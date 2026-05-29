@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+.ruff_cache/
+.gradle/
+build/
+*/build/
+artifacts/
+*.iml
+.DS_Store

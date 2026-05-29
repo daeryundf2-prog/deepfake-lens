@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepfake-lens"
+version = "0.1.0.dev0"
+description = "Local AI-generated media and text screening toolkit"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Private research tooling" }
+authors = [{ name = "YH" }]
+keywords = ["deepfake", "ai-generated", "media-analysis", "local-scanner"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Graphics",
+  "Topic :: Security",
+]
+dependencies = []
+
+[project.scripts]
+deepfake-lens = "deepfake_lens.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["deepfake_lens*"]
