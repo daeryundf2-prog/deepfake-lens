@@ -19,11 +19,32 @@ from .reports import write_eval_html_report, write_html_report, write_pdf_report
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, SUPPORTED_PIXEL_MODES
 from .security import write_security_check
 from .training import write_neural_training_plan
+from .audio import analyze_audio, AudioAnalysis
+from .face import analyze_faces, FaceAnalysis
 from .video import extract_video_frames, write_video_frame_plan
+from .video_analysis import analyze_video_temporal, VideoTemporalAnalysis
+from .inpaint import analyze_inpainting, InpaintAnalysis
+from .text_advanced import analyze_text_advanced, TextAdvancedAnalysis
+from .c2pa import analyze_metadata_forensic, MetadataForensicAnalysis
+from .classifier import classify_metadata, classify_text_content, ClassificationResult as ToolClassificationResult
+from .multimodal import analyze_multimodal, MultimodalAnalysis
+from .realtime import RealtimeDetector, create_realtime_detector
+from .model_scout import scan_for_new_models, compare_with_known, generate_scout_report
+from .evidence import create_evidence_chain, generate_forensic_report
+from .api_server import run_server as run_api_server
+from .batch import BatchProcessor
+from .xai import explain_classification, format_explanation_text
+from .benchmark_suite import run_benchmark_suite
+from .ai_agent import analyze_agent_content, AgentAnalysis
+from .threed import analyze_3d_content, ThreeDAnalysis
+from .avatar import analyze_avatar, AvatarAnalysis
+from .pixel_analyzer import analyze_pixels, PixelAnalysis
+from .ml_classifier import SimpleClassifier
+from .enhanced_forensics import analyze_forensic, generate_legal_report
 from .webapp import run_server
 
 
-COMMANDS = {"scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "train", "train-neural-plan", "models", "video", "perf", "security", "release", "web", "-h", "--help"}
+COMMANDS = {"scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "inpaint", "text-advanced", "forensic", "classify", "multimodal", "realtime", "scout", "evidence", "api-serve", "batch", "explain", "bench-suite", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -151,6 +172,124 @@ def main(argv: list[str] | None = None) -> int:
     video_parser.add_argument("--no-recursive", action="store_true")
     video_parser.add_argument("--extract", action="store_true", help="run ffmpeg commands after writing the plan")
     video_parser.add_argument("--extract-limit", type=int)
+
+    audio_parser = subparsers.add_parser("audio", help="analyze audio files for AI generation or voice cloning")
+    audio_parser.add_argument("file", type=Path, help="audio file to analyze")
+    audio_parser.add_argument("--segment-seconds", type=int, default=30, help="maximum seconds to analyze (default: 30)")
+    audio_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    audio_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    face_parser = subparsers.add_parser("face", help="analyze images for face manipulation")
+    face_parser.add_argument("file", type=Path, help="image file to analyze")
+    face_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    face_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    video_analysis_parser = subparsers.add_parser("video-analysis", help="analyze video temporal consistency")
+    video_analysis_parser.add_argument("file", type=Path, help="video file to analyze")
+    video_analysis_parser.add_argument("--frame-rate", type=float, default=1.0, help="frame sample rate (default: 1.0 fps)")
+    video_analysis_parser.add_argument("--max-frames", type=int, default=100, help="maximum frames to analyze (default: 100)")
+    video_analysis_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    video_analysis_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    inpaint_parser = subparsers.add_parser("inpaint", help="analyze images for inpainting or partial manipulation")
+    inpaint_parser.add_argument("file", type=Path, help="image file to analyze")
+    inpaint_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    inpaint_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    text_advanced_parser = subparsers.add_parser("text-advanced", help="advanced text analysis for AI generation detection")
+    text_advanced_parser.add_argument("file", type=Path, help="text file to analyze")
+    text_advanced_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    text_advanced_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    forensic_parser = subparsers.add_parser("forensic", help="analyze metadata for C2PA, SynthID, and provenance signals")
+    forensic_parser.add_argument("file", type=Path, help="file to analyze")
+    forensic_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    forensic_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    classify_parser = subparsers.add_parser("classify", help="classify which AI tool generated the content")
+    classify_parser.add_argument("file", type=Path, help="file to analyze")
+    classify_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    classify_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    multimodal_parser = subparsers.add_parser("multimodal", help="combine multiple modality analyses into unified assessment")
+    multimodal_parser.add_argument("--image-score", type=int, help="image analysis score")
+    multimodal_parser.add_argument("--text-score", type=int, help="text analysis score")
+    multimodal_parser.add_argument("--audio-score", type=int, help="audio analysis score")
+    multimodal_parser.add_argument("--video-score", type=int, help="video analysis score")
+    multimodal_parser.add_argument("--image-source", type=str, help="image source guess")
+    multimodal_parser.add_argument("--text-source", type=str, help="text source guess")
+    multimodal_parser.add_argument("--audio-source", type=str, help="audio source guess")
+    multimodal_parser.add_argument("--video-source", type=str, help="video source guess")
+    multimodal_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    multimodal_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    realtime_parser = subparsers.add_parser("realtime", help="run realtime deepfake detection")
+    realtime_parser.add_argument("--window-size", type=int, default=30, help="moving average window size (default: 30)")
+    realtime_parser.add_argument("--alert-threshold", type=int, default=67, help="alert threshold (default: 67)")
+    realtime_parser.add_argument("--warning-threshold", type=int, default=35, help="warning threshold (default: 35)")
+    realtime_parser.add_argument("--scores", type=str, help="comma-separated scores to process (for testing)")
+    realtime_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    realtime_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    scout_parser = subparsers.add_parser("scout", help="scan for new AI models and generate discovery report")
+    scout_parser.add_argument("--sources", type=str, default="github,arxiv,huggingface", help="comma-separated sources to scan")
+    scout_parser.add_argument("--report-out", type=Path, help="write scout report to file")
+    scout_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+
+    evidence_parser = subparsers.add_parser("evidence", help="create forensic evidence chain")
+    evidence_parser.add_argument("file", type=Path, help="file to create evidence for")
+    evidence_parser.add_argument("--analyst-id", type=str, default="system", help="analyst identifier")
+    evidence_parser.add_argument("--output", type=Path, help="output evidence file")
+
+    api_parser = subparsers.add_parser("api-serve", help="start REST API server")
+    api_parser.add_argument("--host", type=str, default="127.0.0.1", help="host to bind")
+    api_parser.add_argument("--port", type=int, default=8765, help="port to listen on")
+
+    batch_parser = subparsers.add_parser("batch", help="process files in batch")
+    batch_parser.add_argument("folder", type=Path, help="folder to process")
+    batch_parser.add_argument("--workers", type=int, default=4, help="number of workers")
+    batch_parser.add_argument("--output", type=Path, help="output results file")
+
+    explain_parser = subparsers.add_parser("explain", help="explain classification decision")
+    explain_parser.add_argument("--score", type=int, required=True, help="classification score")
+    explain_parser.add_argument("--signals", type=str, help="JSON signals array")
+    explain_parser.add_argument("--format", choices=["text", "json"], default="text", help="output format")
+
+    bench_parser = subparsers.add_parser("bench-suite", help="run benchmark suite")
+    bench_parser.add_argument("folder", type=Path, help="test files folder")
+    bench_parser.add_argument("--methods", type=str, default="metadata,pixel,text", help="comma-separated methods")
+    bench_parser.add_argument("--output", type=Path, help="output report file")
+
+    agent_parser = subparsers.add_parser("agent", help="analyze content for AI agent generation")
+    agent_parser.add_argument("--text", type=str, help="text to analyze")
+    agent_parser.add_argument("--file", type=Path, help="file to analyze")
+    agent_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    agent_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    threed_parser = subparsers.add_parser("3d", help="analyze content for 3D AI generation")
+    threed_parser.add_argument("--file", type=Path, help="file to analyze")
+    threed_parser.add_argument("--text", type=str, help="text to analyze")
+    threed_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    threed_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    avatar_parser = subparsers.add_parser("avatar", help="analyze content for AI avatar generation")
+    avatar_parser.add_argument("--file", type=Path, help="file to analyze")
+    avatar_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    avatar_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    pixel_parser = subparsers.add_parser("pixel-analysis", help="analyze image pixels for AI generation")
+    pixel_parser.add_argument("file", type=Path, help="image file to analyze")
+    pixel_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    pixel_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    ml_parser = subparsers.add_parser("ml-classify", help="classify image using ML features")
+    ml_parser.add_argument("file", type=Path, help="image file to analyze")
+    ml_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    ml_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    legal_parser = subparsers.add_parser("legal-report", help="generate legal forensic report")
+    legal_parser.add_argument("file", type=Path, help="file to analyze")
+    legal_parser.add_argument("--output", type=Path, help="output report file")
 
     perf_parser = subparsers.add_parser("perf", help="measure scan throughput and cache/hash behavior")
     perf_parser.add_argument("folder", type=Path)
@@ -329,6 +468,402 @@ def main(argv: list[str] | None = None) -> int:
             payload["extraction"] = extract_video_frames(payload, limit=args.extract_limit)
             args.out.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(json.dumps({"count": payload["count"], "ffmpeg_available": payload["ffmpeg_available"], "out": str(args.out)}, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "audio":
+        analysis = analyze_audio(args.file, segment_seconds=args.segment_seconds)
+        if args.json_out:
+            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if args.format == "json":
+            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
+        else:
+            print(f"Score: {analysis.score} ({analysis.band_label})")
+            print(f"Verdict: {analysis.verdict}")
+            print(f"Source: {analysis.source_guess}")
+            if analysis.signals:
+                print("Signals:")
+                for signal in analysis.signals:
+                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
+        return 0
+    if args.command == "face":
+        analysis = analyze_faces(args.file)
+        if args.json_out:
+            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if args.format == "json":
+            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
+        else:
+            print(f"Score: {analysis.score} ({analysis.band_label})")
+            print(f"Verdict: {analysis.verdict}")
+            print(f"Faces: {analysis.face_count}, Type: {analysis.manipulation_type}")
+            if analysis.signals:
+                print("Signals:")
+                for signal in analysis.signals:
+                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
+        return 0
+    if args.command == "video-analysis":
+        analysis = analyze_video_temporal(args.file, frame_sample_rate=args.frame_rate, max_frames=args.max_frames)
+        if args.json_out:
+            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if args.format == "json":
+            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
+        else:
+            print(f"Score: {analysis.score} ({analysis.band_label})")
+            print(f"Verdict: {analysis.verdict}")
+            print(f"Frames: {analysis.frame_count}, Duration: {analysis.duration_seconds:.1f}s, FPS: {analysis.fps:.1f}")
+            if analysis.signals:
+                print("Signals:")
+                for signal in analysis.signals:
+                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
+        return 0
+    if args.command == "inpaint":
+        analysis = analyze_inpainting(args.file)
+        if args.json_out:
+            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if args.format == "json":
+            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
+        else:
+            print(f"Score: {analysis.score} ({analysis.band_label})")
+            print(f"Verdict: {analysis.verdict}")
+            print(f"Regions detected: {analysis.regions_detected}")
+            if analysis.signals:
+                print("Signals:")
+                for signal in analysis.signals:
+                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
+        return 0
+    if args.command == "text-advanced":
+        text = args.file.read_text(encoding="utf-8", errors="replace")
+        analysis = analyze_text_advanced(text)
+        if args.json_out:
+            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if args.format == "json":
+            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
+        else:
+            print(f"Score: {analysis.score} ({analysis.band_label})")
+            print(f"Verdict: {analysis.verdict}")
+            print(f"AI Probability: {analysis.ai_probability:.2%}")
+            print(f"Style: {analysis.style_profile}")
+            if analysis.signals:
+                print("Signals:")
+                for signal in analysis.signals:
+                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
+        return 0
+    if args.command == "forensic":
+        analysis = analyze_metadata_forensic(args.file)
+        if args.json_out:
+            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if args.format == "json":
+            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
+        else:
+            print(f"Score: {analysis.score} ({analysis.band_label})")
+            print(f"Verdict: {analysis.verdict}")
+            print(f"C2PA: {analysis.has_c2pa}, SynthID: {analysis.has_synthid}, Watermark: {analysis.has_watermark}")
+            if analysis.signals:
+                print("Signals:")
+                for signal in analysis.signals:
+                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
+        return 0
+    if args.command == "classify":
+        # Read file and try to extract metadata or text for classification
+        try:
+            import struct
+            data = args.file.read_bytes()
+            metadata = {}
+            result = None
+            
+            # Check if it's a text file
+            text_extensions = {'.txt', '.md', '.py', '.js', '.json', '.csv', '.log'}
+            if args.file.suffix.lower() in text_extensions:
+                # Text file - classify text content
+                text_content = data.decode('utf-8', errors='ignore')
+                result = classify_text_content(text_content)
+            # Simple metadata extraction from PNG/JPEG
+            elif data[:8] == b"\x89PNG\r\n\x1a\n":
+                # PNG - extract text chunks
+                offset = 8
+                while offset + 8 <= len(data):
+                    length = struct.unpack(">I", data[offset:offset+4])[0]
+                    chunk_type = data[offset+4:offset+8]
+                    if chunk_type in (b"tEXt", b"iTXt"):
+                        chunk_data = data[offset+8:offset+8+length]
+                        if b"\x00" in chunk_data:
+                            key, value = chunk_data.split(b"\x00", 1)
+                            metadata[key.decode("latin-1", errors="ignore")] = value.decode("utf-8", errors="ignore")
+                    offset += 12 + length
+                    if chunk_type == b"IEND":
+                        break
+                result = classify_metadata(metadata)
+            elif data[:2] == b"\xff\xd8":
+                # JPEG - simple marker scan
+                metadata["format"] = "jpeg"
+                metadata["size"] = str(len(data))
+                result = classify_metadata(metadata)
+            else:
+                # Unknown format - try metadata
+                result = classify_metadata(metadata)
+            
+            if args.json_out:
+                args.json_out.write_text(json.dumps(result.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            if args.format == "json":
+                print(json.dumps(result.to_json(), ensure_ascii=False, indent=2))
+            else:
+                print(f"Category: {result.category}")
+                print(f"Confidence: {result.confidence}")
+                if result.primary_match:
+                    print(f"Primary: {result.primary_match.name} ({result.primary_match.provider})")
+                if result.matches:
+                    print("Matches:")
+                    for match in result.matches:
+                        print(f"  - [{match.confidence:.2f}] {match.name} ({match.provider}): {', '.join(match.evidence)}")
+        except Exception as exc:
+            print(json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2))
+            return 1
+        return 0
+    if args.command == "multimodal":
+        analysis = analyze_multimodal(
+            image_score=args.image_score,
+            text_score=args.text_score,
+            audio_score=args.audio_score,
+            video_score=args.video_score,
+            image_source_guess=args.image_source,
+            text_source_guess=args.text_source,
+            audio_source_guess=args.audio_source,
+            video_source_guess=args.video_source,
+        )
+        if args.json_out:
+            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if args.format == "json":
+            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
+        else:
+            print(f"Score: {analysis.score} ({analysis.band_label})")
+            print(f"Verdict: {analysis.verdict}")
+            print(f"Modalities: {', '.join(analysis.modalities_used)}")
+            print(f"Consistency: {analysis.consistency_score:.2f}")
+            print(f"AI Probability: {analysis.overall_ai_probability:.2%}")
+            if analysis.signals:
+                print("Signals:")
+                for signal in analysis.signals:
+                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail} ({signal.source_modality})")
+        return 0
+    if args.command == "realtime":
+        detector = create_realtime_detector(
+            window_size=args.window_size,
+            alert_threshold=args.alert_threshold,
+            warning_threshold=args.warning_threshold,
+        )
+        
+        # Process scores if provided (for testing)
+        if args.scores:
+            scores = [int(s.strip()) for s in args.scores.split(",")]
+            for score in scores:
+                state = detector.process_frame(score)
+        else:
+            # Demo mode with sample scores
+            demo_scores = [20, 25, 30, 80, 85, 90, 25, 30, 20]
+            for score in demo_scores:
+                state = detector.process_frame(score)
+        
+        summary = detector.get_summary()
+        
+        if args.json_out:
+            output = {"state": state.to_json(), "summary": summary}
+            args.json_out.write_text(json.dumps(output, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        
+        if args.format == "json":
+            print(json.dumps({"state": state.to_json(), "summary": summary}, ensure_ascii=False, indent=2))
+        else:
+            print(f"Current Score: {state.current_score}")
+            print(f"Average Score: {state.average_score:.1f}")
+            print(f"Band: {state.band_label}")
+            print(f"Frames Processed: {state.frame_count}")
+            print(f"Alerts: {len(state.alerts)}")
+            if state.alerts:
+                print("Recent Alerts:")
+                for alert in state.alerts[-3:]:
+                    print(f"  - [{alert.band}] {alert.message}")
+        
+        return 0
+    if args.command == "scout":
+        sources = [s.strip() for s in args.sources.split(",")]
+        discovered = scan_for_new_models(sources)
+        diff = compare_with_known(discovered)
+        report = generate_scout_report(diff)
+        
+        if args.report_out:
+            args.report_out.write_text(json.dumps(report.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        
+        if args.format == "json":
+            print(json.dumps(report.to_json(), ensure_ascii=False, indent=2))
+        else:
+            print(f"Scout Report: {report.report_date}")
+            print(f"New models: {report.summary['new_models']}")
+            print(f"Updated: {report.summary['updated_models']}")
+            print(f"Deprecated: {report.summary['deprecated_models']}")
+            print(f"Total known: {report.summary['total_known']}")
+            if report.new_models:
+                print("\nNew Models:")
+                for model in report.new_models:
+                    print(f"  - {model.name} ({model.provider}) [{model.category}]")
+            if report.recommended_actions:
+                print("\nRecommended Actions:")
+                for action in report.recommended_actions:
+                    print(f"  - {action}")
+        
+        return 0
+    if args.command == "evidence":
+        chain = create_evidence_chain(
+            args.file,
+            results={"analyst_id": args.analyst_id},
+            analyst_id=args.analyst_id,
+        )
+        if args.output:
+            from .evidence import save_evidence_chains
+            save_evidence_chains([chain], args.output)
+            print(json.dumps({"output": str(args.output), "hash": chain.file_hash}, ensure_ascii=False, indent=2))
+        else:
+            print(json.dumps(chain.to_json(), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "api-serve":
+        run_api_server(host=args.host, port=args.port)
+        return 0
+    if args.command == "batch":
+        processor = BatchProcessor(max_workers=args.workers)
+        files = list(args.folder.glob("*"))
+        from .core import analyze_file
+        job = processor.process_batch(files, lambda f: analyze_file(f).to_json() if analyze_file(f) else {})
+        if args.output:
+            from .batch import save_batch_results
+            save_batch_results(job, args.output)
+            print(json.dumps({"output": str(args.output), "job_id": job.job_id, "processed": job.processed_files}, ensure_ascii=False, indent=2))
+        else:
+            summary = processor.get_summary(job.job_id)
+            print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "explain":
+        signals = []
+        if args.signals:
+            try:
+                signals = json.loads(args.signals)
+            except json.JSONDecodeError:
+                pass
+        explanation = explain_classification(args.score, signals)
+        if args.format == "json":
+            print(json.dumps(explanation.to_json(), ensure_ascii=False, indent=2))
+        else:
+            print(format_explanation_text(explanation))
+        return 0
+    if args.command == "bench-suite":
+        methods = [m.strip() for m in args.methods.split(",")]
+        test_files = list(args.folder.glob("*"))
+        report = run_benchmark_suite(test_files, methods)
+        if args.output:
+            from .benchmark_suite import save_benchmark_report
+            save_benchmark_report(report, args.output)
+            print(json.dumps({"output": str(args.output), "methods": len(report.results)}, ensure_ascii=False, indent=2))
+        else:
+            print(json.dumps(report.to_json(), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "agent":
+        text = args.text
+        if args.file:
+            text = args.file.read_text(encoding="utf-8", errors="replace")
+        analysis = analyze_agent_content(text=text)
+        if args.json_out:
+            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if args.format == "json":
+            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
+        else:
+            print(f"Score: {analysis.score} ({analysis.band_label})")
+            print(f"Verdict: {analysis.verdict}")
+            print(f"Agent Type: {analysis.agent_type}")
+            if analysis.signals:
+                print("Signals:")
+                for signal in analysis.signals:
+                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
+        return 0
+    if args.command == "3d":
+        text = args.text
+        if args.file:
+            text = args.file.read_text(encoding="utf-8", errors="replace")
+        analysis = analyze_3d_content(text=text)
+        if args.json_out:
+            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if args.format == "json":
+            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
+        else:
+            print(f"Score: {analysis.score} ({analysis.band_label})")
+            print(f"Verdict: {analysis.verdict}")
+            print(f"Content Type: {analysis.content_type}")
+            if analysis.signals:
+                print("Signals:")
+                for signal in analysis.signals:
+                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
+        return 0
+    if args.command == "avatar":
+        analysis = analyze_avatar(file_path=str(args.file) if args.file else None)
+        if args.json_out:
+            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if args.format == "json":
+            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
+        else:
+            print(f"Score: {analysis.score} ({analysis.band_label})")
+            print(f"Verdict: {analysis.verdict}")
+            print(f"Avatar Type: {analysis.avatar_type}")
+            if analysis.signals:
+                print("Signals:")
+                for signal in analysis.signals:
+                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
+        return 0
+    if args.command == "pixel-analysis":
+        analysis = analyze_pixels(args.file)
+        if args.json_out:
+            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if args.format == "json":
+            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
+        else:
+            print(f"Score: {analysis.score} ({analysis.band_label})")
+            print(f"Verdict: {analysis.verdict}")
+            if analysis.signals:
+                print("Signals:")
+                for signal in analysis.signals:
+                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
+        return 0
+    if args.command == "ml-classify":
+        # Extract features and classify
+        try:
+            import cv2
+            import numpy as np
+            image = cv2.imread(str(args.file))
+            if image is None:
+                print(json.dumps({"error": "이미지를 읽을 수 없습니다"}, ensure_ascii=False, indent=2))
+                return 1
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            # Simple feature extraction
+            features = {
+                "mean": float(np.mean(gray)),
+                "std": float(np.std(gray)),
+                "texture_variance": float(np.var(cv2.Laplacian(gray, cv2.CV_64F))),
+            }
+            classifier = SimpleClassifier()
+            result = classifier.predict(features)
+            if args.json_out:
+                args.json_out.write_text(json.dumps(result.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            if args.format == "json":
+                print(json.dumps(result.to_json(), ensure_ascii=False, indent=2))
+            else:
+                print(f"Prediction: {result.prediction}")
+                print(f"Confidence: {result.confidence:.2f}")
+                print(f"AI Probability: {result.probability_ai:.2%}")
+        except ImportError:
+            print(json.dumps({"error": "opencv/numpy가 설치되어 있지 않습니다"}, ensure_ascii=False, indent=2))
+            return 1
+        return 0
+    if args.command == "legal-report":
+        report = analyze_forensic(args.file)
+        legal_text = report.generate_legal_text()
+        if args.output:
+            args.output.write_text(legal_text, encoding="utf-8")
+            print(json.dumps({"output": str(args.output), "report_id": report.report_id}, ensure_ascii=False, indent=2))
+        else:
+            print(legal_text)
         return 0
     if args.command == "perf":
         payload = run_performance_check(
@@ -541,3 +1076,11 @@ def _parse_csv(value: str) -> list[str]:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+# Test tracker command (simplified)
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "test-tracker":
+        from .test_tracker import TestTracker
+        tracker = TestTracker(results_path=Path("test_results.json"))
+        stats = tracker.get_statistics()
+        print(json.dumps(stats, ensure_ascii=False, indent=2))

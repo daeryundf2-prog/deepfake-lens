@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deepfake Lens - AI 콘텐츠 분석기</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; color: #1a1a2e; }
+        
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .header h1 { font-size: 24px; font-weight: 600; }
+        .header p { opacity: 0.9; margin-top: 5px; }
+        
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        
+        .dashboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .stat-card h3 { font-size: 14px; color: #666; margin-bottom: 8px; }
+        .stat-card .value { font-size: 28px; font-weight: 700; color: #333; }
+        .stat-card .label { font-size: 12px; color: #999; margin-top: 5px; }
+        .stat-card.high { border-left: 4px solid #e74c3c; }
+        .stat-card.medium { border-left: 4px solid #f39c12; }
+        .stat-card.low { border-left: 4px solid #27ae60; }
+        .stat-card.info { border-left: 4px solid #3498db; }
+        
+        .main-content { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        
+        .panel { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .panel h2 { font-size: 18px; margin-bottom: 15px; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        
+        .upload-zone { border: 3px dashed #ccc; border-radius: 10px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.3s; }
+        .upload-zone:hover { border-color: #667eea; background: #f8f9ff; }
+        .upload-zone.dragover { border-color: #667eea; background: #e8f0fe; }
+        .upload-zone p { color: #666; margin-top: 10px; }
+        
+        .folder-input { display: flex; gap: 10px; margin-bottom: 15px; }
+        .folder-input input { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
+        .folder-input button { padding: 12px 24px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; }
+        .folder-input button:hover { background: #5a6fd6; }
+        .folder-input button:disabled { background: #ccc; cursor: not-allowed; }
+        
+        .options { display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
+        .option-group { display: flex; align-items: center; gap: 8px; }
+        .option-group label { font-size: 13px; color: #666; }
+        .option-group select, .option-group input { padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; }
+        
+        .progress-bar { width: 100%; height: 6px; background: #eee; border-radius: 3px; margin-top: 10px; overflow: hidden; display: none; }
+        .progress-bar.active { display: block; }
+        .progress-bar .fill { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); width: 0%; transition: width 0.3s; }
+        
+        .results-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .results-table th, .results-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; }
+        .results-table th { background: #f8f9fa; font-weight: 600; color: #555; position: sticky; top: 0; }
+        .results-table tr:hover { background: #f8f9ff; }
+        .results-table .risk-high { color: #e74c3c; font-weight: 600; }
+        .results-table .risk-medium { color: #f39c12; font-weight: 600; }
+        .results-table .risk-low { color: #27ae60; font-weight: 600; }
+        
+        .btn { padding: 8px 16px; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; font-weight: 500; }
+        .btn-primary { background: #667eea; color: white; }
+        .btn-success { background: #27ae60; color: white; }
+        .btn-danger { background: #e74c3c; color: white; }
+        .btn:hover { opacity: 0.9; }
+        
+        .file-list { max-height: 200px; overflow-y: auto; margin-top: 10px; }
+        .file-item { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #eee; }
+        .file-item .name { font-size: 13px; color: #333; }
+        .file-item .size { font-size: 12px; color: #999; }
+        
+        .export-buttons { display: flex; gap: 10px; margin-top: 15px; }
+        
+        @media (max-width: 900px) {
+            .dashboard { grid-template-columns: repeat(2, 1fr); }
+            .main-content { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔍 Deepfake Lens</h1>
+        <p>AI 생성 콘텐츠 탐지 및 분석 시스템</p>
+    </div>
+    
+    <div class="container">
+        <!-- Dashboard -->
+        <div class="dashboard">
+            <div class="stat-card high">
+                <h3>AI 생성 의심</h3>
+                <div class="value" id="stat-ai">0</div>
+                <div class="label">high risk 파일</div>
+            </div>
+            <div class="stat-card medium">
+                <h3>주의 필요</h3>
+                <div class="value" id="stat-medium">0</div>
+                <div class="label">medium risk 파일</div>
+            </div>
+            <div class="stat-card low">
+                <h3>정상</h3>
+                <div class="value" id="stat-low">0</div>
+                <div class="label">low risk 파일</div>
+            </div>
+            <div class="stat-card info">
+                <h3>전체 분석</h3>
+                <div class="value" id="stat-total">0</div>
+                <div class="label">총 분석 파일</div>
+            </div>
+        </div>
+        
+        <div class="main-content">
+            <!-- Left Panel: Input -->
+            <div class="panel">
+                <h2>📁 분석 대상</h2>
+                
+                <!-- Folder Input -->
+                <div class="folder-input">
+                    <input type="text" id="folder-path" placeholder="폴더 경로 입력 (예: C:\Users\test\images)">
+                    <button id="analyze-btn" onclick="analyzeFolder()">분석 시작</button>
+                </div>
+                
+                <!-- Options -->
+                <div class="options">
+                    <div class="option-group">
+                        <label>픽셀 분석:</label>
+                        <select id="pixel-mode">
+                            <option value="off">꺼짐</option>
+                            <option value="fast">빠름</option>
+                            <option value="deep">정밀</option>
+                        </select>
+                    </div>
+                    <div class="option-group">
+                        <label>최대 파일:</label>
+                        <input type="number" id="max-files" value="1000" min="1" max="10000">
+                    </div>
+                    <div class="option-group">
+                        <label>포맷:</label>
+                        <select id="output-format">
+                            <option value="json">JSON</option>
+                            <option value="csv">CSV</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Progress -->
+                <div class="progress-bar" id="progress">
+                    <div class="fill" id="progress-fill"></div>
+                </div>
+                <p id="progress-text" style="font-size: 12px; color: #666; margin-top: 5px;"></p>
+                
+                <!-- Drag & Drop Zone -->
+                <div class="upload-zone" id="drop-zone">
+                    <p>📁 여기에 파일을 드래그 앤 드롭하세요</p>
+                    <p style="font-size: 12px; color: #999;">지원 형식: PNG, JPG, JPEG, WebP, BMP, TIFF</p>
+                </div>
+                
+                <!-- File List -->
+                <div class="file-list" id="file-list"></div>
+            </div>
+            
+            <!-- Right Panel: Results -->
+            <div class="panel">
+                <h2>📊 분석 결과</h2>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                    <button class="btn btn-primary" onclick="exportJSON()">JSON 내보내기</button>
+                    <button class="btn btn-success" onclick="exportCSV()">CSV 내보내기</button>
+                    <button class="btn btn-danger" onclick="clearResults()">결과 삭제</button>
+                </div>
+                <div style="max-height: 500px; overflow-y: auto;">
+                    <table class="results-table">
+                        <thead>
+                            <tr>
+                                <th>위험도</th>
+                                <th>점수</th>
+                                <th>도구</th>
+                                <th>파일명</th>
+                            </tr>
+                        </thead>
+                        <tbody id="results-body">
+                            <tr><td colspan="4" style="text-align: center; color: #999;">분석 결과가 없습니다</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let results = [];
+        let selectedFiles = [];
+        
+        // Drag & Drop
+        const dropZone = document.getElementById('drop-zone');
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('dragover'); });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            const files = Array.from(e.dataTransfer.files);
+            addFiles(files);
+        });
+        dropZone.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.multiple = true;
+            input.accept = '.png,.jpg,.jpeg,.webp,.bmp,.tiff';
+            input.onchange = (e) => addFiles(Array.from(e.target.files));
+            input.click();
+        });
+        
+        function addFiles(files) {
+            const list = document.getElementById('file-list');
+            files.forEach(file => {
+                if (!selectedFiles.find(f => f.name === file.name)) {
+                    selectedFiles.push(file);
+                    const item = document.createElement('div');
+                    item.className = 'file-item';
+                    item.innerHTML = `<span class="name">${file.name}</span><span class="size">${(file.size/1024).toFixed(1)} KB</span>`;
+                    list.appendChild(item);
+                }
+            });
+        }
+        
+        async function analyzeFolder() {
+            const folderPath = document.getElementById('folder-path').value;
+            if (!folderPath) {
+                alert('폴더 경로를 입력하세요');
+                return;
+            }
+            
+            const pixelMode = document.getElementById('pixel-mode').value;
+            const maxFiles = document.getElementById('max-files').value;
+            
+            document.getElementById('analyze-btn').disabled = true;
+            document.getElementById('progress').classList.add('active');
+            document.getElementById('progress-fill').style.width = '0%';
+            document.getElementById('progress-text').textContent = '분석 시작...';
+            
+            try {
+                const response = await fetch(`/api/scan?folder=${encodeURIComponent(folderPath)}&pixel=${pixelMode}&max_files=${maxFiles}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    alert('오류: ' + data.error);
+                    return;
+                }
+                
+                processResults(data);
+            } catch (error) {
+                alert('분석 중 오류 발생: ' + error.message);
+            } finally {
+                document.getElementById('analyze-btn').disabled = false;
+                document.getElementById('progress').classList.remove('active');
+                document.getElementById('progress-text').textContent = '';
+            }
+        }
+        
+        async function analyzeFiles() {
+            if (selectedFiles.length === 0) {
+                alert('분석할 파일을 선택하세요');
+                return;
+            }
+            
+            document.getElementById('progress').classList.add('active');
+            document.getElementById('progress-fill').style.width = '0%';
+            
+            for (let i = 0; i < selectedFiles.length; i++) {
+                const file = selectedFiles[i];
+                document.getElementById('progress-text').textContent = `${i+1}/${selectedFiles.length} - ${file.name}`;
+                document.getElementById('progress-fill').style.width = `${((i+1)/selectedFiles.length)*100}%`;
+                
+                // For demo, we'll simulate analysis
+                results.push({
+                    name: file.name,
+                    score: Math.floor(Math.random() * 100),
+                    tool: '분석 중...',
+                    risk: 'unknown'
+                });
+            }
+            
+            updateResults();
+            document.getElementById('progress').classList.remove('active');
+        }
+        
+        function processResults(data) {
+            results = [];
+            if (data.items) {
+                data.items.forEach(item => {
+                    const result = item.result || {};
+                    results.push({
+                        name: item.name || item.path,
+                        score: result.score || 0,
+                        tool: result.source_guess?.label || '알 수 없음',
+                        risk: result.band || 'unknown'
+                    });
+                });
+            }
+            updateResults();
+        }
+        
+        function updateResults() {
+            const tbody = document.getElementById('results-body');
+            tbody.innerHTML = '';
+            
+            let aiCount = 0, mediumCount = 0, lowCount = 0;
+            
+            results.sort((a, b) => b.score - a.score);
+            
+            results.forEach(r => {
+                if (r.risk === 'high') aiCount++;
+                else if (r.risk === 'medium') mediumCount++;
+                else lowCount++;
+                
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="risk-${r.risk}">${r.risk === 'high' ? '높음' : r.risk === 'medium' ? '주의' : '낮음'}</td>
+                    <td>${r.score}</td>
+                    <td>${r.tool}</td>
+                    <td>${r.name}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            
+            document.getElementById('stat-ai').textContent = aiCount;
+            document.getElementById('stat-medium').textContent = mediumCount;
+            document.getElementById('stat-low').textContent = lowCount;
+            document.getElementById('stat-total').textContent = results.length;
+        }
+        
+        function exportJSON() {
+            const data = JSON.stringify(results, null, 2);
+            const blob = new Blob([data], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'deepfake-lens-results.json';
+            a.click();
+        }
+        
+        function exportCSV() {
+            let csv = '위험도,점수,도구,파일명\n';
+            results.forEach(r => {
+                csv += `${r.risk},${r.score},${r.tool},${r.name}\n`;
+            });
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'deepfake-lens-results.csv';
+            a.click();
+        }
+        
+        function clearResults() {
+            results = [];
+            document.getElementById('results-body').innerHTML = '<tr><td colspan="4" style="text-align: center; color: #999;">분석 결과가 없습니다</td></tr>';
+            document.getElementById('stat-ai').textContent = '0';
+            document.getElementById('stat-medium').textContent = '0';
+            document.getElementById('stat-low').textContent = '0';
+            document.getElementById('stat-total').textContent = '0';
+        }
+    </script>
+</body>
+</html>

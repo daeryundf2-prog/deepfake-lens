@@ -1,10 +1,34 @@
+# Python
 __pycache__/
-*.py[cod]
+*.pyc
+*.pyo
 .venv/
-.ruff_cache/
-.gradle/
+venv/
+*.egg-info/
+dist/
 build/
-*/build/
-artifacts/
-*.iml
+
+# Test data
+*.png
+*.jpg
+*.jpeg
+*.webp
+training_data/
+test_datasets/
+public_datasets/
+ml_classifier.json
+test_results.json
+model_tracker.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Logs
+*.log

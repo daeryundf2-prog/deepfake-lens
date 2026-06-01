@@ -215,11 +215,11 @@ def write_robustness_plan(root: Path | str, output_path: Path | str, *, recursiv
 
 
 def is_positive_label(label: str) -> bool:
-    return label in {"ai", "edited"}
+    return label in POSITIVE_LABELS
 
 
 def is_negative_label(label: str) -> bool:
-    return label == "real"
+    return label in NEGATIVE_LABELS
 
 
 def _label_for(path: Path, root: Path) -> str:

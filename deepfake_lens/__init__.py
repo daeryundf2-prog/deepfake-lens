@@ -20,10 +20,46 @@ from .perf import run_performance_check
 from .pixel import PixelAnalysis, PixelExpertResult
 from .security import build_security_check
 from .training import build_neural_training_plan
+from .audio import AudioAnalysis, analyze_audio
+from .face import FaceAnalysis, analyze_faces
 from .video import build_video_frame_plan, discover_videos
+from .video_analysis import VideoTemporalAnalysis, analyze_video_temporal
+from .inpaint import InpaintAnalysis, analyze_inpainting
+from .text_advanced import TextAdvancedAnalysis, analyze_text_advanced
+from .c2pa import MetadataForensicAnalysis, analyze_metadata_forensic
+from .classifier import ClassificationResult as ToolClassificationResult, classify_metadata
+from .multimodal import MultimodalAnalysis, analyze_multimodal
+from .realtime import RealtimeDetector, RealtimeState, create_realtime_detector
+from .model_scout import ScoutReport, scan_for_new_models, compare_with_known, generate_scout_report
+from .evidence import EvidenceChain, ForensicReport, create_evidence_chain, generate_forensic_report
+from .xai import XAIExplanation, explain_classification, format_explanation_text
+from .batch import BatchProcessor, BatchJob
+from .benchmark_suite import BenchmarkReport, run_benchmark_suite
+from .ai_agent import AgentAnalysis, analyze_agent_content
+from .threed import ThreeDAnalysis, analyze_3d_content
+from .avatar import AvatarAnalysis, analyze_avatar
 
 __all__ = [
+    "AudioAnalysis",
     "BatchScanSummary",
+    "FaceAnalysis",
+    "VideoTemporalAnalysis",
+    "InpaintAnalysis",
+    "TextAdvancedAnalysis",
+    "MetadataForensicAnalysis",
+    "ToolClassificationResult",
+    "MultimodalAnalysis",
+    "RealtimeDetector",
+    "ScoutReport",
+    "AgentAnalysis",
+    "ThreeDAnalysis",
+    "AvatarAnalysis",
+    "EvidenceChain",
+    "ForensicReport",
+    "XAIExplanation",
+    "BatchProcessor",
+    "BatchJob",
+    "BenchmarkReport",
     "ClassificationResult",
     "DatasetAudit",
     "DatasetRecord",
@@ -35,8 +71,26 @@ __all__ = [
     "PixelExpertResult",
     "ScanItem",
     "SourceGuess",
+    "analyze_audio",
+    "analyze_faces",
     "analyze_file",
     "analyze_text",
+    "analyze_video_temporal",
+    "analyze_inpainting",
+    "analyze_text_advanced",
+    "analyze_metadata_forensic",
+    "classify_metadata",
+    "analyze_multimodal",
+    "create_realtime_detector",
+    "generate_scout_report",
+    "create_evidence_chain",
+    "generate_forensic_report",
+    "explain_classification",
+    "format_explanation_text",
+    "analyze_agent_content",
+    "analyze_3d_content",
+    "analyze_avatar",
+    "run_benchmark_suite",
     "audit_dataset",
     "build_collection_plan",
     "build_neural_training_plan",

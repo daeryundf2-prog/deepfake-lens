@@ -861,7 +861,7 @@ def _generic_text_signal(normalized: str, words: list[str]) -> EvidenceSignal | 
     if len(words) < 70:
         return None
     has_number_or_date = re.search(r"\d{1,4}([./:-]\d{1,2})?", normalized) is not None
-    personal_anchor_count = sum(1 for anchor in PERSONAL_ANCHORS if re.search(rf"(^|\s){re.escape(anchor)}($|\s)", normalized))
+    personal_anchor_count = sum(1 for anchor in PERSONAL_ANCHORS if re.search(rf"\b{re.escape(anchor)}\b", normalized))
     if not has_number_or_date and personal_anchor_count == 0:
         return EvidenceSignal("개인 맥락 부족", "긴 글인데 날짜, 수치, 구체적 경험 단서가 거의 없습니다.", 8)
     return None
@@ -884,7 +884,7 @@ def _direct_tool_guess(normalized: str) -> SourceGuess | None:
         ("Grok/xAI 추정", ["grok", "xai"], "Grok/xAI 단서가 메타데이터에 있습니다."),
     ]
     for label, markers, reason in rules:
-        if any(marker in normalized for marker in markers):
+        if any(re.search(rf"(?:^|\s){re.escape(marker)}(?:\s|$)", normalized) for marker in markers):
             return SourceGuess(label, SourceConfidence.HIGH, [reason])
     return None
 
