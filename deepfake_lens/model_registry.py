@@ -80,10 +80,11 @@ DETECTOR_REGISTRY = [
         adapter_target="future neural checkpoint",
         status="research",
         priority="medium",
-        source_url="https://www.mdpi.com/1424-8220/26/8/2389",
+        source_url="",
         notes=[
             "Diffusion-specific generalization candidate.",
             "Do not claim support until weights and license are verified.",
+            "Cited MDPI link returned 403 to automated checks and could not be verified; removed by scripts/check_registry_links.py.",
         ],
     ),
     DetectorCandidate(
@@ -93,7 +94,7 @@ DETECTOR_REGISTRY = [
         adapter_target="model selection rubric",
         status="reference",
         priority="high",
-        source_url="https://researchtrend.ai/papers/2602.07814",
+        source_url="https://arxiv.org/abs/2604.11487",
         notes=[
             "Use to decide which pretrained detectors deserve local adapter work first.",
             "Emphasizes zero-shot, out-of-the-box behavior across many generators.",

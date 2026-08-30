@@ -170,8 +170,8 @@ The current registry is research-backed and intentionally separates benchmarks f
 - [AIDE ICLR 2025](https://github.com/shilinyan99/AIDE): public code/checkpoints candidate for first pretrained image detector integration.
 - [CLIDE WACV 2026](https://rbetser.github.io/CLIDE/): zero-shot CLIP-likelihood direction for unseen generators.
 - [Dual-Path AI-Generated Image Detection](https://github.com/ljppp117/Dual-Path-AI-Generated-Image-Detection): patch/global detector candidate for local artifact heatmaps.
-- [DIFC-Net 2026](https://www.mdpi.com/1424-8220/26/8/2389): diffusion-intrinsic feature research candidate.
-- [Out-of-box benchmark 2026](https://researchtrend.ai/papers/2602.07814): model selection reference covering many open-source detector variants.
+- DIFC-Net 2026: diffusion-intrinsic feature research candidate (previously cited MDPI link could not be verified by automated checks and was removed).
+- [Out-of-box benchmark 2026](https://arxiv.org/abs/2604.11487): model selection reference covering many open-source detector variants.
 
 ## Video Workflow
 
