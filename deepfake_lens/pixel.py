@@ -84,7 +84,7 @@ def analyze_image_pixels(
     edge_stats = _basic_stats(edge_values)
     experts = [
         _pixel_baseline_expert(raster, luminance, stats, edge_stats),
-        _spectral_statistics_expert(raster, luminance, stats, edge_stats),
+        _frequency_forensics_expert(raster),
         _difference_in_difference_expert(raster, luminance, stats),
         _spark_il_retrieval_expert(raster, luminance, stats, edge_stats),
         _low_correlation_fractal_expert(raster, luminance, stats, edge_stats),
@@ -361,29 +361,71 @@ def _pixel_baseline_expert(
     return PixelExpertResult("pixel_baseline", "pixel", score, 0.28, True, detail)
 
 
-def _spectral_statistics_expert(
-    raster: PixelRaster,
-    luminance: list[float],
-    stats: tuple[float, float],
-    edge_stats: tuple[float, float],
-) -> PixelExpertResult:
-    _, stdev = stats
-    edge_mean, _ = edge_stats
-    high_frequency_ratio = edge_mean / max(1.0, stdev)
-    periodicity_score, periodicity_detail = _periodicity_signal(raster, luminance)
+def _frequency_forensics_expert(raster: PixelRaster) -> PixelExpertResult:
+    """FFT/DCT/NPR frequency measurements (numpy-based, optional).
+
+    Replaces the former 'spectral_statistics' expert whose periodicity
+    metric was a spatial shift-difference, not a spectral measurement.
+    """
+    reference = "NPR (Neighboring Pixel Relations); F3-Net frequency-aware learning"
+    try:
+        import numpy as np
+
+        from .frequency import MIN_FREQUENCY_ANALYSIS_SIDE, frequency_features
+    except ImportError:
+        return PixelExpertResult(
+            "frequency_forensics",
+            "frequency",
+            0,
+            0.30,
+            False,
+            "numpy가 설치되어 있지 않아 주파수 분석을 건너뜁니다.",
+            reference,
+            "numpy-local-simplified",
+        )
+
+    if min(raster.width, raster.height) < MIN_FREQUENCY_ANALYSIS_SIDE:
+        return PixelExpertResult(
+            "frequency_forensics",
+            "frequency",
+            0,
+            0.30,
+            False,
+            "주파수 분석을 하기에는 샘플링된 이미지가 너무 작습니다.",
+            reference,
+            "numpy-local-simplified",
+        )
+
+    gray = np.asarray(
+        [[0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2] for p in raster.pixels[y * raster.width : (y + 1) * raster.width]] for y in range(raster.height)],
+        dtype=np.float64,
+    )
+    features = frequency_features(gray)
 
     score = 0
-    detail = "주파수 대리 통계에서 강한 반복/고주파 신호를 찾지 못했습니다."
-    if periodicity_score:
-        score = periodicity_score
-        detail = periodicity_detail
-    elif high_frequency_ratio > 1.45 and edge_mean > 38:
-        score = 70
-        detail = "고주파 에너지가 전체 대비에 비해 커서 격자/업스케일/합성 흔적 후보입니다."
-    elif high_frequency_ratio < 0.16 and stdev > 16:
-        score = 52
-        detail = "전체 대비는 있지만 고주파 변화가 낮아 생성 모델 특유의 매끈한 표면 후보입니다."
-    return PixelExpertResult("spectral_statistics", "spectral", score, 0.30, True, detail)
+    detail = "방사형 스펙트럼/스파이크/NPR/DCT 측정에서 두드러진 생성 흔적을 찾지 못했습니다."
+    if features.spike_count > 0 and features.max_spike_prominence >= 8.0:
+        score = 72
+        detail = f"방사형 평균 대비 스펙트럼 스파이크 {features.spike_count}개(최대 {features.max_spike_prominence:.1f}σ)가 관측됩니다. 업샘플링/체커보드 아티팩트 후보입니다."
+    elif features.max_spike_prominence >= 5.0:
+        score = 48
+        detail = f"약한 스펙트럼 스파이크(최대 {features.max_spike_prominence:.1f}σ)가 보여 리샘플링 흔적을 확인할 만합니다."
+    elif features.npr_consistency > 0.55:
+        score = 55
+        detail = f"이웃 픽셀 보간 일치율({features.npr_consistency:.2f})이 높아 리사이즈된 영역일 수 있습니다."
+    elif features.dct_highfreq_ratio < 0.02 and features.dct_block_uniformity < 0.01:
+        score = 45
+        detail = "8x8 블록 고주파 에너지가 비정상적으로 낮아 과도하게 평활화된 표면입니다."
+    return PixelExpertResult(
+        "frequency_forensics",
+        "frequency",
+        score,
+        0.30,
+        True,
+        detail,
+        reference,
+        "numpy-local-simplified",
+    )
 
 
 def _difference_in_difference_expert(
@@ -738,7 +780,7 @@ def _agentfox_explainable_summary(experts: list[PixelExpertResult], fused: int, 
 def _implemented_references(mode: str) -> list[str]:
     references = [
         "1. difference_in_difference_reconstruction",
-        "2. spark_il_spectral_retrieval",
+        "2. frequency_forensics_fft_dct_npr",
         "3. low_correlation_fractal_signal",
         "4. alpha_blending_compositing",
         "6. vrag_dfd_local_retrieval",
@@ -746,6 +788,7 @@ def _implemented_references(mode: str) -> list[str]:
         "8. agentfox_explainable_summary",
         "9. fuzzy_decision_tree_fusion",
         "10. ivy_xdetector_adapter",
+        "11. spark_il_spectral_retrieval",
     ]
     if mode == "deep":
         references.insert(4, "5. safe_pixel_localization")

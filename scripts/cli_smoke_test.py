@@ -66,6 +66,7 @@ def main() -> int:
         (["text-advanced", str(ai_sample)], 0),
         (["explain", "--score", "70"], 0),
         (["realtime", "--scores", "10,20,30"], 0),
+        (["rppg", "/nonexistent/video.mp4"], 0),
         (["multimodal", "--image-score", "50", "--text-score", "10"], 0),
         (["agent", "--text", "hello world"], 0),
         (["3d", "--text", "a small cube"], 0),
