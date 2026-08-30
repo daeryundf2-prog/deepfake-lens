@@ -26,7 +26,7 @@ from .video import build_video_frame_plan, discover_videos
 from .video_analysis import VideoTemporalAnalysis, analyze_video_temporal
 from .inpaint import InpaintAnalysis, analyze_inpainting
 from .text_advanced import TextAdvancedAnalysis, analyze_text_advanced
-from .c2pa import MetadataForensicAnalysis, analyze_metadata_forensic
+from .c2pa import MetadataForensicAnalysis, analyze_metadata_forensic, validate_c2pa_manifest
 from .classifier import ClassificationResult as ToolClassificationResult, classify_metadata
 from .multimodal import MultimodalAnalysis, analyze_multimodal
 from .realtime import RealtimeDetector, RealtimeState, create_realtime_detector
@@ -81,6 +81,7 @@ __all__ = [
     "analyze_inpainting",
     "analyze_text_advanced",
     "analyze_metadata_forensic",
+    "validate_c2pa_manifest",
     "classify_metadata",
     "analyze_multimodal",
     "create_realtime_detector",

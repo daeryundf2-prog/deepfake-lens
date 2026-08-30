@@ -78,37 +78,71 @@ def analyze_metadata_forensic(path: Path | str) -> MetadataForensicAnalysis:
     has_synthid = False
     has_watermark = False
 
-    # Check C2PA manifest
-    c2pa_record = _check_c2pa(data)
-    if c2pa_record:
-        provenance_records.append(c2pa_record)
+    # Preferred path: real C2PA manifest validation via the official SDK.
+    # When the manifest is verifiably present (or absent), the byte-scan
+    # fallback below is not authoritative and is skipped/demoted.
+    sdk_validation = validate_c2pa_manifest(file_path)
+    if sdk_validation is not None and sdk_validation.get("present"):
         has_c2pa = True
-        signals.append(ForensicEvidenceSignal(
-            "C2PA 매니페스트 발견",
-            f"C2PA 표준 콘텐츠 출처 정보가 발견되었습니다 ({c2pa_record.provider}).",
-            30,
+        signature = sdk_validation.get("signature") or {}
+        provenance_records.append(ProvenanceRecord(
+            standard="C2PA",
+            provider="CAI",
+            signed=bool(signature),
+            claim_url=None,
+            details=sdk_validation,
         ))
+        state = str(sdk_validation.get("state", ""))
+        failures = list(sdk_validation.get("failure_codes") or [])
+        if state.lower() == "valid":
+            signer = str(signature.get("common_name", "unknown"))
+            signals.append(ForensicEvidenceSignal(
+                "C2PA 매니페스트 검증됨",
+                f"공식 SDK 검증 상태 {state}. 서명자: {signer}.",
+                20,
+            ))
+        else:
+            signals.append(ForensicEvidenceSignal(
+                "C2PA 매니페스트 검증 미완료",
+                f"SDK 검증 상태가 {state}입니다 ({', '.join(failures) or '세부 코드 없음'}). 신뢰 저장소에 없는 서명자일 수 있어 참고 수준입니다.",
+                10,
+            ))
+        limitations.append("C2PA 검증 결과는 공식 c2pa-python SDK 기반입니다.")
+    elif sdk_validation is None:
+        # SDK missing: marker strings only. A coincidental byte match is not
+        # a manifest, so this stays at reference weight.
+        c2pa_record = _check_c2pa(data)
+        if c2pa_record:
+            provenance_records.append(c2pa_record)
+            has_c2pa = True
+            signals.append(ForensicEvidenceSignal(
+                "C2PA 관련 문자열 발견",
+                "매니페스트 검증이 아닌 문자열 탐지입니다. c2pa-python 설치 시 실제 검증이 가능합니다.",
+                10,
+            ))
+    # else: the SDK ran and authoritatively found no manifest — no fallback.
 
-    # Check SynthID watermark
-    synthid_record = _check_synthid(data)
+    # Google tool markers are metadata attribution hints. SynthID itself is a
+    # pixel-domain watermark and cannot be detected by byte scanning.
+    synthid_record = _check_google_tool_metadata(data)
     if synthid_record:
         provenance_records.append(synthid_record)
-        has_synthid = True
         signals.append(ForensicEvidenceSignal(
-            "SynthID 워터마크 발견",
-            "Google SynthID 워터마크가 감지되었습니다.",
-            25,
+            "Google 생성 도구 메타데이터 문자열",
+            "Google 계열 도구를 식별하는 메타데이터 문자열입니다. SynthID 워터마크 검증은 아닙니다.",
+            10,
         ))
+    limitations.append("SynthID는 픽셀 도메인 워터마크이므로 바이트 스캔으로는 감지할 수 없습니다.")
 
-    # Check other watermarks
+    # Check other tool/watermark metadata strings
     watermark_record = _check_watermarks(data)
     if watermark_record:
         provenance_records.append(watermark_record)
         has_watermark = True
         signals.append(ForensicEvidenceSignal(
-            "워터마크 발견",
-            f"{watermark_record.provider} 워터마크가 감지되었습니다.",
-            20,
+            "생성 도구 식별 문자열",
+            f"{watermark_record.provider} 관련 메타데이터 문자열입니다(암호학적 워터마크 검증이 아닙니다).",
+            10,
         ))
 
     # Check ExifTool JSON embedding
@@ -178,6 +212,61 @@ def _error_analysis(message: str) -> MetadataForensicAnalysis:
     )
 
 
+def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
+    """Validate a C2PA manifest with the official c2pa-python SDK.
+
+    Returns None only when the SDK is not installed (cannot validate).
+    When the SDK ran: ``{"present": False}`` for files without a manifest,
+    otherwise a summary with the SDK validation state, signature info, and
+    per-claim success/failure codes. A state other than "valid" usually
+    means the signer is not in the trust store rather than proof of
+    tampering.
+    """
+    try:
+        import c2pa
+    except ImportError:
+        return None
+    try:
+        reader = c2pa.Reader(str(Path(path)))
+    except Exception:
+        return {"present": False}
+    try:
+        state = str(reader.get_validation_state())
+        manifest = reader.get_active_manifest() or {}
+        results = reader.get_validation_results() or {}
+    except Exception:
+        return {"present": False}
+    finally:
+        try:
+            reader.close()
+        except Exception:
+            pass
+
+    success_codes: list[str] = []
+    failure_codes: list[str] = []
+    if isinstance(results, dict):
+        for section in results.values():
+            if not isinstance(section, dict):
+                continue
+            for key, sink in (("success", success_codes), ("failure", failure_codes)):
+                for item in section.get(key, []) or []:
+                    code = item.get("code") if isinstance(item, dict) else None
+                    if code:
+                        sink.append(str(code))
+    signature = manifest.get("signature_info") if isinstance(manifest, dict) else None
+    return {
+        "present": True,
+        "state": state,
+        "trusted": "signingCredential.trusted" in success_codes
+        and "signingCredential.trusted" not in failure_codes,
+        "signature": dict(signature) if isinstance(signature, dict) else {},
+        "success_codes": success_codes,
+        "failure_codes": failure_codes,
+        "title": manifest.get("title") if isinstance(manifest, dict) else None,
+        "claim_generator": manifest.get("claim_generator") if isinstance(manifest, dict) else None,
+    }
+
+
 def _check_c2pa(data: bytes) -> ProvenanceRecord | None:
     """Check for C2PA manifest in file."""
     # C2PA manifest is typically in a JUMBF box
@@ -216,29 +305,29 @@ def _check_c2pa(data: bytes) -> ProvenanceRecord | None:
     return None
 
 
-def _check_synthid(data: bytes) -> ProvenanceRecord | None:
-    """Check for Google SynthID watermark."""
-    # SynthID is embedded in image pixels but also has metadata markers
-    # Check for Google-specific metadata markers
+def _check_google_tool_metadata(data: bytes) -> ProvenanceRecord | None:
+    """Find Google tool-identifying metadata strings.
+
+    These are attribution hints only. SynthID itself is embedded in pixels
+    and is invisible to byte scanning, so this must never be reported as
+    SynthID watermark detection.
+    """
     google_markers = [
         b"Google", b"SynthID", b"GenerativeAI", b"AI.Generated",
         b"google.com/synthid", b"deepmind", b"gemini",
     ]
-    
+
     for marker in google_markers:
         if marker in data:
             idx = data.find(marker)
-            # Verify it's in a metadata context (not random pixel data)
             context = data[max(0, idx-50):min(len(data), idx+100)]
-            
-            # Check if it's in a text-readable area
+
             try:
                 context_str = context.decode("utf-8", errors="ignore")
-                # If it contains mostly printable characters, it's likely metadata
                 printable_ratio = sum(1 for c in context_str if c.isprintable()) / max(1, len(context_str))
                 if printable_ratio > 0.5:
                     return ProvenanceRecord(
-                        standard="SynthID",
+                        standard="ToolMetadata",
                         provider="Google",
                         signed=False,
                         claim_url=None,
@@ -246,7 +335,7 @@ def _check_synthid(data: bytes) -> ProvenanceRecord | None:
                     )
             except Exception:
                 continue
-    
+
     return None
 
 
@@ -271,7 +360,7 @@ def _check_watermarks(data: bytes) -> ProvenanceRecord | None:
     for marker, provider in watermark_markers.items():
         if marker in data:
             return ProvenanceRecord(
-                standard="Watermark",
+                standard="ToolMetadata",
                 provider=provider,
                 signed=False,
                 claim_url=None,
