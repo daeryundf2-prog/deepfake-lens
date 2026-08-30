@@ -100,6 +100,30 @@ def binary_metrics(scores: list[tuple[int, bool]], threshold: int) -> dict[str, 
     }
 
 
+def eer(scores: list[tuple[int, bool]]) -> float | None:
+    """Equal error rate: the operating point where FPR and miss rate cross.
+
+    Swept over integer thresholds; None when either class is absent.
+    """
+    if not scores:
+        return None
+    if not any(positive for _, positive in scores):
+        return None
+    if all(positive for _, positive in scores):
+        return None
+    best_diff = None
+    best_value = None
+    for threshold in range(0, 101):
+        metrics = binary_metrics(scores, threshold)
+        fpr = float(metrics["false_positive_rate"])
+        fnr = 1.0 - float(metrics["recall"])
+        diff = abs(fpr - fnr)
+        if best_diff is None or diff < best_diff:
+            best_diff = diff
+            best_value = (fpr + fnr) / 2
+    return best_value
+
+
 def auroc(scores: list[tuple[int, bool]]) -> float | None:
     positives = [score for score, positive in scores if positive]
     negatives = [score for score, positive in scores if not positive]

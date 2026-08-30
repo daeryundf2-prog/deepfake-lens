@@ -53,6 +53,15 @@ def write_pdf_report(path: Path | str, summary: BatchScanSummary, items: list[Sc
         source = result.source_guess.label if result else "-"
         top_signal = result.signals[0].title if result and result.signals else (item.error or "")
         lines.append(f"{risk} {score} {_display_path(item.path, redact_paths=redact_paths)} {source} {top_signal}")
+    if any(ord(char) > 255 for line in lines for char in line):
+        # The minimal PDF writer is Latin-1 only; state the limitation
+        # instead of silently turning Korean labels into '?'.
+        lines = [
+            "NOTE: this simple PDF is Latin-1 only; non-Latin text",
+            "(e.g. Korean band labels and signal titles) appears as '?'.",
+            "Use --html-out for a full Unicode report.",
+            "",
+        ] + lines
     _write_minimal_pdf(Path(path), lines)
 
 
