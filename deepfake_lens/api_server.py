@@ -1,6 +1,10 @@
 """REST API server module for Deepfake Lens.
 
 Provides HTTP API endpoints for external system integration.
+
+The API reads local files on request, so it must never be exposed without a
+token: ``run_server(..., token=...)`` requires an ``X-API-Token`` header on
+every /api/ route, and the CLI refuses non-localhost binds without one.
 """
 
 from __future__ import annotations
@@ -9,6 +13,8 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 @dataclass(frozen=True)
@@ -21,22 +27,46 @@ class APIResponse:
         return asdict(self)
 
 
-def create_app(host: str = "127.0.0.1", port: int = 8765) -> Any:
+def host_name(header_value: str) -> str:
+    """Extract the hostname part of a Host header (handles [::1]:port)."""
+    value = header_value.strip().lower()
+    if value.startswith("["):
+        end = value.find("]")
+        return value[1:end] if end != -1 else value
+    if value.count(":") == 1:
+        return value.rsplit(":", 1)[0]
+    return value
+
+
+def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = None) -> Any:
     """Create a FastAPI application."""
     try:
-        from fastapi import FastAPI, HTTPException
+        from fastapi import FastAPI, HTTPException, Request
         from fastapi.middleware.cors import CORSMiddleware
+        from fastapi.responses import JSONResponse
     except ImportError:
         raise ImportError("FastAPI is required. Install with: pip install fastapi uvicorn")
-    
+
     app = FastAPI(title="Deepfake Lens API", version="0.1.0")
-    
+
+    allowed_hosts = set(LOCAL_HOSTS) if host in LOCAL_HOSTS else {host}
+
+    @app.middleware("http")
+    async def request_guard(request: Request, call_next: Any) -> Any:
+        if request.url.path.startswith("/api/"):
+            if token is not None:
+                if request.headers.get("x-api-token") != token:
+                    return JSONResponse({"status": "error", "message": "unauthorized"}, status_code=401)
+            elif host_name(request.headers.get("host", "")) not in allowed_hosts:
+                return JSONResponse({"status": "error", "message": "host not allowed"}, status_code=403)
+        return await call_next(request)
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["X-API-Token"],
     )
     
     @app.get("/")
@@ -136,13 +166,17 @@ def create_app(host: str = "127.0.0.1", port: int = 8765) -> Any:
     return app
 
 
-def run_server(host: str = "127.0.0.1", port: int = 8765) -> None:
-    """Run the API server."""
+def run_server(host: str = "127.0.0.1", port: int = 8765, token: str | None = None) -> None:
+    """Run the API server.
+
+    ``token`` enables X-API-Token authentication and is mandatory for
+    non-localhost binds (enforced by the ``api-serve`` CLI command).
+    """
     try:
         import uvicorn
     except ImportError:
         raise ImportError("uvicorn is required. Install with: pip install uvicorn")
-    
-    app = create_app(host, port)
-    print(f"Starting Deepfake Lens API server on http://{host}:{port}")
+
+    app = create_app(host, port, token=token)
+    print(f"Starting Deepfake Lens API server on http://{host}:{port}" + (" (token required)" if token else ""))
     uvicorn.run(app, host=host, port=port)

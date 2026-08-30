@@ -237,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     api_parser = subparsers.add_parser("api-serve", help="start REST API server")
     api_parser.add_argument("--host", type=str, default="127.0.0.1", help="host to bind")
     api_parser.add_argument("--port", type=int, default=8765, help="port to listen on")
+    api_parser.add_argument("--token", type=str, help="require an X-API-Token header on /api routes (mandatory for non-localhost hosts)")
 
     batch_parser = subparsers.add_parser("batch", help="process files in batch")
     batch_parser.add_argument("folder", type=Path, help="folder to process")
@@ -683,7 +684,10 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(chain.to_json(), ensure_ascii=False, indent=2))
         return 0
     if args.command == "api-serve":
-        run_api_server(host=args.host, port=args.port)
+        from .api_server import LOCAL_HOSTS
+        if args.host not in LOCAL_HOSTS and not args.token:
+            api_parser.error("--token is required when binding a non-localhost host; the API reads local files on request")
+        run_api_server(host=args.host, port=args.port, token=args.token)
         return 0
     if args.command == "batch":
         processor = BatchProcessor(max_workers=args.workers)

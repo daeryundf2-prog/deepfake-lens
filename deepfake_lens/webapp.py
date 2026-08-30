@@ -15,25 +15,47 @@ from .fusion import apply_fusion_to_items, load_fusion_profile
 
 
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+MAX_SCAN_FILES = 2000
+MAX_FILE_BYTES_CEILING = 1024 * 1024 * 1024
+
+
+def host_name(header_value: str) -> str:
+    """Extract the hostname part of a Host header (handles [::1]:port)."""
+    value = header_value.strip().lower()
+    if value.startswith("["):
+        end = value.find("]")
+        return value[1:end] if end != -1 else value
+    if value.count(":") == 1:
+        return value.rsplit(":", 1)[0]
+    return value
 
 
 def run_server(host: str, port: int, *, default_folder: Path | None = None, allow_lan: bool = False) -> None:
     """Run the web server with GUI."""
     if not allow_lan and host not in LOCAL_HOSTS:
         raise ValueError("local web app binds to localhost by default; pass --allow-lan to bind elsewhere")
-    
+
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
+            if not allow_lan:
+                # DNS-rebinding guard: a remote page must not be able to reach
+                # this server by pointing a hostname at 127.0.0.1.
+                if host_name(self.headers.get("Host") or "") not in LOCAL_HOSTS:
+                    self.send_error(403, "host not allowed")
+                    return
             parsed = urlparse(self.path)
-            
+
             # Serve GUI
             if parsed.path == "/" or parsed.path == "/gui":
                 self._send_html(_load_gui())
                 return
-            
+
             # API endpoints
             if parsed.path == "/api/scan":
-                self._send_json(_scan_payload(parsed.query, default_folder=default_folder))
+                try:
+                    self._send_json(_scan_payload(parsed.query, default_folder=default_folder))
+                except ValueError as exc:
+                    self.send_error(400, str(exc))
                 return
             if parsed.path == "/api/heatmap":
                 self._send_png(_heatmap_payload(parsed.query))
@@ -44,7 +66,7 @@ def run_server(host: str, port: int, *, default_folder: Path | None = None, allo
             if parsed.path == "/api/stats":
                 self._send_json(_stats_payload())
                 return
-            
+
             # Default to GUI
             self._send_html(_load_gui())
         
@@ -56,7 +78,6 @@ def run_server(host: str, port: int, *, default_folder: Path | None = None, allo
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(body)
         
@@ -98,8 +119,17 @@ def _scan_payload(query: str, *, default_folder: Path | None) -> dict[str, objec
     folder = Path(params.get("folder", [str(default_folder or ".")])[0]).expanduser()
     pixel = params.get("pixel", ["off"])[0]
     recursive = params.get("recursive", ["false"])[0].lower() in {"1", "true", "yes"}
-    max_files = int(params.get("max_files", ["500"])[0])
+    try:
+        max_files = int(params.get("max_files", ["500"])[0])
+    except ValueError as exc:
+        raise ValueError("max_files must be an integer") from exc
+    max_files = max(1, min(max_files, MAX_SCAN_FILES))
     max_file_bytes = params.get("max_file_bytes", [None])[0]
+    if max_file_bytes is not None:
+        try:
+            max_file_bytes = min(int(max_file_bytes), MAX_FILE_BYTES_CEILING)
+        except ValueError as exc:
+            raise ValueError("max_file_bytes must be an integer") from exc
     dedupe = params.get("dedupe", ["false"])[0].lower() in {"1", "true", "yes"}
     heatmaps = params.get("heatmaps", ["false"])[0].lower() in {"1", "true", "yes"}
     model_path = _optional_path(params.get("model_path", [""])[0])
@@ -112,7 +142,7 @@ def _scan_payload(query: str, *, default_folder: Path | None) -> dict[str, objec
             max_files=max_files,
             pixel_mode=pixel,
             heatmaps=heatmaps and pixel == "deep",
-            max_file_bytes=int(max_file_bytes) if max_file_bytes else None,
+            max_file_bytes=max_file_bytes,
             dedupe=dedupe,
             model_path=model_path,
         )
