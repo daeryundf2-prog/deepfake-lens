@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import random
 import sys
@@ -23,6 +24,10 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="train with Self-Blended Images: fakes are synthesized from real images only",
     )
+    parser.add_argument("--early-stopping-patience", type=int, default=3, help="epochs without validation improvement before stopping (default: 3)")
+    parser.add_argument("--min-improvement", type=float, default=1e-4, help="minimum validation change that counts as an improvement (default: 1e-4)")
+    parser.add_argument("--selection", choices=["loss", "accuracy"], default="loss", help="validation metric used for best-checkpoint selection (default: loss)")
+    parser.add_argument("--lr-schedule", choices=["cosine", "none"], default="cosine", help="learning-rate schedule across epochs (default: cosine)")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
 
@@ -79,8 +84,20 @@ def main(argv: list[str] | None = None) -> int:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = _build_model(torchvision, torch, args.arch).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
+    scheduler = None
+    if args.lr_schedule == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     criterion = torch.nn.CrossEntropyLoss()
     history = []
+
+    # Best-checkpoint selection: keep the weights from the best validation
+    # epoch instead of whatever the last epoch happened to produce, and stop
+    # when validation stops improving.
+    best_metric = 0.0
+    best_epoch = 0
+    best_state = None
+    epochs_ran = 0
+    early_stopped = False
 
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -97,8 +114,27 @@ def main(argv: list[str] | None = None) -> int:
             batch_size = int(labels.numel())
             total_loss += float(loss.detach().cpu()) * batch_size
             seen += batch_size
-        metrics = _evaluate(torch, model, val_loader, device)
+        metrics = _evaluate(torch, model, val_loader, device, criterion)
         history.append({"epoch": epoch, "train_loss": total_loss / max(1, seen), **metrics})
+        epochs_ran = epoch
+
+        selection_score = metrics["val_loss"] if args.selection == "loss" else metrics["val_accuracy"]
+        if args.selection == "loss":
+            improved = best_state is None or selection_score < best_metric - args.min_improvement
+        else:
+            improved = best_state is None or selection_score > best_metric + args.min_improvement
+        if improved:
+            best_metric = selection_score
+            best_epoch = epoch
+            best_state = copy.deepcopy(model.state_dict())
+        elif epoch - best_epoch >= args.early_stopping_patience:
+            early_stopped = True
+            break
+        if scheduler is not None:
+            scheduler.step()
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
 
     classes = {"real": 0, "synthetic-fake": 1} if args.sbi else {"real": 0, "ai": 1, "edited": 1}
     state_path = args.out / f"{args.arch}-state.pt"
@@ -133,6 +169,13 @@ def main(argv: list[str] | None = None) -> int:
         "mode": "sbi-v1" if args.sbi else "labeled-v1",
         "image_size": args.image_size,
         "epochs": args.epochs,
+        "epochs_ran": epochs_ran,
+        "early_stopped": early_stopped,
+        "best_epoch": best_epoch,
+        "best_selection_score": best_metric if best_state is not None else None,
+        "selection": args.selection,
+        "lr_schedule": args.lr_schedule,
+        "early_stopping_patience": args.early_stopping_patience,
         "batch_size": args.batch_size,
         "learning_rate": args.learning_rate,
         "seed": args.seed,
@@ -257,26 +300,38 @@ def _build_model(torchvision, torch, arch: str):
     return model
 
 
-def _evaluate(torch, model, loader, device) -> dict[str, float]:
+def _evaluate(torch, model, loader, device, criterion) -> dict[str, float]:
     model.eval()
     correct = 0
     total = 0
     positives = 0
     predicted_positives = 0
     true_positives = 0
+    total_loss = 0.0
+    seen = 0
     with torch.no_grad():
         for images, labels in loader:
             images = images.to(device)
             labels = labels.to(device)
-            predictions = torch.argmax(model(images), dim=1)
+            logits = model(images)
+            loss = criterion(logits, labels)
+            batch_size = int(labels.numel())
+            total_loss += float(loss.detach().cpu()) * batch_size
+            seen += batch_size
+            predictions = torch.argmax(logits, dim=1)
             correct += int((predictions == labels).sum().detach().cpu())
-            total += int(labels.numel())
+            total += batch_size
             positives += int((labels == 1).sum().detach().cpu())
             predicted_positives += int((predictions == 1).sum().detach().cpu())
             true_positives += int(((predictions == 1) & (labels == 1)).sum().detach().cpu())
     precision = true_positives / max(1, predicted_positives)
     recall = true_positives / max(1, positives)
-    return {"val_accuracy": correct / max(1, total), "val_precision": precision, "val_recall": recall}
+    return {
+        "val_loss": total_loss / max(1, seen),
+        "val_accuracy": correct / max(1, total),
+        "val_precision": precision,
+        "val_recall": recall,
+    }
 
 
 if __name__ == "__main__":
