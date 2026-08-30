@@ -31,6 +31,7 @@ from .classifier import ClassificationResult as ToolClassificationResult, classi
 from .multimodal import MultimodalAnalysis, analyze_multimodal
 from .realtime import RealtimeDetector, RealtimeState, create_realtime_detector
 from .rppg import RppgAnalysis, analyze_rppg
+from .prnu import PrnuAnalysis, analyze_prnu, camera_fingerprint, normalized_cross_correlation, prnu_residual
 from .frequency import FrequencyFeatures, frequency_features
 from .evidence import EvidenceChain, ForensicReport, create_evidence_chain, generate_forensic_report
 from .xai import XAIExplanation, explain_classification, format_explanation_text
@@ -51,6 +52,7 @@ __all__ = [
     "MultimodalAnalysis",
     "RealtimeDetector",
     "RppgAnalysis",
+    "PrnuAnalysis",
     "FrequencyFeatures",
     "AgentAnalysis",
     "ThreeDAnalysis",
@@ -83,6 +85,10 @@ __all__ = [
     "analyze_multimodal",
     "create_realtime_detector",
     "analyze_rppg",
+    "analyze_prnu",
+    "prnu_residual",
+    "camera_fingerprint",
+    "normalized_cross_correlation",
     "frequency_features",
     "create_evidence_chain",
     "generate_forensic_report",

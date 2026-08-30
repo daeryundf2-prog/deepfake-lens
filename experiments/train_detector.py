@@ -6,6 +6,8 @@ import random
 import sys
 from pathlib import Path
 
+import numpy as np
+
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
@@ -18,6 +20,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--seed", type=int, default=20260525)
+    parser.add_argument(
+        "--sbi",
+        action="store_true",
+        help="train with Self-Blended Images: fakes are synthesized from real images only",
+    )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
 
@@ -30,10 +37,24 @@ def main(argv: list[str] | None = None) -> int:
         print("Install torch, torchvision, and Pillow in an experiment environment.", file=sys.stderr)
         return 2
 
+    if args.sbi:
+        try:
+            import sbi as sbi_module
+        except ImportError as exc:
+            print(f"error: SBI module unavailable: {exc}", file=sys.stderr)
+            return 2
+    else:
+        sbi_module = None
+
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-    records = _image_records(manifest)
+    records = _image_records(manifest, sbi=args.sbi)
     if not records:
-        print("error: manifest has no labeled ai/edited/real image records", file=sys.stderr)
+        message = (
+            "manifest has no labeled real image records (SBI mode needs only reals)"
+            if args.sbi
+            else "manifest has no labeled ai/edited/real image records"
+        )
+        print(f"error: {message}", file=sys.stderr)
         return 2
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -47,13 +68,14 @@ def main(argv: list[str] | None = None) -> int:
             torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
     )
+    dataset_class = _SbiImageDataset if args.sbi else _ManifestImageDataset
     train_loader = torch.utils.data.DataLoader(
-        _ManifestImageDataset(train_records, transform=transform, image_module=Image),
+        dataset_class(train_records, transform=transform, image_module=Image, seed=args.seed),
         batch_size=args.batch_size,
         shuffle=True,
     )
     val_loader = torch.utils.data.DataLoader(
-        _ManifestImageDataset(val_records, transform=transform, image_module=Image),
+        dataset_class(val_records, transform=transform, image_module=Image, seed=args.seed + 1),
         batch_size=args.batch_size,
     )
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -80,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         metrics = _evaluate(torch, model, val_loader, device)
         history.append({"epoch": epoch, "train_loss": total_loss / max(1, seen), **metrics})
 
+    classes = {"real": 0, "synthetic-fake": 1} if args.sbi else {"real": 0, "ai": 1, "edited": 1}
     state_path = args.out / f"{args.arch}-state.pt"
     script_path = args.out / f"{args.arch}.torchscript"
     profile_path = args.out / "runtime-profile.json"
@@ -87,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
         {
             "arch": args.arch,
             "image_size": args.image_size,
-            "classes": {"real": 0, "ai": 1, "edited": 1},
+            "classes": classes,
             "model_state_dict": model.state_dict(),
             "history": history,
         },
@@ -109,6 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     profile_path.write_text(json.dumps(profile, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     metadata = {
         "arch": args.arch,
+        "mode": "sbi-v1" if args.sbi else "labeled-v1",
         "image_size": args.image_size,
         "epochs": args.epochs,
         "batch_size": args.batch_size,
@@ -117,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
         "records": len(records),
         "train_records": len(train_records),
         "val_records": len(val_records),
-        "classes": {"real": 0, "ai": 1, "edited": 1},
+        "classes": classes,
         "artifacts": {
             "state_dict": str(state_path),
             "torchscript": str(script_path),
@@ -146,13 +170,18 @@ def main(argv: list[str] | None = None) -> int:
 
 
 class _ManifestImageDataset:
-    def __init__(self, records: list[dict[str, object]], *, transform, image_module) -> None:
+    def __init__(self, records: list[dict[str, object]], *, transform, image_module, seed: int = 0) -> None:
         self.records = records
         self.transform = transform
         self.image_module = image_module
+        self.seed = seed
 
     def __len__(self) -> int:
         return len(self.records)
+
+    def _load_array(self, record: dict[str, object]):
+        image = self.image_module.open(record["path"]).convert("RGB")
+        return np.asarray(image, dtype=np.float64)
 
     def __getitem__(self, index: int):
         record = self.records[index]
@@ -161,13 +190,36 @@ class _ManifestImageDataset:
         return self.transform(image), label
 
 
-def _image_records(manifest: dict[str, object]) -> list[dict[str, object]]:
+class _SbiImageDataset(_ManifestImageDataset):
+    """Each real record yields an original (label 0) and a self-blended fake
+    (label 1). Blending is deterministic per index for reproducibility."""
+
+    def __len__(self) -> int:
+        return len(self.records) * 2
+
+    def __getitem__(self, index: int):
+        import sbi as sbi_module
+
+        record = self.records[index // 2]
+        array = self._load_array(record)
+        if index % 2 == 0:
+            label = 0
+        else:
+            rng = np.random.default_rng(self.seed + index)
+            array, _ = sbi_module.self_blended_image(array, rng)
+            label = 1
+        image = self.image_module.fromarray(np.clip(array, 0, 255).astype("uint8"))
+        return self.transform(image), label
+
+
+def _image_records(manifest: dict[str, object], *, sbi: bool = False) -> list[dict[str, object]]:
     records = manifest.get("records", [])
     if not isinstance(records, list):
         return []
+    accepted_labels = {"real"} if sbi else {"ai", "edited", "real"}
     result = []
     for record in records:
-        if not isinstance(record, dict) or record.get("label") not in {"ai", "edited", "real"}:
+        if not isinstance(record, dict) or record.get("label") not in accepted_labels:
             continue
         path = Path(str(record.get("path", "")))
         if path.suffix.lower() not in IMAGE_EXTENSIONS or not path.exists():

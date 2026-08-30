@@ -30,6 +30,7 @@ from .classifier import classify_metadata, classify_text_content, Classification
 from .multimodal import analyze_multimodal, MultimodalAnalysis
 from .realtime import RealtimeDetector, create_realtime_detector
 from .rppg import analyze_rppg, RppgAnalysis
+from .prnu import analyze_prnu, PrnuAnalysis
 from .evidence import create_evidence_chain, generate_forensic_report
 from .api_server import run_server as run_api_server
 from .batch import BatchProcessor
@@ -43,7 +44,7 @@ from .enhanced_forensics import analyze_forensic
 from .webapp import run_server
 
 
-COMMANDS = {"scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "inpaint", "text-advanced", "forensic", "classify", "multimodal", "realtime", "rppg", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
+COMMANDS = {"scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "inpaint", "text-advanced", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -235,6 +236,12 @@ def main(argv: list[str] | None = None) -> int:
     rppg_parser.add_argument("--max-frames", type=int, default=600, help="maximum face samples to collect (default: 600)")
     rppg_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     rppg_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    prnu_parser = subparsers.add_parser("prnu", help="correlate an image against a sensor fingerprint")
+    prnu_parser.add_argument("file", type=Path, help="target image to check")
+    prnu_parser.add_argument("--reference", type=Path, action="append", required=True, help="reference image from the same device (repeat 3+ times)")
+    prnu_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    prnu_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
     evidence_parser = subparsers.add_parser("evidence", help="create forensic evidence chain")
     evidence_parser.add_argument("file", type=Path, help="file to create evidence for")
@@ -689,6 +696,22 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Score: {analysis.score} ({analysis.band_label})")
             print(f"Verdict: {analysis.verdict}")
             print(f"Pulse: {bpm} bpm, SNR: {snr}, Face frames: {analysis.face_frames}")
+            if analysis.signals:
+                print("Signals:")
+                for signal in analysis.signals:
+                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
+        return 0
+    if args.command == "prnu":
+        analysis = analyze_prnu(args.file, args.reference)
+        if args.json_out:
+            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if args.format == "json":
+            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
+        else:
+            correlation = f"{analysis.correlation:.3f}" if analysis.correlation is not None else "-"
+            print(f"Score: {analysis.score} ({analysis.band_label})")
+            print(f"Verdict: {analysis.verdict}")
+            print(f"NCC: {correlation}, References: {analysis.reference_images}")
             if analysis.signals:
                 print("Signals:")
                 for signal in analysis.signals:

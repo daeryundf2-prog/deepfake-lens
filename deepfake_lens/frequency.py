@@ -172,6 +172,24 @@ def _dct_basis(size: int = 8) -> "object":
     return basis
 
 
+def dct_2d(block) -> "object":
+    """Orthonormal 2-D DCT-II of a square block (any size)."""
+    import numpy as np
+
+    array = np.asarray(block, dtype=np.float64)
+    basis = _dct_basis(array.shape[0])
+    return basis @ array @ basis.T
+
+
+def idct_2d(coefficients) -> "object":
+    """Inverse of :func:`dct_2d` (basis is orthonormal, so transpose suffices)."""
+    import numpy as np
+
+    array = np.asarray(coefficients, dtype=np.float64)
+    basis = _dct_basis(array.shape[0])
+    return basis.T @ array @ basis
+
+
 def _dct_block_highfreq(image, block: int = 8) -> tuple[float, float]:
     """Per-block DCT high-frequency AC energy share and its spatial spread.
 

@@ -40,6 +40,8 @@ class AudioFeatures:
     mfcc_stds: list[float]
     tempo: float
     onset_rate: float
+    jitter: float = 0.0
+    shimmer: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -120,6 +122,11 @@ def analyze_audio(
     noise_signal = _noise_analysis(features)
     if noise_signal:
         signals.append(noise_signal)
+
+    # Voice-quality regularity (jitter/shimmer)
+    regularity_signal = _regularity_analysis(features)
+    if regularity_signal:
+        signals.append(regularity_signal)
 
     # Source guess
     source_guess = _guess_audio_source(features)
@@ -211,6 +218,8 @@ def _extract_features(path: Path, *, segment_seconds: int) -> AudioFeatures | No
             pitch_values.append(float(pitches[idx, t]))
     pitch_mean = float(np.mean(pitch_values)) if pitch_values else 0.0
     pitch_std = float(np.std(pitch_values)) if pitch_values else 0.0
+    jitter = _relative_successive_variation(pitch_values)
+    shimmer = _relative_successive_variation([float(value) for value in rms])
 
     # Formant estimation (simplified)
     formants = _estimate_formants(y, sr)
@@ -242,7 +251,20 @@ def _extract_features(path: Path, *, segment_seconds: int) -> AudioFeatures | No
         mfcc_stds=mfcc_stds,
         tempo=tempo_val,
         onset_rate=onset_rate,
+        jitter=jitter,
+        shimmer=shimmer,
     )
+
+
+def _relative_successive_variation(values: list[float]) -> float:
+    """Mean absolute successive difference over the mean (jitter/shimmer)."""
+    if len(values) < 3:
+        return 0.0
+    mean_value = sum(abs(value) for value in values) / len(values)
+    if mean_value <= 1e-9:
+        return 0.0
+    variation = sum(abs(values[i] - values[i - 1]) for i in range(1, len(values))) / (len(values) - 1)
+    return variation / mean_value
 
 
 def _estimate_formants(y, sr: int) -> list[float]:
@@ -460,6 +482,31 @@ def _noise_analysis(features: AudioFeatures) -> AudioEvidenceSignal | None:
             10,
         )
 
+    return None
+
+
+def _regularity_analysis(features: AudioFeatures) -> AudioEvidenceSignal | None:
+    """Voice-quality regularity metrics (jitter/shimmer).
+
+    Natural voiced speech carries measurable pitch and amplitude micro-
+    variation (jitter ~1-2%, shimmer ~3-5%); strongly regular series are a
+    weak synthesis hint. Estimator noise means the thresholds are loose and
+    the weight stays low.
+    """
+    if features.duration_seconds < 5.0:
+        return None
+    if 0 < features.jitter < 0.004 and features.pitch_mean > 0:
+        return AudioEvidenceSignal(
+            "비정상적으로 규칙적인 피치 미세변동",
+            f"피치 지터({features.jitter * 100:.2f}%)가 자연 발화 범위보다 낮습니다.",
+            12,
+        )
+    if 0 < features.shimmer < 0.01:
+        return AudioEvidenceSignal(
+            "균일한 진폭 변동",
+            f"진폭 쉬머({features.shimmer * 100:.2f}%)가 비정상적으로 균일합니다.",
+            8,
+        )
     return None
 
 

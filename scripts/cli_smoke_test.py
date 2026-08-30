@@ -67,6 +67,7 @@ def main() -> int:
         (["explain", "--score", "70"], 0),
         (["realtime", "--scores", "10,20,30"], 0),
         (["rppg", "/nonexistent/video.mp4"], 0),
+        (["prnu", "/nonexistent/target.png", "--reference", "/nonexistent/r1.png", "--reference", "/nonexistent/r2.png", "--reference", "/nonexistent/r3.png"], 0),
         (["multimodal", "--image-score", "50", "--text-score", "10"], 0),
         (["agent", "--text", "hello world"], 0),
         (["3d", "--text", "a small cube"], 0),
