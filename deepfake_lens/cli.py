@@ -40,7 +40,7 @@ from .threed import analyze_3d_content, ThreeDAnalysis
 from .avatar import analyze_avatar, AvatarAnalysis
 from .pixel_analyzer import analyze_pixels, PixelAnalysis
 from .ml_classifier import SimpleClassifier
-from .enhanced_forensics import analyze_forensic, generate_legal_report
+from .enhanced_forensics import analyze_forensic
 from .webapp import run_server
 
 
@@ -652,7 +652,7 @@ def main(argv: list[str] | None = None) -> int:
         
         # Process scores if provided (for testing)
         if args.scores:
-            scores = [int(s.strip()) for s in args.scores.split(",")]
+            scores = [int(part) for part in args.scores.split(",") if part.strip()]
             for score in scores:
                 state = detector.process_frame(score)
         else:
@@ -726,9 +726,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "batch":
         processor = BatchProcessor(max_workers=args.workers)
-        files = list(args.folder.glob("*"))
+        files = [path for path in args.folder.glob("*") if path.is_file()]
         from .core import analyze_file
-        job = processor.process_batch(files, lambda f: analyze_file(f).to_json() if analyze_file(f) else {})
+        job = processor.process_batch(files, lambda f: analyze_file(f).to_json())
         if args.output:
             from .batch import save_batch_results
             save_batch_results(job, args.output)
