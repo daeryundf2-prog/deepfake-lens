@@ -202,10 +202,15 @@ python -m deepfake_lens scan samples --model-path experiments/run-001/runtime-pr
 
 `train_detector.py` writes a TorchScript checkpoint, state dict, runtime profile, and training metadata when optional PyTorch dependencies are present. It intentionally stays outside the package dependency set.
 
-## Frequency And Biometric Screening (Phase 2)
+## Frequency, Biometric And Provenance Screening (Phase 2)
 
 - `pixel` ensemble `frequency_forensics` expert (requires numpy): real FFT/DCT measurements replacing the former shift-difference pseudo-spectral expert — radial power-spectrum slope (natural images decay ~1/f^2), robust spectral-spike detection above the radial average (upsampling/checkerboard artifacts), NPR-inspired neighboring-pixel interpolation consistency, and per-block DCT high-frequency energy share. Feature computation lives in `deepfake_lens/frequency.py`.
 - `rppg <video>` (requires opencv; numpy for the pulse math): CHROM remote photoplethysmography — face-ROI RGB means are projected to chrominance signals and band-passed to 0.7-4 Hz. A stable cardiac peak (SNR >= 8, 45-200 bpm) is evidence of a camera-captured live face; its absence raises a weak 25-weight suspicion signal only. Compression, poor lighting, and motion can erase the pulse, so a missing pulse is never a verdict on its own.
+- `prnu <target> --reference a.png --reference b.png --reference c.png` (requires numpy): sensor-fingerprint (PRNU) provenance screening — residuals of 3+ same-device reference images are averaged into a fingerprint and the target's residual is correlated against it (zero-mean NCC after border-cropped Gaussian denoising). NCC >= 0.10 reads as same-device origin; a mismatch raises a weak suspicion signal. Re-compression, resizing, and rendering degrade the fingerprint, so a mismatch is a lead, not a verdict.
+
+## SBI Training (experiments)
+
+`python experiments/train_detector.py --manifest artifacts/manifest.json --sbi ...` trains with Self-Blended Images (Shiohara & Yamasaki, CVPR 2022): fakes are synthesized from the real-labeled images only, by blending two differently distorted copies (bilinear resampling, Gaussian blur, DCT-quantization JPEG simulation, color jitter) under a random soft mask. A detector trained this way learns blending/resampling artifacts rather than one generator's signature and needs no fake data. `experiments/sbi.py` is pure numpy; training itself still requires torch/torchvision.
 
 ## Limits
 
