@@ -7,7 +7,6 @@ SynthID watermarks, and other provenance signals in image/video files.
 from __future__ import annotations
 
 import struct
-import struct
 from dataclasses import asdict, dataclass
 from pathlib import Path
 

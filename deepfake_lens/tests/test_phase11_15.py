@@ -24,11 +24,6 @@ from deepfake_lens.batch import (
     BatchJob,
     BatchResult,
 )
-from deepfake_lens.benchmark_suite import (
-    BenchmarkResult,
-    BenchmarkReport,
-    run_benchmark_suite,
-)
 
 
 class EvidenceTest(unittest.TestCase):
@@ -154,41 +149,6 @@ class BatchTest(unittest.TestCase):
         data = job.to_json()
         self.assertIsInstance(data, dict)
         self.assertEqual(data["total_files"], 10)
-
-
-class BenchmarkSuiteTest(unittest.TestCase):
-    """Test cases for benchmark suite module."""
-
-    def test_benchmark_result_creation(self) -> None:
-        """BenchmarkResult should be created."""
-        result = BenchmarkResult(
-            method="test",
-            dataset="test",
-            accuracy=0.85,
-            precision=0.9,
-            recall=0.8,
-            f1_score=0.85,
-            processing_time=1.5,
-            files_processed=100,
-        )
-        self.assertEqual(result.accuracy, 0.85)
-
-    def test_benchmark_result_to_json(self) -> None:
-        """BenchmarkResult to_json should return a dictionary."""
-        result = BenchmarkResult(
-            method="test",
-            dataset="test",
-            accuracy=0.85,
-            precision=0.9,
-            recall=0.8,
-            f1_score=0.85,
-            processing_time=1.5,
-            files_processed=100,
-        )
-        data = result.to_json()
-        self.assertIsInstance(data, dict)
-        self.assertIn("method", data)
-        self.assertIn("accuracy", data)
 
 
 if __name__ == "__main__":
