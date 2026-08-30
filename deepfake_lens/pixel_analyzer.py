@@ -18,7 +18,13 @@ class PixelEvidenceSignal:
 
 
 @dataclass(frozen=True)
-class PixelAnalysis:
+class QuickPixelAnalysis:
+    """Result of the cv2-based quick pixel screen.
+
+    Deliberately not named ``PixelAnalysis``: that name belongs to the main
+    ensemble result in ``pixel.py`` and the two models are incompatible.
+    """
+
     score: int
     band: str
     band_label: str
@@ -31,7 +37,7 @@ class PixelAnalysis:
         return asdict(self)
 
 
-def analyze_pixels(path: Path | str) -> PixelAnalysis:
+def analyze_pixels(path: Path | str) -> QuickPixelAnalysis:
     """Analyze image pixels for AI generation signs."""
     image_path = Path(path)
     if not image_path.is_file():
@@ -102,7 +108,7 @@ def analyze_pixels(path: Path | str) -> PixelAnalysis:
         band_label = "낮음"
         verdict = "픽셀 분석에서 뚜렷한 AI 생성 의심 신호는 적습니다."
 
-    return PixelAnalysis(
+    return QuickPixelAnalysis(
         score=score,
         band=band,
         band_label=band_label,
@@ -113,8 +119,8 @@ def analyze_pixels(path: Path | str) -> PixelAnalysis:
     )
 
 
-def _error_analysis(message: str) -> PixelAnalysis:
-    return PixelAnalysis(
+def _error_analysis(message: str) -> QuickPixelAnalysis:
+    return QuickPixelAnalysis(
         score=0,
         band="unknown",
         band_label="판단 어려움",

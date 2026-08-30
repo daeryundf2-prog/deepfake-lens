@@ -36,7 +36,7 @@ from .xai import explain_classification, format_explanation_text
 from .ai_agent import analyze_agent_content, AgentAnalysis
 from .threed import analyze_3d_content, ThreeDAnalysis
 from .avatar import analyze_avatar, AvatarAnalysis
-from .pixel_analyzer import analyze_pixels, PixelAnalysis
+from .pixel_analyzer import analyze_pixels
 from .ml_classifier import SimpleClassifier
 from .enhanced_forensics import analyze_forensic
 from .webapp import run_server
