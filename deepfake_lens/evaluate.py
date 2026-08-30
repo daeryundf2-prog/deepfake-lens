@@ -4,7 +4,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from .calibration import DEFAULT_THRESHOLD, auroc, binary_metrics, calibrate_threshold, load_calibration
+from .calibration import DEFAULT_THRESHOLD, auroc, binary_metrics, calibrate_threshold, eer, load_calibration
 from .core import analyze_file
 from .datasets import ROBUSTNESS_TRANSFORMS, discover_dataset, is_negative_label, is_positive_label
 from .fusion import FusionProfile, apply_fusion_to_result
@@ -71,6 +71,9 @@ def evaluate_dataset(
     auc = auroc(score_pairs)
     if auc is not None:
         metrics["auroc"] = auc
+    error_rate = eer(score_pairs)
+    if error_rate is not None:
+        metrics["eer"] = error_rate
     confusion = _confusion(rows)
     case_summary = _case_summary(rows)
     per_source = {

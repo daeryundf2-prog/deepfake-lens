@@ -38,9 +38,11 @@ class ForensicReport:
     analyst_id: str = "system"
     tool_version: str = "2.0"
     jurisdiction: str = "KR"
-    # Digital signature
-    digital_signature: str = ""
-    signature_timestamp: str = ""
+    # Checksum of the report contents. This is NOT a digital signature: an
+    # unkeyed SHA-256 provides integrity binding for the report text only,
+    # and cannot prove authorship. A real signature requires a key pair.
+    integrity_checksum: str = ""
+    checksum_timestamp: str = ""
     # Standardized report format
     report_format_version: str = "1.0"
     report_id: str = ""
@@ -84,12 +86,12 @@ class ForensicReport:
         
         lines.extend([
             "",
-            "=== 디지털 서명 ===",
-            f"서명: {self.digital_signature[:32]}...",
-            f"서명 일시: {self.signature_timestamp}",
-            f"무결성 검증: SHA-256 해시 기반",
+            "=== 무결성 체크섬 ===",
+            f"체크섬 (보고서 내용 기반 SHA-256, 전자서명 아님): {self.integrity_checksum[:32]}...",
+            f"생성 일시: {self.checksum_timestamp}",
+            f"파일 해시 검증: SHA-256 ({self.file_hash[:16]}...)",
         ])
-        
+
         return "\n".join(lines)
 
 def analyze_forensic(path: Path | str) -> ForensicReport:
@@ -136,11 +138,11 @@ def analyze_forensic(path: Path | str) -> ForensicReport:
     legal_notes.append("법적 효력을 위해서는 공인된 검증 기관의 확인이 필요합니다.")
     legal_notes.append("파일 무결성은 SHA-256 해시로 검증되었습니다.")
 
-    # Generate report ID and digital signature
+    # Generate report ID and content checksum
     report_id = f"FR-{datetime.now().strftime('%Y%m%d%H%M%S')}-{file_hash[:8]}"
-    signature_timestamp = datetime.now().isoformat()
-    signature_data = f"{file_hash}:{signature_timestamp}:2.0"
-    digital_signature = hashlib.sha256(signature_data.encode()).hexdigest()
+    checksum_timestamp = datetime.now().isoformat()
+    checksum_data = f"{file_hash}:{checksum_timestamp}:2.0"
+    integrity_checksum = hashlib.sha256(checksum_data.encode()).hexdigest()
 
     return ForensicReport(
         file_path=str(file_path.absolute()),
@@ -153,8 +155,8 @@ def analyze_forensic(path: Path | str) -> ForensicReport:
         analyst_id="system",
         tool_version="2.0",
         jurisdiction="KR",
-        digital_signature=digital_signature,
-        signature_timestamp=signature_timestamp,
+        integrity_checksum=integrity_checksum,
+        checksum_timestamp=checksum_timestamp,
         report_format_version="1.0",
         report_id=report_id,
     )
@@ -172,8 +174,8 @@ def _error_report(message: str) -> ForensicReport:
         analyst_id="system",
         tool_version="2.0",
         jurisdiction="KR",
-        digital_signature="",
-        signature_timestamp="",
+        integrity_checksum="",
+        checksum_timestamp="",
         report_format_version="1.0",
         report_id="",
     )

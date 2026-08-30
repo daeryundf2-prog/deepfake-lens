@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -61,19 +61,24 @@ def create_evidence_chain(
     tool_version: str = "0.1.0",
     parameters: dict[str, str] | None = None,
 ) -> EvidenceChain:
-    """Create an evidence chain for a file analysis."""
+    """Create an evidence chain for a file analysis.
+
+    ``integrity_verified`` is measured, not assumed: the chain is marked
+    verified only when an immediate re-hash of the file still matches the
+    recorded hash.
+    """
     path = Path(file_path)
-    
+
     # Calculate file hash
     file_hash = _calculate_hash(path)
-    
+
     # Get file info
     try:
         file_size = path.stat().st_size
     except OSError:
         file_size = 0
-    
-    return EvidenceChain(
+
+    chain = EvidenceChain(
         file_hash=file_hash,
         file_path=str(path.absolute()),
         file_size=file_size,
@@ -82,8 +87,9 @@ def create_evidence_chain(
         tool_version=tool_version,
         parameters=parameters or {},
         results=results,
-        integrity_verified=True,
+        integrity_verified=False,
     )
+    return replace(chain, integrity_verified=verify_integrity(chain))
 
 
 def verify_integrity(chain: EvidenceChain) -> bool:

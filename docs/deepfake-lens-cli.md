@@ -118,9 +118,10 @@ The next-stage plan is implemented as local-first commands and adapters:
 7. Source attribution: JSON separates `ai_score`, `source_guess`, and `source_attribution_label`. Metadata rules now include Flux, Ideogram, Imagen/Gemini, Recraft, Canva AI, and Grok/xAI in addition to earlier sources.
 8. Large scans and performance: `--cache`, `--workers`, `--dedupe`, `--hash-db`, `--max-file-bytes`, and `--progress` support resumable parallel scans with duplicate and oversize handling. `perf` writes a throughput/cache/duplicate-rate report for local tuning.
 9. Local web app: `web` starts a localhost-only UI/API with escaped table rendering, optional recursive/dedupe scans, model/fusion profile fields, and heatmap preview serving constrained to the scanned folder.
-10. Reports: `--html-out` and `--pdf-out` write review artifacts with optional `--redact-paths`; HTML reports embed heatmaps when available.
-11. Security/privacy: `security` writes a local-only guardrail report. Network calls are not used by scan/eval/train, symlink following is opt-in, oversize files can be skipped, report paths can be redacted, and the web server binds to localhost unless `--allow-lan` is passed.
-12. Release prep: `release` writes a readiness checklist and `.github/workflows/deepfake-lens.yml` runs compile, unit tests, registry smoke, and CLI help checks.
+10. Reports: `--html-out` and `--pdf-out` write review artifacts with optional `--redact-paths`; HTML reports embed heatmaps when available. The simple PDF is Latin-1 only — when Korean text is present it prints an explicit notice recommending the HTML report.
+11. Evaluation output includes AUROC and EER (threshold-swept equal error rate) alongside confusion counts, and `eval` reports per-split metrics when the dataset declares splits.
+12. Security/privacy: `security` writes a local-only guardrail report. Network calls are not used by scan/eval/train, symlink following is opt-in, oversize files can be skipped, report paths can be redacted, and the web server binds to localhost unless `--allow-lan` is passed.
+13. Release prep: `release` writes a readiness checklist and `.github/workflows/deepfake-lens.yml` runs compile, unit tests, registry smoke, and CLI help checks.
 
 ## Dataset And Benchmark Workflow
 
