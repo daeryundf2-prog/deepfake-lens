@@ -9,6 +9,42 @@ It is intentionally CLI-first:
 - Reusable later from a local web app or localhost API.
 - No upload, login, cloud AI API, or new runtime dependency.
 
+## Command Reference
+
+Every subcommand, briefly. Detail for the core workflow lives in the sections below.
+
+- `scan <folder>`: folder screening with metadata + optional pixel ensemble and reports.
+- `collect <folder> --out`: write a dataset collection plan.
+- `dataset <folder> --manifest-out`: labeled-dataset manifest, audit, split and robustness plans.
+- `eval <folder>`: labeled-dataset metrics (accuracy/precision/recall/FPR, AUROC, EER, per-split).
+- `benchmark <folder>`: pixel-mode/model matrix benchmark.
+- `fusion <folder> --out` / `calibrate <folder> --out` / `train <folder> --out`: fusion profile, threshold calibration, portable baseline.
+- `models [--focus]`: detector registry and runtime profile scaffolding.
+- `train-neural-plan <folder> --out`: neural training/ONNX handoff plan.
+- `video <folder> --out --frame-root`: video frame extraction plan (ffmpeg optional).
+- `video-analysis <file>`: temporal consistency heuristics (stability signals skip static footage).
+- `audio <file>`: AI-generation/voice-cloning heuristics (jitter/shimmer regularity included).
+- `face <file>`: face manipulation heuristics (boundary blending, reflection, color temperature).
+- `inpaint <file>`: inpainting/partial manipulation heuristics.
+- `text-advanced <file>`: advanced text stylometry analysis.
+- `forensic <file>`: C2PA/provenance metadata forensics (SDK validation when `provenance` extra installed).
+- `classify <file>`: which AI tool produced the content (word-boundary marker matching).
+- `multimodal`: combine per-modality scores into one assessment.
+- `realtime`: moving-average frame scoring with alert thresholds.
+- `rppg <video>`: CHROM cardiac-pulse screening from face video.
+- `prnu <target> --reference ...`: sensor-fingerprint provenance correlation.
+- `evidence <file>`: forensic evidence chain with measured integrity verification.
+- `api-serve [--token]`: REST API server (token mandatory off-localhost).
+- `batch <folder>`: parallel per-file analysis.
+- `explain --score`: human-readable explanation of a score/signals.
+- `agent --text|--file` / `3d --text|--file` / `avatar --file`: AI-agent text, 3D-asset, and avatar heuristics.
+- `pixel-analysis <file>`: cv2-based quick pixel screen (QuickPixelAnalysis).
+- `ml-classify <file>`: feature-threshold classification (requires opencv/numpy).
+- `legal-report <file>`: legal-style forensic report with integrity checksum (not a digital signature).
+- `perf <folder> --out`: throughput/cache/duplicate-rate report.
+- `security --out` / `release --out`: guardrail and release-readiness reports.
+- `web`: local web GUI (localhost; Host-header guarded).
+
 ## Usage
 
 ```sh

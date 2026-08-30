@@ -247,3 +247,57 @@ class AudioAnalysisTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _has_librosa() -> bool:
+    try:
+        import librosa  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+class AudioSuccessPathTest(unittest.TestCase):
+    """The extraction success path was only ever tested with missing files;
+    a synthetic WAV finally exercises librosa feature extraction."""
+
+    def _write_tone(self, path: Path, *, seconds: int = 3, hz: float = 440.0) -> None:
+        import math
+        import struct
+        import wave
+
+        sample_rate = 16000
+        with wave.open(str(path), "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(sample_rate)
+            frames = bytearray()
+            for n in range(sample_rate * seconds):
+                value = 0.4 * math.sin(2 * math.pi * hz * n / sample_rate)
+                frames += struct.pack("<h", int(value * 32767))
+            handle.writeframes(bytes(frames))
+
+    @unittest.skipUnless(_has_librosa(), "librosa not installed")
+    def test_tone_wav_produces_features(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wav_path = Path(tmp) / "tone.wav"
+            self._write_tone(wav_path)
+            analysis = analyze_audio(wav_path)
+            self.assertIsNotNone(analysis.features)
+            self.assertAlmostEqual(analysis.features.duration_seconds, 3.0, delta=0.15)
+            self.assertEqual(analysis.band in {"low", "medium", "high"}, True)
+            self.assertGreater(analysis.features.sample_rate, 0)
+
+    @unittest.skipUnless(_has_librosa(), "librosa not installed")
+    def test_pure_tone_pitch_is_detected(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            wav_path = Path(tmp) / "tone.wav"
+            self._write_tone(wav_path, hz=440.0)
+            analysis = analyze_audio(wav_path)
+            self.assertIsNotNone(analysis.features)
+            self.assertAlmostEqual(analysis.features.pitch_mean, 440.0, delta=60.0)

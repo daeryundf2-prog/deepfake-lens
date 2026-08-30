@@ -475,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "audio":
         analysis = analyze_audio(args.file, segment_seconds=args.segment_seconds)
         if args.json_out:
-            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
             print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
         else:
@@ -490,7 +490,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "face":
         analysis = analyze_faces(args.file)
         if args.json_out:
-            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
             print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
         else:
@@ -505,7 +505,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "video-analysis":
         analysis = analyze_video_temporal(args.file, frame_sample_rate=args.frame_rate, max_frames=args.max_frames)
         if args.json_out:
-            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
             print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
         else:
@@ -520,7 +520,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "inpaint":
         analysis = analyze_inpainting(args.file)
         if args.json_out:
-            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
             print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
         else:
@@ -536,7 +536,7 @@ def main(argv: list[str] | None = None) -> int:
         text = args.file.read_text(encoding="utf-8", errors="replace")
         analysis = analyze_text_advanced(text)
         if args.json_out:
-            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
             print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
         else:
@@ -552,7 +552,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "forensic":
         analysis = analyze_metadata_forensic(args.file)
         if args.json_out:
-            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
             print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
         else:
@@ -604,7 +604,7 @@ def main(argv: list[str] | None = None) -> int:
                 result = classify_metadata(metadata)
             
             if args.json_out:
-                args.json_out.write_text(json.dumps(result.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                _write_json_out(args.json_out, json.dumps(result.to_json(), ensure_ascii=False, indent=2) + "\n")
             if args.format == "json":
                 print(json.dumps(result.to_json(), ensure_ascii=False, indent=2))
             else:
@@ -632,7 +632,7 @@ def main(argv: list[str] | None = None) -> int:
             video_source_guess=args.video_source,
         )
         if args.json_out:
-            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
             print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
         else:
@@ -668,7 +668,7 @@ def main(argv: list[str] | None = None) -> int:
         
         if args.json_out:
             output = {"state": state.to_json(), "summary": summary}
-            args.json_out.write_text(json.dumps(output, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            _write_json_out(args.json_out, json.dumps(output, ensure_ascii=False, indent=2) + "\n")
         
         if args.format == "json":
             print(json.dumps({"state": state.to_json(), "summary": summary}, ensure_ascii=False, indent=2))
@@ -687,7 +687,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "rppg":
         analysis = analyze_rppg(args.file, max_frames=args.max_frames)
         if args.json_out:
-            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
             print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
         else:
@@ -704,7 +704,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "prnu":
         analysis = analyze_prnu(args.file, args.reference)
         if args.json_out:
-            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
             print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
         else:
@@ -768,7 +768,7 @@ def main(argv: list[str] | None = None) -> int:
             text = args.file.read_text(encoding="utf-8", errors="replace")
         analysis = analyze_agent_content(text=text)
         if args.json_out:
-            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
             print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
         else:
@@ -786,7 +786,7 @@ def main(argv: list[str] | None = None) -> int:
             text = args.file.read_text(encoding="utf-8", errors="replace")
         analysis = analyze_3d_content(text=text)
         if args.json_out:
-            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
             print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
         else:
@@ -801,7 +801,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "avatar":
         analysis = analyze_avatar(file_path=str(args.file) if args.file else None)
         if args.json_out:
-            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
             print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
         else:
@@ -816,7 +816,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "pixel-analysis":
         analysis = analyze_pixels(args.file)
         if args.json_out:
-            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
             print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
         else:
@@ -846,7 +846,7 @@ def main(argv: list[str] | None = None) -> int:
             classifier = SimpleClassifier()
             result = classifier.predict(features)
             if args.json_out:
-                args.json_out.write_text(json.dumps(result.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                _write_json_out(args.json_out, json.dumps(result.to_json(), ensure_ascii=False, indent=2) + "\n")
             if args.format == "json":
                 print(json.dumps(result.to_json(), ensure_ascii=False, indent=2))
             else:
@@ -940,7 +940,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Done: analyzed={summary.analyzed}, cached={summary.cached}, total={summary.total}", file=sys.stderr)
 
     if args.json_out:
-        args.json_out.write_text(scan_to_json_text(summary, items) + "\n", encoding="utf-8")
+        _write_json_out(args.json_out, scan_to_json_text(summary, items) + "\n")
     if args.csv_out:
         _write_csv(args.csv_out, items)
     if args.html_out:
@@ -953,6 +953,13 @@ def main(argv: list[str] | None = None) -> int:
     else:
         _print_table(summary, items, include_low=args.include_low)
     return 0
+
+
+def _write_json_out(path: Path, payload: str) -> None:
+    """Write a JSON artifact, creating parent directories on demand."""
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(payload, encoding="utf-8")
 
 
 def _print_table(summary, items: list[ScanItem], *, include_low: bool) -> None:

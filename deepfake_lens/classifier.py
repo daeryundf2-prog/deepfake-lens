@@ -7,6 +7,7 @@ and learned patterns.
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
 
 
@@ -224,6 +225,29 @@ def classify_spectral_profile(profile: dict[str, float]) -> ClassificationResult
     )
 
 
+_MARKER_PATTERNS: dict[str, "re.Pattern[str]"] = {}
+
+
+def _marker_matches(marker: str, text: str) -> bool:
+    """Match a tool marker inside lowercased text.
+
+    ASCII markers match on word boundaries so 'spark' no longer fires inside
+    'Apache Spark' ecosystem chatter, 'invoke' inside 'invoke a function', or
+    'meta' inside 'metadata'. Markers containing non-ASCII characters (e.g.
+    Chinese product names) keep plain substring matching — word-character
+    boundaries do not apply there.
+    """
+    if not marker:
+        return False
+    if any(ord(char) > 127 for char in marker):
+        return marker in text
+    pattern = _MARKER_PATTERNS.get(marker)
+    if pattern is None:
+        pattern = re.compile(rf"(?<![a-z0-9]){re.escape(marker)}(?![a-z0-9])")
+        _MARKER_PATTERNS[marker] = pattern
+    return pattern.search(text) is not None
+
+
 def _classify_text(text: str) -> ClassificationResult:
     """Classify based on text matching."""
     all_tools = IMAGE_TOOLS + VIDEO_TOOLS + AUDIO_TOOLS + DETECTION_TOOLS + TEXT_TOOLS + ADDITIONAL_IMAGE_TOOLS
@@ -232,7 +256,7 @@ def _classify_text(text: str) -> ClassificationResult:
     for tool in all_tools:
         tool_matches = []
         for marker in tool["markers"]:
-            if marker in text:
+            if _marker_matches(marker, text):
                 tool_matches.append(f"Marker '{marker}' found")
         
         if tool_matches:

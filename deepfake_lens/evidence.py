@@ -142,16 +142,34 @@ def save_evidence_chains(chains: list[EvidenceChain], path: Path) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def load_evidence_chains(path: Path) -> list[EvidenceChain]:
-    """Load evidence chains from a JSON file."""
-    if not path.exists():
-        return []
-    
+def load_evidence_chains(path: Path | str) -> tuple[list[EvidenceChain], list[str]]:
+    """Load evidence chains, reporting anything that had to be skipped.
+
+    A forensic chain-of-custody loader must never silently present a
+    damaged file as an empty set, so this returns ``(chains, issues)``:
+    well-formed chains plus one issue line per skipped entry (or file-level
+    problem). Callers that only want the chains can ignore the second
+    element — but should not, for evidence records.
+    """
+    evidence_path = Path(path)
+    if not evidence_path.exists():
+        return [], [f"file not found: {evidence_path}"]
+
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return [EvidenceChain(**item) for item in data]
-    except (json.JSONDecodeError, TypeError):
-        return []
+        data = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return [], [f"invalid JSON: {exc}"]
+    if not isinstance(data, list):
+        return [], ["unexpected top-level structure (expected a list of chains)"]
+
+    chains: list[EvidenceChain] = []
+    issues: list[str] = []
+    for index, item in enumerate(data):
+        try:
+            chains.append(EvidenceChain(**item))
+        except TypeError as exc:
+            issues.append(f"entry {index} skipped: {exc}")
+    return chains, issues
 
 
 def _calculate_hash(path: Path) -> str:

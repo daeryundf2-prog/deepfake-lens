@@ -8,6 +8,7 @@ subcommand responds to --help and every functional check passes.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -38,6 +39,17 @@ def main() -> int:
 
     commands = sorted(name for name in cli.COMMANDS if not name.startswith("-"))
     failures: list[str] = []
+
+    docs = (REPO_ROOT / "docs" / "deepfake-lens-cli.md").read_text(encoding="utf-8")
+    # A command counts as documented when it appears backticked, optionally
+    # followed by argument placeholders (`scan`, `scan <folder>`, `rppg <video>`).
+    undocumented = [
+        command
+        for command in commands
+        if not re.search(rf"`{re.escape(command)}(?:[\s<:`]|`)", docs)
+    ]
+    if undocumented:
+        failures.append(f"commands missing from docs/deepfake-lens-cli.md: {undocumented}")
 
     for command in commands:
         proc = run_cli([command, "--help"], cwd=REPO_ROOT)
