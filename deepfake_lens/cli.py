@@ -29,6 +29,7 @@ from .c2pa import analyze_metadata_forensic, MetadataForensicAnalysis
 from .classifier import classify_metadata, classify_text_content, ClassificationResult as ToolClassificationResult
 from .multimodal import analyze_multimodal, MultimodalAnalysis
 from .realtime import RealtimeDetector, create_realtime_detector
+from .rppg import analyze_rppg, RppgAnalysis
 from .evidence import create_evidence_chain, generate_forensic_report
 from .api_server import run_server as run_api_server
 from .batch import BatchProcessor
@@ -42,7 +43,7 @@ from .enhanced_forensics import analyze_forensic
 from .webapp import run_server
 
 
-COMMANDS = {"scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "inpaint", "text-advanced", "forensic", "classify", "multimodal", "realtime", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
+COMMANDS = {"scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "inpaint", "text-advanced", "forensic", "classify", "multimodal", "realtime", "rppg", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -228,6 +229,12 @@ def main(argv: list[str] | None = None) -> int:
     realtime_parser.add_argument("--scores", type=str, help="comma-separated scores to process (for testing)")
     realtime_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     realtime_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    rppg_parser = subparsers.add_parser("rppg", help="estimate cardiac pulse from face video (CHROM rPPG)")
+    rppg_parser.add_argument("file", type=Path, help="video file to analyze")
+    rppg_parser.add_argument("--max-frames", type=int, default=600, help="maximum face samples to collect (default: 600)")
+    rppg_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    rppg_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
     evidence_parser = subparsers.add_parser("evidence", help="create forensic evidence chain")
     evidence_parser.add_argument("file", type=Path, help="file to create evidence for")
@@ -669,6 +676,23 @@ def main(argv: list[str] | None = None) -> int:
                 for alert in state.alerts[-3:]:
                     print(f"  - [{alert.band}] {alert.message}")
         
+        return 0
+    if args.command == "rppg":
+        analysis = analyze_rppg(args.file, max_frames=args.max_frames)
+        if args.json_out:
+            args.json_out.write_text(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if args.format == "json":
+            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
+        else:
+            bpm = f"{analysis.estimated_bpm:.0f}" if analysis.estimated_bpm else "-"
+            snr = f"{analysis.peak_snr:.1f}" if analysis.peak_snr is not None else "-"
+            print(f"Score: {analysis.score} ({analysis.band_label})")
+            print(f"Verdict: {analysis.verdict}")
+            print(f"Pulse: {bpm} bpm, SNR: {snr}, Face frames: {analysis.face_frames}")
+            if analysis.signals:
+                print("Signals:")
+                for signal in analysis.signals:
+                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
         return 0
     if args.command == "evidence":
         chain = create_evidence_chain(

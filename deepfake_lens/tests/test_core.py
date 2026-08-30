@@ -118,7 +118,7 @@ class DeepfakeLensCoreTest(unittest.TestCase):
 
             self.assertTrue(result.available)
             self.assertGreaterEqual(result.score, 45)
-            self.assertTrue(any(expert.family == "spectral" for expert in result.experts))
+            self.assertTrue(any(expert.family == "frequency" for expert in result.experts))
 
     def test_analyze_file_merges_pixel_signal_and_heatmap(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -202,6 +202,11 @@ python -m deepfake_lens scan samples --model-path experiments/run-001/runtime-pr
 
 `train_detector.py` writes a TorchScript checkpoint, state dict, runtime profile, and training metadata when optional PyTorch dependencies are present. It intentionally stays outside the package dependency set.
 
+## Frequency And Biometric Screening (Phase 2)
+
+- `pixel` ensemble `frequency_forensics` expert (requires numpy): real FFT/DCT measurements replacing the former shift-difference pseudo-spectral expert — radial power-spectrum slope (natural images decay ~1/f^2), robust spectral-spike detection above the radial average (upsampling/checkerboard artifacts), NPR-inspired neighboring-pixel interpolation consistency, and per-block DCT high-frequency energy share. Feature computation lives in `deepfake_lens/frequency.py`.
+- `rppg <video>` (requires opencv; numpy for the pulse math): CHROM remote photoplethysmography — face-ROI RGB means are projected to chrominance signals and band-passed to 0.7-4 Hz. A stable cardiac peak (SNR >= 8, 45-200 bpm) is evidence of a camera-captured live face; its absence raises a weak 25-weight suspicion signal only. Compression, poor lighting, and motion can erase the pulse, so a missing pulse is never a verdict on its own.
+
 ## Limits
 
 This is a screening tool, not a truth engine.

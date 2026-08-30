@@ -30,6 +30,8 @@ from .c2pa import MetadataForensicAnalysis, analyze_metadata_forensic
 from .classifier import ClassificationResult as ToolClassificationResult, classify_metadata
 from .multimodal import MultimodalAnalysis, analyze_multimodal
 from .realtime import RealtimeDetector, RealtimeState, create_realtime_detector
+from .rppg import RppgAnalysis, analyze_rppg
+from .frequency import FrequencyFeatures, frequency_features
 from .evidence import EvidenceChain, ForensicReport, create_evidence_chain, generate_forensic_report
 from .xai import XAIExplanation, explain_classification, format_explanation_text
 from .batch import BatchProcessor, BatchJob
@@ -48,6 +50,8 @@ __all__ = [
     "ToolClassificationResult",
     "MultimodalAnalysis",
     "RealtimeDetector",
+    "RppgAnalysis",
+    "FrequencyFeatures",
     "AgentAnalysis",
     "ThreeDAnalysis",
     "AvatarAnalysis",
@@ -78,6 +82,8 @@ __all__ = [
     "classify_metadata",
     "analyze_multimodal",
     "create_realtime_detector",
+    "analyze_rppg",
+    "frequency_features",
     "create_evidence_chain",
     "generate_forensic_report",
     "explain_classification",
