@@ -40,19 +40,44 @@ def main(argv: list[str] | None = None) -> int:
     model.eval()
     dummy = torch.zeros(1, 3, image_size, image_size)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    torch.onnx.export(
-        model,
-        dummy,
-        str(args.out),
-        input_names=[args.input_name],
-        output_names=[args.output_name],
-        opset_version=17,
-        dynamic_axes={args.input_name: {0: "batch"}, args.output_name: {0: "batch"}},
-    )
+    _export_onnx(model, dummy, args.out, args.input_name, args.output_name)
     print(f"exported {args.out}")
     if not _verify_export(args.checkpoint, args.out, image_size, args.input_name, args.output_name):
         return 1
     return 0
+
+
+def _export_onnx(model, dummy, out_path: Path, input_name: str, output_name: str) -> None:
+    """Export a TorchScript checkpoint to ONNX.
+
+    TorchScript modules cannot traverse the modern torch.export-based
+    exporter (torch >= 2.9 default), so the legacy TorchScript exporter is
+    the correct route here; on older torch builds that lack the ``dynamo``
+    kwarg the export is simply called without it.
+    """
+    import torch
+
+    try:
+        torch.onnx.export(
+            model,
+            dummy,
+            str(out_path),
+            input_names=[input_name],
+            output_names=[output_name],
+            opset_version=17,
+            dynamic_axes={input_name: {0: "batch"}, output_name: {0: "batch"}},
+            dynamo=False,
+        )
+    except TypeError:
+        torch.onnx.export(
+            model,
+            dummy,
+            str(out_path),
+            input_names=[input_name],
+            output_names=[output_name],
+            opset_version=17,
+            dynamic_axes={input_name: {0: "batch"}, output_name: {0: "batch"}},
+        )
 
 
 def _resolve_image_size(parser: argparse.ArgumentParser, checkpoint: Path, value: int | None) -> int:
