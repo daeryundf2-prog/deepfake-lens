@@ -1,0 +1,55 @@
+name: deepfake-lens
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly registry/doc link check, Mondays 03:00 UTC.
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package (stdlib-only, no optional extras)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Compile check
+        run: python -m compileall deepfake_lens
+      - name: Unit tests
+        run: python -m unittest discover deepfake_lens/tests -v
+      - name: CLI help and fixture smoke
+        run: python scripts/cli_smoke_test.py
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android unit tests
+        run: ./gradlew :deepfakeclassifier:testDebugUnitTest --no-daemon
+
+  registry-links:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify cited URLs
+        run: python scripts/check_registry_links.py

@@ -1,5 +1,7 @@
 # Deepfake Lens
 
+[![CI](https://github.com/daeryundf2-prog/deepfake-lens/actions/workflows/deepfake-lens.yml/badge.svg)](https://github.com/daeryundf2-prog/deepfake-lens/actions/workflows/deepfake-lens.yml)
+
 Local AI-generated image/text screening tools split from the mobile-forensics repository.
 
 ## Python CLI
