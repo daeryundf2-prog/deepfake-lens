@@ -164,7 +164,7 @@ internal fun loadImageAnalysisPayload(context: Context, uri: Uri, includePreview
                 sourceHeight = sourceHeight,
                 metadata = metadata
             )
-        )
+        ).withNeuralScore(OnnxClassifier.classify(context, pixels, analysisBitmap.width, analysisBitmap.height))
         ImageAnalysisPayload(preview = if (includePreview) decoded else null, result = result)
     }.getOrElse { error ->
         ImageAnalysisPayload(
@@ -173,6 +173,28 @@ internal fun loadImageAnalysisPayload(context: Context, uri: Uri, includePreview
             errorMessage = error.message ?: "지원하지 않는 이미지이거나 접근 권한이 없습니다."
         )
     }
+}
+
+/**
+ * Attach the ONNX model's synthetic-class probability as an informational
+ * signal (weight 0): no validated checkpoint ships with the app, so the
+ * neural score must not move the heuristic score or band. When no model is
+ * bundled the limitation says so instead of pretending the network ran.
+ */
+private fun ClassificationResult.withNeuralScore(neural: NeuralScore?): ClassificationResult {
+    if (neural == null) {
+        return copy(
+            limitations = limitations + "ONNX 신경망 모델이 없어 휴리스틱만 사용했습니다 (assets/deepfake-lens.onnx)."
+        )
+    }
+    return copy(
+        signals = signals + EvidenceSignal(
+            title = "신경망 분류 (ONNX)",
+            detail = "학습 모델 추정 AI 확률 ${(neural.aiProbability * 100).toInt()}% — 참고용이며 검증된 체크포인트가 필요합니다.",
+            weight = 0
+        ),
+        limitations = limitations + "ONNX 신경망 점수는 학습 데이터 품질에 좌우되는 참고값입니다."
+    )
 }
 
 private fun unreadableImageResult(error: Throwable): ClassificationResult {

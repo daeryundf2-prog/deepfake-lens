@@ -64,6 +64,7 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.18.0")
 
     testImplementation("junit:junit:4.13.2")
 
