@@ -207,6 +207,10 @@
             input.click();
         });
         
+        function escapeHtml(value) {
+            return String(value).replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
+        }
+
         function addFiles(files) {
             const list = document.getElementById('file-list');
             files.forEach(file => {
@@ -214,7 +218,7 @@
                     selectedFiles.push(file);
                     const item = document.createElement('div');
                     item.className = 'file-item';
-                    item.innerHTML = `<span class="name">${file.name}</span><span class="size">${(file.size/1024).toFixed(1)} KB</span>`;
+                    item.innerHTML = `<span class="name">${escapeHtml(file.name)}</span><span class="size">${(file.size/1024).toFixed(1)} KB</span>`;
                     list.appendChild(item);
                 }
             });
@@ -254,33 +258,6 @@
             }
         }
         
-        async function analyzeFiles() {
-            if (selectedFiles.length === 0) {
-                alert('분석할 파일을 선택하세요');
-                return;
-            }
-            
-            document.getElementById('progress').classList.add('active');
-            document.getElementById('progress-fill').style.width = '0%';
-            
-            for (let i = 0; i < selectedFiles.length; i++) {
-                const file = selectedFiles[i];
-                document.getElementById('progress-text').textContent = `${i+1}/${selectedFiles.length} - ${file.name}`;
-                document.getElementById('progress-fill').style.width = `${((i+1)/selectedFiles.length)*100}%`;
-                
-                // For demo, we'll simulate analysis
-                results.push({
-                    name: file.name,
-                    score: Math.floor(Math.random() * 100),
-                    tool: '분석 중...',
-                    risk: 'unknown'
-                });
-            }
-            
-            updateResults();
-            document.getElementById('progress').classList.remove('active');
-        }
-        
         function processResults(data) {
             results = [];
             if (data.items) {
@@ -313,9 +290,9 @@
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td class="risk-${r.risk}">${r.risk === 'high' ? '높음' : r.risk === 'medium' ? '주의' : '낮음'}</td>
-                    <td>${r.score}</td>
-                    <td>${r.tool}</td>
-                    <td>${r.name}</td>
+                    <td>${Number(r.score) || 0}</td>
+                    <td>${escapeHtml(r.tool)}</td>
+                    <td>${escapeHtml(r.name)}</td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -336,10 +313,15 @@
             a.click();
         }
         
+        function csvField(value) {
+            const text = String(value);
+            return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+        }
+
         function exportCSV() {
             let csv = '위험도,점수,도구,파일명\n';
             results.forEach(r => {
-                csv += `${r.risk},${r.score},${r.tool},${r.name}\n`;
+                csv += [csvField(r.risk), csvField(r.score), csvField(r.tool), csvField(r.name)].join(',') + '\n';
             });
             const blob = new Blob([csv], { type: 'text/csv' });
             const url = URL.createObjectURL(blob);

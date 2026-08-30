@@ -169,12 +169,19 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
 
 
 def _stats_payload() -> dict[str, object]:
-    """Handle stats request."""
+    """Handle stats request with real package facts."""
+    import importlib.metadata
+
+    try:
+        version = importlib.metadata.version("deepfake-lens")
+    except importlib.metadata.PackageNotFoundError:
+        version = "dev"
+    package_dir = Path(__file__).parent
+    module_count = sum(1 for entry in package_dir.glob("*.py") if not entry.name.startswith("_"))
     return {
         "status": "ok",
-        "version": "2.0",
-        "modules": 47,
-        "tests": 159,
+        "version": version,
+        "modules": module_count,
     }
 
 

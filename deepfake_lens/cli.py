@@ -29,12 +29,10 @@ from .c2pa import analyze_metadata_forensic, MetadataForensicAnalysis
 from .classifier import classify_metadata, classify_text_content, ClassificationResult as ToolClassificationResult
 from .multimodal import analyze_multimodal, MultimodalAnalysis
 from .realtime import RealtimeDetector, create_realtime_detector
-from .model_scout import scan_for_new_models, compare_with_known, generate_scout_report
 from .evidence import create_evidence_chain, generate_forensic_report
 from .api_server import run_server as run_api_server
 from .batch import BatchProcessor
 from .xai import explain_classification, format_explanation_text
-from .benchmark_suite import run_benchmark_suite
 from .ai_agent import analyze_agent_content, AgentAnalysis
 from .threed import analyze_3d_content, ThreeDAnalysis
 from .avatar import analyze_avatar, AvatarAnalysis
@@ -44,7 +42,7 @@ from .enhanced_forensics import analyze_forensic
 from .webapp import run_server
 
 
-COMMANDS = {"scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "inpaint", "text-advanced", "forensic", "classify", "multimodal", "realtime", "scout", "evidence", "api-serve", "batch", "explain", "bench-suite", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
+COMMANDS = {"scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "inpaint", "text-advanced", "forensic", "classify", "multimodal", "realtime", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -231,11 +229,6 @@ def main(argv: list[str] | None = None) -> int:
     realtime_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     realtime_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    scout_parser = subparsers.add_parser("scout", help="scan for new AI models and generate discovery report")
-    scout_parser.add_argument("--sources", type=str, default="github,arxiv,huggingface", help="comma-separated sources to scan")
-    scout_parser.add_argument("--report-out", type=Path, help="write scout report to file")
-    scout_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
-
     evidence_parser = subparsers.add_parser("evidence", help="create forensic evidence chain")
     evidence_parser.add_argument("file", type=Path, help="file to create evidence for")
     evidence_parser.add_argument("--analyst-id", type=str, default="system", help="analyst identifier")
@@ -254,11 +247,6 @@ def main(argv: list[str] | None = None) -> int:
     explain_parser.add_argument("--score", type=int, required=True, help="classification score")
     explain_parser.add_argument("--signals", type=str, help="JSON signals array")
     explain_parser.add_argument("--format", choices=["text", "json"], default="text", help="output format")
-
-    bench_parser = subparsers.add_parser("bench-suite", help="run benchmark suite")
-    bench_parser.add_argument("folder", type=Path, help="test files folder")
-    bench_parser.add_argument("--methods", type=str, default="metadata,pixel,text", help="comma-separated methods")
-    bench_parser.add_argument("--output", type=Path, help="output report file")
 
     agent_parser = subparsers.add_parser("agent", help="analyze content for AI agent generation")
     agent_parser.add_argument("--text", type=str, help="text to analyze")
@@ -681,33 +669,6 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"  - [{alert.band}] {alert.message}")
         
         return 0
-    if args.command == "scout":
-        sources = [s.strip() for s in args.sources.split(",")]
-        discovered = scan_for_new_models(sources)
-        diff = compare_with_known(discovered)
-        report = generate_scout_report(diff)
-        
-        if args.report_out:
-            args.report_out.write_text(json.dumps(report.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        
-        if args.format == "json":
-            print(json.dumps(report.to_json(), ensure_ascii=False, indent=2))
-        else:
-            print(f"Scout Report: {report.report_date}")
-            print(f"New models: {report.summary['new_models']}")
-            print(f"Updated: {report.summary['updated_models']}")
-            print(f"Deprecated: {report.summary['deprecated_models']}")
-            print(f"Total known: {report.summary['total_known']}")
-            if report.new_models:
-                print("\nNew Models:")
-                for model in report.new_models:
-                    print(f"  - {model.name} ({model.provider}) [{model.category}]")
-            if report.recommended_actions:
-                print("\nRecommended Actions:")
-                for action in report.recommended_actions:
-                    print(f"  - {action}")
-        
-        return 0
     if args.command == "evidence":
         chain = create_evidence_chain(
             args.file,
@@ -749,17 +710,6 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(explanation.to_json(), ensure_ascii=False, indent=2))
         else:
             print(format_explanation_text(explanation))
-        return 0
-    if args.command == "bench-suite":
-        methods = [m.strip() for m in args.methods.split(",")]
-        test_files = list(args.folder.glob("*"))
-        report = run_benchmark_suite(test_files, methods)
-        if args.output:
-            from .benchmark_suite import save_benchmark_report
-            save_benchmark_report(report, args.output)
-            print(json.dumps({"output": str(args.output), "methods": len(report.results)}, ensure_ascii=False, indent=2))
-        else:
-            print(json.dumps(report.to_json(), ensure_ascii=False, indent=2))
         return 0
     if args.command == "agent":
         text = args.text

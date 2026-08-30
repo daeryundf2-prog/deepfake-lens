@@ -94,10 +94,22 @@ def create_app(host: str = "127.0.0.1", port: int = 8765) -> Any:
     
     @app.post("/api/classify")
     async def classify(file_path: str):
-        from .classifier import classify_metadata
+        from .classifier import classify_metadata, classify_text_content
+        from .png import read_png_metadata
         try:
-            metadata = {}  # Would extract from file in production
-            result = classify_metadata(metadata)
+            path = Path(file_path)
+            max_bytes = 64 * 1024 * 1024
+            with path.open("rb") as handle:
+                data = handle.read(max_bytes)
+            text_extensions = {".txt", ".md", ".py", ".js", ".json", ".csv", ".log"}
+            if path.suffix.lower() in text_extensions:
+                result = classify_text_content(data.decode("utf-8", errors="ignore"))
+            elif data[:8] == b"\x89PNG\r\n\x1a\n":
+                result = classify_metadata(read_png_metadata(data))
+            elif data[:2] == b"\xff\xd8":
+                result = classify_metadata({"format": "jpeg", "size": str(len(data))})
+            else:
+                result = classify_metadata({})
             return {"status": "success", "data": result.to_json()}
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
@@ -118,18 +130,6 @@ def create_app(host: str = "127.0.0.1", port: int = 8765) -> Any:
                 video_score=video_score,
             )
             return {"status": "success", "data": result.to_json()}
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc))
-    
-    @app.get("/api/scout")
-    async def scout(sources: str = "github,arxiv,huggingface"):
-        from .model_scout import scan_for_new_models, compare_with_known, generate_scout_report
-        try:
-            source_list = [s.strip() for s in sources.split(",")]
-            discovered = scan_for_new_models(source_list)
-            diff = compare_with_known(discovered)
-            report = generate_scout_report(diff)
-            return {"status": "success", "data": report.to_json()}
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
     
