@@ -84,7 +84,18 @@ def calibrate_fusion_profile(
 
 
 def component_scores(result: ClassificationResult) -> dict[str, int]:
-    metadata_score = sum(signal.weight for signal in result.signals if not _is_pixel_signal(signal) and not _is_model_signal(signal))
+    # "생성 도구 메타데이터" is derived from the same source guess that the
+    # "source" component scores, so it must not also count as metadata weight;
+    # the fusion signal itself must be excluded so re-applying fusion is
+    # idempotent.
+    metadata_score = sum(
+        signal.weight
+        for signal in result.signals
+        if not _is_pixel_signal(signal)
+        and not _is_model_signal(signal)
+        and not _is_source_signal(signal)
+        and not _is_fusion_signal(signal)
+    )
     pixel_score = result.pixel_analysis.score if result.pixel_analysis and result.pixel_analysis.available else 0
     model_score = result.model_analysis.score if result.model_analysis and result.model_analysis.available else 0
     source_score = {
@@ -110,7 +121,15 @@ def fused_score(components: dict[str, int], profile: FusionProfile) -> int:
 
 
 def apply_fusion_to_result(result: ClassificationResult, profile: FusionProfile) -> ClassificationResult:
-    components = component_scores(result)
+    # Strip any previous fusion output so applying the same profile twice
+    # produces the same result instead of compounding.
+    base_signals = [signal for signal in result.signals if not _is_fusion_signal(signal)]
+    base_limitations = [
+        limitation
+        for limitation in result.limitations
+        if limitation != "융합 점수는 로컬 보정 프로필 기반 우선순위 점수입니다."
+    ]
+    components = component_scores(replace(result, signals=base_signals))
     score = fused_score(components, profile)
     if score < profile.unknown_below and result.source_guess.confidence == SourceConfidence.UNKNOWN:
         band = RiskBand.UNKNOWN
@@ -128,8 +147,8 @@ def apply_fusion_to_result(result: ClassificationResult, profile: FusionProfile)
         band=band,
         band_label=RISK_LABELS[band],
         verdict=_verdict(band),
-        signals=[signal, *result.signals],
-        limitations=[*result.limitations, "융합 점수는 로컬 보정 프로필 기반 우선순위 점수입니다."],
+        signals=[signal, *base_signals],
+        limitations=[*base_limitations, "융합 점수는 로컬 보정 프로필 기반 우선순위 점수입니다."],
     )
 
 
@@ -151,6 +170,14 @@ def _is_pixel_signal(signal: EvidenceSignal) -> bool:
 
 def _is_model_signal(signal: EvidenceSignal) -> bool:
     return signal.title.startswith("외부 모델")
+
+
+def _is_source_signal(signal: EvidenceSignal) -> bool:
+    return signal.title == "생성 도구 메타데이터"
+
+
+def _is_fusion_signal(signal: EvidenceSignal) -> bool:
+    return signal.title == "융합 점수"
 
 
 def _verdict(band: RiskBand) -> str:

@@ -6,7 +6,6 @@ using geometric analysis, boundary blending, and reflection patterns.
 
 from __future__ import annotations
 
-import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -88,11 +87,6 @@ def analyze_faces(
     limitations: list[str] = []
 
     for face in faces:
-        # Landmark consistency
-        landmark_signal = _landmark_consistency(face)
-        if landmark_signal:
-            signals.append(landmark_signal)
-
         # Boundary blending
         boundary_signal = _boundary_blending(face, image)
         if boundary_signal:
@@ -108,11 +102,6 @@ def analyze_faces(
         if color_signal:
             signals.append(color_signal)
 
-        # Symmetry analysis
-        symmetry_signal = _symmetry_analysis(face)
-        if symmetry_signal:
-            signals.append(symmetry_signal)
-
     # Multi-face consistency
     if len(faces) > 1:
         multi_face_signal = _multi_face_consistency(faces, image)
@@ -122,6 +111,8 @@ def analyze_faces(
     # Limitations
     if len(faces) == 1:
         limitations.append("단일 얼굴만 감지되어 다중 얼굴 비교가 불가합니다.")
+    limitations.append("랜드마크 기하/대칭 검증은 실제 랜드마크 추출이 연동되지 않아 미평가입니다.")
+    limitations.append("눈 위치는 감지 박스에서 추정한 값이므로 반사 패턴 비교는 참고 수준입니다.")
     limitations.append("로컬 휴리스틱 기반 선별 결과이며, 확정적 판별이 아닙니다.")
 
     score = min(100, sum(signal.weight for signal in signals))
@@ -192,57 +183,18 @@ def _detect_faces(image: Any) -> list[FaceRegion]:
 
 
 def _estimate_landmarks(x: int, y: int, w: int, h: int) -> list[tuple[int, int]]:
-    """Estimate basic facial landmarks from bounding box."""
+    """Assume eye/nose/mouth positions from the detection box proportions.
+
+    These are NOT measured landmarks; they only anchor the eye-region
+    sampling used by reflection analysis. Geometry checks must not be built
+    on them because every derived relation is a constant of the box shape.
+    """
     # Left eye, right eye, nose tip, mouth center
     left_eye = (x + int(w * 0.35), y + int(h * 0.35))
     right_eye = (x + int(w * 0.65), y + int(h * 0.35))
     nose_tip = (x + int(w * 0.5), y + int(h * 0.55))
     mouth_center = (x + int(w * 0.5), y + int(h * 0.75))
     return [left_eye, right_eye, nose_tip, mouth_center]
-
-
-def _landmark_consistency(face: FaceRegion) -> FaceEvidenceSignal | None:
-    """Check facial landmark geometric consistency."""
-    if len(face.landmarks) < 4:
-        return None
-
-    left_eye, right_eye, nose_tip, mouth_center = face.landmarks[:4]
-
-    # Eye symmetry
-    eye_center_x = (left_eye[0] + right_eye[0]) / 2
-    nose_offset = abs(nose_tip[0] - eye_center_x)
-
-    # Nose should be roughly centered between eyes
-    if nose_offset > face.width * 0.15:
-        return FaceEvidenceSignal(
-            "랜드마크 비대칭",
-            f"코 위치가 양쪽 눈 중앙에서 벗어나 있습니다 (편차: {nose_offset:.1f}px).",
-            20,
-        )
-
-    # Eye distance ratio
-    eye_distance = math.sqrt((right_eye[0] - left_eye[0]) ** 2 + (right_eye[1] - left_eye[1]) ** 2)
-    face_width_ratio = eye_distance / face.width
-
-    if face_width_ratio < 0.2 or face_width_ratio > 0.6:
-        return FaceEvidenceSignal(
-            "비정상적 눈 간격",
-            f"양쪽 눈 사이 거리가 얼굴 너비 대비 비정상적입니다 ({face_width_ratio:.2f}).",
-            15,
-        )
-
-    # Mouth-nose distance
-    mouth_nose_distance = math.sqrt((mouth_center[0] - nose_tip[0]) ** 2 + (mouth_center[1] - nose_tip[1]) ** 2)
-    face_height_ratio = mouth_nose_distance / face.height
-
-    if face_height_ratio < 0.1 or face_height_ratio > 0.4:
-        return FaceEvidenceSignal(
-            "코-입 거리 이상",
-            f"코와 입 사이 거리가 비정상적입니다 ({face_height_ratio:.2f}).",
-            12,
-        )
-
-    return None
 
 
 def _boundary_blending(face: FaceRegion, image) -> FaceEvidenceSignal | None:
@@ -365,37 +317,16 @@ def _color_temperature(face: FaceRegion, image) -> FaceEvidenceSignal | None:
     face_hue_mean = np.mean(face_hsv[:, :, 0])
     surround_hue_mean = np.mean(surround_hsv[:, :, 0])
 
-    hue_diff = abs(face_hue_mean - surround_hue_mean)
-    if hue_diff > 15:
+    # OpenCV hue is circular in [0, 179]; compare on the circle so hue 5 vs
+    # hue 175 (the same red family) does not read as a 170-unit mismatch.
+    hue_diff = abs(float(face_hue_mean) - float(surround_hue_mean))
+    circular_hue_diff = min(hue_diff, 180.0 - hue_diff)
+    if circular_hue_diff > 15:
         return FaceEvidenceSignal(
             "색온도 불일치",
-            f"얼굴과 주변 영역 색상 차이({hue_diff:.1f})가 커서 합성일 수 있습니다.",
+            f"얼굴과 주변 영역 색상 차이({circular_hue_diff:.1f})가 커서 합성일 수 있습니다.",
             12,
         )
-
-    return None
-
-
-def _symmetry_analysis(face: FaceRegion) -> FaceEvidenceSignal | None:
-    """Analyze facial symmetry."""
-    # Simple symmetry check using landmarks
-    if len(face.landmarks) < 2:
-        return None
-
-    left_eye, right_eye = face.landmarks[0], face.landmarks[1]
-    center_x = face.x + face.width // 2
-
-    left_dist = abs(left_eye[0] - center_x)
-    right_dist = abs(right_eye[0] - center_x)
-
-    if left_dist > 0 and right_dist > 0:
-        symmetry_ratio = min(left_dist, right_dist) / max(left_dist, right_dist)
-        if symmetry_ratio < 0.7:
-            return FaceEvidenceSignal(
-                "대칭성 위반",
-                f"양쪽 눈 위치 대칭 비율({symmetry_ratio:.2f})이 낮습니다.",
-                10,
-            )
 
     return None
 
@@ -423,8 +354,6 @@ def _classify_manipulation_type(signals: list[FaceEvidenceSignal]) -> str:
     """Classify the type of manipulation based on signals."""
     signal_titles = {s.title for s in signals}
 
-    if "랜드마크 비대칭" in signal_titles or "대칭성 위반" in signal_titles:
-        return "face_swap"
     if "경계 블렌딩 의심" in signal_titles:
         return "face_swap"
     if "반사 패턴 불일치" in signal_titles:

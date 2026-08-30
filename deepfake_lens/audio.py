@@ -207,8 +207,8 @@ def _extract_features(path: Path, *, segment_seconds: int) -> AudioFeatures | No
     pitch_values = []
     for t in range(pitches.shape[1]):
         idx = magnitudes[:, t].argmax()
-        if magnitudes[idx, t] > 0:
-            pitch_values.append(pitches[idx, t])
+        if magnitudes[idx, t] > 0 and pitches[idx, t] > 0:
+            pitch_values.append(float(pitches[idx, t]))
     pitch_mean = float(np.mean(pitch_values)) if pitch_values else 0.0
     pitch_std = float(np.std(pitch_values)) if pitch_values else 0.0
 
@@ -246,7 +246,12 @@ def _extract_features(path: Path, *, segment_seconds: int) -> AudioFeatures | No
 
 
 def _estimate_formants(y, sr: int) -> list[float]:
-    """Estimate formant frequencies using LPC analysis."""
+    """Estimate formant frequencies using LPC analysis.
+
+    Solves the autocorrelation normal equations R a = r, where R is the
+    Toeplitz matrix of r[0..p-1] and r = r[1..p]; the polynomial
+    A(z) = 1 - a1 z^-1 - ... then has the vocal-tract resonances as roots.
+    """
     try:
         import numpy as np
         import scipy.linalg
@@ -260,10 +265,14 @@ def _estimate_formants(y, sr: int) -> list[float]:
         # Framing
         frame_length = int(0.025 * sr)
         frame_step = int(0.010 * sr)
-        frames = []
-        for i in range(0, len(pre_emphasized) - frame_length, frame_step):
-            frames.append(pre_emphasized[i:i + frame_length])
+        order = min(10, frame_length - 1)
+        if frame_length <= order:
+            return []
 
+        frames = [
+            pre_emphasized[i : i + frame_length]
+            for i in range(0, len(pre_emphasized) - frame_length, frame_step)
+        ]
         if not frames:
             return []
 
@@ -272,21 +281,30 @@ def _estimate_formants(y, sr: int) -> list[float]:
         formant_list = []
         for frame in windowed[:5]:  # Use first 5 frames
             try:
-                a = np.array([1] + list(scipy.linalg.solve_toeplitz(
-                    np.correlate(frame, frame, mode='full')[frame_length-1:frame_length+10],
-                    frame[:11]
-                )))
-                roots = np.roots(a)
+                corr = np.correlate(frame, frame, mode="full")[frame_length - 1 :]
+                r0 = corr[: order + 1]
+                if r0[0] <= 0:
+                    continue
+                a = scipy.linalg.solve_toeplitz(r0[:order], r0[1:])
+                poly = np.concatenate(([1.0], -a))
+                roots = np.roots(poly)
                 roots = roots[np.imag(roots) >= 0]
-                formant_freqs = sorted(np.angle(roots) * (sr / (2 * np.pi)))
+                formant_freqs = sorted(abs(np.angle(roots)) * (sr / (2 * np.pi)))
                 formant_list.append([f for f in formant_freqs if 90 < f < 5000][:4])
             except Exception:
                 continue
 
-        if formant_list:
-            avg_formants = np.mean(formant_list, axis=0)
-            return [float(f) for f in avg_formants]
-        return []
+        if not formant_list:
+            return []
+        # Frames can yield different numbers of in-band roots; average each
+        # formant index over the frames that produced it instead of calling
+        # np.mean on a ragged list.
+        max_formants = max(len(freqs) for freqs in formant_list)
+        averaged = []
+        for i in range(max_formants):
+            values = [freqs[i] for freqs in formant_list if len(freqs) > i]
+            averaged.append(float(np.mean(values)))
+        return averaged
     except Exception:
         return []
 
@@ -362,9 +380,12 @@ def _fluency_analysis(features: AudioFeatures) -> AudioEvidenceSignal | None:
             18,
         )
 
-    # Too regular rhythm
+    # Too regular rhythm: onset rate close to the beat rate in Hz.
+    # tempo is BPM, so convert to beats per second before comparing with the
+    # onset rate (onsets per second).
     if features.tempo > 0 and features.onset_rate > 0:
-        ratio = features.onset_rate / features.tempo
+        beat_rate_hz = features.tempo / 60.0
+        ratio = features.onset_rate / beat_rate_hz
         if 0.8 < ratio < 1.2 and features.duration_seconds > 10:
             return AudioEvidenceSignal(
                 "균일한 리듬 패턴",

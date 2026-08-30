@@ -144,12 +144,16 @@ def analyze_multimodal(
         limitations.append("단일 모달리티만 분석되어 멀티모달 비교가 불가합니다.")
     limitations.append("멀티모달 분석은 각 모달리티 분석의 종합이며, 개별 분석의 정확도에 의존합니다.")
 
-    # Calculate overall score
+    # Calculate overall score: the mean modality score, plus the weights of
+    # any cross-modal disagreement signals. Consistency is reported as a
+    # diagnostic and must not raise suspicion by itself — agreement between
+    # clean modalities is not evidence of AI generation.
+    cross_modal_weight = sum(
+        signal.weight for signal in signals if signal.source_modality == "cross-modal"
+    )
     if scores:
-        # Weighted average with consistency bonus
         base_score = sum(s for s, _ in scores) / len(scores)
-        consistency_bonus = consistency_score * 10
-        score = min(100, int(base_score + consistency_bonus))
+        score = min(100, int(round(base_score + cross_modal_weight)))
     else:
         score = 0
 
