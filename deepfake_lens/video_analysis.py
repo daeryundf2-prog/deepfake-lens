@@ -94,25 +94,31 @@ def analyze_video_temporal(
     signals: list[VideoEvidenceSignal] = []
     limitations: list[str] = []
 
-    # Brightness consistency
-    brightness_signal = _brightness_consistency(frame_analyses)
-    if brightness_signal:
-        signals.append(brightness_signal)
+    # Temporal stability signals are meaningless on effectively frozen
+    # footage (screen recordings, fixed tripods): every real video is then
+    # "unnaturally stable" too. Report it instead of scoring it.
+    if _is_static_footage(frame_analyses):
+        limitations.append("정적 영상(화면 녹화/고정 삼각대 추정)이라 안정성 기반 신호는 판별에 사용할 수 없습니다.")
+    else:
+        # Brightness consistency
+        brightness_signal = _brightness_consistency(frame_analyses)
+        if brightness_signal:
+            signals.append(brightness_signal)
 
-    # Contrast consistency
-    contrast_signal = _contrast_consistency(frame_analyses)
-    if contrast_signal:
-        signals.append(contrast_signal)
+        # Contrast consistency
+        contrast_signal = _contrast_consistency(frame_analyses)
+        if contrast_signal:
+            signals.append(contrast_signal)
 
-    # Blur pattern
-    blur_signal = _blur_pattern(frame_analyses)
-    if blur_signal:
-        signals.append(blur_signal)
+        # Blur pattern
+        blur_signal = _blur_pattern(frame_analyses)
+        if blur_signal:
+            signals.append(blur_signal)
 
-    # Edge density changes
-    edge_signal = _edge_density_changes(frame_analyses)
-    if edge_signal:
-        signals.append(edge_signal)
+        # Edge density changes
+        edge_signal = _edge_density_changes(frame_analyses)
+        if edge_signal:
+            signals.append(edge_signal)
 
     # Frame rate analysis
     fps_signal = _fps_analysis(fps, duration)
@@ -251,6 +257,35 @@ def _calculate_edge_density(gray) -> float:
     return float(np.mean(edges)) / 255.0
 
 
+def _is_static_footage(frames: list[FrameAnalysis]) -> bool:
+    """Detect effectively frozen footage where stability signals carry no
+    information (screen recordings, locked-off tripods)."""
+    if len(frames) < 10:
+        return False
+
+    def max_step(values: list[float]) -> float:
+        return max((abs(values[i] - values[i - 1]) for i in range(1, len(values))), default=0.0)
+
+    def spread(values: list[float]) -> float:
+        mean = sum(values) / len(values)
+        return max(abs(value - mean) for value in values)
+
+    brightnesses = [f.brightness for f in frames]
+    contrasts = [f.contrast for f in frames]
+    blurs = [f.blur_score for f in frames]
+    edges = [f.edge_density for f in frames]
+
+    frozen = (
+        max_step(brightnesses) < 3.0
+        and spread(brightnesses) < 3.0
+        and max_step(contrasts) < 3.0
+        and spread(contrasts) < 3.0
+        and max_step(blurs) < 25.0
+        and max_step(edges) < 0.01
+    )
+    return frozen
+
+
 def _brightness_consistency(frames: list[FrameAnalysis]) -> VideoEvidenceSignal | None:
     """Check for brightness inconsistencies across frames."""
     if len(frames) < 5:
@@ -268,9 +303,12 @@ def _brightness_consistency(frames: list[FrameAnalysis]) -> VideoEvidenceSignal 
             18,
         )
 
-    # Sudden brightness changes
+    # Sudden brightness changes: a single isolated cut inside otherwise
+    # stable footage is the suspicious case. Regular editing (multiple cuts)
+    # is normal in real footage and must not fire.
     max_change = max(abs(brightnesses[i] - brightnesses[i-1]) for i in range(1, len(brightnesses)))
-    if max_change > 50:
+    large_changes = sum(1 for i in range(1, len(brightnesses)) if abs(brightnesses[i] - brightnesses[i-1]) > 50)
+    if max_change > 50 and large_changes == 1:
         return VideoEvidenceSignal(
             "급격한 밝기 변화",
             f"최대 프레임 간 밝기 변화({max_change:.1f})가 큽니다.",
@@ -355,7 +393,7 @@ def _fps_analysis(fps: float, duration: float) -> VideoEvidenceSignal | None:
     common_fps = [23.976, 24, 25, 29.97, 30, 50, 59.94, 60]
     if fps > 0:
         min_diff = min(abs(fps - cfps) for cfps in common_fps)
-        if min_diff > 1.0 and fps not in [0, -1]:
+        if min_diff > 1.0:
             return VideoEvidenceSignal(
                 "비표준 프레임 레이트",
                 f"프레임 레이트({fps:.3f}fps)가 일반적이지 않습니다.",

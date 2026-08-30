@@ -40,11 +40,16 @@ def evaluate_dataset(
         )
         if item.result and fusion_profile:
             item = replace(item, result=apply_fusion_to_result(item.result, fusion_profile))
+        analyzed = item.result is not None
+        # Unanalyzed files (corrupt, unsupported, failed decode) have no
+        # score; counting them as score-0 "real" inflates negative-class
+        # metrics, so they are reported separately instead.
         score = item.result.score if item.result else 0
         positive = is_positive_label(record.label)
-        predicted_positive = score >= threshold
-        score_pairs.append((score, positive))
-        source_scores.setdefault(record.source, []).append((score, positive))
+        predicted_positive = analyzed and score >= threshold
+        if analyzed:
+            score_pairs.append((score, positive))
+            source_scores.setdefault(record.source, []).append((score, positive))
         rows.append(
             {
                 "path": item.path,
@@ -52,7 +57,7 @@ def evaluate_dataset(
                 "source": record.source,
                 "split": record.split,
                 "score": score,
-                "predicted": "ai" if predicted_positive else "real",
+                "predicted": ("ai" if predicted_positive else "real") if analyzed else "unavailable",
                 "correct": predicted_positive == positive,
                 "mask_path": record.mask_path,
                 "source_guess": item.result.source_guess.label if item.result else "",
@@ -75,6 +80,8 @@ def evaluate_dataset(
         }
         for source, pairs in source_scores.items()
     }
+    per_split = _per_split_metrics(rows, threshold)
+    unanalyzed_count = sum(1 for row in rows if row.get("predicted") == "unavailable")
     return {
         "dataset": dataset_summary.to_json(),
         "threshold": threshold,
@@ -83,7 +90,35 @@ def evaluate_dataset(
         "case_summary": case_summary,
         "source_attribution": _source_attribution(rows),
         "per_source": per_source,
+        "per_split": per_split,
+        "unanalyzed_count": unanalyzed_count,
         "items": rows,
+    }
+
+
+def _per_split_metrics(rows: list[dict[str, object]], threshold: int) -> dict[str, object]:
+    """Report metrics per declared split so in-sample vs holdout is visible.
+
+    Datasets without explicit splits get no breakdown instead of a single
+    misleading bucket.
+    """
+    split_pairs: dict[str, list[tuple[int, bool]]] = {}
+    for row in rows:
+        if row.get("predicted") == "unavailable":
+            continue
+        split = str(row.get("split", "unspecified"))
+        if split == "unspecified":
+            continue
+        label = str(row.get("label", "unknown"))
+        if not (is_positive_label(label) or is_negative_label(label)):
+            continue
+        split_pairs.setdefault(split, []).append((int(row.get("score", 0) or 0), is_positive_label(label)))
+    return {
+        split: {
+            **binary_metrics(pairs, threshold),
+            **({"auroc": value} if (value := auroc(pairs)) is not None else {}),
+        }
+        for split, pairs in sorted(split_pairs.items())
     }
 
 
@@ -95,9 +130,13 @@ def calibrate_dataset(
     target_false_positive_rate: float = 0.05,
     max_files: int | None = None,
 ) -> dict[str, object]:
-    score_pairs = _score_dataset(root, pixel_mode=pixel_mode, pixel_max_side=pixel_max_side, max_files=max_files)
+    score_pairs, calibration_scope = _score_dataset(
+        root, pixel_mode=pixel_mode, pixel_max_side=pixel_max_side, max_files=max_files
+    )
     profile = calibrate_threshold(score_pairs, target_false_positive_rate=target_false_positive_rate)
-    return profile.to_json()
+    payload = profile.to_json()
+    payload["calibration_scope"] = calibration_scope
+    return payload
 
 
 def train_portable_baseline(
@@ -181,16 +220,44 @@ def write_json_report(path: Path | str, payload: dict[str, object]) -> None:
     output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _score_dataset(root: Path | str, *, pixel_mode: str, pixel_max_side: int, max_files: int | None) -> list[tuple[int, bool]]:
+def _score_dataset(
+    root: Path | str, *, pixel_mode: str, pixel_max_side: int, max_files: int | None
+) -> tuple[list[tuple[int, bool]], dict[str, object]]:
+    """Score a labeled dataset for threshold fitting.
+
+    When the dataset declares explicit splits, only train-split records are
+    used; fitting on the same records that evaluation later scores is
+    train/test leakage. Datasets without any split information keep the
+    previous behavior and say so.
+    """
     root_path = Path(root)
     _, records = discover_dataset(root_path, max_files=max_files)
-    scores = []
-    for record in records:
-        if not (is_positive_label(record.label) or is_negative_label(record.label)):
-            continue
+    labeled = [record for record in records if is_positive_label(record.label) or is_negative_label(record.label)]
+    train_records = [record for record in labeled if record.split == "train"]
+    if any(record.split == "train" for record in labeled):
+        used_records = train_records
+        scope: dict[str, object] = {
+            "records_used": len(used_records),
+            "records_total": len(labeled),
+            "policy": "train-split-only",
+        }
+    else:
+        used_records = labeled
+        scope = {
+            "records_used": len(used_records),
+            "records_total": len(labeled),
+            "policy": "all-records (no explicit splits found; metrics are in-sample)",
+        }
+    scores: list[tuple[int, bool]] = []
+    unanalyzed = 0
+    for record in used_records:
         item = analyze_file(Path(record.path), root=root_path, pixel_mode=pixel_mode, pixel_max_side=pixel_max_side)
-        scores.append((item.result.score if item.result else 0, is_positive_label(record.label)))
-    return scores
+        if item.result is None:
+            unanalyzed += 1
+            continue
+        scores.append((item.result.score, is_positive_label(record.label)))
+    scope["unanalyzed_excluded"] = unanalyzed
+    return scores, scope
 
 
 def _threshold(*, calibration_path: Path | None, model_path: Path | None) -> int:
@@ -206,6 +273,8 @@ def _threshold(*, calibration_path: Path | None, model_path: Path | None) -> int
 def _confusion(rows: list[dict[str, object]]) -> dict[str, int]:
     confusion = {"true_positive": 0, "false_positive": 0, "true_negative": 0, "false_negative": 0}
     for row in rows:
+        if row.get("predicted") == "unavailable":
+            continue
         label = str(row.get("label", "unknown"))
         predicted = str(row.get("predicted", "unknown"))
         if is_positive_label(label) and predicted == "ai":
@@ -220,8 +289,9 @@ def _confusion(rows: list[dict[str, object]]) -> dict[str, int]:
 
 
 def _case_summary(rows: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:
-    false_positives = [row for row in rows if is_negative_label(str(row.get("label", ""))) and row.get("predicted") == "ai"]
-    false_negatives = [row for row in rows if is_positive_label(str(row.get("label", ""))) and row.get("predicted") != "ai"]
+    scored_rows = [row for row in rows if row.get("predicted") != "unavailable"]
+    false_positives = [row for row in scored_rows if is_negative_label(str(row.get("label", ""))) and row.get("predicted") == "ai"]
+    false_negatives = [row for row in scored_rows if is_positive_label(str(row.get("label", ""))) and row.get("predicted") != "ai"]
     return {
         "false_positives": sorted(false_positives, key=lambda row: int(row.get("score", 0) or 0), reverse=True),
         "false_negatives": sorted(false_negatives, key=lambda row: int(row.get("score", 0) or 0)),

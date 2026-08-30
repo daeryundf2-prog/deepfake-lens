@@ -7,13 +7,20 @@ from pathlib import Path
 
 from deepfake_lens.face import (
     FaceAnalysis,
-    FaceRegion,
     analyze_faces,
-    _landmark_consistency,
-    _symmetry_analysis,
     _classify_manipulation_type,
     _calculate_confidence,
+    _estimate_landmarks,
 )
+
+
+def _has_cv2() -> bool:
+    try:
+        import cv2  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
 
 
 class FaceAnalysisTest(unittest.TestCase):
@@ -51,58 +58,41 @@ class FaceAnalysisTest(unittest.TestCase):
         self.assertIn("face_count", data)
         self.assertIn("manipulation_type", data)
 
-    def test_landmark_consistency_asymmetric(self) -> None:
-        """Asymmetric landmarks should generate signal."""
-        face = FaceRegion(
-            x=100, y=100, width=200, height=200,
-            landmarks=[(130, 135), (170, 135), (185, 165), (150, 190)],  # Nose far right
-            confidence=0.9,
-        )
-        signal = _landmark_consistency(face)
-        self.assertIsNotNone(signal)
-        self.assertIn("랜드마크", signal.title)
+    def test_dead_geometry_checks_are_gone(self) -> None:
+        """Landmark-derived checks were provably dead code (synthesized
+        landmarks made every relation a constant) and must not return."""
+        import deepfake_lens.face as face_module
 
-    def test_landmark_consistency_normal(self) -> None:
-        """Normal landmarks should not generate signal."""
-        face = FaceRegion(
-            x=100, y=100, width=200, height=200,
-            landmarks=[(130, 135), (170, 135), (150, 165), (150, 190)],  # Centered, good distance
-            confidence=0.9,
-        )
-        signal = _landmark_consistency(face)
-        self.assertIsNone(signal)
+        self.assertFalse(hasattr(face_module, "_landmark_consistency"))
+        self.assertFalse(hasattr(face_module, "_symmetry_analysis"))
 
-    def test_symmetry_analysis_asymmetric(self) -> None:
-        """Asymmetric eyes should generate signal."""
-        face = FaceRegion(
-            x=100, y=100, width=200, height=200,
-            landmarks=[(110, 135), (180, 135)],  # Very asymmetric
-            confidence=0.9,
-        )
-        signal = _symmetry_analysis(face)
-        self.assertIsNotNone(signal)
-        self.assertIn("대칭", signal.title)
+    @unittest.skipUnless(_has_cv2(), "opencv not installed")
+    def test_circular_hue_same_red_family_does_not_fire(self) -> None:
+        """Face hue 5 vs surround hue 175 is the same red family on the
+        OpenCV hue circle and must not read as a 170-unit mismatch."""
+        import cv2
+        import numpy as np
 
-    def test_symmetry_analysis_symmetric(self) -> None:
-        """Symmetric eyes should not generate signal."""
-        face = FaceRegion(
-            x=100, y=100, width=200, height=200,
-            landmarks=[(145, 135), (155, 135)],  # Symmetric
-            confidence=0.9,
-        )
-        signal = _symmetry_analysis(face)
-        self.assertIsNone(signal)
+        from deepfake_lens.face import FaceRegion, _color_temperature
+
+        image = np.zeros((120, 120, 3), dtype=np.uint8)
+        image[:, :, 2] = 200  # reddish background (BGR)
+        face = FaceRegion(x=10, y=10, width=60, height=60, landmarks=[], confidence=0.9)
+        result = _color_temperature(face, image)
+        self.assertIsNone(result)
 
     def test_classify_manipulation_type_swap(self) -> None:
-        """Landmark signals should classify as face_swap."""
+        """Boundary blending signals should classify as face_swap."""
         from deepfake_lens.face import FaceEvidenceSignal
-        signals = [FaceEvidenceSignal("랜드마크 비대칭", "test", 20)]
+
+        signals = [FaceEvidenceSignal("경계 블렌딩 의심", "test", 18)]
         result = _classify_manipulation_type(signals)
         self.assertEqual(result, "face_swap")
 
     def test_classify_manipulation_type_reenactment(self) -> None:
         """Reflection signals should classify as reenactment."""
         from deepfake_lens.face import FaceEvidenceSignal
+
         signals = [FaceEvidenceSignal("반사 패턴 불일치", "test", 15)]
         result = _classify_manipulation_type(signals)
         self.assertEqual(result, "reenactment")
@@ -126,6 +116,12 @@ class FaceAnalysisTest(unittest.TestCase):
         """Low score should be low confidence."""
         result = _calculate_confidence(20, 1, 0)
         self.assertEqual(result, "low")
+
+    def test_assumed_landmarks_are_box_constants(self) -> None:
+        """The assumed eye/nose/mouth anchors are fixed box fractions; they
+        anchor eye-region sampling only and imply nothing about geometry."""
+        landmarks = _estimate_landmarks(100, 100, 200, 200)
+        self.assertEqual(landmarks, [(170, 170), (230, 170), (200, 210), (200, 250)])
 
 
 if __name__ == "__main__":

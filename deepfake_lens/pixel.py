@@ -151,9 +151,9 @@ def _load_raster(path: Path, *, max_side: int) -> tuple[PixelRaster | None, list
         return None, [f"이미지 픽셀을 읽지 못했습니다: {exc}"]
 
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        raster, limitation = _load_png_raster(data)
+        raster, limitation = _load_png_raster(data, max_side=max_side)
         if raster:
-            return _downsample_raster(raster, max_side), []
+            return raster, []
         return None, [limitation or "지원하지 않는 PNG 픽셀 형식입니다."]
 
     pillow_raster, pillow_limitations = _load_with_optional_pillow(path, max_side=max_side)
@@ -177,7 +177,7 @@ def _load_with_optional_pillow(path: Path, *, max_side: int) -> tuple[PixelRaste
         return None, [f"Pillow로 이미지 픽셀을 읽지 못했습니다: {exc}"]
 
 
-def _load_png_raster(data: bytes) -> tuple[PixelRaster | None, str | None]:
+def _load_png_raster(data: bytes, *, max_side: int) -> tuple[PixelRaster | None, str | None]:
     if len(data) < 33:
         return None, "PNG 파일이 너무 짧습니다."
 
@@ -223,10 +223,20 @@ def _load_png_raster(data: bytes) -> tuple[PixelRaster | None, str | None]:
     if len(raw) != expected or not decompressor.eof:
         return None, "PNG 픽셀 데이터 크기가 예상과 다릅니다."
 
-    rows: list[bytearray] = []
+    # Sample rows/pixels while decoding so memory stays proportional to the
+    # output raster instead of the full image (a full-resolution tuple raster
+    # of a max-size PNG can approach the gigabyte range).
+    step = 1
+    if max(width, height) > max_side:
+        step = int(math.ceil(max(width, height) / max_side))
+    out_width = max(1, width // step)
+    out_height = max(1, height // step)
+    kept_rows = {min(height - 1, y * step) for y in range(out_height)}
+
+    pixels: list[tuple[int, int, int]] = []
     cursor = 0
     previous = bytearray(row_bytes)
-    for _ in range(height):
+    for row_index in range(height):
         filter_type = raw[cursor]
         cursor += 1
         scanline = bytearray(raw[cursor : cursor + row_bytes])
@@ -243,23 +253,17 @@ def _load_png_raster(data: bytes) -> tuple[PixelRaster | None, str | None]:
             reconstructed = _unfilter_paeth(scanline, previous, channels)
         else:
             return None, "지원하지 않는 PNG 필터입니다."
-        rows.append(reconstructed)
+        if row_index in kept_rows:
+            for source_x in (min(width - 1, x * step) for x in range(out_width)):
+                index = source_x * channels
+                if color_type in {0, 4}:
+                    value = reconstructed[index]
+                    pixels.append((value, value, value))
+                else:
+                    pixels.append((reconstructed[index], reconstructed[index + 1], reconstructed[index + 2]))
         previous = reconstructed
 
-    pixels: list[tuple[int, int, int]] = []
-    for row in rows:
-        for index in range(0, row_bytes, channels):
-            if color_type == 0:
-                value = row[index]
-                pixels.append((value, value, value))
-            elif color_type == 2:
-                pixels.append((row[index], row[index + 1], row[index + 2]))
-            elif color_type == 4:
-                value = row[index]
-                pixels.append((value, value, value))
-            else:
-                pixels.append((row[index], row[index + 1], row[index + 2]))
-    return PixelRaster(width, height, tuple(pixels), "png"), None
+    return PixelRaster(out_width, out_height, tuple(pixels), "png" if step == 1 else "png-sampled"), None
 
 
 def _unfilter_sub(scanline: bytearray, bpp: int) -> bytearray:
@@ -300,22 +304,6 @@ def _paeth(left: int, up: int, up_left: int) -> int:
     if up_distance <= up_left_distance:
         return up
     return up_left
-
-
-def _downsample_raster(raster: PixelRaster, max_side: int) -> PixelRaster:
-    if max(raster.width, raster.height) <= max_side:
-        return raster
-    step = int(math.ceil(max(raster.width, raster.height) / max_side))
-    width = max(1, raster.width // step)
-    height = max(1, raster.height // step)
-    pixels = []
-    for y in range(height):
-        source_y = min(raster.height - 1, y * step)
-        row_start = source_y * raster.width
-        for x in range(width):
-            source_x = min(raster.width - 1, x * step)
-            pixels.append(raster.pixels[row_start + source_x])
-    return PixelRaster(width, height, tuple(pixels), f"{raster.source}-sampled")
 
 
 def _luminance_values(raster: PixelRaster) -> list[float]:

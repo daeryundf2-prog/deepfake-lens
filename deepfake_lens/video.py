@@ -88,6 +88,17 @@ def extract_video_frames(plan: dict[str, object], *, limit: int | None = None) -
         frame_dir = Path(str(item.get("frame_dir", "")))
         if not command:
             continue
+        # The plan is a JSON file, so only ffmpeg may be invoked regardless of
+        # what a tampered plan claims as the executable.
+        if Path(command[0]).name.lower() not in {"ffmpeg", "ffmpeg.exe"}:
+            results.append(
+                {
+                    "path": item.get("path", ""),
+                    "returncode": -1,
+                    "stderr": "rejected: only ffmpeg commands are allowed",
+                }
+            )
+            continue
         frame_dir.mkdir(parents=True, exist_ok=True)
         completed = subprocess.run(command, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         results.append(
