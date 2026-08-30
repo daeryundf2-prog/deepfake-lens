@@ -1030,11 +1030,3 @@ def _parse_csv(value: str) -> list[str]:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-# Test tracker command (simplified)
-if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "test-tracker":
-        from .test_tracker import TestTracker
-        tracker = TestTracker(results_path=Path("test_results.json"))
-        stats = tracker.get_statistics()
-        print(json.dumps(stats, ensure_ascii=False, indent=2))

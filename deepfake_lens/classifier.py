@@ -8,7 +8,6 @@ and learned patterns.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from dataclasses import asdict, dataclass
 
 
 @dataclass(frozen=True)
