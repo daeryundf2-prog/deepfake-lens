@@ -58,8 +58,15 @@ def calibrate_threshold(scores: list[tuple[int, bool]], *, target_false_positive
             best_recall = recall
             best_metrics = metrics
     if not best_metrics:
-        best_threshold = 101
+        # No threshold satisfies the target FPR. Save the most conservative
+        # in-domain threshold (100) and record the shortfall explicitly; a
+        # former fallback of 101 was out of the score domain and silently
+        # disabled detection while looking like a normal profile.
+        best_threshold = 100
         best_metrics = binary_metrics(scores, best_threshold)
+        best_metrics["target_fpr_met"] = 0
+    else:
+        best_metrics["target_fpr_met"] = 1
     return CalibrationProfile("calibration-v1", best_threshold, target_false_positive_rate, best_metrics)
 
 
