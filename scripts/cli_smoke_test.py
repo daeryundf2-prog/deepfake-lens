@@ -76,7 +76,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="deepfake-lens-smoke-") as tmp:
         out_dir = Path(tmp)
         for raw_args, expected in checks:
-            args = [str(out_dir) if arg == "@OUT@" else arg for arg in raw_args]
+            args = [arg.replace("@OUT@", str(out_dir)) for arg in raw_args]
             proc = run_cli(args, cwd=REPO_ROOT)
             if proc.returncode != expected:
                 label = " ".join(Path(arg).name if arg.startswith("/") else arg for arg in args)
