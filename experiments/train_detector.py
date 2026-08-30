@@ -6,8 +6,6 @@ import random
 import sys
 from pathlib import Path
 
-import numpy as np
-
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
@@ -180,6 +178,8 @@ class _ManifestImageDataset:
         return len(self.records)
 
     def _load_array(self, record: dict[str, object]):
+        import numpy as np
+
         image = self.image_module.open(record["path"]).convert("RGB")
         return np.asarray(image, dtype=np.float64)
 
@@ -198,6 +198,7 @@ class _SbiImageDataset(_ManifestImageDataset):
         return len(self.records) * 2
 
     def __getitem__(self, index: int):
+        import numpy as np
         import sbi as sbi_module
 
         record = self.records[index // 2]

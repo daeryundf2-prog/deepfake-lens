@@ -5,6 +5,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.FloatBuffer
 
+private fun toArray(buffer: FloatBuffer): FloatArray {
+    val values = FloatArray(buffer.limit())
+    buffer.get(values)
+    return values
+}
+
 class OnnxPreprocessingTest {
     private fun argb(r: Int, g: Int, b: Int): Int = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
 
@@ -12,7 +18,7 @@ class OnnxPreprocessingTest {
     fun `white image normalizes to imagenet-standard values`() {
         val size = 4
         val pixels = IntArray(size * size) { argb(255, 255, 255) }
-        val values = OnnxPreprocessing.preprocessArgb(pixels, size, size).toArray()
+        val values = toArray(OnnxPreprocessing.preprocessArgb(pixels, size, size))
         assertEquals(3 * size * size, values.size)
         assertEquals((1f - 0.485f) / 0.229f, values[0], 1e-5f)
         assertEquals((1f - 0.456f) / 0.224f, values[size * size], 1e-5f)
@@ -23,7 +29,7 @@ class OnnxPreprocessingTest {
     fun `black image normalizes to negative mean over std`() {
         val size = 2
         val pixels = IntArray(size * size) { argb(0, 0, 0) }
-        val values = OnnxPreprocessing.preprocessArgb(pixels, size, size).toArray()
+        val values = toArray(OnnxPreprocessing.preprocessArgb(pixels, size, size))
         assertEquals((0f - 0.485f) / 0.229f, values[0], 1e-5f)
     }
 
@@ -32,7 +38,7 @@ class OnnxPreprocessingTest {
         // Only the first pixel carries red; the planes must not bleed.
         val size = 2
         val pixels = IntArray(size * size) { argb(0, 0, 0) }.also { it[0] = argb(255, 0, 0) }
-        val values = OnnxPreprocessing.preprocessArgb(pixels, size, size).toArray()
+        val values = toArray(OnnxPreprocessing.preprocessArgb(pixels, size, size))
         assertEquals((1f - 0.485f) / 0.229f, values[0], 1e-5f)              // R plane, pixel (0,0)
         assertEquals((0f - 0.485f) / 0.229f, values[1], 1e-5f)              // R plane, pixel (1,0) is black
         assertEquals((0f - 0.456f) / 0.224f, values[size * size], 1e-5f)    // G plane, pixel (0,0) is black
@@ -47,7 +53,7 @@ class OnnxPreprocessingTest {
             argb(10, 20, 30), argb(40, 50, 60),
             argb(70, 80, 90), argb(100, 110, 120)
         )
-        val values = OnnxPreprocessing.preprocessArgb(pixels, size, size).toArray()
+        val values = toArray(OnnxPreprocessing.preprocessArgb(pixels, size, size))
         fun expected(channelValue: Int, channel: Int) =
             (channelValue / 255f - OnnxPreprocessing.MEAN[channel]) / OnnxPreprocessing.STD[channel]
         // NCHW: plane stride = size*size, within a plane row-major over (dy, dx).

@@ -13,7 +13,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT / "experiments"))
 
-import sbi  # noqa: E402
+# sbi (and numpy) are optional: the stdlib-only CI environment must still
+# collect this module, so the import is guarded and the dependent tests
+# skip when it is unavailable.
+try:
+    import sbi  # noqa: E402
+except ImportError:
+    sbi = None
+
 from deepfake_lens.audio import AudioFeatures, _regularity_analysis, _relative_successive_variation  # noqa: E402
 from deepfake_lens.prnu import (  # noqa: E402
     analyze_prnu,
@@ -48,7 +55,7 @@ def _write_gray_png(path: Path, image) -> None:
 
 
 class SbiDistortionTest(unittest.TestCase):
-    @unittest.skipUnless(_has_numpy(), "numpy not installed")
+    @unittest.skipUnless(sbi is not None, "sbi/numpy not available")
     def test_resize_bilinear_interpolates_linear_ramp(self) -> None:
         import numpy as np
 
@@ -56,7 +63,7 @@ class SbiDistortionTest(unittest.TestCase):
         out = sbi.resize_bilinear(ramp, 1, 3)
         self.assertTrue(np.allclose(out, [[0.0, 0.5, 1.0]]))
 
-    @unittest.skipUnless(_has_numpy(), "numpy not installed")
+    @unittest.skipUnless(sbi is not None, "sbi/numpy not available")
     def test_jpeg_simulation_quality_ordering(self) -> None:
         import numpy as np
 
