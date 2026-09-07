@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -49,20 +50,32 @@ def check(url: str) -> tuple[bool, str]:
         try:
             with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
                 code = getattr(response, "status", 200)
-                if code in (403, 429):
-                    # Bot protection: the host exists but refuses automated
-                    # clients. Treat as reachable, surface as a warning.
-                    return True, f"HTTP {code} (bot-blocked)"
-                if code in RETRYABLE_STATUS and attempt < RETRIES:
-                    last_error = f"HTTP {code} (transient, retrying)"
-                    time.sleep(2 * (attempt + 1))
-                    continue
-                return (code < 400), f"HTTP {code}"
+                return _status_result(code)
+        except urllib.error.HTTPError as exc:
+            # urlopen raises HTTPError for >= 400 instead of returning a
+            # response, so bot-block detection (403/429) must also live
+            # here — CI runners get 403 from hosts that serve 200 locally.
+            code = int(exc.code)
+            if code in (403, 429):
+                # Bot protection: the host exists but refuses automated
+                # clients. Treat as reachable, surface as a warning.
+                return True, f"HTTP {code} (bot-blocked)"
+            if code in RETRYABLE_STATUS and attempt < RETRIES:
+                last_error = f"HTTP {code} (transient, retrying)"
+                time.sleep(2 * (attempt + 1))
+                continue
+            return False, f"HTTP {code}"
         except Exception as exc:  # noqa: BLE001 - report any network failure
             last_error = f"{type(exc).__name__}: {exc}"
             if attempt < RETRIES:
                 time.sleep(2 * (attempt + 1))
     return False, last_error
+
+
+def _status_result(code: int) -> tuple[bool, str]:
+    if code in (403, 429):
+        return True, f"HTTP {code} (bot-blocked)"
+    return (code < 400), f"HTTP {code}"
 
 
 def main() -> int:
