@@ -23,6 +23,10 @@ python -m deepfake_lens --help
 python -m deepfake_lens models --focus benchmark
 python -m deepfake_lens fusion fixtures/deepfake-lens-sample --pixel off --out /tmp/deepfake-lens-fusion.json
 python -m deepfake_lens perf fixtures/deepfake-lens-sample --out /tmp/deepfake-lens-perf.json
+python scripts/build_c2pa_fixture.py --force   # needs c2pa-python + openssl
+python scripts/build_synthetic_dataset.py --out /tmp/dfl-smoke-dataset --per-split 6
+python scripts/build_robustness_variants.py --root /tmp/dfl-smoke-dataset --out /tmp/dfl-smoke-variants
+python -m deepfake_lens eval /tmp/dfl-smoke-variants --pixel deep --robustness --json-out /tmp/dfl-smoke-robustness.json
 ./gradlew :deepfakeclassifier:testDebugUnitTest
 ```
 

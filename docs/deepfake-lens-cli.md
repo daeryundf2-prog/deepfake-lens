@@ -181,7 +181,18 @@ python -m deepfake_lens benchmark data/raw --pixel-modes off,fast,deep --fusion-
 python -m deepfake_lens perf data/raw --pixel deep --workers 4 --cache artifacts/scan-cache.json --hash-db artifacts/hash-db.json --out artifacts/perf.json
 ```
 
-The robustness plan is a no-dependency manifest of variants to generate externally: JPEG quality changes, resizing, crops, light blur, screenshots, and social-media recompression. Put generated variants under folders named by transform and run `eval --robustness`.
+The robustness plan is a manifest of variants to generate. `scripts/build_robustness_variants.py`
+generates them locally (requires numpy + Pillow; reuses the pure-numpy bilinear
+resize from `experiments/sbi.py`): JPEG quality changes, resizing, crops,
+light blur, screenshots, and social-media recompression. Variants land under
+folders named by transform and `eval --robustness` reports per-transform
+metrics against the same threshold:
+
+```sh
+python -m deepfake_lens dataset data/raw --robustness-out artifacts/robustness-plan.json
+python scripts/build_robustness_variants.py --root data/raw --out data/robust
+python -m deepfake_lens eval data/robust --pixel deep --robustness --json-out artifacts/robustness-eval.json
+```
 
 For command smoke checks without a real benchmark, use the tiny layout fixture:
 
@@ -189,6 +200,15 @@ For command smoke checks without a real benchmark, use the tiny layout fixture:
 python -m deepfake_lens dataset fixtures/deepfake-lens-sample --manifest-out /tmp/dfl-manifest.json --audit-out /tmp/dfl-audit.json --split-out /tmp/dfl-split.json
 python -m deepfake_lens eval fixtures/deepfake-lens-sample --pixel off --json-out /tmp/dfl-eval.json
 python -m deepfake_lens perf fixtures/deepfake-lens-sample --out /tmp/dfl-perf.json
+```
+
+For an end-to-end smoke of the robustness loop, use the synthetic dataset
+builder (requires numpy + Pillow):
+
+```sh
+python scripts/build_synthetic_dataset.py --out /tmp/dfl-smoke-dataset --per-split 6
+python scripts/build_robustness_variants.py --root /tmp/dfl-smoke-dataset --out /tmp/dfl-smoke-variants
+python -m deepfake_lens eval /tmp/dfl-smoke-variants --pixel deep --robustness --json-out /tmp/dfl-smoke-robustness.json
 ```
 
 ## Model Registry
