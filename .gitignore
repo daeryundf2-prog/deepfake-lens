@@ -13,6 +13,9 @@ build/
 *.jpg
 *.jpeg
 *.webp
+# Committed test fixtures (the C2PA fixture is required by test_c2pa.py and
+# is reproducible via scripts/build_c2pa_fixture.py)
+!fixtures/**/*.png
 training_data/
 test_datasets/
 public_datasets/
