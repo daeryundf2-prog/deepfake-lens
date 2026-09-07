@@ -33,7 +33,7 @@ Relevant sources:
 - Android `ImageDecoder`: https://developer.android.com/reference/android/graphics/ImageDecoder
 - AndroidX `ExifInterface`: https://developer.android.com/reference/androidx/exifinterface/media/ExifInterface
 - W3C PNG spec: https://www.w3.org/TR/REC-png.pdf
-- ComfyUI workflow metadata: https://docs.comfy.org/development/core-concepts/workflow
+- ComfyUI workflow metadata: https://docs.comfy.org/basic-concepts/workflow
 
 Implementation implication:
 - Decode image content URIs on a worker thread.

@@ -29,6 +29,12 @@ def main(argv: list[str] | None = None) -> int:
     if not args.checkpoint.exists():
         print(f"error: checkpoint not found: {args.checkpoint}", file=sys.stderr)
         return 2
+    try:
+        import onnx  # noqa: F401 - torch's ONNX exporter requires it
+    except ImportError:
+        print("error: optional export dependency missing: onnx", file=sys.stderr)
+        print("Install onnx (pip install onnx); torch's ONNX exporter fails without it.", file=sys.stderr)
+        return 2
 
     image_size = _resolve_image_size(parser, args.checkpoint, args.image_size)
 

@@ -25,6 +25,8 @@ URL_PATTERN = re.compile(r"https?://[^\s\"'\\)\]>]+")
 USER_AGENT = {"User-Agent": "deepfake-lens-link-check/1.0 (+https://github.com/daeryundf2-prog/deepfake-lens)"}
 TIMEOUT_SECONDS = 20
 RETRIES = 2
+# Transient server-side failures worth retrying before declaring a URL dead.
+RETRYABLE_STATUS = {408, 500, 502, 503, 504}
 
 
 def extract_urls() -> list[tuple[str, str]]:
@@ -51,6 +53,10 @@ def check(url: str) -> tuple[bool, str]:
                     # Bot protection: the host exists but refuses automated
                     # clients. Treat as reachable, surface as a warning.
                     return True, f"HTTP {code} (bot-blocked)"
+                if code in RETRYABLE_STATUS and attempt < RETRIES:
+                    last_error = f"HTTP {code} (transient, retrying)"
+                    time.sleep(2 * (attempt + 1))
+                    continue
                 return (code < 400), f"HTTP {code}"
         except Exception as exc:  # noqa: BLE001 - report any network failure
             last_error = f"{type(exc).__name__}: {exc}"

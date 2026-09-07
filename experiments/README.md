@@ -8,6 +8,8 @@ Expected optional dependencies for real training:
 - `torch`
 - `torchvision`
 - `Pillow`
+- `onnx` (required by `export_onnx.py`; the torch ONNX exporter fails
+  without it, which is easy to miss because torch itself imports fine)
 
 Recommended flow:
 
