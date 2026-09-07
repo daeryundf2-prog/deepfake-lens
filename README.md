@@ -33,3 +33,7 @@ python -m deepfake_lens eval /tmp/dfl-smoke-variants --pixel deep --robustness -
 ## Scope
 
 This repository is independent from YH Mobile Trace. It does not contain mobile forensic acquisition code, evidence-chain schemas, or Android/iOS device collection routes.
+
+## Roadmap
+
+Completed steps, pending work, and the blocked-on-token-scope CI patch are tracked in [docs/ROADMAP.md](docs/ROADMAP.md).

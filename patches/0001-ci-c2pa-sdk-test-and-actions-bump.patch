@@ -1,0 +1,58 @@
+diff --git a/.github/workflows/deepfake-lens.yml b/.github/workflows/deepfake-lens.yml
+index e541757..98d97d6 100644
+--- a/.github/workflows/deepfake-lens.yml
++++ b/.github/workflows/deepfake-lens.yml
+@@ -17,8 +17,8 @@ jobs:
+       matrix:
+         python-version: ["3.11", "3.12"]
+     steps:
+-      - uses: actions/checkout@v4
+-      - uses: actions/setup-python@v5
++      - uses: actions/checkout@v5
++      - uses: actions/setup-python@v6
+         with:
+           python-version: ${{ matrix.python-version }}
+       - name: Install package (stdlib-only, no optional extras)
+@@ -35,8 +35,8 @@ jobs:
+   python-extras:
+     runs-on: ubuntu-latest
+     steps:
+-      - uses: actions/checkout@v4
+-      - uses: actions/setup-python@v5
++      - uses: actions/checkout@v5
++      - uses: actions/setup-python@v6
+         with:
+           python-version: "3.12"
+       - name: Install with optional extras
+@@ -45,12 +45,18 @@ jobs:
+           python -m pip install -e . numpy scipy opencv-python-headless librosa soundfile scikit-learn
+       - name: Unit tests (optional-dependency paths enabled)
+         run: python -m unittest discover deepfake_lens/tests -v
++      # The C2PA SDK gates three tests in test_c2pa.py; with the fixture now
++      # committed, install the provenance extra so those run in CI too.
++      - name: Install provenance extra (c2pa-python)
++        run: python -m pip install -e '.[provenance]'
++      - name: C2PA SDK validation tests
++        run: python -m unittest deepfake_lens.tests.test_c2pa -v
+ 
+   android:
+     runs-on: ubuntu-latest
+     steps:
+-      - uses: actions/checkout@v4
+-      - uses: actions/setup-java@v4
++      - uses: actions/checkout@v5
++      - uses: actions/setup-java@v5
+         with:
+           distribution: temurin
+           java-version: "17"
+@@ -61,8 +67,8 @@ jobs:
+     runs-on: ubuntu-latest
+     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+     steps:
+-      - uses: actions/checkout@v4
+-      - uses: actions/setup-python@v5
++      - uses: actions/checkout@v5
++      - uses: actions/setup-python@v6
+         with:
+           python-version: "3.12"
+       - name: Verify cited URLs
