@@ -224,11 +224,20 @@ def is_negative_label(label: str) -> bool:
 
 def _label_for(path: Path, root: Path) -> str:
     parts = [part.lower() for part in _relative_parts(path, root)]
-    if any(part in POSITIVE_LABELS for part in parts):
-        return "edited" if "edited" in parts else "ai"
-    if any(part in NEGATIVE_LABELS for part in parts):
+    if any(part in POSITIVE_LABELS or _strip_class_prefix(part) in POSITIVE_LABELS for part in parts):
+        return "edited" if "edited" in parts or _strip_class_prefix("edited") in [_strip_class_prefix(p) for p in parts] else "ai"
+    if any(part in NEGATIVE_LABELS or _strip_class_prefix(part) in NEGATIVE_LABELS for part in parts):
         return "real"
     return "unknown"
+
+
+def _strip_class_prefix(part: str) -> str:
+    """Drop numeric class prefixes used by detection benchmarks (CNNDetection
+    and its derivatives label folders `0_real` / `1_fake`), so `1_fake`
+    matches the `fake` positive-label rule."""
+    if len(part) > 1 and part[0].isdigit() and part[1] == "_":
+        return part[2:]
+    return part
 
 
 def _split_for(path: Path, root: Path) -> str:
@@ -243,6 +252,8 @@ def _source_for(path: Path, root: Path, label: str, split: str) -> str:
     for part in _relative_parts(path, root)[:-1]:
         lowered = part.lower()
         if lowered in POSITIVE_LABELS or lowered in NEGATIVE_LABELS or lowered in SPLIT_NAMES:
+            continue
+        if _strip_class_prefix(lowered) in POSITIVE_LABELS or _strip_class_prefix(lowered) in NEGATIVE_LABELS:
             continue
         return lowered
     return label if label != "unknown" else split

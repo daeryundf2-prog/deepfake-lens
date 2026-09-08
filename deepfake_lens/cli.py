@@ -952,6 +952,9 @@ def main(argv: list[str] | None = None) -> int:
         print(scan_to_json_text(summary, items))
     else:
         _print_table(summary, items, include_low=args.include_low)
+        if not args.recursive and summary.total == 0 and _has_subdirectories(args.folder):
+            print()
+            print(f"힌트: '{args.folder}'의 직접 자식에는 파일이 없고 하위 폴더가 있습니다. --recursive 를 추가해 보세요.")
     return 0
 
 
@@ -960,6 +963,14 @@ def _write_json_out(path: Path, payload: str) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(payload, encoding="utf-8")
+
+
+def _has_subdirectories(folder: Path | str) -> bool:
+    """True when the scan root has child directories the non-recursive scan cannot enter."""
+    try:
+        return any(child.is_dir() for child in Path(folder).iterdir())
+    except OSError:
+        return False
 
 
 def _print_table(summary, items: list[ScanItem], *, include_low: bool) -> None:

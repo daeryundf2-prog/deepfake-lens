@@ -56,6 +56,25 @@ remains, so the next session can pick up without re-deriving context.
   synthetic-dataset, robustness-variant, and C2PA-fixture scripts plus the
   SDK-gated tests.
 
+### 2026-09-08 external-data pass
+- **Label rules now understand benchmark class prefixes**: CNNDetection and
+  its derivatives label folders `0_real`/`1_fake`; discovery previously
+  exact-matched only `real`/`fake`/... and reported every record in such
+  datasets as `unknown`. `_strip_class_prefix` drops the numeric prefix so
+  `1_fake` maps to the positive label (unit test added).
+- **Empty-scan hint**: non-recursive `scan` over a folder whose direct
+  children are subdirectories now prints a `--recursive` hint instead of a
+  bare "Scanned 0 files".
+- **First real-data measurement (ProGAN test set)**: CNNDetection's
+  progan_testset (HF mirror `sywang/CNNDetection`, 8,000 images, 4 classes
+  × 200 ProGAN fakes + 200 reals), evaluated at 400 images (cat class):
+  `pixel off` AUROC 0.50, `fast` 0.479, `deep` 0.476 — the pixel expert
+  ensemble does NOT beat chance on ProGAN. This is the honest baseline the
+  Limits section warns about: heuristics detect metadata and heavy
+  manipulation traces, not GAN textures; a trained detector (P1/AIDE) is the
+  known gap. Full-dataset runs and the Synthbuster download (12.4 GB, in
+  progress) are the natural follow-ups.
+
 ## Pending (in priority order)
 
 ### P0 — CI workflow update (blocked on token scope, patch ready)
@@ -75,8 +94,9 @@ gh auth refresh -h github.com -s workflow   # then push
 ```
 
 ### P1 — Real-data evaluation (the actual product blocker)
-Everything measurable without real data is done. The remaining accuracy
-claims require:
+First real measurement done (ProGAN 400-image sample: pixel AUROC ~0.48,
+see the completed section — heuristics do not beat chance on GAN textures).
+The remaining accuracy work:
 1. A labeled real-world dataset (e.g. GenImage, Synthbuster — links in
    `docs/deepfake-lightweight-tool-research.md`) with per-source folders.
 2. `dataset` manifest + audit, then `eval --pixel deep` for clean AUC/EER,

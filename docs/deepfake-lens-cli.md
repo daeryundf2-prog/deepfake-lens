@@ -163,8 +163,8 @@ The next-stage plan is implemented as local-first commands and adapters:
 
 Folder labels are inferred from path segments:
 
-- Positive: `ai`, `fake`, `synthetic`, `generated`, `edited`, `deepfake`
-- Negative: `real`, `human`, `camera`, `authentic`, `original`
+- Positive: `ai`, `fake`, `synthetic`, `generated`, `edited`, `deepfake` — benchmark-style class-prefixed folders (`1_fake`, `2_synthetic`) are matched by dropping the numeric prefix
+- Negative: `real`, `human`, `camera`, `authentic`, `original` (`0_real` likewise)
 - Splits: `train`, `val`, `valid`, `validation`, `test`
 
 Recommended sequence:

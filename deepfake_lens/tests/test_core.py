@@ -297,6 +297,31 @@ class DeepfakeLensCoreTest(unittest.TestCase):
             release = build_release_checklist(Path.cwd())
             self.assertTrue(release["entrypoint_present"])
 
+    def test_dataset_labels_recognize_class_prefix_folders(self) -> None:
+        """CNNDetection-style `0_real`/`1_fake` folder names must map to labels.
+
+        Detection benchmarks label folders with a numeric class prefix
+        (`0_real`, `1_fake`); the discovery rules must strip the prefix
+        instead of reporting every record as unknown.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "progan" / "cat"
+            fake_dir = root / "1_fake"
+            real_dir = root / "0_real"
+            fake_dir.mkdir(parents=True)
+            real_dir.mkdir(parents=True)
+            _write_rgb_png(fake_dir / "fake.png", 8, 8, lambda x, y: (10, 20, 30))
+            _write_rgb_png(real_dir / "real.png", 8, 8, lambda x, y: (30, 20, 10))
+
+            summary, records = discover_dataset(root)
+            self.assertEqual(summary.total, 2)
+            self.assertEqual(summary.positive, 1)
+            self.assertEqual(summary.negative, 1)
+            self.assertEqual(summary.unknown, 0)
+            labels = {record.path: record.label for record in records}
+            self.assertEqual(labels[str(fake_dir / "fake.png")], "ai")
+            self.assertEqual(labels[str(real_dir / "real.png")], "real")
+
     def test_scan_dedupe_skips_large_files_and_optional_runtime_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
