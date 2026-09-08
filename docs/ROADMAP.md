@@ -74,6 +74,13 @@ remains, so the next session can pick up without re-deriving context.
   manipulation traces, not GAN textures; a trained detector (P1/AIDE) is the
   known gap. Full-dataset runs and the Synthbuster download (12.4 GB, in
   progress) are the natural follow-ups.
+- **Synthbuster first pass** (40 images per model, dalle2/glide/sdxl): the
+  metadata-first design is confirmed on real data — DALL-E 2 images carry
+  real OpenAI provenance metadata and score 100 with `DALL-E/OpenAI 추정`
+  attribution (mean 87.8); glide 17.7 and sdxl 9.8 show that diffusion images
+  without metadata land in low-signal territory, consistent with the
+  `출처 단서 없음` posture. Detection strength tracks metadata presence
+  exactly as documented, not pixel "magic".
 
 ## Pending (in priority order)
 
