@@ -30,6 +30,11 @@ video = ["opencv-python>=4.8", "numpy>=1.24"]
 ml = ["opencv-python>=4.8", "numpy>=1.24", "scikit-learn>=1.3"]
 provenance = ["c2pa-python>=0.6"]
 full = ["librosa>=0.10", "opencv-python>=4.8", "numpy>=1.24", "scipy>=1.10", "scikit-learn>=1.3"]
+dev = [
+  "numpy>=1.24",
+  "Pillow>=10.0",
+  "c2pa-python>=0.6",
+]
 
 [project.scripts]
 deepfake-lens = "deepfake_lens.cli:main"

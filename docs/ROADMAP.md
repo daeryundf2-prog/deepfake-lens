@@ -45,6 +45,16 @@ remains, so the next session can pick up without re-deriving context.
   under transform-named folders; `eval --robustness` reports per-transform
   metrics. Verified end to end on the synthetic dataset (clean AUROC 0.97
   → 0.5-0.75 degraded, which is the drop the report exists to measure).
+- **Weekly link checker fixed for CI**: urllib raises `HTTPError` for
+  400+ statuses instead of returning a response, so the bot-block tolerance
+  never fired on CI runners (GitHub IPs get 403 from openai.com while
+  residential IPs get 200). HTTPError is now classified through the same
+  retry/bot-block rules. Verified via a manual workflow dispatch: all five
+  CI jobs green, including registry-links.
+- `dev` extra added to pyproject (numpy, Pillow, c2pa-python) for
+  contributor onboarding: `pip install -e '.[dev]'` enables the
+  synthetic-dataset, robustness-variant, and C2PA-fixture scripts plus the
+  SDK-gated tests.
 
 ## Pending (in priority order)
 
@@ -80,11 +90,9 @@ claims require:
 ### P2 — Nice-to-have
 - `python-extras` CI job could also run the C2PA fixture regeneration
   script to prove reproducibility on a clean machine (needs openssl, which
-  runners have).
-- Registry-links scheduled run is green locally; the weekly cron will
-  confirm on its own now that transient 5xx retries exist.
-- Consider a `dev` extra collecting the tooling dependencies
-  (numpy, Pillow, c2pa-python) for contributor onboarding.
+  runners have). Blocked on the same workflow-scope credential as P0.
+- Registry-links scheduled run is green via manual dispatch (including the
+  403 bot-block fix); the weekly cron confirms it autonomously from here.
 
 ## Non-goals (stable)
 - No cloud calls, no upload, no login — local-only by design.
