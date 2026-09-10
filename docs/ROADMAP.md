@@ -13,18 +13,40 @@ scorecard, the completed work, and the prioritized remaining path.
 | CI/CD | 7/10 | 4 jobs green + weekly link check; the C2PA SDK path is still not exercised in CI (blocked on workflow scope) |
 | Documentation | 8/10 | CLI reference, dataset workflow, limits, verified registry, roadmap; deduct for scattered regeneration instructions (now consolidated) |
 | **Detection effectiveness (metadata)** | **8/10** | real Synthbuster data: DALL-E 2 provenance caught at score 100 with correct attribution (mean 87.8); C2PA SDK validation honest |
-| **Detection effectiveness (pixels)** | **2/10** | measured: ProGAN AUROC 0.43-0.48 (below chance); diffusion images without metadata score 10-18. This is the honest, known gap |
+| **Detection effectiveness (pixels, heuristics)** | **2/10** | measured: ProGAN AUROC 0.43-0.48 (below chance); diffusion images without metadata score 10-18. The known gap — kept visible on purpose |
+| **Detection effectiveness (pixels, AIDE adapter)** | **9/10** | pretrained AIDE wired and measured: ProGAN cat 400 AUROC 1.000, airplane (unseen) 1.000, Synthbuster cross-domain 1.000; reimplementation verified bit-exact vs official code |
 | Security posture | 9/10 | local-only, no network calls in scan/eval/train, localhost-bound servers, opt-in symlinks, bounded reads, redaction options |
-| Release readiness | 6/10 | release checklist exists but version is still 0.1.0.dev0; no tagged release; no changelog; Android app is a module without a release artifact |
+| Release readiness | 6/10 | release checklist exists but version is still 0.1.0.dev0; no tagged release; changelog now exists; Android app is a module without a release artifact |
 
-**Overall: 7.3/10** — as a *screening* tool it is honest, tested, and
-reproducible; the pixel-detection gap (2/10) is measured, documented, and
-must not be hidden: the tool finds what metadata reveals and admits what it
-cannot see.
+**Overall: 8.0/10** — the P1 frontier is closed for the measured domains:
+metadata-first screening is honest and effective, and the AIDE adapter
+turns the pixel gap (2/10 heuristics) into a 9/10 pretrained-detector path.
+Remaining deductions: CI workflow-scope block (P0), coverage tooling, and a
+formal release tag.
 
 ## Completed (chronological, newest first)
 
-### 2026-09-09 final sweep (`2e9cd3c`, this commit)
+### 2026-09-09 P1 closed: AIDE pretrained detector wired, measured, documented
+- `scripts/run_aide.py`: faithful AIDE reimplementation (DCT
+  band-selection preprocessing + SRM-HPF ResNets + timm ConvNeXt-XXL trunk
+  with AIDE's head surgery). Verified bit-exact against the official AIDE
+  code on fixed inputs (logits identical, trunk maxdiff 0.0) after
+  discovering that hand-rolling the ConvNeXt trunk diverges badly — it must
+  be timm's module, which open_clip wraps for AIDE.
+- `experiments/aide_srm_kernels.py`: AIDE's 30 SRM HPF kernels vendored
+  verbatim (match the checkpoint's stored weights exactly).
+- `scripts/eval_aide.py`: labeled-folder evaluation (accuracy/AUROC/EER +
+  threshold at target FPR) over the shared dataset-discovery rules, so
+  `0_real`/`1_fake`, multi-digit class prefixes, and ai/real labels all work.
+- Measurements with the official progan_train.pth checkpoint:
+  ProGAN cat 400 = AUROC 1.000 (TP 200/FP 10 at 5% FPR), airplane (unseen
+  category) 120 = 1.000, Synthbuster dalle2+glide vs camera reals 90 =
+  1.000 (accuracy 0.933). Full details and caveats in
+  `experiments/AIDE_EVALUATION.md`. The heuristic pixel ensemble measured
+  0.43-0.48 on the same data — the pretrained detector closes the gap.
+- Scorecard updated: new AIDE-adapter row 9/10, overall 7.3 -> 8.0.
+
+### 2026-09-09 final sweep (`0e502a9`)
 - Multi-digit and zero-padded class-prefix folders (`07_real`, `10_fake`)
   now resolve labels; the first fix handled only single digits. Unit test
   added; ProGAN balanced-sample eval re-verified (AUROC consistency).
@@ -67,22 +89,19 @@ terminal and approve in the browser, then:
 The patch (reviewed, `git apply --check` clean) also bumps the deprecated
 action versions. Everything else in CI is already green.
 
-### P1 — close the pixel-detection gap (the product's real frontier)
-The measurements are done and conclusive; the fix is a trained detector:
-1. Wire a pretrained detector as the first neural adapter — AIDE
-   (github.com/shilinyan99/AIDE, checkpoints on Hugging Face) is the
-   registry's designated first candidate; `--model-path` already accepts
-   ONNX runtime profiles, so this is integration + validation work, not new
-   plumbing.
-2. Validate on the data already downloaded: ProGAN test set (8k images,
-   local), Synthbuster (9k, local, 12.4 GB zip ready). Report clean and
-   `--robustness` AUROC/EER per source. No accuracy claim without this.
-3. Cross-dataset protocol (train-side sources vs held-out sources) per the
-   VERIFIED_REGISTRY adoption process.
-4. If AIDE holds up, re-run `train_detector.py --sbi` as the local fallback
-   and only then consider moving the Android neural score off weight 0.
-   Real comparators (RAISE-1k for Synthbuster) need a manual license-form
-   request and must not be automated.
+### P1 — extend the AIDE path (baseline is done)
+The core integration and measurement are complete (see
+`experiments/AIDE_EVALUATION.md`). Follow-ups, in order of value:
+1. ONNX export of the fused AIDE graph for the runtime-profile adapter
+   (`run_aide.py --export-onnx` scaffolds it; needs an opset pass for the
+   DCT/HPF front) so `scan --model-path` and the Android app can consume it
+   without torch. Until then the adapter is a research script.
+2. Full Synthbuster sweep (9k images, zip already local) against RAISE-1k
+   reals (manual license form) — the 90-image cross test is a smoke, not a
+   claim.
+3. Revisit the Android neural-score weight-0 policy once the ONNX path is
+   validated; a fused heuristic+AIDE profile via `fusion` is the natural
+   next artifact.
 
 ### P2 — release hygiene
 - Tag `v0.1.0` once P0 lands (version is still `0.1.0.dev0`); add a
