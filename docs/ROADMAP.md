@@ -1,125 +1,103 @@
 # Deepfake Lens Roadmap
 
-Status date: 2026-09-08. This file tracks what has been completed and what
-remains, so the next session can pick up without re-deriving context.
+Status date: 2026-09-09 (full review pass complete). This file records the
+scorecard, the completed work, and the prioritized remaining path.
 
-## Completed
+## Scorecard
 
-### Foundation (earlier phases)
-- Metadata-first CLI scanner with 36 subcommands (`scan`, `eval`, `benchmark`,
-  `fusion`, `calibrate`, `train`, `train-neural-plan`, `models`, `perf`,
-  `security`, `release`, `web`, per-modality analyzers, ...).
-- Honest-labeling posture throughout: no metadata = `출처 단서 없음`, never
-  "human-made"; unverified signals are reference-level only.
-- SBI training path (`experiments/sbi.py`, pure numpy), ConvNeXt/EfficientNet
-  trainer with best-checkpoint selection + early stopping, ONNX export with
-  TorchScript-vs-ONNX verification.
-- Android `deepfakeclassifier` module: SAF folder scan, metadata + pixel
-  heuristics, ONNX Runtime inference path (weight-0 signal until a validated
-  checkpoint exists).
-- Verified research registry (`docs/VERIFIED_REGISTRY.md`) + weekly link
-  checker with bot-block tolerance.
+| Area | Score | Basis |
+|---|---|---|
+| Code quality & hygiene | 9/10 | stdlib-first with optional extras that fail safe; honest labels everywhere; no dead code found; 228 tests |
+| Testing infrastructure | 8/10 | 228 unit tests, CLI smoke (36 subcommands), CI matrix 3.11/3.12/extras/android; deduct for no coverage tooling and no perf regression test |
+| Reproducibility | 9/10 | new-clone verified end to end (install -> tests -> fixture regeneration -> scripts); SBI/ONNX export deterministic with seed |
+| CI/CD | 7/10 | 4 jobs green + weekly link check; the C2PA SDK path is still not exercised in CI (blocked on workflow scope) |
+| Documentation | 8/10 | CLI reference, dataset workflow, limits, verified registry, roadmap; deduct for scattered regeneration instructions (now consolidated) |
+| **Detection effectiveness (metadata)** | **8/10** | real Synthbuster data: DALL-E 2 provenance caught at score 100 with correct attribution (mean 87.8); C2PA SDK validation honest |
+| **Detection effectiveness (pixels)** | **2/10** | measured: ProGAN AUROC 0.43-0.48 (below chance); diffusion images without metadata score 10-18. This is the honest, known gap |
+| Security posture | 9/10 | local-only, no network calls in scan/eval/train, localhost-bound servers, opt-in symlinks, bounded reads, redaction options |
+| Release readiness | 6/10 | release checklist exists but version is still 0.1.0.dev0; no tagged release; no changelog; Android app is a module without a release artifact |
 
-### 2026-09 review pass (commits c3c484f, a5b8d1a, 65e176d)
-- Repaired dead ComfyUI docs URL (404) and added 408/5xx retry to
-  `scripts/check_registry_links.py` (Zenodo 504s were failing CI spuriously).
-- `export_onnx.py` fails fast with a clear message when the `onnx` package is
-  missing (torch's exporter needs it; easy to miss).
-- `scripts/build_synthetic_dataset.py`: synthetic ai/real dataset generator
-  for pipeline smoke tests.
-- End-to-end verified: dataset → manifest → SBI training → ONNX export
-  (max abs diff vs TorchScript 5.4e-07) → `models --profile-out` →
-  `scan --model-path` integration → `fusion` calibration at target FPR.
-- **C2PA fixture restored**: the blanket `*.png` ignore rule had kept
-  `fixtures/c2pa-test/signed-c2pa.png` out of the repo, so the three
-  SDK-gated tests failed on every fresh clone with c2pa-python installed.
-  Added `!fixtures/**/*.png` exception and
-  `scripts/build_c2pa_fixture.py` (deterministic regeneration: test CA +
-  ES256 signer cert with digitalSignature/emailProtection extensions,
-  PKCS#8 key, 32x32 PNG, official-SDK manifest signing; keys stay in a temp
-  dir). Verified: 12/12 test_c2pa pass locally and the `forensic` CLI
-  reports the untrusted-signer wording.
-- **Robustness loop closed**: `scripts/build_robustness_variants.py`
-  generates all eight planned transforms (jpeg_q95/q75, resize_75/50,
-  center_crop_90, gaussian_blur_light, screenshot, social_recompress)
-  under transform-named folders; `eval --robustness` reports per-transform
-  metrics. Verified end to end on the synthetic dataset (clean AUROC 0.97
-  → 0.5-0.75 degraded, which is the drop the report exists to measure).
-- **Weekly link checker fixed for CI**: urllib raises `HTTPError` for
-  400+ statuses instead of returning a response, so the bot-block tolerance
-  never fired on CI runners (GitHub IPs get 403 from openai.com while
-  residential IPs get 200). HTTPError is now classified through the same
-  retry/bot-block rules. Verified via a manual workflow dispatch: all five
-  CI jobs green, including registry-links.
-- `dev` extra added to pyproject (numpy, Pillow, c2pa-python) for
-  contributor onboarding: `pip install -e '.[dev]'` enables the
-  synthetic-dataset, robustness-variant, and C2PA-fixture scripts plus the
-  SDK-gated tests.
+**Overall: 7.3/10** — as a *screening* tool it is honest, tested, and
+reproducible; the pixel-detection gap (2/10) is measured, documented, and
+must not be hidden: the tool finds what metadata reveals and admits what it
+cannot see.
 
-### 2026-09-08 external-data pass
-- **Label rules now understand benchmark class prefixes**: CNNDetection and
-  its derivatives label folders `0_real`/`1_fake`; discovery previously
-  exact-matched only `real`/`fake`/... and reported every record in such
-  datasets as `unknown`. `_strip_class_prefix` drops the numeric prefix so
-  `1_fake` maps to the positive label (unit test added).
-- **Empty-scan hint**: non-recursive `scan` over a folder whose direct
-  children are subdirectories now prints a `--recursive` hint instead of a
-  bare "Scanned 0 files".
-- **First real-data measurement (ProGAN test set)**: CNNDetection's
-  progan_testset (HF mirror `sywang/CNNDetection`, 8,000 images, 4 classes
-  × 200 ProGAN fakes + 200 reals), evaluated at 400 images (cat class):
-  `pixel off` AUROC 0.50, `fast` 0.479, `deep` 0.476 — the pixel expert
-  ensemble does NOT beat chance on ProGAN. This is the honest baseline the
-  Limits section warns about: heuristics detect metadata and heavy
-  manipulation traces, not GAN textures; a trained detector (P1/AIDE) is the
-  known gap. Full-dataset runs and the Synthbuster download (12.4 GB, in
-  progress) are the natural follow-ups.
-- **Synthbuster first pass** (40 images per model, dalle2/glide/sdxl): the
-  metadata-first design is confirmed on real data — DALL-E 2 images carry
-  real OpenAI provenance metadata and score 100 with `DALL-E/OpenAI 추정`
-  attribution (mean 87.8); glide 17.7 and sdxl 9.8 show that diffusion images
-  without metadata land in low-signal territory, consistent with the
-  `출처 단서 없음` posture. Detection strength tracks metadata presence
-  exactly as documented, not pixel "magic".
+## Completed (chronological, newest first)
 
-## Pending (in priority order)
+### 2026-09-09 final sweep (`2e9cd3c`, this commit)
+- Multi-digit and zero-padded class-prefix folders (`07_real`, `10_fake`)
+  now resolve labels; the first fix handled only single digits. Unit test
+  added; ProGAN balanced-sample eval re-verified (AUROC consistency).
 
-### P0 — CI workflow update (blocked on token scope, patch ready)
-The current CI never exercises the C2PA SDK tests (they skip without
-c2pa-python) and runs deprecated action versions. The full change is saved
-as `patches/0001-ci-c2pa-sdk-test-and-actions-bump.patch`.
+### 2026-09-08/09 external-data pass (`a0ecb92`, `2e9cd3c`)
+- First real-data measurements recorded (see scorecard): ProGAN test set
+  via HF mirror, Synthbuster 3-model sample. Metadata-first detection
+  confirmed on real DALL-E 2 provenance; pixel gap quantified.
+- `0_real`/`1_fake` benchmark label folders recognized (CNNDetection
+  convention); empty non-recursive scans now print a `--recursive` hint.
 
-Applying it requires a git credential with the `workflow` scope; the repo
-token currently has only `repo`/`gist`/`read:org` (verified: a normal-file
-commit via API succeeds, workflow-file updates are rejected). To apply:
+### 2026-09-08 reproducibility & tooling (`83bdf11`, `e4158bd`, `65e176d`)
+- `dev` extra (numpy/Pillow/c2pa-python) — one install enables every
+  script and the SDK-gated tests.
+- Robustness loop closed: `build_robustness_variants.py` generates all 8
+  planned transforms; `eval --robustness` reports per-transform metrics.
+- New-clone reproducibility verified from scratch.
 
-```sh
-git apply patches/0001-ci-c2pa-sdk-test-and-actions-bump.patch
-git checkout -b ci/c2pa-sdk-test && git commit -am "ci: apply patch"
-# push with a workflow-scoped token, or run:
-gh auth refresh -h github.com -s workflow   # then push
-```
+### 2026-09-07 review pass (`a5b8d1a`, `9a150c1`, `c3c484f`)
+- C2PA fixture restored (was lost to the blanket `*.png` ignore) with a
+  deterministic regeneration script; `.gitignore` exception added; the 3
+  SDK-gated tests now actually run when c2pa-python is present.
+- Link checker: transient 5xx retries + HTTPError bot-block classification
+  (CI runners get 403 from hosts that serve 200 locally).
+- ONNX export guard (missing `onnx` package), synthetic dataset builder,
+  dead ComfyUI doc link replaced.
 
-### P1 — Real-data evaluation (the actual product blocker)
-First real measurement done (ProGAN 400-image sample: pixel AUROC ~0.48,
-see the completed section — heuristics do not beat chance on GAN textures).
-The remaining accuracy work:
-1. A labeled real-world dataset (e.g. GenImage, Synthbuster — links in
-   `docs/deepfake-lightweight-tool-research.md`) with per-source folders.
-2. `dataset` manifest + audit, then `eval --pixel deep` for clean AUC/EER,
-   and the robustness loop (P0's script) for transform degradation.
-3. Cross-dataset evaluation (train on one source mix, eval on another) —
-   the only honest generalization claim per VERIFIED_REGISTRY rules.
-4. Only after that: consider wiring a pretrained detector (AIDE is the
-   registry's first candidate) or training a local checkpoint for the
-   Android app. Until then the app keeps the neural score at weight 0.
+### Earlier foundations
+- 36-subcommand CLI, SBI training path, ConvNeXt trainer with
+  best-checkpoint/early-stopping/cosine LR, ONNX export with
+  TorchScript-parity verification (5.4e-07), Android ONNX Runtime path
+  (weight-0 until a validated checkpoint), verified research registry.
 
-### P2 — Nice-to-have
-- `python-extras` CI job could also run the C2PA fixture regeneration
-  script to prove reproducibility on a clean machine (needs openssl, which
-  runners have). Blocked on the same workflow-scope credential as P0.
-- Registry-links scheduled run is green via manual dispatch (including the
-  403 bot-block fix); the weekly cron confirms it autonomously from here.
+## Remaining (priority order)
+
+### P0 — unblock CI coverage of the C2PA SDK path
+One-time action: run `gh auth refresh -h github.com -s workflow` in a
+terminal and approve in the browser, then:
+`git apply patches/0001-ci-c2pa-sdk-test-and-actions-bump.patch && git push`.
+The patch (reviewed, `git apply --check` clean) also bumps the deprecated
+action versions. Everything else in CI is already green.
+
+### P1 — close the pixel-detection gap (the product's real frontier)
+The measurements are done and conclusive; the fix is a trained detector:
+1. Wire a pretrained detector as the first neural adapter — AIDE
+   (github.com/shilinyan99/AIDE, checkpoints on Hugging Face) is the
+   registry's designated first candidate; `--model-path` already accepts
+   ONNX runtime profiles, so this is integration + validation work, not new
+   plumbing.
+2. Validate on the data already downloaded: ProGAN test set (8k images,
+   local), Synthbuster (9k, local, 12.4 GB zip ready). Report clean and
+   `--robustness` AUROC/EER per source. No accuracy claim without this.
+3. Cross-dataset protocol (train-side sources vs held-out sources) per the
+   VERIFIED_REGISTRY adoption process.
+4. If AIDE holds up, re-run `train_detector.py --sbi` as the local fallback
+   and only then consider moving the Android neural score off weight 0.
+   Real comparators (RAISE-1k for Synthbuster) need a manual license-form
+   request and must not be automated.
+
+### P2 — release hygiene
+- Tag `v0.1.0` once P0 lands (version is still `0.1.0.dev0`); add a
+  CHANGELOG from the git history (the log messages are already
+  release-note quality).
+- Add coverage tooling and a perf regression assertion for scan throughput
+  (the `perf` report exists; a pass/fail bound does not).
+- Consider a `dev` CI job running the fixture-regeneration script on a
+  clean runner to keep reproducibility from drifting.
+
+### P3 — later / optional
+- CLIDE-style zero-shot direction for unseen generators (registry
+  research entry).
+- Localization review of Korean verdict strings against the English docs
+  terminology.
 
 ## Non-goals (stable)
 - No cloud calls, no upload, no login — local-only by design.

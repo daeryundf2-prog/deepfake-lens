@@ -322,6 +322,30 @@ class DeepfakeLensCoreTest(unittest.TestCase):
             self.assertEqual(labels[str(fake_dir / "fake.png")], "ai")
             self.assertEqual(labels[str(real_dir / "real.png")], "real")
 
+    def test_dataset_labels_strip_multi_digit_class_prefixes(self) -> None:
+        """Zero-padded and multi-digit class folders (`07_real`, `10_fake`)
+        must map to labels like their single-digit counterparts."""
+        from deepfake_lens.datasets import _strip_class_prefix
+
+        self.assertEqual(_strip_class_prefix("0_real"), "real")
+        self.assertEqual(_strip_class_prefix("1_fake"), "fake")
+        self.assertEqual(_strip_class_prefix("07_real"), "real")
+        self.assertEqual(_strip_class_prefix("10_fake"), "fake")
+        self.assertEqual(_strip_class_prefix("123_generated"), "generated")
+        # Non-prefixed and malformed names must pass through unchanged.
+        for unchanged in ("real", "fake", "a_real", "1x_real", "__fake"):
+            self.assertEqual(_strip_class_prefix(unchanged), unchanged)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "many"
+            (root / "10_fake").mkdir(parents=True)
+            (root / "07_real").mkdir(parents=True)
+            _write_rgb_png(root / "10_fake" / "a.png", 8, 8, lambda x, y: (1, 2, 3))
+            _write_rgb_png(root / "07_real" / "b.png", 8, 8, lambda x, y: (3, 2, 1))
+            summary, _ = discover_dataset(root)
+            self.assertEqual(summary.positive, 1)
+            self.assertEqual(summary.negative, 1)
+            self.assertEqual(summary.unknown, 0)
+
     def test_scan_dedupe_skips_large_files_and_optional_runtime_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

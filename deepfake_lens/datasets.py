@@ -224,9 +224,10 @@ def is_negative_label(label: str) -> bool:
 
 def _label_for(path: Path, root: Path) -> str:
     parts = [part.lower() for part in _relative_parts(path, root)]
-    if any(part in POSITIVE_LABELS or _strip_class_prefix(part) in POSITIVE_LABELS for part in parts):
-        return "edited" if "edited" in parts or _strip_class_prefix("edited") in [_strip_class_prefix(p) for p in parts] else "ai"
-    if any(part in NEGATIVE_LABELS or _strip_class_prefix(part) in NEGATIVE_LABELS for part in parts):
+    stripped = [part if part in POSITIVE_LABELS or part in NEGATIVE_LABELS else _strip_class_prefix(part) for part in parts]
+    if any(part in POSITIVE_LABELS for part in stripped):
+        return "edited" if "edited" in stripped else "ai"
+    if any(part in NEGATIVE_LABELS for part in stripped):
         return "real"
     return "unknown"
 
@@ -234,9 +235,11 @@ def _label_for(path: Path, root: Path) -> str:
 def _strip_class_prefix(part: str) -> str:
     """Drop numeric class prefixes used by detection benchmarks (CNNDetection
     and its derivatives label folders `0_real` / `1_fake`), so `1_fake`
-    matches the `fake` positive-label rule."""
-    if len(part) > 1 and part[0].isdigit() and part[1] == "_":
-        return part[2:]
+    matches the `fake` positive-label rule. Handles multi-digit and
+    zero-padded prefixes (`07_real`, `10_fake`)."""
+    stripped = part.lstrip("0123456789")
+    if stripped != part and stripped.startswith("_"):
+        return stripped[1:]
     return part
 
 
