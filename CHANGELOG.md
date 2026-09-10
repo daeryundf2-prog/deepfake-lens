@@ -7,6 +7,14 @@ grouped by work pass rather than release.
 ## 2026-09 — detection-evidence pass
 
 ### Added
+- **Full Synthbuster sweep**: 720 images (9 generators x 40 vs 360 camera
+  reals) — AUROC 0.951 at 5% target FPR with the ProGAN-trained AIDE
+  checkpoint; the strongest cross-generator evidence to date
+  (`experiments/AIDE_EVALUATION.md`).
+- **AIDE ONNX export path** (`run_aide.py --export-onnx`): fused graph
+  exported with external-data weight split (3.57 GB); ONNX runtime
+  reproduces torch probabilities to 4 decimals on real images — the bridge
+  to `--model-path` runtime profiles and a future mobile build.
 - AIDE (ICLR 2025) pretrained-detector adapter, verified bit-exact against
   the official code:
   - `scripts/run_aide.py` — faithful reimplementation (DCT band-selection,

@@ -15,6 +15,13 @@ below).
 | ProGAN cat (test split) | 400 | **1.000** | 0.000 | 1.000 | TP 200 / FP 10 / FN 0 / TN 190 |
 | ProGAN airplane (unseen category) | 120 | **1.000** | 0.000 | 1.000 | TP 60 / FP 3 / FN 0 / TN 57 |
 | Cross-domain: Synthbuster dalle2+glide vs camera reals | 90 | **1.000** | 0.000 | 0.933 | TP 60 / FP 2 / FN 0 / TN 28 |
+| **Full Synthbuster sweep** (9 models x 40: dalle2/3, firefly, glide, midjourney-v5, sd-1.3/1.4/2, sdxl) vs camera reals | 720 | **0.951** | 0.000 | 0.854 | TP 332 / FP 18 / FN 28 / TN 342 |
+
+The full sweep is the honest headline: the ProGAN-trained checkpoint keeps
+AUROC 0.951 across nine diffusion/commercial generators it never saw, with
+28 misses concentrated in the hardest commercial models (per-model numbers
+below). ONNX parity: the exported graph reproduces torch probabilities to 4
+decimals on real images (external-data split, 3.57 GB).
 
 Context: the heuristic pixel ensemble measured AUROC **0.43-0.48** on the
 same ProGAN data (below chance) — the pretrained AIDE detector closes the

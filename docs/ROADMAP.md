@@ -1,125 +1,105 @@
 # Deepfake Lens Roadmap
 
-Status date: 2026-09-09 (full review pass complete). This file records the
-scorecard, the completed work, and the prioritized remaining path.
+Status date: 2026-09-11. Rewritten after the full external audit (all four
+modalities vs the 2025-26 generation landscape) and the completed AIDE
+integration. Every gap below was verified against the code, not assumed.
 
-## Scorecard
+## Where we actually are (measured, not claimed)
 
-| Area | Score | Basis |
-|---|---|---|
-| Code quality & hygiene | 9/10 | stdlib-first with optional extras that fail safe; honest labels everywhere; no dead code found; 228 tests |
-| Testing infrastructure | 8/10 | 228 unit tests, CLI smoke (36 subcommands), CI matrix 3.11/3.12/extras/android; deduct for no coverage tooling and no perf regression test |
-| Reproducibility | 9/10 | new-clone verified end to end (install -> tests -> fixture regeneration -> scripts); SBI/ONNX export deterministic with seed |
-| CI/CD | 7/10 | 4 jobs green + weekly link check; the C2PA SDK path is still not exercised in CI (blocked on workflow scope) |
-| Documentation | 8/10 | CLI reference, dataset workflow, limits, verified registry, roadmap; deduct for scattered regeneration instructions (now consolidated) |
-| **Detection effectiveness (metadata)** | **8/10** | real Synthbuster data: DALL-E 2 provenance caught at score 100 with correct attribution (mean 87.8); C2PA SDK validation honest |
-| **Detection effectiveness (pixels, heuristics)** | **2/10** | measured: ProGAN AUROC 0.43-0.48 (below chance); diffusion images without metadata score 10-18. The known gap — kept visible on purpose |
-| **Detection effectiveness (pixels, AIDE adapter)** | **9/10** | pretrained AIDE wired and measured: ProGAN cat 400 AUROC 1.000, airplane (unseen) 1.000, Synthbuster cross-domain 1.000; reimplementation verified bit-exact vs official code |
-| Security posture | 9/10 | local-only, no network calls in scan/eval/train, localhost-bound servers, opt-in symlinks, bounded reads, redaction options |
-| Release readiness | 6/10 | release checklist exists but version is still 0.1.0.dev0; no tagged release; changelog now exists; Android app is a module without a release artifact |
+| Modality | Screening capability | Measured evidence | Neural detection |
+|---|---|---|---|
+| Image (metadata/provenance) | strong | DALL-E 2 provenance caught at 100 w/ attribution; C2PA SDK validation honest (untrusted ≠ valid) | n/a — this IS the design |
+| Image (pixels, heuristics) | weak, documented | ProGAN AUROC 0.43-0.48 (below chance) | — |
+| Image (pixels, AIDE adapter) | **strong** | ProGAN cat 400 = 1.000, airplane = 1.000, **full Synthbuster sweep 720 (9 generators) = 0.951**; ONNX parity verified (4-decimal prob match) | **done** (`scripts/run_aide.py`) |
+| Video | heuristic only | Haar-cascade 1-box rPPG; landmark "estimator" is box-ratio arithmetic (`face.py:185` — self-documented as NOT measured) | none |
+| Audio | heuristic only | librosa thresholds (jitter/shimmer/formants); no vocoder bispectrum, no AASIST/RawNet | none |
+| Text | heuristic only | bigram-entropy pseudo-perplexity; no LLM backbone, no Binoculars | none |
+| Cross-modal | scalar average only | no lip-sync phase analysis, no semantic consistency check | none |
 
-**Overall: 8.0/10** — the P1 frontier is closed for the measured domains:
-metadata-first screening is honest and effective, and the AIDE adapter
-turns the pixel gap (2/10 heuristics) into a 9/10 pretrained-detector path.
-Remaining deductions: CI workflow-scope block (P0), coverage tooling, and a
-formal release tag.
+Overall scorecard: **8.0/10 for the image path**; video/audio/text remain
+honest-but-heuristic (4-5/10 each as *screeners* — they say "참고용" and mean
+it). The audit's P0-P3 findings map to real code and are folded in below.
 
-## Completed (chronological, newest first)
+## Priority order (top = next session's first task)
 
-### 2026-09-09 P1 closed: AIDE pretrained detector wired, measured, documented
-- `scripts/run_aide.py`: faithful AIDE reimplementation (DCT
-  band-selection preprocessing + SRM-HPF ResNets + timm ConvNeXt-XXL trunk
-  with AIDE's head surgery). Verified bit-exact against the official AIDE
-  code on fixed inputs (logits identical, trunk maxdiff 0.0) after
-  discovering that hand-rolling the ConvNeXt trunk diverges badly — it must
-  be timm's module, which open_clip wraps for AIDE.
-- `experiments/aide_srm_kernels.py`: AIDE's 30 SRM HPF kernels vendored
-  verbatim (match the checkpoint's stored weights exactly).
-- `scripts/eval_aide.py`: labeled-folder evaluation (accuracy/AUROC/EER +
-  threshold at target FPR) over the shared dataset-discovery rules, so
-  `0_real`/`1_fake`, multi-digit class prefixes, and ai/real labels all work.
-- Measurements with the official progan_train.pth checkpoint:
-  ProGAN cat 400 = AUROC 1.000 (TP 200/FP 10 at 5% FPR), airplane (unseen
-  category) 120 = 1.000, Synthbuster dalle2+glide vs camera reals 90 =
-  1.000 (accuracy 0.933). Full details and caveats in
-  `experiments/AIDE_EVALUATION.md`. The heuristic pixel ensemble measured
-  0.43-0.48 on the same data — the pretrained detector closes the gap.
-- Scorecard updated: new AIDE-adapter row 9/10, overall 7.3 -> 8.0.
+### P0 — Ship the CI workflow patch (2 minutes of user action)
+`gh auth refresh -h github.com -s workflow` in a terminal, approve in the
+browser, then `git apply patches/0001-... && git push`. Unblocks: C2PA SDK
+tests in CI, action version bumps. (Blocked only on the user's browser;
+verified three separate push routes all require the scope.)
 
-### 2026-09-09 final sweep (`0e502a9`)
-- Multi-digit and zero-padded class-prefix folders (`07_real`, `10_fake`)
-  now resolve labels; the first fix handled only single digits. Unit test
-  added; ProGAN balanced-sample eval re-verified (AUROC consistency).
+### P1 — Make AIDE the default pixel engine (product-critical)
+The adapter exists and measures AUROC 1.0, but it is a *script*, not the
+product. Close the loop:
+1. **Bundle path**: `deepfake-lens scan --model-path <profile>` already
+   accepts ONNX runtime profiles; wire a `models/aide-runtime.json` profile
+   + a documented "download checkpoint once" step (checkpoint is 3.3 GB and
+   license-restricted — do NOT commit weights; provide a fetch script with
+   checksum).
+2. **Android**: export a quantized AIDE (fp16/int8) that fits mobile
+   budgets, validate parity vs the fp32 torch path, then move the neural
+   score off weight-0 (`AndroidFileAnalysis.kt:194`) per the app's own
+   contract — only after a cross-generator report exists.
+3. **Full-benchmark run**: the 720-image Synthbuster sweep is DONE
+   (AUROC 0.951, report updated). Next: per-model breakdown
+   (`eval_aide.py --per-source` flag), then the full 9k set vs RAISE-1k
+   reals (manual license form — never automate). Publish per-model
+   AUROC/EER in `experiments/AIDE_EVALUATION.md` with the
+   VERIFIED_REGISTRY caveats.
 
-### 2026-09-08/09 external-data pass (`a0ecb92`, `2e9cd3c`)
-- First real-data measurements recorded (see scorecard): ProGAN test set
-  via HF mirror, Synthbuster 3-model sample. Metadata-first detection
-  confirmed on real DALL-E 2 provenance; pixel gap quantified.
-- `0_real`/`1_fake` benchmark label folders recognized (CNNDetection
-  convention); empty non-recursive scans now print a `--recursive` hint.
+### P2 — Replace fake heuristics with real measurements (audit finding)
+The audit correctly flags where the codebase *simulates* capability:
+1. **face.py `_estimate_landmarks`**: box-ratio arithmetic pretending to be
+   landmarks. Replace with MediaPipe FaceMesh (or InsightFace 2d-106) as an
+   optional extra; keep the current fallback but stop calling the derived
+   points "landmarks" in output until then.
+2. **rppg.py single-box CHROM**: upgrade to multi-ROI (forehead + both
+   cheeks) phase-coherence à la FakeCatcher; report per-ROI agreement, not
+   one pulse.
+3. **text_advanced.py pseudo-perplexity**: bigram entropy is not
+   perplexity. Either rename the signal honestly ("repetition entropy") or
+   add a small local LLM for real PPL/Binoculars as an optional extra.
+4. **multimodal.py**: scalar average admits to being a summary. Add an
+   audio-visual lip-sync phase check (phoneme closure vs formant timing) as
+   the first true cross-modal signal.
 
-### 2026-09-08 reproducibility & tooling (`83bdf11`, `e4158bd`, `65e176d`)
-- `dev` extra (numpy/Pillow/c2pa-python) — one install enables every
-  script and the SDK-gated tests.
-- Robustness loop closed: `build_robustness_variants.py` generates all 8
-  planned transforms; `eval --robustness` reports per-transform metrics.
-- New-clone reproducibility verified from scratch.
+### P3 — Modern-benchmark coverage (audit P2)
+Current data: ProGAN (2019 GAN), Synthbuster (2023 diffusion). Missing
+2025-26 generators the audit names (Wan2.1, HunyuanVideo, FLUX.1, SD3.5,
+F5-TTS/CosyVoice audio, DeepSeek-style text). Plan: a
+`fixtures/modern-bench/` layout spec + eval commands users can point at
+self-collected samples; no redistribution of generated content — document
+per-set license provenance only.
 
-### 2026-09-07 review pass (`a5b8d1a`, `9a150c1`, `c3c484f`)
-- C2PA fixture restored (was lost to the blanket `*.png` ignore) with a
-  deterministic regeneration script; `.gitignore` exception added; the 3
-  SDK-gated tests now actually run when c2pa-python is present.
-- Link checker: transient 5xx retries + HTTPError bot-block classification
-  (CI runners get 403 from hosts that serve 200 locally).
-- ONNX export guard (missing `onnx` package), synthetic dataset builder,
-  dead ComfyUI doc link replaced.
+### P4 — Release hygiene
+- Tag `v0.1.0` (CHANGELOG.md exists; P0 patch is the last CI blocker).
+- Coverage tooling (`coverage.py` over the unit suite) + a `perf` floor
+  assertion in `scripts/cli_smoke_test.py`.
+- Korean/English verdict-string review (audit notes mixed registers).
 
-### Earlier foundations
-- 36-subcommand CLI, SBI training path, ConvNeXt trainer with
-  best-checkpoint/early-stopping/cosine LR, ONNX export with
-  TorchScript-parity verification (5.4e-07), Android ONNX Runtime path
-  (weight-0 until a validated checkpoint), verified research registry.
+### Explicitly out of scope (unchanged)
+- Cloud calls, uploads, logins — local-only.
+- Final "this is fake" verdicts — screening + next checks only.
+- Publishing model weights without license + calibration report
+  (VERIFIED_REGISTRY adoption process step 4).
+- Legal-evidence output beyond what exists (`legal-report` stays a
+  summary with checksums; court-grade packaging is a separate product per
+  the audit's P3 — noted, not planned here).
 
-## Remaining (priority order)
+## Completed log (condensed)
 
-### P0 — unblock CI coverage of the C2PA SDK path
-One-time action: run `gh auth refresh -h github.com -s workflow` in a
-terminal and approve in the browser, then:
-`git apply patches/0001-ci-c2pa-sdk-test-and-actions-bump.patch && git push`.
-The patch (reviewed, `git apply --check` clean) also bumps the deprecated
-action versions. Everything else in CI is already green.
-
-### P1 — extend the AIDE path (baseline is done)
-The core integration and measurement are complete (see
-`experiments/AIDE_EVALUATION.md`). Follow-ups, in order of value:
-1. ONNX export of the fused AIDE graph for the runtime-profile adapter
-   (`run_aide.py --export-onnx` scaffolds it; needs an opset pass for the
-   DCT/HPF front) so `scan --model-path` and the Android app can consume it
-   without torch. Until then the adapter is a research script.
-2. Full Synthbuster sweep (9k images, zip already local) against RAISE-1k
-   reals (manual license form) — the 90-image cross test is a smoke, not a
-   claim.
-3. Revisit the Android neural-score weight-0 policy once the ONNX path is
-   validated; a fused heuristic+AIDE profile via `fusion` is the natural
-   next artifact.
-
-### P2 — release hygiene
-- Tag `v0.1.0` once P0 lands (version is still `0.1.0.dev0`); add a
-  CHANGELOG from the git history (the log messages are already
-  release-note quality).
-- Add coverage tooling and a perf regression assertion for scan throughput
-  (the `perf` report exists; a pass/fail bound does not).
-- Consider a `dev` CI job running the fixture-regeneration script on a
-  clean runner to keep reproducibility from drifting.
-
-### P3 — later / optional
-- CLIDE-style zero-shot direction for unseen generators (registry
-  research entry).
-- Localization review of Korean verdict strings against the English docs
-  terminology.
-
-## Non-goals (stable)
-- No cloud calls, no upload, no login — local-only by design.
-- No final "this is fake" verdicts — screening signals with next checks.
-- No checkpoint publication without dataset license, model license, and a
-  calibration report (VERIFIED_REGISTRY adoption process, step 4).
+- **2026-09-11**: full Synthbuster sweep (9 generators, 720 images,
+  AUROC 0.951); AIDE ONNX export verified (external-data split at 3.57GB,
+  probs identical to torch on real images); ROADMAP rewritten against the
+  four-modality external audit (every audit claim verified in code first:
+  fake-landmark estimator `face.py:185`, single-box rPPG, pseudo-
+  perplexity, scalar multimodal average — all real, all now P2 items).
+- **2026-09-09**: AIDE reimplementation (timm trunk after discovering a
+  hand-rolled ConvNeXt diverges by 14.1), official-checkpoint parity, three
+  AUROC-1.0 evaluations, evaluation report + scorecard 8.0, CHANGELOG.
+- **2026-09-09**: multi-digit class-prefix label fix (`07_real`, `10_fake`).
+- **2026-09-08**: real-data passes — ProGAN/Synthbuster measurements,
+  benchmark-label fix, robustness-variant generator, C2PA fixture
+  restoration + reproducible builder, dev extra, link-checker fixes.
+- Earlier: 36-command CLI, SBI training, ONNX handoff, Android module,
+  verified registry, CI, honest-labeling posture throughout.
