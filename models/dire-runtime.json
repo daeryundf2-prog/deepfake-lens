@@ -1,0 +1,14 @@
+{
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "DIRE (ICCV 2023) diffusion reconstruction error",
+  "candidate_key": "dire-iccv-2023",
+  "runtime": "dire",
+  "supported": false,
+  "reason": "DIRE is not a drop-in checkpoint: it requires a pretrained ADM diffusion model plus a per-image inversion/reconstruction pipeline, and the repo ships training/eval code rather than a single detector weight file. Not wired; kept as a documented placeholder profile.",
+  "fetch": "Source and instructions: https://github.com/ZhendongWang6/DIRE — wiring it would need an ADM checkpoint (OpenAI guided-diffusion weights) plus a DIRE reconstruction runner; contributions welcome behind optional deps.",
+  "source_url": "https://github.com/ZhendongWang6/DIRE",
+  "limitations": [
+    "This profile never produces scores; it exists to document the candidate and its fetch path.",
+    "Even when wired, diffusion-reconstruction error is a prioritization signal, not a truth label."
+  ]
+}

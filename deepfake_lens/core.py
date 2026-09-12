@@ -747,6 +747,7 @@ def _model_analysis_from_json(data: dict[str, object]) -> ExternalModelAnalysis:
         model=str(data.get("model", "")),
         detail=str(data.get("detail", "")),
         limitations=[str(item) for item in data.get("limitations", [])] if isinstance(data.get("limitations"), list) else [],
+        models=[dict(item) for item in data.get("models", []) if isinstance(item, dict)] if isinstance(data.get("models"), list) else [],
     )
 
 

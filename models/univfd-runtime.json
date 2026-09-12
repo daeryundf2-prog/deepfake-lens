@@ -1,0 +1,26 @@
+{
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "UnivFD (CVPR 2023) CLIP ViT-L/14 linear probe",
+  "candidate_key": "univfd-cvpr-2023",
+  "runtime": "clip-linear",
+  "backbone": "openai/clip-vit-large-patch14",
+  "checkpoint": "univfd_fc.pth",
+  "input_size": 224,
+  "mean": [0.48145466, 0.4578275, 0.40821073],
+  "std": [0.26862954, 0.26130258, 0.27577711],
+  "score_index": 0,
+  "score_activation": "sigmoid",
+  "threshold": 67,
+  "source_url": "https://github.com/YuhengLi99/UniversalFakeDetect",
+  "limitations": [
+    "Weights are not committed; download the linear-probe head (fc weights, ~3 MB) from the UnivFD repo and place it at models/univfd_fc.pth.",
+    "The first run downloads the CLIP ViT-L/14 backbone (~1.7 GB) via transformers into the Hugging Face cache; set 'backbone' to a local snapshot directory to run fully offline.",
+    "UnivFD is a linear probe on CLIP features — a prioritization signal, not a truth label; verify AUROC on your own data before trusting scores."
+  ],
+  "notes": [
+    "Runtime 'clip-linear' loads the CLIP backbone named in 'backbone' (Hugging Face id or local directory) via transformers, L2-normalizes image features, and applies the linear head stored in 'checkpoint'.",
+    "The checkpoint may be a state dict with weight/bias keys (UnivFD's released fc weights) or a bare 2-D weight tensor; score_index 0 with sigmoid yields the fake probability on a 0-100 scale.",
+    "input_size/mean/std record UnivFD's preprocessing (224px, CLIP stats) for reference; the CLIPProcessor applies them internally.",
+    "The checkpoint path is relative to this profile's directory (models/); keep it out of git — it is covered by .gitignore."
+  ]
+}
