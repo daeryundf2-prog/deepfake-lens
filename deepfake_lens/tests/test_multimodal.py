@@ -5,10 +5,22 @@ from __future__ import annotations
 import unittest
 
 from deepfake_lens.multimodal import (
+    AvSyncAnalysis,
     MultimodalAnalysis,
     MultimodalEvidenceSignal,
+    analyze_av_sync,
     analyze_multimodal,
+    av_sync_from_envelopes,
 )
+
+
+def _has_numpy() -> bool:
+    try:
+        import numpy  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
 
 
 class MultimodalAnalysisTest(unittest.TestCase):
@@ -111,6 +123,106 @@ class MultimodalAnalysisTest(unittest.TestCase):
         )
         self.assertEqual(signal.title, "Test")
         self.assertEqual(signal.source_modality, "image")
+
+
+class AvSyncTest(unittest.TestCase):
+    """Synthetic-envelope tests for the A/V sync check."""
+
+    @staticmethod
+    def _burst_envelope(*, seconds=10.0, rate=25.0, seed=0):
+        import numpy as np
+
+        rng = np.random.default_rng(seed)
+        n = int(seconds * rate)
+        env = rng.normal(0, 0.05, size=n)
+        # Speech-like bursts every ~1.5 s
+        for center in range(int(rate), n - int(rate), int(1.5 * rate)):
+            width = int(0.2 * rate)
+            lo, hi = center - width, center + width
+            env[lo:hi] += np.hanning(hi - lo)
+        return env.tolist()
+
+    @unittest.skipUnless(_has_numpy(), "numpy not installed")
+    def test_aligned_envelopes_report_small_offset(self) -> None:
+        audio = self._burst_envelope()
+        motion = self._burst_envelope()
+        result = av_sync_from_envelopes(
+            audio, motion, audio_rate=25.0, motion_rate=25.0
+        )
+        self.assertIsNotNone(result.offset_seconds)
+        self.assertAlmostEqual(result.offset_seconds, 0.0, delta=0.1)
+        self.assertGreater(result.peak_correlation, 0.5)
+        self.assertEqual(result.score, 0)
+        self.assertFalse(result.signals)
+
+    @unittest.skipUnless(_has_numpy(), "numpy not installed")
+    def test_delayed_audio_flags_desync(self) -> None:
+        import numpy as np
+
+        motion = self._burst_envelope()
+        delay = int(0.5 * 25)  # audio arrives 0.5 s late
+        audio = np.concatenate([np.zeros(delay), np.asarray(motion)[:-delay]]).tolist()
+        result = av_sync_from_envelopes(
+            audio, motion, audio_rate=25.0, motion_rate=25.0
+        )
+        self.assertAlmostEqual(result.offset_seconds, 0.5, delta=0.1)
+        self.assertGreater(result.peak_correlation, 0.15)
+        self.assertTrue(any("싱크 오프셋" in s.title for s in result.signals))
+        self.assertGreater(result.score, 0)
+
+    @unittest.skipUnless(_has_numpy(), "numpy not installed")
+    def test_uncorrelated_envelopes_do_not_score(self) -> None:
+        import numpy as np
+
+        rng = np.random.default_rng(1)
+        audio = np.abs(rng.normal(0, 1, 250)).tolist()
+        motion = np.abs(rng.normal(0, 1, 250)).tolist()
+        result = av_sync_from_envelopes(
+            audio, motion, audio_rate=25.0, motion_rate=25.0
+        )
+        self.assertEqual(result.score, 0)
+        self.assertFalse(result.signals)
+        self.assertTrue(
+            any("상관이 낮" in line or "싱크" in line for line in result.limitations)
+            or result.peak_correlation < 0.15
+        )
+
+    def test_short_or_flat_envelopes_degrade_gracefully(self) -> None:
+        result = av_sync_from_envelopes(
+            [0.0] * 500, [1.0] * 500, audio_rate=25.0, motion_rate=25.0
+        )
+        self.assertEqual(result.band, "unknown")
+        self.assertIsNone(result.offset_seconds)
+
+    def test_missing_file_returns_error(self) -> None:
+        result = analyze_av_sync("/nonexistent/video.mp4")
+        self.assertEqual(result.band, "unknown")
+        self.assertIn("존재하지 않습니다", result.verdict)
+
+    def test_avsync_analysis_to_json(self) -> None:
+        result = analyze_av_sync("/nonexistent/video.mp4")
+        data = result.to_json()
+        self.assertIsInstance(data, dict)
+        self.assertIn("offset_seconds", data)
+        self.assertIn("peak_correlation", data)
+        self.assertIn("method", data)
+
+    @unittest.skipUnless(_has_numpy(), "numpy not installed")
+    def test_avsync_feeds_multimodal_as_cross_modal(self) -> None:
+        import numpy as np
+
+        motion = self._burst_envelope()
+        delay = int(0.5 * 25)
+        audio = np.concatenate([np.zeros(delay), np.asarray(motion)[:-delay]]).tolist()
+        sync = av_sync_from_envelopes(
+            audio, motion, audio_rate=25.0, motion_rate=25.0
+        )
+        combined = analyze_multimodal(image_score=20, text_score=20, av_sync=sync)
+        self.assertIn("av-sync", combined.modalities_used)
+        self.assertGreater(combined.score, 20)
+        self.assertTrue(
+            any(s.source_modality == "cross-modal" and "싱크" in s.title for s in combined.signals)
+        )
 
 
 if __name__ == "__main__":

@@ -2,11 +2,19 @@
 
 Combines signals from image, text, audio, and video analysis
 to provide a unified assessment of content authenticity.
+
+Also provides a real audio/visual sync check: the audio amplitude
+envelope (librosa) is cross-correlated with the visual motion envelope
+(frame-difference energy via opencv). A correlated-but-shifted pairing
+beyond the desync threshold is a suspicion signal — a classic dubbed or
+re-timed audio artifact. All heavy deps stay optional extras.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Sequence
 
 
 @dataclass(frozen=True)
@@ -33,6 +41,35 @@ class MultimodalAnalysis:
         return asdict(self)
 
 
+# A/V sync thresholds
+AV_SYNC_MAX_LAG_SECONDS = 1.0
+AV_SYNC_DESYNC_SECONDS = 0.3
+AV_SYNC_MIN_CORRELATION = 0.15
+AV_SYNC_DESYNC_WEIGHT = 18
+AV_SYNC_MIN_SECONDS = 3.0
+AV_SYNC_MIN_SAMPLES = 16
+
+
+@dataclass(frozen=True)
+class AvSyncAnalysis:
+    score: int
+    band: str
+    band_label: str
+    verdict: str
+    signals: list[MultimodalEvidenceSignal]
+    limitations: list[str]
+    # Positive offset = the audio envelope is delayed relative to visual
+    # motion. None when no reliable cross-correlation peak exists.
+    offset_seconds: float | None
+    peak_correlation: float | None
+    audio_seconds: float
+    video_seconds: float
+    method: str = "envelope-xcorr-v1"
+
+    def to_json(self) -> dict[str, object]:
+        return asdict(self)
+
+
 def analyze_multimodal(
     image_score: int | None = None,
     text_score: int | None = None,
@@ -42,6 +79,7 @@ def analyze_multimodal(
     text_source_guess: str | None = None,
     audio_source_guess: str | None = None,
     video_source_guess: str | None = None,
+    av_sync: AvSyncAnalysis | None = None,
 ) -> MultimodalAnalysis:
     """Combine signals from multiple modalities into a unified analysis."""
     signals: list[MultimodalEvidenceSignal] = []
@@ -130,6 +168,21 @@ def analyze_multimodal(
             ))
         if video_source_guess and video_source_guess != "unknown":
             source_guesses.append((video_source_guess, "video"))
+
+    # A/V sync result, when provided, is a true cross-modal measurement:
+    # its suspicion signals enter the score via the cross-modal weight.
+    if av_sync is not None:
+        modalities_used.append("av-sync")
+        for sync_signal in av_sync.signals:
+            signals.append(
+                MultimodalEvidenceSignal(
+                    sync_signal.title,
+                    sync_signal.detail,
+                    sync_signal.weight,
+                    "cross-modal",
+                )
+            )
+        limitations.extend(av_sync.limitations)
 
     # Calculate consistency score
     consistency_score = _calculate_consistency(scores, source_guesses)
@@ -248,3 +301,279 @@ def _check_inconsistency(
             )
 
     return None
+
+
+def analyze_av_sync(
+    path: Path | str, *, max_lag_seconds: float = AV_SYNC_MAX_LAG_SECONDS
+) -> AvSyncAnalysis:
+    """Extract audio and motion envelopes from a video file and measure
+    their cross-correlation offset.
+
+    Requires the optional ``audio`` (librosa) and ``video`` (opencv)
+    extras; degrades to an error analysis when either is absent or the
+    file has no usable audio/video stream.
+    """
+    video_path = Path(path)
+    if not video_path.is_file():
+        return _av_sync_error(f"파일이 존재하지 않습니다: {video_path}")
+
+    try:
+        import cv2  # noqa: F401
+    except ImportError:
+        return _av_sync_error("opencv가 설치되어 있지 않습니다. pip install opencv-python으로 설치하세요.")
+    try:
+        import librosa  # noqa: F401
+    except ImportError:
+        return _av_sync_error("librosa가 설치되어 있지 않습니다. pip install librosa로 설치하세요.")
+
+    motion_env, motion_rate, video_seconds = _motion_envelope(video_path)
+    if motion_env is None:
+        return _av_sync_error("비디오 프레임을 읽을 수 없어 모션 신호를 추출하지 못했습니다.")
+
+    audio_env, audio_rate, audio_seconds = _audio_envelope(video_path)
+    if audio_env is None:
+        return _av_sync_error("오디오 스트림을 읽을 수 없어 A/V 싱크를 측정할 수 없습니다.")
+
+    return av_sync_from_envelopes(
+        audio_env,
+        motion_env,
+        audio_rate=audio_rate,
+        motion_rate=motion_rate,
+        max_lag_seconds=max_lag_seconds,
+        audio_seconds=audio_seconds,
+        video_seconds=video_seconds,
+    )
+
+
+def av_sync_from_envelopes(
+    audio_env: Sequence[float],
+    motion_env: Sequence[float],
+    *,
+    audio_rate: float,
+    motion_rate: float,
+    max_lag_seconds: float = AV_SYNC_MAX_LAG_SECONDS,
+    audio_seconds: float | None = None,
+    video_seconds: float | None = None,
+) -> AvSyncAnalysis:
+    """Pure envelope-level A/V sync measurement.
+
+    Both envelopes are resampled to the coarser rate and z-normalized; the
+    normalized cross-correlation peak over +/- ``max_lag_seconds`` gives
+    the offset. Positive offset = audio delayed relative to motion. A
+    correlated pairing shifted beyond ``AV_SYNC_DESYNC_SECONDS`` raises a
+    suspicion signal; weak correlation degrades to a limitation, never a
+    score.
+    """
+    limitations = [
+        "A/V 싱크는 오디오 에너지-모션 에너지 상관 기반 참고 측정값이며, 립싱크 수준의 정밀 측정이 아닙니다."
+    ]
+    if audio_seconds is None:
+        audio_seconds = len(audio_env) / audio_rate if audio_rate > 0 else 0.0
+    if video_seconds is None:
+        video_seconds = len(motion_env) / motion_rate if motion_rate > 0 else 0.0
+
+    measure = _av_sync_measure(
+        audio_env, motion_env, audio_rate, motion_rate, max_lag_seconds
+    )
+    if measure is None:
+        return _av_sync_error(
+            "엔벨로프가 너무 짧거나 분산이 없어 A/V 싱크를 측정할 수 없습니다.",
+            audio_seconds=audio_seconds,
+            video_seconds=video_seconds,
+        )
+
+    offset_seconds = measure["offset_seconds"]
+    peak_correlation = measure["peak_correlation"]
+    signals: list[MultimodalEvidenceSignal] = []
+    score = 0
+
+    if peak_correlation < AV_SYNC_MIN_CORRELATION:
+        verdict = "오디오-비디오 에너지 상관이 낮아 싱크 일치 여부를 판별할 수 없습니다."
+        limitations.append(
+            "무음 구간·정지 장면·배경음 위주 오디오는 본래 상관이 낮습니다. 낮은 상관 자체는 의심 신호가 아닙니다."
+        )
+    elif abs(offset_seconds) > AV_SYNC_DESYNC_SECONDS:
+        score = AV_SYNC_DESYNC_WEIGHT
+        signals.append(
+            MultimodalEvidenceSignal(
+                "A/V 싱크 오프셋 의심",
+                f"오디오-모션 상관 피크가 {offset_seconds:+.2f}초에서 발생 "
+                f"(상관 {peak_correlation:.2f}). 더빙·재타이밍된 오디오 가능성이 있습니다.",
+                AV_SYNC_DESYNC_WEIGHT,
+                "cross-modal",
+            )
+        )
+        verdict = "오디오와 화면 움직임이 상관되지만 유의미한 시간 오프셋이 있습니다."
+        limitations.append("프레임레이트 추정 오차와 인코딩 지연이 소규모 오프셋을 만들 수 있습니다.")
+    else:
+        verdict = "오디오-모션 에너지가 정상 범위에서 동기화되어 있습니다."
+
+    band = "medium" if score >= 25 else "low"
+    band_label = "주의" if band == "medium" else "낮음"
+    return AvSyncAnalysis(
+        score=score,
+        band=band,
+        band_label=band_label,
+        verdict=verdict,
+        signals=signals,
+        limitations=limitations,
+        offset_seconds=offset_seconds,
+        peak_correlation=peak_correlation,
+        audio_seconds=audio_seconds,
+        video_seconds=video_seconds,
+    )
+
+
+def _av_sync_error(
+    message: str, *, audio_seconds: float = 0.0, video_seconds: float = 0.0
+) -> AvSyncAnalysis:
+    return AvSyncAnalysis(
+        score=0,
+        band="unknown",
+        band_label="판단 어려움",
+        verdict=message,
+        signals=[],
+        limitations=[message],
+        offset_seconds=None,
+        peak_correlation=None,
+        audio_seconds=audio_seconds,
+        video_seconds=video_seconds,
+    )
+
+
+def _av_sync_measure(
+    audio_env: Sequence[float],
+    motion_env: Sequence[float],
+    audio_rate: float,
+    motion_rate: float,
+    max_lag_seconds: float,
+) -> dict[str, float] | None:
+    """Normalized cross-correlation between the two envelopes.
+
+    Returns {"offset_seconds", "peak_correlation"} or None when the inputs
+    cannot support a measurement (too short, zero variance, numpy absent).
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        return None
+
+    audio = np.asarray(list(audio_env), dtype=np.float64)
+    motion = np.asarray(list(motion_env), dtype=np.float64)
+    if audio_rate <= 0 or motion_rate <= 0:
+        return None
+
+    rate = min(audio_rate, motion_rate)
+    audio_r = _resample_linear(audio, audio_rate, rate)
+    motion_r = _resample_linear(motion, motion_rate, rate)
+    length = min(len(audio_r), len(motion_r))
+    audio_r = audio_r[:length] - audio_r[:length].mean()
+    motion_r = motion_r[:length] - motion_r[:length].mean()
+
+    if length < AV_SYNC_MIN_SAMPLES:
+        return None
+    if length / rate < AV_SYNC_MIN_SECONDS:
+        return None
+    if audio_r.std() <= 1e-9 or motion_r.std() <= 1e-9:
+        return None
+
+    max_lag = int(max_lag_seconds * rate)
+    best_lag = 0
+    best_corr = 0.0
+    # corr(lag) = <a(t), m(t - lag)>: a positive lag means the audio
+    # feature arrives later than the matching motion feature.
+    for lag in range(-max_lag, max_lag + 1):
+        if lag >= 0:
+            a_seg = audio_r[lag:]
+            m_seg = motion_r[: length - lag]
+        else:
+            a_seg = audio_r[: length + lag]
+            m_seg = motion_r[-lag:]
+        if len(a_seg) < AV_SYNC_MIN_SAMPLES:
+            continue
+        denom = float(np.linalg.norm(a_seg) * np.linalg.norm(m_seg))
+        if denom <= 1e-9:
+            continue
+        corr = float(np.dot(a_seg, m_seg) / denom)
+        # Only positive correlation counts as alignment; an anti-
+        # correlated envelope is not a sync match.
+        if corr > best_corr:
+            best_corr = corr
+            best_lag = lag
+
+    return {
+        "offset_seconds": best_lag / rate,
+        "peak_correlation": best_corr,
+    }
+
+
+def _resample_linear(series, from_rate: float, to_rate: float):
+    """Linear-interpolation resampling; identity when rates already match."""
+    import numpy as np
+
+    if abs(from_rate - to_rate) < 1e-9 or len(series) == 0:
+        return np.asarray(series, dtype=np.float64)
+    duration = len(series) / from_rate
+    target_len = max(1, int(round(duration * to_rate)))
+    positions = np.linspace(0.0, len(series) - 1, num=target_len)
+    return np.interp(positions, np.arange(len(series)), series)
+
+
+def _motion_envelope(video_path: Path):
+    """Per-frame mean absolute frame-difference energy via opencv.
+
+    Returns (envelope, rate_hz, video_seconds) or (None, 0, 0) on failure.
+    """
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return None, 0.0, 0.0
+
+    capture = cv2.VideoCapture(str(video_path))
+    if not capture.isOpened():
+        return None, 0.0, 0.0
+    try:
+        fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
+        total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        envelope: list[float] = []
+        previous = None
+        while True:
+            ok, frame = capture.read()
+            if not ok:
+                break
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float64)
+            if previous is not None:
+                envelope.append(float(np.abs(gray - previous).mean()))
+            previous = gray
+        video_seconds = total / fps if fps > 0 else 0.0
+        if not envelope:
+            return None, 0.0, video_seconds
+        return envelope, fps, video_seconds
+    finally:
+        capture.release()
+
+
+def _audio_envelope(video_path: Path):
+    """RMS amplitude envelope of the video's audio track via librosa.
+
+    Returns (envelope, rate_hz, audio_seconds) or (None, 0, 0) on failure.
+    """
+    try:
+        import librosa
+    except ImportError:
+        return None, 0.0, 0.0
+
+    sample_rate = 22050
+    hop = 512
+    try:
+        y, sr = librosa.load(str(video_path), sr=sample_rate, mono=True)
+    except Exception:
+        return None, 0.0, 0.0
+    if y is None or len(y) < hop:
+        return None, 0.0, 0.0
+    envelope = librosa.feature.rms(y=y, hop_length=hop)[0]
+    audio_seconds = len(y) / sr
+    if len(envelope) == 0:
+        return None, 0.0, audio_seconds
+    return [float(v) for v in envelope], sr / hop, audio_seconds

@@ -29,7 +29,7 @@ Every subcommand, briefly. Detail for the core workflow lives in the sections be
 - `text-advanced <file>`: advanced text stylometry analysis.
 - `forensic <file>`: C2PA/provenance metadata forensics (SDK validation when `provenance` extra installed).
 - `classify <file>`: which AI tool produced the content (word-boundary marker matching).
-- `multimodal`: combine per-modality scores into one assessment.
+- `multimodal`: combine per-modality scores into one assessment; `--av-sync <video>` adds an audio-envelope vs motion-envelope cross-correlation desync check (requires opencv+librosa).
 - `realtime`: moving-average frame scoring with alert thresholds.
 - `rppg <video>`: CHROM cardiac-pulse screening from face video.
 - `prnu <target> --reference ...`: sensor-fingerprint provenance correlation.

@@ -27,7 +27,7 @@ from .inpaint import analyze_inpainting, InpaintAnalysis
 from .text_advanced import analyze_text_advanced, TextAdvancedAnalysis
 from .c2pa import analyze_metadata_forensic, MetadataForensicAnalysis
 from .classifier import classify_metadata, classify_text_content, ClassificationResult as ToolClassificationResult
-from .multimodal import analyze_multimodal, MultimodalAnalysis
+from .multimodal import analyze_av_sync, analyze_multimodal, MultimodalAnalysis
 from .realtime import RealtimeDetector, create_realtime_detector
 from .rppg import analyze_rppg, RppgAnalysis
 from .prnu import analyze_prnu, PrnuAnalysis
@@ -237,6 +237,7 @@ def main(argv: list[str] | None = None) -> int:
     multimodal_parser.add_argument("--text-source", type=str, help="text source guess")
     multimodal_parser.add_argument("--audio-source", type=str, help="audio source guess")
     multimodal_parser.add_argument("--video-source", type=str, help="video source guess")
+    multimodal_parser.add_argument("--av-sync", type=Path, help="video file for audio/visual sync check (requires opencv+librosa)")
     multimodal_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     multimodal_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
@@ -638,6 +639,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         return 0
     if args.command == "multimodal":
+        av_sync_result = analyze_av_sync(args.av_sync) if args.av_sync else None
         analysis = analyze_multimodal(
             image_score=args.image_score,
             text_score=args.text_score,
@@ -647,6 +649,7 @@ def main(argv: list[str] | None = None) -> int:
             text_source_guess=args.text_source,
             audio_source_guess=args.audio_source,
             video_source_guess=args.video_source,
+            av_sync=av_sync_result,
         )
         if args.json_out:
             _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")

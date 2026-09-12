@@ -28,7 +28,7 @@ from .inpaint import InpaintAnalysis, analyze_inpainting
 from .text_advanced import TextAdvancedAnalysis, analyze_text_advanced
 from .c2pa import MetadataForensicAnalysis, analyze_metadata_forensic, validate_c2pa_manifest
 from .classifier import ClassificationResult as ToolClassificationResult, classify_metadata
-from .multimodal import MultimodalAnalysis, analyze_multimodal
+from .multimodal import AvSyncAnalysis, MultimodalAnalysis, analyze_av_sync, analyze_multimodal
 from .realtime import RealtimeDetector, RealtimeState, create_realtime_detector
 from .rppg import RppgAnalysis, analyze_rppg
 from .prnu import PrnuAnalysis, analyze_prnu, camera_fingerprint, normalized_cross_correlation, prnu_residual
@@ -50,6 +50,7 @@ __all__ = [
     "MetadataForensicAnalysis",
     "ToolClassificationResult",
     "MultimodalAnalysis",
+    "AvSyncAnalysis",
     "RealtimeDetector",
     "RppgAnalysis",
     "PrnuAnalysis",
@@ -84,6 +85,7 @@ __all__ = [
     "validate_c2pa_manifest",
     "classify_metadata",
     "analyze_multimodal",
+    "analyze_av_sync",
     "create_realtime_detector",
     "analyze_rppg",
     "analyze_prnu",

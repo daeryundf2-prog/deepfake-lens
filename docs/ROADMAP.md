@@ -66,9 +66,14 @@ The audit correctly flags where the codebase *simulates* capability:
    measure exposed publicly as `bigram_entropy`, and outputs now state
    explicitly that it is a distribution statistic, not LM perplexity.
    A real PPL/Binoculars optional extra remains future work.
-4. **multimodal.py**: scalar average admits to being a summary. Add an
-   audio-visual lip-sync phase check (phoneme closure vs formant timing) as
-   the first true cross-modal signal.
+4. **multimodal.py**: DONE (first true cross-modal signal) —
+   `analyze_av_sync` cross-correlates the librosa audio envelope with the
+   opencv frame-difference motion envelope and flags a correlated pairing
+   shifted beyond 0.3 s (dubbed/re-timed audio artifact). The scalar
+   score aggregation remains the fallback when deps or streams are
+   absent; `analyze_multimodal(av_sync=...)` folds the finding in as a
+   cross-modal signal. A phoneme-closure/formant-level lip-sync check
+   remains future work.
 
 ### P3 — Modern-benchmark coverage (audit P2)
 Current data: ProGAN (2019 GAN), Synthbuster (2023 diffusion). Missing
