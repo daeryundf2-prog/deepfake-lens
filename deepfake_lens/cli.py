@@ -49,6 +49,7 @@ from .webapp import run_server
 COMMANDS = {"scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "inpaint", "text-advanced", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
 
 DEFAULT_ENGINE_PROFILE = "models/aide-runtime.json"
+DEFAULT_AUDIO_ENGINE_PROFILE = "models/aasist-runtime.json"
 
 
 def default_model_path(root: Path | None = None) -> Path | None:
@@ -60,6 +61,18 @@ def default_model_path(root: Path | None = None) -> Path | None:
     """
     base = Path(root) if root is not None else Path(__file__).resolve().parent.parent
     candidate = base / DEFAULT_ENGINE_PROFILE
+    return candidate if candidate.is_file() else None
+
+
+def default_audio_model_path(root: Path | None = None) -> Path | None:
+    """Bundled default audio profile (models/aasist-runtime.json), when present.
+
+    Same contract as default_model_path: the profile is committed, the
+    AASIST checkpoint is not (scripts/fetch_aasist.py), and absence returns
+    None so audio analysis stays heuristic-only.
+    """
+    base = Path(root) if root is not None else Path(__file__).resolve().parent.parent
+    candidate = base / DEFAULT_AUDIO_ENGINE_PROFILE
     return candidate if candidate.is_file() else None
 
 
@@ -84,8 +97,8 @@ def main(argv: list[str] | None = None) -> int:
     scan_parser.add_argument("--pixel-max-side", type=int, default=DEFAULT_PIXEL_MAX_SIDE, help=f"maximum sampled side for pixel analysis (default: {DEFAULT_PIXEL_MAX_SIDE})")
     scan_parser.add_argument("--heatmaps", action="store_true", help="write PNG heatmaps for deep pixel localization")
     scan_parser.add_argument("--heatmap-dir", type=Path, help="directory for heatmaps (default: folder/deepfake_lens_heatmaps)")
-    scan_parser.add_argument("--model-path", type=Path, help="external model profile or neural checkpoint path (default: auto-discover models/aide-runtime.json)")
-    scan_parser.add_argument("--no-default-engine", action="store_true", help="ignore the bundled models/aide-runtime.json default-engine profile")
+    scan_parser.add_argument("--model-path", type=Path, help="external model profile, checkpoint, or profile directory (default: auto-discover bundled image+audio engine profiles)")
+    scan_parser.add_argument("--no-default-engine", action="store_true", help="ignore the bundled models/*-runtime.json default-engine profiles")
     scan_parser.add_argument("--fusion-profile", type=Path, help="optional score-fusion profile")
     scan_parser.add_argument("--cache", type=Path, help="JSON cache for resumable large-folder scans")
     scan_parser.add_argument("--workers", type=int, default=1, help="parallel file workers for large folders")
@@ -213,6 +226,8 @@ def main(argv: list[str] | None = None) -> int:
     audio_parser = subparsers.add_parser("audio", help="analyze audio files for AI generation or voice cloning")
     audio_parser.add_argument("file", type=Path, help="audio file to analyze")
     audio_parser.add_argument("--segment-seconds", type=int, default=30, help="maximum seconds to analyze (default: 30)")
+    audio_parser.add_argument("--model-path", type=Path, help="external audio model profile (default: auto-discover models/aasist-runtime.json)")
+    audio_parser.add_argument("--no-default-engine", action="store_true", help="ignore the bundled models/aasist-runtime.json default-engine profile")
     audio_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     audio_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
@@ -546,7 +561,8 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"count": payload["count"], "ffmpeg_available": payload["ffmpeg_available"], "out": str(args.out)}, ensure_ascii=False, indent=2))
         return 0
     if args.command == "audio":
-        analysis = analyze_audio(args.file, segment_seconds=args.segment_seconds)
+        audio_model_path = args.model_path or (None if args.no_default_engine else default_audio_model_path())
+        analysis = analyze_audio(args.file, segment_seconds=args.segment_seconds, model_path=audio_model_path)
         if args.json_out:
             _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
@@ -982,9 +998,17 @@ def main(argv: list[str] | None = None) -> int:
         scan_parser.error("--heatmaps requires --pixel deep")
     if args.model_path and not args.model_path.exists():
         scan_parser.error("--model-path does not exist")
-    model_path = args.model_path or (None if args.no_default_engine else default_model_path())
+    # Default engine profiles cover both modalities: the adapter filters by
+    # modality, so images run the image profiles and audio files run the
+    # audio ones. An explicit --model-path replaces both defaults.
+    if args.model_path:
+        model_path: Path | list[Path] | None = args.model_path
+    elif args.no_default_engine:
+        model_path = None
+    else:
+        model_path = [path for path in (default_model_path(), default_audio_model_path()) if path is not None] or None
     if model_path and args.model_path is None:
-        print(f"default engine profile: {model_path}", file=sys.stderr)
+        print(f"default engine profiles: {model_path}", file=sys.stderr)
 
     try:
         if args.progress:

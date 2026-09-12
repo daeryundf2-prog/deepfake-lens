@@ -4,6 +4,31 @@ All notable changes to Deepfake Lens. Format: Keep a Changelog; this repo
 has not tagged a release yet (version is `0.1.0.dev0`), so entries are
 grouped by work pass rather than release.
 
+## 2026-09 — AASIST audio runtime + modality-aware adapter
+
+### Added
+- `models/aasist-runtime.json` — committed runtime profile for AASIST
+  (Interspeech 2022, the standard audio anti-spoofing baseline): 16 kHz
+  mono, 64 600-sample window, spoof-probability score semantics; weights
+  stay out of git.
+- `scripts/run_aasist.py` — faithful minimal reimplementation (sinc
+  convolution frontend, residual blocks, spectro-temporal graph attention
+  + pooling) with a stdlib WAV loader; loads the official `AASIST.pth`
+  strict state-dict.
+- `scripts/fetch_aasist.py` — checkpoint fetcher (direct raw-GitHub URL,
+  ~1.3 MB) with sha256 verification, license notice, and `--force` guard.
+- `model_adapter` modality filtering: profiles declare `modality`
+  (`image`/`audio`) and only run on matching files; the `aasist` runtime
+  dispatches to `scripts/run_aasist.py`. Profiles that exist but do not
+  match the file's modality are skipped silently (no `model_analysis`
+  entry), same as having no profile.
+- Audio scan plumbing: `analyze_audio` accepts `model_path`, scan items of
+  `kind: audio` carry `model_analysis`, and `summary.external_model_active`
+  counts them identically to images. `scan`/`audio`/`api-serve`
+  auto-discover `models/aasist-runtime.json`.
+- Registry entry `aasist-2022`; docs updated (`models/README.md`, JSON
+  contract, CLI reference).
+
 ## 2026-09 — AIDE default-engine plumbing
 
 ### Added

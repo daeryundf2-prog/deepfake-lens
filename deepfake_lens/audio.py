@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .model_adapter import ExternalModelAnalysis, analyze_external_model
+
 
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wma", ".opus"}
 DEFAULT_SAMPLE_RATE = 16000
@@ -55,6 +57,9 @@ class AudioAnalysis:
     source_guess: str
     features: AudioFeatures | None = None
     model_name: str = "local-audio-heuristic-v1"
+    # External audio model result (e.g. AASIST via models/aasist-runtime.json);
+    # None when no audio-modality profile was supplied.
+    model_analysis: ExternalModelAnalysis | None = None
 
     def to_json(self) -> dict[str, object]:
         data = asdict(self)
@@ -65,8 +70,15 @@ def analyze_audio(
     path: Path | str,
     *,
     segment_seconds: int = DEFAULT_SEGMENT_SECONDS,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None = None,
 ) -> AudioAnalysis:
-    """Analyze an audio file for signs of AI generation or voice cloning."""
+    """Analyze an audio file for signs of AI generation or voice cloning.
+
+    ``model_path`` plugs an external audio model (e.g. the AASIST runtime
+    profile in models/aasist-runtime.json) into the same adapter contract as
+    image scans: only audio-modality profiles run, and the result lands in
+    ``model_analysis`` as a prioritization signal, not a truth label.
+    """
     audio_path = Path(path)
     if not audio_path.is_file():
         return _error_analysis(f"파일이 존재하지 않습니다: {audio_path}")
@@ -86,9 +98,10 @@ def analyze_audio(
     if file_size == 0:
         return _error_analysis("파일이 비어 있습니다.")
 
+    model_analysis = analyze_external_model(audio_path, model_path, modality="audio") if model_path else None
     features = _extract_features(audio_path, segment_seconds=segment_seconds)
     if features is None:
-        return _error_analysis("오디오 특징을 추출할 수 없습니다. librosa가 설치되어 있는지 확인하세요.")
+        return _features_failed_analysis(model_analysis)
 
     signals: list[AudioEvidenceSignal] = []
     limitations: list[str] = []
@@ -128,6 +141,11 @@ def analyze_audio(
     if regularity_signal:
         signals.append(regularity_signal)
 
+    # External model (e.g. AASIST): prioritization signal, not a truth label
+    model_signal = _model_evidence_signal(model_analysis)
+    if model_signal:
+        signals.append(model_signal)
+
     # Source guess
     source_guess = _guess_audio_source(features)
 
@@ -137,6 +155,8 @@ def analyze_audio(
     if features.duration_seconds > 300:
         limitations.append("매우 긴 오디오는 구간별 분석이 필요합니다.")
     limitations.append("로컬 휴리스틱 기반 선별 결과이며, 확정적 판별이 아닙니다.")
+    if model_analysis:
+        limitations.extend(model_analysis.limitations)
 
     score = min(100, sum(signal.weight for signal in signals))
 
@@ -162,10 +182,11 @@ def analyze_audio(
         limitations=limitations,
         source_guess=source_guess,
         features=features,
+        model_analysis=model_analysis,
     )
 
 
-def _error_analysis(message: str) -> AudioAnalysis:
+def _error_analysis(message: str, *, model_analysis: ExternalModelAnalysis | None = None) -> AudioAnalysis:
     return AudioAnalysis(
         score=0,
         band="unknown",
@@ -174,7 +195,74 @@ def _error_analysis(message: str) -> AudioAnalysis:
         signals=[],
         limitations=[message],
         source_guess="unknown",
+        model_analysis=model_analysis,
     )
+
+
+def _features_failed_analysis(model_analysis: ExternalModelAnalysis | None) -> AudioAnalysis:
+    """Feature extraction needs librosa; an available model score still counts."""
+    message = "오디오 특징을 추출할 수 없습니다. librosa가 설치되어 있는지 확인하세요."
+    model_signal = _model_evidence_signal(model_analysis)
+    if model_signal is None:
+        limitations = [message]
+        if model_analysis:
+            limitations.extend(model_analysis.limitations)
+        return AudioAnalysis(
+            score=0,
+            band="unknown",
+            band_label="판단 어려움",
+            verdict=message,
+            signals=[],
+            limitations=limitations,
+            source_guess="unknown",
+            model_analysis=model_analysis,
+        )
+
+    score = min(100, model_signal.weight)
+    if score >= 67:
+        band, band_label = "high", "높음"
+        verdict = "외부 모델이 강한 합성 의심 신호를 반환했습니다 (휴리스틱 특징 추출 실패)."
+    elif score >= 35:
+        band, band_label = "medium", "주의"
+        verdict = "외부 모델이 의심 신호를 반환했습니다 (휴리스틱 특징 추출 실패)."
+    else:
+        band, band_label = "low", "낮음"
+        verdict = "외부 모델 점수가 낮습니다 (휴리스틱 특징 추출 실패)."
+    limitations = [message, "외부 모델 점수만 반영된 결과입니다 — 우선순위 신호이며 확정 판별이 아닙니다."]
+    if model_analysis:
+        limitations.extend(model_analysis.limitations)
+    return AudioAnalysis(
+        score=score,
+        band=band,
+        band_label=band_label,
+        verdict=verdict,
+        signals=[model_signal],
+        limitations=limitations,
+        source_guess="unknown",
+        model_analysis=model_analysis,
+    )
+
+
+def _model_evidence_signal(model_analysis: ExternalModelAnalysis | None) -> AudioEvidenceSignal | None:
+    """Map an external model score to an evidence signal.
+
+    Same thresholds/weights as the image path (_model_evidence_signal in
+    core.py) so an AASIST score weighs as heavily as an AIDE score.
+    """
+    if not model_analysis or not model_analysis.available:
+        return None
+    if model_analysis.score >= 82:
+        weight = 67
+        title = "외부 모델 강한 의심"
+    elif model_analysis.score >= 65:
+        weight = 42
+        title = "외부 모델 의심"
+    elif model_analysis.score >= 45:
+        weight = 24
+        title = "외부 모델 약한 의심"
+    else:
+        return None
+    return AudioEvidenceSignal(title, f"{model_analysis.model}: {model_analysis.detail}", weight)
 
 
 def _extract_features(path: Path, *, segment_seconds: int) -> AudioFeatures | None:

@@ -257,6 +257,26 @@ keeps the external signal distinct (`model_analysis` per item,
 signals, not truth labels; measured AUROC lives in
 `experiments/AIDE_EVALUATION.md`.
 
+### Default audio engine: AASIST (Interspeech 2022)
+
+`scan` and the `audio` command also auto-discover
+`models/aasist-runtime.json` for audio files. AASIST is the standard audio
+deepfake/anti-spoofing baseline (RawNet2-style sinc frontend +
+spectro-temporal graph attention), reimplemented self-contained in
+`scripts/run_aasist.py`. The checkpoint is the official in-repo
+`AASIST.pth` (~1.3 MB, MIT-licensed, trained on ASVspoof2019-LA) and is not
+committed:
+
+```sh
+# Direct GitHub raw link — no Google Drive step needed.
+python scripts/fetch_aasist.py --sha256 <hex>
+```
+
+The runtime requires optional torch; without torch or the checkpoint audio
+scans degrade to `model_analysis.available=false` and stay heuristic-only.
+Higher `model_analysis.score` means more spoof suspicion — still a
+prioritization signal, not a truth label.
+
 The current registry is research-backed and intentionally separates benchmarks from reusable checkpoints:
 
 - [NTIRE 2026 Robust AI-Generated Image Detection in the Wild](https://arxiv.org/abs/2604.11487): robustness benchmark and challenge report for transformed real-world images.

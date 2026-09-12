@@ -14,6 +14,13 @@ PROFILE_SET_TYPE = "deepfake-lens-profile-set-v1"
 AGREEMENT_SPREAD = 20
 _MAX_PROFILE_DEPTH = 4
 
+# Runtimes are bound to a media modality: image runtimes consume pixels via
+# PIL/numpy; audio runtimes consume waveforms. Profiles may declare an
+# explicit "modality" field; otherwise it is inferred from the runtime.
+IMAGE_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision"}
+AUDIO_RUNTIMES = {"aasist"}
+ALL_RUNTIMES = IMAGE_RUNTIMES | AUDIO_RUNTIMES
+
 
 @dataclass(frozen=True)
 class ExternalModelAnalysis:
@@ -30,8 +37,10 @@ class ExternalModelAnalysis:
 def analyze_external_model(
     path: Path | str,
     model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
+    *,
+    modality: str = "image",
 ) -> ExternalModelAnalysis | None:
-    """Score one image with external model profile(s).
+    """Score one media file with external model profile(s).
 
     ``model_path`` may be a single profile/checkpoint file, a directory of
     ``*.json`` profiles, a profile-set JSON (``type: deepfake-lens-profile-set-v1``
@@ -39,11 +48,17 @@ def analyze_external_model(
     profile every member runs and the result reports per-model scores plus an
     agreement signal; members that cannot run degrade to ``available=False``
     entries rather than failing the whole analysis.
+
+    ``modality`` (``"image"`` or ``"audio"``) selects which profiles apply:
+    a profile matches when it declares a matching ``"modality"`` field, when
+    its runtime is bound to that modality, or when it is modality-agnostic
+    (score maps, sidecars, placeholders). A directory or list may therefore
+    mix image and audio profiles — each file only runs the ones that fit.
     """
     if model_path is None:
         return None
 
-    image_path = Path(path)
+    media_path = Path(path)
     sources = _model_sources(model_path)
     if not sources:
         return ExternalModelAnalysis(
@@ -54,8 +69,13 @@ def analyze_external_model(
             detail=f"no model profiles found under {model_path}",
             limitations=["Point --model-path at a profile JSON, a profile set, or a directory containing *-runtime.json profiles."],
         )
+    sources = [source for source in sources if _profile_matches_modality(source, modality)]
+    if not sources:
+        # Profiles exist but none apply to this file's modality — same as no
+        # profile at all, not an error worth a row in the report.
+        return None
 
-    results = [(source, _analyze_profile_file(image_path, source, depth=0)) for source in sources]
+    results = [(source, _analyze_profile_file(media_path, source, depth=0, modality=modality)) for source in sources]
     if len(results) == 1:
         return results[0][1]
     return _aggregate_profile_results(results)
@@ -75,10 +95,48 @@ def _model_sources(model_path: Path | str | list[Path | str] | tuple[Path | str,
     return [candidate]
 
 
-def _analyze_profile_file(image_path: Path, model_file: Path, *, depth: int) -> ExternalModelAnalysis:
+def _profile_modality(source: Path) -> str:
+    """Return 'image', 'audio', or 'any' for a profile source.
+
+    Bare checkpoint files are image-bound (they run through the generic
+    image runtimes). JSON profiles declare 'modality' explicitly or are
+    inferred from their runtime; score maps, sidecars, placeholders, and
+    profile sets match any modality — set members are filtered again when
+    the set is expanded.
+    """
+    suffix = source.suffix.lower()
+    if suffix in {".pt", ".pth", ".onnx", ".torchscript"}:
+        return "image"
+    if suffix != ".json":
+        return "any"
+    try:
+        profile = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return "any"  # unreadable profiles surface their own error later
+    if not isinstance(profile, dict):
+        return "any"
+    declared = str(profile.get("modality") or "").lower()
+    if declared:
+        return declared
+    if profile.get("type") == PROFILE_SET_TYPE:
+        return "any"
+    runtime = str(profile.get("runtime") or "").lower()
+    if runtime in AUDIO_RUNTIMES:
+        return "audio"
+    if runtime in IMAGE_RUNTIMES:
+        return "image"
+    return "any"
+
+
+def _profile_matches_modality(source: Path, modality: str) -> bool:
+    profile_modality = _profile_modality(source)
+    return profile_modality == "any" or profile_modality == modality
+
+
+def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, modality: str = "image") -> ExternalModelAnalysis:
     if model_file.suffix.lower() in {".pt", ".pth", ".onnx", ".torchscript"}:
         runtime = "onnx" if model_file.suffix.lower() == ".onnx" else "torchscript"
-        return _score_from_runtime_profile({"runtime": runtime, "checkpoint": str(model_file), "name": model_file.name}, image_path, base_dir=model_file.parent)
+        return _score_from_runtime_profile({"runtime": runtime, "checkpoint": str(model_file), "name": model_file.name}, media_path, base_dir=model_file.parent)
 
     try:
         profile = json.loads(model_file.read_text(encoding="utf-8"))
@@ -102,7 +160,7 @@ def _analyze_profile_file(image_path: Path, model_file: Path, *, depth: int) -> 
     model_name = str(profile.get("name") or profile.get("model") or model_file.name)
 
     if profile.get("type") == PROFILE_SET_TYPE:
-        return _analyze_profile_set(image_path, model_file, profile, model_name=model_name, depth=depth)
+        return _analyze_profile_set(media_path, model_file, profile, model_name=model_name, depth=depth, modality=modality)
 
     if profile.get("supported") is False:
         reason = str(profile.get("reason") or "this profile is a documented placeholder and is not wired to a runnable runtime.")
@@ -119,11 +177,11 @@ def _analyze_profile_file(image_path: Path, model_file: Path, *, depth: int) -> 
             limitations=limitations,
         )
 
-    score = _score_from_score_map(profile, image_path)
+    score = _score_from_score_map(profile, media_path)
     if score is None:
-        score = _score_from_sidecar(profile, image_path)
+        score = _score_from_sidecar(profile, media_path)
     if score is None:
-        runtime_result = _score_from_runtime_profile(profile, image_path, base_dir=model_file.parent)
+        runtime_result = _score_from_runtime_profile(profile, media_path, base_dir=model_file.parent)
         if runtime_result is not None:
             return runtime_result
     if score is None:
@@ -145,7 +203,7 @@ def _analyze_profile_file(image_path: Path, model_file: Path, *, depth: int) -> 
     )
 
 
-def _analyze_profile_set(image_path: Path, model_file: Path, profile: dict[str, object], *, model_name: str, depth: int) -> ExternalModelAnalysis:
+def _analyze_profile_set(media_path: Path, model_file: Path, profile: dict[str, object], *, model_name: str, depth: int, modality: str = "image") -> ExternalModelAnalysis:
     """Run every member listed in a profile-set JSON and aggregate."""
     members = profile.get("profiles")
     if depth >= _MAX_PROFILE_DEPTH or not isinstance(members, list) or not members:
@@ -161,6 +219,7 @@ def _analyze_profile_set(image_path: Path, model_file: Path, profile: dict[str, 
         raw = Path(str(member))
         resolved = raw if raw.is_absolute() else model_file.parent / raw
         sources.extend(_model_sources(resolved))
+    sources = [source for source in sources if _profile_matches_modality(source, modality)]
     if not sources:
         return ExternalModelAnalysis(
             available=False,
@@ -169,7 +228,7 @@ def _analyze_profile_set(image_path: Path, model_file: Path, profile: dict[str, 
             model=model_name,
             detail=f"profile set {model_file.name} resolved to no member profiles.",
         )
-    results = [(source, _analyze_profile_file(image_path, source, depth=depth + 1)) for source in sources]
+    results = [(source, _analyze_profile_file(media_path, source, depth=depth + 1, modality=modality)) for source in sources]
     return _aggregate_profile_results(results, model_name=model_name)
 
 
@@ -240,9 +299,9 @@ def load_model_threshold(model_path: Path | str | None) -> int | None:
     return None
 
 
-def _score_from_runtime_profile(profile: dict[str, object], image_path: Path, *, base_dir: Path) -> ExternalModelAnalysis | None:
+def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *, base_dir: Path) -> ExternalModelAnalysis | None:
     runtime = str(profile.get("runtime") or "").lower()
-    if runtime not in {"onnx", "torchscript", "aide", "clip-linear", "torchvision"}:
+    if runtime not in ALL_RUNTIMES:
         return None
     checkpoint = _checkpoint_path(profile, base_dir=base_dir)
     model_name = str(profile.get("name") or profile.get("model") or checkpoint.name)
@@ -258,11 +317,13 @@ def _score_from_runtime_profile(profile: dict[str, object], image_path: Path, *,
         )
     try:
         if runtime == "aide":
-            values = _run_aide(checkpoint, image_path)
+            values = _run_aide(checkpoint, media_path)
         elif runtime == "clip-linear":
-            values = _run_clip_linear(checkpoint, image_path, profile)
+            values = _run_clip_linear(checkpoint, media_path, profile)
+        elif runtime == "aasist":
+            values = _run_aasist(checkpoint, media_path, profile)
         else:
-            array = _preprocess_image(image_path, profile)
+            array = _preprocess_image(media_path, profile)
             if runtime == "onnx":
                 values = _run_onnx(checkpoint, array, profile)
             elif runtime == "torchvision":
@@ -308,6 +369,8 @@ def _profile_limitations(profile: dict[str, object]) -> list[str]:
 def _checkpoint_hint(runtime: str) -> list[str]:
     if runtime == "aide":
         return ["Fetch the checkpoint with scripts/fetch_aide.py, or point 'checkpoint' at a local progan_train.pth."]
+    if runtime == "aasist":
+        return ["Fetch the checkpoint with scripts/fetch_aasist.py (downloads the official AASIST.pth, ~1.3 MB), or point 'checkpoint' at a local AASIST state dict."]
     if runtime == "clip-linear":
         return ["Download the detector's linear-head weights and point 'checkpoint' at the .pth file; the CLIP backbone named in 'backbone' is fetched by transformers on first use."]
     if runtime == "torchvision":
@@ -318,6 +381,8 @@ def _checkpoint_hint(runtime: str) -> list[str]:
 def _runtime_install_hint(runtime: str) -> str:
     if runtime == "aide":
         return "Install the optional research stack (torch, torchvision, timm, Pillow, numpy) to enable the AIDE engine."
+    if runtime == "aasist":
+        return "Install the optional research stack (torch, numpy) to enable the AASIST engine; PCM .wav files need no other decoder."
     if runtime == "clip-linear":
         return "Install the optional clip-linear stack (torch, transformers, Pillow) to enable the CLIP linear-probe runtime."
     if runtime == "torchvision":
@@ -359,6 +424,50 @@ def _run_aide(checkpoint: Path, image_path: Path) -> list[float]:
     batch = module.preprocess(image_module.open(image_path), dct).unsqueeze(0)
     with torch.no_grad():
         logits = model(batch)
+    return _flatten_outputs(logits.detach().cpu().numpy())
+
+
+# The AASIST checkpoint is tiny (~1.3 MB) but still cached per path so a scan
+# loads weights once instead of per audio file.
+_AASIST_RUNNERS: dict[str, tuple[object, object]] = {}
+
+
+def _aasist_runner(checkpoint: Path) -> tuple[object, object]:
+    """Load scripts/run_aasist.py (module, model), cached per checkpoint."""
+    importlib.import_module("torch")  # surface ImportError before loading the script
+    key = str(checkpoint.resolve())
+    cached = _AASIST_RUNNERS.get(key)
+    if cached is not None:
+        return cached
+    repo_root = Path(__file__).resolve().parent.parent
+    script = repo_root / "scripts" / "run_aasist.py"
+    if not script.is_file():
+        raise RuntimeError(f"AASIST runner script is missing: {script}")
+    spec = importlib.util.spec_from_file_location("deepfake_lens_aasist_runner", script)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load AASIST runner: {script}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    runner = (module, module.load_model(checkpoint))
+    _AASIST_RUNNERS[key] = runner
+    return runner
+
+
+def _run_aasist(checkpoint: Path, audio_path: Path, profile: dict[str, object]) -> list[float]:
+    """Score one audio file with the AASIST reimplementation (optional torch stack).
+
+    Decodes to mono at the profile's ``sample_rate`` (stdlib wave for PCM
+    .wav, optional soundfile/librosa otherwise), then scores evenly spaced
+    ``window_samples`` windows — each loop-padded/trimmed exactly like
+    upstream pad() — and averages logits over up to ``max_seconds`` of audio.
+    Returns raw logits [spoof, bonafide]; the profile's score_index selects
+    the spoof probability.
+    """
+    module, model = _aasist_runner(checkpoint)
+    sample_rate = int(profile.get("sample_rate", 16000) or 16000)
+    nb_samp = int(profile.get("window_samples", 64600) or 64600)
+    max_seconds = float(profile.get("max_seconds", 30) or 30)
+    logits = module.score_audio_file(model, audio_path, sample_rate=sample_rate, nb_samp=nb_samp, max_seconds=max_seconds)
     return _flatten_outputs(logits.detach().cpu().numpy())
 
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from typing import Iterable
 
+from .audio import SUPPORTED_AUDIO_EXTENSIONS, AudioAnalysis, analyze_audio
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, PixelAnalysis, analyze_image_pixels
 from .pixel import PixelExpertResult
@@ -191,7 +192,7 @@ def scan_directory(
     pixel_max_side: int = DEFAULT_PIXEL_MAX_SIDE,
     heatmaps: bool = False,
     heatmap_dir: Path | None = None,
-    model_path: Path | None = None,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None = None,
     cache_path: Path | None = None,
     workers: int = 1,
     max_file_bytes: int | None = None,
@@ -284,7 +285,7 @@ def analyze_file(
     pixel_max_side: int = DEFAULT_PIXEL_MAX_SIDE,
     heatmaps: bool = False,
     heatmap_dir: Path | None = None,
-    model_path: Path | None = None,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None = None,
 ) -> ScanItem:
     file_path = Path(path)
     display_path = _display_path(file_path, root=root)
@@ -318,7 +319,45 @@ def analyze_file(
         except OSError as exc:
             return ScanItem(display_path, file_path.name, "image", "failed", size, error=str(exc))
 
+    if extension in SUPPORTED_AUDIO_EXTENSIONS:
+        try:
+            analysis = analyze_audio(file_path, model_path=model_path)
+            return ScanItem(display_path, file_path.name, "audio", "analyzed", size, _audio_result(analysis))
+        except OSError as exc:
+            return ScanItem(display_path, file_path.name, "audio", "failed", size, error=str(exc))
+
     return ScanItem(display_path, file_path.name, "unsupported", "unsupported", size, error="지원 형식이 아닙니다.")
+
+
+def _audio_result(analysis: AudioAnalysis) -> ClassificationResult:
+    """Adapt an AudioAnalysis into the stable ClassificationResult contract.
+
+    Keeps the heuristic score/band/signals and carries model_analysis through
+    so external_model_active accounting works exactly like the image path.
+    """
+    try:
+        band = RiskBand(analysis.band)
+    except ValueError:
+        band = RiskBand.UNKNOWN
+    source_known = bool(analysis.source_guess) and analysis.source_guess != "unknown"
+    source_guess = SourceGuess(
+        analysis.source_guess or "출처 단서 없음",
+        SourceConfidence.LOW if source_known else SourceConfidence.UNKNOWN,
+        [analysis.source_guess] if source_known else ["오디오에서 출처를 판단할 단서가 부족합니다."],
+    )
+    return ClassificationResult(
+        score=analysis.score,
+        band=band,
+        band_label=analysis.band_label,
+        verdict=analysis.verdict,
+        signals=[EvidenceSignal(signal.title, signal.detail, signal.weight) for signal in analysis.signals],
+        limitations=list(analysis.limitations),
+        source_guess=source_guess,
+        next_checks=["원본 녹음이나 통화 원본을 확보하세요.", "동일 화자의 다른 샘플과 음향 특성을 비교하세요.", "업로드 맥락과 파일 메타데이터를 함께 검토하세요."],
+        model_analysis=analysis.model_analysis,
+        ai_score=analysis.score,
+        source_attribution_label=source_guess.label,
+    )
 
 
 def analyze_text(text: str) -> ClassificationResult:
@@ -643,14 +682,17 @@ def _cache_key(
     pixel_mode: str,
     pixel_max_side: int,
     heatmaps: bool,
-    model_path: Path | None,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
 ) -> str:
     try:
         stat = path.stat()
         relative = str(path.relative_to(root))
     except OSError:
         return str(path)
-    model_marker = str(model_path.resolve()) if model_path else ""
+    if isinstance(model_path, (list, tuple)):
+        model_marker = ";".join(str(Path(entry).resolve()) for entry in model_path)
+    else:
+        model_marker = str(Path(model_path).resolve()) if model_path else ""
     return "|".join(
         [
             relative,

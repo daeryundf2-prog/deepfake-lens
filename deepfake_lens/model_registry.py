@@ -87,6 +87,19 @@ DETECTOR_REGISTRY = [
         ],
     ),
     DetectorCandidate(
+        key="aasist-2022",
+        name="AASIST Audio Anti-Spoofing Integrated Spectro-Temporal Graph Attention",
+        task="binary-audio-detector",
+        adapter_target="aasist runtime profile",
+        status="candidate",
+        priority="high",
+        source_url="https://github.com/clovaai/aasist",
+        notes=[
+            "Wired via models/aasist-runtime.json; scripts/fetch_aasist.py downloads the in-repo AASIST.pth (~1.3 MB, not committed).",
+            "Trained on ASVspoof2019-LA — strong on TTS/VC attacks; verify cross-domain AUROC on local data before trusting thresholds.",
+        ],
+    ),
+    DetectorCandidate(
         key="clide-wacv-2026",
         name="CLIDE Conditional Likelihood generated Image Detector",
         task="zero-shot-image-detector",
