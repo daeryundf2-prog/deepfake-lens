@@ -68,6 +68,12 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
 
+    // Instrumented ONNX contract tests (src/androidTest/). Test-scoped only;
+    // OnnxClassifier needs a real Context + the onnxruntime native lib, so
+    // its graceful-null path is verified on-device, not on the JVM.
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
