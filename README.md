@@ -30,6 +30,20 @@ python -m deepfake_lens eval /tmp/dfl-smoke-variants --pixel deep --robustness -
 ./gradlew :deepfakeclassifier:testDebugUnitTest
 ```
 
+### Coverage
+
+Coverage is tracked for visibility only — there is intentionally no
+percentage gate. Install the dev extra and run the suite under coverage:
+
+```bash
+python -m pip install -e ".[dev]"
+coverage run -m unittest discover deepfake_lens/tests
+coverage report          # terminal table with missing lines
+coverage html            # optional HTML report in htmlcov/ (gitignored)
+```
+
+Source/omit rules live in `[tool.coverage.*]` in `pyproject.toml`.
+
 ## Scope
 
 This repository is independent from YH Mobile Trace. It does not contain mobile forensic acquisition code, evidence-chain schemas, or Android/iOS device collection routes.

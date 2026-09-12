@@ -35,6 +35,7 @@ dev = [
   "numpy>=1.24",
   "Pillow>=10.0",
   "c2pa-python>=0.6",
+  "coverage>=7.4",
 ]
 
 [project.scripts]
@@ -42,3 +43,21 @@ deepfake-lens = "deepfake_lens.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["deepfake_lens*"]
+
+# Coverage is visibility-only: no fail_under gate. The test suite lives
+# inside the measured package, so deepfake_lens/tests is omitted.
+[tool.coverage.run]
+source = ["deepfake_lens"]
+omit = ["deepfake_lens/tests/*", "deepfake_lens/__main__.py"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_also = [
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "\\.\\.\\.",
+  "@(abc\\.)?abstractmethod",
+]
