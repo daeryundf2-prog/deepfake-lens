@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from deepfake_lens.face import (
     FaceAnalysis,
@@ -151,9 +152,51 @@ class FaceAnalysisTest(unittest.TestCase):
         self.assertEqual(source, "box-ratio-estimate")
         self.assertEqual(landmarks, _estimate_landmarks(10, 10, 40, 40))
 
+    def test_face_landmarks_labels_measured_anchors_as_mediapipe(self) -> None:
+        """When the FaceMesh path returns measured anchors, the label must
+        say so AND pass the measured values through verbatim — it must not
+        silently substitute the box-ratio constants."""
+        import numpy as np
+
+        import deepfake_lens.face as face_module
+
+        image = np.zeros((80, 80, 3), dtype=np.uint8)
+        measured = [(25, 25), (45, 26), (36, 40), (35, 52)]
+        self.assertNotEqual(measured, _estimate_landmarks(10, 10, 40, 40))
+        with patch.object(face_module, "_mediapipe_landmarks", return_value=measured):
+            landmarks, source = _face_landmarks(image, 10, 10, 40, 40)
+        self.assertEqual(source, "mediapipe-facemesh")
+        self.assertEqual(landmarks, measured)
+
+    def test_face_landmarks_labels_none_result_as_box_estimate(self) -> None:
+        """A FaceMesh miss (no face in crop, or the extra absent) must fall
+        back to the labelled estimate — runs in both base and extra envs."""
+        import numpy as np
+
+        import deepfake_lens.face as face_module
+
+        image = np.zeros((80, 80, 3), dtype=np.uint8)
+        with patch.object(face_module, "_mediapipe_landmarks", return_value=None):
+            landmarks, source = _face_landmarks(image, 10, 10, 40, 40)
+        self.assertEqual(source, "box-ratio-estimate")
+        self.assertEqual(landmarks, _estimate_landmarks(10, 10, 40, 40))
+
     @unittest.skipIf(_has_mediapipe(), "mediapipe installed")
     def test_mediapipe_landmarks_none_without_package(self) -> None:
         """The MediaPipe path must degrade to None when the extra is absent."""
+        import numpy as np
+
+        from deepfake_lens.face import _mediapipe_landmarks
+
+        image = np.zeros((80, 80, 3), dtype=np.uint8)
+        self.assertIsNone(_mediapipe_landmarks(image, 10, 10, 40, 40))
+
+    @unittest.skipUnless(_has_mediapipe(), "mediapipe not installed")
+    def test_mediapipe_landmarks_degrades_cleanly_on_blank_crop(self) -> None:
+        """With the real package installed (any API generation — legacy
+        solutions or tasks-only builds where mp.solutions is gone), a
+        faceless crop must return None instead of crashing, so callers keep
+        the labelled box-ratio fallback."""
         import numpy as np
 
         from deepfake_lens.face import _mediapipe_landmarks

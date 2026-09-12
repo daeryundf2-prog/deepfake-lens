@@ -26,7 +26,11 @@ dependencies = []
 pixel = ["opencv-python>=4.8", "numpy>=1.24"]
 audio = ["librosa>=0.10", "numpy>=1.24", "scipy>=1.10"]
 face = ["opencv-python>=4.8", "numpy>=1.24"]
-face_mediapipe = ["mediapipe>=0.10", "opencv-python>=4.8", "numpy>=1.24"]
+# face.py uses the legacy mp.solutions.face_mesh API, which mediapipe
+# removed in 0.10.30 (tasks-only builds) and in 1.x. mediapipe 0.10.x in
+# turn requires numpy<2, which bounds opencv below the numpy-2-only 5.x
+# line. Verified on mediapipe 0.10.14/0.10.21 + opencv 4.11 + numpy 1.26.
+face_mediapipe = ["mediapipe>=0.10,<0.10.30", "opencv-python>=4.8,<5", "numpy>=1.24,<2"]
 video = ["opencv-python>=4.8", "numpy>=1.24"]
 ml = ["opencv-python>=4.8", "numpy>=1.24", "scikit-learn>=1.3"]
 provenance = ["c2pa-python>=0.6"]

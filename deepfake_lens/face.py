@@ -7,6 +7,15 @@ Facial landmark anchors are measured with MediaPipe FaceMesh when the
 optional ``face_mediapipe`` extra is installed; otherwise they fall back
 to box-ratio estimates that are explicitly labelled via
 ``FaceRegion.landmarks_source`` and must not feed geometry checks.
+
+The measurement path uses the legacy ``mp.solutions.face_mesh`` API.
+MediaPipe removed that API in 0.10.30 (tasks-only builds) and in 1.x,
+so the extra pins ``mediapipe>=0.10,<0.10.30``; on newer mediapipe
+builds the FaceMesh call fails softly and the labelled box-ratio
+estimate stays active. Verified end-to-end on mediapipe 0.10.21
+(macosx arm64, CPython 3.12): a real face photo yields
+``landmarks_source="mediapipe-facemesh"`` with measured anchors that
+differ from the box constants.
 """
 
 from __future__ import annotations

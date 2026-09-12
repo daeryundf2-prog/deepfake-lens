@@ -53,7 +53,14 @@ The audit correctly flags where the codebase *simulates* capability:
    behind the `face_mediapipe` optional extra; the box-ratio fallback is
    kept but every `FaceRegion` now carries `landmarks_source`
    ("mediapipe-facemesh" vs "box-ratio-estimate") so downstream output can
-   no longer pass estimates off as measured landmarks.
+   no longer pass estimates off as measured landmarks. Verified end-to-end
+   2026-09-12 on mediapipe 0.10.21 (macOS arm64, CPython 3.12) against a
+   real face photo: measured anchors differ from the box constants and are
+   labelled `mediapipe-facemesh`. Caveat: the legacy `mp.solutions` API was
+   removed in mediapipe 0.10.30/1.x, so the extra is pinned
+   `>=0.10,<0.10.30`; newer builds degrade cleanly to the labelled
+   fallback (a Tasks-API FaceLandmarker port needs a bundled `.task`
+   model asset — future work).
 2. **rppg.py single-box CHROM**: DONE — the face box is now split into a
    3x3 grid of sub-ROIs with a per-ROI CHROM pulse, and FakeCatcher-style
    phase coherence (circular mean resultant length at the shared peak
