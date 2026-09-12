@@ -17,15 +17,6 @@ from deepfake_lens.face import (
 )
 
 
-def _has_numpy() -> bool:
-    try:
-        import numpy  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
-
-
 def _has_cv2() -> bool:
     try:
         import cv2  # noqa: F401
@@ -150,59 +141,50 @@ class FaceAnalysisTest(unittest.TestCase):
         region = FaceRegion(x=0, y=0, width=10, height=10, landmarks=[], confidence=0.9)
         self.assertEqual(region.landmarks_source, "box-ratio-estimate")
 
-    @unittest.skipUnless(_has_numpy(), "numpy not installed")
     @unittest.skipIf(_has_mediapipe(), "mediapipe installed — fallback path not exercised")
     def test_face_landmarks_falls_back_to_labelled_box_estimate(self) -> None:
         """Without mediapipe, _face_landmarks must still return anchors but
         label them as box-ratio estimates, never as measured landmarks."""
-        import numpy as np
-
-        image = np.zeros((80, 80, 3), dtype=np.uint8)
-        landmarks, source = _face_landmarks(image, 10, 10, 40, 40)
+        # No numpy in the base env: the mediapipe import guard returns before
+        # pixels are ever read, so a placeholder image suffices.
+        landmarks, source = _face_landmarks(None, 10, 10, 40, 40)
         self.assertEqual(source, "box-ratio-estimate")
         self.assertEqual(landmarks, _estimate_landmarks(10, 10, 40, 40))
 
-    @unittest.skipUnless(_has_numpy(), "numpy not installed")
     def test_face_landmarks_labels_measured_anchors_as_mediapipe(self) -> None:
         """When the FaceMesh path returns measured anchors, the label must
         say so AND pass the measured values through verbatim — it must not
         silently substitute the box-ratio constants."""
-        import numpy as np
-
         import deepfake_lens.face as face_module
 
-        image = np.zeros((80, 80, 3), dtype=np.uint8)
         measured = [(25, 25), (45, 26), (36, 40), (35, 52)]
         self.assertNotEqual(measured, _estimate_landmarks(10, 10, 40, 40))
+        # The image is passed straight through to the patched-out
+        # _mediapipe_landmarks, so no real pixel array is needed.
         with patch.object(face_module, "_mediapipe_landmarks", return_value=measured):
-            landmarks, source = _face_landmarks(image, 10, 10, 40, 40)
+            landmarks, source = _face_landmarks(None, 10, 10, 40, 40)
         self.assertEqual(source, "mediapipe-facemesh")
         self.assertEqual(landmarks, measured)
 
-    @unittest.skipUnless(_has_numpy(), "numpy not installed")
     def test_face_landmarks_labels_none_result_as_box_estimate(self) -> None:
         """A FaceMesh miss (no face in crop, or the extra absent) must fall
         back to the labelled estimate — runs in both base and extra envs."""
-        import numpy as np
-
         import deepfake_lens.face as face_module
 
-        image = np.zeros((80, 80, 3), dtype=np.uint8)
+        # Same as above: the patched _mediapipe_landmarks never sees pixels.
         with patch.object(face_module, "_mediapipe_landmarks", return_value=None):
-            landmarks, source = _face_landmarks(image, 10, 10, 40, 40)
+            landmarks, source = _face_landmarks(None, 10, 10, 40, 40)
         self.assertEqual(source, "box-ratio-estimate")
         self.assertEqual(landmarks, _estimate_landmarks(10, 10, 40, 40))
 
-    @unittest.skipUnless(_has_numpy(), "numpy not installed")
     @unittest.skipIf(_has_mediapipe(), "mediapipe installed")
     def test_mediapipe_landmarks_none_without_package(self) -> None:
         """The MediaPipe path must degrade to None when the extra is absent."""
-        import numpy as np
-
         from deepfake_lens.face import _mediapipe_landmarks
 
-        image = np.zeros((80, 80, 3), dtype=np.uint8)
-        self.assertIsNone(_mediapipe_landmarks(image, 10, 10, 40, 40))
+        # Returns at the ImportError guard before touching the image, so a
+        # placeholder keeps this test runnable without numpy installed.
+        self.assertIsNone(_mediapipe_landmarks(None, 10, 10, 40, 40))
 
     @unittest.skipUnless(_has_mediapipe(), "mediapipe not installed")
     def test_mediapipe_landmarks_degrades_cleanly_on_blank_crop(self) -> None:

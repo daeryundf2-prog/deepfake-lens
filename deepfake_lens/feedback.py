@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -283,7 +284,23 @@ def suggest_fusion_weights(
     if units and residual:
         largest = max(units, key=lambda key: units[key])
         units[largest] += residual
-    return {key: unit / 10000 for key, unit in units.items()}, notes
+    weights = {key: unit / 10000 for key, unit in units.items()}
+    if weights:
+        # Emit the largest weight last and pin it to the float complement of
+        # the rest: sum() only gained compensated (Neumaier) summation for
+        # floats in Python 3.12, and under the older left-to-right fold only
+        # the final addend can pin the total to exactly 1.0.
+        largest = max(keys, key=lambda key: weights[key])
+        weights = {key: weights[key] for key in keys if key != largest}
+        weights[largest] = 1.0 - sum(weights.values())
+        for _ in range(8):  # absorb any residual double-rounding
+            residual = 1.0 - sum(weights.values())
+            if residual == 0.0:
+                break
+            weights[largest] = math.nextafter(
+                weights[largest], math.inf if residual > 0 else -math.inf
+            )
+    return weights, notes
 
 
 def _per_signal_stats(observations: list[FeedbackObservation]) -> dict[str, object]:
