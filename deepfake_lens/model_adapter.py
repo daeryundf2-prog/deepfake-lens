@@ -464,8 +464,12 @@ def _run_torchvision(checkpoint: Path, array, profile: dict[str, object]) -> lis
             raise RuntimeError(f"torchvision arch '{arch}' has no fc head to rewire for num_classes={num_classes}")
         model.fc = torch.nn.Linear(model.fc.in_features, num_classes)
         state = torch.load(str(checkpoint), map_location="cpu")
-        if isinstance(state, dict) and isinstance(state.get("state_dict"), dict):
-            state = state["state_dict"]
+        if isinstance(state, dict):
+            for wrapper in ("state_dict", "model", "net"):
+                nested = state.get(wrapper)
+                if isinstance(nested, dict) and any(hasattr(v, "ndim") for v in nested.values()):
+                    state = nested
+                    break
         prefix = str(profile.get("state_dict_prefix") or "")
         if prefix:
             state = {name[len(prefix):] if str(name).startswith(prefix) else name: value for name, value in state.items()}
