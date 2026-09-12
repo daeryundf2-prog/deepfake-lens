@@ -69,3 +69,34 @@ python scripts/run_aide.py --checkpoint aide-progan.pth --image suspect.png
   images); a proper Synthbuster eval pairs it with RAISE-1k itself.
 - The checkpoint license is AIDE's research code license; redistribution of
   the checkpoint is not covered here — users download it themselves.
+
+## Cross-domain measured addendum: CIFAKE (2026-09-13)
+
+A labeled 100-image sample from `dragonintelligence/CIFAKE-image-dataset`
+(HF test split, 50 real CIFAR-style + 50 fake Diffusion-generated, all
+32×32) was run through the committed eval command against three wired
+runtimes:
+
+```sh
+python -m deepfake_lens.cli eval /tmp/dfl-bench --model-path models/<profile>.json
+```
+
+| Profile | AUROC | Accuracy | FPR | EER |
+|---|---|---|---|---|
+| `aide-runtime.json` (ConvNeXt-XXL, ProGAN-trained) | **0.554** | 0.51 | 0.26 | 0.44 |
+| `univfd-runtime.json` (CLIP ViT-L/14 + fc weights) | **0.468** | 0.49 | 0.02 | 0.54 |
+| `cnndetection-runtime.json` (ResNet-50, blur+jpg aug) | **0.476** | 0.48 | 0.04 | 0.53 |
+
+**Honest reading:** on 32×32 thumbnails all three detectors sit near chance.
+CIFAKE is far below every model's native input resolution and outside their
+training distributions (AIDE trained on ProGAN at 256px+; UnivFD on
+LAION-ProGAN; CNNDetection on ProGAN classes). This result *confirms* the
+documented caveat — these are prioritization signals that must be
+re-validated on data matching the target domain before thresholds mean
+anything. It is also the first measured low-resolution failure bound now
+on record: do not trust these profiles on thumbnail-scale inputs.
+
+Dataset: CIFAKE (Kaggle/HF mirror), CIFAR-10-derived reals vs SD-v1.x
+fakes, CC-BY terms per source. 100-image test-split sample fetched via
+HF datasets-server on 2026-09-13; local copies in `/tmp/dfl-bench` (not
+committed — third-party media stays out of git per repo policy).
