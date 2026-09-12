@@ -29,6 +29,19 @@ jobs:
         run: python -m compileall deepfake_lens
       - name: Unit tests
         run: python -m unittest discover deepfake_lens/tests -v
+      # Benchmark E2E runs only on the committed synthetic fixtures — no
+      # external dataset fetch in CI. Real datasets are fetched manually with
+      # scripts/fetch_benchmark.py (see its docstring for the manifest format).
+      - name: Benchmark E2E (in-tree fixtures)
+        env:
+          DEEPFAKE_LENS_BENCH_REPORT: benchmark-report.json
+        run: python -m unittest deepfake_lens.tests.test_benchmark_e2e -v
+      - name: Upload benchmark smoke report
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report-py${{ matrix.python-version }}
+          path: benchmark-report.json
+          if-no-files-found: ignore
       - name: CLI help and fixture smoke
         run: python scripts/cli_smoke_test.py
 

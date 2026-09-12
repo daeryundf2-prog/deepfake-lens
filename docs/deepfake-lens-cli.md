@@ -197,6 +197,20 @@ python scripts/build_robustness_variants.py --root data/raw --out data/robust
 python -m deepfake_lens eval data/robust --pixel deep --robustness --json-out artifacts/robustness-eval.json
 ```
 
+To pull a small real benchmark set, use `scripts/fetch_benchmark.py` with a
+checksummed manifest (per-file URL + sha256 + `dest` under a label folder;
+see the script docstring for the format). No dataset URL is baked in — the
+Synthbuster Zenodo record cited in `docs/deepfake-lightweight-tool-research.md`
+is one candidate source; check its terms before use. CI never fetches
+external data — it runs the committed synthetic `fixtures/benchmark/` set via
+`deepfake_lens/tests/test_benchmark_e2e.py`:
+
+```sh
+python scripts/fetch_benchmark.py --manifest bench.json --dest public_datasets/bench
+python scripts/fetch_benchmark.py --manifest bench.json --verify-only   # re-check sha256 later
+python -m deepfake_lens benchmark public_datasets/bench --pixel-modes off --json-out artifacts/bench.json
+```
+
 For command smoke checks without a real benchmark, use the tiny layout fixture:
 
 ```sh
