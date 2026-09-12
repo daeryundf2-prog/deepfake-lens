@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .benchmark import run_benchmark, write_benchmark, write_benchmark_markdown
 from .collection import write_collection_plan
-from .core import DEFAULT_MAX_FILES, RiskBand, ScanItem, scan_directory, scan_to_json_text, summarize
+from .core import DEFAULT_MAX_FILES, RiskBand, ScanItem, scan_directory, scan_to_json, scan_to_json_text, summarize
 from .datasets import write_audit, write_manifest, write_robustness_plan, write_split_plan
 from .evaluate import calibrate_dataset, evaluate_dataset, evaluate_robustness_dataset, train_portable_baseline, write_cases_jsonl, write_json_report
 from .feedback import build_feedback_report, load_feedback, observations_from_scan_payload, observations_live
@@ -19,6 +19,7 @@ from .release import write_release_checklist
 from .reports import write_eval_html_report, write_html_report, write_pdf_report
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, SUPPORTED_PIXEL_MODES
 from .security import write_security_check
+from .signing import resolve_report_key, sign_report
 from .training import write_neural_training_plan
 from .audio import analyze_audio, AudioAnalysis
 from .face import analyze_faces, FaceAnalysis
@@ -96,6 +97,8 @@ def main(argv: list[str] | None = None) -> int:
     scan_parser.add_argument("--html-out", type=Path, help="write HTML report")
     scan_parser.add_argument("--pdf-out", type=Path, help="write simple PDF report")
     scan_parser.add_argument("--redact-paths", action="store_true", help="redact paths in HTML/PDF reports")
+    scan_parser.add_argument("--sign", action="store_true", help="HMAC-SHA256 sign the --json-out report (integrity-to-key-holder, not legal non-repudiation; key from --key-file or DEEPFAKE_LENS_REPORT_KEY)")
+    scan_parser.add_argument("--key-file", type=Path, help="report signing key file (default: DEEPFAKE_LENS_REPORT_KEY env var)")
 
     collect_parser = subparsers.add_parser("collect", help="write a dataset collection plan")
     collect_parser.add_argument("folder", type=Path)
@@ -128,6 +131,8 @@ def main(argv: list[str] | None = None) -> int:
     eval_parser.add_argument("--false-negative-out", type=Path)
     eval_parser.add_argument("--robustness", action="store_true", help="also summarize transform-named robustness folders")
     eval_parser.add_argument("--redact-paths", action="store_true")
+    eval_parser.add_argument("--sign", action="store_true", help="HMAC-SHA256 sign the --json-out report (integrity-to-key-holder, not legal non-repudiation; key from --key-file or DEEPFAKE_LENS_REPORT_KEY)")
+    eval_parser.add_argument("--key-file", type=Path, help="report signing key file (default: DEEPFAKE_LENS_REPORT_KEY env var)")
 
     benchmark_parser = subparsers.add_parser("benchmark", help="run a matrix benchmark across pixel modes and model profiles")
     benchmark_parser.add_argument("folder", type=Path)
@@ -138,6 +143,8 @@ def main(argv: list[str] | None = None) -> int:
     benchmark_parser.add_argument("--max-files", type=int)
     benchmark_parser.add_argument("--json-out", type=Path, required=True)
     benchmark_parser.add_argument("--md-out", type=Path)
+    benchmark_parser.add_argument("--sign", action="store_true", help="HMAC-SHA256 sign the --json-out report (integrity-to-key-holder, not legal non-repudiation; key from --key-file or DEEPFAKE_LENS_REPORT_KEY)")
+    benchmark_parser.add_argument("--key-file", type=Path, help="report signing key file (default: DEEPFAKE_LENS_REPORT_KEY env var)")
 
     fusion_parser = subparsers.add_parser("fusion", help="calibrate a metadata/pixel/model/source fusion profile")
     fusion_parser.add_argument("folder", type=Path)
@@ -391,7 +398,7 @@ def main(argv: list[str] | None = None) -> int:
             max_files=args.max_files,
         )
         if args.json_out:
-            write_json_report(args.json_out, payload)
+            write_json_report(args.json_out, _maybe_sign(payload, sign=args.sign, key_file=args.key_file))
         if args.html_out:
             write_eval_html_report(args.html_out, payload, redact_paths=args.redact_paths)
         cases = payload.get("case_summary", {}) if isinstance(payload.get("case_summary"), dict) else {}
@@ -414,7 +421,7 @@ def main(argv: list[str] | None = None) -> int:
             robustness=args.robustness,
             max_files=args.max_files,
         )
-        write_benchmark(args.json_out, payload)
+        write_benchmark(args.json_out, _maybe_sign(payload, sign=args.sign, key_file=args.key_file))
         if args.md_out:
             write_benchmark_markdown(args.md_out, payload)
         print(json.dumps({"out": str(args.json_out), "rows": len(payload["rows"]), "best": payload["best"]}, ensure_ascii=False, indent=2))
@@ -1011,7 +1018,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Done: analyzed={summary.analyzed}, cached={summary.cached}, total={summary.total}", file=sys.stderr)
 
     if args.json_out:
-        _write_json_out(args.json_out, scan_to_json_text(summary, items) + "\n")
+        scan_payload = _maybe_sign(scan_to_json(summary, items), sign=args.sign, key_file=args.key_file)
+        _write_json_out(args.json_out, json.dumps(scan_payload, ensure_ascii=False, indent=2) + "\n")
     if args.csv_out:
         _write_csv(args.csv_out, items)
     if args.html_out:
@@ -1034,6 +1042,21 @@ def _write_json_out(path: Path, payload: str) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(payload, encoding="utf-8")
+
+
+def _maybe_sign(payload: dict[str, object], *, sign: bool, key_file: Path | None) -> dict[str, object]:
+    """HMAC-sign a report payload when --sign was passed.
+
+    Without a configured key the report is still written — unsigned, with a
+    self-describing signature_note — rather than failing or fabricating a
+    signature.
+    """
+    if not sign:
+        return payload
+    signed = sign_report(payload, resolve_report_key(key_file))
+    if signed.get("signature") is None:
+        print("note: report written unsigned (no key; set DEEPFAKE_LENS_REPORT_KEY or --key-file)", file=sys.stderr)
+    return signed
 
 
 def _has_subdirectories(folder: Path | str) -> bool:

@@ -13,7 +13,7 @@ It is intentionally CLI-first:
 
 Every subcommand, briefly. Detail for the core workflow lives in the sections below.
 
-- `scan <folder>`: folder screening with metadata + optional pixel ensemble and reports.
+- `scan <folder>`: folder screening with metadata + optional pixel ensemble and reports; `--sign` adds an HMAC-SHA256 `signature`/`signature_key_id` to `--json-out` (key via `--key-file` or `DEEPFAKE_LENS_REPORT_KEY`; proves integrity to the key holder, not legal non-repudiation — anyone holding the key can sign). `eval` and `benchmark` accept the same flags; `deepfake_lens.signing.verify_report(path, key)` verifies, and a missing key produces an unsigned report with a note rather than a failure.
 - `collect <folder> --out`: write a dataset collection plan.
 - `dataset <folder> --manifest-out`: labeled-dataset manifest, audit, split and robustness plans.
 - `eval <folder>`: labeled-dataset metrics (accuracy/precision/recall/FPR, AUROC, EER, per-split).
