@@ -1,0 +1,23 @@
+{
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "AIDE (ICLR 2025) progan_train",
+  "candidate_key": "aide-iclr-2025",
+  "runtime": "aide",
+  "checkpoint": "aide_progan_train.pth",
+  "input_size": 256,
+  "mean": [0.485, 0.456, 0.406],
+  "std": [0.229, 0.224, 0.225],
+  "score_index": 1,
+  "score_activation": "softmax",
+  "threshold": 67,
+  "source_url": "https://github.com/shilinyan99/AIDE",
+  "limitations": [
+    "Checkpoint is not committed; run scripts/fetch_aide.py to download progan_train.pth (~3.3 GB, research license).",
+    "AIDE scores are a prioritization signal, not a truth label; see experiments/AIDE_EVALUATION.md for measured AUROC and cross-generator caveats."
+  ],
+  "notes": [
+    "Runtime 'aide' delegates to scripts/run_aide.py, which bakes AIDE's DCT band-selection preprocessing into the model class; input_size/mean/std are recorded for reference rather than consumed by the generic image preprocessor.",
+    "Model logits are (real=0, fake=1); score_index 1 with softmax yields the fake probability on a 0-100 scale.",
+    "The checkpoint path is relative to this profile's directory (models/); keep it out of git — it is covered by .gitignore."
+  ]
+}

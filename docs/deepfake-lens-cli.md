@@ -220,6 +220,26 @@ python -m deepfake_lens models --candidate aide-iclr-2025 --checkpoint models/ai
 python -m deepfake_lens scan samples --model-path artifacts/aide-profile.json
 ```
 
+### Default engine: AIDE (ICLR 2025)
+
+`scan`, `eval`, and `fusion` auto-discover the committed runtime profile
+`models/aide-runtime.json` when `--model-path` is not given (opt out with
+`--no-default-engine`). The checkpoint itself is not committed — it is ~3.3 GB
+under the AIDE research license. Fetch it once with checksum verification:
+
+```sh
+# The Model Zoo link is a Google Drive folder; copy the file ID of
+# progan_train.pth and pass its direct link.
+python scripts/fetch_aide.py --url "https://drive.google.com/uc?id=<FILE_ID>" --sha256 <hex>
+```
+
+Without the checkpoint the engine reports `model_analysis.available=false`
+with the reason in `limitations` and scans continue heuristic-only — the JSON
+keeps the external signal distinct (`model_analysis` per item,
+`summary.external_model_active` for the batch). Scores remain prioritization
+signals, not truth labels; measured AUROC lives in
+`experiments/AIDE_EVALUATION.md`.
+
 The current registry is research-backed and intentionally separates benchmarks from reusable checkpoints:
 
 - [NTIRE 2026 Robust AI-Generated Image Detection in the Wild](https://arxiv.org/abs/2604.11487): robustness benchmark and challenge report for transformed real-world images.

@@ -122,6 +122,7 @@ class BatchScanSummary:
     cached: int = 0
     duplicates: int = 0
     skipped: int = 0
+    external_model_active: int = 0
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
@@ -512,6 +513,7 @@ def summarize(items: list[ScanItem], *, capped: bool, cached: int = 0) -> BatchS
         cached=cached,
         duplicates=sum(1 for item in items if item.status == "duplicate"),
         skipped=sum(1 for item in items if item.status == "skipped"),
+        external_model_active=sum(1 for item in analyzed if item.result and item.result.model_analysis and item.result.model_analysis.available),
     )
 
 

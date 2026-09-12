@@ -46,6 +46,20 @@ from .webapp import run_server
 
 COMMANDS = {"scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "inpaint", "text-advanced", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
 
+DEFAULT_ENGINE_PROFILE = "models/aide-runtime.json"
+
+
+def default_model_path(root: Path | None = None) -> Path | None:
+    """Bundled default-engine profile (models/aide-runtime.json), when present.
+
+    The profile is committed but the checkpoint it points at is not, so the
+    adapter degrades gracefully until scripts/fetch_aide.py is run. Returns
+    None when the profile is absent so callers keep heuristic-only behavior.
+    """
+    base = Path(root) if root is not None else Path(__file__).resolve().parent.parent
+    candidate = base / DEFAULT_ENGINE_PROFILE
+    return candidate if candidate.is_file() else None
+
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -68,7 +82,8 @@ def main(argv: list[str] | None = None) -> int:
     scan_parser.add_argument("--pixel-max-side", type=int, default=DEFAULT_PIXEL_MAX_SIDE, help=f"maximum sampled side for pixel analysis (default: {DEFAULT_PIXEL_MAX_SIDE})")
     scan_parser.add_argument("--heatmaps", action="store_true", help="write PNG heatmaps for deep pixel localization")
     scan_parser.add_argument("--heatmap-dir", type=Path, help="directory for heatmaps (default: folder/deepfake_lens_heatmaps)")
-    scan_parser.add_argument("--model-path", type=Path, help="optional external model profile or neural checkpoint path")
+    scan_parser.add_argument("--model-path", type=Path, help="external model profile or neural checkpoint path (default: auto-discover models/aide-runtime.json)")
+    scan_parser.add_argument("--no-default-engine", action="store_true", help="ignore the bundled models/aide-runtime.json default-engine profile")
     scan_parser.add_argument("--fusion-profile", type=Path, help="optional score-fusion profile")
     scan_parser.add_argument("--cache", type=Path, help="JSON cache for resumable large-folder scans")
     scan_parser.add_argument("--workers", type=int, default=1, help="parallel file workers for large folders")
@@ -102,7 +117,8 @@ def main(argv: list[str] | None = None) -> int:
     eval_parser.add_argument("--pixel", choices=sorted(SUPPORTED_PIXEL_MODES), default="deep")
     eval_parser.add_argument("--pixel-max-side", type=int, default=DEFAULT_PIXEL_MAX_SIDE)
     eval_parser.add_argument("--calibration", type=Path)
-    eval_parser.add_argument("--model-path", type=Path)
+    eval_parser.add_argument("--model-path", type=Path, help="external model profile (default: auto-discover models/aide-runtime.json)")
+    eval_parser.add_argument("--no-default-engine", action="store_true", help="ignore the bundled models/aide-runtime.json default-engine profile")
     eval_parser.add_argument("--fusion-profile", type=Path)
     eval_parser.add_argument("--max-files", type=int)
     eval_parser.add_argument("--json-out", type=Path)
@@ -125,7 +141,8 @@ def main(argv: list[str] | None = None) -> int:
     fusion_parser = subparsers.add_parser("fusion", help="calibrate a metadata/pixel/model/source fusion profile")
     fusion_parser.add_argument("folder", type=Path)
     fusion_parser.add_argument("--pixel", choices=sorted(SUPPORTED_PIXEL_MODES), default="deep")
-    fusion_parser.add_argument("--model-path", type=Path)
+    fusion_parser.add_argument("--model-path", type=Path, help="external model profile (default: auto-discover models/aide-runtime.json)")
+    fusion_parser.add_argument("--no-default-engine", action="store_true", help="ignore the bundled models/aide-runtime.json default-engine profile")
     fusion_parser.add_argument("--target-fpr", type=float, default=0.05)
     fusion_parser.add_argument("--max-files", type=int)
     fusion_parser.add_argument("--out", type=Path, required=True)
@@ -355,7 +372,7 @@ def main(argv: list[str] | None = None) -> int:
             pixel_mode=args.pixel,
             pixel_max_side=args.pixel_max_side,
             calibration_path=args.calibration,
-            model_path=args.model_path,
+            model_path=args.model_path or (None if args.no_default_engine else default_model_path()),
             fusion_profile=fusion_profile,
             max_files=args.max_files,
         )
@@ -392,7 +409,7 @@ def main(argv: list[str] | None = None) -> int:
         payload = calibrate_fusion_profile(
             args.folder,
             pixel_mode=args.pixel,
-            model_path=args.model_path,
+            model_path=args.model_path or (None if args.no_default_engine else default_model_path()),
             target_false_positive_rate=args.target_fpr,
             max_files=args.max_files,
         )
@@ -907,6 +924,9 @@ def main(argv: list[str] | None = None) -> int:
         scan_parser.error("--heatmaps requires --pixel deep")
     if args.model_path and not args.model_path.exists():
         scan_parser.error("--model-path does not exist")
+    model_path = args.model_path or (None if args.no_default_engine else default_model_path())
+    if model_path and args.model_path is None:
+        print(f"default engine profile: {model_path}", file=sys.stderr)
 
     try:
         if args.progress:
@@ -921,7 +941,7 @@ def main(argv: list[str] | None = None) -> int:
             pixel_max_side=args.pixel_max_side,
             heatmaps=args.heatmaps,
             heatmap_dir=args.heatmap_dir,
-            model_path=args.model_path,
+            model_path=model_path,
             cache_path=args.cache,
             workers=args.workers,
             max_file_bytes=args.max_file_bytes,

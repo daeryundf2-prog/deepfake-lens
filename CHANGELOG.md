@@ -4,6 +4,24 @@ All notable changes to Deepfake Lens. Format: Keep a Changelog; this repo
 has not tagged a release yet (version is `0.1.0.dev0`), so entries are
 grouped by work pass rather than release.
 
+## 2026-09 — AIDE default-engine plumbing
+
+### Added
+- `models/aide-runtime.json` — committed runtime profile for the AIDE
+  (ICLR 2025) `progan_train` checkpoint; weights stay out of git.
+- `scripts/fetch_aide.py` — checkpoint fetcher with sha256 verification,
+  Google Drive interstitial handling, license notice, and `--force`
+  overwrite guard.
+- `model_adapter` runtime `"aide"`: lazily loads `scripts/run_aide.py`
+  (optional torch/timm stack), caches the model across files, and returns
+  `available=False` with a reason when the checkpoint or dependencies are
+  missing. Runtime profiles may now carry a `limitations` list that merges
+  into results.
+- CLI auto-discovery: `scan`/`eval`/`fusion` use `models/aide-runtime.json`
+  as the default `--model-path` when present; `--no-default-engine` opts out.
+- `summary.external_model_active` count in scan JSON so the external-engine
+  signal stays distinct from the pixel ensemble.
+
 ## 2026-09 — detection-evidence pass
 
 ### Added

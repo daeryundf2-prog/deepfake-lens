@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import math
 from dataclasses import dataclass, field
@@ -83,10 +84,11 @@ def load_model_threshold(model_path: Path | str | None) -> int | None:
 
 def _score_from_runtime_profile(profile: dict[str, object], image_path: Path, *, base_dir: Path) -> ExternalModelAnalysis | None:
     runtime = str(profile.get("runtime") or "").lower()
-    if runtime not in {"onnx", "torchscript"}:
+    if runtime not in {"onnx", "torchscript", "aide"}:
         return None
     checkpoint = _checkpoint_path(profile, base_dir=base_dir)
     model_name = str(profile.get("name") or profile.get("model") or checkpoint.name)
+    profile_limitations = _profile_limitations(profile)
     if not checkpoint.exists():
         return ExternalModelAnalysis(
             available=False,
@@ -94,11 +96,14 @@ def _score_from_runtime_profile(profile: dict[str, object], image_path: Path, *,
             confidence="unavailable",
             model=model_name,
             detail=f"{runtime} checkpoint was not found: {checkpoint}",
-            limitations=["Use an absolute checkpoint path or a path relative to the model profile."],
+            limitations=[*_checkpoint_hint(runtime), *profile_limitations],
         )
     try:
-        array = _preprocess_image(image_path, profile)
-        values = _run_onnx(checkpoint, array, profile) if runtime == "onnx" else _run_torchscript(checkpoint, array)
+        if runtime == "aide":
+            values = _run_aide(checkpoint, image_path)
+        else:
+            array = _preprocess_image(image_path, profile)
+            values = _run_onnx(checkpoint, array, profile) if runtime == "onnx" else _run_torchscript(checkpoint, array)
         score = _score_from_outputs(values, profile)
     except ImportError as exc:
         return ExternalModelAnalysis(
@@ -107,7 +112,7 @@ def _score_from_runtime_profile(profile: dict[str, object], image_path: Path, *,
             confidence="unavailable",
             model=model_name,
             detail=f"{runtime} runtime is optional and not installed: {exc}",
-            limitations=["Install Pillow plus onnxruntime or torch in the local environment to enable neural inference."],
+            limitations=[_runtime_install_hint(runtime), *profile_limitations],
         )
     except Exception as exc:  # noqa: BLE001 - model runtimes fail in many library-specific ways.
         return ExternalModelAnalysis(
@@ -116,7 +121,7 @@ def _score_from_runtime_profile(profile: dict[str, object], image_path: Path, *,
             confidence="unavailable",
             model=model_name,
             detail=f"{runtime} inference failed: {exc}",
-            limitations=["Verify input_size, mean/std, input_name, score_index, and checkpoint compatibility."],
+            limitations=["Verify input_size, mean/std, input_name, score_index, and checkpoint compatibility.", *profile_limitations],
         )
     return ExternalModelAnalysis(
         available=True,
@@ -124,7 +129,64 @@ def _score_from_runtime_profile(profile: dict[str, object], image_path: Path, *,
         confidence=_confidence_for_score(score),
         model=model_name,
         detail=f"{runtime} runtime supplied score={score}.",
+        limitations=list(profile_limitations),
     )
+
+
+def _profile_limitations(profile: dict[str, object]) -> list[str]:
+    values = profile.get("limitations")
+    if not isinstance(values, list):
+        return []
+    return [str(item) for item in values]
+
+
+def _checkpoint_hint(runtime: str) -> list[str]:
+    if runtime == "aide":
+        return ["Fetch the checkpoint with scripts/fetch_aide.py, or point 'checkpoint' at a local progan_train.pth."]
+    return ["Use an absolute checkpoint path or a path relative to the model profile."]
+
+
+def _runtime_install_hint(runtime: str) -> str:
+    if runtime == "aide":
+        return "Install the optional research stack (torch, torchvision, timm, Pillow, numpy) to enable the AIDE engine."
+    return "Install Pillow plus onnxruntime or torch in the local environment to enable neural inference."
+
+
+# The AIDE engine keeps its 3.3 GB checkpoint resident between files; keyed by
+# resolved checkpoint path so a scan loads weights once instead of per image.
+_AIDE_RUNNERS: dict[str, tuple[object, object, object]] = {}
+
+
+def _aide_runner(checkpoint: Path) -> tuple[object, object, object]:
+    """Load scripts/run_aide.py (module, model, DCT preprocessor), cached per checkpoint."""
+    importlib.import_module("torch")  # surface ImportError before loading the heavy script
+    key = str(checkpoint.resolve())
+    cached = _AIDE_RUNNERS.get(key)
+    if cached is not None:
+        return cached
+    repo_root = Path(__file__).resolve().parent.parent
+    script = repo_root / "scripts" / "run_aide.py"
+    if not script.is_file():
+        raise RuntimeError(f"AIDE runner script is missing: {script}")
+    spec = importlib.util.spec_from_file_location("deepfake_lens_aide_runner", script)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load AIDE runner: {script}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    runner = (module, module.load_model(checkpoint), module.DctPreprocessor())
+    _AIDE_RUNNERS[key] = runner
+    return runner
+
+
+def _run_aide(checkpoint: Path, image_path: Path) -> list[float]:
+    """Score one image with the AIDE reimplementation (optional torch stack)."""
+    torch = importlib.import_module("torch")
+    image_module = importlib.import_module("PIL.Image")
+    module, model, dct = _aide_runner(checkpoint)
+    batch = module.preprocess(image_module.open(image_path), dct).unsqueeze(0)
+    with torch.no_grad():
+        logits = model(batch)
+    return _flatten_outputs(logits.detach().cpu().numpy())
 
 
 def _checkpoint_path(profile: dict[str, object], *, base_dir: Path) -> Path:

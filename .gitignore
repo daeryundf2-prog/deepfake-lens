@@ -23,6 +23,15 @@ ml_classifier.json
 test_results.json
 model_tracker.json
 
+# Neural checkpoints are research-licensed and never committed;
+# fetch them with scripts/fetch_aide.py (see models/aide-runtime.json).
+models/*.pth
+models/*.pt
+models/*.onnx
+models/*.torchscript
+models/*.bin
+models/*.part
+
 # IDE
 .vscode/
 .idea/
