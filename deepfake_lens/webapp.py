@@ -30,8 +30,13 @@ def host_name(header_value: str) -> str:
     return value
 
 
-def run_server(host: str, port: int, *, default_folder: Path | None = None, allow_lan: bool = False) -> None:
-    """Run the web server with GUI."""
+def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Path | None = None, allow_lan: bool = False) -> None:
+    """Run the web server with GUI.
+
+    Binds to loopback by default; any other host requires ``allow_lan=True``
+    (the ``web`` CLI command maps ``--allow-lan`` to it). See
+    docs/deepfake-lens-service.md for the full service contract.
+    """
     if not allow_lan and host not in LOCAL_HOSTS:
         raise ValueError("local web app binds to localhost by default; pass --allow-lan to bind elsewhere")
 

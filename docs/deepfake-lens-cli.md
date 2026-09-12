@@ -35,7 +35,7 @@ Every subcommand, briefly. Detail for the core workflow lives in the sections be
 - `rppg <video>`: CHROM cardiac-pulse screening from face video.
 - `prnu <target> --reference ...`: sensor-fingerprint provenance correlation.
 - `evidence <file>`: forensic evidence chain with measured integrity verification.
-- `api-serve [--token]`: REST API server (token mandatory off-localhost).
+- `api-serve [--token]`: REST API server (token mandatory off-localhost; contract: `docs/deepfake-lens-service.md`).
 - `batch <folder>`: parallel per-file analysis.
 - `explain --score`: human-readable explanation of a score/signals.
 - `agent --text|--file` / `3d --text|--file` / `avatar --file`: AI-agent text, 3D-asset, and avatar heuristics.
@@ -44,7 +44,7 @@ Every subcommand, briefly. Detail for the core workflow lives in the sections be
 - `legal-report <file>`: legal-style forensic report with integrity checksum (not a digital signature); provenance evidence delegates to the same SDK-first c2pa.py path as `forensic`.
 - `perf <folder> --out`: throughput/cache/duplicate-rate report.
 - `security --out` / `release --out`: guardrail and release-readiness reports.
-- `web`: local web GUI (localhost; Host-header guarded).
+- `web`: local web GUI (localhost; Host-header guarded; contract: `docs/deepfake-lens-service.md`).
 
 ## Usage
 
