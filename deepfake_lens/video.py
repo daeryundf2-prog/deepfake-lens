@@ -10,6 +10,9 @@ from typing import Iterable
 
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
 
+# Per-command ffmpeg budget; matches the batch job timeout in batch.py.
+FFMPEG_TIMEOUT_SECONDS = 300
+
 
 @dataclass(frozen=True)
 class VideoPlanItem:
@@ -100,7 +103,17 @@ def extract_video_frames(plan: dict[str, object], *, limit: int | None = None) -
             )
             continue
         frame_dir.mkdir(parents=True, exist_ok=True)
-        completed = subprocess.run(command, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            completed = subprocess.run(command, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=FFMPEG_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            results.append(
+                {
+                    "path": item.get("path", ""),
+                    "returncode": -1,
+                    "stderr": f"timed out after {FFMPEG_TIMEOUT_SECONDS}s",
+                }
+            )
+            continue
         results.append(
             {
                 "path": item.get("path", ""),
