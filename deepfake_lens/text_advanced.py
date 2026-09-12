@@ -1,7 +1,11 @@
 """Advanced text analysis module for AI-generated text detection.
 
 Provides deeper analysis of text using statistical measures like
-perplexity, burstiness, vocabulary diversity, and n-gram patterns.
+bigram entropy, burstiness, vocabulary diversity, and n-gram patterns.
+
+Note: the entropy measure below is a bigram distribution statistic, NOT
+language-model perplexity. No LLM backbone is bundled, so nothing in this
+module claims or approximates PPL.
 """
 
 from __future__ import annotations
@@ -55,10 +59,10 @@ def analyze_text_advanced(text: str) -> TextAdvancedAnalysis:
     signals: list[TextAdvancedEvidenceSignal] = []
     limitations: list[str] = []
 
-    # Perplexity analysis
-    perplexity_signal = _perplexity_analysis(words)
-    if perplexity_signal:
-        signals.append(perplexity_signal)
+    # Bigram-entropy analysis (a distribution statistic, not LM perplexity)
+    bigram_entropy_signal = _bigram_entropy_analysis(words)
+    if bigram_entropy_signal:
+        signals.append(bigram_entropy_signal)
 
     # Burstiness analysis
     burstiness_signal = _burstiness_analysis(sentences)
@@ -95,6 +99,8 @@ def analyze_text_advanced(text: str) -> TextAdvancedAnalysis:
         limitations.append("텍스트가 너무 짧아 신뢰할 수 있는 분석이 어렵습니다.")
     if len(sentences) < 3:
         limitations.append("문장 수가 적어 문장 수준 분석이 제한적입니다.")
+    if len(words) >= 20:
+        limitations.append("빅그램 엔트로피는 언어모델 퍼플렉시티가 아닌 분포 통계이므로 PPL 수준의 근거로 해석하면 안 됩니다.")
     limitations.append("통계적 휴리스틱 기반 선별 결과이며, 확정적 판별이 아닙니다.")
 
     score = min(100, sum(signal.weight for signal in signals))
@@ -127,13 +133,16 @@ def analyze_text_advanced(text: str) -> TextAdvancedAnalysis:
     )
 
 
-def _perplexity_analysis(words: list[str]) -> TextAdvancedEvidenceSignal | None:
-    """Analyze word-level perplexity (simplified)."""
-    if len(words) < 20:
-        return None
+def bigram_entropy(words: list[str]) -> float:
+    """Shannon entropy (bits) of the word-bigram distribution.
 
-    # Calculate bigram entropy as a proxy for perplexity
-    bigrams = [(words[i], words[i+1]) for i in range(len(words) - 1)]
+    This is a distributional statistic over the observed bigrams — it is
+    NOT language-model perplexity and must not be reported as such.
+    """
+    if len(words) < 2:
+        return 0.0
+
+    bigrams = [(words[i], words[i + 1]) for i in range(len(words) - 1)]
     bigram_counts = Counter(bigrams)
     total_bigrams = len(bigrams)
 
@@ -141,6 +150,15 @@ def _perplexity_analysis(words: list[str]) -> TextAdvancedEvidenceSignal | None:
     for count in bigram_counts.values():
         prob = count / total_bigrams
         entropy -= prob * math.log2(prob)
+    return entropy
+
+
+def _bigram_entropy_analysis(words: list[str]) -> TextAdvancedEvidenceSignal | None:
+    """Flag extreme bigram-entropy regimes (predictable vs abnormal text)."""
+    if len(words) < 20:
+        return None
+
+    entropy = bigram_entropy(words)
 
     # AI text tends to have lower entropy (more predictable)
     if entropy < 4.0 and len(words) > 100:

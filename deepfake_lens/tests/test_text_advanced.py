@@ -7,6 +7,7 @@ import unittest
 from deepfake_lens.text_advanced import (
     TextAdvancedAnalysis,
     analyze_text_advanced,
+    bigram_entropy,
 )
 
 
@@ -79,6 +80,29 @@ class TextAdvancedAnalysisTest(unittest.TestCase):
         text = " ".join(sentences)
         result = analyze_text_advanced(text)
         self.assertGreater(result.score, 0)
+
+    def test_bigram_entropy_known_distribution(self) -> None:
+        """Two equiprobable bigrams must yield exactly 1 bit of entropy."""
+        self.assertAlmostEqual(bigram_entropy(["a", "b", "a", "b", "a"]), 1.0)
+        # A single repeated bigram has zero entropy.
+        self.assertAlmostEqual(bigram_entropy(["x", "x", "x", "x"]), 0.0)
+        self.assertAlmostEqual(bigram_entropy(["only"]), 0.0)
+
+    def test_no_perplexity_claims(self) -> None:
+        """The module measures bigram entropy; the old pseudo-perplexity
+        name must not survive anywhere."""
+        import deepfake_lens.text_advanced as text_module
+
+        self.assertFalse(hasattr(text_module, "_perplexity_analysis"))
+        self.assertTrue(hasattr(text_module, "bigram_entropy"))
+
+    def test_limitations_disclaim_perplexity(self) -> None:
+        """Outputs must state that bigram entropy is not LM perplexity."""
+        text = " ".join(f"word{i} follows" for i in range(40))
+        result = analyze_text_advanced(text)
+        self.assertTrue(
+            any("퍼플렉시티가 아닌" in line for line in result.limitations)
+        )
 
 
 if __name__ == "__main__":

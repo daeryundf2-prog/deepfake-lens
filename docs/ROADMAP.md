@@ -57,9 +57,11 @@ The audit correctly flags where the codebase *simulates* capability:
 2. **rppg.py single-box CHROM**: upgrade to multi-ROI (forehead + both
    cheeks) phase-coherence à la FakeCatcher; report per-ROI agreement, not
    one pulse.
-3. **text_advanced.py pseudo-perplexity**: bigram entropy is not
-   perplexity. Either rename the signal honestly ("repetition entropy") or
-   add a small local LLM for real PPL/Binoculars as an optional extra.
+3. **text_advanced.py pseudo-perplexity**: DONE (honest-naming path) —
+   `_perplexity_analysis` renamed to `_bigram_entropy_analysis`, the
+   measure exposed publicly as `bigram_entropy`, and outputs now state
+   explicitly that it is a distribution statistic, not LM perplexity.
+   A real PPL/Binoculars optional extra remains future work.
 4. **multimodal.py**: scalar average admits to being a summary. Add an
    audio-visual lip-sync phase check (phoneme closure vs formant timing) as
    the first true cross-modal signal.
