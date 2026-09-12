@@ -3,22 +3,22 @@
 Provides comprehensive forensic analysis for legal and evidentiary use.
 
 This module is the legal-report packaging layer (hashing, report ID,
-legal text, checksum) behind the ``legal-report`` CLI command. The
-canonical provenance-detection path is ``c2pa.py``
-(``analyze_metadata_forensic``), which this module's byte-marker scans
-partially duplicate; see ``docs/consolidation-notes.md`` for the planned
-convergence.
+legal text, checksum) behind the ``legal-report`` CLI command. Evidence
+collection delegates to the canonical provenance path in ``c2pa.py``
+(``analyze_metadata_forensic``), so a raw ``b"c2pa"`` substring is a
+reference-level hint — never the 0.9 confidence that only an
+SDK-validated manifest earns. See ``docs/consolidation-notes.md``.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
-import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from .c2pa import MetadataForensicAnalysis, ProvenanceRecord, analyze_metadata_forensic
 
 
 @dataclass(frozen=True)
@@ -119,20 +119,20 @@ def analyze_forensic(path: Path | str) -> ForensicReport:
     evidences: list[ForensicEvidence] = []
     legal_notes: list[str] = []
 
-    # Analyze metadata
-    metadata_evidence = _analyze_metadata(file_path)
-    if metadata_evidence:
-        evidences.extend(metadata_evidence)
+    # Provenance/metadata evidence comes from the canonical SDK-first scan
+    # in c2pa.py: a single calibration point, the 256 MB read cap, and the
+    # official SDK validator when the `provenance` extra is installed.
+    forensic = analyze_metadata_forensic(file_path)
+    evidences.extend(_evidence_from_forensic_analysis(forensic))
+    if forensic.band == "unknown":
+        legal_notes.append(f"출처 메타데이터 분석을 수행하지 못했습니다: {forensic.verdict}")
+    else:
+        legal_notes.extend(forensic.limitations)
 
-    # Analyze file structure
+    # File-structure checks not covered by the provenance path.
     structure_evidence = _analyze_structure(file_path)
     if structure_evidence:
         evidences.extend(structure_evidence)
-
-    # Analyze provenance markers
-    provenance_evidence = _analyze_provenance(file_path)
-    if provenance_evidence:
-        evidences.extend(provenance_evidence)
 
     # Calculate overall confidence
     if evidences:
@@ -200,68 +200,108 @@ def _calculate_hash(path: Path) -> str:
         return ""
 
 
-def _analyze_metadata(path: Path) -> list[ForensicEvidence]:
-    """Analyze file metadata for forensic evidence."""
-    evidences = []
-    
-    try:
-        import struct
-        data = path.read_bytes()
-        
-        if data[:8] == b"\x89PNG\r\n\x1a\n":
-            # PNG - check for C2PA
-            if b"c2pa" in data or b"jumbf" in data:
-                evidences.append(ForensicEvidence(
-                    evidence_type="c2pa_manifest",
-                    description="C2PA 매니페스트 발견",
-                    confidence=0.9,
-                    details={"standard": "C2PA"},
-                ))
-            
-            # Check for watermarks
-            watermark_markers = [b"Google", b"SynthID", b"Adobe Firefly", b"Midjourney"]
-            for marker in watermark_markers:
-                if marker in data:
-                    evidences.append(ForensicEvidence(
-                        evidence_type="watermark",
-                        description=f"{marker.decode()} 워터마크 발견",
-                        confidence=0.7,
-                        details={"marker": marker.decode()},
-                    ))
-        
-        elif data[:2] == b"\xff\xd8":
-            # JPEG - check for EXIF
-            if b"Exif" in data:
-                evidences.append(ForensicEvidence(
-                    evidence_type="exif_metadata",
-                    description="EXIF 메타데이터 발견",
-                    confidence=0.5,
-                    details={"format": "JPEG"},
-                ))
-    except Exception:
-        pass
-    
+# Signals produced by c2pa.py that have no companion ProvenanceRecord —
+# every other signal is already represented by a translated record, so
+# reporting it again would double-count the same finding.
+_SIGNAL_ONLY_EVIDENCE = {
+    "PNG 출처 청크": ("png_metadata", 0.3),
+    "EXIF 메타데이터": ("exif_metadata", 0.5),
+}
+
+
+def _evidence_from_forensic_analysis(analysis: MetadataForensicAnalysis) -> list[ForensicEvidence]:
+    """Translate the canonical provenance scan into report evidence."""
+    evidences = [_evidence_from_record(record) for record in analysis.provenance_records]
+    for signal in analysis.signals:
+        mapped = _SIGNAL_ONLY_EVIDENCE.get(signal.title)
+        if mapped is None:
+            continue
+        evidence_type, confidence = mapped
+        evidences.append(
+            ForensicEvidence(
+                evidence_type=evidence_type,
+                description=f"{signal.title}: {signal.detail}",
+                confidence=confidence,
+                details={"signal": signal.title, "detail": signal.detail},
+            )
+        )
     return evidences
 
 
+def _evidence_from_record(record: ProvenanceRecord) -> ForensicEvidence:
+    """Map one ProvenanceRecord to ForensicEvidence with honest confidence.
+
+    Only an SDK-validated C2PA manifest earns 0.9. A manifest the SDK read
+    but could not fully validate (e.g. untrusted signer) is 0.5, and a
+    bare byte-marker match without the SDK is a 0.3 hint — the old local
+    scan scored that substring 0.9, which outranked verified manifests.
+    """
+    details: dict[str, Any] = {
+        "standard": record.standard,
+        "provider": record.provider,
+        "signed": record.signed,
+        "claim_url": record.claim_url,
+        **record.details,
+    }
+    if record.standard == "C2PA":
+        if record.details.get("present"):
+            if str(record.details.get("state", "")).lower() == "valid":
+                return ForensicEvidence(
+                    evidence_type="c2pa_manifest",
+                    description="C2PA 매니페스트가 공식 SDK로 검증되었습니다.",
+                    confidence=0.9,
+                    details=details,
+                )
+            return ForensicEvidence(
+                evidence_type="c2pa_manifest",
+                description="C2PA 매니페스트가 감지되었지만 SDK 검증이 완료되지 않았습니다(신뢰 저장소에 없는 서명자일 수 있습니다).",
+                confidence=0.5,
+                details=details,
+            )
+        return ForensicEvidence(
+            evidence_type="c2pa_marker",
+            description="C2PA 관련 문자열이 발견되었습니다(매니페스트 검증이 아닌 문자열 탐지입니다).",
+            confidence=0.3,
+            details=details,
+        )
+    if record.standard == "ExifTool":
+        return ForensicEvidence(
+            evidence_type="exiftool_metadata",
+            description="ExifTool 형식 메타데이터 임베딩이 발견되었습니다.",
+            confidence=0.4,
+            details=details,
+        )
+    return ForensicEvidence(
+        evidence_type="provenance_marker",
+        description=f"{record.provider} 생성 도구 식별 문자열입니다(암호학적 워터마크 검증이 아닙니다).",
+        confidence=0.4,
+        details=details,
+    )
+
+
 def _analyze_structure(path: Path) -> list[ForensicEvidence]:
-    """Analyze file structure for forensic evidence."""
+    """Structural checks the provenance path does not cover (size, gzip).
+
+    Not a duplicate of c2pa.py: those findings describe file shape, not
+    provenance markers.
+    """
     evidences = []
-    
+
     try:
-        data = path.read_bytes()
-        
-        # Check file size anomalies
-        if len(data) < 100:
+        size = path.stat().st_size
+        if size < 100:
             evidences.append(ForensicEvidence(
                 evidence_type="file_size",
                 description="비정상적으로 작은 파일",
                 confidence=0.3,
-                details={"size": len(data)},
+                details={"size": size},
             ))
-        
-        # Check for compression patterns
-        if data[:2] == b"\x1f\x8b":  # gzip
+
+        # Only the magic bytes are needed — no full-file read here; the
+        # provenance path above already enforces MAX_FORENSIC_FILE_BYTES.
+        with path.open("rb") as handle:
+            magic = handle.read(2)
+        if magic == b"\x1f\x8b":  # gzip
             evidences.append(ForensicEvidence(
                 evidence_type="compression",
                 description="gzip 압축 파일",
@@ -270,35 +310,6 @@ def _analyze_structure(path: Path) -> list[ForensicEvidence]:
             ))
     except Exception:
         pass
-    
-    return evidences
 
-
-def _analyze_provenance(path: Path) -> list[ForensicEvidence]:
-    """Analyze file provenance for forensic evidence."""
-    evidences = []
-    
-    try:
-        data = path.read_bytes()
-        
-        # Check for provenance markers
-        provenance_markers = {
-            b"Content Credentials": "CAI",
-            b"Adobe": "Adobe",
-            b"OpenAI": "OpenAI",
-            b"Google": "Google",
-        }
-        
-        for marker, provider in provenance_markers.items():
-            if marker in data:
-                evidences.append(ForensicEvidence(
-                    evidence_type="provenance_marker",
-                    description=f"{provider} 프로바이전스 마커 발견",
-                    confidence=0.6,
-                    details={"provider": provider},
-                ))
-    except Exception:
-        pass
-    
     return evidences
 

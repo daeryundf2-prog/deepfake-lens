@@ -735,6 +735,7 @@ def _pixel_analysis_from_json(data: dict[str, object]) -> PixelAnalysis:
         evidence_chain=[str(item) for item in data.get("evidence_chain", [])] if isinstance(data.get("evidence_chain"), list) else [],
         implemented_references=[str(item) for item in data.get("implemented_references", [])] if isinstance(data.get("implemented_references"), list) else [],
         heatmap_path=str(data.get("heatmap_path")) if data.get("heatmap_path") else None,
+        analysis_tier=str(data.get("analysis_tier", "ensemble")),
     )
 
 

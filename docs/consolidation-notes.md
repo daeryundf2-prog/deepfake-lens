@@ -40,16 +40,19 @@ different thresholds, and different result schemas. `pixel_analyzer.py` is a
 strict subset in capability: anything it can flag, the `pixel.py` experts can
 express as an expert score with a citation.
 
-### Recommended resolution
+### Resolution (executed 2026-09-12)
 
-Keep `pixel_analyzer.py` as a **fast pre-screen tier** for the surfaces that
-already use it (CLI `pixel-analysis`, webapp quick view), but reimplement it
-as a thin wrapper: decode once with cv2, then delegate scoring to the
-`pixel.py` expert functions instead of maintaining a parallel heuristic set.
-Long term, when the AIDE runtime profile (roadmap P1) lands, the pre-screen
-tier should prefer the neural adapter and fall back to the expert ensemble —
-at which point `pixel_analyzer.py`'s own signal functions can be deleted and
-the module shrinks to a result-shape adapter for its two call sites.
+Kept `pixel_analyzer.py` as the **fast pre-screen tier** and labelled it in
+result metadata: `QuickPixelAnalysis.analysis_tier="pre-screen"` vs
+`PixelAnalysis.analysis_tier="ensemble"` (round-tripped through the scan
+JSON cache). Scoring was deliberately NOT delegated to the `pixel.py`
+experts: the ensemble's local heuristics measured AUROC 0.43-0.48 on
+ProGAN (below chance, see ROADMAP), so re-emitting its score under a
+"quick screen" name would imply more analysis than either tier performs.
+The long-term plan below still stands — once the AIDE runtime profile
+lands, the pre-screen tier should prefer the neural adapter and fall back
+to the expert ensemble, at which point this module's own signal functions
+can be deleted and the module shrinks to a result-shape adapter.
 
 ## 2. Provenance/forensics: `enhanced_forensics.py` vs `c2pa.py`
 
@@ -89,19 +92,21 @@ verified" and "the bytes `c2pa` appear somewhere". Its confidence values
 the equivalent fallback signal (weight 10, explicitly caveated as string
 detection, not verification).
 
-### Recommended resolution
+### Resolution (executed 2026-09-12)
 
-Keep `enhanced_forensics.py` as the **report-packaging layer** (hashing,
-report ID, legal text, checksum) — that part has no duplicate — but make its
-evidence collection delegate to `c2pa.py::analyze_metadata_forensic()`
-instead of its own byte scans, translating `MetadataForensicAnalysis`
-signals/provenance records into `ForensicEvidence` entries. This removes the
-conflicting confidence calibration (a raw `c2pa` substring should never
-outscore an SDK-verified manifest) and inherits the size cap and SDK path
-for free. The `_analyze_metadata`/`_analyze_provenance`/`_analyze_structure`
-private functions can then be deleted; tests in `test_phase4_reports.py`
-should keep passing since the public `analyze_forensic` contract is
-unchanged.
+Done as recommended: `analyze_forensic` now delegates evidence collection
+to `analyze_metadata_forensic()` and translates `ProvenanceRecord`s plus
+the two record-less signals (PNG text chunks, JPEG APP1 EXIF) into
+`ForensicEvidence` entries. Confidence follows the c2pa.py calibration:
+0.9 only for an SDK-`valid` manifest, 0.5 for an SDK-detected but
+incompletely validated manifest (e.g. untrusted signer), 0.3 for a bare
+byte-marker match (`evidence_type` is now `c2pa_marker`, not
+`c2pa_manifest`), 0.4 for tool-metadata strings. `_analyze_metadata` and
+`_analyze_provenance` were deleted; `_analyze_structure` was kept (file
+size/gzip are not provenance markers) but now reads only magic bytes +
+`stat` instead of the whole file. The packaging contract — hash, report
+ID, legal text, checksum — is unchanged, and the analysis limitations now
+flow into the report's legal notes.
 
 ## Standing contract (unchanged by consolidation)
 

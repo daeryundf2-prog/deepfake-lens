@@ -1,9 +1,10 @@
 """Canonical pixel analysis path: local multi-expert ensemble.
 
-``analyze_image_pixels`` is what the scan pipeline (``core.py``) calls.
-``pixel_analyzer.py`` is a separate cv2-based quick screen kept for the
-``pixel-analysis`` CLI command and webapp; see
-``docs/consolidation-notes.md`` for the planned convergence.
+``analyze_image_pixels`` is what the scan pipeline (``core.py``) calls;
+results are labelled ``analysis_tier="ensemble"``. ``pixel_analyzer.py``
+is a separate cv2-based quick screen kept for the ``pixel-analysis`` CLI
+command and webapp (``analysis_tier="pre-screen"``); see
+``docs/consolidation-notes.md`` for the convergence plan.
 """
 
 from __future__ import annotations
@@ -49,6 +50,9 @@ class PixelAnalysis:
     evidence_chain: list[str] = field(default_factory=list)
     implemented_references: list[str] = field(default_factory=list)
     heatmap_path: str | None = None
+    # "ensemble" here; the cv2 quick screen in pixel_analyzer.py reports
+    # "pre-screen".
+    analysis_tier: str = "ensemble"
 
 
 @dataclass(frozen=True)

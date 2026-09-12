@@ -1,12 +1,20 @@
-"""Pixel analysis module for AI-generated image detection.
+"""Pixel analysis module for AI-generated image detection — pre-screen tier.
 
 Analyzes image pixels to detect AI generation artifacts
 without relying on metadata.
 
-This is the cv2-based quick screen used by the ``pixel-analysis`` CLI
-command and the webapp. The canonical pixel path is the multi-expert
-ensemble in ``pixel.py`` (``analyze_image_pixels``); see
-``docs/consolidation-notes.md`` for the planned convergence.
+This is the cv2-based *fast pre-screen tier* used by the ``pixel-analysis``
+CLI command and the webapp quick view; results are labelled
+``analysis_tier="pre-screen"``. The canonical pixel path is the
+multi-expert ensemble in ``pixel.py`` (``analyze_image_pixels``,
+``analysis_tier="ensemble"``).
+
+This module deliberately keeps its own lightweight scoring instead of
+delegating to the ensemble experts: both tiers are heuristic-only, and
+the ensemble itself measured AUROC 0.43-0.48 on ProGAN (below chance —
+see ``docs/ROADMAP.md``), so aliasing its score here would imply a
+deeper analysis than was run. Neither tier is a truth label; see
+``docs/consolidation-notes.md``.
 """
 
 from __future__ import annotations
@@ -28,6 +36,8 @@ class QuickPixelAnalysis:
 
     Deliberately not named ``PixelAnalysis``: that name belongs to the main
     ensemble result in ``pixel.py`` and the two models are incompatible.
+    ``analysis_tier`` marks this as the fast pre-screen tier so consumers
+    never mistake it for the scan-pipeline ensemble result.
     """
 
     score: int
@@ -37,6 +47,9 @@ class QuickPixelAnalysis:
     signals: list[PixelEvidenceSignal]
     limitations: list[str]
     features: dict[str, float]
+    # "pre-screen" here; the scan pipeline's multi-expert path in pixel.py
+    # reports "ensemble".
+    analysis_tier: str = "pre-screen"
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
@@ -95,6 +108,7 @@ def analyze_pixels(path: Path | str) -> QuickPixelAnalysis:
         signals.append(texture_signal)
 
     # Limitations
+    limitations.append("이 결과는 빠른 사전 선별(pre-screen) 단계이며, 스캔 파이프라인의 픽셀 앙상블(--pixel fast/deep)과 다른 계열입니다.")
     limitations.append("픽셀 분석은 통계적 휴리스틱 기반입니다.")
     limitations.append("실제 AI 생성 여부는 추가 검증이 필요합니다.")
 
