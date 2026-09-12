@@ -121,6 +121,33 @@ class PreScreenTierTest(unittest.TestCase):
         self.assertEqual(restored.analysis_tier, "ensemble")
 
 
+class PixelEnsembleDispositionTest(unittest.TestCase):
+    """R-2: the ensemble measured below-chance AUROC, so when no external
+    model signal ran it must say so in the output."""
+
+    def test_no_external_model_warns_unverified(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "tile.png"
+            _write_rgb_png(path, 32, 32, lambda x, y: (200, 200, 200) if (x + y) % 3 else (60, 60, 60))
+            result = analyze_image_pixels(path, mode="fast")
+            self.assertTrue(result.available)
+            self.assertTrue(any("미검증 휴리스틱" in line for line in result.limitations))
+            self.assertTrue(any("AUROC" in line for line in result.limitations))
+
+    def test_external_sidecar_suppresses_unverified_warning(self) -> None:
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "tile.png"
+            _write_rgb_png(path, 32, 32, lambda x, y: (200, 200, 200) if (x + y) % 3 else (60, 60, 60))
+            path.with_suffix(path.suffix + ".ivy.json").write_text(
+                json.dumps({"score": 0.7, "explanation": "external baseline"}), encoding="utf-8"
+            )
+            result = analyze_image_pixels(path, mode="fast")
+            self.assertTrue(result.available)
+            self.assertFalse(any("미검증 휴리스틱" in line for line in result.limitations))
+
+
 class ForensicDelegationTest(unittest.TestCase):
     """analyze_forensic must inherit the c2pa.py calibration: verified
     manifest > unverified manifest > bare byte string."""

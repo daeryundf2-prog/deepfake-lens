@@ -9,6 +9,7 @@ Each test pins behavior that was previously provably wrong:
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
 from deepfake_lens.audio import AudioFeatures, _fluency_analysis
 from deepfake_lens.core import (
@@ -180,6 +181,56 @@ class FusionDoubleCountTest(unittest.TestCase):
     def test_fused_score_stays_in_range(self) -> None:
         components = {"metadata": 100, "pixel": 100, "external_model": 100, "source": 100}
         self.assertEqual(fused_score(components, DEFAULT_FUSION_PROFILE), 100)
+
+
+class FusionExternalPreferenceTest(unittest.TestCase):
+    """R-2: the local pixel ensemble measured AUROC 0.43-0.48 (below
+    chance), so the fusion profile must prefer a real external-model score
+    (AIDE etc.) over it. These tests pin the observed weight behavior."""
+
+    def test_external_model_weight_exceeds_pixel_weight(self) -> None:
+        weights = DEFAULT_FUSION_PROFILE.weights
+        self.assertGreater(weights["external_model"], weights["pixel"])
+        self.assertEqual(weights["external_model"], 0.3)
+        self.assertEqual(weights["pixel"], 0.25)
+
+    def test_external_score_moves_fused_score_more_than_pixel(self) -> None:
+        """A maxed external-model component contributes 30 points of fused
+        score vs the pixel ensemble's 25 — external is preferred, but NOT
+        dominant: all profile weights stay in the denominator even when a
+        component is unavailable, and pixel still counts when both run."""
+        external_only = fused_score({"external_model": 100}, DEFAULT_FUSION_PROFILE)
+        pixel_only = fused_score({"pixel": 100}, DEFAULT_FUSION_PROFILE)
+        self.assertEqual(external_only, 30)
+        self.assertEqual(pixel_only, 25)
+        self.assertGreater(external_only, pixel_only)
+
+    def test_component_scores_read_model_and_pixel_results(self) -> None:
+        """component_scores must route model_analysis.score to
+        external_model and pixel_analysis.score to pixel so the weight
+        ordering above actually applies."""
+        from deepfake_lens.model_adapter import ExternalModelAnalysis
+        from deepfake_lens.pixel import PixelAnalysis
+
+        result = _classification_result([], SourceConfidence.UNKNOWN)
+        result = replace(
+            result,
+            pixel_analysis=PixelAnalysis(
+                mode="deep", available=True, score=90, confidence="medium",
+                model="local-multiexpert-pixel-v1",
+            ),
+            model_analysis=ExternalModelAnalysis(
+                available=True, score=90, confidence="high",
+                model="aide", detail="test",
+            ),
+        )
+        components = component_scores(result)
+        self.assertEqual(components["pixel"], 90)
+        self.assertEqual(components["external_model"], 90)
+        self.assertEqual(
+            fused_score(components, DEFAULT_FUSION_PROFILE),
+            fused_score({"pixel": 90, "external_model": 90}, DEFAULT_FUSION_PROFILE),
+        )
 
 
 if __name__ == "__main__":

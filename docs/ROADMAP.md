@@ -9,7 +9,7 @@ integration. Every gap below was verified against the code, not assumed.
 | Modality | Screening capability | Measured evidence | Neural detection |
 |---|---|---|---|
 | Image (metadata/provenance) | strong | DALL-E 2 provenance caught at 100 w/ attribution; C2PA SDK validation honest (untrusted ≠ valid) | n/a — this IS the design |
-| Image (pixels, heuristics) | weak, documented | ProGAN AUROC 0.43-0.48 (below chance) | — |
+| Image (pixels, heuristics) | **pre-screen tier only** (demoted 2026-09-12) | ProGAN AUROC 0.43-0.48 (below chance); output now warns "미검증 휴리스틱" whenever no external-model signal ran; fusion weights prefer external_model 0.30 > pixel 0.25 (pixel still contributes — no veto) | — |
 | Image (pixels, AIDE adapter) | **strong** | ProGAN cat 400 = 1.000, airplane = 1.000, **full Synthbuster sweep 720 (9 generators) = 0.951**; ONNX parity verified (4-decimal prob match) | **done** (`scripts/run_aide.py`) |
 | Video | heuristic only | Haar-cascade 1-box rPPG; landmark "estimator" is box-ratio arithmetic (`face.py:185` — self-documented as NOT measured) | none |
 | Audio | heuristic only | librosa thresholds (jitter/shimmer/formants); no vocoder bispectrum, no AASIST/RawNet | none |

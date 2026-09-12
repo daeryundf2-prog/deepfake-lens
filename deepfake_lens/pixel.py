@@ -5,6 +5,14 @@ results are labelled ``analysis_tier="ensemble"``. ``pixel_analyzer.py``
 is a separate cv2-based quick screen kept for the ``pixel-analysis`` CLI
 command and webapp (``analysis_tier="pre-screen"``); see
 ``docs/consolidation-notes.md`` for the convergence plan.
+
+Disposition (R-2): this ensemble measured AUROC 0.43-0.48 on ProGAN —
+below chance — so it is a pre-screen/prioritization signal only. When an
+external model (e.g. AIDE via ``--model-path``) supplies a score, the
+scan-level fusion profile prefers it (``external_model`` 0.30 vs
+``pixel`` 0.25); the pixel component still contributes — there is no
+veto — and when no external signal ran, the result carries an explicit
+"미검증 휴리스틱" limitation.
 """
 
 from __future__ import annotations
@@ -135,6 +143,11 @@ def analyze_image_pixels(
         "메타데이터가 제거된 파일도 볼 수 있지만, 카메라 원본/편집본/압축본을 구분하지 못할 수 있습니다.",
         agentfox_summary,
     ]
+    if not any(expert.available for expert in experts if expert.family == "external_baseline"):
+        limitations.append(
+            "픽셀 앙상블은 미검증 휴리스틱입니다(ProGAN 실측 AUROC 0.43-0.48 — 무작위 수준 이하). "
+            "AIDE 등 외부 모델 점수 없이는 이 점수를 단독으로 신뢰할 수 없습니다."
+        )
 
     written_heatmap = None
     if heatmap_path and heatmap_grid:
