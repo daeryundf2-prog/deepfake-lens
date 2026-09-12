@@ -48,14 +48,16 @@ deepfake-lens = "deepfake_lens.cli:main"
 [tool.setuptools.packages.find]
 include = ["deepfake_lens*"]
 
-# Coverage is visibility-only: no fail_under gate. The test suite lives
-# inside the measured package, so deepfake_lens/tests is omitted.
+# Coverage gate: fail_under is set just below the measured floor (67% branch
+# coverage with the dev extra installed, 2026-09). The test suite lives inside
+# the measured package, so deepfake_lens/tests is omitted.
 [tool.coverage.run]
 source = ["deepfake_lens"]
 omit = ["deepfake_lens/tests/*", "deepfake_lens/__main__.py"]
 branch = true
 
 [tool.coverage.report]
+fail_under = 65
 show_missing = true
 skip_covered = false
 exclude_also = [

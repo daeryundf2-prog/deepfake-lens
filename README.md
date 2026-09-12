@@ -32,17 +32,22 @@ python -m deepfake_lens eval /tmp/dfl-smoke-variants --pixel deep --robustness -
 
 ### Coverage
 
-Coverage is tracked for visibility only — there is intentionally no
-percentage gate. Install the dev extra and run the suite under coverage:
+Coverage is gated at `fail_under = 65` (branch coverage) — set just below the
+measured floor of ~67% with the dev extra installed, so the gate pins the
+floor without blocking legitimate refactor noise. Install the dev extra and
+run the suite under coverage:
 
 ```bash
 python -m pip install -e ".[dev]"
 coverage run -m unittest discover deepfake_lens/tests
-coverage report          # terminal table with missing lines
+coverage report          # terminal table with missing lines; exits nonzero below 65%
 coverage html            # optional HTML report in htmlcov/ (gitignored)
 ```
 
-Source/omit rules live in `[tool.coverage.*]` in `pyproject.toml`.
+Source/omit rules and the `fail_under` floor live in `[tool.coverage.*]` in
+`pyproject.toml`. Optional-dependency paths (torch/transformers/onnxruntime,
+c2pa, mediapipe) are exercised only when those extras are installed, so the
+floor is intentionally a floor — coverage with all extras is higher.
 
 ## Scope
 
