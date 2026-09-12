@@ -39,7 +39,7 @@ from .ai_agent import analyze_agent_content, AgentAnalysis
 from .threed import analyze_3d_content, ThreeDAnalysis
 from .avatar import analyze_avatar, AvatarAnalysis
 from .pixel_analyzer import analyze_pixels
-from .ml_classifier import SimpleClassifier
+from .rule_classifier import RuleClassifier
 from .enhanced_forensics import analyze_forensic
 from .webapp import run_server
 
@@ -302,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     pixel_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     pixel_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    ml_parser = subparsers.add_parser("ml-classify", help="classify image using ML features")
+    ml_parser = subparsers.add_parser("ml-classify", help="classify image using feature-threshold rules")
     ml_parser.add_argument("file", type=Path, help="image file to analyze")
     ml_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     ml_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
@@ -860,7 +860,7 @@ def main(argv: list[str] | None = None) -> int:
                 "std": float(np.std(gray)),
                 "texture_variance": float(np.var(cv2.Laplacian(gray, cv2.CV_64F))),
             }
-            classifier = SimpleClassifier()
+            classifier = RuleClassifier()
             result = classifier.predict(features)
             if args.json_out:
                 _write_json_out(args.json_out, json.dumps(result.to_json(), ensure_ascii=False, indent=2) + "\n")
