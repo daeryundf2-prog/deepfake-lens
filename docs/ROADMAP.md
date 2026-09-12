@@ -54,9 +54,13 @@ The audit correctly flags where the codebase *simulates* capability:
    kept but every `FaceRegion` now carries `landmarks_source`
    ("mediapipe-facemesh" vs "box-ratio-estimate") so downstream output can
    no longer pass estimates off as measured landmarks.
-2. **rppg.py single-box CHROM**: upgrade to multi-ROI (forehead + both
-   cheeks) phase-coherence à la FakeCatcher; report per-ROI agreement, not
-   one pulse.
+2. **rppg.py single-box CHROM**: DONE — the face box is now split into a
+   3x3 grid of sub-ROIs with a per-ROI CHROM pulse, and FakeCatcher-style
+   phase coherence (circular mean resultant length at the shared peak
+   frequency) is reported as `phase_coherence` alongside `roi_count`.
+   Coherence is only evaluated while a plausible global pulse exists —
+   noise phases are uniformly random and would only fake a measurement.
+   The single-ROI `rppg_from_rgb_samples` entry point is unchanged.
 3. **text_advanced.py pseudo-perplexity**: DONE (honest-naming path) —
    `_perplexity_analysis` renamed to `_bigram_entropy_analysis`, the
    measure exposed publicly as `bigram_entropy`, and outputs now state

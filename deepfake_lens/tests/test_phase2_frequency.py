@@ -217,6 +217,110 @@ class ChromPulseTest(unittest.TestCase):
         self.assertIn("짧습니다", analysis.verdict)
 
 
+class MultiRoiRppgTest(unittest.TestCase):
+    """FakeCatcher-style inter-ROI phase coherence over the 3x3 grid."""
+
+    @staticmethod
+    def _roi_series(phases, *, fps=30.0, seconds=30, seed=3):
+        """Per-ROI mean-RGB series carrying a 1.2 Hz pulse at the given
+        per-ROI phase offsets.
+
+        Pulse amplitude is kept modest on purpose: in this CHROM variant a
+        pulse that dominates the band variance is re-absorbed by the
+        alpha-normalization, which would push the spectral peak onto a
+        leakage bin and turn the test into a tautology.
+        """
+        import numpy as np
+
+        t = np.arange(int(seconds * fps)) / fps
+        rois = []
+        for k, phase in enumerate(phases):
+            rng = np.random.default_rng(seed + k)
+            motion = rng.normal(0, 6.0, size=len(t))
+            independent = rng.normal(0, 0.5, size=(len(t), 3))
+            pulse = np.sin(2 * np.pi * 1.2 * t + phase)
+            red = 120 + 5 * pulse + motion + independent[:, 0]
+            green = 110 - 2.5 * pulse + motion + independent[:, 1]
+            blue = 100 + 1 * pulse + motion + independent[:, 2]
+            rois.append(list(zip(red.tolist(), green.tolist(), blue.tolist())))
+        return rois
+
+    @unittest.skipUnless(_has_numpy(), "numpy not installed")
+    def test_coherent_rois_report_high_phase_coherence(self) -> None:
+        import numpy as np
+
+        from deepfake_lens.rppg import rppg_from_roi_samples
+
+        rois = self._roi_series([0.0, 0.1, -0.1, 0.05])
+        analysis = rppg_from_roi_samples(rois, fps=30.0)
+        self.assertEqual(analysis.roi_count, 4)
+        self.assertEqual(analysis.method, "chrom-multiroi-v1")
+        self.assertIsNotNone(analysis.phase_coherence)
+        self.assertGreater(analysis.phase_coherence, 0.9)
+        self.assertFalse(
+            any("위상 불일치" in signal.title for signal in analysis.signals)
+        )
+
+    @unittest.skipUnless(_has_numpy(), "numpy not installed")
+    def test_incoherent_rois_flag_low_phase_coherence(self) -> None:
+        import numpy as np
+
+        from deepfake_lens.rppg import rppg_from_roi_samples
+
+        # Phases spread across the circle (R ~ 0.35): decorrelated, but the
+        # aggregate still carries a pulse so coherence stays meaningful.
+        rois = self._roi_series([0.0, np.pi / 2, np.pi, np.pi])
+        analysis = rppg_from_roi_samples(rois, fps=30.0)
+        self.assertIsNotNone(analysis.phase_coherence)
+        self.assertLess(analysis.phase_coherence, 0.5)
+        self.assertTrue(
+            any("위상 불일치" in signal.title for signal in analysis.signals)
+        )
+        self.assertGreater(analysis.score, 0)
+
+    @unittest.skipUnless(_has_numpy(), "numpy not installed")
+    def test_missing_pulse_skips_coherence_measurement(self) -> None:
+        """Without a real global pulse the per-ROI phases are noise; the
+        coherence field must stay None rather than report a fake number."""
+        import numpy as np
+
+        rng = np.random.default_rng(5)
+        rois = []
+        for _ in range(4):
+            noise = rng.normal(0, 6.0, size=(30 * 30, 3))
+            rois.append(
+                list(zip(
+                    (120 + noise[:, 0]).tolist(),
+                    (110 + noise[:, 1]).tolist(),
+                    (100 + noise[:, 2]).tolist(),
+                ))
+            )
+        from deepfake_lens.rppg import rppg_from_roi_samples
+
+        analysis = rppg_from_roi_samples(rois, fps=30.0)
+        self.assertIsNone(analysis.phase_coherence)
+        self.assertEqual(analysis.roi_count, 4)
+
+    @unittest.skipUnless(_has_numpy(), "numpy not installed")
+    def test_single_roi_path_keeps_compat_fields(self) -> None:
+        import numpy as np
+
+        from deepfake_lens.rppg import rppg_from_rgb_samples
+
+        fps = 30.0
+        t = np.arange(30 * fps) / fps
+        pulse = np.sin(2 * np.pi * 1.2 * t)
+        samples = list(zip(
+            (120 + 8 * pulse).tolist(),
+            (110 - 2 * pulse).tolist(),
+            (100 + 1 * pulse).tolist(),
+        ))
+        analysis = rppg_from_rgb_samples(samples, fps=fps)
+        self.assertEqual(analysis.roi_count, 1)
+        self.assertIsNone(analysis.phase_coherence)
+        self.assertEqual(analysis.method, "chrom-v1")
+
+
 class RppgVideoErrorPathTest(unittest.TestCase):
     def test_missing_file_returns_error_analysis(self) -> None:
         from deepfake_lens.rppg import analyze_rppg

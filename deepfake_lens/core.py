@@ -17,6 +17,7 @@ from .png import read_png_dimensions, read_png_metadata
 
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 SUPPORTED_TEXT_EXTENSIONS = {".txt", ".md"}
+SCAN_JSON_SCHEMA_VERSION = 1
 DEFAULT_MAX_FILES = 1000
 DEFAULT_TEXT_BYTES = 64 * 1024
 DEFAULT_METADATA_BYTES = 4 * 1024 * 1024
@@ -518,7 +519,11 @@ def summarize(items: list[ScanItem], *, capped: bool, cached: int = 0) -> BatchS
 
 
 def scan_to_json(summary: BatchScanSummary, items: list[ScanItem]) -> dict[str, object]:
-    return {"summary": summary.to_json(), "items": [item.to_json() for item in items]}
+    return {
+        "schema_version": SCAN_JSON_SCHEMA_VERSION,
+        "summary": summary.to_json(),
+        "items": [item.to_json() for item in items],
+    }
 
 
 def scan_to_json_text(summary: BatchScanSummary, items: list[ScanItem]) -> str:
