@@ -428,7 +428,14 @@ def _run_clip_linear(checkpoint: Path, image_path: Path, profile: dict[str, obje
     image = image_module.open(image_path).convert("RGB")
     inputs = processor(images=image, return_tensors="pt")
     with torch.no_grad():
-        features = model.get_image_features(**inputs).float()
+        features = model.get_image_features(**inputs)
+        # transformers >=5 returns BaseModelOutputWithPooling; 4.x returned a
+        # bare tensor. Unwrap the pooled feature in either case.
+        if hasattr(features, "pooler_output"):
+            features = features.pooler_output
+        elif isinstance(features, (tuple, list)):
+            features = features[0]
+        features = features.float()
         features = features / features.norm(dim=-1, keepdim=True).clamp_min(1e-12)
         logits = features @ weight.T + bias
     return _flatten_outputs(logits.detach().cpu().numpy())
