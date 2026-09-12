@@ -2,6 +2,10 @@
 
 Detects Content Authenticity Initiative (CAI) markers, C2PA manifests,
 SynthID watermarks, and other provenance signals in image/video files.
+
+This is the canonical provenance path. ``enhanced_forensics.py`` duplicates
+part of the byte-marker scan for its legal-report output; see
+``docs/consolidation-notes.md`` for the planned convergence.
 """
 
 from __future__ import annotations

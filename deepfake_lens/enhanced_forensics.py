@@ -1,6 +1,13 @@
 """Enhanced forensics module for legal evidence.
 
 Provides comprehensive forensic analysis for legal and evidentiary use.
+
+This module is the legal-report packaging layer (hashing, report ID,
+legal text, checksum) behind the ``legal-report`` CLI command. The
+canonical provenance-detection path is ``c2pa.py``
+(``analyze_metadata_forensic``), which this module's byte-marker scans
+partially duplicate; see ``docs/consolidation-notes.md`` for the planned
+convergence.
 """
 
 from __future__ import annotations

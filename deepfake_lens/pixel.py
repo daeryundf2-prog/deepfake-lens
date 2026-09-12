@@ -1,3 +1,11 @@
+"""Canonical pixel analysis path: local multi-expert ensemble.
+
+``analyze_image_pixels`` is what the scan pipeline (``core.py``) calls.
+``pixel_analyzer.py`` is a separate cv2-based quick screen kept for the
+``pixel-analysis`` CLI command and webapp; see
+``docs/consolidation-notes.md`` for the planned convergence.
+"""
+
 from __future__ import annotations
 
 import math

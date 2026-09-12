@@ -2,6 +2,11 @@
 
 Analyzes image pixels to detect AI generation artifacts
 without relying on metadata.
+
+This is the cv2-based quick screen used by the ``pixel-analysis`` CLI
+command and the webapp. The canonical pixel path is the multi-expert
+ensemble in ``pixel.py`` (``analyze_image_pixels``); see
+``docs/consolidation-notes.md`` for the planned convergence.
 """
 
 from __future__ import annotations
