@@ -17,6 +17,15 @@ from deepfake_lens.face import (
 )
 
 
+def _has_numpy() -> bool:
+    try:
+        import numpy  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 def _has_cv2() -> bool:
     try:
         import cv2  # noqa: F401
@@ -141,6 +150,7 @@ class FaceAnalysisTest(unittest.TestCase):
         region = FaceRegion(x=0, y=0, width=10, height=10, landmarks=[], confidence=0.9)
         self.assertEqual(region.landmarks_source, "box-ratio-estimate")
 
+    @unittest.skipUnless(_has_numpy(), "numpy not installed")
     @unittest.skipIf(_has_mediapipe(), "mediapipe installed — fallback path not exercised")
     def test_face_landmarks_falls_back_to_labelled_box_estimate(self) -> None:
         """Without mediapipe, _face_landmarks must still return anchors but
@@ -152,6 +162,7 @@ class FaceAnalysisTest(unittest.TestCase):
         self.assertEqual(source, "box-ratio-estimate")
         self.assertEqual(landmarks, _estimate_landmarks(10, 10, 40, 40))
 
+    @unittest.skipUnless(_has_numpy(), "numpy not installed")
     def test_face_landmarks_labels_measured_anchors_as_mediapipe(self) -> None:
         """When the FaceMesh path returns measured anchors, the label must
         say so AND pass the measured values through verbatim — it must not
@@ -168,6 +179,7 @@ class FaceAnalysisTest(unittest.TestCase):
         self.assertEqual(source, "mediapipe-facemesh")
         self.assertEqual(landmarks, measured)
 
+    @unittest.skipUnless(_has_numpy(), "numpy not installed")
     def test_face_landmarks_labels_none_result_as_box_estimate(self) -> None:
         """A FaceMesh miss (no face in crop, or the extra absent) must fall
         back to the labelled estimate — runs in both base and extra envs."""
@@ -181,6 +193,7 @@ class FaceAnalysisTest(unittest.TestCase):
         self.assertEqual(source, "box-ratio-estimate")
         self.assertEqual(landmarks, _estimate_landmarks(10, 10, 40, 40))
 
+    @unittest.skipUnless(_has_numpy(), "numpy not installed")
     @unittest.skipIf(_has_mediapipe(), "mediapipe installed")
     def test_mediapipe_landmarks_none_without_package(self) -> None:
         """The MediaPipe path must degrade to None when the extra is absent."""

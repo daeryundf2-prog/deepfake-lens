@@ -149,7 +149,7 @@ class SuggestWeightsTest(unittest.TestCase):
             "source": {"auroc": 0.5},
         }
         weights, _ = suggest_fusion_weights(per_component, DEFAULT_FUSION_PROFILE.weights)
-        self.assertEqual(sum(weights.values()), 1.0)
+        self.assertAlmostEqual(sum(weights.values()), 1.0, places=12)
         self.assertEqual(weights["source"], 0.0)
         self.assertGreater(weights["metadata"], weights["pixel"])
 

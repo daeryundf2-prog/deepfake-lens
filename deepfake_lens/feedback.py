@@ -254,8 +254,9 @@ def suggest_fusion_weights(
     """Weights proportional to each component's observed label separation.
 
     Contribution is ``max(0, component AUROC - 0.5)``: components that do not
-    separate examiner labels get no suggested weight. Suggested weights always
-    sum to exactly 1.0. When nothing separates, the base weights are returned
+    separate examiner labels get no suggested weight. Suggested weights are
+    normalized in integer 1e-4 units so they always sum to 1.0 (within float
+    representation). When nothing separates, the base weights are returned
     normalized with an explanatory note rather than a fabricated ranking.
     """
     notes: list[str] = []
@@ -275,13 +276,14 @@ def suggest_fusion_weights(
         suggested = {key: max(0.0, base_weights[key]) / base_total for key in keys}
     else:
         suggested = {key: raw[key] / total for key in keys}
-    # Normalize to exactly 1.0 after rounding so the suggestion is a valid profile.
-    rounded = {key: round(value, 4) for key, value in suggested.items()}
-    residual = 1.0 - sum(rounded.values())
-    if rounded:
-        largest = max(rounded, key=lambda key: rounded[key])
-        rounded[largest] = round(rounded[largest] + residual, 4)
-    return rounded, notes
+    # Normalize in integer basis points (1e-4 units) so the residual distribution
+    # is deterministic and unaffected by float addition order.
+    units = {key: int(round(value * 10000)) for key, value in suggested.items()}
+    residual = 10000 - sum(units.values())
+    if units and residual:
+        largest = max(units, key=lambda key: units[key])
+        units[largest] += residual
+    return {key: unit / 10000 for key, unit in units.items()}, notes
 
 
 def _per_signal_stats(observations: list[FeedbackObservation]) -> dict[str, object]:
