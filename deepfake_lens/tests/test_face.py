@@ -7,16 +7,27 @@ from pathlib import Path
 
 from deepfake_lens.face import (
     FaceAnalysis,
+    FaceRegion,
     analyze_faces,
     _classify_manipulation_type,
     _calculate_confidence,
     _estimate_landmarks,
+    _face_landmarks,
 )
 
 
 def _has_cv2() -> bool:
     try:
         import cv2  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def _has_mediapipe() -> bool:
+    try:
+        import mediapipe  # noqa: F401
 
         return True
     except ImportError:
@@ -122,6 +133,33 @@ class FaceAnalysisTest(unittest.TestCase):
         anchor eye-region sampling only and imply nothing about geometry."""
         landmarks = _estimate_landmarks(100, 100, 200, 200)
         self.assertEqual(landmarks, [(170, 170), (230, 170), (200, 210), (200, 250)])
+
+    def test_landmarks_source_defaults_to_box_estimate(self) -> None:
+        """A FaceRegion without an explicit source must not masquerade as
+        measured geometry."""
+        region = FaceRegion(x=0, y=0, width=10, height=10, landmarks=[], confidence=0.9)
+        self.assertEqual(region.landmarks_source, "box-ratio-estimate")
+
+    @unittest.skipIf(_has_mediapipe(), "mediapipe installed — fallback path not exercised")
+    def test_face_landmarks_falls_back_to_labelled_box_estimate(self) -> None:
+        """Without mediapipe, _face_landmarks must still return anchors but
+        label them as box-ratio estimates, never as measured landmarks."""
+        import numpy as np
+
+        image = np.zeros((80, 80, 3), dtype=np.uint8)
+        landmarks, source = _face_landmarks(image, 10, 10, 40, 40)
+        self.assertEqual(source, "box-ratio-estimate")
+        self.assertEqual(landmarks, _estimate_landmarks(10, 10, 40, 40))
+
+    @unittest.skipIf(_has_mediapipe(), "mediapipe installed")
+    def test_mediapipe_landmarks_none_without_package(self) -> None:
+        """The MediaPipe path must degrade to None when the extra is absent."""
+        import numpy as np
+
+        from deepfake_lens.face import _mediapipe_landmarks
+
+        image = np.zeros((80, 80, 3), dtype=np.uint8)
+        self.assertIsNone(_mediapipe_landmarks(image, 10, 10, 40, 40))
 
 
 if __name__ == "__main__":

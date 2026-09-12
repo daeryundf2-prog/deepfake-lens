@@ -49,10 +49,11 @@ product. Close the loop:
 
 ### P2 — Replace fake heuristics with real measurements (audit finding)
 The audit correctly flags where the codebase *simulates* capability:
-1. **face.py `_estimate_landmarks`**: box-ratio arithmetic pretending to be
-   landmarks. Replace with MediaPipe FaceMesh (or InsightFace 2d-106) as an
-   optional extra; keep the current fallback but stop calling the derived
-   points "landmarks" in output until then.
+1. **face.py `_estimate_landmarks`**: DONE — MediaPipe FaceMesh path added
+   behind the `face_mediapipe` optional extra; the box-ratio fallback is
+   kept but every `FaceRegion` now carries `landmarks_source`
+   ("mediapipe-facemesh" vs "box-ratio-estimate") so downstream output can
+   no longer pass estimates off as measured landmarks.
 2. **rppg.py single-box CHROM**: upgrade to multi-ROI (forehead + both
    cheeks) phase-coherence à la FakeCatcher; report per-ROI agreement, not
    one pulse.

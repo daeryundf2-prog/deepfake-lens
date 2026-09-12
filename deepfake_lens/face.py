@@ -1,7 +1,12 @@
 """Face manipulation detection module.
 
 Detects face swap, face reenactment, and lip sync manipulation
-using geometric analysis, boundary blending, and reflection patterns.
+using boundary blending, reflection patterns, and color consistency.
+
+Facial landmark anchors are measured with MediaPipe FaceMesh when the
+optional ``face_mediapipe`` extra is installed; otherwise they fall back
+to box-ratio estimates that are explicitly labelled via
+``FaceRegion.landmarks_source`` and must not feed geometry checks.
 """
 
 from __future__ import annotations
@@ -26,6 +31,9 @@ class FaceRegion:
     height: int
     landmarks: list[tuple[int, int]]
     confidence: float
+    # "mediapipe-facemesh" = measured; "box-ratio-estimate" = derived from
+    # the detection box and carries no geometric information.
+    landmarks_source: str = "box-ratio-estimate"
 
 
 @dataclass(frozen=True)
@@ -111,8 +119,13 @@ def analyze_faces(
     # Limitations
     if len(faces) == 1:
         limitations.append("단일 얼굴만 감지되어 다중 얼굴 비교가 불가합니다.")
-    limitations.append("랜드마크 기하/대칭 검증은 실제 랜드마크 추출이 연동되지 않아 미평가입니다.")
-    limitations.append("눈 위치는 감지 박스에서 추정한 값이므로 반사 패턴 비교는 참고 수준입니다.")
+    landmark_sources = {face.landmarks_source for face in faces}
+    if landmark_sources == {"mediapipe-facemesh"}:
+        limitations.append("랜드마크는 MediaPipe FaceMesh 실측값입니다. 기하/대칭 검증은 아직 구현되지 않았습니다.")
+    else:
+        limitations.append("랜드마크가 감지 박스 비율 추정값(landmarks_source=box-ratio-estimate)이며 실측이 아닙니다.")
+        limitations.append("랜드마크 기하/대칭 검증은 실측 랜드마크가 없어 미평가입니다.")
+        limitations.append("눈 위치는 감지 박스에서 추정한 값이므로 반사 패턴 비교는 참고 수준입니다.")
     limitations.append("로컬 휴리스틱 기반 선별 결과이며, 확정적 판별이 아닙니다.")
 
     score = min(100, sum(signal.weight for signal in signals))
@@ -175,11 +188,84 @@ def _detect_faces(image: Any) -> list[FaceRegion]:
 
     regions = []
     for x, y, w, h in faces:
-        # Simple landmark estimation (eye, nose, mouth positions)
-        landmarks = _estimate_landmarks(x, y, w, h)
-        regions.append(FaceRegion(x=x, y=y, width=w, height=h, landmarks=landmarks, confidence=0.9))
+        landmarks, source = _face_landmarks(image, x, y, w, h)
+        regions.append(
+            FaceRegion(
+                x=x, y=y, width=w, height=h,
+                landmarks=landmarks, confidence=0.9,
+                landmarks_source=source,
+            )
+        )
 
     return regions
+
+
+def _face_landmarks(image, x: int, y: int, w: int, h: int) -> tuple[list[tuple[int, int]], str]:
+    """Return (anchor points, source label) for one detected face box.
+
+    Prefers measured MediaPipe FaceMesh anchors; falls back to box-ratio
+    estimates so every FaceRegion is honest about where its landmarks came
+    from.
+    """
+    measured = _mediapipe_landmarks(image, x, y, w, h)
+    if measured is not None:
+        return measured, "mediapipe-facemesh"
+    return _estimate_landmarks(x, y, w, h), "box-ratio-estimate"
+
+
+# MediaPipe FaceMesh canonical indices for the four anchors, averaged where
+# a small neighbourhood is more stable than a single point.
+_MEDIAPIPE_ANCHOR_INDICES = (
+    (33, 133),    # left eye: inner+outer canthus midpoint
+    (263, 362),   # right eye: inner+outer canthus midpoint
+    (1,),         # nose tip
+    (13, 14),     # mouth center: upper/lower inner lip midpoint
+)
+
+
+def _mediapipe_landmarks(image, x: int, y: int, w: int, h: int) -> list[tuple[int, int]] | None:
+    """Measure eye/nose/mouth anchors with MediaPipe FaceMesh.
+
+    Returns None when the optional ``face_mediapipe`` extra is not
+    installed, when FaceMesh finds no face in the crop, or when the
+    measurement fails — callers then fall back to the labelled box-ratio
+    estimate.
+    """
+    try:
+        import cv2
+        import mediapipe as mp
+    except ImportError:
+        return None
+
+    crop = image[max(0, y) : y + h, max(0, x) : x + w]
+    if crop.size == 0:
+        return None
+
+    try:
+        face_mesh = mp.solutions.face_mesh.FaceMesh(
+            static_image_mode=True,
+            max_num_faces=1,
+            min_detection_confidence=0.5,
+        )
+        try:
+            result = face_mesh.process(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
+        finally:
+            face_mesh.close()
+    except Exception:
+        return None
+
+    if not result.multi_face_landmarks:
+        return None
+
+    mesh = result.multi_face_landmarks[0].landmark
+    crop_h, crop_w = crop.shape[:2]
+
+    def anchor(indices: tuple[int, ...]) -> tuple[int, int]:
+        px = sum(mesh[i].x for i in indices) / len(indices) * crop_w
+        py = sum(mesh[i].y for i in indices) / len(indices) * crop_h
+        return (x + int(px), y + int(py))
+
+    return [anchor(indices) for indices in _MEDIAPIPE_ANCHOR_INDICES]
 
 
 def _estimate_landmarks(x: int, y: int, w: int, h: int) -> list[tuple[int, int]]:
@@ -188,6 +274,7 @@ def _estimate_landmarks(x: int, y: int, w: int, h: int) -> list[tuple[int, int]]
     These are NOT measured landmarks; they only anchor the eye-region
     sampling used by reflection analysis. Geometry checks must not be built
     on them because every derived relation is a constant of the box shape.
+    Callers must label them ``landmarks_source="box-ratio-estimate"``.
     """
     # Left eye, right eye, nose tip, mouth center
     left_eye = (x + int(w * 0.35), y + int(h * 0.35))

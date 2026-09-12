@@ -24,7 +24,7 @@ Every subcommand, briefly. Detail for the core workflow lives in the sections be
 - `video <folder> --out --frame-root`: video frame extraction plan (ffmpeg optional).
 - `video-analysis <file>`: temporal consistency heuristics (stability signals skip static footage).
 - `audio <file>`: AI-generation/voice-cloning heuristics (jitter/shimmer regularity included).
-- `face <file>`: face manipulation heuristics (boundary blending, reflection, color temperature).
+- `face <file>`: face manipulation heuristics (boundary blending, reflection, color temperature). Landmark anchors are measured via MediaPipe FaceMesh when the `face_mediapipe` extra is installed; otherwise they are labelled `landmarks_source=box-ratio-estimate`.
 - `inpaint <file>`: inpainting/partial manipulation heuristics.
 - `text-advanced <file>`: advanced text stylometry analysis.
 - `forensic <file>`: C2PA/provenance metadata forensics (SDK validation when `provenance` extra installed).
