@@ -32,6 +32,8 @@ models/*.onnx
 models/*.torchscript
 models/*.bin
 models/*.part
+# Bundled-app model asset — generated/exported locally, never committed
+deepfakeclassifier/src/main/assets/*.onnx
 
 # IDE
 .vscode/
