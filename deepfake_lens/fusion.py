@@ -112,6 +112,36 @@ def component_scores(result: ClassificationResult) -> dict[str, int]:
     }
 
 
+def component_scores_from_json(result: dict[str, object]) -> dict[str, int]:
+    """Rebuild fusion component scores from a serialized ClassificationResult
+    dict (e.g. a prior ``scan --json-out`` item's ``result``), using the same
+    signal-title exclusions as :func:`component_scores`."""
+    metadata_score = 0.0
+    signals = result.get("signals", [])
+    for signal in signals if isinstance(signals, list) else []:
+        if not isinstance(signal, dict):
+            continue
+        title = str(signal.get("title", ""))
+        weight = signal.get("weight", 0)
+        if not isinstance(weight, (int, float)):
+            continue
+        if title.startswith("픽셀") or title.startswith("외부 모델") or title in {"생성 도구 메타데이터", "융합 점수"}:
+            continue
+        metadata_score += weight
+    pixel = result.get("pixel_analysis") if isinstance(result.get("pixel_analysis"), dict) else {}
+    model = result.get("model_analysis") if isinstance(result.get("model_analysis"), dict) else {}
+    source_guess = result.get("source_guess") if isinstance(result.get("source_guess"), dict) else {}
+    pixel_score = float(pixel.get("score", 0) or 0) if pixel.get("available") else 0.0
+    model_score = float(model.get("score", 0) or 0) if model.get("available") else 0.0
+    source_score = {"high": 100, "medium": 65, "low": 35}.get(str(source_guess.get("confidence", "")), 0)
+    return {
+        "metadata": max(0, min(100, int(metadata_score))),
+        "pixel": max(0, min(100, int(pixel_score))),
+        "external_model": max(0, min(100, int(model_score))),
+        "source": source_score,
+    }
+
+
 def fused_score(components: dict[str, int], profile: FusionProfile) -> int:
     total_weight = sum(max(0.0, value) for value in profile.weights.values())
     if total_weight <= 0:

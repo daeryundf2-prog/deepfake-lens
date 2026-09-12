@@ -19,6 +19,7 @@ Every subcommand, briefly. Detail for the core workflow lives in the sections be
 - `eval <folder>`: labeled-dataset metrics (accuracy/precision/recall/FPR, AUROC, EER, per-split).
 - `benchmark <folder>`: pixel-mode/model matrix benchmark.
 - `fusion <folder> --out` / `calibrate <folder> --out` / `train <folder> --out`: fusion profile, threshold calibration, portable baseline.
+- `feedback <labels.jsonl>`: join examiner verdicts (`{path, expected_label, notes?}`) to a prior `--scan-json` payload or a live rescan; emits a per-signal accuracy report and an advisory `--profile-out` fusion-weight suggestion (never applied automatically; thresholds are left unchanged).
 - `models [--focus]`: detector registry and runtime profile scaffolding.
 - `train-neural-plan <folder> --out`: neural training/ONNX handoff plan.
 - `video <folder> --out --frame-root`: video frame extraction plan (ffmpeg optional).
@@ -38,9 +39,9 @@ Every subcommand, briefly. Detail for the core workflow lives in the sections be
 - `batch <folder>`: parallel per-file analysis.
 - `explain --score`: human-readable explanation of a score/signals.
 - `agent --text|--file` / `3d --text|--file` / `avatar --file`: AI-agent text, 3D-asset, and avatar heuristics.
-- `pixel-analysis <file>`: cv2-based quick pixel screen (QuickPixelAnalysis).
+- `pixel-analysis <file>`: cv2-based quick pixel screen (QuickPixelAnalysis, `analysis_tier="pre-screen"` — the scan pipeline's `--pixel` ensemble is a separate tier).
 - `ml-classify <file>`: feature-threshold classification (requires opencv/numpy).
-- `legal-report <file>`: legal-style forensic report with integrity checksum (not a digital signature).
+- `legal-report <file>`: legal-style forensic report with integrity checksum (not a digital signature); provenance evidence delegates to the same SDK-first c2pa.py path as `forensic`.
 - `perf <folder> --out`: throughput/cache/duplicate-rate report.
 - `security --out` / `release --out`: guardrail and release-readiness reports.
 - `web`: local web GUI (localhost; Host-header guarded).
@@ -62,6 +63,7 @@ python -m deepfake_lens eval /path/to/dataset --pixel deep --json-out eval.json 
 python -m deepfake_lens eval /path/to/dataset --pixel deep --robustness --json-out robustness-eval.json
 python -m deepfake_lens benchmark /path/to/dataset --pixel-modes off,deep --model-path aide-profile.json --json-out matrix.json --md-out matrix.md
 python -m deepfake_lens fusion /path/to/dataset --pixel deep --model-path aide-profile.json --target-fpr 0.05 --out fusion-profile.json
+python -m deepfake_lens feedback examiner-labels.jsonl --scan-json report.json --json-out feedback-report.json --profile-out suggested-fusion-profile.json
 python -m deepfake_lens scan /path/to/folder --fusion-profile fusion-profile.json
 python -m deepfake_lens benchmark /path/to/dataset --pixel-modes off,fast,deep --fusion-profile fusion-profile.json --json-out matrix.json
 python -m deepfake_lens calibrate /path/to/dataset --pixel deep --out calibration.json

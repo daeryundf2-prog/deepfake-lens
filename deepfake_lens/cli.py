@@ -11,6 +11,7 @@ from .collection import write_collection_plan
 from .core import DEFAULT_MAX_FILES, RiskBand, ScanItem, scan_directory, scan_to_json_text, summarize
 from .datasets import write_audit, write_manifest, write_robustness_plan, write_split_plan
 from .evaluate import calibrate_dataset, evaluate_dataset, evaluate_robustness_dataset, train_portable_baseline, write_cases_jsonl, write_json_report
+from .feedback import build_feedback_report, load_feedback, observations_from_scan_payload, observations_live
 from .fusion import FusionProfile, apply_fusion_to_items, calibrate_fusion_profile, load_fusion_profile, write_fusion_profile
 from .model_registry import list_detector_candidates, write_detector_registry, write_runtime_profile
 from .perf import run_performance_check, write_performance_check
@@ -44,7 +45,7 @@ from .enhanced_forensics import analyze_forensic
 from .webapp import run_server
 
 
-COMMANDS = {"scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "inpaint", "text-advanced", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
+COMMANDS = {"scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "inpaint", "text-advanced", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
 
 DEFAULT_ENGINE_PROFILE = "models/aide-runtime.json"
 
@@ -155,6 +156,17 @@ def main(argv: list[str] | None = None) -> int:
     calibrate_parser.add_argument("--max-files", type=int)
     calibrate_parser.add_argument("--out", type=Path, required=True)
     calibrate_parser.add_argument("--mapping-out", type=Path, help="also write an isotonic score-calibration profile (mapping table + method + dataset fingerprint); values are dataset-dependent confidences, not truth probabilities")
+
+    feedback_parser = subparsers.add_parser("feedback", help="compare examiner labels against scan scores and suggest fusion weights")
+    feedback_parser.add_argument("labels", type=Path, help="JSONL/JSON examiner verdicts: {path, expected_label, notes?} per row")
+    feedback_parser.add_argument("--scan-json", type=Path, help="prior scan --json-out payload to score against (default: re-analyze each labeled path)")
+    feedback_parser.add_argument("--pixel", choices=sorted(SUPPORTED_PIXEL_MODES), default="off")
+    feedback_parser.add_argument("--pixel-max-side", type=int, default=DEFAULT_PIXEL_MAX_SIDE)
+    feedback_parser.add_argument("--model-path", type=Path, help="external model profile for live rescan (default: auto-discover models/aide-runtime.json)")
+    feedback_parser.add_argument("--no-default-engine", action="store_true", help="ignore the bundled models/aide-runtime.json default-engine profile")
+    feedback_parser.add_argument("--fusion-profile", type=Path, help="base fusion profile to adjust (default: built-in)")
+    feedback_parser.add_argument("--json-out", type=Path, help="write the feedback report JSON")
+    feedback_parser.add_argument("--profile-out", type=Path, help="write the suggested fusion profile; apply explicitly via --fusion-profile")
 
     train_parser = subparsers.add_parser("train", help="train a portable threshold baseline from a labeled dataset")
     train_parser.add_argument("folder", type=Path)
@@ -440,6 +452,38 @@ def main(argv: list[str] | None = None) -> int:
         if args.mapping_out:
             write_json_report(args.mapping_out, payload["score_calibration"])
         print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "feedback":
+        entries = load_feedback(args.labels)
+        if args.scan_json:
+            try:
+                scan_payload = json.loads(args.scan_json.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                print(f"error: cannot read scan JSON: {exc}", file=sys.stderr)
+                return 2
+            observations, unmatched = observations_from_scan_payload(scan_payload, entries)
+        else:
+            observations, unmatched = observations_live(
+                entries,
+                pixel_mode=args.pixel,
+                pixel_max_side=args.pixel_max_side,
+                model_path=args.model_path or (None if args.no_default_engine else default_model_path()),
+            )
+        report = build_feedback_report(entries, observations, unmatched, base_profile=load_fusion_profile(args.fusion_profile))
+        if args.json_out:
+            write_json_report(args.json_out, report)
+        if args.profile_out and isinstance(report.get("suggested_profile"), dict):
+            suggested = report["suggested_profile"]
+            write_fusion_profile(
+                args.profile_out,
+                FusionProfile(
+                    version=str(suggested.get("version", "fusion-profile-v1")),
+                    weights={str(key): float(value) for key, value in dict(suggested.get("weights", {})).items()},
+                    threshold=int(suggested.get("threshold", 67) or 67),
+                    unknown_below=int(suggested.get("unknown_below", 8) or 8),
+                ),
+            )
+        print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0
     if args.command == "train":
         payload = train_portable_baseline(
