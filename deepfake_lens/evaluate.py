@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
 
-from .calibration import DEFAULT_THRESHOLD, auroc, binary_metrics, calibrate_threshold, eer, load_calibration
+from .calibration import DEFAULT_THRESHOLD, auroc, binary_metrics, calibrate_scores, calibrate_threshold, eer, load_calibration
 from .core import analyze_file
-from .datasets import ROBUSTNESS_TRANSFORMS, discover_dataset, is_negative_label, is_positive_label
+from .datasets import ROBUSTNESS_TRANSFORMS, discover_dataset, file_fingerprint, is_negative_label, is_positive_label
 from .fusion import FusionProfile, apply_fusion_to_result
 from .model_adapter import load_model_threshold
 
@@ -132,6 +133,7 @@ def calibrate_dataset(
     pixel_max_side: int = 192,
     target_false_positive_rate: float = 0.05,
     max_files: int | None = None,
+    include_score_mapping: bool = False,
 ) -> dict[str, object]:
     score_pairs, calibration_scope = _score_dataset(
         root, pixel_mode=pixel_mode, pixel_max_side=pixel_max_side, max_files=max_files
@@ -139,6 +141,9 @@ def calibrate_dataset(
     profile = calibrate_threshold(score_pairs, target_false_positive_rate=target_false_positive_rate)
     payload = profile.to_json()
     payload["calibration_scope"] = calibration_scope
+    if include_score_mapping:
+        calibrator = calibrate_scores(score_pairs, dataset_fingerprint=str(calibration_scope.get("dataset_fingerprint", "")))
+        payload["score_calibration"] = calibrator.to_json()
     return payload
 
 
@@ -260,7 +265,29 @@ def _score_dataset(
             continue
         scores.append((item.result.score, is_positive_label(record.label)))
     scope["unanalyzed_excluded"] = unanalyzed
+    scope["dataset_fingerprint"] = _dataset_fingerprint(used_records)
     return scores, scope
+
+
+def _dataset_fingerprint(records: list) -> str:
+    """Content fingerprint of the labeled records used for fitting.
+
+    Hashes (label, file-content SHA-256) pairs in path order so the same
+    dataset yields the same fingerprint regardless of discovery ordering;
+    empty when no record could be hashed.
+    """
+    digest = hashlib.sha256()
+    hashed = 0
+    for record in sorted(records, key=lambda r: r.path):
+        fingerprint = file_fingerprint(record.path)
+        if not fingerprint:
+            continue
+        digest.update(record.label.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(fingerprint.encode("ascii"))
+        digest.update(b"\n")
+        hashed += 1
+    return digest.hexdigest() if hashed else ""
 
 
 def _threshold(*, calibration_path: Path | None, model_path: Path | None) -> int:

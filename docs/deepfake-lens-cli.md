@@ -65,6 +65,7 @@ python -m deepfake_lens fusion /path/to/dataset --pixel deep --model-path aide-p
 python -m deepfake_lens scan /path/to/folder --fusion-profile fusion-profile.json
 python -m deepfake_lens benchmark /path/to/dataset --pixel-modes off,fast,deep --fusion-profile fusion-profile.json --json-out matrix.json
 python -m deepfake_lens calibrate /path/to/dataset --pixel deep --out calibration.json
+python -m deepfake_lens calibrate /path/to/dataset --pixel deep --out calibration.json --mapping-out calibration-profile.json
 python -m deepfake_lens train /path/to/dataset --pixel deep --out portable-model.json
 python -m deepfake_lens train-neural-plan /path/to/dataset --out neural-plan.json --output-dir experiments/run-001
 python experiments/train_detector.py --manifest dataset-manifest.json --arch convnext_tiny --epochs 10 --out experiments/run-001
@@ -147,7 +148,7 @@ The next-stage plan is implemented as local-first commands and adapters:
 
 1. Dataset preparation: `collect` writes a real/AI source collection plan; `dataset` discovers `ai`, `edited`, and `real` folder labels, writes a manifest, can add SHA-256 fingerprints, writes an audit, plans deterministic splits, and emits a robustness transform plan.
 2. Evaluation runner: `eval` reports threshold, accuracy, precision, recall, false-positive rate, AUROC, confusion counts, false-positive/false-negative case files, benchmark HTML, source-attribution coverage, and per-source metrics. `benchmark` compares multiple pixel modes and model profiles in one matrix.
-3. Calibration and fusion: `calibrate` writes a versioned threshold profile targeting a requested false-positive rate. `fusion` calibrates a local metadata/pixel/external-model/source score profile, and `scan`, `eval`, and `benchmark` accept `--fusion-profile`.
+3. Calibration and fusion: `calibrate` writes a versioned threshold profile targeting a requested false-positive rate; `--mapping-out` additionally writes an isotonic (pool-adjacent-violators, dependency-free) score-calibration profile with a mapping table, method, and dataset fingerprint. Calibrated values are dataset-dependent screening confidences, not truth probabilities, and an undersized dataset produces an honest `insufficient-data` profile rather than a fabricated mapping. `fusion` calibrates a local metadata/pixel/external-model/source score profile, and `scan`, `eval`, and `benchmark` accept `--fusion-profile`.
 4. Pretrained detector adapter: `--model-path` accepts JSON score profiles, sidecar profiles, direct `.onnx`/`.pt`/`.pth`/`.torchscript` paths, and JSON runtime profiles for optional ONNX/TorchScript inference. `models --profile-out` scaffolds candidate profiles such as AIDE.
 5. Training baseline: `train` creates a portable threshold model from local scores until verified neural checkpoints are available. `train-neural-plan` writes the ConvNeXt/ONNX training handoff plan, and optional scripts in `experiments/` run a real PyTorch image experiment when `torch`, `torchvision`, and `Pillow` are installed.
 6. Patch/localization: `--pixel deep --heatmaps` writes SAFE-style PNG localization heatmaps; HTML reports embed small heatmap previews.

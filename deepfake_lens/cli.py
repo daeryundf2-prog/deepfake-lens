@@ -154,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     calibrate_parser.add_argument("--target-fpr", type=float, default=0.05)
     calibrate_parser.add_argument("--max-files", type=int)
     calibrate_parser.add_argument("--out", type=Path, required=True)
+    calibrate_parser.add_argument("--mapping-out", type=Path, help="also write an isotonic score-calibration profile (mapping table + method + dataset fingerprint); values are dataset-dependent confidences, not truth probabilities")
 
     train_parser = subparsers.add_parser("train", help="train a portable threshold baseline from a labeled dataset")
     train_parser.add_argument("folder", type=Path)
@@ -433,8 +434,11 @@ def main(argv: list[str] | None = None) -> int:
             pixel_max_side=args.pixel_max_side,
             target_false_positive_rate=args.target_fpr,
             max_files=args.max_files,
+            include_score_mapping=args.mapping_out is not None,
         )
         write_json_report(args.out, payload)
+        if args.mapping_out:
+            write_json_report(args.mapping_out, payload["score_calibration"])
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
     if args.command == "train":
