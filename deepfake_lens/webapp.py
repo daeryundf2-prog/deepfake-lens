@@ -6,6 +6,7 @@ Provides a web-based GUI that works on Windows, Mac, and Linux.
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from email.parser import BytesParser
 from email.policy import default as email_policy
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 from .core import analyze_file, scan_directory, scan_to_json, summarize
+from .datasets import is_negative_label, is_positive_label
 from .fusion import apply_fusion_to_items, load_fusion_profile
 
 
@@ -131,6 +133,17 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
                 return
             if parsed.path == "/api/analyze-upload":
                 self._handle_analyze_upload()
+                return
+            if parsed.path == "/api/feedback":
+                try:
+                    length = int(self.headers.get("Content-Length") or "0")
+                except ValueError:
+                    self.send_error(400, "invalid Content-Length")
+                    return
+                if length <= 0 or length > 1024 * 1024:
+                    self.send_error(400, "invalid feedback body size")
+                    return
+                self._send_json(_feedback_payload(self.rfile.read(length)))
                 return
             self.send_error(404, "not found")
 
@@ -411,3 +424,44 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
         },
         "items": items,
     }
+
+
+def _feedback_path() -> Path:
+    """Where web-UI examiner labels accumulate; overridable for tests."""
+    override = os.environ.get("DEEPFAKE_LENS_FEEDBACK")
+    if override:
+        return Path(override)
+    return Path.home() / ".deepfake-lens" / "feedback.jsonl"
+
+
+def _feedback_payload(body: bytes) -> dict[str, object]:
+    """Record one examiner verdict from the web UI.
+
+    Appends a ``{path, expected_label, notes, embedded_result}`` JSONL row the
+    ``feedback`` CLI command can consume directly — ``embedded_result`` carries
+    the scan result so labeled rows need no rescan.
+    """
+    try:
+        data = json.loads(body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return {"error": "invalid JSON body"}
+    label = str(data.get("expected_label", "") or "").strip().lower()
+    if not (is_positive_label(label) or is_negative_label(label)):
+        return {"error": "expected_label must be a recognized label (e.g. synthetic, real)"}
+    path = str(data.get("path") or data.get("name") or "").strip()
+    if not path:
+        return {"error": "path is required"}
+    entry: dict[str, object] = {
+        "path": path,
+        "expected_label": label,
+        "notes": str(data.get("notes", "") or ""),
+    }
+    result = data.get("result")
+    if isinstance(result, dict):
+        # load_feedback reads the embedded scan result from the "result" key.
+        entry["result"] = result
+    feedback_file = _feedback_path()
+    feedback_file.parent.mkdir(parents=True, exist_ok=True)
+    with feedback_file.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return {"ok": True, "feedback_file": str(feedback_file)}

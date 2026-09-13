@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+import json
+import os
 import unittest
 from pathlib import Path
 
@@ -153,6 +155,57 @@ class AnalyzeUploadPayloadTest(unittest.TestCase):
         body = f"--{boundary}--\r\n".encode()
         result = _analyze_upload_payload(content_type, body)
         self.assertIn("error", result)
+
+
+class FeedbackPayloadTest(unittest.TestCase):
+    """POST /api/feedback must append JSONL rows the feedback CLI can load."""
+
+    def _with_feedback_path(self, fn):
+        import tempfile
+        from deepfake_lens import webapp
+
+        with tempfile.TemporaryDirectory() as tmp:
+            original = os.environ.get("DEEPFAKE_LENS_FEEDBACK")
+            os.environ["DEEPFAKE_LENS_FEEDBACK"] = str(Path(tmp) / "fb.jsonl")
+            try:
+                return fn(webapp)
+            finally:
+                if original is None:
+                    os.environ.pop("DEEPFAKE_LENS_FEEDBACK")
+                else:
+                    os.environ["DEEPFAKE_LENS_FEEDBACK"] = original
+
+    def test_valid_label_appends_jsonl(self) -> None:
+        from deepfake_lens.feedback import load_feedback
+
+        def run(webapp):
+            payload = webapp._feedback_payload(json.dumps({
+                "path": "/tmp/x.png", "expected_label": "synthetic",
+                "result": {"score": 42},
+            }).encode())
+            self.assertTrue(payload["ok"])
+            entries = load_feedback(payload["feedback_file"])
+            self.assertEqual(len(entries), 1)
+            self.assertEqual(entries[0].expected_label, "synthetic")
+            self.assertEqual(entries[0].embedded_result, {"score": 42})
+
+        self._with_feedback_path(run)
+
+    def test_unknown_label_rejected(self) -> None:
+        def run(webapp):
+            payload = webapp._feedback_payload(json.dumps({
+                "path": "/tmp/x.png", "expected_label": "maybe",
+            }).encode())
+            self.assertIn("error", payload)
+
+        self._with_feedback_path(run)
+
+    def test_missing_path_rejected(self) -> None:
+        def run(webapp):
+            payload = webapp._feedback_payload(json.dumps({"expected_label": "real"}).encode())
+            self.assertIn("error", payload)
+
+        self._with_feedback_path(run)
 
 
 class ApiServeTokenGateTest(unittest.TestCase):

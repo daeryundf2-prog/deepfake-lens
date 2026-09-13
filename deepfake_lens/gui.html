@@ -509,6 +509,20 @@
                 detailTr.className = 'detail-row';
                 detailTr.style.display = 'none';
                 detailTr.innerHTML = `<td colspan="4">${detailHtml(item)}</td>`;
+                // Examiner ground-truth labels append to the feedback JSONL
+                // the `feedback` CLI consumes for calibration reports.
+                const cell = detailTr.querySelector('td');
+                const fb = document.createElement('div');
+                fb.className = 'section';
+                fb.innerHTML = `<div class="section-title">검토자 정답 라벨 (피드백 파일에 기록 — 모델 보정용)</div>` +
+                    `<button class="btn" data-label="synthetic">실제 합성/AI로 확인</button> ` +
+                    `<button class="btn" data-label="real">실제 실물로 확인</button> ` +
+                    `<span class="status-note fb-status"></span>`;
+                fb.querySelectorAll('button[data-label]').forEach(b => b.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    submitFeedback(item, b.dataset.label, fb.querySelector('.fb-status'));
+                }));
+                cell.appendChild(fb);
                 const toggle = () => {
                     const open = detailTr.style.display !== 'none';
                     detailTr.style.display = open ? 'none' : '';
@@ -567,6 +581,26 @@
             document.getElementById('stat-model').textContent = modelActive;
             document.getElementById('stat-model-label').textContent =
                 modelActive > 0 ? '외부 모델 분석 파일' : '휴리스틱 선별 전용';
+        }
+
+        async function submitFeedback(item, label, statusEl) {
+            statusEl.textContent = '기록 중…';
+            try {
+                const res = await apiFetch('/api/feedback', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        path: item.path || item.name,
+                        name: item.name,
+                        expected_label: label,
+                        result: item.result,
+                    }),
+                });
+                const data = await res.json();
+                statusEl.textContent = data.ok ? ('기록됨 → ' + data.feedback_file) : ('실패: ' + (data.error || ''));
+            } catch (e) {
+                statusEl.textContent = '실패: ' + e.message;
+            }
         }
 
         function exportJSON() {
