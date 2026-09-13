@@ -52,29 +52,54 @@ def host_name(header_value: str) -> str:
     return value
 
 
-def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Path | None = None, allow_lan: bool = False) -> None:
+def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Path | None = None, allow_lan: bool = False, token: str | None = None) -> None:
     """Run the web server with GUI.
 
     Binds to loopback by default; any other host requires ``allow_lan=True``
-    (the ``web`` CLI command maps ``--allow-lan`` to it). See
-    docs/deepfake-lens-service.md for the full service contract.
+    (the ``web`` CLI command maps ``--allow-lan`` to it). When ``token`` is
+    set — mandatory for LAN binds — every /api/* request must send it in the
+    ``X-Deepfake-Lens-Token`` header. See docs/deepfake-lens-service.md for
+    the full service contract.
     """
     if not allow_lan and host not in LOCAL_HOSTS:
         raise ValueError("local web app binds to localhost by default; pass --allow-lan to bind elsewhere")
+    if allow_lan and not token:
+        raise ValueError("--allow-lan requires a --token; the API reads and analyzes local files on request")
+    if token and not allow_lan:
+        import sys
+
+        print("note: --token set on a loopback bind; /api/* still enforces it", file=sys.stderr)
 
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self) -> None:
+        def _token_ok(self) -> bool:
+            if not token:
+                return True
+            import secrets
+
+            supplied = self.headers.get("X-Deepfake-Lens-Token") or ""
+            return bool(supplied) and secrets.compare_digest(supplied, token)
+
+        def _guard(self) -> bool:
             if not allow_lan:
                 # DNS-rebinding guard: a remote page must not be able to reach
                 # this server by pointing a hostname at 127.0.0.1.
                 if host_name(self.headers.get("Host") or "") not in LOCAL_HOSTS:
                     self.send_error(403, "host not allowed")
-                    return
+                    return False
+            return True
+
+        def do_GET(self) -> None:
+            if not self._guard():
+                return
             parsed = urlparse(self.path)
 
-            # Serve GUI
+            # Serve GUI (static shell — carries no evidence data)
             if parsed.path == "/" or parsed.path == "/gui":
                 self._send_html(_load_gui())
+                return
+
+            if not self._token_ok():
+                self.send_error(401, "missing or invalid X-Deepfake-Lens-Token")
                 return
 
             # API endpoints
@@ -98,11 +123,12 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
             self._send_html(_load_gui())
 
         def do_POST(self) -> None:
-            if not allow_lan:
-                if host_name(self.headers.get("Host") or "") not in LOCAL_HOSTS:
-                    self.send_error(403, "host not allowed")
-                    return
+            if not self._guard():
+                return
             parsed = urlparse(self.path)
+            if not self._token_ok():
+                self.send_error(401, "missing or invalid X-Deepfake-Lens-Token")
+                return
             if parsed.path == "/api/analyze-upload":
                 self._handle_analyze_upload()
                 return

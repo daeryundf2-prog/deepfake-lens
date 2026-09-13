@@ -20,7 +20,10 @@ files on request, so exposure beyond loopback is an explicit, guarded choice.
   `127.0.0.1`/`localhost`/`::1` get 403 — a DNS-rebinding guard. CORS is
   restricted to `http(s)://localhost[:port]` origins, `GET`/`POST` only.
 - `web` refuses non-loopback binds unless `--allow-lan` is passed, and applies
-  the same Host-header guard while bound to loopback.
+  the same Host-header guard while bound to loopback. `--allow-lan` requires
+  `--token`; every `/api/*` request then needs `X-Deepfake-Lens-Token: <token>`
+  (401 otherwise). The GUI shell stays unauthenticated but prompts for the
+  token on a 401 and stores it in `sessionStorage` for the session.
 - There is no rate limiting, TLS, or per-user isolation — put a reverse proxy
   in front if you need those, and keep `--token` mandatory outside loopback.
 

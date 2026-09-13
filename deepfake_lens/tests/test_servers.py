@@ -165,6 +165,19 @@ class ApiServeTokenGateTest(unittest.TestCase):
             cli.main(["api-serve", "--host", "0.0.0.0", "--port", "0"])
         self.assertEqual(ctx.exception.code, 2)
 
+    def test_web_allow_lan_without_token_is_rejected(self) -> None:
+        from deepfake_lens import cli
+
+        with self.assertRaises(SystemExit) as ctx:
+            cli.main(["web", "--allow-lan", "--host", "0.0.0.0", "--port", "0"])
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_run_server_refuses_allow_lan_without_token(self) -> None:
+        from deepfake_lens import webapp
+
+        with self.assertRaises(ValueError):
+            webapp.run_server("0.0.0.0", 0, allow_lan=True)
+
 
 class ServiceContractTest(unittest.TestCase):
     """Pin the documented service contract: loopback defaults and guards."""

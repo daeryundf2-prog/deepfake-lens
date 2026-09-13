@@ -381,6 +381,7 @@ def main(argv: list[str] | None = None) -> int:
     web_parser.add_argument("--host", default="127.0.0.1")
     web_parser.add_argument("--port", type=int, default=8765)
     web_parser.add_argument("--allow-lan", action="store_true")
+    web_parser.add_argument("--token", default=None, help="API token required with --allow-lan")
 
     args = parser.parse_args(argv)
     if args.command is None:
@@ -992,7 +993,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"out": str(args.out), "passed": payload["passed"]}, ensure_ascii=False, indent=2))
         return 0
     if args.command == "web":
-        run_server(args.host, args.port, default_folder=args.folder, allow_lan=args.allow_lan)
+        if args.allow_lan and not args.token:
+            web_parser.error("--token is required with --allow-lan; the API reads and analyzes local files on request")
+        run_server(args.host, args.port, default_folder=args.folder, allow_lan=args.allow_lan, token=args.token)
         return 0
 
     if args.max_files < 1:
