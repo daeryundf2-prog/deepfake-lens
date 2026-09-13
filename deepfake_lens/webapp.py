@@ -14,9 +14,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
-from .core import analyze_file, scan_directory, scan_to_json, summarize
+from .core import BatchScanSummary, _scan_item_from_json, analyze_file, scan_directory, scan_to_json, summarize
 from .datasets import is_negative_label, is_positive_label
 from .fusion import apply_fusion_to_items, load_fusion_profile
+from .reports import write_html_report
 
 
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -133,6 +134,27 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
                 return
             if parsed.path == "/api/analyze-upload":
                 self._handle_analyze_upload()
+                return
+            if parsed.path == "/api/report":
+                try:
+                    length = int(self.headers.get("Content-Length") or "0")
+                except ValueError:
+                    self.send_error(400, "invalid Content-Length")
+                    return
+                if length <= 0 or length > 64 * 1024 * 1024:
+                    self.send_error(400, "invalid report body size")
+                    return
+                rendered = _report_payload(self.rfile.read(length))
+                if isinstance(rendered, dict):
+                    self._send_json(rendered)
+                else:
+                    body = rendered
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Disposition", 'attachment; filename="deepfake-lens-report.html"')
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
                 return
             if parsed.path == "/api/feedback":
                 try:
@@ -465,3 +487,51 @@ def _feedback_payload(body: bytes) -> dict[str, object]:
     with feedback_file.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
     return {"ok": True, "feedback_file": str(feedback_file)}
+
+
+def _report_payload(body: bytes) -> bytes | dict[str, object]:
+    """Render the HTML report for web-scan results.
+
+    Accepts the items array the GUI holds (scan/upload payload rows), rebuilds
+    ScanItem objects through the same cache deserializer used on disk, and
+    returns the same report the CLI's --html-out produces — so web and CLI
+    artifacts are identical.
+    """
+    try:
+        data = json.loads(body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return {"error": "invalid JSON body"}
+    raw_items = data.get("items")
+    if not isinstance(raw_items, list) or not raw_items:
+        return {"error": "items array is required"}
+    try:
+        items = [_scan_item_from_json(row) for row in raw_items if isinstance(row, dict)]
+    except (TypeError, ValueError) as exc:
+        return {"error": f"malformed item: {exc}"}
+    if not items:
+        return {"error": "items array is required"}
+    analyzed = [item for item in items if item.result is not None]
+    bands = {"high": 0, "medium": 0, "low": 0, "unknown": 0}
+    for item in analyzed:
+        band = item.result.band.value if item.result else "unknown"
+        bands[band if band in bands else "unknown"] += 1
+    summary = BatchScanSummary(
+        total=len(items),
+        analyzed=len(analyzed),
+        high=bands["high"],
+        medium=bands["medium"],
+        low=bands["low"],
+        unknown=bands["unknown"],
+        unsupported_or_failed=len(items) - len(analyzed),
+        capped=False,
+        external_model_active=sum(
+            1 for item in analyzed if item.result and item.result.model_analysis
+        ),
+    )
+    with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        write_html_report(tmp_path, summary, items)
+        return tmp_path.read_bytes()
+    finally:
+        tmp_path.unlink(missing_ok=True)

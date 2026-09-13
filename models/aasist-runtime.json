@@ -26,5 +26,6 @@
     "Audio is decoded to mono at sample_rate, then scored in non-overlapping evenly-spaced windows of window_samples (64600 ~= 4.04s, the upstream evaluation cut); windows beyond the file are skipped and short files are loop-padded exactly like upstream pad().",
     "Model logits are (spoof=0, bonafide=1) — upstream's own eval reads index 1 as the bonafide score, so score_index 0 with softmax yields the spoof/fake probability on a 0-100 scale.",
     "The checkpoint path is relative to this profile's directory (models/); keep it out of git — it is covered by .gitignore."
-  ]
+  ],
+  "license": "MIT"
 }

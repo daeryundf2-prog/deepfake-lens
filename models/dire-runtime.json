@@ -10,5 +10,6 @@
   "limitations": [
     "This profile never produces scores; it exists to document the candidate and its fetch path.",
     "Even when wired, diffusion-reconstruction error is a prioritization signal, not a truth label."
-  ]
+  ],
+  "license": "no license file published upstream — research use, verify before redistribution"
 }

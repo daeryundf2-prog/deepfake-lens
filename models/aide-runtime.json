@@ -5,8 +5,16 @@
   "runtime": "aide",
   "checkpoint": "aide_progan_train.pth",
   "input_size": 256,
-  "mean": [0.485, 0.456, 0.406],
-  "std": [0.229, 0.224, 0.225],
+  "mean": [
+    0.485,
+    0.456,
+    0.406
+  ],
+  "std": [
+    0.229,
+    0.224,
+    0.225
+  ],
   "score_index": 1,
   "score_activation": "softmax",
   "threshold": 67,
@@ -19,5 +27,6 @@
     "Runtime 'aide' delegates to scripts/run_aide.py, which bakes AIDE's DCT band-selection preprocessing into the model class; input_size/mean/std are recorded for reference rather than consumed by the generic image preprocessor.",
     "Model logits are (real=0, fake=1); score_index 1 with softmax yields the fake probability on a 0-100 scale.",
     "The checkpoint path is relative to this profile's directory (models/); keep it out of git — it is covered by .gitignore."
-  ]
+  ],
+  "license": "MIT"
 }

@@ -6,8 +6,16 @@
   "backbone": "openai/clip-vit-large-patch14",
   "checkpoint": "univfd_fc.pth",
   "input_size": 224,
-  "mean": [0.48145466, 0.4578275, 0.40821073],
-  "std": [0.26862954, 0.26130258, 0.27577711],
+  "mean": [
+    0.48145466,
+    0.4578275,
+    0.40821073
+  ],
+  "std": [
+    0.26862954,
+    0.26130258,
+    0.27577711
+  ],
   "score_index": 0,
   "score_activation": "sigmoid",
   "threshold": 67,
@@ -22,5 +30,6 @@
     "The checkpoint may be a state dict with weight/bias keys (UnivFD's released fc weights) or a bare 2-D weight tensor; score_index 0 with sigmoid yields the fake probability on a 0-100 scale.",
     "input_size/mean/std record UnivFD's preprocessing (224px, CLIP stats) for reference; the CLIPProcessor applies them internally.",
     "The checkpoint path is relative to this profile's directory (models/); keep it out of git — it is covered by .gitignore."
-  ]
+  ],
+  "license": "no license file published upstream — research use, verify before redistribution"
 }

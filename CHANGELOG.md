@@ -4,6 +4,22 @@ All notable changes to Deepfake Lens. Format: Keep a Changelog; this repo
 has not tagged a release yet (version is `0.1.0.dev0`), so entries are
 grouped by work pass rather than release.
 
+## 2026-09 — web GUI report download + examiner feedback + model licenses
+
+### Added
+- `POST /api/report` on `web`/`api-serve` GUI server: rebuilds ScanItems via
+  the cache deserializer and returns the same HTML report the CLI's
+  --html-out writes, so web- and CLI-generated artifacts are identical. The
+  GUI gains a "HTML 리포트" download button.
+- `POST /api/feedback`: examiner ground-truth labels ({path, expected_label,
+  notes, result}) append to ~/.deepfake-lens/feedback.jsonl; load_feedback
+  consumes them directly (embedded result ⇒ no rescan for labeled rows).
+  Expanded result rows show "실제 합성/AI로 확인 / 실제 실물로 확인" buttons.
+- `models/NOTICE.md` + a `license` field on every runtime profile recording
+  the verified upstream license status (MIT for AIDE/AASIST/OpenAI
+  detector; nonstandard for CNNDetection; unpublished for UnivFD/DIRE —
+  research use only until upstream publishes terms).
+
 ## 2026-09 — hf-text-classifier runtime (OpenAI detector) + text modality
 
 ### Added

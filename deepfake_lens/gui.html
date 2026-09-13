@@ -214,6 +214,7 @@
                 <div style="display: flex; gap: 10px; margin-bottom: 15px;">
                     <button class="btn btn-primary" onclick="exportJSON()">JSON보내기</button>
                     <button class="btn btn-success" onclick="exportCSV()">CSV보내기</button>
+                    <button class="btn" onclick="downloadReport()">HTML 리포트</button>
                     <button class="btn btn-danger" onclick="clearResults()">결과 삭제</button>
                 </div>
                 <div style="max-height: 560px; overflow-y: auto;">
@@ -600,6 +601,32 @@
                 statusEl.textContent = data.ok ? ('기록됨 → ' + data.feedback_file) : ('실패: ' + (data.error || ''));
             } catch (e) {
                 statusEl.textContent = '실패: ' + e.message;
+            }
+        }
+
+        async function downloadReport() {
+            if (!results.length) { alert('분석 결과가 없습니다'); return; }
+            try {
+                const res = await apiFetch('/api/report', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({items: results.map(e => e.item)}),
+                });
+                const type = res.headers.get('Content-Type') || '';
+                if (!type.includes('text/html')) {
+                    const data = await res.json();
+                    alert('리포트 생성 실패: ' + (data.error || res.status));
+                    return;
+                }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'deepfake-lens-report.html';
+                a.click();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                alert('리포트 생성 오류: ' + e.message);
             }
         }
 

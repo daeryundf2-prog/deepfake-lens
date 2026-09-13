@@ -8,8 +8,16 @@
   "state_dict_prefix": "model.",
   "checkpoint": "blur_jpg_prob.pth",
   "input_size": 224,
-  "mean": [0.485, 0.456, 0.406],
-  "std": [0.229, 0.224, 0.225],
+  "mean": [
+    0.485,
+    0.456,
+    0.406
+  ],
+  "std": [
+    0.229,
+    0.224,
+    0.225
+  ],
   "score_index": 0,
   "score_activation": "sigmoid",
   "threshold": 67,
@@ -24,5 +32,6 @@
     "Runtime 'torchvision' rebuilds the arch named in 'arch' with a num_classes head, strips 'state_dict_prefix' from checkpoint keys, and load_state_dict(strict=True).",
     "The released blur_jpg_prob.pth stores keys under 'model.'; state_dict_prefix handles that wrapper. The companion blur_jpg_prob0.5.pth checkpoint also works — copy it in as the 'checkpoint' target instead.",
     "The checkpoint path is relative to this profile's directory (models/); keep it out of git — it is covered by .gitignore."
-  ]
+  ],
+  "license": "upstream custom license — see source_url before redistribution"
 }
