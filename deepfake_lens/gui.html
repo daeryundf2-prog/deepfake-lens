@@ -109,7 +109,7 @@
 
     <div class="container">
         <!-- Dashboard -->
-        <div class="dashboard">
+        <div class="dashboard" aria-live="polite" aria-label="분석 통계">
             <div class="stat-card high">
                 <h3>AI 생성 의심</h3>
                 <div class="value" id="stat-ai">0</div>
@@ -144,9 +144,10 @@
 
                 <!-- Folder Input -->
                 <div class="folder-input">
-                    <input type="text" id="folder-path" placeholder="폴더 경로 입력 (예: C:\Users\test\images)">
+                    <input type="text" id="folder-path" placeholder="폴더 경로 입력 (예: C:\Users\test\images)" aria-label="분석할 폴더 경로">
                     <button id="analyze-btn" onclick="analyzeFolder()">분석 시작</button>
                 </div>
+                <p class="status-note">경로를 모르면 아래 업로드 영역에서 폴더를 직접 선택하거나 드롭할 수 있습니다.</p>
 
                 <!-- Options -->
                 <div class="options">
@@ -183,19 +184,24 @@
                 </div>
 
                 <!-- Progress -->
-                <div class="progress-bar" id="progress">
+                <div class="progress-bar" id="progress" role="progressbar" aria-label="분석 진행">
                     <div class="fill" id="progress-fill"></div>
                 </div>
-                <p id="progress-text" style="font-size: 12px; color: #666; margin-top: 5px;"></p>
+                <p id="progress-text" style="font-size: 12px; color: #666; margin-top: 5px;" aria-live="polite"></p>
 
                 <!-- Drag & Drop Zone -->
-                <div class="upload-zone" id="drop-zone">
-                    <p>📁 여기에 파일을 드래그 앤 드롭하세요</p>
+                <div class="upload-zone" id="drop-zone" role="button" tabindex="0" aria-label="파일 또는 폴더를 드래그 앤 드롭하거나, Enter를 눌러 선택하세요">
+                    <p>📁 여기에 파일이나 폴더를 드래그 앤 드롭하세요</p>
+                    <p style="font-size: 12px; color: #999;">폴더를 드롭하면 안의 파일이 모두 추가됩니다. 클릭하면 파일을 고를 수 있습니다.</p>
                     <p style="font-size: 12px; color: #999;">지원 형식: PNG, JPG, JPEG, WebP, BMP, TIFF, TXT, MD, WAV, MP3</p>
+                </div>
+                <div style="margin-top: 8px;">
+                    <button class="btn btn-primary" id="dir-picker-btn" type="button">폴더 선택</button>
+                    <input type="file" id="dir-picker" webkitdirectory multiple hidden>
                 </div>
 
                 <!-- File List -->
-                <div class="file-list" id="file-list"></div>
+                <div class="file-list" id="file-list" aria-live="polite"></div>
                 <div style="margin-top: 10px; display: flex; gap: 10px; align-items: center;">
                     <button class="btn btn-primary" id="upload-btn" onclick="analyzeUploads()" disabled>선택 파일 분석</button>
                     <span class="status-note" id="upload-note">드롭한 파일은 서버에 업로드되어 분석 후 삭제됩니다.</span>
@@ -214,10 +220,10 @@
                     <table class="results-table">
                         <thead>
                             <tr>
-                                <th>위험도</th>
-                                <th>점수</th>
-                                <th>출처 추정</th>
-                                <th>파일명</th>
+                                <th scope="col">위험도</th>
+                                <th scope="col">점수</th>
+                                <th scope="col">출처 추정</th>
+                                <th scope="col">파일명</th>
                             </tr>
                         </thead>
                         <tbody id="results-body">
@@ -256,6 +262,7 @@
 
         function startElapsed(text) {
             const el = document.getElementById('progress-text');
+            if (progressTimer) { clearInterval(progressTimer); }
             const t0 = Date.now();
             el.textContent = text;
             progressTimer = setInterval(() => {
@@ -267,22 +274,61 @@
             if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
         }
 
+        let scanBusy = false;
+
+        // Recursively collect files from a dropped FileSystemEntry tree.
+        async function traverseEntry(entry, out) {
+            if (entry.isFile) {
+                await new Promise(res => entry.file(f => { out.push(f); res(); }, res));
+            } else if (entry.isDirectory) {
+                const reader = entry.createReader();
+                let batch;
+                do {
+                    batch = await new Promise(res => reader.readEntries(res, () => res([])));
+                    for (const child of batch) await traverseEntry(child, out);
+                } while (batch.length);
+            }
+        }
+
         // Drag & Drop
         const dropZone = document.getElementById('drop-zone');
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
         dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('dragover'); });
-        dropZone.addEventListener('drop', (e) => {
+        dropZone.addEventListener('drop', async (e) => {
             e.preventDefault();
             dropZone.classList.remove('dragover');
-            addFiles(Array.from(e.dataTransfer.files));
+            if (scanBusy) return;
+            const items = e.dataTransfer.items;
+            if (items && items.length && items[0].webkitGetAsEntry) {
+                const files = [];
+                for (const item of items) {
+                    const entry = item.webkitGetAsEntry();
+                    if (entry) await traverseEntry(entry, files);
+                }
+                addFiles(files);
+            } else {
+                addFiles(Array.from(e.dataTransfer.files));
+            }
         });
-        dropZone.addEventListener('click', () => {
+        function openFilePicker() {
+            if (scanBusy) return;
             const input = document.createElement('input');
             input.type = 'file';
             input.multiple = true;
             input.accept = '.png,.jpg,.jpeg,.webp,.bmp,.tiff,.txt,.md,.wav,.mp3';
             input.onchange = (e) => addFiles(Array.from(e.target.files));
             input.click();
+        }
+        dropZone.addEventListener('click', openFilePicker);
+        dropZone.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFilePicker(); }
+        });
+        document.getElementById('dir-picker-btn').addEventListener('click', () => {
+            if (!scanBusy) document.getElementById('dir-picker').click();
+        });
+        document.getElementById('dir-picker').addEventListener('change', (e) => {
+            addFiles(Array.from(e.target.files));
+            e.target.value = '';
         });
 
         function escapeHtml(value) {
@@ -292,11 +338,12 @@
         function addFiles(files) {
             const list = document.getElementById('file-list');
             files.forEach(file => {
-                if (!selectedFiles.find(f => f.name === file.name && f.size === file.size)) {
+                const displayName = file.webkitRelativePath || file.name;
+                if (!selectedFiles.find(f => (f.webkitRelativePath || f.name) === displayName && f.size === file.size)) {
                     selectedFiles.push(file);
                     const item = document.createElement('div');
                     item.className = 'file-item';
-                    item.innerHTML = `<span class="name">${escapeHtml(file.name)}</span><span class="size">${(file.size/1024).toFixed(1)} KB</span>`;
+                    item.innerHTML = `<span class="name">${escapeHtml(displayName)}</span><span class="size">${(file.size/1024).toFixed(1)} KB</span>`;
                     list.appendChild(item);
                 }
             });
@@ -304,8 +351,18 @@
         }
 
         function setBusy(btn, busy, text) {
+            scanBusy = busy;
             btn.disabled = busy;
             document.getElementById('progress').classList.toggle('active', busy);
+            document.getElementById('progress').setAttribute('aria-busy', busy ? 'true' : 'false');
+            // Lock every input control while a scan runs so the operator can
+            // see the running parameters can't be changed mid-flight.
+            ['folder-path', 'analyze-btn', 'pixel-mode', 'max-files',
+             'opt-recursive', 'opt-dedupe', 'opt-heatmaps', 'opt-model',
+             'dir-picker-btn'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.disabled = busy;
+            });
             if (busy) { startElapsed(text); } else { stopElapsed(); document.getElementById('progress-text').textContent = ''; }
         }
 
@@ -351,19 +408,30 @@
         async function analyzeUploads() {
             if (!selectedFiles.length) return;
             const btn = document.getElementById('upload-btn');
-            const form = new FormData();
-            selectedFiles.forEach(f => form.append('files', f, f.name));
-
+            // The server caps each request at 20 files; send larger drops
+            // (e.g. a picked folder) in sequential batches and merge items.
+            const BATCH = 20;
             setBusy(btn, true, '업로드 파일 분석 중…');
 
             try {
-                const response = await apiFetch('/api/analyze-upload', { method: 'POST', body: form });
-                const data = await response.json();
-                if (data.error) {
-                    alert('오류: ' + data.error);
-                    return;
+                const allItems = [];
+                const total = selectedFiles.length;
+                for (let i = 0; i < total; i += BATCH) {
+                    const batch = selectedFiles.slice(i, i + BATCH);
+                    const form = new FormData();
+                    batch.forEach(f => form.append('files', f, f.webkitRelativePath || f.name));
+                    const response = await apiFetch('/api/analyze-upload', { method: 'POST', body: form });
+                    const data = await response.json();
+                    if (data.error) {
+                        alert('오류: ' + data.error);
+                        return;
+                    }
+                    allItems.push(...(data.items || []));
+                    if (total > BATCH) {
+                        startElapsed(`업로드 파일 분석 중… (${Math.min(i + BATCH, total)}/${total})`);
+                    }
                 }
-                processResults(data);
+                processResults({ items: allItems });
             } catch (error) {
                 alert('분석 중 오류 발생: ' + error.message);
             } finally {
@@ -429,6 +497,8 @@
 
                 const tr = document.createElement('tr');
                 tr.className = 'result-row';
+                tr.tabIndex = 0;
+                tr.setAttribute('aria-expanded', 'false');
                 tr.innerHTML = `
                     <td class="risk-${band}">${riskLabel(band)}</td>
                     <td>${Number(score) || 0}</td>
@@ -439,10 +509,15 @@
                 detailTr.className = 'detail-row';
                 detailTr.style.display = 'none';
                 detailTr.innerHTML = `<td colspan="4">${detailHtml(item)}</td>`;
-                tr.addEventListener('click', () => {
+                const toggle = () => {
                     const open = detailTr.style.display !== 'none';
                     detailTr.style.display = open ? 'none' : '';
                     tr.classList.toggle('expanded', !open);
+                    tr.setAttribute('aria-expanded', String(!open));
+                };
+                tr.addEventListener('click', toggle);
+                tr.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
                 });
                 tbody.appendChild(tr);
                 tbody.appendChild(detailTr);
