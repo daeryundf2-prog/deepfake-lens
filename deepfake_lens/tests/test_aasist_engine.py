@@ -327,7 +327,7 @@ class AasistTorchInferenceTest(unittest.TestCase):
             self.assertTrue(analysis.available, analysis.detail)
             self.assertGreaterEqual(analysis.score, 0)
             self.assertLessEqual(analysis.score, 100)
-            self.assertEqual(analysis.confidence, _expected_confidence(analysis.score))
+            self.assertEqual(analysis.confidence, self._expected_confidence(analysis.score))
 
     def _expected_confidence(self, score: int) -> str:
         return "high" if score >= 80 else "medium" if score >= 50 else "low"

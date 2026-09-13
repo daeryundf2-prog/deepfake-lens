@@ -6,17 +6,39 @@ Provides a web-based GUI that works on Windows, Mac, and Linux.
 from __future__ import annotations
 
 import json
+import tempfile
+from email.parser import BytesParser
+from email.policy import default as email_policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
-from .core import scan_directory, scan_to_json, summarize
+from .core import analyze_file, scan_directory, scan_to_json, summarize
 from .fusion import apply_fusion_to_items, load_fusion_profile
 
 
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 MAX_SCAN_FILES = 2000
 MAX_FILE_BYTES_CEILING = 1024 * 1024 * 1024
+MAX_UPLOAD_BYTES = 256 * 1024 * 1024
+MAX_UPLOAD_FILES = 20
+DEFAULT_PROFILE_NAMES = (
+    "models/aide-runtime.json",
+    "models/aasist-runtime.json",
+    "models/openai-detector-runtime.json",
+)
+
+
+def default_engine_profiles(root: Path | None = None) -> list[Path]:
+    """Bundled default-engine profiles that exist on disk.
+
+    Mirrors the CLI defaults (image/audio/text) so the web scan uses the
+    neural adapters automatically when profiles are committed. Missing
+    profiles are skipped and each adapter degrades gracefully when its
+    checkpoint is absent.
+    """
+    base = Path(root) if root is not None else Path(__file__).resolve().parent.parent
+    return [base / name for name in DEFAULT_PROFILE_NAMES if (base / name).is_file()]
 
 
 def host_name(header_value: str) -> str:
@@ -74,7 +96,33 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
 
             # Default to GUI
             self._send_html(_load_gui())
-        
+
+        def do_POST(self) -> None:
+            if not allow_lan:
+                if host_name(self.headers.get("Host") or "") not in LOCAL_HOSTS:
+                    self.send_error(403, "host not allowed")
+                    return
+            parsed = urlparse(self.path)
+            if parsed.path == "/api/analyze-upload":
+                self._handle_analyze_upload()
+                return
+            self.send_error(404, "not found")
+
+        def _handle_analyze_upload(self) -> None:
+            try:
+                length = int(self.headers.get("Content-Length") or "0")
+            except ValueError:
+                self.send_error(400, "invalid Content-Length")
+                return
+            if length <= 0:
+                self.send_error(400, "empty upload")
+                return
+            if length > MAX_UPLOAD_BYTES:
+                self.send_error(413, f"upload exceeds {MAX_UPLOAD_BYTES} bytes")
+                return
+            body = self.rfile.read(length)
+            self._send_json(_analyze_upload_payload(self.headers.get("Content-Type") or "", body))
+
         def log_message(self, format: str, *args) -> None:
             return
         
@@ -137,7 +185,14 @@ def _scan_payload(query: str, *, default_folder: Path | None) -> dict[str, objec
             raise ValueError("max_file_bytes must be an integer") from exc
     dedupe = params.get("dedupe", ["false"])[0].lower() in {"1", "true", "yes"}
     heatmaps = params.get("heatmaps", ["false"])[0].lower() in {"1", "true", "yes"}
-    model_path = _optional_path(params.get("model_path", [""])[0])
+    model_path_raw = params.get("model_path", [""])[0]
+    no_default_engine = params.get("no_default_engine", ["false"])[0].lower() in {"1", "true", "yes"}
+    if model_path_raw.strip():
+        model_path = _optional_path(model_path_raw)
+    elif no_default_engine:
+        model_path = None
+    else:
+        model_path = default_engine_profiles() or None
     fusion_profile = load_fusion_profile(_optional_path(params.get("fusion_profile", [""])[0]))
     
     try:
@@ -273,3 +328,60 @@ def _is_within(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]:
+    """Analyze files uploaded via multipart/form-data.
+
+    Each part is written to a temporary file, analyzed with the default
+    engine profiles, then deleted. The server never persists uploads.
+    """
+    if "multipart/form-data" not in content_type:
+        return {"error": "multipart/form-data upload required"}
+    message = BytesParser(policy=email_policy).parsebytes(
+        b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
+    )
+    items: list[dict[str, object]] = []
+    for part in message.iter_parts():
+        filename = part.get_filename()
+        payload = part.get_payload(decode=True)
+        if not filename or payload is None:
+            continue
+        if len(items) >= MAX_UPLOAD_FILES:
+            items.append({"name": filename, "error": f"파일 수 상한({MAX_UPLOAD_FILES}) 초과"})
+            break
+        suffix = Path(filename).suffix[:16]
+        try:
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
+                tmp.write(payload)
+                tmp.flush()
+                item = analyze_file(tmp.name, model_path=default_engine_profiles() or None)
+            record = item.to_json()
+            record["path"] = filename
+            record["name"] = filename
+            items.append(record)
+        except Exception as exc:
+            items.append({"name": filename, "error": str(exc)})
+    if not items:
+        return {"error": "업로드된 파일이 없습니다"}
+    analyzed = [item for item in items if not item.get("error")]
+    high = sum(1 for item in analyzed if (item.get("result") or {}).get("band") == "high")
+    medium = sum(1 for item in analyzed if (item.get("result") or {}).get("band") == "medium")
+    low = sum(1 for item in analyzed if (item.get("result") or {}).get("band") == "low")
+    return {
+        "schema_version": 1,
+        "summary": {
+            "total": len(items),
+            "analyzed": len(analyzed),
+            "high": high,
+            "medium": medium,
+            "low": low,
+            "unknown": len(analyzed) - high - medium - low,
+            "unsupported_or_failed": len(items) - len(analyzed),
+            "external_model_active": sum(
+                1 for item in analyzed if (item.get("result") or {}).get("model_analysis")
+            ),
+            "source": "upload",
+        },
+        "items": items,
+    }

@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import unittest
+from pathlib import Path
 
 from deepfake_lens import api_server
 from deepfake_lens.webapp import MAX_FILE_BYTES_CEILING, MAX_SCAN_FILES, _scan_payload, host_name
@@ -75,6 +76,83 @@ class ScanPayloadValidationTest(unittest.TestCase):
     def test_max_file_bytes_is_clamped_to_ceiling(self) -> None:
         captured = self._capture_scan_kwargs("max_file_bytes=99999999999999&folder=.")
         self.assertEqual(captured["max_file_bytes"], MAX_FILE_BYTES_CEILING)
+
+    def _capture_scan_with_profiles(self, query: str, profiles: list[Path]) -> dict[str, object]:
+        from deepfake_lens import webapp
+
+        original_profiles = webapp.default_engine_profiles
+        webapp.default_engine_profiles = lambda root=None: profiles
+        try:
+            return self._capture_scan_kwargs(query)
+        finally:
+            webapp.default_engine_profiles = original_profiles
+
+    def test_default_engine_profiles_applied_when_model_path_absent(self) -> None:
+        profiles = [Path("/tmp/profile-a.json"), Path("/tmp/profile-b.json")]
+        captured = self._capture_scan_with_profiles("folder=.", profiles)
+        self.assertEqual(captured["model_path"], profiles)
+
+    def test_no_default_engine_disables_profiles(self) -> None:
+        captured = self._capture_scan_with_profiles("folder=.&no_default_engine=true", [Path("/tmp/p.json")])
+        self.assertIsNone(captured["model_path"])
+
+    def test_explicit_model_path_wins_over_defaults(self) -> None:
+        captured = self._capture_scan_with_profiles("folder=.&model_path=/tmp/explicit.json", [Path("/tmp/p.json")])
+        self.assertEqual(captured["model_path"], Path("/tmp/explicit.json"))
+
+
+class AnalyzeUploadPayloadTest(unittest.TestCase):
+    """POST /api/analyze-upload must parse multipart bodies and analyze each file."""
+
+    def _multipart(self, *files: tuple[str, bytes]) -> tuple[str, bytes]:
+        boundary = "----dfltestboundary"
+        chunks: list[bytes] = []
+        for name, data in files:
+            chunks.append(
+                (
+                    f"--{boundary}\r\n"
+                    f'Content-Disposition: form-data; name="files"; filename="{name}"\r\n'
+                    "Content-Type: application/octet-stream\r\n\r\n"
+                ).encode()
+                + data
+                + b"\r\n"
+            )
+        chunks.append(f"--{boundary}--\r\n".encode())
+        return f"multipart/form-data; boundary={boundary}", b"".join(chunks)
+
+    def test_rejects_non_multipart(self) -> None:
+        from deepfake_lens.webapp import _analyze_upload_payload
+
+        result = _analyze_upload_payload("text/plain", b"hello")
+        self.assertIn("error", result)
+
+    def test_multipart_files_are_analyzed(self) -> None:
+        from deepfake_lens import webapp
+        from deepfake_lens.core import ScanItem
+
+        def fake_analyze(path, **kwargs):
+            return ScanItem(str(path), Path(str(path)).name, "text", "analyzed", 4, result=None)
+
+        original = webapp.analyze_file
+        webapp.analyze_file = fake_analyze
+        try:
+            content_type, body = self._multipart(("a.txt", b"abc"), ("b.txt", b"def"))
+            result = webapp._analyze_upload_payload(content_type, body)
+        finally:
+            webapp.analyze_file = original
+
+        self.assertEqual(result["summary"]["total"], 2)
+        self.assertEqual(result["summary"]["analyzed"], 2)
+        self.assertEqual({item["name"] for item in result["items"]}, {"a.txt", "b.txt"})
+
+    def test_empty_upload_reports_error(self) -> None:
+        from deepfake_lens.webapp import _analyze_upload_payload
+
+        boundary = "----empty"
+        content_type = f"multipart/form-data; boundary={boundary}"
+        body = f"--{boundary}--\r\n".encode()
+        result = _analyze_upload_payload(content_type, body)
+        self.assertIn("error", result)
 
 
 class ApiServeTokenGateTest(unittest.TestCase):

@@ -7,14 +7,14 @@
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; color: #1a1a2e; }
-        
+
         .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         .header h1 { font-size: 24px; font-weight: 600; }
         .header p { opacity: 0.9; margin-top: 5px; }
-        
+
         .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
-        
-        .dashboard { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px; }
+
+        .dashboard { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin-bottom: 20px; }
         .stat-card { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
         .stat-card h3 { font-size: 14px; color: #666; margin-bottom: 8px; }
         .stat-card .value { font-size: 28px; font-weight: 700; color: #333; }
@@ -23,53 +23,78 @@
         .stat-card.medium { border-left: 4px solid #f39c12; }
         .stat-card.low { border-left: 4px solid #27ae60; }
         .stat-card.info { border-left: 4px solid #3498db; }
-        
+        .stat-card.model { border-left: 4px solid #8e44ad; }
+
         .main-content { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        
+
         .panel { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
         .panel h2 { font-size: 18px; margin-bottom: 15px; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
-        
+
         .upload-zone { border: 3px dashed #ccc; border-radius: 10px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.3s; }
         .upload-zone:hover { border-color: #667eea; background: #f8f9ff; }
         .upload-zone.dragover { border-color: #667eea; background: #e8f0fe; }
         .upload-zone p { color: #666; margin-top: 10px; }
-        
+
         .folder-input { display: flex; gap: 10px; margin-bottom: 15px; }
         .folder-input input { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
         .folder-input button { padding: 12px 24px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; }
         .folder-input button:hover { background: #5a6fd6; }
         .folder-input button:disabled { background: #ccc; cursor: not-allowed; }
-        
+
         .options { display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
         .option-group { display: flex; align-items: center; gap: 8px; }
         .option-group label { font-size: 13px; color: #666; }
-        .option-group select, .option-group input { padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; }
-        
+        .option-group select, .option-group input[type="number"] { padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; }
+        .option-group input[type="checkbox"] { width: 15px; height: 15px; }
+
         .progress-bar { width: 100%; height: 6px; background: #eee; border-radius: 3px; margin-top: 10px; overflow: hidden; display: none; }
         .progress-bar.active { display: block; }
-        .progress-bar .fill { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); width: 0%; transition: width 0.3s; }
-        
+        .progress-bar .fill { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); width: 40%; border-radius: 3px; }
+        .progress-bar.active .fill { animation: indeterminate 1.2s ease-in-out infinite; }
+        @keyframes indeterminate {
+            0% { margin-left: 0%; width: 40%; }
+            50% { width: 60%; }
+            100% { margin-left: 100%; width: 40%; }
+        }
+
         .results-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
         .results-table th, .results-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; }
         .results-table th { background: #f8f9fa; font-weight: 600; color: #555; position: sticky; top: 0; }
-        .results-table tr:hover { background: #f8f9ff; }
+        .results-table tr.result-row { cursor: pointer; }
+        .results-table tr.result-row:hover { background: #f8f9ff; }
+        .results-table tr.result-row.expanded { background: #eef2ff; }
         .results-table .risk-high { color: #e74c3c; font-weight: 600; }
         .results-table .risk-medium { color: #f39c12; font-weight: 600; }
         .results-table .risk-low { color: #27ae60; font-weight: 600; }
-        
+
+        .detail-row td { padding: 12px 16px; background: #fafbff; border-bottom: 1px solid #e0e4f0; }
+        .detail-row .verdict { font-size: 13px; font-weight: 600; color: #333; margin-bottom: 10px; }
+        .detail-row .section { margin-bottom: 10px; }
+        .detail-row .section-title { font-size: 11px; font-weight: 700; color: #667eea; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; }
+        .detail-row ul { margin-left: 18px; }
+        .detail-row li { font-size: 12px; color: #444; margin-bottom: 3px; }
+        .detail-row .limitations { color: #8a6d00; }
+        .detail-row .limitations li { color: #8a6d00; }
+        .detail-row .caveat { font-size: 11px; color: #8a6d00; background: #fff8e1; border-left: 3px solid #f0b429; padding: 6px 10px; border-radius: 4px; margin-top: 8px; }
+        .model-badge { display: inline-block; font-size: 10px; font-weight: 700; color: #fff; background: #8e44ad; border-radius: 4px; padding: 1px 6px; margin-left: 6px; vertical-align: middle; }
+        .src-label { font-size: 12px; color: #555; }
+
         .btn { padding: 8px 16px; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; font-weight: 500; }
         .btn-primary { background: #667eea; color: white; }
         .btn-success { background: #27ae60; color: white; }
         .btn-danger { background: #e74c3c; color: white; }
         .btn:hover { opacity: 0.9; }
-        
+        .btn:disabled { background: #ccc; cursor: not-allowed; }
+
         .file-list { max-height: 200px; overflow-y: auto; margin-top: 10px; }
         .file-item { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #eee; }
         .file-item .name { font-size: 13px; color: #333; }
         .file-item .size { font-size: 12px; color: #999; }
-        
+
         .export-buttons { display: flex; gap: 10px; margin-top: 15px; }
-        
+
+        .status-note { font-size: 12px; color: #777; margin-top: 10px; }
+
         @media (max-width: 900px) {
             .dashboard { grid-template-columns: repeat(2, 1fr); }
             .main-content { grid-template-columns: 1fr; }
@@ -81,7 +106,7 @@
         <h1>🔍 Deepfake Lens</h1>
         <p>AI 생성 콘텐츠 탐지 및 분석 시스템</p>
     </div>
-    
+
     <div class="container">
         <!-- Dashboard -->
         <div class="dashboard">
@@ -105,19 +130,24 @@
                 <div class="value" id="stat-total">0</div>
                 <div class="label">총 분석 파일</div>
             </div>
+            <div class="stat-card model">
+                <h3>뉴럴 모델</h3>
+                <div class="value" id="stat-model">0</div>
+                <div class="label" id="stat-model-label">외부 모델 분석 파일</div>
+            </div>
         </div>
-        
+
         <div class="main-content">
             <!-- Left Panel: Input -->
             <div class="panel">
                 <h2>📁 분석 대상</h2>
-                
+
                 <!-- Folder Input -->
                 <div class="folder-input">
                     <input type="text" id="folder-path" placeholder="폴더 경로 입력 (예: C:\Users\test\images)">
                     <button id="analyze-btn" onclick="analyzeFolder()">분석 시작</button>
                 </div>
-                
+
                 <!-- Options -->
                 <div class="options">
                     <div class="option-group">
@@ -132,46 +162,61 @@
                         <label>최대 파일:</label>
                         <input type="number" id="max-files" value="1000" min="1" max="10000">
                     </div>
+                </div>
+                <div class="options">
                     <div class="option-group">
-                        <label>포맷:</label>
-                        <select id="output-format">
-                            <option value="json">JSON</option>
-                            <option value="csv">CSV</option>
-                        </select>
+                        <input type="checkbox" id="opt-model" checked>
+                        <label for="opt-model">뉴럴 모델 사용</label>
+                    </div>
+                    <div class="option-group">
+                        <input type="checkbox" id="opt-recursive">
+                        <label for="opt-recursive">하위 폴더 포함</label>
+                    </div>
+                    <div class="option-group">
+                        <input type="checkbox" id="opt-dedupe">
+                        <label for="opt-dedupe">중복 제거</label>
+                    </div>
+                    <div class="option-group">
+                        <input type="checkbox" id="opt-heatmaps">
+                        <label for="opt-heatmaps">히트맵 (정밀 필요)</label>
                     </div>
                 </div>
-                
+
                 <!-- Progress -->
                 <div class="progress-bar" id="progress">
                     <div class="fill" id="progress-fill"></div>
                 </div>
                 <p id="progress-text" style="font-size: 12px; color: #666; margin-top: 5px;"></p>
-                
+
                 <!-- Drag & Drop Zone -->
                 <div class="upload-zone" id="drop-zone">
                     <p>📁 여기에 파일을 드래그 앤 드롭하세요</p>
-                    <p style="font-size: 12px; color: #999;">지원 형식: PNG, JPG, JPEG, WebP, BMP, TIFF</p>
+                    <p style="font-size: 12px; color: #999;">지원 형식: PNG, JPG, JPEG, WebP, BMP, TIFF, TXT, MD, WAV, MP3</p>
                 </div>
-                
+
                 <!-- File List -->
                 <div class="file-list" id="file-list"></div>
+                <div style="margin-top: 10px; display: flex; gap: 10px; align-items: center;">
+                    <button class="btn btn-primary" id="upload-btn" onclick="analyzeUploads()" disabled>선택 파일 분석</button>
+                    <span class="status-note" id="upload-note">드롭한 파일은 서버에 업로드되어 분석 후 삭제됩니다.</span>
+                </div>
             </div>
-            
+
             <!-- Right Panel: Results -->
             <div class="panel">
                 <h2>📊 분석 결과</h2>
                 <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                    <button class="btn btn-primary" onclick="exportJSON()">JSON 내보내기</button>
-                    <button class="btn btn-success" onclick="exportCSV()">CSV 내보내기</button>
+                    <button class="btn btn-primary" onclick="exportJSON()">JSON보내기</button>
+                    <button class="btn btn-success" onclick="exportCSV()">CSV보내기</button>
                     <button class="btn btn-danger" onclick="clearResults()">결과 삭제</button>
                 </div>
-                <div style="max-height: 500px; overflow-y: auto;">
+                <div style="max-height: 560px; overflow-y: auto;">
                     <table class="results-table">
                         <thead>
                             <tr>
                                 <th>위험도</th>
                                 <th>점수</th>
-                                <th>도구</th>
+                                <th>출처 추정</th>
                                 <th>파일명</th>
                             </tr>
                         </thead>
@@ -180,14 +225,15 @@
                         </tbody>
                     </table>
                 </div>
+                <p class="status-note">점수는 진위 판정이 아니라 검토 우선순위입니다. 행을 클릭하면 판정 근거와 한계를 볼 수 있습니다.</p>
             </div>
         </div>
     </div>
-    
+
     <script>
         let results = [];
         let selectedFiles = [];
-        
+
         // Drag & Drop
         const dropZone = document.getElementById('drop-zone');
         dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
@@ -195,18 +241,17 @@
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropZone.classList.remove('dragover');
-            const files = Array.from(e.dataTransfer.files);
-            addFiles(files);
+            addFiles(Array.from(e.dataTransfer.files));
         });
         dropZone.addEventListener('click', () => {
             const input = document.createElement('input');
             input.type = 'file';
             input.multiple = true;
-            input.accept = '.png,.jpg,.jpeg,.webp,.bmp,.tiff';
+            input.accept = '.png,.jpg,.jpeg,.webp,.bmp,.tiff,.txt,.md,.wav,.mp3';
             input.onchange = (e) => addFiles(Array.from(e.target.files));
             input.click();
         });
-        
+
         function escapeHtml(value) {
             return String(value).replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
         }
@@ -214,7 +259,7 @@
         function addFiles(files) {
             const list = document.getElementById('file-list');
             files.forEach(file => {
-                if (!selectedFiles.find(f => f.name === file.name)) {
+                if (!selectedFiles.find(f => f.name === file.name && f.size === file.size)) {
                     selectedFiles.push(file);
                     const item = document.createElement('div');
                     item.className = 'file-item';
@@ -222,89 +267,182 @@
                     list.appendChild(item);
                 }
             });
+            document.getElementById('upload-btn').disabled = selectedFiles.length === 0;
         }
-        
+
+        function setBusy(btn, busy, text) {
+            btn.disabled = busy;
+            document.getElementById('progress').classList.toggle('active', busy);
+            document.getElementById('progress-text').textContent = busy ? text : '';
+        }
+
         async function analyzeFolder() {
             const folderPath = document.getElementById('folder-path').value;
             if (!folderPath) {
                 alert('폴더 경로를 입력하세요');
                 return;
             }
-            
-            const pixelMode = document.getElementById('pixel-mode').value;
-            const maxFiles = document.getElementById('max-files').value;
-            
-            document.getElementById('analyze-btn').disabled = true;
-            document.getElementById('progress').classList.add('active');
-            document.getElementById('progress-fill').style.width = '0%';
-            document.getElementById('progress-text').textContent = '분석 시작...';
-            
+
+            const btn = document.getElementById('analyze-btn');
+            const params = new URLSearchParams({
+                folder: folderPath,
+                pixel: document.getElementById('pixel-mode').value,
+                max_files: document.getElementById('max-files').value,
+                recursive: document.getElementById('opt-recursive').checked,
+                dedupe: document.getElementById('opt-dedupe').checked,
+                heatmaps: document.getElementById('opt-heatmaps').checked,
+            });
+            if (!document.getElementById('opt-model').checked) {
+                params.set('no_default_engine', 'true');
+            }
+
+            setBusy(btn, true, '폴더 분석 중… 파일 수와 모델 로딩에 따라 수 분 걸릴 수 있습니다');
+
             try {
-                const response = await fetch(`/api/scan?folder=${encodeURIComponent(folderPath)}&pixel=${pixelMode}&max_files=${maxFiles}`);
+                const response = await fetch('/api/scan?' + params.toString());
                 const data = await response.json();
-                
+
                 if (data.error) {
                     alert('오류: ' + data.error);
                     return;
                 }
-                
+
                 processResults(data);
             } catch (error) {
                 alert('분석 중 오류 발생: ' + error.message);
             } finally {
-                document.getElementById('analyze-btn').disabled = false;
-                document.getElementById('progress').classList.remove('active');
-                document.getElementById('progress-text').textContent = '';
+                setBusy(btn, false, '');
             }
         }
-        
+
+        async function analyzeUploads() {
+            if (!selectedFiles.length) return;
+            const btn = document.getElementById('upload-btn');
+            const form = new FormData();
+            selectedFiles.forEach(f => form.append('files', f, f.name));
+
+            setBusy(btn, true, '업로드 파일 분석 중…');
+
+            try {
+                const response = await fetch('/api/analyze-upload', { method: 'POST', body: form });
+                const data = await response.json();
+                if (data.error) {
+                    alert('오류: ' + data.error);
+                    return;
+                }
+                processResults(data);
+            } catch (error) {
+                alert('분석 중 오류 발생: ' + error.message);
+            } finally {
+                setBusy(btn, false, '');
+                selectedFiles = [];
+                document.getElementById('file-list').innerHTML = '';
+                btn.disabled = true;
+            }
+        }
+
         function processResults(data) {
-            results = [];
-            if (data.items) {
-                data.items.forEach(item => {
-                    const result = item.result || {};
-                    results.push({
-                        name: item.name || item.path,
-                        score: result.score || 0,
-                        tool: result.source_guess?.label || '알 수 없음',
-                        risk: result.band || 'unknown'
-                    });
-                });
-            }
-            updateResults();
+            results = (data.items || []).map(item => ({ item }));
+            updateResults(data.summary || {});
         }
-        
-        function updateResults() {
+
+        function riskLabel(band) {
+            return band === 'high' ? '높음' : band === 'medium' ? '주의' : '낮음';
+        }
+
+        function listItems(title, values, cls) {
+            if (!values || !values.length) return '';
+            const rows = values.map(v => {
+                const text = typeof v === 'string' ? v : (v.title ? `${v.title}: ${v.detail || ''}` : JSON.stringify(v));
+                return `<li>${escapeHtml(text)}</li>`;
+            }).join('');
+            return `<div class="section ${cls || ''}"><div class="section-title">${title}</div><ul>${rows}</ul></div>`;
+        }
+
+        function detailHtml(item) {
+            const r = item.result || {};
+            const parts = [];
+            if (item.error) {
+                parts.push(`<div class="verdict">분석 실패: ${escapeHtml(item.error)}</div>`);
+            }
+            if (r.verdict) {
+                parts.push(`<div class="verdict">${escapeHtml(r.verdict)}</div>`);
+            }
+            const ma = r.model_analysis;
+            if (ma) {
+                const score = ma.score != null ? ` — 점수 ${ma.score}` : '';
+                parts.push(`<div class="section"><div class="section-title">뉴럴 모델</div><div class="src-label">${escapeHtml(ma.model_id || 'model')}${escapeHtml(score)}</div></div>`);
+            }
+            parts.push(listItems('신호', r.signals));
+            parts.push(listItems('한계', r.limitations, 'limitations'));
+            parts.push(listItems('다음 확인', r.next_checks));
+            const sg = r.source_guess;
+            if (sg && sg.label) {
+                const reasons = (sg.reasons || []).map(escapeHtml).join(' ');
+                parts.push(`<div class="section"><div class="section-title">출처 추정 (${escapeHtml(sg.confidence || 'unknown')})</div><div class="src-label">${escapeHtml(sg.label)} — ${reasons}</div></div>`);
+            }
+            parts.push(`<div class="caveat">이 결과는 스크리닝 우선순위 신호입니다. 합성 여부의 확정 판정이 아니며, 원본 확보·맥락 검토가 필요합니다.</div>`);
+            return parts.join('');
+        }
+
+        function updateResults(summary) {
             const tbody = document.getElementById('results-body');
             tbody.innerHTML = '';
-            
-            let aiCount = 0, mediumCount = 0, lowCount = 0;
-            
-            results.sort((a, b) => b.score - a.score);
-            
-            results.forEach(r => {
-                if (r.risk === 'high') aiCount++;
-                else if (r.risk === 'medium') mediumCount++;
+
+            let aiCount = 0, mediumCount = 0, lowCount = 0, modelCount = 0;
+
+            results.sort((a, b) => ((b.item.result || {}).score || 0) - ((a.item.result || {}).score || 0));
+
+            if (!results.length) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #999;">분석 결과가 없습니다</td></tr>';
+            }
+
+            results.forEach(entry => {
+                const item = entry.item;
+                const r = item.result || {};
+                const band = r.band || 'unknown';
+                const score = r.score != null ? r.score : 0;
+                const tool = (r.source_guess && r.source_guess.label) || '알 수 없음';
+                const hasModel = !!r.model_analysis;
+
+                if (band === 'high') aiCount++;
+                else if (band === 'medium') mediumCount++;
                 else lowCount++;
-                
+                if (hasModel) modelCount++;
+
                 const tr = document.createElement('tr');
+                tr.className = 'result-row';
                 tr.innerHTML = `
-                    <td class="risk-${r.risk}">${r.risk === 'high' ? '높음' : r.risk === 'medium' ? '주의' : '낮음'}</td>
-                    <td>${Number(r.score) || 0}</td>
-                    <td>${escapeHtml(r.tool)}</td>
-                    <td>${escapeHtml(r.name)}</td>
+                    <td class="risk-${band}">${riskLabel(band)}</td>
+                    <td>${Number(score) || 0}</td>
+                    <td>${escapeHtml(tool)}${hasModel ? '<span class="model-badge">NN</span>' : ''}</td>
+                    <td>${escapeHtml(item.name || item.path)}</td>
                 `;
+                const detailTr = document.createElement('tr');
+                detailTr.className = 'detail-row';
+                detailTr.style.display = 'none';
+                detailTr.innerHTML = `<td colspan="4">${detailHtml(item)}</td>`;
+                tr.addEventListener('click', () => {
+                    const open = detailTr.style.display !== 'none';
+                    detailTr.style.display = open ? 'none' : '';
+                    tr.classList.toggle('expanded', !open);
+                });
                 tbody.appendChild(tr);
+                tbody.appendChild(detailTr);
             });
-            
+
             document.getElementById('stat-ai').textContent = aiCount;
             document.getElementById('stat-medium').textContent = mediumCount;
             document.getElementById('stat-low').textContent = lowCount;
             document.getElementById('stat-total').textContent = results.length;
+            document.getElementById('stat-model').textContent = summary.external_model_active != null ? summary.external_model_active : modelCount;
+            document.getElementById('stat-model-label').textContent =
+                (summary.external_model_active != null ? summary.external_model_active : modelCount) > 0
+                    ? '외부 모델 분석 파일' : '휴리스틱 선별 전용';
         }
-        
+
         function exportJSON() {
-            const data = JSON.stringify(results, null, 2);
+            const data = JSON.stringify(results.map(e => e.item), null, 2);
             const blob = new Blob([data], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -312,16 +450,19 @@
             a.download = 'deepfake-lens-results.json';
             a.click();
         }
-        
+
         function csvField(value) {
             const text = String(value);
             return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
         }
 
         function exportCSV() {
-            let csv = '위험도,점수,도구,파일명\n';
-            results.forEach(r => {
-                csv += [csvField(r.risk), csvField(r.score), csvField(r.tool), csvField(r.name)].join(',') + '\n';
+            let csv = '위험도,점수,출처 추정,모델,파일명,판정\n';
+            results.forEach(e => {
+                const item = e.item;
+                const r = item.result || {};
+                const model = (r.model_analysis && r.model_analysis.model_id) || '';
+                csv += [csvField(r.band || ''), csvField(r.score != null ? r.score : ''), csvField((r.source_guess && r.source_guess.label) || ''), csvField(model), csvField(item.name || item.path), csvField(r.verdict || '')].join(',') + '\n';
             });
             const blob = new Blob([csv], { type: 'text/csv' });
             const url = URL.createObjectURL(blob);
@@ -330,7 +471,7 @@
             a.download = 'deepfake-lens-results.csv';
             a.click();
         }
-        
+
         function clearResults() {
             results = [];
             document.getElementById('results-body').innerHTML = '<tr><td colspan="4" style="text-align: center; color: #999;">분석 결과가 없습니다</td></tr>';
@@ -338,6 +479,8 @@
             document.getElementById('stat-medium').textContent = '0';
             document.getElementById('stat-low').textContent = '0';
             document.getElementById('stat-total').textContent = '0';
+            document.getElementById('stat-model').textContent = '0';
+            document.getElementById('stat-model-label').textContent = '외부 모델 분석 파일';
         }
     </script>
 </body>
