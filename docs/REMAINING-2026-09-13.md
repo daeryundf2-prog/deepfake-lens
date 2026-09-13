@@ -27,9 +27,9 @@
 |---|---|---|---|
 | 1 | Calibrated AUROC at target resolution | only 32×32 and ProGAN-domain data measured so far | labeled dataset at ≥224px in-domain (Synthbuster full set + RAISE-1k per roadmap P1) |
 | 2 | Lip-sync / video-temporal detector | no committed model | integrate a Wav2Lip-detector or temporal artifact model (new runtime + weights) |
-| 3 | Text-modality neural detector | heuristic only | LLM-backbone detector profile (e.g. Binoculars-style perplexity model) |
+| ~~3~~ | ~~Text-modality neural detector~~ | **done** — `hf-text-classifier` runtime + openai-detector profile committed (`9aa6977`), live-verified (AI text fake=100, human=0) | — |
 | 4 | Android physical-device run | emulator only on this host | real device + committed ONNX asset (int8 AIDE or smaller) |
-| 5 | `v0.1.0` tag + signed release | version still `0.1.0.dev0`; signing-key decision pending | tag + `RAPIDTRIAGE_SIGNING_KEY`-equivalent key management decision |
+| 5 | `v0.1.0` tag + signed release | version still `0.1.0.dev0`; signing-key decision pending | tag + key management decision |
 | 6 | Modern-generator benchmark coverage | 2025-26 generators (FLUX.1, SD3.5, Wan2.1…) not in fixtures | self-collected samples per roadmap P3 (`fixtures/modern-bench/` spec) |
 | 7 | UnivFD full checkpoint family | only `fc_weights.pth` fetched | fetch remaining UnivFD heads if needed |
 
