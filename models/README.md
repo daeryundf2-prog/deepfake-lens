@@ -1,6 +1,6 @@
 # Model zoo
 
-Runtime profiles for published synthetic-media detectors (image and audio).
+Runtime profiles for published synthetic-media detectors (image, audio, and text).
 Profiles are committed; **weights never are** (license + size —
 `models/*.pth` and friends are gitignored). A scan treats every profile as
 optional: missing checkpoints or missing optional dependencies degrade to
@@ -14,9 +14,11 @@ crash.
 | `cnndetection-runtime.json` | CNNDetection (CVPR 2020) ResNet-50 blur+jpg | `torchvision` (torch + torchvision) | wired — drop `blur_jpg_prob.pth` in `models/` |
 | `dire-runtime.json` | DIRE (ICCV 2023) diffusion reconstruction | — | `supported: false` placeholder (needs ADM diffusion pipeline) |
 | `aasist-runtime.json` | AASIST (Interspeech 2022) audio anti-spoofing | `aasist` (torch reimplementation in `scripts/run_aasist.py`) | wired — run `scripts/fetch_aasist.py` |
+| `openai-detector-runtime.json` | OpenAI GPT-2 output detector (RoBERTa-base) | `hf-text-classifier` (torch + transformers) | wired — fetched from HF hub on first use |
 
-Profiles declare a `modality` (`image`/`audio`); a scanned file only runs
-profiles matching its own modality, so the image detectors and AASIST never
+Profiles declare a `modality` (`image`/`audio`/`text`); a scanned file only runs
+profiles matching its own modality, so the image detectors, AASIST, and the
+text classifier never
 trip over each other in a mixed directory scan.
 
 ## Multi-model runs
@@ -38,7 +40,8 @@ deepfake-lens scan folder/ --model-path models/   # every profile in models/
 ```
 
 Default scans auto-discover the bundled verified engines —
-`aide-runtime.json` for images and `aasist-runtime.json` for audio
+`aide-runtime.json` for images, `aasist-runtime.json` for audio, and
+`openai-detector-runtime.json` for text
 (`--no-default-engine` opts out). The wider zoo stays opt-in because the
 placeholder members add latency without scores until their checkpoints are
 fetched.

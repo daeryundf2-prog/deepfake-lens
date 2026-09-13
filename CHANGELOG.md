@@ -4,6 +4,21 @@ All notable changes to Deepfake Lens. Format: Keep a Changelog; this repo
 has not tagged a release yet (version is `0.1.0.dev0`), so entries are
 grouped by work pass rather than release.
 
+## 2026-09 — hf-text-classifier runtime (OpenAI detector) + text modality
+
+### Added
+- `models/openai-detector-runtime.json` — committed profile for OpenAI's
+  roberta-base-openai-detector (RoBERTa fine-tune on GPT-2 outputs): fake
+  probability at softmax index 0 (id2label verified against the model
+  config); ~500 MB checkpoint fetched from Hugging Face on first use.
+- `model_adapter` gains a third modality: `hf-text-classifier` runtime loads
+  AutoTokenizer + AutoModelForSequenceClassification for the profile's
+  `hub_model`, reads ≤256 KiB of the text file, and softmaxes logits.
+  `.txt`/`.md` scan items now carry `model_analysis` exactly like
+  image/audio, and `summary.external_model_active` counts them.
+- Registry entry `openai-detector-2019`; limitations document the known
+  modern-LLM / short-text degradation (OpenAI model card caveat).
+
 ## 2026-09 — AASIST audio runtime + modality-aware adapter
 
 ### Added

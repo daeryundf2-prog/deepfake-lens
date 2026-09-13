@@ -1,0 +1,22 @@
+{
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "OpenAI GPT-2 output detector (roberta-base)",
+  "candidate_key": "openai-detector-2019",
+  "runtime": "hf-text-classifier",
+  "modality": "text",
+  "hub_model": "openai-community/roberta-base-openai-detector",
+  "score_index": 0,
+  "score_activation": "softmax",
+  "score_semantics": "fake_probability",
+  "threshold": 67,
+  "source_url": "https://huggingface.co/openai-community/roberta-base-openai-detector",
+  "limitations": [
+    "Trained on GPT-2 outputs (2019) — accuracy on modern LLM text is known to degrade; OpenAI's own model card reports ~95% on GPT-2 outputs and explicitly recommends against relying on it for longer/non-GPT-2 text.",
+    "The model is fetched from Hugging Face on first use (~500 MB into the HF cache); set 'hub_model' to a local snapshot directory to run fully offline.",
+    "Prioritization signal, not a truth label — high false-positive rates on short or non-English text are documented."
+  ],
+  "notes": [
+    "Runtime 'hf-text-classifier' loads AutoTokenizer + AutoModelForSequenceClassification for 'hub_model', reads up to 256 KiB of the text file, and softmaxes logits; label order for this checkpoint is index 0 = Fake (AI-generated), index 1 = Real (human) — verified against the model's config.json id2label.",
+    "Only .txt/.md scan items run this profile; image/audio profiles are unaffected (modality filtering)."
+  ]
+}

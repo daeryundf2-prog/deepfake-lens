@@ -50,6 +50,7 @@ COMMANDS = {"scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibr
 
 DEFAULT_ENGINE_PROFILE = "models/aide-runtime.json"
 DEFAULT_AUDIO_ENGINE_PROFILE = "models/aasist-runtime.json"
+DEFAULT_TEXT_ENGINE_PROFILE = "models/openai-detector-runtime.json"
 
 
 def default_model_path(root: Path | None = None) -> Path | None:
@@ -73,6 +74,18 @@ def default_audio_model_path(root: Path | None = None) -> Path | None:
     """
     base = Path(root) if root is not None else Path(__file__).resolve().parent.parent
     candidate = base / DEFAULT_AUDIO_ENGINE_PROFILE
+    return candidate if candidate.is_file() else None
+
+
+def default_text_model_path(root: Path | None = None) -> Path | None:
+    """Bundled default text profile (models/openai-detector-runtime.json).
+
+    Same contract as default_model_path: the profile is committed; the
+    ~500 MB RoBERTa checkpoint is fetched from Hugging Face on first use,
+    and absence returns None so text analysis stays heuristic-only.
+    """
+    base = Path(root) if root is not None else Path(__file__).resolve().parent.parent
+    candidate = base / DEFAULT_TEXT_ENGINE_PROFILE
     return candidate if candidate.is_file() else None
 
 
@@ -1006,7 +1019,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.no_default_engine:
         model_path = None
     else:
-        model_path = [path for path in (default_model_path(), default_audio_model_path()) if path is not None] or None
+        model_path = [path for path in (default_model_path(), default_audio_model_path(), default_text_model_path()) if path is not None] or None
     if model_path and args.model_path is None:
         print(f"default engine profiles: {model_path}", file=sys.stderr)
 

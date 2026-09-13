@@ -100,6 +100,19 @@ DETECTOR_REGISTRY = [
         ],
     ),
     DetectorCandidate(
+        key="openai-detector-2019",
+        name="OpenAI GPT-2 output detector (RoBERTa-base fine-tune)",
+        task="binary-text-detector",
+        adapter_target="hf-text-classifier runtime profile",
+        status="candidate",
+        priority="medium",
+        source_url="https://huggingface.co/openai-community/roberta-base-openai-detector",
+        notes=[
+            "Wired via models/openai-detector-runtime.json; the ~500 MB checkpoint is fetched from Hugging Face on first use (point 'hub_model' at a local snapshot for offline).",
+            "Trained on GPT-2 outputs (2019) — OpenAI's model card warns about modern-LLM and short/non-English text; treat as a legacy baseline, re-validate on target-domain samples.",
+        ],
+    ),
+    DetectorCandidate(
         key="clide-wacv-2026",
         name="CLIDE Conditional Likelihood generated Image Detector",
         task="zero-shot-image-detector",

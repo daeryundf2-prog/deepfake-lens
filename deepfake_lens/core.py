@@ -298,7 +298,9 @@ def analyze_file(
     if extension in SUPPORTED_TEXT_EXTENSIONS:
         try:
             text = _read_prefix(file_path, text_bytes).decode("utf-8", errors="replace")
-            return ScanItem(display_path, file_path.name, "text", "analyzed", size, analyze_text(text))
+            model_analysis = analyze_external_model(file_path, model_path, modality="text")
+            result = analyze_text(text, model_analysis=model_analysis)
+            return ScanItem(display_path, file_path.name, "text", "analyzed", size, result)
         except OSError as exc:
             return ScanItem(display_path, file_path.name, "text", "failed", size, error=str(exc))
 
@@ -360,7 +362,7 @@ def _audio_result(analysis: AudioAnalysis) -> ClassificationResult:
     )
 
 
-def analyze_text(text: str) -> ClassificationResult:
+def analyze_text(text: str, *, model_analysis: ExternalModelAnalysis | None = None) -> ClassificationResult:
     trimmed = text.strip()
     if not trimmed:
         return ClassificationResult(
@@ -405,6 +407,9 @@ def analyze_text(text: str) -> ClassificationResult:
     generic_signal = _generic_text_signal(normalized, words)
     if generic_signal:
         signals.append(generic_signal)
+    model_signal = _model_evidence_signal(model_analysis)
+    if model_signal:
+        signals.append(model_signal)
 
     source_guess = guess_text_source(normalized, identity_hits)
     limitations = ["휴리스틱 기반 선별 결과이며 진위 판단이 아니라 검토 우선순위입니다."]
@@ -412,13 +417,16 @@ def analyze_text(text: str) -> ClassificationResult:
         limitations.append("짧은 글은 문체 통계가 불안정합니다.")
     if len(sentences) < 4:
         limitations.append("문장 수가 적어 반복도와 문장 길이 신호가 제한적입니다.")
+    if model_analysis:
+        limitations.extend(model_analysis.limitations)
 
     return _build_result(
         signals,
         subject="글",
         source_guess=source_guess,
         limitations=limitations,
-        force_unknown=len(trimmed) < 24 and not signals and source_guess.confidence == SourceConfidence.UNKNOWN,
+        force_unknown=len(trimmed) < 24 and not signals and source_guess.confidence == SourceConfidence.UNKNOWN and not (model_analysis and model_analysis.available),
+        model_analysis=model_analysis,
     )
 
 

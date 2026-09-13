@@ -23,7 +23,7 @@ from deepfake_lens.model_adapter import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = REPO_ROOT / "models"
-WIRED_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "aasist"}
+WIRED_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "aasist", "hf-text-classifier"}
 
 
 def _write_rgb_png(path: Path, width: int = 8, height: int = 8) -> None:
@@ -58,7 +58,7 @@ class CommittedProfilesTest(unittest.TestCase):
         names = set(self._profiles())
         self.assertEqual(
             names,
-            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json"},
+            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json"},
         )
 
     def test_wired_profiles_use_implemented_runtimes(self) -> None:
@@ -67,7 +67,11 @@ class CommittedProfilesTest(unittest.TestCase):
                 continue
             self.assertEqual(profile["type"], "deepfake-lens-runtime-profile-v1", name)
             self.assertIn(profile["runtime"], WIRED_RUNTIMES, name)
-            self.assertIn("checkpoint", profile, name)
+            # Hub-resolved runtimes name a model id instead of a local file.
+            if profile["runtime"] == "hf-text-classifier":
+                self.assertIn("hub_model", profile, name)
+            else:
+                self.assertIn("checkpoint", profile, name)
             self.assertTrue(profile.get("limitations"), f"{name} must carry honest limitations")
 
     def test_dire_is_documented_placeholder(self) -> None:

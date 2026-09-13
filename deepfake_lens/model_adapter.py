@@ -19,7 +19,8 @@ _MAX_PROFILE_DEPTH = 4
 # explicit "modality" field; otherwise it is inferred from the runtime.
 IMAGE_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision"}
 AUDIO_RUNTIMES = {"aasist"}
-ALL_RUNTIMES = IMAGE_RUNTIMES | AUDIO_RUNTIMES
+TEXT_RUNTIMES = {"hf-text-classifier"}
+ALL_RUNTIMES = IMAGE_RUNTIMES | AUDIO_RUNTIMES | TEXT_RUNTIMES
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,8 @@ def _profile_modality(source: Path) -> str:
         return "audio"
     if runtime in IMAGE_RUNTIMES:
         return "image"
+    if runtime in TEXT_RUNTIMES:
+        return "text"
     return "any"
 
 
@@ -306,7 +309,9 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
     checkpoint = _checkpoint_path(profile, base_dir=base_dir)
     model_name = str(profile.get("name") or profile.get("model") or checkpoint.name)
     profile_limitations = _profile_limitations(profile)
-    if not checkpoint.exists():
+    # Hub-resolved runtimes (hf-text-classifier) name a model id, not a local
+    # file — the exists() gate below does not apply to them.
+    if runtime not in TEXT_RUNTIMES and not checkpoint.exists():
         return ExternalModelAnalysis(
             available=False,
             score=0,
@@ -322,6 +327,8 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
             values = _run_clip_linear(checkpoint, media_path, profile)
         elif runtime == "aasist":
             values = _run_aasist(checkpoint, media_path, profile)
+        elif runtime == "hf-text-classifier":
+            values = _run_hf_text_classifier(media_path, profile)
         else:
             array = _preprocess_image(media_path, profile)
             if runtime == "onnx":
@@ -373,6 +380,8 @@ def _checkpoint_hint(runtime: str) -> list[str]:
         return ["Fetch the checkpoint with scripts/fetch_aasist.py (downloads the official AASIST.pth, ~1.3 MB), or point 'checkpoint' at a local AASIST state dict."]
     if runtime == "clip-linear":
         return ["Download the detector's linear-head weights and point 'checkpoint' at the .pth file; the CLIP backbone named in 'backbone' is fetched by transformers on first use."]
+    if runtime == "hf-text-classifier":
+        return ["The model id in 'hub_model' is fetched by transformers on first use; set it to a local snapshot directory to run fully offline."]
     if runtime == "torchvision":
         return ["Download the detector's published state-dict checkpoint and point 'checkpoint' at the .pth file."]
     return ["Use an absolute checkpoint path or a path relative to the model profile."]
@@ -385,6 +394,8 @@ def _runtime_install_hint(runtime: str) -> str:
         return "Install the optional research stack (torch, numpy) to enable the AASIST engine; PCM .wav files need no other decoder."
     if runtime == "clip-linear":
         return "Install the optional clip-linear stack (torch, transformers, Pillow) to enable the CLIP linear-probe runtime."
+    if runtime == "hf-text-classifier":
+        return "Install the optional hf-text-classifier stack (torch, transformers) to enable the text-detector runtime."
     if runtime == "torchvision":
         return "Install the optional torchvision stack (torch, torchvision, Pillow, numpy) to enable the torchvision runtime."
     return "Install Pillow plus onnxruntime or torch in the local environment to enable neural inference."
@@ -547,6 +558,47 @@ def _run_clip_linear(checkpoint: Path, image_path: Path, profile: dict[str, obje
         features = features.float()
         features = features / features.norm(dim=-1, keepdim=True).clamp_min(1e-12)
         logits = features @ weight.T + bias
+    return _flatten_outputs(logits.detach().cpu().numpy())
+
+
+# HF text classifiers are multi-hundred-MB downloads; keep them resident
+# between files like the CLIP backbones.
+_HF_TEXT_MODELS: dict[str, tuple[object, object]] = {}
+_HF_TEXT_MAX_BYTES = 256 * 1024
+
+
+def _hf_text_model(hub_model: str) -> tuple[object, object]:
+    cached = _HF_TEXT_MODELS.get(hub_model)
+    if cached is not None:
+        return cached
+    transformers = importlib.import_module("transformers")
+    tokenizer = transformers.AutoTokenizer.from_pretrained(hub_model)
+    model = transformers.AutoModelForSequenceClassification.from_pretrained(hub_model)
+    model.eval()
+    pair = (tokenizer, model)
+    _HF_TEXT_MODELS[hub_model] = pair
+    return pair
+
+
+def _run_hf_text_classifier(media_path: Path, profile: dict[str, object]) -> list[float]:
+    """Score one text file with a Hugging Face sequence classifier.
+
+    The profile's ``hub_model`` names the model id (e.g.
+    ``openai-community/roberta-base-openai-detector``); transformers fetches
+    it on first use. Text is read bounded (256 KiB) and tokenized with
+    truncation. Returns raw logits; the profile's score_index/activation
+    selects the fake/AI probability.
+    """
+    torch = importlib.import_module("torch")
+    hub_model = str(profile.get("hub_model") or "")
+    if not hub_model:
+        raise RuntimeError("hf-text-classifier profile needs a 'hub_model' field (e.g. openai-community/roberta-base-openai-detector)")
+    tokenizer, model = _hf_text_model(hub_model)
+    raw = media_path.read_bytes()[:_HF_TEXT_MAX_BYTES]
+    text = raw.decode("utf-8", errors="replace")
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+    with torch.no_grad():
+        logits = model(**inputs).logits
     return _flatten_outputs(logits.detach().cpu().numpy())
 
 
