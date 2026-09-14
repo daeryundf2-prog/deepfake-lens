@@ -100,3 +100,30 @@ Dataset: CIFAKE (Kaggle/HF mirror), CIFAR-10-derived reals vs SD-v1.x
 fakes, CC-BY terms per source. 100-image test-split sample fetched via
 HF datasets-server on 2026-09-13; local copies in `/tmp/dfl-bench` (not
 committed — third-party media stays out of git per repo policy).
+
+## Full-archive Synthbuster per-generator screen rates (2026-09-14)
+
+The complete Synthbuster archive (Zenodo record 10066460, ~11.8 GB zip,
+9,016 PNGs across 9 generators, native ≥512 px) was downloaded and
+CRC-verified. `experiments/eval_synthbuster.py` scored a seeded random
+sample of 20 images per generator through `aide-runtime.json` — this is a
+**fake-only screen rate** (no real class in the archive), so it reports
+fraction scoring >50, not accuracy/AUROC:
+
+| Generator | n | mean score | >50 |
+|---|---|---|---|
+| dalle2 | 20 | 82.0 | 85% |
+| dalle3 | 20 | 44.2 | 45% |
+| firefly | 20 | 64.5 | 75% |
+| glide | 20 | 80.0 | 80% |
+| midjourney-v5 | 20 | 49.1 | 50% |
+| stable-diffusion-1-3 | 20 | 57.6 | 60% |
+| stable-diffusion-1-4 | 20 | 54.0 | 55% |
+| stable-diffusion-2 | 20 | 48.7 | 60% |
+| stable-diffusion-xl | 20 | 76.2 | 80% |
+
+Consistent with the 720-image sweep above: strong on dalle2/glide/sdxl,
+weakest on dalle3 and midjourney-v5 — the misses concentrate on commercial
+generators. For a paired real/fake metric run the same generators against
+licensed real data (RAISE-1k requires a manual license request) under the
+`fixtures/modern-bench/` layout.
