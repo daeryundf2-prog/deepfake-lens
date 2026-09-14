@@ -63,9 +63,9 @@
         .results-table tr.result-row { cursor: pointer; }
         .results-table tr.result-row:hover { background: #f8f9ff; }
         .results-table tr.result-row.expanded { background: #eef2ff; }
-        .results-table .risk-high { color: #e74c3c; font-weight: 600; }
-        .results-table .risk-medium { color: #f39c12; font-weight: 600; }
-        .results-table .risk-low { color: #27ae60; font-weight: 600; }
+        .risk-high { color: #e74c3c; font-weight: 600; }
+        .risk-medium { color: #f39c12; font-weight: 600; }
+        .risk-low { color: #27ae60; font-weight: 600; }
 
         .detail-row td { padding: 12px 16px; background: #fafbff; border-bottom: 1px solid #e0e4f0; }
         .detail-row .verdict { font-size: 13px; font-weight: 600; color: #333; margin-bottom: 10px; }
@@ -94,6 +94,19 @@
         .export-buttons { display: flex; gap: 10px; margin-top: 15px; }
 
         .status-note { font-size: 12px; color: #777; margin-top: 10px; }
+
+        .quick-check { margin-bottom: 20px; }
+        .quick-check textarea { width: 100%; min-height: 90px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; font-family: inherit; resize: vertical; }
+        .quick-check .qc-row { display: flex; gap: 10px; margin-top: 10px; align-items: center; flex-wrap: wrap; }
+        .qc-result { margin-top: 15px; border: 1px solid #e0e4f0; border-radius: 8px; padding: 14px; background: #fafbff; display: none; }
+        .qc-result.visible { display: block; }
+        .qc-verdict { display: flex; gap: 12px; align-items: baseline; margin-bottom: 10px; }
+        .qc-verdict .score { font-size: 30px; font-weight: 700; }
+        .qc-verdict .band { font-size: 13px; font-weight: 600; text-transform: uppercase; }
+        .qc-layer { margin-top: 8px; font-size: 12px; }
+        .qc-layer .section-title { font-size: 11px; font-weight: 700; color: #667eea; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; }
+        .qc-layer ul { margin-left: 18px; }
+        .qc-layer li { color: #444; margin-bottom: 2px; }
 
         @media (max-width: 900px) {
             .dashboard { grid-template-columns: repeat(2, 1fr); }
@@ -135,6 +148,21 @@
                 <div class="value" id="stat-model">0</div>
                 <div class="label" id="stat-model-label">외부 모델 분석 파일</div>
             </div>
+        </div>
+
+        <!-- Unified quick check: paste text or drop one file, run every applicable layer -->
+        <div class="panel quick-check">
+            <h2>⚡ 통합 빠른 검사</h2>
+            <p class="status-note" style="margin-top:-8px; margin-bottom:10px;">텍스트를 붙여넣거나 파일 하나를 선택하면 해당 항목에 적용 가능한 모든 검사(휴리스틱 + 뉴럴 앙상블 + 메타데이터/C2PA + 스타일 지문)를 한 번에 실행합니다.</p>
+            <textarea id="qc-text" placeholder="검사할 텍스트를 붙여넣으세요 (한국어/영어 모두 지원)…" aria-label="검사할 텍스트"></textarea>
+            <div class="qc-row">
+                <button class="btn btn-primary" id="qc-text-btn" onclick="quickCheckText()">텍스트 전체 검사</button>
+                <span style="color:#999;">또는</span>
+                <button class="btn" id="qc-file-btn" onclick="document.getElementById('qc-file').click()">파일 선택 후 전체 검사</button>
+                <input type="file" id="qc-file" hidden>
+                <span class="status-note" id="qc-status" aria-live="polite"></span>
+            </div>
+            <div class="qc-result" id="qc-result" aria-live="polite"></div>
         </div>
 
         <div class="main-content">
@@ -688,6 +716,90 @@
             a.href = url;
             a.download = 'deepfake-lens-results.csv';
             a.click();
+        }
+
+        // ── Unified quick check (/api/check) ───────────────────────────
+        async function quickCheckText() {
+            const text = document.getElementById('qc-text').value;
+            if (!text.trim()) { alert('검사할 텍스트를 입력하세요'); return; }
+            await runQuickCheck({ method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({text}) });
+        }
+
+        document.getElementById('qc-file').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            e.target.value = '';
+            if (!file) return;
+            const form = new FormData();
+            form.append('file', file, file.name);
+            runQuickCheck({ method: 'POST', body: form });
+        });
+
+        async function runQuickCheck(options) {
+            const status = document.getElementById('qc-status');
+            const box = document.getElementById('qc-result');
+            status.textContent = '전체 검사 실행 중… 뉴럴 모델 로딩 시 수십 초 걸릴 수 있습니다';
+            ['qc-text-btn', 'qc-file-btn'].forEach(id => document.getElementById(id).disabled = true);
+            try {
+                const res = await apiFetch('/api/check', options);
+                const data = await res.json();
+                if (data.error) {
+                    box.className = 'qc-result visible';
+                    box.innerHTML = `<div class="verdict">오류: ${escapeHtml(data.error)}</div>`;
+                    return;
+                }
+                renderQuickCheck(data);
+            } catch (e) {
+                box.className = 'qc-result visible';
+                box.innerHTML = `<div class="verdict">검사 실패: ${escapeHtml(e.message)}</div>`;
+            } finally {
+                status.textContent = '';
+                ['qc-text-btn', 'qc-file-btn'].forEach(id => document.getElementById(id).disabled = false);
+            }
+        }
+
+        function qcLayer(title, node) {
+            return `<div class="qc-layer"><div class="section-title">${escapeHtml(title)}</div>${node}</div>`;
+        }
+
+        function renderQuickCheck(data) {
+            const box = document.getElementById('qc-result');
+            const item = data.item || {};
+            const r = item.result || {};
+            const band = r.band || 'unknown';
+            const score = r.score != null ? r.score : 0;
+            const bandText = band === 'high' ? 'AI 의심 — 높음' : band === 'medium' ? '주의 필요' : band === 'low' ? '낮음' : '판단 어려움';
+            const parts = [];
+            parts.push(`<div class="qc-verdict"><span class="score risk-${band}">${Number(score) || 0}</span><span class="band risk-${band}">${escapeHtml(bandText)}</span><span class="src-label">${escapeHtml(item.name || '')}</span></div>`);
+            if (r.verdict) parts.push(`<div class="verdict">${escapeHtml(r.verdict)}</div>`);
+
+            const ma = r.model_analysis;
+            if (ma) {
+                const members = (ma.models || []).map(m =>
+                    `<li>${escapeHtml(m.model || 'model')} — ${m.score != null ? m.score : 'n/a'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
+                parts.push(qcLayer(`뉴럴 앙상블 — 점수 ${ma.score != null ? ma.score : 'n/a'}`,
+                    members ? `<ul>${members}</ul>` : `<div class="src-label">${escapeHtml(ma.detail || '')}</div>`));
+            }
+            if (data.advanced) {
+                const a = data.advanced;
+                const sig = (a.signals || []).map(s => `<li>${escapeHtml(s.title)} (+${s.weight}) — ${escapeHtml(s.detail)}</li>`).join('');
+                const lim = (a.limitations || []).map(l => `<li>${escapeHtml(l)}</li>`).join('');
+                parts.push(qcLayer(`스타일/지문 분석 — 점수 ${a.score != null ? a.score : 0} (${escapeHtml(a.band_label || a.band || '')})`,
+                    (sig ? `<ul>${sig}</ul>` : '<div class="src-label">발동 신호 없음</div>') + (lim ? `<ul style="color:#8a6d00">${lim}</ul>` : '')));
+            }
+            if (data.forensic) {
+                const f = data.forensic;
+                const sig = (f.signals || []).map(s => `<li>${escapeHtml(s.title)} — ${escapeHtml(s.detail)}</li>`).join('');
+                const prov = (f.provenance_records || []).map(p => `<li>${escapeHtml(p.kind || p.source || 'record')}: ${escapeHtml(p.summary || p.detail || '')}</li>`).join('');
+                parts.push(qcLayer(`메타데이터 / C2PA 포렌식 — 점수 ${f.score != null ? f.score : 0}`,
+                    (sig ? `<ul>${sig}</ul>` : '') + (prov ? `<ul>${prov}</ul>` : '') || '<div class="src-label">단서 없음</div>'));
+            }
+            parts.push(listItems('다음 확인', r.next_checks));
+            parts.push(`<div class="caveat">이 결과는 스크리닝 우선순위 신호입니다. 합성 여부의 확정 판정이 아니며, 원본 확보·맥락 검토가 필요합니다.</div>`);
+            box.innerHTML = parts.join('');
+            box.className = 'qc-result visible';
+            box.scrollIntoView({behavior: 'smooth', block: 'nearest'});
         }
 
         function clearResults() {

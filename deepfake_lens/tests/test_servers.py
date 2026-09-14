@@ -158,6 +158,63 @@ class AnalyzeUploadPayloadTest(unittest.TestCase):
         self.assertIn("error", result)
 
 
+class CheckPayloadTest(unittest.TestCase):
+    """POST /api/check runs every applicable layer on one input."""
+
+    def _multipart(self, name: str, data: bytes) -> tuple[str, bytes]:
+        boundary = "----dflcheckboundary"
+        body = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{name}"\r\n'
+            "Content-Type: application/octet-stream\r\n\r\n"
+        ).encode() + data + f"\r\n--{boundary}--\r\n".encode()
+        return f"multipart/form-data; boundary={boundary}", body
+
+    def _fake_analyze(self, path, **kwargs):
+        from deepfake_lens.core import ScanItem
+        return ScanItem(str(path), Path(str(path)).name, "text", "analyzed", 4, result=None)
+
+    def test_text_check_runs_all_text_layers(self) -> None:
+        from deepfake_lens import webapp
+
+        original = webapp.analyze_file
+        webapp.analyze_file = self._fake_analyze
+        try:
+            result = webapp._check_text_payload("인공지능 기술은 빠르게 발전하고 있습니다. " * 5)
+        finally:
+            webapp.analyze_file = original
+
+        self.assertEqual(result["mode"], "text")
+        self.assertIn("item", result)
+        self.assertIn("advanced", result)
+        self.assertIn("signals", result["advanced"])
+
+    def test_text_check_rejects_too_short(self) -> None:
+        from deepfake_lens.webapp import _check_text_payload
+
+        self.assertIn("error", _check_text_payload("짧음"))
+
+    def test_file_check_runs_scan_and_forensic(self) -> None:
+        from deepfake_lens import webapp
+
+        original = webapp.analyze_file
+        webapp.analyze_file = self._fake_analyze
+        try:
+            content_type, body = self._multipart("note.txt", b"hello world, this is a test document")
+            result = webapp._check_file_payload(content_type, body)
+        finally:
+            webapp.analyze_file = original
+
+        self.assertEqual(result["mode"], "file")
+        self.assertEqual(result["item"]["name"], "note.txt")
+        self.assertIsNotNone(result["advanced"])
+
+    def test_file_check_rejects_non_multipart(self) -> None:
+        from deepfake_lens.webapp import _check_file_payload
+
+        self.assertIn("error", _check_file_payload("text/plain", b"x"))
+
+
 class FeedbackPayloadTest(unittest.TestCase):
     """POST /api/feedback must append JSONL rows the feedback CLI can load."""
 

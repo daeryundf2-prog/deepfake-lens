@@ -175,6 +175,9 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
             if parsed.path == "/api/analyze-upload":
                 self._handle_analyze_upload()
                 return
+            if parsed.path == "/api/check":
+                self._handle_check()
+                return
             if parsed.path == "/api/report":
                 try:
                     length = int(self.headers.get("Content-Length") or "0")
@@ -223,6 +226,36 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
                 return
             body = self.rfile.read(length)
             self._send_json(_analyze_upload_payload(self.headers.get("Content-Type") or "", body))
+
+        def _handle_check(self) -> None:
+            """Unified check-all: JSON {text} or a single multipart file.
+
+            Runs every layer applicable to the input — core scan heuristics,
+            the neural member ensemble, metadata/C2PA forensics, and the
+            text fingerprint probes — and returns one consolidated payload.
+            """
+            try:
+                length = int(self.headers.get("Content-Length") or "0")
+            except ValueError:
+                self.send_error(400, "invalid Content-Length")
+                return
+            if length <= 0:
+                self.send_error(400, "empty body")
+                return
+            if length > MAX_UPLOAD_BYTES:
+                self.send_error(413, f"body exceeds {MAX_UPLOAD_BYTES} bytes")
+                return
+            body = self.rfile.read(length)
+            content_type = self.headers.get("Content-Type") or ""
+            if "application/json" in content_type:
+                try:
+                    payload = json.loads(body.decode("utf-8", errors="replace"))
+                except json.JSONDecodeError:
+                    self._send_json({"error": "invalid JSON body"})
+                    return
+                self._send_json(_check_text_payload(str(payload.get("text") or "")))
+                return
+            self._send_json(_check_file_payload(content_type, body))
 
         def log_message(self, format: str, *args) -> None:
             return
@@ -517,10 +550,16 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
             break
         suffix = Path(filename).suffix[:16]
         try:
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
-                tmp.write(payload)
-                tmp.flush()
-                item = analyze_file(tmp.name, model_path=default_engine_profiles() or None)
+            # delete=False: Windows cannot reopen a delete=True temp file.
+            tmp_name = ""
+            try:
+                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                    tmp.write(payload)
+                    tmp_name = tmp.name
+                item = analyze_file(tmp_name, model_path=default_engine_profiles() or None)
+            finally:
+                if tmp_name:
+                    Path(tmp_name).unlink(missing_ok=True)
             record = item.to_json()
             record["path"] = filename
             record["name"] = filename
@@ -549,6 +588,104 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
             "source": "upload",
         },
         "items": items,
+    }
+
+
+def _check_text_payload(text: str) -> dict[str, object]:
+    """Unified text check: core scan heuristics + neural member ensemble
+    + fingerprint probes in one payload.
+
+    The text is written to a temp .txt so the full file pipeline (including
+    the causal-LM/classifier members) runs exactly as it would on a saved
+    document; the temp file is deleted immediately.
+    """
+    trimmed = text.strip()
+    if len(trimmed) < 8:
+        return {"error": "분석할 텍스트가 너무 짧습니다 (8자 이상)."}
+    if len(trimmed) > 256 * 1024:
+        return {"error": "텍스트가 256KB를 초과합니다."}
+    models_dir = Path(__file__).resolve().parent.parent / "models"
+    model_path = models_dir if models_dir.is_dir() else (default_engine_profiles() or None)
+    # delete=False: Windows cannot reopen a delete=True NamedTemporaryFile,
+    # so the analyzers below would hit Permission denied.
+    tmp_name = ""
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as tmp:
+            tmp.write(trimmed)
+            tmp_name = tmp.name
+        item = analyze_file(tmp_name, model_path=model_path)
+        try:
+            from .c2pa import analyze_metadata_forensic
+            forensic = analyze_metadata_forensic(Path(tmp_name)).to_json()
+        except Exception:
+            forensic = None
+    finally:
+        if tmp_name:
+            Path(tmp_name).unlink(missing_ok=True)
+    from .text_advanced import analyze_text_advanced
+    advanced = analyze_text_advanced(trimmed)
+    record = item.to_json()
+    record["name"] = "pasted-text"
+    record["path"] = "pasted-text"
+    return {
+        "schema_version": 1,
+        "mode": "text",
+        "item": record,
+        "advanced": advanced.to_json(),
+        "forensic": forensic,
+    }
+
+
+def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
+    """Unified single-file check: full scan + forensics + text probes."""
+    if "multipart/form-data" not in content_type:
+        return {"error": "multipart/form-data 또는 application/json 본문이 필요합니다"}
+    message = BytesParser(policy=email_policy).parsebytes(
+        b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
+    )
+    part = next(
+        (p for p in message.iter_parts() if p.get_filename() and p.get_payload(decode=True)),
+        None,
+    )
+    if part is None:
+        return {"error": "업로드된 파일이 없습니다"}
+    filename = part.get_filename() or "upload"
+    payload = part.get_payload(decode=True) or b""
+    suffix = Path(filename).suffix[:16]
+    models_dir = Path(__file__).resolve().parent.parent / "models"
+    model_path = models_dir if models_dir.is_dir() else (default_engine_profiles() or None)
+    tmp_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(payload)
+            tmp_name = tmp.name
+        tmp_path = Path(tmp_name)
+        item = analyze_file(tmp_path, model_path=model_path)
+        record = item.to_json()
+        forensic = None
+        try:
+            from .c2pa import analyze_metadata_forensic
+            forensic = analyze_metadata_forensic(tmp_path).to_json()
+        except Exception:
+            pass
+        advanced = None
+        if item.kind == "text":
+            try:
+                from .text_advanced import analyze_text_advanced
+                advanced = analyze_text_advanced(payload.decode("utf-8", errors="replace")).to_json()
+            except Exception:
+                pass
+    finally:
+        if tmp_name:
+            Path(tmp_name).unlink(missing_ok=True)
+    record["name"] = filename
+    record["path"] = filename
+    return {
+        "schema_version": 1,
+        "mode": "file",
+        "item": record,
+        "advanced": advanced,
+        "forensic": forensic,
     }
 
 

@@ -44,6 +44,17 @@ def host_name(header_value: str) -> str:
     return value
 
 
+def _default_profiles() -> Path | None:
+    """Bundled profile directory — every committed runtime profile.
+
+    ``analyze_external_model`` accepts a directory of ``*.json`` profiles and
+    filters by modality, so passing the models dir applies every engine that
+    fits the input and degrades gracefully on missing checkpoints.
+    """
+    models_dir = Path(__file__).resolve().parent.parent / "models"
+    return models_dir if models_dir.is_dir() else None
+
+
 def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = None) -> Any:
     """Create a FastAPI application."""
     try:
@@ -158,6 +169,63 @@ def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = No
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
     
+    @app.post("/api/check")
+    async def check(file_path: str | None = None, text: str | None = None):
+        """Unified check-all: run every layer applicable to one input.
+
+        Accepts either ``file_path`` (any media type) or raw ``text``. Runs
+        the core scan, the neural member ensemble, metadata/C2PA forensics,
+        and — for text — the style-fingerprint probes, returning one
+        consolidated payload with per-layer sections.
+        """
+        import tempfile
+
+        from .core import analyze_file
+        try:
+            if text and text.strip():
+                trimmed = text.strip()
+                if len(trimmed) > 256 * 1024:
+                    raise HTTPException(status_code=400, detail="text exceeds 256KB")
+                from .text_advanced import analyze_text_advanced
+                # delete=False: Windows cannot reopen a delete=True temp file.
+                tmp_name = ""
+                try:
+                    with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as tmp:
+                        tmp.write(trimmed)
+                        tmp_name = tmp.name
+                    item = analyze_file(tmp_name, model_path=_default_profiles())
+                finally:
+                    if tmp_name:
+                        Path(tmp_name).unlink(missing_ok=True)
+                return {"status": "success", "data": {
+                    "mode": "text",
+                    "item": item.to_json(),
+                    "advanced": analyze_text_advanced(trimmed).to_json(),
+                }}
+            if file_path:
+                path = Path(file_path)
+                item = analyze_file(path, model_path=_default_profiles())
+                data: dict[str, Any] = {"mode": "file", "item": item.to_json()}
+                try:
+                    from .c2pa import analyze_metadata_forensic
+                    data["forensic"] = analyze_metadata_forensic(path).to_json()
+                except Exception:
+                    data["forensic"] = None
+                if item.kind == "text":
+                    try:
+                        from .text_advanced import analyze_text_advanced
+                        data["advanced"] = analyze_text_advanced(
+                            path.read_text(encoding="utf-8", errors="replace")[: 256 * 1024]
+                        ).to_json()
+                    except Exception:
+                        data["advanced"] = None
+                return {"status": "success", "data": data}
+            raise HTTPException(status_code=400, detail="file_path or text required")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+
     @app.post("/api/multimodal")
     async def multimodal(
         image_score: int | None = None,
