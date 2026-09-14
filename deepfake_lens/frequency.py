@@ -230,3 +230,95 @@ def _highfreq_mask(block: int) -> "object":
     cols = np.arange(block)[None, :]
     # Outer ring of the 8x8 coefficient matrix (highest 1/4 of frequencies).
     return (rows + cols) >= block
+
+
+def jpeg_double_compression_score(gray, *, block: int = 8, coeff_pos: tuple[int, int] = (1, 2)) -> tuple[float, str]:
+    """Estimate double-JPEG-compression likelihood from block-DCT histograms.
+
+    When a JPEG is recompressed at a different quality, one coefficient's
+    quantized value distribution develops periodic gaps at the ratio of the
+    two quantization steps. We decode to pixels, recompute 8x8 DCT blocks,
+    histogram the chosen mid-frequency coefficient, and measure histogram
+    periodicity via normalized autocorrelation over lags 2..8.
+
+    Returns (strength 0..1, detail). A measurement, not a verdict: many
+    re-saves happen in innocent pipelines (messaging apps, web uploads).
+    """
+    import numpy as np
+
+    image = np.asarray(gray, dtype=np.float64)
+    height, width = image.shape
+    blocks_y, blocks_x = height // block, width // block
+    if blocks_y < 4 or blocks_x < 4:
+        return 0.0, "블록 수가 부족해 이중압축 측정을 건너뜁니다."
+    basis = _dct_basis(block)
+    cropped = image[: blocks_y * block, : blocks_x * block]
+    tiles = cropped.reshape(blocks_y, block, blocks_x, block).transpose(0, 2, 1, 3).reshape(-1, block, block)
+    values = []
+    row, col = coeff_pos
+    for tile in tiles:
+        values.append(float((basis @ tile @ basis.T)[row, col]))
+    if len(values) < 64:
+        return 0.0, "계수 표본이 부족합니다."
+    values = np.asarray(values)
+    lo, hi = np.percentile(values, 2), np.percentile(values, 98)
+    if hi - lo < 1e-6:
+        return 0.0, "계수 분포가 한 값에 몰려 있습니다."
+    hist, _ = np.histogram(np.clip(values, lo, hi), bins=64)
+    hist = hist.astype(np.float64)
+    if hist.sum() <= 0:
+        return 0.0, "히스토그램이 비어 있습니다."
+    hist = hist - hist.mean()
+    norm = float((hist * hist).sum())
+    if norm <= 0:
+        return 0.0, "히스토그램 편차가 없습니다."
+    best = 0.0
+    for lag in range(2, 9):
+        corr = float((hist[:-lag] * hist[lag:]).sum() / norm)
+        best = max(best, corr)
+    strength = max(0.0, min(1.0, best))
+    detail = (
+        f"블록 DCT 계수 히스토그램 주기성 강도 {strength:.2f} "
+        "(0.5+ 이면 서로 다른 품질로 재압축된 흔적 후보)"
+    )
+    return strength, detail
+
+
+def ela_metrics(gray, *, quality: int = 75, block: int = 16) -> tuple[float, float, str]:
+    """Error-Level Analysis: resave the image at a fixed JPEG quality and
+    measure per-block recompression error.
+
+    Returns (global_mean_error, region_max_error, detail). A region whose
+    error is dramatically above the global mean suggests that region was
+    composited after the last save; uniformly low error suggests the file
+    was already saved near this quality or never JPEG-compressed.
+    """
+    import numpy as np
+
+    image = np.asarray(gray, dtype=np.float64)
+    try:
+        import cv2
+    except ImportError:
+        return 0.0, 0.0, "cv2가 없어 ELA를 건너뜁니다."
+    uint8 = np.clip(image, 0, 255).astype(np.uint8)
+    ok, encoded = cv2.imencode(".jpg", uint8, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    if not ok:
+        return 0.0, 0.0, "JPEG 재인코딩 실패."
+    resaved = cv2.imdecode(encoded, cv2.IMREAD_GRAYSCALE).astype(np.float64)
+    height = min(image.shape[0], resaved.shape[0])
+    width = min(image.shape[1], resaved.shape[1])
+    diff = np.abs(image[:height, :width] - resaved[:height, :width])
+    blocks_y, blocks_x = height // block, width // block
+    if blocks_y < 2 or blocks_x < 2:
+        return float(diff.mean()), float(diff.max()), "블록 수 부족 — 전역 오차만 보고합니다."
+    tiles = diff[: blocks_y * block, : blocks_x * block].reshape(
+        blocks_y, block, blocks_x, block
+    ).transpose(0, 2, 1, 3).reshape(-1, block, block)
+    block_errors = tiles.mean(axis=(1, 2))
+    global_mean = float(block_errors.mean())
+    region_max = float(block_errors.max())
+    detail = (
+        f"ELA 전역 오차 {global_mean:.2f}, 최대 영역 오차 {region_max:.2f} "
+        f"(최대/전역 비율 {region_max / max(global_mean, 1e-6):.1f}x)"
+    )
+    return global_mean, region_max, detail

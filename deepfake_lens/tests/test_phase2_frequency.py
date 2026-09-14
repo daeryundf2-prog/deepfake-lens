@@ -332,3 +332,35 @@ class RppgVideoErrorPathTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CompressionForensicsTest(unittest.TestCase):
+    """V5-2/3: double-JPEG periodicity and ELA region error."""
+
+    def test_double_compression_returns_measurement(self) -> None:
+        import numpy as np
+        from deepfake_lens.frequency import jpeg_double_compression_score
+
+        rng = np.random.RandomState(0)
+        gray = rng.normal(128, 25, (256, 256))
+        strength, detail = jpeg_double_compression_score(gray)
+        self.assertGreaterEqual(strength, 0.0)
+        self.assertLessEqual(strength, 1.0)
+        self.assertTrue(detail)
+
+    def test_ela_metrics_on_uniform_surface(self) -> None:
+        import numpy as np
+        from deepfake_lens.frequency import ela_metrics
+
+        gray = np.full((128, 128), 128.0)
+        global_mean, region_max, detail = ela_metrics(gray)
+        self.assertGreaterEqual(region_max, 0.0)
+        self.assertTrue(detail)
+
+    def test_small_image_degrades(self) -> None:
+        import numpy as np
+        from deepfake_lens.frequency import jpeg_double_compression_score
+
+        strength, detail = jpeg_double_compression_score(np.zeros((16, 16)))
+        self.assertEqual(strength, 0.0)
+        self.assertTrue(detail)

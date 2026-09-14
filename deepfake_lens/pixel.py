@@ -426,6 +426,10 @@ def _frequency_forensics_expert(raster: PixelRaster) -> PixelExpertResult:
         dtype=np.float64,
     )
     features = frequency_features(gray)
+    from .frequency import ela_metrics, jpeg_double_compression_score
+
+    djc_strength, djc_detail = jpeg_double_compression_score(gray)
+    ela_global, ela_region, ela_detail = ela_metrics(gray)
 
     score = 0
     detail = "방사형 스펙트럼/스파이크/NPR/DCT 측정에서 두드러진 생성 흔적을 찾지 못했습니다."
@@ -441,6 +445,12 @@ def _frequency_forensics_expert(raster: PixelRaster) -> PixelExpertResult:
     elif features.dct_highfreq_ratio < 0.02 and features.dct_block_uniformity < 0.01:
         score = 45
         detail = "8x8 블록 고주파 에너지가 비정상적으로 낮아 과도하게 평활화된 표면입니다."
+    if djc_strength >= 0.5:
+        score = max(score, 50)
+        detail += " " + djc_detail
+    if ela_global > 0 and ela_region / max(ela_global, 1e-6) >= 3.0:
+        score = max(score, 45)
+        detail += " " + ela_detail + " — 국소 편집/합성 영역 후보."
     return PixelExpertResult(
         "frequency_forensics",
         "frequency",
