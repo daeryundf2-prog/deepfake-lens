@@ -50,6 +50,9 @@ class VideoTemporalAnalysis:
     # External video-model result (e.g. a video-frames profile reusing an
     # image detector per frame); None when no video-modality profile ran.
     model_analysis: ExternalModelAnalysis | None = None
+    # Audio-track cross-analysis when analyze_audio_track=True and ffmpeg is
+    # available: the video's audio scored by the audio pipeline (AASIST etc).
+    av_audio: dict[str, object] | None = None
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
@@ -61,6 +64,7 @@ def analyze_video_temporal(
     frame_sample_rate: float = DEFAULT_FRAME_SAMPLE_RATE,
     max_frames: int = DEFAULT_MAX_FRAMES,
     model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None = None,
+    analyze_audio_track: bool = False,
 ) -> VideoTemporalAnalysis:
     """Analyze a video file for temporal inconsistencies.
 
@@ -69,6 +73,11 @@ def analyze_video_temporal(
     scores sampled frames with an image detector) into the same adapter
     contract as image/audio scans. The result lands in ``model_analysis``
     as a prioritization signal, not a truth label.
+
+    ``analyze_audio_track`` additionally extracts the audio stream with
+    ffmpeg (when present) and scores it with the audio pipeline, attaching
+    the result as ``av_audio`` — a fake face over a real voice (or vice
+    versa) is a common deepfake signature.
     """
     video_path = Path(path)
     if not video_path.is_file():
@@ -145,6 +154,19 @@ def analyze_video_temporal(
 
     model_analysis = analyze_external_model(video_path, model_path, modality="video")
 
+    av_audio = None
+    if analyze_audio_track:
+        av_audio, av_note = _analyze_audio_track(video_path, model_path)
+        if av_audio is None:
+            limitations.append(av_note or "오디오 트랙 분석을 수행할 수 없습니다(ffmpeg 없음 또는 트랙 없음).")
+        else:
+            score = int(av_audio.get("score") or 0)
+            signals.append(VideoEvidenceSignal(
+                "음성 트랙 분석",
+                f"영상 내 음성의 오디오 파이프라인 점수: {score}",
+                min(score, 40),
+            ))
+
     # Limitations
     if len(frame_analyses) < 10:
         limitations.append("분석된 프레임 수가 적어 결과가 불안정할 수 있습니다.")
@@ -183,7 +205,44 @@ def analyze_video_temporal(
         fps=fps,
         resolution=(width, height),
         model_analysis=model_analysis,
+        av_audio=av_audio,
     )
+
+
+def _analyze_audio_track(
+    video_path: Path,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
+) -> tuple[dict[str, object] | None, str | None]:
+    """Extract the video's audio stream with ffmpeg and score it.
+
+    Returns (audio_json, None) on success or (None, reason) — missing
+    ffmpeg, no audio track, or an analysis failure all degrade to a
+    limitation string rather than an exception.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return None, "ffmpeg가 없어 영상 내 음성 트랙을 분석하지 못했습니다."
+    tmp_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp_name = tmp.name
+        proc = subprocess.run(
+            [ffmpeg, "-y", "-i", str(video_path), "-vn", "-ac", "1", "-ar", "16000", tmp_name],
+            capture_output=True, timeout=120,
+        )
+        if proc.returncode != 0 or not Path(tmp_name).stat().st_size:
+            return None, "영상에서 추출 가능한 오디오 트랙이 없습니다."
+        from .audio import analyze_audio
+        return analyze_audio(tmp_name, model_path=model_path).to_json(), None
+    except (subprocess.TimeoutExpired, OSError):
+        return None, "오디오 트랙 추출이 실패했습니다."
+    finally:
+        if tmp_name:
+            Path(tmp_name).unlink(missing_ok=True)
 
 
 def _error_analysis(message: str) -> VideoTemporalAnalysis:

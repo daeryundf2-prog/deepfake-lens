@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
@@ -11,6 +11,7 @@ from typing import Iterable
 
 from .audio import SUPPORTED_AUDIO_EXTENSIONS, AudioAnalysis, analyze_audio
 from .video_analysis import SUPPORTED_VIDEO_EXTENSIONS, VideoTemporalAnalysis, analyze_video_temporal
+from .documents import SUPPORTED_DOCUMENT_EXTENSIONS, extract_document_text
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, PixelAnalysis, analyze_image_pixels
 from .pixel import PixelExpertResult
@@ -87,6 +88,10 @@ class ClassificationResult:
     model_analysis: ExternalModelAnalysis | None = None
     ai_score: int = 0
     source_attribution_label: str = ""
+    # Video-only: extracted audio track scored by the audio pipeline
+    # (ffmpeg + AASIST etc); None when not requested or unavailable.
+    # Appended last: positional constructions predate this field.
+    av_audio: dict | None = None
 
     def to_json(self) -> dict[str, object]:
         data = asdict(self)
@@ -296,11 +301,16 @@ def analyze_file(
         return ScanItem(display_path, file_path.name, "unknown", "failed", 0, error=str(exc))
     extension = file_path.suffix.lower()
 
-    if extension in SUPPORTED_TEXT_EXTENSIONS:
+    if extension in SUPPORTED_TEXT_EXTENSIONS or extension in SUPPORTED_DOCUMENT_EXTENSIONS:
         try:
-            text = _read_prefix(file_path, text_bytes).decode("utf-8", errors="replace")
+            doc_metadata: dict[str, str] = {}
+            if extension in SUPPORTED_DOCUMENT_EXTENSIONS:
+                text, doc_metadata = extract_document_text(file_path)
+            else:
+                text = _read_prefix(file_path, text_bytes).decode("utf-8", errors="replace")
             model_analysis = analyze_external_model(file_path, model_path, modality="text")
             result = analyze_text(text, model_analysis=model_analysis)
+            result = _apply_document_metadata(result, doc_metadata)
             return ScanItem(display_path, file_path.name, "text", "analyzed", size, result)
         except OSError as exc:
             return ScanItem(display_path, file_path.name, "text", "failed", size, error=str(exc))
@@ -331,7 +341,7 @@ def analyze_file(
 
     if extension in SUPPORTED_VIDEO_EXTENSIONS:
         try:
-            analysis = analyze_video_temporal(file_path, model_path=model_path)
+            analysis = analyze_video_temporal(file_path, model_path=model_path, analyze_audio_track=True)
             return ScanItem(display_path, file_path.name, "video", "analyzed", size, _video_result(analysis))
         except OSError as exc:
             return ScanItem(display_path, file_path.name, "video", "failed", size, error=str(exc))
@@ -408,6 +418,51 @@ def _video_result(analysis: "VideoTemporalAnalysis") -> ClassificationResult:
         model_analysis=analysis.model_analysis,
         ai_score=analysis.score,
         source_attribution_label=source_guess.label,
+        av_audio=analysis.av_audio,
+    )
+
+
+def _apply_document_metadata(result: ClassificationResult, doc_metadata: dict[str, str]) -> ClassificationResult:
+    """Fold office-document provenance metadata into the text result.
+
+    Extraction notes (unavailable/failed extractors) become limitations;
+    creator/producer/application fields become source-guess reasons — a
+    document authored by 'ChatGPT' or produced by an AI export pipeline is
+    provenance evidence, not a style signal.
+    """
+    if not doc_metadata:
+        return result
+    limitations = list(result.limitations)
+    extractor = doc_metadata.get("extractor", "")
+    if extractor.startswith("unavailable:") or extractor.startswith("failed:") or extractor.startswith("skipped:"):
+        limitations.append(f"문서 텍스트 추출 불가 ({extractor}) — 텍스트 신호는 추출된 부분만 반영합니다.")
+    reasons = list(result.source_guess.reasons)
+    label = result.source_guess.label
+    confidence = result.source_guess.confidence
+    provenance_keys = (
+        ("pdf.producer", "PDF 생성기"),
+        ("pdf.creator", "PDF 작성 도구"),
+        ("pdf.author", "PDF 작성자"),
+        ("docx.creator", "문서 작성자"),
+        ("docx.last_modified_by", "최종 수정자"),
+        ("docx.application", "작성 애플리케이션"),
+    )
+    hints = [(label_text, doc_metadata[key]) for key, label_text in provenance_keys if doc_metadata.get(key)]
+    for label_text, value in hints:
+        reasons.append(f"{label_text}: {value}")
+    ai_hint = re.compile(r"chatgpt|openai|claude|anthropic|gemini|copilot|midjourney|stable.?diffusion|dall.?e|gamma|jasper|writesonic", re.I)
+    if confidence == SourceConfidence.UNKNOWN:
+        ai_hit = next((v for _, v in hints if ai_hint.search(v)), None)
+        if ai_hit:
+            label = "AI 도구 생성 메타데이터 추정"
+            confidence = SourceConfidence.MEDIUM
+            reasons.append(f"문서 메타데이터에 AI 도구명이 기록되어 있습니다: {ai_hit}")
+        elif hints:
+            reasons.append("문서 메타데이터에서 작성 도구 단서가 발견되었습니다.")
+    return replace(
+        result,
+        limitations=limitations,
+        source_guess=SourceGuess(label, confidence, reasons),
     )
 
 
@@ -849,6 +904,7 @@ def _classification_result_from_json(data: dict[str, object]) -> ClassificationR
         model_analysis=_model_analysis_from_json(model_data) if model_data else None,
         ai_score=int(data.get("ai_score", score) or score),
         source_attribution_label=str(data.get("source_attribution_label", source_guess.label)),
+        av_audio=data.get("av_audio") if isinstance(data.get("av_audio"), dict) else None,
     )
 
 
@@ -929,18 +985,18 @@ def _build_result(
         else ["작성자의 초안이나 편집 이력을 확인하세요.", "짧은 문단보다 전체 글의 맥락을 함께 보세요.", "특정 AI 도구명이 직접 언급되었는지 확인하세요."]
     )
     return ClassificationResult(
-        score,
-        band,
-        RISK_LABELS[band],
-        verdict,
-        sorted_signals,
-        limitations,
-        source_guess,
-        next_checks,
-        pixel_analysis,
-        model_analysis,
-        score,
-        source_guess.label,
+        score=score,
+        band=band,
+        band_label=RISK_LABELS[band],
+        verdict=verdict,
+        signals=sorted_signals,
+        limitations=limitations,
+        source_guess=source_guess,
+        next_checks=next_checks,
+        pixel_analysis=pixel_analysis,
+        model_analysis=model_analysis,
+        ai_score=score,
+        source_attribution_label=source_guess.label,
     )
 
 

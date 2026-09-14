@@ -221,7 +221,7 @@
                 <div class="upload-zone" id="drop-zone" role="button" tabindex="0" aria-label="파일 또는 폴더를 드래그 앤 드롭하거나, Enter를 눌러 선택하세요">
                     <p>📁 여기에 파일이나 폴더를 드래그 앤 드롭하세요</p>
                     <p style="font-size: 12px; color: #999;">폴더를 드롭하면 안의 파일이 모두 추가됩니다. 클릭하면 파일을 고를 수 있습니다.</p>
-                    <p style="font-size: 12px; color: #999;">지원 형식: PNG, JPG, JPEG, WebP, BMP, TIFF, GIF, TXT, MD, WAV, MP3, FLAC, OGG, M4A, MP4, MOV, MKV, WebM, AVI</p>
+                    <p style="font-size: 12px; color: #999;">지원 형식: PNG, JPG, WebP, BMP, TIFF, GIF, TXT, MD, PDF, DOCX, XLSX, PPTX, WAV, MP3, FLAC, OGG, M4A, MP4, MOV, MKV, WebM, AVI</p>
                 </div>
                 <div style="margin-top: 8px;">
                     <button class="btn btn-primary" id="dir-picker-btn" type="button">폴더 선택</button>
@@ -351,7 +351,7 @@
             const input = document.createElement('input');
             input.type = 'file';
             input.multiple = true;
-            input.accept = '.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.gif,.txt,.md,.wav,.mp3,.flac,.ogg,.m4a,.aac,.opus,.mp4,.mov,.m4v,.mkv,.webm,.avi';
+            input.accept = '.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.gif,.txt,.md,.pdf,.docx,.xlsx,.pptx,.hwp,.wav,.mp3,.flac,.ogg,.m4a,.aac,.opus,.mp4,.mov,.m4v,.mkv,.webm,.avi';
             input.onchange = (e) => addFiles(Array.from(e.target.files));
             input.click();
         }
