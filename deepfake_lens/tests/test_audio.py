@@ -301,3 +301,46 @@ class AudioSuccessPathTest(unittest.TestCase):
             analysis = analyze_audio(wav_path)
             self.assertIsNotNone(analysis.features)
             self.assertAlmostEqual(analysis.features.pitch_mean, 440.0, delta=60.0)
+
+
+class V4PhysicalSignalsTest(unittest.TestCase):
+    """V4 probes: pause structure, noise floor, harmonic stability."""
+
+    def _features(self, **kw):
+        from deepfake_lens.audio import AudioFeatures
+        base = dict(
+            sample_rate=22050, duration_seconds=10.0, rms_energy=0.1,
+            zero_crossing_rate=0.1, spectral_centroid=2000.0,
+            spectral_bandwidth=1000.0, spectral_rolloff=4000.0,
+            spectral_flatness=0.2, pitch_mean=200.0, pitch_std=30.0,
+            formant_frequencies=[], mfcc_means=[], mfcc_stds=[],
+            tempo=120.0, onset_rate=2.0,
+        )
+        base.update(kw)
+        return AudioFeatures(**base)
+
+    def test_pauseless_speech_flags(self) -> None:
+        from deepfake_lens.audio import _pause_analysis
+        signal = _pause_analysis(self._features(pause_ratio=0.0, duration_seconds=12.0))
+        self.assertIsNotNone(signal)
+        self.assertIn("침묵", signal.detail)
+
+    def test_metronomic_pauses_flag(self) -> None:
+        from deepfake_lens.audio import _pause_analysis
+        signal = _pause_analysis(self._features(pause_ratio=0.1, pause_cv=0.1))
+        self.assertIsNotNone(signal)
+
+    def test_natural_pauses_no_signal(self) -> None:
+        from deepfake_lens.audio import _pause_analysis
+        self.assertIsNone(_pause_analysis(self._features(pause_ratio=0.1, pause_cv=0.8)))
+
+    def test_noise_floor_discontinuity_flags(self) -> None:
+        from deepfake_lens.audio import _noise_floor_analysis
+        self.assertIsNotNone(_noise_floor_analysis(self._features(noise_floor_std=0.3)))
+        self.assertIsNone(_noise_floor_analysis(self._features(noise_floor_std=0.05)))
+
+    def test_harmonic_stability_flags(self) -> None:
+        from deepfake_lens.audio import _harmonic_analysis
+        self.assertIsNotNone(_harmonic_analysis(self._features(harmonic_cv=0.05)))
+        self.assertIsNone(_harmonic_analysis(self._features(harmonic_cv=0.5)))
+        self.assertIsNone(_harmonic_analysis(self._features(harmonic_cv=0.05, pitch_mean=0.0)))

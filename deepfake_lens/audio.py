@@ -44,6 +44,12 @@ class AudioFeatures:
     onset_rate: float
     jitter: float = 0.0
     shimmer: float = 0.0
+    # Frame-level physical signals (V4): pause structure, noise-floor
+    # continuity, harmonic stability — all provisional weights.
+    pause_ratio: float = 0.0
+    pause_cv: float = 0.0
+    noise_floor_std: float = 0.0
+    harmonic_cv: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -140,6 +146,12 @@ def analyze_audio(
     regularity_signal = _regularity_analysis(features)
     if regularity_signal:
         signals.append(regularity_signal)
+
+    # V4 physical signals: pause structure, noise floor, harmonic stability
+    for probe in (_pause_analysis, _noise_floor_analysis, _harmonic_analysis):
+        signal = probe(features)
+        if signal:
+            signals.append(signal)
 
     # External model (e.g. AASIST): prioritization signal, not a truth label
     model_signal = _model_evidence_signal(model_analysis)
@@ -323,6 +335,49 @@ def _extract_features(path: Path, *, segment_seconds: int) -> AudioFeatures | No
     onset_frames = librosa.onset.onset_detect(y=y, sr=sr)
     onset_rate = len(onset_frames) / max(0.001, duration)
 
+    # V4 physical signals -------------------------------------------------
+    # Pause structure: frames under 20% of peak RMS are candidate silences;
+    # natural speech pauses vary in length, TTS pauses are either absent or
+    # metronomic.
+    rms_threshold = float(np.max(rms)) * 0.2 if len(rms) else 0.0
+    silent = rms <= rms_threshold
+    pause_ratio = float(np.mean(silent)) if len(silent) else 0.0
+    pause_lengths: list[int] = []
+    run = 0
+    for flag in silent:
+        if flag:
+            run += 1
+        elif run:
+            pause_lengths.append(run)
+            run = 0
+    if run:
+        pause_lengths.append(run)
+    pause_cv = (
+        float(np.std(pause_lengths) / np.mean(pause_lengths))
+        if len(pause_lengths) >= 3 and np.mean(pause_lengths) > 0
+        else 0.0
+    )
+    # Noise floor continuity: spectral flatness of the quietest frames —
+    # splices and generated beds show stepped noise floors.
+    flatness_frames = librosa.feature.spectral_flatness(y=y)[0]
+    if len(rms) and len(flatness_frames):
+        quiet_idx = np.argsort(rms)[: max(8, len(rms) // 10)]
+        noise_floor_std = float(np.std(flatness_frames[quiet_idx]))
+    else:
+        noise_floor_std = 0.0
+    # Harmonic stability: synthesizers hold harmonic energy far steadier
+    # than vocal folds do.
+    try:
+        y_harmonic = librosa.effects.harmonic(y)
+        harmonic_rms = librosa.feature.rms(y=y_harmonic)[0]
+        harmonic_cv = (
+            float(np.std(harmonic_rms) / np.mean(harmonic_rms))
+            if len(harmonic_rms) and np.mean(harmonic_rms) > 0
+            else 0.0
+        )
+    except Exception:
+        harmonic_cv = 0.0
+
     return AudioFeatures(
         sample_rate=sr,
         duration_seconds=duration,
@@ -341,6 +396,10 @@ def _extract_features(path: Path, *, segment_seconds: int) -> AudioFeatures | No
         onset_rate=onset_rate,
         jitter=jitter,
         shimmer=shimmer,
+        pause_ratio=pause_ratio,
+        pause_cv=pause_cv,
+        noise_floor_std=noise_floor_std,
+        harmonic_cv=harmonic_cv,
     )
 
 
@@ -594,6 +653,66 @@ def _regularity_analysis(features: AudioFeatures) -> AudioEvidenceSignal | None:
             "균일한 진폭 변동",
             f"진폭 쉬머({features.shimmer * 100:.2f}%)가 비정상적으로 균일합니다.",
             8,
+        )
+    return None
+
+
+def _pause_analysis(features: AudioFeatures) -> AudioEvidenceSignal | None:
+    """Pause-structure probe (V4-1, provisional).
+
+    Spoken text with no silences at all suggests continuous TTS output;
+    metronomic pauses (low length variance across many pauses) suggest
+    templated synthesis. Either pattern is a weak signal only.
+    """
+    if features.duration_seconds < 3.0:
+        return None
+    if features.pause_ratio < 0.01 and features.duration_seconds > 8:
+        return AudioEvidenceSignal(
+            "무휴지 연속 발화",
+            f"{features.duration_seconds:.0f}초 발화에서 측정 가능한 침묵 구간이 없습니다.",
+            14,
+        )
+    if features.pause_ratio > 0.02 and 0 < features.pause_cv < 0.25:
+        return AudioEvidenceSignal(
+            "메트로놈식 침묵 패턴",
+            f"침묵 길이 변이계수({features.pause_cv:.2f})가 비정상적으로 균일합니다.",
+            10,
+        )
+    return None
+
+
+def _noise_floor_analysis(features: AudioFeatures) -> AudioEvidenceSignal | None:
+    """Noise-floor continuity probe (V4-2, provisional).
+
+    Quietest-frame spectral flatness should drift smoothly in a real
+    recording; a high std suggests stepped noise beds from splicing or
+    generated ambience.
+    """
+    if features.duration_seconds < 5.0:
+        return None
+    if features.noise_floor_std > 0.15:
+        return AudioEvidenceSignal(
+            "잡음 바닥 불연속",
+            f"저에너지 구간 스펙트럴 평탄도 표준편차({features.noise_floor_std:.3f})가 높습니다 — 편집/합성 배경 의심.",
+            12,
+        )
+    return None
+
+
+def _harmonic_analysis(features: AudioFeatures) -> AudioEvidenceSignal | None:
+    """Harmonic-stability probe (V4-4, provisional).
+
+    Vocal-fold output breathes; synthesized harmonics hold unnaturally
+    steady energy. Very low harmonic-RMS variation on voiced material is
+    suspicious.
+    """
+    if features.duration_seconds < 3.0 or features.pitch_mean <= 0:
+        return None
+    if 0 < features.harmonic_cv < 0.15:
+        return AudioEvidenceSignal(
+            "비정상적 고조파 안정성",
+            f"고조파 에너지 변이계수({features.harmonic_cv:.3f})가 발성 음성 범위보다 낮습니다.",
+            12,
         )
     return None
 
