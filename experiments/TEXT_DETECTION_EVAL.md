@@ -49,3 +49,26 @@ Candidates that would widen the regime (research-only, not wired):
 multilingual detectors, perplexity-ratio methods (e.g. Binoculars-style
 PPL ratios — needs a reference LM), and watermark checks for providers
 that embed them.
+
+## Second probe — Antigravity/Gemini-style output (same day)
+
+Same protocol, samples written in the Antigravity agent's output style
+(structured numbered summaries, 습니다체, doc/code blocks):
+
+| Sample | Fakespot | OpenAI det. | Final |
+|---|---|---|---|
+| English agent change-summary | **93** | 1 | 34 |
+| English README-style section | 40 | 0 | 18 |
+| Korean agent response (격식체) | 49 | 38 | 10 |
+| Korean explanatory answer | 1 | 73 | 0 |
+
+- English Antigravity output is caught by Fakespot (93) — same narrow
+  regime as generic formal AI text. The OpenAI detector misses it (1).
+- Korean Antigravity output is **not** reliably detectable: scores land
+  mid/noise band and invert (Fakespot 1 vs OpenAI 73 on the same file).
+- The statistical layer does pick up a stylistic tell — "목록 중심 구성"
+  (list-heavy structure) fired on 3/4 samples — but at weight 10 it can
+  only nudge the score, never flag it.
+- Net: Antigravity-written text is distinguishable only when it is
+  formal structured English. Its Korean output is indistinguishable from
+  human text to this stack.
