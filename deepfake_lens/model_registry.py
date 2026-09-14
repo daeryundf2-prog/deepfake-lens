@@ -45,6 +45,7 @@ DETECTOR_REGISTRY = [
         notes=[
             "Good first pretrained integration candidate because code and checkpoints are public.",
             "Hybrid features line up with the existing pixel expert ensemble.",
+            "models/aide-frames-runtime.json reuses this checkpoint per frame as an interim frame-level video screen; it is not temporal detection.",
         ],
     ),
     DetectorCandidate(
@@ -100,6 +101,45 @@ DETECTOR_REGISTRY = [
         ],
     ),
     DetectorCandidate(
+        key="ftcn-iccv-2021",
+        name="FTCN Fully Temporal Convolution Network",
+        task="video-temporal-detector",
+        adapter_target="future video runtime profile",
+        status="research",
+        priority="high",
+        source_url="https://github.com/yinglinzheng/FTCN",
+        notes=[
+            "True temporal detector (temporal-transformer over frame features) — the right long-term target for video, unlike the interim frame-level video-frames bridge.",
+            "Checkpoint availability and FaceForensics++ training domain must be verified before wiring; do not claim support without a working profile.",
+        ],
+    ),
+    DetectorCandidate(
+        key="lipforensics-cvpr-2021",
+        name="LipForensics high-level visual forensic irregularities",
+        task="video-lip-sync-detector",
+        adapter_target="future video runtime profile",
+        status="research",
+        priority="high",
+        source_url="https://github.com/ahaliassos/LipForensics",
+        notes=[
+            "Targets mouth-motion semantics, which the frame-level video-frames path cannot see; needs face-crop preprocessing before scoring.",
+            "Verify released weights, preprocessing pipeline, and license before claiming support.",
+        ],
+    ),
+    DetectorCandidate(
+        key="altfreezing-cvpr-2023",
+        name="AltFreezing alternating spatial-temporal weights",
+        task="video-temporal-detector",
+        adapter_target="future video runtime profile",
+        status="research",
+        priority="medium",
+        source_url="https://github.com/ZhendongWang6/AltFreezing",
+        notes=[
+            "Reported strong FaceForensics++ and cross-dataset results; candidate when a dedicated temporal runtime is written.",
+            "Do not claim support until weights and license are verified.",
+        ],
+    ),
+    DetectorCandidate(
         key="openai-detector-2019",
         name="OpenAI GPT-2 output detector (RoBERTa-base fine-tune)",
         task="binary-text-detector",
@@ -110,6 +150,20 @@ DETECTOR_REGISTRY = [
         notes=[
             "Wired via models/openai-detector-runtime.json; the ~500 MB checkpoint is fetched from Hugging Face on first use (point 'hub_model' at a local snapshot for offline).",
             "Trained on GPT-2 outputs (2019) — OpenAI's model card warns about modern-LLM and short/non-English text; treat as a legacy baseline, re-validate on target-domain samples.",
+        ],
+    ),
+    DetectorCandidate(
+        key="fakespot-detector-2024",
+        name="Fakespot AI text detector (RoBERTa-base, modern-LLM training data)",
+        task="binary-text-detector",
+        adapter_target="hf-text-classifier runtime profile",
+        status="candidate",
+        priority="medium",
+        source_url="https://huggingface.co/fakespot-ai/roberta-base-ai-text-detection-v1",
+        notes=[
+            "Wired via models/fakespot-detector-runtime.json; fetched from Hugging Face on first use like the OpenAI detector.",
+            "Trained on newer LLM outputs than the GPT-2-era OpenAI detector — pair them as a two-member ensemble for an agreement signal.",
+            "Still English-centric and weak on short text; re-validate on target-domain samples.",
         ],
     ),
     DetectorCandidate(

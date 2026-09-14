@@ -10,6 +10,8 @@ import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .model_adapter import ExternalModelAnalysis, analyze_external_model
+
 
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".flv"}
 DEFAULT_FRAME_SAMPLE_RATE = 1.0  # frames per second
@@ -45,6 +47,9 @@ class VideoTemporalAnalysis:
     duration_seconds: float
     fps: float
     resolution: tuple[int, int]
+    # External video-model result (e.g. a video-frames profile reusing an
+    # image detector per frame); None when no video-modality profile ran.
+    model_analysis: ExternalModelAnalysis | None = None
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
@@ -55,8 +60,16 @@ def analyze_video_temporal(
     *,
     frame_sample_rate: float = DEFAULT_FRAME_SAMPLE_RATE,
     max_frames: int = DEFAULT_MAX_FRAMES,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None = None,
 ) -> VideoTemporalAnalysis:
-    """Analyze a video file for temporal inconsistencies."""
+    """Analyze a video file for temporal inconsistencies.
+
+    ``model_path`` plugs a video-modality model profile (e.g. the bundled
+    ``models/aide-frames-runtime.json`` — a ``video-frames`` runtime that
+    scores sampled frames with an image detector) into the same adapter
+    contract as image/audio scans. The result lands in ``model_analysis``
+    as a prioritization signal, not a truth label.
+    """
     video_path = Path(path)
     if not video_path.is_file():
         return _error_analysis(f"파일이 존재하지 않습니다: {video_path}")
@@ -130,9 +143,17 @@ def analyze_video_temporal(
     if resolution_signal:
         signals.append(resolution_signal)
 
+    model_analysis = analyze_external_model(video_path, model_path, modality="video")
+
     # Limitations
     if len(frame_analyses) < 10:
         limitations.append("분석된 프레임 수가 적어 결과가 불안정할 수 있습니다.")
+    if model_analysis is not None and model_analysis.available:
+        signals.append(VideoEvidenceSignal(
+            "외부 모델 신경망 점수",
+            f"{model_analysis.model}: {model_analysis.detail}",
+            model_analysis.score,
+        ))
     limitations.append("로컬 휴리스틱 기반 선별 결과이며, 확정적 판별이 아닙니다.")
 
     score = min(100, sum(signal.weight for signal in signals))
@@ -161,6 +182,7 @@ def analyze_video_temporal(
         duration_seconds=duration,
         fps=fps,
         resolution=(width, height),
+        model_analysis=model_analysis,
     )
 
 

@@ -7,6 +7,7 @@ agreement signal, and graceful degradation when checkpoints are absent.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import tempfile
 import unittest
@@ -23,7 +24,11 @@ from deepfake_lens.model_adapter import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = REPO_ROOT / "models"
-WIRED_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "aasist", "hf-text-classifier"}
+WIRED_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "aasist", "hf-text-classifier", "video-frames"}
+# Runtimes that carry no checkpoint field of their own: hf-text-classifier
+# names a hub model id, video-frames nests the checkpointed image profile.
+CHECKPOINT_LESS_RUNTIMES = {"hf-text-classifier", "video-frames"}
+VIDEO_ONLY_RUNTIMES = {"video-frames"}
 
 
 def _write_rgb_png(path: Path, width: int = 8, height: int = 8) -> None:
@@ -58,7 +63,7 @@ class CommittedProfilesTest(unittest.TestCase):
         names = set(self._profiles())
         self.assertEqual(
             names,
-            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json"},
+            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json", "aide-frames-runtime.json", "fakespot-detector-runtime.json"},
         )
 
     def test_wired_profiles_use_implemented_runtimes(self) -> None:
@@ -67,9 +72,15 @@ class CommittedProfilesTest(unittest.TestCase):
                 continue
             self.assertEqual(profile["type"], "deepfake-lens-runtime-profile-v1", name)
             self.assertIn(profile["runtime"], WIRED_RUNTIMES, name)
-            # Hub-resolved runtimes name a model id instead of a local file.
+            # Hub-resolved runtimes name a model id instead of a local file;
+            # video-frames nests the checkpointed image profile under "inner".
             if profile["runtime"] == "hf-text-classifier":
                 self.assertIn("hub_model", profile, name)
+            elif profile["runtime"] == "video-frames":
+                inner = profile.get("inner")
+                self.assertIsInstance(inner, dict, name)
+                self.assertIn(inner.get("runtime"), WIRED_RUNTIMES - VIDEO_ONLY_RUNTIMES, name)
+                self.assertIn("checkpoint", inner, name)
             else:
                 self.assertIn("checkpoint", profile, name)
             self.assertTrue(profile.get("limitations"), f"{name} must carry honest limitations")
@@ -277,6 +288,95 @@ class MultiProfileAggregationTest(unittest.TestCase):
         restored = _model_analysis_from_json(asdict(analysis))
         self.assertEqual(restored.models, analysis.models)
         self.assertEqual(restored.score, analysis.score)
+
+
+class VideoFramesRuntimeTest(unittest.TestCase):
+    """The video-frames runtime samples frames with cv2 and scores each with
+    the nested image profile — plumbing is verifiable without weights."""
+
+    def _write_video(self, path: Path, frames: int = 12, size: tuple[int, int] = (64, 48)) -> None:
+        import cv2
+        import numpy as np
+
+        writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 10.0, size)
+        self.assertTrue(writer.isOpened())
+        for i in range(frames):
+            frame = np.full((size[1], size[0], 3), (i * 7) % 255, dtype=np.uint8)
+            writer.write(frame)
+        writer.release()
+        self.assertTrue(path.is_file())
+
+    def _profile(self, inner: dict | None) -> dict[str, object]:
+        return {
+            "type": "deepfake-lens-runtime-profile-v1",
+            "name": "test video-frames",
+            "runtime": "video-frames",
+            "modality": "video",
+            "frames": 3,
+            **({"inner": inner} if inner is not None else {}),
+        }
+
+    @unittest.skipUnless(importlib.util.find_spec("cv2") is not None, "opencv not installed")
+    def test_frames_scored_through_inner_profile(self) -> None:
+        """Every sampled frame goes through the inner runtime; a missing
+        checkpoint degrades per frame and the aggregate reports it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            video = Path(tmp) / "clip.mp4"
+            self._write_video(video)
+            profile_path = Path(tmp) / "vf-runtime.json"
+            profile_path.write_text(
+                json.dumps(self._profile({"runtime": "torchvision", "checkpoint": "missing.pth", "name": "inner-net"})),
+                encoding="utf-8",
+            )
+            analysis = analyze_external_model(video, profile_path, modality="video")
+
+        self.assertIsNotNone(analysis)
+        self.assertFalse(analysis.available)
+        self.assertGreaterEqual(len(analysis.models), 1)
+        self.assertTrue(all(not frame["available"] for frame in analysis.models))
+        self.assertIn("no scores", analysis.detail)
+
+    def test_missing_inner_profile_is_graceful_error(self) -> None:
+        """A video-frames profile without 'inner' must degrade, not crash."""
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_path = Path(tmp) / "vf-runtime.json"
+            profile_path.write_text(json.dumps(self._profile(None)), encoding="utf-8")
+            analysis = analyze_external_model(Path(tmp) / "clip.mp4", profile_path, modality="video")
+
+        self.assertIsNotNone(analysis)
+        self.assertFalse(analysis.available)
+        self.assertIn("inner", analysis.detail)
+
+    def test_recursive_inner_runtime_rejected(self) -> None:
+        """video-frames must not nest itself — that would recurse forever."""
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_path = Path(tmp) / "vf-runtime.json"
+            profile_path.write_text(
+                json.dumps(self._profile({"runtime": "video-frames", "inner": {}})),
+                encoding="utf-8",
+            )
+            analysis = analyze_external_model(Path(tmp) / "clip.mp4", profile_path, modality="video")
+
+        self.assertIsNotNone(analysis)
+        self.assertFalse(analysis.available)
+        self.assertIn("image runtime", analysis.detail)
+
+    def test_video_profile_does_not_match_image_files(self) -> None:
+        """A modality=video profile is filtered out for image scans."""
+        with tempfile.TemporaryDirectory() as tmp:
+            image = Path(tmp) / "img.png"
+            _write_rgb_png(image)
+            profile_path = Path(tmp) / "vf-runtime.json"
+            profile_path.write_text(json.dumps(self._profile({"runtime": "onnx", "checkpoint": "x.onnx"})), encoding="utf-8")
+            analysis = analyze_external_model(image, profile_path, modality="image")
+
+        self.assertIsNone(analysis)
+
+    def test_committed_aide_frames_profile_matches_video_modality(self) -> None:
+        profile = json.loads((MODELS_DIR / "aide-frames-runtime.json").read_text(encoding="utf-8"))
+        self.assertEqual(profile["modality"], "video")
+        self.assertEqual(profile["runtime"], "video-frames")
+        self.assertEqual(profile["inner"]["runtime"], "aide")
 
 
 if __name__ == "__main__":

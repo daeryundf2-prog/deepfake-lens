@@ -208,6 +208,102 @@ class FeedbackPayloadTest(unittest.TestCase):
         self._with_feedback_path(run)
 
 
+class ClientHeaderGateTest(unittest.TestCase):
+    """api_request_allowed: token path vs the loopback client-header gate.
+
+    The client header is the CSRF defense on tokenless loopback binds:
+    browsers cannot attach custom headers to cross-origin "simple" requests,
+    so requiring one forces a preflight the server never answers.
+    """
+
+    def _headers(self, mapping: dict[str, str]) -> dict[str, str]:
+        return mapping
+
+    def test_no_token_requires_client_header(self) -> None:
+        from deepfake_lens.webapp import CLIENT_HEADER, api_request_allowed
+
+        self.assertFalse(api_request_allowed(self._headers({}), token=None))
+        self.assertFalse(api_request_allowed(self._headers({CLIENT_HEADER: ""}), token=None))
+        self.assertTrue(api_request_allowed(self._headers({CLIENT_HEADER: "gui"}), token=None))
+        self.assertTrue(api_request_allowed(self._headers({CLIENT_HEADER: "curl-script"}), token=None))
+
+    def test_token_ignores_client_header(self) -> None:
+        from deepfake_lens.webapp import CLIENT_HEADER, api_request_allowed
+
+        self.assertFalse(api_request_allowed(self._headers({CLIENT_HEADER: "gui"}), token="s3cret"))
+        self.assertTrue(
+            api_request_allowed(self._headers({"X-Deepfake-Lens-Token": "s3cret"}), token="s3cret")
+        )
+
+
+class LiveServerClientHeaderTest(unittest.TestCase):
+    """End-to-end: the running web server must 401 /api/* requests that lack
+    the client header on a tokenless loopback bind."""
+
+    def _start_server(self):
+        import socket
+        import threading
+        import urllib.request
+        from deepfake_lens import webapp
+
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        thread = threading.Thread(
+            target=webapp.run_server,
+            kwargs={"host": "127.0.0.1", "port": port},
+            daemon=True,
+        )
+        thread.start()
+        url = f"http://127.0.0.1:{port}"
+        for _ in range(100):
+            try:
+                urllib.request.urlopen(url + "/", timeout=1)
+                break
+            except OSError:
+                threading.Event().wait(0.05)
+        return url
+
+    def test_api_requires_client_header_without_token(self) -> None:
+        import urllib.error
+        import urllib.request
+        from deepfake_lens.webapp import CLIENT_HEADER
+
+        url = self._start_server()
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(url + "/api/stats", timeout=5)
+        self.assertEqual(ctx.exception.code, 401)
+
+        request = urllib.request.Request(url + "/api/stats", headers={CLIENT_HEADER: "gui"})
+        with urllib.request.urlopen(request, timeout=5) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read())["status"], "ok")
+
+    def test_gui_shell_still_served_without_header(self) -> None:
+        import urllib.request
+
+        url = self._start_server()
+        with urllib.request.urlopen(url + "/", timeout=5) as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn(b"<", response.read(64))
+
+    def test_feedback_write_rejected_without_client_header(self) -> None:
+        import urllib.error
+        import urllib.request
+
+        url = self._start_server()
+        body = json.dumps({"path": "x.png", "expected_label": "synthetic"}).encode()
+        request = urllib.request.Request(
+            url + "/api/feedback",
+            data=body,
+            headers={"Content-Type": "text/plain"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(request, timeout=5)
+        self.assertEqual(ctx.exception.code, 401)
+
+
 class ApiServeTokenGateTest(unittest.TestCase):
     """The CLI must refuse non-localhost API binds without a token."""
 

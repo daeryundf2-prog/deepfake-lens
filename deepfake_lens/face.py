@@ -8,18 +8,26 @@ optional ``face_mediapipe`` extra is installed; otherwise they fall back
 to box-ratio estimates that are explicitly labelled via
 ``FaceRegion.landmarks_source`` and must not feed geometry checks.
 
-The measurement path uses the legacy ``mp.solutions.face_mesh`` API.
-MediaPipe removed that API in 0.10.30 (tasks-only builds) and in 1.x,
-so the extra pins ``mediapipe>=0.10,<0.10.30``; on newer mediapipe
-builds the FaceMesh call fails softly and the labelled box-ratio
-estimate stays active. Verified end-to-end on mediapipe 0.10.21
-(macosx arm64, CPython 3.12): a real face photo yields
-``landmarks_source="mediapipe-facemesh"`` with measured anchors that
-differ from the box constants.
+Two measurement paths exist, tried in order:
+
+1. **Tasks API** (``mp.tasks`` FaceLandmarker, mediapipe >= 0.10.30 / 1.x
+   tasks-only builds): needs the ``face_landmarker.task`` model asset —
+   point ``DEEPFAKE_LENS_FACE_LANDMARKER`` at it or drop it at
+   ``models/face_landmarker.task``. Yields
+   ``landmarks_source="mediapipe-facelandmarker"``.
+2. **Legacy FaceMesh** (``mp.solutions.face_mesh``, removed in mediapipe
+   0.10.30 / 1.x, so the ``face_mediapipe`` extra pins
+   ``mediapipe>=0.10,<0.10.30``). Yields
+   ``landmarks_source="mediapipe-facemesh"``. Verified end-to-end on
+   mediapipe 0.10.21 (macosx arm64, CPython 3.12): a real face photo
+   yields measured anchors that differ from the box constants.
+
+With neither available the labelled box-ratio estimate stays active.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -40,8 +48,9 @@ class FaceRegion:
     height: int
     landmarks: list[tuple[int, int]]
     confidence: float
-    # "mediapipe-facemesh" = measured; "box-ratio-estimate" = derived from
-    # the detection box and carries no geometric information.
+    # "mediapipe-facelandmarker"/"mediapipe-facemesh" = measured;
+    # "box-ratio-estimate" = derived from the detection box and carries no
+    # geometric information.
     landmarks_source: str = "box-ratio-estimate"
 
 
@@ -129,8 +138,8 @@ def analyze_faces(
     if len(faces) == 1:
         limitations.append("단일 얼굴만 감지되어 다중 얼굴 비교가 불가합니다.")
     landmark_sources = {face.landmarks_source for face in faces}
-    if landmark_sources == {"mediapipe-facemesh"}:
-        limitations.append("랜드마크는 MediaPipe FaceMesh 실측값입니다. 기하/대칭 검증은 아직 구현되지 않았습니다.")
+    if landmark_sources <= MEASURED_LANDMARK_SOURCES and landmark_sources:
+        limitations.append("랜드마크는 MediaPipe 실측값입니다. 기하/대칭 검증은 아직 구현되지 않았습니다.")
     else:
         limitations.append("랜드마크가 감지 박스 비율 추정값(landmarks_source=box-ratio-estimate)이며 실측이 아닙니다.")
         limitations.append("랜드마크 기하/대칭 검증은 실측 랜드마크가 없어 미평가입니다.")
@@ -209,13 +218,34 @@ def _detect_faces(image: Any) -> list[FaceRegion]:
     return regions
 
 
+# Landmark sources that carry measured geometry (vs the box-ratio estimate).
+MEASURED_LANDMARK_SOURCES = {"mediapipe-facelandmarker", "mediapipe-facemesh"}
+
+# FaceLandmarker (Tasks API) model asset. Bundled under models/ or pointed at
+# with DEEPFAKE_LENS_FACE_LANDMARKER; absent → the legacy FaceMesh path.
+_FACE_LANDMARKER_ENV = "DEEPFAKE_LENS_FACE_LANDMARKER"
+_FACE_LANDMARKER_ASSET = Path(__file__).resolve().parent.parent / "models" / "face_landmarker.task"
+
+
+def _facelandmarker_model_path() -> Path | None:
+    """Resolve the FaceLandmarker .task asset, if one is provisioned."""
+    override = os.environ.get(_FACE_LANDMARKER_ENV, "").strip()
+    if override:
+        path = Path(override).expanduser()
+        return path if path.is_file() else None
+    return _FACE_LANDMARKER_ASSET if _FACE_LANDMARKER_ASSET.is_file() else None
+
+
 def _face_landmarks(image, x: int, y: int, w: int, h: int) -> tuple[list[tuple[int, int]], str]:
     """Return (anchor points, source label) for one detected face box.
 
-    Prefers measured MediaPipe FaceMesh anchors; falls back to box-ratio
-    estimates so every FaceRegion is honest about where its landmarks came
-    from.
+    Prefers measured MediaPipe anchors (Tasks-API FaceLandmarker first, then
+    legacy FaceMesh); falls back to box-ratio estimates so every FaceRegion
+    is honest about where its landmarks came from.
     """
+    measured = _facelandmarker_landmarks(image, x, y, w, h)
+    if measured is not None:
+        return measured, "mediapipe-facelandmarker"
     measured = _mediapipe_landmarks(image, x, y, w, h)
     if measured is not None:
         return measured, "mediapipe-facemesh"
@@ -267,6 +297,58 @@ def _mediapipe_landmarks(image, x: int, y: int, w: int, h: int) -> list[tuple[in
         return None
 
     mesh = result.multi_face_landmarks[0].landmark
+    crop_h, crop_w = crop.shape[:2]
+
+    def anchor(indices: tuple[int, ...]) -> tuple[int, int]:
+        px = sum(mesh[i].x for i in indices) / len(indices) * crop_w
+        py = sum(mesh[i].y for i in indices) / len(indices) * crop_h
+        return (x + int(px), y + int(py))
+
+    return [anchor(indices) for indices in _MEDIAPIPE_ANCHOR_INDICES]
+
+
+def _facelandmarker_landmarks(image, x: int, y: int, w: int, h: int) -> list[tuple[int, int]] | None:
+    """Measure anchors with the Tasks-API FaceLandmarker.
+
+    This is the supported path on mediapipe >= 0.10.30 / 1.x, where the
+    legacy ``mp.solutions`` API no longer exists. It needs the
+    ``face_landmarker.task`` model asset (see ``_facelandmarker_model_path``);
+    returns None when the asset or the Tasks API is absent, or when no face
+    is found in the crop.
+    """
+    model_path = _facelandmarker_model_path()
+    if model_path is None:
+        return None
+    try:
+        import cv2
+        import mediapipe as mp
+        from mediapipe.tasks import python as mp_python
+        from mediapipe.tasks.python import vision as mp_vision
+    except (ImportError, AttributeError):
+        return None
+
+    try:
+        crop = image[max(0, y) : y + h, max(0, x) : x + w]
+        if crop.size == 0:
+            return None
+        options = mp_vision.FaceLandmarkerOptions(
+            base_options=mp_python.BaseOptions(model_asset_path=str(model_path)),
+            running_mode=mp_vision.RunningMode.IMAGE,
+            num_faces=1,
+            min_face_detection_confidence=0.5,
+        )
+        with mp_vision.FaceLandmarker.create_from_options(options) as landmarker:
+            rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+            result = landmarker.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb))
+    except Exception:
+        return None
+
+    if not result.face_landmarks:
+        return None
+
+    # Same canonical 478-point topology as FaceMesh — the shared anchor
+    # indices apply unchanged.
+    mesh = result.face_landmarks[0]
     crop_h, crop_w = crop.shape[:2]
 
     def anchor(indices: tuple[int, ...]) -> tuple[int, int]:

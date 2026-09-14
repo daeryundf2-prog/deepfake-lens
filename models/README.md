@@ -15,10 +15,12 @@ crash.
 | `dire-runtime.json` | DIRE (ICCV 2023) diffusion reconstruction | — | `supported: false` placeholder (needs ADM diffusion pipeline) |
 | `aasist-runtime.json` | AASIST (Interspeech 2022) audio anti-spoofing | `aasist` (torch reimplementation in `scripts/run_aasist.py`) | wired — run `scripts/fetch_aasist.py` |
 | `openai-detector-runtime.json` | OpenAI GPT-2 output detector (RoBERTa-base) | `hf-text-classifier` (torch + transformers) | wired — fetched from HF hub on first use |
+| `fakespot-detector-runtime.json` | Fakespot AI text detector (RoBERTa-base, modern-LLM training data) | `hf-text-classifier` (torch + transformers) | wired — fetched from HF hub on first use |
+| `aide-frames-runtime.json` | AIDE per-frame video screen | `video-frames` (cv2 + nested image profile) | wired — needs the AIDE checkpoint + opencv; **frame-level only, not temporal/lip-sync** |
 
-Profiles declare a `modality` (`image`/`audio`/`text`); a scanned file only runs
-profiles matching its own modality, so the image detectors, AASIST, and the
-text classifier never
+Profiles declare a `modality` (`image`/`audio`/`text`/`video`); a scanned file
+only runs profiles matching its own modality, so the image detectors, AASIST,
+and the text classifiers never
 trip over each other in a mixed directory scan.
 
 ## Multi-model runs
@@ -45,6 +47,14 @@ Default scans auto-discover the bundled verified engines —
 (`--no-default-engine` opts out). The wider zoo stays opt-in because the
 placeholder members add latency without scores until their checkpoints are
 fetched.
+
+## Other assets (not runtime profiles)
+
+- `face_landmarker.task` — MediaPipe Tasks-API model for `face.py`'s
+  measured-landmark path on tasks-only mediapipe builds (>=0.10.30 / 1.x).
+  Fetch with `scripts/fetch_facelandmarker.py` or point
+  `DEEPFAKE_LENS_FACE_LANDMARKER` at a local copy. Absent → the legacy
+  FaceMesh extra or the labelled box-ratio estimate.
 
 ## Honesty notes
 

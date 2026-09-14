@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -24,7 +25,7 @@ class InpaintAnalysisTest(unittest.TestCase):
 
     def test_unsupported_format_returns_error(self) -> None:
         """Analysis of unsupported format should return error analysis."""
-        tmp_path = Path("/tmp") / "test.txt"
+        tmp_path = Path(tempfile.gettempdir()) / "test.txt"
         tmp_path.write_bytes(b"not image")
         result = analyze_inpainting(tmp_path)
         self.assertEqual(result.score, 0)

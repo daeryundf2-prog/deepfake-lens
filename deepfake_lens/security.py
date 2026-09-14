@@ -4,7 +4,28 @@ import json
 from pathlib import Path
 
 
-NETWORK_MARKERS = ["requests.", "urllib.request", "http.client", "socket.create_connection", "aiohttp", "httpx"]
+# Substring markers for network capability. "subprocess" is deliberately not
+# a marker: video.py legitimately spawns ffmpeg for frame extraction. The
+# markers cover the standard-library network surface plus common client libs;
+# a determined bypass is possible, so this stays a guardrail, not an audit.
+NETWORK_MARKERS = [
+    "requests.",
+    "urllib.request",
+    "http.client",
+    "socket.create_connection",
+    "socket.socket",
+    "ssl.",
+    "smtplib",
+    "ftplib",
+    "telnetlib",
+    "xmlrpc",
+    "urlopen",
+    "websocket",
+    "asyncio.open_connection",
+    "asyncio.start_server",
+    "aiohttp",
+    "httpx",
+]
 ALLOWED_NETWORK_FILES = {"security.py", "webapp.py"}
 
 
@@ -21,6 +42,10 @@ def build_security_check(root: Path | str) -> dict[str, object]:
         {"name": "symlink following is opt-in", "passed": "allow_symlinks: bool = False" in (package / "core.py").read_text(encoding="utf-8")},
         {"name": "oversize skip option exists", "passed": "max_file_bytes" in (package / "core.py").read_text(encoding="utf-8")},
         {"name": "report redaction exists", "passed": "redact_paths" in (package / "reports.py").read_text(encoding="utf-8")},
+        {
+            "name": "API requests require a custom header when no token is set (CSRF/drive-by guard)",
+            "passed": "CLIENT_HEADER" in (package / "webapp.py").read_text(encoding="utf-8"),
+        },
     ]
     return {
         "version": "security-check-v1",

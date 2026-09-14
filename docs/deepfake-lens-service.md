@@ -24,6 +24,14 @@ files on request, so exposure beyond loopback is an explicit, guarded choice.
   `--token`; every `/api/*` request then needs `X-Deepfake-Lens-Token: <token>`
   (401 otherwise). The GUI shell stays unauthenticated but prompts for the
   token on a 401 and stores it in `sessionStorage` for the session.
+- **Drive-by/CSRF guard on tokenless binds**: when no token is configured,
+  every `/api/*` request must carry a non-empty `X-Deepfake-Lens-Client`
+  header (the bundled GUI sends `gui`; any non-empty value is accepted).
+  Browsers cannot attach custom headers to cross-origin "simple" requests,
+  so this forces a preflight the server never answers — unrelated web pages
+  cannot trigger scans or write to the feedback log even on loopback.
+  `api-serve` applies the same rule to non-GET `/api/*` requests (its GETs
+  are side-effect-free). Local tools/curl must send the header explicitly.
 - There is no rate limiting, TLS, or per-user isolation — put a reverse proxy
   in front if you need those, and keep `--token` mandatory outside loopback.
 

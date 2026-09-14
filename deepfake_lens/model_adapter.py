@@ -20,7 +20,11 @@ _MAX_PROFILE_DEPTH = 4
 IMAGE_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision"}
 AUDIO_RUNTIMES = {"aasist"}
 TEXT_RUNTIMES = {"hf-text-classifier"}
-ALL_RUNTIMES = IMAGE_RUNTIMES | AUDIO_RUNTIMES | TEXT_RUNTIMES
+# "video-frames" samples frames with cv2 and scores each with a nested image
+# runtime profile ("inner") — it reuses image checkpoints, so it needs no
+# weights of its own.
+VIDEO_RUNTIMES = {"video-frames"}
+ALL_RUNTIMES = IMAGE_RUNTIMES | AUDIO_RUNTIMES | TEXT_RUNTIMES | VIDEO_RUNTIMES
 
 
 @dataclass(frozen=True)
@@ -128,6 +132,8 @@ def _profile_modality(source: Path) -> str:
         return "image"
     if runtime in TEXT_RUNTIMES:
         return "text"
+    if runtime in VIDEO_RUNTIMES:
+        return "video"
     return "any"
 
 
@@ -310,8 +316,9 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
     model_name = str(profile.get("name") or profile.get("model") or checkpoint.name)
     profile_limitations = _profile_limitations(profile)
     # Hub-resolved runtimes (hf-text-classifier) name a model id, not a local
-    # file — the exists() gate below does not apply to them.
-    if runtime not in TEXT_RUNTIMES and not checkpoint.exists():
+    # file; video-frames carries no checkpoint of its own (its inner image
+    # profile does) — the exists() gate below does not apply to them.
+    if runtime not in TEXT_RUNTIMES and runtime not in VIDEO_RUNTIMES and not checkpoint.exists():
         return ExternalModelAnalysis(
             available=False,
             score=0,
@@ -329,6 +336,8 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
             values = _run_aasist(checkpoint, media_path, profile)
         elif runtime == "hf-text-classifier":
             values = _run_hf_text_classifier(media_path, profile)
+        elif runtime == "video-frames":
+            return _run_video_frames(media_path, profile, model_name=model_name, base_dir=base_dir)
         else:
             array = _preprocess_image(media_path, profile)
             if runtime == "onnx":
@@ -398,6 +407,8 @@ def _runtime_install_hint(runtime: str) -> str:
         return "Install the optional hf-text-classifier stack (torch, transformers) to enable the text-detector runtime."
     if runtime == "torchvision":
         return "Install the optional torchvision stack (torch, torchvision, Pillow, numpy) to enable the torchvision runtime."
+    if runtime == "video-frames":
+        return "Install opencv plus the stack required by the inner image profile to enable the video-frames runtime."
     return "Install Pillow plus onnxruntime or torch in the local environment to enable neural inference."
 
 
@@ -741,6 +752,121 @@ def _score_from_sidecar(profile: dict[str, object], image_path: Path) -> int | N
             if key in payload:
                 return _normalize_score(payload[key])
     return None
+
+
+def _run_video_frames(
+    media_path: Path,
+    profile: dict[str, object],
+    *,
+    model_name: str,
+    base_dir: Path,
+) -> ExternalModelAnalysis:
+    """Score a video by running a nested image-runtime profile per frame.
+
+    The profile carries an ``inner`` field: a complete image-runtime profile
+    (runtime + checkpoint + preprocessing fields). ``frames`` (default 8)
+    evenly spaced frames are decoded with cv2, written to temporary PNGs, and
+    each is scored through the normal profile path — so AIDE, UnivFD,
+    CNNDetection, or any ONNX/TorchScript image detector works on video
+    without a video-specific checkpoint.
+
+    The aggregate score is the mean of per-frame scores; ``models[]`` lists
+    each frame's result, and a high spread across frames is reported as a
+    limitation (temporal inconsistency is itself a manipulation cue). This
+    is frame-level screening — it is NOT a lip-sync or temporal-model
+    detector (those need dedicated video checkpoints; see the registry).
+    """
+    import tempfile
+
+    cv2 = importlib.import_module("cv2")
+    inner = profile.get("inner") or profile.get("frame_profile")
+    if not isinstance(inner, dict):
+        raise RuntimeError("video-frames profile needs an 'inner' image-runtime profile object")
+    inner_runtime = str(inner.get("runtime") or "").lower()
+    if inner_runtime in VIDEO_RUNTIMES or not inner_runtime:
+        raise RuntimeError("video-frames 'inner' profile must name an image runtime (onnx/torchscript/aide/clip-linear/torchvision)")
+    frame_target = max(1, int(profile.get("frames", 8) or 8))
+
+    scored_frames: list[dict[str, object]] = []
+    with tempfile.TemporaryDirectory(prefix="dfl-frames-") as tmp_dir:
+        frame_paths = _extract_sampled_frames(cv2, media_path, Path(tmp_dir), frame_target)
+        if not frame_paths:
+            raise RuntimeError(f"no frames could be decoded from {media_path}")
+        for index, frame_path in enumerate(frame_paths):
+            result = _score_from_runtime_profile(inner, frame_path, base_dir=base_dir)
+            scored_frames.append(
+                {
+                    "frame": index,
+                    "path": str(frame_path),
+                    "available": bool(result and result.available),
+                    "score": result.score if result else 0,
+                    "detail": result.detail if result else "no result",
+                }
+            )
+
+    available = [entry["score"] for entry in scored_frames if entry["available"]]
+    if not available:
+        return ExternalModelAnalysis(
+            available=False,
+            score=0,
+            confidence="unavailable",
+            model=model_name,
+            detail=f"video-frames decoded {len(frame_paths)} frames but the inner runtime produced no scores.",
+            limitations=_profile_limitations(profile),
+            models=scored_frames,
+        )
+    score = int(round(sum(available) / len(available)))
+    spread = max(available) - min(available) if len(available) > 1 else 0
+    detail = f"video-frames runtime scored {len(available)}/{len(frame_paths)} frames; mean={score}"
+    if len(available) > 1:
+        detail += f"; frame spread={spread}"
+    limitations = list(_profile_limitations(profile))
+    limitations.append(
+        "Frame-level image detection, not a temporal/lip-sync model — frame scores are averaged and inter-frame consistency is not modeled."
+    )
+    if spread > AGREEMENT_SPREAD:
+        limitations.append(f"Frame scores disagree by {spread} points — possible temporal inconsistency or borderline frames.")
+    return ExternalModelAnalysis(
+        available=True,
+        score=score,
+        confidence=_confidence_for_score(score),
+        model=model_name,
+        detail=detail + ".",
+        limitations=limitations,
+        models=scored_frames,
+    )
+
+
+def _extract_sampled_frames(cv2, media_path: Path, out_dir: Path, count: int) -> list[Path]:
+    """Decode ``count`` evenly spaced frames to PNG files in ``out_dir``."""
+    capture = cv2.VideoCapture(str(media_path))
+    if not capture.isOpened():
+        raise RuntimeError(f"video could not be opened: {media_path}")
+    try:
+        total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total <= 0:
+            # Streaming/unknown-length sources: take the first frames.
+            indices = list(range(count))
+        else:
+            indices = sorted({min(total - 1, int(i * total / count)) for i in range(count)})
+        frames: list[Path] = []
+        wanted = iter(indices)
+        target = next(wanted, None)
+        current = 0
+        while target is not None:
+            ok, frame = capture.read()
+            if not ok:
+                break
+            if current == target:
+                out_path = out_dir / f"frame-{current:05d}.png"
+                cv2.imwrite(str(out_path), frame)
+                if out_path.is_file():
+                    frames.append(out_path)
+                target = next(wanted, None)
+            current += 1
+        return frames
+    finally:
+        capture.release()
 
 
 def _normalize_score(value: object) -> int | None:

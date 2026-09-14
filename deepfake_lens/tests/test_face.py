@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -47,7 +48,7 @@ class FaceAnalysisTest(unittest.TestCase):
 
     def test_unsupported_format_returns_error(self) -> None:
         """Analysis of unsupported format should return error analysis."""
-        tmp_path = Path("/tmp") / "test.txt"
+        tmp_path = Path(tempfile.gettempdir()) / "test.txt"
         tmp_path.write_bytes(b"not image")
         result = analyze_faces(tmp_path)
         self.assertEqual(result.score, 0)
@@ -160,22 +161,58 @@ class FaceAnalysisTest(unittest.TestCase):
         measured = [(25, 25), (45, 26), (36, 40), (35, 52)]
         self.assertNotEqual(measured, _estimate_landmarks(10, 10, 40, 40))
         # The image is passed straight through to the patched-out
-        # _mediapipe_landmarks, so no real pixel array is needed.
-        with patch.object(face_module, "_mediapipe_landmarks", return_value=measured):
+        # _mediapipe_landmarks, so no real pixel array is needed. The
+        # FaceLandmarker path is patched off so the dispatch order is
+        # deterministic even on hosts with the .task asset provisioned.
+        with patch.object(face_module, "_facelandmarker_landmarks", return_value=None), \
+             patch.object(face_module, "_mediapipe_landmarks", return_value=measured):
             landmarks, source = _face_landmarks(None, 10, 10, 40, 40)
         self.assertEqual(source, "mediapipe-facemesh")
         self.assertEqual(landmarks, measured)
 
-    def test_face_landmarks_labels_none_result_as_box_estimate(self) -> None:
-        """A FaceMesh miss (no face in crop, or the extra absent) must fall
-        back to the labelled estimate — runs in both base and extra envs."""
+    def test_face_landmarks_prefers_facelandmarker_when_available(self) -> None:
+        """The Tasks-API path wins over legacy FaceMesh when it measures."""
         import deepfake_lens.face as face_module
 
-        # Same as above: the patched _mediapipe_landmarks never sees pixels.
-        with patch.object(face_module, "_mediapipe_landmarks", return_value=None):
+        measured = [(30, 30), (50, 31), (40, 45), (40, 58)]
+        with patch.object(face_module, "_facelandmarker_landmarks", return_value=measured), \
+             patch.object(face_module, "_mediapipe_landmarks", side_effect=AssertionError("must not run")):
+            landmarks, source = _face_landmarks(None, 10, 10, 40, 40)
+        self.assertEqual(source, "mediapipe-facelandmarker")
+        self.assertEqual(landmarks, measured)
+
+    def test_face_landmarks_labels_none_result_as_box_estimate(self) -> None:
+        """A miss on both measured paths (no face in crop, extras absent)
+        must fall back to the labelled estimate — runs in every env."""
+        import deepfake_lens.face as face_module
+
+        # Same as above: the patched measurers never see pixels.
+        with patch.object(face_module, "_facelandmarker_landmarks", return_value=None), \
+             patch.object(face_module, "_mediapipe_landmarks", return_value=None):
             landmarks, source = _face_landmarks(None, 10, 10, 40, 40)
         self.assertEqual(source, "box-ratio-estimate")
         self.assertEqual(landmarks, _estimate_landmarks(10, 10, 40, 40))
+
+    def test_facelandmarker_model_path_env_override(self) -> None:
+        """DEEPFAKE_LENS_FACE_LANDMARKER points at a .task asset; a missing
+        file or unset env resolves to None so the fallback stays active."""
+        import os
+        import deepfake_lens.face as face_module
+
+        with tempfile.TemporaryDirectory() as tmp:
+            asset = Path(tmp) / "face_landmarker.task"
+            asset.write_bytes(b"not-a-real-model")
+            original = os.environ.get("DEEPFAKE_LENS_FACE_LANDMARKER")
+            try:
+                os.environ["DEEPFAKE_LENS_FACE_LANDMARKER"] = str(asset)
+                self.assertEqual(face_module._facelandmarker_model_path(), asset)
+                os.environ["DEEPFAKE_LENS_FACE_LANDMARKER"] = str(Path(tmp) / "absent.task")
+                self.assertIsNone(face_module._facelandmarker_model_path())
+            finally:
+                if original is None:
+                    os.environ.pop("DEEPFAKE_LENS_FACE_LANDMARKER")
+                else:
+                    os.environ["DEEPFAKE_LENS_FACE_LANDMARKER"] = original
 
     @unittest.skipIf(_has_mediapipe(), "mediapipe installed")
     def test_mediapipe_landmarks_none_without_package(self) -> None:

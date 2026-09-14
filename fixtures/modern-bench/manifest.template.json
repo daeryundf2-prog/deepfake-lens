@@ -1,0 +1,23 @@
+{
+  "name": "modern-bench",
+  "license": "Mixed — see per-folder SOURCE.md; Synthbuster and RAISE-1k terms apply to their subsets. Generated outputs subject to each generator's terms.",
+  "base_url": "",
+  "files": [
+    {
+      "url": "https://zenodo.org/records/10066048/files/<file>.png?download=1",
+      "dest": "1_fake/firefly-v2/<file>.png",
+      "sha256": "<64-hex lowercase digest>"
+    },
+    {
+      "path": "raise-1k/<file>.png",
+      "dest": "0_real/raise-1k/<file>.png",
+      "sha256": "<64-hex lowercase digest>",
+      "_comment": "'path' is joined to base_url; use 'url' for absolute URLs. 'dest' must stay inside the dataset root (traversal refused)."
+    }
+  ],
+  "_notes": [
+    "dest layout is <0_real|1_fake>/<source-or-generator>/<filename> — the second component becomes record.source and drives per_source metrics in deepfake-lens eval.",
+    "Every file needs sha256; fetch_benchmark.py verifies before and after download.",
+    "Do not commit the populated dataset; this template and README.md are the only committed artifacts."
+  ]
+}

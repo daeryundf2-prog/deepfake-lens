@@ -16,6 +16,12 @@ from typing import Any
 
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
+# Custom header required on non-GET /api/* requests when no token is set.
+# Browsers can only attach custom headers via a CORS preflight, and the CORS
+# policy below only allows loopback origins — so drive-by requests from
+# unrelated web pages cannot reach the write endpoints on a loopback bind.
+CLIENT_HEADER = "X-Deepfake-Lens-Client"
+
 
 @dataclass(frozen=True)
 class APIResponse:
@@ -59,6 +65,11 @@ def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = No
                     return JSONResponse({"status": "error", "message": "unauthorized"}, status_code=401)
             elif host_name(request.headers.get("host", "")) not in allowed_hosts:
                 return JSONResponse({"status": "error", "message": "host not allowed"}, status_code=403)
+            elif request.method != "GET" and not (request.headers.get(CLIENT_HEADER) or "").strip():
+                return JSONResponse(
+                    {"status": "error", "message": f"missing {CLIENT_HEADER} header"},
+                    status_code=401,
+                )
         return await call_next(request)
 
     app.add_middleware(
@@ -66,7 +77,7 @@ def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = No
         allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=False,
         allow_methods=["GET", "POST"],
-        allow_headers=["X-API-Token"],
+        allow_headers=["X-API-Token", CLIENT_HEADER],
     )
     
     @app.get("/")

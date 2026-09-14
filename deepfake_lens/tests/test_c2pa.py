@@ -8,6 +8,7 @@ only when c2pa-python is installed (pip install 'deepfake-lens[provenance]').
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -43,7 +44,7 @@ class MetadataForensicAnalysisTest(unittest.TestCase):
 
     def test_empty_file_returns_error(self) -> None:
         """Analysis of empty file should return error analysis."""
-        tmp_path = Path("/tmp") / "empty.txt"
+        tmp_path = Path(tempfile.gettempdir()) / "empty.txt"
         tmp_path.write_bytes(b"")
         result = analyze_metadata_forensic(tmp_path)
         self.assertEqual(result.score, 0)
@@ -72,7 +73,7 @@ class MetadataForensicAnalysisTest(unittest.TestCase):
         validation: the signal wording must say so and its weight stays low.
         With the SDK installed the result is authoritative — a bare marker
         string is not a manifest, so has_c2pa stays False."""
-        tmp_path = Path("/tmp") / "test_c2pa_marker.jpg"
+        tmp_path = Path(tempfile.gettempdir()) / "test_c2pa_marker.jpg"
         tmp_path.write_bytes(b"\xff\xd8" + b"\x00" * 100 + b"c2pa" + b"\x00" * 100)
         try:
             result = analyze_metadata_forensic(tmp_path)
@@ -91,7 +92,7 @@ class MetadataForensicAnalysisTest(unittest.TestCase):
     def test_google_metadata_never_claims_synthid(self) -> None:
         """Google tool strings are attribution hints; SynthID (a pixel-domain
         watermark) must never be reported as detected from bytes."""
-        tmp_path = Path("/tmp") / "test_synthid.jpg"
+        tmp_path = Path(tempfile.gettempdir()) / "test_synthid.jpg"
         context = b"This is a SynthID watermark from Google for AI generated content verification and provenance tracking. " + b"\x00" * 20
         tmp_path.write_bytes(b"\xff\xd8" + b"\x00" * 50 + context)
         try:
@@ -107,7 +108,7 @@ class MetadataForensicAnalysisTest(unittest.TestCase):
     def test_watermark_marker_is_tool_attribution(self) -> None:
         """Tool strings in metadata are attribution hints, not cryptographic
         watermark verification."""
-        tmp_path = Path("/tmp") / "test_watermark.jpg"
+        tmp_path = Path(tempfile.gettempdir()) / "test_watermark.jpg"
         tmp_path.write_bytes(b"\xff\xd8" + b"\x00" * 100 + b"Adobe Firefly" + b"\x00" * 100)
         try:
             result = analyze_metadata_forensic(tmp_path)

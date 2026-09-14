@@ -1,0 +1,26 @@
+{
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "AIDE per-frame (video-frames runtime)",
+  "candidate_key": "aide-iclr-2025",
+  "runtime": "video-frames",
+  "modality": "video",
+  "frames": 8,
+  "inner": {
+    "runtime": "aide",
+    "checkpoint": "aide_progan_train.pth",
+    "score_index": 1,
+    "score_activation": "softmax",
+    "name": "AIDE (ICLR 2025) progan_train"
+  },
+  "source_url": "https://github.com/shilinyan99/AIDE",
+  "limitations": [
+    "Frame-level image detection, not a temporal/lip-sync model — per-frame scores are averaged; inter-frame consistency is not modeled.",
+    "Requires the AIDE checkpoint (scripts/fetch_aide.py) and opencv for frame decoding.",
+    "AIDE scores are a prioritization signal, not a truth label; see experiments/AIDE_EVALUATION.md for measured AUROC and cross-generator caveats."
+  ],
+  "notes": [
+    "The 'inner' profile is a complete image-runtime profile: 'checkpoint' resolves relative to this file's directory (models/).",
+    "'frames' evenly spaced frames are decoded to temp PNGs and scored through the standard profile path; the aggregate is the mean, and 'models[]' reports each frame's score."
+  ],
+  "license": "MIT"
+}

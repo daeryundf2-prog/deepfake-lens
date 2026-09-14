@@ -90,6 +90,13 @@ def default_text_model_path(root: Path | None = None) -> Path | None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows consoles default to a legacy code page (e.g. cp949) that cannot
+    # encode Korean text or em-dashes; reconfiguring to UTF-8 keeps print()
+    # from crashing there. StringIO-style test doubles lack reconfigure.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] not in COMMANDS:
         argv.insert(0, "scan")
@@ -253,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
     video_analysis_parser.add_argument("file", type=Path, help="video file to analyze")
     video_analysis_parser.add_argument("--frame-rate", type=float, default=1.0, help="frame sample rate (default: 1.0 fps)")
     video_analysis_parser.add_argument("--max-frames", type=int, default=100, help="maximum frames to analyze (default: 100)")
+    video_analysis_parser.add_argument("--model-path", type=Path, nargs="*", help="video-modality model profile(s) — e.g. models/aide-frames-runtime.json scores sampled frames with an image detector")
     video_analysis_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     video_analysis_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
@@ -606,7 +614,12 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
         return 0
     if args.command == "video-analysis":
-        analysis = analyze_video_temporal(args.file, frame_sample_rate=args.frame_rate, max_frames=args.max_frames)
+        analysis = analyze_video_temporal(
+            args.file,
+            frame_sample_rate=args.frame_rate,
+            max_frames=args.max_frames,
+            model_path=list(args.model_path) if args.model_path else None,
+        )
         if args.json_out:
             _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
@@ -615,6 +628,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Score: {analysis.score} ({analysis.band_label})")
             print(f"Verdict: {analysis.verdict}")
             print(f"Frames: {analysis.frame_count}, Duration: {analysis.duration_seconds:.1f}s, FPS: {analysis.fps:.1f}")
+            if analysis.model_analysis is not None:
+                state = f"score={analysis.model_analysis.score}" if analysis.model_analysis.available else "unavailable"
+                print(f"Model: {analysis.model_analysis.model} ({state}) — {analysis.model_analysis.detail}")
             if analysis.signals:
                 print("Signals:")
                 for signal in analysis.signals:

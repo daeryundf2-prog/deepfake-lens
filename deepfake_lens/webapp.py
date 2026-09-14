@@ -14,13 +14,21 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
-from .core import BatchScanSummary, _scan_item_from_json, analyze_file, scan_directory, scan_to_json, summarize
+from .core import BatchScanSummary, DEFAULT_METADATA_BYTES, _scan_item_from_json, analyze_file, scan_directory, scan_to_json, summarize
 from .datasets import is_negative_label, is_positive_label
 from .fusion import apply_fusion_to_items, load_fusion_profile
 from .reports import write_html_report
 
 
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+# Custom header required on every /api/* request when no token is configured.
+# Browsers can only attach custom headers via a CORS preflight, which this
+# server never answers — so drive-by requests from unrelated web pages are
+# blocked even on a plain loopback bind (simple requests could otherwise
+# trigger scans and write to the feedback log). The bundled GUI and local
+# tools send it unconditionally.
+CLIENT_HEADER = "X-Deepfake-Lens-Client"
+CLIENT_HEADER_VALUE = "gui"
 MAX_SCAN_FILES = 2000
 MAX_FILE_BYTES_CEILING = 1024 * 1024 * 1024
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024
@@ -55,6 +63,24 @@ def host_name(header_value: str) -> str:
     return value
 
 
+def api_request_allowed(headers: Any, *, token: str | None) -> bool:
+    """Gate for /api/* requests.
+
+    With a configured token the ``X-Deepfake-Lens-Token`` header must match
+    (constant-time compare). Without one, the ``X-Deepfake-Lens-Client``
+    custom header is required instead: browsers cannot send custom headers
+    on cross-origin "simple" requests, so this forces a preflight the server
+    never answers — blocking CSRF-style writes (``/api/feedback``) and
+    drive-by scans on loopback binds.
+    """
+    if token:
+        import secrets
+
+        supplied = headers.get("X-Deepfake-Lens-Token") or ""
+        return bool(supplied) and secrets.compare_digest(supplied, token)
+    return bool((headers.get(CLIENT_HEADER) or "").strip())
+
+
 def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Path | None = None, allow_lan: bool = False, token: str | None = None) -> None:
     """Run the web server with GUI.
 
@@ -74,13 +100,16 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
         print("note: --token set on a loopback bind; /api/* still enforces it", file=sys.stderr)
 
     class Handler(BaseHTTPRequestHandler):
-        def _token_ok(self) -> bool:
-            if not token:
+        def _api_allowed(self) -> bool:
+            if api_request_allowed(self.headers, token=token):
                 return True
-            import secrets
-
-            supplied = self.headers.get("X-Deepfake-Lens-Token") or ""
-            return bool(supplied) and secrets.compare_digest(supplied, token)
+            message = (
+                "missing or invalid X-Deepfake-Lens-Token"
+                if token
+                else f"missing {CLIENT_HEADER} header (cross-origin requests cannot set it)"
+            )
+            self.send_error(401, message)
+            return False
 
         def _guard(self) -> bool:
             if not allow_lan:
@@ -96,13 +125,12 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
                 return
             parsed = urlparse(self.path)
 
-            # Serve GUI (static shell — carries no evidence data)
-            if parsed.path == "/" or parsed.path == "/gui":
+            if not parsed.path.startswith("/api/"):
+                # Serve GUI (static shell — carries no evidence data)
                 self._send_html(_load_gui())
                 return
 
-            if not self._token_ok():
-                self.send_error(401, "missing or invalid X-Deepfake-Lens-Token")
+            if not self._api_allowed():
                 return
 
             # API endpoints
@@ -121,16 +149,16 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
             if parsed.path == "/api/stats":
                 self._send_json(_stats_payload())
                 return
-
-            # Default to GUI
-            self._send_html(_load_gui())
+            self.send_error(404, "not found")
 
         def do_POST(self) -> None:
             if not self._guard():
                 return
             parsed = urlparse(self.path)
-            if not self._token_ok():
-                self.send_error(401, "missing or invalid X-Deepfake-Lens-Token")
+            if not parsed.path.startswith("/api/"):
+                self.send_error(404, "not found")
+                return
+            if not self._api_allowed():
                 return
             if parsed.path == "/api/analyze-upload":
                 self._handle_analyze_upload()
@@ -337,11 +365,18 @@ def _stats_payload() -> dict[str, object]:
 
 
 def _extract_metadata(path: Path) -> dict[str, str]:
-    """Extract metadata from file."""
+    """Extract metadata from file.
+
+    Reads at most ``DEFAULT_METADATA_BYTES`` — the PNG text/iTXt chunks this
+    parses live in the header region anyway, and an unbounded read of a
+    user-supplied path is a memory-exhaustion vector.
+    """
     import struct
-    
+
     metadata = {}
     try:
+        if path.stat().st_size > DEFAULT_METADATA_BYTES:
+            return metadata
         data = path.read_bytes()
         if data[:8] == b"\x89PNG\r\n\x1a\n":
             offset = 8

@@ -45,6 +45,24 @@ jobs:
       - name: CLI help and fixture smoke
         run: python scripts/cli_smoke_test.py
 
+  python-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install package (stdlib-only, no optional extras)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Compile check
+        run: python -m compileall deepfake_lens
+      # The suite must pass on Windows too: the CLI prints non-ASCII output
+      # (Korean labels, em-dashes) and tests must not assume POSIX /tmp.
+      - name: Unit tests
+        run: python -m unittest discover deepfake_lens/tests
+
   python-extras:
     runs-on: ubuntu-latest
     steps:

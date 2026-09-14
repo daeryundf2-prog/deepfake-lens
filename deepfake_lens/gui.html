@@ -247,9 +247,16 @@
         // API token: only needed when the server was started with --token
         // (mandatory for --allow-lan). Stored in sessionStorage, sent as a
         // header; a 401 prompts once and retries.
+        // X-Deepfake-Lens-Client is sent unconditionally: the server requires
+        // it on /api/* when no token is set, because a custom header forces a
+        // CORS preflight that cross-origin drive-by requests cannot pass.
         async function apiFetch(url, options = {}) {
             const token = sessionStorage.getItem('dfl.token') || '';
-            const headers = Object.assign({}, options.headers || {}, token ? { 'X-Deepfake-Lens-Token': token } : {});
+            const headers = Object.assign(
+                { 'X-Deepfake-Lens-Client': 'gui' },
+                options.headers || {},
+                token ? { 'X-Deepfake-Lens-Token': token } : {}
+            );
             const response = await fetch(url, Object.assign({}, options, { headers }));
             if (response.status === 401) {
                 const entered = prompt('API 토큰을 입력하세요 (--token으로 시작된 서버):');

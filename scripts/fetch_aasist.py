@@ -142,6 +142,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--force", action="store_true", help="overwrite an existing destination file")
     args = parser.parse_args(argv)
 
+    # Windows consoles default to a legacy code page (e.g. cp949) that cannot
+    # encode the em-dashes in LICENSE_NOTICE; reconfigure so print() can't crash.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8", errors="replace")
+
     dest_dir = Path(args.dest)
     dest = dest_dir / args.name
     part = dest.with_name(dest.name + ".part")

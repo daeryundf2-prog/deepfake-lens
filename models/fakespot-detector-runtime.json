@@ -1,0 +1,23 @@
+{
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "Fakespot AI text detector (roberta-base)",
+  "candidate_key": "fakespot-detector-2024",
+  "runtime": "hf-text-classifier",
+  "modality": "text",
+  "hub_model": "fakespot-ai/roberta-base-ai-text-detection-v1",
+  "score_index": 1,
+  "score_activation": "softmax",
+  "score_semantics": "fake_probability",
+  "threshold": 67,
+  "source_url": "https://huggingface.co/fakespot-ai/roberta-base-ai-text-detection-v1",
+  "limitations": [
+    "Trained on newer LLM outputs than the GPT-2-era OpenAI detector, but still an English-centric classifier — re-validate on target-domain samples before trusting thresholds.",
+    "The model is fetched from Hugging Face on first use (~500 MB into the HF cache); set 'hub_model' to a local snapshot directory to run fully offline.",
+    "Prioritization signal, not a truth label — short text and non-English text remain unreliable."
+  ],
+  "notes": [
+    "Label order for this checkpoint is index 0 = Human, index 1 = AI — verified against the model's config.json id2label (opposite of the OpenAI detector, which is 0=Fake).",
+    "Pair with models/openai-detector-runtime.json via a directory --model-path to get a two-member text ensemble with an agreement signal."
+  ],
+  "license": "Apache-2.0"
+}

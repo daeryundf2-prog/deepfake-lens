@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import unittest
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -31,7 +31,7 @@ class AudioAnalysisTest(unittest.TestCase):
 
     def test_unsupported_format_returns_error(self) -> None:
         """Analysis of unsupported format should return error analysis."""
-        tmp_path = Path("/tmp") / "test.txt"
+        tmp_path = Path(tempfile.gettempdir()) / "test.txt"
         tmp_path.write_bytes(b"not audio")
         result = analyze_audio(tmp_path)
         self.assertEqual(result.score, 0)
@@ -39,7 +39,7 @@ class AudioAnalysisTest(unittest.TestCase):
         tmp_path.unlink(missing_ok=True)
     def test_empty_file_returns_error(self) -> None:
         """Analysis of empty file should return error analysis."""
-        tmp_path = Path("/tmp") / "empty.wav"
+        tmp_path = Path(tempfile.gettempdir()) / "empty.wav"
         tmp_path.write_bytes(b"")
         result = analyze_audio(tmp_path)
         self.assertEqual(result.score, 0)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -30,7 +31,7 @@ class VideoTemporalAnalysisTest(unittest.TestCase):
 
     def test_unsupported_format_returns_error(self) -> None:
         """Analysis of unsupported format should return error analysis."""
-        tmp_path = Path("/tmp") / "test.txt"
+        tmp_path = Path(tempfile.gettempdir()) / "test.txt"
         tmp_path.write_bytes(b"not video")
         result = analyze_video_temporal(tmp_path)
         self.assertEqual(result.score, 0)
