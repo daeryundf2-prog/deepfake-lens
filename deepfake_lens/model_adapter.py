@@ -745,12 +745,14 @@ def _run_causal_lm_ppl(media_path: Path, profile: dict[str, object], *, model_na
     prose = _extract_prose(text)
     views = [(text, "raw")] + ([(prose, "prose")] if prose != text else [])
     best_ppl: float | None = None
+    best_burst_cv: float | None = None
     view_notes: list[str] = []
     for view_text, view_name in views:
         ids = tokenizer(view_text, return_tensors="pt").input_ids[0]
         total_nll = 0.0
         total_tokens = 0
         windows_done = 0
+        window_nlls: list[float] = []
         with torch.no_grad():
             for start in range(0, ids.shape[0], window):
                 if max_windows and windows_done >= max_windows:
@@ -763,14 +765,23 @@ def _run_causal_lm_ppl(media_path: Path, profile: dict[str, object], *, model_na
                 n_tokens = int(chunk.shape[0]) - 1
                 total_nll += float(out.loss) * n_tokens
                 total_tokens += n_tokens
+                window_nlls.append(float(out.loss))
         if total_tokens < _PPL_MIN_TOKENS:
             continue
         view_ppl = math.exp(min(20.0, total_nll / total_tokens))
-        view_notes.append(f"{view_name}:ppl={view_ppl:.2f}@{total_tokens}tok")
+        # Burstiness: coefficient of variation across per-window NLLs.
+        # Human writing bursty (high CV); machine text uniform (low CV).
+        burst_cv = 0.0
+        if len(window_nlls) >= 3:
+            mean_w = sum(window_nlls) / len(window_nlls)
+            var_w = sum((v - mean_w) ** 2 for v in window_nlls) / len(window_nlls)
+            burst_cv = (var_w ** 0.5) / max(1e-9, mean_w)
+        view_notes.append(f"{view_name}:ppl={view_ppl:.2f}@{total_tokens}tok burstCV={burst_cv:.2f}")
         if best_ppl is None or view_ppl < best_ppl:
             best_ppl = view_ppl
             mean_nll = total_nll / total_tokens
             total_tokens_used = total_tokens
+            best_burst_cv = burst_cv
     if best_ppl is None:
         return ExternalModelAnalysis(
             available=False, score=0, confidence="unavailable", model=model_name,
@@ -789,8 +800,8 @@ def _run_causal_lm_ppl(media_path: Path, profile: dict[str, object], *, model_na
         model=model_name,
         detail=(
             f"causal-lm-ppl: ppl={ppl:.2f} mean_nll={mean_nll:.3f} tokens={total_tokens_used} "
-            f"views=[{'; '.join(view_notes)}] window={window} ref_lm={hub_model} "
-            f"anchors=[{ppl_low},{ppl_high}] score={score}."
+            f"burst_cv={best_burst_cv:.2f} views=[{'; '.join(view_notes)}] window={window} "
+            f"ref_lm={hub_model} anchors=[{ppl_low},{ppl_high}] score={score}."
         ),
         limitations=list(profile_limitations),
     )

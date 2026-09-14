@@ -101,6 +101,13 @@ def analyze_text_advanced(text: str) -> TextAdvancedAnalysis:
     if markdown_signal:
         signals.append(markdown_signal)
 
+    # Frontier-LLM fingerprints (language/model agnostic families)
+    for probe in (_typographic_punctuation_signal, _ai_vocabulary_signal,
+                  _hedging_balance_signal, _connector_starter_signal):
+        probe_signal = probe(trimmed, sentences, words, hangul)
+        if probe_signal:
+            signals.append(probe_signal)
+
     # Limitations
     if len(words) < 50:
         limitations.append("텍스트가 너무 짧아 신뢰할 수 있는 분석이 어렵습니다.")
@@ -271,6 +278,147 @@ def _burstiness_analysis(sentences: list[str]) -> TextAdvancedEvidenceSignal | N
             18,
         )
 
+    return None
+
+
+# Typographic (non-ASCII) punctuation frontier LLMs emit by default while
+# humans type ASCII fallbacks: em/en dashes, curly quotes, ellipsis.
+_TYPOGRAPHIC_PUNCT = "—–‘’“”…″‴·"
+
+# Documented frontier-LLM favored vocabulary (the "delve" family) — words
+# whose frequency spiked in published corpora after LLM adoption.
+_AI_VOCAB_EN = {
+    "delve", "delving", "crucial", "crucially", "realm", "tapestry",
+    "landscape", "nuanced", "foster", "fostering", "meticulous",
+    "meticulously", "testament", "vibrant", "pivotal", "leverage",
+    "leveraging", "elevate", "holistic", "embark", "unleash",
+    "streamline", "commendable", "intricate", "underscore",
+    "underscores", "paramount", "multifaceted", "endeavor", "beacon",
+    "navigate", "navigating", "landscapes", "rich tapestry",
+}
+# Conjunctive adverbs frontier LLMs overuse as sentence glue.
+_AI_CONNECTORS_EN = {
+    "moreover", "furthermore", "additionally", "consequently",
+    "nevertheless", "nonetheless", "in conclusion", "importantly",
+    "notably", "ultimately", "in summary", "in essence",
+}
+# Korean equivalents: formal connective/conclusive phrases typical of
+# model-generated Korean.
+_AI_CONNECTORS_KO = {
+    "결론적으로", "요약하자면", "다음과 같습니다", "중요한 것은",
+    "주목할 점", "핵심은", "다양한 측면", "균형 잡힌",
+    "종합하면", "살펴보면", "고려해야", "한편으로", "무엇보다",
+}
+
+
+def _typographic_punctuation_signal(
+    text: str, sentences: list[str], words: list[str], hangul_ratio: float
+) -> TextAdvancedEvidenceSignal | None:
+    """Humans type ASCII quotes/dashes; frontier LLMs emit typographic
+    Unicode (—, ", ", ', …). Density of those characters is a cheap,
+    model-agnostic fingerprint."""
+    if len(text) < 200:
+        return None
+    typo = sum(text.count(ch) for ch in _TYPOGRAPHIC_PUNCT)
+    density = typo / len(text)
+    # Humans occasionally paste smart quotes; require real density.
+    if typo >= 6 and density > 0.002:
+        return TextAdvancedEvidenceSignal(
+            "타이포그래픽 구두점",
+            f"em-dash/곱따옴표/말줄임 등 비ASCII 구두점이 {typo}개({density:.3f}/문자) — 키보드 입력이 아닌 모델 출력 특성입니다.",
+            12,
+        )
+    return None
+
+
+def _ai_vocabulary_signal(
+    text: str, sentences: list[str], words: list[str], hangul_ratio: float
+) -> TextAdvancedEvidenceSignal | None:
+    """Frontier-LLM favored vocabulary + connector-adverb density."""
+    if len(words) < 60:
+        return None
+    normalized = text.lower()
+    if hangul_ratio > 0.3:
+        hits = sum(normalized.count(p) for p in _AI_CONNECTORS_KO)
+        per_k = hits / (len(words) / 1000)
+        if hits >= 3 and per_k > 4:
+            return TextAdvancedEvidenceSignal(
+                "모델형 연결어 밀도(한국어)",
+                f"모델 생성 한국어에서 과용되는 연결/결론 표현이 {hits}개({per_k:.1f}/1000어) 발견됩니다.",
+                12,
+            )
+        return None
+    vocab_hits = sum(words.count(w) for w in _AI_VOCAB_EN)
+    conn_hits = sum(normalized.count(c) for c in _AI_CONNECTORS_EN)
+    per_k = (vocab_hits + conn_hits) / (len(words) / 1000)
+    if vocab_hits + conn_hits >= 4 and per_k > 5:
+        return TextAdvancedEvidenceSignal(
+            "LLM 과용 어휘",
+            f"frontier LLM이 과용하는 어휘/접속부사가 {vocab_hits + conn_hits}개({per_k:.1f}/1000어) — delve/crucial/moreover 계열 지문입니다.",
+            15,
+        )
+    return None
+
+
+def _hedging_balance_signal(
+    text: str, sentences: list[str], words: list[str], hangul_ratio: float
+) -> TextAdvancedEvidenceSignal | None:
+    """Both-sides hedging scaffold typical of assistant-style answers."""
+    if len(sentences) < 4:
+        return None
+    normalized = text.lower()
+    en_pairs = [
+        ("on the one hand", "on the other hand"),
+        ("while it is", "it is also"),
+        ("however", "it is important to note"),
+        ("although", "nevertheless"),
+    ]
+    ko_pairs = [
+        ("한편", "반면"),
+        ("장점이 있", "단점"),
+        ("다만", "고려해야"),
+        ("반대로", "동시에"),
+    ]
+    pairs = ko_pairs if hangul_ratio > 0.3 else en_pairs
+    hit_pairs = sum(1 for a, b in pairs if a in normalized and b in normalized)
+    if hit_pairs >= 2:
+        return TextAdvancedEvidenceSignal(
+            "양면 균형 헤징 구조",
+            f"찬반 균형형 연결 구조가 {hit_pairs}쌍 발견 — 어시스턴트 응답의 전형적 골격입니다.",
+            10,
+        )
+    return None
+
+
+def _connector_starter_signal(
+    text: str, sentences: list[str], words: list[str], hangul_ratio: float
+) -> TextAdvancedEvidenceSignal | None:
+    """Sentence-initial connector uniformity — humans vary openers,
+    frontier models default to connector-first scaffolding."""
+    if len(sentences) < 6:
+        return None
+    en_starters = (
+        "however", "moreover", "furthermore", "additionally", "in addition",
+        "consequently", "therefore", "thus", "overall", "in conclusion",
+        "importantly", "notably", "first", "second", "finally", "ultimately",
+    )
+    ko_starters = (
+        "또한", "그러나", "하지만", "따라서", "결론적으로", "먼저",
+        "다음으로", "마지막으로", "한편", "특히", "종합하면", "즉,",
+    )
+    starters = ko_starters if hangul_ratio > 0.3 else en_starters
+    hits = sum(
+        1
+        for s in sentences
+        if s.lower().lstrip('"\'-–— ').startswith(starters)
+    )
+    rate = hits / len(sentences)
+    if rate > 0.3 and hits >= 3:
+        return TextAdvancedEvidenceSignal(
+            "문두 접속사 균일성",
+            f"문장의 {rate:.0%}({hits}개)이 접속사로 시작 — 사람보다 균일한 문두 골격입니다.",
+            10,
+        )
     return None
 
 

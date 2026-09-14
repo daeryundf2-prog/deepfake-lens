@@ -173,3 +173,35 @@ pages, +informal/short/technical/news AI samples)
 - Fast-DetectGPT was evaluated and deferred: a second uncalibrated
   zero-shot method adds cost without evidence it fixes the measured
   failures (technical docs, humanized text).
+
+## Fifth probe — frontier-LLM fingerprint signals
+
+Four model-agnostic fingerprint families added to the statistical layer
+(these target *how* frontier models write, independent of which vendor):
+
+| Signal | Mechanism | Fires on |
+|---|---|---|
+| `타이포그래픽 구두점` | em-dash/curly quotes/ellipsis density — humans type ASCII, models emit Unicode | agent/prose output ≥6 chars, >0.2% |
+| `LLM 과용 어휘` | delve/crucial/realm/tapestry/moreover family + Korean connector set, per-1000-word density | formal model prose |
+| `양면 균형 헤징 구조` | both-sides scaffold pairs (한편/반면, on one hand/other hand) | assistant-style answers |
+| `문두 접속사 균일성` | >30% of sentences start with a discourse connector | model-scaffolded writing |
+
+Plus `burst_cv` (per-window NLL coefficient of variation — the
+GPTZero-style burstiness measure, low for machine text) now reported in
+`causal-lm-ppl` details for later calibration.
+
+Measured effect on the corpus (heuristic layer only, no neural members):
+
+- **Overall AUROC 0.769, English AUROC 0.894, FPR 0** — the fingerprint
+  signals rank every AI prose/doc sample above every human sample with
+  zero false positives; the top-6 scored items are all AI (52/43/35/
+  30×3) vs best human 21.
+- Devin technical docs moved 18→**30** fused-heuristic (typographic
+  punctuation + uniform list structure now fire) — still below the flag
+  band, honest improvement not a fix.
+- **The fingerprints out-rank the neural ensemble on English** (0.894
+  vs 0.197) precisely because they do not false-positive on
+  encyclopedic prose — they measure *style fingerprints*, not fluency.
+- Remaining gap: short/plain AI samples (news-style, informal, one-line
+  Korean) still score 0 — fingerprints need ≥60 words / ≥200 chars of
+  scaffolded text to engage.

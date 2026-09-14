@@ -410,6 +410,8 @@ def analyze_text(text: str, *, model_analysis: ExternalModelAnalysis | None = No
     model_signal = _model_evidence_signal(model_analysis)
     if model_signal:
         signals.append(model_signal)
+    fingerprint_signals = _frontier_llm_fingerprints(trimmed, normalized, sentences, words)
+    signals.extend(fingerprint_signals)
 
     source_guess = guess_text_source(normalized, identity_hits)
     limitations = ["휴리스틱 기반 선별 결과이며 진위 판단이 아니라 검토 우선순위입니다."]
@@ -870,6 +872,105 @@ def _pixel_evidence_signal(pixel_analysis: PixelAnalysis | None) -> EvidenceSign
     top_details = pixel_analysis.signals[:2] or ["일부 픽셀 전문가 모델에서 약한 이상 신호가 있습니다."]
     detail = f"{pixel_analysis.model} score={pixel_analysis.score}, confidence={pixel_analysis.confidence}. " + " / ".join(top_details)
     return EvidenceSignal(title, detail, weight)
+
+
+_TYPOGRAPHIC_PUNCT = "—–‘’“”…″‴·"
+
+_AI_VOCAB_EN = {
+    "delve", "delving", "crucial", "crucially", "realm", "tapestry",
+    "landscape", "nuanced", "foster", "fostering", "meticulous",
+    "meticulously", "testament", "vibrant", "pivotal", "leverage",
+    "leveraging", "elevate", "holistic", "embark", "unleash",
+    "streamline", "commendable", "intricate", "underscore",
+    "underscores", "paramount", "multifaceted", "endeavor", "beacon",
+    "navigate", "navigating",
+}
+_AI_CONNECTORS_EN = {
+    "moreover", "furthermore", "additionally", "consequently",
+    "nevertheless", "nonetheless", "in conclusion", "importantly",
+    "notably", "ultimately", "in summary", "in essence",
+}
+_AI_CONNECTORS_KO = {
+    "결론적으로", "요약하자면", "다음과 같습니다", "중요한 것은",
+    "주목할 점", "핵심은", "다양한 측면", "균형 잡힌",
+    "종합하면", "살펴보면", "고려해야", "한편으로", "무엇보다",
+}
+
+
+def _hangul_ratio_text(text: str) -> float:
+    letters = [c for c in text if c.isalpha()]
+    if not letters:
+        return 0.0
+    return sum(1 for c in letters if "가" <= c <= "힣") / len(letters)
+
+
+def _frontier_llm_fingerprints(
+    trimmed: str, normalized: str, sentences: list[str], words: list[str]
+) -> list[EvidenceSignal]:
+    """Model-agnostic fingerprints of frontier-LLM writing style — vendor
+    tells (delve family vocab, typographic punctuation, hedging scaffold,
+    connector-first sentences) that persist across generators. Kept in
+    sync with text_advanced's probe family."""
+    signals: list[EvidenceSignal] = []
+    hangul = _hangul_ratio_text(trimmed)
+
+    if len(trimmed) >= 200:
+        typo = sum(trimmed.count(ch) for ch in _TYPOGRAPHIC_PUNCT)
+        if typo >= 6 and typo / len(trimmed) > 0.002:
+            signals.append(EvidenceSignal(
+                "타이포그래픽 구두점",
+                f"em-dash/곱따옴표/말줄임 등 비ASCII 구두점이 {typo}개 — 키보드 입력이 아닌 모델 출력 특성입니다.",
+                12,
+            ))
+
+    if len(words) >= 60:
+        if hangul > 0.3:
+            hits = sum(normalized.count(p) for p in _AI_CONNECTORS_KO)
+            if hits >= 3 and hits / (len(words) / 1000) > 4:
+                signals.append(EvidenceSignal(
+                    "모델형 연결어 밀도(한국어)",
+                    f"모델 생성 한국어에서 과용되는 연결/결론 표현이 {hits}개 발견됩니다.",
+                    12,
+                ))
+        else:
+            vocab_hits = sum(words.count(w) for w in _AI_VOCAB_EN)
+            conn_hits = sum(normalized.count(c) for c in _AI_CONNECTORS_EN)
+            if vocab_hits + conn_hits >= 4 and (vocab_hits + conn_hits) / (len(words) / 1000) > 5:
+                signals.append(EvidenceSignal(
+                    "LLM 과용 어휘",
+                    f"frontier LLM이 과용하는 어휘/접속부사가 {vocab_hits + conn_hits}개 — delve/crucial/moreover 계열 지문입니다.",
+                    15,
+                ))
+
+    if len(sentences) >= 4:
+        pairs = [("한편", "반면"), ("장점이 있", "단점"), ("다만", "고려해야"), ("반대로", "동시에")] if hangul > 0.3 else [
+            ("on the one hand", "on the other hand"),
+            ("while it is", "it is also"),
+            ("however", "it is important to note"),
+            ("although", "nevertheless"),
+        ]
+        hit_pairs = sum(1 for a, b in pairs if a in normalized and b in normalized)
+        if hit_pairs >= 2:
+            signals.append(EvidenceSignal(
+                "양면 균형 헤징 구조",
+                f"찬반 균형형 연결 구조가 {hit_pairs}쌍 발견 — 어시스턴트 응답의 전형적 골격입니다.",
+                10,
+            ))
+
+    if len(sentences) >= 6:
+        starters = ("또한", "그러나", "하지만", "따라서", "결론적으로", "먼저", "다음으로", "마지막으로", "한편", "특히", "종합하면", "즉,") if hangul > 0.3 else (
+            "however", "moreover", "furthermore", "additionally", "in addition",
+            "consequently", "therefore", "thus", "overall", "in conclusion",
+            "importantly", "notably", "first", "second", "finally", "ultimately",
+        )
+        hits = sum(1 for s in sentences if s.lower().lstrip("\"'-–— ").startswith(starters))
+        if hits / len(sentences) > 0.3 and hits >= 3:
+            signals.append(EvidenceSignal(
+                "문두 접속사 균일성",
+                f"문장의 {hits / len(sentences):.0%}({hits}개)이 접속사로 시작 — 사람보다 균일한 문두 골격입니다.",
+                10,
+            ))
+    return signals
 
 
 def _model_evidence_signal(model_analysis: ExternalModelAnalysis | None) -> EvidenceSignal | None:
