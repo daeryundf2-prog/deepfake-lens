@@ -177,8 +177,9 @@ internal fun loadImageAnalysisPayload(context: Context, uri: Uri, includePreview
 
 /**
  * Attach the ONNX model's synthetic-class probability as an informational
- * signal (weight 0): no validated checkpoint ships with the app, so the
- * neural score must not move the heuristic score or band. When no model is
+ * signal (weight 0): a CNNDetection int8 export ships in assets, but it has
+ * not been validated on-device against the desktop torch path, so the neural
+ * score must not move the heuristic score or band yet. When no model is
  * bundled the limitation says so instead of pretending the network ran.
  */
 private fun ClassificationResult.withNeuralScore(neural: NeuralScore?): ClassificationResult {
@@ -190,10 +191,10 @@ private fun ClassificationResult.withNeuralScore(neural: NeuralScore?): Classifi
     return copy(
         signals = signals + EvidenceSignal(
             title = "신경망 분류 (ONNX)",
-            detail = "학습 모델 추정 AI 확률 ${(neural.aiProbability * 100).toInt()}% — 참고용이며 검증된 체크포인트가 필요합니다.",
+            detail = "CNNDetection 추정 AI 확률 ${(neural.aiProbability * 100).toInt()}% — 참고용이며 온디바이스 검증 전입니다.",
             weight = 0
         ),
-        limitations = limitations + "ONNX 신경망 점수는 학습 데이터 품질에 좌우되는 참고값입니다."
+        limitations = limitations + "ONNX 신경망 점수는 온디바이스 검증 전 참고값입니다 (weight 0)."
     )
 }
 

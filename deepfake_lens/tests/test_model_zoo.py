@@ -251,6 +251,16 @@ class MultiProfileAggregationTest(unittest.TestCase):
             dir_analysis = analyze_external_model(image, root)
             self.assertEqual(len(dir_analysis.models), 2)
 
+    def test_bare_checkpoint_relative_path_is_not_doubled(self) -> None:
+        """A bare .onnx passed as a relative path must resolve once — a
+        doubled 'dir/dir/file' checkpoint path was the regression."""
+        analysis = analyze_external_model(Path("img.png"), Path("models/does-not-exist.onnx"), modality="image")
+        self.assertIsNotNone(analysis)
+        self.assertFalse(analysis.available)
+        self.assertNotIn("models/models", analysis.detail.replace("/", "\\"))
+        self.assertNotIn("models\\models", analysis.detail)
+        self.assertIn("does-not-exist.onnx", analysis.detail)
+
     def test_empty_directory_is_graceful(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

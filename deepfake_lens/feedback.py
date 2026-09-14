@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -277,29 +276,16 @@ def suggest_fusion_weights(
         suggested = {key: max(0.0, base_weights[key]) / base_total for key in keys}
     else:
         suggested = {key: raw[key] / total for key in keys}
-    # Normalize in integer basis points (1e-4 units) so the residual distribution
-    # is deterministic and unaffected by float addition order.
+    # Normalize in integer basis points (1e-4 units): deterministic, and the
+    # single residual assignment keeps the sum within one basis point of 1.0.
+    # Consumers divide by the weight total (fusion.py), so a sub-ulp float
+    # remainder carries no meaning — an exact 1.0 is not promised.
     units = {key: int(round(value * 10000)) for key, value in suggested.items()}
     residual = 10000 - sum(units.values())
     if units and residual:
         largest = max(units, key=lambda key: units[key])
         units[largest] += residual
     weights = {key: unit / 10000 for key, unit in units.items()}
-    if weights:
-        # Emit the largest weight last and pin it to the float complement of
-        # the rest: sum() only gained compensated (Neumaier) summation for
-        # floats in Python 3.12, and under the older left-to-right fold only
-        # the final addend can pin the total to exactly 1.0.
-        largest = max(keys, key=lambda key: weights[key])
-        weights = {key: weights[key] for key in keys if key != largest}
-        weights[largest] = 1.0 - sum(weights.values())
-        for _ in range(8):  # absorb any residual double-rounding
-            residual = 1.0 - sum(weights.values())
-            if residual == 0.0:
-                break
-            weights[largest] = math.nextafter(
-                weights[largest], math.inf if residual > 0 else -math.inf
-            )
     return weights, notes
 
 

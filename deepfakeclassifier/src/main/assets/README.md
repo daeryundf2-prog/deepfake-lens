@@ -7,6 +7,17 @@ python experiments/train_detector.py --manifest artifacts/manifest.json --sbi --
 python experiments/export_onnx.py --checkpoint experiments/run-001/convnext_tiny.torchscript --out deepfakeclassifier/src/main/assets/deepfake-lens.onnx
 ```
 
+A published checkpoint can also be adapted directly — `export_mobile_onnx.py`
+rebuilds a torchvision-runtime profile (e.g. CNNDetection's
+`blur_jpg_prob0.5.pth`), wraps the single-logit sigmoid as the `[1,2]`
+contract, verifies torch/ONNX parity, and can emit an INT8-dynamic model:
+
+```
+python experiments/export_mobile_onnx.py --profile models/cnndetection-runtime.json \
+    --checkpoint models/blur_jpg_prob0.5.pth --quantize-int8 \
+    --out deepfakeclassifier/src/main/assets/deepfake-lens.onnx
+```
+
 Contract (must match `OnnxClassifier.kt` / `export_onnx.py` defaults):
 
 - input name `input`, shape `[1, 3, 224, 224]`, float32 NCHW,

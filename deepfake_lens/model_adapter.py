@@ -145,7 +145,9 @@ def _profile_matches_modality(source: Path, modality: str) -> bool:
 def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, modality: str = "image") -> ExternalModelAnalysis:
     if model_file.suffix.lower() in {".pt", ".pth", ".onnx", ".torchscript"}:
         runtime = "onnx" if model_file.suffix.lower() == ".onnx" else "torchscript"
-        return _score_from_runtime_profile({"runtime": runtime, "checkpoint": str(model_file), "name": model_file.name}, media_path, base_dir=model_file.parent)
+        # Resolve first — _checkpoint_path joins relative paths onto base_dir,
+        # so a relative model_file would be doubled into a bogus path.
+        return _score_from_runtime_profile({"runtime": runtime, "checkpoint": str(model_file.resolve()), "name": model_file.name}, media_path, base_dir=model_file.parent)
 
     try:
         profile = json.loads(model_file.read_text(encoding="utf-8"))

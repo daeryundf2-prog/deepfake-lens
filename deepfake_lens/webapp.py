@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import tempfile
+import threading
+import time
 from email.parser import BytesParser
 from email.policy import default as email_policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -135,10 +138,19 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
 
             # API endpoints
             if parsed.path == "/api/scan":
+                if parse_qs(parsed.query).get("async", ["false"])[0].lower() in {"1", "true", "yes"}:
+                    try:
+                        self._send_json(_scan_job_start(parsed.query, default_folder=default_folder))
+                    except ValueError as exc:
+                        self.send_error(400, str(exc))
+                    return
                 try:
                     self._send_json(_scan_payload(parsed.query, default_folder=default_folder))
                 except ValueError as exc:
                     self.send_error(400, str(exc))
+                return
+            if parsed.path == "/api/scan-status":
+                self._send_json(_scan_status_payload(parsed.query))
                 return
             if parsed.path == "/api/heatmap":
                 self._send_png(_heatmap_payload(parsed.query))
@@ -301,6 +313,63 @@ def _scan_payload(query: str, *, default_folder: Path | None) -> dict[str, objec
         return scan_to_json(summary, items)
     except (OSError, ValueError) as exc:
         return {"error": str(exc)}
+
+
+# In-memory scan-job registry for /api/scan?async=1. ThreadingHTTPServer
+# already runs each request on its own thread, so the job model exists for
+# progress polling and to keep long scans from holding a client connection —
+# not for concurrency. Entries expire; nothing is persisted.
+_SCAN_JOBS: dict[str, dict[str, Any]] = {}
+_SCAN_JOBS_LOCK = threading.Lock()
+_SCAN_JOB_TTL_SECONDS = 15 * 60
+_SCAN_JOB_MAX = 32
+
+
+def _scan_job_evict(now: float) -> None:
+    """Drop finished jobs past the TTL (called with the lock held)."""
+    for key in [key for key, entry in _SCAN_JOBS.items() if now - entry.get("finished", entry["created"]) > _SCAN_JOB_TTL_SECONDS]:
+        _SCAN_JOBS.pop(key, None)
+
+
+def _scan_job_start(query: str, *, default_folder: Path | None) -> dict[str, object]:
+    """Start a background scan job; poll /api/scan-status?job=<id>."""
+    with _SCAN_JOBS_LOCK:
+        _scan_job_evict(time.time())
+        if len(_SCAN_JOBS) >= _SCAN_JOB_MAX:
+            raise ValueError("too many scan jobs in flight; retry after a running job finishes")
+        job_id = secrets.token_hex(8)
+        _SCAN_JOBS[job_id] = {"status": "running", "created": time.time()}
+
+    def work() -> None:
+        try:
+            result = _scan_payload(query, default_folder=default_folder)
+            status = "done"
+        except Exception as exc:  # noqa: BLE001 - a worker crash must not kill the job silently
+            result = {"error": str(exc)}
+            status = "error"
+        with _SCAN_JOBS_LOCK:
+            entry = _SCAN_JOBS.get(job_id)
+            if entry is not None:
+                entry.update(status=status, result=result, finished=time.time())
+
+    threading.Thread(target=work, daemon=True, name=f"scan-job-{job_id}").start()
+    return {"job_id": job_id, "status": "running"}
+
+
+def _scan_status_payload(query: str) -> dict[str, object]:
+    params = parse_qs(query)
+    job_id = params.get("job", [""])[0].strip()
+    if not job_id:
+        return {"error": "missing job parameter"}
+    with _SCAN_JOBS_LOCK:
+        _scan_job_evict(time.time())
+        entry = _SCAN_JOBS.get(job_id)
+        if entry is None:
+            return {"error": "unknown or expired job"}
+        payload: dict[str, object] = {"job_id": job_id, "status": entry["status"]}
+        if entry["status"] != "running":
+            payload["result"] = entry.get("result")
+        return payload
 
 
 def _analyze_file_payload(query: str) -> dict[str, object]:

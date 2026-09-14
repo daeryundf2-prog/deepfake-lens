@@ -149,7 +149,10 @@ class SuggestWeightsTest(unittest.TestCase):
             "source": {"auroc": 0.5},
         }
         weights, _ = suggest_fusion_weights(per_component, DEFAULT_FUSION_PROFILE.weights)
-        self.assertEqual(sum(weights.values()), 1.0)
+        # Basis-point normalization keeps the sum within one 1e-4 unit of
+        # 1.0; consumers divide by the total, so exact float equality is not
+        # required (this used to be pinned by a math.nextafter loop).
+        self.assertAlmostEqual(sum(weights.values()), 1.0, places=6)
         self.assertEqual(weights["source"], 0.0)
         self.assertGreater(weights["metadata"], weights["pixel"])
 

@@ -10,8 +10,8 @@ crash.
 | Profile | Detector | Runtime | Status |
 |---|---|---|---|
 | `aide-runtime.json` | AIDE (ICLR 2025) `progan_train` | `aide` (torch reimplementation in `scripts/run_aide.py`) | wired — run `scripts/fetch_aide.py` |
-| `univfd-runtime.json` | UnivFD (CVPR 2023) CLIP ViT-L/14 linear probe | `clip-linear` (torch + transformers) | wired — drop the fc head at `models/univfd_fc.pth` |
-| `cnndetection-runtime.json` | CNNDetection (CVPR 2020) ResNet-50 blur+jpg | `torchvision` (torch + torchvision) | wired — drop `blur_jpg_prob.pth` in `models/` |
+| `univfd-runtime.json` | UnivFD (CVPR 2023) CLIP ViT-L/14 linear probe | `clip-linear` (torch + transformers) | wired — fetch `pretrained_weights/fc_weights.pth` from the [UnivFD repo](https://github.com/WisconsinAIVision/UniversalFakeDetect) to `models/univfd_fc.pth`; the CLIP backbone downloads from HF on first use (~1.7 GB) |
+| `cnndetection-runtime.json` | CNNDetection (CVPR 2020) ResNet-50 blur+jpg | `torchvision` (torch + torchvision) | wired — download `blur_jpg_prob0.5.pth` via the CNNDetection repo's `weights/download_weights.sh` (Dropbox) to `models/` |
 | `dire-runtime.json` | DIRE (ICCV 2023) diffusion reconstruction | — | `supported: false` placeholder (needs ADM diffusion pipeline) |
 | `aasist-runtime.json` | AASIST (Interspeech 2022) audio anti-spoofing | `aasist` (torch reimplementation in `scripts/run_aasist.py`) | wired — run `scripts/fetch_aasist.py` |
 | `openai-detector-runtime.json` | OpenAI GPT-2 output detector (RoBERTa-base) | `hf-text-classifier` (torch + transformers) | wired — fetched from HF hub on first use |

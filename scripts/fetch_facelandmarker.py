@@ -33,7 +33,7 @@ DEFAULT_NAME = "face_landmarker.task"
 
 FACELANDMARKER_MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/face_landmarker/"
-    "face_landmarker/float32/1/face_landmarker.task"
+    "face_landmarker/float16/1/face_landmarker.task"
 )
 FACELANDMARKER_DOC_URL = "https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker"
 
@@ -42,7 +42,7 @@ EXPECTED_SHA256: str | None = None
 LICENSE_NOTICE = """\
 FaceLandmarker model notice
 - Asset: face_landmarker.task (~4 MB), Google's MediaPipe Tasks face
-  landmark model (478-point canonical face mesh, float32).
+  landmark model (478-point canonical face mesh, float16 bundle).
 - Terms: distributed under the MediaPipe model terms — verify the current
   terms at {doc} before relying on outputs in a product.
 - The asset is NOT covered by this repository's license and must not be

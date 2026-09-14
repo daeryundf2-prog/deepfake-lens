@@ -6,7 +6,7 @@
   "arch": "resnet50",
   "num_classes": 1,
   "state_dict_prefix": "model.",
-  "checkpoint": "blur_jpg_prob.pth",
+  "checkpoint": "blur_jpg_prob0.5.pth",
   "input_size": 224,
   "mean": [
     0.485,
@@ -23,7 +23,7 @@
   "threshold": 67,
   "source_url": "https://github.com/PeterWang512/CNNDetection",
   "limitations": [
-    "Weights are not committed; download blur_jpg_prob.pth via the CNNDetection repo (see its README 'Download the models' links) and place it at models/blur_jpg_prob.pth.",
+    "Weights are not committed; download blur_jpg_prob0.5.pth via the CNNDetection repo's weights/download_weights.sh (Dropbox link) and place it at models/blur_jpg_prob0.5.pth.",
     "CNNDetection was trained on ProGAN outputs with blur+JPEG augmentation; published results show weak transfer to diffusion generators — a low score is not evidence of a real image.",
     "The runtime resizes to 224px with ImageNet mean/std; the original paper evaluated center-crops of arbitrary sizes, so small or heavily cropped inputs may score differently.",
     "Scores are a prioritization signal, not a truth label."

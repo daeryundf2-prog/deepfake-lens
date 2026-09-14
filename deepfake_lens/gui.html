@@ -389,6 +389,7 @@
                 recursive: document.getElementById('opt-recursive').checked,
                 dedupe: document.getElementById('opt-dedupe').checked,
                 heatmaps: document.getElementById('opt-heatmaps').checked,
+                async: '1',
             });
             if (!document.getElementById('opt-model').checked) {
                 params.set('no_default_engine', 'true');
@@ -397,11 +398,32 @@
             setBusy(btn, true, '폴더 분석 중… 파일 수와 모델 로딩에 따라 수 분 걸릴 수 있습니다');
 
             try {
-                const response = await apiFetch('/api/scan?' + params.toString());
-                const data = await response.json();
+                // Async job: the server runs the scan on a worker thread and
+                // this loop polls /api/scan-status, so a long scan never holds
+                // one HTTP request open (and the elapsed ticker keeps ticking).
+                const start = await apiFetch('/api/scan?' + params.toString());
+                const job = await start.json();
+                if (job.error) {
+                    alert('오류: ' + job.error);
+                    return;
+                }
+                let data = null;
+                while (true) {
+                    const status = await apiFetch('/api/scan-status?job=' + encodeURIComponent(job.job_id));
+                    const state = await status.json();
+                    if (state.error) {
+                        alert('오류: ' + state.error);
+                        return;
+                    }
+                    if (state.status !== 'running') {
+                        data = state.result;
+                        break;
+                    }
+                    await new Promise(res => setTimeout(res, 1500));
+                }
 
-                if (data.error) {
-                    alert('오류: ' + data.error);
+                if (!data || data.error) {
+                    alert('오류: ' + (data && data.error ? data.error : '스캔 결과가 없습니다'));
                     return;
                 }
 

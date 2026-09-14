@@ -58,17 +58,24 @@ endpoint. Analysis failures surface as HTTP 500 with the exception text.
 
 ## Web GUI endpoints (`web`, default `127.0.0.1:8765`)
 
-GET-only JSON API under `/api/`; anything else serves the GUI HTML.
+JSON API under `/api/` (GET plus `POST /api/feedback`, `/api/report`,
+`/api/analyze-upload`); anything else serves the GUI HTML.
 
 | Path | Params | Response |
 |---|---|---|
-| `/api/scan` | `folder`, `pixel` (`off`/`fast`/`deep`), `recursive`, `max_files`, `max_file_bytes`, `dedupe`, `heatmaps`, `model_path`, `fusion_profile` | `scan_to_json` payload (`{"summary", "items"}`) or `{"error": "..."}` |
+| `/api/scan` | `folder`, `pixel` (`off`/`fast`/`deep`), `recursive`, `max_files`, `max_file_bytes`, `dedupe`, `heatmaps`, `model_path`, `fusion_profile`, `async` | `scan_to_json` payload (`{"summary", "items"}`) or `{"error": "..."}`; with `async=1` returns `{"job_id", "status": "running"}` |
+| `/api/scan-status` | `job` | `{"job_id", "status": "running"\|"done"\|"error"}` plus `result` once finished; jobs live in memory only and expire after 15 min (max 32 concurrent) |
 | `/api/analyze-file` | `file` | `{"file", "classification", "forensic", "pixel_analysis"}` or `{"error"}` |
 | `/api/heatmap` | `path`, `root` | PNG bytes; 403 unless `path` is a `.png` inside `root`, 404 if missing |
 | `/api/stats` | — | `{"status", "version", "modules"}` |
+| POST `/api/analyze-upload` | multipart file body (≤ `MAX_UPLOAD_BYTES`) | upload-analysis payload |
+| POST `/api/report` | scan JSON body (≤ 64 MiB) | rendered standalone HTML report |
+| POST `/api/feedback` | feedback JSON body (≤ 1 MiB) | appends to `~/.deepfake-lens/feedback.jsonl` |
 
 Limits (clamped, not optional): `max_files ≤ 2000`,
 `max_file_bytes ≤ 1 GiB`, `heatmaps` only with `--pixel deep`.
+The bundled GUI uses `async=1` + `/api/scan-status` polling so a long scan
+never holds one request open; the synchronous form still works for tools.
 
 ## Honesty contract
 

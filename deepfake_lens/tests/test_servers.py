@@ -10,6 +10,7 @@ import importlib.util
 import inspect
 import json
 import os
+import time
 import unittest
 from pathlib import Path
 
@@ -302,6 +303,55 @@ class LiveServerClientHeaderTest(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             urllib.request.urlopen(request, timeout=5)
         self.assertEqual(ctx.exception.code, 401)
+
+
+class AsyncScanJobTest(unittest.TestCase):
+    """The async=1 scan job API: start returns a job id, status polls to done."""
+
+    def test_job_lifecycle(self) -> None:
+        import tempfile
+        from deepfake_lens import webapp
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = Path(tmp) / "a.txt"
+            fixture.write_text("hello world", encoding="utf-8")
+            started = webapp._scan_job_start(f"folder={tmp}&no_default_engine=true", default_folder=None)
+        self.assertEqual(started["status"], "running")
+        job_id = started["job_id"]
+
+        result = None
+        for _ in range(200):
+            state = webapp._scan_status_payload(f"job={job_id}")
+            if state["status"] != "running":
+                result = state["result"]
+                break
+            time.sleep(0.05)
+        self.assertIsNotNone(result, "job did not finish")
+        self.assertEqual(result["summary"]["total"], 1)
+
+        # A second poll returns the stored result, and unknown ids are errors.
+        again = webapp._scan_status_payload(f"job={job_id}")
+        self.assertEqual(again["status"], "done")
+        self.assertIn("error", webapp._scan_status_payload("job=deadbeef"))
+
+    def test_missing_job_parameter_is_error(self) -> None:
+        from deepfake_lens import webapp
+
+        self.assertIn("error", webapp._scan_status_payload(""))
+
+    def test_job_cap_refuses_overflow(self) -> None:
+        from deepfake_lens import webapp
+
+        original = dict(webapp._SCAN_JOBS)
+        try:
+            webapp._SCAN_JOBS.clear()
+            for i in range(webapp._SCAN_JOB_MAX):
+                webapp._SCAN_JOBS[f"fake{i}"] = {"status": "running", "created": time.time()}
+            with self.assertRaises(ValueError):
+                webapp._scan_job_start("folder=.&no_default_engine=true", default_folder=None)
+        finally:
+            webapp._SCAN_JOBS.clear()
+            webapp._SCAN_JOBS.update(original)
 
 
 class ApiServeTokenGateTest(unittest.TestCase):
