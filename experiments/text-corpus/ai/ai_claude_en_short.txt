@@ -1,0 +1,1 @@
+This patch reduces the session token lifetime from 24 hours to 1 hour and adds exponential-backoff refresh retries.

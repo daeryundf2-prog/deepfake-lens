@@ -20,7 +20,7 @@ _MAX_PROFILE_DEPTH = 4
 # explicit "modality" field; otherwise it is inferred from the runtime.
 IMAGE_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision"}
 AUDIO_RUNTIMES = {"aasist"}
-TEXT_RUNTIMES = {"hf-text-classifier", "causal-lm-ppl"}
+TEXT_RUNTIMES = {"hf-text-classifier", "causal-lm-ppl", "binoculars"}
 # "video-frames" samples frames with cv2 and scores each with a nested image
 # runtime profile ("inner") — it reuses image checkpoints, so it needs no
 # weights of its own.
@@ -359,6 +359,8 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
             values = _run_hf_text_classifier(media_path, profile)
         elif runtime == "causal-lm-ppl":
             return _run_causal_lm_ppl(media_path, profile, model_name=model_name)
+        elif runtime == "binoculars":
+            return _run_binoculars(media_path, profile, model_name=model_name)
         elif runtime == "video-frames":
             return _run_video_frames(media_path, profile, model_name=model_name, base_dir=base_dir)
         else:
@@ -416,6 +418,8 @@ def _checkpoint_hint(runtime: str) -> list[str]:
         return ["The model id in 'hub_model' is fetched by transformers on first use; set it to a local snapshot directory to run fully offline."]
     if runtime == "causal-lm-ppl":
         return ["The reference LM id in 'hub_model' is fetched by transformers on first use (~1 GB); set it to a local snapshot directory to run fully offline."]
+    if runtime == "binoculars":
+        return ["The performer/observer LM ids in 'hub_model'/'observer_model' are fetched by transformers on first use; set them to local snapshot directories to run fully offline."]
     if runtime == "torchvision":
         return ["Download the detector's published state-dict checkpoint and point 'checkpoint' at the .pth file."]
     return ["Use an absolute checkpoint path or a path relative to the model profile."]
@@ -432,6 +436,8 @@ def _runtime_install_hint(runtime: str) -> str:
         return "Install the optional hf-text-classifier stack (torch, transformers) to enable the text-detector runtime."
     if runtime == "causal-lm-ppl":
         return "Install the optional causal-lm-ppl stack (torch, transformers) to enable the perplexity-screen runtime."
+    if runtime == "binoculars":
+        return "Install the optional binoculars stack (torch, transformers) to enable the two-LM perplexity-ratio runtime."
     if runtime == "torchvision":
         return "Install the optional torchvision stack (torch, torchvision, Pillow, numpy) to enable the torchvision runtime."
     if runtime == "video-frames":
@@ -731,6 +737,7 @@ def _run_causal_lm_ppl(media_path: Path, profile: dict[str, object], *, model_na
         )
     tokenizer, model = _causal_lm_model(hub_model)
     window = max(_PPL_MIN_TOKENS, int(profile.get("window_tokens", 512) or 512))
+    max_windows = int(profile.get("max_windows", 0) or 0)  # 0 = no cap
     # Score both the raw text and the markup-stripped prose view, keeping
     # the lower perplexity: markdown structure inflates PPL for human and
     # AI alike, so an agent's prose hiding inside a formatted document
@@ -743,11 +750,15 @@ def _run_causal_lm_ppl(media_path: Path, profile: dict[str, object], *, model_na
         ids = tokenizer(view_text, return_tensors="pt").input_ids[0]
         total_nll = 0.0
         total_tokens = 0
+        windows_done = 0
         with torch.no_grad():
             for start in range(0, ids.shape[0], window):
+                if max_windows and windows_done >= max_windows:
+                    break
                 chunk = ids[start:start + window]
                 if chunk.shape[0] < _PPL_MIN_TOKENS:
                     break
+                windows_done += 1
                 out = model(input_ids=chunk.unsqueeze(0), labels=chunk.unsqueeze(0))
                 n_tokens = int(chunk.shape[0]) - 1
                 total_nll += float(out.loss) * n_tokens
@@ -780,6 +791,108 @@ def _run_causal_lm_ppl(media_path: Path, profile: dict[str, object], *, model_na
             f"causal-lm-ppl: ppl={ppl:.2f} mean_nll={mean_nll:.3f} tokens={total_tokens_used} "
             f"views=[{'; '.join(view_notes)}] window={window} ref_lm={hub_model} "
             f"anchors=[{ppl_low},{ppl_high}] score={score}."
+        ),
+        limitations=list(profile_limitations),
+    )
+
+
+def _run_binoculars(media_path: Path, profile: dict[str, object], *, model_name: str) -> ExternalModelAnalysis:
+    """Binoculars screen (Hans et al. 2024): log-PPL under a performer LM
+    divided by the cross-entropy of an observer LM evaluated on the
+    performer's own next-token choices.
+
+    s(x) = mean_nll_M1(x) / x_nll(M1->M2). Machine text scores *lower*
+    (the observer agrees with the performer's confident picks), human
+    text scores higher. This self-normalizing ratio is more robust to
+    domain shift than raw PPL and remains generator-agnostic. Both LMs
+    must share a tokenizer family (e.g. Qwen2.5-0.5B + Qwen2.5-1.5B);
+    the performer's tokenizer drives tokenization.
+
+    Score maps the ratio onto 0-100 between the profile's ``ratio_low``
+    (AI-typical) and ``ratio_high`` (human-typical) anchors — provisional
+    until calibration on the labeled corpus.
+    """
+    torch = importlib.import_module("torch")
+    performer_id = str(profile.get("hub_model") or "")
+    observer_id = str(profile.get("observer_model") or "")
+    if not performer_id or not observer_id:
+        raise RuntimeError("binoculars profile needs 'hub_model' (performer) and 'observer_model' fields")
+    profile_limitations = _profile_limitations(profile)
+    raw = media_path.read_bytes()[:_PPL_MAX_BYTES]
+    text = raw.decode("utf-8", errors="replace")
+    if not text.strip():
+        return ExternalModelAnalysis(
+            available=False, score=0, confidence="unavailable", model=model_name,
+            detail="binoculars: file decodes to empty text.",
+            limitations=list(profile_limitations),
+        )
+    tokenizer, performer = _causal_lm_model(performer_id)
+    _, observer = _causal_lm_model(observer_id)
+    window = max(_PPL_MIN_TOKENS, int(profile.get("window_tokens", 512) or 512))
+    max_windows = int(profile.get("max_windows", 0) or 0)  # 0 = no cap
+    # Raw view only: the X-PPL denominator already normalizes markup, so
+    # the dual-view trick used by causal-lm-ppl buys little here at 2x cost.
+    views = [(text, "raw")]
+    best_ratio: float | None = None
+    best_nll = best_xnll = 0.0
+    best_tokens = 0
+    view_notes: list[str] = []
+    for view_text, view_name in views:
+        ids = tokenizer(view_text, return_tensors="pt").input_ids[0]
+        sum_nll = sum_xnll = 0.0
+        n_positions = 0
+        windows_done = 0
+        with torch.no_grad():
+            for start in range(0, ids.shape[0], window):
+                if max_windows and windows_done >= max_windows:
+                    break
+                chunk = ids[start:start + window]
+                if chunk.shape[0] < _PPL_MIN_TOKENS:
+                    break
+                windows_done += 1
+                batch = chunk.unsqueeze(0)
+                out1 = performer(input_ids=batch)
+                logits1 = out1.logits[0, :-1].float()  # position i predicts token i+1
+                out2 = observer(input_ids=batch)
+                logp2 = torch.log_softmax(out2.logits[0, :-1].float(), dim=-1)
+                # X-PPL: expected observer log-prob over the performer's own
+                # next-token distribution — cross-entropy H(M1, M2), not the
+                # argmax path. This is the denominator of the paper's ratio.
+                probs1 = torch.softmax(logits1, dim=-1)
+                x_nll = -(probs1 * logp2).sum(dim=-1)
+                # Performer NLL on the actual tokens.
+                logp1 = torch.log_softmax(logits1, dim=-1)
+                nll = -logp1.gather(-1, chunk[1:].unsqueeze(-1)).squeeze(-1)
+                sum_nll += float(nll.sum())
+                sum_xnll += float(x_nll.sum())
+                n_positions += nll.shape[0]
+        if n_positions < _PPL_MIN_TOKENS:
+            continue
+        mean_nll = sum_nll / n_positions
+        mean_xnll = sum_xnll / n_positions
+        ratio = mean_nll / max(mean_xnll, 1e-9)
+        view_notes.append(f"{view_name}:ratio={ratio:.3f} nll={mean_nll:.3f} xnll={mean_xnll:.3f}@{n_positions}tok")
+        if best_ratio is None or ratio < best_ratio:
+            best_ratio, best_nll, best_xnll, best_tokens = ratio, mean_nll, mean_xnll, n_positions
+    if best_ratio is None:
+        return ExternalModelAnalysis(
+            available=False, score=0, confidence="unavailable", model=model_name,
+            detail=f"binoculars: fewer than {_PPL_MIN_TOKENS} scored tokens in every view.",
+            limitations=list(profile_limitations),
+        )
+    ratio_low = float(profile.get("ratio_low", 0.85) or 0.85)
+    ratio_high = float(profile.get("ratio_high", 1.05) or 1.05)
+    score = int(round(max(0.0, min(100.0, 100.0 * (ratio_high - best_ratio) / (ratio_high - ratio_low)))))
+    return ExternalModelAnalysis(
+        available=True,
+        score=score,
+        confidence=_confidence_for_score(score),
+        model=model_name,
+        detail=(
+            f"binoculars: ratio={best_ratio:.3f} mean_nll={best_nll:.3f} x_nll={best_xnll:.3f} "
+            f"tokens={best_tokens} views=[{'; '.join(view_notes)}] window={window} "
+            f"performer={performer_id} observer={observer_id} "
+            f"anchors=[{ratio_low},{ratio_high}] score={score}."
         ),
         limitations=list(profile_limitations),
     )

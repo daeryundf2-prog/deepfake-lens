@@ -17,6 +17,7 @@ crash.
 | `openai-detector-runtime.json` | OpenAI GPT-2 output detector (RoBERTa-base) | `hf-text-classifier` (torch + transformers) | wired — fetched from HF hub on first use |
 | `fakespot-detector-runtime.json` | Fakespot AI text detector (RoBERTa-base, modern-LLM training data) | `hf-text-classifier` (torch + transformers) | wired — fetched from HF hub on first use |
 | `qwen-ppl-runtime.json` | Qwen2.5-0.5B reference-LM perplexity screen (generator-agnostic, multilingual incl. Korean) | `causal-lm-ppl` (torch + transformers) | wired — fetched from HF hub on first use (~1 GB); `hub_model` may point at a local snapshot for offline use |
+| `binoculars-runtime.json` | Binoculars two-LM perplexity-ratio screen (Qwen2.5-0.5B performer / 1.5B observer) | `binoculars` (torch + transformers) | wired — fetched from HF hub on first use (~4.3 GB total); `ensemble_weight` 0.25 pending calibration |
 | `aide-frames-runtime.json` | AIDE per-frame video screen | `video-frames` (cv2 + nested image profile) | wired — needs the AIDE checkpoint + opencv; **frame-level only, not temporal/lip-sync** |
 
 Profiles declare a `modality` (`image`/`audio`/`text`/`video`); a scanned file

@@ -180,6 +180,19 @@ DETECTOR_REGISTRY = [
         ],
     ),
     DetectorCandidate(
+        key="binoculars-2024",
+        name="Binoculars two-LM perplexity-ratio screen (Qwen2.5 pair)",
+        task="zero-shot-text-detector",
+        adapter_target="binoculars runtime profile",
+        status="candidate",
+        priority="medium",
+        source_url="https://huggingface.co/Qwen/Qwen2.5-1.5B",
+        notes=[
+            "Wired via models/binoculars-runtime.json; performer PPL over observer cross-PPL on the performer's own picks — a self-normalizing ratio more robust to domain shift than raw PPL.",
+            "Generator-agnostic like causal-lm-ppl but ~2x the cost; ratio anchors [0.85,1.05] are provisional until the labeled corpus grows.",
+        ],
+    ),
+    DetectorCandidate(
         key="clide-wacv-2026",
         name="CLIDE Conditional Likelihood generated Image Detector",
         task="zero-shot-image-detector",

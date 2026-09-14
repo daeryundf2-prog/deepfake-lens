@@ -25,7 +25,7 @@ from deepfake_lens.model_adapter import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = REPO_ROOT / "models"
-WIRED_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "aasist", "hf-text-classifier", "video-frames", "causal-lm-ppl"}
+WIRED_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "aasist", "hf-text-classifier", "video-frames", "causal-lm-ppl", "binoculars"}
 # Runtimes that carry no checkpoint field of their own: hf-text-classifier
 # names a hub model id, video-frames nests the checkpointed image profile.
 CHECKPOINT_LESS_RUNTIMES = {"hf-text-classifier", "video-frames"}
@@ -64,7 +64,7 @@ class CommittedProfilesTest(unittest.TestCase):
         names = set(self._profiles())
         self.assertEqual(
             names,
-            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json", "aide-frames-runtime.json", "fakespot-detector-runtime.json", "qwen-ppl-runtime.json"},
+            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json", "aide-frames-runtime.json", "fakespot-detector-runtime.json", "qwen-ppl-runtime.json", "binoculars-runtime.json"},
         )
 
     def test_wired_profiles_use_implemented_runtimes(self) -> None:
@@ -75,7 +75,7 @@ class CommittedProfilesTest(unittest.TestCase):
             self.assertIn(profile["runtime"], WIRED_RUNTIMES, name)
             # Hub-resolved runtimes name a model id instead of a local file;
             # video-frames nests the checkpointed image profile under "inner".
-            if profile["runtime"] in {"hf-text-classifier", "causal-lm-ppl"}:
+            if profile["runtime"] in {"hf-text-classifier", "causal-lm-ppl", "binoculars"}:
                 self.assertIn("hub_model", profile, name)
             elif profile["runtime"] == "video-frames":
                 inner = profile.get("inner")
@@ -130,6 +130,22 @@ class CommittedProfilesTest(unittest.TestCase):
             empty = Path(tmp) / "empty.txt"
             empty.write_text("", encoding="utf-8")
             analysis = analyze_external_model(empty, MODELS_DIR / "qwen-ppl-runtime.json", modality="text")
+        self.assertIsNotNone(analysis)
+        self.assertFalse(analysis.available)
+
+    def test_binoculars_profile_records_contract(self) -> None:
+        profile = self._profiles()["binoculars-runtime.json"]
+        self.assertEqual(profile["runtime"], "binoculars")
+        self.assertEqual(profile["modality"], "text")
+        self.assertIn("observer_model", profile)
+        self.assertLess(profile["ratio_low"], profile["ratio_high"])
+        self.assertIn("binoculars", TEXT_RUNTIMES)
+
+    def test_binoculars_degrades_on_empty_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            empty = Path(tmp) / "empty.txt"
+            empty.write_text("", encoding="utf-8")
+            analysis = analyze_external_model(empty, MODELS_DIR / "binoculars-runtime.json", modality="text")
         self.assertIsNotNone(analysis)
         self.assertFalse(analysis.available)
 

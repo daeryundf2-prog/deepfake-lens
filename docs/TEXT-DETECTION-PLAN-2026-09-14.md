@@ -104,16 +104,25 @@ user's actual corpus (mostly Korean, agent-generated docs).
   Codex/Gemini/Grok/Kimi samples and informal human Korean.
 - **Phase E — done (partial).** Text members now fuse by
   reliability-weighted mean via per-profile `ensemble_weight`
-  (qwen-ppl 1.0 / fakespot 0.5 / openai-detector 0.25, weights from
-  measured behavior, not claimed accuracy). Provenance stays dominant.
-- **Phase B — not started** (optional English gain, lowest priority).
+  (qwen-ppl 1.0 / fakespot 0.5 / openai-detector 0.25, binoculars 0.25,
+  weights from measured behavior, not claimed accuracy). Provenance
+  stays dominant.
+- **Phase B — done (measured, calibrated low).** `binoculars` runtime
+  wired (Qwen2.5-0.5B performer / 1.5B observer, true X-PPL
+  cross-entropy after fixing an argmax shortcut, `max_windows` cost
+  bound). Measured separation on the seed corpus is weak (AI
+  0.67-0.94 vs human 0.77-0.82) — held at weight 0.25. Fast-DetectGPT
+  evaluated and deferred: adds cost without evidence it fixes the
+  measured failures.
 
 ## Measured outcome — honest read
 
-Ensemble on the seed corpus: AUROC 0.325, recall 0.25 @ FPR 0.20.
-**PPL works on formal prose (incl. Korean) but not on technical/agent
-documents** — markdown/identifier-heavy text is high-PPL whoever wrote
-it, and human encyclopedic prose false-positives at 51–76. See
-`experiments/TEXT_DETECTION_EVAL.md` for the full table. Remaining
-structural gap: technical-doc discrimination needs structure/provenance
-signals, not likelihood scores.
+Ensemble on the expanded seed corpus (n=30): AUROC 0.416 overall,
+**Korean AUROC 0.845** (informal human Korean separates well),
+English AUROC 0.197 (encyclopedic FP). PPL works on formal prose
+incl. Korean but not on technical/agent documents, and human
+encyclopedic prose false-positives at 51–76. See
+`experiments/TEXT_DETECTION_EVAL.md` for the full tables. Remaining
+structural gap: technical-doc discrimination needs
+structure/provenance signals, not likelihood scores — and the corpus
+still lacks real Codex/Gemini/Grok/Kimi outputs.

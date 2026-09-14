@@ -1,0 +1,22 @@
+{
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "Binoculars two-LM perplexity-ratio screen (Qwen2.5 pair)",
+  "runtime": "binoculars",
+  "modality": "text",
+  "hub_model": "Qwen/Qwen2.5-0.5B",
+  "observer_model": "Qwen/Qwen2.5-1.5B",
+  "window_tokens": 512,
+  "max_windows": 4,
+  "ratio_low": 0.85,
+  "ratio_high": 1.05,
+  "ensemble_weight": 0.25,
+  "limitations": [
+    "Perplexity-ratio screen (Hans et al. 2024 style), not a trained detector — ratio anchors [0.85, 1.05] are provisional; measured separation on the seed corpus is weak (AI prose 0.67-0.94 vs human prose 0.77-0.82), so ensemble_weight is held at 0.25 until calibration.",
+    "Two CPU forward passes per window are expensive — max_windows bounds cost at the first 8 windows (~4k tokens).",
+    "Performer and observer must share a tokenizer family (default pair is Qwen2.5-0.5B/1.5B, ~4.3 GB total into the HF cache); point both ids at local snapshot directories to run fully offline.",
+    "Generator-agnostic in principle, but effectiveness on a specific generator must be measured, not assumed — the seed corpus currently covers Claude/Devin only.",
+    "Two forward passes per window roughly doubles the cost of the causal-lm-ppl runtime.",
+    "Prioritization signal, not a truth label."
+  ],
+  "license": "Qwen2.5 is Apache-2.0; weights download to the HF cache, never committed"
+}

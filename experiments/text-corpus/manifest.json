@@ -25,6 +25,12 @@
       "language": "en"
     },
     {
+      "path": "ai/ai_claude_en_short.txt",
+      "label": "ai",
+      "generator": "claude",
+      "language": "en"
+    },
+    {
       "path": "ai/ai_claude_humanized_en.txt",
       "label": "ai",
       "generator": "claude",
@@ -32,6 +38,30 @@
     },
     {
       "path": "ai/ai_claude_ko_formal.txt",
+      "label": "ai",
+      "generator": "claude",
+      "language": "ko"
+    },
+    {
+      "path": "ai/ai_claude_ko_informal.txt",
+      "label": "ai",
+      "generator": "claude",
+      "language": "ko"
+    },
+    {
+      "path": "ai/ai_claude_ko_news_style.txt",
+      "label": "ai",
+      "generator": "claude",
+      "language": "ko"
+    },
+    {
+      "path": "ai/ai_claude_ko_short.txt",
+      "label": "ai",
+      "generator": "claude",
+      "language": "ko"
+    },
+    {
+      "path": "ai/ai_claude_ko_technical.md",
       "label": "ai",
       "generator": "claude",
       "language": "ko"
@@ -77,6 +107,24 @@
       "label": "human",
       "generator": "license-boilerplate",
       "language": "en"
+    },
+    {
+      "path": "human/talk_ko_대한민국.txt",
+      "label": "human",
+      "generator": "wikipedia-talk",
+      "language": "ko"
+    },
+    {
+      "path": "human/talk_ko_조선왕조실록.txt",
+      "label": "human",
+      "generator": "wikipedia-talk",
+      "language": "ko"
+    },
+    {
+      "path": "human/talk_ko_한국어.txt",
+      "label": "human",
+      "generator": "wikipedia-talk",
+      "language": "ko"
     },
     {
       "path": "human/wiki_en_Bread.txt",

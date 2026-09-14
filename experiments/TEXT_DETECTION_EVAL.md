@@ -124,3 +124,52 @@ above, not claimed accuracy).
 4. Threshold 50 currently trades recall 0.25 for FPR 0.20 on this mix —
    not deployable as a verdict, consistent with the "prioritization
    signal" contract.
+
+## Fourth probe — binoculars runtime + expanded corpus (n=30)
+
+`binoculars` runtime (`models/binoculars-runtime.json`): performer
+Qwen2.5-0.5B log-PPL over observer Qwen2.5-1.5B cross-entropy on the
+performer's next-token distribution (Hans et al. 2024 style). First
+implementation used argmax picks instead of the distribution
+expectation — corrected to true X-PPL cross-entropy H(M1,M2) after the
+measured ratios came out inverted (1.5-2.0 instead of ~0.6-1.1).
+
+Raw ratios measured (anchors 0.85/1.05 provisional):
+
+| Sample | ratio | reading |
+|---|---:|---|
+| AI Korean formal | 0.673 | lowest — detected |
+| AI English formal | 0.938 | weak |
+| AI devin technical doc | 1.001 | missed |
+| Human ko wiki | 0.772 | FP under provisional anchors |
+| Human ko talk (informal) | 0.818 | FP |
+| Human en wiki | 0.786 | FP |
+
+Measured separation is **weak** — human formal/informal prose clusters
+0.77-0.82, overlapping the AI band; `ensemble_weight` is therefore held
+at 0.25 and anchors marked uncalibrated. Cost bounded by
+`max_windows=4` (raw view only — the X-PPL denominator self-normalizes
+markup).
+
+### Ensemble on expanded corpus (n=30: +informal human Korean talk
+pages, +informal/short/technical/news AI samples)
+
+- Overall: AUROC 0.416, recall 0.294 @ FPR 0.231 (threshold 50)
+- **Korean: AUROC 0.845, recall 0.667 @ FPR 0.286** — informal human
+  Korean (talk pages) separates from AI Korean better than encyclopedic
+  prose does; the strongest measured split so far
+- English: AUROC 0.197 — encyclopedic human English continues to
+  out-score AI text (wiki FP 76 vs several AI at 18-42)
+- Claude recall 5/11, devin technical docs 0/6 (structural miss —
+  confirmed again), MIT boilerplate now scores 24 (correctly low under
+  the weighted fusion)
+
+### Standing conclusions
+
+- Text content alone detects **formal prose** AI (incl. Korean now) but
+  cannot separate technical/agent documents or encyclopedic human
+  prose. Structure/provenance signals remain the load-bearing evidence
+  for the user's real corpus.
+- Fast-DetectGPT was evaluated and deferred: a second uncalibrated
+  zero-shot method adds cost without evidence it fixes the measured
+  failures (technical docs, humanized text).
