@@ -452,6 +452,18 @@ def _deep_video_layers(path: Path) -> tuple[list[EvidenceSignal], list[str]]:
         limitations.extend(avatar.limitations[:2])
     except Exception:
         limitations.append("아바타 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
+    try:
+        from .lipsync import analyze_lipsync
+        lipsync = analyze_lipsync(path)
+        if lipsync.available and lipsync.score > 0:
+            signals.append(EvidenceSignal(
+                "립싱크 일관성",
+                lipsync.verdict,
+                min(lipsync.score, 30),
+            ))
+        limitations.extend(lipsync.limitations[:2])
+    except Exception:
+        limitations.append("립싱크 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
     return signals, limitations
 
 

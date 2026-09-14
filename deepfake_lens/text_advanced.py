@@ -621,3 +621,80 @@ def _classify_style_profile(words: list[str], text: str) -> str:
         return "conversational"
 
     return "general"
+
+
+@dataclass(frozen=True)
+class StylometryComparison:
+    """Two-input authorship comparison — same-author likelihood.
+
+    Compares a coarse stylometric vector (sentence shape, lexical
+    diversity, punctuation habits, connective use). This is a screening
+    distance, not forensic authorship attribution — short or translated
+    texts make it unreliable.
+    """
+
+    same_author_score: int  # 0-100
+    distance: float
+    band: str
+    verdict: str
+    limitations: list[str]
+
+    def to_json(self) -> dict[str, object]:
+        return asdict(self)
+
+
+def _stylometry_vector(text: str) -> list[float]:
+    """Author fingerprint vector: sentence shape + lexical + punctuation."""
+    import math
+
+    trimmed = text.strip()
+    if not trimmed:
+        return [0.0] * 9
+    sentences = [s for s in re.split(r"[.!?。！？\n]+", trimmed) if s.strip()]
+    hangul = _hangul_ratio(trimmed)
+    words = _tokenize_words(trimmed, hangul)
+    n = len(words) or 1
+    sent_lens = [len(_tokenize_words(s, hangul)) for s in sentences] or [0]
+    mean_len = sum(sent_lens) / len(sent_lens)
+    var_len = sum((x - mean_len) ** 2 for x in sent_lens) / len(sent_lens)
+    punct = sum(1 for ch in trimmed if ch in ",;:'\"—–-()")
+    connectors = sum(1 for w in words if w in {"moreover", "furthermore", "however", "therefore", "또한", "그러나", "따라서", "한편"})
+    unique = len(set(words))
+    return [
+        mean_len / 40.0,
+        math.sqrt(var_len) / max(mean_len, 1.0),
+        unique / n,
+        len([w for w in set(words) if words.count(w) == 1]) / n,
+        punct / max(len(trimmed), 1) * 100,
+        connectors / n * 100,
+        len(sentences) / max(len(trimmed), 1) * 500,
+        hangul,
+        bigram_entropy(words) / 20.0,
+    ]
+
+
+def compare_texts(text_a: str, text_b: str) -> StylometryComparison:
+    """Compare two texts for same-author likelihood."""
+    limitations = [
+        "문체 벡터 거리 측정이며 포렌식 저자 귀속이 아닙니다.",
+        "짧거나 번역된 텍스트에서는 거리가 불안정합니다.",
+    ]
+    vec_a = _stylometry_vector(text_a)
+    vec_b = _stylometry_vector(text_b)
+    # Mean relative difference per dimension — cosine on mostly-positive
+    # vectors under-separates same-language pairs, so scale each feature's
+    # gap by its magnitude instead.
+    distance = sum(abs(a - b) / (abs(a) + abs(b) + 0.02) for a, b in zip(vec_a, vec_b)) / len(vec_a)
+    score = max(0, min(100, int((1.0 - distance / 0.35) * 100)))
+    if score >= 67:
+        band = "same"
+        verdict = "문체 특징이 가까워 동일 작성자/도구일 가능성이 높습니다."
+    elif score >= 35:
+        band = "unclear"
+        verdict = "문체 유사성이 중간 영역입니다 — 더 긴 표본이 필요합니다."
+    else:
+        band = "different"
+        verdict = "문체 특징이 멀어 다른 작성자/도구일 가능성이 높습니다."
+    if len(text_a) < 400 or len(text_b) < 400:
+        limitations.append("한쪽 표본이 400자 미만이라 문체 비교가 불안정합니다.")
+    return StylometryComparison(score, distance, band, verdict, limitations)

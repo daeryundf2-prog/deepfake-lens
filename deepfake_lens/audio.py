@@ -726,3 +726,58 @@ def _guess_audio_source(features: AudioFeatures) -> str:
     if features.spectral_bandwidth < 800:
         return "저품질 압축 또는 합성"
     return "unknown"
+
+
+@dataclass(frozen=True)
+class SpeakerComparison:
+    """Two-input speaker comparison result — same-speaker likelihood.
+
+    MFCC means act as a coarse voiceprint; pitch/jitter distributions add
+    secondary evidence. This is a screening distance, not a forensic voice
+    identification — embedding-based verification needs a dedicated model.
+    """
+
+    same_speaker_score: int  # 0-100, higher = more likely same speaker
+    distance: float  # cosine distance on the feature vector
+    band: str
+    verdict: str
+    limitations: list[str]
+
+    def to_json(self) -> dict[str, object]:
+        return asdict(self)
+
+
+def compare_speakers(path_a: Path | str, path_b: Path | str, *, segment_seconds: int = DEFAULT_SEGMENT_SECONDS) -> SpeakerComparison:
+    """Compare two audio files for same-speaker likelihood."""
+    limitations: list[str] = [
+        "MFCC 기반 거리 측정이며 포렌식 화자 인식이 아닙니다.",
+        "녹음 환경/코덱 차이가 있으면 같은 화자도 멀게 측정될 수 있습니다.",
+    ]
+    feat_a = _extract_features(Path(path_a), segment_seconds=segment_seconds)
+    feat_b = _extract_features(Path(path_b), segment_seconds=segment_seconds)
+    if feat_a is None or feat_b is None:
+        return SpeakerComparison(0, 1.0, "unknown", "특징 추출 실패 — librosa 또는 오디오 형식을 확인하세요.", limitations + ["한쪽 파일의 특징 추출에 실패했습니다."])
+
+    import math
+    vec_a = list(feat_a.mfcc_means) + [feat_a.pitch_mean, feat_a.pitch_std, feat_a.spectral_centroid / 1000.0]
+    vec_b = list(feat_b.mfcc_means) + [feat_b.pitch_mean, feat_b.pitch_std, feat_b.spectral_centroid / 1000.0]
+    dot = sum(a * b for a, b in zip(vec_a, vec_b))
+    norm_a = math.sqrt(sum(a * a for a in vec_a)) or 1e-9
+    norm_b = math.sqrt(sum(b * b for b in vec_b)) or 1e-9
+    distance = 1.0 - dot / (norm_a * norm_b)
+
+    # MFCC cosine distance ~0 = identical vector; typical same-speaker
+    # recordings land under ~0.05, different speakers above ~0.2 (rough).
+    score = max(0, min(100, int((1.0 - distance / 0.3) * 100)))
+    if score >= 67:
+        band = "same"
+        verdict = "두 음성의 음색 특징이 가까워 동일 화자일 가능성이 높습니다."
+    elif score >= 35:
+        band = "unclear"
+        verdict = "화자 유사성이 중간 영역입니다 — 추가 샘플 비교가 필요합니다."
+    else:
+        band = "different"
+        verdict = "두 음성의 음색 특징이 멀어 다른 화자일 가능성이 높습니다."
+    if feat_a.duration_seconds < 5 or feat_b.duration_seconds < 5:
+        limitations.append("한쪽 샘플이 5초 미만이라 화자 비교가 불안정합니다.")
+    return SpeakerComparison(score, distance, band, verdict, limitations)
