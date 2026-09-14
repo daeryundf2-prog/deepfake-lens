@@ -127,3 +127,31 @@ weakest on dalle3 and midjourney-v5 — the misses concentrate on commercial
 generators. For a paired real/fake metric run the same generators against
 licensed real data (RAISE-1k requires a manual license request) under the
 `fixtures/modern-bench/` layout.
+
+### Paired run (same day, 362 samples)
+
+The same 20-per-generator Synthbuster sample was evaluated against 180
+random real photographs (picsum.photos, Unsplash-sourced JPEGs — a
+web-compressed real side, not RAW RAISE) via:
+
+```sh
+python -m deepfake_lens.cli eval public_datasets/modern-bench \
+    --model-path models/aide-runtime.json --json-out eval_report.json
+```
+
+Overall: AUROC **0.672**, accuracy 0.751, precision 0.989, recall 0.508,
+FPR 0.55% (threshold 67). Per-source recall at that threshold:
+
+| Generator | TP/20 | | Generator | TP/20 |
+|---|---|---|---|---|
+| dalle2 | 20 | | midjourney-v5 | 8 |
+| glide | 16 | | stable-diffusion-1-3 | 8 |
+| stable-diffusion-xl | 14 | | stable-diffusion-1-4 | 6 |
+| firefly | 9 | | stable-diffusion-2 | 5 |
+| picsum reals | FP 1/180 | | dalle3 | 5 |
+
+Honest reading: the 0.951 AUROC sweep paired Synthbuster against ProGAN's
+0_real camera images; against arbitrary web photos the detector stays
+precise (1 FP in 180) but misses over half of the commercial-generator
+fakes. Real-world screening should treat AIDE's score as a high-precision
+flagger, not a catch-all — consistent with every other honesty note here.
