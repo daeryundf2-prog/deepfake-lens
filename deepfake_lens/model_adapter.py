@@ -4,6 +4,7 @@ import importlib
 import importlib.util
 import json
 import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -19,7 +20,7 @@ _MAX_PROFILE_DEPTH = 4
 # explicit "modality" field; otherwise it is inferred from the runtime.
 IMAGE_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision"}
 AUDIO_RUNTIMES = {"aasist"}
-TEXT_RUNTIMES = {"hf-text-classifier"}
+TEXT_RUNTIMES = {"hf-text-classifier", "causal-lm-ppl"}
 # "video-frames" samples frames with cv2 and scores each with a nested image
 # runtime profile ("inner") — it reuses image checkpoints, so it needs no
 # weights of its own.
@@ -243,17 +244,35 @@ def _analyze_profile_set(media_path: Path, model_file: Path, profile: dict[str, 
     return _aggregate_profile_results(results, model_name=model_name)
 
 
+def _profile_ensemble_weight(source: Path) -> float:
+    """Reliability weight a member profile declares for ensemble fusion.
+
+    Profiles may set ``ensemble_weight`` (0.05-4.0, default 1.0). Detectors
+    with measured narrow coverage or high false-positive rates on the eval
+    corpus should carry a lower weight so one noisy member cannot dominate
+    or dilute the fused score.
+    """
+    try:
+        profile = json.loads(source.read_text(encoding="utf-8"))
+        weight = float(profile.get("ensemble_weight", 1.0))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return 1.0
+    return min(4.0, max(0.05, weight))
+
+
 def _aggregate_profile_results(results: list[tuple[Path, ExternalModelAnalysis]], *, model_name: str | None = None) -> ExternalModelAnalysis:
     """Merge per-profile results into one analysis with an agreement signal."""
-    scored = [result for _, result in results if result.available]
-    scores = [result.score for result in scored]
-    score = int(round(sum(scores) / len(scores))) if scores else 0
+    scored = [(source, result) for source, result in results if result.available]
+    weights = [_profile_ensemble_weight(source) for source, _ in scored]
+    total_weight = sum(weights)
+    score = int(round(sum(result.score * weight for (_, result), weight in zip(scored, weights)) / total_weight)) if scored else 0
+    scores = [result.score for _, result in scored]
     spread = max(scores) - min(scores) if len(scores) > 1 else 0
     agreement = "n/a" if len(scores) < 2 else ("high" if spread <= AGREEMENT_SPREAD else "low")
 
     detail = f"{len(scored)}/{len(results)} model profiles produced scores"
     if scores:
-        detail += f"; aggregate score={score} (mean of members)"
+        detail += f"; aggregate score={score} (weighted mean of members)"
     if len(scores) > 1:
         detail += f"; member spread={spread} (agreement: {agreement})"
 
@@ -262,7 +281,7 @@ def _aggregate_profile_results(results: list[tuple[Path, ExternalModelAnalysis]]
         for item in result.limitations:
             if item not in limitations:
                 limitations.append(item)
-    limitations.append("Aggregated external scores are the mean of available members — a prioritization signal, not a truth label.")
+    limitations.append("Aggregated external scores are a weighted mean of available members — a prioritization signal, not a truth label.")
     if agreement == "low":
         limitations.append(f"Model zoo members disagree (spread {spread} points); weigh metadata/provenance signals before triage.")
 
@@ -338,6 +357,8 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
             values = _run_aasist(checkpoint, media_path, profile)
         elif runtime == "hf-text-classifier":
             values = _run_hf_text_classifier(media_path, profile)
+        elif runtime == "causal-lm-ppl":
+            return _run_causal_lm_ppl(media_path, profile, model_name=model_name)
         elif runtime == "video-frames":
             return _run_video_frames(media_path, profile, model_name=model_name, base_dir=base_dir)
         else:
@@ -393,6 +414,8 @@ def _checkpoint_hint(runtime: str) -> list[str]:
         return ["Download the detector's linear-head weights and point 'checkpoint' at the .pth file; the CLIP backbone named in 'backbone' is fetched by transformers on first use."]
     if runtime == "hf-text-classifier":
         return ["The model id in 'hub_model' is fetched by transformers on first use; set it to a local snapshot directory to run fully offline."]
+    if runtime == "causal-lm-ppl":
+        return ["The reference LM id in 'hub_model' is fetched by transformers on first use (~1 GB); set it to a local snapshot directory to run fully offline."]
     if runtime == "torchvision":
         return ["Download the detector's published state-dict checkpoint and point 'checkpoint' at the .pth file."]
     return ["Use an absolute checkpoint path or a path relative to the model profile."]
@@ -407,6 +430,8 @@ def _runtime_install_hint(runtime: str) -> str:
         return "Install the optional clip-linear stack (torch, transformers, Pillow) to enable the CLIP linear-probe runtime."
     if runtime == "hf-text-classifier":
         return "Install the optional hf-text-classifier stack (torch, transformers) to enable the text-detector runtime."
+    if runtime == "causal-lm-ppl":
+        return "Install the optional causal-lm-ppl stack (torch, transformers) to enable the perplexity-screen runtime."
     if runtime == "torchvision":
         return "Install the optional torchvision stack (torch, torchvision, Pillow, numpy) to enable the torchvision runtime."
     if runtime == "video-frames":
@@ -613,6 +638,151 @@ def _run_hf_text_classifier(media_path: Path, profile: dict[str, object]) -> lis
     with torch.no_grad():
         logits = model(**inputs).logits
     return _flatten_outputs(logits.detach().cpu().numpy())
+
+
+# Causal LMs for the perplexity screen are ~1 GB downloads; keep them
+# resident between files like the classifier stack.
+_PPL_MODELS: dict[str, tuple[object, object]] = {}
+_PPL_MAX_BYTES = 256 * 1024
+_PPL_MIN_TOKENS = 16
+
+
+def _causal_lm_model(hub_model: str) -> tuple[object, object]:
+    cached = _PPL_MODELS.get(hub_model)
+    if cached is not None:
+        return cached
+    transformers = importlib.import_module("transformers")
+    tokenizer = transformers.AutoTokenizer.from_pretrained(hub_model)
+    model = transformers.AutoModelForCausalLM.from_pretrained(hub_model)
+    model.eval()
+    pair = (tokenizer, model)
+    _PPL_MODELS[hub_model] = pair
+    return pair
+
+
+def _extract_prose(text: str) -> str:
+    """Strip markup so perplexity measures natural prose, not syntax.
+
+    Markdown structure (headers, tables, code fences, list markers, links)
+    is high-perplexity under a causal LM regardless of who wrote it — agent
+    output would otherwise score as 'human' purely because of formatting.
+    List-item text is kept (markers stripped); tables, code blocks, URLs,
+    and pure markup lines are dropped. Falls back to the raw text when
+    extraction removes almost everything (plain prose input).
+    """
+    # Drop fenced code blocks entirely.
+    text = re.sub(r"```.*?```", " ", text, flags=re.DOTALL)
+    text = re.sub(r"`[^`\n]*`", " ", text)
+    # Inline links/images keep their anchor text.
+    text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"https?://\S+|www\.\S+", " ", text)
+    text = re.sub(r"<[^>\n]{1,200}>", " ", text)
+
+    kept: list[str] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("|"):  # table row
+            continue
+        if re.fullmatch(r"[-=:_|#*\s`~.]+", line):  # pure markup line
+            continue
+        # Strip heading/list markers and emphasis, keep the sentence.
+        line = re.sub(r"^#{1,6}\s*", "", line)
+        line = re.sub(r"^>\s*", "", line)
+        line = re.sub(r"^(?:\d+[.)]|[-*•+])\s+", "", line)
+        line = re.sub(r"\*\*([^*]+)\*\*", r"\1", line)
+        line = re.sub(r"[*_]{1,2}([^*_]+)[*_]{1,2}", r"\1", line)
+        line = line.strip(" -–—|")
+        if len(line) >= 12:  # drop label crumbs like 'Summary' or '—'
+            kept.append(line)
+    prose = " ".join(kept)
+    return prose if len(prose) >= 200 else text
+
+
+def _run_causal_lm_ppl(media_path: Path, profile: dict[str, object], *, model_name: str) -> ExternalModelAnalysis:
+    """Perplexity screen: mean token NLL under a reference causal LM.
+
+    Text written by an LLM tends to sit at lower perplexity under a
+    *different* reference LM — this is generator-agnostic, so it covers
+    generators the profile never saw (Codex/Claude/Gemini/Grok/Kimi all
+    compress text toward the same low-PPL regime). It also works on any
+    language the reference LM covers, including Korean — unlike the
+    English-trained classifier stack.
+
+    Score maps log-PPL onto 0-100 between the profile's ``ppl_low``
+    (AI-typical anchor) and ``ppl_high`` (human-typical anchor). The raw
+    PPL is reported in ``detail`` so the anchors can be recalibrated on a
+    labeled corpus — until then every result carries the uncalibrated
+    limitation from the profile.
+    """
+    torch = importlib.import_module("torch")
+    hub_model = str(profile.get("hub_model") or "")
+    if not hub_model:
+        raise RuntimeError("causal-lm-ppl profile needs a 'hub_model' field (e.g. Qwen/Qwen2.5-0.5B)")
+    profile_limitations = _profile_limitations(profile)
+    raw = media_path.read_bytes()[:_PPL_MAX_BYTES]
+    text = raw.decode("utf-8", errors="replace")
+    if not text.strip():
+        return ExternalModelAnalysis(
+            available=False, score=0, confidence="unavailable", model=model_name,
+            detail="causal-lm-ppl: file decodes to empty text.",
+            limitations=list(profile_limitations),
+        )
+    tokenizer, model = _causal_lm_model(hub_model)
+    window = max(_PPL_MIN_TOKENS, int(profile.get("window_tokens", 512) or 512))
+    # Score both the raw text and the markup-stripped prose view, keeping
+    # the lower perplexity: markdown structure inflates PPL for human and
+    # AI alike, so an agent's prose hiding inside a formatted document
+    # must not evade purely because of its syntax.
+    prose = _extract_prose(text)
+    views = [(text, "raw")] + ([(prose, "prose")] if prose != text else [])
+    best_ppl: float | None = None
+    view_notes: list[str] = []
+    for view_text, view_name in views:
+        ids = tokenizer(view_text, return_tensors="pt").input_ids[0]
+        total_nll = 0.0
+        total_tokens = 0
+        with torch.no_grad():
+            for start in range(0, ids.shape[0], window):
+                chunk = ids[start:start + window]
+                if chunk.shape[0] < _PPL_MIN_TOKENS:
+                    break
+                out = model(input_ids=chunk.unsqueeze(0), labels=chunk.unsqueeze(0))
+                n_tokens = int(chunk.shape[0]) - 1
+                total_nll += float(out.loss) * n_tokens
+                total_tokens += n_tokens
+        if total_tokens < _PPL_MIN_TOKENS:
+            continue
+        view_ppl = math.exp(min(20.0, total_nll / total_tokens))
+        view_notes.append(f"{view_name}:ppl={view_ppl:.2f}@{total_tokens}tok")
+        if best_ppl is None or view_ppl < best_ppl:
+            best_ppl = view_ppl
+            mean_nll = total_nll / total_tokens
+            total_tokens_used = total_tokens
+    if best_ppl is None:
+        return ExternalModelAnalysis(
+            available=False, score=0, confidence="unavailable", model=model_name,
+            detail=f"causal-lm-ppl: fewer than {_PPL_MIN_TOKENS} scored tokens in every view.",
+            limitations=list(profile_limitations),
+        )
+    ppl = best_ppl
+    ppl_low = float(profile.get("ppl_low", 8.0) or 8.0)
+    ppl_high = float(profile.get("ppl_high", 60.0) or 60.0)
+    lo, hi = math.log(ppl_low), math.log(ppl_high)
+    score = int(round(max(0.0, min(100.0, 100.0 * (hi - math.log(max(ppl, 1e-9))) / (hi - lo)))))
+    return ExternalModelAnalysis(
+        available=True,
+        score=score,
+        confidence=_confidence_for_score(score),
+        model=model_name,
+        detail=(
+            f"causal-lm-ppl: ppl={ppl:.2f} mean_nll={mean_nll:.3f} tokens={total_tokens_used} "
+            f"views=[{'; '.join(view_notes)}] window={window} ref_lm={hub_model} "
+            f"anchors=[{ppl_low},{ppl_high}] score={score}."
+        ),
+        limitations=list(profile_limitations),
+    )
 
 
 def _run_torchvision(checkpoint: Path, array, profile: dict[str, object]) -> list[float]:

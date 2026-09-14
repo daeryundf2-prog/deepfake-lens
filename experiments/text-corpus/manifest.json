@@ -1,0 +1,136 @@
+{
+  "samples": [
+    {
+      "path": "ai/ai_claude_antigravity_en.md",
+      "label": "ai",
+      "generator": "claude",
+      "language": "en"
+    },
+    {
+      "path": "ai/ai_claude_antigravity_ko.md",
+      "label": "ai",
+      "generator": "claude",
+      "language": "ko"
+    },
+    {
+      "path": "ai/ai_claude_boilerplate_like.txt",
+      "label": "ai",
+      "generator": "claude",
+      "language": "en"
+    },
+    {
+      "path": "ai/ai_claude_en_formal.txt",
+      "label": "ai",
+      "generator": "claude",
+      "language": "en"
+    },
+    {
+      "path": "ai/ai_claude_humanized_en.txt",
+      "label": "ai",
+      "generator": "claude",
+      "language": "en"
+    },
+    {
+      "path": "ai/ai_claude_ko_formal.txt",
+      "label": "ai",
+      "generator": "claude",
+      "language": "ko"
+    },
+    {
+      "path": "ai/devin_doc0.md",
+      "label": "ai",
+      "generator": "devin",
+      "language": "en"
+    },
+    {
+      "path": "ai/devin_doc1.md",
+      "label": "ai",
+      "generator": "devin",
+      "language": "en"
+    },
+    {
+      "path": "ai/devin_doc2.md",
+      "label": "ai",
+      "generator": "devin",
+      "language": "en"
+    },
+    {
+      "path": "ai/devin_doc3.md",
+      "label": "ai",
+      "generator": "devin",
+      "language": "en"
+    },
+    {
+      "path": "ai/devin_doc4.md",
+      "label": "ai",
+      "generator": "devin",
+      "language": "en"
+    },
+    {
+      "path": "ai/devin_doc5.md",
+      "label": "ai",
+      "generator": "devin",
+      "language": "en"
+    },
+    {
+      "path": "human/mit_license.txt",
+      "label": "human",
+      "generator": "license-boilerplate",
+      "language": "en"
+    },
+    {
+      "path": "human/wiki_en_Bread.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "en"
+    },
+    {
+      "path": "human/wiki_en_Classical mechanics.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "en"
+    },
+    {
+      "path": "human/wiki_en_French Revolution.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "en"
+    },
+    {
+      "path": "human/wiki_en_Jane Austen.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "en"
+    },
+    {
+      "path": "human/wiki_en_Photosynthesis.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "en"
+    },
+    {
+      "path": "human/wiki_ko_대한민국.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "ko"
+    },
+    {
+      "path": "human/wiki_ko_물리학.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "ko"
+    },
+    {
+      "path": "human/wiki_ko_서울특별시.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "ko"
+    },
+    {
+      "path": "human/wiki_ko_인공지능.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "ko"
+    }
+  ]
+}

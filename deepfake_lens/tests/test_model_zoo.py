@@ -19,12 +19,13 @@ from deepfake_lens.core import _model_analysis_from_json
 from deepfake_lens.model_adapter import (
     AGREEMENT_SPREAD,
     PROFILE_SET_TYPE,
+    TEXT_RUNTIMES,
     analyze_external_model,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = REPO_ROOT / "models"
-WIRED_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "aasist", "hf-text-classifier", "video-frames"}
+WIRED_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "aasist", "hf-text-classifier", "video-frames", "causal-lm-ppl"}
 # Runtimes that carry no checkpoint field of their own: hf-text-classifier
 # names a hub model id, video-frames nests the checkpointed image profile.
 CHECKPOINT_LESS_RUNTIMES = {"hf-text-classifier", "video-frames"}
@@ -63,7 +64,7 @@ class CommittedProfilesTest(unittest.TestCase):
         names = set(self._profiles())
         self.assertEqual(
             names,
-            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json", "aide-frames-runtime.json", "fakespot-detector-runtime.json"},
+            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json", "aide-frames-runtime.json", "fakespot-detector-runtime.json", "qwen-ppl-runtime.json"},
         )
 
     def test_wired_profiles_use_implemented_runtimes(self) -> None:
@@ -74,7 +75,7 @@ class CommittedProfilesTest(unittest.TestCase):
             self.assertIn(profile["runtime"], WIRED_RUNTIMES, name)
             # Hub-resolved runtimes name a model id instead of a local file;
             # video-frames nests the checkpointed image profile under "inner".
-            if profile["runtime"] == "hf-text-classifier":
+            if profile["runtime"] in {"hf-text-classifier", "causal-lm-ppl"}:
                 self.assertIn("hub_model", profile, name)
             elif profile["runtime"] == "video-frames":
                 inner = profile.get("inner")
@@ -115,6 +116,22 @@ class CommittedProfilesTest(unittest.TestCase):
         self.assertEqual(profile["arch"], "resnet50")
         self.assertEqual(profile["num_classes"], 1)
         self.assertEqual(profile["state_dict_prefix"], "model.")
+
+    def test_qwen_ppl_profile_records_ppl_contract(self) -> None:
+        profile = self._profiles()["qwen-ppl-runtime.json"]
+        self.assertEqual(profile["runtime"], "causal-lm-ppl")
+        self.assertEqual(profile["modality"], "text")
+        self.assertEqual(profile["hub_model"], "Qwen/Qwen2.5-0.5B")
+        self.assertLess(profile["ppl_low"], profile["ppl_high"])
+        self.assertIn("causal-lm-ppl", TEXT_RUNTIMES)
+
+    def test_causal_lm_ppl_degrades_on_empty_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            empty = Path(tmp) / "empty.txt"
+            empty.write_text("", encoding="utf-8")
+            analysis = analyze_external_model(empty, MODELS_DIR / "qwen-ppl-runtime.json", modality="text")
+        self.assertIsNotNone(analysis)
+        self.assertFalse(analysis.available)
 
 
 class MultiProfileAggregationTest(unittest.TestCase):

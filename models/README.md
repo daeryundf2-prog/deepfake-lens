@@ -16,6 +16,7 @@ crash.
 | `aasist-runtime.json` | AASIST (Interspeech 2022) audio anti-spoofing | `aasist` (torch reimplementation in `scripts/run_aasist.py`) | wired — run `scripts/fetch_aasist.py` |
 | `openai-detector-runtime.json` | OpenAI GPT-2 output detector (RoBERTa-base) | `hf-text-classifier` (torch + transformers) | wired — fetched from HF hub on first use |
 | `fakespot-detector-runtime.json` | Fakespot AI text detector (RoBERTa-base, modern-LLM training data) | `hf-text-classifier` (torch + transformers) | wired — fetched from HF hub on first use |
+| `qwen-ppl-runtime.json` | Qwen2.5-0.5B reference-LM perplexity screen (generator-agnostic, multilingual incl. Korean) | `causal-lm-ppl` (torch + transformers) | wired — fetched from HF hub on first use (~1 GB); `hub_model` may point at a local snapshot for offline use |
 | `aide-frames-runtime.json` | AIDE per-frame video screen | `video-frames` (cv2 + nested image profile) | wired — needs the AIDE checkpoint + opencv; **frame-level only, not temporal/lip-sync** |
 
 Profiles declare a `modality` (`image`/`audio`/`text`/`video`); a scanned file
@@ -31,7 +32,10 @@ relative to the set file). With more than one profile every member runs and
 the result reports:
 
 - `models[]` — per-model `available`/`score`/`confidence`/`detail`
-- aggregate `score` — the mean of available member scores
+- aggregate `score` — the `ensemble_weight`-weighted mean of available
+  member scores (each profile may declare `ensemble_weight`, default 1.0;
+  measured-reliability weights, e.g. openai-detector 0.25 / fakespot 0.5 /
+  qwen-ppl 1.0)
 - agreement — `detail` reports the member score spread; disagreement
   (>20 points) drops confidence to `low` and adds a limitation
 

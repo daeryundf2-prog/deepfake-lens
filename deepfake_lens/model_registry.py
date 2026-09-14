@@ -167,6 +167,19 @@ DETECTOR_REGISTRY = [
         ],
     ),
     DetectorCandidate(
+        key="qwen-ppl-2025",
+        name="Qwen2.5-0.5B causal-LM perplexity screen",
+        task="zero-shot-text-detector",
+        adapter_target="causal-lm-ppl runtime profile",
+        status="candidate",
+        priority="high",
+        source_url="https://huggingface.co/Qwen/Qwen2.5-0.5B",
+        notes=[
+            "Wired via models/qwen-ppl-runtime.json; generator-agnostic perplexity screen — LLM output sits at low PPL under a different reference LM, covering generators never enumerated (Codex/Claude/Gemini/Grok/Kimi).",
+            "The only wired approach that structurally handles Korean (English-trained classifiers cannot read it); anchors [8,60] are provisional until a labeled corpus calibrates them.",
+        ],
+    ),
+    DetectorCandidate(
         key="clide-wacv-2026",
         name="CLIDE Conditional Likelihood generated Image Detector",
         task="zero-shot-image-detector",

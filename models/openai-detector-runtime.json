@@ -19,5 +19,6 @@
     "Runtime 'hf-text-classifier' loads AutoTokenizer + AutoModelForSequenceClassification for 'hub_model', reads up to 256 KiB of the text file, and softmaxes logits; label order for this checkpoint is index 0 = Fake (AI-generated), index 1 = Real (human) — verified against the model's config.json id2label.",
     "Only .txt/.md scan items run this profile; image/audio profiles are unaffected (modality filtering)."
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "ensemble_weight": 0.25
 }

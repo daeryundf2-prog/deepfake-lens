@@ -1,0 +1,261 @@
+{
+  "threshold": 50.0,
+  "overall": {
+    "n": 22,
+    "auroc": 0.325,
+    "eer": 0.5916666666666667,
+    "confusion@50": {
+      "tp": 3,
+      "fp": 2,
+      "fn": 9,
+      "tn": 8,
+      "precision": 0.6,
+      "recall": 0.25,
+      "fpr": 0.2
+    }
+  },
+  "by_language": {
+    "en": {
+      "n": 16,
+      "auroc": 0.21666666666666667,
+      "eer": 0.6833333333333333,
+      "confusion@50": {
+        "tp": 2,
+        "fp": 1,
+        "fn": 8,
+        "tn": 5,
+        "precision": 0.6666666666666666,
+        "recall": 0.2,
+        "fpr": 0.16666666666666666
+      }
+    },
+    "ko": {
+      "n": 6,
+      "auroc": 0.875,
+      "eer": 0.125,
+      "confusion@50": {
+        "tp": 1,
+        "fp": 1,
+        "fn": 1,
+        "tn": 3,
+        "precision": 0.5,
+        "recall": 0.5,
+        "fpr": 0.25
+      }
+    }
+  },
+  "by_generator": {
+    "claude": {
+      "n": 6,
+      "auroc": null,
+      "eer": 0.0,
+      "confusion@50": {
+        "tp": 3,
+        "fp": 0,
+        "fn": 3,
+        "tn": 0,
+        "precision": 1.0,
+        "recall": 0.5,
+        "fpr": null
+      }
+    },
+    "devin": {
+      "n": 6,
+      "auroc": null,
+      "eer": 0.0,
+      "confusion@50": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 6,
+        "tn": 0,
+        "precision": null,
+        "recall": 0.0,
+        "fpr": null
+      }
+    },
+    "license-boilerplate": {
+      "n": 1,
+      "auroc": null,
+      "eer": 0.5,
+      "confusion@50": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 0,
+        "tn": 1,
+        "precision": null,
+        "recall": null,
+        "fpr": 0.0
+      }
+    },
+    "wikipedia": {
+      "n": 9,
+      "auroc": null,
+      "eer": 0.05555555555555555,
+      "confusion@50": {
+        "tp": 0,
+        "fp": 2,
+        "fn": 0,
+        "tn": 7,
+        "precision": 0.0,
+        "recall": null,
+        "fpr": 0.2222222222222222
+      }
+    }
+  },
+  "rows": [
+    {
+      "path": "experiments\\text-corpus\\ai\\ai_claude_antigravity_en.md",
+      "label": "ai",
+      "generator": "claude",
+      "language": "en",
+      "score": 19.0
+    },
+    {
+      "path": "experiments\\text-corpus\\ai\\ai_claude_antigravity_ko.md",
+      "label": "ai",
+      "generator": "claude",
+      "language": "ko",
+      "score": 34.0
+    },
+    {
+      "path": "experiments\\text-corpus\\ai\\ai_claude_boilerplate_like.txt",
+      "label": "ai",
+      "generator": "claude",
+      "language": "en",
+      "score": 67.0
+    },
+    {
+      "path": "experiments\\text-corpus\\ai\\ai_claude_en_formal.txt",
+      "label": "ai",
+      "generator": "claude",
+      "language": "en",
+      "score": 100.0
+    },
+    {
+      "path": "experiments\\text-corpus\\ai\\ai_claude_humanized_en.txt",
+      "label": "ai",
+      "generator": "claude",
+      "language": "en",
+      "score": 35.0
+    },
+    {
+      "path": "experiments\\text-corpus\\ai\\ai_claude_ko_formal.txt",
+      "label": "ai",
+      "generator": "claude",
+      "language": "ko",
+      "score": 94.0
+    },
+    {
+      "path": "experiments\\text-corpus\\ai\\devin_doc0.md",
+      "label": "ai",
+      "generator": "devin",
+      "language": "en",
+      "score": 18.0
+    },
+    {
+      "path": "experiments\\text-corpus\\ai\\devin_doc1.md",
+      "label": "ai",
+      "generator": "devin",
+      "language": "en",
+      "score": 18.0
+    },
+    {
+      "path": "experiments\\text-corpus\\ai\\devin_doc2.md",
+      "label": "ai",
+      "generator": "devin",
+      "language": "en",
+      "score": 18.0
+    },
+    {
+      "path": "experiments\\text-corpus\\ai\\devin_doc3.md",
+      "label": "ai",
+      "generator": "devin",
+      "language": "en",
+      "score": 18.0
+    },
+    {
+      "path": "experiments\\text-corpus\\ai\\devin_doc4.md",
+      "label": "ai",
+      "generator": "devin",
+      "language": "en",
+      "score": 18.0
+    },
+    {
+      "path": "experiments\\text-corpus\\ai\\devin_doc5.md",
+      "label": "ai",
+      "generator": "devin",
+      "language": "en",
+      "score": 18.0
+    },
+    {
+      "path": "experiments\\text-corpus\\human\\mit_license.txt",
+      "label": "human",
+      "generator": "license-boilerplate",
+      "language": "en",
+      "score": 42.0
+    },
+    {
+      "path": "experiments\\text-corpus\\human\\wiki_en_Bread.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "en",
+      "score": 42.0
+    },
+    {
+      "path": "experiments\\text-corpus\\human\\wiki_en_Classical mechanics.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "en",
+      "score": 24.0
+    },
+    {
+      "path": "experiments\\text-corpus\\human\\wiki_en_French Revolution.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "en",
+      "score": 76.0
+    },
+    {
+      "path": "experiments\\text-corpus\\human\\wiki_en_Jane Austen.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "en",
+      "score": 42.0
+    },
+    {
+      "path": "experiments\\text-corpus\\human\\wiki_en_Photosynthesis.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "en",
+      "score": 24.0
+    },
+    {
+      "path": "experiments\\text-corpus\\human\\wiki_ko_대한민국.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "ko",
+      "score": 33.0
+    },
+    {
+      "path": "experiments\\text-corpus\\human\\wiki_ko_물리학.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "ko",
+      "score": 24.0
+    },
+    {
+      "path": "experiments\\text-corpus\\human\\wiki_ko_서울특별시.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "ko",
+      "score": 24.0
+    },
+    {
+      "path": "experiments\\text-corpus\\human\\wiki_ko_인공지능.txt",
+      "label": "human",
+      "generator": "wikipedia",
+      "language": "ko",
+      "score": 51.0
+    }
+  ]
+}

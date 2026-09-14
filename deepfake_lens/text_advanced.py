@@ -53,7 +53,8 @@ def analyze_text_advanced(text: str) -> TextAdvancedAnalysis:
             style_profile="empty",
         )
 
-    words = re.findall(r"[\w']+", trimmed.lower())
+    hangul = _hangul_ratio(trimmed)
+    words = _tokenize_words(trimmed, hangul)
     sentences = [s.strip() for s in re.split(r"[.!?。！？\n]+", trimmed) if len(s.strip()) >= 5]
 
     signals: list[TextAdvancedEvidenceSignal] = []
@@ -70,7 +71,7 @@ def analyze_text_advanced(text: str) -> TextAdvancedAnalysis:
         signals.append(burstiness_signal)
 
     # Vocabulary diversity
-    diversity_signal = _vocabulary_diversity(words)
+    diversity_signal = _vocabulary_diversity(words, hangul)
     if diversity_signal:
         signals.append(diversity_signal)
 
@@ -94,12 +95,18 @@ def analyze_text_advanced(text: str) -> TextAdvancedAnalysis:
     if personal_signal:
         signals.append(personal_signal)
 
+    # Markdown/structure fingerprint — agent-style outputs carry heavy
+    # list/header/bold markup even after plain-text flattening
+    markdown_signal = _markdown_density(trimmed)
+    if markdown_signal:
+        signals.append(markdown_signal)
+
     # Limitations
     if len(words) < 50:
         limitations.append("텍스트가 너무 짧아 신뢰할 수 있는 분석이 어렵습니다.")
     if len(sentences) < 3:
         limitations.append("문장 수가 적어 문장 수준 분석이 제한적입니다.")
-    if _hangul_ratio(trimmed) > 0.3:
+    if hangul > 0.3:
         limitations.append(
             "한국어 텍스트입니다 — 어휘 통계 임계값이 영어 기준으로 보정되어 있어 "
             "교착어 특성상 TTR/hapax/MTLD 신호가 발동하지 않을 수 있습니다."
@@ -145,6 +152,56 @@ def _hangul_ratio(text: str) -> float:
         return 0.0
     hangul = sum(1 for c in letters if "가" <= c <= "힣" or "ᄀ" <= c <= "ᇿ")
     return hangul / len(letters)
+
+
+# Common Korean particles/endings (longest-first so multi-char endings
+# strip before their suffixes). A heuristic eojeol normalizer, not a
+# morpheme analyzer — enough to stop 조사/어미 from inflating token counts.
+_KO_PARTICLES = sorted(
+    "으로부터 에서는 에게는 한테는 으로써 으로서 이라고 라고 하고 이며 이고 에서 "
+    "으로 로 에 에게 한테 께 의 을 를 이 가 은 는 도 만 부터 까지 처럼 보다 조차 "
+    "마저 밖에 이나 나 와 과 대한 대해 위해 위한 통해 따라 같은 등 니다 습니다 "
+    "습니다 했다 한다 되는 됩니다 입니다 였다 았다 었다 겠다 고 다".split(),
+    key=len, reverse=True,
+)
+
+
+def _strip_ko_particles(token: str) -> str:
+    for particle in _KO_PARTICLES:
+        if token.endswith(particle) and len(token) > len(particle) + 1:
+            return token[: -len(particle)]
+    return token
+
+
+def _tokenize_words(text: str, hangul_ratio: float) -> list[str]:
+    """Word tokens; for Hangul-heavy text also strip one trailing particle
+    so agglutinative forms do not inflate the vocabulary stats."""
+    words = re.findall(r"[\w']+", text.lower())
+    if hangul_ratio > 0.3:
+        words = [_strip_ko_particles(w) for w in words]
+    return words
+
+
+def _markdown_density(text: str) -> TextAdvancedEvidenceSignal | None:
+    """Agent-style structure fingerprint: markdown headers, bullets,
+    numbered lists, bold, and code fences surviving plain-text flattening."""
+    lines = [l for l in text.splitlines() if l.strip()]
+    if len(lines) < 4:
+        return None
+    structured = sum(
+        1
+        for l in lines
+        if re.match(r"^\s*(#{1,6}\s|[-*•]\s|\d+[.)]\s|>\s)", l) or l.strip() == "```" or l.strip().startswith("```")
+    )
+    density = structured / len(lines)
+    bold_markers = len(re.findall(r"\*\*[^*]+\*\*", text))
+    if density > 0.4 or (density > 0.25 and bold_markers >= 3):
+        return TextAdvancedEvidenceSignal(
+            "구조화 마크업 밀도",
+            f"마크다운형 목록/헤더 구조 비율({density:.2f})이 높아 에이전트형 출력과 유사합니다.",
+            14,
+        )
+    return None
 
 
 def bigram_entropy(words: list[str]) -> float:
@@ -217,7 +274,7 @@ def _burstiness_analysis(sentences: list[str]) -> TextAdvancedEvidenceSignal | N
     return None
 
 
-def _vocabulary_diversity(words: list[str]) -> TextAdvancedEvidenceSignal | None:
+def _vocabulary_diversity(words: list[str], hangul_ratio: float = 0.0) -> TextAdvancedEvidenceSignal | None:
     """Analyze vocabulary diversity metrics."""
     if len(words) < 50:
         return None
@@ -233,6 +290,18 @@ def _vocabulary_diversity(words: list[str]) -> TextAdvancedEvidenceSignal | None
 
     # MTLD (simplified)
     mtld = _calculate_mtld(words)
+
+    if hangul_ratio > 0.3:
+        # Agglutinative Korean sits far above the English bands even after
+        # particle stripping; provisional Korean band until Phase-D
+        # calibration on a labeled corpus.
+        if ttr > 0.8 and hapax_ratio > 0.8:
+            return TextAdvancedEvidenceSignal(
+                "높은 어휘 다양성(한국어)",
+                f"한국어 TTR({ttr:.2f}), hapax({hapax_ratio:.2f})이 높아 정제된 문체입니다.",
+                10,
+            )
+        return None
 
     # AI text often has moderate vocabulary diversity
     if 0.4 < ttr < 0.6 and hapax_ratio < 0.5 and mtld < 50:

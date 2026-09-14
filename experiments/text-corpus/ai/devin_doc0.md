@@ -1,0 +1,141 @@
+# Deepfake Lens — Completion Plan (2026-09-14)
+
+> Basis: full-repo review on 2026-09-14, including a local test run on
+> Windows (CPython 3.12.5): 410 tests, **15 errors, 8 skipped** — all 15
+> reproduce as Windows-portability bugs, not logic failures. CI is green on
+> Ubuntu, which is why these were not caught.
+>
+> Four phases. Phase 1 is pure code work, unblocked now. Phase 2 needs
+> user action or external assets. Phase 3 is genuinely missing
+> functionality. Phase 4 is optional structure cleanup.
+>
+> **Execution status (same day, after implementation + asset-verification pass):**
+> suite now runs **426 tests, 0 failures, 11 skipped** on Windows;
+> `scripts/cli_smoke_test.py` passes.
+> - **Done** — 1-1 (UTF-8 reconfigure + `tempfile` + windows-latest CI job),
+>   1-2 (`X-Deepfake-Lens-Client` custom-header gate on `/api/*` when no
+>   token is set + regression tests + service-doc update), 1-3 (bounded
+>   `stat()`+range read in `_extract_metadata`), 1-4 (expanded network
+>   markers), 2-3 (version bumped to `0.1.0`, local tag `v0.1.0` created at
+>   `45e6866`), 2-2 (**all checkpoints fetched and inference-verified**:
+>   AASIST.pth, AIDE `progan_train.pth` 3.35 GB sha256
+>   `ce3a9d66…4a756e` → 2-image CNNDetection-example eval accuracy/AUROC 1.0
+>   (smoke only), CNNDetection `blur_jpg_prob0.5.pth` 282 MB → real-like
+>   fixture score 0, UnivFD `fc_weights.pth` 4 KB from the official repo →
+>   real-like fixture score 28 with the HF CLIP backbone), 3-1 partial
+>   (`video-frames` runtime + `models/aide-frames-runtime.json` +
+>   `--model-path` on `video-analysis`; **frame-level only — true
+>   temporal/lip-sync remains research**; FTCN/LipForensics/AltFreezing
+>   registered as candidates), 3-4 (FaceLandmarker Tasks-API verified on
+>   mediapipe 1.0.1 — `mp.solutions` absent, Tasks path returns
+>   `mediapipe-facelandmarker` landmarks), 3-5 (`fakespot-` and
+>   `openai-detector-runtime.json` both load from HF and score; **Fakespot
+>   saturated at 100/100 on two short samples — uncalibrated, benchmark
+>   required before trusting it**), 3-6 (layout spec + manifest template +
+>   `SOURCE.template.md`; `public_datasets/modern-bench/` holds 2 real
+>   CNNDetection example images, eval verified end-to-end), Phase 4 async
+>   (`/api/scan?async=1` job registry + status polling + GUI progress),
+>   feedback basis-point normalization simplification, 3-3 (full
+>   Synthbuster archive downloaded, CRC-verified, extracted — 9,016 PNGs
+>   over 9 generators; `experiments/eval_synthbuster.py` measured
+>   per-generator screen rates recorded in `AIDE_EVALUATION.md`; real-side
+>   pairing still needs the RAISE-1k manual license).
+> - **Android** — SDK + emulator installed (`D:\android-sdk`, AEHD driver,
+>   Android-14 x86_64 AVD); `:deepfakeclassifier:connectedDebugAndroidTest`
+>   ran real ONNX inference on the emulator — and **caught a real bug**:
+>   the INT8-dynamic export uses `ConvInteger`/`MatMulInteger` ops that
+>   `onnxruntime-android` cannot session-create, so `classify` returned
+>   null. Swapped the bundled asset to the verified fp32 export; the
+>   instrumented test now passes. Neural signal stays **weight 0**
+>   pending physical-device parity — honest advisory only.
+> - **Benchmark** — paired run done: Synthbuster 20/gen vs 180 picsum real
+>   photos → AUROC 0.672, FPR 0.55%, per-generator recall 25–100%
+>   (recorded in `AIDE_EVALUATION.md`). RAISE-1k still needs a manual
+>   license form for the canonical real side.
+> - **Blocked on externals** — 2-1 (`gh` not authenticated — needs
+>   `gh auth login` then push; the workflow changes were already in
+>   `e582a70`, so only the push remains), 3-2 physical-device parity
+>   (emulator validated; no phone connected).
+> - **Deferred** — Phase 4 remainder: `pixel_analyzer` is documented in
+>   consolidation-notes as the deliberate fast pre-screen tier (no change).
+
+## Phase 1 — Fix the verified bugs (code, unblocked)
+
+### 1-1. Windows portability
+
+| Task | Files | Change |
+|---|---|---|
+| cp949 console crash | `deepfake_lens/cli.py` (`main`, around line 1071), `scripts/fetch_aide.py:152`, `scripts/fetch_aasist.py:149` | `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` at entry. `print()` of `—` (U+2014) raises `UnicodeEncodeError` on the Korean-Windows default console — a user-facing crash in `scan --format json`, not just a test break |
+| `/tmp` hardcoding | `deepfake_lens/tests/test_audio.py` (lines 34, 42), `test_c2pa.py` (46, 75, 94, 110), `test_face.py` (50), `test_inpaint.py` (27), `test_video_analysis.py` (33) | Replace `Path("/tmp") / name` with `tempfile.TemporaryDirectory()`-backed paths. The `/tmp` strings in `test_servers.py` are inert (never written) — leave or normalize, low value either way |
+| Windows CI job | `.github/workflows/deepfake-lens.yml` | Add a `windows-latest` job running `compileall` + `python -m unittest discover deepfake_lens/tests` so the suite can't regress to POSIX-only again |
+
+### 1-2. Loopback CSRF on write endpoints
+
+The Host-header guard stops DNS rebinding, but any web page can still
+issue *simple requests* (no CORS preflight) to `http://localhost:8765`.
+Reading the response is blocked by SOP — the side effects are not.
+
+- `POST /api/feedback` — `fetch(..., {method:"POST", headers:{"Content-Type":"text/plain"}, body: <json>})` writes attacker-chosen rows into `~/.deepfake-lens/feedback.jsonl`, poisoning the examiner-label stream that `suggest_fusion_weights` consumes.
+- `POST /api/analyze-upload` (multipart) and `GET /api/scan?folder=` — attacker-triggered filesystem scans / CPU burn.
+
+Fix: enforce a `Content-Type` allowlist on all write endpoints
+(`application/json` for feedback/report, `multipart/form-data` for
+upload). Non-simple content types force a preflight, which fails because
+the server sends no CORS headers. Optionally extend `--token` enforcement
+to loopback binds as a documented hardening flag. Add a regression check
+("write endpoints enforce content-type") to `security.py`.
+
+### 1-3. Missing size cap in web analyze path
+
+`webapp.py:_analyze_file_payload` → `_extract_metadata` calls
+`path.read_bytes()` on an arbitrary user-supplied path with no bound —
+every other read path has `max_file_bytes`/`MAX_*` caps. `stat()` first;
+read at most `MAX_METADATA_BYTES` (4 MiB).
+
+### 1-4. Guardrail strengthening
+
+`security.py` `NETWORK_MARKERS` is substring matching — `socket.socket()`
+direct calls, `ssl.`, `smtplib`, `ftplib`, and `subprocess`+curl/wget all
+pass today. Either extend the marker list or (better) switch to an
+`ast`-walk import/call check so obfuscated spacing can't evade it.
+
+## Phase 2 — External blockers (user action / assets)
+
+| # | Item | Action | Notes |
+|---|---|---|---|
+| 2-1 | Ship the CI workflow patch | `gh auth refresh -h github.com -s workflow` → `git apply patches/0001-ci-c2pa-sdk-test-and-actions-bump.patch` → push | ROADMAP P0; blocked only on the token scope. ~2 min of user action |
+| 2-2 | Activate the neural engines | `python scripts/fetch_aide.py` (3.3 GB, research license) + `python scripts/fetch_aasist.py` (~1.3 MB) → verify with `scan --model-path models/aide-runtime.json` | Without checkpoints the box ships heuristics only; this is the single largest capability jump for zero code |
+| 2-3 | Tag `v0.1.0` | bump `pyproject.toml` off `0.1.0.dev0` → tag → decide the `DEEPFAKE_LENS_REPORT_KEY` operating model | signing-key management decision is the real blocker, not code |
+
+## Phase 3 — Genuinely missing features (largest first)
+
+| # | Item | Work |
+|---|---|---|
+| 3-1 | Video temporal / lip-sync detector | The only modality with no runnable runtime at all. New runtime + weights profile for a Wav2Lip-detector-class model; wire through `model_adapter` modality dispatch; measured eval before any weight > 0 |
+| 3-2 | Android neural score | Export quantized AIDE (int8/fp16) ONNX fitting mobile budgets → verify parity vs the fp32 torch path → commit `deepfake-lens.onnx` asset (size permitting) → lift `weight=0` in `AndroidFileAnalysis.kt:184` per the app's own contract → physical-device run |
+| 3-3 | ≥224 px in-domain benchmark | Synthbuster full set + RAISE-1k collection (manual license form — never automated, per repo policy) → `eval_aide.py --per-source` → publish per-model AUROC/EER in `experiments/AIDE_EVALUATION.md` |
+| 3-4 | mediapipe Tasks-API port | `face_mediapipe` is pinned `<0.10.30` (legacy `mp.solutions` removed). Port to FaceLandmarker + bundled `.task` asset to unpin |
+| 3-5 | Modern text detector | OpenAI detector is GPT-2-era (documented weakness). Binoculars-style PPL comparison or a modern classifier behind an optional extra |
+| 3-6 | `fixtures/modern-bench/` spec | Layout + eval commands for self-collected FLUX.1/SD3.5/Wan2.1 samples; provenance-only, no redistribution |
+
+## Phase 4 — Structure cleanup (optional, non-feature)
+
+- **Classifier triplication**: `classifier.py` / `ml_classifier.py` /
+  `rule_classifier.py` overlap — apply the consolidation-notes pattern
+  (label tiers or merge).
+- **Async web scans**: `ThreadingHTTPServer` runs scans synchronously —
+  large folders block all other API requests. Job-id + polling model.
+- **`pixel_analyzer` → neural delegation**: consolidation-notes long-term
+  plan — once AIDE is the default engine, the pre-screen tier delegates
+  to the adapter and its own signal functions get deleted.
+- **`feedback.py` weight normalization**: the `math.nextafter` residual
+  loop is over-engineered for the value at stake; a documented rounding
+  note is cheaper to maintain. Low priority.
+
+## Order of operations
+
+1. Phase 1 entirely (verified bugs, small diffs, test-covered).
+2. Phase 2-1 (user, 2 min) + 2-2 (download time, no code).
+3. Phase 3-2 (Android) or 3-1 (video) — the two biggest user-value items.
+4. Phase 2-3 release once 3-2 lands.
+5. Phase 3-3/3-4/3-5/3-6 and Phase 4 as capacity allows.

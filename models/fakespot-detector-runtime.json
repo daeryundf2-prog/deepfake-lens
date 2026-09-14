@@ -19,5 +19,6 @@
     "Label order for this checkpoint is index 0 = Human, index 1 = AI — verified against the model's config.json id2label (opposite of the OpenAI detector, which is 0=Fake).",
     "Pair with models/openai-detector-runtime.json via a directory --model-path to get a two-member text ensemble with an agreement signal."
   ],
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "ensemble_weight": 0.5
 }
