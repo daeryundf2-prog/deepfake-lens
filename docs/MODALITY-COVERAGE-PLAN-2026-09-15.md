@@ -91,49 +91,128 @@
 
 ---
 
-## 구현 계획 (우선순위 순)
+## 구현 계획 — 세부 작업 분해
 
-### Phase V1 — 비디오를 스캔에 배선 (최우선, 구조적 구멍)
-영상이 현재 통합 파이프라인에서 완전히 빠져 있다.
-1. `core.analyze_file`에 `SUPPORTED_VIDEO_EXTENSIONS` 분기 추가:
-   `analyze_video_temporal` + 프레임 샘플 이미지 탐지(aide-frames) + `model_analysis` 융합.
-2. `video-frames` 런타임 결과를 `model_analysis`로 끌어올려 `external_model_active` 집계에 포함.
-3. 오디오 트랙 추출(ffmpeg, 선택) → `analyze_audio` 재귀 호출 → `av_analysis` 섹션.
-4. GUI accept 목록에 mp4 등 추가 + `/api/check`가 영상을 인식.
+각 작업은 (파일 → 변경 내용 → 테스트 → 수용 기준) 순서로 기술한다.
+모든 단계는 독립 커밋 가능 크기로 쪼갠다.
 
-### Phase V2 — 텍스트 문서 파이프라인
-실사용 문서 대부분이 .txt/.md가 아니다.
-1. `_extract_document_text(path)`: pdf(pymupdf), docx(python-docx/zip-xml), hwp(olefile/선택), xlsx → 텍스트 추출 계층. 의존성 없으면 graceful skip.
-2. `SUPPORTED_TEXT_EXTENSIONS`를 "텍스트 추출 가능 문서"로 확장.
-3. 문서 포렌식 신호: PDF Producer/Creator 문자열, docx `docProps`(author, lastModifiedBy, revision) → `forensic` 섹션에 기록.
+---
 
-### Phase V3 — 스캔 미배선 모듈 배선
-이미 구현된 탐지기가 스캔에서 안 도는 문제.
-1. 이미지: `face.analyze_faces` + `inpaint` + `frequency` 신호를 이미지 분기에 통합(선택/옵션 플래그).
-2. 영상: `rppg`(프레임 샘플 있을 때) + `avatar` 신호를 비디오 분기에 통합.
-3. 각각 기본 off + `--deep` 플래그로 활성화 — 런타임 비용 보호.
+### Phase V1 — 비디오 스캔 배선 (구조적 구멍)
 
-### Phase V4 — 오디오 물리 신호군
-1. 무음/호흡 패턴 (energy-gated pause 분포).
-2. 배경 잡음 바닥 불연속 탐지.
-3. 프로소디 단조도 (피치 곡선 분산 — librosa/parselmouth 선택).
-4. 보코더 고조파 규칙성 휴리스틱.
-전부 휴리스틱 신호 레이어 — 신경망 없이 구현 가능.
+**V1-1. `core.analyze_file` 비디오 분기**
+- `deepfake_lens/core.py` → `SUPPORTED_VIDEO_EXTENSIONS` 임포트 후 audio 분기 뒤에
+  video 분기 추가: `analyze_video_temporal(path, model_path=model_path)` 호출 →
+  `_video_result()` 어댑터(`_audio_result`와 동형)로 `ClassificationResult` 변환.
+- 어댑터 규칙: temporal score/band/signals/limitations를 그대로 이관하고
+  `model_analysis`는 `VideoTemporalAnalysis.model_analysis` 그대로 실어
+  `external_model_active` 집계에 포함. `verdict` 앞에 `[영상]` 프리픽스 불필요
+  (kind 필드가 구분).
+- 테스트: `test_core.py`(또는 신규 `test_video_scan.py`)에 cv2 모킹한 가짜 mp4
+  분기 테스트 2건 — (a) 확장자 디스패치 확인, (b) cv2 없을 때 status=failed가
+  아니라 limitation으로 degrade되는지.
+- 수용: `python -m deepfake_lens scan <mp4폴더>`가 "지원 형식 아님" 대신
+  kind=video 결과를 반환.
 
-### Phase V5 — 이미지 포렌식 보강
-1. JPEG 이중압축/고스트 (DCT 계수 히스토그램).
-2. 정식 ELA 신호.
-3. 확장자 커버리지: bmp/tiff/gif를 core 분기에 추가(GUI accept와 정합).
+**V1-2. `webapp`/GUI 영상 인식**
+- `gui.html` → drop-zone 안내문과 `input.accept`에 `.mp4,.mov,.webm,.mkv,.avi` 추가.
+- `webapp.py` → 별도 수정 불필요(업로드는 확장자 무관하게 `analyze_file` 위임).
+- 테스트: 기존 upload 테스트가 mp4 파일명으로도 동작하는지 1건 추가.
+- 수용: GUI에 영상 파일 드롭 → 결과 행에 kind=video.
 
-### Phase V6 — 연구/선택 후보 (비용 대비 검증 후)
-- 립싱크 SyncNet류 A/V 오프셋 — 모델 자산 필요.
-- LLM 텍스트 워터마크(KGW) — 생성기 측 시드 필요, 오픈 생성기에만 유효.
-- SynthID 픽셀 디코더 — Google 비공개, 대체 구현 불확실.
-- 화자 대조 / stylometry 저자 대조 — 참조 샘플 필요한 2-input 기능.
-- 조명/그림자 물리 일관성 — 정확도 연구 단계.
+**V1-3. 영상 오디오 트랙 교차 분석**
+- `video_analysis.py` → `analyze_video_temporal(..., analyze_audio_track: bool=False)` 옵션:
+  ffmpeg 있을 때 `ffmpeg -i in.mp4 -vn -ac 1 -ar 16000 tmp.wav` 추출 →
+  `audio.analyze_audio(tmp, model_path)` → 결과를 `av_audio` 필드로 첨부.
+  ffmpeg/추출 실패 시 limitation "오디오 트랙 분석 불가(ffmpeg 없음)"만 추가.
+- `core.py` 비디오 분기에서 `analyze_audio_track=True`는 `--deep`/opt-in으로 게이트.
+- 테스트: ffmpeg 모킹 + analyze_audio 스텁으로 av_audio 첨부 여부 1건.
+- 수용: 음성 포함 영상에서 음성 점수가 영상 결과와 함께 보고됨.
 
-### 검증 규칙 (기존 계약 유지)
+**V1-4. `/api/check` 영상 경로**
+- webapp `_check_file_payload` → kind==video일 때 forensic에 더해
+  `item.result.model_analysis`가 이미 있으므로 추가 작업 없음 — 응답에
+  `item.kind`가 "video"로 오는지만 테스트.
+- 수용: mp4 업로드 → `{mode:file, item.kind:video}`.
+
+### Phase V2 — 문서 파이프라인
+
+**V2-1. `documents.py` 신규 모듈**
+- `extract_document_text(path) -> tuple[str, dict]` 반환 (본문, 메타데이터 dict).
+- 확장자 매핑: `.pdf`(pymupdf → fallback pdfminer), `.docx`(zipfile+`word/document.xml`
+  정규식 스트립 — 의존성 제로 경로), `.hwp`(olefile 있을 때만), `.xlsx/.pptx`(zip-xml).
+- 추출 불가/의존성 없음 → `("", {"extractor": "unavailable:<dep>"})` — 예외 아님.
+- 크기 캡: 파일 ≤64MB, 추출 텍스트 ≤1MB(절단 표시 limitation).
+- 테스트: zip으로 만든 최소 docx + 텍스트 없는 pdf → graceful 2~3건.
+
+**V2-2. `core.analyze_file` 문서 분기**
+- `SUPPORTED_TEXT_EXTENSIONS`에 문서 확장자 추가하되 `_read_prefix` 대신
+  `documents.extract_document_text` 사용. 추출 실패 시 status=analyzed +
+  limitation "텍스트 추출 불가" (failed 아님 — 파일은 유효).
+- 문서 메타데이터(author, producer, created/modified)를 `analyze_text` 결과의
+  `source_guess.reasons`에 보강 입력.
+- 수용: .docx 드롭 → 텍스트 점수 + 작성자 메타데이터가 출처 추정에 반영.
+
+**V2-3. 문서 포렌식**
+- `documents.py`의 메타데이터 dict를 `c2pa.analyze_metadata_forensic`이 문서형도
+  처리하도록 확장: PDF `/Producer`, docx `docProps/core.xml` author/revision을
+  `ProvenanceRecord`로 기록.
+- 테스트: docx fixture에서 author 레코드 추출 1건.
+
+### Phase V3 — 고립 탐지기 배선 (opt-in deep 모드)
+
+**V3-1. 이미지 deep 신호**
+- `core.analyze_file(..., deep: bool=False)` 추가. deep일 때:
+  `face.analyze_faces`(mediapipe 없으면 랜드마크 근사로 degrade),
+  `inpaint.detect_inpainting`, `frequency` 신호를 `EvidenceSignal`로 변환해
+  `analyze_image_metadata` 결과 signals에 병합.
+- GUI: pixel-mode select에 `deep` 옵션 이미 존재 — deep 선택 시 이 플래그도 전달.
+- 테스트: deep=False 기본 동작 불변 1건 + deep=True 신호 병합 1건(모킹).
+
+**V3-2. 비디오 deep 신호**
+- deep일 때 `rppg.analyze_rppg`(프레임 샘플 재사용), `avatar.analyze_avatar`를
+  비디오 분기에 병합. 각각 독립 try/except + limitation degrade.
+- 수용: `scan --deep`이 얼굴/맥박/인페인팅 신호를 결과에 포함.
+
+### Phase V4 — 오디오 물리 신호 (audio.py 확장)
+
+- V4-1 무음/호흡: RMS 에너지 게이트로 pause 구간 분포 → "pause 히스토그램 균일도" 신호 (weight ≤15).
+- V4-2 잡음 바닥: 저에너지 프레임의 스펙트럴 바닥 일관성 → 불연속 지점 수 신호.
+- V4-3 프로소디: `librosa.yin` 피치 곡선 분산/범위 (librosa 없으면 스킵).
+- V4-4 고조파 규칙성: harmonic/percussive 분리 후 고조파 잔차 균일도.
+- 각각 EvidenceSignal + 테스트 1건씩; 전부 provisional 표기.
+
+### Phase V5 — 이미지 포렌식
+
+- V5-1 확장자: `.bmp/.tiff/.tif/.gif`를 `SUPPORTED_IMAGE_EXTENSIONS`에 추가
+  (PIL/cv2 읽기 확인, GIF는 첫 프레임). GUI accept와 정합.
+- V5-2 JPEG 이중압축: `frequency.py`에 DCT 계수 히스토그램 주기성 신호 추가
+  (JPEG만, 재저장 오탐 limitation 명시).
+- V5-3 정식 ELA: 지정 품질 재저장 후 오차 맵의 지역 분산 → pixel 신호.
+
+### Phase V6 — 연구 후보 (게이트: 별도 검증 후 착수)
+립싱크 SyncNet, KGW 텍스트 워터마크, SynthID 디코더, 화자/저자 대조 —
+각각 선행 조건(모델 자산/참조 샘플) 충족 시 개별 착수. 이 문서에 체크리스트로만 유지.
+
+---
+
+## 실행 순서 및 의존관계
+
+```text
+V1-1 → V1-2 ─┐
+             ├→ V1-3 → V1-4      (비디오 완결)
+V2-1 → V2-2 → V2-3               (문서 완결, V1과 독립 병행 가능)
+V3-1, V3-2                       (V1-1 이후 — deep 플래그 경로 재사용)
+V4-* , V5-*                      (독립, 언제든)
+V6                               (연구 게이트)
+```
+
+권장 커밋 순서: **V1-1 → V1-2 → V2-1+V2-2 → V1-3 → V3-1 → V4-1** —
+"모든 것을 체크할 수 있는 형태"의 체감 개선이 가장 큰 순서.
+
+## 검증 규칙 (기존 계약 유지)
 - 모든 신규 신호는 weight가 명시된 `EvidenceSignal` — 점수는 여전히 우선순위 신호.
 - 모달리티별 라벨 코퍼스 추가 전까지 새 신호는 "측정 전(provisional)" 표기.
-- 선택 의존성(ffmpeg, pymupdf, mediapipe) 부재 시 해당 레이어만 unavailable로 표기.
-- Windows 재현 가능성 필수 (delete=False 패턴 준수).
+- 선택 의존성(ffmpeg, pymupdf, mediapipe, librosa) 부재 시 해당 레이어만 unavailable로 표기.
+- Windows 재현 가능성 필수 (임시파일 delete=False 패턴 준수).
+- 각 Phase 완료 시 해당 모달리티의 실측 프로브 결과를 `experiments/`에 기록.

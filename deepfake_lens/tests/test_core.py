@@ -101,7 +101,7 @@ class DeepfakeLensCoreTest(unittest.TestCase):
                 "prompt\nNegative prompt: blur\nSteps: 10, Sampler: Euler, CFG scale: 5, Seed: 9",
             )
             (root / "note.txt").write_text("오늘은 친구와 점심을 먹었다.", encoding="utf-8")
-            (root / "movie.mp4").write_bytes(b"not supported")
+            (root / "movie.xyz").write_bytes(b"not supported")
 
             summary, items = scan_directory(root)
 
@@ -452,6 +452,55 @@ def _png(*chunks: bytes) -> bytes:
 def _chunk(kind: bytes, payload: bytes) -> bytes:
     return len(payload).to_bytes(4, "big") + kind + payload + b"\x00\x00\x00\x00"
 
+
+
+
+class ImageExtensionDimensionsTest(unittest.TestCase):
+    """BMP/GIF/TIFF headers must yield dimensions so the new extensions
+    aren't analyzed blind."""
+
+    def _metadata(self, data: bytes, suffix: str):
+        import tempfile
+        from deepfake_lens.core import read_image_metadata
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(data)
+            name = tmp.name
+        try:
+            return read_image_metadata(Path(name))
+        finally:
+            Path(name).unlink(missing_ok=True)
+
+    def test_bmp_dimensions(self) -> None:
+        import struct
+        header = b"BM" + b"\x00" * 16 + struct.pack("<ii", 640, 480) + b"\x00" * 16
+        _, dims = self._metadata(header, ".bmp")
+        self.assertEqual(dims, (640, 480))
+
+    def test_gif_dimensions(self) -> None:
+        import struct
+        data = b"GIF89a" + struct.pack("<HH", 320, 200) + b"\x00" * 8
+        _, dims = self._metadata(data, ".gif")
+        self.assertEqual(dims, (320, 200))
+
+    def test_tiff_dimensions_little_endian(self) -> None:
+        import struct
+        entries = (
+            struct.pack("<HHI", 256, 4, 1) + struct.pack("<I", 800) +
+            struct.pack("<HHI", 257, 4, 1) + struct.pack("<I", 600)
+        )
+        data = b"II*\x00" + struct.pack("<I", 8) + struct.pack("<H", 2) + entries + b"\x00" * 4
+        _, dims = self._metadata(data, ".tiff")
+        self.assertEqual(dims, (800, 600))
+
+    def test_analyze_file_accepts_bmp(self) -> None:
+        import tempfile
+        import struct
+        with tempfile.TemporaryDirectory() as tmp:
+            bmp = Path(tmp) / "img.bmp"
+            bmp.write_bytes(b"BM" + b"\x00" * 16 + struct.pack("<ii", 64, 64) + b"\x00" * 64)
+            item = analyze_file(bmp)
+        self.assertEqual(item.kind, "image")
+        self.assertEqual(item.status, "analyzed")
 
 if __name__ == "__main__":
     unittest.main()

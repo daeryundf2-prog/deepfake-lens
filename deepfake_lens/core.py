@@ -10,13 +10,14 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Iterable
 
 from .audio import SUPPORTED_AUDIO_EXTENSIONS, AudioAnalysis, analyze_audio
+from .video_analysis import SUPPORTED_VIDEO_EXTENSIONS, VideoTemporalAnalysis, analyze_video_temporal
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, PixelAnalysis, analyze_image_pixels
 from .pixel import PixelExpertResult
 from .png import read_png_dimensions, read_png_metadata
 
 
-SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
 SUPPORTED_TEXT_EXTENSIONS = {".txt", ".md"}
 SCAN_JSON_SCHEMA_VERSION = 1
 DEFAULT_MAX_FILES = 1000
@@ -328,6 +329,13 @@ def analyze_file(
         except OSError as exc:
             return ScanItem(display_path, file_path.name, "audio", "failed", size, error=str(exc))
 
+    if extension in SUPPORTED_VIDEO_EXTENSIONS:
+        try:
+            analysis = analyze_video_temporal(file_path, model_path=model_path)
+            return ScanItem(display_path, file_path.name, "video", "analyzed", size, _video_result(analysis))
+        except OSError as exc:
+            return ScanItem(display_path, file_path.name, "video", "failed", size, error=str(exc))
+
     return ScanItem(display_path, file_path.name, "unsupported", "unsupported", size, error="지원 형식이 아닙니다.")
 
 
@@ -356,6 +364,47 @@ def _audio_result(analysis: AudioAnalysis) -> ClassificationResult:
         limitations=list(analysis.limitations),
         source_guess=source_guess,
         next_checks=["원본 녹음이나 통화 원본을 확보하세요.", "동일 화자의 다른 샘플과 음향 특성을 비교하세요.", "업로드 맥락과 파일 메타데이터를 함께 검토하세요."],
+        model_analysis=analysis.model_analysis,
+        ai_score=analysis.score,
+        source_attribution_label=source_guess.label,
+    )
+
+
+def _video_result(analysis: "VideoTemporalAnalysis") -> ClassificationResult:
+    """Adapt a VideoTemporalAnalysis into the ClassificationResult contract.
+
+    Same shape as _audio_result: temporal score/band/signals pass through,
+    and model_analysis (e.g. the video-frames profile scoring sampled
+    frames with an image detector) is carried for external_model_active
+    accounting.
+    """
+    try:
+        band = RiskBand(analysis.band)
+    except ValueError:
+        band = RiskBand.UNKNOWN
+    has_detail = analysis.frame_count > 0 and analysis.duration_seconds > 0
+    source_guess = SourceGuess(
+        "출처 단서 없음",
+        SourceConfidence.UNKNOWN,
+        [
+            "영상 파일의 컨테이너 메타데이터에서 출처 단서를 찾지 못했습니다."
+            if has_detail
+            else "영상 분석이 불완전해 출처를 판단할 단서가 없습니다."
+        ],
+    )
+    return ClassificationResult(
+        score=analysis.score,
+        band=band,
+        band_label=analysis.band_label,
+        verdict=analysis.verdict,
+        signals=[EvidenceSignal(signal.title, signal.detail, signal.weight) for signal in analysis.signals],
+        limitations=list(analysis.limitations),
+        source_guess=source_guess,
+        next_checks=[
+            "원본 촬영 파일(인카메라 파일)이나 원 스트림을 확보하세요.",
+            "프레임별 이미지 탐지 점수와 음성 트랙 분석을 함께 검토하세요.",
+            "C2PA/출처 기록이 있는 영상인지 확인하세요.",
+        ],
         model_analysis=analysis.model_analysis,
         ai_score=analysis.score,
         source_attribution_label=source_guess.label,
@@ -495,11 +544,55 @@ def read_image_metadata(path: Path, *, metadata_bytes: int = DEFAULT_METADATA_BY
         dimensions = _read_jpeg_dimensions(data)
     elif data.startswith(b"RIFF") and data[8:12] == b"WEBP":
         dimensions = _read_webp_dimensions(data)
+    elif data.startswith(b"BM") and len(data) >= 26:
+        import struct
+        width, height = struct.unpack_from("<ii", data, 18)
+        if width > 0:
+            dimensions = (width, abs(height))
+    elif data[:6] in (b"GIF87a", b"GIF89a") and len(data) >= 10:
+        import struct
+        dimensions = struct.unpack_from("<HH", data, 6)
+    elif data[:4] in (b"II*\x00", b"MM\x00*"):
+        dimensions = _read_tiff_dimensions(data)
 
     header_text = _extract_header_text(data)
     if header_text:
         metadata["header.text"] = header_text
     return metadata, dimensions
+
+
+def _read_tiff_dimensions(data: bytes) -> tuple[int, int] | None:
+    """Read width/height from a TIFF header's first IFD (tags 256/257)."""
+    import struct
+    little = data[:2] == b"II"
+    order = "<" if little else ">"
+    try:
+        ifd_offset = struct.unpack_from(order + "I", data, 4)[0]
+        count = struct.unpack_from(order + "H", data, ifd_offset)[0]
+        if count > 200:
+            return None
+        width = height = None
+        for index in range(count):
+            base = ifd_offset + 2 + index * 12
+            if base + 12 > len(data):
+                break
+            tag, field_type, num = struct.unpack_from(order + "HHI", data, base)
+            if tag not in (256, 257) or field_type not in (3, 4) or num != 1:
+                continue
+            value = (
+                struct.unpack_from(order + "H", data, base + 8)[0]
+                if field_type == 3
+                else struct.unpack_from(order + "I", data, base + 8)[0]
+            )
+            if tag == 256:
+                width = value
+            else:
+                height = value
+        if width and height:
+            return width, height
+    except (struct.error, IndexError):
+        return None
+    return None
 
 
 def _heatmap_path_for(path: Path, *, root: Path | None, heatmap_dir: Path | None) -> Path:

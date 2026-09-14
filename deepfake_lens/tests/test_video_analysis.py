@@ -155,3 +155,39 @@ class VideoTemporalAnalysisTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AnalyzeFileVideoDispatchTest(unittest.TestCase):
+    """analyze_file must route video extensions to the temporal analyzer
+    instead of dropping them as 'unsupported'."""
+
+    def test_mp4_dispatches_to_video_kind(self) -> None:
+        from deepfake_lens.core import analyze_file
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "clip.mp4"
+            fake.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64)
+            item = analyze_file(fake)
+        self.assertEqual(item.kind, "video")
+        self.assertEqual(item.status, "analyzed")
+        # A fake container can't be decoded: the analyzer degrades to an
+        # error analysis (band unknown) rather than crashing or 'unsupported'.
+        self.assertIsNotNone(item.result)
+        self.assertIn(item.result.band.value, {"unknown", "low"})
+
+    def test_video_result_adapter_contract(self) -> None:
+        from deepfake_lens.core import _video_result
+        from deepfake_lens.video_analysis import VideoEvidenceSignal
+
+        analysis = VideoTemporalAnalysis(
+            score=40, band="medium", band_label="주의",
+            verdict="몇 가지 이상 신호가 보입니다.",
+            signals=[VideoEvidenceSignal("밝기 불일치", "테스트", 20)],
+            limitations=["테스트 한계"],
+            frame_count=10, duration_seconds=10.0, fps=1.0,
+            resolution=(1920, 1080), model_analysis=None,
+        )
+        result = _video_result(analysis)
+        self.assertEqual(result.score, 40)
+        self.assertEqual(result.signals[0].title, "밝기 불일치")
+        self.assertTrue(result.next_checks)
