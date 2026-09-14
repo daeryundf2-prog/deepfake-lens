@@ -99,6 +99,11 @@ def analyze_text_advanced(text: str) -> TextAdvancedAnalysis:
         limitations.append("텍스트가 너무 짧아 신뢰할 수 있는 분석이 어렵습니다.")
     if len(sentences) < 3:
         limitations.append("문장 수가 적어 문장 수준 분석이 제한적입니다.")
+    if _hangul_ratio(trimmed) > 0.3:
+        limitations.append(
+            "한국어 텍스트입니다 — 어휘 통계 임계값이 영어 기준으로 보정되어 있어 "
+            "교착어 특성상 TTR/hapax/MTLD 신호가 발동하지 않을 수 있습니다."
+        )
     if len(words) >= 20:
         limitations.append("빅그램 엔트로피는 언어모델 퍼플렉시티가 아닌 분포 통계이므로 PPL 수준의 근거로 해석하면 안 됩니다.")
     limitations.append("통계적 휴리스틱 기반 선별 결과이며, 확정적 판별이 아닙니다.")
@@ -131,6 +136,15 @@ def analyze_text_advanced(text: str) -> TextAdvancedAnalysis:
         ai_probability=ai_probability,
         style_profile=style_profile,
     )
+
+
+def _hangul_ratio(text: str) -> float:
+    """Fraction of letters that are Hangul syllables/jamo (0-1)."""
+    letters = [c for c in text if c.isalpha()]
+    if not letters:
+        return 0.0
+    hangul = sum(1 for c in letters if "가" <= c <= "힣" or "ᄀ" <= c <= "ᇿ")
+    return hangul / len(letters)
 
 
 def bigram_entropy(words: list[str]) -> float:

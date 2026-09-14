@@ -81,6 +81,17 @@ class TextAdvancedAnalysisTest(unittest.TestCase):
         result = analyze_text_advanced(text)
         self.assertGreater(result.score, 0)
 
+    def test_hangul_text_flags_english_calibrated_thresholds(self) -> None:
+        """Korean text must carry the English-calibration limitation: the
+        lexical thresholds cannot fire on agglutinative token streams, so
+        a Korean score without that warning would mislead."""
+        korean = "인공지능 기술은 최근 몇 년간 콘텐츠 제작 분야에서 혁신적인 변화를 이끌어왔습니다. 대규모 언어 모델은 방대한 학습 데이터를 바탕으로 다양한 주제에 걸쳐 일관성 있고 맥락에 적합한 텍스트를 생성할 수 있습니다."
+        english = "Artificial intelligence has transformed content creation in recent years across many domains and applications worldwide."
+        ko = analyze_text_advanced(korean)
+        en = analyze_text_advanced(english)
+        self.assertTrue(any("한국어" in lim for lim in ko.limitations))
+        self.assertFalse(any("한국어" in lim for lim in en.limitations))
+
     def test_bigram_entropy_known_distribution(self) -> None:
         """Two equiprobable bigrams must yield exactly 1 bit of entropy."""
         self.assertAlmostEqual(bigram_entropy(["a", "b", "a", "b", "a"]), 1.0)
