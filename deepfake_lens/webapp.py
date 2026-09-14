@@ -319,6 +319,7 @@ def _scan_payload(query: str, *, default_folder: Path | None) -> dict[str, objec
             raise ValueError("max_file_bytes must be an integer") from exc
     dedupe = params.get("dedupe", ["false"])[0].lower() in {"1", "true", "yes"}
     heatmaps = params.get("heatmaps", ["false"])[0].lower() in {"1", "true", "yes"}
+    deep_signals = params.get("deep_signals", ["false"])[0].lower() in {"1", "true", "yes"}
     model_path_raw = params.get("model_path", [""])[0]
     no_default_engine = params.get("no_default_engine", ["false"])[0].lower() in {"1", "true", "yes"}
     if model_path_raw.strip():
@@ -339,6 +340,7 @@ def _scan_payload(query: str, *, default_folder: Path | None) -> dict[str, objec
             max_file_bytes=max_file_bytes,
             dedupe=dedupe,
             model_path=model_path,
+            deep_signals=deep_signals,
         )
         if fusion_profile:
             items = apply_fusion_to_items(items, fusion_profile)

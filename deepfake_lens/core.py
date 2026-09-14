@@ -205,6 +205,7 @@ def scan_directory(
     allow_symlinks: bool = False,
     dedupe: bool = False,
     hash_db_path: Path | None = None,
+    deep_signals: bool = False,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
     root = Path(directory)
     if not root.is_dir():
@@ -246,6 +247,7 @@ def scan_directory(
             pixel_max_side=pixel_max_side,
             heatmaps=heatmaps,
             model_path=model_path,
+            deep_signals=deep_signals,
         )
         cached = cache_items.get(key) if isinstance(cache_items, dict) else None
         if isinstance(cached, dict):
@@ -260,6 +262,7 @@ def scan_directory(
             heatmaps=heatmaps,
             heatmap_dir=heatmap_dir,
             model_path=model_path,
+            deep_signals=deep_signals,
         )
         return item, key, False
 
@@ -292,6 +295,7 @@ def analyze_file(
     heatmaps: bool = False,
     heatmap_dir: Path | None = None,
     model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None = None,
+    deep_signals: bool = False,
 ) -> ScanItem:
     file_path = Path(path)
     display_path = _display_path(file_path, root=root)
@@ -328,6 +332,8 @@ def analyze_file(
                 )
             model_analysis = analyze_external_model(file_path, model_path)
             result = analyze_image_metadata(metadata, dimensions=dimensions, pixel_analysis=pixel_analysis, model_analysis=model_analysis)
+            if deep_signals:
+                result = _merge_deep_signals(result, _deep_image_layers(file_path))
             return ScanItem(display_path, file_path.name, "image", "analyzed", size, result)
         except OSError as exc:
             return ScanItem(display_path, file_path.name, "image", "failed", size, error=str(exc))
@@ -342,7 +348,10 @@ def analyze_file(
     if extension in SUPPORTED_VIDEO_EXTENSIONS:
         try:
             analysis = analyze_video_temporal(file_path, model_path=model_path, analyze_audio_track=True)
-            return ScanItem(display_path, file_path.name, "video", "analyzed", size, _video_result(analysis))
+            result = _video_result(analysis)
+            if deep_signals:
+                result = _merge_deep_signals(result, _deep_video_layers(file_path))
+            return ScanItem(display_path, file_path.name, "video", "analyzed", size, result)
         except OSError as exc:
             return ScanItem(display_path, file_path.name, "video", "failed", size, error=str(exc))
 
@@ -377,6 +386,105 @@ def _audio_result(analysis: AudioAnalysis) -> ClassificationResult:
         model_analysis=analysis.model_analysis,
         ai_score=analysis.score,
         source_attribution_label=source_guess.label,
+    )
+
+
+def _deep_image_layers(path: Path) -> tuple[list[EvidenceSignal], list[str]]:
+    """Opt-in deep image layers: face-manipulation and inpainting probes.
+
+    These modules predate the unified scan but were never wired in — each
+    degrades to a limitation note on missing deps (mediapipe, cv2) rather
+    than failing the item.
+    """
+    signals: list[EvidenceSignal] = []
+    limitations: list[str] = []
+    try:
+        from .face import analyze_faces
+        face = analyze_faces(path)
+        if face.face_count > 0:
+            signals.append(EvidenceSignal(
+                "얼굴 조작 분석",
+                f"{face.verdict} (faces={face.face_count}, {face.manipulation_type})",
+                min(face.score, 30),
+            ))
+        limitations.extend(face.limitations[:2])
+    except Exception:
+        limitations.append("얼굴 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
+    try:
+        from .inpaint import analyze_inpainting
+        inpaint = analyze_inpainting(path)
+        if inpaint.regions_detected:
+            signals.append(EvidenceSignal(
+                "인페인팅/부분 변형 탐지",
+                f"{inpaint.verdict} (영역 {inpaint.regions_detected}개)",
+                min(inpaint.score, 25),
+            ))
+        limitations.extend(inpaint.limitations[:2])
+    except Exception:
+        limitations.append("인페인팅 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
+    return signals, limitations
+
+
+def _deep_video_layers(path: Path) -> tuple[list[EvidenceSignal], list[str]]:
+    """Opt-in deep video layers: rPPG pulse screening + avatar probe."""
+    signals: list[EvidenceSignal] = []
+    limitations: list[str] = []
+    try:
+        from .rppg import analyze_rppg
+        rppg = analyze_rppg(path)
+        signals.append(EvidenceSignal(
+            "rPPG 맥박 신호",
+            rppg.verdict,
+            min(rppg.score, 20),
+        ))
+        limitations.extend(rppg.limitations[:2])
+    except Exception:
+        limitations.append("rPPG 맥박 분석을 실행할 수 없습니다(선택 의존성 부재).")
+    try:
+        from .avatar import analyze_avatar
+        avatar = analyze_avatar(path)
+        if avatar.score > 0:
+            signals.append(EvidenceSignal(
+                "아바타/디지털휴먼 탐지",
+                avatar.verdict,
+                min(avatar.score, 25),
+            ))
+        limitations.extend(avatar.limitations[:2])
+    except Exception:
+        limitations.append("아바타 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
+    return signals, limitations
+
+
+def _merge_deep_signals(
+    result: ClassificationResult,
+    layers: tuple[list[EvidenceSignal], list[str]],
+) -> ClassificationResult:
+    """Fold deep-layer signals into a result and rescale score/band.
+
+    Deep signals are capped per-layer so they shift prioritization without
+    dominating the base analysis; band is recomputed on the merged total.
+    """
+    signals, limitations = layers
+    if not signals and not limitations:
+        return result
+    merged = sorted([*result.signals, *signals], key=lambda s: s.weight, reverse=True)
+    score = min(100, result.score + sum(s.weight for s in signals))
+    if result.band == RiskBand.UNKNOWN:
+        band = result.band
+    elif score >= 67:
+        band = RiskBand.HIGH
+    elif score >= 35:
+        band = RiskBand.MEDIUM
+    else:
+        band = RiskBand.LOW
+    return replace(
+        result,
+        score=score,
+        band=band,
+        band_label=RISK_LABELS[band],
+        signals=merged,
+        limitations=[*result.limitations, *limitations, "심층 신호는 측정 전(provisional) 가중치입니다."],
+        ai_score=score,
     )
 
 
@@ -841,6 +949,7 @@ def _cache_key(
     pixel_max_side: int,
     heatmaps: bool,
     model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
+    deep_signals: bool = False,
 ) -> str:
     try:
         stat = path.stat()
@@ -862,6 +971,7 @@ def _cache_key(
             str(pixel_max_side),
             str(bool(heatmaps)),
             model_marker,
+            str(bool(deep_signals)),
         ]
     )
 

@@ -123,6 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     scan_parser.add_argument("--cache", type=Path, help="JSON cache for resumable large-folder scans")
     scan_parser.add_argument("--workers", type=int, default=1, help="parallel file workers for large folders")
     scan_parser.add_argument("--dedupe", action="store_true", help="hash files and mark duplicate content")
+    scan_parser.add_argument("--deep-signals", action="store_true", help="run opt-in deep layers: face-manipulation + inpainting on images, rPPG + avatar on videos")
     scan_parser.add_argument("--hash-db", type=Path, help="persist duplicate hashes across incremental scans")
     scan_parser.add_argument("--max-file-bytes", type=int, help="skip files larger than this size")
     scan_parser.add_argument("--allow-symlinks", action="store_true", help="follow symlinked files")
@@ -1062,6 +1063,7 @@ def main(argv: list[str] | None = None) -> int:
             allow_symlinks=args.allow_symlinks,
             dedupe=args.dedupe,
             hash_db_path=args.hash_db,
+            deep_signals=args.deep_signals,
         )
         fusion_profile = load_fusion_profile(args.fusion_profile)
         if fusion_profile:

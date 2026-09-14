@@ -209,6 +209,10 @@
                         <input type="checkbox" id="opt-heatmaps">
                         <label for="opt-heatmaps">히트맵 (정밀 필요)</label>
                     </div>
+                    <div class="option-group">
+                        <input type="checkbox" id="opt-deep">
+                        <label for="opt-deep">심층 신호 (얼굴/맥박/변형 — 느림)</label>
+                    </div>
                 </div>
 
                 <!-- Progress -->
@@ -395,7 +399,7 @@
             // see the running parameters can't be changed mid-flight.
             ['folder-path', 'analyze-btn', 'pixel-mode', 'max-files',
              'opt-recursive', 'opt-dedupe', 'opt-heatmaps', 'opt-model',
-             'dir-picker-btn'].forEach(id => {
+             'opt-deep', 'dir-picker-btn'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.disabled = busy;
             });
@@ -417,6 +421,7 @@
                 recursive: document.getElementById('opt-recursive').checked,
                 dedupe: document.getElementById('opt-dedupe').checked,
                 heatmaps: document.getElementById('opt-heatmaps').checked,
+                deep_signals: document.getElementById('opt-deep').checked,
                 async: '1',
             });
             if (!document.getElementById('opt-model').checked) {

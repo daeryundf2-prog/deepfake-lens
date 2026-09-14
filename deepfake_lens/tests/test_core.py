@@ -502,5 +502,32 @@ class ImageExtensionDimensionsTest(unittest.TestCase):
         self.assertEqual(item.kind, "image")
         self.assertEqual(item.status, "analyzed")
 
+class DeepSignalsTest(unittest.TestCase):
+    """Opt-in deep layers must merge signals without breaking the base path."""
+
+    def test_deep_signals_merges_layers(self) -> None:
+        from deepfake_lens.core import _merge_deep_signals, _build_result, EvidenceSignal, SourceGuess, SourceConfidence, RISK_LABELS, RiskBand
+
+        base = _build_result([], subject="사진", source_guess=SourceGuess.unknown(), limitations=[])
+        merged = _merge_deep_signals(base, ([EvidenceSignal("rPPG 맥박 신호", "테스트", 15)], ["레이어 한계"]))
+        self.assertEqual(merged.score, 15)
+        self.assertEqual(merged.signals[0].title, "rPPG 맥박 신호")
+        self.assertIn("레이어 한계", merged.limitations)
+        self.assertTrue(any("provisional" in lim for lim in merged.limitations))
+
+    def test_deep_signals_flag_reaches_analyze_file(self) -> None:
+        import struct
+        with tempfile.TemporaryDirectory() as tmp:
+            bmp = Path(tmp) / "img.bmp"
+            bmp.write_bytes(b"BM" + b"\x00" * 16 + struct.pack("<ii", 64, 64) + b"\x00" * 4096)
+            plain = analyze_file(bmp)
+            deep = analyze_file(bmp, deep_signals=True)
+        self.assertEqual(plain.status, "analyzed")
+        self.assertEqual(deep.status, "analyzed")
+        # Deep layers either contribute a signal or a degradation limitation —
+        # never a crash; the flag itself must not change the base verdict path.
+        self.assertIsNotNone(deep.result)
+
+
 if __name__ == "__main__":
     unittest.main()
