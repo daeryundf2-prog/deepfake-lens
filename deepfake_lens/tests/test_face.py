@@ -239,3 +239,38 @@ class FaceAnalysisTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_lighting_consistency_flags_mismatched_shading():
+    """Face lit opposite to scene gradient → lighting signal fires."""
+    np = __import__("numpy")
+    cv2 = __import__("cv2")
+    from deepfake_lens.face import _lighting_consistency, FaceRegion
+
+    img = np.tile(np.linspace(255, 40, 400, dtype=np.float64), (400, 1))
+    face = np.zeros((120, 100))
+    fx, fy = np.meshgrid(np.linspace(-1, 1, 100), np.linspace(-1, 1, 120))
+    mask = (fx**2 + fy**2) < 0.8
+    face[mask] = 128 + 60 * fx[mask]  # face lit from right; scene lit from left
+    img[140:260, 150:250] = np.where(mask, face, img[140:260, 150:250])
+    bgr = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_GRAY2BGR)
+    region = FaceRegion(x=150, y=140, width=100, height=120, confidence=1.0, landmarks=[])
+    signal = _lighting_consistency(region, bgr)
+    assert signal is not None
+    assert "조명" in signal.title
+
+
+def test_lighting_consistency_quiet_when_directions_match():
+    np = __import__("numpy")
+    cv2 = __import__("cv2")
+    from deepfake_lens.face import _lighting_consistency, FaceRegion
+
+    img = np.tile(np.linspace(255, 40, 400, dtype=np.float64), (400, 1))
+    face = np.zeros((120, 100))
+    fx, fy = np.meshgrid(np.linspace(-1, 1, 100), np.linspace(-1, 1, 120))
+    mask = (fx**2 + fy**2) < 0.8
+    face[mask] = 128 - 60 * fx[mask]  # face lit from left, same as scene
+    img[140:260, 150:250] = np.where(mask, face, img[140:260, 150:250])
+    bgr = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_GRAY2BGR)
+    region = FaceRegion(x=150, y=140, width=100, height=120, confidence=1.0, landmarks=[])
+    assert _lighting_consistency(region, bgr) is None

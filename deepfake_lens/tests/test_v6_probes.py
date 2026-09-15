@@ -298,3 +298,34 @@ class CopyMoveKeypointTest(unittest.TestCase):
         rng = np.random.default_rng(0)
         ratio, _ = copy_move_keypoint_score(rng.normal(128, 30, (300, 300)))
         self.assertEqual(ratio, 0.0)
+
+
+class SynthIDWatermarkTest(unittest.TestCase):
+    """B-1: mean-g SynthID detection under own keys (transformers built-in)."""
+
+    def setUp(self) -> None:
+        try:
+            import transformers  # noqa: F401
+            import torch  # noqa: F401
+        except ImportError:
+            self.skipTest("transformers/torch not installed")
+        try:
+            from transformers import AutoTokenizer
+
+            AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B")
+        except Exception:
+            self.skipTest("Qwen2.5-0.5B tokenizer not cached")
+
+    def test_wrong_key_reports_no_signal(self) -> None:
+        from deepfake_lens.watermark import detect_synthid_watermark
+
+        text = "The printing press was invented around 1440 by Johannes Gutenberg. It made books cheap to produce and transformed the spread of knowledge across Europe within a generation." * 3
+        result = detect_synthid_watermark(text, keys=[17, 23, 42, 90, 77])
+        self.assertTrue(result.available)
+        self.assertLess(result.score, 50)
+
+    def test_missing_keys_unavailable(self) -> None:
+        from deepfake_lens.watermark import detect_synthid_watermark
+
+        result = detect_synthid_watermark("x" * 300, keys=[])
+        self.assertFalse(result.available)

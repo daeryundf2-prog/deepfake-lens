@@ -14,7 +14,11 @@ Two honest boundaries:
   the null distribution applies and the test reports "no signal".
 - Public frontier models (Codex, Claude, Gemini, Grok, Kimi) do not publish
   KGW keys, so this layer mainly covers self-hosted watermarked generation
-  and research corpora. SynthID-style schemes are closed and out of scope.
+  and research corpora.
+- ``detect_synthid_watermark`` implements Google's SynthID-Text mean-g
+  detection via the transformers built-in — same own-key boundary: it
+  verifies text generated under keys you know, not Google's private
+  production keys.
 """
 
 from __future__ import annotations
@@ -116,3 +120,68 @@ def _green_list(context: list[int], secret: str, vocab_size: int, gamma: float) 
 
 def _unavailable(limitations: list[str], reason: str) -> WatermarkAnalysis:
     return WatermarkAnalysis(False, 0, f"워터마크 검사 불가 — {reason}", None, None, 0, limitations + [reason])
+
+
+def detect_synthid_watermark(
+    text: str,
+    *,
+    keys: list[int],
+    tokenizer_model: str = "Qwen/Qwen2.5-0.5B",
+    ngram_len: int = 5,
+    sampling_table_size: int = 65536,
+    sampling_table_seed: int = 0,
+    context_history_size: int = 1024,
+) -> WatermarkAnalysis:
+    """Mean-g-score SynthID-Text detection under known generation keys.
+
+    Google's SynthID-Text (transformers built-in scheme) biases sampling
+    toward high g-values for each (n-gram context, token) pair under a set
+    of secret integer keys. With the true keys, watermarked text scores a
+    mean g-value significantly above the 0.5 null expectation. Like KGW,
+    this verifies a *known* watermark — it cannot detect Google production
+    SynthID, whose keys are private.
+    """
+    limitations = [
+        "생성 시 사용된 keys/ngram_len/토크나이저와 일치해야만 검출됩니다 — Google 프로덕션 SynthID 키는 비공개입니다.",
+        "자체 생성/연구 코퍼스 검증용이며 범용 AI 텍스트 검출기가 아닙니다.",
+        "편집/패러프레이즈된 텍스트는 g-점수가 희석됩니다.",
+    ]
+    if not keys:
+        return _unavailable(limitations, "keys가 비어 있습니다 — 생성 비밀키 정수 목록이 필요합니다.")
+    try:
+        import torch
+        from transformers import AutoTokenizer
+        from transformers.generation.watermarking import SynthIDTextWatermarkLogitsProcessor
+    except ImportError:
+        return _unavailable(limitations, "transformers/torch가 설치되지 않았습니다.")
+    if len(text.strip()) < 200:
+        return _unavailable(limitations, "텍스트가 너무 짧습니다 — 최소 200자 이상이 필요합니다.")
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_model)
+    except Exception as exc:
+        return _unavailable(limitations, f"토크나이저를 불러올 수 없습니다: {exc}")
+
+    token_ids = tokenizer.encode(text, add_special_tokens=False, return_tensors="pt")
+    if token_ids.shape[1] < ngram_len + _MIN_TOKENS:
+        return _unavailable(limitations, f"토큰 {token_ids.shape[1]}개 — 검정 가능한 n-gram이 부족합니다.")
+    processor = SynthIDTextWatermarkLogitsProcessor(
+        ngram_len=ngram_len,
+        keys=keys,
+        sampling_table_size=sampling_table_size,
+        sampling_table_seed=sampling_table_seed,
+        context_history_size=context_history_size,
+        device=torch.device("cpu"),
+    )
+    g_values = processor.compute_g_values(token_ids).float()  # (1, T, depth)
+    trials = g_values.shape[1] * g_values.shape[2]
+    mean_g = float(g_values.mean())
+    # Under the null (no watermark) each g is ~U(0,1): var 1/12.
+    z = (mean_g - 0.5) / math.sqrt(1.0 / (12.0 * trials))
+    score = min(100, max(0, int((z / 8.0) * 100)))
+    if z >= _Z_THRESHOLD:
+        verdict = f"평균 g-값 {mean_g:.3f}(기대 0.5), z={z:.1f} — SynthID 워터마크 신호가 강합니다."
+    elif z >= 2.0:
+        verdict = f"평균 g-값 {mean_g:.3f}, z={z:.1f} — 약한 신호, 키/설정 재확인이 필요합니다."
+    else:
+        verdict = f"평균 g-값 {mean_g:.3f}(기대 0.5) — 이 키 기준 워터마크 신호 없음."
+    return WatermarkAnalysis(True, score, verdict, round(z, 2), round(mean_g, 4), int(token_ids.shape[1]), limitations)

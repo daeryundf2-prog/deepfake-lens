@@ -128,6 +128,11 @@ def analyze_faces(
         if color_signal:
             signals.append(color_signal)
 
+        # Lighting-direction consistency (face vs scene)
+        lighting_signal = _lighting_consistency(face, image)
+        if lighting_signal:
+            signals.append(lighting_signal)
+
     # Multi-face consistency
     if len(faces) > 1:
         multi_face_signal = _multi_face_consistency(faces, image)
@@ -550,3 +555,73 @@ def _calculate_confidence(score: int, face_count: int, signal_count: int) -> str
     if score >= 35 and signal_count >= 1:
         return "medium"
     return "low"
+
+
+def _lighting_consistency(face: FaceRegion, image) -> FaceEvidenceSignal | None:
+    """Compare the face's shading direction against the scene's light slope.
+
+    A pasted/AI-composited face often carries illumination from a different
+    photo. The face is approximately convex, so its left/right and up/down
+    luminance asymmetry approximates the light azimuth; the surrounding
+    ring's least-squares luminance ramp estimates the scene's overall
+    light direction. A large angular mismatch is a screening signal, not
+    proof — mixed lighting and flat studio light both suppress it.
+    """
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return None
+
+    x, y, w, h = face.x, face.y, face.width, face.height
+    if w < 40 or h < 40:
+        return None
+    face_region = image[y : y + h, x : x + w]
+    if face_region.size == 0:
+        return None
+    gray_face = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY).astype(float)
+
+    # Face shading asymmetry — left vs right and top vs bottom halves.
+    mid_x, mid_y = w // 2, h // 2
+    fx = float(gray_face[:, :mid_x].mean() - gray_face[:, mid_x:].mean())
+    fy = float(gray_face[:mid_y, :].mean() - gray_face[mid_y:, :].mean())
+    face_strength = float(np.hypot(fx, fy))
+    if face_strength < 4.0:
+        return None  # evenly lit face — no direction to compare
+
+    # Scene light slope — fit I = a*x + b*y + c over the ring around the
+    # face (1.8x box, face excluded).
+    img_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY).astype(float)
+    x0, y0 = max(0, int(x - 0.4 * w)), max(0, int(y - 0.4 * h))
+    x1, y1 = min(image.shape[1], int(x + 1.4 * w)), min(image.shape[0], int(y + 1.4 * h))
+    if (x1 - x0) < w or (y1 - y0) < h:
+        return None
+    coords, values = [], []
+    ys, xs = np.mgrid[y0:y1, x0:x1]
+    inside = (xs >= x) & (xs < x + w) & (ys >= y) & (ys < y + h)
+    ring_x, ring_y = xs[~inside], ys[~inside]
+    ring_v = img_gray[y0:y1, x0:x1][~inside]
+    if len(ring_v) < 200 or float(ring_v.std()) < 3.0:
+        return None  # featureless background — no scene direction
+    a_mat = np.stack([ring_x, ring_y, np.ones_like(ring_x)], axis=1)
+    coef, *_ = np.linalg.lstsq(a_mat, ring_v, rcond=None)
+    gx, gy = float(coef[0]), float(coef[1])
+    scene_strength = float(np.hypot(gx, gy))
+    if scene_strength < 0.02:
+        return None  # uniform background — no direction to compare
+
+    # Sign convention: face asymmetry fx>0 means LEFT darker → light from
+    # right, i.e. direction +x. The scene ramp gradient points toward
+    # increasing brightness = light direction.
+    face_dir = np.arctan2(-fy, -fx)  # darker side → opposite of light
+    scene_dir = np.arctan2(gy, gx)
+    diff = abs(face_dir - scene_dir)
+    diff = min(diff, 2 * np.pi - diff)
+    degrees = float(np.degrees(diff))
+    if degrees >= 60:
+        return FaceEvidenceSignal(
+            "조명 방향 불일치",
+            f"얼굴 음영 방향과 장면 조명 방향이 약 {degrees:.0f}도 어긋납니다 — 다른 조명 환경의 합성 얼굴 후보.",
+            14,
+        )
+    return None

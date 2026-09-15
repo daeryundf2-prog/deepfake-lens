@@ -281,9 +281,10 @@ def main(argv: list[str] | None = None) -> int:
     compare_parser.add_argument("file_b", type=Path, help="second file")
     compare_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
 
-    watermark_parser = subparsers.add_parser("watermark", help="test text for a KGW watermark under a known secret")
+    watermark_parser = subparsers.add_parser("watermark", help="test text for a KGW or SynthID watermark under a known secret")
     watermark_parser.add_argument("file", type=Path, help="text/document file to test")
-    watermark_parser.add_argument("--secret", required=True, help="green-list secret used at generation time")
+    watermark_parser.add_argument("--secret", help="KGW green-list secret used at generation time")
+    watermark_parser.add_argument("--synthid-keys", help="comma-separated SynthID-Text integer keys used at generation (enables SynthID mean-g detection instead of KGW)")
     watermark_parser.add_argument("--tokenizer", default="Qwen/Qwen2.5-0.5B", help="HF tokenizer model or local path")
     watermark_parser.add_argument("--gamma", type=float, default=0.25, help="green-list fraction used at generation")
     watermark_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
@@ -700,7 +701,16 @@ def main(argv: list[str] | None = None) -> int:
         if text is None:
             print(json.dumps({"error": "텍스트 추출 불가 — 지원되지 않는 형식입니다."}, ensure_ascii=False))
             return 1
-        result = detect_kgw_watermark(text, secret=args.secret, tokenizer_model=args.tokenizer, gamma=args.gamma)
+        if args.synthid_keys:
+            from .watermark import detect_synthid_watermark
+
+            keys = [int(part.strip()) for part in args.synthid_keys.split(",") if part.strip()]
+            result = detect_synthid_watermark(text, keys=keys, tokenizer_model=args.tokenizer)
+        else:
+            if not args.secret:
+                print(json.dumps({"error": "--secret(KGW) 또는 --synthid-keys(SynthID) 중 하나가 필요합니다."}, ensure_ascii=False))
+                return 1
+            result = detect_kgw_watermark(text, secret=args.secret, tokenizer_model=args.tokenizer, gamma=args.gamma)
         if args.format == "json":
             print(json.dumps(result.to_json(), ensure_ascii=False, indent=2))
         else:
