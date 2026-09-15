@@ -267,3 +267,29 @@ in-domain separation. The raw `ppl=` value stays in `detail` for audit.
 What this implies: the perplexity screen is *calibrated-away* — on this
 corpus it is near-noise for the contested band. The fingerprint heuristic
 layer remains the strongest measured signal (en AUROC 0.894 solo).
+
+## Eighth probe — Binoculars ratio measurement (2026-09-16)
+
+Raw performer/observer PPL ratio on all 30 samples (Qwen2.5 pair):
+
+| Group | Ratio range | Resulting score |
+|---|---|---|
+| Human polished (wiki/talk, 12/12) | 0.706 – 0.843 | **100 — every one FP** |
+| AI ko (claude family) | 0.673 – 0.912 | 69 – 100 |
+| AI en / devin docs | 0.938 – 1.086 | 0 – 56 |
+| Human boilerplate | 1.380 | 0 |
+
+The ratio tracks **register polish, not AI origin** — polished human
+prose sits *below* the AI formal band (humans write surprisingly
+model-like when encyclopedic). On this corpus the member is worse than
+noise: it guarantees an FP on every clean human document.
+
+Measured action: `ensemble_weight` 0.25 → **0.05** (effectively disabled
+until re-anchored on a real corpus; kept non-zero so the profile still
+reports a detail for audit).
+
+State after all probes: the fingerprint/statistical layer is the only
+measured-discriminative text path (en AUROC 0.894 solo). All three
+neural members are now weight-limited by measurement rather than
+assumption — the honest current capability for text is heuristic-first
+with provenance signals (metadata, watermark-with-key) on top.
