@@ -156,14 +156,22 @@ def _extract_ooxml(path: Path, meta: dict[str, str], suffix: str) -> tuple[str, 
 
 
 def _extract_hwp(path: Path, meta: dict[str, str]) -> tuple[str, dict[str, str]]:
-    """HWP is an OLE compound file; extraction needs olefile. Without it we
-    degrade honestly — binary grepping produces garbage text."""
+    """HWP/HWPX text via the pure-Python ``syhwp`` reader (MIT; sole
+    dependency olefile). HWP 5.x is an OLE compound file — without syhwp we
+    degrade honestly rather than grep binary garbage."""
     try:
-        import olefile  # noqa: F401
+        import syhwp
     except ImportError:
-        meta["extractor"] = "unavailable:olefile"
+        meta["extractor"] = "unavailable:syhwp"
         return "", meta
-    # HWP text lives in the PrvText/BodyText streams, often deflate-packed;
-    # a full decoder is out of scope — record that extraction is partial.
-    meta["extractor"] = "unavailable:hwp-decoder"
-    return "", meta
+    try:
+        text = syhwp.extract_text(str(path))
+    except Exception as exc:
+        meta["extractor"] = f"failed:syhwp:{type(exc).__name__}"
+        return "", meta
+    meta["extractor"] = "syhwp"
+    try:
+        meta["hwp.format"] = syhwp.detect_format(str(path))
+    except Exception:
+        pass
+    return (text or "")[:MAX_EXTRACTED_CHARS], meta

@@ -78,3 +78,30 @@ class DocumentExtractionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HwpExtractionTest(unittest.TestCase):
+    """HWP via optional syhwp reader."""
+
+    def test_invalid_hwp_degrades_gracefully(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "bad.hwp"
+            doc.write_bytes(b"\xd0\xcf\x11\xe0" + b"\x00" * 64)
+            text, meta = extract_document_text(doc)
+        self.assertEqual(text, "")
+        # Either syhwp is absent (unavailable) or it failed on invalid bytes.
+        self.assertTrue(meta["extractor"].startswith(("unavailable", "failed")))
+
+    def test_real_hwp_extracts_when_fixture_present(self) -> None:
+        import os
+
+        fixture = os.environ.get("DEEPFAKE_LENS_TEST_HWP")
+        if not fixture or not Path(fixture).exists():
+            self.skipTest("set DEEPFAKE_LENS_TEST_HWP to a real .hwp file")
+        try:
+            import syhwp  # noqa: F401
+        except ImportError:
+            self.skipTest("syhwp not installed")
+        text, meta = extract_document_text(Path(fixture))
+        self.assertEqual(meta["extractor"], "syhwp")
+        self.assertGreater(len(text), 50)
