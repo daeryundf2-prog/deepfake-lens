@@ -297,18 +297,21 @@ def _aggregate_profile_results(results: list[tuple[Path, ExternalModelAnalysis]]
     scored = [(source, result) for source, result in results if result.available]
     downweighted: list[str] = []
     weights: list[float] = []
-    for source, _result in scored:
+    kept: list[tuple[Path, ExternalModelAnalysis]] = []
+    for source, result in scored:
         weight = _profile_ensemble_weight(source)
         # Language gate: a member that declares an English-only training
-        # list must not dominate a Korean-dominant document — the measured
-        # false-positive on human Korean text was 98/100.
+        # list scores ~98 AI on human Korean (measured) — its output on
+        # Korean-dominant text is noise, so it is excluded, not downweighted.
         langs = _profile_trained_languages(source)
         if langs and hangul_ratio > 0.3 and "ko" not in langs:
-            weight *= 0.25
             downweighted.append(source.stem)
+            continue
+        kept.append((source, result))
         weights.append(weight)
     total_weight = sum(weights)
-    score = int(round(sum(result.score * weight for (_, result), weight in zip(scored, weights)) / total_weight)) if scored else 0
+    score = int(round(sum(result.score * weight for (_, result), weight in zip(kept, weights)) / total_weight)) if kept else 0
+    scores = [result.score for _, result in kept]
     scores = [result.score for _, result in scored]
     spread = max(scores) - min(scores) if len(scores) > 1 else 0
     agreement = "n/a" if len(scores) < 2 else ("high" if spread <= AGREEMENT_SPREAD else "low")
@@ -322,7 +325,7 @@ def _aggregate_profile_results(results: list[tuple[Path, ExternalModelAnalysis]]
     limitations: list[str] = []
     if downweighted:
         limitations.append(
-            f"English-only members {', '.join(downweighted)} were down-weighted 4x on Korean-dominant text "
+            f"English-only members {', '.join(downweighted)} were excluded on Korean-dominant text "
             f"(hangul ratio {hangul_ratio:.0%}) — measured false-positive on human Korean was 98/100."
         )
     for _, result in results:
@@ -333,7 +336,7 @@ def _aggregate_profile_results(results: list[tuple[Path, ExternalModelAnalysis]]
     if agreement == "low":
         limitations.append(f"Model zoo members disagree (spread {spread} points); weigh metadata/provenance signals before triage.")
 
-    if not scored:
+    if not kept:
         confidence = "unavailable"
     elif agreement == "low":
         confidence = "low"

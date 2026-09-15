@@ -93,6 +93,7 @@ Part 2: 구조적 한계/미구현/원리적 불가 항목별 리서치 결과�
 - provenance 신호 비중 상향
 - 점수 대신 "판정 불가" 명시 — 현재 limitation으로 이미 처리, 스코어 캡 추가 가능
 **판정**: 완화만 가능. 신뢰도 표시를 길이 함수로 조정.
+**✅ 구현 완료**: 240자 미만은 문체 신호 합산을 66점(MEDIUM 상한)으로 캡 — '강한 의심' 도달 불가. 단 "AI 자기표현 문구"는 통계가 아닌 명시적 콘텐츠 공개라 캡 면제. 캡 도입 시 임계값 왜곡(49점 캡이 eval@50에서 인위적 fn 뭉툴림)을 실측으로 잡아 66으로 조정.
 
 #### A-5. 생성기별 식별 (어느 모델인지)
 
@@ -103,8 +104,8 @@ Part 2: 구조적 한계/미구현/원리적 불가 항목별 리서치 결과�
 
 #### A-6. 한국어 신경망 탐지기 오탐 (Fakespot/OpenAI ko 98점) ✅ 구현 완료
 
-**구현**: 프로필에 `trained_languages: ["en"]` 필드 추가 → 앙상블 집계 시 hangul_ratio > 0.3이면 영어 전용 멤버 weight ×0.25 자동 감쇠 + 한계 명시. `analyze_external_model`(디렉터리 경로)와 `_analyze_profile_set` 양쪽에 적용. 언어 무관 멤버(Qwen PPL, Binoculars)는 영향 없음.
-**남은 것**: 한국어 코퍼스 확장 시 언어별 재보정으로 개선 가능.
+**구현**: 프로필에 `trained_languages: ["en"]` 필드 추가 → 앙상블 집계 시 hangul_ratio > 0.3이면 영어 전용 멤버를 **제외**(초기 ×0.25 감쇠는 재측정에서 불충분 확인 — 98점 FP 신호는 임의 가중치로도 오염). `analyze_external_model`(디렉터리 경로)와 `_analyze_profile_set` 양쪽에 적용. 언어 무관 멤버(Qwen PPL, Binoculars)는 영향 없음.
+**남은 것**: 제외 후에도 ko 격식체(위키)에 PPL 계열 FP 잔존 — A-3의 본질적 중첩 영역이며 도메인 정규화 필요. 한국어 코퍼스 확장 시 언어별 재보정으로 개선 가능.
 
 ### B. 미구현 — 리서치로 방법 확인됨
 
@@ -129,6 +130,7 @@ Part 2: 구조적 한계/미구현/원리적 불가 항목별 리서치 결과�
 **리서치 결과**: `joonson/syncnet_python` — 사전학습 가중치 공개 다운로드(`download_model.sh`), PyTorch, PyPI 패키지 `syncnet-python` 0.2.2 존재.
 **구현 방법**: model_adapter 프로필로 추가 — syncnet_v2.model 가중치를 `models/` 자산으로, runtime이 입 영역 프레임+MFCC를 먹여 오프셋/신뢰도 출력. 라이선스는 연구용 CC — 재배포 시 주의.
 **판정**: 구현 가능 — 외부 가중치 다운로드만 필요. AASIST 패턴 그대로.
+**✅ 구현 완료**: `lipsync.py::_syncnet_analysis` — syncnet-python 0.2.2 + `models/syncnet_v2.model` + `models/sfd_face.pth` (Oxford 호스팅, `scripts/fetch_syncnet.py`). 실영상 end-to-end 검증: VGG example.avi에서 얼굴 트랙 검출, 오프셋 +5프레임·신뢰도 9.9·min_dist 5.30 측정, 정상 동기 판정. 가중치/패키지 없으면 휴리스틱으로 graceful 폴백. S3FD 첫 가중치는 키 불일치(conv1_1 vs vgg.0)로 실패 — Oxford 원본으로 교체해 해결. |오프셋|>0.5초 또는 신뢰도<1 → 의심, >0.2초 또는 <3 → 경계.
 
 #### B-4. 회전/스케일 강건 copy-move ✅ 구현 완료
 
@@ -181,9 +183,9 @@ Part 2: 구조적 한계/미구현/원리적 불가 항목별 리서치 결과�
 3. ~~**B-5 ECAPA 화자**~~ ✅ speechbrain 경로 구현
 4. ~~**A-6 한국어 게이팅**~~ ✅ trained_languages 게이트 구현
 5. ~~**B-8 C2PA 비디오**~~ ✅ 이미 지원 확인 + 테스트 핀
-6. **B-3 SyncNet** — 진행 중: syncnet-python 설치 + 가중치 다운로드 (sfd_face.pth ~90MB)
+6. ~~**B-3 SyncNet**~~ ✅ 가중치 확보 + 실영상 end-to-end 검증 완료
 7. ~~**A-1 기술문서 게이팅**~~ ✅ 구조 밀도 게이트 1단계 구현
-8. **B-2 조명 물리** — 중간 난이도
-9. **B-1 SynthID-Text** — 자기키만이지만 KGW와 같은 패턴
+8. ~~**B-2 조명 물리**~~ ✅ 얼굴 음영 vs 장면 램프 불일치 구현 (`18fdb4f`)
+9. ~~**B-1 SynthID-Text**~~ ✅ transformers 내장 g-value 경로 + `--synthid-keys` (`18fdb4f`)
 10. **A-2/A-3/A-5** — 코퍼스 확장 선행
 11. **P1 전체** — 측정/보정 기반 작업

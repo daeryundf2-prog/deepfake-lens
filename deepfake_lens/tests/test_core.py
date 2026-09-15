@@ -576,9 +576,9 @@ class ShortTextCapTest(unittest.TestCase):
         guess = SourceGuess.unknown()
         strong = [EvidenceSignal("강한 신호", "x", 80)]
         result = _build_result(
-            strong, subject="글", source_guess=guess, limitations=[], score_cap=49,
+            strong, subject="글", source_guess=guess, limitations=[], score_cap=66,
         )
-        self.assertEqual(result.score, 49)
+        self.assertEqual(result.score, 66)
         self.assertLess(result.score, 67)  # below HIGH threshold
 
     def test_short_text_discloses_cap(self) -> None:

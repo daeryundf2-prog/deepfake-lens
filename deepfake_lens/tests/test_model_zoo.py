@@ -427,7 +427,7 @@ if __name__ == "__main__":
 
 
 class LanguageGateTest(unittest.TestCase):
-    """English-only members must be down-weighted on Korean-dominant text."""
+    """English-only members must be excluded on Korean-dominant text."""
 
     def _profile(self, tmp: str, name: str, weight: float, langs: list | None) -> Path:
         import json
@@ -453,9 +453,9 @@ class LanguageGateTest(unittest.TestCase):
                 (agnostic, ExternalModelAnalysis(True, 10, "high", "multilingual", "", [])),
             ]
             fused = _aggregate_profile_results(results, hangul_ratio=0.9)
-        # en-only weight 1.0 -> 0.25, so score = (90*0.25 + 10*1)/1.25 = 26
-        self.assertLess(fused.score, 30)
-        self.assertTrue(any("down-weighted" in item for item in fused.limitations))
+        # en-only member is excluded, so score = multilingual member's 10
+        self.assertEqual(fused.score, 10)
+        self.assertTrue(any("excluded" in item for item in fused.limitations))
 
     def test_no_downweight_on_english_text(self) -> None:
         import tempfile
@@ -472,4 +472,4 @@ class LanguageGateTest(unittest.TestCase):
             ]
             fused = _aggregate_profile_results(results, hangul_ratio=0.0)
         self.assertEqual(fused.score, 50)
-        self.assertFalse(any("down-weighted" in item for item in fused.limitations))
+        self.assertFalse(any("excluded" in item for item in fused.limitations))

@@ -205,3 +205,39 @@ Measured effect on the corpus (heuristic layer only, no neural members):
 - Remaining gap: short/plain AI samples (news-style, informal, one-line
   Korean) still score 0 — fingerprints need ≥60 words / ≥200 chars of
   scaffolded text to engage.
+
+## Sixth probe — post-gate re-measurement (2026-09-16)
+
+Full-pipeline re-run after the language gate, technical-document gate,
+and short-text cap — 30-sample manifest, all wired neural members:
+
+| Metric | Before gates | After gates |
+|---|---|---|
+| Overall AUROC | 0.416 | 0.299 |
+| ko AUROC | 0.845 | 0.333 |
+| ko FPR@50 | 0.286 | 0.714 |
+| en AUROC | 0.197 | 0.242 |
+
+What the regression actually measures:
+
+- **Short-text cap at 49** initially pushed capped AI samples (49) just
+  under the 50 eval threshold → artificial FN cluster → cap moved to 66
+  (MEDIUM ceiling; "never HIGH on short text" semantics preserved).
+- **English-only member exclusion on Korean** (was ×0.25 downweight):
+  correct semantics — a member measured at 98 FP on human Korean is
+  noise at any weight — but exposed that the *remaining* ko-capable
+  members (Qwen PPL screen, Binoculars) themselves flag polished Korean
+  prose. wiki_ko_인공지능 scores 88 purely from the multilingual members.
+  This is the A-3 intrinsic-overlap zone; the Qwen anchors [8,60] are
+  English-calibrated and the profile itself marks them uncalibrated.
+- **The heuristic fingerprint layer still out-ranks the neural ensemble**
+  (en 0.894 heuristic-only vs 0.242 full-pipeline). The neural members
+  currently subtract information on English, not just Korean.
+- devin-doc misses are the *designed* trade-off of the technical-document
+  gate: suppressed AI docs rank below human prose rather than
+  false-positiving on real documents.
+
+Honest position after measurement: ensemble weighting cannot fix
+members that are noise in-domain. Remaining fixes are corpus-based
+(P1): re-anchoring qwen-ppl on a labeled ko+en corpus, and a
+heuristic-vs-neural weighting pass measured on the manifest.

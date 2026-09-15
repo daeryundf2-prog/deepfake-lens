@@ -693,7 +693,7 @@ def analyze_text(text: str, *, model_analysis: ExternalModelAnalysis | None = No
             f"기술문서 구조 밀도가 높습니다({tech_density:.0%}) — 코드/표/헤더가 목록·균일성·퍼플렉시티 신호를 부풀리므로 문체 기반 판별의 신뢰도가 낮습니다. 측정된 실패 영역입니다."
         )
     if len(trimmed) < 240:
-        limitations.append("짧은 글은 문체 통계가 불안정하며, 점수가 49점으로 상한됩니다 — '강한 의심' 판정에는 더 긴 원문이 필요합니다.")
+        limitations.append("짧은 글은 문체 통계가 불안정하며, 점수가 66점으로 상한됩니다 — '강한 의심' 판정에는 더 긴 원문이 필요합니다.")
     if len(sentences) < 4:
         limitations.append("문장 수가 적어 반복도와 문장 길이 신호가 제한적입니다.")
     if model_analysis:
@@ -706,7 +706,7 @@ def analyze_text(text: str, *, model_analysis: ExternalModelAnalysis | None = No
         limitations=limitations,
         force_unknown=len(trimmed) < 24 and not signals and source_guess.confidence == SourceConfidence.UNKNOWN and not (model_analysis and model_analysis.available),
         model_analysis=model_analysis,
-        score_cap=49 if len(trimmed) < 240 else None,
+        score_cap=66 if len(trimmed) < 240 else None,
         score_cap_exempt_titles=frozenset({"AI 자기표현 문구"}) if len(trimmed) < 240 else None,
     )
 
