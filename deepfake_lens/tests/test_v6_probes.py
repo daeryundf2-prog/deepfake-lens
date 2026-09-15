@@ -35,6 +35,17 @@ class SpeakerComparisonTest(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.dir = Path(self.tmp.name)
 
+    def _mfcc_only(self):
+        """Force the MFCC fallback — sine tones aren't speech, so an
+        installed ECAPA model's behaviour on them is meaningless."""
+        import unittest.mock
+
+        import deepfake_lens.audio as audio_mod
+
+        return unittest.mock.patch.object(
+            audio_mod, "_ecapa_speaker_similarity", return_value=None
+        )
+
     def test_identical_audio_is_same_speaker(self) -> None:
         from deepfake_lens.audio import compare_speakers
 
@@ -42,7 +53,8 @@ class SpeakerComparisonTest(unittest.TestCase):
         b = self.dir / "b.wav"
         _write_sine_wav(a, freq=220.0)
         _write_sine_wav(b, freq=220.0)
-        result = compare_speakers(a, b)
+        with self._mfcc_only():
+            result = compare_speakers(a, b)
         self.assertEqual(result.band, "same")
         self.assertGreaterEqual(result.same_speaker_score, 67)
 
@@ -53,7 +65,8 @@ class SpeakerComparisonTest(unittest.TestCase):
         b = self.dir / "b.wav"
         _write_sine_wav(a, freq=110.0)
         _write_sine_wav(b, freq=1800.0)
-        result = compare_speakers(a, b)
+        with self._mfcc_only():
+            result = compare_speakers(a, b)
         self.assertLess(result.same_speaker_score, 67)
         self.assertTrue(result.limitations)
 
@@ -64,6 +77,21 @@ class SpeakerComparisonTest(unittest.TestCase):
         _write_sine_wav(a)
         result = compare_speakers(a, self.dir / "missing.wav")
         self.assertEqual(result.band, "unknown")
+
+    def test_ecapa_self_comparison_when_available(self) -> None:
+        """With speechbrain installed, same file → ECAPA path, high score."""
+        try:
+            import speechbrain  # noqa: F401
+            import soundfile  # noqa: F401
+        except ImportError:
+            self.skipTest("speechbrain/soundfile not installed")
+        from deepfake_lens.audio import compare_speakers
+
+        a = self.dir / "a.wav"
+        _write_sine_wav(a, freq=220.0)
+        result = compare_speakers(a, a)
+        self.assertIn("ECAPA", result.verdict)
+        self.assertGreaterEqual(result.same_speaker_score, 60)
 
 
 class StylometryComparisonTest(unittest.TestCase):

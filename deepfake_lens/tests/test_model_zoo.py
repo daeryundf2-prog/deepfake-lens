@@ -424,3 +424,52 @@ class VideoFramesRuntimeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LanguageGateTest(unittest.TestCase):
+    """English-only members must be down-weighted on Korean-dominant text."""
+
+    def _profile(self, tmp: str, name: str, weight: float, langs: list | None) -> Path:
+        import json
+
+        profile = {"type": "deepfake-lens-runtime-profile-v1", "name": name, "ensemble_weight": weight}
+        if langs is not None:
+            profile["trained_languages"] = langs
+        path = Path(tmp) / f"{name}.json"
+        path.write_text(json.dumps(profile), encoding="utf-8")
+        return path
+
+    def test_english_member_downweighted_on_korean(self) -> None:
+        import tempfile
+
+        from deepfake_lens.model_adapter import _aggregate_profile_results
+        from deepfake_lens.model_adapter import ExternalModelAnalysis
+
+        with tempfile.TemporaryDirectory() as tmp:
+            en = self._profile(tmp, "en-only", 1.0, ["en"])
+            agnostic = self._profile(tmp, "multilingual", 1.0, None)
+            results = [
+                (en, ExternalModelAnalysis(True, 90, "high", "en-only", "", [])),
+                (agnostic, ExternalModelAnalysis(True, 10, "high", "multilingual", "", [])),
+            ]
+            fused = _aggregate_profile_results(results, hangul_ratio=0.9)
+        # en-only weight 1.0 -> 0.25, so score = (90*0.25 + 10*1)/1.25 = 26
+        self.assertLess(fused.score, 30)
+        self.assertTrue(any("down-weighted" in item for item in fused.limitations))
+
+    def test_no_downweight_on_english_text(self) -> None:
+        import tempfile
+
+        from deepfake_lens.model_adapter import _aggregate_profile_results
+        from deepfake_lens.model_adapter import ExternalModelAnalysis
+
+        with tempfile.TemporaryDirectory() as tmp:
+            en = self._profile(tmp, "en-only", 1.0, ["en"])
+            agnostic = self._profile(tmp, "multilingual", 1.0, None)
+            results = [
+                (en, ExternalModelAnalysis(True, 90, "high", "en-only", "", [])),
+                (agnostic, ExternalModelAnalysis(True, 10, "high", "multilingual", "", [])),
+            ]
+            fused = _aggregate_profile_results(results, hangul_ratio=0.0)
+        self.assertEqual(fused.score, 50)
+        self.assertFalse(any("down-weighted" in item for item in fused.limitations))

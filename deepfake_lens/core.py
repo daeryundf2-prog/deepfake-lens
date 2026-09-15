@@ -677,6 +677,21 @@ def analyze_text(text: str, *, model_analysis: ExternalModelAnalysis | None = No
 
     source_guess = guess_text_source(normalized, identity_hits)
     limitations = ["휴리스틱 기반 선별 결과이며 진위 판단이 아니라 검토 우선순위입니다."]
+    tech_density = _technical_document_density(trimmed, lines)
+    if tech_density >= 0.4:
+        # Code fences/tables/headers inflate list-structure, uniformity,
+        # and perplexity signals — devin-style agent docs measured at
+        # PPL 61-131 for structural reasons alone. Down-weight the
+        # structure-derived signals and disclose the gate.
+        signals = [
+            EvidenceSignal(s.title, s.detail, max(2, int(s.weight * 0.4)))
+            if s.title in {"과도하게 균일한 목록 구조", "목록 중심 구성", "문장 길이 균일성", "낮은 문장 변주"}
+            else s
+            for s in signals
+        ]
+        limitations.append(
+            f"기술문서 구조 밀도가 높습니다({tech_density:.0%}) — 코드/표/헤더가 목록·균일성·퍼플렉시티 신호를 부풀리므로 문체 기반 판별의 신뢰도가 낮습니다. 측정된 실패 영역입니다."
+        )
     if len(trimmed) < 240:
         limitations.append("짧은 글은 문체 통계가 불안정합니다.")
     if len(sentences) < 4:
@@ -1441,3 +1456,33 @@ def _sort_bucket(item: ScanItem) -> int:
         RiskBand.UNKNOWN: 2,
         RiskBand.LOW: 3,
     }[item.result.band]
+
+
+def _technical_document_density(text: str, lines: list[str]) -> float:
+    """Share of lines that are technical-document structure, not prose.
+
+    Code fences, tables, markdown headers, inline-code-only lines and HTML
+    tags make a document look unlike natural prose — they inflate list,
+    uniformity, and perplexity signals for structural reasons unrelated
+    to who wrote it. Returns 0-1.
+    """
+    if not lines:
+        return 0.0
+    structural = 0
+    in_fence = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            structural += 1
+            continue
+        if in_fence:
+            structural += 1
+            continue
+        if (
+            stripped.startswith(("#", "|", ">", "- [", "* ["))
+            or re.match(r"^</?[a-zA-Z][^>]*>$", stripped)
+            or (stripped.count("`") >= 2)
+        ):
+            structural += 1
+    return structural / len(lines)

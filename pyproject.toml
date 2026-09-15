@@ -42,6 +42,11 @@ text_lm = ["torch>=2.0", "transformers>=4.40"]
 # Pure-Python HWP/HWPX reader (MIT; sole dep olefile) for .hwp extraction.
 # Without it .hwp files degrade to extractor=unavailable:syhwp.
 hwp = ["syhwp>=0.0.7", "olefile>=0.46"]
+# ECAPA-TDNN speaker verification for compare_speakers. Weights
+# (~90 MB, speechbrain/spkrec-ecapa-voxceleb) download to ~/.cache on
+# first use; m4a/aac/mp3 inputs also need ffmpeg for wav conversion.
+# Without it, speaker comparison falls back to MFCC distance.
+speaker = ["speechbrain>=1.0", "soundfile>=0.12", "torch>=2.1", "torchaudio>=2.1"]
 full = ["librosa>=0.10", "opencv-python>=4.8", "numpy>=1.24", "scipy>=1.10", "scikit-learn>=1.3"]
 dev = [
   "numpy>=1.24",

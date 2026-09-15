@@ -84,7 +84,8 @@ def analyze_external_model(
     results = [(source, _analyze_profile_file(media_path, source, depth=0, modality=modality)) for source in sources]
     if len(results) == 1:
         return results[0][1]
-    return _aggregate_profile_results(results)
+    hangul_ratio = _media_hangul_ratio(media_path) if modality == "text" else 0.0
+    return _aggregate_profile_results(results, hangul_ratio=hangul_ratio)
 
 
 def _model_sources(model_path: Path | str | list[Path | str] | tuple[Path | str, ...]) -> list[Path]:
@@ -240,8 +241,9 @@ def _analyze_profile_set(media_path: Path, model_file: Path, profile: dict[str, 
             model=model_name,
             detail=f"profile set {model_file.name} resolved to no member profiles.",
         )
+    hangul_ratio = _media_hangul_ratio(media_path) if modality == "text" else 0.0
     results = [(source, _analyze_profile_file(media_path, source, depth=depth + 1, modality=modality)) for source in sources]
-    return _aggregate_profile_results(results, model_name=model_name)
+    return _aggregate_profile_results(results, model_name=model_name, hangul_ratio=hangul_ratio)
 
 
 def _profile_ensemble_weight(source: Path) -> float:
@@ -260,10 +262,51 @@ def _profile_ensemble_weight(source: Path) -> float:
     return min(4.0, max(0.05, weight))
 
 
-def _aggregate_profile_results(results: list[tuple[Path, ExternalModelAnalysis]], *, model_name: str | None = None) -> ExternalModelAnalysis:
+def _profile_trained_languages(source: Path) -> list[str]:
+    """Languages a member was actually trained/validated on.
+
+    Profiles may set ``trained_languages`` (e.g. ``["en"]``). Members
+    without the field are treated as language-agnostic — only members
+    that declare an explicit list can be down-weighted for out-of-domain
+    input.
+    """
+    try:
+        profile = json.loads(source.read_text(encoding="utf-8"))
+        langs = profile.get("trained_languages")
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return []
+    return [str(lang).lower() for lang in langs] if isinstance(langs, list) else []
+
+
+def _media_hangul_ratio(media_path: Path) -> float:
+    """Hangul share of letters in a text scan item (0 for non-text files)."""
+    try:
+        raw = media_path.read_bytes()[:262_144]
+    except OSError:
+        return 0.0
+    text = raw.decode("utf-8", errors="ignore")
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return 0.0
+    hangul = sum(1 for ch in letters if "\uac00" <= ch <= "\ud7a3")
+    return hangul / len(letters)
+
+
+def _aggregate_profile_results(results: list[tuple[Path, ExternalModelAnalysis]], *, model_name: str | None = None, hangul_ratio: float = 0.0) -> ExternalModelAnalysis:
     """Merge per-profile results into one analysis with an agreement signal."""
     scored = [(source, result) for source, result in results if result.available]
-    weights = [_profile_ensemble_weight(source) for source, _ in scored]
+    downweighted: list[str] = []
+    weights: list[float] = []
+    for source, _result in scored:
+        weight = _profile_ensemble_weight(source)
+        # Language gate: a member that declares an English-only training
+        # list must not dominate a Korean-dominant document — the measured
+        # false-positive on human Korean text was 98/100.
+        langs = _profile_trained_languages(source)
+        if langs and hangul_ratio > 0.3 and "ko" not in langs:
+            weight *= 0.25
+            downweighted.append(source.stem)
+        weights.append(weight)
     total_weight = sum(weights)
     score = int(round(sum(result.score * weight for (_, result), weight in zip(scored, weights)) / total_weight)) if scored else 0
     scores = [result.score for _, result in scored]
@@ -277,6 +320,11 @@ def _aggregate_profile_results(results: list[tuple[Path, ExternalModelAnalysis]]
         detail += f"; member spread={spread} (agreement: {agreement})"
 
     limitations: list[str] = []
+    if downweighted:
+        limitations.append(
+            f"English-only members {', '.join(downweighted)} were down-weighted 4x on Korean-dominant text "
+            f"(hangul ratio {hangul_ratio:.0%}) — measured false-positive on human Korean was 98/100."
+        )
     for _, result in results:
         for item in result.limitations:
             if item not in limitations:

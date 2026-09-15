@@ -45,7 +45,15 @@ class LipsyncAnalysis:
 
 
 def analyze_lipsync(path: Path | str, *, max_seconds: float = 20.0) -> LipsyncAnalysis:
-    """Measure audio-envelope vs mouth-motion correlation for a video file."""
+    """Measure audio-visual sync for a video file.
+
+    Prefers the pretrained SyncNet model (joonson/syncnet_python weights
+    in ``models/``) when available; falls back to the zero-asset
+    envelope/mouth-motion correlation heuristic otherwise.
+    """
+    syncnet = _syncnet_analysis(Path(path))
+    if syncnet is not None:
+        return syncnet
     video_path = Path(path)
     limitations: list[str] = [
         "학습된 SyncNet 모델이 아닌 저해상 상관 휴리스틱입니다.",
@@ -200,3 +208,67 @@ def _mouth_openness_series(video_path: Path, *, max_seconds: float) -> tuple[lis
 
 def _unavailable(limitations: list[str], reason: str) -> LipsyncAnalysis:
     return LipsyncAnalysis(False, 0, f"립싱크 분석 불가 — {reason}", None, None, 0, None, limitations + [reason])
+
+
+_SYNCNET_PIPELINE = None
+_SYNCNET_FAILED = False
+
+
+def _syncnet_analysis(video_path: Path) -> LipsyncAnalysis | None:
+    """Pretrained SyncNet offset/confidence, or None when unavailable.
+
+    Requires the optional ``syncnet-python`` package plus both weight
+    files (``models/syncnet_v2.model`` ~2.6 MB, ``models/sfd_face.pth``
+    ~90 MB). Returns None on any failure so the heuristic path runs.
+    """
+    global _SYNCNET_PIPELINE, _SYNCNET_FAILED
+    if _SYNCNET_FAILED:
+        return None
+    try:
+        if _SYNCNET_PIPELINE is None:
+            from syncnet_python.syncnet_pipeline import SyncNetPipeline
+
+            models_dir = Path(__file__).resolve().parent.parent / "models"
+            s3fd = models_dir / "sfd_face.pth"
+            syncnet = models_dir / "syncnet_v2.model"
+            if not (s3fd.is_file() and syncnet.is_file()):
+                _SYNCNET_FAILED = True
+                return None
+            _SYNCNET_PIPELINE = SyncNetPipeline(
+                {
+                    "s3fd_weights": str(s3fd),
+                    "syncnet_weights": str(syncnet),
+                },
+                device="cpu",
+            )
+        offsets, confs, dists, max_conf, min_dist, _json, has_face = (
+            _SYNCNET_PIPELINE.inference(str(video_path))
+        )
+    except Exception:
+        _SYNCNET_FAILED = True
+        return None
+
+    limitations = [
+        "SyncNet 사전학습 모델(LRS2) 기반 오프셋/신뢰도 측정 — 스크리닝 신호이며 포렌식 감정이 아닙니다.",
+        "얼굴 트랙이 짧거나 화질이 낮으면 오프셋 추정이 불안정합니다.",
+    ]
+    if not has_face or not offsets:
+        return LipsyncAnalysis(
+            False, 0, "립싱크 분석 불가 — SyncNet이 얼굴 트랙을 찾지 못했습니다.",
+            None, None, 0, None, limitations + ["S3FD가 유효한 얼굴 트랙을 검출하지 못했습니다."],
+        )
+    offset_frames = float(offsets[0]) if offsets else 0.0
+    lag_seconds = abs(offset_frames) / 25.0
+    confidence = float(max_conf)
+    # SyncNet convention: |offset| <= 3 frames and confidence >= 3 means
+    # in-sync; large offset or low confidence is the dubbing/forgery side.
+    if lag_seconds > 0.5 or confidence < 1.0:
+        score, verdict = 70, f"SyncNet이 유의미한 오디오-비디오 오프셋({offset_frames:+.0f}프레임, 신뢰도 {confidence:.1f})을 측정했습니다 — 더빙/재합성 후보."
+    elif lag_seconds > 0.2 or confidence < 3.0:
+        score, verdict = 40, f"SyncNet 측정이 경계 영역입니다(오프셋 {offset_frames:+.0f}프레임, 신뢰도 {confidence:.1f})."
+    else:
+        score, verdict = 0, f"SyncNet이 정상 동기 범위를 측정했습니다(오프셋 {offset_frames:+.0f}프레임, 신뢰도 {confidence:.1f})."
+    return LipsyncAnalysis(
+        True, score, verdict, round(-min_dist, 4) if min_dist else None,
+        round(lag_seconds, 3), len(offsets), confidence, limitations,
+    )

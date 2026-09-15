@@ -49,7 +49,17 @@ Part 2: 구조적 한계/미구현/원리적 불가 항목별 리서치 결과�
 
 ### A. 구조적 한계 — 측정으로 확인됨
 
-#### A-1. 기술/마크다운 문서의 AI 판별 실패 (PPL 61~131)
+#### A-1. 기술/마크다운 문서의 AI 판별 실패 (PPL 61~131) ✅ 1단계 구현
+
+**구현된 것**: `_technical_document_density` 게이트 — 코드펜스/표/헤더/HTML 태그/인라인코드 라인 비율 ≥40%면 목록·문장균일성 신호를 ×0.4로 감쇠하고 "측정된 실패 영역" 한계를 명시. 구조 자체가 고PPL이라는 진단은 PPL 신호 자체에는 적용 불가(외부 모델 점수라 사후감쇠 불가) — 문서화로 보완.
+**남은 것**: 담론 수준 신호(PDTB 관계), 기술문서 전용 분류기는 코퍼스 확장 후.
+
+**원인**: 표/코드/불릿/식별자는 LM에게 본질적으로 고PPL — 유창성 척도가 못 재는 영역.
+**방법** (리서치):
+- **DTransformer 계열 담론 신호** (arXiv 2412.12679): 문서 수준 구조 특징 — PDTB 담론 관계, 섹션 전이 패턴. paraWP에서 +4~15.5% 개선 입증 → 우리 마크다운 지문 신호의 정규화된 확장으로 구현 가능
+- **산문-구조 이중 채널**: 이미 구현한 이중 뷰를 확장 — 구조 밀도가 높은 문서는 "기술문서 모드"로 PPL 대신 지문 신호만 쓰도록 게이팅
+- **기술문서 전용 분류기**: devin/agent 산출물 라벨 코퍼스로 로지스틱 회귀 — 라벨이 이미 확보됨
+**판정**: 구현 가능, 우선순위 높음 (A-1 게이팅 + 담론 신호).
 
 **원인**: 표/코드/불릿/식별자는 LM에게 본질적으로 고PPL — 유창성 척도가 못 재는 영역.
 **방법** (리서치):
@@ -91,12 +101,10 @@ Part 2: 구조적 한계/미구현/원리적 불가 항목별 리서치 결과�
 - **거리-기반 귀속**: 각 생성기 프로파일의 stylometry 벡터와 거리 비교 — 분류가 아닌 "가장 가까운 프로파일" 보고
 **판정**: 샘플 확보 시 구현 가능. 현재는 데이터 블로커.
 
-#### A-6. 한국어 신경망 탐지기 오탐 (Fakespot/OpenAI ko 98점)
+#### A-6. 한국어 신경망 탐지기 오탐 (Fakespot/OpenAI ko 98점) ✅ 구현 완료
 
-**방법**:
-- 한국어 코퍼스로 두 모델의 **언어별 재보정** — ko 입력 시 다른 임계값/weight
-- Hangul 비율 게이트: hangul_ratio > 0.3이면 두 모델 weight 0으로 — 이미 ensemble_weight로 부분 완화, 게이트 명시화 가능
-**판정**: 즉시 구현 가능 (게이팅 규칙 + ko 코퍼스 재보정).
+**구현**: 프로필에 `trained_languages: ["en"]` 필드 추가 → 앙상블 집계 시 hangul_ratio > 0.3이면 영어 전용 멤버 weight ×0.25 자동 감쇠 + 한계 명시. `analyze_external_model`(디렉터리 경로)와 `_analyze_profile_set` 양쪽에 적용. 언어 무관 멤버(Qwen PPL, Binoculars)는 영향 없음.
+**남은 것**: 한국어 코퍼스 확장 시 언어별 재보정으로 개선 가능.
 
 ### B. 미구현 — 리서치로 방법 확인됨
 
@@ -127,10 +135,10 @@ Part 2: 구조적 한계/미구현/원리적 불가 항목별 리서치 결과�
 **측정**: 이동 복제 0.15 / 스케일 복제 0.05 / 회전+노이즈 0.125 검출, 깨끗한 텍스처·노이즈 0. 실사진에서는 대형 중복 패널을 정확히 검출(스크린샷 템플릿 반복은 진짜 복제라 플래그 — 리뷰 필요 영역). 저텍스처 이미지의 40°+ 회전은 키포인트 부족으로 미달 가능 — 정직한 한계.
 **배선**: `frequency_forensics` 엑스퍼트에 블록 방식과 병행 (≥0.12→점수 55, ≥0.05→약신호). cv2 없으면 graceful degrade.
 
-#### B-5. 진짜 화자 인식 (임베딩)
+#### B-5. 진짜 화자 인식 (임베딩) ✅ 구현 완료
 
-**리서치 결과**: `speechbrain/spkrec-ecapa-voxceleb` — 사전학습 ECAPA-TDNN, `EncoderClassifier.from_hparams` 한 줄로 192차원 임베딩, `verify_files`로 코사인 검증. Apache 라이선스.
-**구현 방법**: `compare_speakers`의 MFCC 경로를 옵션 임베딩 경로로 업그레이드 — speechbrain 있으면 ECAPA, 없으면 기존 MFCC 폴백. model_adapter 프로필로도 가능.
+**구현**: `compare_speakers`가 speechbrain 설치 시 ECAPA-TDNN(spkrec-ecapa-voxceleb, ~90MB HF 다운로드)으로 검증, 없으면 MFCC 폴백. 발견된 함정: Windows 심볼링크 권한(LocalStrategy.COPY로 우회), torchaudio 2.11의 torchcodec 의존(soundfile로 대체), m4a/aac는 ffmpeg→wav 변환, verify_files의 Windows 경로 버그(verify_batch+텐서로 우회).
+**실측**: 자기 녹음 m4a → 100 same, 통화녹음 vs 음성메모 → 20 different (ECAPA 경로). MFCC는 동일 쌍에 97 same 오탐이던 것이 개선.
 **판정**: 구현 가능 — pip 패키지 + HF 다운로드.
 
 #### B-6. 저자 귀속 (누가 썼는지)
@@ -144,11 +152,10 @@ Part 2: 구조적 한계/미구현/원리적 불가 항목별 리서치 결과�
 **구현 방법**: `documents.py`에 syhwp 경로 추가 — `import syhwp` 성공 시 extract, 실패 시 현재 graceful 유지.
 **판정**: 즉시 구현 가능 — 가장 쉬운 미구현 항목.
 
-#### B-8. 영상/오디오 C2PA
+#### B-8. 영상/오디오 C2PA ✅ 확인 완료 (이미 지원됨)
 
-**리서치 결과**: `c2pa-python` (공식 바인딩) 또는 `encypher-c2pa` — Reader가 비디오/오디오 포맷 지원, `reader.json()`으로 manifest+validation_state 추출.
-**구현 방법**: `c2pa.py`에 c2pa-python 경로 추가 — 있으면 전 포맷 Reader 사용, 없으면 현재 이미지 전용 폴백.
-**판정**: 구현 가능 — 선택 의존성 추가.
+**확인**: `analyze_metadata_forensic`/`validate_c2pa_manifest`는 처음부터 포맷 무관 — `c2pa.Reader`가 mp4/mov/wav를 네이티브 파싱함을 실측 (`present: False` 정상 반환, 에러 아님). webapp/api_server/cli의 모든 업로드 경로에 이미 배선. 실제 갭은 c2pa-python 미설치 환경뿐이었음 — `provenance` extra 설치로 해결.
+**테스트**: mp4 컨테이너 파싱 회귀 테스트 추가.
 
 #### B-9. 점수 확률 보정
 
@@ -170,11 +177,11 @@ Part 2: 구조적 한계/미구현/원리적 불가 항목별 리서치 결과�
 
 1. ~~**B-7 HWP**~~ ✅ syhwp로 구현 완료 (`f1f1a2e`)
 2. ~~**B-4 회전 copy-move**~~ ✅ 키포인트+투표+광도검증 구현 완료
-3. **B-5 ECAPA 화자** — 사전학습 모델, 오늘 구현 가능
-4. **A-6 한국어 게이팅** — 규칙 한 줄
-5. **B-8 C2PA 비디오** — 선택 의존성
-6. **B-3 SyncNet** — 가중치 다운로드 필요
-7. **A-1 기술문서 게이팅** — 코퍼스 있음
+3. ~~**B-5 ECAPA 화자**~~ ✅ speechbrain 경로 구현
+4. ~~**A-6 한국어 게이팅**~~ ✅ trained_languages 게이트 구현
+5. ~~**B-8 C2PA 비디오**~~ ✅ 이미 지원 확인 + 테스트 핀
+6. **B-3 SyncNet** — 진행 중: syncnet-python 설치 + 가중치 다운로드 (sfd_face.pth ~90MB)
+7. ~~**A-1 기술문서 게이팅**~~ ✅ 구조 밀도 게이트 1단계 구현
 8. **B-2 조명 물리** — 중간 난이도
 9. **B-1 SynthID-Text** — 자기키만이지만 KGW와 같은 패턴
 10. **A-2/A-3/A-5** — 코퍼스 확장 선행

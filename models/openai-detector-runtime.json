@@ -20,5 +20,8 @@
     "Only .txt/.md scan items run this profile; image/audio profiles are unaffected (modality filtering)."
   ],
   "license": "MIT",
-  "ensemble_weight": 0.25
+  "ensemble_weight": 0.25,
+  "trained_languages": [
+    "en"
+  ]
 }

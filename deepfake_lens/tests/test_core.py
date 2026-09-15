@@ -531,3 +531,37 @@ class DeepSignalsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TechnicalDocumentGateTest(unittest.TestCase):
+    """A-1: markdown/code structure must not inflate prose-style signals."""
+
+    TECH = """# Devin CLI Reference
+
+## Commands
+- `devin run` — execute
+- `devin auth` — authenticate
+
+```bash
+pip install devin
+devin run --task x
+```
+
+| flag | meaning |
+|---|---|
+| --json | output json |
+| --deep | deep signals |
+"""
+
+    def test_markdown_doc_triggers_gate(self) -> None:
+        result = analyze_text(self.TECH * 3)
+        self.assertTrue(any("기술문서" in item for item in result.limitations))
+        # Structural signals are attenuated, not deleted.
+        list_signals = [s for s in result.signals if "목록" in s.title]
+        for signal in list_signals:
+            self.assertLessEqual(signal.weight, 7)
+
+    def test_plain_prose_ungated(self) -> None:
+        prose = "어제 산책을 하다가 오래된 친구를 만났다. 그는 요즘 바쁘다고 했다. 우리는 커피를 마시며 이야기를 나눴다." * 4
+        result = analyze_text(prose)
+        self.assertFalse(any("기술문서" in item for item in result.limitations))

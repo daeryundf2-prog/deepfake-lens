@@ -20,5 +20,8 @@
     "Pair with models/openai-detector-runtime.json via a directory --model-path to get a two-member text ensemble with an agreement signal."
   ],
   "license": "Apache-2.0",
-  "ensemble_weight": 0.5
+  "ensemble_weight": 0.5,
+  "trained_languages": [
+    "en"
+  ]
 }

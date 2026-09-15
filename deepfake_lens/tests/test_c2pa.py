@@ -201,6 +201,23 @@ class C2paSdkValidationTest(unittest.TestCase):
         incomplete = [s for s in analysis.signals if s.title == "C2PA 매니페스트 검증 미완료"]
         self.assertTrue(incomplete)
 
+    @unittest.skipUnless(_has_c2pa_sdk(), "c2pa-python not installed")
+    def test_video_container_parses_for_manifest(self) -> None:
+        """MP4 is a supported C2PA container — the SDK must parse it and
+        report 'no manifest' (not None, which would mean it couldn't run)."""
+        import struct
+        import tempfile
+
+        # Minimal valid-ish mp4: ftyp box + free box — enough for the SDK
+        # to open the container and find no JUMBF manifest.
+        ftyp = bytes(24)[:4] + b"ftypmp42" + bytes(8) + b"mp42isom"
+        with tempfile.TemporaryDirectory() as tmp:
+            mp4 = Path(tmp) / "clip.mp4"
+            mp4.write_bytes(ftyp + (8).to_bytes(4, "big") + b"free")
+            summary = validate_c2pa_manifest(mp4)
+        self.assertIsNotNone(summary)
+        self.assertFalse(summary["present"])
+
 
 if __name__ == "__main__":
     unittest.main()
