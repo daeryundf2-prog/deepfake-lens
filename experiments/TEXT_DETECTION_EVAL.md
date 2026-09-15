@@ -241,3 +241,29 @@ Honest position after measurement: ensemble weighting cannot fix
 members that are noise in-domain. Remaining fixes are corpus-based
 (P1): re-anchoring qwen-ppl on a labeled ko+en corpus, and a
 heuristic-vs-neural weighting pass measured on the manifest.
+
+## Seventh probe — Qwen PPL anchor calibration attempt (2026-09-16)
+
+Raw perplexity measured on all 30 manifest samples (Qwen2.5-0.5B,
+dual raw/prose view, best-of):
+
+| Group | PPL range | n |
+|---|---|---|
+| AI prose (ko+en formal) | 3.0 – 19.3 | 7 |
+| AI humanized/informal | 16.7 – 60.8 | 3 |
+| AI technical docs (devin) | 18.7 – 84.9 | 6 |
+| **Human polished prose (wiki/talk)** | **8.3 – 19.6** | 12 |
+| Human boilerplate (license) | 1.5 | 1 |
+
+**No anchor separates this corpus**: human polished prose (8–19) and AI
+prose (7–19) occupy the same band; only the extremes (boilerplate 1.5,
+tech docs 61–85) are clean. The [8,60] anchors were never calibrated —
+with them, every human wiki sample scores 73–98 = systematic FP.
+
+Measured action taken: `qwen-ppl` `ensemble_weight` 1.0 → **0.25**,
+matching the binoculars policy for members with no demonstrated
+in-domain separation. The raw `ppl=` value stays in `detail` for audit.
+
+What this implies: the perplexity screen is *calibrated-away* — on this
+corpus it is near-noise for the contested band. The fingerprint heuristic
+layer remains the strongest measured signal (en AUROC 0.894 solo).

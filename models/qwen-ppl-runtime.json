@@ -1,19 +1,20 @@
 {
-  "type": "deepfake-lens-runtime-profile-v1",
-  "name": "Qwen2.5-0.5B causal-LM perplexity screen",
-  "runtime": "causal-lm-ppl",
-  "modality": "text",
-  "hub_model": "Qwen/Qwen2.5-0.5B",
-  "window_tokens": 512,
-  "ppl_low": 8.0,
-  "ppl_high": 60.0,
-  "limitations": [
-    "Perplexity screen, not a trained detector — score maps log-PPL between provisional anchors [8, 60] that are NOT yet calibrated on a labeled corpus; recalibrate via deepfake-lens eval before trusting thresholds.",
-    "Generator-agnostic in principle (any LLM output compresses toward low PPL under a different reference LM), but effectiveness on a specific generator must be measured, not assumed.",
-    "Reference LM is fetched from Hugging Face on first use (~1 GB into the HF cache); set 'hub_model' to a local snapshot directory to run fully offline.",
-    "Short texts, templated/boilerplate text, and text written by the reference LM's own family behave differently — the raw ppl value in detail is the auditable signal.",
-    "Prioritization signal, not a truth label."
-  ],
-  "license": "Qwen2.5 is Apache-2.0; weights download to the HF cache, never committed",
-  "ensemble_weight": 1.0
+ "type": "deepfake-lens-runtime-profile-v1",
+ "name": "Qwen2.5-0.5B causal-LM perplexity screen",
+ "runtime": "causal-lm-ppl",
+ "modality": "text",
+ "hub_model": "Qwen/Qwen2.5-0.5B",
+ "window_tokens": 512,
+ "ppl_low": 8.0,
+ "ppl_high": 60.0,
+ "limitations": [
+  "Measured on the 30-sample seed corpus (2026-09-16): human polished prose lands at PPL 8-19, overlapping AI prose at 7-19 — the screen cannot separate this regime at any anchor; ensemble_weight lowered to 0.25 accordingly.",
+  "Perplexity screen, not a trained detector — score maps log-PPL between provisional anchors [8, 60] that are NOT yet calibrated on a labeled corpus; recalibrate via deepfake-lens eval before trusting thresholds.",
+  "Generator-agnostic in principle (any LLM output compresses toward low PPL under a different reference LM), but effectiveness on a specific generator must be measured, not assumed.",
+  "Reference LM is fetched from Hugging Face on first use (~1 GB into the HF cache); set 'hub_model' to a local snapshot directory to run fully offline.",
+  "Short texts, templated/boilerplate text, and text written by the reference LM's own family behave differently — the raw ppl value in detail is the auditable signal.",
+  "Prioritization signal, not a truth label."
+ ],
+ "license": "Qwen2.5 is Apache-2.0; weights download to the HF cache, never committed",
+ "ensemble_weight": 0.25
 }

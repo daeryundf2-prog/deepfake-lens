@@ -2,23 +2,23 @@
   "threshold": 50.0,
   "overall": {
     "n": 30,
-    "auroc": 0.2986425339366516,
-    "eer": 0.6787330316742082,
+    "auroc": 0.416289592760181,
+    "eer": 0.5633484162895928,
     "confusion@50": {
-      "tp": 5,
-      "fp": 6,
-      "fn": 12,
-      "tn": 7,
-      "precision": 0.45454545454545453,
-      "recall": 0.29411764705882354,
-      "fpr": 0.46153846153846156
+      "tp": 6,
+      "fp": 7,
+      "fn": 11,
+      "tn": 6,
+      "precision": 0.46153846153846156,
+      "recall": 0.35294117647058826,
+      "fpr": 0.5384615384615384
     }
   },
   "by_language": {
     "en": {
       "n": 17,
-      "auroc": 0.24242424242424243,
-      "eer": 0.5681818181818181,
+      "auroc": 0.5909090909090909,
+      "eer": 0.5227272727272727,
       "confusion@50": {
         "tp": 1,
         "fp": 1,
@@ -31,16 +31,16 @@
     },
     "ko": {
       "n": 13,
-      "auroc": 0.3333333333333333,
-      "eer": 0.7738095238095238,
+      "auroc": 0.35714285714285715,
+      "eer": 0.6190476190476191,
       "confusion@50": {
-        "tp": 4,
-        "fp": 5,
-        "fn": 2,
-        "tn": 2,
-        "precision": 0.4444444444444444,
-        "recall": 0.6666666666666666,
-        "fpr": 0.7142857142857143
+        "tp": 5,
+        "fp": 6,
+        "fn": 1,
+        "tn": 1,
+        "precision": 0.45454545454545453,
+        "recall": 0.8333333333333334,
+        "fpr": 0.8571428571428571
       }
     }
   },
@@ -50,12 +50,12 @@
       "auroc": null,
       "eer": 0.0,
       "confusion@50": {
-        "tp": 5,
+        "tp": 6,
         "fp": 0,
-        "fn": 6,
+        "fn": 5,
         "tn": 0,
         "precision": 1.0,
-        "recall": 0.45454545454545453,
+        "recall": 0.5454545454545454,
         "fpr": null
       }
     },
@@ -93,12 +93,12 @@
       "eer": 0.05555555555555555,
       "confusion@50": {
         "tp": 0,
-        "fp": 4,
+        "fp": 5,
         "fn": 0,
-        "tn": 5,
+        "tn": 4,
         "precision": 0.0,
         "recall": null,
-        "fpr": 0.4444444444444444
+        "fpr": 0.5555555555555556
       }
     },
     "wikipedia-talk": {
@@ -122,28 +122,28 @@
       "label": "ai",
       "generator": "claude",
       "language": "en",
-      "score": 19.0
+      "score": 43.0
     },
     {
       "path": "experiments\\text-corpus\\ai\\ai_claude_antigravity_ko.md",
       "label": "ai",
       "generator": "claude",
       "language": "ko",
-      "score": 52.0
+      "score": 77.0
     },
     {
       "path": "experiments\\text-corpus\\ai\\ai_claude_boilerplate_like.txt",
       "label": "ai",
       "generator": "claude",
       "language": "en",
-      "score": 42.0
+      "score": 24.0
     },
     {
       "path": "experiments\\text-corpus\\ai\\ai_claude_en_formal.txt",
       "label": "ai",
       "generator": "claude",
       "language": "en",
-      "score": 100.0
+      "score": 85.0
     },
     {
       "path": "experiments\\text-corpus\\ai\\ai_claude_en_short.txt",
@@ -171,7 +171,7 @@
       "label": "ai",
       "generator": "claude",
       "language": "ko",
-      "score": 42.0
+      "score": 66.0
     },
     {
       "path": "experiments\\text-corpus\\ai\\ai_claude_ko_news_style.txt",
@@ -241,7 +241,7 @@
       "label": "human",
       "generator": "license-boilerplate",
       "language": "en",
-      "score": 24.0
+      "score": 0.0
     },
     {
       "path": "experiments\\text-corpus\\human\\talk_ko_대한민국.txt",
@@ -276,7 +276,7 @@
       "label": "human",
       "generator": "wikipedia",
       "language": "en",
-      "score": 24.0
+      "score": 0.0
     },
     {
       "path": "experiments\\text-corpus\\human\\wiki_en_French Revolution.txt",
@@ -290,14 +290,14 @@
       "label": "human",
       "generator": "wikipedia",
       "language": "en",
-      "score": 42.0
+      "score": 24.0
     },
     {
       "path": "experiments\\text-corpus\\human\\wiki_en_Photosynthesis.txt",
       "label": "human",
       "generator": "wikipedia",
       "language": "en",
-      "score": 24.0
+      "score": 0.0
     },
     {
       "path": "experiments\\text-corpus\\human\\wiki_ko_대한민국.txt",
@@ -318,7 +318,7 @@
       "label": "human",
       "generator": "wikipedia",
       "language": "ko",
-      "score": 42.0
+      "score": 67.0
     },
     {
       "path": "experiments\\text-corpus\\human\\wiki_ko_인공지능.txt",
