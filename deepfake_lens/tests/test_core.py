@@ -565,3 +565,27 @@ devin run --task x
         prose = "어제 산책을 하다가 오래된 친구를 만났다. 그는 요즘 바쁘다고 했다. 우리는 커피를 마시며 이야기를 나눴다." * 4
         result = analyze_text(prose)
         self.assertFalse(any("기술문서" in item for item in result.limitations))
+
+
+class ShortTextCapTest(unittest.TestCase):
+    """A-4: short text cannot reach the 'high suspicion' band."""
+
+    def test_score_cap_applies_under_240_chars(self) -> None:
+        from deepfake_lens.core import _build_result, EvidenceSignal, SourceGuess, SourceConfidence
+
+        guess = SourceGuess.unknown()
+        strong = [EvidenceSignal("강한 신호", "x", 80)]
+        result = _build_result(
+            strong, subject="글", source_guess=guess, limitations=[], score_cap=49,
+        )
+        self.assertEqual(result.score, 49)
+        self.assertLess(result.score, 67)  # below HIGH threshold
+
+    def test_short_text_discloses_cap(self) -> None:
+        result = analyze_text("이 글은 매우 짧습니다. 추가 확인이 필요합니다.")
+        self.assertTrue(any("상한" in item for item in result.limitations))
+
+    def test_long_text_uncapped_path(self) -> None:
+        prose = "어제 산책을 하다가 오래된 친구를 만났다. 그는 요즘 바쁘다고 했다." * 10
+        result = analyze_text(prose)
+        self.assertFalse(any("상한" in item for item in result.limitations))
