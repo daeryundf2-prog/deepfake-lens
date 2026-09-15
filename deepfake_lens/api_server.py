@@ -170,7 +170,12 @@ def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = No
             raise HTTPException(status_code=500, detail=str(exc))
     
     @app.post("/api/check")
-    async def check(file_path: str | None = None, text: str | None = None):
+    async def check(
+        file_path: str | None = None,
+        text: str | None = None,
+        watermark_secret: str | None = None,
+        watermark_gamma: float = 0.25,
+    ):
         """Unified check-all: run every layer applicable to one input.
 
         Accepts either ``file_path`` (any media type) or raw ``text``. Runs
@@ -197,11 +202,20 @@ def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = No
                 finally:
                     if tmp_name:
                         Path(tmp_name).unlink(missing_ok=True)
-                return {"status": "success", "data": {
+                data: dict[str, Any] = {
                     "mode": "text",
                     "item": item.to_json(),
                     "advanced": analyze_text_advanced(trimmed).to_json(),
-                }}
+                }
+                if watermark_secret:
+                    try:
+                        from .watermark import detect_kgw_watermark
+                        data["watermark"] = detect_kgw_watermark(
+                            trimmed, secret=watermark_secret, gamma=watermark_gamma
+                        ).to_json()
+                    except Exception:
+                        data["watermark"] = {"available": False, "verdict": "워터마크 검사 실패"}
+                return {"status": "success", "data": data}
             if file_path:
                 path = Path(file_path)
                 item = analyze_file(path, model_path=_default_profiles())
@@ -225,6 +239,20 @@ def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = No
             raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
+
+    @app.post("/api/compare")
+    async def compare(file_path_a: str, file_path_b: str):
+        """Two-file comparison: same-speaker distance for audio pairs,
+        same-author stylometry for text/document pairs."""
+        from .core import compare_files
+
+        try:
+            result = compare_files(Path(file_path_a), Path(file_path_b))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc))
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=str(result["error"]))
+        return {"status": "success", "data": result}
 
     @app.post("/api/multimodal")
     async def multimodal(

@@ -45,6 +45,8 @@ class DocumentExtractionTest(unittest.TestCase):
         self.assertEqual(item.status, "analyzed")
         self.assertIsNotNone(item.result)
         self.assertEqual(item.result.source_guess.label, "AI 도구 생성 메타데이터 추정")
+        self.assertIsNotNone(item.result.document_metadata)
+        self.assertEqual(item.result.document_metadata.get("docx.creator"), "ChatGPT")
 
     def test_corrupt_docx_degrades(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -178,6 +178,9 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
             if parsed.path == "/api/check":
                 self._handle_check()
                 return
+            if parsed.path == "/api/compare":
+                self._handle_compare()
+                return
             if parsed.path == "/api/report":
                 try:
                     length = int(self.headers.get("Content-Length") or "0")
@@ -227,6 +230,19 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
             body = self.rfile.read(length)
             self._send_json(_analyze_upload_payload(self.headers.get("Content-Type") or "", body))
 
+        def _handle_compare(self) -> None:
+            """Two-file comparison: speaker or stylometry by extension pair."""
+            try:
+                length = int(self.headers.get("Content-Length") or "0")
+            except ValueError:
+                self.send_error(400, "invalid Content-Length")
+                return
+            if length <= 0 or length > MAX_UPLOAD_BYTES:
+                self.send_error(400, "invalid compare body size")
+                return
+            body = self.rfile.read(length)
+            self._send_json(_compare_payload(self.headers.get("Content-Type") or "", body))
+
         def _handle_check(self) -> None:
             """Unified check-all: JSON {text} or a single multipart file.
 
@@ -253,7 +269,16 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
                 except json.JSONDecodeError:
                     self._send_json({"error": "invalid JSON body"})
                     return
-                self._send_json(_check_text_payload(str(payload.get("text") or "")))
+                secret = payload.get("watermark_secret")
+                try:
+                    gamma = float(payload.get("watermark_gamma") or 0.25)
+                except (TypeError, ValueError):
+                    gamma = 0.25
+                self._send_json(_check_text_payload(
+                    str(payload.get("text") or ""),
+                    watermark_secret=str(secret) if secret else None,
+                    watermark_gamma=gamma,
+                ))
                 return
             self._send_json(_check_file_payload(content_type, body))
 
@@ -593,13 +618,14 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
     }
 
 
-def _check_text_payload(text: str) -> dict[str, object]:
+def _check_text_payload(text: str, *, watermark_secret: str | None = None, watermark_gamma: float = 0.25) -> dict[str, object]:
     """Unified text check: core scan heuristics + neural member ensemble
     + fingerprint probes in one payload.
 
     The text is written to a temp .txt so the full file pipeline (including
     the causal-LM/classifier members) runs exactly as it would on a saved
-    document; the temp file is deleted immediately.
+    document; the temp file is deleted immediately. When ``watermark_secret``
+    is supplied, a KGW green-list test runs under that key.
     """
     trimmed = text.strip()
     if len(trimmed) < 8:
@@ -626,6 +652,13 @@ def _check_text_payload(text: str) -> dict[str, object]:
             Path(tmp_name).unlink(missing_ok=True)
     from .text_advanced import analyze_text_advanced
     advanced = analyze_text_advanced(trimmed)
+    watermark = None
+    if watermark_secret:
+        try:
+            from .watermark import detect_kgw_watermark
+            watermark = detect_kgw_watermark(trimmed, secret=watermark_secret, gamma=watermark_gamma).to_json()
+        except Exception:
+            watermark = {"available": False, "verdict": "워터마크 검사 실패"}
     record = item.to_json()
     record["name"] = "pasted-text"
     record["path"] = "pasted-text"
@@ -635,6 +668,7 @@ def _check_text_payload(text: str) -> dict[str, object]:
         "item": record,
         "advanced": advanced.to_json(),
         "forensic": forensic,
+        "watermark": watermark,
     }
 
 
@@ -689,6 +723,33 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
         "advanced": advanced,
         "forensic": forensic,
     }
+
+
+def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
+    """Two-file comparison: speaker distance for audio pairs, stylometry
+    for text/document pairs. Both parts must carry filenames."""
+    if "multipart/form-data" not in content_type:
+        return {"error": "multipart/form-data 본문이 필요합니다"}
+    message = BytesParser(policy=email_policy).parsebytes(
+        b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
+    )
+    parts = [
+        p for p in message.iter_parts() if p.get_filename() and p.get_payload(decode=True)
+    ]
+    if len(parts) < 2:
+        return {"error": "비교할 파일 2개가 필요합니다"}
+    tmp_paths: list[Path] = []
+    try:
+        for part in parts[:2]:
+            suffix = Path(part.get_filename() or "upload").suffix[:16]
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                tmp.write(part.get_payload(decode=True) or b"")
+                tmp_paths.append(Path(tmp.name))
+        from .core import compare_files
+        return compare_files(tmp_paths[0], tmp_paths[1])
+    finally:
+        for tmp_path in tmp_paths:
+            tmp_path.unlink(missing_ok=True)
 
 
 def _feedback_path() -> Path:

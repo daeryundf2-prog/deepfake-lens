@@ -163,3 +163,57 @@ class WatermarkTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CopyMoveTest(unittest.TestCase):
+    def _image(self, *, forged: bool):
+        import numpy as np
+
+        rng = np.random.default_rng(0)
+        img = rng.normal(128, 20, (128, 128))
+        if forged:
+            img[70:110, 70:110] = img[10:50, 10:50]
+        return img
+
+    def test_forged_region_flagged(self) -> None:
+        from deepfake_lens.frequency import copy_move_score
+
+        ratio, detail = copy_move_score(self._image(forged=True))
+        self.assertGreaterEqual(ratio, 0.03)
+        self.assertIn("copy-move", detail)
+
+    def test_clean_noise_not_flagged(self) -> None:
+        from deepfake_lens.frequency import copy_move_score
+
+        ratio, _ = copy_move_score(self._image(forged=False))
+        self.assertEqual(ratio, 0.0)
+
+    def test_repetitive_texture_suppressed(self) -> None:
+        import numpy as np
+
+        from deepfake_lens.frequency import copy_move_score
+
+        rng = np.random.default_rng(0)
+        smooth = np.tile(np.linspace(0, 255, 128), (128, 1)) + rng.normal(0, 3, (128, 128))
+        ratio, _ = copy_move_score(smooth)
+        self.assertLess(ratio, 0.2)
+
+
+class CompareFilesTest(unittest.TestCase):
+    def test_text_pair_dispatches_stylometry(self) -> None:
+        from deepfake_lens.core import compare_files
+
+        with tempfile.TemporaryDirectory() as tmp:
+            a = Path(tmp) / "a.txt"
+            b = Path(tmp) / "b.txt"
+            a.write_text("인공지능 기술은 빠르게 발전하고 있으며 다양한 산업에 적용된다. 또한 윤리 문제가 함께 논의된다. " * 8, encoding="utf-8")
+            b.write_text("인공지능의 발전 속도는 빠르며 여러 산업 분야에 활용된다. 또한 윤리 문제가 함께 거론된다. " * 8, encoding="utf-8")
+            result = compare_files(a, b)
+        self.assertEqual(result["kind"], "stylometry")
+        self.assertIn("score", result)
+
+    def test_mixed_pair_rejected(self) -> None:
+        from deepfake_lens.core import compare_files
+
+        result = compare_files(Path("a.wav"), Path("b.txt"))
+        self.assertIn("error", result)

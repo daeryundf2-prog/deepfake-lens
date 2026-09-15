@@ -92,6 +92,10 @@ class ClassificationResult:
     # (ffmpeg + AASIST etc); None when not requested or unavailable.
     # Appended last: positional constructions predate this field.
     av_audio: dict | None = None
+    # Office-document provenance fields preserved verbatim for the
+    # forensic record (pdf.producer, docx.creator, ...); None for non-doc
+    # kinds. Appended last for the same positional-construction reason.
+    document_metadata: dict | None = None
 
     def to_json(self) -> dict[str, object]:
         data = asdict(self)
@@ -542,6 +546,35 @@ def _video_result(analysis: "VideoTemporalAnalysis") -> ClassificationResult:
     )
 
 
+def compare_files(file_a: Path | str, file_b: Path | str) -> dict[str, object]:
+    """Two-file comparison dispatch: speaker distance for audio pairs,
+    stylometry for text/document pairs."""
+    from .audio import compare_speakers
+    from .text_advanced import compare_texts
+
+    path_a, path_b = Path(file_a), Path(file_b)
+    text_exts = SUPPORTED_TEXT_EXTENSIONS | SUPPORTED_DOCUMENT_EXTENSIONS | {".rst", ".log"}
+    ext_a, ext_b = path_a.suffix.lower(), path_b.suffix.lower()
+    if ext_a in SUPPORTED_AUDIO_EXTENSIONS and ext_b in SUPPORTED_AUDIO_EXTENSIONS:
+        result = compare_speakers(path_a, path_b)
+        return {"kind": "speaker", "score": result.same_speaker_score, "band": result.band, "verdict": result.verdict, "distance": result.distance, "limitations": result.limitations}
+    if ext_a in text_exts and ext_b in text_exts:
+        def _text(path: Path) -> str | None:
+            try:
+                if path.suffix.lower() in SUPPORTED_DOCUMENT_EXTENSIONS:
+                    text, _ = extract_document_text(path)
+                    return text or None
+                return _read_prefix(path, 4 * 1024 * 1024).decode("utf-8", errors="replace")
+            except OSError:
+                return None
+        text_a, text_b = _text(path_a), _text(path_b)
+        if text_a is None or text_b is None:
+            return {"error": "한쪽 파일의 텍스트 추출에 실패했습니다."}
+        result = compare_texts(text_a, text_b)
+        return {"kind": "stylometry", "score": result.same_author_score, "band": result.band, "verdict": result.verdict, "distance": result.distance, "limitations": result.limitations}
+    return {"error": f"지원되는 쌍이 아닙니다 ({ext_a} vs {ext_b}) — 오디오끼리 또는 텍스트/문서끼리 비교하세요."}
+
+
 def _apply_document_metadata(result: ClassificationResult, doc_metadata: dict[str, str]) -> ClassificationResult:
     """Fold office-document provenance metadata into the text result.
 
@@ -579,10 +612,15 @@ def _apply_document_metadata(result: ClassificationResult, doc_metadata: dict[st
             reasons.append(f"문서 메타데이터에 AI 도구명이 기록되어 있습니다: {ai_hit}")
         elif hints:
             reasons.append("문서 메타데이터에서 작성 도구 단서가 발견되었습니다.")
+    # Preserve the extracted provenance fields verbatim so API/GUI/report
+    # consumers can show the raw metadata record, not just its folded
+    # source-guess interpretation.
+    preserved = {key: value for key, value in doc_metadata.items() if value and key != "extractor"}
     return replace(
         result,
         limitations=limitations,
         source_guess=SourceGuess(label, confidence, reasons),
+        document_metadata=preserved or result.document_metadata,
     )
 
 
@@ -1027,6 +1065,7 @@ def _classification_result_from_json(data: dict[str, object]) -> ClassificationR
         ai_score=int(data.get("ai_score", score) or score),
         source_attribution_label=str(data.get("source_attribution_label", source_guess.label)),
         av_audio=data.get("av_audio") if isinstance(data.get("av_audio"), dict) else None,
+        document_metadata=data.get("document_metadata") if isinstance(data.get("document_metadata"), dict) else None,
     )
 
 

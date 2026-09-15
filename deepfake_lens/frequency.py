@@ -322,3 +322,105 @@ def ela_metrics(gray, *, quality: int = 75, block: int = 16) -> tuple[float, flo
         f"(최대/전역 비율 {region_max / max(global_mean, 1e-6):.1f}x)"
     )
     return global_mean, region_max, detail
+
+
+def copy_move_score(gray, *, block: int = 16, stride: int = 4, min_offset: int = 20, mad_threshold: float = 4.0) -> tuple[float, str]:
+    """Block-matching copy-move detection: duplicated tiles recurring at a
+    non-local offset.
+
+    Copy-move forgery clones a region within the same image. Tiles are
+    bucketed by a coarse (mean, std, low-frequency DCT) key, then each
+    candidate pair is *verified* by mean absolute difference on a
+    box-blurred tile — the bucket alone collides on noisy content, and
+    verification happens on smoothed pixels because a clone whose offset
+    is not a multiple of the sampling stride lands up to a few pixels
+    off-grid, which pixel-exact comparison would miss on textured content.
+    Rotation/scale-invariant clones are out of scope.
+
+    Returns (duplicated_ratio, detail) — the fraction of tiles participating
+    in a verified non-local duplicate.
+    """
+    import numpy as np
+
+    image = np.asarray(gray, dtype=np.float64)
+    height, width = image.shape
+    if height < block * 3 or width < block * 3:
+        return 0.0, "이미지가 작아 copy-move 분석을 건너뜁니다."
+    # Box-blur once so sub-stride offsets (a clone at a non-multiple-of-
+    # stride shift) still verify on smoothed content.
+    pad = np.pad(image, 1, mode="edge")
+    blurred = (
+        pad[:-2, :-2] + pad[:-2, 1:-1] + pad[:-2, 2:]
+        + pad[1:-1, :-2] + pad[1:-1, 1:-1] + pad[1:-1, 2:]
+        + pad[2:, :-2] + pad[2:, 1:-1] + pad[2:, 2:]
+    ) / 9.0
+    basis = _dct_basis(8)
+    fingerprints: dict[tuple, list[tuple[int, int]]] = {}
+    total = 0
+    for y in range(0, height - block + 1, stride):
+        for x in range(0, width - block + 1, stride):
+            tile = blurred[y : y + block, x : x + block]
+            # Flat tiles carry no clone evidence — a uniform sky or wall
+            # matches everywhere, so exclude them (clones OF flat regions
+            # are undetectable anyway; an honest coverage boundary).
+            if tile.std() < 6.0:
+                total += 1
+                continue
+            sub = tile[:8, :8]
+            coeffs = basis.T @ sub @ basis
+            key = (
+                int(round(tile.mean() / 8.0)),
+                int(round(tile.std() / 8.0)),
+                int(round(coeffs[0, 1] / 16.0)),
+                int(round(coeffs[1, 0] / 16.0)),
+                int(round(coeffs[1, 1] / 16.0)),
+            )
+            fingerprints.setdefault(key, []).append((y, x))
+            total += 1
+    # A genuine clone copies a connected region at ONE displacement, so its
+    # verified pairs pile onto a single offset vector AND stay spatially
+    # compact (two localized areas). Repetitive textures match too, but
+    # their duplicates spread across the whole image — track tiles per
+    # offset so both tests can apply.
+    offset_tiles: dict[tuple[int, int], set[tuple[int, int]]] = {}
+    for positions in fingerprints.values():
+        if len(positions) < 2 or len(positions) > max(8, int(total * 0.05)):
+            continue
+        for i, (y1, x1) in enumerate(positions):
+            for y2, x2 in positions[i + 1 :]:
+                dy, dx = y2 - y1, x2 - x1
+                if abs(dy) < min_offset and abs(dx) < min_offset:
+                    continue
+                tile_a = blurred[y1 : y1 + block, x1 : x1 + block]
+                tile_b = blurred[y2 : y2 + block, x2 : x2 + block]
+                if float(np.abs(tile_a - tile_b).mean()) < mad_threshold:
+                    bucket = offset_tiles.setdefault((dy, dx), set())
+                    bucket.add((y1, x1))
+                    bucket.add((y2, x2))
+    # Score every offset, not just the most frequent: an image-wide texture
+    # family can out-pair a real clone, so pick the strongest offset that
+    # ALSO stays spatially compact (<60% of the frame — the texture
+    # family's tiles spread everywhere and fail this test).
+    top_pairs = 0
+    top_coverage = 1.0
+    for tiles in offset_tiles.values():
+        pairs = len(tiles) // 2
+        if pairs < 6 or pairs <= top_pairs:
+            continue
+        cell = 8
+        cells: set[tuple[int, int]] = set()
+        for ty, tx in tiles:
+            for cy in range(ty // cell, (ty + block) // cell):
+                for cx in range(tx // cell, (tx + block) // cell):
+                    cells.add((cy, cx))
+        coverage = len(cells) * cell * cell / float(height * width)
+        if coverage < 0.6:
+            top_pairs, top_coverage = pairs, coverage
+    ratio = top_pairs / max(total, 1) if top_pairs >= 6 else 0.0
+    detail = (
+        f"copy-move 후보: 단일 오프셋에서 {top_pairs}쌍의 검증된 타일 중복 "
+        f"(이미지의 {top_coverage:.0%} 영역에 국한)이 관측됩니다."
+        if ratio > 0
+        else "비국소 중복 타일이 관측되지 않았습니다."
+    )
+    return ratio, detail

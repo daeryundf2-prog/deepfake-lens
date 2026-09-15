@@ -27,6 +27,7 @@ from .video import extract_video_frames, write_video_frame_plan
 from .video_analysis import analyze_video_temporal, VideoTemporalAnalysis
 from .inpaint import analyze_inpainting, InpaintAnalysis
 from .text_advanced import analyze_text_advanced, TextAdvancedAnalysis
+from .watermark import detect_kgw_watermark
 from .c2pa import analyze_metadata_forensic, MetadataForensicAnalysis
 from .classifier import classify_metadata, classify_text_content, ClassificationResult as ToolClassificationResult
 from .multimodal import analyze_av_sync, analyze_multimodal, MultimodalAnalysis
@@ -46,7 +47,7 @@ from .enhanced_forensics import analyze_forensic
 from .webapp import run_server
 
 
-COMMANDS = {"scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "inpaint", "text-advanced", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
+COMMANDS = {"scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
 
 DEFAULT_ENGINE_PROFILE = "models/aide-runtime.json"
 DEFAULT_AUDIO_ENGINE_PROFILE = "models/aasist-runtime.json"
@@ -274,6 +275,18 @@ def main(argv: list[str] | None = None) -> int:
     text_advanced_parser.add_argument("file", type=Path, help="text file to analyze")
     text_advanced_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     text_advanced_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    compare_parser = subparsers.add_parser("compare", help="compare two files for same-speaker or same-author likelihood")
+    compare_parser.add_argument("file_a", type=Path, help="first file (audio pair or text/document pair)")
+    compare_parser.add_argument("file_b", type=Path, help="second file")
+    compare_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+
+    watermark_parser = subparsers.add_parser("watermark", help="test text for a KGW watermark under a known secret")
+    watermark_parser.add_argument("file", type=Path, help="text/document file to test")
+    watermark_parser.add_argument("--secret", required=True, help="green-list secret used at generation time")
+    watermark_parser.add_argument("--tokenizer", default="Qwen/Qwen2.5-0.5B", help="HF tokenizer model or local path")
+    watermark_parser.add_argument("--gamma", type=float, default=0.25, help="green-list fraction used at generation")
+    watermark_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
 
     forensic_parser = subparsers.add_parser("forensic", help="analyze metadata for C2PA, SynthID, and provenance signals")
     forensic_parser.add_argument("file", type=Path, help="file to analyze")
@@ -668,6 +681,31 @@ def main(argv: list[str] | None = None) -> int:
                 print("Signals:")
                 for signal in analysis.signals:
                     print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
+        return 0
+    if args.command == "compare":
+        from .core import compare_files
+        result = compare_files(args.file_a, args.file_b)
+        if args.format == "json":
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            if "error" in result:
+                print(f"Error: {result['error']}")
+                return 1
+            print(f"Kind: {result['kind']}")
+            print(f"Score: {result['score']} ({result['band']})")
+            print(f"Verdict: {result['verdict']}")
+        return 0
+    if args.command == "watermark":
+        text = _file_text(args.file)
+        if text is None:
+            print(json.dumps({"error": "텍스트 추출 불가 — 지원되지 않는 형식입니다."}, ensure_ascii=False))
+            return 1
+        result = detect_kgw_watermark(text, secret=args.secret, tokenizer_model=args.tokenizer, gamma=args.gamma)
+        if args.format == "json":
+            print(json.dumps(result.to_json(), ensure_ascii=False, indent=2))
+        else:
+            print(f"Score: {result.score} — {result.verdict}")
+            print(f"z={result.z_score}, green={result.green_fraction}, tokens={result.token_count}")
         return 0
     if args.command == "forensic":
         analysis = analyze_metadata_forensic(args.file)
@@ -1093,6 +1131,23 @@ def main(argv: list[str] | None = None) -> int:
             print()
             print(f"힌트: '{args.folder}'의 직접 자식에는 파일이 없고 하위 폴더가 있습니다. --recursive 를 추가해 보세요.")
     return 0
+
+
+def _file_text(path: Path) -> str | None:
+    """Extract text for compare/watermark: plain text or document pipeline."""
+    from .core import SUPPORTED_TEXT_EXTENSIONS, _read_prefix
+    from .documents import SUPPORTED_DOCUMENT_EXTENSIONS, extract_document_text
+
+    extension = path.suffix.lower()
+    try:
+        if extension in SUPPORTED_DOCUMENT_EXTENSIONS:
+            text, _ = extract_document_text(path)
+            return text or None
+        if extension in SUPPORTED_TEXT_EXTENSIONS:
+            return _read_prefix(path, 4 * 1024 * 1024).decode("utf-8", errors="replace")
+    except OSError:
+        return None
+    return None
 
 
 def _write_json_out(path: Path, payload: str) -> None:

@@ -497,3 +497,40 @@ class ApiServiceContractTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ComparePayloadTest(unittest.TestCase):
+    """POST /api/compare pairs two uploaded files by kind."""
+
+    def _two_files(self, a_name: str, a_data: bytes, b_name: str, b_data: bytes) -> tuple[str, bytes]:
+        boundary = "----dflcmpboundary"
+        def part(name: str, data: bytes) -> bytes:
+            return (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="file"; filename="{name}"\r\n'
+                "Content-Type: application/octet-stream\r\n\r\n"
+            ).encode() + data + b"\r\n"
+        body = part(a_name, a_data) + part(b_name, b_data) + f"--{boundary}--\r\n".encode()
+        return f"multipart/form-data; boundary={boundary}", body
+
+    def test_text_pair_returns_stylometry(self) -> None:
+        from deepfake_lens.webapp import _compare_payload
+
+        text = "인공지능 기술은 빠르게 발전하고 있으며 다양한 산업에 적용된다. 또한 윤리 문제가 함께 논의된다. " * 8
+        content_type, body = self._two_files("a.txt", text.encode(), "b.txt", text.encode())
+        result = _compare_payload(content_type, body)
+        self.assertEqual(result.get("kind"), "stylometry")
+        self.assertIn("score", result)
+
+    def test_single_file_rejected(self) -> None:
+        from deepfake_lens.webapp import _compare_payload
+
+        boundary = "----dflcmpboundary"
+        body = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="file"; filename="a.txt"\r\n'
+            "Content-Type: application/octet-stream\r\n\r\nhello\r\n"
+            f"--{boundary}--\r\n"
+        ).encode()
+        result = _compare_payload(f"multipart/form-data; boundary={boundary}", body)
+        self.assertIn("error", result)

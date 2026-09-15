@@ -52,6 +52,7 @@ JSON envelope `{"status": "success", "data": {...}}` or an HTTP error with
 | POST | `/api/analyze/forensic` | `file_path` | `MetadataForensic.to_json()` (C2PA/provenance) |
 | POST | `/api/classify` | `file_path` | `Classification.to_json()` — metadata/content classification; reads at most 64 MiB |
 | POST | `/api/multimodal` | `image_score`, `text_score`, `audio_score`, `video_score` (ints, optional) | `MultimodalAnalysis.to_json()` — scalar fusion of supplied scores |
+| POST | `/api/compare` | `file_path_a` + `file_path_b` | Two-file comparison — same-speaker distance (audio pairs) or same-author stylometry (text/document pairs) |
 | POST | `/api/check` | `file_path` **or** `text` | Unified check-all: core scan + every `models/` member that fits the modality + C2PA/forensic + text fingerprint probes in one `{mode, item, advanced?, forensic?}` payload |
 
 `file_path` is a path **on the server's filesystem** — there is no upload
@@ -70,7 +71,8 @@ JSON API under `/api/` (GET plus `POST /api/feedback`, `/api/report`,
 | `/api/heatmap` | `path`, `root` | PNG bytes; 403 unless `path` is a `.png` inside `root`, 404 if missing |
 | `/api/stats` | — | `{"status", "version", "modules"}` |
 | POST `/api/analyze-upload` | multipart file body (≤ `MAX_UPLOAD_BYTES`) | upload-analysis payload |
-| POST `/api/check` | JSON `{"text": "..."}` **or** one multipart file | Unified check-all: full scan + all `models/` engine members + forensic + text probes → `{mode, item, advanced?, forensic?}` |
+| POST `/api/compare` | multipart with two files | Two-file comparison — speaker distance (audio pair) or stylometry (text pair) |
+| POST `/api/check` | JSON `{"text": "...", "watermark_secret": "...", "watermark_gamma": 0.25}` **or** one multipart file | Unified check-all: full scan + all `models/` engine members + forensic + text probes → `{mode, item, advanced?, forensic?}` |
 | POST `/api/report` | scan JSON body (≤ 64 MiB) | rendered standalone HTML report |
 | POST `/api/feedback` | feedback JSON body (≤ 1 MiB) | appends to `~/.deepfake-lens/feedback.jsonl` |
 
