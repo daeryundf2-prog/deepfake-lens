@@ -424,3 +424,163 @@ def copy_move_score(gray, *, block: int = 16, stride: int = 4, min_offset: int =
         else "비국소 중복 타일이 관측되지 않았습니다."
     )
     return ratio, detail
+
+
+def copy_move_keypoint_score(gray, *, min_matches: int = 4, min_inliers: int = 2) -> tuple[float, str]:
+    """Rotation/scale-robust copy-move detection via keypoint matching.
+
+    The block-matching detector only catches unrotated, unscaled clones.
+    This keypoint path (SIFT → ORB fallback) matches each descriptor against
+    the rest of the image, clusters matches by displacement to exclude
+    self/neighbour matches, then verifies each cluster with a partial-affine
+    RANSAC fit — a genuine rotated/scaled clone yields many matches under
+    ONE geometric transform; incidental texture matches fail the fit.
+
+    Returns (score 0-1, detail) where score is the inlier fraction of the
+    best transform — the fraction of that cluster's matches consistent
+    with a single geometric copy.
+    """
+    import cv2
+    import numpy as np
+
+    image = np.asarray(gray, dtype=np.float64)
+    uint8 = np.clip(image, 0, 255).astype(np.uint8)
+    detector = cv2.SIFT_create() if hasattr(cv2, "SIFT_create") else cv2.ORB_create(nfeatures=1500)
+    keypoints, descriptors = detector.detectAndCompute(uint8, None)
+    if descriptors is None or len(keypoints) < 12:
+        return 0.0, "키포인트 부족 — copy-move 키포인트 분석을 건너뜁니다."
+
+    norm = cv2.NORM_L2 if descriptors.dtype != np.uint8 else cv2.NORM_HAMMING
+    matcher = cv2.BFMatcher(norm)
+    knn = matcher.knnMatch(descriptors, descriptors, k=3)
+    pts = np.float32([kp.pt for kp in keypoints])
+    # Copy-move clones violate Lowe's ratio test (the second-best match is
+    # the clone itself, distance ~0), so use an adaptive absolute threshold:
+    # clone matches sit at near-zero descriptor distance while incidental
+    # self-matches cluster around the median.
+    candidates: list[tuple[float, int, int]] = []
+    for group in knn:
+        others = [m for m in group if m.queryIdx != m.trainIdx]
+        if not others:
+            continue
+        m1 = others[0]
+        if abs(m1.queryIdx - m1.trainIdx) < 3:
+            continue  # neighbouring keypoints trivially match
+        candidates.append((float(m1.distance), m1.queryIdx, m1.trainIdx))
+    if not candidates:
+        return 0.0, "교차 키포인트 매칭이 없습니다 — 복제 후보가 없습니다."
+    median_dist = float(np.median([d for d, _, _ in candidates]))
+    cap = max(1.0, 0.5 * median_dist)
+    good = sorted({(q, t) for d, q, t in candidates if d <= cap})
+    if len(good) < min_matches:
+        return 0.0, f"교차 키포인트 매칭 {len(good)}개 — 복제 후보가 없습니다."
+
+    # A rotated/scaled clone does NOT share one displacement — it shares
+    # one similarity transform. Fit partial-affine RANSAC over all
+    # non-local matches iteratively: each coherent clone yields a transform
+    # with many inliers, incidental matches scatter and produce none.
+    remaining = [
+        (q, t) for q, t in good
+        if abs(float(pts[t][0] - pts[q][0])) >= 16 or abs(float(pts[t][1] - pts[q][1])) >= 16
+    ]
+    # With few matches RANSAC can latch onto a degenerate transform, so
+    # vote instead: every pair of matches proposes one similarity
+    # transform. Mirror matches (clone A→B plus B→A) mix into spurious
+    # hypotheses, so hypotheses are evaluated in vote order and each must
+    # also survive photometric verification — the first that does wins.
+    src_all = np.float32([pts[q] for q, _ in remaining])
+    dst_all = np.float32([pts[t] for _, t in remaining])
+    n = len(remaining)
+    hypotheses: list[tuple[int, np.ndarray, np.ndarray]] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            v1 = src_all[j] - src_all[i]
+            v2 = dst_all[j] - dst_all[i]
+            len1 = float(np.hypot(*v1))
+            if len1 < 6:
+                continue
+            scale = float(np.hypot(*v2)) / len1
+            if not 0.2 <= scale <= 5.0:
+                continue
+            cos_d = float(np.dot(v1, v2)) / (len1 * np.hypot(*v2))
+            sin_d = float(v1[0] * v2[1] - v1[1] * v2[0]) / (len1 * np.hypot(*v2))
+            a, b = scale * cos_d, scale * sin_d
+            tx = dst_all[i][0] - (a * src_all[i][0] - b * src_all[i][1])
+            ty = dst_all[i][1] - (b * src_all[i][0] + a * src_all[i][1])
+            pred = np.stack(
+                [a * src_all[:, 0] - b * src_all[:, 1] + tx,
+                 b * src_all[:, 0] + a * src_all[:, 1] + ty], axis=1
+            )
+            inliers = np.hypot(*(pred - dst_all).T) <= 4.0
+            count = int(inliers.sum())
+            # Two consistent matches already define the transform exactly;
+            # the photometric check below is what rejects accidents, so
+            # keep every hypothesis with at least a pair of supporters.
+            if count >= 2:
+                hypotheses.append(
+                    (count, np.array([[a, -b, tx], [b, a, ty]]), src_all[inliers])
+                )
+    best_count = 0
+    hypotheses.sort(key=lambda h: -h[0])
+    tested: list[np.ndarray] = []
+    for count, matrix, src_inliers in hypotheses[:40]:
+        if any(np.allclose(matrix, prev, atol=2.0) for prev in tested):
+            continue
+        tested.append(matrix)
+        if len(tested) > 12:
+            break
+        spread = float(src_inliers.std(axis=0).max())
+        if spread > 0.45 * max(uint8.shape):
+            continue
+        if _clone_patch_matches(uint8, matrix, src_inliers):
+            best_count = count
+            break
+    if best_count < min_inliers:
+        return 0.0, f"기하 검증을 통과한 매칭 클러스터가 없습니다(최다 {best_count}개 인라이어)."
+    score = min(1.0, best_count / 40.0)
+    detail = (
+        f"copy-move(키포인트) 후보: {best_count}개 매칭이 단일 유사 변환에 "
+        f"수렴합니다 — 회전/스케일 복제 후보."
+    )
+    return score, detail
+
+
+def _clone_patch_matches(image, matrix, src_points, *, pad: int = 8) -> bool:
+    """Photometric verification of a fitted clone transform.
+
+    Warps the source keypoints' bounding region by the similarity transform
+    and compares it against the destination pixels. A genuine copy-move
+    clone reproduces the patch nearly exactly (mean absolute difference
+    low); spurious geometric fits land on unrelated pixels.
+    """
+    import cv2
+    import numpy as np
+
+    x0, y0 = np.floor(src_points.min(axis=0)).astype(int) - pad
+    x1, y1 = np.ceil(src_points.max(axis=0)).astype(int) + pad
+    h, w = image.shape
+    x0, y0 = max(x0, 0), max(y0, 0)
+    x1, y1 = min(x1, w), min(y1, h)
+    if x1 - x0 < 12 or y1 - y0 < 12:
+        return False
+    # Reject glyph-scale repeats (logos, characters, UI icons): a forensic
+    # clone region should cover a meaningful fraction of the frame.
+    if (x1 - x0) * (y1 - y0) < 0.005 * w * h:
+        return False
+    # matrix maps src points→dst points; warpAffine takes the same
+    # forward src→dst transform for the image, placing the source patch
+    # at its destination for pixel comparison.
+    warped = cv2.warpAffine(image, matrix.astype(np.float64), (w, h))
+    dst_pts = cv2.transform(src_points.reshape(-1, 1, 2), matrix).reshape(-1, 2)
+    dx0, dy0 = np.floor(dst_pts.min(axis=0)).astype(int) - pad
+    dx1, dy1 = np.ceil(dst_pts.max(axis=0)).astype(int) + pad
+    dx0, dy0 = max(dx0, 0), max(dy0, 0)
+    dx1, dy1 = min(dx1, w), min(dy1, h)
+    if dx1 - dx0 < 12 or dy1 - dy0 < 12:
+        return False
+    region_warp = warped[dy0:dy1, dx0:dx1]
+    region_real = image[dy0:dy1, dx0:dx1]
+    mad = float(np.abs(region_warp.astype(float) - region_real.astype(float)).mean())
+    # Rotated/scaled clones carry interpolation error, so the bound is
+    # relative: a clone's error is far below the region's own contrast.
+    return mad < max(12.0, 0.35 * float(region_real.std()))

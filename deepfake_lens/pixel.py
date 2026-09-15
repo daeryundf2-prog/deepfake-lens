@@ -426,11 +426,20 @@ def _frequency_forensics_expert(raster: PixelRaster) -> PixelExpertResult:
         dtype=np.float64,
     )
     features = frequency_features(gray)
-    from .frequency import copy_move_score, ela_metrics, jpeg_double_compression_score
+    from .frequency import (
+        copy_move_keypoint_score,
+        copy_move_score,
+        ela_metrics,
+        jpeg_double_compression_score,
+    )
 
     djc_strength, djc_detail = jpeg_double_compression_score(gray)
     ela_global, ela_region, ela_detail = ela_metrics(gray)
     cm_ratio, cm_detail = copy_move_score(gray)
+    try:
+        cmk_ratio, cmk_detail = copy_move_keypoint_score(gray)
+    except ImportError:
+        cmk_ratio, cmk_detail = 0.0, "cv2 미설치 — 회전/스케일 copy-move 분석을 건너뜁니다."
 
     score = 0
     detail = "방사형 스펙트럼/스파이크/NPR/DCT 측정에서 두드러진 생성 흔적을 찾지 못했습니다."
@@ -457,6 +466,11 @@ def _frequency_forensics_expert(raster: PixelRaster) -> PixelExpertResult:
         detail += " " + cm_detail
     elif cm_ratio >= 0.05:
         detail += " " + cm_detail + " (약한 신호 — 확인 필요.)"
+    if cmk_ratio >= 0.12:
+        score = max(score, 55)
+        detail += " " + cmk_detail
+    elif cmk_ratio >= 0.05:
+        detail += " " + cmk_detail + " (약한 신호 — 확인 필요.)"
     return PixelExpertResult(
         "frequency_forensics",
         "frequency",

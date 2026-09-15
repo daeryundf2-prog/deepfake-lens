@@ -217,3 +217,56 @@ class CompareFilesTest(unittest.TestCase):
 
         result = compare_files(Path("a.wav"), Path("b.txt"))
         self.assertIn("error", result)
+
+
+class CopyMoveKeypointTest(unittest.TestCase):
+    """SIFT/ORB + transform-voting copy-move (rotation/scale robust)."""
+
+    def _texture(self, seed: int = 1, size: int = 300):
+        import cv2
+        import numpy as np
+
+        rng = np.random.default_rng(seed)
+        image = rng.normal(0, 1, (size, size))
+        for k in (3, 8, 20):
+            image = image + cv2.GaussianBlur(
+                rng.normal(0, 1, (size, size)).astype(np.float32), (0, 0), k
+            )
+        return (image - image.min()) / (image.max() - image.min()) * 255
+
+    def test_scaled_clone_flagged(self) -> None:
+        import cv2
+
+        from deepfake_lens.frequency import copy_move_keypoint_score
+
+        base = self._texture()
+        forged = base.copy()
+        forged[180:264, 180:264] = cv2.resize(
+            forged[30:100, 30:100].astype("uint8"), (84, 84)
+        )
+        ratio, detail = copy_move_keypoint_score(forged)
+        self.assertGreaterEqual(ratio, 0.03)
+        self.assertIn("copy-move", detail)
+
+    def test_translated_clone_flagged(self) -> None:
+        from deepfake_lens.frequency import copy_move_keypoint_score
+
+        base = self._texture()
+        forged = base.copy()
+        forged[180:250, 180:250] = forged[40:110, 40:110]
+        ratio, _ = copy_move_keypoint_score(forged)
+        self.assertGreaterEqual(ratio, 0.03)
+
+    def test_clean_texture_not_flagged(self) -> None:
+        from deepfake_lens.frequency import copy_move_keypoint_score
+
+        self.assertEqual(copy_move_keypoint_score(self._texture(2))[0], 0.0)
+
+    def test_random_noise_not_flagged(self) -> None:
+        import numpy as np
+
+        from deepfake_lens.frequency import copy_move_keypoint_score
+
+        rng = np.random.default_rng(0)
+        ratio, _ = copy_move_keypoint_score(rng.normal(128, 30, (300, 300)))
+        self.assertEqual(ratio, 0.0)
