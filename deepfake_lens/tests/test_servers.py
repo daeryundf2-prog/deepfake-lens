@@ -534,3 +534,39 @@ class ComparePayloadTest(unittest.TestCase):
         ).encode()
         result = _compare_payload(f"multipart/form-data; boundary={boundary}", body)
         self.assertIn("error", result)
+
+
+class PreviewPayloadTest(unittest.TestCase):
+    """GET /api/preview serves media under the scanned root only."""
+
+    def test_media_served_within_root(self) -> None:
+        import tempfile
+        from deepfake_lens.webapp import _preview_payload
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "a.png"
+            p.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+            status, body, _, mime = _preview_payload(f"path={p}&root={d}")
+            self.assertEqual(status, 200)
+            self.assertEqual(mime, "image/png")
+            self.assertEqual(body[:4], b"\x89PNG")
+
+    def test_outside_root_forbidden(self) -> None:
+        import tempfile
+        from deepfake_lens.webapp import _preview_payload
+
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as other:
+            p = Path(other) / "a.png"
+            p.write_bytes(b"x")
+            status, _, msg, _ = _preview_payload(f"path={p}&root={d}")
+            self.assertEqual(status, 403)
+
+    def test_non_media_forbidden(self) -> None:
+        import tempfile
+        from deepfake_lens.webapp import _preview_payload
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "a.txt"
+            p.write_text("hi")
+            status, _, _, _ = _preview_payload(f"path={p}&root={d}")
+            self.assertEqual(status, 403)

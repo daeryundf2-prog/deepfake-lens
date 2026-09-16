@@ -156,6 +156,9 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
             if parsed.path == "/api/heatmap":
                 self._send_png(_heatmap_payload(parsed.query))
                 return
+            if parsed.path == "/api/preview":
+                self._send_file(_preview_payload(parsed.query))
+                return
             if parsed.path == "/api/analyze-file":
                 self._send_json(_analyze_file_payload(parsed.query))
                 return
@@ -307,6 +310,17 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
             self.send_response(status)
             self.send_header("Content-Type", "image/png" if status == 200 else "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            if message:
+                self.send_header("X-Deepfake-Lens-Error", message)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _send_file(self, payload: tuple[int, bytes, str, str]) -> None:
+            status, body, message, mime = payload
+            self.send_response(status)
+            self.send_header("Content-Type", mime if status == 200 else "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("X-Content-Type-Options", "nosniff")
             if message:
                 self.send_header("X-Deepfake-Lens-Error", message)
             self.end_headers()
@@ -554,6 +568,47 @@ def _is_within(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+# Media the result viewer may inline-preview. Deliberately excludes
+# HTML/SVG and documents — preview is for media inspection, never for
+# rendering active content inside the app.
+_PREVIEW_MIME = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp",
+    ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+    ".m4v": "video/mp4",
+    ".wav": "audio/wav", ".mp3": "audio/mpeg", ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg", ".flac": "audio/flac", ".aac": "audio/aac",
+    ".opus": "audio/opus",
+}
+MAX_PREVIEW_BYTES = 128 * 1024 * 1024
+
+
+def _preview_payload(query: str) -> tuple[int, bytes, str, str]:
+    """Serve a scanned media file for inline preview in the result viewer.
+
+    Same trust model as /api/heatmap: the file must live under the
+    scanned root supplied by the caller, must be a known media type, and
+    is served with nosniff so it can only render as media.
+    """
+    params = parse_qs(query)
+    path_value = params.get("path", [""])[0]
+    root_value = params.get("root", [""])[0]
+    if not path_value or not root_value:
+        return 400, b"missing path or root", "missing", ""
+    path = Path(path_value).expanduser().resolve()
+    root = Path(root_value).expanduser().resolve()
+    mime = _PREVIEW_MIME.get(path.suffix.lower())
+    if mime is None or not _is_within(path, root):
+        return 403, b"forbidden", "forbidden", ""
+    try:
+        if path.stat().st_size > MAX_PREVIEW_BYTES:
+            return 413, b"too large", "too-large", ""
+        data = path.read_bytes()
+    except OSError:
+        return 404, b"not found", "not-found", ""
+    return 200, data, "", mime
 
 
 def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str, object]:

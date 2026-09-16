@@ -224,6 +224,12 @@
             padding: 8px 10px; border-radius: 8px; margin-top: 10px;
         }
         .heatmap-img { max-width: 100%; border-radius: 10px; margin-top: 8px; border: 1px solid var(--line); }
+        .preview-media { max-width: 100%; max-height: 320px; border-radius: 10px; border: 1px solid var(--line); display: block; margin-top: 8px; }
+        audio.preview-media { width: 100%; height: 40px; max-height: 40px; }
+        .slot .pv { max-width: 100%; max-height: 90px; border-radius: 8px; margin-top: 8px; }
+        .qc-preview { margin-top: 10px; }
+        .sig-strong > .dt { color: var(--red); }
+        .sig-strong li { font-weight: 600; }
         .fb-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
         .fb-status { font-size: 12px; color: var(--muted); }
 
@@ -348,6 +354,7 @@
                     <input type="file" id="qc-file" hidden>
                     <input class="field" id="qc-wm" style="flex:0 1 220px;min-width:150px;" placeholder="워터마크 키 (선택)" aria-label="워터마크 키">
                 </div>
+                <div class="qc-preview" id="qc-preview"></div>
                 <div class="elapsed" id="qc-status" aria-live="polite"></div>
                 <div class="qc-out" id="qc-out" aria-live="polite"></div>
             </div>
@@ -728,13 +735,26 @@
             const parts = [];
             if (item.error) parts.push(`<div class="verdict">분석 실패: ${escapeHtml(item.error)}</div>`);
             if (r.verdict) parts.push(`<div class="verdict">${escapeHtml(r.verdict)}</div>`);
+            // Inline media preview for scanned files under the scan root.
+            if (lastScanRoot && item.path && !item.path.includes('::') &&
+                !/^[a-zA-Z]:[\\/]|^\//.test(item.path) &&
+                (item.kind === 'image' || item.kind === 'video' || item.kind === 'audio')) {
+                const abs = lastScanRoot.replace(/[\\/]+$/, '') + '/' + item.path;
+                parts.push(`<div class="dgroup"><div class="dt">미리보기</div><div class="pv-slot" data-pv="${escapeHtml(abs)}" data-kind="${escapeHtml(item.kind)}"><span class="note">로딩 중…</span></div></div>`);
+            }
             const ma = r.model_analysis;
             if (ma) {
                 const members = (ma.models || []).map(m =>
                     `<li>${escapeHtml(m.model || 'model')} — ${m.score != null ? m.score : 'n/a'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
                 parts.push(`<div class="dgroup"><div class="dt">뉴럴 모델 — 점수 ${ma.score != null ? ma.score : 'n/a'}</div>${members ? `<ul>${members}</ul>` : `<div class="note">${escapeHtml(ma.detail || '')}</div>`}</div>`);
             }
-            parts.push(listItems('신호', r.signals));
+            // Signals grouped by strength so the examiner sees the drivers
+            // first, not a flat wall of notes.
+            const sigs = (r.signals || []);
+            const strong = sigs.filter(s => (s.weight || 0) >= 15);
+            const weak = sigs.filter(s => (s.weight || 0) < 15);
+            parts.push(listItems('주요 근거', strong, 'sig-strong'));
+            parts.push(listItems('참고 신호', weak));
             parts.push(listItems('한계', r.limitations, 'lim'));
             parts.push(listItems('다음 확인', r.next_checks));
             const sg = r.source_guess;
@@ -748,6 +768,26 @@
             parts.push(`<div class="band-advice">${escapeHtml(bandAdvice(r.band || 'unknown'))}</div>`);
             parts.push(`<div class="caveat">이 결과는 스크리닝 우선순위 신호입니다. 합성 여부의 확정 판정이 아니며, 원본 확보·맥락 검토가 필요합니다.</div>`);
             return parts.join('');
+        }
+
+        async function loadPreview(slot) {
+            const abs = slot.dataset.pv, kind = slot.dataset.kind;
+            try {
+                const res = await apiFetch('/api/preview?path=' + encodeURIComponent(abs) + '&root=' + encodeURIComponent(lastScanRoot));
+                if (!res.ok) { slot.innerHTML = `<span class="note">미리보기 불가 (${res.status})</span>`; return; }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const tag = kind === 'image' ? 'img' : kind === 'video' ? 'video' : 'audio';
+                const el = document.createElement(tag);
+                el.className = 'preview-media';
+                if (tag !== 'img') el.controls = true;
+                if (tag === 'img') el.alt = '분석 대상 미리보기';
+                el.src = url;
+                slot.innerHTML = '';
+                slot.appendChild(el);
+            } catch (e) {
+                slot.innerHTML = `<span class="note">미리보기 실패: ${escapeHtml(e.message)}</span>`;
+            }
         }
 
         async function loadHeatmap(slot) {
@@ -817,6 +857,7 @@
                     }));
                     detail.appendChild(fb);
                     detail.querySelectorAll('.hm-slot').forEach(loadHeatmap);
+                    detail.querySelectorAll('.pv-slot').forEach(loadPreview);
                 }
             };
             card.querySelector('.res-main').addEventListener('click', toggle);
@@ -949,11 +990,31 @@
             if (wm) body.watermark_secret = wm;
             runQuickCheck({ method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
         });
+        function mediaTagFor(file, cls) {
+            const ext = (file.name.split('.').pop() || '').toLowerCase();
+            const img = ['png','jpg','jpeg','webp','gif','bmp'];
+            const vid = ['mp4','mov','m4v','webm','mkv','avi'];
+            const aud = ['wav','mp3','m4a','ogg','flac','aac','opus'];
+            const tag = img.includes(ext) ? 'img' : vid.includes(ext) ? 'video' : aud.includes(ext) ? 'audio' : null;
+            if (!tag) return null;
+            const el = document.createElement(tag);
+            el.className = cls;
+            if (tag !== 'img') el.controls = true;
+            el.src = URL.createObjectURL(file);
+            return el;
+        }
+
         $('qc-file-btn').addEventListener('click', () => $('qc-file').click());
         $('qc-file').addEventListener('change', e => {
             const file = e.target.files[0];
             e.target.value = '';
             if (!file) return;
+            // Show what is being analyzed so the examiner can eyeball the
+            // file against the reported signals.
+            const pv = $('qc-preview');
+            pv.innerHTML = '';
+            const el = mediaTagFor(file, 'preview-media');
+            if (el) pv.appendChild(el);
             const form = new FormData();
             form.append('file', file, file.name);
             runQuickCheck({ method: 'POST', body: form });
@@ -1055,6 +1116,10 @@
                 cmpFiles[key] = f;
                 slot.classList.add('filled');
                 slot.querySelector('.sn').textContent = f.name;
+                const old = slot.querySelector('.pv');
+                if (old) old.remove();
+                const pv = mediaTagFor(f, 'pv');
+                if (pv) { pv.controls = false; slot.appendChild(pv); }
                 $('cmp-btn').disabled = !(cmpFiles.a && cmpFiles.b);
             });
         }
