@@ -16,8 +16,8 @@ crash.
 | `aasist-runtime.json` | AASIST (Interspeech 2022) audio anti-spoofing | `aasist` (torch reimplementation in `scripts/run_aasist.py`) | wired — run `scripts/fetch_aasist.py` |
 | `openai-detector-runtime.json` | OpenAI GPT-2 output detector (RoBERTa-base) | `hf-text-classifier` (torch + transformers) | wired — fetched from HF hub on first use |
 | `fakespot-detector-runtime.json` | Fakespot AI text detector (RoBERTa-base, modern-LLM training data) | `hf-text-classifier` (torch + transformers) | wired — fetched from HF hub on first use |
-| `qwen-ppl-runtime.json` | Qwen2.5-0.5B reference-LM perplexity screen (generator-agnostic, multilingual incl. Korean) | `causal-lm-ppl` (torch + transformers) | wired — fetched from HF hub on first use (~1 GB); `hub_model` may point at a local snapshot for offline use |
-| `binoculars-runtime.json` | Binoculars two-LM perplexity-ratio screen (Qwen2.5-0.5B performer / 1.5B observer) | `binoculars` (torch + transformers) | wired — fetched from HF hub on first use (~4.3 GB total); `ensemble_weight` 0.25 pending calibration |
+| `qwen-ppl-runtime.json` | Qwen2.5-0.5B reference-LM perplexity screen (generator-agnostic; anchors are **English-calibrated** — excluded on Korean text) | `causal-lm-ppl` (torch + transformers) | wired — fetched from HF hub on first use (~1 GB); `hub_model` may point at a local snapshot for offline use; `ensemble_weight` 0.25 after measured corpus overlap (human polished prose PPL 8–19 == AI 7–19) |
+| `binoculars-runtime.json` | Binoculars two-LM perplexity-ratio screen (Qwen2.5-0.5B performer / 1.5B observer) | `binoculars` (torch + transformers) | wired — fetched from HF hub on first use (~4.3 GB total); `ensemble_weight` **0.05** — measured 2026-09-16 to score 100 on every polished human sample (tracks register, not AI origin) |
 | `aide-frames-runtime.json` | AIDE per-frame video screen | `video-frames` (cv2 + nested image profile) | wired — needs the AIDE checkpoint + opencv; **frame-level only, not temporal/lip-sync** |
 
 Profiles declare a `modality` (`image`/`audio`/`text`/`video`); a scanned file
@@ -60,6 +60,11 @@ fetched.
   Fetch with `scripts/fetch_facelandmarker.py` or point
   `DEEPFAKE_LENS_FACE_LANDMARKER` at a local copy. Absent → the legacy
   FaceMesh extra or the labelled box-ratio estimate.
+- `syncnet_v2.model` + `sfd_face.pth` — pretrained SyncNet (LRS2) lip-sync
+  model and its S3FD face detector for `lipsync.py`'s `--deep-signals`
+  video layer. Fetch both with `scripts/fetch_syncnet.py` (Oxford VGG
+  hosting, research-only license — do not redistribute). Absent → the
+  zero-asset envelope/mouth-correlation heuristic.
 
 ## Honesty notes
 
