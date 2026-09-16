@@ -345,7 +345,7 @@
                 <div class="drop" id="drop-zone" role="button" tabindex="0" style="margin-top:8px;">
                     <div class="icon">📁</div>
                     <p><b>파일이나 폴더를 드롭</b>하거나 클릭해서 선택</p>
-                    <p>PNG·JPG·WebP·GIF·TXT·MD·PDF·DOCX·HWP·WAV·MP3·M4A·MP4·MOV·MKV 등</p>
+                    <p>PNG·JPG·WebP·GIF·TXT·MD·PDF·DOCX·HWP·WAV·MP3·M4A·MP4·MOV·MKV·ZIP·TAR 등</p>
                 </div>
                 <div class="row" style="margin-top:8px;">
                     <button class="btn" id="dir-picker-btn" type="button">폴더 선택</button>
@@ -506,7 +506,7 @@
             const input = document.createElement('input');
             input.type = 'file';
             input.multiple = true;
-            input.accept = '.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.gif,.txt,.md,.pdf,.docx,.xlsx,.pptx,.hwp,.wav,.mp3,.flac,.ogg,.m4a,.aac,.opus,.mp4,.mov,.m4v,.mkv,.webm,.avi';
+            input.accept = '.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.gif,.txt,.md,.pdf,.docx,.xlsx,.pptx,.hwp,.wav,.mp3,.flac,.ogg,.m4a,.aac,.opus,.mp4,.mov,.m4v,.mkv,.webm,.avi,.zip,.7z,.rar,.tar,.tgz,.gz,.bz2,.xz';
             input.onchange = e => addFiles(Array.from(e.target.files));
             input.click();
         }
@@ -882,6 +882,14 @@
                 if (data.error) {
                     box.className = 'qc-out on';
                     box.innerHTML = `<div class="verdict" style="color:var(--red)">오류: ${escapeHtml(data.error)}</div>`;
+                    return;
+                }
+                if (data.mode === 'files') {
+                    // Archive upload: members are analyzed as their own rows.
+                    box.className = 'qc-out';
+                    box.innerHTML = '';
+                    processResults(data);
+                    toast(`압축 해제 — ${(data.items || []).length}개 파일 분석됨`);
                     return;
                 }
                 renderQuickCheck(data);

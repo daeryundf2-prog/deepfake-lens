@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import tempfile
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
@@ -11,6 +12,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from typing import Iterable
 
+from .archives import archive_format, extract_archive, is_archive
 from .audio import SUPPORTED_AUDIO_EXTENSIONS, AudioAnalysis, analyze_audio
 from .video_analysis import SUPPORTED_VIDEO_EXTENSIONS, VideoTemporalAnalysis, analyze_video_temporal
 from .documents import SUPPORTED_DOCUMENT_EXTENSIONS, extract_document_text
@@ -225,13 +227,122 @@ def scan_directory(
             break
         paths.append(path)
 
-    duplicates = _duplicate_map(paths, root=root, max_file_bytes=max_file_bytes, hash_db_path=hash_db_path) if dedupe or hash_db_path else {}
+    # Archive containers are expanded into member jobs up front: each
+    # member is analyzed like a regular file with an "archive::inner"
+    # display path, and the archive itself gets a container row that
+    # aggregates the worst member band. Temp extraction dirs are removed
+    # in the finally block below.
+    specs: list[tuple[Path, str | None]] = []
+    archive_members: dict[str, list[ScanItem]] = {}
+    archive_meta: dict[str, dict] = {}
+    temp_dirs: list[Path] = []
+    for path in paths:
+        if not is_archive(path):
+            specs.append((path, None))
+            continue
+        rel = _display_path(path, root=root)
+        dest = Path(tempfile.mkdtemp(prefix="dflens-arc-"))
+        temp_dirs.append(dest)
+        extraction = extract_archive(path, dest)
+        archive_meta[rel] = {
+            "path": path, "fmt": archive_format(path),
+            "skipped": extraction.skipped, "warnings": extraction.warnings,
+        }
+        archive_members[rel] = []
+        for member in extraction.members:
+            member_rel = member.relative_to(dest).as_posix()
+            specs.append((member, f"{rel}::{member_rel}"))
+
+    try:
+        return _scan_specs(
+            specs, duplicates_paths=[p for p, d in specs if d is None],
+            archive_members=archive_members, archive_meta=archive_meta, root=root, dedupe=dedupe,
+            max_file_bytes=max_file_bytes, hash_db_path=hash_db_path,
+            text_bytes=text_bytes, metadata_bytes=metadata_bytes,
+            pixel_mode=pixel_mode, pixel_max_side=pixel_max_side,
+            heatmaps=heatmaps, heatmap_dir=heatmap_dir, model_path=model_path,
+            cache_path=cache_path, workers=workers, deep_signals=deep_signals,
+            capped=capped,
+        )
+    finally:
+        for temp_dir in temp_dirs:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def _archive_container_item(
+    rel: str,
+    name: str,
+    path: Path,
+    *,
+    fmt: str | None,
+    members: int,
+    skipped: int,
+    warnings: list[str],
+    member_items: list[ScanItem] | None = None,
+) -> ScanItem:
+    """Container row for an expanded archive; aggregates member bands."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        size = 0
+    worst = RiskBand.UNKNOWN
+    if member_items:
+        order = {RiskBand.LOW: 0, RiskBand.MEDIUM: 1, RiskBand.HIGH: 2}
+        for item in member_items:
+            band = item.result.band if item.result else RiskBand.UNKNOWN
+            if band != RiskBand.UNKNOWN and order.get(band, -1) > order.get(worst, -1):
+                worst = band
+    band = worst if worst != RiskBand.UNKNOWN else RiskBand.LOW
+    score = max((item.result.score for item in member_items or [] if item.result), default=0)
+    signals = [EvidenceSignal("압축 컨테이너", f"{fmt or 'archive'} 형식 — 구성 파일 {members}개 개별 분석" + (f", 스킵 {skipped}개" if skipped else ""), 0)]
+    limitations = list(warnings)
+    limitations.append("컨테이너 행은 구성 파일 결과의 요약입니다. '아카이브::경로' 형태의 개별 결과를 확인하세요.")
+    return ScanItem(
+        rel, name, "archive", "analyzed", size,
+        ClassificationResult(
+            score=score,
+            band=band,
+            band_label=RISK_LABELS.get(band, band.value),
+            verdict=f"압축 해제됨 — 구성 파일 {members}개 분석, {skipped}개 스킵",
+            signals=signals,
+            limitations=limitations,
+            source_guess=SourceGuess.unknown("압축 컨테이너에는 출처 추정이 적용되지 않습니다."),
+            next_checks=["구성 파일 중 고위험 항목부터 검토하세요."],
+        ),
+    )
+
+
+def _scan_specs(
+    specs: list[tuple[Path, str | None]],
+    *,
+    duplicates_paths: list[Path],
+    archive_members: dict[str, list[ScanItem]],
+    archive_meta: dict[str, dict],
+    root: Path,
+    dedupe: bool,
+    max_file_bytes: int | None,
+    hash_db_path: Path | None,
+    text_bytes: int,
+    metadata_bytes: int,
+    pixel_mode: str,
+    pixel_max_side: int,
+    heatmaps: bool,
+    heatmap_dir: Path | None,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
+    cache_path: Path | None,
+    workers: int,
+    deep_signals: bool,
+    capped: bool,
+) -> tuple[BatchScanSummary, list[ScanItem]]:
+    """Analyze (path, display) spec pairs — the inner loop of scan_directory."""
+    duplicates = _duplicate_map(duplicates_paths, root=root, max_file_bytes=max_file_bytes, hash_db_path=hash_db_path) if dedupe or hash_db_path else {}
     cache = _load_scan_cache(cache_path)
     cache_items = cache.setdefault("items", {}) if cache is not None else {}
 
-    def analyze_one(path: Path) -> tuple[ScanItem, str | None, bool]:
+    def analyze_one(spec: tuple[Path, str | None]) -> tuple[ScanItem, str | None, bool]:
+        path, display = spec
         if path in duplicates:
-            display_path = _display_path(path, root=root)
+            display_path = display or _display_path(path, root=root)
             try:
                 size = path.stat().st_size
             except OSError:
@@ -241,42 +352,51 @@ def scan_directory(
             try:
                 size = path.stat().st_size
             except OSError as exc:
-                return ScanItem(_display_path(path, root=root), path.name, "unknown", "failed", 0, error=str(exc)), None, False
+                return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "failed", 0, error=str(exc)), None, False
             if size > max_file_bytes:
-                return ScanItem(_display_path(path, root=root), path.name, "unknown", "skipped", size, error=f"file exceeds --max-file-bytes ({max_file_bytes})"), None, False
-        key = _cache_key(
-            path,
-            root=root,
-            text_bytes=text_bytes,
-            metadata_bytes=metadata_bytes,
-            pixel_mode=pixel_mode,
-            pixel_max_side=pixel_max_side,
-            heatmaps=heatmaps,
-            model_path=model_path,
-            deep_signals=deep_signals,
-        )
-        cached = cache_items.get(key) if isinstance(cache_items, dict) else None
-        if isinstance(cached, dict):
-            return _scan_item_from_json(cached), key, True
+                return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "skipped", size, error=f"file exceeds --max-file-bytes ({max_file_bytes})"), None, False
+        # Archive members live in a temp dir with unstable paths — caching
+        # them would both miss every scan and bloat the cache file.
+        key = None
+        if display is None:
+            key = _cache_key(
+                path,
+                root=root,
+                text_bytes=text_bytes,
+                metadata_bytes=metadata_bytes,
+                pixel_mode=pixel_mode,
+                pixel_max_side=pixel_max_side,
+                heatmaps=heatmaps,
+                model_path=model_path,
+                deep_signals=deep_signals,
+            )
+            cached = cache_items.get(key) if isinstance(cache_items, dict) else None
+            if isinstance(cached, dict):
+                return _scan_item_from_json(cached), key, True
         item = analyze_file(
             path,
             root=root,
+            display=display,
             text_bytes=text_bytes,
             metadata_bytes=metadata_bytes,
             pixel_mode=pixel_mode,
             pixel_max_side=pixel_max_side,
-            heatmaps=heatmaps,
+            # Member heatmaps would land inside the temp extraction dir and
+            # be deleted before the GUI could fetch them.
+            heatmaps=heatmaps and display is None,
             heatmap_dir=heatmap_dir,
             model_path=model_path,
             deep_signals=deep_signals,
         )
+        if display is not None and "::" in display:
+            archive_members.setdefault(display.split("::", 1)[0], []).append(item)
         return item, key, False
 
-    if workers > 1 and len(paths) > 1:
+    if workers > 1 and len(specs) > 1:
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            analyzed = list(executor.map(analyze_one, paths))
+            analyzed = list(executor.map(analyze_one, specs))
     else:
-        analyzed = [analyze_one(path) for path in paths]
+        analyzed = [analyze_one(spec) for spec in specs]
 
     cached_count = sum(1 for _, _, was_cached in analyzed if was_cached)
     items = [item for item, _, _ in analyzed]
@@ -286,6 +406,15 @@ def scan_directory(
                 cache_items[key] = item.to_json()
         _write_scan_cache(cache_path, cache)
 
+    for rel, member_items in archive_members.items():
+        meta = archive_meta.get(rel, {})
+        arc_path = meta.get("path", Path(rel))
+        items.append(_archive_container_item(
+            rel, arc_path.name, arc_path, fmt=meta.get("fmt") or archive_format(rel),
+            members=len(member_items), skipped=meta.get("skipped", 0),
+            warnings=meta.get("warnings", []), member_items=member_items,
+        ))
+
     sorted_items = sort_items(items)
     return summarize(sorted_items, capped=capped, cached=cached_count), sorted_items
 
@@ -294,6 +423,7 @@ def analyze_file(
     path: Path | str,
     *,
     root: Path | None = None,
+    display: str | None = None,
     text_bytes: int = DEFAULT_TEXT_BYTES,
     metadata_bytes: int = DEFAULT_METADATA_BYTES,
     pixel_mode: str = "off",
@@ -304,12 +434,30 @@ def analyze_file(
     deep_signals: bool = False,
 ) -> ScanItem:
     file_path = Path(path)
-    display_path = _display_path(file_path, root=root)
+    display_path = display or _display_path(file_path, root=root)
+    item_name = display or file_path.name
     try:
         size = file_path.stat().st_size
     except OSError as exc:
-        return ScanItem(display_path, file_path.name, "unknown", "failed", 0, error=str(exc))
+        return ScanItem(display_path, item_name, "unknown", "failed", 0, error=str(exc))
     extension = file_path.suffix.lower()
+
+    if is_archive(file_path):
+        # Single-item callers get a container row; member-level results
+        # come through scan_directory / upload paths that expand first.
+        return ScanItem(
+            display_path, item_name, "archive", "analyzed", size,
+            ClassificationResult(
+                score=0,
+                band=RiskBand.LOW,
+                band_label="컨테이너",
+                verdict=f"{archive_format(file_path)} 압축 파일 — 내부 파일은 폴더 스캔 또는 업로드 경로에서 개별 분석됩니다.",
+                signals=[EvidenceSignal("압축 컨테이너", "내용물 분석은 스캔 경로에서 수행됩니다", 0)],
+                limitations=["단일 파일 분석에서는 압축 내부를 펼치지 않습니다."],
+                source_guess=SourceGuess.unknown("압축 컨테이너에는 출처 추정이 적용되지 않습니다."),
+                next_checks=["압축 파일이 포함된 폴더를 스캔하거나 업로드하세요."],
+            ),
+        )
 
     if extension in SUPPORTED_TEXT_EXTENSIONS or extension in SUPPORTED_DOCUMENT_EXTENSIONS:
         try:
@@ -338,9 +486,9 @@ def analyze_file(
                     tmp_text_path.unlink(missing_ok=True)
             result = analyze_text(text, model_analysis=model_analysis)
             result = _apply_document_metadata(result, doc_metadata)
-            return ScanItem(display_path, file_path.name, "text", "analyzed", size, result)
+            return ScanItem(display_path, item_name, "text", "analyzed", size, result)
         except OSError as exc:
-            return ScanItem(display_path, file_path.name, "text", "failed", size, error=str(exc))
+            return ScanItem(display_path, item_name, "text", "failed", size, error=str(exc))
 
     if extension in SUPPORTED_IMAGE_EXTENSIONS:
         try:
@@ -357,16 +505,16 @@ def analyze_file(
             result = analyze_image_metadata(metadata, dimensions=dimensions, pixel_analysis=pixel_analysis, model_analysis=model_analysis)
             if deep_signals:
                 result = _merge_deep_signals(result, _deep_image_layers(file_path))
-            return ScanItem(display_path, file_path.name, "image", "analyzed", size, result)
+            return ScanItem(display_path, item_name, "image", "analyzed", size, result)
         except OSError as exc:
-            return ScanItem(display_path, file_path.name, "image", "failed", size, error=str(exc))
+            return ScanItem(display_path, item_name, "image", "failed", size, error=str(exc))
 
     if extension in SUPPORTED_AUDIO_EXTENSIONS:
         try:
             analysis = analyze_audio(file_path, model_path=model_path)
-            return ScanItem(display_path, file_path.name, "audio", "analyzed", size, _audio_result(analysis))
+            return ScanItem(display_path, item_name, "audio", "analyzed", size, _audio_result(analysis))
         except OSError as exc:
-            return ScanItem(display_path, file_path.name, "audio", "failed", size, error=str(exc))
+            return ScanItem(display_path, item_name, "audio", "failed", size, error=str(exc))
 
     if extension in SUPPORTED_VIDEO_EXTENSIONS:
         try:
@@ -374,11 +522,11 @@ def analyze_file(
             result = _video_result(analysis)
             if deep_signals:
                 result = _merge_deep_signals(result, _deep_video_layers(file_path))
-            return ScanItem(display_path, file_path.name, "video", "analyzed", size, result)
+            return ScanItem(display_path, item_name, "video", "analyzed", size, result)
         except OSError as exc:
-            return ScanItem(display_path, file_path.name, "video", "failed", size, error=str(exc))
+            return ScanItem(display_path, item_name, "video", "failed", size, error=str(exc))
 
-    return ScanItem(display_path, file_path.name, "unsupported", "unsupported", size, error="지원 형식이 아닙니다.")
+    return ScanItem(display_path, item_name, "unsupported", "unsupported", size, error="지원 형식이 아닙니다.")
 
 
 def _audio_result(analysis: AudioAnalysis) -> ClassificationResult:

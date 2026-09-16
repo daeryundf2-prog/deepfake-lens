@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import secrets
+import shutil
 import tempfile
 import threading
 import time
@@ -555,14 +556,87 @@ def _is_within(path: Path, root: Path) -> bool:
         return False
 
 
+def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str, object]:
+    analyzed = [item for item in items if not item.get("error")]
+    high = sum(1 for item in analyzed if (item.get("result") or {}).get("band") == "high")
+    medium = sum(1 for item in analyzed if (item.get("result") or {}).get("band") == "medium")
+    low = sum(1 for item in analyzed if (item.get("result") or {}).get("band") == "low")
+    return {
+        "total": len(items),
+        "analyzed": len(analyzed),
+        "high": high,
+        "medium": medium,
+        "low": low,
+        "unknown": len(analyzed) - high - medium - low,
+        "unsupported_or_failed": len(items) - len(analyzed),
+        "external_model_active": sum(
+            1 for item in analyzed if (item.get("result") or {}).get("model_analysis")
+        ),
+        "source": source,
+    }
+
+
+def _archive_upload_items(filename: str, suffix: str, payload: bytes) -> list[dict[str, object]]:
+    """Extract an uploaded archive to a temp dir and analyze each member.
+
+    Members are reported as ``archive.zip::inner/path.png`` rows; the
+    archive bytes and extracted tree are deleted before returning.
+    """
+    from .archives import extract_archive
+
+    tmp_name = ""
+    dest = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(payload)
+            tmp_name = tmp.name
+        dest = tempfile.mkdtemp(prefix="dflens-up-")
+        extraction = extract_archive(tmp_name, dest)
+        items: list[dict[str, object]] = []
+        for member in extraction.members:
+            rel = member.relative_to(dest).as_posix()
+            display = f"{filename}::{rel}"
+            item = analyze_file(member, display=display, model_path=default_engine_profiles() or None)
+            record = item.to_json()
+            record["path"] = display
+            record["name"] = display
+            items.append(record)
+        if extraction.warnings or extraction.skipped:
+            items.append({
+                "name": filename, "path": filename, "kind": "archive", "status": "expanded",
+                "size_bytes": len(payload),
+                "result": {
+                    "score": 0, "band": "low", "band_label": "컨테이너",
+                    "verdict": f"압축 해제 — {len(extraction.members)}개 분석, {extraction.skipped}개 스킵",
+                    "signals": [{"title": "압축 컨테이너", "detail": f"구성 {len(extraction.members)}개", "weight": 0}],
+                    "limitations": extraction.warnings,
+                    "next_checks": [],
+                },
+            })
+        if not items:
+            items.append({
+                "name": filename, "path": filename, "kind": "archive", "status": "failed",
+                "error": "; ".join(extraction.warnings) or "해제된 파일이 없습니다",
+            })
+        return items
+    finally:
+        if tmp_name:
+            Path(tmp_name).unlink(missing_ok=True)
+        if dest:
+            shutil.rmtree(dest, ignore_errors=True)
+
+
 def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]:
     """Analyze files uploaded via multipart/form-data.
 
     Each part is written to a temporary file, analyzed with the default
-    engine profiles, then deleted. The server never persists uploads.
+    engine profiles, then deleted. Archives are extracted and each member
+    analyzed as its own row. The server never persists uploads.
     """
     if "multipart/form-data" not in content_type:
         return {"error": "multipart/form-data upload required"}
+    from .archives import is_archive
+
     message = BytesParser(policy=email_policy).parsebytes(
         b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
     )
@@ -577,6 +651,9 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
             break
         suffix = Path(filename).suffix[:16]
         try:
+            if is_archive(filename):
+                items.extend(_archive_upload_items(filename, suffix, payload))
+                continue
             # delete=False: Windows cannot reopen a delete=True temp file.
             tmp_name = ""
             try:
@@ -595,25 +672,9 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
             items.append({"name": filename, "error": str(exc)})
     if not items:
         return {"error": "업로드된 파일이 없습니다"}
-    analyzed = [item for item in items if not item.get("error")]
-    high = sum(1 for item in analyzed if (item.get("result") or {}).get("band") == "high")
-    medium = sum(1 for item in analyzed if (item.get("result") or {}).get("band") == "medium")
-    low = sum(1 for item in analyzed if (item.get("result") or {}).get("band") == "low")
     return {
         "schema_version": 1,
-        "summary": {
-            "total": len(items),
-            "analyzed": len(analyzed),
-            "high": high,
-            "medium": medium,
-            "low": low,
-            "unknown": len(analyzed) - high - medium - low,
-            "unsupported_or_failed": len(items) - len(analyzed),
-            "external_model_active": sum(
-                1 for item in analyzed if (item.get("result") or {}).get("model_analysis")
-            ),
-            "source": "upload",
-        },
+        "summary": _summarize_records(items, "upload"),
         "items": items,
     }
 
@@ -688,6 +749,15 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     filename = part.get_filename() or "upload"
     payload = part.get_payload(decode=True) or b""
     suffix = Path(filename).suffix[:16]
+    from .archives import is_archive
+    if is_archive(filename):
+        items = _archive_upload_items(filename, suffix, payload)
+        return {
+            "schema_version": 1,
+            "mode": "files",
+            "summary": _summarize_records(items, "upload"),
+            "items": items,
+        }
     models_dir = Path(__file__).resolve().parent.parent / "models"
     model_path = models_dir if models_dir.is_dir() else (default_engine_profiles() or None)
     tmp_name = ""
