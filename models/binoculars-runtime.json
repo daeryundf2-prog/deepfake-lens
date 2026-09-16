@@ -11,6 +11,7 @@
  "ratio_high": 1.05,
  "ensemble_weight": 0.05,
  "limitations": [
+  "Scoring anchors are English-calibrated — on Korean-dominant text this member is excluded by the language gate (its multilingual LM is not the issue; the anchors are).",
   "Measured 2026-09-16 on the seed corpus: every polished human sample scored 100 (ratio 0.71-0.84 overlapping AI ko at 0.67-0.79) — the ratio tracks register polish, not AI origin, so the member is effectively disabled (weight 0.05) pending re-anchoring on a real corpus.",
   "Perplexity-ratio screen (Hans et al. 2024 style), not a trained detector — ratio anchors [0.85, 1.05] are provisional; measured separation on the seed corpus is weak (AI prose 0.67-0.94 vs human prose 0.77-0.82), so ensemble_weight is held at 0.25 until calibration.",
   "Two CPU forward passes per window are expensive — max_windows bounds cost at the first 8 windows (~4k tokens).",
@@ -19,5 +20,8 @@
   "Two forward passes per window roughly doubles the cost of the causal-lm-ppl runtime.",
   "Prioritization signal, not a truth label."
  ],
- "license": "Qwen2.5 is Apache-2.0; weights download to the HF cache, never committed"
+ "license": "Qwen2.5 is Apache-2.0; weights download to the HF cache, never committed",
+ "trained_languages": [
+  "en"
+ ]
 }

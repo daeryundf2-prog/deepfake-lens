@@ -8,6 +8,7 @@
  "ppl_low": 8.0,
  "ppl_high": 60.0,
  "limitations": [
+  "Scoring anchors are English-calibrated — on Korean-dominant text this member is excluded by the language gate (its multilingual LM is not the issue; the anchors are).",
   "Measured on the 30-sample seed corpus (2026-09-16): human polished prose lands at PPL 8-19, overlapping AI prose at 7-19 — the screen cannot separate this regime at any anchor; ensemble_weight lowered to 0.25 accordingly.",
   "Perplexity screen, not a trained detector — score maps log-PPL between provisional anchors [8, 60] that are NOT yet calibrated on a labeled corpus; recalibrate via deepfake-lens eval before trusting thresholds.",
   "Generator-agnostic in principle (any LLM output compresses toward low PPL under a different reference LM), but effectiveness on a specific generator must be measured, not assumed.",
@@ -16,5 +17,8 @@
   "Prioritization signal, not a truth label."
  ],
  "license": "Qwen2.5 is Apache-2.0; weights download to the HF cache, never committed",
- "ensemble_weight": 0.25
+ "ensemble_weight": 0.25,
+ "trained_languages": [
+  "en"
+ ]
 }
