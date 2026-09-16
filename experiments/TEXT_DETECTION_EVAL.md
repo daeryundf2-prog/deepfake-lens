@@ -293,3 +293,23 @@ measured-discriminative text path (en AUROC 0.894 solo). All three
 neural members are now weight-limited by measurement rather than
 assumption — the honest current capability for text is heuristic-first
 with provenance signals (metadata, watermark-with-key) on top.
+
+## Final measurement — after member calibration (2026-09-16)
+
+With en-only members excluded on ko, and both PPL members marked
+English-anchored + weight-limited:
+
+| Metric | Value |
+|---|---|
+| Overall AUROC | **0.586** (best so far) |
+| ko FPR@50 | **0.0** (was 0.71 before calibration) |
+| ko recall | 0.17 — conservative miss-over-accuse posture |
+| en FPR@50 | 0.167 |
+| Wikipedia FP@50 | 0.11 (was 0.44) |
+
+Endpoint interpretation: the pipeline now *misses* hard cases rather
+than accusing humans — the correct failure direction for a screening
+tool. ko detection is heuristic-layer only until a Korean-anchored
+member exists; en detection leans on fingerprint signals. Both are
+documented as prioritization signals, and every change in this session
+was driven by a measured corpus value, not intuition.
