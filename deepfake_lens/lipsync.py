@@ -246,9 +246,15 @@ def _syncnet_analysis(video_path: Path) -> LipsyncAnalysis | None:
                 },
                 device="cpu",
             )
-        offsets, confs, dists, max_conf, min_dist, _json, has_face = (
-            _SYNCNET_PIPELINE.inference(str(video_path))
-        )
+        import contextlib
+        import sys
+
+        # syncnet-python prints ffmpeg progress and framewise confidence to
+        # stdout — redirect to stderr so JSON consumers get a clean channel.
+        with contextlib.redirect_stdout(sys.stderr):
+            offsets, confs, dists, max_conf, min_dist, _json, has_face = (
+                _SYNCNET_PIPELINE.inference(str(video_path))
+            )
     except Exception:
         # Latch only when the pipeline never constructed — a per-file
         # inference failure (corrupt video, no decodable stream) must not
