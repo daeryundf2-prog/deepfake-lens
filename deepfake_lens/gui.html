@@ -2,286 +2,415 @@
 <html lang="ko">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Deepfake Lens - AI 콘텐츠 분석기</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Deepfake Lens</title>
     <style>
+        :root {
+            --bg: #f2f2f7;
+            --card: #ffffff;
+            --card2: #f9f9fb;
+            --text: #1c1c1e;
+            --muted: #8e8e93;
+            --line: rgba(60, 60, 67, 0.12);
+            --accent: #007aff;
+            --accent-press: #0062cc;
+            --green: #34c759;
+            --orange: #ff9500;
+            --red: #ff3b30;
+            --purple: #af52de;
+            --amber-bg: #fff8e1;
+            --amber-line: #f0b429;
+            --amber-text: #8a6d00;
+            --nav-bg: rgba(242, 242, 247, 0.82);
+            --shadow: 0 1px 3px rgba(0,0,0,0.06);
+            --radius: 14px;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #000000;
+                --card: #1c1c1e;
+                --card2: #2c2c2e;
+                --text: #f2f2f7;
+                --muted: #98989f;
+                --line: rgba(84, 84, 88, 0.45);
+                --accent: #0a84ff;
+                --accent-press: #409cff;
+                --green: #30d158;
+                --orange: #ff9f0a;
+                --red: #ff453a;
+                --purple: #bf5af2;
+                --amber-bg: #2d2600;
+                --amber-line: #b08600;
+                --amber-text: #ffd60a;
+                --nav-bg: rgba(28, 28, 30, 0.82);
+                --shadow: 0 1px 3px rgba(0,0,0,0.4);
+            }
+        }
+
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; color: #1a1a2e; }
-
-        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        .header h1 { font-size: 24px; font-weight: 600; }
-        .header p { opacity: 0.9; margin-top: 5px; }
-
-        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
-
-        .dashboard { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin-bottom: 20px; }
-        .stat-card { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-        .stat-card h3 { font-size: 14px; color: #666; margin-bottom: 8px; }
-        .stat-card .value { font-size: 28px; font-weight: 700; color: #333; }
-        .stat-card .label { font-size: 12px; color: #999; margin-top: 5px; }
-        .stat-card.high { border-left: 4px solid #e74c3c; }
-        .stat-card.medium { border-left: 4px solid #f39c12; }
-        .stat-card.low { border-left: 4px solid #27ae60; }
-        .stat-card.info { border-left: 4px solid #3498db; }
-        .stat-card.model { border-left: 4px solid #8e44ad; }
-
-        .main-content { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-
-        .panel { background: white; border-radius: 10px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-        .panel h2 { font-size: 18px; margin-bottom: 15px; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
-
-        .upload-zone { border: 3px dashed #ccc; border-radius: 10px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.3s; }
-        .upload-zone:hover { border-color: #667eea; background: #f8f9ff; }
-        .upload-zone.dragover { border-color: #667eea; background: #e8f0fe; }
-        .upload-zone p { color: #666; margin-top: 10px; }
-
-        .folder-input { display: flex; gap: 10px; margin-bottom: 15px; }
-        .folder-input input { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; }
-        .folder-input button { padding: 12px 24px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; }
-        .folder-input button:hover { background: #5a6fd6; }
-        .folder-input button:disabled { background: #ccc; cursor: not-allowed; }
-
-        .options { display: flex; gap: 15px; margin-bottom: 15px; flex-wrap: wrap; }
-        .option-group { display: flex; align-items: center; gap: 8px; }
-        .option-group label { font-size: 13px; color: #666; }
-        .option-group select, .option-group input[type="number"] { padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; }
-        .option-group input[type="checkbox"] { width: 15px; height: 15px; }
-
-        .progress-bar { width: 100%; height: 6px; background: #eee; border-radius: 3px; margin-top: 10px; overflow: hidden; display: none; }
-        .progress-bar.active { display: block; }
-        .progress-bar .fill { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); width: 40%; border-radius: 3px; }
-        .progress-bar.active .fill { animation: indeterminate 1.2s ease-in-out infinite; }
-        @keyframes indeterminate {
-            0% { margin-left: 0%; width: 40%; }
-            50% { width: 60%; }
-            100% { margin-left: 100%; width: 40%; }
+        html { -webkit-text-size-adjust: 100%; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Malgun Gothic", sans-serif;
+            background: var(--bg); color: var(--text);
+            font-size: 15px; line-height: 1.45;
+            -webkit-font-smoothing: antialiased;
         }
 
-        .results-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        .results-table th, .results-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 13px; }
-        .results-table th { background: #f8f9fa; font-weight: 600; color: #555; position: sticky; top: 0; }
-        .results-table tr.result-row { cursor: pointer; }
-        .results-table tr.result-row:hover { background: #f8f9ff; }
-        .results-table tr.result-row.expanded { background: #eef2ff; }
-        .risk-high { color: #e74c3c; font-weight: 600; }
-        .risk-medium { color: #f39c12; font-weight: 600; }
-        .risk-low { color: #27ae60; font-weight: 600; }
-
-        .detail-row td { padding: 12px 16px; background: #fafbff; border-bottom: 1px solid #e0e4f0; }
-        .detail-row .verdict { font-size: 13px; font-weight: 600; color: #333; margin-bottom: 10px; }
-        .detail-row .section { margin-bottom: 10px; }
-        .detail-row .section-title { font-size: 11px; font-weight: 700; color: #667eea; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; }
-        .detail-row ul { margin-left: 18px; }
-        .detail-row li { font-size: 12px; color: #444; margin-bottom: 3px; }
-        .detail-row .limitations { color: #8a6d00; }
-        .detail-row .limitations li { color: #8a6d00; }
-        .detail-row .caveat { font-size: 11px; color: #8a6d00; background: #fff8e1; border-left: 3px solid #f0b429; padding: 6px 10px; border-radius: 4px; margin-top: 8px; }
-        .model-badge { display: inline-block; font-size: 10px; font-weight: 700; color: #fff; background: #8e44ad; border-radius: 4px; padding: 1px 6px; margin-left: 6px; vertical-align: middle; }
-        .src-label { font-size: 12px; color: #555; }
-
-        .btn { padding: 8px 16px; border: none; border-radius: 5px; cursor: pointer; font-size: 13px; font-weight: 500; }
-        .btn-primary { background: #667eea; color: white; }
-        .btn-success { background: #27ae60; color: white; }
-        .btn-danger { background: #e74c3c; color: white; }
-        .btn:hover { opacity: 0.9; }
-        .btn:disabled { background: #ccc; cursor: not-allowed; }
-
-        .file-list { max-height: 200px; overflow-y: auto; margin-top: 10px; }
-        .file-item { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #eee; }
-        .file-item .name { font-size: 13px; color: #333; }
-        .file-item .size { font-size: 12px; color: #999; }
-
-        .export-buttons { display: flex; gap: 10px; margin-top: 15px; }
-
-        .status-note { font-size: 12px; color: #777; margin-top: 10px; }
-
-        .quick-check { margin-bottom: 20px; }
-        .quick-check textarea { width: 100%; min-height: 90px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; font-family: inherit; resize: vertical; }
-        .quick-check .qc-row { display: flex; gap: 10px; margin-top: 10px; align-items: center; flex-wrap: wrap; }
-        .qc-result { margin-top: 15px; border: 1px solid #e0e4f0; border-radius: 8px; padding: 14px; background: #fafbff; display: none; }
-        .qc-result.visible { display: block; }
-        .qc-verdict { display: flex; gap: 12px; align-items: baseline; margin-bottom: 10px; }
-        .qc-verdict .score { font-size: 30px; font-weight: 700; }
-        .qc-verdict .band { font-size: 13px; font-weight: 600; text-transform: uppercase; }
-        .qc-layer { margin-top: 8px; font-size: 12px; }
-        .qc-layer .section-title { font-size: 11px; font-weight: 700; color: #667eea; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; }
-        .qc-layer ul { margin-left: 18px; }
-        .qc-layer li { color: #444; margin-bottom: 2px; }
-
-        @media (max-width: 900px) {
-            .dashboard { grid-template-columns: repeat(2, 1fr); }
-            .main-content { grid-template-columns: 1fr; }
+        /* ── Glass nav ─────────────────────────────── */
+        .nav {
+            position: sticky; top: 0; z-index: 50;
+            background: var(--nav-bg);
+            backdrop-filter: blur(20px) saturate(1.6);
+            -webkit-backdrop-filter: blur(20px) saturate(1.6);
+            border-bottom: 1px solid var(--line);
+            padding: 14px 20px calc(14px + env(safe-area-inset-top, 0px));
         }
+        .nav-inner { max-width: 980px; margin: 0 auto; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+        .nav h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
+        .nav .sub { font-size: 13px; color: var(--muted); }
+        .nav .chip { margin-left: auto; font-size: 12px; color: var(--muted); background: var(--card2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; }
+
+        .wrap { max-width: 980px; margin: 0 auto; padding: 18px 16px 80px; display: grid; gap: 18px; }
+
+        /* ── Cards (iOS grouped) ───────────────────── */
+        .card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+        .card-head { padding: 14px 16px 10px; display: flex; align-items: center; gap: 8px; }
+        .card-head h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; }
+        .card-head .hint { margin-left: auto; font-size: 12px; color: var(--muted); }
+        .card-body { padding: 0 16px 16px; }
+        .note { font-size: 12.5px; color: var(--muted); }
+        .note.warn { color: var(--amber-text); }
+
+        /* ── Controls ──────────────────────────────── */
+        .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .row + .row { margin-top: 10px; }
+        .field {
+            flex: 1; min-width: 200px;
+            background: var(--card2); border: 1px solid var(--line);
+            border-radius: 10px; padding: 11px 13px;
+            font-size: 15px; color: var(--text); font-family: inherit;
+        }
+        .field:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+        textarea.field { min-height: 96px; resize: vertical; line-height: 1.5; }
+        input[type="number"].field { flex: 0 0 90px; min-width: 0; }
+
+        .btn {
+            appearance: none; border: none; cursor: pointer;
+            font-family: inherit; font-size: 15px; font-weight: 600;
+            padding: 10px 18px; border-radius: 10px;
+            background: var(--card2); color: var(--accent);
+            border: 1px solid var(--line);
+            transition: transform 0.08s ease, background 0.15s;
+        }
+        .btn:active { transform: scale(0.96); }
+        .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+        .btn-primary { background: var(--accent); color: #fff; border-color: transparent; }
+        .btn-primary:active { background: var(--accent-press); }
+        .btn-green { background: var(--green); color: #fff; border-color: transparent; }
+        .btn-red { color: var(--red); }
+        .btn-sm { padding: 6px 12px; font-size: 13px; border-radius: 8px; }
+
+        /* iOS segmented control */
+        .seg { display: inline-flex; background: var(--card2); border: 1px solid var(--line); border-radius: 9px; padding: 2px; }
+        .seg button {
+            appearance: none; border: none; background: transparent; cursor: pointer;
+            font-family: inherit; font-size: 13px; font-weight: 500; color: var(--text);
+            padding: 5px 14px; border-radius: 7px; transition: background 0.15s;
+        }
+        .seg button.on { background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,0.18); font-weight: 600; }
+        @media (prefers-color-scheme: dark) { .seg button.on { background: #48484a; } }
+
+        /* iOS toggle */
+        .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; user-select: none; }
+        .switch input { display: none; }
+        .switch .track {
+            width: 44px; height: 26px; border-radius: 13px; flex: none;
+            background: var(--card2); border: 1px solid var(--line);
+            position: relative; transition: background 0.2s;
+        }
+        .switch .track::after {
+            content: ""; position: absolute; top: 1px; left: 1px;
+            width: 22px; height: 22px; border-radius: 50%;
+            background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.25);
+            transition: transform 0.2s;
+        }
+        .switch input:checked + .track { background: var(--green); border-color: transparent; }
+        .switch input:checked + .track::after { transform: translateX(18px); }
+        .switch input:disabled + .track { opacity: 0.45; }
+        .opt-grid { display: flex; gap: 16px; flex-wrap: wrap; padding: 4px 0; }
+
+        /* Drop zone */
+        .drop {
+            border: 2px dashed var(--line); border-radius: var(--radius);
+            padding: 30px 16px; text-align: center; cursor: pointer;
+            transition: border-color 0.15s, background 0.15s;
+        }
+        .drop:hover, .drop.over { border-color: var(--accent); background: rgba(0,122,255,0.06); }
+        .drop .icon { font-size: 30px; }
+        .drop p { color: var(--muted); font-size: 13px; margin-top: 6px; }
+
+        /* File chips */
+        .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; max-height: 120px; overflow-y: auto; }
+        .chipfile {
+            font-size: 12.5px; background: var(--card2); border: 1px solid var(--line);
+            border-radius: 999px; padding: 4px 10px; display: inline-flex; gap: 6px; align-items: center;
+            max-width: 100%;
+        }
+        .chipfile .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; }
+        .chipfile .x { cursor: pointer; color: var(--muted); font-weight: 700; border: none; background: none; font-size: 13px; padding: 0 2px; }
+        .chipfile .x:hover { color: var(--red); }
+
+        /* Progress */
+        .progress { height: 5px; background: var(--card2); border-radius: 3px; overflow: hidden; margin-top: 12px; display: none; }
+        .progress.on { display: block; }
+        .progress .fill { height: 100%; width: 40%; border-radius: 3px; background: var(--accent); }
+        .progress.on .fill { animation: slide 1.2s ease-in-out infinite; }
+        @keyframes slide { 0% { margin-left: -10%; width: 40%; } 50% { width: 60%; } 100% { margin-left: 105%; width: 40%; } }
+        .elapsed { font-size: 12px; color: var(--muted); margin-top: 6px; min-height: 16px; }
+
+        /* ── Summary strip ─────────────────────────── */
+        .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+        .pill-stat { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px 14px; }
+        .pill-stat .n { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+        .pill-stat .t { font-size: 12px; color: var(--muted); margin-top: 2px; }
+        .pill-stat .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+        .distbar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 12px; background: var(--card2); }
+        .distbar div { transition: width 0.4s; }
+        @media (max-width: 640px) { .summary { grid-template-columns: repeat(2, 1fr); } }
+
+        /* ── Result cards ──────────────────────────── */
+        .res-list { display: grid; gap: 10px; }
+        .res {
+            background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
+            overflow: hidden; cursor: pointer; transition: transform 0.08s;
+        }
+        .res:active { transform: scale(0.99); }
+        .res-main { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
+        .ring { flex: none; width: 44px; height: 44px; position: relative; }
+        .ring svg { width: 44px; height: 44px; transform: rotate(-90deg); }
+        .ring circle { fill: none; stroke-width: 3.5; }
+        .ring .bg { stroke: var(--line); }
+        .ring .val { stroke-linecap: round; }
+        .ring .num {
+            position: absolute; inset: 0; display: grid; place-items: center;
+            font-size: 12px; font-weight: 700;
+        }
+        .res-info { min-width: 0; flex: 1; }
+        .res-name { font-size: 14.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .res-sub { font-size: 12px; color: var(--muted); margin-top: 2px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+        .band-pill { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 2px 9px; }
+        .band-high { background: rgba(255,59,48,0.14); color: var(--red); }
+        .band-medium { background: rgba(255,149,0,0.15); color: var(--orange); }
+        .band-low { background: rgba(52,199,89,0.15); color: var(--green); }
+        .band-unknown { background: var(--card2); color: var(--muted); }
+        .nn-badge { font-size: 10px; font-weight: 700; color: #fff; background: var(--purple); border-radius: 4px; padding: 1px 6px; }
+        .chev { color: var(--muted); font-size: 18px; transition: transform 0.2s; flex: none; }
+        .res.open .chev { transform: rotate(90deg); }
+
+        .res-detail { display: none; border-top: 1px solid var(--line); padding: 14px; background: var(--card2); }
+        .res.open .res-detail { display: block; }
+        .verdict { font-size: 13.5px; font-weight: 600; margin-bottom: 10px; }
+        .dgroup { margin-bottom: 10px; }
+        .dgroup > .dt { font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+        .dgroup ul { margin-left: 18px; }
+        .dgroup li { font-size: 13px; margin-bottom: 3px; }
+        .dgroup.lim > .dt { color: var(--amber-text); }
+        .dgroup.lim li { color: var(--amber-text); }
+        .kv { font-size: 13px; display: grid; grid-template-columns: 110px 1fr; gap: 4px 10px; }
+        .kv b { color: var(--muted); font-weight: 500; }
+        .caveat {
+            font-size: 12px; color: var(--amber-text);
+            background: var(--amber-bg); border-left: 3px solid var(--amber-line);
+            padding: 8px 10px; border-radius: 8px; margin-top: 10px;
+        }
+        .heatmap-img { max-width: 100%; border-radius: 10px; margin-top: 8px; border: 1px solid var(--line); }
+        .fb-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+        .fb-status { font-size: 12px; color: var(--muted); }
+
+        .more-row { text-align: center; padding: 4px; }
+        .empty { text-align: center; color: var(--muted); padding: 30px 10px; font-size: 14px; }
+
+        /* ── Compare ───────────────────────────────── */
+        .cmp-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .slot {
+            border: 2px dashed var(--line); border-radius: 12px; padding: 18px 10px;
+            text-align: center; cursor: pointer; font-size: 13px; color: var(--muted);
+            transition: border-color 0.15s;
+        }
+        .slot:hover { border-color: var(--accent); }
+        .slot.filled { border-style: solid; border-color: var(--accent); color: var(--text); font-weight: 600; }
+        .slot .sn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+        .cmp-result { margin-top: 12px; background: var(--card2); border-radius: 12px; padding: 14px; display: none; }
+        .cmp-result.on { display: block; }
+        @media (max-width: 560px) { .cmp-slots { grid-template-columns: 1fr; } }
+
+        /* ── Quick check result ────────────────────── */
+        .qc-out { display: none; }
+        .qc-out.on { display: block; }
+        .qc-head { display: flex; align-items: center; gap: 14px; padding: 14px 0 4px; }
+        .qc-head .big { font-size: 34px; font-weight: 700; letter-spacing: -1px; }
+        .layers { margin-top: 8px; display: grid; gap: 8px; }
+        .layer { background: var(--card2); border-radius: 10px; padding: 10px 12px; }
+        .layer > .lt { font-size: 12px; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
+        .layer ul { margin-left: 18px; }
+        .layer li { font-size: 12.5px; margin-bottom: 2px; }
+
+        /* ── Toasts ────────────────────────────────── */
+        #toasts { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 100; display: grid; gap: 8px; width: min(480px, calc(100% - 24px)); }
+        .toast {
+            background: var(--text); color: var(--bg);
+            border-radius: 12px; padding: 12px 16px; font-size: 14px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+            animation: tdrop 0.25s ease; text-align: center;
+        }
+        @keyframes tdrop { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: none; } }
+        .toast.err { background: var(--red); color: #fff; }
+
+        .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>🔍 Deepfake Lens</h1>
-        <p>AI 생성 콘텐츠 탐지 및 분석 시스템</p>
+    <div class="nav">
+        <div class="nav-inner">
+            <h1>Deepfake Lens</h1>
+            <span class="sub">AI 생성 콘텐츠 스크리닝</span>
+            <span class="chip" id="ver-chip"></span>
+        </div>
     </div>
 
-    <div class="container">
-        <!-- Dashboard -->
-        <div class="dashboard" aria-live="polite" aria-label="분석 통계">
-            <div class="stat-card high">
-                <h3>AI 생성 의심</h3>
-                <div class="value" id="stat-ai">0</div>
-                <div class="label">high risk 파일</div>
-            </div>
-            <div class="stat-card medium">
-                <h3>주의 필요</h3>
-                <div class="value" id="stat-medium">0</div>
-                <div class="label">medium risk 파일</div>
-            </div>
-            <div class="stat-card low">
-                <h3>정상</h3>
-                <div class="value" id="stat-low">0</div>
-                <div class="label">low risk 파일</div>
-            </div>
-            <div class="stat-card info">
-                <h3>전체 분석</h3>
-                <div class="value" id="stat-total">0</div>
-                <div class="label">총 분석 파일</div>
-            </div>
-            <div class="stat-card model">
-                <h3>뉴럴 모델</h3>
-                <div class="value" id="stat-model">0</div>
-                <div class="label" id="stat-model-label">외부 모델 분석 파일</div>
-            </div>
-        </div>
+    <div class="wrap">
 
-        <!-- Unified quick check: paste text or drop one file, run every applicable layer -->
-        <div class="panel quick-check">
-            <h2>⚡ 통합 빠른 검사</h2>
-            <p class="status-note" style="margin-top:-8px; margin-bottom:10px;">텍스트를 붙여넣거나 파일 하나를 선택하면 해당 항목에 적용 가능한 모든 검사(휴리스틱 + 뉴럴 앙상블 + 메타데이터/C2PA + 스타일 지문)를 한 번에 실행합니다.</p>
-            <textarea id="qc-text" placeholder="검사할 텍스트를 붙여넣으세요 (한국어/영어 모두 지원)…" aria-label="검사할 텍스트"></textarea>
-            <div class="qc-row">
-                <button class="btn btn-primary" id="qc-text-btn" onclick="quickCheckText()">텍스트 전체 검사</button>
-                <span style="color:#999;">또는</span>
-                <button class="btn" id="qc-file-btn" onclick="document.getElementById('qc-file').click()">파일 선택 후 전체 검사</button>
-                <input type="file" id="qc-file" hidden>
-                <span class="status-note" id="qc-status" aria-live="polite"></span>
-            </div>
-            <div class="qc-result" id="qc-result" aria-live="polite"></div>
-        </div>
-
-        <div class="main-content">
-            <!-- Left Panel: Input -->
-            <div class="panel">
-                <h2>📁 분석 대상</h2>
-
-                <!-- Folder Input -->
-                <div class="folder-input">
-                    <input type="text" id="folder-path" placeholder="폴더 경로 입력 (예: C:\Users\test\images)" aria-label="분석할 폴더 경로">
-                    <button id="analyze-btn" onclick="analyzeFolder()">분석 시작</button>
+        <!-- Quick check -->
+        <section class="card">
+            <div class="card-head"><h2>빠른 검사</h2><span class="hint">텍스트 또는 파일 1개 — 적용 가능한 전체 레이어 실행</span></div>
+            <div class="card-body">
+                <textarea class="field" id="qc-text" placeholder="검사할 텍스트를 붙여넣으세요 (한국어/영어)…" aria-label="검사할 텍스트"></textarea>
+                <div class="row" style="margin-top:10px;">
+                    <button class="btn btn-primary" id="qc-text-btn">텍스트 검사</button>
+                    <button class="btn" id="qc-file-btn">파일 선택</button>
+                    <input type="file" id="qc-file" hidden>
+                    <input class="field" id="qc-wm" style="flex:0 1 220px;min-width:150px;" placeholder="워터마크 키 (선택)" aria-label="워터마크 키">
                 </div>
-                <p class="status-note">경로를 모르면 아래 업로드 영역에서 폴더를 직접 선택하거나 드롭할 수 있습니다.</p>
+                <div class="elapsed" id="qc-status" aria-live="polite"></div>
+                <div class="qc-out" id="qc-out" aria-live="polite"></div>
+            </div>
+        </section>
 
-                <!-- Options -->
-                <div class="options">
-                    <div class="option-group">
-                        <label>픽셀 분석:</label>
-                        <select id="pixel-mode">
-                            <option value="off">꺼짐</option>
-                            <option value="fast">빠름</option>
-                            <option value="deep">정밀</option>
-                        </select>
-                    </div>
-                    <div class="option-group">
-                        <label>최대 파일:</label>
-                        <input type="number" id="max-files" value="1000" min="1" max="10000">
-                    </div>
+        <!-- Compare -->
+        <section class="card">
+            <div class="card-head"><h2>두 파일 비교</h2><span class="hint">음성↔음성 화자 비교 · 문서↔문서 필자 비교</span></div>
+            <div class="card-body">
+                <div class="cmp-slots">
+                    <div class="slot" id="slot-a" role="button" tabindex="0"><span class="sn">파일 A 선택</span></div>
+                    <div class="slot" id="slot-b" role="button" tabindex="0"><span class="sn">파일 B 선택</span></div>
                 </div>
-                <div class="options">
-                    <div class="option-group">
-                        <input type="checkbox" id="opt-model" checked>
-                        <label for="opt-model">뉴럴 모델 사용</label>
-                    </div>
-                    <div class="option-group">
-                        <input type="checkbox" id="opt-recursive">
-                        <label for="opt-recursive">하위 폴더 포함</label>
-                    </div>
-                    <div class="option-group">
-                        <input type="checkbox" id="opt-dedupe">
-                        <label for="opt-dedupe">중복 제거</label>
-                    </div>
-                    <div class="option-group">
-                        <input type="checkbox" id="opt-heatmaps">
-                        <label for="opt-heatmaps">히트맵 (정밀 필요)</label>
-                    </div>
-                    <div class="option-group">
-                        <input type="checkbox" id="opt-deep">
-                        <label for="opt-deep">심층 신호 (얼굴/맥박/변형 — 느림)</label>
-                    </div>
+                <input type="file" id="cmp-a" hidden>
+                <input type="file" id="cmp-b" hidden>
+                <div class="row" style="margin-top:10px;">
+                    <button class="btn btn-primary" id="cmp-btn" disabled>비교 실행</button>
+                    <span class="note">같은 모달리티끼리만 비교됩니다 (오디오 쌍 / 텍스트·문서 쌍)</span>
                 </div>
+                <div class="elapsed" id="cmp-status" aria-live="polite"></div>
+                <div class="cmp-result" id="cmp-result" aria-live="polite"></div>
+            </div>
+        </section>
 
-                <!-- Progress -->
-                <div class="progress-bar" id="progress" role="progressbar" aria-label="분석 진행">
-                    <div class="fill" id="progress-fill"></div>
+        <!-- Scan -->
+        <section class="card">
+            <div class="card-head"><h2>폴더 / 파일 스캔</h2></div>
+            <div class="card-body">
+                <div class="row">
+                    <input class="field" id="folder-path" placeholder="폴더 경로 (예: C:\Users\test\images)" aria-label="분석할 폴더 경로">
+                    <button class="btn btn-primary" id="analyze-btn">폴더 스캔</button>
                 </div>
-                <p id="progress-text" style="font-size: 12px; color: #666; margin-top: 5px;" aria-live="polite"></p>
-
-                <!-- Drag & Drop Zone -->
-                <div class="upload-zone" id="drop-zone" role="button" tabindex="0" aria-label="파일 또는 폴더를 드래그 앤 드롭하거나, Enter를 눌러 선택하세요">
-                    <p>📁 여기에 파일이나 폴더를 드래그 앤 드롭하세요</p>
-                    <p style="font-size: 12px; color: #999;">폴더를 드롭하면 안의 파일이 모두 추가됩니다. 클릭하면 파일을 고를 수 있습니다.</p>
-                    <p style="font-size: 12px; color: #999;">지원 형식: PNG, JPG, WebP, BMP, TIFF, GIF, TXT, MD, PDF, DOCX, XLSX, PPTX, WAV, MP3, FLAC, OGG, M4A, MP4, MOV, MKV, WebM, AVI</p>
+                <div class="row" style="margin-top:12px;">
+                    <span class="note">픽셀 분석</span>
+                    <div class="seg" id="pixel-seg" role="radiogroup" aria-label="픽셀 분석 모드">
+                        <button data-v="off" class="on">꺼짐</button>
+                        <button data-v="fast">빠름</button>
+                        <button data-v="deep">정밀</button>
+                    </div>
+                    <span class="note">최대 파일</span>
+                    <input type="number" class="field" id="max-files" value="1000" min="1" max="10000">
                 </div>
-                <div style="margin-top: 8px;">
-                    <button class="btn btn-primary" id="dir-picker-btn" type="button">폴더 선택</button>
+                <div class="opt-grid" style="margin-top:12px;">
+                    <label class="switch"><input type="checkbox" id="opt-model" checked><span class="track"></span>뉴럴 모델</label>
+                    <label class="switch"><input type="checkbox" id="opt-recursive"><span class="track"></span>하위 폴더</label>
+                    <label class="switch"><input type="checkbox" id="opt-dedupe"><span class="track"></span>중복 제거</label>
+                    <label class="switch"><input type="checkbox" id="opt-heatmaps"><span class="track"></span>히트맵 (정밀)</label>
+                    <label class="switch"><input type="checkbox" id="opt-deep"><span class="track"></span>심층 신호 (느림)</label>
+                </div>
+                <div class="progress" id="progress" role="progressbar" aria-label="분석 진행"><div class="fill"></div></div>
+                <div class="elapsed" id="progress-text" aria-live="polite"></div>
+                <div class="drop" id="drop-zone" role="button" tabindex="0" style="margin-top:8px;">
+                    <div class="icon">📁</div>
+                    <p><b>파일이나 폴더를 드롭</b>하거나 클릭해서 선택</p>
+                    <p>PNG·JPG·WebP·GIF·TXT·MD·PDF·DOCX·HWP·WAV·MP3·M4A·MP4·MOV·MKV 등</p>
+                </div>
+                <div class="row" style="margin-top:8px;">
+                    <button class="btn" id="dir-picker-btn" type="button">폴더 선택</button>
                     <input type="file" id="dir-picker" webkitdirectory multiple hidden>
                 </div>
-
-                <!-- File List -->
-                <div class="file-list" id="file-list" aria-live="polite"></div>
-                <div style="margin-top: 10px; display: flex; gap: 10px; align-items: center;">
-                    <button class="btn btn-primary" id="upload-btn" onclick="analyzeUploads()" disabled>선택 파일 분석</button>
-                    <span class="status-note" id="upload-note">드롭한 파일은 서버에 업로드되어 분석 후 삭제됩니다.</span>
+                <div class="chips" id="file-list" aria-live="polite"></div>
+                <div class="row" style="margin-top:10px;" id="upload-row" hidden>
+                    <button class="btn btn-primary" id="upload-btn">선택 파일 분석 (<span id="upload-n">0</span>)</button>
+                    <button class="btn btn-red" id="upload-clear">목록 비우기</button>
+                    <span class="note">업로드된 파일은 분석 후 서버에서 삭제됩니다</span>
                 </div>
             </div>
+        </section>
 
-            <!-- Right Panel: Results -->
-            <div class="panel">
-                <h2>📊 분석 결과</h2>
-                <div style="display: flex; gap: 10px; margin-bottom: 15px;">
-                    <button class="btn btn-primary" onclick="exportJSON()">JSON보내기</button>
-                    <button class="btn btn-success" onclick="exportCSV()">CSV보내기</button>
-                    <button class="btn" onclick="downloadReport()">HTML 리포트</button>
-                    <button class="btn btn-danger" onclick="clearResults()">결과 삭제</button>
-                </div>
-                <div style="max-height: 560px; overflow-y: auto;">
-                    <table class="results-table">
-                        <thead>
-                            <tr>
-                                <th scope="col">위험도</th>
-                                <th scope="col">점수</th>
-                                <th scope="col">출처 추정</th>
-                                <th scope="col">파일명</th>
-                            </tr>
-                        </thead>
-                        <tbody id="results-body">
-                            <tr><td colspan="4" style="text-align: center; color: #999;">분석 결과가 없습니다</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-                <p class="status-note">점수는 진위 판정이 아니라 검토 우선순위입니다. 행을 클릭하면 판정 근거와 한계를 볼 수 있습니다.</p>
+        <!-- Results -->
+        <section id="results-section" hidden>
+            <div class="summary" aria-live="polite">
+                <div class="pill-stat"><div class="n" style="color:var(--red)" id="stat-ai">0</div><div class="t"><span class="dot" style="background:var(--red)"></span>AI 생성 의심</div></div>
+                <div class="pill-stat"><div class="n" style="color:var(--orange)" id="stat-medium">0</div><div class="t"><span class="dot" style="background:var(--orange)"></span>주의 필요</div></div>
+                <div class="pill-stat"><div class="n" style="color:var(--green)" id="stat-low">0</div><div class="t"><span class="dot" style="background:var(--green)"></span>정상</div></div>
+                <div class="pill-stat"><div class="n" id="stat-total">0</div><div class="t">전체 · <span id="stat-model-label">뉴럴 0</span></div></div>
             </div>
-        </div>
+            <div class="distbar" id="distbar"></div>
+
+            <div class="card" style="margin-top:12px;">
+                <div class="card-head">
+                    <h2>분석 결과</h2>
+                    <div class="toolbar" style="margin-left:auto;">
+                        <button class="btn btn-sm" id="exp-json">JSON</button>
+                        <button class="btn btn-sm" id="exp-csv">CSV</button>
+                        <button class="btn btn-sm" id="exp-report">리포트</button>
+                        <button class="btn btn-sm btn-red" id="exp-clear">삭제</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="res-list" id="res-list"></div>
+                    <div class="more-row" id="more-row" hidden><button class="btn" id="more-btn">더 보기</button></div>
+                    <p class="note" style="margin-top:10px;">점수는 진위 판정이 아니라 검토 우선순위입니다. 카드를 누르면 판정 근거와 한계를 볼 수 있습니다.</p>
+                </div>
+            </div>
+        </section>
     </div>
+
+    <div id="toasts" aria-live="polite"></div>
 
     <script>
         let results = [];
         let selectedFiles = [];
+        let lastScanRoot = '';
         const RENDER_WINDOW = 200;
         let renderedRows = 0;
         let progressTimer = null;
+        let scanBusy = false;
 
-        // API token: only needed when the server was started with --token
-        // (mandatory for --allow-lan). Stored in sessionStorage, sent as a
-        // header; a 401 prompts once and retries.
-        // X-Deepfake-Lens-Client is sent unconditionally: the server requires
-        // it on /api/* when no token is set, because a custom header forces a
-        // CORS preflight that cross-origin drive-by requests cannot pass.
+        /* ── infra ─────────────────────────────────── */
+        const $ = id => document.getElementById(id);
+
+        function toast(msg, isErr) {
+            const el = document.createElement('div');
+            el.className = 'toast' + (isErr ? ' err' : '');
+            el.textContent = msg;
+            $('toasts').appendChild(el);
+            setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, isErr ? 5000 : 2800);
+        }
+
         async function apiFetch(url, options = {}) {
             const token = sessionStorage.getItem('dfl.token') || '';
             const headers = Object.assign(
@@ -300,23 +429,46 @@
             return response;
         }
 
-        function startElapsed(text) {
-            const el = document.getElementById('progress-text');
-            if (progressTimer) { clearInterval(progressTimer); }
+        function escapeHtml(value) {
+            return String(value).replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
+        }
+
+        function startElapsed(el, text) {
+            if (progressTimer) clearInterval(progressTimer);
             const t0 = Date.now();
             el.textContent = text;
             progressTimer = setInterval(() => {
-                el.textContent = `${text} (${Math.floor((Date.now() - t0) / 1000)}초 경과)`;
+                el.textContent = `${text} (${Math.floor((Date.now() - t0) / 1000)}초)`;
             }, 1000);
         }
-
-        function stopElapsed() {
+        function stopElapsed(el) {
             if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+            if (el) el.textContent = '';
         }
 
-        let scanBusy = false;
+        /* ── scan controls ─────────────────────────── */
+        let pixelMode = 'off';
+        $('pixel-seg').querySelectorAll('button').forEach(b => {
+            b.addEventListener('click', () => {
+                if (scanBusy) return;
+                pixelMode = b.dataset.v;
+                $('pixel-seg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+            });
+        });
 
-        // Recursively collect files from a dropped FileSystemEntry tree.
+        const SCAN_INPUTS = ['folder-path', 'analyze-btn', 'max-files',
+            'opt-recursive', 'opt-dedupe', 'opt-heatmaps', 'opt-model',
+            'opt-deep', 'dir-picker-btn', 'upload-btn', 'upload-clear'];
+
+        function setBusy(busy, text) {
+            scanBusy = busy;
+            $('progress').classList.toggle('on', busy);
+            $('progress').setAttribute('aria-busy', busy ? 'true' : 'false');
+            SCAN_INPUTS.forEach(id => { const el = $(id); if (el) el.disabled = busy; });
+            if (busy) startElapsed($('progress-text'), text);
+            else stopElapsed($('progress-text'));
+        }
+
         async function traverseEntry(entry, out) {
             if (entry.isFile) {
                 await new Promise(res => entry.file(f => { out.push(f); res(); }, res));
@@ -330,13 +482,12 @@
             }
         }
 
-        // Drag & Drop
-        const dropZone = document.getElementById('drop-zone');
-        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
-        dropZone.addEventListener('dragleave', () => { dropZone.classList.remove('dragover'); });
-        dropZone.addEventListener('drop', async (e) => {
+        const dropZone = $('drop-zone');
+        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('over'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('over'));
+        dropZone.addEventListener('drop', async e => {
             e.preventDefault();
-            dropZone.classList.remove('dragover');
+            dropZone.classList.remove('over');
             if (scanBusy) return;
             const items = e.dataTransfer.items;
             if (items && items.length && items[0].webkitGetAsEntry) {
@@ -356,126 +507,89 @@
             input.type = 'file';
             input.multiple = true;
             input.accept = '.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.gif,.txt,.md,.pdf,.docx,.xlsx,.pptx,.hwp,.wav,.mp3,.flac,.ogg,.m4a,.aac,.opus,.mp4,.mov,.m4v,.mkv,.webm,.avi';
-            input.onchange = (e) => addFiles(Array.from(e.target.files));
+            input.onchange = e => addFiles(Array.from(e.target.files));
             input.click();
         }
         dropZone.addEventListener('click', openFilePicker);
-        dropZone.addEventListener('keydown', (e) => {
+        dropZone.addEventListener('keydown', e => {
             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFilePicker(); }
         });
-        document.getElementById('dir-picker-btn').addEventListener('click', () => {
-            if (!scanBusy) document.getElementById('dir-picker').click();
-        });
-        document.getElementById('dir-picker').addEventListener('change', (e) => {
-            addFiles(Array.from(e.target.files));
-            e.target.value = '';
-        });
+        $('dir-picker-btn').addEventListener('click', () => { if (!scanBusy) $('dir-picker').click(); });
+        $('dir-picker').addEventListener('change', e => { addFiles(Array.from(e.target.files)); e.target.value = ''; });
+        $('upload-clear').addEventListener('click', () => { selectedFiles = []; renderFileChips(); });
 
-        function escapeHtml(value) {
-            return String(value).replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
+        function renderFileChips() {
+            const list = $('file-list');
+            list.innerHTML = '';
+            selectedFiles.forEach((file, i) => {
+                const name = file.webkitRelativePath || file.name;
+                const chip = document.createElement('span');
+                chip.className = 'chipfile';
+                chip.innerHTML = `<span class="nm">${escapeHtml(name)}</span><span>${(file.size/1024).toFixed(0)}K</span>`;
+                const x = document.createElement('button');
+                x.className = 'x'; x.textContent = '✕'; x.setAttribute('aria-label', '제거');
+                x.addEventListener('click', ev => { ev.stopPropagation(); selectedFiles.splice(i, 1); renderFileChips(); });
+                chip.appendChild(x);
+                list.appendChild(chip);
+            });
+            $('upload-row').hidden = selectedFiles.length === 0;
+            $('upload-n').textContent = selectedFiles.length;
         }
 
         function addFiles(files) {
-            const list = document.getElementById('file-list');
             files.forEach(file => {
-                const displayName = file.webkitRelativePath || file.name;
-                if (!selectedFiles.find(f => (f.webkitRelativePath || f.name) === displayName && f.size === file.size)) {
+                const name = file.webkitRelativePath || file.name;
+                if (!selectedFiles.find(f => (f.webkitRelativePath || f.name) === name && f.size === file.size)) {
                     selectedFiles.push(file);
-                    const item = document.createElement('div');
-                    item.className = 'file-item';
-                    item.innerHTML = `<span class="name">${escapeHtml(displayName)}</span><span class="size">${(file.size/1024).toFixed(1)} KB</span>`;
-                    list.appendChild(item);
                 }
             });
-            document.getElementById('upload-btn').disabled = selectedFiles.length === 0;
+            renderFileChips();
         }
 
-        function setBusy(btn, busy, text) {
-            scanBusy = busy;
-            btn.disabled = busy;
-            document.getElementById('progress').classList.toggle('active', busy);
-            document.getElementById('progress').setAttribute('aria-busy', busy ? 'true' : 'false');
-            // Lock every input control while a scan runs so the operator can
-            // see the running parameters can't be changed mid-flight.
-            ['folder-path', 'analyze-btn', 'pixel-mode', 'max-files',
-             'opt-recursive', 'opt-dedupe', 'opt-heatmaps', 'opt-model',
-             'opt-deep', 'dir-picker-btn'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.disabled = busy;
-            });
-            if (busy) { startElapsed(text); } else { stopElapsed(); document.getElementById('progress-text').textContent = ''; }
-        }
-
-        async function analyzeFolder() {
-            const folderPath = document.getElementById('folder-path').value;
-            if (!folderPath) {
-                alert('폴더 경로를 입력하세요');
-                return;
-            }
-
-            const btn = document.getElementById('analyze-btn');
+        /* ── folder scan (async job + poll) ────────── */
+        $('analyze-btn').addEventListener('click', async () => {
+            const folderPath = $('folder-path').value;
+            if (!folderPath) { toast('폴더 경로를 입력하세요', true); return; }
             const params = new URLSearchParams({
                 folder: folderPath,
-                pixel: document.getElementById('pixel-mode').value,
-                max_files: document.getElementById('max-files').value,
-                recursive: document.getElementById('opt-recursive').checked,
-                dedupe: document.getElementById('opt-dedupe').checked,
-                heatmaps: document.getElementById('opt-heatmaps').checked,
-                deep_signals: document.getElementById('opt-deep').checked,
+                pixel: pixelMode,
+                max_files: $('max-files').value,
+                recursive: $('opt-recursive').checked,
+                dedupe: $('opt-dedupe').checked,
+                heatmaps: $('opt-heatmaps').checked,
+                deep_signals: $('opt-deep').checked,
                 async: '1',
             });
-            if (!document.getElementById('opt-model').checked) {
-                params.set('no_default_engine', 'true');
-            }
-
-            setBusy(btn, true, '폴더 분석 중… 파일 수와 모델 로딩에 따라 수 분 걸릴 수 있습니다');
-
+            if (!$('opt-model').checked) params.set('no_default_engine', 'true');
+            setBusy(true, '폴더 분석 중… 모델 로딩 시 수 분 걸릴 수 있습니다');
             try {
-                // Async job: the server runs the scan on a worker thread and
-                // this loop polls /api/scan-status, so a long scan never holds
-                // one HTTP request open (and the elapsed ticker keeps ticking).
                 const start = await apiFetch('/api/scan?' + params.toString());
                 const job = await start.json();
-                if (job.error) {
-                    alert('오류: ' + job.error);
-                    return;
-                }
+                if (job.error) { toast('오류: ' + job.error, true); return; }
                 let data = null;
                 while (true) {
                     const status = await apiFetch('/api/scan-status?job=' + encodeURIComponent(job.job_id));
                     const state = await status.json();
-                    if (state.error) {
-                        alert('오류: ' + state.error);
-                        return;
-                    }
-                    if (state.status !== 'running') {
-                        data = state.result;
-                        break;
-                    }
+                    if (state.error) { toast('오류: ' + state.error, true); return; }
+                    if (state.status !== 'running') { data = state.result; break; }
                     await new Promise(res => setTimeout(res, 1500));
                 }
-
-                if (!data || data.error) {
-                    alert('오류: ' + (data && data.error ? data.error : '스캔 결과가 없습니다'));
-                    return;
-                }
-
+                if (!data || data.error) { toast('오류: ' + (data && data.error ? data.error : '스캔 결과 없음'), true); return; }
+                lastScanRoot = folderPath;
                 processResults(data);
+                toast(`분석 완료 — ${(data.items || []).length}개 파일`);
             } catch (error) {
-                alert('분석 중 오류 발생: ' + error.message);
+                toast('분석 중 오류: ' + error.message, true);
             } finally {
-                setBusy(btn, false, '');
+                setBusy(false);
             }
-        }
+        });
 
-        async function analyzeUploads() {
+        /* ── upload scan (batched) ─────────────────── */
+        $('upload-btn').addEventListener('click', async () => {
             if (!selectedFiles.length) return;
-            const btn = document.getElementById('upload-btn');
-            // The server caps each request at 20 files; send larger drops
-            // (e.g. a picked folder) in sequential batches and merge items.
             const BATCH = 20;
-            setBusy(btn, true, '업로드 파일 분석 중…');
-
+            setBusy(true, '업로드 파일 분석 중…');
             try {
                 const allItems = [];
                 const total = selectedFiles.length;
@@ -485,33 +599,33 @@
                     batch.forEach(f => form.append('files', f, f.webkitRelativePath || f.name));
                     const response = await apiFetch('/api/analyze-upload', { method: 'POST', body: form });
                     const data = await response.json();
-                    if (data.error) {
-                        alert('오류: ' + data.error);
-                        return;
-                    }
+                    if (data.error) { toast('오류: ' + data.error, true); return; }
                     allItems.push(...(data.items || []));
-                    if (total > BATCH) {
-                        startElapsed(`업로드 파일 분석 중… (${Math.min(i + BATCH, total)}/${total})`);
-                    }
+                    if (total > BATCH) startElapsed($('progress-text'), `업로드 분석 중… (${Math.min(i + BATCH, total)}/${total})`);
                 }
+                lastScanRoot = '';  // uploads are temp files; heatmaps unavailable
                 processResults({ items: allItems });
-            } catch (error) {
-                alert('분석 중 오류 발생: ' + error.message);
-            } finally {
-                setBusy(btn, false, '');
+                toast(`분석 완료 — ${allItems.length}개 파일`);
                 selectedFiles = [];
-                document.getElementById('file-list').innerHTML = '';
-                btn.disabled = true;
+                renderFileChips();
+            } catch (error) {
+                toast('분석 중 오류: ' + error.message, true);
+            } finally {
+                setBusy(false);
             }
-        }
+        });
 
+        /* ── results rendering ─────────────────────── */
         function processResults(data) {
             results = (data.items || []).map(item => ({ item }));
-            updateResults(data.summary || {});
+            renderResults(data.summary || {});
         }
 
         function riskLabel(band) {
-            return band === 'high' ? '높음' : band === 'medium' ? '주의' : '낮음';
+            return band === 'high' ? 'AI 의심' : band === 'medium' ? '주의' : band === 'low' ? '정상' : '불명';
+        }
+        function bandColor(band) {
+            return band === 'high' ? 'var(--red)' : band === 'medium' ? 'var(--orange)' : band === 'low' ? 'var(--green)' : 'var(--muted)';
         }
 
         function listItems(title, values, cls) {
@@ -520,131 +634,160 @@
                 const text = typeof v === 'string' ? v : (v.title ? `${v.title}: ${v.detail || ''}` : JSON.stringify(v));
                 return `<li>${escapeHtml(text)}</li>`;
             }).join('');
-            return `<div class="section ${cls || ''}"><div class="section-title">${title}</div><ul>${rows}</ul></div>`;
+            return `<div class="dgroup ${cls || ''}"><div class="dt">${title}</div><ul>${rows}</ul></div>`;
         }
 
         function detailHtml(item) {
             const r = item.result || {};
             const parts = [];
-            if (item.error) {
-                parts.push(`<div class="verdict">분석 실패: ${escapeHtml(item.error)}</div>`);
-            }
-            if (r.verdict) {
-                parts.push(`<div class="verdict">${escapeHtml(r.verdict)}</div>`);
-            }
+            if (item.error) parts.push(`<div class="verdict">분석 실패: ${escapeHtml(item.error)}</div>`);
+            if (r.verdict) parts.push(`<div class="verdict">${escapeHtml(r.verdict)}</div>`);
             const ma = r.model_analysis;
             if (ma) {
-                const score = ma.score != null ? ` — 점수 ${ma.score}` : '';
-                parts.push(`<div class="section"><div class="section-title">뉴럴 모델</div><div class="src-label">${escapeHtml(ma.model_id || 'model')}${escapeHtml(score)}</div></div>`);
+                const members = (ma.models || []).map(m =>
+                    `<li>${escapeHtml(m.model || 'model')} — ${m.score != null ? m.score : 'n/a'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
+                parts.push(`<div class="dgroup"><div class="dt">뉴럴 모델 — 점수 ${ma.score != null ? ma.score : 'n/a'}</div>${members ? `<ul>${members}</ul>` : `<div class="note">${escapeHtml(ma.detail || '')}</div>`}</div>`);
             }
             parts.push(listItems('신호', r.signals));
-            parts.push(listItems('한계', r.limitations, 'limitations'));
+            parts.push(listItems('한계', r.limitations, 'lim'));
             parts.push(listItems('다음 확인', r.next_checks));
             const sg = r.source_guess;
             if (sg && sg.label) {
                 const reasons = (sg.reasons || []).map(escapeHtml).join(' ');
-                parts.push(`<div class="section"><div class="section-title">출처 추정 (${escapeHtml(sg.confidence || 'unknown')})</div><div class="src-label">${escapeHtml(sg.label)} — ${reasons}</div></div>`);
+                parts.push(`<div class="dgroup"><div class="dt">출처 추정 (${escapeHtml(sg.confidence || 'unknown')})</div><div class="note">${escapeHtml(sg.label)} — ${reasons}</div></div>`);
+            }
+            if (item.heatmap_path && lastScanRoot) {
+                parts.push(`<div class="dgroup"><div class="dt">픽셀 히트맵</div><div class="hm-slot" data-hm="${escapeHtml(item.heatmap_path)}"><span class="note">히트맵 로딩 중…</span></div></div>`);
             }
             parts.push(`<div class="caveat">이 결과는 스크리닝 우선순위 신호입니다. 합성 여부의 확정 판정이 아니며, 원본 확보·맥락 검토가 필요합니다.</div>`);
             return parts.join('');
         }
 
-        function renderRows(tbody, from, to) {
-            results.slice(from, to).forEach(entry => {
-                const item = entry.item;
-                const r = item.result || {};
-                const band = r.band || 'unknown';
-                const score = r.score != null ? r.score : 0;
-                const tool = (r.source_guess && r.source_guess.label) || '알 수 없음';
-                const hasModel = !!r.model_analysis;
-
-                const tr = document.createElement('tr');
-                tr.className = 'result-row';
-                tr.tabIndex = 0;
-                tr.setAttribute('aria-expanded', 'false');
-                tr.innerHTML = `
-                    <td class="risk-${band}">${riskLabel(band)}</td>
-                    <td>${Number(score) || 0}</td>
-                    <td>${escapeHtml(tool)}${hasModel ? '<span class="model-badge">NN</span>' : ''}</td>
-                    <td>${escapeHtml(item.name || item.path)}</td>
-                `;
-                const detailTr = document.createElement('tr');
-                detailTr.className = 'detail-row';
-                detailTr.style.display = 'none';
-                detailTr.innerHTML = `<td colspan="4">${detailHtml(item)}</td>`;
-                // Examiner ground-truth labels append to the feedback JSONL
-                // the `feedback` CLI consumes for calibration reports.
-                const cell = detailTr.querySelector('td');
-                const fb = document.createElement('div');
-                fb.className = 'section';
-                fb.innerHTML = `<div class="section-title">검토자 정답 라벨 (피드백 파일에 기록 — 모델 보정용)</div>` +
-                    `<button class="btn" data-label="synthetic">실제 합성/AI로 확인</button> ` +
-                    `<button class="btn" data-label="real">실제 실물로 확인</button> ` +
-                    `<span class="status-note fb-status"></span>`;
-                fb.querySelectorAll('button[data-label]').forEach(b => b.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    submitFeedback(item, b.dataset.label, fb.querySelector('.fb-status'));
-                }));
-                cell.appendChild(fb);
-                const toggle = () => {
-                    const open = detailTr.style.display !== 'none';
-                    detailTr.style.display = open ? 'none' : '';
-                    tr.classList.toggle('expanded', !open);
-                    tr.setAttribute('aria-expanded', String(!open));
-                };
-                tr.addEventListener('click', toggle);
-                tr.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
-                });
-                tbody.appendChild(tr);
-                tbody.appendChild(detailTr);
-            });
+        async function loadHeatmap(slot) {
+            const hmPath = slot.dataset.hm;
+            try {
+                const res = await apiFetch('/api/heatmap?path=' + encodeURIComponent(hmPath) + '&root=' + encodeURIComponent(lastScanRoot));
+                if (!res.ok) { slot.innerHTML = `<span class="note">히트맵을 불러올 수 없습니다 (${res.status})</span>`; return; }
+                const blob = await res.blob();
+                const img = document.createElement('img');
+                img.className = 'heatmap-img';
+                img.alt = '픽셀 분석 히트맵';
+                img.src = URL.createObjectURL(blob);
+                slot.innerHTML = '';
+                slot.appendChild(img);
+            } catch (e) {
+                slot.innerHTML = `<span class="note">히트맵 로딩 실패: ${escapeHtml(e.message)}</span>`;
+            }
         }
 
-        function updateResults(summary) {
-            const tbody = document.getElementById('results-body');
-            tbody.innerHTML = '';
+        function renderCard(list, entry) {
+            const item = entry.item;
+            const r = item.result || {};
+            const band = r.band || 'unknown';
+            const score = r.score != null ? r.score : 0;
+            const tool = (r.source_guess && r.source_guess.label) || '알 수 없음';
 
+            const card = document.createElement('div');
+            card.className = 'res';
+            card.innerHTML = `
+                <div class="res-main">
+                    <div class="ring">
+                        <svg viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15.9"></circle>
+                        <circle class="val" cx="18" cy="18" r="15.9" pathLength="100"
+                            stroke-dasharray="${Math.max(0, Math.min(100, score))} 100"
+                            style="stroke:${bandColor(band)}"></circle></svg>
+                        <span class="num" style="color:${bandColor(band)}">${Number(score) || 0}</span>
+                    </div>
+                    <div class="res-info">
+                        <div class="res-name">${escapeHtml(item.name || item.path || '파일')}</div>
+                        <div class="res-sub">
+                            <span class="band-pill band-${band}">${riskLabel(band)}</span>
+                            <span>${escapeHtml(tool)}</span>
+                            ${r.model_analysis ? '<span class="nn-badge">NN</span>' : ''}
+                            ${item.error ? '<span style="color:var(--red)">분석 실패</span>' : ''}
+                        </div>
+                    </div>
+                    <span class="chev">›</span>
+                </div>
+                <div class="res-detail"></div>`;
+
+            const detail = card.querySelector('.res-detail');
+            let built = false;
+            const toggle = () => {
+                card.classList.toggle('open');
+                if (card.classList.contains('open') && !built) {
+                    built = true;
+                    detail.innerHTML = detailHtml(item);
+                    const fb = document.createElement('div');
+                    fb.className = 'fb-row';
+                    fb.innerHTML = `<span class="note">검토자 라벨:</span>
+                        <button class="btn btn-sm" data-label="synthetic">실제 합성/AI</button>
+                        <button class="btn btn-sm" data-label="real">실제 실물</button>
+                        <span class="fb-status"></span>`;
+                    fb.querySelectorAll('button[data-label]').forEach(b => b.addEventListener('click', e => {
+                        e.stopPropagation();
+                        submitFeedback(item, b.dataset.label, fb.querySelector('.fb-status'));
+                    }));
+                    detail.appendChild(fb);
+                    detail.querySelectorAll('.hm-slot').forEach(loadHeatmap);
+                }
+            };
+            card.querySelector('.res-main').addEventListener('click', toggle);
+            card.querySelector('.res-main').setAttribute('tabindex', '0');
+            card.querySelector('.res-main').addEventListener('keydown', e => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+            });
+            list.appendChild(card);
+        }
+
+        function renderResults(summary) {
+            const list = $('res-list');
+            list.innerHTML = '';
             results.sort((a, b) => ((b.item.result || {}).score || 0) - ((a.item.result || {}).score || 0));
 
             if (!results.length) {
-                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #999;">분석 결과가 없습니다</td></tr>';
+                list.innerHTML = '<div class="empty">분석 결과가 없습니다</div>';
             }
-
-            // Windowed rendering: keep the DOM small on large folders.
             renderedRows = Math.min(RENDER_WINDOW, results.length);
-            renderRows(tbody, 0, renderedRows);
-            if (renderedRows < results.length) {
-                const moreTr = document.createElement('tr');
-                moreTr.innerHTML = `<td colspan="4" style="text-align: center;"><button class="btn btn-primary" id="moreBtn">나머지 ${results.length - renderedRows}개 더 보기</button></td>`;
-                tbody.appendChild(moreTr);
-                moreTr.querySelector('#moreBtn').addEventListener('click', () => {
-                    moreTr.remove();
-                    const prev = renderedRows;
-                    renderedRows = Math.min(renderedRows + RENDER_WINDOW, results.length);
-                    renderRows(tbody, prev, renderedRows);
-                    if (renderedRows < results.length) tbody.appendChild(moreTr);
-                    else moreTr.remove();
-                });
-            }
+            results.slice(0, renderedRows).forEach(e => renderCard(list, e));
+            updateMore(list);
 
-            const bands = { high: 0, medium: 0, low: 0 };
+            const bands = { high: 0, medium: 0, low: 0, other: 0 };
             let modelCount = 0;
             results.forEach(entry => {
                 const r = entry.item.result || {};
-                bands[r.band === 'high' ? 'high' : r.band === 'medium' ? 'medium' : 'low']++;
+                bands[r.band === 'high' ? 'high' : r.band === 'medium' ? 'medium' : r.band === 'low' ? 'low' : 'other']++;
                 if (r.model_analysis) modelCount++;
             });
             const modelActive = summary.external_model_active != null ? summary.external_model_active : modelCount;
-
-            document.getElementById('stat-ai').textContent = bands.high;
-            document.getElementById('stat-medium').textContent = bands.medium;
-            document.getElementById('stat-low').textContent = bands.low;
-            document.getElementById('stat-total').textContent = results.length;
-            document.getElementById('stat-model').textContent = modelActive;
-            document.getElementById('stat-model-label').textContent =
-                modelActive > 0 ? '외부 모델 분석 파일' : '휴리스틱 선별 전용';
+            $('stat-ai').textContent = bands.high;
+            $('stat-medium').textContent = bands.medium;
+            $('stat-low').textContent = bands.low;
+            $('stat-total').textContent = results.length;
+            $('stat-model-label').textContent = `뉴럴 ${modelActive}`;
+            const total = Math.max(1, results.length);
+            $('distbar').innerHTML =
+                `<div style="width:${bands.high / total * 100}%;background:var(--red)"></div>` +
+                `<div style="width:${bands.medium / total * 100}%;background:var(--orange)"></div>` +
+                `<div style="width:${bands.low / total * 100}%;background:var(--green)"></div>` +
+                `<div style="width:${bands.other / total * 100}%;background:var(--line)"></div>`;
+            $('results-section').hidden = false;
+            $('results-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
+
+        function updateMore(list) {
+            const row = $('more-row');
+            if (renderedRows >= results.length) { row.hidden = true; return; }
+            row.hidden = false;
+            $('more-btn').textContent = `나머지 ${results.length - renderedRows}개 더 보기`;
+        }
+        $('more-btn').addEventListener('click', () => {
+            const list = $('res-list');
+            const prev = renderedRows;
+            renderedRows = Math.min(renderedRows + RENDER_WINDOW, results.length);
+            results.slice(prev, renderedRows).forEach(e => renderCard(list, e));
+            updateMore(list);
+        });
 
         async function submitFeedback(item, label, statusEl) {
             statusEl.textContent = '기록 중…';
@@ -660,14 +803,36 @@
                     }),
                 });
                 const data = await res.json();
-                statusEl.textContent = data.ok ? ('기록됨 → ' + data.feedback_file) : ('실패: ' + (data.error || ''));
+                statusEl.textContent = data.ok ? '기록됨 ✓' : ('실패: ' + (data.error || ''));
             } catch (e) {
                 statusEl.textContent = '실패: ' + e.message;
             }
         }
 
-        async function downloadReport() {
-            if (!results.length) { alert('분석 결과가 없습니다'); return; }
+        /* ── export ────────────────────────────────── */
+        function download(blob, name) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = name; a.click();
+            URL.revokeObjectURL(url);
+        }
+        $('exp-json').addEventListener('click', () => {
+            if (!results.length) { toast('분석 결과가 없습니다', true); return; }
+            download(new Blob([JSON.stringify(results.map(e => e.item), null, 2)], { type: 'application/json' }), 'deepfake-lens-results.json');
+        });
+        $('exp-csv').addEventListener('click', () => {
+            if (!results.length) { toast('분석 결과가 없습니다', true); return; }
+            const f = v => /[",\r\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+            // BOM prefix keeps Korean intact when the CSV is opened in Excel.
+            let csv = '﻿위험도,점수,출처 추정,모델,파일명,판정\n';
+            results.forEach(e => {
+                const item = e.item, r = item.result || {};
+                csv += [f(r.band || ''), f(r.score != null ? r.score : ''), f((r.source_guess && r.source_guess.label) || ''), f((r.model_analysis && r.model_analysis.model_id) || ''), f(item.name || item.path), f(r.verdict || '')].join(',') + '\n';
+            });
+            download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'deepfake-lens-results.csv');
+        });
+        $('exp-report').addEventListener('click', async () => {
+            if (!results.length) { toast('분석 결과가 없습니다', true); return; }
             try {
                 const res = await apiFetch('/api/report', {
                     method: 'POST',
@@ -677,62 +842,28 @@
                 const type = res.headers.get('Content-Type') || '';
                 if (!type.includes('text/html')) {
                     const data = await res.json();
-                    alert('리포트 생성 실패: ' + (data.error || res.status));
+                    toast('리포트 생성 실패: ' + (data.error || res.status), true);
                     return;
                 }
-                const blob = await res.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'deepfake-lens-report.html';
-                a.click();
-                URL.revokeObjectURL(url);
-            } catch (e) {
-                alert('리포트 생성 오류: ' + e.message);
-            }
-        }
+                download(await res.blob(), 'deepfake-lens-report.html');
+            } catch (e) { toast('리포트 오류: ' + e.message, true); }
+        });
+        $('exp-clear').addEventListener('click', () => {
+            results = [];
+            $('results-section').hidden = true;
+        });
 
-        function exportJSON() {
-            const data = JSON.stringify(results.map(e => e.item), null, 2);
-            const blob = new Blob([data], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'deepfake-lens-results.json';
-            a.click();
-        }
-
-        function csvField(value) {
-            const text = String(value);
-            return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
-        }
-
-        function exportCSV() {
-            let csv = '위험도,점수,출처 추정,모델,파일명,판정\n';
-            results.forEach(e => {
-                const item = e.item;
-                const r = item.result || {};
-                const model = (r.model_analysis && r.model_analysis.model_id) || '';
-                csv += [csvField(r.band || ''), csvField(r.score != null ? r.score : ''), csvField((r.source_guess && r.source_guess.label) || ''), csvField(model), csvField(item.name || item.path), csvField(r.verdict || '')].join(',') + '\n';
-            });
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'deepfake-lens-results.csv';
-            a.click();
-        }
-
-        // ── Unified quick check (/api/check) ───────────────────────────
-        async function quickCheckText() {
-            const text = document.getElementById('qc-text').value;
-            if (!text.trim()) { alert('검사할 텍스트를 입력하세요'); return; }
-            await runQuickCheck({ method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({text}) });
-        }
-
-        document.getElementById('qc-file').addEventListener('change', (e) => {
+        /* ── quick check ───────────────────────────── */
+        $('qc-text-btn').addEventListener('click', () => {
+            const text = $('qc-text').value;
+            if (!text.trim()) { toast('검사할 텍스트를 입력하세요', true); return; }
+            const body = { text };
+            const wm = $('qc-wm').value.trim();
+            if (wm) body.watermark_secret = wm;
+            runQuickCheck({ method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+        });
+        $('qc-file-btn').addEventListener('click', () => $('qc-file').click());
+        $('qc-file').addEventListener('change', e => {
             const file = e.target.files[0];
             e.target.value = '';
             if (!file) return;
@@ -742,81 +873,148 @@
         });
 
         async function runQuickCheck(options) {
-            const status = document.getElementById('qc-status');
-            const box = document.getElementById('qc-result');
-            status.textContent = '전체 검사 실행 중… 뉴럴 모델 로딩 시 수십 초 걸릴 수 있습니다';
-            ['qc-text-btn', 'qc-file-btn'].forEach(id => document.getElementById(id).disabled = true);
+            const status = $('qc-status'), box = $('qc-out');
+            startElapsed(status, '전체 검사 실행 중… 뉴럴 모델 로딩 시 수십 초');
+            ['qc-text-btn', 'qc-file-btn'].forEach(id => $(id).disabled = true);
             try {
                 const res = await apiFetch('/api/check', options);
                 const data = await res.json();
                 if (data.error) {
-                    box.className = 'qc-result visible';
-                    box.innerHTML = `<div class="verdict">오류: ${escapeHtml(data.error)}</div>`;
+                    box.className = 'qc-out on';
+                    box.innerHTML = `<div class="verdict" style="color:var(--red)">오류: ${escapeHtml(data.error)}</div>`;
                     return;
                 }
                 renderQuickCheck(data);
             } catch (e) {
-                box.className = 'qc-result visible';
-                box.innerHTML = `<div class="verdict">검사 실패: ${escapeHtml(e.message)}</div>`;
+                box.className = 'qc-out on';
+                box.innerHTML = `<div class="verdict" style="color:var(--red)">검사 실패: ${escapeHtml(e.message)}</div>`;
             } finally {
-                status.textContent = '';
-                ['qc-text-btn', 'qc-file-btn'].forEach(id => document.getElementById(id).disabled = false);
+                stopElapsed(status);
+                ['qc-text-btn', 'qc-file-btn'].forEach(id => $(id).disabled = false);
             }
         }
 
-        function qcLayer(title, node) {
-            return `<div class="qc-layer"><div class="section-title">${escapeHtml(title)}</div>${node}</div>`;
+        function layer(title, node) {
+            return `<div class="layer"><div class="lt">${escapeHtml(title)}</div>${node}</div>`;
         }
 
         function renderQuickCheck(data) {
-            const box = document.getElementById('qc-result');
+            const box = $('qc-out');
             const item = data.item || {};
             const r = item.result || {};
             const band = r.band || 'unknown';
             const score = r.score != null ? r.score : 0;
             const bandText = band === 'high' ? 'AI 의심 — 높음' : band === 'medium' ? '주의 필요' : band === 'low' ? '낮음' : '판단 어려움';
             const parts = [];
-            parts.push(`<div class="qc-verdict"><span class="score risk-${band}">${Number(score) || 0}</span><span class="band risk-${band}">${escapeHtml(bandText)}</span><span class="src-label">${escapeHtml(item.name || '')}</span></div>`);
+            parts.push(`<div class="qc-head">
+                <span class="big" style="color:${bandColor(band)}">${Number(score) || 0}</span>
+                <div><span class="band-pill band-${band}">${escapeHtml(bandText)}</span>
+                <div class="note" style="margin-top:4px">${escapeHtml(item.name || '')}</div></div></div>`);
             if (r.verdict) parts.push(`<div class="verdict">${escapeHtml(r.verdict)}</div>`);
 
             const ma = r.model_analysis;
             if (ma) {
                 const members = (ma.models || []).map(m =>
                     `<li>${escapeHtml(m.model || 'model')} — ${m.score != null ? m.score : 'n/a'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
-                parts.push(qcLayer(`뉴럴 앙상블 — 점수 ${ma.score != null ? ma.score : 'n/a'}`,
-                    members ? `<ul>${members}</ul>` : `<div class="src-label">${escapeHtml(ma.detail || '')}</div>`));
+                parts.push(layer(`뉴럴 앙상블 — 점수 ${ma.score != null ? ma.score : 'n/a'}`,
+                    members ? `<ul>${members}</ul>` : `<div class="note">${escapeHtml(ma.detail || '')}</div>`));
             }
             if (data.advanced) {
                 const a = data.advanced;
                 const sig = (a.signals || []).map(s => `<li>${escapeHtml(s.title)} (+${s.weight}) — ${escapeHtml(s.detail)}</li>`).join('');
                 const lim = (a.limitations || []).map(l => `<li>${escapeHtml(l)}</li>`).join('');
-                parts.push(qcLayer(`스타일/지문 분석 — 점수 ${a.score != null ? a.score : 0} (${escapeHtml(a.band_label || a.band || '')})`,
-                    (sig ? `<ul>${sig}</ul>` : '<div class="src-label">발동 신호 없음</div>') + (lim ? `<ul style="color:#8a6d00">${lim}</ul>` : '')));
+                parts.push(layer(`스타일/지문 분석 — 점수 ${a.score != null ? a.score : 0} (${escapeHtml(a.band_label || a.band || '')})`,
+                    (sig ? `<ul>${sig}</ul>` : '<div class="note">발동 신호 없음</div>') + (lim ? `<ul style="color:var(--amber-text)">${lim}</ul>` : '')));
             }
             if (data.forensic) {
-                const f = data.forensic;
-                const sig = (f.signals || []).map(s => `<li>${escapeHtml(s.title)} — ${escapeHtml(s.detail)}</li>`).join('');
-                const prov = (f.provenance_records || []).map(p => `<li>${escapeHtml(p.kind || p.source || 'record')}: ${escapeHtml(p.summary || p.detail || '')}</li>`).join('');
-                parts.push(qcLayer(`메타데이터 / C2PA 포렌식 — 점수 ${f.score != null ? f.score : 0}`,
-                    (sig ? `<ul>${sig}</ul>` : '') + (prov ? `<ul>${prov}</ul>` : '') || '<div class="src-label">단서 없음</div>'));
+                const fr = data.forensic;
+                const sig = (fr.signals || []).map(s => `<li>${escapeHtml(s.title)} — ${escapeHtml(s.detail)}</li>`).join('');
+                const prov = (fr.provenance_records || []).map(p => `<li>${escapeHtml(p.kind || p.source || 'record')}: ${escapeHtml(p.summary || p.detail || '')}</li>`).join('');
+                parts.push(layer(`메타데이터 / C2PA 포렌식 — 점수 ${fr.score != null ? fr.score : 0}`,
+                    (sig ? `<ul>${sig}</ul>` : '') + (prov ? `<ul>${prov}</ul>` : '') || '<div class="note">단서 없음</div>'));
+            }
+            if (data.watermark) {
+                const w = data.watermark;
+                parts.push(layer('워터마크 (KGW)',
+                    `<div class="kv"><b>판정</b><span>${escapeHtml(w.verdict || '')}</span><b>z-score</b><span>${w.z_score != null ? w.z_score : 'n/a'}</span><b>점수</b><span>${w.score != null ? w.score : 'n/a'}</span></div>`));
             }
             parts.push(listItems('다음 확인', r.next_checks));
             parts.push(`<div class="caveat">이 결과는 스크리닝 우선순위 신호입니다. 합성 여부의 확정 판정이 아니며, 원본 확보·맥락 검토가 필요합니다.</div>`);
             box.innerHTML = parts.join('');
-            box.className = 'qc-result visible';
-            box.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+            box.className = 'qc-out on';
+            box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
-        function clearResults() {
-            results = [];
-            document.getElementById('results-body').innerHTML = '<tr><td colspan="4" style="text-align: center; color: #999;">분석 결과가 없습니다</td></tr>';
-            document.getElementById('stat-ai').textContent = '0';
-            document.getElementById('stat-medium').textContent = '0';
-            document.getElementById('stat-low').textContent = '0';
-            document.getElementById('stat-total').textContent = '0';
-            document.getElementById('stat-model').textContent = '0';
-            document.getElementById('stat-model-label').textContent = '외부 모델 분석 파일';
+        /* ── compare ───────────────────────────────── */
+        const cmpFiles = { a: null, b: null };
+        function bindSlot(slotId, inputId, key) {
+            const slot = $(slotId), input = $(inputId);
+            const pick = () => { if (!scanBusy) input.click(); };
+            slot.addEventListener('click', pick);
+            slot.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+            input.addEventListener('change', e => {
+                const f = e.target.files[0];
+                e.target.value = '';
+                if (!f) return;
+                cmpFiles[key] = f;
+                slot.classList.add('filled');
+                slot.querySelector('.sn').textContent = f.name;
+                $('cmp-btn').disabled = !(cmpFiles.a && cmpFiles.b);
+            });
         }
+        bindSlot('slot-a', 'cmp-a', 'a');
+        bindSlot('slot-b', 'cmp-b', 'b');
+
+        $('cmp-btn').addEventListener('click', async () => {
+            if (!(cmpFiles.a && cmpFiles.b)) return;
+            const status = $('cmp-status'), box = $('cmp-result');
+            const form = new FormData();
+            form.append('file_a', cmpFiles.a, cmpFiles.a.name);
+            form.append('file_b', cmpFiles.b, cmpFiles.b.name);
+            startElapsed(status, '비교 실행 중… (화자 모델 로딩 시 수십 초)');
+            $('cmp-btn').disabled = true;
+            try {
+                const res = await apiFetch('/api/compare', { method: 'POST', body: form });
+                const data = await res.json();
+                box.classList.add('on');
+                if (data.error) {
+                    box.innerHTML = `<div class="verdict" style="color:var(--red)">오류: ${escapeHtml(data.error)}</div>`;
+                    return;
+                }
+                renderCompare(data);
+            } catch (e) {
+                box.classList.add('on');
+                box.innerHTML = `<div class="verdict" style="color:var(--red)">비교 실패: ${escapeHtml(e.message)}</div>`;
+            } finally {
+                stopElapsed(status);
+                $('cmp-btn').disabled = false;
+            }
+        });
+
+        function renderCompare(data) {
+            const box = $('cmp-result');
+            const kind = data.kind === 'speaker' ? '화자 유사도 (음성)' : data.kind === 'stylometry' ? '필자 유사도 (텍스트)' : (data.kind || '비교');
+            const band = data.band || 'unknown';
+            const score = data.score != null ? data.score : 0;
+            const bandText = band === 'high' ? '동일 화자/필자 가능성 높음' : band === 'medium' ? '유사 단서 있음' : band === 'low' ? '다를 가능성' : '판단 어려움';
+            const parts = [];
+            parts.push(`<div class="qc-head">
+                <span class="big" style="color:${bandColor(band)}">${Number(score) || 0}</span>
+                <div><span class="band-pill band-${band}">${escapeHtml(bandText)}</span>
+                <div class="note" style="margin-top:4px">${escapeHtml(kind)}${data.method ? ' · ' + escapeHtml(data.method) : ''}</div></div></div>`);
+            if (data.verdict) parts.push(`<div class="verdict">${escapeHtml(data.verdict)}</div>`);
+            const kv = [];
+            if (data.distance != null) kv.push(`<b>거리</b><span>${escapeHtml(String(data.distance))}</span>`);
+            parts.push(layer('측정값', `<div class="kv">${kv.join('')}</div>`));
+            parts.push(listItems('한계', data.limitations, 'lim'));
+            parts.push(`<div class="caveat">유사도는 동일인 증명이 아닙니다. 추가 증거와 함께 해석하세요.</div>`);
+            box.innerHTML = parts.join('');
+        }
+
+        /* ── version chip ──────────────────────────── */
+        apiFetch('/api/stats').then(r => r.json()).then(d => {
+            if (d.version) $('ver-chip').textContent = 'v' + d.version;
+        }).catch(() => {});
     </script>
 </body>
 </html>
