@@ -47,6 +47,12 @@ hwp = ["syhwp>=0.0.7", "olefile>=0.46"]
 # first use; m4a/aac/mp3 inputs also need ffmpeg for wav conversion.
 # Without it, speaker comparison falls back to MFCC distance.
 speaker = ["speechbrain>=1.0", "soundfile>=0.12", "torch>=2.1", "torchaudio>=2.1"]
+# Pretrained SyncNet lip-sync for lipsync.py. syncnet-python calls the
+# scenedetect 0.6 API (video_manager), which 0.7 removed — pin below 0.7.
+# Also needs models/syncnet_v2.model + models/sfd_face.pth — run
+# scripts/fetch_syncnet.py. Without it, lipsync falls back to the
+# zero-asset envelope/mouth heuristic.
+lipsync = ["syncnet-python>=0.2.2", "scenedetect>=0.6,<0.7", "torch>=2.0", "opencv-python>=4.8"]
 full = ["librosa>=0.10", "opencv-python>=4.8", "numpy>=1.24", "scipy>=1.10", "scikit-learn>=1.3"]
 dev = [
   "numpy>=1.24",

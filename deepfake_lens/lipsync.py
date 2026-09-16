@@ -39,6 +39,11 @@ class LipsyncAnalysis:
     mouth_samples: int
     speech_activity: float | None  # envelope std — gate for the verdict
     limitations: list[str]
+    # SyncNet-path fields (None on the heuristic path). Kept separate so
+    # heuristic fields never carry pretrained-model semantics.
+    syncnet_confidence: float | None = None
+    syncnet_min_dist: float | None = None
+    method: str = "heuristic"
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
@@ -245,7 +250,11 @@ def _syncnet_analysis(video_path: Path) -> LipsyncAnalysis | None:
             _SYNCNET_PIPELINE.inference(str(video_path))
         )
     except Exception:
-        _SYNCNET_FAILED = True
+        # Latch only when the pipeline never constructed — a per-file
+        # inference failure (corrupt video, no decodable stream) must not
+        # permanently disable SyncNet for the rest of the process.
+        if _SYNCNET_PIPELINE is None:
+            _SYNCNET_FAILED = True
         return None
 
     limitations = [
@@ -256,8 +265,11 @@ def _syncnet_analysis(video_path: Path) -> LipsyncAnalysis | None:
         return LipsyncAnalysis(
             False, 0, "립싱크 분석 불가 — SyncNet이 얼굴 트랙을 찾지 못했습니다.",
             None, None, 0, None, limitations + ["S3FD가 유효한 얼굴 트랙을 검출하지 못했습니다."],
+            method="syncnet",
         )
-    offset_frames = float(offsets[0]) if offsets else 0.0
+    # All face tracks get checked — report the worst offset across tracks
+    # rather than only the first detected face.
+    offset_frames = max((float(o) for o in offsets), key=abs)
     lag_seconds = abs(offset_frames) / 25.0
     confidence = float(max_conf)
     # SyncNet convention: |offset| <= 3 frames and confidence >= 3 means
@@ -269,6 +281,8 @@ def _syncnet_analysis(video_path: Path) -> LipsyncAnalysis | None:
     else:
         score, verdict = 0, f"SyncNet이 정상 동기 범위를 측정했습니다(오프셋 {offset_frames:+.0f}프레임, 신뢰도 {confidence:.1f})."
     return LipsyncAnalysis(
-        True, score, verdict, round(-min_dist, 4) if min_dist else None,
-        round(lag_seconds, 3), len(offsets), confidence, limitations,
+        True, score, verdict, None, round(lag_seconds, 3), len(offsets), None,
+        limitations, syncnet_confidence=round(confidence, 4),
+        syncnet_min_dist=round(min_dist, 4) if min_dist else None,
+        method="syncnet",
     )

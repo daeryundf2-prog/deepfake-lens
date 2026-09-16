@@ -1153,7 +1153,8 @@ def _file_text(path: Path) -> str | None:
         if extension in SUPPORTED_DOCUMENT_EXTENSIONS:
             text, _ = extract_document_text(path)
             return text or None
-        if extension in SUPPORTED_TEXT_EXTENSIONS:
+        # Match compare_files' text set — .rst/.log are plain text too.
+        if extension in SUPPORTED_TEXT_EXTENSIONS | {".rst", ".log"}:
             return _read_prefix(path, 4 * 1024 * 1024).decode("utf-8", errors="replace")
     except OSError:
         return None

@@ -105,3 +105,29 @@ class HwpExtractionTest(unittest.TestCase):
         text, meta = extract_document_text(Path(fixture))
         self.assertEqual(meta["extractor"], "syhwp")
         self.assertGreater(len(text), 50)
+
+
+class DocumentTextFeedsModelMembersTest(unittest.TestCase):
+    """Text model members must receive extracted text, not container bytes."""
+
+    def test_docx_passes_extracted_text_to_members(self) -> None:
+        from unittest.mock import patch
+        from deepfake_lens.core import analyze_file
+
+        seen: list[Path] = []
+
+        def spy(path, model_path=None, *, modality=None, model_name=None):
+            seen.append(Path(path).read_bytes()[:64])
+            return None
+
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "note.docx"
+            body = "어제 산책을 하다가 오래된 친구를 만났다. " * 12
+            _docx(doc, body)
+            with patch("deepfake_lens.core.analyze_external_model", side_effect=spy):
+                item = analyze_file(doc)
+        self.assertEqual(item.status, "analyzed")
+        self.assertTrue(seen, "member path never invoked")
+        fed = seen[0].decode("utf-8", errors="replace")
+        self.assertIn("산책", fed)  # extracted text, not PK zip bytes
+        self.assertNotIn("PK", fed[:2])

@@ -742,6 +742,7 @@ class SpeakerComparison:
     band: str
     verdict: str
     limitations: list[str]
+    method: str = "mfcc"  # "ecapa" when the SpeechBrain path answered
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
@@ -771,7 +772,7 @@ def compare_speakers(path_a: Path | str, path_b: Path | str, *, segment_seconds:
         else:
             band = "different"
             verdict = "ECAPA-TDNN 임베딩 유사도가 낮아 다른 화자일 가능성이 높습니다."
-        return SpeakerComparison(score, 1.0 - similarity, band, verdict, limitations)
+        return SpeakerComparison(score, 1.0 - similarity, band, verdict, limitations, method="ecapa")
 
     limitations: list[str] = [
         "MFCC 기반 거리 측정이며 포렌식 화자 인식이 아닙니다.",

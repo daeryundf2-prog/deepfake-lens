@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import tempfile
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from pathlib import Path
@@ -312,11 +314,28 @@ def analyze_file(
     if extension in SUPPORTED_TEXT_EXTENSIONS or extension in SUPPORTED_DOCUMENT_EXTENSIONS:
         try:
             doc_metadata: dict[str, str] = {}
+            model_input = file_path
+            tmp_text_path: Path | None = None
             if extension in SUPPORTED_DOCUMENT_EXTENSIONS:
                 text, doc_metadata = extract_document_text(file_path)
+                # Binary containers (docx/hwp/pdf) must not reach the text
+                # members as raw bytes — feed the extracted text instead so
+                # PPL/binoculars and the language gate see real prose.
+                if text.strip():
+                    fd, tmp_name = tempfile.mkstemp(suffix=".txt", prefix="dflens-")
+                    try:
+                        os.write(fd, text.encode("utf-8", errors="replace"))
+                    finally:
+                        os.close(fd)
+                    tmp_text_path = Path(tmp_name)
+                    model_input = tmp_text_path
             else:
                 text = _read_prefix(file_path, text_bytes).decode("utf-8", errors="replace")
-            model_analysis = analyze_external_model(file_path, model_path, modality="text")
+            try:
+                model_analysis = analyze_external_model(model_input, model_path, modality="text")
+            finally:
+                if tmp_text_path is not None:
+                    tmp_text_path.unlink(missing_ok=True)
             result = analyze_text(text, model_analysis=model_analysis)
             result = _apply_document_metadata(result, doc_metadata)
             return ScanItem(display_path, file_path.name, "text", "analyzed", size, result)
@@ -557,7 +576,7 @@ def compare_files(file_a: Path | str, file_b: Path | str) -> dict[str, object]:
     ext_a, ext_b = path_a.suffix.lower(), path_b.suffix.lower()
     if ext_a in SUPPORTED_AUDIO_EXTENSIONS and ext_b in SUPPORTED_AUDIO_EXTENSIONS:
         result = compare_speakers(path_a, path_b)
-        return {"kind": "speaker", "score": result.same_speaker_score, "band": result.band, "verdict": result.verdict, "distance": result.distance, "limitations": result.limitations}
+        return {"kind": "speaker", "score": result.same_speaker_score, "band": result.band, "verdict": result.verdict, "distance": result.distance, "method": result.method, "limitations": result.limitations}
     if ext_a in text_exts and ext_b in text_exts:
         def _text(path: Path) -> str | None:
             try:
