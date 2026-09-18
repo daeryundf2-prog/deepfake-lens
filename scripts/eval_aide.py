@@ -22,6 +22,14 @@ sys.path.insert(0, str(REPO_ROOT))
 
 import importlib.util  # noqa: E402
 
+from deepfake_lens.evaluation_metrics import (
+    auroc as _auroc,
+    eer as _eer,
+    sweep as _sweep,
+    threshold_at_fpr as _threshold_at_fpr,
+    undefined_reason,
+)
+
 
 def _load_run_aide():
     spec = importlib.util.spec_from_file_location("run_aide", REPO_ROOT / "scripts" / "run_aide.py")
@@ -39,6 +47,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--report", type=Path)
     parser.add_argument("--target-fpr", type=float, default=0.05)
     args = parser.parse_args(argv)
+    try:
+        _threshold_at_fpr([], args.target_fpr)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     import torch
     from PIL import Image
@@ -72,28 +84,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {done}/{len(labeled)}", file=sys.stderr)
 
     pairs = list(zip(scores, labels))
-    acc = sum((s >= 0.5) == (l == 1) for s, l in pairs) / len(pairs)
-    auroc = _auroc(pairs)
-
-    threshold = _threshold_at_fpr(pairs, args.target_fpr)
-    tp = sum(1 for s, l in pairs if s >= threshold and l == 1)
-    fp = sum(1 for s, l in pairs if s >= threshold and l == 0)
-    fn = sum(1 for s, l in pairs if s < threshold and l == 1)
-    tn = sum(1 for s, l in pairs if s < threshold and l == 0)
-
     report = {
         "version": "aide-eval-v1",
         "checkpoint": str(args.checkpoint),
         "root": str(args.root),
-        "samples": len(pairs),
-        "accuracy_at_0.5": round(acc, 4),
-        "auroc": round(auroc, 4),
-        "eer": round(_eer(pairs), 4),
-        "target_fpr": args.target_fpr,
-        "threshold_at_target_fpr": round(threshold, 4),
-        "confusion_at_threshold": {"tp": tp, "fp": fp, "fn": fn, "tn": tn},
+        **_metrics_report(pairs, args.target_fpr),
     }
-    text = json.dumps(report, ensure_ascii=False, indent=2)
+    text = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)
     print(text)
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
@@ -101,53 +98,35 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _auroc(pairs: list[tuple[float, int]]) -> float:
-    ranked = sorted(pairs, key=lambda p: p[0])
-    total_pos = sum(1 for _, l in pairs if l == 1)
-    total_neg = len(pairs) - total_pos
-    if total_pos == 0 or total_neg == 0:
-        return float("nan")
-    pos_rank_sum = 0.0
-    for i, (_, label) in enumerate(ranked):
-        if label == 1:
-            pos_rank_sum += i + 1
-    return (pos_rank_sum - total_pos * (total_pos + 1) / 2) / (total_pos * total_neg)
-
-
-def _sweep(pairs: list[tuple[float, int]]):
-    thresholds = sorted(set(s for s, _ in pairs))
-    total_pos = sum(1 for _, l in pairs if l == 1)
-    total_neg = len(pairs) - total_pos
-    for t in thresholds:
-        fp = sum(1 for s, l in pairs if s >= t and l == 0)
-        fn = sum(1 for s, l in pairs if s < t and l == 1)
-        yield (t, fp / max(1, total_neg), fn / max(1, total_pos))
-
-
-def _eer(pairs: list[tuple[float, int]]) -> float:
-    """EER = FAR == FRR crossing; approximate with the closest sweep point."""
-    candidates = []
-    for t, far, frr in _sweep(pairs):
-        candidates.append(abs(far - frr))
-    return min(candidates) / 2
-
-
-def _threshold_at_fpr(pairs: list[tuple[float, int]], target_fpr: float) -> float:
-    best_t, best_gap = 1.0, float("inf")
-    for t, far, _ in _sweep(pairs):
-        gap = abs(far - target_fpr)
-        if gap < best_gap:
-            best_t, best_gap = t, gap
-    return best_t
-
-
-def _threshold_at_fpr(pairs: list[tuple[float, int]], target_fpr: float) -> float:
-    best_t, best_gap = 1.0, float("inf")
-    for t, far, _ in _sweep(pairs):
-        gap = abs(far - target_fpr)
-        if gap < best_gap:
-            best_t, best_gap = t, gap
-    return best_t
+def _metrics_report(pairs: list[tuple[float, int]], target_fpr: float) -> dict:
+    reason = undefined_reason(pairs)
+    auc = _auroc(pairs)
+    error_rate = _eer(pairs)
+    threshold = _threshold_at_fpr(pairs, target_fpr)
+    confusion = None
+    if threshold is not None:
+        confusion = {
+            "tp": sum(1 for s, l in pairs if s >= threshold and l == 1),
+            "fp": sum(1 for s, l in pairs if s >= threshold and l == 0),
+            "fn": sum(1 for s, l in pairs if s < threshold and l == 1),
+            "tn": sum(1 for s, l in pairs if s < threshold and l == 0),
+        }
+    report = {
+        "samples": len(pairs),
+        "accuracy_at_0.5": round(sum((s >= 0.5) == (l == 1) for s, l in pairs) / len(pairs), 4) if pairs else None,
+        "auroc": round(auc, 4) if auc is not None else None,
+        "eer": round(error_rate, 4) if error_rate is not None else None,
+        "target_fpr": target_fpr,
+        "threshold_at_target_fpr": threshold,
+        "confusion_at_threshold": confusion,
+    }
+    if reason is not None:
+        report.update(auroc_reason=reason, eer_reason=reason)
+    if threshold is None:
+        report["threshold_at_target_fpr_reason"] = reason
+    if not pairs:
+        report["accuracy_at_0.5_reason"] = reason
+    return report
 
 
 if __name__ == "__main__":

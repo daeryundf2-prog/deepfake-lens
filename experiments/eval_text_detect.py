@@ -26,39 +26,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from deepfake_lens import analyze_file  # noqa: E402
+from deepfake_lens.evaluation_metrics import auroc, eer, undefined_reason
 
 
 def _auroc(labels: list[int], scores: list[float]) -> float | None:
-    """Rank-based AUROC; None if only one class present."""
-    pos = [s for l, s in zip(labels, scores) if l == 1]
-    neg = [s for l, s in zip(labels, scores) if l == 0]
-    if not pos or not neg:
-        return None
-    wins = ties = 0
-    for p in pos:
-        for n in neg:
-            if p > n:
-                wins += 1
-            elif p == n:
-                ties += 1
-    return (wins + 0.5 * ties) / (len(pos) * len(neg))
+    return auroc(list(zip(scores, labels, strict=True)))
 
 
 def _eer(labels: list[int], scores: list[float]) -> float | None:
-    """Equal-error rate: threshold where FPR ~= FNR, midpoint reported."""
-    thresholds = sorted(set(scores))
-    best = None
-    for t in thresholds:
-        fp = sum(1 for l, s in zip(labels, scores) if l == 0 and s >= t)
-        fn = sum(1 for l, s in zip(labels, scores) if l == 1 and s < t)
-        tn = sum(1 for l, s in zip(labels, scores) if l == 0 and s < t)
-        tp = sum(1 for l, s in zip(labels, scores) if l == 1 and s >= t)
-        fpr = fp / (fp + tn) if fp + tn else 0.0
-        fnr = fn / (fn + tp) if fn + tp else 0.0
-        diff = abs(fpr - fnr)
-        if best is None or diff < best[0]:
-            best = (diff, (fpr + fnr) / 2)
-    return best[1] if best else None
+    return eer(list(zip(scores, labels, strict=True)))
 
 
 def _confusion(labels: list[int], scores: list[float], threshold: float) -> dict:
@@ -86,6 +62,9 @@ def _report(name: str, rows: list[dict], threshold: float) -> dict:
         "eer": _eer(labels, scores),
         f"confusion@{threshold:g}": _confusion(labels, scores, threshold),
     }
+    reason = undefined_reason(list(zip(scores, labels, strict=True)))
+    if reason is not None:
+        out.update(auroc_reason=reason, eer_reason=reason)
     print(f"\n== {name} (n={out['n']}) ==")
     print(f"  AUROC: {out['auroc'] if out['auroc'] is None else round(out['auroc'], 3)}")
     print(f"  EER:   {out['eer'] if out['eer'] is None else round(out['eer'], 3)}")
@@ -136,7 +115,7 @@ def main() -> int:
 
     report["rows"] = rows
     if args.json_out:
-        args.json_out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        args.json_out.write_text(json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
         print(f"\nreport -> {args.json_out}")
     return 0
 
