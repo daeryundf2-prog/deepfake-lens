@@ -1,0 +1,26 @@
+{
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "ViT deepfake-vs-real face classifier (dima806)",
+  "candidate_key": "vit-face-manipulation-dima806",
+  "runtime": "hf-image-classifier",
+  "modality": "image",
+  "hub_model": "dima806/deepfake_vs_real_image_detection",
+  "score_label": "Fake",
+  "score_index": 0,
+  "score_activation": "none",
+  "ensemble_weight": 0.7,
+  "requires_face": true,
+  "source_url": "https://huggingface.co/dima806/deepfake_vs_real_image_detection",
+  "limitations": [
+    "Weights are not committed; transformers downloads the ~330 MB ViT snapshot from the hub_model id on first use (or set hub_model to a local snapshot directory for offline runs).",
+    "Trained on real-vs-synthetic face imagery — detects face-domain manipulation/generation, not full-scene synthetic content; non-face images are gated out by requires_face.",
+    "Community checkpoint: validated locally on a real portrait (scored real) and a self-blended manipulation (scored fake); broad per-generator recall is still unmeasured — see experiments/FACESWAP_EVALUATION.md.",
+    "Scores are a prioritization signal, not a truth label; absence of a face makes this member inapplicable rather than a 'real' verdict."
+  ],
+  "notes": [
+    "Runtime 'hf-image-classifier' uses AutoImageProcessor + AutoModelForImageClassification; 'score_label' resolves the softmax index from the model's id2label so label order cannot silently flip the score.",
+    "Local check (2026-09): lenna-face.png -> Real 0.992, lenna-face-sbi.png -> Fake 0.783, lenna.png -> Real 0.996.",
+    "Replaces the rejected efficientnet-b0-ffpp-c23 community checkpoint, which scored a real face at 96% fake."
+  ],
+  "license": "apache-2.0 (per upstream model card)"
+}

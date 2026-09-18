@@ -18,7 +18,8 @@ _MAX_PROFILE_DEPTH = 4
 # Runtimes are bound to a media modality: image runtimes consume pixels via
 # PIL/numpy; audio runtimes consume waveforms. Profiles may declare an
 # explicit "modality" field; otherwise it is inferred from the runtime.
-IMAGE_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision"}
+IMAGE_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "hf-image-classifier"}
+HUB_RUNTIMES = {"hf-text-classifier", "hf-image-classifier", "causal-lm-ppl", "binoculars"}
 AUDIO_RUNTIMES = {"aasist"}
 TEXT_RUNTIMES = {"hf-text-classifier", "causal-lm-ppl", "binoculars"}
 # "video-frames" samples frames with cv2 and scores each with a nested image
@@ -387,10 +388,22 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
     checkpoint = _checkpoint_path(profile, base_dir=base_dir)
     model_name = str(profile.get("name") or profile.get("model") or checkpoint.name)
     profile_limitations = _profile_limitations(profile)
+    # Face-conditioned members (faceswap/reenactment detectors trained on
+    # face crops) produce meaningless scores on face-free images — skip
+    # rather than letting them false-flag landscapes and documents.
+    if profile.get("requires_face") and runtime in IMAGE_RUNTIMES and not _has_face(media_path):
+        return ExternalModelAnalysis(
+            available=False,
+            score=0,
+            confidence="skipped",
+            model=model_name,
+            detail="requires_face: no face region detected — face-manipulation member not applicable.",
+            limitations=profile_limitations,
+        )
     # Hub-resolved runtimes (hf-text-classifier) name a model id, not a local
     # file; video-frames carries no checkpoint of its own (its inner image
     # profile does) — the exists() gate below does not apply to them.
-    if runtime not in TEXT_RUNTIMES and runtime not in VIDEO_RUNTIMES and not checkpoint.exists():
+    if runtime not in HUB_RUNTIMES and runtime not in VIDEO_RUNTIMES and not checkpoint.exists():
         return ExternalModelAnalysis(
             available=False,
             score=0,
@@ -408,6 +421,8 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
             values = _run_aasist(checkpoint, media_path, profile)
         elif runtime == "hf-text-classifier":
             values = _run_hf_text_classifier(media_path, profile)
+        elif runtime == "hf-image-classifier":
+            values = _run_hf_image_classifier(media_path, profile)
         elif runtime == "causal-lm-ppl":
             return _run_causal_lm_ppl(media_path, profile, model_name=model_name)
         elif runtime == "binoculars":
@@ -449,6 +464,25 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
         detail=f"{runtime} runtime supplied score={score}.",
         limitations=list(profile_limitations),
     )
+
+
+def _has_face(media_path: Path) -> bool:
+    """True only when at least one face region is detected in the image.
+
+    Face-conditioned members are meaningless off-face, so an unchecked or
+    unreadable image fails closed (skip) — consistent with the project's
+    precision-over-recall posture.
+    """
+    try:
+        import cv2
+    except ImportError:
+        return False
+    image = cv2.imread(str(media_path))
+    if image is None:
+        return False
+    from .face import _detect_faces
+
+    return bool(_detect_faces(image))
 
 
 def _profile_limitations(profile: dict[str, object]) -> list[str]:
@@ -695,6 +729,55 @@ def _run_hf_text_classifier(media_path: Path, profile: dict[str, object]) -> lis
     with torch.no_grad():
         logits = model(**inputs).logits
     return _flatten_outputs(logits.detach().cpu().numpy())
+
+
+_HF_IMAGE_MODELS: dict[str, tuple[object, object]] = {}
+
+
+def _hf_image_model(hub_model: str) -> tuple[object, object]:
+    cached = _HF_IMAGE_MODELS.get(hub_model)
+    if cached is not None:
+        return cached
+    transformers = importlib.import_module("transformers")
+    processor = transformers.AutoImageProcessor.from_pretrained(hub_model)
+    model = transformers.AutoModelForImageClassification.from_pretrained(hub_model)
+    model.eval()
+    pair = (processor, model)
+    _HF_IMAGE_MODELS[hub_model] = pair
+    return pair
+
+
+def _run_hf_image_classifier(media_path: Path, profile: dict[str, object]) -> list[float]:
+    """Score one image with a Hugging Face image classifier.
+
+    The profile's ``hub_model`` names the model id; transformers fetches it
+    on first use (set it to a local snapshot directory for offline runs).
+    Returns logits in label order by default. When the profile sets
+    ``score_label`` (e.g. ``"Fake"``), the matching ``id2label`` entry's
+    softmax probability is returned as a single-element output instead —
+    pair it with ``score_index: 0`` and ``score_activation: "none"``.
+    """
+    torch = importlib.import_module("torch")
+    image_module = importlib.import_module("PIL.Image")
+    hub_model = str(profile.get("hub_model") or "")
+    if not hub_model:
+        raise RuntimeError("hf-image-classifier profile needs a 'hub_model' field (e.g. dima806/deepfake_vs_real_image_detection)")
+    processor, model = _hf_image_model(hub_model)
+    image = image_module.open(media_path).convert("RGB")
+    inputs = processor(images=image, return_tensors="pt")
+    with torch.no_grad():
+        logits = model(**inputs).logits
+    values = _flatten_outputs(logits.detach().cpu().numpy())
+    score_label = str(profile.get("score_label") or "").lower()
+    if score_label:
+        id2label = getattr(model.config, "id2label", None) or {}
+        target = next((int(idx) for idx, name in id2label.items() if str(name).lower() == score_label), None)
+        if target is None or target >= len(values):
+            raise RuntimeError(f"score_label '{score_label}' not found in model labels {id2label}")
+        shifted = [value - max(values) for value in values]
+        exps = [math.exp(max(-80.0, min(80.0, value))) for value in shifted]
+        return [exps[target] / max(1e-12, sum(exps))]
+    return values
 
 
 # Causal LMs for the perplexity screen are ~1 GB downloads; keep them
@@ -979,9 +1062,21 @@ def _run_torchvision(checkpoint: Path, array, profile: dict[str, object]) -> lis
         if model_fn is None:
             raise RuntimeError(f"torchvision.models has no architecture named '{arch}'")
         model = model_fn(weights=None)
-        if not hasattr(model, "fc"):
-            raise RuntimeError(f"torchvision arch '{arch}' has no fc head to rewire for num_classes={num_classes}")
-        model.fc = torch.nn.Linear(model.fc.in_features, num_classes)
+        if hasattr(model, "fc"):
+            model.fc = torch.nn.Linear(model.fc.in_features, num_classes)
+        elif hasattr(model, "classifier"):
+            # EfficientNet-family heads: Sequential(Dropout, …, Linear).
+            head = model.classifier
+            if isinstance(head, torch.nn.Sequential):
+                if not isinstance(head[-1], torch.nn.Linear):
+                    raise RuntimeError(f"torchvision arch '{arch}' classifier tail is not Linear")
+                head[-1] = torch.nn.Linear(head[-1].in_features, num_classes)
+            elif isinstance(head, torch.nn.Linear):
+                model.classifier = torch.nn.Linear(head.in_features, num_classes)
+            else:
+                raise RuntimeError(f"torchvision arch '{arch}' classifier is not Linear/Sequential")
+        else:
+            raise RuntimeError(f"torchvision arch '{arch}' has no fc/classifier head to rewire for num_classes={num_classes}")
         state = torch.load(str(checkpoint), map_location="cpu")
         if isinstance(state, dict):
             for wrapper in ("state_dict", "model", "net"):

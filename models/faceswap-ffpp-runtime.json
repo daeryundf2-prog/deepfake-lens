@@ -1,0 +1,42 @@
+{
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "EfficientNet-B0 face-manipulation detector (FaceForensics++ C23)",
+  "candidate_key": "efficientnet-ffpp-2025",
+  "supported": false,
+  "reason": "Measured locally and rejected: the checkpoint scored the real Lenna face at 96% fake and an SBI-manipulated copy lower (86%) than the original — the signal is inverted/unusable for screening. See experiments/FACESWAP_EVALUATION.md. Use face-manipulation-vit-runtime.json instead.",
+  "runtime": "torchvision",
+  "modality": "image",
+  "arch": "efficientnet_b0",
+  "num_classes": 2,
+  "checkpoint": "efficientnet_b0_ffpp_c23.pth",
+  "input_size": 224,
+  "mean": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "std": [
+    1.0,
+    1.0,
+    1.0
+  ],
+  "score_index": 1,
+  "score_activation": "softmax",
+  "ensemble_weight": 0.5,
+  "requires_face": true,
+  "source_url": "https://huggingface.co/Xicor9/efficientnet-b0-ffpp-c23",
+  "limitations": [
+    "Weights are not committed; run scripts/fetch_faceswap.py to download efficientnet_b0_ffpp_c23.pth (~17 MB) into models/.",
+    "Trained on FaceForensics++ C23 face crops — detects face manipulation (faceswap/reenactment), not full-scene generation; non-face images score unreliably and should be routed to the generator-detector members.",
+    "Publisher preprocessing is Resize(224)+ToTensor only — no ImageNet normalization; this profile sets mean=0/std=1 to match.",
+    "LICENSE: upstream marks this checkpoint 'research and educational purposes only — not intended for real-world forensic, biometric, surveillance, or law-enforcement applications'. Keep it an advisory ensemble member, never a standalone basis.",
+    "FaceForensics++ predates diffusion-era manipulation (2023+ neural filters may evade it); scores are a prioritization signal, not a truth label.",
+    "Third-party community checkpoint — cross-dataset accuracy beyond the publisher's FF++ claims is unverified; validate on local labeled data before trusting thresholds."
+  ],
+  "notes": [
+    "Runtime 'torchvision' rebuilds efficientnet_b0 with a 2-class classifier tail (classifier[1]) and load_state_dict(strict=True).",
+    "Complements the generator-detector members: faceswap composites real pixels, which AIDE/UnivFD/CNNDetection structurally do not flag — this member covers the classic 'deepfake' manipulation family.",
+    "The checkpoint path is relative to this profile's directory (models/); keep it out of git — it is covered by .gitignore."
+  ],
+  "license": "upstream community fine-tune — see source_url; FaceForensics++ data carries research-use terms"
+}

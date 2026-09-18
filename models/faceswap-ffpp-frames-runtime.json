@@ -1,0 +1,31 @@
+{
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "EfficientNet-B0 FF++ per-frame (video-frames runtime)",
+  "candidate_key": "efficientnet-ffpp-2025",
+  "supported": false,
+  "reason": "Inner checkpoint measured locally and rejected (real face scored 96% fake, manipulated copy scored lower). See experiments/FACESWAP_EVALUATION.md. Use face-manipulation-vit-frames-runtime.json instead.",
+  "runtime": "video-frames",
+  "modality": "video",
+  "frames": 8,
+  "inner": {
+    "runtime": "torchvision",
+    "arch": "efficientnet_b0",
+    "num_classes": 2,
+    "checkpoint": "efficientnet_b0_ffpp_c23.pth",
+    "score_index": 1,
+    "score_activation": "softmax",
+    "name": "EfficientNet-B0 face-manipulation detector (FaceForensics++ C23)"
+  },
+  "source_url": "https://huggingface.co/Xicor9/efficientnet-b0-ffpp-c23",
+  "limitations": [
+    "Requires the same checkpoint as faceswap-ffpp-runtime.json (scripts/fetch_faceswap.py) plus opencv for frame decoding.",
+    "The model was trained on face CROPS; whole-frame scoring is an approximation — faces occupying a small share of the frame weaken the signal. Pair with the face-crop path for precision.",
+    "Frame-level mean aggregation, not temporal detection — a faceswap present in few frames may dilute below threshold.",
+    "Scores are a prioritization signal, not a truth label."
+  ],
+  "notes": [
+    "The 'inner' profile is a complete image-runtime profile: 'checkpoint' resolves relative to this file's directory (models/).",
+    "'frames' evenly spaced frames are decoded to temp PNGs and scored through the standard profile path; the aggregate is the mean, and 'models[]' reports each frame's score."
+  ],
+  "license": "upstream community fine-tune — see source_url; FaceForensics++ data carries research-use terms"
+}

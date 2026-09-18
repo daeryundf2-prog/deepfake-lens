@@ -88,6 +88,33 @@ DETECTOR_REGISTRY = [
         ],
     ),
     DetectorCandidate(
+        key="vit-face-manipulation-dima806",
+        name="ViT deepfake-vs-real face classifier (dima806)",
+        task="face-manipulation-detector",
+        adapter_target="hf-image-classifier runtime profile",
+        status="wired",
+        priority="high",
+        source_url="https://huggingface.co/dima806/deepfake_vs_real_image_detection",
+        notes=[
+            "Wired via models/face-manipulation-vit-runtime.json (+ face-manipulation-vit-frames-runtime.json for video); ~330 MB snapshot auto-downloads on first use.",
+            "Covers the classic deepfake family — faceswap/reenactment composites of REAL pixels, which generator detectors (AIDE/UnivFD/CNNDetection) structurally miss.",
+            "Locally sanity-checked (real portrait -> real, SBI-manipulated -> fake); broad per-generator recall unmeasured — see experiments/FACESWAP_EVALUATION.md.",
+        ],
+    ),
+    DetectorCandidate(
+        key="efficientnet-ffpp-2025",
+        name="EfficientNet-B0 face-manipulation detector (FaceForensics++ C23)",
+        task="face-manipulation-detector",
+        adapter_target="torchvision runtime profile",
+        status="rejected",
+        priority="high",
+        source_url="https://huggingface.co/Xicor9/efficientnet-b0-ffpp-c23",
+        notes=[
+            "Measured locally and rejected: real Lenna face scored 96% fake while an SBI-manipulated copy scored lower (86%) — inverted/unusable signal.",
+            "Profiles kept as supported:false placeholders with the measurement recorded; fetch_faceswap.py remains for anyone re-validating with better preprocessing/crops.",
+        ],
+    ),
+    DetectorCandidate(
         key="aasist-2022",
         name="AASIST Audio Anti-Spoofing Integrated Spectro-Temporal Graph Attention",
         task="binary-audio-detector",

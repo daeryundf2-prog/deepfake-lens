@@ -1,0 +1,29 @@
+{
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "ViT deepfake-vs-real per-frame (video-frames runtime)",
+  "candidate_key": "vit-face-manipulation-dima806",
+  "runtime": "video-frames",
+  "modality": "video",
+  "frames": 8,
+  "inner": {
+    "runtime": "hf-image-classifier",
+    "hub_model": "dima806/deepfake_vs_real_image_detection",
+    "score_label": "Fake",
+    "score_index": 0,
+    "score_activation": "none",
+    "requires_face": true,
+    "name": "ViT deepfake-vs-real face classifier (dima806)"
+  },
+  "source_url": "https://huggingface.co/dima806/deepfake_vs_real_image_detection",
+  "limitations": [
+    "Downloads the ~330 MB ViT snapshot on first use plus opencv for frame decoding.",
+    "requires_face gates each sampled frame — frames without a detectable face are skipped, so a faceswap confined to frames the detector misses will dilute coverage.",
+    "Frame-level mean aggregation, not temporal detection — a manipulation present in few frames may dilute below threshold.",
+    "Scores are a prioritization signal, not a truth label."
+  ],
+  "notes": [
+    "The 'inner' profile is a complete image-runtime profile; requires_face applies per sampled frame through the standard profile path.",
+    "'frames' evenly spaced frames are decoded to temp PNGs and scored; the aggregate is the mean and 'models[]' reports each frame's score."
+  ],
+  "license": "apache-2.0 (per upstream model card)"
+}

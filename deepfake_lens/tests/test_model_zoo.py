@@ -26,10 +26,10 @@ from deepfake_lens.model_adapter import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = REPO_ROOT / "models"
-WIRED_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "aasist", "hf-text-classifier", "video-frames", "causal-lm-ppl", "binoculars"}
-# Runtimes that carry no checkpoint field of their own: hf-text-classifier
+WIRED_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "aasist", "hf-text-classifier", "hf-image-classifier", "video-frames", "causal-lm-ppl", "binoculars"}
+# Runtimes that carry no checkpoint field of their own: hf-*-classifier
 # names a hub model id, video-frames nests the checkpointed image profile.
-CHECKPOINT_LESS_RUNTIMES = {"hf-text-classifier", "video-frames"}
+CHECKPOINT_LESS_RUNTIMES = {"hf-text-classifier", "hf-image-classifier", "video-frames"}
 VIDEO_ONLY_RUNTIMES = {"video-frames"}
 
 
@@ -65,7 +65,7 @@ class CommittedProfilesTest(unittest.TestCase):
         names = set(self._profiles())
         self.assertEqual(
             names,
-            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json", "aide-frames-runtime.json", "fakespot-detector-runtime.json", "qwen-ppl-runtime.json", "binoculars-runtime.json"},
+            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json", "aide-frames-runtime.json", "fakespot-detector-runtime.json", "qwen-ppl-runtime.json", "binoculars-runtime.json", "faceswap-ffpp-runtime.json", "faceswap-ffpp-frames-runtime.json", "face-manipulation-vit-runtime.json", "face-manipulation-vit-frames-runtime.json"},
         )
 
     def test_wired_profiles_use_implemented_runtimes(self) -> None:
@@ -76,13 +76,13 @@ class CommittedProfilesTest(unittest.TestCase):
             self.assertIn(profile["runtime"], WIRED_RUNTIMES, name)
             # Hub-resolved runtimes name a model id instead of a local file;
             # video-frames nests the checkpointed image profile under "inner".
-            if profile["runtime"] in {"hf-text-classifier", "causal-lm-ppl", "binoculars"}:
+            if profile["runtime"] in {"hf-text-classifier", "hf-image-classifier", "causal-lm-ppl", "binoculars"}:
                 self.assertIn("hub_model", profile, name)
             elif profile["runtime"] == "video-frames":
                 inner = profile.get("inner")
                 self.assertIsInstance(inner, dict, name)
                 self.assertIn(inner.get("runtime"), WIRED_RUNTIMES - VIDEO_ONLY_RUNTIMES, name)
-                self.assertIn("checkpoint", inner, name)
+                self.assertTrue("checkpoint" in inner or "hub_model" in inner, name)
             else:
                 self.assertIn("checkpoint", profile, name)
             self.assertTrue(profile.get("limitations"), f"{name} must carry honest limitations")
@@ -117,6 +117,38 @@ class CommittedProfilesTest(unittest.TestCase):
         self.assertEqual(profile["arch"], "resnet50")
         self.assertEqual(profile["num_classes"], 1)
         self.assertEqual(profile["state_dict_prefix"], "model.")
+
+    def test_face_vit_profile_records_hub_contract(self) -> None:
+        profile = self._profiles()["face-manipulation-vit-runtime.json"]
+        self.assertEqual(profile["runtime"], "hf-image-classifier")
+        self.assertEqual(profile["modality"], "image")
+        self.assertIn("hub_model", profile)
+        self.assertEqual(profile["score_label"], "Fake")
+        self.assertIs(profile["requires_face"], True)
+
+    def test_rejected_ffpp_profiles_are_disabled(self) -> None:
+        for name in ("faceswap-ffpp-runtime.json", "faceswap-ffpp-frames-runtime.json"):
+            profile = self._profiles()[name]
+            self.assertIs(profile["supported"], False, name)
+            self.assertIn("rejected", profile["reason"], name)
+
+    def test_rejected_ffpp_profile_degrades_with_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            image = Path(tmp) / "img.png"
+            _write_rgb_png(image)
+            analysis = analyze_external_model(image, MODELS_DIR / "faceswap-ffpp-runtime.json")
+        self.assertIsNotNone(analysis)
+        self.assertFalse(analysis.available)
+        self.assertIn("rejected", analysis.detail.lower())
+
+    def test_requires_face_gates_off_faceless_image(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            image = Path(tmp) / "img.png"
+            _write_rgb_png(image)
+            analysis = analyze_external_model(image, MODELS_DIR / "face-manipulation-vit-runtime.json")
+        self.assertIsNotNone(analysis)
+        self.assertFalse(analysis.available)
+        self.assertIn("requires_face", analysis.detail)
 
     def test_qwen_ppl_profile_records_ppl_contract(self) -> None:
         profile = self._profiles()["qwen-ppl-runtime.json"]
@@ -311,10 +343,13 @@ class MultiProfileAggregationTest(unittest.TestCase):
             analysis = analyze_external_model(image, MODELS_DIR)
 
         self.assertIsNotNone(analysis)
-        self.assertEqual(len(analysis.models), 4)
+        self.assertEqual(len(analysis.models), 6)
         names = {m["model"] for m in analysis.models}
         self.assertTrue(any("AIDE" in name for name in names))
         self.assertTrue(any("DIRE" in name for name in names))
+        # requires_face members must appear as gated (unavailable) on the
+        # faceless probe image rather than crashing or scoring.
+        self.assertTrue(any("dima806" in name or "deepfake-vs-real" in name for name in names))
         # Without downloaded checkpoints every member must degrade cleanly.
         if not any(MODELS_DIR.glob(pattern) for pattern in ("*.pth", "*.pt", "*.onnx")):
             self.assertFalse(analysis.available)
@@ -442,6 +477,75 @@ class VideoFramesRuntimeTest(unittest.TestCase):
         self.assertEqual(profile["modality"], "video")
         self.assertEqual(profile["runtime"], "video-frames")
         self.assertEqual(profile["inner"]["runtime"], "aide")
+
+
+def _has_torchvision() -> bool:
+    return importlib.util.find_spec("torch") is not None and importlib.util.find_spec("torchvision") is not None
+
+
+def _write_decodable_png(path: Path, size: int = 32) -> None:
+    """_write_rgb_png emits a zero-CRC IHDR that decoders reject; runtime
+    tests need a real PNG."""
+    from PIL import Image
+
+    Image.new("RGB", (size, size), (200, 120, 40)).save(path)
+
+
+class TorchvisionHeadTest(unittest.TestCase):
+    """torchvision runtime must rewire both .fc (ResNet) and .classifier
+    (EfficientNet) heads to the profile's num_classes."""
+
+    def _write_profile(self, tmp: Path, arch: str, num_classes: int, checkpoint: Path) -> Path:
+        profile = {
+            "type": "deepfake-lens-runtime-profile-v1",
+            "name": f"{arch}-head-test",
+            "runtime": "torchvision",
+            "arch": arch,
+            "num_classes": num_classes,
+            "checkpoint": checkpoint.name,
+            "input_size": 32,
+            "score_activation": "softmax",
+        }
+        path = tmp / f"{arch}-runtime.json"
+        path.write_text(json.dumps(profile), encoding="utf-8")
+        return path
+
+    @unittest.skipUnless(_has_torchvision(), "torch/torchvision not installed")
+    def test_efficientnet_classifier_head_rewired_and_loads(self) -> None:
+        import torch
+        from torchvision.models import efficientnet_b0
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            reference = efficientnet_b0(weights=None, num_classes=2)
+            checkpoint = tmp / "eff.pth"
+            torch.save(reference.state_dict(), checkpoint)
+            profile_path = self._write_profile(tmp, "efficientnet_b0", 2, checkpoint)
+            image = tmp / "img.png"
+            _write_decodable_png(image)
+            analysis = analyze_external_model(image, profile_path)
+
+        self.assertIsNotNone(analysis)
+        self.assertTrue(analysis.available)
+        self.assertTrue(0 <= analysis.score <= 100)
+
+    @unittest.skipUnless(_has_torchvision(), "torch/torchvision not installed")
+    def test_resnet_fc_head_still_rewired(self) -> None:
+        import torch
+        from torchvision.models import resnet18
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            reference = resnet18(weights=None, num_classes=2)
+            checkpoint = tmp / "res.pth"
+            torch.save(reference.state_dict(), checkpoint)
+            profile_path = self._write_profile(tmp, "resnet18", 2, checkpoint)
+            image = tmp / "img.png"
+            _write_decodable_png(image)
+            analysis = analyze_external_model(image, profile_path)
+
+        self.assertIsNotNone(analysis)
+        self.assertTrue(analysis.available)
 
 
 if __name__ == "__main__":
