@@ -1,0 +1,452 @@
+{
+  "profile": "D:\\devin\\deepfake-lens\\models\\face-manipulation-vit-runtime.json",
+  "real_dir": "C:\\Users\\HP\\AppData\\Local\\Temp\\faceeval\\real",
+  "fake_dir": null,
+  "n_real_images": 5,
+  "n_fake_images": 0,
+  "sbi_per_real": 2,
+  "overall": {
+    "n": 45,
+    "scored": 45,
+    "skipped": 0,
+    "coverage": 1.0,
+    "auroc": 0.5088888888888888,
+    "eer": 0.4,
+    "threshold_fpr1pct": 100.00000000000001,
+    "threshold_fpr5pct": 100.00000000000001,
+    "accuracy_at_50": 0.5778,
+    "fpr_at_50": 0.4667,
+    "recall_at_50": 0.6
+  },
+  "by_variant": {
+    "original": {
+      "n": 15,
+      "scored": 15,
+      "skipped": 0,
+      "coverage": 1.0,
+      "auroc": 0.5,
+      "eer": 0.4,
+      "threshold_fpr1pct": 100.00000000000001,
+      "threshold_fpr5pct": 100.00000000000001,
+      "accuracy_at_50": 0.6,
+      "fpr_at_50": 0.4,
+      "recall_at_50": 0.6
+    },
+    "jpeg75": {
+      "n": 15,
+      "scored": 15,
+      "skipped": 0,
+      "coverage": 1.0,
+      "auroc": 0.52,
+      "eer": 0.4,
+      "threshold_fpr1pct": 100.00000000000001,
+      "threshold_fpr5pct": 100.00000000000001,
+      "accuracy_at_50": 0.5333,
+      "fpr_at_50": 0.6,
+      "recall_at_50": 0.6
+    },
+    "half": {
+      "n": 15,
+      "scored": 15,
+      "skipped": 0,
+      "coverage": 1.0,
+      "auroc": 0.5,
+      "eer": 0.4,
+      "threshold_fpr1pct": 100.00000000000001,
+      "threshold_fpr5pct": 100.00000000000001,
+      "accuracy_at_50": 0.6,
+      "fpr_at_50": 0.4,
+      "recall_at_50": 0.6
+    }
+  },
+  "by_label": {
+    "0": {
+      "n": 15,
+      "scored": 15,
+      "skipped": 0,
+      "coverage": 1.0,
+      "auroc": null,
+      "eer": null,
+      "threshold_fpr1pct": 100.00000000000001,
+      "threshold_fpr5pct": 100.00000000000001,
+      "accuracy_at_50": 0.5333,
+      "fpr_at_50": 0.4667,
+      "recall_at_50": 0.0
+    },
+    "1": {
+      "n": 30,
+      "scored": 30,
+      "skipped": 0,
+      "coverage": 1.0,
+      "auroc": null,
+      "eer": null,
+      "threshold_fpr1pct": null,
+      "threshold_fpr5pct": null,
+      "accuracy_at_50": 0.6,
+      "fpr_at_50": 0.0,
+      "recall_at_50": 0.6
+    }
+  },
+  "rows": [
+    {
+      "sample": "chaplin.jpg",
+      "variant": "original",
+      "label": 0,
+      "available": true,
+      "score": 0,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 0."
+    },
+    {
+      "sample": "chaplin.jpg",
+      "variant": "jpeg75",
+      "label": 0,
+      "available": true,
+      "score": 0,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 0."
+    },
+    {
+      "sample": "chaplin.jpg",
+      "variant": "half",
+      "label": 0,
+      "available": true,
+      "score": 0,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 0."
+    },
+    {
+      "sample": "chaplin.jpg#sbi0",
+      "variant": "original",
+      "label": 1,
+      "available": true,
+      "score": 0,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 0."
+    },
+    {
+      "sample": "chaplin.jpg#sbi0",
+      "variant": "jpeg75",
+      "label": 1,
+      "available": true,
+      "score": 0,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 0."
+    },
+    {
+      "sample": "chaplin.jpg#sbi0",
+      "variant": "half",
+      "label": 1,
+      "available": true,
+      "score": 0,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 0."
+    },
+    {
+      "sample": "chaplin.jpg#sbi1",
+      "variant": "original",
+      "label": 1,
+      "available": true,
+      "score": 0,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 0."
+    },
+    {
+      "sample": "chaplin.jpg#sbi1",
+      "variant": "jpeg75",
+      "label": 1,
+      "available": true,
+      "score": 0,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 0."
+    },
+    {
+      "sample": "chaplin.jpg#sbi1",
+      "variant": "half",
+      "label": 1,
+      "available": true,
+      "score": 0,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 0."
+    },
+    {
+      "sample": "einstein.jpg",
+      "variant": "original",
+      "label": 0,
+      "available": true,
+      "score": 100,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 100."
+    },
+    {
+      "sample": "einstein.jpg",
+      "variant": "jpeg75",
+      "label": 0,
+      "available": true,
+      "score": 100,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 100."
+    },
+    {
+      "sample": "einstein.jpg",
+      "variant": "half",
+      "label": 0,
+      "available": true,
+      "score": 100,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 100."
+    },
+    {
+      "sample": "einstein.jpg#sbi0",
+      "variant": "original",
+      "label": 1,
+      "available": true,
+      "score": 100,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 100."
+    },
+    {
+      "sample": "einstein.jpg#sbi0",
+      "variant": "jpeg75",
+      "label": 1,
+      "available": true,
+      "score": 100,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 100."
+    },
+    {
+      "sample": "einstein.jpg#sbi0",
+      "variant": "half",
+      "label": 1,
+      "available": true,
+      "score": 99,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 99."
+    },
+    {
+      "sample": "einstein.jpg#sbi1",
+      "variant": "original",
+      "label": 1,
+      "available": true,
+      "score": 97,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 97."
+    },
+    {
+      "sample": "einstein.jpg#sbi1",
+      "variant": "jpeg75",
+      "label": 1,
+      "available": true,
+      "score": 97,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 97."
+    },
+    {
+      "sample": "einstein.jpg#sbi1",
+      "variant": "half",
+      "label": 1,
+      "available": true,
+      "score": 96,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 96."
+    },
+    {
+      "sample": "lenna.png",
+      "variant": "original",
+      "label": 0,
+      "available": true,
+      "score": 1,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 1."
+    },
+    {
+      "sample": "lenna.png",
+      "variant": "jpeg75",
+      "label": 0,
+      "available": true,
+      "score": 2,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 2."
+    },
+    {
+      "sample": "lenna.png",
+      "variant": "half",
+      "label": 0,
+      "available": true,
+      "score": 2,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 2."
+    },
+    {
+      "sample": "lenna.png#sbi0",
+      "variant": "original",
+      "label": 1,
+      "available": true,
+      "score": 0,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 0."
+    },
+    {
+      "sample": "lenna.png#sbi0",
+      "variant": "jpeg75",
+      "label": 1,
+      "available": true,
+      "score": 1,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 1."
+    },
+    {
+      "sample": "lenna.png#sbi0",
+      "variant": "half",
+      "label": 1,
+      "available": true,
+      "score": 1,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 1."
+    },
+    {
+      "sample": "lenna.png#sbi1",
+      "variant": "original",
+      "label": 1,
+      "available": true,
+      "score": 1,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 1."
+    },
+    {
+      "sample": "lenna.png#sbi1",
+      "variant": "jpeg75",
+      "label": 1,
+      "available": true,
+      "score": 2,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 2."
+    },
+    {
+      "sample": "lenna.png#sbi1",
+      "variant": "half",
+      "label": 1,
+      "available": true,
+      "score": 1,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 1."
+    },
+    {
+      "sample": "lincoln.jpg",
+      "variant": "original",
+      "label": 0,
+      "available": true,
+      "score": 99,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 99."
+    },
+    {
+      "sample": "lincoln.jpg",
+      "variant": "jpeg75",
+      "label": 0,
+      "available": true,
+      "score": 99,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 99."
+    },
+    {
+      "sample": "lincoln.jpg",
+      "variant": "half",
+      "label": 0,
+      "available": true,
+      "score": 99,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 99."
+    },
+    {
+      "sample": "lincoln.jpg#sbi0",
+      "variant": "original",
+      "label": 1,
+      "available": true,
+      "score": 100,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 100."
+    },
+    {
+      "sample": "lincoln.jpg#sbi0",
+      "variant": "jpeg75",
+      "label": 1,
+      "available": true,
+      "score": 100,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 100."
+    },
+    {
+      "sample": "lincoln.jpg#sbi0",
+      "variant": "half",
+      "label": 1,
+      "available": true,
+      "score": 100,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 100."
+    },
+    {
+      "sample": "lincoln.jpg#sbi1",
+      "variant": "original",
+      "label": 1,
+      "available": true,
+      "score": 96,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 96."
+    },
+    {
+      "sample": "lincoln.jpg#sbi1",
+      "variant": "jpeg75",
+      "label": 1,
+      "available": true,
+      "score": 99,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 99."
+    },
+    {
+      "sample": "lincoln.jpg#sbi1",
+      "variant": "half",
+      "label": 1,
+      "available": true,
+      "score": 99,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 99."
+    },
+    {
+      "sample": "mona.jpg",
+      "variant": "original",
+      "label": 0,
+      "available": true,
+      "score": 16,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 16."
+    },
+    {
+      "sample": "mona.jpg",
+      "variant": "jpeg75",
+      "label": 0,
+      "available": true,
+      "score": 89,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 89."
+    },
+    {
+      "sample": "mona.jpg",
+      "variant": "half",
+      "label": 0,
+      "available": true,
+      "score": 41,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 41."
+    },
+    {
+      "sample": "mona.jpg#sbi0",
+      "variant": "original",
+      "label": 1,
+      "available": true,
+      "score": 99,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 99."
+    },
+    {
+      "sample": "mona.jpg#sbi0",
+      "variant": "jpeg75",
+      "label": 1,
+      "available": true,
+      "score": 99,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 99."
+    },
+    {
+      "sample": "mona.jpg#sbi0",
+      "variant": "half",
+      "label": 1,
+      "available": true,
+      "score": 100,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 100."
+    },
+    {
+      "sample": "mona.jpg#sbi1",
+      "variant": "original",
+      "label": 1,
+      "available": true,
+      "score": 99,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 99."
+    },
+    {
+      "sample": "mona.jpg#sbi1",
+      "variant": "jpeg75",
+      "label": 1,
+      "available": true,
+      "score": 99,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 99."
+    },
+    {
+      "sample": "mona.jpg#sbi1",
+      "variant": "half",
+      "label": 1,
+      "available": true,
+      "score": 90,
+      "detail": "crop_faces scored 1/1 face crop(s); aggregate=max -> 90."
+    }
+  ]
+}

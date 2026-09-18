@@ -151,6 +151,12 @@ def self_blended_image(image: np.ndarray, rng: np.random.Generator) -> tuple[np.
     second = DISTORTIONS[int(rng.integers(0, len(DISTORTIONS)))]
     base = _apply_distortion(first, base_image, rng)
     patch = _apply_distortion(second, base_image, rng)
+    # jpeg_simulate crops to 8x8 block multiples — restore base dims so the
+    # blend broadcast always lines up.
+    if base.shape[:2] != (height, width):
+        base = resize_bilinear(base, height, width)
+    if patch.shape[:2] != (height, width):
+        patch = resize_bilinear(patch, height, width)
     mask = random_blending_mask(rng, height, width)
     blended = base * (1 - mask[..., None]) + patch * mask[..., None]
     return np.clip(blended, 0, 255), mask

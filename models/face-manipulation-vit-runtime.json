@@ -2,6 +2,8 @@
   "type": "deepfake-lens-runtime-profile-v1",
   "name": "ViT deepfake-vs-real face classifier (dima806)",
   "candidate_key": "vit-face-manipulation-dima806",
+  "supported": false,
+  "reason": "Measured locally and rejected for manipulation detection: on face-focused SBI pairs the member scored at chance (AUROC ~0.51 over 45 samples) while real aged portraits hit 99-100 fake (FPR@50 ~0.47). See experiments/FACESWAP_EVALUATION.md and experiments/eval_face_manipulation.py. The model's trained task — fully AI-generated faces vs real photos — is a different problem than faceswap.",
   "runtime": "hf-image-classifier",
   "modality": "image",
   "hub_model": "dima806/deepfake_vs_real_image_detection",
@@ -9,18 +11,20 @@
   "score_index": 0,
   "score_activation": "none",
   "ensemble_weight": 0.7,
-  "requires_face": true,
+  "crop_faces": true,
+  "crop_margin": 0.25,
+  "crop_aggregate": "max",
   "source_url": "https://huggingface.co/dima806/deepfake_vs_real_image_detection",
   "limitations": [
     "Weights are not committed; transformers downloads the ~330 MB ViT snapshot from the hub_model id on first use (or set hub_model to a local snapshot directory for offline runs).",
-    "Trained on real-vs-synthetic face imagery — detects face-domain manipulation/generation, not full-scene synthetic content; non-face images are gated out by requires_face.",
-    "Community checkpoint: validated locally on a real portrait (scored real) and a self-blended manipulation (scored fake); broad per-generator recall is still unmeasured — see experiments/FACESWAP_EVALUATION.md.",
-    "Scores are a prioritization signal, not a truth label; absence of a face makes this member inapplicable rather than a 'real' verdict."
+    "DISABLED: measured at chance on face-focused SBI manipulation pairs (AUROC ~0.51) with ~47% FPR driven by aged portraits scoring 99-100 fake — kept as a documented candidate, not an active member.",
+    "Trained on real-vs-synthetic face imagery — its actual domain is fully generated faces; pixel-level self-blend manipulations on real photos are out-of-scope and measured accordingly.",
+    "Scores are a prioritization signal, not a truth label; absence of a detected face makes this member inapplicable rather than a 'real' verdict — and a detector miss silently reduces coverage."
   ],
   "notes": [
     "Runtime 'hf-image-classifier' uses AutoImageProcessor + AutoModelForImageClassification; 'score_label' resolves the softmax index from the model's id2label so label order cannot silently flip the score.",
-    "Local check (2026-09): lenna-face.png -> Real 0.992, lenna-face-sbi.png -> Fake 0.783, lenna.png -> Real 0.996.",
-    "Replaces the rejected efficientnet-b0-ffpp-c23 community checkpoint, which scored a real face at 96% fake."
+    "Local check (2026-09): lenna-face.png -> Real 0.992, lenna-face-sbi.png -> Fake 0.783 — a 3-image smoke test that did NOT survive a labeled eval set (5 portraits x SBI x 3 variants -> AUROC ~0.51).",
+    "Both community face checkpoints tried so far failed local measurement (this one and the rejected efficientnet-b0-ffpp-c23); faceswap coverage remains an open gap — see FACESWAP_EVALUATION.md for candidate directions."
   ],
   "license": "apache-2.0 (per upstream model card)"
 }

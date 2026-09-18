@@ -41,8 +41,6 @@ DEFAULT_PROFILE_NAMES = (
     "models/aide-runtime.json",
     "models/aasist-runtime.json",
     "models/openai-detector-runtime.json",
-    "models/face-manipulation-vit-runtime.json",
-    "models/face-manipulation-vit-frames-runtime.json",
 )
 
 

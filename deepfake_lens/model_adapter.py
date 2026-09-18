@@ -391,15 +391,22 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
     # Face-conditioned members (faceswap/reenactment detectors trained on
     # face crops) produce meaningless scores on face-free images — skip
     # rather than letting them false-flag landscapes and documents.
-    if profile.get("requires_face") and runtime in IMAGE_RUNTIMES and not _has_face(media_path):
-        return ExternalModelAnalysis(
-            available=False,
-            score=0,
-            confidence="skipped",
-            model=model_name,
-            detail="requires_face: no face region detected — face-manipulation member not applicable.",
-            limitations=profile_limitations,
-        )
+    # 'crop_faces' goes further: each detected face region is cropped and
+    # scored individually, then aggregated ('crop_aggregate', default max).
+    if runtime in IMAGE_RUNTIMES and (profile.get("requires_face") or profile.get("crop_faces")):
+        crops = _face_crops(media_path, margin=float(profile.get("crop_margin", 0.25) or 0.25))
+        if not crops:
+            label = "crop_faces" if profile.get("crop_faces") else "requires_face"
+            return ExternalModelAnalysis(
+                available=False,
+                score=0,
+                confidence="skipped",
+                model=model_name,
+                detail=f"{label}: no face region detected — face-manipulation member not applicable.",
+                limitations=profile_limitations,
+            )
+        if profile.get("crop_faces"):
+            return _score_face_crops(crops, profile, base_dir=base_dir, model_name=model_name, profile_limitations=profile_limitations)
     # Hub-resolved runtimes (hf-text-classifier) name a model id, not a local
     # file; video-frames carries no checkpoint of its own (its inner image
     # profile does) — the exists() gate below does not apply to them.
@@ -483,6 +490,87 @@ def _has_face(media_path: Path) -> bool:
     from .face import _detect_faces
 
     return bool(_detect_faces(image))
+
+
+def _face_crops(media_path: Path, *, margin: float = 0.25) -> list:
+    """Detected face regions cropped from the image (BGR ndarrays).
+
+    Each box is expanded by ``margin`` (25% default — manipulation cues
+    live at the blend boundary, so a bare face oval loses context) and
+    clipped to the image. Empty when the image is unreadable or no face
+    is detected — callers treat that as the requires_face gate.
+    """
+    try:
+        import cv2
+    except ImportError:
+        return []
+    image = cv2.imread(str(media_path))
+    if image is None:
+        return []
+    from .face import _detect_faces
+
+    img_h, img_w = image.shape[:2]
+    crops = []
+    for region in _detect_faces(image):
+        mx = int(region.width * margin)
+        my = int(region.height * margin)
+        x0 = max(0, region.x - mx)
+        y0 = max(0, region.y - my)
+        x1 = min(img_w, region.x + region.width + mx)
+        y1 = min(img_h, region.y + region.height + my)
+        if x1 - x0 >= 16 and y1 - y0 >= 16:
+            crops.append(image[y0:y1, x0:x1])
+    return crops
+
+
+def _score_face_crops(crops: list, profile: dict[str, object], *, base_dir: Path, model_name: str, profile_limitations: list[str]) -> ExternalModelAnalysis:
+    """Score each face crop through the profile's runtime and aggregate.
+
+    ``crop_aggregate`` picks the rule: ``max`` (default — one manipulated
+    face flags the image) or ``mean``. Per-crop results are reported under
+    ``models[]`` so the viewer can show which face drove the score.
+    """
+    import tempfile
+
+    import cv2
+
+    inner = {key: value for key, value in profile.items() if key not in {"crop_faces", "requires_face", "crop_aggregate", "crop_margin"}}
+    aggregate = str(profile.get("crop_aggregate") or "max").lower()
+    results: list[ExternalModelAnalysis] = []
+    with tempfile.TemporaryDirectory(prefix="dfl-faces-") as tmp_dir:
+        for index, crop in enumerate(crops):
+            crop_path = Path(tmp_dir) / f"face_{index}.png"
+            cv2.imwrite(str(crop_path), crop)
+            result = _score_from_runtime_profile(inner, crop_path, base_dir=base_dir)
+            if result is not None:
+                results.append(result)
+    scored = [result.score for result in results if result.available]
+    if not scored:
+        cause = results[0].detail if results else "no crop produced a result"
+        return ExternalModelAnalysis(
+            available=False,
+            score=0,
+            confidence="unavailable",
+            model=model_name,
+            detail=f"crop_faces: {len(crops)} face crop(s) detected but inference failed ({cause}).",
+            limitations=profile_limitations,
+        )
+    if aggregate == "mean":
+        score = int(round(sum(scored) / len(scored)))
+    else:
+        score = max(scored)
+    return ExternalModelAnalysis(
+        available=True,
+        score=score,
+        confidence=_confidence_for_score(score),
+        model=model_name,
+        detail=f"crop_faces scored {len(scored)}/{len(crops)} face crop(s); aggregate={aggregate} -> {score}.",
+        limitations=list(profile_limitations),
+        models=[
+            {"crop": index, "available": result.available, "score": result.score, "detail": result.detail}
+            for index, result in enumerate(results)
+        ],
+    )
 
 
 def _profile_limitations(profile: dict[str, object]) -> list[str]:

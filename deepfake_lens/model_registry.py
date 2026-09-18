@@ -92,13 +92,13 @@ DETECTOR_REGISTRY = [
         name="ViT deepfake-vs-real face classifier (dima806)",
         task="face-manipulation-detector",
         adapter_target="hf-image-classifier runtime profile",
-        status="wired",
+        status="rejected",
         priority="high",
         source_url="https://huggingface.co/dima806/deepfake_vs_real_image_detection",
         notes=[
-            "Wired via models/face-manipulation-vit-runtime.json (+ face-manipulation-vit-frames-runtime.json for video); ~330 MB snapshot auto-downloads on first use.",
-            "Covers the classic deepfake family — faceswap/reenactment composites of REAL pixels, which generator detectors (AIDE/UnivFD/CNNDetection) structurally miss.",
-            "Locally sanity-checked (real portrait -> real, SBI-manipulated -> fake); broad per-generator recall unmeasured — see experiments/FACESWAP_EVALUATION.md.",
+            "Measured locally and rejected for manipulation detection: AUROC ~0.51 on 45 face-focused SBI pairs, ~47% FPR@50 driven by aged portraits scoring 99-100 fake.",
+            "Profiles kept as supported:false (face-manipulation-vit-*.json); the hf-image-classifier runtime + crop_faces machinery remains for the next candidate.",
+            "Its trained task (fully generated faces vs real photos) is a different problem than faceswap — see experiments/FACESWAP_EVALUATION.md.",
         ],
     ),
     DetectorCandidate(

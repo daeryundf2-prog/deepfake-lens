@@ -120,11 +120,14 @@ class CommittedProfilesTest(unittest.TestCase):
 
     def test_face_vit_profile_records_hub_contract(self) -> None:
         profile = self._profiles()["face-manipulation-vit-runtime.json"]
+        self.assertIs(profile["supported"], False)
+        self.assertIn("rejected", profile["reason"])
         self.assertEqual(profile["runtime"], "hf-image-classifier")
         self.assertEqual(profile["modality"], "image")
         self.assertIn("hub_model", profile)
         self.assertEqual(profile["score_label"], "Fake")
-        self.assertIs(profile["requires_face"], True)
+        self.assertIs(profile["crop_faces"], True)
+        self.assertEqual(profile["crop_aggregate"], "max")
 
     def test_rejected_ffpp_profiles_are_disabled(self) -> None:
         for name in ("faceswap-ffpp-runtime.json", "faceswap-ffpp-frames-runtime.json"):
@@ -141,14 +144,37 @@ class CommittedProfilesTest(unittest.TestCase):
         self.assertFalse(analysis.available)
         self.assertIn("rejected", analysis.detail.lower())
 
-    def test_requires_face_gates_off_faceless_image(self) -> None:
+    def test_crop_faces_gates_off_faceless_image(self) -> None:
+        """crop_faces profiles must skip face-free images before inference."""
+        with tempfile.TemporaryDirectory() as tmp:
+            image = Path(tmp) / "img.png"
+            _write_rgb_png(image)
+            profile_path = Path(tmp) / "cf-runtime.json"
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "type": "deepfake-lens-runtime-profile-v1",
+                        "name": "crop-gate-test",
+                        "runtime": "hf-image-classifier",
+                        "hub_model": "unused/gated-before-load",
+                        "crop_faces": True,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            analysis = analyze_external_model(image, profile_path)
+        self.assertIsNotNone(analysis)
+        self.assertFalse(analysis.available)
+        self.assertIn("crop_faces", analysis.detail)
+
+    def test_disabled_face_vit_profile_reports_reason(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             image = Path(tmp) / "img.png"
             _write_rgb_png(image)
             analysis = analyze_external_model(image, MODELS_DIR / "face-manipulation-vit-runtime.json")
         self.assertIsNotNone(analysis)
         self.assertFalse(analysis.available)
-        self.assertIn("requires_face", analysis.detail)
+        self.assertIn("rejected", analysis.detail.lower())
 
     def test_qwen_ppl_profile_records_ppl_contract(self) -> None:
         profile = self._profiles()["qwen-ppl-runtime.json"]

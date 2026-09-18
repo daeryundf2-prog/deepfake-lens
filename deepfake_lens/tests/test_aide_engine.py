@@ -259,9 +259,8 @@ class DefaultEngineDiscoveryTest(unittest.TestCase):
 
             out = io.StringIO()
             with mock.patch("deepfake_lens.cli.default_model_path", return_value=None):
-                with mock.patch("deepfake_lens.cli.default_face_model_paths", return_value=[]):
-                    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
-                        rc = cli_main(["scan", str(root), "--format", "json"])
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                    rc = cli_main(["scan", str(root), "--format", "json"])
 
             self.assertEqual(rc, 0)
             payload = json.loads(out.getvalue())

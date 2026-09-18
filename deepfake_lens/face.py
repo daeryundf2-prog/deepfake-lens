@@ -197,7 +197,13 @@ def _error_analysis(message: str) -> FaceAnalysis:
 
 
 def _detect_faces(image: Any) -> list[FaceRegion]:
-    """Detect faces using OpenCV Haar cascade."""
+    """Detect faces: OpenCV Haar first, MediaPipe FaceMesh as fallback.
+
+    Haar misses valid frontal faces on generated/atypical imagery (measured
+    on local samples); when it returns nothing, a whole-image FaceMesh pass
+    recovers detection coverage. Regions recovered by the fallback carry the
+    ``mediapipe-facemesh-detection`` landmark source.
+    """
     try:
         import cv2
         import numpy as np
@@ -219,7 +225,67 @@ def _detect_faces(image: Any) -> list[FaceRegion]:
                 landmarks_source=source,
             )
         )
+    if regions:
+        return regions
+    return _mediapipe_detect_faces(image)
 
+
+def _mediapipe_detect_faces(image: Any, max_faces: int = 3) -> list[FaceRegion]:
+    """Whole-image MediaPipe FaceMesh pass used when Haar finds nothing.
+
+    Each returned mesh's landmark extent becomes the face box (expanded
+    ~15%); landmarks are honest box estimates, not measured anchors. Returns
+    [] when mediapipe is absent or no mesh is found.
+    """
+    try:
+        import cv2
+        import mediapipe as mp
+    except ImportError:
+        return []
+    if not hasattr(mp, "solutions"):
+        return []
+
+    try:
+        face_mesh = mp.solutions.face_mesh.FaceMesh(
+            static_image_mode=True,
+            max_num_faces=max_faces,
+            min_detection_confidence=0.5,
+        )
+        try:
+            result = face_mesh.process(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+        finally:
+            face_mesh.close()
+    except Exception:
+        return []
+
+    if not result.multi_face_landmarks:
+        return []
+
+    img_h, img_w = image.shape[:2]
+    regions: list[FaceRegion] = []
+    for face_landmarks in result.multi_face_landmarks:
+        xs = [lm.x for lm in face_landmarks.landmark]
+        ys = [lm.y for lm in face_landmarks.landmark]
+        x0, x1 = min(xs) * img_w, max(xs) * img_w
+        y0, y1 = min(ys) * img_h, max(ys) * img_h
+        bw, bh = x1 - x0, y1 - y0
+        if bw < 8 or bh < 8:
+            continue
+        mx, my = bw * 0.15, bh * 0.15
+        x = int(max(0, x0 - mx))
+        y = int(max(0, y0 - my))
+        w = int(min(img_w, x1 + mx) - x)
+        h = int(min(img_h, y1 + my) - y)
+        if w < 8 or h < 8:
+            continue
+        regions.append(
+            FaceRegion(
+                x=x, y=y, width=w, height=h,
+                landmarks=_estimate_landmarks(x, y, w, h),
+                confidence=0.7,
+                landmarks_source="mediapipe-facemesh-detection",
+            )
+        )
     return regions
 
 
