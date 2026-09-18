@@ -14,6 +14,7 @@ import unittest
 import zlib
 from dataclasses import asdict
 from pathlib import Path
+from unittest.mock import patch
 
 from deepfake_lens.core import _model_analysis_from_json
 from deepfake_lens.model_adapter import (
@@ -403,6 +404,27 @@ class VideoFramesRuntimeTest(unittest.TestCase):
         self.assertIsNotNone(analysis)
         self.assertFalse(analysis.available)
         self.assertIn("image runtime", analysis.detail)
+
+    def test_inner_validation_precedes_optional_import(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile_path = Path(tmp) / "vf-runtime.json"
+            for inner, detail in ((None, "inner"), ({"runtime": "video-frames"}, "image runtime")):
+                with self.subTest(inner=inner):
+                    profile_path.write_text(json.dumps(self._profile(inner)), encoding="utf-8")
+                    with patch("deepfake_lens.model_adapter.importlib.import_module", side_effect=ImportError("cv2 unavailable")) as optional_import:
+                        analysis = analyze_external_model(Path(tmp) / "clip.mp4", profile_path, modality="video")
+                    self.assertIsNotNone(analysis)
+                    self.assertFalse(analysis.available)
+                    self.assertIn(detail, analysis.detail)
+                    optional_import.assert_not_called()
+
+            profile_path.write_text(json.dumps(self._profile({"runtime": "onnx", "checkpoint": "missing.onnx"})), encoding="utf-8")
+            with patch("deepfake_lens.model_adapter.importlib.import_module", side_effect=ImportError("cv2 unavailable")) as optional_import:
+                analysis = analyze_external_model(Path(tmp) / "clip.mp4", profile_path, modality="video")
+            self.assertIsNotNone(analysis)
+            self.assertFalse(analysis.available)
+            self.assertIn("optional and not installed", analysis.detail)
+            optional_import.assert_called_once_with("cv2")
 
     def test_video_profile_does_not_match_image_files(self) -> None:
         """A modality=video profile is filtered out for image scans."""

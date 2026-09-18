@@ -111,7 +111,7 @@ class CliSigningTest(unittest.TestCase):
             (root / "note.txt").write_text("plain note", encoding="utf-8")
             out = root / "report.json"
             with patch.dict(os.environ, {REPORT_KEY_ENV: "cli-secret"}):
-                rc = main(["scan", str(root), "--json-out", str(out), "--sign", "--format", "json"])
+                rc = main(["scan", str(root), "--no-default-engine", "--json-out", str(out), "--sign", "--format", "json"])
             self.assertEqual(rc, 0)
             payload = json.loads(out.read_text(encoding="utf-8"))
             self.assertIsInstance(payload["signature"], str)
@@ -126,7 +126,7 @@ class CliSigningTest(unittest.TestCase):
             out = root / "report.json"
             env = {key: value for key, value in os.environ.items() if key != REPORT_KEY_ENV}
             with patch.dict(os.environ, env, clear=True):
-                rc = main(["scan", str(root), "--json-out", str(out), "--sign", "--format", "json"])
+                rc = main(["scan", str(root), "--no-default-engine", "--json-out", str(out), "--sign", "--format", "json"])
             self.assertEqual(rc, 0)
             payload = json.loads(out.read_text(encoding="utf-8"))
             self.assertIsNone(payload["signature"])

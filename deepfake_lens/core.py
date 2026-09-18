@@ -236,24 +236,25 @@ def scan_directory(
     archive_members: dict[str, list[ScanItem]] = {}
     archive_meta: dict[str, dict] = {}
     temp_dirs: list[Path] = []
-    for path in paths:
-        if not is_archive(path):
-            specs.append((path, None))
-            continue
-        rel = _display_path(path, root=root)
-        dest = Path(tempfile.mkdtemp(prefix="dflens-arc-"))
-        temp_dirs.append(dest)
-        extraction = extract_archive(path, dest)
-        archive_meta[rel] = {
-            "path": path, "fmt": archive_format(path),
-            "skipped": extraction.skipped, "warnings": extraction.warnings,
-        }
-        archive_members[rel] = []
-        for member in extraction.members:
-            member_rel = member.relative_to(dest).as_posix()
-            specs.append((member, f"{rel}::{member_rel}"))
-
     try:
+        for path in paths:
+            if not is_archive(path):
+                specs.append((path, None))
+                continue
+            rel = _display_path(path, root=root)
+            dest = Path(tempfile.mkdtemp(prefix="dflens-arc-"))
+            temp_dirs.append(dest)
+            dest = dest.resolve()
+            extraction = extract_archive(path, dest)
+            archive_meta[rel] = {
+                "path": path, "fmt": archive_format(path),
+                "skipped": extraction.skipped, "warnings": extraction.warnings,
+            }
+            archive_members[rel] = []
+            for member in extraction.members:
+                member_rel = member.relative_to(dest).as_posix()
+                specs.append((member, f"{rel}::{member_rel}"))
+
         return _scan_specs(
             specs, duplicates_paths=[p for p, d in specs if d is None],
             archive_members=archive_members, archive_meta=archive_meta, root=root, dedupe=dedupe,

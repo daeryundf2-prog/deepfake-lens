@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import importlib
+import os
+import sys
 import tempfile
 import unittest
 import wave
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from unittest.mock import Mock, call, patch
 
 
 def _write_sine_wav(path: Path, *, freq: float = 220.0, seconds: float = 6.0, rate: int = 22050) -> None:
@@ -78,6 +83,7 @@ class SpeakerComparisonTest(unittest.TestCase):
         result = compare_speakers(a, self.dir / "missing.wav")
         self.assertEqual(result.band, "unknown")
 
+    @unittest.skipUnless(os.environ.get("DEEPFAKE_LENS_MODEL_TESTS") == "1", "set DEEPFAKE_LENS_MODEL_TESTS=1")
     def test_ecapa_self_comparison_when_available(self) -> None:
         """With speechbrain installed, same file → ECAPA path, high score."""
         try:
@@ -155,15 +161,25 @@ class WatermarkTest(unittest.TestCase):
     def test_watermarked_text_detected(self) -> None:
         """Simulated KGW generation: force-sampling green tokens must score high."""
         try:
-            from transformers import AutoTokenizer
+            import transformers
         except ImportError:
-            self.skipTest("transformers not installed")
-        try:
-            tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B")
-        except Exception:
-            self.skipTest("tokenizer not cached")
+            transformers = ModuleType("transformers")
+            transformers.AutoTokenizer = SimpleNamespace(from_pretrained=Mock())
         from deepfake_lens.watermark import _green_list, detect_kgw_watermark
 
+        class FakeTokenizer:
+            def __len__(self):
+                return 1000
+
+            def decode(self, token_ids):
+                return " ".join(str(token_id) for token_id in token_ids)
+
+            def encode(self, text, *, add_special_tokens):
+                self_test.assertFalse(add_special_tokens)
+                return [int(token) for token in text.split()]
+
+        self_test = self
+        tokenizer = FakeTokenizer()
         vocab = len(tokenizer)
         secret = "unit-test-secret"
         # Generate a token stream biased to the green list.
@@ -176,17 +192,24 @@ class WatermarkTest(unittest.TestCase):
             pick = green[gen.randrange(len(green))] if gen.random() < 0.9 else rng_ids[gen.randrange(vocab)]
             token_ids.append(pick)
         text = tokenizer.decode(token_ids)
-        if len(text) < 200:
-            text = (text + " ") * 3
-        result = detect_kgw_watermark(text, secret=secret)
-        if not result.available:
-            self.skipTest(f"tokenizer path unavailable: {result.verdict}")
-        self.assertGreaterEqual(result.z_score or 0, 4.0)
+        self.assertGreaterEqual(len(text), 200)
+        self.assertEqual(tokenizer.encode(text, add_special_tokens=False), token_ids)
+        with (
+            patch.dict(sys.modules, {"transformers": transformers}),
+            patch.object(transformers.AutoTokenizer, "from_pretrained", return_value=tokenizer) as load_tokenizer,
+            patch("socket.socket.connect", side_effect=AssertionError("unexpected network acquisition")) as connect,
+        ):
+            result = detect_kgw_watermark(text, secret=secret)
+            self.assertTrue(result.available)
+            self.assertEqual(result.token_count, len(token_ids))
+            self.assertGreaterEqual(result.z_score or 0, 4.0)
 
-        # A wrong key must NOT flag the same stream.
-        wrong = detect_kgw_watermark(text, secret="wrong-key")
-        if wrong.available:
+            # A wrong key must NOT flag the same stream.
+            wrong = detect_kgw_watermark(text, secret="wrong-key")
+            self.assertTrue(wrong.available)
             self.assertLess(wrong.z_score or 0, 4.0)
+            self.assertEqual(load_tokenizer.call_args_list, [call("Qwen/Qwen2.5-0.5B")] * 2)
+            connect.assert_not_called()
 
 
 if __name__ == "__main__":
@@ -194,6 +217,12 @@ if __name__ == "__main__":
 
 
 class CopyMoveTest(unittest.TestCase):
+    def setUp(self) -> None:
+        try:
+            importlib.import_module("numpy")
+        except ImportError:
+            self.skipTest("numpy not installed")
+
     def _image(self, *, forged: bool):
         import numpy as np
 
@@ -250,6 +279,13 @@ class CompareFilesTest(unittest.TestCase):
 class CopyMoveKeypointTest(unittest.TestCase):
     """SIFT/ORB + transform-voting copy-move (rotation/scale robust)."""
 
+    def setUp(self) -> None:
+        try:
+            importlib.import_module("numpy")
+            importlib.import_module("cv2")
+        except ImportError:
+            self.skipTest("numpy/opencv not installed")
+
     def _texture(self, seed: int = 1, size: int = 300):
         import cv2
         import numpy as np
@@ -303,24 +339,23 @@ class CopyMoveKeypointTest(unittest.TestCase):
 class SynthIDWatermarkTest(unittest.TestCase):
     """B-1: mean-g SynthID detection under own keys (transformers built-in)."""
 
-    def setUp(self) -> None:
+    @unittest.skipUnless(os.environ.get("DEEPFAKE_LENS_MODEL_TESTS") == "1", "set DEEPFAKE_LENS_MODEL_TESTS=1")
+    def test_wrong_key_reports_no_signal(self) -> None:
         try:
-            import transformers  # noqa: F401
-            import torch  # noqa: F401
+            importlib.import_module("torch")
+            from transformers import AutoTokenizer
         except ImportError:
             self.skipTest("transformers/torch not installed")
         try:
-            from transformers import AutoTokenizer
-
-            AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B")
-        except Exception:
+            tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B", local_files_only=True)
+        except OSError:
             self.skipTest("Qwen2.5-0.5B tokenizer not cached")
-
-    def test_wrong_key_reports_no_signal(self) -> None:
         from deepfake_lens.watermark import detect_synthid_watermark
 
         text = "The printing press was invented around 1440 by Johannes Gutenberg. It made books cheap to produce and transformed the spread of knowledge across Europe within a generation." * 3
-        result = detect_synthid_watermark(text, keys=[17, 23, 42, 90, 77])
+        with patch.object(AutoTokenizer, "from_pretrained", return_value=tokenizer) as load_tokenizer:
+            result = detect_synthid_watermark(text, keys=[17, 23, 42, 90, 77])
+        load_tokenizer.assert_called_once_with("Qwen/Qwen2.5-0.5B")
         self.assertTrue(result.available)
         self.assertLess(result.score, 50)
 

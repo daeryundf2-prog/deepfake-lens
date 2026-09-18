@@ -3,6 +3,7 @@ import tarfile
 import zipfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from deepfake_lens.archives import (
     archive_format,
@@ -118,10 +119,56 @@ class ScanIntegrationTests(unittest.TestCase):
 
     def test_scan_temp_dirs_cleaned(self):
         make_zip(self.tmp / "b.zip", {"x.txt": b"content to check cleanup"})
-        scan_directory(self.tmp)
-        import tempfile, os
-        leftovers = [d for d in os.listdir(tempfile.gettempdir()) if d.startswith("dflens-arc-")]
-        self.assertEqual(leftovers, [])
+        dest = self.tmp / "extracted"
+        dest.mkdir()
+        with patch("deepfake_lens.core.tempfile.mkdtemp", return_value=str(dest)):
+            scan_directory(self.tmp)
+        self.assertFalse(dest.exists())
+        self.assertTrue((self.tmp / "b.zip").is_file())
+
+    def test_scan_normalizes_extraction_root(self):
+        make_zip(self.tmp / "bundle.zip", {"dir/notes.txt": b"plain text inside the archive"})
+        dest = self.tmp / "extracted"
+        dest.mkdir()
+        unresolved = str(dest / ".." / dest.name)
+        with patch("deepfake_lens.core.tempfile.mkdtemp", return_value=unresolved):
+            with patch("deepfake_lens.core.extract_archive", wraps=extract_archive) as extract:
+                summary, items = scan_directory(self.tmp)
+        self.assertEqual(extract.call_args.args[1], dest.resolve())
+        self.assertEqual(summary.total, 2)
+        member = next(item for item in items if item.path == "bundle.zip::dir/notes.txt")
+        self.assertEqual(member.status, "analyzed")
+        self.assertFalse(dest.exists())
+
+    def test_scan_temp_dirs_cleaned_on_preparation_failure(self):
+        for name in ("a.zip", "b.zip"):
+            make_zip(self.tmp / name, {"notes.txt": b"plain text inside the archive"})
+        destinations = [self.tmp / "first", self.tmp / "second"]
+        for dest in destinations:
+            dest.mkdir()
+
+        def fail_second_extraction(path, dest):
+            extraction = extract_archive(path, dest)
+            if dest == destinations[1].resolve():
+                raise RuntimeError("preparation failed")
+            return extraction
+
+        with patch("deepfake_lens.core.tempfile.mkdtemp", side_effect=[str(dest) for dest in destinations]):
+            with patch("deepfake_lens.core.extract_archive", side_effect=fail_second_extraction):
+                with self.assertRaisesRegex(RuntimeError, "preparation failed"):
+                    scan_directory(self.tmp)
+        self.assertTrue(all(not dest.exists() for dest in destinations))
+        self.assertTrue(all((self.tmp / name).is_file() for name in ("a.zip", "b.zip")))
+
+    def test_scan_temp_dirs_cleaned_on_analysis_failure(self):
+        make_zip(self.tmp / "bundle.zip", {"notes.txt": b"plain text inside the archive"})
+        dest = self.tmp / "extracted"
+        dest.mkdir()
+        with patch("deepfake_lens.core.tempfile.mkdtemp", return_value=str(dest)):
+            with patch("deepfake_lens.core._scan_specs", side_effect=RuntimeError("analysis failed")):
+                with self.assertRaisesRegex(RuntimeError, "analysis failed"):
+                    scan_directory(self.tmp)
+        self.assertFalse(dest.exists())
 
     def test_analyze_file_archive_container(self):
         zpath = self.tmp / "single.zip"

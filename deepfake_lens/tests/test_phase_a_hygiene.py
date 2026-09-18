@@ -115,7 +115,7 @@ class JsonOutParentCreationTest(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 exit_code = cli.main([
                 "scan", str(repo_root / "fixtures" / "deepfake-lens-sample"),
-                    "--recursive", "--json-out", str(out_path),
+                    "--recursive", "--no-default-engine", "--json-out", str(out_path),
                 ])
             self.assertEqual(exit_code, 0)
             self.assertTrue(out_path.exists())

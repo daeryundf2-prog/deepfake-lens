@@ -11,6 +11,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from deepfake_lens.core import analyze_file, scan_directory
 from deepfake_lens.model_adapter import analyze_external_model
@@ -77,14 +78,25 @@ class TextDetectorScanTest(unittest.TestCase):
             txt = root / "note.txt"
             _write_text(txt)
 
-            item = analyze_file(txt, root=root, model_path=[PROFILE_PATH])
+            profile = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
+            with patch(
+                "deepfake_lens.model_adapter._run_hf_text_classifier",
+                autospec=True,
+                return_value=[2.0, 0.0],
+            ) as run_classifier:
+                item = analyze_file(txt, root=root, model_path=[PROFILE_PATH])
+            run_classifier.assert_called_once_with(txt, profile)
 
             self.assertEqual(item.kind, "text")
             self.assertEqual(item.status, "analyzed")
             self.assertIsNotNone(item.result)
             self.assertIsNotNone(item.result.model_analysis)
+            self.assertTrue(item.result.model_analysis.available)
+            self.assertEqual(item.result.model_analysis.score, 88)
             payload = item.to_json()
             self.assertIn("model_analysis", payload["result"])
+            self.assertTrue(payload["result"]["model_analysis"]["available"])
+            self.assertEqual(payload["result"]["model_analysis"]["score"], 88)
 
     def test_scan_without_text_profile_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -1125,7 +1125,6 @@ def _run_video_frames(
     """
     import tempfile
 
-    cv2 = importlib.import_module("cv2")
     inner = profile.get("inner") or profile.get("frame_profile")
     if not isinstance(inner, dict):
         raise RuntimeError("video-frames profile needs an 'inner' image-runtime profile object")
@@ -1133,6 +1132,7 @@ def _run_video_frames(
     if inner_runtime in VIDEO_RUNTIMES or not inner_runtime:
         raise RuntimeError("video-frames 'inner' profile must name an image runtime (onnx/torchscript/aide/clip-linear/torchvision)")
     frame_target = max(1, int(profile.get("frames", 8) or 8))
+    cv2 = importlib.import_module("cv2")
 
     scored_frames: list[dict[str, object]] = []
     with tempfile.TemporaryDirectory(prefix="dfl-frames-") as tmp_dir:

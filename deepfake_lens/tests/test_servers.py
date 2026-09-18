@@ -13,6 +13,7 @@ import os
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from deepfake_lens import api_server
 from deepfake_lens.webapp import MAX_FILE_BYTES_CEILING, MAX_SCAN_FILES, _scan_payload, host_name
@@ -365,6 +366,13 @@ class LiveServerClientHeaderTest(unittest.TestCase):
 class AsyncScanJobTest(unittest.TestCase):
     """The async=1 scan job API: start returns a job id, status polls to done."""
 
+    def setUp(self) -> None:
+        from deepfake_lens import webapp
+
+        registry = patch.object(webapp, "_SCAN_JOBS", {})
+        registry.start()
+        self.addCleanup(registry.stop)
+
     def test_job_lifecycle(self) -> None:
         import tempfile
         from deepfake_lens import webapp
@@ -373,23 +381,24 @@ class AsyncScanJobTest(unittest.TestCase):
             fixture = Path(tmp) / "a.txt"
             fixture.write_text("hello world", encoding="utf-8")
             started = webapp._scan_job_start(f"folder={tmp}&no_default_engine=true", default_folder=None)
-        self.assertEqual(started["status"], "running")
-        job_id = started["job_id"]
+            self.assertEqual(started["status"], "running")
+            job_id = started["job_id"]
 
-        result = None
-        for _ in range(200):
-            state = webapp._scan_status_payload(f"job={job_id}")
-            if state["status"] != "running":
-                result = state["result"]
-                break
-            time.sleep(0.05)
-        self.assertIsNotNone(result, "job did not finish")
-        self.assertEqual(result["summary"]["total"], 1)
+            result = None
+            for _ in range(200):
+                state = webapp._scan_status_payload(f"job={job_id}")
+                if state["status"] != "running":
+                    result = state["result"]
+                    break
+                time.sleep(0.05)
+            self.assertIsNotNone(result, "job did not finish")
+            self.assertEqual(state["status"], "done", result)
+            self.assertEqual(result["summary"]["total"], 1)
 
-        # A second poll returns the stored result, and unknown ids are errors.
-        again = webapp._scan_status_payload(f"job={job_id}")
-        self.assertEqual(again["status"], "done")
-        self.assertIn("error", webapp._scan_status_payload("job=deadbeef"))
+            # A second poll returns the stored result, and unknown ids are errors.
+            again = webapp._scan_status_payload(f"job={job_id}")
+            self.assertEqual(again["status"], "done")
+            self.assertIn("error", webapp._scan_status_payload("job=deadbeef"))
 
     def test_missing_job_parameter_is_error(self) -> None:
         from deepfake_lens import webapp
@@ -399,16 +408,11 @@ class AsyncScanJobTest(unittest.TestCase):
     def test_job_cap_refuses_overflow(self) -> None:
         from deepfake_lens import webapp
 
-        original = dict(webapp._SCAN_JOBS)
-        try:
-            webapp._SCAN_JOBS.clear()
+        with webapp._SCAN_JOBS_LOCK:
             for i in range(webapp._SCAN_JOB_MAX):
                 webapp._SCAN_JOBS[f"fake{i}"] = {"status": "running", "created": time.time()}
-            with self.assertRaises(ValueError):
-                webapp._scan_job_start("folder=.&no_default_engine=true", default_folder=None)
-        finally:
-            webapp._SCAN_JOBS.clear()
-            webapp._SCAN_JOBS.update(original)
+        with self.assertRaises(ValueError):
+            webapp._scan_job_start("folder=.&no_default_engine=true", default_folder=None)
 
 
 class ApiServeTokenGateTest(unittest.TestCase):

@@ -334,6 +334,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
+@unittest.skipUnless(_has_numpy(), "numpy not installed")
 class CompressionForensicsTest(unittest.TestCase):
     """V5-2/3: double-JPEG periodicity and ELA region error."""
 
