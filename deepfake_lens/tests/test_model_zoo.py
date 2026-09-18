@@ -26,10 +26,10 @@ from deepfake_lens.model_adapter import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = REPO_ROOT / "models"
-WIRED_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "aasist", "hf-text-classifier", "hf-image-classifier", "video-frames", "causal-lm-ppl", "binoculars"}
+WIRED_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "aasist", "hf-text-classifier", "hf-image-classifier", "hf-audio-classifier", "video-frames", "causal-lm-ppl", "binoculars"}
 # Runtimes that carry no checkpoint field of their own: hf-*-classifier
 # names a hub model id, video-frames nests the checkpointed image profile.
-CHECKPOINT_LESS_RUNTIMES = {"hf-text-classifier", "hf-image-classifier", "video-frames"}
+CHECKPOINT_LESS_RUNTIMES = {"hf-text-classifier", "hf-image-classifier", "hf-audio-classifier", "video-frames"}
 VIDEO_ONLY_RUNTIMES = {"video-frames"}
 
 
@@ -65,7 +65,7 @@ class CommittedProfilesTest(unittest.TestCase):
         names = set(self._profiles())
         self.assertEqual(
             names,
-            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json", "aide-frames-runtime.json", "fakespot-detector-runtime.json", "qwen-ppl-runtime.json", "binoculars-runtime.json", "faceswap-ffpp-runtime.json", "faceswap-ffpp-frames-runtime.json", "face-manipulation-vit-runtime.json", "face-manipulation-vit-frames-runtime.json"},
+            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json", "aide-frames-runtime.json", "fakespot-detector-runtime.json", "qwen-ppl-runtime.json", "binoculars-runtime.json", "faceswap-ffpp-runtime.json", "faceswap-ffpp-frames-runtime.json", "face-manipulation-vit-runtime.json", "face-manipulation-vit-frames-runtime.json", "wav2vec-deepfake-audio-runtime.json", "ai-image-swin-runtime.json"},
         )
 
     def test_wired_profiles_use_implemented_runtimes(self) -> None:
@@ -76,7 +76,7 @@ class CommittedProfilesTest(unittest.TestCase):
             self.assertIn(profile["runtime"], WIRED_RUNTIMES, name)
             # Hub-resolved runtimes name a model id instead of a local file;
             # video-frames nests the checkpointed image profile under "inner".
-            if profile["runtime"] in {"hf-text-classifier", "hf-image-classifier", "causal-lm-ppl", "binoculars"}:
+            if profile["runtime"] in {"hf-text-classifier", "hf-image-classifier", "hf-audio-classifier", "causal-lm-ppl", "binoculars"}:
                 self.assertIn("hub_model", profile, name)
             elif profile["runtime"] == "video-frames":
                 inner = profile.get("inner")
@@ -369,7 +369,7 @@ class MultiProfileAggregationTest(unittest.TestCase):
             analysis = analyze_external_model(image, MODELS_DIR)
 
         self.assertIsNotNone(analysis)
-        self.assertEqual(len(analysis.models), 6)
+        self.assertEqual(len(analysis.models), 7)
         names = {m["model"] for m in analysis.models}
         self.assertTrue(any("AIDE" in name for name in names))
         self.assertTrue(any("DIRE" in name for name in names))

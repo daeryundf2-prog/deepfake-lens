@@ -81,6 +81,18 @@ def default_audio_model_path(root: Path | None = None) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+# Additional bundled audio members run alongside AASIST when present. The
+# wav2vec XLSR classifier complements AASIST (better calibrated on real
+# speech, weaker on out-of-domain TTS); its hub weights download on demand.
+DEFAULT_AUDIO_AUX_PROFILES = ("models/wav2vec-deepfake-audio-runtime.json",)
+
+
+def default_audio_model_paths(root: Path | None = None) -> list[Path]:
+    """All bundled audio profiles that exist (AASIST + aux members)."""
+    base = Path(root) if root is not None else Path(__file__).resolve().parent.parent
+    return [candidate for rel in (DEFAULT_AUDIO_ENGINE_PROFILE, *DEFAULT_AUDIO_AUX_PROFILES) if (candidate := base / rel).is_file()]
+
+
 def default_text_model_path(root: Path | None = None) -> Path | None:
     """Bundled default text profile (models/openai-detector-runtime.json).
 
@@ -601,7 +613,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"count": payload["count"], "ffmpeg_available": payload["ffmpeg_available"], "out": str(args.out)}, ensure_ascii=False, indent=2))
         return 0
     if args.command == "audio":
-        audio_model_path = args.model_path or (None if args.no_default_engine else default_audio_model_path())
+        audio_model_path = args.model_path or (None if args.no_default_engine else default_audio_model_paths() or None)
         analysis = analyze_audio(args.file, segment_seconds=args.segment_seconds, model_path=audio_model_path)
         if args.json_out:
             _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
@@ -1090,7 +1102,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.no_default_engine:
         model_path = None
     else:
-        model_path = [path for path in (default_model_path(), default_audio_model_path(), default_text_model_path()) if path is not None] or None
+        model_path = [path for path in (default_model_path(), default_text_model_path()) if path is not None] + default_audio_model_paths() or None
     if model_path and args.model_path is None:
         print(f"default engine profiles: {model_path}", file=sys.stderr)
 

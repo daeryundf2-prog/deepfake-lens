@@ -1,0 +1,30 @@
+{
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "Wav2Vec2-XLSR deepfake audio classifier (Gustking, In-the-Wild)",
+  "candidate_key": "wav2vec-xlsr-gustking",
+  "runtime": "hf-audio-classifier",
+  "modality": "audio",
+  "hub_model": "Gustking/wav2vec2-large-xlsr-deepfake-audio-classification",
+  "score_label": "fake",
+  "score_index": 0,
+  "score_activation": "none",
+  "score_semantics": "spoof_probability",
+  "max_seconds": 15,
+  "threshold": 67,
+  "source_url": "https://huggingface.co/Gustking/wav2vec2-large-xlsr-deepfake-audio-classification",
+  "supported": true,
+  "limitations": [
+    "Hub weights are not committed; transformers downloads ~1.2 GB on first use (set hub_model to a local snapshot directory for offline runs).",
+    "Fine-tuned on the 'In-the-Wild' audio deepfake dataset — coverage of generators outside that dataset is unverified.",
+    "Measured locally (2026-09): catches older synthesizer TTS (SAPI fake 91.7%) and is well-calibrated on real speech (LibriSpeech real 89.7%, YESNO 8 kHz real 93.0%) but MISSED a modern neural TTS sample (edge-tts fake only 17.9%) — do not treat a low score as evidence of real audio.",
+    "Only the first ~15 s is scored; longer files are truncated.",
+    "Scores are a prioritization signal, not a truth label."
+  ],
+  "notes": [
+    "Wav2Vec2ForSequenceClassification fine-tuned on In-the-Wild (real vs generated speech collected in the wild), Apache-2.0.",
+    "score_label 'fake' resolves the class index from id2label at runtime ({0: 'real', 1: 'fake'} in this checkpoint) — label order cannot silently invert the score.",
+    "Pairs with the AASIST member as complementary coverage: AASIST catches generators outside In-the-Wild but false-positives on low-bandwidth real speech (8 kHz telephone audio scored 97.5% spoof); this model is better calibrated on real speech but misses newer TTS. Disagreement between the two is itself a review signal.",
+    "Empirical comparison vs the rejected MelodyMachine/Deepfake-audio-detection-V2 candidate: that checkpoint returned inverted scores on local samples (real speech -> fake 100%), so it is not wired."
+  ],
+  "license": "apache-2.0"
+}

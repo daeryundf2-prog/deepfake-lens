@@ -464,7 +464,12 @@ class DefaultAudioEngineDiscoveryTest(unittest.TestCase):
             item = payload["items"][0]
             self.assertEqual(item["kind"], "audio")
             self.assertIsNotNone(item["result"]["model_analysis"])
-            self.assertIn("AASIST", item["result"]["model_analysis"]["model"])
+            members = item["result"]["model_analysis"].get("models", [])
+            member_names = [m.get("model", "") for m in members]
+            if members:
+                self.assertTrue(any("AASIST" in n for n in member_names), member_names)
+            else:
+                self.assertIn("AASIST", item["result"]["model_analysis"]["model"])
 
     def test_scan_no_default_engine_skips_audio_model(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -492,7 +497,12 @@ class DefaultAudioEngineDiscoveryTest(unittest.TestCase):
             payload = json.loads(out.getvalue())
             self.assertIn("model_analysis", payload)
             self.assertIsNotNone(payload["model_analysis"])
-            self.assertIn("AASIST", payload["model_analysis"]["model"])
+            members = payload["model_analysis"].get("models", [])
+            member_names = [m.get("model", "") for m in members]
+            if members:
+                self.assertTrue(any("AASIST" in n for n in member_names), member_names)
+            else:
+                self.assertIn("AASIST", payload["model_analysis"]["model"])
 
     def test_audio_command_no_default_engine(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

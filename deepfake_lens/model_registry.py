@@ -75,6 +75,20 @@ DETECTOR_REGISTRY = [
         ],
     ),
     DetectorCandidate(
+        key="swin-ai-image-umm-maybe",
+        name="Swin-large AI-vs-human image detector (umm-maybe/AI-image-detector)",
+        task="binary-image-detector",
+        adapter_target="hf-image-classifier runtime profile",
+        status="integrated",
+        priority="medium",
+        source_url="https://huggingface.co/umm-maybe/AI-image-detector",
+        notes=[
+            "Wired via models/ai-image-swin-runtime.json (score_label 'artificial'); ~870 MB hub weights download on first use.",
+            "Measured locally (2026-09): 1/4 DALL-E samples caught, real Lenna correctly scored human 0.97 — its value is real-image calibration against AIDE's false positives (Lenna: AIDE 85 vs Swin 3), not commercial-generator recall.",
+            "Opt-in member: picked up by models/ directory scans (web app, api_server, --model-path models) but kept out of the CLI default list — see experiments/IMAGE_EVALUATION.md.",
+        ],
+    ),
+    DetectorCandidate(
         key="dire-iccv-2023",
         name="DIRE DIffusion Reconstruction Error",
         task="diffusion-image-detector",
@@ -125,6 +139,21 @@ DETECTOR_REGISTRY = [
         notes=[
             "Wired via models/aasist-runtime.json; scripts/fetch_aasist.py downloads the in-repo AASIST.pth (~1.3 MB, not committed).",
             "Trained on ASVspoof2019-LA — strong on TTS/VC attacks; verify cross-domain AUROC on local data before trusting thresholds.",
+        ],
+    ),
+    DetectorCandidate(
+        key="wav2vec-xlsr-gustking",
+        name="Wav2Vec2-XLSR deepfake audio classifier (In-the-Wild)",
+        task="binary-audio-detector",
+        adapter_target="hf-audio-classifier runtime profile",
+        status="integrated",
+        priority="high",
+        source_url="https://huggingface.co/Gustking/wav2vec2-large-xlsr-deepfake-audio-classification",
+        notes=[
+            "Wired via models/wav2vec-deepfake-audio-runtime.json on the new hf-audio-classifier runtime (AutoFeatureExtractor + AutoModelForAudioClassification, shared run_aasist waveform decoder).",
+            "Measured locally (2026-09): real LibriSpeech 89.7% / 8 kHz YESNO 93.0% real, SAPI TTS 91.7% fake — but a modern neural TTS sample (edge-tts) scored only 17.9% fake, so low scores are not evidence of real audio.",
+            "Complements AASIST: AASIST caught the edge-tts sample (72.9% spoof) but false-positives on low-bandwidth real speech (97.5% spoof on 8 kHz YESNO); Gustking is the better-calibrated real-speech member.",
+            "Rejected candidate: MelodyMachine/Deepfake-audio-detection-V2 returned inverted scores on local samples (real speech -> fake 100%).",
         ],
     ),
     DetectorCandidate(
@@ -191,6 +220,20 @@ DETECTOR_REGISTRY = [
             "Wired via models/fakespot-detector-runtime.json; fetched from Hugging Face on first use like the OpenAI detector.",
             "Trained on newer LLM outputs than the GPT-2-era OpenAI detector — pair them as a two-member ensemble for an agreement signal.",
             "Still English-centric and weak on short text; re-validate on target-domain samples.",
+            "Follow-up screening (2026-09) confirmed it is the strongest public text member measured: scores ~0.98 on OOD GPT-2 output and formal Korean AI-style text.",
+        ],
+    ),
+    DetectorCandidate(
+        key="hc3-roberta-2023",
+        name="Hello-SimpleAI chatgpt-detector-roberta (HC3 corpus)",
+        task="binary-text-detector",
+        adapter_target="hf-text-classifier runtime profile",
+        status="rejected",
+        priority="low",
+        source_url="https://huggingface.co/Hello-SimpleAI/chatgpt-detector-roberta",
+        notes=[
+            "Screened 2026-09 and not wired: perfect on its HC3 training domain but scores ~0.00 on out-of-domain inputs (GPT-2 output, Korean AI-style text) — would only dilute the ensemble.",
+            "Recorded in experiments/TEXT_DETECTION_EVAL.md (follow-up candidate screening).",
         ],
     ),
     DetectorCandidate(

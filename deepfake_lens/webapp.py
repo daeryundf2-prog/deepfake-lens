@@ -40,6 +40,7 @@ MAX_UPLOAD_FILES = 20
 DEFAULT_PROFILE_NAMES = (
     "models/aide-runtime.json",
     "models/aasist-runtime.json",
+    "models/wav2vec-deepfake-audio-runtime.json",
     "models/openai-detector-runtime.json",
 )
 

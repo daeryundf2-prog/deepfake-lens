@@ -313,3 +313,27 @@ tool. ko detection is heuristic-layer only until a Korean-anchored
 member exists; en detection leans on fingerprint signals. Both are
 documented as prioritization signals, and every change in this session
 was driven by a measured corpus value, not intuition.
+
+## Follow-up candidate screening (2026-09-18)
+
+Candidate: `Hello-SimpleAI/chatgpt-detector-roberta` (45.8k HF downloads,
+RoBERTa fine-tuned on the HC3 human-vs-ChatGPT corpus) — screened before
+wiring against the incumbent fakespot member.
+
+| Input | fakespot P(AI) | HC3-roberta P(ChatGPT) |
+|---|---|---|
+| HC3 human answers (8) | 0.000 (sampled) | 0.000–0.002 |
+| HC3 ChatGPT answers (8) | 1.000 (sampled) | 0.998–1.000 |
+| Local GPT-2 output (OOD) | **0.977** | 0.002 — miss |
+| Korean formal AI-style (OOD) | **0.985** | 0.008 — miss |
+
+Verdict: **rejected, not wired.** The HC3 model is perfect on its own
+training domain but blind outside it — the incumbent fakespot member is
+already the stronger public model and actually generalizes further
+(GPT-2 and even formal Korean AI-style text score ~0.98). Adding a
+weaker second classifier would only dilute the ensemble.
+
+New measured note: fakespot scoring 0.985 on formal Korean AI-style
+prose is better than this document's earlier Korean recall estimate
+suggested — but one formal sample is not a recall number; informal,
+short, and humanized Korean remains heuristic-only.

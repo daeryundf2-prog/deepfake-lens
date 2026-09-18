@@ -19,8 +19,8 @@ _MAX_PROFILE_DEPTH = 4
 # PIL/numpy; audio runtimes consume waveforms. Profiles may declare an
 # explicit "modality" field; otherwise it is inferred from the runtime.
 IMAGE_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "hf-image-classifier"}
-HUB_RUNTIMES = {"hf-text-classifier", "hf-image-classifier", "causal-lm-ppl", "binoculars"}
-AUDIO_RUNTIMES = {"aasist"}
+HUB_RUNTIMES = {"hf-text-classifier", "hf-image-classifier", "hf-audio-classifier", "causal-lm-ppl", "binoculars"}
+AUDIO_RUNTIMES = {"aasist", "hf-audio-classifier"}
 TEXT_RUNTIMES = {"hf-text-classifier", "causal-lm-ppl", "binoculars"}
 # "video-frames" samples frames with cv2 and scores each with a nested image
 # runtime profile ("inner") — it reuses image checkpoints, so it needs no
@@ -430,6 +430,8 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
             values = _run_hf_text_classifier(media_path, profile)
         elif runtime == "hf-image-classifier":
             values = _run_hf_image_classifier(media_path, profile)
+        elif runtime == "hf-audio-classifier":
+            values = _run_hf_audio_classifier(media_path, profile)
         elif runtime == "causal-lm-ppl":
             return _run_causal_lm_ppl(media_path, profile, model_name=model_name)
         elif runtime == "binoculars":
@@ -660,6 +662,27 @@ def _run_aide(checkpoint: Path, image_path: Path) -> list[float]:
 _AASIST_RUNNERS: dict[str, tuple[object, object]] = {}
 
 
+_AASIST_MODULE: object | None = None
+
+
+def _aasist_module():
+    """Load scripts/run_aasist.py once — its waveform decoder is shared by
+    every audio runtime, not just the AASIST checkpoint path."""
+    global _AASIST_MODULE
+    if _AASIST_MODULE is None:
+        repo_root = Path(__file__).resolve().parent.parent
+        script = repo_root / "scripts" / "run_aasist.py"
+        if not script.is_file():
+            raise RuntimeError(f"AASIST runner script is missing: {script}")
+        spec = importlib.util.spec_from_file_location("deepfake_lens_aasist_runner", script)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"could not load AASIST runner: {script}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _AASIST_MODULE = module
+    return _AASIST_MODULE
+
+
 def _aasist_runner(checkpoint: Path) -> tuple[object, object]:
     """Load scripts/run_aasist.py (module, model), cached per checkpoint."""
     importlib.import_module("torch")  # surface ImportError before loading the script
@@ -667,15 +690,7 @@ def _aasist_runner(checkpoint: Path) -> tuple[object, object]:
     cached = _AASIST_RUNNERS.get(key)
     if cached is not None:
         return cached
-    repo_root = Path(__file__).resolve().parent.parent
-    script = repo_root / "scripts" / "run_aasist.py"
-    if not script.is_file():
-        raise RuntimeError(f"AASIST runner script is missing: {script}")
-    spec = importlib.util.spec_from_file_location("deepfake_lens_aasist_runner", script)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"could not load AASIST runner: {script}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = _aasist_module()
     runner = (module, module.load_model(checkpoint))
     _AASIST_RUNNERS[key] = runner
     return runner
@@ -697,6 +712,62 @@ def _run_aasist(checkpoint: Path, audio_path: Path, profile: dict[str, object]) 
     max_seconds = float(profile.get("max_seconds", 30) or 30)
     logits = module.score_audio_file(model, audio_path, sample_rate=sample_rate, nb_samp=nb_samp, max_seconds=max_seconds)
     return _flatten_outputs(logits.detach().cpu().numpy())
+
+
+# Hugging Face audio classifiers (wav2vec2-family deepfake detectors) are
+# multi-hundred-MB downloads — keep them resident between files.
+_HF_AUDIO_MODELS: dict[str, tuple[object, object]] = {}
+
+
+def _hf_audio_model(hub_model: str) -> tuple[object, object]:
+    cached = _HF_AUDIO_MODELS.get(hub_model)
+    if cached is not None:
+        return cached
+    transformers = importlib.import_module("transformers")
+    extractor = transformers.AutoFeatureExtractor.from_pretrained(hub_model)
+    model = transformers.AutoModelForAudioClassification.from_pretrained(hub_model)
+    model.eval()
+    pair = (extractor, model)
+    _HF_AUDIO_MODELS[hub_model] = pair
+    return pair
+
+
+def _run_hf_audio_classifier(media_path: Path, profile: dict[str, object]) -> list[float]:
+    """Score one audio file with a Hugging Face audio classifier.
+
+    The profile's ``hub_model`` names the model id (e.g.
+    Gustking/wav2vec2-large-xlsr-deepfake-audio-classification); transformers
+    fetches it on first use — point it at a local snapshot dir for offline
+    runs. Audio is decoded to mono float32 at the extractor's expected
+    sampling rate via the shared run_aasist decoder (stdlib wave for PCM
+    .wav, soundfile/librosa for everything else).
+
+    Same ``score_label`` contract as hf-image-classifier: when set, the
+    matching ``id2label`` entry's softmax probability is returned so label
+    order in the checkpoint can never silently flip the score.
+    """
+    torch = importlib.import_module("torch")
+    hub_model = str(profile.get("hub_model") or "")
+    if not hub_model:
+        raise RuntimeError("hf-audio-classifier profile needs a 'hub_model' field (e.g. Gustking/wav2vec2-large-xlsr-deepfake-audio-classification)")
+    extractor, model = _hf_audio_model(hub_model)
+    sample_rate = int(getattr(extractor, "sampling_rate", 16000) or 16000)
+    max_seconds = float(profile.get("max_seconds", 15) or 15)
+    waveform = _aasist_module().load_waveform(media_path, sample_rate=sample_rate, max_seconds=max_seconds)
+    inputs = extractor(waveform, sampling_rate=sample_rate, return_tensors="pt")
+    with torch.no_grad():
+        logits = model(**inputs).logits
+    values = _flatten_outputs(logits.detach().cpu().numpy())
+    score_label = str(profile.get("score_label") or "").lower()
+    if score_label:
+        id2label = getattr(model.config, "id2label", None) or {}
+        target = next((int(idx) for idx, name in id2label.items() if str(name).lower() == score_label), None)
+        if target is None or target >= len(values):
+            raise RuntimeError(f"score_label '{score_label}' not found in model labels {id2label}")
+        shifted = [value - max(values) for value in values]
+        exps = [math.exp(max(-80.0, min(80.0, value))) for value in shifted]
+        return [exps[target] / max(1e-12, sum(exps))]
+    return values
 
 
 # CLIP backbones are multi-hundred-MB downloads; keep them resident between

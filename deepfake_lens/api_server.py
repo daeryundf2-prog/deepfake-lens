@@ -112,10 +112,11 @@ def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = No
     async def analyze_audio(file_path: str):
         from .audio import analyze_audio
         try:
-            # Bundled audio profile degrades gracefully when the checkpoint
+            # Bundled audio profiles degrade gracefully when checkpoints
             # or the optional torch stack is absent.
-            profile = Path(__file__).resolve().parent.parent / "models" / "aasist-runtime.json"
-            result = analyze_audio(file_path, model_path=profile if profile.is_file() else None)
+            models_dir = Path(__file__).resolve().parent.parent / "models"
+            profiles = [p for name in ("aasist-runtime.json", "wav2vec-deepfake-audio-runtime.json") if (p := models_dir / name).is_file()]
+            result = analyze_audio(file_path, model_path=profiles or None)
             return {"status": "success", "data": result.to_json()}
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
