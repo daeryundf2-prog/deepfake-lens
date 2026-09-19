@@ -92,7 +92,20 @@ distortions and real training images were never recompressed. Fix:
 `--augment-degradation` now applies random JPEG/resize to BOTH classes;
 retrained model no longer collapses.
 
-### Measured results (eval_face_manipulation.py, models/sbi-effnet-runtime.json)
+### Measured results — round 2 (diverse-domain training data)
+
+The FFHQ-only checkpoint was retrained after adding 86 diverse real
+faces (Wikimedia old/damaged/vintage portraits, face-cropped) plus their
+SBI fakes — 62 train / 24 held-out. Effect on the false-positive domain:
+
+| Set | n | AUROC | recall@50 | FPR@50 |
+|---|---:|---:|---:|---:|
+| FFHQ in-domain, clean | 40 | 0.90 | 0.65 | 0.00 |
+| FFHQ in-domain, jpeg75 | 40 | 0.84 | 0.65 | 0.15 |
+| FFHQ in-domain, 50% resize | 40 | 0.86 | 0.65 | 0.05 |
+| Cross-domain (27 diverse/old portraits, held-out) | 216 | 0.79 | 0.48 | 0.07 |
+
+### Measured results — round 1 (FFHQ-only, superseded)
 
 | Set | n | AUROC | recall@50 | FPR@50 |
 |---|---:|---:|---:|---:|
@@ -101,12 +114,16 @@ retrained model no longer collapses.
 | FFHQ in-domain, 50% resize | 40 | 0.91 | 0.80 | 0.25 |
 | Cross-domain portraits (Einstein/Lincoln/Lenna) | 36 | 0.72 | 0.89 | 0.67 |
 
-Verdict: **wired with narrow-domain limitations** — the only working
-face-manipulation member. Passes the ≥0.8 gate on its training domain
-with degradation robustness, but old/scanned/sepia portraits remain a
-measured false-positive domain (FPR ~0.67). The profile limitations and
-`crop_faces` gating carry this. Scores on non-FFHQ-like faces should be
-treated as unreliable; the member is advisory weight.
+Round-2 trade-off: cross-domain FPR dropped 0.67 → 0.07 (10x) at the
+cost of recall 0.89 → 0.48 — consistent with the precision-over-recall
+posture. A conservative score now means 'needs review', not 'probably
+real'.
+
+Verdict: **wired with measured limits** — the only working
+face-manipulation member. In-domain AUROC ~0.86-0.90 with low FPR;
+cross-domain AUROC ~0.79 is usable but recall is conservative. The
+profile limitations and `crop_faces` gating carry this; the member is
+advisory weight and must not drive a verdict alone.
 
 ### Reproduce
 
@@ -120,6 +137,6 @@ treated as unreliable; the member is advisory weight.
 - The eval set is small; in-domain numbers are FFHQ-like faces only.
 - Aged/damaged portraits are a measured false-positive domain for
   off-domain classifiers — keep them in every future eval set.
-- Cross-domain AUROC 0.72 means this member must not drive a verdict
-  alone; it prioritizes review, nothing more.
+- Cross-domain AUROC 0.79 with conservative recall means this member
+  must not drive a verdict alone; it prioritizes review, nothing more.
 

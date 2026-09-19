@@ -138,8 +138,8 @@ DETECTOR_REGISTRY = [
         source_url="local: experiments/train_detector.py --sbi --augment-degradation",
         notes=[
             "Wired via models/sbi-effnet-runtime.json; checkpoint not committed — reproduce with train_detector.py.",
-            "Measured: in-domain AUROC ~0.90 incl. jpeg75/resize variants (FPR 0.05 clean); cross-domain portraits AUROC ~0.72, FPR ~0.67 — narrow-domain advisory member.",
-            "--augment-degradation was the fix for a measured FPR-1.0 collapse under JPEG recompression; see experiments/FACESWAP_EVALUATION.md.",
+            "Measured: in-domain AUROC 0.84-0.90, FPR 0.0-0.15; cross-domain (27 diverse portraits) AUROC ~0.79, FPR ~0.07 — usable with conservative recall.",
+            "--augment-degradation fixed a measured FPR-1.0 JPEG collapse; adding diverse-domain real faces fixed a measured cross-domain FPR-0.67. See experiments/FACESWAP_EVALUATION.md.",
         ],
     ),
     DetectorCandidate(

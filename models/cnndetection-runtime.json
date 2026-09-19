@@ -21,12 +21,14 @@
   "score_index": 0,
   "score_activation": "sigmoid",
   "threshold": 67,
+  "ensemble_weight": 0.3,
   "source_url": "https://github.com/PeterWang512/CNNDetection",
   "limitations": [
     "Weights are not committed; download blur_jpg_prob0.5.pth via the CNNDetection repo's weights/download_weights.sh (Dropbox link) and place it at models/blur_jpg_prob0.5.pth.",
     "CNNDetection was trained on ProGAN outputs with blur+JPEG augmentation; published results show weak transfer to diffusion generators — a low score is not evidence of a real image.",
     "The runtime resizes to 224px with ImageNet mean/std; the original paper evaluated center-crops of arbitrary sizes, so small or heavily cropped inputs may score differently.",
-    "Scores are a prioritization signal, not a truth label."
+    "Scores are a prioritization signal, not a truth label.",
+    "Measured locally (2026-09): scored ~0 on every eval input including known AI images — on this set it only votes 'real', so ensemble_weight is reduced to 0.3. See experiments/RECOMPRESSION_EVAL.md."
   ],
   "notes": [
     "Runtime 'torchvision' rebuilds the arch named in 'arch' with a num_classes head, strips 'state_dict_prefix' from checkpoint keys, and load_state_dict(strict=True).",
