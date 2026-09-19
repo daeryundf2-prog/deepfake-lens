@@ -24,6 +24,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="train with Self-Blended Images: fakes are synthesized from real images only",
     )
+    parser.add_argument(
+        "--augment-degradation",
+        action="store_true",
+        help="randomly JPEG-recompress/downscale BOTH classes so compression artifacts alone cannot become the 'fake' signal (measured FPR 1.0 @ jpeg75 without it)",
+    )
     parser.add_argument("--early-stopping-patience", type=int, default=3, help="epochs without validation improvement before stopping (default: 3)")
     parser.add_argument("--min-improvement", type=float, default=1e-4, help="minimum validation change that counts as an improvement (default: 1e-4)")
     parser.add_argument("--selection", choices=["loss", "accuracy"], default="loss", help="validation metric used for best-checkpoint selection (default: loss)")
@@ -64,13 +69,17 @@ def main(argv: list[str] | None = None) -> int:
     random.seed(args.seed)
     torch.manual_seed(args.seed)
     train_records, val_records = _split_records(records)
-    transform = torchvision.transforms.Compose(
+    transform_steps = []
+    if args.augment_degradation:
+        transform_steps.append(torchvision.transforms.Lambda(_degrade_image))
+    transform_steps.extend(
         [
             torchvision.transforms.Resize((args.image_size, args.image_size)),
             torchvision.transforms.ToTensor(),
             torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
     )
+    transform = torchvision.transforms.Compose(transform_steps)
     dataset_class = _SbiImageDataset if args.sbi else _ManifestImageDataset
     train_loader = torch.utils.data.DataLoader(
         dataset_class(train_records, transform=transform, image_module=Image, seed=args.seed),
@@ -167,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     metadata = {
         "arch": args.arch,
         "mode": "sbi-v1" if args.sbi else "labeled-v1",
+        "augment_degradation": args.augment_degradation,
         "image_size": args.image_size,
         "epochs": args.epochs,
         "epochs_ran": epochs_ran,
@@ -208,6 +218,27 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     return 0
+
+
+def _degrade_image(image):
+    """Apply random transcode-style degradation (JPEG recompress, downscale).
+
+    Applied to both classes so the model cannot learn 'JPEG artifacts =
+    fake' — without this, a re-encoded real image scores fake at FPR 1.0.
+    """
+    import io
+
+    from PIL import Image
+
+    if random.random() < 0.5:
+        buf = io.BytesIO()
+        image.save(buf, "JPEG", quality=random.choice([50, 60, 70, 75, 80]))
+        buf.seek(0)
+        image = Image.open(buf).convert("RGB")
+    if random.random() < 0.5:
+        scale = random.choice([0.4, 0.5, 0.6])
+        image = image.resize((max(32, int(image.width * scale)), max(32, int(image.height * scale))))
+    return image
 
 
 class _ManifestImageDataset:

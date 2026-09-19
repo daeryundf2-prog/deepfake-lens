@@ -191,3 +191,43 @@ class AnalyzeFileVideoDispatchTest(unittest.TestCase):
         self.assertEqual(result.score, 40)
         self.assertEqual(result.signals[0].title, "밝기 불일치")
         self.assertTrue(result.next_checks)
+
+
+class HfFlickerSignalTest(unittest.TestCase):
+    """High-frequency temporal flicker (frame-independent generation cue)."""
+
+    def _frames(self, blur_series, brightness=120.0):
+        return [
+            FrameAnalysis(i, i * 0.033, brightness, 30.0, b, 0.1)
+            for i, b in enumerate(blur_series)
+        ]
+
+    def test_oscillating_hf_energy_flags_flicker(self) -> None:
+        from deepfake_lens.video_analysis import _hf_flicker_consistency
+        # HF energy alternating every frame while brightness stays flat —
+        # the frame-independent-generation signature.
+        frames = self._frames([100, 140, 100, 140, 100, 140, 100, 140, 100, 140])
+        signal = _hf_flicker_consistency(frames)
+        self.assertIsNotNone(signal)
+        self.assertGreaterEqual(signal.weight, 30)
+
+    def test_monotonic_motion_hf_is_not_flicker(self) -> None:
+        from deepfake_lens.video_analysis import _hf_flicker_consistency
+        # HF energy drifting smoothly upward (natural focus/motion change).
+        frames = self._frames([100, 105, 112, 118, 125, 131, 138, 144, 151, 158])
+        self.assertIsNone(_hf_flicker_consistency(frames))
+
+    def test_flicker_with_matched_exposure_jitter_not_flagged(self) -> None:
+        from deepfake_lens.video_analysis import _hf_flicker_consistency
+        # Same oscillation but brightness jitters along — motion-driven,
+        # not generator flicker.
+        frames = [
+            FrameAnalysis(i, i * 0.033, 110.0 + (i % 2) * 30, 30.0, b, 0.1)
+            for i, b in enumerate([100, 140, 100, 140, 100, 140, 100, 140, 100, 140])
+        ]
+        self.assertIsNone(_hf_flicker_consistency(frames))
+
+    def test_too_few_frames_returns_none(self) -> None:
+        from deepfake_lens.video_analysis import _hf_flicker_consistency
+        frames = self._frames([100, 140, 100, 140])
+        self.assertIsNone(_hf_flicker_consistency(frames))

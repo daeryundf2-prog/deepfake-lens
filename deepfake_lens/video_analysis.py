@@ -142,6 +142,11 @@ def analyze_video_temporal(
         if edge_signal:
             signals.append(edge_signal)
 
+        # High-frequency flicker (frame-independent generation artifact)
+        flicker_signal = _hf_flicker_consistency(frame_analyses)
+        if flicker_signal:
+            signals.append(flicker_signal)
+
     # Frame rate analysis
     fps_signal = _fps_analysis(fps, duration)
     if fps_signal:
@@ -445,6 +450,61 @@ def _blur_pattern(frames: list[FrameAnalysis]) -> VideoEvidenceSignal | None:
             10,
         )
 
+    return None
+
+
+def _hf_flicker_consistency(frames: list[FrameAnalysis]) -> VideoEvidenceSignal | None:
+    """Detect high-frequency temporal flicker — the signature of
+    frame-independent generation.
+
+    Per-frame generators (image models applied to video, many diffusion
+    videos) re-draw fine detail every frame, so high-frequency energy
+    (Laplacian variance, already stored as blur_score) oscillates
+    up/down/up/down even when the scene itself barely moves. Real camera
+    footage changes HF energy smoothly with motion/exposure.
+
+    Uncalibrated heuristic — thresholds are chosen conservatively and the
+    signal reports review priority only.
+    """
+    if len(frames) < 8:
+        return None
+
+    blur = [f.blur_score for f in frames]
+    mean_blur = sum(blur) / len(blur)
+    if mean_blur < 20:  # too little HF content to flicker meaningfully
+        return None
+
+    diffs = [blur[i] - blur[i - 1] for i in range(1, len(blur))]
+    signs = [1 if d > 0 else -1 if d < 0 else 0 for d in diffs]
+    nz = [s for s in signs if s != 0]
+    if len(nz) < 4:
+        return None
+    flips = sum(1 for i in range(1, len(nz)) if nz[i] != nz[i - 1])
+    osc = flips / (len(nz) - 1)
+    amplitude = sum(abs(d) for d in diffs) / len(diffs) / mean_blur
+
+    brightness = [f.brightness for f in frames]
+    b_mean = sum(brightness) / len(brightness) or 1.0
+    b_jitter = (
+        sum(abs(brightness[i] - brightness[i - 1]) for i in range(1, len(brightness)))
+        / (len(brightness) - 1)
+        / b_mean
+    )
+    # Flicker is suspicious when HF energy oscillates fast but exposure
+    # stays comparatively stable — motion-driven HF change moves with
+    # brightness, generator flicker does not.
+    if osc >= 0.60 and amplitude >= 0.12 and b_jitter < amplitude * 0.6:
+        return VideoEvidenceSignal(
+            "고주파 프레임 플리커",
+            f"고주파 에너지가 프레임마다 상하로 진동합니다(진동률 {osc:.0%}, 진폭 {amplitude:.2f}, 밝기 jitter {b_jitter:.3f}) — 프레임 독립 생성/부분 합성 가능성.",
+            32,
+        )
+    if osc >= 0.50 and amplitude >= 0.08 and b_jitter < amplitude * 0.6:
+        return VideoEvidenceSignal(
+            "경미한 고주파 플리커",
+            f"고주파 에너지 진동 패턴이 관찰됩니다(진동률 {osc:.0%}, 진폭 {amplitude:.2f}) — 미보정 휴리스틱이므로 참고용.",
+            18,
+        )
     return None
 
 

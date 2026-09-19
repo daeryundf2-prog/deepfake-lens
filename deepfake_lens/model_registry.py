@@ -129,6 +129,20 @@ DETECTOR_REGISTRY = [
         ],
     ),
     DetectorCandidate(
+        key="sbi-effnet-b0-local",
+        name="SBI-trained EfficientNet-B0 (local self-blend)",
+        task="face-manipulation-detector",
+        adapter_target="torchvision runtime profile",
+        status="candidate",
+        priority="high",
+        source_url="local: experiments/train_detector.py --sbi --augment-degradation",
+        notes=[
+            "Wired via models/sbi-effnet-runtime.json; checkpoint not committed — reproduce with train_detector.py.",
+            "Measured: in-domain AUROC ~0.90 incl. jpeg75/resize variants (FPR 0.05 clean); cross-domain portraits AUROC ~0.72, FPR ~0.67 — narrow-domain advisory member.",
+            "--augment-degradation was the fix for a measured FPR-1.0 collapse under JPEG recompression; see experiments/FACESWAP_EVALUATION.md.",
+        ],
+    ),
+    DetectorCandidate(
         key="aasist-2022",
         name="AASIST Audio Anti-Spoofing Integrated Spectro-Temporal Graph Attention",
         task="binary-audio-detector",
@@ -167,6 +181,19 @@ DETECTOR_REGISTRY = [
         notes=[
             "True temporal detector (temporal-transformer over frame features) — the right long-term target for video, unlike the interim frame-level video-frames bridge.",
             "Checkpoint availability and FaceForensics++ training domain must be verified before wiring; do not claim support without a working profile.",
+        ],
+    ),
+    DetectorCandidate(
+        key="reenactment-morph-2026",
+        name="Face reenactment / morphing public detectors (HF survey)",
+        task="face-reenactment-detector",
+        adapter_target="future runtime profile",
+        status="research",
+        priority="medium",
+        source_url="https://huggingface.co/models",
+        notes=[
+            "Surveyed 2026-09-19: no usable public reenactment (Face2Face/FOMM-style) or face-morphing detector checkpoint found on HF — only student demos and unrelated repos.",
+            "The honest interim coverage for reenactment is the SBI-trained crop detector (if it validates) plus the temporal-consistency heuristic; revisit when a vetted checkpoint appears.",
         ],
     ),
     DetectorCandidate(

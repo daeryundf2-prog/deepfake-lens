@@ -1,0 +1,29 @@
+{
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "SBI-trained EfficientNet-B0 (local, FFHQ self-blend)",
+  "candidate_key": "sbi-effnet-b0-local",
+  "runtime": "torchvision",
+  "modality": "image",
+  "arch": "efficientnet_b0",
+  "num_classes": 2,
+  "checkpoint": "sbi-effnet-b0.pth",
+  "input_size": 224,
+  "score_index": 1,
+  "score_activation": "softmax",
+  "crop_faces": true,
+  "supported": true,
+  "source_url": "local training: experiments/train_detector.py + experiments/sbi.py on FFHQ parquet (CC-BY-NC 4.0 for FFHQ-derived research use)",
+  "limitations": [
+    "Checkpoint is not committed; reproduce with experiments/train_detector.py --sbi --augment-degradation --arch efficientnet_b0 (CPU ~10 min, 720-image set).",
+    "Measured in-domain (FFHQ-like faces): AUROC ~0.90 incl. jpeg75/50%-resize variants; AUROC 0.94, FPR 0.05, recall 0.70 on clean samples.",
+    "Measured cross-domain (old/damaged/low-quality portraits): AUROC ~0.72 with FPR ~0.67 at score 50 — sepia, scanned, or heavily compressed real faces can be flagged. Treat scores on such photos as unreliable.",
+    "crop_faces=true: face-free images are skipped (unavailable) rather than scored.",
+    "Detects self-blend-style manipulation artifacts; a real faceswap generator (FaceSwap/DeepFaceLab) may produce different artifacts — treat as a review signal.",
+    "A low score is not evidence of an authentic face; a high score is not proof of malicious manipulation."
+  ],
+  "notes": [
+    "Model logits are (real=0, fake=1); score_index 1 with softmax yields the fake probability on a 0-100 scale.",
+    "Trained on 360 real FFHQ faces + 360 face-region self-blend manipulations with both-class JPEG/resize degradation augmentation (without it, recompression alone drove FPR to 1.0 — see FACESWAP_EVALUATION.md).",
+    "Same-distribution validation AUROC 0.93; the honest operating numbers are the eval-harness figures in the limitations above."
+  ]
+}

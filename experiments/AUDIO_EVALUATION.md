@@ -65,3 +65,29 @@ index from id2label, so label order can never silently flip the score).
   advisory — both profiles carry these measurements in `limitations`.
 - Coverage of voice-clone services (ElevenLabs et al.) is still unmeasured —
   edge-tts is the only modern generator in this set.
+
+## Generator-level recall sweep (2026-09-19)
+
+Expanded the fake set to 7 edge-tts voices (en-US/GB + ko-KR, English and
+Korean text) — the modern neural-TTS family. Threshold reference ~0.5.
+
+| Sample | AASIST P(spoof) | wav2vec P(fake) | Read |
+|---|---|---|---|
+| real_extra.flac (real) | 0.019 | 0.103 | both correct |
+| real_yesno.wav (real, 8 kHz) | **0.928 FP** | 0.068 | AASIST trips on telephone bandwidth |
+| fake_sapi.wav (SAPI TTS) | 1.000 | 0.917 | both catch |
+| tts_en_aria (edge-tts) | 0.088 | 0.253 | both miss |
+| tts_en_guy (edge-tts) | 0.189 | 0.604 | wav2vec catches |
+| tts_gb_sonia (edge-tts) | 0.385 | 0.620 | wav2vec catches |
+| tts_ko_injoon, English text | 0.018 | 0.713 | wav2vec catches |
+| tts_ko_injoon, Korean text | 0.000 | 0.214 | both miss |
+| tts_ko_sunhi, English text | 0.685 | 0.858 | both catch |
+| tts_ko_sunhi, Korean text | 0.019 | 0.435 | wav2vec partial |
+
+**edge-tts recall: AASIST ~1/7, wav2vec ~4/7 at 0.5 — and both collapse on
+Korean-language text** (ko_injoon 0.71 -> 0.21, ko_sunhi 0.86 -> 0.44 when
+the same voice speaks Korean). The earlier single-sample "AASIST catches
+edge-tts at 0.73" was voice-dependent luck, not coverage.
+
+Voice-clone services (ElevenLabs, RVC, so-vits-svc) remain **unmeasured** —
+no checkpoint or API access locally; that gap stays explicitly open.

@@ -18,6 +18,7 @@
     "Checkpoint is not committed; run scripts/fetch_aasist.py to download AASIST.pth (~1.3 MB) into models/aasist.pth.",
     "AASIST code and weights are MIT-licensed (NAVER Corp.) but the model was trained on ASVspoof2019-LA, whose dataset terms are research-oriented; treat the checkpoint as research-use, not a redistributed asset of this repo.",
     "Trained on ASVspoof2019 LA attacks (TTS/VC): generalization to newer neural codecs and commercial voice-clone services is not guaranteed — a low score is not evidence of real audio.",
+    "Measured locally (2026-09): edge-tts 7-voice recall ~1/7 at 0.5 (voice-dependent), and false-positives on low-bandwidth real speech (8 kHz YESNO scored 0.93 spoof). Pairs with the wav2vec member which is calibrated better on real speech but weak on some TTS voices.",
     "Only the first ~30s is scored, in ~4s windows whose logits are averaged; very long files are not fully covered.",
     "Scores are a prioritization signal, not a truth label."
   ],

@@ -109,6 +109,7 @@ def analyze_image_pixels(
         _spark_il_retrieval_expert(raster, luminance, stats, edge_stats),
         _low_correlation_fractal_expert(raster, luminance, stats, edge_stats),
         _alpha_blending_expert(raster, luminance),
+        _ela_expert(raster),
         _vrag_dfd_expert(raster, luminance, stats, edge_stats),
         _ivy_xdetector_adapter(image_path),
     ]
@@ -658,6 +659,110 @@ def _alpha_blending_expert(raster: PixelRaster, luminance: list[float]) -> Pixel
         True,
         detail,
         "Rethinking Deepfake Detection: Training Detectors with Real-Only Data via Alpha Blending",
+    )
+
+
+def _ela_expert(raster: PixelRaster) -> PixelExpertResult:
+    """Error-level analysis: re-save at fixed JPEG quality and look for
+    blocks whose compression error deviates from the frame baseline.
+
+    A spliced/composited region carries a different compression history
+    than the rest of the image, so its re-save error level differs.
+    Heuristic tier only — flags regions for review, never a verdict.
+    Unreliable on uniform/flat content and on inputs that were never
+    JPEG-compressed.
+    """
+    unavailable = PixelExpertResult(
+        "ela_error_level",
+        "forensic",
+        0,
+        0.12,
+        False,
+        "ELA를 계산할 수 없습니다 (PIL 필요 또는 이미지가 너무 작음).",
+        "Error Level Analysis (Krawetz, 2007)",
+    )
+    if raster.width < 32 or raster.height < 32:
+        return unavailable
+    try:
+        from PIL import Image
+        import io
+    except ImportError:
+        return unavailable
+
+    flat = bytes(channel for px in raster.pixels for channel in px)
+    try:
+        image = Image.frombytes("RGB", (raster.width, raster.height), flat)
+        buffer = io.BytesIO()
+        image.save(buffer, "JPEG", quality=90)
+        buffer.seek(0)
+        resaved = Image.open(buffer).convert("RGB")
+        resaved_pixels = resaved.tobytes()
+    except Exception:
+        return unavailable
+
+    block = 16
+    blocks_x = raster.width // block
+    blocks_y = raster.height // block
+    if blocks_x < 2 or blocks_y < 2:
+        return unavailable
+
+    block_means: list[float] = []
+    for by in range(blocks_y):
+        for bx in range(blocks_x):
+            total = 0.0
+            count = 0
+            for y in range(by * block, (by + 1) * block):
+                row = y * raster.width
+                for x in range(bx * block, (bx + 1) * block):
+                    i = (row + x) * 3
+                    total += abs(flat[i] - resaved_pixels[i])
+                    count += 1
+            block_means.append(total / max(1, count))
+
+    ordered = sorted(block_means)
+    median = ordered[len(ordered) // 2]
+    deviations = sorted(abs(v - median) for v in block_means)
+    mad = deviations[len(deviations) // 2] or 1e-6
+    # Outlier blocks deviate strongly from the baseline error level — in
+    # either direction (a pasted region may carry *less* error if it was
+    # compressed at higher quality before compositing).
+    outlier_idx = [
+        i for i, v in enumerate(block_means) if abs(v - median) > 4.5 * mad
+    ]
+    outlier_ratio = len(outlier_idx) / len(block_means)
+    # Localization: outliers concentrated in a sub-region (bounding box
+    # covering less than ~2/3 of the frame) are splice-like; scattered
+    # outliers are usually texture noise.
+    localized = False
+    if outlier_idx:
+        xs = [i % blocks_x for i in outlier_idx]
+        ys = [i // blocks_x for i in outlier_idx]
+        span_x = (max(xs) - min(xs) + 1) / blocks_x
+        span_y = (max(ys) - min(ys) + 1) / blocks_y
+        localized = span_x * span_y <= 0.66
+
+    score = 0
+    detail = "ELA 오차 수준이 프레임 전반에 걸쳐 고르게 분포합니다."
+    if 0.02 <= outlier_ratio <= 0.30 and localized and mad > 0:
+        score = 62
+        detail = (
+            f"일부 블록({len(outlier_idx)}개, {outlier_ratio:.0%})의 재압축 오차가 "
+            "주변과 유의하게 달라 부분 편집/합성 후보입니다."
+        )
+    elif 0.01 <= outlier_ratio <= 0.40 and mad > 0:
+        score = 41
+        detail = (
+            f"ELA 오차 이상 블록({len(outlier_idx)}개)이 있으나 국소성이 약해 "
+            "텍스처 차이일 가능성도 있습니다."
+        )
+    return PixelExpertResult(
+        "ela_error_level",
+        "forensic",
+        score,
+        0.12,
+        True,
+        detail,
+        "Error Level Analysis (Krawetz, 2007)",
     )
 
 

@@ -63,24 +63,63 @@ same profile shape and must pass this harness before `supported` flips.
 
 ## Open gap — faceswap coverage
 
-Neither community checkpoint survived local measurement. Remaining
-directions, in order of tractability:
+Neither community checkpoint survived local measurement. Direction 1
+below was executed (see Candidate C); the rest remain open:
 
-1. **Local fine-tune** — the training path already exists
-   (`experiments/train_detector.py`, `sbi.py` augmentations); train on
-   FF++/KoDF-style data or SBI-augmented local corpora, then validate
-   with `eval_face_manipulation.py` before wiring.
+1. ~~Local fine-tune~~ — done: `train_detector.py --sbi
+   --augment-degradation`, evaluated with `eval_face_manipulation.py`,
+   wired as `models/sbi-effnet-runtime.json` (narrow domain — see
+   Candidate C).
 2. **Gated/restricted checkpoints** — e.g.
    `HrutikAdsare/deepfake-detector-faceforensics` (HF gated, 401) —
    requires operator-authenticated access before evaluation.
 3. **Cross-domain KoDF model** — a checkpoint verified on Korean faces,
-   since deployment data is likely Korean.
+   since deployment data is likely Korean; would also address the
+   measured cross-domain FPR of Candidate C.
+
+## Candidate C — local SBI-trained EfficientNet-B0 — WIRED (narrow domain)
+
+After both public checkpoints failed, a local detector was trained with
+`experiments/train_detector.py --sbi` on 360 FFHQ faces + 360 face-region
+self-blend fakes (pure NumPy `sbi.py` pipeline, no external fake corpus).
+
+### Failure found and fixed during measurement
+
+The first checkpoint scored AUROC 0.97 on clean held-out SBI pairs but
+**FPR 1.0 under JPEG q75 recompression** — the model had learned
+'JPEG artifacts = fake' because `jpeg_simulate` is one of the blend
+distortions and real training images were never recompressed. Fix:
+`--augment-degradation` now applies random JPEG/resize to BOTH classes;
+retrained model no longer collapses.
+
+### Measured results (eval_face_manipulation.py, models/sbi-effnet-runtime.json)
+
+| Set | n | AUROC | recall@50 | FPR@50 |
+|---|---:|---:|---:|---:|
+| FFHQ in-domain, clean | 40 | 0.94 | 0.70 | 0.05 |
+| FFHQ in-domain, jpeg75 | 40 | 0.91 | 0.75 | 0.20 |
+| FFHQ in-domain, 50% resize | 40 | 0.91 | 0.80 | 0.25 |
+| Cross-domain portraits (Einstein/Lincoln/Lenna) | 36 | 0.72 | 0.89 | 0.67 |
+
+Verdict: **wired with narrow-domain limitations** — the only working
+face-manipulation member. Passes the ≥0.8 gate on its training domain
+with degradation robustness, but old/scanned/sepia portraits remain a
+measured false-positive domain (FPR ~0.67). The profile limitations and
+`crop_faces` gating carry this. Scores on non-FFHQ-like faces should be
+treated as unreliable; the member is advisory weight.
+
+### Reproduce
+
+    python experiments/train_detector.py --manifest faces.json --sbi         --augment-degradation --arch efficientnet_b0 --out models/
+    python experiments/eval_face_manipulation.py --real-dir <faces>         --profile models/sbi-effnet-runtime.json
 
 ## Honest limits
 
 - `crop_faces` coverage depends on the detector (Haar + MediaPipe
   FaceMesh fallback); faces both miss are silently skipped.
-- The eval set is small (5 identities); a passing candidate needs a
-  larger labeled set before its weight rises above advisory.
+- The eval set is small; in-domain numbers are FFHQ-like faces only.
 - Aged/damaged portraits are a measured false-positive domain for
   off-domain classifiers — keep them in every future eval set.
+- Cross-domain AUROC 0.72 means this member must not drive a verdict
+  alone; it prioritizes review, nothing more.
+

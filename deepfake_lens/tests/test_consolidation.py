@@ -218,3 +218,58 @@ class ForensicDelegationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ElaExpertTest(unittest.TestCase):
+    """ELA (error-level analysis) heuristic expert."""
+
+    def _jpeg_pair(self, tmp: Path) -> tuple[Path, Path]:
+        """Control JPEG vs the same frame with an uncompressed patch pasted in."""
+        import io
+        import numpy as np
+        from PIL import Image
+
+        rng = np.random.default_rng(7)
+        yy, xx = np.mgrid[0:256, 0:256]
+        # photographic-ish content: smooth gradient + mild noise
+        arr = np.stack([
+            128 + 60 * np.sin(xx / 40.0),
+            128 + 60 * np.cos(yy / 50.0),
+            128 + 40 * np.sin((xx + yy) / 60.0),
+        ], axis=2)
+        arr = np.clip(arr + rng.normal(0, 6, arr.shape), 0, 255).astype(np.uint8)
+        base = Image.fromarray(arr)
+        base_path = tmp / "base.jpg"
+        base.save(base_path, quality=60)
+        base_j = Image.open(base_path).convert("RGB")
+        control = tmp / "control.jpg"
+        base_j.save(control, quality=75)
+
+        patch = Image.fromarray(np.clip(arr[60:170, 60:170] + 12, 0, 255).astype(np.uint8))
+        spliced = base_j.copy()
+        spliced.paste(patch, (60, 60))
+        spliced_path = tmp / "spliced.jpg"
+        spliced.save(spliced_path, quality=75)
+        return control, spliced_path
+
+    def test_spliced_region_scores_above_control(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            control, spliced = self._jpeg_pair(Path(tmp))
+            for path in (control, spliced):
+                result = analyze_image_pixels(path, mode="fast")
+                ela = next(e for e in result.experts if e.name == "ela_error_level")
+                self.assertTrue(ela.available)
+                if path == control:
+                    control_score = ela.score
+                else:
+                    spliced_score = ela.score
+            self.assertGreater(spliced_score, control_score)
+            self.assertGreaterEqual(spliced_score, 41)
+
+    def test_ela_expert_present_in_fast_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "tile.png"
+            _write_rgb_png(path, 64, 64, lambda x, y: (180, 120, 60))
+            result = analyze_image_pixels(path, mode="fast")
+            names = [e.name for e in result.experts]
+            self.assertIn("ela_error_level", names)
