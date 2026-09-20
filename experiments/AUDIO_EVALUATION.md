@@ -128,3 +128,30 @@ wav2vec recall on Korean text: 4/4 in this batch vs 0/2 in the first —
 the collapse is **sample/text-dependent, not a systematic Korean gap**.
 AASIST remains voice-dependent (2/4 missed). No threshold recalibration
 is warranted; the ensemble disagreement itself remains the review signal.
+
+## Extended voice sweep (2026-09-20, 39 edge-tts voices + 12 real)
+
+Supersedes the earlier 7-voice estimate — the small sample understated
+both members.
+
+| Member | recall@50 (40 fake) | FPR@50 (12 real) | mean fake | mean real |
+|---|---|---|---|---|
+| AASIST | **0.72** | 0.08 | 65 | 10 |
+| wav2vec XLSR | **0.78** | 0.00 | 69 | 10 |
+| union (either ≥50) | **0.93** | 0.08 | — | — |
+| ensemble mean ≥50 | 0.75 | — | — | — |
+
+Per-language wav2vec recall: ko 3/3, en **11/19 (weakest)**, ja/zh/de/fr/
+es/it/pt/nl ~1.00, ru 1/2. AASIST is complementary — catches most en
+voices w2v misses. Both-missed set is only 3 English voices
+(AnaNeural, BrandonNeural, LibbyNeural).
+
+AASIST's single FP remains the 8 kHz telephone-bandwidth YESNO clip
+(score 98) — low-bandwidth real speech stays its known weakness.
+
+## Voice-clone coverage attempt (2026-09-20)
+
+Coqui TTS (XTTS) cannot install on this environment (no distribution for
+Python 3.12); RVC/so-vits need trained voice models; ElevenLabs needs an
+API key. True voice-clone coverage remains **unmeasured** — edge-tts
+neural TTS is the newest locally reproducible generator.

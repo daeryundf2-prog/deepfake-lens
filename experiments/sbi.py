@@ -117,12 +117,37 @@ def random_blending_mask(rng: np.random.Generator, height: int, width: int) -> n
     return gaussian_blur(mask, max(1.0, min(height, width) * 0.02))
 
 
+def polygon_blending_mask(rng: np.random.Generator, height: int, width: int) -> np.ndarray:
+    """Convex-polygon mask — mimics the landmark-hull shape real face swaps use.
+
+    Random points near the face region, convex-hulled and filled, then
+    blurred with a sigma that is sometimes near-zero (real swaps can have
+    hard boundaries after codec noise).
+    """
+    try:
+        import cv2
+    except ImportError:
+        return random_blending_mask(rng, height, width)
+    n = int(rng.integers(5, 9))
+    cx, cy = rng.uniform(0.3, 0.7, size=2)
+    angles = np.sort(rng.uniform(0, 2 * np.pi, size=n))
+    radii = rng.uniform(0.18, 0.45, size=n)
+    pts = np.stack(
+        [cx * width + radii * width * np.cos(angles),
+         cy * height + radii * height * np.sin(angles)], axis=1)
+    hull = cv2.convexHull(pts.astype(np.float32)).astype(np.int32)
+    mask = np.zeros((height, width), dtype=np.uint8)
+    cv2.fillConvexPoly(mask, hull, 1)
+    sigma = rng.uniform(0.5, min(height, width) * 0.03)
+    return gaussian_blur(mask.astype(np.float64), sigma)
+
+
 def _color_jitter(image: np.ndarray, rng: np.random.Generator) -> np.ndarray:
     gains = 1.0 + rng.uniform(-0.12, 0.12, size=(3,))
     return np.clip(image * gains, 0, 255)
 
 
-DISTORTIONS = ("resize", "blur", "jpeg", "color")
+DISTORTIONS = ("resize", "blur", "jpeg", "color", "affine", "noise", "sharpen")
 
 
 def _apply_distortion(name: str, image: np.ndarray, rng: np.random.Generator) -> np.ndarray:
@@ -137,6 +162,31 @@ def _apply_distortion(name: str, image: np.ndarray, rng: np.random.Generator) ->
         return jpeg_simulate(image, int(rng.integers(30, 75)))
     if name == "color":
         return _color_jitter(image, rng)
+    if name == "affine":
+        # Small rotation/scale/translation mismatch — the signature of a
+        # warped-in face patch. Uses cv2 when available, else falls back to
+        # a resize jitter.
+        try:
+            import cv2
+        except ImportError:
+            return _apply_distortion("resize", image, rng)
+        angle = rng.uniform(-12, 12)
+        scale = rng.uniform(0.9, 1.1)
+        tx = rng.uniform(-0.08, 0.08) * width
+        ty = rng.uniform(-0.08, 0.08) * height
+        matrix = cv2.getRotationMatrix2D((width / 2, height / 2), angle, scale)
+        matrix[:, 2] += [tx, ty]
+        warp = cv2.warpAffine(
+            np.asarray(image, dtype=np.float64), matrix, (width, height),
+            flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+        return np.clip(warp, 0, 255)
+    if name == "noise":
+        sigma = rng.uniform(2.0, 8.0)
+        return np.clip(image + rng.normal(0, sigma, image.shape), 0, 255)
+    if name == "sharpen":
+        blurred = gaussian_blur(image, rng.uniform(0.8, 1.6))
+        amount = rng.uniform(0.4, 1.2)
+        return np.clip(image + amount * (image - blurred), 0, 255)
     raise ValueError(f"unknown distortion: {name}")
 
 
@@ -157,6 +207,8 @@ def self_blended_image(image: np.ndarray, rng: np.random.Generator) -> tuple[np.
         base = resize_bilinear(base, height, width)
     if patch.shape[:2] != (height, width):
         patch = resize_bilinear(patch, height, width)
-    mask = random_blending_mask(rng, height, width)
+    mask = (polygon_blending_mask(rng, height, width)
+            if rng.random() < 0.5
+            else random_blending_mask(rng, height, width))
     blended = base * (1 - mask[..., None]) + patch * mask[..., None]
     return np.clip(blended, 0, 255), mask

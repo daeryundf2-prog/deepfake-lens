@@ -1362,7 +1362,11 @@ def _score_from_outputs(values: list[float], profile: dict[str, object]) -> int:
         score = 1.0 / (1.0 + math.exp(-max(-80.0, min(80.0, values[index]))))
     else:
         score = values[index]
-    return _normalize_score(score) or 0
+    normalized = _normalize_score(score) or 0
+    bias = profile.get("score_bias")
+    if isinstance(bias, (int, float)) and not isinstance(bias, bool):
+        normalized = max(0, min(100, normalized - int(round(float(bias)))))
+    return normalized
 
 
 def _score_from_score_map(profile: dict[str, object], image_path: Path) -> int | None:

@@ -161,3 +161,28 @@ Haar fallback. Detection-miss remains a documented blind spot
 (`crop_faces` skips silently) — the fix is a recall benchmark, not this
 model.
 
+
+## SBI v2 — enriched blending + score recalibration (2026-09-20)
+
+v1 recall dropped to ~0.34-0.48 after diverse-portrait negatives were
+added. Retrained with diversified self-blending: polygon/hull masks,
+affine misalignment between warped face and base, extra
+noise/sharpen distortion paths (experiments/sbi.py).
+
+Held-out eval: 72 real (40 FFHQ-val + 32 diverse/archival) + 85 fake
+(v2-recipe SBI positives never seen in training).
+
+| Member | AUROC | FPR@50 | recall@50 | recall @ matched FPR~8% |
+|---|---:|---:|---:|---:|
+| v1 (deployed) | 0.813 | 0.029 | 0.342 | in-domain 0.41 / xd 0.20 |
+| v2 raw | 0.862 | 0.250 | 0.785 | in-domain 0.77 / xd 0.30 |
+| v2 + score_bias 35 | 0.862 | 0.044 | 0.405 | (same operating point) |
+
+v2's ROC dominates v1 at every matched-FPR operating point; the raw
+score distribution shifted ~16 points up on real faces, so
+`score_bias: 35` was added to `_score_from_outputs` and set in the
+runtime profile to restore the precision-first operating point.
+Promoted as `models/sbi-effnet-b0.pth` (still git-ignored).
+
+Residual caveat: cross-domain ranking stays weak (AUROC ~0.68) — the
+member remains advisory-only on aged/scanned portraits.

@@ -16,7 +16,8 @@
   "limitations": [
     "Frame-level image detection, not a temporal/lip-sync model — per-frame scores are averaged; inter-frame consistency is not modeled.",
     "Requires the AIDE checkpoint (scripts/fetch_aide.py) and opencv for frame decoding.",
-    "AIDE scores are a prioritization signal, not a truth label; see experiments/AIDE_EVALUATION.md for measured AUROC and cross-generator caveats."
+    "AIDE scores are a prioritization signal, not a truth label; see experiments/AIDE_EVALUATION.md for measured AUROC and cross-generator caveats.",
+    "Measured on synthetic still-frame videos (2026-09-20): inherits the image member's failure modes — real photo scored 86 (false positive), DALL-E frames 10-19 (missed), and crf32/screen-capture recompression collapses all scores toward zero."
   ],
   "notes": [
     "The 'inner' profile is a complete image-runtime profile: 'checkpoint' resolves relative to this file's directory (models/).",

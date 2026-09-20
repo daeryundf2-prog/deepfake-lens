@@ -616,6 +616,30 @@ class TorchvisionHeadTest(unittest.TestCase):
         self.assertTrue(analysis.available)
 
 
+class ScoreBiasTest(unittest.TestCase):
+    """score_bias subtracts calibration points after activation (SBI v2
+    measured a ~16-point upward shift on real faces)."""
+
+    def test_bias_subtracts_from_normalized_score(self) -> None:
+        from deepfake_lens.model_adapter import _score_from_outputs
+
+        base = _score_from_outputs([0.0, 4.0], {"score_index": 1})
+        biased = _score_from_outputs([0.0, 4.0], {"score_index": 1, "score_bias": 35})
+        self.assertEqual(biased, max(0, base - 35))
+
+    def test_bias_clamps_at_zero(self) -> None:
+        from deepfake_lens.model_adapter import _score_from_outputs
+
+        score = _score_from_outputs([4.0, 0.0], {"score_index": 1, "score_bias": 35})
+        self.assertEqual(score, 0)
+
+    def test_no_bias_unchanged(self) -> None:
+        from deepfake_lens.model_adapter import _score_from_outputs
+
+        self.assertEqual(_score_from_outputs([0.0, 4.0], {"score_index": 1}),
+                         _score_from_outputs([0.0, 4.0], {"score_index": 1, "score_bias": 0}))
+
+
 if __name__ == "__main__":
     unittest.main()
 

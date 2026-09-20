@@ -55,3 +55,21 @@ Findings:
 - This document is the measured basis for the "low score ≠ real"
   warnings — a recompressed synthetic can sit below threshold on every
   member while looking legitimate.
+
+## Video-container recompression (2026-09-20, aide-frames member)
+
+Synthetic test: still frames → 4 s mp4 → crf32 re-encode and
+screen-capture sim (downscale + re-encode). AIDE per-frame scores:
+
+| Video | original | crf32 | screen-recap |
+|---|---|---|---|
+| real_lenna | **86 FP** | 9 | 11 |
+| fake_dalle0 | 16 miss | 18 | 10 |
+| fake_dalle1 | 19 miss | 12 | 11 |
+
+The frame-aggregated member inherits the image member's failure modes
+verbatim: the known Lenna false-positive fires in video too (86), DALL-E
+frames are missed, and recompression collapses every score toward zero.
+**Per-frame video scoring adds nothing beyond the image modality's own
+weaknesses on this corpus — treat video scores as noise when the
+underlying still would mislead the image members.**
