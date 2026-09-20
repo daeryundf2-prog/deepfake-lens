@@ -1,0 +1,26 @@
+{
+ "type": "deepfake-lens-runtime-profile-v1",
+ "name": "Local EfficientNet-B0 trained on SD-Turbo fakes vs Hemg reals",
+ "candidate_key": "sd-turbo-effnet-b0-local",
+ "runtime": "torchscript",
+ "modality": "image",
+ "checkpoint": "sd-turbo-det-b0.torchscript",
+ "input_size": 224,
+ "score_index": 1,
+ "score_activation": "softmax",
+ "ensemble_weight": 0.6,
+ "supported": true,
+ "source_url": "local training: experiments/train_detector.py --augment-degradation on experiments/gen_sdturbo_corpus.py output (280 SD-Turbo fakes) + Hemg/deepfake-and-real-images real class",
+ "limitations": [
+  "Checkpoint is not committed; reproduce with experiments/gen_sdturbo_corpus.py + train_detector.py.",
+  "Single-generator training (SD-Turbo 4-step) — measured cross-generator transfer: DALL-E AUROC 0.99 / recall 0.75 / FPR 0.00 (4 samples, small set).",
+  "In-domain holdout AUROC 0.999 / recall 1.00 / FPR 0.075 (80 held-out).",
+  "Measured failure: face-manipulation fakes (Hemg 'fake' class, StyleGAN/faceswap-style 256px portraits) score as real — AUROC 0.44, recall 0.00. That class is covered by the sbi-effnet member (crop_faces); do not treat a low score here as evidence of authenticity.",
+  "JPEG q50 recompression collapses fake scores toward 0 (measured: recall 0.00 on q50 Hemg) — compressed media reads low regardless.",
+  "Scores are a prioritization signal, not a truth label."
+ ],
+ "notes": [
+  "Model logits are (real=0, ai=1); score_index 1 with softmax yields the fake probability on a 0-100 scale.",
+  "ensemble_weight 0.6 keeps it advisory until a larger cross-generator corpus validates the DALL-E transfer signal."
+ ]
+}

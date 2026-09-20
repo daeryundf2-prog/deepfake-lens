@@ -65,7 +65,7 @@ class CommittedProfilesTest(unittest.TestCase):
         names = set(self._profiles())
         self.assertEqual(
             names,
-            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json", "aide-frames-runtime.json", "fakespot-detector-runtime.json", "qwen-ppl-runtime.json", "binoculars-runtime.json", "faceswap-ffpp-runtime.json", "faceswap-ffpp-frames-runtime.json", "face-manipulation-vit-runtime.json", "face-manipulation-vit-frames-runtime.json", "wav2vec-deepfake-audio-runtime.json", "ai-image-swin-runtime.json", "sbi-effnet-runtime.json"},
+            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json", "aide-frames-runtime.json", "fakespot-detector-runtime.json", "qwen-ppl-runtime.json", "binoculars-runtime.json", "faceswap-ffpp-runtime.json", "faceswap-ffpp-frames-runtime.json", "face-manipulation-vit-runtime.json", "face-manipulation-vit-frames-runtime.json", "wav2vec-deepfake-audio-runtime.json", "ai-image-swin-runtime.json", "sbi-effnet-runtime.json", "sd-turbo-det-runtime.json"},
         )
 
     def test_wired_profiles_use_implemented_runtimes(self) -> None:
@@ -409,7 +409,7 @@ class MultiProfileAggregationTest(unittest.TestCase):
             analysis = analyze_external_model(image, MODELS_DIR)
 
         self.assertIsNotNone(analysis)
-        self.assertEqual(len(analysis.models), 8)
+        self.assertEqual(len(analysis.models), 9)
         names = {m["model"] for m in analysis.models}
         self.assertTrue(any("AIDE" in name for name in names))
         self.assertTrue(any("DIRE" in name for name in names))

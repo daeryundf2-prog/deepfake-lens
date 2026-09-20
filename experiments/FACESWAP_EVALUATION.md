@@ -186,3 +186,27 @@ Promoted as `models/sbi-effnet-b0.pth` (still git-ignored).
 
 Residual caveat: cross-domain ranking stays weak (AUROC ~0.68) — the
 member remains advisory-only on aged/scanned portraits.
+
+## B2 generic image detector — SD-Turbo self-training (2026-09-20)
+
+First attempt on Hemg/deepfake-and-real-images parquet (720 images)
+collapsed: holdout AUROC 0.615, FPR 1.0 — noisy labels, rejected.
+
+Second attempt: generated 280 known-fake images locally with SD-Turbo
+(experiments/gen_sdturbo_corpus.py, 4-step turbo distilled SD 2.1,
+~20 s/image CPU) vs 280 Hemg reals, EfficientNet-B0 +
+--augment-degradation.
+
+| Eval set | AUROC | FPR@50 | recall@50 |
+|---|---:|---:|---:|
+| in-domain holdout (80) | 0.999 | 0.075 | 1.000 |
+| cross-gen DALL-E (4 fake + 25 real) | 0.990 | 0.000 | 0.750 |
+| cross-gen Hemg face-fakes (120) | 0.438 | 0.000 | 0.000 |
+| Hemg JPEG q50 (60) | 0.510 | 0.033 | 0.000 |
+
+Interpretation: the member learned a real diffusion fingerprint and it
+transfers to DALL-E — but Hemg "fake" images are 256px
+face-manipulation (StyleGAN/faceswap-style), a different artifact class
+covered by the sbi-effnet member, not by this one. Wired as an advisory
+member (`sd-turbo-det-runtime.json`, ensemble_weight 0.6) — precision
+is strong (FPR 0 across every real set); recall is generator-limited.
