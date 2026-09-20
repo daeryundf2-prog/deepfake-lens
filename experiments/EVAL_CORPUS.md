@@ -13,8 +13,8 @@ and `experiments/suggest_weights.py`.
 | `text/fake/ko_qwen15_*.txt` | ~29 | Local Qwen2.5-1.5B base, prompt-completion | locally generated; cross-generator holdout |
 | `audio/real/*.wav/flac` | ~7 | torchaudio YESNO (8 kHz telephone speech) + LibriSpeech sample | public domain / CC BY 4.0 |
 | `audio/fake/*.mp3/wav` | ~9 | edge-tts (ko/en voices) + Windows SAPI | locally generated |
-| `image/real/` | 1+ | lenna + real photo samples | test fixture |
-| `image/fake/` | 4 | DALL-E samples fetched from Wikimedia Commons | AI-generated, public-domain-ish status per Commons |
+| `image/real/` | 26 | lenna + 25 held-out samples from Hemg/deepfake-and-real-images (HF, real class) | dataset license per HF page |
+| `image/fake/` | 29 | 4 DALL-E samples from Wikimedia Commons + 25 held-out Hemg fakes | AI-generated; Hemg provenance per HF page |
 | `face/real/` | 54 | Wikimedia vintage/diverse portraits + xdomain crops (via `scripts/fetch_diverse_faces.py`) | public domain portraits |
 
 Face positives are **synthesized at eval time** — `eval_all.py` runs SBI
@@ -51,7 +51,9 @@ python experiments/suggest_weights.py report.json --write   # updates profiles
   that aces this corpus may still miss other generators. The KoELECTRA
   experiment measured exactly this failure (holdout AUROC 1.0, cross-gen
   recall 0.10). Treat high corpus scores as necessary-not-sufficient.
-- `image/fake` is small (4 DALL-E) — precision estimates are coarse.
+- `image/fake` now mixes DALL-E (4) and Hemg parquet fakes (25) — the Hemg
+  generator mix is undocumented on the HF page, so treat image metrics as
+  cross-generator-agnostic rather than per-generator.
 - `face/` positives are SBI self-blends — coverage of Deepfakes/
   FaceShifter-class pipelines is inferred, not measured.
 - Small n means wide confidence intervals; AUROC differences <0.1 on

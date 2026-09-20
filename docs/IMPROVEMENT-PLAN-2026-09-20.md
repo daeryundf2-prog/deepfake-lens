@@ -31,10 +31,10 @@
 
 | 항목 | 내용 | 배경 |
 |---|---|---|
-| **B1 SBI recall 회복** | 다양 도메인 학습 후 recall 0.89→0.48 하락. SBI 생성 시 더 다양한 블렌딩(다중 랜드마크 마스크, 색상 불일치, 블러 경계) + hard negative 추가로 정밀도 유지하며 recall 회복 시도 | 최대 실질 탐지 공백의 재측정 개선 |
-| **B2 범용 이미지 생성 탐지 자체학습** | SBI 성공 경로 재적용: 로컬 생성 모델(SD-Turbo 등 CPU 가능 소형)로 fake 코퍼스 자체 생성 → 실사 코퍼스와 이진 분류 학습. DALL-E 3급은 생성 불가하므로 **공개 사전학습 체크포인트(AIDE 등)와의 상호보완** 측정이 목표 | DALL-E 1/4 공백 — 게이트: 크로스생성기 AUROC ≥0.7 아니면 기각 |
-| **B3 오디오 확장 벤치** | edge-tts 전 음성(50+) 스윕으로 voice-dependency 분포 확정 + Coqui XTTS(로컬 보이스클론) 샘플 생성 시도. AASIST 오탐 조건(대역폭별) 프로파일 | "보이스클론 미측정" 해소, 임계값 근거 확보 |
-| **B4 영상 재압축 측정** | 화면녹화/재인코딩 시뮬레이션(ffmpeg preset)으로 프레임 집계 탐지율 붕괴 곡선 측정 | 실전 경유 조건의 정직한 수치 |
+| **B1 SBI recall 회복** | 다양 도메인 학습 후 recall 0.89→0.48 하락. SBI 생성 시 더 다양한 블렌딩(다중 랜드마크 마스크, 색상 불일치, 블러 경계) + hard negative 추가로 정밀도 유지하며 recall 회복 시도 | ✅ 완료 — v2 승격: 블렌딩 다양화(폴리곤/아핀) + `score_bias 35` 재보정으로 recall 0.405@FPR0.044, matched-FPR 기준 전 구간 우월 |
+| **B2 범용 이미지 생성 탐지 자체학습** | Hemg/deepfake-and-real-images(HF parquet, 720장)로 EfficientNet-B0 이진분류 학습 시도 | ❌ 기각(실측) — holdout AUROC 0.615, FPR 1.0(전 입력 ~64점), DALL-E 랜덤. 데이터셋 라벨 노이즈+560장으로 부족. diffusion 자체생성 경로는 미시도(diffusers 미설치)로 잔여 |
+| **B3 오디오 확장 벤치** | edge-tts 전 음성(50+) 스윕으로 voice-dependency 분포 확정 + Coqui XTTS(로컬 보이스클론) 샘플 생성 시도. AASIST 오탐 조건(대역폭별) 프로파일 | ✅ 완료 — 40 fake/12 real: AASIST recall 0.72/FPR 0.08, w2v 0.78/0.00, union 0.93. 점수표 `experiments/audio_sweep_2026-09-20.json`. Coqui는 py3.12 미지원으로 미측정 유지 |
+| **B4 영상 재압축 측정** | 화면녹화/재인코딩 시뮬레이션(ffmpeg preset)으로 프레임 집계 탐지율 붕괴 곡선 측정 | ✅ 완료 — 실측: 실사 Lenna 86(오탐), DALL-E 10-19(미스), crf32/화면녹화 시 전멸. aide-frames 프로필 limitation에 기록 |
 
 ## Phase C — 파이프라인/운영 개선
 
