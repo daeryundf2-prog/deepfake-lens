@@ -12,7 +12,7 @@ from itertools import permutations, product
 from pathlib import Path
 from unittest.mock import patch
 
-from experiments import eval_text_detect
+from experiments import eval_all, eval_text_detect, suggest_weights
 from scripts import eval_aide
 
 from deepfake_lens.calibration import auroc, calibrate_threshold
@@ -234,6 +234,46 @@ class EvaluationScriptMetricsTest(unittest.TestCase):
             tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
             names = [node.name for node in tree.body if isinstance(node, ast.FunctionDef)]
             self.assertEqual(len(names), len(set(names)))
+
+
+class SuggestWeightsTest(unittest.TestCase):
+    """The FPR penalty must keep 'flags everything' members at the floor —
+    AUROC alone rewarded them (regression: qwen-ppl scored 1.31 pre-fix)."""
+
+    def test_flags_everything_member_hits_floor(self) -> None:
+        member = {"auroc": 0.83, "fpr_at_50": 0.97, "pos": 40, "neg": 40}
+        self.assertAlmostEqual(suggest_weights.suggest(member), 0.07, places=2)
+
+    def test_clean_discriminator_gets_full_weight(self) -> None:
+        member = {"auroc": 0.95, "fpr_at_50": 0.0, "pos": 40, "neg": 40}
+        self.assertAlmostEqual(suggest_weights.suggest(member), 1.8, places=2)
+
+    def test_insufficient_samples_return_none(self) -> None:
+        member = {"auroc": 0.99, "fpr_at_50": 0.0, "pos": 5, "neg": 40}
+        self.assertIsNone(suggest_weights.suggest(member))
+
+    def test_missing_auroc_returns_none(self) -> None:
+        self.assertIsNone(suggest_weights.suggest({"fpr_at_50": 0.0, "pos": 40, "neg": 40}))
+
+
+class EvalAllAvailabilityTest(unittest.TestCase):
+    """Regression: the ko_eval run that scored every sample 0.0 happened
+    because unavailable results were counted as real scores. eval_all
+    must mark them unavailable instead."""
+
+    def test_unavailable_result_is_not_a_zero_score(self) -> None:
+        class _Result:
+            available = False
+            score = 0
+
+        with patch.object(eval_all, "analyze_external_model", return_value=_Result()):
+            score, available = eval_all._score_member(Path("x.txt"), Path("p.json"), "text")
+        self.assertFalse(available)
+
+    def test_exception_is_unavailable_not_zero(self) -> None:
+        with patch.object(eval_all, "analyze_external_model", side_effect=RuntimeError("boom")):
+            score, available = eval_all._score_member(Path("x.txt"), Path("p.json"), "text")
+        self.assertFalse(available)
 
 
 if __name__ == "__main__":
