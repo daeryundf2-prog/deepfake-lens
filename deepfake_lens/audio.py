@@ -50,6 +50,9 @@ class AudioFeatures:
     pause_cv: float = 0.0
     noise_floor_std: float = 0.0
     harmonic_cv: float = 0.0
+    # Vocoder artifact probe: median wrapped phase second-difference in the
+    # upper STFT bands. Uncalibrated heuristic, low weight only.
+    phase_discontinuity: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -377,6 +380,11 @@ def _extract_features(path: Path, *, segment_seconds: int) -> AudioFeatures | No
         )
     except Exception:
         harmonic_cv = 0.0
+    # Phase second-difference energy in the upper STFT bands. Measured
+    # 2026-09: real speech 0.80-1.19, TTS/vocoder output 0.70-0.77 —
+    # inverted vs the naive hypothesis and overlapping too much to score,
+    # so the metric is kept as a feature but wired to no signal.
+    phase_discontinuity = _phase_discontinuity_metric(y, np)
 
     return AudioFeatures(
         sample_rate=sr,
@@ -400,7 +408,33 @@ def _extract_features(path: Path, *, segment_seconds: int) -> AudioFeatures | No
         pause_cv=pause_cv,
         noise_floor_std=noise_floor_std,
         harmonic_cv=harmonic_cv,
+        phase_discontinuity=phase_discontinuity,
     )
+
+
+def _phase_discontinuity_metric(y, np) -> float:
+    """Median |wrapped Δ²φ| across upper-half STFT bins.
+
+    Expected neural-vocoder output to inflate this metric; measured the
+    opposite (vocoders produce *smoother* phase than vocal cords) with
+    real/synthetic ranges overlapping (0.80 vs 0.77 at the margin).
+    Recorded as a diagnostic feature only — no signal is derived.
+    """
+    try:
+        import librosa
+
+        spec = librosa.stft(y, n_fft=1024, hop_length=256)
+        if spec.shape[1] < 4:
+            return 0.0
+        phase = np.angle(spec)
+        d2 = phase[:, 2:] - 2.0 * phase[:, 1:-1] + phase[:, :-2]
+        d2 = np.abs((d2 + np.pi) % (2.0 * np.pi) - np.pi)
+        upper = d2[d2.shape[0] // 2 :, :]
+        if upper.size == 0:
+            return 0.0
+        return float(np.median(upper))
+    except Exception:  # noqa: BLE001 - heuristic must never fail analysis
+        return 0.0
 
 
 def _relative_successive_variation(values: list[float]) -> float:

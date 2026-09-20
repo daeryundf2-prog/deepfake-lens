@@ -353,6 +353,46 @@ class MultiProfileAggregationTest(unittest.TestCase):
         self.assertNotIn("models\\models", analysis.detail)
         self.assertIn("does-not-exist.onnx", analysis.detail)
 
+    def test_degraded_weight_applies_on_low_quality_jpeg(self) -> None:
+        """A member with degraded_weight must lose influence on recompressed JPEGs."""
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            hi = root / "img_hi.jpg"
+            lo = root / "img_lo.jpg"
+            Image.new("RGB", (128, 128), (200, 120, 40)).save(hi, quality=95)
+            Image.new("RGB", (128, 128), (200, 120, 40)).save(lo, quality=40)
+            a = root / "a-runtime.json"
+            b = root / "b-runtime.json"
+            fragile = {**_score_map_profile("fragile", {"img_hi.jpg": 80, "img_lo.jpg": 80}), "degraded_weight": 0.05}
+            stable = _score_map_profile("stable", {"img_hi.jpg": 40, "img_lo.jpg": 40})
+            a.write_text(json.dumps(fragile), encoding="utf-8")
+            b.write_text(json.dumps(stable), encoding="utf-8")
+
+            high_q = analyze_external_model(hi, [a, b])
+            low_q = analyze_external_model(lo, [a, b])
+
+        # q95: equal weights -> mean(80, 40) = 60
+        self.assertEqual(high_q.score, 60)
+        # q40: fragile down-weighted to 0.05 -> aggregate slides toward 40
+        self.assertLessEqual(low_q.score, 45)
+        self.assertTrue(any("down-weighted" in item for item in low_q.limitations))
+
+    def test_low_resolution_flagged_as_unreliable(self) -> None:
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            small = root / "tiny.jpg"
+            Image.new("RGB", (64, 64), (200, 120, 40)).save(small, quality=95)
+            a = root / "a-runtime.json"
+            b = root / "b-runtime.json"
+            a.write_text(json.dumps(_score_map_profile("model-a", {"tiny.jpg": 80})), encoding="utf-8")
+            b.write_text(json.dumps(_score_map_profile("model-b", {"tiny.jpg": 40})), encoding="utf-8")
+            analysis = analyze_external_model(small, [a, b])
+        self.assertTrue(any("below every member" in item for item in analysis.limitations))
+
     def test_empty_directory_is_graceful(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

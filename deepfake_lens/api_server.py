@@ -241,6 +241,160 @@ def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = No
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
 
+    # --- Streaming job API -------------------------------------------------
+    # /api/check/stream runs the same layered check as /api/check but reports
+    # per-stage progress over SSE. Jobs register in _JOBS so a client can
+    # cancel between stages via /api/jobs/{id}/cancel — cancellation is
+    # cooperative and takes effect at stage boundaries, not mid-analysis.
+    _JOBS: dict[str, dict[str, Any]] = {}
+
+    @app.post("/api/check/stream")
+    async def check_stream(
+        file_path: str | None = None,
+        text: str | None = None,
+        watermark_secret: str | None = None,
+        watermark_gamma: float = 0.25,
+    ):
+        import asyncio
+        import json as _json
+        import threading
+        import uuid
+
+        from fastapi.responses import StreamingResponse
+
+        job_id = uuid.uuid4().hex[:12]
+        cancel = threading.Event()
+        _JOBS[job_id] = {"cancel": cancel, "done": False}
+
+        def run_layered() -> Any:
+            """Run the check stages, aborting between stages if cancelled."""
+            import tempfile
+
+            from .core import analyze_file
+
+            stages: list[tuple[str, Any]] = []
+            yield ("job", {"job_id": job_id})
+            if cancel.is_set():
+                yield ("cancelled", {"job_id": job_id})
+                return
+
+            if text and text.strip():
+                trimmed = text.strip()
+                if len(trimmed) > 256 * 1024:
+                    yield ("error", {"detail": "text exceeds 256KB"})
+                    return
+                yield ("progress", {"stage": "core", "index": 1, "total": 3})
+                tmp_name = ""
+                try:
+                    with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as tmp:
+                        tmp.write(trimmed)
+                        tmp_name = tmp.name
+                    item = analyze_file(tmp_name, model_path=_default_profiles())
+                finally:
+                    if tmp_name:
+                        Path(tmp_name).unlink(missing_ok=True)
+                if cancel.is_set():
+                    yield ("cancelled", {"job_id": job_id})
+                    return
+                stages.append(("item", item.to_json()))
+
+                yield ("progress", {"stage": "text-advanced", "index": 2, "total": 3})
+                from .text_advanced import analyze_text_advanced
+                stages.append(("advanced", analyze_text_advanced(trimmed).to_json()))
+
+                if watermark_secret:
+                    if cancel.is_set():
+                        yield ("cancelled", {"job_id": job_id})
+                        return
+                    yield ("progress", {"stage": "watermark", "index": 3, "total": 3})
+                    try:
+                        from .watermark import detect_kgw_watermark
+                        wm: Any = detect_kgw_watermark(
+                            trimmed, secret=watermark_secret, gamma=watermark_gamma
+                        ).to_json()
+                    except Exception:
+                        wm = {"available": False, "verdict": "워터마크 검사 실패"}
+                    stages.append(("watermark", wm))
+                payload = {"mode": "text", **dict(stages)}
+            else:
+                if not file_path:
+                    yield ("error", {"detail": "file_path or text required"})
+                    return
+                path = Path(file_path)
+                yield ("progress", {"stage": "core", "index": 1, "total": 2})
+                item = analyze_file(path, model_path=_default_profiles())
+                if cancel.is_set():
+                    yield ("cancelled", {"job_id": job_id})
+                    return
+                stages.append(("item", item.to_json()))
+
+                yield ("progress", {"stage": "forensic", "index": 2, "total": 2})
+                try:
+                    from .c2pa import analyze_metadata_forensic
+                    forensic: Any = analyze_metadata_forensic(path).to_json()
+                except Exception:
+                    forensic = None
+                stages.append(("forensic", forensic))
+                if item.kind == "text":
+                    try:
+                        from .text_advanced import analyze_text_advanced
+                        stages.append(("advanced", analyze_text_advanced(
+                            path.read_text(encoding="utf-8", errors="replace")[: 256 * 1024]
+                        ).to_json()))
+                    except Exception:
+                        stages.append(("advanced", None))
+                payload = {"mode": "file", **dict(stages)}
+
+            yield ("result", payload)
+
+        async def events():
+            loop = asyncio.get_event_loop()
+            queue: asyncio.Queue[Any] = asyncio.Queue()
+
+            def produce() -> None:
+                try:
+                    for evt in run_layered():
+                        loop.call_soon_threadsafe(queue.put_nowait, evt)
+                except Exception as exc:  # noqa: BLE001 - report, don't hang
+                    loop.call_soon_threadsafe(
+                        queue.put_nowait, ("error", {"detail": str(exc)}))
+                finally:
+                    _JOBS[job_id]["done"] = True
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
+
+            threading.Thread(target=produce, daemon=True).start()
+            try:
+                while True:
+                    evt = await queue.get()
+                    if evt is None:
+                        break
+                    name, data = evt
+                    yield f"event: {name}\ndata: {_json.dumps(data, ensure_ascii=False)}\n\n"
+            finally:
+                _JOBS.pop(job_id, None)
+
+        return StreamingResponse(events(), media_type="text/event-stream")
+
+    @app.post("/api/jobs/{job_id}/cancel")
+    async def cancel_job(job_id: str):
+        job = _JOBS.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="unknown or finished job")
+        job["cancel"].set()
+        return {"status": "success", "job_id": job_id, "cancelled": True}
+
+    @app.get("/api/jobs/{job_id}")
+    async def job_status(job_id: str):
+        job = _JOBS.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="unknown or finished job")
+        return {
+            "status": "success",
+            "job_id": job_id,
+            "done": bool(job["done"]),
+            "cancelled": bool(job["cancel"].is_set()),
+        }
+
     @app.post("/api/compare")
     async def compare(file_path_a: str, file_path_b: str):
         """Two-file comparison: same-speaker distance for audio pairs,

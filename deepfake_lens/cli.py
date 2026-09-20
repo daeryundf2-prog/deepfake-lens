@@ -47,7 +47,7 @@ from .enhanced_forensics import analyze_forensic
 from .webapp import run_server
 
 
-COMMANDS = {"scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
+COMMANDS = {"doctor", "scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
 
 DEFAULT_ENGINE_PROFILE = "models/aide-runtime.json"
 DEFAULT_AUDIO_ENGINE_PROFILE = "models/aasist-runtime.json"
@@ -420,6 +420,10 @@ def main(argv: list[str] | None = None) -> int:
     web_parser.add_argument("--port", type=int, default=8765)
     web_parser.add_argument("--allow-lan", action="store_true")
     web_parser.add_argument("--token", default=None, help="API token required with --allow-lan")
+
+    doctor_parser = subparsers.add_parser("doctor", help="diagnose model weights, accelerators, and dependencies")
+    doctor_parser.add_argument("--format", choices=["table", "json"], default="table")
+    doctor_parser.add_argument("--json-out", type=Path, help="write the diagnostic report as JSON")
 
     args = parser.parse_args(argv)
     if args.command is None:
@@ -1076,6 +1080,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.allow_lan and not args.token:
             web_parser.error("--token is required with --allow-lan; the API reads and analyzes local files on request")
         run_server(args.host, args.port, default_folder=args.folder, allow_lan=args.allow_lan, token=args.token)
+        return 0
+    if args.command == "doctor":
+        from .doctor import format_report, run_diagnostics
+
+        report = run_diagnostics()
+        if args.json_out:
+            _write_json_out(args.json_out, json.dumps(report.to_json(), ensure_ascii=False, indent=2) + "\n")
+        if args.format == "json":
+            print(json.dumps(report.to_json(), ensure_ascii=False, indent=2))
+        else:
+            print(format_report(report))
         return 0
 
     if args.max_files < 1:

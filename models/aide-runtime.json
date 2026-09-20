@@ -21,6 +21,7 @@
   "source_url": "https://github.com/shilinyan99/AIDE",
   "limitations": [
     "Checkpoint is not committed; run scripts/fetch_aide.py to download progan_train.pth (~3.3 GB, research license).",
+    "Measured locally (2026-09): JPEG recompression collapses fake scores (DALL-E 91->6 at q50) and real-image false positives alike (Lenna 85->12 at q75) — below q75 this member is auto down-weighted via 'degraded_weight'. See experiments/RECOMPRESSION_EVAL.md.",
     "AIDE scores are a prioritization signal, not a truth label; see experiments/AIDE_EVALUATION.md for measured AUROC and cross-generator caveats."
   ],
   "notes": [
@@ -28,5 +29,6 @@
     "Model logits are (real=0, fake=1); score_index 1 with softmax yields the fake probability on a 0-100 scale.",
     "The checkpoint path is relative to this profile's directory (models/); keep it out of git — it is covered by .gitignore."
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "degraded_weight": 0.3
 }

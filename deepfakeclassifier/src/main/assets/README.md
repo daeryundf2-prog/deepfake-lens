@@ -22,8 +22,24 @@ python experiments/export_mobile_onnx.py --profile models/cnndetection-runtime.j
 INT8 dynamic quantization emits `ConvInteger`/`MatMulInteger`/
 `DynamicQuantizeLinear` ops that `onnxruntime-android` cannot create a
 session for (verified: instrumented test `classify` returned null on an
-Android-14 x86_64 emulator, 2026-09-14). Ship the fp32 export (~94 MB);
-the bundled `deepfake-lens.onnx` is that verified artifact.
+Android-14 x86_64 emulator, 2026-09-14), and on EfficientNet-B0 it also
+diverges ~35 logit units even on desktop ORT. Ship the fp32 export.
+
+Current bundled model (2026-09-20): `sbi-effnet-b0` FP32 (~15 MB),
+exported via:
+
+```
+python experiments/export_mobile_onnx.py --profile models/sbi-effnet-runtime.json \
+    --checkpoint models/sbi-effnet-b0.pth \
+    --out deepfakeclassifier/src/main/assets/deepfake-lens.onnx
+```
+
+torch↔ONNX parity verified at 5.7e-05 max abs diff. It replaces the
+earlier 94 MB CNNDetection export, which measured ~0 on every eval
+input (see experiments/RECOMPRESSION_EVAL.md). Note: the desktop profile
+gates on `crop_faces`; the app has no face gate, so off-face images are
+out-of-domain — the neural signal stays advisory (weight 0) until
+on-device validation.
 
 Contract (must match `OnnxClassifier.kt` / `export_onnx.py` defaults):
 

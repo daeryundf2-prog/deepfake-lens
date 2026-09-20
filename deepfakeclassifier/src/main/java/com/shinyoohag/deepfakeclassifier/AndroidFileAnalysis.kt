@@ -177,10 +177,13 @@ internal fun loadImageAnalysisPayload(context: Context, uri: Uri, includePreview
 
 /**
  * Attach the ONNX model's synthetic-class probability as an informational
- * signal (weight 0): a CNNDetection int8 export ships in assets, but it has
- * not been validated on-device against the desktop torch path, so the neural
- * score must not move the heuristic score or band yet. When no model is
- * bundled the limitation says so instead of pretending the network ran.
+ * signal (weight 0): the bundled fp32 export (sbi-effnet-b0, an SBI-trained
+ * face-manipulation detector) runs on-device, but it has not been validated
+ * against the desktop torch path on a labeled on-device corpus — and unlike
+ * the desktop profile it has no face-crop gate, so off-face images are
+ * out-of-domain. The neural score must not move the heuristic score or band
+ * yet. When no model is bundled the limitation says so instead of
+ * pretending the network ran.
  */
 private fun ClassificationResult.withNeuralScore(neural: NeuralScore?): ClassificationResult {
     if (neural == null) {
@@ -191,7 +194,7 @@ private fun ClassificationResult.withNeuralScore(neural: NeuralScore?): Classifi
     return copy(
         signals = signals + EvidenceSignal(
             title = "신경망 분류 (ONNX)",
-            detail = "CNNDetection 추정 AI 확률 ${(neural.aiProbability * 100).toInt()}% — 참고용이며 온디바이스 검증 전입니다.",
+            detail = "SBI-EffNet 추정 합성 확률 ${(neural.aiProbability * 100).toInt()}% — 참고용이며 온디바이스 검증 전입니다.",
             weight = 0
         ),
         limitations = limitations + "ONNX 신경망 점수는 온디바이스 검증 전 참고값입니다 (weight 0)."

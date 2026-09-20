@@ -86,7 +86,8 @@ def analyze_external_model(
     if len(results) == 1:
         return results[0][1]
     hangul_ratio = _media_hangul_ratio(media_path) if modality == "text" else 0.0
-    return _aggregate_profile_results(results, hangul_ratio=hangul_ratio)
+    jpeg_qf, min_side = _image_quality_context(media_path) if modality == "image" else (None, None)
+    return _aggregate_profile_results(results, hangul_ratio=hangul_ratio, jpeg_qf=jpeg_qf, min_side=min_side)
 
 
 def _model_sources(model_path: Path | str | list[Path | str] | tuple[Path | str, ...]) -> list[Path]:
@@ -243,8 +244,9 @@ def _analyze_profile_set(media_path: Path, model_file: Path, profile: dict[str, 
             detail=f"profile set {model_file.name} resolved to no member profiles.",
         )
     hangul_ratio = _media_hangul_ratio(media_path) if modality == "text" else 0.0
+    jpeg_qf, min_side = _image_quality_context(media_path) if modality == "image" else (None, None)
     results = [(source, _analyze_profile_file(media_path, source, depth=depth + 1, modality=modality)) for source in sources]
-    return _aggregate_profile_results(results, model_name=model_name, hangul_ratio=hangul_ratio)
+    return _aggregate_profile_results(results, model_name=model_name, hangul_ratio=hangul_ratio, jpeg_qf=jpeg_qf, min_side=min_side)
 
 
 def _profile_ensemble_weight(source: Path) -> float:
@@ -263,6 +265,24 @@ def _profile_ensemble_weight(source: Path) -> float:
     return min(4.0, max(0.05, weight))
 
 
+def _profile_degraded_weight(source: Path) -> float | None:
+    """Weight to use when the input is a low-quality JPEG (``degraded_weight``).
+
+    Members measured fragile under recompression (e.g. AIDE collapsing
+    91->6 at q50) declare a lower weight so a re-encoded fake cannot
+    rely on the fragile member's destroyed signal — and a re-encoded
+    real photo cannot be dragged by its compression-artifact noise.
+    """
+    try:
+        profile = json.loads(source.read_text(encoding="utf-8"))
+        weight = profile.get("degraded_weight")
+        if weight is None:
+            return None
+        return min(4.0, max(0.05, float(weight)))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+
+
 def _profile_trained_languages(source: Path) -> list[str]:
     """Languages a member was actually trained/validated on.
 
@@ -279,6 +299,16 @@ def _profile_trained_languages(source: Path) -> list[str]:
     return [str(lang).lower() for lang in langs] if isinstance(langs, list) else []
 
 
+def _image_quality_context(media_path: Path) -> tuple[float | None, int | None]:
+    """JPEG quality estimate + smallest side for ensemble weight gating."""
+    from .jpegq import estimate_jpeg_quality, image_min_side
+
+    try:
+        return estimate_jpeg_quality(media_path), image_min_side(media_path)
+    except Exception:  # noqa: BLE001 - quality estimation is advisory
+        return None, None
+
+
 def _media_hangul_ratio(media_path: Path) -> float:
     """Hangul share of letters in a text scan item (0 for non-text files)."""
     try:
@@ -293,10 +323,11 @@ def _media_hangul_ratio(media_path: Path) -> float:
     return hangul / len(letters)
 
 
-def _aggregate_profile_results(results: list[tuple[Path, ExternalModelAnalysis]], *, model_name: str | None = None, hangul_ratio: float = 0.0) -> ExternalModelAnalysis:
+def _aggregate_profile_results(results: list[tuple[Path, ExternalModelAnalysis]], *, model_name: str | None = None, hangul_ratio: float = 0.0, jpeg_qf: float | None = None, min_side: int | None = None) -> ExternalModelAnalysis:
     """Merge per-profile results into one analysis with an agreement signal."""
     scored = [(source, result) for source, result in results if result.available]
     downweighted: list[str] = []
+    degraded_adjusted: list[str] = []
     weights: list[float] = []
     kept: list[tuple[Path, ExternalModelAnalysis]] = []
     for source, result in scored:
@@ -308,6 +339,11 @@ def _aggregate_profile_results(results: list[tuple[Path, ExternalModelAnalysis]]
         if langs and hangul_ratio > 0.3 and "ko" not in langs:
             downweighted.append(source.stem)
             continue
+        if jpeg_qf is not None and jpeg_qf < 75:
+            degraded = _profile_degraded_weight(source)
+            if degraded is not None and degraded < weight:
+                weight = degraded
+                degraded_adjusted.append(source.stem)
         kept.append((source, result))
         weights.append(weight)
     total_weight = sum(weights)
@@ -328,6 +364,16 @@ def _aggregate_profile_results(results: list[tuple[Path, ExternalModelAnalysis]]
         limitations.append(
             f"English-only members {', '.join(downweighted)} were excluded on Korean-dominant text "
             f"(hangul ratio {hangul_ratio:.0%}) — measured false-positive on human Korean was 98/100."
+        )
+    if degraded_adjusted:
+        limitations.append(
+            f"JPEG quality ~{jpeg_qf:.0f}: recompression-fragile members {', '.join(degraded_adjusted)} "
+            "down-weighted (measured collapse on re-encoded inputs — see RECOMPRESSION_EVAL.md)."
+        )
+    if min_side is not None and min_side < 128:
+        limitations.append(
+            f"Input is {min_side}px on its smallest side — below every member's native resolution; "
+            "measured AUROC on 32x32 thumbnails is ~0.5 (chance). Treat scores as unreliable."
         )
     for _, result in results:
         for item in result.limitations:

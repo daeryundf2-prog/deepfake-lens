@@ -17,7 +17,7 @@
     "Hub weights are not committed; transformers downloads ~1.2 GB on first use (set hub_model to a local snapshot directory for offline runs).",
     "Fine-tuned on the 'In-the-Wild' audio deepfake dataset — coverage of generators outside that dataset is unverified.",
     "Measured locally (2026-09): catches older synthesizer TTS (SAPI fake 91.7%) and is well-calibrated on real speech (LibriSpeech real 89.7%, YESNO 8 kHz real 93.0%).",
-    "Edge-tts 7-voice sweep (2026-09-19): recall ~4/7 at 0.5 — voice-dependent (en_guy 0.60, ko_sunhi 0.86 caught; en_aria 0.25 missed) and collapses on Korean-language text (ko_injoon 0.71 -> 0.21, ko_sunhi 0.86 -> 0.44). A low score is not evidence of real audio.",
+    "Edge-tts sweeps (2026-09): recall ~4/7 at 0.5 — voice- and text-dependent (en_guy 0.60 caught; en_aria 0.25 missed). Korean-text batch A scored 0.21-0.44 but batch B scored 0.57-0.91 — the variance is sample-dependent, not a systematic language gap. A low score is not evidence of real audio.",
     "Only the first ~15 s is scored; longer files are truncated.",
     "Scores are a prioritization signal, not a truth label."
   ],

@@ -140,3 +140,24 @@ advisory weight and must not drive a verdict alone.
 - Cross-domain AUROC 0.79 with conservative recall means this member
   must not drive a verdict alone; it prioritizes review, nothing more.
 
+
+## Face-detector swap candidate — yolov8n-face — REJECTED (2026-09-20)
+
+Proposal: replace Haar+MediaPipe with `yolov8n-face-lindevs.onnx`
+(12 MB, WIDERFace-trained) to cut detection misses on side/low-light
+faces. Measured on the local corpus before wiring:
+
+| Set | n | MediaPipe+Haar | yolov8n-face (conf 0.35) |
+|---|---:|---:|---:|
+| diverse portraits (train pool) | 62 | 61 | 53 |
+| FFHQ val | 30 | 30 | 30 |
+| cross-domain held-out | 27 | 25 | 22 |
+
+Verdict: the existing stack already out-detects yolov8n-face on every
+set — including the vintage/damaged portraits it was meant to rescue.
+Lowering confidence below 0.35 recovers misses but at unmeasured
+false-positive cost. Rejected; the detector stays MediaPipe primary +
+Haar fallback. Detection-miss remains a documented blind spot
+(`crop_faces` skips silently) — the fix is a recall benchmark, not this
+model.
+

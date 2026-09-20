@@ -40,7 +40,16 @@ def build_model(profile: dict[str, object], checkpoint: Path):
     if model_fn is None:
         raise SystemExit(f"error: torchvision.models has no architecture named '{arch}'")
     model = model_fn(weights=None)
-    model.fc = torch.nn.Linear(model.fc.in_features, num_classes)
+    if hasattr(model, "fc"):
+        model.fc = torch.nn.Linear(model.fc.in_features, num_classes)
+    elif hasattr(model, "classifier"):
+        head = model.classifier
+        if isinstance(head, torch.nn.Sequential):
+            head[-1] = torch.nn.Linear(head[-1].in_features, num_classes)
+        else:
+            model.classifier = torch.nn.Linear(head.in_features, num_classes)
+    else:
+        raise SystemExit(f"error: torchvision arch '{arch}' has no fc/classifier head to rewire")
     state = torch.load(str(checkpoint), map_location="cpu")
     if isinstance(state, dict):
         for wrapper in ("state_dict", "model", "net"):

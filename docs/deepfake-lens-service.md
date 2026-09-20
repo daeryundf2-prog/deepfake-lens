@@ -54,9 +54,18 @@ JSON envelope `{"status": "success", "data": {...}}` or an HTTP error with
 | POST | `/api/multimodal` | `image_score`, `text_score`, `audio_score`, `video_score` (ints, optional) | `MultimodalAnalysis.to_json()` — scalar fusion of supplied scores |
 | POST | `/api/compare` | `file_path_a` + `file_path_b` | Two-file comparison — same-speaker distance (audio pairs) or same-author stylometry (text/document pairs) |
 | POST | `/api/check` | `file_path` **or** `text` | Unified check-all: core scan + every `models/` member that fits the modality + C2PA/forensic + text fingerprint probes in one `{mode, item, advanced?, forensic?}` payload |
+| POST | `/api/check/stream` | same as `/api/check` | Server-Sent Events (`text/event-stream`): `job` → `progress` per stage → `result` (same payload as `/api/check`), or `error`/`cancelled` |
+| POST | `/api/jobs/{job_id}/cancel` | — | Sets the job's cancellation flag; takes effect at the next stage boundary (`{"status": "success", "cancelled": true}`, 404 for unknown/finished jobs) |
+| GET | `/api/jobs/{job_id}` | — | `{"job_id", "done", "cancelled"}` for in-flight stream jobs; 404 once the job is reaped |
 
 `file_path` is a path **on the server's filesystem** — there is no upload
 endpoint. Analysis failures surface as HTTP 500 with the exception text.
+
+`/api/check/stream` emits SSE frames `event: <name>\ndata: <json>\n\n`.
+Stage events carry `{stage, index, total}` (`core`, `forensic`/`text-advanced`,
+`watermark` when requested). Cancellation is cooperative — a running stage
+finishes before the job stops, so latency-critical callers should also close
+the HTTP connection.
 
 ## Web GUI endpoints (`web`, default `127.0.0.1:8765`)
 

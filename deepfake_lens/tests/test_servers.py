@@ -498,6 +498,53 @@ class ApiServiceContractTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("version", response.json())
 
+    _SSE_HEADERS = {"host": "localhost", api_server.CLIENT_HEADER: "test"}
+
+    def _collect_sse(self, response) -> dict[str, list[dict]]:
+        events: dict[str, list[dict]] = {}
+        current: str | None = None
+        for raw in "".join(response.iter_text()).splitlines():
+            if raw.startswith("event:"):
+                current = raw.split(":", 1)[1].strip()
+            elif raw.startswith("data:") and current:
+                events.setdefault(current, []).append(json.loads(raw[5:].strip()))
+        return events
+
+    def test_check_stream_emits_progress_then_result(self) -> None:
+        client = self._client()
+        text = "인공지능 기술은 빠르게 발전하고 있습니다. " * 5
+        with client.stream(
+            "POST",
+            "/api/check/stream",
+            params={"text": text},
+            headers=self._SSE_HEADERS,
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.headers["content-type"].split(";")[0], "text/event-stream")
+            events = self._collect_sse(response)
+        self.assertIn("job", events)
+        self.assertIn("progress", events)
+        self.assertIn("result", events)
+        self.assertEqual(events["result"][0]["mode"], "text")
+        self.assertIn("item", events["result"][0])
+        self.assertIn("advanced", events["result"][0])
+
+    def test_check_stream_requires_input(self) -> None:
+        client = self._client()
+        with client.stream(
+            "POST", "/api/check/stream", headers=self._SSE_HEADERS
+        ) as response:
+            events = self._collect_sse(response)
+        self.assertIn("error", events)
+
+    def test_cancel_unknown_job_is_404(self) -> None:
+        client = self._client()
+        response = client.post(
+            "/api/jobs/deadbeef/cancel", headers=self._SSE_HEADERS
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(client.get("/api/jobs/deadbeef", headers=self._SSE_HEADERS).status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

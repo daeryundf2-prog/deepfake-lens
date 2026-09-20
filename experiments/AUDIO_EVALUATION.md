@@ -84,10 +84,47 @@ Korean text) — the modern neural-TTS family. Threshold reference ~0.5.
 | tts_ko_sunhi, English text | 0.685 | 0.858 | both catch |
 | tts_ko_sunhi, Korean text | 0.019 | 0.435 | wav2vec partial |
 
-**edge-tts recall: AASIST ~1/7, wav2vec ~4/7 at 0.5 — and both collapse on
-Korean-language text** (ko_injoon 0.71 -> 0.21, ko_sunhi 0.86 -> 0.44 when
-the same voice speaks Korean). The earlier single-sample "AASIST catches
-edge-tts at 0.73" was voice-dependent luck, not coverage.
+**edge-tts recall: AASIST ~1/7, wav2vec ~4/7 at 0.5.** The first batch
+suggested a Korean-language collapse (ko_injoon 0.71 -> 0.21), but a
+second batch on different Korean text scored 0.57-0.91 — the drop is
+sample/text-dependent, not a systematic Korean gap (see extended sweep
+below).
 
 Voice-clone services (ElevenLabs, RVC, so-vits-svc) remain **unmeasured** —
 no checkpoint or API access locally; that gap stays explicitly open.
+
+## Rejected candidate: phase-discontinuity heuristic (2026-09)
+
+Hypothesis: neural-vocoder frame boundaries inflate wrapped Δ²φ in upper
+STFT bins. Measured at the pipeline rate (16 kHz), median |wrapped Δ²φ|:
+
+| Sample | Value |
+|---|---|
+| real_yesno (8 kHz speech) | 1.19 |
+| real_flac (studio speech) | 0.80 |
+| edge_en / edge_ko | 0.77 / 0.74 |
+| fake_sapi | 0.72 |
+
+The direction is **inverted** vs the hypothesis — vocoders produce
+*smoother* phase than vocal cords — and clean studio speech (0.80)
+overlaps the synthetic range (0.72-0.77). Margin ~0.05, sensitive to
+sample rate and codec. **Rejected as a scoring signal**; the metric is
+kept in `AudioFeatures.phase_discontinuity` as a recorded diagnostic
+only.
+
+## Korean-voice extended sweep (2026-09, second batch)
+
+Same voices, different Korean text — result reverses the earlier
+"Korean-language collapse" claim:
+
+| Sample | AASIST | wav2vec |
+|---|---|---|
+| HyunsuMultilingual (Korean) | 0.09 miss | **0.91** catch |
+| InJoonNeural (Korean) | 0.02 miss | **0.67** catch |
+| SunHiNeural (Korean) | **0.94** catch | **0.73** catch |
+| edge_ko (Korean) | **0.81** catch | **0.57** catch |
+
+wav2vec recall on Korean text: 4/4 in this batch vs 0/2 in the first —
+the collapse is **sample/text-dependent, not a systematic Korean gap**.
+AASIST remains voice-dependent (2/4 missed). No threshold recalibration
+is warranted; the ensemble disagreement itself remains the review signal.
