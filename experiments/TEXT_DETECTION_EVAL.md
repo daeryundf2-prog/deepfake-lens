@@ -337,3 +337,37 @@ New measured note: fakespot scoring 0.985 on formal Korean AI-style
 prose is better than this document's earlier Korean recall estimate
 suggested — but one formal sample is not a recall number; informal,
 short, and humanized Korean remains heuristic-only.
+
+## Korean corpus evaluation (2026-09-20)
+
+Corpus built locally: 398 human samples (Korean Wikipedia) + 175 AI
+samples (Qwen2.5-0.5B-Instruct, 8 prompt styles × 25 topics) + 39
+cross-generator samples (Qwen2.5-1.5B base, prompt-completion).
+40-sample subsets per side, score≥50 = flagged:
+
+| Member | AI-ko recall | human-ko FPR | Note |
+|---|---|---|---|
+| fakespot roberta | 0.90 | 0.30 | gated off Korean anyway (`trained_languages: en`) |
+| openai detector | 0.97 | 0.57 | gated off Korean |
+| qwen-ppl | 1.00 | **0.97** | flags nearly all Korean as AI — gated |
+| binoculars | 1.00 | **1.00** | flags all Korean as AI — gated |
+| heuristic layer | 0.00 | 0.00 | blind on Korean |
+
+Every English-trained member false-positives badly on Korean human text
+(FPR 0.30–1.00) — the `trained_languages` gate is load-bearing and all
+four are correctly excluded on hangul-dominant input. But that means
+Korean AI text today gets **zero neural coverage** — heuristics score ~0.
+
+## Rejected candidate: locally fine-tuned KoELECTRA-small
+
+Trained `monologg/koelectra-small-v3-discriminator` on the balanced
+corpus (88 human / 88 Qwen-0.5B AI, 3 epochs):
+
+- Same-distribution holdout: AUROC 1.00, FPR 0.00, recall 1.00
+- **Cross-generator (Qwen2.5-1.5B): recall 3/29 = 0.10**
+
+The perfect holdout was single-generator overfitting — the classifier
+learned Qwen-0.5B-instruct style, not "AI text". Consistent with every
+supervised detector measured here. **Not wired.** A usable Korean member
+needs a multi-generator Korean AI corpus (HyperCLOVA/GPT/Claude outputs),
+which requires API access we don't have locally.
