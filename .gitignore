@@ -67,3 +67,4 @@ captures/
 *.apk
 *.aab
 .kotlin/
+eval_corpus/
