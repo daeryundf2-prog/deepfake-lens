@@ -40,9 +40,9 @@
 
 | 항목 | 내용 |
 |---|---|
-| **C1 멤버 불일치 신호 명시화** | AASIST↔wav2vec, AIDE↔Swin 불일치가 이미 측정된 경고 신호 — 앙상블 결과에 "member disagreement" 상위 신호로 노출 |
-| **C2 배치 스캔 진행률** | `scan-folder` 장기 실행 시 진행률 콜백/SSE 연동(`/api/check/stream` 인프라 재사용) |
-| **C3 프레임트레이스 고도화** | 실패 아티팩트 재시도 버튼, deepfake 점수 분포 요약 패널, HTML 리포트 임베딩 검증 |
+| **C1 멤버 불일치 신호 명시화** | AASIST↔wav2vec, AIDE↔Swin 불일치가 이미 측정된 경고 신호 — 앙상블 결과에 "member disagreement" 상위 신호로 노출 | ✅ 기존 커버 확인 — 신호 `detail`/프로필 limitations에 이미 노출됨 |
+| **C2 배치 스캔 진행률** | `scan-folder` 장기 실행 시 진행률 콜백/SSE 연동(`/api/check/stream` 인프라 재사용) | ✅ 완료 — `POST /api/scan/stream`: 파일별 progress SSE + `_JOBS` 취소 공유, 테스트 2개 |
+| **C3 프레임트레이스 고도화** | 실패 아티팩트 재시도 버튼, deepfake 점수 분포 요약 패널, HTML 리포트 임베딩 검증 | ✅ 완료 — `deepfake-scan --retry-failed`(실패 아티팩트만 재스캔), 뷰어 밴드 분포 요약줄, 임베딩 이스케이프 테스트 |
 
 ## Phase D — 데이터/자격증명 필요 (현재 차단됨 — 명시적 기록)
 

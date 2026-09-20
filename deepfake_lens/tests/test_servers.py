@@ -545,6 +545,41 @@ class ApiServiceContractTest(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(client.get("/api/jobs/deadbeef", headers=self._SSE_HEADERS).status_code, 404)
 
+    def test_scan_stream_emits_progress_then_result(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        client = self._client()
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "a.txt").write_text("안녕하세요 테스트 문서입니다.", encoding="utf-8")
+            Path(tmp, "b.txt").write_text("다른 파일입니다.", encoding="utf-8")
+            with client.stream(
+                "POST",
+                "/api/scan/stream",
+                params={"directory": tmp},
+                headers=self._SSE_HEADERS,
+            ) as response:
+                self.assertEqual(response.status_code, 200)
+                events = self._collect_sse(response)
+        self.assertIn("job", events)
+        self.assertIn("progress", events)
+        self.assertIn("result", events)
+        result = events["result"][0]
+        self.assertEqual(result["mode"], "scan")
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(len(result["items"]), 2)
+
+    def test_scan_stream_requires_directory(self) -> None:
+        client = self._client()
+        with client.stream(
+            "POST",
+            "/api/scan/stream",
+            params={"directory": "C:/nonexistent-dir-xyz"},
+            headers=self._SSE_HEADERS,
+        ) as response:
+            events = self._collect_sse(response)
+        self.assertIn("error", events)
+
 
 if __name__ == "__main__":
     unittest.main()

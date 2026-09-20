@@ -55,6 +55,7 @@ JSON envelope `{"status": "success", "data": {...}}` or an HTTP error with
 | POST | `/api/compare` | `file_path_a` + `file_path_b` | Two-file comparison — same-speaker distance (audio pairs) or same-author stylometry (text/document pairs) |
 | POST | `/api/check` | `file_path` **or** `text` | Unified check-all: core scan + every `models/` member that fits the modality + C2PA/forensic + text fingerprint probes in one `{mode, item, advanced?, forensic?}` payload |
 | POST | `/api/check/stream` | same as `/api/check` | Server-Sent Events (`text/event-stream`): `job` → `progress` per stage → `result` (same payload as `/api/check`), or `error`/`cancelled` |
+| POST | `/api/scan/stream` | `directory`, `recursive` (bool), `max_files` (≤5000, default 200) | SSE batch scan of a server-local directory: `job` → `progress` per file (`{stage, index, total, path, band}`) → `result` (`{mode: "scan", total, counts, items}`), or `error`/`cancelled` |
 | POST | `/api/jobs/{job_id}/cancel` | — | Sets the job's cancellation flag; takes effect at the next stage boundary (`{"status": "success", "cancelled": true}`, 404 for unknown/finished jobs) |
 | GET | `/api/jobs/{job_id}` | — | `{"job_id", "done", "cancelled"}` for in-flight stream jobs; 404 once the job is reaped |
 
@@ -66,6 +67,13 @@ Stage events carry `{stage, index, total}` (`core`, `forensic`/`text-advanced`,
 `watermark` when requested). Cancellation is cooperative — a running stage
 finishes before the job stops, so latency-critical callers should also close
 the HTTP connection.
+
+`/api/scan/stream` reuses the same job/cancel machinery for directories:
+an `enumerate` progress event reports the file count first, then one
+`scan` progress event per file. Per-file failures are recorded in
+`items` (and counted under `counts.failed`) rather than aborting the
+scan. `items` entries are compact `{path, kind, status, band, score}`
+summaries — use `/api/check` per file for full detail.
 
 ## Web GUI endpoints (`web`, default `127.0.0.1:8765`)
 

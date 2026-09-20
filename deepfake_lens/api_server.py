@@ -395,6 +395,105 @@ def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = No
             "cancelled": bool(job["cancel"].is_set()),
         }
 
+    # /api/scan/stream scans a server-local directory with per-file
+    # progress events over SSE. Shares the _JOBS registry so clients can
+    # cancel between files via /api/jobs/{id}/cancel. Directory reads are
+    # limited to max_files entries; same trust level as /api/check.
+    @app.post("/api/scan/stream")
+    async def scan_stream(
+        directory: str,
+        recursive: bool = False,
+        max_files: int = 200,
+    ):
+        import asyncio
+        import json as _json
+        import threading
+        import uuid
+
+        from fastapi.responses import StreamingResponse
+
+        job_id = uuid.uuid4().hex[:12]
+        cancel = threading.Event()
+        _JOBS[job_id] = {"cancel": cancel, "done": False}
+
+        def run_scan():
+            from .core import _iter_files, analyze_file
+
+            yield ("job", {"job_id": job_id})
+            root = Path(directory) if directory else None
+            if root is None or not root.is_dir():
+                yield ("error", {"detail": "directory required"})
+                return
+            try:
+                paths = []
+                capped = False
+                for p in _iter_files(root, recursive=recursive):
+                    if len(paths) >= max(1, min(max_files, 5000)):
+                        capped = True
+                        break
+                    paths.append(p)
+            except Exception as exc:  # noqa: BLE001
+                yield ("error", {"detail": f"listing failed: {exc}"})
+                return
+            total = len(paths)
+            yield ("progress", {"stage": "enumerate", "total": total, "capped": capped})
+            items: list[dict[str, Any]] = []
+            counts = {"high": 0, "medium": 0, "unknown": 0, "low": 0, "failed": 0}
+            for index, path in enumerate(paths, 1):
+                if cancel.is_set():
+                    yield ("cancelled", {"job_id": job_id, "processed": index - 1, "total": total})
+                    return
+                try:
+                    item = analyze_file(path, model_path=_default_profiles())
+                    data = item.to_json()
+                    result = data.get("result") or {}
+                    band = str(result.get("band") or "unknown")
+                    status = str(data.get("status") or "failed")
+                    if status == "analyzed":
+                        counts[band if band in counts else "unknown"] += 1
+                    elif status in {"skipped", "duplicate"}:
+                        counts["unknown"] += 1
+                    else:
+                        counts["failed"] += 1
+                    items.append({"path": data.get("path"), "kind": data.get("kind"),
+                                  "status": status, "band": band if status == "analyzed" else None,
+                                  "score": result.get("score")})
+                except Exception as exc:  # noqa: BLE001 - per-file failure is data
+                    counts["failed"] += 1
+                    items.append({"path": str(path), "status": "failed", "error": str(exc)})
+                yield ("progress", {"stage": "scan", "index": index, "total": total,
+                                    "path": path.name, "band": items[-1].get("band")})
+            yield ("result", {"mode": "scan", "directory": str(root), "total": total,
+                              "capped": capped, "counts": counts, "items": items})
+
+        async def events():
+            loop = asyncio.get_event_loop()
+            queue: asyncio.Queue[Any] = asyncio.Queue()
+
+            def produce() -> None:
+                try:
+                    for evt in run_scan():
+                        loop.call_soon_threadsafe(queue.put_nowait, evt)
+                except Exception as exc:  # noqa: BLE001 - report, don't hang
+                    loop.call_soon_threadsafe(
+                        queue.put_nowait, ("error", {"detail": str(exc)}))
+                finally:
+                    _JOBS[job_id]["done"] = True
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
+
+            threading.Thread(target=produce, daemon=True).start()
+            try:
+                while True:
+                    evt = await queue.get()
+                    if evt is None:
+                        break
+                    name, data = evt
+                    yield f"event: {name}\ndata: {_json.dumps(data, ensure_ascii=False)}\n\n"
+            finally:
+                _JOBS.pop(job_id, None)
+
+        return StreamingResponse(events(), media_type="text/event-stream")
+
     @app.post("/api/compare")
     async def compare(file_path_a: str, file_path_b: str):
         """Two-file comparison: same-speaker distance for audio pairs,
