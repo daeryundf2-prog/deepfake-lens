@@ -3,11 +3,14 @@
     python experiments/eval_all.py --corpus <dir> --report report.json
     python experiments/suggest_weights.py report.json [--write]
 
-Weight rule (transparent, documented): a member's discriminating power is
-its AUROC distance from chance; the suggestion is
-``clamp(4 * (auroc - 0.5), 0.05, 4.0)`` — AUROC 0.95 -> 1.8, AUROC 0.55 ->
-0.2, AUROC <= 0.5 -> floor 0.05. Members with <20 scored samples per class
-or no AUROC keep their current weight (insufficient evidence).
+Weight rule (transparent, documented): discriminating power is AUROC
+distance from chance, penalized by the operating-point false-positive
+rate — AUROC rewards ranking even when a member flags everything, so
+``suggested = clamp(4 * (auroc - 0.5) * max(0.05, 1 - fpr_at_50),
+0.05, 4.0)``. A member at AUROC 0.95 with FPR 0 gets 1.8; a member at
+AUROC 0.83 but FPR 0.97 collapses to the 0.05 floor. Members with <20
+scored samples per class or no AUROC keep their current weight
+(insufficient evidence).
 
 With --write the suggestion is stored in each profile JSON as
 ``ensemble_weight`` plus a ``weight_basis`` note naming the report. Without
@@ -31,7 +34,8 @@ def suggest(member: dict) -> float | None:
         return None
     if member.get("pos", 0) < 20 or member.get("neg", 0) < 20:
         return None
-    return max(0.05, min(4.0, round(4.0 * (auc - 0.5), 2)))
+    fpr_penalty = max(0.05, 1.0 - (member.get("fpr_at_50") or 0.0))
+    return max(0.05, min(4.0, round(4.0 * (auc - 0.5) * fpr_penalty, 2)))
 
 
 def main() -> int:

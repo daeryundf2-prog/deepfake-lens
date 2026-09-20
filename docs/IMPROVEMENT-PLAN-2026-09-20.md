@@ -21,11 +21,11 @@
 지금까지 축적된 라벨 코퍼스(얼굴 724+/크로스도메인 86, 오디오 12+, 한국어 텍스트 398+175+39, 이미지 DALL-E/실사)가
 임시 디렉터리에만 존재한다. **코퍼스를 잃으면 측정 기반이 사라진다.**
 
-| 항목 | 내용 | 성공 기준 |
+| 항목 | 내용 | 상태 |
 |---|---|---|
-| **A1 평가 하네스** | `experiments/eval_all.py` — 라벨 코퍼스 디렉터리를 받아 전 멤버의 AUROC/FPR/recall/커버리지를 표로 출력. 기존 eval 스크립트 통합 | 한 명령으로 전 멤버 성능표 재생성 |
-| **A2 코퍼스 재현 스크립트** | `scripts/build_eval_corpus.py` — 위키 인간문/TTS 생성/얼굴 수집을 재현(체크포인트와 대용량 원본은 비커밋, 스크립트만 커밋) | 클린 환경에서 코퍼스 재생성 가능 |
-| **A3 데이터 기반 가중치** | 현재 `ensemble_weight`는 수동 — 라벨 코퍼스의 실측 AUROC/정밀도로 멤버별 가중치를 계산해 프로필에 기록 | 가중치가 측정값에서 유도됨을 문서화 |
+| **A1 평가 하네스** | `experiments/eval_all.py` — 라벨 코퍼스 디렉터리 → 전 멤버 AUROC/FPR/recall/커버리지 표. face 모댈리티는 crop_faces 멤버 + SBI 양성 자동합성 | ✅ 완료 — 베이스라인 `experiments/baseline_eval_2026-09-20.json` |
+| **A2 코퍼스 재현 스크립트** | `scripts/build_eval_corpus.py` — 위키/TTS/YESNO 재현. 코퍼스는 `eval_corpus/`(581파일, gitignore)에 보존 | ✅ 완료 — `experiments/EVAL_CORPUS.md` |
+| **A3 데이터 기반 가중치** | `experiments/suggest_weights.py` — `4·(AUROC−0.5)·(1−FPR@50)` 클램프. AUROC만으론 "전부 플래그" 멤버가 과대평가되어 FPR 페널티 필수임을 실증 | ✅ 완료 — advisory 모드 |
 
 ## Phase B — 탐지 성능 개선 (측정된 약점 순)
 

@@ -1,0 +1,285 @@
+{
+  "corpus": "eval_corpus",
+  "modalities": [
+    {
+      "modality": "image",
+      "samples": 5,
+      "real": 1,
+      "fake": 4,
+      "members": [
+        {
+          "n": 5,
+          "pos": 4,
+          "neg": 1,
+          "auroc": 0.5,
+          "eer": 0.5,
+          "thr_at_fpr1": 35,
+          "thr_at_fpr5": 35,
+          "fpr_at_50": 0.0,
+          "recall_at_50": 0.25,
+          "profile": "ai-image-swin-runtime.json",
+          "available": 5,
+          "skipped": 0
+        },
+        {
+          "n": 5,
+          "pos": 4,
+          "neg": 1,
+          "auroc": 0.5,
+          "eer": 0.5,
+          "thr_at_fpr1": 90,
+          "thr_at_fpr5": 90,
+          "fpr_at_50": 1.0,
+          "recall_at_50": 0.75,
+          "profile": "aide-runtime.json",
+          "available": 5,
+          "skipped": 0
+        },
+        {
+          "n": 5,
+          "pos": 4,
+          "neg": 1,
+          "auroc": 0.5,
+          "eer": 0.5,
+          "thr_at_fpr1": 5e-324,
+          "thr_at_fpr5": 5e-324,
+          "fpr_at_50": 0.0,
+          "recall_at_50": 0.0,
+          "profile": "cnndetection-runtime.json",
+          "available": 5,
+          "skipped": 0
+        },
+        {
+          "n": 3,
+          "pos": 2,
+          "neg": 1,
+          "auroc": 1.0,
+          "eer": 0.0,
+          "thr_at_fpr1": 62,
+          "thr_at_fpr5": 62,
+          "fpr_at_50": 0.0,
+          "recall_at_50": 1.0,
+          "profile": "sbi-effnet-runtime.json",
+          "available": 3,
+          "skipped": 2
+        },
+        {
+          "n": 5,
+          "pos": 4,
+          "neg": 1,
+          "auroc": 0.625,
+          "eer": 0.4,
+          "thr_at_fpr1": 32,
+          "thr_at_fpr5": 32,
+          "fpr_at_50": 0.0,
+          "recall_at_50": 0.0,
+          "profile": "univfd-runtime.json",
+          "available": 5,
+          "skipped": 0
+        },
+        {
+          "n": 5,
+          "pos": 4,
+          "neg": 1,
+          "auroc": 0.5,
+          "eer": 0.5,
+          "thr_at_fpr1": 43.0,
+          "thr_at_fpr5": 43.0,
+          "fpr_at_50": 0.0,
+          "recall_at_50": 0.0,
+          "profile": "<ensemble-mean>",
+          "available": 5
+        }
+      ],
+      "unsupported_profiles": [
+        "dire-runtime.json",
+        "face-manipulation-vit-frames-runtime.json",
+        "face-manipulation-vit-runtime.json",
+        "faceswap-ffpp-frames-runtime.json",
+        "faceswap-ffpp-runtime.json"
+      ]
+    },
+    {
+      "modality": "face",
+      "samples": 84,
+      "real": 30,
+      "fake": 54,
+      "members": [
+        {
+          "n": 81,
+          "pos": 53,
+          "neg": 28,
+          "auroc": 0.8672506738544474,
+          "eer": 0.2462686567164179,
+          "thr_at_fpr1": 71,
+          "thr_at_fpr5": 49,
+          "fpr_at_50": 0.03571428571428571,
+          "recall_at_50": 0.5660377358490566,
+          "profile": "sbi-effnet-runtime.json",
+          "available": 81,
+          "skipped": 3
+        },
+        {
+          "n": 81,
+          "pos": 53,
+          "neg": 28,
+          "auroc": 0.8672506738544474,
+          "eer": 0.2462686567164179,
+          "thr_at_fpr1": 71.0,
+          "thr_at_fpr5": 49.0,
+          "fpr_at_50": 0.03571428571428571,
+          "recall_at_50": 0.5660377358490566,
+          "profile": "<ensemble-mean>",
+          "available": 81
+        }
+      ],
+      "unsupported_profiles": [
+        "dire-runtime.json",
+        "face-manipulation-vit-frames-runtime.json",
+        "face-manipulation-vit-runtime.json",
+        "faceswap-ffpp-frames-runtime.json",
+        "faceswap-ffpp-runtime.json"
+      ]
+    },
+    {
+      "modality": "audio",
+      "samples": 7,
+      "real": 1,
+      "fake": 6,
+      "members": [
+        {
+          "n": 7,
+          "pos": 6,
+          "neg": 1,
+          "auroc": 0.16666666666666666,
+          "eer": 0.8333333333333334,
+          "thr_at_fpr1": 100,
+          "thr_at_fpr5": 100,
+          "fpr_at_50": 1.0,
+          "recall_at_50": 0.6666666666666666,
+          "profile": "aasist-runtime.json",
+          "available": 7,
+          "skipped": 0
+        },
+        {
+          "n": 7,
+          "pos": 6,
+          "neg": 1,
+          "auroc": 1.0,
+          "eer": 0.0,
+          "thr_at_fpr1": 34,
+          "thr_at_fpr5": 34,
+          "fpr_at_50": 0.0,
+          "recall_at_50": 0.8333333333333334,
+          "profile": "wav2vec-deepfake-audio-runtime.json",
+          "available": 7,
+          "skipped": 0
+        },
+        {
+          "n": 7,
+          "pos": 6,
+          "neg": 1,
+          "auroc": 0.5,
+          "eer": 0.5,
+          "thr_at_fpr1": 69.0,
+          "thr_at_fpr5": 69.0,
+          "fpr_at_50": 1.0,
+          "recall_at_50": 0.6666666666666666,
+          "profile": "<ensemble-mean>",
+          "available": 7
+        }
+      ],
+      "unsupported_profiles": [
+        "dire-runtime.json",
+        "face-manipulation-vit-frames-runtime.json",
+        "face-manipulation-vit-runtime.json",
+        "faceswap-ffpp-frames-runtime.json",
+        "faceswap-ffpp-runtime.json"
+      ]
+    },
+    {
+      "modality": "text",
+      "samples": 80,
+      "real": 40,
+      "fake": 40,
+      "members": [
+        {
+          "n": 80,
+          "pos": 40,
+          "neg": 40,
+          "auroc": 0.5,
+          "eer": 0.5,
+          "thr_at_fpr1": 100.00000000000001,
+          "thr_at_fpr5": 100.00000000000001,
+          "fpr_at_50": 1.0,
+          "recall_at_50": 1.0,
+          "profile": "binoculars-runtime.json",
+          "available": 80,
+          "skipped": 0
+        },
+        {
+          "n": 80,
+          "pos": 40,
+          "neg": 40,
+          "auroc": 0.91125,
+          "eer": 0.16666666666666666,
+          "thr_at_fpr1": 100.00000000000001,
+          "thr_at_fpr5": 100,
+          "fpr_at_50": 0.3,
+          "recall_at_50": 0.9,
+          "profile": "fakespot-detector-runtime.json",
+          "available": 80,
+          "skipped": 0
+        },
+        {
+          "n": 80,
+          "pos": 40,
+          "neg": 40,
+          "auroc": 0.833125,
+          "eer": 0.225,
+          "thr_at_fpr1": 99.00000000000001,
+          "thr_at_fpr5": 96,
+          "fpr_at_50": 0.575,
+          "recall_at_50": 0.975,
+          "profile": "openai-detector-runtime.json",
+          "available": 80,
+          "skipped": 0
+        },
+        {
+          "n": 80,
+          "pos": 40,
+          "neg": 40,
+          "auroc": 0.82875,
+          "eer": 0.25,
+          "thr_at_fpr1": 100.00000000000001,
+          "thr_at_fpr5": 98,
+          "fpr_at_50": 0.975,
+          "recall_at_50": 1.0,
+          "profile": "qwen-ppl-runtime.json",
+          "available": 80,
+          "skipped": 0
+        },
+        {
+          "n": 80,
+          "pos": 40,
+          "neg": 40,
+          "auroc": 0.95125,
+          "eer": 0.1,
+          "thr_at_fpr1": 99.75,
+          "thr_at_fpr5": 87.0,
+          "fpr_at_50": 0.8,
+          "recall_at_50": 1.0,
+          "profile": "<ensemble-mean>",
+          "available": 80
+        }
+      ],
+      "unsupported_profiles": [
+        "dire-runtime.json",
+        "face-manipulation-vit-frames-runtime.json",
+        "face-manipulation-vit-runtime.json",
+        "faceswap-ffpp-frames-runtime.json",
+        "faceswap-ffpp-runtime.json"
+      ]
+    }
+  ]
+}
