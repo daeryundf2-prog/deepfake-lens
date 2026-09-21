@@ -34,6 +34,7 @@ models/*.bin
 models/*.part
 models/*.model
 models/*.task
+models/checkpoints/
 # Bundled-app model asset — generated/exported locally, never committed
 deepfakeclassifier/src/main/assets/*.onnx
 

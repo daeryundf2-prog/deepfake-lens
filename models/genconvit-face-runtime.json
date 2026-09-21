@@ -1,0 +1,21 @@
+{
+ "type": "deepfake-lens-runtime-profile-v1",
+ "name": "GenConViT ED (ConvNeXt-T + Swin-T hybrid) deepfake video/face detector",
+ "candidate_key": "genconvit-ed-onnx",
+ "runtime": "onnx",
+ "modality": "image",
+ "crop_faces": true,
+ "checkpoint": "checkpoints/genconvit/genconvit_ed_inference.onnx",
+ "input_size": 224,
+ "input_name": "input",
+ "score_index": 1,
+ "score_activation": "softmax",
+ "supported": false,
+ "reason": "Measured locally (2026-09-21) and rejected: on the eval_corpus/face benchmark (SBI self-blend positives vs diverse real portraits, 98 samples) AUROC 0.49 with FPR@50 0.42 — random separation plus heavy false-flagging of real faces. Trained on FF++/DFDC-style forgeries; does not transfer to self-blend artifacts. Revisit only if real faceswap video samples arrive.",
+ "fetch": "Download genconvit_ed_inference.onnx (~117 MB) from https://huggingface.co/pranjal-pravesh/GenConViT-onnx",
+ "source_url": "https://huggingface.co/pranjal-pravesh/GenConViT-onnx (ONNX conversion of erprogs/GenConViT ED network)",
+ "limitations": [
+  "This profile never produces scores; it exists to document the measured rejection.",
+  "Even when wired, scores are a prioritization signal, not a truth label."
+ ]
+}

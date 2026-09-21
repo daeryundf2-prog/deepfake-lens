@@ -210,3 +210,47 @@ face-manipulation (StyleGAN/faceswap-style), a different artifact class
 covered by the sbi-effnet member, not by this one. Wired as an advisory
 member (`sd-turbo-det-runtime.json`, ensemble_weight 0.6) — precision
 is strong (FPR 0 across every real set); recall is generator-limited.
+
+## External candidate sweep (2026-09-21) — image/video/audio member search
+
+Pre-live-data sweep of current public detectors. Method: every candidate
+runs through the labeled eval_corpus gate before wiring; measurements
+below are on local corpora, not vendor cards.
+
+### Wired (advisory)
+
+| Member | Corpus | AUROC | FPR@50 | recall@50 | Verdict |
+|---|---|---:|---:|---:|---|
+| CommunityForensics ViT-S/384 (`generative_detector.onnx` direct export) | mixed image 55 | 0.56 | 0.04 | 0.14 | advisory w=0.6 — strong precision, generator-limited recall |
+| └ DALL-E subset | 29 | 0.99* | 0.00 | ~0.50 | catches DALL-E partially |
+| └ SD-Turbo fake subset | 120 | 0.58 | 0.01 | 0.00 | misses distilled-diffusion entirely |
+| └ Hemg face-manip subset | 120 | ~0.5 | — | — | out of scope (crop_faces members own this) |
+| sbi-frames (video-frames + SBI inner, crop_faces) | — | inherits SBI | | | faceswap-video path: face crop per frame |
+
+### Rejected after measurement
+
+| Candidate | Measured failure |
+|---|---|
+| onnx-community/CommunityForensics-DeepfakeDet-ViT-ONNX | auto-converted 2-logit export produces flat ~0.4-0.7 on every input (real and fake alike) — broken conversion; the direct single-logit export is used instead |
+| GenConViT ED ONNX (face crops) | face corpus: AUROC 0.49, FPR@50 0.42 — no transfer to self-blend fakes, flags real portraits |
+| Red-had1911 faceswap_detector.onnx | no separation: real face crops 0.01-1.00, SBI fakes 0.02-0.99 overlap |
+| MelodyMachine wav2vec2 (ONNX + HF paths) | saturates: edge-TTS fakes AND LibriSpeech reals both read the same class (~1.0); card's [fake, real] label order also verified wrong for the ONNX export |
+| umm-maybe/AI-image-detector (ConvNeXt) | P(artificial) 0.01-0.26 on DALL-E AND reals — no separation under either label reading |
+
+### Bugs fixed during the sweep
+
+- `score_label` outputs were being re-sigmoided (3% -> 51): profiles using
+  score_label must set `score_activation: "none"` — documented in the
+  rejected umm-maybe profile.
+- New `onnx-audio` runtime added (raw waveform -> ONNX session via the
+  shared run_aasist decoder, per-file zero-mean/unit-var option).
+- `models/checkpoints/` added to .gitignore — nested ONNX checkpoints
+  were outside the flat `models/*.onnx` ignore and would have committed.
+
+### Takeaway for live media
+
+Real incoming photos/videos should get: sbi-effnet (faceswap),
+sd-turbo-det + community-forensics (generated imagery), sbi-frames +
+community-forensics-frames (video), metadata/C2PA. Public pretrained
+face-video detectors (GenConViT class) measured worse than the local
+SBI member on our corpus — do not add them unmeasured.

@@ -1,0 +1,22 @@
+{
+ "type": "deepfake-lens-runtime-profile-v1",
+ "name": "MelodyMachine wav2vec2 deepfake-audio detector",
+ "candidate_key": "melodymachine-w2v2",
+ "runtime": "onnx-audio",
+ "modality": "audio",
+ "checkpoint": "checkpoints/community-forensics/audio_deepfake_detector.onnx",
+ "input_name": "input_values",
+ "sample_rate": 16000,
+ "max_seconds": 15,
+ "normalize_audio": true,
+ "score_index": 1,
+ "score_activation": "softmax",
+ "supported": false,
+ "reason": "Measured locally (2026-09-21) and rejected in both export paths. ONNX export saturates to a single class on all inputs (edge-TTS fakes AND LibriSpeech reals both logit[1]~1.0). HF hub path (hf-audio-classifier, MelodyMachine/Deepfake-audio-detection-V2, id2label {0:fake,1:real}) scores real speech higher on the fake axis than TTS (yesno 73 vs edge_ko 50) — inverted/unusable. The onnx-audio runtime stays wired for future candidates.",
+ "fetch": "ONNX: https://huggingface.co/Red-had1911/deepfake-detector-onnx (audio_deepfake_detector.onnx). HF: MelodyMachine/Deepfake-audio-detection-V2.",
+ "source_url": "https://huggingface.co/MelodyMachine/Deepfake-audio-detection-V2",
+ "limitations": [
+  "This profile never produces scores; it exists to document the measured rejection.",
+  "Existing measured audio members remain aasist + wav2vec XLSR."
+ ]
+}

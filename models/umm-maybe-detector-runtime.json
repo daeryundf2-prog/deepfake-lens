@@ -1,0 +1,19 @@
+{
+ "type": "deepfake-lens-runtime-profile-v1",
+ "name": "umm-maybe ConvNeXt AI-image detector (HF)",
+ "candidate_key": "umm-maybe-convnext",
+ "runtime": "hf-image-classifier",
+ "modality": "image",
+ "hub_model": "umm-maybe/AI-image-detector",
+ "score_label": "artificial",
+ "score_index": 0,
+ "score_activation": "none",
+ "supported": false,
+ "reason": "Measured locally (2026-09-21) and rejected: the checkpoint does not separate the corpus under either label reading — with id2label {0:artificial,1:human}, P(artificial) is 0.01-0.26 across DALL-E fakes AND real photos (reads everything as human); read the other way it flags everything. Either the published head drifted from the card or the labels are effectively swapped; no wiring survives the measured gate.",
+ "fetch": "HF hub model umm-maybe/AI-image-detector (~350 MB) — kept unwired.",
+ "source_url": "https://huggingface.co/umm-maybe/AI-image-detector",
+ "limitations": [
+  "This profile never produces scores; it exists to document the measured rejection.",
+  "Note: score_label paths must pair with score_activation 'none' — the returned value is already a softmax probability (a default sigmoid re-application pushed a 3% probability to 51)."
+ ]
+}

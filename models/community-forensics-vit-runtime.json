@@ -1,0 +1,29 @@
+{
+ "type": "deepfake-lens-runtime-profile-v1",
+ "name": "CommunityForensics ViT-S/384 (OpenSight) general AI-image detector",
+ "candidate_key": "community-forensics-vit-s384",
+ "runtime": "onnx",
+ "modality": "image",
+ "checkpoint": "checkpoints/community-forensics/generative_detector.onnx",
+ "input_size": 384,
+ "input_name": "input",
+ "mean": [0.48145466, 0.4578275, 0.40821073],
+ "std": [0.26862954, 0.26130258, 0.27577711],
+ "score_index": 0,
+ "score_activation": "sigmoid",
+ "ensemble_weight": 0.6,
+ "supported": true,
+ "source_url": "https://huggingface.co/Red-had1911/deepfake-detector-onnx (generative_detector.onnx — direct export of the original timm checkpoint model_v11_ViT_384_base_ckpt.pt; Community Forensics, Park & Owens U-Michigan, arXiv:2411.04125, MIT)",
+ "limitations": [
+  "Checkpoint is not committed; download generative_detector.onnx from Red-had1911/deepfake-detector-onnx.",
+  "Trained on 2.7M samples across ~4,800 generators (Community Forensics, 2024).",
+  "Measured locally (2026-09-21, mixed 55-sample corpus): AUROC 0.56, FPR@50 0.04, recall@50 0.14 — precision is strong (reals read ~0.00-0.06) but recall is generator-limited: DALL-E mean 0.55, SD-Turbo recall 0.00, Hemg face-manipulation fakes read ~0.04 (that class belongs to crop_faces members).",
+  "Same-repo faceswap_detector.onnx was also evaluated on face crops and rejected — no separation between real faces and SBI blends (real 0.01-1.0, fake 0.02-0.99 overlapping).",
+  "The onnx-community auto-converted export (model.onnx, 2-logit) produces flat ~0.4-0.7 scores on every input — DO NOT use it; this profile uses the direct single-logit export.",
+  "Card preprocessing is resize-440 + center-crop-384; the adapter applies a direct 384 resize (small domain shift).",
+  "Scores are a prioritization signal, not a truth label."
+ ],
+ "notes": [
+  "Output (N,1) logit; sigmoid = P(AI-generated) on 0-100 scale."
+ ]
+}

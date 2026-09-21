@@ -1,0 +1,28 @@
+{
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "CommunityForensics ViT-S/384 per-frame (video-frames runtime)",
+  "candidate_key": "community-forensics-vit-s384-frames",
+  "runtime": "video-frames",
+  "modality": "video",
+  "frames": 8,
+  "inner": {
+    "runtime": "onnx",
+    "checkpoint": "checkpoints/community-forensics/generative_detector.onnx",
+    "input_size": 384,
+    "input_name": "input",
+    "mean": [0.48145466, 0.4578275, 0.40821073],
+    "std": [0.26862954, 0.26130258, 0.27577711],
+    "score_index": 0,
+    "score_activation": "sigmoid",
+    "name": "CommunityForensics ViT-S/384"
+  },
+  "ensemble_weight": 0.6,
+  "supported": true,
+  "source_url": "https://huggingface.co/Red-had1911/deepfake-detector-onnx (generative_detector.onnx — Community Forensics ViT-S/384, arXiv:2411.04125, MIT)",
+  "limitations": [
+    "Frame-level generated-image detection, not a temporal/lip-sync/faceswap model — fully AI-generated video (Sora-class) frames may flag; face-swapped real video will NOT (that class needs crop_faces members on extracted faces).",
+    "Requires the ONNX checkpoint (not committed) and opencv for frame decoding.",
+    "Inherits the image member's measured profile: precision high, recall generator-limited; heavy recompression collapses scores.",
+    "Scores are a prioritization signal, not a truth label."
+  ]
+}

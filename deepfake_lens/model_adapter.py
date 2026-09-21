@@ -20,7 +20,7 @@ _MAX_PROFILE_DEPTH = 4
 # explicit "modality" field; otherwise it is inferred from the runtime.
 IMAGE_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "hf-image-classifier"}
 HUB_RUNTIMES = {"hf-text-classifier", "hf-image-classifier", "hf-audio-classifier", "causal-lm-ppl", "binoculars"}
-AUDIO_RUNTIMES = {"aasist", "hf-audio-classifier"}
+AUDIO_RUNTIMES = {"aasist", "hf-audio-classifier", "onnx-audio"}
 TEXT_RUNTIMES = {"hf-text-classifier", "causal-lm-ppl", "binoculars"}
 # "video-frames" samples frames with cv2 and scores each with a nested image
 # runtime profile ("inner") — it reuses image checkpoints, so it needs no
@@ -478,6 +478,8 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
             values = _run_hf_image_classifier(media_path, profile)
         elif runtime == "hf-audio-classifier":
             values = _run_hf_audio_classifier(media_path, profile)
+        elif runtime == "onnx-audio":
+            values = _run_onnx_audio(checkpoint, media_path, profile)
         elif runtime == "causal-lm-ppl":
             return _run_causal_lm_ppl(media_path, profile, model_name=model_name)
         elif runtime == "binoculars":
@@ -633,6 +635,8 @@ def _checkpoint_hint(runtime: str) -> list[str]:
         return ["Fetch the checkpoint with scripts/fetch_aide.py, or point 'checkpoint' at a local progan_train.pth."]
     if runtime == "aasist":
         return ["Fetch the checkpoint with scripts/fetch_aasist.py (downloads the official AASIST.pth, ~1.3 MB), or point 'checkpoint' at a local AASIST state dict."]
+    if runtime == "onnx-audio":
+        return ["Download the ONNX checkpoint named by the profile's source_url into the profile's checkpoint path."]
     if runtime == "clip-linear":
         return ["Download the detector's linear-head weights and point 'checkpoint' at the .pth file; the CLIP backbone named in 'backbone' is fetched by transformers on first use."]
     if runtime == "hf-text-classifier":
@@ -663,6 +667,8 @@ def _runtime_install_hint(runtime: str) -> str:
         return "Install the optional torchvision stack (torch, torchvision, Pillow, numpy) to enable the torchvision runtime."
     if runtime == "video-frames":
         return "Install opencv plus the stack required by the inner image profile to enable the video-frames runtime."
+    if runtime == "onnx-audio":
+        return "Install onnxruntime and numpy to enable the raw-waveform ONNX audio runtime; PCM .wav files need no other decoder."
     return "Install Pillow plus onnxruntime or torch in the local environment to enable neural inference."
 
 
@@ -814,6 +820,30 @@ def _run_hf_audio_classifier(media_path: Path, profile: dict[str, object]) -> li
         exps = [math.exp(max(-80.0, min(80.0, value))) for value in shifted]
         return [exps[target] / max(1e-12, sum(exps))]
     return values
+
+
+def _run_onnx_audio(checkpoint: Path, audio_path: Path, profile: dict[str, object]) -> list[float]:
+    """Score one audio file with a raw-waveform ONNX classifier.
+
+    Decodes mono float32 at the profile's ``sample_rate`` via the shared
+    run_aasist decoder (stdlib wave for PCM .wav, soundfile/librosa
+    otherwise), caps at ``max_seconds``, optionally applies per-file
+    zero-mean/unit-variance normalization (``normalize_audio``), and feeds
+    a (1, samples) tensor to the ONNX session.
+    """
+    ort = importlib.import_module("onnxruntime")
+    np = importlib.import_module("numpy")
+    sample_rate = int(profile.get("sample_rate", 16000) or 16000)
+    max_seconds = float(profile.get("max_seconds", 15) or 15)
+    waveform = _aasist_module().load_waveform(audio_path, sample_rate=sample_rate, max_seconds=max_seconds)
+    array = np.asarray(waveform, dtype="float32").reshape(1, -1)
+    if profile.get("normalize_audio"):
+        std = float(array.std())
+        array = (array - float(array.mean())) / (std if std > 1e-8 else 1.0)
+    session = ort.InferenceSession(str(checkpoint), providers=["CPUExecutionProvider"])
+    input_name = str(profile.get("input_name") or session.get_inputs()[0].name)
+    outputs = session.run(None, {input_name: array})
+    return _flatten_outputs(outputs[0])
 
 
 # CLIP backbones are multi-hundred-MB downloads; keep them resident between

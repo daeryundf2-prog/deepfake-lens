@@ -1,0 +1,29 @@
+{
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "SBI EfficientNet-B0 on per-frame face crops (video-frames runtime)",
+  "candidate_key": "sbi-effnet-b0-frames",
+  "runtime": "video-frames",
+  "modality": "video",
+  "frames": 8,
+  "inner": {
+    "runtime": "torchvision",
+    "checkpoint": "sbi-effnet-b0.pth",
+    "input_size": 224,
+    "score_index": 1,
+    "score_activation": "softmax",
+    "score_bias": 35,
+    "crop_faces": true,
+    "name": "SBI EfficientNet-B0 (v2, diverse-domain)"
+  },
+  "ensemble_weight": 0.7,
+  "supported": true,
+  "source_url": "local training: experiments/train_detector.py on self-blend corpus (see experiments/FACESWAP_EVALUATION.md); frame wrapper uses the committed sbi-effnet-runtime.json inner config",
+  "limitations": [
+    "This is the measured faceswap path for video: faces are detected per sampled frame (MediaPipe + Haar fallback) and scored by the SBI member — the member with AUROC ~0.87 on held-out face manipulation.",
+    "Frames without detectable faces are skipped, not scored as authentic.",
+    "Not a temporal model — per-frame face scores are averaged; lip-sync/inter-frame drift is not modeled.",
+    "Heavy compression/low-resolution faces degrade detection (documented in experiments/FACESWAP_EVALUATION.md).",
+    "Checkpoint is not committed; reproduce via scripts + experiments/train_detector.py.",
+    "Scores are a prioritization signal, not a truth label."
+  ]
+}

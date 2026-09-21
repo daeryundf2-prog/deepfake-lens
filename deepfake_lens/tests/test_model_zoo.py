@@ -65,7 +65,7 @@ class CommittedProfilesTest(unittest.TestCase):
         names = set(self._profiles())
         self.assertEqual(
             names,
-            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json", "aide-frames-runtime.json", "fakespot-detector-runtime.json", "qwen-ppl-runtime.json", "binoculars-runtime.json", "faceswap-ffpp-runtime.json", "faceswap-ffpp-frames-runtime.json", "face-manipulation-vit-runtime.json", "face-manipulation-vit-frames-runtime.json", "wav2vec-deepfake-audio-runtime.json", "ai-image-swin-runtime.json", "sbi-effnet-runtime.json", "sd-turbo-det-runtime.json"},
+            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json", "aide-frames-runtime.json", "fakespot-detector-runtime.json", "qwen-ppl-runtime.json", "binoculars-runtime.json", "faceswap-ffpp-runtime.json", "faceswap-ffpp-frames-runtime.json", "face-manipulation-vit-runtime.json", "face-manipulation-vit-frames-runtime.json", "wav2vec-deepfake-audio-runtime.json", "ai-image-swin-runtime.json", "sbi-effnet-runtime.json", "sd-turbo-det-runtime.json", "community-forensics-vit-runtime.json", "community-forensics-frames-runtime.json", "sbi-frames-runtime.json", "genconvit-face-runtime.json", "melodymachine-w2v2-runtime.json", "umm-maybe-detector-runtime.json"},
         )
 
     def test_wired_profiles_use_implemented_runtimes(self) -> None:
@@ -303,6 +303,37 @@ class MultiProfileAggregationTest(unittest.TestCase):
         self.assertIn("0/2 model profiles", analysis.detail)
         self.assertEqual(len(analysis.models), 2)
 
+    def test_onnx_audio_missing_checkpoint_reports_unavailable(self) -> None:
+        """The onnx-audio runtime must degrade to 'unavailable' (not score 0)
+        when its checkpoint is absent — same contract as image ONNX members."""
+        import struct
+        import wave
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wav = root / "clip.wav"
+            with wave.open(str(wav), "wb") as fh:
+                fh.setnchannels(1)
+                fh.setsampwidth(2)
+                fh.setframerate(16000)
+                fh.writeframes(b"".join(struct.pack("<h", 0) for _ in range(1600)))
+            zoo = self._make_dir(
+                root,
+                {
+                    "a-runtime.json": {
+                        "name": "audio-a",
+                        "runtime": "onnx-audio",
+                        "checkpoint": "missing.onnx",
+                    },
+                },
+            )
+            analysis = analyze_external_model(wav, zoo, modality="audio")
+
+        self.assertFalse(analysis.available)
+        self.assertEqual(analysis.score, 0)
+        self.assertEqual(analysis.confidence, "unavailable")
+        self.assertIn("checkpoint", analysis.detail)
+
     def test_profile_set_resolves_members_relative_to_set(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -409,7 +440,7 @@ class MultiProfileAggregationTest(unittest.TestCase):
             analysis = analyze_external_model(image, MODELS_DIR)
 
         self.assertIsNotNone(analysis)
-        self.assertEqual(len(analysis.models), 9)
+        self.assertEqual(len(analysis.models), 12)
         names = {m["model"] for m in analysis.models}
         self.assertTrue(any("AIDE" in name for name in names))
         self.assertTrue(any("DIRE" in name for name in names))
