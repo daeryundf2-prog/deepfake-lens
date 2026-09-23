@@ -636,6 +636,18 @@ def _deep_video_layers(path: Path) -> tuple[list[EvidenceSignal], list[str]]:
         limitations.extend(lipsync.limitations[:2])
     except Exception:
         limitations.append("립싱크 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
+    try:
+        from .face_track import analyze_face_track
+        track = analyze_face_track(path)
+        if track.available and track.score > 0:
+            signals.append(EvidenceSignal(
+                "얼굴 트랙 시간-일관성",
+                track.verdict,
+                min(track.score, 35),
+            ))
+        limitations.extend(track.limitations[:2])
+    except Exception:
+        limitations.append("얼굴 트랙 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
     return signals, limitations
 
 

@@ -230,14 +230,24 @@ def _degrade_image(image):
 
     from PIL import Image
 
-    if random.random() < 0.5:
+    if random.random() < 0.6:
         buf = io.BytesIO()
-        image.save(buf, "JPEG", quality=random.choice([50, 60, 70, 75, 80]))
+        image.save(buf, "JPEG", quality=random.choice([30, 40, 50, 60, 70, 80, 90]))
         buf.seek(0)
         image = Image.open(buf).convert("RGB")
     if random.random() < 0.5:
-        scale = random.choice([0.4, 0.5, 0.6])
+        scale = random.choice([0.3, 0.4, 0.5, 0.6, 0.7])
         image = image.resize((max(32, int(image.width * scale)), max(32, int(image.height * scale))))
+    if random.random() < 0.3:
+        from PIL import ImageFilter
+
+        image = image.filter(ImageFilter.GaussianBlur(radius=random.choice([0.6, 1.0, 1.6])))
+    if random.random() < 0.3:
+        import numpy as np
+
+        arr = np.asarray(image, dtype=np.float64)
+        arr = np.clip(arr + np.random.normal(0, random.choice([2, 4, 8]), arr.shape), 0, 255)
+        image = Image.fromarray(arr.astype("uint8"))
     return image
 
 

@@ -73,3 +73,58 @@ frames are missed, and recompression collapses every score toward zero.
 **Per-frame video scoring adds nothing beyond the image modality's own
 weaknesses on this corpus — treat video scores as noise when the
 underlying still would mislead the image members.**
+
+## Screen-capture simulation (2026-09-23, sim_screen_capture.py)
+
+Realistic screen-recording degradations: display-grid resampling moiré,
+refresh-rate brightness banding, optional perspective skew, then
+JPEG q80 (images) / H.264 crf30 (video).
+
+### Image members under screen-capture degradation
+
+| Input | swin | community-forensics | sd-turbo-det |
+|---|---|---|---|
+| dalle_0 screen | 5 miss | 0 miss | **100 catch** |
+| dalle_1 screen | 87 catch | 0 miss | **82 catch** |
+| hemg_real screen | 5 | 0 | 0 |
+| lenna screen | 6 | 0 | 1 |
+
+- **sd-turbo-det survives screen-capture** on its diffusion class —
+  the class-balanced degradation augmentation paid off where CF-ViT
+  (no comparable augmentation in its export) collapses to 0.
+- Zero false positives on the real screens.
+
+### sd-turbo-det under direct JPEG sweep (diffusion class only)
+
+| Condition | dalle scores | real |
+|---|---|---|
+| clean | 100, 84, 100 | all ≤1 |
+| JPEG q50 | 100, 79, 100 | all ≤1 |
+| JPEG q30 | 100, 84, 100 | all ≤1 |
+
+The earlier "q50 AUROC 0.51 collapse" was driven by the Hemg
+face-manipulation class (which this member never detected); on its
+actual diffusion class the member is already compression-robust.
+
+### V3 compression-invariant retrain — REJECTED
+
+Retrained on the same corpus as convnext_tiny with heavier class-balanced
+degradation (JPEG q30-90, downscale 0.3-0.7, blur, noise). Result:
+perfectly compression-invariant (identical scores clean/q50/q30) but
+non-discriminating — real mean ~40 vs fake mean ~45, FPR collapses.
+Invariance without separation is worthless; v2 stays.
+
+## Video face-track under screen-capture (face_track module)
+
+| Video | faces found | score |
+|---|---|---|
+| talk_plos real screen | 16/16 | 0 |
+| talk_wikitongues real screen | 65/65 | 0 |
+| swap_jitter screen | **0-7** | unavailable |
+
+- Real tracks survive moiré/banding with no false positive.
+- **The swapped video loses face detection entirely under screen
+  degradation** — the track signal degrades to *unavailable*, not to a
+  false "clean". Screen-recording is an evasion vector for
+  track-based detection: absence of a track verdict is not evidence of
+  authenticity.
