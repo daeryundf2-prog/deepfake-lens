@@ -61,7 +61,9 @@ def analyze_inpainting(
         return _error_analysis("opencv가 설치되어 있지 않습니다. pip install opencv-python로 설치하세요.")
 
     try:
-        image = cv2.imread(str(image_path))
+        from .face import _imread_unicode
+
+        image = _imread_unicode(image_path)
         if image is None:
             return _error_analysis("이미지를 읽을 수 없습니다.")
     except Exception as exc:

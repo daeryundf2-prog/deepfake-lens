@@ -533,13 +533,14 @@ def _has_face(media_path: Path) -> bool:
     precision-over-recall posture.
     """
     try:
-        import cv2
+        import cv2  # noqa: F401
     except ImportError:
         return False
-    image = cv2.imread(str(media_path))
+    from .face import _detect_faces, _imread_unicode
+
+    image = _imread_unicode(media_path)
     if image is None:
         return False
-    from .face import _detect_faces
 
     return bool(_detect_faces(image))
 
@@ -553,13 +554,14 @@ def _face_crops(media_path: Path, *, margin: float = 0.25) -> list:
     is detected — callers treat that as the requires_face gate.
     """
     try:
-        import cv2
+        import cv2  # noqa: F401
     except ImportError:
         return []
-    image = cv2.imread(str(media_path))
+    from .face import _detect_faces, _imread_unicode
+
+    image = _imread_unicode(media_path)
     if image is None:
         return []
-    from .face import _detect_faces
 
     img_h, img_w = image.shape[:2]
     crops = []

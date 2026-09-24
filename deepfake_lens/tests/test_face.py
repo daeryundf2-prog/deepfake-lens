@@ -55,6 +55,30 @@ class FaceAnalysisTest(unittest.TestCase):
         self.assertIn("지원하지 않는", result.verdict)
         tmp_path.unlink(missing_ok=True)
 
+    def test_unicode_path_image_is_readable(self) -> None:
+        """Images under non-ASCII (Korean) paths must decode via _imread_unicode.
+
+        cv2.imread returns None for non-ASCII paths on Windows — the
+        analyzer must not report those files as unreadable.
+        """
+        if not _has_cv2():
+            self.skipTest("opencv not installed")
+        import cv2
+        import numpy as np
+
+        tmp = Path(tempfile.mkdtemp(prefix="한글경로"))
+        img_path = tmp / "테스트이미지.png"
+        ok, encoded = cv2.imencode(".png", np.full((32, 32, 3), 200, np.uint8))
+        self.assertTrue(ok)
+        img_path.write_bytes(encoded.tobytes())
+        try:
+            result = analyze_faces(img_path)
+            self.assertNotIn("읽을 수 없", result.verdict)
+        finally:
+            import shutil
+
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_analysis_returns_dataclass(self) -> None:
         """Analysis should return a FaceAnalysis dataclass."""
         result = analyze_faces(Path("nonexistent.jpg"))

@@ -1021,7 +1021,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             import cv2
             import numpy as np
-            image = cv2.imread(str(args.file))
+            from .face import _imread_unicode
+            image = _imread_unicode(args.file)
             if image is None:
                 print(json.dumps({"error": "이미지를 읽을 수 없습니다"}, ensure_ascii=False, indent=2))
                 return 1

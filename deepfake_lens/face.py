@@ -70,6 +70,25 @@ class FaceAnalysis:
         return asdict(self)
 
 
+def _imread_unicode(path: Path | str):
+    """cv2.imread that survives non-ASCII paths on Windows.
+
+    cv2.imread silently returns None for paths containing non-ASCII
+    characters (Korean/CJK filenames) on Windows — read the bytes and
+    decode instead. Returns None on any failure, like cv2.imread.
+    """
+    import cv2
+    import numpy as np
+
+    try:
+        data = np.fromfile(str(path), dtype=np.uint8)
+    except OSError:
+        return None
+    if data.size == 0:
+        return None
+    return cv2.imdecode(data, cv2.IMREAD_COLOR)
+
+
 def analyze_faces(
     path: Path | str,
 ) -> FaceAnalysis:
@@ -89,7 +108,7 @@ def analyze_faces(
         return _error_analysis("opencv가 설치되어 있지 않습니다. pip install opencv-python로 설치하세요.")
 
     try:
-        image = cv2.imread(str(image_path))
+        image = _imread_unicode(image_path)
         if image is None:
             return _error_analysis("이미지를 읽을 수 없습니다.")
     except Exception as exc:
