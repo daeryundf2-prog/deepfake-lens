@@ -6,44 +6,52 @@
     <title>Deepfake Lens</title>
     <style>
         :root {
-            --bg: #f2f2f7;
+            --bg: #eef0f5;
+            --bg-tint: radial-gradient(1200px 600px at 80% -10%, rgba(0,122,255,0.10), transparent 60%),
+                       radial-gradient(900px 500px at -10% 0%, rgba(175,82,222,0.07), transparent 55%);
             --card: #ffffff;
-            --card2: #f9f9fb;
-            --text: #1c1c1e;
-            --muted: #8e8e93;
-            --line: rgba(60, 60, 67, 0.12);
-            --accent: #007aff;
-            --accent-press: #0062cc;
-            --green: #34c759;
-            --orange: #ff9500;
-            --red: #ff3b30;
-            --purple: #af52de;
+            --card2: #f6f7fa;
+            --text: #16181d;
+            --muted: #71757f;
+            --line: rgba(60, 60, 67, 0.11);
+            --accent: #0066f5;
+            --accent-press: #0052cc;
+            --accent-soft: rgba(0,102,245,0.10);
+            --green: #28a745;
+            --orange: #f08c00;
+            --red: #e03131;
+            --purple: #9c36d5;
             --amber-bg: #fff8e1;
             --amber-line: #f0b429;
             --amber-text: #8a6d00;
-            --nav-bg: rgba(242, 242, 247, 0.82);
-            --shadow: 0 1px 3px rgba(0,0,0,0.06);
-            --radius: 14px;
+            --nav-bg: rgba(238, 240, 245, 0.78);
+            --shadow: 0 1px 2px rgba(16,24,40,0.05), 0 4px 14px rgba(16,24,40,0.06);
+            --shadow-lift: 0 2px 4px rgba(16,24,40,0.07), 0 10px 26px rgba(16,24,40,0.10);
+            --radius: 16px;
         }
         @media (prefers-color-scheme: dark) {
             :root {
-                --bg: #000000;
-                --card: #1c1c1e;
-                --card2: #2c2c2e;
-                --text: #f2f2f7;
-                --muted: #98989f;
-                --line: rgba(84, 84, 88, 0.45);
-                --accent: #0a84ff;
-                --accent-press: #409cff;
-                --green: #30d158;
-                --orange: #ff9f0a;
-                --red: #ff453a;
-                --purple: #bf5af2;
+                --bg: #0c0d12;
+                --bg-tint: radial-gradient(1200px 600px at 80% -10%, rgba(10,132,255,0.12), transparent 60%),
+                           radial-gradient(900px 500px at -10% 0%, rgba(191,90,242,0.09), transparent 55%);
+                --card: #17181f;
+                --card2: #1f212b;
+                --text: #eceef4;
+                --muted: #8f94a3;
+                --line: rgba(120, 124, 140, 0.22);
+                --accent: #4c9aff;
+                --accent-press: #79b4ff;
+                --accent-soft: rgba(76,154,255,0.14);
+                --green: #3fcf6e;
+                --orange: #ffa538;
+                --red: #ff6b62;
+                --purple: #cf7df2;
                 --amber-bg: #2d2600;
                 --amber-line: #b08600;
                 --amber-text: #ffd60a;
-                --nav-bg: rgba(28, 28, 30, 0.82);
-                --shadow: 0 1px 3px rgba(0,0,0,0.4);
+                --nav-bg: rgba(12, 13, 18, 0.75);
+                --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 4px 16px rgba(0,0,0,0.32);
+                --shadow-lift: 0 2px 4px rgba(0,0,0,0.4), 0 12px 30px rgba(0,0,0,0.42);
             }
         }
 
@@ -51,33 +59,45 @@
         html { -webkit-text-size-adjust: 100%; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Malgun Gothic", sans-serif;
-            background: var(--bg); color: var(--text);
+            background: var(--bg); background-image: var(--bg-tint); background-attachment: fixed;
+            color: var(--text);
             font-size: 15px; line-height: 1.45;
             -webkit-font-smoothing: antialiased;
         }
+        :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
         /* ── Glass nav ─────────────────────────────── */
         .nav {
             position: sticky; top: 0; z-index: 50;
             background: var(--nav-bg);
-            backdrop-filter: blur(20px) saturate(1.6);
-            -webkit-backdrop-filter: blur(20px) saturate(1.6);
+            backdrop-filter: blur(22px) saturate(1.7);
+            -webkit-backdrop-filter: blur(22px) saturate(1.7);
             border-bottom: 1px solid var(--line);
-            padding: 14px 20px calc(14px + env(safe-area-inset-top, 0px));
+            padding: 13px 20px calc(13px + env(safe-area-inset-top, 0px));
         }
-        .nav-inner { max-width: 980px; margin: 0 auto; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-        .nav h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; }
-        .nav .sub { font-size: 13px; color: var(--muted); }
-        .nav .chip { margin-left: auto; font-size: 12px; color: var(--muted); background: var(--card2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; }
+        .nav-inner { max-width: 980px; margin: 0 auto; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .nav .brand { display: flex; align-items: center; gap: 10px; }
+        .nav .mark {
+            width: 30px; height: 30px; border-radius: 9px; flex: none;
+            background: linear-gradient(135deg, var(--accent), var(--purple));
+            display: grid; place-items: center; color: #fff; font-size: 15px;
+            box-shadow: 0 2px 8px rgba(0,102,245,0.35);
+        }
+        .nav h1 { font-size: 21px; font-weight: 750; letter-spacing: -0.5px; }
+        .nav .sub { font-size: 12.5px; color: var(--muted); }
+        .nav .chip { font-size: 12px; color: var(--muted); background: var(--card2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; }
 
-        .wrap { max-width: 980px; margin: 0 auto; padding: 18px 16px 80px; display: grid; gap: 18px; }
+        .wrap { max-width: 980px; margin: 0 auto; padding: 20px 16px 80px; display: grid; gap: 18px; }
+        .wrap > section { animation: rise 0.35s ease both; }
+        @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
-        /* ── Cards (iOS grouped) ───────────────────── */
-        .card { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
-        .card-head { padding: 14px 16px 10px; display: flex; align-items: center; gap: 8px; }
-        .card-head h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; }
+        /* ── Cards ─────────────────────────────────── */
+        .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+        .card-head { padding: 16px 18px 10px; display: flex; align-items: center; gap: 10px; }
+        .card-head h2 { font-size: 16.5px; font-weight: 700; letter-spacing: -0.2px; display: flex; align-items: center; gap: 8px; }
+        .card-head h2 .gh { font-size: 15px; }
         .card-head .hint { margin-left: auto; font-size: 12px; color: var(--muted); }
-        .card-body { padding: 0 16px 16px; }
+        .card-body { padding: 0 18px 18px; }
         .note { font-size: 12.5px; color: var(--muted); }
         .note.warn { color: var(--amber-text); }
 
@@ -87,24 +107,31 @@
         .field {
             flex: 1; min-width: 200px;
             background: var(--card2); border: 1px solid var(--line);
-            border-radius: 10px; padding: 11px 13px;
+            border-radius: 11px; padding: 11px 13px;
             font-size: 15px; color: var(--text); font-family: inherit;
+            transition: border-color 0.15s, box-shadow 0.15s;
         }
-        .field:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+        .field:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
         textarea.field { min-height: 96px; resize: vertical; line-height: 1.5; }
         input[type="number"].field { flex: 0 0 90px; min-width: 0; }
 
         .btn {
             appearance: none; border: none; cursor: pointer;
             font-family: inherit; font-size: 15px; font-weight: 600;
-            padding: 10px 18px; border-radius: 10px;
+            padding: 10px 18px; border-radius: 11px;
             background: var(--card2); color: var(--accent);
             border: 1px solid var(--line);
-            transition: transform 0.08s ease, background 0.15s;
+            transition: transform 0.08s ease, background 0.15s, border-color 0.15s, box-shadow 0.15s;
         }
-        .btn:active { transform: scale(0.96); }
+        .btn:hover { border-color: var(--accent); background: var(--accent-soft); }
+        .btn:active { transform: scale(0.97); }
         .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
-        .btn-primary { background: var(--accent); color: #fff; border-color: transparent; }
+        .btn-primary {
+            background: linear-gradient(180deg, var(--accent), var(--accent-press));
+            color: #fff; border-color: transparent;
+            box-shadow: 0 2px 8px rgba(0,102,245,0.30);
+        }
+        .btn-primary:hover { background: linear-gradient(180deg, var(--accent-press), var(--accent-press)); filter: brightness(1.05); }
         .btn-primary:active { background: var(--accent-press); }
         .btn-green { background: var(--green); color: #fff; border-color: transparent; }
         .btn-red { color: var(--red); }
@@ -143,9 +170,9 @@
         .drop {
             border: 2px dashed var(--line); border-radius: var(--radius);
             padding: 30px 16px; text-align: center; cursor: pointer;
-            transition: border-color 0.15s, background 0.15s;
+            transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
         }
-        .drop:hover, .drop.over { border-color: var(--accent); background: rgba(0,122,255,0.06); }
+        .drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-soft); }
         .drop .icon { font-size: 30px; }
         .drop p { color: var(--muted); font-size: 13px; margin-top: 6px; }
 
@@ -169,34 +196,50 @@
         .elapsed { font-size: 12px; color: var(--muted); margin-top: 6px; min-height: 16px; }
 
         /* ── Summary strip ─────────────────────────── */
-        .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-        .pill-stat { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px 14px; }
-        .pill-stat[data-band] { cursor: pointer; border: 1px solid transparent; }
-        .pill-stat[data-band]:hover { border-color: var(--line); }
-        .pill-stat[data-band].active { border-color: var(--accent); }
-        .pill-stat .n { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+        .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+        .pill-stat {
+            position: relative; background: var(--card); border: 1px solid var(--line);
+            border-radius: var(--radius); box-shadow: var(--shadow); padding: 13px 15px;
+            overflow: hidden;
+        }
+        .pill-stat::before {
+            content: ""; position: absolute; inset: 0 auto 0 0; width: 3px;
+            background: var(--pill-accent, transparent);
+        }
+        .pill-stat[data-band] { cursor: pointer; transition: transform 0.1s, box-shadow 0.15s, border-color 0.15s; }
+        .pill-stat[data-band]:hover { transform: translateY(-1px); box-shadow: var(--shadow-lift); }
+        .pill-stat[data-band].active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft), var(--shadow); }
+        .pill-stat .n { font-size: 25px; font-weight: 750; letter-spacing: -0.6px; font-variant-numeric: tabular-nums; }
         .pill-stat .t { font-size: 12px; color: var(--muted); margin-top: 2px; }
         .pill-stat .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
-        .distbar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 12px; background: var(--card2); }
+        .distbar { display: flex; height: 10px; border-radius: 6px; overflow: hidden; margin-top: 12px; background: var(--card2); border: 1px solid var(--line); }
         .distbar div { transition: width 0.4s; }
-        @media (max-width: 640px) { .summary { grid-template-columns: repeat(2, 1fr); } }
 
         /* ── Result cards ──────────────────────────── */
         .res-list { display: grid; gap: 10px; }
         .res {
-            background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);
-            overflow: hidden; cursor: pointer; transition: transform 0.08s;
+            position: relative;
+            background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            overflow: hidden; cursor: pointer; transition: transform 0.1s, box-shadow 0.15s;
         }
-        .res:active { transform: scale(0.99); }
-        .res-main { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
-        .ring { flex: none; width: 44px; height: 44px; position: relative; }
-        .ring svg { width: 44px; height: 44px; transform: rotate(-90deg); }
+        .res::before {
+            content: ""; position: absolute; inset: 0 auto 0 0; width: 3px;
+            background: var(--res-accent, transparent);
+        }
+        .res:hover { box-shadow: var(--shadow-lift); }
+        .res:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .res.kb-focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft), var(--shadow); }
+        .res:active { transform: scale(0.995); }
+        .res-main { display: flex; align-items: center; gap: 13px; padding: 13px 15px 13px 17px; }
+        .ring { flex: none; width: 46px; height: 46px; position: relative; }
+        .ring svg { width: 46px; height: 46px; transform: rotate(-90deg); }
         .ring circle { fill: none; stroke-width: 3.5; }
         .ring .bg { stroke: var(--line); }
-        .ring .val { stroke-linecap: round; }
+        .ring .val { stroke-linecap: round; transition: stroke-dasharray 0.5s ease; }
         .ring .num {
             position: absolute; inset: 0; display: grid; place-items: center;
-            font-size: 12px; font-weight: 700;
+            font-size: 12px; font-weight: 750; font-variant-numeric: tabular-nums;
         }
         .res-info { min-width: 0; flex: 1; }
         .res-name { font-size: 14.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -237,7 +280,34 @@
         .fb-status { font-size: 12px; color: var(--muted); }
 
         .more-row { text-align: center; padding: 4px; }
-        .empty { text-align: center; color: var(--muted); padding: 30px 10px; font-size: 14px; }
+        .empty { text-align: center; color: var(--muted); padding: 36px 12px; font-size: 14px; }
+        .empty .e-icon { font-size: 30px; opacity: 0.55; margin-bottom: 8px; }
+
+        /* ── Review state ──────────────────────────── */
+        .rev-star {
+            appearance: none; border: none; background: none; cursor: pointer;
+            font-size: 17px; color: var(--muted); padding: 2px 4px; flex: none;
+            transition: transform 0.1s, color 0.15s;
+        }
+        .rev-star:hover { transform: scale(1.15); }
+        .res.reviewed .rev-star { color: var(--orange); }
+        .rev-badge { font-size: 10px; font-weight: 700; color: var(--orange); border: 1px solid var(--orange); border-radius: 4px; padding: 1px 5px; }
+        .rev-note {
+            width: 100%; margin-top: 10px; min-height: 52px;
+            background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+            padding: 9px 11px; font-family: inherit; font-size: 13px; color: var(--text);
+            resize: vertical;
+        }
+        .rev-note:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+        .sort-sel {
+            background: var(--card2); border: 1px solid var(--line); border-radius: 8px;
+            padding: 5px 8px; font-size: 12.5px; color: var(--text); font-family: inherit;
+        }
+        .kb-hint { font-size: 11.5px; color: var(--muted); }
+        .kb-hint kbd {
+            background: var(--card2); border: 1px solid var(--line); border-bottom-width: 2px;
+            border-radius: 4px; padding: 0 5px; font-family: inherit; font-size: 11px;
+        }
 
         /* ── Onboarding guide ────────────────────── */
         .guide-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
@@ -301,7 +371,10 @@
 <body>
     <div class="nav">
         <div class="nav-inner">
-            <h1>Deepfake Lens</h1>
+            <div class="brand">
+                <span class="mark">◉</span>
+                <h1>Deepfake Lens</h1>
+            </div>
             <span class="sub">AI 생성 콘텐츠 스크리닝</span>
             <button class="btn btn-sm" id="guide-btn" style="margin-left:auto;">사용법</button>
             <span class="chip" id="ver-chip"></span>
@@ -313,7 +386,7 @@
         <!-- Onboarding guide -->
         <section class="card" id="guide-card">
             <div class="card-head">
-                <h2>사용법</h2>
+                <h2><span class="gh">🧭</span>사용법</h2>
                 <button class="btn btn-sm" id="guide-close" style="margin-left:auto;">닫기</button>
             </div>
             <div class="card-body">
@@ -348,7 +421,7 @@
 
         <!-- Quick check -->
         <section class="card" id="card-check">
-            <div class="card-head"><h2>빠른 검사</h2><span class="hint">의심 콘텐츠 1개 — 모든 탐지 레이어 한 번에</span></div>
+            <div class="card-head"><h2><span class="gh">⚡</span>빠른 검사</h2><span class="hint">의심 콘텐츠 1개 — 모든 탐지 레이어 한 번에</span></div>
             <div class="card-body">
                 <textarea class="field" id="qc-text" placeholder="검사할 텍스트를 붙여넣으세요 (한국어/영어)…" aria-label="검사할 텍스트"></textarea>
                 <div class="row" style="margin-top:10px;">
@@ -365,7 +438,7 @@
 
         <!-- Compare -->
         <section class="card" id="card-compare">
-            <div class="card-head"><h2>두 파일 비교</h2><span class="hint">같은 사람이 만들었는지 — 음성은 화자, 문서는 필자</span></div>
+            <div class="card-head"><h2><span class="gh">⚖️</span>두 파일 비교</h2><span class="hint">같은 사람이 만들었는지 — 음성은 화자, 문서는 필자</span></div>
             <div class="card-body">
                 <div class="cmp-slots">
                     <div class="slot" id="slot-a" role="button" tabindex="0"><span class="sn">파일 A 선택</span></div>
@@ -384,7 +457,7 @@
 
         <!-- Scan -->
         <section class="card" id="card-scan">
-            <div class="card-head"><h2>폴더 / 파일 스캔</h2><span class="hint">여러 파일을 위험도순으로 일괄 조사</span></div>
+            <div class="card-head"><h2><span class="gh">📁</span>폴더 / 파일 스캔</h2><span class="hint">여러 파일을 위험도순으로 일괄 조사</span></div>
             <div class="card-body">
                 <div class="row">
                     <input class="field" id="folder-path" placeholder="폴더 경로 (예: C:\Users\test\images)" aria-label="분석할 폴더 경로">
@@ -433,18 +506,24 @@
         <!-- Results -->
         <section id="results-section" hidden>
             <div class="summary" aria-live="polite" id="stat-pills">
-                <div class="pill-stat" data-band="high" role="button" tabindex="0" title="클릭하면 이 위험도만 표시"><div class="n" style="color:var(--red)" id="stat-ai">0</div><div class="t"><span class="dot" style="background:var(--red)"></span>AI 생성 의심</div></div>
-                <div class="pill-stat" data-band="medium" role="button" tabindex="0" title="클릭하면 이 위험도만 표시"><div class="n" style="color:var(--orange)" id="stat-medium">0</div><div class="t"><span class="dot" style="background:var(--orange)"></span>주의 필요</div></div>
-                <div class="pill-stat" data-band="low" role="button" tabindex="0" title="클릭하면 이 위험도만 표시"><div class="n" style="color:var(--green)" id="stat-low">0</div><div class="t"><span class="dot" style="background:var(--green)"></span>낮은 신호</div></div>
-                <div class="pill-stat" data-band="other" role="button" tabindex="0" title="분석 실패·중복·건너뜀 등"><div class="n" style="color:var(--muted)" id="stat-other">0</div><div class="t"><span class="dot" style="background:var(--muted)"></span>불가·기타</div></div>
-                <div class="pill-stat" data-band="" role="button" tabindex="0" title="필터 해제"><div class="n" id="stat-total">0</div><div class="t">전체 · <span id="stat-model-label">뉴럴 0</span></div></div>
+                <div class="pill-stat" data-band="high" role="button" tabindex="0" title="클릭하면 이 위험도만 표시" style="--pill-accent:var(--red)"><div class="n" style="color:var(--red)" id="stat-ai">0</div><div class="t"><span class="dot" style="background:var(--red)"></span>AI 생성 의심</div></div>
+                <div class="pill-stat" data-band="medium" role="button" tabindex="0" title="클릭하면 이 위험도만 표시" style="--pill-accent:var(--orange)"><div class="n" style="color:var(--orange)" id="stat-medium">0</div><div class="t"><span class="dot" style="background:var(--orange)"></span>주의 필요</div></div>
+                <div class="pill-stat" data-band="low" role="button" tabindex="0" title="클릭하면 이 위험도만 표시" style="--pill-accent:var(--green)"><div class="n" style="color:var(--green)" id="stat-low">0</div><div class="t"><span class="dot" style="background:var(--green)"></span>낮은 신호</div></div>
+                <div class="pill-stat" data-band="other" role="button" tabindex="0" title="분석 실패·중복·건너뜀 등" style="--pill-accent:var(--muted)"><div class="n" style="color:var(--muted)" id="stat-other">0</div><div class="t"><span class="dot" style="background:var(--muted)"></span>불가·기타</div></div>
+                <div class="pill-stat" data-band="" role="button" tabindex="0" title="필터 해제" style="--pill-accent:var(--accent)"><div class="n" id="stat-total">0</div><div class="t">전체 · <span id="stat-model-label">뉴럴 0</span></div></div>
             </div>
             <div class="distbar" id="distbar"></div>
 
             <div class="card" style="margin-top:12px;">
                 <div class="card-head">
-                    <h2>분석 결과</h2>
-                    <input type="search" id="res-filter" class="inp" placeholder="파일명·경로 필터" style="max-width:220px;margin-left:auto;" aria-label="결과 필터">
+                    <h2><span class="gh">📋</span>분석 결과</h2>
+                    <input type="search" id="res-filter" class="field" placeholder="파일명·경로 필터" style="max-width:200px;min-width:140px;padding:7px 11px;font-size:13px;" aria-label="결과 필터">
+                    <select id="res-sort" class="sort-sel" aria-label="정렬">
+                        <option value="score">점수순</option>
+                        <option value="name">이름순</option>
+                        <option value="band">위험도순</option>
+                    </select>
+                    <button class="btn btn-sm" id="rev-filter" aria-pressed="false" title="검토 표시한 항목만 보기">★ 검토됨</button>
                     <div class="toolbar">
                         <button class="btn btn-sm" id="exp-json">JSON</button>
                         <button class="btn btn-sm" id="exp-csv">CSV</button>
@@ -456,6 +535,7 @@
                     <div class="res-list" id="res-list"></div>
                     <div class="more-row" id="more-row" hidden><button class="btn" id="more-btn">더 보기</button></div>
                     <p class="note" style="margin-top:10px;">점수는 진위 판정이 아니라 검토 우선순위입니다. 카드를 누르면 판정 근거와 한계를 볼 수 있습니다.</p>
+                    <p class="kb-hint" style="margin-top:6px;"><kbd>↑</kbd><kbd>↓</kbd> 또는 <kbd>J</kbd><kbd>K</kbd> 이동 · <kbd>Enter</kbd> 열기 · <kbd>Esc</kbd> 닫기/필터 해제 · <kbd>★</kbd> 검토 표시</p>
                 </div>
             </div>
         </section>
@@ -474,6 +554,38 @@
         let currentJobId = null;
         let bandFilter = null;
         let textFilter = '';
+        let sortMode = 'score';
+        let revFilter = false;
+        let kbIndex = -1;
+
+        /* Review marks live only in this browser — keyed by path (or name
+           for uploads), so a re-scan of the same folder restores them. */
+        const REVIEW_KEY = 'dflens-review-v1';
+        let reviewStore = {};
+        try { reviewStore = JSON.parse(localStorage.getItem(REVIEW_KEY) || '{}'); } catch (e) { reviewStore = {}; }
+        function itemKey(item) { return item.path || item.name || ''; }
+        function saveReviewStore() {
+            try { localStorage.setItem(REVIEW_KEY, JSON.stringify(reviewStore)); } catch (e) { /* quota — non-fatal */ }
+        }
+        function toggleReview(item, card) {
+            const key = itemKey(item);
+            const entry = reviewStore[key] || {};
+            entry.star = !entry.star;
+            if (!entry.star && !entry.note) delete reviewStore[key];
+            else reviewStore[key] = entry;
+            saveReviewStore();
+            card.classList.toggle('reviewed', !!entry.star);
+            card.querySelector('.rev-star').setAttribute('aria-pressed', entry.star ? 'true' : 'false');
+            const sub = card.querySelector('.res-sub');
+            if (entry.star && !sub.querySelector('.rev-badge')) {
+                const b = document.createElement('span');
+                b.className = 'rev-badge'; b.textContent = '검토됨';
+                sub.appendChild(b);
+            } else if (!entry.star) {
+                const b = sub.querySelector('.rev-badge');
+                if (b) b.remove();
+            }
+        }
 
         /* ── infra ─────────────────────────────────── */
         const $ = id => document.getElementById(id);
@@ -843,9 +955,11 @@
             const band = r.band || 'unknown';
             const score = r.score != null ? r.score : 0;
             const tool = (r.source_guess && r.source_guess.label) || '알 수 없음';
+            const rev = reviewStore[itemKey(item)] || {};
 
             const card = document.createElement('div');
-            card.className = 'res';
+            card.className = 'res' + (rev.star ? ' reviewed' : '');
+            card.style.setProperty('--res-accent', bandColor(band));
             card.innerHTML = `
                 <div class="res-main">
                     <div class="ring">
@@ -861,12 +975,19 @@
                             <span class="band-pill band-${band}">${riskLabel(band)}</span>
                             <span>${escapeHtml(tool)}</span>
                             ${r.model_analysis ? '<span class="nn-badge">NN</span>' : ''}
+                            ${rev.star ? '<span class="rev-badge">검토됨</span>' : ''}
                             ${item.error ? '<span style="color:var(--red)">분석 실패</span>' : ''}
                         </div>
                     </div>
+                    <button class="rev-star" title="검토 표시 토글" aria-pressed="${rev.star ? 'true' : 'false'}">★</button>
                     <span class="chev">›</span>
                 </div>
                 <div class="res-detail"></div>`;
+
+            card.querySelector('.rev-star').addEventListener('click', e => {
+                e.stopPropagation();
+                toggleReview(item, card);
+            });
 
             const detail = card.querySelector('.res-detail');
             let built = false;
@@ -886,6 +1007,18 @@
                         submitFeedback(item, b.dataset.label, fb.querySelector('.fb-status'));
                     }));
                     detail.appendChild(fb);
+                    const note = document.createElement('textarea');
+                    note.className = 'rev-note';
+                    note.placeholder = '검토 메모 — 이 브라우저에만 저장됩니다';
+                    note.value = rev.note || '';
+                    note.addEventListener('click', e => e.stopPropagation());
+                    note.addEventListener('input', () => {
+                        const entry2 = reviewStore[itemKey(item)] || {};
+                        entry2.note = note.value;
+                        reviewStore[itemKey(item)] = entry2;
+                        saveReviewStore();
+                    });
+                    detail.appendChild(note);
                     detail.querySelectorAll('.hm-slot').forEach(loadHeatmap);
                     detail.querySelectorAll('.pv-slot').forEach(loadPreview);
                 }
@@ -903,20 +1036,30 @@
             return band === 'high' || band === 'medium' || band === 'low' ? band : 'other';
         }
 
+        const BAND_ORDER = { high: 0, medium: 1, low: 2, other: 3 };
         function filteredResults() {
             const needle = textFilter.trim().toLowerCase();
-            return results.filter(entry => {
+            const filtered = results.filter(entry => {
                 if (bandFilter && itemBand(entry) !== bandFilter) return false;
+                if (revFilter && !(reviewStore[itemKey(entry.item)] || {}).star) return false;
                 if (!needle) return true;
                 const item = entry.item;
                 return ((item.name || '') + ' ' + (item.path || '')).toLowerCase().includes(needle);
             });
+            if (sortMode === 'name') {
+                filtered.sort((a, b) => String(a.item.name || a.item.path || '').localeCompare(String(b.item.name || b.item.path || ''), 'ko'));
+            } else if (sortMode === 'band') {
+                filtered.sort((a, b) => (BAND_ORDER[itemBand(a)] - BAND_ORDER[itemBand(b)]) ||
+                    ((b.item.result || {}).score || 0) - ((a.item.result || {}).score || 0));
+            } else {
+                filtered.sort((a, b) => ((b.item.result || {}).score || 0) - ((a.item.result || {}).score || 0));
+            }
+            return filtered;
         }
 
         function renderResults(summary, scroll = true) {
             const list = $('res-list');
             list.innerHTML = '';
-            results.sort((a, b) => ((b.item.result || {}).score || 0) - ((a.item.result || {}).score || 0));
 
             // Canonical band counts — every pill plus the total must agree.
             const bands = { high: 0, medium: 0, low: 0, other: 0 };
@@ -945,9 +1088,12 @@
                 p.setAttribute('aria-pressed', active ? 'true' : 'false');
             });
 
+            kbIndex = -1;
             const filtered = filteredResults();
             if (!filtered.length) {
-                list.innerHTML = results.length ? '<div class="empty">필터와 일치하는 결과가 없습니다</div>' : '<div class="empty">분석 결과가 없습니다</div>';
+                list.innerHTML = results.length
+                    ? '<div class="empty"><div class="e-icon">🔍</div>필터와 일치하는 결과가 없습니다</div>'
+                    : '<div class="empty"><div class="e-icon">📭</div>분석 결과가 없습니다</div>';
             }
             renderedRows = Math.min(RENDER_WINDOW, filtered.length);
             filtered.slice(0, renderedRows).forEach(e => renderCard(list, e));
@@ -983,6 +1129,48 @@
             p.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); apply(); } });
         });
         $('res-filter').addEventListener('input', e => { textFilter = e.target.value; renderResults({}, false); });
+        $('res-sort').addEventListener('change', e => { sortMode = e.target.value; renderResults({}, false); });
+        $('rev-filter').addEventListener('click', () => {
+            revFilter = !revFilter;
+            $('rev-filter').setAttribute('aria-pressed', revFilter ? 'true' : 'false');
+            $('rev-filter').classList.toggle('btn-primary', revFilter);
+            renderResults({}, false);
+        });
+
+        /* Keyboard review: arrows/j/k walk the rendered cards, Enter opens,
+           Esc closes open cards or clears filters. Skipped while typing. */
+        document.addEventListener('keydown', e => {
+            const tag = (e.target.tagName || '').toLowerCase();
+            const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
+            if ($('results-section').hidden) return;
+            if (e.key === 'Escape') {
+                const open = document.querySelector('.res.open');
+                if (open) { open.classList.remove('open'); return; }
+                if (bandFilter || revFilter || textFilter) {
+                    bandFilter = null; revFilter = false; textFilter = '';
+                    $('res-filter').value = '';
+                    $('rev-filter').setAttribute('aria-pressed', 'false');
+                    $('rev-filter').classList.remove('btn-primary');
+                    renderResults({}, false);
+                }
+                return;
+            }
+            if (typing) return;
+            const cards = [...document.querySelectorAll('#res-list .res')];
+            if (!cards.length) return;
+            const move = { ArrowDown: 1, j: 1, J: 1, ArrowUp: -1, k: -1, K: -1 }[e.key];
+            if (move == null) {
+                if (e.key === 'Enter' && kbIndex >= 0 && cards[kbIndex]) {
+                    e.preventDefault();
+                    cards[kbIndex].querySelector('.res-main').click();
+                }
+                return;
+            }
+            e.preventDefault();
+            kbIndex = Math.max(0, Math.min(cards.length - 1, kbIndex + move));
+            cards.forEach((c, i) => c.classList.toggle('kb-focus', i === kbIndex));
+            cards[kbIndex].scrollIntoView({ block: 'nearest' });
+        });
 
         async function submitFeedback(item, label, statusEl) {
             statusEl.textContent = '기록 중…';
@@ -1013,16 +1201,21 @@
         }
         $('exp-json').addEventListener('click', () => {
             if (!results.length) { toast('분석 결과가 없습니다', true); return; }
-            download(new Blob([JSON.stringify(results.map(e => e.item), null, 2)], { type: 'application/json' }), 'deepfake-lens-results.json');
+            const enriched = results.map(e => {
+                const rev = reviewStore[itemKey(e.item)];
+                return rev ? { ...e.item, review: rev } : e.item;
+            });
+            download(new Blob([JSON.stringify(enriched, null, 2)], { type: 'application/json' }), 'deepfake-lens-results.json');
         });
         $('exp-csv').addEventListener('click', () => {
             if (!results.length) { toast('분석 결과가 없습니다', true); return; }
             const f = v => /[",\r\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
             // BOM prefix keeps Korean intact when the CSV is opened in Excel.
-            let csv = '﻿위험도,점수,출처 추정,모델,파일명,판정\n';
+            let csv = '﻿위험도,점수,출처 추정,모델,파일명,검토,메모,판정\n';
             results.forEach(e => {
                 const item = e.item, r = item.result || {};
-                csv += [f(r.band || ''), f(r.score != null ? r.score : ''), f((r.source_guess && r.source_guess.label) || ''), f((r.model_analysis && r.model_analysis.model_id) || ''), f(item.name || item.path), f(r.verdict || '')].join(',') + '\n';
+                const rev = reviewStore[itemKey(item)] || {};
+                csv += [f(r.band || ''), f(r.score != null ? r.score : ''), f((r.source_guess && r.source_guess.label) || ''), f((r.model_analysis && r.model_analysis.model_id) || ''), f(item.name || item.path), f(rev.star ? '검토됨' : ''), f(rev.note || ''), f(r.verdict || '')].join(',') + '\n';
             });
             download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'deepfake-lens-results.csv');
         });
