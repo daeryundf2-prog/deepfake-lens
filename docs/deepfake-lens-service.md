@@ -84,6 +84,7 @@ JSON API under `/api/` (GET plus `POST /api/feedback`, `/api/report`,
 |---|---|---|
 | `/api/scan` | `folder`, `pixel` (`off`/`fast`/`deep`), `recursive`, `max_files`, `max_file_bytes`, `dedupe`, `heatmaps`, `model_path`, `fusion_profile`, `async` | `scan_to_json` payload (`{"summary", "items"}`) or `{"error": "..."}`; with `async=1` returns `{"job_id", "status": "running"}` |
 | `/api/scan-status` | `job` | `{"job_id", "status": "running"\|"done"\|"error"}` plus `result` once finished; jobs live in memory only and expire after 15 min (max 32 concurrent) |
+| `/api/scan-cancel` | `job` | Sets the job's cancel flag; the scan stops between items and returns partial results as `done`. `{"cancelled": true}` while running, `false` once finished |
 | `/api/analyze-file` | `file` | `{"file", "classification", "forensic", "pixel_analysis"}` or `{"error"}` |
 | `/api/heatmap` | `path`, `root` | PNG bytes; 403 unless `path` is a `.png` inside `root`, 404 if missing |
 | `/api/stats` | — | `{"status", "version", "modules"}` |
@@ -97,6 +98,8 @@ Limits (clamped, not optional): `max_files ≤ 2000`,
 `max_file_bytes ≤ 1 GiB`, `heatmaps` only with `--pixel deep`.
 The bundled GUI uses `async=1` + `/api/scan-status` polling so a long scan
 never holds one request open; the synchronous form still works for tools.
+The GUI's cancel button calls `/api/scan-cancel`, which sets a flag the
+scanner checks between files — partial results still come back as `done`.
 
 ## Honesty contract
 

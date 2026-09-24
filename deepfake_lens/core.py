@@ -214,6 +214,7 @@ def scan_directory(
     dedupe: bool = False,
     hash_db_path: Path | None = None,
     deep_signals: bool = False,
+    should_stop: "Callable[[], bool] | None" = None,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
     root = Path(directory)
     if not root.is_dir():
@@ -263,7 +264,7 @@ def scan_directory(
             pixel_mode=pixel_mode, pixel_max_side=pixel_max_side,
             heatmaps=heatmaps, heatmap_dir=heatmap_dir, model_path=model_path,
             cache_path=cache_path, workers=workers, deep_signals=deep_signals,
-            capped=capped,
+            capped=capped, should_stop=should_stop,
         )
     finally:
         for temp_dir in temp_dirs:
@@ -334,6 +335,7 @@ def _scan_specs(
     workers: int,
     deep_signals: bool,
     capped: bool,
+    should_stop: "Callable[[], bool] | None" = None,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
     """Analyze (path, display) spec pairs — the inner loop of scan_directory."""
     duplicates = _duplicate_map(duplicates_paths, root=root, max_file_bytes=max_file_bytes, hash_db_path=hash_db_path) if dedupe or hash_db_path else {}
@@ -342,6 +344,8 @@ def _scan_specs(
 
     def analyze_one(spec: tuple[Path, str | None]) -> tuple[ScanItem, str | None, bool]:
         path, display = spec
+        if should_stop is not None and should_stop():
+            return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "skipped", 0, error="scan cancelled"), None, False
         if path in duplicates:
             display_path = display or _display_path(path, root=root)
             try:
@@ -394,10 +398,16 @@ def _scan_specs(
         return item, key, False
 
     if workers > 1 and len(specs) > 1:
+        # Each worker still checks should_stop so a cancel short-circuits
+        # remaining items instead of running every analysis to completion.
         with ThreadPoolExecutor(max_workers=workers) as executor:
             analyzed = list(executor.map(analyze_one, specs))
     else:
-        analyzed = [analyze_one(spec) for spec in specs]
+        analyzed = []
+        for spec in specs:
+            if should_stop is not None and should_stop():
+                break
+            analyzed.append(analyze_one(spec))
 
     cached_count = sum(1 for _, _, was_cached in analyzed if was_cached)
     items = [item for item, _, _ in analyzed]

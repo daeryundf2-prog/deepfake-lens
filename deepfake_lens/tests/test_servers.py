@@ -405,6 +405,44 @@ class AsyncScanJobTest(unittest.TestCase):
 
         self.assertIn("error", webapp._scan_status_payload(""))
 
+    def test_cancel_payload(self) -> None:
+        import threading
+        from deepfake_lens import webapp
+
+        self.assertIn("error", webapp._scan_cancel_payload(""))
+        self.assertIn("error", webapp._scan_cancel_payload("job=deadbeef"))
+
+        cancel = threading.Event()
+        with webapp._SCAN_JOBS_LOCK:
+            webapp._SCAN_JOBS["job1"] = {"status": "running", "created": time.time(), "cancel": cancel}
+        out = webapp._scan_cancel_payload("job=job1")
+        self.assertTrue(out["cancelled"])
+        self.assertTrue(cancel.is_set())
+
+        # A finished job reports that there is nothing left to cancel.
+        with webapp._SCAN_JOBS_LOCK:
+            webapp._SCAN_JOBS["job2"] = {"status": "done", "created": time.time(), "cancel": threading.Event()}
+        out = webapp._scan_cancel_payload("job=job2")
+        self.assertFalse(out["cancelled"])
+        self.assertEqual(out["status"], "done")
+
+    def test_cancel_stops_scan_early(self) -> None:
+        """should_stop must short-circuit scan_directory between items."""
+        import tempfile
+        from deepfake_lens.core import scan_directory
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for i in range(5):
+                (Path(tmp) / f"f{i}.txt").write_text(f"content {i}", encoding="utf-8")
+            stop_calls = []
+
+            def stop() -> bool:
+                stop_calls.append(1)
+                return len(stop_calls) > 2
+
+            summary, items = scan_directory(tmp, should_stop=stop)
+            self.assertLess(len(items), 5)
+
     def test_job_cap_refuses_overflow(self) -> None:
         from deepfake_lens import webapp
 

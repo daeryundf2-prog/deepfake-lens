@@ -171,6 +171,9 @@
         /* ── Summary strip ─────────────────────────── */
         .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
         .pill-stat { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px 14px; }
+        .pill-stat[data-band] { cursor: pointer; border: 1px solid transparent; }
+        .pill-stat[data-band]:hover { border-color: var(--line); }
+        .pill-stat[data-band].active { border-color: var(--accent); }
         .pill-stat .n { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
         .pill-stat .t { font-size: 12px; color: var(--muted); margin-top: 2px; }
         .pill-stat .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
@@ -405,7 +408,10 @@
                     <label class="switch"><input type="checkbox" id="opt-deep"><span class="track"></span>심층 신호 (느림)</label>
                 </div>
                 <div class="progress" id="progress" role="progressbar" aria-label="분석 진행"><div class="fill"></div></div>
-                <div class="elapsed" id="progress-text" aria-live="polite"></div>
+                <div class="row" style="align-items:center;gap:10px;">
+                    <div class="elapsed" id="progress-text" aria-live="polite"></div>
+                    <button class="btn btn-sm" id="scan-cancel" type="button" hidden>취소</button>
+                </div>
                 <div class="drop" id="drop-zone" role="button" tabindex="0" style="margin-top:8px;">
                     <div class="icon">📁</div>
                     <p><b>파일이나 폴더를 드롭</b>하거나 클릭해서 선택</p>
@@ -426,18 +432,20 @@
 
         <!-- Results -->
         <section id="results-section" hidden>
-            <div class="summary" aria-live="polite">
-                <div class="pill-stat"><div class="n" style="color:var(--red)" id="stat-ai">0</div><div class="t"><span class="dot" style="background:var(--red)"></span>AI 생성 의심</div></div>
-                <div class="pill-stat"><div class="n" style="color:var(--orange)" id="stat-medium">0</div><div class="t"><span class="dot" style="background:var(--orange)"></span>주의 필요</div></div>
-                <div class="pill-stat"><div class="n" style="color:var(--green)" id="stat-low">0</div><div class="t"><span class="dot" style="background:var(--green)"></span>정상</div></div>
-                <div class="pill-stat"><div class="n" id="stat-total">0</div><div class="t">전체 · <span id="stat-model-label">뉴럴 0</span></div></div>
+            <div class="summary" aria-live="polite" id="stat-pills">
+                <div class="pill-stat" data-band="high" role="button" tabindex="0" title="클릭하면 이 위험도만 표시"><div class="n" style="color:var(--red)" id="stat-ai">0</div><div class="t"><span class="dot" style="background:var(--red)"></span>AI 생성 의심</div></div>
+                <div class="pill-stat" data-band="medium" role="button" tabindex="0" title="클릭하면 이 위험도만 표시"><div class="n" style="color:var(--orange)" id="stat-medium">0</div><div class="t"><span class="dot" style="background:var(--orange)"></span>주의 필요</div></div>
+                <div class="pill-stat" data-band="low" role="button" tabindex="0" title="클릭하면 이 위험도만 표시"><div class="n" style="color:var(--green)" id="stat-low">0</div><div class="t"><span class="dot" style="background:var(--green)"></span>낮은 신호</div></div>
+                <div class="pill-stat" data-band="other" role="button" tabindex="0" title="분석 실패·중복·건너뜀 등"><div class="n" style="color:var(--muted)" id="stat-other">0</div><div class="t"><span class="dot" style="background:var(--muted)"></span>불가·기타</div></div>
+                <div class="pill-stat" data-band="" role="button" tabindex="0" title="필터 해제"><div class="n" id="stat-total">0</div><div class="t">전체 · <span id="stat-model-label">뉴럴 0</span></div></div>
             </div>
             <div class="distbar" id="distbar"></div>
 
             <div class="card" style="margin-top:12px;">
                 <div class="card-head">
                     <h2>분석 결과</h2>
-                    <div class="toolbar" style="margin-left:auto;">
+                    <input type="search" id="res-filter" class="inp" placeholder="파일명·경로 필터" style="max-width:220px;margin-left:auto;" aria-label="결과 필터">
+                    <div class="toolbar">
                         <button class="btn btn-sm" id="exp-json">JSON</button>
                         <button class="btn btn-sm" id="exp-csv">CSV</button>
                         <button class="btn btn-sm" id="exp-report">리포트</button>
@@ -463,6 +471,9 @@
         let renderedRows = 0;
         let progressTimer = null;
         let scanBusy = false;
+        let currentJobId = null;
+        let bandFilter = null;
+        let textFilter = '';
 
         /* ── infra ─────────────────────────────────── */
         const $ = id => document.getElementById(id);
@@ -659,6 +670,8 @@
                 const start = await apiFetch('/api/scan?' + params.toString());
                 const job = await start.json();
                 if (job.error) { toast('오류: ' + job.error, true); return; }
+                currentJobId = job.job_id;
+                $('scan-cancel').hidden = false;
                 let data = null;
                 while (true) {
                     const status = await apiFetch('/api/scan-status?job=' + encodeURIComponent(job.job_id));
@@ -674,7 +687,24 @@
             } catch (error) {
                 toast('분석 중 오류: ' + error.message, true);
             } finally {
+                currentJobId = null;
+                $('scan-cancel').hidden = true;
                 setBusy(false);
+            }
+        });
+
+        $('scan-cancel').addEventListener('click', async () => {
+            if (!currentJobId) return;
+            $('scan-cancel').disabled = true;
+            try {
+                const res = await apiFetch('/api/scan-cancel?job=' + encodeURIComponent(currentJobId));
+                const data = await res.json();
+                if (data.error) toast('취소 실패: ' + data.error, true);
+                else toast('취소 요청됨 — 분석된 항목까지만 표시됩니다');
+            } catch (e) {
+                toast('취소 실패: ' + e.message, true);
+            } finally {
+                $('scan-cancel').disabled = false;
             }
         });
 
@@ -715,7 +745,7 @@
         }
 
         function riskLabel(band) {
-            return band === 'high' ? 'AI 의심' : band === 'medium' ? '주의' : band === 'low' ? '정상' : '불명';
+            return band === 'high' ? 'AI 의심' : band === 'medium' ? '주의' : band === 'low' ? '낮은 신호' : '분석 불가';
         }
         function bandColor(band) {
             return band === 'high' ? 'var(--red)' : band === 'medium' ? 'var(--orange)' : band === 'low' ? 'var(--green)' : 'var(--muted)';
@@ -868,29 +898,38 @@
             list.appendChild(card);
         }
 
-        function renderResults(summary) {
+        function itemBand(entry) {
+            const band = (entry.item.result || {}).band;
+            return band === 'high' || band === 'medium' || band === 'low' ? band : 'other';
+        }
+
+        function filteredResults() {
+            const needle = textFilter.trim().toLowerCase();
+            return results.filter(entry => {
+                if (bandFilter && itemBand(entry) !== bandFilter) return false;
+                if (!needle) return true;
+                const item = entry.item;
+                return ((item.name || '') + ' ' + (item.path || '')).toLowerCase().includes(needle);
+            });
+        }
+
+        function renderResults(summary, scroll = true) {
             const list = $('res-list');
             list.innerHTML = '';
             results.sort((a, b) => ((b.item.result || {}).score || 0) - ((a.item.result || {}).score || 0));
 
-            if (!results.length) {
-                list.innerHTML = '<div class="empty">분석 결과가 없습니다</div>';
-            }
-            renderedRows = Math.min(RENDER_WINDOW, results.length);
-            results.slice(0, renderedRows).forEach(e => renderCard(list, e));
-            updateMore(list);
-
+            // Canonical band counts — every pill plus the total must agree.
             const bands = { high: 0, medium: 0, low: 0, other: 0 };
             let modelCount = 0;
             results.forEach(entry => {
-                const r = entry.item.result || {};
-                bands[r.band === 'high' ? 'high' : r.band === 'medium' ? 'medium' : r.band === 'low' ? 'low' : 'other']++;
-                if (r.model_analysis) modelCount++;
+                bands[itemBand(entry)]++;
+                if ((entry.item.result || {}).model_analysis) modelCount++;
             });
             const modelActive = summary.external_model_active != null ? summary.external_model_active : modelCount;
             $('stat-ai').textContent = bands.high;
             $('stat-medium').textContent = bands.medium;
             $('stat-low').textContent = bands.low;
+            $('stat-other').textContent = bands.other;
             $('stat-total').textContent = results.length;
             $('stat-model-label').textContent = `뉴럴 ${modelActive}`;
             const total = Math.max(1, results.length);
@@ -899,23 +938,51 @@
                 `<div style="width:${bands.medium / total * 100}%;background:var(--orange)"></div>` +
                 `<div style="width:${bands.low / total * 100}%;background:var(--green)"></div>` +
                 `<div style="width:${bands.other / total * 100}%;background:var(--line)"></div>`;
+
+            document.querySelectorAll('#stat-pills .pill-stat').forEach(p => {
+                const active = (p.dataset.band || null) === bandFilter;
+                p.classList.toggle('active', active);
+                p.setAttribute('aria-pressed', active ? 'true' : 'false');
+            });
+
+            const filtered = filteredResults();
+            if (!filtered.length) {
+                list.innerHTML = results.length ? '<div class="empty">필터와 일치하는 결과가 없습니다</div>' : '<div class="empty">분석 결과가 없습니다</div>';
+            }
+            renderedRows = Math.min(RENDER_WINDOW, filtered.length);
+            filtered.slice(0, renderedRows).forEach(e => renderCard(list, e));
+            updateMore(list, filtered.length);
+
             $('results-section').hidden = false;
-            $('results-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            if (scroll) $('results-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
 
-        function updateMore(list) {
+        function updateMore(list, filteredLen) {
             const row = $('more-row');
-            if (renderedRows >= results.length) { row.hidden = true; return; }
+            if (renderedRows >= filteredLen) { row.hidden = true; return; }
             row.hidden = false;
-            $('more-btn').textContent = `나머지 ${results.length - renderedRows}개 더 보기`;
+            $('more-btn').textContent = `나머지 ${filteredLen - renderedRows}개 더 보기`;
         }
         $('more-btn').addEventListener('click', () => {
             const list = $('res-list');
+            const filtered = filteredResults();
             const prev = renderedRows;
-            renderedRows = Math.min(renderedRows + RENDER_WINDOW, results.length);
-            results.slice(prev, renderedRows).forEach(e => renderCard(list, e));
-            updateMore(list);
+            renderedRows = Math.min(renderedRows + RENDER_WINDOW, filtered.length);
+            filtered.slice(prev, renderedRows).forEach(e => renderCard(list, e));
+            updateMore(list, filtered.length);
         });
+
+        /* Band pills and the text box are the single filter surface —
+           clicking the active pill again clears the filter. */
+        document.querySelectorAll('#stat-pills .pill-stat').forEach(p => {
+            const apply = () => {
+                bandFilter = (p.dataset.band || null) === bandFilter ? null : (p.dataset.band || null);
+                renderResults({}, false);
+            };
+            p.addEventListener('click', apply);
+            p.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); apply(); } });
+        });
+        $('res-filter').addEventListener('input', e => { textFilter = e.target.value; renderResults({}, false); });
 
         async function submitFeedback(item, label, statusEl) {
             statusEl.textContent = '기록 중…';

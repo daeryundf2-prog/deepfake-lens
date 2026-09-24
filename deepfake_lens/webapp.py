@@ -154,6 +154,9 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
             if parsed.path == "/api/scan-status":
                 self._send_json(_scan_status_payload(parsed.query))
                 return
+            if parsed.path == "/api/scan-cancel":
+                self._send_json(_scan_cancel_payload(parsed.query))
+                return
             if parsed.path == "/api/heatmap":
                 self._send_png(_heatmap_payload(parsed.query))
                 return
@@ -328,8 +331,8 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
             self.wfile.write(body)
     
     server = ThreadingHTTPServer((host, port), Handler)
-    print(f"Deepfake Lens GUI: http://{host}:{port}")
-    print(f"Windows에서 접속: http://localhost:{port}")
+    print(f"Deepfake Lens GUI: http://{host}:{port}", flush=True)
+    print(f"Windows에서 접속: http://localhost:{port}", flush=True)
     server.serve_forever()
 
 
@@ -341,7 +344,7 @@ def _load_gui() -> str:
     return "<h1>GUI 파일을 찾을 수 없습니다</h1>"
 
 
-def _scan_payload(query: str, *, default_folder: Path | None) -> dict[str, object]:
+def _scan_payload(query: str, *, default_folder: Path | None, should_stop: "Callable[[], bool] | None" = None) -> dict[str, object]:
     """Handle scan request."""
     params = parse_qs(query)
     folder = Path(params.get("folder", [str(default_folder or ".")])[0]).expanduser()
@@ -382,6 +385,7 @@ def _scan_payload(query: str, *, default_folder: Path | None) -> dict[str, objec
             dedupe=dedupe,
             model_path=model_path,
             deep_signals=deep_signals,
+            should_stop=should_stop,
         )
         if fusion_profile:
             items = apply_fusion_to_items(items, fusion_profile)
@@ -414,11 +418,12 @@ def _scan_job_start(query: str, *, default_folder: Path | None) -> dict[str, obj
         if len(_SCAN_JOBS) >= _SCAN_JOB_MAX:
             raise ValueError("too many scan jobs in flight; retry after a running job finishes")
         job_id = secrets.token_hex(8)
-        _SCAN_JOBS[job_id] = {"status": "running", "created": time.time()}
+        cancel = threading.Event()
+        _SCAN_JOBS[job_id] = {"status": "running", "created": time.time(), "cancel": cancel}
 
     def work() -> None:
         try:
-            result = _scan_payload(query, default_folder=default_folder)
+            result = _scan_payload(query, default_folder=default_folder, should_stop=cancel.is_set)
             status = "done"
         except Exception as exc:  # noqa: BLE001 - a worker crash must not kill the job silently
             result = {"error": str(exc)}
@@ -446,6 +451,23 @@ def _scan_status_payload(query: str) -> dict[str, object]:
         if entry["status"] != "running":
             payload["result"] = entry.get("result")
         return payload
+
+
+def _scan_cancel_payload(query: str) -> dict[str, object]:
+    params = parse_qs(query)
+    job_id = params.get("job", [""])[0].strip()
+    if not job_id:
+        return {"error": "missing job parameter"}
+    with _SCAN_JOBS_LOCK:
+        entry = _SCAN_JOBS.get(job_id)
+        if entry is None:
+            return {"error": "unknown or expired job"}
+        if entry["status"] != "running":
+            return {"job_id": job_id, "status": entry["status"], "cancelled": False}
+        cancel = entry.get("cancel")
+        if isinstance(cancel, threading.Event):
+            cancel.set()
+        return {"job_id": job_id, "status": "cancelling", "cancelled": True}
 
 
 def _analyze_file_payload(query: str) -> dict[str, object]:
