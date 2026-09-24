@@ -183,14 +183,14 @@ def explain_video_classification(
 def format_explanation_text(explanation: XAIExplanation) -> str:
     """Format explanation as human-readable text."""
     lines = [
-        f"=== 분석 결과 ===",
+        "=== 분석 결과 ===",
         f"점수: {explanation.overall_score} ({explanation.band})",
         f"신뢰도: {explanation.confidence}",
-        f"",
-        f"=== 요약 ===",
+        "",
+        "=== 요약 ===",
         f"{explanation.summary}",
-        f"",
-        f"=== 주요 요인 ===",
+        "",
+        "=== 주요 요인 ===",
     ]
     
     for i, feature in enumerate(explanation.feature_importances[:5], 1):

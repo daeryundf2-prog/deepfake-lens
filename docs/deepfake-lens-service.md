@@ -85,14 +85,21 @@ JSON API under `/api/` (GET plus `POST /api/feedback`, `/api/report`,
 | `/api/scan` | `folder`, `pixel` (`off`/`fast`/`deep`), `recursive`, `max_files`, `max_file_bytes`, `dedupe`, `heatmaps`, `model_path`, `fusion_profile`, `async` | `scan_to_json` payload (`{"summary", "items"}`) or `{"error": "..."}`; with `async=1` returns `{"job_id", "status": "running"}` |
 | `/api/scan-status` | `job` | `{"job_id", "status": "running"\|"done"\|"error"}` plus `result` once finished; jobs live in memory only and expire after 15 min (max 32 concurrent) |
 | `/api/scan-cancel` | `job` | Sets the job's cancel flag; the scan stops between items and returns partial results as `done`. `{"cancelled": true}` while running, `false` once finished |
-| `/api/analyze-file` | `file` | `{"file", "classification", "forensic", "pixel_analysis"}` or `{"error"}` |
-| `/api/heatmap` | `path`, `root` | PNG bytes; 403 unless `path` is a `.png` inside `root`, 404 if missing |
+| `/api/analyze-file` | `file` | `{"file", "classification", "forensic", "pixel_analysis"}` or `{"error"}` (+`detail` for unexpected failures). Unrestricted path by design — it is the tool-facing single-file endpoint; treat the API token as the access boundary |
+| `/api/heatmap` | `path`, `root` | PNG bytes; 403 unless `path` is a `.png` under a **server-registered** read root (see below), 404 if missing |
+| `/api/preview` | `path`, `root` | media bytes with `nosniff`; same registered-root rule, media extensions only, ≤128 MiB |
 | `/api/stats` | — | `{"status", "version", "modules"}` |
 | POST `/api/analyze-upload` | multipart file body (≤ `MAX_UPLOAD_BYTES`) | upload-analysis payload |
 | POST `/api/compare` | multipart with two files | Two-file comparison — speaker distance (audio pair) or stylometry (text pair) |
 | POST `/api/check` | JSON `{"text": "...", "watermark_secret": "...", "watermark_gamma": 0.25}` **or** one multipart file | Unified check-all: full scan + all `models/` engine members + forensic + text probes → `{mode, item, advanced?, forensic?}` |
 | POST `/api/report` | scan JSON body (≤ 64 MiB) | rendered standalone HTML report |
 | POST `/api/feedback` | feedback JSON body (≤ 1 MiB) | appends to `~/.deepfake-lens/feedback.jsonl` |
+
+Read-root rule for `/api/heatmap` and `/api/preview`: `/api/scan`
+registers its resolved `folder` server-side (max 64 remembered). Both
+endpoints require the file to live under a registered root, and when a
+`root` argument is supplied it must also contain the file — so a forged
+`root=C:\` can never widen the read scope.
 
 Limits (clamped, not optional): `max_files ≤ 2000`,
 `max_file_bytes ≤ 1 GiB`, `heatmaps` only with `--pixel deep`.

@@ -31,6 +31,10 @@ jobs:
           python -m pip install -e .
       - name: Compile check
         run: python -m compileall deepfake_lens
+      - name: Lint (ruff)
+        run: |
+          python -m pip install ruff
+          python -m ruff check deepfake_lens
       - name: Unit tests
         run: python -m unittest discover deepfake_lens/tests -v
       # Benchmark E2E runs only on the committed synthetic fixtures — no
@@ -108,3 +112,22 @@ jobs:
           python-version: "3.12"
       - name: Verify cited URLs
         run: python scripts/check_registry_links.py
+
+  dep-audit:
+    # Vulnerability scan of the base install + declared extras. Advisory
+    # for now: optional deps are minimum-bounded and upstream advisories
+    # change without a commit here, so findings must not block pushes —
+    # they surface on the job page instead.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install package and pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pip-audit
+      - name: Audit installed dependencies
+        run: pip-audit --strict

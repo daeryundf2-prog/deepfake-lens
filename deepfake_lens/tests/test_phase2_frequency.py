@@ -8,6 +8,7 @@ bilinear upsampling) and the features must respond in the right direction.
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
 
 def _has_numpy() -> bool:

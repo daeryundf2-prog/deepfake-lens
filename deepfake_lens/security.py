@@ -46,6 +46,10 @@ def build_security_check(root: Path | str) -> dict[str, object]:
             "name": "API requests require a custom header when no token is set (CSRF/drive-by guard)",
             "passed": "CLIENT_HEADER" in (package / "webapp.py").read_text(encoding="utf-8"),
         },
+        {
+            "name": "file-serving endpoints check a server-registered read root, not a caller-supplied one",
+            "passed": "_READ_ROOTS" in (package / "webapp.py").read_text(encoding="utf-8"),
+        },
     ]
     return {
         "version": "security-check-v1",

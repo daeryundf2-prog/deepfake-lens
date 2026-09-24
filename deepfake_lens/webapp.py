@@ -16,7 +16,7 @@ from email.parser import BytesParser
 from email.policy import default as email_policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
 from .core import BatchScanSummary, DEFAULT_METADATA_BYTES, _scan_item_from_json, analyze_file, scan_directory, scan_to_json, summarize
 from .datasets import is_negative_label, is_positive_label
@@ -344,10 +344,11 @@ def _load_gui() -> str:
     return "<h1>GUI 파일을 찾을 수 없습니다</h1>"
 
 
-def _scan_payload(query: str, *, default_folder: Path | None, should_stop: "Callable[[], bool] | None" = None) -> dict[str, object]:
+def _scan_payload(query: str, *, default_folder: Path | None, should_stop: Callable[[], bool] | None = None) -> dict[str, object]:
     """Handle scan request."""
     params = parse_qs(query)
     folder = Path(params.get("folder", [str(default_folder or ".")])[0]).expanduser()
+    _register_read_root(folder)
     pixel = params.get("pixel", ["off"])[0]
     recursive = params.get("recursive", ["false"])[0].lower() in {"1", "true", "yes"}
     try:
@@ -483,7 +484,7 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
         from .c2pa import analyze_metadata_forensic
         from .pixel_analyzer import analyze_pixels
         
-        path = Path(file_path)
+        path = Path(file_path).expanduser()
         if not path.exists():
             return {"error": f"파일이 존재하지 않습니다: {file_path}"}
         
@@ -511,7 +512,9 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
             "pixel_analysis": pixel_result.to_json() if pixel_result else None,
         }
     except Exception as exc:
-        return {"error": str(exc)}
+        # Detail stays in `detail` so the GUI shows a clean headline instead
+        # of a raw exception sentence; the type/message aid local debugging.
+        return {"error": "파일 분석 중 오류가 발생했습니다", "detail": f"{type(exc).__name__}: {exc}"}
 
 
 def _stats_payload() -> dict[str, object]:
@@ -568,15 +571,53 @@ def _optional_path(value: str) -> Path | None:
     return Path(value).expanduser() if value else None
 
 
+# Server-side read roots for /api/heatmap and /api/preview. The `root`
+# parameter is kept for backward compatibility but is no longer trusted:
+# a path is only served when it lives under a directory the server itself
+# registered via /api/scan (or an explicit allow-root registration), so a
+# caller cannot widen the read scope by passing root=C:\.
+_READ_ROOTS_LOCK = threading.Lock()
+_READ_ROOTS: set[Path] = set()
+_READ_ROOTS_MAX = 64
+
+
+def _register_read_root(folder: Path) -> None:
+    resolved = folder.expanduser().resolve()
+    with _READ_ROOTS_LOCK:
+        if resolved in _READ_ROOTS:
+            return
+        if len(_READ_ROOTS) >= _READ_ROOTS_MAX:
+            _READ_ROOTS.pop()
+        _READ_ROOTS.add(resolved)
+
+
+def _read_root_allows(path: Path, root_value: str = "") -> bool:
+    """True when `path` sits under a server-registered root.
+
+    The caller-supplied root is also checked when present so a stale or
+    mismatched root argument cannot broaden access beyond the registered
+    set — both conditions must hold.
+    """
+    with _READ_ROOTS_LOCK:
+        roots = set(_READ_ROOTS)
+    if root_value:
+        try:
+            root = Path(root_value).expanduser().resolve()
+        except OSError:
+            return False
+        if not _is_within(path, root):
+            return False
+    return any(_is_within(path, root) for root in roots)
+
+
 def _heatmap_payload(query: str) -> tuple[int, bytes, str]:
     params = parse_qs(query)
     path_value = params.get("path", [""])[0]
     root_value = params.get("root", [""])[0]
-    if not path_value or not root_value:
-        return 400, b"missing path or root", "missing"
+    if not path_value:
+        return 400, b"missing path", "missing"
     path = Path(path_value).expanduser().resolve()
-    root = Path(root_value).expanduser().resolve()
-    if path.suffix.lower() != ".png" or not _is_within(path, root):
+    if path.suffix.lower() != ".png" or not _read_root_allows(path, root_value):
         return 403, b"forbidden", "forbidden"
     try:
         data = path.read_bytes()
@@ -611,19 +652,18 @@ MAX_PREVIEW_BYTES = 128 * 1024 * 1024
 def _preview_payload(query: str) -> tuple[int, bytes, str, str]:
     """Serve a scanned media file for inline preview in the result viewer.
 
-    Same trust model as /api/heatmap: the file must live under the
-    scanned root supplied by the caller, must be a known media type, and
-    is served with nosniff so it can only render as media.
+    Same trust model as /api/heatmap: the file must live under a
+    server-registered scan root (see _read_root_allows), must be a known
+    media type, and is served with nosniff so it can only render as media.
     """
     params = parse_qs(query)
     path_value = params.get("path", [""])[0]
     root_value = params.get("root", [""])[0]
-    if not path_value or not root_value:
-        return 400, b"missing path or root", "missing", ""
+    if not path_value:
+        return 400, b"missing path", "missing", ""
     path = Path(path_value).expanduser().resolve()
-    root = Path(root_value).expanduser().resolve()
     mime = _PREVIEW_MIME.get(path.suffix.lower())
-    if mime is None or not _is_within(path, root):
+    if mime is None or not _read_root_allows(path, root_value):
         return 403, b"forbidden", "forbidden", ""
     try:
         if path.stat().st_size > MAX_PREVIEW_BYTES:

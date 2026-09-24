@@ -661,13 +661,21 @@ class ComparePayloadTest(unittest.TestCase):
 
 
 class PreviewPayloadTest(unittest.TestCase):
-    """GET /api/preview serves media under the scanned root only."""
+    """GET /api/preview serves media under a server-registered root only."""
+
+    def setUp(self) -> None:
+        from deepfake_lens import webapp
+
+        registry = patch.object(webapp, "_READ_ROOTS", set())
+        registry.start()
+        self.addCleanup(registry.stop)
 
     def test_media_served_within_root(self) -> None:
         import tempfile
-        from deepfake_lens.webapp import _preview_payload
+        from deepfake_lens.webapp import _preview_payload, _register_read_root
 
         with tempfile.TemporaryDirectory() as d:
+            _register_read_root(Path(d))
             p = Path(d) / "a.png"
             p.write_bytes(b"\x89PNG\r\n\x1a\nfake")
             status, body, _, mime = _preview_payload(f"path={p}&root={d}")
@@ -677,9 +685,10 @@ class PreviewPayloadTest(unittest.TestCase):
 
     def test_outside_root_forbidden(self) -> None:
         import tempfile
-        from deepfake_lens.webapp import _preview_payload
+        from deepfake_lens.webapp import _preview_payload, _register_read_root
 
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as other:
+            _register_read_root(Path(d))
             p = Path(other) / "a.png"
             p.write_bytes(b"x")
             status, _, msg, _ = _preview_payload(f"path={p}&root={d}")
@@ -687,10 +696,48 @@ class PreviewPayloadTest(unittest.TestCase):
 
     def test_non_media_forbidden(self) -> None:
         import tempfile
-        from deepfake_lens.webapp import _preview_payload
+        from deepfake_lens.webapp import _preview_payload, _register_read_root
 
         with tempfile.TemporaryDirectory() as d:
+            _register_read_root(Path(d))
             p = Path(d) / "a.txt"
             p.write_text("hi")
             status, _, _, _ = _preview_payload(f"path={p}&root={d}")
+            self.assertEqual(status, 403)
+
+    def test_caller_supplied_root_cannot_widen_scope(self) -> None:
+        """A forged root= must not grant access outside registered roots."""
+        import tempfile
+        from deepfake_lens.webapp import _preview_payload, _register_read_root
+
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as other:
+            _register_read_root(Path(d))
+            p = Path(other) / "a.png"
+            p.write_bytes(b"x")
+            # Caller claims the parent dir as root — before the fix this
+            # passed _is_within and served any file on the host.
+            status, _, _, _ = _preview_payload(f"path={p}&root={other}")
+            self.assertEqual(status, 403)
+
+    def test_unregistered_root_rejected(self) -> None:
+        import tempfile
+        from deepfake_lens.webapp import _preview_payload
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "a.png"
+            p.write_bytes(b"x")
+            status, _, _, _ = _preview_payload(f"path={p}&root={d}")
+            self.assertEqual(status, 403)
+
+    def test_stale_root_argument_rejected(self) -> None:
+        """path inside a registered root but root= pointing elsewhere -> 403."""
+        import tempfile
+        from deepfake_lens.webapp import _preview_payload, _register_read_root
+
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as other:
+            _register_read_root(Path(d))
+            _register_read_root(Path(other))
+            p = Path(d) / "a.png"
+            p.write_bytes(b"x")
+            status, _, _, _ = _preview_payload(f"path={p}&root={other}")
             self.assertEqual(status, 403)

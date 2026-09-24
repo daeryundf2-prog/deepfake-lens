@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from typing import Iterable
+from typing import Callable, Iterable
 
 from .archives import archive_format, extract_archive, is_archive
 from .audio import SUPPORTED_AUDIO_EXTENSIONS, AudioAnalysis, analyze_audio
@@ -214,7 +214,7 @@ def scan_directory(
     dedupe: bool = False,
     hash_db_path: Path | None = None,
     deep_signals: bool = False,
-    should_stop: "Callable[[], bool] | None" = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
     root = Path(directory)
     if not root.is_dir():
@@ -335,7 +335,7 @@ def _scan_specs(
     workers: int,
     deep_signals: bool,
     capped: bool,
-    should_stop: "Callable[[], bool] | None" = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
     """Analyze (path, display) spec pairs — the inner loop of scan_directory."""
     duplicates = _duplicate_map(duplicates_paths, root=root, max_file_bytes=max_file_bytes, hash_db_path=hash_db_path) if dedupe or hash_db_path else {}
