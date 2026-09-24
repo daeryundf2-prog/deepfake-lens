@@ -28,6 +28,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+from deepfake_lens.checkpoint_integrity import load_torch_state  # noqa: E402
+
 
 def build_model(profile: dict[str, object], checkpoint: Path):
     """Mirror model_adapter._run_torchvision's rebuild: arch + head + weights."""
@@ -50,7 +52,7 @@ def build_model(profile: dict[str, object], checkpoint: Path):
             model.classifier = torch.nn.Linear(head.in_features, num_classes)
     else:
         raise SystemExit(f"error: torchvision arch '{arch}' has no fc/classifier head to rewire")
-    state = torch.load(str(checkpoint), map_location="cpu")
+    state = load_torch_state(checkpoint)
     if isinstance(state, dict):
         for wrapper in ("state_dict", "model", "net"):
             nested = state.get(wrapper)

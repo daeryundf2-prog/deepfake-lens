@@ -31,6 +31,7 @@ import torch  # noqa: E402
 import torch.nn as nn  # noqa: E402
 import torch.nn.functional as F  # noqa: E402
 import timm  # noqa: E402
+from deepfake_lens.checkpoint_integrity import load_torch_state  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # DCT band-selection preprocessing (ported from AIDE data/dct.py)
@@ -256,7 +257,7 @@ class AideModel(nn.Module):
 
 
 def load_model(checkpoint_path: Path) -> AideModel:
-    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    ckpt = load_torch_state(checkpoint_path)
     state = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
     model = AideModel()
     missing, unexpected = model.load_state_dict(state, strict=False)

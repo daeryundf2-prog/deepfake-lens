@@ -8,6 +8,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .checkpoint_integrity import load_torch_state
+
 # Profile-set marker: a JSON file that lists member profiles/directories so a
 # single --model-path can drive several detectors at once.
 PROFILE_SET_TYPE = "deepfake-lens-profile-set-v1"
@@ -878,7 +880,7 @@ def _load_linear_head(checkpoint: Path):
     cached = _CLIP_HEADS.get(key)
     if cached is not None:
         return cached
-    state = torch.load(str(checkpoint), map_location="cpu")
+    state = load_torch_state(checkpoint)
     if isinstance(state, dict):
         nested = state.get("state_dict") if isinstance(state.get("state_dict"), dict) else state
         weight = next((value for name, value in nested.items() if str(name).lower().endswith("weight") and hasattr(value, "ndim") and value.ndim == 2), None)
@@ -1312,7 +1314,7 @@ def _run_torchvision(checkpoint: Path, array, profile: dict[str, object]) -> lis
                 raise RuntimeError(f"torchvision arch '{arch}' classifier is not Linear/Sequential")
         else:
             raise RuntimeError(f"torchvision arch '{arch}' has no fc/classifier head to rewire for num_classes={num_classes}")
-        state = torch.load(str(checkpoint), map_location="cpu")
+        state = load_torch_state(checkpoint)
         if isinstance(state, dict):
             for wrapper in ("state_dict", "model", "net"):
                 nested = state.get(wrapper)

@@ -314,10 +314,17 @@ def _image_records(manifest: dict[str, object], *, sbi: bool = False) -> list[di
 
 
 def _split_records(records: list[dict[str, object]]) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    # "test" records are held out entirely — folding them into validation
+    # would let the reported val metrics claim test-set performance.
     train_records = [record for record in records if record["split"] in {"train", "unspecified"}]
-    val_records = [record for record in records if record["split"] in {"val", "test"}]
+    val_records = [record for record in records if record["split"] == "val"]
+    test_records = [record for record in records if record["split"] == "test"]
     if not train_records:
-        train_records = list(records)
+        train_records = [record for record in records if record["split"] != "test"]
+    if not train_records:
+        raise SystemExit("error: no usable training records (all records are split=test)")
+    if test_records:
+        print(f"note: {len(test_records)} test record(s) held out of train/val", file=sys.stderr)
     if not val_records:
         shuffled = list(train_records)
         random.shuffle(shuffled)

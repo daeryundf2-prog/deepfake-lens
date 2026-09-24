@@ -220,11 +220,19 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
     """Validate a C2PA manifest with the official c2pa-python SDK.
 
     Returns None only when the SDK is not installed (cannot validate).
-    When the SDK ran: ``{"present": False}`` for files without a manifest,
-    otherwise a summary with the SDK validation state, signature info, and
-    per-claim success/failure codes. A state other than "valid" usually
-    means the signer is not in the trust store rather than proof of
-    tampering.
+    Otherwise always carries a ``status`` in
+    ``{"valid", "invalid", "absent", "unavailable"}``:
+
+    - ``valid`` / ``invalid``: the SDK read a manifest and completed
+      validation. Non-``"valid"`` states usually mean the signer is not in
+      the trust store rather than proof of tampering.
+    - ``absent``: the SDK could not open a manifest at all (no manifest,
+      or bytes it could not parse — the SDK does not distinguish).
+    - ``unavailable``: a manifest was opened but validation itself failed —
+      never collapse this into "absent", since a corrupt-but-present
+      manifest is forensically meaningful.
+
+    ``present`` remains as the boolean shorthand for "a manifest was read".
     """
     try:
         import c2pa
@@ -232,14 +240,14 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
         return None
     try:
         reader = c2pa.Reader(str(Path(path)))
-    except Exception:
-        return {"present": False}
+    except Exception as exc:
+        return {"present": False, "status": "absent", "error": str(exc)}
     try:
         state = str(reader.get_validation_state())
         manifest = reader.get_active_manifest() or {}
         results = reader.get_validation_results() or {}
-    except Exception:
-        return {"present": False}
+    except Exception as exc:
+        return {"present": True, "status": "unavailable", "error": str(exc)}
     finally:
         try:
             reader.close()
@@ -260,6 +268,7 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
     signature = manifest.get("signature_info") if isinstance(manifest, dict) else None
     return {
         "present": True,
+        "status": "valid" if state == "valid" else "invalid",
         "state": state,
         "trusted": "signingCredential.trusted" in success_codes
         and "signingCredential.trusted" not in failure_codes,

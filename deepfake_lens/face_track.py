@@ -30,6 +30,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .checkpoint_integrity import load_torch_state
+
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
 _DEFAULT_FPS = 4.0  # frames sampled per second
 _MAX_FRAMES = 96
@@ -180,7 +182,7 @@ def _embed_sequence(crops, limitations: list[str]):
                 Path(__file__).resolve().parent.parent / "models" / "sbi-effnet-b0.pth"
             )
             model = torchvision.models.efficientnet_b0(weights=None)
-            sd = torch.load(weights, map_location="cpu")
+            sd = load_torch_state(weights)
             if isinstance(sd, dict) and "state_dict" in sd:
                 sd = sd["state_dict"]
             sd = {k: v for k, v in sd.items() if k.startswith("features.")}
