@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Local AI-generated media and text screening toolkit"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Private research tooling" }
+license = { text = "MIT" }
 authors = [{ name = "YH" }]
 keywords = ["deepfake", "ai-generated", "media-analysis", "local-scanner"]
 classifiers = [
