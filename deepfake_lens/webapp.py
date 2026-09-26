@@ -1056,11 +1056,16 @@ def _report_payload(body: bytes, format_override: str | None = None) -> bytes | 
         ),
     )
     req_format = (format_override or data.get("format") or "html").lower()
-    suffix = ".pdf" if req_format == "pdf" else ".html"
+    suffix = ".pdf" if req_format in ("pdf", "evidence", "evidence-statement") else ".html"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp_path = Path(tmp.name)
     try:
-        if req_format == "pdf":
+        if req_format in ("evidence", "evidence-statement"):
+            from .evidence_statement import build_evidence_statement, write_evidence_statement_pdf
+            case_no = str(data.get("case_no") or "(사건번호 입력)")
+            stmt = build_evidence_statement(items, case_no=case_no)
+            write_evidence_statement_pdf(tmp_path, stmt)
+        elif req_format == "pdf":
             from .reports import write_forensic_pdf_report
             exhibit_no = str(data.get("exhibit_no") or "갑 제        호증")
             write_forensic_pdf_report(tmp_path, summary, items, exhibit_no=exhibit_no)

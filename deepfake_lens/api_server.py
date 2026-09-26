@@ -622,11 +622,12 @@ def create_app(
         rendered = _report_payload(body, format_override=fmt)
         if isinstance(rendered, dict):
             return rendered
-        if (fmt or "").lower() == "pdf":
+        if (fmt or "").lower() in ("pdf", "evidence", "evidence-statement"):
+            fn = "deepfake-lens-evidence-statement.pdf" if (fmt or "").lower() in ("evidence", "evidence-statement") else "deepfake-lens-forensic-report.pdf"
             return Response(
                 content=rendered,
                 media_type="application/pdf",
-                headers={"Content-Disposition": 'attachment; filename="deepfake-lens-forensic-report.pdf"'},
+                headers={"Content-Disposition": f'attachment; filename="{fn}"'},
             )
         return Response(
             content=rendered,
