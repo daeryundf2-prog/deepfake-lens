@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from collections import OrderedDict
-import gc
 import importlib
 import importlib.util
 import json
@@ -14,81 +12,6 @@ from pathlib import Path
 from typing import Any
 
 from .checkpoint_integrity import load_torch_state
-
-
-def _release_torch_memory() -> None:
-    """Best-effort release of cached GPU/MPS memory back to the OS."""
-    try:
-        if importlib.util.find_spec("torch") is not None:
-            torch = importlib.import_module("torch")
-            if hasattr(torch, "cuda") and torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
-                torch.mps.empty_cache()
-    except Exception:
-        pass
-    gc.collect()
-
-
-class LRUModelCache(OrderedDict):
-    """Size-bounded LRU cache for heavy neural model weights.
-
-    Prevents unbounded VRAM/RAM accumulation when scanning large sets of files
-    or alternating across multiple modalities (AIDE, Swin, wav2vec2, LLMs).
-    Evicted items are moved to CPU / cleared and torch memory is released.
-    """
-
-    def __init__(self, maxsize: int = 4, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        env_cap = os.getenv("DFLENS_MAX_CACHED_MODELS")
-        if env_cap and env_cap.isdigit():
-            self.maxsize = max(1, int(env_cap))
-        else:
-            self.maxsize = max(1, maxsize)
-
-    def __getitem__(self, key: Any) -> Any:
-        value = super().__getitem__(key)
-        self.move_to_end(key)
-        return value
-
-    def get(self, key: Any, default: Any = None) -> Any:
-        if key in self:
-            self.move_to_end(key)
-            return super().__getitem__(key)
-        return default
-
-    def __setitem__(self, key: Any, value: Any) -> None:
-        if key in self:
-            self.move_to_end(key)
-        super().__setitem__(key, value)
-        if len(self) > self.maxsize:
-            self.evict_oldest()
-
-    def evict_oldest(self) -> None:
-        """Evict the least recently used model and release memory."""
-        if not self:
-            return
-        oldest_key, oldest_val = self.popitem(last=False)
-        self._unload_item(oldest_val)
-        _release_torch_memory()
-
-    def _unload_item(self, item: Any) -> None:
-        try:
-            if hasattr(item, "to") and callable(item.to):
-                item.to("cpu")
-            elif isinstance(item, (tuple, list)):
-                for sub in item:
-                    if hasattr(sub, "to") and callable(sub.to):
-                        sub.to("cpu")
-        except Exception:
-            pass
-
-    def clear(self) -> None:
-        while self:
-            _, val = self.popitem(last=False)
-            self._unload_item(val)
-        super().clear()
-        _release_torch_memory()
 
 # Profile-set marker: a JSON file that lists member profiles/directories so a
 # single --model-path can drive several detectors at once.
@@ -821,8 +744,6 @@ class _ModelLRU(OrderedDict):
         while len(self) > self.limit:
             _, evicted = self.popitem(last=False)
             _release_cached_model(evicted)
-
-LRUModelCache = _ModelLRU
 
 
 # The AIDE engine keeps its 3.3 GB checkpoint resident between files; keyed by

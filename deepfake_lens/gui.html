@@ -661,21 +661,19 @@
             if (!changedKey) return;
             clearTimeout(reviewPushTimer);
             reviewPushTimer = setTimeout(() => {
-                const entry = reviewStore[changedKey] || {};
-                apiFetch('/api/review-marks', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({marks: {[changedKey]: entry}}),
-                }).catch(() => {});
+                pushReviewToServer(changedKey, reviewStore[changedKey] || {});
             }, 400);
         }
-        async function syncReviewToServer(key, entry) {
+        async function pushReviewToServer(key, entry) {
             if (!key) return;
             try {
-                await apiFetch('/api/artifacts/' + encodeURIComponent(key) + '/review', {
-                    method: 'PUT',
+                // POST /api/review exists on both the builtin web server and the
+                // FastAPI api_server; explicit blank fields let the store prune
+                // the entry when the examiner clears every mark.
+                await apiFetch('/api/review', {
+                    method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(entry),
+                    body: JSON.stringify(Object.assign({artifact_id: key, star: false, note: '', verdict: 'unreviewed'}, entry)),
                 });
             } catch (e) {
                 // Background sync failure is non-fatal; localStorage retains
@@ -699,15 +697,6 @@
             } catch (e) { /* ignore */ }
         }
 
-        // Merge server marks on load — server is the durable store.
-        apiFetch('/api/review-marks').then(r => r.ok ? r.json() : null).then(d => {
-            if (d && d.marks && typeof d.marks === 'object') {
-                Object.assign(reviewStore, d.marks);
-                try { localStorage.setItem(REVIEW_KEY, JSON.stringify(reviewStore)); } catch (e) {}
-                if (results.length) renderResults(false);
-            }
-        }).catch(() => {});
-
         function toggleReview(item, card) {
             const key = itemKey(item);
             const entry = reviewStore[key] || {};
@@ -716,7 +705,6 @@
             if (!entry.star && !entry.note && !entry.verdict) delete reviewStore[key];
             else reviewStore[key] = entry;
             saveReviewStore(key);
-            syncReviewToServer(key, entry);
             card.classList.toggle('reviewed', !!entry.star);
             card.querySelector('.rev-star').setAttribute('aria-pressed', entry.star ? 'true' : 'false');
             const sub = card.querySelector('.res-sub');
@@ -1424,7 +1412,7 @@
                         syncStatus.textContent = '● 동기화 중…';
                         clearTimeout(syncTimeout);
                         syncTimeout = setTimeout(async () => {
-                            await syncReviewToServer(k, cur);
+                            await pushReviewToServer(k, cur);
                             syncStatus.className = 'rev-sync-status saved';
                             syncStatus.textContent = '● 서버 동기화됨';
                         }, 500);
