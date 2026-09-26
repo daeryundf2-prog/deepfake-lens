@@ -724,43 +724,44 @@ class LanguageGateTest(unittest.TestCase):
         self.assertFalse(any("excluded" in item for item in fused.limitations))
 
 
-class LRUModelCacheTest(unittest.TestCase):
-    """Test LRU eviction and memory bounds for neural model caches."""
+class ModelCacheLRUTest(unittest.TestCase):
+    """_ModelLRU bounds resident model count and evicts least-recently-used."""
 
-    def test_lru_eviction_on_capacity_exceeded(self) -> None:
-        from deepfake_lens.model_adapter import LRUModelCache
+    def test_evicts_oldest_beyond_limit(self) -> None:
+        from deepfake_lens.model_adapter import _ModelLRU
 
-        cache = LRUModelCache(maxsize=2)
-        cache["m1"] = "val1"
-        cache["m2"] = "val2"
-        self.assertEqual(list(cache.keys()), ["m1", "m2"])
+        cache = _ModelLRU(2)
+        cache["a"], cache["b"], cache["c"] = 1, 2, 3
+        self.assertNotIn("a", cache)
+        self.assertEqual(list(cache), ["b", "c"])
 
-        # Accessing m1 makes m2 the oldest
-        _ = cache.get("m1")
-        self.assertEqual(list(cache.keys()), ["m2", "m1"])
+    def test_get_refreshes_recency(self) -> None:
+        from deepfake_lens.model_adapter import _ModelLRU
 
-        # Adding m3 should evict m2
-        cache["m3"] = "val3"
-        self.assertEqual(list(cache.keys()), ["m1", "m3"])
-        self.assertNotIn("m2", cache)
+        cache = _ModelLRU(2)
+        cache["a"], cache["b"] = 1, 2
+        cache.get("a")
+        cache["c"] = 3
+        self.assertNotIn("b", cache)
+        self.assertIn("a", cache)
 
-    def test_unload_item_moves_torch_model_to_cpu(self) -> None:
-        from deepfake_lens.model_adapter import LRUModelCache
+    def test_env_configured_limit(self) -> None:
+        import os
+        from deepfake_lens.model_adapter import _model_cache_limit
 
-        class FakeModel:
-            def __init__(self):
-                self.device = "cuda"
-
-            def to(self, device):
-                self.device = device
-                return self
-
-        fake = FakeModel()
-        cache = LRUModelCache(maxsize=1)
-        cache["m1"] = fake
-        cache["m2"] = "val2"
-
-        self.assertEqual(fake.device, "cpu")
+        saved = os.environ.get("DEEPFAKE_LENS_MODEL_CACHE_MAX")
+        try:
+            os.environ["DEEPFAKE_LENS_MODEL_CACHE_MAX"] = "9"
+            self.assertEqual(_model_cache_limit(), 9)
+            os.environ["DEEPFAKE_LENS_MODEL_CACHE_MAX"] = "0"
+            self.assertEqual(_model_cache_limit(), 1)
+            os.environ["DEEPFAKE_LENS_MODEL_CACHE_MAX"] = "bogus"
+            self.assertEqual(_model_cache_limit(), 4)
+        finally:
+            if saved is None:
+                os.environ.pop("DEEPFAKE_LENS_MODEL_CACHE_MAX", None)
+            else:
+                os.environ["DEEPFAKE_LENS_MODEL_CACHE_MAX"] = saved
 
     def test_clear_all_model_caches_flushes_state(self) -> None:
         from deepfake_lens.model_adapter import (

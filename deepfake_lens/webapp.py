@@ -68,10 +68,17 @@ def host_name(header_value: str) -> str:
     return value
 
 
+# Token header names accepted by every local service. The webapp and the
+# FastAPI api_server grew separate conventions (X-Deepfake-Lens-Token vs
+# X-API-Token); accepting both keeps a single credential working across
+# either server while clients migrate to the canonical name.
+TOKEN_HEADERS = ("X-Deepfake-Lens-Token", "X-API-Token")
+
+
 def api_request_allowed(headers: Any, *, token: str | None) -> bool:
     """Gate for /api/* requests.
 
-    With a configured token the ``X-Deepfake-Lens-Token`` header must match
+    With a configured token any of the ``TOKEN_HEADERS`` must match
     (constant-time compare). Without one, the ``X-Deepfake-Lens-Client``
     custom header is required instead: browsers cannot send custom headers
     on cross-origin "simple" requests, so this forces a preflight the server
@@ -81,8 +88,11 @@ def api_request_allowed(headers: Any, *, token: str | None) -> bool:
     if token:
         import secrets
 
-        supplied = headers.get("X-Deepfake-Lens-Token") or ""
-        return bool(supplied) and secrets.compare_digest(supplied, token)
+        for name in TOKEN_HEADERS:
+            supplied = headers.get(name) or ""
+            if supplied and secrets.compare_digest(supplied, token):
+                return True
+        return False
     return bool((headers.get(CLIENT_HEADER) or "").strip())
 
 
@@ -169,6 +179,9 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
             if parsed.path == "/api/stats":
                 self._send_json(_stats_payload())
                 return
+            if parsed.path == "/api/review-marks":
+                self._send_json(_review_marks_payload())
+                return
             if parsed.path == "/api/reviews":
                 from .reviews import get_default_review_store
                 self._send_json({"status": "success", "reviews": get_default_review_store().list_reviews()})
@@ -233,6 +246,20 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
                     self.send_error(400, "invalid feedback body size")
                     return
                 self._send_json(_feedback_payload(self.rfile.read(length)))
+                return
+            if parsed.path == "/api/review-marks":
+                try:
+                    length = int(self.headers.get("Content-Length") or "0")
+                except ValueError:
+                    self.send_error(400, "invalid Content-Length")
+                    return
+                if length <= 0 or length > 8 * 1024 * 1024:
+                    self.send_error(400, "invalid review-marks body size")
+                    return
+                try:
+                    self._send_json(_merge_review_marks(self.rfile.read(length)))
+                except ValueError as exc:
+                    self.send_error(400, str(exc))
                 return
             if parsed.path == "/api/review":
                 try:
@@ -567,6 +594,73 @@ def _stats_payload() -> dict[str, object]:
         "version": version,
         "modules": module_count,
     }
+
+
+# ── review marks store ──────────────────────────────────────────────
+# Examiner review marks (star + note) persist server-side so they survive
+# browser cache clears and are visible from any client — chain-of-custody
+# for the review decision, not just a browser-local convenience.
+_REVIEW_LOCK = threading.Lock()
+_REVIEW_MAX_KEYS = 20000
+_REVIEW_MAX_KEY_LEN = 4096
+_REVIEW_MAX_NOTE_LEN = 4000
+
+
+def _review_store_path() -> Path:
+    override = os.environ.get("DEEPFAKE_LENS_REVIEW_STORE")
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".deepfake_lens" / "review-marks.json"
+
+
+def _load_review_marks() -> dict[str, dict[str, object]]:
+    try:
+        data = json.loads(_review_store_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    marks = data.get("marks") if isinstance(data, dict) else None
+    return marks if isinstance(marks, dict) else {}
+
+
+def _save_review_marks(marks: dict[str, dict[str, object]]) -> None:
+    path = _review_store_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps({"version": 1, "marks": marks}, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _review_marks_payload() -> dict[str, object]:
+    """GET /api/review-marks — return all stored examiner marks."""
+    with _REVIEW_LOCK:
+        return {"status": "ok", "marks": _load_review_marks()}
+
+
+def _merge_review_marks(body: bytes) -> dict[str, object]:
+    """POST /api/review-marks — merge per-key updates; empty entries delete."""
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid JSON body") from exc
+    incoming = payload.get("marks") if isinstance(payload, dict) else None
+    if not isinstance(incoming, dict) or len(incoming) > _REVIEW_MAX_KEYS:
+        raise ValueError("invalid marks payload")
+    with _REVIEW_LOCK:
+        marks = _load_review_marks()
+        for key, entry in incoming.items():
+            if not isinstance(key, str) or len(key) > _REVIEW_MAX_KEY_LEN or not isinstance(entry, dict):
+                continue
+            star = bool(entry.get("star"))
+            note = str(entry.get("note") or "")[:_REVIEW_MAX_NOTE_LEN]
+            ts = entry.get("ts")
+            if not isinstance(ts, (int, float)):
+                ts = int(time.time() * 1000)
+            if star or note:
+                marks[key] = {"star": star, "note": note, "ts": ts}
+            else:
+                marks.pop(key, None)
+        _save_review_marks(marks)
+        return {"status": "ok", "marks": marks}
 
 
 def _extract_metadata(path: Path) -> dict[str, str]:

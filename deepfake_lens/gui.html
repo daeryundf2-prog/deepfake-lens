@@ -416,20 +416,6 @@
         .split-label-orig { color: var(--text); }
         .split-label-heat { color: var(--red); font-weight: 600; }
 
-        /* ── Accessible Token Dialog ── */
-        .token-modal {
-            border: 1px solid var(--line); border-radius: 16px; background: var(--card); color: var(--text);
-            box-shadow: 0 20px 40px rgba(0,0,0,0.3); max-width: 420px; width: 90%; padding: 22px;
-            margin: auto; outline: none;
-        }
-        .token-modal::backdrop {
-            background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px);
-        }
-        .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 6px; color: var(--text); }
-        .modal-desc { font-size: 13px; color: var(--muted); margin-bottom: 14px; line-height: 1.45; }
-        .modal-field-row { display: flex; gap: 6px; align-items: center; }
-        .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
-
         /* ── Review sync indicator & verdict ── */
         .rev-toolbar { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; flex-wrap: wrap; gap: 6px; }
         .rev-verdict-sel {
@@ -439,6 +425,34 @@
         .rev-sync-status { font-size: 11px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; }
         .rev-sync-status.saved { color: var(--green); }
         .rev-sync-status.saving { color: var(--orange); }
+
+        /* token modal */
+        #token-modal {
+            position: fixed; inset: 0; z-index: 90;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(10, 12, 18, 0.55); backdrop-filter: blur(2px);
+        }
+        #token-modal[hidden] { display: none; }
+        .tm-card {
+            width: min(380px, calc(100vw - 32px));
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 14px; padding: 20px;
+            box-shadow: 0 18px 48px rgba(0,0,0,0.30);
+            display: flex; flex-direction: column; gap: 12px;
+        }
+        .tm-card h3 { margin: 0; font-size: 1.05em; }
+        .tm-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+        /* mobile / narrow viewport */
+        @media (max-width: 640px) {
+            .res-main { flex-wrap: wrap; gap: 8px; }
+            .res-info { min-width: 0; }
+            .res-name { word-break: break-all; }
+            .kv { grid-template-columns: 1fr; }
+            .dgroup img, .pv-slot img, .hm-slot img { max-width: 100%; height: auto; }
+            .nav-inner { padding: 10px 14px; }
+            .res-detail { padding: 10px; }
+        }
     </style>
 </head>
 <body>
@@ -616,21 +630,6 @@
         </section>
     </div>
 
-    <dialog id="token-dialog" class="token-modal" aria-labelledby="token-dialog-title">
-        <form method="dialog" id="token-form">
-            <div class="modal-title" id="token-dialog-title">🔐 API 인증 토큰 입력</div>
-            <p class="modal-desc">서버에 접근하기 위해 인증 토큰이 필요합니다. (--token으로 시작된 서버)</p>
-            <div class="modal-field-row">
-                <input type="password" id="modal-token-input" class="field" placeholder="API 토큰을 입력하세요" autocomplete="off" required>
-                <button type="button" class="btn btn-sm" id="modal-token-toggle" aria-label="토큰 보기">👁</button>
-            </div>
-            <div class="modal-actions">
-                <button type="button" class="btn" id="modal-token-cancel">취소</button>
-                <button type="submit" class="btn btn-primary" id="modal-token-submit">확인</button>
-            </div>
-        </form>
-    </dialog>
-
     <div id="toasts" aria-live="polite"></div>
 
     <script>
@@ -653,10 +652,23 @@
         let reviewStore = {};
         try { reviewStore = JSON.parse(localStorage.getItem(REVIEW_KEY) || '{}'); } catch (e) { reviewStore = {}; }
         function itemKey(item) { return item.path || item.name || ''; }
-        function saveReviewStore() {
+        let reviewPushTimer = null;
+        function saveReviewStore(changedKey) {
             try { localStorage.setItem(REVIEW_KEY, JSON.stringify(reviewStore)); } catch (e) { /* quota — non-fatal */ }
+            // Server-side store keeps examiner marks across browsers/devices
+            // (chain of custody); localStorage stays as offline fallback.
+            // Debounced so per-keystroke note edits send one update.
+            if (!changedKey) return;
+            clearTimeout(reviewPushTimer);
+            reviewPushTimer = setTimeout(() => {
+                const entry = reviewStore[changedKey] || {};
+                apiFetch('/api/review-marks', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({marks: {[changedKey]: entry}}),
+                }).catch(() => {});
+            }, 400);
         }
-
         async function syncReviewToServer(key, entry) {
             if (!key) return;
             try {
@@ -687,13 +699,23 @@
             } catch (e) { /* ignore */ }
         }
 
+        // Merge server marks on load — server is the durable store.
+        apiFetch('/api/review-marks').then(r => r.ok ? r.json() : null).then(d => {
+            if (d && d.marks && typeof d.marks === 'object') {
+                Object.assign(reviewStore, d.marks);
+                try { localStorage.setItem(REVIEW_KEY, JSON.stringify(reviewStore)); } catch (e) {}
+                if (results.length) renderResults(false);
+            }
+        }).catch(() => {});
+
         function toggleReview(item, card) {
             const key = itemKey(item);
             const entry = reviewStore[key] || {};
             entry.star = !entry.star;
+            entry.ts = Date.now();
             if (!entry.star && !entry.note && !entry.verdict) delete reviewStore[key];
             else reviewStore[key] = entry;
-            saveReviewStore();
+            saveReviewStore(key);
             syncReviewToServer(key, entry);
             card.classList.toggle('reviewed', !!entry.star);
             card.querySelector('.rev-star').setAttribute('aria-pressed', entry.star ? 'true' : 'false');
@@ -719,55 +741,32 @@
             setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, isErr ? 5000 : 2800);
         }
 
-        /* ── non-blocking token dialog ──────────────── */
-        let tokenPromiseResolver = null;
-        function initTokenModal() {
-            const dlg = $('token-dialog');
-            const inp = $('modal-token-input');
-            const toggle = $('modal-token-toggle');
-            const cancelBtn = $('modal-token-cancel');
-            const form = $('token-form');
-
-            toggle.addEventListener('click', () => {
-                const isPw = inp.type === 'password';
-                inp.type = isPw ? 'text' : 'password';
-                toggle.textContent = isPw ? '🔒' : '👁';
+        /* ── token modal (async replacement for window.prompt) ── */
+        let tokenPromptPending = null;
+        function requestToken() {
+            if (tokenPromptPending) return tokenPromptPending;
+            tokenPromptPending = new Promise(resolve => {
+                const modal = $('token-modal'), input = $('token-modal-input');
+                const done = value => {
+                    modal.hidden = true;
+                    input.value = '';
+                    input.removeEventListener('keydown', onKey);
+                    $('token-modal-ok').onclick = null;
+                    $('token-modal-cancel').onclick = null;
+                    tokenPromptPending = null;
+                    resolve(value);
+                };
+                const onKey = e => {
+                    if (e.key === 'Enter') done(input.value.trim() || null);
+                    if (e.key === 'Escape') done(null);
+                };
+                $('token-modal-ok').onclick = () => done(input.value.trim() || null);
+                $('token-modal-cancel').onclick = () => done(null);
+                input.addEventListener('keydown', onKey);
+                modal.hidden = false;
+                input.focus();
             });
-
-            cancelBtn.addEventListener('click', () => {
-                if (typeof dlg.close === 'function') dlg.close();
-                else dlg.style.display = 'none';
-                if (tokenPromiseResolver) {
-                    tokenPromiseResolver(null);
-                    tokenPromiseResolver = null;
-                }
-            });
-
-            form.addEventListener('submit', (e) => {
-                e.preventDefault();
-                const val = inp.value.trim();
-                if (typeof dlg.close === 'function') dlg.close();
-                else dlg.style.display = 'none';
-                if (tokenPromiseResolver) {
-                    tokenPromiseResolver(val);
-                    tokenPromiseResolver = null;
-                }
-            });
-        }
-
-        function requestApiToken() {
-            return new Promise((resolve) => {
-                const dlg = $('token-dialog');
-                const inp = $('modal-token-input');
-                inp.value = sessionStorage.getItem('dfl.token') || '';
-                tokenPromiseResolver = resolve;
-                if (typeof dlg.showModal === 'function') {
-                    dlg.showModal();
-                } else {
-                    dlg.style.display = 'block';
-                }
-                inp.focus();
-            });
+            return tokenPromptPending;
         }
 
         async function apiFetch(url, options = {}) {
@@ -779,7 +778,7 @@
             );
             const response = await fetch(url, Object.assign({}, options, { headers }));
             if (response.status === 401) {
-                const entered = await requestApiToken();
+                const entered = await requestToken();
                 if (entered) {
                     sessionStorage.setItem('dfl.token', entered);
                     return apiFetch(url, options);
@@ -1418,8 +1417,9 @@
                         const cur = reviewStore[k] || {};
                         cur.note = note.value;
                         cur.verdict = verdictSel.value;
+                        cur.ts = Date.now();
                         reviewStore[k] = cur;
-                        saveReviewStore();
+                        saveReviewStore(k);
                         syncStatus.className = 'rev-sync-status saving';
                         syncStatus.textContent = '● 동기화 중…';
                         clearTimeout(syncTimeout);
@@ -1899,7 +1899,6 @@
         }
 
         /* ── initialization ───────────────────────── */
-        initTokenModal();
         fetchReviewsFromServer();
 
         /* ── version chip ──────────────────────────── */
@@ -1907,5 +1906,16 @@
             if (d.version) $('ver-chip').textContent = 'v' + d.version;
         }).catch(() => {});
     </script>
+    <div id="token-modal" role="dialog" aria-modal="true" aria-labelledby="token-modal-title" hidden>
+        <div class="tm-card">
+            <h3 id="token-modal-title">API 토큰 입력</h3>
+            <p class="note">서버가 --token으로 시작됐습니다. API 토큰을 입력하세요.</p>
+            <input id="token-modal-input" class="field" type="password" autocomplete="off" placeholder="API 토큰" />
+            <div class="tm-actions">
+                <button id="token-modal-ok" class="btn primary">확인</button>
+                <button id="token-modal-cancel" class="btn">취소</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

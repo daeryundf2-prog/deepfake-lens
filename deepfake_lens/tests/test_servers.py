@@ -294,6 +294,13 @@ class ClientHeaderGateTest(unittest.TestCase):
             api_request_allowed(self._headers({"X-Deepfake-Lens-Token": "s3cret"}), token="s3cret")
         )
 
+    def test_token_accepts_api_token_alias(self) -> None:
+        """Both servers accept either token header so one credential works."""
+        from deepfake_lens.webapp import api_request_allowed
+
+        self.assertTrue(api_request_allowed(self._headers({"X-API-Token": "s3cret"}), token="s3cret"))
+        self.assertFalse(api_request_allowed(self._headers({"X-API-Token": "wrong"}), token="s3cret"))
+
 
 class LiveServerClientHeaderTest(unittest.TestCase):
     """End-to-end: the running web server must 401 /api/* requests that lack
@@ -756,3 +763,53 @@ class PreviewPayloadTest(unittest.TestCase):
             p.write_bytes(b"x")
             status, _, _, _ = _preview_payload(f"path={p}&root={other}")
             self.assertEqual(status, 403)
+
+
+class ReviewMarksStoreTest(unittest.TestCase):
+    """/api/review-marks merge semantics and persistence."""
+
+    def _store_env(self, path) -> None:
+        import os
+
+        os.environ["DEEPFAKE_LENS_REVIEW_STORE"] = str(path)
+        self.addCleanup(os.environ.pop, "DEEPFAKE_LENS_REVIEW_STORE", None)
+
+    def test_merge_save_delete_roundtrip(self) -> None:
+        import tempfile
+        from deepfake_lens.webapp import _merge_review_marks, _review_marks_payload
+
+        with tempfile.TemporaryDirectory() as d:
+            self._store_env(Path(d) / "marks.json")
+            body = json.dumps({"marks": {"a.png": {"star": True, "note": "suspect", "ts": 1}}}).encode()
+            merged = _merge_review_marks(body)
+            self.assertEqual(merged["status"], "ok")
+            self.assertTrue(merged["marks"]["a.png"]["star"])
+
+            got = _review_marks_payload()
+            self.assertEqual(got["marks"]["a.png"]["note"], "suspect")
+
+            # Empty entry deletes the key.
+            body2 = json.dumps({"marks": {"a.png": {}}}).encode()
+            merged2 = _merge_review_marks(body2)
+            self.assertNotIn("a.png", merged2["marks"])
+
+    def test_invalid_body_rejected(self) -> None:
+        import tempfile
+        from deepfake_lens.webapp import _merge_review_marks
+
+        with tempfile.TemporaryDirectory() as d:
+            self._store_env(Path(d) / "marks.json")
+            with self.assertRaises(ValueError):
+                _merge_review_marks(b"not json")
+            with self.assertRaises(ValueError):
+                _merge_review_marks(json.dumps({"marks": "nope"}).encode())
+
+    def test_long_note_truncated(self) -> None:
+        import tempfile
+        from deepfake_lens.webapp import _merge_review_marks
+
+        with tempfile.TemporaryDirectory() as d:
+            self._store_env(Path(d) / "marks.json")
+            body = json.dumps({"marks": {"k": {"note": "x" * 5000, "star": False}}}).encode()
+            merged = _merge_review_marks(body)
+            self.assertEqual(len(merged["marks"]["k"]["note"]), 4000)

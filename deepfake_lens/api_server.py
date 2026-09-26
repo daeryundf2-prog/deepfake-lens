@@ -83,8 +83,12 @@ def create_app(
         if request.url.path.startswith("/api/"):
             if token is not None:
                 import secrets
-                supplied = request.headers.get("x-api-token") or request.headers.get("x-deepfake-lens-token") or ""
-                if not (supplied and secrets.compare_digest(supplied, token)):
+                from .webapp import TOKEN_HEADERS
+
+                if not any(
+                    (supplied := request.headers.get(name)) and secrets.compare_digest(supplied, token)
+                    for name in TOKEN_HEADERS
+                ):
                     return JSONResponse({"status": "error", "message": "unauthorized"}, status_code=401)
             elif host_name(request.headers.get("host", "")) not in allowed_hosts:
                 return JSONResponse({"status": "error", "message": "host not allowed"}, status_code=403)

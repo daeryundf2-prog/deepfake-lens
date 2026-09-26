@@ -397,25 +397,41 @@ def _scan_specs(
             archive_members.setdefault(display.split("::", 1)[0], []).append(item)
         return item, key, False
 
+    # Flush per-item results into the cache as the scan proceeds — a
+    # killed/cancelled multi-hour scan must not lose every completed
+    # analysis. A rerun with the same --cache resumes instantly on the
+    # items that already finished.
+    _CACHE_FLUSH_EVERY = 20
+
+    def flush_cache(entries: list[tuple[ScanItem, str | None, bool]]) -> None:
+        if cache is None:
+            return
+        for item, key, _ in entries:
+            if key:
+                cache_items[key] = item.to_json()
+        _write_scan_cache(cache_path, cache)
+
+    analyzed: list[tuple[ScanItem, str | None, bool]] = []
     if workers > 1 and len(specs) > 1:
         # Each worker still checks should_stop so a cancel short-circuits
         # remaining items instead of running every analysis to completion.
         with ThreadPoolExecutor(max_workers=workers) as executor:
             analyzed = list(executor.map(analyze_one, specs))
     else:
-        analyzed = []
-        for spec in specs:
-            if should_stop is not None and should_stop():
-                break
-            analyzed.append(analyze_one(spec))
+        try:
+            for spec in specs:
+                if should_stop is not None and should_stop():
+                    break
+                analyzed.append(analyze_one(spec))
+                if len(analyzed) % _CACHE_FLUSH_EVERY == 0:
+                    flush_cache(analyzed[-_CACHE_FLUSH_EVERY:])
+        finally:
+            flush_cache(analyzed)
 
     cached_count = sum(1 for _, _, was_cached in analyzed if was_cached)
     items = [item for item, _, _ in analyzed]
-    if cache is not None:
-        for item, key, _ in analyzed:
-            if key:
-                cache_items[key] = item.to_json()
-        _write_scan_cache(cache_path, cache)
+    if cache is not None and workers > 1:
+        flush_cache(analyzed)
 
     for rel, member_items in archive_members.items():
         meta = archive_meta.get(rel, {})

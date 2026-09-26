@@ -23,7 +23,11 @@ files on request, so exposure beyond loopback is an explicit, guarded choice.
   the same Host-header guard while bound to loopback. `--allow-lan` requires
   `--token`; every `/api/*` request then needs `X-Deepfake-Lens-Token: <token>`
   (401 otherwise). The GUI shell stays unauthenticated but prompts for the
-  token on a 401 and stores it in `sessionStorage` for the session.
+  token on a 401 (async modal) and stores it in `sessionStorage` for the
+  session.
+- Both servers accept either token header — `X-Deepfake-Lens-Token` or the
+  `X-API-Token` alias — so a single credential works across `web` and
+  `api-serve` while the two surfaces converge.
 - **Drive-by/CSRF guard on tokenless binds**: when no token is configured,
   every `/api/*` request must carry a non-empty `X-Deepfake-Lens-Client`
   header (the bundled GUI sends `gui`; any non-empty value is accepted).
@@ -89,6 +93,8 @@ JSON API under `/api/` (GET plus `POST /api/feedback`, `/api/report`,
 | `/api/heatmap` | `path`, `root` | PNG bytes; 403 unless `path` is a `.png` under a **server-registered** read root (see below), 404 if missing |
 | `/api/preview` | `path`, `root` | media bytes with `nosniff`; same registered-root rule, media extensions only, ≤128 MiB |
 | `/api/stats` | — | `{"status", "version", "modules"}` |
+| `/api/review-marks` | — | `{"status", "marks": {path: {star, note, ts}}}` — durable examiner marks store (default `~/.deepfake_lens/review-marks.json`, override `DEEPFAKE_LENS_REVIEW_STORE`) |
+| POST `/api/review-marks` | JSON `{"marks": {path: {star, note, ts}}}` (≤ 8 MiB) | merges per-key marks; an entry with neither `star` nor `note` deletes the key |
 | POST `/api/analyze-upload` | multipart file body (≤ `MAX_UPLOAD_BYTES`) | upload-analysis payload |
 | POST `/api/compare` | multipart with two files | Two-file comparison — speaker distance (audio pair) or stylometry (text pair) |
 | POST `/api/check` | JSON `{"text": "...", "watermark_secret": "...", "watermark_gamma": 0.25}` **or** one multipart file | Unified check-all: full scan + all `models/` engine members + forensic + text probes → `{mode, item, advanced?, forensic?}` |
