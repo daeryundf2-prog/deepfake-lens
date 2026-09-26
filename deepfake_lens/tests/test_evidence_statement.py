@@ -133,6 +133,22 @@ class EvidenceStatementTest(unittest.TestCase):
         self.assertTrue(content.startswith(b"%PDF-"))
         self.assertGreater(len(content), 1000)
 
+    @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf required for PDF generation")
+    def test_pdf_purpose_column_renders_content(self) -> None:
+        """Regression: fixed-height rows silently dropped the purpose column."""
+        import pymupdf
+
+        statement = build_evidence_statement(self.items)
+        pdf_path = self.root / "statement_purpose.pdf"
+        write_evidence_statement_pdf(pdf_path, statement)
+
+        doc = pymupdf.open(str(pdf_path))
+        full_text = "\n".join(page.get_text() for page in doc)
+        doc.close()
+        self.assertIn("입증함", full_text)
+        self.assertIn("제14조의2", full_text)
+        self.assertIn("갑 제1호증", full_text)
+
     def test_cli_evidence_statement_command(self) -> None:
         # Create a mock scan JSON
         scan_json = self.root / "scan_output.json"

@@ -101,7 +101,7 @@ def _compute_sha256(path: Path | str) -> str:
                 h.update(chunk)
         return h.hexdigest()
     except OSError:
-        return "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+        return "N/A (파일 읽기 실패)"
 
 
 def _determine_statutes(score: int, signals: list[Any], item_kind: str) -> list[str]:
@@ -112,10 +112,10 @@ def _determine_statutes(score: int, signals: list[Any], item_kind: str) -> list[
     is_video = item_kind == "video"
 
     if score >= 50:
-        statutes.append("성폭력범죄의 처벌 등에 관한 특례법 제14조의2 (허위영상물 등의 반포등)")
-        statutes.append("정보통신망 이용촉진 및 정보보호 등에 관한 법률 제70조 (벌칙 - 명예훼손)")
         if is_faceswap or is_video:
+            statutes.append("성폭력범죄의 처벌 등에 관한 특례법 제14조의2 (허위영상물 등의 반포등)")
             statutes.append("형법 제347조 (사기 - 신원도용 및 기망)")
+        statutes.append("정보통신망 이용촉진 및 정보보호 등에 관한 법률 제70조 (벌칙 - 명예훼손)")
     else:
         statutes.append("정보통신망 이용촉진 및 정보보호 등에 관한 법률 제70조 (비방 목적 정보유통)")
 
@@ -205,10 +205,10 @@ def write_evidence_statement_pdf(path: Path | str, statement: EvidenceStatement)
         try:
             import fitz as pymupdf
         except ImportError:
-            # Fallback to markdown if pymupdf is unavailable
-            md_path = Path(path).with_suffix(".md")
-            write_evidence_statement_markdown(md_path, statement)
-            return
+            raise RuntimeError(
+                "pymupdf is required for PDF evidence statements; "
+                "install it or use the Markdown output path instead."
+            )
 
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -244,28 +244,41 @@ def write_evidence_statement_pdf(path: Path | str, statement: EvidenceStatement)
 
     page.insert_text(pymupdf.Point(265, 185), "다        음", fontname=font_ko, fontsize=11, color=(0.1, 0.1, 0.1))
 
+    hdr_h = 20.0
+    col4_w = (margin_r - 5) - (margin_l + 285)
+
+    def draw_table_header(y_top: float) -> None:
+        page.draw_rect(pymupdf.Rect(margin_l, y_top, margin_r, y_top + hdr_h), color=(0.75, 0.8, 0.88), fill=(0.9, 0.93, 0.97))
+        page.insert_text(pymupdf.Point(margin_l + 8, y_top + 14), "호증", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
+        page.insert_text(pymupdf.Point(margin_l + 55, y_top + 14), "서증(증거)의 명칭", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
+        page.insert_text(pymupdf.Point(margin_l + 180, y_top + 14), "작성자 및 일자", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
+        page.insert_text(pymupdf.Point(margin_l + 285, y_top + 14), "입증취지 및 위법성 요건 대조", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
+
+    # Measure each row's required height against column 4 (the widest content).
+    # insert_textbox returns the spare height — negative when the text would
+    # overflow — so needed = rect_height - spare holds for both signs.
+    measure = pymupdf.open()
+    probe_page = measure.new_page(width=page_w, height=page_h)
+    row_heights: list[float] = []
+    for entry in statement.entries:
+        probe = pymupdf.Rect(0, 0, col4_w, 2000)
+        spare = probe_page.insert_textbox(probe, entry.purpose_of_proof, fontname=font_ko, fontsize=6.8)
+        needed = probe.height - spare
+        row_heights.append(min(max(58.0, needed + 10.0), 620.0))
+    measure.close()
+
     # Table Header
     y = 196.0
-    hdr_h = 20.0
-    page.draw_rect(pymupdf.Rect(margin_l, y, margin_r, y + hdr_h), color=(0.75, 0.8, 0.88), fill=(0.9, 0.93, 0.97))
-    page.insert_text(pymupdf.Point(margin_l + 8, y + 14), "호증", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
-    page.insert_text(pymupdf.Point(margin_l + 55, y + 14), "서증(증거)의 명칭", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
-    page.insert_text(pymupdf.Point(margin_l + 180, y + 14), "작성자 및 일자", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
-    page.insert_text(pymupdf.Point(margin_l + 285, y + 14), "입증취지 및 위법성 요건 대조", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
+    draw_table_header(y)
     y += hdr_h
 
     # Table rows
-    row_h = 58.0
-
     for idx, entry in enumerate(statement.entries):
+        row_h = row_heights[idx]
         if y + row_h > 720:
             page = create_page()
             y = 70.0
-            page.draw_rect(pymupdf.Rect(margin_l, y, margin_r, y + hdr_h), color=(0.75, 0.8, 0.88), fill=(0.9, 0.93, 0.97))
-            page.insert_text(pymupdf.Point(margin_l + 8, y + 14), "호증", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
-            page.insert_text(pymupdf.Point(margin_l + 55, y + 14), "서증(증거)의 명칭", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
-            page.insert_text(pymupdf.Point(margin_l + 180, y + 14), "작성자 및 일자", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
-            page.insert_text(pymupdf.Point(margin_l + 285, y + 14), "입증취지 및 위법성 요건 대조", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
+            draw_table_header(y)
             y += hdr_h
 
         # Alternating background

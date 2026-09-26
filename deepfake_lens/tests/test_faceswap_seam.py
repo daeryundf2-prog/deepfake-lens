@@ -40,6 +40,25 @@ class FaceSwapSeamTest(unittest.TestCase):
         self.assertTrue(len(analysis.limitations) > 0)
 
     @unittest.skipUnless(HAVE_CV2, "opencv required")
+    def test_undersized_faces_report_unknown_not_low(self) -> None:
+        """Faces below the analysis resolution must not yield a 'low risk' verdict."""
+        from unittest.mock import patch
+
+        from deepfake_lens.face import FaceRegion
+        import deepfake_lens.faceswap_seam as seam_mod
+
+        img = np.full((300, 300, 3), 128, dtype=np.uint8)
+        img_path = self.root / "small_face.png"
+        cv2.imwrite(str(img_path), img)
+
+        tiny = FaceRegion(x=10, y=10, width=20, height=20, landmarks=[], confidence=0.9)
+        with patch.object(seam_mod, "_detect_faces", return_value=[tiny]):
+            analysis = analyze_faceswap_seam(img_path)
+
+        self.assertEqual(analysis.band, "unknown")
+        self.assertEqual(analysis.face_count, 1)
+
+    @unittest.skipUnless(HAVE_CV2, "opencv required")
     def test_blank_image_reports_no_faces(self) -> None:
         # Create solid gray image
         blank = np.full((300, 300, 3), 128, dtype=np.uint8)

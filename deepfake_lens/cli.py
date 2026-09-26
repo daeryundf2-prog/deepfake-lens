@@ -161,6 +161,10 @@ def main(argv: list[str] | None = None) -> int:
     scan_parser.add_argument("--evidence-statement-out", type=Path, help="write standard ECFS court evidence statement (증거설명서, Markdown or PDF depending on suffix)")
     scan_parser.add_argument("--evidence-statement-pdf-out", type=Path, help="write standard ECFS court evidence statement as PDF")
     scan_parser.add_argument("--case-no", type=str, default="(사건번호 입력)", help="case number for forensic evidence statement")
+    scan_parser.add_argument("--case-name", type=str, default="성폭력처벌법위반(허위영상물편집등) 및 정보통신망법위반", help="case title (사건명) for forensic evidence statement")
+    scan_parser.add_argument("--plaintiff", type=str, default="(의뢰사 상호명 입력) 귀하", help="plaintiff/claimant for forensic evidence statement")
+    scan_parser.add_argument("--defendant", type=str, default="(피고/피의자 성명 입력)", help="defendant/suspect for forensic evidence statement")
+    scan_parser.add_argument("--court", type=str, default="○○지방법원 귀중", help="court/investigation agency for forensic evidence statement")
     scan_parser.add_argument("--exhibit-no", type=str, default="갑 제        호증", help="court exhibit number for forensic PDF report (default: '갑 제        호증')")
     scan_parser.add_argument("--redact-paths", action="store_true", help="redact paths in HTML/PDF reports")
     scan_parser.add_argument("--sign", action="store_true", help="HMAC-SHA256 sign the --json-out report (integrity-to-key-holder, not legal non-repudiation; key from --key-file or DEEPFAKE_LENS_REPORT_KEY)")
@@ -1162,7 +1166,7 @@ def main(argv: list[str] | None = None) -> int:
         if target.is_file() and target.suffix.lower() == ".json":
             try:
                 data = json.loads(target.read_text(encoding="utf-8"))
-                from .webapp import _scan_item_from_json
+                from .core import _scan_item_from_json
                 raw_items = data.get("items", [])
                 items = [_scan_item_from_json(row) for row in raw_items if isinstance(row, dict)]
             except Exception as exc:
@@ -1236,6 +1240,7 @@ def main(argv: list[str] | None = None) -> int:
 
         manifest = inspect_model_manifest(args.models_dir)
         if args.manifest_out:
+            args.manifest_out.parent.mkdir(parents=True, exist_ok=True)
             args.manifest_out.write_text(json.dumps(manifest.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         if args.format == "json":
             print(json.dumps(manifest.to_json(), ensure_ascii=False, indent=2))
@@ -1326,17 +1331,23 @@ def main(argv: list[str] | None = None) -> int:
             redact_paths=args.redact_paths,
             exhibit_no=getattr(args, "exhibit_no", "갑 제        호증"),
         )
-    if getattr(args, "evidence_statement_out", None):
-        out_p = Path(args.evidence_statement_out)
-        stmt = build_evidence_statement(items, case_no=getattr(args, "case_no", "(사건번호 입력)"))
-        if out_p.suffix.lower() == ".pdf":
-            write_evidence_statement_pdf(out_p, stmt)
-        else:
-            write_evidence_statement_markdown(out_p, stmt)
-    if getattr(args, "evidence_statement_pdf_out", None):
-        out_p = Path(args.evidence_statement_pdf_out)
-        stmt = build_evidence_statement(items, case_no=getattr(args, "case_no", "(사건번호 입력)"))
-        write_evidence_statement_pdf(out_p, stmt)
+    if getattr(args, "evidence_statement_out", None) or getattr(args, "evidence_statement_pdf_out", None):
+        stmt = build_evidence_statement(
+            items,
+            case_no=getattr(args, "case_no", "(사건번호 입력)"),
+            case_name=getattr(args, "case_name", "성폭력처벌법위반(허위영상물편집등) 및 정보통신망법위반"),
+            plaintiff=getattr(args, "plaintiff", "(의뢰사 상호명 입력) 귀하"),
+            defendant=getattr(args, "defendant", "(피고/피의자 성명 입력)"),
+            court=getattr(args, "court", "○○지방법원 귀중"),
+        )
+        if getattr(args, "evidence_statement_out", None):
+            out_p = Path(args.evidence_statement_out)
+            if out_p.suffix.lower() == ".pdf":
+                write_evidence_statement_pdf(out_p, stmt)
+            else:
+                write_evidence_statement_markdown(out_p, stmt)
+        if getattr(args, "evidence_statement_pdf_out", None):
+            write_evidence_statement_pdf(Path(args.evidence_statement_pdf_out), stmt)
 
     if args.format == "json":
         print(scan_to_json_text(summary, items))

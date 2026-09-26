@@ -75,6 +75,8 @@ class VendorWeightsTest(unittest.TestCase):
         self.assertEqual(result["available_weights"], 1)
         self.assertEqual(result["missing_weights"], 1)
         self.assertIn("missing_detector", result["missing"])
+        # Missing weights must not report a clean pass for air-gap custody.
+        self.assertEqual(result["status"], "warn")
 
     def test_bundle_offline_weights(self) -> None:
         bundle_dir = self.root / "offline_bundle"
@@ -86,6 +88,26 @@ class VendorWeightsTest(unittest.TestCase):
         # Check files were copied
         self.assertTrue((bundle_dir / "test_detector-runtime.json").is_file())
         self.assertTrue((bundle_dir / "test_model.pth").is_file())
+
+    def test_bundle_preserves_nested_checkpoint_paths(self) -> None:
+        """Nested checkpoint relpaths must keep their structure so the copied
+        runtime profile still resolves inside the bundle."""
+        nested = self.models_dir / "checkpoints" / "sub"
+        nested.mkdir(parents=True)
+        (nested / "deep_model.onnx").write_bytes(b"nested weights")
+        (self.models_dir / "nested_detector-runtime.json").write_text(
+            json.dumps({"model_id": "nested_detector", "checkpoint": "checkpoints/sub/deep_model.onnx"}),
+            encoding="utf-8",
+        )
+
+        bundle_dir = self.root / "nested_bundle"
+        bundle_offline_weights(bundle_dir, models_dir=self.models_dir, copy_weights=True)
+
+        bundled = bundle_dir / "checkpoints" / "sub" / "deep_model.onnx"
+        self.assertTrue(bundled.is_file())
+        # The copied profile + bundled weights must resolve against each other.
+        profile = json.loads((bundle_dir / "nested_detector-runtime.json").read_text(encoding="utf-8"))
+        self.assertTrue((bundle_dir / profile["checkpoint"]).is_file())
 
     def test_cli_vendor_weights_inspect(self) -> None:
         buf = io.StringIO()

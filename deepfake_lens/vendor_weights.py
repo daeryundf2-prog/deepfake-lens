@@ -94,9 +94,9 @@ def _infer_modality(name: str, profile_data: dict[str, Any]) -> str:
     if mod in ("image", "audio", "text", "video"):
         return mod
     n = name.lower()
-    if "audio" in n or "wav" in n or "aasist" in n:
+    if "audio" in n or "wav" in n or "aasist" in n or "w2v2" in n or "wav2vec" in n or "melodymachine" in n:
         return "audio"
-    if "text" in n or "roberta" in n or "ppl" in n or "detector" in n and "openai" in n:
+    if "text" in n or "roberta" in n or "ppl" in n or "binoculars" in n or "qwen" in n or ("detector" in n and "openai" in n):
         return "text"
     if "video" in n or "frames" in n or "temporal" in n:
         return "video"
@@ -197,7 +197,11 @@ def verify_offline_integrity(models_dir: Path | str | None = None) -> dict[str, 
     missing = [e for e in manifest.entries if e.integrity_status == "missing"]
 
     return {
-        "status": "pass" if not mismatches and manifest.available_weights > 0 else "warn",
+        "status": (
+            "fail" if mismatches
+            else "warn" if (missing or manifest.available_weights == 0)
+            else "pass"
+        ),
         "total_profiles": manifest.total_profiles,
         "available_weights": manifest.available_weights,
         "missing_weights": manifest.missing_weights,
@@ -232,6 +236,12 @@ def bundle_offline_weights(
         if copy_weights and e.exists:
             src_chk = Path(e.checkpoint_abspath)
             if src_chk.is_file():
-                shutil.copy2(src_chk, dest / src_chk.name)
+                rel = Path(e.checkpoint_relpath)
+                # Preserve the checkpoint's declared relative path so the copied
+                # runtime profile still resolves inside the bundle; fall back to
+                # the basename for absolute or escaping paths.
+                dest_chk = dest / src_chk.name if rel.is_absolute() or ".." in rel.parts else dest / rel
+                dest_chk.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_chk, dest_chk)
 
     return manifest_file

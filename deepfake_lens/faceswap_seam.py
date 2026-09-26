@@ -92,11 +92,13 @@ def analyze_faceswap_seam(
     best_corneal_asym: float | None = None
 
     img_h, img_w = image.shape[:2]
+    analyzed_faces = 0
 
     for face in faces:
         x, y, w, h = face.x, face.y, face.width, face.height
         if w < 32 or h < 32:
             continue
+        analyzed_faces += 1
 
         # 1. Elliptical boundary seam analysis (Poisson blending & feathering)
         seam_res, seam_sig = _analyze_elliptical_seam(image, face, cv2, np)
@@ -107,7 +109,10 @@ def analyze_faceswap_seam(
 
         # 2. Sensor noise discrepancy (Face crop vs body context)
         noise_ratio, noise_sig = _analyze_noise_mismatch(image, face, cv2, np)
-        if noise_ratio is not None:
+        if noise_ratio is not None and (
+            best_noise_ratio is None
+            or abs(math.log(max(noise_ratio, 1e-9))) > abs(math.log(max(best_noise_ratio, 1e-9)))
+        ):
             best_noise_ratio = noise_ratio
         if noise_sig:
             signals.append(noise_sig)
@@ -126,8 +131,33 @@ def analyze_faceswap_seam(
         if corneal_sig:
             signals.append(corneal_sig)
 
-    if not signals:
+    if analyzed_faces == 0:
+        return FaceSwapSeamAnalysis(
+            score=0,
+            band="unknown",
+            band_label="판단 어려움",
+            verdict="감지된 얼굴이 모두 32px 미만으로 경계면 분석이 불가능합니다.",
+            signals=[],
+            limitations=["유효 해상도의 얼굴이 없어 분석 지표를 산출하지 못했습니다."],
+            face_count=len(faces),
+        )
+
+    measured = any(v is not None for v in (best_boundary_res, best_noise_ratio, best_chroma_delta, best_corneal_asym))
+    if not measured:
+        limitations.append("얼굴 주변 문맥 영역이 부족하여 분석 지표를 산출하지 못했습니다.")
+    elif not signals:
         limitations.append("얼굴 경계면 및 노이즈 분포에서 뚜렷한 합성 불연속성이 감지되지 않았습니다.")
+
+    if not measured:
+        return FaceSwapSeamAnalysis(
+            score=0,
+            band="unknown",
+            band_label="판단 어려움",
+            verdict="안면부 분석 지표를 산출할 수 없어 합성 여부를 판단하지 못했습니다.",
+            signals=signals,
+            limitations=limitations,
+            face_count=len(faces),
+        )
 
     score = min(100, sum(s.weight for s in signals))
     if score >= 65:
