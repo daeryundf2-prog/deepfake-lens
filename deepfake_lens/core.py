@@ -604,6 +604,15 @@ def _deep_image_layers(path: Path) -> tuple[list[EvidenceSignal], list[str]]:
         limitations.extend(inpaint.limitations[:2])
     except Exception:
         limitations.append("인페인팅 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
+    try:
+        from .faceswap_seam import analyze_faceswap_seam
+        seam = analyze_faceswap_seam(path)
+        if seam.signals:
+            for sig in seam.signals:
+                signals.append(EvidenceSignal(sig.title, sig.detail, min(sig.weight, 30)))
+        limitations.extend(seam.limitations[:2])
+    except Exception:
+        limitations.append("페이스스왑 경계면 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
     return signals, limitations
 
 
