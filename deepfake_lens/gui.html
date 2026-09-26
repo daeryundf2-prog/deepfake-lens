@@ -366,6 +366,79 @@
         .toast.err { background: var(--red); color: #fff; }
 
         .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+
+        /* ── Forensic Split-Slider & Comparison Studio ── */
+        .forensic-studio {
+            background: var(--card2); border: 1px solid var(--line); border-radius: 12px;
+            padding: 12px; margin-top: 10px; display: flex; flex-direction: column; gap: 8px;
+        }
+        .studio-header {
+            display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;
+        }
+        .studio-title { font-size: 11.5px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px; }
+        .studio-modes { display: flex; gap: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+        .studio-btn {
+            background: transparent; border: none; font-size: 11.5px; padding: 3px 8px; border-radius: 6px; cursor: pointer; color: var(--muted); font-weight: 600; font-family: inherit; transition: background 0.15s, color 0.15s;
+        }
+        .studio-btn.active { background: var(--accent); color: #fff; }
+        .split-slider-viewport {
+            position: relative; width: 100%; max-height: 480px; min-height: 200px; overflow: hidden; border-radius: 8px;
+            background: #0d1117; display: flex; justify-content: center; align-items: center; user-select: none;
+            touch-action: pan-y;
+        }
+        .split-base-img {
+            max-width: 100%; max-height: 480px; object-fit: contain; display: block; border-radius: 8px;
+        }
+        .split-overlay-wrap {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center;
+            overflow: hidden; pointer-events: none;
+        }
+        .split-overlay-img {
+            max-width: 100%; max-height: 480px; object-fit: contain; display: block; border-radius: 8px;
+        }
+        .split-divider-line {
+            position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; box-shadow: 0 0 8px rgba(0,0,0,0.9);
+            transform: translateX(-50%); pointer-events: none; z-index: 10;
+        }
+        .split-handle {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 32px; height: 32px; border-radius: 50%; background: #fff; color: #111;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center;
+            font-size: 12px; font-weight: 800; cursor: ew-resize; pointer-events: auto;
+        }
+        .split-controls {
+            display: flex; align-items: center; gap: 10px; margin-top: 4px; font-size: 12px; color: var(--muted);
+        }
+        .split-range {
+            flex: 1; accent-color: var(--accent); cursor: pointer; height: 6px;
+        }
+        .split-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-weight: 500; }
+        .split-label-orig { color: var(--text); }
+        .split-label-heat { color: var(--red); font-weight: 600; }
+
+        /* ── Accessible Token Dialog ── */
+        .token-modal {
+            border: 1px solid var(--line); border-radius: 16px; background: var(--card); color: var(--text);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3); max-width: 420px; width: 90%; padding: 22px;
+            margin: auto; outline: none;
+        }
+        .token-modal::backdrop {
+            background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px);
+        }
+        .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 6px; color: var(--text); }
+        .modal-desc { font-size: 13px; color: var(--muted); margin-bottom: 14px; line-height: 1.45; }
+        .modal-field-row { display: flex; gap: 6px; align-items: center; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+
+        /* ── Review sync indicator & verdict ── */
+        .rev-toolbar { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; flex-wrap: wrap; gap: 6px; }
+        .rev-verdict-sel {
+            background: var(--card2); border: 1px solid var(--line); border-radius: 6px;
+            padding: 4px 8px; font-size: 12px; color: var(--text); font-family: inherit;
+        }
+        .rev-sync-status { font-size: 11px; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; }
+        .rev-sync-status.saved { color: var(--green); }
+        .rev-sync-status.saving { color: var(--orange); }
     </style>
 </head>
 <body>
@@ -527,7 +600,8 @@
                     <div class="toolbar">
                         <button class="btn btn-sm" id="exp-json">JSON</button>
                         <button class="btn btn-sm" id="exp-csv">CSV</button>
-                        <button class="btn btn-sm" id="exp-report">리포트</button>
+                        <button class="btn btn-sm" id="exp-report">HTML</button>
+                        <button class="btn btn-sm" id="exp-pdf">감정 PDF</button>
                         <button class="btn btn-sm btn-red" id="exp-clear">삭제</button>
                     </div>
                 </div>
@@ -540,6 +614,21 @@
             </div>
         </section>
     </div>
+
+    <dialog id="token-dialog" class="token-modal" aria-labelledby="token-dialog-title">
+        <form method="dialog" id="token-form">
+            <div class="modal-title" id="token-dialog-title">🔐 API 인증 토큰 입력</div>
+            <p class="modal-desc">서버에 접근하기 위해 인증 토큰이 필요합니다. (--token으로 시작된 서버)</p>
+            <div class="modal-field-row">
+                <input type="password" id="modal-token-input" class="field" placeholder="API 토큰을 입력하세요" autocomplete="off" required>
+                <button type="button" class="btn btn-sm" id="modal-token-toggle" aria-label="토큰 보기">👁</button>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn" id="modal-token-cancel">취소</button>
+                <button type="submit" class="btn btn-primary" id="modal-token-submit">확인</button>
+            </div>
+        </form>
+    </dialog>
 
     <div id="toasts" aria-live="polite"></div>
 
@@ -558,8 +647,7 @@
         let revFilter = false;
         let kbIndex = -1;
 
-        /* Review marks live only in this browser — keyed by path (or name
-           for uploads), so a re-scan of the same folder restores them. */
+        /* Review marks stored locally and synchronized with backend API */
         const REVIEW_KEY = 'dflens-review-v1';
         let reviewStore = {};
         try { reviewStore = JSON.parse(localStorage.getItem(REVIEW_KEY) || '{}'); } catch (e) { reviewStore = {}; }
@@ -567,13 +655,45 @@
         function saveReviewStore() {
             try { localStorage.setItem(REVIEW_KEY, JSON.stringify(reviewStore)); } catch (e) { /* quota — non-fatal */ }
         }
+
+        async function syncReviewToServer(key, entry) {
+            if (!key) return;
+            try {
+                await apiFetch('/api/artifacts/' + encodeURIComponent(key) + '/review', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(entry),
+                });
+            } catch (e) {
+                // Background sync failure is non-fatal; localStorage retains
+            }
+        }
+
+        async function fetchReviewsFromServer() {
+            try {
+                const res = await apiFetch('/api/reviews');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.reviews && typeof data.reviews === 'object') {
+                        for (const [k, v] of Object.entries(data.reviews)) {
+                            if (!reviewStore[k] || (v.updated_at && (!reviewStore[k].updated_at || v.updated_at > reviewStore[k].updated_at))) {
+                                reviewStore[k] = v;
+                            }
+                        }
+                        saveReviewStore();
+                    }
+                }
+            } catch (e) { /* ignore */ }
+        }
+
         function toggleReview(item, card) {
             const key = itemKey(item);
             const entry = reviewStore[key] || {};
             entry.star = !entry.star;
-            if (!entry.star && !entry.note) delete reviewStore[key];
+            if (!entry.star && !entry.note && !entry.verdict) delete reviewStore[key];
             else reviewStore[key] = entry;
             saveReviewStore();
+            syncReviewToServer(key, entry);
             card.classList.toggle('reviewed', !!entry.star);
             card.querySelector('.rev-star').setAttribute('aria-pressed', entry.star ? 'true' : 'false');
             const sub = card.querySelector('.res-sub');
@@ -598,6 +718,57 @@
             setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, isErr ? 5000 : 2800);
         }
 
+        /* ── non-blocking token dialog ──────────────── */
+        let tokenPromiseResolver = null;
+        function initTokenModal() {
+            const dlg = $('token-dialog');
+            const inp = $('modal-token-input');
+            const toggle = $('modal-token-toggle');
+            const cancelBtn = $('modal-token-cancel');
+            const form = $('token-form');
+
+            toggle.addEventListener('click', () => {
+                const isPw = inp.type === 'password';
+                inp.type = isPw ? 'text' : 'password';
+                toggle.textContent = isPw ? '🔒' : '👁';
+            });
+
+            cancelBtn.addEventListener('click', () => {
+                if (typeof dlg.close === 'function') dlg.close();
+                else dlg.style.display = 'none';
+                if (tokenPromiseResolver) {
+                    tokenPromiseResolver(null);
+                    tokenPromiseResolver = null;
+                }
+            });
+
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const val = inp.value.trim();
+                if (typeof dlg.close === 'function') dlg.close();
+                else dlg.style.display = 'none';
+                if (tokenPromiseResolver) {
+                    tokenPromiseResolver(val);
+                    tokenPromiseResolver = null;
+                }
+            });
+        }
+
+        function requestApiToken() {
+            return new Promise((resolve) => {
+                const dlg = $('token-dialog');
+                const inp = $('modal-token-input');
+                inp.value = sessionStorage.getItem('dfl.token') || '';
+                tokenPromiseResolver = resolve;
+                if (typeof dlg.showModal === 'function') {
+                    dlg.showModal();
+                } else {
+                    dlg.style.display = 'block';
+                }
+                inp.focus();
+            });
+        }
+
         async function apiFetch(url, options = {}) {
             const token = sessionStorage.getItem('dfl.token') || '';
             const headers = Object.assign(
@@ -607,9 +778,9 @@
             );
             const response = await fetch(url, Object.assign({}, options, { headers }));
             if (response.status === 401) {
-                const entered = prompt('API 토큰을 입력하세요 (--token으로 시작된 서버):');
+                const entered = await requestApiToken();
                 if (entered) {
-                    sessionStorage.setItem('dfl.token', entered.trim());
+                    sessionStorage.setItem('dfl.token', entered);
                     return apiFetch(url, options);
                 }
             }
@@ -877,12 +1048,21 @@
             const parts = [];
             if (item.error) parts.push(`<div class="verdict">분석 실패: ${escapeHtml(item.error)}</div>`);
             if (r.verdict) parts.push(`<div class="verdict">${escapeHtml(r.verdict)}</div>`);
-            // Inline media preview for scanned files under the scan root.
-            if (lastScanRoot && item.path && !item.path.includes('::') &&
+            const hasPreview = lastScanRoot && item.path && !item.path.includes('::') &&
                 !/^[a-zA-Z]:[\\/]|^\//.test(item.path) &&
-                (item.kind === 'image' || item.kind === 'video' || item.kind === 'audio')) {
-                const abs = lastScanRoot.replace(/[\\/]+$/, '') + '/' + item.path;
-                parts.push(`<div class="dgroup"><div class="dt">미리보기</div><div class="pv-slot" data-pv="${escapeHtml(abs)}" data-kind="${escapeHtml(item.kind)}"><span class="note">로딩 중…</span></div></div>`);
+                (item.kind === 'image' || item.kind === 'video' || item.kind === 'audio');
+            const abs = hasPreview ? (lastScanRoot.replace(/[\\/]+$/, '') + '/' + item.path) : '';
+            const hasHeatmap = Boolean(item.heatmap_path && lastScanRoot);
+
+            if (item.kind === 'image' && hasPreview && hasHeatmap) {
+                parts.push(`<div class="forensic-studio-slot" data-pv="${escapeHtml(abs)}" data-hm="${escapeHtml(item.heatmap_path)}"><span class="note">포렌식 비교 스튜디오 준비 중…</span></div>`);
+            } else {
+                if (hasPreview) {
+                    parts.push(`<div class="dgroup"><div class="dt">미리보기</div><div class="pv-slot" data-pv="${escapeHtml(abs)}" data-kind="${escapeHtml(item.kind)}"><span class="note">로딩 중…</span></div></div>`);
+                }
+                if (hasHeatmap) {
+                    parts.push(`<div class="dgroup"><div class="dt">픽셀 히트맵</div><div class="hm-slot" data-hm="${escapeHtml(item.heatmap_path)}"><span class="note">히트맵 로딩 중…</span></div></div>`);
+                }
             }
             const ma = r.model_analysis;
             if (ma) {
@@ -903,9 +1083,6 @@
             if (sg && sg.label) {
                 const reasons = (sg.reasons || []).map(escapeHtml).join(' ');
                 parts.push(`<div class="dgroup"><div class="dt">출처 추정 (${escapeHtml(sg.confidence || 'unknown')})</div><div class="note">${escapeHtml(sg.label)} — ${reasons}</div></div>`);
-            }
-            if (item.heatmap_path && lastScanRoot) {
-                parts.push(`<div class="dgroup"><div class="dt">픽셀 히트맵</div><div class="hm-slot" data-hm="${escapeHtml(item.heatmap_path)}"><span class="note">히트맵 로딩 중…</span></div></div>`);
             }
             parts.push(`<div class="band-advice">${escapeHtml(bandAdvice(r.band || 'unknown'))}</div>`);
             parts.push(`<div class="caveat">이 결과는 스크리닝 우선순위 신호입니다. 합성 여부의 확정 판정이 아니며, 원본 확보·맥락 검토가 필요합니다.</div>`);
@@ -946,6 +1123,206 @@
                 slot.appendChild(img);
             } catch (e) {
                 slot.innerHTML = `<span class="note">히트맵 로딩 실패: ${escapeHtml(e.message)}</span>`;
+            }
+        }
+
+        async function loadForensicStudio(slot) {
+            const pvPath = slot.dataset.pv;
+            const hmPath = slot.dataset.hm;
+            slot.innerHTML = `<span class="note">포렌식 레이어 로딩 중 (원본 & 히트맵)…</span>`;
+
+            try {
+                const [resPv, resHm] = await Promise.all([
+                    apiFetch('/api/preview?path=' + encodeURIComponent(pvPath) + '&root=' + encodeURIComponent(lastScanRoot)),
+                    apiFetch('/api/heatmap?path=' + encodeURIComponent(hmPath) + '&root=' + encodeURIComponent(lastScanRoot)),
+                ]);
+
+                if (!resPv.ok || !resHm.ok) {
+                    slot.innerHTML = `<span class="note">포렌식 비교 이미지 로드 실패 (원본: ${resPv.status}, 히트맵: ${resHm.status})</span>`;
+                    return;
+                }
+
+                const blobPv = await resPv.blob();
+                const blobHm = await resHm.blob();
+                const urlPv = URL.createObjectURL(blobPv);
+                const urlHm = URL.createObjectURL(blobHm);
+
+                const studio = document.createElement('div');
+                studio.className = 'forensic-studio';
+
+                let mode = 'split';
+                let splitPos = 50;
+                let blendOpacity = 60;
+
+                studio.innerHTML = `
+                    <div class="studio-header">
+                        <div class="studio-title">
+                            <span>🔬</span>
+                            <span>포렌식 비교 분석 스튜디오</span>
+                        </div>
+                        <div class="studio-modes" role="group" aria-label="비교 모드">
+                            <button type="button" class="studio-btn active" data-mode="split">좌우 분할</button>
+                            <button type="button" class="studio-btn" data-mode="blend">알파 중첩</button>
+                            <button type="button" class="studio-btn" data-mode="orig">원본만</button>
+                            <button type="button" class="studio-btn" data-mode="heat">히트맵만</button>
+                        </div>
+                    </div>
+                    <div class="split-slider-viewport">
+                        <img class="split-base-img" src="${urlPv}" alt="원본 이미지">
+                        <div class="split-overlay-wrap">
+                            <img class="split-overlay-img" src="${urlHm}" alt="픽셀 히트맵">
+                        </div>
+                        <div class="split-divider-line">
+                            <div class="split-handle" title="드래그하여 분할 조정">⟷</div>
+                        </div>
+                    </div>
+                    <div class="split-controls">
+                        <span class="split-mode-label" style="font-weight:600;">분할 위치:</span>
+                        <input type="range" class="split-range" min="0" max="100" value="50" aria-label="비교 슬라이더 위치">
+                        <span class="split-pct-label" style="min-width:36px;text-align:right;">50%</span>
+                        <button type="button" class="btn btn-sm" data-quick="0">0%</button>
+                        <button type="button" class="btn btn-sm" data-quick="50">50%</button>
+                        <button type="button" class="btn btn-sm" data-quick="100">100%</button>
+                    </div>
+                    <div class="split-labels">
+                        <span class="split-label-orig">◀ 원본 (Original)</span>
+                        <span class="split-label-heat">히트맵 (Grad-CAM/ELA) ▶</span>
+                    </div>
+                `;
+
+                const viewport = studio.querySelector('.split-slider-viewport');
+                const overlayWrap = studio.querySelector('.split-overlay-wrap');
+                const overlayImg = studio.querySelector('.split-overlay-img');
+                const baseImg = studio.querySelector('.split-base-img');
+                const divider = studio.querySelector('.split-divider-line');
+                const range = studio.querySelector('.split-range');
+                const pctLabel = studio.querySelector('.split-pct-label');
+                const modeLabel = studio.querySelector('.split-mode-label');
+                const modeBtns = studio.querySelectorAll('.studio-btn');
+
+                function updateView() {
+                    if (mode === 'split') {
+                        overlayWrap.style.clipPath = `polygon(${splitPos}% 0, 100% 0, 100% 100%, ${splitPos}% 100%)`;
+                        overlayImg.style.opacity = '1';
+                        baseImg.style.display = 'block';
+                        divider.style.display = 'block';
+                        divider.style.left = splitPos + '%';
+                        range.value = splitPos;
+                        pctLabel.textContent = splitPos + '%';
+                        modeLabel.textContent = '분할 위치:';
+                    } else if (mode === 'blend') {
+                        overlayWrap.style.clipPath = 'none';
+                        overlayImg.style.opacity = String(blendOpacity / 100);
+                        baseImg.style.display = 'block';
+                        divider.style.display = 'none';
+                        range.value = blendOpacity;
+                        pctLabel.textContent = blendOpacity + '%';
+                        modeLabel.textContent = '중첩 투명도:';
+                    } else if (mode === 'orig') {
+                        overlayWrap.style.clipPath = 'polygon(100% 0, 100% 0, 100% 100%, 100% 100%)';
+                        overlayImg.style.opacity = '0';
+                        baseImg.style.display = 'block';
+                        divider.style.display = 'none';
+                        range.value = 0;
+                        pctLabel.textContent = '0%';
+                        modeLabel.textContent = '원본 100%';
+                    } else if (mode === 'heat') {
+                        overlayWrap.style.clipPath = 'none';
+                        overlayImg.style.opacity = '1';
+                        baseImg.style.display = 'none';
+                        divider.style.display = 'none';
+                        range.value = 100;
+                        pctLabel.textContent = '100%';
+                        modeLabel.textContent = '히트맵 100%';
+                    }
+                }
+
+                modeBtns.forEach(b => b.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    modeBtns.forEach(btn => btn.classList.remove('active'));
+                    b.classList.add('active');
+                    mode = b.dataset.mode;
+                    updateView();
+                }));
+
+                range.addEventListener('input', (e) => {
+                    e.stopPropagation();
+                    const val = parseInt(range.value, 10);
+                    if (mode === 'blend') blendOpacity = val;
+                    else {
+                        splitPos = val;
+                        if (mode !== 'split') {
+                            mode = 'split';
+                            modeBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.mode === 'split'));
+                        }
+                    }
+                    updateView();
+                });
+
+                studio.querySelectorAll('button[data-quick]').forEach(b => {
+                    b.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const val = parseInt(b.dataset.quick, 10);
+                        if (mode === 'blend') blendOpacity = val;
+                        else {
+                            splitPos = val;
+                            if (mode !== 'split') {
+                                mode = 'split';
+                                modeBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.mode === 'split'));
+                            }
+                        }
+                        updateView();
+                    });
+                });
+
+                let isDragging = false;
+                function handlePointer(clientX) {
+                    const rect = viewport.getBoundingClientRect();
+                    if (!rect.width) return;
+                    let pct = Math.round(((clientX - rect.left) / rect.width) * 100);
+                    pct = Math.max(0, Math.min(100, pct));
+                    if (mode === 'blend') blendOpacity = pct;
+                    else {
+                        splitPos = pct;
+                        if (mode !== 'split') {
+                            mode = 'split';
+                            modeBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.mode === 'split'));
+                        }
+                    }
+                    updateView();
+                }
+
+                viewport.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    isDragging = true;
+                    handlePointer(e.clientX);
+                });
+                window.addEventListener('mousemove', (e) => {
+                    if (!isDragging) return;
+                    e.preventDefault();
+                    handlePointer(e.clientX);
+                });
+                window.addEventListener('mouseup', () => { isDragging = false; });
+
+                viewport.addEventListener('touchstart', (e) => {
+                    if (e.touches.length > 0) {
+                        isDragging = true;
+                        handlePointer(e.touches[0].clientX);
+                    }
+                }, { passive: true });
+                viewport.addEventListener('touchmove', (e) => {
+                    if (isDragging && e.touches.length > 0) {
+                        handlePointer(e.touches[0].clientX);
+                    }
+                }, { passive: true });
+                viewport.addEventListener('touchend', () => { isDragging = false; });
+
+                updateView();
+                slot.innerHTML = '';
+                slot.appendChild(studio);
+            } catch (e) {
+                slot.innerHTML = `<span class="note">스튜디오 로딩 실패: ${escapeHtml(e.message)}</span>`;
             }
         }
 
@@ -1007,18 +1384,59 @@
                         submitFeedback(item, b.dataset.label, fb.querySelector('.fb-status'));
                     }));
                     detail.appendChild(fb);
+                    const revBox = document.createElement('div');
+                    revBox.className = 'rev-box';
                     const note = document.createElement('textarea');
                     note.className = 'rev-note';
-                    note.placeholder = '검토 메모 — 이 브라우저에만 저장됩니다';
+                    note.placeholder = '검토 메모 — 분석관 의견 및 특이사항 입력 (서버 자동 동기화)';
                     note.value = rev.note || '';
                     note.addEventListener('click', e => e.stopPropagation());
-                    note.addEventListener('input', () => {
-                        const entry2 = reviewStore[itemKey(item)] || {};
-                        entry2.note = note.value;
-                        reviewStore[itemKey(item)] = entry2;
+
+                    const revBar = document.createElement('div');
+                    revBar.className = 'rev-toolbar';
+                    revBar.innerHTML = `
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <label style="font-size:11.5px;color:var(--muted);font-weight:600;">검토 판정:</label>
+                            <select class="rev-verdict-sel">
+                                <option value="unreviewed">미검토 (Pending)</option>
+                                <option value="synthetic">인공합성 의심 (Synthetic)</option>
+                                <option value="authentic">원본 정상 (Authentic)</option>
+                                <option value="inconclusive">판단 보류 (Inconclusive)</option>
+                            </select>
+                        </div>
+                        <span class="rev-sync-status"></span>
+                    `;
+                    const verdictSel = revBar.querySelector('.rev-verdict-sel');
+                    verdictSel.value = rev.verdict || 'unreviewed';
+                    verdictSel.addEventListener('click', e => e.stopPropagation());
+
+                    const syncStatus = revBar.querySelector('.rev-sync-status');
+                    let syncTimeout = null;
+                    function saveAndSync() {
+                        const k = itemKey(item);
+                        const cur = reviewStore[k] || {};
+                        cur.note = note.value;
+                        cur.verdict = verdictSel.value;
+                        reviewStore[k] = cur;
                         saveReviewStore();
-                    });
-                    detail.appendChild(note);
+                        syncStatus.className = 'rev-sync-status saving';
+                        syncStatus.textContent = '● 동기화 중…';
+                        clearTimeout(syncTimeout);
+                        syncTimeout = setTimeout(async () => {
+                            await syncReviewToServer(k, cur);
+                            syncStatus.className = 'rev-sync-status saved';
+                            syncStatus.textContent = '● 서버 동기화됨';
+                        }, 500);
+                    }
+
+                    note.addEventListener('input', saveAndSync);
+                    verdictSel.addEventListener('change', saveAndSync);
+
+                    revBox.appendChild(note);
+                    revBox.appendChild(revBar);
+                    detail.appendChild(revBox);
+
+                    detail.querySelectorAll('.forensic-studio-slot').forEach(loadForensicStudio);
                     detail.querySelectorAll('.hm-slot').forEach(loadHeatmap);
                     detail.querySelectorAll('.pv-slot').forEach(loadPreview);
                 }
@@ -1236,6 +1654,29 @@
                 download(await res.blob(), 'deepfake-lens-report.html');
             } catch (e) { toast('리포트 오류: ' + e.message, true); }
         });
+        $('exp-pdf').addEventListener('click', async () => {
+            if (!results.length) { toast('분석 결과가 없습니다', true); return; }
+            try {
+                toast('포렌식 감정 PDF 생성 중…');
+                const res = await apiFetch('/api/report?format=pdf', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        items: results.map(e => e.item),
+                        format: 'pdf',
+                        exhibit_no: '갑 제        호증',
+                    }),
+                });
+                const type = res.headers.get('Content-Type') || '';
+                if (!type.includes('application/pdf')) {
+                    const data = await res.json();
+                    toast('PDF 생성 실패: ' + (data.error || res.status), true);
+                    return;
+                }
+                download(await res.blob(), 'deepfake-lens-forensic-report.pdf');
+                toast('포렌식 감정서(PDF)가 다운로드되었습니다.');
+            } catch (e) { toast('PDF 생성 오류: ' + e.message, true); }
+        });
         $('exp-clear').addEventListener('click', () => {
             results = [];
             $('results-section').hidden = true;
@@ -1432,6 +1873,10 @@
             parts.push(`<div class="caveat">유사도는 동일인 증명이 아닙니다. 추가 증거와 함께 해석하세요.</div>`);
             box.innerHTML = parts.join('');
         }
+
+        /* ── initialization ───────────────────────── */
+        initTokenModal();
+        fetchReviewsFromServer();
 
         /* ── version chip ──────────────────────────── */
         apiFetch('/api/stats').then(r => r.json()).then(d => {
