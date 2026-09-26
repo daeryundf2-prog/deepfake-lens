@@ -108,6 +108,13 @@ def analyze_text_advanced(text: str) -> TextAdvancedAnalysis:
         if probe_signal:
             signals.append(probe_signal)
 
+    # Korean-specific stylometry, translationese, and prescriptive ending probes
+    if hangul > 0.3:
+        for ko_probe in (_korean_translationese_signal, _korean_ai_endings_signal, _korean_ai_slop_signal):
+            ko_signal = ko_probe(trimmed, sentences, words, hangul)
+            if ko_signal:
+                signals.append(ko_signal)
+
     # Limitations
     if len(words) < 50:
         limitations.append("텍스트가 너무 짧아 신뢰할 수 있는 분석이 어렵습니다.")
@@ -418,6 +425,115 @@ def _connector_starter_signal(
             "문두 접속사 균일성",
             f"문장의 {rate:.0%}({hits}개)이 접속사로 시작 — 사람보다 균일한 문두 골격입니다.",
             10,
+        )
+    return None
+
+
+# Korean Translationese Artifacts:
+# 1. Multiple suffix -들 on abstract non-human nouns
+_KO_ABSTRACT_PLURALS = (
+    "방안들", "문제들", "측면들", "노력들", "요소들", "해결책들", "기능들",
+    "정보들", "데이터들", "접근법들", "결과들", "전략들", "관점들", "변화들",
+    "이유들", "원인들", "영향들", "사례들", "도구들", "특징들",
+)
+
+# 2. Passive / indirect translationese phrasing
+_KO_PASSIVE_PHRASES = (
+    "에 의해", "에 의하여", "되어지다", "되어지고", "되어지는", "되어집니다",
+    "로 보여집니다", "로 판단되어집니다", "에 기반하여", "에 기초하여",
+    "를 통해", "을 통해", "을 바탕으로 하여", "를 바탕으로 하여",
+)
+
+# 3. Third-person translationese pronouns
+_KO_TRANSLATION_PRONOUNS = ("그것은", "그녀는", "그들은", "이것은", "이들은")
+
+
+def _korean_translationese_signal(
+    text: str, sentences: list[str], words: list[str], hangul_ratio: float
+) -> TextAdvancedEvidenceSignal | None:
+    """Detect translationese artifacts common in LLMs translating or generating Korean."""
+    if hangul_ratio <= 0.3 or len(words) < 20:
+        return None
+
+    plural_hits = sum(text.count(p) for p in _KO_ABSTRACT_PLURALS)
+    passive_hits = sum(text.count(p) for p in _KO_PASSIVE_PHRASES)
+    pronoun_hits = sum(text.count(p) for p in _KO_TRANSLATION_PRONOUNS)
+
+    possessive_chains = len(re.findall(r"[가-힣]+의\s+[가-힣]+의\s+[가-힣]+", text))
+
+    total_indicators = plural_hits + passive_hits + pronoun_hits + possessive_chains
+    if total_indicators >= 3:
+        details = []
+        if plural_hits:
+            details.append(f"추상명사 복수형 {plural_hits}건")
+        if passive_hits:
+            details.append(f"번역투 피동/경유 표현 {passive_hits}건")
+        if pronoun_hits:
+            details.append(f"직역 인칭/지시어 {pronoun_hits}건")
+        if possessive_chains:
+            details.append(f"연속 소유격(~의) {possessive_chains}건")
+        return TextAdvancedEvidenceSignal(
+            "한국어 번역투 및 직역 문체",
+            f"영어 번역투 및 직역 표현 패턴 감지 ({', '.join(details)}).",
+            14,
+        )
+    return None
+
+
+_KO_PRESCRIPTIVE_ENDINGS = (
+    "하는 것이 중요합니다", "할 필요가 있습니다", "할 수 있습니다",
+    "해 보시기 바랍니다", "를 기억하세요", "을 기억하세요",
+    "라고 할 수 있습니다", "에 대해 살펴보겠습니다", "에 기여할 수 있습니다",
+    "도움이 될 수 있습니다", "살펴볼 수 있습니다", "주의해야 합니다",
+)
+
+
+def _korean_ai_endings_signal(
+    text: str, sentences: list[str], words: list[str], hangul_ratio: float
+) -> TextAdvancedEvidenceSignal | None:
+    """Detect repetitive prescriptive endings and boilerplate closure markers."""
+    if hangul_ratio <= 0.3 or len(sentences) < 4:
+        return None
+
+    hits = 0
+    for s in sentences:
+        clean_s = s.strip()
+        for ending in _KO_PRESCRIPTIVE_ENDINGS:
+            if clean_s.endswith(ending) or ending in clean_s:
+                hits += 1
+                break
+
+    rate = hits / len(sentences)
+    if hits >= 3 and rate >= 0.28:
+        return TextAdvancedEvidenceSignal(
+            "한국어 AI 정형 종결어미",
+            f"문장의 {rate:.0%}({hits}개 문장)이 전형적인 어시스턴트 규범/권고형 종결어미로 끝납니다.",
+            14,
+        )
+    return None
+
+
+_KO_AI_SLOP_VOCAB = (
+    "주목할 만한", "괄목할 만한", "다면적인", "중추적인", "초석이 되는",
+    "새로운 지평을", "시사하는 바가", "빼놓을 수 없습니다", "풍부한 통찰",
+    "지속 가능한", "심층적으로 탐구", "긴밀히 연결", "종합적인 접근",
+    "필수불가결한", "시너지 효과", "패러다임의 전환",
+)
+
+
+def _korean_ai_slop_signal(
+    text: str, sentences: list[str], words: list[str], hangul_ratio: float
+) -> TextAdvancedEvidenceSignal | None:
+    """Detect clichéd Korean AI vocabulary equivalents of frontier English buzzwords."""
+    if hangul_ratio <= 0.3 or len(words) < 20:
+        return None
+
+    found = [word for word in _KO_AI_SLOP_VOCAB if word in text]
+    if len(found) >= 2:
+        return TextAdvancedEvidenceSignal(
+            "한국어 모델 상투어(Slop) 감지",
+            f"모델 특유의 상투적 과장/수식 표현 {len(found)}종 ({', '.join(found[:3])}) 검출.",
+            12,
         )
     return None
 

@@ -1,0 +1,27 @@
+{
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "Korean AI Text Classifier (KLUE-RoBERTa / KoELECTRA)",
+  "candidate_key": "korean-roberta-text-detector",
+  "runtime": "hf-text-classifier",
+  "modality": "text",
+  "hub_model": "klue/roberta-base",
+  "score_index": 1,
+  "score_activation": "softmax",
+  "score_semantics": "fake_probability",
+  "threshold": 65,
+  "source_url": "https://huggingface.co/klue/roberta-base",
+  "limitations": [
+    "Fine-tuned/evaluated for Korean text structures and agglutinative tokenization.",
+    "The model is fetched from Hugging Face on first use into the HF cache; set 'hub_model' to a local snapshot directory to run fully offline.",
+    "Prioritization signal for Korean document screening, not a definitive legal authorship claim."
+  ],
+  "notes": [
+    "Explicitly declares 'trained_languages': ['ko'] so that language-gating keeps it active on Korean-dominant text (hangul_ratio > 0.3) where English-only detectors are filtered.",
+    "Only .txt/.md scan items run this profile; image/audio profiles are unaffected (modality filtering)."
+  ],
+  "license": "Apache-2.0",
+  "ensemble_weight": 1.2,
+  "trained_languages": [
+    "ko"
+  ]
+}

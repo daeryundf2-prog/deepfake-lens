@@ -65,7 +65,7 @@ class CommittedProfilesTest(unittest.TestCase):
         names = set(self._profiles())
         self.assertEqual(
             names,
-            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json", "aide-frames-runtime.json", "fakespot-detector-runtime.json", "qwen-ppl-runtime.json", "binoculars-runtime.json", "faceswap-ffpp-runtime.json", "faceswap-ffpp-frames-runtime.json", "face-manipulation-vit-runtime.json", "face-manipulation-vit-frames-runtime.json", "wav2vec-deepfake-audio-runtime.json", "ai-image-swin-runtime.json", "sbi-effnet-runtime.json", "sd-turbo-det-runtime.json", "community-forensics-vit-runtime.json", "community-forensics-frames-runtime.json", "sbi-frames-runtime.json", "genconvit-face-runtime.json", "melodymachine-w2v2-runtime.json", "umm-maybe-detector-runtime.json"},
+            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json", "aide-frames-runtime.json", "fakespot-detector-runtime.json", "qwen-ppl-runtime.json", "binoculars-runtime.json", "faceswap-ffpp-runtime.json", "faceswap-ffpp-frames-runtime.json", "face-manipulation-vit-runtime.json", "face-manipulation-vit-frames-runtime.json", "wav2vec-deepfake-audio-runtime.json", "ai-image-swin-runtime.json", "sbi-effnet-runtime.json", "sd-turbo-det-runtime.json", "community-forensics-vit-runtime.json", "community-forensics-frames-runtime.json", "sbi-frames-runtime.json", "genconvit-face-runtime.json", "melodymachine-w2v2-runtime.json", "umm-maybe-detector-runtime.json", "korean-roberta-text-detector-runtime.json"},
         )
 
     def test_wired_profiles_use_implemented_runtimes(self) -> None:
@@ -722,3 +722,59 @@ class LanguageGateTest(unittest.TestCase):
             fused = _aggregate_profile_results(results, hangul_ratio=0.0)
         self.assertEqual(fused.score, 50)
         self.assertFalse(any("excluded" in item for item in fused.limitations))
+
+
+class LRUModelCacheTest(unittest.TestCase):
+    """Test LRU eviction and memory bounds for neural model caches."""
+
+    def test_lru_eviction_on_capacity_exceeded(self) -> None:
+        from deepfake_lens.model_adapter import LRUModelCache
+
+        cache = LRUModelCache(maxsize=2)
+        cache["m1"] = "val1"
+        cache["m2"] = "val2"
+        self.assertEqual(list(cache.keys()), ["m1", "m2"])
+
+        # Accessing m1 makes m2 the oldest
+        _ = cache.get("m1")
+        self.assertEqual(list(cache.keys()), ["m2", "m1"])
+
+        # Adding m3 should evict m2
+        cache["m3"] = "val3"
+        self.assertEqual(list(cache.keys()), ["m1", "m3"])
+        self.assertNotIn("m2", cache)
+
+    def test_unload_item_moves_torch_model_to_cpu(self) -> None:
+        from deepfake_lens.model_adapter import LRUModelCache
+
+        class FakeModel:
+            def __init__(self):
+                self.device = "cuda"
+
+            def to(self, device):
+                self.device = device
+                return self
+
+        fake = FakeModel()
+        cache = LRUModelCache(maxsize=1)
+        cache["m1"] = fake
+        cache["m2"] = "val2"
+
+        self.assertEqual(fake.device, "cpu")
+
+    def test_clear_all_model_caches_flushes_state(self) -> None:
+        from deepfake_lens.model_adapter import (
+            _AIDE_RUNNERS,
+            _CLIP_HEADS,
+            clear_all_model_caches,
+        )
+
+        _AIDE_RUNNERS["test_key"] = ("a", "b", "c")
+        _CLIP_HEADS["test_head"] = ("x", "y")
+        self.assertIn("test_key", _AIDE_RUNNERS)
+        self.assertIn("test_head", _CLIP_HEADS)
+
+        clear_all_model_caches()
+        self.assertEqual(len(_AIDE_RUNNERS), 0)
+        self.assertEqual(len(_CLIP_HEADS), 0)
+

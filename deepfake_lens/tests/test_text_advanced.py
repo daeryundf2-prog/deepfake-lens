@@ -115,6 +115,41 @@ class TextAdvancedAnalysisTest(unittest.TestCase):
             any("퍼플렉시티가 아닌" in line for line in result.limitations)
         )
 
+    def test_korean_translationese_probe(self) -> None:
+        """Korean text with multiple translationese markers should trigger the translationese signal."""
+        text = (
+            "이러한 문제점들을 해결하기 위한 구체적인 방안들을 살펴보겠습니다. "
+            "새로운 정책에 의해 사회적 제도가 변경되어집니다. "
+            "그것은 국가 경제의 발전의 방향에 중요한 영향을 미칩니다. "
+            "다양한 요소들을 고려하고 여러 데이터들을 분석하는 과정을 거쳤습니다."
+        )
+        res = analyze_text_advanced(text)
+        signal_titles = [s.title for s in res.signals]
+        self.assertIn("한국어 번역투 및 직역 문체", signal_titles)
+
+    def test_korean_ai_endings_probe(self) -> None:
+        """Korean text with uniform prescriptive endings should trigger the endings signal."""
+        text = (
+            "첫째로 보안 수칙을 준수하는 것이 중요합니다. "
+            "정기적인 업데이트를 통해 취약점을 방지할 수 있습니다. "
+            "공식 문서를 반드시 확인해 보시기 바랍니다. "
+            "비밀번호를 안전하게 관리하는 것을 기억하세요."
+        )
+        res = analyze_text_advanced(text)
+        signal_titles = [s.title for s in res.signals]
+        self.assertIn("한국어 AI 정형 종결어미", signal_titles)
+
+    def test_korean_ai_slop_probe(self) -> None:
+        """Korean text with LLM buzzwords should trigger the slop signal."""
+        text = (
+            "이번 기술 혁신은 업계에서 주목할 만한 성과로 평가받고 있습니다. "
+            "인공지능의 도입은 미래 산업의 중추적인 역할을 담당하게 될 것입니다. "
+            "새로운 지평을 열어가는 과정에서 지속 가능한 발전 모델을 구축하고 있습니다."
+        )
+        res = analyze_text_advanced(text)
+        signal_titles = [s.title for s in res.signals]
+        self.assertIn("한국어 모델 상투어(Slop) 감지", signal_titles)
+
 
 if __name__ == "__main__":
     unittest.main()
