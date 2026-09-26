@@ -592,16 +592,39 @@
         let reviewStore = {};
         try { reviewStore = JSON.parse(localStorage.getItem(REVIEW_KEY) || '{}'); } catch (e) { reviewStore = {}; }
         function itemKey(item) { return item.path || item.name || ''; }
-        function saveReviewStore() {
+        let reviewPushTimer = null;
+        function saveReviewStore(changedKey) {
             try { localStorage.setItem(REVIEW_KEY, JSON.stringify(reviewStore)); } catch (e) { /* quota — non-fatal */ }
+            // Server-side store keeps examiner marks across browsers/devices
+            // (chain of custody); localStorage stays as offline fallback.
+            // Debounced so per-keystroke note edits send one update.
+            if (!changedKey) return;
+            clearTimeout(reviewPushTimer);
+            reviewPushTimer = setTimeout(() => {
+                const entry = reviewStore[changedKey] || {};
+                apiFetch('/api/review-marks', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({marks: {[changedKey]: entry}}),
+                }).catch(() => {});
+            }, 400);
         }
+        // Merge server marks on load — server is the durable store.
+        apiFetch('/api/review-marks').then(r => r.ok ? r.json() : null).then(d => {
+            if (d && d.marks && typeof d.marks === 'object') {
+                Object.assign(reviewStore, d.marks);
+                try { localStorage.setItem(REVIEW_KEY, JSON.stringify(reviewStore)); } catch (e) {}
+                if (results.length) renderResults(false);
+            }
+        }).catch(() => {});
         function toggleReview(item, card) {
             const key = itemKey(item);
             const entry = reviewStore[key] || {};
             entry.star = !entry.star;
+            entry.ts = Date.now();
             if (!entry.star && !entry.note) delete reviewStore[key];
             else reviewStore[key] = entry;
-            saveReviewStore();
+            saveReviewStore(key);
             card.classList.toggle('reviewed', !!entry.star);
             card.querySelector('.rev-star').setAttribute('aria-pressed', entry.star ? 'true' : 'false');
             const sub = card.querySelector('.res-sub');
@@ -1065,14 +1088,15 @@
                     detail.appendChild(fb);
                     const note = document.createElement('textarea');
                     note.className = 'rev-note';
-                    note.placeholder = '검토 메모 — 이 브라우저에만 저장됩니다';
+                    note.placeholder = '검토 메모 — 서버에 저장됩니다';
                     note.value = rev.note || '';
                     note.addEventListener('click', e => e.stopPropagation());
                     note.addEventListener('input', () => {
                         const entry2 = reviewStore[itemKey(item)] || {};
                         entry2.note = note.value;
+                        entry2.ts = Date.now();
                         reviewStore[itemKey(item)] = entry2;
-                        saveReviewStore();
+                        saveReviewStore(itemKey(item));
                     });
                     detail.appendChild(note);
                     detail.querySelectorAll('.hm-slot').forEach(loadHeatmap);
