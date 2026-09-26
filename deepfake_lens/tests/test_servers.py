@@ -524,6 +524,7 @@ class ApiServiceContractTest(unittest.TestCase):
         client = self._client(token="s3cret")
         self.assertEqual(client.get("/api/health").status_code, 401)
         self.assertEqual(client.get("/api/health", headers={"x-api-token": "s3cret"}).status_code, 200)
+        self.assertEqual(client.get("/api/health", headers={"x-deepfake-lens-token": "s3cret"}).status_code, 200)
 
     def test_host_allowlist_without_token(self) -> None:
         client = self._client()
@@ -535,6 +536,20 @@ class ApiServiceContractTest(unittest.TestCase):
         response = client.get("/")
         self.assertEqual(response.status_code, 200)
         self.assertIn("version", response.json())
+
+    def test_gui_serves_html(self) -> None:
+        client = self._client(token="s3cret")
+        res_gui = client.get("/gui")
+        self.assertEqual(res_gui.status_code, 200)
+        self.assertIn("<html", res_gui.text.lower())
+
+    def test_unified_api_stats(self) -> None:
+        client = self._client(token="s3cret")
+        res = client.get("/api/stats", headers={"x-deepfake-lens-token": "s3cret"})
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertIn("status", data)
+
 
     _SSE_HEADERS = {"host": "localhost", api_server.CLIENT_HEADER: "test"}
 

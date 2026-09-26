@@ -169,6 +169,19 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
             if parsed.path == "/api/stats":
                 self._send_json(_stats_payload())
                 return
+            if parsed.path == "/api/reviews":
+                from .reviews import get_default_review_store
+                self._send_json({"status": "success", "reviews": get_default_review_store().list_reviews()})
+                return
+            if parsed.path == "/api/review":
+                from .reviews import get_default_review_store
+                qs = parse_qs(parsed.query)
+                art_id = qs.get("path", qs.get("artifact_id", [""]))[0]
+                if not art_id:
+                    self.send_error(400, "missing path or artifact_id")
+                    return
+                self._send_json({"status": "success", "artifact_id": art_id, "review": get_default_review_store().get_review(art_id)})
+                return
             self.send_error(404, "not found")
 
         def do_POST(self) -> None:
@@ -220,6 +233,28 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
                     self.send_error(400, "invalid feedback body size")
                     return
                 self._send_json(_feedback_payload(self.rfile.read(length)))
+                return
+            if parsed.path == "/api/review":
+                try:
+                    length = int(self.headers.get("Content-Length") or "0")
+                except ValueError:
+                    self.send_error(400, "invalid Content-Length")
+                    return
+                if length <= 0 or length > 1024 * 1024:
+                    self.send_error(400, "invalid review body size")
+                    return
+                try:
+                    raw = json.loads(self.rfile.read(length).decode("utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    self.send_error(400, "invalid JSON")
+                    return
+                art_id = raw.get("artifact_id", raw.get("path", ""))
+                if not art_id:
+                    self.send_error(400, "missing artifact_id")
+                    return
+                from .reviews import get_default_review_store
+                saved = get_default_review_store().save_review(art_id, raw)
+                self._send_json({"status": "success", "artifact_id": art_id, "review": saved})
                 return
             self.send_error(404, "not found")
 
@@ -981,8 +1016,8 @@ def _feedback_payload(body: bytes) -> dict[str, object]:
     return {"ok": True, "feedback_file": str(feedback_file)}
 
 
-def _report_payload(body: bytes) -> bytes | dict[str, object]:
-    """Render the HTML report for web-scan results.
+def _report_payload(body: bytes, format_override: str | None = None) -> bytes | dict[str, object]:
+    """Render the HTML or court-admissible forensic PDF report for web-scan results.
 
     Accepts the items array the GUI holds (scan/upload payload rows), rebuilds
     ScanItem objects through the same cache deserializer used on disk, and
@@ -1020,10 +1055,17 @@ def _report_payload(body: bytes) -> bytes | dict[str, object]:
             1 for item in analyzed if item.result and item.result.model_analysis
         ),
     )
-    with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as tmp:
+    req_format = (format_override or data.get("format") or "html").lower()
+    suffix = ".pdf" if req_format == "pdf" else ".html"
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp_path = Path(tmp.name)
     try:
-        write_html_report(tmp_path, summary, items)
+        if req_format == "pdf":
+            from .reports import write_forensic_pdf_report
+            exhibit_no = str(data.get("exhibit_no") or "갑 제        호증")
+            write_forensic_pdf_report(tmp_path, summary, items, exhibit_no=exhibit_no)
+        else:
+            write_html_report(tmp_path, summary, items)
         return tmp_path.read_bytes()
     finally:
         tmp_path.unlink(missing_ok=True)

@@ -14,6 +14,11 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+try:
+    from fastapi import Request
+except ImportError:
+    Request = Any  # type: ignore[assignment, misc]
+
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 # Custom header required on non-GET /api/* requests when no token is set.
@@ -55,7 +60,12 @@ def _default_profiles() -> Path | None:
     return models_dir if models_dir.is_dir() else None
 
 
-def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = None) -> Any:
+def create_app(
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    token: str | None = None,
+    default_folder: Path | None = None,
+) -> Any:
     """Create a FastAPI application."""
     try:
         from fastapi import FastAPI, HTTPException, Request
@@ -72,7 +82,9 @@ def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = No
     async def request_guard(request: Request, call_next: Any) -> Any:
         if request.url.path.startswith("/api/"):
             if token is not None:
-                if request.headers.get("x-api-token") != token:
+                import secrets
+                supplied = request.headers.get("x-api-token") or request.headers.get("x-deepfake-lens-token") or ""
+                if not (supplied and secrets.compare_digest(supplied, token)):
                     return JSONResponse({"status": "error", "message": "unauthorized"}, status_code=401)
             elif host_name(request.headers.get("host", "")) not in allowed_hosts:
                 return JSONResponse({"status": "error", "message": "host not allowed"}, status_code=403)
@@ -87,13 +99,19 @@ def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = No
         CORSMiddleware,
         allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
-        allow_headers=["X-API-Token", CLIENT_HEADER],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["X-API-Token", "X-Deepfake-Lens-Token", CLIENT_HEADER, "Content-Type"],
     )
     
     @app.get("/")
     async def root():
         return {"message": "Deepfake Lens API", "version": "0.1.0"}
+
+    @app.get("/gui")
+    async def gui_view():
+        from fastapi.responses import HTMLResponse
+        from .webapp import _load_gui
+        return HTMLResponse(_load_gui())
     
     @app.get("/api/health")
     async def health():
@@ -527,20 +545,174 @@ def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = No
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc))
     
+    # --- GUI & Webapp compatibility endpoints ---
+    @app.get("/api/scan")
+    async def api_scan(request: Request):
+        from urllib.parse import parse_qs
+        from .webapp import _scan_job_start, _scan_payload
+        qs = str(request.url.query)
+        if parse_qs(qs).get("async", ["false"])[0].lower() in {"1", "true", "yes"}:
+            try:
+                return _scan_job_start(qs, default_folder=default_folder)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+        try:
+            return _scan_payload(qs, default_folder=default_folder)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+    @app.get("/api/scan-status")
+    async def api_scan_status(request: Request):
+        from .webapp import _scan_status_payload
+        return _scan_status_payload(str(request.url.query))
+
+    @app.get("/api/scan-cancel")
+    async def api_scan_cancel(request: Request):
+        from .webapp import _scan_cancel_payload
+        return _scan_cancel_payload(str(request.url.query))
+
+    @app.get("/api/heatmap")
+    async def api_heatmap(request: Request):
+        from fastapi import Response
+        from .webapp import _heatmap_payload
+        status, data, content_type = _heatmap_payload(str(request.url.query))
+        return Response(content=data, status_code=status, media_type=content_type)
+
+    @app.get("/api/preview")
+    async def api_preview(request: Request):
+        from fastapi import Response
+        from .webapp import _preview_payload
+        status, data, content_type, content_range = _preview_payload(str(request.url.query))
+        headers = {}
+        if content_range:
+            headers["Content-Range"] = content_range
+        return Response(content=data, status_code=status, media_type=content_type, headers=headers)
+
+    @app.get("/api/analyze-file")
+    async def api_analyze_file(request: Request):
+        from .webapp import _analyze_file_payload
+        return _analyze_file_payload(str(request.url.query))
+
+    @app.get("/api/stats")
+    async def api_stats():
+        from .webapp import _stats_payload
+        return _stats_payload()
+
+    @app.post("/api/analyze-upload")
+    async def api_analyze_upload(request: Request):
+        from .webapp import MAX_UPLOAD_BYTES, _analyze_upload_payload
+        body = await request.body()
+        if len(body) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail=f"upload exceeds {MAX_UPLOAD_BYTES} bytes")
+        content_type = request.headers.get("content-type", "")
+        return _analyze_upload_payload(content_type, body)
+
+    @app.post("/api/report")
+    async def api_report(request: Request):
+        from fastapi import Response
+        from .webapp import _report_payload
+        body = await request.body()
+        fmt = request.query_params.get("format")
+        try:
+            parsed = json.loads(body.decode("utf-8") if body else "{}")
+            if not fmt:
+                fmt = parsed.get("format")
+        except Exception:
+            pass
+        rendered = _report_payload(body, format_override=fmt)
+        if isinstance(rendered, dict):
+            return rendered
+        if (fmt or "").lower() == "pdf":
+            return Response(
+                content=rendered,
+                media_type="application/pdf",
+                headers={"Content-Disposition": 'attachment; filename="deepfake-lens-forensic-report.pdf"'},
+            )
+        return Response(
+            content=rendered,
+            media_type="text/html; charset=utf-8",
+            headers={"Content-Disposition": 'attachment; filename="deepfake-lens-report.html"'},
+        )
+
+    @app.post("/api/feedback")
+    async def api_feedback(request: Request):
+        from .webapp import _feedback_payload
+        body = await request.body()
+        return _feedback_payload(body)
+
+    @app.get("/api/artifacts/{artifact_id:path}/review")
+    async def get_artifact_review(artifact_id: str):
+        from .reviews import get_default_review_store
+        store = get_default_review_store()
+        review = store.get_review(artifact_id)
+        return {"status": "success", "artifact_id": artifact_id, "review": review}
+
+    @app.put("/api/artifacts/{artifact_id:path}/review")
+    async def put_artifact_review(artifact_id: str, request: Request):
+        from .reviews import get_default_review_store
+        store = get_default_review_store()
+        body = await request.body()
+        try:
+            data = json.loads(body.decode("utf-8") if body else "{}")
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="invalid json body")
+        saved = store.save_review(artifact_id, data)
+        return {"status": "success", "artifact_id": artifact_id, "review": saved}
+
+    @app.get("/api/review")
+    async def api_get_review(request: Request):
+        from urllib.parse import parse_qs
+        from .reviews import get_default_review_store
+        qs = parse_qs(str(request.url.query))
+        artifact_id = qs.get("path", qs.get("artifact_id", [""]))[0]
+        if not artifact_id:
+            raise HTTPException(status_code=400, detail="missing path or artifact_id query parameter")
+        store = get_default_review_store()
+        review = store.get_review(artifact_id)
+        return {"status": "success", "artifact_id": artifact_id, "review": review}
+
+    @app.post("/api/review")
+    async def api_post_review(request: Request):
+        from .reviews import get_default_review_store
+        body = await request.body()
+        try:
+            data = json.loads(body.decode("utf-8") if body else "{}")
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="invalid json body")
+        artifact_id = data.get("artifact_id", data.get("path", ""))
+        if not artifact_id:
+            raise HTTPException(status_code=400, detail="missing artifact_id in payload")
+        store = get_default_review_store()
+        saved = store.save_review(artifact_id, data)
+        return {"status": "success", "artifact_id": artifact_id, "review": saved}
+
+    @app.get("/api/reviews")
+    async def api_list_reviews():
+        from .reviews import get_default_review_store
+        store = get_default_review_store()
+        return {"status": "success", "reviews": store.list_reviews()}
+
     return app
 
 
-def run_server(host: str = "127.0.0.1", port: int = 8765, token: str | None = None) -> None:
+def run_server(
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    token: str | None = None,
+    default_folder: Path | None = None,
+    allow_lan: bool = False,
+) -> None:
     """Run the API server.
 
-    ``token`` enables X-API-Token authentication and is mandatory for
-    non-localhost binds (enforced by the ``api-serve`` CLI command).
+    ``token`` enables authentication and is mandatory for non-localhost binds
+    (enforced by the ``api-serve`` and ``web`` CLI commands).
     """
     try:
         import uvicorn
     except ImportError:
         raise ImportError("uvicorn is required. Install with: pip install uvicorn")
 
-    app = create_app(host, port, token=token)
-    print(f"Starting Deepfake Lens API server on http://{host}:{port}" + (" (token required)" if token else ""))
+    app = create_app(host, port, token=token, default_folder=default_folder)
+    print(f"Starting Deepfake Lens unified server on http://{host}:{port}" + (" (token required)" if token else ""))
     uvicorn.run(app, host=host, port=port)
+
