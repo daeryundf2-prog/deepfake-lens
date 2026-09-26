@@ -602,6 +602,7 @@
                         <button class="btn btn-sm" id="exp-csv">CSV</button>
                         <button class="btn btn-sm" id="exp-report">HTML</button>
                         <button class="btn btn-sm" id="exp-pdf">감정 PDF</button>
+                        <button class="btn btn-sm" id="exp-evidence" title="대법원 전자소송(ECFS) 표준 증거설명서 내보내기">증거설명서</button>
                         <button class="btn btn-sm btn-red" id="exp-clear">삭제</button>
                     </div>
                 </div>
@@ -1676,6 +1677,29 @@
                 download(await res.blob(), 'deepfake-lens-forensic-report.pdf');
                 toast('포렌식 감정서(PDF)가 다운로드되었습니다.');
             } catch (e) { toast('PDF 생성 오류: ' + e.message, true); }
+        });
+        $('exp-evidence').addEventListener('click', async () => {
+            if (!results.length) { toast('분석 결과가 없습니다', true); return; }
+            try {
+                toast('전자소송 증거설명서(PDF) 생성 중…');
+                const res = await apiFetch('/api/report?format=evidence', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        items: results.map(e => e.item),
+                        format: 'evidence',
+                        case_no: '(사건번호 입력)',
+                    }),
+                });
+                const type = res.headers.get('Content-Type') || '';
+                if (!type.includes('application/pdf')) {
+                    const data = await res.json();
+                    toast('증거설명서 생성 실패: ' + (data.error || res.status), true);
+                    return;
+                }
+                download(await res.blob(), 'deepfake-lens-evidence-statement.pdf');
+                toast('전자소송 증거설명서(PDF)가 다운로드되었습니다.');
+            } catch (e) { toast('증거설명서 오류: ' + e.message, true); }
         });
         $('exp-clear').addEventListener('click', () => {
             results = [];

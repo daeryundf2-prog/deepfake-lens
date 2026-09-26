@@ -69,3 +69,5 @@ captures/
 *.aab
 .kotlin/
 eval_corpus/
+.lazycodex/
+.omo/

@@ -45,9 +45,20 @@ from .pixel_analyzer import analyze_pixels
 from .rule_classifier import RuleClassifier
 from .enhanced_forensics import analyze_forensic
 from .webapp import run_server
+from .faceswap_seam import analyze_faceswap_seam
+from .evidence_statement import (
+    build_evidence_statement,
+    write_evidence_statement_markdown,
+    write_evidence_statement_pdf,
+)
+from .vendor_weights import (
+    bundle_offline_weights,
+    inspect_model_manifest,
+    verify_offline_integrity,
+)
 
 
-COMMANDS = {"doctor", "scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
+COMMANDS = {"doctor", "scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "faceswap-seam", "evidence-statement", "vendor-weights", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
 
 DEFAULT_ENGINE_PROFILE = "models/aide-runtime.json"
 DEFAULT_AUDIO_ENGINE_PROFILE = "models/aasist-runtime.json"
@@ -147,6 +158,9 @@ def main(argv: list[str] | None = None) -> int:
     scan_parser.add_argument("--html-out", type=Path, help="write HTML report")
     scan_parser.add_argument("--pdf-out", type=Path, help="write simple PDF report")
     scan_parser.add_argument("--forensic-pdf-out", type=Path, help="write court-admissible forensic PDF report with ECFS exhibit stamp and SHA-256 hashes")
+    scan_parser.add_argument("--evidence-statement-out", type=Path, help="write standard ECFS court evidence statement (증거설명서, Markdown or PDF depending on suffix)")
+    scan_parser.add_argument("--evidence-statement-pdf-out", type=Path, help="write standard ECFS court evidence statement as PDF")
+    scan_parser.add_argument("--case-no", type=str, default="(사건번호 입력)", help="case number for forensic evidence statement")
     scan_parser.add_argument("--exhibit-no", type=str, default="갑 제        호증", help="court exhibit number for forensic PDF report (default: '갑 제        호증')")
     scan_parser.add_argument("--redact-paths", action="store_true", help="redact paths in HTML/PDF reports")
     scan_parser.add_argument("--sign", action="store_true", help="HMAC-SHA256 sign the --json-out report (integrity-to-key-holder, not legal non-repudiation; key from --key-file or DEEPFAKE_LENS_REPORT_KEY)")
@@ -426,6 +440,30 @@ def main(argv: list[str] | None = None) -> int:
     doctor_parser = subparsers.add_parser("doctor", help="diagnose model weights, accelerators, and dependencies")
     doctor_parser.add_argument("--format", choices=["table", "json"], default="table")
     doctor_parser.add_argument("--json-out", type=Path, help="write the diagnostic report as JSON")
+
+    faceswap_parser = subparsers.add_parser("faceswap-seam", help="analyze localized face-swap boundary seams, Poisson feathering, and sensor noise mismatch")
+    faceswap_parser.add_argument("file", type=Path, help="image file to analyze")
+    faceswap_parser.add_argument("--format", choices=["table", "json"], default="table", help="output format")
+    faceswap_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    evidence_stmt_parser = subparsers.add_parser("evidence-statement", help="generate ECFS electronic litigation evidence explanation statement (증거설명서)")
+    evidence_stmt_parser.add_argument("target", type=Path, help="scanned folder, scan JSON file, or single media file")
+    evidence_stmt_parser.add_argument("--case-no", type=str, default="(사건번호 입력)", help="case number (사건번호)")
+    evidence_stmt_parser.add_argument("--case-name", type=str, default="성폭력처벌법위반(허위영상물편집등) 및 정보통신망법위반", help="case title (사건명)")
+    evidence_stmt_parser.add_argument("--plaintiff", type=str, default="(의뢰사 상호명 입력) 귀하", help="plaintiff/claimant (원고/고소인)")
+    evidence_stmt_parser.add_argument("--defendant", type=str, default="(피고/피의자 성명 입력)", help="defendant/suspect (피고/피고소인)")
+    evidence_stmt_parser.add_argument("--court", type=str, default="○○지방법원 귀중", help="court/investigation agency (관할법원/수사관서)")
+    evidence_stmt_parser.add_argument("--pdf-out", type=Path, help="write evidence statement PDF")
+    evidence_stmt_parser.add_argument("--md-out", type=Path, help="write evidence statement Markdown")
+    evidence_stmt_parser.add_argument("--format", choices=["table", "json", "markdown"], default="table", help="stdout format")
+
+    vendor_parser = subparsers.add_parser("vendor-weights", help="air-gapped forensic lab model weight verification and offline bundler")
+    vendor_parser.add_argument("--models-dir", type=Path, help="path to models directory (default: bundled models/)")
+    vendor_parser.add_argument("--verify", action="store_true", help="verify SHA-256 integrity of offline weights")
+    vendor_parser.add_argument("--manifest-out", type=Path, help="write offline model manifest JSON")
+    vendor_parser.add_argument("--bundle-to", type=Path, help="export offline weight package directory")
+    vendor_parser.add_argument("--copy-weights", action="store_true", help="copy large weights files into bundle directory")
+    vendor_parser.add_argument("--format", choices=["table", "json", "markdown"], default="table", help="stdout format")
 
     args = parser.parse_args(argv)
     if args.command is None:
@@ -1095,6 +1133,121 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(format_report(report))
         return 0
+    if args.command == "faceswap-seam":
+        analysis = analyze_faceswap_seam(args.file)
+        if args.json_out:
+            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
+        if args.format == "json":
+            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
+        else:
+            print(f"Score: {analysis.score} ({analysis.band_label})")
+            print(f"Verdict: {analysis.verdict}")
+            print(f"Faces: {analysis.face_count}")
+            if analysis.boundary_residual is not None:
+                print(f"Boundary Seam Laplacian Residual: {analysis.boundary_residual:.2f}")
+            if analysis.noise_discrepancy_ratio is not None:
+                print(f"Noise Variance Ratio: {analysis.noise_discrepancy_ratio:.2f}")
+            if analysis.chrominance_delta is not None:
+                print(f"Chin-Neck Chroma Delta: {analysis.chrominance_delta:.1f}")
+            if analysis.corneal_asymmetry is not None:
+                print(f"Corneal Highlight Asymmetry: {analysis.corneal_asymmetry:.1f}px")
+            if analysis.signals:
+                print("Signals:")
+                for sig in analysis.signals:
+                    print(f"  - [{sig.weight}] {sig.title}: {sig.detail}")
+        return 0
+    if args.command == "evidence-statement":
+        target = Path(args.target)
+        items: list[ScanItem] = []
+        if target.is_file() and target.suffix.lower() == ".json":
+            try:
+                data = json.loads(target.read_text(encoding="utf-8"))
+                from .webapp import _scan_item_from_json
+                raw_items = data.get("items", [])
+                items = [_scan_item_from_json(row) for row in raw_items if isinstance(row, dict)]
+            except Exception as exc:
+                print(f"error: cannot parse scan JSON: {exc}", file=sys.stderr)
+                return 2
+        elif target.is_dir():
+            _, items = scan_directory(target, max_files=100)
+        elif target.is_file():
+            from .core import analyze_file
+            item = analyze_file(target)
+            items = [item]
+        else:
+            print(f"error: target does not exist: {target}", file=sys.stderr)
+            return 2
+
+        statement = build_evidence_statement(
+            items,
+            case_no=args.case_no,
+            case_name=args.case_name,
+            plaintiff=args.plaintiff,
+            defendant=args.defendant,
+            court=args.court,
+        )
+        if args.md_out:
+            write_evidence_statement_markdown(args.md_out, statement)
+        if args.pdf_out:
+            write_evidence_statement_pdf(args.pdf_out, statement)
+
+        if args.format == "json":
+            print(json.dumps(statement.to_json(), ensure_ascii=False, indent=2))
+        elif args.format == "markdown":
+            print(statement.to_markdown())
+        else:
+            print(f"=== {statement.case_name} 증거설명서 ===")
+            print(f"사건번호: {statement.case_no}")
+            print(f"원고(고소인): {statement.plaintiff}")
+            print(f"피고(피의자): {statement.defendant}")
+            print(f"증거 목록 ({len(statement.entries)}건):")
+            for entry in statement.entries:
+                print(f"  - [{entry.exhibit_no}] {entry.document_name} ({entry.band_label}, {entry.score}점)")
+                print(f"    SHA-256: {entry.sha256[:24]}...")
+            if args.pdf_out:
+                print(f"PDF 저장 완료: {args.pdf_out}")
+            if args.md_out:
+                print(f"Markdown 저장 완료: {args.md_out}")
+        return 0
+    if args.command == "vendor-weights":
+        if args.bundle_to:
+            manifest_file = bundle_offline_weights(
+                args.bundle_to,
+                models_dir=args.models_dir,
+                copy_weights=args.copy_weights,
+            )
+            print(json.dumps({"bundle_dir": str(args.bundle_to), "manifest": str(manifest_file)}, ensure_ascii=False, indent=2))
+            return 0
+        if args.verify:
+            verify_res = verify_offline_integrity(args.models_dir)
+            if args.format == "json":
+                print(json.dumps(verify_res, ensure_ascii=False, indent=2))
+            else:
+                status_str = "PASS" if verify_res["status"] == "pass" else "WARN"
+                print(f"Offline Model Integrity: {status_str}")
+                print(f"Profiles: {verify_res['total_profiles']}, Available: {verify_res['available_weights']}, Missing: {verify_res['missing_weights']}, Size: {verify_res['total_size_mb']} MB")
+                if verify_res["mismatches"]:
+                    print("Mismatched Checkpoints:")
+                    for m in verify_res["mismatches"]:
+                        print(f"  - {m['name']}: {m['checkpoint_relpath']}")
+                if verify_res["missing"]:
+                    print(f"Missing Checkpoints: {', '.join(verify_res['missing'])}")
+            return 0 if verify_res["status"] == "pass" else 1
+
+        manifest = inspect_model_manifest(args.models_dir)
+        if args.manifest_out:
+            args.manifest_out.write_text(json.dumps(manifest.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if args.format == "json":
+            print(json.dumps(manifest.to_json(), ensure_ascii=False, indent=2))
+        elif args.format == "markdown":
+            print(manifest.to_markdown())
+        else:
+            print(f"Models Directory: {manifest.models_dir}")
+            print(f"Profiles: {manifest.total_profiles}, Available: {manifest.available_weights}, Missing: {manifest.missing_weights}, Total: {manifest.total_bytes / (1024 * 1024):.1f} MB")
+            for e in manifest.entries:
+                chk_mark = "OK" if e.exists else "MISSING"
+                print(f"  [{chk_mark:<7}] {e.name:<24} ({e.modality:<5}) {e.checkpoint_relpath}")
+        return 0
 
     if args.max_files < 1:
         scan_parser.error("--max-files must be at least 1")
@@ -1173,6 +1326,17 @@ def main(argv: list[str] | None = None) -> int:
             redact_paths=args.redact_paths,
             exhibit_no=getattr(args, "exhibit_no", "갑 제        호증"),
         )
+    if getattr(args, "evidence_statement_out", None):
+        out_p = Path(args.evidence_statement_out)
+        stmt = build_evidence_statement(items, case_no=getattr(args, "case_no", "(사건번호 입력)"))
+        if out_p.suffix.lower() == ".pdf":
+            write_evidence_statement_pdf(out_p, stmt)
+        else:
+            write_evidence_statement_markdown(out_p, stmt)
+    if getattr(args, "evidence_statement_pdf_out", None):
+        out_p = Path(args.evidence_statement_pdf_out)
+        stmt = build_evidence_statement(items, case_no=getattr(args, "case_no", "(사건번호 입력)"))
+        write_evidence_statement_pdf(out_p, stmt)
 
     if args.format == "json":
         print(scan_to_json_text(summary, items))
