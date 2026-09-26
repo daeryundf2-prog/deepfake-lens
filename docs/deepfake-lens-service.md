@@ -23,7 +23,11 @@ files on request, so exposure beyond loopback is an explicit, guarded choice.
   the same Host-header guard while bound to loopback. `--allow-lan` requires
   `--token`; every `/api/*` request then needs `X-Deepfake-Lens-Token: <token>`
   (401 otherwise). The GUI shell stays unauthenticated but prompts for the
-  token on a 401 and stores it in `sessionStorage` for the session.
+  token on a 401 (async modal) and stores it in `sessionStorage` for the
+  session.
+- Both servers accept either token header — `X-Deepfake-Lens-Token` or the
+  `X-API-Token` alias — so a single credential works across `web` and
+  `api-serve` while the two surfaces converge.
 - **Drive-by/CSRF guard on tokenless binds**: when no token is configured,
   every `/api/*` request must carry a non-empty `X-Deepfake-Lens-Client`
   header (the bundled GUI sends `gui`; any non-empty value is accepted).

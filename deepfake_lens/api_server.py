@@ -72,7 +72,14 @@ def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = No
     async def request_guard(request: Request, call_next: Any) -> Any:
         if request.url.path.startswith("/api/"):
             if token is not None:
-                if request.headers.get("x-api-token") != token:
+                import secrets
+
+                from .webapp import TOKEN_HEADERS
+
+                if not any(
+                    (supplied := request.headers.get(name)) and secrets.compare_digest(supplied, token)
+                    for name in TOKEN_HEADERS
+                ):
                     return JSONResponse({"status": "error", "message": "unauthorized"}, status_code=401)
             elif host_name(request.headers.get("host", "")) not in allowed_hosts:
                 return JSONResponse({"status": "error", "message": "host not allowed"}, status_code=403)
@@ -88,7 +95,7 @@ def create_app(host: str = "127.0.0.1", port: int = 8765, token: str | None = No
         allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=False,
         allow_methods=["GET", "POST"],
-        allow_headers=["X-API-Token", CLIENT_HEADER],
+        allow_headers=["X-API-Token", "X-Deepfake-Lens-Token", CLIENT_HEADER],
     )
     
     @app.get("/")

@@ -4,7 +4,9 @@ import importlib
 import importlib.util
 import json
 import math
+import os
 import re
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -676,9 +678,72 @@ def _runtime_install_hint(runtime: str) -> str:
     return "Install Pillow plus onnxruntime or torch in the local environment to enable neural inference."
 
 
+def _model_cache_limit() -> int:
+    """Per-cache residency cap for loaded model objects."""
+    try:
+        return max(1, int(os.environ.get("DEEPFAKE_LENS_MODEL_CACHE_MAX", "4")))
+    except ValueError:
+        return 4
+
+
+def _release_cached_model(entry: object) -> None:
+    """Drop an evicted model entry and return accelerator memory.
+
+    Cache entries hold torch modules/transformers pipelines with
+    hundreds of MB–GB of weights; after eviction, GC + empty_cache
+    hands CUDA/MPS reservations back so long scans do not OOM.
+    """
+    try:
+        import gc
+
+        del entry
+        gc.collect()
+        torch = importlib.import_module("torch")
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        mps = getattr(getattr(torch, "backends", None), "mps", None)
+        if mps is not None and mps.is_available() and hasattr(torch, "mps"):
+            torch.mps.empty_cache()
+    except Exception:
+        pass
+
+
+class _ModelLRU(OrderedDict):
+    """Bounded LRU dict for resident model objects.
+
+    The adapter caches heavyweight models (AIDE ~3.3 GB, HF audio/text/
+    image classifiers) across files; an unbounded dict grows until OOM
+    on multi-modality scans. Evicting least-recently-used entries keeps
+    a bounded residency while still avoiding per-file reloads.
+    """
+
+    def __init__(self, limit: int) -> None:
+        super().__init__()
+        self.limit = limit
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.move_to_end(key)
+        return value
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def __setitem__(self, key, value):
+        if key in self:
+            del self[key]
+        super().__setitem__(key, value)
+        while len(self) > self.limit:
+            _, evicted = self.popitem(last=False)
+            _release_cached_model(evicted)
+
+
 # The AIDE engine keeps its 3.3 GB checkpoint resident between files; keyed by
 # resolved checkpoint path so a scan loads weights once instead of per image.
-_AIDE_RUNNERS: dict[str, tuple[object, object, object]] = {}
+_AIDE_RUNNERS = _ModelLRU(_model_cache_limit())
 
 
 def _aide_runner(checkpoint: Path) -> tuple[object, object, object]:
@@ -715,7 +780,7 @@ def _run_aide(checkpoint: Path, image_path: Path) -> list[float]:
 
 # The AASIST checkpoint is tiny (~1.3 MB) but still cached per path so a scan
 # loads weights once instead of per audio file.
-_AASIST_RUNNERS: dict[str, tuple[object, object]] = {}
+_AASIST_RUNNERS = _ModelLRU(_model_cache_limit())
 
 
 _AASIST_MODULE: object | None = None
@@ -772,7 +837,7 @@ def _run_aasist(checkpoint: Path, audio_path: Path, profile: dict[str, object]) 
 
 # Hugging Face audio classifiers (wav2vec2-family deepfake detectors) are
 # multi-hundred-MB downloads — keep them resident between files.
-_HF_AUDIO_MODELS: dict[str, tuple[object, object]] = {}
+_HF_AUDIO_MODELS = _ModelLRU(_model_cache_limit())
 
 
 def _hf_audio_model(hub_model: str) -> tuple[object, object]:
@@ -852,9 +917,9 @@ def _run_onnx_audio(checkpoint: Path, audio_path: Path, profile: dict[str, objec
 
 # CLIP backbones are multi-hundred-MB downloads; keep them resident between
 # files. Linear heads are small but cached too so a scan stays cheap.
-_CLIP_BACKBONES: dict[str, tuple[object, object]] = {}
-_CLIP_HEADS: dict[str, tuple[object, object]] = {}
-_TORCHVISION_MODELS: dict[str, object] = {}
+_CLIP_BACKBONES = _ModelLRU(_model_cache_limit())
+_CLIP_HEADS = _ModelLRU(_model_cache_limit())
+_TORCHVISION_MODELS = _ModelLRU(_model_cache_limit())
 
 
 def _clip_backbone(backbone: str) -> tuple[object, object]:
@@ -931,7 +996,7 @@ def _run_clip_linear(checkpoint: Path, image_path: Path, profile: dict[str, obje
 
 # HF text classifiers are multi-hundred-MB downloads; keep them resident
 # between files like the CLIP backbones.
-_HF_TEXT_MODELS: dict[str, tuple[object, object]] = {}
+_HF_TEXT_MODELS = _ModelLRU(_model_cache_limit())
 _HF_TEXT_MAX_BYTES = 256 * 1024
 
 
@@ -970,7 +1035,7 @@ def _run_hf_text_classifier(media_path: Path, profile: dict[str, object]) -> lis
     return _flatten_outputs(logits.detach().cpu().numpy())
 
 
-_HF_IMAGE_MODELS: dict[str, tuple[object, object]] = {}
+_HF_IMAGE_MODELS = _ModelLRU(_model_cache_limit())
 
 
 def _hf_image_model(hub_model: str) -> tuple[object, object]:
@@ -1021,7 +1086,7 @@ def _run_hf_image_classifier(media_path: Path, profile: dict[str, object]) -> li
 
 # Causal LMs for the perplexity screen are ~1 GB downloads; keep them
 # resident between files like the classifier stack.
-_PPL_MODELS: dict[str, tuple[object, object]] = {}
+_PPL_MODELS = _ModelLRU(_model_cache_limit())
 _PPL_MAX_BYTES = 256 * 1024
 _PPL_MIN_TOKENS = 16
 

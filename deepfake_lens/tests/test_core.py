@@ -245,6 +245,41 @@ class DeepfakeLensCoreTest(unittest.TestCase):
             self.assertIn("summary", web_payload)
             self.assertEqual(web_payload["summary"]["total"], 2)
 
+    def test_cancelled_scan_still_flushes_cache(self) -> None:
+        """A cancelled scan must keep completed results in the cache.
+
+        Multi-hour scans are routinely interrupted; the per-file results
+        written before the cancel/crash have to remain resumable instead
+        of being discarded with the whole batch.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            scan_root = Path(tmp)
+            for idx in range(3):
+                _write_rgb_png(scan_root / f"f{idx}.png", 32, 32, lambda x, y: (10 + idx, 20, 30))
+            cache = scan_root / "cache.json"
+            seen: list[str] = []
+
+            from deepfake_lens import core as core_mod
+
+            def stop_after_one() -> bool:
+                return len(seen) >= 1
+
+            original = core_mod.analyze_file
+            try:
+                def counting_analyze(*args, **kwargs):
+                    item = original(*args, **kwargs)
+                    seen.append(item.name)
+                    return item
+
+                core_mod.analyze_file = counting_analyze
+                scan_directory(scan_root, pixel_mode="off", cache_path=cache, should_stop=stop_after_one)
+            finally:
+                core_mod.analyze_file = original
+
+            self.assertTrue(cache.is_file())
+            resummary, _ = scan_directory(scan_root, pixel_mode="off", cache_path=cache)
+            self.assertGreaterEqual(resummary.cached, 1)
+
     def test_dataset_audit_split_robustness_registry_video_and_release(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

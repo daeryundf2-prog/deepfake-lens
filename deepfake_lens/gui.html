@@ -366,6 +366,34 @@
         .toast.err { background: var(--red); color: #fff; }
 
         .toolbar { display: flex; gap: 8px; flex-wrap: wrap; }
+
+        /* token modal */
+        #token-modal {
+            position: fixed; inset: 0; z-index: 90;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(10, 12, 18, 0.55); backdrop-filter: blur(2px);
+        }
+        #token-modal[hidden] { display: none; }
+        .tm-card {
+            width: min(380px, calc(100vw - 32px));
+            background: var(--card); border: 1px solid var(--border);
+            border-radius: 14px; padding: 20px;
+            box-shadow: 0 18px 48px rgba(0,0,0,0.30);
+            display: flex; flex-direction: column; gap: 12px;
+        }
+        .tm-card h3 { margin: 0; font-size: 1.05em; }
+        .tm-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+        /* mobile / narrow viewport */
+        @media (max-width: 640px) {
+            .res-main { flex-wrap: wrap; gap: 8px; }
+            .res-info { min-width: 0; }
+            .res-name { word-break: break-all; }
+            .kv { grid-template-columns: 1fr; }
+            .dgroup img, .pv-slot img, .hm-slot img { max-width: 100%; height: auto; }
+            .nav-inner { padding: 10px 14px; }
+            .res-detail { padding: 10px; }
+        }
     </style>
 </head>
 <body>
@@ -598,6 +626,34 @@
             setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, isErr ? 5000 : 2800);
         }
 
+        /* ── token modal (async replacement for window.prompt) ── */
+        let tokenPromptPending = null;
+        function requestToken() {
+            if (tokenPromptPending) return tokenPromptPending;
+            tokenPromptPending = new Promise(resolve => {
+                const modal = $('token-modal'), input = $('token-modal-input');
+                const done = value => {
+                    modal.hidden = true;
+                    input.value = '';
+                    input.removeEventListener('keydown', onKey);
+                    $('token-modal-ok').onclick = null;
+                    $('token-modal-cancel').onclick = null;
+                    tokenPromptPending = null;
+                    resolve(value);
+                };
+                const onKey = e => {
+                    if (e.key === 'Enter') done(input.value.trim() || null);
+                    if (e.key === 'Escape') done(null);
+                };
+                $('token-modal-ok').onclick = () => done(input.value.trim() || null);
+                $('token-modal-cancel').onclick = () => done(null);
+                input.addEventListener('keydown', onKey);
+                modal.hidden = false;
+                input.focus();
+            });
+            return tokenPromptPending;
+        }
+
         async function apiFetch(url, options = {}) {
             const token = sessionStorage.getItem('dfl.token') || '';
             const headers = Object.assign(
@@ -607,7 +663,7 @@
             );
             const response = await fetch(url, Object.assign({}, options, { headers }));
             if (response.status === 401) {
-                const entered = prompt('API 토큰을 입력하세요 (--token으로 시작된 서버):');
+                const entered = await requestToken();
                 if (entered) {
                     sessionStorage.setItem('dfl.token', entered.trim());
                     return apiFetch(url, options);
@@ -1438,5 +1494,16 @@
             if (d.version) $('ver-chip').textContent = 'v' + d.version;
         }).catch(() => {});
     </script>
+    <div id="token-modal" role="dialog" aria-modal="true" aria-labelledby="token-modal-title" hidden>
+        <div class="tm-card">
+            <h3 id="token-modal-title">API 토큰 입력</h3>
+            <p class="note">서버가 --token으로 시작됐습니다. API 토큰을 입력하세요.</p>
+            <input id="token-modal-input" class="field" type="password" autocomplete="off" placeholder="API 토큰" />
+            <div class="tm-actions">
+                <button id="token-modal-ok" class="btn primary">확인</button>
+                <button id="token-modal-cancel" class="btn">취소</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

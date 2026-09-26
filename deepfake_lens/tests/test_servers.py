@@ -294,6 +294,13 @@ class ClientHeaderGateTest(unittest.TestCase):
             api_request_allowed(self._headers({"X-Deepfake-Lens-Token": "s3cret"}), token="s3cret")
         )
 
+    def test_token_accepts_api_token_alias(self) -> None:
+        """Both servers accept either token header so one credential works."""
+        from deepfake_lens.webapp import api_request_allowed
+
+        self.assertTrue(api_request_allowed(self._headers({"X-API-Token": "s3cret"}), token="s3cret"))
+        self.assertFalse(api_request_allowed(self._headers({"X-API-Token": "wrong"}), token="s3cret"))
+
 
 class LiveServerClientHeaderTest(unittest.TestCase):
     """End-to-end: the running web server must 401 /api/* requests that lack

@@ -722,3 +722,43 @@ class LanguageGateTest(unittest.TestCase):
             fused = _aggregate_profile_results(results, hangul_ratio=0.0)
         self.assertEqual(fused.score, 50)
         self.assertFalse(any("excluded" in item for item in fused.limitations))
+
+
+class ModelCacheLRUTest(unittest.TestCase):
+    """_ModelLRU bounds resident model count and evicts least-recently-used."""
+
+    def test_evicts_oldest_beyond_limit(self) -> None:
+        from deepfake_lens.model_adapter import _ModelLRU
+
+        cache = _ModelLRU(2)
+        cache["a"], cache["b"], cache["c"] = 1, 2, 3
+        self.assertNotIn("a", cache)
+        self.assertEqual(list(cache), ["b", "c"])
+
+    def test_get_refreshes_recency(self) -> None:
+        from deepfake_lens.model_adapter import _ModelLRU
+
+        cache = _ModelLRU(2)
+        cache["a"], cache["b"] = 1, 2
+        cache.get("a")
+        cache["c"] = 3
+        self.assertNotIn("b", cache)
+        self.assertIn("a", cache)
+
+    def test_env_configured_limit(self) -> None:
+        import os
+        from deepfake_lens.model_adapter import _model_cache_limit
+
+        saved = os.environ.get("DEEPFAKE_LENS_MODEL_CACHE_MAX")
+        try:
+            os.environ["DEEPFAKE_LENS_MODEL_CACHE_MAX"] = "9"
+            self.assertEqual(_model_cache_limit(), 9)
+            os.environ["DEEPFAKE_LENS_MODEL_CACHE_MAX"] = "0"
+            self.assertEqual(_model_cache_limit(), 1)
+            os.environ["DEEPFAKE_LENS_MODEL_CACHE_MAX"] = "bogus"
+            self.assertEqual(_model_cache_limit(), 4)
+        finally:
+            if saved is None:
+                os.environ.pop("DEEPFAKE_LENS_MODEL_CACHE_MAX", None)
+            else:
+                os.environ["DEEPFAKE_LENS_MODEL_CACHE_MAX"] = saved

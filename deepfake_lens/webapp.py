@@ -68,10 +68,17 @@ def host_name(header_value: str) -> str:
     return value
 
 
+# Token header names accepted by every local service. The webapp and the
+# FastAPI api_server grew separate conventions (X-Deepfake-Lens-Token vs
+# X-API-Token); accepting both keeps a single credential working across
+# either server while clients migrate to the canonical name.
+TOKEN_HEADERS = ("X-Deepfake-Lens-Token", "X-API-Token")
+
+
 def api_request_allowed(headers: Any, *, token: str | None) -> bool:
     """Gate for /api/* requests.
 
-    With a configured token the ``X-Deepfake-Lens-Token`` header must match
+    With a configured token any of the ``TOKEN_HEADERS`` must match
     (constant-time compare). Without one, the ``X-Deepfake-Lens-Client``
     custom header is required instead: browsers cannot send custom headers
     on cross-origin "simple" requests, so this forces a preflight the server
@@ -81,8 +88,11 @@ def api_request_allowed(headers: Any, *, token: str | None) -> bool:
     if token:
         import secrets
 
-        supplied = headers.get("X-Deepfake-Lens-Token") or ""
-        return bool(supplied) and secrets.compare_digest(supplied, token)
+        for name in TOKEN_HEADERS:
+            supplied = headers.get(name) or ""
+            if supplied and secrets.compare_digest(supplied, token):
+                return True
+        return False
     return bool((headers.get(CLIENT_HEADER) or "").strip())
 
 
