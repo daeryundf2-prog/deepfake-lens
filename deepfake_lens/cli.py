@@ -16,7 +16,7 @@ from .fusion import FusionProfile, apply_fusion_to_items, calibrate_fusion_profi
 from .model_registry import list_detector_candidates, write_detector_registry, write_runtime_profile
 from .perf import run_performance_check, write_performance_check
 from .release import write_release_checklist
-from .reports import write_eval_html_report, write_html_report, write_pdf_report
+from .reports import write_eval_html_report, write_forensic_pdf_report, write_html_report, write_pdf_report
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, SUPPORTED_PIXEL_MODES
 from .security import write_security_check
 from .signing import resolve_report_key, sign_report
@@ -146,6 +146,8 @@ def main(argv: list[str] | None = None) -> int:
     scan_parser.add_argument("--progress", action="store_true", help="print coarse progress messages")
     scan_parser.add_argument("--html-out", type=Path, help="write HTML report")
     scan_parser.add_argument("--pdf-out", type=Path, help="write simple PDF report")
+    scan_parser.add_argument("--forensic-pdf-out", type=Path, help="write court-admissible forensic PDF report with ECFS exhibit stamp and SHA-256 hashes")
+    scan_parser.add_argument("--exhibit-no", type=str, default="갑 제        호증", help="court exhibit number for forensic PDF report (default: '갑 제        호증')")
     scan_parser.add_argument("--redact-paths", action="store_true", help="redact paths in HTML/PDF reports")
     scan_parser.add_argument("--sign", action="store_true", help="HMAC-SHA256 sign the --json-out report (integrity-to-key-holder, not legal non-repudiation; key from --key-file or DEEPFAKE_LENS_REPORT_KEY)")
     scan_parser.add_argument("--key-file", type=Path, help="report signing key file (default: DEEPFAKE_LENS_REPORT_KEY env var)")
@@ -1163,6 +1165,14 @@ def main(argv: list[str] | None = None) -> int:
         write_html_report(args.html_out, summary, items, redact_paths=args.redact_paths)
     if args.pdf_out:
         write_pdf_report(args.pdf_out, summary, items, redact_paths=args.redact_paths)
+    if getattr(args, "forensic_pdf_out", None):
+        write_forensic_pdf_report(
+            args.forensic_pdf_out,
+            summary,
+            items,
+            redact_paths=args.redact_paths,
+            exhibit_no=getattr(args, "exhibit_no", "갑 제        호증"),
+        )
 
     if args.format == "json":
         print(scan_to_json_text(summary, items))
