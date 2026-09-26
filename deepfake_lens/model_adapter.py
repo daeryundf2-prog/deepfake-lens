@@ -1,14 +1,93 @@
 from __future__ import annotations
 
+from collections import OrderedDict
+import gc
 import importlib
 import importlib.util
 import json
 import math
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .checkpoint_integrity import load_torch_state
+
+
+def _release_torch_memory() -> None:
+    """Best-effort release of cached GPU/MPS memory back to the OS."""
+    try:
+        if importlib.util.find_spec("torch") is not None:
+            torch = importlib.import_module("torch")
+            if hasattr(torch, "cuda") and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
+                torch.mps.empty_cache()
+    except Exception:
+        pass
+    gc.collect()
+
+
+class LRUModelCache(OrderedDict):
+    """Size-bounded LRU cache for heavy neural model weights.
+
+    Prevents unbounded VRAM/RAM accumulation when scanning large sets of files
+    or alternating across multiple modalities (AIDE, Swin, wav2vec2, LLMs).
+    Evicted items are moved to CPU / cleared and torch memory is released.
+    """
+
+    def __init__(self, maxsize: int = 4, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        env_cap = os.getenv("DFLENS_MAX_CACHED_MODELS")
+        if env_cap and env_cap.isdigit():
+            self.maxsize = max(1, int(env_cap))
+        else:
+            self.maxsize = max(1, maxsize)
+
+    def __getitem__(self, key: Any) -> Any:
+        value = super().__getitem__(key)
+        self.move_to_end(key)
+        return value
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        if key in self:
+            self.move_to_end(key)
+            return super().__getitem__(key)
+        return default
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        if len(self) > self.maxsize:
+            self.evict_oldest()
+
+    def evict_oldest(self) -> None:
+        """Evict the least recently used model and release memory."""
+        if not self:
+            return
+        oldest_key, oldest_val = self.popitem(last=False)
+        self._unload_item(oldest_val)
+        _release_torch_memory()
+
+    def _unload_item(self, item: Any) -> None:
+        try:
+            if hasattr(item, "to") and callable(item.to):
+                item.to("cpu")
+            elif isinstance(item, (tuple, list)):
+                for sub in item:
+                    if hasattr(sub, "to") and callable(sub.to):
+                        sub.to("cpu")
+        except Exception:
+            pass
+
+    def clear(self) -> None:
+        while self:
+            _, val = self.popitem(last=False)
+            self._unload_item(val)
+        super().clear()
+        _release_torch_memory()
 
 # Profile-set marker: a JSON file that lists member profiles/directories so a
 # single --model-path can drive several detectors at once.
@@ -279,6 +358,10 @@ def _profile_degraded_weight(source: Path) -> float | None:
         profile = json.loads(source.read_text(encoding="utf-8"))
         weight = profile.get("degraded_weight")
         if weight is None:
+            runtime = profile.get("runtime", "")
+            if runtime in {"torchvision", "aide"}:
+                base = _profile_ensemble_weight(source)
+                return min(4.0, max(0.05, base * 0.35))
             return None
         return min(4.0, max(0.05, float(weight)))
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
@@ -678,7 +761,7 @@ def _runtime_install_hint(runtime: str) -> str:
 
 # The AIDE engine keeps its 3.3 GB checkpoint resident between files; keyed by
 # resolved checkpoint path so a scan loads weights once instead of per image.
-_AIDE_RUNNERS: dict[str, tuple[object, object, object]] = {}
+_AIDE_RUNNERS: LRUModelCache = LRUModelCache(maxsize=2)
 
 
 def _aide_runner(checkpoint: Path) -> tuple[object, object, object]:
@@ -715,7 +798,7 @@ def _run_aide(checkpoint: Path, image_path: Path) -> list[float]:
 
 # The AASIST checkpoint is tiny (~1.3 MB) but still cached per path so a scan
 # loads weights once instead of per audio file.
-_AASIST_RUNNERS: dict[str, tuple[object, object]] = {}
+_AASIST_RUNNERS: LRUModelCache = LRUModelCache(maxsize=2)
 
 
 _AASIST_MODULE: object | None = None
@@ -772,7 +855,7 @@ def _run_aasist(checkpoint: Path, audio_path: Path, profile: dict[str, object]) 
 
 # Hugging Face audio classifiers (wav2vec2-family deepfake detectors) are
 # multi-hundred-MB downloads — keep them resident between files.
-_HF_AUDIO_MODELS: dict[str, tuple[object, object]] = {}
+_HF_AUDIO_MODELS: LRUModelCache = LRUModelCache(maxsize=2)
 
 
 def _hf_audio_model(hub_model: str) -> tuple[object, object]:
@@ -852,9 +935,9 @@ def _run_onnx_audio(checkpoint: Path, audio_path: Path, profile: dict[str, objec
 
 # CLIP backbones are multi-hundred-MB downloads; keep them resident between
 # files. Linear heads are small but cached too so a scan stays cheap.
-_CLIP_BACKBONES: dict[str, tuple[object, object]] = {}
-_CLIP_HEADS: dict[str, tuple[object, object]] = {}
-_TORCHVISION_MODELS: dict[str, object] = {}
+_CLIP_BACKBONES: LRUModelCache = LRUModelCache(maxsize=2)
+_CLIP_HEADS: LRUModelCache = LRUModelCache(maxsize=4)
+_TORCHVISION_MODELS: LRUModelCache = LRUModelCache(maxsize=2)
 
 
 def _clip_backbone(backbone: str) -> tuple[object, object]:
@@ -931,7 +1014,7 @@ def _run_clip_linear(checkpoint: Path, image_path: Path, profile: dict[str, obje
 
 # HF text classifiers are multi-hundred-MB downloads; keep them resident
 # between files like the CLIP backbones.
-_HF_TEXT_MODELS: dict[str, tuple[object, object]] = {}
+_HF_TEXT_MODELS: LRUModelCache = LRUModelCache(maxsize=2)
 _HF_TEXT_MAX_BYTES = 256 * 1024
 
 
@@ -970,7 +1053,7 @@ def _run_hf_text_classifier(media_path: Path, profile: dict[str, object]) -> lis
     return _flatten_outputs(logits.detach().cpu().numpy())
 
 
-_HF_IMAGE_MODELS: dict[str, tuple[object, object]] = {}
+_HF_IMAGE_MODELS: LRUModelCache = LRUModelCache(maxsize=2)
 
 
 def _hf_image_model(hub_model: str) -> tuple[object, object]:
@@ -1021,9 +1104,26 @@ def _run_hf_image_classifier(media_path: Path, profile: dict[str, object]) -> li
 
 # Causal LMs for the perplexity screen are ~1 GB downloads; keep them
 # resident between files like the classifier stack.
-_PPL_MODELS: dict[str, tuple[object, object]] = {}
+_PPL_MODELS: LRUModelCache = LRUModelCache(maxsize=2)
 _PPL_MAX_BYTES = 256 * 1024
 _PPL_MIN_TOKENS = 16
+
+
+def clear_all_model_caches() -> None:
+    """Flush all resident model weights and release GPU/MPS memory back to OS."""
+    for cache in (
+        _AIDE_RUNNERS,
+        _AASIST_RUNNERS,
+        _HF_AUDIO_MODELS,
+        _CLIP_BACKBONES,
+        _CLIP_HEADS,
+        _TORCHVISION_MODELS,
+        _HF_TEXT_MODELS,
+        _HF_IMAGE_MODELS,
+        _PPL_MODELS,
+    ):
+        cache.clear()
+
 
 
 def _causal_lm_model(hub_model: str) -> tuple[object, object]:

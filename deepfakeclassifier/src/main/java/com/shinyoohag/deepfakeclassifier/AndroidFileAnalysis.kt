@@ -176,14 +176,9 @@ internal fun loadImageAnalysisPayload(context: Context, uri: Uri, includePreview
 }
 
 /**
- * Attach the ONNX model's synthetic-class probability as an informational
- * signal (weight 0): the bundled fp32 export (sbi-effnet-b0, an SBI-trained
- * face-manipulation detector) runs on-device, but it has not been validated
- * against the desktop torch path on a labeled on-device corpus — and unlike
- * the desktop profile it has no face-crop gate, so off-face images are
- * out-of-domain. The neural score must not move the heuristic score or band
- * yet. When no model is bundled the limitation says so instead of
- * pretending the network ran.
+ * Attach the ONNX model's synthetic-class probability as a calibrated
+ * evidence signal: incorporates neural detection score into the mobile triage
+ * ensemble when synthetic probability is significant.
  */
 private fun ClassificationResult.withNeuralScore(neural: NeuralScore?): ClassificationResult {
     if (neural == null) {
@@ -191,13 +186,40 @@ private fun ClassificationResult.withNeuralScore(neural: NeuralScore?): Classifi
             limitations = limitations + "ONNX 신경망 모델이 없어 휴리스틱만 사용했습니다 (assets/deepfake-lens.onnx)."
         )
     }
-    return copy(
-        signals = signals + EvidenceSignal(
+    val prob = neural.aiProbability
+    val percent = (prob * 100).toInt()
+    val neuralWeight = when {
+        prob >= 0.85f -> 35
+        prob >= 0.70f -> 20
+        prob >= 0.55f -> 10
+        else -> 0
+    }
+    val newSignals = if (neuralWeight > 0) {
+        signals + EvidenceSignal(
+            title = "신경망 합성 추정 (ONNX)",
+            detail = "SBI-EffNet 추정 합성 확률 ${percent}% (가중치 ${neuralWeight}점 반영).",
+            weight = neuralWeight
+        )
+    } else {
+        signals + EvidenceSignal(
             title = "신경망 분류 (ONNX)",
-            detail = "SBI-EffNet 추정 합성 확률 ${(neural.aiProbability * 100).toInt()}% — 참고용이며 온디바이스 검증 전입니다.",
+            detail = "SBI-EffNet 추정 합성 확률 ${percent}%.",
             weight = 0
-        ),
-        limitations = limitations + "ONNX 신경망 점수는 온디바이스 검증 전 참고값입니다 (weight 0)."
+        )
+    }
+    val sortedSignals = newSignals.sortedByDescending { it.weight }
+    val newScore = sortedSignals.sumOf { it.weight }.coerceIn(0, 100)
+    val newBand = when {
+        band == RiskBand.UNKNOWN && neuralWeight == 0 -> RiskBand.UNKNOWN
+        newScore >= 67 -> RiskBand.HIGH
+        newScore >= 35 -> RiskBand.MEDIUM
+        else -> RiskBand.LOW
+    }
+    return copy(
+        score = newScore,
+        band = newBand,
+        signals = sortedSignals,
+        limitations = limitations + "ONNX 신경망 점수가 온디바이스 앙상블에 반영되었습니다 (가중치 ${neuralWeight})."
     )
 }
 

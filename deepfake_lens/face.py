@@ -230,20 +230,20 @@ def _detect_faces(image: Any) -> list[FaceRegion]:
         return []
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    face_cascade = cv2.CascadeClassifier(cascade_path)
-    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
-
     regions = []
-    for x, y, w, h in faces:
-        landmarks, source = _face_landmarks(image, x, y, w, h)
-        regions.append(
-            FaceRegion(
-                x=x, y=y, width=w, height=h,
-                landmarks=landmarks, confidence=0.9,
-                landmarks_source=source,
+    if hasattr(cv2, "CascadeClassifier") and hasattr(getattr(cv2, "data", None), "haarcascades"):
+        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        face_cascade = cv2.CascadeClassifier(cascade_path)
+        faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+        for x, y, w, h in faces:
+            landmarks, source = _face_landmarks(image, x, y, w, h)
+            regions.append(
+                FaceRegion(
+                    x=x, y=y, width=w, height=h,
+                    landmarks=landmarks, confidence=0.9,
+                    landmarks_source=source,
+                )
             )
-        )
     if regions:
         return regions
     return _mediapipe_detect_faces(image)

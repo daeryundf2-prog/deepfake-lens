@@ -197,7 +197,14 @@ def _load_with_optional_pillow(path: Path, *, max_side: int) -> tuple[PixelRaste
             image = image.convert("RGB")
             image.thumbnail((max_side, max_side))
             width, height = image.size
-            pixels = tuple((int(r), int(g), int(b)) for r, g, b in image.getdata())
+            if hasattr(image, "get_flattened_data"):
+                raw = image.get_flattened_data()
+                if raw and isinstance(raw[0], (tuple, list)):
+                    pixels = tuple((int(p[0]), int(p[1]), int(p[2])) for p in raw)
+                else:
+                    pixels = tuple((int(raw[i]), int(raw[i + 1]), int(raw[i + 2])) for i in range(0, len(raw), 3))
+            else:
+                pixels = tuple((int(r), int(g), int(b)) for r, g, b in image.getdata())
             return PixelRaster(width, height, pixels, "pillow"), []
     except Exception as exc:  # pragma: no cover - depends on optional Pillow codecs
         return None, [f"Pillow로 이미지 픽셀을 읽지 못했습니다: {exc}"]

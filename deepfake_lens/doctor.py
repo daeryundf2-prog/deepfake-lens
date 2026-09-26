@@ -39,6 +39,8 @@ OPTIONAL_DEPS = [
     ("c2pa", "c2pa-python", "C2PA manifest verification"),
     ("syhwp", "syhwp", "HWP/HWPX document parsing"),
     ("fitz", "PyMuPDF", "PDF rendering forensics"),
+    ("fastapi", "fastapi", "unified async REST API server"),
+    ("uvicorn", "uvicorn", "ASGI server for unified API service"),
 ]
 
 EXTERNAL_TOOLS = ["ffmpeg", "ffprobe"]
@@ -106,10 +108,13 @@ def _check_accelerators() -> list[Check]:
     try:
         torch = importlib.import_module("torch")
         cuda = bool(torch.cuda.is_available())
-        detail = f"torch {torch.__version__}, CUDA {'available' if cuda else 'not available'}"
+        mps = bool(hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
+        detail = f"torch {torch.__version__}, CUDA {'available' if cuda else 'not available'}, MPS {'available' if mps else 'not available'}"
         if cuda:
             detail += f" ({torch.cuda.get_device_name(0)})"
-        checks.append(Check("torch", "ok" if cuda else "warn", detail))
+        elif mps:
+            detail += " (Apple Silicon GPU)"
+        checks.append(Check("torch", "ok" if (cuda or mps) else "warn", detail))
         dml = getattr(torch, "directml", None) or importlib.util.find_spec("torch_directml")
         checks.append(Check("directml", "ok" if dml else "warn", "DirectML " + ("detected" if dml else "not installed")))
     except ImportError:
