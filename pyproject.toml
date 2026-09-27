@@ -116,6 +116,12 @@ files = [
     "deepfake_lens/vendor_weights.py",
     "deepfake_lens/evidence_statement.py",
     "deepfake_lens/reviews.py",
+    "deepfake_lens/result_types.py",
+    "deepfake_lens/serialization.py",
+    "deepfake_lens/scan_cache.py",
+    "deepfake_lens/model_cache.py",
+    "deepfake_lens/cli_render.py",
+    "deepfake_lens/doctor.py",
 ]
 follow_imports = "skip"
 ignore_missing_imports = true

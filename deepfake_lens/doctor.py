@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import importlib.util
 import json
 import shutil
 from dataclasses import asdict, dataclass, field
