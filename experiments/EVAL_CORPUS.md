@@ -80,3 +80,43 @@ Writing a profile: `calibration.write_threshold_profile` — include
 `samples`, `dataset_fingerprint`, `measured_at`, and the `metrics` block
 (AUROC/FPR at the chosen operating point). `cli --thresholds` warns to
 stderr when the profile is provisional or fails to load.
+
+## Corpus acquisition plan (threshold de-provisionalization)
+
+The current corpus cannot de-provisionalize the seam/track thresholds:
+`face/fake` positives are SBI self-blends generated at eval time, so the
+fake side is not a measured faceswap population. Target corpora:
+
+| Layer | Corpus | Why | Access |
+|---|---|---|---|
+| `faceswap_seam` | FaceForensics++ (FaceSwap/Deepfakes subsets) | canonical faceswap seam artifact benchmark | research agreement, per-user approval — cannot be committed or auto-fetched |
+| `faceswap_seam` | KoDF | Korean-domain distribution match for the actual user base | KODF institutional application (ko df dataset, data.kosa.or.kr) |
+| `faceswap_seam` | Celeb-DF v2 | harder, boundary-refined swaps | research agreement |
+| `face_track` | DFDC preview / KoDF video subset | temporal tracks with per-video labels | Kaggle/institutional agreement |
+| `audio` | ASVspoof 2019/2021 LA | same benchmark AASIST reports against | public download |
+
+None of these can be committed to the repo (license) — the corpus stays
+gitignored under `eval_corpus/` like today, and the measurement script
+writes its sha256 fingerprint into the profile so "which corpus produced
+these numbers" stays answerable without redistributing data.
+
+## Measuring seam thresholds
+
+```bash
+python experiments/eval_seam_thresholds.py \
+    --real-dir eval_corpus/face/real --fake-dir eval_corpus/face/ffpp \
+    --profile-out models/thresholds.faceswap_seam.json \
+    --report experiments/seam_eval_report.json
+```
+
+`eval_seam_thresholds.py` scores each sample with the production
+`analyze_faceswap_seam`, records all four raw metrics, fits cutoffs at
+the target real-class FPR (`--fpr-high` 1%, `--fpr-medium` 10%), and
+writes a `layer-thresholds-v1` profile with the corpus fingerprint and
+per-metric AUROC. Metrics that cannot be fit keep the module defaults
+and are marked `fell_back_to_default` in the report — the profile never
+implies a measurement that did not happen.
+
+Cross-domain check before shipping: fit on one corpus, evaluate the
+profile on a held-out second corpus (in-domain numbers alone are a known
+overfit — the SBI candidate measured 0.84 in-domain vs 0.79 cross).
