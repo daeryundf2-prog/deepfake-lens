@@ -37,6 +37,40 @@ _DEFAULT_FPS = 4.0  # frames sampled per second
 _MAX_FRAMES = 96
 _MIN_TRACK = 8  # frames with a usable face required for a verdict
 
+# Default heuristic cutoffs (measured on the small synthetic corpus recorded
+# in experiments/FACESWAP_EVALUATION.md). A ThresholdProfile
+# (calibration.py, keys "face_track.<name>") overrides any of them.
+TRACK_THRESHOLDS: dict[str, float] = {
+    "drift_mean_high": 0.25,
+    "drift_mean_mid": 0.12,
+    "drift_max": 0.5,
+    "jitter_high": 0.08,
+    "jitter_mid": 0.04,
+    "area_delta": 0.15,
+    "score_high": 60.0,
+    "score_mid": 30.0,
+}
+
+
+def _resolve_thresholds(thresholds) -> tuple:
+    """Return ``(lookup, provisional)`` for a ThresholdProfile, dict, or None."""
+    if thresholds is None:
+        return lambda key: TRACK_THRESHOLDS[key], False
+    value_fn = getattr(thresholds, "value", None)
+    if callable(value_fn) and hasattr(thresholds, "provisional"):
+        return (
+            lambda key: value_fn(f"face_track.{key}", TRACK_THRESHOLDS[key]),
+            bool(thresholds.provisional),
+        )
+    if isinstance(thresholds, dict):
+        merged = dict(TRACK_THRESHOLDS)
+        for key, raw in thresholds.items():
+            short = str(key).split(".", 1)[-1]
+            if short in merged and isinstance(raw, (int, float)):
+                merged[short] = float(raw)
+        return lambda key: merged[key], False
+    return lambda key: TRACK_THRESHOLDS[key], False
+
 
 @dataclass(frozen=True)
 class FaceTrackAnalysis:
@@ -57,7 +91,7 @@ class FaceTrackAnalysis:
 
 
 def analyze_face_track(
-    path: Path | str, *, fps: float = _DEFAULT_FPS, max_frames: int = _MAX_FRAMES
+    path: Path | str, *, fps: float = _DEFAULT_FPS, max_frames: int = _MAX_FRAMES, thresholds=None
 ) -> FaceTrackAnalysis:
     """Measure temporal face-track consistency on a video file."""
     video_path = Path(path)
@@ -65,6 +99,9 @@ def analyze_face_track(
         "휴리스틱 시간-일관성 측정이며 학습된 temporal 모델이 아닙니다 — 스크리닝 신호입니다.",
         "작거나 측면 얼굴, 장면 전환, 강한 손떨림은 실사에서도 드리프트를 키웁니다.",
     ]
+    t, provisional = _resolve_thresholds(thresholds)
+    if provisional:
+        limitations.append("적용된 임계값 프로파일이 표본 부족으로 임시(provisional) 상태입니다 — 측정 기반으로 검증되지 않았습니다.")
     try:
         import cv2
         import numpy as np
@@ -116,8 +153,8 @@ def analyze_face_track(
     jitter = _landmark_jitter([l for _, l, _ in usable], [b for _, _, b in usable])
     area_delta = _box_smoothness([b for _, _, b in usable])
 
-    score = _score(drift, jitter, area_delta)
-    verdict = _verdict(score)
+    score = _score(drift, jitter, area_delta, t)
+    verdict = _verdict(score, t)
     return FaceTrackAnalysis(
         True,
         score,
@@ -249,28 +286,32 @@ def _box_smoothness(boxes) -> float | None:
     return float(sum(deltas) / len(deltas)) if deltas else None
 
 
-def _score(drift, jitter, area_delta) -> int:
-    """Weak heuristic: thresholds from the synthetic-corpus calibration."""
+def _score(drift, jitter, area_delta, t=None) -> int:
+    """Weak heuristic: thresholds default to the synthetic-corpus calibration."""
+    if t is None:
+        t, _ = _resolve_thresholds(None)
     points = 0
-    if drift and drift["mean"] > 0.25:
+    if drift and drift["mean"] > t("drift_mean_high"):
         points += 35
-    elif drift and drift["mean"] > 0.12:
+    elif drift and drift["mean"] > t("drift_mean_mid"):
         points += 15
-    if drift and drift["max"] > 0.5:
+    if drift and drift["max"] > t("drift_max"):
         points += 15
-    if jitter is not None and jitter > 0.08:
+    if jitter is not None and jitter > t("jitter_high"):
         points += 25
-    elif jitter is not None and jitter > 0.04:
+    elif jitter is not None and jitter > t("jitter_mid"):
         points += 10
-    if area_delta is not None and area_delta > 0.15:
+    if area_delta is not None and area_delta > t("area_delta"):
         points += 15
     return min(points, 100)
 
 
-def _verdict(score: int) -> str:
-    if score >= 60:
+def _verdict(score: int, t=None) -> str:
+    if t is None:
+        t, _ = _resolve_thresholds(None)
+    if score >= t("score_high"):
         return "얼굴 트랙 시간-불일치가 큽니다 — 프레임 단위 합성/스왑 후보 (사람 검토 필요)."
-    if score >= 30:
+    if score >= t("score_mid"):
         return "얼굴 트랙 드리프트가 경계 영역입니다 — 재촬영/압축과 구분이 필요합니다."
     return "얼굴 트랙이 시간적으로 매끄럽습니다 — 이 신호만으로는 조작을 배제할 수 없습니다."
 

@@ -25,6 +25,43 @@ from typing import Any
 from .face import FaceRegion, _detect_faces, _imread_unicode
 
 
+# Default heuristic cutoffs. These literals are the shipped baseline; a
+# measured ThresholdProfile (calibration.py, keys "faceswap_seam.<name>")
+# can override any of them with corpus-fitted values.
+SEAM_THRESHOLDS: dict[str, float] = {
+    "min_face_px": 32.0,
+    "seam_ratio_high": 3.2,
+    "seam_ratio_low": 0.22,
+    "seam_inner_var_min": 15.0,
+    "noise_ratio_low": 0.42,
+    "noise_ratio_high": 2.6,
+    "chroma_delta": 18.0,
+    "corneal_asymmetry_px": 4.5,
+    "score_high": 65.0,
+    "score_medium": 35.0,
+}
+
+
+def _resolve_thresholds(thresholds: Any) -> tuple[Any, bool]:
+    """Return ``(lookup, provisional)`` for a ThresholdProfile, dict, or None."""
+    if thresholds is None:
+        return lambda key: SEAM_THRESHOLDS[key], False
+    value_fn = getattr(thresholds, "value", None)
+    if callable(value_fn) and hasattr(thresholds, "provisional"):
+        return (
+            lambda key: value_fn(f"faceswap_seam.{key}", SEAM_THRESHOLDS[key]),
+            bool(thresholds.provisional),
+        )
+    if isinstance(thresholds, dict):
+        merged = dict(SEAM_THRESHOLDS)
+        for key, raw in thresholds.items():
+            short = str(key).split(".", 1)[-1]
+            if short in merged and isinstance(raw, (int, float)):
+                merged[short] = float(raw)
+        return lambda key: merged[key], False
+    return lambda key: SEAM_THRESHOLDS[key], False
+
+
 @dataclass(frozen=True)
 class FaceSwapEvidenceSignal:
     title: str
@@ -54,6 +91,7 @@ def analyze_faceswap_seam(
     path: Path | str,
     *,
     image_matrix: Any = None,
+    thresholds: Any = None,
 ) -> FaceSwapSeamAnalysis:
     """Run multi-cue localized face-swap seam forensic analysis on an image."""
     try:
@@ -93,22 +131,25 @@ def analyze_faceswap_seam(
 
     img_h, img_w = image.shape[:2]
     analyzed_faces = 0
+    t, provisional = _resolve_thresholds(thresholds)
+    if provisional:
+        limitations.append("적용된 임계값 프로파일이 표본 부족으로 임시(provisional) 상태입니다 — 측정 기반으로 검증되지 않았습니다.")
 
     for face in faces:
         x, y, w, h = face.x, face.y, face.width, face.height
-        if w < 32 or h < 32:
+        if w < t("min_face_px") or h < t("min_face_px"):
             continue
         analyzed_faces += 1
 
         # 1. Elliptical boundary seam analysis (Poisson blending & feathering)
-        seam_res, seam_sig = _analyze_elliptical_seam(image, face, cv2, np)
+        seam_res, seam_sig = _analyze_elliptical_seam(image, face, cv2, np, t)
         if seam_res is not None:
             best_boundary_res = max(best_boundary_res or 0.0, seam_res)
         if seam_sig:
             signals.append(seam_sig)
 
         # 2. Sensor noise discrepancy (Face crop vs body context)
-        noise_ratio, noise_sig = _analyze_noise_mismatch(image, face, cv2, np)
+        noise_ratio, noise_sig = _analyze_noise_mismatch(image, face, cv2, np, t)
         if noise_ratio is not None and (
             best_noise_ratio is None
             or abs(math.log(max(noise_ratio, 1e-9))) > abs(math.log(max(best_noise_ratio, 1e-9)))
@@ -118,14 +159,14 @@ def analyze_faceswap_seam(
             signals.append(noise_sig)
 
         # 3. Chrominance gradient discontinuity (Chin vs Neck color temperature)
-        chroma_d, chroma_sig = _analyze_chroma_step(image, face, cv2, np)
+        chroma_d, chroma_sig = _analyze_chroma_step(image, face, cv2, np, t)
         if chroma_d is not None:
             best_chroma_delta = max(best_chroma_delta or 0.0, chroma_d)
         if chroma_sig:
             signals.append(chroma_sig)
 
         # 4. Corneal reflection specular asymmetry
-        corneal_asym, corneal_sig = _analyze_corneal_reflections(image, face, cv2, np)
+        corneal_asym, corneal_sig = _analyze_corneal_reflections(image, face, cv2, np, t)
         if corneal_asym is not None:
             best_corneal_asym = max(best_corneal_asym or 0.0, corneal_asym)
         if corneal_sig:
@@ -160,11 +201,11 @@ def analyze_faceswap_seam(
         )
 
     score = min(100, sum(s.weight for s in signals))
-    if score >= 65:
+    if score >= t("score_high"):
         band = "high"
         band_label = "높음"
         verdict = "안면부 경계면 잔차 및 노이즈 불일치로 보아 페이스스왑(FaceSwap) 합성 가능성이 매우 높습니다."
-    elif score >= 35:
+    elif score >= t("score_medium"):
         band = "medium"
         band_label = "주의"
         verdict = "안면부와 주변 신체 영역 사이에 미세한 이질성이 감지되어 정밀 대조가 필요합니다."
@@ -188,7 +229,7 @@ def analyze_faceswap_seam(
     )
 
 
-def _analyze_elliptical_seam(image: Any, face: FaceRegion, cv2: Any, np: Any) -> tuple[float | None, FaceSwapEvidenceSignal | None]:
+def _analyze_elliptical_seam(image: Any, face: FaceRegion, cv2: Any, np: Any, t: Any) -> tuple[float | None, FaceSwapEvidenceSignal | None]:
     """Measure high-frequency Laplacian transition across the elliptical face seam."""
     img_h, img_w = image.shape[:2]
     cx = face.x + face.width // 2
@@ -226,13 +267,13 @@ def _analyze_elliptical_seam(image: Any, face: FaceRegion, cv2: Any, np: Any) ->
     # or hard boundary cut-and-paste edges (abnormally high seam variance).
     ratio = ring_var / max(inner_var, 1e-4)
 
-    if ratio > 3.2:
+    if ratio > t("seam_ratio_high"):
         return ratio, FaceSwapEvidenceSignal(
             title="안면 윤곽선 경계면 주파수 단절",
             detail=f"얼굴 외곽 경계선에서 라플라시안 주파수 잔차 비율({ratio:.2f})이 비정상적으로 높아 경계 합성이 의심됩니다.",
             weight=30,
         )
-    elif ratio < 0.22 and inner_var > 15.0:
+    elif ratio < t("seam_ratio_low") and inner_var > t("seam_inner_var_min"):
         return ratio, FaceSwapEvidenceSignal(
             title="안면부 인위적 스무딩/페더링 흔적",
             detail=f"얼굴 경계면의 고주파 잔차가 과도하게 평활화({ratio:.2f})되어 포아송 블렌딩 합성 흔적을 시사합니다.",
@@ -241,7 +282,7 @@ def _analyze_elliptical_seam(image: Any, face: FaceRegion, cv2: Any, np: Any) ->
     return ratio, None
 
 
-def _analyze_noise_mismatch(image: Any, face: FaceRegion, cv2: Any, np: Any) -> tuple[float | None, FaceSwapEvidenceSignal | None]:
+def _analyze_noise_mismatch(image: Any, face: FaceRegion, cv2: Any, np: Any, t: Any) -> tuple[float | None, FaceSwapEvidenceSignal | None]:
     """Measure high-frequency noise variance mismatch between face and body."""
     img_h, img_w = image.shape[:2]
     fx, fy, fw, fh = face.x, face.y, face.width, face.height
@@ -279,13 +320,13 @@ def _analyze_noise_mismatch(image: Any, face: FaceRegion, cv2: Any, np: Any) -> 
 
     ratio = face_std / max(ctx_std, 1e-4)
 
-    if ratio < 0.42:
+    if ratio < t("noise_ratio_low"):
         return ratio, FaceSwapEvidenceSignal(
             title="안면부-신체 노이즈 질감 불일치",
             detail=f"얼굴 영역의 센서 노이즈 강도({face_std:.1f})가 주변 신체({ctx_std:.1f}) 대비 {ratio:.2f}배로 이질적입니다 (AI 생성 얼굴 과평활화).",
             weight=28,
         )
-    elif ratio > 2.6:
+    elif ratio > t("noise_ratio_high"):
         return ratio, FaceSwapEvidenceSignal(
             title="안면부 인공 고주파 노이즈 과다",
             detail=f"얼굴 영역의 노이즈 강도({face_std:.1f})가 주변({ctx_std:.1f}) 대비 {ratio:.2f}배로 불균형합니다 (생성기 체크포인트 잔차).",
@@ -294,7 +335,7 @@ def _analyze_noise_mismatch(image: Any, face: FaceRegion, cv2: Any, np: Any) -> 
     return ratio, None
 
 
-def _analyze_chroma_step(image: Any, face: FaceRegion, cv2: Any, np: Any) -> tuple[float | None, FaceSwapEvidenceSignal | None]:
+def _analyze_chroma_step(image: Any, face: FaceRegion, cv2: Any, np: Any, t: Any) -> tuple[float | None, FaceSwapEvidenceSignal | None]:
     """Measure chrominance (color temperature) step across the chin-to-neck transition."""
     img_h, img_w = image.shape[:2]
     fx, fy, fw, fh = face.x, face.y, face.width, face.height
@@ -323,7 +364,7 @@ def _analyze_chroma_step(image: Any, face: FaceRegion, cv2: Any, np: Any) -> tup
 
     delta_chroma = math.sqrt((chin_cr_mean - neck_cr_mean) ** 2 + (chin_cb_mean - neck_cb_mean) ** 2)
 
-    if delta_chroma > 18.0:
+    if delta_chroma > t("chroma_delta"):
         return delta_chroma, FaceSwapEvidenceSignal(
             title="턱선-목선 색온도 및 색도 단절",
             detail=f"턱선과 목선 사이의 피부 톤 색도차(Δ{delta_chroma:.1f})가 비자연스럽게 커 서로 다른 인물 간 합성 징후입니다.",
@@ -332,7 +373,7 @@ def _analyze_chroma_step(image: Any, face: FaceRegion, cv2: Any, np: Any) -> tup
     return delta_chroma, None
 
 
-def _analyze_corneal_reflections(image: Any, face: FaceRegion, cv2: Any, np: Any) -> tuple[float | None, FaceSwapEvidenceSignal | None]:
+def _analyze_corneal_reflections(image: Any, face: FaceRegion, cv2: Any, np: Any, t: Any) -> tuple[float | None, FaceSwapEvidenceSignal | None]:
     """Examine corneal specular reflection highlight asymmetry across both eyes."""
     if len(face.landmarks) < 2:
         return None, None
@@ -372,7 +413,7 @@ def _analyze_corneal_reflections(image: Any, face: FaceRegion, cv2: Any, np: Any
     # Discrepancy in normalized relative highlight direction
     asym = math.sqrt((lx_off - rx_off) ** 2 + (ly_off - ry_off) ** 2)
 
-    if asym > 4.5:
+    if asym > t("corneal_asymmetry_px"):
         return asym, FaceSwapEvidenceSignal(
             title="양안 각막 반사광(하이라이트) 불일치",
             detail=f"양쪽 눈동자에 반사된 광원 중심점 편차({asym:.1f}px)가 물리적 조명 법칙에 위배됩니다 (가상 광원 합성).",

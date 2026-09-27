@@ -17,10 +17,19 @@ try:
 except ImportError:
     HAVE_CV2 = False
 
+from deepfake_lens.calibration import (
+    MIN_CALIBRATION_SAMPLES,
+    THRESHOLD_PROFILE_VERSION,
+    ThresholdProfile,
+    load_threshold_profile,
+    write_threshold_profile,
+)
 from deepfake_lens.cli import main
 from deepfake_lens.core import _deep_image_layers
 from deepfake_lens.faceswap_seam import (
     FaceSwapSeamAnalysis,
+    SEAM_THRESHOLDS,
+    _resolve_thresholds,
     analyze_faceswap_seam,
 )
 
@@ -130,3 +139,73 @@ class FaceSwapSeamTest(unittest.TestCase):
         signals, limitations = _deep_image_layers(test_path)
         self.assertIsInstance(signals, list)
         self.assertIsInstance(limitations, list)
+
+
+class ThresholdProfileTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp_dir.name)
+
+    def tearDown(self) -> None:
+        self.tmp_dir.cleanup()
+
+    def test_roundtrip_and_lookup(self) -> None:
+        profile = ThresholdProfile(
+            version=THRESHOLD_PROFILE_VERSION,
+            values={"faceswap_seam.seam_ratio_high": 4.1},
+            samples=200,
+            dataset_fingerprint="abc123",
+            measured_at="2026-09-28",
+        )
+        out = self.root / "thresholds.json"
+        write_threshold_profile(out, profile)
+        loaded = load_threshold_profile(out)
+        self.assertIsNotNone(loaded)
+        self.assertFalse(loaded.provisional)
+        self.assertEqual(loaded.value("faceswap_seam.seam_ratio_high", 3.2), 4.1)
+        self.assertEqual(loaded.value("faceswap_seam.chroma_delta", 18.0), 18.0)
+
+    def test_small_sample_profile_is_provisional(self) -> None:
+        profile = ThresholdProfile(
+            version=THRESHOLD_PROFILE_VERSION, values={}, samples=MIN_CALIBRATION_SAMPLES - 1
+        )
+        self.assertTrue(profile.provisional)
+
+    def test_wrong_version_rejected(self) -> None:
+        out = self.root / "bad.json"
+        out.write_text(json.dumps({"version": "other", "values": {}}), encoding="utf-8")
+        self.assertIsNone(load_threshold_profile(out))
+
+    def test_resolve_defaults_and_overrides(self) -> None:
+        t, provisional = _resolve_thresholds(None)
+        self.assertEqual(t("seam_ratio_high"), 3.2)
+        self.assertFalse(provisional)
+
+        t, _ = _resolve_thresholds({"seam_ratio_high": 9.9, "bogus_key": 1})
+        self.assertEqual(t("seam_ratio_high"), 9.9)
+        self.assertEqual(t("chroma_delta"), SEAM_THRESHOLDS["chroma_delta"])
+
+        profile = ThresholdProfile(
+            version=THRESHOLD_PROFILE_VERSION,
+            values={"faceswap_seam.chroma_delta": 7.5},
+            samples=100,
+        )
+        t, _ = _resolve_thresholds(profile)
+        self.assertEqual(t("chroma_delta"), 7.5)
+        self.assertEqual(t("seam_ratio_high"), 3.2)
+
+    @unittest.skipUnless(HAVE_CV2, "opencv required")
+    def test_provisional_profile_adds_limitation(self) -> None:
+        from unittest.mock import patch
+
+        from deepfake_lens.face import FaceRegion
+        import deepfake_lens.faceswap_seam as seam_mod
+
+        face = FaceRegion(x=60, y=60, width=120, height=120, landmarks=[], confidence=0.9)
+        img = np.full((300, 300, 3), 128, dtype=np.uint8)
+        profile = ThresholdProfile(
+            version=THRESHOLD_PROFILE_VERSION, values={}, samples=3
+        )
+        with patch.object(seam_mod, "_detect_faces", return_value=[face]):
+            analysis = analyze_faceswap_seam("ignored.png", image_matrix=img, thresholds=profile)
+        self.assertTrue(any("provisional" in lim or "임시" in lim for lim in analysis.limitations))

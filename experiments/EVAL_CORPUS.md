@@ -58,3 +58,25 @@ python experiments/suggest_weights.py report.json --write   # updates profiles
   FaceShifter-class pipelines is inferred, not measured.
 - Small n means wide confidence intervals; AUROC differences <0.1 on
   n<100 are noise-level.
+
+## Per-layer threshold provenance (layer-thresholds-v1)
+
+Heuristic decision cutoffs (`faceswap_seam.*`, `face_track.*`) are module
+defaults that a `ThresholdProfile` JSON can override at scan/eval time
+(`--thresholds`). A profile is **provisional** while `samples <
+MIN_CALIBRATION_SAMPLES` (20) and detectors must surface that status in
+their `limitations` — a provisional profile is a hypothesis, not a
+measurement.
+
+Minimum corpus requirements before shipping a non-provisional profile:
+
+| Layer | Keys | Min samples | Required coverage |
+|---|---|---:|---|
+| `faceswap_seam` | seam_ratio_high/low, noise_ratio_low/high, chroma_delta, corneal_asymmetry_px, score_high/medium | 40 labeled (>=20 real faces incl. aged/damaged portraits + >=20 swaps) | jpeg75 + 50%-resize variants; aged/damaged portrait FPR is a known failure domain — keep them in every eval set |
+| `face_track` | drift_mean_*, jitter_*, area_delta, score_* | 20 labeled videos (>=10 real talking-head, >=10 swaps incl. smooth single-identity pastes — the measured evasion case) | landmark-aligned deepfakes evade re-detection; include at least one |
+| score (global) | CalibrationProfile / ScoreCalibrator | 20 samples, >=5 per class | existing `calibrate` machinery |
+
+Writing a profile: `calibration.write_threshold_profile` — include
+`samples`, `dataset_fingerprint`, `measured_at`, and the `metrics` block
+(AUROC/FPR at the chosen operating point). `cli --thresholds` warns to
+stderr when the profile is provisional or fails to load.

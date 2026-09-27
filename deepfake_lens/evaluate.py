@@ -21,6 +21,7 @@ def evaluate_dataset(
     model_path: Path | None = None,
     fusion_profile: FusionProfile | None = None,
     max_files: int | None = None,
+    thresholds: object | None = None,
 ) -> dict[str, object]:
     root_path = Path(root)
     dataset_summary, records = discover_dataset(root_path, max_files=max_files)
@@ -38,6 +39,7 @@ def evaluate_dataset(
             pixel_mode=pixel_mode,
             pixel_max_side=pixel_max_side,
             model_path=model_path,
+            thresholds=thresholds,
         )
         if item.result and fusion_profile:
             item = replace(item, result=apply_fusion_to_result(item.result, fusion_profile))
@@ -134,9 +136,10 @@ def calibrate_dataset(
     target_false_positive_rate: float = 0.05,
     max_files: int | None = None,
     include_score_mapping: bool = False,
+    thresholds: object | None = None,
 ) -> dict[str, object]:
     score_pairs, calibration_scope = _score_dataset(
-        root, pixel_mode=pixel_mode, pixel_max_side=pixel_max_side, max_files=max_files
+        root, pixel_mode=pixel_mode, pixel_max_side=pixel_max_side, max_files=max_files, thresholds=thresholds
     )
     profile = calibrate_threshold(score_pairs, target_false_positive_rate=target_false_positive_rate)
     payload = profile.to_json()
@@ -186,6 +189,7 @@ def evaluate_robustness_dataset(
     model_path: Path | None = None,
     fusion_profile: FusionProfile | None = None,
     max_files: int | None = None,
+    thresholds: object | None = None,
 ) -> dict[str, object]:
     payload = evaluate_dataset(
         root,
@@ -195,6 +199,7 @@ def evaluate_robustness_dataset(
         model_path=model_path,
         fusion_profile=fusion_profile,
         max_files=max_files,
+        thresholds=thresholds,
     )
     transform_rows: dict[str, list[tuple[int, bool]]] = {}
     threshold = int(payload["threshold"])
@@ -229,7 +234,7 @@ def write_json_report(path: Path | str, payload: dict[str, object]) -> None:
 
 
 def _score_dataset(
-    root: Path | str, *, pixel_mode: str, pixel_max_side: int, max_files: int | None
+    root: Path | str, *, pixel_mode: str, pixel_max_side: int, max_files: int | None, thresholds: object | None = None
 ) -> tuple[list[tuple[int, bool]], dict[str, object]]:
     """Score a labeled dataset for threshold fitting.
 
@@ -259,7 +264,7 @@ def _score_dataset(
     scores: list[tuple[int, bool]] = []
     unanalyzed = 0
     for record in used_records:
-        item = analyze_file(Path(record.path), root=root_path, pixel_mode=pixel_mode, pixel_max_side=pixel_max_side)
+        item = analyze_file(Path(record.path), root=root_path, pixel_mode=pixel_mode, pixel_max_side=pixel_max_side, thresholds=thresholds)
         if item.result is None:
             unanalyzed += 1
             continue

@@ -344,6 +344,80 @@ def _interpolate(mapping: tuple[tuple[float, float], ...], score: float) -> floa
     return mapping[-1][1]
 
 
+THRESHOLD_PROFILE_VERSION = "layer-thresholds-v1"
+
+
+@dataclass(frozen=True)
+class ThresholdProfile:
+    """Measured per-layer decision thresholds with provenance.
+
+    ``values`` maps ``"<layer>.<param>"`` keys (e.g.
+    ``"faceswap_seam.seam_ratio_high"``) to measured cutoffs, replacing the
+    hardcoded module defaults. ``provisional`` is derived from the sample
+    count — a profile fit on fewer than ``MIN_CALIBRATION_SAMPLES`` labeled
+    items must surface as provisional so forensic output can mark the
+    thresholds as unvalidated rather than measured.
+    """
+
+    version: str
+    values: dict[str, float]
+    samples: int = 0
+    dataset_fingerprint: str = ""
+    measured_at: str = ""
+    metrics: dict[str, float | int] | None = None
+
+    @property
+    def provisional(self) -> bool:
+        return self.samples < MIN_CALIBRATION_SAMPLES
+
+    def value(self, key: str, default: float) -> float:
+        raw = self.values.get(key)
+        if isinstance(raw, (int, float)):
+            return float(raw)
+        return default
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "version": self.version,
+            "values": dict(self.values),
+            "samples": self.samples,
+            "provisional": self.provisional,
+            "dataset_fingerprint": self.dataset_fingerprint,
+            "measured_at": self.measured_at,
+            "metrics": dict(self.metrics or {}),
+        }
+
+
+def load_threshold_profile(path: Path | str | None) -> ThresholdProfile | None:
+    if path is None:
+        return None
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("version") != THRESHOLD_PROFILE_VERSION:
+        return None
+    values = payload.get("values")
+    if not isinstance(values, dict):
+        return None
+    clean = {str(key): float(val) for key, val in values.items() if isinstance(val, (int, float))}
+    metrics = payload.get("metrics")
+    return ThresholdProfile(
+        version=THRESHOLD_PROFILE_VERSION,
+        values=clean,
+        samples=int(payload.get("samples", 0) or 0),
+        dataset_fingerprint=str(payload.get("dataset_fingerprint", "")),
+        measured_at=str(payload.get("measured_at", "")),
+        metrics=dict(metrics) if isinstance(metrics, dict) else None,
+    )
+
+
+def write_threshold_profile(path: Path | str, profile: ThresholdProfile) -> None:
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(profile.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def _float_pairs(raw: object) -> tuple[tuple[float, float], ...]:
     pairs = []
     if isinstance(raw, list):
