@@ -111,12 +111,11 @@ def create_app(
     async def root():
         return {"message": "Deepfake Lens API", "version": "0.1.0"}
 
-    # GUI is fully externalized (gui.css/gui.js) — the policy blocks inline
-    # scripts; blob: covers object-URL previews and heatmaps. style-src keeps
-    # 'unsafe-inline' because markup/JS use style attributes (the low-risk
-    # vector); script-src stays strict.
+    # GUI is fully externalized (gui.css/gui.js) and markup carries no
+    # inline style attributes — script-src and style-src are both strict
+    # 'self'; blob: covers object-URL previews and heatmaps.
     GUI_CSP = (
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "default-src 'self'; script-src 'self'; style-src 'self'; "
         "img-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'"
     )
 

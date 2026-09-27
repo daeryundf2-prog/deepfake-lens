@@ -14,7 +14,7 @@
                 <h1>Deepfake Lens</h1>
             </div>
             <span class="sub">AI 생성 콘텐츠 스크리닝</span>
-            <button class="btn btn-sm" id="guide-btn" style="margin-left:auto;">사용법</button>
+            <button class="btn btn-sm ml-auto" id="guide-btn">사용법</button>
             <span class="chip" id="ver-chip"></span>
         </div>
     </div>
@@ -25,7 +25,7 @@
         <section class="card" id="guide-card">
             <div class="card-head">
                 <h2><span class="gh">🧭</span>사용법</h2>
-                <button class="btn btn-sm" id="guide-close" style="margin-left:auto;">닫기</button>
+                <button class="btn btn-sm ml-auto" id="guide-close">닫기</button>
             </div>
             <div class="card-body">
                 <div class="guide-tiles">
@@ -53,7 +53,7 @@
                     <span class="lg"><span class="band-pill band-medium">주의</span> 일부 단서 — <b>추가 증거 필요</b></span>
                     <span class="lg"><span class="band-pill band-low">정상</span> 발동된 신호 없음 — <b>합성이 아니라는 뜻이 아님</b></span>
                 </div>
-                <p class="note warn" style="margin-top:10px;">점수 0~100은 <b>판정이 아니라 검토 우선순위</b>입니다. AI 탐지는 기술적으로 오탐·미탐이 있으므로, 높은 점수 = "먼저 검토", 낮은 점수 = "단서 부재"로 읽으세요. 카드를 누르면 판정 근거·한계·다음 확인 방법이 나옵니다.</p>
+                <p class="note warn mt-10">점수 0~100은 <b>판정이 아니라 검토 우선순위</b>입니다. AI 탐지는 기술적으로 오탐·미탐이 있으므로, 높은 점수 = "먼저 검토", 낮은 점수 = "단서 부재"로 읽으세요. 카드를 누르면 판정 근거·한계·다음 확인 방법이 나옵니다.</p>
             </div>
         </section>
 
@@ -62,11 +62,11 @@
             <div class="card-head"><h2><span class="gh">⚡</span>빠른 검사</h2><span class="hint">의심 콘텐츠 1개 — 모든 탐지 레이어 한 번에</span></div>
             <div class="card-body">
                 <textarea class="field" id="qc-text" placeholder="검사할 텍스트를 붙여넣으세요 (한국어/영어)…" aria-label="검사할 텍스트"></textarea>
-                <div class="row" style="margin-top:10px;">
+                <div class="row mt-10">
                     <button class="btn btn-primary" id="qc-text-btn">텍스트 검사</button>
                     <button class="btn" id="qc-file-btn">파일 선택</button>
                     <input type="file" id="qc-file" hidden>
-                    <input class="field" id="qc-wm" style="flex:0 1 220px;min-width:150px;" placeholder="워터마크 키 (선택)" aria-label="워터마크 키">
+                    <input class="field" id="qc-wm" placeholder="워터마크 키 (선택)" aria-label="워터마크 키">
                 </div>
                 <div class="qc-preview" id="qc-preview"></div>
                 <div class="elapsed" id="qc-status" aria-live="polite"></div>
@@ -84,7 +84,7 @@
                 </div>
                 <input type="file" id="cmp-a" hidden>
                 <input type="file" id="cmp-b" hidden>
-                <div class="row" style="margin-top:10px;">
+                <div class="row mt-10">
                     <button class="btn btn-primary" id="cmp-btn" disabled>비교 실행</button>
                     <span class="note">같은 모달리티끼리만 비교됩니다 (오디오 쌍 / 텍스트·문서 쌍)</span>
                 </div>
@@ -101,7 +101,7 @@
                     <input class="field" id="folder-path" placeholder="폴더 경로 (예: C:\Users\test\images)" aria-label="분석할 폴더 경로">
                     <button class="btn btn-primary" id="analyze-btn">폴더 스캔</button>
                 </div>
-                <div class="row" style="margin-top:12px;">
+                <div class="row mt-12">
                     <span class="note">픽셀 분석</span>
                     <div class="seg" id="pixel-seg" role="radiogroup" aria-label="픽셀 분석 모드">
                         <button data-v="off" class="on">꺼짐</button>
@@ -111,7 +111,7 @@
                     <span class="note">최대 파일</span>
                     <input type="number" class="field" id="max-files" value="1000" min="1" max="10000">
                 </div>
-                <div class="opt-grid" style="margin-top:12px;">
+                <div class="opt-grid mt-12">
                     <label class="switch"><input type="checkbox" id="opt-model" checked><span class="track"></span>뉴럴 모델</label>
                     <label class="switch"><input type="checkbox" id="opt-recursive"><span class="track"></span>하위 폴더</label>
                     <label class="switch"><input type="checkbox" id="opt-dedupe"><span class="track"></span>중복 제거</label>
@@ -119,21 +119,21 @@
                     <label class="switch"><input type="checkbox" id="opt-deep"><span class="track"></span>심층 신호 (느림)</label>
                 </div>
                 <div class="progress" id="progress" role="progressbar" aria-label="분석 진행"><div class="fill"></div></div>
-                <div class="row" style="align-items:center;gap:10px;">
+                <div class="row">
                     <div class="elapsed" id="progress-text" aria-live="polite"></div>
                     <button class="btn btn-sm" id="scan-cancel" type="button" hidden>취소</button>
                 </div>
-                <div class="drop" id="drop-zone" role="button" tabindex="0" style="margin-top:8px;">
+                <div class="drop mt-8" id="drop-zone" role="button" tabindex="0">
                     <div class="icon">📁</div>
                     <p><b>파일이나 폴더를 드롭</b>하거나 클릭해서 선택</p>
                     <p>PNG·JPG·WebP·GIF·TXT·MD·PDF·DOCX·HWP·WAV·MP3·M4A·MP4·MOV·MKV·ZIP·TAR 등</p>
                 </div>
-                <div class="row" style="margin-top:8px;">
+                <div class="row mt-8">
                     <button class="btn" id="dir-picker-btn" type="button">폴더 선택</button>
                     <input type="file" id="dir-picker" webkitdirectory multiple hidden>
                 </div>
                 <div class="chips" id="file-list" aria-live="polite"></div>
-                <div class="row" style="margin-top:10px;" id="upload-row" hidden>
+                <div class="row mt-10" id="upload-row" hidden>
                     <button class="btn btn-primary" id="upload-btn">선택 파일 분석 (<span id="upload-n">0</span>)</button>
                     <button class="btn btn-red" id="upload-clear">목록 비우기</button>
                     <span class="note">업로드된 파일은 분석 후 서버에서 삭제됩니다</span>
@@ -144,18 +144,18 @@
         <!-- Results -->
         <section id="results-section" hidden>
             <div class="summary" aria-live="polite" id="stat-pills">
-                <div class="pill-stat" data-band="high" role="button" tabindex="0" title="클릭하면 이 위험도만 표시" style="--pill-accent:var(--red)"><div class="n" style="color:var(--red)" id="stat-ai">0</div><div class="t"><span class="dot" style="background:var(--red)"></span>AI 생성 의심</div></div>
-                <div class="pill-stat" data-band="medium" role="button" tabindex="0" title="클릭하면 이 위험도만 표시" style="--pill-accent:var(--orange)"><div class="n" style="color:var(--orange)" id="stat-medium">0</div><div class="t"><span class="dot" style="background:var(--orange)"></span>주의 필요</div></div>
-                <div class="pill-stat" data-band="low" role="button" tabindex="0" title="클릭하면 이 위험도만 표시" style="--pill-accent:var(--green)"><div class="n" style="color:var(--green)" id="stat-low">0</div><div class="t"><span class="dot" style="background:var(--green)"></span>낮은 신호</div></div>
-                <div class="pill-stat" data-band="other" role="button" tabindex="0" title="분석 실패·중복·건너뜀 등" style="--pill-accent:var(--muted)"><div class="n" style="color:var(--muted)" id="stat-other">0</div><div class="t"><span class="dot" style="background:var(--muted)"></span>불가·기타</div></div>
-                <div class="pill-stat" data-band="" role="button" tabindex="0" title="필터 해제" style="--pill-accent:var(--accent)"><div class="n" id="stat-total">0</div><div class="t">전체 · <span id="stat-model-label">뉴럴 0</span></div></div>
+                <div class="pill-stat pa-red" data-band="high" role="button" tabindex="0" title="클릭하면 이 위험도만 표시"><div class="n c-red" id="stat-ai">0</div><div class="t"><span class="dot bg-red"></span>AI 생성 의심</div></div>
+                <div class="pill-stat pa-orange" data-band="medium" role="button" tabindex="0" title="클릭하면 이 위험도만 표시"><div class="n c-orange" id="stat-medium">0</div><div class="t"><span class="dot bg-orange"></span>주의 필요</div></div>
+                <div class="pill-stat pa-green" data-band="low" role="button" tabindex="0" title="클릭하면 이 위험도만 표시"><div class="n c-green" id="stat-low">0</div><div class="t"><span class="dot bg-green"></span>낮은 신호</div></div>
+                <div class="pill-stat pa-muted" data-band="other" role="button" tabindex="0" title="분석 실패·중복·건너뜀 등"><div class="n c-muted" id="stat-other">0</div><div class="t"><span class="dot bg-muted"></span>불가·기타</div></div>
+                <div class="pill-stat pa-accent" data-band="" role="button" tabindex="0" title="필터 해제"><div class="n" id="stat-total">0</div><div class="t">전체 · <span id="stat-model-label">뉴럴 0</span></div></div>
             </div>
             <div class="distbar" id="distbar"></div>
 
-            <div class="card" style="margin-top:12px;">
+            <div class="card mt-12">
                 <div class="card-head">
                     <h2><span class="gh">📋</span>분석 결과</h2>
-                    <input type="search" id="res-filter" class="field" placeholder="파일명·경로 필터" style="max-width:200px;min-width:140px;padding:7px 11px;font-size:13px;" aria-label="결과 필터">
+                    <input type="search" id="res-filter" class="field" placeholder="파일명·경로 필터" aria-label="결과 필터">
                     <select id="res-sort" class="sort-sel" aria-label="정렬">
                         <option value="score">점수순</option>
                         <option value="name">이름순</option>
@@ -174,8 +174,8 @@
                 <div class="card-body">
                     <div class="res-list" id="res-list"></div>
                     <div class="more-row" id="more-row" hidden><button class="btn" id="more-btn">더 보기</button></div>
-                    <p class="note" style="margin-top:10px;">점수는 진위 판정이 아니라 검토 우선순위입니다. 카드를 누르면 판정 근거와 한계를 볼 수 있습니다.</p>
-                    <p class="kb-hint" style="margin-top:6px;"><kbd>↑</kbd><kbd>↓</kbd> 또는 <kbd>J</kbd><kbd>K</kbd> 이동 · <kbd>Enter</kbd> 열기 · <kbd>Esc</kbd> 닫기/필터 해제 · <kbd>★</kbd> 검토 표시</p>
+                    <p class="note mt-10">점수는 진위 판정이 아니라 검토 우선순위입니다. 카드를 누르면 판정 근거와 한계를 볼 수 있습니다.</p>
+                    <p class="kb-hint mt-6"><kbd>↑</kbd><kbd>↓</kbd> 또는 <kbd>J</kbd><kbd>K</kbd> 이동 · <kbd>Enter</kbd> 열기 · <kbd>Esc</kbd> 닫기/필터 해제 · <kbd>★</kbd> 검토 표시</p>
                 </div>
             </div>
         </section>

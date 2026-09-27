@@ -364,13 +364,12 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
             body = html.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
-            # GUI is fully externalized (gui.css/gui.js); no inline script.
-            # blob: covers object-URL previews and heatmaps. style-src keeps
-            # 'unsafe-inline' because markup/JS use style attributes (the
-            # low-risk vector); script-src stays strict.
+            # GUI is fully externalized (gui.css/gui.js) and markup carries
+            # no inline style attributes — script-src and style-src are both
+            # strict 'self'. blob: covers object-URL previews and heatmaps.
             self.send_header(
                 "Content-Security-Policy",
-                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                "default-src 'self'; script-src 'self'; style-src 'self'; "
                 "img-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'",
             )
             self.send_header("X-Content-Type-Options", "nosniff")

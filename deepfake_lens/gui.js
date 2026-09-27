@@ -386,6 +386,11 @@
         function bandColor(band) {
             return band === 'high' ? 'var(--red)' : band === 'medium' ? 'var(--orange)' : band === 'low' ? 'var(--green)' : 'var(--muted)';
         }
+        // Class-name variant — bandColor() is only used in markup templates
+        // where a CSP-safe class is required instead of an inline style.
+        function bandCls(band) {
+            return band === 'high' || band === 'medium' || band === 'low' ? band : 'other';
+        }
 
         function listItems(title, values, cls) {
             if (!values || !values.length) return '';
@@ -530,9 +535,9 @@
                         </div>
                     </div>
                     <div class="split-controls">
-                        <span class="split-mode-label" style="font-weight:600;">분할 위치:</span>
+                        <span class="split-mode-label">분할 위치:</span>
                         <input type="range" class="split-range" min="0" max="100" value="50" aria-label="비교 슬라이더 위치">
-                        <span class="split-pct-label" style="min-width:36px;text-align:right;">50%</span>
+                        <span class="split-pct-label">50%</span>
                         <button type="button" class="btn btn-sm" data-quick="0">0%</button>
                         <button type="button" class="btn btn-sm" data-quick="50">50%</button>
                         <button type="button" class="btn btn-sm" data-quick="100">100%</button>
@@ -696,8 +701,8 @@
                         <svg viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15.9"></circle>
                         <circle class="val" cx="18" cy="18" r="15.9" pathLength="100"
                             stroke-dasharray="${Math.max(0, Math.min(100, score))} 100"
-                            style="stroke:${bandColor(band)}"></circle></svg>
-                        <span class="num" style="color:${bandColor(band)}">${Number(score) || 0}</span>
+                            class="bs-${bandCls(band)}"></circle></svg>
+                        <span class="num bc-${bandCls(band)}">${Number(score) || 0}</span>
                     </div>
                     <div class="res-info">
                         <div class="res-name">${escapeHtml(item.name || item.path || '파일')}</div>
@@ -706,7 +711,7 @@
                             <span>${escapeHtml(tool)}</span>
                             ${r.model_analysis ? '<span class="nn-badge">NN</span>' : ''}
                             ${rev.star ? '<span class="rev-badge">검토됨</span>' : ''}
-                            ${item.error ? '<span style="color:var(--red)">분석 실패</span>' : ''}
+                            ${item.error ? '<span class="c-red">분석 실패</span>' : ''}
                         </div>
                     </div>
                     <button class="rev-star" title="검토 표시 토글" aria-pressed="${rev.star ? 'true' : 'false'}">★</button>
@@ -748,8 +753,8 @@
                     const revBar = document.createElement('div');
                     revBar.className = 'rev-toolbar';
                     revBar.innerHTML = `
-                        <div style="display:flex;align-items:center;gap:8px;">
-                            <label style="font-size:11.5px;color:var(--muted);font-weight:600;">검토 판정:</label>
+                        <div class="rev-row">
+                            <label class="rev-lbl">검토 판정:</label>
                             <select class="rev-verdict-sel">
                                 <option value="unreviewed">미검토 (Pending)</option>
                                 <option value="synthetic">인공합성 의심 (Synthetic)</option>
@@ -849,10 +854,16 @@
             $('stat-model-label').textContent = `뉴럴 ${modelActive}`;
             const total = Math.max(1, results.length);
             $('distbar').innerHTML =
-                `<div style="width:${bands.high / total * 100}%;background:var(--red)"></div>` +
-                `<div style="width:${bands.medium / total * 100}%;background:var(--orange)"></div>` +
-                `<div style="width:${bands.low / total * 100}%;background:var(--green)"></div>` +
-                `<div style="width:${bands.other / total * 100}%;background:var(--line)"></div>`;
+                `<div class="bg-red"></div>` +
+                `<div class="bg-orange"></div>` +
+                `<div class="bg-green"></div>` +
+                `<div class="bg-line"></div>`;
+            // el.style.width is a JS property assignment — not an inline
+            // style attribute, so it is allowed under style-src 'self'.
+            const segs = $('distbar').children;
+            [bands.high, bands.medium, bands.low, bands.other].forEach((n, i) => {
+                if (segs[i]) segs[i].style.width = (n / total * 100) + '%';
+            });
 
             document.querySelectorAll('#stat-pills .pill-stat').forEach(p => {
                 const active = (p.dataset.band || null) === bandFilter;
@@ -1107,7 +1118,7 @@
                 const data = await res.json();
                 if (data.error) {
                     box.className = 'qc-out on';
-                    box.innerHTML = `<div class="verdict" style="color:var(--red)">오류: ${escapeHtml(data.error)}</div>`;
+                    box.innerHTML = `<div class="verdict c-red">오류: ${escapeHtml(data.error)}</div>`;
                     return;
                 }
                 if (data.mode === 'files') {
@@ -1121,7 +1132,7 @@
                 renderQuickCheck(data);
             } catch (e) {
                 box.className = 'qc-out on';
-                box.innerHTML = `<div class="verdict" style="color:var(--red)">검사 실패: ${escapeHtml(e.message)}</div>`;
+                box.innerHTML = `<div class="verdict c-red">검사 실패: ${escapeHtml(e.message)}</div>`;
             } finally {
                 stopElapsed(status);
                 ['qc-text-btn', 'qc-file-btn'].forEach(id => $(id).disabled = false);
@@ -1141,9 +1152,9 @@
             const bandText = band === 'high' ? 'AI 의심 — 높음' : band === 'medium' ? '주의 필요' : band === 'low' ? '낮음' : '판단 어려움';
             const parts = [];
             parts.push(`<div class="qc-head">
-                <span class="big" style="color:${bandColor(band)}">${Number(score) || 0}</span>
+                <span class="big bc-${bandCls(band)}">${Number(score) || 0}</span>
                 <div><span class="band-pill band-${band}">${escapeHtml(bandText)}</span>
-                <div class="note" style="margin-top:4px">${escapeHtml(item.name || '')}</div></div></div>`);
+                <div class="note" class="mt-4">${escapeHtml(item.name || '')}</div></div></div>`);
             if (r.verdict) parts.push(`<div class="verdict">${escapeHtml(r.verdict)}</div>`);
 
             const ma = r.model_analysis;
@@ -1158,7 +1169,7 @@
                 const sig = (a.signals || []).map(s => `<li>${escapeHtml(s.title)} (+${s.weight}) — ${escapeHtml(s.detail)}</li>`).join('');
                 const lim = (a.limitations || []).map(l => `<li>${escapeHtml(l)}</li>`).join('');
                 parts.push(layer(`스타일/지문 분석 — 점수 ${a.score != null ? a.score : 0} (${escapeHtml(a.band_label || a.band || '')})`,
-                    (sig ? `<ul>${sig}</ul>` : '<div class="note">발동 신호 없음</div>') + (lim ? `<ul style="color:var(--amber-text)">${lim}</ul>` : '')));
+                    (sig ? `<ul>${sig}</ul>` : '<div class="note">발동 신호 없음</div>') + (lim ? `<ul class="c-amber">${lim}</ul>` : '')));
             }
             if (data.forensic) {
                 const fr = data.forensic;
@@ -1217,13 +1228,13 @@
                 const data = await res.json();
                 box.classList.add('on');
                 if (data.error) {
-                    box.innerHTML = `<div class="verdict" style="color:var(--red)">오류: ${escapeHtml(data.error)}</div>`;
+                    box.innerHTML = `<div class="verdict c-red">오류: ${escapeHtml(data.error)}</div>`;
                     return;
                 }
                 renderCompare(data);
             } catch (e) {
                 box.classList.add('on');
-                box.innerHTML = `<div class="verdict" style="color:var(--red)">비교 실패: ${escapeHtml(e.message)}</div>`;
+                box.innerHTML = `<div class="verdict c-red">비교 실패: ${escapeHtml(e.message)}</div>`;
             } finally {
                 stopElapsed(status);
                 $('cmp-btn').disabled = false;
@@ -1238,9 +1249,9 @@
             const bandText = band === 'high' ? '동일 화자/필자 가능성 높음' : band === 'medium' ? '유사 단서 있음' : band === 'low' ? '다를 가능성' : '판단 어려움';
             const parts = [];
             parts.push(`<div class="qc-head">
-                <span class="big" style="color:${bandColor(band)}">${Number(score) || 0}</span>
+                <span class="big bc-${bandCls(band)}">${Number(score) || 0}</span>
                 <div><span class="band-pill band-${band}">${escapeHtml(bandText)}</span>
-                <div class="note" style="margin-top:4px">${escapeHtml(kind)}${data.method ? ' · ' + escapeHtml(data.method) : ''}</div></div></div>`);
+                <div class="note" class="mt-4">${escapeHtml(kind)}${data.method ? ' · ' + escapeHtml(data.method) : ''}</div></div></div>`);
             if (data.verdict) parts.push(`<div class="verdict">${escapeHtml(data.verdict)}</div>`);
             const kv = [];
             if (data.distance != null) kv.push(`<b>거리</b><span>${escapeHtml(String(data.distance))}</span>`);
