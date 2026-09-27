@@ -384,6 +384,7 @@ class MultiProfileAggregationTest(unittest.TestCase):
         self.assertNotIn("models\\models", analysis.detail)
         self.assertIn("does-not-exist.onnx", analysis.detail)
 
+    @unittest.skipUnless(importlib.util.find_spec("PIL") is not None, "Pillow not installed")
     def test_degraded_weight_applies_on_low_quality_jpeg(self) -> None:
         """A member with degraded_weight must lose influence on recompressed JPEGs."""
         from PIL import Image
@@ -410,6 +411,7 @@ class MultiProfileAggregationTest(unittest.TestCase):
         self.assertLessEqual(low_q.score, 45)
         self.assertTrue(any("down-weighted" in item for item in low_q.limitations))
 
+    @unittest.skipUnless(importlib.util.find_spec("PIL") is not None, "Pillow not installed")
     def test_low_resolution_flagged_as_unreliable(self) -> None:
         from PIL import Image
 

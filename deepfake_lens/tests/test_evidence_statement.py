@@ -149,6 +149,7 @@ class EvidenceStatementTest(unittest.TestCase):
         self.assertIn("제14조의2", full_text)
         self.assertIn("갑 제1호증", full_text)
 
+    @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf required for PDF generation")
     def test_cli_evidence_statement_command(self) -> None:
         # Create a mock scan JSON
         scan_json = self.root / "scan_output.json"

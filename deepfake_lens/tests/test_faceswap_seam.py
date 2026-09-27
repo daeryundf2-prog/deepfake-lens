@@ -9,12 +9,13 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
-import numpy as np
-
 try:
     import cv2
+    import numpy as np
+
     HAVE_CV2 = True
 except ImportError:
+    np = None  # type: ignore[assignment]
     HAVE_CV2 = False
 
 from deepfake_lens.calibration import (

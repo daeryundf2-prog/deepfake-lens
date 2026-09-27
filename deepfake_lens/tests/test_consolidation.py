@@ -13,6 +13,7 @@ Two contracts pinned here:
 
 from __future__ import annotations
 
+import importlib.util
 import struct
 import tempfile
 import unittest
@@ -252,6 +253,7 @@ class ElaExpertTest(unittest.TestCase):
         spliced.save(spliced_path, quality=75)
         return control, spliced_path
 
+    @unittest.skipUnless(_has_cv2() and importlib.util.find_spec("PIL") is not None, "numpy/Pillow not installed")
     def test_spliced_region_scores_above_control(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             control, spliced = self._jpeg_pair(Path(tmp))

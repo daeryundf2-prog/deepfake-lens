@@ -66,7 +66,8 @@ class ForensicPdfReportTest(unittest.TestCase):
             self.assertTrue(out_pdf.is_file())
             raw = out_pdf.read_bytes()
             self.assertTrue(raw.startswith(b"%PDF-"))
-            self.assertGreater(len(raw), 1500)
+            if HAVE_PYMUPDF:
+                self.assertGreater(len(raw), 1500)
 
             if HAVE_PYMUPDF:
                 import pymupdf

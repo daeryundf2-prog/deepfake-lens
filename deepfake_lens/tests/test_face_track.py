@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import unittest
 from pathlib import Path
 
@@ -34,6 +35,7 @@ class FaceTrackAnalysisTest(unittest.TestCase):
             self.assertIn(key, result)
 
 
+@unittest.skipUnless(importlib.util.find_spec("numpy") is not None, "numpy not installed")
 class MetricMathTest(unittest.TestCase):
     def test_consecutive_cosine_identical(self) -> None:
         import numpy as np

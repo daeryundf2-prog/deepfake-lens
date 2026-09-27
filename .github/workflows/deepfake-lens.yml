@@ -136,4 +136,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e . pip-audit
       - name: Audit installed dependencies
-        run: pip-audit --strict
+        # --skip-editable: the local project is not published on PyPI, so
+        # pip-audit cannot look it up and would fail on the package itself.
+        run: pip-audit --strict --skip-editable
