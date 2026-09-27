@@ -153,6 +153,14 @@ def run_diagnostics(models_dir: Path | None = None) -> DoctorReport:
 def format_report(report: DoctorReport) -> str:
     lines: list[str] = []
     icon = {"ok": " OK  ", "missing": " MISS", "warn": " WARN"}
+    mounted = sum(1 for c in report.profiles if c.status == "ok")
+    degraded = sum(1 for c in report.profiles if c.status in {"missing", "warn"})
+    if degraded:
+        lines.append(
+            f"!! {mounted + degraded}개 중 {mounted}개 가중치 탑재 — "
+            f"미탑재 {degraded}개는 휴리스틱 전용 모드로 열화됩니다 "
+            f"(`vendor-weights fetch` 또는 오프라인 번들로 보충)"
+        )
     for section, checks in (
         ("Model profiles", report.profiles),
         ("Accelerators", report.accelerators),

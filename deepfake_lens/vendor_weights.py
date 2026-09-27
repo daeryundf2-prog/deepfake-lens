@@ -211,6 +211,97 @@ def verify_offline_integrity(models_dir: Path | str | None = None) -> dict[str, 
     }
 
 
+def weights_coverage(models_dir: Path | str | None = None) -> dict[str, int]:
+    """Cheap exists/missing count across runtime profiles — no hashing.
+
+    Used by scan JSON output and the doctor banner where hashing every
+    weight (potentially several GB) per call would be too expensive.
+    """
+    base_dir = (
+        Path(models_dir).resolve()
+        if models_dir is not None
+        else Path(__file__).resolve().parent.parent / "models"
+    )
+    total = present = 0
+    if not base_dir.is_dir():
+        return {"weights_total": 0, "weights_available": 0, "weights_missing": 0}
+    for profile_path in sorted(base_dir.glob("*-runtime.json")):
+        try:
+            data = json.loads(profile_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if data.get("supported") is False:
+            continue
+        total += 1
+        checkpoint_rel = data.get("checkpoint") or data.get("weights") or ""
+        inner = data.get("inner")
+        if not checkpoint_rel and isinstance(inner, dict):
+            checkpoint_rel = inner.get("checkpoint") or ""
+        if checkpoint_rel:
+            chk = (base_dir / checkpoint_rel) if not Path(checkpoint_rel).is_absolute() else Path(checkpoint_rel)
+            if chk.is_file():
+                present += 1
+    return {"weights_total": total, "weights_available": present, "weights_missing": total - present}
+
+
+def fetch_weights(
+    models_dir: Path | str | None = None,
+    *,
+    offline: bool = False,
+    timeout: float = 120.0,
+) -> dict[str, Any]:
+    """Download profile checkpoints from their declared URLs and verify SHA-256.
+
+    Each ``*-runtime.json`` may carry ``checkpoint_url`` plus ``sha256``.
+    A weight is written only after its hash matches; failed downloads leave
+    no partial file. ``offline=True`` refuses outright — air-gapped hosts
+    must never open a socket.
+    """
+    if offline:
+        return {"status": "skipped", "reason": "offline mode: network fetch refused", "fetched": [], "failed": []}
+
+    import urllib.request
+
+    base_dir = (
+        Path(models_dir).resolve()
+        if models_dir is not None
+        else Path(__file__).resolve().parent.parent / "models"
+    )
+    fetched: list[str] = []
+    failed: list[dict[str, str]] = []
+    for profile_path in sorted(base_dir.glob("*-runtime.json")):
+        name = profile_path.stem.replace("-runtime", "")
+        try:
+            data = json.loads(profile_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            failed.append({"name": name, "error": f"profile unreadable: {exc}"})
+            continue
+        url = data.get("checkpoint_url")
+        checkpoint_rel = data.get("checkpoint") or data.get("weights") or ""
+        if not url or not checkpoint_rel:
+            continue
+        dest = (base_dir / checkpoint_rel) if not Path(checkpoint_rel).is_absolute() else Path(checkpoint_rel)
+        if dest.is_file():
+            expected = str(data.get("sha256") or data.get("expected_sha256") or "")
+            if expected and _compute_file_sha256(dest) == expected:
+                continue  # already fetched and verified
+        try:
+            with urllib.request.urlopen(str(url), timeout=timeout) as response:
+                payload = response.read()
+        except (OSError, ValueError) as exc:
+            failed.append({"name": name, "error": f"download failed: {exc}"})
+            continue
+        expected = str(data.get("sha256") or data.get("expected_sha256") or "")
+        actual = hashlib.sha256(payload).hexdigest()
+        if expected and actual != expected.lower():
+            failed.append({"name": name, "error": f"sha256 mismatch (expected {expected[:12]}…, got {actual[:12]}…)"})
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(payload)
+        fetched.append(name)
+    return {"status": "ok", "fetched": fetched, "failed": failed}
+
+
 def bundle_offline_weights(
     dest_dir: Path | str,
     models_dir: Path | str | None = None,

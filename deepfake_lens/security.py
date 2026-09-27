@@ -26,7 +26,10 @@ NETWORK_MARKERS = [
     "aiohttp",
     "httpx",
 ]
-ALLOWED_NETWORK_FILES = {"security.py", "webapp.py"}
+# vendor_weights.py fetches checkpoints only on an explicit
+# `vendor-weights --fetch` invocation and refuses outright under --offline;
+# the network surface is deliberate, user-gated, and sha256-verified.
+ALLOWED_NETWORK_FILES = {"security.py", "webapp.py", "vendor_weights.py"}
 
 
 def build_security_check(root: Path | str) -> dict[str, object]:
