@@ -6,12 +6,17 @@ import json
 import math
 import os
 import re
-from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .checkpoint_integrity import load_torch_state
+from .model_cache import (  # noqa: F401 — re-exported for existing callers/tests
+    _ModelLRU,
+    _model_cache_limit,
+    _release_cached_model,
+    clear_all_model_caches,
+)
 
 # Profile-set marker: a JSON file that lists member profiles/directories so a
 # single --model-path can drive several detectors at once.
@@ -683,69 +688,6 @@ def _runtime_install_hint(runtime: str) -> str:
     return "Install Pillow plus onnxruntime or torch in the local environment to enable neural inference."
 
 
-def _model_cache_limit() -> int:
-    """Per-cache residency cap for loaded model objects."""
-    try:
-        return max(1, int(os.environ.get("DEEPFAKE_LENS_MODEL_CACHE_MAX", "4")))
-    except ValueError:
-        return 4
-
-
-def _release_cached_model(entry: object) -> None:
-    """Drop an evicted model entry and return accelerator memory.
-
-    Cache entries hold torch modules/transformers pipelines with
-    hundreds of MB–GB of weights; after eviction, GC + empty_cache
-    hands CUDA/MPS reservations back so long scans do not OOM.
-    """
-    try:
-        import gc
-
-        del entry
-        gc.collect()
-        torch = importlib.import_module("torch")
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        mps = getattr(getattr(torch, "backends", None), "mps", None)
-        if mps is not None and mps.is_available() and hasattr(torch, "mps"):
-            torch.mps.empty_cache()
-    except Exception:
-        pass
-
-
-class _ModelLRU(OrderedDict):
-    """Bounded LRU dict for resident model objects.
-
-    The adapter caches heavyweight models (AIDE ~3.3 GB, HF audio/text/
-    image classifiers) across files; an unbounded dict grows until OOM
-    on multi-modality scans. Evicting least-recently-used entries keeps
-    a bounded residency while still avoiding per-file reloads.
-    """
-
-    def __init__(self, limit: int) -> None:
-        super().__init__()
-        self.limit = limit
-
-    def __getitem__(self, key):
-        value = super().__getitem__(key)
-        self.move_to_end(key)
-        return value
-
-    def get(self, key, default=None):
-        try:
-            return self[key]
-        except KeyError:
-            return default
-
-    def __setitem__(self, key, value):
-        if key in self:
-            del self[key]
-        super().__setitem__(key, value)
-        while len(self) > self.limit:
-            _, evicted = self.popitem(last=False)
-            _release_cached_model(evicted)
-
-
 # The AIDE engine keeps its 3.3 GB checkpoint resident between files; keyed by
 # resolved checkpoint path so a scan loads weights once instead of per image.
 _AIDE_RUNNERS = _ModelLRU(_model_cache_limit())
@@ -1095,21 +1037,6 @@ _PPL_MODELS = _ModelLRU(_model_cache_limit())
 _PPL_MAX_BYTES = 256 * 1024
 _PPL_MIN_TOKENS = 16
 
-
-def clear_all_model_caches() -> None:
-    """Flush all resident model weights and release GPU/MPS memory back to OS."""
-    for cache in (
-        _AIDE_RUNNERS,
-        _AASIST_RUNNERS,
-        _HF_AUDIO_MODELS,
-        _CLIP_BACKBONES,
-        _CLIP_HEADS,
-        _TORCHVISION_MODELS,
-        _HF_TEXT_MODELS,
-        _HF_IMAGE_MODELS,
-        _PPL_MODELS,
-    ):
-        cache.clear()
 
 
 

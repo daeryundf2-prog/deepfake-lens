@@ -12,8 +12,10 @@ from pathlib import Path
 from deepfake_lens.cli import main
 from deepfake_lens.vendor_weights import (
     bundle_offline_weights,
+    fetch_weights,
     inspect_model_manifest,
     verify_offline_integrity,
+    weights_coverage,
 )
 
 
@@ -134,3 +136,117 @@ class VendorWeightsTest(unittest.TestCase):
         output = json.loads(buf.getvalue())
         self.assertEqual(output["bundle_dir"], str(bundle_out))
         self.assertTrue((bundle_out / "offline_manifest.json").is_file())
+
+
+class FetchAndCoverageTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp_dir.name)
+        self.models_dir = self.root / "models"
+        self.models_dir.mkdir(parents=True, exist_ok=True)
+
+    def test_weights_coverage_counts_without_hashing(self) -> None:
+        (self.models_dir / "present.pth").write_bytes(b"w")
+        (self.models_dir / "a-runtime.json").write_text(
+            json.dumps({"name": "a", "checkpoint": "present.pth"}), encoding="utf-8"
+        )
+        (self.models_dir / "b-runtime.json").write_text(
+            json.dumps({"name": "b", "checkpoint": "missing.pth"}), encoding="utf-8"
+        )
+        (self.models_dir / "rejected-runtime.json").write_text(
+            json.dumps({"name": "rej", "supported": False, "checkpoint": "nope.pth"}),
+            encoding="utf-8",
+        )
+        self.assertEqual(
+            weights_coverage(self.models_dir),
+            {"weights_total": 2, "weights_available": 1, "weights_missing": 1},
+        )
+
+    def test_fetch_offline_refuses_network(self) -> None:
+        result = fetch_weights(self.models_dir, offline=True)
+        self.assertEqual(result["status"], "skipped")
+        self.assertIn("offline", result["reason"])
+        self.assertEqual(result["failed"], [])
+
+    def test_fetch_skips_profiles_without_url(self) -> None:
+        (self.models_dir / "a-runtime.json").write_text(
+            json.dumps({"name": "a", "checkpoint": "a.pth"}), encoding="utf-8"
+        )
+        result = fetch_weights(self.models_dir)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["fetched"], [])
+        self.assertEqual(result["failed"], [])
+
+    def test_fetch_verified_download_writes_checkpoint(self) -> None:
+        import hashlib
+        import unittest.mock as mock
+
+        payload = b"fake weights blob"
+        sha = hashlib.sha256(payload).hexdigest()
+        (self.models_dir / "net-runtime.json").write_text(
+            json.dumps({
+                "name": "net",
+                "checkpoint": "net.pth",
+                "checkpoint_url": "https://example.invalid/net.pth",
+                "sha256": sha,
+            }),
+            encoding="utf-8",
+        )
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return payload
+
+        with mock.patch("urllib.request.urlopen", return_value=_FakeResponse()):
+            result = fetch_weights(self.models_dir)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["fetched"], ["net"])
+        self.assertEqual((self.models_dir / "net.pth").read_bytes(), payload)
+
+    def test_fetch_sha256_mismatch_writes_nothing(self) -> None:
+        import unittest.mock as mock
+
+        (self.models_dir / "bad-runtime.json").write_text(
+            json.dumps({
+                "name": "bad",
+                "checkpoint": "bad.pth",
+                "checkpoint_url": "https://example.invalid/bad.pth",
+                "sha256": "0" * 64,
+            }),
+            encoding="utf-8",
+        )
+
+        class _FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b"tampered"
+
+        with mock.patch("urllib.request.urlopen", return_value=_FakeResponse()):
+            result = fetch_weights(self.models_dir)
+        self.assertEqual(result["fetched"], [])
+        self.assertEqual(len(result["failed"]), 1)
+        self.assertIn("sha256 mismatch", result["failed"][0]["error"])
+        self.assertFalse((self.models_dir / "bad.pth").exists())
+
+    def test_cli_vendor_weights_fetch_offline(self) -> None:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = main([
+                "vendor-weights",
+                "--models-dir", str(self.models_dir),
+                "--fetch",
+                "--offline",
+            ])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(buf.getvalue())["status"], "skipped")

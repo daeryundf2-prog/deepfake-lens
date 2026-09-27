@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
 import shutil
 import tempfile
-from dataclasses import asdict, dataclass, field, replace
-from enum import Enum
+from dataclasses import replace
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, Iterable
+from typing import Callable
 
 from .archives import archive_format, extract_archive, is_archive
 from .audio import SUPPORTED_AUDIO_EXTENSIONS, AudioAnalysis, analyze_audio
@@ -30,118 +28,38 @@ DEFAULT_TEXT_BYTES = 64 * 1024
 DEFAULT_METADATA_BYTES = 4 * 1024 * 1024
 
 
-class RiskBand(str, Enum):
-    UNKNOWN = "unknown"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-
-
-RISK_LABELS = {
-    RiskBand.UNKNOWN: "판단 어려움",
-    RiskBand.LOW: "낮음",
-    RiskBand.MEDIUM: "주의",
-    RiskBand.HIGH: "높음",
-}
-
-
-class SourceConfidence(str, Enum):
-    UNKNOWN = "unknown"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-
-
-SOURCE_CONFIDENCE_LABELS = {
-    SourceConfidence.UNKNOWN: "알 수 없음",
-    SourceConfidence.LOW: "낮음",
-    SourceConfidence.MEDIUM: "중간",
-    SourceConfidence.HIGH: "높음",
-}
-
-
-@dataclass(frozen=True)
-class SourceGuess:
-    label: str
-    confidence: SourceConfidence
-    reasons: list[str] = field(default_factory=list)
-
-    @classmethod
-    def unknown(cls, reason: str = "출처를 판단할 메타데이터나 명시적 단서가 없습니다.") -> "SourceGuess":
-        return cls("출처 단서 없음", SourceConfidence.UNKNOWN, [reason])
-
-
-@dataclass(frozen=True)
-class EvidenceSignal:
-    title: str
-    detail: str
-    weight: int
-
-
-@dataclass(frozen=True)
-class ClassificationResult:
-    score: int
-    band: RiskBand
-    band_label: str
-    verdict: str
-    signals: list[EvidenceSignal]
-    limitations: list[str]
-    source_guess: SourceGuess
-    next_checks: list[str]
-    pixel_analysis: PixelAnalysis | None = None
-    model_analysis: ExternalModelAnalysis | None = None
-    ai_score: int = 0
-    source_attribution_label: str = ""
-    # Video-only: extracted audio track scored by the audio pipeline
-    # (ffmpeg + AASIST etc); None when not requested or unavailable.
-    # Appended last: positional constructions predate this field.
-    av_audio: dict | None = None
-    # Office-document provenance fields preserved verbatim for the
-    # forensic record (pdf.producer, docx.creator, ...); None for non-doc
-    # kinds. Appended last for the same positional-construction reason.
-    document_metadata: dict | None = None
-
-    def to_json(self) -> dict[str, object]:
-        data = asdict(self)
-        data["band"] = self.band.value
-        data["source_guess"]["confidence"] = self.source_guess.confidence.value
-        return data
-
-
-@dataclass(frozen=True)
-class ScanItem:
-    path: str
-    name: str
-    kind: str
-    status: str
-    size_bytes: int
-    result: ClassificationResult | None = None
-    error: str | None = None
-    duplicate_of: str | None = None
-
-    def to_json(self) -> dict[str, object]:
-        data = asdict(self)
-        data["result"] = self.result.to_json() if self.result else None
-        return data
-
-
-@dataclass(frozen=True)
-class BatchScanSummary:
-    total: int
-    analyzed: int
-    high: int
-    medium: int
-    unknown: int
-    low: int
-    unsupported_or_failed: int
-    capped: bool
-    cached: int = 0
-    duplicates: int = 0
-    skipped: int = 0
-    external_model_active: int = 0
-
-    def to_json(self) -> dict[str, object]:
-        return asdict(self)
+# Result types and scan-cache/serialization helpers live in leaf modules;
+# re-exported here so existing ``from .core import ...`` call sites keep
+# working unchanged.
+from .result_types import (  # noqa: F401
+    RISK_LABELS,
+    SOURCE_CONFIDENCE_LABELS,
+    BatchScanSummary,
+    ClassificationResult,
+    EvidenceSignal,
+    RiskBand,
+    ScanItem,
+    SourceConfidence,
+    SourceGuess,
+)
+from .serialization import (  # noqa: F401
+    _classification_result_from_json,
+    _model_analysis_from_json,
+    _pixel_analysis_from_json,
+    _scan_item_from_json,
+)
+from .scan_cache import (  # noqa: F401
+    _cache_key,
+    _display_path,
+    _duplicate_map,
+    _file_fingerprint,
+    _iter_files,
+    _load_hash_db,
+    _load_scan_cache,
+    _read_prefix,
+    _write_hash_db,
+    _write_scan_cache,
+)
 
 
 AI_IDENTITY_PHRASES = [
@@ -214,6 +132,7 @@ def scan_directory(
     dedupe: bool = False,
     hash_db_path: Path | None = None,
     deep_signals: bool = False,
+    thresholds: object | None = None,
     should_stop: Callable[[], bool] | None = None,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
     root = Path(directory)
@@ -264,7 +183,7 @@ def scan_directory(
             pixel_mode=pixel_mode, pixel_max_side=pixel_max_side,
             heatmaps=heatmaps, heatmap_dir=heatmap_dir, model_path=model_path,
             cache_path=cache_path, workers=workers, deep_signals=deep_signals,
-            capped=capped, should_stop=should_stop,
+            capped=capped, thresholds=thresholds, should_stop=should_stop,
         )
     finally:
         for temp_dir in temp_dirs:
@@ -335,6 +254,7 @@ def _scan_specs(
     workers: int,
     deep_signals: bool,
     capped: bool,
+    thresholds: object | None = None,
     should_stop: Callable[[], bool] | None = None,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
     """Analyze (path, display) spec pairs — the inner loop of scan_directory."""
@@ -392,6 +312,7 @@ def _scan_specs(
             heatmap_dir=heatmap_dir,
             model_path=model_path,
             deep_signals=deep_signals,
+            thresholds=thresholds,
         )
         if display is not None and "::" in display:
             archive_members.setdefault(display.split("::", 1)[0], []).append(item)
@@ -459,6 +380,7 @@ def analyze_file(
     heatmap_dir: Path | None = None,
     model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None = None,
     deep_signals: bool = False,
+    thresholds: "object | None" = None,
 ) -> ScanItem:
     file_path = Path(path)
     display_path = display or _display_path(file_path, root=root)
@@ -531,7 +453,7 @@ def analyze_file(
             model_analysis = analyze_external_model(file_path, model_path)
             result = analyze_image_metadata(metadata, dimensions=dimensions, pixel_analysis=pixel_analysis, model_analysis=model_analysis)
             if deep_signals:
-                result = _merge_deep_signals(result, _deep_image_layers(file_path))
+                result = _merge_deep_signals(result, _deep_image_layers(file_path, thresholds))
             return ScanItem(display_path, item_name, "image", "analyzed", size, result)
         except OSError as exc:
             return ScanItem(display_path, item_name, "image", "failed", size, error=str(exc))
@@ -548,7 +470,7 @@ def analyze_file(
             analysis = analyze_video_temporal(file_path, model_path=model_path, analyze_audio_track=True)
             result = _video_result(analysis)
             if deep_signals:
-                result = _merge_deep_signals(result, _deep_video_layers(file_path))
+                result = _merge_deep_signals(result, _deep_video_layers(file_path, thresholds))
             return ScanItem(display_path, item_name, "video", "analyzed", size, result)
         except OSError as exc:
             return ScanItem(display_path, item_name, "video", "failed", size, error=str(exc))
@@ -587,7 +509,7 @@ def _audio_result(analysis: AudioAnalysis) -> ClassificationResult:
     )
 
 
-def _deep_image_layers(path: Path) -> tuple[list[EvidenceSignal], list[str]]:
+def _deep_image_layers(path: Path, thresholds=None) -> tuple[list[EvidenceSignal], list[str]]:
     """Opt-in deep image layers: face-manipulation and inpainting probes.
 
     These modules predate the unified scan but were never wired in — each
@@ -622,7 +544,7 @@ def _deep_image_layers(path: Path) -> tuple[list[EvidenceSignal], list[str]]:
         limitations.append("인페인팅 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
     try:
         from .faceswap_seam import analyze_faceswap_seam
-        seam = analyze_faceswap_seam(path)
+        seam = analyze_faceswap_seam(path, thresholds=thresholds)
         if seam.signals:
             for sig in seam.signals:
                 signals.append(EvidenceSignal(sig.title, sig.detail, min(sig.weight, 30)))
@@ -632,7 +554,7 @@ def _deep_image_layers(path: Path) -> tuple[list[EvidenceSignal], list[str]]:
     return signals, limitations
 
 
-def _deep_video_layers(path: Path) -> tuple[list[EvidenceSignal], list[str]]:
+def _deep_video_layers(path: Path, thresholds=None) -> tuple[list[EvidenceSignal], list[str]]:
     """Opt-in deep video layers: rPPG pulse screening + avatar probe."""
     signals: list[EvidenceSignal] = []
     limitations: list[str] = []
@@ -673,7 +595,7 @@ def _deep_video_layers(path: Path) -> tuple[list[EvidenceSignal], list[str]]:
         limitations.append("립싱크 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
     try:
         from .face_track import analyze_face_track
-        track = analyze_face_track(path)
+        track = analyze_face_track(path, thresholds=thresholds)
         if track.available and track.score > 0:
             signals.append(EvidenceSignal(
                 "얼굴 트랙 시간-일관성",
@@ -1106,9 +1028,14 @@ def summarize(items: list[ScanItem], *, capped: bool, cached: int = 0) -> BatchS
 
 
 def scan_to_json(summary: BatchScanSummary, items: list[ScanItem]) -> dict[str, object]:
+    from .vendor_weights import weights_coverage
+
     return {
         "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "summary": summary.to_json(),
+        # Weight coverage is surfaced per-scan so a heuristic-only run can
+        # never masquerade as a full neural pipeline in downstream reports.
+        "coverage": weights_coverage(),
         "items": [item.to_json() for item in items],
     }
 
@@ -1116,233 +1043,6 @@ def scan_to_json(summary: BatchScanSummary, items: list[ScanItem]) -> dict[str, 
 def scan_to_json_text(summary: BatchScanSummary, items: list[ScanItem]) -> str:
     return json.dumps(scan_to_json(summary, items), ensure_ascii=False, indent=2)
 
-
-def _iter_files(root: Path, *, recursive: bool, allow_symlinks: bool = False) -> Iterable[Path]:
-    iterator = root.rglob("*") if recursive else root.iterdir()
-    for path in iterator:
-        if path.is_symlink() and not allow_symlinks:
-            continue
-        if path.is_file():
-            if path.name.endswith((".ivy.json", ".model.json")):
-                continue
-            yield path
-
-
-def _read_prefix(path: Path, limit: int) -> bytes:
-    with path.open("rb") as handle:
-        return handle.read(max(0, limit))
-
-
-def _display_path(path: Path, *, root: Path | None) -> str:
-    try:
-        return str(path.relative_to(root)) if root else str(path)
-    except ValueError:
-        return str(path)
-
-
-def _duplicate_map(paths: list[Path], *, root: Path, max_file_bytes: int | None, hash_db_path: Path | None) -> dict[Path, str]:
-    hash_db = _load_hash_db(hash_db_path)
-    seen = hash_db.setdefault("hashes", {}) if hash_db is not None else {}
-    if not isinstance(seen, dict):
-        seen = {}
-        if hash_db is not None:
-            hash_db["hashes"] = seen
-    duplicates: dict[Path, str] = {}
-    for path in paths:
-        if max_file_bytes is not None:
-            try:
-                if path.stat().st_size > max_file_bytes:
-                    continue
-            except OSError:
-                continue
-        fingerprint = _file_fingerprint(path)
-        if not fingerprint:
-            continue
-        display_path = _display_path(path, root=root)
-        if fingerprint in seen:
-            duplicates[path] = str(seen[fingerprint])
-        else:
-            seen[fingerprint] = display_path
-    if hash_db is not None:
-        _write_hash_db(hash_db_path, hash_db)
-    return duplicates
-
-
-def _file_fingerprint(path: Path) -> str:
-    digest = hashlib.sha256()
-    try:
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-    except OSError:
-        return ""
-    return digest.hexdigest()
-
-
-def _load_scan_cache(cache_path: Path | None) -> dict[str, object] | None:
-    if cache_path is None:
-        return None
-    try:
-        payload = json.loads(cache_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {"version": 1, "items": {}}
-    if not isinstance(payload, dict):
-        return {"version": 1, "items": {}}
-    payload.setdefault("version", 1)
-    payload.setdefault("items", {})
-    return payload
-
-
-def _write_scan_cache(cache_path: Path | None, cache: dict[str, object]) -> None:
-    if cache_path is None:
-        return
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(json.dumps(cache, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def _load_hash_db(hash_db_path: Path | None) -> dict[str, object] | None:
-    if hash_db_path is None:
-        return None
-    try:
-        payload = json.loads(hash_db_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {"version": 1, "hashes": {}}
-    if not isinstance(payload, dict):
-        return {"version": 1, "hashes": {}}
-    payload.setdefault("version", 1)
-    payload.setdefault("hashes", {})
-    return payload
-
-
-def _write_hash_db(hash_db_path: Path | None, hash_db: dict[str, object]) -> None:
-    if hash_db_path is None:
-        return
-    hash_db_path.parent.mkdir(parents=True, exist_ok=True)
-    hash_db_path.write_text(json.dumps(hash_db, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def _cache_key(
-    path: Path,
-    *,
-    root: Path,
-    text_bytes: int,
-    metadata_bytes: int,
-    pixel_mode: str,
-    pixel_max_side: int,
-    heatmaps: bool,
-    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
-    deep_signals: bool = False,
-) -> str:
-    try:
-        stat = path.stat()
-        relative = str(path.relative_to(root))
-    except OSError:
-        return str(path)
-    if isinstance(model_path, (list, tuple)):
-        model_marker = ";".join(str(Path(entry).resolve()) for entry in model_path)
-    else:
-        model_marker = str(Path(model_path).resolve()) if model_path else ""
-    return "|".join(
-        [
-            relative,
-            str(stat.st_size),
-            str(int(stat.st_mtime_ns)),
-            str(text_bytes),
-            str(metadata_bytes),
-            pixel_mode,
-            str(pixel_max_side),
-            str(bool(heatmaps)),
-            model_marker,
-            str(bool(deep_signals)),
-        ]
-    )
-
-
-def _scan_item_from_json(data: dict[str, object]) -> ScanItem:
-    result_data = data.get("result")
-    result = _classification_result_from_json(result_data) if isinstance(result_data, dict) else None
-    return ScanItem(
-        str(data.get("path", "")),
-        str(data.get("name", "")),
-        str(data.get("kind", "unknown")),
-        str(data.get("status", "failed")),
-        int(data.get("size_bytes", 0) or 0),
-        result,
-        str(data.get("error")) if data.get("error") is not None else None,
-        str(data.get("duplicate_of")) if data.get("duplicate_of") is not None else None,
-    )
-
-
-def _classification_result_from_json(data: dict[str, object]) -> ClassificationResult:
-    source_data = data.get("source_guess") if isinstance(data.get("source_guess"), dict) else {}
-    source_guess = SourceGuess(
-        str(source_data.get("label", "출처 단서 없음")),
-        SourceConfidence(str(source_data.get("confidence", SourceConfidence.UNKNOWN.value))),
-        [str(item) for item in source_data.get("reasons", [])] if isinstance(source_data.get("reasons"), list) else [],
-    )
-    pixel_data = data.get("pixel_analysis") if isinstance(data.get("pixel_analysis"), dict) else None
-    model_data = data.get("model_analysis") if isinstance(data.get("model_analysis"), dict) else None
-    score = int(data.get("score", 0) or 0)
-    return ClassificationResult(
-        score=score,
-        band=RiskBand(str(data.get("band", RiskBand.UNKNOWN.value))),
-        band_label=str(data.get("band_label", RISK_LABELS[RiskBand.UNKNOWN])),
-        verdict=str(data.get("verdict", "")),
-        signals=[EvidenceSignal(str(item.get("title", "")), str(item.get("detail", "")), int(item.get("weight", 0) or 0)) for item in data.get("signals", []) if isinstance(item, dict)],
-        limitations=[str(item) for item in data.get("limitations", [])] if isinstance(data.get("limitations"), list) else [],
-        source_guess=source_guess,
-        next_checks=[str(item) for item in data.get("next_checks", [])] if isinstance(data.get("next_checks"), list) else [],
-        pixel_analysis=_pixel_analysis_from_json(pixel_data) if pixel_data else None,
-        model_analysis=_model_analysis_from_json(model_data) if model_data else None,
-        ai_score=int(data.get("ai_score", score) or score),
-        source_attribution_label=str(data.get("source_attribution_label", source_guess.label)),
-        av_audio=data.get("av_audio") if isinstance(data.get("av_audio"), dict) else None,
-        document_metadata=data.get("document_metadata") if isinstance(data.get("document_metadata"), dict) else None,
-    )
-
-
-def _pixel_analysis_from_json(data: dict[str, object]) -> PixelAnalysis:
-    experts = [
-        PixelExpertResult(
-            name=str(item.get("name", "")),
-            family=str(item.get("family", "")),
-            score=int(item.get("score", 0) or 0),
-            weight=float(item.get("weight", 0.0) or 0.0),
-            available=bool(item.get("available", False)),
-            detail=str(item.get("detail", "")),
-            reference=str(item.get("reference", "")),
-            implementation=str(item.get("implementation", "local")),
-        )
-        for item in data.get("experts", [])
-        if isinstance(item, dict)
-    ]
-    return PixelAnalysis(
-        mode=str(data.get("mode", "off")),
-        available=bool(data.get("available", False)),
-        score=int(data.get("score", 0) or 0),
-        confidence=str(data.get("confidence", "unknown")),
-        model=str(data.get("model", "")),
-        experts=experts,
-        signals=[str(item) for item in data.get("signals", [])] if isinstance(data.get("signals"), list) else [],
-        limitations=[str(item) for item in data.get("limitations", [])] if isinstance(data.get("limitations"), list) else [],
-        fusion=str(data.get("fusion", "weighted_mean")),
-        evidence_chain=[str(item) for item in data.get("evidence_chain", [])] if isinstance(data.get("evidence_chain"), list) else [],
-        implemented_references=[str(item) for item in data.get("implemented_references", [])] if isinstance(data.get("implemented_references"), list) else [],
-        heatmap_path=str(data.get("heatmap_path")) if data.get("heatmap_path") else None,
-        analysis_tier=str(data.get("analysis_tier", "ensemble")),
-    )
-
-
-def _model_analysis_from_json(data: dict[str, object]) -> ExternalModelAnalysis:
-    return ExternalModelAnalysis(
-        available=bool(data.get("available", False)),
-        score=int(data.get("score", 0) or 0),
-        confidence=str(data.get("confidence", "unknown")),
-        model=str(data.get("model", "")),
-        detail=str(data.get("detail", "")),
-        limitations=[str(item) for item in data.get("limitations", [])] if isinstance(data.get("limitations"), list) else [],
-        models=[dict(item) for item in data.get("models", []) if isinstance(item, dict)] if isinstance(data.get("models"), list) else [],
-    )
 
 
 def _build_result(

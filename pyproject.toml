@@ -71,6 +71,11 @@ deepfake-lens = "deepfake_lens.cli:main"
 [tool.setuptools.packages.find]
 include = ["deepfake_lens*"]
 
+# GUI shell + extracted static assets must ship together — webapp.py serves
+# gui.css/gui.js from the package directory.
+[tool.setuptools.package-data]
+deepfake_lens = ["gui.html", "gui.css", "gui.js"]
+
 # Coverage gate: fail_under is set just below the measured floor (67% branch
 # coverage with the dev extra installed, 2026-09). The test suite lives inside
 # the measured package, so deepfake_lens/tests is omitted.
@@ -99,3 +104,19 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E9", "F821", "F541", "F811", "W605"]
+
+# Gradual typing gate: the modules below were verified clean under mypy and
+# must stay so. Add a file here only after it passes — widening the list is
+# the migration path, never loosen the settings.
+[tool.mypy]
+files = [
+    "deepfake_lens/calibration.py",
+    "deepfake_lens/faceswap_seam.py",
+    "deepfake_lens/face_track.py",
+    "deepfake_lens/vendor_weights.py",
+    "deepfake_lens/evidence_statement.py",
+    "deepfake_lens/reviews.py",
+]
+follow_imports = "skip"
+ignore_missing_imports = true
+warn_unused_ignores = true

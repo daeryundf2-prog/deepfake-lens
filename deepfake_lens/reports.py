@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 from html import escape
 from pathlib import Path
+from typing import Any
 
 from .core import BatchScanSummary, ScanItem
 

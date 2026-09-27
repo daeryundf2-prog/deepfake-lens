@@ -9,6 +9,21 @@ from pathlib import Path
 from .benchmark import run_benchmark, write_benchmark, write_benchmark_markdown
 from .collection import write_collection_plan
 from .core import DEFAULT_MAX_FILES, RiskBand, ScanItem, scan_directory, scan_to_json, scan_to_json_text, summarize
+from .calibration import MIN_CALIBRATION_SAMPLES, load_threshold_profile
+from .cli_render import (
+    _file_text,
+    _has_subdirectories,
+    _is_priority_row,
+    _load_thresholds_arg,
+    _maybe_sign,
+    _parse_csv,
+    _parse_split_ratios,
+    _pixel_score_text,
+    _pixel_top_experts,
+    _print_table,
+    _write_csv,
+    _write_json_out,
+)
 from .datasets import write_audit, write_manifest, write_robustness_plan, write_split_plan
 from .evaluate import calibrate_dataset, evaluate_dataset, evaluate_robustness_dataset, train_portable_baseline, write_cases_jsonl, write_json_report
 from .feedback import build_feedback_report, load_feedback, observations_from_scan_payload, observations_live
@@ -52,6 +67,7 @@ from .evidence_statement import (
     write_evidence_statement_pdf,
 )
 from .vendor_weights import (
+    fetch_weights,
     bundle_offline_weights,
     inspect_model_manifest,
     verify_offline_integrity,
@@ -151,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
     scan_parser.add_argument("--workers", type=int, default=1, help="parallel file workers for large folders")
     scan_parser.add_argument("--dedupe", action="store_true", help="hash files and mark duplicate content")
     scan_parser.add_argument("--deep-signals", action="store_true", help="run opt-in deep layers: face-manipulation + inpainting on images, rPPG + avatar + lip-sync on videos")
+    scan_parser.add_argument("--thresholds", type=Path, help="layer-threshold profile JSON (calibration.py layer-thresholds-v1) overriding heuristic cutoffs")
     scan_parser.add_argument("--hash-db", type=Path, help="persist duplicate hashes across incremental scans")
     scan_parser.add_argument("--max-file-bytes", type=int, help="skip files larger than this size")
     scan_parser.add_argument("--allow-symlinks", action="store_true", help="follow symlinked files")
@@ -194,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
     eval_parser.add_argument("--model-path", type=Path, help="external model profile (default: auto-discover models/aide-runtime.json)")
     eval_parser.add_argument("--no-default-engine", action="store_true", help="ignore the bundled models/aide-runtime.json default-engine profile")
     eval_parser.add_argument("--fusion-profile", type=Path)
+    eval_parser.add_argument("--thresholds", type=Path, help="layer-threshold profile JSON overriding heuristic cutoffs")
     eval_parser.add_argument("--max-files", type=int)
     eval_parser.add_argument("--json-out", type=Path)
     eval_parser.add_argument("--html-out", type=Path)
@@ -233,6 +251,7 @@ def main(argv: list[str] | None = None) -> int:
     calibrate_parser.add_argument("--max-files", type=int)
     calibrate_parser.add_argument("--out", type=Path, required=True)
     calibrate_parser.add_argument("--mapping-out", type=Path, help="also write an isotonic score-calibration profile (mapping table + method + dataset fingerprint); values are dataset-dependent confidences, not truth probabilities")
+    calibrate_parser.add_argument("--thresholds", type=Path, help="layer-threshold profile JSON overriding heuristic cutoffs")
 
     feedback_parser = subparsers.add_parser("feedback", help="compare examiner labels against scan scores and suggest fusion weights")
     feedback_parser.add_argument("labels", type=Path, help="JSONL/JSON examiner verdicts: {path, expected_label, notes?} per row")
@@ -446,6 +465,7 @@ def main(argv: list[str] | None = None) -> int:
     doctor_parser.add_argument("--json-out", type=Path, help="write the diagnostic report as JSON")
 
     faceswap_parser = subparsers.add_parser("faceswap-seam", help="analyze localized face-swap boundary seams, Poisson feathering, and sensor noise mismatch")
+    faceswap_parser.add_argument("--thresholds", type=Path, help="layer-threshold profile JSON overriding heuristic cutoffs")
     faceswap_parser.add_argument("file", type=Path, help="image file to analyze")
     faceswap_parser.add_argument("--format", choices=["table", "json"], default="table", help="output format")
     faceswap_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
@@ -464,6 +484,8 @@ def main(argv: list[str] | None = None) -> int:
     vendor_parser = subparsers.add_parser("vendor-weights", help="air-gapped forensic lab model weight verification and offline bundler")
     vendor_parser.add_argument("--models-dir", type=Path, help="path to models directory (default: bundled models/)")
     vendor_parser.add_argument("--verify", action="store_true", help="verify SHA-256 integrity of offline weights")
+    vendor_parser.add_argument("--fetch", action="store_true", help="download declared checkpoint_url weights and verify SHA-256 before writing")
+    vendor_parser.add_argument("--offline", action="store_true", help="refuse all network access (air-gapped mode)")
     vendor_parser.add_argument("--manifest-out", type=Path, help="write offline model manifest JSON")
     vendor_parser.add_argument("--bundle-to", type=Path, help="export offline weight package directory")
     vendor_parser.add_argument("--copy-weights", action="store_true", help="copy large weights files into bundle directory")
@@ -511,6 +533,7 @@ def main(argv: list[str] | None = None) -> int:
             model_path=args.model_path or (None if args.no_default_engine else default_model_path()),
             fusion_profile=fusion_profile,
             max_files=args.max_files,
+            thresholds=_load_thresholds_arg(args),
         )
         if args.json_out:
             write_json_report(args.json_out, _maybe_sign(payload, sign=args.sign, key_file=args.key_file))
@@ -569,6 +592,7 @@ def main(argv: list[str] | None = None) -> int:
             target_false_positive_rate=args.target_fpr,
             max_files=args.max_files,
             include_score_mapping=args.mapping_out is not None,
+            thresholds=_load_thresholds_arg(args),
         )
         write_json_report(args.out, payload)
         if args.mapping_out:
@@ -1138,7 +1162,7 @@ def main(argv: list[str] | None = None) -> int:
             print(format_report(report))
         return 0
     if args.command == "faceswap-seam":
-        analysis = analyze_faceswap_seam(args.file)
+        analysis = analyze_faceswap_seam(args.file, thresholds=_load_thresholds_arg(args))
         if args.json_out:
             _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
@@ -1214,6 +1238,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Markdown 저장 완료: {args.md_out}")
         return 0
     if args.command == "vendor-weights":
+        if args.fetch:
+            fetch_res = fetch_weights(args.models_dir, offline=args.offline)
+            print(json.dumps(fetch_res, ensure_ascii=False, indent=2))
+            return 0 if fetch_res["status"] in {"ok", "skipped"} else 1
         if args.bundle_to:
             manifest_file = bundle_offline_weights(
                 args.bundle_to,
@@ -1303,6 +1331,7 @@ def main(argv: list[str] | None = None) -> int:
             dedupe=args.dedupe,
             hash_db_path=args.hash_db,
             deep_signals=args.deep_signals,
+            thresholds=_load_thresholds_arg(args),
         )
         fusion_profile = load_fusion_profile(args.fusion_profile)
         if fusion_profile:
@@ -1357,174 +1386,6 @@ def main(argv: list[str] | None = None) -> int:
             print()
             print(f"힌트: '{args.folder}'의 직접 자식에는 파일이 없고 하위 폴더가 있습니다. --recursive 를 추가해 보세요.")
     return 0
-
-
-def _file_text(path: Path) -> str | None:
-    """Extract text for compare/watermark: plain text or document pipeline."""
-    from .core import SUPPORTED_TEXT_EXTENSIONS, _read_prefix
-    from .documents import SUPPORTED_DOCUMENT_EXTENSIONS, extract_document_text
-
-    extension = path.suffix.lower()
-    try:
-        if extension in SUPPORTED_DOCUMENT_EXTENSIONS:
-            text, _ = extract_document_text(path)
-            return text or None
-        # Match compare_files' text set — .rst/.log are plain text too.
-        if extension in SUPPORTED_TEXT_EXTENSIONS | {".rst", ".log"}:
-            return _read_prefix(path, 4 * 1024 * 1024).decode("utf-8", errors="replace")
-    except OSError:
-        return None
-    return None
-
-
-def _write_json_out(path: Path, payload: str) -> None:
-    """Write a JSON artifact, creating parent directories on demand."""
-    output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(payload, encoding="utf-8")
-
-
-def _maybe_sign(payload: dict[str, object], *, sign: bool, key_file: Path | None) -> dict[str, object]:
-    """HMAC-sign a report payload when --sign was passed.
-
-    Without a configured key the report is still written — unsigned, with a
-    self-describing signature_note — rather than failing or fabricating a
-    signature.
-    """
-    if not sign:
-        return payload
-    signed = sign_report(payload, resolve_report_key(key_file))
-    if signed.get("signature") is None:
-        print("note: report written unsigned (no key; set DEEPFAKE_LENS_REPORT_KEY or --key-file)", file=sys.stderr)
-    return signed
-
-
-def _has_subdirectories(folder: Path | str) -> bool:
-    """True when the scan root has child directories the non-recursive scan cannot enter."""
-    try:
-        return any(child.is_dir() for child in Path(folder).iterdir())
-    except OSError:
-        return False
-
-
-def _print_table(summary, items: list[ScanItem], *, include_low: bool) -> None:
-    cap_note = " (cap reached)" if summary.capped else ""
-    print(
-        f"Scanned {summary.total} files{cap_note}: "
-        f"high={summary.high}, medium={summary.medium}, unknown={summary.unknown}, "
-        f"low={summary.low}, unsupported/failed={summary.unsupported_or_failed}, "
-        f"duplicates={summary.duplicates}, skipped={summary.skipped}, cached={summary.cached}"
-    )
-    print("참고용 선별 결과입니다. 메타데이터가 없으면 '출처 단서 없음'으로 남깁니다.")
-    print()
-    print(f"{'risk':<12} {'score':>5} {'pixel':>5} {'source':<28} {'kind':<6} file")
-    print("-" * 100)
-    visible = [item for item in items if include_low or _is_priority_row(item)]
-    if not visible:
-        print("우선 검토할 후보가 없습니다. --include-low 로 전체 행을 볼 수 있습니다.")
-        return
-    for item in visible:
-        if item.result:
-            risk = item.result.band_label
-            score = str(item.result.score)
-            pixel = _pixel_score_text(item)
-            source = item.result.source_guess.label[:27]
-            reason = item.result.signals[0].title if item.result.signals else "강한 의심 신호 없음"
-        else:
-            risk = item.status
-            score = "-"
-            pixel = "-"
-            source = "-"
-            reason = item.error or ""
-        print(f"{risk:<12} {score:>5} {pixel:>5} {source:<28} {item.kind:<6} {item.path}  # {reason}")
-
-
-def _is_priority_row(item: ScanItem) -> bool:
-    if item.status != "analyzed" or not item.result:
-        return False
-    return item.result.band in {RiskBand.HIGH, RiskBand.MEDIUM, RiskBand.UNKNOWN}
-
-
-def _write_csv(path: Path, items: list[ScanItem]) -> None:
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(
-            [
-                "path",
-                "kind",
-                "status",
-                "score",
-                "risk",
-                "pixel_score",
-                "pixel_confidence",
-                "pixel_model",
-                "pixel_fusion",
-                "pixel_top_experts",
-                "external_model",
-                "external_model_score",
-                "heatmap_path",
-                "source",
-                "source_confidence",
-                "top_signal",
-                "error",
-            ]
-        )
-        for item in items:
-            result = item.result
-            pixel = result.pixel_analysis if result else None
-            model = result.model_analysis if result else None
-            writer.writerow(
-                [
-                    item.path,
-                    item.kind,
-                    item.status,
-                    result.score if result else "",
-                    result.band_label if result else "",
-                    pixel.score if pixel and pixel.available else "",
-                    pixel.confidence if pixel and pixel.available else "",
-                    pixel.model if pixel and pixel.available else "",
-                    pixel.fusion if pixel and pixel.available else "",
-                    _pixel_top_experts(pixel) if pixel and pixel.available else "",
-                    model.model if model and model.available else "",
-                    model.score if model and model.available else "",
-                    pixel.heatmap_path if pixel and pixel.heatmap_path else "",
-                    result.source_guess.label if result else "",
-                    result.source_guess.confidence.value if result else "",
-                    result.signals[0].title if result and result.signals else "",
-                    item.error or "",
-                ]
-            )
-
-
-def _pixel_score_text(item: ScanItem) -> str:
-    pixel = item.result.pixel_analysis if item.result else None
-    if not pixel:
-        return "-"
-    if not pixel.available:
-        return "n/a"
-    return str(pixel.score)
-
-
-def _pixel_top_experts(pixel) -> str:
-    active = [expert for expert in pixel.experts if expert.available and expert.score >= 45]
-    return ";".join(expert.name for expert in sorted(active, key=lambda expert: expert.score, reverse=True)[:5])
-
-
-def _parse_split_ratios(value: str) -> tuple[float, float, float]:
-    parts = [part.strip() for part in value.split(",")]
-    if len(parts) != 3:
-        raise argparse.ArgumentTypeError("--split-ratios must be train,val,test")
-    try:
-        train, val, test = (float(part) for part in parts)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("--split-ratios values must be numbers") from exc
-    if train < 0 or val < 0 or test < 0 or train + val + test <= 0:
-        raise argparse.ArgumentTypeError("--split-ratios must be non-negative and sum to more than zero")
-    return train, val, test
-
-
-def _parse_csv(value: str) -> list[str]:
-    return [part.strip() for part in value.split(",") if part.strip()]
 
 
 if __name__ == "__main__":
