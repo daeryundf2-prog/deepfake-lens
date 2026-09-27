@@ -111,11 +111,41 @@ def create_app(
     async def root():
         return {"message": "Deepfake Lens API", "version": "0.1.0"}
 
+    # GUI is fully externalized (gui.css/gui.js) — the policy blocks inline
+    # scripts; blob: covers object-URL previews and heatmaps. style-src keeps
+    # 'unsafe-inline' because markup/JS use style attributes (the low-risk
+    # vector); script-src stays strict.
+    GUI_CSP = (
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'"
+    )
+
     @app.get("/gui")
     async def gui_view():
         from fastapi.responses import HTMLResponse
         from .webapp import _load_gui
-        return HTMLResponse(_load_gui())
+        return HTMLResponse(
+            _load_gui(),
+            headers={"Content-Security-Policy": GUI_CSP, "X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get("/gui.css")
+    async def gui_css():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "gui.css",
+            media_type="text/css; charset=utf-8",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
+
+    @app.get("/gui.js")
+    async def gui_js():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            Path(__file__).resolve().parent / "gui.js",
+            media_type="text/javascript; charset=utf-8",
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
     
     @app.get("/api/health")
     async def health():

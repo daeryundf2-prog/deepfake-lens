@@ -1,0 +1,1260 @@
+        let results = [];
+        let selectedFiles = [];
+        let lastScanRoot = '';
+        const RENDER_WINDOW = 200;
+        let renderedRows = 0;
+        let progressTimer = null;
+        let scanBusy = false;
+        let currentJobId = null;
+        let bandFilter = null;
+        let textFilter = '';
+        let sortMode = 'score';
+        let revFilter = false;
+        let kbIndex = -1;
+
+        /* Review marks stored locally and synchronized with backend API */
+        const REVIEW_KEY = 'dflens-review-v1';
+        let reviewStore = {};
+        try { reviewStore = JSON.parse(localStorage.getItem(REVIEW_KEY) || '{}'); } catch (e) { reviewStore = {}; }
+        function itemKey(item) { return item.path || item.name || ''; }
+        let reviewPushTimer = null;
+        function saveReviewStore(changedKey) {
+            try { localStorage.setItem(REVIEW_KEY, JSON.stringify(reviewStore)); } catch (e) { /* quota — non-fatal */ }
+            // Server-side store keeps examiner marks across browsers/devices
+            // (chain of custody); localStorage stays as offline fallback.
+            // Debounced so per-keystroke note edits send one update.
+            if (!changedKey) return;
+            clearTimeout(reviewPushTimer);
+            reviewPushTimer = setTimeout(() => {
+                pushReviewToServer(changedKey, reviewStore[changedKey] || {});
+            }, 400);
+        }
+        async function pushReviewToServer(key, entry) {
+            if (!key) return;
+            try {
+                // POST /api/review exists on both the builtin web server and the
+                // FastAPI api_server; explicit blank fields let the store prune
+                // the entry when the examiner clears every mark.
+                await apiFetch('/api/review', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(Object.assign({artifact_id: key, star: false, note: '', verdict: 'unreviewed'}, entry)),
+                });
+            } catch (e) {
+                // Background sync failure is non-fatal; localStorage retains
+            }
+        }
+
+        async function fetchReviewsFromServer() {
+            try {
+                const res = await apiFetch('/api/reviews');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.reviews && typeof data.reviews === 'object') {
+                        for (const [k, v] of Object.entries(data.reviews)) {
+                            if (!reviewStore[k] || (v.updated_at && (!reviewStore[k].updated_at || v.updated_at > reviewStore[k].updated_at))) {
+                                reviewStore[k] = v;
+                            }
+                        }
+                        saveReviewStore();
+                    }
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        function toggleReview(item, card) {
+            const key = itemKey(item);
+            const entry = reviewStore[key] || {};
+            entry.star = !entry.star;
+            entry.ts = Date.now();
+            if (!entry.star && !entry.note && !entry.verdict) delete reviewStore[key];
+            else reviewStore[key] = entry;
+            saveReviewStore(key);
+            card.classList.toggle('reviewed', !!entry.star);
+            card.querySelector('.rev-star').setAttribute('aria-pressed', entry.star ? 'true' : 'false');
+            const sub = card.querySelector('.res-sub');
+            if (entry.star && !sub.querySelector('.rev-badge')) {
+                const b = document.createElement('span');
+                b.className = 'rev-badge'; b.textContent = '검토됨';
+                sub.appendChild(b);
+            } else if (!entry.star) {
+                const b = sub.querySelector('.rev-badge');
+                if (b) b.remove();
+            }
+        }
+
+        /* ── infra ─────────────────────────────────── */
+        const $ = id => document.getElementById(id);
+
+        function toast(msg, isErr) {
+            const el = document.createElement('div');
+            el.className = 'toast' + (isErr ? ' err' : '');
+            el.textContent = msg;
+            $('toasts').appendChild(el);
+            setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, isErr ? 5000 : 2800);
+        }
+
+        /* ── token modal (async replacement for window.prompt) ── */
+        let tokenPromptPending = null;
+        function requestToken() {
+            if (tokenPromptPending) return tokenPromptPending;
+            tokenPromptPending = new Promise(resolve => {
+                const modal = $('token-modal'), input = $('token-modal-input');
+                const done = value => {
+                    modal.hidden = true;
+                    input.value = '';
+                    input.removeEventListener('keydown', onKey);
+                    $('token-modal-ok').onclick = null;
+                    $('token-modal-cancel').onclick = null;
+                    tokenPromptPending = null;
+                    resolve(value);
+                };
+                const onKey = e => {
+                    if (e.key === 'Enter') done(input.value.trim() || null);
+                    if (e.key === 'Escape') done(null);
+                };
+                $('token-modal-ok').onclick = () => done(input.value.trim() || null);
+                $('token-modal-cancel').onclick = () => done(null);
+                input.addEventListener('keydown', onKey);
+                modal.hidden = false;
+                input.focus();
+            });
+            return tokenPromptPending;
+        }
+
+        async function apiFetch(url, options = {}) {
+            const token = sessionStorage.getItem('dfl.token') || '';
+            const headers = Object.assign(
+                { 'X-Deepfake-Lens-Client': 'gui' },
+                options.headers || {},
+                token ? { 'X-Deepfake-Lens-Token': token } : {}
+            );
+            const response = await fetch(url, Object.assign({}, options, { headers }));
+            if (response.status === 401) {
+                const entered = await requestToken();
+                if (entered) {
+                    sessionStorage.setItem('dfl.token', entered);
+                    return apiFetch(url, options);
+                }
+            }
+            return response;
+        }
+
+        function escapeHtml(value) {
+            return String(value).replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
+        }
+
+        /* ── onboarding guide ────────────────────── */
+        const guideCard = $('guide-card');
+        function setGuide(open) {
+            guideCard.style.display = open ? '' : 'none';
+            localStorage.setItem('dfl.guide', open ? 'open' : 'closed');
+        }
+        $('guide-close').addEventListener('click', () => setGuide(false));
+        $('guide-btn').addEventListener('click', () => setGuide(guideCard.style.display === 'none'));
+        if (localStorage.getItem('dfl.guide') === 'closed') guideCard.style.display = 'none';
+        guideCard.querySelectorAll('.tile').forEach(tile => {
+            const go = () => {
+                const target = $(tile.dataset.target);
+                if (!target) return;
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                target.classList.remove('flash');
+                void target.offsetWidth;
+                target.classList.add('flash');
+            };
+            tile.addEventListener('click', go);
+            tile.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+        });
+
+        function bandAdvice(band) {
+            if (band === 'high') return '여러 신호가 합성 패턴과 일치합니다 — 원본 파일·최초 출처·촬영자 확인을 먼저 하세요. 확정 판정이 아니므로 정밀 검토가 필요합니다.';
+            if (band === 'medium') return '일부 단서가 있습니다 — 아래 "다음 확인"을 따라 추가 증거를 모으세요.';
+            if (band === 'low') return '발동된 신호가 없습니다 — "합성이 아님"이 아니라 "단서 부재"입니다. 의심이 계속되면 원본 해상도 파일로 다시 검사하세요.';
+            return '판단에 필요한 신호가 부족합니다 — 다른 각도의 검증이 필요합니다.';
+        }
+
+        function startElapsed(el, text) {
+            if (progressTimer) clearInterval(progressTimer);
+            const t0 = Date.now();
+            el.textContent = text;
+            progressTimer = setInterval(() => {
+                el.textContent = `${text} (${Math.floor((Date.now() - t0) / 1000)}초)`;
+            }, 1000);
+        }
+        function stopElapsed(el) {
+            if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+            if (el) el.textContent = '';
+        }
+
+        /* ── scan controls ─────────────────────────── */
+        let pixelMode = 'off';
+        $('pixel-seg').querySelectorAll('button').forEach(b => {
+            b.addEventListener('click', () => {
+                if (scanBusy) return;
+                pixelMode = b.dataset.v;
+                $('pixel-seg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+            });
+        });
+
+        const SCAN_INPUTS = ['folder-path', 'analyze-btn', 'max-files',
+            'opt-recursive', 'opt-dedupe', 'opt-heatmaps', 'opt-model',
+            'opt-deep', 'dir-picker-btn', 'upload-btn', 'upload-clear'];
+
+        function setBusy(busy, text) {
+            scanBusy = busy;
+            $('progress').classList.toggle('on', busy);
+            $('progress').setAttribute('aria-busy', busy ? 'true' : 'false');
+            SCAN_INPUTS.forEach(id => { const el = $(id); if (el) el.disabled = busy; });
+            if (busy) startElapsed($('progress-text'), text);
+            else stopElapsed($('progress-text'));
+        }
+
+        async function traverseEntry(entry, out) {
+            if (entry.isFile) {
+                await new Promise(res => entry.file(f => { out.push(f); res(); }, res));
+            } else if (entry.isDirectory) {
+                const reader = entry.createReader();
+                let batch;
+                do {
+                    batch = await new Promise(res => reader.readEntries(res, () => res([])));
+                    for (const child of batch) await traverseEntry(child, out);
+                } while (batch.length);
+            }
+        }
+
+        const dropZone = $('drop-zone');
+        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('over'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('over'));
+        dropZone.addEventListener('drop', async e => {
+            e.preventDefault();
+            dropZone.classList.remove('over');
+            if (scanBusy) return;
+            const items = e.dataTransfer.items;
+            if (items && items.length && items[0].webkitGetAsEntry) {
+                const files = [];
+                for (const item of items) {
+                    const entry = item.webkitGetAsEntry();
+                    if (entry) await traverseEntry(entry, files);
+                }
+                addFiles(files);
+            } else {
+                addFiles(Array.from(e.dataTransfer.files));
+            }
+        });
+        function openFilePicker() {
+            if (scanBusy) return;
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.multiple = true;
+            input.accept = '.png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.gif,.txt,.md,.pdf,.docx,.xlsx,.pptx,.hwp,.wav,.mp3,.flac,.ogg,.m4a,.aac,.opus,.mp4,.mov,.m4v,.mkv,.webm,.avi,.zip,.7z,.rar,.tar,.tgz,.gz,.bz2,.xz';
+            input.onchange = e => addFiles(Array.from(e.target.files));
+            input.click();
+        }
+        dropZone.addEventListener('click', openFilePicker);
+        dropZone.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFilePicker(); }
+        });
+        $('dir-picker-btn').addEventListener('click', () => { if (!scanBusy) $('dir-picker').click(); });
+        $('dir-picker').addEventListener('change', e => { addFiles(Array.from(e.target.files)); e.target.value = ''; });
+        $('upload-clear').addEventListener('click', () => { selectedFiles = []; renderFileChips(); });
+
+        function renderFileChips() {
+            const list = $('file-list');
+            list.innerHTML = '';
+            selectedFiles.forEach((file, i) => {
+                const name = file.webkitRelativePath || file.name;
+                const chip = document.createElement('span');
+                chip.className = 'chipfile';
+                chip.innerHTML = `<span class="nm">${escapeHtml(name)}</span><span>${(file.size/1024).toFixed(0)}K</span>`;
+                const x = document.createElement('button');
+                x.className = 'x'; x.textContent = '✕'; x.setAttribute('aria-label', '제거');
+                x.addEventListener('click', ev => { ev.stopPropagation(); selectedFiles.splice(i, 1); renderFileChips(); });
+                chip.appendChild(x);
+                list.appendChild(chip);
+            });
+            $('upload-row').hidden = selectedFiles.length === 0;
+            $('upload-n').textContent = selectedFiles.length;
+        }
+
+        function addFiles(files) {
+            files.forEach(file => {
+                const name = file.webkitRelativePath || file.name;
+                if (!selectedFiles.find(f => (f.webkitRelativePath || f.name) === name && f.size === file.size)) {
+                    selectedFiles.push(file);
+                }
+            });
+            renderFileChips();
+        }
+
+        /* ── folder scan (async job + poll) ────────── */
+        $('analyze-btn').addEventListener('click', async () => {
+            const folderPath = $('folder-path').value;
+            if (!folderPath) { toast('폴더 경로를 입력하세요', true); return; }
+            const params = new URLSearchParams({
+                folder: folderPath,
+                pixel: pixelMode,
+                max_files: $('max-files').value,
+                recursive: $('opt-recursive').checked,
+                dedupe: $('opt-dedupe').checked,
+                heatmaps: $('opt-heatmaps').checked,
+                deep_signals: $('opt-deep').checked,
+                async: '1',
+            });
+            if (!$('opt-model').checked) params.set('no_default_engine', 'true');
+            setBusy(true, '폴더 분석 중… 모델 로딩 시 수 분 걸릴 수 있습니다');
+            try {
+                const start = await apiFetch('/api/scan?' + params.toString());
+                const job = await start.json();
+                if (job.error) { toast('오류: ' + job.error, true); return; }
+                currentJobId = job.job_id;
+                $('scan-cancel').hidden = false;
+                let data = null;
+                while (true) {
+                    const status = await apiFetch('/api/scan-status?job=' + encodeURIComponent(job.job_id));
+                    const state = await status.json();
+                    if (state.error) { toast('오류: ' + state.error, true); return; }
+                    if (state.status !== 'running') { data = state.result; break; }
+                    await new Promise(res => setTimeout(res, 1500));
+                }
+                if (!data || data.error) { toast('오류: ' + (data && data.error ? data.error : '스캔 결과 없음'), true); return; }
+                lastScanRoot = folderPath;
+                processResults(data);
+                toast(`분석 완료 — ${(data.items || []).length}개 파일`);
+            } catch (error) {
+                toast('분석 중 오류: ' + error.message, true);
+            } finally {
+                currentJobId = null;
+                $('scan-cancel').hidden = true;
+                setBusy(false);
+            }
+        });
+
+        $('scan-cancel').addEventListener('click', async () => {
+            if (!currentJobId) return;
+            $('scan-cancel').disabled = true;
+            try {
+                const res = await apiFetch('/api/scan-cancel?job=' + encodeURIComponent(currentJobId));
+                const data = await res.json();
+                if (data.error) toast('취소 실패: ' + data.error, true);
+                else toast('취소 요청됨 — 분석된 항목까지만 표시됩니다');
+            } catch (e) {
+                toast('취소 실패: ' + e.message, true);
+            } finally {
+                $('scan-cancel').disabled = false;
+            }
+        });
+
+        /* ── upload scan (batched) ─────────────────── */
+        $('upload-btn').addEventListener('click', async () => {
+            if (!selectedFiles.length) return;
+            const BATCH = 20;
+            setBusy(true, '업로드 파일 분석 중…');
+            try {
+                const allItems = [];
+                const total = selectedFiles.length;
+                for (let i = 0; i < total; i += BATCH) {
+                    const batch = selectedFiles.slice(i, i + BATCH);
+                    const form = new FormData();
+                    batch.forEach(f => form.append('files', f, f.webkitRelativePath || f.name));
+                    const response = await apiFetch('/api/analyze-upload', { method: 'POST', body: form });
+                    const data = await response.json();
+                    if (data.error) { toast('오류: ' + data.error, true); return; }
+                    allItems.push(...(data.items || []));
+                    if (total > BATCH) startElapsed($('progress-text'), `업로드 분석 중… (${Math.min(i + BATCH, total)}/${total})`);
+                }
+                lastScanRoot = '';  // uploads are temp files; heatmaps unavailable
+                processResults({ items: allItems });
+                toast(`분석 완료 — ${allItems.length}개 파일`);
+                selectedFiles = [];
+                renderFileChips();
+            } catch (error) {
+                toast('분석 중 오류: ' + error.message, true);
+            } finally {
+                setBusy(false);
+            }
+        });
+
+        /* ── results rendering ─────────────────────── */
+        function processResults(data) {
+            results = (data.items || []).map(item => ({ item }));
+            renderResults(data.summary || {});
+        }
+
+        function riskLabel(band) {
+            return band === 'high' ? 'AI 의심' : band === 'medium' ? '주의' : band === 'low' ? '낮은 신호' : '분석 불가';
+        }
+        function bandColor(band) {
+            return band === 'high' ? 'var(--red)' : band === 'medium' ? 'var(--orange)' : band === 'low' ? 'var(--green)' : 'var(--muted)';
+        }
+
+        function listItems(title, values, cls) {
+            if (!values || !values.length) return '';
+            const rows = values.map(v => {
+                const text = typeof v === 'string' ? v : (v.title ? `${v.title}: ${v.detail || ''}` : JSON.stringify(v));
+                return `<li>${escapeHtml(text)}</li>`;
+            }).join('');
+            return `<div class="dgroup ${cls || ''}"><div class="dt">${title}</div><ul>${rows}</ul></div>`;
+        }
+
+        function detailHtml(item) {
+            const r = item.result || {};
+            const parts = [];
+            if (item.error) parts.push(`<div class="verdict">분석 실패: ${escapeHtml(item.error)}</div>`);
+            if (r.verdict) parts.push(`<div class="verdict">${escapeHtml(r.verdict)}</div>`);
+            const hasPreview = lastScanRoot && item.path && !item.path.includes('::') &&
+                !/^[a-zA-Z]:[\\/]|^\//.test(item.path) &&
+                (item.kind === 'image' || item.kind === 'video' || item.kind === 'audio');
+            const abs = hasPreview ? (lastScanRoot.replace(/[\\/]+$/, '') + '/' + item.path) : '';
+            const hasHeatmap = Boolean(item.heatmap_path && lastScanRoot);
+
+            if (item.kind === 'image' && hasPreview && hasHeatmap) {
+                parts.push(`<div class="forensic-studio-slot" data-pv="${escapeHtml(abs)}" data-hm="${escapeHtml(item.heatmap_path)}"><span class="note">포렌식 비교 스튜디오 준비 중…</span></div>`);
+            } else {
+                if (hasPreview) {
+                    parts.push(`<div class="dgroup"><div class="dt">미리보기</div><div class="pv-slot" data-pv="${escapeHtml(abs)}" data-kind="${escapeHtml(item.kind)}"><span class="note">로딩 중…</span></div></div>`);
+                }
+                if (hasHeatmap) {
+                    parts.push(`<div class="dgroup"><div class="dt">픽셀 히트맵</div><div class="hm-slot" data-hm="${escapeHtml(item.heatmap_path)}"><span class="note">히트맵 로딩 중…</span></div></div>`);
+                }
+            }
+            const ma = r.model_analysis;
+            if (ma) {
+                const members = (ma.models || []).map(m =>
+                    `<li>${escapeHtml(m.model || 'model')} — ${m.score != null ? m.score : 'n/a'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
+                parts.push(`<div class="dgroup"><div class="dt">뉴럴 모델 — 점수 ${ma.score != null ? ma.score : 'n/a'}</div>${members ? `<ul>${members}</ul>` : `<div class="note">${escapeHtml(ma.detail || '')}</div>`}</div>`);
+            }
+            // Signals grouped by strength so the examiner sees the drivers
+            // first, not a flat wall of notes.
+            const sigs = (r.signals || []);
+            const strong = sigs.filter(s => (s.weight || 0) >= 15);
+            const weak = sigs.filter(s => (s.weight || 0) < 15);
+            parts.push(listItems('주요 근거', strong, 'sig-strong'));
+            parts.push(listItems('참고 신호', weak));
+            parts.push(listItems('한계', r.limitations, 'lim'));
+            parts.push(listItems('다음 확인', r.next_checks));
+            const sg = r.source_guess;
+            if (sg && sg.label) {
+                const reasons = (sg.reasons || []).map(escapeHtml).join(' ');
+                parts.push(`<div class="dgroup"><div class="dt">출처 추정 (${escapeHtml(sg.confidence || 'unknown')})</div><div class="note">${escapeHtml(sg.label)} — ${reasons}</div></div>`);
+            }
+            parts.push(`<div class="band-advice">${escapeHtml(bandAdvice(r.band || 'unknown'))}</div>`);
+            parts.push(`<div class="caveat">이 결과는 스크리닝 우선순위 신호입니다. 합성 여부의 확정 판정이 아니며, 원본 확보·맥락 검토가 필요합니다.</div>`);
+            return parts.join('');
+        }
+
+        async function loadPreview(slot) {
+            const abs = slot.dataset.pv, kind = slot.dataset.kind;
+            try {
+                const res = await apiFetch('/api/preview?path=' + encodeURIComponent(abs) + '&root=' + encodeURIComponent(lastScanRoot));
+                if (!res.ok) { slot.innerHTML = `<span class="note">미리보기 불가 (${res.status})</span>`; return; }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const tag = kind === 'image' ? 'img' : kind === 'video' ? 'video' : 'audio';
+                const el = document.createElement(tag);
+                el.className = 'preview-media';
+                if (tag !== 'img') el.controls = true;
+                if (tag === 'img') el.alt = '분석 대상 미리보기';
+                el.src = url;
+                slot.innerHTML = '';
+                slot.appendChild(el);
+            } catch (e) {
+                slot.innerHTML = `<span class="note">미리보기 실패: ${escapeHtml(e.message)}</span>`;
+            }
+        }
+
+        async function loadHeatmap(slot) {
+            const hmPath = slot.dataset.hm;
+            try {
+                const res = await apiFetch('/api/heatmap?path=' + encodeURIComponent(hmPath) + '&root=' + encodeURIComponent(lastScanRoot));
+                if (!res.ok) { slot.innerHTML = `<span class="note">히트맵을 불러올 수 없습니다 (${res.status})</span>`; return; }
+                const blob = await res.blob();
+                const img = document.createElement('img');
+                img.className = 'heatmap-img';
+                img.alt = '픽셀 분석 히트맵';
+                img.src = URL.createObjectURL(blob);
+                slot.innerHTML = '';
+                slot.appendChild(img);
+            } catch (e) {
+                slot.innerHTML = `<span class="note">히트맵 로딩 실패: ${escapeHtml(e.message)}</span>`;
+            }
+        }
+
+        async function loadForensicStudio(slot) {
+            const pvPath = slot.dataset.pv;
+            const hmPath = slot.dataset.hm;
+            slot.innerHTML = `<span class="note">포렌식 레이어 로딩 중 (원본 & 히트맵)…</span>`;
+
+            try {
+                const [resPv, resHm] = await Promise.all([
+                    apiFetch('/api/preview?path=' + encodeURIComponent(pvPath) + '&root=' + encodeURIComponent(lastScanRoot)),
+                    apiFetch('/api/heatmap?path=' + encodeURIComponent(hmPath) + '&root=' + encodeURIComponent(lastScanRoot)),
+                ]);
+
+                if (!resPv.ok || !resHm.ok) {
+                    slot.innerHTML = `<span class="note">포렌식 비교 이미지 로드 실패 (원본: ${resPv.status}, 히트맵: ${resHm.status})</span>`;
+                    return;
+                }
+
+                const blobPv = await resPv.blob();
+                const blobHm = await resHm.blob();
+                const urlPv = URL.createObjectURL(blobPv);
+                const urlHm = URL.createObjectURL(blobHm);
+
+                const studio = document.createElement('div');
+                studio.className = 'forensic-studio';
+
+                let mode = 'split';
+                let splitPos = 50;
+                let blendOpacity = 60;
+
+                studio.innerHTML = `
+                    <div class="studio-header">
+                        <div class="studio-title">
+                            <span>🔬</span>
+                            <span>포렌식 비교 분석 스튜디오</span>
+                        </div>
+                        <div class="studio-modes" role="group" aria-label="비교 모드">
+                            <button type="button" class="studio-btn active" data-mode="split">좌우 분할</button>
+                            <button type="button" class="studio-btn" data-mode="blend">알파 중첩</button>
+                            <button type="button" class="studio-btn" data-mode="orig">원본만</button>
+                            <button type="button" class="studio-btn" data-mode="heat">히트맵만</button>
+                        </div>
+                    </div>
+                    <div class="split-slider-viewport">
+                        <img class="split-base-img" src="${urlPv}" alt="원본 이미지">
+                        <div class="split-overlay-wrap">
+                            <img class="split-overlay-img" src="${urlHm}" alt="픽셀 히트맵">
+                        </div>
+                        <div class="split-divider-line">
+                            <div class="split-handle" title="드래그하여 분할 조정">⟷</div>
+                        </div>
+                    </div>
+                    <div class="split-controls">
+                        <span class="split-mode-label" style="font-weight:600;">분할 위치:</span>
+                        <input type="range" class="split-range" min="0" max="100" value="50" aria-label="비교 슬라이더 위치">
+                        <span class="split-pct-label" style="min-width:36px;text-align:right;">50%</span>
+                        <button type="button" class="btn btn-sm" data-quick="0">0%</button>
+                        <button type="button" class="btn btn-sm" data-quick="50">50%</button>
+                        <button type="button" class="btn btn-sm" data-quick="100">100%</button>
+                    </div>
+                    <div class="split-labels">
+                        <span class="split-label-orig">◀ 원본 (Original)</span>
+                        <span class="split-label-heat">히트맵 (Grad-CAM/ELA) ▶</span>
+                    </div>
+                `;
+
+                const viewport = studio.querySelector('.split-slider-viewport');
+                const overlayWrap = studio.querySelector('.split-overlay-wrap');
+                const overlayImg = studio.querySelector('.split-overlay-img');
+                const baseImg = studio.querySelector('.split-base-img');
+                const divider = studio.querySelector('.split-divider-line');
+                const range = studio.querySelector('.split-range');
+                const pctLabel = studio.querySelector('.split-pct-label');
+                const modeLabel = studio.querySelector('.split-mode-label');
+                const modeBtns = studio.querySelectorAll('.studio-btn');
+
+                function updateView() {
+                    if (mode === 'split') {
+                        overlayWrap.style.clipPath = `polygon(${splitPos}% 0, 100% 0, 100% 100%, ${splitPos}% 100%)`;
+                        overlayImg.style.opacity = '1';
+                        baseImg.style.display = 'block';
+                        divider.style.display = 'block';
+                        divider.style.left = splitPos + '%';
+                        range.value = splitPos;
+                        pctLabel.textContent = splitPos + '%';
+                        modeLabel.textContent = '분할 위치:';
+                    } else if (mode === 'blend') {
+                        overlayWrap.style.clipPath = 'none';
+                        overlayImg.style.opacity = String(blendOpacity / 100);
+                        baseImg.style.display = 'block';
+                        divider.style.display = 'none';
+                        range.value = blendOpacity;
+                        pctLabel.textContent = blendOpacity + '%';
+                        modeLabel.textContent = '중첩 투명도:';
+                    } else if (mode === 'orig') {
+                        overlayWrap.style.clipPath = 'polygon(100% 0, 100% 0, 100% 100%, 100% 100%)';
+                        overlayImg.style.opacity = '0';
+                        baseImg.style.display = 'block';
+                        divider.style.display = 'none';
+                        range.value = 0;
+                        pctLabel.textContent = '0%';
+                        modeLabel.textContent = '원본 100%';
+                    } else if (mode === 'heat') {
+                        overlayWrap.style.clipPath = 'none';
+                        overlayImg.style.opacity = '1';
+                        baseImg.style.display = 'none';
+                        divider.style.display = 'none';
+                        range.value = 100;
+                        pctLabel.textContent = '100%';
+                        modeLabel.textContent = '히트맵 100%';
+                    }
+                }
+
+                modeBtns.forEach(b => b.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    modeBtns.forEach(btn => btn.classList.remove('active'));
+                    b.classList.add('active');
+                    mode = b.dataset.mode;
+                    updateView();
+                }));
+
+                range.addEventListener('input', (e) => {
+                    e.stopPropagation();
+                    const val = parseInt(range.value, 10);
+                    if (mode === 'blend') blendOpacity = val;
+                    else {
+                        splitPos = val;
+                        if (mode !== 'split') {
+                            mode = 'split';
+                            modeBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.mode === 'split'));
+                        }
+                    }
+                    updateView();
+                });
+
+                studio.querySelectorAll('button[data-quick]').forEach(b => {
+                    b.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const val = parseInt(b.dataset.quick, 10);
+                        if (mode === 'blend') blendOpacity = val;
+                        else {
+                            splitPos = val;
+                            if (mode !== 'split') {
+                                mode = 'split';
+                                modeBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.mode === 'split'));
+                            }
+                        }
+                        updateView();
+                    });
+                });
+
+                let isDragging = false;
+                function handlePointer(clientX) {
+                    const rect = viewport.getBoundingClientRect();
+                    if (!rect.width) return;
+                    let pct = Math.round(((clientX - rect.left) / rect.width) * 100);
+                    pct = Math.max(0, Math.min(100, pct));
+                    if (mode === 'blend') blendOpacity = pct;
+                    else {
+                        splitPos = pct;
+                        if (mode !== 'split') {
+                            mode = 'split';
+                            modeBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.mode === 'split'));
+                        }
+                    }
+                    updateView();
+                }
+
+                viewport.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    isDragging = true;
+                    handlePointer(e.clientX);
+                });
+                window.addEventListener('mousemove', (e) => {
+                    if (!isDragging) return;
+                    e.preventDefault();
+                    handlePointer(e.clientX);
+                });
+                window.addEventListener('mouseup', () => { isDragging = false; });
+
+                viewport.addEventListener('touchstart', (e) => {
+                    if (e.touches.length > 0) {
+                        isDragging = true;
+                        handlePointer(e.touches[0].clientX);
+                    }
+                }, { passive: true });
+                viewport.addEventListener('touchmove', (e) => {
+                    if (isDragging && e.touches.length > 0) {
+                        handlePointer(e.touches[0].clientX);
+                    }
+                }, { passive: true });
+                viewport.addEventListener('touchend', () => { isDragging = false; });
+
+                updateView();
+                slot.innerHTML = '';
+                slot.appendChild(studio);
+            } catch (e) {
+                slot.innerHTML = `<span class="note">스튜디오 로딩 실패: ${escapeHtml(e.message)}</span>`;
+            }
+        }
+
+        function renderCard(list, entry) {
+            const item = entry.item;
+            const r = item.result || {};
+            const band = r.band || 'unknown';
+            const score = r.score != null ? r.score : 0;
+            const tool = (r.source_guess && r.source_guess.label) || '알 수 없음';
+            const rev = reviewStore[itemKey(item)] || {};
+
+            const card = document.createElement('div');
+            card.className = 'res' + (rev.star ? ' reviewed' : '');
+            card.style.setProperty('--res-accent', bandColor(band));
+            card.innerHTML = `
+                <div class="res-main">
+                    <div class="ring">
+                        <svg viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15.9"></circle>
+                        <circle class="val" cx="18" cy="18" r="15.9" pathLength="100"
+                            stroke-dasharray="${Math.max(0, Math.min(100, score))} 100"
+                            style="stroke:${bandColor(band)}"></circle></svg>
+                        <span class="num" style="color:${bandColor(band)}">${Number(score) || 0}</span>
+                    </div>
+                    <div class="res-info">
+                        <div class="res-name">${escapeHtml(item.name || item.path || '파일')}</div>
+                        <div class="res-sub">
+                            <span class="band-pill band-${band}">${riskLabel(band)}</span>
+                            <span>${escapeHtml(tool)}</span>
+                            ${r.model_analysis ? '<span class="nn-badge">NN</span>' : ''}
+                            ${rev.star ? '<span class="rev-badge">검토됨</span>' : ''}
+                            ${item.error ? '<span style="color:var(--red)">분석 실패</span>' : ''}
+                        </div>
+                    </div>
+                    <button class="rev-star" title="검토 표시 토글" aria-pressed="${rev.star ? 'true' : 'false'}">★</button>
+                    <span class="chev">›</span>
+                </div>
+                <div class="res-detail"></div>`;
+
+            card.querySelector('.rev-star').addEventListener('click', e => {
+                e.stopPropagation();
+                toggleReview(item, card);
+            });
+
+            const detail = card.querySelector('.res-detail');
+            let built = false;
+            const toggle = () => {
+                card.classList.toggle('open');
+                if (card.classList.contains('open') && !built) {
+                    built = true;
+                    detail.innerHTML = detailHtml(item);
+                    const fb = document.createElement('div');
+                    fb.className = 'fb-row';
+                    fb.innerHTML = `<span class="note">검토자 라벨:</span>
+                        <button class="btn btn-sm" data-label="synthetic">실제 합성/AI</button>
+                        <button class="btn btn-sm" data-label="real">실제 실물</button>
+                        <span class="fb-status"></span>`;
+                    fb.querySelectorAll('button[data-label]').forEach(b => b.addEventListener('click', e => {
+                        e.stopPropagation();
+                        submitFeedback(item, b.dataset.label, fb.querySelector('.fb-status'));
+                    }));
+                    detail.appendChild(fb);
+                    const revBox = document.createElement('div');
+                    revBox.className = 'rev-box';
+                    const note = document.createElement('textarea');
+                    note.className = 'rev-note';
+                    note.placeholder = '검토 메모 — 분석관 의견 및 특이사항 입력 (서버 자동 동기화)';
+                    note.value = rev.note || '';
+                    note.addEventListener('click', e => e.stopPropagation());
+
+                    const revBar = document.createElement('div');
+                    revBar.className = 'rev-toolbar';
+                    revBar.innerHTML = `
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <label style="font-size:11.5px;color:var(--muted);font-weight:600;">검토 판정:</label>
+                            <select class="rev-verdict-sel">
+                                <option value="unreviewed">미검토 (Pending)</option>
+                                <option value="synthetic">인공합성 의심 (Synthetic)</option>
+                                <option value="authentic">원본 정상 (Authentic)</option>
+                                <option value="inconclusive">판단 보류 (Inconclusive)</option>
+                            </select>
+                        </div>
+                        <span class="rev-sync-status"></span>
+                    `;
+                    const verdictSel = revBar.querySelector('.rev-verdict-sel');
+                    verdictSel.value = rev.verdict || 'unreviewed';
+                    verdictSel.addEventListener('click', e => e.stopPropagation());
+
+                    const syncStatus = revBar.querySelector('.rev-sync-status');
+                    let syncTimeout = null;
+                    function saveAndSync() {
+                        const k = itemKey(item);
+                        const cur = reviewStore[k] || {};
+                        cur.note = note.value;
+                        cur.verdict = verdictSel.value;
+                        cur.ts = Date.now();
+                        reviewStore[k] = cur;
+                        saveReviewStore(k);
+                        syncStatus.className = 'rev-sync-status saving';
+                        syncStatus.textContent = '● 동기화 중…';
+                        clearTimeout(syncTimeout);
+                        syncTimeout = setTimeout(async () => {
+                            await pushReviewToServer(k, cur);
+                            syncStatus.className = 'rev-sync-status saved';
+                            syncStatus.textContent = '● 서버 동기화됨';
+                        }, 500);
+                    }
+
+                    note.addEventListener('input', saveAndSync);
+                    verdictSel.addEventListener('change', saveAndSync);
+
+                    revBox.appendChild(note);
+                    revBox.appendChild(revBar);
+                    detail.appendChild(revBox);
+
+                    detail.querySelectorAll('.forensic-studio-slot').forEach(loadForensicStudio);
+                    detail.querySelectorAll('.hm-slot').forEach(loadHeatmap);
+                    detail.querySelectorAll('.pv-slot').forEach(loadPreview);
+                }
+            };
+            card.querySelector('.res-main').addEventListener('click', toggle);
+            card.querySelector('.res-main').setAttribute('tabindex', '0');
+            card.querySelector('.res-main').addEventListener('keydown', e => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+            });
+            list.appendChild(card);
+        }
+
+        function itemBand(entry) {
+            const band = (entry.item.result || {}).band;
+            return band === 'high' || band === 'medium' || band === 'low' ? band : 'other';
+        }
+
+        const BAND_ORDER = { high: 0, medium: 1, low: 2, other: 3 };
+        function filteredResults() {
+            const needle = textFilter.trim().toLowerCase();
+            const filtered = results.filter(entry => {
+                if (bandFilter && itemBand(entry) !== bandFilter) return false;
+                if (revFilter && !(reviewStore[itemKey(entry.item)] || {}).star) return false;
+                if (!needle) return true;
+                const item = entry.item;
+                return ((item.name || '') + ' ' + (item.path || '')).toLowerCase().includes(needle);
+            });
+            if (sortMode === 'name') {
+                filtered.sort((a, b) => String(a.item.name || a.item.path || '').localeCompare(String(b.item.name || b.item.path || ''), 'ko'));
+            } else if (sortMode === 'band') {
+                filtered.sort((a, b) => (BAND_ORDER[itemBand(a)] - BAND_ORDER[itemBand(b)]) ||
+                    ((b.item.result || {}).score || 0) - ((a.item.result || {}).score || 0));
+            } else {
+                filtered.sort((a, b) => ((b.item.result || {}).score || 0) - ((a.item.result || {}).score || 0));
+            }
+            return filtered;
+        }
+
+        function renderResults(summary, scroll = true) {
+            const list = $('res-list');
+            list.innerHTML = '';
+
+            // Canonical band counts — every pill plus the total must agree.
+            const bands = { high: 0, medium: 0, low: 0, other: 0 };
+            let modelCount = 0;
+            results.forEach(entry => {
+                bands[itemBand(entry)]++;
+                if ((entry.item.result || {}).model_analysis) modelCount++;
+            });
+            const modelActive = summary.external_model_active != null ? summary.external_model_active : modelCount;
+            $('stat-ai').textContent = bands.high;
+            $('stat-medium').textContent = bands.medium;
+            $('stat-low').textContent = bands.low;
+            $('stat-other').textContent = bands.other;
+            $('stat-total').textContent = results.length;
+            $('stat-model-label').textContent = `뉴럴 ${modelActive}`;
+            const total = Math.max(1, results.length);
+            $('distbar').innerHTML =
+                `<div style="width:${bands.high / total * 100}%;background:var(--red)"></div>` +
+                `<div style="width:${bands.medium / total * 100}%;background:var(--orange)"></div>` +
+                `<div style="width:${bands.low / total * 100}%;background:var(--green)"></div>` +
+                `<div style="width:${bands.other / total * 100}%;background:var(--line)"></div>`;
+
+            document.querySelectorAll('#stat-pills .pill-stat').forEach(p => {
+                const active = (p.dataset.band || null) === bandFilter;
+                p.classList.toggle('active', active);
+                p.setAttribute('aria-pressed', active ? 'true' : 'false');
+            });
+
+            kbIndex = -1;
+            const filtered = filteredResults();
+            if (!filtered.length) {
+                list.innerHTML = results.length
+                    ? '<div class="empty"><div class="e-icon">🔍</div>필터와 일치하는 결과가 없습니다</div>'
+                    : '<div class="empty"><div class="e-icon">📭</div>분석 결과가 없습니다</div>';
+            }
+            renderedRows = Math.min(RENDER_WINDOW, filtered.length);
+            filtered.slice(0, renderedRows).forEach(e => renderCard(list, e));
+            updateMore(list, filtered.length);
+
+            $('results-section').hidden = false;
+            if (scroll) $('results-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        function updateMore(list, filteredLen) {
+            const row = $('more-row');
+            if (renderedRows >= filteredLen) { row.hidden = true; return; }
+            row.hidden = false;
+            $('more-btn').textContent = `나머지 ${filteredLen - renderedRows}개 더 보기`;
+        }
+        $('more-btn').addEventListener('click', () => {
+            const list = $('res-list');
+            const filtered = filteredResults();
+            const prev = renderedRows;
+            renderedRows = Math.min(renderedRows + RENDER_WINDOW, filtered.length);
+            filtered.slice(prev, renderedRows).forEach(e => renderCard(list, e));
+            updateMore(list, filtered.length);
+        });
+
+        /* Band pills and the text box are the single filter surface —
+           clicking the active pill again clears the filter. */
+        document.querySelectorAll('#stat-pills .pill-stat').forEach(p => {
+            const apply = () => {
+                bandFilter = (p.dataset.band || null) === bandFilter ? null : (p.dataset.band || null);
+                renderResults({}, false);
+            };
+            p.addEventListener('click', apply);
+            p.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); apply(); } });
+        });
+        $('res-filter').addEventListener('input', e => { textFilter = e.target.value; renderResults({}, false); });
+        $('res-sort').addEventListener('change', e => { sortMode = e.target.value; renderResults({}, false); });
+        $('rev-filter').addEventListener('click', () => {
+            revFilter = !revFilter;
+            $('rev-filter').setAttribute('aria-pressed', revFilter ? 'true' : 'false');
+            $('rev-filter').classList.toggle('btn-primary', revFilter);
+            renderResults({}, false);
+        });
+
+        /* Keyboard review: arrows/j/k walk the rendered cards, Enter opens,
+           Esc closes open cards or clears filters. Skipped while typing. */
+        document.addEventListener('keydown', e => {
+            const tag = (e.target.tagName || '').toLowerCase();
+            const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
+            if ($('results-section').hidden) return;
+            if (e.key === 'Escape') {
+                const open = document.querySelector('.res.open');
+                if (open) { open.classList.remove('open'); return; }
+                if (bandFilter || revFilter || textFilter) {
+                    bandFilter = null; revFilter = false; textFilter = '';
+                    $('res-filter').value = '';
+                    $('rev-filter').setAttribute('aria-pressed', 'false');
+                    $('rev-filter').classList.remove('btn-primary');
+                    renderResults({}, false);
+                }
+                return;
+            }
+            if (typing) return;
+            const cards = [...document.querySelectorAll('#res-list .res')];
+            if (!cards.length) return;
+            const move = { ArrowDown: 1, j: 1, J: 1, ArrowUp: -1, k: -1, K: -1 }[e.key];
+            if (move == null) {
+                if (e.key === 'Enter' && kbIndex >= 0 && cards[kbIndex]) {
+                    e.preventDefault();
+                    cards[kbIndex].querySelector('.res-main').click();
+                }
+                return;
+            }
+            e.preventDefault();
+            kbIndex = Math.max(0, Math.min(cards.length - 1, kbIndex + move));
+            cards.forEach((c, i) => c.classList.toggle('kb-focus', i === kbIndex));
+            cards[kbIndex].scrollIntoView({ block: 'nearest' });
+        });
+
+        async function submitFeedback(item, label, statusEl) {
+            statusEl.textContent = '기록 중…';
+            try {
+                const res = await apiFetch('/api/feedback', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        path: item.path || item.name,
+                        name: item.name,
+                        expected_label: label,
+                        result: item.result,
+                    }),
+                });
+                const data = await res.json();
+                statusEl.textContent = data.ok ? '기록됨 ✓' : ('실패: ' + (data.error || ''));
+            } catch (e) {
+                statusEl.textContent = '실패: ' + e.message;
+            }
+        }
+
+        /* ── export ────────────────────────────────── */
+        function download(blob, name) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = name; a.click();
+            URL.revokeObjectURL(url);
+        }
+        $('exp-json').addEventListener('click', () => {
+            if (!results.length) { toast('분석 결과가 없습니다', true); return; }
+            const enriched = results.map(e => {
+                const rev = reviewStore[itemKey(e.item)];
+                return rev ? { ...e.item, review: rev } : e.item;
+            });
+            download(new Blob([JSON.stringify(enriched, null, 2)], { type: 'application/json' }), 'deepfake-lens-results.json');
+        });
+        $('exp-csv').addEventListener('click', () => {
+            if (!results.length) { toast('분석 결과가 없습니다', true); return; }
+            const f = v => /[",\r\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+            // BOM prefix keeps Korean intact when the CSV is opened in Excel.
+            let csv = '﻿위험도,점수,출처 추정,모델,파일명,검토,메모,판정\n';
+            results.forEach(e => {
+                const item = e.item, r = item.result || {};
+                const rev = reviewStore[itemKey(item)] || {};
+                csv += [f(r.band || ''), f(r.score != null ? r.score : ''), f((r.source_guess && r.source_guess.label) || ''), f((r.model_analysis && r.model_analysis.model_id) || ''), f(item.name || item.path), f(rev.star ? '검토됨' : ''), f(rev.note || ''), f(r.verdict || '')].join(',') + '\n';
+            });
+            download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'deepfake-lens-results.csv');
+        });
+        $('exp-report').addEventListener('click', async () => {
+            if (!results.length) { toast('분석 결과가 없습니다', true); return; }
+            try {
+                const res = await apiFetch('/api/report', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({items: results.map(e => e.item)}),
+                });
+                const type = res.headers.get('Content-Type') || '';
+                if (!type.includes('text/html')) {
+                    const data = await res.json();
+                    toast('리포트 생성 실패: ' + (data.error || res.status), true);
+                    return;
+                }
+                download(await res.blob(), 'deepfake-lens-report.html');
+            } catch (e) { toast('리포트 오류: ' + e.message, true); }
+        });
+        $('exp-pdf').addEventListener('click', async () => {
+            if (!results.length) { toast('분석 결과가 없습니다', true); return; }
+            try {
+                toast('포렌식 감정 PDF 생성 중…');
+                const res = await apiFetch('/api/report?format=pdf', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        items: results.map(e => e.item),
+                        format: 'pdf',
+                        exhibit_no: '갑 제        호증',
+                    }),
+                });
+                const type = res.headers.get('Content-Type') || '';
+                if (!type.includes('application/pdf')) {
+                    const data = await res.json();
+                    toast('PDF 생성 실패: ' + (data.error || res.status), true);
+                    return;
+                }
+                download(await res.blob(), 'deepfake-lens-forensic-report.pdf');
+                toast('포렌식 감정서(PDF)가 다운로드되었습니다.');
+            } catch (e) { toast('PDF 생성 오류: ' + e.message, true); }
+        });
+        $('exp-evidence').addEventListener('click', async () => {
+            if (!results.length) { toast('분석 결과가 없습니다', true); return; }
+            try {
+                toast('전자소송 증거설명서(PDF) 생성 중…');
+                const res = await apiFetch('/api/report?format=evidence', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        items: results.map(e => e.item),
+                        format: 'evidence',
+                        case_no: '(사건번호 입력)',
+                    }),
+                });
+                const type = res.headers.get('Content-Type') || '';
+                if (!type.includes('application/pdf')) {
+                    const data = await res.json();
+                    toast('증거설명서 생성 실패: ' + (data.error || res.status), true);
+                    return;
+                }
+                download(await res.blob(), 'deepfake-lens-evidence-statement.pdf');
+                toast('전자소송 증거설명서(PDF)가 다운로드되었습니다.');
+            } catch (e) { toast('증거설명서 오류: ' + e.message, true); }
+        });
+        $('exp-clear').addEventListener('click', () => {
+            results = [];
+            $('results-section').hidden = true;
+        });
+
+        /* ── quick check ───────────────────────────── */
+        $('qc-text-btn').addEventListener('click', () => {
+            const text = $('qc-text').value;
+            if (!text.trim()) { toast('검사할 텍스트를 입력하세요', true); return; }
+            const body = { text };
+            const wm = $('qc-wm').value.trim();
+            if (wm) body.watermark_secret = wm;
+            runQuickCheck({ method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) });
+        });
+        function mediaTagFor(file, cls) {
+            const ext = (file.name.split('.').pop() || '').toLowerCase();
+            const img = ['png','jpg','jpeg','webp','gif','bmp'];
+            const vid = ['mp4','mov','m4v','webm','mkv','avi'];
+            const aud = ['wav','mp3','m4a','ogg','flac','aac','opus'];
+            const tag = img.includes(ext) ? 'img' : vid.includes(ext) ? 'video' : aud.includes(ext) ? 'audio' : null;
+            if (!tag) return null;
+            const el = document.createElement(tag);
+            el.className = cls;
+            if (tag !== 'img') el.controls = true;
+            el.src = URL.createObjectURL(file);
+            return el;
+        }
+
+        $('qc-file-btn').addEventListener('click', () => $('qc-file').click());
+        $('qc-file').addEventListener('change', e => {
+            const file = e.target.files[0];
+            e.target.value = '';
+            if (!file) return;
+            // Show what is being analyzed so the examiner can eyeball the
+            // file against the reported signals.
+            const pv = $('qc-preview');
+            pv.innerHTML = '';
+            const el = mediaTagFor(file, 'preview-media');
+            if (el) pv.appendChild(el);
+            const form = new FormData();
+            form.append('file', file, file.name);
+            runQuickCheck({ method: 'POST', body: form });
+        });
+
+        async function runQuickCheck(options) {
+            const status = $('qc-status'), box = $('qc-out');
+            startElapsed(status, '전체 검사 실행 중… 뉴럴 모델 로딩 시 수십 초');
+            ['qc-text-btn', 'qc-file-btn'].forEach(id => $(id).disabled = true);
+            try {
+                const res = await apiFetch('/api/check', options);
+                const data = await res.json();
+                if (data.error) {
+                    box.className = 'qc-out on';
+                    box.innerHTML = `<div class="verdict" style="color:var(--red)">오류: ${escapeHtml(data.error)}</div>`;
+                    return;
+                }
+                if (data.mode === 'files') {
+                    // Archive upload: members are analyzed as their own rows.
+                    box.className = 'qc-out';
+                    box.innerHTML = '';
+                    processResults(data);
+                    toast(`압축 해제 — ${(data.items || []).length}개 파일 분석됨`);
+                    return;
+                }
+                renderQuickCheck(data);
+            } catch (e) {
+                box.className = 'qc-out on';
+                box.innerHTML = `<div class="verdict" style="color:var(--red)">검사 실패: ${escapeHtml(e.message)}</div>`;
+            } finally {
+                stopElapsed(status);
+                ['qc-text-btn', 'qc-file-btn'].forEach(id => $(id).disabled = false);
+            }
+        }
+
+        function layer(title, node) {
+            return `<div class="layer"><div class="lt">${escapeHtml(title)}</div>${node}</div>`;
+        }
+
+        function renderQuickCheck(data) {
+            const box = $('qc-out');
+            const item = data.item || {};
+            const r = item.result || {};
+            const band = r.band || 'unknown';
+            const score = r.score != null ? r.score : 0;
+            const bandText = band === 'high' ? 'AI 의심 — 높음' : band === 'medium' ? '주의 필요' : band === 'low' ? '낮음' : '판단 어려움';
+            const parts = [];
+            parts.push(`<div class="qc-head">
+                <span class="big" style="color:${bandColor(band)}">${Number(score) || 0}</span>
+                <div><span class="band-pill band-${band}">${escapeHtml(bandText)}</span>
+                <div class="note" style="margin-top:4px">${escapeHtml(item.name || '')}</div></div></div>`);
+            if (r.verdict) parts.push(`<div class="verdict">${escapeHtml(r.verdict)}</div>`);
+
+            const ma = r.model_analysis;
+            if (ma) {
+                const members = (ma.models || []).map(m =>
+                    `<li>${escapeHtml(m.model || 'model')} — ${m.score != null ? m.score : 'n/a'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
+                parts.push(layer(`뉴럴 앙상블 — 점수 ${ma.score != null ? ma.score : 'n/a'}`,
+                    members ? `<ul>${members}</ul>` : `<div class="note">${escapeHtml(ma.detail || '')}</div>`));
+            }
+            if (data.advanced) {
+                const a = data.advanced;
+                const sig = (a.signals || []).map(s => `<li>${escapeHtml(s.title)} (+${s.weight}) — ${escapeHtml(s.detail)}</li>`).join('');
+                const lim = (a.limitations || []).map(l => `<li>${escapeHtml(l)}</li>`).join('');
+                parts.push(layer(`스타일/지문 분석 — 점수 ${a.score != null ? a.score : 0} (${escapeHtml(a.band_label || a.band || '')})`,
+                    (sig ? `<ul>${sig}</ul>` : '<div class="note">발동 신호 없음</div>') + (lim ? `<ul style="color:var(--amber-text)">${lim}</ul>` : '')));
+            }
+            if (data.forensic) {
+                const fr = data.forensic;
+                const sig = (fr.signals || []).map(s => `<li>${escapeHtml(s.title)} — ${escapeHtml(s.detail)}</li>`).join('');
+                const prov = (fr.provenance_records || []).map(p => `<li>${escapeHtml(p.kind || p.source || 'record')}: ${escapeHtml(p.summary || p.detail || '')}</li>`).join('');
+                parts.push(layer(`메타데이터 / C2PA 포렌식 — 점수 ${fr.score != null ? fr.score : 0}`,
+                    (sig ? `<ul>${sig}</ul>` : '') + (prov ? `<ul>${prov}</ul>` : '') || '<div class="note">단서 없음</div>'));
+            }
+            if (data.watermark) {
+                const w = data.watermark;
+                parts.push(layer('워터마크 (KGW)',
+                    `<div class="kv"><b>판정</b><span>${escapeHtml(w.verdict || '')}</span><b>z-score</b><span>${w.z_score != null ? w.z_score : 'n/a'}</span><b>점수</b><span>${w.score != null ? w.score : 'n/a'}</span></div>`));
+            }
+            parts.push(listItems('다음 확인', r.next_checks));
+            parts.push(`<div class="band-advice">${escapeHtml(bandAdvice(band))}</div>`);
+            parts.push(`<div class="caveat">이 결과는 스크리닝 우선순위 신호입니다. 합성 여부의 확정 판정이 아니며, 원본 확보·맥락 검토가 필요합니다.</div>`);
+            box.innerHTML = parts.join('');
+            box.className = 'qc-out on';
+            box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        /* ── compare ───────────────────────────────── */
+        const cmpFiles = { a: null, b: null };
+        function bindSlot(slotId, inputId, key) {
+            const slot = $(slotId), input = $(inputId);
+            const pick = () => { if (!scanBusy) input.click(); };
+            slot.addEventListener('click', pick);
+            slot.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+            input.addEventListener('change', e => {
+                const f = e.target.files[0];
+                e.target.value = '';
+                if (!f) return;
+                cmpFiles[key] = f;
+                slot.classList.add('filled');
+                slot.querySelector('.sn').textContent = f.name;
+                const old = slot.querySelector('.pv');
+                if (old) old.remove();
+                const pv = mediaTagFor(f, 'pv');
+                if (pv) { pv.controls = false; slot.appendChild(pv); }
+                $('cmp-btn').disabled = !(cmpFiles.a && cmpFiles.b);
+            });
+        }
+        bindSlot('slot-a', 'cmp-a', 'a');
+        bindSlot('slot-b', 'cmp-b', 'b');
+
+        $('cmp-btn').addEventListener('click', async () => {
+            if (!(cmpFiles.a && cmpFiles.b)) return;
+            const status = $('cmp-status'), box = $('cmp-result');
+            const form = new FormData();
+            form.append('file_a', cmpFiles.a, cmpFiles.a.name);
+            form.append('file_b', cmpFiles.b, cmpFiles.b.name);
+            startElapsed(status, '비교 실행 중… (화자 모델 로딩 시 수십 초)');
+            $('cmp-btn').disabled = true;
+            try {
+                const res = await apiFetch('/api/compare', { method: 'POST', body: form });
+                const data = await res.json();
+                box.classList.add('on');
+                if (data.error) {
+                    box.innerHTML = `<div class="verdict" style="color:var(--red)">오류: ${escapeHtml(data.error)}</div>`;
+                    return;
+                }
+                renderCompare(data);
+            } catch (e) {
+                box.classList.add('on');
+                box.innerHTML = `<div class="verdict" style="color:var(--red)">비교 실패: ${escapeHtml(e.message)}</div>`;
+            } finally {
+                stopElapsed(status);
+                $('cmp-btn').disabled = false;
+            }
+        });
+
+        function renderCompare(data) {
+            const box = $('cmp-result');
+            const kind = data.kind === 'speaker' ? '화자 유사도 (음성)' : data.kind === 'stylometry' ? '필자 유사도 (텍스트)' : (data.kind || '비교');
+            const band = data.band || 'unknown';
+            const score = data.score != null ? data.score : 0;
+            const bandText = band === 'high' ? '동일 화자/필자 가능성 높음' : band === 'medium' ? '유사 단서 있음' : band === 'low' ? '다를 가능성' : '판단 어려움';
+            const parts = [];
+            parts.push(`<div class="qc-head">
+                <span class="big" style="color:${bandColor(band)}">${Number(score) || 0}</span>
+                <div><span class="band-pill band-${band}">${escapeHtml(bandText)}</span>
+                <div class="note" style="margin-top:4px">${escapeHtml(kind)}${data.method ? ' · ' + escapeHtml(data.method) : ''}</div></div></div>`);
+            if (data.verdict) parts.push(`<div class="verdict">${escapeHtml(data.verdict)}</div>`);
+            const kv = [];
+            if (data.distance != null) kv.push(`<b>거리</b><span>${escapeHtml(String(data.distance))}</span>`);
+            parts.push(layer('측정값', `<div class="kv">${kv.join('')}</div>`));
+            parts.push(listItems('한계', data.limitations, 'lim'));
+            parts.push(`<div class="band-advice">${escapeHtml(bandAdvice(band))}</div>`);
+            parts.push(`<div class="caveat">유사도는 동일인 증명이 아닙니다. 추가 증거와 함께 해석하세요.</div>`);
+            box.innerHTML = parts.join('');
+        }
+
+        /* ── initialization ───────────────────────── */
+        fetchReviewsFromServer();
+
+        /* ── version chip ──────────────────────────── */
+        apiFetch('/api/stats').then(r => r.json()).then(d => {
+            if (d.version) $('ver-chip').textContent = 'v' + d.version;
+        }).catch(() => {});

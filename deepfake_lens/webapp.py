@@ -141,7 +141,13 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
             parsed = urlparse(self.path)
 
             if not parsed.path.startswith("/api/"):
-                # Serve GUI (static shell — carries no evidence data)
+                # Serve GUI shell + extracted static assets (carry no evidence data)
+                if parsed.path == "/gui.css":
+                    self._send_static("gui.css", "text/css; charset=utf-8")
+                    return
+                if parsed.path == "/gui.js":
+                    self._send_static("gui.js", "text/javascript; charset=utf-8")
+                    return
                 self._send_html(_load_gui())
                 return
 
@@ -358,6 +364,31 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
             body = html.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            # GUI is fully externalized (gui.css/gui.js); no inline script.
+            # blob: covers object-URL previews and heatmaps. style-src keeps
+            # 'unsafe-inline' because markup/JS use style attributes (the
+            # low-risk vector); script-src stays strict.
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+                "img-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'",
+            )
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _send_static(self, name: str, content_type: str) -> None:
+            """Serve a bundled GUI asset (gui.css/gui.js) — package-internal only."""
+            path = Path(__file__).parent / name
+            if not path.exists():
+                self.send_error(404, "not found")
+                return
+            body = path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

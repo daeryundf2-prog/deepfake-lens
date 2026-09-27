@@ -353,6 +353,32 @@ class LiveServerClientHeaderTest(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertIn(b"<", response.read(64))
 
+    def test_gui_assets_and_csp_headers(self) -> None:
+        """Extracted gui.css/gui.js are served and the shell carries the CSP."""
+        import urllib.request
+
+        url = self._start_server()
+        with urllib.request.urlopen(url + "/", timeout=5) as response:
+            self.assertEqual(response.status, 200)
+            csp = response.headers.get("Content-Security-Policy", "")
+            self.assertIn("script-src 'self'", csp)
+            self.assertNotIn("unsafe-inline'; script-src", csp)
+            html = response.read()
+            self.assertIn(b'href="/gui.css"', html)
+            self.assertIn(b'src="/gui.js"', html)
+            self.assertNotIn(b"<script>", html)
+            self.assertNotIn(b"<style>", html)
+
+        with urllib.request.urlopen(url + "/gui.css", timeout=5) as response:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.headers.get_content_type(), "text/css")
+            self.assertIn(b":root", response.read())
+
+        with urllib.request.urlopen(url + "/gui.js", timeout=5) as response:
+            self.assertEqual(response.status, 200)
+            self.assertIn("javascript", response.headers.get_content_type())
+            self.assertGreater(len(response.read()), 1000)
+
     def test_feedback_write_rejected_without_client_header(self) -> None:
         import urllib.error
         import urllib.request
