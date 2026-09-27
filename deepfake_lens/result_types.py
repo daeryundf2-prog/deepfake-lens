@@ -11,8 +11,27 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 
-from .model_adapter import ExternalModelAnalysis
 from .pixel import PixelAnalysis
+
+
+@dataclass(frozen=True)
+class ExternalModelAnalysis:
+    """Score supplied by an external model profile (onnx/torch/HF runtime).
+
+    Lives in this leaf module rather than ``model_adapter`` so the runtime
+    executors in ``model_runtimes`` can build results without importing the
+    dispatcher — keeping the adapter → runtimes dependency one-directional.
+    Re-exported from ``model_adapter`` for existing callers.
+    """
+
+    available: bool
+    score: int
+    confidence: str
+    model: str
+    detail: str
+    limitations: list[str] = field(default_factory=list)
+    # Per-member results when several profiles ran (model zoo / profile set).
+    models: list[dict[str, object]] = field(default_factory=list)
 
 
 class RiskBand(str, Enum):
