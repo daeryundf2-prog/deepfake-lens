@@ -120,12 +120,11 @@ jobs:
         run: python scripts/check_registry_links.py
 
   dep-audit:
-    # Vulnerability scan of the base install + declared extras. Advisory
-    # for now: optional deps are minimum-bounded and upstream advisories
-    # change without a commit here, so findings must not block pushes —
-    # they surface on the job page instead.
+    # Vulnerability scan of the base install + declared extras. Hard gate:
+    # a forensic tool must not ship with a known-vulnerable dependency,
+    # even when the advisory lands upstream between two commits here —
+    # the fix is bumping the minimum bound, not ignoring the failure.
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6

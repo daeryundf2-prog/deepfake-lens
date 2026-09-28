@@ -122,6 +122,10 @@ files = [
     "deepfake_lens/model_cache.py",
     "deepfake_lens/cli_render.py",
     "deepfake_lens/doctor.py",
+    "deepfake_lens/pixel_raster.py",
+    "deepfake_lens/image_metadata.py",
+    "deepfake_lens/text_heuristics.py",
+    "deepfake_lens/cli_parser.py",
 ]
 follow_imports = "skip"
 ignore_missing_imports = true
