@@ -18,6 +18,19 @@ from .model_adapter import ExternalModelAnalysis, analyze_external_model
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, PixelAnalysis, analyze_image_pixels
 from .pixel import PixelExpertResult
 from .png import read_png_dimensions, read_png_metadata
+from .image_metadata import (  # noqa: F401
+    DEFAULT_METADATA_BYTES,
+    guess_image_source,
+    read_image_metadata,
+)
+from .text_heuristics import (  # noqa: F401
+    _frontier_llm_fingerprints,
+    _generic_text_signal,
+    _repeated_shingle_signal,
+    _sentence_uniformity_signal,
+    _technical_document_density,
+    guess_text_source,
+)
 
 
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
@@ -25,7 +38,6 @@ SUPPORTED_TEXT_EXTENSIONS = {".txt", ".md"}
 SCAN_JSON_SCHEMA_VERSION = 1
 DEFAULT_MAX_FILES = 1000
 DEFAULT_TEXT_BYTES = 64 * 1024
-DEFAULT_METADATA_BYTES = 4 * 1024 * 1024
 
 
 # Result types and scan-cache/serialization helpers live in leaf modules;
@@ -90,27 +102,6 @@ SYNTHETIC_WRITING_PHRASES = [
     "balanced approach",
 ]
 
-PERSONAL_ANCHORS = [
-    "나",
-    "저",
-    "우리",
-    "오늘",
-    "어제",
-    "내일",
-    "엄마",
-    "아빠",
-    "친구",
-    "학교",
-    "회사",
-    "집",
-    "i",
-    "me",
-    "my",
-    "we",
-    "today",
-    "yesterday",
-    "tomorrow",
-]
 
 
 def scan_directory(
@@ -899,69 +890,6 @@ def analyze_image_metadata(
     )
 
 
-def read_image_metadata(path: Path, *, metadata_bytes: int = DEFAULT_METADATA_BYTES) -> tuple[dict[str, str], tuple[int, int] | None]:
-    data = _read_prefix(path, metadata_bytes)
-    metadata: dict[str, str] = {}
-    dimensions: tuple[int, int] | None = None
-
-    if data.startswith(b"\x89PNG\r\n\x1a\n"):
-        metadata.update(read_png_metadata(data))
-        dimensions = read_png_dimensions(data)
-    elif data.startswith(b"\xff\xd8"):
-        dimensions = _read_jpeg_dimensions(data)
-    elif data.startswith(b"RIFF") and data[8:12] == b"WEBP":
-        dimensions = _read_webp_dimensions(data)
-    elif data.startswith(b"BM") and len(data) >= 26:
-        import struct
-        width, height = struct.unpack_from("<ii", data, 18)
-        if width > 0:
-            dimensions = (width, abs(height))
-    elif data[:6] in (b"GIF87a", b"GIF89a") and len(data) >= 10:
-        import struct
-        dimensions = struct.unpack_from("<HH", data, 6)
-    elif data[:4] in (b"II*\x00", b"MM\x00*"):
-        dimensions = _read_tiff_dimensions(data)
-
-    header_text = _extract_header_text(data)
-    if header_text:
-        metadata["header.text"] = header_text
-    return metadata, dimensions
-
-
-def _read_tiff_dimensions(data: bytes) -> tuple[int, int] | None:
-    """Read width/height from a TIFF header's first IFD (tags 256/257)."""
-    import struct
-    little = data[:2] == b"II"
-    order = "<" if little else ">"
-    try:
-        ifd_offset = struct.unpack_from(order + "I", data, 4)[0]
-        count = struct.unpack_from(order + "H", data, ifd_offset)[0]
-        if count > 200:
-            return None
-        width = height = None
-        for index in range(count):
-            base = ifd_offset + 2 + index * 12
-            if base + 12 > len(data):
-                break
-            tag, field_type, num = struct.unpack_from(order + "HHI", data, base)
-            if tag not in (256, 257) or field_type not in (3, 4) or num != 1:
-                continue
-            value = (
-                struct.unpack_from(order + "H", data, base + 8)[0]
-                if field_type == 3
-                else struct.unpack_from(order + "I", data, base + 8)[0]
-            )
-            if tag == 256:
-                width = value
-            else:
-                height = value
-        if width and height:
-            return width, height
-    except (struct.error, IndexError):
-        return None
-    return None
-
-
 def _heatmap_path_for(path: Path, *, root: Path | None, heatmap_dir: Path | None) -> Path:
     output_root = heatmap_dir or path.parent / "deepfake_lens_heatmaps"
     try:
@@ -971,38 +899,6 @@ def _heatmap_path_for(path: Path, *, root: Path | None, heatmap_dir: Path | None
     safe_parts = [part.replace("/", "_").replace("\\", "_") for part in relative.parts]
     output_name = "__".join(safe_parts) + ".heatmap.png"
     return output_root / output_name
-
-
-def guess_image_source(metadata: dict[str, str]) -> SourceGuess:
-    blob = "\n".join(f"{key}: {value}" for key, value in metadata.items())
-    normalized = blob.lower()
-    if not normalized.strip():
-        return SourceGuess.unknown()
-
-    if _looks_like_comfyui(normalized):
-        return SourceGuess("ComfyUI 추정", SourceConfidence.HIGH, ["ComfyUI workflow/prompt 구조가 발견되었습니다."])
-    if _looks_like_a1111(normalized):
-        return SourceGuess("Stable Diffusion / A1111 추정", SourceConfidence.HIGH, ["프롬프트, steps, sampler, CFG, seed 같은 A1111 생성 파라미터가 발견되었습니다."])
-
-    direct = _direct_tool_guess(normalized)
-    if direct:
-        return direct
-
-    if _contains_generation_fields(normalized):
-        return SourceGuess("AI 생성 메타데이터 추정", SourceConfidence.MEDIUM, ["prompt/model/seed/CFG 계열 필드가 발견되었습니다."])
-    return SourceGuess.unknown()
-
-
-def guess_text_source(normalized_text: str, ai_identity_hits: int) -> SourceGuess:
-    if "chatgpt" in normalized_text or "openai" in normalized_text:
-        return SourceGuess("ChatGPT/OpenAI 단서 있음", SourceConfidence.MEDIUM, ["원문에 ChatGPT 또는 OpenAI가 직접 언급되었습니다."])
-    if "claude" in normalized_text or "anthropic" in normalized_text:
-        return SourceGuess("Claude 단서 있음", SourceConfidence.MEDIUM, ["원문에 Claude 또는 Anthropic이 직접 언급되었습니다."])
-    if "gemini" in normalized_text or "bard" in normalized_text:
-        return SourceGuess("Gemini/Bard 단서 있음", SourceConfidence.MEDIUM, ["원문에 Gemini 또는 Bard가 직접 언급되었습니다."])
-    if ai_identity_hits:
-        return SourceGuess("AI 어시스턴트 문체 추정", SourceConfidence.MEDIUM, ["AI 또는 언어 모델임을 직접 암시하는 문구가 있습니다."])
-    return SourceGuess.unknown()
 
 
 def sort_items(items: list[ScanItem]) -> list[ScanItem]:
@@ -1027,7 +923,31 @@ def summarize(items: list[ScanItem], *, capped: bool, cached: int = 0) -> BatchS
     )
 
 
-def scan_to_json(summary: BatchScanSummary, items: list[ScanItem]) -> dict[str, object]:
+def _thresholds_json(thresholds: object | None) -> dict[str, object]:
+    """Record which decision thresholds produced this scan.
+
+    Builtin literals are unmeasured — every scan must admit that. A loaded
+    ThresholdProfile additionally reports its sample count and provisional
+    flag so downstream consumers can tell measured cutoffs from defaults.
+    """
+    if thresholds is None:
+        return {"source": "builtin_defaults", "provisional": True, "measured": False}
+    to_json = getattr(thresholds, "to_json", None)
+    payload = to_json() if callable(to_json) else {}
+    if not isinstance(payload, dict):
+        payload = {}
+    return {
+        "source": "threshold_profile",
+        "version": str(payload.get("version", "")),
+        "provisional": bool(payload.get("provisional", True)),
+        "samples": int(payload.get("samples", 0) or 0),
+        "dataset_fingerprint": str(payload.get("dataset_fingerprint", "")),
+        "measured_at": str(payload.get("measured_at", "")),
+        "measured": not bool(payload.get("provisional", True)),
+    }
+
+
+def scan_to_json(summary: BatchScanSummary, items: list[ScanItem], *, thresholds: object | None = None) -> dict[str, object]:
     from .vendor_weights import weights_coverage
 
     return {
@@ -1036,12 +956,15 @@ def scan_to_json(summary: BatchScanSummary, items: list[ScanItem]) -> dict[str, 
         # Weight coverage is surfaced per-scan so a heuristic-only run can
         # never masquerade as a full neural pipeline in downstream reports.
         "coverage": weights_coverage(),
+        # Threshold provenance: unmeasured builtin defaults vs a profile
+        # fit on labeled data (with its corpus fingerprint and sample n).
+        "thresholds": _thresholds_json(thresholds),
         "items": [item.to_json() for item in items],
     }
 
 
-def scan_to_json_text(summary: BatchScanSummary, items: list[ScanItem]) -> str:
-    return json.dumps(scan_to_json(summary, items), ensure_ascii=False, indent=2)
+def scan_to_json_text(summary: BatchScanSummary, items: list[ScanItem], *, thresholds: object | None = None) -> str:
+    return json.dumps(scan_to_json(summary, items, thresholds=thresholds), ensure_ascii=False, indent=2)
 
 
 
@@ -1123,104 +1046,6 @@ def _pixel_evidence_signal(pixel_analysis: PixelAnalysis | None) -> EvidenceSign
     return EvidenceSignal(title, detail, weight)
 
 
-_TYPOGRAPHIC_PUNCT = "—–‘’“”…″‴·"
-
-_AI_VOCAB_EN = {
-    "delve", "delving", "crucial", "crucially", "realm", "tapestry",
-    "landscape", "nuanced", "foster", "fostering", "meticulous",
-    "meticulously", "testament", "vibrant", "pivotal", "leverage",
-    "leveraging", "elevate", "holistic", "embark", "unleash",
-    "streamline", "commendable", "intricate", "underscore",
-    "underscores", "paramount", "multifaceted", "endeavor", "beacon",
-    "navigate", "navigating",
-}
-_AI_CONNECTORS_EN = {
-    "moreover", "furthermore", "additionally", "consequently",
-    "nevertheless", "nonetheless", "in conclusion", "importantly",
-    "notably", "ultimately", "in summary", "in essence",
-}
-_AI_CONNECTORS_KO = {
-    "결론적으로", "요약하자면", "다음과 같습니다", "중요한 것은",
-    "주목할 점", "핵심은", "다양한 측면", "균형 잡힌",
-    "종합하면", "살펴보면", "고려해야", "한편으로", "무엇보다",
-}
-
-
-def _hangul_ratio_text(text: str) -> float:
-    letters = [c for c in text if c.isalpha()]
-    if not letters:
-        return 0.0
-    return sum(1 for c in letters if "가" <= c <= "힣") / len(letters)
-
-
-def _frontier_llm_fingerprints(
-    trimmed: str, normalized: str, sentences: list[str], words: list[str]
-) -> list[EvidenceSignal]:
-    """Model-agnostic fingerprints of frontier-LLM writing style — vendor
-    tells (delve family vocab, typographic punctuation, hedging scaffold,
-    connector-first sentences) that persist across generators. Kept in
-    sync with text_advanced's probe family."""
-    signals: list[EvidenceSignal] = []
-    hangul = _hangul_ratio_text(trimmed)
-
-    if len(trimmed) >= 200:
-        typo = sum(trimmed.count(ch) for ch in _TYPOGRAPHIC_PUNCT)
-        if typo >= 6 and typo / len(trimmed) > 0.002:
-            signals.append(EvidenceSignal(
-                "타이포그래픽 구두점",
-                f"em-dash/곱따옴표/말줄임 등 비ASCII 구두점이 {typo}개 — 키보드 입력이 아닌 모델 출력 특성입니다.",
-                12,
-            ))
-
-    if len(words) >= 60:
-        if hangul > 0.3:
-            hits = sum(normalized.count(p) for p in _AI_CONNECTORS_KO)
-            if hits >= 3 and hits / (len(words) / 1000) > 4:
-                signals.append(EvidenceSignal(
-                    "모델형 연결어 밀도(한국어)",
-                    f"모델 생성 한국어에서 과용되는 연결/결론 표현이 {hits}개 발견됩니다.",
-                    12,
-                ))
-        else:
-            vocab_hits = sum(words.count(w) for w in _AI_VOCAB_EN)
-            conn_hits = sum(normalized.count(c) for c in _AI_CONNECTORS_EN)
-            if vocab_hits + conn_hits >= 4 and (vocab_hits + conn_hits) / (len(words) / 1000) > 5:
-                signals.append(EvidenceSignal(
-                    "LLM 과용 어휘",
-                    f"frontier LLM이 과용하는 어휘/접속부사가 {vocab_hits + conn_hits}개 — delve/crucial/moreover 계열 지문입니다.",
-                    15,
-                ))
-
-    if len(sentences) >= 4:
-        pairs = [("한편", "반면"), ("장점이 있", "단점"), ("다만", "고려해야"), ("반대로", "동시에")] if hangul > 0.3 else [
-            ("on the one hand", "on the other hand"),
-            ("while it is", "it is also"),
-            ("however", "it is important to note"),
-            ("although", "nevertheless"),
-        ]
-        hit_pairs = sum(1 for a, b in pairs if a in normalized and b in normalized)
-        if hit_pairs >= 2:
-            signals.append(EvidenceSignal(
-                "양면 균형 헤징 구조",
-                f"찬반 균형형 연결 구조가 {hit_pairs}쌍 발견 — 어시스턴트 응답의 전형적 골격입니다.",
-                10,
-            ))
-
-    if len(sentences) >= 6:
-        starters = ("또한", "그러나", "하지만", "따라서", "결론적으로", "먼저", "다음으로", "마지막으로", "한편", "특히", "종합하면", "즉,") if hangul > 0.3 else (
-            "however", "moreover", "furthermore", "additionally", "in addition",
-            "consequently", "therefore", "thus", "overall", "in conclusion",
-            "importantly", "notably", "first", "second", "finally", "ultimately",
-        )
-        hits = sum(1 for s in sentences if s.lower().lstrip("\"'-–— ").startswith(starters))
-        if hits / len(sentences) > 0.3 and hits >= 3:
-            signals.append(EvidenceSignal(
-                "문두 접속사 균일성",
-                f"문장의 {hits / len(sentences):.0%}({hits}개)이 접속사로 시작 — 사람보다 균일한 문두 골격입니다.",
-                10,
-            ))
-    return signals
-
 
 def _model_evidence_signal(model_analysis: ExternalModelAnalysis | None) -> EvidenceSignal | None:
     if not model_analysis or not model_analysis.available:
@@ -1239,138 +1064,6 @@ def _model_evidence_signal(model_analysis: ExternalModelAnalysis | None) -> Evid
     return EvidenceSignal(title, f"{model_analysis.model}: {model_analysis.detail}", weight)
 
 
-def _sentence_uniformity_signal(sentences: list[str]) -> EvidenceSignal | None:
-    if len(sentences) < 5:
-        return None
-    lengths = [max(1, len(re.findall(r"[\w']+", sentence, flags=re.UNICODE))) for sentence in sentences]
-    average = sum(lengths) / len(lengths)
-    variance = sum((length - average) ** 2 for length in lengths) / len(lengths)
-    coefficient = (variance**0.5) / max(1.0, average)
-    if average >= 18.0 and coefficient < 0.28:
-        return EvidenceSignal("문장 길이 균일성", "여러 문장이 비슷한 길이로 이어집니다.", 15)
-    if average >= 14.0 and coefficient < 0.38:
-        return EvidenceSignal("낮은 문장 변주", "문장 길이 변화가 작습니다.", 9)
-    return None
-
-
-def _repeated_shingle_signal(words: list[str]) -> EvidenceSignal | None:
-    if len(words) < 80:
-        return None
-    shingles = [" ".join(words[index : index + 3]) for index in range(len(words) - 2)]
-    repeated = len(shingles) - len(set(shingles))
-    ratio = repeated / max(1, len(shingles))
-    if ratio >= 0.1:
-        return EvidenceSignal("반복 어구", f"3단어 구문 반복률이 {int(ratio * 100)}% 입니다.", 16)
-    if ratio >= 0.055:
-        return EvidenceSignal("약한 반복 패턴", "비슷한 구문이 여러 번 재사용됩니다.", 8)
-    return None
-
-
-def _generic_text_signal(normalized: str, words: list[str]) -> EvidenceSignal | None:
-    if len(words) < 70:
-        return None
-    has_number_or_date = re.search(r"\d{1,4}([./:-]\d{1,2})?", normalized) is not None
-    personal_anchor_count = sum(1 for anchor in PERSONAL_ANCHORS if re.search(rf"\b{re.escape(anchor)}\b", normalized))
-    if not has_number_or_date and personal_anchor_count == 0:
-        return EvidenceSignal("개인 맥락 부족", "긴 글인데 날짜, 수치, 구체적 경험 단서가 거의 없습니다.", 8)
-    return None
-
-
-def _direct_tool_guess(normalized: str) -> SourceGuess | None:
-    rules = [
-        ("Midjourney/Niji 추정", ["midjourney", "niji"], "Midjourney/Niji 단서가 메타데이터에 있습니다."),
-        ("Flux / Black Forest Labs 추정", ["flux", "black forest labs", "bfl"], "Flux 또는 Black Forest Labs 단서가 메타데이터에 있습니다."),
-        ("Stable Diffusion 추정", ["stable diffusion", "stablediffusion", "automatic1111", "a1111", "sd-webui"], "Stable Diffusion 계열 단서가 메타데이터에 있습니다."),
-        ("DALL-E/OpenAI 추정", ["dall-e", "dalle", "openai", "chatgpt"], "DALL-E/OpenAI 단서가 메타데이터에 있습니다."),
-        ("Google Imagen/Gemini 추정", ["imagen", "gemini", "google ai studio", "nano banana"], "Google Imagen/Gemini 계열 단서가 메타데이터에 있습니다."),
-        ("Adobe Firefly 추정", ["adobe firefly", "firefly"], "Adobe Firefly 단서가 메타데이터에 있습니다."),
-        ("Ideogram 추정", ["ideogram"], "Ideogram 단서가 메타데이터에 있습니다."),
-        ("Runway 추정", ["runway"], "Runway 단서가 메타데이터에 있습니다."),
-        ("Leonardo.ai 추정", ["leonardo.ai", "leonardo ai"], "Leonardo.ai 단서가 메타데이터에 있습니다."),
-        ("NovelAI 추정", ["novelai", "novel ai"], "NovelAI 단서가 메타데이터에 있습니다."),
-        ("Recraft 추정", ["recraft"], "Recraft 단서가 메타데이터에 있습니다."),
-        ("Canva AI 추정", ["canva ai", "magic media"], "Canva AI/Magic Media 단서가 메타데이터에 있습니다."),
-        ("Grok/xAI 추정", ["grok", "xai"], "Grok/xAI 단서가 메타데이터에 있습니다."),
-    ]
-    for label, markers, reason in rules:
-        if any(re.search(rf"(?:^|\s){re.escape(marker)}(?:\s|$)", normalized) for marker in markers):
-            return SourceGuess(label, SourceConfidence.HIGH, [reason])
-    return None
-
-
-def _looks_like_a1111(normalized: str) -> bool:
-    has_prompt_block = "negative prompt" in normalized or "png.parameters" in normalized
-    hits = sum(1 for marker in ["steps:", "sampler:", "cfg scale", "seed:", "model hash", "model:"] if marker in normalized)
-    return has_prompt_block and hits >= 2
-
-
-def _looks_like_comfyui(normalized: str) -> bool:
-    has_workflow = "png.workflow" in normalized or "png.prompt" in normalized or '"workflow"' in normalized or "comfyui" in normalized
-    hits = sum(1 for marker in ["ksampler", "checkpointloadersimple", "loraloader", '"class_type"', '"inputs"', '"widgets_values"'] if marker in normalized)
-    return has_workflow and hits >= 1
-
-
-def _contains_generation_fields(normalized: str) -> bool:
-    fields = ["prompt", "negative prompt", "seed", "cfg", "sampler", "model hash", "model_name", "lora", "checkpoint"]
-    return sum(1 for field in fields if field in normalized) >= 2
-
-
-def _extract_header_text(data: bytes) -> str:
-    text = data.decode("latin-1", errors="ignore")
-    strings = re.findall(r"[ -~]{4,}", text)
-    useful = [item for item in strings if any(marker in item.lower() for marker in ["prompt", "seed", "sampler", "stable", "comfy", "midjourney", "openai", "firefly", "runway", "novelai", "leonardo"])]
-    return "\n".join(useful[:80])
-
-
-def _read_jpeg_dimensions(data: bytes) -> tuple[int, int] | None:
-    if len(data) < 4 or not data.startswith(b"\xff\xd8"):
-        return None
-    offset = 2
-    sof_markers = set(range(0xC0, 0xC4)) | set(range(0xC5, 0xC8)) | set(range(0xC9, 0xCC)) | set(range(0xCD, 0xD0))
-    while offset + 9 < len(data):
-        if data[offset] != 0xFF:
-            offset += 1
-            continue
-        while offset < len(data) and data[offset] == 0xFF:
-            offset += 1
-        if offset >= len(data):
-            return None
-        marker = data[offset]
-        offset += 1
-        if marker in {0xD8, 0xD9, 0x01} or 0xD0 <= marker <= 0xD7:
-            continue
-        if offset + 2 > len(data):
-            return None
-        segment_length = int.from_bytes(data[offset : offset + 2], "big")
-        if segment_length < 2 or offset + segment_length > len(data):
-            return None
-        if marker in sof_markers and segment_length >= 7:
-            height = int.from_bytes(data[offset + 3 : offset + 5], "big")
-            width = int.from_bytes(data[offset + 5 : offset + 7], "big")
-            return width, height
-        offset += segment_length
-    return None
-
-
-def _read_webp_dimensions(data: bytes) -> tuple[int, int] | None:
-    if len(data) < 30 or not (data.startswith(b"RIFF") and data[8:12] == b"WEBP"):
-        return None
-    offset = 12
-    while offset + 8 <= len(data):
-        chunk_type = data[offset : offset + 4]
-        chunk_size = int.from_bytes(data[offset + 4 : offset + 8], "little")
-        chunk_start = offset + 8
-        if chunk_start + chunk_size > len(data):
-            return None
-        chunk = data[chunk_start : chunk_start + chunk_size]
-        if chunk_type == b"VP8X" and len(chunk) >= 10:
-            width = 1 + int.from_bytes(chunk[4:7], "little")
-            height = 1 + int.from_bytes(chunk[7:10], "little")
-            return width, height
-        offset = chunk_start + chunk_size + (chunk_size % 2)
-    return None
-
-
 def _sort_bucket(item: ScanItem) -> int:
     if item.status != "analyzed" or not item.result:
         return 4
@@ -1381,32 +1074,3 @@ def _sort_bucket(item: ScanItem) -> int:
         RiskBand.LOW: 3,
     }[item.result.band]
 
-
-def _technical_document_density(text: str, lines: list[str]) -> float:
-    """Share of lines that are technical-document structure, not prose.
-
-    Code fences, tables, markdown headers, inline-code-only lines and HTML
-    tags make a document look unlike natural prose — they inflate list,
-    uniformity, and perplexity signals for structural reasons unrelated
-    to who wrote it. Returns 0-1.
-    """
-    if not lines:
-        return 0.0
-    structural = 0
-    in_fence = False
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("```"):
-            in_fence = not in_fence
-            structural += 1
-            continue
-        if in_fence:
-            structural += 1
-            continue
-        if (
-            stripped.startswith(("#", "|", ">", "- [", "* ["))
-            or re.match(r"^</?[a-zA-Z][^>]*>$", stripped)
-            or (stripped.count("`") >= 2)
-        ):
-            structural += 1
-    return structural / len(lines)

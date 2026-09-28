@@ -51,7 +51,7 @@ def build_security_check(root: Path | str) -> dict[str, object]:
         },
         {
             "name": "file-serving endpoints check a server-registered read root, not a caller-supplied one",
-            "passed": "_READ_ROOTS" in (package / "webapp.py").read_text(encoding="utf-8"),
+            "passed": "_READ_ROOTS" in (package / "webapp_api.py").read_text(encoding="utf-8"),
         },
     ]
     return {
