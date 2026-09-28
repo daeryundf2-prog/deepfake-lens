@@ -1,0 +1,380 @@
+"""Argument-parser construction for the CLI.
+
+Extracted from cli.main() — ``main`` owns dispatch; this module owns the
+argparse shape so each stays readable as commands are added.
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from .core import DEFAULT_MAX_FILES
+from .pixel import DEFAULT_PIXEL_MAX_SIDE, SUPPORTED_PIXEL_MODES
+
+
+def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:
+    parser = argparse.ArgumentParser(prog="deepfake-lens", description="Local AI-generated image/text folder scanner.")
+    subparsers = parser.add_subparsers(dest="command")
+    scan_parser = subparsers.add_parser("scan", help="scan a folder")
+    scan_parser.add_argument("folder", type=Path, help="folder to scan")
+    scan_parser.add_argument("--recursive", action="store_true", help="scan recursively instead of direct children only")
+    scan_parser.add_argument("--max-files", type=int, default=DEFAULT_MAX_FILES, help=f"maximum files to inspect (default: {DEFAULT_MAX_FILES})")
+    scan_parser.add_argument("--include-low", action="store_true", help="print low-signal and unsupported rows in the table")
+    scan_parser.add_argument("--format", choices=["table", "json"], default="table", help="stdout format")
+    scan_parser.add_argument("--json-out", type=Path, help="write full JSON report")
+    scan_parser.add_argument("--csv-out", type=Path, help="write compact CSV report")
+    scan_parser.add_argument("--text-bytes", type=int, default=64 * 1024, help="maximum text bytes read from each text file")
+    scan_parser.add_argument("--metadata-bytes", type=int, default=4 * 1024 * 1024, help="maximum leading bytes read from each image file")
+    scan_parser.add_argument("--pixel", choices=sorted(SUPPORTED_PIXEL_MODES), default="off", help="run local pixel-level experts for images")
+    scan_parser.add_argument("--pixel-max-side", type=int, default=DEFAULT_PIXEL_MAX_SIDE, help=f"maximum sampled side for pixel analysis (default: {DEFAULT_PIXEL_MAX_SIDE})")
+    scan_parser.add_argument("--heatmaps", action="store_true", help="write PNG heatmaps for deep pixel localization")
+    scan_parser.add_argument("--heatmap-dir", type=Path, help="directory for heatmaps (default: folder/deepfake_lens_heatmaps)")
+    scan_parser.add_argument("--model-path", type=Path, help="external model profile, checkpoint, or profile directory (default: auto-discover bundled image+audio engine profiles)")
+    scan_parser.add_argument("--no-default-engine", action="store_true", help="ignore the bundled models/*-runtime.json default-engine profiles")
+    scan_parser.add_argument("--fusion-profile", type=Path, help="optional score-fusion profile")
+    scan_parser.add_argument("--cache", type=Path, help="JSON cache for resumable large-folder scans")
+    scan_parser.add_argument("--workers", type=int, default=1, help="parallel file workers for large folders")
+    scan_parser.add_argument("--dedupe", action="store_true", help="hash files and mark duplicate content")
+    scan_parser.add_argument("--deep-signals", action="store_true", help="run opt-in deep layers: face-manipulation + inpainting on images, rPPG + avatar + lip-sync on videos")
+    scan_parser.add_argument("--thresholds", type=Path, help="layer-threshold profile JSON (calibration.py layer-thresholds-v1) overriding heuristic cutoffs")
+    scan_parser.add_argument("--hash-db", type=Path, help="persist duplicate hashes across incremental scans")
+    scan_parser.add_argument("--max-file-bytes", type=int, help="skip files larger than this size")
+    scan_parser.add_argument("--allow-symlinks", action="store_true", help="follow symlinked files")
+    scan_parser.add_argument("--progress", action="store_true", help="print coarse progress messages")
+    scan_parser.add_argument("--html-out", type=Path, help="write HTML report")
+    scan_parser.add_argument("--pdf-out", type=Path, help="write simple PDF report")
+    scan_parser.add_argument("--forensic-pdf-out", type=Path, help="write court-admissible forensic PDF report with ECFS exhibit stamp and SHA-256 hashes")
+    scan_parser.add_argument("--evidence-statement-out", type=Path, help="write standard ECFS court evidence statement (증거설명서, Markdown or PDF depending on suffix)")
+    scan_parser.add_argument("--evidence-statement-pdf-out", type=Path, help="write standard ECFS court evidence statement as PDF")
+    scan_parser.add_argument("--case-no", type=str, default="(사건번호 입력)", help="case number for forensic evidence statement")
+    scan_parser.add_argument("--case-name", type=str, default="성폭력처벌법위반(허위영상물편집등) 및 정보통신망법위반", help="case title (사건명) for forensic evidence statement")
+    scan_parser.add_argument("--plaintiff", type=str, default="(의뢰사 상호명 입력) 귀하", help="plaintiff/claimant for forensic evidence statement")
+    scan_parser.add_argument("--defendant", type=str, default="(피고/피의자 성명 입력)", help="defendant/suspect for forensic evidence statement")
+    scan_parser.add_argument("--court", type=str, default="○○지방법원 귀중", help="court/investigation agency for forensic evidence statement")
+    scan_parser.add_argument("--exhibit-no", type=str, default="갑 제        호증", help="court exhibit number for forensic PDF report (default: '갑 제        호증')")
+    scan_parser.add_argument("--redact-paths", action="store_true", help="redact paths in HTML/PDF reports")
+    scan_parser.add_argument("--sign", action="store_true", help="HMAC-SHA256 sign the --json-out report (integrity-to-key-holder, not legal non-repudiation; key from --key-file or DEEPFAKE_LENS_REPORT_KEY)")
+    scan_parser.add_argument("--key-file", type=Path, help="report signing key file (default: DEEPFAKE_LENS_REPORT_KEY env var)")
+
+    collect_parser = subparsers.add_parser("collect", help="write a dataset collection plan")
+    collect_parser.add_argument("folder", type=Path)
+    collect_parser.add_argument("--out", type=Path, required=True)
+    collect_parser.add_argument("--minimum-per-source", type=int)
+
+    dataset_parser = subparsers.add_parser("dataset", help="discover a labeled dataset and write a manifest")
+    dataset_parser.add_argument("folder", type=Path)
+    dataset_parser.add_argument("--manifest-out", type=Path, required=True)
+    dataset_parser.add_argument("--fingerprints", action="store_true", help="include SHA-256 fingerprints in the manifest")
+    dataset_parser.add_argument("--audit-out", type=Path, help="write dataset audit JSON")
+    dataset_parser.add_argument("--split-out", type=Path, help="write deterministic train/val/test split plan")
+    dataset_parser.add_argument("--split-ratios", default="0.8,0.1,0.1", help="train,val,test split ratios")
+    dataset_parser.add_argument("--split-seed", default="deepfake-lens-v1")
+    dataset_parser.add_argument("--robustness-out", type=Path, help="write robustness transform plan")
+    dataset_parser.add_argument("--no-recursive", action="store_true")
+
+    eval_parser = subparsers.add_parser("eval", help="evaluate a labeled dataset")
+    eval_parser.add_argument("folder", type=Path)
+    eval_parser.add_argument("--pixel", choices=sorted(SUPPORTED_PIXEL_MODES), default="deep")
+    eval_parser.add_argument("--pixel-max-side", type=int, default=DEFAULT_PIXEL_MAX_SIDE)
+    eval_parser.add_argument("--calibration", type=Path)
+    eval_parser.add_argument("--model-path", type=Path, help="external model profile (default: auto-discover models/aide-runtime.json)")
+    eval_parser.add_argument("--no-default-engine", action="store_true", help="ignore the bundled models/aide-runtime.json default-engine profile")
+    eval_parser.add_argument("--fusion-profile", type=Path)
+    eval_parser.add_argument("--thresholds", type=Path, help="layer-threshold profile JSON overriding heuristic cutoffs")
+    eval_parser.add_argument("--max-files", type=int)
+    eval_parser.add_argument("--json-out", type=Path)
+    eval_parser.add_argument("--html-out", type=Path)
+    eval_parser.add_argument("--false-positive-out", type=Path)
+    eval_parser.add_argument("--false-negative-out", type=Path)
+    eval_parser.add_argument("--robustness", action="store_true", help="also summarize transform-named robustness folders")
+    eval_parser.add_argument("--redact-paths", action="store_true")
+    eval_parser.add_argument("--sign", action="store_true", help="HMAC-SHA256 sign the --json-out report (integrity-to-key-holder, not legal non-repudiation; key from --key-file or DEEPFAKE_LENS_REPORT_KEY)")
+    eval_parser.add_argument("--key-file", type=Path, help="report signing key file (default: DEEPFAKE_LENS_REPORT_KEY env var)")
+
+    benchmark_parser = subparsers.add_parser("benchmark", help="run a matrix benchmark across pixel modes and model profiles")
+    benchmark_parser.add_argument("folder", type=Path)
+    benchmark_parser.add_argument("--pixel-modes", default="off,deep", help="comma-separated pixel modes")
+    benchmark_parser.add_argument("--model-path", type=Path, action="append", default=[])
+    benchmark_parser.add_argument("--fusion-profile", type=Path)
+    benchmark_parser.add_argument("--robustness", action="store_true")
+    benchmark_parser.add_argument("--max-files", type=int)
+    benchmark_parser.add_argument("--json-out", type=Path, required=True)
+    benchmark_parser.add_argument("--md-out", type=Path)
+    benchmark_parser.add_argument("--sign", action="store_true", help="HMAC-SHA256 sign the --json-out report (integrity-to-key-holder, not legal non-repudiation; key from --key-file or DEEPFAKE_LENS_REPORT_KEY)")
+    benchmark_parser.add_argument("--key-file", type=Path, help="report signing key file (default: DEEPFAKE_LENS_REPORT_KEY env var)")
+
+    fusion_parser = subparsers.add_parser("fusion", help="calibrate a metadata/pixel/model/source fusion profile")
+    fusion_parser.add_argument("folder", type=Path)
+    fusion_parser.add_argument("--pixel", choices=sorted(SUPPORTED_PIXEL_MODES), default="deep")
+    fusion_parser.add_argument("--model-path", type=Path, help="external model profile (default: auto-discover models/aide-runtime.json)")
+    fusion_parser.add_argument("--no-default-engine", action="store_true", help="ignore the bundled models/aide-runtime.json default-engine profile")
+    fusion_parser.add_argument("--target-fpr", type=float, default=0.05)
+    fusion_parser.add_argument("--max-files", type=int)
+    fusion_parser.add_argument("--out", type=Path, required=True)
+
+    calibrate_parser = subparsers.add_parser("calibrate", help="fit a score threshold from a labeled dataset")
+    calibrate_parser.add_argument("folder", type=Path)
+    calibrate_parser.add_argument("--pixel", choices=sorted(SUPPORTED_PIXEL_MODES), default="deep")
+    calibrate_parser.add_argument("--pixel-max-side", type=int, default=DEFAULT_PIXEL_MAX_SIDE)
+    calibrate_parser.add_argument("--target-fpr", type=float, default=0.05)
+    calibrate_parser.add_argument("--max-files", type=int)
+    calibrate_parser.add_argument("--out", type=Path, required=True)
+    calibrate_parser.add_argument("--mapping-out", type=Path, help="also write an isotonic score-calibration profile (mapping table + method + dataset fingerprint); values are dataset-dependent confidences, not truth probabilities")
+    calibrate_parser.add_argument("--thresholds", type=Path, help="layer-threshold profile JSON overriding heuristic cutoffs")
+
+    feedback_parser = subparsers.add_parser("feedback", help="compare examiner labels against scan scores and suggest fusion weights")
+    feedback_parser.add_argument("labels", type=Path, help="JSONL/JSON examiner verdicts: {path, expected_label, notes?} per row")
+    feedback_parser.add_argument("--scan-json", type=Path, help="prior scan --json-out payload to score against (default: re-analyze each labeled path)")
+    feedback_parser.add_argument("--pixel", choices=sorted(SUPPORTED_PIXEL_MODES), default="off")
+    feedback_parser.add_argument("--pixel-max-side", type=int, default=DEFAULT_PIXEL_MAX_SIDE)
+    feedback_parser.add_argument("--model-path", type=Path, help="external model profile for live rescan (default: auto-discover models/aide-runtime.json)")
+    feedback_parser.add_argument("--no-default-engine", action="store_true", help="ignore the bundled models/aide-runtime.json default-engine profile")
+    feedback_parser.add_argument("--fusion-profile", type=Path, help="base fusion profile to adjust (default: built-in)")
+    feedback_parser.add_argument("--json-out", type=Path, help="write the feedback report JSON")
+    feedback_parser.add_argument("--profile-out", type=Path, help="write the suggested fusion profile; apply explicitly via --fusion-profile")
+
+    train_parser = subparsers.add_parser("train", help="train a portable threshold baseline from a labeled dataset")
+    train_parser.add_argument("folder", type=Path)
+    train_parser.add_argument("--pixel", choices=sorted(SUPPORTED_PIXEL_MODES), default="deep")
+    train_parser.add_argument("--pixel-max-side", type=int, default=DEFAULT_PIXEL_MAX_SIDE)
+    train_parser.add_argument("--target-fpr", type=float, default=0.05)
+    train_parser.add_argument("--max-files", type=int)
+    train_parser.add_argument("--out", type=Path, required=True)
+
+    models_parser = subparsers.add_parser("models", help="list researched detector integration candidates")
+    models_parser.add_argument("--focus", help="filter by task, key, name, or adapter target")
+    models_parser.add_argument("--json-out", type=Path)
+    models_parser.add_argument("--profile-out", type=Path, help="write a runtime profile for a candidate checkpoint")
+    models_parser.add_argument("--candidate", default="aide-iclr-2025")
+    models_parser.add_argument("--checkpoint", type=Path)
+    models_parser.add_argument("--runtime", choices=["onnx", "torchscript"])
+    models_parser.add_argument("--input-size", type=int, default=224)
+    models_parser.add_argument("--score-index", type=int, default=1)
+
+    neural_parser = subparsers.add_parser("train-neural-plan", help="write a neural training and ONNX export plan")
+    neural_parser.add_argument("folder", type=Path)
+    neural_parser.add_argument("--out", type=Path, required=True)
+    neural_parser.add_argument("--output-dir", type=Path, required=True)
+    neural_parser.add_argument("--architecture", default="convnext_tiny")
+    neural_parser.add_argument("--image-size", type=int, default=224)
+    neural_parser.add_argument("--epochs", type=int, default=10)
+
+    video_parser = subparsers.add_parser("video", help="plan or run video frame extraction for image scanning")
+    video_parser.add_argument("folder", type=Path)
+    video_parser.add_argument("--out", type=Path, required=True)
+    video_parser.add_argument("--frame-root", type=Path, required=True)
+    video_parser.add_argument("--sample-every", type=float, default=2.0)
+    video_parser.add_argument("--no-recursive", action="store_true")
+    video_parser.add_argument("--extract", action="store_true", help="run ffmpeg commands after writing the plan")
+    video_parser.add_argument("--extract-limit", type=int)
+
+    audio_parser = subparsers.add_parser("audio", help="analyze audio files for AI generation or voice cloning")
+    audio_parser.add_argument("file", type=Path, help="audio file to analyze")
+    audio_parser.add_argument("--segment-seconds", type=int, default=30, help="maximum seconds to analyze (default: 30)")
+    audio_parser.add_argument("--model-path", type=Path, help="external audio model profile (default: auto-discover models/aasist-runtime.json)")
+    audio_parser.add_argument("--no-default-engine", action="store_true", help="ignore the bundled models/aasist-runtime.json default-engine profile")
+    audio_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    audio_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    face_parser = subparsers.add_parser("face", help="analyze images for face manipulation")
+    face_parser.add_argument("file", type=Path, help="image file to analyze")
+    face_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    face_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    video_analysis_parser = subparsers.add_parser("video-analysis", help="analyze video temporal consistency")
+    video_analysis_parser.add_argument("file", type=Path, help="video file to analyze")
+    video_analysis_parser.add_argument("--frame-rate", type=float, default=1.0, help="frame sample rate (default: 1.0 fps)")
+    video_analysis_parser.add_argument("--max-frames", type=int, default=100, help="maximum frames to analyze (default: 100)")
+    video_analysis_parser.add_argument("--model-path", type=Path, nargs="*", help="video-modality model profile(s) — e.g. models/aide-frames-runtime.json scores sampled frames with an image detector")
+    video_analysis_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    video_analysis_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    inpaint_parser = subparsers.add_parser("inpaint", help="analyze images for inpainting or partial manipulation")
+    inpaint_parser.add_argument("file", type=Path, help="image file to analyze")
+    inpaint_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    inpaint_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    text_advanced_parser = subparsers.add_parser("text-advanced", help="advanced text analysis for AI generation detection")
+    text_advanced_parser.add_argument("file", type=Path, help="text file to analyze")
+    text_advanced_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    text_advanced_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    compare_parser = subparsers.add_parser("compare", help="compare two files for same-speaker or same-author likelihood")
+    compare_parser.add_argument("file_a", type=Path, help="first file (audio pair or text/document pair)")
+    compare_parser.add_argument("file_b", type=Path, help="second file")
+    compare_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+
+    watermark_parser = subparsers.add_parser("watermark", help="test text for a KGW or SynthID watermark under a known secret")
+    watermark_parser.add_argument("file", type=Path, help="text/document file to test")
+    watermark_parser.add_argument("--secret", help="KGW green-list secret used at generation time")
+    watermark_parser.add_argument("--synthid-keys", help="comma-separated SynthID-Text integer keys used at generation (enables SynthID mean-g detection instead of KGW)")
+    watermark_parser.add_argument("--tokenizer", default="Qwen/Qwen2.5-0.5B", help="HF tokenizer model or local path")
+    watermark_parser.add_argument("--gamma", type=float, default=0.25, help="green-list fraction used at generation")
+    watermark_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+
+    forensic_parser = subparsers.add_parser("forensic", help="analyze metadata for C2PA, SynthID, and provenance signals")
+    forensic_parser.add_argument("file", type=Path, help="file to analyze")
+    forensic_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    forensic_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    classify_parser = subparsers.add_parser("classify", help="classify which AI tool generated the content")
+    classify_parser.add_argument("file", type=Path, help="file to analyze")
+    classify_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    classify_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    multimodal_parser = subparsers.add_parser("multimodal", help="combine multiple modality analyses into unified assessment")
+    multimodal_parser.add_argument("--image-score", type=int, help="image analysis score")
+    multimodal_parser.add_argument("--text-score", type=int, help="text analysis score")
+    multimodal_parser.add_argument("--audio-score", type=int, help="audio analysis score")
+    multimodal_parser.add_argument("--video-score", type=int, help="video analysis score")
+    multimodal_parser.add_argument("--image-source", type=str, help="image source guess")
+    multimodal_parser.add_argument("--text-source", type=str, help="text source guess")
+    multimodal_parser.add_argument("--audio-source", type=str, help="audio source guess")
+    multimodal_parser.add_argument("--video-source", type=str, help="video source guess")
+    multimodal_parser.add_argument("--av-sync", type=Path, help="video file for audio/visual sync check (requires opencv+librosa)")
+    multimodal_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    multimodal_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    realtime_parser = subparsers.add_parser("realtime", help="run realtime deepfake detection")
+    realtime_parser.add_argument("--window-size", type=int, default=30, help="moving average window size (default: 30)")
+    realtime_parser.add_argument("--alert-threshold", type=int, default=67, help="alert threshold (default: 67)")
+    realtime_parser.add_argument("--warning-threshold", type=int, default=35, help="warning threshold (default: 35)")
+    realtime_parser.add_argument("--scores", type=str, help="comma-separated scores to process (for testing)")
+    realtime_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    realtime_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    rppg_parser = subparsers.add_parser("rppg", help="estimate cardiac pulse from face video (CHROM rPPG)")
+    rppg_parser.add_argument("file", type=Path, help="video file to analyze")
+    rppg_parser.add_argument("--max-frames", type=int, default=600, help="maximum face samples to collect (default: 600)")
+    rppg_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    rppg_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    prnu_parser = subparsers.add_parser("prnu", help="correlate an image against a sensor fingerprint")
+    prnu_parser.add_argument("file", type=Path, help="target image to check")
+    prnu_parser.add_argument("--reference", type=Path, action="append", required=True, help="reference image from the same device (repeat 3+ times)")
+    prnu_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    prnu_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    evidence_parser = subparsers.add_parser("evidence", help="create forensic evidence chain")
+    evidence_parser.add_argument("file", type=Path, help="file to create evidence for")
+    evidence_parser.add_argument("--analyst-id", type=str, default="system", help="analyst identifier")
+    evidence_parser.add_argument("--output", type=Path, help="output evidence file")
+
+    api_parser = subparsers.add_parser("api-serve", help="start REST API server")
+    api_parser.add_argument("--host", type=str, default="127.0.0.1", help="host to bind")
+    api_parser.add_argument("--port", type=int, default=8765, help="port to listen on")
+    api_parser.add_argument("--token", type=str, help="require an X-API-Token header on /api routes (mandatory for non-localhost hosts)")
+
+    batch_parser = subparsers.add_parser("batch", help="process files in batch")
+    batch_parser.add_argument("folder", type=Path, help="folder to process")
+    batch_parser.add_argument("--workers", type=int, default=4, help="number of workers")
+    batch_parser.add_argument("--output", type=Path, help="output results file")
+
+    explain_parser = subparsers.add_parser("explain", help="explain classification decision")
+    explain_parser.add_argument("--score", type=int, required=True, help="classification score")
+    explain_parser.add_argument("--signals", type=str, help="JSON signals array")
+    explain_parser.add_argument("--format", choices=["text", "json"], default="text", help="output format")
+
+    agent_parser = subparsers.add_parser("agent", help="analyze content for AI agent generation")
+    agent_parser.add_argument("--text", type=str, help="text to analyze")
+    agent_parser.add_argument("--file", type=Path, help="file to analyze")
+    agent_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    agent_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    threed_parser = subparsers.add_parser("3d", help="analyze content for 3D AI generation")
+    threed_parser.add_argument("--file", type=Path, help="file to analyze")
+    threed_parser.add_argument("--text", type=str, help="text to analyze")
+    threed_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    threed_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    avatar_parser = subparsers.add_parser("avatar", help="analyze content for AI avatar generation")
+    avatar_parser.add_argument("--file", type=Path, help="file to analyze")
+    avatar_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    avatar_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    pixel_parser = subparsers.add_parser("pixel-analysis", help="analyze image pixels for AI generation")
+    pixel_parser.add_argument("file", type=Path, help="image file to analyze")
+    pixel_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    pixel_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    ml_parser = subparsers.add_parser("ml-classify", help="classify image using feature-threshold rules")
+    ml_parser.add_argument("file", type=Path, help="image file to analyze")
+    ml_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    ml_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    legal_parser = subparsers.add_parser("legal-report", help="generate legal forensic report")
+    legal_parser.add_argument("file", type=Path, help="file to analyze")
+    legal_parser.add_argument("--output", type=Path, help="output report file")
+
+    perf_parser = subparsers.add_parser("perf", help="measure scan throughput and cache/hash behavior")
+    perf_parser.add_argument("folder", type=Path)
+    perf_parser.add_argument("--pixel", choices=sorted(SUPPORTED_PIXEL_MODES), default="off")
+    perf_parser.add_argument("--workers", type=int, default=1)
+    perf_parser.add_argument("--cache", type=Path)
+    perf_parser.add_argument("--hash-db", type=Path)
+    perf_parser.add_argument("--max-files", type=int, default=DEFAULT_MAX_FILES)
+    perf_parser.add_argument("--no-recursive", action="store_true")
+    perf_parser.add_argument("--out", type=Path, required=True)
+
+    release_parser = subparsers.add_parser("release", help="write a release readiness checklist")
+    release_parser.add_argument("--out", type=Path, required=True)
+
+    security_parser = subparsers.add_parser("security", help="write a local-only security guardrail report")
+    security_parser.add_argument("--out", type=Path, required=True)
+
+    web_parser = subparsers.add_parser("web", help="start the local web app")
+    web_parser.add_argument("--folder", type=Path)
+    web_parser.add_argument("--host", default="127.0.0.1")
+    web_parser.add_argument("--port", type=int, default=8765)
+    web_parser.add_argument("--allow-lan", action="store_true")
+    web_parser.add_argument("--token", default=None, help="API token required with --allow-lan")
+
+    doctor_parser = subparsers.add_parser("doctor", help="diagnose model weights, accelerators, and dependencies")
+    doctor_parser.add_argument("--format", choices=["table", "json"], default="table")
+    doctor_parser.add_argument("--json-out", type=Path, help="write the diagnostic report as JSON")
+
+    faceswap_parser = subparsers.add_parser("faceswap-seam", help="analyze localized face-swap boundary seams, Poisson feathering, and sensor noise mismatch")
+    faceswap_parser.add_argument("--thresholds", type=Path, help="layer-threshold profile JSON overriding heuristic cutoffs")
+    faceswap_parser.add_argument("file", type=Path, help="image file to analyze")
+    faceswap_parser.add_argument("--format", choices=["table", "json"], default="table", help="output format")
+    faceswap_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
+
+    evidence_stmt_parser = subparsers.add_parser("evidence-statement", help="generate ECFS electronic litigation evidence explanation statement (증거설명서)")
+    evidence_stmt_parser.add_argument("target", type=Path, help="scanned folder, scan JSON file, or single media file")
+    evidence_stmt_parser.add_argument("--case-no", type=str, default="(사건번호 입력)", help="case number (사건번호)")
+    evidence_stmt_parser.add_argument("--case-name", type=str, default="성폭력처벌법위반(허위영상물편집등) 및 정보통신망법위반", help="case title (사건명)")
+    evidence_stmt_parser.add_argument("--plaintiff", type=str, default="(의뢰사 상호명 입력) 귀하", help="plaintiff/claimant (원고/고소인)")
+    evidence_stmt_parser.add_argument("--defendant", type=str, default="(피고/피의자 성명 입력)", help="defendant/suspect (피고/피고소인)")
+    evidence_stmt_parser.add_argument("--court", type=str, default="○○지방법원 귀중", help="court/investigation agency (관할법원/수사관서)")
+    evidence_stmt_parser.add_argument("--pdf-out", type=Path, help="write evidence statement PDF")
+    evidence_stmt_parser.add_argument("--md-out", type=Path, help="write evidence statement Markdown")
+    evidence_stmt_parser.add_argument("--format", choices=["table", "json", "markdown"], default="table", help="stdout format")
+
+    vendor_parser = subparsers.add_parser("vendor-weights", help="air-gapped forensic lab model weight verification and offline bundler")
+    vendor_parser.add_argument("--models-dir", type=Path, help="path to models directory (default: bundled models/)")
+    vendor_parser.add_argument("--verify", action="store_true", help="verify SHA-256 integrity of offline weights")
+    vendor_parser.add_argument("--fetch", action="store_true", help="download declared checkpoint_url weights and verify SHA-256 before writing")
+    vendor_parser.add_argument("--offline", action="store_true", help="refuse all network access (air-gapped mode)")
+    vendor_parser.add_argument("--manifest-out", type=Path, help="write offline model manifest JSON")
+    vendor_parser.add_argument("--bundle-to", type=Path, help="export offline weight package directory")
+    vendor_parser.add_argument("--copy-weights", action="store_true", help="copy large weights files into bundle directory")
+    vendor_parser.add_argument("--format", choices=["table", "json", "markdown"], default="table", help="stdout format")
+
+    return parser, {
+        "scan": scan_parser, "collect": collect_parser, "dataset": dataset_parser,
+        "eval": eval_parser, "benchmark": benchmark_parser, "fusion": fusion_parser,
+        "calibrate": calibrate_parser, "feedback": feedback_parser, "train": train_parser,
+        "models": models_parser, "train-neural-plan": neural_parser, "video": video_parser,
+        "audio": audio_parser, "face": face_parser, "video-analysis": video_analysis_parser,
+        "inpaint": inpaint_parser, "text-advanced": text_advanced_parser, "compare": compare_parser,
+        "watermark": watermark_parser, "forensic": forensic_parser, "classify": classify_parser,
+        "multimodal": multimodal_parser, "realtime": realtime_parser, "rppg": rppg_parser,
+        "prnu": prnu_parser, "evidence": evidence_parser, "api-serve": api_parser,
+        "batch": batch_parser, "explain": explain_parser, "agent": agent_parser,
+        "3d": threed_parser, "avatar": avatar_parser, "pixel-analysis": pixel_parser,
+        "ml-classify": ml_parser, "legal-report": legal_parser, "perf": perf_parser,
+        "release": release_parser, "security": security_parser, "web": web_parser,
+        "doctor": doctor_parser, "faceswap-seam": faceswap_parser,
+        "evidence-statement": evidence_stmt_parser, "vendor-weights": vendor_parser,
+    }
