@@ -54,6 +54,40 @@ class Check:
     detail: str
 
 
+def _check_thresholds(root: Path) -> Check:
+    """Report whether decision thresholds are measured or unmeasured.
+
+    No thresholds.json means every scan ran on the builtin heuristic
+    literals — honest deployments should know that. A present-but-
+    provisional profile (n < MIN_CALIBRATION_SAMPLES) is better than
+    defaults but still unvalidated.
+    """
+    from .calibration import MIN_CALIBRATION_SAMPLES, load_threshold_profile
+
+    path = root / "thresholds.json"
+    if not path.is_file():
+        return Check(
+            "thresholds.json",
+            "warn",
+            "absent — scans use builtin unmeasured heuristic thresholds "
+            "(fit one with experiments/eval_seam_thresholds.py on a labeled corpus)",
+        )
+    profile = load_threshold_profile(path)
+    if profile is None:
+        return Check("thresholds.json", "warn", "unreadable or wrong schema version")
+    if profile.provisional:
+        return Check(
+            "thresholds.json",
+            "warn",
+            f"provisional — n={profile.samples} < {MIN_CALIBRATION_SAMPLES}; cutoffs unvalidated",
+        )
+    fp = profile.dataset_fingerprint[:16]
+    detail = f"measured n={profile.samples}"
+    if fp:
+        detail += f", corpus fp {fp}"
+    return Check("thresholds.json", "ok", detail)
+
+
 @dataclass
 class DoctorReport:
     profiles: list[Check] = field(default_factory=list)
@@ -137,6 +171,7 @@ def run_diagnostics(models_dir: Path | None = None) -> DoctorReport:
             report.profiles.append(_check_profile(profile_path))
     else:
         report.profiles.append(Check(str(root), "warn", "models directory not found"))
+    report.profiles.append(_check_thresholds(root))
     report.accelerators = _check_accelerators()
     for import_name, package, purpose in OPTIONAL_DEPS:
         try:

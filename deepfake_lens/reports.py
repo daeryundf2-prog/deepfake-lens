@@ -11,7 +11,27 @@ from typing import Any
 from .core import BatchScanSummary, ScanItem
 
 
-def write_html_report(path: Path | str, summary: BatchScanSummary, items: list[ScanItem], *, redact_paths: bool = False) -> None:
+def _threshold_provenance_line(thresholds: object | None) -> str:
+    """One-line calibration provenance for report headers.
+
+    A scan has no reason to hide that its cutoffs were the unmeasured
+    builtins; a loaded profile reports its sample count so provisional
+    (n < MIN_CALIBRATION_SAMPLES) fits are visibly marked unvalidated.
+    """
+    if thresholds is None:
+        return "Decision thresholds: builtin defaults (unmeasured - provisional)."
+    to_json = getattr(thresholds, "to_json", None)
+    payload = to_json() if callable(to_json) else {}
+    if not isinstance(payload, dict):
+        payload = {}
+    samples = int(payload.get("samples", 0) or 0)
+    state = "PROVISIONAL (unvalidated)" if payload.get("provisional", True) else "measured"
+    fp = str(payload.get("dataset_fingerprint", ""))[:16]
+    suffix = f", corpus fp {fp}" if fp else ""
+    return f"Decision thresholds: threshold profile {payload.get('version', '?')} — {state}, n={samples}{suffix}."
+
+
+def write_html_report(path: Path | str, summary: BatchScanSummary, items: list[ScanItem], *, redact_paths: bool = False, thresholds: object | None = None) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     rows = "\n".join(_html_row(item, redact_paths=redact_paths) for item in items)
@@ -33,6 +53,7 @@ def write_html_report(path: Path | str, summary: BatchScanSummary, items: list[S
   <h1>Deepfake Lens Report</h1>
   <p>Scanned {summary.total} files: high={summary.high}, medium={summary.medium}, unknown={summary.unknown}, low={summary.low}, unsupported/failed={summary.unsupported_or_failed}, duplicates={summary.duplicates}, skipped={summary.skipped}, cached={summary.cached}</p>
   <p class="note">Local-only screening report. Scores are prioritization evidence, not final truth labels.</p>
+  <p class="note">{_threshold_provenance_line(thresholds)}</p>
   <table>
     <thead><tr><th>risk</th><th>score</th><th>pixel</th><th>source</th><th>file</th><th>heatmap</th><th>top signal</th></tr></thead>
     <tbody>{rows}</tbody>
@@ -43,11 +64,25 @@ def write_html_report(path: Path | str, summary: BatchScanSummary, items: list[S
     output.write_text(body, encoding="utf-8")
 
 
-def write_pdf_report(path: Path | str, summary: BatchScanSummary, items: list[ScanItem], *, redact_paths: bool = False) -> None:
+def _threshold_provenance_ko(thresholds: object | None) -> str:
+    """Korean calibration-provenance line for the forensic PDF header."""
+    if thresholds is None:
+        return "판정 임계값: 내장 기본값 (비측정 — 잠정; calibration 미적용)"
+    to_json = getattr(thresholds, "to_json", None)
+    payload = to_json() if callable(to_json) else {}
+    if not isinstance(payload, dict):
+        payload = {}
+    samples = int(payload.get("samples", 0) or 0)
+    state = "잠정(미검증)" if payload.get("provisional", True) else "측정됨"
+    return f"판정 임계값: 프로파일 {payload.get('version', '?')} — {state}, 표본 n={samples}"
+
+
+def write_pdf_report(path: Path | str, summary: BatchScanSummary, items: list[ScanItem], *, redact_paths: bool = False, thresholds: object | None = None) -> None:
     lines = [
         "Deepfake Lens Report",
         f"Scanned {summary.total} files: high={summary.high}, medium={summary.medium}, unknown={summary.unknown}, low={summary.low}, unsupported/failed={summary.unsupported_or_failed}, duplicates={summary.duplicates}, skipped={summary.skipped}, cached={summary.cached}",
         "Local-only screening report. Scores are prioritization evidence, not final truth labels.",
+        _threshold_provenance_line(thresholds),
         "",
     ]
     for item in items[:80]:
@@ -76,6 +111,7 @@ def write_forensic_pdf_report(
     *,
     redact_paths: bool = False,
     exhibit_no: str = "갑 제        호증",
+    thresholds: object | None = None,
 ) -> None:
     """Generate a court-admissible forensic PDF report with ECFS exhibit stamp,
     SHA-256 evidence integrity hashes, and Daeryun Law Firm forensic signoff."""
@@ -120,7 +156,7 @@ def write_forensic_pdf_report(
     page.insert_text(pymupdf.Point(margin_l, 110), f"문서 번호: DFL-EVID-{int(time.time())}", fontname=font_en, fontsize=7.5, color=(0.5, 0.5, 0.5))
 
     # Metadata & Case Overview Box
-    meta_box = pymupdf.Rect(margin_l, 122, margin_r, 185)
+    meta_box = pymupdf.Rect(margin_l, 122, margin_r, 196)
     page.draw_rect(meta_box, color=(0.85, 0.88, 0.92), fill=(0.98, 0.98, 0.99))
 
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -140,9 +176,16 @@ def write_forensic_pdf_report(
         fontsize=8,
         color=(0.45, 0.45, 0.45),
     )
+    page.insert_text(
+        pymupdf.Point(margin_l + 10, 191),
+        _threshold_provenance_ko(thresholds),
+        fontname=font_ko,
+        fontsize=8,
+        color=(0.45, 0.45, 0.45),
+    )
 
     # Table Header
-    y = 202.0
+    y = 208.0
     page.draw_rect(pymupdf.Rect(margin_l, y, margin_r, y + 20), color=(0.8, 0.85, 0.9), fill=(0.92, 0.94, 0.97))
     page.insert_text(pymupdf.Point(margin_l + 5, y + 14), "No.", fontname=font_en, fontsize=8, color=(0.15, 0.2, 0.35))
     page.insert_text(pymupdf.Point(margin_l + 30, y + 14), "증거 파일명 및 SHA-256 무결성 해시", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
