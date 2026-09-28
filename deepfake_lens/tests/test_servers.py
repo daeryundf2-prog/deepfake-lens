@@ -16,7 +16,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from deepfake_lens import api_server
-from deepfake_lens.webapp import MAX_FILE_BYTES_CEILING, MAX_SCAN_FILES, _scan_payload, host_name
+from deepfake_lens import webapp_api
+from deepfake_lens.webapp import host_name
+from deepfake_lens.webapp_api import MAX_FILE_BYTES_CEILING, MAX_SCAN_FILES, _scan_payload
 
 HAVE_FASTAPI = importlib.util.find_spec("fastapi") is not None and importlib.util.find_spec("httpx") is not None
 
@@ -44,7 +46,7 @@ class ScanPayloadValidationTest(unittest.TestCase):
     """_scan_payload must reject non-integer limits and clamp unbounded values."""
 
     def _capture_scan_kwargs(self, query: str) -> dict[str, object]:
-        from deepfake_lens import webapp
+        from deepfake_lens import webapp, webapp_api
 
         captured: dict[str, object] = {}
 
@@ -52,13 +54,13 @@ class ScanPayloadValidationTest(unittest.TestCase):
             captured.update(kwargs)
             raise RuntimeError("sentinel-stop")
 
-        original = webapp.scan_directory
-        webapp.scan_directory = fake_scan_directory
+        original = webapp_api.scan_directory
+        webapp_api.scan_directory = fake_scan_directory
         try:
             with self.assertRaises(RuntimeError):
                 _scan_payload(query, default_folder=None)
         finally:
-            webapp.scan_directory = original
+            webapp_api.scan_directory = original
         return captured
 
     def test_invalid_max_files_raises_value_error(self) -> None:
@@ -82,14 +84,14 @@ class ScanPayloadValidationTest(unittest.TestCase):
         self.assertEqual(captured["max_file_bytes"], MAX_FILE_BYTES_CEILING)
 
     def _capture_scan_with_profiles(self, query: str, profiles: list[Path]) -> dict[str, object]:
-        from deepfake_lens import webapp
+        from deepfake_lens import webapp, webapp_api
 
-        original_profiles = webapp.default_engine_profiles
-        webapp.default_engine_profiles = lambda root=None: profiles
+        original_profiles = webapp_api.default_engine_profiles
+        webapp_api.default_engine_profiles = lambda root=None: profiles
         try:
             return self._capture_scan_kwargs(query)
         finally:
-            webapp.default_engine_profiles = original_profiles
+            webapp_api.default_engine_profiles = original_profiles
 
     def test_default_engine_profiles_applied_when_model_path_absent(self) -> None:
         profiles = [Path("/tmp/profile-a.json"), Path("/tmp/profile-b.json")]
@@ -125,32 +127,32 @@ class AnalyzeUploadPayloadTest(unittest.TestCase):
         return f"multipart/form-data; boundary={boundary}", b"".join(chunks)
 
     def test_rejects_non_multipart(self) -> None:
-        from deepfake_lens.webapp import _analyze_upload_payload
+        from deepfake_lens.webapp_api import _analyze_upload_payload
 
         result = _analyze_upload_payload("text/plain", b"hello")
         self.assertIn("error", result)
 
     def test_multipart_files_are_analyzed(self) -> None:
-        from deepfake_lens import webapp
+        from deepfake_lens import webapp, webapp_api
         from deepfake_lens.core import ScanItem
 
         def fake_analyze(path, **kwargs):
             return ScanItem(str(path), Path(str(path)).name, "text", "analyzed", 4, result=None)
 
-        original = webapp.analyze_file
-        webapp.analyze_file = fake_analyze
+        original = webapp_api.analyze_file
+        webapp_api.analyze_file = fake_analyze
         try:
             content_type, body = self._multipart(("a.txt", b"abc"), ("b.txt", b"def"))
-            result = webapp._analyze_upload_payload(content_type, body)
+            result = webapp_api._analyze_upload_payload(content_type, body)
         finally:
-            webapp.analyze_file = original
+            webapp_api.analyze_file = original
 
         self.assertEqual(result["summary"]["total"], 2)
         self.assertEqual(result["summary"]["analyzed"], 2)
         self.assertEqual({item["name"] for item in result["items"]}, {"a.txt", "b.txt"})
 
     def test_empty_upload_reports_error(self) -> None:
-        from deepfake_lens.webapp import _analyze_upload_payload
+        from deepfake_lens.webapp_api import _analyze_upload_payload
 
         boundary = "----empty"
         content_type = f"multipart/form-data; boundary={boundary}"
@@ -176,14 +178,14 @@ class CheckPayloadTest(unittest.TestCase):
         return ScanItem(str(path), Path(str(path)).name, "text", "analyzed", 4, result=None)
 
     def test_text_check_runs_all_text_layers(self) -> None:
-        from deepfake_lens import webapp
+        from deepfake_lens import webapp, webapp_api
 
-        original = webapp.analyze_file
-        webapp.analyze_file = self._fake_analyze
+        original = webapp_api.analyze_file
+        webapp_api.analyze_file = self._fake_analyze
         try:
-            result = webapp._check_text_payload("인공지능 기술은 빠르게 발전하고 있습니다. " * 5)
+            result = webapp_api._check_text_payload("인공지능 기술은 빠르게 발전하고 있습니다. " * 5)
         finally:
-            webapp.analyze_file = original
+            webapp_api.analyze_file = original
 
         self.assertEqual(result["mode"], "text")
         self.assertIn("item", result)
@@ -191,27 +193,27 @@ class CheckPayloadTest(unittest.TestCase):
         self.assertIn("signals", result["advanced"])
 
     def test_text_check_rejects_too_short(self) -> None:
-        from deepfake_lens.webapp import _check_text_payload
+        from deepfake_lens.webapp_api import _check_text_payload
 
         self.assertIn("error", _check_text_payload("짧음"))
 
     def test_file_check_runs_scan_and_forensic(self) -> None:
-        from deepfake_lens import webapp
+        from deepfake_lens import webapp, webapp_api
 
-        original = webapp.analyze_file
-        webapp.analyze_file = self._fake_analyze
+        original = webapp_api.analyze_file
+        webapp_api.analyze_file = self._fake_analyze
         try:
             content_type, body = self._multipart("note.txt", b"hello world, this is a test document")
-            result = webapp._check_file_payload(content_type, body)
+            result = webapp_api._check_file_payload(content_type, body)
         finally:
-            webapp.analyze_file = original
+            webapp_api.analyze_file = original
 
         self.assertEqual(result["mode"], "file")
         self.assertEqual(result["item"]["name"], "note.txt")
         self.assertIsNotNone(result["advanced"])
 
     def test_file_check_rejects_non_multipart(self) -> None:
-        from deepfake_lens.webapp import _check_file_payload
+        from deepfake_lens.webapp_api import _check_file_payload
 
         self.assertIn("error", _check_file_payload("text/plain", b"x"))
 
@@ -221,7 +223,7 @@ class FeedbackPayloadTest(unittest.TestCase):
 
     def _with_feedback_path(self, fn):
         import tempfile
-        from deepfake_lens import webapp
+        from deepfake_lens import webapp, webapp_api
 
         with tempfile.TemporaryDirectory() as tmp:
             original = os.environ.get("DEEPFAKE_LENS_FEEDBACK")
@@ -238,7 +240,7 @@ class FeedbackPayloadTest(unittest.TestCase):
         from deepfake_lens.feedback import load_feedback
 
         def run(webapp):
-            payload = webapp._feedback_payload(json.dumps({
+            payload = webapp_api._feedback_payload(json.dumps({
                 "path": "/tmp/x.png", "expected_label": "synthetic",
                 "result": {"score": 42},
             }).encode())
@@ -252,7 +254,7 @@ class FeedbackPayloadTest(unittest.TestCase):
 
     def test_unknown_label_rejected(self) -> None:
         def run(webapp):
-            payload = webapp._feedback_payload(json.dumps({
+            payload = webapp_api._feedback_payload(json.dumps({
                 "path": "/tmp/x.png", "expected_label": "maybe",
             }).encode())
             self.assertIn("error", payload)
@@ -261,7 +263,7 @@ class FeedbackPayloadTest(unittest.TestCase):
 
     def test_missing_path_rejected(self) -> None:
         def run(webapp):
-            payload = webapp._feedback_payload(json.dumps({"expected_label": "real"}).encode())
+            payload = webapp_api._feedback_payload(json.dumps({"expected_label": "real"}).encode())
             self.assertIn("error", payload)
 
         self._with_feedback_path(run)
@@ -310,7 +312,7 @@ class LiveServerClientHeaderTest(unittest.TestCase):
         import socket
         import threading
         import urllib.request
-        from deepfake_lens import webapp
+        from deepfake_lens import webapp, webapp_api
 
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
@@ -401,26 +403,26 @@ class AsyncScanJobTest(unittest.TestCase):
     """The async=1 scan job API: start returns a job id, status polls to done."""
 
     def setUp(self) -> None:
-        from deepfake_lens import webapp
+        from deepfake_lens import webapp, webapp_api
 
-        registry = patch.object(webapp, "_SCAN_JOBS", {})
+        registry = patch.object(webapp_api, "_SCAN_JOBS", {})
         registry.start()
         self.addCleanup(registry.stop)
 
     def test_job_lifecycle(self) -> None:
         import tempfile
-        from deepfake_lens import webapp
+        from deepfake_lens import webapp, webapp_api
 
         with tempfile.TemporaryDirectory() as tmp:
             fixture = Path(tmp) / "a.txt"
             fixture.write_text("hello world", encoding="utf-8")
-            started = webapp._scan_job_start(f"folder={tmp}&no_default_engine=true", default_folder=None)
+            started = webapp_api._scan_job_start(f"folder={tmp}&no_default_engine=true", default_folder=None)
             self.assertEqual(started["status"], "running")
             job_id = started["job_id"]
 
             result = None
             for _ in range(200):
-                state = webapp._scan_status_payload(f"job={job_id}")
+                state = webapp_api._scan_status_payload(f"job={job_id}")
                 if state["status"] != "running":
                     result = state["result"]
                     break
@@ -430,33 +432,33 @@ class AsyncScanJobTest(unittest.TestCase):
             self.assertEqual(result["summary"]["total"], 1)
 
             # A second poll returns the stored result, and unknown ids are errors.
-            again = webapp._scan_status_payload(f"job={job_id}")
+            again = webapp_api._scan_status_payload(f"job={job_id}")
             self.assertEqual(again["status"], "done")
-            self.assertIn("error", webapp._scan_status_payload("job=deadbeef"))
+            self.assertIn("error", webapp_api._scan_status_payload("job=deadbeef"))
 
     def test_missing_job_parameter_is_error(self) -> None:
-        from deepfake_lens import webapp
+        from deepfake_lens import webapp, webapp_api
 
-        self.assertIn("error", webapp._scan_status_payload(""))
+        self.assertIn("error", webapp_api._scan_status_payload(""))
 
     def test_cancel_payload(self) -> None:
         import threading
-        from deepfake_lens import webapp
+        from deepfake_lens import webapp, webapp_api
 
-        self.assertIn("error", webapp._scan_cancel_payload(""))
-        self.assertIn("error", webapp._scan_cancel_payload("job=deadbeef"))
+        self.assertIn("error", webapp_api._scan_cancel_payload(""))
+        self.assertIn("error", webapp_api._scan_cancel_payload("job=deadbeef"))
 
         cancel = threading.Event()
-        with webapp._SCAN_JOBS_LOCK:
-            webapp._SCAN_JOBS["job1"] = {"status": "running", "created": time.time(), "cancel": cancel}
-        out = webapp._scan_cancel_payload("job=job1")
+        with webapp_api._SCAN_JOBS_LOCK:
+            webapp_api._SCAN_JOBS["job1"] = {"status": "running", "created": time.time(), "cancel": cancel}
+        out = webapp_api._scan_cancel_payload("job=job1")
         self.assertTrue(out["cancelled"])
         self.assertTrue(cancel.is_set())
 
         # A finished job reports that there is nothing left to cancel.
-        with webapp._SCAN_JOBS_LOCK:
-            webapp._SCAN_JOBS["job2"] = {"status": "done", "created": time.time(), "cancel": threading.Event()}
-        out = webapp._scan_cancel_payload("job=job2")
+        with webapp_api._SCAN_JOBS_LOCK:
+            webapp_api._SCAN_JOBS["job2"] = {"status": "done", "created": time.time(), "cancel": threading.Event()}
+        out = webapp_api._scan_cancel_payload("job=job2")
         self.assertFalse(out["cancelled"])
         self.assertEqual(out["status"], "done")
 
@@ -478,13 +480,13 @@ class AsyncScanJobTest(unittest.TestCase):
             self.assertLess(len(items), 5)
 
     def test_job_cap_refuses_overflow(self) -> None:
-        from deepfake_lens import webapp
+        from deepfake_lens import webapp, webapp_api
 
-        with webapp._SCAN_JOBS_LOCK:
-            for i in range(webapp._SCAN_JOB_MAX):
-                webapp._SCAN_JOBS[f"fake{i}"] = {"status": "running", "created": time.time()}
+        with webapp_api._SCAN_JOBS_LOCK:
+            for i in range(webapp_api._SCAN_JOB_MAX):
+                webapp_api._SCAN_JOBS[f"fake{i}"] = {"status": "running", "created": time.time()}
         with self.assertRaises(ValueError):
-            webapp._scan_job_start("folder=.&no_default_engine=true", default_folder=None)
+            webapp_api._scan_job_start("folder=.&no_default_engine=true", default_folder=None)
 
 
 class ApiServeTokenGateTest(unittest.TestCase):
@@ -505,7 +507,7 @@ class ApiServeTokenGateTest(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 2)
 
     def test_run_server_refuses_allow_lan_without_token(self) -> None:
-        from deepfake_lens import webapp
+        from deepfake_lens import webapp, webapp_api
 
         with self.assertRaises(ValueError):
             webapp.run_server("0.0.0.0", 0, allow_lan=True)
@@ -515,7 +517,7 @@ class ServiceContractTest(unittest.TestCase):
     """Pin the documented service contract: loopback defaults and guards."""
 
     def test_servers_default_to_loopback(self) -> None:
-        from deepfake_lens import webapp
+        from deepfake_lens import webapp, webapp_api
 
         self.assertEqual(inspect.signature(api_server.run_server).parameters["host"].default, "127.0.0.1")
         self.assertEqual(inspect.signature(api_server.create_app).parameters["host"].default, "127.0.0.1")
@@ -527,7 +529,7 @@ class ServiceContractTest(unittest.TestCase):
         self.assertNotIn(api_server.host_name("attacker.example.com"), api_server.LOCAL_HOSTS)
 
     def test_webapp_refuses_non_loopback_without_allow_lan(self) -> None:
-        from deepfake_lens import webapp
+        from deepfake_lens import webapp, webapp_api
 
         with self.assertRaises(ValueError):
             webapp.run_server("0.0.0.0", 0)
@@ -687,7 +689,7 @@ class ComparePayloadTest(unittest.TestCase):
         return f"multipart/form-data; boundary={boundary}", body
 
     def test_text_pair_returns_stylometry(self) -> None:
-        from deepfake_lens.webapp import _compare_payload
+        from deepfake_lens.webapp_api import _compare_payload
 
         text = "인공지능 기술은 빠르게 발전하고 있으며 다양한 산업에 적용된다. 또한 윤리 문제가 함께 논의된다. " * 8
         content_type, body = self._two_files("a.txt", text.encode(), "b.txt", text.encode())
@@ -696,7 +698,7 @@ class ComparePayloadTest(unittest.TestCase):
         self.assertIn("score", result)
 
     def test_single_file_rejected(self) -> None:
-        from deepfake_lens.webapp import _compare_payload
+        from deepfake_lens.webapp_api import _compare_payload
 
         boundary = "----dflcmpboundary"
         body = (
@@ -713,15 +715,15 @@ class PreviewPayloadTest(unittest.TestCase):
     """GET /api/preview serves media under a server-registered root only."""
 
     def setUp(self) -> None:
-        from deepfake_lens import webapp
+        from deepfake_lens import webapp, webapp_api
 
-        registry = patch.object(webapp, "_READ_ROOTS", set())
+        registry = patch.object(webapp_api, "_READ_ROOTS", set())
         registry.start()
         self.addCleanup(registry.stop)
 
     def test_media_served_within_root(self) -> None:
         import tempfile
-        from deepfake_lens.webapp import _preview_payload, _register_read_root
+        from deepfake_lens.webapp_api import _preview_payload, _register_read_root
 
         with tempfile.TemporaryDirectory() as d:
             _register_read_root(Path(d))
@@ -734,7 +736,7 @@ class PreviewPayloadTest(unittest.TestCase):
 
     def test_outside_root_forbidden(self) -> None:
         import tempfile
-        from deepfake_lens.webapp import _preview_payload, _register_read_root
+        from deepfake_lens.webapp_api import _preview_payload, _register_read_root
 
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as other:
             _register_read_root(Path(d))
@@ -745,7 +747,7 @@ class PreviewPayloadTest(unittest.TestCase):
 
     def test_non_media_forbidden(self) -> None:
         import tempfile
-        from deepfake_lens.webapp import _preview_payload, _register_read_root
+        from deepfake_lens.webapp_api import _preview_payload, _register_read_root
 
         with tempfile.TemporaryDirectory() as d:
             _register_read_root(Path(d))
@@ -757,7 +759,7 @@ class PreviewPayloadTest(unittest.TestCase):
     def test_caller_supplied_root_cannot_widen_scope(self) -> None:
         """A forged root= must not grant access outside registered roots."""
         import tempfile
-        from deepfake_lens.webapp import _preview_payload, _register_read_root
+        from deepfake_lens.webapp_api import _preview_payload, _register_read_root
 
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as other:
             _register_read_root(Path(d))
@@ -781,7 +783,7 @@ class PreviewPayloadTest(unittest.TestCase):
     def test_stale_root_argument_rejected(self) -> None:
         """path inside a registered root but root= pointing elsewhere -> 403."""
         import tempfile
-        from deepfake_lens.webapp import _preview_payload, _register_read_root
+        from deepfake_lens.webapp_api import _preview_payload, _register_read_root
 
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as other:
             _register_read_root(Path(d))
