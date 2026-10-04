@@ -93,14 +93,20 @@ def create_evidence_chain(
 
 
 def verify_integrity(chain: EvidenceChain) -> bool:
-    """Verify evidence chain integrity by re-hashing the file."""
+    """Verify evidence chain integrity by re-hashing the file.
+
+    An empty recorded hash (unreadable/missing at capture time) can never
+    verify — ``"" == ""`` would silently bless failed captures.
+    """
+    if not chain.file_hash:
+        return False
     path = Path(chain.file_path)
-    
+
     if not path.exists():
         return False
-    
+
     current_hash = _calculate_hash(path)
-    return current_hash == chain.file_hash
+    return bool(current_hash) and current_hash == chain.file_hash
 
 
 def create_audit_trail(

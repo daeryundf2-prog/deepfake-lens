@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from html import escape
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .core import BatchScanSummary, ScanItem
 
@@ -18,12 +18,10 @@ def _threshold_provenance_line(thresholds: object | None) -> str:
     builtins; a loaded profile reports its sample count so provisional
     (n < MIN_CALIBRATION_SAMPLES) fits are visibly marked unvalidated.
     """
-    if thresholds is None:
-        return "Decision thresholds: builtin defaults (unmeasured - provisional)."
     to_json = getattr(thresholds, "to_json", None)
-    payload = to_json() if callable(to_json) else {}
-    if not isinstance(payload, dict):
-        payload = {}
+    payload = to_json() if callable(to_json) else (thresholds if isinstance(thresholds, dict) else {})
+    if thresholds is None or not isinstance(payload, dict) or payload.get("source") == "builtin_defaults":
+        return "Decision thresholds: builtin defaults (unmeasured - provisional)."
     samples = int(payload.get("samples", 0) or 0)
     state = "PROVISIONAL (unvalidated)" if payload.get("provisional", True) else "measured"
     fp = str(payload.get("dataset_fingerprint", ""))[:16]
@@ -64,20 +62,51 @@ def write_html_report(path: Path | str, summary: BatchScanSummary, items: list[S
     output.write_text(body, encoding="utf-8")
 
 
+def _evidence_sha256(
+    path_text: str,
+    allow: "Callable[[str], bool] | None" = None,
+    resolve: "Callable[[str], Path | None] | None" = None,
+) -> str | None:
+    """Hash the evidence file fully, streaming — or return None.
+
+    Never fabricate a digest: a path string is not evidence. Callers must
+    render ``None`` as "hash unavailable", not as a hex value.
+    ``resolve`` maps a stored row path (often relative) to the real
+    evidence file so web reports hash the same bytes the CLI hashes.
+    """
+
+    p = Path(path_text)
+    if resolve is not None:
+        resolved = resolve(path_text)
+        if resolved is None:
+            return None
+        p = resolved
+    if allow is not None and not allow(path_text):
+        return None
+    try:
+        if not p.is_file():
+            return None
+        digest = hashlib.sha256()
+        with p.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 20), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
 def _threshold_provenance_ko(thresholds: object | None) -> str:
     """Korean calibration-provenance line for the forensic PDF header."""
-    if thresholds is None:
-        return "판정 임계값: 내장 기본값 (비측정 — 잠정; calibration 미적용)"
     to_json = getattr(thresholds, "to_json", None)
-    payload = to_json() if callable(to_json) else {}
-    if not isinstance(payload, dict):
-        payload = {}
+    payload = to_json() if callable(to_json) else (thresholds if isinstance(thresholds, dict) else {})
+    if thresholds is None or not isinstance(payload, dict) or payload.get("source") == "builtin_defaults":
+        return "판정 임계값: 내장 기본값 (비측정 — 잠정; calibration 미적용)"
     samples = int(payload.get("samples", 0) or 0)
     state = "잠정(미검증)" if payload.get("provisional", True) else "측정됨"
     return f"판정 임계값: 프로파일 {payload.get('version', '?')} — {state}, 표본 n={samples}"
 
 
-def write_pdf_report(path: Path | str, summary: BatchScanSummary, items: list[ScanItem], *, redact_paths: bool = False, thresholds: object | None = None) -> None:
+def write_pdf_report(path: Path | str, summary: BatchScanSummary, items: list[ScanItem], *, redact_paths: bool = False, thresholds: object | None = None, degrade_note: str | None = None) -> None:
     lines = [
         "Deepfake Lens Report",
         f"Scanned {summary.total} files: high={summary.high}, medium={summary.medium}, unknown={summary.unknown}, low={summary.low}, unsupported/failed={summary.unsupported_or_failed}, duplicates={summary.duplicates}, skipped={summary.skipped}, cached={summary.cached}",
@@ -85,7 +114,14 @@ def write_pdf_report(path: Path | str, summary: BatchScanSummary, items: list[Sc
         _threshold_provenance_line(thresholds),
         "",
     ]
-    for item in items[:80]:
+    if degrade_note:
+        lines.append(f"NOTE: {degrade_note}")
+        lines.append("")
+    shown = items[:80]
+    if len(items) > len(shown):
+        lines.append(f"NOTE: {len(items)} items scanned; first {len(shown)} shown — see JSON/CSV output for the remainder.")
+        lines.append("")
+    for item in shown:
         result = item.result
         score = result.score if result else "-"
         risk = result.band_label if result else item.status
@@ -112,6 +148,9 @@ def write_forensic_pdf_report(
     redact_paths: bool = False,
     exhibit_no: str = "갑 제        호증",
     thresholds: object | None = None,
+    coverage: dict[str, object] | None = None,
+    allow_path: "Callable[[str], bool] | None" = None,
+    resolve_path: "Callable[[str], Path | None] | None" = None,
 ) -> None:
     """Generate a court-admissible forensic PDF report with ECFS exhibit stamp,
     SHA-256 evidence integrity hashes, and Daeryun Law Firm forensic signoff."""
@@ -121,7 +160,12 @@ def write_forensic_pdf_report(
         try:
             import fitz as pymupdf
         except ImportError:
-            write_pdf_report(path, summary, items, redact_paths=redact_paths)
+            write_pdf_report(
+                path, summary, items,
+                redact_paths=redact_paths,
+                thresholds=thresholds,
+                degrade_note="pymupdf not installed — this is a simplified text report, NOT the ECFS-stamped forensic layout. Install the 'forensic' extra for the court artifact.",
+            )
             return
 
     output = Path(path)
@@ -155,6 +199,11 @@ def write_forensic_pdf_report(
     page.insert_text(pymupdf.Point(margin_l, 98), "DEEPFAKE LENS FORENSIC AI DETECTION REPORT", fontname=font_en, fontsize=8, color=(0.4, 0.45, 0.5))
     page.insert_text(pymupdf.Point(margin_l, 110), f"문서 번호: DFL-EVID-{int(time.time())}", fontname=font_en, fontsize=7.5, color=(0.5, 0.5, 0.5))
 
+    # Evidence hashes are computed once, up front, so the header's
+    # integrity claim can state the real verified/total count.
+    hash_map = {item.path: _evidence_sha256(item.path, allow_path, resolve_path) for item in items}
+    hashed = sum(1 for v in hash_map.values() if v)
+
     # Metadata & Case Overview Box
     meta_box = pymupdf.Rect(margin_l, 122, margin_r, 196)
     page.draw_rect(meta_box, color=(0.85, 0.88, 0.92), fill=(0.98, 0.98, 0.99))
@@ -171,7 +220,7 @@ def write_forensic_pdf_report(
     )
     page.insert_text(
         pymupdf.Point(margin_l + 10, 178),
-        "무결성 확인: 전수 SHA-256 해시 대조 완료  |  보안 등급: 사법기관 제출용 대외비",
+        f"무결성 확인: {hashed}/{len(items)} 파일 SHA-256 전체 해시 계산" + ("  |  보안 등급: 사법기관 제출용 대외비" if hashed == len(items) else "  |  해시 불가 항목 포함 — 원본 접근 필요"),
         fontname=font_ko,
         fontsize=8,
         color=(0.45, 0.45, 0.45),
@@ -229,15 +278,8 @@ def write_forensic_pdf_report(
         else:
             band_color = (0.4, 0.4, 0.4)
 
-        sha256_hex = ""
-        p = Path(item.path)
-        try:
-            if p.is_file():
-                sha256_hex = hashlib.sha256(p.read_bytes()[:1024*1024]).hexdigest()
-            else:
-                sha256_hex = hashlib.sha256(item.path.encode()).hexdigest()
-        except OSError:
-            sha256_hex = hashlib.sha256(item.path.encode()).hexdigest()
+        sha256_hex = hash_map.get(item.path)
+        hash_line = f"SHA-256: {sha256_hex[:32]}…" if sha256_hex else "SHA-256: 해시 불가 — 원본 파일 접근 실패"
 
         disp_path = Path(item.path).name if redact_paths else item.path
         if len(disp_path) > 36:
@@ -245,7 +287,7 @@ def write_forensic_pdf_report(
 
         page.insert_text(pymupdf.Point(margin_l + 5, y + 12), str(idx), fontname=font_en, fontsize=8, color=(0.3, 0.3, 0.3))
         page.insert_text(pymupdf.Point(margin_l + 30, y + 12), disp_path, fontname=font_ko, fontsize=8, color=(0.1, 0.1, 0.1))
-        page.insert_text(pymupdf.Point(margin_l + 30, y + 24), f"SHA-256: {sha256_hex[:32]}…", fontname=font_en, fontsize=6.5, color=(0.5, 0.5, 0.5))
+        page.insert_text(pymupdf.Point(margin_l + 30, y + 24), hash_line, fontname=font_en if sha256_hex else font_ko, fontsize=6.5, color=(0.5, 0.5, 0.5) if sha256_hex else (0.7, 0.3, 0.3))
 
         page.insert_text(pymupdf.Point(margin_l + 250, y + 15), band_str, fontname=font_ko, fontsize=8, color=band_color)
         page.insert_text(pymupdf.Point(margin_l + 300, y + 15), score_val, fontname=font_en, fontsize=8.5, color=(0.1, 0.1, 0.1))
@@ -261,16 +303,27 @@ def write_forensic_pdf_report(
     y += 15.0
     sign_box = pymupdf.Rect(margin_l, y, margin_r, y + 65)
     page.draw_rect(sign_box, color=(0.8, 0.85, 0.9), fill=(0.97, 0.98, 0.99))
+    _wa = coverage.get("weights_available", 0) if coverage else 0
+    if isinstance(_wa, (int, float)) and _wa > 0:
+        engine_text = "사법절차 적격성 고지: 본 감정서는 법무법인(유한) 대륜 디지털포렌식 감정센터의 뉴럴 앙상블 + 로컬 휴리스틱 분석에 따른 스크리닝 결과입니다."
+    elif coverage is not None:
+        engine_text = "사법절차 적격성 고지: 본 감정서는 신경망 가중치 미탑재 상태의 로컬 휴리스틱 분석에 따른 스크리닝 결과입니다 (뉴럴 엔진 미실행)."
+    else:
+        engine_text = "사법절차 적격성 고지: 본 감정서는 법무법인(유한) 대륜 디지털포렌식 감정센터의 로컬 스크리닝 분석 결과입니다."
     page.insert_text(
         pymupdf.Point(margin_l + 10, y + 16),
-        "사법절차 적격성 고지: 본 감정서는 법무법인(유한) 대륜 디지털포렌식 감정센터의 뉴럴 앙상블 분석에 따른 스크리닝 결과입니다.",
+        engine_text,
         fontname=font_ko,
         fontsize=7.5,
         color=(0.4, 0.4, 0.4),
     )
+    if hashed == len(items):
+        integrity_text = "무결성 확약: 상기 기재된 증거물 일체는 SHA-256 해시 검증을 필하였으며, 채증·보존 과정에서 위변조되지 않았음을 확인합니다."
+    else:
+        integrity_text = f"무결성 고지: 해시가 계산된 {hashed}건은 채증 시점 값을 기재하였으며, 해시 불가 {len(items) - hashed}건은 별도 표기하였습니다."
     page.insert_text(
         pymupdf.Point(margin_l + 10, y + 29),
-        "무결성 확약: 상기 기재된 증거물 일체는 SHA-256 해시 검증을 필하였으며, 채증·보존 과정에서 위변조되지 않았음을 확인합니다.",
+        integrity_text,
         fontname=font_ko,
         fontsize=7.5,
         color=(0.4, 0.4, 0.4),
@@ -294,18 +347,25 @@ def write_forensic_pdf_report(
             color=(0.5, 0.5, 0.5),
         )
 
-    output.write_bytes(doc.tobytes())
+    _atomic_write_bytes(output, doc.tobytes())
+    doc.close()
 
 
 def write_eval_html_report(path: Path | str, payload: dict[str, object], *, redact_paths: bool = False) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    metrics = payload.get("metrics", {}) if isinstance(payload.get("metrics"), dict) else {}
-    confusion = payload.get("confusion", {}) if isinstance(payload.get("confusion"), dict) else {}
-    case_summary = payload.get("case_summary", {}) if isinstance(payload.get("case_summary"), dict) else {}
-    false_positives = case_summary.get("false_positives", []) if isinstance(case_summary.get("false_positives"), list) else []
-    false_negatives = case_summary.get("false_negatives", []) if isinstance(case_summary.get("false_negatives"), list) else []
-    rows = "\n".join(_eval_row(row, redact_paths=redact_paths) for row in payload.get("items", []) if isinstance(row, dict))
+    metrics_raw = payload.get("metrics")
+    confusion_raw = payload.get("confusion")
+    case_raw = payload.get("case_summary")
+    metrics: dict = dict(metrics_raw) if isinstance(metrics_raw, dict) else {}
+    confusion: dict = dict(confusion_raw) if isinstance(confusion_raw, dict) else {}
+    case_summary: dict = dict(case_raw) if isinstance(case_raw, dict) else {}
+    fp_raw = case_summary.get("false_positives")
+    fn_raw = case_summary.get("false_negatives")
+    items_raw = payload.get("items")
+    false_positives = list(fp_raw) if isinstance(fp_raw, list) else []
+    false_negatives = list(fn_raw) if isinstance(fn_raw, list) else []
+    rows = "\n".join(_eval_row(row, redact_paths=redact_paths) for row in (items_raw if isinstance(items_raw, list) else []) if isinstance(row, dict))
     body = f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -397,6 +457,22 @@ def _heatmap_img(path: str | None) -> str:
     return f'<img class="heatmap" alt="heatmap" src="data:image/png;base64,{encoded}">'
 
 
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Write via temp file + os.replace so a crash cannot leave a half-written artifact."""
+    import os
+    import tempfile
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+
+
 def _write_minimal_pdf(path: Path, lines: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     content_lines = ["BT", "/F1 11 Tf", "50 780 Td"]
@@ -423,7 +499,7 @@ def _write_minimal_pdf(path: Path, lines: list[str]) -> None:
     for offset in offsets[1:]:
         output.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
     output.extend(f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode("ascii"))
-    path.write_bytes(bytes(output))
+    _atomic_write_bytes(path, bytes(output))
 
 
 def _pdf_escape(text: str) -> str:

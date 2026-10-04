@@ -145,7 +145,10 @@ class EvidenceStatementTest(unittest.TestCase):
         doc = pymupdf.open(str(pdf_path))
         full_text = "\n".join(page.get_text() for page in doc)
         doc.close()
-        self.assertIn("입증함", full_text)
+        # Neutral screening language — the tool must never assert the
+        # evidence "proves" an illegal synthetic production.
+        self.assertIn("소명함", full_text)
+        self.assertNotIn("불법 합성물임을 입증함", full_text)
         self.assertIn("제14조의2", full_text)
         self.assertIn("갑 제1호증", full_text)
 
