@@ -41,8 +41,18 @@ jobs:
         run: |
           python -m pip install mypy
           python -m mypy
-      - name: Unit tests
-        run: python -m unittest discover deepfake_lens/tests -v
+      - name: Unit tests (under coverage)
+        run: |
+          python -m pip install coverage
+          python -m coverage run -m unittest discover deepfake_lens/tests -v
+      # Coverage gate: this no-extras environment measured 53.57% (2026-10) —
+      # much lower than the extras job because optional-dependency modules go
+      # largely uncovered here. Gated only on 3.12 so the floor is not at the
+      # mercy of interpreter-version coverage drift across the matrix. The
+      # extras job enforces pyproject's fail_under instead.
+      - name: Coverage report (no-extras floor)
+        if: matrix.python-version == '3.12'
+        run: python -m coverage report --fail-under=53
       # Benchmark E2E runs only on the committed synthetic fixtures — no
       # external dataset fetch in CI. Real datasets are fetched manually with
       # scripts/fetch_benchmark.py (see its docstring for the manifest format).
@@ -88,14 +98,21 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e . numpy scipy opencv-python-headless librosa soundfile scikit-learn
-      - name: Unit tests (optional-dependency paths enabled)
-        run: python -m unittest discover deepfake_lens/tests -v
+      - name: Unit tests (optional-dependency paths enabled, under coverage)
+        run: |
+          python -m pip install coverage
+          python -m coverage run -m unittest discover deepfake_lens/tests -v
       # The C2PA SDK gates three tests in test_c2pa.py; with the fixture now
       # committed, install the provenance extra so those run in CI too.
       - name: Install provenance extra (c2pa-python)
         run: python -m pip install -e '.[provenance]'
+      # -a appends to the coverage data above so the report below measures
+      # the same set of tests as the locally-measured 63.59% floor.
       - name: C2PA SDK validation tests
-        run: python -m unittest deepfake_lens.tests.test_c2pa -v
+        run: python -m coverage run -a -m unittest deepfake_lens.tests.test_c2pa -v
+      # Gate at pyproject [tool.coverage.report] fail_under (63).
+      - name: Coverage report (extras floor)
+        run: python -m coverage report
 
   android:
     runs-on: ubuntu-latest
@@ -107,6 +124,20 @@ jobs:
           java-version: "17"
       - name: Android unit tests
         run: ./gradlew :deepfakeclassifier:testDebugUnitTest --no-daemon
+
+  contract-drift:
+    # contracts/ vendors files from lazy-contracts (evidence schema, trust
+    # levels, path-confinement helper). PIN.json records their sha256 at the
+    # pinned upstream commit; any edit without a matching PIN bump fails
+    # here, so re-vendoring is always a deliberate, reviewable change.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Verify vendored contracts against PIN.json
+        run: python scripts/verify_contracts.py
 
   registry-links:
     runs-on: ubuntu-latest

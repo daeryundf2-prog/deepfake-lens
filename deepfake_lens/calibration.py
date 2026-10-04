@@ -131,7 +131,7 @@ def eer(scores: list[tuple[int, bool]]) -> float | None:
     return best_value
 
 
-def auroc(scores: list[tuple[int, bool]]) -> float | None:
+def auroc(scores: list[tuple[float, bool]]) -> float | None:
     positives = [score for score, positive in scores if positive]
     negatives = [score for score, positive in scores if not positive]
     if not positives or not negatives:

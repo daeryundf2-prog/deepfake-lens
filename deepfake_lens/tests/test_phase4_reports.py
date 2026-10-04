@@ -91,11 +91,14 @@ class EerTest(unittest.TestCase):
         scores = [(5, False), (95, True)] * 10
         value = eer(scores)
         self.assertIsNotNone(value)
+        assert value is not None
         self.assertLessEqual(value, 0.05)
 
     def test_fully_overlapping_scores_have_high_eer(self) -> None:
         scores = [(50, False), (50, True)] * 10
         value = eer(scores)
+        self.assertIsNotNone(value)
+        assert value is not None
         self.assertGreaterEqual(value, 0.4)
         self.assertLessEqual(value, 0.6)
 

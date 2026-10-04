@@ -265,6 +265,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
+@unittest.skipUnless(_has_cv2(), "opencv not installed")
 def test_lighting_consistency_flags_mismatched_shading():
     """Face lit opposite to scene gradient → lighting signal fires."""
     np = __import__("numpy")
@@ -284,6 +285,7 @@ def test_lighting_consistency_flags_mismatched_shading():
     assert "조명" in signal.title
 
 
+@unittest.skipUnless(_has_cv2(), "opencv not installed")
 def test_lighting_consistency_quiet_when_directions_match():
     np = __import__("numpy")
     cv2 = __import__("cv2")
