@@ -17,9 +17,10 @@ from deepfake_lens.core import analyze_file, scan_directory
 from deepfake_lens.model_adapter import analyze_external_model
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PROFILE_PATH = REPO_ROOT / "models" / "openai-detector-runtime.json"
-IMAGE_PROFILE_PATH = REPO_ROOT / "models" / "aide-runtime.json"
-AUDIO_PROFILE_PATH = REPO_ROOT / "models" / "aasist-runtime.json"
+PKG_MODELS = Path(__file__).resolve().parents[1] / "models"
+PROFILE_PATH = PKG_MODELS / "openai-detector-runtime.json"
+IMAGE_PROFILE_PATH = PKG_MODELS / "aide-runtime.json"
+AUDIO_PROFILE_PATH = PKG_MODELS / "aasist-runtime.json"
 
 
 def _write_text(path: Path, body: str = "sample text body for testing " * 8) -> None:

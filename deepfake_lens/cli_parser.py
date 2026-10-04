@@ -38,6 +38,10 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     scan_parser.add_argument("--dedupe", action="store_true", help="hash files and mark duplicate content")
     scan_parser.add_argument("--deep-signals", action="store_true", help="run opt-in deep layers: face-manipulation + inpainting on images, rPPG + avatar + lip-sync on videos")
     scan_parser.add_argument("--thresholds", type=Path, help="layer-threshold profile JSON (calibration.py layer-thresholds-v1) overriding heuristic cutoffs")
+    scan_parser.add_argument("--models-dir", type=Path, help="models directory (profiles + weights); default: packaged models/ or $DEEPFAKE_LENS_MODELS_DIR")
+    scan_parser.add_argument("--law-firm", type=str, default="법무법인(유한) 대륜", help="law firm name for court artifacts")
+    scan_parser.add_argument("--contact", type=str, default="02-780-1128", help="firm phone for court artifacts")
+    scan_parser.add_argument("--center", type=str, default="디지털포렌식 감정센터", help="forensic center name for court artifacts")
     scan_parser.add_argument("--hash-db", type=Path, help="persist duplicate hashes across incremental scans")
     scan_parser.add_argument("--max-file-bytes", type=int, help="skip files larger than this size")
     scan_parser.add_argument("--allow-symlinks", action="store_true", help="follow symlinked files")
@@ -329,6 +333,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     web_parser.add_argument("--port", type=int, default=8765)
     web_parser.add_argument("--allow-lan", action="store_true")
     web_parser.add_argument("--token", default=None, help="API token required with --allow-lan")
+    web_parser.add_argument("--models-dir", type=Path, help="models directory provisioned via vendor-weights --install")
 
     doctor_parser = subparsers.add_parser("doctor", help="diagnose model weights, accelerators, and dependencies")
     doctor_parser.add_argument("--format", choices=["table", "json"], default="table")
@@ -347,6 +352,9 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     evidence_stmt_parser.add_argument("--plaintiff", type=str, default="(의뢰사 상호명 입력) 귀하", help="plaintiff/claimant (원고/고소인)")
     evidence_stmt_parser.add_argument("--defendant", type=str, default="(피고/피의자 성명 입력)", help="defendant/suspect (피고/피고소인)")
     evidence_stmt_parser.add_argument("--court", type=str, default="○○지방법원 귀중", help="court/investigation agency (관할법원/수사관서)")
+    evidence_stmt_parser.add_argument("--law-firm", type=str, default="법무법인(유한) 대륜", help="law firm name on the letterhead (소송대리인 상호)")
+    evidence_stmt_parser.add_argument("--contact", type=str, default="02-780-1128", help="firm phone number on the letterhead")
+    evidence_stmt_parser.add_argument("--center", type=str, default="디지털포렌식 감정센터", help="forensic center name on the letterhead")
     evidence_stmt_parser.add_argument("--pdf-out", type=Path, help="write evidence statement PDF")
     evidence_stmt_parser.add_argument("--md-out", type=Path, help="write evidence statement Markdown")
     evidence_stmt_parser.add_argument("--format", choices=["table", "json", "markdown"], default="table", help="stdout format")
@@ -359,6 +367,9 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     vendor_parser.add_argument("--manifest-out", type=Path, help="write offline model manifest JSON")
     vendor_parser.add_argument("--bundle-to", type=Path, help="export offline weight package directory")
     vendor_parser.add_argument("--copy-weights", action="store_true", help="copy large weights files into bundle directory")
+    vendor_parser.add_argument("--force", action="store_true", help="allow bundling into a non-empty destination")
+    vendor_parser.add_argument("--install", type=Path, metavar="BUNDLE_DIR", help="install a fetched bundle into --models-dir (or --to TARGET)")
+    vendor_parser.add_argument("--to", type=Path, help="target models dir for --install (default: --models-dir / DEEPFAKE_LENS_MODELS_DIR)")
     vendor_parser.add_argument("--format", choices=["table", "json", "markdown"], default="table", help="stdout format")
 
     return parser, {

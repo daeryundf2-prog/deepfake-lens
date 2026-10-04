@@ -29,9 +29,10 @@ from deepfake_lens.core import analyze_file, scan_directory
 from deepfake_lens.model_adapter import analyze_external_model, load_model_threshold
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PROFILE_PATH = REPO_ROOT / "models" / "aasist-runtime.json"
+PKG_MODELS = Path(__file__).resolve().parents[1] / "models"
+PROFILE_PATH = PKG_MODELS / "aasist-runtime.json"
 CHECKPOINT_PATH = PROFILE_PATH.parent / "aasist.pth"
-IMAGE_PROFILE_PATH = REPO_ROOT / "models" / "aide-runtime.json"
+IMAGE_PROFILE_PATH = PKG_MODELS / "aide-runtime.json"
 
 
 def _has_torch() -> bool:

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .benchmark import run_benchmark, write_benchmark, write_benchmark_markdown
 from .collection import write_collection_plan
-from .core import DEFAULT_MAX_FILES, RiskBand, ScanItem, scan_directory, scan_to_json, scan_to_json_text, summarize
+from .core import DEFAULT_MAX_FILES, RiskBand, ScanItem, _thresholds_json, scan_directory, scan_to_json, scan_to_json_text, summarize
 from .calibration import MIN_CALIBRATION_SAMPLES, load_threshold_profile
 from .cli_parser import build_parser
 from .cli_render import (
@@ -68,18 +68,27 @@ from .evidence_statement import (
     write_evidence_statement_pdf,
 )
 from .vendor_weights import (
+    default_models_dir,
     fetch_weights,
     bundle_offline_weights,
     inspect_model_manifest,
+    install_bundle,
     verify_offline_integrity,
+    weights_coverage,
 )
 
 
 COMMANDS = {"doctor", "scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "faceswap-seam", "evidence-statement", "vendor-weights", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
 
-DEFAULT_ENGINE_PROFILE = "models/aide-runtime.json"
-DEFAULT_AUDIO_ENGINE_PROFILE = "models/aasist-runtime.json"
-DEFAULT_TEXT_ENGINE_PROFILE = "models/openai-detector-runtime.json"
+def _pkg_profile(name: str) -> str:
+    # Absolute path into the resolved models dir — works from the source
+    # tree and from an installed wheel alike.
+    return str(default_models_dir() / name)
+
+
+DEFAULT_ENGINE_PROFILE = _pkg_profile("aide-runtime.json")
+DEFAULT_AUDIO_ENGINE_PROFILE = _pkg_profile("aasist-runtime.json")
+DEFAULT_TEXT_ENGINE_PROFILE = _pkg_profile("openai-detector-runtime.json")
 # Face-manipulation profiles exist under models/ but are supported:false —
 # measured at chance on local labeled eval (experiments/FACESWAP_EVALUATION.md),
 # so they are intentionally not part of the default ensemble.
@@ -92,8 +101,7 @@ def default_model_path(root: Path | None = None) -> Path | None:
     adapter degrades gracefully until scripts/fetch_aide.py is run. Returns
     None when the profile is absent so callers keep heuristic-only behavior.
     """
-    base = Path(root) if root is not None else Path(__file__).resolve().parent.parent
-    candidate = base / DEFAULT_ENGINE_PROFILE
+    candidate = (Path(root) / Path(DEFAULT_ENGINE_PROFILE).name) if root is not None else Path(DEFAULT_ENGINE_PROFILE)
     return candidate if candidate.is_file() else None
 
 
@@ -104,21 +112,21 @@ def default_audio_model_path(root: Path | None = None) -> Path | None:
     AASIST checkpoint is not (scripts/fetch_aasist.py), and absence returns
     None so audio analysis stays heuristic-only.
     """
-    base = Path(root) if root is not None else Path(__file__).resolve().parent.parent
-    candidate = base / DEFAULT_AUDIO_ENGINE_PROFILE
+    candidate = (Path(root) / Path(DEFAULT_AUDIO_ENGINE_PROFILE).name) if root is not None else Path(DEFAULT_AUDIO_ENGINE_PROFILE)
     return candidate if candidate.is_file() else None
 
 
 # Additional bundled audio members run alongside AASIST when present. The
 # wav2vec XLSR classifier complements AASIST (better calibrated on real
 # speech, weaker on out-of-domain TTS); its hub weights download on demand.
-DEFAULT_AUDIO_AUX_PROFILES = ("models/wav2vec-deepfake-audio-runtime.json",)
+DEFAULT_AUDIO_AUX_PROFILES = (_pkg_profile("wav2vec-deepfake-audio-runtime.json"),)
 
 
 def default_audio_model_paths(root: Path | None = None) -> list[Path]:
     """All bundled audio profiles that exist (AASIST + aux members)."""
-    base = Path(root) if root is not None else Path(__file__).resolve().parent.parent
-    return [candidate for rel in (DEFAULT_AUDIO_ENGINE_PROFILE, *DEFAULT_AUDIO_AUX_PROFILES) if (candidate := base / rel).is_file()]
+    if root is not None:
+        return [c for rel in (DEFAULT_AUDIO_ENGINE_PROFILE, *DEFAULT_AUDIO_AUX_PROFILES) if (c := Path(root) / Path(rel).name).is_file()]
+    return [Path(rel) for rel in (DEFAULT_AUDIO_ENGINE_PROFILE, *DEFAULT_AUDIO_AUX_PROFILES) if Path(rel).is_file()]
 
 
 def default_text_model_path(root: Path | None = None) -> Path | None:
@@ -128,8 +136,7 @@ def default_text_model_path(root: Path | None = None) -> Path | None:
     ~500 MB RoBERTa checkpoint is fetched from Hugging Face on first use,
     and absence returns None so text analysis stays heuristic-only.
     """
-    base = Path(root) if root is not None else Path(__file__).resolve().parent.parent
-    candidate = base / DEFAULT_TEXT_ENGINE_PROFILE
+    candidate = (Path(root) / Path(DEFAULT_TEXT_ENGINE_PROFILE).name) if root is not None else Path(DEFAULT_TEXT_ENGINE_PROFILE)
     return candidate if candidate.is_file() else None
 
 
@@ -804,7 +811,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "web":
         if args.allow_lan and not args.token:
             cmd_parsers["web"].error("--token is required with --allow-lan; the API reads and analyzes local files on request")
-        run_server(args.host, args.port, default_folder=args.folder, allow_lan=args.allow_lan, token=args.token)
+        run_server(args.host, args.port, default_folder=args.folder, allow_lan=args.allow_lan, token=args.token, models_dir=getattr(args, "models_dir", None))
         return 0
     if args.command == "doctor":
         from .doctor import format_report, run_diagnostics
@@ -869,6 +876,10 @@ def main(argv: list[str] | None = None) -> int:
             plaintiff=args.plaintiff,
             defendant=args.defendant,
             court=args.court,
+            law_firm=args.law_firm,
+            contact=args.contact,
+            center=args.center,
+            coverage=weights_coverage(None),
         )
         if args.md_out:
             write_evidence_statement_markdown(args.md_out, statement)
@@ -887,22 +898,38 @@ def main(argv: list[str] | None = None) -> int:
             print(f"증거 목록 ({len(statement.entries)}건):")
             for entry in statement.entries:
                 print(f"  - [{entry.exhibit_no}] {entry.document_name} ({entry.band_label}, {entry.score}점)")
-                print(f"    SHA-256: {entry.sha256[:24]}...")
+                print(f"    SHA-256: {entry.sha256}" if entry.sha256 else "    SHA-256: 해시 불가 — 원본 접근 실패")
             if args.pdf_out:
                 print(f"PDF 저장 완료: {args.pdf_out}")
             if args.md_out:
                 print(f"Markdown 저장 완료: {args.md_out}")
         return 0
     if args.command == "vendor-weights":
+        _modes = [bool(args.fetch), bool(args.verify), bool(args.bundle_to), bool(args.install), bool(args.manifest_out)]
+        if sum(_modes) > 1:
+            print("error: vendor-weights flags are mutually exclusive — choose one of --fetch/--verify/--bundle-to/--install/--manifest-out", file=sys.stderr)
+            return 2
+        if args.install:
+            target = args.to or args.models_dir
+            if target is None:
+                print("error: --install needs a target — pass --to DIR or --models-dir DIR (or set DEEPFAKE_LENS_MODELS_DIR)", file=sys.stderr)
+                return 2
+            res = install_bundle(args.install, target)
+            print(json.dumps(res, ensure_ascii=False, indent=2))
+            return 0 if res["status"] == "installed" else 1
         if args.fetch:
             fetch_res = fetch_weights(args.models_dir, offline=args.offline)
             print(json.dumps(fetch_res, ensure_ascii=False, indent=2))
             return 0 if fetch_res["status"] in {"ok", "skipped"} else 1
+        if args.offline and not args.verify and not args.bundle_to:
+            print("error: --offline only makes sense with --fetch/--verify/--bundle-to", file=sys.stderr)
+            return 2
         if args.bundle_to:
             manifest_file = bundle_offline_weights(
                 args.bundle_to,
                 models_dir=args.models_dir,
                 copy_weights=args.copy_weights,
+                force=args.force,
             )
             print(json.dumps({"bundle_dir": str(args.bundle_to), "manifest": str(manifest_file)}, ensure_ascii=False, indent=2))
             return 0
@@ -911,16 +938,23 @@ def main(argv: list[str] | None = None) -> int:
             if args.format == "json":
                 print(json.dumps(verify_res, ensure_ascii=False, indent=2))
             else:
-                status_str = "PASS" if verify_res["status"] == "pass" else "WARN"
+                st = verify_res["status"]
+                status_str = "PASS" if st == "pass" else ("PASS (unverified weights present)" if st == "pass-unverified" else "FAIL")
                 print(f"Offline Model Integrity: {status_str}")
-                print(f"Profiles: {verify_res['total_profiles']}, Available: {verify_res['available_weights']}, Missing: {verify_res['missing_weights']}, Size: {verify_res['total_size_mb']} MB")
+                print(f"Profiles: {verify_res['total_profiles']}, Local checkpoints: {verify_res['local_checkpoints']}, Verified: {verify_res['verified']}, Size: {verify_res['total_size_mb']} MB")
+                if verify_res["unverified"]:
+                    print(f"Unverified (no declared hash): {', '.join(verify_res['unverified'])}")
                 if verify_res["mismatches"]:
                     print("Mismatched Checkpoints:")
                     for m in verify_res["mismatches"]:
                         print(f"  - {m['name']}: {m['checkpoint_relpath']}")
                 if verify_res["missing"]:
                     print(f"Missing Checkpoints: {', '.join(verify_res['missing'])}")
-            return 0 if verify_res["status"] == "pass" else 1
+                if verify_res.get("hub_resolved"):
+                    print(f"Hub-resolved (no local weight): {', '.join(verify_res['hub_resolved'])}")
+                if verify_res.get("unsupported"):
+                    print(f"Unsupported profiles (not counted): {', '.join(verify_res['unsupported'])}")
+            return 0 if verify_res["status"] in ("pass", "pass-unverified") else 1
 
         manifest = inspect_model_manifest(args.models_dir)
         if args.manifest_out:
@@ -1000,11 +1034,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.progress:
         print(f"Done: analyzed={summary.analyzed}, cached={summary.cached}, total={summary.total}", file=sys.stderr)
 
+    scan_coverage = weights_coverage(getattr(args, "models_dir", None))
     if args.json_out:
-        scan_payload = _maybe_sign(scan_to_json(summary, items, thresholds=thresholds), sign=args.sign, key_file=args.key_file)
+        scan_payload = _maybe_sign(scan_to_json(summary, items, thresholds=thresholds, models_dir=getattr(args, 'models_dir', None)), sign=args.sign, key_file=args.key_file)
         _write_json_out(args.json_out, json.dumps(scan_payload, ensure_ascii=False, indent=2) + "\n")
     if args.csv_out:
-        _write_csv(args.csv_out, items)
+        _write_csv(args.csv_out, items, coverage=weights_coverage(getattr(args, "models_dir", None)), thresholds=thresholds)
     if args.html_out:
         write_html_report(args.html_out, summary, items, redact_paths=args.redact_paths, thresholds=thresholds)
     if args.pdf_out:
@@ -1017,6 +1052,7 @@ def main(argv: list[str] | None = None) -> int:
             redact_paths=args.redact_paths,
             exhibit_no=getattr(args, "exhibit_no", "갑 제        호증"),
             thresholds=thresholds,
+            coverage=scan_coverage,
         )
     if getattr(args, "evidence_statement_out", None) or getattr(args, "evidence_statement_pdf_out", None):
         stmt = build_evidence_statement(
@@ -1026,6 +1062,11 @@ def main(argv: list[str] | None = None) -> int:
             plaintiff=getattr(args, "plaintiff", "(의뢰사 상호명 입력) 귀하"),
             defendant=getattr(args, "defendant", "(피고/피의자 성명 입력)"),
             court=getattr(args, "court", "○○지방법원 귀중"),
+            law_firm=getattr(args, "law_firm", "법무법인(유한) 대륜"),
+            contact=getattr(args, "contact", "02-780-1128"),
+            center=getattr(args, "center", "디지털포렌식 감정센터"),
+            thresholds=_thresholds_json(thresholds),
+            coverage=scan_coverage,
         )
         if getattr(args, "evidence_statement_out", None):
             out_p = Path(args.evidence_statement_out)
@@ -1037,9 +1078,9 @@ def main(argv: list[str] | None = None) -> int:
             write_evidence_statement_pdf(Path(args.evidence_statement_pdf_out), stmt)
 
     if args.format == "json":
-        print(scan_to_json_text(summary, items, thresholds=thresholds))
+        print(scan_to_json_text(summary, items, thresholds=thresholds, models_dir=getattr(args, 'models_dir', None)))
     else:
-        _print_table(summary, items, include_low=args.include_low)
+        _print_table(summary, items, include_low=args.include_low, coverage=scan_coverage, thresholds=thresholds)
         if not args.recursive and summary.total == 0 and _has_subdirectories(args.folder):
             print()
             print(f"힌트: '{args.folder}'의 직접 자식에는 파일이 없고 하위 폴더가 있습니다. --recursive 를 추가해 보세요.")

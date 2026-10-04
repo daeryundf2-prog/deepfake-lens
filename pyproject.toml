@@ -70,11 +70,13 @@ deepfake-lens = "deepfake_lens.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["deepfake_lens*"]
+# Tests stay in the repo — the shipped wheel is a production artifact.
+exclude = ["deepfake_lens.tests*"]
 
 # GUI shell + extracted static assets must ship together — webapp.py serves
 # gui.css/gui.js from the package directory.
 [tool.setuptools.package-data]
-deepfake_lens = ["gui.html", "gui.css", "gui.js"]
+deepfake_lens = ["gui.html", "gui.css", "gui.js", "models/*.json", "models/*.md"]
 
 # Coverage gate: fail_under is set just below the measured floor (63.59%
 # branch coverage with the dev extra installed, 2026-10 — down from 67% in
@@ -152,6 +154,8 @@ files = [
     "deepfake_lens/release.py",
     "deepfake_lens/rule_classifier.py",
     "deepfake_lens/security.py",
+    "deepfake_lens/webapp_api.py",
+    "deepfake_lens/reports.py",
     "deepfake_lens/tests/__init__.py",
     "deepfake_lens/tests/test_archives.py",
     "deepfake_lens/tests/test_consolidation.py",

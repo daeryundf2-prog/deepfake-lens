@@ -82,7 +82,17 @@ def _has_subdirectories(folder: Path | str) -> bool:
         return False
 
 
-def _print_table(summary, items: list[ScanItem], *, include_low: bool) -> None:
+def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage: dict[str, object] | None = None, thresholds: object | None = None) -> None:
+    if coverage is not None:
+        wa_raw, wc_raw = coverage.get("weights_available", 0), coverage.get("weights_total", 0)
+        wa = wa_raw if isinstance(wa_raw, int) else 0
+        wc = wc_raw if isinstance(wc_raw, int) else 0
+        if wa == 0:
+            print("!! 신경망 가중치 미탑재 — 아래 결과는 휴리스틱 전용이며 뉴럴 엔진이 실행되지 않았습니다 !!")
+        elif wa < wc:
+            print(f"!! 신경망 가중치 부분 탑재 ({wa}/{wc}) — 일부 뉴럴 엔진이 실행되지 않았습니다 !!")
+    if thresholds is not None and getattr(thresholds, "provisional", False):
+        print("!! 판정 임계값: 미측정 잠정값 — 표본 코퍼스 캘리브레이션 전까지 상대 우선순위로만 해석하세요 !!")
     cap_note = " (cap reached)" if summary.capped else ""
     print(
         f"Scanned {summary.total} files{cap_note}: "
@@ -120,8 +130,26 @@ def _is_priority_row(item: ScanItem) -> bool:
     return item.result.band in {RiskBand.HIGH, RiskBand.MEDIUM, RiskBand.UNKNOWN}
 
 
-def _write_csv(path: Path, items: list[ScanItem]) -> None:
+def _write_csv(path: Path, items: list[ScanItem], *, coverage: dict[str, object] | None = None, thresholds: object | None = None) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
+        # Provenance is written as leading comment lines so the CSV can
+        # never be mistaken for a fully-verified neural run.
+        if coverage is not None:
+            handle.write(f"# weights_available={coverage.get('weights_available', 0)} weights_total={coverage.get('weights_total', 0)}\n")
+        if thresholds is not None:
+            tp = thresholds if isinstance(thresholds, dict) else {
+                "version": getattr(thresholds, "version", "?"),
+                "provisional": getattr(thresholds, "provisional", True),
+                "samples": getattr(thresholds, "samples", 0),
+                "dataset_fingerprint": getattr(thresholds, "dataset_fingerprint", ""),
+                "source": "profile",
+            }
+            if tp.get("source") == "builtin_defaults":
+                handle.write("# thresholds_source=builtin_defaults provisional=true\n")
+            else:
+                handle.write(f"# thresholds_source=profile:{tp.get('version')} provisional={tp.get('provisional')} samples={tp.get('samples')} fingerprint={tp.get('dataset_fingerprint')}\n")
+        else:
+            handle.write("# thresholds_source=builtin_defaults provisional=true\n")
         writer = csv.writer(handle)
         writer.writerow(
             [

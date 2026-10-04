@@ -21,8 +21,9 @@ import json
 import shutil
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from .vendor_weights import default_models_dir
 
-MODELS_DIR = Path(__file__).resolve().parent.parent / "models"
+MODELS_DIR = default_models_dir()
 
 # (import name, pip package, what it enables)
 OPTIONAL_DEPS = [
@@ -117,7 +118,7 @@ def _check_profile(profile_path: Path) -> Check:
     name = str(profile.get("name") or profile_path.stem)
     runtime = str(profile.get("runtime") or "")
     if profile.get("hub_model") or runtime in {"hf-text-classifier", "hf-image-classifier", "hf-audio-classifier", "causal-lm-ppl", "binoculars"}:
-        return Check(name, "ok", f"{runtime}: hub-resolved ({profile.get('hub_model', 'n/a')}), downloads on first use")
+        return Check(name, "ok", f"{runtime}: hub-resolved ({profile.get('hub_model', 'n/a')}) — 첫 실행 시 네트워크 필요 (폐쇄망은 사전 캐시 필수)")
     checkpoint = profile.get("checkpoint") or profile.get("path")
     if runtime == "video-frames" and isinstance(profile.get("inner"), dict):
         checkpoint = profile["inner"].get("checkpoint")
@@ -167,7 +168,7 @@ def run_diagnostics(models_dir: Path | None = None) -> DoctorReport:
     report = DoctorReport()
     root = models_dir or MODELS_DIR
     if root.is_dir():
-        for profile_path in sorted(root.glob("*.json")):
+        for profile_path in sorted(root.glob("*-runtime.json")):
             report.profiles.append(_check_profile(profile_path))
     else:
         report.profiles.append(Check(str(root), "warn", "models directory not found"))
@@ -189,13 +190,18 @@ def run_diagnostics(models_dir: Path | None = None) -> DoctorReport:
 def format_report(report: DoctorReport) -> str:
     lines: list[str] = []
     icon = {"ok": " OK  ", "missing": " MISS", "warn": " WARN"}
-    mounted = sum(1 for c in report.profiles if c.status == "ok")
-    degraded = sum(1 for c in report.profiles if c.status in {"missing", "warn"})
+    # Banner counts local-checkpoint profiles only — hub/unsupported/
+    # weightless entries and the thresholds check are not weight gaps.
+    mounted = sum(
+        1 for c in report.profiles
+        if c.status == "ok" and "hub-resolved" not in c.detail
+    )
+    degraded = sum(1 for c in report.profiles if c.status == "missing")
     if degraded:
         lines.append(
-            f"!! {mounted + degraded}개 중 {mounted}개 가중치 탑재 — "
+            f"!! 신경망 가중치 {mounted}/{mounted + degraded} 탑재 — "
             f"미탑재 {degraded}개는 휴리스틱 전용 모드로 열화됩니다 "
-            f"(`vendor-weights fetch` 또는 오프라인 번들로 보충)"
+            f"(`deepfake-lens vendor-weights --fetch` 또는 `--bundle-to/--install`로 보충)"
         )
     for section, checks in (
         ("Model profiles", report.profiles),

@@ -35,6 +35,15 @@ models/*.part
 models/*.model
 models/*.task
 models/checkpoints/
+deepfake_lens/models/*.pth
+deepfake_lens/models/*.pt
+deepfake_lens/models/*.onnx
+deepfake_lens/models/*.torchscript
+deepfake_lens/models/*.bin
+deepfake_lens/models/*.part
+deepfake_lens/models/*.model
+deepfake_lens/models/*.task
+deepfake_lens/models/checkpoints/
 # Bundled-app model asset — generated/exported locally, never committed
 deepfakeclassifier/src/main/assets/*.onnx
 

@@ -25,7 +25,8 @@ from deepfake_lens.model_adapter import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MODELS_DIR = REPO_ROOT / "models"
+PKG_MODELS = Path(__file__).resolve().parents[1] / "models"
+MODELS_DIR = PKG_MODELS
 WIRED_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "aasist", "hf-text-classifier", "hf-image-classifier", "hf-audio-classifier", "video-frames", "causal-lm-ppl", "binoculars"}
 # Runtimes that carry no checkpoint field of their own: hf-*-classifier
 # names a hub model id, video-frames nests the checkpointed image profile.

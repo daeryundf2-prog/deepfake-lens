@@ -16,7 +16,8 @@ from deepfake_lens.core import analyze_file
 from deepfake_lens.model_adapter import analyze_external_model, load_model_threshold
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PROFILE_PATH = REPO_ROOT / "models" / "aide-runtime.json"
+PKG_MODELS = Path(__file__).resolve().parents[1] / "models"
+PROFILE_PATH = PKG_MODELS / "aide-runtime.json"
 CHECKPOINT_PATH = PROFILE_PATH.parent / "aide_progan_train.pth"
 
 

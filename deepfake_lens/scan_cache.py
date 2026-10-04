@@ -10,18 +10,51 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 
-def _iter_files(root: Path, *, recursive: bool, allow_symlinks: bool = False) -> Iterable[Path]:
-    iterator = root.rglob("*") if recursive else root.iterdir()
-    for path in iterator:
-        if path.is_symlink() and not allow_symlinks:
-            continue
-        if path.is_file():
-            if path.name.endswith((".ivy.json", ".model.json")):
+def _iter_files(root: Path, *, recursive: bool, allow_symlinks: bool = False, on_error: Callable[[Path, OSError], None] | None = None) -> Iterable[Path]:
+    """Iterate scan targets; unreadable directories skip, not kill.
+
+    ``rglob``/``iterdir`` raise lazily mid-iteration — one permission-
+    denied subdirectory must not abort a multi-hour evidence scan.
+    """
+    if recursive:
+        def _walk_error(exc: OSError) -> None:
+            if on_error is not None:
+                on_error(Path(getattr(exc, "filename", None) or root), exc)
+        import os
+        for dirpath, _dirs, files in os.walk(root, onerror=_walk_error):
+            for name in files:
+                path = Path(dirpath) / name
+                try:
+                    if path.is_symlink() and not allow_symlinks:
+                        continue
+                    if not path.is_file():
+                        continue
+                except OSError:
+                    continue
+                if name.endswith((".ivy.json", ".model.json")):
+                    continue
+                yield path
+        return
+    try:
+        entries = list(root.iterdir())
+    except OSError as exc:
+        if on_error is not None:
+            on_error(root, exc)
+        return
+    for path in entries:
+        try:
+            if path.is_symlink() and not allow_symlinks:
                 continue
-            yield path
+            if not path.is_file():
+                continue
+        except OSError:
+            continue
+        if path.name.endswith((".ivy.json", ".model.json")):
+            continue
+        yield path
 
 
 def _read_prefix(path: Path, limit: int) -> bytes:
@@ -92,8 +125,13 @@ def _load_scan_cache(cache_path: Path | None) -> dict[str, object] | None:
 def _write_scan_cache(cache_path: Path | None, cache: dict[str, object]) -> None:
     if cache_path is None:
         return
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(json.dumps(cache, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(cache, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(cache_path)
+    except OSError:
+        pass  # cache flush failure must never mask real scan results
 
 
 def _load_hash_db(hash_db_path: Path | None) -> dict[str, object] | None:
@@ -128,6 +166,7 @@ def _cache_key(
     heatmaps: bool,
     model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
     deep_signals: bool = False,
+    provenance: str = "",
 ) -> str:
     try:
         stat = path.stat()
@@ -150,5 +189,8 @@ def _cache_key(
             str(bool(heatmaps)),
             model_marker,
             str(bool(deep_signals)),
+            # Threshold/weights/tool provenance — a cached score computed
+            # under different calibration or coverage must never replay.
+            provenance,
         ]
     )
