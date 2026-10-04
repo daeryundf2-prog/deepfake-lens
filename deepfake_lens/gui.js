@@ -1,4 +1,5 @@
         let results = [];
+        let lastProvenance = { coverage: null, thresholds: null, summary: null };
         let selectedFiles = [];
         let lastScanRoot = '';
         const RENDER_WINDOW = 200;
@@ -129,7 +130,14 @@
                 options.headers || {},
                 token ? { 'X-Deepfake-Lens-Token': token } : {}
             );
-            const response = await fetch(url, Object.assign({}, options, { headers }));
+            let response;
+            try {
+                response = await fetch(url, Object.assign({}, options, { headers }));
+            } catch (e) {
+                // TypeError: Failed to fetch → 서버 다운/네트워크 단절을
+                // 사용자가 이해할 수 있는 한국어로 바꾼다.
+                throw new Error('서버에 연결할 수 없습니다 — deepfake-lens web 프로세스가 실행 중인지 확인하세요');
+            }
             if (response.status === 401) {
                 const entered = await requestToken();
                 if (entered) {
@@ -138,6 +146,50 @@
                 }
             }
             return response;
+        }
+
+        // Read an error payload safely — HTML error pages and aborts must
+        // never surface as "Unexpected token" / raw English to the examiner.
+        async function apiError(res) {
+            let detail = '';
+            try {
+                const ct = res.headers.get('Content-Type') || '';
+                if (ct.includes('application/json')) {
+                    const j = await res.json();
+                    detail = j.error || j.detail || '';
+                } else {
+                    detail = `서버 오류 (HTTP ${res.status})`;
+                }
+            } catch (e) {
+                detail = `서버 오류 (HTTP ${res.status})`;
+            }
+            return detail || `요청 실패 (HTTP ${res.status})`;
+        }
+
+        async function apiJson(url, options = {}) {
+            const res = await apiFetch(url, options);
+            if (!res.ok) throw new Error(await apiError(res));
+            try {
+                return await res.json();
+            } catch (e) {
+                throw new Error('서버 응답을 해석할 수 없습니다 (JSON이 아님)');
+            }
+        }
+
+        function provenanceBannerHtml() {
+            const cov = lastProvenance.coverage || {};
+            const thr = lastProvenance.thresholds || {};
+            const parts = [];
+            const wa = cov.weights_available, wt = cov.weights_total;
+            if (wt !== undefined) {
+                if ((wa || 0) === 0) parts.push('<b>휴리스틱 전용 모드</b> — 신경망 가중치가 하나도 탑재되지 않았습니다. 점수는 규칙 기반 추정입니다.');
+                else if (wa < wt) parts.push(`신경망 가중치 일부 탑재 (${wa}/${wt}) — 미탑재 엔진의 판단이 빠져 있습니다.`);
+            }
+            if (thr.provisional || thr.source === 'builtin_defaults') {
+                parts.push('판정 임계값: <b>미측정 잠정값</b> — 라벨 코퍼스 캘리브레이션 전까지 절대 점수가 아닌 상대 우선순위로만 해석하세요.');
+            }
+            if (!parts.length) return '';
+            return `<div class="prov-banner" role="status">${parts.map(p => `<p>${p}</p>`).join('')}<p class="note">이 결과는 스크리닝 우선순위 신호이며 유죄·불법성의 확정 판정이 아닙니다.</p></div>`;
         }
 
         function escapeHtml(value) {
@@ -192,7 +244,10 @@
             b.addEventListener('click', () => {
                 if (scanBusy) return;
                 pixelMode = b.dataset.v;
-                $('pixel-seg').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+                $('pixel-seg').querySelectorAll('button').forEach(x => {
+                    x.classList.toggle('on', x === b);
+                    x.setAttribute('aria-checked', x === b ? 'true' : 'false');
+                });
             });
         });
 
@@ -303,15 +358,19 @@
             if (!$('opt-model').checked) params.set('no_default_engine', 'true');
             setBusy(true, '폴더 분석 중… 모델 로딩 시 수 분 걸릴 수 있습니다');
             try {
-                const start = await apiFetch('/api/scan?' + params.toString());
-                const job = await start.json();
+                const job = await apiJson('/api/scan?' + params.toString());
                 if (job.error) { toast('오류: ' + job.error, true); return; }
                 currentJobId = job.job_id;
                 $('scan-cancel').hidden = false;
                 let data = null;
+                // Polling is bounded — a dead backend must not spin forever.
+                const deadline = Date.now() + 30 * 60 * 1000;
                 while (true) {
-                    const status = await apiFetch('/api/scan-status?job=' + encodeURIComponent(job.job_id));
-                    const state = await status.json();
+                    if (Date.now() > deadline) {
+                        toast('분석 시간 초과 (30분) — 파일 수를 줄이거나 서버 로그를 확인하세요', true);
+                        return;
+                    }
+                    const state = await apiJson('/api/scan-status?job=' + encodeURIComponent(job.job_id));
                     if (state.error) { toast('오류: ' + state.error, true); return; }
                     if (state.status !== 'running') { data = state.result; break; }
                     await new Promise(res => setTimeout(res, 1500));
@@ -356,10 +415,11 @@
                     const batch = selectedFiles.slice(i, i + BATCH);
                     const form = new FormData();
                     batch.forEach(f => form.append('files', f, f.webkitRelativePath || f.name));
-                    const response = await apiFetch('/api/analyze-upload', { method: 'POST', body: form });
-                    const data = await response.json();
+                    const data = await apiJson('/api/analyze-upload', { method: 'POST', body: form });
                     if (data.error) { toast('오류: ' + data.error, true); return; }
                     allItems.push(...(data.items || []));
+                    if (data.coverage) lastProvenance.coverage = data.coverage;
+                    if (data.thresholds) lastProvenance.thresholds = data.thresholds;
                     if (total > BATCH) startElapsed($('progress-text'), `업로드 분석 중… (${Math.min(i + BATCH, total)}/${total})`);
                 }
                 lastScanRoot = '';  // uploads are temp files; heatmaps unavailable
@@ -377,7 +437,41 @@
         /* ── results rendering ─────────────────────── */
         function processResults(data) {
             results = (data.items || []).map(item => ({ item }));
+            if (data.coverage) lastProvenance.coverage = data.coverage;
+            if (data.thresholds) lastProvenance.thresholds = data.thresholds;
+            lastProvenance.summary = data.summary || null;
+            const label = $('stat-model-label');
+            if (label) {
+                const cov = lastProvenance.coverage || {};
+                const wa = cov.weights_available, wt = cov.weights_total;
+                label.textContent = wt !== undefined
+                    ? (wa ? `뉴럴 ${wa}/${wt}` : '휴리스틱 전용')
+                    : `뉴럴 ${data.summary && data.summary.external_model_active ? data.summary.external_model_active : 0}`;
+            }
+            const banner = $('prov-banner');
+            if (banner) {
+                banner.innerHTML = provenanceBannerHtml();
+                banner.hidden = !banner.innerHTML;
+            }
             renderResults(data.summary || {});
+        }
+
+        function reportPayload(extra) {
+            const out = {
+                items: results.map(r => r.item),
+                summary: lastProvenance.summary || {},
+                coverage: lastProvenance.coverage || {},
+                thresholds: lastProvenance.thresholds || {},
+            };
+            const map = { 'case-no': 'case_no', 'case-name': 'case_name',
+                          'case-plaintiff': 'plaintiff', 'case-defendant': 'defendant',
+                          'case-court': 'court', 'case-firm': 'law_firm',
+                          'case-center': 'center', 'case-contact': 'contact' };
+            for (const [id, key] of Object.entries(map)) {
+                const el = $(id);
+                if (el && el.value.trim()) out[key] = el.value.trim();
+            }
+            return Object.assign(out, extra || {});
         }
 
         function riskLabel(band) {
@@ -958,7 +1052,7 @@
         async function submitFeedback(item, label, statusEl) {
             statusEl.textContent = '기록 중…';
             try {
-                const res = await apiFetch('/api/feedback', {
+                const data = await apiJson('/api/feedback', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
@@ -968,7 +1062,6 @@
                         result: item.result,
                     }),
                 });
-                const data = await res.json();
                 statusEl.textContent = data.ok ? '기록됨 ✓' : ('실패: ' + (data.error || ''));
             } catch (e) {
                 statusEl.textContent = '실패: ' + e.message;
@@ -1008,12 +1101,11 @@
                 const res = await apiFetch('/api/report', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({items: results.map(e => e.item)}),
+                    body: JSON.stringify(reportPayload()),
                 });
                 const type = res.headers.get('Content-Type') || '';
                 if (!type.includes('text/html')) {
-                    const data = await res.json();
-                    toast('리포트 생성 실패: ' + (data.error || res.status), true);
+                    toast('리포트 생성 실패: ' + await apiError(res), true);
                     return;
                 }
                 download(await res.blob(), 'deepfake-lens-report.html');
@@ -1026,16 +1118,11 @@
                 const res = await apiFetch('/api/report?format=pdf', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        items: results.map(e => e.item),
-                        format: 'pdf',
-                        exhibit_no: '갑 제        호증',
-                    }),
+                    body: JSON.stringify(reportPayload({ format: 'pdf', exhibit_no: '갑 제        호증' })),
                 });
                 const type = res.headers.get('Content-Type') || '';
                 if (!type.includes('application/pdf')) {
-                    const data = await res.json();
-                    toast('PDF 생성 실패: ' + (data.error || res.status), true);
+                    toast('PDF 생성 실패: ' + await apiError(res), true);
                     return;
                 }
                 download(await res.blob(), 'deepfake-lens-forensic-report.pdf');
@@ -1049,16 +1136,11 @@
                 const res = await apiFetch('/api/report?format=evidence', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        items: results.map(e => e.item),
-                        format: 'evidence',
-                        case_no: '(사건번호 입력)',
-                    }),
+                    body: JSON.stringify(reportPayload({ format: 'evidence' })),
                 });
                 const type = res.headers.get('Content-Type') || '';
                 if (!type.includes('application/pdf')) {
-                    const data = await res.json();
-                    toast('증거설명서 생성 실패: ' + (data.error || res.status), true);
+                    toast('증거설명서 생성 실패: ' + await apiError(res), true);
                     return;
                 }
                 download(await res.blob(), 'deepfake-lens-evidence-statement.pdf');
@@ -1114,8 +1196,7 @@
             startElapsed(status, '전체 검사 실행 중… 뉴럴 모델 로딩 시 수십 초');
             ['qc-text-btn', 'qc-file-btn'].forEach(id => $(id).disabled = true);
             try {
-                const res = await apiFetch('/api/check', options);
-                const data = await res.json();
+                const data = await apiJson('/api/check', options);
                 if (data.error) {
                     box.className = 'qc-out on';
                     box.innerHTML = `<div class="verdict c-red">오류: ${escapeHtml(data.error)}</div>`;
@@ -1143,6 +1224,18 @@
             return `<div class="layer"><div class="lt">${escapeHtml(title)}</div>${node}</div>`;
         }
 
+        function provenanceNoteHtml(data) {
+            const cov = data.coverage || {};
+            const thr = data.thresholds || {};
+            const parts = [];
+            const wa = cov.weights_available, wt = cov.weights_total;
+            if (wt !== undefined && (wa || 0) === 0) parts.push('휴리스틱 전용 모드(신경망 가중치 없음)');
+            else if (wt !== undefined && wa < wt) parts.push(`신경망 가중치 일부 탑재(${wa}/${wt})`);
+            if (thr.provisional || thr.source === 'builtin_defaults') parts.push('잠정 임계값(미측정)');
+            if (!parts.length) return '';
+            return `<div class="prov-note">${parts.join(' · ')} — 스크리닝 우선순위 신호이며 확정 판정이 아닙니다.</div>`;
+        }
+
         function renderQuickCheck(data) {
             const box = $('qc-out');
             const item = data.item || {};
@@ -1156,6 +1249,7 @@
                 <div><span class="band-pill band-${band}">${escapeHtml(bandText)}</span>
                 <div class="note" class="mt-4">${escapeHtml(item.name || '')}</div></div></div>`);
             if (r.verdict) parts.push(`<div class="verdict">${escapeHtml(r.verdict)}</div>`);
+            parts.push(provenanceNoteHtml(data));
 
             const ma = r.model_analysis;
             if (ma) {
@@ -1224,8 +1318,7 @@
             startElapsed(status, '비교 실행 중… (화자 모델 로딩 시 수십 초)');
             $('cmp-btn').disabled = true;
             try {
-                const res = await apiFetch('/api/compare', { method: 'POST', body: form });
-                const data = await res.json();
+                const data = await apiJson('/api/compare', { method: 'POST', body: form });
                 box.classList.add('on');
                 if (data.error) {
                     box.innerHTML = `<div class="verdict c-red">오류: ${escapeHtml(data.error)}</div>`;
@@ -1253,6 +1346,7 @@
                 <div><span class="band-pill band-${band}">${escapeHtml(bandText)}</span>
                 <div class="note" class="mt-4">${escapeHtml(kind)}${data.method ? ' · ' + escapeHtml(data.method) : ''}</div></div></div>`);
             if (data.verdict) parts.push(`<div class="verdict">${escapeHtml(data.verdict)}</div>`);
+            parts.push(provenanceNoteHtml(data));
             const kv = [];
             if (data.distance != null) kv.push(`<b>거리</b><span>${escapeHtml(String(data.distance))}</span>`);
             parts.push(layer('측정값', `<div class="kv">${kv.join('')}</div>`));

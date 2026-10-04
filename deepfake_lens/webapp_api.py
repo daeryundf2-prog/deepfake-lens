@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs
 
+from .vendor_weights import default_models_dir
 from .core import BatchScanSummary, DEFAULT_METADATA_BYTES, _scan_item_from_json, analyze_file, scan_directory, scan_to_json, summarize
 from .datasets import is_negative_label, is_positive_label
 from .fusion import apply_fusion_to_items, load_fusion_profile
@@ -31,11 +32,26 @@ MAX_FILE_BYTES_CEILING = 1024 * 1024 * 1024
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 MAX_UPLOAD_FILES = 20
 DEFAULT_PROFILE_NAMES = (
-    "models/aide-runtime.json",
-    "models/aasist-runtime.json",
-    "models/wav2vec-deepfake-audio-runtime.json",
-    "models/openai-detector-runtime.json",
+    "aide-runtime.json",
+    "aasist-runtime.json",
+    "wav2vec-deepfake-audio-runtime.json",
+    "openai-detector-runtime.json",
 )
+
+# Server-level models directory override — set by run_server(--models-dir)
+# or DEEPFAKE_LENS_MODELS_DIR so every scan/check/coverage call resolves the
+# same weight set an administrator provisioned.
+_MODELS_DIR: Path | None = None
+
+
+def set_models_dir(path: Path | None) -> None:
+    global _MODELS_DIR
+    _MODELS_DIR = Path(path).expanduser().resolve() if path else None
+
+
+def _models_dir() -> Path | None:
+    return _MODELS_DIR or default_models_dir()
+
 
 def default_engine_profiles(root: Path | None = None) -> list[Path]:
     """Bundled default-engine profiles that exist on disk.
@@ -45,7 +61,9 @@ def default_engine_profiles(root: Path | None = None) -> list[Path]:
     profiles are skipped and each adapter degrades gracefully when its
     checkpoint is absent.
     """
-    base = Path(root) if root is not None else Path(__file__).resolve().parent.parent
+    base = Path(root) if root is not None else _models_dir()
+    if base is None:
+        return []
     return [base / name for name in DEFAULT_PROFILE_NAMES if (base / name).is_file()]
 
 
@@ -70,10 +88,11 @@ def _scan_payload(query: str, *, default_folder: Path | None, should_stop: Calla
     except ValueError as exc:
         raise ValueError("max_files must be an integer") from exc
     max_files = max(1, min(max_files, MAX_SCAN_FILES))
-    max_file_bytes = params.get("max_file_bytes", [None])[0]
-    if max_file_bytes is not None:
+    max_file_bytes_raw = params.get("max_file_bytes", [None])[0]
+    max_file_bytes: int | None = None
+    if max_file_bytes_raw is not None:
         try:
-            max_file_bytes = min(int(max_file_bytes), MAX_FILE_BYTES_CEILING)
+            max_file_bytes = min(int(max_file_bytes_raw), MAX_FILE_BYTES_CEILING)
         except ValueError as exc:
             raise ValueError("max_file_bytes must be an integer") from exc
     dedupe = params.get("dedupe", ["false"])[0].lower() in {"1", "true", "yes"}
@@ -81,6 +100,7 @@ def _scan_payload(query: str, *, default_folder: Path | None, should_stop: Calla
     deep_signals = params.get("deep_signals", ["false"])[0].lower() in {"1", "true", "yes"}
     model_path_raw = params.get("model_path", [""])[0]
     no_default_engine = params.get("no_default_engine", ["false"])[0].lower() in {"1", "true", "yes"}
+    model_path: Path | list[Path] | None
     if model_path_raw.strip():
         model_path = _optional_path(model_path_raw)
     elif no_default_engine:
@@ -199,6 +219,10 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
         from .pixel_analyzer import analyze_pixels
         
         path = Path(file_path).expanduser()
+        with _READ_ROOTS_LOCK:
+            roots_registered = bool(_READ_ROOTS)
+        if roots_registered and not _read_root_allows(path):
+            return {"error": "허용되지 않은 경로입니다 — 먼저 해당 폴더를 스캔/등록하세요.", "detail": "path not under a registered read root"}
         if not path.exists():
             return {"error": f"파일이 존재하지 않습니다: {file_path}"}
         
@@ -257,7 +281,7 @@ def _extract_metadata(path: Path) -> dict[str, str]:
     """
     import struct
 
-    metadata = {}
+    metadata: dict[str, str] = {}
     try:
         if path.stat().st_size > DEFAULT_METADATA_BYTES:
             return metadata
@@ -388,11 +412,47 @@ def _preview_payload(query: str) -> tuple[int, bytes, str, str]:
     return 200, data, "", mime
 
 
+def _provenance() -> dict[str, object]:
+    """Coverage + threshold provenance attached to every scan-shaped payload.
+
+    A response that omits these lets a heuristic-only run read as a full
+    neural one downstream (GUI banner, /api/report, exported JSON).
+    """
+    from .vendor_weights import weights_coverage
+    try:
+        cov = weights_coverage(_models_dir())
+    except Exception:
+        cov = {}
+    return {"coverage": cov, "thresholds": {"source": "builtin_defaults", "provisional": True}}
+
+
+def _model_active(item: dict[str, object]) -> bool:
+    result = item.get("result")
+    if not isinstance(result, dict):
+        return False
+    ma = result.get("model_analysis")
+    return isinstance(ma, dict) and bool(ma.get("available"))
+
+
+def _part_bytes(part) -> bytes | None:
+    """Normalize a multipart payload to bytes (email API may return str)."""
+    payload = part.get_payload(decode=True)
+    if isinstance(payload, bytes):
+        return payload
+    if isinstance(payload, str):
+        return payload.encode("utf-8", errors="replace")
+    return None
+
+
 def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str, object]:
     analyzed = [item for item in items if not item.get("error")]
-    high = sum(1 for item in analyzed if (item.get("result") or {}).get("band") == "high")
-    medium = sum(1 for item in analyzed if (item.get("result") or {}).get("band") == "medium")
-    low = sum(1 for item in analyzed if (item.get("result") or {}).get("band") == "low")
+    def _band(item: dict[str, object]) -> str:
+        result = item.get("result")
+        return str(result.get("band")) if isinstance(result, dict) else ""
+
+    high = sum(1 for item in analyzed if _band(item) == "high")
+    medium = sum(1 for item in analyzed if _band(item) == "medium")
+    low = sum(1 for item in analyzed if _band(item) == "low")
     return {
         "total": len(items),
         "analyzed": len(analyzed),
@@ -401,9 +461,7 @@ def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str,
         "low": low,
         "unknown": len(analyzed) - high - medium - low,
         "unsupported_or_failed": len(items) - len(analyzed),
-        "external_model_active": sum(
-            1 for item in analyzed if (item.get("result") or {}).get("model_analysis")
-        ),
+        "external_model_active": sum(1 for item in analyzed if _model_active(item)),
         "source": source,
     }
 
@@ -422,7 +480,9 @@ def _archive_upload_items(filename: str, suffix: str, payload: bytes) -> list[di
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(payload)
             tmp_name = tmp.name
-        dest = tempfile.mkdtemp(prefix="dflens-up-")
+        # resolve: mkdtemp may return a symlinked path (/var→/private/var on
+        # macOS); members come back resolved, so relative_to needs the real path.
+        dest = str(Path(tempfile.mkdtemp(prefix="dflens-up-")).resolve())
         extraction = extract_archive(tmp_name, dest)
         items: list[dict[str, object]] = []
         for member in extraction.members:
@@ -434,12 +494,18 @@ def _archive_upload_items(filename: str, suffix: str, payload: bytes) -> list[di
             record["name"] = display
             items.append(record)
         if extraction.warnings or extraction.skipped:
+            # A container whose members could not all be analyzed is never a
+            # clean LOW — skipped/warned members mean unseen evidence.
+            partial = bool(extraction.warnings or extraction.skipped)
+            band = "unknown" if (partial or not extraction.members) else "low"
             items.append({
-                "name": filename, "path": filename, "kind": "archive", "status": "expanded",
+                "name": filename, "path": filename, "kind": "archive",
+                "status": "unknown" if band == "unknown" else "expanded",
                 "size_bytes": len(payload),
                 "result": {
-                    "score": 0, "band": "low", "band_label": "컨테이너",
-                    "verdict": f"압축 해제 — {len(extraction.members)}개 분석, {extraction.skipped}개 스킵",
+                    "score": 0, "band": band, "band_label": "판단 불가" if band == "unknown" else "컨테이너",
+                    "verdict": f"압축 해제 — {len(extraction.members)}개 분석, {extraction.skipped}개 스킵"
+                               + (" — 일부 구성을 분석하지 못했습니다" if partial else ""),
                     "signals": [{"title": "압축 컨테이너", "detail": f"구성 {len(extraction.members)}개", "weight": 0}],
                     "limitations": extraction.warnings,
                     "next_checks": [],
@@ -475,7 +541,7 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
     items: list[dict[str, object]] = []
     for part in message.iter_parts():
         filename = part.get_filename()
-        payload = part.get_payload(decode=True)
+        payload = _part_bytes(part)
         if not filename or payload is None:
             continue
         if len(items) >= MAX_UPLOAD_FILES:
@@ -508,6 +574,7 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
         "schema_version": 1,
         "summary": _summarize_records(items, "upload"),
         "items": items,
+        **_provenance(),
     }
 
 
@@ -525,8 +592,8 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
         return {"error": "분석할 텍스트가 너무 짧습니다 (8자 이상)."}
     if len(trimmed) > 256 * 1024:
         return {"error": "텍스트가 256KB를 초과합니다."}
-    models_dir = Path(__file__).resolve().parent.parent / "models"
-    model_path = models_dir if models_dir.is_dir() else (default_engine_profiles() or None)
+    models_dir = _models_dir()
+    model_path = models_dir if models_dir and models_dir.is_dir() else (default_engine_profiles() or None)
     # delete=False: Windows cannot reopen a delete=True NamedTemporaryFile,
     # so the analyzers below would hit Permission denied.
     tmp_name = ""
@@ -562,6 +629,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
         "advanced": advanced.to_json(),
         "forensic": forensic,
         "watermark": watermark,
+        **_provenance(),
     }
 
 
@@ -579,7 +647,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     if part is None:
         return {"error": "업로드된 파일이 없습니다"}
     filename = part.get_filename() or "upload"
-    payload = part.get_payload(decode=True) or b""
+    payload = _part_bytes(part) or b""
     suffix = Path(filename).suffix[:16]
     from .archives import is_archive
     if is_archive(filename):
@@ -589,9 +657,10 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
             "mode": "files",
             "summary": _summarize_records(items, "upload"),
             "items": items,
+            **_provenance(),
         }
-    models_dir = Path(__file__).resolve().parent.parent / "models"
-    model_path = models_dir if models_dir.is_dir() else (default_engine_profiles() or None)
+    models_dir = _models_dir()
+    model_path = models_dir if models_dir and models_dir.is_dir() else (default_engine_profiles() or None)
     tmp_name = ""
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -624,6 +693,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
         "item": record,
         "advanced": advanced,
         "forensic": forensic,
+        **_provenance(),
     }
 
 
@@ -636,7 +706,7 @@ def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
         b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
     )
     parts = [
-        p for p in message.iter_parts() if p.get_filename() and p.get_payload(decode=True)
+        p for p in message.iter_parts() if p.get_filename() and _part_bytes(p)
     ]
     if len(parts) < 2:
         return {"error": "비교할 파일 2개가 필요합니다"}
@@ -645,10 +715,13 @@ def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
         for part in parts[:2]:
             suffix = Path(part.get_filename() or "upload").suffix[:16]
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-                tmp.write(part.get_payload(decode=True) or b"")
+                tmp.write(_part_bytes(part) or b"")
                 tmp_paths.append(Path(tmp.name))
         from .core import compare_files
-        return compare_files(tmp_paths[0], tmp_paths[1])
+        result = compare_files(tmp_paths[0], tmp_paths[1])
+        if isinstance(result, dict) and not result.get("error"):
+            result.update(_provenance())
+        return result
     finally:
         for tmp_path in tmp_paths:
             tmp_path.unlink(missing_ok=True)
@@ -701,7 +774,9 @@ def _report_payload(body: bytes, format_override: str | None = None) -> bytes | 
     Accepts the items array the GUI holds (scan/upload payload rows), rebuilds
     ScanItem objects through the same cache deserializer used on disk, and
     returns the same report the CLI's --html-out produces — so web and CLI
-    artifacts are identical.
+    artifacts are identical. Posted ``thresholds``/``coverage`` provenance and
+    case metadata are preserved into the artifact; a report that drops them
+    would let an uncalibrated scan masquerade as a measured one.
     """
     try:
         data = json.loads(body.decode("utf-8"))
@@ -710,12 +785,43 @@ def _report_payload(body: bytes, format_override: str | None = None) -> bytes | 
     raw_items = data.get("items")
     if not isinstance(raw_items, list) or not raw_items:
         return {"error": "items array is required"}
+
+    thresholds = data.get("thresholds")
+    if thresholds is not None and not isinstance(thresholds, dict):
+        return {"error": "thresholds must be an object"}
+    coverage = data.get("coverage")
+    if coverage is not None and not isinstance(coverage, dict):
+        return {"error": "coverage must be an object"}
+
     try:
         items = [_scan_item_from_json(row) for row in raw_items if isinstance(row, dict)]
     except (TypeError, ValueError) as exc:
         return {"error": f"malformed item: {exc}"}
     if not items:
         return {"error": "items array is required"}
+
+    # Report hashing reads item.path from disk — confine those reads to the
+    # registered scan roots so a crafted payload cannot probe host files.
+    # Scan rows carry relative paths, so they are resolved against the
+    # registered roots first; an unresolved or escaping path stays unread.
+    read_roots_registered = bool(_READ_ROOTS)
+    def _resolve_item_path(path_text: str) -> Path | None:
+        p = Path(path_text).expanduser()
+        candidates = [p] if p.is_absolute() else [root / p for root in _READ_ROOTS]
+        for cand in candidates:
+            try:
+                resolved = cand.resolve()
+            except OSError:
+                continue
+            if resolved.is_file() and any(_is_within(resolved, r) for r in _READ_ROOTS):
+                return resolved
+        return None
+
+    def _path_allowed(path_text: str) -> bool:
+        if not read_roots_registered:
+            return True  # standalone GUI-less use — same trust as the CLI
+        return _resolve_item_path(path_text) is not None
+
     analyzed = [item for item in items if item.result is not None]
     bands = {"high": 0, "medium": 0, "low": 0, "unknown": 0}
     for item in analyzed:
@@ -731,7 +837,9 @@ def _report_payload(body: bytes, format_override: str | None = None) -> bytes | 
         unsupported_or_failed=len(items) - len(analyzed),
         capped=False,
         external_model_active=sum(
-            1 for item in analyzed if item.result and item.result.model_analysis
+            1
+            for item in analyzed
+            if item.result and item.result.model_analysis and item.result.model_analysis.available
         ),
     )
     req_format = (format_override or data.get("format") or "html").lower()
@@ -741,15 +849,36 @@ def _report_payload(body: bytes, format_override: str | None = None) -> bytes | 
     try:
         if req_format in ("evidence", "evidence-statement"):
             from .evidence_statement import build_evidence_statement, write_evidence_statement_pdf
-            case_no = str(data.get("case_no") or "(사건번호 입력)")
-            stmt = build_evidence_statement(items, case_no=case_no)
-            write_evidence_statement_pdf(tmp_path, stmt)
+            try:
+                stmt = build_evidence_statement(
+                    items,
+                    case_no=str(data.get("case_no") or "(사건번호 입력)"),
+                    case_name=str(data.get("case_name") or "성폭력처벌법위반(허위영상물편집등) 및 정보통신망법위반"),
+                    plaintiff=str(data.get("plaintiff") or "(의뢰사 상호명 입력) 귀하"),
+                    defendant=str(data.get("defendant") or "(피고/피의자 성명 입력)"),
+                    court=str(data.get("court") or "○○지방법원 귀중"),
+                    law_firm=str(data.get("law_firm") or "법무법인(유한) 대륜"),
+                    contact=str(data.get("contact") or ""),
+                    center=str(data.get("center") or "디지털포렌식 감정센터"),
+                    thresholds=thresholds,
+                    coverage=coverage,
+                )
+                write_evidence_statement_pdf(tmp_path, stmt)
+            except RuntimeError as exc:
+                return {"error": f"증거설명서 PDF 생성 실패: {exc}", "hint": "pip install 'deepfake-lens[forensic]' 후 재시도하거나 Markdown 출력을 사용하세요."}
         elif req_format == "pdf":
             from .reports import write_forensic_pdf_report
             exhibit_no = str(data.get("exhibit_no") or "갑 제        호증")
-            write_forensic_pdf_report(tmp_path, summary, items, exhibit_no=exhibit_no)
+            write_forensic_pdf_report(
+                tmp_path, summary, items,
+                exhibit_no=exhibit_no,
+                thresholds=thresholds,
+                coverage=coverage,
+                resolve_path=_resolve_item_path if read_roots_registered else None,
+                allow_path=_path_allowed,
+            )
         else:
-            write_html_report(tmp_path, summary, items)
+            write_html_report(tmp_path, summary, items, thresholds=thresholds)
         return tmp_path.read_bytes()
     finally:
         tmp_path.unlink(missing_ok=True)

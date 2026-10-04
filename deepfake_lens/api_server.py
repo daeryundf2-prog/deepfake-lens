@@ -13,6 +13,7 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+from .vendor_weights import default_models_dir
 
 try:
     from fastapi import Request
@@ -56,7 +57,7 @@ def _default_profiles() -> Path | None:
     filters by modality, so passing the models dir applies every engine that
     fits the input and degrades gracefully on missing checkpoints.
     """
-    models_dir = Path(__file__).resolve().parent.parent / "models"
+    models_dir = default_models_dir()
     return models_dir if models_dir.is_dir() else None
 
 
@@ -165,7 +166,7 @@ def create_app(
         try:
             # Bundled audio profiles degrade gracefully when checkpoints
             # or the optional torch stack is absent.
-            models_dir = Path(__file__).resolve().parent.parent / "models"
+            models_dir = default_models_dir()
             profiles = [p for name in ("aasist-runtime.json", "wav2vec-deepfake-audio-runtime.json") if (p := models_dir / name).is_file()]
             result = analyze_audio(file_path, model_path=profiles or None)
             return {"status": "success", "data": result.to_json()}

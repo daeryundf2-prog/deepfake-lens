@@ -91,7 +91,7 @@ def api_request_allowed(headers: Any, *, token: str | None) -> bool:
     return bool((headers.get(CLIENT_HEADER) or "").strip())
 
 
-def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Path | None = None, allow_lan: bool = False, token: str | None = None) -> None:
+def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Path | None = None, allow_lan: bool = False, token: str | None = None, models_dir: Path | None = None) -> None:
     """Run the web server with GUI.
 
     Binds to loopback by default; any other host requires ``allow_lan=True``
@@ -100,6 +100,9 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
     ``X-Deepfake-Lens-Token`` header. See docs/deepfake-lens-service.md for
     the full service contract.
     """
+    if models_dir is not None:
+        from .webapp_api import set_models_dir
+        set_models_dir(models_dir)
     if not allow_lan and host not in LOCAL_HOSTS:
         raise ValueError("local web app binds to localhost by default; pass --allow-lan to bind elsewhere")
     if allow_lan and not token:
@@ -290,7 +293,13 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
                 self.send_error(413, f"upload exceeds {MAX_UPLOAD_BYTES} bytes")
                 return
             body = self.rfile.read(length)
-            self._send_json(_analyze_upload_payload(self.headers.get("Content-Type") or "", body))
+            if len(body) != length:
+                self.send_error(400, "incomplete request body — connection dropped mid-upload")
+                return
+            try:
+                self._send_json(_analyze_upload_payload(self.headers.get("Content-Type") or "", body))
+            except Exception as exc:
+                self._send_json({"error": "업로드 분석 중 오류가 발생했습니다", "detail": f"{type(exc).__name__}: {exc}"})
 
         def _handle_compare(self) -> None:
             """Two-file comparison: speaker or stylometry by extension pair."""
@@ -303,7 +312,13 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
                 self.send_error(400, "invalid compare body size")
                 return
             body = self.rfile.read(length)
-            self._send_json(_compare_payload(self.headers.get("Content-Type") or "", body))
+            if len(body) != length:
+                self.send_error(400, "incomplete request body — connection dropped mid-upload")
+                return
+            try:
+                self._send_json(_compare_payload(self.headers.get("Content-Type") or "", body))
+            except Exception as exc:
+                self._send_json({"error": "비교 분석 중 오류가 발생했습니다", "detail": f"{type(exc).__name__}: {exc}"})
 
         def _handle_check(self) -> None:
             """Unified check-all: JSON {text} or a single multipart file.
@@ -324,6 +339,9 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
                 self.send_error(413, f"body exceeds {MAX_UPLOAD_BYTES} bytes")
                 return
             body = self.rfile.read(length)
+            if len(body) != length:
+                self.send_error(400, "incomplete request body — connection dropped mid-upload")
+                return
             content_type = self.headers.get("Content-Type") or ""
             if "application/json" in content_type:
                 try:

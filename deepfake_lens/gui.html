@@ -104,12 +104,12 @@
                 <div class="row mt-12">
                     <span class="note">픽셀 분석</span>
                     <div class="seg" id="pixel-seg" role="radiogroup" aria-label="픽셀 분석 모드">
-                        <button data-v="off" class="on">꺼짐</button>
-                        <button data-v="fast">빠름</button>
-                        <button data-v="deep">정밀</button>
+                        <button data-v="off" class="on" role="radio" aria-checked="true">꺼짐</button>
+                        <button data-v="fast" role="radio" aria-checked="false">빠름</button>
+                        <button data-v="deep" role="radio" aria-checked="false">정밀</button>
                     </div>
                     <span class="note">최대 파일</span>
-                    <input type="number" class="field" id="max-files" value="1000" min="1" max="10000">
+                    <input type="number" class="field" id="max-files" value="1000" min="1" max="10000" aria-label="최대 파일 수">
                 </div>
                 <div class="opt-grid mt-12">
                     <label class="switch"><input type="checkbox" id="opt-model" checked><span class="track"></span>뉴럴 모델</label>
@@ -143,6 +143,7 @@
 
         <!-- Results -->
         <section id="results-section" hidden>
+            <div id="prov-banner" hidden></div>
             <div class="summary" aria-live="polite" id="stat-pills">
                 <div class="pill-stat pa-red" data-band="high" role="button" tabindex="0" title="클릭하면 이 위험도만 표시"><div class="n c-red" id="stat-ai">0</div><div class="t"><span class="dot bg-red"></span>AI 생성 의심</div></div>
                 <div class="pill-stat pa-orange" data-band="medium" role="button" tabindex="0" title="클릭하면 이 위험도만 표시"><div class="n c-orange" id="stat-medium">0</div><div class="t"><span class="dot bg-orange"></span>주의 필요</div></div>
@@ -172,6 +173,19 @@
                     </div>
                 </div>
                 <div class="card-body">
+                    <details class="case-meta" id="case-meta">
+                        <summary>사건 정보 (감정서·증거설명서에 반영)</summary>
+                        <div class="case-grid">
+                            <label>사건번호<input class="field" id="case-no" placeholder="2024가단0000"></label>
+                            <label>사건명<input class="field" id="case-name" placeholder="성폭력처벌법위반(허위영상물편집등) 등"></label>
+                            <label>의뢰인<input class="field" id="case-plaintiff" placeholder="(의뢰사 상호명 입력) 귀하"></label>
+                            <label>피고/피의자<input class="field" id="case-defendant" placeholder="(피고/피의자 성명 입력)"></label>
+                            <label>수권법원<input class="field" id="case-court" placeholder="○○지방법원 귀중"></label>
+                            <label>법무법인<input class="field" id="case-firm" placeholder="법무법인(유한) ○○"></label>
+                            <label>감정센터<input class="field" id="case-center" placeholder="디지털포렌식 감정센터"></label>
+                            <label>연락처<input class="field" id="case-contact" placeholder="02-0000-0000"></label>
+                        </div>
+                    </details>
                     <div class="res-list" id="res-list"></div>
                     <div class="more-row" id="more-row" hidden><button class="btn" id="more-btn">더 보기</button></div>
                     <p class="note mt-10">점수는 진위 판정이 아니라 검토 우선순위입니다. 카드를 누르면 판정 근거와 한계를 볼 수 있습니다.</p>

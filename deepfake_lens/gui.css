@@ -142,7 +142,7 @@
 
         /* iOS toggle */
         .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; user-select: none; }
-        .switch input { display: none; }
+        .switch input { position: absolute; opacity: 0; width: 0; height: 0; margin: 0; }
         .switch .track {
             width: 44px; height: 26px; border-radius: 13px; flex: none;
             background: var(--card2); border: 1px solid var(--line);
@@ -471,3 +471,31 @@
         .split-pct-label { min-width: 36px; text-align: right; }
         .rev-row { display: flex; align-items: center; gap: 8px; }
         .rev-lbl { font-size: 11.5px; color: var(--muted); font-weight: 600; }
+
+        /* degraded/provisional provenance banner — examiner must see this */
+        .prov-banner {
+            border: 1px solid var(--orange);
+            background: rgba(255, 159, 10, 0.08);
+            border-radius: 10px;
+            padding: 10px 14px;
+            margin-bottom: 10px;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .prov-banner p { margin: 4px 0; }
+        .prov-banner b { color: var(--orange); }
+        .case-meta { margin-bottom: 10px; font-size: 13px; }
+        .case-meta summary { cursor: pointer; color: var(--muted); }
+        .case-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin-top: 8px; }
+        .case-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+        .btn.primary { }
+        .btn.primary, .btn.primary:hover {
+            background: linear-gradient(180deg, var(--accent), var(--accent-press));
+            color: #fff; border-color: transparent;
+        }
+        .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+        .prov-note {
+            margin: 8px 0; padding: 8px 10px; font-size: 12px;
+            border-left: 3px solid var(--orange); color: var(--muted);
+            background: rgba(255, 159, 10, 0.06); border-radius: 6px;
+        }
