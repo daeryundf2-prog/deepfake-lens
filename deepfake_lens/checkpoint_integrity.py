@@ -32,17 +32,20 @@ def _expected_sha256(checkpoint: Path) -> str | None:
     return pinned.lower() or None
 
 
-def verify_checkpoint_sha256(checkpoint: Path) -> None:
-    """Verify the checkpoint digest when a sidecar or env pin exists.
+def verify_checkpoint_sha256(checkpoint: Path, expected: str | None = None) -> None:
+    """Verify the checkpoint digest against a sidecar, env pin, or declared pin.
 
+    ``expected`` is the profile-declared ``sha256`` (or ``expected_sha256``)
+    from a runtime profile — when present it is the strongest pin and wins.
     No pin configured means "unverified" — operators that need provenance
-    must ship a sidecar or set the env var. A configured pin that mismatches
-    is a hard failure.
+    must declare a hash. A configured pin that mismatches is a hard failure.
     """
-    expected = _expected_sha256(checkpoint)
+    if expected is None:
+        expected = _expected_sha256(checkpoint)
     if expected is None:
         return
-    digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    expected = expected.strip().lower()
+    digest = _stream_sha256(checkpoint)
     if digest != expected:
         raise RuntimeError(
             f"checkpoint sha256 mismatch: {checkpoint}\n"
@@ -50,10 +53,18 @@ def verify_checkpoint_sha256(checkpoint: Path) -> None:
         )
 
 
-def load_torch_state(checkpoint: Path | str):
+def _stream_sha256(checkpoint: Path) -> str:
+    digest = hashlib.sha256()
+    with checkpoint.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def load_torch_state(checkpoint: Path | str, *, expected_sha256: str | None = None):
     """Load a torch checkpoint with weights_only=True and hash verification."""
     checkpoint = Path(checkpoint)
-    verify_checkpoint_sha256(checkpoint)
+    verify_checkpoint_sha256(checkpoint, expected_sha256)
     import torch
 
     return torch.load(str(checkpoint), map_location="cpu", weights_only=True)

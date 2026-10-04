@@ -30,6 +30,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .vendor_weights import default_models_dir
 from .checkpoint_integrity import load_torch_state
 
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
@@ -216,7 +217,7 @@ def _embed_sequence(crops, limitations: list[str]):
 
         if not _EMBEDDER_FAILED and _EMBEDDER is None:
             weights = (
-                Path(__file__).resolve().parent.parent / "models" / "sbi-effnet-b0.pth"
+                default_models_dir() / "sbi-effnet-b0.pth"
             )
             model = torchvision.models.efficientnet_b0(weights=None)
             sd = load_torch_state(weights)

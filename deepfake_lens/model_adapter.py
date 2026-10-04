@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .checkpoint_integrity import load_torch_state
+from .checkpoint_integrity import load_torch_state, verify_checkpoint_sha256
 from .model_cache import (  # noqa: F401 — re-exported for existing callers/tests
     _ModelLRU,
     _model_cache_limit,
@@ -463,6 +463,9 @@ def load_model_threshold(model_path: Path | str | None) -> int | None:
     return None
 
 
+_PROFILE_SHA_OK: set[Path] = set()
+
+
 def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *, base_dir: Path) -> ExternalModelAnalysis | None:
     runtime = str(profile.get("runtime") or "").lower()
     if runtime not in ALL_RUNTIMES:
@@ -501,6 +504,22 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
             detail=f"{runtime} checkpoint was not found: {checkpoint}",
             limitations=[*_checkpoint_hint(runtime), *profile_limitations],
         )
+    # A profile-declared sha256 is a hard provenance pin — a mismatched or
+    # tampered checkpoint must never silently produce scores.
+    declared_sha = str(profile.get("sha256") or profile.get("expected_sha256") or "")
+    if declared_sha and checkpoint.is_file() and checkpoint not in _PROFILE_SHA_OK:
+        try:
+            verify_checkpoint_sha256(checkpoint, declared_sha)
+            _PROFILE_SHA_OK.add(checkpoint)
+        except Exception as exc:
+            return ExternalModelAnalysis(
+                available=False,
+                score=0,
+                confidence="unavailable",
+                model=model_name,
+                detail=f"checkpoint integrity check failed: {exc}",
+                limitations=["프로파일 선언 SHA-256과 체크포인트가 불일치 — 가중치를 재프로비저닝하세요.", *profile_limitations],
+            )
     try:
         if runtime == "aide":
             values = _run_aide(checkpoint, media_path)

@@ -31,6 +31,7 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+from .vendor_weights import default_models_dir
 
 
 @dataclass(frozen=True)
@@ -314,7 +315,7 @@ MEASURED_LANDMARK_SOURCES = {"mediapipe-facelandmarker", "mediapipe-facemesh"}
 # FaceLandmarker (Tasks API) model asset. Bundled under models/ or pointed at
 # with DEEPFAKE_LENS_FACE_LANDMARKER; absent → the legacy FaceMesh path.
 _FACE_LANDMARKER_ENV = "DEEPFAKE_LENS_FACE_LANDMARKER"
-_FACE_LANDMARKER_ASSET = Path(__file__).resolve().parent.parent / "models" / "face_landmarker.task"
+_FACE_LANDMARKER_ASSET = default_models_dir() / "face_landmarker.task"
 
 
 def _facelandmarker_model_path() -> Path | None:

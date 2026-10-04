@@ -77,19 +77,35 @@ class VendorWeightsTest(unittest.TestCase):
         self.assertEqual(result["available_weights"], 1)
         self.assertEqual(result["missing_weights"], 1)
         self.assertIn("missing_detector", result["missing"])
-        # Missing weights must not report a clean pass for air-gap custody.
-        self.assertEqual(result["status"], "warn")
+        # Missing required weights must FAIL loudly for air-gap custody —
+        # a "warn" verdict lets an unprovisioned box look deployable.
+        self.assertEqual(result["status"], "fail")
 
     def test_bundle_offline_weights(self) -> None:
+        # Only the present-weight profile — a complete, deterministic bundle.
+        (self.models_dir / "missing_detector-runtime.json").unlink()
         bundle_dir = self.root / "offline_bundle"
         manifest_file = bundle_offline_weights(bundle_dir, models_dir=self.models_dir, copy_weights=True)
 
         self.assertTrue(manifest_file.is_file())
         manifest_json = json.loads(manifest_file.read_text(encoding="utf-8"))
-        self.assertEqual(manifest_json["total_profiles"], 2)
+        self.assertEqual(manifest_json["total_profiles"], 1)
         # Check files were copied
         self.assertTrue((bundle_dir / "test_detector-runtime.json").is_file())
         self.assertTrue((bundle_dir / "test_model.pth").is_file())
+        # Bundle manifests carry relative paths — no source-machine leakage.
+        for entry in manifest_json["entries"]:
+            self.assertNotIn("checkpoint_abspath", entry)
+        self.assertEqual(manifest_json["models_dir"], ".")
+
+    def test_bundle_refuses_incomplete_weights(self) -> None:
+        """copy_weights with an absent required checkpoint fails the bundle."""
+        with self.assertRaises(SystemExit):
+            bundle_offline_weights(
+                self.root / "bad_bundle",
+                models_dir=self.models_dir,
+                copy_weights=True,
+            )
 
     def test_bundle_preserves_nested_checkpoint_paths(self) -> None:
         """Nested checkpoint relpaths must keep their structure so the copied
@@ -102,6 +118,7 @@ class VendorWeightsTest(unittest.TestCase):
             encoding="utf-8",
         )
 
+        (self.models_dir / "missing_detector-runtime.json").unlink()
         bundle_dir = self.root / "nested_bundle"
         bundle_offline_weights(bundle_dir, models_dir=self.models_dir, copy_weights=True)
 
@@ -157,10 +174,11 @@ class FetchAndCoverageTest(unittest.TestCase):
             json.dumps({"name": "rej", "supported": False, "checkpoint": "nope.pth"}),
             encoding="utf-8",
         )
-        self.assertEqual(
-            weights_coverage(self.models_dir),
-            {"weights_total": 2, "weights_available": 1, "weights_missing": 1},
-        )
+        cov = weights_coverage(self.models_dir)
+        self.assertEqual(cov["weights_total"], 2)
+        self.assertEqual(cov["weights_available"], 1)
+        self.assertEqual(cov["weights_missing"], 1)
+        self.assertEqual(cov["weights_unsupported"], 1)
 
     def test_fetch_offline_refuses_network(self) -> None:
         result = fetch_weights(self.models_dir, offline=True)
@@ -200,8 +218,10 @@ class FetchAndCoverageTest(unittest.TestCase):
             def __exit__(self, *args):
                 return False
 
-            def read(self):
-                return payload
+            def read(self, size=-1):
+                data = payload if not hasattr(self, "_done") else b""
+                self._done = True
+                return data
 
         with mock.patch("urllib.request.urlopen", return_value=_FakeResponse()):
             result = fetch_weights(self.models_dir)
@@ -229,8 +249,10 @@ class FetchAndCoverageTest(unittest.TestCase):
             def __exit__(self, *args):
                 return False
 
-            def read(self):
-                return b"tampered"
+            def read(self, size=-1):
+                data = b"tampered" if not hasattr(self, "_done") else b""
+                self._done = True
+                return data
 
         with mock.patch("urllib.request.urlopen", return_value=_FakeResponse()):
             result = fetch_weights(self.models_dir)

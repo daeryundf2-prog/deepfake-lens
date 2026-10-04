@@ -23,6 +23,7 @@ import subprocess
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from .vendor_weights import default_models_dir
 
 # Correlation below this with clear speech activity = mismatch candidate.
 _WEAK_CORRELATION = 0.12
@@ -237,7 +238,7 @@ def _syncnet_analysis(video_path: Path) -> LipsyncAnalysis | None:
         if _SYNCNET_PIPELINE is None:
             from syncnet_python.syncnet_pipeline import SyncNetPipeline
 
-            models_dir = Path(__file__).resolve().parent.parent / "models"
+            models_dir = default_models_dir()
             s3fd = models_dir / "sfd_face.pth"
             syncnet = models_dir / "syncnet_v2.model"
             if not (s3fd.is_file() and syncnet.is_file()):
