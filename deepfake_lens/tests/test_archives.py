@@ -155,10 +155,18 @@ class ScanIntegrationTests(unittest.TestCase):
 
         with patch("deepfake_lens.core.tempfile.mkdtemp", side_effect=[str(dest) for dest in destinations]):
             with patch("deepfake_lens.core.extract_archive", side_effect=fail_second_extraction):
-                with self.assertRaisesRegex(RuntimeError, "preparation failed"):
-                    scan_directory(self.tmp)
+                # One corrupt archive must not kill the whole scan — it
+                # becomes a failed/unknown container row and cleanup runs.
+                summary, items = scan_directory(self.tmp)
         self.assertTrue(all(not dest.exists() for dest in destinations))
         self.assertTrue(all((self.tmp / name).is_file() for name in ("a.zip", "b.zip")))
+        # The failed archive surfaces as a non-clean row, never low.
+        b_rows = [i for i in items if i.path.startswith("b.zip")]
+        self.assertTrue(b_rows)
+        self.assertTrue(all(
+            (i.result is None) or (i.result.band.value != "low")
+            for i in b_rows
+        ))
 
     def test_scan_temp_dirs_cleaned_on_analysis_failure(self):
         make_zip(self.tmp / "bundle.zip", {"notes.txt": b"plain text inside the archive"})

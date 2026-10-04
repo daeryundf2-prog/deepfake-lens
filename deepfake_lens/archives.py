@@ -144,16 +144,31 @@ def _extract_zip(path: Path, dest: Path, out: ArchiveExtraction) -> None:
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             try:
+                written = 0
+                truncated = False
                 with zf.open(info) as src, target.open("wb") as dst:
                     while True:
                         chunk = src.read(1024 * 1024)
                         if not chunk:
                             break
+                        # Cap real bytes written — declared member sizes
+                        # can lie (forged local/central headers).
+                        remaining = MAX_ARCHIVE_MEMBER_BYTES - written
+                        if len(chunk) > remaining:
+                            dst.write(chunk[:remaining])
+                            truncated = True
+                            break
                         dst.write(chunk)
+                        written += len(chunk)
+                        if total + written > MAX_ARCHIVE_TOTAL_BYTES:
+                            truncated = True
+                            break
             except (OSError, zipfile.BadZipFile, RuntimeError):
                 out.skipped += 1
                 continue
-            total += info.file_size
+            total += written
+            if truncated:
+                out.warnings.append(f"{rel}: 크기 상한 초과로 일부만 해제됨")
             out.members.append(target)
 
 
@@ -184,16 +199,29 @@ def _extract_tar(path: Path, dest: Path, out: ArchiveExtraction) -> None:
                 if src is None:
                     out.skipped += 1
                     continue
+                written = 0
+                truncated = False
                 with src, target.open("wb") as dst:
                     while True:
                         chunk = src.read(1024 * 1024)
                         if not chunk:
                             break
+                        remaining = MAX_ARCHIVE_MEMBER_BYTES - written
+                        if len(chunk) > remaining:
+                            dst.write(chunk[:remaining])
+                            truncated = True
+                            break
                         dst.write(chunk)
+                        written += len(chunk)
+                        if total + written > MAX_ARCHIVE_TOTAL_BYTES:
+                            truncated = True
+                            break
             except (OSError, tarfile.TarError):
                 out.skipped += 1
                 continue
-            total += member.size
+            total += written
+            if truncated:
+                out.warnings.append(f"{rel}: 크기 상한 초과로 일부만 해제됨")
             out.members.append(target)
 
 

@@ -36,6 +36,7 @@ from .text_heuristics import (  # noqa: F401
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
 SUPPORTED_TEXT_EXTENSIONS = {".txt", ".md"}
 SCAN_JSON_SCHEMA_VERSION = 1
+TOOL_VERSION = "0.1.0"  # kept in sync with pyproject version
 DEFAULT_MAX_FILES = 1000
 DEFAULT_TEXT_BYTES = 64 * 1024
 
@@ -132,7 +133,11 @@ def scan_directory(
 
     paths: list[Path] = []
     capped = False
-    for path in _iter_files(root, recursive=recursive, allow_symlinks=allow_symlinks):
+    iter_errors: list[tuple[Path, OSError]] = []
+    for path in _iter_files(
+        root, recursive=recursive, allow_symlinks=allow_symlinks,
+        on_error=lambda p, e: iter_errors.append((p, e)),
+    ):
         if len(paths) >= max_files:
             capped = True
             break
@@ -156,7 +161,17 @@ def scan_directory(
             dest = Path(tempfile.mkdtemp(prefix="dflens-arc-"))
             temp_dirs.append(dest)
             dest = dest.resolve()
-            extraction = extract_archive(path, dest)
+            try:
+                extraction = extract_archive(path, dest)
+            except Exception as exc:
+                # A corrupt/unreadable archive becomes a failed container
+                # row — one bad file must not kill the whole scan.
+                archive_meta[rel] = {
+                    "path": path, "fmt": archive_format(path),
+                    "skipped": 0, "warnings": [f"압축 해제 실패: {exc}"],
+                }
+                archive_members[rel] = []
+                continue
             archive_meta[rel] = {
                 "path": path, "fmt": archive_format(path),
                 "skipped": extraction.skipped, "warnings": extraction.warnings,
@@ -166,7 +181,7 @@ def scan_directory(
                 member_rel = member.relative_to(dest).as_posix()
                 specs.append((member, f"{rel}::{member_rel}"))
 
-        return _scan_specs(
+        summary, items = _scan_specs(
             specs, duplicates_paths=[p for p, d in specs if d is None],
             archive_members=archive_members, archive_meta=archive_meta, root=root, dedupe=dedupe,
             max_file_bytes=max_file_bytes, hash_db_path=hash_db_path,
@@ -176,6 +191,16 @@ def scan_directory(
             cache_path=cache_path, workers=workers, deep_signals=deep_signals,
             capped=capped, thresholds=thresholds, should_stop=should_stop,
         )
+        if iter_errors:
+            for err_path, exc in iter_errors:
+                items.append(ScanItem(
+                    _display_path(err_path, root=root), err_path.name,
+                    "unknown", "failed", 0,
+                    error=f"directory unreadable: {exc}",
+                ))
+            items = sort_items(items)
+            summary = summarize(items, capped=summary.capped, cached=summary.cached)
+        return summary, items
     finally:
         for temp_dir in temp_dirs:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -197,25 +222,32 @@ def _archive_container_item(
         size = path.stat().st_size
     except OSError:
         size = 0
+    analyzed_members = [i for i in (member_items or []) if i.result and i.result.band != RiskBand.UNKNOWN]
     worst = RiskBand.UNKNOWN
-    if member_items:
+    for item in analyzed_members:
+        band = item.result.band  # type: ignore[union-attr]
         order = {RiskBand.LOW: 0, RiskBand.MEDIUM: 1, RiskBand.HIGH: 2}
-        for item in member_items:
-            band = item.result.band if item.result else RiskBand.UNKNOWN
-            if band != RiskBand.UNKNOWN and order.get(band, -1) > order.get(worst, -1):
-                worst = band
-    band = worst if worst != RiskBand.UNKNOWN else RiskBand.LOW
+        if order.get(band, -1) > order.get(worst, -1):
+            worst = band
+    # A container with zero analyzable members is NOT a clean scan —
+    # corrupt/empty/all-unsupported archives stay UNKNOWN, never LOW.
+    band = worst
     score = max((item.result.score for item in member_items or [] if item.result), default=0)
     signals = [EvidenceSignal("압축 컨테이너", f"{fmt or 'archive'} 형식 — 구성 파일 {members}개 개별 분석" + (f", 스킵 {skipped}개" if skipped else ""), 0)]
     limitations = list(warnings)
     limitations.append("컨테이너 행은 구성 파일 결과의 요약입니다. '아카이브::경로' 형태의 개별 결과를 확인하세요.")
+    verdict = (
+        f"압축 해제됨 — 구성 파일 {members}개 분석, {skipped}개 스킵"
+        if analyzed_members
+        else "아카이브에서 분석 가능한 구성 파일이 없습니다 — 판정 불가"
+    )
     return ScanItem(
-        rel, name, "archive", "analyzed", size,
+        rel, name, "archive", "analyzed" if analyzed_members else "unknown", size,
         ClassificationResult(
             score=score,
             band=band,
             band_label=RISK_LABELS.get(band, band.value),
-            verdict=f"압축 해제됨 — 구성 파일 {members}개 분석, {skipped}개 스킵",
+            verdict=verdict,
             signals=signals,
             limitations=limitations,
             source_guess=SourceGuess.unknown("압축 컨테이너에는 출처 추정이 적용되지 않습니다."),
@@ -252,6 +284,10 @@ def _scan_specs(
     duplicates = _duplicate_map(duplicates_paths, root=root, max_file_bytes=max_file_bytes, hash_db_path=hash_db_path) if dedupe or hash_db_path else {}
     cache = _load_scan_cache(cache_path)
     cache_items = cache.setdefault("items", {}) if cache is not None else {}
+    # Cache keys embed analysis provenance so a stored verdict computed
+    # under different thresholds or model coverage is never replayed as
+    # if it were produced by the current configuration.
+    cache_provenance = _cache_provenance(thresholds) if cache is not None else ""
 
     def analyze_one(spec: tuple[Path, str | None]) -> tuple[ScanItem, str | None, bool]:
         path, display = spec
@@ -285,11 +321,16 @@ def _scan_specs(
                 heatmaps=heatmaps,
                 model_path=model_path,
                 deep_signals=deep_signals,
+                provenance=cache_provenance,
             )
             cached = cache_items.get(key) if isinstance(cache_items, dict) else None
             if isinstance(cached, dict):
-                return _scan_item_from_json(cached), key, True
-        item = analyze_file(
+                try:
+                    return _scan_item_from_json(cached), key, True
+                except (ValueError, TypeError, KeyError):
+                    pass  # corrupt entry — fall through and re-analyze
+        try:
+            item = analyze_file(
             path,
             root=root,
             display=display,
@@ -305,6 +346,16 @@ def _scan_specs(
             deep_signals=deep_signals,
             thresholds=thresholds,
         )
+        except Exception as exc:
+            # Analyzer internals can raise non-OSError (codec errors,
+            # malformed profiles, decoder failures). Surface a failed row
+            # instead of aborting the entire batch.
+            item = ScanItem(
+                display or _display_path(path, root=root),
+                path.name, "unknown", "failed", 0,
+                error=f"analysis error: {type(exc).__name__}: {exc}",
+            )
+            return item, key, False
         if display is not None and "::" in display:
             archive_members.setdefault(display.split("::", 1)[0], []).append(item)
         return item, key, False
@@ -385,13 +436,14 @@ def analyze_file(
     if is_archive(file_path):
         # Single-item callers get a container row; member-level results
         # come through scan_directory / upload paths that expand first.
+        # An unexpanded container is "unknown" — never a clean LOW verdict.
         return ScanItem(
             display_path, item_name, "archive", "analyzed", size,
             ClassificationResult(
                 score=0,
-                band=RiskBand.LOW,
-                band_label="컨테이너",
-                verdict=f"{archive_format(file_path)} 압축 파일 — 내부 파일은 폴더 스캔 또는 업로드 경로에서 개별 분석됩니다.",
+                band=RiskBand.UNKNOWN,
+                band_label="판단 유보(컨테이너)",
+                verdict=f"{archive_format(file_path)} 압축 파일 — 내용물 미분석 상태로 판단을 유보합니다. 내부 파일은 폴더 스캔 또는 업로드 경로에서 개별 분석됩니다.",
                 signals=[EvidenceSignal("압축 컨테이너", "내용물 분석은 스캔 경로에서 수행됩니다", 0)],
                 limitations=["단일 파일 분석에서는 압축 내부를 펼치지 않습니다."],
                 source_guess=SourceGuess.unknown("압축 컨테이너에는 출처 추정이 적용되지 않습니다."),
@@ -491,7 +543,10 @@ def _audio_result(analysis: AudioAnalysis) -> ClassificationResult:
         band_label=analysis.band_label,
         verdict=analysis.verdict,
         signals=[EvidenceSignal(signal.title, signal.detail, signal.weight) for signal in analysis.signals],
-        limitations=list(analysis.limitations),
+        limitations=[
+            *analysis.limitations,
+            *(analysis.model_analysis.limitations if analysis.model_analysis else []),
+        ],
         source_guess=source_guess,
         next_checks=["원본 녹음이나 통화 원본을 확보하세요.", "동일 화자의 다른 샘플과 음향 특성을 비교하세요.", "업로드 맥락과 파일 메타데이터를 함께 검토하세요."],
         model_analysis=analysis.model_analysis,
@@ -660,7 +715,10 @@ def _video_result(analysis: "VideoTemporalAnalysis") -> ClassificationResult:
         band_label=analysis.band_label,
         verdict=analysis.verdict,
         signals=[EvidenceSignal(signal.title, signal.detail, signal.weight) for signal in analysis.signals],
-        limitations=list(analysis.limitations),
+        limitations=[
+            *analysis.limitations,
+            *(analysis.model_analysis.limitations if analysis.model_analysis else []),
+        ],
         source_guess=source_guess,
         next_checks=[
             "원본 촬영 파일(인카메라 파일)이나 원 스트림을 확보하세요.",
@@ -947,7 +1005,26 @@ def _thresholds_json(thresholds: object | None) -> dict[str, object]:
     }
 
 
-def scan_to_json(summary: BatchScanSummary, items: list[ScanItem], *, thresholds: object | None = None) -> dict[str, object]:
+def _cache_provenance(thresholds: object | None) -> str:
+    """Provenance string that invalidates cached verdicts on drift."""
+    from .vendor_weights import weights_coverage
+
+    try:
+        cov = weights_coverage()
+    except Exception:
+        cov = {}
+    tj = _thresholds_json(thresholds)
+    return "|".join(
+        [
+            f"tool:{TOOL_VERSION}",
+            f"schema:{SCAN_JSON_SCHEMA_VERSION}",
+            f"thr:{tj.get('source', '')}:{tj.get('version', '')}:{tj.get('dataset_fingerprint', '')}",
+            f"w:{cov.get('weights_available', 0)}/{cov.get('weights_total', 0)}",
+        ]
+    )
+
+
+def scan_to_json(summary: BatchScanSummary, items: list[ScanItem], *, thresholds: object | None = None, models_dir: object | None = None) -> dict[str, object]:
     from .vendor_weights import weights_coverage
 
     return {
@@ -955,7 +1032,7 @@ def scan_to_json(summary: BatchScanSummary, items: list[ScanItem], *, thresholds
         "summary": summary.to_json(),
         # Weight coverage is surfaced per-scan so a heuristic-only run can
         # never masquerade as a full neural pipeline in downstream reports.
-        "coverage": weights_coverage(),
+        "coverage": weights_coverage(models_dir),
         # Threshold provenance: unmeasured builtin defaults vs a profile
         # fit on labeled data (with its corpus fingerprint and sample n).
         "thresholds": _thresholds_json(thresholds),
@@ -963,8 +1040,8 @@ def scan_to_json(summary: BatchScanSummary, items: list[ScanItem], *, thresholds
     }
 
 
-def scan_to_json_text(summary: BatchScanSummary, items: list[ScanItem], *, thresholds: object | None = None) -> str:
-    return json.dumps(scan_to_json(summary, items, thresholds=thresholds), ensure_ascii=False, indent=2)
+def scan_to_json_text(summary: BatchScanSummary, items: list[ScanItem], *, thresholds: object | None = None, models_dir: object | None = None) -> str:
+    return json.dumps(scan_to_json(summary, items, thresholds=thresholds, models_dir=models_dir), ensure_ascii=False, indent=2)
 
 
 

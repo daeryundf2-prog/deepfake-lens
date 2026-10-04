@@ -28,11 +28,19 @@ class PixelRaster:
     source: str
 
 
+MAX_SOURCE_IMAGE_BYTES = 512 * 1024 * 1024
+
+
 def _load_raster(path: Path, *, max_side: int) -> tuple[PixelRaster | None, list[str]]:
+    # Read with a cap — a huge/corrupt file must not be slurped fully
+    # into memory before the format checks even run.
     try:
-        data = path.read_bytes()
+        with path.open("rb") as handle:
+            data = handle.read(MAX_SOURCE_IMAGE_BYTES + 1)
     except OSError as exc:
         return None, [f"이미지 픽셀을 읽지 못했습니다: {exc}"]
+    if len(data) > MAX_SOURCE_IMAGE_BYTES:
+        return None, [f"이미지 파일이 너무 큽니다 ({MAX_SOURCE_IMAGE_BYTES // (1024 * 1024)}MB 상한)."]
 
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         raster, limitation = _load_png_raster(data, max_side=max_side)
