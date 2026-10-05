@@ -39,14 +39,22 @@ def _load_thresholds_arg(args: argparse.Namespace):
     """Resolve --thresholds to a ThresholdProfile; warn when it cannot load."""
     path = getattr(args, "thresholds", None)
     if path is None:
-        return None
+        # Auto-discovery: a provisioned models dir (bundle install or
+        # DEEPFAKE_LENS_MODELS_DIR) carrying thresholds.json applies it —
+        # an admin should not have to pass --thresholds on every scan.
+        from .vendor_weights import default_models_dir
+        auto = default_models_dir() / "thresholds.json"
+        if auto.is_file():
+            path = auto
+        else:
+            return None
     profile = load_threshold_profile(path)
     if profile is None:
         print(f"warning: threshold profile unreadable or wrong version: {path}", file=sys.stderr)
     elif profile.provisional:
         print(
             f"warning: threshold profile {path} is provisional "
-            f"({profile.samples} samples < {MIN_CALIBRATION_SAMPLES}); thresholds are unvalidated",
+            f"({profile.provisional_reason}); thresholds are unvalidated",
             file=sys.stderr,
         )
     return profile

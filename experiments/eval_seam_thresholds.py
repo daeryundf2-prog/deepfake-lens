@@ -51,6 +51,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from deepfake_lens.calibration import (  # noqa: E402
+    MIN_VALIDATION_AUROC,
     ThresholdProfile,
     THRESHOLD_PROFILE_VERSION,
     write_threshold_profile,
@@ -234,6 +235,16 @@ def main() -> int:
         metrics["score_auroc"] = auroc(score_pairs) or 0.0
         metrics["score_eer"] = eer(score_pairs) or 0.0
         metrics["coverage"] = round(len(scored) / len(rows), 4)
+        metrics["min_validation_auroc"] = MIN_VALIDATION_AUROC
+
+    # Quality gate: an aggregate score that cannot beat chance must not ship
+    # fitted cutoffs. The profile keeps the honest metrics and provenance but
+    # carries no values, so consumers fall back to builtin defaults and the
+    # profile's provisional flag stays set via the AUROC floor.
+    measured_auroc = metrics.get("score_auroc")
+    if isinstance(measured_auroc, (int, float)) and measured_auroc < MIN_VALIDATION_AUROC:
+        metrics["values_rejected_low_auroc"] = 1
+        values = {}
 
     profile = ThresholdProfile(
         version=THRESHOLD_PROFILE_VERSION,
@@ -263,6 +274,12 @@ def main() -> int:
 
     status = "PROVISIONAL" if profile.provisional else "MEASURED"
     print(f"[{status}] entries={len(entries)} scored={len(scored)} unmeasured={skipped}")
+    if metrics.get("values_rejected_low_auroc"):
+        print(
+            f"WARNING: score AUROC {metrics['score_auroc']:.3f} below validation floor "
+            f"{MIN_VALIDATION_AUROC} — fitted cutoffs rejected, profile ships builtin defaults "
+            "and stays provisional"
+        )
     if "score_auroc" in metrics:
         print(f"score auroc={metrics['score_auroc']} eer={metrics['score_eer']} coverage={metrics['coverage']}")
     for key, fitted in detail.items():

@@ -12,6 +12,12 @@ from .datasets import is_negative_label, is_positive_label
 DEFAULT_THRESHOLD = 67
 CALIBRATOR_VERSION = "score-calibrator-v1"
 MIN_CALIBRATION_SAMPLES = 20
+
+# A measured aggregate score must at least beat a coin flip before its fitted
+# cutoffs are trusted. Below this AUROC the corpus demonstrably does not
+# separate real from fake, so the profile must stay provisional regardless of
+# sample count — shipping those cutoffs as "measured" would be dishonest.
+MIN_VALIDATION_AUROC = 0.55
 MIN_CLASS_SAMPLES = 5
 
 
@@ -367,8 +373,19 @@ class ThresholdProfile:
     metrics: dict[str, float | int] | None = None
 
     @property
+    def provisional_reason(self) -> str | None:
+        """Why this profile is unvalidated, or None when it is trusted."""
+        if self.samples < MIN_CALIBRATION_SAMPLES:
+            return f"n={self.samples} < {MIN_CALIBRATION_SAMPLES}"
+        metrics = self.metrics or {}
+        auroc = metrics.get("score_auroc")
+        if isinstance(auroc, (int, float)) and float(auroc) < MIN_VALIDATION_AUROC:
+            return f"score_auroc={float(auroc):.3f} < {MIN_VALIDATION_AUROC}"
+        return None
+
+    @property
     def provisional(self) -> bool:
-        return self.samples < MIN_CALIBRATION_SAMPLES
+        return self.provisional_reason is not None
 
     def value(self, key: str, default: float) -> float:
         raw = self.values.get(key)

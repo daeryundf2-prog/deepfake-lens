@@ -1,0 +1,18 @@
+{
+  "version": "layer-thresholds-v1",
+  "values": {},
+  "samples": 123,
+  "provisional": true,
+  "dataset_fingerprint": "446515c21e6dec28a2f9086c97d71ad6a2d5582338fcf351e22b35e584eb89ce",
+  "measured_at": "2026-10-05T00:12:51Z",
+  "metrics": {
+    "n": 132,
+    "scored": 123,
+    "skipped_unmeasured": 9,
+    "score_auroc": 0.469973544973545,
+    "score_eer": 0.5415472779369628,
+    "coverage": 0.9318,
+    "min_validation_auroc": 0.55,
+    "values_rejected_low_auroc": 1
+  }
+}

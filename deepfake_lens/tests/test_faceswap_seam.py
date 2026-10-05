@@ -172,6 +172,28 @@ class ThresholdProfileTest(unittest.TestCase):
         )
         self.assertTrue(profile.provisional)
 
+    def test_low_auroc_profile_is_provisional(self) -> None:
+        # A measured corpus whose aggregate score cannot beat chance must not
+        # ship as "measured" — the AUROC floor keeps it provisional regardless
+        # of sample count.
+        profile = ThresholdProfile(
+            version=THRESHOLD_PROFILE_VERSION,
+            values={},
+            samples=MIN_CALIBRATION_SAMPLES + 100,
+            metrics={"score_auroc": 0.47},
+        )
+        self.assertTrue(profile.provisional)
+        self.assertIn("score_auroc", profile.provisional_reason or "")
+
+        good = ThresholdProfile(
+            version=THRESHOLD_PROFILE_VERSION,
+            values={},
+            samples=MIN_CALIBRATION_SAMPLES + 100,
+            metrics={"score_auroc": 0.9},
+        )
+        self.assertFalse(good.provisional)
+        self.assertIsNone(good.provisional_reason)
+
     def test_wrong_version_rejected(self) -> None:
         out = self.root / "bad.json"
         out.write_text(json.dumps({"version": "other", "values": {}}), encoding="utf-8")

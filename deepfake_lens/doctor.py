@@ -80,7 +80,7 @@ def _check_thresholds(root: Path) -> Check:
         return Check(
             "thresholds.json",
             "warn",
-            f"provisional — n={profile.samples} < {MIN_CALIBRATION_SAMPLES}; cutoffs unvalidated",
+            f"provisional — {profile.provisional_reason}; cutoffs unvalidated",
         )
     fp = profile.dataset_fingerprint[:16]
     detail = f"measured n={profile.samples}"

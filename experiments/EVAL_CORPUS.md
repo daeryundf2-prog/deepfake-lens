@@ -120,3 +120,23 @@ implies a measurement that did not happen.
 Cross-domain check before shipping: fit on one corpus, evaluate the
 profile on a held-out second corpus (in-domain numbers alone are a known
 overfit — the SBI candidate measured 0.84 in-domain vs 0.79 cross).
+
+## Measurement log
+
+### 2026-10-05 — SBI self-blend corpus (Wikimedia portraits)
+
+- Corpus: `scripts/fetch_diverse_faces.py` → 66 real / 66 fake (SBI
+  self-blends) + 21/21 held-out val; fingerprint
+  `446515c21e6dec28a2f9086c97d71ad6a2d5582338fcf351e22b35e584eb89ce`
+- Result: `analyze_faceswap_seam` aggregate score **AUROC 0.470**,
+  EER 0.542 on 123 scored samples — below the 0.55 validation floor.
+  The heuristic seam metrics do **not** discriminate SBI self-blends on
+  this diverse-face population; fitted cutoffs were rejected and the
+  shipped `models/thresholds.json` stays provisional with empty values.
+- Implication: de-provisionalizing `faceswap_seam` requires a real
+  faceswap corpus (FF++/KoDF per the table above) — SBI self-blends do
+  not produce the boundary artifacts the layer looks for.
+- Also fixed: OpenCV 5.x no longer ships `haarcascade_frontalface_default.xml`
+  under `cv2.data`; `face._detect_faces` raised `cv2.error` on every frame.
+  The cascade is now vendored under `deepfake_lens/models/` (BSD-3, see
+  models/NOTICE.md) and detection is crash-safe when cascades are absent.
