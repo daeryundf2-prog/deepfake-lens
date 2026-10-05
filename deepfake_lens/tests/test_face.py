@@ -104,6 +104,33 @@ class FaceAnalysisTest(unittest.TestCase):
         self.assertFalse(hasattr(face_module, "_symmetry_analysis"))
 
     @unittest.skipUnless(_has_cv2(), "opencv not installed")
+    def test_detect_faces_survives_broken_cascade(self) -> None:
+        """OpenCV 5.x ships CascadeClassifier without the cascade XML, and
+        detectMultiScale raises instead of returning []. _detect_faces must
+        degrade to the bundled XML or MediaPipe, never propagate."""
+        import cv2
+        import numpy as np
+
+        import deepfake_lens.face as face_module
+
+        class _BrokenCascade:
+            def __init__(self, *args, **kwargs) -> None:
+                raise cv2.error("(-215:Assertion failed) !empty()")
+
+        image = np.zeros((200, 200, 3), dtype=np.uint8)
+        # create=True: some OpenCV builds lack CascadeClassifier entirely.
+        with patch.object(cv2, "CascadeClassifier", _BrokenCascade, create=True):
+            result = face_module._detect_faces(image)
+        self.assertIsInstance(result, list)
+
+    @unittest.skipUnless(_has_cv2(), "opencv not installed")
+    def test_bundled_cascade_is_packaged(self) -> None:
+        """cv2.data no longer ships the Haar XML on 5.x — the bundled copy
+        under deepfake_lens/models must exist so air-gapped installs detect."""
+        bundled = Path(__file__).resolve().parent.parent / "models" / "haarcascade_frontalface_default.xml"
+        self.assertTrue(bundled.is_file(), f"missing bundled cascade: {bundled}")
+
+    @unittest.skipUnless(_has_cv2(), "opencv not installed")
     def test_circular_hue_same_red_family_does_not_fire(self) -> None:
         """Face hue 5 vs surround hue 175 is the same red family on the
         OpenCV hue circle and must not read as a 170-unit mismatch."""

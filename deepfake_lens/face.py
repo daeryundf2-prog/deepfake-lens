@@ -232,10 +232,29 @@ def _detect_faces(image: Any) -> list[FaceRegion]:
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     regions = []
-    if hasattr(cv2, "CascadeClassifier") and hasattr(getattr(cv2, "data", None), "haarcascades"):
-        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-        face_cascade = cv2.CascadeClassifier(cascade_path)
-        faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+    if hasattr(cv2, "CascadeClassifier"):
+        faces: Any = []
+        try:
+            # OpenCV 5.x keeps CascadeClassifier (xobjdetect) but no longer
+            # ships the cascade XML — fall back to the bundled copy under
+            # models/ so air-gapped installs still detect faces.
+            cv2_data = getattr(cv2, "data", None)
+            cv2_cascade_dir = getattr(cv2_data, "haarcascades", "") or ""
+            candidates = [
+                cv2_cascade_dir + "haarcascade_frontalface_default.xml" if cv2_cascade_dir else "",
+                os.environ.get("DEEPFAKE_LENS_HAAR_CASCADE") or "",
+                str(Path(__file__).resolve().parent / "models" / "haarcascade_frontalface_default.xml"),
+            ]
+            face_cascade = None
+            for cand in candidates:
+                if cand and Path(str(cand)).is_file():
+                    face_cascade = cv2.CascadeClassifier(str(cand))
+                    if not face_cascade.empty():
+                        break
+            if face_cascade is not None:
+                faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+        except cv2.error:
+            faces = []
         for x, y, w, h in faces:
             landmarks, source = _face_landmarks(image, x, y, w, h)
             regions.append(

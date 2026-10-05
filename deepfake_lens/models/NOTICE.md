@@ -18,3 +18,10 @@ repository. Verify each license before redistributing or commercializing.
 
 Each profile's `license` field mirrors this table. The `models` CLI prints
 the same field, and every scan result surfaces the profile's `limitations`.
+
+## Bundled detector assets
+
+- `haarcascade_frontalface_default.xml` — OpenCV frontal-face cascade
+  (OpenCV, BSD 3-Clause). Vendored because OpenCV 5.x no longer ships the
+  cascade XML with `cv2.data`; used by `face._detect_faces` before the
+  MediaPipe fallback.
