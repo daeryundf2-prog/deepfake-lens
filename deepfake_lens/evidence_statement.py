@@ -319,16 +319,47 @@ def write_evidence_statement_pdf(path: Path | str, statement: EvidenceStatement)
         page.insert_text(pymupdf.Point(margin_l + 180, y_top + 14), "작성자 및 일자", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
         page.insert_text(pymupdf.Point(margin_l + 285, y_top + 14), "입증취지 및 위법성 요건 대조", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
 
-    # Measure each row's required height against column 4 (the widest content).
-    # insert_textbox returns the spare height — negative when the text would
-    # overflow — so needed = rect_height - spare holds for both signs.
+    # Measure each row's required height across ALL free-text cells —
+    # insert_textbox returns the spare height, negative on overflow, so
+    # needed = rect_height - spare. Measuring only the widest column would
+    # let a long document name silently clip.
+    col2_w, col3_w = 120.0, 100.0
     measure = pymupdf.open()
     probe_page = measure.new_page(width=page_w, height=page_h)
     row_heights: list[float] = []
+    fitted_purpose: list[str] = []
+    fitted_doc: list[str] = []
+    fitted_author: list[str] = []
     for entry in statement.entries:
-        probe = pymupdf.Rect(0, 0, col4_w, 2000)
-        spare = probe_page.insert_textbox(probe, entry.purpose_of_proof, fontname=font_ko, fontsize=6.8)
-        needed = probe.height - spare
+        def _needed(width: float, text: str, size: float) -> float:
+            probe = pymupdf.Rect(0, 0, width, 2000)
+            return probe.height - probe_page.insert_textbox(probe, text or " ", fontname=font_ko, fontsize=size)
+
+        def _fit(width: float, text: str, size: float, max_h: float) -> str:
+            """Trim text so it renders inside max_h — with an explicit
+            ellipsis marker instead of silent clipping (a clipped purpose
+            statement would hide legal mapping from the filing)."""
+            text = text or " "
+            if _needed(width, text, size) <= max_h:
+                return text
+            marker = " …(이후 내용 생략 — 원문은 감정 데이터 참조)"
+            lo, hi = 0, len(text)
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                if _needed(width, text[:mid].rstrip() + marker, size) <= max_h:
+                    lo = mid
+                else:
+                    hi = mid - 1
+            return text[:lo].rstrip() + marker
+
+        fitted_purpose.append(_fit(col4_w, entry.purpose_of_proof, 6.8, 606.0))
+        fitted_doc.append(_fit(col2_w, entry.document_name, 7.5, 606.0))
+        fitted_author.append(_fit(col3_w, entry.author_date, 7.5, 606.0))
+        needed = max(
+            _needed(col4_w, fitted_purpose[-1], 6.8),
+            _needed(col2_w, fitted_doc[-1], 7.5),
+            _needed(col3_w, fitted_author[-1], 7.5),
+        )
         row_heights.append(min(max(58.0, needed + 10.0), 620.0))
     measure.close()
 
@@ -356,16 +387,16 @@ def write_evidence_statement_pdf(path: Path | str, statement: EvidenceStatement)
 
         # Col 2: Document Name
         doc_rect = pymupdf.Rect(margin_l + 55, y + 6, margin_l + 175, y + row_h - 4)
-        page.insert_textbox(doc_rect, entry.document_name, fontname=font_ko, fontsize=7.5, color=(0.2, 0.2, 0.2))
+        page.insert_textbox(doc_rect, fitted_doc[idx], fontname=font_ko, fontsize=7.5, color=(0.2, 0.2, 0.2))
 
         # Col 3: Author and Date
         auth_rect = pymupdf.Rect(margin_l + 180, y + 6, margin_l + 280, y + row_h - 4)
-        page.insert_textbox(auth_rect, entry.author_date, fontname=font_ko, fontsize=7.5, color=(0.3, 0.3, 0.3))
+        page.insert_textbox(auth_rect, fitted_author[idx], fontname=font_ko, fontsize=7.5, color=(0.3, 0.3, 0.3))
 
         # Col 4: Purpose of proof & legal mapping
         purpose_rect = pymupdf.Rect(margin_l + 285, y + 4, margin_r - 5, y + row_h - 4)
         # Compact single-line summary with statutes
-        page.insert_textbox(purpose_rect, entry.purpose_of_proof, fontname=font_ko, fontsize=6.8, color=(0.15, 0.15, 0.15))
+        page.insert_textbox(purpose_rect, fitted_purpose[idx], fontname=font_ko, fontsize=6.8, color=(0.15, 0.15, 0.15))
 
         y += row_h
 

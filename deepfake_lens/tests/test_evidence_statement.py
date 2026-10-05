@@ -224,3 +224,54 @@ class EvidenceStatementTest(unittest.TestCase):
         self.assertEqual(resp.headers.get("content-type"), "application/pdf")
         self.assertIn("deepfake-lens-evidence-statement.pdf", resp.headers.get("content-disposition", ""))
         self.assertTrue(resp.content.startswith(b"%PDF-"))
+
+    @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf not installed")
+    def test_pdf_pagination_stress_60_entries(self) -> None:
+        """60 mixed entries (long names, empty purposes, unhashed paths) must
+        all survive pagination — every exhibit number and every filename must
+        appear in the extracted text, and the disclosure/signoff blocks must
+        not be clipped off the last page."""
+        import pymupdf
+
+        items = []
+        for i in range(60):
+            name = (
+                f"evidence_{i:02d}_" + "매우긴파일명_" * (8 if i % 7 == 0 else 1) + ".png"
+                if i % 5 else f"evidence_{i:02d}.png"
+            )
+            fpath = self.root / name
+            if i % 3:
+                fpath.write_bytes(b"x" * (i + 1))
+                path = str(fpath)
+            else:
+                path = f"/nonexistent/{name}"  # unhashable entry
+            band = [RiskBand.HIGH, RiskBand.MEDIUM, RiskBand.LOW, RiskBand.UNKNOWN][i % 4]
+            res = ClassificationResult(
+                score=10 * (i % 10),
+                band=band,
+                band_label=str(band.value),
+                verdict="" if i % 6 == 0 else f"판정 근거 {i} — " + "긴목적문" * (30 if i % 9 == 0 else 2),
+                signals=[], limitations=[],
+                source_guess=SourceGuess.unknown(""),
+                next_checks=[],
+            )
+            items.append(ScanItem(path=path, name=name, kind="image",
+                                  status="analyzed", size_bytes=i + 1, result=res))
+
+        stmt = build_evidence_statement(items, case_no="2024가단9999")
+        self.assertEqual(len(stmt.entries), 60)
+        out = self.root / "stress.pdf"
+        write_evidence_statement_pdf(out, stmt)
+        doc = pymupdf.open(str(out))
+        try:
+            text = "".join(p.get_text() for p in doc)
+            self.assertGreater(len(doc), 1)  # pagination actually happened
+            flat = "".join(text.split())
+            for i, entry in enumerate(stmt.entries):
+                self.assertIn(entry.exhibit_no, text)
+                if "생략" not in entry.document_name:
+                    self.assertIn("".join(entry.document_name.split())[:20], flat)
+            self.assertIn("무결성", text)
+            self.assertIn("2024가단9999", text)
+        finally:
+            doc.close()
