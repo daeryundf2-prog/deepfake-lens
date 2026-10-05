@@ -803,7 +803,7 @@
                         <div class="res-sub">
                             <span class="band-pill band-${band}">${riskLabel(band)}</span>
                             <span>${escapeHtml(tool)}</span>
-                            ${r.model_analysis ? '<span class="nn-badge">NN</span>' : ''}
+                            ${r.model_analysis && r.model_analysis.available !== false ? '<span class="nn-badge">NN</span>' : ''}
                             ${rev.star ? '<span class="rev-badge">검토됨</span>' : ''}
                             ${item.error ? '<span class="c-red">분석 실패</span>' : ''}
                         </div>

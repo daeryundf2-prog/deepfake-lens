@@ -76,7 +76,7 @@ exclude = ["deepfake_lens.tests*"]
 # GUI shell + extracted static assets must ship together — webapp.py serves
 # gui.css/gui.js from the package directory.
 [tool.setuptools.package-data]
-deepfake_lens = ["gui.html", "gui.css", "gui.js", "models/*.json", "models/*.md"]
+deepfake_lens = ["gui.html", "gui.css", "gui.js", "models/*.json", "models/*.md", "models/*.xml"]
 
 # Coverage gate: fail_under is set just below the measured floor (63.59%
 # branch coverage with the dev extra installed, 2026-10 — down from 67% in
