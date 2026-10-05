@@ -131,8 +131,10 @@ def _model_sources(model_path: Path | str | list[Path | str] | tuple[Path | str,
         return sources
     candidate = Path(model_path)
     if candidate.is_dir():
-        # *.model.json sidecars are per-file score payloads, not profiles.
-        return sorted(path for path in candidate.glob("*.json") if not path.name.endswith(".model.json"))
+        # Only *-runtime.json files are adapter profiles — thresholds.json,
+        # *.model.json score sidecars, and other manifests in a models dir
+        # must never be loaded as model configs.
+        return sorted(candidate.glob("*-runtime.json"))
     return [candidate]
 
 

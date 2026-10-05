@@ -57,9 +57,12 @@ class CommittedProfilesTest(unittest.TestCase):
     """models/*.json profiles must satisfy the adapter contract honestly."""
 
     def _profiles(self) -> dict[str, dict]:
+        # Only *-runtime.json files are model profiles — thresholds.json and
+        # other provenance manifests in the same directory must not be read
+        # as adapter configs.
         return {
             path.name: json.loads(path.read_text(encoding="utf-8"))
-            for path in sorted(MODELS_DIR.glob("*.json"))
+            for path in sorted(MODELS_DIR.glob("*-runtime.json"))
         }
 
     def test_zoo_has_expected_profiles(self) -> None:
