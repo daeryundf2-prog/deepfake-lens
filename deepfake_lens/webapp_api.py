@@ -445,11 +445,19 @@ def _part_bytes(part) -> bytes | None:
 
 
 def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str, object]:
-    analyzed = [item for item in items if not item.get("error")]
+    """Mirror core.summarize() — identical inputs must yield identical counts
+    across CLI JSON, web uploads, and report headers. A row counts as
+    analyzed only when it has status "analyzed" AND a result; failed,
+    unsupported, and unknown-container rows land in unsupported_or_failed.
+    """
+    def _status(item: dict[str, object]) -> str:
+        return str(item.get("status") or ("failed" if item.get("error") else "analyzed"))
+
     def _band(item: dict[str, object]) -> str:
         result = item.get("result")
         return str(result.get("band")) if isinstance(result, dict) else ""
 
+    analyzed = [i for i in items if _status(i) == "analyzed" and isinstance(i.get("result"), dict)]
     high = sum(1 for item in analyzed if _band(item) == "high")
     medium = sum(1 for item in analyzed if _band(item) == "medium")
     low = sum(1 for item in analyzed if _band(item) == "low")
@@ -460,7 +468,9 @@ def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str,
         "medium": medium,
         "low": low,
         "unknown": len(analyzed) - high - medium - low,
-        "unsupported_or_failed": len(items) - len(analyzed),
+        "unsupported_or_failed": sum(1 for i in items if _status(i) not in {"analyzed", "duplicate", "skipped"}),
+        "duplicates": sum(1 for i in items if _status(i) == "duplicate"),
+        "skipped": sum(1 for i in items if _status(i) == "skipped"),
         "external_model_active": sum(1 for item in analyzed if _model_active(item)),
         "source": source,
     }

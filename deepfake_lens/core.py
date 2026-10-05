@@ -242,7 +242,10 @@ def _archive_container_item(
         else "아카이브에서 분석 가능한 구성 파일이 없습니다 — 판정 불가"
     )
     return ScanItem(
-        rel, name, "archive", "analyzed" if analyzed_members else "unknown", size,
+        # "expanded" (not "analyzed") keeps the roll-up row out of the band
+        # counts — members already carry their own verdicts, and counting
+        # the container too would double every archive member's tally.
+        rel, name, "archive", "expanded" if analyzed_members else "unknown", size,
         ClassificationResult(
             score=score,
             band=band,

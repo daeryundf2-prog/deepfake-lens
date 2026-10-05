@@ -137,7 +137,11 @@ class AnalyzeUploadPayloadTest(unittest.TestCase):
         from deepfake_lens.core import ScanItem
 
         def fake_analyze(path, **kwargs):
-            return ScanItem(str(path), Path(str(path)).name, "text", "analyzed", 4, result=None)
+            from deepfake_lens.result_types import ClassificationResult, RiskBand, SourceGuess
+            return ScanItem(str(path), Path(str(path)).name, "text", "analyzed", 4,
+                            result=ClassificationResult(score=1, band=RiskBand.LOW, band_label="낮음",
+                                                        verdict="", signals=[], limitations=[],
+                                                        source_guess=SourceGuess.unknown(""), next_checks=[]))
 
         original = webapp_api.analyze_file
         webapp_api.analyze_file = fake_analyze
@@ -792,3 +796,88 @@ class PreviewPayloadTest(unittest.TestCase):
             p.write_bytes(b"x")
             status, _, _, _ = _preview_payload(f"path={p}&root={other}")
             self.assertEqual(status, 403)
+
+
+class SummaryParityTest(unittest.TestCase):
+    """core.summarize() and webapp_api._summarize_records() must agree —
+    the same rows seen through CLI, upload, or report must report the same
+    counts, or a corrupt archive could look analyzed on one surface and
+    failed on another."""
+
+    def _rows(self):
+        return [
+            {"path": "ok.png", "status": "analyzed",
+             "result": {"band": "low", "score": 3}},
+            {"path": "sus.png", "status": "analyzed",
+             "result": {"band": "high", "score": 90, "model_analysis": {"available": True}}},
+            {"path": "bad.zip", "status": "unknown", "kind": "archive",
+             "result": {"band": "unknown", "score": 0}},
+            {"path": "gone.bin", "status": "failed", "error": "unreadable"},
+            {"path": "dup.png", "status": "duplicate"},
+            {"path": "big.iso", "status": "skipped"},
+        ]
+
+    def test_web_summary_matches_core_contract(self):
+        from deepfake_lens.webapp_api import _summarize_records
+        summary = _summarize_records(self._rows(), "test")
+        # container/failed rows never count as analyzed
+        self.assertEqual(summary["total"], 6)
+        self.assertEqual(summary["analyzed"], 2)
+        self.assertEqual(summary["high"], 1)
+        self.assertEqual(summary["low"], 1)
+        self.assertEqual(summary["unknown"], 0)
+        self.assertEqual(summary["unsupported_or_failed"], 2)
+        self.assertEqual(summary["duplicates"], 1)
+        self.assertEqual(summary["skipped"], 1)
+        self.assertEqual(summary["external_model_active"], 1)
+
+    def _cr(self, score: int, band) -> "object":
+        from deepfake_lens.result_types import ClassificationResult, SourceGuess
+        return ClassificationResult(score=score, band=band,
+                                    band_label=str(band), verdict="",
+                                    signals=[], limitations=[],
+                                    source_guess=SourceGuess.unknown(""),
+                                    next_checks=[])
+
+    def test_core_counts_same_scan_items(self):
+        from deepfake_lens.core import summarize
+        from deepfake_lens.result_types import RiskBand, ScanItem
+        items = [
+            ScanItem("ok.png", "ok.png", "image", "analyzed", 10,
+                     self._cr(3, RiskBand.LOW)),
+            ScanItem("sus.png", "sus.png", "image", "analyzed", 10,
+                     self._cr(90, RiskBand.HIGH)),
+            ScanItem("bad.zip", "bad.zip", "archive", "unknown", 10,
+                     self._cr(0, RiskBand.UNKNOWN)),
+            ScanItem("gone.bin", "gone.bin", "unknown", "failed", 0, error="unreadable"),
+            ScanItem("dup.png", "dup.png", "image", "duplicate", 10),
+            ScanItem("big.iso", "big.iso", "unknown", "skipped", 10),
+        ]
+        summary = summarize(items, capped=False)
+        self.assertEqual(summary.analyzed, 2)
+        self.assertEqual(summary.high, 1)
+        self.assertEqual(summary.low, 1)
+        self.assertEqual(summary.unknown, 0)
+        self.assertEqual(summary.unsupported_or_failed, 2)
+        self.assertEqual(summary.duplicates, 1)
+        self.assertEqual(summary.skipped, 1)
+
+    def test_serialized_rows_parity(self):
+        """The web helper consumes ScanItem.to_json() rows — feed it exactly
+        that and compare against core counts on the same items."""
+        from deepfake_lens.core import summarize
+        from deepfake_lens.result_types import RiskBand, ScanItem
+        from deepfake_lens.webapp_api import _summarize_records
+        items = [
+            ScanItem("ok.png", "ok.png", "image", "analyzed", 10,
+                     self._cr(3, RiskBand.LOW)),
+            ScanItem("arc.zip", "arc.zip", "archive", "expanded", 10,
+                     self._cr(50, RiskBand.MEDIUM)),
+            ScanItem("arc.zip::a.png", "a.png", "image", "analyzed", 5,
+                     self._cr(50, RiskBand.MEDIUM)),
+        ]
+        core = summarize(items, capped=False)
+        web = _summarize_records([i.to_json() for i in items], "test")
+        self.assertEqual(web["analyzed"], core.analyzed)
+        self.assertEqual(web["medium"], core.medium)
+        self.assertEqual(web["unsupported_or_failed"], core.unsupported_or_failed)
