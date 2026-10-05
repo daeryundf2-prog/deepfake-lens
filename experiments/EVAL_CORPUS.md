@@ -140,3 +140,26 @@ overfit — the SBI candidate measured 0.84 in-domain vs 0.79 cross).
   under `cv2.data`; `face._detect_faces` raised `cv2.error` on every frame.
   The cascade is now vendored under `deepfake_lens/models/` (BSD-3, see
   models/NOTICE.md) and detection is crash-safe when cascades are absent.
+
+### 2026-10-05 — inswapper_128 real-faceswap corpus (de-provisionalized)
+
+- Corpus: same Wikimedia portrait fetch with `--save-full` → 90 real
+  frames; `scripts/make_faceswap_corpus.py` ran inswapper_128 (buffalo_l
+  embeddings) pair-wise across identities → 88 swapped frames. Fingerprint
+  `d77809e5eddfd968afb1336099a09588e50e9d307448e2db292a634509d35aca`
+- Result: `faceswap_seam` aggregate **AUROC 0.654** (train 0.633 /
+  held-out val 0.714 — signal replicates, not a fit artifact), EER 0.42,
+  coverage 0.97 on 173 scored samples
+- Per-metric: `noise_discrepancy_ratio` dominates (AUROC 0.87 both
+  splits) — the real faceswap boundary noise is what this layer actually
+  detects; `seam_ratio` modest (0.61), `chroma`/`corneal` near chance
+- `models/thresholds.json` now ships **MEASURED** (provisional=false)
+  with fitted cutoffs — the first de-provisionalized layer
+- Honest caveat: fakes are all inswapper_128 output — thresholds
+  measure detectability of *this* generator's artifacts. GAN-native
+  (FaceFusion-style) or video-level (DFL) fakes may shift the optimum;
+  the corpus fingerprint records exactly which distribution produced
+  these numbers.
+- SBI contrast: self-blends scored 0.47 — confirms SBI does not produce
+  the boundary artifacts this layer keys on; SBI alone could never have
+  validated it.

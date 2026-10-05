@@ -1,18 +1,25 @@
 {
   "version": "layer-thresholds-v1",
-  "values": {},
-  "samples": 123,
-  "provisional": true,
-  "dataset_fingerprint": "446515c21e6dec28a2f9086c97d71ad6a2d5582338fcf351e22b35e584eb89ce",
-  "measured_at": "2026-10-05T00:12:51Z",
+  "values": {
+    "faceswap_seam.seam_ratio_high": 4.2596,
+    "faceswap_seam.chroma_delta": 37.2518,
+    "faceswap_seam.corneal_asymmetry_px": 28.6644,
+    "faceswap_seam.noise_ratio_low": 0.3461,
+    "faceswap_seam.noise_ratio_high": 2.8891,
+    "faceswap_seam.score_high": 48.0,
+    "faceswap_seam.score_medium": 22.0
+  },
+  "samples": 173,
+  "provisional": false,
+  "dataset_fingerprint": "d77809e5eddfd968afb1336099a09588e50e9d307448e2db292a634509d35aca",
+  "measured_at": "2026-10-05T03:29:39Z",
   "metrics": {
-    "n": 132,
-    "scored": 123,
-    "skipped_unmeasured": 9,
-    "score_auroc": 0.469973544973545,
-    "score_eer": 0.5415472779369628,
-    "coverage": 0.9318,
-    "min_validation_auroc": 0.55,
-    "values_rejected_low_auroc": 1
+    "n": 178,
+    "scored": 173,
+    "skipped_unmeasured": 5,
+    "score_auroc": 0.6545041432771986,
+    "score_eer": 0.42318840579710143,
+    "coverage": 0.9719,
+    "min_validation_auroc": 0.55
   }
 }

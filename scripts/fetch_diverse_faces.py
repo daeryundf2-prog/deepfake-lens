@@ -98,6 +98,13 @@ def main() -> int:
     parser.add_argument("--max-downloads", type=int, default=150)
     parser.add_argument("--val-every", type=int, default=4, help="every Nth face goes to validation (default: 4)")
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument(
+        "--save-full",
+        action="store_true",
+        help="also save each downloaded full frame under full/<prefix>_real/ "
+        "for pipelines that need the original composition (e.g. faceswap "
+        "generation — seam artifacts only exist relative to the surround)",
+    )
     args = parser.parse_args()
 
     try:
@@ -145,6 +152,10 @@ def main() -> int:
         prefix = "diverse_val" if index % max(1, args.val_every) == 0 else "diverse"
         crop.save(args.out / f"{prefix}_real/{kept:03d}.jpg", quality=92)
         blended_image.save(args.out / f"{prefix}_fake/{kept:03d}.jpg", quality=92)
+        if args.save_full:
+            full_dir = args.out / "full" / f"{prefix}_real"
+            full_dir.mkdir(parents=True, exist_ok=True)
+            image.save(full_dir / f"{kept:03d}.jpg", quality=95)
         kept += 1
         if kept % 10 == 0:
             print(f"  kept {kept} face crops...", flush=True)
