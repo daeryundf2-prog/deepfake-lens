@@ -7,6 +7,7 @@ from pathlib import Path
 from .calibration import calibrate_threshold
 from .core import ClassificationResult, EvidenceSignal, ScanItem, SourceConfidence, analyze_file
 from .datasets import discover_dataset, is_positive_label
+from .evaluation_metrics import ci_summary
 
 
 @dataclass(frozen=True)
@@ -74,11 +75,23 @@ def calibrate_fusion_profile(
         rows.append({"path": item.path, "label": record.label, "score": score, "components": components})
     calibration = calibrate_threshold(scores, target_false_positive_rate=target_false_positive_rate)
     profile = replace(DEFAULT_FUSION_PROFILE, threshold=calibration.threshold)
+    # G26: the fused number is built from raw member scores (component_scores
+    # reads model_analysis/pixel_analysis raw values, never result.score) and
+    # the fitted cutoff is in-sample; report CIs and say both.
+    ci = ci_summary(
+        [float(score) for score, _ in scores],
+        [1 if positive else 0 for _, positive in scores],
+        threshold=float(calibration.threshold),
+    )
     return {
         "version": "fusion-calibration-v1",
         "dataset": summary.to_json(),
         "profile": profile.to_json(),
         "metrics": calibration.metrics,
+        "metrics_ci": ci,
+        "score_basis": "raw, uncalibrated",
+        "in_sample": True,
+        "note": "융합 임계값은 같은 표본에서 맞추고 같은 표본에서 평가한 in-sample 값(참고)이며 원점수(raw, uncalibrated) 기반입니다.",
         "rows": rows,
     }
 

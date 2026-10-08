@@ -11,6 +11,8 @@
   },
   "samples": 173,
   "provisional": false,
+  "in_sample": true,
+  "note": "G28: 이 임계값은 experiments/eval_seam_thresholds.py가 평가에 쓴 같은 173개 행에서 맞춘 in-sample 값이다. 아래 metrics는 적합에 쓴 행 위에서 계산되어 낙관적으로 편향되어 있고 독립 테스트 분할이 없으므로 감정 근거가 아닌 참고값이다. 재적합하지 않았다.",
   "dataset_fingerprint": "d77809e5eddfd968afb1336099a09588e50e9d307448e2db292a634509d35aca",
   "measured_at": "2026-10-05T03:29:39Z",
   "metrics": {

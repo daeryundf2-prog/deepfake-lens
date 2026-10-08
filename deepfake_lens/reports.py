@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .core import BatchScanSummary, ScanItem
+from .evaluation_metrics import format_ci
 from .result_text import (
     TEXT_LEGAL_LIMITATION,
     VERDICT_CODES_ASCII,
@@ -44,6 +45,9 @@ def _threshold_provenance_line(thresholds: object | None) -> str:
         return "Decision thresholds: builtin defaults (unmeasured - provisional)."
     samples = int(payload.get("samples", 0) or 0)
     state = "PROVISIONAL (unvalidated)" if payload.get("provisional", True) else "measured"
+    if payload.get("in_sample"):
+        # G28: fitted on the same rows it was evaluated on.
+        state += ", in-sample (reference only)"
     fp = str(payload.get("dataset_fingerprint", ""))[:16]
     suffix = f", corpus fp {fp}" if fp else ""
     return f"Decision thresholds: threshold profile {payload.get('version', '?')} — {state}, n={samples}{suffix}."
@@ -276,6 +280,8 @@ def _threshold_provenance_ko(thresholds: object | None) -> str:
         return "판정 임계값: 내장 기본값 (비측정 — 잠정; calibration 미적용)"
     samples = int(payload.get("samples", 0) or 0)
     state = "잠정(미검증)" if payload.get("provisional", True) else "측정됨"
+    if payload.get("in_sample"):
+        state += " · in-sample(참고)"  # G28
     return f"판정 임계값: 프로파일 {payload.get('version', '?')} — {state}, 표본 n={samples}"
 
 
@@ -613,10 +619,13 @@ def write_eval_html_report(path: Path | str, payload: dict[str, object], *, reda
   <div class="grid">
     <div class="metric">accuracy<br><strong>{escape(str(metrics.get("accuracy", "-")))}</strong></div>
     <div class="metric">precision<br><strong>{escape(str(metrics.get("precision", "-")))}</strong></div>
-    <div class="metric">recall<br><strong>{escape(str(metrics.get("recall", "-")))}</strong></div>
-    <div class="metric">AUROC<br><strong>{escape(str(metrics.get("auroc", "-")))}</strong></div>
+    <div class="metric">recall [95% CI]<br><strong>{escape(format_ci(metrics.get("recall"), metrics.get("recall_ci")))}</strong></div>
+    <div class="metric">FPR [95% CI]<br><strong>{escape(format_ci(metrics.get("false_positive_rate"), metrics.get("false_positive_rate_ci")))}</strong></div>
+    <div class="metric">AUROC [95% CI]<br><strong>{escape(format_ci(metrics.get("auroc"), metrics.get("auroc_ci")))}</strong></div>
+    <div class="metric">n_pos / n_neg<br><strong>{escape(str(metrics.get("n_pos", "-")))} / {escape(str(metrics.get("n_neg", "-")))}</strong></div>
     <div class="metric">FP/FN<br><strong>{len(false_positives)} / {len(false_negatives)}</strong></div>
   </div>
+  <p>점수 기준: {escape(str(payload.get("score_basis", "raw, uncalibrated")))} — {escape(str(payload.get("score_basis_note", "")))}</p>
   <p>Confusion: {escape(str(confusion))}</p>
   <table>
     <thead><tr><th>label</th><th>predicted</th><th>score</th><th>source</th><th>guess</th><th>file</th></tr></thead>

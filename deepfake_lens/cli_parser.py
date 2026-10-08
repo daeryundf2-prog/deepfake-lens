@@ -10,6 +10,7 @@ import argparse
 from pathlib import Path
 
 from .core import DEFAULT_MAX_FILES
+from .corpus_manifest import add_corpus_parser
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, SUPPORTED_PIXEL_MODES
 
 
@@ -378,7 +379,11 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     vendor_parser.add_argument("--to", type=Path, help="target models dir for --install (default: --models-dir / DEEPFAKE_LENS_MODELS_DIR)")
     vendor_parser.add_argument("--format", choices=["table", "json", "markdown"], default="table", help="stdout format")
 
+    # corpus build|split|verify — reproducible corpus manifests (WP-I, G27).
+    corpus_parser = add_corpus_parser(subparsers)
+
     return parser, {
+        "corpus": corpus_parser,
         "scan": scan_parser, "collect": collect_parser, "dataset": dataset_parser,
         "eval": eval_parser, "benchmark": benchmark_parser, "fusion": fusion_parser,
         "calibrate": calibrate_parser, "feedback": feedback_parser, "train": train_parser,

@@ -16,6 +16,10 @@ With --write the suggestion is stored in each profile JSON as
 ``ensemble_weight`` plus a ``weight_basis`` note naming the report. Without
 --write it prints the table only. Always review before committing — a
 single corpus can overfit the weights to its distribution.
+
+Profiles are written under ``deepfake_lens.cli.default_models_dir()`` (the
+repo-root ``models/`` no longer exists — G27). The AUROC column comes from
+eval_all.py, which scores raw, uncalibrated member outputs.
 """
 
 from __future__ import annotations
@@ -26,6 +30,9 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
+
+from deepfake_lens.cli import default_models_dir  # noqa: E402
 
 
 def suggest(member: dict) -> float | None:
@@ -45,8 +52,9 @@ def main() -> int:
     args = parser.parse_args()
 
     report = json.loads(args.report.read_text(encoding="utf-8"))
-    print("| member | AUROC | suggested weight |")
-    print("|---|---|---|")
+    print(f"score basis: {report.get('score_basis', 'raw, uncalibrated')}")
+    print("| member | n_pos | n_neg | AUROC | AUROC 95% CI | suggested weight |")
+    print("|---|---|---|---|---|---|")
     for block in report["modalities"]:
         if "skipped" in block:
             continue
@@ -54,10 +62,11 @@ def main() -> int:
             if member["profile"].startswith("<"):
                 continue
             w = suggest(member)
-            print(f"| {member['profile']} | {member.get('auroc')} | "
+            print(f"| {member['profile']} | {member.get('pos', 0)} | {member.get('neg', 0)} | "
+                  f"{member.get('auroc')} | {member.get('auroc_ci', '-')} | "
                   f"{w if w is not None else 'insufficient data'} |")
             if args.write and w is not None:
-                path = REPO_ROOT / "models" / member["profile"]
+                path = default_models_dir() / member["profile"]
                 prof = json.loads(path.read_text(encoding="utf-8"))
                 prof["ensemble_weight"] = w
                 prof["weight_basis"] = (

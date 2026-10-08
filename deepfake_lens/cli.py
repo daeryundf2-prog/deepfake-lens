@@ -79,7 +79,7 @@ from .vendor_weights import (
 )
 
 
-COMMANDS = {"doctor", "scan", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "faceswap-seam", "evidence-statement", "vendor-weights", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
+COMMANDS = {"doctor", "scan", "corpus", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "faceswap-seam", "evidence-statement", "vendor-weights", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
 
 def _pkg_profile(name: str) -> str:
     # Absolute path into the resolved models dir — works from the source
@@ -177,6 +177,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
+    if args.command == "corpus":
+        from .corpus_manifest import run_corpus_cli
+
+        return run_corpus_cli(args)
     if args.command == "collect":
         payload = write_collection_plan(args.folder, args.out, minimum_per_source=args.minimum_per_source)
         print(json.dumps({"out": str(args.out), "targets": len(payload["targets"])}, ensure_ascii=False, indent=2))

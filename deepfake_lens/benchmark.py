@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .evaluate import evaluate_dataset, evaluate_robustness_dataset
+from .evaluate import SCORE_BASIS, SCORE_BASIS_NOTE, evaluate_dataset, evaluate_robustness_dataset
+from .evaluation_metrics import format_ci
 from .fusion import FusionProfile
 
 
@@ -37,6 +38,13 @@ def run_benchmark(
                 "f1": f1,
                 "false_positive_rate": metrics.get("false_positive_rate", 0.0),
                 "auroc": metrics.get("auroc"),
+                # G26: every rate carries its bootstrap CI and class counts.
+                "n_pos": metrics.get("n_pos", 0),
+                "n_neg": metrics.get("n_neg", 0),
+                "auroc_ci": metrics.get("auroc_ci"),
+                "recall_ci": metrics.get("recall_ci"),
+                "false_positive_rate_ci": metrics.get("false_positive_rate_ci"),
+                "score_basis": SCORE_BASIS,
                 "confusion": payload.get("confusion", {}),
                 "robustness": payload.get("robustness", {}),
             }
@@ -44,6 +52,8 @@ def run_benchmark(
     return {
         "version": "benchmark-v1",
         "root": str(Path(root)),
+        "score_basis": SCORE_BASIS,
+        "score_basis_note": SCORE_BASIS_NOTE,
         "robustness": robustness,
         "fusion_profile": fusion_profile.to_json() if fusion_profile else None,
         "rows": sorted(rows, key=_rank_row),
@@ -64,22 +74,27 @@ def write_benchmark_markdown(path: Path | str, payload: dict[str, object]) -> No
     lines = [
         "# Deepfake Lens Benchmark",
         "",
-        "| name | samples | accuracy | precision | recall | f1 | fpr | auroc |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        f"점수 기준: {SCORE_BASIS} — {SCORE_BASIS_NOTE}",
+        "괄호 안은 95% 층화 부트스트랩 신뢰구간(n_boot=2000)입니다.",
+        "",
+        "| name | samples | n_pos | n_neg | accuracy | precision | recall [95% CI] | f1 | fpr [95% CI] | auroc [95% CI] |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in rows:
         if not isinstance(row, dict):
             continue
         lines.append(
-            "| {name} | {samples} | {accuracy:.4f} | {precision:.4f} | {recall:.4f} | {f1:.4f} | {fpr:.4f} | {auroc} |".format(
+            "| {name} | {samples} | {n_pos} | {n_neg} | {accuracy:.4f} | {precision:.4f} | {recall} | {f1:.4f} | {fpr} | {auroc} |".format(
                 name=row.get("name", ""),
                 samples=int(row.get("samples", 0) or 0),
+                n_pos=int(row.get("n_pos", 0) or 0),
+                n_neg=int(row.get("n_neg", 0) or 0),
                 accuracy=float(row.get("accuracy", 0.0) or 0.0),
                 precision=float(row.get("precision", 0.0) or 0.0),
-                recall=float(row.get("recall", 0.0) or 0.0),
+                recall=format_ci(row.get("recall"), row.get("recall_ci"), 4),
                 f1=float(row.get("f1", 0.0) or 0.0),
-                fpr=float(row.get("false_positive_rate", 0.0) or 0.0),
-                auroc="-" if row.get("auroc") is None else f"{float(row.get('auroc', 0.0)):.4f}",
+                fpr=format_ci(row.get("false_positive_rate"), row.get("false_positive_rate_ci"), 4),
+                auroc=format_ci(row.get("auroc"), row.get("auroc_ci"), 4),
             )
         )
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")

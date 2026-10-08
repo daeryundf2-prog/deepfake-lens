@@ -81,6 +81,8 @@ grouped by work pass rather than release.
 ## 2026-09 — detection-evidence pass
 
 ### Added
+> ⚠ 미검증(n 부족 또는 재현 불가) — 2차 계획 WP-I 참조. 아래 수치는 클래스당 200개 미만이거나 코퍼스가 재현 불가능하여 증거로 사용할 수 없다.
+
 - **Full Synthbuster sweep**: 720 images (9 generators x 40 vs 360 camera
   reals) — AUROC 0.951 at 5% target FPR with the ProGAN-trained AIDE
   checkpoint; the strongest cross-generator evidence to date

@@ -56,7 +56,7 @@ from deepfake_lens.calibration import (  # noqa: E402
     THRESHOLD_PROFILE_VERSION,
     write_threshold_profile,
 )
-from deepfake_lens.evaluation_metrics import auroc, eer, threshold_at_fpr  # noqa: E402
+from deepfake_lens.evaluation_metrics import auroc, bootstrap_ci, eer, threshold_at_fpr  # noqa: E402
 from deepfake_lens.faceswap_seam import SEAM_THRESHOLDS, analyze_faceswap_seam  # noqa: E402
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
@@ -234,6 +234,13 @@ def main() -> int:
     if score_pairs:
         metrics["score_auroc"] = auroc(score_pairs) or 0.0
         metrics["score_eer"] = eer(score_pairs) or 0.0
+        # G26: AUROC with its 95% bootstrap CI and class counts (in-sample —
+        # the cutoffs below are fitted on these same rows, G28).
+        ci = bootstrap_ci([s for s, _ in score_pairs], [lab for _, lab in score_pairs], "auroc")
+        if ci is not None:
+            metrics["score_auroc_ci_low"], metrics["score_auroc_ci_high"] = ci
+        metrics["n_pos"] = sum(1 for _, lab in score_pairs if lab == 1)
+        metrics["n_neg"] = sum(1 for _, lab in score_pairs if lab == 0)
         metrics["coverage"] = round(len(scored) / len(rows), 4)
         metrics["min_validation_auroc"] = MIN_VALIDATION_AUROC
 
@@ -253,6 +260,13 @@ def main() -> int:
         dataset_fingerprint=fingerprint,
         measured_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         metrics=metrics,
+        # G28: cutoffs are fitted on `scored` and the metrics above are
+        # computed on the same rows — there is no held-out split here.
+        in_sample=True,
+        note=(
+            "G28: 임계값을 맞춘 행과 metrics를 계산한 행이 같은 in-sample 값이다. "
+            "독립 테스트 분할(corpus split)로 재측정하기 전까지 참고값이다."
+        ),
     )
 
     report = {
@@ -281,7 +295,12 @@ def main() -> int:
             "and stays provisional"
         )
     if "score_auroc" in metrics:
-        print(f"score auroc={metrics['score_auroc']} eer={metrics['score_eer']} coverage={metrics['coverage']}")
+        print(
+            f"score auroc={metrics['score_auroc']} "
+            f"[95% CI {metrics.get('score_auroc_ci_low')}, {metrics.get('score_auroc_ci_high')}] "
+            f"n_pos={metrics.get('n_pos')} n_neg={metrics.get('n_neg')} (in-sample) "
+            f"eer={metrics['score_eer']} coverage={metrics['coverage']}"
+        )
     for key, fitted in detail.items():
         if isinstance(fitted, dict):
             print(f"  {key}: n={fitted.get('n')} auroc={fitted.get('auroc', fitted.get('auroc_log_abs'))} fitted={fitted.get('fitted', fitted.get('fitted_deviation'))} fallback={fitted.get('fell_back_to_default')}")

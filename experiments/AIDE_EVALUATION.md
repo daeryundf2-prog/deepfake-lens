@@ -1,3 +1,5 @@
+> ⚠ 미검증(n 부족 또는 재현 불가) — 2차 계획 WP-I 참조. 아래 수치는 클래스당 200개 미만이거나 코퍼스가 재현 불가능하여 증거로 사용할 수 없다.
+
 # AIDE Detector Evaluation Report
 
 Date: 2026-09-09. All numbers below were produced by
@@ -12,10 +14,10 @@ below).
 
 | Test set | Samples | AUROC | EER | Accuracy @0.5 | At target FPR 5% |
 |---|---|---|---|---|---|
-| ProGAN cat (test split) | 400 | **1.000** | 0.000 | 1.000 | TP 200 / FP 10 / FN 0 / TN 190 |
-| ProGAN airplane (unseen category) | 120 | **1.000** | 0.000 | 1.000 | TP 60 / FP 3 / FN 0 / TN 57 |
-| Cross-domain: Synthbuster dalle2+glide vs camera reals | 90 | **1.000** | 0.000 | 0.933 | TP 60 / FP 2 / FN 0 / TN 28 |
-| **Full Synthbuster sweep** (9 models x 40: dalle2/3, firefly, glide, midjourney-v5, sd-1.3/1.4/2, sdxl) vs camera reals | 720 | **0.951** | 0.000 | 0.854 | TP 332 / FP 18 / FN 28 / TN 342 |
+| ProGAN cat (test split) | 400 | **1.000** | ~~0.000~~ — 재계산 필요(FN/FP와 모순) | 1.000 | TP 200 / FP 10 / FN 0 / TN 190 |
+| ProGAN airplane (unseen category) | 120 | **1.000** | ~~0.000~~ — 재계산 필요(FN/FP와 모순) | 1.000 | TP 60 / FP 3 / FN 0 / TN 57 |
+| Cross-domain: Synthbuster dalle2+glide vs camera reals | 90 | **1.000** | ~~0.000~~ — 재계산 필요(FN/FP와 모순) | 0.933 | TP 60 / FP 2 / FN 0 / TN 28 |
+| **Full Synthbuster sweep** (9 models x 40: dalle2/3, firefly, glide, midjourney-v5, sd-1.3/1.4/2, sdxl) vs camera reals | 720 | **0.951** | ~~0.000~~ — 재계산 필요(FN/FP와 모순) | 0.854 | TP 332 / FP 18 / FN 28 / TN 342 |
 
 The full sweep is the honest headline: the ProGAN-trained checkpoint keeps
 AUROC 0.951 across nine diffusion/commercial generators it never saw, with

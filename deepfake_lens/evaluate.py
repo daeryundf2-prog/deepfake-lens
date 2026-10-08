@@ -8,8 +8,78 @@ from pathlib import Path
 from .calibration import DEFAULT_THRESHOLD, auroc, binary_metrics, calibrate_scores, calibrate_threshold, eer, load_calibration
 from .core import analyze_file
 from .datasets import ROBUSTNESS_TRANSFORMS, discover_dataset, file_fingerprint, is_negative_label, is_positive_label
+from .evaluation_metrics import DEFAULT_TARGET_FPR, ci_summary
 from .fusion import FusionProfile, apply_fusion_to_result
 from .model_adapter import load_model_threshold
+from .result_types import ClassificationResult, EvidenceKind
+
+# Contract v2 (WP-A) sets ``result.score`` to 0 unless a calibrated
+# probability exists, so evaluating on it would measure nothing. Every
+# evaluation in this module scores *raw member outputs* instead and says so
+# in its output (G26/G27): the external model's raw 0-100 score, else the
+# strongest raw score on a statistical evidence item (deep layers), else
+# the pixel heuristic's raw score (a reference signal). None of these is a
+# probability.
+SCORE_BASIS = "raw, uncalibrated"
+SCORE_BASIS_NOTE = (
+    "평가 점수는 보정되지 않은 원점수(raw, uncalibrated)입니다 — 외부 모델 원점수, "
+    "없으면 통계적 근거 원점수, 없으면 픽셀 휴리스틱(참고) 원점수 순으로 사용하며 확률이 아닙니다."
+)
+# Rows for which no raw member score exists are excluded from metrics (like
+# unanalyzed files) instead of being scored as a confident 0.
+UNSCORED = "unscored"
+
+
+def raw_member_score(result: ClassificationResult) -> tuple[int | None, str]:
+    """``(raw 0-100 score, basis)`` for evaluation; ``(None, "none")`` if absent.
+
+    Never reads ``result.score`` — under contract v2 that is 0 for every
+    uncalibrated result.
+    """
+    model = result.model_analysis
+    if model is not None and model.available:
+        return int(model.score), "external_model"
+    statistical = [
+        int(item.raw_score)
+        for item in result.evidence
+        if item.kind == EvidenceKind.STATISTICAL and item.raw_score is not None
+    ]
+    if statistical:
+        return max(statistical), "statistical_evidence"
+    pixel = result.pixel_analysis
+    if pixel is not None and pixel.available:
+        return int(pixel.score), "pixel_reference"
+    return None, "none"
+
+
+def metrics_with_ci(pairs: list[tuple[int, bool]], threshold: int) -> dict[str, object]:
+    """``binary_metrics`` plus AUROC and bootstrap CIs (G26).
+
+    Every AUROC/recall/FPR carries a 95% stratified bootstrap interval and
+    the class counts it was computed from; ``score_basis`` states that the
+    scores are raw and uncalibrated.
+    """
+    metrics: dict[str, object] = dict(binary_metrics(pairs, threshold))
+    scores = [float(score) for score, _ in pairs]
+    labels = [1 if positive else 0 for _, positive in pairs]
+    summary = ci_summary(scores, labels, threshold=float(threshold), target_fpr=DEFAULT_TARGET_FPR)
+    auc = auroc(pairs)
+    if auc is not None:
+        metrics["auroc"] = auc
+    metrics.update(
+        {
+            "n_pos": summary["n_pos"],
+            "n_neg": summary["n_neg"],
+            "auroc_ci": summary["auroc_ci"],
+            "recall_ci": summary["recall_at_threshold_ci"],
+            "false_positive_rate_ci": summary["fpr_at_threshold_ci"],
+            "recall_at_fpr_0_01": summary["recall_at_fpr"],
+            "recall_at_fpr_0_01_ci": summary["recall_at_fpr_ci"],
+            "ci_method": summary["ci_method"],
+            "score_basis": SCORE_BASIS,
+        }
+    )
+    return metrics
 
 
 def evaluate_dataset(
@@ -43,16 +113,26 @@ def evaluate_dataset(
         )
         if item.result and fusion_profile:
             item = replace(item, result=apply_fusion_to_result(item.result, fusion_profile))
-        analyzed = item.result is not None
         # Unanalyzed files (corrupt, unsupported, failed decode) have no
         # score; counting them as score-0 "real" inflates negative-class
-        # metrics, so they are reported separately instead.
-        score = item.result.score if item.result else 0
+        # metrics, so they are reported separately instead. The same holds
+        # for analyzed files with no raw member score (G26: result.score is
+        # 0 when uncalibrated and must not be evaluated).
+        raw, basis = raw_member_score(item.result) if item.result else (None, "none")
+        analyzed = item.result is not None
+        scored = raw is not None
+        score = raw if raw is not None else 0
         positive = is_positive_label(record.label)
-        predicted_positive = analyzed and score >= threshold
-        if analyzed:
+        predicted_positive = scored and score >= threshold
+        if scored:
             score_pairs.append((score, positive))
             source_scores.setdefault(record.source, []).append((score, positive))
+        if not analyzed:
+            predicted = "unavailable"
+        elif not scored:
+            predicted = UNSCORED
+        else:
+            predicted = "ai" if predicted_positive else "real"
         rows.append(
             {
                 "path": item.path,
@@ -60,7 +140,8 @@ def evaluate_dataset(
                 "source": record.source,
                 "split": record.split,
                 "score": score,
-                "predicted": ("ai" if predicted_positive else "real") if analyzed else "unavailable",
+                "score_basis": basis,
+                "predicted": predicted,
                 "correct": predicted_positive == positive,
                 "mask_path": record.mask_path,
                 "source_guess": item.result.source_guess.label if item.result else "",
@@ -70,27 +151,22 @@ def evaluate_dataset(
             }
         )
 
-    metrics = binary_metrics(score_pairs, threshold) if score_pairs else binary_metrics([], threshold)
-    auc = auroc(score_pairs)
-    if auc is not None:
-        metrics["auroc"] = auc
+    metrics = metrics_with_ci(score_pairs, threshold)
     error_rate = eer(score_pairs)
     if error_rate is not None:
         metrics["eer"] = error_rate
     confusion = _confusion(rows)
     case_summary = _case_summary(rows)
-    per_source = {
-        source: {
-            **binary_metrics(pairs, threshold),
-            **({"auroc": value} if (value := auroc(pairs)) is not None else {}),
-        }
-        for source, pairs in source_scores.items()
-    }
+    per_source = {source: metrics_with_ci(pairs, threshold) for source, pairs in source_scores.items()}
     per_split = _per_split_metrics(rows, threshold)
     unanalyzed_count = sum(1 for row in rows if row.get("predicted") == "unavailable")
+    unscored_count = sum(1 for row in rows if row.get("predicted") == UNSCORED)
     return {
         "dataset": dataset_summary.to_json(),
         "threshold": threshold,
+        "score_basis": SCORE_BASIS,
+        "score_basis_note": SCORE_BASIS_NOTE,
+        "unscored_count": unscored_count,
         "metrics": metrics,
         "confusion": confusion,
         "case_summary": case_summary,
@@ -110,7 +186,7 @@ def _per_split_metrics(rows: list[dict[str, object]], threshold: int) -> dict[st
     """
     split_pairs: dict[str, list[tuple[int, bool]]] = {}
     for row in rows:
-        if row.get("predicted") == "unavailable":
+        if not _is_scored(row):
             continue
         split = str(row.get("split", "unspecified"))
         if split == "unspecified":
@@ -119,13 +195,12 @@ def _per_split_metrics(rows: list[dict[str, object]], threshold: int) -> dict[st
         if not (is_positive_label(label) or is_negative_label(label)):
             continue
         split_pairs.setdefault(split, []).append((int(row.get("score", 0) or 0), is_positive_label(label)))
-    return {
-        split: {
-            **binary_metrics(pairs, threshold),
-            **({"auroc": value} if (value := auroc(pairs)) is not None else {}),
-        }
-        for split, pairs in sorted(split_pairs.items())
-    }
+    return {split: metrics_with_ci(pairs, threshold) for split, pairs in sorted(split_pairs.items())}
+
+
+def _is_scored(row: dict[str, object]) -> bool:
+    """True when the row carries a raw member score (analyzed and scored)."""
+    return row.get("predicted") not in {"unavailable", UNSCORED}
 
 
 def calibrate_dataset(
@@ -144,6 +219,8 @@ def calibrate_dataset(
     profile = calibrate_threshold(score_pairs, target_false_positive_rate=target_false_positive_rate)
     payload = profile.to_json()
     payload["calibration_scope"] = calibration_scope
+    payload["score_basis"] = SCORE_BASIS
+    payload["score_basis_note"] = SCORE_BASIS_NOTE
     if include_score_mapping:
         calibrator = calibrate_scores(score_pairs, dataset_fingerprint=str(calibration_scope.get("dataset_fingerprint", "")))
         payload["score_calibration"] = calibrator.to_json()
@@ -170,7 +247,8 @@ def train_portable_baseline(
         "name": "deepfake-lens portable pixel baseline",
         "threshold": calibration["threshold"],
         "target_false_positive_rate": target_false_positive_rate,
-        "feature_source": "deepfake_lens_score",
+        "feature_source": "raw_member_score",
+        "score_basis": SCORE_BASIS,
         "pixel_mode": pixel_mode,
         "metrics": calibration.get("metrics", {}),
         "notes": [
@@ -208,13 +286,10 @@ def evaluate_robustness_dataset(
             continue
         transform = _transform_for_path(str(row.get("path", "")))
         label = str(row.get("label", "unknown"))
-        if transform is None or label == "unknown":
+        if transform is None or label == "unknown" or not _is_scored(row):
             continue
         transform_rows.setdefault(transform, []).append((int(row.get("score", 0) or 0), is_positive_label(label)))
-    payload["robustness"] = {
-        transform: binary_metrics(pairs, threshold) | ({"auroc": value} if (value := auroc(pairs)) is not None else {})
-        for transform, pairs in sorted(transform_rows.items())
-    }
+    payload["robustness"] = {transform: metrics_with_ci(pairs, threshold) for transform, pairs in sorted(transform_rows.items())}
     payload["robustness_transforms"] = ROBUSTNESS_TRANSFORMS
     return payload
 
@@ -263,13 +338,20 @@ def _score_dataset(
         }
     scores: list[tuple[int, bool]] = []
     unanalyzed = 0
+    unscored = 0
     for record in used_records:
         item = analyze_file(Path(record.path), root=root_path, pixel_mode=pixel_mode, pixel_max_side=pixel_max_side, thresholds=thresholds)
         if item.result is None:
             unanalyzed += 1
             continue
-        scores.append((item.result.score, is_positive_label(record.label)))
+        raw, _basis = raw_member_score(item.result)
+        if raw is None:
+            unscored += 1
+            continue
+        scores.append((raw, is_positive_label(record.label)))
     scope["unanalyzed_excluded"] = unanalyzed
+    scope["unscored_excluded"] = unscored
+    scope["score_basis"] = SCORE_BASIS
     scope["dataset_fingerprint"] = _dataset_fingerprint(used_records)
     return scores, scope
 
@@ -308,7 +390,7 @@ def _threshold(*, calibration_path: Path | None, model_path: Path | None) -> int
 def _confusion(rows: list[dict[str, object]]) -> dict[str, int]:
     confusion = {"true_positive": 0, "false_positive": 0, "true_negative": 0, "false_negative": 0}
     for row in rows:
-        if row.get("predicted") == "unavailable":
+        if not _is_scored(row):
             continue
         label = str(row.get("label", "unknown"))
         predicted = str(row.get("predicted", "unknown"))
@@ -324,7 +406,7 @@ def _confusion(rows: list[dict[str, object]]) -> dict[str, int]:
 
 
 def _case_summary(rows: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:
-    scored_rows = [row for row in rows if row.get("predicted") != "unavailable"]
+    scored_rows = [row for row in rows if _is_scored(row)]
     false_positives = [row for row in scored_rows if is_negative_label(str(row.get("label", ""))) and row.get("predicted") == "ai"]
     false_negatives = [row for row in scored_rows if is_positive_label(str(row.get("label", ""))) and row.get("predicted") != "ai"]
     return {

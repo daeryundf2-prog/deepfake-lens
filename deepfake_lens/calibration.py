@@ -371,6 +371,11 @@ class ThresholdProfile:
     dataset_fingerprint: str = ""
     measured_at: str = ""
     metrics: dict[str, float | int] | None = None
+    # G28: True when the cutoffs were fitted on the same rows their metrics
+    # were computed on (no held-out split). Such a profile is shown as
+    # "in-sample(참고)" — its metrics are optimistic and not evidence.
+    in_sample: bool = False
+    note: str = ""
 
     @property
     def provisional_reason(self) -> str | None:
@@ -402,7 +407,28 @@ class ThresholdProfile:
             "dataset_fingerprint": self.dataset_fingerprint,
             "measured_at": self.measured_at,
             "metrics": dict(self.metrics or {}),
+            "in_sample": self.in_sample,
+            "note": self.note,
         }
+
+
+IN_SAMPLE_LABEL = "in-sample(참고)"
+
+
+def threshold_display_label(thresholds: object | None) -> str:
+    """Korean state label for a threshold profile (or its JSON dict).
+
+    ``in-sample(참고)`` wins over measured/provisional: an in-sample fit's
+    metrics describe the rows it was fitted on, not new data (G28).
+    """
+    if thresholds is None:
+        return "내장 기본값(미측정)"
+    payload: object = thresholds if isinstance(thresholds, dict) else getattr(thresholds, "to_json", dict)()
+    if not isinstance(payload, dict) or payload.get("source") == "builtin_defaults":
+        return "내장 기본값(미측정)"
+    if payload.get("in_sample"):
+        return IN_SAMPLE_LABEL
+    return "잠정(미검증)" if payload.get("provisional", True) else "측정됨"
 
 
 def load_threshold_profile(path: Path | str | None) -> ThresholdProfile | None:
@@ -426,6 +452,8 @@ def load_threshold_profile(path: Path | str | None) -> ThresholdProfile | None:
         dataset_fingerprint=str(payload.get("dataset_fingerprint", "")),
         measured_at=str(payload.get("measured_at", "")),
         metrics=dict(metrics) if isinstance(metrics, dict) else None,
+        in_sample=bool(payload.get("in_sample", False)),
+        note=str(payload.get("note", "") or ""),
     )
 
 
