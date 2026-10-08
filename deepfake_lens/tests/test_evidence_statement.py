@@ -5,10 +5,12 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from typing import Any
 
 from deepfake_lens.cli import main
 from deepfake_lens.core import (
@@ -28,16 +30,23 @@ from deepfake_lens.result_types import (
     Verdict,
 )
 from deepfake_lens.evidence_statement import (
+    EVIDENCE_STATEMENT_REPORT_TYPE,
+    SIGNATURE_SECTION_TITLE,
     build_evidence_statement,
+    signed_statement_body,
+    write_evidence_statement_json,
     write_evidence_statement_markdown,
     write_evidence_statement_pdf,
 )
+from deepfake_lens.signing import REPORT_KEY_ENV, signed_body_sha256, verify_report
 
 HAVE_FASTAPI = importlib.util.find_spec("fastapi") is not None and importlib.util.find_spec("httpx") is not None
 HAVE_PYMUPDF = importlib.util.find_spec("pymupdf") is not None or importlib.util.find_spec("fitz") is not None
 
 
-class EvidenceStatementTest(unittest.TestCase):
+class _StatementFixture(unittest.TestCase):
+    """Two scan items (a manipulation verdict and a legacy medium row) with real files."""
+
     def setUp(self) -> None:
         self.tmp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp_dir.name)
@@ -101,6 +110,8 @@ class EvidenceStatementTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp_dir.cleanup()
 
+
+class EvidenceStatementTest(_StatementFixture):
     def test_build_evidence_statement_structure_and_statutes(self) -> None:
         statement = build_evidence_statement(
             self.items,
@@ -134,7 +145,11 @@ class EvidenceStatementTest(unittest.TestCase):
         md_path = self.root / "statement.md"
         write_evidence_statement_markdown(md_path, statement)
         self.assertTrue(md_path.is_file())
-        self.assertEqual(md_path.read_text(encoding="utf-8"), md)
+        # G30: the written file is the statement plus its signature section
+        # (was: byte-equal to to_markdown(), i.e. never signed).
+        written = md_path.read_text(encoding="utf-8")
+        self.assertTrue(written.startswith(md))
+        self.assertIn(SIGNATURE_SECTION_TITLE, written)
 
     @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf required for PDF generation")
     def test_pdf_generation(self) -> None:
@@ -289,3 +304,101 @@ class EvidenceStatementTest(unittest.TestCase):
             self.assertIn("2024가단9999", text)
         finally:
             doc.close()
+
+
+KEY = b"evidence-statement-test-key"
+
+
+class EvidenceStatementSigningTest(_StatementFixture):
+    """G30: the 증거설명서 is signed over its whole body like the other reports."""
+
+    def _env(self, key: bytes | None) -> Any:
+        from unittest import mock
+
+        env = {k: v for k, v in os.environ.items() if k != REPORT_KEY_ENV}
+        if key is not None:
+            env[REPORT_KEY_ENV] = key.decode("utf-8")
+        return mock.patch.dict(os.environ, env, clear=True)
+
+    def test_signed_body_verifies_and_every_field_is_covered(self) -> None:
+        statement = build_evidence_statement(self.items, case_no="2026고합123")
+        signed = signed_statement_body(statement, KEY)
+        self.assertEqual(signed["report_type"], EVIDENCE_STATEMENT_REPORT_TYPE)
+        self.assertTrue(verify_report(signed, KEY).verified)
+        for field, value in (("case_no", "2026고합124"), ("defendant", "다른 사람"), ("signature_note", "x"), ("report_type", "scan")):
+            with self.subTest(field=field):
+                tampered = json.loads(json.dumps(signed))
+                tampered[field] = value
+                self.assertEqual(verify_report(tampered, KEY).status, "tampered")
+        tampered = json.loads(json.dumps(signed))
+        entry = tampered["entries"][0]
+        entry["purpose_of_proof"] = entry["purpose_of_proof"].replace("자동", "수동", 1)
+        self.assertEqual(verify_report(tampered, KEY).status, "tampered")
+        tampered = json.loads(json.dumps(signed))
+        tampered["entries"][1]["sha256"] = "0" * 64
+        self.assertEqual(verify_report(tampered, KEY).status, "tampered")
+
+    def test_without_a_key_it_says_unsigned(self) -> None:
+        statement = build_evidence_statement(self.items)
+        with self._env(None):
+            signed = signed_statement_body(statement)
+            md_path = self.root / "unsigned.md"
+            write_evidence_statement_markdown(md_path, statement)
+        self.assertIsNone(signed["signature"])
+        self.assertIn("서명 없음", str(signed["signature_note"]))
+        self.assertEqual(verify_report(signed, KEY).status, "unsigned")
+        self.assertIn("서명 없음", md_path.read_text(encoding="utf-8"))
+
+    def test_markdown_and_json_carry_the_same_signed_body(self) -> None:
+        statement = build_evidence_statement(self.items)
+        signed = signed_statement_body(statement, KEY)
+        md_path, json_path = self.root / "s.md", self.root / "s.json"
+        write_evidence_statement_markdown(md_path, statement, signed=signed)
+        write_evidence_statement_json(json_path, statement, signed=signed)
+        text = md_path.read_text(encoding="utf-8")
+        self.assertIn(str(signed["signature"]), text)
+        self.assertIn(signed_body_sha256(signed), text)
+        self.assertTrue(verify_report(json_path, KEY).verified)
+
+    def test_cli_evidence_statement_signs_json_out_and_stdout(self) -> None:
+        scan_json = self.root / "scan.json"
+        scan_json.write_text(json.dumps({"items": [self.item1.to_json(), self.item2.to_json()]}, ensure_ascii=False), encoding="utf-8")
+        json_out, md_out = self.root / "stmt.json", self.root / "stmt.md"
+        buf = io.StringIO()
+        with self._env(KEY), redirect_stdout(buf):
+            code = main(["evidence-statement", str(scan_json), "--json-out", str(json_out), "--md-out", str(md_out), "--format", "json"])
+        self.assertEqual(code, 0)
+        printed = json.loads(buf.getvalue())
+        self.assertTrue(verify_report(printed, KEY).verified)
+        self.assertTrue(verify_report(json_out, KEY).verified)
+        self.assertEqual(json.loads(json_out.read_text(encoding="utf-8")), printed)
+        self.assertIn(signed_body_sha256(printed), md_out.read_text(encoding="utf-8"))
+        key_file = self.root / "key.txt"
+        key_file.write_bytes(b"another-key")
+        with self._env(None), redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["evidence-statement", str(scan_json), "--json-out", str(json_out), "--key-file", str(key_file)]), 0)
+        self.assertTrue(verify_report(json_out, b"another-key").verified)
+
+    def test_cli_scan_writes_signed_statement_json(self) -> None:
+        folder = self.root / "case"
+        folder.mkdir()
+        (folder / "memo.txt").write_text("사건 메모 본문입니다.", encoding="utf-8")
+        out = self.root / "statement.json"
+        with self._env(KEY), redirect_stdout(io.StringIO()):
+            self.assertEqual(main(["scan", str(folder), "--no-default-engine", "--evidence-statement-out", str(out)]), 0)
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual(payload["report_type"], EVIDENCE_STATEMENT_REPORT_TYPE)
+        self.assertTrue(verify_report(payload, KEY).verified)
+
+    @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf required for PDF generation")
+    def test_pdf_prints_the_signature(self) -> None:
+        import pymupdf
+
+        statement = build_evidence_statement(self.items)
+        pdf_path = self.root / "signed.pdf"
+        signed = write_evidence_statement_pdf(pdf_path, statement, key=KEY)
+        doc = pymupdf.open(str(pdf_path))
+        text = "".join(page.get_text() for page in doc)
+        doc.close()
+        self.assertIn(str(signed["signature"]), "".join(text.split()))
+        self.assertTrue(verify_report(signed, KEY).verified)

@@ -10,11 +10,20 @@ Litigation standards. Formulates a structured 4-column exhibit schedule:
    - 정보통신망 이용촉진 및 정보보호 등에 관한 법률 제70조 (명예훼손)
    - 형법 제347조 (사기 - 신원 사칭)
    - Cryptographic SHA-256 evidence integrity verification
+
+Signing (G30): like the scan reports, the statement is signed as a whole —
+``signed_statement_body`` HMAC-signs every field of ``to_json()`` plus
+``report_type``, ``tool_version``, ``model_pins`` and ``signature_note``
+(key from ``--key-file`` or DEEPFAKE_LENS_REPORT_KEY). The JSON output is
+that signed body; the Markdown and PDF renderings print the signature, the
+key id and the signed body's SHA-256 so a paper copy can be tied to its
+signed JSON, or state "서명 없음" when no key is configured.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -24,6 +33,12 @@ from typing import Any
 from .core import BatchScanSummary, ScanItem
 from .result_text import TEXT_LEGAL_LIMITATION, coverage_gaps, evidence_groups
 from .result_types import VERDICT_LABELS, CoverageStatus, EvidenceDirection, EvidenceKind, EvidenceStrength, Grade, Verdict
+from .signing import resolve_report_key, sign_report
+
+# Marks a signed body as a 증거설명서 so it can never be mistaken for (or
+# verified as) a scan report body.
+EVIDENCE_STATEMENT_REPORT_TYPE = "evidence-statement"
+SIGNATURE_SECTION_TITLE = "### [보고서 서명]"
 
 
 @dataclass(frozen=True)
@@ -287,14 +302,76 @@ def build_evidence_statement(
     )
 
 
-def write_evidence_statement_markdown(path: Path | str, statement: EvidenceStatement) -> None:
+def signed_statement_body(
+    statement: EvidenceStatement,
+    key: bytes | str | None = None,
+    *,
+    model_pins: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    """The statement as a signed report body (G30).
+
+    ``key`` None means DEEPFAKE_LENS_REPORT_KEY; with no key at all the body
+    carries ``signature: null`` and the "서명 없음" note (never silently
+    unsigned). Verify with ``signing.verify_report``.
+    """
+    body: dict[str, object] = {"report_type": EVIDENCE_STATEMENT_REPORT_TYPE, **statement.to_json()}
+    return sign_report(body, key if key is not None else resolve_report_key(), model_pins=model_pins)
+
+
+def statement_signature_lines(signed: dict[str, object]) -> list[str]:
+    """Korean signature lines for the Markdown/PDF renderings."""
+    from .reports import signature_lines_ko
+
+    return signature_lines_ko(signed)
+
+
+def _signed(statement: EvidenceStatement, signed: dict[str, object] | None, key: bytes | str | None) -> dict[str, object]:
+    return signed if signed is not None else signed_statement_body(statement, key)
+
+
+def write_evidence_statement_json(
+    path: Path | str,
+    statement: EvidenceStatement,
+    *,
+    signed: dict[str, object] | None = None,
+    key: bytes | str | None = None,
+) -> dict[str, object]:
+    """Write the signed statement body as JSON; returns it."""
+    body = _signed(statement, signed, key)
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(statement.to_markdown(), encoding="utf-8")
+    p.write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return body
 
 
-def write_evidence_statement_pdf(path: Path | str, statement: EvidenceStatement) -> None:
-    """Render court-admissible Evidence Statement PDF using PyMuPDF with Korean fonts."""
+def write_evidence_statement_markdown(
+    path: Path | str,
+    statement: EvidenceStatement,
+    *,
+    signed: dict[str, object] | None = None,
+    key: bytes | str | None = None,
+) -> dict[str, object]:
+    """Markdown statement followed by the signature section (G30)."""
+    body = _signed(statement, signed, key)
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lines = [statement.to_markdown(), "", SIGNATURE_SECTION_TITLE, *statement_signature_lines(body), ""]
+    p.write_text("\n".join(lines), encoding="utf-8")
+    return body
+
+
+def write_evidence_statement_pdf(
+    path: Path | str,
+    statement: EvidenceStatement,
+    *,
+    signed: dict[str, object] | None = None,
+    key: bytes | str | None = None,
+) -> dict[str, object]:
+    """Render court-admissible Evidence Statement PDF using PyMuPDF with Korean fonts.
+
+    The last block prints the signature lines of the signed statement body
+    (G30); returns that body."""
+    body = _signed(statement, signed, key)
     try:
         import pymupdf
     except ImportError:
@@ -465,7 +542,18 @@ def write_evidence_statement_pdf(path: Path | str, statement: EvidenceStatement)
 
     page.insert_text(pymupdf.Point(margin_l, y + 85), statement.court, fontname=font_ko, fontsize=12, color=(0.05, 0.05, 0.05))
 
+    # G30: signature block (or the explicit "서명 없음" lines).
+    sig_lines = statement_signature_lines(body)
+    sig_y = y + 105.0
+    if sig_y + 9.0 * len(sig_lines) > 800:
+        page = create_page()
+        sig_y = 70.0
+    for line in sig_lines:
+        page.insert_text(pymupdf.Point(margin_l, sig_y), line, fontname=font_ko, fontsize=6.5, color=(0.35, 0.35, 0.35))
+        sig_y += 9.0
+
     tmp = output.with_suffix(output.suffix + ".tmp")
     doc.save(str(tmp))
     doc.close()
     tmp.replace(output)
+    return body

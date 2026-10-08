@@ -218,6 +218,21 @@ top-level fields. The HMAC-SHA256 covers the canonical JSON
 Rendered reports (`POST /api/report`, `--html-out`) additionally carry
 `report_format` and the posted `thresholds`/`coverage` in the signed body.
 
+### Signed evidence statement (증거설명서)
+
+`evidence-statement --json-out`/`--format json`, `scan
+--evidence-statement-out <file>.json` and the Markdown/PDF renderings
+(`--md-out`, `--pdf-out`, `POST /api/report?format=evidence`) are backed by
+one signed body: every field of `EvidenceStatement.to_json()` (`case_no`,
+`case_name`, `plaintiff`, `defendant`, `court`, `entries[]` with
+`purpose_of_proof`/`sha256`/`statutes`, `created_at`, `law_firm`, `contact`,
+`center`, `provenance_note`, `reference_note`) plus `"report_type":
+"evidence-statement"` and the four signing fields above, all inside the MAC
+except `signature`/`signature_key_id`. The Markdown and PDF print the
+signature, key id and the signed body's SHA-256 (or the `서명 없음` lines)
+so a paper copy can be tied to its signed JSON; verify the JSON with
+`signing.verify_report`.
+
 ## Measurement records (phase 0, WP-I — G26/G27/G28)
 
 These shapes are not part of the scan payload but are contracts between

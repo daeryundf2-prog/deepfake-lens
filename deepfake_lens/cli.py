@@ -66,6 +66,8 @@ from .webapp import run_server
 from .faceswap_seam import analyze_faceswap_seam
 from .evidence_statement import (
     build_evidence_statement,
+    signed_statement_body,
+    write_evidence_statement_json,
     write_evidence_statement_markdown,
     write_evidence_statement_pdf,
 )
@@ -905,13 +907,17 @@ def main(argv: list[str] | None = None) -> int:
             center=args.center,
             coverage=weights_coverage(None),
         )
+        # G30: one signed body backs every output (JSON, Markdown, PDF).
+        signed_statement = signed_statement_body(statement, resolve_report_key(args.key_file))
         if args.md_out:
-            write_evidence_statement_markdown(args.md_out, statement)
+            write_evidence_statement_markdown(args.md_out, statement, signed=signed_statement)
         if args.pdf_out:
-            write_evidence_statement_pdf(args.pdf_out, statement)
+            write_evidence_statement_pdf(args.pdf_out, statement, signed=signed_statement)
+        if args.json_out:
+            write_evidence_statement_json(args.json_out, statement, signed=signed_statement)
 
         if args.format == "json":
-            print(json.dumps(statement.to_json(), ensure_ascii=False, indent=2))
+            print(json.dumps(signed_statement, ensure_ascii=False, indent=2))
         elif args.format == "markdown":
             print(statement.to_markdown())
         else:
@@ -927,6 +933,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"PDF 저장 완료: {args.pdf_out}")
             if args.md_out:
                 print(f"Markdown 저장 완료: {args.md_out}")
+            if args.json_out:
+                print(f"서명 JSON 저장 완료: {args.json_out}")
+            print("서명: " + ("HMAC-SHA256 " + str(signed_statement.get("signature_key_id")) if signed_statement.get("signature") else "서명 없음 (키 미설정)"))
         return 0
     if args.command == "vendor-weights":
         if args.action == "pin":
@@ -1069,14 +1078,17 @@ def main(argv: list[str] | None = None) -> int:
             thresholds=_thresholds_json(thresholds),
             coverage=scan_coverage,
         )
+        signed_stmt = signed_statement_body(stmt, resolve_report_key(getattr(args, "key_file", None)))
         if getattr(args, "evidence_statement_out", None):
             out_p = Path(args.evidence_statement_out)
             if out_p.suffix.lower() == ".pdf":
-                write_evidence_statement_pdf(out_p, stmt)
+                write_evidence_statement_pdf(out_p, stmt, signed=signed_stmt)
+            elif out_p.suffix.lower() == ".json":
+                write_evidence_statement_json(out_p, stmt, signed=signed_stmt)
             else:
-                write_evidence_statement_markdown(out_p, stmt)
+                write_evidence_statement_markdown(out_p, stmt, signed=signed_stmt)
         if getattr(args, "evidence_statement_pdf_out", None):
-            write_evidence_statement_pdf(Path(args.evidence_statement_pdf_out), stmt)
+            write_evidence_statement_pdf(Path(args.evidence_statement_pdf_out), stmt, signed=signed_stmt)
 
     if args.format == "json":
         print(json.dumps(analysis_scan_payload(summary, items, thresholds, options), ensure_ascii=False, indent=2))

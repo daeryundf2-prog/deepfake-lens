@@ -50,7 +50,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     scan_parser.add_argument("--html-out", type=Path, help="write HTML report")
     scan_parser.add_argument("--pdf-out", type=Path, help="write simple PDF report")
     scan_parser.add_argument("--forensic-pdf-out", type=Path, help="write court-admissible forensic PDF report with ECFS exhibit stamp and SHA-256 hashes")
-    scan_parser.add_argument("--evidence-statement-out", type=Path, help="write standard ECFS court evidence statement (증거설명서, Markdown or PDF depending on suffix)")
+    scan_parser.add_argument("--evidence-statement-out", type=Path, help="write standard ECFS court evidence statement (증거설명서; .pdf -> PDF, .json -> signed JSON, else Markdown — all signed with --key-file/DEEPFAKE_LENS_REPORT_KEY)")
     scan_parser.add_argument("--evidence-statement-pdf-out", type=Path, help="write standard ECFS court evidence statement as PDF")
     scan_parser.add_argument("--case-no", type=str, default="(사건번호 입력)", help="case number for forensic evidence statement")
     scan_parser.add_argument("--case-name", type=str, default="성폭력처벌법위반(허위영상물편집등) 및 정보통신망법위반", help="case title (사건명) for forensic evidence statement")
@@ -363,6 +363,8 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     evidence_stmt_parser.add_argument("--center", type=str, default="디지털포렌식 감정센터", help="forensic center name on the letterhead")
     evidence_stmt_parser.add_argument("--pdf-out", type=Path, help="write evidence statement PDF")
     evidence_stmt_parser.add_argument("--md-out", type=Path, help="write evidence statement Markdown")
+    evidence_stmt_parser.add_argument("--json-out", type=Path, help="write the signed evidence statement JSON (verify with signing.verify_report)")
+    evidence_stmt_parser.add_argument("--key-file", type=Path, help="report signing key file (default: DEEPFAKE_LENS_REPORT_KEY env var); without a key every output says 서명 없음")
     evidence_stmt_parser.add_argument("--format", choices=["table", "json", "markdown"], default="table", help="stdout format")
 
     vendor_parser = subparsers.add_parser("vendor-weights", help="air-gapped forensic lab model weight verification and offline bundler")

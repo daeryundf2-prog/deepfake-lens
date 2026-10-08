@@ -950,7 +950,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
         tmp_path = Path(tmp.name)
     try:
         if req_format in ("evidence", "evidence-statement"):
-            from .evidence_statement import build_evidence_statement, write_evidence_statement_pdf
+            from .evidence_statement import build_evidence_statement, signed_statement_body, write_evidence_statement_pdf
             try:
                 stmt = build_evidence_statement(
                     items,
@@ -965,7 +965,8 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
                     thresholds=thresholds,
                     coverage=coverage,
                 )
-                write_evidence_statement_pdf(tmp_path, stmt)
+                # G30: signed like the other web reports (server key + pins).
+                write_evidence_statement_pdf(tmp_path, stmt, signed=signed_statement_body(stmt, model_pins=profile_pins(_models_dir())))
             except RuntimeError as exc:
                 return {"error": f"증거설명서 PDF 생성 실패: {exc}", "hint": "pip install 'deepfake-lens[forensic]' 후 재시도하거나 Markdown 출력을 사용하세요."}
         elif req_format == "pdf":
