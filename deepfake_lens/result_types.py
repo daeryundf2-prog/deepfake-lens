@@ -77,6 +77,14 @@ SOURCE_CONFIDENCE_LABELS = {
 }
 
 
+# Default reason of SourceGuess.unknown(); dropped as soon as a concrete
+# reason exists (R3), so a guess never says both "no clue" and a clue.
+NO_SOURCE_CLUE_REASON = "출처를 판단할 메타데이터나 명시적 단서가 없습니다."
+# Label prefix of a source guess that is reference information only (R3,
+# D11): text heuristics and document creator/application metadata.
+REFERENCE_SOURCE_PREFIX = "참고: "
+
+
 @dataclass(frozen=True)
 class SourceGuess:
     label: str
@@ -84,7 +92,7 @@ class SourceGuess:
     reasons: list[str] = field(default_factory=list)
 
     @classmethod
-    def unknown(cls, reason: str = "출처를 판단할 메타데이터나 명시적 단서가 없습니다.") -> "SourceGuess":
+    def unknown(cls, reason: str = NO_SOURCE_CLUE_REASON) -> "SourceGuess":
         return cls("출처 단서 없음", SourceConfidence.UNKNOWN, [reason])
 
 

@@ -103,6 +103,8 @@ from .result_types import (  # noqa: F401
     EvidenceKind,
     EvidenceSignal,
     EvidenceStrength,
+    NO_SOURCE_CLUE_REASON,
+    REFERENCE_SOURCE_PREFIX,
     Grade,
     RiskBand,
     ScanItem,
@@ -1425,16 +1427,25 @@ def _apply_document_metadata(result: ClassificationResult, doc_metadata: dict[st
         ("docx.application", "작성 애플리케이션"),
     )
     hints = [(label_text, doc_metadata[key]) for key, label_text in provenance_keys if doc_metadata.get(key)]
-    for label_text, value in hints:
-        reasons.append(f"{label_text}: {value}")
     ai_hit = next((v for _, v in hints if _DOCUMENT_AI_HINT.search(v)), None)
-    if confidence == SourceConfidence.UNKNOWN:
+    if hints:
+        # R3: creator/application fields are free text anyone can set — a
+        # source guess built from them is reference information only:
+        # "참고: " label, confidence unknown, and no leftover "no clue"
+        # reason contradicting the clue just listed.
+        reasons = [reason for reason in reasons if reason != NO_SOURCE_CLUE_REASON]
+        reasons.extend(f"{label_text}: {value}" for label_text, value in hints)
         if ai_hit:
-            label = "AI 도구 생성 메타데이터 추정"
-            confidence = SourceConfidence.MEDIUM
-            reasons.append(f"문서 메타데이터에 AI 도구명이 기록되어 있습니다: {ai_hit}")
-        elif hints:
-            reasons.append("문서 메타데이터에서 작성 도구 단서가 발견되었습니다.")
+            label = f"{REFERENCE_SOURCE_PREFIX}문서 메타데이터에 AI 도구명 기록"
+            reasons.append(
+                f"문서 메타데이터에 AI 도구명이 기록되어 있습니다: {ai_hit} — 작성 도구 필드는 누구나 바꿀 수 있어 출처 확정 근거가 아닙니다."
+            )
+        elif confidence == SourceConfidence.UNKNOWN:
+            label = f"{REFERENCE_SOURCE_PREFIX}문서 메타데이터의 작성 도구 단서"
+            reasons.append("문서 메타데이터에서 작성 도구 단서가 발견되었습니다(참고 정보).")
+        elif not label.startswith(REFERENCE_SOURCE_PREFIX):
+            label = f"{REFERENCE_SOURCE_PREFIX}{label}"
+        confidence = SourceConfidence.UNKNOWN
     # Preserve the extracted provenance fields verbatim so API/GUI/report
     # consumers can show the raw metadata record, not just its folded
     # source-guess interpretation.

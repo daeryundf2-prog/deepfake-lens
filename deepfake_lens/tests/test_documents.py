@@ -10,7 +10,7 @@ from pathlib import Path
 from deepfake_lens.documents import extract_document_text
 
 
-def _docx(path: Path, body: str, creator: str = "") -> None:
+def _docx(path: Path, body: str, creator: str = "", application: str = "") -> None:
     document = (
         '<?xml version="1.0"?><w:document xmlns:w="w">'
         f"<w:body><w:p><w:r><w:t>{body}</w:t></w:r></w:p></w:body></w:document>"
@@ -22,6 +22,12 @@ def _docx(path: Path, body: str, creator: str = "") -> None:
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("word/document.xml", document)
         zf.writestr("docProps/core.xml", core)
+        if application:
+            zf.writestr(
+                "docProps/app.xml",
+                '<?xml version="1.0"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">'
+                f"<Application>{application}</Application></Properties>",
+            )
 
 
 class DocumentExtractionTest(unittest.TestCase):
@@ -44,9 +50,47 @@ class DocumentExtractionTest(unittest.TestCase):
         self.assertEqual(item.kind, "text")
         self.assertEqual(item.status, "analyzed")
         self.assertIsNotNone(item.result)
-        self.assertEqual(item.result.source_guess.label, "AI 도구 생성 메타데이터 추정")
+        # R3: a source guess from creator metadata is reference-only.
+        self.assertEqual(item.result.source_guess.label, "참고: 문서 메타데이터에 AI 도구명 기록")
         self.assertIsNotNone(item.result.document_metadata)
         self.assertEqual(item.result.document_metadata.get("docx.creator"), "ChatGPT")
+
+    def test_application_metadata_source_guess_is_reference_only(self) -> None:
+        """R3: docProps/app.xml Application "ChatGPT" gives a "참고: " source
+        guess with confidence unknown, and the "no clue" default reason is
+        gone once the metadata clue is listed."""
+        from deepfake_lens.core import analyze_file
+        from deepfake_lens.result_types import NO_SOURCE_CLUE_REASON, Grade, SourceConfidence, Verdict
+
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "memo.docx"
+            _docx(doc, "회의 결과를 정리한 메모입니다. 다음 주까지 초안을 검토합니다. " * 6, application="ChatGPT")
+            item = analyze_file(doc)
+        self.assertIsNotNone(item.result)
+        assert item.result is not None
+        guess = item.result.source_guess
+        self.assertTrue(guess.label.startswith("참고: "), guess.label)
+        self.assertEqual(guess.confidence, SourceConfidence.UNKNOWN)
+        self.assertNotIn(NO_SOURCE_CLUE_REASON, guess.reasons)
+        self.assertIn("작성 애플리케이션: ChatGPT", guess.reasons)
+        self.assertEqual(item.result.to_json()["source_guess"]["confidence"], "unknown")
+        self.assertEqual(item.result.grade, Grade.REFERENCE)
+        self.assertEqual(item.result.verdict_code, Verdict.UNDETERMINED)
+
+    def test_non_ai_application_is_reference_clue(self) -> None:
+        """R3: a non-AI writing tool is a reference clue too — never a confident guess."""
+        from deepfake_lens.core import analyze_file
+        from deepfake_lens.result_types import NO_SOURCE_CLUE_REASON, SourceConfidence
+
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = Path(tmp) / "memo.docx"
+            _docx(doc, "회의 결과를 정리한 메모입니다. " * 6, application="Microsoft Office Word")
+            item = analyze_file(doc)
+        assert item.result is not None
+        guess = item.result.source_guess
+        self.assertTrue(guess.label.startswith("참고: "), guess.label)
+        self.assertEqual(guess.confidence, SourceConfidence.UNKNOWN)
+        self.assertNotIn(NO_SOURCE_CLUE_REASON, guess.reasons)
 
     def test_corrupt_docx_degrades(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
