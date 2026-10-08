@@ -3,7 +3,7 @@ import tarfile
 import zipfile
 from pathlib import Path
 import unittest
-from typing import Sequence
+from typing import Any, Sequence
 from unittest.mock import patch
 
 from deepfake_lens.archives import (
@@ -564,3 +564,116 @@ class RejectedMemberRecordTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WebUploadArchiveRecordTests(unittest.TestCase):
+    """D9 on the web upload path: an archive uploaded to the stdlib web server
+    (``webapp.build_server``) records refused members, extraction errors and
+    missing extractors on its container row exactly like the folder scan."""
+
+    def setUp(self) -> None:
+        import tempfile
+        import threading
+        from collections import OrderedDict
+
+        from deepfake_lens import webapp, webapp_api
+
+        roots: Any = patch.object(webapp_api, "_READ_ROOTS", OrderedDict[Path, None]())
+        roots.start()
+        self.addCleanup(roots.stop)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        server = webapp.build_server("127.0.0.1", 0, default_folder=self.root)
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+        thread.start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.url = f"http://127.0.0.1:{server.server_address[1]}"
+
+    def _post(self, endpoint: str, field: str, filename: str, data: bytes) -> dict:
+        import json
+        import urllib.request
+
+        from deepfake_lens.webapp import CLIENT_HEADER
+
+        boundary = "----dflarchiveupload"
+        body = (
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"; filename=\"{filename}\"\r\n"
+            "Content-Type: application/octet-stream\r\n\r\n"
+        ).encode() + data + f"\r\n--{boundary}--\r\n".encode()
+        request = urllib.request.Request(
+            self.url + endpoint, data=body, method="POST",
+            headers={CLIENT_HEADER: "test", "Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            self.assertEqual(response.status, 200)
+            return json.loads(response.read().decode("utf-8"))
+
+    def _hostile_zip(self) -> tuple[Path, int, int]:
+        arc = self.root / "evil.zip"
+        declared, compressed = RejectedMemberRecordTests._bomb_zip(arc)
+        with zipfile.ZipFile(arc, "a") as zf:
+            zf.writestr("../x.png", b"x")
+        return arc, declared, compressed
+
+    @staticmethod
+    def _container(payload: dict, name: str) -> dict:
+        rows = [row for row in payload["items"] if row.get("kind") == "archive" and row.get("path") == name]
+        assert len(rows) == 1, payload["items"]
+        return rows[0]
+
+    def test_rejected_members_surface_on_upload_container(self) -> None:
+        import hashlib
+
+        from deepfake_lens.archives import MAX_ARCHIVE_RATIO
+
+        arc, declared, compressed = self._hostile_zip()
+        data = arc.read_bytes()
+        expected_bomb = f"zeros.bin: 압축 예산 초과(선언 크기 {declared}, 한도 {compressed * MAX_ARCHIVE_RATIO})"
+        traversal = "../x.png: 경로 이탈 멤버('..' — 대상 폴더 밖 쓰기 시도)"
+        # The folder scan of the same bytes is the reference surface.
+        _, scanned = scan_directory(self.root)
+        scanned_row = next(item for item in scanned if item.kind == "archive").to_json()
+        for endpoint, field in (("/api/analyze-upload", "files"), ("/api/check", "file")):
+            with self.subTest(endpoint=endpoint):
+                payload = self._post(endpoint, field, "evil.zip", data)
+                container = self._container(payload, "evil.zip")
+                self.assertEqual(container["sha256"], hashlib.sha256(data).hexdigest())
+                result = container["result"]
+                self.assertEqual(result["verdict_code"], "undetermined")
+                member_entries = [entry for entry in result["coverage"] if entry["check"] == "archive_member"]
+                self.assertTrue(all(entry["status"] == "skipped" for entry in member_entries), member_entries)
+                reasons = {entry["reason"] for entry in member_entries}
+                self.assertTrue(any(reason.startswith(expected_bomb) for reason in reasons), reasons)
+                self.assertIn(traversal, reasons)
+                self.assertTrue(any("구성 파일 거부: zeros.bin — 압축 예산 초과(" in lim for lim in result["limitations"]), result["limitations"])
+                self.assertIn("구성 파일 거부: ../x.png — 경로 이탈 멤버('..' — 대상 폴더 밖 쓰기 시도)", result["limitations"])
+                self.assertEqual(result["coverage"][0], {"check": "archive", "status": "ran", "reason": ""})
+                # Same container record as the CLI/folder scan (D9 parity).
+                for key in ("coverage", "limitations", "verdict", "verdict_code", "band"):
+                    self.assertEqual(result[key], scanned_row["result"][key], key)
+                members = [row["path"] for row in payload["items"] if str(row.get("path", "")).startswith("evil.zip::")]
+                self.assertEqual(members, ["evil.zip::ok.txt"])
+                self.assertFalse(any("x.png" in str(row.get("path")) and "::" in str(row.get("path")) for row in payload["items"]))
+
+    def test_unopenable_archive_is_failed_container(self) -> None:
+        payload = self._post("/api/analyze-upload", "files", "broken.zip", b"PK\x03\x04 not really a zip archive")
+        result = self._container(payload, "broken.zip")["result"]
+        archive_entry = next(entry for entry in result["coverage"] if entry["check"] == "archive")
+        self.assertEqual(archive_entry["status"], "failed")
+        self.assertIn("BadZipFile", archive_entry["reason"])
+        self.assertIn("압축 해제 실패", result["verdict"])
+        self.assertEqual(result["verdict_code"], "undetermined")
+
+    def test_missing_extractor_is_skipped_container(self) -> None:
+        from deepfake_lens.archives import ArchiveExtraction
+
+        missing = ArchiveExtraction(missing_dependency="py7zr")
+        missing.warnings.append("7z 압축 해제에는 py7zr가 필요합니다.")
+        with patch("deepfake_lens.archives.extract_archive", return_value=missing):
+            payload = self._post("/api/analyze-upload", "files", "bundle.7z", b"7z\xbc\xaf\x27\x1c\x00\x04")
+        result = self._container(payload, "bundle.7z")["result"]
+        self.assertIn({"check": "archive", "status": "skipped", "reason": "의존성 부재: py7zr"}, result["coverage"])
+        self.assertIn("의존성 부재: py7zr", result["verdict"])
+        self.assertEqual(result["verdict_code"], "undetermined")

@@ -537,9 +537,20 @@ def _archive_upload_items(
     """Extract an uploaded archive to a temp dir and analyze each member.
 
     Members are reported as ``archive.zip::inner/path.png`` rows; the
-    archive bytes and extracted tree are deleted before returning.
+    archive bytes and extracted tree are deleted before returning. The
+    container row is built exactly like the folder scan's
+    (``core._archive_container_item``, D9): every member the extractor
+    refused (``ArchiveExtraction.rejected`` — traversal, absolute path,
+    link, "압축 예산 초과(...)" bomb/budget limits) is a skipped
+    ``archive_member`` coverage entry plus a limitation on the container,
+    an unopenable archive (``error``) is a failed ``archive`` check and a
+    missing extractor (``missing_dependency``) a skipped one; the row
+    carries the uploaded archive's SHA-256.
     """
-    from .archives import extract_archive
+    import hashlib
+
+    from .archives import archive_format, extract_archive
+    from .core import ScanItem, _archive_container_item
 
     tmp_name = ""
     dest = ""
@@ -550,45 +561,49 @@ def _archive_upload_items(
         # resolve: mkdtemp may return a symlinked path (/var→/private/var on
         # macOS); members come back resolved, so relative_to needs the real path.
         dest = str(Path(tempfile.mkdtemp(prefix="dflens-up-")).resolve())
-        extraction = extract_archive(tmp_name, dest)
+        members: list[Path] = []
+        skipped = 0
+        warnings: list[str] = []
+        rejected: list[tuple[str, str]] = []
+        extraction_error: str | None = None
+        missing_dependency: str | None = None
+        try:
+            extraction = extract_archive(tmp_name, dest)
+        except Exception as exc:
+            # Same as the folder scan: a corrupt/unreadable archive becomes a
+            # failed container row, never a silently missing upload.
+            logger.exception("archive extraction failed: %s", filename)
+            warnings = [f"압축 해제 실패: {exc}"]
+            extraction_error = failure_reason(exc)
+        else:
+            members = list(extraction.members)
+            skipped = extraction.skipped
+            warnings = list(extraction.warnings)
+            rejected = list(extraction.rejected)
+            extraction_error = extraction.error
+            missing_dependency = extraction.missing_dependency
         items: list[dict[str, object]] = []
-        for member in extraction.members:
+        member_items: list[ScanItem] = []
+        for member in members:
             rel = member.relative_to(dest).as_posix()
             display = f"{filename}::{rel}"
             item = analyze_path(member, options, display=display, thresholds=thresholds)
+            member_items.append(item)
             record = item.to_json()
             record["path"] = display
             record["name"] = display
             items.append(record)
-        if extraction.warnings or extraction.skipped:
-            # A container whose members could not all be analyzed is never a
-            # clean LOW — skipped/warned members mean unseen evidence.
-            # This branch only runs for partial extraction, so the
-            # container is always undetermined (contract v2, never "low").
-            reason = f"구성 파일 {extraction.skipped}개 스킵, 경고 {len(extraction.warnings)}건 — 일부 구성을 분석하지 못했습니다"
-            items.append({
-                "name": filename, "path": filename, "kind": "archive",
-                "status": "unknown",
-                "size_bytes": len(payload),
-                "result": {
-                    "score": 0, "band": "unknown", "band_label": "판단 불가",
-                    "verdict": f"압축 파일: 판단 불가 — {len(extraction.members)}개 분석, {extraction.skipped}개 스킵",
-                    "verdict_code": "undetermined", "verdict_label": "판단 불가",
-                    "grade": "evidence", "grade_label": "감정 근거로 사용 가능",
-                    "evidence": [],
-                    "coverage": [{"check": "archive", "status": "skipped", "reason": reason}],
-                    "reference_signals": [],
-                    "probability": None, "probability_ci": None, "score_is_calibrated": False,
-                    "signals": [{"title": "압축 컨테이너", "detail": f"구성 {len(extraction.members)}개", "weight": 0}],
-                    "limitations": extraction.warnings,
-                    "next_checks": [],
-                },
-            })
-        if not items:
-            items.append({
-                "name": filename, "path": filename, "kind": "archive", "status": "failed",
-                "error": "; ".join(extraction.warnings) or "해제된 파일이 없습니다",
-            })
+        container = _archive_container_item(
+            filename, filename, Path(tmp_name),
+            fmt=archive_format(filename), members=len(member_items), skipped=skipped,
+            warnings=warnings, member_items=member_items, extraction_error=extraction_error,
+            rejected=rejected, sha256=hashlib.sha256(payload).hexdigest(),
+            missing_dependency=missing_dependency,
+        )
+        record = container.to_json()
+        record["path"] = filename
+        record["name"] = filename
+        items.append(record)
         return items
     finally:
         if tmp_name:

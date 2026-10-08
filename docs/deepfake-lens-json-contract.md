@@ -91,7 +91,10 @@ always `0` invited old-contract readings. They remain readable as
   `중첩 압축 예산(N개) 소진으로 미해제`, `손상된 멤버 데이터(<Exception>: …)`;
   members of nested archives are named `<inner archive>::<member>`. The same
   lines appear in `limitations` as `구성 파일 거부: <member> — <why>` (at most
-  100 per container, then one `외 N개` entry).
+  100 per container, then one `외 N개` entry). An archive uploaded to the web
+  server (`/api/analyze-upload`, `/api/check`) gets the same container row —
+  built by the same function, always present, `path`/`name` = the uploaded
+  file name and `sha256` = the digest of the uploaded bytes (D9).
 - A symlink found in a scanned folder (file or directory) is never followed
   and is listed as its own row: `kind: "unknown"`, `status: "skipped"`,
   `result: null`, `error` starting `심볼릭 링크` (D10); it counts in
