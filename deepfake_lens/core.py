@@ -1180,7 +1180,12 @@ def _analyze_text_file(
             elif extractor.startswith("skipped:"):
                 entry = skipped("document_text", f"측정 범위 밖: {extractor.split(':', 1)[1]}")
             elif extractor.startswith("failed:"):
-                entry = failed_entry("document_text", AnalyzerError(f"문서 텍스트 추출 실패 ({extractor})"))
+                # D16: the extractor's exception class and message are kept.
+                cause = doc_metadata.get("extractor_error")
+                entry = failed_entry(
+                    "document_text",
+                    AnalyzerError(f"문서 텍스트 추출 실패 ({extractor})" + (f" — {cause}" if cause else "")),
+                )
         coverage.append(entry)
         # Binary containers (docx/hwp/pdf) must not reach the text members
         # as raw bytes — feed the extracted text instead so PPL/binoculars
@@ -1304,7 +1309,7 @@ def _apply_document_metadata(result: ClassificationResult, doc_metadata: dict[st
     # Preserve the extracted provenance fields verbatim so API/GUI/report
     # consumers can show the raw metadata record, not just its folded
     # source-guess interpretation.
-    preserved = {key: value for key, value in doc_metadata.items() if value and key != "extractor"}
+    preserved = {key: value for key, value in doc_metadata.items() if value and key not in {"extractor", "extractor_error"}}
     extra = document_metadata_evidence(ai_hit)
     rebuilt = build_classification_result(
         subject="글",

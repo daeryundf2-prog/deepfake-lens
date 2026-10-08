@@ -14,17 +14,42 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from deepfake_lens.corpus_manifest import SCHEMA, item_id, manifest_sha256
 from deepfake_lens.measurement_gate import MIN_AUROC_CI_LOW, MIN_PER_CLASS, check_models_dir, check_profile, gate_report_lines
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GATE_SCRIPT = REPO_ROOT / "scripts" / "check_measurement_gate.py"
-MANIFEST_SHA = "a" * 64
+CORPUS_ID = "t-img-test"
+# Test-split class counts of the fixture manifest (>= every n used below).
+MANIFEST_POS, MANIFEST_NEG = 240, 260
+# Path of the fixture manifest relative to the models dir (D16).
+MANIFEST_REL = "corpus/manifest.json"
+
+
+def _manifest_payload(n_pos: int = MANIFEST_POS, n_neg: int = MANIFEST_NEG, corpus_id: str = CORPUS_ID) -> dict[str, object]:
+    """A corpus-manifest-v1 document (no media files needed for the gate)."""
+    items: list[dict[str, object]] = []
+    for label, count in (("synthetic", n_pos), ("real", n_neg)):
+        for index in range(count):
+            relpath = f"{label}/{index:04d}.png"
+            items.append({
+                "id": item_id(relpath), "relpath": relpath, "sha256": f"{index:064x}", "modality": "image",
+                "label": label, "generator": "sdxl" if label == "synthetic" else None, "variant": "original",
+                "split": "test", "source_note": "qa fixture", "derived_from": None,
+            })
+    items.sort(key=lambda item: str(item["id"]))
+    return {"schema": SCHEMA, "corpus_id": corpus_id, "created": "2026-10-01T00:00:00Z", "items": items, "manifest_sha256": manifest_sha256(items)}
+
+
+FIXTURE_MANIFEST = _manifest_payload()
+MANIFEST_SHA = str(FIXTURE_MANIFEST["manifest_sha256"])
 
 
 def _measured(**overrides: object) -> dict[str, object]:
     record: dict[str, object] = {
-        "corpus_id": "t-img-test",
+        "corpus_id": CORPUS_ID,
         "manifest_sha256": MANIFEST_SHA,
+        "manifest_path": MANIFEST_REL,
         "split": "test",
         "n_pos": 240,
         "n_neg": 260,
@@ -54,6 +79,9 @@ class MeasurementGateTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.models = Path(self._tmp.name)
+        self.manifest = self.models / MANIFEST_REL
+        self.manifest.parent.mkdir(parents=True)
+        self.manifest.write_text(json.dumps(FIXTURE_MANIFEST), encoding="utf-8")
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -110,6 +138,39 @@ class MeasurementGateTest(unittest.TestCase):
                 self.assertTrue(any(needle in problem for problem in problems), problems)
         exact = _write(self.models, "exact-runtime.json", _image_profile(measured_on=_measured(n_pos=MIN_PER_CLASS, n_neg=MIN_PER_CLASS, auroc_ci=[MIN_AUROC_CI_LOW, 0.9])))
         self.assertEqual(check_profile(exact), [])
+
+    def test_measured_on_must_point_at_an_existing_matching_manifest(self) -> None:
+        """D16: a well-formed but invented record (all-zero manifest hash, no
+        file) fails; so do a missing/edited/other-corpus manifest and class
+        counts the manifest's test split cannot supply."""
+        edited = json.loads(json.dumps(FIXTURE_MANIFEST))
+        edited["items"][0]["source_note"] = "edited after hashing"  # changed after its hash was taken
+        (self.models / "corpus" / "edited.json").write_text(json.dumps(edited), encoding="utf-8")
+        other = _manifest_payload(corpus_id="other-corpus")
+        (self.models / "corpus" / "other.json").write_text(json.dumps(other), encoding="utf-8")
+        small = _manifest_payload(n_pos=MIN_PER_CLASS, n_neg=MIN_PER_CLASS)
+        (self.models / "corpus" / "small.json").write_text(json.dumps(small), encoding="utf-8")
+        (self.models / "corpus" / "not-a-manifest.json").write_text('{"schema": "x"}', encoding="utf-8")
+        cases = {
+            "forged-zero": (_measured(manifest_sha256="0" * 64, manifest_path="corpus/missing.json"), "파일이 없습니다"),
+            "zero-sha-real-file": (_measured(manifest_sha256="0" * 64), "해시"),
+            "no-path": (_measured(manifest_path=""), "manifest_path"),
+            "edited": (_measured(manifest_path="corpus/edited.json"), "편집된 매니페스트"),
+            "other-corpus": (_measured(manifest_path="corpus/other.json", manifest_sha256=str(other["manifest_sha256"])), "corpus_id"),
+            "too-few": (_measured(manifest_path="corpus/small.json", manifest_sha256=str(small["manifest_sha256"])), "항목 수"),
+            "not-manifest": (_measured(manifest_path="corpus/not-a-manifest.json"), "corpus-manifest-v1"),
+        }
+        for name, (record, needle) in cases.items():
+            with self.subTest(name):
+                path = _write(self.models, f"{name}-runtime.json", _image_profile(measured_on=record))
+                problems = check_profile(path)
+                self.assertTrue(any(needle in problem for problem in problems), problems)
+        absolute = _write(self.models, "abs-runtime.json", _image_profile(measured_on=_measured(manifest_path=str(self.manifest))))
+        self.assertEqual(check_profile(absolute), [])
+        missing_key = _measured()
+        del missing_key["manifest_path"]
+        partial = _write(self.models, "nopath-runtime.json", _image_profile(measured_on=missing_key))
+        self.assertTrue(any("manifest_path" in problem for problem in check_profile(partial)))
 
     def test_missing_measured_on_key(self) -> None:
         record = _measured()

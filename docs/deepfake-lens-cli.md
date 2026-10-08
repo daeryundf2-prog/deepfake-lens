@@ -261,8 +261,10 @@ python -m deepfake_lens corpus verify --manifest artifacts/t-img.json
 ```
 
 `manifest_sha256` covers every item (hash, label, split …); a profile that
-is `supported` must record it in `measured_on` together with test-split
-n_pos/n_neg (>= 200 each) and an AUROC 95% CI lower bound >= 0.85 —
+is `supported` must record it in `measured_on` together with the manifest
+file's `manifest_path` (the gate opens it and re-checks the hash, corpus id
+and test-split counts), test-split n_pos/n_neg (>= 200 each) and an AUROC
+95% CI lower bound >= 0.85 —
 `python scripts/check_measurement_gate.py` enforces this in CI. Schema and
 field list: `docs/deepfake-lens-json-contract.md`.
 

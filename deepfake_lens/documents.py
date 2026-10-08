@@ -10,9 +10,28 @@ never an exception.
 
 from __future__ import annotations
 
+import logging
 import re
 import zipfile
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+# Longest exception message kept in ``extractor_error`` (as checks.run_check).
+EXTRACTOR_ERROR_MAX_CHARS = 200
+
+
+def _failed(meta: dict[str, str], backend: str, exc: BaseException) -> None:
+    """Record an extractor failure with its exception class (D16).
+
+    ``extractor`` becomes ``failed:<backend>:<ExceptionClass>`` and
+    ``extractor_error`` ``"<ExceptionClass>: <message>"`` — core reports the
+    latter in the failed ``document_text`` coverage entry. The traceback is
+    logged; the call still returns empty text instead of raising.
+    """
+    logger.warning("document extraction failed (%s)", backend, exc_info=exc)
+    meta["extractor"] = f"failed:{backend}:{type(exc).__name__}"
+    message = str(exc)[:EXTRACTOR_ERROR_MAX_CHARS]
+    meta["extractor_error"] = f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 # Extensions routed to this module from analyze_file.
 SUPPORTED_DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".hwp", ".xlsx", ".pptx", ".doc", ".xls", ".ppt"}
@@ -68,8 +87,8 @@ def _extract_pdf(path: Path, meta: dict[str, str]) -> tuple[str, dict[str, str]]
                 break
         info = doc.metadata or {}
         doc.close()
-    except Exception:
-        meta["extractor"] = "failed:pymupdf"
+    except Exception as exc:  # noqa: BLE001 - pymupdf raises its own error types; class kept in the record
+        _failed(meta, "pymupdf", exc)
         return "", meta
     meta["extractor"] = "pymupdf"
     for key, out_key in (("producer", "pdf.producer"), ("creator", "pdf.creator"),
@@ -123,8 +142,8 @@ def _extract_docx(path: Path, meta: dict[str, str]) -> tuple[str, dict[str, str]
             except KeyError:
                 meta["extractor"] = "failed:no-document-xml"
                 return "", meta
-    except (zipfile.BadZipFile, OSError):
-        meta["extractor"] = "failed:zip"
+    except (zipfile.BadZipFile, OSError) as exc:
+        _failed(meta, "zip", exc)
         return "", meta
     meta["extractor"] = "zip-xml"
     return _strip_xml_text(document)[:MAX_EXTRACTED_CHARS], meta
@@ -148,8 +167,8 @@ def _extract_ooxml(path: Path, meta: dict[str, str], suffix: str) -> tuple[str, 
             parts = []
             for name in targets[:200]:
                 parts.append(_strip_xml_text(zf.read(name).decode("utf-8", errors="replace")))
-    except (zipfile.BadZipFile, OSError):
-        meta["extractor"] = "failed:zip"
+    except (zipfile.BadZipFile, OSError) as exc:
+        _failed(meta, "zip", exc)
         return "", meta
     meta["extractor"] = "zip-xml"
     return "\n".join(parts)[:MAX_EXTRACTED_CHARS], meta
@@ -166,8 +185,8 @@ def _extract_hwp(path: Path, meta: dict[str, str]) -> tuple[str, dict[str, str]]
         return "", meta
     try:
         text = syhwp.extract_text(str(path))
-    except Exception as exc:
-        meta["extractor"] = f"failed:syhwp:{type(exc).__name__}"
+    except Exception as exc:  # noqa: BLE001 - syhwp/olefile error types vary; class kept in the record
+        _failed(meta, "syhwp", exc)
         return "", meta
     meta["extractor"] = "syhwp"
     try:

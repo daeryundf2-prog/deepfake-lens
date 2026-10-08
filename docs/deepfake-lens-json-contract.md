@@ -288,7 +288,8 @@ Every `deepfake_lens/models/*-runtime.json` may carry `measured_on`
 
 | Key | Meaning |
 | --- | --- |
-| `corpus_id`, `manifest_sha256` | The corpus manifest measured on (`manifest_sha256` is 64 lowercase hex). |
+| `corpus_id`, `manifest_sha256` | The corpus manifest measured on (`manifest_sha256` is 64 lowercase hex — the manifest's canonical items hash, as above). |
+| `manifest_path` | The corpus-manifest-v1 file itself (absolute, or relative to the profile's directory). The gate opens it (D16): it must exist and load, its items must still hash to its own `manifest_sha256`, that hash must equal `measured_on.manifest_sha256`, its `corpus_id` must match, and its test split must hold at least `n_pos` synthetic/edited and `n_neg` real items. |
 | `split` | Must be `"test"`. |
 | `n_pos`, `n_neg` | Class counts actually scored. |
 | `auroc`, `auroc_ci` | AUROC and its 95% stratified bootstrap interval `[lo, hi]` (`evaluation_metrics.bootstrap_ci`, n_boot 2000). |
@@ -299,8 +300,10 @@ Every `deepfake_lens/models/*-runtime.json` may carry `measured_on`
 `scripts/check_measurement_gate.py` (CI job `measurement-gate`, QA-SYS-9)
 fails when a profile with `supported: true` — or no `supported` key — lacks
 `measured_on`, or has `split != "test"`, `n_pos < 200`, `n_neg < 200`,
-`auroc_ci[0] < 0.85` (not applied to text; text needs `recall_at_fpr_0_01`)
-or a malformed `manifest_sha256`.
+`auroc_ci[0] < 0.85` (not applied to text; text needs `recall_at_fpr_0_01`),
+a malformed `manifest_sha256`, or a `manifest_path` that is missing, does
+not load, or does not match the record (so a well-formed but invented
+hash, e.g. 64 zeros, fails).
 
 A profile (or a `video-frames` profile's `inner`) that sets `score_bias`
 must also set `score_bias_in_sample` (bool): `true` when the bias was chosen

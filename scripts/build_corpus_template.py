@@ -163,7 +163,7 @@ def root_readme() -> str:
         lines.append(f"| {track.track_id} | {track.modality} | {', '.join(c.label for c in track.classes)} |")
     lines += [
         "",
-        "측정 결과는 프로필의 `measured_on`에 corpus_id, manifest_sha256, split=\"test\", n_pos, n_neg, auroc, auroc_ci, "
+        "측정 결과는 프로필의 `measured_on`에 corpus_id, manifest_sha256, manifest_path(매니페스트 파일 경로), split=\"test\", n_pos, n_neg, auroc, auroc_ci, "
         "fpr_at_threshold, recall_at_threshold, measured_at으로 기록한다.",
     ]
     return "\n".join(lines) + "\n"
