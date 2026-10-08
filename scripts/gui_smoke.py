@@ -78,8 +78,11 @@ def main() -> int:
             banner = page.locator("#prov-banner")
             assert banner.is_visible(), "provenance banner not shown after degraded scan"
             banner_text = banner.inner_text()
-            assert "휴리스틱" in banner_text or "가중치" in banner_text, f"unexpected banner: {banner_text}"
+            assert "신경망 미탑재(측정 게이트 미충족)" in banner_text, f"unexpected banner: {banner_text}"  # D16
             assert "우선순위" in banner_text, "screening-priority disclaimer missing"
+            # D16: 결론순 is the default (and only verdict) ordering; no 점수순/위험도순.
+            assert page.locator("#res-sort").input_value() == "verdict", "default sort must be 결론순"
+            assert page.locator("#res-sort option[value='score']").count() == 0, "점수순 sort must be gone"
 
             # 4. Result cards rendered, stat total matches card count.
             cards = page.locator(".res-card, .res-item, [data-band]").count()

@@ -182,7 +182,7 @@ class ChromPulseTest(unittest.TestCase):
         blue = 100 + 1 * pulse + motion + independent[:, 2]
         samples = list(zip(red.tolist(), green.tolist(), blue.tolist()))
         analysis = rppg_from_rgb_samples(samples, fps=fps)
-        self.assertEqual(analysis.band, "low")
+        self.assertEqual(analysis.reference_band, "reference")  # D1: layer modules report reference_band/reference_note, never a band
         self.assertIsNotNone(analysis.estimated_bpm)
         self.assertAlmostEqual(analysis.estimated_bpm, 72.0, delta=4.0)
 
@@ -207,15 +207,15 @@ class ChromPulseTest(unittest.TestCase):
 
         samples = [(120.0, 110.0, 100.0)] * (30 * 30)
         analysis = rppg_from_rgb_samples(samples, fps=30.0)
-        self.assertEqual(analysis.band, "unknown")
-        self.assertIn("분산이 부족", analysis.verdict)
+        self.assertEqual(analysis.reference_band, "unavailable")  # D1: layer modules report reference_band/reference_note, never a band
+        self.assertIn("분산이 부족", analysis.reference_note)
 
     def test_short_series_is_rejected(self) -> None:
         from deepfake_lens.rppg import rppg_from_rgb_samples
 
         analysis = rppg_from_rgb_samples([(120.0, 110.0, 100.0)] * 10, fps=30.0)
-        self.assertEqual(analysis.band, "unknown")
-        self.assertIn("짧습니다", analysis.verdict)
+        self.assertEqual(analysis.reference_band, "unavailable")  # D1: layer modules report reference_band/reference_note, never a band
+        self.assertIn("짧습니다", analysis.reference_note)
 
 
 class MultiRoiRppgTest(unittest.TestCase):
@@ -327,8 +327,8 @@ class RppgVideoErrorPathTest(unittest.TestCase):
         from deepfake_lens.rppg import analyze_rppg
 
         analysis = analyze_rppg("/nonexistent/video.mp4")
-        self.assertEqual(analysis.band, "unknown")
-        self.assertIn("존재하지 않습니다", analysis.verdict)
+        self.assertEqual(analysis.reference_band, "unavailable")  # D1: layer modules report reference_band/reference_note, never a band
+        self.assertIn("존재하지 않습니다", analysis.reference_note)
 
 
 if __name__ == "__main__":

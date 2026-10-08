@@ -1,0 +1,275 @@
+"""Output shapes of the standalone subcommands (D1).
+
+Two shapes only:
+
+* **analysis_result** — the three-verdict contract produced by
+  ``analysis_api.analyze_path`` (the same path as ``scan``). Used by every
+  command that answers "is it fake": ``forensic``, ``classify``,
+  ``multimodal FILE…``, ``explain FILE``, ``agent``, ``legal-report``.
+* **layer_diagnostic** — one layer's raw, unmeasured numbers with the fixed
+  notice (:mod:`deepfake_lens.layer_diagnostic`). Used by the per-layer
+  commands (``audio``, ``video-analysis``, ``text-advanced``,
+  ``pixel-analysis``, ``inpaint``, ``prnu``, ``rppg``, ``face``, ``avatar``,
+  ``3d``, ``realtime``, ``faceswap-seam``, ``compare``, ``ml-classify``).
+
+Neither shape carries a ``band`` key; the analysis_result carries
+``verdict_code`` (manipulation_evidence / authenticity_evidence /
+undetermined) and never a score that was not calibrated.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import tempfile
+from pathlib import Path
+from typing import Any, Iterable, Mapping
+
+from .layer_diagnostic import (
+    ANALYSIS_RESULT_KIND,
+    LAYER_DIAGNOSTIC_NOTICE,
+    UNAVAILABLE_BAND,
+    format_layer_diagnostic,
+    to_layer_diagnostic,
+)
+from .result_types import VERDICT_LABELS, GRADE_LABELS, Grade, ScanItem, Verdict
+
+ANALYSIS_RESULT_NOTICE = "결론은 `scan`과 같은 경로(analysis_api.analyze_path)로 산출되었습니다."
+# Result fields that make up the three-verdict contract. Legacy derived
+# fields (band, band_label, score, ai_score, signals) are left out on purpose.
+_RESULT_FIELDS = (
+    "verdict_code",
+    "verdict",
+    "grade",
+    "evidence",
+    "coverage",
+    "limitations",
+    "reference_signals",
+    "source_guess",
+    "probability",
+    "probability_ci",
+    "score_is_calibrated",
+    "next_checks",
+)
+_HASH_CHUNK_BYTES = 1024 * 1024
+
+
+def file_sha256(path: Path | str) -> str | None:
+    """SHA-256 of a file's bytes (None when it cannot be read)."""
+    digest = hashlib.sha256()
+    try:
+        with Path(path).open("rb") as handle:
+            for chunk in iter(lambda: handle.read(_HASH_CHUNK_BYTES), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def analysis_result_payload(item: ScanItem, *, command: str, sha256: str | None = None) -> dict[str, Any]:
+    """The analysis_result JSON for one analyzed file."""
+    payload: dict[str, Any] = {
+        "kind": ANALYSIS_RESULT_KIND,
+        "command": command,
+        "notice": ANALYSIS_RESULT_NOTICE,
+        "path": item.path,
+        "file_kind": item.kind,
+        "status": item.status,
+        "sha256": item.sha256 or sha256,
+    }
+    if item.result is None:
+        # Unsupported or failed file: no conclusion is possible.
+        payload.update(
+            verdict_code=Verdict.UNDETERMINED.value,
+            verdict=f"{VERDICT_LABELS[Verdict.UNDETERMINED]} — {item.error or item.status}",
+            grade=Grade.REFERENCE.value,
+            evidence=[],
+            coverage=[],
+            limitations=[item.error] if item.error else [],
+        )
+        return payload
+    result = item.result.to_json()
+    for field in _RESULT_FIELDS:
+        if field in result:
+            payload[field] = result[field]
+    payload["verdict_label"] = VERDICT_LABELS[item.result.verdict_code]
+    payload["grade_label"] = GRADE_LABELS[item.result.grade]
+    return payload
+
+
+def analyze_text_payload(text: str, options: Any, *, command: str, thresholds: Any = None) -> dict[str, Any]:
+    """analysis_result for raw text: written to a temp .txt, analyzed like a file."""
+    from .analysis_api import analyze_path
+
+    tmp_name = ""
+    try:
+        # delete=False: Windows cannot reopen a delete=True temp file.
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as tmp:
+            tmp.write(text)
+            tmp_name = tmp.name
+        item = analyze_path(tmp_name, options, thresholds=thresholds)
+        payload = analysis_result_payload(item, command=command, sha256=file_sha256(tmp_name))
+    finally:
+        if tmp_name:
+            Path(tmp_name).unlink(missing_ok=True)
+    payload["path"] = "(입력 텍스트)"
+    return payload
+
+
+def format_analysis_result(payload: Mapping[str, Any]) -> str:
+    lines = [
+        f"[결론] {payload.get('verdict_label') or VERDICT_LABELS[Verdict(payload.get('verdict_code', 'undetermined'))]}"
+        f" ({payload.get('verdict_code')}) · 등급: {payload.get('grade_label') or payload.get('grade')}",
+        f"대상: {payload.get('path')}",
+    ]
+    if payload.get("sha256"):
+        lines.append(f"SHA-256: {payload['sha256']}")
+    if payload.get("verdict"):
+        lines.append(str(payload["verdict"]))
+    evidence = payload.get("evidence") if isinstance(payload.get("evidence"), list) else []
+    if evidence:
+        lines.append("근거:")
+        for item in evidence:
+            if isinstance(item, Mapping):
+                lines.append(
+                    f"  - [{item.get('kind')}/{item.get('direction')}/{item.get('strength')}] "
+                    f"{item.get('title')}: {item.get('detail')}"
+                )
+    coverage = payload.get("coverage") if isinstance(payload.get("coverage"), list) else []
+    if coverage:
+        lines.append("검사 범위:")
+        for entry in coverage:
+            if isinstance(entry, Mapping):
+                reason = f" — {entry['reason']}" if entry.get("reason") else ""
+                lines.append(f"  - {entry.get('check')}: {entry.get('status')}{reason}")
+    for key, title in (("rule", "결정 규칙"),):
+        if payload.get(key):
+            lines.append(f"{title}: {payload[key]}")
+    lines.append(str(payload.get("notice", ANALYSIS_RESULT_NOTICE)))
+    return "\n".join(lines)
+
+
+def emit(payload: Mapping[str, Any], *, fmt: str, json_out: Path | None, text: str | None = None) -> None:
+    """Print ``payload`` as JSON or text and optionally write it to ``json_out``."""
+    rendered = json.dumps(payload, ensure_ascii=False, indent=2)
+    if json_out is not None:
+        from .cli_render import _write_json_out
+
+        _write_json_out(json_out, rendered + "\n")
+    if fmt == "json":
+        print(rendered)
+        return
+    if text is None:
+        text = (
+            format_layer_diagnostic(payload)
+            if payload.get("kind") != ANALYSIS_RESULT_KIND
+            else format_analysis_result(payload)
+        )
+    print(text)
+
+
+def emit_layer(
+    args: Any,
+    layer: str,
+    layer_label: str,
+    raw: Mapping[str, Any],
+    *,
+    subject: str | None = None,
+) -> int:
+    """Print one layer diagnostic for a standalone command; exit code 0."""
+    diag = to_layer_diagnostic(layer, raw, layer_label=layer_label, subject=subject)
+    emit(diag, fmt=getattr(args, "format", "json"), json_out=getattr(args, "json_out", None))
+    return 0
+
+
+def gated_pixel_layer(path: Path) -> dict[str, Any]:
+    """Quick pixel pre-screen behind the photo/non-photo gate (WP-D, D3).
+
+    A non-photo (or too small) image is not pre-screened at all: the layer
+    reports ``reference_band: unavailable`` with the gate reason, exactly as
+    ``scan`` records ``pixel: skipped``.
+    """
+    from .image_class import classify_image
+    from .pixel_analyzer import analyze_pixels
+
+    try:
+        image_class = classify_image(path)
+    except Exception as exc:  # noqa: BLE001 - the gate failing is reported, not hidden
+        from .checks import failure_reason
+
+        return {
+            "score": 0,
+            "reference_band": UNAVAILABLE_BAND,
+            "reference_note": f"이미지 유형 판별 실패 — {failure_reason(exc)}",
+            "signals": [],
+            "limitations": ["사진/비사진 판별이 실패해 픽셀 사전 선별을 수행하지 않았습니다."],
+        }
+    if not image_class.is_photo:
+        reason = image_class.skip_reason() or f"사진 아님: {image_class.kind}"
+        return {
+            "score": 0,
+            "reference_band": UNAVAILABLE_BAND,
+            "reference_note": reason,
+            "image_class": image_class.kind,
+            "signals": [],
+            "limitations": [f"{reason} — 생성 탐지기는 사진에서만 측정 의미가 있습니다."],
+        }
+    data = analyze_pixels(path).to_json()
+    data["image_class"] = image_class.kind
+    return data
+
+
+# Bytes read for tool-marker attribution (same cap as the former /api/classify).
+TOOL_ATTRIBUTION_MAX_BYTES = 64 * 1024 * 1024
+_TOOL_TEXT_EXTENSIONS = frozenset({".txt", ".md", ".py", ".js", ".json", ".csv", ".log"})
+
+
+def tool_attribution(path: Path) -> Any:
+    """Marker-string tool attribution (classifier.py) for ``classify``.
+
+    Reference only: a marker match names a candidate tool; whether the file
+    is generated is the analysis_result verdict next to it.
+    """
+    from .classifier import classify_metadata, classify_text_content
+    from .png import read_png_metadata
+
+    with Path(path).open("rb") as handle:
+        data = handle.read(TOOL_ATTRIBUTION_MAX_BYTES)
+    if Path(path).suffix.lower() in _TOOL_TEXT_EXTENSIONS:
+        return classify_text_content(data.decode("utf-8", errors="ignore"))
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return classify_metadata(read_png_metadata(data))
+    if data[:2] == b"\xff\xd8":
+        return classify_metadata({"format": "jpeg", "size": str(len(data))})
+    return classify_metadata({})
+
+
+def combined_verdict(payloads: Iterable[Mapping[str, Any]]) -> tuple[str, str]:
+    """Combine per-file analysis results with the same rule order as ``decide``.
+
+    Any file with manipulation evidence → manipulation_evidence (rule 2/4);
+    otherwise any undetermined file → undetermined; authenticity only when
+    every file has it. Returns ``(verdict_code, explanation)``.
+    """
+    codes = [str(p.get("verdict_code") or Verdict.UNDETERMINED.value) for p in payloads]
+    if not codes:
+        return Verdict.UNDETERMINED.value, "분석한 파일이 없습니다."
+    if Verdict.MANIPULATION_EVIDENCE.value in codes:
+        return Verdict.MANIPULATION_EVIDENCE.value, "하나 이상의 파일에 조작·생성 근거가 있습니다."
+    if all(code == Verdict.AUTHENTICITY_EVIDENCE.value for code in codes):
+        return Verdict.AUTHENTICITY_EVIDENCE.value, "모든 파일에 원본성 근거가 있습니다."
+    return Verdict.UNDETERMINED.value, "판단 불가인 파일이 있어 종합 결론을 유보합니다."
+
+
+__all__ = [
+    "ANALYSIS_RESULT_NOTICE",
+    "LAYER_DIAGNOSTIC_NOTICE",
+    "analysis_result_payload",
+    "analyze_text_payload",
+    "combined_verdict",
+    "emit",
+    "emit_layer",
+    "file_sha256",
+    "format_analysis_result",
+    "gated_pixel_layer",
+]

@@ -208,7 +208,11 @@ class CheckPayloadTest(unittest.TestCase):
         self.assertEqual(result["mode"], "text")
         self.assertIn("item", result)
         self.assertIn("advanced", result)
-        self.assertIn("signals", result["advanced"])
+        # D1: the text-statistics layer is a layer diagnostic (raw numbers,
+        # fixed notice, no band); its signals sit under "diagnostic".
+        self.assertEqual(result["advanced"]["kind"], "layer_diagnostic")
+        self.assertIn("signals", result["advanced"]["diagnostic"])
+        self.assertNotIn("band", result["advanced"])
 
     def test_text_check_rejects_too_short(self) -> None:
         from deepfake_lens.webapp_api import _check_text_payload
@@ -718,8 +722,12 @@ class ComparePayloadTest(unittest.TestCase):
         text = "인공지능 기술은 빠르게 발전하고 있으며 다양한 산업에 적용된다. 또한 윤리 문제가 함께 논의된다. " * 8
         content_type, body = self._two_files("a.txt", text.encode(), "b.txt", text.encode())
         result = _compare_payload(content_type, body)
-        self.assertEqual(result.get("kind"), "stylometry")
-        self.assertIn("score", result)
+        # D1: similarity is a layer diagnostic — no same/different band.
+        self.assertEqual(result.get("kind"), "layer_diagnostic")
+        self.assertEqual(result["diagnostic"]["kind"], "stylometry")
+        self.assertIn("raw_score", result)
+        self.assertNotIn("band", result)
+        self.assertNotIn("band", result["diagnostic"])
 
     def test_single_file_rejected(self) -> None:
         from deepfake_lens.webapp_api import _compare_payload
@@ -829,9 +837,9 @@ class SummaryParityTest(unittest.TestCase):
     def _rows(self):
         return [
             {"path": "ok.png", "status": "analyzed",
-             "result": {"band": "low", "score": 3}},
+             "result": {"band": "low", "verdict_code": "authenticity_evidence", "score": 3}},
             {"path": "sus.png", "status": "analyzed",
-             "result": {"band": "high", "score": 90, "model_analysis": {"available": True}}},
+             "result": {"band": "high", "verdict_code": "manipulation_evidence", "score": 90, "model_analysis": {"available": True}}},
             {"path": "bad.zip", "status": "unknown", "kind": "archive",
              "result": {"band": "unknown", "score": 0}},
             {"path": "gone.bin", "status": "failed", "error": "unreadable"},
@@ -845,9 +853,12 @@ class SummaryParityTest(unittest.TestCase):
         # container/failed rows never count as analyzed
         self.assertEqual(summary["total"], 6)
         self.assertEqual(summary["analyzed"], 2)
-        self.assertEqual(summary["high"], 1)
-        self.assertEqual(summary["low"], 1)
-        self.assertEqual(summary["unknown"], 0)
+        # D16: verdict counts only — the legacy band keys are not serialized.
+        self.assertEqual(summary["manipulation_evidence"], 1)
+        self.assertEqual(summary["authenticity_evidence"], 1)
+        self.assertEqual(summary["undetermined"], 0)
+        for legacy in ("high", "medium", "low", "unknown"):
+            self.assertNotIn(legacy, summary)
         self.assertEqual(summary["unsupported_or_failed"], 2)
         self.assertEqual(summary["duplicates"], 1)
         self.assertEqual(summary["skipped"], 1)
@@ -901,7 +912,8 @@ class SummaryParityTest(unittest.TestCase):
         core = summarize(items, capped=False)
         web = _summarize_records([i.to_json() for i in items], "test")
         self.assertEqual(web["analyzed"], core.analyzed)
-        self.assertEqual(web["medium"], core.medium)
+        self.assertEqual(web["undetermined"], core.undetermined)  # D16: verdict keys only
+        self.assertEqual(web["manipulation_evidence"], core.manipulation_evidence)
         self.assertEqual(web["unsupported_or_failed"], core.unsupported_or_failed)
 
 

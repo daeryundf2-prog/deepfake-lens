@@ -149,7 +149,7 @@ class PrnuTest(unittest.TestCase):
             self.assertLess(abs(other), 0.15)
 
             analysis = analyze_prnu(query_same, references)
-            self.assertEqual(analysis.band, "low")
+            self.assertEqual(analysis.reference_band, "reference")  # D1: layer modules report reference_band/reference_note, never a band
             self.assertGreater(analysis.correlation, 0.5)
             analysis_other = analyze_prnu(query_other, references)
             self.assertEqual(analysis_other.score, 25)
@@ -159,13 +159,13 @@ class PrnuTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             paths = self._camera_images(Path(tmp), camera_seed=1, count=2)
             analysis = analyze_prnu(paths[0], paths)
-            self.assertEqual(analysis.band, "unknown")
-            self.assertIn("부족합니다", analysis.verdict)
+            self.assertEqual(analysis.reference_band, "unavailable")  # D1: layer modules report reference_band/reference_note, never a band
+            self.assertIn("부족합니다", analysis.reference_note)
 
     def test_missing_target_returns_error(self) -> None:
         analysis = analyze_prnu("/nonexistent/t.png", ["/a.png", "/b.png", "/c.png"])
-        self.assertEqual(analysis.band, "unknown")
-        self.assertIn("존재하지 않습니다", analysis.verdict)
+        self.assertEqual(analysis.reference_band, "unavailable")  # D1: layer modules report reference_band/reference_note, never a band
+        self.assertIn("존재하지 않습니다", analysis.reference_note)
 
 
 def _load_gray(path: Path):

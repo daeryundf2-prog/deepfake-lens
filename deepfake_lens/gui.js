@@ -9,7 +9,8 @@
         let currentJobId = null;
         let bandFilter = null;
         let textFilter = '';
-        let sortMode = 'score';
+        // D16: default 결론순 — manipulation → undetermined → authenticity → other.
+        let sortMode = 'verdict';
         let revFilter = false;
         let kbIndex = -1;
 
@@ -182,7 +183,7 @@
             const parts = [];
             const wa = cov.weights_available, wt = cov.weights_total;
             if (wt !== undefined) {
-                if ((wa || 0) === 0) parts.push('<b>휴리스틱 전용 모드</b> — 신경망 가중치가 하나도 탑재되지 않았습니다. 점수는 규칙 기반 추정입니다.');
+                if ((wa || 0) === 0) parts.push('<b>신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영</b> — 탑재된 신경망 가중치가 없어 통계적 근거는 결론에 참여하지 않습니다.');
                 else if (wa < wt) parts.push(`신경망 가중치 일부 탑재 (${wa}/${wt}) — 미탑재 엔진의 판단이 빠져 있습니다.`);
             }
             if (thr.provisional || thr.source === 'builtin_defaults') {
@@ -522,7 +523,7 @@
                 const cov = lastProvenance.coverage || {};
                 const wa = cov.weights_available, wt = cov.weights_total;
                 label.textContent = wt !== undefined
-                    ? (wa ? `뉴럴 ${wa}/${wt}` : '휴리스틱 전용')
+                    ? (wa ? `뉴럴 ${wa}/${wt}` : '신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영')
                     : `뉴럴 ${data.summary && data.summary.external_model_active ? data.summary.external_model_active : 0}`;
             }
             const banner = $('prov-banner');
@@ -1010,13 +1011,13 @@
                 const item = entry.item;
                 return ((item.name || '') + ' ' + (item.path || '')).toLowerCase().includes(needle);
             });
+            const byName = (a, b) => String(a.item.name || a.item.path || '').localeCompare(String(b.item.name || b.item.path || ''), 'ko');
             if (sortMode === 'name') {
-                filtered.sort((a, b) => String(a.item.name || a.item.path || '').localeCompare(String(b.item.name || b.item.path || ''), 'ko'));
-            } else if (sortMode === 'band') {
-                filtered.sort((a, b) => (BAND_ORDER[itemBand(a)] - BAND_ORDER[itemBand(b)]) ||
-                    ((b.item.result || {}).score || 0) - ((a.item.result || {}).score || 0));
+                filtered.sort(byName);
             } else {
-                filtered.sort((a, b) => ((b.item.result || {}).score || 0) - ((a.item.result || {}).score || 0));
+                // 결론순 (D16): verdict order, then name. The uncalibrated
+                // score is always 0 in phase 0 and never orders results.
+                filtered.sort((a, b) => (BAND_ORDER[itemBand(a)] - BAND_ORDER[itemBand(b)]) || byName(a, b));
             }
             return filtered;
         }
@@ -1325,7 +1326,7 @@
             const thr = data.thresholds || {};
             const parts = [];
             const wa = cov.weights_available, wt = cov.weights_total;
-            if (wt !== undefined && (wa || 0) === 0) parts.push('휴리스틱 전용 모드(신경망 가중치 없음)');
+            if (wt !== undefined && (wa || 0) === 0) parts.push('신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영');
             else if (wt !== undefined && wa < wt) parts.push(`신경망 가중치 일부 탑재(${wa}/${wt})`);
             if (thr.provisional || thr.source === 'builtin_defaults') parts.push('잠정 임계값(미측정)');
             if (thr.in_sample) parts.push('임계값 in-sample(참고)');
@@ -1360,20 +1361,22 @@
                     members ? `<ul>${members}</ul>` : `<div class="note">${escapeHtml(ma.detail || '')}</div>`));
             }
             if (data.advanced) {
-                const a = data.advanced;
-                // Style/fingerprint probes are lexical reference signals (G4):
-                // show the raw number, never a band or a "+points" weight.
-                const sig = (a.signals || []).map(s => `<li>${escapeHtml(s.title)} — ${escapeHtml(s.detail)}</li>`).join('');
-                const lim = (a.limitations || []).map(l => `<li>${escapeHtml(l)}</li>`).join('');
-                parts.push(layer(`스타일/지문 분석(어휘적 참고 — 결론 불참여) — 원점수 ${a.score != null ? a.score : 0}`,
+                // D1: layer diagnostic — raw numbers with the fixed notice,
+                // never a band or a "+points" weight (G4).
+                const a = data.advanced, body = a.diagnostic || a;
+                const sig = (body.signals || []).map(s => `<li>${escapeHtml(s.title)} — ${escapeHtml(s.detail)}</li>`).join('');
+                const lim = (body.limitations || []).map(l => `<li>${escapeHtml(l)}</li>`).join('');
+                parts.push(layer(`스타일/지문 분석 · 계층 진단(참고 신호 · 미측정) — 원점수 ${a.raw_score != null ? a.raw_score : 0}`,
+                    (a.notice ? `<div class="note">${escapeHtml(a.notice)}</div>` : '') +
                     (sig ? `<ul>${sig}</ul>` : '<div class="note">발동 신호 없음</div>') + (lim ? `<ul class="c-amber">${lim}</ul>` : '')));
             }
             if (data.forensic) {
-                const fr = data.forensic;
-                const sig = (fr.signals || []).map(s => `<li>${escapeHtml(s.title)} — ${escapeHtml(s.detail)}</li>`).join('');
-                const prov = (fr.provenance_records || []).map(p => `<li>${escapeHtml(p.kind || p.source || 'record')}: ${escapeHtml(p.summary || p.detail || '')}</li>`).join('');
-                parts.push(layer(`메타데이터 / C2PA 포렌식 — 점수 ${fr.score != null ? fr.score : 0}`,
-                    (sig ? `<ul>${sig}</ul>` : '') + (prov ? `<ul>${prov}</ul>` : '') || '<div class="note">단서 없음</div>'));
+                const fr = data.forensic, body = fr.diagnostic || fr;
+                const sig = (body.signals || []).map(s => `<li>${escapeHtml(s.title)} — ${escapeHtml(s.detail)}</li>`).join('');
+                const prov = (body.provenance_records || []).map(p => `<li>${escapeHtml(p.kind || p.source || p.standard || 'record')}: ${escapeHtml(p.summary || p.detail || p.provider || '')}</li>`).join('');
+                parts.push(layer(`메타데이터 / C2PA · 계층 진단(참고 신호 · 미측정) — 원점수 ${fr.raw_score != null ? fr.raw_score : 0}`,
+                    (fr.notice ? `<div class="note">${escapeHtml(fr.notice)}</div>` : '') +
+                    ((sig ? `<ul>${sig}</ul>` : '') + (prov ? `<ul>${prov}</ul>` : '') || '<div class="note">단서 없음</div>')));
             }
             if (data.watermark) {
                 const w = data.watermark;
@@ -1439,24 +1442,25 @@
         });
 
         function renderCompare(data) {
+            // D1: similarity is a layer diagnostic — raw number + notice,
+            // no same/different band.
             const box = $('cmp-result');
-            const kind = data.kind === 'speaker' ? '화자 유사도 (음성)' : data.kind === 'stylometry' ? '필자 유사도 (텍스트)' : (data.kind || '비교');
-            const band = data.band || 'unknown';
-            const score = data.score != null ? data.score : 0;
-            const bandText = band === 'high' ? '동일 화자/필자 가능성 높음' : band === 'medium' ? '유사 단서 있음' : band === 'low' ? '다를 가능성' : '판단 어려움';
+            const body = data.diagnostic || data;
+            const kind = body.kind === 'speaker' ? '화자 유사도 (음성)' : body.kind === 'stylometry' ? '필자 유사도 (텍스트)' : (body.kind || '비교');
+            const score = data.raw_score != null ? data.raw_score : 0;
             const parts = [];
             parts.push(`<div class="qc-head">
-                <span class="big bc-${bandCls(band)}">${Number(score) || 0}</span>
-                <div><span class="band-pill band-${band}">${escapeHtml(bandText)}</span>
-                <div class="note" class="mt-4">${escapeHtml(kind)}${data.method ? ' · ' + escapeHtml(data.method) : ''}</div></div></div>`);
-            if (data.verdict) parts.push(`<div class="verdict">${escapeHtml(data.verdict)}</div>`);
+                <span class="big bc-other">${Number(score) || 0}</span>
+                <div><span class="band-pill band-unknown">계층 진단(참고 신호 · 미측정)</span>
+                <div class="note mt-4">${escapeHtml(kind)}${body.method ? ' · ' + escapeHtml(body.method) : ''}</div></div></div>`);
+            if (data.notice) parts.push(`<div class="note">${escapeHtml(data.notice)}</div>`);
+            if (data.reference_note) parts.push(`<div class="verdict">${escapeHtml(data.reference_note)}</div>`);
             parts.push(provenanceNoteHtml(data));
             const kv = [];
-            if (data.distance != null) kv.push(`<b>거리</b><span>${escapeHtml(String(data.distance))}</span>`);
+            if (body.distance != null) kv.push(`<b>거리</b><span>${escapeHtml(String(body.distance))}</span>`);
             parts.push(layer('측정값', `<div class="kv">${kv.join('')}</div>`));
-            parts.push(listItems('한계', data.limitations, 'lim'));
-            parts.push(`<div class="band-advice">${escapeHtml(band === 'high' ? '유사도가 높습니다 — 확정이 아니므로 추가 샘플로 교차 확인하세요.' : band === 'low' ? '유사도가 낮습니다 — 녹음 조건·문체 차이일 수 있습니다.' : '판단에 필요한 신호가 부족합니다 — 더 긴 샘플이 필요합니다.')}</div>`);
-            parts.push(`<div class="caveat">유사도는 동일인 증명이 아닙니다. 추가 증거와 함께 해석하세요.</div>`);
+            parts.push(listItems('한계', body.limitations, 'lim'));
+            parts.push(`<div class="caveat">유사도는 측정되지 않은 참고 수치이며 동일인 증명이 아닙니다. 추가 증거와 함께 해석하세요.</div>`);
             box.innerHTML = parts.join('');
         }
 

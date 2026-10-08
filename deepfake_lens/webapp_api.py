@@ -134,7 +134,7 @@ def _scan_job_start(query: str, *, default_folder: Path | None) -> dict[str, obj
     with _SCAN_JOBS_LOCK:
         _scan_job_evict(time.time())
         if len(_SCAN_JOBS) >= _SCAN_JOB_MAX:
-            raise ValueError("too many scan jobs in flight; retry after a running job finishes")
+            raise ValueError("실행 중인 검사 작업이 너무 많습니다 — 진행 중인 작업이 끝난 뒤 다시 시도하십시오")
         job_id = secrets.token_hex(8)
         cancel = threading.Event()
         _SCAN_JOBS[job_id] = {"status": "running", "created": time.time(), "cancel": cancel}
@@ -143,8 +143,18 @@ def _scan_job_start(query: str, *, default_folder: Path | None) -> dict[str, obj
         try:
             result = _scan_payload(query, default_folder=default_folder, should_stop=cancel.is_set)
             status = "done"
-        except Exception as exc:  # noqa: BLE001 - a worker crash must not kill the job silently
-            result = {"error": str(exc)}
+        except Exception as exc:  # noqa: BLE001 - a worker crash is recorded, not raised into the thread
+            # D16: log the traceback and record the failure as coverage +
+            # limitation — never just a bare message (fail-closed: the scan
+            # did not complete, so nothing in it may read as a conclusion).
+            logger.exception("scan job %s failed", job_id)
+            reason = failure_reason(exc)
+            result = {
+                "error": "폴더 검사 작업이 실패했습니다",
+                "detail": reason,
+                "coverage": [{"check": "scan_job", "status": "failed", "reason": reason}],
+                "limitations": [f"검사 작업 실패 — {reason}. 이 작업의 결과는 결론으로 사용할 수 없습니다."],
+            }
             status = "error"
         with _SCAN_JOBS_LOCK:
             entry = _SCAN_JOBS.get(job_id)
@@ -159,12 +169,12 @@ def _scan_status_payload(query: str) -> dict[str, object]:
     params = parse_qs(query)
     job_id = params.get("job", [""])[0].strip()
     if not job_id:
-        return {"error": "missing job parameter"}
+        return {"error": "job 매개변수가 필요합니다"}
     with _SCAN_JOBS_LOCK:
         _scan_job_evict(time.time())
         entry = _SCAN_JOBS.get(job_id)
         if entry is None:
-            return {"error": "unknown or expired job"}
+            return {"error": "알 수 없거나 만료된 작업입니다"}
         payload: dict[str, object] = {"job_id": job_id, "status": entry["status"]}
         if entry["status"] != "running":
             payload["result"] = entry.get("result")
@@ -175,11 +185,11 @@ def _scan_cancel_payload(query: str) -> dict[str, object]:
     params = parse_qs(query)
     job_id = params.get("job", [""])[0].strip()
     if not job_id:
-        return {"error": "missing job parameter"}
+        return {"error": "job 매개변수가 필요합니다"}
     with _SCAN_JOBS_LOCK:
         entry = _SCAN_JOBS.get(job_id)
         if entry is None:
-            return {"error": "unknown or expired job"}
+            return {"error": "알 수 없거나 만료된 작업입니다"}
         if entry["status"] != "running":
             return {"job_id": job_id, "status": entry["status"], "cancelled": False}
         cancel = entry.get("cancel")
@@ -189,55 +199,60 @@ def _scan_cancel_payload(query: str) -> dict[str, object]:
 
 
 def _analyze_file_payload(query: str) -> dict[str, object]:
-    """Handle single file analysis request."""
+    """Single-file analysis (``/api/analyze-file``).
+
+    D3: the conclusion is the scan result (``analysis_api.analyze_path``,
+    three verdicts) — the same path, photo gate and thresholds as /api/scan.
+    The provenance-metadata scan and the tool-marker match ride along as
+    layer diagnostics (reference, no band). No pixel pre-screen runs here:
+    scan's own pixel layer is gated by the photo classifier and recorded in
+    coverage.
+    """
+    from .cli_standalone import analysis_result_payload, file_sha256, tool_attribution
+    from .layer_diagnostic import to_layer_diagnostic
+
     params = parse_qs(query)
     file_path = params.get("file", [""])[0]
-    
+
     if not file_path:
         return {"error": "파일 경로가 없습니다"}
     # G31: confined to the operator roots even when none are registered
     # (then only the server's default folder) — raises ReadRootDenied (403).
     path = _require_read_root(Path(file_path))
+    if not path.exists():
+        return {"error": f"파일이 존재하지 않습니다: {file_path}"}
 
+    options = _web_options()
+    thresholds = load_thresholds(options)
     try:
-        from .classifier import classify_metadata
-        from .c2pa import analyze_metadata_forensic
-        from .pixel_analyzer import analyze_pixels
-
-        if not path.exists():
-            return {"error": f"파일이 존재하지 않습니다: {file_path}"}
-        
-        # Extract metadata
-        metadata = _extract_metadata(path)
-        
-        # Classify
-        classification = classify_metadata(metadata)
-        
-        # Forensic analysis
-        forensic = analyze_metadata_forensic(path)
-        
-        # Pixel analysis (if image)
-        pixel_result = None
-        response: dict[str, Any] = {}
-        if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"}:
-            try:
-                pixel_result = analyze_pixels(path)
-            except Exception as exc:
-                logger.exception("pixel layer failed for %s", path)
-                _layer_error(response, "pixel_analysis", exc)
-
-        response.update({
-            "file": str(path),
-            "classification": classification.to_json(),
-            "forensic": forensic.to_json(),
-            "pixel_analysis": pixel_result.to_json() if pixel_result else None,
-        })
-        return response
+        item = analyze_path(path, options, thresholds=thresholds)
     except Exception as exc:
         logger.exception("file analysis failed")
         # Detail stays in `detail` so the GUI shows a clean headline instead
         # of a raw exception sentence; the type/message aid local debugging.
-        return {"error": "파일 분석 중 오류가 발생했습니다", "detail": f"{type(exc).__name__}: {exc}"}
+        return {"error": "파일 분석 중 오류가 발생했습니다", "detail": failure_reason(exc)}
+    response: dict[str, Any] = analysis_result_payload(item, command="analyze-file", sha256=file_sha256(path))
+    response["file"] = str(path)
+    layers: dict[str, Any] = {}
+    try:
+        from .c2pa import analyze_metadata_forensic
+
+        layers["provenance_metadata"] = to_layer_diagnostic(
+            "provenance_metadata", analyze_metadata_forensic(path).to_json(), layer_label="출처 메타데이터 계층"
+        )
+    except Exception as exc:
+        logger.exception("provenance layer failed for %s", path)
+        _layer_error(response, "provenance_metadata", exc)
+    try:
+        layers["tool_candidates"] = to_layer_diagnostic(
+            "tool_attribution", tool_attribution(path).to_json(), layer_label="생성 도구 표지 대조"
+        )
+    except Exception as exc:
+        logger.exception("tool attribution layer failed for %s", path)
+        _layer_error(response, "tool_candidates", exc)
+    response["layer_diagnostics"] = layers
+    response.update(_provenance(options, thresholds))
+    return response
 
 
 def _stats_payload() -> dict[str, object]:
@@ -386,7 +401,7 @@ def _heatmap_payload(query: str) -> tuple[int, bytes, str]:
     path_value = params.get("path", [""])[0]
     root_value = params.get("root", [""])[0]
     if not path_value:
-        return 400, b"missing path", "missing"
+        return 400, "경로가 없습니다".encode("utf-8"), "missing"
     path = Path(path_value).expanduser().resolve()
     # Heatmaps live in the tool-owned output root (never in the evidence
     # folder, R-IN-1); those are served without a read root.
@@ -395,7 +410,7 @@ def _heatmap_payload(query: str) -> tuple[int, bytes, str]:
     try:
         data = path.read_bytes()
     except OSError:
-        return 404, b"not found", "not-found"
+        return 404, "파일을 찾을 수 없습니다".encode("utf-8"), "not-found"
     return 200, data, ""
 
 
@@ -433,7 +448,7 @@ def _preview_payload(query: str) -> tuple[int, bytes, str, str]:
     path_value = params.get("path", [""])[0]
     root_value = params.get("root", [""])[0]
     if not path_value:
-        return 400, b"missing path", "missing", ""
+        return 400, "경로가 없습니다".encode("utf-8"), "missing", ""
     path = Path(path_value).expanduser().resolve()
     mime = _PREVIEW_MIME.get(path.suffix.lower())
     if mime is None or not _read_root_allows(path, root_value):
@@ -443,7 +458,7 @@ def _preview_payload(query: str) -> tuple[int, bytes, str, str]:
             return 413, b"too large", "too-large", ""
         data = path.read_bytes()
     except OSError:
-        return 404, b"not found", "not-found", ""
+        return 404, "파일을 찾을 수 없습니다".encode("utf-8"), "not-found", ""
     return 200, data, "", mime
 
 
@@ -490,10 +505,6 @@ def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str,
     def _status(item: dict[str, object]) -> str:
         return str(item.get("status") or ("failed" if item.get("error") else "analyzed"))
 
-    def _band(item: dict[str, object]) -> str:
-        result = item.get("result")
-        return str(result.get("band")) if isinstance(result, dict) else ""
-
     def _verdict(item: dict[str, object]) -> str:
         result = item.get("result")
         return str(result.get("verdict_code") or "undetermined") if isinstance(result, dict) else ""
@@ -504,9 +515,7 @@ def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str,
         return isinstance(coverage, list) and any(isinstance(e, dict) and e.get("status") == "failed" for e in coverage)
 
     analyzed = [i for i in items if _status(i) == "analyzed" and isinstance(i.get("result"), dict)]
-    high = sum(1 for item in analyzed if _band(item) == "high")
-    medium = sum(1 for item in analyzed if _band(item) == "medium")
-    low = sum(1 for item in analyzed if _band(item) == "low")
+    # D16: verdict counts only — same keys as BatchScanSummary.to_json().
     return {
         "manipulation_evidence": sum(1 for item in analyzed if _verdict(item) == "manipulation_evidence"),
         "authenticity_evidence": sum(1 for item in analyzed if _verdict(item) == "authenticity_evidence"),
@@ -514,10 +523,6 @@ def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str,
         "checks_failed": sum(1 for item in analyzed if _has_failed_check(item)),
         "total": len(items),
         "analyzed": len(analyzed),
-        "high": high,
-        "medium": medium,
-        "low": low,
-        "unknown": len(analyzed) - high - medium - low,
         "unsupported_or_failed": sum(1 for i in items if _status(i) not in {"analyzed", "duplicate", "skipped"}),
         "duplicates": sum(1 for i in items if _status(i) == "duplicate"),
         "skipped": sum(1 for i in items if _status(i) == "skipped"),
@@ -600,7 +605,7 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
     analyzed as its own row. The server never persists uploads.
     """
     if "multipart/form-data" not in content_type:
-        return {"error": "multipart/form-data upload required"}
+        return {"error": "multipart/form-data 업로드가 필요합니다"}
     from .archives import is_archive
 
     message = BytesParser(policy=email_policy).parsebytes(
@@ -651,6 +656,27 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
     }
 
 
+def _provenance_layer(raw: dict[str, Any]) -> dict[str, Any]:
+    """c2pa.analyze_metadata_forensic output as a layer diagnostic (D1/D3)."""
+    from .layer_diagnostic import to_layer_diagnostic
+
+    return to_layer_diagnostic("provenance_metadata", raw, layer_label="출처 메타데이터 계층")
+
+
+def _text_statistics_layer(raw: dict[str, Any]) -> dict[str, Any]:
+    """text_advanced output as a layer diagnostic (D1)."""
+    from .layer_diagnostic import to_layer_diagnostic
+
+    return to_layer_diagnostic("text_statistics", raw, layer_label="텍스트 문체 통계 계층")
+
+
+def compare_layer(raw: dict[str, Any]) -> dict[str, Any]:
+    """core.compare_files output as a layer diagnostic (D1)."""
+    from .layer_diagnostic import to_layer_diagnostic
+
+    return to_layer_diagnostic("compare", raw, layer_label="두 파일 유사도 계층")
+
+
 def _check_text_payload(text: str, *, watermark_secret: str | None = None, watermark_gamma: float = 0.25) -> dict[str, object]:
     """Unified text check: core scan heuristics + neural member ensemble
     + fingerprint probes in one payload.
@@ -678,7 +704,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
         item = analyze_path(tmp_name, options, thresholds=thresholds)
         try:
             from .c2pa import analyze_metadata_forensic
-            forensic = analyze_metadata_forensic(Path(tmp_name)).to_json()
+            forensic = _provenance_layer(analyze_metadata_forensic(Path(tmp_name)).to_json())
         except Exception as exc:
             logger.exception("forensic layer failed")
             forensic = None
@@ -704,7 +730,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
         "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "mode": "text",
         "item": record,
-        "advanced": advanced.to_json(),
+        "advanced": _text_statistics_layer(advanced.to_json()),
         "forensic": forensic,
         "watermark": watermark,
         **layer_errors,
@@ -752,7 +778,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
         layer_errors: dict[str, Any] = {}
         try:
             from .c2pa import analyze_metadata_forensic
-            forensic = analyze_metadata_forensic(tmp_path).to_json()
+            forensic = _provenance_layer(analyze_metadata_forensic(tmp_path).to_json())
         except Exception as exc:
             logger.exception("forensic layer failed")
             _layer_error(layer_errors, "forensic", exc)
@@ -760,7 +786,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
         if item.kind == "text":
             try:
                 from .text_advanced import analyze_text_advanced
-                advanced = analyze_text_advanced(payload.decode("utf-8", errors="replace")).to_json()
+                advanced = _text_statistics_layer(analyze_text_advanced(payload.decode("utf-8", errors="replace")).to_json())
             except Exception as exc:
                 logger.exception("text-advanced layer failed")
                 _layer_error(layer_errors, "advanced", exc)
@@ -803,8 +829,12 @@ def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
         from .core import compare_files
         result = compare_files(tmp_paths[0], tmp_paths[1])
         if isinstance(result, dict) and not result.get("error"):
+            # D1: similarity is an unmeasured reference number — the
+            # former same/unclear/different band is not returned.
             options = _web_options()
-            result.update(_provenance(options, load_thresholds(options)))
+            diag = compare_layer(result)
+            diag.update(_provenance(options, load_thresholds(options)))
+            return diag
         return result
     finally:
         for tmp_path in tmp_paths:
@@ -829,13 +859,13 @@ def _feedback_payload(body: bytes) -> dict[str, object]:
     try:
         data = json.loads(body.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
-        return {"error": "invalid JSON body"}
+        return {"error": "JSON 본문을 해석할 수 없습니다"}
     label = str(data.get("expected_label", "") or "").strip().lower()
     if not (is_positive_label(label) or is_negative_label(label)):
-        return {"error": "expected_label must be a recognized label (e.g. synthetic, real)"}
+        return {"error": "expected_label은 인식 가능한 라벨이어야 합니다 (예: synthetic, real)"}
     path = str(data.get("path") or data.get("name") or "").strip()
     if not path:
-        return {"error": "path is required"}
+        return {"error": "path가 필요합니다"}
     entry: dict[str, object] = {
         "path": path,
         "expected_label": label,
@@ -868,7 +898,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     try:
         data = json.loads(body.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
-        return {"error": "invalid JSON body"}
+        return {"error": "JSON 본문을 해석할 수 없습니다"}
     raw_items = data.get("items")
     if not isinstance(raw_items, list) or not raw_items:
         return {"error": "items array is required"}

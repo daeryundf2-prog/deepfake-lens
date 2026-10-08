@@ -34,6 +34,7 @@ from .checks import failed as failed_entry
 from .checks import failure_reason
 from .checks import skipped as skipped_entry
 from .decision import decide
+from .layer_diagnostic import UNAVAILABLE_BAND
 from .result_text import TEXT_LEGAL_LIMITATION
 from .evidence_rules import (
     c2pa_evidence,
@@ -257,7 +258,7 @@ def scan_directory(
                 items.append(ScanItem(
                     _display_path(err_path, root=root), err_path.name,
                     "unknown", "failed", 0,
-                    error=f"directory unreadable: {exc}",
+                    error=f"폴더를 읽을 수 없습니다: {exc}",
                 ))
             # D10: a symlink in the evidence folder is listed (never followed)
             # so the report accounts for every directory entry it was given.
@@ -410,21 +411,21 @@ def _scan_specs(
     def analyze_one(spec: tuple[Path, str | None]) -> tuple[ScanItem, str | None, bool]:
         path, display = spec
         if should_stop is not None and should_stop():
-            return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "skipped", 0, error="scan cancelled"), None, False
+            return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "skipped", 0, error="검사가 취소되었습니다"), None, False
         if path in duplicates:
             display_path = display or _display_path(path, root=root)
             try:
                 size = path.stat().st_size
             except OSError:
                 size = 0
-            return ScanItem(display_path, path.name, "duplicate", "duplicate", size, error="duplicate content", duplicate_of=duplicates[path], sha256=fingerprints.get(path)), None, False
+            return ScanItem(display_path, path.name, "duplicate", "duplicate", size, error="중복 내용(동일 해시)", duplicate_of=duplicates[path], sha256=fingerprints.get(path)), None, False
         if max_file_bytes is not None:
             try:
                 size = path.stat().st_size
             except OSError as exc:
                 return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "failed", 0, error=str(exc)), None, False
             if size > max_file_bytes:
-                return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "skipped", size, error=f"file exceeds --max-file-bytes ({max_file_bytes})"), None, False
+                return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "skipped", size, error=f"파일 크기가 --max-file-bytes 상한({max_file_bytes} bytes)을 초과해 건너뜀"), None, False
         # Archive members live in a temp dir with unstable paths — caching
         # them would both miss every scan and bloat the cache file.
         key = None
@@ -471,7 +472,7 @@ def _scan_specs(
             item = ScanItem(
                 display or _display_path(path, root=root),
                 path.name, "unknown", "failed", 0,
-                error=f"analysis error: {type(exc).__name__}: {exc}",
+                error=f"분석 오류: {type(exc).__name__}: {exc}",
             )
             return item, key, False
         item = _with_content_sha256(item, path, fingerprints)
@@ -769,8 +770,8 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
         from .inpaint import analyze_inpainting
 
         inpaint = analyze_inpainting(path)
-        if inpaint.band == "unknown":
-            _raise_unavailable(inpaint.verdict)
+        if inpaint.reference_band == UNAVAILABLE_BAND:
+            _raise_unavailable(inpaint.reference_note)
         return inpaint
 
     inpaint, entry = run_check("inpaint", inpaint_check)
@@ -778,7 +779,7 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
     if inpaint is not None:
         if inpaint.regions_detected:
             out.reference.append(deep_layer_reference(
-                "인페인팅/부분 변형 탐지", f"{inpaint.verdict} (영역 {inpaint.regions_detected}개)", inpaint.score,
+                "인페인팅/부분 변형 탐지", f"인페인팅 후보 영역 {inpaint.regions_detected}개", inpaint.score,
             ))
         out.limitations.extend(inpaint.limitations[:2])
 
@@ -792,10 +793,10 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
         if missing:
             raise CheckSkipped(f"의존성 부재: {missing}")
         seam = analyze_faceswap_seam(path, thresholds=thresholds)
-        if seam.band == "unknown":
-            if seam.face_count == 0 and "얼굴" in seam.verdict:
+        if seam.reference_band == UNAVAILABLE_BAND:
+            if seam.face_count == 0 and "얼굴" in seam.reference_note:
                 raise CheckSkipped("얼굴 미검출")
-            _raise_unavailable(seam.verdict)
+            _raise_unavailable(seam.reference_note)
         return seam
 
     seam, entry = run_check("faceswap_seam", seam_check)
@@ -826,15 +827,15 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
 
         _require_haar(cv2)
         rppg = analyze_rppg(path)
-        if rppg.band == "unknown":
-            _raise_unavailable(rppg.verdict)
+        if rppg.reference_band == UNAVAILABLE_BAND:
+            _raise_unavailable(rppg.reference_note)
         return rppg
 
     rppg, entry = run_check("rppg", rppg_check)
     out.coverage.append(entry)
     if rppg is not None:
         if rppg.score > 0:
-            out.reference.append(deep_layer_reference("rPPG 맥박 신호", rppg.verdict, rppg.score))
+            out.reference.append(deep_layer_reference("rPPG 맥박 신호", rppg.reference_note, rppg.score))
         out.limitations.extend(rppg.limitations[:2])
 
     def avatar_check():
@@ -852,7 +853,7 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
         markers = [signal for signal in avatar.signals if signal.title != FORMAT_SIGNAL_TITLE]
         if markers:
             raw = min(100, sum(signal.weight for signal in markers))
-            out.reference.append(deep_layer_reference("아바타/디지털휴먼 탐지", avatar.verdict, raw))
+            out.reference.append(deep_layer_reference("아바타/디지털휴먼 탐지", f"마커 신호 {len(markers)}개 ({avatar.avatar_type})", raw))
         out.limitations.extend(avatar.limitations[:2])
 
     def lipsync_check():
@@ -1019,7 +1020,7 @@ def _analyze_audio_file(
         coverage.append(skipped("audio_features", "의존성 부재: librosa"))
     else:
         # Early-exit error analysis (empty/oversized/unreadable file).
-        coverage.append(failed_entry("audio_features", AnalyzerError(analysis.verdict)))
+        coverage.append(failed_entry("audio_features", AnalyzerError(analysis.reference_note)))
     if analysis.model_analysis is None:
         coverage.append(_no_model_entry(model_path, "audio"))
     else:
@@ -1080,8 +1081,8 @@ def _analyze_video_file(
         import cv2  # noqa: F401 — dependency probe
 
         analysis = analyze_video_temporal(file_path, model_path=model_path, analyze_audio_track=True)
-        if analysis.band == "unknown" and analysis.duration_seconds <= 0 and not analysis.signals:
-            raise AnalyzerError(analysis.verdict)
+        if analysis.reference_band == UNAVAILABLE_BAND and analysis.duration_seconds <= 0 and not analysis.signals:
+            raise AnalyzerError(analysis.reference_note)
         return analysis
 
     analysis, entry = run_check("video_analysis", video_check)

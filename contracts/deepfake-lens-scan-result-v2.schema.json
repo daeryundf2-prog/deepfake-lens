@@ -27,12 +27,15 @@
     "summary": {
       "type": "object",
       "required": [
-        "total", "analyzed", "high", "medium", "unknown", "low", "unsupported_or_failed",
+        "total", "analyzed", "unsupported_or_failed",
         "manipulation_evidence", "authenticity_evidence", "undetermined", "checks_failed"
       ],
-      "properties": {
-        "medium": { "const": 0, "description": "Legacy band count; no v2 path produces the medium band." }
-      }
+      "not": {
+        "anyOf": [
+          { "required": ["high"] }, { "required": ["medium"] }, { "required": ["low"] }, { "required": ["unknown"] }
+        ]
+      },
+      "description": "Verdict counts only (D16): the legacy band counts high/medium/low/unknown are not serialized."
     },
     "item": {
       "type": "object",

@@ -518,6 +518,9 @@ class DefaultAudioEngineDiscoveryTest(unittest.TestCase):
 
             self.assertEqual(rc, 0)
             payload = json.loads(out.getvalue())
+            # D1: the audio command prints a layer diagnostic; raw fields sit under "diagnostic".
+            self.assertEqual(payload["kind"], "layer_diagnostic")
+            payload = payload["diagnostic"]
             self.assertIn("model_analysis", payload)
             self.assertIsNotNone(payload["model_analysis"])
             members = payload["model_analysis"].get("models", [])
@@ -537,7 +540,7 @@ class DefaultAudioEngineDiscoveryTest(unittest.TestCase):
                 rc = cli_main(["audio", str(wav), "--format", "json", "--no-default-engine"])
 
             self.assertEqual(rc, 0)
-            payload = json.loads(out.getvalue())
+            payload = json.loads(out.getvalue())["diagnostic"]  # D1: layer diagnostic
             self.assertIsNone(payload["model_analysis"])
 
 

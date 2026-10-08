@@ -57,8 +57,13 @@ per-file coverage record:
 | `authenticity_evidence` | Analyzed items whose verdict is `authenticity_evidence`. |
 | `undetermined` | Analyzed items whose verdict is `undetermined`. |
 | `checks_failed` | Analyzed items with at least one `failed` coverage entry. |
-| `high` / `low` / `unknown` | Legacy names for the three verdict counts above. |
-| `medium` | Legacy; always `0` in v2. |
+
+The legacy band counts `high` / `medium` / `low` / `unknown` are no longer
+serialized (phase-0 fix D16): no front end read them (the GUI counts
+verdicts itself, reports use the verdict counts), and a `medium` key that is
+always `0` invited old-contract readings. They remain readable as
+`BatchScanSummary` attributes for library callers. Web upload summaries and
+`/api/scan/stream` `counts` use the same verdict keys.
 
 ## Item fields (stable)
 
@@ -254,7 +259,69 @@ one signed body: every field of `EvidenceStatement.to_json()` (`case_no`,
 except `signature`/`signature_key_id`. The Markdown and PDF print the
 signature, key id and the signed body's SHA-256 (or the `서명 없음` lines)
 so a paper copy can be tied to its signed JSON; verify the JSON with
-`signing.verify_report`.
+`signing.verify_report` or `deepfake-lens verify-report`.
+
+### Legal report (`legal-report --json-out`, D4)
+
+Built from the scan result of one file: `report_type: "legal-report"`,
+`report_format_version: "2.0"`, `report_id`, `generated_at`, `analyst_id`,
+`jurisdiction`, `tool_version` (package version), `file` (`path`, `sha256`,
+`size_bytes`, `kind`, `status`), `conclusion` (`verdict_code`,
+`verdict_label`, `verdict`, `grade`, `grade_label`), `evidence[]` and
+`coverage[]` exactly as in the scan item, `limitations`,
+`reference_signals`, `provenance` (weights coverage + threshold provenance),
+`legal_notes`, plus the four signing fields above.
+
+### Verifying (`verify-report`, D14)
+
+`deepfake-lens verify-report <report.json> [--key-file F]` (key also from
+`DEEPFAKE_LENS_REPORT_KEY`) prints `검증됨` / `변조됨` / `키 ID 불일치` /
+`서명 없음` and exits 0 / 1 / 2 / 3; an unreadable report or a missing key
+exits 4. `--format json` prints `{report, verified, status, key_id, reason}`.
+
+## Standalone command / endpoint shapes (D1-D3)
+
+Commands and endpoints outside `scan` return one of two shapes; neither has
+a `band`, `band_label`, or a high/medium/low value anywhere.
+
+**`analysis_result`** — `forensic`, `classify`, `multimodal FILE…`,
+`explain FILE`, `agent`, `/api/analyze/{image,audio,text,forensic}`,
+`/api/classify`, `/api/analyze-file`: `kind: "analysis_result"`, `command`,
+`notice`, `path`, `file_kind`, `status`, `sha256`, and the result fields
+`verdict_code`, `verdict_label`, `verdict`, `grade`, `grade_label`,
+`evidence`, `coverage`, `limitations`, `reference_signals`, `source_guess`,
+`probability`, `probability_ci`, `score_is_calibrated`, `next_checks` — the
+same values `scan` produces for the file (legacy `band`/`score`/`signals`
+are omitted). Extras: `layer_diagnostics.{provenance_metadata,
+text_statistics, agent_markers, multimodal_scores}`, `tool_candidates`,
+`items[]` (multimodal), `rule_number`/`rule` (explain).
+
+**`layer_diagnostic`** — `audio`, `video-analysis`, `text-advanced`,
+`pixel-analysis`, `inpaint`, `prnu`, `rppg`, `face`, `avatar`, `3d`,
+`realtime`, `faceswap-seam`, `compare`, `ml-classify`,
+`/api/analyze/face`, `/api/multimodal`, `/api/compare`, and the `forensic` /
+`advanced` sections of `/api/check`:
+
+| Field | Meaning |
+| --- | --- |
+| `kind` | `"layer_diagnostic"` |
+| `title` | `"계층 진단(참고 신호 · 미측정)"` |
+| `layer` | Layer id (`audio`, `video_temporal`, `text_statistics`, `pixel_prescreen`, `inpaint`, `prnu`, `rppg`, `face`, `avatar`, `threed`, `realtime`, `faceswap_seam`, `compare`, `rule_features`, `provenance_metadata`, `tool_attribution`, `multimodal_scores`, `agent_markers`). |
+| `measured` | Always `false`. |
+| `notice` | Fixed: "이 출력은 측정되지 않은 참고 신호이며 결론이 아닙니다. 결론은 `scan`을 사용하십시오." |
+| `reference_band` | `reference` (the layer ran; numbers are reference only) or `unavailable` (it could not run). Never a band. |
+| `reference_note` | Neutral note with the raw score, or the reason the layer could not run. |
+| `raw_score` | The layer's unmeasured heuristic sum (0-100), when it has one. |
+| `diagnostic` | The layer's raw output (signals, limitations, measurements) with any legacy `band`/`band_label`/`verdict` key removed at every depth. |
+
+The layer modules themselves (`AudioAnalysis`, `VideoTemporalAnalysis`,
+`TextAdvancedAnalysis`, `QuickPixelAnalysis`, `InpaintAnalysis`,
+`MultimodalAnalysis`, `AvSyncAnalysis`, `PrnuAnalysis`, `RppgAnalysis`,
+`AvatarAnalysis`, `ThreeDAnalysis`, `AgentAnalysis`, `FaceSwapSeamAnalysis`,
+`RealtimeState`) carry `reference_band`/`reference_note` instead of
+`band`/`band_label`/`verdict`; `ai_probability`/`overall_ai_probability`
+(score/100) were removed. A video item's `result.av_audio` therefore has
+`reference_band`/`reference_note`, not the old audio band.
 
 ## Measurement records (phase 0, WP-I — G26/G27/G28)
 

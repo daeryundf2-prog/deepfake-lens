@@ -10,6 +10,8 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .layer_diagnostic import REFERENCE_BAND, raw_score_note
+
 # Title of the container-format signal. It records only that the file is a
 # video — never evidence of avatar generation on its own (core.py keeps it
 # out of the evidence list).
@@ -27,9 +29,9 @@ class AvatarEvidenceSignal:
 @dataclass(frozen=True)
 class AvatarAnalysis:
     score: int
-    band: str
-    band_label: str
-    verdict: str
+    # D1: no band/verdict — reference_band is 'reference'/'unavailable' (layer_diagnostic).
+    reference_band: str
+    reference_note: str
     signals: list[AvatarEvidenceSignal]
     limitations: list[str]
     avatar_type: str
@@ -76,26 +78,12 @@ def analyze_avatar(
     
     score = min(100, sum(signal.weight for signal in signals))
     
-    if score >= 67:
-        band = "high"
-        band_label = "높음"
-        verdict = "AI 아바타 생성 콘텐츠일 가능성이 높습니다."
-    elif score >= 35:
-        band = "medium"
-        band_label = "주의"
-        verdict = "AI 아바타 생성 가능성이 일부 감지됩니다."
-    else:
-        band = "low"
-        band_label = "낮음"
-        verdict = "AI 아바타 생성 신호가 거의 없습니다."
-    
     avatar_type = _classify_avatar_type(signals)
     
     return AvatarAnalysis(
         score=score,
-        band=band,
-        band_label=band_label,
-        verdict=verdict,
+        reference_band=REFERENCE_BAND,
+        reference_note=raw_score_note("아바타 마커 휴리스틱", score),
         signals=signals,
         limitations=limitations,
         avatar_type=avatar_type,

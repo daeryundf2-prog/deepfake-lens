@@ -95,7 +95,7 @@
 
         <!-- Scan -->
         <section class="card" id="card-scan">
-            <div class="card-head"><h2><span class="gh">📁</span>폴더 / 파일 스캔</h2><span class="hint">여러 파일을 위험도순으로 일괄 조사</span></div>
+            <div class="card-head"><h2><span class="gh">📁</span>폴더 / 파일 스캔</h2><span class="hint">여러 파일을 결론순으로 일괄 조사</span></div>
             <div class="card-body">
                 <div class="row">
                     <input class="field" id="folder-path" placeholder="폴더 경로 (예: C:\Users\test\images)" aria-label="분석할 폴더 경로">
@@ -158,9 +158,8 @@
                     <h2><span class="gh">📋</span>분석 결과</h2>
                     <input type="search" id="res-filter" class="field" placeholder="파일명·경로 필터" aria-label="결과 필터">
                     <select id="res-sort" class="sort-sel" aria-label="정렬">
-                        <option value="score">점수순</option>
+                        <option value="verdict">결론순</option>
                         <option value="name">이름순</option>
-                        <option value="band">결론순</option>
                     </select>
                     <button class="btn btn-sm" id="rev-filter" aria-pressed="false" title="검토 표시한 항목만 보기">★ 검토됨</button>
                     <div class="toolbar">

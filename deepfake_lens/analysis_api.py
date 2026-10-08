@@ -147,11 +147,11 @@ class AnalysisOptions:
         """
         pixel = _param(params, "pixel", "off").strip().lower() or "off"
         if pixel not in SUPPORTED_PIXEL_MODES:
-            raise InvalidOption(f"pixel must be one of {sorted(SUPPORTED_PIXEL_MODES)}")
+            raise InvalidOption(f"pixel은 {sorted(SUPPORTED_PIXEL_MODES)} 중 하나여야 합니다")
         try:
             max_files = int(_param(params, "max_files", str(WEB_DEFAULT_MAX_FILES)))
         except ValueError as exc:
-            raise InvalidOption("max_files must be an integer") from exc
+            raise InvalidOption("max_files는 정수여야 합니다") from exc
         max_files = max(1, min(max_files, WEB_MAX_SCAN_FILES))
         max_file_bytes: int | None = None
         raw_bytes = _param(params, "max_file_bytes", "")
@@ -159,7 +159,7 @@ class AnalysisOptions:
             try:
                 max_file_bytes = min(int(raw_bytes), WEB_MAX_FILE_BYTES_CEILING)
             except ValueError as exc:
-                raise InvalidOption("max_file_bytes must be an integer") from exc
+                raise InvalidOption("max_file_bytes는 정수여야 합니다") from exc
         resolved_dir = Path(models_dir).expanduser().resolve() if models_dir else default_models_dir()
         model_name = _param(params, "model_path", "").strip()
         fusion_name = _param(params, "fusion_profile", "").strip()
@@ -385,15 +385,15 @@ def _models_dir_file(name: str, models_dir: Path, field_name: str) -> Path:
         or PureWindowsPath(name).is_absolute()
         or PurePosixPath(name).name != name
     ):
-        raise InvalidOption(f"{field_name} must be a file name inside the models directory")
+        raise InvalidOption(f"{field_name}은(는) 모델 디렉터리 안의 파일 이름이어야 합니다")
     base = models_dir.resolve()
     candidate = (base / name).resolve()
     try:
         candidate.relative_to(base)
     except ValueError as exc:
-        raise InvalidOption(f"{field_name} must be a file name inside the models directory") from exc
+        raise InvalidOption(f"{field_name}은(는) 모델 디렉터리 안의 파일 이름이어야 합니다") from exc
     if not candidate.is_file():
-        raise InvalidOption(f"{field_name} not found in the models directory: {name}")
+        raise InvalidOption(f"{field_name}을(를) 모델 디렉터리에서 찾을 수 없습니다: {name}")
     return candidate
 
 

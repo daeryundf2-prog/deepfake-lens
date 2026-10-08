@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
+from .layer_diagnostic import REFERENCE_BAND, raw_score_note
+
 
 @dataclass(frozen=True)
 class ThreeDEvidenceSignal:
@@ -19,9 +21,9 @@ class ThreeDEvidenceSignal:
 @dataclass(frozen=True)
 class ThreeDAnalysis:
     score: int
-    band: str
-    band_label: str
-    verdict: str
+    # D1: no band/verdict — reference_band is 'reference'/'unavailable' (layer_diagnostic).
+    reference_band: str
+    reference_note: str
     signals: list[ThreeDEvidenceSignal]
     limitations: list[str]
     content_type: str
@@ -71,26 +73,12 @@ def analyze_3d_content(
     
     score = min(100, sum(signal.weight for signal in signals))
     
-    if score >= 67:
-        band = "high"
-        band_label = "높음"
-        verdict = "3D AI 생성 콘텐츠일 가능성이 높습니다."
-    elif score >= 35:
-        band = "medium"
-        band_label = "주의"
-        verdict = "3D AI 생성 가능성이 일부 감지됩니다."
-    else:
-        band = "low"
-        band_label = "낮음"
-        verdict = "3D AI 생성 신호가 거의 없습니다."
-    
     content_type = _classify_content_type(signals)
     
     return ThreeDAnalysis(
         score=score,
-        band=band,
-        band_label=band_label,
-        verdict=verdict,
+        reference_band=REFERENCE_BAND,
+        reference_note=raw_score_note("3D 생성 마커 휴리스틱", score),
         signals=signals,
         limitations=limitations,
         content_type=content_type,

@@ -85,22 +85,23 @@ class MultimodalAnalysisTest(unittest.TestCase):
         self.assertGreater(len(inconsistency_signals), 0)
 
     def test_ai_probability_range(self) -> None:
-        """AI probability should be between 0 and 1."""
+        """D1: overall_ai_probability (= score/100) is gone; the raw score stays in 0-100."""
         result = analyze_multimodal(image_score=80, text_score=70)
-        self.assertGreaterEqual(result.overall_ai_probability, 0.0)
-        self.assertLessEqual(result.overall_ai_probability, 1.0)
+        self.assertFalse(hasattr(result, "overall_ai_probability"))
+        self.assertLessEqual(result.score, 100)
 
     def test_high_score_returns_high_band(self) -> None:
-        """High scores should return high band."""
+        """D1 (was: high band): high raw inputs give a reference diagnostic, no band."""
         result = analyze_multimodal(image_score=90, text_score=85, audio_score=88)
-        self.assertEqual(result.band, "high")
-        self.assertEqual(result.band_label, "높음")
+        self.assertEqual(result.reference_band, "reference")
+        self.assertFalse(hasattr(result, "band"))
+        self.assertNotIn("강합니다", result.reference_note)
 
     def test_low_score_returns_low_band(self) -> None:
-        """Low scores should return low band."""
+        """D1 (was: low band): low raw inputs never produce a "낮음" conclusion."""
         result = analyze_multimodal(image_score=10, text_score=15, audio_score=12)
-        self.assertEqual(result.band, "low")
-        self.assertEqual(result.band_label, "낮음")
+        self.assertEqual(result.reference_band, "reference")
+        self.assertNotIn("적습니다", result.reference_note)
 
     def test_to_json_returns_dict(self) -> None:
         """to_json should return a dictionary."""
@@ -108,8 +109,10 @@ class MultimodalAnalysisTest(unittest.TestCase):
         data = result.to_json()
         self.assertIsInstance(data, dict)
         self.assertIn("score", data)
-        self.assertIn("band", data)
-        self.assertIn("verdict", data)
+        self.assertIn("reference_band", data)
+        self.assertNotIn("band", data)  # D1: layer modules report reference_band/reference_note, never a band
+        self.assertIn("reference_note", data)
+        self.assertNotIn("verdict", data)
         self.assertIn("modalities_used", data)
         self.assertIn("consistency_score", data)
 
@@ -191,13 +194,13 @@ class AvSyncTest(unittest.TestCase):
         result = av_sync_from_envelopes(
             [0.0] * 500, [1.0] * 500, audio_rate=25.0, motion_rate=25.0
         )
-        self.assertEqual(result.band, "unknown")
+        self.assertEqual(result.reference_band, "unavailable")  # D1: layer modules report reference_band/reference_note, never a band
         self.assertIsNone(result.offset_seconds)
 
     def test_missing_file_returns_error(self) -> None:
         result = analyze_av_sync("/nonexistent/video.mp4")
-        self.assertEqual(result.band, "unknown")
-        self.assertIn("존재하지 않습니다", result.verdict)
+        self.assertEqual(result.reference_band, "unavailable")  # D1: layer modules report reference_band/reference_note, never a band
+        self.assertIn("존재하지 않습니다", result.reference_note)
 
     def test_avsync_analysis_to_json(self) -> None:
         result = analyze_av_sync("/nonexistent/video.mp4")

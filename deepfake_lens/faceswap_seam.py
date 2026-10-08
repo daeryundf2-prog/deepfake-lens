@@ -22,6 +22,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
+
 from .face import FaceRegion, _detect_faces, _imread_unicode
 
 
@@ -72,9 +74,9 @@ class FaceSwapEvidenceSignal:
 @dataclass(frozen=True)
 class FaceSwapSeamAnalysis:
     score: int  # 0-100
-    band: str  # high, medium, low, unknown
-    band_label: str  # 높음, 주의, 낮음, 판단 어려움
-    verdict: str
+    # D1: no band/verdict — reference_band is 'reference'/'unavailable' (layer_diagnostic).
+    reference_band: str
+    reference_note: str
     signals: list[FaceSwapEvidenceSignal]
     limitations: list[str]
     face_count: int
@@ -113,9 +115,8 @@ def analyze_faceswap_seam(
     if not faces:
         return FaceSwapSeamAnalysis(
             score=0,
-            band="unknown",
-            band_label="판단 어려움",
-            verdict="얼굴 영역이 감지되지 않아 페이스스왑 경계면 분석을 수행할 수 없습니다.",
+            reference_band=UNAVAILABLE_BAND,
+            reference_note="얼굴 영역이 감지되지 않아 페이스스왑 경계면 분석을 수행할 수 없습니다.",
             signals=[],
             limitations=["이미지에서 유효한 얼굴을 찾지 못했습니다."],
             face_count=0,
@@ -175,9 +176,8 @@ def analyze_faceswap_seam(
     if analyzed_faces == 0:
         return FaceSwapSeamAnalysis(
             score=0,
-            band="unknown",
-            band_label="판단 어려움",
-            verdict="감지된 얼굴이 모두 32px 미만으로 경계면 분석이 불가능합니다.",
+            reference_band=UNAVAILABLE_BAND,
+            reference_note="감지된 얼굴이 모두 32px 미만으로 경계면 분석이 불가능합니다.",
             signals=[],
             limitations=["유효 해상도의 얼굴이 없어 분석 지표를 산출하지 못했습니다."],
             face_count=len(faces),
@@ -192,33 +192,19 @@ def analyze_faceswap_seam(
     if not measured:
         return FaceSwapSeamAnalysis(
             score=0,
-            band="unknown",
-            band_label="판단 어려움",
-            verdict="안면부 분석 지표를 산출할 수 없어 합성 여부를 판단하지 못했습니다.",
+            reference_band=UNAVAILABLE_BAND,
+            reference_note="안면부 분석 지표를 산출할 수 없어 합성 여부를 판단하지 못했습니다.",
             signals=signals,
             limitations=limitations,
             face_count=len(faces),
         )
 
     score = min(100, sum(s.weight for s in signals))
-    if score >= t("score_high"):
-        band = "high"
-        band_label = "높음"
-        verdict = "안면부 경계면 잔차 및 노이즈 불일치로 보아 페이스스왑(FaceSwap) 합성 가능성이 매우 높습니다."
-    elif score >= t("score_medium"):
-        band = "medium"
-        band_label = "주의"
-        verdict = "안면부와 주변 신체 영역 사이에 미세한 이질성이 감지되어 정밀 대조가 필요합니다."
-    else:
-        band = "low"
-        band_label = "낮음"
-        verdict = "안면부 경계면 및 피부 노이즈가 주변 환경과 일관성을 유지하고 있습니다."
 
     return FaceSwapSeamAnalysis(
         score=score,
-        band=band,
-        band_label=band_label,
-        verdict=verdict,
+        reference_band=REFERENCE_BAND,
+        reference_note=raw_score_note("페이스스왑 경계면 휴리스틱", score),
         signals=signals,
         limitations=limitations,
         face_count=len(faces),
@@ -425,9 +411,8 @@ def _analyze_corneal_reflections(image: Any, face: FaceRegion, cv2: Any, np: Any
 def _error_analysis(msg: str) -> FaceSwapSeamAnalysis:
     return FaceSwapSeamAnalysis(
         score=0,
-        band="unknown",
-        band_label="판단 어려움",
-        verdict=msg,
+        reference_band=UNAVAILABLE_BAND,
+        reference_note=msg,
         signals=[],
         limitations=[msg],
         face_count=0,

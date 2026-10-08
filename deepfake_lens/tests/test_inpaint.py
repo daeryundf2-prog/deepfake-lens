@@ -20,8 +20,8 @@ class InpaintAnalysisTest(unittest.TestCase):
         """Analysis of nonexistent file should return error analysis."""
         result = analyze_inpainting(Path("/nonexistent/image.jpg"))
         self.assertEqual(result.score, 0)
-        self.assertEqual(result.band, "unknown")
-        self.assertIn("존재하지 않습니다", result.verdict)
+        self.assertEqual(result.reference_band, "unavailable")  # D1: layer modules report reference_band/reference_note, never a band
+        self.assertIn("존재하지 않습니다", result.reference_note)
 
     def test_unsupported_format_returns_error(self) -> None:
         """Analysis of unsupported format should return error analysis."""
@@ -29,7 +29,7 @@ class InpaintAnalysisTest(unittest.TestCase):
         tmp_path.write_bytes(b"not image")
         result = analyze_inpainting(tmp_path)
         self.assertEqual(result.score, 0)
-        self.assertIn("지원하지 않는", result.verdict)
+        self.assertIn("지원하지 않는", result.reference_note)
         tmp_path.unlink(missing_ok=True)
 
     def test_analysis_returns_dataclass(self) -> None:
@@ -43,8 +43,10 @@ class InpaintAnalysisTest(unittest.TestCase):
         data = result.to_json()
         self.assertIsInstance(data, dict)
         self.assertIn("score", data)
-        self.assertIn("band", data)
-        self.assertIn("verdict", data)
+        self.assertIn("reference_band", data)
+        self.assertNotIn("band", data)  # D1: layer modules report reference_band/reference_note, never a band
+        self.assertIn("reference_note", data)
+        self.assertNotIn("verdict", data)
         self.assertIn("regions_detected", data)
 
     def test_inpaint_region_dataclass(self) -> None:

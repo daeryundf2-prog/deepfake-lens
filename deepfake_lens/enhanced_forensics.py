@@ -2,8 +2,13 @@
 
 Provides comprehensive forensic analysis for legal and evidentiary use.
 
-This module is the legal-report packaging layer (hashing, report ID,
-legal text, checksum) behind the ``legal-report`` CLI command. Evidence
+``build_legal_report`` is what the ``legal-report`` CLI command prints (D4):
+it is built from the scan result (``analysis_api.analyze_path``) — the same
+verdict, evidence and coverage as ``scan`` — plus the file hash, the
+package tool version and an HMAC signature when a report key is set.
+
+``analyze_forensic`` is the older provenance-only packaging (hashing,
+report ID, legal text, checksum) kept for library callers. Its evidence
 collection delegates to the canonical provenance path in ``c2pa.py``
 (``analyze_metadata_forensic``), so a raw ``b"c2pa"`` substring is a
 reference-level hint — never the 0.9 confidence that only an
@@ -43,7 +48,7 @@ class ForensicReport:
     legal_notes: list[str]
     # Legal elements
     analyst_id: str = "system"
-    tool_version: str = "2.0"
+    tool_version: str = ""
     jurisdiction: str = "KR"
     # Checksum of the report contents. This is NOT a digital signature: an
     # unkeyed SHA-256 provides integrity binding for the report text only,
@@ -148,7 +153,7 @@ def analyze_forensic(path: Path | str) -> ForensicReport:
     # Generate report ID and content checksum
     report_id = f"FR-{datetime.now().strftime('%Y%m%d%H%M%S')}-{file_hash[:8]}"
     checksum_timestamp = datetime.now().isoformat()
-    checksum_data = f"{file_hash}:{checksum_timestamp}:2.0"
+    checksum_data = f"{file_hash}:{checksum_timestamp}:{package_version()}"
     integrity_checksum = hashlib.sha256(checksum_data.encode()).hexdigest()
 
     return ForensicReport(
@@ -160,7 +165,7 @@ def analyze_forensic(path: Path | str) -> ForensicReport:
         overall_confidence=overall_confidence,
         legal_notes=legal_notes,
         analyst_id="system",
-        tool_version="2.0",
+        tool_version=package_version(),
         jurisdiction="KR",
         integrity_checksum=integrity_checksum,
         checksum_timestamp=checksum_timestamp,
@@ -179,7 +184,7 @@ def _error_report(message: str) -> ForensicReport:
         overall_confidence=0.0,
         legal_notes=[message],
         analyst_id="system",
-        tool_version="2.0",
+        tool_version=package_version(),
         jurisdiction="KR",
         integrity_checksum="",
         checksum_timestamp="",
@@ -312,4 +317,136 @@ def _analyze_structure(path: Path) -> list[ForensicEvidence]:
         pass
 
     return evidences
+
+
+def package_version() -> str:
+    """The deepfake-lens package version (pyproject), for every report."""
+    from .core import TOOL_VERSION
+
+    return TOOL_VERSION
+
+
+LEGAL_REPORT_TYPE = "legal-report"
+LEGAL_REPORT_FORMAT_VERSION = "2.0"
+LEGAL_REPORT_NOTES = (
+    "결론은 scan과 같은 결정 규칙(decision.decide)으로 산출되었습니다: 결정적 근거(메타데이터·C2PA)만 결론을 바꿀 수 있고, "
+    "측정되지 않은 통계·휴리스틱 신호는 참고 신호로만 기록됩니다.",
+    "'판단 불가'는 원본이라는 뜻이 아닙니다. 검사 범위(coverage)에 실행·건너뜀·실패한 검사가 모두 기록되어 있습니다.",
+    "법적 효력을 위해서는 공인된 검증 기관의 확인이 필요합니다.",
+    "파일 무결성은 SHA-256 해시로 기록되었으며, 보고서 서명(HMAC-SHA256)은 서명 키 보유자에 대한 무결성 증명입니다.",
+)
+
+
+def build_legal_report(
+    path: Path | str,
+    options: Any = None,
+    *,
+    analyst_id: str = "system",
+    jurisdiction: str = "KR",
+    key: bytes | None = None,
+) -> dict[str, Any]:
+    """Legal report for one file, built from the scan result (D4).
+
+    The conclusion, evidence list and coverage are exactly what
+    ``analysis_api.analyze_path`` returns for the file — an a1111 PNG shows
+    its deterministic generator-metadata evidence and
+    ``manipulation_evidence``. The body is signed with ``key`` (HMAC-SHA256)
+    when one is given, otherwise it carries the "서명 없음" note; verify it
+    with ``deepfake-lens verify-report``.
+    """
+    from .analysis_api import AnalysisOptions, analyze_path, load_thresholds, provenance
+    from .cli_standalone import analysis_result_payload, file_sha256
+    from .signing import sign_report
+
+    file_path = Path(path)
+    opts = options if options is not None else AnalysisOptions()
+    thresholds = load_thresholds(opts)
+    item = analyze_path(file_path, opts, thresholds=thresholds)
+    result = analysis_result_payload(item, command=LEGAL_REPORT_TYPE, sha256=file_sha256(file_path))
+    try:
+        size = file_path.stat().st_size
+    except OSError:
+        size = 0
+    now = datetime.now()
+    sha = str(result.get("sha256") or "")
+    report: dict[str, Any] = {
+        "report_type": LEGAL_REPORT_TYPE,
+        "report_format_version": LEGAL_REPORT_FORMAT_VERSION,
+        "report_id": f"LR-{now.strftime('%Y%m%d%H%M%S')}-{sha[:8] or 'nohash'}",
+        "generated_at": now.isoformat(timespec="seconds"),
+        "analyst_id": analyst_id,
+        "jurisdiction": jurisdiction,
+        "tool_version": package_version(),
+        "file": {
+            "path": str(file_path.absolute()),
+            "sha256": sha or None,
+            "size_bytes": size,
+            "kind": result.get("file_kind"),
+            "status": result.get("status"),
+        },
+        "conclusion": {
+            "verdict_code": result.get("verdict_code"),
+            "verdict_label": result.get("verdict_label"),
+            "verdict": result.get("verdict"),
+            "grade": result.get("grade"),
+            "grade_label": result.get("grade_label"),
+        },
+        "evidence": result.get("evidence", []),
+        "coverage": result.get("coverage", []),
+        "limitations": result.get("limitations", []),
+        "reference_signals": result.get("reference_signals", []),
+        "provenance": provenance(opts, thresholds),
+        "legal_notes": list(LEGAL_REPORT_NOTES),
+    }
+    return sign_report(report, key)
+
+
+def legal_report_text(report: dict[str, Any]) -> str:
+    """Korean plain-text rendering of :func:`build_legal_report`."""
+    raw_file, raw_conclusion = report.get("file"), report.get("conclusion")
+    file_info: dict[str, Any] = raw_file if isinstance(raw_file, dict) else {}
+    conclusion: dict[str, Any] = raw_conclusion if isinstance(raw_conclusion, dict) else {}
+    lines = [
+        "=== 포렌식 분석 보고서 ===",
+        f"보고서 ID: {report.get('report_id', '')}",
+        f"분석 일시: {report.get('generated_at', '')}",
+        f"분석자: {report.get('analyst_id', '')}",
+        f"도구 버전: {report.get('tool_version', '')}",
+        f"관할권: {report.get('jurisdiction', '')}",
+        "",
+        "=== 파일 정보 ===",
+        f"파일 경로: {file_info.get('path', '')}",
+        f"파일 해시 (SHA-256): {file_info.get('sha256') or '해시 불가'}",
+        f"파일 크기: {file_info.get('size_bytes', 0)} bytes",
+        "",
+        "=== 결론 ===",
+        f"{conclusion.get('verdict_label', '')} ({conclusion.get('verdict_code', '')}) · 등급: {conclusion.get('grade_label', '')}",
+        str(conclusion.get("verdict", "")),
+        "",
+        "=== 근거 ===",
+    ]
+    raw_evidence = report.get("evidence")
+    evidence: list[Any] = raw_evidence if isinstance(raw_evidence, list) else []
+    if not evidence:
+        lines.append("(기록된 근거 없음)")
+    for index, item in enumerate(evidence, 1):
+        if isinstance(item, dict):
+            lines.append(
+                f"{index}. [{item.get('kind')}/{item.get('direction')}/{item.get('strength')}] "
+                f"{item.get('title')}: {item.get('detail')}"
+            )
+    lines.extend(["", "=== 검사 범위 ==="])
+    for entry in report.get("coverage") or []:
+        if isinstance(entry, dict):
+            reason = f" — {entry['reason']}" if entry.get("reason") else ""
+            lines.append(f"- {entry.get('check')}: {entry.get('status')}{reason}")
+    lines.extend(["", "=== 한계 ==="])
+    lines.extend(f"- {item}" for item in report.get("limitations") or [])
+    lines.extend(["", "=== 법적 참고사항 ==="])
+    lines.extend(f"- {note}" for note in report.get("legal_notes") or [])
+    lines.extend(["", "=== 서명 ==="])
+    if report.get("signature"):
+        lines.append(f"HMAC-SHA256 {report.get('signature_key_id')}: {report.get('signature')}")
+    lines.append(str(report.get("signature_note", "")))
+    return "\n".join(lines)
 

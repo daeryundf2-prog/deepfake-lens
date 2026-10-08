@@ -28,7 +28,7 @@ class AIAgentTest(unittest.TestCase):
         """Empty analysis should return low score."""
         result = analyze_agent_content()
         self.assertEqual(result.score, 0)
-        self.assertEqual(result.band, "low")
+        self.assertEqual(result.reference_band, "reference")  # D1: layer modules report reference_band/reference_note, never a band
 
     def test_analyze_text_with_agent_marker(self) -> None:
         """Text with agent marker should be detected."""
@@ -66,7 +66,7 @@ class ThreeDTest(unittest.TestCase):
         """Empty analysis should return low score."""
         result = analyze_3d_content()
         self.assertEqual(result.score, 0)
-        self.assertEqual(result.band, "low")
+        self.assertEqual(result.reference_band, "reference")  # D1: layer modules report reference_band/reference_note, never a band
 
     def test_analyze_text_with_nerf_marker(self) -> None:
         """Text with NeRF marker should be detected."""
@@ -104,7 +104,7 @@ class AvatarTest(unittest.TestCase):
         """Empty analysis should return low score."""
         result = analyze_avatar()
         self.assertEqual(result.score, 0)
-        self.assertEqual(result.band, "low")
+        self.assertEqual(result.reference_band, "reference")  # D1: layer modules report reference_band/reference_note, never a band
 
     def test_analyze_metadata_with_avatar_marker(self) -> None:
         """Metadata with avatar marker should be detected."""

@@ -47,7 +47,6 @@ from .inpaint import analyze_inpainting, InpaintAnalysis
 from .text_advanced import analyze_text_advanced, TextAdvancedAnalysis
 from .watermark import detect_kgw_watermark
 from .c2pa import analyze_metadata_forensic, MetadataForensicAnalysis
-from .classifier import classify_metadata, classify_text_content, ClassificationResult as ToolClassificationResult
 from .multimodal import analyze_av_sync, analyze_multimodal, MultimodalAnalysis
 from .realtime import RealtimeDetector, create_realtime_detector
 from .rppg import analyze_rppg, RppgAnalysis
@@ -55,13 +54,24 @@ from .prnu import analyze_prnu, PrnuAnalysis
 from .evidence import create_evidence_chain, generate_forensic_report
 from .api_server import run_server as run_api_server
 from .batch import BatchProcessor
-from .xai import explain_classification, format_explanation_text
 from .ai_agent import analyze_agent_content, AgentAnalysis
 from .threed import analyze_3d_content, ThreeDAnalysis
 from .avatar import analyze_avatar, AvatarAnalysis
-from .pixel_analyzer import analyze_pixels
 from .rule_classifier import RuleClassifier
-from .enhanced_forensics import analyze_forensic
+from .layer_diagnostic import ANALYSIS_RESULT_KIND, to_layer_diagnostic
+from .cli_standalone import (
+    ANALYSIS_RESULT_NOTICE,
+    analysis_result_payload,
+    analyze_text_payload,
+    combined_verdict,
+    emit,
+    emit_layer,
+    file_sha256,
+    format_analysis_result,
+    gated_pixel_layer,
+    tool_attribution,
+)
+from .result_types import VERDICT_LABELS, Verdict
 from .webapp import run_server
 from .faceswap_seam import analyze_faceswap_seam
 from .evidence_statement import (
@@ -83,7 +93,7 @@ from .vendor_weights import (
 )
 
 
-COMMANDS = {"doctor", "scan", "corpus", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "faceswap-seam", "evidence-statement", "vendor-weights", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
+COMMANDS = {"doctor", "scan", "verify-report", "corpus", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "faceswap-seam", "evidence-statement", "vendor-weights", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
 
 def _pkg_profile(name: str) -> str:
     # Absolute path into the resolved models dir — works from the source
@@ -149,18 +159,168 @@ def default_text_model_path(root: Path | None = None) -> Path | None:
 def _vendor_weights_pin(args: argparse.Namespace) -> int:
     """``vendor-weights pin <profile>``: write the profile's weight pin (G9)."""
     if not args.profile:
-        print("error: 'vendor-weights pin' needs a profile name or path", file=sys.stderr)
+        print("오류: 'vendor-weights pin'에는 프로필 이름이나 경로가 필요합니다", file=sys.stderr)
         return 2
     try:
         result = pin_profile(args.profile, args.models_dir, revision=args.revision)
     except (OSError, ValueError, RuntimeError) as exc:
-        print(f"error: 프로필 고정 실패 — {exc}", file=sys.stderr)
+        print(f"오류: 프로필 고정 실패 — {exc}", file=sys.stderr)
         return 1
     if result["status"] == "needs-manual":
         print(result["instructions"], file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
+
+
+def _multimodal_command(args: argparse.Namespace) -> int:
+    """``multimodal [FILE…]`` (D1).
+
+    With files: each one goes through analysis_api (the scan verdict) and
+    the combined verdict follows the decision-rule order — any
+    manipulation evidence wins, authenticity only when every file has it.
+    The legacy ``--*-score`` inputs and ``--av-sync`` are unmeasured
+    reference numbers and are reported as a layer diagnostic only.
+    """
+    files = list(getattr(args, "files", None) or [])
+    av_sync_result = analyze_av_sync(args.av_sync) if args.av_sync else None
+    has_scores = any(
+        value is not None for value in (args.image_score, args.text_score, args.audio_score, args.video_score)
+    )
+    diagnostic = None
+    if has_scores or av_sync_result is not None or not files:
+        raw = analyze_multimodal(
+            image_score=args.image_score,
+            text_score=args.text_score,
+            audio_score=args.audio_score,
+            video_score=args.video_score,
+            image_source_guess=args.image_source,
+            text_source_guess=args.text_source,
+            audio_source_guess=args.audio_source,
+            video_source_guess=args.video_source,
+            av_sync=av_sync_result,
+        ).to_json()
+        if av_sync_result is not None:
+            raw["av_sync"] = av_sync_result.to_json()
+        diagnostic = to_layer_diagnostic("multimodal_scores", raw, layer_label="멀티모달 원점수 조합")
+    if not files:
+        assert diagnostic is not None
+        emit(diagnostic, fmt=args.format, json_out=args.json_out)
+        return 0
+    options = AnalysisOptions.from_cli_args(args)
+    thresholds = load_thresholds(options, warn=thresholds_warning_printer(sys.stderr))
+    per_file = [
+        analysis_result_payload(analyze_path(path, options, thresholds=thresholds), command="multimodal", sha256=file_sha256(path))
+        for path in files
+    ]
+    verdict_code, explanation = combined_verdict(per_file)
+    payload: dict[str, object] = {
+        "kind": ANALYSIS_RESULT_KIND,
+        "command": "multimodal",
+        "notice": ANALYSIS_RESULT_NOTICE,
+        "verdict_code": verdict_code,
+        "verdict_label": VERDICT_LABELS[Verdict(verdict_code)],
+        "verdict": f"{VERDICT_LABELS[Verdict(verdict_code)]} — {explanation}",
+        "items": per_file,
+    }
+    if diagnostic is not None:
+        payload["layer_diagnostics"] = {"multimodal_scores": diagnostic}
+    text = "\n\n".join(
+        [f"[종합 결론] {payload['verdict']}", *(format_analysis_result(item) for item in per_file)]
+    )
+    emit(payload, fmt=args.format, json_out=args.json_out, text=text)
+    return 0
+
+
+def _explain_command(args: argparse.Namespace) -> int:
+    """``explain FILE``: which decision rule produced the scan verdict (D1).
+
+    ``--score`` alone (the former score-band explanation) can no longer be
+    explained — a raw score is not a conclusion — and is reported as a
+    layer diagnostic that says so.
+    """
+    from .decision import RULE_DESCRIPTIONS, decide_with_rule
+
+    if args.file is None:
+        raw: dict[str, object] = {
+            "score": args.score,
+            "reference_band": "unavailable",
+            "reference_note": "점수만으로는 결론을 설명할 수 없습니다 — 결론은 근거·검사 범위·결정 규칙에서 나옵니다. `explain <파일>`을 사용하십시오.",
+        }
+        if args.signals:
+            try:
+                raw["signals"] = json.loads(args.signals)
+            except json.JSONDecodeError:
+                raw["limitations"] = ["--signals JSON을 해석할 수 없습니다."]
+        emit(to_layer_diagnostic("explain_score", raw, layer_label="점수 설명"), fmt="json" if args.format == "json" else "table", json_out=None)
+        return 0
+    options = AnalysisOptions.from_cli_args(args)
+    item = analyze_path(args.file, options, thresholds=load_thresholds(options, warn=thresholds_warning_printer(sys.stderr)))
+    payload = analysis_result_payload(item, command="explain", sha256=file_sha256(args.file))
+    if item.result is not None:
+        verdict, rule = decide_with_rule(item.result.evidence, item.result.coverage, item.result.grade)
+        payload["rule_number"] = rule
+        payload["rule"] = RULE_DESCRIPTIONS[rule]
+        if verdict != item.result.verdict_code:
+            payload["rule_note"] = "결정 규칙 재현 결과가 기록된 결론과 다릅니다 — 보정 임계값 프로필을 확인하십시오."
+    else:
+        payload["rule"] = "분석 결과가 없어 결정 규칙을 적용하지 못했습니다 → 판단 불가"
+    emit(payload, fmt="json" if args.format == "json" else "table", json_out=None)
+    return 0
+
+
+def _legal_report_command(args: argparse.Namespace) -> int:
+    """``legal-report FILE``: report built from the scan result (D4)."""
+    from .enhanced_forensics import build_legal_report, legal_report_text
+
+    report = build_legal_report(
+        args.file,
+        AnalysisOptions.from_cli_args(args),
+        analyst_id=args.analyst_id,
+        key=resolve_report_key(args.key_file),
+    )
+    if args.json_out:
+        _write_json_out(args.json_out, json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    text = legal_report_text(report)
+    if args.output:
+        args.output.write_text(text + "\n", encoding="utf-8")
+    if args.format == "json":
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    elif args.output:
+        print(json.dumps({"output": str(args.output), "report_id": report.get("report_id")}, ensure_ascii=False, indent=2))
+    else:
+        print(text)
+    return 0
+
+
+# verify-report exit codes (D14): documented in docs/deepfake-lens-cli.md.
+VERIFY_EXIT_CODES = {"verified": 0, "tampered": 1, "key-mismatch": 2, "unsigned": 3}
+VERIFY_EXIT_OTHER = 4
+
+
+def _verify_report_command(args: argparse.Namespace) -> int:
+    """``verify-report REPORT.json [--key-file F]`` (D14).
+
+    Prints 검증됨 / 변조됨 / 키 ID 불일치 / 서명 없음 and exits 0/1/2/3.
+    An unreadable report or a missing key exits 4 (사용 오류).
+    """
+    from .signing import REPORT_KEY_ENV, verify_report
+
+    key = resolve_report_key(args.key_file)
+    result = verify_report(args.report, key)
+    payload = {"report": str(args.report), **result.to_json()}
+    if result.status == "no-key":
+        payload["hint"] = f"검증 키가 없습니다 — --key-file 또는 {REPORT_KEY_ENV} 환경 변수를 지정하십시오."
+    if args.format == "json":
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        line = f"{result.reason}: {args.report}"
+        if result.key_id:
+            line += f" (키 ID {result.key_id})"
+        print(line)
+        if payload.get("hint"):
+            print(payload["hint"], file=sys.stderr)
+    return VERIFY_EXIT_CODES.get(result.status, VERIFY_EXIT_OTHER)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -185,6 +345,8 @@ def main(argv: list[str] | None = None) -> int:
         from .corpus_manifest import run_corpus_cli
 
         return run_corpus_cli(args)
+    if args.command == "verify-report":
+        return _verify_report_command(args)
     if args.command == "collect":
         payload = write_collection_plan(args.folder, args.out, minimum_per_source=args.minimum_per_source)
         print(json.dumps({"out": str(args.out), "targets": len(payload["targets"])}, ensure_ascii=False, indent=2))
@@ -295,7 +457,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 scan_payload = json.loads(args.scan_json.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
-                print(f"error: cannot read scan JSON: {exc}", file=sys.stderr)
+                print(f"오류: 검사 JSON을 읽을 수 없습니다: {exc}", file=sys.stderr)
                 return 2
             observations, unmatched = observations_from_scan_payload(scan_payload, entries)
         else:
@@ -338,7 +500,7 @@ def main(argv: list[str] | None = None) -> int:
             write_detector_registry(args.json_out, focus=args.focus)
         if args.profile_out:
             if not args.checkpoint:
-                cmd_parsers["models"].error("--profile-out requires --checkpoint")
+                cmd_parsers["models"].error("--profile-out에는 --checkpoint가 필요합니다")
             profile = write_runtime_profile(
                 args.profile_out,
                 args.candidate,
@@ -375,36 +537,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"count": payload["count"], "ffmpeg_available": payload["ffmpeg_available"], "out": str(args.out)}, ensure_ascii=False, indent=2))
         return 0
     if args.command == "audio":
+        # D1: layer diagnostic only — the verdict for an audio file is `scan`.
         audio_model_path = args.model_path or (None if args.no_default_engine else default_audio_model_paths() or None)
         analysis = analyze_audio(args.file, segment_seconds=args.segment_seconds, model_path=audio_model_path)
-        if args.json_out:
-            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
-        if args.format == "json":
-            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
-        else:
-            print(f"Score: {analysis.score} ({analysis.band_label})")
-            print(f"Verdict: {analysis.verdict}")
-            print(f"Source: {analysis.source_guess}")
-            if analysis.signals:
-                print("Signals:")
-                for signal in analysis.signals:
-                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
-        return 0
+        return emit_layer(args, "audio", "오디오 음향 계층", analysis.to_json(), subject=str(args.file))
     if args.command == "face":
         analysis = analyze_faces(args.file)
-        if args.json_out:
-            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
-        if args.format == "json":
-            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
-        else:
-            print(f"Score: {analysis.score} ({analysis.band_label})")
-            print(f"Verdict: {analysis.verdict}")
-            print(f"Faces: {analysis.face_count}, Type: {analysis.manipulation_type}")
-            if analysis.signals:
-                print("Signals:")
-                for signal in analysis.signals:
-                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
-        return 0
+        return emit_layer(args, "face", "얼굴 조작 계층", analysis.to_json(), subject=str(args.file))
     if args.command == "video-analysis":
         analysis = analyze_video_temporal(
             args.file,
@@ -412,67 +551,23 @@ def main(argv: list[str] | None = None) -> int:
             max_frames=args.max_frames,
             model_path=list(args.model_path) if args.model_path else None,
         )
-        if args.json_out:
-            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
-        if args.format == "json":
-            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
-        else:
-            print(f"Score: {analysis.score} ({analysis.band_label})")
-            print(f"Verdict: {analysis.verdict}")
-            print(f"Frames: {analysis.frame_count}, Duration: {analysis.duration_seconds:.1f}s, FPS: {analysis.fps:.1f}")
-            if analysis.model_analysis is not None:
-                state = f"score={analysis.model_analysis.score}" if analysis.model_analysis.available else "unavailable"
-                print(f"Model: {analysis.model_analysis.model} ({state}) — {analysis.model_analysis.detail}")
-            if analysis.signals:
-                print("Signals:")
-                for signal in analysis.signals:
-                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
-        return 0
+        return emit_layer(args, "video_temporal", "영상 시간축 계층", analysis.to_json(), subject=str(args.file))
     if args.command == "inpaint":
         analysis = analyze_inpainting(args.file)
-        if args.json_out:
-            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
-        if args.format == "json":
-            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
-        else:
-            print(f"Score: {analysis.score} ({analysis.band_label})")
-            print(f"Verdict: {analysis.verdict}")
-            print(f"Regions detected: {analysis.regions_detected}")
-            if analysis.signals:
-                print("Signals:")
-                for signal in analysis.signals:
-                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
-        return 0
+        return emit_layer(args, "inpaint", "인페인팅 계층", analysis.to_json(), subject=str(args.file))
     if args.command == "text-advanced":
         text = args.file.read_text(encoding="utf-8", errors="replace")
         analysis = analyze_text_advanced(text)
-        if args.json_out:
-            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
-        if args.format == "json":
-            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
-        else:
-            print(f"Score: {analysis.score} ({analysis.band_label})")
-            print(f"Verdict: {analysis.verdict}")
-            print(f"AI Probability: {analysis.ai_probability:.2%}")
-            print(f"Style: {analysis.style_profile}")
-            if analysis.signals:
-                print("Signals:")
-                for signal in analysis.signals:
-                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
-        return 0
+        return emit_layer(args, "text_statistics", "텍스트 문체 통계 계층", analysis.to_json(), subject=str(args.file))
     if args.command == "compare":
         from .core import compare_files
         result = compare_files(args.file_a, args.file_b, ecapa_revision=args.ecapa_revision)
-        if args.format == "json":
-            print(json.dumps(result, ensure_ascii=False, indent=2))
-        else:
-            if "error" in result:
-                print(f"Error: {result['error']}")
-                return 1
-            print(f"Kind: {result['kind']}")
-            print(f"Score: {result['score']} ({result['band']})")
-            print(f"Verdict: {result['verdict']}")
-        return 0
+        if "error" in result:
+            emit({"error": result["error"]}, fmt="json", json_out=None) if args.format == "json" else print(f"오류: {result['error']}")
+            return 1
+        # D1: same-speaker / same-author similarity is an unmeasured
+        # reference number; its former same/unclear/different band is dropped.
+        return emit_layer(args, "compare", "두 파일 유사도 계층", result, subject=f"{args.file_a} ↔ {args.file_b}")
     if args.command == "watermark":
         text = _file_text(args.file)
         if text is None:
@@ -495,175 +590,45 @@ def main(argv: list[str] | None = None) -> int:
             print(f"z={result.z_score}, green={result.green_fraction}, tokens={result.token_count}")
         return 0
     if args.command == "forensic":
-        analysis = analyze_metadata_forensic(args.file)
-        if args.json_out:
-            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
-        if args.format == "json":
-            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
-        else:
-            print(f"Score: {analysis.score} ({analysis.band_label})")
-            print(f"Verdict: {analysis.verdict}")
-            print(f"C2PA: {analysis.has_c2pa}, SynthID: {analysis.has_synthid}, Watermark: {analysis.has_watermark}")
-            if analysis.signals:
-                print("Signals:")
-                for signal in analysis.signals:
-                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
+        # D1: "is it fake" answers come from analysis_api — same as scan.
+        options = AnalysisOptions.from_cli_args(args)
+        item = analyze_path(args.file, options, thresholds=load_thresholds(options, warn=thresholds_warning_printer(sys.stderr)))
+        payload = analysis_result_payload(item, command="forensic", sha256=file_sha256(args.file))
+        payload["layer_diagnostics"] = {
+            "provenance_metadata": to_layer_diagnostic("provenance_metadata", analyze_metadata_forensic(args.file).to_json(), layer_label="출처 메타데이터 계층"),
+        }
+        emit(payload, fmt=args.format, json_out=args.json_out)
         return 0
     if args.command == "classify":
-        # Read file and try to extract metadata or text for classification
-        try:
-            import struct
-            data = args.file.read_bytes()
-            metadata = {}
-            result = None
-            
-            # Check if it's a text file
-            text_extensions = {'.txt', '.md', '.py', '.js', '.json', '.csv', '.log'}
-            if args.file.suffix.lower() in text_extensions:
-                # Text file - classify text content
-                text_content = data.decode('utf-8', errors='ignore')
-                result = classify_text_content(text_content)
-            # Simple metadata extraction from PNG/JPEG
-            elif data[:8] == b"\x89PNG\r\n\x1a\n":
-                # PNG - extract text chunks
-                offset = 8
-                while offset + 8 <= len(data):
-                    length = struct.unpack(">I", data[offset:offset+4])[0]
-                    chunk_type = data[offset+4:offset+8]
-                    if chunk_type in (b"tEXt", b"iTXt"):
-                        chunk_data = data[offset+8:offset+8+length]
-                        if b"\x00" in chunk_data:
-                            key, value = chunk_data.split(b"\x00", 1)
-                            metadata[key.decode("latin-1", errors="ignore")] = value.decode("utf-8", errors="ignore")
-                    offset += 12 + length
-                    if chunk_type == b"IEND":
-                        break
-                result = classify_metadata(metadata)
-            elif data[:2] == b"\xff\xd8":
-                # JPEG - simple marker scan
-                metadata["format"] = "jpeg"
-                metadata["size"] = str(len(data))
-                result = classify_metadata(metadata)
-            else:
-                # Unknown format - try metadata
-                result = classify_metadata(metadata)
-            
-            if args.json_out:
-                _write_json_out(args.json_out, json.dumps(result.to_json(), ensure_ascii=False, indent=2) + "\n")
-            if args.format == "json":
-                print(json.dumps(result.to_json(), ensure_ascii=False, indent=2))
-            else:
-                print(f"Category: {result.category}")
-                print(f"Confidence: {result.confidence}")
-                if result.primary_match:
-                    print(f"Primary: {result.primary_match.name} ({result.primary_match.provider})")
-                if result.matches:
-                    print("Matches:")
-                    for match in result.matches:
-                        print(f"  - [{match.confidence:.2f}] {match.name} ({match.provider}): {', '.join(match.evidence)}")
-        except Exception as exc:
-            print(json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2))
-            return 1
+        # D1: the conclusion is the scan verdict; tool attribution is a
+        # reference list of marker matches, never a verdict.
+        options = AnalysisOptions.from_cli_args(args)
+        item = analyze_path(args.file, options, thresholds=load_thresholds(options, warn=thresholds_warning_printer(sys.stderr)))
+        payload = analysis_result_payload(item, command="classify", sha256=file_sha256(args.file))
+        payload["tool_candidates"] = to_layer_diagnostic("tool_attribution", tool_attribution(args.file).to_json(), layer_label="생성 도구 표지 대조")
+        emit(payload, fmt=args.format, json_out=args.json_out)
         return 0
     if args.command == "multimodal":
-        av_sync_result = analyze_av_sync(args.av_sync) if args.av_sync else None
-        analysis = analyze_multimodal(
-            image_score=args.image_score,
-            text_score=args.text_score,
-            audio_score=args.audio_score,
-            video_score=args.video_score,
-            image_source_guess=args.image_source,
-            text_source_guess=args.text_source,
-            audio_source_guess=args.audio_source,
-            video_source_guess=args.video_source,
-            av_sync=av_sync_result,
-        )
-        if args.json_out:
-            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
-        if args.format == "json":
-            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
-        else:
-            print(f"Score: {analysis.score} ({analysis.band_label})")
-            print(f"Verdict: {analysis.verdict}")
-            print(f"Modalities: {', '.join(analysis.modalities_used)}")
-            print(f"Consistency: {analysis.consistency_score:.2f}")
-            print(f"AI Probability: {analysis.overall_ai_probability:.2%}")
-            if analysis.signals:
-                print("Signals:")
-                for signal in analysis.signals:
-                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail} ({signal.source_modality})")
-        return 0
+        return _multimodal_command(args)
     if args.command == "realtime":
         detector = create_realtime_detector(
             window_size=args.window_size,
             alert_threshold=args.alert_threshold,
-            warning_threshold=args.warning_threshold,
         )
-        
-        # Process scores if provided (for testing)
-        if args.scores:
-            scores = [int(part) for part in args.scores.split(",") if part.strip()]
-            for score in scores:
-                state = detector.process_frame(score)
-        else:
-            # Demo mode with sample scores
-            demo_scores = [20, 25, 30, 80, 85, 90, 25, 30, 20]
-            for score in demo_scores:
-                state = detector.process_frame(score)
-        
-        summary = detector.get_summary()
-        
-        if args.json_out:
-            output = {"state": state.to_json(), "summary": summary}
-            _write_json_out(args.json_out, json.dumps(output, ensure_ascii=False, indent=2) + "\n")
-        
-        if args.format == "json":
-            print(json.dumps({"state": state.to_json(), "summary": summary}, ensure_ascii=False, indent=2))
-        else:
-            print(f"Current Score: {state.current_score}")
-            print(f"Average Score: {state.average_score:.1f}")
-            print(f"Band: {state.band_label}")
-            print(f"Frames Processed: {state.frame_count}")
-            print(f"Alerts: {len(state.alerts)}")
-            if state.alerts:
-                print("Recent Alerts:")
-                for alert in state.alerts[-3:]:
-                    print(f"  - [{alert.band}] {alert.message}")
-        
-        return 0
+        scores = [int(part) for part in args.scores.split(",") if part.strip()] if args.scores else []
+        state = detector.idle_state()
+        for score in scores:
+            state = detector.process_frame(score)
+        raw = {**state.to_json(), "summary": detector.get_summary()}
+        if not args.scores:
+            raw["limitations"] = ["--scores가 없어 처리한 프레임 점수가 없습니다."]
+        return emit_layer(args, "realtime", "실시간 프레임 점수 계층", raw)
     if args.command == "rppg":
         analysis = analyze_rppg(args.file, max_frames=args.max_frames)
-        if args.json_out:
-            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
-        if args.format == "json":
-            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
-        else:
-            bpm = f"{analysis.estimated_bpm:.0f}" if analysis.estimated_bpm else "-"
-            snr = f"{analysis.peak_snr:.1f}" if analysis.peak_snr is not None else "-"
-            print(f"Score: {analysis.score} ({analysis.band_label})")
-            print(f"Verdict: {analysis.verdict}")
-            print(f"Pulse: {bpm} bpm, SNR: {snr}, Face frames: {analysis.face_frames}")
-            if analysis.signals:
-                print("Signals:")
-                for signal in analysis.signals:
-                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
-        return 0
+        return emit_layer(args, "rppg", "rPPG 맥박 계층", analysis.to_json(), subject=str(args.file))
     if args.command == "prnu":
         analysis = analyze_prnu(args.file, args.reference)
-        if args.json_out:
-            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
-        if args.format == "json":
-            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
-        else:
-            correlation = f"{analysis.correlation:.3f}" if analysis.correlation is not None else "-"
-            print(f"Score: {analysis.score} ({analysis.band_label})")
-            print(f"Verdict: {analysis.verdict}")
-            print(f"NCC: {correlation}, References: {analysis.reference_images}")
-            if analysis.signals:
-                print("Signals:")
-                for signal in analysis.signals:
-                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
-        return 0
+        return emit_layer(args, "prnu", "PRNU 센서 지문 계층", analysis.to_json(), subject=str(args.file))
     if args.command == "evidence":
         chain = create_evidence_chain(
             args.file,
@@ -680,7 +645,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "api-serve":
         from .api_server import LOCAL_HOSTS
         if args.host not in LOCAL_HOSTS and not args.token:
-            cmd_parsers["api-serve"].error("--token is required when binding a non-localhost host; the API reads local files on request")
+            cmd_parsers["api-serve"].error("localhost가 아닌 주소에 바인딩하려면 --token이 필요합니다 — API는 요청에 따라 로컬 파일을 읽습니다")
         run_api_server(host=args.host, port=args.port, token=args.token, allow_roots=args.allow_root)
         return 0
     if args.command == "batch":
@@ -698,123 +663,73 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0
     if args.command == "explain":
-        signals = []
-        if args.signals:
-            try:
-                signals = json.loads(args.signals)
-            except json.JSONDecodeError:
-                pass
-        explanation = explain_classification(args.score, signals)
-        if args.format == "json":
-            print(json.dumps(explanation.to_json(), ensure_ascii=False, indent=2))
-        else:
-            print(format_explanation_text(explanation))
-        return 0
+        return _explain_command(args)
     if args.command == "agent":
-        text = args.text
-        if args.file:
+        # D1: text is reference grade — the verdict comes from the same text
+        # path as scan (always 판단 불가/참고); the agent markers are a layer
+        # diagnostic beside it.
+        if args.file is None and not (args.text or "").strip():
+            print("오류: --text 또는 --file 중 하나가 필요합니다.", file=sys.stderr)
+            return 2
+        options = AnalysisOptions.from_cli_args(args)
+        thresholds = load_thresholds(options, warn=thresholds_warning_printer(sys.stderr))
+        if args.file is not None:
             text = args.file.read_text(encoding="utf-8", errors="replace")
-        analysis = analyze_agent_content(text=text)
-        if args.json_out:
-            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
-        if args.format == "json":
-            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
+            item = analyze_path(args.file, options, thresholds=thresholds)
+            payload = analysis_result_payload(item, command="agent", sha256=file_sha256(args.file))
         else:
-            print(f"Score: {analysis.score} ({analysis.band_label})")
-            print(f"Verdict: {analysis.verdict}")
-            print(f"Agent Type: {analysis.agent_type}")
-            if analysis.signals:
-                print("Signals:")
-                for signal in analysis.signals:
-                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
+            text = args.text
+            payload = analyze_text_payload(text, options, command="agent", thresholds=thresholds)
+        payload["layer_diagnostics"] = {
+            "agent_markers": to_layer_diagnostic("agent_markers", analyze_agent_content(text=text).to_json(), layer_label="AI 에이전트 문체 계층"),
+        }
+        emit(payload, fmt=args.format, json_out=args.json_out)
         return 0
     if args.command == "3d":
         text = args.text
         if args.file:
             text = args.file.read_text(encoding="utf-8", errors="replace")
         analysis = analyze_3d_content(text=text)
-        if args.json_out:
-            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
-        if args.format == "json":
-            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
-        else:
-            print(f"Score: {analysis.score} ({analysis.band_label})")
-            print(f"Verdict: {analysis.verdict}")
-            print(f"Content Type: {analysis.content_type}")
-            if analysis.signals:
-                print("Signals:")
-                for signal in analysis.signals:
-                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
-        return 0
+        return emit_layer(args, "threed", "3D 생성 마커 계층", analysis.to_json(), subject=str(args.file) if args.file else None)
     if args.command == "avatar":
         analysis = analyze_avatar(file_path=str(args.file) if args.file else None)
-        if args.json_out:
-            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
-        if args.format == "json":
-            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
-        else:
-            print(f"Score: {analysis.score} ({analysis.band_label})")
-            print(f"Verdict: {analysis.verdict}")
-            print(f"Avatar Type: {analysis.avatar_type}")
-            if analysis.signals:
-                print("Signals:")
-                for signal in analysis.signals:
-                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
-        return 0
+        return emit_layer(args, "avatar", "아바타 마커 계층", analysis.to_json(), subject=str(args.file) if args.file else None)
     if args.command == "pixel-analysis":
-        analysis = analyze_pixels(args.file)
-        if args.json_out:
-            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
-        if args.format == "json":
-            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
-        else:
-            print(f"Score: {analysis.score} ({analysis.band_label})")
-            print(f"Verdict: {analysis.verdict}")
-            if analysis.signals:
-                print("Signals:")
-                for signal in analysis.signals:
-                    print(f"  - [{signal.weight}] {signal.title}: {signal.detail}")
-        return 0
+        # D1/D3: gated by the photo/non-photo classifier like scan; raw
+        # pre-screen numbers only.
+        return emit_layer(args, "pixel_prescreen", "픽셀 사전 선별 계층", gated_pixel_layer(args.file), subject=str(args.file))
     if args.command == "ml-classify":
-        # Extract features and classify
+        # Feature-threshold rules (rule_classifier) are unmeasured: layer
+        # diagnostic only (D1).
         try:
             import cv2
             import numpy as np
             from .face import _imread_unicode
-            image = _imread_unicode(args.file)
-            if image is None:
-                print(json.dumps({"error": "이미지를 읽을 수 없습니다"}, ensure_ascii=False, indent=2))
-                return 1
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            # Simple feature extraction
-            features = {
-                "mean": float(np.mean(gray)),
-                "std": float(np.std(gray)),
-                "texture_variance": float(np.var(cv2.Laplacian(gray, cv2.CV_64F))),
-            }
-            classifier = RuleClassifier()
-            result = classifier.predict(features)
-            if args.json_out:
-                _write_json_out(args.json_out, json.dumps(result.to_json(), ensure_ascii=False, indent=2) + "\n")
-            if args.format == "json":
-                print(json.dumps(result.to_json(), ensure_ascii=False, indent=2))
-            else:
-                print(f"Prediction: {result.prediction}")
-                print(f"Confidence: {result.confidence:.2f}")
-                print(f"AI Probability: {result.probability_ai:.2%}")
         except ImportError:
             print(json.dumps({"error": "opencv/numpy가 설치되어 있지 않습니다"}, ensure_ascii=False, indent=2))
             return 1
-        return 0
+        image = _imread_unicode(args.file)
+        if image is None:
+            print(json.dumps({"error": "이미지를 읽을 수 없습니다"}, ensure_ascii=False, indent=2))
+            return 1
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        features = {
+            "mean": float(np.mean(gray)),
+            "std": float(np.std(gray)),
+            "texture_variance": float(np.var(cv2.Laplacian(gray, cv2.CV_64F))),
+        }
+        rule_result = RuleClassifier().predict(features).to_json()
+        # The rule's "ai"/"natural" label and probability_ai are not kept:
+        # an unmeasured weight sum is neither a label nor a probability.
+        raw = {
+            "features": features,
+            "rule_weight_sum": rule_result.get("probability_ai"),
+            "rules_matched": rule_result.get("features_used", []),
+            "limitations": ["특징 임계값 규칙은 측정되지 않았습니다 — rule_weight_sum은 확률이나 결론이 아닙니다."],
+        }
+        return emit_layer(args, "rule_features", "특징 임계값 규칙 계층", raw, subject=str(args.file))
     if args.command == "legal-report":
-        report = analyze_forensic(args.file)
-        legal_text = report.generate_legal_text()
-        if args.output:
-            args.output.write_text(legal_text, encoding="utf-8")
-            print(json.dumps({"output": str(args.output), "report_id": report.report_id}, ensure_ascii=False, indent=2))
-        else:
-            print(legal_text)
-        return 0
+        return _legal_report_command(args)
     if args.command == "perf":
         payload = run_performance_check(
             args.folder,
@@ -838,7 +753,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "web":
         if args.allow_lan and not args.token:
-            cmd_parsers["web"].error("--token is required with --allow-lan; the API reads and analyzes local files on request")
+            cmd_parsers["web"].error("--allow-lan에는 --token이 필요합니다 — API는 요청에 따라 로컬 파일을 읽고 분석합니다")
         run_server(args.host, args.port, default_folder=args.folder, allow_lan=args.allow_lan, token=args.token, models_dir=getattr(args, "models_dir", None), allow_roots=args.allow_root)
         return 0
     if args.command == "doctor":
@@ -854,27 +769,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "faceswap-seam":
         analysis = analyze_faceswap_seam(args.file, thresholds=_load_thresholds_arg(args))
-        if args.json_out:
-            _write_json_out(args.json_out, json.dumps(analysis.to_json(), ensure_ascii=False, indent=2) + "\n")
-        if args.format == "json":
-            print(json.dumps(analysis.to_json(), ensure_ascii=False, indent=2))
-        else:
-            print(f"Score: {analysis.score} ({analysis.band_label})")
-            print(f"Verdict: {analysis.verdict}")
-            print(f"Faces: {analysis.face_count}")
-            if analysis.boundary_residual is not None:
-                print(f"Boundary Seam Laplacian Residual: {analysis.boundary_residual:.2f}")
-            if analysis.noise_discrepancy_ratio is not None:
-                print(f"Noise Variance Ratio: {analysis.noise_discrepancy_ratio:.2f}")
-            if analysis.chrominance_delta is not None:
-                print(f"Chin-Neck Chroma Delta: {analysis.chrominance_delta:.1f}")
-            if analysis.corneal_asymmetry is not None:
-                print(f"Corneal Highlight Asymmetry: {analysis.corneal_asymmetry:.1f}px")
-            if analysis.signals:
-                print("Signals:")
-                for sig in analysis.signals:
-                    print(f"  - [{sig.weight}] {sig.title}: {sig.detail}")
-        return 0
+        return emit_layer(args, "faceswap_seam", "페이스스왑 경계면 계층", analysis.to_json(), subject=str(args.file))
     if args.command == "evidence-statement":
         target = Path(args.target)
         items: list[ScanItem] = []
@@ -885,14 +780,14 @@ def main(argv: list[str] | None = None) -> int:
                 raw_items = data.get("items", [])
                 items = [_scan_item_from_json(row) for row in raw_items if isinstance(row, dict)]
             except Exception as exc:
-                print(f"error: cannot parse scan JSON: {exc}", file=sys.stderr)
+                print(f"오류: 검사 JSON을 해석할 수 없습니다: {exc}", file=sys.stderr)
                 return 2
         elif target.is_dir():
             _, items, _ = scan_folder(target, AnalysisOptions(max_files=100), warn=thresholds_warning_printer(sys.stderr))
         elif target.is_file():
             items = [analyze_path(target, AnalysisOptions())]
         else:
-            print(f"error: target does not exist: {target}", file=sys.stderr)
+            print(f"오류: 대상이 존재하지 않습니다: {target}", file=sys.stderr)
             return 2
 
         statement = build_evidence_statement(
@@ -927,7 +822,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"피고(피의자): {statement.defendant}")
             print(f"증거 목록 ({len(statement.entries)}건):")
             for entry in statement.entries:
-                print(f"  - [{entry.exhibit_no}] {entry.document_name} ({entry.band_label}, {entry.score}점)")
+                # D1: the verdict label only — an uncalibrated score (always 0) is not printed.
+                print(f"  - [{entry.exhibit_no}] {entry.document_name} (결론: {entry.band_label})")
                 print(f"    SHA-256: {entry.sha256}" if entry.sha256 else "    SHA-256: 해시 불가 — 원본 접근 실패")
             if args.pdf_out:
                 print(f"PDF 저장 완료: {args.pdf_out}")
@@ -942,12 +838,12 @@ def main(argv: list[str] | None = None) -> int:
             return _vendor_weights_pin(args)
         _modes =[bool(args.fetch), bool(args.verify), bool(args.bundle_to), bool(args.install), bool(args.manifest_out)]
         if sum(_modes) > 1:
-            print("error: vendor-weights flags are mutually exclusive — choose one of --fetch/--verify/--bundle-to/--install/--manifest-out", file=sys.stderr)
+            print("오류: vendor-weights 옵션은 함께 쓸 수 없습니다 — --fetch/--verify/--bundle-to/--install/--manifest-out 중 하나만 지정하십시오", file=sys.stderr)
             return 2
         if args.install:
             target = args.to or args.models_dir
             if target is None:
-                print("error: --install needs a target — pass --to DIR or --models-dir DIR (or set DEEPFAKE_LENS_MODELS_DIR)", file=sys.stderr)
+                print("오류: --install에는 대상이 필요합니다 — --to DIR 또는 --models-dir DIR을 지정하십시오 (또는 DEEPFAKE_LENS_MODELS_DIR)", file=sys.stderr)
                 return 2
             res = install_bundle(args.install, target)
             print(json.dumps(res, ensure_ascii=False, indent=2))
@@ -957,7 +853,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(fetch_res, ensure_ascii=False, indent=2))
             return 0 if fetch_res["status"] in {"ok", "skipped"} else 1
         if args.offline and not args.verify and not args.bundle_to:
-            print("error: --offline only makes sense with --fetch/--verify/--bundle-to", file=sys.stderr)
+            print("오류: --offline은 --fetch/--verify/--bundle-to와 함께만 쓸 수 있습니다", file=sys.stderr)
             return 2
         if args.bundle_to:
             manifest_file = bundle_offline_weights(
@@ -1008,21 +904,21 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.max_files < 1:
-        cmd_parsers["scan"].error("--max-files must be at least 1")
+        cmd_parsers["scan"].error("--max-files는 1 이상이어야 합니다")
     if args.text_bytes < 1:
-        cmd_parsers["scan"].error("--text-bytes must be at least 1")
+        cmd_parsers["scan"].error("--text-bytes는 1 이상이어야 합니다")
     if args.metadata_bytes < 1:
-        cmd_parsers["scan"].error("--metadata-bytes must be at least 1")
+        cmd_parsers["scan"].error("--metadata-bytes는 1 이상이어야 합니다")
     if args.pixel_max_side < 16:
-        cmd_parsers["scan"].error("--pixel-max-side must be at least 16")
+        cmd_parsers["scan"].error("--pixel-max-side는 16 이상이어야 합니다")
     if args.workers < 1:
-        cmd_parsers["scan"].error("--workers must be at least 1")
+        cmd_parsers["scan"].error("--workers는 1 이상이어야 합니다")
     if args.max_file_bytes is not None and args.max_file_bytes < 1:
-        cmd_parsers["scan"].error("--max-file-bytes must be at least 1")
+        cmd_parsers["scan"].error("--max-file-bytes는 1 이상이어야 합니다")
     if args.heatmaps and args.pixel != "deep":
-        cmd_parsers["scan"].error("--heatmaps requires --pixel deep")
+        cmd_parsers["scan"].error("--heatmaps에는 --pixel deep이 필요합니다")
     if args.model_path and not args.model_path.exists():
-        cmd_parsers["scan"].error("--model-path does not exist")
+        cmd_parsers["scan"].error("--model-path가 존재하지 않습니다")
     # G7: CLI, GUI and API all go through analysis_api. The default engine
     # set is every runtime profile in the models dir (--models-dir or the
     # packaged/$DEEPFAKE_LENS_MODELS_DIR one) — the adapter filters by
@@ -1039,7 +935,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Analyzing {args.folder} with workers={args.workers}, pixel={args.pixel}...", file=sys.stderr)
         summary, items, thresholds = scan_folder(args.folder, options, warn=thresholds_warning_printer(sys.stderr))
     except OSError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        print(f"오류: {exc}", file=sys.stderr)
         return 2
     if args.progress:
         print(f"Done: analyzed={summary.analyzed}, cached={summary.cached}, total={summary.total}", file=sys.stderr)

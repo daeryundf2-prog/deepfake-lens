@@ -78,7 +78,7 @@ class PreScreenTierTest(unittest.TestCase):
         result = analyze_pixels(Path("/nonexistent/image.png"))
         self.assertIsInstance(result, QuickPixelAnalysis)
         self.assertEqual(result.analysis_tier, "pre-screen")
-        self.assertEqual(result.band, "unknown")
+        self.assertEqual(result.reference_band, "unavailable")  # D1: layer modules report reference_band/reference_note, never a band
 
     def test_pre_screen_label_survives_json(self) -> None:
         result = analyze_pixels(Path("/nonexistent/image.png"))

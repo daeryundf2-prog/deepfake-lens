@@ -127,8 +127,11 @@ class MultimodalScoreTest(unittest.TestCase):
         self.assertTrue(any(s.source_modality == "cross-modal" for s in result.signals))
 
     def test_consistent_high_scores_still_high(self) -> None:
+        # D1: agreement of high raw inputs keeps the mean (no cross-modal
+        # bonus); the result is a reference number, never a "high" band.
         result = analyze_multimodal(image_score=80, text_score=75, audio_score=78)
-        self.assertEqual(result.band, "high")
+        self.assertEqual(result.score, 78)
+        self.assertEqual(result.reference_band, "reference")
 
 
 def _classification_result(signals: list[EvidenceSignal], confidence: SourceConfidence) -> ClassificationResult:

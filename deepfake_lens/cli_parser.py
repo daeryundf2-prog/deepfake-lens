@@ -174,7 +174,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     video_parser.add_argument("--extract", action="store_true", help="run ffmpeg commands after writing the plan")
     video_parser.add_argument("--extract-limit", type=int)
 
-    audio_parser = subparsers.add_parser("audio", help="analyze audio files for AI generation or voice cloning")
+    audio_parser = subparsers.add_parser("audio", help="audio acoustic layer — layer diagnostic: unmeasured reference numbers, no verdict (use scan)")
     audio_parser.add_argument("file", type=Path, help="audio file to analyze")
     audio_parser.add_argument("--segment-seconds", type=int, default=30, help="maximum seconds to analyze (default: 30)")
     audio_parser.add_argument("--model-path", type=Path, help="external audio model profile (default: auto-discover models/aasist-runtime.json)")
@@ -182,12 +182,12 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     audio_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     audio_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    face_parser = subparsers.add_parser("face", help="analyze images for face manipulation")
+    face_parser = subparsers.add_parser("face", help="face manipulation layer — layer diagnostic: unmeasured reference numbers, no verdict (use scan)")
     face_parser.add_argument("file", type=Path, help="image file to analyze")
     face_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     face_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    video_analysis_parser = subparsers.add_parser("video-analysis", help="analyze video temporal consistency")
+    video_analysis_parser = subparsers.add_parser("video-analysis", help="video temporal-consistency layer — layer diagnostic: unmeasured reference numbers, no verdict (use scan)")
     video_analysis_parser.add_argument("file", type=Path, help="video file to analyze")
     video_analysis_parser.add_argument("--frame-rate", type=float, default=1.0, help="frame sample rate (default: 1.0 fps)")
     video_analysis_parser.add_argument("--max-frames", type=int, default=100, help="maximum frames to analyze (default: 100)")
@@ -195,17 +195,17 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     video_analysis_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     video_analysis_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    inpaint_parser = subparsers.add_parser("inpaint", help="analyze images for inpainting or partial manipulation")
+    inpaint_parser = subparsers.add_parser("inpaint", help="inpainting / partial-edit layer — layer diagnostic: unmeasured reference numbers, no verdict (use scan)")
     inpaint_parser.add_argument("file", type=Path, help="image file to analyze")
     inpaint_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     inpaint_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    text_advanced_parser = subparsers.add_parser("text-advanced", help="advanced text analysis for AI generation detection")
+    text_advanced_parser = subparsers.add_parser("text-advanced", help="text statistics layer — layer diagnostic: unmeasured reference numbers, no verdict (use scan)")
     text_advanced_parser.add_argument("file", type=Path, help="text file to analyze")
     text_advanced_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     text_advanced_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    compare_parser = subparsers.add_parser("compare", help="compare two files for same-speaker or same-author likelihood")
+    compare_parser = subparsers.add_parser("compare", help="same-speaker / same-author similarity — layer diagnostic: unmeasured reference numbers, no verdict (use scan)")
     compare_parser.add_argument("file_a", type=Path, help="first file (audio pair or text/document pair)")
     compare_parser.add_argument("file_b", type=Path, help="second file")
     compare_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
@@ -220,18 +220,19 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     watermark_parser.add_argument("--gamma", type=float, default=0.25, help="green-list fraction used at generation")
     watermark_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
 
-    forensic_parser = subparsers.add_parser("forensic", help="analyze metadata for C2PA, SynthID, and provenance signals")
+    forensic_parser = subparsers.add_parser("forensic", help="three-verdict result (same path as scan) plus the provenance-metadata layer diagnostic")
     forensic_parser.add_argument("file", type=Path, help="file to analyze")
     forensic_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     forensic_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    classify_parser = subparsers.add_parser("classify", help="classify which AI tool generated the content")
+    classify_parser = subparsers.add_parser("classify", help="three-verdict result (same path as scan) plus reference AI-tool marker candidates")
     classify_parser.add_argument("file", type=Path, help="file to analyze")
     classify_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     classify_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    multimodal_parser = subparsers.add_parser("multimodal", help="combine multiple modality analyses into unified assessment")
-    multimodal_parser.add_argument("--image-score", type=int, help="image analysis score")
+    multimodal_parser = subparsers.add_parser("multimodal", help="combined three-verdict result for several files (score inputs are a reference-only layer diagnostic)")
+    multimodal_parser.add_argument("files", type=Path, nargs="*", help="files to analyze through the scan path; the combined verdict follows the decision-rule order")
+    multimodal_parser.add_argument("--image-score", type=int, help="image raw score (reference only, never a conclusion)")
     multimodal_parser.add_argument("--text-score", type=int, help="text analysis score")
     multimodal_parser.add_argument("--audio-score", type=int, help="audio analysis score")
     multimodal_parser.add_argument("--video-score", type=int, help="video analysis score")
@@ -243,21 +244,21 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     multimodal_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     multimodal_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    realtime_parser = subparsers.add_parser("realtime", help="run realtime deepfake detection")
+    realtime_parser = subparsers.add_parser("realtime", help="moving average of uncalibrated frame scores (layer diagnostic, no verdict)")
     realtime_parser.add_argument("--window-size", type=int, default=30, help="moving average window size (default: 30)")
-    realtime_parser.add_argument("--alert-threshold", type=int, default=67, help="alert threshold (default: 67)")
-    realtime_parser.add_argument("--warning-threshold", type=int, default=35, help="warning threshold (default: 35)")
+    realtime_parser.add_argument("--alert-threshold", type=int, default=None, help="optional operator threshold whose crossings are recorded (no default: the former 67 cutoff was never measured)")
+    realtime_parser.add_argument("--warning-threshold", type=int, default=None, help="deprecated and ignored (the former 'medium' band no longer exists)")
     realtime_parser.add_argument("--scores", type=str, help="comma-separated scores to process (for testing)")
     realtime_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     realtime_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    rppg_parser = subparsers.add_parser("rppg", help="estimate cardiac pulse from face video (CHROM rPPG)")
+    rppg_parser = subparsers.add_parser("rppg", help="rPPG pulse layer (CHROM) — layer diagnostic: unmeasured reference numbers, no verdict (use scan)")
     rppg_parser.add_argument("file", type=Path, help="video file to analyze")
     rppg_parser.add_argument("--max-frames", type=int, default=600, help="maximum face samples to collect (default: 600)")
     rppg_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     rppg_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    prnu_parser = subparsers.add_parser("prnu", help="correlate an image against a sensor fingerprint")
+    prnu_parser = subparsers.add_parser("prnu", help="PRNU sensor-fingerprint correlation layer — layer diagnostic: unmeasured reference numbers, no verdict (use scan)")
     prnu_parser.add_argument("file", type=Path, help="target image to check")
     prnu_parser.add_argument("--reference", type=Path, action="append", required=True, help="reference image from the same device (repeat 3+ times)")
     prnu_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
@@ -272,48 +273,58 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     api_parser.add_argument("--host", type=str, default="127.0.0.1", help="host to bind")
     api_parser.add_argument("--port", type=int, default=8765, help="port to listen on")
     api_parser.add_argument("--token", type=str, help="require an X-API-Token header on /api routes (mandatory for non-localhost hosts)")
-    api_parser.add_argument("--allow-root", type=Path, action="append", default=[], help="additional read root the API may read from (repeatable); requests for paths outside --folder/--allow-root get 403")
+    api_parser.add_argument("--allow-root", type=Path, action="append", default=[], help="read root the API may read from (repeatable); requests for paths outside every --allow-root get 403")
 
     batch_parser = subparsers.add_parser("batch", help="process files in batch")
     batch_parser.add_argument("folder", type=Path, help="folder to process")
     batch_parser.add_argument("--workers", type=int, default=4, help="number of workers")
     batch_parser.add_argument("--output", type=Path, help="output results file")
 
-    explain_parser = subparsers.add_parser("explain", help="explain classification decision")
-    explain_parser.add_argument("--score", type=int, required=True, help="classification score")
-    explain_parser.add_argument("--signals", type=str, help="JSON signals array")
+    explain_parser = subparsers.add_parser("explain", help="explain which decision rule produced a file's verdict")
+    explain_parser.add_argument("file", type=Path, nargs="?", help="file to analyze through the scan path and explain")
+    explain_parser.add_argument("--score", type=int, help="deprecated: a raw score alone cannot be explained (layer diagnostic)")
+    explain_parser.add_argument("--signals", type=str, help="deprecated: JSON signals array echoed into the --score diagnostic")
     explain_parser.add_argument("--format", choices=["text", "json"], default="text", help="output format")
 
-    agent_parser = subparsers.add_parser("agent", help="analyze content for AI agent generation")
+    agent_parser = subparsers.add_parser("agent", help="three-verdict text result (reference grade) plus the AI-agent marker layer diagnostic")
     agent_parser.add_argument("--text", type=str, help="text to analyze")
     agent_parser.add_argument("--file", type=Path, help="file to analyze")
     agent_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     agent_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    threed_parser = subparsers.add_parser("3d", help="analyze content for 3D AI generation")
+    threed_parser = subparsers.add_parser("3d", help="3D-generation marker layer — layer diagnostic: unmeasured reference numbers, no verdict (use scan)")
     threed_parser.add_argument("--file", type=Path, help="file to analyze")
     threed_parser.add_argument("--text", type=str, help="text to analyze")
     threed_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     threed_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    avatar_parser = subparsers.add_parser("avatar", help="analyze content for AI avatar generation")
+    avatar_parser = subparsers.add_parser("avatar", help="AI-avatar marker layer — layer diagnostic: unmeasured reference numbers, no verdict (use scan)")
     avatar_parser.add_argument("--file", type=Path, help="file to analyze")
     avatar_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     avatar_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    pixel_parser = subparsers.add_parser("pixel-analysis", help="analyze image pixels for AI generation")
+    pixel_parser = subparsers.add_parser("pixel-analysis", help="pixel pre-screen layer behind the photo gate — layer diagnostic: unmeasured reference numbers, no verdict (use scan)")
     pixel_parser.add_argument("file", type=Path, help="image file to analyze")
     pixel_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     pixel_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    ml_parser = subparsers.add_parser("ml-classify", help="classify image using feature-threshold rules")
+    ml_parser = subparsers.add_parser("ml-classify", help="feature-threshold rule layer — layer diagnostic: unmeasured reference numbers, no verdict (use scan)")
     ml_parser.add_argument("file", type=Path, help="image file to analyze")
     ml_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     ml_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
-    legal_parser = subparsers.add_parser("legal-report", help="generate legal forensic report")
+    legal_parser = subparsers.add_parser("legal-report", help="legal forensic report built from the scan result (verdict, evidence, coverage)")
     legal_parser.add_argument("file", type=Path, help="file to analyze")
-    legal_parser.add_argument("--output", type=Path, help="output report file")
+    legal_parser.add_argument("--output", type=Path, help="write the Korean report text to this file")
+    legal_parser.add_argument("--json-out", type=Path, help="write the signed report JSON (verify with verify-report)")
+    legal_parser.add_argument("--key-file", type=Path, help="report signing key file (default: DEEPFAKE_LENS_REPORT_KEY env var); without a key the report says 서명 없음")
+    legal_parser.add_argument("--analyst-id", type=str, default="system", help="analyst identifier recorded in the report")
+    legal_parser.add_argument("--format", choices=["text", "json"], default="text", help="stdout format")
+
+    verify_parser = subparsers.add_parser("verify-report", help="verify a signed report JSON (exit 0 검증됨, 1 변조됨, 2 키 ID 불일치, 3 서명 없음, 4 사용 오류)")
+    verify_parser.add_argument("report", type=Path, help="signed report JSON (scan --json-out --sign, legal-report --json-out, evidence-statement --json-out, …)")
+    verify_parser.add_argument("--key-file", type=Path, help="verification key file (default: DEEPFAKE_LENS_REPORT_KEY env var)")
+    verify_parser.add_argument("--format", choices=["text", "json"], default="text", help="stdout format")
 
     perf_parser = subparsers.add_parser("perf", help="measure scan throughput and cache/hash behavior")
     perf_parser.add_argument("folder", type=Path)
@@ -345,7 +356,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     doctor_parser.add_argument("--json-out", type=Path, help="write the diagnostic report as JSON")
     doctor_parser.add_argument("--models-dir", type=Path, help="models directory to diagnose (default: packaged models/ or $DEEPFAKE_LENS_MODELS_DIR)")
 
-    faceswap_parser = subparsers.add_parser("faceswap-seam", help="analyze localized face-swap boundary seams, Poisson feathering, and sensor noise mismatch")
+    faceswap_parser = subparsers.add_parser("faceswap-seam", help="face-swap boundary seam layer — layer diagnostic: unmeasured reference numbers, no verdict (use scan)")
     faceswap_parser.add_argument("--thresholds", type=Path, help="layer-threshold profile JSON overriding heuristic cutoffs")
     faceswap_parser.add_argument("file", type=Path, help="image file to analyze")
     faceswap_parser.add_argument("--format", choices=["table", "json"], default="table", help="output format")
@@ -399,7 +410,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
         "prnu": prnu_parser, "evidence": evidence_parser, "api-serve": api_parser,
         "batch": batch_parser, "explain": explain_parser, "agent": agent_parser,
         "3d": threed_parser, "avatar": avatar_parser, "pixel-analysis": pixel_parser,
-        "ml-classify": ml_parser, "legal-report": legal_parser, "perf": perf_parser,
+        "ml-classify": ml_parser, "legal-report": legal_parser, "verify-report": verify_parser, "perf": perf_parser,
         "release": release_parser, "security": security_parser, "web": web_parser,
         "doctor": doctor_parser, "faceswap-seam": faceswap_parser,
         "evidence-statement": evidence_stmt_parser, "vendor-weights": vendor_parser,
