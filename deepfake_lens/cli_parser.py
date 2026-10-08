@@ -30,7 +30,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     scan_parser.add_argument("--pixel", choices=sorted(SUPPORTED_PIXEL_MODES), default="off", help="run local pixel-level experts for images")
     scan_parser.add_argument("--pixel-max-side", type=int, default=DEFAULT_PIXEL_MAX_SIDE, help=f"maximum sampled side for pixel analysis (default: {DEFAULT_PIXEL_MAX_SIDE})")
     scan_parser.add_argument("--heatmaps", action="store_true", help="write PNG heatmaps for deep pixel localization")
-    scan_parser.add_argument("--heatmap-dir", type=Path, help="directory for heatmaps (default: folder/deepfake_lens_heatmaps)")
+    scan_parser.add_argument("--heatmap-dir", type=Path, help="directory for heatmaps (default: $DEEPFAKE_LENS_HEATMAP_DIR or ~/.cache/deepfake-lens/heatmaps/<folder key> — never inside the scanned evidence folder)")
     scan_parser.add_argument("--model-path", type=Path, help="external model profile, checkpoint, or profile directory (default: auto-discover bundled image+audio engine profiles)")
     scan_parser.add_argument("--no-default-engine", action="store_true", help="ignore the bundled models/*-runtime.json default-engine profiles")
     scan_parser.add_argument("--fusion-profile", type=Path, help="optional score-fusion profile")

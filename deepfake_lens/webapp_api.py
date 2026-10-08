@@ -44,7 +44,7 @@ from .analysis_api import (
     scan_payload,
 )
 from .analysis_api import default_engine_profiles as _engine_profiles_in
-from .core import SCAN_JSON_SCHEMA_VERSION, BatchScanSummary, DEFAULT_METADATA_BYTES, _scan_item_from_json, summarize  # noqa: F401
+from .core import SCAN_JSON_SCHEMA_VERSION, BatchScanSummary, DEFAULT_METADATA_BYTES, _scan_item_from_json, is_default_heatmap_output, summarize  # noqa: F401
 from .datasets import is_negative_label, is_positive_label
 from .reports import write_html_report
 
@@ -388,7 +388,9 @@ def _heatmap_payload(query: str) -> tuple[int, bytes, str]:
     if not path_value:
         return 400, b"missing path", "missing"
     path = Path(path_value).expanduser().resolve()
-    if path.suffix.lower() != ".png" or not _read_root_allows(path, root_value):
+    # Heatmaps live in the tool-owned output root (never in the evidence
+    # folder, R-IN-1); those are served without a read root.
+    if path.suffix.lower() != ".png" or not (_read_root_allows(path, root_value) or is_default_heatmap_output(path)):
         return 403, b"forbidden", "forbidden"
     try:
         data = path.read_bytes()
@@ -912,7 +914,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
             resolved = Path(path_text).expanduser().resolve()
         except OSError:
             return False
-        return any(_is_within(resolved, r) for r in roots)
+        return any(_is_within(resolved, r) for r in roots) or is_default_heatmap_output(resolved)
 
     # A posted heatmap_path outside the roots is a probe for host files:
     # refuse the whole report (403) instead of rendering around it.

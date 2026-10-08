@@ -1,4 +1,12 @@
-"""QA-IN-2 / QA-IN-4 — deterministic rescans and a content-keyed scan cache (WP-G: G11, G32).
+"""QA-IN-1 / QA-IN-2 / QA-IN-4 — read-only evidence, deterministic rescans and a
+content-keyed scan cache (WP-G: G11, G31, G32; WP-J).
+
+QA-IN-1 scans one sample of every supported format (``samples.py``) in a
+folder made read-only (0o555 / files 0o444) with every analysis layer on and
+every report written elsewhere, then checks that no byte, mtime, mode or
+directory entry in the evidence folder changed. Tests run as root in some
+CI containers, where 0o555 does not stop a write — so the assertion is on
+the folder's contents, not on a PermissionError.
 
 Runs without network weights (``--no-default-engine``). QA-IN-2 crosses a
 real process boundary (``python -m deepfake_lens scan`` in a subprocess) and
@@ -27,6 +35,8 @@ import deepfake_lens
 from deepfake_lens import core
 from deepfake_lens.core import scan_directory
 from deepfake_lens.scan_cache import _iter_files
+
+from .samples import UNMADE_REASONS, supported_extensions, write_samples
 
 REPO_ROOT = Path(deepfake_lens.__file__).resolve().parent.parent
 # Keys whose values are wall-clock timestamps (stripped before comparing).
@@ -101,6 +111,122 @@ def _fresh_package_import() -> Any:
         for name in [name for name in sys.modules if ours(name)]:
             del sys.modules[name]
         sys.modules.update(saved)
+
+
+def _snapshot(folder: Path) -> dict[str, tuple[str, int, int, int]]:
+    """relpath -> (sha256, size, mtime_ns, mode) for every entry, dirs included."""
+    entries: dict[str, tuple[str, int, int, int]] = {}
+    for dirpath, dirnames, filenames in os.walk(folder):
+        for name in dirnames + filenames:
+            path = Path(dirpath) / name
+            stat = path.lstat()
+            digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() and not path.is_symlink() else "dir"
+            entries[path.relative_to(folder).as_posix()] = (digest, stat.st_size if digest != "dir" else 0, stat.st_mtime_ns, stat.st_mode)
+    root = folder.stat()
+    entries["."] = ("dir", 0, root.st_mtime_ns, root.st_mode)
+    return entries
+
+
+def _make_read_only(folder: Path) -> None:
+    for dirpath, dirnames, filenames in os.walk(folder):
+        for name in filenames:
+            os.chmod(Path(dirpath) / name, 0o444)
+        for name in dirnames:
+            os.chmod(Path(dirpath) / name, 0o555)
+    os.chmod(folder, 0o555)
+
+
+def _make_writable(folder: Path) -> None:
+    os.chmod(folder, 0o755)
+    for dirpath, dirnames, filenames in os.walk(folder):
+        for name in dirnames:
+            os.chmod(Path(dirpath) / name, 0o755)
+        for name in filenames:
+            os.chmod(Path(dirpath) / name, 0o644)
+
+
+class QaIn1ReadOnlyEvidenceTest(unittest.TestCase):
+    """QA-IN-1: read-only evidence folder, every supported format, every layer on."""
+
+    def test_full_scan_leaves_read_only_folder_untouched(self) -> None:
+        """QA-IN-1: 지원 형식 전부의 샘플 1개씩을 읽기 전용 폴더에 두고 전체 검사 → 모든 파일의 검사 전후 SHA-256 동일, mtime 불변, 폴더에 새 파일 0개.
+
+        "전체 검사" = CLI scan with --recursive --dedupe --pixel deep
+        --deep-signals --heatmaps, a cache, a hash DB and JSON/CSV/HTML/PDF/
+        evidence-statement reports — all outputs outside the evidence folder.
+        Formats no encoder here can write are named with a reason from the
+        closed set in samples.UNMADE_REASONS, never silently dropped.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            evidence = base / "evidence"
+            made, unmade = write_samples(evidence)
+            self.assertEqual(set(made) | set(unmade), supported_extensions())
+            self.assertTrue(set(unmade.values()) <= UNMADE_REASONS, unmade)
+            # Always synthesizable (stdlib only): the floor of this test.
+            self.assertTrue({".png", ".txt", ".md", ".wav", ".docx", ".pdf", ".zip", ".tar"} <= set(made))
+            out = base / "out"
+            out.mkdir()
+            _make_read_only(evidence)
+            try:
+                before = _snapshot(evidence)
+                code, payload = self._full_scan(evidence, out)
+                after = _snapshot(evidence)
+            finally:
+                _make_writable(evidence)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(sorted(after), sorted(before), "the scan created or removed entries in the evidence folder")
+        for name, (digest, size, mtime_ns, mode) in before.items():
+            with self.subTest(entry=name):
+                self.assertEqual(after[name][0], digest, "SHA-256 changed")
+                self.assertEqual(after[name][1], size)
+                self.assertEqual(after[name][2], mtime_ns, "mtime changed")
+                self.assertEqual(after[name][3], mode, "permissions changed")
+        statuses = {item["path"]: item["status"] for item in payload["items"]}
+        for ext, path in made.items():
+            with self.subTest(sample=ext):
+                self.assertIn(path.name, statuses, f"{path.name} was not scanned")
+                # Every format is examined itself (samples are distinct, so
+                # --dedupe marks none of them as a twin).
+                self.assertIn(statuses[path.name], {"analyzed", "expanded"})
+        hashed = {item["path"]: item.get("sha256") for item in payload["items"] if "::" not in item["path"]}
+        for name, (digest, *_rest) in before.items():
+            if digest != "dir" and hashed.get(name):
+                self.assertEqual(hashed[name], digest, f"reported sha256 of {name} differs from the file")
+
+    def _full_scan(self, evidence: Path, out: Path) -> tuple[int, dict[str, Any]]:
+        from deepfake_lens.cli import main
+
+        args = [
+            "scan", str(evidence), "--recursive", "--dedupe", "--pixel", "deep", "--deep-signals", "--heatmaps",
+            "--cache", str(out / "cache.json"), "--hash-db", str(out / "hashes.json"),
+            "--json-out", str(out / "scan.json"), "--csv-out", str(out / "scan.csv"),
+            "--html-out", str(out / "scan.html"), "--evidence-statement-out", str(out / "statement.md"),
+            "--format", "json", "--max-files", "500",
+        ]
+        env = {key: value for key, value in os.environ.items() if key != "DEEPFAKE_LENS_REPORT_KEY"}
+        # Heatmaps take the default (no --heatmap-dir) path logic; only the
+        # tool-owned root is redirected so the test does not write to $HOME.
+        env["DEEPFAKE_LENS_HEATMAP_DIR"] = str(out / "heatmaps")
+        with patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            code = main(args)
+        return code, json.loads((out / "scan.json").read_text(encoding="utf-8"))
+
+    def test_default_heatmap_dir_is_outside_the_evidence_folder(self) -> None:
+        """QA-IN-1 (heatmaps): without --heatmap-dir heatmaps go to the tool-owned root, never into the folder."""
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = Path(tmp) / "evidence"
+            env = {key: value for key, value in os.environ.items() if key != core.HEATMAP_DIR_ENV}
+            with patch.dict(os.environ, env, clear=True):
+                target = core._heatmap_path_for(evidence / "sub" / "a.png", root=evidence, heatmap_dir=None)
+                self.assertTrue(core.is_default_heatmap_output(target))
+            self.assertFalse(target.resolve().is_relative_to(evidence.resolve()))
+            self.assertTrue(target.is_relative_to(Path.home() / ".cache" / "deepfake-lens" / "heatmaps"))
+            other = core._heatmap_path_for(Path(tmp) / "other" / "sub" / "a.png", root=Path(tmp) / "other", heatmap_dir=None)
+            self.assertNotEqual(target, other, "two case folders must not share heatmap files")
+            self.assertFalse(core.is_default_heatmap_output(evidence / "a.heatmap.png"))
 
 
 class QaIn2DeterministicRescanTest(unittest.TestCase):

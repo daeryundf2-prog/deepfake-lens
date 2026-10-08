@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import logging
@@ -1522,14 +1523,48 @@ def build_classification_result(
     )
 
 
+# R-IN-1 (QA-IN-1): an analysis never writes into the evidence folder. Heatmaps
+# without an explicit --heatmap-dir go to a tool-owned output root (one
+# subfolder per scanned folder), not to ``<folder>/deepfake_lens_heatmaps``.
+HEATMAP_DIR_ENV = "DEEPFAKE_LENS_HEATMAP_DIR"
+HEATMAP_SUFFIX = ".heatmap.png"
+# Hex chars of sha256(resolved folder) naming the per-folder subdirectory:
+# 64 bits keeps distinct case folders apart without unwieldy paths.
+HEATMAP_FOLDER_KEY_CHARS = 16
+
+
+def default_heatmap_root() -> Path:
+    """Tool-owned heatmap output root: ``$DEEPFAKE_LENS_HEATMAP_DIR`` or
+    ``~/.cache/deepfake-lens/heatmaps``. Never inside the evidence."""
+    env = os.environ.get(HEATMAP_DIR_ENV)
+    return Path(env).expanduser() if env else Path.home() / ".cache" / "deepfake-lens" / "heatmaps"
+
+
+def is_default_heatmap_output(path: Path | str) -> bool:
+    """True for a ``*.heatmap.png`` under the tool-owned heatmap root —
+    the web server may serve these without a read root (they are tool
+    output, not caller-chosen files)."""
+    try:
+        resolved = Path(path).expanduser().resolve()
+        resolved.relative_to(default_heatmap_root().expanduser().resolve())
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return resolved.name.endswith(HEATMAP_SUFFIX)
+
+
 def _heatmap_path_for(path: Path, *, root: Path | None, heatmap_dir: Path | None) -> Path:
-    output_root = heatmap_dir or path.parent / "deepfake_lens_heatmaps"
+    if heatmap_dir is not None:
+        output_root = heatmap_dir
+    else:
+        folder = str(Path(root or path.parent).expanduser().resolve())
+        key = hashlib.sha256(folder.encode("utf-8")).hexdigest()[:HEATMAP_FOLDER_KEY_CHARS]
+        output_root = default_heatmap_root() / key
     try:
         relative = path.relative_to(root) if root else Path(path.name)
     except ValueError:
         relative = Path(path.name)
     safe_parts = [part.replace("/", "_").replace("\\", "_") for part in relative.parts]
-    output_name = "__".join(safe_parts) + ".heatmap.png"
+    output_name = "__".join(safe_parts) + HEATMAP_SUFFIX
     return output_root / output_name
 
 

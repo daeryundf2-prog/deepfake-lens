@@ -219,6 +219,12 @@ class _ServerFixture(unittest.TestCase):
         self.outside = base / "elsewhere"
         self.root.mkdir()
         self.outside.mkdir()
+        # Heatmaps go to the tool-owned output root (R-IN-1), kept in the
+        # temp dir here instead of ~/.cache.
+        self.heatmaps = base / "heatmap-root"
+        env = patch.dict(os.environ, {"DEEPFAKE_LENS_HEATMAP_DIR": str(self.heatmaps)})
+        env.start()
+        self.addCleanup(env.stop)
         (self.root / "memo.txt").write_text("사건 메모", encoding="utf-8")
         _write_secret_png(self.outside / "secret.png")
         (self.outside / "secret.txt").write_bytes(SECRET)
@@ -262,7 +268,10 @@ class QaSys7ReadRootConfinementTest(_ServerFixture):
         _, items = scan_directory(self.root, pixel_mode="deep", heatmaps=True)
         rows = [item.to_json() for item in items]
         with_heatmap = [row for row in rows if (((row.get("result") or {}).get("pixel_analysis") or {}).get("heatmap_path"))]  # type: ignore[union-attr]
-        self.assertTrue(with_heatmap, "fixture must produce a heatmap under the root")
+        self.assertTrue(with_heatmap, "fixture must produce a heatmap")
+        for row in with_heatmap:
+            heatmap = Path(row["result"]["pixel_analysis"]["heatmap_path"])  # type: ignore[index]
+            self.assertTrue(heatmap.is_relative_to(self.heatmaps), "heatmaps never land in the evidence folder (R-IN-1)")
         return rows
 
     def test_scan_of_filesystem_root_is_403(self) -> None:
@@ -316,6 +325,23 @@ class QaSys7ReadRootConfinementTest(_ServerFixture):
         self.assertEqual(status, 200)
         self.assertIn(b"data:image/png;base64", body)
         self.assertNoSecret(body)
+
+    def test_tool_owned_heatmap_is_served_but_nothing_else_there(self) -> None:
+        """QA-SYS-7 (heatmap root): /api/heatmap serves a tool-written *.heatmap.png
+        from the heatmap output root; any other file placed there, and the same
+        name outside it, stays 403."""
+        rows = self._scan_rows_with_heatmap()
+        heatmap = next(Path(row["result"]["pixel_analysis"]["heatmap_path"]) for row in rows  # type: ignore[index]
+                       if ((row.get("result") or {}).get("pixel_analysis") or {}).get("heatmap_path"))  # type: ignore[union-attr]
+        status, body = self.request(f"/api/heatmap?path={heatmap}&root={self.root}")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, heatmap.read_bytes())
+        planted = heatmap.parent / "planted.png"
+        planted.write_bytes((self.outside / "secret.png").read_bytes())
+        self.assertDenied(*self.request(f"/api/heatmap?path={planted}&root={self.root}"))
+        renamed = self.outside / heatmap.name
+        renamed.write_bytes((self.outside / "secret.png").read_bytes())
+        self.assertDenied(*self.request(f"/api/heatmap?path={renamed}&root={self.root}"))
 
     def test_report_does_not_hash_outside_files(self) -> None:
         """QA-SYS-7: an item path outside the roots is never read — its sha256 stays null."""

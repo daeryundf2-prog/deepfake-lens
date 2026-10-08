@@ -127,7 +127,7 @@ Pixel-level analysis is opt-in:
 - `--pixel off` keeps the default metadata-first scanner.
 - `--pixel fast` adds local pixel, spectral/statistical, reconstruction, retrieval, compositing, fuzzy-fusion, and external-baseline adapter experts.
 - `--pixel deep` also adds SAFE-style local manipulation/localization.
-- `--heatmaps` with `--pixel deep` writes small PNG heatmaps for localization review.
+- `--heatmaps` with `--pixel deep` writes small PNG heatmaps for localization review. Without `--heatmap-dir` they go to `$DEEPFAKE_LENS_HEATMAP_DIR` or `~/.cache/deepfake-lens/heatmaps/<folder key>/` — never into the scanned evidence folder (R-IN-1, QA-IN-1: a scan leaves every evidence file's bytes, mtime and the folder listing unchanged).
 - PNG pixels are decoded with the built-in reader. JPEG/WebP pixel analysis works when Pillow is available, without making Pillow a required dependency.
 - Ivy-xDetector can be used as an external baseline by placing a sidecar next to the image, for example `image.png.ivy.json` or `image.ivy.json`, with `score`, `fake_score`, `probability`, or `label`.
 - `--model-path` can point to a JSON score profile, a sidecar profile, or an optional ONNX/TorchScript runtime profile. ONNX Runtime, PyTorch, Pillow, and NumPy remain optional local dependencies rather than mandatory install requirements.
@@ -174,7 +174,7 @@ The next-stage plan is implemented as local-first commands and adapters:
 6. Patch/localization: `--pixel deep --heatmaps` writes SAFE-style PNG localization heatmaps; HTML reports embed small heatmap previews.
 7. Source attribution: JSON separates `ai_score`, `source_guess`, and `source_attribution_label`. Metadata rules now include Flux, Ideogram, Imagen/Gemini, Recraft, Canva AI, and Grok/xAI in addition to earlier sources.
 8. Large scans and performance: `--cache`, `--workers`, `--dedupe`, `--hash-db`, `--max-file-bytes`, and `--progress` support resumable parallel scans with duplicate and oversize handling. `perf` writes a throughput/cache/duplicate-rate report for local tuning.
-9. Local web app: `web` starts a localhost-only UI/API with escaped table rendering, optional recursive/dedupe scans, model/fusion profile fields, and heatmap preview serving constrained to the scanned folder.
+9. Local web app: `web` starts a localhost-only UI/API with escaped table rendering, optional recursive/dedupe scans, model/fusion profile fields, and heatmap preview serving constrained to the read roots plus the tool-owned heatmap output root (`*.heatmap.png` only).
 10. Reports: `--html-out` and `--pdf-out` write review artifacts with optional `--redact-paths`; HTML reports embed heatmaps when available. The simple PDF is Latin-1 only — when Korean text is present it prints an explicit notice recommending the HTML report.
 11. Evaluation output includes AUROC and EER (threshold-swept equal error rate) alongside confusion counts, and `eval` reports per-split metrics when the dataset declares splits.
 12. Security/privacy: `security` writes a local-only guardrail report. Network calls are not used by scan/eval/train, symlink following is opt-in, oversize files can be skipped, report paths can be redacted, and the web server binds to localhost unless `--allow-lan` is passed.
