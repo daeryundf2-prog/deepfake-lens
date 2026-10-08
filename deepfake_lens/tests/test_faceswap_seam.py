@@ -137,9 +137,16 @@ class FaceSwapSeamTest(unittest.TestCase):
         test_path = self.root / "deep_sample.png"
         cv2.imwrite(str(test_path), img)
 
-        signals, limitations = _deep_image_layers(test_path)
-        self.assertIsInstance(signals, list)
-        self.assertIsInstance(limitations, list)
+        # G12: deep layers now return evidence + per-layer coverage instead
+        # of a (signals, limitations) pair.
+        layers = _deep_image_layers(test_path)
+        self.assertIsInstance(layers.evidence, list)
+        self.assertIsInstance(layers.limitations, list)
+        self.assertEqual([entry.check for entry in layers.coverage], ["face_manipulation", "inpaint", "faceswap_seam"])
+        face_entry = layers.coverage[0]
+        # A flat grey image has no face: recorded as a skip with a reason.
+        self.assertEqual(face_entry.status.value, "skipped")
+        self.assertEqual(face_entry.reason, "얼굴 미검출")
 
 
 class ThresholdProfileTest(unittest.TestCase):

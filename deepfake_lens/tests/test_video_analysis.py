@@ -188,8 +188,13 @@ class AnalyzeFileVideoDispatchTest(unittest.TestCase):
             resolution=(1920, 1080), model_analysis=None,
         )
         result = _video_result(analysis)
-        self.assertEqual(result.score, 40)
-        self.assertEqual(result.signals[0].title, "밝기 불일치")
+        # G5/G17: the temporal heuristic's 40/"medium" used to pass through
+        # as the result; it is now a reference signal and cannot decide.
+        self.assertEqual(result.score, 0)
+        self.assertEqual(result.band.value, "unknown")
+        self.assertEqual(result.verdict_code.value, "undetermined")
+        self.assertEqual(result.reference_signals[0].title, "밝기 불일치")
+        self.assertEqual(result.reference_signals[0].weight, 20)
         self.assertTrue(result.next_checks)
 
 

@@ -266,9 +266,13 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
                     if code:
                         sink.append(str(code))
     signature = manifest.get("signature_info") if isinstance(manifest, dict) else None
+    # The SDK reports "Valid"/"Trusted"/"Invalid" (capitalized); compare
+    # case-insensitively — "Trusted" is a valid manifest with a trusted
+    # signer in newer SDK releases.
+    valid_state = state.lower() in {"valid", "trusted"}
     return {
         "present": True,
-        "status": "valid" if state == "valid" else "invalid",
+        "status": "valid" if valid_state else "invalid",
         "state": state,
         "trusted": "signingCredential.trusted" in success_codes
         and "signingCredential.trusted" not in failure_codes,
@@ -277,7 +281,28 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
         "failure_codes": failure_codes,
         "title": manifest.get("title") if isinstance(manifest, dict) else None,
         "claim_generator": manifest.get("claim_generator") if isinstance(manifest, dict) else None,
+        # IPTC digitalSourceType values declared by the manifest's actions
+        # (e.g. trainedAlgorithmicMedia, digitalCapture) — the field that
+        # distinguishes a generator's manifest from a camera's.
+        "digital_source_types": sorted(_digital_source_types(manifest)),
     }
+
+
+def _digital_source_types(node: object, depth: int = 0) -> set[str]:
+    """Collect every ``digitalSourceType`` value in a manifest (bounded walk)."""
+    if depth > 12:
+        return set()
+    found: set[str] = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "digitalSourceType" and isinstance(value, str):
+                found.add(value.rsplit("/", 1)[-1])
+            else:
+                found |= _digital_source_types(value, depth + 1)
+    elif isinstance(node, list):
+        for value in node:
+            found |= _digital_source_types(value, depth + 1)
+    return found
 
 
 def _check_c2pa(data: bytes) -> ProvenanceRecord | None:

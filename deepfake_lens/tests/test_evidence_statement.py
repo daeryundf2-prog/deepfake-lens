@@ -20,6 +20,13 @@ from deepfake_lens.core import (
     SourceConfidence,
     SourceGuess,
 )
+from deepfake_lens.result_types import (
+    EvidenceDirection,
+    EvidenceItem,
+    EvidenceKind,
+    EvidenceStrength,
+    Verdict,
+)
 from deepfake_lens.evidence_statement import (
     build_evidence_statement,
     write_evidence_statement_markdown,
@@ -45,6 +52,13 @@ class EvidenceStatementTest(unittest.TestCase):
             limitations=[],
             source_guess=SourceGuess(label="FaceSwap / ReActor", confidence=SourceConfidence.HIGH),
             next_checks=[],
+            # G6: statutes are listed only for a manipulation verdict backed
+            # by deterministic evidence (a high band alone no longer counts).
+            verdict_code=Verdict.MANIPULATION_EVIDENCE,
+            evidence=[EvidenceItem(
+                "C2PA 서명: 생성형 AI 출처 선언", "trainedAlgorithmicMedia",
+                EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "c2pa",
+            )],
         )
         # Create dummy file to test SHA-256 hash calculation
         self.sample1 = self.root / "suspect_video.mp4"

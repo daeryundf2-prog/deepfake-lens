@@ -13,7 +13,24 @@ import sys
 from pathlib import Path
 
 from .calibration import MIN_CALIBRATION_SAMPLES, load_threshold_profile
-from .result_types import RiskBand, ScanItem
+from .result_text import (
+    TEXT_LEGAL_LIMITATION,
+    coverage_counts_text,
+    coverage_gaps,
+    deciding_evidence,
+    evidence_counts,
+    evidence_counts_text,
+    summary_line,
+)
+from .result_types import (
+    EVIDENCE_KIND_LABELS,
+    VERDICT_LABELS,
+    CoverageStatus,
+    EvidenceKind,
+    Grade,
+    RiskBand,
+    ScanItem,
+)
 from .signing import resolve_report_key, sign_report
 
 
@@ -102,34 +119,36 @@ def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage:
     if thresholds is not None and getattr(thresholds, "provisional", False):
         print("!! 판정 임계값: 미측정 잠정값 — 표본 코퍼스 캘리브레이션 전까지 상대 우선순위로만 해석하세요 !!")
     cap_note = " (cap reached)" if summary.capped else ""
+    print(summary_line(summary) + cap_note)
     print(
-        f"Scanned {summary.total} files{cap_note}: "
-        f"high={summary.high}, medium={summary.medium}, unknown={summary.unknown}, "
-        f"low={summary.low}, unsupported/failed={summary.unsupported_or_failed}, "
-        f"duplicates={summary.duplicates}, skipped={summary.skipped}, cached={summary.cached}"
+        "결론은 세 가지뿐입니다: 조작·생성 근거 있음 / 원본성 근거 있음 / 판단 불가. "
+        "통계(모델)·어휘(키워드) 신호는 보정 전까지 결론을 바꾸지 않습니다."
     )
-    print("참고용 선별 결과입니다. 메타데이터가 없으면 '출처 단서 없음'으로 남깁니다.")
+    if any(item.result and item.result.grade == Grade.REFERENCE for item in items):
+        print(f"참고: {TEXT_LEGAL_LIMITATION}")
     print()
-    print(f"{'risk':<12} {'score':>5} {'pixel':>5} {'source':<28} {'kind':<6} file")
-    print("-" * 100)
+    print(f"{'결론':<14} {'등급':<4} {'근거(결정·통계·어휘)':<18} {'검사(실행·미실행·실패)':<20} {'kind':<6} file")
+    print("-" * 110)
     visible = [item for item in items if include_low or _is_priority_row(item)]
     if not visible:
         print("우선 검토할 후보가 없습니다. --include-low 로 전체 행을 볼 수 있습니다.")
         return
     for item in visible:
         if item.result:
-            risk = item.result.band_label
-            score = str(item.result.score)
-            pixel = _pixel_score_text(item)
-            source = item.result.source_guess.label[:27]
-            reason = item.result.signals[0].title if item.result.signals else "강한 의심 신호 없음"
+            result = item.result
+            verdict = VERDICT_LABELS[result.verdict_code]
+            grade = "참고" if result.grade == Grade.REFERENCE else "근거"
+            counts = evidence_counts_text(result)
+            checks = coverage_counts_text(result)
+            top = deciding_evidence(result)
+            gaps = [entry for entry in coverage_gaps(result) if entry.status == CoverageStatus.FAILED]
+            reason = (
+                f"[{EVIDENCE_KIND_LABELS[top.kind]}] {top.title}" if top else "근거 항목 없음"
+            ) + (f" | 실패: {'; '.join(entry.describe() for entry in gaps)}" if gaps else "")
         else:
-            risk = item.status
-            score = "-"
-            pixel = "-"
-            source = "-"
+            verdict, grade, counts, checks = item.status, "-", "-", "-"
             reason = item.error or ""
-        print(f"{risk:<12} {score:>5} {pixel:>5} {source:<28} {item.kind:<6} {item.path}  # {reason}")
+        print(f"{verdict:<14} {grade:<4} {counts:<18} {checks:<20} {item.kind:<6} {item.path}  # {reason}")
 
 
 def _is_priority_row(item: ScanItem) -> bool:
@@ -178,6 +197,17 @@ def _write_csv(path: Path, items: list[ScanItem], *, coverage: dict[str, object]
                 "source_confidence",
                 "top_signal",
                 "error",
+                # Contract v2 columns, appended so v1 column positions hold.
+                "verdict_code",
+                "verdict_label",
+                "grade",
+                "evidence_deterministic",
+                "evidence_statistical",
+                "evidence_lexical",
+                "top_evidence",
+                "coverage_failed",
+                "coverage_skipped",
+                "score_is_calibrated",
             ]
         )
         for item in items:
@@ -203,8 +233,30 @@ def _write_csv(path: Path, items: list[ScanItem], *, coverage: dict[str, object]
                     result.source_guess.confidence.value if result else "",
                     result.signals[0].title if result and result.signals else "",
                     item.error or "",
+                    *_csv_v2_columns(item),
                 ]
             )
+
+
+def _csv_v2_columns(item: ScanItem) -> list[object]:
+    result = item.result
+    if result is None:
+        return ["", "", "", "", "", "", "", "", "", ""]
+    counts = evidence_counts(result)
+    top = deciding_evidence(result)
+    gaps = coverage_gaps(result)
+    return [
+        result.verdict_code.value,
+        VERDICT_LABELS[result.verdict_code],
+        result.grade.value,
+        counts[EvidenceKind.DETERMINISTIC],
+        counts[EvidenceKind.STATISTICAL],
+        counts[EvidenceKind.LEXICAL],
+        f"{top.kind.value}:{top.title}" if top else "",
+        "; ".join(entry.describe() for entry in gaps if entry.status == CoverageStatus.FAILED),
+        "; ".join(entry.describe() for entry in gaps if entry.status == CoverageStatus.SKIPPED),
+        result.score_is_calibrated,
+    ]
 
 
 def _pixel_score_text(item: ScanItem) -> str:

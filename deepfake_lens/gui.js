@@ -218,11 +218,86 @@
             tile.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
         });
 
-        function bandAdvice(band) {
-            if (band === 'high') return '여러 신호가 합성 패턴과 일치합니다 — 원본 파일·최초 출처·촬영자 확인을 먼저 하세요. 확정 판정이 아니므로 정밀 검토가 필요합니다.';
-            if (band === 'medium') return '일부 단서가 있습니다 — 아래 "다음 확인"을 따라 추가 증거를 모으세요.';
-            if (band === 'low') return '발동된 신호가 없습니다 — "합성이 아님"이 아니라 "단서 부재"입니다. 의심이 계속되면 원본 해상도 파일로 다시 검사하세요.';
-            return '판단에 필요한 신호가 부족합니다 — 다른 각도의 검증이 필요합니다.';
+        /* Result contract v2: three verdicts, evidence by kind, coverage.
+           Statistical (model) and lexical (keyword) evidence never decide;
+           a failed check leaves the file undetermined. */
+        const VERDICT_LABELS = {
+            manipulation_evidence: '조작·생성 근거 있음',
+            authenticity_evidence: '원본성 근거 있음',
+            undetermined: '판단 불가',
+        };
+        const KIND_LABELS = { deterministic: '결정적 근거', statistical: '통계적 근거', lexical: '어휘적 근거' };
+        const KIND_NOTES = {
+            deterministic: '메타데이터·C2PA 등 파일이 스스로 기록한 사실 — 결론을 낼 수 있습니다.',
+            statistical: '모델 출력 — 보정(측정 코퍼스·신뢰구간)이 없으면 결론에 참여하지 않습니다.',
+            lexical: '키워드·문체 통계 — 결론을 바꾸지 못하는 참고 정보입니다.',
+        };
+        const DIRECTION_LABELS = { synthetic: '조작·생성 방향', authentic: '원본성 방향', neutral: '중립' };
+        const STRENGTH_LABELS = { strong: '강', moderate: '중', weak: '약' };
+        const CHECK_LABELS = {
+            metadata: '메타데이터', c2pa: 'C2PA 출처 검증', pixel: '픽셀 휴리스틱(참고)', external_model: '외부 모델',
+            face_manipulation: '얼굴 검사', inpaint: '인페인팅 검사', faceswap_seam: '페이스스왑 경계면 검사',
+            rppg: 'rPPG 맥박 검사', avatar: '아바타 검사', lipsync: '립싱크 검사', face_track: '얼굴 트랙 검사',
+            audio_analysis: '오디오 분석', audio_features: '오디오 특징 추출', video_analysis: '영상 분석',
+            document_text: '문서 텍스트 추출', text_lexical: '어휘·문체 신호', archive: '압축 해제',
+        };
+        const COVERAGE_STATUS_LABELS = { ran: '실행', skipped: '미실행', failed: '실패' };
+        const TEXT_LEGAL_LIMITATION = '텍스트 생성 여부 판별은 2026년 현재 증거능력이 없으며 참고 정보입니다.';
+
+        function verdictOf(item) {
+            const r = (item && item.result) || null;
+            if (!r || item.status === 'failed' || item.status === 'unsupported') return 'other';
+            return r.verdict_code || 'undetermined';
+        }
+        function checkLabel(check) {
+            if (String(check).startsWith('model:')) return `외부 모델(${String(check).slice(6)})`;
+            return CHECK_LABELS[check] || check;
+        }
+        function coverageText(entry) {
+            const head = `${checkLabel(entry.check)} ${COVERAGE_STATUS_LABELS[entry.status] || entry.status}`;
+            return entry.reason ? `${head}: ${entry.reason}` : head;
+        }
+        function verdictAdvice(verdict, grade) {
+            if (grade === 'reference') return '텍스트 결과는 참고 등급입니다 — 어휘·문체 신호는 사람이 쓴 글에도 나타나므로 결론으로 쓰지 마세요.';
+            if (verdict === 'manipulation_evidence') return '결정적 근거(메타데이터·C2PA 등)가 조작·생성을 가리킵니다 — 근거 항목과 원본 파일을 대조해 감정서에 인용하세요.';
+            if (verdict === 'authenticity_evidence') return '결정적 근거가 원본성을 가리킵니다 — 서명자·해시 검증 내역을 감정서에 함께 기재하세요.';
+            return '결론을 낼 결정적 근거가 없거나 검사가 실패했습니다 — "원본"이라는 뜻이 아닙니다. 아래 검사 범위의 미실행·실패 사유를 확인하세요.';
+        }
+        function evidenceHtml(r) {
+            const ev = r.evidence || [];
+            if (!ev.length) return '<div class="dgroup ev-group"><div class="dt">근거</div><div class="note">근거 항목 없음</div></div>';
+            return ['deterministic', 'statistical', 'lexical'].map(kind => {
+                const rows = ev.filter(e => e.kind === kind);
+                if (!rows.length) return '';
+                const lis = rows.map(e => {
+                    const prob = (e.probability != null && e.calibration_id)
+                        ? ` · p=${Number(e.probability).toFixed(2)}${e.probability_ci ? ` (95% CI ${Number(e.probability_ci[0]).toFixed(2)}–${Number(e.probability_ci[1]).toFixed(2)})` : ''} · 보정 ${escapeHtml(e.calibration_id)}`
+                        : '';
+                    return `<li class="ev-item ev-${escapeHtml(e.direction)}"><b>${escapeHtml(e.title)}</b> <span class="ev-badge">${escapeHtml(DIRECTION_LABELS[e.direction] || e.direction)}·${escapeHtml(STRENGTH_LABELS[e.strength] || e.strength)}${prob}</span><div class="note">${escapeHtml(e.detail || '')}</div></li>`;
+                }).join('');
+                return `<div class="dgroup ev-group ev-kind-${kind}" data-kind="${kind}"><div class="dt">${KIND_LABELS[kind]} (${rows.length})</div><div class="note">${KIND_NOTES[kind]}</div><ul>${lis}</ul></div>`;
+            }).join('');
+        }
+        function coverageHtml(r) {
+            const cov = r.coverage || [];
+            if (!cov.length) return '';
+            const failed = cov.filter(c => c.status === 'failed');
+            const skipped = cov.filter(c => c.status === 'skipped');
+            const ran = cov.filter(c => c.status === 'ran');
+            const li = (c, cls) => `<li class="${cls}">${escapeHtml(coverageText(c))}</li>`;
+            return `<div class="dgroup cov-group"><div class="dt">검사 범위 — 실행 ${ran.length} · 미실행 ${skipped.length} · 실패 ${failed.length}</div><ul>` +
+                failed.map(c => li(c, 'cov-failed')).join('') +
+                skipped.map(c => li(c, 'cov-skipped')).join('') +
+                (ran.length ? `<li class="cov-ran">실행: ${ran.map(c => escapeHtml(checkLabel(c.check))).join(', ')}</li>` : '') +
+                '</ul></div>';
+        }
+        function verdictHeadHtml(r) {
+            const v = r.verdict_code || 'undetermined';
+            const grade = r.grade === 'reference' ? '참고' : '감정 근거로 사용 가능';
+            const parts = [`<div class="verdict-head v-${escapeHtml(v)}" data-verdict="${escapeHtml(v)}"><span class="band-pill band-${bandCls(v)}">${escapeHtml(VERDICT_LABELS[v] || v)}</span> <span class="grade-pill">${escapeHtml(grade)}</span></div>`];
+            if (r.grade === 'reference') parts.push(`<div class="legal-note">${escapeHtml(TEXT_LEGAL_LIMITATION)}</div>`);
+            if (r.verdict) parts.push(`<div class="verdict">${escapeHtml(r.verdict)}</div>`);
+            return parts.join('');
         }
 
         function startElapsed(el, text) {
@@ -474,16 +549,21 @@
             return Object.assign(out, extra || {});
         }
 
-        function riskLabel(band) {
-            return band === 'high' ? 'AI 의심' : band === 'medium' ? '주의' : band === 'low' ? '낮은 신호' : '분석 불가';
+        function riskLabel(verdict) {
+            return VERDICT_LABELS[verdict] || '미지원·실패';
         }
-        function bandColor(band) {
-            return band === 'high' ? 'var(--red)' : band === 'medium' ? 'var(--orange)' : band === 'low' ? 'var(--green)' : 'var(--muted)';
+        // Verdict -> existing colour classes: red = manipulation evidence,
+        // orange = undetermined (needs the examiner), green = authenticity.
+        const VERDICT_CLS = { manipulation_evidence: 'high', undetermined: 'medium', authenticity_evidence: 'low' };
+        function bandColor(verdict) {
+            const cls = VERDICT_CLS[verdict];
+            return cls === 'high' ? 'var(--red)' : cls === 'medium' ? 'var(--orange)' : cls === 'low' ? 'var(--green)' : 'var(--muted)';
         }
         // Class-name variant — bandColor() is only used in markup templates
         // where a CSP-safe class is required instead of an inline style.
-        function bandCls(band) {
-            return band === 'high' || band === 'medium' || band === 'low' ? band : 'other';
+        function bandCls(verdictOrBand) {
+            if (VERDICT_CLS[verdictOrBand]) return VERDICT_CLS[verdictOrBand];
+            return verdictOrBand === 'high' || verdictOrBand === 'medium' || verdictOrBand === 'low' ? verdictOrBand : 'other';
         }
 
         function listItems(title, values, cls) {
@@ -499,7 +579,12 @@
             const r = item.result || {};
             const parts = [];
             if (item.error) parts.push(`<div class="verdict">분석 실패: ${escapeHtml(item.error)}</div>`);
-            if (r.verdict) parts.push(`<div class="verdict">${escapeHtml(r.verdict)}</div>`);
+            // Order: verdict, then evidence grouped by kind, then coverage.
+            if (item.result) {
+                parts.push(verdictHeadHtml(r));
+                parts.push(evidenceHtml(r));
+                parts.push(coverageHtml(r));
+            }
             const hasPreview = lastScanRoot && item.path && !item.path.includes('::') &&
                 !/^[a-zA-Z]:[\\/]|^\//.test(item.path) &&
                 (item.kind === 'image' || item.kind === 'video' || item.kind === 'audio');
@@ -519,16 +604,12 @@
             const ma = r.model_analysis;
             if (ma) {
                 const members = (ma.models || []).map(m =>
-                    `<li>${escapeHtml(m.model || 'model')} — ${m.score != null ? m.score : 'n/a'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
-                parts.push(`<div class="dgroup"><div class="dt">뉴럴 모델 — 점수 ${ma.score != null ? ma.score : 'n/a'}</div>${members ? `<ul>${members}</ul>` : `<div class="note">${escapeHtml(ma.detail || '')}</div>`}</div>`);
+                    `<li>${escapeHtml(m.model || 'model')} — 원점수 ${m.score != null ? m.score : 'n/a'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
+                parts.push(`<div class="dgroup"><div class="dt">외부 모델 원점수(미보정, 결론 불참여) — ${ma.score != null ? ma.score : 'n/a'}</div>${members ? `<ul>${members}</ul>` : `<div class="note">${escapeHtml(ma.detail || '')}</div>`}</div>`);
             }
-            // Signals grouped by strength so the examiner sees the drivers
-            // first, not a flat wall of notes.
-            const sigs = (r.signals || []);
-            const strong = sigs.filter(s => (s.weight || 0) >= 15);
-            const weak = sigs.filter(s => (s.weight || 0) < 15);
-            parts.push(listItems('주요 근거', strong, 'sig-strong'));
-            parts.push(listItems('참고 신호', weak));
+            // Unmeasured heuristics (pixel ensemble, fusion, legacy audio/
+            // video heuristics) — displayed for reference, never decide.
+            parts.push(listItems('참고 신호(미측정 휴리스틱 — 결론 불참여)', (r.reference_signals || []).map(s => ({ title: `${s.title} (${s.weight})`, detail: s.detail }))));
             parts.push(listItems('한계', r.limitations, 'lim'));
             parts.push(listItems('다음 확인', r.next_checks));
             const sg = r.source_guess;
@@ -536,8 +617,8 @@
                 const reasons = (sg.reasons || []).map(escapeHtml).join(' ');
                 parts.push(`<div class="dgroup"><div class="dt">출처 추정 (${escapeHtml(sg.confidence || 'unknown')})</div><div class="note">${escapeHtml(sg.label)} — ${reasons}</div></div>`);
             }
-            parts.push(`<div class="band-advice">${escapeHtml(bandAdvice(r.band || 'unknown'))}</div>`);
-            parts.push(`<div class="caveat">이 결과는 스크리닝 우선순위 신호입니다. 합성 여부의 확정 판정이 아니며, 원본 확보·맥락 검토가 필요합니다.</div>`);
+            parts.push(`<div class="band-advice">${escapeHtml(verdictAdvice(r.verdict_code || 'undetermined', r.grade))}</div>`);
+            parts.push(`<div class="caveat">결론은 결정적 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>`);
             return parts.join('');
         }
 
@@ -781,27 +862,38 @@
         function renderCard(list, entry) {
             const item = entry.item;
             const r = item.result || {};
-            const band = r.band || 'unknown';
-            const score = r.score != null ? r.score : 0;
+            const verdict = verdictOf(item);
+            const band = bandCls(verdict);
+            // The ring shows a number only for a calibrated probability;
+            // otherwise a verdict glyph (no uncalibrated number on display).
+            const calibrated = Boolean(r.score_is_calibrated);
+            const ringText = calibrated ? String(Number(r.score) || 0) : ({ high: '!', low: '✓', medium: '?' }[band] || '–');
+            const ringFill = calibrated ? (Number(r.score) || 0) : (band === 'other' ? 0 : 100);
+            const evCounts = ['deterministic', 'statistical', 'lexical'].map(k => (r.evidence || []).filter(e => e.kind === k).length);
+            const failedChecks = (r.coverage || []).filter(c => c.status === 'failed').length;
             const tool = (r.source_guess && r.source_guess.label) || '알 수 없음';
             const rev = reviewStore[itemKey(item)] || {};
 
             const card = document.createElement('div');
             card.className = 'res' + (rev.star ? ' reviewed' : '');
-            card.style.setProperty('--res-accent', bandColor(band));
+            card.style.setProperty('--res-accent', bandColor(verdict));
+            card.dataset.verdict = verdict;
             card.innerHTML = `
                 <div class="res-main">
                     <div class="ring">
                         <svg viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15.9"></circle>
                         <circle class="val" cx="18" cy="18" r="15.9" pathLength="100"
-                            stroke-dasharray="${Math.max(0, Math.min(100, score))} 100"
-                            class="bs-${bandCls(band)}"></circle></svg>
-                        <span class="num bc-${bandCls(band)}">${Number(score) || 0}</span>
+                            stroke-dasharray="${Math.max(0, Math.min(100, ringFill))} 100"
+                            class="bs-${band}"></circle></svg>
+                        <span class="num bc-${band}">${escapeHtml(ringText)}</span>
                     </div>
                     <div class="res-info">
                         <div class="res-name">${escapeHtml(item.name || item.path || '파일')}</div>
                         <div class="res-sub">
-                            <span class="band-pill band-${band}">${riskLabel(band)}</span>
+                            <span class="band-pill band-${band}">${escapeHtml(riskLabel(verdict))}</span>
+                            ${r.grade === 'reference' ? '<span class="grade-pill">참고</span>' : ''}
+                            <span class="ev-counts" title="결정적·통계적·어휘적 근거 수">결정 ${evCounts[0]} · 통계 ${evCounts[1]} · 어휘 ${evCounts[2]}</span>
+                            ${failedChecks ? `<span class="c-red">검사 실패 ${failedChecks}</span>` : ''}
                             <span>${escapeHtml(tool)}</span>
                             ${r.model_analysis && r.model_analysis.available !== false ? '<span class="nn-badge">NN</span>' : ''}
                             ${rev.star ? '<span class="rev-badge">검토됨</span>' : ''}
@@ -903,11 +995,10 @@
         }
 
         function itemBand(entry) {
-            const band = (entry.item.result || {}).band;
-            return band === 'high' || band === 'medium' || band === 'low' ? band : 'other';
+            return verdictOf(entry.item);
         }
 
-        const BAND_ORDER = { high: 0, medium: 1, low: 2, other: 3 };
+        const BAND_ORDER = { manipulation_evidence: 0, undetermined: 1, authenticity_evidence: 2, other: 3 };
         function filteredResults() {
             const needle = textFilter.trim().toLowerCase();
             const filtered = results.filter(entry => {
@@ -933,16 +1024,16 @@
             list.innerHTML = '';
 
             // Canonical band counts — every pill plus the total must agree.
-            const bands = { high: 0, medium: 0, low: 0, other: 0 };
+            const bands = { manipulation_evidence: 0, undetermined: 0, authenticity_evidence: 0, other: 0 };
             let modelCount = 0;
             results.forEach(entry => {
                 bands[itemBand(entry)]++;
                 if ((entry.item.result || {}).model_analysis) modelCount++;
             });
             const modelActive = summary.external_model_active != null ? summary.external_model_active : modelCount;
-            $('stat-ai').textContent = bands.high;
-            $('stat-medium').textContent = bands.medium;
-            $('stat-low').textContent = bands.low;
+            $('stat-manip').textContent = bands.manipulation_evidence;
+            $('stat-undet').textContent = bands.undetermined;
+            $('stat-auth').textContent = bands.authenticity_evidence;
             $('stat-other').textContent = bands.other;
             $('stat-total').textContent = results.length;
             $('stat-model-label').textContent = `뉴럴 ${modelActive}`;
@@ -955,7 +1046,7 @@
             // el.style.width is a JS property assignment — not an inline
             // style attribute, so it is allowed under style-src 'self'.
             const segs = $('distbar').children;
-            [bands.high, bands.medium, bands.low, bands.other].forEach((n, i) => {
+            [bands.manipulation_evidence, bands.undetermined, bands.authenticity_evidence, bands.other].forEach((n, i) => {
                 if (segs[i]) segs[i].style.width = (n / total * 100) + '%';
             });
 
@@ -1087,11 +1178,14 @@
             if (!results.length) { toast('분석 결과가 없습니다', true); return; }
             const f = v => /[",\r\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
             // BOM prefix keeps Korean intact when the CSV is opened in Excel.
-            let csv = '﻿위험도,점수,출처 추정,모델,파일명,검토,메모,판정\n';
+            let csv = '﻿결론,등급,결정적 근거,통계적 근거,어휘적 근거,검사 실패,출처 추정,모델,파일명,검토,메모,판정 문장\n';
             results.forEach(e => {
                 const item = e.item, r = item.result || {};
                 const rev = reviewStore[itemKey(item)] || {};
-                csv += [f(r.band || ''), f(r.score != null ? r.score : ''), f((r.source_guess && r.source_guess.label) || ''), f((r.model_analysis && r.model_analysis.model_id) || ''), f(item.name || item.path), f(rev.star ? '검토됨' : ''), f(rev.note || ''), f(r.verdict || '')].join(',') + '\n';
+                const ev = r.evidence || [];
+                const titles = kind => ev.filter(x => x.kind === kind).map(x => x.title).join(' / ');
+                const failedCov = (r.coverage || []).filter(c => c.status === 'failed').map(coverageText).join(' / ');
+                csv += [f(riskLabel(verdictOf(item))), f(r.grade === 'reference' ? '참고' : (r.grade ? '근거' : '')), f(titles('deterministic')), f(titles('statistical')), f(titles('lexical')), f(failedCov), f((r.source_guess && r.source_guess.label) || ''), f((r.model_analysis && r.model_analysis.model) || ''), f(item.name || item.path), f(rev.star ? '검토됨' : ''), f(rev.note || ''), f(r.verdict || '')].join(',') + '\n';
             });
             download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'deepfake-lens-results.csv');
         });
@@ -1240,22 +1334,26 @@
             const box = $('qc-out');
             const item = data.item || {};
             const r = item.result || {};
-            const band = r.band || 'unknown';
-            const score = r.score != null ? r.score : 0;
-            const bandText = band === 'high' ? 'AI 의심 — 높음' : band === 'medium' ? '주의 필요' : band === 'low' ? '낮음' : '판단 어려움';
+            const verdict = verdictOf(item);
+            const band = bandCls(verdict);
             const parts = [];
             parts.push(`<div class="qc-head">
-                <span class="big bc-${bandCls(band)}">${Number(score) || 0}</span>
-                <div><span class="band-pill band-${band}">${escapeHtml(bandText)}</span>
-                <div class="note" class="mt-4">${escapeHtml(item.name || '')}</div></div></div>`);
-            if (r.verdict) parts.push(`<div class="verdict">${escapeHtml(r.verdict)}</div>`);
+                <span class="big bc-${band}">${escapeHtml(r.score_is_calibrated ? String(Number(r.score) || 0) : ({ high: '!', low: '✓', medium: '?' }[band] || '–'))}</span>
+                <div><span class="band-pill band-${band}">${escapeHtml(riskLabel(verdict))}</span>
+                <div class="note mt-4">${escapeHtml(item.name || '')}</div></div></div>`);
+            if (item.error) parts.push(`<div class="verdict">분석 실패: ${escapeHtml(item.error)}</div>`);
+            if (item.result) {
+                parts.push(verdictHeadHtml(r));
+                parts.push(evidenceHtml(r));
+                parts.push(coverageHtml(r));
+            }
             parts.push(provenanceNoteHtml(data));
 
             const ma = r.model_analysis;
             if (ma) {
                 const members = (ma.models || []).map(m =>
                     `<li>${escapeHtml(m.model || 'model')} — ${m.score != null ? m.score : 'n/a'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
-                parts.push(layer(`뉴럴 앙상블 — 점수 ${ma.score != null ? ma.score : 'n/a'}`,
+                parts.push(layer(`외부 모델 원점수(미보정, 결론 불참여) — ${ma.score != null ? ma.score : 'n/a'}`,
                     members ? `<ul>${members}</ul>` : `<div class="note">${escapeHtml(ma.detail || '')}</div>`));
             }
             if (data.advanced) {
@@ -1277,9 +1375,10 @@
                 parts.push(layer('워터마크 (KGW)',
                     `<div class="kv"><b>판정</b><span>${escapeHtml(w.verdict || '')}</span><b>z-score</b><span>${w.z_score != null ? w.z_score : 'n/a'}</span><b>점수</b><span>${w.score != null ? w.score : 'n/a'}</span></div>`));
             }
+            parts.push(listItems('참고 신호(미측정 휴리스틱 — 결론 불참여)', (r.reference_signals || []).map(s => ({ title: `${s.title} (${s.weight})`, detail: s.detail }))));
             parts.push(listItems('다음 확인', r.next_checks));
-            parts.push(`<div class="band-advice">${escapeHtml(bandAdvice(band))}</div>`);
-            parts.push(`<div class="caveat">이 결과는 스크리닝 우선순위 신호입니다. 합성 여부의 확정 판정이 아니며, 원본 확보·맥락 검토가 필요합니다.</div>`);
+            parts.push(`<div class="band-advice">${escapeHtml(verdictAdvice(r.verdict_code || 'undetermined', r.grade))}</div>`);
+            parts.push(`<div class="caveat">결론은 결정적 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>`);
             box.innerHTML = parts.join('');
             box.className = 'qc-out on';
             box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1351,7 +1450,7 @@
             if (data.distance != null) kv.push(`<b>거리</b><span>${escapeHtml(String(data.distance))}</span>`);
             parts.push(layer('측정값', `<div class="kv">${kv.join('')}</div>`));
             parts.push(listItems('한계', data.limitations, 'lim'));
-            parts.push(`<div class="band-advice">${escapeHtml(bandAdvice(band))}</div>`);
+            parts.push(`<div class="band-advice">${escapeHtml(band === 'high' ? '유사도가 높습니다 — 확정이 아니므로 추가 샘플로 교차 확인하세요.' : band === 'low' ? '유사도가 낮습니다 — 녹음 조건·문체 차이일 수 있습니다.' : '판단에 필요한 신호가 부족합니다 — 더 긴 샘플이 필요합니다.')}</div>`);
             parts.push(`<div class="caveat">유사도는 동일인 증명이 아닙니다. 추가 증거와 함께 해석하세요.</div>`);
             box.innerHTML = parts.join('');
         }

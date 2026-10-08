@@ -499,3 +499,19 @@
             border-left: 3px solid var(--orange); color: var(--muted);
             background: rgba(255, 159, 10, 0.06); border-radius: 6px;
         }
+
+        /* Result contract v2 — verdict head, evidence by kind, coverage. */
+        .verdict-head { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+        .grade-pill { font-size: 11px; font-weight: 700; border-radius: 999px; padding: 2px 9px; background: var(--card2); color: var(--muted); }
+        .legal-note { font-size: 12.5px; font-weight: 700; color: var(--amber-text); margin: 4px 0 8px; }
+        .ev-counts { font-size: 11.5px; color: var(--muted); }
+        .ev-group > .dt { text-transform: none; }
+        .ev-kind-deterministic > .dt { color: var(--red); }
+        .ev-kind-statistical > .dt { color: var(--accent); }
+        .ev-kind-lexical > .dt { color: var(--muted); }
+        .ev-badge { font-size: 11px; color: var(--muted); }
+        .ev-authentic b { color: var(--green); }
+        .cov-group li { font-size: 12.5px; }
+        .cov-failed { color: var(--red); font-weight: 600; }
+        .cov-skipped { color: var(--amber-text); }
+        .cov-ran { color: var(--muted); }

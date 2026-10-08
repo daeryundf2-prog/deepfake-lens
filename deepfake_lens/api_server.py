@@ -490,7 +490,9 @@ def create_app(
             total = len(paths)
             yield ("progress", {"stage": "enumerate", "total": total, "capped": capped})
             items: list[dict[str, Any]] = []
-            counts = {"high": 0, "medium": 0, "unknown": 0, "low": 0, "failed": 0}
+            # Legacy band keys ("medium" stays 0) plus contract-v2 verdict keys.
+            counts = {"high": 0, "medium": 0, "unknown": 0, "low": 0, "failed": 0,
+                      "manipulation_evidence": 0, "authenticity_evidence": 0, "undetermined": 0}
             for index, path in enumerate(paths, 1):
                 if cancel.is_set():
                     yield ("cancelled", {"job_id": job_id, "processed": index - 1, "total": total})
@@ -501,14 +503,18 @@ def create_app(
                     result = data.get("result") or {}
                     band = str(result.get("band") or "unknown")
                     status = str(data.get("status") or "failed")
+                    verdict_code = str(result.get("verdict_code") or "undetermined")
                     if status == "analyzed":
                         counts[band if band in counts else "unknown"] += 1
+                        counts[verdict_code if verdict_code in counts else "undetermined"] += 1
                     elif status in {"skipped", "duplicate"}:
                         counts["unknown"] += 1
                     else:
                         counts["failed"] += 1
                     items.append({"path": data.get("path"), "kind": data.get("kind"),
                                   "status": status, "band": band if status == "analyzed" else None,
+                                  "verdict_code": verdict_code if status == "analyzed" else None,
+                                  "grade": result.get("grade"),
                                   "score": result.get("score")})
                 except Exception as exc:  # noqa: BLE001 - per-file failure is data
                     counts["failed"] += 1

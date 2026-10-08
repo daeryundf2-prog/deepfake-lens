@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+import logging
 import os
 import re
 import shutil
 import tempfile
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
@@ -23,6 +25,20 @@ from .image_metadata import (  # noqa: F401
     guess_image_source,
     read_image_metadata,
 )
+from .checks import AnalyzerError, CheckSkipped, run_check, skipped
+from .checks import failed as failed_entry
+from .checks import failure_reason
+from .decision import decide
+from .result_text import TEXT_LEGAL_LIMITATION
+from .evidence_rules import (
+    c2pa_evidence,
+    deep_layer_evidence,
+    document_metadata_evidence,
+    image_metadata_evidence,
+    lexical_evidence,
+    model_evidence,
+    reference_signal,
+)
 from .text_heuristics import (  # noqa: F401
     _frontier_llm_fingerprints,
     _generic_text_signal,
@@ -35,10 +51,22 @@ from .text_heuristics import (  # noqa: F401
 
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
 SUPPORTED_TEXT_EXTENSIONS = {".txt", ".md"}
-SCAN_JSON_SCHEMA_VERSION = 1
+# 2: result contract v2 (verdict_code/grade/evidence/coverage, no medium
+# band, score only from calibrated probability) — phase 0, G5/G6/G12/G24.
+SCAN_JSON_SCHEMA_VERSION = 2
 TOOL_VERSION = "0.1.0"  # kept in sync with pyproject version
 DEFAULT_MAX_FILES = 1000
 DEFAULT_TEXT_BYTES = 64 * 1024
+# Smallest image side a detector is run on. Every bundled image detector
+# takes >=224 px input and the model_adapter note records chance-level
+# AUROC (~0.5) on 32x32 thumbnails; 128 px is the phase-0 spec's floor
+# (WP-B) until WP-I measures a per-profile range.
+MODEL_MIN_SIDE_PX = 128
+# ExternalModelAnalysis.confidence value marking a member that raised
+# (inference error, integrity mismatch) rather than one that was skipped.
+MODEL_FAILED_CONFIDENCE = "failed"
+
+logger = logging.getLogger(__name__)
 
 
 # Result types and scan-cache/serialization helpers live in leaf modules;
@@ -47,13 +75,24 @@ DEFAULT_TEXT_BYTES = 64 * 1024
 from .result_types import (  # noqa: F401
     RISK_LABELS,
     SOURCE_CONFIDENCE_LABELS,
+    VERDICT_LABELS,
     BatchScanSummary,
     ClassificationResult,
+    CoverageEntry,
+    CoverageStatus,
+    EvidenceDirection,
+    EvidenceItem,
+    EvidenceKind,
     EvidenceSignal,
+    EvidenceStrength,
+    Grade,
     RiskBand,
     ScanItem,
     SourceConfidence,
     SourceGuess,
+    Verdict,
+    band_for_verdict,
+    check_label,
 )
 from .serialization import (  # noqa: F401
     _classification_result_from_json,
@@ -102,6 +141,7 @@ SYNTHETIC_WRITING_PHRASES = [
     "from multiple perspectives",
     "balanced approach",
 ]
+
 
 
 
@@ -166,9 +206,11 @@ def scan_directory(
             except Exception as exc:
                 # A corrupt/unreadable archive becomes a failed container
                 # row — one bad file must not kill the whole scan.
+                logger.exception("archive extraction failed: %s", path)
                 archive_meta[rel] = {
                     "path": path, "fmt": archive_format(path),
                     "skipped": 0, "warnings": [f"압축 해제 실패: {exc}"],
+                    "error": failure_reason(exc),
                 }
                 archive_members[rel] = []
                 continue
@@ -216,45 +258,68 @@ def _archive_container_item(
     skipped: int,
     warnings: list[str],
     member_items: list[ScanItem] | None = None,
+    extraction_error: str | None = None,
 ) -> ScanItem:
-    """Container row for an expanded archive; aggregates member bands."""
+    """Container row for an expanded archive; rolls member verdicts up.
+
+    manipulation if any member has manipulation evidence; authenticity only
+    if every member was analyzed, none was skipped, and all have
+    authenticity evidence; otherwise undetermined. The row carries no
+    evidence of its own — the members do.
+    """
     try:
         size = path.stat().st_size
     except OSError:
         size = 0
-    analyzed_members = [i for i in (member_items or []) if i.result and i.result.band != RiskBand.UNKNOWN]
-    worst = RiskBand.UNKNOWN
-    for item in analyzed_members:
-        band = item.result.band  # type: ignore[union-attr]
-        order = {RiskBand.LOW: 0, RiskBand.MEDIUM: 1, RiskBand.HIGH: 2}
-        if order.get(band, -1) > order.get(worst, -1):
-            worst = band
-    # A container with zero analyzable members is NOT a clean scan —
-    # corrupt/empty/all-unsupported archives stay UNKNOWN, never LOW.
-    band = worst
-    score = max((item.result.score for item in member_items or [] if item.result), default=0)
+    analyzed_members = [i for i in (member_items or []) if i.result is not None and i.status == "analyzed"]
+    verdicts = [i.result.verdict_code for i in analyzed_members if i.result is not None]
+    manipulated = sum(1 for v in verdicts if v == Verdict.MANIPULATION_EVIDENCE)
+    if manipulated:
+        verdict_code = Verdict.MANIPULATION_EVIDENCE
+    elif (
+        verdicts
+        and all(v == Verdict.AUTHENTICITY_EVIDENCE for v in verdicts)
+        and len(verdicts) == members
+        and not skipped
+        and not warnings
+        and extraction_error is None
+    ):
+        verdict_code = Verdict.AUTHENTICITY_EVIDENCE
+    else:
+        verdict_code = Verdict.UNDETERMINED
+    coverage = [
+        failed_entry("archive", AnalyzerError(extraction_error))
+        if extraction_error
+        else CoverageEntry("archive", CoverageStatus.RAN)
+    ]
     signals = [EvidenceSignal("압축 컨테이너", f"{fmt or 'archive'} 형식 — 구성 파일 {members}개 개별 분석" + (f", 스킵 {skipped}개" if skipped else ""), 0)]
     limitations = list(warnings)
     limitations.append("컨테이너 행은 구성 파일 결과의 요약입니다. '아카이브::경로' 형태의 개별 결과를 확인하세요.")
-    verdict = (
-        f"압축 해제됨 — 구성 파일 {members}개 분석, {skipped}개 스킵"
-        if analyzed_members
-        else "아카이브에서 분석 가능한 구성 파일이 없습니다 — 판정 불가"
-    )
+    if analyzed_members:
+        verdict = (
+            f"압축 파일: {VERDICT_LABELS[verdict_code]} — 구성 파일 {members}개 분석"
+            + (f"(조작·생성 근거 {manipulated}건)" if manipulated else "")
+            + f", {skipped}개 스킵"
+        )
+    else:
+        verdict = "압축 파일: 판단 불가 — 아카이브에서 분석 가능한 구성 파일이 없습니다."
+    band = band_for_verdict(verdict_code)
     return ScanItem(
-        # "expanded" (not "analyzed") keeps the roll-up row out of the band
-        # counts — members already carry their own verdicts, and counting
-        # the container too would double every archive member's tally.
+        # "expanded" (not "analyzed") keeps the roll-up row out of the
+        # verdict counts — members already carry their own verdicts, and
+        # counting the container too would double every member's tally.
         rel, name, "archive", "expanded" if analyzed_members else "unknown", size,
         ClassificationResult(
-            score=score,
+            score=max((i.result.score for i in analyzed_members if i.result is not None), default=0),
             band=band,
-            band_label=RISK_LABELS.get(band, band.value),
+            band_label=VERDICT_LABELS[verdict_code],
             verdict=verdict,
             signals=signals,
             limitations=limitations,
             source_guess=SourceGuess.unknown("압축 컨테이너에는 출처 추정이 적용되지 않습니다."),
-            next_checks=["구성 파일 중 고위험 항목부터 검토하세요."],
+            next_checks=["구성 파일 중 조작·생성 근거가 있는 항목부터 검토하세요."],
+            verdict_code=verdict_code,
+            coverage=coverage,
         ),
     )
 
@@ -353,6 +418,7 @@ def _scan_specs(
             # Analyzer internals can raise non-OSError (codec errors,
             # malformed profiles, decoder failures). Surface a failed row
             # instead of aborting the entire batch.
+            logger.exception("analysis failed: %s", path)
             item = ScanItem(
                 display or _display_path(path, root=root),
                 path.name, "unknown", "failed", 0,
@@ -406,11 +472,11 @@ def _scan_specs(
             rel, arc_path.name, arc_path, fmt=meta.get("fmt") or archive_format(rel),
             members=len(member_items), skipped=meta.get("skipped", 0),
             warnings=meta.get("warnings", []), member_items=member_items,
+            extraction_error=meta.get("error"),
         ))
 
     sorted_items = sort_items(items)
     return summarize(sorted_items, capped=capped, cached=cached_count), sorted_items
-
 
 def analyze_file(
     path: Path | str,
@@ -439,300 +505,580 @@ def analyze_file(
     if is_archive(file_path):
         # Single-item callers get a container row; member-level results
         # come through scan_directory / upload paths that expand first.
-        # An unexpanded container is "unknown" — never a clean LOW verdict.
+        # An unexpanded container is undetermined — never a clean verdict.
         return ScanItem(
             display_path, item_name, "archive", "analyzed", size,
-            ClassificationResult(
-                score=0,
-                band=RiskBand.UNKNOWN,
-                band_label="판단 유보(컨테이너)",
-                verdict=f"{archive_format(file_path)} 압축 파일 — 내용물 미분석 상태로 판단을 유보합니다. 내부 파일은 폴더 스캔 또는 업로드 경로에서 개별 분석됩니다.",
-                signals=[EvidenceSignal("압축 컨테이너", "내용물 분석은 스캔 경로에서 수행됩니다", 0)],
-                limitations=["단일 파일 분석에서는 압축 내부를 펼치지 않습니다."],
+            build_classification_result(
+                subject="압축 파일",
+                evidence=[],
+                coverage=[skipped("archive", "단일 파일 분석에서는 압축 내부를 펼치지 않습니다")],
                 source_guess=SourceGuess.unknown("압축 컨테이너에는 출처 추정이 적용되지 않습니다."),
+                limitations=[
+                    f"{archive_format(file_path)} 압축 파일 — 내부 파일은 폴더 스캔 또는 업로드 경로에서 개별 분석됩니다.",
+                ],
                 next_checks=["압축 파일이 포함된 폴더를 스캔하거나 업로드하세요."],
             ),
         )
 
     if extension in SUPPORTED_TEXT_EXTENSIONS or extension in SUPPORTED_DOCUMENT_EXTENSIONS:
         try:
-            doc_metadata: dict[str, str] = {}
-            model_input = file_path
-            tmp_text_path: Path | None = None
-            if extension in SUPPORTED_DOCUMENT_EXTENSIONS:
-                text, doc_metadata = extract_document_text(file_path)
-                # Binary containers (docx/hwp/pdf) must not reach the text
-                # members as raw bytes — feed the extracted text instead so
-                # PPL/binoculars and the language gate see real prose.
-                if text.strip():
-                    fd, tmp_name = tempfile.mkstemp(suffix=".txt", prefix="dflens-")
-                    try:
-                        os.write(fd, text.encode("utf-8", errors="replace"))
-                    finally:
-                        os.close(fd)
-                    tmp_text_path = Path(tmp_name)
-                    model_input = tmp_text_path
-            else:
-                text = _read_prefix(file_path, text_bytes).decode("utf-8", errors="replace")
-            try:
-                model_analysis = analyze_external_model(model_input, model_path, modality="text")
-            finally:
-                if tmp_text_path is not None:
-                    tmp_text_path.unlink(missing_ok=True)
-            result = analyze_text(text, model_analysis=model_analysis)
-            result = _apply_document_metadata(result, doc_metadata)
-            return ScanItem(display_path, item_name, "text", "analyzed", size, result)
+            return ScanItem(
+                display_path, item_name, "text", "analyzed", size,
+                _analyze_text_file(file_path, extension, text_bytes=text_bytes, model_path=model_path),
+            )
         except OSError as exc:
             return ScanItem(display_path, item_name, "text", "failed", size, error=str(exc))
 
     if extension in SUPPORTED_IMAGE_EXTENSIONS:
         try:
             metadata, dimensions = read_image_metadata(file_path, metadata_bytes=metadata_bytes)
-            pixel_analysis = None
-            if pixel_mode != "off":
-                pixel_analysis = analyze_image_pixels(
-                    file_path,
-                    mode=pixel_mode,
-                    max_side=pixel_max_side,
-                    heatmap_path=_heatmap_path_for(file_path, root=root, heatmap_dir=heatmap_dir) if heatmaps else None,
-                )
-            model_analysis = analyze_external_model(file_path, model_path)
-            result = analyze_image_metadata(metadata, dimensions=dimensions, pixel_analysis=pixel_analysis, model_analysis=model_analysis)
-            if deep_signals:
-                result = _merge_deep_signals(result, _deep_image_layers(file_path, thresholds))
+            result = _analyze_image_file(
+                file_path, metadata, dimensions,
+                root=root, pixel_mode=pixel_mode, pixel_max_side=pixel_max_side,
+                heatmaps=heatmaps, heatmap_dir=heatmap_dir, model_path=model_path,
+                deep_signals=deep_signals, thresholds=thresholds,
+            )
             return ScanItem(display_path, item_name, "image", "analyzed", size, result)
         except OSError as exc:
             return ScanItem(display_path, item_name, "image", "failed", size, error=str(exc))
 
     if extension in SUPPORTED_AUDIO_EXTENSIONS:
-        try:
-            analysis = analyze_audio(file_path, model_path=model_path)
-            return ScanItem(display_path, item_name, "audio", "analyzed", size, _audio_result(analysis))
-        except OSError as exc:
-            return ScanItem(display_path, item_name, "audio", "failed", size, error=str(exc))
+        return ScanItem(display_path, item_name, "audio", "analyzed", size, _analyze_audio_file(file_path, model_path=model_path))
 
     if extension in SUPPORTED_VIDEO_EXTENSIONS:
-        try:
-            analysis = analyze_video_temporal(file_path, model_path=model_path, analyze_audio_track=True)
-            result = _video_result(analysis)
-            if deep_signals:
-                result = _merge_deep_signals(result, _deep_video_layers(file_path, thresholds))
-            return ScanItem(display_path, item_name, "video", "analyzed", size, result)
-        except OSError as exc:
-            return ScanItem(display_path, item_name, "video", "failed", size, error=str(exc))
+        return ScanItem(
+            display_path, item_name, "video", "analyzed", size,
+            _analyze_video_file(file_path, model_path=model_path, deep_signals=deep_signals, thresholds=thresholds),
+        )
 
     return ScanItem(display_path, item_name, "unsupported", "unsupported", size, error="지원 형식이 아닙니다.")
 
 
-def _audio_result(analysis: AudioAnalysis) -> ClassificationResult:
-    """Adapt an AudioAnalysis into the stable ClassificationResult contract.
+# ---------------------------------------------------------------------------
+# Per-modality analysis. Every analyzer call goes through checks.run_check so
+# its outcome lands in ``coverage``; evidence comes from evidence_rules; the
+# verdict comes from decision.decide via build_classification_result.
+# ---------------------------------------------------------------------------
 
-    Keeps the heuristic score/band/signals and carries model_analysis through
-    so external_model_active accounting works exactly like the image path.
+DEEP_IMAGE_CHECKS = ("face_manipulation", "inpaint", "faceswap_seam")
+DEEP_VIDEO_CHECKS = ("rppg", "avatar", "lipsync", "face_track")
+DEEP_DISABLED_REASON = "비활성화(deep_signals=false)"
+
+
+def _model_entry(check: str, *, available: bool, confidence: str, detail: str) -> CoverageEntry:
+    if available:
+        return CoverageEntry(check, CoverageStatus.RAN)
+    reason = detail.strip() or "모델 결과 없음"
+    if confidence == MODEL_FAILED_CONFIDENCE:
+        return CoverageEntry(check, CoverageStatus.FAILED, reason)
+    return CoverageEntry(check, CoverageStatus.SKIPPED, f"모델 실행 불가: {reason}")
+
+
+def model_coverage(model: ExternalModelAnalysis, check: str = "external_model") -> list[CoverageEntry]:
+    """Coverage entries for an external-model result.
+
+    A model zoo/profile set reports one entry per member (``model:<name>``)
+    so the examiner sees exactly which detector ran, was skipped, or failed.
     """
-    try:
-        band = RiskBand(analysis.band)
-    except ValueError:
-        band = RiskBand.UNKNOWN
+    members = [entry for entry in model.models if isinstance(entry, dict) and "profile" in entry]
+    if members:
+        return [
+            _model_entry(
+                f"model:{member.get('model') or Path(str(member.get('profile'))).stem}",
+                available=bool(member.get("available")),
+                confidence=str(member.get("confidence") or ""),
+                detail=str(member.get("detail") or ""),
+            )
+            for member in members
+        ]
+    return [_model_entry(check, available=model.available, confidence=model.confidence, detail=model.detail)]
+
+
+def _run_model(
+    media_path: Path,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
+    *,
+    modality: str,
+    dimensions: tuple[int, int] | None = None,
+) -> tuple[ExternalModelAnalysis | None, list[CoverageEntry]]:
+    """Run the external-model check with its range gate (G1/QA-OUT-5)."""
+    if model_path is not None and dimensions and min(dimensions) < MODEL_MIN_SIDE_PX:
+        width, height = dimensions
+        return None, [skipped(
+            "external_model",
+            f"측정 범위 밖: 해상도 {width}x{height} (최소 변 {MODEL_MIN_SIDE_PX}px 미만)",
+        )]
+    model, entry = run_check(
+        "external_model",
+        lambda: analyze_external_model(media_path, model_path, modality=modality),
+    )
+    if entry.status != CoverageStatus.RAN:
+        return None, [entry]
+    if model is None:
+        return None, [_no_model_entry(model_path, modality)]
+    return model, model_coverage(model)
+
+
+def _no_model_entry(model_path: object | None, modality: str) -> CoverageEntry:
+    if model_path is None:
+        return skipped("external_model", "모델 프로필 미지정")
+    return skipped("external_model", f"{modality} 형식에 맞는 모델 프로필 없음")
+
+
+def _validate_c2pa(path: Path) -> dict[str, object]:
+    import c2pa  # noqa: F401 — dependency probe: absent SDK is "skipped", not "failed"
+
+    from .c2pa import validate_c2pa_manifest
+
+    validation = validate_c2pa_manifest(path)
+    if validation is None:
+        raise ModuleNotFoundError("c2pa", name="c2pa")
+    if validation.get("status") == "unavailable":
+        raise AnalyzerError(f"C2PA 매니페스트를 읽었으나 검증 중 오류: {validation.get('error', '')}")
+    return validation
+
+
+# Words in a legacy analyzer's "unavailable" verdict that mean the input
+# could not be processed (a failure) rather than that the check does not
+# apply (a skip, e.g. no face or clip too short).
+_ANALYZER_ERROR_MARKERS = ("읽을 수 없", "디코딩할 수 없", "읽기 오류", "열 수 없", "열기 오류", "오류", "error", "failed")
+
+
+def _raise_unavailable(message: str) -> None:
+    lowered = message.lower()
+    if any(marker in lowered for marker in _ANALYZER_ERROR_MARKERS):
+        raise AnalyzerError(message)
+    raise CheckSkipped(message or "적용 불가")
+
+
+@dataclass
+class DeepLayers:
+    """Outcome of the opt-in deep layers for one file."""
+
+    evidence: list[EvidenceItem] = field(default_factory=list)
+    coverage: list[CoverageEntry] = field(default_factory=list)
+    limitations: list[str] = field(default_factory=list)
+
+
+def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
+    """Opt-in deep image layers: face manipulation, inpainting, face-swap seam.
+
+    Each layer is a separate check: a missing dependency is ``skipped``, no
+    detected face is ``skipped`` "얼굴 미검출", any other exception is
+    ``failed`` (G1/G12). Flags become uncalibrated statistical evidence.
+    """
+    out = DeepLayers()
+
+    def face_check():
+        import cv2  # noqa: F401 — dependency probe
+
+        from .face import analyze_faces
+
+        face = analyze_faces(path)
+        if face.face_count == 0:
+            if face.manipulation_type == "none":
+                raise CheckSkipped("얼굴 미검출")
+            raise AnalyzerError(face.verdict)
+        return face
+
+    face, entry = run_check("face_manipulation", face_check)
+    out.coverage.append(entry)
+    if face is not None:
+        if face.score > 0:
+            out.evidence.append(deep_layer_evidence(
+                "얼굴 조작 분석", f"{face.verdict} (faces={face.face_count}, {face.manipulation_type})", "face", face.score,
+            ))
+        out.limitations.extend(face.limitations[:2])
+
+    def inpaint_check():
+        import cv2  # noqa: F401 — dependency probe
+
+        from .inpaint import analyze_inpainting
+
+        inpaint = analyze_inpainting(path)
+        if inpaint.band == "unknown":
+            _raise_unavailable(inpaint.verdict)
+        return inpaint
+
+    inpaint, entry = run_check("inpaint", inpaint_check)
+    out.coverage.append(entry)
+    if inpaint is not None:
+        if inpaint.regions_detected:
+            out.evidence.append(deep_layer_evidence(
+                "인페인팅/부분 변형 탐지", f"{inpaint.verdict} (영역 {inpaint.regions_detected}개)", "inpaint", inpaint.score,
+            ))
+        out.limitations.extend(inpaint.limitations[:2])
+
+    def seam_check():
+        import cv2  # noqa: F401 — dependency probe
+
+        from .faceswap_seam import analyze_faceswap_seam
+
+        seam = analyze_faceswap_seam(path, thresholds=thresholds)
+        if seam.band == "unknown":
+            if seam.face_count == 0 and "얼굴" in seam.verdict:
+                raise CheckSkipped("얼굴 미검출")
+            _raise_unavailable(seam.verdict)
+        return seam
+
+    seam, entry = run_check("faceswap_seam", seam_check)
+    out.coverage.append(entry)
+    if seam is not None:
+        for sig in seam.signals:
+            out.evidence.append(deep_layer_evidence(sig.title, sig.detail, "face", sig.weight))
+        out.limitations.extend(seam.limitations[:2])
+    return out
+
+
+def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
+    """Opt-in deep video layers: rPPG, avatar, lip-sync, face-track."""
+    out = DeepLayers()
+
+    def rppg_check():
+        import cv2  # noqa: F401 — dependency probe
+
+        from .rppg import analyze_rppg
+
+        rppg = analyze_rppg(path)
+        if rppg.band == "unknown":
+            _raise_unavailable(rppg.verdict)
+        return rppg
+
+    rppg, entry = run_check("rppg", rppg_check)
+    out.coverage.append(entry)
+    if rppg is not None:
+        if rppg.score > 0:
+            out.evidence.append(deep_layer_evidence("rPPG 맥박 신호", rppg.verdict, "rppg", rppg.score))
+        out.limitations.extend(rppg.limitations[:2])
+
+    def avatar_check():
+        from .avatar import analyze_avatar
+
+        return analyze_avatar(path)
+
+    avatar, entry = run_check("avatar", avatar_check)
+    out.coverage.append(entry)
+    if avatar is not None:
+        if avatar.score > 0:
+            out.evidence.append(deep_layer_evidence("아바타/디지털휴먼 탐지", avatar.verdict, "avatar", avatar.score))
+        out.limitations.extend(avatar.limitations[:2])
+
+    def lipsync_check():
+        from .lipsync import analyze_lipsync
+
+        lipsync = analyze_lipsync(path)
+        if not lipsync.available:
+            _raise_unavailable(lipsync.verdict)
+        return lipsync
+
+    lipsync, entry = run_check("lipsync", lipsync_check)
+    out.coverage.append(entry)
+    if lipsync is not None:
+        if lipsync.score > 0:
+            out.evidence.append(deep_layer_evidence("립싱크 일관성", lipsync.verdict, "lipsync", lipsync.score))
+        out.limitations.extend(lipsync.limitations[:2])
+
+    def track_check():
+        from .face_track import analyze_face_track
+
+        track = analyze_face_track(path, thresholds=thresholds)
+        if not track.available:
+            _raise_unavailable(track.verdict)
+        return track
+
+    track, entry = run_check("face_track", track_check)
+    out.coverage.append(entry)
+    if track is not None:
+        if track.score > 0:
+            out.evidence.append(deep_layer_evidence("얼굴 트랙 시간-일관성", track.verdict, "face_track", track.score))
+        out.limitations.extend(track.limitations[:2])
+    return out
+
+
+def _deep_disabled(checks: tuple[str, ...]) -> DeepLayers:
+    return DeepLayers(coverage=[skipped(check, DEEP_DISABLED_REASON) for check in checks])
+
+
+def _analyze_image_file(
+    file_path: Path,
+    metadata: dict[str, str],
+    dimensions: tuple[int, int] | None,
+    *,
+    root: Path | None,
+    pixel_mode: str,
+    pixel_max_side: int,
+    heatmaps: bool,
+    heatmap_dir: Path | None,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
+    deep_signals: bool,
+    thresholds: object | None,
+) -> ClassificationResult:
+    coverage: list[CoverageEntry] = [CoverageEntry("metadata", CoverageStatus.RAN)]
+    c2pa_validation, entry = run_check("c2pa", lambda: _validate_c2pa(file_path))
+    coverage.append(entry)
+
+    pixel_analysis: PixelAnalysis | None = None
+    if pixel_mode == "off":
+        coverage.append(skipped("pixel", "비활성화(pixel=off) — 참고 신호 전용 검사"))
+    else:
+        pixel_analysis, entry = run_check(
+            "pixel",
+            lambda: analyze_image_pixels(
+                file_path,
+                mode=pixel_mode,
+                max_side=pixel_max_side,
+                heatmap_path=_heatmap_path_for(file_path, root=root, heatmap_dir=heatmap_dir) if heatmaps else None,
+            ),
+            reraise=(OSError,),
+        )
+        if pixel_analysis is not None and not pixel_analysis.available:
+            reason = pixel_analysis.limitations[0] if pixel_analysis.limitations else "픽셀 분석 불가"
+            entry = skipped("pixel", reason)
+        coverage.append(entry)
+
+    model_analysis, model_entries = _run_model(file_path, model_path, modality="image", dimensions=dimensions)
+    coverage.extend(model_entries)
+
+    deep = _deep_image_layers(file_path, thresholds) if deep_signals else _deep_disabled(DEEP_IMAGE_CHECKS)
+    coverage.extend(deep.coverage)
+
+    return analyze_image_metadata(
+        metadata,
+        dimensions=dimensions,
+        pixel_analysis=pixel_analysis,
+        model_analysis=model_analysis,
+        c2pa_validation=c2pa_validation,
+        coverage=coverage,
+        extra_evidence=deep.evidence,
+        extra_limitations=deep.limitations,
+    )
+
+
+def _analyze_audio_file(
+    file_path: Path,
+    *,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
+) -> ClassificationResult:
+    analysis, entry = run_check("audio_analysis", lambda: analyze_audio(file_path, model_path=model_path))
+    if analysis is None:
+        return build_classification_result(
+            subject="오디오",
+            evidence=[],
+            coverage=[entry],
+            source_guess=SourceGuess.unknown("오디오를 분석하지 못했습니다."),
+            limitations=[],
+            next_checks=AUDIO_NEXT_CHECKS,
+        )
+    coverage = [entry]
+    if analysis.features is not None:
+        coverage.append(CoverageEntry("audio_features", CoverageStatus.RAN))
+    elif importlib.util.find_spec("librosa") is None:
+        coverage.append(skipped("audio_features", "의존성 부재: librosa"))
+    else:
+        coverage.append(failed_entry("audio_features", AnalyzerError(analysis.verdict)))
+    if analysis.model_analysis is None:
+        coverage.append(_no_model_entry(model_path, "audio"))
+    else:
+        coverage.extend(model_coverage(analysis.model_analysis))
+    return _audio_result(analysis, coverage=coverage)
+
+
+def _audio_result(analysis: AudioAnalysis, *, coverage: list[CoverageEntry] | None = None) -> ClassificationResult:
+    """Adapt an AudioAnalysis into the result contract.
+
+    Audio: legacy acoustic heuristics are reference-only; the model is
+    statistical evidence; nothing deterministic exists yet (G21, phase 1).
+    """
+    if coverage is None:
+        coverage = [CoverageEntry("audio_analysis", CoverageStatus.RAN)]
+        if analysis.model_analysis is not None:
+            coverage.extend(model_coverage(analysis.model_analysis))
+    evidence: list[EvidenceItem] = []
+    model_item = model_evidence(analysis.model_analysis)
+    if model_item is not None:
+        evidence.append(model_item)
+    reference = [
+        reference_signal(signal.title, signal.detail, signal.weight)
+        for signal in analysis.signals
+        if not signal.title.startswith("외부 모델")
+    ]
     source_known = bool(analysis.source_guess) and analysis.source_guess != "unknown"
     source_guess = SourceGuess(
-        analysis.source_guess or "출처 단서 없음",
+        analysis.source_guess if source_known else "출처 단서 없음",
         SourceConfidence.LOW if source_known else SourceConfidence.UNKNOWN,
         [analysis.source_guess] if source_known else ["오디오에서 출처를 판단할 단서가 부족합니다."],
     )
-    return ClassificationResult(
-        score=analysis.score,
-        band=band,
-        band_label=analysis.band_label,
-        verdict=analysis.verdict,
-        signals=[EvidenceSignal(signal.title, signal.detail, signal.weight) for signal in analysis.signals],
-        limitations=[
-            *analysis.limitations,
-            *(analysis.model_analysis.limitations if analysis.model_analysis else []),
-        ],
+    limitations = [
+        "오디오 음향 휴리스틱은 측정 전 참고 신호이며 결론에 참여하지 않습니다.",
+        *analysis.limitations,
+        *(analysis.model_analysis.limitations if analysis.model_analysis else []),
+    ]
+    return build_classification_result(
+        subject="오디오",
+        evidence=evidence,
+        coverage=coverage,
         source_guess=source_guess,
-        next_checks=["원본 녹음이나 통화 원본을 확보하세요.", "동일 화자의 다른 샘플과 음향 특성을 비교하세요.", "업로드 맥락과 파일 메타데이터를 함께 검토하세요."],
+        limitations=limitations,
+        next_checks=AUDIO_NEXT_CHECKS,
+        reference_signals=reference,
         model_analysis=analysis.model_analysis,
-        ai_score=analysis.score,
-        source_attribution_label=source_guess.label,
     )
 
 
-def _deep_image_layers(path: Path, thresholds=None) -> tuple[list[EvidenceSignal], list[str]]:
-    """Opt-in deep image layers: face-manipulation and inpainting probes.
-
-    These modules predate the unified scan but were never wired in — each
-    degrades to a limitation note on missing deps (mediapipe, cv2) rather
-    than failing the item.
-    """
-    signals: list[EvidenceSignal] = []
-    limitations: list[str] = []
-    try:
-        from .face import analyze_faces
-        face = analyze_faces(path)
-        if face.face_count > 0:
-            signals.append(EvidenceSignal(
-                "얼굴 조작 분석",
-                f"{face.verdict} (faces={face.face_count}, {face.manipulation_type})",
-                min(face.score, 30),
-            ))
-        limitations.extend(face.limitations[:2])
-    except Exception:
-        limitations.append("얼굴 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
-    try:
-        from .inpaint import analyze_inpainting
-        inpaint = analyze_inpainting(path)
-        if inpaint.regions_detected:
-            signals.append(EvidenceSignal(
-                "인페인팅/부분 변형 탐지",
-                f"{inpaint.verdict} (영역 {inpaint.regions_detected}개)",
-                min(inpaint.score, 25),
-            ))
-        limitations.extend(inpaint.limitations[:2])
-    except Exception:
-        limitations.append("인페인팅 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
-    try:
-        from .faceswap_seam import analyze_faceswap_seam
-        seam = analyze_faceswap_seam(path, thresholds=thresholds)
-        if seam.signals:
-            for sig in seam.signals:
-                signals.append(EvidenceSignal(sig.title, sig.detail, min(sig.weight, 30)))
-        limitations.extend(seam.limitations[:2])
-    except Exception:
-        limitations.append("페이스스왑 경계면 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
-    return signals, limitations
-
-
-def _deep_video_layers(path: Path, thresholds=None) -> tuple[list[EvidenceSignal], list[str]]:
-    """Opt-in deep video layers: rPPG pulse screening + avatar probe."""
-    signals: list[EvidenceSignal] = []
-    limitations: list[str] = []
-    try:
-        from .rppg import analyze_rppg
-        rppg = analyze_rppg(path)
-        signals.append(EvidenceSignal(
-            "rPPG 맥박 신호",
-            rppg.verdict,
-            min(rppg.score, 20),
-        ))
-        limitations.extend(rppg.limitations[:2])
-    except Exception:
-        limitations.append("rPPG 맥박 분석을 실행할 수 없습니다(선택 의존성 부재).")
-    try:
-        from .avatar import analyze_avatar
-        avatar = analyze_avatar(path)
-        if avatar.score > 0:
-            signals.append(EvidenceSignal(
-                "아바타/디지털휴먼 탐지",
-                avatar.verdict,
-                min(avatar.score, 25),
-            ))
-        limitations.extend(avatar.limitations[:2])
-    except Exception:
-        limitations.append("아바타 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
-    try:
-        from .lipsync import analyze_lipsync
-        lipsync = analyze_lipsync(path)
-        if lipsync.available and lipsync.score > 0:
-            signals.append(EvidenceSignal(
-                "립싱크 일관성",
-                lipsync.verdict,
-                min(lipsync.score, 30),
-            ))
-        limitations.extend(lipsync.limitations[:2])
-    except Exception:
-        limitations.append("립싱크 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
-    try:
-        from .face_track import analyze_face_track
-        track = analyze_face_track(path, thresholds=thresholds)
-        if track.available and track.score > 0:
-            signals.append(EvidenceSignal(
-                "얼굴 트랙 시간-일관성",
-                track.verdict,
-                min(track.score, 35),
-            ))
-        limitations.extend(track.limitations[:2])
-    except Exception:
-        limitations.append("얼굴 트랙 분석 레이어를 실행할 수 없습니다(선택 의존성 부재).")
-    return signals, limitations
-
-
-def _merge_deep_signals(
-    result: ClassificationResult,
-    layers: tuple[list[EvidenceSignal], list[str]],
+def _analyze_video_file(
+    file_path: Path,
+    *,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
+    deep_signals: bool,
+    thresholds: object | None,
 ) -> ClassificationResult:
-    """Fold deep-layer signals into a result and rescale score/band.
+    def video_check() -> VideoTemporalAnalysis:
+        import cv2  # noqa: F401 — dependency probe
 
-    Deep signals are capped per-layer so they shift prioritization without
-    dominating the base analysis; band is recomputed on the merged total.
-    """
-    signals, limitations = layers
-    if not signals and not limitations:
-        return result
-    merged = sorted([*result.signals, *signals], key=lambda s: s.weight, reverse=True)
-    score = min(100, result.score + sum(s.weight for s in signals))
-    if result.band == RiskBand.UNKNOWN:
-        band = result.band
-    elif score >= 67:
-        band = RiskBand.HIGH
-    elif score >= 35:
-        band = RiskBand.MEDIUM
+        analysis = analyze_video_temporal(file_path, model_path=model_path, analyze_audio_track=True)
+        if analysis.band == "unknown" and analysis.duration_seconds <= 0 and not analysis.signals:
+            raise AnalyzerError(analysis.verdict)
+        return analysis
+
+    analysis, entry = run_check("video_analysis", video_check)
+    deep = _deep_video_layers(file_path, thresholds) if deep_signals else _deep_disabled(DEEP_VIDEO_CHECKS)
+    coverage: list[CoverageEntry] = [entry]
+    if analysis is None:
+        if model_path is not None:
+            coverage.append(skipped("external_model", "영상 분석이 실행되지 않아 모델 검사도 수행되지 않음"))
+        coverage.extend(deep.coverage)
+        return build_classification_result(
+            subject="영상",
+            evidence=deep.evidence,
+            coverage=coverage,
+            source_guess=SourceGuess.unknown("영상 분석이 불완전해 출처를 판단할 단서가 없습니다."),
+            limitations=deep.limitations,
+            next_checks=VIDEO_NEXT_CHECKS,
+        )
+    if analysis.model_analysis is None:
+        coverage.append(_no_model_entry(model_path, "video"))
     else:
-        band = RiskBand.LOW
-    return replace(
-        result,
-        score=score,
-        band=band,
-        band_label=RISK_LABELS[band],
-        signals=merged,
-        limitations=[*result.limitations, *limitations, "심층 신호는 측정 전(provisional) 가중치입니다."],
-        ai_score=score,
-    )
+        coverage.extend(model_coverage(analysis.model_analysis))
+    coverage.extend(deep.coverage)
+    return _video_result(analysis, coverage=coverage, deep=deep)
 
 
-def _video_result(analysis: "VideoTemporalAnalysis") -> ClassificationResult:
-    """Adapt a VideoTemporalAnalysis into the ClassificationResult contract.
+def _video_result(
+    analysis: VideoTemporalAnalysis,
+    *,
+    coverage: list[CoverageEntry] | None = None,
+    deep: DeepLayers | None = None,
+) -> ClassificationResult:
+    """Adapt a VideoTemporalAnalysis into the result contract.
 
-    Same shape as _audio_result: temporal score/band/signals pass through,
-    and model_analysis (e.g. the video-frames profile scoring sampled
-    frames with an image detector) is carried for external_model_active
-    accounting.
+    Temporal heuristics are reference-only; the frame model is statistical
+    evidence; deep layers are uncalibrated statistical flags.
     """
-    try:
-        band = RiskBand(analysis.band)
-    except ValueError:
-        band = RiskBand.UNKNOWN
+    deep = deep or DeepLayers()
+    if coverage is None:
+        coverage = [CoverageEntry("video_analysis", CoverageStatus.RAN)]
+        if analysis.model_analysis is not None:
+            coverage.extend(model_coverage(analysis.model_analysis))
+    evidence: list[EvidenceItem] = list(deep.evidence)
+    model_item = model_evidence(analysis.model_analysis)
+    if model_item is not None:
+        evidence.append(model_item)
+    reference = [
+        reference_signal(signal.title, signal.detail, signal.weight)
+        for signal in analysis.signals
+        if not signal.title.startswith("외부 모델")
+    ]
     has_detail = analysis.frame_count > 0 and analysis.duration_seconds > 0
-    source_guess = SourceGuess(
-        "출처 단서 없음",
-        SourceConfidence.UNKNOWN,
-        [
-            "영상 파일의 컨테이너 메타데이터에서 출처 단서를 찾지 못했습니다."
-            if has_detail
-            else "영상 분석이 불완전해 출처를 판단할 단서가 없습니다."
-        ],
+    source_guess = SourceGuess.unknown(
+        "영상 파일의 컨테이너 메타데이터에서 출처 단서를 찾지 못했습니다."
+        if has_detail
+        else "영상 분석이 불완전해 출처를 판단할 단서가 없습니다."
     )
-    return ClassificationResult(
-        score=analysis.score,
-        band=band,
-        band_label=analysis.band_label,
-        verdict=analysis.verdict,
-        signals=[EvidenceSignal(signal.title, signal.detail, signal.weight) for signal in analysis.signals],
-        limitations=[
-            *analysis.limitations,
-            *(analysis.model_analysis.limitations if analysis.model_analysis else []),
-        ],
+    limitations = [
+        "영상 시간축 휴리스틱은 측정 전 참고 신호이며 결론에 참여하지 않습니다.",
+        *analysis.limitations,
+        *(analysis.model_analysis.limitations if analysis.model_analysis else []),
+        *deep.limitations,
+    ]
+    return build_classification_result(
+        subject="영상",
+        evidence=evidence,
+        coverage=coverage,
         source_guess=source_guess,
-        next_checks=[
-            "원본 촬영 파일(인카메라 파일)이나 원 스트림을 확보하세요.",
-            "프레임별 이미지 탐지 점수와 음성 트랙 분석을 함께 검토하세요.",
-            "C2PA/출처 기록이 있는 영상인지 확인하세요.",
-        ],
+        limitations=limitations,
+        next_checks=VIDEO_NEXT_CHECKS,
+        reference_signals=reference,
         model_analysis=analysis.model_analysis,
-        ai_score=analysis.score,
-        source_attribution_label=source_guess.label,
         av_audio=analysis.av_audio,
     )
+
+
+def _analyze_text_file(
+    file_path: Path,
+    extension: str,
+    *,
+    text_bytes: int,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
+) -> ClassificationResult:
+    coverage: list[CoverageEntry] = []
+    doc_metadata: dict[str, str] = {}
+    model_input = file_path
+    tmp_text_path: Path | None = None
+    if extension in SUPPORTED_DOCUMENT_EXTENSIONS:
+        extracted, entry = run_check("document_text", lambda: extract_document_text(file_path), reraise=(OSError,))
+        text, doc_metadata = extracted if extracted is not None else ("", {})
+        extractor = doc_metadata.get("extractor", "")
+        if entry.status == CoverageStatus.RAN:
+            if extractor.startswith("unavailable:"):
+                entry = skipped("document_text", f"의존성 부재: {extractor.split(':', 1)[1]}")
+            elif extractor.startswith("skipped:"):
+                entry = skipped("document_text", f"측정 범위 밖: {extractor.split(':', 1)[1]}")
+            elif extractor.startswith("failed:"):
+                entry = failed_entry("document_text", AnalyzerError(f"문서 텍스트 추출 실패 ({extractor})"))
+        coverage.append(entry)
+        # Binary containers (docx/hwp/pdf) must not reach the text members
+        # as raw bytes — feed the extracted text instead so PPL/binoculars
+        # and the language gate see real prose.
+        if text.strip():
+            fd, tmp_name = tempfile.mkstemp(suffix=".txt", prefix="dflens-")
+            try:
+                os.write(fd, text.encode("utf-8", errors="replace"))
+            finally:
+                os.close(fd)
+            tmp_text_path = Path(tmp_name)
+            model_input = tmp_text_path
+    else:
+        text = _read_prefix(file_path, text_bytes).decode("utf-8", errors="replace")
+    try:
+        model_analysis, model_entries = _run_model(model_input, model_path, modality="text")
+    finally:
+        if tmp_text_path is not None:
+            tmp_text_path.unlink(missing_ok=True)
+    coverage.extend(model_entries)
+    result = analyze_text(text, model_analysis=model_analysis, coverage=coverage)
+    return _apply_document_metadata(result, doc_metadata)
+
+
+AUDIO_NEXT_CHECKS = [
+    "원본 녹음이나 통화 원본을 확보하세요.",
+    "동일 화자의 다른 샘플과 음향 특성을 비교하세요.",
+    "업로드 맥락과 파일 메타데이터를 함께 검토하세요.",
+]
+VIDEO_NEXT_CHECKS = [
+    "원본 촬영 파일(인카메라 파일)이나 원 스트림을 확보하세요.",
+    "프레임별 이미지 탐지 점수와 음성 트랙 분석을 함께 검토하세요.",
+    "C2PA/출처 기록이 있는 영상인지 확인하세요.",
+]
+IMAGE_NEXT_CHECKS = [
+    "원본 파일을 확보해 메타데이터를 확인하세요.",
+    "역이미지 검색이나 원본 촬영본을 비교하세요.",
+    "게시 계정의 반복 패턴과 업로드 맥락을 함께 보세요.",
+]
+TEXT_NEXT_CHECKS = [
+    "작성자의 초안이나 편집 이력을 확인하세요.",
+    "짧은 문단보다 전체 글의 맥락을 함께 보세요.",
+    "특정 AI 도구명이 직접 언급되었는지 확인하세요.",
+]
 
 
 def compare_files(file_a: Path | str, file_b: Path | str) -> dict[str, object]:
@@ -764,13 +1110,21 @@ def compare_files(file_a: Path | str, file_b: Path | str) -> dict[str, object]:
     return {"error": f"지원되는 쌍이 아닙니다 ({ext_a} vs {ext_b}) — 오디오끼리 또는 텍스트/문서끼리 비교하세요."}
 
 
+
+
+_DOCUMENT_AI_HINT = re.compile(
+    r"chatgpt|openai|claude|anthropic|gemini|copilot|midjourney|stable.?diffusion|dall.?e|gamma|jasper|writesonic",
+    re.I,
+)
+
+
 def _apply_document_metadata(result: ClassificationResult, doc_metadata: dict[str, str]) -> ClassificationResult:
     """Fold office-document provenance metadata into the text result.
 
     Extraction notes (unavailable/failed extractors) become limitations;
-    creator/producer/application fields become source-guess reasons — a
-    document authored by 'ChatGPT' or produced by an AI export pipeline is
-    provenance evidence, not a style signal.
+    creator/producer/application fields become source-guess reasons, and an
+    AI tool name in them becomes deterministic (moderate) evidence — still
+    reference-grade, because text results never conclude (G24).
     """
     if not doc_metadata:
         return result
@@ -792,9 +1146,8 @@ def _apply_document_metadata(result: ClassificationResult, doc_metadata: dict[st
     hints = [(label_text, doc_metadata[key]) for key, label_text in provenance_keys if doc_metadata.get(key)]
     for label_text, value in hints:
         reasons.append(f"{label_text}: {value}")
-    ai_hint = re.compile(r"chatgpt|openai|claude|anthropic|gemini|copilot|midjourney|stable.?diffusion|dall.?e|gamma|jasper|writesonic", re.I)
+    ai_hit = next((v for _, v in hints if _DOCUMENT_AI_HINT.search(v)), None)
     if confidence == SourceConfidence.UNKNOWN:
-        ai_hit = next((v for _, v in hints if ai_hint.search(v)), None)
         if ai_hit:
             label = "AI 도구 생성 메타데이터 추정"
             confidence = SourceConfidence.MEDIUM
@@ -805,26 +1158,47 @@ def _apply_document_metadata(result: ClassificationResult, doc_metadata: dict[st
     # consumers can show the raw metadata record, not just its folded
     # source-guess interpretation.
     preserved = {key: value for key, value in doc_metadata.items() if value and key != "extractor"}
-    return replace(
-        result,
-        limitations=limitations,
+    extra = document_metadata_evidence(ai_hit)
+    rebuilt = build_classification_result(
+        subject="글",
+        evidence=[*result.evidence, *extra],
+        coverage=result.coverage,
+        grade=result.grade,
         source_guess=SourceGuess(label, confidence, reasons),
-        document_metadata=preserved or result.document_metadata,
+        limitations=limitations,
+        next_checks=result.next_checks,
+        reference_signals=result.reference_signals,
+        model_analysis=result.model_analysis,
     )
+    return replace(rebuilt, document_metadata=preserved or result.document_metadata)
 
 
-def analyze_text(text: str, *, model_analysis: ExternalModelAnalysis | None = None) -> ClassificationResult:
+TEXT_LEXICAL_LIMITATION = "어휘·문체 신호(키워드, 연결 문구, 문장 통계)는 사람이 쓴 글에도 나타나며 결론을 바꾸지 않습니다."
+# Below this many characters, style statistics are unstable (sentence-length
+# variance and shingle repetition need several sentences) — disclosed only.
+SHORT_TEXT_CHARS = 240
+
+
+def analyze_text(
+    text: str,
+    *,
+    model_analysis: ExternalModelAnalysis | None = None,
+    coverage: list[CoverageEntry] | None = None,
+) -> ClassificationResult:
+    """Text screening — always reference grade with the legal limitation
+    first (G24). Phrase/style signals are lexical evidence only (G4)."""
+    coverage = list(coverage) if coverage is not None else _default_model_coverage(model_analysis)
     trimmed = text.strip()
     if not trimmed:
-        return ClassificationResult(
-            score=0,
-            band=RiskBand.UNKNOWN,
-            band_label=RISK_LABELS[RiskBand.UNKNOWN],
-            verdict="글에서 판단할 단서가 부족합니다.",
-            signals=[],
-            limitations=["분석할 원문이 비어 있습니다."],
+        return build_classification_result(
+            subject="글",
+            evidence=[],
+            coverage=[*coverage, skipped("text_lexical", "분석할 원문이 비어 있음")],
+            grade=Grade.REFERENCE,
             source_guess=SourceGuess.unknown(),
+            limitations=[TEXT_LEGAL_LIMITATION, "분석할 원문이 비어 있습니다."],
             next_checks=["분석할 원문을 더 길게 확보하세요."],
+            model_analysis=model_analysis,
         )
 
     normalized = re.sub(r"\s+", " ", trimmed.lower())
@@ -849,55 +1223,51 @@ def analyze_text(text: str, *, model_analysis: ExternalModelAnalysis | None = No
     elif list_markers >= 3:
         signals.append(EvidenceSignal("목록 중심 구성", "번호/불릿 구조가 두드러집니다.", 10))
 
-    sentence_signal = _sentence_uniformity_signal(sentences)
-    if sentence_signal:
-        signals.append(sentence_signal)
-    repeat_signal = _repeated_shingle_signal(words)
-    if repeat_signal:
-        signals.append(repeat_signal)
-    generic_signal = _generic_text_signal(normalized, words)
-    if generic_signal:
-        signals.append(generic_signal)
-    model_signal = _model_evidence_signal(model_analysis)
-    if model_signal:
-        signals.append(model_signal)
-    fingerprint_signals = _frontier_llm_fingerprints(trimmed, normalized, sentences, words)
-    signals.extend(fingerprint_signals)
+    for optional in (
+        _sentence_uniformity_signal(sentences),
+        _repeated_shingle_signal(words),
+        _generic_text_signal(normalized, words),
+    ):
+        if optional:
+            signals.append(optional)
+    signals.extend(_frontier_llm_fingerprints(trimmed, normalized, sentences, words))
+
+    evidence = lexical_evidence(signals)
+    model_item = model_evidence(model_analysis)
+    if model_item is not None:
+        evidence.append(model_item)
 
     source_guess = guess_text_source(normalized, identity_hits)
-    limitations = ["휴리스틱 기반 선별 결과이며 진위 판단이 아니라 검토 우선순위입니다."]
+    limitations = [TEXT_LEGAL_LIMITATION, TEXT_LEXICAL_LIMITATION]
     tech_density = _technical_document_density(trimmed, lines)
     if tech_density >= 0.4:
-        # Code fences/tables/headers inflate list-structure, uniformity,
-        # and perplexity signals — devin-style agent docs measured at
-        # PPL 61-131 for structural reasons alone. Down-weight the
-        # structure-derived signals and disclose the gate.
-        signals = [
-            EvidenceSignal(s.title, s.detail, max(2, int(s.weight * 0.4)))
-            if s.title in {"과도하게 균일한 목록 구조", "목록 중심 구성", "문장 길이 균일성", "낮은 문장 변주"}
-            else s
-            for s in signals
-        ]
         limitations.append(
             f"기술문서 구조 밀도가 높습니다({tech_density:.0%}) — 코드/표/헤더가 목록·균일성·퍼플렉시티 신호를 부풀리므로 문체 기반 판별의 신뢰도가 낮습니다. 측정된 실패 영역입니다."
         )
-    if len(trimmed) < 240:
-        limitations.append("짧은 글은 문체 통계가 불안정하며, 점수가 66점으로 상한됩니다 — '강한 의심' 판정에는 더 긴 원문이 필요합니다.")
+    if len(trimmed) < SHORT_TEXT_CHARS:
+        limitations.append("짧은 글은 문체 통계가 불안정합니다 — 어휘 신호가 있어도 참고 정보로만 표시합니다.")
     if len(sentences) < 4:
         limitations.append("문장 수가 적어 반복도와 문장 길이 신호가 제한적입니다.")
     if model_analysis:
         limitations.extend(model_analysis.limitations)
 
-    return _build_result(
-        signals,
+    return build_classification_result(
         subject="글",
+        evidence=evidence,
+        coverage=[*coverage, CoverageEntry("text_lexical", CoverageStatus.RAN)],
+        grade=Grade.REFERENCE,
         source_guess=source_guess,
         limitations=limitations,
-        force_unknown=len(trimmed) < 24 and not signals and source_guess.confidence == SourceConfidence.UNKNOWN and not (model_analysis and model_analysis.available),
+        next_checks=TEXT_NEXT_CHECKS,
         model_analysis=model_analysis,
-        score_cap=66 if len(trimmed) < 240 else None,
-        score_cap_exempt_titles=frozenset({"AI 자기표현 문구"}) if len(trimmed) < 240 else None,
     )
+
+
+def _default_model_coverage(model_analysis: ExternalModelAnalysis | None) -> list[CoverageEntry]:
+    """Coverage for direct (non-file) calls that pass a model result in."""
+    if model_analysis is None:
+        return [skipped("external_model", "모델 프로필 미지정")]
+    return model_coverage(model_analysis)
 
 
 def analyze_image_metadata(
@@ -906,48 +1276,162 @@ def analyze_image_metadata(
     dimensions: tuple[int, int] | None = None,
     pixel_analysis: PixelAnalysis | None = None,
     model_analysis: ExternalModelAnalysis | None = None,
+    c2pa_validation: dict[str, object] | None = None,
+    coverage: list[CoverageEntry] | None = None,
+    extra_evidence: list[EvidenceItem] | None = None,
+    extra_limitations: list[str] | None = None,
 ) -> ClassificationResult:
-    signals: list[EvidenceSignal] = []
-    source_guess = guess_image_source(metadata)
-    if source_guess.confidence in {SourceConfidence.MEDIUM, SourceConfidence.HIGH}:
-        signals.append(
-            EvidenceSignal(
-                "생성 도구 메타데이터",
-                source_guess.reasons[0] if source_guess.reasons else "생성 도구 단서가 발견되었습니다.",
-                67 if source_guess.confidence == SourceConfidence.HIGH else 36,
-            )
-        )
+    """Image result from already-collected analyzer outputs.
 
-    if dimensions:
-        width, height = dimensions
-        if width == height and width >= 512 and width % 64 == 0:
-            signals.append(EvidenceSignal("생성 모델에 흔한 정사각 해상도", f"{width}x{height} 해상도는 생성 이미지 워크플로에서 자주 쓰입니다.", 9))
+    ``coverage`` is supplied by ``analyze_file``; direct callers (tests,
+    benchmarks) get a coverage record synthesized from the arguments.
+    """
+    evidence = [*image_metadata_evidence(metadata, dimensions), *c2pa_evidence(c2pa_validation)]
+    model_item = model_evidence(model_analysis)
+    if model_item is not None:
+        evidence.append(model_item)
+    evidence.extend(extra_evidence or [])
 
-    pixel_signal = _pixel_evidence_signal(pixel_analysis)
-    if pixel_signal:
-        signals.append(pixel_signal)
-    model_signal = _model_evidence_signal(model_analysis)
-    if model_signal:
-        signals.append(model_signal)
+    reference: list[EvidenceSignal] = []
+    if pixel_analysis and pixel_analysis.available:
+        top = " / ".join(pixel_analysis.signals[:2]) or "픽셀 전문가 신호 요약 없음"
+        reference.append(reference_signal(
+            "픽셀 앙상블(참고, 미측정)",
+            f"{pixel_analysis.model} score={pixel_analysis.score}, confidence={pixel_analysis.confidence}. {top}",
+            pixel_analysis.score,
+        ))
 
-    limitations = ["기본 분석은 메타데이터와 파일 헤더 중심의 빠른 선별 도구입니다."]
-    if not metadata:
-        limitations.append("메타데이터가 없거나 읽지 못했습니다. 이는 사람이 만든 파일이라는 뜻이 아닙니다.")
+    if coverage is None:
+        coverage = [CoverageEntry("metadata", CoverageStatus.RAN)]
+        if pixel_analysis is not None:
+            coverage.append(CoverageEntry("pixel", CoverageStatus.RAN) if pixel_analysis.available else skipped("pixel", "픽셀 분석 불가"))
+        coverage.extend(_default_model_coverage(model_analysis))
+
+    limitations = ["결론은 메타데이터·출처 기록 같은 결정적 근거로만 내립니다. 통계·휴리스틱 신호는 보정 전까지 결론에 참여하지 않습니다."]
     if not dimensions:
         limitations.append("이미지 크기를 파일 헤더에서 확인하지 못했습니다.")
     if pixel_analysis:
         limitations.extend(pixel_analysis.limitations)
     if model_analysis:
         limitations.extend(model_analysis.limitations)
+    limitations.extend(extra_limitations or [])
 
-    return _build_result(
-        signals,
-        subject="사진",
-        source_guess=source_guess,
+    return build_classification_result(
+        subject="이미지",
+        evidence=evidence,
+        coverage=coverage,
+        source_guess=guess_image_source(metadata),
         limitations=limitations,
-        force_unknown=not metadata and not dimensions and not (pixel_analysis and pixel_analysis.available),
+        next_checks=IMAGE_NEXT_CHECKS,
+        reference_signals=reference,
         pixel_analysis=pixel_analysis,
         model_analysis=model_analysis,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Result assembly (contract v2)
+# ---------------------------------------------------------------------------
+
+_KIND_ORDER = {EvidenceKind.DETERMINISTIC: 0, EvidenceKind.STATISTICAL: 1, EvidenceKind.LEXICAL: 2}
+_STRENGTH_ORDER = {EvidenceStrength.STRONG: 0, EvidenceStrength.MODERATE: 1, EvidenceStrength.WEAK: 2}
+_DIRECTION_ORDER = {EvidenceDirection.SYNTHETIC: 0, EvidenceDirection.AUTHENTIC: 1, EvidenceDirection.NEUTRAL: 2}
+
+
+def _ordered_evidence(items: list[EvidenceItem]) -> list[EvidenceItem]:
+    return sorted(items, key=lambda i: (_KIND_ORDER[i.kind], _STRENGTH_ORDER[i.strength], _DIRECTION_ORDER[i.direction]))
+
+
+def _verdict_text(
+    subject: str,
+    verdict: Verdict,
+    grade: Grade,
+    evidence: list[EvidenceItem],
+    failed_entries: list[CoverageEntry],
+) -> str:
+    if grade == Grade.REFERENCE:
+        lexical = sum(1 for item in evidence if item.kind == EvidenceKind.LEXICAL)
+        note = f" (어휘적 신호 {lexical}건은 참고 정보)" if lexical else ""
+        return f"참고: 근거 부족 — {subject}의 생성 여부는 결론을 내리지 않습니다{note}."
+    if verdict == Verdict.MANIPULATION_EVIDENCE:
+        basis = next(
+            (
+                item for item in evidence
+                if (item.kind == EvidenceKind.DETERMINISTIC and item.direction == EvidenceDirection.SYNTHETIC and item.strength == EvidenceStrength.STRONG)
+                or (item.kind == EvidenceKind.STATISTICAL and item.is_calibrated and item.direction == EvidenceDirection.SYNTHETIC)
+            ),
+            None,
+        )
+        return f"{subject}: {VERDICT_LABELS[verdict]} — {basis.title if basis else '근거 목록 참조'}."
+    if verdict == Verdict.AUTHENTICITY_EVIDENCE:
+        basis = next((item for item in evidence if item.direction == EvidenceDirection.AUTHENTIC and item.strength == EvidenceStrength.STRONG), None)
+        return f"{subject}: {VERDICT_LABELS[verdict]} — {basis.title if basis else '근거 목록 참조'}."
+    if failed_entries:
+        names = ", ".join(check_label(entry.check) for entry in failed_entries)
+        return f"{subject}: 판단 불가 — 검사 실패({names})로 결론을 내리지 않습니다."
+    return f"{subject}: 판단 불가 — 결론을 뒷받침할 결정적 근거나 보정된 모델 근거가 없습니다. 원본이라는 뜻이 아닙니다."
+
+
+def build_classification_result(
+    *,
+    subject: str,
+    evidence: list[EvidenceItem],
+    coverage: list[CoverageEntry],
+    source_guess: SourceGuess,
+    limitations: list[str],
+    next_checks: list[str],
+    grade: Grade = Grade.EVIDENCE,
+    reference_signals: list[EvidenceSignal] | None = None,
+    pixel_analysis: PixelAnalysis | None = None,
+    model_analysis: ExternalModelAnalysis | None = None,
+    av_audio: dict | None = None,
+    document_metadata: dict | None = None,
+    probability_thresholds: dict[str, float] | None = None,
+) -> ClassificationResult:
+    """The only constructor new code uses for a ClassificationResult.
+
+    Verdict comes from ``decision.decide``; every legacy field is derived:
+    band from the verdict (never MEDIUM), score from a calibrated
+    probability only (else 0), signals from the evidence list.
+    """
+    ordered = _ordered_evidence(list(evidence))
+    entries = list(coverage)
+    verdict_code = decide(ordered, entries, grade, probability_thresholds)
+    calibrated = [item for item in ordered if item.kind == EvidenceKind.STATISTICAL and item.is_calibrated]
+    top = max(calibrated, key=lambda item: item.probability or 0.0) if calibrated else None
+    probability = top.probability if top else None
+    score = int(round(probability * 100)) if probability is not None else 0
+    band = band_for_verdict(verdict_code)
+    failed_entries = [entry for entry in entries if entry.status == CoverageStatus.FAILED]
+    all_limitations = list(limitations)
+    if grade == Grade.REFERENCE:
+        all_limitations = [TEXT_LEGAL_LIMITATION, *(lim for lim in all_limitations if lim != TEXT_LEGAL_LIMITATION)]
+    for entry in failed_entries:
+        all_limitations.append(f"검사 실패 — {entry.describe()}")
+    legacy_signals = sorted((item.legacy_signal() for item in ordered), key=lambda signal: signal.weight, reverse=True)
+    return ClassificationResult(
+        score=score,
+        band=band,
+        band_label=VERDICT_LABELS[verdict_code],
+        verdict=_verdict_text(subject, verdict_code, grade, ordered, failed_entries),
+        signals=legacy_signals,
+        limitations=all_limitations,
+        source_guess=source_guess,
+        next_checks=list(next_checks),
+        pixel_analysis=pixel_analysis,
+        model_analysis=model_analysis,
+        ai_score=score,
+        source_attribution_label=source_guess.label,
+        av_audio=av_audio,
+        document_metadata=document_metadata,
+        verdict_code=verdict_code,
+        grade=grade,
+        evidence=ordered,
+        coverage=entries,
+        probability=probability,
+        probability_ci=top.probability_ci if top else None,
+        score_is_calibrated=probability is not None,
+        reference_signals=list(reference_signals or []),
     )
 
 
@@ -968,6 +1452,10 @@ def sort_items(items: list[ScanItem]) -> list[ScanItem]:
 
 def summarize(items: list[ScanItem], *, capped: bool, cached: int = 0) -> BatchScanSummary:
     analyzed = [item for item in items if item.status == "analyzed" and item.result]
+
+    def count(verdict: Verdict) -> int:
+        return sum(1 for item in analyzed if item.result and item.result.verdict_code == verdict)
+
     return BatchScanSummary(
         total=len(items),
         analyzed=len(analyzed),
@@ -981,6 +1469,13 @@ def summarize(items: list[ScanItem], *, capped: bool, cached: int = 0) -> BatchS
         duplicates=sum(1 for item in items if item.status == "duplicate"),
         skipped=sum(1 for item in items if item.status == "skipped"),
         external_model_active=sum(1 for item in analyzed if item.result and item.result.model_analysis and item.result.model_analysis.available),
+        manipulation_evidence=count(Verdict.MANIPULATION_EVIDENCE),
+        authenticity_evidence=count(Verdict.AUTHENTICITY_EVIDENCE),
+        undetermined=count(Verdict.UNDETERMINED),
+        checks_failed=sum(
+            1 for item in analyzed
+            if item.result and any(entry.status == CoverageStatus.FAILED for entry in item.result.coverage)
+        ),
     )
 
 
@@ -1015,7 +1510,10 @@ def _cache_provenance(thresholds: object | None) -> str:
     try:
         cov = weights_coverage()
     except Exception:
-        cov = {}
+        # Unreadable weights state must not abort the scan, but it is logged
+        # and recorded as "unknown" so cached verdicts are not replayed.
+        logger.exception("weights coverage unavailable for cache provenance")
+        cov = {"weights_available": "unknown", "weights_total": "unknown"}
     tj = _thresholds_json(thresholds)
     return "|".join(
         [
@@ -1048,102 +1546,6 @@ def scan_to_json_text(summary: BatchScanSummary, items: list[ScanItem], *, thres
 
 
 
-def _build_result(
-    signals: list[EvidenceSignal],
-    *,
-    subject: str,
-    source_guess: SourceGuess,
-    limitations: list[str],
-    force_unknown: bool = False,
-    pixel_analysis: PixelAnalysis | None = None,
-    model_analysis: ExternalModelAnalysis | None = None,
-    score_cap: int | None = None,
-    score_cap_exempt_titles: frozenset[str] | None = None,
-) -> ClassificationResult:
-    sorted_signals = sorted(signals, key=lambda signal: signal.weight, reverse=True)
-    exempt_titles = score_cap_exempt_titles or frozenset()
-    exempt = sum(signal.weight for signal in sorted_signals if signal.title in exempt_titles)
-    rest = sum(signal.weight for signal in sorted_signals if signal.title not in exempt_titles)
-    if score_cap is not None:
-        rest = min(rest, score_cap)
-    score = min(100, exempt + rest)
-    if force_unknown:
-        band = RiskBand.UNKNOWN
-    elif score >= 67:
-        band = RiskBand.HIGH
-    elif score >= 35:
-        band = RiskBand.MEDIUM
-    else:
-        band = RiskBand.LOW
-
-    verdict = {
-        RiskBand.UNKNOWN: f"{subject}에서 판단할 단서가 부족합니다.",
-        RiskBand.HIGH: f"{subject}에서 의심 신호가 강합니다.",
-        RiskBand.MEDIUM: f"{subject}에서 몇 가지 의심 신호가 보여 추가 확인이 필요합니다.",
-        RiskBand.LOW: f"{subject}에서 뚜렷한 의심 신호는 적습니다.",
-    }[band]
-    next_checks = (
-        ["원본 파일을 확보해 메타데이터를 확인하세요.", "역이미지 검색이나 원본 촬영본을 비교하세요.", "게시 계정의 반복 패턴과 업로드 맥락을 함께 보세요."]
-        if subject == "사진"
-        else ["작성자의 초안이나 편집 이력을 확인하세요.", "짧은 문단보다 전체 글의 맥락을 함께 보세요.", "특정 AI 도구명이 직접 언급되었는지 확인하세요."]
-    )
-    return ClassificationResult(
-        score=score,
-        band=band,
-        band_label=RISK_LABELS[band],
-        verdict=verdict,
-        signals=sorted_signals,
-        limitations=limitations,
-        source_guess=source_guess,
-        next_checks=next_checks,
-        pixel_analysis=pixel_analysis,
-        model_analysis=model_analysis,
-        ai_score=score,
-        source_attribution_label=source_guess.label,
-    )
-
-
-def _pixel_evidence_signal(pixel_analysis: PixelAnalysis | None) -> EvidenceSignal | None:
-    if not pixel_analysis or not pixel_analysis.available:
-        return None
-    if pixel_analysis.score >= 82:
-        weight = 61
-        title = "픽셀 앙상블 강한 의심"
-    elif pixel_analysis.score >= 68:
-        weight = 47
-        title = "픽셀 앙상블 의심"
-    elif pixel_analysis.score >= 48:
-        weight = 35
-        title = "픽셀 앙상블 약한 의심"
-    elif pixel_analysis.score >= 32:
-        weight = 18
-        title = "픽셀 통계 확인 필요"
-    else:
-        return None
-
-    top_details = pixel_analysis.signals[:2] or ["일부 픽셀 전문가 모델에서 약한 이상 신호가 있습니다."]
-    detail = f"{pixel_analysis.model} score={pixel_analysis.score}, confidence={pixel_analysis.confidence}. " + " / ".join(top_details)
-    return EvidenceSignal(title, detail, weight)
-
-
-
-def _model_evidence_signal(model_analysis: ExternalModelAnalysis | None) -> EvidenceSignal | None:
-    if not model_analysis or not model_analysis.available:
-        return None
-    if model_analysis.score >= 82:
-        weight = 67
-        title = "외부 모델 강한 의심"
-    elif model_analysis.score >= 65:
-        weight = 42
-        title = "외부 모델 의심"
-    elif model_analysis.score >= 45:
-        weight = 24
-        title = "외부 모델 약한 의심"
-    else:
-        return None
-    return EvidenceSignal(title, f"{model_analysis.model}: {model_analysis.detail}", weight)
-
-
 def _sort_bucket(item: ScanItem) -> int:
     if item.status != "analyzed" or not item.result:
         return 4
@@ -1153,4 +1555,3 @@ def _sort_bucket(item: ScanItem) -> int:
         RiskBand.UNKNOWN: 2,
         RiskBand.LOW: 3,
     }[item.result.band]
-

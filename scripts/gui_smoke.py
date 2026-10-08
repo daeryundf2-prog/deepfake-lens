@@ -87,6 +87,36 @@ def main() -> int:
             total_txt = page.locator("#stat-total").inner_text()
             assert total_txt.strip().isdigit() and int(total_txt) > 0
 
+            # 4b. Contract v2: verdict pills, then verdict -> evidence (by
+            #     kind) -> coverage inside an opened card (QA-OUT-1/3/6).
+            for pill in ("#stat-manip", "#stat-undet", "#stat-auth", "#stat-other"):
+                assert page.locator(pill).count() == 1, f"verdict pill {pill} missing"
+            assert page.locator("#stat-pills [data-band='medium']").count() == 0, "legacy 'medium' pill must be gone"
+            first = page.locator("#res-list .res").first
+            assert first.get_attribute("data-verdict") in {
+                "manipulation_evidence", "authenticity_evidence", "undetermined", "other",
+            }, "card lacks a contract-v2 verdict"
+            first.locator(".res-main").click()
+            detail = first.locator(".res-detail")
+            detail.locator(".verdict-head").wait_for(timeout=10_000)
+            head_text = detail.locator(".verdict-head").inner_text()
+            assert any(label in head_text for label in ("조작·생성 근거 있음", "원본성 근거 있음", "판단 불가")), head_text
+            assert detail.locator(".ev-group").count() >= 1, "evidence block missing"
+            for kind in detail.locator(".ev-group[data-kind]").all():
+                assert kind.get_attribute("data-kind") in {"deterministic", "statistical", "lexical"}
+            assert detail.locator(".cov-group").count() == 1, "coverage block missing"
+            html = detail.inner_html()
+            assert html.index("verdict-head") < html.index("ev-group") < html.index("cov-group"), \
+                "detail order must be verdict -> evidence -> coverage"
+            # Text results lead with the fixed legal limitation.
+            for card in page.locator("#res-list .res").all():
+                card_text = card.inner_text()
+                if "참고" in card_text and ".txt" in card_text:
+                    card.locator(".res-main").click()
+                    card.locator(".legal-note").wait_for(timeout=10_000)
+                    assert "증거능력이 없으며" in card.locator(".legal-note").inner_text()
+                    break
+
             # 5. Case metadata fields exist and feed exports.
             page.locator("#case-meta summary").click()
             page.fill("#case-no", "2024가단0000")

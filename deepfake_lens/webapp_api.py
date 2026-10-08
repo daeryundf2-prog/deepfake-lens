@@ -457,11 +457,24 @@ def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str,
         result = item.get("result")
         return str(result.get("band")) if isinstance(result, dict) else ""
 
+    def _verdict(item: dict[str, object]) -> str:
+        result = item.get("result")
+        return str(result.get("verdict_code") or "undetermined") if isinstance(result, dict) else ""
+
+    def _has_failed_check(item: dict[str, object]) -> bool:
+        result = item.get("result")
+        coverage = result.get("coverage") if isinstance(result, dict) else None
+        return isinstance(coverage, list) and any(isinstance(e, dict) and e.get("status") == "failed" for e in coverage)
+
     analyzed = [i for i in items if _status(i) == "analyzed" and isinstance(i.get("result"), dict)]
     high = sum(1 for item in analyzed if _band(item) == "high")
     medium = sum(1 for item in analyzed if _band(item) == "medium")
     low = sum(1 for item in analyzed if _band(item) == "low")
     return {
+        "manipulation_evidence": sum(1 for item in analyzed if _verdict(item) == "manipulation_evidence"),
+        "authenticity_evidence": sum(1 for item in analyzed if _verdict(item) == "authenticity_evidence"),
+        "undetermined": sum(1 for item in analyzed if _verdict(item) == "undetermined"),
+        "checks_failed": sum(1 for item in analyzed if _has_failed_check(item)),
         "total": len(items),
         "analyzed": len(analyzed),
         "high": high,
@@ -506,16 +519,22 @@ def _archive_upload_items(filename: str, suffix: str, payload: bytes) -> list[di
         if extraction.warnings or extraction.skipped:
             # A container whose members could not all be analyzed is never a
             # clean LOW — skipped/warned members mean unseen evidence.
-            partial = bool(extraction.warnings or extraction.skipped)
-            band = "unknown" if (partial or not extraction.members) else "low"
+            # This branch only runs for partial extraction, so the
+            # container is always undetermined (contract v2, never "low").
+            reason = f"구성 파일 {extraction.skipped}개 스킵, 경고 {len(extraction.warnings)}건 — 일부 구성을 분석하지 못했습니다"
             items.append({
                 "name": filename, "path": filename, "kind": "archive",
-                "status": "unknown" if band == "unknown" else "expanded",
+                "status": "unknown",
                 "size_bytes": len(payload),
                 "result": {
-                    "score": 0, "band": band, "band_label": "판단 불가" if band == "unknown" else "컨테이너",
-                    "verdict": f"압축 해제 — {len(extraction.members)}개 분석, {extraction.skipped}개 스킵"
-                               + (" — 일부 구성을 분석하지 못했습니다" if partial else ""),
+                    "score": 0, "band": "unknown", "band_label": "판단 불가",
+                    "verdict": f"압축 파일: 판단 불가 — {len(extraction.members)}개 분석, {extraction.skipped}개 스킵",
+                    "verdict_code": "undetermined", "verdict_label": "판단 불가",
+                    "grade": "evidence", "grade_label": "감정 근거로 사용 가능",
+                    "evidence": [],
+                    "coverage": [{"check": "archive", "status": "skipped", "reason": reason}],
+                    "reference_signals": [],
+                    "probability": None, "probability_ci": None, "score_is_calibrated": False,
                     "signals": [{"title": "압축 컨테이너", "detail": f"구성 {len(extraction.members)}개", "weight": 0}],
                     "limitations": extraction.warnings,
                     "next_checks": [],
@@ -832,26 +851,9 @@ def _report_payload(body: bytes, format_override: str | None = None) -> bytes | 
             return True  # standalone GUI-less use — same trust as the CLI
         return _resolve_item_path(path_text) is not None
 
-    analyzed = [item for item in items if item.result is not None]
-    bands = {"high": 0, "medium": 0, "low": 0, "unknown": 0}
-    for item in analyzed:
-        band = item.result.band.value if item.result else "unknown"
-        bands[band if band in bands else "unknown"] += 1
-    summary = BatchScanSummary(
-        total=len(items),
-        analyzed=len(analyzed),
-        high=bands["high"],
-        medium=bands["medium"],
-        low=bands["low"],
-        unknown=bands["unknown"],
-        unsupported_or_failed=len(items) - len(analyzed),
-        capped=False,
-        external_model_active=sum(
-            1
-            for item in analyzed
-            if item.result and item.result.model_analysis and item.result.model_analysis.available
-        ),
-    )
+    # Same counting rule as the CLI (core.summarize) so web and CLI report
+    # headers agree on every verdict count.
+    summary = summarize(items, capped=False)
     req_format = (format_override or data.get("format") or "html").lower()
     suffix = ".pdf" if req_format in ("pdf", "evidence", "evidence-statement") else ".html"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:

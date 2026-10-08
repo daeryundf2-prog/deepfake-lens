@@ -59,7 +59,9 @@ class AideRuntimeProfileTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             image = root / "sample.png"
-            _write_rgb_png(image, 8, 8, lambda x, y: (255, 255, 255))
+            # G1/WP-B: images under MODEL_MIN_SIDE_PX skip the model check as
+            # out of range; 128 px keeps this test on the missing-checkpoint path.
+            _write_rgb_png(image, 128, 128, lambda x, y: (255, 255, 255))
 
             analysis = analyze_external_model(image, PROFILE_PATH)
 
@@ -227,7 +229,8 @@ class DefaultEngineDiscoveryTest(unittest.TestCase):
             self.skipTest("checkpoint is present; auto-discovery would run real inference")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            _write_rgb_png(root / "img.png", 8, 8, lambda x, y: (255, 255, 255))
+            # G1/WP-B: 128 px so the model check is in range and actually runs.
+            _write_rgb_png(root / "img.png", 128, 128, lambda x, y: (255, 255, 255))
 
             out = io.StringIO()
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
@@ -270,7 +273,8 @@ class DefaultEngineDiscoveryTest(unittest.TestCase):
     def test_explicit_model_path_wins_over_default(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            _write_rgb_png(root / "img.png", 8, 8, lambda x, y: (255, 255, 255))
+            # G1/WP-B: 128 px so the model check is in range and actually runs.
+            _write_rgb_png(root / "img.png", 128, 128, lambda x, y: (255, 255, 255))
             sidecar_profile = root / "external.json"
             sidecar_profile.write_text(json.dumps({"type": "score-sidecar-v1", "name": "explicit fixture"}), encoding="utf-8")
 

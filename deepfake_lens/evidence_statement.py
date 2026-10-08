@@ -22,6 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from .core import BatchScanSummary, ScanItem
+from .result_text import TEXT_LEGAL_LIMITATION, coverage_gaps, evidence_groups
+from .result_types import VERDICT_LABELS, CoverageStatus, EvidenceDirection, EvidenceKind, EvidenceStrength, Grade, Verdict
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,8 @@ class EvidenceStatement:
     contact: str = "02-780-1128"
     center: str = "디지털포렌식 감정센터"
     provenance_note: str = ""
+    # The fixed legal limitation, set when any entry is a text result.
+    reference_note: str = ""
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -89,9 +93,11 @@ class EvidenceStatement:
             "",
             "### [증거 무결성 고지 (Chain of Custody)]",
             integrity_line,
-            "본 문서는 자동 스크리닝 도구의 결과를 요약한 것으로, 탐지 점수는 유죄·불법성에 대한 법적 판단이 아닙니다.",
+            "본 문서는 자동 분석 도구의 결과를 요약한 것으로, 결론(조작·생성 근거 있음/원본성 근거 있음/판단 불가)은 유죄·불법성에 대한 법적 판단이 아닙니다.",
             "",
         ])
+        if self.reference_note:
+            lines.extend(["### [텍스트 분석 한계]", self.reference_note, ""])
         if self.provenance_note:
             lines.extend(["### [분석 프로비넌스]", self.provenance_note, ""])
         lines.extend([
@@ -123,13 +129,14 @@ def _compute_sha256(path: Path | str) -> str | None:
 
 
 def _determine_statutes(score: int, signals: list[Any], item_kind: str, band: str) -> list[str]:
-    """Statutes a legal reviewer may consider — only when the screen flags risk.
+    """Statutes a legal reviewer may consider — only for a manipulation verdict.
 
-    A screening score is not proof of a crime. Statutes are listed as
-    '검토 참고' candidates only for high/medium bands, and never asserted
-    for low/unknown/failed items.
+    ``band`` here is the verdict-derived band ("high" == manipulation
+    evidence on an evidence-grade result). A screening number is not proof
+    of a crime, so statutes are listed as '검토 참고' candidates only, and
+    never for undetermined, authenticity, reference-grade or failed items.
     """
-    if band not in ("high", "medium"):
+    if band != "high":
         return []
     statutes = []
     sig_titles = [s.title for s in signals] if signals else []
@@ -137,15 +144,35 @@ def _determine_statutes(score: int, signals: list[Any], item_kind: str, band: st
     is_faceswap = any("얼굴" in t or "안면" in t or "스왑" in t or "턱선" in t for t in sig_titles)
     is_video = item_kind == "video"
 
-    if band == "high":
-        if is_faceswap or is_video:
-            statutes.append("성폭력범죄의 처벌 등에 관한 특례법 제14조의2 (허위영상물 등의 반포등) — 검토 참고")
-            statutes.append("형법 제347조 (사기 - 신원도용 및 기망) — 검토 참고")
-        statutes.append("정보통신망 이용촉진 및 정보보호 등에 관한 법률 제70조 (벌칙 - 명예훼손) — 검토 참고")
-    else:
-        statutes.append("관련 법조 적용 가능성 검토 필요 — 스크리닝 점수만으로 범죄 구성요건 단정 불가")
-
+    if is_faceswap or is_video:
+        statutes.append("성폭력범죄의 처벌 등에 관한 특례법 제14조의2 (허위영상물 등의 반포등) — 검토 참고")
+        statutes.append("형법 제347조 (사기 - 신원도용 및 기망) — 검토 참고")
+    statutes.append("정보통신망 이용촉진 및 정보보호 등에 관한 법률 제70조 (벌칙 - 명예훼손) — 검토 참고")
     return statutes
+
+
+def _purpose_head(item: ScanItem) -> str:
+    res = item.result
+    if res is None:
+        return "분석 불가 상태의 증거물로, 별도 검증이 필요함을 소명함."
+    if res.grade == Grade.REFERENCE:
+        return f"{TEXT_LEGAL_LIMITATION} 본 증거물에 대한 자동 분석 결과는 결론이 아닌 참고 정보임을 소명함."
+    if res.verdict_code == Verdict.MANIPULATION_EVIDENCE:
+        basis = next(
+            (e.title for e in res.evidence if e.kind == EvidenceKind.DETERMINISTIC and e.direction == EvidenceDirection.SYNTHETIC and e.strength == EvidenceStrength.STRONG),
+            "결정적 근거",
+        )
+        return f"결정적 근거({basis})에 의해 조작·생성 근거가 확인된 증거물임을 소명함."
+    if res.verdict_code == Verdict.AUTHENTICITY_EVIDENCE:
+        basis = next(
+            (e.title for e in res.evidence if e.direction == EvidenceDirection.AUTHENTIC and e.strength == EvidenceStrength.STRONG),
+            "결정적 근거",
+        )
+        return f"결정적 근거({basis})에 의해 원본성 근거가 확인된 증거물임을 소명함."
+    failed = [entry for entry in res.coverage if entry.status == CoverageStatus.FAILED]
+    if failed:
+        return f"검사 실패({', '.join(entry.describe() for entry in failed)})로 판단 불가 상태이며, 별도 검증이 필요함을 소명함."
+    return "결론을 뒷받침할 결정적 근거가 없어 판단 불가 상태이며(원본이라는 뜻이 아님), 별도 검증이 필요함을 소명함."
 
 
 def build_evidence_statement(
@@ -170,8 +197,14 @@ def build_evidence_statement(
     for idx, item in enumerate(items, start=1):
         res = item.result
         score = res.score if res else 0
-        band_value = res.band.value if res else "unknown"
-        band = res.band_label if res else (item.status or "판단 불가")
+        # Statutes key off the verdict, not the stored band: a v1 record
+        # (no verdict) or a reference-grade text result never lists any.
+        band_value = (
+            "high"
+            if res is not None and res.verdict_code == Verdict.MANIPULATION_EVIDENCE and res.grade == Grade.EVIDENCE
+            else "unknown"
+        )
+        band = VERDICT_LABELS[res.verdict_code] if res else (item.status or "판단 불가")
         signals = res.signals if res else []
         file_sha256 = _compute_sha256(item.path)
 
@@ -181,26 +214,25 @@ def build_evidence_statement(
 
         statutes = _determine_statutes(score, signals, item.kind, band_value)
 
-        # The tool screens and prioritizes; it does not prove crimes.
-        # Purpose language must match the actual analytic outcome.
-        if band_value == "high":
-            purpose_head = "AI 합성 의심 신호가 검출되어 우선 정밀 감정 대상으로 분류된 증거물임을 소명함."
-        elif band_value == "medium":
-            purpose_head = "일부 합성 관련 신호가 관찰되어 추가 검토가 필요한 증거물임을 소명함."
-        elif band_value == "low":
-            purpose_head = "AI 스크리닝에서 유의한 합성 신호가 확인되지 않은 증거물임을 소명함."
-        else:
-            purpose_head = "분석 불가 또는 판단 유보 상태의 증거물로, 별도 검증이 필요함을 소명함."
+        # The tool screens; it does not prove crimes. Purpose language
+        # follows the verdict and names the evidence kind behind it.
+        purpose_head = _purpose_head(item)
+        evidence_lines: list[str] = []
+        if res is not None:
+            for kind_label, lines in evidence_groups(res):
+                evidence_lines.append(f"• {kind_label}: " + "; ".join(line[:60] for line in lines[:2]) + (" 외" if len(lines) > 2 else ""))
+            gaps = coverage_gaps(res)
+            if gaps:
+                evidence_lines.append("• 검사 범위: " + "; ".join(entry.describe() for entry in gaps[:3]) + (f" 외 {len(gaps) - 3}건" if len(gaps) > 3 else ""))
+        sig_text = "\n".join(evidence_lines) if evidence_lines else "• 근거 항목 없음"
 
-        top_signals = [f"• {s.title} ({s.detail[:55]}...)" for s in signals[:2]]
-        sig_text = "\n".join(top_signals) if top_signals else "• 인공지능 생성/합성 흔적 정밀 검사"
-
-        statute_text = "\n".join([f"• {st}" for st in statutes]) if statutes else "• 관련 법조: 해당 없음 (스크리닝 결과상 단정 불가)"
+        statute_text = "\n".join([f"• {st}" for st in statutes]) if statutes else "• 관련 법조: 해당 없음 (결정적 근거에 의한 조작·생성 결론이 없음)"
 
         hash_text = f"• 원본 SHA-256: {file_sha256}" if file_sha256 else "• 원본 SHA-256: 해시 불가 — 원본 파일 접근 실패 (동일성 확인 요망)"
 
+        grade_text = (res.grade_label if res else "판단 불가")
         purpose = (
-            f"[스크리닝 위험도: {band} ({score}점) — 자동 스크리닝 결과로서 유죄·불법성의 직접 증거가 아님]\n"
+            f"[자동 분석 결론: {band} / 등급: {grade_text} — 유죄·불법성의 직접 증거가 아님]\n"
             f"{purpose_head}\n"
             f"{sig_text}\n"
             f"{statute_text}\n"
@@ -251,6 +283,7 @@ def build_evidence_statement(
         contact=contact,
         center=center,
         provenance_note=provenance_note,
+        reference_note=TEXT_LEGAL_LIMITATION if any(i.result is not None and i.result.grade == Grade.REFERENCE for i in items) else "",
     )
 
 
@@ -411,7 +444,8 @@ def write_evidence_statement_pdf(path: Path | str, statement: EvidenceStatement)
     page.insert_textbox(
         pymupdf.Rect(margin_l + 8, y + 18, margin_r - 8, y + 52),
         (f"원본 해시 산출: {hashed}/{len(statement.entries)}건. "
-         "본 문서의 위험도는 자동 스크리닝 결과로 유죄·불법성의 직접 증거가 아니며, 정밀 감정은 별도로 수행되어야 합니다. "
+         "본 문서의 결론은 자동 분석 결과로 유죄·불법성의 직접 증거가 아니며, 정밀 감정은 별도로 수행되어야 합니다. "
+         + (statement.reference_note + " " if statement.reference_note else "")
          + statement.provenance_note.replace("\n", " / ")),
         fontname=font_ko, fontsize=6.8, color=(0.4, 0.4, 0.4),
     )

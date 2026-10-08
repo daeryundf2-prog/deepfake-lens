@@ -175,8 +175,13 @@ class FusionDoubleCountTest(unittest.TestCase):
         twice = apply_fusion_to_result(once, DEFAULT_FUSION_PROFILE)
         self.assertEqual(once.score, twice.score)
         self.assertEqual(once.band, twice.band)
-        fusion_signals = [s for s in twice.signals if s.title == "융합 점수"]
+        # G5: the fusion score lives in reference_signals and leaves the
+        # verdict/band/score of the input untouched.
+        self.assertEqual(once.band, result.band)
+        self.assertEqual(once.score, result.score)
+        fusion_signals = [s for s in twice.reference_signals if s.title == "융합 점수"]
         self.assertEqual(len(fusion_signals), 1)
+        self.assertFalse([s for s in twice.signals if s.title == "융합 점수"])
 
     def test_fused_score_stays_in_range(self) -> None:
         components = {"metadata": 100, "pixel": 100, "external_model": 100, "source": 100}

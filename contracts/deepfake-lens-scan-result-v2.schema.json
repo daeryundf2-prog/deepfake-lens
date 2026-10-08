@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "deepfake-lens/contracts/deepfake-lens-scan-result-v2.schema.json",
+  "title": "Deepfake Lens scan JSON — result contract v2",
+  "description": "Project-owned (not vendored) schema of `deepfake-lens scan --format json` from schema_version 2 (phase 0, G5/G6/G12/G24). Conclusions are one of three verdicts; evidence is classified deterministic/statistical/lexical; coverage records every check that ran, was skipped, or failed. Legacy v1 fields stay for read-compat and are derived from the v2 fields.",
+  "type": "object",
+  "required": ["schema_version", "summary", "items"],
+  "properties": {
+    "schema_version": { "const": 2 },
+    "summary": { "$ref": "#/$defs/summary" },
+    "items": { "type": "array", "items": { "$ref": "#/$defs/item" } }
+  },
+  "$defs": {
+    "summary": {
+      "type": "object",
+      "required": [
+        "total", "analyzed", "high", "medium", "unknown", "low", "unsupported_or_failed",
+        "manipulation_evidence", "authenticity_evidence", "undetermined", "checks_failed"
+      ],
+      "properties": {
+        "medium": { "const": 0, "description": "Legacy band count; no v2 path produces the medium band." }
+      }
+    },
+    "item": {
+      "type": "object",
+      "required": ["path", "name", "kind", "status", "size_bytes", "result"],
+      "properties": {
+        "result": { "type": ["object", "null"], "$ref": "#/$defs/result" }
+      }
+    },
+    "result": {
+      "type": "object",
+      "required": [
+        "verdict_code", "verdict_label", "grade", "grade_label", "evidence", "coverage",
+        "probability", "probability_ci", "score_is_calibrated", "reference_signals",
+        "score", "band", "band_label", "verdict", "signals", "limitations", "source_guess", "next_checks"
+      ],
+      "properties": {
+        "verdict_code": { "enum": ["manipulation_evidence", "authenticity_evidence", "undetermined"] },
+        "verdict_label": { "enum": ["조작·생성 근거 있음", "원본성 근거 있음", "판단 불가"] },
+        "grade": { "enum": ["evidence", "reference"], "description": "Text results are always reference." },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence_item" } },
+        "coverage": { "type": "array", "items": { "$ref": "#/$defs/coverage_entry" } },
+        "probability": { "type": ["number", "null"], "description": "Set only from a calibrated statistical item." },
+        "probability_ci": { "type": ["array", "null"] },
+        "score_is_calibrated": { "type": "boolean" },
+        "reference_signals": { "type": "array", "items": { "$ref": "#/$defs/signal" } },
+        "score": { "type": "integer", "description": "round(probability*100) when calibrated, else 0." },
+        "band": { "enum": ["high", "low", "unknown"], "description": "Derived: manipulation->high, authenticity->low, undetermined->unknown." },
+        "signals": { "type": "array", "items": { "$ref": "#/$defs/signal" } }
+      }
+    },
+    "evidence_item": {
+      "type": "object",
+      "required": [
+        "title", "detail", "kind", "direction", "strength", "layer",
+        "probability", "probability_ci", "calibration_id", "measured_on", "raw_score"
+      ],
+      "properties": {
+        "kind": { "enum": ["deterministic", "statistical", "lexical"] },
+        "direction": { "enum": ["synthetic", "authentic", "neutral"] },
+        "strength": { "enum": ["strong", "moderate", "weak"] },
+        "probability": { "type": ["number", "null"] },
+        "probability_ci": { "type": ["array", "null"] },
+        "calibration_id": { "type": ["string", "null"] },
+        "measured_on": { "type": ["string", "null"] },
+        "raw_score": { "type": ["integer", "null"], "description": "Uncalibrated model/heuristic output (0-100); never a probability." }
+      }
+    },
+    "coverage_entry": {
+      "type": "object",
+      "required": ["check", "status", "reason"],
+      "properties": {
+        "check": { "type": "string" },
+        "status": { "enum": ["ran", "skipped", "failed"] },
+        "reason": { "type": "string", "description": "Required (non-empty) for skipped/failed; failed starts with the exception class name." }
+      }
+    },
+    "signal": {
+      "type": "object",
+      "required": ["title", "detail", "weight"]
+    }
+  }
+}

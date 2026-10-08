@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from deepfake_lens.benchmark import run_benchmark, write_benchmark, write_benchmark_markdown
 from deepfake_lens.collection import build_collection_plan, write_collection_plan
 from deepfake_lens.core import RiskBand, SourceConfidence, analyze_file, analyze_image_metadata, analyze_text, scan_directory
+from deepfake_lens.result_types import EvidenceKind, Grade, Verdict
 from deepfake_lens.datasets import audit_dataset, build_robustness_plan, discover_dataset, plan_dataset_splits, write_audit, write_manifest, write_robustness_plan, write_split_plan
 from deepfake_lens.evaluate import calibrate_dataset, evaluate_dataset, evaluate_robustness_dataset, train_portable_baseline
 from deepfake_lens.fusion import FusionProfile, apply_fusion_to_items, calibrate_fusion_profile, load_fusion_profile, write_fusion_profile
@@ -34,7 +35,12 @@ class DeepfakeLensCoreTest(unittest.TestCase):
             "3. In conclusion, it depends on multiple perspectives."
         )
 
-        self.assertEqual(result.band, RiskBand.HIGH)
+        # G4/G24: an AI-identity phrase is lexical evidence only; text is
+        # always reference grade and never concludes (was: band HIGH).
+        self.assertEqual(result.band, RiskBand.UNKNOWN)
+        self.assertEqual(result.verdict_code, Verdict.UNDETERMINED)
+        self.assertEqual(result.grade, Grade.REFERENCE)
+        self.assertTrue(any(item.title == "AI 자기표현 문구" and item.kind == EvidenceKind.LEXICAL for item in result.evidence))
         self.assertEqual(result.source_guess.label, "AI 어시스턴트 문체 추정")
 
     def test_generic_ai_like_text_does_not_invent_vendor(self) -> None:
@@ -55,6 +61,8 @@ class DeepfakeLensCoreTest(unittest.TestCase):
         )
 
         self.assertEqual(result.band, RiskBand.HIGH)
+        # G6: the band now follows from a deterministic verdict.
+        self.assertEqual(result.verdict_code, Verdict.MANIPULATION_EVIDENCE)
         self.assertEqual(result.source_guess.label, "Stable Diffusion / A1111 추정")
 
     def test_comfyui_metadata_is_high(self) -> None:
@@ -134,8 +142,12 @@ class DeepfakeLensCoreTest(unittest.TestCase):
             self.assertTrue(item.result.pixel_analysis.available)
             self.assertTrue(item.result.pixel_analysis.heatmap_path)
             self.assertTrue(Path(item.result.pixel_analysis.heatmap_path).exists())
-            self.assertEqual(item.result.band, RiskBand.MEDIUM)
-            self.assertTrue(any(signal.title.startswith("픽셀") for signal in item.result.signals))
+            # G3/G17: a checkerboard used to land in MEDIUM via the pixel
+            # ensemble; pixel heuristics are now reference-only and never decide.
+            self.assertEqual(item.result.band, RiskBand.UNKNOWN)
+            self.assertEqual(item.result.verdict_code, Verdict.UNDETERMINED)
+            self.assertTrue(any(signal.title.startswith("픽셀") for signal in item.result.reference_signals))
+            self.assertFalse(any(signal.title.startswith("픽셀") for signal in item.result.signals))
 
     def test_deep_pixel_analysis_exposes_all_recent_research_layers(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -218,8 +230,14 @@ class DeepfakeLensCoreTest(unittest.TestCase):
             model_profile = root / "external-model.json"
             model_profile.write_text(json.dumps({"type": "score-sidecar-v1", "name": "external fixture"}), encoding="utf-8")
             item = analyze_file(ai_dir / "ai.png", root=root, pixel_mode="off", model_path=model_profile)
-            self.assertIsNotNone(item.result.model_analysis)
-            self.assertTrue(item.result.model_analysis.available)
+            # G1/WP-B: a 64 px image is below MODEL_MIN_SIDE_PX, so the model
+            # check is skipped as out of range and says so in coverage (it
+            # used to run and report a score).
+            self.assertIsNone(item.result.model_analysis)
+            self.assertTrue(any(
+                entry.check == "external_model" and entry.status.value == "skipped" and "측정 범위 밖" in entry.reason
+                for entry in item.result.coverage
+            ))
 
             fusion_payload = calibrate_fusion_profile(root, pixel_mode="deep", model_path=model_profile)
             profile_payload = fusion_payload["profile"]
@@ -236,7 +254,13 @@ class DeepfakeLensCoreTest(unittest.TestCase):
             fused_eval = evaluate_dataset(root, pixel_mode="deep", model_path=model_profile, fusion_profile=loaded_fusion)
             self.assertEqual(fused_eval["threshold"], loaded_fusion.threshold)
             fused_items = apply_fusion_to_items(items, loaded_fusion)
-            self.assertTrue(any(item.result and item.result.signals[0].title == "융합 점수" for item in fused_items))
+            # G5: the fused score is a reference signal; it no longer
+            # replaces the leading evidence signal or moves the verdict.
+            self.assertTrue(any(item.result and item.result.reference_signals[0].title == "융합 점수" for item in fused_items))
+            for before, after in zip(items, fused_items):
+                if before.result and after.result:
+                    self.assertEqual(before.result.verdict_code, after.result.verdict_code)
+                    self.assertEqual(before.result.band, after.result.band)
 
             web_payload = _scan_payload(
                 urlencode({"folder": str(scan_root), "recursive": "true", "pixel": "deep", "fusion_profile": str(fusion_path)}),
@@ -403,7 +427,9 @@ class DeepfakeLensCoreTest(unittest.TestCase):
             self.assertTrue(hash_db.exists())
 
             image = root / "image.png"
-            _write_rgb_png(image, 8, 8, lambda x, y: (255, 255, 255))
+            # G1/WP-B: below MODEL_MIN_SIDE_PX the model check is skipped as
+            # out of range, so the fail-closed runtime path needs a 128 px image.
+            _write_rgb_png(image, 128, 128, lambda x, y: (255, 255, 255))
             model = root / "detector.onnx"
             model.write_bytes(b"not an onnx model")
             item = analyze_file(image, root=root, model_path=model)
@@ -541,14 +567,24 @@ class DeepSignalsTest(unittest.TestCase):
     """Opt-in deep layers must merge signals without breaking the base path."""
 
     def test_deep_signals_merges_layers(self) -> None:
-        from deepfake_lens.core import _merge_deep_signals, _build_result, EvidenceSignal, SourceGuess, SourceConfidence, RISK_LABELS, RiskBand
+        # G5: deep layers used to add their raw weight to the score and
+        # rescale the band (score 15 here). They are now uncalibrated
+        # statistical evidence: listed, never deciding, score stays 0.
+        from deepfake_lens.core import build_classification_result, SourceGuess
+        from deepfake_lens.evidence_rules import deep_layer_evidence
 
-        base = _build_result([], subject="사진", source_guess=SourceGuess.unknown(), limitations=[])
-        merged = _merge_deep_signals(base, ([EvidenceSignal("rPPG 맥박 신호", "테스트", 15)], ["레이어 한계"]))
-        self.assertEqual(merged.score, 15)
+        item = deep_layer_evidence("rPPG 맥박 신호", "테스트", "rppg", 15)
+        merged = build_classification_result(
+            subject="영상", evidence=[item], coverage=[], source_guess=SourceGuess.unknown(),
+            limitations=["레이어 한계"], next_checks=[],
+        )
+        self.assertEqual(merged.score, 0)
+        self.assertEqual(merged.verdict_code, Verdict.UNDETERMINED)
+        self.assertEqual(merged.evidence[0].title, "rPPG 맥박 신호")
+        self.assertEqual(merged.evidence[0].kind, EvidenceKind.STATISTICAL)
+        self.assertIsNone(merged.evidence[0].probability)
         self.assertEqual(merged.signals[0].title, "rPPG 맥박 신호")
         self.assertIn("레이어 한계", merged.limitations)
-        self.assertTrue(any("provisional" in lim for lim in merged.limitations))
 
     def test_deep_signals_flag_reaches_analyze_file(self) -> None:
         import struct
@@ -606,21 +642,20 @@ class ShortTextCapTest(unittest.TestCase):
     """A-4: short text cannot reach the 'high suspicion' band."""
 
     def test_score_cap_applies_under_240_chars(self) -> None:
-        from deepfake_lens.core import _build_result, EvidenceSignal, SourceGuess, SourceConfidence
-
-        guess = SourceGuess.unknown()
-        strong = [EvidenceSignal("강한 신호", "x", 80)]
-        result = _build_result(
-            strong, subject="글", source_guess=guess, limitations=[], score_cap=66,
-        )
-        self.assertEqual(result.score, 66)
-        self.assertLess(result.score, 67)  # below HIGH threshold
+        # G4: the 66-point cap (and its exemption for "AI 자기표현 문구",
+        # which let one keyword reach HIGH) is gone — no text result can
+        # reach HIGH at any length, so there is nothing left to cap.
+        short = analyze_text("As an AI language model, I can help.")
+        self.assertEqual(short.score, 0)
+        self.assertEqual(short.band, RiskBand.UNKNOWN)
+        self.assertEqual(short.grade, Grade.REFERENCE)
 
     def test_short_text_discloses_cap(self) -> None:
+        # G4: the disclosure now states instability, not a score cap.
         result = analyze_text("이 글은 매우 짧습니다. 추가 확인이 필요합니다.")
-        self.assertTrue(any("상한" in item for item in result.limitations))
+        self.assertTrue(any("짧은 글" in item for item in result.limitations))
 
     def test_long_text_uncapped_path(self) -> None:
         prose = "어제 산책을 하다가 오래된 친구를 만났다. 그는 요즘 바쁘다고 했다." * 10
         result = analyze_text(prose)
-        self.assertFalse(any("상한" in item for item in result.limitations))
+        self.assertFalse(any("짧은 글" in item for item in result.limitations))

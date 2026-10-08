@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from .calibration import calibrate_threshold
-from .core import ClassificationResult, EvidenceSignal, RISK_LABELS, RiskBand, ScanItem, SourceConfidence, analyze_file
+from .core import ClassificationResult, EvidenceSignal, ScanItem, SourceConfidence, analyze_file
 from .datasets import discover_dataset, is_positive_label
 
 
@@ -150,35 +150,32 @@ def fused_score(components: dict[str, int], profile: FusionProfile) -> int:
     return max(0, min(100, int(round(score))))
 
 
+FUSION_SIGNAL_TITLE = "융합 점수"
+FUSION_LIMITATION = "융합 점수는 손으로 정한 가중치의 우선순위 점수(참고)이며 결론에 참여하지 않습니다."
+
+
 def apply_fusion_to_result(result: ClassificationResult, profile: FusionProfile) -> ClassificationResult:
-    # Strip any previous fusion output so applying the same profile twice
-    # produces the same result instead of compounding.
+    """Attach the fused component score as a *reference* signal (G5).
+
+    The weights are hand-set constants, not a measured mapping, so the
+    fused number must not move the verdict, band, or score. Re-applying
+    the same profile replaces the previous fusion signal (idempotent).
+    """
+    base_reference = [signal for signal in result.reference_signals if not _is_fusion_signal(signal)]
     base_signals = [signal for signal in result.signals if not _is_fusion_signal(signal)]
-    base_limitations = [
-        limitation
-        for limitation in result.limitations
-        if limitation != "융합 점수는 로컬 보정 프로필 기반 우선순위 점수입니다."
-    ]
+    base_limitations = [limitation for limitation in result.limitations if limitation != FUSION_LIMITATION]
     components = component_scores(replace(result, signals=base_signals))
     score = fused_score(components, profile)
-    if score < profile.unknown_below and result.source_guess.confidence == SourceConfidence.UNKNOWN:
-        band = RiskBand.UNKNOWN
-    elif score >= profile.threshold:
-        band = RiskBand.HIGH
-    elif score >= max(35, profile.threshold // 2):
-        band = RiskBand.MEDIUM
-    else:
-        band = RiskBand.LOW
-    signal = EvidenceSignal("융합 점수", f"metadata={components['metadata']}, pixel={components['pixel']}, external={components['external_model']}, source={components['source']}", score)
+    signal = EvidenceSignal(
+        FUSION_SIGNAL_TITLE,
+        f"metadata={components['metadata']}, pixel={components['pixel']}, external={components['external_model']}, source={components['source']} (참고, 미측정 가중치)",
+        score,
+    )
     return replace(
         result,
-        score=score,
-        ai_score=score,
-        band=band,
-        band_label=RISK_LABELS[band],
-        verdict=_verdict(band),
-        signals=[signal, *base_signals],
-        limitations=[*base_limitations, "융합 점수는 로컬 보정 프로필 기반 우선순위 점수입니다."],
+        reference_signals=[signal, *base_reference],
+        signals=base_signals,
+        limitations=[*base_limitations, FUSION_LIMITATION],
     )
 
 
@@ -207,13 +204,4 @@ def _is_source_signal(signal: EvidenceSignal) -> bool:
 
 
 def _is_fusion_signal(signal: EvidenceSignal) -> bool:
-    return signal.title == "융합 점수"
-
-
-def _verdict(band: RiskBand) -> str:
-    return {
-        RiskBand.UNKNOWN: "융합 점수에서 판단할 단서가 부족합니다.",
-        RiskBand.HIGH: "융합 점수에서 의심 신호가 강합니다.",
-        RiskBand.MEDIUM: "융합 점수에서 추가 확인이 필요합니다.",
-        RiskBand.LOW: "융합 점수에서 뚜렷한 의심 신호는 적습니다.",
-    }[band]
+    return signal.title == FUSION_SIGNAL_TITLE

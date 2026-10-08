@@ -9,6 +9,24 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .core import BatchScanSummary, ScanItem
+from .result_text import (
+    TEXT_LEGAL_LIMITATION,
+    VERDICT_CODES_ASCII,
+    coverage_gaps,
+    deciding_evidence,
+    evidence_counts,
+    evidence_counts_text,
+    evidence_groups,
+    leading_limitations,
+    summary_line,
+    summary_line_ascii,
+    verdict_heading,
+)
+from .result_types import EVIDENCE_KIND_LABELS, VERDICT_LABELS, CoverageStatus, EvidenceKind, Grade, Verdict
+
+
+def _has_reference_grade(items: list[ScanItem]) -> bool:
+    return any(item.result is not None and item.result.grade == Grade.REFERENCE for item in items)
 
 
 def _threshold_provenance_line(thresholds: object | None) -> str:
@@ -33,6 +51,7 @@ def write_html_report(path: Path | str, summary: BatchScanSummary, items: list[S
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     rows = "\n".join(_html_row(item, redact_paths=redact_paths) for item in items)
+    legal_note = f'<p class="legal">{escape(TEXT_LEGAL_LIMITATION)}</p>' if _has_reference_grade(items) else ""
     body = f"""<!doctype html>
 <html lang="ko">
 <head>
@@ -44,16 +63,24 @@ def write_html_report(path: Path | str, summary: BatchScanSummary, items: list[S
     th, td {{ border-bottom: 1px solid #d8dee9; padding: 8px; text-align: left; vertical-align: top; }}
     th {{ background: #f5f7fa; }}
     .note {{ color: #5f6b7a; }}
+    .legal {{ font-weight: 700; color: #8a4b00; }}
+    .v-manipulation_evidence {{ color: #b42318; font-weight: 700; }}
+    .v-authenticity_evidence {{ color: #067647; font-weight: 700; }}
+    .v-undetermined {{ color: #475467; font-weight: 700; }}
+    .kind {{ font-size: 12px; font-weight: 700; color: #344054; margin-top: 4px; }}
+    .gap-failed {{ color: #b42318; }}
+    ul {{ margin: 2px 0 2px 16px; padding: 0; }}
     img.heatmap {{ width: 96px; height: 96px; object-fit: cover; image-rendering: pixelated; border: 1px solid #d8dee9; }}
   </style>
 </head>
 <body>
   <h1>Deepfake Lens Report</h1>
-  <p>Scanned {summary.total} files: high={summary.high}, medium={summary.medium}, unknown={summary.unknown}, low={summary.low}, unsupported/failed={summary.unsupported_or_failed}, duplicates={summary.duplicates}, skipped={summary.skipped}, cached={summary.cached}</p>
-  <p class="note">Local-only screening report. Scores are prioritization evidence, not final truth labels.</p>
+  <p>{escape(summary_line(summary))}</p>
+  <p class="note">결론은 세 가지뿐입니다 — 조작·생성 근거 있음 / 원본성 근거 있음 / 판단 불가. 결정적 근거(메타데이터·C2PA)만 결론을 내리고, 통계적(모델)·어휘적(키워드) 근거는 보정 전까지 참고로만 표시합니다. 검사가 실패한 파일은 판단 불가로 남습니다.</p>
+  {legal_note}
   <p class="note">{_threshold_provenance_line(thresholds)}</p>
   <table>
-    <thead><tr><th>risk</th><th>score</th><th>pixel</th><th>source</th><th>file</th><th>heatmap</th><th>top signal</th></tr></thead>
+    <thead><tr><th>결론</th><th>근거(종류별)</th><th>검사 범위(미실행·실패)</th><th>파일</th><th>참고 신호</th><th>heatmap</th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
 </body>
@@ -109,11 +136,15 @@ def _threshold_provenance_ko(thresholds: object | None) -> str:
 def write_pdf_report(path: Path | str, summary: BatchScanSummary, items: list[ScanItem], *, redact_paths: bool = False, thresholds: object | None = None, degrade_note: str | None = None) -> None:
     lines = [
         "Deepfake Lens Report",
-        f"Scanned {summary.total} files: high={summary.high}, medium={summary.medium}, unknown={summary.unknown}, low={summary.low}, unsupported/failed={summary.unsupported_or_failed}, duplicates={summary.duplicates}, skipped={summary.skipped}, cached={summary.cached}",
-        "Local-only screening report. Scores are prioritization evidence, not final truth labels.",
+        summary_line_ascii(summary),
+        "Verdicts: MANIPULATION-EVIDENCE / AUTHENTICITY-EVIDENCE / UNDETERMINED. Only deterministic",
+        "evidence (metadata, C2PA) concludes; statistical (model) and lexical (keyword) evidence is",
+        "reference-only until calibrated. A failed check leaves the file UNDETERMINED.",
         _threshold_provenance_line(thresholds),
         "",
     ]
+    if _has_reference_grade(items):
+        lines.insert(2, "TEXT RESULTS: reference grade only - text-generation detection has no evidentiary value (2026).")
     if degrade_note:
         lines.append(f"NOTE: {degrade_note}")
         lines.append("")
@@ -123,17 +154,25 @@ def write_pdf_report(path: Path | str, summary: BatchScanSummary, items: list[Sc
         lines.append("")
     for item in shown:
         result = item.result
-        score = result.score if result else "-"
-        risk = result.band_label if result else item.status
-        source = result.source_guess.label if result else "-"
-        top_signal = result.signals[0].title if result and result.signals else (item.error or "")
-        lines.append(f"{risk} {score} {_display_path(item.path, redact_paths=redact_paths)} {source} {top_signal}")
+        if result is None:
+            lines.append(f"{item.status} {_display_path(item.path, redact_paths=redact_paths)} {item.error or ''}")
+            continue
+        counts = evidence_counts(result)
+        failed = sum(1 for entry in result.coverage if entry.status == CoverageStatus.FAILED)
+        skipped = sum(1 for entry in result.coverage if entry.status == CoverageStatus.SKIPPED)
+        top = deciding_evidence(result)
+        lines.append(
+            f"{VERDICT_CODES_ASCII[result.verdict_code]} grade={result.grade.value} "
+            f"det={counts[EvidenceKind.DETERMINISTIC]} stat={counts[EvidenceKind.STATISTICAL]} lex={counts[EvidenceKind.LEXICAL]} "
+            f"checks_failed={failed} skipped={skipped} {_display_path(item.path, redact_paths=redact_paths)}"
+            + (f" [{top.kind.value}] {top.title}" if top else "")
+        )
     if any(ord(char) > 255 for line in lines for char in line):
         # The minimal PDF writer is Latin-1 only; state the limitation
         # instead of silently turning Korean labels into '?'.
         lines = [
             "NOTE: this simple PDF is Latin-1 only; non-Latin text",
-            "(e.g. Korean band labels and signal titles) appears as '?'.",
+            "(e.g. Korean evidence titles) appears as '?'.",
             "Use --html-out for a full Unicode report.",
             "",
         ] + lines
@@ -213,7 +252,7 @@ def write_forensic_pdf_report(
     page.insert_text(pymupdf.Point(margin_l + 10, 151), f"감정 일시: {now_str} (KST)  |  분석 엔진: Deepfake Lens Forensic Suite v0.1.0", fontname=font_ko, fontsize=8.5, color=(0.2, 0.2, 0.2))
     page.insert_text(
         pymupdf.Point(margin_l + 10, 165),
-        f"감정 결과: 총 {summary.total}개 검토 (AI 의심 {summary.high}건, 주의 {summary.medium}건, 저위험 {summary.low}건, 불가/오류 {summary.unsupported_or_failed}건)",
+        f"감정 결과: 총 {summary.total}개 — 조작·생성 근거 {summary.manipulation_evidence}건, 원본성 근거 {summary.authenticity_evidence}건, 판단 불가 {summary.undetermined}건(검사 실패 {summary.checks_failed}건), 미지원/오류 {summary.unsupported_or_failed}건",
         fontname=font_ko,
         fontsize=8.5,
         color=(0.1, 0.2, 0.4),
@@ -238,10 +277,10 @@ def write_forensic_pdf_report(
     page.draw_rect(pymupdf.Rect(margin_l, y, margin_r, y + 20), color=(0.8, 0.85, 0.9), fill=(0.92, 0.94, 0.97))
     page.insert_text(pymupdf.Point(margin_l + 5, y + 14), "No.", fontname=font_en, fontsize=8, color=(0.15, 0.2, 0.35))
     page.insert_text(pymupdf.Point(margin_l + 30, y + 14), "증거 파일명 및 SHA-256 무결성 해시", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-    page.insert_text(pymupdf.Point(margin_l + 250, y + 14), "위험도", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-    page.insert_text(pymupdf.Point(margin_l + 300, y + 14), "점수", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-    page.insert_text(pymupdf.Point(margin_l + 345, y + 14), "엔진/출처", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-    page.insert_text(pymupdf.Point(margin_l + 420, y + 14), "주요 감정 신호", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
+    page.insert_text(pymupdf.Point(margin_l + 250, y + 14), "결론", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
+    page.insert_text(pymupdf.Point(margin_l + 300, y + 14), "등급", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
+    page.insert_text(pymupdf.Point(margin_l + 345, y + 14), "근거 종류", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
+    page.insert_text(pymupdf.Point(margin_l + 420, y + 14), "주요 근거/검사 실패", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
     y += 20.0
 
     row_h = 28.0
@@ -253,10 +292,10 @@ def write_forensic_pdf_report(
             page.draw_rect(pymupdf.Rect(margin_l, y, margin_r, y + 20), color=(0.8, 0.85, 0.9), fill=(0.92, 0.94, 0.97))
             page.insert_text(pymupdf.Point(margin_l + 5, y + 14), "No.", fontname=font_en, fontsize=8, color=(0.15, 0.2, 0.35))
             page.insert_text(pymupdf.Point(margin_l + 30, y + 14), "증거 파일명 및 SHA-256 무결성 해시", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-            page.insert_text(pymupdf.Point(margin_l + 250, y + 14), "위험도", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-            page.insert_text(pymupdf.Point(margin_l + 300, y + 14), "점수", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-            page.insert_text(pymupdf.Point(margin_l + 345, y + 14), "엔진/출처", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-            page.insert_text(pymupdf.Point(margin_l + 420, y + 14), "주요 감정 신호", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
+            page.insert_text(pymupdf.Point(margin_l + 250, y + 14), "결론", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
+            page.insert_text(pymupdf.Point(margin_l + 300, y + 14), "등급", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
+            page.insert_text(pymupdf.Point(margin_l + 345, y + 14), "근거 종류", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
+            page.insert_text(pymupdf.Point(margin_l + 420, y + 14), "주요 근거/검사 실패", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
             y += 20.0
 
         if idx % 2 == 0:
@@ -264,16 +303,21 @@ def write_forensic_pdf_report(
         page.draw_line(pymupdf.Point(margin_l, y + row_h), pymupdf.Point(margin_r, y + row_h), color=(0.9, 0.92, 0.94), width=0.5)
 
         res = item.result
-        band_str = res.band_label if res else (item.status or "-")
-        score_val = str(res.score) if res else "-"
-        source_str = res.source_guess.label if res else "-"
-        sig_str = res.signals[0].title if (res and res.signals) else (item.error or "이상 없음")
+        band_str = VERDICT_LABELS[res.verdict_code] if res else (item.status or "-")
+        score_val = ("참고" if res.grade == Grade.REFERENCE else "근거") if res else "-"
+        source_str = evidence_counts_text(res) if res else "-"
+        failed_checks = [entry for entry in res.coverage if entry.status == CoverageStatus.FAILED] if res else []
+        top_item = deciding_evidence(res) if res else None
+        if failed_checks:
+            sig_str = "실패: " + failed_checks[0].check
+        elif top_item is not None:
+            sig_str = f"[{EVIDENCE_KIND_LABELS[top_item.kind][:2]}] {top_item.title}"
+        else:
+            sig_str = item.error or "근거 항목 없음"
 
-        if res and res.band.value == "high":
+        if res and res.verdict_code == Verdict.MANIPULATION_EVIDENCE:
             band_color = (0.8, 0.15, 0.15)
-        elif res and res.band.value == "medium":
-            band_color = (0.85, 0.45, 0.05)
-        elif res and res.band.value == "low":
+        elif res and res.verdict_code == Verdict.AUTHENTICITY_EVIDENCE:
             band_color = (0.1, 0.55, 0.25)
         else:
             band_color = (0.4, 0.4, 0.4)
@@ -289,16 +333,26 @@ def write_forensic_pdf_report(
         page.insert_text(pymupdf.Point(margin_l + 30, y + 12), disp_path, fontname=font_ko, fontsize=8, color=(0.1, 0.1, 0.1))
         page.insert_text(pymupdf.Point(margin_l + 30, y + 24), hash_line, fontname=font_en if sha256_hex else font_ko, fontsize=6.5, color=(0.5, 0.5, 0.5) if sha256_hex else (0.7, 0.3, 0.3))
 
-        page.insert_text(pymupdf.Point(margin_l + 250, y + 15), band_str, fontname=font_ko, fontsize=8, color=band_color)
-        page.insert_text(pymupdf.Point(margin_l + 300, y + 15), score_val, fontname=font_en, fontsize=8.5, color=(0.1, 0.1, 0.1))
+        page.insert_text(pymupdf.Point(margin_l + 250, y + 15), band_str[:8], fontname=font_ko, fontsize=7, color=band_color)
+        page.insert_text(pymupdf.Point(margin_l + 300, y + 15), score_val, fontname=font_ko, fontsize=8, color=(0.1, 0.1, 0.1))
         page.insert_text(pymupdf.Point(margin_l + 345, y + 15), source_str[:12], fontname=font_ko, fontsize=7.5, color=(0.3, 0.3, 0.3))
         page.insert_text(pymupdf.Point(margin_l + 420, y + 15), sig_str[:18], fontname=font_ko, fontsize=7.5, color=(0.2, 0.2, 0.2))
 
         y += row_h
 
-    if y + 80 > 750:
+    if y + 120 > 750:
         page = create_page()
         y = 70.0
+
+    if _has_reference_grade(items):
+        y += 12.0
+        page.insert_text(pymupdf.Point(margin_l, y), TEXT_LEGAL_LIMITATION, fontname=font_ko, fontsize=8, color=(0.55, 0.3, 0.0))
+    y += 12.0
+    page.insert_text(
+        pymupdf.Point(margin_l, y),
+        "결론은 결정적 근거(메타데이터·C2PA)로만 내리며, 통계적·어휘적 근거와 검사 실패 내역은 JSON 산출물의 evidence/coverage에 전부 기록됩니다.",
+        fontname=font_ko, fontsize=7, color=(0.4, 0.4, 0.4),
+    )
 
     y += 15.0
     sign_box = pymupdf.Rect(margin_l, y, margin_r, y + 65)
@@ -402,27 +456,44 @@ def write_eval_html_report(path: Path | str, payload: dict[str, object], *, reda
 
 def _html_row(item: ScanItem, *, redact_paths: bool) -> str:
     result = item.result
-    risk = result.band_label if result else item.status
-    score = str(result.score) if result else "-"
-    pixel = "-"
-    source = "-"
-    signal = item.error or ""
+    path_cell = escape(_display_path(item.path, redact_paths=redact_paths))
+    if result is None:
+        return (
+            "<tr>"
+            f"<td>{escape(item.status)}</td>"
+            f"<td>{escape(item.error or '')}</td>"
+            "<td></td>"
+            f"<td>{path_cell}</td>"
+            "<td></td><td></td>"
+            "</tr>"
+        )
+    verdict_cell = (
+        f'<span class="v-{escape(result.verdict_code.value)}">{escape(verdict_heading(result))}</span>'
+        f"<br>{escape(result.verdict)}"
+    )
+    evidence_parts: list[str] = []
+    if result.grade == Grade.REFERENCE:
+        evidence_parts.append(f'<div class="legal">{escape(leading_limitations(result)[0])}</div>')
+    for kind_label, lines in evidence_groups(result):
+        evidence_parts.append(f'<div class="kind">{escape(kind_label)}</div><ul>' + "".join(f"<li>{escape(line)}</li>" for line in lines) + "</ul>")
+    if not evidence_parts:
+        evidence_parts.append("근거 항목 없음")
+    gaps = coverage_gaps(result)
+    gap_cell = "<ul>" + "".join(
+        f'<li class="{"gap-failed" if entry.status == CoverageStatus.FAILED else ""}">{escape(entry.describe())}</li>' for entry in gaps
+    ) + "</ul>" if gaps else "전 검사 실행"
+    reference = "; ".join(f"{signal.title} ({signal.weight})" for signal in result.reference_signals) or "-"
     heatmap = ""
-    if result:
-        if result.pixel_analysis and result.pixel_analysis.available:
-            pixel = str(result.pixel_analysis.score)
-            heatmap = _heatmap_img(result.pixel_analysis.heatmap_path)
-        source = result.source_guess.label
-        signal = result.signals[0].detail if result.signals else "강한 의심 신호 없음"
+    if result.pixel_analysis and result.pixel_analysis.available:
+        heatmap = _heatmap_img(result.pixel_analysis.heatmap_path)
     return (
         "<tr>"
-        f"<td>{escape(risk)}</td>"
-        f"<td>{escape(score)}</td>"
-        f"<td>{escape(pixel)}</td>"
-        f"<td>{escape(source)}</td>"
-        f"<td>{escape(_display_path(item.path, redact_paths=redact_paths))}</td>"
+        f"<td>{verdict_cell}</td>"
+        f"<td>{''.join(evidence_parts)}</td>"
+        f"<td>{gap_cell}</td>"
+        f"<td>{path_cell}</td>"
+        f"<td>{escape(reference)}</td>"
         f"<td>{heatmap}</td>"
-        f"<td>{escape(signal)}</td>"
         "</tr>"
     )
 

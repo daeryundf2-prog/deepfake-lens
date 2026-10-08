@@ -5,5 +5,9 @@
     "lazy-evidence-case-v1.json": "fff669b9b9b1707e0b1357e3c7c547eedb8cdc0c2bbd9ebed0b8b1e48a6f62db",
     "trust-levels.md": "e42ca36ccc20f7ff1c0701199b5701f99078233488c891c5d3f07ddc436360a9",
     "confine_path.py": "ac4166bfdb523ab86642fdc403b7cb035298366577749d251b9fb322f1c38417"
-  }
+  },
+  "local": {
+    "deepfake-lens-scan-result-v2.schema.json": "80d77e8eaa65a09446810a7ee3a445edd38f4302ae503e3c33117c369edac1c1"
+  },
+  "local_note": "Project-owned contracts (not from lazy-contracts). Pinned so edits stay deliberate; update the hash in the same commit as the schema."
 }

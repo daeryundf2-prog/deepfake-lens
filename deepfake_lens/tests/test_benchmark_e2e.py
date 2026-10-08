@@ -99,15 +99,21 @@ class BenchmarkE2ETest(unittest.TestCase):
         marker = self.by_name[MARKER_NAME]
         self.assertIsNotNone(marker.result)
         self.assertEqual(marker.result.band, RiskBand.HIGH)
-        self.assertGreaterEqual(marker.result.score, 67)
+        # G5/G6: the marker concludes through deterministic evidence; the
+        # numeric score is 0 because no calibrated probability exists.
+        self.assertEqual(marker.result.verdict_code.value, "manipulation_evidence")
+        self.assertEqual(marker.result.score, 0)
         self.assertEqual(marker.result.source_guess.confidence, SourceConfidence.HIGH)
         self.assertIn("A1111", marker.result.source_guess.label)
 
     def test_marker_outranks_unmarked_images(self) -> None:
-        marker_score = self.by_name[MARKER_NAME].result.score
+        # G5: ranking is by verdict, not by an uncalibrated score — the
+        # marker is the only manipulation verdict and sorts first; the
+        # unmarked images are undetermined (never "low"/clean).
+        self.assertEqual(self.items[0].name, MARKER_NAME)
         for name in EXPECTED_IMAGES - {MARKER_NAME}:
-            score = self.by_name[name].result.score
-            self.assertLess(score, marker_score, f"{name} scored {score}, expected below the metadata marker")
+            verdict = self.by_name[name].result.verdict_code.value
+            self.assertEqual(verdict, "undetermined", f"{name} concluded {verdict}, expected undetermined")
 
     def test_score_report_written(self) -> None:
         """Per-file scores recorded to JSON for trend inspection only."""
