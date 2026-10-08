@@ -103,6 +103,7 @@ def _scan_item_from_json(data: dict[str, object]) -> ScanItem:
         result,
         str(data.get("error")) if data.get("error") is not None else None,
         str(data.get("duplicate_of")) if data.get("duplicate_of") is not None else None,
+        str(data.get("sha256")) if isinstance(data.get("sha256"), str) and data.get("sha256") else None,
     )
 
 

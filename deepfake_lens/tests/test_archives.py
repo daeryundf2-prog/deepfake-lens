@@ -153,6 +153,10 @@ class ScanIntegrationTests(unittest.TestCase):
                 raise RuntimeError("preparation failed")
             return extraction
 
+        # G32: the scan walks a directory in sorted path order, so a.zip is
+        # always extracted into destinations[0] and b.zip (the one made to
+        # fail) into destinations[1]. Before the fix this depended on the
+        # OS directory order and failed whenever b.zip was listed first.
         with patch("deepfake_lens.core.tempfile.mkdtemp", side_effect=[str(dest) for dest in destinations]):
             with patch("deepfake_lens.core.extract_archive", side_effect=fail_second_extraction):
                 # One corrupt archive must not kill the whole scan — it

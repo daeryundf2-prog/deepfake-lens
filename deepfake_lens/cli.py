@@ -654,7 +654,7 @@ def main(argv: list[str] | None = None) -> int:
         from .api_server import LOCAL_HOSTS
         if args.host not in LOCAL_HOSTS and not args.token:
             cmd_parsers["api-serve"].error("--token is required when binding a non-localhost host; the API reads local files on request")
-        run_api_server(host=args.host, port=args.port, token=args.token)
+        run_api_server(host=args.host, port=args.port, token=args.token, allow_roots=args.allow_root)
         return 0
     if args.command == "batch":
         processor = BatchProcessor(max_workers=args.workers)
@@ -811,7 +811,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "web":
         if args.allow_lan and not args.token:
             cmd_parsers["web"].error("--token is required with --allow-lan; the API reads and analyzes local files on request")
-        run_server(args.host, args.port, default_folder=args.folder, allow_lan=args.allow_lan, token=args.token, models_dir=getattr(args, "models_dir", None))
+        run_server(args.host, args.port, default_folder=args.folder, allow_lan=args.allow_lan, token=args.token, models_dir=getattr(args, "models_dir", None), allow_roots=args.allow_root)
         return 0
     if args.command == "doctor":
         from .doctor import format_report, run_diagnostics

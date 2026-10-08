@@ -34,6 +34,9 @@ from .webapp_api import (
     _load_gui,
     _preview_payload,
     _report_payload,
+    ReadRootDenied,
+    configure_read_roots,
+    read_root_denied_body,
     _scan_cancel_payload,
     _scan_job_start,
     _scan_payload,
@@ -91,7 +94,16 @@ def api_request_allowed(headers: Any, *, token: str | None) -> bool:
     return bool((headers.get(CLIENT_HEADER) or "").strip())
 
 
-def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Path | None = None, allow_lan: bool = False, token: str | None = None, models_dir: Path | None = None) -> None:
+def run_server(
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    *,
+    default_folder: Path | None = None,
+    allow_lan: bool = False,
+    token: str | None = None,
+    models_dir: Path | None = None,
+    allow_roots: list[Path] | None = None,
+) -> None:
     """Run the web server with GUI.
 
     Binds to loopback by default; any other host requires ``allow_lan=True``
@@ -99,6 +111,33 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
     set — mandatory for LAN binds — every /api/* request must send it in the
     ``X-Deepfake-Lens-Token`` header. See docs/deepfake-lens-service.md for
     the full service contract.
+
+    Read roots (G31): ``default_folder`` (``--folder``) and every
+    ``allow_roots`` entry (``--allow-root``) are the only directories the
+    API reads from; requests for any other path get 403.
+    """
+    server = build_server(
+        host, port, default_folder=default_folder, allow_lan=allow_lan,
+        token=token, models_dir=models_dir, allow_roots=allow_roots,
+    )
+    print(f"Deepfake Lens GUI: http://{host}:{server.server_address[1]}", flush=True)
+    print(f"Windows에서 접속: http://localhost:{server.server_address[1]}", flush=True)
+    server.serve_forever()
+
+
+def build_server(
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    *,
+    default_folder: Path | None = None,
+    allow_lan: bool = False,
+    token: str | None = None,
+    models_dir: Path | None = None,
+    allow_roots: list[Path] | None = None,
+) -> ThreadingHTTPServer:
+    """Configure and bind the server without serving (``run_server`` serves it).
+
+    Tests drive the returned server with ``serve_forever``/``shutdown``.
     """
     if models_dir is not None:
         from .webapp_api import set_models_dir
@@ -111,6 +150,8 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
         import sys
 
         print("note: --token set on a loopback bind; /api/* still enforces it", file=sys.stderr)
+    # The only place read roots are registered (G31): operator setup.
+    configure_read_roots(default_folder, allow_roots)
 
     class Handler(BaseHTTPRequestHandler):
         def _api_allowed(self) -> bool:
@@ -152,6 +193,12 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
             if not self._api_allowed():
                 return
 
+            try:
+                self._route_get(parsed)
+            except ReadRootDenied:
+                self._send_json(read_root_denied_body(), status=403)
+
+        def _route_get(self, parsed: Any) -> None:
             # API endpoints
             if parsed.path == "/api/scan":
                 if parse_qs(parsed.query).get("async", ["false"])[0].lower() in {"1", "true", "yes"}:
@@ -207,6 +254,12 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
                 return
             if not self._api_allowed():
                 return
+            try:
+                self._route_post(parsed)
+            except ReadRootDenied:
+                self._send_json(read_root_denied_body(), status=403)
+
+        def _route_post(self, parsed: Any) -> None:
             if parsed.path == "/api/analyze-upload":
                 self._handle_analyze_upload()
                 return
@@ -226,7 +279,7 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
                     self.send_error(400, "invalid report body size")
                     return
                 req_fmt = (parse_qs(parsed.query).get("format", [""])[0] or "").lower()
-                rendered = _report_payload(self.rfile.read(length), format_override=req_fmt or None)
+                rendered = _report_payload(self.rfile.read(length), format_override=req_fmt or None, default_folder=default_folder)
                 if isinstance(rendered, dict):
                     self._send_json(rendered)
                 else:
@@ -365,9 +418,9 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
         def log_message(self, format: str, *args) -> None:
             return
         
-        def _send_json(self, payload: dict[str, Any]) -> None:
+        def _send_json(self, payload: dict[str, Any], status: int = 200) -> None:
             body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
-            self.send_response(200)
+            self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -426,9 +479,6 @@ def run_server(host: str = "127.0.0.1", port: int = 8765, *, default_folder: Pat
             self.end_headers()
             self.wfile.write(body)
     
-    server = ThreadingHTTPServer((host, port), Handler)
-    print(f"Deepfake Lens GUI: http://{host}:{port}", flush=True)
-    print(f"Windows에서 접속: http://localhost:{port}", flush=True)
-    server.serve_forever()
+    return ThreadingHTTPServer((host, port), Handler)
 
 

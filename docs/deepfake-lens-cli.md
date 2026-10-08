@@ -13,7 +13,8 @@ It is intentionally CLI-first:
 
 Every subcommand, briefly. Detail for the core workflow lives in the sections below.
 
-- `scan <folder>`: folder screening with metadata + optional pixel ensemble and reports; `--sign` adds an HMAC-SHA256 `signature`/`signature_key_id` to `--json-out` (key via `--key-file` or `DEEPFAKE_LENS_REPORT_KEY`; proves integrity to the key holder, not legal non-repudiation — anyone holding the key can sign). `eval` and `benchmark` accept the same flags; `deepfake_lens.signing.verify_report(path, key)` verifies, and a missing key produces an unsigned report with a note rather than a failure.
+- `scan <folder>`: folder screening with metadata + optional pixel ensemble and reports; `--sign` adds an HMAC-SHA256 `signature`/`signature_key_id` to `--json-out` (key via `--key-file` or `DEEPFAKE_LENS_REPORT_KEY`; proves integrity to the key holder, not legal non-repudiation — anyone holding the key can sign). The MAC covers every field except `signature` and `signature_key_id` — including `signature_note`, `tool_version`, `model_pins` (profile name + pin, `null` when unpinned) and every item's `sha256` (G30). `eval` and `benchmark` accept the same flags; `deepfake_lens.signing.verify_report(path, key)` verifies and reports `검증됨` / `변조됨` / `키 ID 불일치` / `서명 없음` / `검증 키 없음`, and a missing key produces an unsigned report whose note says `서명 없음` rather than a failure. `--html-out`/`--pdf-out`/`--forensic-pdf-out` are signed the same way when `DEEPFAKE_LENS_REPORT_KEY` is set (HTML embeds the signed JSON body in `<script id="deepfake-lens-signed-report">`; PDFs print the signature and the signed body's SHA-256) and say `서명 없음` otherwise.
+- Scan order and cache (G11/G32): files are walked in sorted path order (per directory level, files before subdirectories), so the same folder yields the same file order on every OS. `--cache` entries are keyed by the file's SHA-256 + a hash of the analysis options + tool version + the sorted model-profile pin list (`unpinned:<name>` for profiles without a pin) — never by path, size or mtime. Each scanned item records its content `sha256`; with `--dedupe` the same digest is reused rather than hashing twice.
 - `collect <folder> --out`: write a dataset collection plan.
 - `dataset <folder> --manifest-out`: labeled-dataset manifest, audit, split and robustness plans.
 - `eval <folder>`: labeled-dataset metrics (accuracy/precision/recall/FPR, AUROC, EER, per-split).
@@ -78,8 +79,15 @@ python -m deepfake_lens video /path/to/videos --out video-plan.json --frame-root
 python -m deepfake_lens perf /path/to/folder --pixel deep --workers 4 --cache .cache/scan.json --hash-db .cache/hashes.json --out perf.json
 python -m deepfake_lens security --out security-check.json
 python -m deepfake_lens release --out release-check.json
-python -m deepfake_lens web --folder /path/to/folder
+python -m deepfake_lens web --folder /path/to/folder --allow-root /path/to/other-case
 ```
+
+`security` runs behavioral checks (localhost bind, LAN token, client
+header, symlink opt-in, oversize skip, path redaction) plus the QA-SYS-6
+(signature covers the whole report) and QA-SYS-7 (read-root confinement)
+test suites, and fails when the QA tests are not available (they ship only
+in the source tree). `web --allow-root <dir>` (repeatable) adds read roots
+next to `--folder`; the GUI can only scan or read files under them.
 
 If installed from the package, the entry point is:
 

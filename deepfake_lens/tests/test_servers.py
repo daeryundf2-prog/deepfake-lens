@@ -12,6 +12,7 @@ import json
 import os
 import time
 import unittest
+from collections import OrderedDict
 from pathlib import Path
 from unittest.mock import patch
 
@@ -412,6 +413,9 @@ class AsyncScanJobTest(unittest.TestCase):
         registry = patch.object(webapp_api, "_SCAN_JOBS", {})
         registry.start()
         self.addCleanup(registry.stop)
+        roots = patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
+        roots.start()
+        self.addCleanup(roots.stop)
 
     def test_job_lifecycle(self) -> None:
         import tempfile
@@ -420,7 +424,9 @@ class AsyncScanJobTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             fixture = Path(tmp) / "a.txt"
             fixture.write_text("hello world", encoding="utf-8")
-            started = webapp_api._scan_job_start(f"folder={tmp}&no_default_engine=true", default_folder=None)
+            # G31: a scan may only target the server's own roots — here the
+            # default folder (nothing registered), as `web --folder <tmp>`.
+            started = webapp_api._scan_job_start(f"folder={tmp}&no_default_engine=true", default_folder=Path(tmp))
             self.assertEqual(started["status"], "running")
             job_id = started["job_id"]
 
@@ -721,7 +727,9 @@ class PreviewPayloadTest(unittest.TestCase):
     def setUp(self) -> None:
         from deepfake_lens import webapp, webapp_api
 
-        registry = patch.object(webapp_api, "_READ_ROOTS", set())
+        # G31: the registry is an insertion-ordered OrderedDict (oldest
+        # registration evicted first), no longer a set.
+        registry = patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
         registry.start()
         self.addCleanup(registry.stop)
 

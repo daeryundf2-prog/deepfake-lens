@@ -15,6 +15,8 @@ import shutil
 import tempfile
 import threading
 import time
+from collections import OrderedDict
+from dataclasses import replace
 from email.parser import BytesParser
 from email.policy import default as email_policy
 from pathlib import Path
@@ -87,10 +89,14 @@ def _load_gui() -> str:
 
 
 def _scan_payload(query: str, *, default_folder: Path | None, should_stop: Callable[[], bool] | None = None) -> dict[str, object]:
-    """Handle scan request."""
+    """Handle scan request.
+
+    Raises ReadRootDenied (-> HTTP 403) when the folder is outside the
+    operator-registered roots; the caller's folder is never registered (G31).
+    """
     params = parse_qs(query)
-    folder = Path(params.get("folder", [str(default_folder or ".")])[0]).expanduser()
-    _register_read_root(folder)
+    folder = _requested_folder(query, default_folder)
+    _require_read_root(folder, default_folder)
     pixel = params.get("pixel", ["off"])[0]
     recursive = params.get("recursive", ["false"])[0].lower() in {"1", "true", "yes"}
     try:
@@ -158,6 +164,8 @@ def _scan_job_evict(now: float) -> None:
 
 def _scan_job_start(query: str, *, default_folder: Path | None) -> dict[str, object]:
     """Start a background scan job; poll /api/scan-status?job=<id>."""
+    # Refuse out-of-root folders up front (403), not inside the job.
+    _require_read_root(_requested_folder(query, default_folder), default_folder)
     with _SCAN_JOBS_LOCK:
         _scan_job_evict(time.time())
         if len(_SCAN_JOBS) >= _SCAN_JOB_MAX:
@@ -222,17 +230,15 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
     
     if not file_path:
         return {"error": "파일 경로가 없습니다"}
-    
+    # G31: confined to the operator roots even when none are registered
+    # (then only the server's default folder) — raises ReadRootDenied (403).
+    path = _require_read_root(Path(file_path))
+
     try:
         from .classifier import classify_metadata
         from .c2pa import analyze_metadata_forensic
         from .pixel_analyzer import analyze_pixels
-        
-        path = Path(file_path).expanduser()
-        with _READ_ROOTS_LOCK:
-            roots_registered = bool(_READ_ROOTS)
-        if roots_registered and not _read_root_allows(path):
-            return {"error": "허용되지 않은 경로입니다 — 먼저 해당 폴더를 스캔/등록하세요.", "detail": "path not under a registered read root"}
+
         if not path.exists():
             return {"error": f"파일이 존재하지 않습니다: {file_path}"}
         
@@ -325,35 +331,86 @@ def _optional_path(value: str) -> Path | None:
     return Path(value).expanduser() if value else None
 
 
-# Server-side read roots for /api/heatmap and /api/preview. The `root`
-# parameter is kept for backward compatibility but is no longer trusted:
-# a path is only served when it lives under a directory the server itself
-# registered via /api/scan (or an explicit allow-root registration), so a
-# caller cannot widen the read scope by passing root=C:\.
+# Operator-registered read roots (G31). Every endpoint that reads a path the
+# caller names — /api/scan, /api/analyze-file, /api/heatmap, /api/preview
+# and the report hashing/heatmap embedding — is confined to these. Only
+# server setup registers them (``configure_read_roots`` from run_server:
+# ``--folder`` and each ``--allow-root``); a request can never add one. With
+# none registered, the server's own default folder (``--folder`` or the
+# working directory it was started in) is the only root — never "anything".
+# The `root` query parameter is kept for backward compatibility but can only
+# narrow, never widen, the scope.
 _READ_ROOTS_LOCK = threading.Lock()
-_READ_ROOTS: set[Path] = set()
+_READ_ROOTS: OrderedDict[Path, None] = OrderedDict()
 _READ_ROOTS_MAX = 64
+READ_ROOT_DENIED_MESSAGE = "허용되지 않은 경로"
+
+
+class ReadRootDenied(PermissionError):
+    """The requested path is outside every operator-registered read root.
+
+    HTTP layers turn this into status 403 with ``read_root_denied_body()`` —
+    a fixed message that echoes no file content.
+    """
+
+
+def read_root_denied_body() -> dict[str, object]:
+    return {"error": READ_ROOT_DENIED_MESSAGE}
 
 
 def _register_read_root(folder: Path) -> None:
+    """Register an operator read root. Call only from server setup."""
     resolved = folder.expanduser().resolve()
     with _READ_ROOTS_LOCK:
         if resolved in _READ_ROOTS:
+            _READ_ROOTS.move_to_end(resolved)
             return
-        if len(_READ_ROOTS) >= _READ_ROOTS_MAX:
-            _READ_ROOTS.pop()
-        _READ_ROOTS.add(resolved)
+        while len(_READ_ROOTS) >= _READ_ROOTS_MAX:
+            _READ_ROOTS.popitem(last=False)  # evict the oldest registration
+        _READ_ROOTS[resolved] = None
 
 
-def _read_root_allows(path: Path, root_value: str = "") -> bool:
-    """True when `path` sits under a server-registered root.
+def configure_read_roots(default_folder: Path | None, allow_roots: list[Path] | tuple[Path, ...] | None = None) -> None:
+    """Server-setup hook: register ``--folder`` and every ``--allow-root``."""
+    if default_folder is not None:
+        _register_read_root(Path(default_folder))
+    for root in allow_roots or ():
+        _register_read_root(Path(root))
+
+
+def _effective_roots(default_folder: Path | None = None) -> list[Path]:
+    """Registered roots in registration order, or the default folder alone."""
+    with _READ_ROOTS_LOCK:
+        roots = list(_READ_ROOTS)
+    if roots:
+        return roots
+    return [Path(default_folder or ".").expanduser().resolve()]
+
+
+def _require_read_root(path: Path, default_folder: Path | None = None) -> Path:
+    """Resolve ``path`` and raise ReadRootDenied unless it is inside a root."""
+    try:
+        resolved = Path(path).expanduser().resolve()
+    except (OSError, RuntimeError) as exc:
+        raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE) from exc
+    if not any(_is_within(resolved, root) for root in _effective_roots(default_folder)):
+        raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE)
+    return resolved
+
+
+def _requested_folder(query: str, default_folder: Path | None) -> Path:
+    params = parse_qs(query)
+    return Path(params.get("folder", [str(default_folder or ".")])[0]).expanduser()
+
+
+def _read_root_allows(path: Path, root_value: str = "", default_folder: Path | None = None) -> bool:
+    """True when `path` sits under an operator-registered root.
 
     The caller-supplied root is also checked when present so a stale or
     mismatched root argument cannot broaden access beyond the registered
     set — both conditions must hold.
     """
-    with _READ_ROOTS_LOCK:
-        roots = set(_READ_ROOTS)
+    roots = _effective_roots(default_folder)
     if root_value:
         try:
             root = Path(root_value).expanduser().resolve()
@@ -828,8 +885,11 @@ def _feedback_payload(body: bytes) -> dict[str, object]:
     return {"ok": True, "feedback_file": str(feedback_file)}
 
 
-def _report_payload(body: bytes, format_override: str | None = None) -> bytes | dict[str, object]:
+def _report_payload(body: bytes, format_override: str | None = None, *, default_folder: Path | None = None) -> bytes | dict[str, object]:
     """Render the HTML or court-admissible forensic PDF report for web-scan results.
+
+    ``format=json`` returns the signed report body itself. Raises
+    ReadRootDenied (-> 403) when a posted heatmap_path is outside the roots.
 
     Accepts the items array the GUI holds (scan/upload payload rows), rebuilds
     ScanItem objects through the same cache deserializer used on disk, and
@@ -860,32 +920,64 @@ def _report_payload(body: bytes, format_override: str | None = None) -> bytes | 
     if not items:
         return {"error": "items array is required"}
 
-    # Report hashing reads item.path from disk — confine those reads to the
-    # registered scan roots so a crafted payload cannot probe host files.
-    # Scan rows carry relative paths, so they are resolved against the
-    # registered roots first; an unresolved or escaping path stays unread.
-    read_roots_registered = bool(_READ_ROOTS)
+    # G31: every disk read this report makes — evidence hashing and heatmap
+    # embedding — is confined to the operator read roots (or, with none
+    # registered, the server's default folder). Scan rows carry relative
+    # paths, so they are resolved against the roots; an unresolved or
+    # escaping path stays unread.
+    roots = _effective_roots(default_folder)
+
     def _resolve_item_path(path_text: str) -> Path | None:
         p = Path(path_text).expanduser()
-        candidates = [p] if p.is_absolute() else [root / p for root in _READ_ROOTS]
+        candidates = [p] if p.is_absolute() else [root / p for root in roots]
         for cand in candidates:
             try:
                 resolved = cand.resolve()
             except OSError:
                 continue
-            if resolved.is_file() and any(_is_within(resolved, r) for r in _READ_ROOTS):
+            if resolved.is_file() and any(_is_within(resolved, r) for r in roots):
                 return resolved
         return None
 
     def _path_allowed(path_text: str) -> bool:
-        if not read_roots_registered:
-            return True  # standalone GUI-less use — same trust as the CLI
         return _resolve_item_path(path_text) is not None
+
+    def _heatmap_allowed(path_text: str) -> bool:
+        try:
+            resolved = Path(path_text).expanduser().resolve()
+        except OSError:
+            return False
+        return any(_is_within(resolved, r) for r in roots)
+
+    # A posted heatmap_path outside the roots is a probe for host files:
+    # refuse the whole report (403) instead of rendering around it.
+    for item in items:
+        pixel = item.result.pixel_analysis if item.result is not None else None
+        heatmap_path = getattr(pixel, "heatmap_path", None)
+        if heatmap_path and not _heatmap_allowed(str(heatmap_path)):
+            raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE)
+
+    # Client-posted sha256 values are never trusted: each row's hash is
+    # recomputed from the evidence file under the roots (None when it cannot
+    # be read), once, and reused by every renderer and by the signature.
+    from .reports import _evidence_sha256, signed_report_body
+
+    items = [replace(item, sha256=_evidence_sha256(item.path, _path_allowed, _resolve_item_path)) for item in items]
 
     # Same counting rule as the CLI (core.summarize) so web and CLI report
     # headers agree on every verdict count.
     summary = summarize(items, capped=False)
     req_format = (format_override or data.get("format") or "html").lower()
+    # G30: web reports are signed when DEEPFAKE_LENS_REPORT_KEY is set and
+    # say "서명 없음" otherwise; the pins are those of the server's models dir.
+    from .profile_pins import profile_pins
+
+    signed = signed_report_body(
+        summary, items, thresholds=thresholds, coverage=coverage,
+        report_format=req_format, model_pins=profile_pins(_models_dir()),
+    )
+    if req_format == "json":
+        return signed
     suffix = ".pdf" if req_format in ("pdf", "evidence", "evidence-statement") else ".html"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp_path = Path(tmp.name)
@@ -917,11 +1009,12 @@ def _report_payload(body: bytes, format_override: str | None = None) -> bytes | 
                 exhibit_no=exhibit_no,
                 thresholds=thresholds,
                 coverage=coverage,
-                resolve_path=_resolve_item_path if read_roots_registered else None,
+                resolve_path=_resolve_item_path,
                 allow_path=_path_allowed,
+                signed_report=signed,
             )
         else:
-            write_html_report(tmp_path, summary, items, thresholds=thresholds)
+            write_html_report(tmp_path, summary, items, thresholds=thresholds, allow_path=_heatmap_allowed, signed_report=signed)
         return tmp_path.read_bytes()
     finally:
         tmp_path.unlink(missing_ok=True)

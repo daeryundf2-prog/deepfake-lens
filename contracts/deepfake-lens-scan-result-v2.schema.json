@@ -8,7 +8,20 @@
   "properties": {
     "schema_version": { "const": 2 },
     "summary": { "$ref": "#/$defs/summary" },
-    "items": { "type": "array", "items": { "$ref": "#/$defs/item" } }
+    "items": { "type": "array", "items": { "$ref": "#/$defs/item" } },
+    "tool_version": { "type": "string", "description": "Signed reports only (G30): tool version, inside the MAC." },
+    "model_pins": {
+      "type": "array",
+      "description": "Signed reports only (G30): runtime-profile pins, inside the MAC; pin null = unpinned.",
+      "items": {
+        "type": "object",
+        "required": ["profile", "pin"],
+        "properties": { "profile": { "type": "string" }, "pin": { "type": ["object", "null"] } }
+      }
+    },
+    "signature_note": { "type": "string", "description": "Inside the MAC; says 서명 없음 when unsigned." },
+    "signature_key_id": { "type": "string", "description": "Outside the MAC; mismatch is reported as 키 ID 불일치." },
+    "signature": { "type": ["string", "null"], "description": "HMAC-SHA256 over every field except signature and signature_key_id." }
   },
   "$defs": {
     "summary": {
@@ -25,7 +38,12 @@
       "type": "object",
       "required": ["path", "name", "kind", "status", "size_bytes", "result"],
       "properties": {
-        "result": { "type": ["object", "null"], "$ref": "#/$defs/result" }
+        "result": { "type": ["object", "null"], "$ref": "#/$defs/result" },
+        "sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of the analyzed file bytes (G11/G30); null when not hashed."
+        }
       }
     },
     "result": {

@@ -4,7 +4,9 @@ import tempfile
 import unittest
 import json
 import zlib
+from collections import OrderedDict
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import urlencode
 
 from deepfake_lens.benchmark import run_benchmark, write_benchmark, write_benchmark_markdown
@@ -262,10 +264,13 @@ class DeepfakeLensCoreTest(unittest.TestCase):
                     self.assertEqual(before.result.verdict_code, after.result.verdict_code)
                     self.assertEqual(before.result.band, after.result.band)
 
-            web_payload = _scan_payload(
-                urlencode({"folder": str(scan_root), "recursive": "true", "pixel": "deep", "fusion_profile": str(fusion_path)}),
-                default_folder=None,
-            )
+            # G31: /api/scan only reads under the server's roots; with none
+            # registered that is the default folder (`web --folder`).
+            with patch("deepfake_lens.webapp_api._READ_ROOTS", OrderedDict()):
+                web_payload = _scan_payload(
+                    urlencode({"folder": str(scan_root), "recursive": "true", "pixel": "deep", "fusion_profile": str(fusion_path)}),
+                    default_folder=scan_root,
+                )
             self.assertIn("summary", web_payload)
             self.assertEqual(web_payload["summary"]["total"], 2)
 
