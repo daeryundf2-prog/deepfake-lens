@@ -157,7 +157,7 @@ class RawScoreEvaluationTest(unittest.TestCase):
         unavailable = ExternalModelAnalysis(False, 99, "unknown", "m", "d")
         result = _result(score=0, model_analysis=unavailable, evidence=[_statistical(40), _statistical(61)])
         self.assertEqual(raw_member_score(result), (61, "statistical_evidence"))
-        pixel = PixelAnalysis(mode="deep", available=True, score=37, confidence="low", model="ensemble")
+        pixel = PixelAnalysis(mode="deep", available=True, raw_score=37, reference_confidence="참고", model="ensemble")
         self.assertEqual(raw_member_score(_result(pixel_analysis=pixel)), (37, "pixel_reference"))
         self.assertEqual(raw_member_score(_result(pixel_analysis=replace(pixel, available=False))), (None, "none"))
         # A legacy/uncalibrated result.score is never used as an eval score.

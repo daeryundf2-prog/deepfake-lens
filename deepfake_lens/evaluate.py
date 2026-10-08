@@ -48,7 +48,7 @@ def raw_member_score(result: ClassificationResult) -> tuple[int | None, str]:
         return max(statistical), "statistical_evidence"
     pixel = result.pixel_analysis
     if pixel is not None and pixel.available:
-        return int(pixel.score), "pixel_reference"
+        return int(pixel.raw_score), "pixel_reference"
     return None, "none"
 
 
@@ -146,7 +146,7 @@ def evaluate_dataset(
                 "mask_path": record.mask_path,
                 "source_guess": item.result.source_guess.label if item.result else "",
                 "source_confidence": item.result.source_guess.confidence.value if item.result else "",
-                "pixel_score": item.result.pixel_analysis.score if item.result and item.result.pixel_analysis and item.result.pixel_analysis.available else None,
+                "pixel_raw_score_reference": item.result.pixel_analysis.raw_score if item.result and item.result.pixel_analysis and item.result.pixel_analysis.available else None,
                 "external_model_score": item.result.model_analysis.score if item.result and item.result.model_analysis and item.result.model_analysis.available else None,
             }
         )

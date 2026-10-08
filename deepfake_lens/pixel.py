@@ -64,12 +64,25 @@ class PixelExpertResult:
     implementation: str = "local"
 
 
+# D12: the ensemble is an unmeasured heuristic (ProGAN AUROC 0.43-0.48), so
+# its output is a raw 0-100 value labeled 참고 — never a score or a
+# low/medium/high confidence that reads like a finding.
+PIXEL_REFERENCE_CONFIDENCE = "참고"
+
+
 @dataclass(frozen=True)
 class PixelAnalysis:
+    """Pixel ensemble output — reference only (D12).
+
+    ``raw_score`` is the uncalibrated 0-100 weighted mean of the experts;
+    ``reference_confidence`` is ``"참고"`` when the ensemble ran, else
+    ``"off"``/``"unavailable"``.
+    """
+
     mode: str
     available: bool
-    score: int
-    confidence: str
+    raw_score: int
+    reference_confidence: str
     model: str
     experts: list[PixelExpertResult] = field(default_factory=list)
     signals: list[str] = field(default_factory=list)
@@ -147,10 +160,9 @@ def analyze_image_pixels(
             "Rethinking AI-Generated Image Detection with Fuzzy Decision Tree",
         )
     )
-    confidence = _confidence_for(fused, len(available_experts), mode)
     signals = [expert.detail for expert in available_experts if expert.score >= 45]
     evidence_chain = _reveal_evidence_chain(experts)
-    agentfox_summary = _agentfox_explainable_summary(available_experts, fused, confidence)
+    agentfox_summary = _agentfox_explainable_summary(available_experts, fused)
     limitations = load_limitations + [
         "픽셀 분석은 로컬 multi-expert 앙상블입니다. 학습된 딥페이크 모델의 확률값으로 해석하면 안 됩니다.",
         "메타데이터가 제거된 파일도 볼 수 있지만, 카메라 원본/편집본/압축본을 구분하지 못할 수 있습니다.",
@@ -169,8 +181,8 @@ def analyze_image_pixels(
     return PixelAnalysis(
         mode=mode,
         available=True,
-        score=fused,
-        confidence=confidence,
+        raw_score=fused,
+        reference_confidence=PIXEL_REFERENCE_CONFIDENCE,
         model=PIXEL_MODEL_NAME,
         experts=experts,
         signals=signals,
@@ -747,13 +759,13 @@ def _reveal_evidence_chain(experts: list[PixelExpertResult]) -> list[str]:
     return chain
 
 
-def _agentfox_explainable_summary(experts: list[PixelExpertResult], fused: int, confidence: str) -> str:
+def _agentfox_explainable_summary(experts: list[PixelExpertResult], fused: int) -> str:
     active = [expert for expert in experts if expert.available and expert.score >= 45]
     if not active:
-        return "AgentFoX-style explanation: 활성 전문가가 적어 설명 신뢰도는 낮습니다."
+        return "AgentFoX-style explanation: 활성 전문가가 적어 설명할 신호가 거의 없습니다(참고 신호)."
     families = sorted({expert.family for expert in active})
     names = ", ".join(expert.name for expert in sorted(active, key=lambda item: item.score, reverse=True)[:4])
-    return f"AgentFoX-style explanation: {len(active)}개 전문가({', '.join(families)})가 fused score={fused}, confidence={confidence}에 기여했습니다: {names}."
+    return f"AgentFoX-style explanation: {len(active)}개 전문가({', '.join(families)})가 원점수 {fused}(참고, 미측정)에 기여했습니다: {names}."
 
 
 def _implemented_references(mode: str) -> list[str]:
@@ -813,12 +825,4 @@ def _score_from_ivy_payload(payload: dict[str, object]) -> int:
     return 0
 
 
-def _confidence_for(score: int, expert_count: int, mode: str) -> str:
-    if score >= 70 and expert_count >= 3:
-        return "high" if mode == "deep" else "medium"
-    if score >= 45:
-        return "medium"
-    if score > 0:
-        return "low"
-    return "low"
 

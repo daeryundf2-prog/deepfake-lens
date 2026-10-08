@@ -109,7 +109,7 @@ def component_scores(result: ClassificationResult) -> dict[str, int]:
         and not _is_source_signal(signal)
         and not _is_fusion_signal(signal)
     )
-    pixel_score = result.pixel_analysis.score if result.pixel_analysis and result.pixel_analysis.available else 0
+    pixel_score = result.pixel_analysis.raw_score if result.pixel_analysis and result.pixel_analysis.available else 0
     model_score = result.model_analysis.score if result.model_analysis and result.model_analysis.available else 0
     source_score = {
         SourceConfidence.HIGH: 100,
@@ -144,7 +144,7 @@ def component_scores_from_json(result: dict[str, object]) -> dict[str, int]:
     pixel = result.get("pixel_analysis") if isinstance(result.get("pixel_analysis"), dict) else {}
     model = result.get("model_analysis") if isinstance(result.get("model_analysis"), dict) else {}
     source_guess = result.get("source_guess") if isinstance(result.get("source_guess"), dict) else {}
-    pixel_score = float(pixel.get("score", 0) or 0) if pixel.get("available") else 0.0
+    pixel_score = float(pixel.get("raw_score", pixel.get("score", 0)) or 0) if pixel.get("available") else 0.0
     model_score = float(model.get("score", 0) or 0) if model.get("available") else 0.0
     source_score = {"high": 100, "medium": 65, "low": 35}.get(str(source_guess.get("confidence", "")), 0)
     return {

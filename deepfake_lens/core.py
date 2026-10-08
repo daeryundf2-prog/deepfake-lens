@@ -1464,8 +1464,8 @@ def analyze_image_metadata(
         top = " / ".join(pixel_analysis.signals[:2]) or "픽셀 전문가 신호 요약 없음"
         reference.append(reference_signal(
             "픽셀 앙상블(참고, 미측정)",
-            f"{pixel_analysis.model} score={pixel_analysis.score}, confidence={pixel_analysis.confidence}. {top}",
-            pixel_analysis.score,
+            f"{pixel_analysis.model} 원점수 {pixel_analysis.raw_score}/100 ({pixel_analysis.reference_confidence}, 미측정 — 결론에 참여하지 않습니다). {top}",
+            pixel_analysis.raw_score,
         ))
 
     if coverage is None:

@@ -138,8 +138,8 @@ class DeepfakeLensCoreTest(unittest.TestCase):
             self.assertTrue(any(expert.available and expert.score >= 45 for expert in result.experts))
             members = [expert for expert in result.experts if expert.available and expert.family != "fusion"]
             weighted = sum(expert.score * expert.weight for expert in members) / sum(expert.weight for expert in members)
-            self.assertEqual(result.score, int(round(weighted)))
-            self.assertLess(result.score, 66)
+            self.assertEqual(result.raw_score, int(round(weighted)))  # D12: score -> raw_score
+            self.assertLess(result.raw_score, 66)
 
     def test_analyze_file_merges_pixel_signal_and_heatmap(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
