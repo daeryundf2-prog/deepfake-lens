@@ -22,7 +22,21 @@ from pathlib import Path
 
 from .checkpoint_integrity import load_torch_state
 from .model_cache import _ModelLRU, _model_cache_limit
+from .model_pins import UNPINNED_REASON, PinError, is_commit_sha, require_revision
 from .result_types import ExternalModelAnalysis
+
+
+def _pinned_revision(revision: str, model_id: str) -> str:
+    """Refuse a hub load without a pinned commit (G10).
+
+    Every ``from_pretrained`` call passes ``revision=`` so the hub serves
+    exactly the pinned commit; an empty or non-commit revision would load
+    whatever ``main`` points at today, so it is refused here as a second
+    line of defence behind the adapter's profile check.
+    """
+    if not revision or not is_commit_sha(revision):
+        raise PinError(f"{UNPINNED_REASON}: {model_id} revision 미지정")
+    return revision
 
 
 
@@ -174,16 +188,18 @@ def _run_aasist(checkpoint: Path, audio_path: Path, profile: dict[str, object]) 
 _HF_AUDIO_MODELS = _ModelLRU(_model_cache_limit())
 
 
-def _hf_audio_model(hub_model: str) -> tuple[object, object]:
-    cached = _HF_AUDIO_MODELS.get(hub_model)
+def _hf_audio_model(hub_model: str, revision: str) -> tuple[object, object]:
+    revision = _pinned_revision(revision, hub_model)
+    key = f"{hub_model}@{revision}"
+    cached = _HF_AUDIO_MODELS.get(key)
     if cached is not None:
         return cached
     transformers = importlib.import_module("transformers")
-    extractor = transformers.AutoFeatureExtractor.from_pretrained(hub_model)
-    model = transformers.AutoModelForAudioClassification.from_pretrained(hub_model)
+    extractor = transformers.AutoFeatureExtractor.from_pretrained(hub_model, revision=revision)
+    model = transformers.AutoModelForAudioClassification.from_pretrained(hub_model, revision=revision)
     model.eval()
     pair = (extractor, model)
-    _HF_AUDIO_MODELS[hub_model] = pair
+    _HF_AUDIO_MODELS[key] = pair
     return pair
 
 
@@ -205,7 +221,7 @@ def _run_hf_audio_classifier(media_path: Path, profile: dict[str, object]) -> li
     hub_model = str(profile.get("hub_model") or "")
     if not hub_model:
         raise RuntimeError("hf-audio-classifier profile needs a 'hub_model' field (e.g. Gustking/wav2vec2-large-xlsr-deepfake-audio-classification)")
-    extractor, model = _hf_audio_model(hub_model)
+    extractor, model = _hf_audio_model(hub_model, require_revision(profile))
     sample_rate = int(getattr(extractor, "sampling_rate", 16000) or 16000)
     max_seconds = float(profile.get("max_seconds", 15) or 15)
     waveform = _aasist_module().load_waveform(media_path, sample_rate=sample_rate, max_seconds=max_seconds)
@@ -256,16 +272,18 @@ _CLIP_HEADS = _ModelLRU(_model_cache_limit())
 _TORCHVISION_MODELS = _ModelLRU(_model_cache_limit())
 
 
-def _clip_backbone(backbone: str) -> tuple[object, object]:
-    """Load a Hugging Face CLIPModel + processor, cached per backbone id/path."""
-    cached = _CLIP_BACKBONES.get(backbone)
+def _clip_backbone(backbone: str, revision: str) -> tuple[object, object]:
+    """Load a Hugging Face CLIPModel + processor, cached per backbone id + revision."""
+    revision = _pinned_revision(revision, backbone)
+    key = f"{backbone}@{revision}"
+    cached = _CLIP_BACKBONES.get(key)
     if cached is not None:
         return cached
     transformers = importlib.import_module("transformers")
-    model = transformers.CLIPModel.from_pretrained(backbone)
-    processor = transformers.CLIPProcessor.from_pretrained(backbone)
+    model = transformers.CLIPModel.from_pretrained(backbone, revision=revision)
+    processor = transformers.CLIPProcessor.from_pretrained(backbone, revision=revision)
     model.eval()
-    _CLIP_BACKBONES[backbone] = (model, processor)
+    _CLIP_BACKBONES[key] = (model, processor)
     return model, processor
 
 
@@ -310,7 +328,7 @@ def _run_clip_linear(checkpoint: Path, image_path: Path, profile: dict[str, obje
     torch = importlib.import_module("torch")
     image_module = importlib.import_module("PIL.Image")
     backbone = str(profile.get("backbone") or "openai/clip-vit-large-patch14")
-    model, processor = _clip_backbone(backbone)
+    model, processor = _clip_backbone(backbone, require_revision(profile))
     weight, bias = _load_linear_head(checkpoint)
     image = image_module.open(image_path).convert("RGB")
     inputs = processor(images=image, return_tensors="pt")
@@ -334,16 +352,18 @@ _HF_TEXT_MODELS = _ModelLRU(_model_cache_limit())
 _HF_TEXT_MAX_BYTES = 256 * 1024
 
 
-def _hf_text_model(hub_model: str) -> tuple[object, object]:
-    cached = _HF_TEXT_MODELS.get(hub_model)
+def _hf_text_model(hub_model: str, revision: str) -> tuple[object, object]:
+    revision = _pinned_revision(revision, hub_model)
+    key = f"{hub_model}@{revision}"
+    cached = _HF_TEXT_MODELS.get(key)
     if cached is not None:
         return cached
     transformers = importlib.import_module("transformers")
-    tokenizer = transformers.AutoTokenizer.from_pretrained(hub_model)
-    model = transformers.AutoModelForSequenceClassification.from_pretrained(hub_model)
+    tokenizer = transformers.AutoTokenizer.from_pretrained(hub_model, revision=revision)
+    model = transformers.AutoModelForSequenceClassification.from_pretrained(hub_model, revision=revision)
     model.eval()
     pair = (tokenizer, model)
-    _HF_TEXT_MODELS[hub_model] = pair
+    _HF_TEXT_MODELS[key] = pair
     return pair
 
 
@@ -351,7 +371,7 @@ def _run_hf_text_classifier(media_path: Path, profile: dict[str, object]) -> lis
     """Score one text file with a Hugging Face sequence classifier.
 
     The profile's ``hub_model`` names the model id (e.g.
-    ``openai-community/roberta-base-openai-detector``); transformers fetches
+    ``fakespot-ai/roberta-base-ai-text-detection-v1``); transformers fetches
     it on first use. Text is read bounded (256 KiB) and tokenized with
     truncation. Returns raw logits; the profile's score_index/activation
     selects the fake/AI probability.
@@ -359,8 +379,8 @@ def _run_hf_text_classifier(media_path: Path, profile: dict[str, object]) -> lis
     torch = importlib.import_module("torch")
     hub_model = str(profile.get("hub_model") or "")
     if not hub_model:
-        raise RuntimeError("hf-text-classifier profile needs a 'hub_model' field (e.g. openai-community/roberta-base-openai-detector)")
-    tokenizer, model = _hf_text_model(hub_model)
+        raise RuntimeError("hf-text-classifier profile needs a 'hub_model' field (e.g. fakespot-ai/roberta-base-ai-text-detection-v1)")
+    tokenizer, model = _hf_text_model(hub_model, require_revision(profile))
     raw = media_path.read_bytes()[:_HF_TEXT_MAX_BYTES]
     text = raw.decode("utf-8", errors="replace")
     inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
@@ -372,16 +392,18 @@ def _run_hf_text_classifier(media_path: Path, profile: dict[str, object]) -> lis
 _HF_IMAGE_MODELS = _ModelLRU(_model_cache_limit())
 
 
-def _hf_image_model(hub_model: str) -> tuple[object, object]:
-    cached = _HF_IMAGE_MODELS.get(hub_model)
+def _hf_image_model(hub_model: str, revision: str) -> tuple[object, object]:
+    revision = _pinned_revision(revision, hub_model)
+    key = f"{hub_model}@{revision}"
+    cached = _HF_IMAGE_MODELS.get(key)
     if cached is not None:
         return cached
     transformers = importlib.import_module("transformers")
-    processor = transformers.AutoImageProcessor.from_pretrained(hub_model)
-    model = transformers.AutoModelForImageClassification.from_pretrained(hub_model)
+    processor = transformers.AutoImageProcessor.from_pretrained(hub_model, revision=revision)
+    model = transformers.AutoModelForImageClassification.from_pretrained(hub_model, revision=revision)
     model.eval()
     pair = (processor, model)
-    _HF_IMAGE_MODELS[hub_model] = pair
+    _HF_IMAGE_MODELS[key] = pair
     return pair
 
 
@@ -399,8 +421,8 @@ def _run_hf_image_classifier(media_path: Path, profile: dict[str, object]) -> li
     image_module = importlib.import_module("PIL.Image")
     hub_model = str(profile.get("hub_model") or "")
     if not hub_model:
-        raise RuntimeError("hf-image-classifier profile needs a 'hub_model' field (e.g. dima806/deepfake_vs_real_image_detection)")
-    processor, model = _hf_image_model(hub_model)
+        raise RuntimeError("hf-image-classifier profile needs a 'hub_model' field (e.g. umm-maybe/AI-image-detector)")
+    processor, model = _hf_image_model(hub_model, require_revision(profile))
     image = image_module.open(media_path).convert("RGB")
     inputs = processor(images=image, return_tensors="pt")
     with torch.no_grad():
@@ -427,16 +449,18 @@ _PPL_MIN_TOKENS = 16
 
 
 
-def _causal_lm_model(hub_model: str) -> tuple[object, object]:
-    cached = _PPL_MODELS.get(hub_model)
+def _causal_lm_model(hub_model: str, revision: str) -> tuple[object, object]:
+    revision = _pinned_revision(revision, hub_model)
+    key = f"{hub_model}@{revision}"
+    cached = _PPL_MODELS.get(key)
     if cached is not None:
         return cached
     transformers = importlib.import_module("transformers")
-    tokenizer = transformers.AutoTokenizer.from_pretrained(hub_model)
-    model = transformers.AutoModelForCausalLM.from_pretrained(hub_model)
+    tokenizer = transformers.AutoTokenizer.from_pretrained(hub_model, revision=revision)
+    model = transformers.AutoModelForCausalLM.from_pretrained(hub_model, revision=revision)
     model.eval()
     pair = (tokenizer, model)
-    _PPL_MODELS[hub_model] = pair
+    _PPL_MODELS[key] = pair
     return pair
 
 
@@ -509,7 +533,7 @@ def _run_causal_lm_ppl(media_path: Path, profile: dict[str, object], *, model_na
             detail="causal-lm-ppl: file decodes to empty text.",
             limitations=list(profile_limitations),
         )
-    tokenizer, model = _causal_lm_model(hub_model)
+    tokenizer, model = _causal_lm_model(hub_model, require_revision(profile))
     window = max(_PPL_MIN_TOKENS, int(profile.get("window_tokens", 512) or 512))
     max_windows = int(profile.get("max_windows", 0) or 0)  # 0 = no cap
     # Score both the raw text and the markup-stripped prose view, keeping
@@ -611,8 +635,8 @@ def _run_binoculars(media_path: Path, profile: dict[str, object], *, model_name:
             detail="binoculars: file decodes to empty text.",
             limitations=list(profile_limitations),
         )
-    tokenizer, performer = _causal_lm_model(performer_id)
-    _, observer = _causal_lm_model(observer_id)
+    tokenizer, performer = _causal_lm_model(performer_id, require_revision(profile))
+    _, observer = _causal_lm_model(observer_id, require_revision(profile, "observer_revision"))
     window = max(_PPL_MIN_TOKENS, int(profile.get("window_tokens", 512) or 512))
     max_windows = int(profile.get("max_windows", 0) or 0)  # 0 = no cap
     # Raw view only: the X-PPL denominator already normalizes markup, so

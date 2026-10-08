@@ -17,6 +17,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from deepfake_lens.core import _model_analysis_from_json
+from deepfake_lens.model_pins import empty_pin_for
 from deepfake_lens.model_adapter import (
     AGREEMENT_SPREAD,
     PROFILE_SET_TYPE,
@@ -27,6 +28,23 @@ from deepfake_lens.model_adapter import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PKG_MODELS = Path(__file__).resolve().parents[1] / "models"
 MODELS_DIR = PKG_MODELS
+# G2/G33 (WP-C): the profiles that remain after the zoo cleanup.
+EXPECTED_PROFILES = {
+    "aide-runtime.json", "ai-image-swin-runtime.json", "community-forensics-vit-runtime.json",
+    "community-forensics-frames-runtime.json", "sd-turbo-det-runtime.json", "sbi-effnet-runtime.json",
+    "sbi-frames-runtime.json", "aasist-runtime.json", "wav2vec-deepfake-audio-runtime.json",
+    "fakespot-detector-runtime.json",
+}
+REMOVED_PROFILES = (
+    "korean-roberta-text-detector-runtime.json", "cnndetection-runtime.json", "univfd-runtime.json",
+    "qwen-ppl-runtime.json", "binoculars-runtime.json", "openai-detector-runtime.json",
+    "aide-frames-runtime.json", "umm-maybe-detector-runtime.json", "melodymachine-w2v2-runtime.json",
+    "dire-runtime.json", "genconvit-face-runtime.json", "faceswap-ffpp-runtime.json",
+    "faceswap-ffpp-frames-runtime.json", "face-manipulation-vit-runtime.json",
+    "face-manipulation-vit-frames-runtime.json",
+)
+# A syntactically valid hub commit id for pinned temp profiles.
+FAKE_REVISION = "0123456789abcdef0123456789abcdef01234567"
 WIRED_RUNTIMES = {"onnx", "torchscript", "aide", "clip-linear", "torchvision", "aasist", "hf-text-classifier", "hf-image-classifier", "hf-audio-classifier", "video-frames", "causal-lm-ppl", "binoculars"}
 # Runtimes that carry no checkpoint field of their own: hf-*-classifier
 # names a hub model id, video-frames nests the checkpointed image profile.
@@ -66,16 +84,44 @@ class CommittedProfilesTest(unittest.TestCase):
         }
 
     def test_zoo_has_expected_profiles(self) -> None:
+        # G2/G33 (WP-C): 15 rejected/placeholder profiles were removed; their
+        # measurement notes live in docs/MODEL-REJECTIONS.md.
         names = set(self._profiles())
-        self.assertEqual(
-            names,
-            {"aide-runtime.json", "univfd-runtime.json", "cnndetection-runtime.json", "dire-runtime.json", "aasist-runtime.json", "openai-detector-runtime.json", "aide-frames-runtime.json", "fakespot-detector-runtime.json", "qwen-ppl-runtime.json", "binoculars-runtime.json", "faceswap-ffpp-runtime.json", "faceswap-ffpp-frames-runtime.json", "face-manipulation-vit-runtime.json", "face-manipulation-vit-frames-runtime.json", "wav2vec-deepfake-audio-runtime.json", "ai-image-swin-runtime.json", "sbi-effnet-runtime.json", "sd-turbo-det-runtime.json", "community-forensics-vit-runtime.json", "community-forensics-frames-runtime.json", "sbi-frames-runtime.json", "genconvit-face-runtime.json", "melodymachine-w2v2-runtime.json", "umm-maybe-detector-runtime.json", "korean-roberta-text-detector-runtime.json"},
-        )
+        self.assertEqual(names, EXPECTED_PROFILES)
+
+    def test_removed_profiles_are_gone_and_documented(self) -> None:
+        """G2/G33: deleted profiles stay deleted and keep a rejection record."""
+        rejections = (REPO_ROOT / "docs" / "MODEL-REJECTIONS.md").read_text(encoding="utf-8")
+        for name in REMOVED_PROFILES:
+            with self.subTest(profile=name):
+                self.assertFalse((MODELS_DIR / name).exists())
+                self.assertIn(f"`{name}`", rejections)
+
+    def test_generated_model_docs_match_profiles(self) -> None:
+        """G9: models/README.md, NOTICE.md and the registry's profile block
+        are generated from the profiles (scripts/sync_model_docs.py --check)."""
+        spec = importlib.util.spec_from_file_location("sync_model_docs", REPO_ROOT / "scripts" / "sync_model_docs.py")
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        for path, expected in module.render().items():
+            with self.subTest(path=path.name):
+                self.assertEqual(path.read_text(encoding="utf-8"), expected, "run: python scripts/sync_model_docs.py")
+        from deepfake_lens.model_registry import DETECTOR_REGISTRY
+
+        keys = {candidate.key for candidate in DETECTOR_REGISTRY}
+        for profile in self._profiles().values():
+            self.assertIn(profile["candidate_key"], keys)
+
+    def test_umm_maybe_weights_have_one_profile(self) -> None:
+        """G33: the umm-maybe hub weights appear in exactly one profile."""
+        owners = [name for name, profile in self._profiles().items() if profile.get("hub_model") == "umm-maybe/AI-image-detector"]
+        self.assertEqual(owners, ["ai-image-swin-runtime.json"])
 
     def test_wired_profiles_use_implemented_runtimes(self) -> None:
+        # G9 (WP-C): every profile is supported:false in phase 0, so the
+        # contract is checked on all of them rather than skipping them.
         for name, profile in self._profiles().items():
-            if profile.get("supported") is False:
-                continue
             self.assertEqual(profile["type"], "deepfake-lens-runtime-profile-v1", name)
             self.assertIn(profile["runtime"], WIRED_RUNTIMES, name)
             # Hub-resolved runtimes name a model id instead of a local file;
@@ -91,62 +137,59 @@ class CommittedProfilesTest(unittest.TestCase):
                 self.assertIn("checkpoint", profile, name)
             self.assertTrue(profile.get("limitations"), f"{name} must carry honest limitations")
 
-    def test_dire_is_documented_placeholder(self) -> None:
-        profile = self._profiles()["dire-runtime.json"]
-        self.assertIs(profile["supported"], False)
-        self.assertTrue(profile["reason"])
-        self.assertIn("http", profile["fetch"])
+    def test_every_profile_is_gated_and_carries_an_empty_pin(self) -> None:
+        """G9: supported:false (measurement gate not met), a pin object of
+        the right kind (sha256 for local weights, revision for hub models),
+        and a measured_on slot for WP-I."""
+        for name, profile in self._profiles().items():
+            with self.subTest(profile=name):
+                self.assertIs(profile["supported"], False)
+                self.assertIn("측정 게이트", profile["reason"])
+                self.assertIn("measured_on", profile)
+                self.assertIsNone(profile["measured_on"])
+                self.assertEqual(profile["pin"], empty_pin_for(profile))
+                target = profile["inner"] if profile["runtime"] == "video-frames" else profile
+                expected_key = "revision" if "hub_model" in target else "sha256"
+                self.assertEqual(set(profile["pin"]), {expected_key})
+
+    def test_gated_profile_degrades_with_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            image = Path(tmp) / "img.png"
+            _write_rgb_png(image)
+            analysis = analyze_external_model(image, MODELS_DIR / "aide-runtime.json")
+        self.assertIsNotNone(analysis)
+        self.assertFalse(analysis.available)
+        self.assertEqual(analysis.confidence, "unavailable")
+        self.assertIn("AIDE", analysis.model)
+        self.assertIn("측정 게이트", analysis.detail)
 
     def test_placeholder_profile_degrades_with_reason(self) -> None:
+        # Formerly exercised the committed dire-runtime.json placeholder,
+        # which was removed in WP-C (G2); same contract on a temp profile.
         with tempfile.TemporaryDirectory() as tmp:
             image = Path(tmp) / "img.png"
             _write_rgb_png(image)
-            analysis = analyze_external_model(image, MODELS_DIR / "dire-runtime.json")
+            profile_path = Path(tmp) / "placeholder-runtime.json"
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "type": "deepfake-lens-runtime-profile-v1",
+                        "name": "Placeholder detector",
+                        "runtime": "dire",
+                        "supported": False,
+                        "reason": "not wired: needs a reconstruction pipeline.",
+                        "fetch": "Source: https://example.invalid/placeholder",
+                        "limitations": ["This profile never produces scores."],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            analysis = analyze_external_model(image, profile_path)
         self.assertIsNotNone(analysis)
         self.assertFalse(analysis.available)
-        self.assertIn("DIRE", analysis.model)
+        self.assertIn("Placeholder", analysis.model)
         self.assertIn("not wired", analysis.detail.lower())
-        self.assertTrue(any("github.com/ZhendongWang6/DIRE" in item for item in analysis.limitations))
-
-    def test_univfd_profile_records_clip_contract(self) -> None:
-        profile = self._profiles()["univfd-runtime.json"]
-        self.assertEqual(profile["runtime"], "clip-linear")
-        self.assertEqual(profile["backbone"], "openai/clip-vit-large-patch14")
-        self.assertEqual(profile["mean"], [0.48145466, 0.4578275, 0.40821073])
-        self.assertEqual(profile["score_activation"], "sigmoid")
-
-    def test_cnndetection_profile_records_torchvision_contract(self) -> None:
-        profile = self._profiles()["cnndetection-runtime.json"]
-        self.assertEqual(profile["runtime"], "torchvision")
-        self.assertEqual(profile["arch"], "resnet50")
-        self.assertEqual(profile["num_classes"], 1)
-        self.assertEqual(profile["state_dict_prefix"], "model.")
-
-    def test_face_vit_profile_records_hub_contract(self) -> None:
-        profile = self._profiles()["face-manipulation-vit-runtime.json"]
-        self.assertIs(profile["supported"], False)
-        self.assertIn("rejected", profile["reason"])
-        self.assertEqual(profile["runtime"], "hf-image-classifier")
-        self.assertEqual(profile["modality"], "image")
-        self.assertIn("hub_model", profile)
-        self.assertEqual(profile["score_label"], "Fake")
-        self.assertIs(profile["crop_faces"], True)
-        self.assertEqual(profile["crop_aggregate"], "max")
-
-    def test_rejected_ffpp_profiles_are_disabled(self) -> None:
-        for name in ("faceswap-ffpp-runtime.json", "faceswap-ffpp-frames-runtime.json"):
-            profile = self._profiles()[name]
-            self.assertIs(profile["supported"], False, name)
-            self.assertIn("rejected", profile["reason"], name)
-
-    def test_rejected_ffpp_profile_degrades_with_reason(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            image = Path(tmp) / "img.png"
-            _write_rgb_png(image)
-            analysis = analyze_external_model(image, MODELS_DIR / "faceswap-ffpp-runtime.json")
-        self.assertIsNotNone(analysis)
-        self.assertFalse(analysis.available)
-        self.assertIn("rejected", analysis.detail.lower())
+        self.assertTrue(any("example.invalid/placeholder" in item for item in analysis.limitations))
 
     def test_crop_faces_gates_off_faceless_image(self) -> None:
         """crop_faces profiles must skip face-free images before inference."""
@@ -171,46 +214,60 @@ class CommittedProfilesTest(unittest.TestCase):
         self.assertFalse(analysis.available)
         self.assertIn("crop_faces", analysis.detail)
 
-    def test_disabled_face_vit_profile_reports_reason(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            image = Path(tmp) / "img.png"
-            _write_rgb_png(image)
-            analysis = analyze_external_model(image, MODELS_DIR / "face-manipulation-vit-runtime.json")
-        self.assertIsNotNone(analysis)
-        self.assertFalse(analysis.available)
-        self.assertIn("rejected", analysis.detail.lower())
-
-    def test_qwen_ppl_profile_records_ppl_contract(self) -> None:
-        profile = self._profiles()["qwen-ppl-runtime.json"]
-        self.assertEqual(profile["runtime"], "causal-lm-ppl")
-        self.assertEqual(profile["modality"], "text")
-        self.assertEqual(profile["hub_model"], "Qwen/Qwen2.5-0.5B")
-        self.assertLess(profile["ppl_low"], profile["ppl_high"])
-        self.assertIn("causal-lm-ppl", TEXT_RUNTIMES)
-
     def test_causal_lm_ppl_degrades_on_empty_text(self) -> None:
+        # Formerly used the committed qwen-ppl-runtime.json (removed, G2);
+        # the runtime contract is kept on a pinned temp profile.
+        self.assertIn("causal-lm-ppl", TEXT_RUNTIMES)
         with tempfile.TemporaryDirectory() as tmp:
             empty = Path(tmp) / "empty.txt"
             empty.write_text("", encoding="utf-8")
-            analysis = analyze_external_model(empty, MODELS_DIR / "qwen-ppl-runtime.json", modality="text")
+            profile_path = Path(tmp) / "ppl-runtime.json"
+            profile_path.write_text(
+                json.dumps({"name": "ppl", "runtime": "causal-lm-ppl", "modality": "text", "hub_model": "org/lm", "pin": {"revision": FAKE_REVISION}}),
+                encoding="utf-8",
+            )
+            analysis = analyze_external_model(empty, profile_path, modality="text")
         self.assertIsNotNone(analysis)
         self.assertFalse(analysis.available)
-
-    def test_binoculars_profile_records_contract(self) -> None:
-        profile = self._profiles()["binoculars-runtime.json"]
-        self.assertEqual(profile["runtime"], "binoculars")
-        self.assertEqual(profile["modality"], "text")
-        self.assertIn("observer_model", profile)
-        self.assertLess(profile["ratio_low"], profile["ratio_high"])
-        self.assertIn("binoculars", TEXT_RUNTIMES)
 
     def test_binoculars_degrades_on_empty_text(self) -> None:
+        # Formerly used the committed binoculars-runtime.json (removed, G2).
+        self.assertIn("binoculars", TEXT_RUNTIMES)
         with tempfile.TemporaryDirectory() as tmp:
             empty = Path(tmp) / "empty.txt"
             empty.write_text("", encoding="utf-8")
-            analysis = analyze_external_model(empty, MODELS_DIR / "binoculars-runtime.json", modality="text")
+            profile_path = Path(tmp) / "bino-runtime.json"
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "name": "bino",
+                        "runtime": "binoculars",
+                        "modality": "text",
+                        "hub_model": "org/performer",
+                        "observer_model": "org/observer",
+                        "pin": {"revision": FAKE_REVISION, "observer_revision": FAKE_REVISION},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            analysis = analyze_external_model(empty, profile_path, modality="text")
         self.assertIsNotNone(analysis)
         self.assertFalse(analysis.available)
+
+    def test_binoculars_requires_both_revisions(self) -> None:
+        """G10: the observer LM is a second hub load and needs its own pin."""
+        with tempfile.TemporaryDirectory() as tmp:
+            text = Path(tmp) / "t.txt"
+            text.write_text("some text", encoding="utf-8")
+            profile_path = Path(tmp) / "bino-runtime.json"
+            profile_path.write_text(
+                json.dumps({"name": "bino", "runtime": "binoculars", "modality": "text", "hub_model": "a/b", "observer_model": "c/d", "pin": {"revision": FAKE_REVISION}}),
+                encoding="utf-8",
+            )
+            analysis = analyze_external_model(text, profile_path, modality="text")
+        self.assertEqual(analysis.confidence, "failed")
+        self.assertTrue(analysis.detail.startswith("미고정 프로필"), analysis.detail)
+        self.assertIn("observer_revision", analysis.detail)
 
 
 class MultiProfileAggregationTest(unittest.TestCase):
@@ -446,19 +503,20 @@ class MultiProfileAggregationTest(unittest.TestCase):
             analysis = analyze_external_model(image, MODELS_DIR)
 
         self.assertIsNotNone(analysis)
-        self.assertEqual(len(analysis.models), 12)
+        # G2/G33 (WP-C): the image-modality members left after the cleanup
+        # (aide, ai-image-swin, community-forensics-vit, sd-turbo-det,
+        # sbi-effnet) — was 12 before the rejected profiles were removed.
+        self.assertEqual(len(analysis.models), 5)
         names = {m["model"] for m in analysis.models}
         self.assertTrue(any("AIDE" in name for name in names))
-        self.assertTrue(any("DIRE" in name for name in names))
-        # requires_face members must appear as gated (unavailable) on the
-        # faceless probe image rather than crashing or scoring.
-        self.assertTrue(any("dima806" in name or "deepfake-vs-real" in name for name in names))
-        # crop_faces members must likewise gate on the faceless probe image.
         self.assertTrue(any("SBI" in name or "sbi" in name for name in names))
-        # Without downloaded checkpoints every member must degrade cleanly.
-        if not any(MODELS_DIR.glob(pattern) for pattern in ("*.pth", "*.pt", "*.onnx")):
-            self.assertFalse(analysis.available)
-            self.assertEqual(analysis.score, 0)
+        # G9: every member is supported:false in phase 0 -> skipped with the
+        # gate reason, never scored, whatever weights are on disk.
+        self.assertFalse(analysis.available)
+        self.assertEqual(analysis.score, 0)
+        for member in analysis.models:
+            self.assertFalse(member["available"], member)
+            self.assertIn("측정 게이트", member["detail"])
 
     def test_aggregate_models_round_trip_through_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -577,11 +635,17 @@ class VideoFramesRuntimeTest(unittest.TestCase):
 
         self.assertIsNone(analysis)
 
-    def test_committed_aide_frames_profile_matches_video_modality(self) -> None:
-        profile = json.loads((MODELS_DIR / "aide-frames-runtime.json").read_text(encoding="utf-8"))
-        self.assertEqual(profile["modality"], "video")
-        self.assertEqual(profile["runtime"], "video-frames")
-        self.assertEqual(profile["inner"]["runtime"], "aide")
+    def test_committed_frames_profiles_match_video_modality(self) -> None:
+        # aide-frames-runtime.json was removed (G2/WP-C); the remaining
+        # video-frames profiles carry the same contract.
+        for name, inner_runtime in (("community-forensics-frames-runtime.json", "onnx"), ("sbi-frames-runtime.json", "torchvision")):
+            with self.subTest(profile=name):
+                profile = json.loads((MODELS_DIR / name).read_text(encoding="utf-8"))
+                self.assertEqual(profile["modality"], "video")
+                self.assertEqual(profile["runtime"], "video-frames")
+                self.assertEqual(profile["inner"]["runtime"], inner_runtime)
+                # G9: the outer pin describes the inner checkpoint.
+                self.assertEqual(profile["pin"], {"sha256": ""})
 
 
 def _has_torchvision() -> bool:
@@ -601,6 +665,8 @@ class TorchvisionHeadTest(unittest.TestCase):
     (EfficientNet) heads to the profile's num_classes."""
 
     def _write_profile(self, tmp: Path, arch: str, num_classes: int, checkpoint: Path) -> Path:
+        import hashlib
+
         profile = {
             "type": "deepfake-lens-runtime-profile-v1",
             "name": f"{arch}-head-test",
@@ -610,6 +676,8 @@ class TorchvisionHeadTest(unittest.TestCase):
             "checkpoint": checkpoint.name,
             "input_size": 32,
             "score_activation": "softmax",
+            # G9: weights load only against a matching pin.
+            "pin": {"sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest()},
         }
         path = tmp / f"{arch}-runtime.json"
         path.write_text(json.dumps(profile), encoding="utf-8")
@@ -728,6 +796,75 @@ class LanguageGateTest(unittest.TestCase):
             fused = _aggregate_profile_results(results, hangul_ratio=0.0)
         self.assertEqual(fused.score, 50)
         self.assertFalse(any("excluded" in item for item in fused.limitations))
+
+    def test_gated_member_takes_no_part_in_spread_or_agreement(self) -> None:
+        """G33 regression: _aggregate_profile_results assigned ``scores``
+        twice and the second (over every available member) overwrote the
+        first, so an excluded English-only member still drove the spread."""
+        import tempfile
+
+        from deepfake_lens.model_adapter import ExternalModelAnalysis, _aggregate_profile_results
+
+        with tempfile.TemporaryDirectory() as tmp:
+            en = self._profile(tmp, "en-only", 1.0, ["en"])
+            ko_a = self._profile(tmp, "ko-a", 1.0, ["ko"])
+            ko_b = self._profile(tmp, "ko-b", 1.0, None)
+            results = [
+                (en, ExternalModelAnalysis(True, 98, "high", "en-only", "", [])),
+                (ko_a, ExternalModelAnalysis(True, 10, "low", "ko-a", "", [])),
+                (ko_b, ExternalModelAnalysis(True, 15, "low", "ko-b", "", [])),
+            ]
+            fused = _aggregate_profile_results(results, hangul_ratio=0.9)
+        # Spread over the two contributing members is 5, not 98 - 10 = 88.
+        self.assertIn("member spread=5", fused.detail)
+        self.assertIn("agreement: high", fused.detail)
+        self.assertFalse(any("disagree" in item for item in fused.limitations))
+        self.assertIn("2/3 model profiles", fused.detail)
+        self.assertEqual(fused.score, 12)
+        # The gated member is reported as skipped, so its coverage entry is
+        # "skipped", not "ran".
+        members = {m["model"]: m for m in fused.models}
+        self.assertFalse(members["en-only"]["available"])
+        self.assertEqual(members["en-only"]["confidence"], "skipped")
+        self.assertIn("언어 게이트", members["en-only"]["detail"])
+
+    def test_gated_member_alone_does_not_hide_disagreement(self) -> None:
+        """The reverse case: two contributing members that disagree must
+        still read as disagreement whatever the gated member scored."""
+        import tempfile
+
+        from deepfake_lens.model_adapter import ExternalModelAnalysis, _aggregate_profile_results
+
+        with tempfile.TemporaryDirectory() as tmp:
+            en = self._profile(tmp, "en-only", 1.0, ["en"])
+            ko_a = self._profile(tmp, "ko-a", 1.0, ["ko"])
+            ko_b = self._profile(tmp, "ko-b", 1.0, None)
+            results = [
+                (en, ExternalModelAnalysis(True, 50, "medium", "en-only", "", [])),
+                (ko_a, ExternalModelAnalysis(True, 10, "low", "ko-a", "", [])),
+                (ko_b, ExternalModelAnalysis(True, 90, "high", "ko-b", "", [])),
+            ]
+            fused = _aggregate_profile_results(results, hangul_ratio=0.9)
+        self.assertIn("member spread=80", fused.detail)
+        self.assertEqual(fused.confidence, "low")
+
+    def test_all_members_gated_is_not_available(self) -> None:
+        """Every scoring member excluded -> no usable aggregate (not score 0 / available)."""
+        import tempfile
+
+        from deepfake_lens.model_adapter import ExternalModelAnalysis, _aggregate_profile_results
+
+        with tempfile.TemporaryDirectory() as tmp:
+            en_a = self._profile(tmp, "en-a", 1.0, ["en"])
+            en_b = self._profile(tmp, "en-b", 1.0, ["en"])
+            results = [
+                (en_a, ExternalModelAnalysis(True, 90, "high", "en-a", "", [])),
+                (en_b, ExternalModelAnalysis(True, 80, "high", "en-b", "", [])),
+            ]
+            fused = _aggregate_profile_results(results, hangul_ratio=0.9)
+        self.assertFalse(fused.available)
+        self.assertEqual(fused.confidence, "unavailable")
+        self.assertIn("0/2 model profiles", fused.detail)
 
 
 class ModelCacheLRUTest(unittest.TestCase):

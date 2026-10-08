@@ -26,6 +26,25 @@ def _checkpoint_downloaded() -> bool:
     return CHECKPOINT_PATH.exists()
 
 
+def _enabled_copy(root: Path, *, checkpoint: Path | None = None) -> Path:
+    """An operator-enabled copy of the committed profile in ``root``.
+
+    G9/WP-C: the committed profile is ``supported: false`` (measurement gate
+    not met) and unpinned, so tests that exercise the runtime path use a
+    copy with the gate lifted and, when a checkpoint is given, a matching
+    ``pin.sha256``.
+    """
+    profile = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
+    profile.pop("supported", None)
+    profile.pop("reason", None)
+    if checkpoint is not None:
+        profile["checkpoint"] = str(checkpoint)
+        profile["pin"] = {"sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest()}
+    path = root / PROFILE_PATH.name
+    path.write_text(json.dumps(profile), encoding="utf-8")
+    return path
+
+
 def _load_fetch_aide():
     spec = importlib.util.spec_from_file_location("fetch_aide", REPO_ROOT / "scripts" / "fetch_aide.py")
     module = importlib.util.module_from_spec(spec)
@@ -63,7 +82,14 @@ class AideRuntimeProfileTest(unittest.TestCase):
             # out of range; 128 px keeps this test on the missing-checkpoint path.
             _write_rgb_png(image, 128, 128, lambda x, y: (255, 255, 255))
 
-            analysis = analyze_external_model(image, PROFILE_PATH)
+            # G9/WP-C: the committed profile is supported:false — skipped
+            # with the measurement-gate reason before any checkpoint lookup.
+            committed = analyze_external_model(image, PROFILE_PATH)
+            self.assertFalse(committed.available)
+            self.assertIn("측정 게이트", committed.detail)
+
+            enabled = _enabled_copy(root)
+            analysis = analyze_external_model(image, enabled)
 
             self.assertIsNotNone(analysis)
             self.assertFalse(analysis.available)
@@ -72,7 +98,7 @@ class AideRuntimeProfileTest(unittest.TestCase):
             self.assertIn("AIDE", analysis.model)
             self.assertTrue(any("fetch_aide" in item for item in analysis.limitations))
 
-            item = analyze_file(image, root=root, model_path=PROFILE_PATH)
+            item = analyze_file(image, root=root, model_path=enabled)
             self.assertEqual(item.status, "analyzed")
             self.assertIsNotNone(item.result.model_analysis)
             self.assertFalse(item.result.model_analysis.available)
@@ -86,8 +112,7 @@ class AideRuntimeProfileTest(unittest.TestCase):
     def test_copied_profile_resolves_checkpoint_relative_to_profile(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            profile_copy = root / "aide-runtime.json"
-            profile_copy.write_text(PROFILE_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+            profile_copy = _enabled_copy(root)  # G9/WP-C: committed profile is supported:false
             image = root / "sample.png"
             _write_rgb_png(image, 8, 8, lambda x, y: (10, 20, 30))
 

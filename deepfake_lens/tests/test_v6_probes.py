@@ -141,7 +141,29 @@ class LipsyncTest(unittest.TestCase):
         self.assertIn("mouth_samples", payload)
 
 
+# A syntactically valid hub commit id; tokenizer loads are mocked.
+_TOKENIZER_REV = "0123456789abcdef0123456789abcdef01234567"
+
+
 class WatermarkTest(unittest.TestCase):
+    def test_unpinned_tokenizer_is_refused(self) -> None:
+        """G10: no revision (or a branch name) -> unavailable before any hub load."""
+        from deepfake_lens.watermark import detect_kgw_watermark, detect_synthid_watermark
+
+        text = "word " * 100
+        fake_transformers = ModuleType("transformers")
+        fake_transformers.AutoTokenizer = SimpleNamespace(from_pretrained=Mock(side_effect=AssertionError("must not load")))
+        with patch.dict(sys.modules, {"transformers": fake_transformers}):
+            for revision in ("", "main"):
+                with self.subTest(revision=revision):
+                    result = detect_kgw_watermark(text, secret="k", tokenizer_revision=revision)
+                    self.assertFalse(result.available)
+                    self.assertIn("미고정", result.verdict)
+        fake_transformers.AutoTokenizer.from_pretrained.assert_not_called()
+        # SynthID needs torch as well; without it the dependency message wins.
+        synthid = detect_synthid_watermark(text, keys=[1, 2], tokenizer_revision="")
+        self.assertFalse(synthid.available)
+
     def test_short_text_unavailable(self) -> None:
         from deepfake_lens.watermark import detect_kgw_watermark
 
@@ -199,16 +221,17 @@ class WatermarkTest(unittest.TestCase):
             patch.object(transformers.AutoTokenizer, "from_pretrained", return_value=tokenizer) as load_tokenizer,
             patch("socket.socket.connect", side_effect=AssertionError("unexpected network acquisition")) as connect,
         ):
-            result = detect_kgw_watermark(text, secret=secret)
+            # G10 (WP-C): the hub tokenizer must be pinned to a commit.
+            result = detect_kgw_watermark(text, secret=secret, tokenizer_revision=_TOKENIZER_REV)
             self.assertTrue(result.available)
             self.assertEqual(result.token_count, len(token_ids))
             self.assertGreaterEqual(result.z_score or 0, 4.0)
 
             # A wrong key must NOT flag the same stream.
-            wrong = detect_kgw_watermark(text, secret="wrong-key")
+            wrong = detect_kgw_watermark(text, secret="wrong-key", tokenizer_revision=_TOKENIZER_REV)
             self.assertTrue(wrong.available)
             self.assertLess(wrong.z_score or 0, 4.0)
-            self.assertEqual(load_tokenizer.call_args_list, [call("Qwen/Qwen2.5-0.5B")] * 2)
+            self.assertEqual(load_tokenizer.call_args_list, [call("Qwen/Qwen2.5-0.5B", revision=_TOKENIZER_REV)] * 2)
             connect.assert_not_called()
 
 
@@ -354,8 +377,8 @@ class SynthIDWatermarkTest(unittest.TestCase):
 
         text = "The printing press was invented around 1440 by Johannes Gutenberg. It made books cheap to produce and transformed the spread of knowledge across Europe within a generation." * 3
         with patch.object(AutoTokenizer, "from_pretrained", return_value=tokenizer) as load_tokenizer:
-            result = detect_synthid_watermark(text, keys=[17, 23, 42, 90, 77])
-        load_tokenizer.assert_called_once_with("Qwen/Qwen2.5-0.5B")
+            result = detect_synthid_watermark(text, keys=[17, 23, 42, 90, 77], tokenizer_revision=_TOKENIZER_REV)
+        load_tokenizer.assert_called_once_with("Qwen/Qwen2.5-0.5B", revision=_TOKENIZER_REV)  # G10
         self.assertTrue(result.available)
         self.assertLess(result.score, 50)
 

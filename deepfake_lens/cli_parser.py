@@ -190,7 +190,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     video_analysis_parser.add_argument("file", type=Path, help="video file to analyze")
     video_analysis_parser.add_argument("--frame-rate", type=float, default=1.0, help="frame sample rate (default: 1.0 fps)")
     video_analysis_parser.add_argument("--max-frames", type=int, default=100, help="maximum frames to analyze (default: 100)")
-    video_analysis_parser.add_argument("--model-path", type=Path, nargs="*", help="video-modality model profile(s) — e.g. models/aide-frames-runtime.json scores sampled frames with an image detector")
+    video_analysis_parser.add_argument("--model-path", type=Path, nargs="*", help="video-modality model profile(s) — e.g. models/community-forensics-frames-runtime.json scores sampled frames with an image detector")
     video_analysis_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
     video_analysis_parser.add_argument("--json-out", type=Path, help="write JSON report to file")
 
@@ -214,6 +214,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     watermark_parser.add_argument("--secret", help="KGW green-list secret used at generation time")
     watermark_parser.add_argument("--synthid-keys", help="comma-separated SynthID-Text integer keys used at generation (enables SynthID mean-g detection instead of KGW)")
     watermark_parser.add_argument("--tokenizer", default="Qwen/Qwen2.5-0.5B", help="HF tokenizer model or local path")
+    watermark_parser.add_argument("--tokenizer-revision", default="", help="pinned 40-hex hub commit for --tokenizer (required; unpinned tokenizers are refused)")
     watermark_parser.add_argument("--gamma", type=float, default=0.25, help="green-list fraction used at generation")
     watermark_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
 
@@ -360,6 +361,9 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     evidence_stmt_parser.add_argument("--format", choices=["table", "json", "markdown"], default="table", help="stdout format")
 
     vendor_parser = subparsers.add_parser("vendor-weights", help="air-gapped forensic lab model weight verification and offline bundler")
+    vendor_parser.add_argument("action", nargs="?", choices=["pin"], help="'pin <profile>': record the checkpoint sha256 / hub commit revision in the profile's pin")
+    vendor_parser.add_argument("profile", nargs="?", help="profile name (e.g. aasist) or path, for 'pin'")
+    vendor_parser.add_argument("--revision", help="for 'pin' on a hub model: use this 40-hex commit instead of querying the hub")
     vendor_parser.add_argument("--models-dir", type=Path, help="path to models directory (default: bundled models/)")
     vendor_parser.add_argument("--verify", action="store_true", help="verify SHA-256 integrity of offline weights")
     vendor_parser.add_argument("--fetch", action="store_true", help="download declared checkpoint_url weights and verify SHA-256 before writing")

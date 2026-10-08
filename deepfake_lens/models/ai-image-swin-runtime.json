@@ -3,6 +3,8 @@
   "name": "Swin-large AI-vs-human image detector (umm-maybe)",
   "candidate_key": "swin-ai-image-umm-maybe",
   "runtime": "hf-image-classifier",
+  "supported": false,
+  "reason": "0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
   "modality": "image",
   "hub_model": "umm-maybe/AI-image-detector",
   "score_label": "artificial",
@@ -11,19 +13,23 @@
   "score_semantics": "synthetic_probability",
   "threshold": 67,
   "source_url": "https://huggingface.co/umm-maybe/AI-image-detector",
-  "supported": true,
   "limitations": [
     "Hub weights are not committed; transformers downloads ~870 MB on first use (set hub_model to a local snapshot directory for offline runs).",
     "Measured locally (2026-09) on 4 DALL-E samples + Lenna: caught 1 of 4 (artificial 0.77), missed 3 (0.01/0.00/0.35); correctly scored real Lenna human 0.97.",
     "Complements AIDE mainly as real-image calibration (AIDE scored real Lenna 85% fake; this model 3%) — it does NOT close the commercial-generator recall gap; DALL-E-family recall stays weak.",
     "AutoTrain fine-tune without a published eval protocol; per-generator recall is unverified beyond the local samples above.",
     "Not in the CLI default member list — it is picked up automatically by scans pointed at the models/ directory (web app, api_server, --model-path models).",
-    "Scores are a prioritization signal, not a truth label."
+    "Scores are a prioritization signal, not a truth label.",
+    "G33: the same hub weights (umm-maybe/AI-image-detector) were re-measured on 2026-09-21 and showed no separation under either label reading (see docs/MODEL-REJECTIONS.md). The two measurements conflict, so the profile stays disabled until WP-I re-measures it."
   ],
   "notes": [
     "SwinForImageClassification (Swin-large) fine-tuned on AI-vs-human image sets, cc-by-4.0, ~355k HF downloads.",
     "score_label 'artificial' resolves the class index from id2label ({0: artificial, 1: human}) at runtime — label order cannot silently invert the score.",
     "Kept opt-in for default runs: the measured marginal gain over the AIDE default is modest (it dilutes strong AIDE hits on some generators while correcting AIDE's false positives on processed real photos) — see experiments/IMAGE_EVALUATION.md."
   ],
-  "license": "cc-by-4.0"
+  "license": "cc-by-4.0",
+  "pin": {
+    "revision": ""
+  },
+  "measured_on": null
 }

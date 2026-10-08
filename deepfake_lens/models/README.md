@@ -1,29 +1,52 @@
 # Model zoo
 
-Runtime profiles for published synthetic-media detectors (image, audio, and text).
-Profiles are committed; **weights never are** (license + size —
-`models/*.pth` and friends are gitignored). A scan treats every profile as
-optional: missing checkpoints or missing optional dependencies degrade to
-`available: false` entries with the fetch hint in `limitations`, never a
+Runtime profiles for published synthetic-media detectors (image, audio, text
+and per-frame video). Profiles are committed; **weights never are** (license +
+size — `models/*.pth` and friends are gitignored). A scan treats every
+profile as optional: a missing checkpoint or a missing optional dependency is
+recorded as a skipped check with the fetch hint in `limitations`, never a
 crash.
 
-| Profile | Detector | Runtime | Status |
-|---|---|---|---|
-| `aide-runtime.json` | AIDE (ICLR 2025) `progan_train` | `aide` (torch reimplementation in `scripts/run_aide.py`) | wired — run `scripts/fetch_aide.py` |
-| `univfd-runtime.json` | UnivFD (CVPR 2023) CLIP ViT-L/14 linear probe | `clip-linear` (torch + transformers) | wired — fetch `pretrained_weights/fc_weights.pth` from the [UnivFD repo](https://github.com/WisconsinAIVision/UniversalFakeDetect) to `models/univfd_fc.pth`; the CLIP backbone downloads from HF on first use (~1.7 GB) |
-| `cnndetection-runtime.json` | CNNDetection (CVPR 2020) ResNet-50 blur+jpg | `torchvision` (torch + torchvision) | wired — download `blur_jpg_prob0.5.pth` via the CNNDetection repo's `weights/download_weights.sh` (Dropbox) to `models/` |
-| `dire-runtime.json` | DIRE (ICCV 2023) diffusion reconstruction | — | `supported: false` placeholder (needs ADM diffusion pipeline) |
-| `aasist-runtime.json` | AASIST (Interspeech 2022) audio anti-spoofing | `aasist` (torch reimplementation in `scripts/run_aasist.py`) | wired — run `scripts/fetch_aasist.py` |
-| `openai-detector-runtime.json` | OpenAI GPT-2 output detector (RoBERTa-base) | `hf-text-classifier` (torch + transformers) | wired — fetched from HF hub on first use |
-| `fakespot-detector-runtime.json` | Fakespot AI text detector (RoBERTa-base, modern-LLM training data) | `hf-text-classifier` (torch + transformers) | wired — fetched from HF hub on first use |
-| `qwen-ppl-runtime.json` | Qwen2.5-0.5B reference-LM perplexity screen (generator-agnostic; anchors are **English-calibrated** — excluded on Korean text) | `causal-lm-ppl` (torch + transformers) | wired — fetched from HF hub on first use (~1 GB); `hub_model` may point at a local snapshot for offline use; `ensemble_weight` 0.25 after measured corpus overlap (human polished prose PPL 8–19 == AI 7–19) |
-| `binoculars-runtime.json` | Binoculars two-LM perplexity-ratio screen (Qwen2.5-0.5B performer / 1.5B observer) | `binoculars` (torch + transformers) | wired — fetched from HF hub on first use (~4.3 GB total); `ensemble_weight` **0.05** — measured 2026-09-16 to score 100 on every polished human sample (tracks register, not AI origin) |
-| `aide-frames-runtime.json` | AIDE per-frame video screen | `video-frames` (cv2 + nested image profile) | wired — needs the AIDE checkpoint + opencv; **frame-level only, not temporal/lip-sync** |
+## Phase-0 status
+
+- **Every profile is `supported: false`.** None has passed the measurement
+  gate (≥200 samples per class, AUROC 95% CI lower bound ≥ 0.85 — WP-I), so
+  the adapter skips them with the profile's `reason`. `measured_on` is the
+  slot WP-I fills with the corpus id, manifest hash and CI.
+- **No weight loads without a pin** (G9/G10). Each profile carries a `pin`
+  object: `{"sha256": "<64 hex>"}` for a local checkpoint (re-hashed on every
+  load) or `{"revision": "<40 hex commit>"}` for a Hugging Face hub model
+  (passed as `revision=` to every `from_pretrained`). An empty pin is
+  recorded as a failed check `미고정 프로필`; a mismatch as
+  `무결성 불일치: …`. Either makes the verdict `판단 불가`.
+- Fill a pin with `deepfake-lens vendor-weights pin <profile>` (local file:
+  sha256 of the checkpoint; hub model: the current commit via
+  `huggingface_hub`, or `--revision <sha>` offline).
+- Profiles removed in phase 0 and the measurements behind each removal are
+  listed in `docs/MODEL-REJECTIONS.md`.
+
+The table below is generated from the profiles by
+`scripts/sync_model_docs.py`; CI fails when it is stale.
+
+<!-- BEGIN GENERATED: profiles (scripts/sync_model_docs.py — do not edit by hand) -->
+| 프로필 | 검출기 | 모달리티 | 런타임 | 가중치 | pin | supported | measured_on |
+|---|---|---|---|---|---|---|---|
+| `aasist-runtime.json` | AASIST (Interspeech 2022) ASVspoof2019-LA anti-spoofing | audio | `aasist` | 로컬 `aasist.pth` | 미고정 (sha256 비어 있음) | false | 없음 |
+| `ai-image-swin-runtime.json` | Swin-large AI-vs-human image detector (umm-maybe) | image | `hf-image-classifier` | 허브 `umm-maybe/AI-image-detector` | 미고정 (revision 비어 있음) | false | 없음 |
+| `aide-runtime.json` | AIDE (ICLR 2025) progan_train | image | `aide` | 로컬 `aide_progan_train.pth` | 미고정 (sha256 비어 있음) | false | 없음 |
+| `community-forensics-frames-runtime.json` | CommunityForensics ViT-S/384 per-frame (video-frames runtime) | video | `video-frames → onnx` | 로컬 `checkpoints/community-forensics/generative_detector.onnx` | 미고정 (sha256 비어 있음) | false | 없음 |
+| `community-forensics-vit-runtime.json` | CommunityForensics ViT-S/384 (OpenSight) general AI-image detector | image | `onnx` | 로컬 `checkpoints/community-forensics/generative_detector.onnx` | 미고정 (sha256 비어 있음) | false | 없음 |
+| `fakespot-detector-runtime.json` | Fakespot AI text detector (roberta-base) | text | `hf-text-classifier` | 허브 `fakespot-ai/roberta-base-ai-text-detection-v1` | 미고정 (revision 비어 있음) | false | 없음 |
+| `sbi-effnet-runtime.json` | SBI-trained EfficientNet-B0 v2 (local, enriched self-blend: polygon/affine masks + diverse portraits) | image | `torchvision` | 로컬 `sbi-effnet-b0.pth` | 미고정 (sha256 비어 있음) | false | 없음 |
+| `sbi-frames-runtime.json` | SBI EfficientNet-B0 on per-frame face crops (video-frames runtime) | video | `video-frames → torchvision` | 로컬 `sbi-effnet-b0.pth` | 미고정 (sha256 비어 있음) | false | 없음 |
+| `sd-turbo-det-runtime.json` | Local EfficientNet-B0 trained on SD-Turbo fakes vs Hemg reals | image | `torchscript` | 로컬 `sd-turbo-det-b0.torchscript` | 미고정 (sha256 비어 있음) | false | 없음 |
+| `wav2vec-deepfake-audio-runtime.json` | Wav2Vec2-XLSR deepfake audio classifier (Gustking, In-the-Wild) | audio | `hf-audio-classifier` | 허브 `Gustking/wav2vec2-large-xlsr-deepfake-audio-classification` | 미고정 (revision 비어 있음) | false | 없음 |
+<!-- END GENERATED: profiles -->
 
 Profiles declare a `modality` (`image`/`audio`/`text`/`video`); a scanned file
-only runs profiles matching its own modality, so the image detectors, AASIST,
-and the text classifiers never
-trip over each other in a mixed directory scan.
+only runs profiles matching its own modality, so the image detectors, the
+audio members and the text classifier never trip over each other in a mixed
+directory scan.
 
 ## Multi-model runs
 
@@ -32,13 +55,15 @@ trip over each other in a mixed directory scan.
 relative to the set file). With more than one profile every member runs and
 the result reports:
 
-- `models[]` — per-model `available`/`score`/`confidence`/`detail`
-- aggregate `score` — the `ensemble_weight`-weighted mean of available
-  member scores (each profile may declare `ensemble_weight`, default 1.0;
-  measured-reliability weights, e.g. openai-detector 0.25 / fakespot 0.5 /
-  qwen-ppl 1.0)
-- agreement — `detail` reports the member score spread; disagreement
-  (>20 points) drops confidence to `low` and adds a limitation
+- `models[]` — per-model `available`/`score`/`confidence`/`detail`; each
+  member also gets its own `model:<name>` coverage entry
+- aggregate `score` — the `ensemble_weight`-weighted mean of the members
+  that contributed (each profile may declare `ensemble_weight`, default 1.0)
+- agreement — `detail` reports the spread of the contributing members;
+  disagreement (>20 points) drops confidence to `low` and adds a limitation.
+  A member excluded by the language gate (`trained_languages` without `ko`
+  on Korean-dominant text) is reported as skipped and takes no part in the
+  aggregate, the spread or the agreement.
 
 Example:
 
@@ -46,12 +71,10 @@ Example:
 deepfake-lens scan folder/ --model-path models/   # every profile in models/
 ```
 
-Default scans auto-discover the bundled verified engines —
-`aide-runtime.json` for images, `aasist-runtime.json` for audio, and
-`openai-detector-runtime.json` for text
-(`--no-default-engine` opts out). The wider zoo stays opt-in because the
-placeholder members add latency without scores until their checkpoints are
-fetched.
+Default scans auto-discover `aide-runtime.json` for images and
+`aasist-runtime.json` + `wav2vec-deepfake-audio-runtime.json` for audio
+(`--no-default-engine` opts out). There is no default text model. In phase 0
+the defaults are `supported: false`, so they are recorded as skipped.
 
 ## Other assets (not runtime profiles)
 
@@ -68,8 +91,8 @@ fetched.
 
 ## Honesty notes
 
-- Scores are **prioritization signals, not truth labels** — calibration
-  against your own data (`deepfake-lens eval` / `calibrate`) is required
-  before trusting thresholds.
+- Scores are **prioritization signals, not truth labels** — an uncalibrated
+  model score never decides the verdict (see
+  `docs/deepfake-lens-json-contract.md`, decision rule 4).
 - Each profile's `limitations` field is surfaced on every result it touches;
   read them before citing a score.

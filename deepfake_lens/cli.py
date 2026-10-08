@@ -73,6 +73,7 @@ from .vendor_weights import (
     bundle_offline_weights,
     inspect_model_manifest,
     install_bundle,
+    pin_profile,
     verify_offline_integrity,
     weights_coverage,
 )
@@ -88,10 +89,10 @@ def _pkg_profile(name: str) -> str:
 
 DEFAULT_ENGINE_PROFILE = _pkg_profile("aide-runtime.json")
 DEFAULT_AUDIO_ENGINE_PROFILE = _pkg_profile("aasist-runtime.json")
-DEFAULT_TEXT_ENGINE_PROFILE = _pkg_profile("openai-detector-runtime.json")
-# Face-manipulation profiles exist under models/ but are supported:false —
-# measured at chance on local labeled eval (experiments/FACESWAP_EVALUATION.md),
-# so they are intentionally not part of the default ensemble.
+# G2: no text model is a default member. The former default (GPT-2-era
+# OpenAI detector) and the Korean "detector" (an MLM without a classifier
+# head) were removed — see docs/MODEL-REJECTIONS.md.
+DEFAULT_TEXT_ENGINE_PROFILE: str | None = None
 
 
 def default_model_path(root: Path | None = None) -> Path | None:
@@ -130,14 +131,32 @@ def default_audio_model_paths(root: Path | None = None) -> list[Path]:
 
 
 def default_text_model_path(root: Path | None = None) -> Path | None:
-    """Bundled default text profile (models/openai-detector-runtime.json).
+    """Bundled default text profile, when one is configured.
 
-    Same contract as default_model_path: the profile is committed; the
-    ~500 MB RoBERTa checkpoint is fetched from Hugging Face on first use,
-    and absence returns None so text analysis stays heuristic-only.
+    ``DEFAULT_TEXT_ENGINE_PROFILE`` is None since phase 0 (G2), so this
+    returns None and text analysis stays lexical/reference-only.
     """
+    if DEFAULT_TEXT_ENGINE_PROFILE is None:
+        return None
     candidate = (Path(root) / Path(DEFAULT_TEXT_ENGINE_PROFILE).name) if root is not None else Path(DEFAULT_TEXT_ENGINE_PROFILE)
     return candidate if candidate.is_file() else None
+
+
+def _vendor_weights_pin(args: argparse.Namespace) -> int:
+    """``vendor-weights pin <profile>``: write the profile's weight pin (G9)."""
+    if not args.profile:
+        print("error: 'vendor-weights pin' needs a profile name or path", file=sys.stderr)
+        return 2
+    try:
+        result = pin_profile(args.profile, args.models_dir, revision=args.revision)
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(f"error: 프로필 고정 실패 — {exc}", file=sys.stderr)
+        return 1
+    if result["status"] == "needs-manual":
+        print(result["instructions"], file=sys.stderr)
+        return 1
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -455,12 +474,12 @@ def main(argv: list[str] | None = None) -> int:
             from .watermark import detect_synthid_watermark
 
             keys = [int(part.strip()) for part in args.synthid_keys.split(",") if part.strip()]
-            result = detect_synthid_watermark(text, keys=keys, tokenizer_model=args.tokenizer)
+            result = detect_synthid_watermark(text, keys=keys, tokenizer_model=args.tokenizer, tokenizer_revision=args.tokenizer_revision)
         else:
             if not args.secret:
                 print(json.dumps({"error": "--secret(KGW) 또는 --synthid-keys(SynthID) 중 하나가 필요합니다."}, ensure_ascii=False))
                 return 1
-            result = detect_kgw_watermark(text, secret=args.secret, tokenizer_model=args.tokenizer, gamma=args.gamma)
+            result = detect_kgw_watermark(text, secret=args.secret, tokenizer_model=args.tokenizer, tokenizer_revision=args.tokenizer_revision, gamma=args.gamma)
         if args.format == "json":
             print(json.dumps(result.to_json(), ensure_ascii=False, indent=2))
         else:
@@ -905,7 +924,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Markdown 저장 완료: {args.md_out}")
         return 0
     if args.command == "vendor-weights":
-        _modes = [bool(args.fetch), bool(args.verify), bool(args.bundle_to), bool(args.install), bool(args.manifest_out)]
+        if args.action == "pin":
+            return _vendor_weights_pin(args)
+        _modes =[bool(args.fetch), bool(args.verify), bool(args.bundle_to), bool(args.install), bool(args.manifest_out)]
         if sum(_modes) > 1:
             print("error: vendor-weights flags are mutually exclusive — choose one of --fetch/--verify/--bundle-to/--install/--manifest-out", file=sys.stderr)
             return 2

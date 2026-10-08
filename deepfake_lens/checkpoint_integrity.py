@@ -35,8 +35,10 @@ def _expected_sha256(checkpoint: Path) -> str | None:
 def verify_checkpoint_sha256(checkpoint: Path, expected: str | None = None) -> None:
     """Verify the checkpoint digest against a sidecar, env pin, or declared pin.
 
-    ``expected`` is the profile-declared ``sha256`` (or ``expected_sha256``)
-    from a runtime profile — when present it is the strongest pin and wins.
+    ``expected`` is a caller-supplied digest — when present it is the
+    strongest pin and wins. (Runtime profiles declare theirs as
+    ``pin.sha256``; ``model_adapter`` verifies that through
+    ``model_pins.verify_pin`` on every load.)
     No pin configured means "unverified" — operators that need provenance
     must declare a hash. A configured pin that mismatches is a hard failure.
     """

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 from deepfake_lens.cli import main
@@ -14,6 +15,7 @@ from deepfake_lens.vendor_weights import (
     bundle_offline_weights,
     fetch_weights,
     inspect_model_manifest,
+    pin_profile,
     verify_offline_integrity,
     weights_coverage,
 )
@@ -206,7 +208,7 @@ class FetchAndCoverageTest(unittest.TestCase):
                 "name": "net",
                 "checkpoint": "net.pth",
                 "checkpoint_url": "https://example.invalid/net.pth",
-                "sha256": sha,
+                "pin": {"sha256": sha},  # G9: the declared hash lives in the pin object
             }),
             encoding="utf-8",
         )
@@ -237,7 +239,7 @@ class FetchAndCoverageTest(unittest.TestCase):
                 "name": "bad",
                 "checkpoint": "bad.pth",
                 "checkpoint_url": "https://example.invalid/bad.pth",
-                "sha256": "0" * 64,
+                "pin": {"sha256": "0" * 64},  # G9: the declared hash lives in the pin object
             }),
             encoding="utf-8",
         )
@@ -272,3 +274,206 @@ class FetchAndCoverageTest(unittest.TestCase):
             ])
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(buf.getvalue())["status"], "skipped")
+
+
+class _FakeResponse:
+    """Minimal urlopen() stand-in streaming ``payload`` once."""
+
+    def __init__(self, payload: bytes) -> None:
+        self._chunks = [payload]
+
+    def __enter__(self) -> "_FakeResponse":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self, size: int = -1) -> bytes:
+        return self._chunks.pop() if self._chunks else b""
+
+
+class FetchHardeningTest(unittest.TestCase):
+    """G9: https only, no "fetched" without a declared hash, size cap."""
+
+    def setUp(self) -> None:
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.models_dir = Path(self.tmp_dir.name) / "models"
+        self.models_dir.mkdir()
+
+    def tearDown(self) -> None:
+        self.tmp_dir.cleanup()
+
+    def _profile(self, url: str, pin: dict[str, str] | None = None) -> None:
+        data: dict[str, object] = {"name": "net", "checkpoint": "net.pth", "checkpoint_url": url}
+        if pin is not None:
+            data["pin"] = pin
+        (self.models_dir / "net-runtime.json").write_text(json.dumps(data), encoding="utf-8")
+
+    def test_download_without_declared_hash_is_unverified_not_fetched(self) -> None:
+        import unittest.mock as mock
+
+        self._profile("https://example.invalid/net.pth", pin={"sha256": ""})
+        with mock.patch("urllib.request.urlopen", return_value=_FakeResponse(b"weights")):
+            result = fetch_weights(self.models_dir)
+        self.assertEqual(result["fetched"], [])
+        self.assertEqual(result["unverified"], ["net"])
+        self.assertEqual(result["status"], "unverified")
+        [entry] = result["results"]
+        self.assertEqual(entry["status"], "unverified")
+        self.assertNotIn(entry["status"], {"fetched", "verified"})
+        # The bytes are kept for the operator to pin, but nothing vouches for them.
+        self.assertTrue((self.models_dir / "net.pth").is_file())
+
+    def test_non_https_urls_are_refused(self) -> None:
+        import unittest.mock as mock
+
+        for url in ("http://example.invalid/net.pth", "file:///etc/passwd", "ftp://example.invalid/net.pth"):
+            with self.subTest(url=url):
+                self._profile(url, pin={"sha256": "0" * 64})
+                with mock.patch("urllib.request.urlopen") as urlopen:
+                    result = fetch_weights(self.models_dir)
+                urlopen.assert_not_called()
+                self.assertEqual(result["status"], "failed")
+                self.assertIn("https", result["failed"][0]["error"])
+                self.assertFalse((self.models_dir / "net.pth").exists())
+
+    def test_download_over_size_cap_is_aborted(self) -> None:
+        import unittest.mock as mock
+
+        self._profile("https://example.invalid/net.pth", pin={"sha256": "0" * 64})
+        with mock.patch("urllib.request.urlopen", return_value=_FakeResponse(b"x" * 64)):
+            result = fetch_weights(self.models_dir, max_bytes=16)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("size cap", result["failed"][0]["error"])
+        self.assertFalse((self.models_dir / "net.pth").exists())
+        self.assertEqual(list(self.models_dir.glob(".fetch-*")), [])
+
+    def test_cli_fetch_unverified_exits_nonzero(self) -> None:
+        import unittest.mock as mock
+
+        self._profile("https://example.invalid/net.pth")
+        buf = io.StringIO()
+        with mock.patch("urllib.request.urlopen", return_value=_FakeResponse(b"weights")), redirect_stdout(buf):
+            code = main(["vendor-weights", "--models-dir", str(self.models_dir), "--fetch"])
+        self.assertEqual(code, 1)
+        self.assertEqual(json.loads(buf.getvalue())["status"], "unverified")
+
+    def test_manifest_reads_declared_hash_from_pin(self) -> None:
+        payload = b"weights"
+        (self.models_dir / "net.pth").write_bytes(payload)
+        self._profile("https://example.invalid/net.pth", pin={"sha256": hashlib.sha256(payload).hexdigest()})
+        result = verify_offline_integrity(self.models_dir)
+        self.assertEqual(result["verified"], 1)
+        self._profile("https://example.invalid/net.pth", pin={"sha256": "0" * 64})
+        self.assertEqual(verify_offline_integrity(self.models_dir)["status"], "fail")
+
+
+class PinProfileTest(unittest.TestCase):
+    """`deepfake-lens vendor-weights pin <profile>` (G9)."""
+
+    def setUp(self) -> None:
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.models_dir = Path(self.tmp_dir.name) / "models"
+        self.models_dir.mkdir()
+
+    def tearDown(self) -> None:
+        self.tmp_dir.cleanup()
+
+    def _write(self, name: str, data: dict[str, object]) -> Path:
+        path = self.models_dir / name
+        path.write_text(json.dumps(data), encoding="utf-8")
+        return path
+
+    def test_cli_pins_local_checkpoint_sha256(self) -> None:
+        payload = b"local checkpoint bytes"
+        (self.models_dir / "det.pth").write_bytes(payload)
+        path = self._write("det-runtime.json", {"name": "det", "runtime": "torchvision", "checkpoint": "det.pth", "pin": {"sha256": ""}})
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = main(["vendor-weights", "pin", "det", "--models-dir", str(self.models_dir)])
+        self.assertEqual(code, 0)
+        expected = hashlib.sha256(payload).hexdigest()
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["pin"], {"sha256": expected})
+        self.assertEqual(json.loads(buf.getvalue())["pin"]["sha256"], expected)
+        # Other profile fields survive the rewrite.
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["checkpoint"], "det.pth")
+
+    def test_pinned_profile_then_loads_and_repin_after_swap(self) -> None:
+        """The written pin is what the adapter verifies; a swapped file
+        needs a fresh pin (and is refused until then)."""
+        import unittest.mock as mock
+
+        from deepfake_lens.model_adapter import analyze_external_model
+
+        checkpoint = self.models_dir / "det.onnx"
+        checkpoint.write_bytes(b"v1")
+        path = self._write("det-runtime.json", {"name": "det", "runtime": "onnx", "checkpoint": "det.onnx", "modality": "image"})
+        pin_profile(path)
+        image = Path(self.tmp_dir.name) / "img.png"
+        _write_png(image)
+        with mock.patch("deepfake_lens.model_adapter._run_onnx", return_value=[0.0]) as run:
+            self.assertTrue(analyze_external_model(image, path).available)
+            checkpoint.write_bytes(b"v2")
+            refused = analyze_external_model(image, path)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(refused.confidence, "failed")
+        self.assertTrue(refused.detail.startswith("무결성 불일치"), refused.detail)
+
+    def test_video_frames_pin_hashes_inner_checkpoint(self) -> None:
+        (self.models_dir / "inner.onnx").write_bytes(b"inner")
+        path = self._write("vf-runtime.json", {"name": "vf", "runtime": "video-frames", "inner": {"runtime": "onnx", "checkpoint": "inner.onnx"}, "pin": {"sha256": ""}})
+        result = pin_profile(path)
+        self.assertEqual(result["pin"], {"sha256": hashlib.sha256(b"inner").hexdigest()})
+
+    def test_missing_checkpoint_is_an_error_and_writes_nothing(self) -> None:
+        path = self._write("det-runtime.json", {"name": "det", "runtime": "onnx", "checkpoint": "absent.onnx", "pin": {"sha256": ""}})
+        before = path.read_text(encoding="utf-8")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            code = main(["vendor-weights", "pin", str(path)])
+        self.assertEqual(code, 1)
+        self.assertIn("absent.onnx", err.getvalue())
+        self.assertEqual(path.read_text(encoding="utf-8"), before)
+
+    def test_hub_profile_uses_resolver(self) -> None:
+        path = self._write("hub-runtime.json", {"name": "hub", "runtime": "hf-image-classifier", "hub_model": "org/model", "pin": {"revision": ""}})
+        seen: list[str] = []
+
+        def resolver(model_id: str) -> str:
+            seen.append(model_id)
+            return "a" * 40
+
+        result = pin_profile(path, hub_resolver=resolver)
+        self.assertEqual(seen, ["org/model"])
+        self.assertEqual(result["pin"], {"revision": "a" * 40})
+
+    def test_hub_profile_explicit_revision_and_validation(self) -> None:
+        path = self._write("hub-runtime.json", {"name": "hub", "runtime": "hf-text-classifier", "hub_model": "org/model"})
+        self.assertEqual(pin_profile(path, revision="B" * 40)["pin"], {"revision": "b" * 40})
+        with self.assertRaises(ValueError):
+            pin_profile(path, revision="main")
+
+    def test_hub_without_huggingface_hub_prints_instructions(self) -> None:
+        import unittest.mock as mock
+
+        path = self._write("hub-runtime.json", {"name": "hub", "runtime": "hf-audio-classifier", "hub_model": "org/model", "pin": {"revision": ""}})
+        before = path.read_text(encoding="utf-8")
+        err = io.StringIO()
+        with mock.patch.dict("sys.modules", {"huggingface_hub": None}), redirect_stderr(err):
+            code = main(["vendor-weights", "pin", "hub-runtime.json", "--models-dir", str(self.models_dir)])
+        self.assertEqual(code, 1)
+        self.assertIn("huggingface_hub", err.getvalue())
+        self.assertIn("--revision", err.getvalue())
+        self.assertEqual(path.read_text(encoding="utf-8"), before)
+
+    def test_pin_without_profile_argument_is_usage_error(self) -> None:
+        err = io.StringIO()
+        with redirect_stderr(err):
+            code = main(["vendor-weights", "pin"])
+        self.assertEqual(code, 2)
+
+
+def _write_png(path: Path, size: int = 128) -> None:
+    from PIL import Image
+
+    Image.new("RGB", (size, size), (120, 80, 40)).save(path)

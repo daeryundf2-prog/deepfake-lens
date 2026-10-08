@@ -45,7 +45,6 @@ DEFAULT_PROFILE_NAMES = (
     "aide-runtime.json",
     "aasist-runtime.json",
     "wav2vec-deepfake-audio-runtime.json",
-    "openai-detector-runtime.json",
 )
 
 # Server-level models directory override — set by run_server(--models-dir)

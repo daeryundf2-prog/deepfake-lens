@@ -8,15 +8,10 @@ python experiments/export_onnx.py --checkpoint experiments/run-001/convnext_tiny
 ```
 
 A published checkpoint can also be adapted directly — `export_mobile_onnx.py`
-rebuilds a torchvision-runtime profile (e.g. CNNDetection's
-`blur_jpg_prob0.5.pth`), wraps the single-logit sigmoid as the `[1,2]`
-contract, and verifies torch/ONNX parity:
-
-```
-python experiments/export_mobile_onnx.py --profile models/cnndetection-runtime.json \
-    --checkpoint models/blur_jpg_prob0.5.pth \
-    --out deepfakeclassifier/src/main/assets/deepfake-lens.onnx
-```
+rebuilds a torchvision-runtime profile, wraps a single-logit sigmoid head as
+the `[1,2]` contract, and verifies torch/ONNX parity (see the sbi-effnet
+example below). The CNNDetection profile used in earlier examples was removed
+(docs/MODEL-REJECTIONS.md).
 
 **Do NOT ship the `--quantize-int8` output as `deepfake-lens.onnx`.**
 INT8 dynamic quantization emits `ConvInteger`/`MatMulInteger`/

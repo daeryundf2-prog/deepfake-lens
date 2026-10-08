@@ -28,9 +28,14 @@ import math
 import random
 from dataclasses import asdict, dataclass
 
+from .model_pins import UNPINNED_REASON, is_commit_sha
+
 # z > 4 ≈ p < 3e-5 — the standard KGW detection threshold.
 _Z_THRESHOLD = 4.0
 _MIN_TOKENS = 32
+# G10: the tokenizer is fetched from the hub; without a pinned commit the
+# green list would be computed over whatever vocabulary ``main`` serves today.
+_UNPINNED_TOKENIZER = f"{UNPINNED_REASON}: 토크나이저 revision(40자리 커밋 SHA)을 지정해야 합니다."
 
 
 @dataclass(frozen=True)
@@ -54,6 +59,7 @@ def detect_kgw_watermark(
     *,
     secret: str,
     tokenizer_model: str = "Qwen/Qwen2.5-0.5B",
+    tokenizer_revision: str = "",
     gamma: float = 0.25,
     context_width: int = 1,
 ) -> WatermarkAnalysis:
@@ -73,8 +79,11 @@ def detect_kgw_watermark(
         return _unavailable(limitations, "transformers가 설치되지 않았습니다.")
     if len(text.strip()) < 200:
         return _unavailable(limitations, "텍스트가 너무 짧습니다 — 최소 200자 이상이 필요합니다.")
+    revision = tokenizer_revision.strip().lower()
+    if not is_commit_sha(revision):
+        return _unavailable(limitations, _UNPINNED_TOKENIZER)
     try:
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_model)
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_model, revision=revision)
     except Exception as exc:
         return _unavailable(limitations, f"토크나이저를 불러올 수 없습니다: {exc}")
 
@@ -127,6 +136,7 @@ def detect_synthid_watermark(
     *,
     keys: list[int],
     tokenizer_model: str = "Qwen/Qwen2.5-0.5B",
+    tokenizer_revision: str = "",
     ngram_len: int = 5,
     sampling_table_size: int = 65536,
     sampling_table_seed: int = 0,
@@ -156,8 +166,11 @@ def detect_synthid_watermark(
         return _unavailable(limitations, "transformers/torch가 설치되지 않았습니다.")
     if len(text.strip()) < 200:
         return _unavailable(limitations, "텍스트가 너무 짧습니다 — 최소 200자 이상이 필요합니다.")
+    revision = tokenizer_revision.strip().lower()
+    if not is_commit_sha(revision):
+        return _unavailable(limitations, _UNPINNED_TOKENIZER)
     try:
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_model)
+        tokenizer = AutoTokenizer.from_pretrained(tokenizer_model, revision=revision)
     except Exception as exc:
         return _unavailable(limitations, f"토크나이저를 불러올 수 없습니다: {exc}")
 
