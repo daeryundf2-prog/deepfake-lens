@@ -1,0 +1,2972 @@
+{
+ "schema": "deepfake-lens-test-inventory-v1",
+ "description": "QA-SYS-10 기준선. 각 항목은 'relpath::Class.test_method'(module-level 클래스에 직접 정의된 test* 메서드, AST 집계 — tests/qa/traceability.source_inventory와 같은 규칙). 비교는 파일 부분을 뺀 'Class.test_method'로 한다(파일 이동은 삭제가 아님).",
+ "pre_phase0": {
+  "commit": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
+  "label": "0단계 시작 전(명세의 '기존 633개')",
+  "count": 633
+ },
+ "wp_baseline": {
+  "commit": "35cbc8e1c4c376368865a12744b58b3751250799",
+  "label": "WP-A..E 반영 후, WP-C 삭제 직전(하한 739)",
+  "count": 739
+ },
+ "tests": [
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistRunnerScriptTest.test_main_reports_missing_checkpoint",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistRunnerScriptTest.test_main_reports_unavailable_without_torch",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistRunnerScriptTest.test_module_loads_without_torch",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistRunnerScriptTest.test_pad_mirrors_upstream",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistRunnerScriptTest.test_waveform_loader_decodes_pcm_wav",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistRuntimeProfileTest.test_committed_profile_matches_adapter_contract",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistRuntimeProfileTest.test_fake_checkpoint_never_scores",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistRuntimeProfileTest.test_load_model_threshold_reads_profile",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistRuntimeProfileTest.test_missing_checkpoint_is_graceful",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistRuntimeProfileTest.test_mixed_model_path_filters_to_audio_member",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistRuntimeProfileTest.test_modality_filtering_keeps_profiles_in_lane",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistScanPipelineTest.test_analyze_audio_json_contract",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistScanPipelineTest.test_analyze_file_marks_audio_and_carries_model_analysis",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistScanPipelineTest.test_scan_summary_counts_external_model",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistScanPipelineTest.test_scan_without_model_path_still_analyzes_audio",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistTorchInferenceTest.test_official_checkpoint_scores_synthetic_tone",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::AasistTorchInferenceTest.test_random_init_checkpoint_produces_bounded_score",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::DefaultAudioEngineDiscoveryTest.test_audio_command_no_default_engine",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::DefaultAudioEngineDiscoveryTest.test_audio_command_passes_default_profile",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::DefaultAudioEngineDiscoveryTest.test_discovers_committed_profile",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::DefaultAudioEngineDiscoveryTest.test_returns_none_when_models_dir_absent",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::DefaultAudioEngineDiscoveryTest.test_scan_auto_discovers_audio_profile",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::DefaultAudioEngineDiscoveryTest.test_scan_no_default_engine_skips_audio_model",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::FetchAasistTest.test_download_via_file_url_and_verify_sha256",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::FetchAasistTest.test_download_without_sha256_still_prints_digest",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::FetchAasistTest.test_drive_folder_url_prints_instructions_without_network",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::FetchAasistTest.test_refuses_overwrite_without_force",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::FetchAasistTest.test_sha256_file_helper",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::FetchAasistTest.test_sha256_mismatch_fails_and_removes_file",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aasist_engine.py::FetchAasistTest.test_url_classification",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::AideRuntimeProfileTest.test_committed_profile_matches_adapter_contract",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::AideRuntimeProfileTest.test_copied_profile_resolves_checkpoint_relative_to_profile",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::AideRuntimeProfileTest.test_load_model_threshold_reads_profile",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::AideRuntimeProfileTest.test_missing_checkpoint_is_graceful",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::DefaultEngineDiscoveryTest.test_discovers_committed_profile",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::DefaultEngineDiscoveryTest.test_explicit_model_path_wins_over_default",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::DefaultEngineDiscoveryTest.test_returns_none_when_models_dir_absent",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::DefaultEngineDiscoveryTest.test_scan_auto_discovers_profile_and_degrades",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::DefaultEngineDiscoveryTest.test_scan_falls_back_when_profile_absent",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::DefaultEngineDiscoveryTest.test_scan_no_default_engine_matches_heuristic_only",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::FetchAideTest.test_default_folder_url_prints_instructions_without_network",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::FetchAideTest.test_download_via_file_url_and_verify_sha256",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::FetchAideTest.test_download_without_sha256_still_prints_digest",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::FetchAideTest.test_refuses_overwrite_without_force",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::FetchAideTest.test_sha256_file_helper",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::FetchAideTest.test_sha256_mismatch_fails_and_removes_file",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_aide_engine.py::FetchAideTest.test_url_classification",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_archives.py::ArchiveFormatTests.test_format_detection",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_archives.py::ArchiveFormatTests.test_safe_member_name",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_archives.py::ExtractionTests.test_corrupt_zip_warns_not_raises",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_archives.py::ExtractionTests.test_nested_zip_expanded",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_archives.py::ExtractionTests.test_tar_members_extracted",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_archives.py::ExtractionTests.test_zip_members_extracted",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_archives.py::ExtractionTests.test_zip_slip_blocked",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_archives.py::ScanIntegrationTests.test_analyze_file_archive_container",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_archives.py::ScanIntegrationTests.test_scan_expands_zip_members",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_archives.py::ScanIntegrationTests.test_scan_normalizes_extraction_root",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_archives.py::ScanIntegrationTests.test_scan_temp_dirs_cleaned",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_archives.py::ScanIntegrationTests.test_scan_temp_dirs_cleaned_on_analysis_failure",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_archives.py::ScanIntegrationTests.test_scan_temp_dirs_cleaned_on_preparation_failure",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::AudioAnalysisTest.test_analysis_returns_dataclass",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::AudioAnalysisTest.test_empty_file_returns_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::AudioAnalysisTest.test_energy_analysis_low",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::AudioAnalysisTest.test_fluency_analysis_fast",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::AudioAnalysisTest.test_mfcc_analysis_stable",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::AudioAnalysisTest.test_noise_analysis_high",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::AudioAnalysisTest.test_nonexistent_file_returns_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::AudioAnalysisTest.test_pitch_analysis_high_variability",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::AudioAnalysisTest.test_pitch_analysis_stable_pitch",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::AudioAnalysisTest.test_spectral_analysis_flat",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::AudioAnalysisTest.test_spectral_analysis_smooth",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::AudioAnalysisTest.test_to_json_returns_dict",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::AudioAnalysisTest.test_unsupported_format_returns_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::AudioSuccessPathTest.test_pure_tone_pitch_is_detected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::AudioSuccessPathTest.test_tone_wav_produces_features",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::V4PhysicalSignalsTest.test_harmonic_stability_flags",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::V4PhysicalSignalsTest.test_metronomic_pauses_flag",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::V4PhysicalSignalsTest.test_natural_pauses_no_signal",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::V4PhysicalSignalsTest.test_noise_floor_discontinuity_flags",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_audio.py::V4PhysicalSignalsTest.test_pauseless_speech_flags",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_benchmark_e2e.py::BenchmarkE2ETest.test_marker_outranks_unmarked_images",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_benchmark_e2e.py::BenchmarkE2ETest.test_metadata_marker_scores_high",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_benchmark_e2e.py::BenchmarkE2ETest.test_pipeline_completes_with_no_failures",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_benchmark_e2e.py::BenchmarkE2ETest.test_score_report_written",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_benchmark_e2e.py::BenchmarkFixturesTest.test_fixtures_regenerate_deterministically",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_c2pa.py::C2paSdkValidationTest.test_signed_fixture_manifest_is_read_and_reported",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_c2pa.py::C2paSdkValidationTest.test_unsigned_image_reports_absent_manifest",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_c2pa.py::C2paSdkValidationTest.test_untrusted_signer_is_reported_not_fabricated",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_c2pa.py::C2paSdkValidationTest.test_video_container_parses_for_manifest",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_c2pa.py::MetadataForensicAnalysisTest.test_analysis_returns_dataclass",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_c2pa.py::MetadataForensicAnalysisTest.test_c2pa_marker_is_reference_level_hint",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_c2pa.py::MetadataForensicAnalysisTest.test_empty_file_returns_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_c2pa.py::MetadataForensicAnalysisTest.test_google_metadata_never_claims_synthid",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_c2pa.py::MetadataForensicAnalysisTest.test_nonexistent_file_returns_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_c2pa.py::MetadataForensicAnalysisTest.test_provenance_record_dataclass",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_c2pa.py::MetadataForensicAnalysisTest.test_provenance_record_to_json",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_c2pa.py::MetadataForensicAnalysisTest.test_to_json_returns_dict",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_c2pa.py::MetadataForensicAnalysisTest.test_watermark_marker_is_tool_attribution",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_calibration_mapping.py::CalibrateScoresTest.test_dict_rows_and_labels_are_accepted",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_calibration_mapping.py::CalibrateScoresTest.test_insufficient_data_is_honest_not_fabricated",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_calibration_mapping.py::CalibrateScoresTest.test_mapping_is_monotone_and_transform_matches",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_calibration_mapping.py::CalibrateScoresTest.test_single_class_is_insufficient",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_calibration_mapping.py::CalibrateScoresTest.test_transform_reports_empirical_fpr_band",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_calibration_mapping.py::DatasetIntegrationTest.test_dataset_fingerprint_is_stable",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_calibration_mapping.py::DatasetIntegrationTest.test_fixture_dataset_yields_insufficient_data_mapping",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_calibration_mapping.py::IsotonicKnotsTest.test_perfectly_separated_gives_two_plateaus",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_calibration_mapping.py::IsotonicKnotsTest.test_tied_scores_share_one_fitted_value",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_calibration_mapping.py::IsotonicKnotsTest.test_violating_block_is_pooled",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_calibration_mapping.py::ScoreCalibratorRoundTripTest.test_load_missing_or_wrong_version_returns_none",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_calibration_mapping.py::ScoreCalibratorRoundTripTest.test_save_load_preserves_transform",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_classifier.py::ClassifierTest.test_classification_result_to_json",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_classifier.py::ClassifierTest.test_classify_metadata_returns_result",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_classifier.py::ClassifierTest.test_classify_spectral_profile_returns_result",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_classifier.py::ClassifierTest.test_classify_text_content_returns_result",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_classifier.py::ClassifierTest.test_dalle_detection",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_classifier.py::ClassifierTest.test_get_tool_info",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_classifier.py::ClassifierTest.test_get_tool_info_not_found",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_classifier.py::ClassifierTest.test_list_all_tools",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_classifier.py::ClassifierTest.test_midjourney_detection",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_classifier.py::ClassifierTest.test_no_match_returns_empty",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_classifier.py::ClassifierTest.test_primary_match_is_highest_confidence",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_classifier.py::ClassifierTest.test_stable_diffusion_detection",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_classifier.py::ClassifierTest.test_suno_detection",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_classifier.py::ClassifierTest.test_tool_match_to_json",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_classifier.py::ClassifierTest.test_veo_detection",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_consolidation.py::ElaExpertTest.test_ela_expert_present_in_fast_mode",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_consolidation.py::ElaExpertTest.test_spliced_region_scores_above_control",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_consolidation.py::ForensicDelegationTest.test_jpeg_app1_exif_still_reported",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_consolidation.py::ForensicDelegationTest.test_raw_c2pa_substring_is_hint_not_manifest",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_consolidation.py::ForensicDelegationTest.test_report_packaging_unchanged",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_consolidation.py::ForensicDelegationTest.test_structure_evidence_preserved",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_consolidation.py::ForensicDelegationTest.test_tool_string_is_provenance_marker_not_watermark",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_consolidation.py::PixelEnsembleDispositionTest.test_external_sidecar_suppresses_unverified_warning",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_consolidation.py::PixelEnsembleDispositionTest.test_no_external_model_warns_unverified",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_consolidation.py::PreScreenTierTest.test_cached_results_without_tier_default_to_ensemble",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_consolidation.py::PreScreenTierTest.test_ensemble_result_is_labelled_ensemble",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_consolidation.py::PreScreenTierTest.test_ensemble_tier_round_trips_through_scan_json",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_consolidation.py::PreScreenTierTest.test_error_result_is_labelled_pre_screen",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_consolidation.py::PreScreenTierTest.test_pre_screen_label_survives_json",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_consolidation.py::PreScreenTierTest.test_real_image_result_is_labelled_pre_screen",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepSignalsTest.test_deep_signals_flag_reaches_analyze_file",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepSignalsTest.test_deep_signals_merges_layers",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_analyze_file_merges_pixel_signal_and_heatmap",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_cancelled_scan_still_flushes_cache",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_collection_benchmark_runtime_profile_training_and_security",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_comfyui_metadata_is_high",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_dataset_audit_split_robustness_registry_video_and_release",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_dataset_eval_calibrate_train_cache_and_reports",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_dataset_labels_recognize_class_prefix_folders",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_dataset_labels_strip_multi_digit_class_prefixes",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_deep_pixel_analysis_exposes_all_recent_research_layers",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_generic_ai_like_text_does_not_invent_vendor",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_modern_generator_metadata_source_rules",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_png_compressed_chunks_are_bounded",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_png_pixel_experts_flag_repeating_texture",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_png_text_and_compressed_chunks_extract",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_scan_dedupe_skips_large_files_and_optional_runtime_fails_closed",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_scan_directory_sorts_candidates_first",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_stable_diffusion_a1111_metadata_is_high",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::DeepfakeLensCoreTest.test_text_ai_disclosure_is_high_and_assistant_source",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::ImageExtensionDimensionsTest.test_analyze_file_accepts_bmp",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::ImageExtensionDimensionsTest.test_bmp_dimensions",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::ImageExtensionDimensionsTest.test_gif_dimensions",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::ImageExtensionDimensionsTest.test_tiff_dimensions_little_endian",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::ShortTextCapTest.test_long_text_uncapped_path",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::ShortTextCapTest.test_score_cap_applies_under_240_chars",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::ShortTextCapTest.test_short_text_discloses_cap",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::TechnicalDocumentGateTest.test_markdown_doc_triggers_gate",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_core.py::TechnicalDocumentGateTest.test_plain_prose_ungated",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::BandDerivationTest.test_band_never_medium",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::BandDerivationTest.test_coverage_entry_requires_reason_when_not_ran",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::PurityTest.test_accepts_iterators",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::PurityTest.test_inputs_not_mutated_and_result_repeatable",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::PurityTest.test_order_independent",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule1ReferenceGradeTest.test_reference_overrides_authenticity",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule1ReferenceGradeTest.test_reference_overrides_calibrated_statistical",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule1ReferenceGradeTest.test_reference_overrides_strong_deterministic_synthetic",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule1ReferenceGradeTest.test_reference_with_no_evidence",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule2DeterministicSyntheticTest.test_beats_strong_authenticity",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule2DeterministicSyntheticTest.test_moderate_is_not_enough",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule2DeterministicSyntheticTest.test_strong_deterministic_neutral_does_not_conclude",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule2DeterministicSyntheticTest.test_strong_deterministic_synthetic_concludes",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule2DeterministicSyntheticTest.test_strong_lexical_does_not_conclude",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule2DeterministicSyntheticTest.test_strong_statistical_without_calibration_does_not_conclude",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule2DeterministicSyntheticTest.test_survives_a_failed_check",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule2DeterministicSyntheticTest.test_weak_is_not_enough",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule3FailClosedTest.test_failure_alone_is_undetermined",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule3FailClosedTest.test_failure_blocks_authenticity",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule3FailClosedTest.test_failure_blocks_calibrated_statistical",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule3FailClosedTest.test_skipped_is_not_failed",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule4CalibratedStatisticalTest.test_calibrated_lexical_shape_is_ignored",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule4CalibratedStatisticalTest.test_calibrated_statistical_beats_authenticity",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule4CalibratedStatisticalTest.test_missing_calibration_id_does_not",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule4CalibratedStatisticalTest.test_missing_measured_on_does_not",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule4CalibratedStatisticalTest.test_missing_probability_does_not",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule4CalibratedStatisticalTest.test_neutral_direction_does_not_conclude",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule4CalibratedStatisticalTest.test_probability_equal_to_threshold_concludes",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule4CalibratedStatisticalTest.test_probability_just_below_threshold_does_not",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule4CalibratedStatisticalTest.test_profile_threshold_is_respected",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule4CalibratedStatisticalTest.test_threshold_for_other_calibration_falls_back_to_default",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule5AuthenticityTest.test_calibrated_synthetic_below_threshold_still_blocks",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule5AuthenticityTest.test_lexical_synthetic_does_not_block",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule5AuthenticityTest.test_moderate_authentic_is_not_enough",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule5AuthenticityTest.test_moderate_deterministic_synthetic_blocks",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule5AuthenticityTest.test_neutral_items_do_not_block",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule5AuthenticityTest.test_statistical_authentic_is_not_enough",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule5AuthenticityTest.test_strong_deterministic_authentic_concludes",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule5AuthenticityTest.test_uncalibrated_statistical_synthetic_blocks",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule6DefaultTest.test_no_evidence",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule6DefaultTest.test_only_lexical",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_decision.py::Rule6DefaultTest.test_only_neutral",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_doctor.py::DoctorCliTest.test_doctor_json_output_parses",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_doctor.py::DoctorCliTest.test_doctor_table_runs",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_doctor.py::DoctorCliTest.test_report_format_covers_all_sections",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_doctor.py::DoctorProfileCheckTest.test_hub_profile_needs_no_local_file",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_doctor.py::DoctorProfileCheckTest.test_missing_checkpoint_reports_missing",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_doctor.py::DoctorProfileCheckTest.test_present_checkpoint_reports_ok",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_doctor.py::DoctorProfileCheckTest.test_sha256_mismatch_warns",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_doctor.py::DoctorProfileCheckTest.test_unsupported_profile_warns",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_documents.py::DocumentExtractionTest.test_corrupt_docx_degrades",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_documents.py::DocumentExtractionTest.test_docx_analyzed_by_scan_pipeline",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_documents.py::DocumentExtractionTest.test_docx_body_text_and_creator",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_documents.py::DocumentExtractionTest.test_legacy_doc_marks_unavailable",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_documents.py::DocumentExtractionTest.test_legacy_doc_scans_with_limitation",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_documents.py::DocumentTextFeedsModelMembersTest.test_docx_passes_extracted_text_to_members",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_documents.py::HwpExtractionTest.test_invalid_hwp_degrades_gracefully",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_documents.py::HwpExtractionTest.test_real_hwp_extracts_when_fixture_present",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_evidence_statement.py::EvidenceStatementTest.test_api_report_evidence_statement_format",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_evidence_statement.py::EvidenceStatementTest.test_build_evidence_statement_structure_and_statutes",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_evidence_statement.py::EvidenceStatementTest.test_cli_evidence_statement_command",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_evidence_statement.py::EvidenceStatementTest.test_cli_scan_with_evidence_statement_out",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_evidence_statement.py::EvidenceStatementTest.test_markdown_generation",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_evidence_statement.py::EvidenceStatementTest.test_pdf_generation",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_evidence_statement.py::EvidenceStatementTest.test_pdf_pagination_stress_60_entries",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_evidence_statement.py::EvidenceStatementTest.test_pdf_purpose_column_renders_content",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_analysis_returns_dataclass",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_assumed_landmarks_are_box_constants",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_bundled_cascade_is_packaged",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_calculate_confidence_high",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_calculate_confidence_low",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_calculate_confidence_medium",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_circular_hue_same_red_family_does_not_fire",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_classify_manipulation_type_reenactment",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_classify_manipulation_type_swap",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_classify_manipulation_type_unknown",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_dead_geometry_checks_are_gone",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_detect_faces_survives_broken_cascade",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_face_landmarks_falls_back_to_labelled_box_estimate",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_face_landmarks_labels_measured_anchors_as_mediapipe",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_face_landmarks_labels_none_result_as_box_estimate",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_face_landmarks_prefers_facelandmarker_when_available",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_facelandmarker_model_path_env_override",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_landmarks_source_defaults_to_box_estimate",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_mediapipe_landmarks_degrades_cleanly_on_blank_crop",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_mediapipe_landmarks_none_without_package",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_nonexistent_file_returns_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_to_json_returns_dict",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_unicode_path_image_is_readable",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face.py::FaceAnalysisTest.test_unsupported_format_returns_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face_track.py::FaceTrackAnalysisTest.test_missing_file_is_unavailable",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face_track.py::FaceTrackAnalysisTest.test_to_json_shape",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face_track.py::FaceTrackAnalysisTest.test_unavailable_is_not_clean",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face_track.py::MetricMathTest.test_box_smoothness_detects_jump",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face_track.py::MetricMathTest.test_box_smoothness_stable",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face_track.py::MetricMathTest.test_consecutive_cosine_identical",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face_track.py::MetricMathTest.test_consecutive_cosine_orthogonal",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face_track.py::MetricMathTest.test_landmark_jitter_normalized_by_box",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face_track.py::MetricMathTest.test_landmark_jitter_zero_when_static",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_face_track.py::MetricMathTest.test_score_bounds",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_faceswap_seam.py::FaceSwapSeamTest.test_blank_image_reports_no_faces",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_faceswap_seam.py::FaceSwapSeamTest.test_cli_faceswap_seam_json_output",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_faceswap_seam.py::FaceSwapSeamTest.test_core_deep_image_layers_integration",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_faceswap_seam.py::FaceSwapSeamTest.test_missing_file_returns_graceful_analysis",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_faceswap_seam.py::FaceSwapSeamTest.test_synthetic_faceswap_with_simulated_seam",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_faceswap_seam.py::FaceSwapSeamTest.test_undersized_faces_report_unknown_not_low",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_faceswap_seam.py::ThresholdProfileTest.test_low_auroc_profile_is_provisional",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_faceswap_seam.py::ThresholdProfileTest.test_provisional_profile_adds_limitation",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_faceswap_seam.py::ThresholdProfileTest.test_resolve_defaults_and_overrides",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_faceswap_seam.py::ThresholdProfileTest.test_roundtrip_and_lookup",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_faceswap_seam.py::ThresholdProfileTest.test_small_sample_profile_is_provisional",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_faceswap_seam.py::ThresholdProfileTest.test_wrong_version_rejected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::BlindExceptGuardTest.test_no_silent_broad_except",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::ImageLayerFailClosedTest.test_c2pa_crash_is_failed",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::ImageLayerFailClosedTest.test_c2pa_missing_sdk_is_skipped",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::ImageLayerFailClosedTest.test_deep_layers_disabled_are_listed",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::ImageLayerFailClosedTest.test_face_layer_crash_is_failed",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::ImageLayerFailClosedTest.test_missing_face_detector_is_not_reported_as_no_face",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::ImageLayerFailClosedTest.test_no_face_is_recorded_as_skip",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::ImageLayerFailClosedTest.test_pixel_crash_is_failed",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::ImageLayerFailClosedTest.test_strong_deterministic_evidence_survives_a_failure",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::ModelFailClosedTest.test_adapter_crash_itself_is_failed",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::ModelFailClosedTest.test_below_measured_range_is_skipped",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::ModelFailClosedTest.test_failed_member_in_a_zoo_is_reported_per_member",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::ModelFailClosedTest.test_inference_runtime_error_is_failed",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::ModelFailClosedTest.test_missing_runtime_dependency_is_skipped_not_failed",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::NoCleanResultWithoutEvidenceTest.test_metadata_only_images_are_undetermined",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::OtherModalityFailClosedTest.test_audio_crash_is_failed",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::OtherModalityFailClosedTest.test_audio_decode_failure_is_not_dependency",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::OtherModalityFailClosedTest.test_document_extractor_crash_is_failed_but_text_stays_reference",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::OtherModalityFailClosedTest.test_video_crash_is_failed",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::OtherModalityFailClosedTest.test_video_deep_layer_crash_is_failed",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::OtherModalityFailClosedTest.test_whole_analyzer_crash_is_a_failed_row_not_a_clean_one",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::RunCheckTest.test_check_skipped_keeps_reason",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::RunCheckTest.test_import_error_is_skipped_with_module",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::RunCheckTest.test_other_exception_is_failed_with_class_name",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::RunCheckTest.test_reraise_passes_through",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_fail_closed.py::RunCheckTest.test_success_is_ran",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_feedback.py::FeedbackReportTest.test_agreement_metrics_perfect_labels",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_feedback.py::FeedbackReportTest.test_embedded_scan_row_needs_no_scan_payload",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_feedback.py::FeedbackReportTest.test_empty_feedback_is_noop_with_message",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_feedback.py::FeedbackReportTest.test_mislabeled_entry_shows_up_in_agreement",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_feedback.py::FeedbackReportTest.test_no_separating_component_keeps_base_weights",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_feedback.py::FeedbackReportTest.test_suggested_weights_sum_to_one_and_favor_separating_component",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_feedback.py::FeedbackReportTest.test_unmatched_and_basename_matching",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_feedback.py::LiveObservationTest.test_live_rescan_scores_existing_files",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_feedback.py::LoadFeedbackTest.test_json_array_and_missing_file",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_feedback.py::LoadFeedbackTest.test_jsonl_rows",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_feedback.py::SuggestWeightsTest.test_weights_sum_exactly",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_fetch_benchmark.py::FetchBenchmarkTest.test_base_url_joining",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_fetch_benchmark.py::FetchBenchmarkTest.test_dest_traversal_is_rejected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_fetch_benchmark.py::FetchBenchmarkTest.test_fetch_with_checksum_and_label_audit",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_fetch_benchmark.py::FetchBenchmarkTest.test_manifest_validation_errors",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_fetch_benchmark.py::FetchBenchmarkTest.test_max_files_caps_and_keeps_existing",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_fetch_benchmark.py::FetchBenchmarkTest.test_sha256_mismatch_fails_and_removes_partial",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_fetch_benchmark.py::FetchBenchmarkTest.test_verify_only_reports_missing_and_mismatch",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_forensic_pdf.py::ForensicPdfApiEndpointTest.test_api_report_pdf_format_query",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_forensic_pdf.py::ForensicPdfReportTest.test_redact_paths_in_forensic_pdf",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_forensic_pdf.py::ForensicPdfReportTest.test_write_forensic_pdf_generates_valid_pdf",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_inpaint.py::InpaintAnalysisTest.test_analysis_returns_dataclass",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_inpaint.py::InpaintAnalysisTest.test_inpaint_region_dataclass",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_inpaint.py::InpaintAnalysisTest.test_nonexistent_file_returns_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_inpaint.py::InpaintAnalysisTest.test_to_json_returns_dict",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_inpaint.py::InpaintAnalysisTest.test_unsupported_format_returns_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_json_contract.py::ResultContractV2Test.test_json_shape_uses_enum_values",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_json_contract.py::ResultContractV2Test.test_round_trip_preserves_every_v2_field",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_json_contract.py::ResultContractV2Test.test_scan_payload_matches_vendored_result_schema",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_json_contract.py::ResultContractV2Test.test_v1_record_loads_as_undetermined",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_json_contract.py::ScanJsonContractTest.test_scan_json_payload_carries_schema_version",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_json_contract.py::ScanJsonContractTest.test_scan_json_text_round_trips_with_schema_version",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::CommittedProfilesTest.test_binoculars_degrades_on_empty_text",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::CommittedProfilesTest.test_binoculars_profile_records_contract",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::CommittedProfilesTest.test_causal_lm_ppl_degrades_on_empty_text",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::CommittedProfilesTest.test_cnndetection_profile_records_torchvision_contract",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::CommittedProfilesTest.test_crop_faces_gates_off_faceless_image",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::CommittedProfilesTest.test_dire_is_documented_placeholder",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::CommittedProfilesTest.test_disabled_face_vit_profile_reports_reason",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::CommittedProfilesTest.test_face_vit_profile_records_hub_contract",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::CommittedProfilesTest.test_placeholder_profile_degrades_with_reason",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::CommittedProfilesTest.test_qwen_ppl_profile_records_ppl_contract",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::CommittedProfilesTest.test_rejected_ffpp_profile_degrades_with_reason",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::CommittedProfilesTest.test_rejected_ffpp_profiles_are_disabled",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::CommittedProfilesTest.test_univfd_profile_records_clip_contract",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::CommittedProfilesTest.test_wired_profiles_use_implemented_runtimes",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::CommittedProfilesTest.test_zoo_has_expected_profiles",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::LanguageGateTest.test_english_member_downweighted_on_korean",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::LanguageGateTest.test_no_downweight_on_english_text",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::ModelCacheLRUTest.test_clear_all_model_caches_flushes_state",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::ModelCacheLRUTest.test_env_configured_limit",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::ModelCacheLRUTest.test_evicts_oldest_beyond_limit",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::ModelCacheLRUTest.test_get_refreshes_recency",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::MultiProfileAggregationTest.test_aggregate_models_round_trip_through_json",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::MultiProfileAggregationTest.test_all_members_missing_degrades_cleanly",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::MultiProfileAggregationTest.test_bare_checkpoint_relative_path_is_not_doubled",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::MultiProfileAggregationTest.test_committed_zoo_directory_runs_all_profiles",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::MultiProfileAggregationTest.test_degraded_weight_applies_on_low_quality_jpeg",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::MultiProfileAggregationTest.test_directory_of_score_maps_aggregates",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::MultiProfileAggregationTest.test_disagreement_drops_confidence_and_flags_limitation",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::MultiProfileAggregationTest.test_empty_directory_is_graceful",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::MultiProfileAggregationTest.test_list_of_paths_and_sidecar_exclusion",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::MultiProfileAggregationTest.test_low_resolution_flagged_as_unreliable",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::MultiProfileAggregationTest.test_onnx_audio_missing_checkpoint_reports_unavailable",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::MultiProfileAggregationTest.test_partial_availability_scores_only_available_members",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::MultiProfileAggregationTest.test_profile_set_resolves_members_relative_to_set",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::ScoreBiasTest.test_bias_clamps_at_zero",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::ScoreBiasTest.test_bias_subtracts_from_normalized_score",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::ScoreBiasTest.test_no_bias_unchanged",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::TorchvisionHeadTest.test_efficientnet_classifier_head_rewired_and_loads",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::TorchvisionHeadTest.test_resnet_fc_head_still_rewired",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::VideoFramesRuntimeTest.test_committed_aide_frames_profile_matches_video_modality",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::VideoFramesRuntimeTest.test_frames_scored_through_inner_profile",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::VideoFramesRuntimeTest.test_inner_validation_precedes_optional_import",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::VideoFramesRuntimeTest.test_missing_inner_profile_is_graceful_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::VideoFramesRuntimeTest.test_recursive_inner_runtime_rejected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_model_zoo.py::VideoFramesRuntimeTest.test_video_profile_does_not_match_image_files",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::AvSyncTest.test_aligned_envelopes_report_small_offset",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::AvSyncTest.test_avsync_analysis_to_json",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::AvSyncTest.test_avsync_feeds_multimodal_as_cross_modal",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::AvSyncTest.test_delayed_audio_flags_desync",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::AvSyncTest.test_missing_file_returns_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::AvSyncTest.test_short_or_flat_envelopes_degrade_gracefully",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::AvSyncTest.test_uncorrelated_envelopes_do_not_score",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::MultimodalAnalysisTest.test_ai_probability_range",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::MultimodalAnalysisTest.test_analyze_multimodal_returns_result",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::MultimodalAnalysisTest.test_consistent_high_scores",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::MultimodalAnalysisTest.test_consistent_low_scores",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::MultimodalAnalysisTest.test_empty_modalities_returns_zero",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::MultimodalAnalysisTest.test_high_score_returns_high_band",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::MultimodalAnalysisTest.test_inconsistent_scores_detected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::MultimodalAnalysisTest.test_low_score_returns_low_band",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::MultimodalAnalysisTest.test_multimodal_evidence_signal",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::MultimodalAnalysisTest.test_single_modality_returns_neutral",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::MultimodalAnalysisTest.test_source_guess_consistency",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::MultimodalAnalysisTest.test_source_guess_inconsistency",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_multimodal.py::MultimodalAnalysisTest.test_to_json_returns_dict",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase11_15.py::BatchTest.test_batch_job_to_json",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase11_15.py::BatchTest.test_batch_processor_creation",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase11_15.py::BatchTest.test_process_batch",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase11_15.py::EvidenceTest.test_create_evidence_chain",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase11_15.py::EvidenceTest.test_evidence_chain_to_json",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase11_15.py::EvidenceTest.test_generate_forensic_report",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase11_15.py::XAITest.test_explain_classification",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase11_15.py::XAITest.test_explain_low_score",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase11_15.py::XAITest.test_explain_medium_score",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase11_15.py::XAITest.test_format_explanation_text",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase11_15.py::XAITest.test_xai_explanation_to_json",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::CalibrateThresholdFallbackTest.test_feasible_target_marks_success",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::CalibrateThresholdFallbackTest.test_impossible_fpr_falls_back_to_100_with_marker",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::EvalAllAvailabilityTest.test_exception_is_unavailable_not_zero",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::EvalAllAvailabilityTest.test_unavailable_result_is_not_a_zero_score",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::EvaluationScriptMetricsTest.test_cli_rejects_invalid_target_before_model_loading",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::EvaluationScriptMetricsTest.test_exhaustive_small_auroc_matches_pairwise_and_roc_area",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::EvaluationScriptMetricsTest.test_invalid_scores_labels_and_lengths_rejected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::EvaluationScriptMetricsTest.test_invalid_targets_rejected_even_without_samples",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::EvaluationScriptMetricsTest.test_known_auroc_and_interpolated_eer",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::EvaluationScriptMetricsTest.test_script_has_no_duplicate_functions",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::EvaluationScriptMetricsTest.test_sweep_groups_ties_and_includes_endpoints",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::EvaluationScriptMetricsTest.test_target_fpr_never_overshoots_and_maximizes_recall",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::EvaluationScriptMetricsTest.test_threshold_boundary_and_json_precision",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::EvaluationScriptMetricsTest.test_undefined_metrics_are_null_with_reasons",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::PerSplitMetricsTest.test_declared_split_reported",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::PerSplitMetricsTest.test_no_declared_splits_gives_empty_breakdown",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::SplitAwareCalibrationTest.test_fixture_calibration_uses_train_split_only",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::SuggestWeightsTest.test_clean_discriminator_gets_full_weight",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::SuggestWeightsTest.test_flags_everything_member_hits_floor",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::SuggestWeightsTest.test_insufficient_samples_return_none",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::SuggestWeightsTest.test_missing_auroc_returns_none",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::UnanalyzedExclusionTest.test_case_summary_ignores_unavailable_rows",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_eval.py::UnanalyzedExclusionTest.test_confusion_ignores_unavailable_rows",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_math.py::AudioFluencyUnitTest.test_half_beat_onset_rate_does_not_fire",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_math.py::AudioFluencyUnitTest.test_onsets_matching_beat_rate_fires",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_math.py::AudioFluencyUnitTest.test_short_clip_does_not_fire",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_math.py::FormantEstimationTest.test_silence_returns_empty",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_math.py::FormantEstimationTest.test_synthetic_tones_yield_formants",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_math.py::FusionDoubleCountTest.test_apply_fusion_is_idempotent",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_math.py::FusionDoubleCountTest.test_fused_score_stays_in_range",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_math.py::FusionDoubleCountTest.test_other_metadata_signals_still_count",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_math.py::FusionDoubleCountTest.test_source_signal_not_double_counted",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_math.py::FusionExternalPreferenceTest.test_component_scores_read_model_and_pixel_results",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_math.py::FusionExternalPreferenceTest.test_external_model_weight_exceeds_pixel_weight",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_math.py::FusionExternalPreferenceTest.test_external_score_moves_fused_score_more_than_pixel",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_math.py::MultimodalScoreTest.test_clean_multiple_modalities_stay_clean",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_math.py::MultimodalScoreTest.test_clean_single_modality_scores_zero",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_math.py::MultimodalScoreTest.test_consistent_high_scores_still_high",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase1_math.py::MultimodalScoreTest.test_cross_modal_disagreement_is_scored",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_detection.py::AudioRegularityTest.test_natural_jitter_does_not_fire",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_detection.py::AudioRegularityTest.test_relative_successive_variation",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_detection.py::AudioRegularityTest.test_uniform_shimmer_fires",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_detection.py::AudioRegularityTest.test_very_regular_pitch_fires",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_detection.py::PrnuTest.test_fewer_than_three_references_is_rejected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_detection.py::PrnuTest.test_missing_target_returns_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_detection.py::PrnuTest.test_same_camera_correlates_other_camera_does_not",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_detection.py::SbiDistortionTest.test_jpeg_simulation_quality_ordering",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_detection.py::SbiDistortionTest.test_resize_bilinear_interpolates_linear_ramp",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_detection.py::SbiDistortionTest.test_self_blended_image_is_deterministic_and_masked",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_detection.py::SbiTrainerIntegrationTest.test_sbi_mode_accepts_only_real_records",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::ChromPulseTest.test_flat_signal_cannot_be_estimated",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::ChromPulseTest.test_pulseless_noise_reports_missing_pulse",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::ChromPulseTest.test_short_series_is_rejected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::ChromPulseTest.test_synthetic_pulse_detected_near_72_bpm",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::CompressionForensicsTest.test_double_compression_returns_measurement",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::CompressionForensicsTest.test_ela_metrics_on_uniform_surface",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::CompressionForensicsTest.test_small_image_degrades",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::FrequencyExpertIntegrationTest.test_expert_present_in_ensemble",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::FrequencyExpertIntegrationTest.test_expert_unavailable_without_numpy",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::MultiRoiRppgTest.test_coherent_rois_report_high_phase_coherence",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::MultiRoiRppgTest.test_incoherent_rois_flag_low_phase_coherence",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::MultiRoiRppgTest.test_missing_pulse_skips_coherence_measurement",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::MultiRoiRppgTest.test_single_roi_path_keeps_compat_fields",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::RppgVideoErrorPathTest.test_missing_file_returns_error_analysis",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::SpectrumSlopeTest.test_bilinear_upsample_raises_npr_consistency",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::SpectrumSlopeTest.test_checkerboard_injection_creates_spectral_spikes",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::SpectrumSlopeTest.test_dct_highfreq_zero_for_constant_image",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase2_frequency.py::SpectrumSlopeTest.test_natural_image_slope_near_two",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase4_reports.py::ChecksumNamingTest.test_legal_text_names_checksum_not_signature",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase4_reports.py::ChecksumNamingTest.test_report_json_uses_checksum_field",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase4_reports.py::EerTest.test_fully_overlapping_scores_have_high_eer",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase4_reports.py::EerTest.test_separable_scores_have_near_zero_eer",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase4_reports.py::EerTest.test_single_class_returns_none",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase4_reports.py::EvidenceIntegrityTest.test_chain_for_existing_file_is_verified",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase4_reports.py::EvidenceIntegrityTest.test_chain_for_missing_file_reports_unverified",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase4_reports.py::PdfLatin1NoticeTest.test_ascii_only_content_has_no_notice",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase4_reports.py::PdfLatin1NoticeTest.test_korean_content_gets_latin1_notice",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::AIAgentTest.test_agent_analysis_to_json",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::AIAgentTest.test_agent_type_classification",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::AIAgentTest.test_analyze_empty_returns_low",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::AIAgentTest.test_analyze_metadata_with_agent_marker",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::AIAgentTest.test_analyze_text_with_agent_marker",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::AIAgentTest.test_analyze_text_with_workflow_pattern",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::AvatarTest.test_analyze_empty_returns_low",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::AvatarTest.test_analyze_file_video_extension",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::AvatarTest.test_analyze_metadata_with_avatar_marker",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::AvatarTest.test_analyze_metadata_with_synthesia",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::AvatarTest.test_avatar_analysis_to_json",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::AvatarTest.test_avatar_type_classification",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::ThreeDTest.test_analyze_empty_returns_low",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::ThreeDTest.test_analyze_file_extension",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::ThreeDTest.test_analyze_text_with_gaussian_marker",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::ThreeDTest.test_analyze_text_with_nerf_marker",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::ThreeDTest.test_content_type_classification",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase6_new.py::ThreeDTest.test_threed_analysis_to_json",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase_a_hygiene.py::ClassifierBoundaryTest.test_barking_is_not_suno_bark",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase_a_hygiene.py::ClassifierBoundaryTest.test_invoked_verb_is_not_invokeai",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase_a_hygiene.py::ClassifierBoundaryTest.test_metadata_word_is_not_meta_imagine",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase_a_hygiene.py::ClassifierBoundaryTest.test_phrase_marker_respects_boundaries",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase_a_hygiene.py::ClassifierBoundaryTest.test_real_tool_still_detected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase_a_hygiene.py::ClassifierBoundaryTest.test_sparked_does_not_match_spark",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase_a_hygiene.py::EvidenceLoaderTest.test_invalid_json_reports_issue",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase_a_hygiene.py::EvidenceLoaderTest.test_malformed_entry_is_skipped_with_issue",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase_a_hygiene.py::EvidenceLoaderTest.test_missing_file_reports_issue",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase_a_hygiene.py::EvidenceLoaderTest.test_roundtrip_reports_no_issues",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_phase_a_hygiene.py::JsonOutParentCreationTest.test_scan_json_out_creates_missing_parents",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_qa_adv3_keywords.py::HumanTextsAboutAiTest.test_corpus_has_thirty_texts_with_identity_phrases",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_qa_adv3_keywords.py::HumanTextsAboutAiTest.test_folder_scan_counts_no_conclusions",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_qa_adv3_keywords.py::HumanTextsAboutAiTest.test_keyword_is_listed_but_never_concludes",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_qa_adv3_keywords.py::HumanTextsAboutAiTest.test_keyword_stacking_still_cannot_conclude",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_realtime.py::RealtimeDetectorTest.test_alert_cooldown",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_realtime.py::RealtimeDetectorTest.test_alert_to_json",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_realtime.py::RealtimeDetectorTest.test_alert_triggered",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_realtime.py::RealtimeDetectorTest.test_create_detector",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_realtime.py::RealtimeDetectorTest.test_create_detector_custom_params",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_realtime.py::RealtimeDetectorTest.test_get_summary",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_realtime.py::RealtimeDetectorTest.test_moving_average",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_realtime.py::RealtimeDetectorTest.test_process_frame_returns_state",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_realtime.py::RealtimeDetectorTest.test_process_multiple_frames",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_realtime.py::RealtimeDetectorTest.test_reset",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_realtime.py::RealtimeDetectorTest.test_state_to_json",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::ArchiveRollUpTest.test_all_authentic_rolls_up_only_without_skips",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::ArchiveRollUpTest.test_any_manipulated_member_rolls_up",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::ArchiveRollUpTest.test_extraction_error_is_failed_coverage",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::C2paEvidenceMappingTest.test_absent_manifest_gives_no_evidence",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::C2paEvidenceMappingTest.test_hash_mismatch_never_authentic",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::C2paEvidenceMappingTest.test_real_fixture_records_coverage_and_untrusted_evidence",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::C2paEvidenceMappingTest.test_trusted_ai_declaration_is_strong_synthetic",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::C2paEvidenceMappingTest.test_trusted_capture_with_hash_match_is_strong_authentic",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::C2paEvidenceMappingTest.test_untrusted_manifest_is_neutral_weak",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::C2paEvidenceMappingTest.test_untrusted_signer_with_ai_declaration_is_moderate",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::DerivedLegacyFieldsTest.test_failed_check_appears_in_limitations_and_verdict",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::DerivedLegacyFieldsTest.test_legacy_signal_weights_follow_strength_and_direction",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::DerivedLegacyFieldsTest.test_uncalibrated_result_has_zero_score",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::MetadataEvidenceMappingTest.test_header_byte_string_is_only_moderate",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::MetadataEvidenceMappingTest.test_missing_metadata_is_neutral",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::MetadataEvidenceMappingTest.test_structured_a1111_parameters_are_strong",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::MetadataEvidenceMappingTest.test_tool_word_in_free_text_field_is_not_strong",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::ModelEvidenceMappingTest.test_calibrated_profile_carries_probability_and_ci",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::ModelEvidenceMappingTest.test_low_uncalibrated_score_is_neutral",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::ModelEvidenceMappingTest.test_unavailable_model_gives_no_evidence",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::ModelEvidenceMappingTest.test_uncalibrated_score_is_raw_not_probability",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::NoMediumBandSweepTest.test_varied_inputs_never_produce_medium",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::RendererTest.test_cli_table_shows_verdicts_and_kinds",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::RendererTest.test_csv_has_v2_columns",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::RendererTest.test_evidence_statement_follows_verdict",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::RendererTest.test_html_report_groups_evidence_and_coverage",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::RendererTest.test_minimal_pdf_states_verdict_codes",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::RendererTest.test_summary_counts_verdicts",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::RendererTest.test_text_result_is_reference_with_legal_sentence_first",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_result_contract.py::TextAlwaysReferenceTest.test_every_text_shape_is_reference",
+   "pre_phase0": false
+  },
+  {
+   "name": "deepfake_lens/tests/test_reviews.py::ReviewApiEndpointTest.test_get_and_post_review_query_param",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_reviews.py::ReviewApiEndpointTest.test_list_all_reviews_endpoint",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_reviews.py::ReviewApiEndpointTest.test_put_and_get_artifact_review",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_reviews.py::ReviewStoreTest.test_delete_review",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_reviews.py::ReviewStoreTest.test_list_reviews",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_reviews.py::ReviewStoreTest.test_save_and_get_review",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_reviews.py::ReviewStoreTest.test_update_existing_review",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_rule_classifier.py::DeprecatedShimTest.test_shim_emits_deprecation_warning",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_rule_classifier.py::DeprecatedShimTest.test_shim_reexports_same_objects",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_rule_classifier.py::RuleClassifierTest.test_load_missing_file_returns_fresh_classifier",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_rule_classifier.py::RuleClassifierTest.test_low_feature_rules_raise_ai_score",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_rule_classifier.py::RuleClassifierTest.test_natural_features_stay_natural",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_rule_classifier.py::RuleClassifierTest.test_predict_returns_result",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_rule_classifier.py::RuleClassifierTest.test_save_load_roundtrip",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_rule_classifier.py::RuleClassifierTest.test_trained_statistics_switch_to_zscore_rules",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_rule_classifier.py::RuleClassifierTest.test_zscore_path_fires_on_outlier",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::AnalyzeUploadPayloadTest.test_empty_upload_reports_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::AnalyzeUploadPayloadTest.test_multipart_files_are_analyzed",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::AnalyzeUploadPayloadTest.test_rejects_non_multipart",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ApiServeTokenGateTest.test_non_local_host_without_token_is_rejected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ApiServeTokenGateTest.test_run_server_refuses_allow_lan_without_token",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ApiServeTokenGateTest.test_web_allow_lan_without_token_is_rejected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ApiServiceContractTest.test_cancel_unknown_job_is_404",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ApiServiceContractTest.test_check_stream_emits_progress_then_result",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ApiServiceContractTest.test_check_stream_requires_input",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ApiServiceContractTest.test_gui_serves_html",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ApiServiceContractTest.test_health_endpoint_shape",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ApiServiceContractTest.test_host_allowlist_without_token",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ApiServiceContractTest.test_root_is_unauthenticated",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ApiServiceContractTest.test_scan_stream_emits_progress_then_result",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ApiServiceContractTest.test_scan_stream_requires_directory",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ApiServiceContractTest.test_token_required_when_configured",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ApiServiceContractTest.test_unified_api_stats",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::AsyncScanJobTest.test_cancel_payload",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::AsyncScanJobTest.test_cancel_stops_scan_early",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::AsyncScanJobTest.test_job_cap_refuses_overflow",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::AsyncScanJobTest.test_job_lifecycle",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::AsyncScanJobTest.test_missing_job_parameter_is_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::CheckPayloadTest.test_file_check_rejects_non_multipart",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::CheckPayloadTest.test_file_check_runs_scan_and_forensic",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::CheckPayloadTest.test_text_check_rejects_too_short",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::CheckPayloadTest.test_text_check_runs_all_text_layers",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ClientHeaderGateTest.test_no_token_requires_client_header",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ClientHeaderGateTest.test_token_accepts_api_token_alias",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ClientHeaderGateTest.test_token_ignores_client_header",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ComparePayloadTest.test_single_file_rejected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ComparePayloadTest.test_text_pair_returns_stylometry",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::FeedbackPayloadTest.test_missing_path_rejected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::FeedbackPayloadTest.test_unknown_label_rejected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::FeedbackPayloadTest.test_valid_label_appends_jsonl",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::HostNameTest.test_bare_hostname",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::HostNameTest.test_ipv4_with_port",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::HostNameTest.test_ipv6_bracketed_with_port",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::HostNameTest.test_localhost_with_port",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::HostNameTest.test_rebound_hostname_is_not_local",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::LiveServerClientHeaderTest.test_api_requires_client_header_without_token",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::LiveServerClientHeaderTest.test_feedback_write_rejected_without_client_header",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::LiveServerClientHeaderTest.test_gui_assets_and_csp_headers",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::LiveServerClientHeaderTest.test_gui_shell_still_served_without_header",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::PreviewPayloadTest.test_caller_supplied_root_cannot_widen_scope",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::PreviewPayloadTest.test_media_served_within_root",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::PreviewPayloadTest.test_non_media_forbidden",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::PreviewPayloadTest.test_outside_root_forbidden",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::PreviewPayloadTest.test_stale_root_argument_rejected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::PreviewPayloadTest.test_unregistered_root_rejected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ScanPayloadValidationTest.test_default_engine_profiles_applied_when_model_path_absent",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ScanPayloadValidationTest.test_explicit_model_path_wins_over_defaults",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ScanPayloadValidationTest.test_invalid_max_file_bytes_raises_value_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ScanPayloadValidationTest.test_invalid_max_files_raises_value_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ScanPayloadValidationTest.test_max_file_bytes_is_clamped_to_ceiling",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ScanPayloadValidationTest.test_max_files_floors_at_one",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ScanPayloadValidationTest.test_max_files_is_clamped_to_ceiling",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ScanPayloadValidationTest.test_no_default_engine_disables_profiles",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ServiceContractTest.test_api_server_host_name_parsing",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ServiceContractTest.test_create_app_import_guard",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ServiceContractTest.test_servers_default_to_loopback",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::ServiceContractTest.test_webapp_refuses_non_loopback_without_allow_lan",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::SummaryParityTest.test_core_counts_same_scan_items",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::SummaryParityTest.test_serialized_rows_parity",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_servers.py::SummaryParityTest.test_web_summary_matches_core_contract",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_signing.py::CliSigningTest.test_scan_json_out_signed_via_env_key",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_signing.py::CliSigningTest.test_scan_json_out_unsigned_without_key",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_signing.py::KeyResolutionTest.test_env_var_key",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_signing.py::KeyResolutionTest.test_key_file_wins_over_env",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_signing.py::KeyResolutionTest.test_no_key_returns_none",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_signing.py::SignVerifyTest.test_missing_key_writes_unsigned_with_note",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_signing.py::SignVerifyTest.test_round_trip_verifies",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_signing.py::SignVerifyTest.test_signing_is_deterministic_and_strips_prior_signature",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_signing.py::SignVerifyTest.test_swapped_key_id_fails_verification",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_signing.py::SignVerifyTest.test_tampered_field_fails_verification",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_signing.py::SignVerifyTest.test_unreadable_input",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_signing.py::SignVerifyTest.test_verify_from_file_path",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_signing.py::SignVerifyTest.test_verify_without_key_reports_no_key",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_signing.py::SignVerifyTest.test_wrong_key_fails",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_advanced.py::TextAdvancedAnalysisTest.test_ai_probability_range",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_advanced.py::TextAdvancedAnalysisTest.test_analysis_returns_dataclass",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_advanced.py::TextAdvancedAnalysisTest.test_bigram_entropy_known_distribution",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_advanced.py::TextAdvancedAnalysisTest.test_empty_text_returns_unknown",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_advanced.py::TextAdvancedAnalysisTest.test_hangul_text_flags_english_calibrated_thresholds",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_advanced.py::TextAdvancedAnalysisTest.test_korean_ai_endings_probe",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_advanced.py::TextAdvancedAnalysisTest.test_korean_ai_slop_probe",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_advanced.py::TextAdvancedAnalysisTest.test_korean_translationese_probe",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_advanced.py::TextAdvancedAnalysisTest.test_limitations_disclaim_perplexity",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_advanced.py::TextAdvancedAnalysisTest.test_no_perplexity_claims",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_advanced.py::TextAdvancedAnalysisTest.test_repetitive_text_detected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_advanced.py::TextAdvancedAnalysisTest.test_short_text_returns_low",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_advanced.py::TextAdvancedAnalysisTest.test_style_profile_valid",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_advanced.py::TextAdvancedAnalysisTest.test_to_json_returns_dict",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_advanced.py::TextAdvancedAnalysisTest.test_transitional_text_detected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_advanced.py::TextAdvancedAnalysisTest.test_uniform_sentence_length_detected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_detector.py::TextDetectorProfileTest.test_committed_profile_matches_contract",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_detector.py::TextDetectorProfileTest.test_missing_transformers_degrades_gracefully",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_detector.py::TextDetectorProfileTest.test_text_profile_is_filtered_to_text_modality",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_detector.py::TextDetectorScanTest.test_analyze_file_marks_text_and_carries_model_analysis",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_text_detector.py::TextDetectorScanTest.test_scan_without_text_profile_unchanged",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::CompareFilesTest.test_mixed_pair_rejected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::CompareFilesTest.test_text_pair_dispatches_stylometry",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::CopyMoveKeypointTest.test_clean_texture_not_flagged",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::CopyMoveKeypointTest.test_random_noise_not_flagged",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::CopyMoveKeypointTest.test_scaled_clone_flagged",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::CopyMoveKeypointTest.test_translated_clone_flagged",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::CopyMoveTest.test_clean_noise_not_flagged",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::CopyMoveTest.test_forged_region_flagged",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::CopyMoveTest.test_repetitive_texture_suppressed",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::LipsyncTest.test_contract_fields",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::LipsyncTest.test_nonexistent_video_unavailable",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::SpeakerComparisonTest.test_ecapa_self_comparison_when_available",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::SpeakerComparisonTest.test_identical_audio_is_same_speaker",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::SpeakerComparisonTest.test_missing_file_is_graceful",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::SpeakerComparisonTest.test_very_different_audio_scores_lower",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::StylometryComparisonTest.test_different_style_scores_lower",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::StylometryComparisonTest.test_short_text_adds_limitation",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::StylometryComparisonTest.test_similar_texts_same_author",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::SynthIDWatermarkTest.test_missing_keys_unavailable",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::SynthIDWatermarkTest.test_wrong_key_reports_no_signal",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::WatermarkTest.test_green_list_deterministic",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::WatermarkTest.test_short_text_unavailable",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_v6_probes.py::WatermarkTest.test_watermarked_text_detected",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_vendor_weights.py::FetchAndCoverageTest.test_cli_vendor_weights_fetch_offline",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_vendor_weights.py::FetchAndCoverageTest.test_fetch_offline_refuses_network",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_vendor_weights.py::FetchAndCoverageTest.test_fetch_sha256_mismatch_writes_nothing",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_vendor_weights.py::FetchAndCoverageTest.test_fetch_skips_profiles_without_url",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_vendor_weights.py::FetchAndCoverageTest.test_fetch_verified_download_writes_checkpoint",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_vendor_weights.py::FetchAndCoverageTest.test_weights_coverage_counts_without_hashing",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_vendor_weights.py::VendorWeightsTest.test_bundle_offline_weights",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_vendor_weights.py::VendorWeightsTest.test_bundle_preserves_nested_checkpoint_paths",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_vendor_weights.py::VendorWeightsTest.test_bundle_refuses_incomplete_weights",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_vendor_weights.py::VendorWeightsTest.test_cli_vendor_weights_bundle",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_vendor_weights.py::VendorWeightsTest.test_cli_vendor_weights_inspect",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_vendor_weights.py::VendorWeightsTest.test_inspect_model_manifest",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_vendor_weights.py::VendorWeightsTest.test_verify_offline_integrity",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::AnalyzeFileVideoDispatchTest.test_mp4_dispatches_to_video_kind",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::AnalyzeFileVideoDispatchTest.test_video_result_adapter_contract",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::HfFlickerSignalTest.test_flicker_with_matched_exposure_jitter_not_flagged",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::HfFlickerSignalTest.test_monotonic_motion_hf_is_not_flicker",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::HfFlickerSignalTest.test_oscillating_hf_energy_flags_flicker",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::HfFlickerSignalTest.test_too_few_frames_returns_none",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::VideoTemporalAnalysisTest.test_analysis_returns_dataclass",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::VideoTemporalAnalysisTest.test_blur_pattern_normal",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::VideoTemporalAnalysisTest.test_blur_pattern_stable",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::VideoTemporalAnalysisTest.test_brightness_consistency_normal",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::VideoTemporalAnalysisTest.test_brightness_consistency_stable",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::VideoTemporalAnalysisTest.test_contrast_consistency_normal",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::VideoTemporalAnalysisTest.test_contrast_consistency_stable",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::VideoTemporalAnalysisTest.test_edge_density_normal",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::VideoTemporalAnalysisTest.test_edge_density_stable",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::VideoTemporalAnalysisTest.test_fps_analysis_normal",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::VideoTemporalAnalysisTest.test_fps_analysis_unusual",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::VideoTemporalAnalysisTest.test_nonexistent_file_returns_error",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::VideoTemporalAnalysisTest.test_resolution_analysis_normal",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::VideoTemporalAnalysisTest.test_resolution_analysis_unusual",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::VideoTemporalAnalysisTest.test_to_json_returns_dict",
+   "pre_phase0": true
+  },
+  {
+   "name": "deepfake_lens/tests/test_video_analysis.py::VideoTemporalAnalysisTest.test_unsupported_format_returns_error",
+   "pre_phase0": true
+  }
+ ]
+}

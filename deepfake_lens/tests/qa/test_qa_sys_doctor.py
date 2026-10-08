@@ -108,6 +108,23 @@ class QaSys3DoctorMatchesScanTest(unittest.TestCase):
             if status.runnable and _profile_matches_modality(self.models / status.file, modality)
         }
 
+    def test_deleted_model_is_miss_and_runnable_summary_matches_scan(self) -> None:
+        """QA-SYS-3: 필수 모델 하나를 삭제한 환경에서 doctor 실행 → 해당 모델 MISS, "실행 가능" 요약이 실제 검사 결과의 coverage와 일치.
+
+        Both halves on the audio scan (no photo gate in front of the model
+        check): the deleted-checkpoint profile is MISS in doctor and not
+        "ran" in coverage; doctor's runnable set equals the ran set.
+        """
+        report = run_diagnostics(self.models)
+        by_name = {status.name: status for status in report.model_profiles}
+        self.assertEqual(by_name["fake-audio"].checkpoint, "missing")
+        self.assertFalse(by_name["fake-audio"].runnable)
+        self.assertIn("[ MISS] fake-audio", format_report(report))
+        _, items, _ = scan_folder(self.media, AnalysisOptions(models_dir=self.models))
+        ran = _ran_models(items, AUDIO_NAME)
+        self.assertEqual(ran, self._doctor_runnable_for("audio"))
+        self.assertNotIn("fake-audio", ran)
+
     def test_doctor_marks_deleted_checkpoint_miss(self) -> None:
         """QA-SYS-3: the profiles whose checkpoint was deleted are MISS and not runnable."""
         report = run_diagnostics(self.models)

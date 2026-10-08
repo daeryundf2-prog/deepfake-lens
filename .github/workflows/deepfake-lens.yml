@@ -163,6 +163,42 @@ jobs:
       - name: Check shipped profiles against the measurement gate
         run: python scripts/check_measurement_gate.py --models-dir deepfake_lens/models
 
+  qa-phase0:
+    # Phase 0, WP-J: the QA harness runs the whole unit suite, folds the
+    # results per QA ID (tests/qa/traceability.json) and regenerates
+    # docs/CONFORMANCE.md; it exits 1 when any automated test fails or a
+    # QA ID lacks exactly one canonical test. The extras the QA scenarios
+    # exercise are installed (photo gate/face layer: numpy, Pillow, opencv;
+    # audio: librosa/soundfile; API legs of QA-OUT-4 and G31: fastapi/httpx;
+    # QA-IN-1 format samples: ffmpeg). No model weights.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # QA-SYS-10 checks that each deleted test's reason is in its
+          # commit message; a shallow clone would skip that check.
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Install package with QA extras
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . numpy Pillow opencv-python-headless scipy librosa soundfile scikit-learn fastapi httpx
+      - name: QA harness (writes build/qa-logs and docs/CONFORMANCE.md)
+        run: python scripts/qa_phase0.py --log-dir build/qa-logs --out docs/CONFORMANCE.md
+      - name: Upload QA logs and conformance table
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-phase0-conformance
+          path: |
+            build/qa-logs
+            docs/CONFORMANCE.md
+          if-no-files-found: error
+
   registry-links:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

@@ -9,6 +9,7 @@ check set.
 from __future__ import annotations
 
 import base64
+import importlib.util
 import json
 import os
 import tempfile
@@ -50,6 +51,25 @@ def _write_secret_png(path: Path) -> None:
     Image.new("RGB", (32, 32), (200, 10, 10)).save(path)
     with path.open("ab") as handle:
         handle.write(SECRET)
+
+
+# The forensic PDF prints "서명 없음" with pymupdf (Korean font, compressed
+# streams) and "UNSIGNED" from the Latin-1 fallback writer without it.
+HAVE_PYMUPDF = importlib.util.find_spec("pymupdf") is not None or importlib.util.find_spec("fitz") is not None
+UNSIGNED_PDF_MARKER = "서명 없음" if HAVE_PYMUPDF else "UNSIGNED"
+
+
+def _pdf_text(pdf: bytes) -> str:
+    """Text of a rendered PDF: pymupdf extraction when available, else the raw
+    Latin-1 bytes of the uncompressed fallback writer."""
+    if not HAVE_PYMUPDF:
+        return pdf.decode("latin-1")
+    try:
+        import pymupdf
+    except ImportError:
+        import fitz as pymupdf
+    with pymupdf.open(stream=pdf, filetype="pdf") as doc:
+        return "".join(page.get_text() for page in doc)
 
 
 def _leaves(node: Any, prefix: tuple[Any, ...] = ()) -> Iterator[tuple[tuple[Any, ...], Any]]:
@@ -106,7 +126,12 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
         self.assertEqual(result.reason, "검증됨")
 
     def test_named_fields_are_inside_the_signature(self) -> None:
-        """QA-SYS-6: verdict, evidence, note, model pin, item sha256 and tool version each flip to 변조됨."""
+        """QA-SYS-6: 보고서 JSON의 임의 필드(결론, 근거, note, 모델 해시) 한 글자 변경 후 검증 → 모든 경우 "변조됨".
+
+        Verdict, evidence, note, model pin, item sha256 and tool version
+        each flip to 변조됨; test_every_field_is_inside_the_signature covers
+        every other leaf.
+        """
         generated = next(i for i, item in enumerate(self.signed["items"]) if item["name"] == "generated.png")
         item = self.signed["items"][generated]
         self.assertEqual(item["result"]["verdict_code"], "manipulation_evidence")
@@ -200,7 +225,7 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
         assert embedded is not None
         self.assertIsNone(embedded["signature"])
         self.assertEqual(verify_report(embedded, KEY).reason, "서명 없음")
-        self.assertIn(b"UNSIGNED", pdf)
+        self.assertIn(UNSIGNED_PDF_MARKER, _pdf_text(pdf))
 
 
 class _ServerFixture(unittest.TestCase):
@@ -273,6 +298,27 @@ class QaSys7ReadRootConfinementTest(_ServerFixture):
             heatmap = Path(row["result"]["pixel_analysis"]["heatmap_path"])  # type: ignore[index]
             self.assertTrue(heatmap.is_relative_to(self.heatmaps), "heatmaps never land in the evidence folder (R-IN-1)")
         return rows
+
+    def test_unregistered_scan_and_outside_heatmap_report_are_403_with_no_bytes(self) -> None:
+        """QA-SYS-7: /api/scan?folder=/ 등 등록되지 않은 경로로 요청. heatmap_path를 외부 파일로 지정한 report 요청 → 모두 403, 응답에 파일 내용 0바이트.
+
+        Both halves in one test; the sibling QA-SYS-7 tests add traversal,
+        async scans, analyze-file, preview/heatmap and the api-serve file
+        endpoints (test_servers.ApiServerFilePathConfinementTest).
+        """
+        for query in ("folder=/", f"folder={self.outside}", f"folder={self.outside}&async=1"):
+            with self.subTest(scan=query):
+                status, body = self.request("/api/scan?" + query + "&no_default_engine=true")
+                self.assertDenied(status, body)
+                self.assertEqual(json.loads(body), {"error": "허용되지 않은 경로"})
+        rows = self._scan_rows_with_heatmap()
+        for row in rows:
+            pixel = ((row.get("result") or {}).get("pixel_analysis") or {})  # type: ignore[union-attr]
+            if pixel.get("heatmap_path"):
+                pixel["heatmap_path"] = str(self.outside / "secret.png")
+        for fmt in ("html", "pdf", "json"):
+            with self.subTest(report=fmt):
+                self.assertDenied(*self.request(f"/api/report?format={fmt}", {"items": rows}))
 
     def test_scan_of_filesystem_root_is_403(self) -> None:
         """QA-SYS-7: GET /api/scan?folder=/ → 403 {"error": "허용되지 않은 경로"}."""

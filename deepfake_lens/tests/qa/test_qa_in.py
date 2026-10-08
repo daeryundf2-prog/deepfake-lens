@@ -233,7 +233,11 @@ class QaIn2DeterministicRescanTest(unittest.TestCase):
     """QA-IN-2: 같은 폴더를 3회 검사(중간에 프로세스 재시작, 폴더 이름 변경) → 타임스탬프·절대경로 필드를 제외한 JSON이 바이트 단위로 동일. 파일 순서 동일."""
 
     def test_three_scans_across_restart_and_rename_are_byte_identical(self) -> None:
-        """QA-IN-2: in-process, subprocess, and re-imported-after-rename scans give identical JSON."""
+        """QA-IN-2: 같은 폴더를 3회 검사(중간에 프로세스 재시작, 폴더 이름 변경) → 타임스탬프·절대경로 필드를 제외한 JSON이 바이트 단위로 동일. 파일 순서 동일.
+
+        In-process, subprocess, and re-imported-after-rename scans give
+        identical JSON and the same file order.
+        """
         from deepfake_lens.cli import main
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -335,7 +339,11 @@ class QaIn4ContentKeyedCacheTest(unittest.TestCase):
         return summary, {item.name: item for item in items}, analyze.call_count
 
     def test_same_size_edit_with_restored_mtime_is_reanalyzed(self) -> None:
-        """QA-IN-4: last byte changed, size equal, mtime restored → cache miss, new analysis, new hash."""
+        """QA-IN-4: 마지막 바이트만 바꾼 동일 크기 파일을 같은 경로에 넣고 touch -r로 mtime 복원 후 재검사 → 캐시 미사용, 새로 분석, 해시가 다르게 기록.
+
+        Last byte changed, size equal, mtime restored → cache miss, new
+        analysis, new hash.
+        """
         summary, items, calls = self._scan()
         self.assertEqual((summary.cached, calls), (0, 2))
         old_hash = items["evidence.txt"].sha256

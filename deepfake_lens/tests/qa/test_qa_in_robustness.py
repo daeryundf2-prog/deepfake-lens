@@ -244,8 +244,13 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
             self.assertIn(name, self.by_path, name)
 
     def test_each_damaged_input_is_undetermined_unsupported_or_failed_with_reason(self) -> None:
-        """QA-IN-5: every damaged input (and every member pulled out of one) is
-        판단 불가 with a reason, 미지원, or 실패 — never a conclusion."""
+        """QA-IN-5: 손상 파일 20종(잘린 JPEG, 깨진 mp4 moov, 빈 파일, 확장자 위장, zip 폭탄, 중첩 zip 100개) → 프로세스 생존, 각 파일이 "판단 불가 + 이유" 또는 "미지원". 디스크 사용 상한 초과 없음. 다른 파일 결과에 영향 없음.
+
+        Every damaged input (and every member pulled out of one) is 판단
+        불가 with a reason, 미지원, or 실패 — never a conclusion. The disk
+        budget and the "other files unaffected" halves are the sibling
+        QA-IN-5 tests in this class.
+        """
         for item in self.items:
             top = item.path.split("::", 1)[0]
             if top in self.valid:

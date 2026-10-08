@@ -1,4 +1,15 @@
-"""QA-OUT scenarios for the unified entry point (WP-F, G7/G8) — phase 0.
+"""QA-OUT scenarios (phase 0): verdict contract, fail-closed, entry points.
+
+QA-OUT-2 and QA-OUT-3 (WP-B, G1/G12) are the explicit QA forms of the
+fail-closed tests in tests/test_fail_closed.py (whose assertion helper they
+reuse): an exception injected into model inference is "실패: <예외 유형>",
+never "의존성 부재", and the verdict is 판단 불가; a photo where the face
+detector finds nothing records "얼굴 검사 미실행: 얼굴 미검출" and never a
+"no manipulation" conclusion. No detector weights exist here, so the three
+face conditions are synthetic scenes and the detector's "no face" outcome is
+injected; a second test runs the real (vendored Haar) detector unpatched.
+
+The remaining scenarios cover the unified entry point (WP-F, G7/G8).
 
 Runs without neural weights: the packaged models dir carries only
 ``supported: false`` profiles, so every model check is recorded as skipped
@@ -14,6 +25,7 @@ evidence, coverage and threshold provenance.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import importlib.util
 import io
 import json
@@ -52,6 +64,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 BENCHMARK = REPO_ROOT / "fixtures" / "benchmark"
 TEXT_CORPORA = (REPO_ROOT / "experiments" / "text-corpus", REPO_ROOT / "fixtures" / "adversarial-text")
 HAVE_NUMPY = importlib.util.find_spec("numpy") is not None
+HAVE_CV2 = importlib.util.find_spec("cv2") is not None
 HAVE_FASTAPI = importlib.util.find_spec("fastapi") is not None and importlib.util.find_spec("httpx") is not None
 CLIENT_HEADERS = {"X-Deepfake-Lens-Client": "qa"}
 
@@ -113,6 +126,175 @@ def _norm_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def write_scene_png(path: Path, *, seed: int, condition: str = "no_face", width: int = 224, height: int = 168) -> Path:
+    """A deterministic photo-like scene: soft light blobs, hard-edged objects,
+    sensor noise. ``condition``: ``no_face`` (scene only), ``profile_face``
+    (a side-view head silhouette: skin ellipse, nose bump, hair) or
+    ``low_light`` (the scene at 20 % exposure with ISO-like noise).
+    Classified ``photo`` by image_class (asserted by the tests). Needs numpy.
+    """
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float64)
+    image = np.zeros((height, width, 3), dtype=np.float64) + rng.uniform(40, 120, size=3)
+    for _ in range(5):
+        cx, cy = rng.uniform(0, width), rng.uniform(0, height)
+        sigma = rng.uniform(width / 8, width / 3)
+        blob = np.exp(-((xx - cx) ** 2 + (yy - cy) ** 2) / (2 * sigma**2))
+        image += blob[..., None] * rng.uniform(-80, 100, size=3)
+    for _ in range(int(rng.integers(4, 8))):
+        x0, y0 = int(rng.uniform(0, width * 0.8)), int(rng.uniform(0, height * 0.8))
+        w = min(int(rng.uniform(width * 0.08, width * 0.35)), width - x0)
+        h = min(int(rng.uniform(height * 0.08, height * 0.5)), height - y0)
+        shade = np.linspace(1.0, rng.uniform(0.6, 1.0), h)[:, None, None]
+        image[y0:y0 + h, x0:x0 + w] = rng.uniform(20, 230, size=3) * shade
+    if condition == "profile_face":
+        cx, cy = width * rng.uniform(0.3, 0.7), height * 0.5
+        head = (((xx - cx) / (width * 0.11)) ** 2 + ((yy - cy) / (height * 0.28)) ** 2) <= 1.0
+        nose = (((xx - (cx + width * 0.1)) / (width * 0.03)) ** 2 + ((yy - cy) / (height * 0.05)) ** 2) <= 1.0
+        image[head | nose] = np.array([200.0, 155.0, 130.0]) + rng.normal(0, 5, 3)
+        image[head & (yy < cy - height * 0.1) & (xx < cx + width * 0.02)] = np.array([40.0, 30.0, 25.0])
+    if condition == "low_light":
+        image = image * 0.2 + rng.normal(0, 4.0, size=image.shape)
+    else:
+        image += rng.normal(0, 5.0, size=image.shape)
+    pixels = np.clip(image, 0, 255).astype(np.uint8)
+    path.write_bytes(_png_bytes(width, height, pixels.tobytes()))
+    return path
+
+
+FACE_CONDITIONS = ("no_face", "profile_face", "low_light")
+FACE_IMAGES_PER_CONDITION = 20
+# Exception types injected into model inference (QA-OUT-2): runtime, input,
+# lookup, resource and I/O failures — none of them a missing dependency.
+INJECTED_EXCEPTIONS: tuple[type[BaseException], ...] = (RuntimeError, ValueError, KeyError, MemoryError, OSError)
+# Phrases that would state a face-manipulation absence (QA-OUT-3).
+NO_MANIPULATION_PHRASES = ("얼굴 조작 없음", "조작 없음", "조작 흔적 없음", "조작되지 않")
+
+
+def _pinned_fake_aide(root: Path) -> Path:
+    """A pinned ``aide`` image profile over a fake checkpoint (as in
+    test_fail_closed): pin verification passes, so inference is reached."""
+    checkpoint = root / "fake-aide.pth"
+    checkpoint.write_bytes(b"not a real checkpoint")
+    profile = root / "fake-aide-runtime.json"
+    pin = {"sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest()}
+    profile.write_text(json.dumps({"name": "fake-aide", "runtime": "aide", "checkpoint": str(checkpoint), "modality": "image", "pin": pin}), encoding="utf-8")
+    return profile
+
+
+@unittest.skipUnless(HAVE_NUMPY, "numpy not installed (scene generator)")
+class QaOut2InferenceExceptionTest(unittest.TestCase):
+    """QA-OUT-2: an exception inside model inference is a failed check, never a missing dependency."""
+
+    def test_injected_inference_exceptions_are_failed_and_undetermined(self) -> None:
+        """QA-OUT-2: 모델 추론 함수에 예외를 강제 주입(monkeypatch)하고 검사 → 커버리지에 "실패: <예외 유형>" 기록, 결론 "판단 불가". "의존성 부재"로 표기되지 않음.
+
+        Five exception types x five photo scenes, injected into
+        model_adapter._run_aide behind a correctly pinned fake profile.
+        """
+        from deepfake_lens.image_class import PHOTO, classify_image
+        from deepfake_lens.tests.test_fail_closed import FailClosedAssertions
+
+        assertions = FailClosedAssertions()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _pinned_fake_aide(root)
+            images = [write_scene_png(root / f"scene-{index}.png", seed=500 + index) for index in range(5)]
+            for image in images:
+                self.assertEqual(classify_image(image).kind, PHOTO, image.name)
+            for exc_type in INJECTED_EXCEPTIONS:
+                for image in images:
+                    with self.subTest(exception=exc_type.__name__, image=image.name), \
+                            mock.patch("deepfake_lens.model_adapter._run_aide", side_effect=exc_type("inference crashed")), \
+                            self.assertLogs("deepfake_lens.model_adapter", level="ERROR"):
+                        item = analyze_file(image, model_path=profile)
+                        assertions.assertFailedUndetermined(item, "external_model", exc_type.__name__)
+                        result = item.result
+                        assert result is not None
+                        [entry] = [e for e in result.coverage if e.check == "external_model"]
+                        self.assertIn(f"실패: {exc_type.__name__}", entry.describe())
+                        self.assertNotIn("의존성 부재", entry.describe())
+                        self.assertEqual(result.verdict_code, Verdict.UNDETERMINED)
+                        self.assertIsNone(result.probability)
+                        self.assertFalse(result.score_is_calibrated)
+
+    def test_failure_survives_the_unified_entry_point(self) -> None:
+        """QA-OUT-2 (scan JSON): the failed entry reaches scan_folder's payload unchanged."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = _pinned_fake_aide(root)
+            media = root / "media"
+            media.mkdir()
+            write_scene_png(media / "scene.png", seed=77)
+            with mock.patch("deepfake_lens.model_adapter._run_aide", side_effect=RuntimeError("boom")), \
+                    self.assertLogs("deepfake_lens.model_adapter", level="ERROR"):
+                summary, items, _ = scan_folder(media, AnalysisOptions(model_path=profile))
+        payload = items[0].to_json()
+        coverage = {entry["check"]: entry for entry in payload["result"]["coverage"]}
+        self.assertEqual(coverage["external_model"]["status"], "failed")
+        self.assertTrue(coverage["external_model"]["reason"].startswith("RuntimeError"))
+        self.assertEqual(payload["result"]["verdict_code"], "undetermined")
+        self.assertEqual(summary.authenticity_evidence, 0)
+
+
+@unittest.skipUnless(HAVE_NUMPY and HAVE_CV2, "numpy + opencv required (scene generator, face layer)")
+class QaOut3NoFaceTest(unittest.TestCase):
+    """QA-OUT-3: an undetected face is recorded as a skipped check, never as "no manipulation"."""
+
+    def _assert_no_face_claim(self, result: Any) -> None:
+        self.assertNotEqual(result.verdict_code, Verdict.AUTHENTICITY_EVIDENCE)
+        self.assertNotEqual(result.band, RiskBand.LOW)
+        self.assertFalse([e for e in result.evidence if e.layer == "face" and e.direction == EvidenceDirection.AUTHENTIC])
+        texts = [result.verdict, *result.limitations, *(e.title for e in result.evidence), *(e.detail for e in result.evidence)]
+        for phrase in NO_MANIPULATION_PHRASES:
+            self.assertFalse([text for text in texts if phrase in text], phrase)
+
+    def test_no_face_profile_and_low_light_record_face_check_not_run(self) -> None:
+        """QA-OUT-3: 얼굴 없는 사진, 측면 얼굴, 저조도 얼굴 각 20장 → 얼굴 미검출 시 커버리지에 "얼굴 검사 미실행: 얼굴 미검출" 기록. 얼굴 조작 결론이 "없음"으로 나오지 않음.
+
+        60 synthetic photo scenes (20 per condition); the detector's "no
+        face found" outcome is injected (_detect_faces_strict -> []), as no
+        landmark weights exist in this environment.
+        """
+        from deepfake_lens.image_class import PHOTO, classify_image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for condition in FACE_CONDITIONS:
+                for index in range(FACE_IMAGES_PER_CONDITION):
+                    image = write_scene_png(root / f"{condition}-{index:02d}.png", seed=3000 + index, condition=condition)
+                    with self.subTest(condition=condition, image=image.name):
+                        self.assertEqual(classify_image(image).kind, PHOTO, "the face layer runs on photos only")
+                        with mock.patch("deepfake_lens.face._detect_faces_strict", return_value=[]):
+                            item = analyze_file(image, deep_signals=True)
+                        result = item.result
+                        assert result is not None
+                        [entry] = [e for e in result.coverage if e.check == "face_manipulation"]
+                        self.assertEqual(entry.status, CoverageStatus.SKIPPED)
+                        self.assertEqual(entry.describe(), "얼굴 검사 미실행: 얼굴 미검출")
+                        self.assertFalse([e for e in result.evidence if e.layer == "face"])
+                        self._assert_no_face_claim(result)
+
+    def test_real_detector_never_yields_a_no_manipulation_claim(self) -> None:
+        """QA-OUT-3 (unpatched detector): whatever the vendored detector finds on
+        the 60 scenes, a skip says why and no "no manipulation" conclusion appears."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for condition in FACE_CONDITIONS:
+                for index in range(FACE_IMAGES_PER_CONDITION):
+                    image = write_scene_png(root / f"{condition}-{index:02d}.png", seed=3000 + index, condition=condition)
+                    with self.subTest(condition=condition, image=image.name):
+                        item = analyze_file(image, deep_signals=True)
+                        result = item.result
+                        assert result is not None
+                        [entry] = [e for e in result.coverage if e.check == "face_manipulation"]
+                        if entry.status != CoverageStatus.RAN:
+                            self.assertTrue(entry.reason, entry)
+                        self._assert_no_face_claim(result)
+
+
 class QaOut4SameResultEverywhereTest(unittest.TestCase):
     """QA-OUT-4: 같은 폴더를 CLI, GUI(/api/scan), API 서버로 각각 검사 → 세 결과의 결론·근거·확률·임계값 출처가 동일."""
 
@@ -163,7 +345,12 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
         return response.json()
 
     def test_cli_gui_api_identical_on_benchmark_fixtures(self) -> None:
-        """QA-OUT-4: identical verdict/grade/evidence/coverage/thresholds across entry points."""
+        """QA-OUT-4: 같은 폴더를 CLI, GUI(/api/scan), API 서버로 각각 검사 → 세 결과의 결론·근거·확률·임계값 출처가 동일.
+
+        Identical verdict/grade/evidence/coverage/thresholds across the CLI
+        and the stdlib web server here; the FastAPI leg is
+        test_api_server_leg (skipped without fastapi/httpx).
+        """
         folder = BENCHMARK.resolve()
         cli = _norm_payload(self._cli_payload(folder))
         options = AnalysisOptions.from_cli_args(type("Args", (), {})())
@@ -208,6 +395,7 @@ class QaOut1NoWeightsTest(unittest.TestCase):
     """QA-OUT-1: 신경망 가중치를 제거한 상태에서 사진 100장 검사 → 결론이 "판단 불가" 또는 결정적 근거에 의한 결론뿐. "낮음/깨끗함"이 통계적 근거 없이 나오는 건 0개."""
 
     def test_hundred_photos_without_weights(self) -> None:
+        """QA-OUT-1: 신경망 가중치를 제거한 상태에서 사진 100장 검사 → 결론이 "판단 불가" 또는 결정적 근거에 의한 결론뿐. "낮음/깨끗함"이 통계적 근거 없이 나오는 건 0개."""
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp)
             for index in range(100):
@@ -268,7 +456,12 @@ class QaOut5ProbabilityProvenanceTest(unittest.TestCase):
         )
 
     def test_synthetic_calibrated_probability_carries_provenance(self) -> None:
-        """QA-OUT-5: a calibrated statistical item (built synthetically) carries id, conditions and CI."""
+        """QA-OUT-5: 모델 확률이 표시된 모든 결과 → 각 확률에 보정 코퍼스 ID, 측정 조건, 95% CI가 붙어 있음. 측정 범위 밖 입력(64 px 이하)은 "범위 밖"으로 표시되고 확률 없음.
+
+        A calibrated statistical item (built synthetically — no calibrated
+        model exists in phase 0) carries id, conditions and CI; the real-scan
+        and 64 px halves are the sibling QA-OUT-5 tests.
+        """
         calibrated = EvidenceItem(
             title="보정된 모델 확률",
             detail="합성 입력",
@@ -338,6 +531,7 @@ class QaOut6TextIsReferenceTest(unittest.TestCase):
     """QA-OUT-6: 텍스트 파일 50개 검사 → 모든 결론 등급이 "참고", 보고서에 법적 한계 문구 존재."""
 
     def test_text_corpora_are_reference_grade(self) -> None:
+        """QA-OUT-6: 텍스트 파일 50개 검사 → 모든 결론 등급이 "참고", 보고서에 법적 한계 문구 존재."""
         texts: list[ScanItem] = []
         for corpus in TEXT_CORPORA:
             _, items, _ = scan_folder(corpus, AnalysisOptions(recursive=True))

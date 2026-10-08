@@ -1,0 +1,445 @@
+{
+  "schema": "deepfake-lens-qa-traceability-v1",
+  "description": "0단계 요구사항 → 갭 → QA 시나리오 추적표. scripts/qa_phase0.py가 이 파일을 읽어 docs/CONFORMANCE.md를 만든다. 자동 QA ID마다 docstring 첫 줄이 '<QA ID>: <criteria>'인 테스트가 정확히 1개 있어야 한다(tests/qa/test_qa_traceability.py).",
+  "criteria_source": "0단계 명세 'QA 시나리오 (통과 기준 원문)'",
+  "qa": {
+    "QA-IN-1": {
+      "mode": "automated",
+      "criteria": "지원 형식 전부의 샘플 1개씩을 읽기 전용 폴더에 두고 전체 검사 → 모든 파일의 검사 전후 SHA-256 동일, mtime 불변, 폴더에 새 파일 0개."
+    },
+    "QA-IN-2": {
+      "mode": "automated",
+      "criteria": "같은 폴더를 3회 검사(중간에 프로세스 재시작, 폴더 이름 변경) → 타임스탬프·절대경로 필드를 제외한 JSON이 바이트 단위로 동일. 파일 순서 동일."
+    },
+    "QA-IN-4": {
+      "mode": "automated",
+      "criteria": "마지막 바이트만 바꾼 동일 크기 파일을 같은 경로에 넣고 touch -r로 mtime 복원 후 재검사 → 캐시 미사용, 새로 분석, 해시가 다르게 기록."
+    },
+    "QA-IN-5": {
+      "mode": "automated",
+      "criteria": "손상 파일 20종(잘린 JPEG, 깨진 mp4 moov, 빈 파일, 확장자 위장, zip 폭탄, 중첩 zip 100개) → 프로세스 생존, 각 파일이 \"판단 불가 + 이유\" 또는 \"미지원\". 디스크 사용 상한 초과 없음. 다른 파일 결과에 영향 없음."
+    },
+    "QA-OUT-1": {
+      "mode": "automated",
+      "criteria": "신경망 가중치를 제거한 상태에서 사진 100장 검사 → 결론이 \"판단 불가\" 또는 결정적 근거에 의한 결론뿐. \"낮음/깨끗함\"이 통계적 근거 없이 나오는 건 0개."
+    },
+    "QA-OUT-2": {
+      "mode": "automated",
+      "criteria": "모델 추론 함수에 예외를 강제 주입(monkeypatch)하고 검사 → 커버리지에 \"실패: <예외 유형>\" 기록, 결론 \"판단 불가\". \"의존성 부재\"로 표기되지 않음."
+    },
+    "QA-OUT-3": {
+      "mode": "automated",
+      "criteria": "얼굴 없는 사진, 측면 얼굴, 저조도 얼굴 각 20장 → 얼굴 미검출 시 커버리지에 \"얼굴 검사 미실행: 얼굴 미검출\" 기록. 얼굴 조작 결론이 \"없음\"으로 나오지 않음."
+    },
+    "QA-OUT-4": {
+      "mode": "automated",
+      "criteria": "같은 폴더를 CLI, GUI(/api/scan), API 서버로 각각 검사 → 세 결과의 결론·근거·확률·임계값 출처가 동일."
+    },
+    "QA-OUT-5": {
+      "mode": "automated",
+      "criteria": "모델 확률이 표시된 모든 결과 → 각 확률에 보정 코퍼스 ID, 측정 조건, 95% CI가 붙어 있음. 측정 범위 밖 입력(64 px 이하)은 \"범위 밖\"으로 표시되고 확률 없음."
+    },
+    "QA-OUT-6": {
+      "mode": "automated",
+      "criteria": "텍스트 파일 50개 검사 → 모든 결론 등급이 \"참고\", 보고서에 법적 한계 문구 존재."
+    },
+    "QA-ADV-1": {
+      "mode": "automated",
+      "criteria": "그라데이션, 랜덤 노이즈, 단색, 체커보드, 블러 노이즈 각 10장 → 전부 \"사진 아님 — 생성 탐지 비적용\". 의심 판정 0."
+    },
+    "QA-ADV-2": {
+      "mode": "automated",
+      "criteria": "스크린샷 50장(카톡 대화, 웹페이지, 문서 뷰어) → 스크린샷으로 분류, 생성 탐지 미적용, 의심 판정 0."
+    },
+    "QA-ADV-3": {
+      "mode": "automated",
+      "criteria": "AI에 대해 쓴 사람 글 30건(\"언어 모델\", \"as an AI\" 포함) → 키워드는 근거 목록에 나타나되 결론은 \"참고 — 근거 부족\"."
+    },
+    "QA-SYS-1": {
+      "mode": "automated",
+      "criteria": "프로필의 sha256을 한 글자 바꾸고 검사 → 모델 로드 거부, 결론 \"판단 불가: 모델 무결성 실패\"."
+    },
+    "QA-SYS-2": {
+      "mode": "automated",
+      "criteria": "가중치 파일을 다른 파일로 바꾸고 검사 → 동일."
+    },
+    "QA-SYS-3": {
+      "mode": "automated",
+      "criteria": "필수 모델 하나를 삭제한 환경에서 doctor 실행 → 해당 모델 MISS, \"실행 가능\" 요약이 실제 검사 결과의 coverage와 일치."
+    },
+    "QA-SYS-6": {
+      "mode": "automated",
+      "criteria": "보고서 JSON의 임의 필드(결론, 근거, note, 모델 해시) 한 글자 변경 후 검증 → 모든 경우 \"변조됨\"."
+    },
+    "QA-SYS-7": {
+      "mode": "automated",
+      "criteria": "/api/scan?folder=/ 등 등록되지 않은 경로로 요청. heatmap_path를 외부 파일로 지정한 report 요청 → 모두 403, 응답에 파일 내용 0바이트."
+    },
+    "QA-SYS-9": {
+      "mode": "automated",
+      "criteria": "측정 기록 없는 프로필을 models/에 추가하고 PR → CI 실패."
+    },
+    "QA-SYS-10": {
+      "mode": "automated",
+      "criteria": "기존 633개 테스트 중 유지 대상 전부 통과. 삭제된 테스트는 삭제 이유가 커밋 메시지에 기록."
+    },
+    "QA-IN-3": {
+      "mode": "manual",
+      "title": "네트워크 차단 상태 검사",
+      "criteria": null,
+      "checklist": "docs/QA-MANUAL.md#qa-in-3",
+      "note": "명세에 통과 기준 원문이 없어 docs/QA-MANUAL.md의 체크리스트 기준을 따른다."
+    },
+    "QA-SYS-4": {
+      "mode": "manual",
+      "title": "깨끗한 Windows 11 설치",
+      "criteria": null,
+      "checklist": "docs/QA-MANUAL.md#qa-sys-4",
+      "note": "명세에 통과 기준 원문이 없어 docs/QA-MANUAL.md의 체크리스트 기준을 따른다."
+    },
+    "QA-SYS-5": {
+      "mode": "manual",
+      "title": "500개 파일 검사 중 강제 종료 후 재개",
+      "criteria": null,
+      "checklist": "docs/QA-MANUAL.md#qa-sys-5",
+      "note": "명세에 통과 기준 원문이 없어 docs/QA-MANUAL.md의 체크리스트 기준을 따른다."
+    },
+    "QA-SYS-8": {
+      "mode": "manual",
+      "title": "CPU 전용 처리 시간",
+      "criteria": null,
+      "checklist": "docs/QA-MANUAL.md#qa-sys-8",
+      "note": "명세에 통과 기준 원문이 없어 docs/QA-MANUAL.md의 체크리스트 기준을 따른다."
+    },
+    "QA-IMG-1": {
+      "mode": "phase1",
+      "title": "R-IMG-4 측정(1단계 코퍼스, G15)",
+      "criteria": null
+    },
+    "QA-IMG-2": {
+      "mode": "phase1",
+      "title": "R-IMG-3 측정(1단계 코퍼스, G16)",
+      "criteria": null
+    },
+    "QA-IMG-3": {
+      "mode": "phase1",
+      "title": "R-IMG-4 측정(1단계 코퍼스, G15)",
+      "criteria": null
+    },
+    "QA-TXT-1": {
+      "mode": "phase1",
+      "title": "R-TXT-3 텍스트 탐지 측정(1단계 코퍼스, G25)",
+      "criteria": null
+    }
+  },
+  "out_of_scope": {
+    "ids": [
+      "QA-MOD-*",
+      "QA-ADV-4",
+      "QA-ADV-5",
+      "QA-ADV-6"
+    ],
+    "mode": "phase1",
+    "note": "명세 WP-J: 0단계 범위 밖. 요구사항 대응표에는 없다."
+  },
+  "requirements": [
+    {
+      "id": "R-IN-1",
+      "gaps": [
+        "G31"
+      ],
+      "qa": [
+        "QA-IN-1",
+        "QA-SYS-7"
+      ]
+    },
+    {
+      "id": "R-IN-2",
+      "gaps": [],
+      "qa": [
+        "QA-IN-1"
+      ]
+    },
+    {
+      "id": "R-IN-3",
+      "gaps": [
+        "G32"
+      ],
+      "qa": [
+        "QA-IN-2"
+      ]
+    },
+    {
+      "id": "R-IN-4",
+      "gaps": [],
+      "qa": [
+        "QA-IN-3"
+      ]
+    },
+    {
+      "id": "R-OUT-1",
+      "gaps": [
+        "G5",
+        "G6"
+      ],
+      "qa": [
+        "QA-OUT-1"
+      ]
+    },
+    {
+      "id": "R-OUT-2",
+      "gaps": [
+        "G5"
+      ],
+      "qa": [
+        "QA-OUT-1",
+        "QA-OUT-5"
+      ]
+    },
+    {
+      "id": "R-OUT-3",
+      "gaps": [
+        "G12"
+      ],
+      "qa": [
+        "QA-OUT-3"
+      ]
+    },
+    {
+      "id": "R-OUT-4",
+      "gaps": [
+        "G1"
+      ],
+      "qa": [
+        "QA-OUT-2"
+      ]
+    },
+    {
+      "id": "R-OUT-5",
+      "gaps": [
+        "G5",
+        "G28"
+      ],
+      "qa": [
+        "QA-OUT-5"
+      ]
+    },
+    {
+      "id": "R-OUT-6",
+      "gaps": [
+        "G7",
+        "G8"
+      ],
+      "qa": [
+        "QA-OUT-4"
+      ]
+    },
+    {
+      "id": "R-IMG-1",
+      "gaps": [
+        "G14"
+      ],
+      "qa": [],
+      "phase1": "메신저 재압축 지문"
+    },
+    {
+      "id": "R-IMG-2",
+      "gaps": [
+        "G3",
+        "G13"
+      ],
+      "qa": [
+        "QA-ADV-1",
+        "QA-ADV-2"
+      ]
+    },
+    {
+      "id": "R-IMG-3",
+      "gaps": [
+        "G16"
+      ],
+      "qa": [
+        "QA-IMG-2"
+      ]
+    },
+    {
+      "id": "R-IMG-4",
+      "gaps": [
+        "G15"
+      ],
+      "qa": [
+        "QA-IMG-1",
+        "QA-IMG-3"
+      ]
+    },
+    {
+      "id": "R-IMG-5",
+      "gaps": [
+        "G17"
+      ],
+      "qa": [
+        "QA-ADV-1"
+      ]
+    },
+    {
+      "id": "R-VID-*",
+      "gaps": [
+        "G18"
+      ],
+      "qa": [],
+      "phase1": "영상 코퍼스·측정"
+    },
+    {
+      "id": "R-AUD-*",
+      "gaps": [
+        "G19",
+        "G20",
+        "G21"
+      ],
+      "qa": [],
+      "phase1": "음성 코퍼스·측정, 편집 흔적"
+    },
+    {
+      "id": "R-DOC-*",
+      "gaps": [
+        "G22",
+        "G23"
+      ],
+      "qa": [],
+      "phase1": "문서 타임라인/이력, PDF 서명"
+    },
+    {
+      "id": "R-TXT-1",
+      "gaps": [
+        "G24"
+      ],
+      "qa": [
+        "QA-OUT-6"
+      ]
+    },
+    {
+      "id": "R-TXT-2",
+      "gaps": [
+        "G4"
+      ],
+      "qa": [
+        "QA-ADV-3"
+      ]
+    },
+    {
+      "id": "R-TXT-3",
+      "gaps": [
+        "G2",
+        "G25"
+      ],
+      "qa": [
+        "QA-SYS-9",
+        "QA-TXT-1"
+      ],
+      "notes": {
+        "QA-SYS-9": "게이트"
+      }
+    },
+    {
+      "id": "R-SYS-1",
+      "gaps": [
+        "G9",
+        "G10"
+      ],
+      "qa": [
+        "QA-SYS-1",
+        "QA-SYS-2"
+      ]
+    },
+    {
+      "id": "R-SYS-2",
+      "gaps": [
+        "G29"
+      ],
+      "qa": [
+        "QA-SYS-3",
+        "QA-SYS-4"
+      ]
+    },
+    {
+      "id": "R-SYS-3",
+      "gaps": [
+        "G11",
+        "G34"
+      ],
+      "qa": [
+        "QA-IN-4",
+        "QA-IN-5",
+        "QA-SYS-5"
+      ]
+    },
+    {
+      "id": "R-SYS-4",
+      "gaps": [
+        "G30"
+      ],
+      "qa": [
+        "QA-SYS-6"
+      ]
+    },
+    {
+      "id": "R-SYS-5",
+      "gaps": [],
+      "qa": [
+        "QA-SYS-8"
+      ]
+    },
+    {
+      "id": "R-SYS-6",
+      "gaps": [],
+      "qa": [
+        "QA-SYS-4"
+      ]
+    },
+    {
+      "id": "R-QA-1",
+      "gaps": [
+        "G26",
+        "G27"
+      ],
+      "qa": [
+        "QA-SYS-9"
+      ]
+    },
+    {
+      "id": "R-QA-2",
+      "gaps": [
+        "G26"
+      ],
+      "qa": [
+        "QA-SYS-9"
+      ]
+    },
+    {
+      "id": "R-QA-3",
+      "gaps": [
+        "G28"
+      ],
+      "qa": [
+        "QA-SYS-9",
+        "QA-SYS-10"
+      ]
+    },
+    {
+      "id": "R-QA-4",
+      "gaps": [
+        "G3",
+        "G4",
+        "G13"
+      ],
+      "qa": [
+        "QA-ADV-1",
+        "QA-ADV-2",
+        "QA-ADV-3"
+      ]
+    }
+  ],
+  "gaps_without_qa": {
+    "G33": "umm-maybe 가중치 이중 프로필 + _aggregate_profile_results 덮어쓰기 버그 — QA 시나리오 없음, 회귀 테스트 tests/test_model_zoo.py의 test_gated_member_takes_no_part_in_spread_or_agreement, test_all_members_gated_is_not_available로 고정"
+  }
+}

@@ -6,6 +6,10 @@ undetermined. The detector is a fake ``onnx-audio`` profile pointing at a
 temporary "checkpoint" file; the runtime call is mocked, so no weights,
 torch or onnxruntime are needed. Audio is used for the end-to-end scans
 because it has no photo/non-photo gate in front of the model check.
+
+QA-SYS-10 (WP-J): the test inventory never drops below the recorded
+baseline, and every baseline test that is gone is documented in
+docs/TEST-DELETIONS.md with the reason in its commit message.
 """
 
 from __future__ import annotations
@@ -13,7 +17,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import shutil
 import struct
+import subprocess
 import tempfile
 import unittest
 import wave
@@ -24,6 +30,8 @@ from deepfake_lens.core import analyze_file
 from deepfake_lens.model_adapter import FAILED_CONFIDENCE, analyze_external_model
 from deepfake_lens.model_pins import MISMATCH_REASON, UNPINNED_REASON
 from deepfake_lens.result_types import ClassificationResult, CoverageEntry, CoverageStatus, Verdict
+
+from .traceability import BASELINE_PATH, DELETIONS_DOC, REPO_ROOT, documented_deletions, short_names, source_inventory
 
 RUNTIME = "deepfake_lens.model_adapter._run_onnx_audio"
 # Raw logits the fake runtime returns: softmax index 1 -> ~0.88.
@@ -102,6 +110,8 @@ class _IntegrityAssertions(unittest.TestCase):
 
 
 class QaSys1PinTamperTest(_IntegrityAssertions):
+    """QA-SYS-1: a profile pin that does not match its checkpoint is never loaded."""
+
     def test_pinned_profile_baseline_runs(self) -> None:
         """QA-SYS-1 (control): with the correct pin the fake runtime is
         dispatched and the model check is recorded as ran."""
@@ -163,9 +173,13 @@ class QaSys1PinTamperTest(_IntegrityAssertions):
 
 
 class QaSys2CheckpointSwapTest(_IntegrityAssertions):
+    """QA-SYS-2: a swapped weight file is never loaded."""
 
     def test_checkpoint_replaced_by_another_file_refuses_load(self) -> None:
-        """QA-SYS-2: 가중치 파일을 다른 파일로 바꾸고 검사 → 모델 로드 거부, 결론 "판단 불가: 모델 무결성 실패"."""
+        """QA-SYS-2: 가중치 파일을 다른 파일로 바꾸고 검사 → 동일.
+
+        "동일" = as QA-SYS-1: 모델 로드 거부, 결론 "판단 불가: 모델 무결성 실패".
+        """
         with tempfile.TemporaryDirectory() as tmp:
             fx = _Fixture(Path(tmp))
             other = Path(tmp) / "other.onnx"
@@ -244,6 +258,84 @@ class QaSys2CheckpointSwapTest(_IntegrityAssertions):
         assert analysis is not None
         self.assertEqual(analysis.confidence, FAILED_CONFIDENCE)
         self.assertTrue(analysis.detail.startswith(MISMATCH_REASON), analysis.detail)
+
+
+# Test-count floor: the inventory right before WP-C removed tests (commit
+# 35cbc8e, WP-A..E applied) — recorded in tests/qa/test_inventory_baseline.json.
+WP_BASELINE_FLOOR = 739
+PRE_PHASE0_COUNT = 633
+DELETED_SECTION = "삭제"
+RENAMED_SECTION = "이름 변경"
+
+
+class QaSys10TestInventoryTest(unittest.TestCase):
+    """QA-SYS-10: no baseline test disappears without a documented reason."""
+
+    baseline: dict[str, object]
+    baseline_names: set[str]
+    pre_phase0: set[str]
+    current: set[str]
+    documented: dict[str, str]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+        rows = cls.baseline["tests"]
+        assert isinstance(rows, list)
+        cls.baseline_names = {str(row["name"]).split("::", 1)[1] for row in rows}
+        cls.pre_phase0 = {str(row["name"]).split("::", 1)[1] for row in rows if row["pre_phase0"]}
+        cls.current = short_names(source_inventory())
+        cls.documented = documented_deletions()
+
+    def test_inventory_floor_and_documented_deletions(self) -> None:
+        """QA-SYS-10: 기존 633개 테스트 중 유지 대상 전부 통과. 삭제된 테스트는 삭제 이유가 커밋 메시지에 기록.
+
+        Here: the baseline has 633 pre-phase-0 / 739 WP-baseline tests; the
+        current count is >= 739; every baseline test still exists or is
+        listed in docs/TEST-DELETIONS.md (삭제/이름 변경); the reasons are in
+        the commit messages (sibling test). "전부 통과" is the full-suite run
+        that scripts/qa_phase0.py adds to this QA ID.
+        """
+        self.assertEqual(len(self.pre_phase0), PRE_PHASE0_COUNT)
+        self.assertEqual(len(self.baseline_names), WP_BASELINE_FLOOR)
+        self.assertGreaterEqual(len(self.current), WP_BASELINE_FLOOR, "test count dropped below the WP baseline")
+        missing = sorted(self.baseline_names - self.current)
+        undocumented = [name for name in missing if name not in self.documented]
+        self.assertEqual(undocumented, [], "baseline tests removed without an entry in docs/TEST-DELETIONS.md")
+        retained = self.pre_phase0 - set(self.documented)
+        self.assertEqual(sorted(retained - self.current), [], "a retained pre-phase-0 test is gone")
+
+    def test_deletion_document_is_accurate(self) -> None:
+        """QA-SYS-10: every documented deletion was a baseline test and is really gone; renames exist under the new name."""
+        self.assertTrue(self.documented, DELETIONS_DOC)
+        for name, section in self.documented.items():
+            with self.subTest(test=name):
+                self.assertIn(section, {DELETED_SECTION, RENAMED_SECTION})
+                self.assertIn(name, self.baseline_names, "only baseline tests can be listed")
+                self.assertNotIn(name, self.current, "a listed test still exists")
+        text = DELETIONS_DOC.read_text(encoding="utf-8")
+        renamed_rows = [line for line in text.split(f"## {RENAMED_SECTION}", 1)[1].split("## ", 1)[0].splitlines() if line.startswith("| `")]
+        for row in renamed_rows:
+            new_name = row.strip("|").split("|")[-1].strip().strip("`")
+            with self.subTest(renamed_to=new_name):
+                self.assertIn(new_name, self.current)
+
+    def test_deletion_reasons_are_in_commit_messages(self) -> None:
+        """QA-SYS-10: each deleted test's commit message names it (needs git history; skipped on a shallow clone)."""
+        git = shutil.which("git")
+        if git is None:
+            self.skipTest("git not available")
+        text = DELETIONS_DOC.read_text(encoding="utf-8")
+        deleted = [name for name, section in self.documented.items() if section == DELETED_SECTION]
+        self.assertTrue(deleted)
+        for name in deleted:
+            row = next(line for line in text.splitlines() if f"`{name}`" in line)
+            commit = row.strip("|").split("|")[1].strip().split()[0]
+            done = subprocess.run([git, "log", "-1", "--format=%B", commit], cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+            if done.returncode != 0:
+                self.skipTest(f"commit {commit} not in this clone (shallow checkout)")
+            with self.subTest(test=name, commit=commit):
+                self.assertIn(name.split(".", 1)[1], done.stdout, "the deletion is not explained in its commit message")
 
 
 if __name__ == "__main__":

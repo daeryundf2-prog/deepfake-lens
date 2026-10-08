@@ -1,5 +1,7 @@
 """QA-ADV-3 (phase 0, WP-E, G4): keywords never promote a text.
 
+Moved from tests/test_qa_adv3_keywords.py into the QA package (WP-J).
+
 통과 기준: AI에 대해 쓴 사람 글 30건("언어 모델", "as an AI" 포함) → 키워드는
 근거 목록에 나타나되 결론은 "참고 — 근거 부족".
 """
@@ -13,10 +15,14 @@ from deepfake_lens.core import AI_IDENTITY_PHRASES, analyze_file, analyze_text, 
 from deepfake_lens.result_text import TEXT_LEGAL_LIMITATION
 from deepfake_lens.result_types import EvidenceDirection, EvidenceKind, Grade, RiskBand, Verdict
 
-FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "adversarial-text" / "human-about-ai"
+FIXTURES = Path(__file__).resolve().parents[3] / "fixtures" / "adversarial-text" / "human-about-ai"
 
 
 class HumanTextsAboutAiTest(unittest.TestCase):
+    """QA-ADV-3: keywords in human texts about AI are listed, never decisive."""
+
+    paths: list[Path]
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.paths = sorted(FIXTURES.glob("human-*.txt"))
@@ -28,6 +34,11 @@ class HumanTextsAboutAiTest(unittest.TestCase):
             self.assertTrue(any(phrase in text for phrase in AI_IDENTITY_PHRASES), path.name)
 
     def test_keyword_is_listed_but_never_concludes(self) -> None:
+        """QA-ADV-3: AI에 대해 쓴 사람 글 30건("언어 모델", "as an AI" 포함) → 키워드는 근거 목록에 나타나되 결론은 "참고 — 근거 부족".
+
+        The product renders the verdict as "참고: 근거 부족 …" (G24/G4).
+        """
+        self.assertEqual(len(self.paths), 30)
         for path in self.paths:
             with self.subTest(path.name):
                 item = analyze_file(path)
