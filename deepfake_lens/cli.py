@@ -801,6 +801,9 @@ def main(argv: list[str] | None = None) -> int:
             contact=args.contact,
             center=args.center,
             coverage=weights_coverage(None),
+            # D5: a row without sha256 is hashed against the scanned folder,
+            # never the cwd (a single file / JSON input has no scan root).
+            scan_root=target if target.is_dir() else None,
         )
         # G30: one signed body backs every output (JSON, Markdown, PDF).
         signed_statement = signed_statement_body(statement, resolve_report_key(args.key_file))
@@ -973,6 +976,7 @@ def main(argv: list[str] | None = None) -> int:
             center=getattr(args, "center", "디지털포렌식 감정센터"),
             thresholds=_thresholds_json(thresholds),
             coverage=scan_coverage,
+            scan_root=args.folder,  # D5: resolve sha256-less rows here, not in the cwd
         )
         signed_stmt = signed_statement_body(stmt, resolve_report_key(getattr(args, "key_file", None)))
         if getattr(args, "evidence_statement_out", None):

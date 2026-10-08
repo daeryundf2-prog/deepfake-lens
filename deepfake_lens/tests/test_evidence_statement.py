@@ -469,6 +469,47 @@ class EvidenceStatementHashSourceTest(unittest.TestCase):
         self.assertEqual(without_root.entries[0].sha256, "")
         self.assertIn("해시 불가", without_root.entries[0].purpose_of_proof)
 
+    def _cli_statement_hashes(self, argv: list[str], out: Path) -> dict[str, str]:
+        """Run the CLI with a scanner whose rows lost ``sha256`` (an old
+        cache row / JSON) from the decoy cwd; return file_path -> sha256."""
+        import dataclasses
+        from unittest import mock
+
+        from deepfake_lens import cli
+        from deepfake_lens.analysis_api import scan_folder as real_scan_folder
+
+        def scan_without_digests(*args: object, **kwargs: object) -> tuple[object, list[ScanItem], object]:
+            summary, items, thresholds = real_scan_folder(*args, **kwargs)  # type: ignore[arg-type]
+            stripped = [dataclasses.replace(item, sha256=None) for item in items]
+            return summary, stripped, thresholds
+
+        os.chdir(self.decoy_dir)
+        with mock.patch.object(cli, "scan_folder", scan_without_digests), mock.patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(cli.main(argv), 0)
+        body = json.loads(out.read_text(encoding="utf-8"))
+        return {entry["file_path"]: entry["sha256"] for entry in body["entries"]}
+
+    def _assert_cli_hashes(self, by_path: dict[str, str]) -> None:
+        for name in ("note.txt", "photo.bin"):
+            self.assertEqual(by_path[name], self._sha(self.case / name), name)
+        self.assertNotEqual(by_path["note.txt"], self._sha(self.decoy_dir / "note.txt"))
+
+    def test_cli_scan_statement_resolves_against_scan_folder(self) -> None:
+        """D5: ``scan <folder> --evidence-statement-out`` passes the folder as scan_root."""
+        out = self.base / "scan-stmt.json"
+        by_path = self._cli_statement_hashes(
+            ["scan", str(self.case.resolve()), "--pixel", "off", "--format", "json", "--evidence-statement-out", str(out)], out
+        )
+        self._assert_cli_hashes(by_path)
+
+    def test_cli_evidence_statement_folder_resolves_against_folder(self) -> None:
+        """D5: ``evidence-statement <folder>`` passes the folder as scan_root."""
+        out = self.base / "stmt.json"
+        by_path = self._cli_statement_hashes(
+            ["evidence-statement", str(self.case.resolve()), "--format", "json", "--json-out", str(out)], out
+        )
+        self._assert_cli_hashes(by_path)
+
     def test_archive_member_without_digest_is_not_hashed(self) -> None:
         item = ScanItem("bundle.zip::note.txt", "bundle.zip::note.txt", "text", "analyzed", 1)
         statement = build_evidence_statement([item], scan_root=self.case)
