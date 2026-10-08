@@ -37,8 +37,8 @@ Every subcommand, briefly. Detail for the core workflow lives in the sections be
 - `rppg <video>`: CHROM cardiac-pulse screening from face video.
 - `prnu <target> --reference ...`: sensor-fingerprint provenance correlation.
 - `evidence <file>`: forensic evidence chain with measured integrity verification.
-- `api-serve [--token]`: REST API server (token mandatory off-localhost; contract: `docs/deepfake-lens-service.md`).
-- `batch <folder>`: parallel per-file analysis.
+- `api-serve [--token] [--allow-root DIR]`: REST API server (token mandatory off-localhost; contract: `docs/deepfake-lens-service.md`). Without `fastapi`/`uvicorn` it prints a Korean install hint and exits 2 (no traceback).
+- `batch <folder>`: parallel per-file analysis (same engines/thresholds as `scan`, via `analysis_api.analyze_path`).
 - `explain --score`: human-readable explanation of a score/signals.
 - `agent --text|--file` / `3d --text|--file` / `avatar --file`: AI-agent text, 3D-asset, and avatar heuristics.
 - `pixel-analysis <file>`: cv2-based quick pixel screen (QuickPixelAnalysis, `analysis_tier="pre-screen"` — the scan pipeline's `--pixel` ensemble is a separate tier).
@@ -49,6 +49,10 @@ Every subcommand, briefly. Detail for the core workflow lives in the sections be
 - `web`: local web GUI (localhost; Host-header guarded; contract: `docs/deepfake-lens-service.md`).
 - `vendor-weights [--verify|--fetch|--bundle-to|--install|--manifest-out]`: air-gap weight inventory, verification and bundling. `--fetch` downloads `https://` URLs only, caps each download, and records a checkpoint without a declared `pin.sha256` as `unverified` (exit 1), never `fetched`.
 - `vendor-weights pin <profile> [--revision <commit>]`: write the profile's `pin` — the sha256 of its local checkpoint, or the current Hugging Face commit of its hub model (via `huggingface_hub`, online, only on this explicit command; `--revision` sets it offline). See "Weight pins" below.
+- `compare <file_a> <file_b> [--format json|table]`: two-file comparison — same-speaker distance for an audio pair, same-author stylometry for a text/document pair (the same function as the web/API `/api/compare`).
+- `doctor [--models-dir DIR] [--format table|json] [--json-out]`: environment and model-integrity diagnostics. Every runtime profile gets three columns — **pin** (the `pin` object carries every key its runtime needs), **런타임 의존성** (the runtime's modules actually import: torch/transformers for hub classifiers, onnxruntime for `onnx`, …) and **체크포인트** (the local file exists and its sha256 matches the pin; hub runtimes are pinned by revision instead). The **실행 가능** summary counts only `supported:true` profiles whose three columns are all OK — the same set a scan of that models dir reports as `ran` in coverage (`model:<name>`, QA-SYS-3); a hub model is never OK without torch/transformers (G29). The thresholds row shows the profile's state label (`측정됨` / `잠정(미검증)` / `in-sample(참고)`). Exit code is always 0 — doctor reports, it does not gate.
+- `evidence-statement <folder|scan.json|file> [--case-no … --pdf-out … --md-out … --format table|json|markdown]`: ECFS evidence explanation statement (증거설명서) from a prior scan JSON, a folder (scanned through the same `analysis_api` path as `scan`, max 100 files) or one file.
+- `faceswap-seam <image> [--thresholds FILE] [--format table|json] [--json-out]`: face-swap boundary-seam / Poisson-feathering / sensor-noise mismatch heuristics on detected faces; thresholds default to `<models_dir>/thresholds.json` like `scan`.
 - `watermark <file> --secret|--synthid-keys --tokenizer-revision <commit>`: KGW / SynthID-Text watermark verification under a known key; the hub tokenizer must be pinned to a 40-hex commit or the check reports unavailable (`미고정 프로필`).
 
 ## Usage
@@ -127,6 +131,8 @@ Pixel-level analysis is opt-in:
 - PNG pixels are decoded with the built-in reader. JPEG/WebP pixel analysis works when Pillow is available, without making Pillow a required dependency.
 - Ivy-xDetector can be used as an external baseline by placing a sidecar next to the image, for example `image.png.ivy.json` or `image.ivy.json`, with `score`, `fake_score`, `probability`, or `label`.
 - `--model-path` can point to a JSON score profile, a sidecar profile, or an optional ONNX/TorchScript runtime profile. ONNX Runtime, PyTorch, Pillow, and NumPy remain optional local dependencies rather than mandatory install requirements.
+- Without `--model-path` the engine set is every `*-runtime.json` in the models dir (`--models-dir`, `$DEEPFAKE_LENS_MODELS_DIR`, or the packaged `models/`) — the same set the web GUI and the REST API use (G7, `deepfake_lens.analysis_api`). Profiles that are `supported:false` or unpinned are recorded in coverage as skipped/failed, never silently dropped. `--no-default-engine` runs no models.
+- Thresholds: `--thresholds FILE`, else `<models_dir>/thresholds.json` when present (stderr warns when it is provisional or `in-sample(참고)`). The JSON `thresholds` block records which profile produced the scan; GUI and API scans report the same block for the same folder.
 
 The recent-research layer is represented in the JSON report as named experts:
 

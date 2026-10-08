@@ -888,6 +888,36 @@ class ModelCacheLRUTest(unittest.TestCase):
         self.assertNotIn("b", cache)
         self.assertIn("a", cache)
 
+    def test_concurrent_get_set_keeps_bound_and_never_raises(self) -> None:
+        """G34: scan workers and web request threads share the caches."""
+        import threading
+
+        from deepfake_lens.model_adapter import _ModelLRU
+
+        cache = _ModelLRU(3)
+        errors: list[BaseException] = []
+
+        def worker(seed: int) -> None:
+            try:
+                for step in range(2000):
+                    key = (seed * 7 + step) % 11
+                    if cache.get(key) is None:
+                        cache[key] = (seed, step)
+                    if step % 97 == 0:
+                        cache.clear()
+            except BaseException as exc:  # noqa: BLE001 - surfaced by the assertion below
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(n,)) for n in range(8)]
+        # Eviction normally runs gc.collect(); stub it so the race is the test.
+        with patch("deepfake_lens.model_cache._release_cached_model"):
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        self.assertEqual(errors, [])
+        self.assertLessEqual(len(cache), 3)
+
     def test_env_configured_limit(self) -> None:
         import os
         from deepfake_lens.model_adapter import _model_cache_limit

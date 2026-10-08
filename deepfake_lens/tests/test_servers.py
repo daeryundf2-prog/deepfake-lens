@@ -47,7 +47,9 @@ class ScanPayloadValidationTest(unittest.TestCase):
     """_scan_payload must reject non-integer limits and clamp unbounded values."""
 
     def _capture_scan_kwargs(self, query: str) -> dict[str, object]:
-        from deepfake_lens import webapp, webapp_api
+        # G7: /api/scan reaches core.scan_directory only through
+        # analysis_api.scan_folder, so that is where the call is captured.
+        from deepfake_lens import analysis_api
 
         captured: dict[str, object] = {}
 
@@ -55,13 +57,9 @@ class ScanPayloadValidationTest(unittest.TestCase):
             captured.update(kwargs)
             raise RuntimeError("sentinel-stop")
 
-        original = webapp_api.scan_directory
-        webapp_api.scan_directory = fake_scan_directory
-        try:
+        with patch.object(analysis_api, "scan_directory", fake_scan_directory):
             with self.assertRaises(RuntimeError):
                 _scan_payload(query, default_folder=None)
-        finally:
-            webapp_api.scan_directory = original
         return captured
 
     def test_invalid_max_files_raises_value_error(self) -> None:
@@ -85,14 +83,10 @@ class ScanPayloadValidationTest(unittest.TestCase):
         self.assertEqual(captured["max_file_bytes"], MAX_FILE_BYTES_CEILING)
 
     def _capture_scan_with_profiles(self, query: str, profiles: list[Path]) -> dict[str, object]:
-        from deepfake_lens import webapp, webapp_api
+        from deepfake_lens import analysis_api
 
-        original_profiles = webapp_api.default_engine_profiles
-        webapp_api.default_engine_profiles = lambda root=None: profiles
-        try:
+        with patch.object(analysis_api, "default_engine_profiles", lambda root=None: profiles):
             return self._capture_scan_kwargs(query)
-        finally:
-            webapp_api.default_engine_profiles = original_profiles
 
     def test_default_engine_profiles_applied_when_model_path_absent(self) -> None:
         profiles = [Path("/tmp/profile-a.json"), Path("/tmp/profile-b.json")]
@@ -104,8 +98,29 @@ class ScanPayloadValidationTest(unittest.TestCase):
         self.assertIsNone(captured["model_path"])
 
     def test_explicit_model_path_wins_over_defaults(self) -> None:
-        captured = self._capture_scan_with_profiles("folder=.&model_path=/tmp/explicit.json", [Path("/tmp/p.json")])
-        self.assertEqual(captured["model_path"], Path("/tmp/explicit.json"))
+        # G7: model_path names a profile file inside the server's models dir.
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            models = Path(tmp).resolve()
+            (models / "explicit.json").write_text("{}", encoding="utf-8")
+            with patch.object(webapp_api, "_MODELS_DIR", models):
+                captured = self._capture_scan_with_profiles("folder=.&model_path=explicit.json", [Path("/tmp/p.json")])
+        self.assertEqual(captured["model_path"], models / "explicit.json")
+
+    def test_model_and_fusion_paths_outside_models_dir_rejected(self) -> None:
+        """G7: a request can never point the server at another file (400)."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            models = Path(tmp).resolve() / "models"
+            models.mkdir()
+            (Path(tmp) / "outside.json").write_text("{}", encoding="utf-8")
+            with patch.object(webapp_api, "_MODELS_DIR", models):
+                for value in ("/etc/passwd", "../outside.json", "sub/x.json", "..", "C:\\x.json", "missing.json"):
+                    for field in ("model_path", "fusion_profile"):
+                        with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                            _scan_payload(f"folder=.&{field}=" + __import__("urllib.parse").parse.quote(value), default_folder=None)
 
 
 class AnalyzeUploadPayloadTest(unittest.TestCase):
@@ -144,13 +159,12 @@ class AnalyzeUploadPayloadTest(unittest.TestCase):
                                                         verdict="", signals=[], limitations=[],
                                                         source_guess=SourceGuess.unknown(""), next_checks=[]))
 
-        original = webapp_api.analyze_file
-        webapp_api.analyze_file = fake_analyze
-        try:
+        # G7: uploads are analyzed through analysis_api.analyze_path.
+        from deepfake_lens import analysis_api
+
+        with patch.object(analysis_api, "analyze_file", fake_analyze):
             content_type, body = self._multipart(("a.txt", b"abc"), ("b.txt", b"def"))
             result = webapp_api._analyze_upload_payload(content_type, body)
-        finally:
-            webapp_api.analyze_file = original
 
         self.assertEqual(result["summary"]["total"], 2)
         self.assertEqual(result["summary"]["analyzed"], 2)
@@ -185,12 +199,10 @@ class CheckPayloadTest(unittest.TestCase):
     def test_text_check_runs_all_text_layers(self) -> None:
         from deepfake_lens import webapp, webapp_api
 
-        original = webapp_api.analyze_file
-        webapp_api.analyze_file = self._fake_analyze
-        try:
+        from deepfake_lens import analysis_api
+
+        with patch.object(analysis_api, "analyze_file", self._fake_analyze):
             result = webapp_api._check_text_payload("인공지능 기술은 빠르게 발전하고 있습니다. " * 5)
-        finally:
-            webapp_api.analyze_file = original
 
         self.assertEqual(result["mode"], "text")
         self.assertIn("item", result)
@@ -205,13 +217,11 @@ class CheckPayloadTest(unittest.TestCase):
     def test_file_check_runs_scan_and_forensic(self) -> None:
         from deepfake_lens import webapp, webapp_api
 
-        original = webapp_api.analyze_file
-        webapp_api.analyze_file = self._fake_analyze
-        try:
+        from deepfake_lens import analysis_api
+
+        with patch.object(analysis_api, "analyze_file", self._fake_analyze):
             content_type, body = self._multipart("note.txt", b"hello world, this is a test document")
             result = webapp_api._check_file_payload(content_type, body)
-        finally:
-            webapp_api.analyze_file = original
 
         self.assertEqual(result["mode"], "file")
         self.assertEqual(result["item"]["name"], "note.txt")
@@ -889,3 +899,87 @@ class SummaryParityTest(unittest.TestCase):
         self.assertEqual(web["analyzed"], core.analyzed)
         self.assertEqual(web["medium"], core.medium)
         self.assertEqual(web["unsupported_or_failed"], core.unsupported_or_failed)
+
+
+class ApiServeMissingDependenciesTest(unittest.TestCase):
+    """G29: `api-serve` without fastapi/uvicorn exits 2 with a Korean hint, no traceback."""
+
+    def test_api_serve_exits_2_with_install_hint(self) -> None:
+        import contextlib
+        import io
+
+        from deepfake_lens import cli
+
+        err = io.StringIO()
+        with patch.object(api_server, "missing_server_dependencies", return_value=["fastapi", "uvicorn"]), \
+                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as ctx:
+            cli.main(["api-serve", "--port", "0"])
+        self.assertEqual(ctx.exception.code, 2)
+        message = err.getvalue()
+        self.assertIn("pip install fastapi uvicorn", message)
+        self.assertIn("설치", message)
+        self.assertNotIn("Traceback", message)
+
+    def test_missing_dependencies_reflect_environment(self) -> None:
+        expected = [name for name in api_server.SERVER_DEPENDENCIES if importlib.util.find_spec(name) is None]
+        self.assertEqual(api_server.missing_server_dependencies(), expected)
+
+
+@unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed")
+class ApiServerHardeningTest(unittest.TestCase):
+    """G8/G34 on the FastAPI server: preview/heatmap tuples, nosniff, client
+    header on scan GETs, job cap (429), request paths confined (400)."""
+
+    _LOCAL = {"host": "localhost"}
+
+    def setUp(self) -> None:
+        import tempfile
+
+        from fastapi.testclient import TestClient
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        roots = patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
+        roots.start()
+        self.addCleanup(roots.stop)
+        webapp_api.configure_read_roots(self.root)
+        self.client = TestClient(api_server.create_app(default_folder=self.root))
+
+    def _gui(self) -> dict[str, str]:
+        return {**self._LOCAL, api_server.CLIENT_HEADER: "gui"}
+
+    def test_scan_get_requires_client_header(self) -> None:
+        for path in ("/api/scan", "/api/scan-cancel?job=x", "/api/scan-status?job=x"):
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path, headers=self._LOCAL).status_code, 401)
+        ok = self.client.get("/api/scan", params={"folder": str(self.root), "no_default_engine": "true"}, headers=self._gui())
+        self.assertEqual(ok.status_code, 200)
+
+    def test_preview_unpacks_status_data_message_mime(self) -> None:
+        png = self.root / "a.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+        res = self.client.get("/api/preview", params={"path": str(png)}, headers=self._gui())
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.headers["content-type"], "image/png")
+        self.assertEqual(res.headers["x-content-type-options"], "nosniff")
+        self.assertEqual(res.content, png.read_bytes())
+        denied = self.client.get("/api/preview", params={"path": "/etc/hostname"}, headers=self._gui())
+        self.assertEqual(denied.status_code, 403)
+        self.assertTrue(denied.headers["content-type"].startswith("text/plain"))
+        self.assertEqual(denied.headers["x-content-type-options"], "nosniff")
+
+    def test_heatmap_media_type_is_png_or_text(self) -> None:
+        denied = self.client.get("/api/heatmap", params={"path": "/etc/x.png"}, headers=self._gui())
+        self.assertEqual(denied.status_code, 403)
+        self.assertTrue(denied.headers["content-type"].startswith("text/plain"))
+        self.assertEqual(denied.headers["x-content-type-options"], "nosniff")
+
+    def test_job_registry_cap_returns_429(self) -> None:
+        with patch.object(api_server, "MAX_JOBS", 0):
+            res = self.client.post("/api/check/stream", params={"text": "테스트 문장입니다. " * 4}, headers=self._gui())
+        self.assertEqual(res.status_code, 429)
+
+    def test_model_path_outside_models_dir_is_400(self) -> None:
+        res = self.client.get("/api/scan", params={"folder": str(self.root), "model_path": "/etc/passwd"}, headers=self._gui())
+        self.assertEqual(res.status_code, 400)

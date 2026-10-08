@@ -8,7 +8,9 @@ from pathlib import Path
 
 from .benchmark import run_benchmark, write_benchmark, write_benchmark_markdown
 from .collection import write_collection_plan
-from .core import DEFAULT_MAX_FILES, RiskBand, ScanItem, _thresholds_json, scan_directory, scan_to_json, scan_to_json_text, summarize
+from .core import DEFAULT_MAX_FILES, RiskBand, ScanItem, _thresholds_json, summarize
+from .analysis_api import AnalysisOptions, analyze_path, load_thresholds, scan_folder, thresholds_warning_printer
+from .analysis_api import scan_payload as analysis_scan_payload
 from .calibration import MIN_CALIBRATION_SAMPLES, load_threshold_profile
 from .cli_parser import build_parser
 from .cli_render import (
@@ -681,9 +683,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "batch":
         processor = BatchProcessor(max_workers=args.workers)
-        files = [path for path in args.folder.glob("*") if path.is_file()]
-        from .core import analyze_file
-        job = processor.process_batch(files, lambda f: analyze_file(f).to_json())
+        files = sorted((path for path in args.folder.glob("*") if path.is_file()), key=lambda p: str(p))
+        batch_options = AnalysisOptions.from_cli_args(args)
+        batch_thresholds = load_thresholds(batch_options, warn=thresholds_warning_printer(sys.stderr))
+        job = processor.process_batch(files, lambda f: analyze_path(f, batch_options, thresholds=batch_thresholds).to_json())
         if args.output:
             from .batch import save_batch_results
             save_batch_results(job, args.output)
@@ -839,7 +842,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "doctor":
         from .doctor import format_report, run_diagnostics
 
-        report = run_diagnostics()
+        report = run_diagnostics(getattr(args, "models_dir", None))
         if args.json_out:
             _write_json_out(args.json_out, json.dumps(report.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
@@ -883,11 +886,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"error: cannot parse scan JSON: {exc}", file=sys.stderr)
                 return 2
         elif target.is_dir():
-            _, items = scan_directory(target, max_files=100)
+            _, items, _ = scan_folder(target, AnalysisOptions(max_files=100), warn=thresholds_warning_printer(sys.stderr))
         elif target.is_file():
-            from .core import analyze_file
-            item = analyze_file(target)
-            items = [item]
+            items = [analyze_path(target, AnalysisOptions())]
         else:
             print(f"error: target does not exist: {target}", file=sys.stderr)
             return 2
@@ -1013,58 +1014,33 @@ def main(argv: list[str] | None = None) -> int:
         cmd_parsers["scan"].error("--heatmaps requires --pixel deep")
     if args.model_path and not args.model_path.exists():
         cmd_parsers["scan"].error("--model-path does not exist")
-    # Default engine profiles cover both modalities: the adapter filters by
-    # modality, so images run the image profiles and audio files run the
-    # audio ones. An explicit --model-path replaces both defaults.
-    if args.model_path:
-        model_path: Path | list[Path] | None = args.model_path
-    elif args.no_default_engine:
-        model_path = None
-    else:
-        model_path = [path for path in (default_model_path(), default_text_model_path()) if path is not None] + default_audio_model_paths() or None
-    if model_path and args.model_path is None:
-        print(f"default engine profiles: {model_path}", file=sys.stderr)
-    thresholds = _load_thresholds_arg(args)
+    # G7: CLI, GUI and API all go through analysis_api. The default engine
+    # set is every runtime profile in the models dir (--models-dir or the
+    # packaged/$DEEPFAKE_LENS_MODELS_DIR one) — the adapter filters by
+    # modality, and `supported`/`pin` decide which members actually run.
+    # An explicit --model-path replaces the defaults.
+    options = AnalysisOptions.from_cli_args(args)
+    engine_profiles = options.engine_profiles()
+    if engine_profiles and args.model_path is None:
+        names = [p.name for p in engine_profiles] if isinstance(engine_profiles, list) else [str(engine_profiles)]
+        print(f"default engine profiles ({options.resolved_models_dir()}): {names}", file=sys.stderr)
 
     try:
         if args.progress:
             print(f"Analyzing {args.folder} with workers={args.workers}, pixel={args.pixel}...", file=sys.stderr)
-        summary, items = scan_directory(
-            args.folder,
-            recursive=args.recursive,
-            max_files=args.max_files,
-            text_bytes=args.text_bytes,
-            metadata_bytes=args.metadata_bytes,
-            pixel_mode=args.pixel,
-            pixel_max_side=args.pixel_max_side,
-            heatmaps=args.heatmaps,
-            heatmap_dir=args.heatmap_dir,
-            model_path=model_path,
-            cache_path=args.cache,
-            workers=args.workers,
-            max_file_bytes=args.max_file_bytes,
-            allow_symlinks=args.allow_symlinks,
-            dedupe=args.dedupe,
-            hash_db_path=args.hash_db,
-            deep_signals=args.deep_signals,
-            thresholds=thresholds,
-        )
-        fusion_profile = load_fusion_profile(args.fusion_profile)
-        if fusion_profile:
-            items = apply_fusion_to_items(items, fusion_profile)
-            summary = summarize(items, capped=summary.capped, cached=summary.cached)
+        summary, items, thresholds = scan_folder(args.folder, options, warn=thresholds_warning_printer(sys.stderr))
     except OSError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     if args.progress:
         print(f"Done: analyzed={summary.analyzed}, cached={summary.cached}, total={summary.total}", file=sys.stderr)
 
-    scan_coverage = weights_coverage(getattr(args, "models_dir", None))
+    scan_coverage = weights_coverage(options.resolved_models_dir())
     if args.json_out:
-        scan_payload = _maybe_sign(scan_to_json(summary, items, thresholds=thresholds, models_dir=getattr(args, 'models_dir', None)), sign=args.sign, key_file=args.key_file)
+        scan_payload = _maybe_sign(analysis_scan_payload(summary, items, thresholds, options), sign=args.sign, key_file=args.key_file)
         _write_json_out(args.json_out, json.dumps(scan_payload, ensure_ascii=False, indent=2) + "\n")
     if args.csv_out:
-        _write_csv(args.csv_out, items, coverage=weights_coverage(getattr(args, "models_dir", None)), thresholds=thresholds)
+        _write_csv(args.csv_out, items, coverage=scan_coverage, thresholds=thresholds)
     if args.html_out:
         write_html_report(args.html_out, summary, items, redact_paths=args.redact_paths, thresholds=thresholds)
     if args.pdf_out:
@@ -1103,7 +1079,7 @@ def main(argv: list[str] | None = None) -> int:
             write_evidence_statement_pdf(Path(args.evidence_statement_pdf_out), stmt)
 
     if args.format == "json":
-        print(scan_to_json_text(summary, items, thresholds=thresholds, models_dir=getattr(args, 'models_dir', None)))
+        print(json.dumps(analysis_scan_payload(summary, items, thresholds, options), ensure_ascii=False, indent=2))
     else:
         _print_table(summary, items, include_low=args.include_low, coverage=scan_coverage, thresholds=thresholds)
         if not args.recursive and summary.total == 0 and _has_subdirectories(args.folder):

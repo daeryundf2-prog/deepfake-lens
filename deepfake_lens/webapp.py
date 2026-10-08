@@ -18,9 +18,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs, urlparse
-from .core import BatchScanSummary, DEFAULT_METADATA_BYTES, _scan_item_from_json, analyze_file, scan_directory, scan_to_json, summarize
-from .datasets import is_negative_label, is_positive_label
-from .fusion import apply_fusion_to_items, load_fusion_profile
 from .webapp_api import (
     MAX_UPLOAD_BYTES,
     MAX_UPLOAD_FILES,
@@ -201,16 +198,19 @@ def build_server(
         def _route_get(self, parsed: Any) -> None:
             # API endpoints
             if parsed.path == "/api/scan":
+                # Invalid options (analysis_api.InvalidOption) and a full job
+                # registry are JSON 400s — send_error's status line is
+                # latin-1 only and the message may echo a non-ASCII name.
                 if parse_qs(parsed.query).get("async", ["false"])[0].lower() in {"1", "true", "yes"}:
                     try:
                         self._send_json(_scan_job_start(parsed.query, default_folder=default_folder))
                     except ValueError as exc:
-                        self.send_error(400, str(exc))
+                        self._send_json({"error": str(exc)}, status=400)
                     return
                 try:
                     self._send_json(_scan_payload(parsed.query, default_folder=default_folder))
                 except ValueError as exc:
-                    self.send_error(400, str(exc))
+                    self._send_json({"error": str(exc)}, status=400)
                 return
             if parsed.path == "/api/scan-status":
                 self._send_json(_scan_status_payload(parsed.query))
