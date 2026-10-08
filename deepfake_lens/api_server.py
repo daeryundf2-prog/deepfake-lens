@@ -5,6 +5,10 @@ Provides HTTP API endpoints for external system integration.
 The API reads local files on request, so it must never be exposed without a
 token: ``run_server(..., token=...)`` requires an ``X-API-Token`` header on
 every /api/ route, and the CLI refuses non-localhost binds without one.
+
+Every analysis goes through :mod:`deepfake_lens.analysis_api` (G7) — the same
+options, engine set and threshold profile as the CLI and the built-in web
+GUI.
 """
 
 from __future__ import annotations
@@ -37,6 +41,17 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 # policy below only allows loopback origins — so drive-by requests from
 # unrelated web pages cannot reach the write endpoints on a loopback bind.
 CLIENT_HEADER = "X-Deepfake-Lens-Client"
+# GET endpoints that start/cancel work or read files the caller names also
+# need the header (G8, review M1/M2): a cross-origin <img src> or link can
+# issue a "simple" GET, which must not be able to start or cancel a scan.
+CLIENT_HEADER_GET_PATHS = frozenset({
+    "/api/scan",
+    "/api/scan-cancel",
+    "/api/scan-status",
+    "/api/analyze-file",
+    "/api/heatmap",
+    "/api/preview",
+})
 
 
 @dataclass(frozen=True)
@@ -61,14 +76,19 @@ def host_name(header_value: str) -> str:
 
 
 def _default_profiles() -> Path | None:
-    """Bundled profile directory — every committed runtime profile.
+    """The models directory the API analyzes with (kept for compatibility).
 
-    ``analyze_external_model`` accepts a directory of ``*.json`` profiles and
-    filters by modality, so passing the models dir applies every engine that
-    fits the input and degrades gracefully on missing checkpoints.
+    The engine set itself is resolved by analysis_api from this directory.
     """
     models_dir = default_models_dir()
     return models_dir if models_dir.is_dir() else None
+
+
+def _api_options() -> Any:
+    """AnalysisOptions for an API request: the server's models dir, defaults."""
+    from .webapp_api import _web_options
+
+    return _web_options()
 
 
 def create_app(
@@ -84,6 +104,8 @@ def create_app(
         from fastapi.responses import JSONResponse
     except ImportError:
         raise ImportError("FastAPI is required. Install with: pip install fastapi uvicorn")
+
+    from .analysis_api import analyze_path, load_thresholds
 
     app = FastAPI(title="Deepfake Lens API", version="0.1.0")
 
@@ -103,7 +125,9 @@ def create_app(
                     return JSONResponse({"status": "error", "message": "unauthorized"}, status_code=401)
             elif host_name(request.headers.get("host", "")) not in allowed_hosts:
                 return JSONResponse({"status": "error", "message": "host not allowed"}, status_code=403)
-            elif request.method != "GET" and not (request.headers.get(CLIENT_HEADER) or "").strip():
+            elif (
+                request.method != "GET" or request.url.path in CLIENT_HEADER_GET_PATHS
+            ) and not (request.headers.get(CLIENT_HEADER) or "").strip():
                 return JSONResponse(
                     {"status": "error", "message": f"missing {CLIENT_HEADER} header"},
                     status_code=401,
@@ -163,9 +187,8 @@ def create_app(
     
     @app.post("/api/analyze/image")
     async def analyze_image(file_path: str):
-        from .core import analyze_file
         try:
-            result = analyze_file(file_path, pixel_mode="off")
+            result = analyze_path(file_path, _api_options())
             return {"status": "success", "data": result.to_json()}
         except Exception as exc:
             logger.exception("request failed")
@@ -254,7 +277,8 @@ def create_app(
         """
         import tempfile
 
-        from .core import analyze_file
+        options = _api_options()
+        thresholds = load_thresholds(options)
         try:
             if text and text.strip():
                 trimmed = text.strip()
@@ -267,7 +291,7 @@ def create_app(
                     with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as tmp:
                         tmp.write(trimmed)
                         tmp_name = tmp.name
-                    item = analyze_file(tmp_name, model_path=_default_profiles())
+                    item = analyze_path(tmp_name, options, thresholds=thresholds)
                 finally:
                     if tmp_name:
                         Path(tmp_name).unlink(missing_ok=True)
@@ -289,8 +313,8 @@ def create_app(
                 return {"status": "success", "data": data}
             if file_path:
                 path = Path(file_path)
-                item = analyze_file(path, model_path=_default_profiles())
-                data: dict[str, Any] = {"mode": "file", "item": item.to_json()}
+                item = analyze_path(path, options, thresholds=thresholds)
+                data = {"mode": "file", "item": item.to_json()}
                 try:
                     from .c2pa import analyze_metadata_forensic
                     data["forensic"] = analyze_metadata_forensic(path).to_json()
@@ -345,8 +369,8 @@ def create_app(
             """Run the check stages, aborting between stages if cancelled."""
             import tempfile
 
-            from .core import analyze_file
-
+            options = _api_options()
+            thresholds = load_thresholds(options)
             stages: list[tuple[str, Any]] = []
             yield ("job", {"job_id": job_id})
             if cancel.is_set():
@@ -364,7 +388,7 @@ def create_app(
                     with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as tmp:
                         tmp.write(trimmed)
                         tmp_name = tmp.name
-                    item = analyze_file(tmp_name, model_path=_default_profiles())
+                    item = analyze_path(tmp_name, options, thresholds=thresholds)
                 finally:
                     if tmp_name:
                         Path(tmp_name).unlink(missing_ok=True)
@@ -398,7 +422,7 @@ def create_app(
                     return
                 path = Path(file_path)
                 yield ("progress", {"stage": "core", "index": 1, "total": 2})
-                item = analyze_file(path, model_path=_default_profiles())
+                item = analyze_path(path, options, thresholds=thresholds)
                 if cancel.is_set():
                     yield ("cancelled", {"job_id": job_id})
                     return
@@ -497,7 +521,7 @@ def create_app(
         _JOBS[job_id] = {"cancel": cancel, "done": False}
 
         def run_scan():
-            from .core import _iter_files, analyze_file
+            from .core import _iter_files
 
             yield ("job", {"job_id": job_id})
             root = Path(directory) if directory else None
@@ -515,6 +539,8 @@ def create_app(
             except Exception as exc:  # noqa: BLE001
                 yield ("error", {"detail": f"listing failed: {exc}"})
                 return
+            options = _api_options()
+            thresholds = load_thresholds(options)
             total = len(paths)
             yield ("progress", {"stage": "enumerate", "total": total, "capped": capped})
             items: list[dict[str, Any]] = []
@@ -526,7 +552,7 @@ def create_app(
                     yield ("cancelled", {"job_id": job_id, "processed": index - 1, "total": total})
                     return
                 try:
-                    item = analyze_file(path, model_path=_default_profiles())
+                    item = analyze_path(path, options, root=root, thresholds=thresholds)
                     data = item.to_json()
                     result = data.get("result") or {}
                     band = str(result.get("band") or "unknown")
@@ -616,6 +642,9 @@ def create_app(
             raise HTTPException(status_code=500, detail=str(exc)) from exc
     
     # --- GUI & Webapp compatibility endpoints ---
+    # Same payload functions as the stdlib web server (webapp_api), which in
+    # turn call analysis_api — so /api/scan here, in the web GUI and in the
+    # CLI return the same verdicts and threshold provenance (G7).
     @app.get("/api/scan")
     async def api_scan(request: Request):
         from urllib.parse import parse_qs
@@ -649,19 +678,28 @@ def create_app(
     @app.get("/api/heatmap")
     async def api_heatmap(request: Request):
         from fastapi import Response
-        from .webapp import _heatmap_payload
-        status, data, content_type = _heatmap_payload(str(request.url.query))
-        return Response(content=data, status_code=status, media_type=content_type)
+        from .webapp_api import _heatmap_payload
+        # G8: the payload is (status, body, error message); the media type
+        # is fixed — heatmaps are PNG, errors are plain text.
+        status, data, message = _heatmap_payload(str(request.url.query))
+        headers = {"X-Content-Type-Options": "nosniff"}
+        if message:
+            headers["X-Deepfake-Lens-Error"] = message
+        media_type = "image/png" if status == 200 else "text/plain; charset=utf-8"
+        return Response(content=data, status_code=status, media_type=media_type, headers=headers)
 
     @app.get("/api/preview")
     async def api_preview(request: Request):
         from fastapi import Response
-        from .webapp import _preview_payload
-        status, data, content_type, content_range = _preview_payload(str(request.url.query))
-        headers = {}
-        if content_range:
-            headers["Content-Range"] = content_range
-        return Response(content=data, status_code=status, media_type=content_type, headers=headers)
+        from .webapp_api import _preview_payload
+        # G8: (status, data, message, mime) — the 3rd element is the error
+        # message, not a content type; nosniff keeps previews media-only.
+        status, data, message, mime = _preview_payload(str(request.url.query))
+        headers = {"X-Content-Type-Options": "nosniff"}
+        if message:
+            headers["X-Deepfake-Lens-Error"] = message
+        media_type = mime if status == 200 and mime else "text/plain; charset=utf-8"
+        return Response(content=data, status_code=status, media_type=media_type, headers=headers)
 
     @app.get("/api/analyze-file")
     async def api_analyze_file(request: Request):

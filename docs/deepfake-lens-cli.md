@@ -38,7 +38,7 @@ Every subcommand, briefly. Detail for the core workflow lives in the sections be
 - `prnu <target> --reference ...`: sensor-fingerprint provenance correlation.
 - `evidence <file>`: forensic evidence chain with measured integrity verification.
 - `api-serve [--token]`: REST API server (token mandatory off-localhost; contract: `docs/deepfake-lens-service.md`).
-- `batch <folder>`: parallel per-file analysis.
+- `batch <folder>`: parallel per-file analysis (same engines/thresholds as `scan`, via `analysis_api.analyze_path`).
 - `explain --score`: human-readable explanation of a score/signals.
 - `agent --text|--file` / `3d --text|--file` / `avatar --file`: AI-agent text, 3D-asset, and avatar heuristics.
 - `pixel-analysis <file>`: cv2-based quick pixel screen (QuickPixelAnalysis, `analysis_tier="pre-screen"` — the scan pipeline's `--pixel` ensemble is a separate tier).
@@ -127,6 +127,8 @@ Pixel-level analysis is opt-in:
 - PNG pixels are decoded with the built-in reader. JPEG/WebP pixel analysis works when Pillow is available, without making Pillow a required dependency.
 - Ivy-xDetector can be used as an external baseline by placing a sidecar next to the image, for example `image.png.ivy.json` or `image.ivy.json`, with `score`, `fake_score`, `probability`, or `label`.
 - `--model-path` can point to a JSON score profile, a sidecar profile, or an optional ONNX/TorchScript runtime profile. ONNX Runtime, PyTorch, Pillow, and NumPy remain optional local dependencies rather than mandatory install requirements.
+- Without `--model-path` the engine set is every `*-runtime.json` in the models dir (`--models-dir`, `$DEEPFAKE_LENS_MODELS_DIR`, or the packaged `models/`) — the same set the web GUI and the REST API use (G7, `deepfake_lens.analysis_api`). Profiles that are `supported:false` or unpinned are recorded in coverage as skipped/failed, never silently dropped. `--no-default-engine` runs no models.
+- Thresholds: `--thresholds FILE`, else `<models_dir>/thresholds.json` when present (stderr warns when it is provisional or `in-sample(참고)`). The JSON `thresholds` block records which profile produced the scan; GUI and API scans report the same block for the same folder.
 
 The recent-research layer is represented in the JSON report as named experts:
 

@@ -178,6 +178,8 @@ files = [
     "deepfake_lens/rule_classifier.py",
     "deepfake_lens/security.py",
     "deepfake_lens/webapp_api.py",
+    "deepfake_lens/analysis_api.py",
+    "deepfake_lens/tests/qa/test_qa_out.py",
     "deepfake_lens/reports.py",
     "deepfake_lens/tests/__init__.py",
     "deepfake_lens/tests/test_archives.py",

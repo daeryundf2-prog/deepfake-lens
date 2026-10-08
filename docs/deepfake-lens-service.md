@@ -9,6 +9,32 @@ files on request, so exposure beyond loopback is an explicit, guarded choice.
 | REST API | `deepfake-lens api-serve` (`deepfake_lens.api_server`) | FastAPI + uvicorn (optional deps) | `X-API-Token` header when `--token` is set; loopback Host allowlist otherwise |
 | Web GUI | `deepfake-lens web` (`deepfake_lens.webapp`) | stdlib `http.server` | loopback bind + Host-header allowlist; `--allow-lan` to override |
 
+## One analysis entry point (G7)
+
+The CLI (`scan`, `batch`, `evidence-statement`), the web GUI (`/api/scan`,
+uploads, `/api/check`) and the REST API (`/api/analyze/image`, `/api/check`,
+the stream endpoints, `/api/scan`) all analyze through
+`deepfake_lens.analysis_api`: an `AnalysisOptions` object
+(`from_cli_args` / `from_query`) and the two functions `analyze_path` and
+`scan_folder`. Consequences:
+
+- **Same engine set.** The default model set is every `*-runtime.json` in
+  the models dir (`--models-dir` / `web --models-dir` /
+  `$DEEPFAKE_LENS_MODELS_DIR` / the packaged `models/`); `supported` (the
+  measurement gate) and `pin` decide which members actually run, and each
+  member's outcome is recorded in coverage as `model:<name>`.
+- **Same thresholds.** `analysis_api.load_thresholds` resolves the threshold
+  profile once per request — an explicit `--thresholds` file (CLI only),
+  else `<models_dir>/thresholds.json`. Every scan-shaped response (scan,
+  upload, check) reports the profile it used under `thresholds`
+  (`source: "threshold_profile"`, `measured`, `in_sample`, `label`), so a
+  GUI scan and a CLI scan of the same folder carry the same verdicts and the
+  same threshold provenance (QA-OUT-4).
+- **No request-chosen files.** `model_path` and `fusion_profile` query
+  parameters accept only a bare file name that exists inside the server's
+  models dir; a path (`/`, `\`, `..`, drive or absolute) or a missing name
+  is **400** `{"error": "..."}` before any file is read.
+
 ## Bind and auth rules (enforced)
 
 - Both servers default to `127.0.0.1` (`api-serve --host`, `web --host`).
@@ -34,8 +60,11 @@ files on request, so exposure beyond loopback is an explicit, guarded choice.
   Browsers cannot attach custom headers to cross-origin "simple" requests,
   so this forces a preflight the server never answers — unrelated web pages
   cannot trigger scans or write to the feedback log even on loopback.
-  `api-serve` applies the same rule to non-GET `/api/*` requests (its GETs
-  are side-effect-free). Local tools/curl must send the header explicitly.
+  `api-serve` applies the same rule to every non-GET `/api/*` request and to
+  the GETs that start, poll or cancel work or read caller-named files:
+  `/api/scan`, `/api/scan-status`, `/api/scan-cancel`, `/api/analyze-file`,
+  `/api/heatmap`, `/api/preview` (G8). Local tools/curl must send the header
+  explicitly.
 - There is no rate limiting, TLS, or per-user isolation — put a reverse proxy
   in front if you need those, and keep `--token` mandatory outside loopback.
 
@@ -62,6 +91,7 @@ JSON envelope `{"status": "success", "data": {...}}` or an HTTP error with
 | POST | `/api/scan/stream` | `directory`, `recursive` (bool), `max_files` (≤5000, default 200) | SSE batch scan of a server-local directory: `job` → `progress` per file (`{stage, index, total, path, band}`) → `result` (`{mode: "scan", total, counts, items}`), or `error`/`cancelled` |
 | POST | `/api/jobs/{job_id}/cancel` | — | Sets the job's cancellation flag; takes effect at the next stage boundary (`{"status": "success", "cancelled": true}`, 404 for unknown/finished jobs) |
 | GET | `/api/jobs/{job_id}` | — | `{"job_id", "done", "cancelled"}` for in-flight stream jobs; 404 once the job is reaped |
+| GET | `/api/scan`, `/api/scan-status`, `/api/scan-cancel`, `/api/analyze-file`, `/api/heatmap`, `/api/preview` | as in the web GUI table below | Same payload functions as `web` (identical JSON); `/api/heatmap` is `image/png` (errors `text/plain`), `/api/preview` uses the file's media type; both send `X-Content-Type-Options: nosniff` |
 
 `file_path` is a path **on the server's filesystem** — there is no upload
 endpoint. Analysis failures surface as HTTP 500 with the exception text.
@@ -86,7 +116,7 @@ JSON API under `/api/` (GET plus `POST /api/feedback`, `/api/report`,
 
 | Path | Params | Response |
 |---|---|---|
-| `/api/scan` | `folder`, `pixel` (`off`/`fast`/`deep`), `recursive`, `max_files`, `max_file_bytes`, `dedupe`, `heatmaps`, `model_path`, `fusion_profile`, `async` | `scan_to_json` payload (`{"summary", "items"}`) or `{"error": "..."}`; with `async=1` returns `{"job_id", "status": "running"}`. **403** `{"error": "허용되지 않은 경로"}` when `folder` is outside the read roots (see below) |
+| `/api/scan` | `folder`, `pixel` (`off`/`fast`/`deep`), `recursive`, `max_files`, `max_file_bytes`, `dedupe`, `heatmaps`, `deep_signals`, `no_default_engine`, `model_path` / `fusion_profile` (bare file name in the models dir), `async` | the same `scan_to_json` payload the CLI prints (`{"schema_version", "summary", "coverage", "thresholds", "items"}`) or `{"error": "..."}`; with `async=1` returns `{"job_id", "status": "running"}`. **400** `{"error": ...}` for an invalid option (non-integer limit, unknown pixel mode, `model_path`/`fusion_profile` not a file name inside the models dir). **403** `{"error": "허용되지 않은 경로"}` when `folder` is outside the read roots (see below) |
 | `/api/scan-status` | `job` | `{"job_id", "status": "running"\|"done"\|"error"}` plus `result` once finished; jobs live in memory only and expire after 15 min (max 32 concurrent) |
 | `/api/scan-cancel` | `job` | Sets the job's cancel flag; the scan stops between items and returns partial results as `done`. `{"cancelled": true}` while running, `false` once finished |
 | `/api/analyze-file` | `file` | `{"file", "classification", "forensic", "pixel_analysis"}` or `{"error"}` (+`detail` for unexpected failures). **403** `{"error": "허용되지 않은 경로"}` when `file` is outside the read roots |

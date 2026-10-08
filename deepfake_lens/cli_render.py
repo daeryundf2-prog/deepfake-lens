@@ -12,7 +12,7 @@ import csv
 import sys
 from pathlib import Path
 
-from .calibration import IN_SAMPLE_LABEL, MIN_CALIBRATION_SAMPLES, load_threshold_profile
+from .calibration import IN_SAMPLE_LABEL
 from .result_text import (
     TEXT_LEGAL_LIMITATION,
     coverage_counts_text,
@@ -53,34 +53,14 @@ def _file_text(path: Path) -> str | None:
 
 
 def _load_thresholds_arg(args: argparse.Namespace):
-    """Resolve --thresholds to a ThresholdProfile; warn when it cannot load."""
-    path = getattr(args, "thresholds", None)
-    if path is None:
-        # Auto-discovery: a provisioned models dir (bundle install or
-        # DEEPFAKE_LENS_MODELS_DIR) carrying thresholds.json applies it —
-        # an admin should not have to pass --thresholds on every scan.
-        from .vendor_weights import default_models_dir
-        auto = default_models_dir() / "thresholds.json"
-        if auto.is_file():
-            path = auto
-        else:
-            return None
-    profile = load_threshold_profile(path)
-    if profile is None:
-        print(f"warning: threshold profile unreadable or wrong version: {path}", file=sys.stderr)
-    elif profile.provisional:
-        print(
-            f"warning: threshold profile {path} is provisional "
-            f"({profile.provisional_reason}); thresholds are unvalidated",
-            file=sys.stderr,
-        )
-    if profile is not None and profile.in_sample:
-        print(
-            f"warning: threshold profile {path} is {IN_SAMPLE_LABEL} — cutoffs were fitted on the rows "
-            "they were evaluated on (G28); treat as reference only",
-            file=sys.stderr,
-        )
-    return profile
+    """Resolve --thresholds to a ThresholdProfile; warn when it cannot load.
+
+    G7: the resolution rule (explicit file, else ``<models_dir>/thresholds.json``)
+    lives in analysis_api.load_thresholds so the CLI, GUI and API share it.
+    """
+    from .analysis_api import AnalysisOptions, load_thresholds, thresholds_warning_printer
+
+    return load_thresholds(AnalysisOptions.from_cli_args(args), warn=thresholds_warning_printer(sys.stderr))
 
 
 def _write_json_out(path: Path, payload: str) -> None:

@@ -33,21 +33,28 @@ def _layer_error(payload: dict[str, Any], layer: str, exc: BaseException) -> Non
     """Record a failed auxiliary layer in the response instead of hiding it."""
     errors = payload.setdefault("layer_errors", [])
     errors.append({"layer": layer, "status": "failed", "reason": failure_reason(exc)})
-from .core import SCAN_JSON_SCHEMA_VERSION, BatchScanSummary, DEFAULT_METADATA_BYTES, _scan_item_from_json, analyze_file, scan_directory, scan_to_json, summarize
+from .analysis_api import (
+    WEB_MAX_FILE_BYTES_CEILING,
+    WEB_MAX_SCAN_FILES,
+    AnalysisOptions,
+    analyze_path,
+    load_thresholds,
+    provenance,
+    scan_folder,
+    scan_payload,
+)
+from .analysis_api import default_engine_profiles as _engine_profiles_in
+from .core import SCAN_JSON_SCHEMA_VERSION, BatchScanSummary, DEFAULT_METADATA_BYTES, _scan_item_from_json, summarize  # noqa: F401
 from .datasets import is_negative_label, is_positive_label
-from .fusion import apply_fusion_to_items, load_fusion_profile
 from .reports import write_html_report
 
 
-MAX_SCAN_FILES = 2000
-MAX_FILE_BYTES_CEILING = 1024 * 1024 * 1024
+# G7: request limits live in analysis_api (AnalysisOptions.from_query);
+# re-exported under their historical names.
+MAX_SCAN_FILES = WEB_MAX_SCAN_FILES
+MAX_FILE_BYTES_CEILING = WEB_MAX_FILE_BYTES_CEILING
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024
 MAX_UPLOAD_FILES = 20
-DEFAULT_PROFILE_NAMES = (
-    "aide-runtime.json",
-    "aasist-runtime.json",
-    "wav2vec-deepfake-audio-runtime.json",
-)
 
 # Server-level models directory override — set by run_server(--models-dir)
 # or DEEPFAKE_LENS_MODELS_DIR so every scan/check/coverage call resolves the
@@ -65,17 +72,13 @@ def _models_dir() -> Path | None:
 
 
 def default_engine_profiles(root: Path | None = None) -> list[Path]:
-    """Bundled default-engine profiles that exist on disk.
+    """Engine profiles of the server's models dir (G7: same set as the CLI)."""
+    return _engine_profiles_in(Path(root) if root is not None else _models_dir())
 
-    Mirrors the CLI defaults (image/audio/text) so the web scan uses the
-    neural adapters automatically when profiles are committed. Missing
-    profiles are skipped and each adapter degrades gracefully when its
-    checkpoint is absent.
-    """
-    base = Path(root) if root is not None else _models_dir()
-    if base is None:
-        return []
-    return [base / name for name in DEFAULT_PROFILE_NAMES if (base / name).is_file()]
+
+def _web_options(params: dict[str, list[str]] | None = None) -> AnalysisOptions:
+    """AnalysisOptions for a web request (InvalidOption -> HTTP 400)."""
+    return AnalysisOptions.from_query(params or {}, models_dir=_models_dir())
 
 
 
@@ -93,54 +96,15 @@ def _scan_payload(query: str, *, default_folder: Path | None, should_stop: Calla
     Raises ReadRootDenied (-> HTTP 403) when the folder is outside the
     operator-registered roots; the caller's folder is never registered (G31).
     """
-    params = parse_qs(query)
     folder = _requested_folder(query, default_folder)
     _require_read_root(folder, default_folder)
-    pixel = params.get("pixel", ["off"])[0]
-    recursive = params.get("recursive", ["false"])[0].lower() in {"1", "true", "yes"}
+    # G7: same options object, thresholds and engine set as the CLI. A bad
+    # option (non-integer limit, model_path outside the models dir) raises
+    # InvalidOption (a ValueError) -> HTTP 400 before any file is read.
+    options = _web_options(parse_qs(query))
     try:
-        max_files = int(params.get("max_files", ["500"])[0])
-    except ValueError as exc:
-        raise ValueError("max_files must be an integer") from exc
-    max_files = max(1, min(max_files, MAX_SCAN_FILES))
-    max_file_bytes_raw = params.get("max_file_bytes", [None])[0]
-    max_file_bytes: int | None = None
-    if max_file_bytes_raw is not None:
-        try:
-            max_file_bytes = min(int(max_file_bytes_raw), MAX_FILE_BYTES_CEILING)
-        except ValueError as exc:
-            raise ValueError("max_file_bytes must be an integer") from exc
-    dedupe = params.get("dedupe", ["false"])[0].lower() in {"1", "true", "yes"}
-    heatmaps = params.get("heatmaps", ["false"])[0].lower() in {"1", "true", "yes"}
-    deep_signals = params.get("deep_signals", ["false"])[0].lower() in {"1", "true", "yes"}
-    model_path_raw = params.get("model_path", [""])[0]
-    no_default_engine = params.get("no_default_engine", ["false"])[0].lower() in {"1", "true", "yes"}
-    model_path: Path | list[Path] | None
-    if model_path_raw.strip():
-        model_path = _optional_path(model_path_raw)
-    elif no_default_engine:
-        model_path = None
-    else:
-        model_path = default_engine_profiles() or None
-    fusion_profile = load_fusion_profile(_optional_path(params.get("fusion_profile", [""])[0]))
-    
-    try:
-        summary, items = scan_directory(
-            folder,
-            recursive=recursive,
-            max_files=max_files,
-            pixel_mode=pixel,
-            heatmaps=heatmaps and pixel == "deep",
-            max_file_bytes=max_file_bytes,
-            dedupe=dedupe,
-            model_path=model_path,
-            deep_signals=deep_signals,
-            should_stop=should_stop,
-        )
-        if fusion_profile:
-            items = apply_fusion_to_items(items, fusion_profile)
-            summary = summarize(items, capped=summary.capped, cached=summary.cached)
-        return scan_to_json(summary, items)
+        summary, items, thresholds = scan_folder(folder, options, should_stop=should_stop)
+        return scan_payload(summary, items, thresholds, options)
     except (OSError, ValueError) as exc:
         return {"error": str(exc)}
 
@@ -163,8 +127,10 @@ def _scan_job_evict(now: float) -> None:
 
 def _scan_job_start(query: str, *, default_folder: Path | None) -> dict[str, object]:
     """Start a background scan job; poll /api/scan-status?job=<id>."""
-    # Refuse out-of-root folders up front (403), not inside the job.
+    # Refuse out-of-root folders (403) and invalid options (400) up front,
+    # not inside the job.
     _require_read_root(_requested_folder(query, default_folder), default_folder)
+    _web_options(parse_qs(query))
     with _SCAN_JOBS_LOCK:
         _scan_job_evict(time.time())
         if len(_SCAN_JOBS) >= _SCAN_JOB_MAX:
@@ -325,11 +291,6 @@ def _extract_metadata(path: Path) -> dict[str, str]:
     return metadata
 
 
-def _optional_path(value: str) -> Path | None:
-    value = value.strip()
-    return Path(value).expanduser() if value else None
-
-
 # Operator-registered read roots (G31). Every endpoint that reads a path the
 # caller names — /api/scan, /api/analyze-file, /api/heatmap, /api/preview
 # and the report hashing/heatmap embedding — is confined to these. Only
@@ -484,20 +445,20 @@ def _preview_payload(query: str) -> tuple[int, bytes, str, str]:
     return 200, data, "", mime
 
 
-def _provenance() -> dict[str, object]:
+def _provenance(options: AnalysisOptions | None = None, thresholds: Any = None) -> dict[str, object]:
     """Coverage + threshold provenance attached to every scan-shaped payload.
 
     A response that omits these lets a heuristic-only run read as a full
-    neural one downstream (GUI banner, /api/report, exported JSON).
+    neural one downstream (GUI banner, /api/report, exported JSON). G7: the
+    thresholds reported are the ones the analysis actually used.
     """
-    from .vendor_weights import weights_coverage
-    cov: dict[str, object]
+    opts = options or _web_options()
     try:
-        cov = dict(weights_coverage(_models_dir()))
+        return provenance(opts, thresholds)
     except Exception as exc:
         logger.exception("weights coverage unavailable")
-        cov = {"error": failure_reason(exc)}
-    return {"coverage": cov, "thresholds": {"source": "builtin_defaults", "provisional": True}}
+        from .core import _thresholds_json
+        return {"coverage": {"error": failure_reason(exc)}, "thresholds": _thresholds_json(thresholds)}
 
 
 def _model_active(item: dict[str, object]) -> bool:
@@ -563,7 +524,9 @@ def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str,
     }
 
 
-def _archive_upload_items(filename: str, suffix: str, payload: bytes) -> list[dict[str, object]]:
+def _archive_upload_items(
+    filename: str, suffix: str, payload: bytes, *, options: AnalysisOptions, thresholds: Any,
+) -> list[dict[str, object]]:
     """Extract an uploaded archive to a temp dir and analyze each member.
 
     Members are reported as ``archive.zip::inner/path.png`` rows; the
@@ -585,7 +548,7 @@ def _archive_upload_items(filename: str, suffix: str, payload: bytes) -> list[di
         for member in extraction.members:
             rel = member.relative_to(dest).as_posix()
             display = f"{filename}::{rel}"
-            item = analyze_file(member, display=display, model_path=default_engine_profiles() or None)
+            item = analyze_path(member, options, display=display, thresholds=thresholds)
             record = item.to_json()
             record["path"] = display
             record["name"] = display
@@ -641,6 +604,8 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
     message = BytesParser(policy=email_policy).parsebytes(
         b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
     )
+    options = _web_options()
+    thresholds = load_thresholds(options)
     items: list[dict[str, object]] = []
     for part in message.iter_parts():
         filename = part.get_filename()
@@ -653,7 +618,7 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
         suffix = Path(filename).suffix[:16]
         try:
             if is_archive(filename):
-                items.extend(_archive_upload_items(filename, suffix, payload))
+                items.extend(_archive_upload_items(filename, suffix, payload, options=options, thresholds=thresholds))
                 continue
             # delete=False: Windows cannot reopen a delete=True temp file.
             tmp_name = ""
@@ -661,7 +626,7 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
                 with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
                     tmp.write(payload)
                     tmp_name = tmp.name
-                item = analyze_file(tmp_name, model_path=default_engine_profiles() or None)
+                item = analyze_path(tmp_name, options, thresholds=thresholds)
             finally:
                 if tmp_name:
                     Path(tmp_name).unlink(missing_ok=True)
@@ -680,7 +645,7 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
         "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "summary": _summarize_records(items, "upload"),
         "items": items,
-        **_provenance(),
+        **_provenance(options, thresholds),
     }
 
 
@@ -698,8 +663,8 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
         return {"error": "분석할 텍스트가 너무 짧습니다 (8자 이상)."}
     if len(trimmed) > 256 * 1024:
         return {"error": "텍스트가 256KB를 초과합니다."}
-    models_dir = _models_dir()
-    model_path = models_dir if models_dir and models_dir.is_dir() else (default_engine_profiles() or None)
+    options = _web_options()
+    thresholds = load_thresholds(options)
     # delete=False: Windows cannot reopen a delete=True NamedTemporaryFile,
     # so the analyzers below would hit Permission denied.
     tmp_name = ""
@@ -708,7 +673,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
         with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as tmp:
             tmp.write(trimmed)
             tmp_name = tmp.name
-        item = analyze_file(tmp_name, model_path=model_path)
+        item = analyze_path(tmp_name, options, thresholds=thresholds)
         try:
             from .c2pa import analyze_metadata_forensic
             forensic = analyze_metadata_forensic(Path(tmp_name)).to_json()
@@ -741,7 +706,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
         "forensic": forensic,
         "watermark": watermark,
         **layer_errors,
-        **_provenance(),
+        **_provenance(options, thresholds),
     }
 
 
@@ -762,24 +727,24 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     payload = _part_bytes(part) or b""
     suffix = Path(filename).suffix[:16]
     from .archives import is_archive
+    options = _web_options()
+    thresholds = load_thresholds(options)
     if is_archive(filename):
-        items = _archive_upload_items(filename, suffix, payload)
+        items = _archive_upload_items(filename, suffix, payload, options=options, thresholds=thresholds)
         return {
             "schema_version": SCAN_JSON_SCHEMA_VERSION,
             "mode": "files",
             "summary": _summarize_records(items, "upload"),
             "items": items,
-            **_provenance(),
+            **_provenance(options, thresholds),
         }
-    models_dir = _models_dir()
-    model_path = models_dir if models_dir and models_dir.is_dir() else (default_engine_profiles() or None)
     tmp_name = ""
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(payload)
             tmp_name = tmp.name
         tmp_path = Path(tmp_name)
-        item = analyze_file(tmp_path, model_path=model_path)
+        item = analyze_path(tmp_path, options, thresholds=thresholds)
         record = item.to_json()
         forensic = None
         layer_errors: dict[str, Any] = {}
@@ -809,7 +774,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
         "advanced": advanced,
         "forensic": forensic,
         **layer_errors,
-        **_provenance(),
+        **_provenance(options, thresholds),
     }
 
 
@@ -836,7 +801,8 @@ def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
         from .core import compare_files
         result = compare_files(tmp_paths[0], tmp_paths[1])
         if isinstance(result, dict) and not result.get("error"):
-            result.update(_provenance())
+            options = _web_options()
+            result.update(_provenance(options, load_thresholds(options)))
         return result
     finally:
         for tmp_path in tmp_paths:

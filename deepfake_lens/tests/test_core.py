@@ -266,11 +266,20 @@ class DeepfakeLensCoreTest(unittest.TestCase):
 
             # G31: /api/scan only reads under the server's roots; with none
             # registered that is the default folder (`web --folder`).
-            with patch("deepfake_lens.webapp_api._READ_ROOTS", OrderedDict()):
+            # G7: fusion_profile is a bare file name resolved inside the
+            # server's models dir (an absolute request path is refused), so
+            # the fixture dir doubles as the models dir here.
+            with patch("deepfake_lens.webapp_api._READ_ROOTS", OrderedDict()), \
+                    patch("deepfake_lens.webapp_api._MODELS_DIR", root):
                 web_payload = _scan_payload(
-                    urlencode({"folder": str(scan_root), "recursive": "true", "pixel": "deep", "fusion_profile": str(fusion_path)}),
+                    urlencode({"folder": str(scan_root), "recursive": "true", "pixel": "deep", "fusion_profile": fusion_path.name}),
                     default_folder=scan_root,
                 )
+                with self.assertRaises(ValueError):
+                    _scan_payload(
+                        urlencode({"folder": str(scan_root), "fusion_profile": str(fusion_path)}),
+                        default_folder=scan_root,
+                    )
             self.assertIn("summary", web_payload)
             self.assertEqual(web_payload["summary"]["total"], 2)
 
