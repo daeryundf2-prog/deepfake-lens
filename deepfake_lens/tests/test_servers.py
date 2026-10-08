@@ -14,6 +14,7 @@ import time
 import unittest
 from collections import OrderedDict
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from deepfake_lens import api_server
@@ -658,11 +659,14 @@ class ApiServiceContractTest(unittest.TestCase):
         import tempfile
         from pathlib import Path
 
-        client = self._client()
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "a.txt").write_text("안녕하세요 테스트 문서입니다.", encoding="utf-8")
             Path(tmp, "b.txt").write_text("다른 파일입니다.", encoding="utf-8")
-            with client.stream(
+            # G31: /api/scan/stream is confined to the read roots like
+            # /api/scan; the scanned dir is the server's default folder
+            # (no roots registered in this test).
+            client = self._client(default_folder=Path(tmp))
+            with patch.object(webapp_api, "_READ_ROOTS", OrderedDict()), client.stream(
                 "POST",
                 "/api/scan/stream",
                 params={"directory": tmp},
@@ -983,3 +987,104 @@ class ApiServerHardeningTest(unittest.TestCase):
     def test_model_path_outside_models_dir_is_400(self) -> None:
         res = self.client.get("/api/scan", params={"folder": str(self.root), "model_path": "/etc/passwd"}, headers=self._gui())
         self.assertEqual(res.status_code, 400)
+
+
+SECRET_BYTES = b"G31-API-SERVER-SECRET-do-not-read"
+
+
+class ApiServerConfinementUnitTest(unittest.TestCase):
+    """G31: api_server.confine_request_path — the check every file-reading
+    API endpoint runs. Stdlib only (runs without fastapi)."""
+
+    def setUp(self) -> None:
+        import tempfile
+
+        roots = patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
+        roots.start()
+        self.addCleanup(roots.stop)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        base = Path(self._tmp.name).resolve()
+        self.root, self.outside = base / "case", base / "elsewhere"
+        self.root.mkdir()
+        self.outside.mkdir()
+        (self.root / "memo.txt").write_text("사건 메모", encoding="utf-8")
+        (self.outside / "secret.txt").write_bytes(SECRET_BYTES)
+        webapp_api.configure_read_roots(self.root)
+
+    def test_inside_root_resolves(self) -> None:
+        self.assertEqual(api_server.confine_request_path(str(self.root / "memo.txt")), self.root / "memo.txt")
+        self.assertEqual(api_server.confine_request_path(str(self.root)), self.root)
+
+    def test_outside_traversal_and_symlink_are_denied(self) -> None:
+        link = self.root / "link.txt"
+        try:
+            link.symlink_to(self.outside / "secret.txt")
+        except OSError:
+            link = self.outside / "secret.txt"  # no symlink privilege (Windows)
+        for text in (str(self.outside / "secret.txt"), f"{self.root}/../elsewhere/secret.txt", "/", str(link)):
+            with self.subTest(path=text), self.assertRaises(webapp_api.ReadRootDenied):
+                api_server.confine_request_path(text)
+
+    def test_default_folder_only_when_nothing_registered(self) -> None:
+        webapp_api._READ_ROOTS.clear()
+        self.assertEqual(api_server.confine_request_path(str(self.root / "memo.txt"), self.root), self.root / "memo.txt")
+        with self.assertRaises(webapp_api.ReadRootDenied):
+            api_server.confine_request_path(str(self.outside / "secret.txt"), self.root)
+
+
+@unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed")
+class ApiServerFilePathConfinementTest(ApiServerConfinementUnitTest):
+    """G31 on the FastAPI server: every endpoint that takes ``file_path`` /
+    ``directory`` is confined to the registered read roots like /api/scan —
+    403 {"error": "허용되지 않은 경로"} outside, no file content echoed."""
+
+    _HEADERS = {"host": "localhost", api_server.CLIENT_HEADER: "test"}
+
+    def setUp(self) -> None:
+        super().setUp()
+        from fastapi.testclient import TestClient
+
+        self.client = TestClient(api_server.create_app(default_folder=self.root))
+
+    def _post(self, path: str, params: dict[str, str]) -> Any:
+        return self.client.post(path, params=params, headers=self._HEADERS)
+
+    def _requests(self, target: Path) -> list[tuple[str, dict[str, str]]]:
+        file_endpoints = ["/api/analyze/image", "/api/analyze/audio", "/api/analyze/face", "/api/analyze/forensic", "/api/classify", "/api/check", "/api/check/stream"]
+        requests = [(endpoint, {"file_path": str(target)}) for endpoint in file_endpoints]
+        requests.append(("/api/scan/stream", {"directory": str(target.parent)}))
+        requests.append(("/api/compare", {"file_path_a": str(self.root / "memo.txt"), "file_path_b": str(target)}))
+        requests.append(("/api/compare", {"file_path_a": str(target), "file_path_b": str(self.root / "memo.txt")}))
+        return requests
+
+    def test_every_file_endpoint_refuses_paths_outside_the_roots(self) -> None:
+        for endpoint, params in self._requests(self.outside / "secret.txt"):
+            with self.subTest(endpoint=endpoint, params=params):
+                res = self._post(endpoint, params)
+                self.assertEqual(res.status_code, 403, res.text[:300])
+                self.assertEqual(res.json(), {"error": "허용되지 않은 경로"})
+                self.assertNotIn(SECRET_BYTES, res.content)
+
+    def test_traversal_out_of_the_root_is_refused(self) -> None:
+        sneaky = Path(f"{self.root}/../elsewhere/secret.txt")
+        for endpoint, params in self._requests(sneaky):
+            with self.subTest(endpoint=endpoint):
+                self.assertEqual(self._post(endpoint, params).status_code, 403)
+
+    def test_refused_request_starts_no_job(self) -> None:
+        # Confinement runs before job registration: with a zero job cap a
+        # refused path is 403 (not 429), so no job slot was ever taken.
+        with patch.object(api_server, "MAX_JOBS", 0):
+            self.assertEqual(self._post("/api/scan/stream", {"directory": str(self.outside)}).status_code, 403)
+            self.assertEqual(self._post("/api/check/stream", {"file_path": str(self.outside / "secret.txt")}).status_code, 403)
+
+    def test_inside_the_root_still_works(self) -> None:
+        inside = self.root / "memo.txt"
+        for endpoint in ("/api/analyze/image", "/api/check", "/api/classify"):
+            with self.subTest(endpoint=endpoint):
+                self.assertEqual(self._post(endpoint, {"file_path": str(inside)}).status_code, 200)
+        res = self._post("/api/scan/stream", {"directory": str(self.root)})
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("event: result", res.text)
+        self.assertIn("memo.txt", res.text)

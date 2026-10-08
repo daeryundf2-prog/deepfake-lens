@@ -100,6 +100,22 @@ def _default_profiles() -> Path | None:
     return models_dir if models_dir.is_dir() else None
 
 
+def confine_request_path(path_text: str, default_folder: Path | None = None) -> Path:
+    """Resolve a caller-named path and require it inside a read root (G31).
+
+    Every endpoint that reads a ``file_path``/``directory`` the request
+    names goes through this, exactly like ``/api/scan``: only roots the
+    operator registered at server start (``--folder``/``--allow-root``), or
+    the default folder when none are registered. Raises
+    ``webapp_api.ReadRootDenied`` (-> 403 ``{"error": "허용되지 않은 경로"}``,
+    no file content) otherwise. Returns the resolved path, which the
+    handler then analyzes — the check and the read use the same path.
+    """
+    from .webapp_api import _require_read_root
+
+    return _require_read_root(Path(path_text), default_folder)
+
+
 def missing_server_dependencies() -> list[str]:
     """Server packages that are not importable in this environment."""
     return [name for name in SERVER_DEPENDENCIES if importlib.util.find_spec(name) is None]
@@ -128,8 +144,12 @@ def create_app(
         raise ImportError("FastAPI is required. Install with: pip install fastapi uvicorn")
 
     from .analysis_api import analyze_path, load_thresholds
+    from .webapp_api import ReadRootDenied, read_root_denied_body
 
     app = FastAPI(title="Deepfake Lens API", version="0.1.0")
+
+    def _denied() -> Any:
+        return JSONResponse(read_root_denied_body(), status_code=403)
 
     allowed_hosts = set(LOCAL_HOSTS) if host in LOCAL_HOSTS else {host}
 
@@ -212,7 +232,11 @@ def create_app(
     @app.post("/api/analyze/image")
     def analyze_image(file_path: str):
         try:
-            result = analyze_path(file_path, _api_options())
+            path = confine_request_path(file_path, default_folder)
+        except ReadRootDenied:
+            return _denied()
+        try:
+            result = analyze_path(path, _api_options())
             return {"status": "success", "data": result.to_json()}
         except Exception as exc:
             logger.exception("request failed")
@@ -222,11 +246,15 @@ def create_app(
     def analyze_audio(file_path: str):
         from .audio import analyze_audio
         try:
+            path = confine_request_path(file_path, default_folder)
+        except ReadRootDenied:
+            return _denied()
+        try:
             # Bundled audio profiles degrade gracefully when checkpoints
             # or the optional torch stack is absent.
             models_dir = default_models_dir()
             profiles = [p for name in ("aasist-runtime.json", "wav2vec-deepfake-audio-runtime.json") if (p := models_dir / name).is_file()]
-            result = analyze_audio(file_path, model_path=profiles or None)
+            result = analyze_audio(path, model_path=profiles or None)
             return {"status": "success", "data": result.to_json()}
         except Exception as exc:
             logger.exception("request failed")
@@ -236,7 +264,11 @@ def create_app(
     def analyze_face(file_path: str):
         from .face import analyze_faces
         try:
-            result = analyze_faces(file_path)
+            path = confine_request_path(file_path, default_folder)
+        except ReadRootDenied:
+            return _denied()
+        try:
+            result = analyze_faces(path)
             return {"status": "success", "data": result.to_json()}
         except Exception as exc:
             logger.exception("request failed")
@@ -256,7 +288,11 @@ def create_app(
     def analyze_forensic(file_path: str):
         from .c2pa import analyze_metadata_forensic
         try:
-            result = analyze_metadata_forensic(file_path)
+            path = confine_request_path(file_path, default_folder)
+        except ReadRootDenied:
+            return _denied()
+        try:
+            result = analyze_metadata_forensic(path)
             return {"status": "success", "data": result.to_json()}
         except Exception as exc:
             logger.exception("request failed")
@@ -267,7 +303,10 @@ def create_app(
         from .classifier import classify_metadata, classify_text_content
         from .png import read_png_metadata
         try:
-            path = Path(file_path)
+            path = confine_request_path(file_path, default_folder)
+        except ReadRootDenied:
+            return _denied()
+        try:
             max_bytes = 64 * 1024 * 1024
             with path.open("rb") as handle:
                 data = handle.read(max_bytes)
@@ -336,7 +375,10 @@ def create_app(
                         _layer_error(data, "watermark", exc)
                 return {"status": "success", "data": data}
             if file_path:
-                path = Path(file_path)
+                try:
+                    path = confine_request_path(file_path, default_folder)
+                except ReadRootDenied:
+                    return _denied()
                 item = analyze_path(path, options, thresholds=thresholds)
                 data = {"mode": "file", "item": item.to_json()}
                 try:
@@ -456,6 +498,12 @@ def create_app(
         watermark_secret: str | None = None,
         watermark_gamma: float = 0.25,
     ):
+        confined: Path | None = None
+        if not (text and text.strip()) and file_path:
+            try:
+                confined = confine_request_path(file_path, default_folder)
+            except ReadRootDenied:
+                return _denied()
         job_id, cancel = _register_job()
 
         def run_layered() -> Any:
@@ -510,10 +558,10 @@ def create_app(
                     stages.append(("watermark", wm))
                 payload = {"mode": "text", **dict(stages)}
             else:
-                if not file_path:
+                if confined is None:
                     yield ("error", {"detail": "file_path or text required"})
                     return
-                path = Path(file_path)
+                path = confined
                 yield ("progress", {"stage": "core", "index": 1, "total": 2})
                 item = analyze_path(path, options, thresholds=thresholds)
                 if cancel.is_set():
@@ -573,7 +621,8 @@ def create_app(
     # /api/scan/stream scans a server-local directory with per-file
     # progress events over SSE. Shares the _JOBS registry so clients can
     # cancel between files via /api/jobs/{id}/cancel. Directory reads are
-    # limited to max_files entries; same trust level as /api/check.
+    # limited to max_files entries; the directory must sit inside a read
+    # root (G31, 403 otherwise) like /api/scan and /api/check.
     @app.post("/api/scan/stream")
     async def scan_stream(
         request: Request,
@@ -581,13 +630,18 @@ def create_app(
         recursive: bool = False,
         max_files: int = 200,
     ):
+        root: Path | None = None
+        if directory:
+            try:
+                root = confine_request_path(directory, default_folder)
+            except ReadRootDenied:
+                return _denied()
         job_id, cancel = _register_job()
 
         def run_scan():
             from .core import _iter_files
 
             yield ("job", {"job_id": job_id})
-            root = Path(directory) if directory else None
             if root is None or not root.is_dir():
                 yield ("error", {"detail": "directory required"})
                 return
@@ -652,7 +706,12 @@ def create_app(
         from .core import compare_files
 
         try:
-            result = compare_files(Path(file_path_a), Path(file_path_b))
+            path_a = confine_request_path(file_path_a, default_folder)
+            path_b = confine_request_path(file_path_b, default_folder)
+        except ReadRootDenied:
+            return _denied()
+        try:
+            result = compare_files(path_a, path_b)
         except Exception as exc:
             logger.exception("request failed")
             raise HTTPException(status_code=500, detail=str(exc)) from exc

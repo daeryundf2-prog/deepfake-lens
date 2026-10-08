@@ -85,6 +85,14 @@ All analyze endpoints take parameters as **query string** values and return a
 JSON envelope `{"status": "success", "data": {...}}` or an HTTP error with
 `{"detail": "..."}`. `/api/*` routes require auth as above.
 
+Every parameter that names a server-side path — `file_path`
+(`/api/analyze/image|audio|face|forensic`, `/api/classify`, `/api/check`,
+`/api/check/stream`), `directory` (`/api/scan/stream`) and
+`file_path_a`/`file_path_b` (`/api/compare`) — must resolve inside a read
+root (same rule as `/api/scan`, see "Read-root rule" below); otherwise the
+response is **403** `{"error": "허용되지 않은 경로"}` with no file content
+and, for the streaming endpoints, no job is started (G31).
+
 | Method | Path | Params | `data` shape |
 |---|---|---|---|
 | GET | `/` | — | `{"message", "version"}` (no auth) |
@@ -143,8 +151,9 @@ JSON API under `/api/` (GET plus `POST /api/feedback`, `/api/report`,
 | POST `/api/feedback` | feedback JSON body (≤ 1 MiB) | appends to `~/.deepfake-lens/feedback.jsonl` |
 
 Read-root rule (G31) for `/api/scan`, `/api/analyze-file`,
-`/api/heatmap`, `/api/preview` and `/api/report` (evidence hashing and
-heatmap embedding): only the operator registers read roots, at server
+`/api/heatmap`, `/api/preview`, `/api/report` (evidence hashing and
+heatmap embedding) and every `api-serve` endpoint that takes a
+`file_path`/`directory`: only the operator registers read roots, at server
 start — `web --folder <dir>` and each repeatable `--allow-root <dir>`
 (`api-serve --allow-root` likewise; max 64, oldest evicted first). No
 request can add one; `/api/scan?folder=` no longer registers anything.
