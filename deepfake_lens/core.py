@@ -1536,6 +1536,17 @@ def _ordered_evidence(items: list[EvidenceItem]) -> list[EvidenceItem]:
     return sorted(items, key=lambda i: (_KIND_ORDER[i.kind], _STRENGTH_ORDER[i.strength], _DIRECTION_ORDER[i.direction]))
 
 
+def _integrity_failures(failed_entries: list[CoverageEntry]) -> list[CoverageEntry]:
+    """Model checks refused by the pin policy (G9): unpinned or mismatched weights."""
+    from .model_pins import MISMATCH_REASON, UNPINNED_REASON
+
+    return [
+        entry for entry in failed_entries
+        if (entry.check == "external_model" or entry.check.startswith("model:"))
+        and entry.reason.startswith((MISMATCH_REASON, UNPINNED_REASON))
+    ]
+
+
 def _verdict_text(
     subject: str,
     verdict: Verdict,
@@ -1543,10 +1554,14 @@ def _verdict_text(
     evidence: list[EvidenceItem],
     failed_entries: list[CoverageEntry],
 ) -> str:
+    integrity = _integrity_failures(failed_entries)
+    integrity_names = ", ".join(check_label(entry.check) for entry in integrity)
     if grade == Grade.REFERENCE:
         lexical = sum(1 for item in evidence if item.kind == EvidenceKind.LEXICAL)
         note = f" (어휘적 신호 {lexical}건은 참고 정보)" if lexical else ""
         failure = f" 검사 실패: {', '.join(check_label(entry.check) for entry in failed_entries)}." if failed_entries else ""
+        if integrity:
+            failure += f" 모델 무결성 실패({integrity_names})."
         return f"참고: 근거 부족 — {subject}의 생성 여부는 결론을 내리지 않습니다{note}.{failure}"
     if verdict == Verdict.MANIPULATION_EVIDENCE:
         basis = next(
@@ -1561,6 +1576,14 @@ def _verdict_text(
     if verdict == Verdict.AUTHENTICITY_EVIDENCE:
         basis = next((item for item in evidence if item.direction == EvidenceDirection.AUTHENTIC and item.strength == EvidenceStrength.STRONG), None)
         return f"{subject}: {VERDICT_LABELS[verdict]} — {basis.title if basis else '근거 목록 참조'}."
+    if integrity:
+        # QA-SYS-1/2: a refused weight is named as such in the conclusion.
+        others = [entry for entry in failed_entries if entry not in integrity]
+        rest = f" 그 외 검사 실패({', '.join(check_label(entry.check) for entry in others)})." if others else ""
+        return (
+            f"{subject}: 판단 불가: 모델 무결성 실패({integrity_names}) — 고정(pin)되지 않았거나 해시가 일치하지 않는 "
+            f"가중치는 로드하지 않았으므로 결론을 내리지 않습니다.{rest}"
+        )
     if failed_entries:
         names = ", ".join(check_label(entry.check) for entry in failed_entries)
         return f"{subject}: 판단 불가 — 검사 실패({names})로 결론을 내리지 않습니다."

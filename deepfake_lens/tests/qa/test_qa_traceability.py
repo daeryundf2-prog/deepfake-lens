@@ -125,6 +125,80 @@ class HarnessLogicTest(unittest.TestCase):
         self.assertEqual({row[0] for row in rows} - {"—"}, {row["id"] for row in self.data["requirements"]})
         self.assertIn(("R-TXT-3", "G2, G25", "QA-SYS-9 (게이트)", "통과", "`build/qa-logs/QA-SYS-9.log`"), rows)
         self.assertIn(("R-IN-4", "—", "QA-IN-3", "수동", "`docs/QA-MANUAL.md#qa-in-3`"), rows)
+        # QA-OUT-5 is a structural check in phase 0 and says so on every row.
+        out5 = [row for row in rows if row[2].startswith("QA-OUT-5")]
+        self.assertTrue(out5)
+        self.assertTrue(all("구조 검사(0단계에 보정 모델 없음)" in row[2] for row in out5), out5)
+
+    def test_recorded_run_requires_fastapi(self) -> None:
+        """D6/QA-OUT-4: without fastapi the harness exits 1 ("fastapi 필요")
+        before running anything, instead of recording a skipped API leg."""
+        import contextlib
+        import io
+        from unittest import mock
+
+        real_find_spec = self.harness.importlib.util.find_spec
+
+        def no_fastapi(name: str, *args: Any, **kwargs: Any) -> Any:
+            return None if name in {"fastapi", "httpx"} else real_find_spec(name, *args, **kwargs)
+
+        stderr = io.StringIO()
+        with mock.patch.object(self.harness.importlib.util, "find_spec", no_fastapi), \
+                mock.patch.object(self.harness, "load_suite", side_effect=AssertionError("suite must not run")), \
+                contextlib.redirect_stderr(stderr):
+            code = self.harness.main(["--out", str(REPO_ROOT / "build" / "never-written.md")])
+        self.assertEqual(code, 1)
+        self.assertIn("fastapi 필요", stderr.getvalue())
+        self.assertIn("pip install fastapi httpx uvicorn", stderr.getvalue())
+
+    def test_dirty_tree_is_refused_without_allow_dirty(self) -> None:
+        import contextlib
+        import io
+        from unittest import mock
+
+        def fake_git(*args: str) -> str:
+            return {"rev-parse": "a" * 40, "status": " M deepfake_lens/core.py"}[args[0]]
+
+        stderr = io.StringIO()
+        with mock.patch.object(self.harness.importlib.util, "find_spec", return_value=object()), \
+                mock.patch.object(self.harness, "_git", fake_git), \
+                mock.patch.object(self.harness, "load_suite", side_effect=AssertionError("suite must not run")), \
+                contextlib.redirect_stderr(stderr):
+            code = self.harness.main(["--out", str(REPO_ROOT / "build" / "never-written.md")])
+        self.assertEqual(code, 1)
+        self.assertIn("--allow-dirty", stderr.getvalue())
+
+    def test_verify_record_checks_commit_and_later_changes(self) -> None:
+        import contextlib
+        import io
+        import tempfile
+        from unittest import mock
+
+        from pathlib import Path
+
+        parent, head = "b" * 40, "c" * 40
+        out_rel = "docs/CONFORMANCE.md"
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "CONFORMANCE.md"
+            out.write_text(f"# x\n\n{self.harness.COMMIT_LINE_PREFIX}{parent}` — 변경 없는 작업 트리에서 실행.\n", encoding="utf-8")
+
+            def run(diff: str) -> int:
+                answers = {"HEAD": head, "HEAD^": parent}
+
+                def fake_git(*args: str) -> str:
+                    if args[0] == "rev-parse":
+                        return answers[args[1]]
+                    return diff
+
+                with mock.patch.object(self.harness, "_git", fake_git), \
+                        mock.patch.object(self.harness, "_rel", return_value=out_rel), \
+                        contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    return int(self.harness.verify_record(out))
+
+            self.assertEqual(run(out_rel), 0)
+            self.assertEqual(run(f"{out_rel}\ndeepfake_lens/core.py"), 1)
+            out.write_text(f"{self.harness.COMMIT_LINE_PREFIX}{'d' * 40}`\n", encoding="utf-8")
+            self.assertEqual(run(out_rel), 1, "recorded commit is neither HEAD nor its parent")
 
 
 if __name__ == "__main__":

@@ -517,9 +517,13 @@ class QaOut5ProbabilityProvenanceTest(unittest.TestCase):
     def test_synthetic_calibrated_probability_carries_provenance(self) -> None:
         """QA-OUT-5: 모델 확률이 표시된 모든 결과 → 각 확률에 보정 코퍼스 ID, 측정 조건, 95% CI가 붙어 있음. 측정 범위 밖 입력(64 px 이하)은 "범위 밖"으로 표시되고 확률 없음.
 
-        A calibrated statistical item (built synthetically — no calibrated
-        model exists in phase 0) carries id, conditions and CI; the real-scan
-        and 64 px halves are the sibling QA-OUT-5 tests.
+        구조 검사(0단계에 보정 모델 없음): no calibrated model exists in
+        phase 0, so no real result carries a probability yet. This test only
+        checks the structure — a synthetically built calibrated statistical
+        item carries calibration id, measurement conditions and CI through
+        the result contract; the real-scan (no probability anywhere) and
+        64 px halves are the sibling QA-OUT-5 tests. The conformance table
+        labels this QA ID the same way (traceability.json "label").
         """
         calibrated = EvidenceItem(
             title="보정된 모델 확률",

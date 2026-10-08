@@ -101,7 +101,8 @@ class _IntegrityAssertions(unittest.TestCase):
         self.assertTrue(entry.reason.startswith(MISMATCH_REASON), entry.reason)
         self.assertNotIn("의존성 부재", entry.reason)
         self.assertEqual(result.verdict_code, Verdict.UNDETERMINED)
-        self.assertIn("판단 불가", result.verdict)
+        # D6/QA-SYS-1: the conclusion itself names the integrity failure.
+        self.assertIn("판단 불가: 모델 무결성 실패", result.verdict)
         self.assertTrue(any("검사 실패" in item and MISMATCH_REASON in item for item in result.limitations), result.limitations)
         self.assertEqual(result.score, 0)
         assert result.model_analysis is not None
@@ -151,6 +152,7 @@ class QaSys1PinTamperTest(_IntegrityAssertions):
         [entry] = _model_entries(item.result)
         self.assertEqual(entry.status, CoverageStatus.FAILED)
         self.assertTrue(entry.reason.startswith(UNPINNED_REASON), entry.reason)
+        self.assertIn("판단 불가: 모델 무결성 실패", item.result.verdict)
         self.assertEqual(item.result.verdict_code, Verdict.UNDETERMINED)
 
     def test_tampered_member_of_a_zoo_is_reported_per_member(self) -> None:
@@ -169,6 +171,7 @@ class QaSys1PinTamperTest(_IntegrityAssertions):
         self.assertEqual(by_check["model:good-detector"].status, CoverageStatus.RAN)
         self.assertEqual(by_check["model:bad-detector"].status, CoverageStatus.FAILED)
         self.assertTrue(by_check["model:bad-detector"].reason.startswith(MISMATCH_REASON))
+        self.assertIn("판단 불가: 모델 무결성 실패(외부 모델(bad-detector))", item.result.verdict)
         self.assertEqual(item.result.verdict_code, Verdict.UNDETERMINED)
 
 
