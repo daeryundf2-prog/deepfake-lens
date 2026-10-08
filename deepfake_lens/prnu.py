@@ -21,6 +21,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
+
 MIN_REFERENCE_IMAGES = 3
 MIN_CORRELATION = 0.10  # empirical screening floor for same-device NCC
 
@@ -35,9 +37,9 @@ class PrnuEvidenceSignal:
 @dataclass(frozen=True)
 class PrnuAnalysis:
     score: int
-    band: str
-    band_label: str
-    verdict: str
+    # D1: no band/verdict — reference_band is 'reference'/'unavailable' (layer_diagnostic).
+    reference_band: str
+    reference_note: str
     signals: list[PrnuEvidenceSignal]
     limitations: list[str]
     correlation: float | None
@@ -161,7 +163,7 @@ def analyze_prnu(target_path: Path | str, reference_paths: list[Path | str]) -> 
         "참조 이미지는 동일 장치의 원본 사진 여러 장이어야 합니다.",
     ]
     if correlation >= MIN_CORRELATION:
-        verdict = f"대상 이미지가 참조 지문과 상관됩니다 (NCC {correlation:.3f}). 동일 장치 출처 추정입니다."
+        note = f"대상 이미지가 참조 지문과 상관됩니다 (NCC {correlation:.3f}). 동일 장치 출처와 정합합니다 (참고 측정값 — 결론이 아닙니다)."
     else:
         score = 25
         signals.append(
@@ -171,15 +173,11 @@ def analyze_prnu(target_path: Path | str, reference_paths: list[Path | str]) -> 
                 25,
             )
         )
-        verdict = "대상 이미지가 참조 지문과 상관되지 않습니다. 다른 장치/렌더링 출처 가능성을 확인하세요."
-
-    band = "medium" if score >= 25 else "low"
-    band_label = "주의" if band == "medium" else "낮음"
+        note = "대상 이미지가 참조 지문과 상관되지 않습니다. 다른 장치/렌더링 출처 여부는 별도 확인이 필요합니다 (참고 측정값)."
     return PrnuAnalysis(
         score=score,
-        band=band,
-        band_label=band_label,
-        verdict=verdict,
+        reference_band=REFERENCE_BAND,
+        reference_note=note,
         signals=signals,
         limitations=limitations,
         correlation=correlation,
@@ -190,9 +188,8 @@ def analyze_prnu(target_path: Path | str, reference_paths: list[Path | str]) -> 
 def _error_analysis(message: str) -> PrnuAnalysis:
     return PrnuAnalysis(
         score=0,
-        band="unknown",
-        band_label="판단 어려움",
-        verdict=message,
+        reference_band=UNAVAILABLE_BAND,
+        reference_note=message,
         signals=[],
         limitations=[message],
         correlation=None,

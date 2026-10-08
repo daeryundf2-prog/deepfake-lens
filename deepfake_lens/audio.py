@@ -12,6 +12,7 @@ import os
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
+from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
 
 
@@ -62,10 +63,12 @@ class AudioFeatures:
 
 @dataclass(frozen=True)
 class AudioAnalysis:
+    # D1: ``score`` is the raw heuristic sum (reference only). There is no
+    # band/verdict: reference_band is "reference" or "unavailable"
+    # (layer_diagnostic), reference_note a neutral sentence or the reason.
     score: int
-    band: str
-    band_label: str
-    verdict: str
+    reference_band: str
+    reference_note: str
     signals: list[AudioEvidenceSignal]
     limitations: list[str]
     source_guess: str
@@ -184,24 +187,10 @@ def analyze_audio(
 
     score = min(100, sum(signal.weight for signal in signals))
 
-    if score >= 67:
-        band = "high"
-        band_label = "높음"
-        verdict = "오디오에서 AI 생성/합성 의심 신호가 강합니다."
-    elif score >= 35:
-        band = "medium"
-        band_label = "주의"
-        verdict = "오디오에서 몇 가지 의심 신호가 보여 추가 확인이 필요합니다."
-    else:
-        band = "low"
-        band_label = "낮음"
-        verdict = "오디오에서 뚜렷한 합성 의심 신호는 적습니다."
-
     return AudioAnalysis(
         score=score,
-        band=band,
-        band_label=band_label,
-        verdict=verdict,
+        reference_band=REFERENCE_BAND,
+        reference_note=raw_score_note("오디오 음향 휴리스틱", score),
         signals=signals,
         limitations=limitations,
         source_guess=source_guess,
@@ -213,9 +202,8 @@ def analyze_audio(
 def _error_analysis(message: str, *, model_analysis: ExternalModelAnalysis | None = None) -> AudioAnalysis:
     return AudioAnalysis(
         score=0,
-        band="unknown",
-        band_label="판단 어려움",
-        verdict=message,
+        reference_band=UNAVAILABLE_BAND,
+        reference_note=message,
         signals=[],
         limitations=[message],
         source_guess="unknown",
@@ -236,9 +224,8 @@ def _features_failed_analysis(model_analysis: ExternalModelAnalysis | None, reas
             limitations.extend(model_analysis.limitations)
         return AudioAnalysis(
             score=0,
-            band="unknown",
-            band_label="판단 어려움",
-            verdict=message,
+            reference_band=UNAVAILABLE_BAND,
+            reference_note=message,
             signals=[],
             limitations=limitations,
             source_guess="unknown",
@@ -246,23 +233,13 @@ def _features_failed_analysis(model_analysis: ExternalModelAnalysis | None, reas
         )
 
     score = min(100, model_signal.weight)
-    if score >= 67:
-        band, band_label = "high", "높음"
-        verdict = "외부 모델이 강한 합성 의심 신호를 반환했습니다 (휴리스틱 특징 추출 실패)."
-    elif score >= 35:
-        band, band_label = "medium", "주의"
-        verdict = "외부 모델이 의심 신호를 반환했습니다 (휴리스틱 특징 추출 실패)."
-    else:
-        band, band_label = "low", "낮음"
-        verdict = "외부 모델 점수가 낮습니다 (휴리스틱 특징 추출 실패)."
     limitations = [message, "외부 모델 점수만 반영된 결과입니다 — 우선순위 신호이며 확정 판별이 아닙니다."]
     if model_analysis:
         limitations.extend(model_analysis.limitations)
     return AudioAnalysis(
         score=score,
-        band=band,
-        band_label=band_label,
-        verdict=verdict,
+        reference_band=REFERENCE_BAND,
+        reference_note=raw_score_note("외부 모델 원점수(휴리스틱 특징 추출 실패)", score),
         signals=[model_signal],
         limitations=limitations,
         source_guess="unknown",

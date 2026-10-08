@@ -46,7 +46,7 @@ class FaceSwapSeamTest(unittest.TestCase):
     def test_missing_file_returns_graceful_analysis(self) -> None:
         analysis = analyze_faceswap_seam(self.root / "nonexistent.jpg")
         self.assertEqual(analysis.score, 0)
-        self.assertEqual(analysis.band, "unknown")
+        self.assertEqual(analysis.reference_band, "unavailable")  # D1: layer modules report reference_band/reference_note, never a band
         self.assertTrue(len(analysis.limitations) > 0)
 
     @unittest.skipUnless(HAVE_CV2, "opencv required")
@@ -65,7 +65,7 @@ class FaceSwapSeamTest(unittest.TestCase):
         with patch.object(seam_mod, "_detect_faces", return_value=[tiny]):
             analysis = analyze_faceswap_seam(img_path)
 
-        self.assertEqual(analysis.band, "unknown")
+        self.assertEqual(analysis.reference_band, "unavailable")  # D1: layer modules report reference_band/reference_note, never a band
         self.assertEqual(analysis.face_count, 1)
 
     @unittest.skipUnless(HAVE_CV2, "opencv required")
@@ -77,7 +77,7 @@ class FaceSwapSeamTest(unittest.TestCase):
 
         analysis = analyze_faceswap_seam(blank_path)
         self.assertEqual(analysis.face_count, 0)
-        self.assertEqual(analysis.band, "unknown")
+        self.assertEqual(analysis.reference_band, "unavailable")  # D1: layer modules report reference_band/reference_note, never a band
         self.assertEqual(analysis.score, 0)
 
     @unittest.skipUnless(HAVE_CV2, "opencv required")
@@ -113,7 +113,8 @@ class FaceSwapSeamTest(unittest.TestCase):
         analysis = analyze_faceswap_seam(test_path)
         self.assertIsInstance(analysis, FaceSwapSeamAnalysis)
         self.assertIn("score", analysis.to_json())
-        self.assertIn("band", analysis.to_json())
+        self.assertIn("reference_band", analysis.to_json())
+        self.assertNotIn("band", analysis.to_json())  # D1: layer modules report reference_band/reference_note, never a band
         self.assertIn("signals", analysis.to_json())
 
     @unittest.skipUnless(HAVE_CV2, "opencv required")
@@ -127,9 +128,13 @@ class FaceSwapSeamTest(unittest.TestCase):
             code = main(["faceswap-seam", str(test_path), "--format", "json"])
         self.assertEqual(code, 0)
         output = json.loads(buf.getvalue())
-        self.assertIn("score", output)
-        self.assertIn("band", output)
-        self.assertIn("verdict", output)
+        # D1: the standalone command prints a layer diagnostic — raw score,
+        # reference_band, fixed notice; never band/verdict.
+        self.assertEqual(output["kind"], "layer_diagnostic")
+        self.assertIn("raw_score", output)
+        self.assertIn(output["reference_band"], {"reference", "unavailable"})
+        self.assertNotIn("band", output)
+        self.assertNotIn("verdict", output)
 
     @unittest.skipUnless(HAVE_CV2, "opencv required")
     def test_core_deep_image_layers_integration(self) -> None:

@@ -189,55 +189,60 @@ def _scan_cancel_payload(query: str) -> dict[str, object]:
 
 
 def _analyze_file_payload(query: str) -> dict[str, object]:
-    """Handle single file analysis request."""
+    """Single-file analysis (``/api/analyze-file``).
+
+    D3: the conclusion is the scan result (``analysis_api.analyze_path``,
+    three verdicts) — the same path, photo gate and thresholds as /api/scan.
+    The provenance-metadata scan and the tool-marker match ride along as
+    layer diagnostics (reference, no band). No pixel pre-screen runs here:
+    scan's own pixel layer is gated by the photo classifier and recorded in
+    coverage.
+    """
+    from .cli_standalone import analysis_result_payload, file_sha256, tool_attribution
+    from .layer_diagnostic import to_layer_diagnostic
+
     params = parse_qs(query)
     file_path = params.get("file", [""])[0]
-    
+
     if not file_path:
         return {"error": "파일 경로가 없습니다"}
     # G31: confined to the operator roots even when none are registered
     # (then only the server's default folder) — raises ReadRootDenied (403).
     path = _require_read_root(Path(file_path))
+    if not path.exists():
+        return {"error": f"파일이 존재하지 않습니다: {file_path}"}
 
+    options = _web_options()
+    thresholds = load_thresholds(options)
     try:
-        from .classifier import classify_metadata
-        from .c2pa import analyze_metadata_forensic
-        from .pixel_analyzer import analyze_pixels
-
-        if not path.exists():
-            return {"error": f"파일이 존재하지 않습니다: {file_path}"}
-        
-        # Extract metadata
-        metadata = _extract_metadata(path)
-        
-        # Classify
-        classification = classify_metadata(metadata)
-        
-        # Forensic analysis
-        forensic = analyze_metadata_forensic(path)
-        
-        # Pixel analysis (if image)
-        pixel_result = None
-        response: dict[str, Any] = {}
-        if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"}:
-            try:
-                pixel_result = analyze_pixels(path)
-            except Exception as exc:
-                logger.exception("pixel layer failed for %s", path)
-                _layer_error(response, "pixel_analysis", exc)
-
-        response.update({
-            "file": str(path),
-            "classification": classification.to_json(),
-            "forensic": forensic.to_json(),
-            "pixel_analysis": pixel_result.to_json() if pixel_result else None,
-        })
-        return response
+        item = analyze_path(path, options, thresholds=thresholds)
     except Exception as exc:
         logger.exception("file analysis failed")
         # Detail stays in `detail` so the GUI shows a clean headline instead
         # of a raw exception sentence; the type/message aid local debugging.
-        return {"error": "파일 분석 중 오류가 발생했습니다", "detail": f"{type(exc).__name__}: {exc}"}
+        return {"error": "파일 분석 중 오류가 발생했습니다", "detail": failure_reason(exc)}
+    response: dict[str, Any] = analysis_result_payload(item, command="analyze-file", sha256=file_sha256(path))
+    response["file"] = str(path)
+    layers: dict[str, Any] = {}
+    try:
+        from .c2pa import analyze_metadata_forensic
+
+        layers["provenance_metadata"] = to_layer_diagnostic(
+            "provenance_metadata", analyze_metadata_forensic(path).to_json(), layer_label="출처 메타데이터 계층"
+        )
+    except Exception as exc:
+        logger.exception("provenance layer failed for %s", path)
+        _layer_error(response, "provenance_metadata", exc)
+    try:
+        layers["tool_candidates"] = to_layer_diagnostic(
+            "tool_attribution", tool_attribution(path).to_json(), layer_label="생성 도구 표지 대조"
+        )
+    except Exception as exc:
+        logger.exception("tool attribution layer failed for %s", path)
+        _layer_error(response, "tool_candidates", exc)
+    response["layer_diagnostics"] = layers
+    response.update(_provenance(options, thresholds))
+    return response
 
 
 def _stats_payload() -> dict[str, object]:
@@ -651,6 +656,27 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
     }
 
 
+def _provenance_layer(raw: dict[str, Any]) -> dict[str, Any]:
+    """c2pa.analyze_metadata_forensic output as a layer diagnostic (D1/D3)."""
+    from .layer_diagnostic import to_layer_diagnostic
+
+    return to_layer_diagnostic("provenance_metadata", raw, layer_label="출처 메타데이터 계층")
+
+
+def _text_statistics_layer(raw: dict[str, Any]) -> dict[str, Any]:
+    """text_advanced output as a layer diagnostic (D1)."""
+    from .layer_diagnostic import to_layer_diagnostic
+
+    return to_layer_diagnostic("text_statistics", raw, layer_label="텍스트 문체 통계 계층")
+
+
+def compare_layer(raw: dict[str, Any]) -> dict[str, Any]:
+    """core.compare_files output as a layer diagnostic (D1)."""
+    from .layer_diagnostic import to_layer_diagnostic
+
+    return to_layer_diagnostic("compare", raw, layer_label="두 파일 유사도 계층")
+
+
 def _check_text_payload(text: str, *, watermark_secret: str | None = None, watermark_gamma: float = 0.25) -> dict[str, object]:
     """Unified text check: core scan heuristics + neural member ensemble
     + fingerprint probes in one payload.
@@ -678,7 +704,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
         item = analyze_path(tmp_name, options, thresholds=thresholds)
         try:
             from .c2pa import analyze_metadata_forensic
-            forensic = analyze_metadata_forensic(Path(tmp_name)).to_json()
+            forensic = _provenance_layer(analyze_metadata_forensic(Path(tmp_name)).to_json())
         except Exception as exc:
             logger.exception("forensic layer failed")
             forensic = None
@@ -704,7 +730,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
         "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "mode": "text",
         "item": record,
-        "advanced": advanced.to_json(),
+        "advanced": _text_statistics_layer(advanced.to_json()),
         "forensic": forensic,
         "watermark": watermark,
         **layer_errors,
@@ -752,7 +778,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
         layer_errors: dict[str, Any] = {}
         try:
             from .c2pa import analyze_metadata_forensic
-            forensic = analyze_metadata_forensic(tmp_path).to_json()
+            forensic = _provenance_layer(analyze_metadata_forensic(tmp_path).to_json())
         except Exception as exc:
             logger.exception("forensic layer failed")
             _layer_error(layer_errors, "forensic", exc)
@@ -760,7 +786,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
         if item.kind == "text":
             try:
                 from .text_advanced import analyze_text_advanced
-                advanced = analyze_text_advanced(payload.decode("utf-8", errors="replace")).to_json()
+                advanced = _text_statistics_layer(analyze_text_advanced(payload.decode("utf-8", errors="replace")).to_json())
             except Exception as exc:
                 logger.exception("text-advanced layer failed")
                 _layer_error(layer_errors, "advanced", exc)
@@ -803,8 +829,12 @@ def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
         from .core import compare_files
         result = compare_files(tmp_paths[0], tmp_paths[1])
         if isinstance(result, dict) and not result.get("error"):
+            # D1: similarity is an unmeasured reference number — the
+            # former same/unclear/different band is not returned.
             options = _web_options()
-            result.update(_provenance(options, load_thresholds(options)))
+            diag = compare_layer(result)
+            diag.update(_provenance(options, load_thresholds(options)))
+            return diag
         return result
     finally:
         for tmp_path in tmp_paths:

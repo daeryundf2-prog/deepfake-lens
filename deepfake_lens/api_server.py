@@ -121,6 +121,18 @@ def missing_server_dependencies() -> list[str]:
     return [name for name in SERVER_DEPENDENCIES if importlib.util.find_spec(name) is None]
 
 
+def _provenance_layer(raw: dict[str, Any]) -> dict[str, Any]:
+    from .webapp_api import _provenance_layer as layer
+
+    return layer(raw)
+
+
+def _text_statistics_layer(raw: dict[str, Any]) -> dict[str, Any]:
+    from .webapp_api import _text_statistics_layer as layer
+
+    return layer(raw)
+
+
 def _api_options() -> Any:
     """AnalysisOptions for an API request: the server's models dir, defaults."""
     from .webapp_api import _web_options
@@ -229,6 +241,17 @@ def create_app(
 
     # Synchronous analysis endpoints are plain `def`: FastAPI runs them in
     # its thread pool, so a multi-second analysis never blocks the loop.
+    # D2: every /api/analyze/* and /api/classify answer is the three-verdict
+    # result of analysis_api.analyze_path (the scan path); per-layer extras
+    # are layer diagnostics (reference numbers, no band). /api/analyze/face
+    # is a layer diagnostic only, like the `face` CLI command.
+    def _verdict_payload(path: Path, command: str) -> dict[str, Any]:
+        from .cli_standalone import analysis_result_payload, file_sha256
+
+        options = _api_options()
+        item = analyze_path(path, options, thresholds=load_thresholds(options))
+        return analysis_result_payload(item, command=command, sha256=file_sha256(path))
+
     @app.post("/api/analyze/image")
     def analyze_image(file_path: str):
         try:
@@ -236,26 +259,21 @@ def create_app(
         except ReadRootDenied:
             return _denied()
         try:
-            result = analyze_path(path, _api_options())
-            return {"status": "success", "data": result.to_json()}
+            return {"status": "success", "data": _verdict_payload(path, "analyze/image")}
         except Exception as exc:
             logger.exception("request failed")
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.post("/api/analyze/audio")
     def analyze_audio(file_path: str):
-        from .audio import analyze_audio
         try:
             path = confine_request_path(file_path, default_folder)
         except ReadRootDenied:
             return _denied()
         try:
-            # Bundled audio profiles degrade gracefully when checkpoints
-            # or the optional torch stack is absent.
-            models_dir = default_models_dir()
-            profiles = [p for name in ("aasist-runtime.json", "wav2vec-deepfake-audio-runtime.json") if (p := models_dir / name).is_file()]
-            result = analyze_audio(path, model_path=profiles or None)
-            return {"status": "success", "data": result.to_json()}
+            # The scan path runs the audio heuristics as reference signals
+            # and the bundled audio profiles under their pins/gates.
+            return {"status": "success", "data": _verdict_payload(path, "analyze/audio")}
         except Exception as exc:
             logger.exception("request failed")
             raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -263,23 +281,35 @@ def create_app(
     @app.post("/api/analyze/face")
     def analyze_face(file_path: str):
         from .face import analyze_faces
+        from .layer_diagnostic import to_layer_diagnostic
         try:
             path = confine_request_path(file_path, default_folder)
         except ReadRootDenied:
             return _denied()
         try:
             result = analyze_faces(path)
-            return {"status": "success", "data": result.to_json()}
+            diag = to_layer_diagnostic("face", result.to_json(), layer_label="얼굴 조작 계층", subject=str(path))
+            return {"status": "success", "data": diag}
         except Exception as exc:
             logger.exception("request failed")
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.post("/api/analyze/text")
     def analyze_text(text: str):
+        from .cli_standalone import analyze_text_payload
+        from .layer_diagnostic import to_layer_diagnostic
         from .text_advanced import analyze_text_advanced
+        if len(text.strip()) > 256 * 1024:
+            raise HTTPException(status_code=400, detail="텍스트가 256KB를 초과합니다")
         try:
-            result = analyze_text_advanced(text)
-            return {"status": "success", "data": result.to_json()}
+            options = _api_options()
+            data = analyze_text_payload(text, options, command="analyze/text", thresholds=load_thresholds(options))
+            data["layer_diagnostics"] = {
+                "text_statistics": to_layer_diagnostic(
+                    "text_statistics", analyze_text_advanced(text).to_json(), layer_label="텍스트 문체 통계 계층"
+                ),
+            }
+            return {"status": "success", "data": data}
         except Exception as exc:
             logger.exception("request failed")
             raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -287,39 +317,37 @@ def create_app(
     @app.post("/api/analyze/forensic")
     def analyze_forensic(file_path: str):
         from .c2pa import analyze_metadata_forensic
+        from .layer_diagnostic import to_layer_diagnostic
         try:
             path = confine_request_path(file_path, default_folder)
         except ReadRootDenied:
             return _denied()
         try:
-            result = analyze_metadata_forensic(path)
-            return {"status": "success", "data": result.to_json()}
+            data = _verdict_payload(path, "analyze/forensic")
+            data["layer_diagnostics"] = {
+                "provenance_metadata": to_layer_diagnostic(
+                    "provenance_metadata", analyze_metadata_forensic(path).to_json(), layer_label="출처 메타데이터 계층"
+                ),
+            }
+            return {"status": "success", "data": data}
         except Exception as exc:
             logger.exception("request failed")
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.post("/api/classify")
     def classify(file_path: str):
-        from .classifier import classify_metadata, classify_text_content
-        from .png import read_png_metadata
+        from .cli_standalone import tool_attribution
+        from .layer_diagnostic import to_layer_diagnostic
         try:
             path = confine_request_path(file_path, default_folder)
         except ReadRootDenied:
             return _denied()
         try:
-            max_bytes = 64 * 1024 * 1024
-            with path.open("rb") as handle:
-                data = handle.read(max_bytes)
-            text_extensions = {".txt", ".md", ".py", ".js", ".json", ".csv", ".log"}
-            if path.suffix.lower() in text_extensions:
-                result = classify_text_content(data.decode("utf-8", errors="ignore"))
-            elif data[:8] == b"\x89PNG\r\n\x1a\n":
-                result = classify_metadata(read_png_metadata(data))
-            elif data[:2] == b"\xff\xd8":
-                result = classify_metadata({"format": "jpeg", "size": str(len(data))})
-            else:
-                result = classify_metadata({})
-            return {"status": "success", "data": result.to_json()}
+            data = _verdict_payload(path, "classify")
+            data["tool_candidates"] = to_layer_diagnostic(
+                "tool_attribution", tool_attribution(path).to_json(), layer_label="생성 도구 표지 대조"
+            )
+            return {"status": "success", "data": data}
         except Exception as exc:
             logger.exception("request failed")
             raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -361,7 +389,7 @@ def create_app(
                 data: dict[str, Any] = {
                     "mode": "text",
                     "item": item.to_json(),
-                    "advanced": analyze_text_advanced(trimmed).to_json(),
+                    "advanced": _text_statistics_layer(analyze_text_advanced(trimmed).to_json()),
                 }
                 if watermark_secret:
                     try:
@@ -383,7 +411,7 @@ def create_app(
                 data = {"mode": "file", "item": item.to_json()}
                 try:
                     from .c2pa import analyze_metadata_forensic
-                    data["forensic"] = analyze_metadata_forensic(path).to_json()
+                    data["forensic"] = _provenance_layer(analyze_metadata_forensic(path).to_json())
                 except Exception as exc:
                     logger.exception("forensic layer failed")
                     data["forensic"] = None
@@ -391,9 +419,9 @@ def create_app(
                 if item.kind == "text":
                     try:
                         from .text_advanced import analyze_text_advanced
-                        data["advanced"] = analyze_text_advanced(
+                        data["advanced"] = _text_statistics_layer(analyze_text_advanced(
                             path.read_text(encoding="utf-8", errors="replace")[: 256 * 1024]
-                        ).to_json()
+                        ).to_json())
                     except Exception as exc:
                         logger.exception("text-advanced layer failed")
                         data["advanced"] = None
@@ -540,7 +568,7 @@ def create_app(
 
                 yield ("progress", {"stage": "text-advanced", "index": 2, "total": 3})
                 from .text_advanced import analyze_text_advanced
-                stages.append(("advanced", analyze_text_advanced(trimmed).to_json()))
+                stages.append(("advanced", _text_statistics_layer(analyze_text_advanced(trimmed).to_json())))
 
                 if watermark_secret:
                     if cancel.is_set():
@@ -572,7 +600,7 @@ def create_app(
                 yield ("progress", {"stage": "forensic", "index": 2, "total": 2})
                 try:
                     from .c2pa import analyze_metadata_forensic
-                    forensic: Any = analyze_metadata_forensic(path).to_json()
+                    forensic: Any = _provenance_layer(analyze_metadata_forensic(path).to_json())
                 except Exception as exc:
                     logger.exception("forensic layer failed")
                     forensic = None
@@ -581,9 +609,9 @@ def create_app(
                 if item.kind == "text":
                     try:
                         from .text_advanced import analyze_text_advanced
-                        stages.append(("advanced", analyze_text_advanced(
+                        stages.append(("advanced", _text_statistics_layer(analyze_text_advanced(
                             path.read_text(encoding="utf-8", errors="replace")[: 256 * 1024]
-                        ).to_json()))
+                        ).to_json())))
                     except Exception as exc:
                         logger.exception("text-advanced layer failed")
                         stages.append(("advanced", None))
@@ -717,7 +745,8 @@ def create_app(
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         if "error" in result:
             raise HTTPException(status_code=400, detail=str(result["error"]))
-        return {"status": "success", "data": result}
+        from .webapp_api import compare_layer
+        return {"status": "success", "data": compare_layer(result)}
 
     @app.post("/api/multimodal")
     def multimodal(
@@ -726,6 +755,10 @@ def create_app(
         audio_score: int | None = None,
         video_score: int | None = None,
     ):
+        # D2: caller-supplied scores are unmeasured reference numbers — the
+        # combination is a layer diagnostic, never a band. A verdict for
+        # files comes from /api/analyze/* or /api/scan.
+        from .layer_diagnostic import to_layer_diagnostic
         from .multimodal import analyze_multimodal
         try:
             result = analyze_multimodal(
@@ -734,7 +767,8 @@ def create_app(
                 audio_score=audio_score,
                 video_score=video_score,
             )
-            return {"status": "success", "data": result.to_json()}
+            diag = to_layer_diagnostic("multimodal_scores", result.to_json(), layer_label="멀티모달 원점수 조합")
+            return {"status": "success", "data": diag}
         except Exception as exc:
             logger.exception("request failed")
             raise HTTPException(status_code=500, detail=str(exc)) from exc

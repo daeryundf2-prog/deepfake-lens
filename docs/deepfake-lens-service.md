@@ -97,17 +97,17 @@ and, for the streaming endpoints, no job is started (G31).
 |---|---|---|---|
 | GET | `/` | — | `{"message", "version"}` (no auth) |
 | GET | `/api/health` | — | `{"status": "healthy"}` |
-| POST | `/api/analyze/image` | `file_path` | `ClassificationResult.to_json()` — `score`/`band`/`signals`/`limitations`/`source_guess`; score is a prioritization signal, not a truth label |
-| POST | `/api/analyze/audio` | `file_path` | `AudioAnalysis.to_json()` |
-| POST | `/api/analyze/face` | `file_path` | `FaceAnalysis.to_json()` |
-| POST | `/api/analyze/text` | `text` | `TextAdvancedAnalysis.to_json()` |
-| POST | `/api/analyze/forensic` | `file_path` | `MetadataForensic.to_json()` (C2PA/provenance) |
-| POST | `/api/classify` | `file_path` | `Classification.to_json()` — metadata/content classification; reads at most 64 MiB |
-| POST | `/api/multimodal` | `image_score`, `text_score`, `audio_score`, `video_score` (ints, optional) | `MultimodalAnalysis.to_json()` — scalar fusion of supplied scores |
-| POST | `/api/compare` | `file_path_a` + `file_path_b` | Two-file comparison — same-speaker distance (audio pairs) or same-author stylometry (text/document pairs) |
+| POST | `/api/analyze/image` | `file_path` | **analysis_result** (D2): `kind: "analysis_result"`, `verdict_code` (`manipulation_evidence`/`authenticity_evidence`/`undetermined`), `verdict`, `grade`, `evidence`, `coverage`, `limitations`, `reference_signals`, `sha256` — the scan result from `analysis_api.analyze_path`; no band, no uncalibrated score |
+| POST | `/api/analyze/audio` | `file_path` | analysis_result (the audio heuristics are reference signals; the audio profiles run under their pins/gates) |
+| POST | `/api/analyze/face` | `file_path` | **layer_diagnostic**: `kind: "layer_diagnostic"`, `measured: false`, `raw_score`, `reference_band` (`reference`/`unavailable`), `reference_note`, the fixed notice and the face layer's raw numbers under `diagnostic` |
+| POST | `/api/analyze/text` | `text` (≤256 KB) | analysis_result (text is reference grade → `undetermined`) + `layer_diagnostics.text_statistics` |
+| POST | `/api/analyze/forensic` | `file_path` | analysis_result (an A1111 PNG is `manipulation_evidence`, as in `scan`) + `layer_diagnostics.provenance_metadata` (C2PA/provenance scan) |
+| POST | `/api/classify` | `file_path` | analysis_result + `tool_candidates` (layer diagnostic of AI-tool marker matches; reads at most 64 MiB) |
+| POST | `/api/multimodal` | `image_score`, `text_score`, `audio_score`, `video_score` (ints, optional) | layer_diagnostic — the supplied scores are unmeasured; their combination is never a band |
+| POST | `/api/compare` | `file_path_a` + `file_path_b` | layer_diagnostic — same-speaker distance (audio pairs) or same-author stylometry (text/document pairs) under `diagnostic`; no same/different band |
 | POST | `/api/check` | `file_path` **or** `text` | Unified check-all: core scan + every `models/` member that fits the modality + C2PA/forensic + text fingerprint probes in one `{mode, item, advanced?, forensic?}` payload |
 | POST | `/api/check/stream` | same as `/api/check` | Server-Sent Events (`text/event-stream`): `job` → `progress` per stage → `result` (same payload as `/api/check`), or `error`/`cancelled` |
-| POST | `/api/scan/stream` | `directory`, `recursive` (bool), `max_files` (≤5000, default 200) | SSE batch scan of a server-local directory: `job` → `progress` per file (`{stage, index, total, path, band}`) → `result` (`{mode: "scan", total, counts, items}`), or `error`/`cancelled` |
+| POST | `/api/scan/stream` | `directory`, `recursive` (bool), `max_files` (≤5000, default 200) | SSE batch scan of a server-local directory: `job` → `progress` per file (`{stage, index, total, path, verdict_code}`) → `result` (`{mode: "scan", total, counts, items}`; `counts` = `manipulation_evidence`/`authenticity_evidence`/`undetermined`/`other`/`failed`), or `error`/`cancelled` |
 | POST | `/api/jobs/{job_id}/cancel` | — | Sets the job's cancellation flag; takes effect at the next stage boundary (`{"status": "success", "cancelled": true}`, 404 for unknown/finished jobs) |
 | GET | `/api/jobs/{job_id}` | — | `{"job_id", "done", "cancelled"}` for in-flight stream jobs; 404 once the job is reaped |
 | GET | `/api/scan`, `/api/scan-status`, `/api/scan-cancel`, `/api/analyze-file`, `/api/heatmap`, `/api/preview` | as in the web GUI table below | Same payload functions as `web` (identical JSON); `/api/heatmap` is `image/png` (errors `text/plain`), `/api/preview` uses the file's media type; both send `X-Content-Type-Options: nosniff` |
@@ -138,7 +138,7 @@ JSON API under `/api/` (GET plus `POST /api/feedback`, `/api/report`,
 | `/api/scan` | `folder`, `pixel` (`off`/`fast`/`deep`), `recursive`, `max_files`, `max_file_bytes`, `dedupe`, `heatmaps`, `deep_signals`, `no_default_engine`, `model_path` / `fusion_profile` (bare file name in the models dir), `async` | the same `scan_to_json` payload the CLI prints (`{"schema_version", "summary", "coverage", "thresholds", "items"}`) or `{"error": "..."}`; with `async=1` returns `{"job_id", "status": "running"}`. **400** `{"error": ...}` for an invalid option (non-integer limit, unknown pixel mode, `model_path`/`fusion_profile` not a file name inside the models dir). **403** `{"error": "허용되지 않은 경로"}` when `folder` is outside the read roots (see below) |
 | `/api/scan-status` | `job` | `{"job_id", "status": "running"\|"done"\|"error"}` plus `result` once finished; jobs live in memory only and expire after 15 min (max 32 concurrent) |
 | `/api/scan-cancel` | `job` | Sets the job's cancel flag; the scan stops between items and returns partial results as `done`. `{"cancelled": true}` while running, `false` once finished |
-| `/api/analyze-file` | `file` | `{"file", "classification", "forensic", "pixel_analysis"}` or `{"error"}` (+`detail` for unexpected failures). **403** `{"error": "허용되지 않은 경로"}` when `file` is outside the read roots |
+| `/api/analyze-file` | `file` | analysis_result (D3: the scan result — verdict_code, evidence, coverage; the scan's own photo-gated pixel layer only) + `layer_diagnostics.provenance_metadata` / `.tool_candidates`, or `{"error"}` (+`detail` for unexpected failures). No ungated pixel pre-screen and no band. **403** `{"error": "허용되지 않은 경로"}` when `file` is outside the read roots |
 | `/api/heatmap` | `path`, `root` | PNG bytes; 403 unless `path` is a `.png` under a **server-registered** read root (see below), 404 if missing |
 | `/api/preview` | `path`, `root` | media bytes with `nosniff`; same registered-root rule, media extensions only, ≤128 MiB |
 | `/api/stats` | — | `{"status", "version", "modules"}` |

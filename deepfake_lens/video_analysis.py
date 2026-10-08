@@ -10,6 +10,7 @@ import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
 
 
@@ -37,10 +38,10 @@ class FrameAnalysis:
 
 @dataclass(frozen=True)
 class VideoTemporalAnalysis:
+    # D1: raw heuristic sum, reference only — no 67/35 band, no verdict.
     score: int
-    band: str
-    band_label: str
-    verdict: str
+    reference_band: str
+    reference_note: str
     signals: list[VideoEvidenceSignal]
     limitations: list[str]
     frame_count: int
@@ -185,24 +186,10 @@ def analyze_video_temporal(
 
     score = min(100, sum(signal.weight for signal in signals))
 
-    if score >= 67:
-        band = "high"
-        band_label = "높음"
-        verdict = "비디오에서 템포럴 이상 신호가 강합니다."
-    elif score >= 35:
-        band = "medium"
-        band_label = "주의"
-        verdict = "비디오에서 몇 가지 이상 신호가 보여 추가 확인이 필요합니다."
-    else:
-        band = "low"
-        band_label = "낮음"
-        verdict = "비디오에서 뚜렷한 템포럴 이상 신호는 적습니다."
-
     return VideoTemporalAnalysis(
         score=score,
-        band=band,
-        band_label=band_label,
-        verdict=verdict,
+        reference_band=REFERENCE_BAND,
+        reference_note=raw_score_note("영상 시간축 휴리스틱", score),
         signals=signals,
         limitations=limitations,
         frame_count=frame_count,
@@ -253,9 +240,8 @@ def _analyze_audio_track(
 def _error_analysis(message: str) -> VideoTemporalAnalysis:
     return VideoTemporalAnalysis(
         score=0,
-        band="unknown",
-        band_label="판단 어려움",
-        verdict=message,
+        reference_band=UNAVAILABLE_BAND,
+        reference_note=message,
         signals=[],
         limitations=[message],
         frame_count=0,

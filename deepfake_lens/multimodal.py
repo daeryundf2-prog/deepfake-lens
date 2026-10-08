@@ -16,6 +16,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Sequence
 
+from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
+
 
 @dataclass(frozen=True)
 class MultimodalEvidenceSignal:
@@ -27,19 +29,23 @@ class MultimodalEvidenceSignal:
 
 @dataclass(frozen=True)
 class MultimodalAnalysis:
+    # D1: the combination of caller-supplied raw scores is reference only.
+    # The former 67/35 band, verdict and ``overall_ai_probability``
+    # (= score/100, not a probability) are gone; a conclusion for files
+    # comes from ``deepfake-lens multimodal FILE…`` (analysis_api).
     score: int
-    band: str
-    band_label: str
-    verdict: str
+    reference_band: str
+    reference_note: str
     signals: list[MultimodalEvidenceSignal]
     limitations: list[str]
     modalities_used: list[str]
     consistency_score: float
-    overall_ai_probability: float
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
 
+
+_MODALITY_LABELS = {"image": "이미지", "text": "텍스트", "audio": "오디오", "video": "비디오"}
 
 # A/V sync thresholds
 AV_SYNC_MAX_LAG_SECONDS = 1.0
@@ -53,9 +59,10 @@ AV_SYNC_MIN_SAMPLES = 16
 @dataclass(frozen=True)
 class AvSyncAnalysis:
     score: int
-    band: str
-    band_label: str
-    verdict: str
+    reference_band: str
+    # The measurement observation (offset/correlation) or the reason the
+    # measurement could not run; never a band.
+    reference_note: str
     signals: list[MultimodalEvidenceSignal]
     limitations: list[str]
     # Positive offset = the audio envelope is delayed relative to visual
@@ -89,85 +96,27 @@ def analyze_multimodal(
     scores: list[tuple[int, str]] = []
     source_guesses: list[tuple[str, str]] = []
 
-    if image_score is not None:
-        scores.append((image_score, "image"))
-        modalities_used.append("image")
-        if image_score >= 67:
-            signals.append(MultimodalEvidenceSignal(
-                "이미지 강한 의심",
-                f"이미지 분석 점수({image_score})가 높습니다.",
-                30,
-                "image",
-            ))
-        elif image_score >= 35:
-            signals.append(MultimodalEvidenceSignal(
-                "이미지 의심",
-                f"이미지 분석 점수({image_score})가 중간입니다.",
-                15,
-                "image",
-            ))
-        if image_source_guess and image_source_guess != "unknown":
-            source_guesses.append((image_source_guess, "image"))
-
-    if text_score is not None:
-        scores.append((text_score, "text"))
-        modalities_used.append("text")
-        if text_score >= 67:
-            signals.append(MultimodalEvidenceSignal(
-                "텍스트 강한 의심",
-                f"텍스트 분석 점수({text_score})가 높습니다.",
-                25,
-                "text",
-            ))
-        elif text_score >= 35:
-            signals.append(MultimodalEvidenceSignal(
-                "텍스트 의심",
-                f"텍스트 분석 점수({text_score})가 중간입니다.",
-                12,
-                "text",
-            ))
-        if text_source_guess and text_source_guess != "unknown":
-            source_guesses.append((text_source_guess, "text"))
-
-    if audio_score is not None:
-        scores.append((audio_score, "audio"))
-        modalities_used.append("audio")
-        if audio_score >= 67:
-            signals.append(MultimodalEvidenceSignal(
-                "오디오 강한 의심",
-                f"오디오 분석 점수({audio_score})가 높습니다.",
-                28,
-                "audio",
-            ))
-        elif audio_score >= 35:
-            signals.append(MultimodalEvidenceSignal(
-                "오디오 의심",
-                f"오디오 분석 점수({audio_score})가 중간입니다.",
-                14,
-                "audio",
-            ))
-        if audio_source_guess and audio_source_guess != "unknown":
-            source_guesses.append((audio_source_guess, "audio"))
-
-    if video_score is not None:
-        scores.append((video_score, "video"))
-        modalities_used.append("video")
-        if video_score >= 67:
-            signals.append(MultimodalEvidenceSignal(
-                "비디오 강한 의심",
-                f"비디오 분석 점수({video_score})가 높습니다.",
-                26,
-                "video",
-            ))
-        elif video_score >= 35:
-            signals.append(MultimodalEvidenceSignal(
-                "비디오 의심",
-                f"비디오 분석 점수({video_score})가 중간입니다.",
-                13,
-                "video",
-            ))
-        if video_source_guess and video_source_guess != "unknown":
-            source_guesses.append((video_source_guess, "video"))
+    # D1: each caller-supplied score is recorded as a raw input. The former
+    # 67/35 cutoffs that turned it into "강한 의심"/"의심" signals were never
+    # measured and are gone.
+    for modality, modality_score, guess in (
+        ("image", image_score, image_source_guess),
+        ("text", text_score, text_source_guess),
+        ("audio", audio_score, audio_source_guess),
+        ("video", video_score, video_source_guess),
+    ):
+        if modality_score is None:
+            continue
+        scores.append((modality_score, modality))
+        modalities_used.append(modality)
+        signals.append(MultimodalEvidenceSignal(
+            f"{_MODALITY_LABELS[modality]} 입력 원점수",
+            f"호출자가 제공한 {_MODALITY_LABELS[modality]} 원점수 {modality_score} (미측정).",
+            0,
+            modality,
+        ))
+        if guess and guess != "unknown":
+            source_guesses.append((guess, modality))
 
     # A/V sync result, when provided, is a true cross-modal measurement:
     # its suspicion signals enter the score via the cross-modal weight.
@@ -210,31 +159,18 @@ def analyze_multimodal(
     else:
         score = 0
 
-    if score >= 67:
-        band = "high"
-        band_label = "높음"
-        verdict = "멀티모달 분석에서 AI 생성 의심 신호가 강합니다."
-    elif score >= 35:
-        band = "medium"
-        band_label = "주의"
-        verdict = "멀티모달 분석에서 몇 가지 의심 신호가 보여 추가 확인이 필요합니다."
-    else:
-        band = "low"
-        band_label = "낮음"
-        verdict = "멀티모달 분석에서 뚜렷한 AI 생성 의심 신호는 적습니다."
-
-    overall_ai_probability = min(1.0, score / 100.0)
-
     return MultimodalAnalysis(
         score=score,
-        band=band,
-        band_label=band_label,
-        verdict=verdict,
+        reference_band=REFERENCE_BAND if scores or av_sync is not None else UNAVAILABLE_BAND,
+        reference_note=(
+            raw_score_note("멀티모달 원점수 조합", score)
+            if scores or av_sync is not None
+            else "조합할 모달리티 원점수가 없습니다."
+        ),
         signals=signals,
         limitations=limitations,
         modalities_used=modalities_used,
         consistency_score=consistency_score,
-        overall_ai_probability=overall_ai_probability,
     )
 
 
@@ -388,7 +324,7 @@ def av_sync_from_envelopes(
     score = 0
 
     if peak_correlation < AV_SYNC_MIN_CORRELATION:
-        verdict = "오디오-비디오 에너지 상관이 낮아 싱크 일치 여부를 판별할 수 없습니다."
+        note = "오디오-비디오 에너지 상관이 낮아 싱크 일치 여부를 판별할 수 없습니다."
         limitations.append(
             "무음 구간·정지 장면·배경음 위주 오디오는 본래 상관이 낮습니다. 낮은 상관 자체는 의심 신호가 아닙니다."
         )
@@ -403,18 +339,15 @@ def av_sync_from_envelopes(
                 "cross-modal",
             )
         )
-        verdict = "오디오와 화면 움직임이 상관되지만 유의미한 시간 오프셋이 있습니다."
+        note = "오디오와 화면 움직임이 상관되지만 유의미한 시간 오프셋이 있습니다."
         limitations.append("프레임레이트 추정 오차와 인코딩 지연이 소규모 오프셋을 만들 수 있습니다.")
     else:
-        verdict = "오디오-모션 에너지가 정상 범위에서 동기화되어 있습니다."
+        note = "오디오-모션 에너지 상관 피크가 싱크 오프셋 기준 이내입니다 (참고 측정값)."
 
-    band = "medium" if score >= 25 else "low"
-    band_label = "주의" if band == "medium" else "낮음"
     return AvSyncAnalysis(
         score=score,
-        band=band,
-        band_label=band_label,
-        verdict=verdict,
+        reference_band=REFERENCE_BAND,
+        reference_note=note,
         signals=signals,
         limitations=limitations,
         offset_seconds=offset_seconds,
@@ -429,9 +362,8 @@ def _av_sync_error(
 ) -> AvSyncAnalysis:
     return AvSyncAnalysis(
         score=0,
-        band="unknown",
-        band_label="판단 어려움",
-        verdict=message,
+        reference_band=UNAVAILABLE_BAND,
+        reference_note=message,
         signals=[],
         limitations=[message],
         offset_seconds=None,

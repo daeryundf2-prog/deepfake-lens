@@ -15,6 +15,8 @@ import re
 from collections import Counter
 from dataclasses import asdict, dataclass
 
+from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
+
 
 @dataclass(frozen=True)
 class TextAdvancedEvidenceSignal:
@@ -25,13 +27,14 @@ class TextAdvancedEvidenceSignal:
 
 @dataclass(frozen=True)
 class TextAdvancedAnalysis:
+    # D1: raw statistic sum, reference only. The former band/verdict (67/35
+    # cutoffs) and ``ai_probability`` (= score/100, not a probability) are
+    # gone; text is reference grade in every phase-0 output.
     score: int
-    band: str
-    band_label: str
-    verdict: str
+    reference_band: str
+    reference_note: str
     signals: list[TextAdvancedEvidenceSignal]
     limitations: list[str]
-    ai_probability: float
     style_profile: str
 
     def to_json(self) -> dict[str, object]:
@@ -39,17 +42,15 @@ class TextAdvancedAnalysis:
 
 
 def analyze_text_advanced(text: str) -> TextAdvancedAnalysis:
-    """Perform advanced text analysis for AI generation detection."""
+    """Compute reference-only text statistics (bigram entropy, burstiness, …)."""
     trimmed = text.strip()
     if not trimmed:
         return TextAdvancedAnalysis(
             score=0,
-            band="unknown",
-            band_label="판단 어려움",
-            verdict="분석할 텍스트가 비어 있습니다.",
+            reference_band=UNAVAILABLE_BAND,
+            reference_note="분석할 텍스트가 비어 있습니다.",
             signals=[],
             limitations=["텍스트가 비어 있습니다."],
-            ai_probability=0.0,
             style_profile="empty",
         )
 
@@ -130,31 +131,14 @@ def analyze_text_advanced(text: str) -> TextAdvancedAnalysis:
     limitations.append("통계적 휴리스틱 기반 선별 결과이며, 확정적 판별이 아닙니다.")
 
     score = min(100, sum(signal.weight for signal in signals))
-
-    if score >= 67:
-        band = "high"
-        band_label = "높음"
-        verdict = "텍스트에서 AI 생성 의심 신호가 강합니다."
-    elif score >= 35:
-        band = "medium"
-        band_label = "주의"
-        verdict = "텍스트에서 몇 가지 의심 신호가 보여 추가 확인이 필요합니다."
-    else:
-        band = "low"
-        band_label = "낮음"
-        verdict = "텍스트에서 뚜렷한 AI 생성 의심 신호는 적습니다."
-
-    ai_probability = min(1.0, score / 100.0)
     style_profile = _classify_style_profile(words, trimmed)
 
     return TextAdvancedAnalysis(
         score=score,
-        band=band,
-        band_label=band_label,
-        verdict=verdict,
+        reference_band=REFERENCE_BAND,
+        reference_note=raw_score_note("텍스트 문체 통계", score),
         signals=signals,
         limitations=limitations,
-        ai_probability=ai_probability,
         style_profile=style_profile,
     )
 

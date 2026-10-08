@@ -26,8 +26,8 @@ class VideoTemporalAnalysisTest(unittest.TestCase):
         """Analysis of nonexistent file should return error analysis."""
         result = analyze_video_temporal(Path("/nonexistent/video.mp4"))
         self.assertEqual(result.score, 0)
-        self.assertEqual(result.band, "unknown")
-        self.assertIn("존재하지 않습니다", result.verdict)
+        self.assertEqual(result.reference_band, "unavailable")  # D1: layer modules report reference_band/reference_note, never a band
+        self.assertIn("존재하지 않습니다", result.reference_note)
 
     def test_unsupported_format_returns_error(self) -> None:
         """Analysis of unsupported format should return error analysis."""
@@ -35,7 +35,7 @@ class VideoTemporalAnalysisTest(unittest.TestCase):
         tmp_path.write_bytes(b"not video")
         result = analyze_video_temporal(tmp_path)
         self.assertEqual(result.score, 0)
-        self.assertIn("지원하지 않는", result.verdict)
+        self.assertIn("지원하지 않는", result.reference_note)
         tmp_path.unlink(missing_ok=True)
 
     def test_analysis_returns_dataclass(self) -> None:
@@ -49,8 +49,10 @@ class VideoTemporalAnalysisTest(unittest.TestCase):
         data = result.to_json()
         self.assertIsInstance(data, dict)
         self.assertIn("score", data)
-        self.assertIn("band", data)
-        self.assertIn("verdict", data)
+        self.assertIn("reference_band", data)
+        self.assertNotIn("band", data)  # D1: layer modules report reference_band/reference_note, never a band
+        self.assertIn("reference_note", data)
+        self.assertNotIn("verdict", data)
         self.assertIn("frame_count", data)
         self.assertIn("duration_seconds", data)
 
@@ -180,8 +182,8 @@ class AnalyzeFileVideoDispatchTest(unittest.TestCase):
         from deepfake_lens.video_analysis import VideoEvidenceSignal
 
         analysis = VideoTemporalAnalysis(
-            score=40, band="medium", band_label="주의",
-            verdict="몇 가지 이상 신호가 보입니다.",
+            score=40, reference_band="reference",  # D1: no band/verdict on layer results
+            reference_note="영상 시간축 휴리스틱 참고 원점수 40/100",
             signals=[VideoEvidenceSignal("밝기 불일치", "테스트", 20)],
             limitations=["테스트 한계"],
             frame_count=10, duration_seconds=10.0, fps=1.0,

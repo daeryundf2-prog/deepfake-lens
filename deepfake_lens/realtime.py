@@ -1,7 +1,11 @@
-"""Realtime deepfake detection module.
+"""Realtime frame-score monitor.
 
-Provides lightweight, frame-by-frame analysis for live video streams
-with moving average score stabilization and alert thresholds.
+Keeps a moving average of per-frame scores from a live stream. The scores
+are uncalibrated reference numbers, so the monitor reports them as a layer
+diagnostic (D1): there is no high/medium/low band and no "AI 생성 의심"
+message. An optional caller-chosen ``alert_threshold`` records when the
+moving average crosses it — a monitoring cue for the operator, not a
+conclusion. Conclusions come from ``deepfake-lens scan``.
 """
 
 from __future__ import annotations
@@ -10,12 +14,19 @@ import time
 from collections import deque
 from dataclasses import asdict, dataclass
 
+from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
+
+# Seconds between two recorded threshold crossings (debounce).
+ALERT_DEBOUNCE_SECONDS = 5.0
+# Crossings kept in the reported state.
+MAX_REPORTED_ALERTS = 10
+
 
 @dataclass(frozen=True)
 class RealtimeAlert:
     timestamp: float
     score: int
-    band: str
+    threshold: int
     message: str
 
     def to_json(self) -> dict[str, object]:
@@ -26,8 +37,10 @@ class RealtimeAlert:
 class RealtimeState:
     current_score: int
     average_score: float
-    band: str
-    band_label: str
+    # D1: "reference" once a frame was seen, "unavailable" before.
+    reference_band: str
+    reference_note: str
+    above_alert_threshold: bool
     frame_count: int
     alerts: list[RealtimeAlert]
     is_live: bool
@@ -37,17 +50,19 @@ class RealtimeState:
 
 
 class RealtimeDetector:
-    """Lightweight realtime detector with moving average stabilization."""
+    """Moving-average monitor over uncalibrated frame scores."""
 
     def __init__(
         self,
         window_size: int = 30,
-        alert_threshold: int = 67,
-        warning_threshold: int = 35,
+        alert_threshold: int | None = None,
+        warning_threshold: int | None = None,
     ) -> None:
+        # warning_threshold is kept for call compatibility only: the former
+        # warning ("주의") band no longer exists and nothing reads it (D1).
+        self.warning_threshold: int | None = warning_threshold
         self.window_size: int = window_size
-        self.alert_threshold: int = alert_threshold
-        self.warning_threshold: int = warning_threshold
+        self.alert_threshold: int | None = alert_threshold
         self.scores: deque[int] = deque(maxlen=window_size)
         self.alerts: list[RealtimeAlert] = []
         self.frame_count: int = 0
@@ -59,32 +74,41 @@ class RealtimeDetector:
         self.frame_count += 1
 
         average_score = sum(self.scores) / len(self.scores)
-
-        if average_score >= self.alert_threshold:
-            band = "high"
-            band_label = "높음"
-            if len(self.alerts) == 0 or (time.time() - self.alerts[-1].timestamp) > 5.0:
+        above = self.alert_threshold is not None and average_score >= self.alert_threshold
+        if above and self.alert_threshold is not None:
+            if not self.alerts or (time.time() - self.alerts[-1].timestamp) > ALERT_DEBOUNCE_SECONDS:
                 self.alerts.append(RealtimeAlert(
                     timestamp=time.time(),
                     score=score,
-                    band=band,
-                    message=f"경고: AI 생성 의심 점수가 높습니다 ({score})",
+                    threshold=self.alert_threshold,
+                    message=(
+                        f"이동 평균 {average_score:.1f}이(가) 지정 임계값 {self.alert_threshold}을(를) 넘었습니다 "
+                        "— 미측정 점수에 대한 모니터링 표시이며 결론이 아닙니다."
+                    ),
                 ))
-        elif average_score >= self.warning_threshold:
-            band = "medium"
-            band_label = "주의"
-        else:
-            band = "low"
-            band_label = "낮음"
 
         return RealtimeState(
             current_score=score,
             average_score=average_score,
-            band=band,
-            band_label=band_label,
+            reference_band=REFERENCE_BAND,
+            reference_note=raw_score_note("실시간 프레임 점수 이동 평균", round(average_score, 1)),
+            above_alert_threshold=above,
             frame_count=self.frame_count,
-            alerts=self.alerts[-10:],  # Last 10 alerts
+            alerts=self.alerts[-MAX_REPORTED_ALERTS:],
             is_live=True,
+        )
+
+    def idle_state(self) -> RealtimeState:
+        """State before any frame was processed."""
+        return RealtimeState(
+            current_score=0,
+            average_score=0.0,
+            reference_band=UNAVAILABLE_BAND,
+            reference_note="처리된 프레임 점수가 없습니다.",
+            above_alert_threshold=False,
+            frame_count=0,
+            alerts=[],
+            is_live=False,
         )
 
     def get_summary(self) -> dict[str, object]:
@@ -119,10 +143,10 @@ class RealtimeDetector:
 
 def create_realtime_detector(
     window_size: int = 30,
-    alert_threshold: int = 67,
-    warning_threshold: int = 35,
+    alert_threshold: int | None = None,
+    warning_threshold: int | None = None,
 ) -> RealtimeDetector:
-    """Create a new realtime detector instance."""
+    """Create a new realtime monitor instance."""
     return RealtimeDetector(
         window_size=window_size,
         alert_threshold=alert_threshold,

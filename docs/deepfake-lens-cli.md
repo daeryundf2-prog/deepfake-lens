@@ -13,7 +13,20 @@ It is intentionally CLI-first:
 
 Every subcommand, briefly. Detail for the core workflow lives in the sections below.
 
-- `scan <folder>`: folder screening with metadata + optional pixel ensemble and reports; `--sign` adds an HMAC-SHA256 `signature`/`signature_key_id` to `--json-out` (key via `--key-file` or `DEEPFAKE_LENS_REPORT_KEY`; proves integrity to the key holder, not legal non-repudiation — anyone holding the key can sign). The MAC covers every field except `signature` and `signature_key_id` — including `signature_note`, `tool_version`, `model_pins` (profile name + pin, `null` when unpinned) and every item's `sha256` (G30). `eval` and `benchmark` accept the same flags; `deepfake_lens.signing.verify_report(path, key)` verifies and reports `검증됨` / `변조됨` / `키 ID 불일치` / `서명 없음` / `검증 키 없음`, and a missing key produces an unsigned report whose note says `서명 없음` rather than a failure. `--html-out`/`--pdf-out`/`--forensic-pdf-out` are signed the same way when `DEEPFAKE_LENS_REPORT_KEY` is set (HTML embeds the signed JSON body in `<script id="deepfake-lens-signed-report">`; PDFs print the signature and the signed body's SHA-256) and say `서명 없음` otherwise.
+**Two output shapes only (phase-0 fix D1).** A conclusion ("is it fake") always comes from
+`analysis_api.analyze_path`, the same path as `scan`: three verdicts (`verdict_code`
+`manipulation_evidence` / `authenticity_evidence` / `undetermined`), `grade`, `evidence`,
+`coverage`. `forensic`, `classify`, `multimodal FILE…`, `explain FILE`, `agent` and
+`legal-report` print that **analysis_result** shape. Every per-layer command (`audio`,
+`video-analysis`, `text-advanced`, `pixel-analysis`, `inpaint`, `prnu`, `rppg`, `face`,
+`avatar`, `3d`, `realtime`, `faceswap-seam`, `compare`, `ml-classify`) prints a **layer
+diagnostic** instead: `kind: "layer_diagnostic"`, `measured: false`, `raw_score`, the layer's raw
+numbers under `diagnostic`, `reference_band` (`reference` = the layer ran, `unavailable` = it
+could not run, with the reason in `reference_note`) and the fixed notice
+"이 출력은 측정되지 않은 참고 신호이며 결론이 아닙니다. 결론은 `scan`을 사용하십시오." No standalone
+command prints a band (높음/주의/낮음) or a "의심 신호가 강합니다/적습니다" sentence.
+
+- `scan <folder>`: folder screening with metadata + optional pixel ensemble and reports; `--sign` adds an HMAC-SHA256 `signature`/`signature_key_id` to `--json-out` (key via `--key-file` or `DEEPFAKE_LENS_REPORT_KEY`; proves integrity to the key holder, not legal non-repudiation — anyone holding the key can sign). The MAC covers every field except `signature` and `signature_key_id` — including `signature_note`, `tool_version`, `model_pins` (profile name + pin, `null` when unpinned) and every item's `sha256` (G30). `eval` and `benchmark` accept the same flags; `verify-report <report.json>` (below) and `deepfake_lens.signing.verify_report(path, key)` verify and report `검증됨` / `변조됨` / `키 ID 불일치` / `서명 없음` / `검증 키 없음`, and a missing key produces an unsigned report whose note says `서명 없음` rather than a failure. `--html-out`/`--pdf-out`/`--forensic-pdf-out` are signed the same way when `DEEPFAKE_LENS_REPORT_KEY` is set (HTML embeds the signed JSON body in `<script id="deepfake-lens-signed-report">`; PDFs print the signature and the signed body's SHA-256) and say `서명 없음` otherwise.
 - Scan order and cache (G11/G32): files are walked in sorted path order (per directory level, files before subdirectories), so the same folder yields the same file order on every OS. `--cache` entries are keyed by the file's SHA-256 + a hash of the analysis options + tool version + the sorted model-profile pin list (`unpinned:<name>` for profiles without a pin) — never by path, size or mtime. Each scanned item records its content `sha256`; with `--dedupe` the same digest is reused rather than hashing twice.
 - `collect <folder> --out`: write a dataset collection plan.
 - `dataset <folder> --manifest-out`: labeled-dataset manifest, audit, split and robustness plans.
@@ -25,25 +38,26 @@ Every subcommand, briefly. Detail for the core workflow lives in the sections be
 - `models [--focus]`: detector registry and runtime profile scaffolding.
 - `train-neural-plan <folder> --out`: neural training/ONNX handoff plan.
 - `video <folder> --out --frame-root`: video frame extraction plan (ffmpeg optional).
-- `video-analysis <file>`: temporal consistency heuristics (stability signals skip static footage).
-- `audio <file>`: AI-generation/voice-cloning heuristics (jitter/shimmer regularity included).
-- `face <file>`: face manipulation heuristics (boundary blending, reflection, color temperature). Landmark anchors are measured via MediaPipe FaceMesh when the `face_mediapipe` extra is installed; otherwise they are labelled `landmarks_source=box-ratio-estimate`.
-- `inpaint <file>`: inpainting/partial manipulation heuristics.
-- `text-advanced <file>`: advanced text stylometry analysis.
-- `forensic <file>`: C2PA/provenance metadata forensics (SDK validation when `provenance` extra installed).
-- `classify <file>`: which AI tool produced the content (word-boundary marker matching).
-- `multimodal`: combine per-modality scores into one assessment; `--av-sync <video>` adds an audio-envelope vs motion-envelope cross-correlation desync check (requires opencv+librosa).
-- `realtime`: moving-average frame scoring with alert thresholds.
-- `rppg <video>`: CHROM cardiac-pulse screening from face video.
-- `prnu <target> --reference ...`: sensor-fingerprint provenance correlation.
+- `video-analysis <file>`: temporal consistency heuristics (stability signals skip static footage). **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
+- `audio <file>`: AI-generation/voice-cloning heuristics (jitter/shimmer regularity included). **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
+- `face <file>`: face manipulation heuristics (boundary blending, reflection, color temperature). Landmark anchors are measured via MediaPipe FaceMesh when the `face_mediapipe` extra is installed; otherwise they are labelled `landmarks_source=box-ratio-estimate`. **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
+- `inpaint <file>`: inpainting/partial manipulation heuristics. **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
+- `text-advanced <file>`: advanced text stylometry analysis (no `ai_probability`: score/100 is not a probability). **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
+- `forensic <file>`: the file's three-verdict result (same as `scan`; an A1111 PNG is `manipulation_evidence`) plus the C2PA/provenance metadata scan as `layer_diagnostics.provenance_metadata` (SDK validation when `provenance` extra installed).
+- `classify <file>`: the file's three-verdict result plus `tool_candidates` — a layer diagnostic of AI-tool marker matches (word-boundary matching; a candidate name, never a verdict).
+- `multimodal [FILE…]`: with files, each one is analyzed through `analysis_api` and the combined `verdict_code` follows the decision-rule order (any manipulation evidence → `manipulation_evidence`; all authenticity → `authenticity_evidence`; else `undetermined`). The legacy `--image-score/--text-score/…` inputs and `--av-sync <video>` (audio-envelope vs motion-envelope cross-correlation, requires opencv+librosa) are a layer diagnostic only.
+- `realtime [--scores …] [--alert-threshold N]`: moving average of uncalibrated frame scores; crossings of an operator-chosen `--alert-threshold` are recorded (no default — the old 67/35 cutoffs were never measured; `--warning-threshold` is ignored). **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
+- `rppg <video>`: CHROM cardiac-pulse screening from face video. **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
+- `prnu <target> --reference ...`: sensor-fingerprint provenance correlation. **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
 - `evidence <file>`: forensic evidence chain with measured integrity verification.
-- `api-serve [--token] [--allow-root DIR]`: REST API server (token mandatory off-localhost; contract: `docs/deepfake-lens-service.md`). Without `fastapi`/`uvicorn` it prints a Korean install hint and exits 2 (no traceback).
+- `api-serve [--token] [--allow-root DIR]`: REST API server (token mandatory off-localhost; contract: `docs/deepfake-lens-service.md`). Read roots come only from `--allow-root` (there is no `--folder` here); without a token every `/api/*` route except `/api/health` requires the `X-Deepfake-Lens-Client` header, like the built-in web server. Without `fastapi`/`uvicorn` it prints a Korean install hint and exits 2 (no traceback).
 - `batch <folder>`: parallel per-file analysis (same engines/thresholds as `scan`, via `analysis_api.analyze_path`).
-- `explain --score`: human-readable explanation of a score/signals.
-- `agent --text|--file` / `3d --text|--file` / `avatar --file`: AI-agent text, 3D-asset, and avatar heuristics.
-- `pixel-analysis <file>`: cv2-based quick pixel screen (QuickPixelAnalysis, `analysis_tier="pre-screen"` — the scan pipeline's `--pixel` ensemble is a separate tier).
-- `ml-classify <file>`: feature-threshold classification (requires opencv/numpy).
-- `legal-report <file>`: legal-style forensic report with integrity checksum (not a digital signature); provenance evidence delegates to the same SDK-first c2pa.py path as `forensic`.
+- `explain <file> [--format text|json]`: which decision rule (1-6 of `decision.decide`) produced the file's verdict, with its evidence and coverage. `--score` alone is a layer diagnostic stating that a raw score cannot be explained.
+- `agent --text|--file`: the text's three-verdict result (text is reference grade, so always `undetermined`) plus the AI-agent marker heuristics as a layer diagnostic. `3d --text|--file` / `avatar --file`: 3D-asset and avatar marker heuristics. **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
+- `pixel-analysis <file>`: cv2-based quick pixel screen (QuickPixelAnalysis, `analysis_tier="pre-screen"` — the scan pipeline's `--pixel` ensemble is a separate tier), behind the same photo/non-photo gate as `scan` (a non-photo is `reference_band: unavailable`, "사진 아님: …"). **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
+- `ml-classify <file>`: feature-threshold rules (requires opencv/numpy); reports `rule_weight_sum` and `rules_matched`, never an ai/natural label or probability. **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
+- `legal-report <file> [--output F] [--json-out F] [--key-file F] [--analyst-id ID] [--format text|json]`: legal-style report built from the scan result (`analysis_api.analyze_path`): conclusion (`verdict_code`, grade), every evidence item (kind/direction/strength/layer), every coverage entry, limitations, threshold provenance, file SHA-256 and the package `tool_version`. `--json-out` writes the body signed with HMAC-SHA256 when a key is set (`--key-file` or `DEEPFAKE_LENS_REPORT_KEY`), otherwise with the 서명 없음 note; check it with `verify-report`.
+- `verify-report <report.json> [--key-file F] [--format text|json]`: verify a signed report (scan `--json-out --sign`, `legal-report --json-out`, `evidence-statement --json-out`, …). The key comes from `--key-file` or `DEEPFAKE_LENS_REPORT_KEY`. Prints one of `검증됨` (exit 0), `변조됨` (exit 1 — any byte of the signed body changed), `키 ID 불일치` (exit 2 — signed under a different key), `서명 없음` (exit 3 — the report carries no signature); an unreadable file or a missing key exits 4.
 - `perf <folder> --out`: throughput/cache/duplicate-rate report.
 - `security --out` / `release --out`: guardrail and release-readiness reports.
 - `web`: local web GUI (localhost; Host-header guarded; contract: `docs/deepfake-lens-service.md`).

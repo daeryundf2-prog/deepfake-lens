@@ -22,6 +22,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
+
 
 @dataclass(frozen=True)
 class PixelEvidenceSignal:
@@ -40,10 +42,11 @@ class QuickPixelAnalysis:
     never mistake it for the scan-pipeline ensemble result.
     """
 
+    # D1: raw heuristic sum, reference only — the old 35/20 band and the
+    # "의심 신호가 강합니다" verdict were never measured (AUROC < 0.5 tier).
     score: int
-    band: str
-    band_label: str
-    verdict: str
+    reference_band: str
+    reference_note: str
     signals: list[PixelEvidenceSignal]
     limitations: list[str]
     features: dict[str, float]
@@ -116,24 +119,10 @@ def analyze_pixels(path: Path | str) -> QuickPixelAnalysis:
 
     score = min(100, sum(signal.weight for signal in signals))
 
-    if score >= 35:
-        band = "high"
-        band_label = "높음"
-        verdict = "픽셀 분석에서 AI 생성 의심 신호가 강합니다."
-    elif score >= 20:
-        band = "medium"
-        band_label = "주의"
-        verdict = "픽셀 분석에서 몇 가지 의심 신호가 보입니다."
-    else:
-        band = "low"
-        band_label = "낮음"
-        verdict = "픽셀 분석에서 뚜렷한 AI 생성 의심 신호는 적습니다."
-
     return QuickPixelAnalysis(
         score=score,
-        band=band,
-        band_label=band_label,
-        verdict=verdict,
+        reference_band=REFERENCE_BAND,
+        reference_note=raw_score_note("픽셀 사전 선별 휴리스틱", score),
         signals=signals,
         limitations=limitations,
         features=features,
@@ -143,9 +132,8 @@ def analyze_pixels(path: Path | str) -> QuickPixelAnalysis:
 def _error_analysis(message: str) -> QuickPixelAnalysis:
     return QuickPixelAnalysis(
         score=0,
-        band="unknown",
-        band_label="판단 어려움",
-        verdict=message,
+        reference_band=UNAVAILABLE_BAND,
+        reference_note=message,
         signals=[],
         limitations=[message],
         features={},

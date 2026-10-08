@@ -22,6 +22,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
+
 PULSE_LOW_HZ = 0.7
 PULSE_HIGH_HZ = 4.0
 MIN_SECONDS = 8.0
@@ -41,9 +43,9 @@ class RppgEvidenceSignal:
 @dataclass(frozen=True)
 class RppgAnalysis:
     score: int
-    band: str
-    band_label: str
-    verdict: str
+    # D1: no band/verdict — reference_band is 'reference'/'unavailable' (layer_diagnostic).
+    reference_band: str
+    reference_note: str
     signals: list[RppgEvidenceSignal]
     limitations: list[str]
     face_frames: int
@@ -69,9 +71,13 @@ def analyze_rppg(path: Path | str, *, max_frames: int = 600) -> RppgAnalysis:
         return _error_analysis(f"파일이 존재하지 않습니다: {video_path}")
 
     try:
-        import cv2  # noqa: F401
+        import cv2
     except ImportError:
         return _error_analysis("opencv가 설치되어 있지 않습니다. pip install opencv-python으로 설치하세요.")
+    if not hasattr(cv2, "CascadeClassifier"):
+        # OpenCV 5 builds without contrib have no Haar cascade API: a missing
+        # dependency, reported instead of an AttributeError traceback.
+        return _error_analysis("의존성 부재: cv2.CascadeClassifier (opencv-contrib) — 얼굴 영역을 찾을 수 없습니다.")
 
     aggregate, roi_samples, fps, duration = _face_roi_samples(video_path, max_frames=max_frames)
     if len(aggregate) < MIN_FACE_FRAMES:
@@ -172,7 +178,7 @@ def _analyze_rppg(
     # averages around 5-6x the mean bin power, so only peaks clearly above
     # that are treated as a cardiac pulse.
     if pulse_ok:
-        verdict = "안정적인 심박 펄스가 검출되어 촬영 기반 실물 영상일 가능성이 있습니다."
+        note = "안정적인 심박 펄스가 검출되었습니다 (참고 측정값 — 원본성 결론이 아닙니다)."
         limitations.append("rPPG 펄스는 워터마크/조작 여부와 무관하게 촬영 원본성의 참고 신호입니다.")
         if phase_coherence is not None:
             limitations.append(
@@ -188,7 +194,7 @@ def _analyze_rppg(
                         INCOHERENT_ROI_WEIGHT,
                     )
                 )
-                verdict = (
+                note = (
                     "심박 펄스는 검출되었으나 얼굴 영역 간 위상이 불일치합니다. "
                     "조명 불균일·압축 영향을 배제할 수 없어 추가 확인이 필요합니다."
                 )
@@ -203,18 +209,14 @@ def _analyze_rppg(
                 25,
             )
         )
-        verdict = "얼굴 영역에서 생체 펄스가 회복되지 않았습니다. 조명/압축 영향을 배제할 수 없어 추가 확인이 필요합니다."
+        note = "얼굴 영역에서 생체 펄스가 회복되지 않았습니다. 조명/압축 영향을 배제할 수 없어 추가 확인이 필요합니다."
         limitations.append("강한 압축, 어두운 조명, 큰 움직임은 펄스를 지울 수 있습니다.")
         if len(roi_series) >= 2:
             limitations.append("전역 펄스가 없어 ROI 간 위상 일관성은 의미가 없어 미평가입니다.")
-
-    band = "medium" if score >= 25 else "low"
-    band_label = "주의" if band == "medium" else "낮음"
     return RppgAnalysis(
         score=score,
-        band=band,
-        band_label=band_label,
-        verdict=verdict,
+        reference_band=REFERENCE_BAND,
+        reference_note=note,
         signals=signals,
         limitations=limitations,
         face_frames=face_frames,
@@ -230,9 +232,8 @@ def _analyze_rppg(
 def _error_analysis(message: str) -> RppgAnalysis:
     return RppgAnalysis(
         score=0,
-        band="unknown",
-        band_label="판단 어려움",
-        verdict=message,
+        reference_band=UNAVAILABLE_BAND,
+        reference_note=message,
         signals=[],
         limitations=[message],
         face_frames=0,

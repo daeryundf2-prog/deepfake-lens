@@ -18,14 +18,14 @@ class TextAdvancedAnalysisTest(unittest.TestCase):
         """Empty text should return unknown analysis."""
         result = analyze_text_advanced("")
         self.assertEqual(result.score, 0)
-        self.assertEqual(result.band, "unknown")
-        self.assertIn("비어 있습니다", result.verdict)
+        self.assertEqual(result.reference_band, "unavailable")  # D1: layer modules report reference_band/reference_note, never a band
+        self.assertIn("비어 있습니다", result.reference_note)
 
     def test_short_text_returns_low(self) -> None:
         """Short text should return low score."""
         result = analyze_text_advanced("Hello world")
         self.assertEqual(result.score, 0)
-        self.assertEqual(result.band, "low")
+        self.assertEqual(result.reference_band, "reference")  # D1: layer modules report reference_band/reference_note, never a band
 
     def test_analysis_returns_dataclass(self) -> None:
         """Analysis should return a TextAdvancedAnalysis dataclass."""
@@ -38,16 +38,19 @@ class TextAdvancedAnalysisTest(unittest.TestCase):
         data = result.to_json()
         self.assertIsInstance(data, dict)
         self.assertIn("score", data)
-        self.assertIn("band", data)
-        self.assertIn("verdict", data)
-        self.assertIn("ai_probability", data)
+        self.assertIn("reference_band", data)
+        self.assertNotIn("band", data)  # D1: layer modules report reference_band/reference_note, never a band
+        self.assertIn("reference_note", data)
+        self.assertNotIn("verdict", data)
+        self.assertNotIn("ai_probability", data)  # D1: score/100 is not a probability
         self.assertIn("style_profile", data)
 
     def test_ai_probability_range(self) -> None:
-        """AI probability should be between 0 and 1."""
-        result = analyze_text_advanced("This is a test sentence with enough words to analyze properly.")
-        self.assertGreaterEqual(result.ai_probability, 0.0)
-        self.assertLessEqual(result.ai_probability, 1.0)
+        """D1: the former ai_probability (= score/100) is gone; the raw score stays in 0-100."""
+        result = analyze_text_advanced("This is a test sentence. " * 10)
+        self.assertFalse(hasattr(result, "ai_probability"))
+        self.assertGreaterEqual(result.score, 0)
+        self.assertLessEqual(result.score, 100)
 
     def test_style_profile_valid(self) -> None:
         """Style profile should be a valid string."""

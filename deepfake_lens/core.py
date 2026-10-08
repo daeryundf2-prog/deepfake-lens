@@ -31,6 +31,7 @@ from .image_class import MEASURABLE_MIN_SIDE_PX, ImageClass, classify_image, res
 from .checks import failed as failed_entry
 from .checks import failure_reason
 from .decision import decide
+from .layer_diagnostic import UNAVAILABLE_BAND
 from .result_text import TEXT_LEGAL_LIMITATION
 from .evidence_rules import (
     c2pa_evidence,
@@ -707,8 +708,8 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
         from .inpaint import analyze_inpainting
 
         inpaint = analyze_inpainting(path)
-        if inpaint.band == "unknown":
-            _raise_unavailable(inpaint.verdict)
+        if inpaint.reference_band == UNAVAILABLE_BAND:
+            _raise_unavailable(inpaint.reference_note)
         return inpaint
 
     inpaint, entry = run_check("inpaint", inpaint_check)
@@ -716,7 +717,7 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
     if inpaint is not None:
         if inpaint.regions_detected:
             out.evidence.append(deep_layer_evidence(
-                "인페인팅/부분 변형 탐지", f"{inpaint.verdict} (영역 {inpaint.regions_detected}개)", "inpaint", inpaint.score,
+                "인페인팅/부분 변형 탐지", f"인페인팅 후보 영역 {inpaint.regions_detected}개", "inpaint", inpaint.score,
             ))
         out.limitations.extend(inpaint.limitations[:2])
 
@@ -730,10 +731,10 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
         if missing:
             raise CheckSkipped(f"의존성 부재: {missing}")
         seam = analyze_faceswap_seam(path, thresholds=thresholds)
-        if seam.band == "unknown":
-            if seam.face_count == 0 and "얼굴" in seam.verdict:
+        if seam.reference_band == UNAVAILABLE_BAND:
+            if seam.face_count == 0 and "얼굴" in seam.reference_note:
                 raise CheckSkipped("얼굴 미검출")
-            _raise_unavailable(seam.verdict)
+            _raise_unavailable(seam.reference_note)
         return seam
 
     seam, entry = run_check("faceswap_seam", seam_check)
@@ -764,15 +765,15 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
 
         _require_haar(cv2)
         rppg = analyze_rppg(path)
-        if rppg.band == "unknown":
-            _raise_unavailable(rppg.verdict)
+        if rppg.reference_band == UNAVAILABLE_BAND:
+            _raise_unavailable(rppg.reference_note)
         return rppg
 
     rppg, entry = run_check("rppg", rppg_check)
     out.coverage.append(entry)
     if rppg is not None:
         if rppg.score > 0:
-            out.evidence.append(deep_layer_evidence("rPPG 맥박 신호", rppg.verdict, "rppg", rppg.score))
+            out.evidence.append(deep_layer_evidence("rPPG 맥박 신호", rppg.reference_note, "rppg", rppg.score))
         out.limitations.extend(rppg.limitations[:2])
 
     def avatar_check():
@@ -790,7 +791,7 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
         markers = [signal for signal in avatar.signals if signal.title != FORMAT_SIGNAL_TITLE]
         if markers:
             raw = min(100, sum(signal.weight for signal in markers))
-            out.evidence.append(deep_layer_evidence("아바타/디지털휴먼 탐지", avatar.verdict, "avatar", raw))
+            out.evidence.append(deep_layer_evidence("아바타/디지털휴먼 탐지", f"마커 신호 {len(markers)}개 ({avatar.avatar_type})", "avatar", raw))
         out.limitations.extend(avatar.limitations[:2])
 
     def lipsync_check():
@@ -936,7 +937,7 @@ def _analyze_audio_file(
         coverage.append(skipped("audio_features", "의존성 부재: librosa"))
     else:
         # Early-exit error analysis (empty/oversized/unreadable file).
-        coverage.append(failed_entry("audio_features", AnalyzerError(analysis.verdict)))
+        coverage.append(failed_entry("audio_features", AnalyzerError(analysis.reference_note)))
     if analysis.model_analysis is None:
         coverage.append(_no_model_entry(model_path, "audio"))
     else:
@@ -997,8 +998,8 @@ def _analyze_video_file(
         import cv2  # noqa: F401 — dependency probe
 
         analysis = analyze_video_temporal(file_path, model_path=model_path, analyze_audio_track=True)
-        if analysis.band == "unknown" and analysis.duration_seconds <= 0 and not analysis.signals:
-            raise AnalyzerError(analysis.verdict)
+        if analysis.reference_band == UNAVAILABLE_BAND and analysis.duration_seconds <= 0 and not analysis.signals:
+            raise AnalyzerError(analysis.reference_note)
         return analysis
 
     analysis, entry = run_check("video_analysis", video_check)

@@ -106,20 +106,22 @@ class RealtimeDetectorTest(unittest.TestCase):
         self.assertIsInstance(data, dict)
         self.assertIn("current_score", data)
         self.assertIn("average_score", data)
-        self.assertIn("band", data)
+        self.assertIn("reference_band", data)
+        self.assertNotIn("band", data)  # D1: layer modules report reference_band/reference_note, never a band
 
     def test_alert_to_json(self) -> None:
         """RealtimeAlert to_json should return a dictionary."""
         alert = RealtimeAlert(
             timestamp=1234567890.0,
             score=80,
-            band="high",
+            threshold=70,
             message="Test alert",
         )
         data = alert.to_json()
         self.assertIsInstance(data, dict)
         self.assertEqual(data["score"], 80)
-        self.assertEqual(data["band"], "high")
+        self.assertEqual(data["threshold"], 70)
+        self.assertNotIn("band", data)  # D1: layer modules report reference_band/reference_note, never a band
 
 
 if __name__ == "__main__":

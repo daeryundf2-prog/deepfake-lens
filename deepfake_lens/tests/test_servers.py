@@ -208,7 +208,11 @@ class CheckPayloadTest(unittest.TestCase):
         self.assertEqual(result["mode"], "text")
         self.assertIn("item", result)
         self.assertIn("advanced", result)
-        self.assertIn("signals", result["advanced"])
+        # D1: the text-statistics layer is a layer diagnostic (raw numbers,
+        # fixed notice, no band); its signals sit under "diagnostic".
+        self.assertEqual(result["advanced"]["kind"], "layer_diagnostic")
+        self.assertIn("signals", result["advanced"]["diagnostic"])
+        self.assertNotIn("band", result["advanced"])
 
     def test_text_check_rejects_too_short(self) -> None:
         from deepfake_lens.webapp_api import _check_text_payload
@@ -718,8 +722,12 @@ class ComparePayloadTest(unittest.TestCase):
         text = "인공지능 기술은 빠르게 발전하고 있으며 다양한 산업에 적용된다. 또한 윤리 문제가 함께 논의된다. " * 8
         content_type, body = self._two_files("a.txt", text.encode(), "b.txt", text.encode())
         result = _compare_payload(content_type, body)
-        self.assertEqual(result.get("kind"), "stylometry")
-        self.assertIn("score", result)
+        # D1: similarity is a layer diagnostic — no same/different band.
+        self.assertEqual(result.get("kind"), "layer_diagnostic")
+        self.assertEqual(result["diagnostic"]["kind"], "stylometry")
+        self.assertIn("raw_score", result)
+        self.assertNotIn("band", result)
+        self.assertNotIn("band", result["diagnostic"])
 
     def test_single_file_rejected(self) -> None:
         from deepfake_lens.webapp_api import _compare_payload
