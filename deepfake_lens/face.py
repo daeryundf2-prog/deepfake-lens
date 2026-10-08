@@ -53,6 +53,9 @@ class FaceRegion:
     # "box-ratio-estimate" = derived from the detection box and carries no
     # geometric information.
     landmarks_source: str = "box-ratio-estimate"
+    # Which detector produced the box: "haar", "mediapipe-facemesh" or the
+    # weight-free HEURISTIC_DETECTOR (D15).
+    detector: str = "haar"
 
 
 @dataclass(frozen=True)
@@ -99,8 +102,10 @@ def analyze_faces(
         return _error_analysis(f"파일이 존재하지 않습니다: {image_path}")
 
     extension = image_path.suffix.lower()
-    if extension not in {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}:
-        return _error_analysis(f"지원하지 않는 이미지 형식입니다: {extension}")
+    if extension not in FACE_IMAGE_EXTENSIONS:
+        # D15: a format the face layer does not read (GIF) is "not
+        # applicable" — a skip with a reason, not an analysis failure.
+        return _unsupported_format_analysis(extension)
 
     try:
         import cv2
@@ -174,6 +179,8 @@ def analyze_faces(
         limitations.append("랜드마크가 감지 박스 비율 추정값(landmarks_source=box-ratio-estimate)이며 실측이 아닙니다.")
         limitations.append("랜드마크 기하/대칭 검증은 실측 랜드마크가 없어 미평가입니다.")
         limitations.append("눈 위치는 감지 박스에서 추정한 값이므로 반사 패턴 비교는 참고 수준입니다.")
+    if any(face.detector == HEURISTIC_DETECTOR for face in faces):
+        limitations.append(HEURISTIC_DETECTOR_LIMITATION)
     limitations.append("로컬 휴리스틱 기반 선별 결과이며, 확정적 판별이 아닙니다.")
 
     score = min(100, sum(signal.weight for signal in signals))
@@ -204,6 +211,27 @@ def analyze_faces(
         face_count=len(faces),
         manipulation_type=manipulation_type,
         confidence=confidence,
+    )
+
+
+# Still-image formats the face layer decodes (cv2.imdecode); GIF is not one.
+FACE_IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"})
+UNSUPPORTED_FORMAT = "unsupported_format"
+UNSUPPORTED_FORMAT_REASON = "지원하지 않는 이미지 형식"
+
+
+def _unsupported_format_analysis(extension: str) -> FaceAnalysis:
+    message = f"{UNSUPPORTED_FORMAT_REASON}: {extension or '(확장자 없음)'}"
+    return FaceAnalysis(
+        score=0,
+        band="unknown",
+        band_label="판단 어려움",
+        verdict=message,
+        signals=[],
+        limitations=[message],
+        face_count=0,
+        manipulation_type=UNSUPPORTED_FORMAT,
+        confidence="low",
     )
 
 
@@ -244,31 +272,26 @@ class FaceDetectionError(RuntimeError):
     """Every available face detector raised; "no face" would be a lie."""
 
 
-def face_detector_unavailable_reason() -> str | None:
+def face_detector_unavailable_reason(*, require_landmarks: bool = False) -> str | None:
     """None when at least one face detector can run, else why not.
 
     Cheap probe (no inference) so callers can report "의존성 부재" instead
     of "얼굴 미검출" when there is nothing that could have found a face.
+    With opencv + numpy the weight-free heuristic (D15) can always run.
+    ``require_landmarks`` asks for a detector with measured landmarks
+    (MediaPipe) — the face-track layer uses only those.
     """
     try:
         import cv2
+        import numpy  # noqa: F401
     except ImportError:
         return "opencv 없음"
-    if hasattr(cv2, "CascadeClassifier"):
-        cv2_cascade_dir = getattr(getattr(cv2, "data", None), "haarcascades", "") or ""
-        candidates = [
-            cv2_cascade_dir + "haarcascade_frontalface_default.xml" if cv2_cascade_dir else "",
-            os.environ.get("DEEPFAKE_LENS_HAAR_CASCADE") or "",
-            str(Path(__file__).resolve().parent / "models" / "haarcascade_frontalface_default.xml"),
-        ]
-        if any(cand and Path(cand).is_file() for cand in candidates):
-            return None
-    try:
-        import mediapipe as mp
-    except ImportError:
-        return "얼굴 검출기 없음: OpenCV CascadeClassifier/Haar XML과 MediaPipe가 모두 없습니다"
-    if not hasattr(mp, "solutions"):
-        return "얼굴 검출기 없음: mediapipe에 solutions API가 없습니다"
+    if require_landmarks:
+        try:
+            import mediapipe  # noqa: F401
+        except ImportError:
+            return "실측 랜드마크 검출기 없음: mediapipe"
+        return None
     return None
 
 
@@ -286,12 +309,16 @@ def _detect_faces(image: Any) -> list[FaceRegion]:
 
 
 def _detect_faces_strict(image: Any) -> list[FaceRegion]:
-    """Detect faces: OpenCV Haar first, MediaPipe FaceMesh as fallback.
+    """Detect faces: OpenCV Haar, then MediaPipe FaceMesh, then the
+    weight-free skin/eye heuristic (D15).
 
     Haar misses valid frontal faces on generated/atypical imagery (measured
     on local samples); when it returns nothing, a whole-image FaceMesh pass
     recovers detection coverage. Regions recovered by the fallback carry the
-    ``mediapipe-facemesh-detection`` landmark source.
+    ``mediapipe-facemesh-detection`` landmark source. OpenCV 5 wheels have
+    no CascadeClassifier, so on a stock install the heuristic is the
+    detector that runs; ``FaceRegion.detector`` names the one that found
+    each face.
     """
     try:
         import cv2
@@ -350,6 +377,16 @@ def _detect_faces_strict(image: Any) -> list[FaceRegion]:
         detectors_run += 1
         if mesh_regions:
             return mesh_regions
+    # D15: the weight-free heuristic always runs when Haar/MediaPipe found
+    # nothing (or do not exist), so "얼굴 미검출" comes from a real run.
+    try:
+        heuristic_regions = _skin_eye_heuristic_faces(image)
+    except cv2.error as exc:
+        errors.append(exc)
+    else:
+        detectors_run += 1
+        if heuristic_regions:
+            return heuristic_regions
     if detectors_run == 0:
         if errors:
             raise FaceDetectionError(f"{type(errors[0]).__name__}: {errors[0]}") from errors[0]
@@ -419,9 +456,205 @@ def _mediapipe_detect_faces(image: Any, max_faces: int = 3, *, strict: bool = Fa
                 landmarks=_estimate_landmarks(x, y, w, h),
                 confidence=0.7,
                 landmarks_source="mediapipe-facemesh-detection",
+                detector="mediapipe-facemesh",
             )
         )
     return regions
+
+
+# ---------------------------------------------------------------------------
+# Dependency-free fallback detector (D15). OpenCV 5.0 wheels no longer ship
+# cv2.CascadeClassifier and MediaPipe is optional, so without this the face
+# check could only ever say "의존성 부재". cv2.FaceDetectorYN (YuNet) exists in
+# OpenCV 5 but needs an ONNX download that would have to be sha256-pinned like
+# any weight; phase 0 uses this weight-free heuristic instead.
+#
+# Method (eyes first, so a face touching a skin-coloured background or neck
+# is still found):
+# 1. skin pixels by the YCrCb box of Chai & Ngan (1999, "Face segmentation
+#    using skin-color map in videophone applications", IEEE TCSVT 9(4)),
+#    after a bounded gain on dark frames;
+# 2. eye candidates = dark non-skin holes enclosed by skin (not connected to
+#    the frame border);
+# 3. a pair of candidates at eye geometry (level, similar size) defines a
+#    face box from the inter-eye distance d (width 2.5 d, height 3.5 d, eyes
+#    1.3 d below the top — typical adult proportions, interpupillary
+#    distance ~ 0.4 of face width);
+# 4. the box is accepted when the ellipse inscribed in it is mostly skin.
+#
+# Limits (unmeasured; phase 1 replaces it with a pinned detector): finds
+# frontal, upright faces with both eyes visible as dark regions and skin in
+# the Chai-Ngan chroma box; misses profiles, closed/occluded eyes, faces with
+# sunglasses, skin outside the box, faces with eyes under ~3 px apart at the
+# working scale; can fire on skin-coloured objects with two dark spots.
+# Landmarks are box-ratio estimates (not measured geometry).
+# ---------------------------------------------------------------------------
+HEURISTIC_DETECTOR = "skin-eye-heuristic"
+HEURISTIC_WORK_MAX_SIDE = 320
+SKIN_CR_RANGE = (133, 173)
+SKIN_CB_RANGE = (77, 127)
+# Skin needs some light: below this luma the chroma is mostly noise.
+SKIN_MIN_LUMA = 40
+# Low-light normalisation: when the 95th-percentile luma is below
+# LOW_LIGHT_P95 the frame is gained towards LOW_LIGHT_TARGET (at most
+# LOW_LIGHT_MAX_GAIN x) before the skin test.
+LOW_LIGHT_P95 = 120
+LOW_LIGHT_TARGET = 200
+LOW_LIGHT_MAX_GAIN = 5.0
+LOW_LIGHT_BLUR_KERNEL = (5, 5)
+# Eye candidates: pixel area at the working scale, darkness vs face skin.
+EYE_MIN_AREA_PX = 4
+EYE_MAX_AREA_FRACTION = 0.01
+EYE_DARK_RATIO = 0.6
+EYE_MAX_CANDIDATES = 60
+# Pair geometry: inter-eye distance (px at the working scale), vertical
+# offset relative to it, area ratio.
+EYE_MIN_DISTANCE_PX = 8
+EYE_MAX_TILT = 0.25
+EYE_MAX_AREA_RATIO = 3.0
+# Face box from the inter-eye distance d.
+FACE_WIDTH_PER_EYE_DISTANCE = 2.5
+FACE_HEIGHT_PER_EYE_DISTANCE = 3.5
+FACE_TOP_ABOVE_EYES = 1.3
+# Share of the inscribed ellipse that must be skin (eye/mouth holes and
+# brows excluded by the margin), and share of it that must lie in frame.
+FACE_MIN_SKIN_FRACTION = 0.6
+FACE_MIN_INSIDE_FRACTION = 0.8
+# Eye blobs larger than this share of the face box are not eyes.
+EYE_MAX_BOX_FRACTION = 0.06
+HEURISTIC_CONFIDENCE = 0.5
+HEURISTIC_DETECTOR_LIMITATION = (
+    "얼굴 검출: 피부색·눈 영역 휴리스틱(가중치 없음, 미측정) — 정면이고 두 눈이 보이는 얼굴만 찾으며, "
+    "측면·가려진 얼굴은 놓치고 피부색 물체를 얼굴로 잡을 수 있습니다."
+)
+
+
+def _skin_eye_heuristic_faces(image: Any) -> list[FaceRegion]:
+    """Weight-free face detector (D15); BGR uint8 image -> face regions."""
+    import cv2
+    import numpy as np
+
+    if image is None or getattr(image, "ndim", 0) != 3 or image.shape[2] < 3:
+        return []
+    height0, width0 = image.shape[:2]
+    scale = min(1.0, HEURISTIC_WORK_MAX_SIDE / max(height0, width0))
+    work = np.ascontiguousarray(image[..., :3])
+    if scale < 1.0:
+        work = cv2.resize(work, (max(1, round(width0 * scale)), max(1, round(height0 * scale))), interpolation=cv2.INTER_AREA)
+    ycrcb = cv2.cvtColor(work, cv2.COLOR_BGR2YCrCb)
+    p95 = float(np.percentile(ycrcb[..., 0], 95))
+    if 0 < p95 < LOW_LIGHT_P95:
+        gain = min(LOW_LIGHT_MAX_GAIN, LOW_LIGHT_TARGET / p95)
+        work = np.clip(work.astype(np.float64) * gain, 0, 255).astype(np.uint8)
+        # The gain amplifies sensor noise too; smooth it before the
+        # per-pixel chroma test.
+        work = cv2.GaussianBlur(work, LOW_LIGHT_BLUR_KERNEL, 0)
+        ycrcb = cv2.cvtColor(work, cv2.COLOR_BGR2YCrCb)
+    luma = ycrcb[..., 0].astype(np.float64)
+    cr, cb = ycrcb[..., 1], ycrcb[..., 2]
+    skin = (
+        (cr >= SKIN_CR_RANGE[0]) & (cr <= SKIN_CR_RANGE[1])
+        & (cb >= SKIN_CB_RANGE[0]) & (cb <= SKIN_CB_RANGE[1])
+        & (luma >= SKIN_MIN_LUMA)
+    )
+    skin = cv2.morphologyEx(skin.astype(np.uint8), cv2.MORPH_OPEN, np.ones((3, 3), np.uint8)).astype(bool)
+    if not skin.any():
+        return []
+    work_h, work_w = skin.shape
+
+    # Eye candidates: non-skin components enclosed by skin.
+    count, labels, stats, centroids = cv2.connectedComponentsWithStats((~skin).astype(np.uint8), connectivity=8)
+    max_area = EYE_MAX_AREA_FRACTION * work_h * work_w
+    candidates: list[tuple[float, float, float, int]] = []
+    for label in range(1, count):
+        x, y, w, h, area = (int(v) for v in stats[label])
+        if x == 0 or y == 0 or x + w >= work_w or y + h >= work_h:
+            continue  # touches the frame: background, not a hole
+        if not EYE_MIN_AREA_PX <= area <= max_area:
+            continue
+        candidates.append((float(centroids[label][0]), float(centroids[label][1]), float(area), label))
+    candidates = sorted(candidates, key=lambda c: -c[2])[:EYE_MAX_CANDIDATES]
+
+    yy, xx = np.mgrid[0:work_h, 0:work_w]
+    found: list[tuple[float, tuple[int, int, int, int]]] = []
+    for i, first in enumerate(candidates):
+        for second in candidates[i + 1:]:
+            left, right = sorted((first, second))
+            distance = right[0] - left[0]
+            if distance < EYE_MIN_DISTANCE_PX or abs(right[1] - left[1]) > EYE_MAX_TILT * distance:
+                continue
+            if max(left[2], right[2]) > EYE_MAX_AREA_RATIO * min(left[2], right[2]):
+                continue
+            box = _face_box_from_eyes(left, right, distance)
+            score = _face_box_score(box, (left, right), skin, luma, labels, xx, yy)
+            if score is not None:
+                found.append((score, box))
+    regions: list[FaceRegion] = []
+    for score, box in sorted(found, key=lambda item: -item[0]):
+        if any(_overlap(box, (r.x * scale, r.y * scale, r.width * scale, r.height * scale)) > 0.3 for r in regions):
+            continue
+        bx, by, bw, bh = box
+        fx, fy = max(0, int(round(bx / scale))), max(0, int(round(by / scale)))
+        fw, fh = int(round(bw / scale)), int(round(bh / scale))
+        regions.append(FaceRegion(
+            x=fx, y=fy, width=fw, height=fh,
+            landmarks=_estimate_landmarks(fx, fy, fw, fh),
+            confidence=HEURISTIC_CONFIDENCE,
+            landmarks_source="box-ratio-estimate",
+            detector=HEURISTIC_DETECTOR,
+        ))
+    return regions
+
+
+def _face_box_from_eyes(left: tuple[float, ...], right: tuple[float, ...], distance: float) -> tuple[int, int, int, int]:
+    mid_x, mid_y = (left[0] + right[0]) / 2, (left[1] + right[1]) / 2
+    width = FACE_WIDTH_PER_EYE_DISTANCE * distance
+    height = FACE_HEIGHT_PER_EYE_DISTANCE * distance
+    return int(round(mid_x - width / 2)), int(round(mid_y - FACE_TOP_ABOVE_EYES * distance)), int(round(width)), int(round(height))
+
+
+def _face_box_score(
+    box: tuple[int, int, int, int],
+    eyes: tuple[tuple[float, ...], tuple[float, ...]],
+    skin: Any,
+    luma: Any,
+    labels: Any,
+    xx: Any,
+    yy: Any,
+) -> float | None:
+    """Skin share of the box's inscribed ellipse, or None when not a face."""
+    import numpy as np
+
+    x, y, w, h = box
+    if w <= 0 or h <= 0:
+        return None
+    ellipse = (((xx - (x + w / 2)) / (w / 2)) ** 2 + ((yy - (y + h / 2)) / (h / 2)) ** 2) <= 1.0
+    full_area = np.pi * (w / 2) * (h / 2)
+    inside = int(ellipse.sum())
+    if inside < FACE_MIN_INSIDE_FRACTION * full_area:
+        return None
+    eye_pixels = (labels == eyes[0][3]) | (labels == eyes[1][3])
+    if eye_pixels.sum() > EYE_MAX_BOX_FRACTION * w * h * 2:
+        return None
+    # The eyes must be dark against the face's own skin.
+    face_skin = ellipse & skin
+    if not face_skin.any():
+        return None
+    skin_luma = float(np.median(luma[face_skin]))
+    if float(luma[eye_pixels].mean()) >= EYE_DARK_RATIO * skin_luma:
+        return None
+    skin_share = float(face_skin.sum()) / inside
+    return skin_share if skin_share >= FACE_MIN_SKIN_FRACTION else None
+
+
+def _overlap(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> float:
+    """Intersection over the smaller box."""
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    ix = max(0.0, min(ax + aw, bx + bw) - max(ax, bx))
+    iy = max(0.0, min(ay + ah, by + bh) - max(ay, by))
+    smaller = min(aw * ah, bw * bh)
+    return (ix * iy) / smaller if smaller > 0 else 0.0
 
 
 # Landmark sources that carry measured geometry (vs the box-ratio estimate).

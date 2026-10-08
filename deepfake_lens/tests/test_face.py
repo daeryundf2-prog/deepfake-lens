@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from deepfake_lens.face import (
@@ -327,3 +328,93 @@ def test_lighting_consistency_quiet_when_directions_match():
     bgr = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_GRAY2BGR)
     region = FaceRegion(x=150, y=140, width=100, height=120, confidence=1.0, landmarks=[])
     assert _lighting_consistency(region, bgr) is None
+
+
+def _synthetic_face_bgr(*, face: bool = True, eyes: bool = True, exposure: float = 1.0, seed: int = 0) -> Any:
+    """A 240x320 scene with an optional frontal face (oval, eyes, mouth)."""
+    import cv2
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    h, w = 240, 320
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float64)
+    rgb = np.zeros((h, w, 3)) + np.array([70.0, 110.0, 90.0])
+    rgb += np.exp(-((xx - 60) ** 2 + (yy - 50) ** 2) / 4000.0)[..., None] * np.array([80.0, 60.0, 20.0])
+    if face:
+        cx, cy, fw, fh = 170.0, 125.0, 90.0, 144.0
+        rgb[(((xx - cx) / (fw / 2)) ** 2 + ((yy - cy) / (fh / 2)) ** 2) <= 1.0] = [200.0, 155.0, 130.0]
+        if eyes:
+            for side in (-1, 1):
+                ex, ey = cx + side * fw * 0.2, cy - fh * 0.12
+                rgb[(((xx - ex) / (fw * 0.09)) ** 2 + ((yy - ey) / (fh * 0.045)) ** 2) <= 1.0] = [35.0, 30.0, 30.0]
+        rgb[(((xx - cx) / (fw * 0.18)) ** 2 + ((yy - (cy + fh * 0.27)) / (fh * 0.04)) ** 2) <= 1.0] = [150.0, 60.0, 60.0]
+    rgb = rgb * exposure + rng.normal(0, 4.0 if exposure < 1 else 5.0, rgb.shape)
+    return cv2.cvtColor(np.clip(rgb, 0, 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+
+
+@unittest.skipUnless(_has_cv2(), "opencv not installed")
+class WeightFreeDetectorTest(unittest.TestCase):
+    """D15: the numpy/OpenCV-core skin+eye heuristic is a real detector."""
+
+    def test_finds_frontal_face_with_box_on_the_face(self) -> None:
+        from deepfake_lens.face import HEURISTIC_DETECTOR, _skin_eye_heuristic_faces
+
+        regions = _skin_eye_heuristic_faces(_synthetic_face_bgr())
+        self.assertEqual(len(regions), 1)
+        region = regions[0]
+        self.assertEqual(region.detector, HEURISTIC_DETECTOR)
+        self.assertEqual(region.landmarks_source, "box-ratio-estimate")
+        self.assertLess(abs(region.x + region.width / 2 - 170), 20)
+        self.assertLess(abs(region.y + region.height / 2 - 125), 30)
+
+    def test_low_light_face_is_found_after_gain(self) -> None:
+        from deepfake_lens.face import _skin_eye_heuristic_faces
+
+        self.assertTrue(_skin_eye_heuristic_faces(_synthetic_face_bgr(exposure=0.2)))
+
+    def test_non_faces_are_not_detected(self) -> None:
+        import numpy as np
+
+        from deepfake_lens.face import _skin_eye_heuristic_faces
+
+        cases = {
+            "scene without a face": _synthetic_face_bgr(face=False),
+            "skin oval without eyes": _synthetic_face_bgr(eyes=False),
+            "flat grey": np.full((200, 200, 3), 128, dtype=np.uint8),
+            "black": np.zeros((120, 160, 3), dtype=np.uint8),
+        }
+        for name, image in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(_skin_eye_heuristic_faces(image), [])
+
+    def test_strict_detection_runs_the_heuristic_without_mediapipe(self) -> None:
+        import deepfake_lens.face as face_module
+
+        unavailable = face_module.FaceDetectorUnavailable("mediapipe 없음")
+        spy = patch.object(face_module, "_skin_eye_heuristic_faces", wraps=face_module._skin_eye_heuristic_faces)
+        with patch.object(face_module, "_mediapipe_detect_faces", side_effect=unavailable), spy as heuristic:
+            self.assertEqual(face_module._detect_faces_strict(_synthetic_face_bgr(face=False)), [])
+            self.assertTrue(face_module._detect_faces_strict(_synthetic_face_bgr()))
+        self.assertGreaterEqual(heuristic.call_count, 1)
+        self.assertIsNone(face_module.face_detector_unavailable_reason())
+
+    def test_face_track_still_requires_measured_landmarks(self) -> None:
+        import deepfake_lens.face as face_module
+
+        reason = face_module.face_detector_unavailable_reason(require_landmarks=True)
+        if _has_mediapipe():
+            self.assertIsNone(reason)
+        else:
+            self.assertEqual(reason, "실측 랜드마크 검출기 없음: mediapipe")
+
+    def test_gif_is_unsupported_format_not_error(self) -> None:
+        from deepfake_lens.face import FACE_IMAGE_EXTENSIONS, UNSUPPORTED_FORMAT
+
+        with tempfile.TemporaryDirectory() as tmp:
+            gif = Path(tmp) / "anim.gif"
+            gif.write_bytes(b"GIF89a\x01\x00\x01\x00\x00\x00\x00;")
+            result = analyze_faces(gif)
+        self.assertEqual(result.manipulation_type, UNSUPPORTED_FORMAT)
+        self.assertEqual(result.verdict, "지원하지 않는 이미지 형식: .gif")
+        self.assertIn(".tif", FACE_IMAGE_EXTENSIONS)
+        self.assertIn(".tiff", FACE_IMAGE_EXTENSIONS)

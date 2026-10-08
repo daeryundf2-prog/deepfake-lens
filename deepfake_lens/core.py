@@ -733,12 +733,15 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
     def face_check():
         import cv2  # noqa: F401 — dependency probe
 
-        from .face import analyze_faces
+        from .face import UNSUPPORTED_FORMAT, analyze_faces
 
         face = analyze_faces(path)
         if face.face_count == 0:
             if face.manipulation_type == "none":
                 raise CheckSkipped("얼굴 미검출")
+            if face.manipulation_type == UNSUPPORTED_FORMAT:
+                # D15: GIF etc. — not applicable, never a failure.
+                raise CheckSkipped(face.verdict)
             if face.manipulation_type == "unavailable":
                 raise CheckSkipped(f"의존성 부재: {face.verdict}")
             raise AnalyzerError(face.verdict)
@@ -867,7 +870,9 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
         from .face import face_detector_unavailable_reason
         from .face_track import analyze_face_track
 
-        missing = face_detector_unavailable_reason()
+        # The track layer uses measured landmarks only (MediaPipe); the
+        # weight-free D15 detector does not provide them.
+        missing = face_detector_unavailable_reason(require_landmarks=True)
         if missing:
             raise CheckSkipped(f"의존성 부재: {missing}")
         track = analyze_face_track(path, thresholds=thresholds)

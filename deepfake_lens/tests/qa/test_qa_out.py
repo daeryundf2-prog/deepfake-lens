@@ -5,9 +5,11 @@ fail-closed tests in tests/test_fail_closed.py (whose assertion helper they
 reuse): an exception injected into model inference is "실패: <예외 유형>",
 never "의존성 부재", and the verdict is 판단 불가; a photo where the face
 detector finds nothing records "얼굴 검사 미실행: 얼굴 미검출" and never a
-"no manipulation" conclusion. No detector weights exist here, so the three
-face conditions are synthetic scenes and the detector's "no face" outcome is
-injected; a second test runs the real (vendored Haar) detector unpatched.
+"no manipulation" conclusion. The three face conditions are synthetic
+scenes run through the real, unmocked face detector — on OpenCV 5 without
+CascadeClassifier and MediaPipe that is the weight-free skin/eye heuristic
+(face._skin_eye_heuristic_faces, D15) — with synthetic frontal faces as its
+positive control.
 
 The remaining scenarios cover the unified entry point (WP-F, G7/G8).
 
@@ -126,12 +128,30 @@ def _norm_payload(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _draw_frontal_face(image: Any, xx: Any, yy: Any, rng: Any, width: int, height: int) -> None:
+    """A frontal face: skin oval, two dark eye ellipses, nose, mouth."""
+    import numpy as np
+
+    cx, cy = width * rng.uniform(0.35, 0.65), height * rng.uniform(0.45, 0.55)
+    fw, fh = width * 0.28, width * 0.28 * 1.6
+    skin = np.array([200.0, 155.0, 130.0]) * rng.uniform(0.85, 1.05)
+    image[(((xx - cx) / (fw / 2)) ** 2 + ((yy - cy) / (fh / 2)) ** 2) <= 1.0] = skin
+    for side in (-1, 1):
+        ex, ey = cx + side * fw * 0.2, cy - fh * 0.12
+        image[(((xx - ex) / (fw * 0.09)) ** 2 + ((yy - ey) / (fh * 0.045)) ** 2) <= 1.0] = np.array([35.0, 30.0, 30.0])
+    image[(((xx - cx) / (fw * 0.06)) ** 2 + ((yy - (cy + fh * 0.05)) / (fh * 0.1)) ** 2) <= 1.0] = skin * 0.85
+    image[(((xx - cx) / (fw * 0.18)) ** 2 + ((yy - (cy + fh * 0.27)) / (fh * 0.04)) ** 2) <= 1.0] = np.array([150.0, 60.0, 60.0])
+
+
 def write_scene_png(path: Path, *, seed: int, condition: str = "no_face", width: int = 224, height: int = 168) -> Path:
     """A deterministic photo-like scene: soft light blobs, hard-edged objects,
     sensor noise. ``condition``: ``no_face`` (scene only), ``profile_face``
-    (a side-view head silhouette: skin ellipse, nose bump, hair) or
-    ``low_light`` (the scene at 20 % exposure with ISO-like noise).
-    Classified ``photo`` by image_class (asserted by the tests). Needs numpy.
+    (a side-view head silhouette: skin ellipse, nose bump, hair),
+    ``low_light`` (a frontal face in the scene at 20 % exposure with
+    ISO-like noise — the spec's "저조도 얼굴") or ``frontal_face`` (a
+    frontal face: oval, two eyes, nose, mouth — the detector's positive
+    control). Classified ``photo`` by image_class (asserted by the tests).
+    Needs numpy.
     """
     import numpy as np
 
@@ -155,6 +175,8 @@ def write_scene_png(path: Path, *, seed: int, condition: str = "no_face", width:
         nose = (((xx - (cx + width * 0.1)) / (width * 0.03)) ** 2 + ((yy - cy) / (height * 0.05)) ** 2) <= 1.0
         image[head | nose] = np.array([200.0, 155.0, 130.0]) + rng.normal(0, 5, 3)
         image[head & (yy < cy - height * 0.1) & (xx < cx + width * 0.02)] = np.array([40.0, 30.0, 25.0])
+    if condition in ("low_light", "frontal_face"):
+        _draw_frontal_face(image, xx, yy, rng, width, height)
     if condition == "low_light":
         image = image * 0.2 + rng.normal(0, 4.0, size=image.shape)
     else:
@@ -251,48 +273,85 @@ class QaOut3NoFaceTest(unittest.TestCase):
         for phrase in NO_MANIPULATION_PHRASES:
             self.assertFalse([text for text in texts if phrase in text], phrase)
 
+    def _face_entry(self, result: Any) -> CoverageEntry:
+        [entry] = [e for e in result.coverage if e.check == "face_manipulation"]
+        return entry
+
     def test_no_face_profile_and_low_light_record_face_check_not_run(self) -> None:
         """QA-OUT-3: 얼굴 없는 사진, 측면 얼굴, 저조도 얼굴 각 20장 → 얼굴 미검출 시 커버리지에 "얼굴 검사 미실행: 얼굴 미검출" 기록. 얼굴 조작 결론이 "없음"으로 나오지 않음.
 
-        60 synthetic photo scenes (20 per condition); the detector's "no
-        face found" outcome is injected (_detect_faces_strict -> []), as no
-        landmark weights exist in this environment.
+        60 synthetic photo scenes (20 per condition) through the real face
+        detector — nothing is mocked. On OpenCV 5 without CascadeClassifier
+        and without MediaPipe that is the weight-free skin/eye heuristic
+        (face._skin_eye_heuristic_faces, D15), wrapped with a spy only to
+        prove it ran. Scenes without a face and profile heads must come
+        back "얼굴 미검출" from that run; a low-light frontal face is either
+        found (the check ran) or recorded "얼굴 미검출"; no result ever
+        claims "no manipulation". The detector's positive control is
+        test_real_detector_finds_frontal_faces.
         """
+        from deepfake_lens import face as face_module
         from deepfake_lens.image_class import PHOTO, classify_image
 
-        with tempfile.TemporaryDirectory() as tmp:
+        spy = mock.patch.object(face_module, "_skin_eye_heuristic_faces", wraps=face_module._skin_eye_heuristic_faces)
+        not_detected = 0
+        with tempfile.TemporaryDirectory() as tmp, spy as heuristic:
             root = Path(tmp)
             for condition in FACE_CONDITIONS:
                 for index in range(FACE_IMAGES_PER_CONDITION):
                     image = write_scene_png(root / f"{condition}-{index:02d}.png", seed=3000 + index, condition=condition)
                     with self.subTest(condition=condition, image=image.name):
                         self.assertEqual(classify_image(image).kind, PHOTO, "the face layer runs on photos only")
-                        with mock.patch("deepfake_lens.face._detect_faces_strict", return_value=[]):
-                            item = analyze_file(image, deep_signals=True)
-                        result = item.result
-                        assert result is not None
-                        [entry] = [e for e in result.coverage if e.check == "face_manipulation"]
-                        self.assertEqual(entry.status, CoverageStatus.SKIPPED)
-                        self.assertEqual(entry.describe(), "얼굴 검사 미실행: 얼굴 미검출")
-                        self.assertFalse([e for e in result.evidence if e.layer == "face"])
-                        self._assert_no_face_claim(result)
-
-    def test_real_detector_never_yields_a_no_manipulation_claim(self) -> None:
-        """QA-OUT-3 (unpatched detector): whatever the vendored detector finds on
-        the 60 scenes, a skip says why and no "no manipulation" conclusion appears."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            for condition in FACE_CONDITIONS:
-                for index in range(FACE_IMAGES_PER_CONDITION):
-                    image = write_scene_png(root / f"{condition}-{index:02d}.png", seed=3000 + index, condition=condition)
-                    with self.subTest(condition=condition, image=image.name):
                         item = analyze_file(image, deep_signals=True)
                         result = item.result
                         assert result is not None
-                        [entry] = [e for e in result.coverage if e.check == "face_manipulation"]
-                        if entry.status != CoverageStatus.RAN:
-                            self.assertTrue(entry.reason, entry)
+                        entry = self._face_entry(result)
+                        if condition in ("no_face", "profile_face"):
+                            self.assertEqual(entry.status, CoverageStatus.SKIPPED, entry)
+                        if entry.status == CoverageStatus.SKIPPED:
+                            self.assertEqual(entry.describe(), "얼굴 검사 미실행: 얼굴 미검출")
+                            not_detected += 1
+                        else:
+                            self.assertEqual(entry.status, CoverageStatus.RAN, entry)
+                        self.assertFalse([e for e in result.evidence if e.layer == "face"])
                         self._assert_no_face_claim(result)
+            # "얼굴 미검출" came from detector runs, not from a stub.
+            self.assertGreaterEqual(heuristic.call_count, not_detected)
+        self.assertGreaterEqual(not_detected, 2 * FACE_IMAGES_PER_CONDITION)
+
+    def test_real_detector_finds_frontal_faces(self) -> None:
+        """QA-OUT-3 (positive control): the same unmocked detector finds 20
+        synthetic frontal faces, so its "얼굴 미검출" above is a real negative;
+        a found face yields only reference signals, never a conclusion."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for index in range(FACE_IMAGES_PER_CONDITION):
+                image = write_scene_png(root / f"frontal-{index:02d}.png", seed=3000 + index, condition="frontal_face")
+                with self.subTest(image=image.name):
+                    item = analyze_file(image, deep_signals=True)
+                    result = item.result
+                    assert result is not None
+                    self.assertEqual(self._face_entry(result).status, CoverageStatus.RAN)
+                    self.assertFalse([e for e in result.evidence if e.layer == "face"])
+                    self.assertEqual(result.verdict_code, Verdict.UNDETERMINED)
+                    self._assert_no_face_claim(result)
+
+    def test_gif_face_check_is_skipped_not_failed(self) -> None:
+        """D15: a GIF is outside the face layer's formats — skipped with the reason."""
+        if importlib.util.find_spec("PIL") is None:
+            self.skipTest("Pillow writes the GIF")
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            png = write_scene_png(Path(tmp) / "scene.png", seed=5, condition="frontal_face")
+            gif = Path(tmp) / "scene.gif"
+            with Image.open(png) as source:
+                source.save(gif)
+            item = analyze_file(gif, deep_signals=True)
+        assert item.result is not None
+        entry = self._face_entry(item.result)
+        self.assertEqual(entry.status, CoverageStatus.SKIPPED)
+        self.assertEqual(entry.reason, "지원하지 않는 이미지 형식: .gif")
 
 
 class QaOut4SameResultEverywhereTest(unittest.TestCase):
