@@ -79,6 +79,8 @@ from .evidence_statement import (
     signed_statement_body,
     write_evidence_statement_json,
     write_evidence_statement_markdown,
+    PdfDependencyMissing,
+    pdf_backend_available,
     write_evidence_statement_pdf,
 )
 from .vendor_weights import (
@@ -772,6 +774,10 @@ def main(argv: list[str] | None = None) -> int:
         return emit_layer(args, "faceswap_seam", "페이스스왑 경계면 계층", analysis.to_json(), subject=str(args.file))
     if args.command == "evidence-statement":
         target = Path(args.target)
+        if args.pdf_out and not pdf_backend_available():
+            # R6: missing optional renderer -> Korean message, exit 2, before any analysis.
+            print(f"오류: {PdfDependencyMissing()}", file=sys.stderr)
+            return 2
         items: list[ScanItem] = []
         if target.is_file() and target.suffix.lower() == ".json":
             try:
@@ -927,6 +933,15 @@ def main(argv: list[str] | None = None) -> int:
     # packaged/$DEEPFAKE_LENS_MODELS_DIR one) — the adapter filters by
     # modality, and `supported`/`pin` decide which members actually run.
     # An explicit --model-path replaces the defaults.
+    wants_statement_pdf = bool(getattr(args, "evidence_statement_pdf_out", None)) or (
+        getattr(args, "evidence_statement_out", None) is not None
+        and Path(args.evidence_statement_out).suffix.lower() == ".pdf"
+    )
+    if wants_statement_pdf and not pdf_backend_available():
+        # R6: say so before a possibly hours-long scan, in Korean, exit 2 —
+        # never a RuntimeError traceback after the scan finished.
+        print(f"오류: {PdfDependencyMissing()}", file=sys.stderr)
+        return 2
     options = AnalysisOptions.from_cli_args(args)
     engine_profiles = options.engine_profiles()
     if engine_profiles and args.model_path is None:

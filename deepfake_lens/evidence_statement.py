@@ -395,6 +395,42 @@ def write_evidence_statement_markdown(
     return body
 
 
+# R6: the PDF renderer's optional dependency and the message shown when it
+# is missing (CLI exit 2, web JSON error) — never an English traceback.
+PDF_DEPENDENCY = "pymupdf"
+PDF_DEPENDENCY_MESSAGE = (
+    "PDF 증거설명서를 만들려면 pymupdf 패키지가 필요합니다(설치: pip install pymupdf). "
+    "Markdown(.md) 또는 JSON(.json) 증거설명서는 pymupdf 없이 만들 수 있습니다."
+)
+
+
+class PdfDependencyMissing(RuntimeError):
+    """pymupdf (or its legacy ``fitz`` name) is not installed (R6)."""
+
+    def __init__(self) -> None:
+        super().__init__(PDF_DEPENDENCY_MESSAGE)
+
+
+def _import_pymupdf() -> Any:
+    try:
+        import pymupdf
+    except ImportError:
+        try:
+            import fitz as pymupdf
+        except ImportError as exc:
+            raise PdfDependencyMissing() from exc
+    return pymupdf
+
+
+def pdf_backend_available() -> bool:
+    """True when write_evidence_statement_pdf can run (checked before a scan starts)."""
+    try:
+        _import_pymupdf()
+    except PdfDependencyMissing:
+        return False
+    return True
+
+
 def write_evidence_statement_pdf(
     path: Path | str,
     statement: EvidenceStatement,
@@ -407,16 +443,7 @@ def write_evidence_statement_pdf(
     The last block prints the signature lines of the signed statement body
     (G30); returns that body."""
     body = _signed(statement, signed, key)
-    try:
-        import pymupdf
-    except ImportError:
-        try:
-            import fitz as pymupdf
-        except ImportError:
-            raise RuntimeError(
-                "pymupdf is required for PDF evidence statements; "
-                "install it or use the Markdown output path instead."
-            )
+    pymupdf = _import_pymupdf()
 
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)

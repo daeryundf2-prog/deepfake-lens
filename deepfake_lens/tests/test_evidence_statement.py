@@ -514,3 +514,69 @@ class EvidenceStatementHashSourceTest(unittest.TestCase):
         item = ScanItem("bundle.zip::note.txt", "bundle.zip::note.txt", "text", "analyzed", 1)
         statement = build_evidence_statement([item], scan_root=self.case)
         self.assertEqual(statement.entries[0].sha256, "")
+
+
+class PdfDependencyMissingTest(unittest.TestCase):
+    """R6: --evidence-statement-pdf-out (and evidence-statement --pdf-out)
+    without pymupdf -> a Korean message naming the package, exit 2, no
+    traceback, checked before the scan runs; pymupdf/fitz imports are
+    blocked so the test holds where pymupdf is installed too."""
+
+    BENCHMARK = Path(__file__).resolve().parents[2] / "fixtures" / "benchmark"
+
+    def setUp(self) -> None:
+        import sys
+        from unittest import mock
+
+        patcher = mock.patch.dict(sys.modules, {"pymupdf": None, "fitz": None})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.out = Path(self._tmp.name)
+
+    def _run(self, argv: list[str]) -> tuple[int, str]:
+        from contextlib import redirect_stderr
+        from unittest import mock
+
+        err = io.StringIO()
+        with mock.patch("deepfake_lens.cli.scan_folder", side_effect=AssertionError("scan must not start")), \
+                redirect_stdout(io.StringIO()), redirect_stderr(err):
+            code = main(argv)
+        return code, err.getvalue()
+
+    def _assert_korean_refusal(self, code: int, stderr: str) -> None:
+        self.assertEqual(code, 2)
+        self.assertIn("pymupdf", stderr)
+        self.assertIn("PDF 증거설명서를 만들려면 pymupdf 패키지가 필요합니다", stderr)
+        self.assertNotIn("Traceback", stderr)
+        self.assertNotIn("is required", stderr)
+
+    def test_scan_evidence_statement_pdf_out(self) -> None:
+        pdf = self.out / "statement.pdf"
+        code, stderr = self._run(["scan", str(self.BENCHMARK), "--evidence-statement-pdf-out", str(pdf)])
+        self._assert_korean_refusal(code, stderr)
+        self.assertFalse(pdf.exists())
+
+    def test_scan_evidence_statement_out_with_pdf_suffix(self) -> None:
+        code, stderr = self._run(["scan", str(self.BENCHMARK), "--evidence-statement-out", str(self.out / "s.pdf")])
+        self._assert_korean_refusal(code, stderr)
+
+    def test_evidence_statement_command_pdf_out(self) -> None:
+        code, stderr = self._run(["evidence-statement", str(self.BENCHMARK), "--pdf-out", str(self.out / "s.pdf")])
+        self._assert_korean_refusal(code, stderr)
+
+    def test_writer_raises_korean_dependency_error(self) -> None:
+        from deepfake_lens.evidence_statement import (
+            PDF_DEPENDENCY_MESSAGE,
+            PdfDependencyMissing,
+            pdf_backend_available,
+            write_evidence_statement_pdf,
+        )
+
+        self.assertFalse(pdf_backend_available())
+        statement = build_evidence_statement([])
+        with self.assertRaises(PdfDependencyMissing) as ctx:
+            write_evidence_statement_pdf(self.out / "s.pdf", statement)
+        self.assertEqual(str(ctx.exception), PDF_DEPENDENCY_MESSAGE)
+        self.assertIsInstance(ctx.exception, RuntimeError)  # web /api/report catches RuntimeError
