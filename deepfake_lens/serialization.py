@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from .model_adapter import ExternalModelAnalysis
-from .pixel import PixelAnalysis, PixelExpertResult
+from .pixel import PIXEL_REFERENCE_CONFIDENCE, PixelAnalysis, PixelExpertResult
 from .result_types import (
     RISK_LABELS,
     ClassificationResult,
@@ -163,11 +163,19 @@ def _pixel_analysis_from_json(data: dict[str, object]) -> PixelAnalysis:
         for item in _items(data.get("experts"))
         if isinstance(item, dict)
     ]
+    available = bool(data.get("available", False))
+    # D12: v2 records carry raw_score/reference_confidence; older records
+    # carry score/confidence — read both, and never re-surface a legacy
+    # low/medium/high confidence for a pixel run (it becomes "참고").
+    raw = data.get("raw_score", data.get("score"))
+    reference_confidence = data.get("reference_confidence")
+    if not reference_confidence:
+        reference_confidence = PIXEL_REFERENCE_CONFIDENCE if available else data.get("confidence", "unknown")
     return PixelAnalysis(
         mode=str(data.get("mode", "off")),
-        available=bool(data.get("available", False)),
-        score=int(_num(data.get("score"))),
-        confidence=str(data.get("confidence", "unknown")),
+        available=available,
+        raw_score=int(_num(raw)),
+        reference_confidence=str(reference_confidence),
         model=str(data.get("model", "")),
         experts=experts,
         signals=[str(item) for item in _items(data.get("signals"))],

@@ -402,3 +402,74 @@ class EvidenceStatementSigningTest(_StatementFixture):
         doc.close()
         self.assertIn(str(signed["signature"]), "".join(text.split()))
         self.assertTrue(verify_report(signed, KEY).verified)
+
+
+class EvidenceStatementHashSourceTest(unittest.TestCase):
+    """D5: the statement records the scan's ``item.sha256``; a fallback hash
+    resolves relative paths against the scan root, never the cwd."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name)
+        self.case = self.base / "case"
+        self.case.mkdir()
+        (self.case / "note.txt").write_text("사건 메모 원문입니다.\n", encoding="utf-8")
+        (self.case / "photo.bin").write_bytes(b"\x00\x01 opaque evidence bytes")
+        # A different file with the same relative name in the working dir:
+        # hashing ``item.path`` against the cwd would record this one.
+        self.decoy_dir = self.base / "cwd"
+        self.decoy_dir.mkdir()
+        (self.decoy_dir / "note.txt").write_text("다른 파일\n", encoding="utf-8")
+        self.old_cwd = os.getcwd()
+
+    def tearDown(self) -> None:
+        os.chdir(self.old_cwd)
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _sha(path: Path) -> str:
+        import hashlib
+
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def _assert_statement_hashes(self, items: list[ScanItem], *, scan_root: Path | str | None) -> None:
+        statement = build_evidence_statement(items, scan_root=scan_root)
+        by_path = {entry.file_path: entry.sha256 for entry in statement.entries}
+        for name in ("note.txt", "photo.bin"):
+            self.assertEqual(by_path[name], self._sha(self.case / name), name)
+        self.assertNotEqual(by_path["note.txt"], self._sha(self.decoy_dir / "note.txt"))
+
+    def test_absolute_folder_scan_records_item_sha256(self) -> None:
+        from deepfake_lens.analysis_api import AnalysisOptions, scan_folder
+
+        os.chdir(self.decoy_dir)
+        _, items, _ = scan_folder(self.case.resolve(), AnalysisOptions())
+        self.assertTrue(all(item.sha256 for item in items))
+        self._assert_statement_hashes(items, scan_root=None)
+
+    def test_relative_folder_scan_records_item_sha256(self) -> None:
+        from deepfake_lens.analysis_api import AnalysisOptions, scan_folder
+
+        os.chdir(self.base)
+        _, items, _ = scan_folder(Path("case"), AnalysisOptions())
+        os.chdir(self.decoy_dir)  # the statement is built from elsewhere
+        self._assert_statement_hashes(items, scan_root=None)
+
+    def test_item_sha256_wins_over_rehashing(self) -> None:
+        item = ScanItem("note.txt", "note.txt", "text", "analyzed", 1, sha256="ab" * 32)
+        statement = build_evidence_statement([item], scan_root=self.case)
+        self.assertEqual(statement.entries[0].sha256, "ab" * 32)
+
+    def test_fallback_resolves_against_scan_root_not_cwd(self) -> None:
+        os.chdir(self.decoy_dir)
+        item = ScanItem("note.txt", "note.txt", "text", "analyzed", 1)
+        with_root = build_evidence_statement([item], scan_root=self.case)
+        self.assertEqual(with_root.entries[0].sha256, self._sha(self.case / "note.txt"))
+        without_root = build_evidence_statement([item])
+        self.assertEqual(without_root.entries[0].sha256, "")
+        self.assertIn("해시 불가", without_root.entries[0].purpose_of_proof)
+
+    def test_archive_member_without_digest_is_not_hashed(self) -> None:
+        item = ScanItem("bundle.zip::note.txt", "bundle.zip::note.txt", "text", "analyzed", 1)
+        statement = build_evidence_statement([item], scan_root=self.case)
+        self.assertEqual(statement.entries[0].sha256, "")

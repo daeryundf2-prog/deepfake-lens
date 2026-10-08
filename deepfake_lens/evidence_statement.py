@@ -131,7 +131,10 @@ def _compute_sha256(path: Path | str) -> str | None:
     hash must be rendered as 'unavailable', not as a digest-shaped value.
     """
     p = Path(path)
-    if not p.is_file():
+    try:
+        if not p.is_file():
+            return None
+    except OSError:
         return None
     h = hashlib.sha256()
     try:
@@ -141,6 +144,30 @@ def _compute_sha256(path: Path | str) -> str | None:
         return h.hexdigest()
     except OSError:
         return None
+
+
+def _item_sha256(item: ScanItem, scan_root: Path | str | None) -> str | None:
+    """The evidence file's SHA-256 for one statement row (D5).
+
+    The scan already hashed the bytes it analyzed (``item.sha256``, WP-G),
+    so that digest is used as is — re-reading the file later could hash a
+    different file or a changed one. Only a row without a recorded digest
+    (a single-file analysis, an old JSON) is hashed here, and then a
+    relative ``item.path`` is resolved against ``scan_root`` (the scanned
+    folder), never against the process working directory. A relative path
+    with no ``scan_root`` and archive-member paths (``a.zip::x``) are not
+    hashable and yield None ("해시 불가").
+    """
+    if item.sha256:
+        return item.sha256
+    if "::" in item.path:
+        return None
+    path = Path(item.path)
+    if not path.is_absolute():
+        if scan_root is None:
+            return None
+        path = Path(scan_root) / path
+    return _compute_sha256(path)
 
 
 def _determine_statutes(score: int, signals: list[Any], item_kind: str, band: str) -> list[str]:
@@ -204,8 +231,14 @@ def build_evidence_statement(
     center: str = "디지털포렌식 감정센터",
     thresholds: object | None = None,
     coverage: dict[str, object] | None = None,
+    scan_root: Path | str | None = None,
 ) -> EvidenceStatement:
-    """Build an EvidenceStatement from analyzed scan items."""
+    """Build an EvidenceStatement from analyzed scan items.
+
+    ``scan_root`` is the folder the items were scanned from; it is only
+    used to locate a file whose row carries no ``sha256`` (see
+    :func:`_item_sha256`).
+    """
     entries: list[EvidenceStatementEntry] = []
     now_date = datetime.now().strftime("%Y. %m. %d.")
 
@@ -221,7 +254,7 @@ def build_evidence_statement(
         )
         band = VERDICT_LABELS[res.verdict_code] if res else (item.status or "판단 불가")
         signals = res.signals if res else []
-        file_sha256 = _compute_sha256(item.path)
+        file_sha256 = _item_sha256(item, scan_root)
 
         exhibit_no = f"{exhibit_prefix}{idx}호증"
         doc_name = f"디지털 증거 파일 ({Path(item.path).name}) 및 AI 스크리닝 데이터"

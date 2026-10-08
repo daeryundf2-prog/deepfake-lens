@@ -65,9 +65,51 @@ _WINDOWS_RESERVED = {
 
 @dataclass
 class ArchiveExtraction:
+    """Extracted member paths plus every member that was not extracted.
+
+    ``rejected`` holds one ``(member name, reason)`` per refused member
+    (D9): path traversal, absolute path, link/device entry, budget or bomb
+    limits, corrupt data, nesting limits. Names of members of nested
+    archives are prefixed ``<inner archive>::``. ``skipped`` is its count.
+    """
+
     members: list[Path] = field(default_factory=list)
     skipped: int = 0
     warnings: list[str] = field(default_factory=list)
+    rejected: list[tuple[str, str]] = field(default_factory=list)
+    # The container could not be opened: a missing optional extractor
+    # (py7zr / rarfile) or "<ExceptionClass>: <message>" of the parse error.
+    # Only the top-level archive's own state; nested failures stay warnings.
+    missing_dependency: str | None = None
+    error: str | None = None
+
+    def reject(self, name: str, reason: str) -> None:
+        self.skipped += 1
+        self.rejected.append((name, reason))
+
+
+def budget_reason(declared: int, limit: int, detail: str = "") -> str:
+    """"압축 예산 초과(선언 크기 N, 한도 M)" (+ detail) — the D9 wording."""
+    return f"압축 예산 초과(선언 크기 {declared}, 한도 {max(0, limit)})" + (f" — {detail}" if detail else "")
+
+
+def _unsafe_name_reason(name: str) -> str:
+    """Why ``_safe_member_name`` refused ``name``."""
+    normalized = name.replace("\\", "/").strip()
+    if not normalized:
+        return "빈 멤버 이름"
+    if normalized.startswith("/") or (len(normalized) > 1 and normalized[1] == ":") or normalized[0] == "~":
+        return "절대 경로 멤버(대상 폴더 밖 쓰기 시도)"
+    if any(part == ".." for part in PurePosixPath(normalized).parts):
+        return "경로 이탈 멤버('..' — 대상 폴더 밖 쓰기 시도)"
+    if ":" in normalized:
+        return "허용되지 않는 이름(드라이브 문자·ADS ':' 포함)"
+    return "허용되지 않는 이름(Windows 예약 장치명)"
+
+
+def _reject_rest(out: ArchiveExtraction, names: list[str], reason: str) -> None:
+    for name in names:
+        out.reject(name, reason)
 
 
 @dataclass
@@ -186,26 +228,38 @@ def _member_cap(per_archive_total: int, budget: ExtractionBudget) -> int:
     return max(0, min(MAX_ARCHIVE_MEMBER_BYTES, MAX_ARCHIVE_TOTAL_BYTES - per_archive_total, budget.bytes_left()))
 
 
-def _member_allowed(out: ArchiveExtraction, budget: ExtractionBudget) -> bool:
-    """False (with a warning) once the per-archive or tree member cap is hit."""
+def _member_allowed(out: ArchiveExtraction, budget: ExtractionBudget) -> str | None:
+    """None, or (with a warning) the reason the member cap stops extraction."""
     if len(out.members) >= MAX_ARCHIVE_MEMBERS:
         out.warnings.append(f"멤버 수 상한({MAX_ARCHIVE_MEMBERS}) 도달 — 나머지 생략")
-        return False
+        return f"멤버 수 상한({MAX_ARCHIVE_MEMBERS}) 도달로 미해제"
     if budget.members_left() <= 0:
         budget.note_exhausted("members", out)
-        return False
-    return True
+        return f"압축 해제 멤버 수 예산({budget.total_members}) 소진으로 미해제"
+    return None
 
 
-def _declared_fits(declared: int, per_archive_total: int, out: ArchiveExtraction, budget: ExtractionBudget) -> bool:
-    """False (with a warning) when a member's declared size breaks a total cap."""
+def _declared_fits(declared: int, per_archive_total: int, out: ArchiveExtraction, budget: ExtractionBudget) -> str | None:
+    """None, or (with a warning) the reason a member's declared size breaks a total cap."""
     if per_archive_total + declared > MAX_ARCHIVE_TOTAL_BYTES:
         out.warnings.append(f"해제 총량 상한({MAX_ARCHIVE_TOTAL_BYTES // (1024 * 1024)}MB) 도달 — 나머지 생략")
-        return False
+        return budget_reason(declared, MAX_ARCHIVE_TOTAL_BYTES - per_archive_total, "압축 파일당 해제 총량 상한")
     if declared > budget.bytes_left():
         budget.note_exhausted("bytes", out)
-        return False
-    return True
+        return budget_reason(declared, budget.bytes_left(), "압축 해제 총량 예산 소진")
+    return None
+
+
+def _size_reason(declared: int, compressed: int | None = None) -> str | None:
+    """Per-member bomb checks on declared sizes: member cap and ratio cap."""
+    if declared > MAX_ARCHIVE_MEMBER_BYTES:
+        return budget_reason(declared, MAX_ARCHIVE_MEMBER_BYTES, "멤버당 크기 상한")
+    if compressed and declared // max(1, compressed) > MAX_ARCHIVE_RATIO:
+        return budget_reason(
+            declared, compressed * MAX_ARCHIVE_RATIO,
+            f"압축률 {declared // max(1, compressed)}:1 > {MAX_ARCHIVE_RATIO}:1 (압축 폭탄 의심)",
+        )
+    return None
 
 
 def _copy_capped(src: IO[bytes], target: Path, cap: int) -> tuple[int, bool]:
@@ -243,40 +297,43 @@ def _charge(out: ArchiveExtraction, budget: ExtractionBudget, target: Path, rel:
 def _extract_zip(path: Path, dest: Path, out: ArchiveExtraction, budget: ExtractionBudget) -> None:
     total = 0
     with zipfile.ZipFile(path) as zf:
-        for info in zf.infolist():
-            if info.is_dir():
-                continue
-            if not _member_allowed(out, budget):
+        infos = [info for info in zf.infolist() if not info.is_dir()]
+        for index, info in enumerate(infos):
+            name = _zip_member_name(info)
+            stop = _member_allowed(out, budget)
+            if stop:
+                _reject_rest(out, [_zip_member_name(i) for i in infos[index:]], stop)
                 break
             if _is_zip_symlink(info):
-                out.skipped += 1
+                out.reject(name, "심볼릭 링크 멤버")
                 continue
-            rel = _safe_member_name(_zip_member_name(info))
+            rel = _safe_member_name(name)
             if rel is None:
-                out.skipped += 1
+                out.reject(name, _unsafe_name_reason(name))
                 continue
-            if info.file_size > MAX_ARCHIVE_MEMBER_BYTES:
-                out.skipped += 1
+            too_big = _size_reason(info.file_size, info.compress_size)
+            if too_big:
+                out.reject(name, too_big)
                 continue
-            if info.compress_size and info.file_size // max(1, info.compress_size) > MAX_ARCHIVE_RATIO:
-                out.skipped += 1
-                continue
-            if not _declared_fits(info.file_size, total, out, budget):
+            stop = _declared_fits(info.file_size, total, out, budget)
+            if stop:
+                out.reject(name, stop)
+                _reject_rest(out, [_zip_member_name(i) for i in infos[index + 1:]], "앞선 멤버에서 해제 예산 소진으로 미해제")
                 break
             target = _dest_for(dest, rel)
             if target is None:
-                out.skipped += 1
+                out.reject(name, "경로 이탈 멤버(해석 결과가 대상 폴더 밖)")
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             try:
                 with zf.open(info) as src:
                     written, truncated = _copy_capped(src, target, _member_cap(total, budget))
-            except (OSError, zipfile.BadZipFile, RuntimeError, EOFError, ValueError, zlib.error):
+            except (OSError, zipfile.BadZipFile, RuntimeError, EOFError, ValueError, zlib.error) as exc:
                 # Corrupt member data (bad CRC, truncated stream, encrypted):
                 # drop the partial file so it is neither analyzed nor left
                 # occupying budget-free disk space.
                 target.unlink(missing_ok=True)
-                out.skipped += 1
+                out.reject(name, f"손상된 멤버 데이터({type(exc).__name__}: {str(exc)[:120]})")
                 continue
             total += written
             _charge(out, budget, target, rel, written, truncated)
@@ -285,36 +342,46 @@ def _extract_zip(path: Path, dest: Path, out: ArchiveExtraction, budget: Extract
 def _extract_tar(path: Path, dest: Path, out: ArchiveExtraction, budget: ExtractionBudget) -> None:
     total = 0
     with tarfile.open(path) as tf:
-        for member in tf.getmembers():
-            if not _member_allowed(out, budget):
+        members = [member for member in tf.getmembers() if not member.isdir()]
+        for index, member in enumerate(members):
+            stop = _member_allowed(out, budget)
+            if stop:
+                _reject_rest(out, [m.name for m in members[index:]], stop)
                 break
             # Symlinks, hardlinks, devices and FIFOs are never materialized:
             # only regular files are copied, and only via extractfile().
             if not member.isreg():
-                if not member.isdir():
-                    out.skipped += 1
+                kind = "심볼릭 링크 멤버" if member.issym() else "하드 링크 멤버" if member.islnk() else "일반 파일이 아닌 멤버(장치·FIFO)"
+                out.reject(member.name, kind)
                 continue
             rel = _safe_member_name(member.name)
-            if rel is None or member.size > MAX_ARCHIVE_MEMBER_BYTES:
-                out.skipped += 1
+            if rel is None:
+                out.reject(member.name, _unsafe_name_reason(member.name))
                 continue
-            if not _declared_fits(member.size, total, out, budget):
+            too_big = _size_reason(member.size)
+            if too_big:
+                out.reject(member.name, too_big)
+                continue
+            stop = _declared_fits(member.size, total, out, budget)
+            if stop:
+                out.reject(member.name, stop)
+                _reject_rest(out, [m.name for m in members[index + 1:]], "앞선 멤버에서 해제 예산 소진으로 미해제")
                 break
             target = _dest_for(dest, rel)
             if target is None:
-                out.skipped += 1
+                out.reject(member.name, "경로 이탈 멤버(해석 결과가 대상 폴더 밖)")
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             try:
                 src = tf.extractfile(member)
                 if src is None:
-                    out.skipped += 1
+                    out.reject(member.name, "멤버 데이터를 열 수 없음")
                     continue
                 with src:
                     written, truncated = _copy_capped(src, target, _member_cap(total, budget))
-            except (OSError, tarfile.TarError, EOFError, zlib.error):
+            except (OSError, tarfile.TarError, EOFError, zlib.error) as exc:
                 target.unlink(missing_ok=True)
-                out.skipped += 1
+                out.reject(member.name, f"손상된 멤버 데이터({type(exc).__name__}: {str(exc)[:120]})")
                 continue
             total += written
             _charge(out, budget, target, rel, written, truncated)
@@ -350,29 +417,40 @@ def _extract_7z(path: Path, dest: Path, out: ArchiveExtraction, budget: Extracti
         import py7zr
     except ImportError:
         out.warnings.append("7z 해제에는 py7zr이 필요합니다 (pip install deepfake-lens[archive])")
+        out.missing_dependency = "py7zr"
         return
     total = 0
     try:
         with py7zr.SevenZipFile(path) as sf:
             links = _7z_link_names(sf)
             infos = {i.filename: i for i in sf.list() if not i.is_directory}
+            names = list(infos)
             targets: list[str] = []
-            for name, info in infos.items():
+            for index, (name, info) in enumerate(infos.items()):
                 if len(targets) >= MAX_ARCHIVE_MEMBERS:
                     out.warnings.append(f"멤버 수 상한({MAX_ARCHIVE_MEMBERS}) 도달 — 나머지 생략")
+                    _reject_rest(out, names[index:], f"멤버 수 상한({MAX_ARCHIVE_MEMBERS}) 도달로 미해제")
                     break
                 if len(targets) >= budget.members_left():
                     budget.note_exhausted("members", out)
+                    _reject_rest(out, names[index:], f"압축 해제 멤버 수 예산({budget.total_members}) 소진으로 미해제")
                     break
                 if name in links or _flag(info, "is_symlink"):
-                    out.skipped += 1
+                    out.reject(name, "심볼릭 링크 멤버")
                     continue
                 rel = _safe_member_name(name)
                 declared = int(getattr(info, "uncompressed", 0) or 0)
-                if rel is None or declared > MAX_ARCHIVE_MEMBER_BYTES:
-                    out.skipped += 1
+                if rel is None:
+                    out.reject(name, _unsafe_name_reason(name))
                     continue
-                if not _declared_fits(declared, total, out, budget):
+                too_big = _size_reason(declared)
+                if too_big:
+                    out.reject(name, too_big)
+                    continue
+                stop = _declared_fits(declared, total, out, budget)
+                if stop:
+                    out.reject(name, stop)
+                    _reject_rest(out, names[index + 1:], "앞선 멤버에서 해제 예산 소진으로 미해제")
                     break
                 total += declared
                 targets.append(name)
@@ -384,7 +462,7 @@ def _extract_7z(path: Path, dest: Path, out: ArchiveExtraction, budget: Extracti
                 if target is None or target.is_symlink() or not target.is_file():
                     if target is not None and target.is_symlink():
                         target.unlink(missing_ok=True)
-                    out.skipped += 1
+                    out.reject(name, "해제 결과가 일반 파일이 아님(링크·누락)")
                     continue
                 size = target.stat().st_size
                 if size > budget.bytes_left():
@@ -392,11 +470,12 @@ def _extract_7z(path: Path, dest: Path, out: ArchiveExtraction, budget: Extracti
                     # beyond the tree budget.
                     target.unlink(missing_ok=True)
                     budget.note_exhausted("bytes", out)
-                    out.skipped += 1
+                    out.reject(name, budget_reason(size, budget.bytes_left(), "헤더가 실제 크기를 축소 선언"))
                     continue
                 _charge(out, budget, target, rel or name, size, False)
     except Exception as exc:  # noqa: BLE001 - py7zr raises several custom error types
         out.warnings.append(f"7z 해제 실패: {type(exc).__name__}: {exc}")
+        out.error = f"{type(exc).__name__}: {str(exc)[:200]}"
 
 
 def _rar_member_rejected(info: Any) -> bool:
@@ -424,41 +503,52 @@ def _extract_rar(path: Path, dest: Path, out: ArchiveExtraction, budget: Extract
         import rarfile
     except ImportError:
         out.warnings.append("rar 해제에는 rarfile이 필요합니다 (pip install deepfake-lens[archive])")
+        out.missing_dependency = "rarfile"
         return
     total = 0
     try:
         with rarfile.RarFile(path) as rf:
-            for info in rf.infolist():
-                if _flag(info, "isdir") or _flag(info, "is_dir"):
-                    continue
-                if not _member_allowed(out, budget):
+            infos = [info for info in rf.infolist() if not (_flag(info, "isdir") or _flag(info, "is_dir"))]
+            for index, info in enumerate(infos):
+                name = str(info.filename)
+                stop = _member_allowed(out, budget)
+                if stop:
+                    _reject_rest(out, [str(i.filename) for i in infos[index:]], stop)
                     break
                 if _rar_member_rejected(info):
-                    out.skipped += 1
+                    out.reject(name, "링크·리다이렉트 또는 일반 파일이 아닌 멤버")
                     continue
-                rel = _safe_member_name(str(info.filename))
+                rel = _safe_member_name(name)
                 declared = int(getattr(info, "file_size", 0) or 0)
-                if rel is None or declared > MAX_ARCHIVE_MEMBER_BYTES:
-                    out.skipped += 1
+                if rel is None:
+                    out.reject(name, _unsafe_name_reason(name))
                     continue
-                if not _declared_fits(declared, total, out, budget):
+                too_big = _size_reason(declared)
+                if too_big:
+                    out.reject(name, too_big)
+                    continue
+                stop = _declared_fits(declared, total, out, budget)
+                if stop:
+                    out.reject(name, stop)
+                    _reject_rest(out, [str(i.filename) for i in infos[index + 1:]], "앞선 멤버에서 해제 예산 소진으로 미해제")
                     break
                 target = _dest_for(dest, rel)
                 if target is None:
-                    out.skipped += 1
+                    out.reject(name, "경로 이탈 멤버(해석 결과가 대상 폴더 밖)")
                     continue
                 target.parent.mkdir(parents=True, exist_ok=True)
                 try:
                     with rf.open(info) as src:
                         written, truncated = _copy_capped(src, target, _member_cap(total, budget))
-                except Exception:  # noqa: BLE001 - rarfile/unrar errors vary by backend
+                except Exception as exc:  # noqa: BLE001 - rarfile/unrar errors vary by backend
                     target.unlink(missing_ok=True)
-                    out.skipped += 1
+                    out.reject(name, f"손상된 멤버 데이터({type(exc).__name__}: {str(exc)[:120]})")
                     continue
                 total += written
                 _charge(out, budget, target, rel, written, truncated)
     except Exception as exc:  # noqa: BLE001 - rarfile raises several custom error types
         out.warnings.append(f"rar 해제 실패: {type(exc).__name__}: {exc}")
+        out.error = f"{type(exc).__name__}: {str(exc)[:200]}"
 
 
 def extract_archive(
@@ -497,21 +587,23 @@ def extract_archive(
             return out
     except (zipfile.BadZipFile, tarfile.TarError, OSError, EOFError, ValueError) as exc:
         out.warnings.append(f"압축 해제 실패: {type(exc).__name__}: {exc}")
+        out.error = f"{type(exc).__name__}: {str(exc)[:200]}"
         return out
 
     nested = [m for m in out.members if is_archive(m)]
     if nested:
         if _depth + 1 >= max_depth:
-            out.skipped += len(nested)
             out.warnings.append(f"중첩 압축 {len(nested)}개 — 최대 깊이({max_depth})로 미해제")
             for m in nested:
                 out.members.remove(m)
+                out.reject(_member_rel(m, root), f"중첩 압축 최대 깊이({max_depth}) 초과로 미해제")
         else:
             for m in nested:
+                inner_rel = _member_rel(m, root)
                 if tree_budget.nested_left() <= 0:
                     tree_budget.note_exhausted("nested", out)
                     out.members.remove(m)
-                    out.skipped += 1
+                    out.reject(inner_rel, f"중첩 압축 예산({tree_budget.nested_archives}개) 소진으로 미해제")
                     continue
                 tree_budget.nested_used += 1
                 # Unpack next to the inner archive (inside root) so two inner
@@ -525,5 +617,16 @@ def extract_archive(
                     out.members.remove(m)
                     out.members.extend(sub.members)
                 out.skipped += sub.skipped
+                out.rejected.extend((f"{inner_rel}::{name}", reason) for name, reason in sub.rejected)
                 out.warnings.extend(sub.warnings)
     return out
+
+
+def _member_rel(member: Path, root: Path) -> str:
+    """``member``'s path inside the archive (extraction targets are resolved)."""
+    for base in (root, root.resolve()):
+        try:
+            return member.relative_to(base).as_posix()
+        except ValueError:
+            continue
+    return member.name

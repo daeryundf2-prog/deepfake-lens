@@ -16,6 +16,7 @@ import os
 import random
 import struct
 import tempfile
+import threading
 import unittest
 import zipfile
 import zlib
@@ -29,6 +30,8 @@ from deepfake_lens.result_types import ScanItem, Verdict
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 VALID_PNG = REPO_ROOT / "fixtures" / "benchmark" / "ai-like-gradient.png"
+A1111_PNG = REPO_ROOT / "fixtures" / "benchmark" / "a1111-metadata-marker.png"
+CONCLUSIVE_CONTROL = "a1111-metadata-marker.png"
 # Small aggregate budget so the byte cap is exercised by a few MB of
 # fixtures instead of 2 GiB (the production default).
 TEST_BUDGET_BYTES = 4 * 1024 * 1024
@@ -165,7 +168,109 @@ def damaged_inputs() -> dict[str, bytes]:
 def write_valid_files(folder: Path) -> list[str]:
     (folder / "valid.png").write_bytes(VALID_PNG.read_bytes())
     (folder / "valid.txt").write_text("오늘은 공원에서 산책을 하고 친구와 점심을 먹었다. 날씨가 좋아서 오래 걸었다.", encoding="utf-8")
-    return ["valid.png", "valid.txt"]
+    # Control with a conclusion (D6): A1111 generator metadata must stay
+    # manipulation_evidence next to the damaged files — "undetermined" alone
+    # would not show that the damaged files leave other results untouched.
+    (folder / CONCLUSIVE_CONTROL).write_bytes(A1111_PNG.read_bytes())
+    return ["valid.png", "valid.txt", CONCLUSIVE_CONTROL]
+
+
+# The specific reason each damaged input must be answered with (D6): one of
+# these substrings must appear in the row's error, verdict, limitations or
+# coverage reasons. Alternatives cover environments without the decoder
+# (stdlib-only CI: no numpy/Pillow/opencv/librosa/pymupdf).
+DAMAGE_REASONS: dict[str, tuple[str, ...]] = {
+    "truncated.jpg": ("잘린 파일",),
+    "broken-moov.mp4": ("비디오를 열 수 없습니다", "의존성 부재: cv2"),
+    "empty.png": ("빈 파일",),
+    "empty.wav": ("파일이 비어 있습니다",),
+    "text-as.jpg": ("확장자 위장",),
+    "zip-as.png": ("확장자 위장",),
+    "png-as.wav": ("Format not recognised", "의존성 부재: librosa", "의존성 부재: soundfile"),
+    "truncated.png": ("잘린 파일",),
+    "huge-dims.png": ("DecompressionBombError", "의존성 부재: numpy"),
+    "garbage.wav": ("Error in WAV", "의존성 부재: librosa", "의존성 부재: soundfile"),
+    "bad.pdf": ("의존성 부재: pymupdf", "문서 텍스트 추출 실패"),
+    "bad.docx": ("문서 텍스트 추출 실패",),
+    "bomb-declared.zip": (f"압축 예산 초과(선언 크기 {1 << 30}, 한도 {archives.MAX_ARCHIVE_MEMBER_BYTES})",),
+    "bomb-deflate.zip": ("압축 예산 초과(선언 크기 67108864", "압축 폭탄 의심"),
+    "nested-100.zip": (f"중첩 압축 예산({archives.TOTAL_NESTED_ARCHIVES}개) 소진",),
+    "deep-nested.zip": (f"중첩 압축 최대 깊이({archives.MAX_NESTED_DEPTH}) 초과",),
+    "dir-symlink.zip": ("심볼릭 링크 멤버",),
+    "absolute-path.zip": ("절대 경로 멤버", "경로 이탈 멤버"),
+    "corrupt-crc.zip": ("손상된 멤버 데이터",),
+    "truncated.zip": ("압축 해제 실패(BadZipFile",),
+    "bad.tar.gz": ("압축 해제 실패(ReadError",),
+    "fat.zip": ("압축 해제 총량 예산 소진",),
+}
+# Temp space a scan may use besides archive extraction (extracted document
+# text handed to the text models, a few KB here).
+NON_ARCHIVE_TEMP_SLACK = 1024 * 1024
+POLL_SECONDS = 0.002
+
+
+class _TempUsagePoller:
+    """Polls a temp root in a thread and records peak bytes (D6/QA-IN-5).
+
+    Peak per top-level ``dflens-arc-*`` extraction dir and for the whole
+    root; extraction dirs live until the scan ends, so a post-hoc
+    measurement would miss transient files (partial corrupt members).
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.peak_total = 0
+        self.peak_by_dir: dict[str, int] = {}
+        self.polls = 0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def __enter__(self) -> "_TempUsagePoller":
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._stop.set()
+        self._thread.join()
+        self._sample()
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            self._sample()
+            self._stop.wait(POLL_SECONDS)
+
+    def _sample(self) -> None:
+        total = 0
+        try:
+            children = list(self.root.iterdir())
+        except OSError:
+            return
+        for child in children:
+            size = _tree_bytes(child)
+            total += size
+            if child.name.startswith("dflens-arc-"):
+                self.peak_by_dir[child.name] = max(self.peak_by_dir.get(child.name, 0), size)
+        self.peak_total = max(self.peak_total, total)
+        self.polls += 1
+
+
+def _tree_bytes(path: Path) -> int:
+    """Bytes of regular files under ``path`` (no symlink follow; races tolerated)."""
+    try:
+        if path.is_symlink():
+            return 0
+        if path.is_file():
+            return path.stat().st_size
+    except OSError:
+        return 0
+    total = 0
+    for dirpath, _, filenames in os.walk(path, followlinks=False):
+        for name in filenames:
+            try:
+                total += (Path(dirpath) / name).lstat().st_size
+            except OSError:
+                continue
+    return total
 
 
 def _disk_usage(root: Path) -> tuple[int, list[Path]]:
@@ -205,6 +310,8 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
     items: list[ScanItem]
     by_path: dict[str, ScanItem]
     summary: Any
+    temp_root: Path
+    poller: _TempUsagePoller
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -229,9 +336,16 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
             cls.extractions[Path(path).name] = (usage, links, out)
             return out
 
+        # Every temp file of the scan lands in a dedicated root that a
+        # polling thread measures while the scan runs (peak, not post hoc).
+        cls.temp_root = root / "scan-temp"
+        cls.temp_root.mkdir()
         with mock.patch.object(archives, "TOTAL_EXTRACTION_BYTES", TEST_BUDGET_BYTES), \
-                mock.patch("deepfake_lens.core.extract_archive", measured_extract):
+                mock.patch("deepfake_lens.core.extract_archive", measured_extract), \
+                mock.patch.object(tempfile, "tempdir", str(cls.temp_root)), \
+                _TempUsagePoller(cls.temp_root) as poller:
             cls.summary, cls.items, _ = scan_folder(cls.folder, AnalysisOptions(max_files=100))
+        cls.poller = poller
         cls.by_path = {item.path: item for item in cls.items}
 
     @classmethod
@@ -247,10 +361,15 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
         """QA-IN-5: 손상 파일 20종(잘린 JPEG, 깨진 mp4 moov, 빈 파일, 확장자 위장, zip 폭탄, 중첩 zip 100개) → 프로세스 생존, 각 파일이 "판단 불가 + 이유" 또는 "미지원". 디스크 사용 상한 초과 없음. 다른 파일 결과에 영향 없음.
 
         Every damaged input (and every member pulled out of one) is 판단
-        불가 with a reason, 미지원, or 실패 — never a conclusion. The disk
-        budget and the "other files unaffected" halves are the sibling
+        불가 with a reason, 미지원, or 실패 — never a conclusion. Each damaged
+        input's reason must be the specific one for its damage
+        (DAMAGE_REASONS: 잘린 파일, 빈 파일, 확장자 위장, 압축 예산 초과(선언
+        크기 N, 한도 M), …), not just any non-empty string. The disk budget
+        (peak, polled while the scan runs) and the "other files unaffected"
+        halves (with a manipulation_evidence control) are the sibling
         QA-IN-5 tests in this class.
         """
+        self.assertEqual(set(DAMAGE_REASONS), set(self.damaged))
         for item in self.items:
             top = item.path.split("::", 1)[0]
             if top in self.valid:
@@ -259,10 +378,16 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
                 if item.result is None:
                     self.assertIn(item.status, {"failed", "unsupported", "skipped", "unknown"})
                     self.assertTrue(item.error, "a row without a result must carry a reason")
+                    reasons = [item.error or ""]
                 else:
                     self.assertEqual(item.result.verdict_code, Verdict.UNDETERMINED, item.result.verdict)
                     reasons = [item.result.verdict, *item.result.limitations, *(e.reason for e in item.result.coverage if e.reason)]
                     self.assertTrue(any(reasons), "판단 불가 must say why")
+                if "::" in item.path:
+                    continue  # a member is an ordinary file; its archive row carries the damage reason
+                expected = DAMAGE_REASONS[item.path]
+                text = "\n".join(reasons)
+                self.assertTrue(any(marker in text for marker in expected), f"{item.path}: none of {expected} in {text[:400]}")
 
     def test_disk_usage_stays_within_budget_and_inside_temp_dir(self) -> None:
         """QA-IN-5: extraction never writes past the aggregate budget, no symlink lands on disk, nothing escapes."""
@@ -273,6 +398,23 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
                 self.assertEqual(links, [])
         for candidate in (Path(tempfile.gettempdir()) / ESCAPE_NAME, Path(tempfile.gettempdir()).parent / ESCAPE_NAME, Path("/") / ESCAPE_NAME):
             self.assertFalse(candidate.exists(), candidate)
+
+    def test_peak_temp_usage_polled_during_the_scan_stays_within_budget(self) -> None:
+        """QA-IN-5 (D6): peak disk use, sampled by a polling thread while the
+        scan runs — per archive tree within its budget, and the whole temp
+        root within (archives x budget) + a small non-archive allowance;
+        everything removed afterwards."""
+        poller = self.poller
+        self.assertGreater(poller.polls, 1, "the poller never sampled the scan")
+        archive_count = sum(1 for name in self.damaged if archives.is_archive(name))
+        self.assertTrue(poller.peak_by_dir, "no extraction dir was observed")
+        self.assertLessEqual(len(poller.peak_by_dir), archive_count)
+        for name, peak in poller.peak_by_dir.items():
+            with self.subTest(extraction_dir=name):
+                self.assertLessEqual(peak, TEST_BUDGET_BYTES)
+        self.assertGreater(max(poller.peak_by_dir.values()), 0)
+        self.assertLessEqual(poller.peak_total, archive_count * TEST_BUDGET_BYTES + NON_ARCHIVE_TEMP_SLACK)
+        self.assertEqual(list(self.temp_root.iterdir()), [], "temp files left behind")
 
     def test_budget_exhaustion_is_reported(self) -> None:
         """The fat archive hits the byte budget; the 100-inner-zip archive hits the nested-archive budget."""
@@ -304,6 +446,9 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
                 self.assertEqual(item.status, "analyzed")
                 self.assertIsNotNone(item.result)
                 self.assertEqual(_comparable(item), clean[name])
+        control = self.by_path[CONCLUSIVE_CONTROL]
+        assert control.result is not None
+        self.assertEqual(control.result.verdict_code, Verdict.MANIPULATION_EVIDENCE, control.result.verdict)
 
 
 if __name__ == "__main__":

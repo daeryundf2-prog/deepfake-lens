@@ -10,6 +10,7 @@ this over ``deepfake_lens/models/*-runtime.json`` in CI (QA-SYS-9).
 
     {"corpus_id": "t-img-2026q4",
      "manifest_sha256": "<64 hex>",
+     "manifest_path": "corpora/t-img-2026q4/manifest.json",
      "split": "test",
      "n_pos": 240, "n_neg": 260,
      "auroc": 0.93, "auroc_ci": [0.90, 0.95],
@@ -20,6 +21,17 @@ Text members additionally need ``recall_at_fpr_0_01`` and have no AUROC
 floor (text generation detection is reference-grade only — G24); the class
 counts still apply. A profile without ``supported`` counts as supported,
 matching how experiments/eval_all.py and the adapter treat it.
+
+``manifest_path`` (D16) names the corpus-manifest-v1 file the measurement
+was taken on — absolute, or relative to the profile's directory. The gate
+opens it: it must exist and load as corpus-manifest-v1, its items must
+still hash to its own ``manifest_sha256`` (not edited since), that hash
+must equal ``measured_on.manifest_sha256``, its ``corpus_id`` must match,
+and its test split must hold at least ``n_pos`` positive (synthetic /
+edited) and ``n_neg`` real items. A well-formed but invented hash (all
+zeros) therefore fails. ``manifest_sha256`` is the manifest's canonical
+items hash (``corpus_manifest.manifest_sha256``), not the bytes of the
+JSON file, so a re-serialized manifest still matches.
 """
 
 from __future__ import annotations
@@ -32,6 +44,7 @@ from typing import Any
 MEASURED_ON_KEYS = (
     "corpus_id",
     "manifest_sha256",
+    "manifest_path",
     "split",
     "n_pos",
     "n_neg",
@@ -93,6 +106,8 @@ def check_profile(path: Path) -> list[str]:
     manifest_sha = measured.get("manifest_sha256")
     if not (isinstance(manifest_sha, str) and _HEX64.match(manifest_sha)):
         problems.append("measured_on.manifest_sha256이 64자리 소문자 16진수가 아닙니다 — 코퍼스 매니페스트(corpus-manifest-v1)를 특정할 수 없습니다.")
+    else:
+        problems.extend(_manifest_problems(path, measured))
     if profile_modality(path) == "text":
         if TEXT_RECALL_KEY not in measured:
             problems.append(f"텍스트 프로필은 measured_on.{TEXT_RECALL_KEY}(FPR 1%에서의 재현율)가 필요합니다.")
@@ -102,6 +117,47 @@ def check_profile(path: Path) -> list[str]:
             problems.append(f"measured_on.auroc_ci가 [하한, 상한] 숫자 쌍이 아닙니다({ci!r}).")
         elif float(ci[0]) < MIN_AUROC_CI_LOW:
             problems.append(f"AUROC 95% 신뢰구간 하한 {float(ci[0]):.3f} < {MIN_AUROC_CI_LOW} — 측정 게이트 미달입니다.")
+    return problems
+
+
+POSITIVE_LABELS = frozenset({"synthetic", "edited"})
+NEGATIVE_LABELS = frozenset({"real"})
+
+
+def _manifest_problems(profile_path: Path, measured: dict[str, Any]) -> list[str]:
+    """The corpus manifest behind ``measured_on`` must exist and match it (D16)."""
+    from .corpus_manifest import ManifestError, load_manifest, manifest_sha256
+
+    raw = measured.get("manifest_path")
+    if not isinstance(raw, str) or not raw.strip():
+        return ["measured_on.manifest_path가 없습니다 — 측정에 쓴 코퍼스 매니페스트 파일을 지정해야 해시를 확인할 수 있습니다."]
+    manifest_path = Path(raw)
+    if not manifest_path.is_absolute():
+        manifest_path = profile_path.parent / manifest_path
+    if not manifest_path.is_file():
+        return [f"measured_on.manifest_path 파일이 없습니다: {raw} — 존재하지 않는 코퍼스에 대한 측정 기록은 인정하지 않습니다."]
+    try:
+        manifest = load_manifest(manifest_path)
+    except ManifestError as exc:
+        return [f"measured_on.manifest_path를 corpus-manifest-v1로 읽을 수 없습니다: {exc}"]
+    items = [item for item in manifest["items"] if isinstance(item, dict)]
+    actual = manifest_sha256(items)
+    problems: list[str] = []
+    if manifest.get("manifest_sha256") != actual:
+        problems.append(f"매니페스트 파일 {raw}의 manifest_sha256이 항목 목록과 맞지 않습니다 — 작성 이후 편집된 매니페스트입니다.")
+    if measured.get("manifest_sha256") != actual:
+        problems.append(f"measured_on.manifest_sha256이 {raw}의 해시({actual[:12]}…)와 다릅니다 — 측정 기록이 그 코퍼스를 가리키지 않습니다.")
+    if manifest.get("corpus_id") != measured.get("corpus_id"):
+        problems.append(f"measured_on.corpus_id({measured.get('corpus_id')!r})가 매니페스트의 corpus_id({manifest.get('corpus_id')!r})와 다릅니다.")
+    test_items = [item for item in items if item.get("split") == REQUIRED_SPLIT]
+    available = {
+        "n_pos": sum(1 for item in test_items if item.get("label") in POSITIVE_LABELS),
+        "n_neg": sum(1 for item in test_items if item.get("label") in NEGATIVE_LABELS),
+    }
+    for key, count in available.items():
+        value = measured.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value > count:
+            problems.append(f"measured_on.{key}={value}이(가) 매니페스트 test 분할의 해당 항목 수 {count}보다 큽니다.")
     return problems
 
 

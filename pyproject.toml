@@ -149,6 +149,7 @@ files = [
     "deepfake_lens/doctor.py",
     "deepfake_lens/pixel_raster.py",
     "deepfake_lens/image_metadata.py",
+    "deepfake_lens/tests/test_image_metadata_exif.py",
     "deepfake_lens/text_heuristics.py",
     "deepfake_lens/cli_parser.py",
     "deepfake_lens/__init__.py",

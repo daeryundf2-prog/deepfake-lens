@@ -23,18 +23,21 @@ from .pixel import PixelExpertResult
 from .png import read_png_dimensions, read_png_metadata
 from .image_metadata import (  # noqa: F401
     DEFAULT_METADATA_BYTES,
+    ImageMetadataRead,
     guess_image_source,
     read_image_metadata,
+    read_image_metadata_full,
 )
 from .checks import AnalyzerError, CheckSkipped, run_check, skipped
 from .image_class import MEASURABLE_MIN_SIDE_PX, ImageClass, classify_image, resolution_out_of_range
 from .checks import failed as failed_entry
 from .checks import failure_reason
+from .checks import skipped as skipped_entry
 from .decision import decide
 from .result_text import TEXT_LEGAL_LIMITATION
 from .evidence_rules import (
     c2pa_evidence,
-    deep_layer_evidence,
+    deep_layer_reference,
     document_metadata_evidence,
     image_class_evidence,
     image_metadata_evidence,
@@ -60,6 +63,11 @@ SCAN_JSON_SCHEMA_VERSION = 2
 TOOL_VERSION = "0.1.0"  # kept in sync with pyproject version
 DEFAULT_MAX_FILES = 1000
 DEFAULT_TEXT_BYTES = 64 * 1024
+# D10: reason on the row of a symlink found in a scanned folder.
+SYMLINK_SKIP_REASON = "심볼릭 링크 — 링크를 따라가지 않으므로 분석하지 않았습니다(allow_symlinks=false)"
+# D9: rejected archive members listed one coverage entry each, up to this
+# many per container; the rest are summarized in one entry with the count.
+MAX_ARCHIVE_REJECTION_ENTRIES = 100
 # Smallest image side a detector is run on — defined once in image_class
 # (the photo/non-photo gate also uses it for ``too_small``); kept here as
 # an alias for existing callers.
@@ -104,6 +112,7 @@ from .serialization import (  # noqa: F401
 )
 from .scan_cache import (  # noqa: F401
     _cache_key,
+    _content_sha256,
     _cache_scan_context,
     _cached_scan_item,
     _with_content_sha256,
@@ -179,9 +188,11 @@ def scan_directory(
     paths: list[Path] = []
     capped = False
     iter_errors: list[tuple[Path, OSError]] = []
+    symlinks: list[Path] = []
     for path in _iter_files(
         root, recursive=recursive, allow_symlinks=allow_symlinks,
         on_error=lambda p, e: iter_errors.append((p, e)),
+        on_symlink=symlinks.append,
     ):
         if len(paths) >= max_files:
             capped = True
@@ -222,6 +233,9 @@ def scan_directory(
             archive_meta[rel] = {
                 "path": path, "fmt": archive_format(path),
                 "skipped": extraction.skipped, "warnings": extraction.warnings,
+                "rejected": list(extraction.rejected),
+                "error": extraction.error,
+                "missing_dependency": extraction.missing_dependency,
             }
             archive_members[rel] = []
             for member in extraction.members:
@@ -238,12 +252,20 @@ def scan_directory(
             cache_path=cache_path, workers=workers, deep_signals=deep_signals,
             capped=capped, thresholds=thresholds, should_stop=should_stop,
         )
-        if iter_errors:
+        if iter_errors or symlinks:
             for err_path, exc in iter_errors:
                 items.append(ScanItem(
                     _display_path(err_path, root=root), err_path.name,
                     "unknown", "failed", 0,
                     error=f"directory unreadable: {exc}",
+                ))
+            # D10: a symlink in the evidence folder is listed (never followed)
+            # so the report accounts for every directory entry it was given.
+            for link in symlinks:
+                items.append(ScanItem(
+                    _display_path(link, root=root), link.name,
+                    "unknown", "skipped", 0,
+                    error=SYMLINK_SKIP_REASON,
                 ))
             items = sort_items(items)
             summary = summarize(items, capped=summary.capped, cached=summary.cached)
@@ -264,14 +286,22 @@ def _archive_container_item(
     warnings: list[str],
     member_items: list[ScanItem] | None = None,
     extraction_error: str | None = None,
+    rejected: list[tuple[str, str]] | None = None,
+    sha256: str | None = None,
+    missing_dependency: str | None = None,
 ) -> ScanItem:
     """Container row for an expanded archive; rolls member verdicts up.
 
     manipulation if any member has manipulation evidence; authenticity only
     if every member was analyzed, none was skipped, and all have
     authenticity evidence; otherwise undetermined. The row carries no
-    evidence of its own — the members do.
+    evidence of its own — the members do. Each member the extractor
+    refused (traversal, absolute path, link, budget/bomb limits, …) is a
+    ``skipped`` ``archive_member`` coverage entry and a limitation naming
+    the member and the reason (D9); ``sha256`` is the archive file's
+    digest so a signed report binds the container too.
     """
+    rejected = list(rejected or [])
     try:
         size = path.stat().st_size
     except OSError:
@@ -292,22 +322,34 @@ def _archive_container_item(
         verdict_code = Verdict.AUTHENTICITY_EVIDENCE
     else:
         verdict_code = Verdict.UNDETERMINED
-    coverage = [
-        failed_entry("archive", AnalyzerError(extraction_error))
-        if extraction_error
-        else CoverageEntry("archive", CoverageStatus.RAN)
-    ]
+    if extraction_error:
+        coverage = [failed_entry("archive", AnalyzerError(extraction_error))]
+    elif missing_dependency:
+        coverage = [skipped_entry("archive", f"의존성 부재: {missing_dependency}")]
+    else:
+        coverage = [CoverageEntry("archive", CoverageStatus.RAN)]
+    shown = rejected[:MAX_ARCHIVE_REJECTION_ENTRIES]
+    coverage.extend(skipped_entry("archive_member", f"{name}: {reason}") for name, reason in shown)
+    if len(rejected) > len(shown):
+        coverage.append(skipped_entry("archive_member", f"외 {len(rejected) - len(shown)}개 구성 파일 거부(사유는 위 항목과 경고 참조)"))
     signals = [EvidenceSignal("압축 컨테이너", f"{fmt or 'archive'} 형식 — 구성 파일 {members}개 개별 분석" + (f", 스킵 {skipped}개" if skipped else ""), 0)]
     limitations = list(warnings)
+    limitations.extend(f"구성 파일 거부: {name} — {reason}" for name, reason in shown)
     limitations.append("컨테이너 행은 구성 파일 결과의 요약입니다. '아카이브::경로' 형태의 개별 결과를 확인하세요.")
+    first_rejection = f" 거부 {len(rejected)}개(예: {rejected[0][0]} — {rejected[0][1]})." if rejected else ""
     if analyzed_members:
         verdict = (
             f"압축 파일: {VERDICT_LABELS[verdict_code]} — 구성 파일 {members}개 분석"
             + (f"(조작·생성 근거 {manipulated}건)" if manipulated else "")
-            + f", {skipped}개 스킵"
+            + f", {skipped}개 스킵."
+            + first_rejection
         )
+    elif extraction_error:
+        verdict = f"압축 파일: 판단 불가 — 압축 해제 실패({extraction_error})."
+    elif missing_dependency:
+        verdict = f"압축 파일: 판단 불가 — 의존성 부재: {missing_dependency}(압축을 풀 수 없어 구성 파일을 분석하지 않았습니다)."
     else:
-        verdict = "압축 파일: 판단 불가 — 아카이브에서 분석 가능한 구성 파일이 없습니다."
+        verdict = "압축 파일: 판단 불가 — 아카이브에서 분석 가능한 구성 파일이 없습니다." + first_rejection
     band = band_for_verdict(verdict_code)
     return ScanItem(
         # "expanded" (not "analyzed") keeps the roll-up row out of the
@@ -326,6 +368,7 @@ def _archive_container_item(
             verdict_code=verdict_code,
             coverage=coverage,
         ),
+        sha256=sha256,
     )
 
 
@@ -480,6 +523,10 @@ def _scan_specs(
             members=len(member_items), skipped=meta.get("skipped", 0),
             warnings=meta.get("warnings", []), member_items=member_items,
             extraction_error=meta.get("error"),
+            rejected=meta.get("rejected", []),
+            missing_dependency=meta.get("missing_dependency"),
+            # D9: the container's own digest binds the archive into a signed report.
+            sha256=_content_sha256(arc_path, fingerprints) or None,
         ))
 
     sorted_items = sort_items(items)
@@ -538,12 +585,13 @@ def analyze_file(
 
     if extension in SUPPORTED_IMAGE_EXTENSIONS:
         try:
-            metadata, dimensions = read_image_metadata(file_path, metadata_bytes=metadata_bytes)
+            metadata_read = read_image_metadata_full(file_path, metadata_bytes=metadata_bytes)
             result = _analyze_image_file(
-                file_path, metadata, dimensions,
+                file_path, metadata_read.metadata, metadata_read.dimensions,
                 root=root, pixel_mode=pixel_mode, pixel_max_side=pixel_max_side,
                 heatmaps=heatmaps, heatmap_dir=heatmap_dir, model_path=model_path,
                 deep_signals=deep_signals, thresholds=thresholds,
+                metadata_read=metadata_read,
             )
             return ScanItem(display_path, item_name, "image", "analyzed", size, result)
         except OSError as exc:
@@ -643,7 +691,12 @@ def _validate_c2pa(path: Path) -> dict[str, object]:
     if validation is None:
         raise ModuleNotFoundError("c2pa", name="c2pa")
     if validation.get("status") == "unavailable":
-        raise AnalyzerError(f"C2PA 매니페스트를 읽었으나 검증 중 오류: {validation.get('error', '')}")
+        # D8: a reader/validation error is a failed check — whether a
+        # manifest exists is unknown, so it is never reported as absent.
+        if validation.get("error_kind") == "not_supported":
+            raise CheckSkipped(f"C2PA SDK가 지원하지 않는 형식: {validation.get('error', '')}")
+        stage = "검증" if validation.get("present") else "판독"
+        raise AnalyzerError(f"C2PA {stage} 실패: {validation.get('error', '')}")
     return validation
 
 
@@ -662,11 +715,16 @@ def _raise_unavailable(message: str) -> None:
 
 @dataclass
 class DeepLayers:
-    """Outcome of the opt-in deep layers for one file."""
+    """Outcome of the opt-in deep layers for one file.
+
+    Uncalibrated deep-layer outputs go to ``reference`` (D13) — never to
+    ``evidence``; ``evidence`` stays for a future calibrated layer.
+    """
 
     evidence: list[EvidenceItem] = field(default_factory=list)
     coverage: list[CoverageEntry] = field(default_factory=list)
     limitations: list[str] = field(default_factory=list)
+    reference: list[EvidenceSignal] = field(default_factory=list)
 
 
 def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
@@ -674,19 +732,23 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
 
     Each layer is a separate check: a missing dependency is ``skipped``, no
     detected face is ``skipped`` "얼굴 미검출", any other exception is
-    ``failed`` (G1/G12). Flags become uncalibrated statistical evidence.
+    ``failed`` (G1/G12). Flags become reference signals (D13: no calibration,
+    so no part in the decision).
     """
     out = DeepLayers()
 
     def face_check():
         import cv2  # noqa: F401 — dependency probe
 
-        from .face import analyze_faces
+        from .face import UNSUPPORTED_FORMAT, analyze_faces
 
         face = analyze_faces(path)
         if face.face_count == 0:
             if face.manipulation_type == "none":
                 raise CheckSkipped("얼굴 미검출")
+            if face.manipulation_type == UNSUPPORTED_FORMAT:
+                # D15: GIF etc. — not applicable, never a failure.
+                raise CheckSkipped(face.verdict)
             if face.manipulation_type == "unavailable":
                 raise CheckSkipped(f"의존성 부재: {face.verdict}")
             raise AnalyzerError(face.verdict)
@@ -696,8 +758,8 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
     out.coverage.append(entry)
     if face is not None:
         if face.score > 0:
-            out.evidence.append(deep_layer_evidence(
-                "얼굴 조작 분석", f"{face.verdict} (faces={face.face_count}, {face.manipulation_type})", "face", face.score,
+            out.reference.append(deep_layer_reference(
+                "얼굴 조작 분석", f"{face.verdict} (faces={face.face_count}, {face.manipulation_type})", face.score,
             ))
         out.limitations.extend(face.limitations[:2])
 
@@ -715,8 +777,8 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
     out.coverage.append(entry)
     if inpaint is not None:
         if inpaint.regions_detected:
-            out.evidence.append(deep_layer_evidence(
-                "인페인팅/부분 변형 탐지", f"{inpaint.verdict} (영역 {inpaint.regions_detected}개)", "inpaint", inpaint.score,
+            out.reference.append(deep_layer_reference(
+                "인페인팅/부분 변형 탐지", f"{inpaint.verdict} (영역 {inpaint.regions_detected}개)", inpaint.score,
             ))
         out.limitations.extend(inpaint.limitations[:2])
 
@@ -740,7 +802,7 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
     out.coverage.append(entry)
     if seam is not None:
         for sig in seam.signals:
-            out.evidence.append(deep_layer_evidence(sig.title, sig.detail, "face", sig.weight))
+            out.reference.append(deep_layer_reference(sig.title, sig.detail, sig.weight))
         out.limitations.extend(seam.limitations[:2])
     return out
 
@@ -772,7 +834,7 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
     out.coverage.append(entry)
     if rppg is not None:
         if rppg.score > 0:
-            out.evidence.append(deep_layer_evidence("rPPG 맥박 신호", rppg.verdict, "rppg", rppg.score))
+            out.reference.append(deep_layer_reference("rPPG 맥박 신호", rppg.verdict, rppg.score))
         out.limitations.extend(rppg.limitations[:2])
 
     def avatar_check():
@@ -790,7 +852,7 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
         markers = [signal for signal in avatar.signals if signal.title != FORMAT_SIGNAL_TITLE]
         if markers:
             raw = min(100, sum(signal.weight for signal in markers))
-            out.evidence.append(deep_layer_evidence("아바타/디지털휴먼 탐지", avatar.verdict, "avatar", raw))
+            out.reference.append(deep_layer_reference("아바타/디지털휴먼 탐지", avatar.verdict, raw))
         out.limitations.extend(avatar.limitations[:2])
 
     def lipsync_check():
@@ -808,14 +870,16 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
     out.coverage.append(entry)
     if lipsync is not None:
         if lipsync.score > 0:
-            out.evidence.append(deep_layer_evidence("립싱크 일관성", lipsync.verdict, "lipsync", lipsync.score))
+            out.reference.append(deep_layer_reference("립싱크 일관성", lipsync.verdict, lipsync.score))
         out.limitations.extend(lipsync.limitations[:2])
 
     def track_check():
         from .face import face_detector_unavailable_reason
         from .face_track import analyze_face_track
 
-        missing = face_detector_unavailable_reason()
+        # The track layer uses measured landmarks only (MediaPipe); the
+        # weight-free D15 detector does not provide them.
+        missing = face_detector_unavailable_reason(require_landmarks=True)
         if missing:
             raise CheckSkipped(f"의존성 부재: {missing}")
         track = analyze_face_track(path, thresholds=thresholds)
@@ -827,7 +891,7 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
     out.coverage.append(entry)
     if track is not None:
         if track.score > 0:
-            out.evidence.append(deep_layer_evidence("얼굴 트랙 시간-일관성", track.verdict, "face_track", track.score))
+            out.reference.append(deep_layer_reference("얼굴 트랙 시간-일관성", track.verdict, track.score))
         out.limitations.extend(track.limitations[:2])
     return out
 
@@ -849,10 +913,18 @@ def _analyze_image_file(
     model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
     deep_signals: bool,
     thresholds: object | None,
+    metadata_read: ImageMetadataRead | None = None,
 ) -> ClassificationResult:
-    coverage: list[CoverageEntry] = [CoverageEntry("metadata", CoverageStatus.RAN)]
+    # D16: a metadata read that stopped early (truncated structure, empty
+    # file, unrecognized header, EXIF error) is a failed check, not an
+    # absence of metadata.
+    read_error = metadata_read.error if metadata_read is not None else None
+    coverage: list[CoverageEntry] = [
+        failed_entry("metadata", AnalyzerError(read_error)) if read_error else CoverageEntry("metadata", CoverageStatus.RAN)
+    ]
     c2pa_validation, entry = run_check("c2pa", lambda: _validate_c2pa(file_path))
     coverage.append(entry)
+    c2pa_unknown = entry.status == CoverageStatus.FAILED
 
     # Photo/non-photo gate (WP-D, G13): detectors are only applied to
     # photographs. A non-photo (or too small) image keeps metadata + C2PA;
@@ -897,6 +969,12 @@ def _analyze_image_file(
         deep = _deep_image_layers(file_path, thresholds) if deep_signals else _deep_disabled(DEEP_IMAGE_CHECKS)
     coverage.extend(deep.coverage)
 
+    image_format = metadata_read.image_format if metadata_read is not None else None
+    jpeg_quality = None
+    if image_format == "jpeg" and (metadata.get("exif.Make") or metadata.get("exif.Model")):
+        from .jpegq import estimate_jpeg_quality
+
+        jpeg_quality = estimate_jpeg_quality(file_path)
     return analyze_image_metadata(
         metadata,
         dimensions=dimensions,
@@ -905,8 +983,13 @@ def _analyze_image_file(
         c2pa_validation=c2pa_validation,
         coverage=coverage,
         extra_evidence=deep.evidence,
-        extra_limitations=deep.limitations,
+        extra_limitations=[*(metadata_read.notes if metadata_read is not None else []), *deep.limitations],
         image_class=image_class,
+        metadata_read_error=read_error,
+        c2pa_unknown=c2pa_unknown,
+        image_format=image_format,
+        jpeg_quality=jpeg_quality,
+        extra_reference=deep.reference,
     )
 
 
@@ -1015,6 +1098,7 @@ def _analyze_video_file(
             source_guess=SourceGuess.unknown("영상 분석이 불완전해 출처를 판단할 단서가 없습니다."),
             limitations=deep.limitations,
             next_checks=VIDEO_NEXT_CHECKS,
+            reference_signals=deep.reference,
         )
     if analysis.model_analysis is None:
         coverage.append(_no_model_entry(model_path, "video"))
@@ -1033,7 +1117,7 @@ def _video_result(
     """Adapt a VideoTemporalAnalysis into the result contract.
 
     Temporal heuristics are reference-only; the frame model is statistical
-    evidence; deep layers are uncalibrated statistical flags.
+    evidence; deep layers are reference signals (D13).
     """
     deep = deep or DeepLayers()
     if coverage is None:
@@ -1049,6 +1133,7 @@ def _video_result(
         for signal in analysis.signals
         if not signal.title.startswith("외부 모델")
     ]
+    reference.extend(deep.reference)
     has_detail = analysis.frame_count > 0 and analysis.duration_seconds > 0
     source_guess = SourceGuess.unknown(
         "영상 파일의 컨테이너 메타데이터에서 출처 단서를 찾지 못했습니다."
@@ -1095,7 +1180,12 @@ def _analyze_text_file(
             elif extractor.startswith("skipped:"):
                 entry = skipped("document_text", f"측정 범위 밖: {extractor.split(':', 1)[1]}")
             elif extractor.startswith("failed:"):
-                entry = failed_entry("document_text", AnalyzerError(f"문서 텍스트 추출 실패 ({extractor})"))
+                # D16: the extractor's exception class and message are kept.
+                cause = doc_metadata.get("extractor_error")
+                entry = failed_entry(
+                    "document_text",
+                    AnalyzerError(f"문서 텍스트 추출 실패 ({extractor})" + (f" — {cause}" if cause else "")),
+                )
         coverage.append(entry)
         # Binary containers (docx/hwp/pdf) must not reach the text members
         # as raw bytes — feed the extracted text instead so PPL/binoculars
@@ -1219,7 +1309,7 @@ def _apply_document_metadata(result: ClassificationResult, doc_metadata: dict[st
     # Preserve the extracted provenance fields verbatim so API/GUI/report
     # consumers can show the raw metadata record, not just its folded
     # source-guess interpretation.
-    preserved = {key: value for key, value in doc_metadata.items() if value and key != "extractor"}
+    preserved = {key: value for key, value in doc_metadata.items() if value and key not in {"extractor", "extractor_error"}}
     extra = document_metadata_evidence(ai_hit)
     rebuilt = build_classification_result(
         subject="글",
@@ -1360,6 +1450,11 @@ def analyze_image_metadata(
     extra_evidence: list[EvidenceItem] | None = None,
     extra_limitations: list[str] | None = None,
     image_class: ImageClass | None = None,
+    metadata_read_error: str | None = None,
+    c2pa_unknown: bool = False,
+    image_format: str | None = None,
+    jpeg_quality: float | None = None,
+    extra_reference: list[EvidenceSignal] | None = None,
 ) -> ClassificationResult:
     """Image result from already-collected analyzer outputs.
 
@@ -1367,9 +1462,19 @@ def analyze_image_metadata(
     benchmarks) get a coverage record synthesized from the arguments.
     ``image_class`` (the photo/non-photo gate) adds its neutral evidence
     item and, for a non-photo, the "사진 아님 — 생성 탐지 비적용" notice.
+    ``metadata_read_error`` / ``c2pa_unknown`` suppress the "메타데이터
+    부재" item when the metadata or the C2PA read did not complete (D16);
+    ``image_format`` and ``jpeg_quality`` feed the camera-EXIF rule (D7).
     """
+    c2pa_present = bool(c2pa_validation and c2pa_validation.get("present"))
     evidence = [
-        *image_metadata_evidence(metadata, dimensions),
+        *image_metadata_evidence(
+            metadata, dimensions,
+            metadata_read_error=metadata_read_error,
+            c2pa_present=c2pa_present or c2pa_unknown,
+            image_format=image_format,
+            jpeg_quality=jpeg_quality,
+        ),
         *c2pa_evidence(c2pa_validation),
         *image_class_evidence(image_class),
     ]
@@ -1378,13 +1483,13 @@ def analyze_image_metadata(
         evidence.append(model_item)
     evidence.extend(extra_evidence or [])
 
-    reference: list[EvidenceSignal] = []
+    reference: list[EvidenceSignal] = list(extra_reference or [])
     if pixel_analysis and pixel_analysis.available:
         top = " / ".join(pixel_analysis.signals[:2]) or "픽셀 전문가 신호 요약 없음"
         reference.append(reference_signal(
             "픽셀 앙상블(참고, 미측정)",
-            f"{pixel_analysis.model} score={pixel_analysis.score}, confidence={pixel_analysis.confidence}. {top}",
-            pixel_analysis.score,
+            f"{pixel_analysis.model} 원점수 {pixel_analysis.raw_score}/100 ({pixel_analysis.reference_confidence}, 미측정 — 결론에 참여하지 않습니다). {top}",
+            pixel_analysis.raw_score,
         ))
 
     if coverage is None:
@@ -1436,6 +1541,17 @@ def _ordered_evidence(items: list[EvidenceItem]) -> list[EvidenceItem]:
     return sorted(items, key=lambda i: (_KIND_ORDER[i.kind], _STRENGTH_ORDER[i.strength], _DIRECTION_ORDER[i.direction]))
 
 
+def _integrity_failures(failed_entries: list[CoverageEntry]) -> list[CoverageEntry]:
+    """Model checks refused by the pin policy (G9): unpinned or mismatched weights."""
+    from .model_pins import MISMATCH_REASON, UNPINNED_REASON
+
+    return [
+        entry for entry in failed_entries
+        if (entry.check == "external_model" or entry.check.startswith("model:"))
+        and entry.reason.startswith((MISMATCH_REASON, UNPINNED_REASON))
+    ]
+
+
 def _verdict_text(
     subject: str,
     verdict: Verdict,
@@ -1443,10 +1559,14 @@ def _verdict_text(
     evidence: list[EvidenceItem],
     failed_entries: list[CoverageEntry],
 ) -> str:
+    integrity = _integrity_failures(failed_entries)
+    integrity_names = ", ".join(check_label(entry.check) for entry in integrity)
     if grade == Grade.REFERENCE:
         lexical = sum(1 for item in evidence if item.kind == EvidenceKind.LEXICAL)
         note = f" (어휘적 신호 {lexical}건은 참고 정보)" if lexical else ""
         failure = f" 검사 실패: {', '.join(check_label(entry.check) for entry in failed_entries)}." if failed_entries else ""
+        if integrity:
+            failure += f" 모델 무결성 실패({integrity_names})."
         return f"참고: 근거 부족 — {subject}의 생성 여부는 결론을 내리지 않습니다{note}.{failure}"
     if verdict == Verdict.MANIPULATION_EVIDENCE:
         basis = next(
@@ -1461,6 +1581,14 @@ def _verdict_text(
     if verdict == Verdict.AUTHENTICITY_EVIDENCE:
         basis = next((item for item in evidence if item.direction == EvidenceDirection.AUTHENTIC and item.strength == EvidenceStrength.STRONG), None)
         return f"{subject}: {VERDICT_LABELS[verdict]} — {basis.title if basis else '근거 목록 참조'}."
+    if integrity:
+        # QA-SYS-1/2: a refused weight is named as such in the conclusion.
+        others = [entry for entry in failed_entries if entry not in integrity]
+        rest = f" 그 외 검사 실패({', '.join(check_label(entry.check) for entry in others)})." if others else ""
+        return (
+            f"{subject}: 판단 불가: 모델 무결성 실패({integrity_names}) — 고정(pin)되지 않았거나 해시가 일치하지 않는 "
+            f"가중치는 로드하지 않았으므로 결론을 내리지 않습니다.{rest}"
+        )
     if failed_entries:
         names = ", ".join(check_label(entry.check) for entry in failed_entries)
         return f"{subject}: 판단 불가 — 검사 실패({names})로 결론을 내리지 않습니다."

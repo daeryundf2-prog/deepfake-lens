@@ -148,25 +148,33 @@ class AdversarialGateTest(unittest.TestCase):
     def test_qa_adv_2_screenshots_are_classified_and_gated(self) -> None:
         """QA-ADV-2: 스크린샷 50장(카톡 대화, 웹페이지, 문서 뷰어) → 스크린샷으로 분류, 생성 탐지 미적용, 의심 판정 0.
 
-        Phase 0 runs the 10 synthetic chat screenshots (plus their JPEG
-        re-encodes, as messengers send them); the 50-image real set is
-        corpus work (phase 1).
+        50 synthetic screenshots of the three named kinds: 17 phone chat
+        screens (KakaoTalk-style bubbles), 17 desktop browser pages (tab
+        strip, address bar, article, sidebar cards) and 16 desktop document
+        viewers (title bar, toolbar, thumbnail pane, page of text) — plus a
+        JPEG q85 re-encode of every third one, as messengers send them. A
+        real-capture set is corpus work (phase 1).
         """
         from deepfake_lens.image_class import classify_image
 
-        paths = self.paths["screenshot"]
-        self.assertEqual(len(paths), 10)
-        for path in paths:
-            with self.subTest(image=path.name):
-                self._assert_gated(path, "screenshot")
-                if int(path.stem) % 3:
-                    continue  # JPEG re-encode check on every third image
-                with Image.open(path) as image:
-                    buffer = io.BytesIO()
-                    image.convert("RGB").save(buffer, format="JPEG", quality=85)
-                jpeg = path.with_suffix(".jpg")
-                jpeg.write_bytes(buffer.getvalue())
-                self.assertEqual(classify_image(jpeg).kind, "screenshot", "JPEG q85 re-encode")
+        expected = {"screenshot": 17, "screenshot_web": 17, "screenshot_viewer": 16}
+        checked = 0
+        for cls, count in expected.items():
+            paths = self.paths[cls]
+            self.assertEqual(len(paths), count, cls)
+            for path in paths:
+                with self.subTest(image=f"{cls}/{path.name}"):
+                    self._assert_gated(path, "screenshot")
+                    checked += 1
+                    if int(path.stem) % 3:
+                        continue  # JPEG re-encode check on every third image
+                    with Image.open(path) as image:
+                        buffer = io.BytesIO()
+                        image.convert("RGB").save(buffer, format="JPEG", quality=85)
+                    jpeg = path.with_suffix(".jpg")
+                    jpeg.write_bytes(buffer.getvalue())
+                    self.assertEqual(classify_image(jpeg).kind, "screenshot", "JPEG q85 re-encode")
+        self.assertEqual(checked, 50)
 
     def test_document_scans_are_not_photos(self) -> None:
         for path in self.paths["document_scan"]:
@@ -175,7 +183,7 @@ class AdversarialGateTest(unittest.TestCase):
 
     def test_generation_is_deterministic(self) -> None:
         with tempfile.TemporaryDirectory() as other:
-            again = self.generator.generate_all(Path(other), seed=0, classes=("noise", "screenshot"))
+            again = self.generator.generate_all(Path(other), seed=0, classes=("noise", "screenshot", "screenshot_web", "screenshot_viewer"))
             for cls, paths in again.items():
                 for fresh, original in zip(paths, self.paths[cls]):
                     self.assertEqual(fresh.read_bytes(), original.read_bytes(), f"{cls}/{fresh.name}")

@@ -6,7 +6,8 @@ absent — absent counts as true, as in experiments/eval_all.py), require a
 ``measured_on`` record on a reproducible corpus's *test* split with
 n_pos >= 200, n_neg >= 200 and an AUROC 95% CI lower bound >= 0.85
 (text members: n_pos/n_neg >= 200 and ``recall_at_fpr_0_01`` present, no
-AUROC floor), and a 64-hex ``manifest_sha256`` naming the corpus manifest.
+AUROC floor), and a 64-hex ``manifest_sha256`` naming the corpus manifest
+whose file ``manifest_path`` must exist and hash to it (D16).
 Rules live in ``deepfake_lens/measurement_gate.py``.
 
     python scripts/check_measurement_gate.py [--models-dir DIR]

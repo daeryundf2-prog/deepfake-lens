@@ -155,16 +155,23 @@ class QaIn1ReadOnlyEvidenceTest(unittest.TestCase):
         --deep-signals --heatmaps, a cache, a hash DB and JSON/CSV/HTML/PDF/
         evidence-statement reports — all outputs outside the evidence folder.
         Formats no encoder here can write are named with a reason from the
-        closed set in samples.UNMADE_REASONS, never silently dropped.
+        closed set in samples.UNMADE_REASONS, never silently dropped. Binary
+        formats without a writer (.doc .xls .ppt .hwp .rar, and .7z without
+        py7zr) are scanned as magic-header-only samples (samples.MAGIC_ONLY)
+        and must come back 미지원 or 판단 불가 with a reason (D6).
         """
+        magic_only: dict[str, str] = {}
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             evidence = base / "evidence"
-            made, unmade = write_samples(evidence)
+            made, unmade = write_samples(evidence, magic_only)
             self.assertEqual(set(made) | set(unmade), supported_extensions())
             self.assertTrue(set(unmade.values()) <= UNMADE_REASONS, unmade)
-            # Always synthesizable (stdlib only): the floor of this test.
+            # Always synthesizable (stdlib only): the floor of this test —
+            # including the magic-only binary formats (all 43 with Pillow +
+            # ffmpeg installed).
             self.assertTrue({".png", ".txt", ".md", ".wav", ".docx", ".pdf", ".zip", ".tar"} <= set(made))
+            self.assertTrue({".doc", ".xls", ".ppt", ".hwp", ".rar", ".7z"} <= set(made))
             out = base / "out"
             out.mkdir()
             _make_read_only(evidence)
@@ -184,9 +191,22 @@ class QaIn1ReadOnlyEvidenceTest(unittest.TestCase):
                 self.assertEqual(after[name][2], mtime_ns, "mtime changed")
                 self.assertEqual(after[name][3], mode, "permissions changed")
         statuses = {item["path"]: item["status"] for item in payload["items"]}
+        rows = {item["path"]: item for item in payload["items"]}
         for ext, path in made.items():
             with self.subTest(sample=ext):
                 self.assertIn(path.name, statuses, f"{path.name} was not scanned")
+                if ext in magic_only:
+                    # 미지원, or 판단 불가 with the reason it could not be read.
+                    row = rows[path.name]
+                    result = row.get("result") or {}
+                    if row["status"] == "unsupported":
+                        self.assertTrue(row.get("error"))
+                        continue
+                    self.assertEqual(result.get("verdict_code"), "undetermined", row)
+                    gaps = [c for c in result.get("coverage", []) if c["status"] != "ran"]
+                    self.assertTrue(gaps, f"{path.name}: 판단 불가 must name the check that could not run")
+                    self.assertTrue(all(c["reason"] for c in gaps))
+                    continue
                 # Every format is examined itself (samples are distinct, so
                 # --dedupe marks none of them as a twin).
                 self.assertIn(statuses[path.name], {"analyzed", "expanded"})

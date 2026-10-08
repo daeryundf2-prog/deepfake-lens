@@ -20,6 +20,26 @@
 
 Exit 0 when every automated test passed and each automated QA ID has
 exactly one canonical test; 1 otherwise.
+
+Preconditions of a recorded run (D6, D16):
+
+- **fastapi + httpx** must be importable, or the harness exits 1 with
+  "fastapi 필요" before running anything: QA-OUT-4 compares the CLI, the
+  web server and the FastAPI server, and a record whose API leg was
+  skipped is not a QA-OUT-4 pass. The unit-test suite itself still skips
+  that leg without fastapi (CI). Run from a side venv that sees the
+  project's other packages::
+
+      python -m venv --system-site-packages /tmp/dflens-qa-venv
+      /tmp/dflens-qa-venv/bin/pip install fastapi httpx uvicorn
+      /tmp/dflens-qa-venv/bin/python scripts/qa_phase0.py
+
+- **clean work tree**: tracked files must match HEAD (``git status
+  --porcelain --untracked-files=no`` empty) unless ``--allow-dirty``; the
+  header records that HEAD commit. The table is then committed on its own,
+  so the commit holding docs/CONFORMANCE.md is a child of the recorded
+  commit that changes nothing else — ``--verify-record`` checks exactly
+  that (exit 1 otherwise).
 """
 
 from __future__ import annotations
@@ -65,6 +85,15 @@ EXTRAS = (
 )
 
 PASS, FAIL, MANUAL, PHASE1, SKIPPED = "통과", "실패", "수동", "1단계", "건너뜀"
+# QA-OUT-4's API-server leg needs these; a recorded run without them fails.
+REQUIRED_FOR_RECORD = ("fastapi", "httpx")
+SIDE_VENV_HINT = (
+    "python -m venv --system-site-packages /tmp/dflens-qa-venv && "
+    "/tmp/dflens-qa-venv/bin/pip install fastapi httpx uvicorn && "
+    "/tmp/dflens-qa-venv/bin/python scripts/qa_phase0.py"
+)
+# Header line the record is parsed back from by --verify-record.
+COMMIT_LINE_PREFIX = "- 검증 커밋: `"
 
 
 @dataclass
@@ -299,7 +328,10 @@ def conformance_rows(data: dict[str, Any], outcomes: dict[str, dict[str, Any]], 
 
     def cell(qa_id: str, note: str = "") -> tuple[str, str, str]:
         entry = qa[qa_id]
-        label = f"{qa_id} ({note})" if note else qa_id
+        # A QA-level label (e.g. QA-OUT-5 "구조 검사(0단계에 보정 모델 없음)")
+        # qualifies what "통과" means on every row that cites the QA ID.
+        notes = [text for text in (note, entry.get("label", "")) if text]
+        label = f"{qa_id} ({'; '.join(notes)})" if notes else qa_id
         if entry["mode"] == "automated":
             return label, outcomes[qa_id]["result"], f"`{_rel(log_paths[qa_id])}`"
         if entry["mode"] == "manual":
@@ -349,7 +381,13 @@ def render(data: dict[str, Any], outcomes: dict[str, dict[str, Any]], log_paths:
         "",
         "<!-- scripts/qa_phase0.py가 생성 — 손으로 고치지 말 것 -->",
         "",
-        f"- 검증 커밋: `{env['commit']}`" + (" (작업 트리에 커밋되지 않은 변경 있음)" if env["dirty"] else ""),
+        f"{COMMIT_LINE_PREFIX}{env['commit']}`"
+        + (
+            " (작업 트리에 커밋되지 않은 변경 있음 — --allow-dirty 실행, 기록으로 쓰지 말 것)"
+            if env["dirty"]
+            else " — 변경 없는 작업 트리에서 실행. 이 표는 이 커밋의 직계 자식 커밋에 단독으로 담긴다"
+            " (`python scripts/qa_phase0.py --verify-record`로 확인)"
+        ),
         f"- 생성 일시(UTC): {env['date']}",
         f"- 도구 버전: deepfake-lens {env['tool_version']}",
         f"- 환경: Python {env['python']} / {env['platform']} / ffmpeg {'있음' if env['ffmpeg'] else '없음'}",
@@ -400,6 +438,42 @@ def render(data: dict[str, Any], outcomes: dict[str, dict[str, Any]], log_paths:
     return "\n".join(lines)
 
 
+def recorded_commit(table: str) -> str | None:
+    for line in table.splitlines():
+        if line.startswith(COMMIT_LINE_PREFIX):
+            return line[len(COMMIT_LINE_PREFIX):].split("`", 1)[0] or None
+    return None
+
+
+def verify_record(out: Path) -> int:
+    """The committed table must come from a clean run on HEAD's parent (or
+    HEAD itself, before it is committed) with no other change since (D16)."""
+    try:
+        table = out.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"[qa] 기록 없음: {out}: {exc}", file=sys.stderr)
+        return 1
+    commit = recorded_commit(table)
+    if not commit or "커밋되지 않은 변경 있음" in table:
+        print(f"[qa] 기록 불가: 검증 커밋이 없거나 변경 있는 작업 트리에서 생성됨 ({out})", file=sys.stderr)
+        return 1
+    head = _git("rev-parse", "HEAD")
+    if not head:
+        print("[qa] git 없음 — 기록을 확인할 수 없습니다.", file=sys.stderr)
+        return 1
+    if commit != head and _git("rev-parse", "HEAD^") != commit:
+        print(f"[qa] 기록 커밋 {commit[:12]}이 HEAD({head[:12]})나 그 부모가 아닙니다 — 다시 생성하세요.", file=sys.stderr)
+        return 1
+    changed = [name for name in _git("diff", "--name-only", commit).splitlines() if name]
+    relative = _rel(out)
+    others = [name for name in changed if name != relative]
+    if others:
+        print(f"[qa] 기록 이후 {len(others)}개 파일이 바뀌었습니다(예: {', '.join(others[:5])}) — 다시 생성하세요.", file=sys.stderr)
+        return 1
+    print(f"[qa] 기록 확인: {relative}는 {commit[:12]}에서 생성되었고 그 뒤 다른 변경이 없습니다.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
@@ -409,7 +483,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR, help="per-QA logs, full-suite.log, results.json (default: build/qa-logs)")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="conformance table (default: docs/CONFORMANCE.md)")
     parser.add_argument("--qa-only", action="store_true", help="run tests/qa + fail-closed/decision tests only (QA-SYS-10 -> 건너뜀)")
+    parser.add_argument("--allow-dirty", action="store_true", help="run on a work tree with uncommitted tracked changes (the record says so)")
+    parser.add_argument("--verify-record", action="store_true", help="check that --out was produced on its commit's parent and nothing else changed since")
     args = parser.parse_args(argv)
+
+    if args.verify_record:
+        return verify_record(args.out)
+    missing = [name for name in REQUIRED_FOR_RECORD if importlib.util.find_spec(name) is None]
+    if missing:
+        print(f"[qa] fastapi 필요: {', '.join(missing)} 없음 — QA-OUT-4의 API 서버 레그를 건너뛴 기록은 통과로 쓸 수 없습니다.", file=sys.stderr)
+        print(f"[qa] 사이드 venv: {SIDE_VENV_HINT}", file=sys.stderr)
+        return 1
+    if _git("rev-parse", "HEAD") and _git("status", "--porcelain", "--untracked-files=no") and not args.allow_dirty:
+        print("[qa] 작업 트리에 커밋되지 않은 변경이 있습니다 — 커밋한 뒤 실행하거나 --allow-dirty(기록으로 쓰지 말 것)를 주세요.", file=sys.stderr)
+        return 1
 
     data = load_traceability()
     criteria = automated_criteria(data)

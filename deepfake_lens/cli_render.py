@@ -176,8 +176,8 @@ def _write_csv(path: Path, items: list[ScanItem], *, coverage: dict[str, object]
                 "status",
                 "score",
                 "risk",
-                "pixel_score",
-                "pixel_confidence",
+                "참고_픽셀_원점수",
+                "참고_픽셀_신뢰도",
                 "pixel_model",
                 "pixel_fusion",
                 "pixel_top_experts",
@@ -212,8 +212,8 @@ def _write_csv(path: Path, items: list[ScanItem], *, coverage: dict[str, object]
                     item.status,
                     result.score if result else "",
                     result.band_label if result else "",
-                    pixel.score if pixel and pixel.available else "",
-                    pixel.confidence if pixel and pixel.available else "",
+                    pixel.raw_score if pixel and pixel.available else "",
+                    pixel.reference_confidence if pixel and pixel.available else "",
                     pixel.model if pixel and pixel.available else "",
                     pixel.fusion if pixel and pixel.available else "",
                     _pixel_top_experts(pixel) if pixel and pixel.available else "",
@@ -256,7 +256,7 @@ def _pixel_score_text(item: ScanItem) -> str:
         return "-"
     if not pixel.available:
         return "n/a"
-    return str(pixel.score)
+    return f"{pixel.raw_score}(참고)"
 
 
 def _pixel_top_experts(pixel) -> str:

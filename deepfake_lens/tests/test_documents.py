@@ -56,6 +56,42 @@ class DocumentExtractionTest(unittest.TestCase):
         self.assertEqual(text, "")
         self.assertTrue(meta["extractor"].startswith("failed"))
 
+    def test_extraction_failure_keeps_the_exception_class(self) -> None:
+        """D16: a failed extractor records its exception class, and the scan's
+        document_text coverage entry carries it (pymupdf path: documents.py
+        used to drop the class)."""
+        import sys
+        import types
+        from unittest import mock
+
+        from deepfake_lens.core import analyze_file
+        from deepfake_lens.result_types import CoverageStatus
+
+        class _BrokenFitz(types.ModuleType):
+            @staticmethod
+            def open(path: object) -> object:
+                raise RuntimeError("cannot open broken document: xref table damaged")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pdf = Path(tmp) / "broken.pdf"
+            pdf.write_bytes(b"%PDF-1.7\n%broken\n")
+            with mock.patch.dict(sys.modules, {"fitz": _BrokenFitz("fitz")}):
+                text, meta = extract_document_text(pdf)
+                with self.assertLogs("deepfake_lens.documents", level="WARNING"):
+                    item = analyze_file(pdf)
+            docx = Path(tmp) / "broken.docx"
+            docx.write_bytes(b"not a zip")
+            _, docx_meta = extract_document_text(docx)
+        self.assertEqual(text, "")
+        self.assertEqual(meta["extractor"], "failed:pymupdf:RuntimeError")
+        self.assertEqual(meta["extractor_error"], "RuntimeError: cannot open broken document: xref table damaged")
+        self.assertEqual(docx_meta["extractor"], "failed:zip:BadZipFile")
+        assert item.result is not None
+        [entry] = [c for c in item.result.coverage if c.check == "document_text"]
+        self.assertEqual(entry.status, CoverageStatus.FAILED)
+        self.assertIn("RuntimeError: cannot open broken document", entry.reason)
+        self.assertNotIn("extractor_error", item.result.document_metadata or {})
+
     def test_legacy_doc_marks_unavailable(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             doc = Path(tmp) / "old.doc"

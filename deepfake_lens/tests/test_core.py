@@ -43,7 +43,10 @@ class DeepfakeLensCoreTest(unittest.TestCase):
         self.assertEqual(result.verdict_code, Verdict.UNDETERMINED)
         self.assertEqual(result.grade, Grade.REFERENCE)
         self.assertTrue(any(item.title == "AI 자기표현 문구" and item.kind == EvidenceKind.LEXICAL for item in result.evidence))
-        self.assertEqual(result.source_guess.label, "AI 어시스턴트 문체 추정")
+        # D11: a lexical source hint is labeled 참고 with confidence
+        # unknown (was: "AI 어시스턴트 문체 추정", medium).
+        self.assertEqual(result.source_guess.label, "참고: AI 어시스턴트 문체 유사")
+        self.assertEqual(result.source_guess.confidence, SourceConfidence.UNKNOWN)
 
     def test_generic_ai_like_text_does_not_invent_vendor(self) -> None:
         result = analyze_text("결론적으로 이 문제는 다양한 관점에서 접근해야 합니다. 균형 잡힌 이해가 도움이 됩니다.")
@@ -135,8 +138,8 @@ class DeepfakeLensCoreTest(unittest.TestCase):
             self.assertTrue(any(expert.available and expert.score >= 45 for expert in result.experts))
             members = [expert for expert in result.experts if expert.available and expert.family != "fusion"]
             weighted = sum(expert.score * expert.weight for expert in members) / sum(expert.weight for expert in members)
-            self.assertEqual(result.score, int(round(weighted)))
-            self.assertLess(result.score, 66)
+            self.assertEqual(result.raw_score, int(round(weighted)))  # D12: score -> raw_score
+            self.assertLess(result.raw_score, 66)
 
     def test_analyze_file_merges_pixel_signal_and_heatmap(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -663,23 +666,65 @@ class DeepSignalsTest(unittest.TestCase):
 
     def test_deep_signals_merges_layers(self) -> None:
         # G5: deep layers used to add their raw weight to the score and
-        # rescale the band (score 15 here). They are now uncalibrated
-        # statistical evidence: listed, never deciding, score stays 0.
+        # rescale the band (score 15 here). D13: without calibration they
+        # are reference signals only — listed, never evidence, never
+        # deciding, score stays 0 (was: a synthetic statistical evidence
+        # item that blocked decision rule 5).
         from deepfake_lens.core import build_classification_result, SourceGuess
-        from deepfake_lens.evidence_rules import deep_layer_evidence
+        from deepfake_lens.evidence_rules import deep_layer_reference
 
-        item = deep_layer_evidence("rPPG 맥박 신호", "테스트", "rppg", 15)
+        signal = deep_layer_reference("rPPG 맥박 신호", "테스트", 15)
         merged = build_classification_result(
-            subject="영상", evidence=[item], coverage=[], source_guess=SourceGuess.unknown(),
-            limitations=["레이어 한계"], next_checks=[],
+            subject="영상", evidence=[], coverage=[], source_guess=SourceGuess.unknown(),
+            limitations=["레이어 한계"], next_checks=[], reference_signals=[signal],
         )
         self.assertEqual(merged.score, 0)
         self.assertEqual(merged.verdict_code, Verdict.UNDETERMINED)
-        self.assertEqual(merged.evidence[0].title, "rPPG 맥박 신호")
-        self.assertEqual(merged.evidence[0].kind, EvidenceKind.STATISTICAL)
-        self.assertIsNone(merged.evidence[0].probability)
-        self.assertEqual(merged.signals[0].title, "rPPG 맥박 신호")
+        self.assertEqual(merged.evidence, [])
+        self.assertEqual(merged.signals, [])
+        self.assertEqual(merged.reference_signals[0].title, "rPPG 맥박 신호(참고, 미보정)")
+        self.assertIn("미보정", merged.reference_signals[0].detail)
         self.assertIn("레이어 한계", merged.limitations)
+
+    def test_deep_layer_flags_are_reference_signals_not_evidence(self) -> None:
+        """D13: an inpaint/face/seam flag lands in reference_signals and does
+        not block an authenticity conclusion backed by strong evidence."""
+        import importlib.util
+        from unittest import mock
+
+        if importlib.util.find_spec("cv2") is None:
+            self.skipTest("the inpaint check probes for opencv")
+
+        from deepfake_lens.core import DeepLayers, analyze_image_metadata, _deep_image_layers
+        from deepfake_lens.result_types import CoverageEntry, CoverageStatus, EvidenceDirection, EvidenceItem, EvidenceStrength
+
+        class _Inpaint:
+            band = "low"
+            verdict = "뚜렷한 인페인팅 의심 신호는 적습니다"
+            regions_detected = 2
+            score = 15
+            limitations: list[str] = []
+
+        with mock.patch("deepfake_lens.inpaint.analyze_inpainting", return_value=_Inpaint()), \
+                mock.patch("deepfake_lens.face.analyze_faces", side_effect=ImportError("cv2", name="cv2")), \
+                mock.patch("deepfake_lens.faceswap_seam.analyze_faceswap_seam", side_effect=ImportError("cv2", name="cv2")):
+            layers = _deep_image_layers(Path("unused.png"))
+        self.assertEqual(layers.evidence, [])
+        self.assertEqual([s.title for s in layers.reference], ["인페인팅/부분 변형 탐지(참고, 미보정)"])
+        capture = EvidenceItem(
+            "C2PA 서명: 카메라 촬영 출처", "digitalCapture",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.AUTHENTIC, EvidenceStrength.STRONG, "c2pa",
+        )
+        result = analyze_image_metadata(
+            {"png.software": "camera"},
+            coverage=[CoverageEntry("metadata", CoverageStatus.RAN)],
+            extra_evidence=[capture, *layers.evidence],
+            extra_reference=layers.reference,
+        )
+        self.assertEqual(result.verdict_code, Verdict.AUTHENTICITY_EVIDENCE)
+        self.assertIn("인페인팅/부분 변형 탐지(참고, 미보정)", [s.title for s in result.reference_signals])
+        self.assertFalse([e for e in result.evidence if e.layer in {"inpaint", "face"}])
+        self.assertIsInstance(DeepLayers().reference, list)
 
     def test_deep_signals_flag_reaches_analyze_file(self) -> None:
         import struct

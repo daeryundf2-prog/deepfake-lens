@@ -212,7 +212,7 @@ class FusionExternalPreferenceTest(unittest.TestCase):
 
     def test_component_scores_read_model_and_pixel_results(self) -> None:
         """component_scores must route model_analysis.score to
-        external_model and pixel_analysis.score to pixel so the weight
+        external_model and pixel_analysis.raw_score to pixel so the weight
         ordering above actually applies."""
         from deepfake_lens.model_adapter import ExternalModelAnalysis
         from deepfake_lens.pixel import PixelAnalysis
@@ -221,7 +221,7 @@ class FusionExternalPreferenceTest(unittest.TestCase):
         result = replace(
             result,
             pixel_analysis=PixelAnalysis(
-                mode="deep", available=True, score=90, confidence="medium",
+                mode="deep", available=True, raw_score=90, reference_confidence="참고",
                 model="local-multiexpert-pixel-v1",
             ),
             model_analysis=ExternalModelAnalysis(

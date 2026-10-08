@@ -120,6 +120,52 @@ class PreScreenTierTest(unittest.TestCase):
 
         restored = _pixel_analysis_from_json({"mode": "fast", "available": True, "score": 12})
         self.assertEqual(restored.analysis_tier, "ensemble")
+        # D12: a legacy score/confidence record loads as raw_score / 참고.
+        legacy = _pixel_analysis_from_json({"mode": "fast", "available": True, "score": 12, "confidence": "medium"})
+        self.assertEqual((legacy.raw_score, legacy.reference_confidence), (12, "참고"))
+
+    def test_pixel_output_is_raw_score_and_reference_confidence(self) -> None:
+        """D12: JSON carries raw_score/reference_confidence="참고"; the CSV
+        columns are 참고_픽셀_원점수/참고_픽셀_신뢰도; no "medium" anywhere."""
+        import csv
+        import json
+
+        from deepfake_lens.cli_render import _write_csv
+        from deepfake_lens.core import scan_directory
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "tile.png"
+            _write_rgb_png(path, 32, 32, lambda x, y: (220, 220, 220) if (x // 8 + y // 8) % 2 == 0 else (30, 30, 30))
+            direct = analyze_image_pixels(path, mode="fast")
+            self.assertTrue(direct.available)
+            self.assertEqual(direct.reference_confidence, "참고")
+            self.assertNotIn("medium", " ".join(direct.limitations))
+            payload = asdict(direct)
+            self.assertIn("raw_score", payload)
+            self.assertNotIn("score", payload)
+            self.assertNotIn("confidence", payload)
+
+            # Force the ensemble to run on the tile (the photo gate would skip it).
+            from unittest import mock
+
+            with mock.patch("deepfake_lens.core.classify_image", side_effect=ImportError("numpy", name="numpy")):
+                _, items = scan_directory(root, pixel_mode="fast")
+            item_json = json.loads(json.dumps(items[0].to_json(), ensure_ascii=False))
+            pixel = item_json["result"]["pixel_analysis"]
+            self.assertEqual(pixel["reference_confidence"], "참고")
+            self.assertIsInstance(pixel["raw_score"], int)
+            self.assertNotIn("score", pixel)
+            self.assertNotIn("confidence", pixel)
+            csv_path = root / "out.csv"
+            _write_csv(csv_path, items)
+            rows = [row for row in csv.reader(csv_path.read_text(encoding="utf-8").splitlines()) if row and not row[0].startswith("#")]
+            header, first = rows[0], rows[1]
+            self.assertIn("참고_픽셀_원점수", header)
+            self.assertIn("참고_픽셀_신뢰도", header)
+            self.assertNotIn("pixel_score", header)
+            self.assertNotIn("pixel_confidence", header)
+            self.assertEqual(first[header.index("참고_픽셀_신뢰도")], "참고")
 
 
 class PixelEnsembleDispositionTest(unittest.TestCase):

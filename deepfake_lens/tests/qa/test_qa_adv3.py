@@ -13,7 +13,7 @@ from pathlib import Path
 
 from deepfake_lens.core import AI_IDENTITY_PHRASES, analyze_file, analyze_text, scan_directory
 from deepfake_lens.result_text import TEXT_LEGAL_LIMITATION
-from deepfake_lens.result_types import EvidenceDirection, EvidenceKind, Grade, RiskBand, Verdict
+from deepfake_lens.result_types import EvidenceDirection, EvidenceKind, Grade, RiskBand, SourceConfidence, Verdict
 
 FIXTURES = Path(__file__).resolve().parents[3] / "fixtures" / "adversarial-text" / "human-about-ai"
 
@@ -68,6 +68,26 @@ class HumanTextsAboutAiTest(unittest.TestCase):
         self.assertEqual(summary.manipulation_evidence, 0)
         self.assertEqual(summary.high, 0)
         self.assertEqual(summary.medium, 0)
+
+    def test_lexical_source_hint_is_reference_only(self) -> None:
+        """D11: the text source guess from words in the text is "참고: …" with
+        confidence unknown — never a medium/high attribution."""
+        hinted = 0
+        for path in self.paths:
+            with self.subTest(path.name):
+                item = analyze_file(path)
+                assert item.result is not None
+                guess = item.result.source_guess
+                self.assertEqual(guess.confidence, SourceConfidence.UNKNOWN, guess)
+                self.assertTrue(guess.label.startswith("참고:") or guess.label == "출처 단서 없음", guess.label)
+                hinted += guess.label.startswith("참고:")
+        self.assertGreater(hinted, 0)
+        for text, label in (
+            ("ChatGPT에 대해 사람이 쓴 칼럼입니다. openai 발표를 인용했습니다.", "참고: 원문에 ChatGPT/OpenAI 언급"),
+            ("As an AI language model은 흔한 밈이다.", "참고: AI 어시스턴트 문체 유사"),
+        ):
+            guess = analyze_text(text).source_guess
+            self.assertEqual((guess.label, guess.confidence), (label, SourceConfidence.UNKNOWN))
 
     def test_keyword_stacking_still_cannot_conclude(self) -> None:
         stacked = ("As an AI language model, I cannot browse. 인공지능으로서 언어 모델로서 답합니다. "
