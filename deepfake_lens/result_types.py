@@ -238,6 +238,7 @@ COVERAGE_STATUS_LABELS = {
 CHECK_LABELS = {
     "metadata": "메타데이터",
     "c2pa": "C2PA 출처 검증",
+    "image_class": "이미지 유형 판별(사진/비사진)",
     "pixel": "픽셀 휴리스틱(참고)",
     "external_model": "외부 모델",
     "face_manipulation": "얼굴 검사",

@@ -710,32 +710,27 @@ def _safe_localization_expert(raster: PixelRaster, luminance: list[float]) -> tu
 
 
 def _fuzzy_decision_tree_fusion(experts: list[PixelExpertResult]) -> tuple[int, str]:
+    """Weighted mean of the available experts' scores — nothing else (G3).
+
+    The former rule branches lifted the result to fixed floors
+    (max(72|66|54|34, ...)) whenever a few experts fired, which turned
+    noise, gradients and blur into a constant ~35-66 "medium" (AUROC
+    0.43-0.48 measured on ProGAN). The activation pattern is still
+    described in the detail string for the examiner, but it no longer
+    changes the number. The score is a reference signal only.
+    """
     available = [expert for expert in experts if expert.available]
     if not available:
         return 0, "사용 가능한 전문가 점수가 없어 fusion을 수행하지 못했습니다."
 
     high = [expert for expert in available if expert.score >= 67]
     medium = [expert for expert in available if 45 <= expert.score < 67]
-    retrieval = [expert for expert in available if expert.family == "retrieval" and expert.score >= 45]
-    localization = [expert for expert in available if expert.family in {"localization", "compositing"} and expert.score >= 45]
-    statistical = [expert for expert in available if expert.family in {"spectral", "statistical", "reconstruction"} and expert.score >= 45]
     weighted = sum(expert.score * expert.weight for expert in available) / max(0.001, sum(expert.weight for expert in available))
-
-    if len(high) >= 2 or (high and retrieval and statistical):
-        score = max(72, min(96, int(round(weighted + 16))))
-        detail = "fuzzy rule: 복수 고신뢰 전문가 또는 검색+통계 고신호가 동시에 활성화되었습니다."
-    elif high and (medium or localization):
-        score = max(66, min(88, int(round(weighted + 10))))
-        detail = "fuzzy rule: 한 고신뢰 전문가와 보조 신호가 함께 활성화되었습니다."
-    elif len(medium) >= 3:
-        score = max(54, min(78, int(round(weighted + 8))))
-        detail = "fuzzy rule: 중간 신호가 여러 계열에서 누적되었습니다."
-    elif len(medium) >= 1:
-        score = max(34, min(62, int(round(weighted + 3))))
-        detail = "fuzzy rule: 단일 또는 소수의 중간 신호만 있어 보수적으로 반영했습니다."
-    else:
-        score = max(0, min(32, int(round(weighted))))
-        detail = "fuzzy rule: 전문가 신호가 낮아 낮은 점수로 유지했습니다."
+    score = max(0, min(100, int(round(weighted))))
+    detail = (
+        f"전문가 {len(available)}개 점수의 가중평균 {score} "
+        f"(고신호 {len(high)}개, 중간 신호 {len(medium)}개 — 하한·가산 규칙 없음, 미측정 참고값)."
+    )
     return score, detail
 
 

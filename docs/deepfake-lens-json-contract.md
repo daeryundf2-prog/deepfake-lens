@@ -97,7 +97,7 @@ per-file coverage record:
 | `kind` | `deterministic` \| `statistical` \| `lexical` | |
 | `direction` | `synthetic` \| `authentic` \| `neutral` | |
 | `strength` | `strong` \| `moderate` \| `weak` | |
-| `layer` | string | `metadata`, `c2pa`, `model`, `face`, `inpaint`, `rppg`, `text`, `document_metadata`, … |
+| `layer` | string | `metadata`, `c2pa`, `image_class`, `model`, `face`, `inpaint`, `rppg`, `text`, `document_metadata`, … |
 | `probability` | number \| null | Set **only** for a calibrated statistical item. |
 | `probability_ci` | `[lo, hi]` \| null | |
 | `calibration_id` | string \| null | Calibration mapping that produced `probability`. |
@@ -114,19 +114,61 @@ Phase-0 classification of existing signals:
 | C2PA manifest valid + trusted signer + `digitalCapture`, data hash match | deterministic | authentic | strong |
 | C2PA manifest present but untrusted / not validated | deterministic | neutral (synthetic/moderate if it declares AI) | weak |
 | Square generator resolution, missing metadata | deterministic | neutral | weak |
+| Image class from the photo/non-photo gate (`이미지 유형: …`, layer `image_class`) | deterministic | neutral | weak |
 | External model output | statistical | synthetic if raw ≥ 50, else neutral | weak (moderate when calibrated) |
 | Deep layers (face, inpaint, face-swap seam, rPPG, avatar, lip-sync, face track) | statistical | synthetic | weak, no probability |
 | AI identity phrases, template connectors, list structure, style statistics | lexical | synthetic | weak |
 | Office document creator/producer naming an AI tool | deterministic | synthetic | moderate |
-| Pixel ensemble, frequency heuristics, audio/video heuristics, fusion score | — | — | `reference_signals` only |
+| Pixel ensemble (plain weighted mean of its experts — no floors, G3), frequency heuristics, audio/video heuristics, fusion score | — | — | `reference_signals` only |
 
 ### Coverage entry
 
 | Field | Values |
 | --- | --- |
-| `check` | `metadata`, `c2pa`, `pixel`, `external_model`, `model:<member>`, `face_manipulation`, `inpaint`, `faceswap_seam`, `rppg`, `avatar`, `lipsync`, `face_track`, `audio_analysis`, `audio_features`, `video_analysis`, `document_text`, `text_lexical`, `archive` |
+| `check` | `metadata`, `c2pa`, `image_class`, `pixel`, `external_model`, `model:<member>`, `face_manipulation`, `inpaint`, `faceswap_seam`, `rppg`, `avatar`, `lipsync`, `face_track`, `audio_analysis`, `audio_features`, `video_analysis`, `document_text`, `text_lexical`, `archive` |
 | `status` | `ran` \| `skipped` \| `failed` |
-| `reason` | Required for `skipped`/`failed`. Skips: `의존성 부재: <module>`, `얼굴 미검출`, `측정 범위 밖: 해상도 …`, `비활성화(…)`, `모델 프로필 미지정`, `모델 실행 불가: …`. Failures: `<ExceptionClass>: <message ≤200 chars>`; a model weight refused by the pin policy (G9) fails with `미고정 프로필: …` (no/empty/malformed `pin`) or `무결성 불일치: …` (checkpoint sha256 differs from `pin.sha256`). A language-gated zoo member is `skipped` with `모델 실행 불가: 언어 게이트 제외: …`. |
+| `reason` | Required for `skipped`/`failed`. Skips: `의존성 부재: <module>`, `얼굴 미검출`, `측정 범위 밖: 해상도 …`, `사진 아님: <kind>` (see below), `비활성화(…)`, `모델 프로필 미지정`, `모델 실행 불가: …`. Failures: `<ExceptionClass>: <message ≤200 chars>`; a model weight refused by the pin policy (G9) fails with `미고정 프로필: …` (no/empty/malformed `pin`) or `무결성 불일치: …` (checkpoint sha256 differs from `pin.sha256`). A language-gated zoo member is `skipped` with `모델 실행 불가: 언어 게이트 제외: …`. |
+
+### Image class — photo/non-photo gate (phase 0, WP-D: G3/G13/G17)
+
+Every image goes through `deepfake_lens/image_class.py:classify_image`
+(numpy + Pillow; deterministic rules, constants and their sources at the
+top of the module) before any detector. The result is recorded twice:
+
+- **coverage** — check `image_class`: `ran`; `skipped` `의존성 부재: numpy`
+  without the imaging extras; `failed` `<Exception>: …` when the file
+  cannot be decoded (which, by rule 3, makes the verdict `undetermined`).
+- **evidence** — one item, `title` `이미지 유형: <label>`, `kind`
+  `deterministic`, `direction` `neutral`, `strength` `weak`, `layer`
+  `image_class`; `detail` names the class and the rule values that decided
+  it. It never points toward or away from synthesis.
+
+| `kind` | Korean label | Rule (first match wins) |
+| --- | --- | --- |
+| `too_small` | 저해상도 | long side < 128 px (from the file header when available) |
+| `screenshot` | 스크린샷 | dimensions in the module's phone/tablet/monitor resolution table **and** a solid status-bar band at the top **and** ≥ 0.3 % of pixels on exact axis-aligned step-edge runs |
+| `document_scan` | 문서 스캔 | > 60 % near-white, ≥ 2 % ink, bimodal luminance, ≥ 5 text lines in the row projection profile |
+| `pattern` | 패턴(노이즈·그라데이션·단색) | < 64 unique colours, or 3×3 noise-residual variance outside the photo range, or lag-1 row/column autocorrelation > 0.999 (gradient) / < 0.05 (white noise), or a stationary Gaussian field (blurred noise) |
+| `graphic` | 그래픽 | unique-colour ratio < 5 % and > 40 % flat-colour area |
+| `photo` | 사진 | none of the above |
+
+When `kind` is not `photo`, the checks `pixel`, `external_model`,
+`face_manipulation`, `inpaint` and `faceswap_seam` are **not run** and are
+recorded as `skipped` with reason `사진 아님: <kind>` (for `too_small`:
+`측정 범위 밖: 해상도 WxH (최소 변 128px 미만)` — the same reason the
+model range gate uses; the 128 px floor is defined once, in
+`image_class.MEASURABLE_MIN_SIDE_PX`). Metadata and C2PA still run, so a
+deterministic conclusion (e.g. generator metadata) is unaffected. The
+verdict sentence reads `이미지(사진 아님 — 생성 탐지 비적용): …` and the
+first limitation repeats the class. When the gate itself cannot run
+(dependency missing or decode failure) the detectors run as before and
+the `image_class` entry says why the gate did not apply.
+
+The thresholds are first-principles values checked against the synthetic
+adversarial set (`scripts/make_adversarial_fixtures.py`, QA-ADV-1/2) and a
+photo-like positive control; they are not yet measured on a real-photo
+corpus (phase 1). A photograph misclassified as non-photo loses its
+detector checks — it never gains a conclusion.
 
 ### Decision rule (`deepfake_lens/decision.py`)
 
