@@ -26,6 +26,7 @@ from .image_metadata import (  # noqa: F401
     read_image_metadata,
 )
 from .checks import AnalyzerError, CheckSkipped, run_check, skipped
+from .image_class import MEASURABLE_MIN_SIDE_PX, ImageClass, classify_image, resolution_out_of_range
 from .checks import failed as failed_entry
 from .checks import failure_reason
 from .decision import decide
@@ -34,6 +35,7 @@ from .evidence_rules import (
     c2pa_evidence,
     deep_layer_evidence,
     document_metadata_evidence,
+    image_class_evidence,
     image_metadata_evidence,
     lexical_evidence,
     model_evidence,
@@ -57,11 +59,10 @@ SCAN_JSON_SCHEMA_VERSION = 2
 TOOL_VERSION = "0.1.0"  # kept in sync with pyproject version
 DEFAULT_MAX_FILES = 1000
 DEFAULT_TEXT_BYTES = 64 * 1024
-# Smallest image side a detector is run on. Every bundled image detector
-# takes >=224 px input and the model_adapter note records chance-level
-# AUROC (~0.5) on 32x32 thumbnails; 128 px is the phase-0 spec's floor
-# (WP-B) until WP-I measures a per-profile range.
-MODEL_MIN_SIDE_PX = 128
+# Smallest image side a detector is run on — defined once in image_class
+# (the photo/non-photo gate also uses it for ``too_small``); kept here as
+# an alias for existing callers.
+MODEL_MIN_SIDE_PX = MEASURABLE_MIN_SIDE_PX
 # ExternalModelAnalysis.confidence value marking a member that raised
 # (inference error, integrity mismatch) rather than one that was skipped.
 MODEL_FAILED_CONFIDENCE = FAILED_CONFIDENCE
@@ -568,6 +569,9 @@ def analyze_file(
 DEEP_IMAGE_CHECKS = ("face_manipulation", "inpaint", "faceswap_seam")
 DEEP_VIDEO_CHECKS = ("rppg", "avatar", "lipsync", "face_track")
 DEEP_DISABLED_REASON = "비활성화(deep_signals=false)"
+# Shown in the verdict sentence and first limitation of a gated image (WP-D).
+NON_PHOTO_NOTICE = "사진 아님 — 생성 탐지 비적용"
+OUT_OF_RANGE_NOTICE = "측정 범위 밖(해상도) — 생성 탐지 비적용"
 
 
 def _model_entry(check: str, *, available: bool, confidence: str, detail: str) -> CoverageEntry:
@@ -609,12 +613,9 @@ def _run_model(
     dimensions: tuple[int, int] | None = None,
 ) -> tuple[ExternalModelAnalysis | None, list[CoverageEntry]]:
     """Run the external-model check with its range gate (G1/QA-OUT-5)."""
-    if model_path is not None and dimensions and min(dimensions) < MODEL_MIN_SIDE_PX:
-        width, height = dimensions
-        return None, [skipped(
-            "external_model",
-            f"측정 범위 밖: 해상도 {width}x{height} (최소 변 {MODEL_MIN_SIDE_PX}px 미만)",
-        )]
+    out_of_range = resolution_out_of_range(dimensions) if model_path is not None else None
+    if out_of_range:
+        return None, [skipped("external_model", out_of_range)]
     model, entry = run_check(
         "external_model",
         lambda: analyze_external_model(media_path, model_path, modality=modality),
@@ -846,8 +847,19 @@ def _analyze_image_file(
     c2pa_validation, entry = run_check("c2pa", lambda: _validate_c2pa(file_path))
     coverage.append(entry)
 
+    # Photo/non-photo gate (WP-D, G13): detectors are only applied to
+    # photographs. A non-photo (or too small) image keeps metadata + C2PA;
+    # pixel, model and deep checks are recorded as skipped with the class.
+    # If the gate itself cannot run, its entry says so (skipped/failed) and
+    # the detectors run as before — a failed gate already forces undetermined.
+    image_class, entry = run_check("image_class", lambda: classify_image(file_path, dimensions=dimensions))
+    coverage.append(entry)
+    gate = image_class.skip_reason() if image_class is not None and not image_class.is_photo else None
+
     pixel_analysis: PixelAnalysis | None = None
-    if pixel_mode == "off":
+    if gate:
+        coverage.append(skipped("pixel", gate))
+    elif pixel_mode == "off":
         coverage.append(skipped("pixel", "비활성화(pixel=off) — 참고 신호 전용 검사"))
     else:
         pixel_analysis, entry = run_check(
@@ -865,10 +877,17 @@ def _analyze_image_file(
             entry = skipped("pixel", reason)
         coverage.append(entry)
 
-    model_analysis, model_entries = _run_model(file_path, model_path, modality="image", dimensions=dimensions)
-    coverage.extend(model_entries)
+    model_analysis: ExternalModelAnalysis | None = None
+    if gate:
+        coverage.append(skipped("external_model", gate))
+    else:
+        model_analysis, model_entries = _run_model(file_path, model_path, modality="image", dimensions=dimensions)
+        coverage.extend(model_entries)
 
-    deep = _deep_image_layers(file_path, thresholds) if deep_signals else _deep_disabled(DEEP_IMAGE_CHECKS)
+    if gate:
+        deep = DeepLayers(coverage=[skipped(check, gate) for check in DEEP_IMAGE_CHECKS])
+    else:
+        deep = _deep_image_layers(file_path, thresholds) if deep_signals else _deep_disabled(DEEP_IMAGE_CHECKS)
     coverage.extend(deep.coverage)
 
     return analyze_image_metadata(
@@ -880,6 +899,7 @@ def _analyze_image_file(
         coverage=coverage,
         extra_evidence=deep.evidence,
         extra_limitations=deep.limitations,
+        image_class=image_class,
     )
 
 
@@ -1331,13 +1351,20 @@ def analyze_image_metadata(
     coverage: list[CoverageEntry] | None = None,
     extra_evidence: list[EvidenceItem] | None = None,
     extra_limitations: list[str] | None = None,
+    image_class: ImageClass | None = None,
 ) -> ClassificationResult:
     """Image result from already-collected analyzer outputs.
 
     ``coverage`` is supplied by ``analyze_file``; direct callers (tests,
     benchmarks) get a coverage record synthesized from the arguments.
+    ``image_class`` (the photo/non-photo gate) adds its neutral evidence
+    item and, for a non-photo, the "사진 아님 — 생성 탐지 비적용" notice.
     """
-    evidence = [*image_metadata_evidence(metadata, dimensions), *c2pa_evidence(c2pa_validation)]
+    evidence = [
+        *image_metadata_evidence(metadata, dimensions),
+        *c2pa_evidence(c2pa_validation),
+        *image_class_evidence(image_class),
+    ]
     model_item = model_evidence(model_analysis)
     if model_item is not None:
         evidence.append(model_item)
@@ -1359,6 +1386,14 @@ def analyze_image_metadata(
         coverage.extend(_default_model_coverage(model_analysis))
 
     limitations = ["결론은 메타데이터·출처 기록 같은 결정적 근거로만 내립니다. 통계·휴리스틱 신호는 보정 전까지 결론에 참여하지 않습니다."]
+    subject = "이미지"
+    if image_class is not None and not image_class.is_photo:
+        notice = NON_PHOTO_NOTICE if image_class.kind != "too_small" else OUT_OF_RANGE_NOTICE
+        subject = f"이미지({notice})"
+        limitations.insert(0, (
+            f"{notice}: 이미지 유형 {image_class.label}({image_class.kind}). 픽셀·모델·얼굴 검사를 적용하지 않았습니다 — "
+            "생성 탐지기는 사진에서만 측정 의미가 있으며, 메타데이터·C2PA 검사만 수행했습니다."
+        ))
     if not dimensions:
         limitations.append("이미지 크기를 파일 헤더에서 확인하지 못했습니다.")
     if pixel_analysis:
@@ -1368,7 +1403,7 @@ def analyze_image_metadata(
     limitations.extend(extra_limitations or [])
 
     return build_classification_result(
-        subject="이미지",
+        subject=subject,
         evidence=evidence,
         coverage=coverage,
         source_guess=guess_image_source(metadata),

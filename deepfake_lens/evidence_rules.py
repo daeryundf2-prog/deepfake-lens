@@ -17,12 +17,14 @@ Classification (phase-0 spec, WP-A):
 | deep layers (face seam, inpaint, tracking …)       | statistical   | synthetic | weak, no probability |
 | AI identity phrases, template connectors, style    | lexical       | synthetic | weak     |
 | pixel ensemble / frequency / legacy heuristics     | reference_signals only |
+| image class (photo / screenshot / pattern …)      | deterministic | neutral   | weak     |
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 
+from .image_class import DIRECTION_NEUTRAL_NOTE, ImageClass
 from .image_metadata import guess_image_source
 from .result_types import (
     EvidenceDirection,
@@ -227,3 +229,27 @@ def document_metadata_evidence(ai_tool_value: str | None) -> list[EvidenceItem]:
 def reference_signal(title: str, detail: str, raw_score: int) -> EvidenceSignal:
     """An unmeasured heuristic kept for display only (never decides)."""
     return EvidenceSignal(title, detail, int(raw_score))
+
+
+def image_class_evidence(image_class: ImageClass | None) -> list[EvidenceItem]:
+    """The photo/non-photo gate's result (WP-D, G13): deterministic, neutral, weak.
+
+    It records *which* detectors apply, never a direction — a screenshot is
+    not evidence of manipulation and a "photo" is not evidence of
+    authenticity.
+    """
+    if image_class is None:
+        return []
+    reasons = "; ".join(image_class.reasons)
+    if image_class.is_photo:
+        detail = f"분류: 사진 — 생성 탐지 검사 적용 대상. 판별 근거: {reasons}. {DIRECTION_NEUTRAL_NOTE}"
+    else:
+        detail = (
+            f"분류: {image_class.label}({image_class.kind}) — 생성·조작 탐지 검사를 적용하지 않았습니다. "
+            f"판별 근거: {reasons}. {DIRECTION_NEUTRAL_NOTE}"
+        )
+    return [EvidenceItem(
+        f"이미지 유형: {image_class.label}",
+        detail,
+        EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "image_class",
+    )]

@@ -236,7 +236,8 @@
         const DIRECTION_LABELS = { synthetic: '조작·생성 방향', authentic: '원본성 방향', neutral: '중립' };
         const STRENGTH_LABELS = { strong: '강', moderate: '중', weak: '약' };
         const CHECK_LABELS = {
-            metadata: '메타데이터', c2pa: 'C2PA 출처 검증', pixel: '픽셀 휴리스틱(참고)', external_model: '외부 모델',
+            metadata: '메타데이터', c2pa: 'C2PA 출처 검증', image_class: '이미지 유형 판별(사진/비사진)',
+            pixel: '픽셀 휴리스틱(참고)', external_model: '외부 모델',
             face_manipulation: '얼굴 검사', inpaint: '인페인팅 검사', faceswap_seam: '페이스스왑 경계면 검사',
             rppg: 'rPPG 맥박 검사', avatar: '아바타 검사', lipsync: '립싱크 검사', face_track: '얼굴 트랙 검사',
             audio_analysis: '오디오 분석', audio_features: '오디오 특징 추출', video_analysis: '영상 분석',

@@ -127,15 +127,36 @@ class DeepfakeLensCoreTest(unittest.TestCase):
             result = analyze_image_pixels(path, mode="deep")
 
             self.assertTrue(result.available)
-            self.assertGreaterEqual(result.score, 45)
+            # G3: the fused score used to be lifted to a floor (>= 66/72)
+            # whenever a few experts fired; it is now the plain weighted
+            # mean of the available experts, so assert the expert fired and
+            # the fusion equals that mean instead of a fixed floor.
             self.assertTrue(any(expert.family == "frequency" for expert in result.experts))
+            self.assertTrue(any(expert.available and expert.score >= 45 for expert in result.experts))
+            members = [expert for expert in result.experts if expert.available and expert.family != "fusion"]
+            weighted = sum(expert.score * expert.weight for expert in members) / sum(expert.weight for expert in members)
+            self.assertEqual(result.score, int(round(weighted)))
+            self.assertLess(result.score, 66)
 
     def test_analyze_file_merges_pixel_signal_and_heatmap(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             path = root / "tile.png"
             heatmap_dir = root / "heatmaps"
-            _write_rgb_png(path, 64, 64, lambda x, y: (220, 220, 220) if (x // 8 + y // 8) % 2 == 0 else (30, 30, 30))
+            # G13: a checkerboard is not a photo — the pixel heuristic is
+            # gated off for it (it used to run and produce a heatmap). The
+            # merge path is exercised on a photo-like image instead.
+            checker = root / "checker.png"
+            _write_valid_rgb_png(checker, 160, 160, lambda x, y: (220, 220, 220) if (x // 8 + y // 8) % 2 == 0 else (30, 30, 30))
+            gated = analyze_file(checker, root=root, pixel_mode="deep", heatmaps=True, heatmap_dir=heatmap_dir)
+            gate_entry = next(entry for entry in gated.result.coverage if entry.check == "image_class")
+            if gate_entry.status.value == "ran":
+                self.assertIsNone(gated.result.pixel_analysis)
+                pixel_entry = next(entry for entry in gated.result.coverage if entry.check == "pixel")
+                self.assertEqual(pixel_entry.reason, "사진 아님: pattern")
+            else:  # no-extras install: the gate needs numpy/Pillow and says so
+                self.assertEqual(gate_entry.reason, "의존성 부재: numpy")
+            _write_valid_rgb_png(path, 160, 160, _photo_like_pixel_fn(160, 160, seed=3))
 
             item = analyze_file(path, root=root, pixel_mode="deep", heatmaps=True, heatmap_dir=heatmap_dir)
 
@@ -185,8 +206,12 @@ class DeepfakeLensCoreTest(unittest.TestCase):
             real_dir = root / "train" / "real" / "camera"
             ai_dir.mkdir(parents=True)
             real_dir.mkdir(parents=True)
-            _write_rgb_png(ai_dir / "ai.png", 64, 64, lambda x, y: (245, 245, 245) if (x // 8 + y // 8) % 2 == 0 else (15, 15, 15))
-            _write_rgb_png(real_dir / "real.png", 64, 64, lambda x, y: (120 + (x % 5), 118 + (y % 7), 122))
+            # G13: evaluation scores come from detectors that only run on
+            # photographs; the former 64 px checkerboard / flat stand-ins
+            # are now gated off (too small, not a photo) and would yield
+            # zero samples, so the dataset uses photo-like images.
+            _write_valid_rgb_png(ai_dir / "ai.png", 160, 160, _photo_like_pixel_fn(160, 160, seed=1))
+            _write_valid_rgb_png(real_dir / "real.png", 160, 160, _photo_like_pixel_fn(160, 160, seed=2))
             (ai_dir / "ai.png.model.json").write_text(json.dumps({"score": 0.9}), encoding="utf-8")
 
             summary, records = discover_dataset(root)
@@ -231,7 +256,11 @@ class DeepfakeLensCoreTest(unittest.TestCase):
 
             model_profile = root / "external-model.json"
             model_profile.write_text(json.dumps({"type": "score-sidecar-v1", "name": "external fixture"}), encoding="utf-8")
-            item = analyze_file(ai_dir / "ai.png", root=root, pixel_mode="off", model_path=model_profile)
+            small = root / "small" / "ai.png"
+            small.parent.mkdir()
+            _write_rgb_png(small, 64, 64, lambda x, y: (245, 245, 245) if (x // 8 + y // 8) % 2 == 0 else (15, 15, 15))
+            small.with_name("ai.png.model.json").write_text(json.dumps({"score": 0.9}), encoding="utf-8")
+            item = analyze_file(small, root=root, pixel_mode="off", model_path=model_profile)
             # G1/WP-B: a 64 px image is below MODEL_MIN_SIDE_PX, so the model
             # check is skipped as out of range and says so in coverage (it
             # used to run and report a score).
@@ -507,6 +536,58 @@ def _write_rgb_png(path: Path, width: int, height: int, pixel_at) -> None:
     compressed = zlib.compress(b"".join(rows))
     ihdr = _chunk(b"IHDR", width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x02\x00\x00\x00")
     path.write_bytes(b"\x89PNG\r\n\x1a\n" + ihdr + _chunk(b"IDAT", compressed) + _chunk(b"IEND", b""))
+
+
+def _write_valid_rgb_png(path: Path, width: int, height: int, pixel_at) -> None:
+    """Like ``_write_rgb_png`` but with real chunk CRCs, so Pillow (and the
+    photo/non-photo gate) can decode it — ``_write_rgb_png`` writes zero
+    CRCs that only the pure-Python reader accepts."""
+    rows = []
+    for y in range(height):
+        row = bytearray([0])
+        for x in range(width):
+            row.extend(pixel_at(x, y))
+        rows.append(bytes(row))
+
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        crc = zlib.crc32(kind + payload) & 0xFFFFFFFF
+        return len(payload).to_bytes(4, "big") + kind + payload + crc.to_bytes(4, "big")
+
+    ihdr = chunk(b"IHDR", width.to_bytes(4, "big") + height.to_bytes(4, "big") + b"\x08\x02\x00\x00\x00")
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + ihdr + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
+
+
+def _photo_like_pixel_fn(width: int, height: int, seed: int):
+    """Pure-Python photo stand-in (no numpy): a soft horizon between two
+    tones, textured ground, soft-edged shaded blobs and Gaussian grain —
+    classified ``photo`` by image_class, unlike flat/checkerboard fills."""
+    import math
+    import random
+
+    rng = random.Random(seed)
+    blobs = [
+        (rng.uniform(0, width), rng.uniform(0, height), rng.uniform(width * 0.1, width * 0.35),
+         rng.uniform(height * 0.1, height * 0.35), [rng.uniform(30, 230) for _ in range(3)])
+        for _ in range(5)
+    ]
+    sky = [rng.uniform(120, 220) for _ in range(3)]
+    ground = [rng.uniform(30, 120) for _ in range(3)]
+    phase = rng.uniform(0, 6.28)
+
+    def at(x: int, y: int) -> tuple[int, int, int]:
+        t = y / (height - 1)
+        horizon = 0.55 + 0.08 * math.sin(x / width * 6.28 + phase)
+        mix = 1.0 / (1.0 + math.exp(-(t - horizon) * 40))
+        rgb = [s * (1 - mix) + g * mix + 12 * math.sin(x / 9.0 + y / 13.0) * mix for s, g in zip(sky, ground)]
+        for cx, cy, rx, ry, color in blobs:
+            alpha = min(1.0, max(0.0, (1.0 - math.hypot((x - cx) / rx, (y - cy) / ry)) * 12.0))
+            if alpha > 0:
+                shade = 1.0 + 0.25 * (y - cy) / ry
+                rgb = [c * (1 - alpha) + k * shade * alpha for c, k in zip(rgb, color)]
+        r, g, b = (max(0, min(255, int(round(c + rng.gauss(0, 3.0))))) for c in rgb)
+        return r, g, b
+
+    return at
 
 
 def _png(*chunks: bytes) -> bytes:
