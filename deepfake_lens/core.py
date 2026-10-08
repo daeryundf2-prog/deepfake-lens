@@ -102,6 +102,9 @@ from .serialization import (  # noqa: F401
 )
 from .scan_cache import (  # noqa: F401
     _cache_key,
+    _cache_scan_context,
+    _cached_scan_item,
+    _with_content_sha256,
     _display_path,
     _duplicate_map,
     _file_fingerprint,
@@ -349,13 +352,15 @@ def _scan_specs(
     should_stop: Callable[[], bool] | None = None,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
     """Analyze (path, display) spec pairs — the inner loop of scan_directory."""
-    duplicates = _duplicate_map(duplicates_paths, root=root, max_file_bytes=max_file_bytes, hash_db_path=hash_db_path) if dedupe or hash_db_path else {}
+    fingerprints: dict[Path, str] = {}  # per-scan SHA-256 memo shared by dedupe, cache key, item.sha256 (G11)
+    duplicates = _duplicate_map(duplicates_paths, root=root, max_file_bytes=max_file_bytes, hash_db_path=hash_db_path, fingerprints=fingerprints) if dedupe or hash_db_path else {}
     cache = _load_scan_cache(cache_path)
     cache_items = cache.setdefault("items", {}) if cache is not None else {}
     # Cache keys embed analysis provenance so a stored verdict computed
     # under different thresholds or model coverage is never replayed as
     # if it were produced by the current configuration.
     cache_provenance = _cache_provenance(thresholds) if cache is not None else ""
+    scan_context = _cache_scan_context(model_path) if cache is not None else ""
 
     def analyze_one(spec: tuple[Path, str | None]) -> tuple[ScanItem, str | None, bool]:
         path, display = spec
@@ -367,7 +372,7 @@ def _scan_specs(
                 size = path.stat().st_size
             except OSError:
                 size = 0
-            return ScanItem(display_path, path.name, "duplicate", "duplicate", size, error="duplicate content", duplicate_of=duplicates[path]), None, False
+            return ScanItem(display_path, path.name, "duplicate", "duplicate", size, error="duplicate content", duplicate_of=duplicates[path], sha256=fingerprints.get(path)), None, False
         if max_file_bytes is not None:
             try:
                 size = path.stat().st_size
@@ -390,13 +395,12 @@ def _scan_specs(
                 model_path=model_path,
                 deep_signals=deep_signals,
                 provenance=cache_provenance,
-            )
-            cached = cache_items.get(key) if isinstance(cache_items, dict) else None
-            if isinstance(cached, dict):
-                try:
-                    return _scan_item_from_json(cached), key, True
-                except (ValueError, TypeError, KeyError):
-                    pass  # corrupt entry — fall through and re-analyze
+                fingerprints=fingerprints,
+                scan_context=scan_context,
+            ) if cache is not None else None
+            cached_item = _cached_scan_item(cache_items.get(key) if key and isinstance(cache_items, dict) else None, path, root=root)
+            if cached_item is not None:
+                return _with_content_sha256(cached_item, path, fingerprints), key, True
         try:
             item = analyze_file(
             path,
@@ -425,6 +429,7 @@ def _scan_specs(
                 error=f"analysis error: {type(exc).__name__}: {exc}",
             )
             return item, key, False
+        item = _with_content_sha256(item, path, fingerprints)
         if display is not None and "::" in display:
             archive_members.setdefault(display.split("::", 1)[0], []).append(item)
         return item, key, False

@@ -270,6 +270,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     api_parser.add_argument("--host", type=str, default="127.0.0.1", help="host to bind")
     api_parser.add_argument("--port", type=int, default=8765, help="port to listen on")
     api_parser.add_argument("--token", type=str, help="require an X-API-Token header on /api routes (mandatory for non-localhost hosts)")
+    api_parser.add_argument("--allow-root", type=Path, action="append", default=[], help="additional read root the API may read from (repeatable); requests for paths outside --folder/--allow-root get 403")
 
     batch_parser = subparsers.add_parser("batch", help="process files in batch")
     batch_parser.add_argument("folder", type=Path, help="folder to process")
@@ -335,6 +336,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     web_parser.add_argument("--allow-lan", action="store_true")
     web_parser.add_argument("--token", default=None, help="API token required with --allow-lan")
     web_parser.add_argument("--models-dir", type=Path, help="models directory provisioned via vendor-weights --install")
+    web_parser.add_argument("--allow-root", type=Path, action="append", default=[], help="additional read root the API may read from (repeatable); requests for paths outside --folder/--allow-root get 403")
 
     doctor_parser = subparsers.add_parser("doctor", help="diagnose model weights, accelerators, and dependencies")
     doctor_parser.add_argument("--format", choices=["table", "json"], default="table")

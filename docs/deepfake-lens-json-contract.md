@@ -66,6 +66,11 @@ per-file coverage record:
   `unsupported`, `duplicate`, `unknown`), `status` (`analyzed`, `failed`,
   `skipped`, `unsupported`, `duplicate`, `expanded`, `unknown`),
   `size_bytes`, `error`, `duplicate_of`.
+- `sha256`: SHA-256 (hex) of the file's bytes as analyzed — set by folder
+  scans for every readable file (duplicates included), `null` when the file
+  was not hashed (oversize skip, unreadable, single-file analysis). It is the
+  scan-cache key's content component (G11) and is covered by report
+  signatures (G30).
 - `result`: `null` unless the item was analyzed (archive container rows
   carry a roll-up result with `status: "expanded"`).
 
@@ -152,6 +157,24 @@ Evaluated in order; the first that applies wins.
 Reading a v1 record: missing v2 fields load as `verdict_code:
 "undetermined"`, `grade: "evidence"`, empty `evidence`/`coverage`; the
 stored v1 `band` is kept verbatim but is not a verdict.
+
+## Signed reports (G30)
+
+`scan --sign`, signed HTML/PDF renderings and `POST /api/report` add these
+top-level fields. The HMAC-SHA256 covers the canonical JSON
+(`sort_keys`, compact separators, UTF-8) of **every field except
+`signature` and `signature_key_id`**.
+
+| Field | Meaning |
+| --- | --- |
+| `tool_version` | Deepfake Lens version that produced the report. |
+| `model_pins` | `[{"profile": "<profile file stem>", "pin": {"sha256"\|"revision": …} \| null}]` for every runtime profile in the effective models dir (plus explicit `--model-path` profiles), sorted by name. `null` = unpinned. |
+| `signature_note` | Korean note: what the HMAC proves, or `서명 없음 (unsigned): …` when no key was configured. Inside the MAC. |
+| `signature_key_id` | `hmac-sha256-v1:<first 12 hex of SHA-256(key)>`. Outside the MAC; a mismatch with the verifying key is reported as `키 ID 불일치`. |
+| `signature` | Hex HMAC, or `null` when unsigned. |
+
+Rendered reports (`POST /api/report`, `--html-out`) additionally carry
+`report_format` and the posted `thresholds`/`coverage` in the signed body.
 
 ## Versioning rules
 

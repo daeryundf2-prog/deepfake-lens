@@ -620,14 +620,19 @@ def create_app(
     async def api_scan(request: Request):
         from urllib.parse import parse_qs
         from .webapp import _scan_job_start, _scan_payload
+        from .webapp_api import ReadRootDenied, read_root_denied_body
         qs = str(request.url.query)
         if parse_qs(qs).get("async", ["false"])[0].lower() in {"1", "true", "yes"}:
             try:
                 return _scan_job_start(qs, default_folder=default_folder)
+            except ReadRootDenied:
+                return JSONResponse(read_root_denied_body(), status_code=403)
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
         try:
             return _scan_payload(qs, default_folder=default_folder)
+        except ReadRootDenied:
+            return JSONResponse(read_root_denied_body(), status_code=403)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
 
@@ -661,7 +666,11 @@ def create_app(
     @app.get("/api/analyze-file")
     async def api_analyze_file(request: Request):
         from .webapp import _analyze_file_payload
-        return _analyze_file_payload(str(request.url.query))
+        from .webapp_api import ReadRootDenied, read_root_denied_body
+        try:
+            return _analyze_file_payload(str(request.url.query))
+        except ReadRootDenied:
+            return JSONResponse(read_root_denied_body(), status_code=403)
 
     @app.get("/api/stats")
     async def api_stats():
@@ -690,7 +699,11 @@ def create_app(
         except (UnicodeDecodeError, ValueError):
             # Malformed body: _report_payload below returns the JSON error.
             fmt = fmt or None
-        rendered = _report_payload(body, format_override=fmt)
+        from .webapp_api import ReadRootDenied, read_root_denied_body
+        try:
+            rendered = _report_payload(body, format_override=fmt, default_folder=default_folder)
+        except ReadRootDenied:
+            return JSONResponse(read_root_denied_body(), status_code=403)
         if isinstance(rendered, dict):
             return rendered
         if (fmt or "").lower() in ("pdf", "evidence", "evidence-statement"):
@@ -773,8 +786,12 @@ def run_server(
     token: str | None = None,
     default_folder: Path | None = None,
     allow_lan: bool = False,
+    allow_roots: list[Path] | None = None,
 ) -> None:
     """Run the API server.
+
+    Read roots (G31) are registered here only: ``default_folder`` and each
+    ``allow_roots`` entry (``--allow-root``); other paths get 403.
 
     ``token`` enables authentication and is mandatory for non-localhost binds
     (enforced by the ``api-serve`` and ``web`` CLI commands).
@@ -784,6 +801,9 @@ def run_server(
     except ImportError:
         raise ImportError("uvicorn is required. Install with: pip install uvicorn")
 
+    from .webapp_api import configure_read_roots
+
+    configure_read_roots(default_folder, allow_roots)
     app = create_app(host, port, token=token, default_folder=default_folder)
     print(f"Starting Deepfake Lens unified server on http://{host}:{port}" + (" (token required)" if token else ""))
     uvicorn.run(app, host=host, port=port)

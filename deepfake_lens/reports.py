@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import time
 from datetime import datetime
 from html import escape
@@ -23,6 +24,7 @@ from .result_text import (
     verdict_heading,
 )
 from .result_types import EVIDENCE_KIND_LABELS, VERDICT_LABELS, CoverageStatus, EvidenceKind, Grade, Verdict
+from .signing import REPORT_KEY_ENV, resolve_report_key, sign_report, signed_body_sha256
 
 
 def _has_reference_grade(items: list[ScanItem]) -> bool:
@@ -47,10 +49,153 @@ def _threshold_provenance_line(thresholds: object | None) -> str:
     return f"Decision thresholds: threshold profile {payload.get('version', '?')} — {state}, n={samples}{suffix}."
 
 
-def write_html_report(path: Path | str, summary: BatchScanSummary, items: list[ScanItem], *, redact_paths: bool = False, thresholds: object | None = None) -> None:
+SIGNED_REPORT_SCRIPT_ID = "deepfake-lens-signed-report"
+
+
+def _thresholds_payload(thresholds: object | None) -> object:
+    to_json = getattr(thresholds, "to_json", None)
+    if callable(to_json):
+        return to_json()
+    return thresholds if isinstance(thresholds, (dict, type(None))) else str(thresholds)
+
+
+def build_report_body(
+    summary: BatchScanSummary,
+    items: list[ScanItem],
+    *,
+    thresholds: object | None = None,
+    coverage: dict[str, object] | None = None,
+    report_format: str = "html",
+    redact_paths: bool = False,
+) -> dict[str, object]:
+    """The JSON body an HTML/PDF report renders — what its signature covers.
+
+    Every row carries ``sha256`` exactly as the item holds it: the scanner's
+    content hash, or None. Nothing is re-read here — a row path is often
+    relative to a scan root this function does not know (resolving it
+    against the working directory could hash the wrong file), and the web
+    report hashes under the read roots before calling.
+    """
+    rows: list[dict[str, object]] = []
+    for item in items:
+        row = item.to_json()
+        row["sha256"] = item.sha256
+        if redact_paths:
+            # The embedded/signed body must not undo --redact-paths.
+            row["path"] = _display_path(item.path, redact_paths=True)
+            if item.duplicate_of:
+                row["duplicate_of"] = _display_path(item.duplicate_of, redact_paths=True)
+        rows.append(row)
+    from .core import SCAN_JSON_SCHEMA_VERSION
+
+    return {
+        "schema_version": SCAN_JSON_SCHEMA_VERSION,
+        "report_format": report_format,
+        "summary": summary.to_json(),
+        "thresholds": _thresholds_payload(thresholds),
+        "coverage": coverage,
+        "items": rows,
+    }
+
+
+def signed_report_body(
+    summary: BatchScanSummary,
+    items: list[ScanItem],
+    *,
+    thresholds: object | None = None,
+    coverage: dict[str, object] | None = None,
+    report_format: str = "html",
+    model_pins: list[dict[str, object]] | None = None,
+    key: bytes | None = None,
+    redact_paths: bool = False,
+) -> dict[str, object]:
+    """``build_report_body`` signed with ``key`` or DEEPFAKE_LENS_REPORT_KEY (G30).
+
+    Without a key the body is returned with ``signature: null`` and a
+    "서명 없음" note — never silently unsigned.
+    """
+    body = build_report_body(summary, items, thresholds=thresholds, coverage=coverage, report_format=report_format, redact_paths=redact_paths)
+    return sign_report(body, key if key is not None else resolve_report_key(), model_pins=model_pins)
+
+
+def signature_lines_ko(signed: dict[str, object]) -> list[str]:
+    """Korean signature status lines for HTML/forensic-PDF renderings."""
+    if signed.get("signature"):
+        return [
+            f"보고서 서명: HMAC-SHA256 서명됨 — 키 ID {signed.get('signature_key_id')}",
+            f"서명값: {signed.get('signature')}",
+            f"서명 본문 SHA-256: {signed_body_sha256(signed)}",
+        ]
+    return [
+        f"보고서 서명: 서명 없음 — {REPORT_KEY_ENV}가 설정되지 않아 이 보고서는 서명되지 않았습니다.",
+        f"본문 SHA-256(참고, 서명 아님): {signed_body_sha256(signed)}",
+    ]
+
+
+def signature_lines_ascii(signed: dict[str, object]) -> list[str]:
+    """Latin-1 signature lines for the minimal PDF writer."""
+    if signed.get("signature"):
+        return [
+            f"Signature: HMAC-SHA256, key id {signed.get('signature_key_id')}",
+            f"  {signed.get('signature')}",
+            f"Signed body SHA-256: {signed_body_sha256(signed)}",
+        ]
+    return [
+        f"Signature: UNSIGNED - no report key ({REPORT_KEY_ENV} not set)",
+        f"Body SHA-256 (not a signature): {signed_body_sha256(signed)}",
+    ]
+
+
+def extract_signed_report(html_text: str) -> dict[str, object] | None:
+    """The signed JSON body embedded in an HTML report, for ``verify_report``."""
+    marker = f'<script type="application/json" id="{SIGNED_REPORT_SCRIPT_ID}">'
+    start = html_text.find(marker)
+    if start == -1:
+        return None
+    end = html_text.find("</script>", start)
+    if end == -1:
+        return None
+    try:
+        loaded = json.loads(html_text[start + len(marker):end])
+    except json.JSONDecodeError:
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def _signature_html(signed: dict[str, object]) -> str:
+    lines = "".join(f"<p class=\"note\">{escape(line)}</p>" for line in signature_lines_ko(signed))
+    # "</" is escaped so the JSON cannot close the script element; json.loads
+    # reads "<\/" back as "</", so the extracted body verifies unchanged.
+    embedded = json.dumps(signed, ensure_ascii=False, sort_keys=True).replace("</", "<\\/")
+    return (
+        f'<section class="signature"><h2>보고서 서명</h2>{lines}</section>\n'
+        f'<script type="application/json" id="{SIGNED_REPORT_SCRIPT_ID}">{embedded}</script>'
+    )
+
+
+def write_html_report(
+    path: Path | str,
+    summary: BatchScanSummary,
+    items: list[ScanItem],
+    *,
+    redact_paths: bool = False,
+    thresholds: object | None = None,
+    allow_path: Callable[[str], bool] | None = None,
+    signed_report: dict[str, object] | None = None,
+) -> None:
+    """Write the HTML report.
+
+    ``allow_path`` (G31) decides which heatmap files may be read and inlined;
+    a heatmap it rejects renders as a placeholder. None trusts every path
+    (CLI use on the examiner's own scan). ``signed_report`` is the signed
+    body to embed; when omitted it is built and signed here with
+    DEEPFAKE_LENS_REPORT_KEY (G30), or marked "서명 없음".
+    """
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    rows = "\n".join(_html_row(item, redact_paths=redact_paths) for item in items)
+    if signed_report is None:
+        signed_report = signed_report_body(summary, items, thresholds=thresholds, report_format="html", redact_paths=redact_paths)
+    rows = "\n".join(_html_row(item, redact_paths=redact_paths, allow_path=allow_path) for item in items)
     legal_note = f'<p class="legal">{escape(TEXT_LEGAL_LIMITATION)}</p>' if _has_reference_grade(items) else ""
     body = f"""<!doctype html>
 <html lang="ko">
@@ -83,6 +228,7 @@ def write_html_report(path: Path | str, summary: BatchScanSummary, items: list[S
     <thead><tr><th>결론</th><th>근거(종류별)</th><th>검사 범위(미실행·실패)</th><th>파일</th><th>참고 신호</th><th>heatmap</th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
+  {_signature_html(signed_report)}
 </body>
 </html>
 """
@@ -133,7 +279,18 @@ def _threshold_provenance_ko(thresholds: object | None) -> str:
     return f"판정 임계값: 프로파일 {payload.get('version', '?')} — {state}, 표본 n={samples}"
 
 
-def write_pdf_report(path: Path | str, summary: BatchScanSummary, items: list[ScanItem], *, redact_paths: bool = False, thresholds: object | None = None, degrade_note: str | None = None) -> None:
+def write_pdf_report(
+    path: Path | str,
+    summary: BatchScanSummary,
+    items: list[ScanItem],
+    *,
+    redact_paths: bool = False,
+    thresholds: object | None = None,
+    degrade_note: str | None = None,
+    signed_report: dict[str, object] | None = None,
+) -> None:
+    if signed_report is None:
+        signed_report = signed_report_body(summary, items, thresholds=thresholds, report_format="pdf", redact_paths=redact_paths)
     lines = [
         "Deepfake Lens Report",
         summary_line_ascii(summary),
@@ -167,6 +324,8 @@ def write_pdf_report(path: Path | str, summary: BatchScanSummary, items: list[Sc
             f"checks_failed={failed} skipped={skipped} {_display_path(item.path, redact_paths=redact_paths)}"
             + (f" [{top.kind.value}] {top.title}" if top else "")
         )
+    lines.append("")
+    lines.extend(signature_lines_ascii(signed_report))
     if any(ord(char) > 255 for line in lines for char in line):
         # The minimal PDF writer is Latin-1 only; state the limitation
         # instead of silently turning Korean labels into '?'.
@@ -190,9 +349,16 @@ def write_forensic_pdf_report(
     coverage: dict[str, object] | None = None,
     allow_path: "Callable[[str], bool] | None" = None,
     resolve_path: "Callable[[str], Path | None] | None" = None,
+    signed_report: dict[str, object] | None = None,
 ) -> None:
     """Generate a court-admissible forensic PDF report with ECFS exhibit stamp,
-    SHA-256 evidence integrity hashes, and Daeryun Law Firm forensic signoff."""
+    SHA-256 evidence integrity hashes, and Daeryun Law Firm forensic signoff.
+
+    The signature block (G30) states the HMAC signature and the signed body's
+    SHA-256, or "서명 없음" when no report key is configured.
+    """
+    if signed_report is None:
+        signed_report = signed_report_body(summary, items, thresholds=thresholds, coverage=coverage, report_format="pdf", redact_paths=redact_paths)
     try:
         import pymupdf
     except ImportError:
@@ -203,6 +369,7 @@ def write_forensic_pdf_report(
                 path, summary, items,
                 redact_paths=redact_paths,
                 thresholds=thresholds,
+                signed_report=signed_report,
                 degrade_note="pymupdf not installed — this is a simplified text report, NOT the ECFS-stamped forensic layout. Install the 'forensic' extra for the court artifact.",
             )
             return
@@ -240,7 +407,9 @@ def write_forensic_pdf_report(
 
     # Evidence hashes are computed once, up front, so the header's
     # integrity claim can state the real verified/total count.
-    hash_map = {item.path: _evidence_sha256(item.path, allow_path, resolve_path) for item in items}
+    # The scanner's content hash is reused when the row has one (G11) —
+    # each evidence file is read for hashing at most once.
+    hash_map = {item.path: item.sha256 or _evidence_sha256(item.path, allow_path, resolve_path) for item in items}
     hashed = sum(1 for v in hash_map.values() if v)
 
     # Metadata & Case Overview Box
@@ -390,6 +559,11 @@ def write_forensic_pdf_report(
         color=(0.15, 0.25, 0.45),
     )
 
+    sig_y = y + 76.0
+    for line in signature_lines_ko(signed_report):
+        page.insert_text(pymupdf.Point(margin_l, sig_y), line, fontname=font_ko, fontsize=6.5, color=(0.35, 0.35, 0.35))
+        sig_y += 9.0
+
     total_pages = doc.page_count
     for i in range(total_pages):
         p = doc[i]
@@ -454,7 +628,7 @@ def write_eval_html_report(path: Path | str, payload: dict[str, object], *, reda
     output.write_text(body, encoding="utf-8")
 
 
-def _html_row(item: ScanItem, *, redact_paths: bool) -> str:
+def _html_row(item: ScanItem, *, redact_paths: bool, allow_path: Callable[[str], bool] | None = None) -> str:
     result = item.result
     path_cell = escape(_display_path(item.path, redact_paths=redact_paths))
     if result is None:
@@ -485,7 +659,7 @@ def _html_row(item: ScanItem, *, redact_paths: bool) -> str:
     reference = "; ".join(f"{signal.title} ({signal.weight})" for signal in result.reference_signals) or "-"
     heatmap = ""
     if result.pixel_analysis and result.pixel_analysis.available:
-        heatmap = _heatmap_img(result.pixel_analysis.heatmap_path)
+        heatmap = _heatmap_img(result.pixel_analysis.heatmap_path, allow_path=allow_path)
     return (
         "<tr>"
         f"<td>{verdict_cell}</td>"
@@ -515,9 +689,19 @@ def _display_path(path: str, *, redact_paths: bool) -> str:
     return Path(path).name if redact_paths else path
 
 
-def _heatmap_img(path: str | None) -> str:
+HEATMAP_PLACEHOLDER = "(히트맵 생략: 허용되지 않은 경로)"
+
+
+def _heatmap_img(path: str | None, *, allow_path: Callable[[str], bool] | None = None) -> str:
+    """Inline a heatmap PNG, or a placeholder when ``allow_path`` rejects it (G31).
+
+    The check runs before any filesystem access, so a rejected path is never
+    stat'ed or read — not even its name is echoed.
+    """
     if not path:
         return ""
+    if allow_path is not None and not allow_path(str(path)):
+        return escape(HEATMAP_PLACEHOLDER)
     heatmap = Path(path)
     try:
         if heatmap.suffix.lower() != ".png" or heatmap.stat().st_size > 512 * 1024:

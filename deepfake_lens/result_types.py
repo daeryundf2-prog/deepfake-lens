@@ -365,6 +365,10 @@ class ScanItem:
     result: ClassificationResult | None = None
     error: str | None = None
     duplicate_of: str | None = None
+    # SHA-256 of the file content as analyzed (G11/G30). Set by the folder
+    # scanner, which also keys the scan cache on it; None when the file was
+    # not hashed (single-file paths, oversize skips, unreadable files).
+    sha256: str | None = None
 
     def to_json(self) -> dict[str, object]:
         data = asdict(self)

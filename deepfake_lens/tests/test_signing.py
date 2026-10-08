@@ -79,7 +79,44 @@ class SignVerifyTest(unittest.TestCase):
         signed_once = sign_report(_report(), KEY)
         signed_twice = sign_report(signed_once, KEY)
         self.assertEqual(signed_once["signature"], signed_twice["signature"])
-        self.assertNotIn("signature_note", signed_twice)
+        # G30: a signed report now carries its own signature_note *inside*
+        # the MAC (it used to be stripped and left unsigned); re-signing
+        # replaces it with the same note, so the signature is stable.
+        self.assertEqual(signed_twice["signature_note"], signed_once["signature_note"])
+        self.assertTrue(verify_report(signed_twice, KEY).verified)
+
+    def test_swapped_key_id_reported_as_key_mismatch(self) -> None:
+        signed = sign_report(_report(), KEY)
+        result = verify_report(dict(signed, signature_key_id="hmac-sha256-v1:000000000000"), KEY)
+        self.assertEqual(result.status, "key-mismatch")
+        self.assertEqual(result.reason, "키 ID 불일치")
+        self.assertEqual(verify_report(signed, b"other-key").reason, "키 ID 불일치")
+
+    def test_note_tool_version_and_model_pins_are_signed(self) -> None:
+        signed = sign_report(_report(), KEY, model_pins=[{"profile": "aide-runtime", "pin": {"sha256": "ab" * 32}}])
+        self.assertIn("tool_version", signed)
+        self.assertEqual(signed["model_pins"][0]["profile"], "aide-runtime")
+        for field, value in (("signature_note", "x"), ("tool_version", "9.9.9"), ("model_pins", [])):
+            tampered = dict(signed, **{field: value})
+            result = verify_report(tampered, KEY)
+            self.assertEqual(result.status, "tampered", field)
+            self.assertEqual(result.reason, "변조됨")
+
+    def test_default_model_pins_record_unpinned_profiles(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "a-runtime.json").write_text(json.dumps({"name": "a"}), encoding="utf-8")
+            Path(tmp, "b-runtime.json").write_text(json.dumps({"pin": {"revision": "abc123"}}), encoding="utf-8")
+            with patch.dict(os.environ, {"DEEPFAKE_LENS_MODELS_DIR": tmp}):
+                signed = sign_report(_report(), KEY)
+        self.assertEqual(signed["model_pins"], [
+            {"profile": "a-runtime", "pin": None},
+            {"profile": "b-runtime", "pin": {"revision": "abc123"}},
+        ])
+
+    def test_unsigned_note_says_unsigned_in_korean(self) -> None:
+        signed = sign_report(_report(), None)
+        self.assertIn("서명 없음", signed["signature_note"])
+        self.assertEqual(verify_report(signed, KEY).reason, "서명 없음")
 
 
 class KeyResolutionTest(unittest.TestCase):

@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Iterable
+
+from .profile_pins import ModelPathArg, model_path_digest, pin_tokens, profile_pins
+from .result_types import ScanItem
 
 
 def _iter_files(root: Path, *, recursive: bool, allow_symlinks: bool = False, on_error: Callable[[Path, OSError], None] | None = None) -> Iterable[Path]:
@@ -18,14 +22,22 @@ def _iter_files(root: Path, *, recursive: bool, allow_symlinks: bool = False, on
 
     ``rglob``/``iterdir`` raise lazily mid-iteration — one permission-
     denied subdirectory must not abort a multi-hour evidence scan.
+
+    Order is deterministic (G32): each directory level is sorted by the
+    path string, a directory's files before its subdirectories. The OS
+    directory order (creation order on ext4, hash order elsewhere) used to
+    decide which files a max-files cap kept and which copy dedupe called
+    the original.
     """
     if recursive:
         def _walk_error(exc: OSError) -> None:
             if on_error is not None:
                 on_error(Path(getattr(exc, "filename", None) or root), exc)
         import os
-        for dirpath, _dirs, files in os.walk(root, onerror=_walk_error):
-            for name in files:
+        for dirpath, dirs, files in os.walk(root, onerror=_walk_error):
+            # os.walk descends into ``dirs`` in list order — sort in place.
+            dirs.sort(key=lambda name: str(Path(dirpath) / name))
+            for name in sorted(files, key=lambda name: str(Path(dirpath) / name)):
                 path = Path(dirpath) / name
                 try:
                     if path.is_symlink() and not allow_symlinks:
@@ -39,7 +51,7 @@ def _iter_files(root: Path, *, recursive: bool, allow_symlinks: bool = False, on
                 yield path
         return
     try:
-        entries = list(root.iterdir())
+        entries = sorted(root.iterdir(), key=str)
     except OSError as exc:
         if on_error is not None:
             on_error(root, exc)
@@ -69,7 +81,20 @@ def _display_path(path: Path, *, root: Path | None) -> str:
         return str(path)
 
 
-def _duplicate_map(paths: list[Path], *, root: Path, max_file_bytes: int | None, hash_db_path: Path | None) -> dict[Path, str]:
+def _duplicate_map(
+    paths: list[Path],
+    *,
+    root: Path,
+    max_file_bytes: int | None,
+    hash_db_path: Path | None,
+    fingerprints: dict[Path, str] | None = None,
+) -> dict[Path, str]:
+    """Map each duplicate path to the display path of its first occurrence.
+
+    ``fingerprints`` (path -> SHA-256) is filled as a side effect so the
+    scan-cache key and the item ``sha256`` reuse these digests instead of
+    hashing every file a second time.
+    """
     hash_db = _load_hash_db(hash_db_path)
     seen = hash_db.setdefault("hashes", {}) if hash_db is not None else {}
     if not isinstance(seen, dict):
@@ -84,7 +109,7 @@ def _duplicate_map(paths: list[Path], *, root: Path, max_file_bytes: int | None,
                     continue
             except OSError:
                 continue
-        fingerprint = _file_fingerprint(path)
+        fingerprint = _content_sha256(path, fingerprints)
         if not fingerprint:
             continue
         display_path = _display_path(path, root=root)
@@ -158,39 +183,123 @@ def _write_hash_db(hash_db_path: Path | None, hash_db: dict[str, object]) -> Non
 def _cache_key(
     path: Path,
     *,
-    root: Path,
+    root: Path | None = None,
     text_bytes: int,
     metadata_bytes: int,
     pixel_mode: str,
     pixel_max_side: int,
     heatmaps: bool,
-    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
+    model_path: ModelPathArg,
     deep_signals: bool = False,
     provenance: str = "",
+    fingerprints: dict[Path, str] | None = None,
+    scan_context: str | None = None,
 ) -> str:
-    try:
-        stat = path.stat()
-        relative = str(path.relative_to(root))
-    except OSError:
-        return str(path)
-    if isinstance(model_path, (list, tuple)):
-        model_marker = ";".join(str(Path(entry).resolve()) for entry in model_path)
-    else:
-        model_marker = str(Path(model_path).resolve()) if model_path else ""
+    """Content-addressed cache key (G11).
+
+    key = SHA-256(file bytes) + hash(analysis options) + tool version +
+    sorted profile-pin list (+ threshold/weights provenance). Path, size
+    and mtime are deliberately absent: a same-size edit whose mtime was
+    restored must miss (QA-IN-4), and a renamed folder must still hit.
+    ``root`` is accepted for call-site compatibility and ignored. Returns
+    "" (never cacheable) when the file cannot be read.
+    """
+    del root
+    digest = _content_sha256(path, fingerprints)
+    if not digest:
+        return ""
+    options = json.dumps(
+        {
+            "text_bytes": int(text_bytes),
+            "metadata_bytes": int(metadata_bytes),
+            "pixel_mode": pixel_mode,
+            "pixel_max_side": int(pixel_max_side),
+            "heatmaps": bool(heatmaps),
+            "deep_signals": bool(deep_signals),
+            "model_profiles": model_path_digest(model_path),
+        },
+        sort_keys=True,
+    )
+    context = scan_context if scan_context is not None else _cache_scan_context(model_path)
     return "|".join(
         [
-            relative,
-            str(stat.st_size),
-            str(int(stat.st_mtime_ns)),
-            str(text_bytes),
-            str(metadata_bytes),
-            pixel_mode,
-            str(pixel_max_side),
-            str(bool(heatmaps)),
-            model_marker,
-            str(bool(deep_signals)),
-            # Threshold/weights/tool provenance — a cached score computed
-            # under different calibration or coverage must never replay.
-            provenance,
+            CACHE_KEY_VERSION,
+            f"sha256:{digest}",
+            f"opts:{_short_digest(options)}",
+            context,
+            # Threshold/weights provenance — a cached verdict computed under
+            # different calibration or coverage must never replay.
+            f"prov:{_short_digest(provenance)}",
         ]
     )
+
+
+def _short_digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
+
+
+def _content_sha256(path: Path, fingerprints: dict[Path, str] | None = None) -> str:
+    """SHA-256 of ``path``'s bytes, memoized per scan in ``fingerprints``.
+
+    The memo lives only for one scan (``_scan_specs`` creates it), so a file
+    rewritten between scans is always re-read — never trusted by its size
+    or mtime (G11, QA-IN-4).
+    """
+    if fingerprints is not None:
+        known = fingerprints.get(path)
+        if known:
+            return known
+    digest = _file_fingerprint(path)
+    if digest and fingerprints is not None:
+        fingerprints[path] = digest
+    return digest
+
+
+# Bumped whenever the key layout changes so entries written under an older
+# layout (the path+size+mtime keys before G11) can never match.
+CACHE_KEY_VERSION = "content-v2"
+
+
+def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | None = None) -> str:
+    """Per-scan part of every cache key: tool version + model pins.
+
+    Computed once per scan (reading every profile per file would be
+    wasteful) and passed to ``_cache_key`` as ``scan_context``. Unpinned
+    profiles contribute ``unpinned:<name>``, so pinning or re-pinning a
+    profile invalidates the verdicts cached under the old weights.
+    """
+    from .core import TOOL_VERSION
+
+    tokens = pin_tokens(profile_pins(models_dir, model_path))
+    return f"tool:{TOOL_VERSION}|pins:{_short_digest(chr(10).join(tokens))}"
+
+
+def _cached_scan_item(cached: object, path: Path, *, root: Path) -> ScanItem | None:
+    """Rebuild a cached row for the file at ``path``, or None to re-analyze.
+
+    The key is content-only, so the stored row may come from a file with the
+    same bytes elsewhere (or from before a folder rename): path and name are
+    rewritten to the current file. A row whose heatmap no longer exists is a
+    miss rather than a replay with a dead link.
+    """
+    if not isinstance(cached, dict):
+        return None
+    from .serialization import _scan_item_from_json
+
+    try:
+        item = _scan_item_from_json(cached)
+    except (ValueError, TypeError, KeyError):
+        return None  # corrupt entry — re-analyze
+    pixel = item.result.pixel_analysis if item.result is not None else None
+    heatmap_path = getattr(pixel, "heatmap_path", None)
+    if heatmap_path and not Path(heatmap_path).is_file():
+        return None
+    return replace(item, path=_display_path(path, root=root), name=path.name)
+
+
+def _with_content_sha256(item: ScanItem, path: Path, fingerprints: dict[Path, str] | None) -> ScanItem:
+    """Record the analyzed file's SHA-256 on the row (reusing the scan memo)."""
+    if item.sha256:
+        return item
+    digest = _content_sha256(path, fingerprints)
+    return replace(item, sha256=digest) if digest else item
