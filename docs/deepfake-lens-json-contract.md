@@ -279,6 +279,14 @@ fails when a profile with `supported: true` — or no `supported` key — lacks
 `auroc_ci[0] < 0.85` (not applied to text; text needs `recall_at_fpr_0_01`)
 or a malformed `manifest_sha256`.
 
+A profile (or a `video-frames` profile's `inner`) that sets `score_bias`
+must also set `score_bias_in_sample` (bool): `true` when the bias was chosen
+on the same rows its reported numbers were measured on (G28), with a Korean
+`score_bias_note`. `scripts/sync_model_docs.py` shows it in the
+`표본 내 보정(G28)` column of `deepfake_lens/models/README.md`. Today
+`sbi-effnet` and `sbi-frames` are `true` (score_bias=35 fitted on the
+evaluation crops).
+
 ### Evaluation outputs
 
 `deepfake-lens eval`/`benchmark`/`calibrate`/`fusion` and

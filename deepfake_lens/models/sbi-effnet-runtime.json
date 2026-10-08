@@ -28,6 +28,8 @@
     "Training on FFHQ only produced a cross-domain FPR of ~0.67 on old/damaged portraits; adding 62 diverse real faces dropped it to ~0.07 — see FACESWAP_EVALUATION.md."
   ],
   "score_bias": 35,
+  "score_bias_in_sample": true,
+  "score_bias_note": "score_bias=35는 성능을 보고한 바로 그 평가 얼굴 크롭(147개 held-out 크롭, 2026-09-20 평가)에서 골라 맞춘 값이다(표본 내 적합, G28). 이 바이어스로 낸 FPR/recall 수치는 낙관 편향이 있으므로, 독립된 테스트 분할에서 바이어스를 다시 고르고 측정하기 전에는 성능 근거로 쓰지 않는다.",
   "pin": {
     "sha256": ""
   },

@@ -100,19 +100,28 @@ def _measured(profile: dict) -> str:
     return "없음"
 
 
+def _in_sample(profile: dict) -> str:
+    """G28: a calibration value (score_bias) fitted on the evaluation data."""
+    target = _target(profile)
+    for candidate in (profile, target):
+        if candidate.get("score_bias_in_sample") is True:
+            return f"예 (score_bias={candidate.get('score_bias', '?')})"
+    return "—"
+
+
 def _cell(text: str) -> str:
     return text.replace("|", "\\|").replace("\n", " ")
 
 
 def readme_block(profiles: list[tuple[str, dict]]) -> str:
     lines = [
-        "| 프로필 | 검출기 | 모달리티 | 런타임 | 가중치 | pin | supported | measured_on |",
-        "|---|---|---|---|---|---|---|---|",
+        "| 프로필 | 검출기 | 모달리티 | 런타임 | 가중치 | pin | supported | measured_on | 표본 내 보정(G28) |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for name, profile in profiles:
         lines.append(
             f"| `{name}` | {_cell(str(profile.get('name') or name))} | {_modality(profile)} | `{_runtime(profile)}` "
-            f"| {_weights(profile)} | {_pin_status(profile)} | {_supported(profile)} | {_measured(profile)} |"
+            f"| {_weights(profile)} | {_pin_status(profile)} | {_supported(profile)} | {_measured(profile)} | {_in_sample(profile)} |"
         )
     return "\n".join(lines)
 

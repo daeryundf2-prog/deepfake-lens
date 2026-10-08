@@ -97,6 +97,25 @@ class CommittedProfilesTest(unittest.TestCase):
                 self.assertFalse((MODELS_DIR / name).exists())
                 self.assertIn(f"`{name}`", rejections)
 
+    def test_in_sample_score_bias_is_declared_and_shown(self) -> None:
+        """G28: every score_bias says whether it was fitted on the evaluation
+        data; the SBI bias was (in-sample) and the generated README says so."""
+        readme = (MODELS_DIR / "README.md").read_text(encoding="utf-8")
+        for name, profile in self._profiles().items():
+            for target in (profile, profile.get("inner") or {}):
+                if "score_bias" not in target:
+                    continue
+                with self.subTest(profile=name):
+                    self.assertIsInstance(target.get("score_bias_in_sample"), bool, "score_bias needs score_bias_in_sample")
+                    if target["score_bias_in_sample"]:
+                        note = str(target.get("score_bias_note") or "")
+                        self.assertIn("표본 내", note)
+                        self.assertIn("G28", note)
+                        row = next(line for line in readme.splitlines() if line.startswith(f"| `{name}`"))
+                        self.assertTrue(row.rstrip().endswith(f"예 (score_bias={target['score_bias']}) |"), row)
+        sbi = self._profiles()["sbi-effnet-runtime.json"]
+        self.assertIs(sbi["score_bias_in_sample"], True)
+
     def test_generated_model_docs_match_profiles(self) -> None:
         """G9: models/README.md, NOTICE.md and the registry's profile block
         are generated from the profiles (scripts/sync_model_docs.py --check)."""
