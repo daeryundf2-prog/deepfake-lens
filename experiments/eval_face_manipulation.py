@@ -20,7 +20,10 @@ social-media transcode simulation), half (50% resize).
 
 Metrics come from deepfake_lens.evaluation_metrics: AUROC, EER,
 threshold@FPR, plus a coverage rate — crop_faces skips face-free samples,
-and skipped-vs-scored is reported rather than silently treated as 0.
+and skipped-vs-scored is reported rather than silently treated as 0. Every
+AUROC/recall/FPR carries a 95% bootstrap CI and n_pos/n_neg (G26); scores
+are the member's raw, uncalibrated output (ExternalModelAnalysis.score).
+The default profile lives in deepfake_lens.cli.default_models_dir() (G27).
 """
 
 from __future__ import annotations
@@ -36,7 +39,8 @@ sys.path.insert(0, str(REPO_ROOT))
 
 import numpy as np  # noqa: E402
 
-from deepfake_lens.evaluation_metrics import auroc, eer, threshold_at_fpr  # noqa: E402
+from deepfake_lens.cli import default_models_dir  # noqa: E402
+from deepfake_lens.evaluation_metrics import auroc, ci_summary, eer, format_ci, threshold_at_fpr  # noqa: E402
 from deepfake_lens.model_adapter import analyze_external_model  # noqa: E402
 from experiments.sbi import DISTORTIONS, _apply_distortion, gaussian_blur  # noqa: E402
 
@@ -123,7 +127,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--real-dir", type=Path, required=True, help="Directory of real face images (label 0)")
     parser.add_argument("--fake-dir", type=Path, help="Optional directory of known-fake faces (label 1)")
-    parser.add_argument("--profile", type=Path, default=REPO_ROOT / "models/face-manipulation-vit-runtime.json")
+    parser.add_argument("--profile", type=Path, default=default_models_dir() / "face-manipulation-vit-runtime.json")
     parser.add_argument("--variants", default="original,jpeg75,half", help="Comma list of: original,jpeg75,half")
     parser.add_argument("--sbi-per-real", type=int, default=1, help="SBI manipulations synthesized per real image")
     parser.add_argument("--seed", type=int, default=0)
@@ -192,6 +196,15 @@ def main() -> int:
             out["accuracy_at_50"] = round(correct / len(scored), 4)
             out["fpr_at_50"] = round(sum(1 for s, l in scored if s >= 50 and l == 0) / max(1, sum(1 for _, l in scored if l == 0)), 4)
             out["recall_at_50"] = round(sum(1 for s, l in scored if s >= 50 and l == 1) / max(1, sum(1 for _, l in scored if l == 1)), 4)
+            ci = ci_summary([s for s, _ in scored], [l for _, l in scored], threshold=50.0)
+            out.update(
+                n_pos=ci["n_pos"],
+                n_neg=ci["n_neg"],
+                auroc_ci=ci["auroc_ci"],
+                fpr_at_50_ci=ci["fpr_at_threshold_ci"],
+                recall_at_50_ci=ci["recall_at_threshold_ci"],
+                score_basis="raw, uncalibrated",
+            )
         return out
 
     report = {
@@ -211,11 +224,20 @@ def main() -> int:
     overall = report["overall"]
     print(f"samples={overall['n']} scored={overall['scored']} skipped={overall['skipped']} coverage={overall['coverage']}")
     if "auroc" in overall:
-        print(f"auroc={overall['auroc']} eer={overall['eer']} acc@50={overall['accuracy_at_50']} fpr@50={overall['fpr_at_50']} recall@50={overall['recall_at_50']}")
+        print(
+            f"(raw, uncalibrated) n_pos={overall['n_pos']} n_neg={overall['n_neg']} "
+            f"auroc={format_ci(overall['auroc'], overall['auroc_ci'])} eer={overall['eer']} acc@50={overall['accuracy_at_50']} "
+            f"fpr@50={format_ci(overall['fpr_at_50'], overall['fpr_at_50_ci'])} "
+            f"recall@50={format_ci(overall['recall_at_50'], overall['recall_at_50_ci'])}"
+        )
     for name, sub in report["by_variant"].items():
         line = f"  {name}: n={sub['n']} coverage={sub['coverage']}"
         if "auroc" in sub:
-            line += f" auroc={sub['auroc']} recall@50={sub['recall_at_50']} fpr@50={sub['fpr_at_50']}"
+            line += (
+                f" n_pos={sub['n_pos']} n_neg={sub['n_neg']} auroc={format_ci(sub['auroc'], sub['auroc_ci'])}"
+                f" recall@50={format_ci(sub['recall_at_50'], sub['recall_at_50_ci'])}"
+                f" fpr@50={format_ci(sub['fpr_at_50'], sub['fpr_at_50_ci'])}"
+            )
         print(line)
     print(f"report -> {args.report}")
     return 0

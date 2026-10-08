@@ -12,7 +12,7 @@ import csv
 import sys
 from pathlib import Path
 
-from .calibration import MIN_CALIBRATION_SAMPLES, load_threshold_profile
+from .calibration import IN_SAMPLE_LABEL, MIN_CALIBRATION_SAMPLES, load_threshold_profile
 from .result_text import (
     TEXT_LEGAL_LIMITATION,
     coverage_counts_text,
@@ -74,6 +74,12 @@ def _load_thresholds_arg(args: argparse.Namespace):
             f"({profile.provisional_reason}); thresholds are unvalidated",
             file=sys.stderr,
         )
+    if profile is not None and profile.in_sample:
+        print(
+            f"warning: threshold profile {path} is {IN_SAMPLE_LABEL} — cutoffs were fitted on the rows "
+            "they were evaluated on (G28); treat as reference only",
+            file=sys.stderr,
+        )
     return profile
 
 
@@ -118,6 +124,9 @@ def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage:
             print(f"!! 신경망 가중치 부분 탑재 ({wa}/{wc}) — 일부 뉴럴 엔진이 실행되지 않았습니다 !!")
     if thresholds is not None and getattr(thresholds, "provisional", False):
         print("!! 판정 임계값: 미측정 잠정값 — 표본 코퍼스 캘리브레이션 전까지 상대 우선순위로만 해석하세요 !!")
+    if thresholds is not None and getattr(thresholds, "in_sample", False):
+        # G28: fitted and evaluated on the same rows — reference only.
+        print(f"!! 판정 임계값: {IN_SAMPLE_LABEL} — 적합에 쓴 같은 표본에서 평가된 값이라 감정 근거가 아닙니다 !!")
     cap_note = " (cap reached)" if summary.capped else ""
     print(summary_line(summary) + cap_note)
     print(
@@ -169,12 +178,14 @@ def _write_csv(path: Path, items: list[ScanItem], *, coverage: dict[str, object]
                 "provisional": getattr(thresholds, "provisional", True),
                 "samples": getattr(thresholds, "samples", 0),
                 "dataset_fingerprint": getattr(thresholds, "dataset_fingerprint", ""),
+                "in_sample": getattr(thresholds, "in_sample", False),
                 "source": "profile",
             }
             if tp.get("source") == "builtin_defaults":
                 handle.write("# thresholds_source=builtin_defaults provisional=true\n")
             else:
-                handle.write(f"# thresholds_source=profile:{tp.get('version')} provisional={tp.get('provisional')} samples={tp.get('samples')} fingerprint={tp.get('dataset_fingerprint')}\n")
+                in_sample = f" in_sample=true label={IN_SAMPLE_LABEL}" if tp.get("in_sample") else ""
+                handle.write(f"# thresholds_source=profile:{tp.get('version')} provisional={tp.get('provisional')} samples={tp.get('samples')} fingerprint={tp.get('dataset_fingerprint')}{in_sample}\n")
         else:
             handle.write("# thresholds_source=builtin_defaults provisional=true\n")
         writer = csv.writer(handle)

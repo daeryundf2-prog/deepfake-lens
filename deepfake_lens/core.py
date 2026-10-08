@@ -1533,6 +1533,8 @@ def _thresholds_json(thresholds: object | None) -> dict[str, object]:
     ThresholdProfile additionally reports its sample count and provisional
     flag so downstream consumers can tell measured cutoffs from defaults.
     """
+    from .calibration import threshold_display_label
+
     if thresholds is None:
         return {"source": "builtin_defaults", "provisional": True, "measured": False}
     to_json = getattr(thresholds, "to_json", None)
@@ -1547,6 +1549,11 @@ def _thresholds_json(thresholds: object | None) -> dict[str, object]:
         "dataset_fingerprint": str(payload.get("dataset_fingerprint", "")),
         "measured_at": str(payload.get("measured_at", "")),
         "measured": not bool(payload.get("provisional", True)),
+        # G28: cutoffs fitted on the rows they were evaluated on are shown
+        # as "in-sample(참고)" (calibration.threshold_display_label).
+        "in_sample": bool(payload.get("in_sample", False)),
+        "note": str(payload.get("note", "") or ""),
+        "label": threshold_display_label(payload),
     }
 
 

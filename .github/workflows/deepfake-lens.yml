@@ -139,6 +139,25 @@ jobs:
       - name: Verify vendored contracts against PIN.json
         run: python scripts/verify_contracts.py
 
+  measurement-gate:
+    # Phase 0, WP-I (G26/G28, QA-SYS-9): every runtime profile that is
+    # supported (or omits `supported`) must carry a `measured_on` record from
+    # the test split of a corpus-manifest-v1 corpus with n_pos/n_neg >= 200
+    # and an AUROC 95% CI lower bound >= 0.85 (text: recall_at_fpr_0_01, no
+    # AUROC floor). Adding an unmeasured active profile fails this job.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install package (stdlib-only)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Check shipped profiles against the measurement gate
+        run: python scripts/check_measurement_gate.py --models-dir deepfake_lens/models
+
   registry-links:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

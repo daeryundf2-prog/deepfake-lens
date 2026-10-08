@@ -43,7 +43,7 @@ per-file coverage record:
 | `schema_version` | stable | Integer, currently `2`. |
 | `summary` | stable | `BatchScanSummary` counts (see below). |
 | `coverage` | stable | Weight availability for the run (`weights_available`, `weights_total`, …). Not to be confused with per-item `result.coverage`. |
-| `thresholds` | stable | Threshold provenance (`source`, `provisional`, `measured`, …). |
+| `thresholds` | stable | Threshold provenance (`source`, `provisional`, `measured`, …). A loaded profile also reports `in_sample` (cutoffs fitted on the rows they were evaluated on — G28), `note`, and `label` (`"in-sample(참고)"`, `"측정됨"`, `"잠정(미검증)"`). |
 | `items` | stable | Per-file scan items, conclusions first: manipulation evidence, then undetermined, then authenticity evidence, then unanalyzed rows. |
 
 ### `summary`
@@ -152,6 +152,63 @@ Evaluated in order; the first that applies wins.
 Reading a v1 record: missing v2 fields load as `verdict_code:
 "undetermined"`, `grade: "evidence"`, empty `evidence`/`coverage`; the
 stored v1 `band` is kept verbatim but is not a verdict.
+
+## Measurement records (phase 0, WP-I — G26/G27/G28)
+
+These shapes are not part of the scan payload but are contracts between
+the evaluation tooling, the shipped model profiles and CI.
+
+### Corpus manifest (`corpus-manifest-v1`)
+
+Written by `deepfake-lens corpus build`, re-split by `corpus split`,
+checked by `corpus verify` (`deepfake_lens/corpus_manifest.py`). Schema:
+[`contracts/corpus-manifest-v1.schema.json`](../contracts/corpus-manifest-v1.schema.json).
+
+| Field | Meaning |
+| --- | --- |
+| `schema` | `"corpus-manifest-v1"`. |
+| `corpus_id` | Human identifier (default: corpus directory name). Not hashed. |
+| `created` | UTC ISO-8601 build time. Not hashed. |
+| `items[]` | One per file: `id` (16 hex of SHA-256 over `relpath`), `relpath` (POSIX, relative to the corpus root), `sha256` (file content), `modality` (`image`/`video`/`audio`/`document`/`text`), `label` (`real`/`synthetic`/`edited`; `null` only while unlabeled), `generator`, `variant` (`original`, `kakao`, `telegram`, `instagram`, `jpeg_q50`, …), `split` (`train`/`val`/`test`; `null` before `corpus split`), `source_note`, `derived_from` (item id, relpath or 64-hex sha256 of the original; `null` for originals). |
+| `manifest_sha256` | SHA-256 of the canonical items JSON: items sorted by `id`, exactly the item fields above, `sort_keys`, separators `(",", ":")`, UTF-8 without ASCII escaping. Changes when any item or split assignment changes. |
+| `root_hint` | Optional; where `verify` looks for the files. Not hashed. |
+
+`corpus build --label-from-dir` reads `<label>/<generator>/<variant>/<file>`
+and links a variant to `<label>/<generator>/original/<same stem>.*` through
+`derived_from`. `corpus split --group-by origin` (default) keeps every item
+that derives from one original — and exact duplicates — in one split.
+
+### Profile `measured_on`
+
+Every `deepfake_lens/models/*-runtime.json` may carry `measured_on`
+(object or `null`):
+
+| Key | Meaning |
+| --- | --- |
+| `corpus_id`, `manifest_sha256` | The corpus manifest measured on (`manifest_sha256` is 64 lowercase hex). |
+| `split` | Must be `"test"`. |
+| `n_pos`, `n_neg` | Class counts actually scored. |
+| `auroc`, `auroc_ci` | AUROC and its 95% stratified bootstrap interval `[lo, hi]` (`evaluation_metrics.bootstrap_ci`, n_boot 2000). |
+| `fpr_at_threshold`, `recall_at_threshold` | At the profile's operating threshold. |
+| `measured_at` | UTC ISO-8601. |
+| `recall_at_fpr_0_01` | Required for text members only. |
+
+`scripts/check_measurement_gate.py` (CI job `measurement-gate`, QA-SYS-9)
+fails when a profile with `supported: true` — or no `supported` key — lacks
+`measured_on`, or has `split != "test"`, `n_pos < 200`, `n_neg < 200`,
+`auroc_ci[0] < 0.85` (not applied to text; text needs `recall_at_fpr_0_01`)
+or a malformed `manifest_sha256`.
+
+### Evaluation outputs
+
+`deepfake-lens eval`/`benchmark`/`calibrate`/`fusion` and
+`experiments/eval_*.py` score **raw member outputs** (external model raw
+0-100 score, else a statistical evidence item's `raw_score`, else the pixel
+heuristic's raw score), never `result.score` — which is 0 for every
+uncalibrated v2 result — and say so with `score_basis: "raw, uncalibrated"`.
+Every AUROC/recall/FPR is accompanied by `*_ci` (95% bootstrap interval),
+`n_pos`, `n_neg` and `ci_method`. Rows with no raw member score are
+`predicted: "unscored"` and excluded from metrics (`unscored_count`).
 
 ## Versioning rules
 

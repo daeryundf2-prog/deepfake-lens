@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/deepfake-lens/contracts/corpus-manifest-v1.schema.json",
+  "title": "deepfake-lens corpus manifest v1",
+  "description": "Reproducible evaluation corpus (phase 0, WP-I, G27). manifest_sha256 = SHA-256 of the canonical items JSON (sorted by id, item fields only, sort_keys, separators (',', ':'), UTF-8). Written by `deepfake-lens corpus build`, checked by `corpus verify`.",
+  "type": "object",
+  "required": ["schema", "corpus_id", "created", "items", "manifest_sha256"],
+  "properties": {
+    "schema": {"const": "corpus-manifest-v1"},
+    "corpus_id": {"type": "string", "minLength": 1},
+    "created": {"type": "string"},
+    "root_hint": {"type": "string"},
+    "manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "items": {"type": "array", "items": {"$ref": "#/$defs/item"}}
+  },
+  "$defs": {
+    "item": {
+      "type": "object",
+      "required": ["id", "relpath", "sha256", "modality", "label", "generator", "variant", "split", "source_note"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "relpath": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "modality": {"enum": ["image", "video", "audio", "document", "text"]},
+        "label": {"enum": ["real", "synthetic", "edited", null]},
+        "generator": {"type": "string"},
+        "variant": {"type": "string"},
+        "split": {"enum": ["train", "val", "test", null]},
+        "source_note": {"type": "string"},
+        "derived_from": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

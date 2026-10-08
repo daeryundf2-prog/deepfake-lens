@@ -12,7 +12,12 @@ screen rates, NOT accuracy/AUROC. Pair with a licensed real set (e.g.
 RAISE-1k) under fixtures/modern-bench/ for a calibrated metric.
 
 Usage:
-    python experiments/eval_synthbuster.py [--per-gen 100] [--profile models/aide-runtime.json]
+    python experiments/eval_synthbuster.py [--per-gen 100] [--profile <models_dir>/aide-runtime.json]
+
+Scores are the member's raw, uncalibrated output (ExternalModelAnalysis.score),
+not probabilities; the default profile is resolved through
+deepfake_lens.cli.default_models_dir() (G27). Screen rates come with a 95%
+bootstrap CI (G26).
 """
 
 from __future__ import annotations
@@ -24,7 +29,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from deepfake_lens.model_adapter import analyze_external_model
+from deepfake_lens.cli import default_models_dir  # noqa: E402
+from deepfake_lens.evaluation_metrics import bootstrap_ci  # noqa: E402
+from deepfake_lens.model_adapter import analyze_external_model  # noqa: E402
 
 DATASET = Path("public_datasets/synthbuster")
 
@@ -34,7 +41,7 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser()
     ap.add_argument("--per-gen", type=int, default=100)
-    ap.add_argument("--profile", default="models/aide-runtime.json")
+    ap.add_argument("--profile", default=str(default_models_dir() / "aide-runtime.json"))
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--root", default=str(DATASET))
     args = ap.parse_args()
@@ -45,8 +52,8 @@ def main() -> int:
         return 2
 
     gens = sorted(p for p in root.iterdir() if p.is_dir())
-    print(f"profile={args.profile} per_gen={args.per_gen} generators={len(gens)}\n")
-    print(f"{'generator':<22} {'n':>5} {'mean':>6} {'>50':>6}")
+    print(f"profile={args.profile} per_gen={args.per_gen} generators={len(gens)} (raw, uncalibrated)\n")
+    print(f"{'generator':<22} {'n':>5} {'mean':>6} {'>50':>6}  95% CI")
     for gen in gens:
         images = sorted(gen.glob("*.png"))
         random.Random(args.seed).shuffle(images)
@@ -63,7 +70,12 @@ def main() -> int:
             continue
         mean = sum(scores) / len(scores)
         rate = sum(1 for s in scores if s > 50) / len(scores)
-        print(f"{gen.name:<22} {len(scores):>5} {mean:>6.1f} {rate:>6.1%}")
+        # Screen rate = share of generated images above 50; bootstrapped as
+        # an "FPR" over a single class (labels all 0) — strict > 50 matches
+        # the rate above via a threshold just above 50.
+        ci = bootstrap_ci([float(s) for s in scores], [0] * len(scores), "fpr_at_threshold", threshold=50.0 + 1e-9)
+        ci_text = f"[{ci[0]:.1%}, {ci[1]:.1%}]" if ci else "-"
+        print(f"{gen.name:<22} {len(scores):>5} {mean:>6.1f} {rate:>6.1%}  {ci_text}")
     return 0
 
 

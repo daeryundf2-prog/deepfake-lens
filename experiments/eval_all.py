@@ -12,8 +12,16 @@ Corpus layout (each modality dir is optional):
       face/real/   [face/fake/]   # like eval_face_manipulation: real images get
                                   # an SBI fake synthesized for the positive class
 
-Per-member metrics: availability, AUROC, EER, FPR@50, recall@50, skipped.
+Per-member metrics: availability, AUROC, EER, FPR@50, recall@50, skipped —
+every AUROC/recall/FPR with a 95% stratified bootstrap CI and n_pos/n_neg
+(G26). Scores are each member's raw, uncalibrated 0-100 output
+(``ExternalModelAnalysis.score``), never ``ClassificationResult.score``,
+which is 0 for every uncalibrated result under contract v2.
 The ensemble row aggregates every available member of the modality.
+
+Profiles are read from ``deepfake_lens.cli.default_models_dir()`` (the
+packaged ``deepfake_lens/models`` or ``$DEEPFAKE_LENS_MODELS_DIR``); the
+repo-root ``models/`` this script used to read no longer exists (G27).
 
 Members are matched to the modality via each profile's ``modality`` field;
 profiles whose members can't run (missing checkpoints/deps) degrade to
@@ -31,8 +39,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from deepfake_lens.evaluation_metrics import auroc, eer, threshold_at_fpr  # noqa: E402
+from deepfake_lens.cli import default_models_dir  # noqa: E402
+from deepfake_lens.evaluation_metrics import auroc, ci_summary, eer, format_ci, threshold_at_fpr  # noqa: E402
 from deepfake_lens.model_adapter import analyze_external_model  # noqa: E402
+
+SCORE_BASIS = "raw, uncalibrated"
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".webp"}
 AUDIO_SUFFIXES = {".wav", ".mp3", ".flac", ".ogg", ".m4a"}
@@ -55,7 +66,7 @@ def _profiles_for(modality: str) -> tuple[list[Path], list[str]]:
     """
     from deepfake_lens.model_adapter import _profile_modality
 
-    models_dir = REPO_ROOT / "models"
+    models_dir = default_models_dir()
     out, skipped = [], []
     for path in sorted(models_dir.glob("*.json")):
         try:
@@ -97,7 +108,11 @@ def _synthesize_sbi_fakes(real_dir: Path, out_dir: Path, limit: int) -> list[Pat
 
 
 def _score_member(path: Path, profile: Path, modality: str) -> tuple[int, bool]:
-    """Return (score 0-100, available)."""
+    """Return (raw uncalibrated member score 0-100, available).
+
+    ``ExternalModelAnalysis.score`` is the member's raw output; it is not a
+    probability and is evaluated as such.
+    """
     try:
         result = analyze_external_model(path, profile, modality=modality)
     except Exception:
@@ -121,13 +136,20 @@ def _metrics(pairs: list[tuple[float, int]]) -> dict:
         "thr_at_fpr1": threshold_at_fpr(pairs, 0.01),
         "thr_at_fpr5": threshold_at_fpr(pairs, 0.05),
     }
-    at50 = [(s, l) for s, l in pairs if True]
-    row["fpr_at_50"] = (
-        sum(1 for s, l in at50 if s >= 50 and l == 0) / n_neg if n_neg else None
-    )
-    row["recall_at_50"] = (
-        sum(1 for s, l in at50 if s >= 50 and l == 1) / n_pos if n_pos else None
-    )
+    ci = ci_summary([float(s) for s, _ in pairs], [int(l) for _, l in pairs], threshold=50.0)
+    row.update({
+        "n_pos": n_pos,
+        "n_neg": n_neg,
+        "auroc_ci": ci["auroc_ci"],
+        "fpr_at_50": ci["fpr_at_threshold"],
+        "fpr_at_50_ci": ci["fpr_at_threshold_ci"],
+        "recall_at_50": ci["recall_at_threshold"],
+        "recall_at_50_ci": ci["recall_at_threshold_ci"],
+        "recall_at_fpr_0_01": ci["recall_at_fpr"],
+        "recall_at_fpr_0_01_ci": ci["recall_at_fpr_ci"],
+        "ci_method": ci["ci_method"],
+        "score_basis": SCORE_BASIS,
+    })
     return row
 
 
@@ -188,15 +210,19 @@ def _md_table(report: dict) -> str:
             continue
         lines.append(f"## {block['modality']} — {block['samples']} samples "
                      f"({block['real']} real / {block['fake']} fake)")
-        lines.append("| member | avail | AUROC | EER | FPR@50 | recall@50 | thr@FPR5% |")
-        lines.append("|---|---|---|---|---|---|---|")
+        lines.append(f"점수 기준: {SCORE_BASIS} (멤버 원점수, 확률 아님). 괄호 안은 95% 부트스트랩 신뢰구간.")
+        lines.append("")
+        lines.append("| member | avail | n_pos | n_neg | AUROC [95% CI] | EER | FPR@50 [95% CI] | recall@50 [95% CI] | thr@FPR5% |")
+        lines.append("|---|---|---|---|---|---|---|---|---|")
         for m in block["members"]:
             def f(v, pct=True):
                 return "-" if v is None else (f"{v:.2f}" if pct else str(v))
             lines.append(
                 f"| {m['profile']} | {m['available']}/{m['available']+m.get('skipped',0)} | "
-                f"{f(m.get('auroc'))} | {f(m.get('eer'))} | "
-                f"{f(m.get('fpr_at_50'))} | {f(m.get('recall_at_50'))} | "
+                f"{m.get('n_pos', 0)} | {m.get('n_neg', 0)} | "
+                f"{format_ci(m.get('auroc'), m.get('auroc_ci'), 2)} | {f(m.get('eer'))} | "
+                f"{format_ci(m.get('fpr_at_50'), m.get('fpr_at_50_ci'), 2)} | "
+                f"{format_ci(m.get('recall_at_50'), m.get('recall_at_50_ci'), 2)} | "
                 f"{f(m.get('thr_at_fpr5'), pct=False)} |")
         lines.append("")
     return "\n".join(lines)
@@ -214,7 +240,9 @@ def main() -> int:
     args = parser.parse_args()
 
     modalities = [m.strip() for m in args.modality.split(",") if m.strip()]
-    report = {"corpus": str(args.corpus), "modalities": []}
+    report = {"corpus": str(args.corpus), "score_basis": SCORE_BASIS,
+              "models_dir": str(default_models_dir()), "modalities": []}
+    print(f"[eval_all] score basis: {SCORE_BASIS} (member raw scores, not probabilities)")
     for modality in modalities:
         print(f"[eval_all] {modality}...", flush=True)
         block = evaluate_modality(args.corpus, modality, args.sbi_limit,
@@ -225,8 +253,10 @@ def main() -> int:
             continue
         for m in block["members"]:
             print(f"  {m['profile']:<45s} avail={m['available']:<3d} "
-                  f"auroc={m.get('auroc')} fpr@50={m.get('fpr_at_50')} "
-                  f"recall@50={m.get('recall_at_50')}", flush=True)
+                  f"n_pos={m.get('n_pos', 0)} n_neg={m.get('n_neg', 0)} "
+                  f"auroc={format_ci(m.get('auroc'), m.get('auroc_ci'))} "
+                  f"fpr@50={format_ci(m.get('fpr_at_50'), m.get('fpr_at_50_ci'))} "
+                  f"recall@50={format_ci(m.get('recall_at_50'), m.get('recall_at_50_ci'))}", flush=True)
 
     if args.report:
         args.report.write_text(json.dumps(report, indent=2), encoding="utf-8")

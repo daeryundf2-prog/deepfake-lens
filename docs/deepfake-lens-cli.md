@@ -16,7 +16,8 @@ Every subcommand, briefly. Detail for the core workflow lives in the sections be
 - `scan <folder>`: folder screening with metadata + optional pixel ensemble and reports; `--sign` adds an HMAC-SHA256 `signature`/`signature_key_id` to `--json-out` (key via `--key-file` or `DEEPFAKE_LENS_REPORT_KEY`; proves integrity to the key holder, not legal non-repudiation — anyone holding the key can sign). `eval` and `benchmark` accept the same flags; `deepfake_lens.signing.verify_report(path, key)` verifies, and a missing key produces an unsigned report with a note rather than a failure.
 - `collect <folder> --out`: write a dataset collection plan.
 - `dataset <folder> --manifest-out`: labeled-dataset manifest, audit, split and robustness plans.
-- `eval <folder>`: labeled-dataset metrics (accuracy/precision/recall/FPR, AUROC, EER, per-split).
+- `corpus build <dir> --out manifest.json [--label-from-dir]` / `corpus split --manifest m.json --seed N --ratio 60/20/20 [--group-by <field>]` / `corpus verify --manifest m.json`: reproducible `corpus-manifest-v1` manifests (content hashes, label/generator/variant from `<label>/<generator>/<variant>/file`, train/val/test splits that keep every variant of one original together, re-hash check). See "Reproducible corpora and the measurement gate" below.
+- `eval <folder>`: labeled-dataset metrics (accuracy/precision/recall/FPR, AUROC, EER, per-split), each AUROC/recall/FPR with a 95% bootstrap CI and n_pos/n_neg, on raw uncalibrated member scores (`score_basis: "raw, uncalibrated"`).
 - `benchmark <folder>`: pixel-mode/model matrix benchmark.
 - `fusion <folder> --out` / `calibrate <folder> --out` / `train <folder> --out`: fusion profile, threshold calibration, portable baseline.
 - `feedback <labels.jsonl>`: join examiner verdicts (`{path, expected_label, notes?}`) to a prior `--scan-json` payload or a live rescan; emits a per-signal accuracy report and an advisory `--profile-out` fusion-weight suggestion (never applied automatically; thresholds are left unchanged).
@@ -227,6 +228,26 @@ python scripts/build_synthetic_dataset.py --out /tmp/dfl-smoke-dataset --per-spl
 python scripts/build_robustness_variants.py --root /tmp/dfl-smoke-dataset --out /tmp/dfl-smoke-variants
 python -m deepfake_lens eval /tmp/dfl-smoke-variants --pixel deep --robustness --json-out /tmp/dfl-smoke-robustness.json
 ```
+
+## Reproducible corpora and the measurement gate
+
+Phase 0 (WP-I): a performance number is evidence only when it names the
+exact files it was measured on. Lay a corpus out as
+`<label>/<generator>/<variant>/<file>` (label `real`/`synthetic`/`edited`;
+`python scripts/build_corpus_template.py --out corpora/` creates the five
+phase-1 track skeletons T-IMG, T-VID, T-AUD, T-DOC, T-TXT), then:
+
+```sh
+python -m deepfake_lens corpus build corpora/T-IMG --out artifacts/t-img.json --label-from-dir --corpus-id t-img-2026q4
+python -m deepfake_lens corpus split --manifest artifacts/t-img.json --seed 20261009 --ratio 60/20/20
+python -m deepfake_lens corpus verify --manifest artifacts/t-img.json
+```
+
+`manifest_sha256` covers every item (hash, label, split …); a profile that
+is `supported` must record it in `measured_on` together with test-split
+n_pos/n_neg (>= 200 each) and an AUROC 95% CI lower bound >= 0.85 —
+`python scripts/check_measurement_gate.py` enforces this in CI. Schema and
+field list: `docs/deepfake-lens-json-contract.md`.
 
 ## Model Registry
 
