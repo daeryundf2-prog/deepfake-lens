@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Fetch the official AASIST (Interspeech 2022) checkpoint with sha256 verification.
 
-Downloads `AASIST.pth` (~1.3 MB) into `models/` so the committed
-`models/aasist-runtime.json` profile can drive audio scans. The checkpoint
+Downloads `AASIST.pth` (~1.3 MB) into the effective models dir
+(`deepfake_lens.cli.default_models_dir()`, G27) so the committed
+`aasist-runtime.json` profile can drive audio scans. The checkpoint
 is NOT committed to git (see .gitignore).
 
 Official distribution point: the checkpoint is committed inside the
@@ -32,7 +33,15 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DEST_DIR = REPO_ROOT / "models"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+# G27: weights land in the directory the scanner reads profiles and
+# checkpoints from — $DEEPFAKE_LENS_MODELS_DIR or the packaged
+# deepfake_lens/models — never a repo-root models/ nothing loads from.
+from deepfake_lens.cli import default_models_dir  # noqa: E402
+
+DEST_HELP = "destination directory (default: deepfake_lens.cli.default_models_dir() — $DEEPFAKE_LENS_MODELS_DIR or the packaged models dir)"
 DEFAULT_NAME = "aasist.pth"
 
 # Official checkpoint location: committed inside clovaai/aasist at
@@ -134,9 +143,9 @@ def download(url: str, dest: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Fetch the AASIST pretrained checkpoint into models/.")
+    parser = argparse.ArgumentParser(description="Fetch the AASIST pretrained checkpoint into the models dir.")
     parser.add_argument("--url", default=AASIST_CHECKPOINT_URL, help="direct checkpoint download URL (default: the official AASIST.pth raw link)")
-    parser.add_argument("--dest", type=Path, default=DEFAULT_DEST_DIR, help=f"destination directory (default: {DEFAULT_DEST_DIR})")
+    parser.add_argument("--dest", type=Path, default=None, help=DEST_HELP)
     parser.add_argument("--name", default=DEFAULT_NAME, help=f"destination filename (default: {DEFAULT_NAME})")
     parser.add_argument("--sha256", help="expected lowercase sha256 hex digest; the download fails if it does not match")
     parser.add_argument("--force", action="store_true", help="overwrite an existing destination file")
@@ -149,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
         if reconfigure is not None:
             reconfigure(encoding="utf-8", errors="replace")
 
-    dest_dir = Path(args.dest)
+    dest_dir = Path(args.dest) if args.dest else default_models_dir()
     dest = dest_dir / args.name
     part = dest.with_name(dest.name + ".part")
 
@@ -193,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
     part.replace(dest)
     print(f"sha256: {digest}" + (" (verified)" if expected else " (no --sha256 supplied; record this digest)"))
     print(f"saved {dest} ({dest.stat().st_size / (1024 ** 2):.2f} MiB)")
-    print("scans now auto-discover models/aasist-runtime.json; no extra flags needed.")
+    print(f"scans now auto-discover {dest_dir / 'aasist-runtime.json'} when it is the effective models dir ($DEEPFAKE_LENS_MODELS_DIR or packaged).")
     return 0
 
 

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Fetch the MediaPipe FaceLandmarker ``.task`` asset with sha256 verification.
 
-Downloads ``face_landmarker.task`` (~4 MB) into ``models/`` so the Tasks-API
+Downloads ``face_landmarker.task`` (~4 MB) into the effective models dir
+(``deepfake_lens.cli.default_models_dir()``, G27) so the Tasks-API
 path in ``deepfake_lens/face.py`` (``landmarks_source="mediapipe-facelandmarker"``)
 can run on mediapipe >= 0.10.30 / 1.x, where the legacy ``mp.solutions``
 FaceMesh API no longer exists. The asset is NOT committed to git (see
@@ -28,7 +29,15 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DEST_DIR = REPO_ROOT / "models"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+# G27: weights land in the directory the scanner reads profiles and
+# checkpoints from — $DEEPFAKE_LENS_MODELS_DIR or the packaged
+# deepfake_lens/models — never a repo-root models/ nothing loads from.
+from deepfake_lens.cli import default_models_dir  # noqa: E402
+
+DEST_HELP = "destination directory (default: deepfake_lens.cli.default_models_dir() — $DEEPFAKE_LENS_MODELS_DIR or the packaged models dir)"
 DEFAULT_NAME = "face_landmarker.task"
 
 FACELANDMARKER_MODEL_URL = (
@@ -78,9 +87,9 @@ def download(url: str, dest: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Fetch the FaceLandmarker .task asset into models/.")
+    parser = argparse.ArgumentParser(description="Fetch the FaceLandmarker .task asset into the models dir.")
     parser.add_argument("--url", default=FACELANDMARKER_MODEL_URL, help="direct model download URL")
-    parser.add_argument("--dest", type=Path, default=DEFAULT_DEST_DIR, help=f"destination directory (default: {DEFAULT_DEST_DIR})")
+    parser.add_argument("--dest", type=Path, default=None, help=DEST_HELP)
     parser.add_argument("--name", default=DEFAULT_NAME, help=f"destination filename (default: {DEFAULT_NAME})")
     parser.add_argument("--sha256", help="expected lowercase sha256 hex digest; the download fails if it does not match")
     parser.add_argument("--force", action="store_true", help="overwrite an existing destination file")
@@ -93,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         if reconfigure is not None:
             reconfigure(encoding="utf-8", errors="replace")
 
-    dest_dir = Path(args.dest)
+    dest_dir = Path(args.dest) if args.dest else default_models_dir()
     dest = dest_dir / args.name
     part = dest.with_name(dest.name + ".part")
 
@@ -123,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"downloaded {args.url}\n  -> {dest}")
     print(f"sha256: {digest} (no --sha256 supplied; record this digest)" if not args.sha256 else f"sha256: {digest} (verified)")
     print(f"saved {dest} ({size_mib:.2f} MiB)")
-    print("face.py auto-discovers models/face_landmarker.task; DEEPFAKE_LENS_FACE_LANDMARKER overrides the path.")
+    print("face.py auto-discovers face_landmarker.task in the effective models dir; DEEPFAKE_LENS_FACE_LANDMARKER overrides the path.")
     return 0
 
 

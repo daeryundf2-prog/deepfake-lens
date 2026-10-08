@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Fetch the official AIDE (ICLR 2025) checkpoint with sha256 verification.
 
-Downloads `progan_train.pth` (~3.3 GB) into `models/` so the committed
-`models/aide-runtime.json` profile can drive scans. The checkpoint is NOT
+Downloads `progan_train.pth` (~3.3 GB) into the effective models dir
+(`deepfake_lens.cli.default_models_dir()`, G27) so the committed
+`aide-runtime.json` profile can drive scans. The checkpoint is NOT
 committed to git (research license; see .gitignore).
 
 Official distribution point: the "Model Zoo" Google Drive folder linked from
@@ -36,7 +37,15 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DEST_DIR = REPO_ROOT / "models"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+# G27: weights land in the directory the scanner reads profiles and
+# checkpoints from — $DEEPFAKE_LENS_MODELS_DIR or the packaged
+# deepfake_lens/models — never a repo-root models/ nothing loads from.
+from deepfake_lens.cli import default_models_dir  # noqa: E402
+
+DEST_HELP = "destination directory (default: deepfake_lens.cli.default_models_dir() — $DEEPFAKE_LENS_MODELS_DIR or the packaged models dir)"
 DEFAULT_NAME = "aide_progan_train.pth"
 
 # Official checkpoint location from the AIDE README "Model Zoo" section.
@@ -137,9 +146,9 @@ def download(url: str, dest: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Fetch the AIDE progan_train checkpoint into models/.")
+    parser = argparse.ArgumentParser(description="Fetch the AIDE progan_train checkpoint into the models dir.")
     parser.add_argument("--url", default=AIDE_MODEL_ZOO_URL, help="direct checkpoint download URL (default: the AIDE Model Zoo folder, which prints instructions)")
-    parser.add_argument("--dest", type=Path, default=DEFAULT_DEST_DIR, help=f"destination directory (default: {DEFAULT_DEST_DIR})")
+    parser.add_argument("--dest", type=Path, default=None, help=DEST_HELP)
     parser.add_argument("--name", default=DEFAULT_NAME, help=f"destination filename (default: {DEFAULT_NAME})")
     parser.add_argument("--sha256", help="expected lowercase sha256 hex digest; the download fails if it does not match")
     parser.add_argument("--force", action="store_true", help="overwrite an existing destination file")
@@ -152,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
         if reconfigure is not None:
             reconfigure(encoding="utf-8", errors="replace")
 
-    dest_dir = Path(args.dest)
+    dest_dir = Path(args.dest) if args.dest else default_models_dir()
     dest = dest_dir / args.name
     part = dest.with_name(dest.name + ".part")
 
@@ -196,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
     part.replace(dest)
     print(f"sha256: {digest}" + (" (verified)" if expected else " (no --sha256 supplied; record this digest)"))
     print(f"saved {dest} ({dest.stat().st_size / (1024 ** 3):.2f} GiB)")
-    print("scans now auto-discover models/aide-runtime.json; no extra flags needed.")
+    print(f"scans now auto-discover {dest_dir / 'aide-runtime.json'} when it is the effective models dir ($DEEPFAKE_LENS_MODELS_DIR or packaged).")
     return 0
 
 
