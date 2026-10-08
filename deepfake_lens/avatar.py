@@ -6,7 +6,15 @@ using analysis of facial movements, lip sync, and rendering artifacts.
 
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass
+from pathlib import Path
+
+# Title of the container-format signal. It records only that the file is a
+# video — never evidence of avatar generation on its own (core.py keeps it
+# out of the evidence list).
+FORMAT_SIGNAL_TITLE = "비디오 형식"
+VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".avi", ".mkv", ".webm"})
 
 
 @dataclass(frozen=True)
@@ -46,7 +54,7 @@ AVATAR_MARKERS = {
 
 
 def analyze_avatar(
-    file_path: str | None = None,
+    file_path: str | os.PathLike[str] | None = None,
     metadata: dict[str, str] | None = None,
 ) -> AvatarAnalysis:
     """Analyze content for AI avatar generation signs."""
@@ -94,21 +102,19 @@ def analyze_avatar(
     )
 
 
-def _analyze_file(file_path: str) -> list[AvatarEvidenceSignal]:
-    """Analyze file for avatar generation indicators."""
+def _analyze_file(file_path: str | os.PathLike[str]) -> list[AvatarEvidenceSignal]:
+    """Analyze file for avatar generation indicators.
+
+    Accepts ``str`` and ``Path`` alike — core.py passes a ``Path``; calling
+    ``.lower()`` on it crashed the avatar check for every video.
+    """
     signals = []
-    
-    # Check file extension
-    video_extensions = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
-    for ext in video_extensions:
-        if file_path.lower().endswith(ext):
-            signals.append(AvatarEvidenceSignal(
-                "비디오 형식",
-                "아바타는 일반적으로 비디오 형식으로 생성됩니다.",
-                5,
-            ))
-            break
-    
+    if Path(file_path).suffix.lower() in VIDEO_EXTENSIONS:
+        signals.append(AvatarEvidenceSignal(
+            FORMAT_SIGNAL_TITLE,
+            "아바타는 일반적으로 비디오 형식으로 생성됩니다.",
+            5,
+        ))
     return signals
 
 

@@ -783,8 +783,14 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
     avatar, entry = run_check("avatar", avatar_check)
     out.coverage.append(entry)
     if avatar is not None:
-        if avatar.score > 0:
-            out.evidence.append(deep_layer_evidence("아바타/디지털휴먼 탐지", avatar.verdict, "avatar", avatar.score))
+        from .avatar import FORMAT_SIGNAL_TITLE
+
+        # "It is a video" is not an avatar indicator: only marker signals
+        # become (non-deciding) evidence.
+        markers = [signal for signal in avatar.signals if signal.title != FORMAT_SIGNAL_TITLE]
+        if markers:
+            raw = min(100, sum(signal.weight for signal in markers))
+            out.evidence.append(deep_layer_evidence("아바타/디지털휴먼 탐지", avatar.verdict, "avatar", raw))
         out.limitations.extend(avatar.limitations[:2])
 
     def lipsync_check():

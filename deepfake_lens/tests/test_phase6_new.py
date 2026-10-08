@@ -121,6 +121,34 @@ class AvatarTest(unittest.TestCase):
         result = analyze_avatar(file_path="avatar.mp4")
         self.assertGreater(result.score, 0)
 
+    def test_path_object_is_accepted(self) -> None:
+        """Regression: core passes a Path; ``.lower()`` on it crashed the
+        avatar check (AttributeError) for every video file."""
+        from pathlib import Path
+
+        result = analyze_avatar(file_path=Path("/evidence/clip.MP4"))
+        self.assertEqual(result.score, analyze_avatar(file_path="/evidence/clip.MP4").score)
+        self.assertGreater(result.score, 0)
+        self.assertEqual(analyze_avatar(file_path=Path("/evidence/photo.png")).score, 0)
+
+    def test_core_avatar_check_runs_and_format_alone_is_not_evidence(self) -> None:
+        """Regression (core._deep_video_layers): the avatar check now runs
+        ("ran", not "failed"), and the container format alone adds no
+        evidence row."""
+        import tempfile
+        from pathlib import Path
+
+        from deepfake_lens.core import _deep_video_layers
+        from deepfake_lens.result_types import CoverageStatus
+
+        with tempfile.TemporaryDirectory() as tmp:
+            clip = Path(tmp) / "clip.mp4"
+            clip.write_bytes(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64)
+            layers = _deep_video_layers(clip)
+        [entry] = [entry for entry in layers.coverage if entry.check == "avatar"]
+        self.assertEqual(entry.status, CoverageStatus.RAN, entry.reason)
+        self.assertFalse([e for e in layers.evidence if e.layer == "avatar"])
+
     def test_avatar_type_classification(self) -> None:
         """Avatar type should be classified correctly."""
         result = analyze_avatar(metadata={"tool": "heygen"})
