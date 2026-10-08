@@ -498,10 +498,14 @@ def _part_bytes(part) -> bytes | None:
 
 def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str, object]:
     """Mirror core.summarize() — identical inputs must yield identical counts
-    across CLI JSON, web uploads, and report headers. A row counts as
-    analyzed only when it has status "analyzed" AND a result; failed,
-    unsupported, and unknown-container rows land in unsupported_or_failed.
+    across CLI JSON, web uploads, and report headers. A row with a result
+    is counted by its verdict unless its status is failed/unsupported/
+    duplicate/skipped (``result_types.is_verdict_row``) — archive container
+    rows included (R5); everything else lands in unsupported_or_failed,
+    duplicates or skipped.
     """
+    from .result_types import is_verdict_row
+
     def _status(item: dict[str, object]) -> str:
         return str(item.get("status") or ("failed" if item.get("error") else "analyzed"))
 
@@ -514,7 +518,8 @@ def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str,
         coverage = result.get("coverage") if isinstance(result, dict) else None
         return isinstance(coverage, list) and any(isinstance(e, dict) and e.get("status") == "failed" for e in coverage)
 
-    analyzed = [i for i in items if _status(i) == "analyzed" and isinstance(i.get("result"), dict)]
+    analyzed = [i for i in items if is_verdict_row(_status(i), isinstance(i.get("result"), dict))]
+    verdict_rows = {id(i) for i in analyzed}
     # D16: verdict counts only — same keys as BatchScanSummary.to_json().
     return {
         "manipulation_evidence": sum(1 for item in analyzed if _verdict(item) == "manipulation_evidence"),
@@ -523,7 +528,7 @@ def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str,
         "checks_failed": sum(1 for item in analyzed if _has_failed_check(item)),
         "total": len(items),
         "analyzed": len(analyzed),
-        "unsupported_or_failed": sum(1 for i in items if _status(i) not in {"analyzed", "duplicate", "skipped"}),
+        "unsupported_or_failed": sum(1 for i in items if id(i) not in verdict_rows and _status(i) not in {"duplicate", "skipped"}),
         "duplicates": sum(1 for i in items if _status(i) == "duplicate"),
         "skipped": sum(1 for i in items if _status(i) == "skipped"),
         "external_model_active": sum(1 for item in analyzed if _model_active(item)),

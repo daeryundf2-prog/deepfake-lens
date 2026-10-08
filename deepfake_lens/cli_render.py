@@ -28,8 +28,9 @@ from .result_types import (
     CoverageStatus,
     EvidenceKind,
     Grade,
-    RiskBand,
     ScanItem,
+    Verdict,
+    is_verdict_row,
 )
 from .signing import resolve_report_key, sign_report
 
@@ -118,9 +119,13 @@ def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage:
     print()
     print(f"{'결론':<14} {'등급':<4} {'근거(결정·통계·어휘)':<18} {'검사(실행·미실행·실패)':<20} {'kind':<6} file")
     print("-" * 110)
+    # R5/R16: every row is shown except "원본성 근거 있음" rows, which
+    # --include-low adds; the omitted count is printed so the table always
+    # reconciles with the header counts.
     visible = [item for item in items if include_low or _is_priority_row(item)]
+    hidden = len(items) - len(visible)
     if not visible:
-        print("우선 검토할 후보가 없습니다. --include-low 로 전체 행을 볼 수 있습니다.")
+        print("표시할 행이 없습니다. --include-low 로 원본성 근거 있음 행을 함께 볼 수 있습니다.")
         return
     for item in visible:
         if item.result:
@@ -138,12 +143,20 @@ def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage:
             verdict, grade, counts, checks = item.status, "-", "-", "-"
             reason = item.error or ""
         print(f"{verdict:<14} {grade:<4} {counts:<18} {checks:<20} {item.kind:<6} {item.path}  # {reason}")
+    if hidden:
+        print(f"(원본성 근거 있음 {hidden}건은 표에서 생략했습니다 — --include-low 로 표시)")
 
 
 def _is_priority_row(item: ScanItem) -> bool:
-    if item.status != "analyzed" or not item.result:
-        return False
-    return item.result.band in {RiskBand.HIGH, RiskBand.MEDIUM, RiskBand.UNKNOWN}
+    """Rows shown without --include-low: everything but "원본성 근거 있음".
+
+    R5: archive container rows are verdict rows like any other; failed,
+    unsupported, skipped and duplicate rows are shown with their status so
+    the table accounts for every header count.
+    """
+    if not is_verdict_row(item.status, item.result is not None) or item.result is None:
+        return True
+    return item.result.verdict_code != Verdict.AUTHENTICITY_EVIDENCE
 
 
 def _write_csv(path: Path, items: list[ScanItem], *, coverage: dict[str, object] | None = None, thresholds: object | None = None) -> None:

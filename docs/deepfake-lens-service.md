@@ -104,9 +104,9 @@ and, for the streaming endpoints, no job is started (G31).
 | POST | `/api/classify` | `file_path` | analysis_result + `tool_candidates` (layer diagnostic of AI-tool marker matches; reads at most 64 MiB) |
 | POST | `/api/multimodal` | `image_score`, `text_score`, `audio_score`, `video_score` (ints, optional) | layer_diagnostic — the supplied scores are unmeasured; their combination is never a band |
 | POST | `/api/compare` | `file_path_a` + `file_path_b` | layer_diagnostic — same-speaker distance (audio pairs) or same-author stylometry (text/document pairs) under `diagnostic`; no same/different band |
-| POST | `/api/check` | `file_path` **or** `text` | Unified check-all: core scan + every `models/` member that fits the modality + C2PA/forensic + text fingerprint probes in one `{mode, item, advanced?, forensic?}` payload |
+| POST | `/api/check` | `file_path` **or** `text` | Unified check-all: core scan + every `models/` member that fits the modality + C2PA/forensic + text fingerprint probes in one `{mode, item, advanced?, forensic?}` payload. An archive `file_path` is expanded exactly as the folder scan expands it: `{mode: "files", summary, items}` with the member rows and the container row (refused members as `archive_member` coverage) |
 | POST | `/api/check/stream` | same as `/api/check` | Server-Sent Events (`text/event-stream`): `job` → `progress` per stage → `result` (same payload as `/api/check`), or `error`/`cancelled` |
-| POST | `/api/scan/stream` | `directory`, `recursive` (bool), `max_files` (≤5000, default 200) | SSE batch scan of a server-local directory: `job` → `progress` per file (`{stage, index, total, path, verdict_code}`) → `result` (`{mode: "scan", total, counts, items}`; `counts` = `manipulation_evidence`/`authenticity_evidence`/`undetermined`/`other`/`failed`), or `error`/`cancelled` |
+| POST | `/api/scan/stream` | `directory`, `recursive` (bool), `max_files` (≤5000, default 200) | SSE batch scan of a server-local directory through `analysis_api.scan_folder` (the CLI's scan): `job` → `progress` per row (`{stage: "scan", index, total, path, status, verdict_code}`) → `result` (the `/api/scan` payload — `schema_version`, `summary`, `coverage`, `thresholds`, `items` — plus `mode: "scan"`, `directory`, `total`, `capped`, `counts`; `counts` = `manipulation_evidence`/`authenticity_evidence`/`undetermined` from the summary, `other` = skipped + duplicate rows, `failed` = `unsupported_or_failed`), or `error`/`cancelled` |
 | POST | `/api/jobs/{job_id}/cancel` | — | Sets the job's cancellation flag; takes effect at the next stage boundary (`{"status": "success", "cancelled": true}`, 404 for unknown/finished jobs) |
 | GET | `/api/jobs/{job_id}` | — | `{"job_id", "done", "cancelled"}` for in-flight stream jobs; 404 once the job is reaped |
 | GET | `/api/scan`, `/api/scan-status`, `/api/scan-cancel`, `/api/analyze-file`, `/api/heatmap`, `/api/preview` | as in the web GUI table below | Same payload functions as `web` (identical JSON); `/api/heatmap` is `image/png` (errors `text/plain`), `/api/preview` uses the file's media type; both send `X-Content-Type-Options: nosniff` |
@@ -120,12 +120,17 @@ Stage events carry `{stage, index, total}` (`core`, `forensic`/`text-advanced`,
 finishes before the job stops, so latency-critical callers should also close
 the HTTP connection.
 
-`/api/scan/stream` reuses the same job/cancel machinery for directories:
-an `enumerate` progress event reports the file count first, then one
-`scan` progress event per file. Per-file failures are recorded in
-`items` (and counted under `counts.failed`) rather than aborting the
-scan. `items` entries are compact `{path, kind, status, verdict_code, grade, probability}`
-summaries — use `/api/check` per file for full detail. `/api/check` returns
+`/api/scan/stream` reuses the same job/cancel machinery for directories.
+It runs `analysis_api.scan_folder` — never its own folder walk — so the
+rows are the CLI's rows (R1): archives are expanded into member rows plus a
+container row with every refused member (traversal, absolute path, link,
+bomb/budget) recorded as `archive_member` coverage, symlinked files appear
+as `skipped` rows, and every row carries its `sha256`. An `enumerate`
+progress event comes first, then one `scan` progress event per finished row
+(`index` = rows done, `total` = rows known so far). Per-file failures are
+rows, never an aborted scan. `items` are the full `/api/scan` items; each
+also repeats `verdict_code`, `grade` and `probability` from its `result` at
+the top level for clients of the earlier compact rows. `/api/check` returns
 `forensic` and `advanced` as layer diagnostics (raw numbers + notice, no band).
 
 ## Web GUI endpoints (`web`, default `127.0.0.1:8765`)

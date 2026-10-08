@@ -65,6 +65,9 @@ CLIENT_HEADER_EXEMPT_PATHS = frozenset({"/api/health"})
 # results until the client disconnects; 32 matches the web server's
 # _SCAN_JOB_MAX so both servers bound concurrent work the same way.
 MAX_JOBS = 32
+# Upper bound on /api/scan/stream's max_files query value (unchanged since
+# the endpoint was added; the folder scan itself enforces it).
+MAX_STREAM_SCAN_FILES = 5000
 JOBS_FULL_MESSAGE = "실행 중인 작업이 너무 많습니다 — 진행 중인 작업이 끝난 뒤 다시 시도하십시오"
 
 # Packages the API server needs at runtime; missing ones make `api-serve`
@@ -141,6 +144,26 @@ def _api_options() -> Any:
     from .webapp_api import _web_options
 
     return _web_options()
+
+
+def _is_archive(path: Path) -> bool:
+    from .archives import is_archive
+
+    return is_archive(path)
+
+
+def _archive_check_data(path: Path, options: Any, thresholds: Any, *, progress: Any = None) -> dict[str, Any]:
+    """``/api/check`` payload for an archive: the folder-scan rows for it (R1)."""
+    from .analysis_api import scan_file
+    from .core import SCAN_JSON_SCHEMA_VERSION
+
+    summary, items, _ = scan_file(path, options, thresholds=thresholds, progress=progress)
+    return {
+        "schema_version": SCAN_JSON_SCHEMA_VERSION,
+        "mode": "files",
+        "summary": summary.to_json(),
+        "items": [item.to_json() for item in items],
+    }
 
 
 def create_app(
@@ -410,6 +433,10 @@ def create_app(
                     path = confine_request_path(file_path, default_folder)
                 except ReadRootDenied:
                     return _denied()
+                if _is_archive(path):
+                    # R1: an archive is expanded exactly as the folder scan
+                    # expands it (member rows + container row).
+                    return {"status": "success", "data": _archive_check_data(path, options, thresholds)}
                 item = analyze_path(path, options, thresholds=thresholds)
                 data = {"mode": "file", "item": item.to_json()}
                 try:
@@ -593,6 +620,34 @@ def create_app(
                     yield ("error", {"detail": "file_path 또는 text가 필요합니다"})
                     return
                 path = confined
+                if _is_archive(path):
+                    # R1: same expansion as the folder scan; one progress
+                    # event per member/container row.
+                    import queue
+
+                    rows: queue.Queue[Any] = queue.Queue()
+                    archive_outcome: dict[str, Any] = {}
+
+                    def on_row(row: Any, done: int, planned: int) -> None:
+                        rows.put(("progress", {"stage": "archive", "index": done, "total": planned, "path": row.path}))
+
+                    def expand() -> None:
+                        try:
+                            archive_outcome["data"] = _archive_check_data(path, options, thresholds, progress=on_row)
+                        except Exception as exc:  # noqa: BLE001 - reported as an SSE error event
+                            logger.exception("archive check failed: %s", path)
+                            archive_outcome["error"] = exc
+                        finally:
+                            rows.put(None)
+
+                    threading.Thread(target=expand, daemon=True, name=f"api-archive-{job_id}").start()
+                    while (evt := rows.get()) is not None:
+                        yield evt
+                    if "error" in archive_outcome:
+                        yield ("error", {"detail": f"압축 파일 검사 실패: {failure_reason(archive_outcome['error'])}"})
+                        return
+                    yield ("result", archive_outcome["data"])
+                    return
                 yield ("progress", {"stage": "core", "index": 1, "total": 2})
                 item = analyze_path(path, options, thresholds=thresholds)
                 if cancel.is_set():
@@ -670,62 +725,79 @@ def create_app(
         job_id, cancel = _register_job()
 
         def run_scan():
-            from .core import _iter_files
+            # R1: the stream runs analysis_api.scan_folder — the CLI's scan —
+            # so archives are expanded into member + container rows, refused
+            # members (bombs, traversal, links) are recorded per member and
+            # symlinked files appear as skipped rows. Progress events come
+            # from scan_folder's per-row callback.
+            import dataclasses
+            import queue
+
+            from .analysis_api import scan_folder, scan_payload
 
             yield ("job", {"job_id": job_id})
             if root is None or not root.is_dir():
                 yield ("error", {"detail": "directory가 필요합니다"})
                 return
-            try:
-                paths = []
-                capped = False
-                for p in _iter_files(root, recursive=recursive):
-                    if len(paths) >= max(1, min(max_files, 5000)):
-                        capped = True
-                        break
-                    paths.append(p)
-            except Exception as exc:  # noqa: BLE001
-                logger.exception("directory listing failed: %s", root)
-                yield ("error", {"detail": f"폴더 목록을 읽지 못했습니다: {failure_reason(exc)}"})
-                return
-            options = _api_options()
-            thresholds = load_thresholds(options)
-            total = len(paths)
-            yield ("progress", {"stage": "enumerate", "total": total, "capped": capped})
-            items: list[dict[str, Any]] = []
-            # D16: verdict counts only (no legacy band keys); "other" counts
-            # skipped/duplicate rows, "failed" unanalyzable ones.
-            counts = {"failed": 0, "other": 0,
-                      "manipulation_evidence": 0, "authenticity_evidence": 0, "undetermined": 0}
-            for index, path in enumerate(paths, 1):
-                if cancel.is_set():
-                    yield ("cancelled", {"job_id": job_id, "processed": index - 1, "total": total})
-                    return
+            options = dataclasses.replace(
+                _api_options(), recursive=recursive, max_files=max(1, min(max_files, MAX_STREAM_SCAN_FILES)),
+            )
+            events: queue.Queue[Any] = queue.Queue()
+            outcome: dict[str, Any] = {}
+
+            def on_row(item: Any, done: int, planned: int) -> None:
+                data = item.to_json()
+                result = data.get("result") or {}
+                events.put(("progress", {
+                    "stage": "scan", "index": done, "total": planned,
+                    "path": data.get("path"), "status": data.get("status"),
+                    "verdict_code": result.get("verdict_code"),
+                }))
+
+            def work() -> None:
                 try:
-                    item = analyze_path(path, options, root=root, thresholds=thresholds)
-                    data = item.to_json()
-                    result = data.get("result") or {}
-                    status = str(data.get("status") or "failed")
-                    verdict_code = str(result.get("verdict_code") or "undetermined")
-                    if status == "analyzed":
-                        counts[verdict_code if verdict_code in counts else "undetermined"] += 1
-                    elif status in {"skipped", "duplicate"}:
-                        counts["other"] += 1
-                    else:
-                        counts["failed"] += 1
-                    items.append({"path": data.get("path"), "kind": data.get("kind"),
-                                  "status": status,
-                                  "verdict_code": verdict_code if status == "analyzed" else None,
-                                  "grade": result.get("grade"),
-                                  "probability": result.get("probability")})
-                except Exception as exc:  # noqa: BLE001 - per-file failure is data
-                    logger.exception("analysis failed: %s", path)
-                    counts["failed"] += 1
-                    items.append({"path": str(path), "status": "failed", "error": failure_reason(exc)})
-                yield ("progress", {"stage": "scan", "index": index, "total": total,
-                                    "path": path.name, "verdict_code": items[-1].get("verdict_code")})
-            yield ("result", {"mode": "scan", "directory": str(root), "total": total,
-                              "capped": capped, "counts": counts, "items": items})
+                    outcome["value"] = scan_folder(root, options, should_stop=cancel.is_set, progress=on_row)
+                except Exception as exc:  # noqa: BLE001 - reported as an SSE error event
+                    logger.exception("streaming scan failed: %s", root)
+                    outcome["error"] = exc
+                finally:
+                    events.put(None)
+
+            threading.Thread(target=work, daemon=True, name=f"api-scan-{job_id}").start()
+            yield ("progress", {"stage": "enumerate"})
+            while True:
+                evt = events.get()
+                if evt is None:
+                    break
+                yield evt
+            if "error" in outcome:
+                yield ("error", {"detail": f"폴더 검사 실패: {failure_reason(outcome['error'])}"})
+                return
+            summary, items, thresholds = outcome["value"]
+            if cancel.is_set():
+                yield ("cancelled", {"job_id": job_id, "processed": sum(1 for i in items if i.error != "검사가 취소되었습니다"), "total": len(items)})
+                return
+            payload = scan_payload(summary, items, thresholds, options)
+            # Rows are the /api/scan rows; verdict_code/grade/probability are
+            # also copied to the row top level for stream clients that read
+            # them there (the pre-R1 stream row shape).
+            for row in payload["items"]:
+                result = row.get("result") or {}
+                row.setdefault("verdict_code", result.get("verdict_code"))
+                row.setdefault("grade", result.get("grade"))
+                row.setdefault("probability", result.get("probability"))
+            # D16/R5: verdict counts come from the scan summary (container
+            # rows counted by verdict); "other" = skipped + duplicate rows,
+            # "failed" = unsupported / unanalyzable rows.
+            counts = {
+                "failed": summary.unsupported_or_failed,
+                "other": summary.skipped + summary.duplicates,
+                "manipulation_evidence": summary.manipulation_evidence,
+                "authenticity_evidence": summary.authenticity_evidence,
+                "undetermined": summary.undetermined,
+            }
+            yield ("result", {"mode": "scan", "directory": str(root), "total": len(items),
+                              "capped": summary.capped, "counts": counts, **payload})
 
         return _sse_response(request, job_id, cancel, run_scan)
 

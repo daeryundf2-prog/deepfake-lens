@@ -677,3 +677,62 @@ class WebUploadArchiveRecordTests(unittest.TestCase):
         self.assertIn({"check": "archive", "status": "skipped", "reason": "의존성 부재: py7zr"}, result["coverage"])
         self.assertIn("의존성 부재: py7zr", result["verdict"])
         self.assertEqual(result["verdict_code"], "undetermined")
+
+
+class ArchiveContainerCountTests(unittest.TestCase):
+    """R5: archive container rows are counted by their verdict in the summary
+    — never as "미지원/분석 실패" — so the header equals the CLI table and the
+    GUI pills (gui.js verdictOf, the same rule as result_types.is_verdict_row)."""
+
+    A1111 = Path(__file__).resolve().parents[2] / "fixtures" / "benchmark" / "a1111-metadata-marker.png"
+
+    def setUp(self) -> None:
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.folder = Path(self._tmp.name)
+        make_zip(self.folder / "case.zip", {"inner/a1111.png": self.A1111.read_bytes()})
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_summary_counts_container_by_verdict(self) -> None:
+        from deepfake_lens.result_types import Verdict, is_verdict_row
+
+        summary, items = scan_directory(self.folder)
+        by_path = {item.path: item for item in items}
+        self.assertEqual(by_path["case.zip"].status, "expanded")
+        self.assertEqual(by_path["case.zip"].result.verdict_code, Verdict.MANIPULATION_EVIDENCE)
+        self.assertEqual(by_path["case.zip::inner/a1111.png"].result.verdict_code, Verdict.MANIPULATION_EVIDENCE)
+        self.assertEqual(summary.total, 2)
+        self.assertEqual(summary.manipulation_evidence, 2)
+        self.assertEqual(summary.undetermined, 0)
+        self.assertEqual(summary.unsupported_or_failed, 0)
+        # GUI pills: every row with a result outside failed/unsupported/
+        # duplicate/skipped is counted by verdict_code; the rest is "other".
+        pills: dict[str, int] = {}
+        for row in (item.to_json() for item in items):
+            result = row.get("result")
+            key = (result or {}).get("verdict_code") if is_verdict_row(row.get("status"), isinstance(result, dict)) else "other"
+            pills[str(key)] = pills.get(str(key), 0) + 1
+        self.assertEqual(pills, {"manipulation_evidence": 2})
+        self.assertEqual(summary.to_json()["manipulation_evidence"], pills["manipulation_evidence"])
+
+    def test_cli_header_equals_table_rows(self) -> None:
+        import contextlib
+        import io
+        import re
+
+        from deepfake_lens.cli import main as cli_main
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli_main(["scan", str(self.folder)]), 0)
+        text = out.getvalue()
+        header = re.search(r"총 (\d+)건 — 조작·생성 근거 있음 (\d+)건, 원본성 근거 있음 (\d+)건, 판단 불가 (\d+)건.*미지원/분석 실패 (\d+)건", text)
+        assert header is not None, text
+        total, manipulated, authentic, undetermined, failed = (int(value) for value in header.groups())
+        self.assertEqual((total, manipulated, authentic, undetermined, failed), (2, 2, 0, 0, 0))
+        table_rows = [line for line in text.splitlines() if line.startswith("조작·생성 근거 있음")]
+        self.assertEqual(len(table_rows), manipulated)
+        self.assertTrue(any(line.rstrip().split("  #")[0].endswith("case.zip") for line in table_rows), table_rows)

@@ -53,10 +53,21 @@ per-file coverage record:
 
 | Field | Meaning |
 | --- | --- |
-| `manipulation_evidence` | Analyzed items whose verdict is `manipulation_evidence`. |
-| `authenticity_evidence` | Analyzed items whose verdict is `authenticity_evidence`. |
-| `undetermined` | Analyzed items whose verdict is `undetermined`. |
-| `checks_failed` | Analyzed items with at least one `failed` coverage entry. |
+| `manipulation_evidence` | Verdict rows whose verdict is `manipulation_evidence`. |
+| `authenticity_evidence` | Verdict rows whose verdict is `authenticity_evidence`. |
+| `undetermined` | Verdict rows whose verdict is `undetermined`. |
+| `checks_failed` | Verdict rows with at least one `failed` coverage entry. |
+
+A *verdict row* is any item with a `result` whose `status` is not `failed`,
+`unsupported`, `duplicate` or `skipped` (`result_types.is_verdict_row`) —
+analyzed files, archive members **and archive container rows**
+(`expanded`, or `unknown` when no member could be analyzed). R5: container
+rows are counted by their verdict like every other row (they used to land
+in `unsupported_or_failed`), so the header counts equal the CLI table and
+the GUI pills. `analyzed` is the number of verdict rows;
+`unsupported_or_failed` counts the remaining rows that are neither
+`duplicate` nor `skipped`. `total` = the three verdict counts +
+`unsupported_or_failed` + `duplicates` + `skipped`.
 
 The legacy band counts `high` / `medium` / `low` / `unknown` are no longer
 serialized (phase-0 fix D16): no front end read them (the GUI counts
@@ -73,7 +84,9 @@ always `0` invited old-contract readings. They remain readable as
   `size_bytes`, `error`, `duplicate_of`.
 - `sha256`: SHA-256 (hex) of the file's bytes as analyzed — set by folder
   scans for every readable file (duplicates included), `null` when the file
-  was not hashed (oversize skip, unreadable, single-file analysis). It is the
+  was not hashed (oversize skip, unreadable). Single-file analysis
+  (`analysis_api.analyze_path`: uploads, `/api/check`, standalone CLI
+  commands) records it too, so every front end reports the same digest. It is the
   scan-cache key's content component (G11) and is covered by report
   signatures (G30). Archive container rows carry the archive file's own
   digest (D9), so a signed report binds the container as well as its members.

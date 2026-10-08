@@ -411,3 +411,16 @@ class BatchScanSummary:
 
 # Band-count fields of BatchScanSummary that are not serialized (D16).
 LEGACY_SUMMARY_KEYS = frozenset({"high", "medium", "unknown", "low"})
+
+# R5: row statuses that never carry a verdict. Every other row with a result
+# — analyzed files, archive members, archive container rows ("expanded", or
+# "unknown" when no member could be analyzed) — is counted by its
+# verdict_code in the summary, exactly as the CLI table and the GUI pills
+# show it. Rows without a result (or with one of these statuses) are
+# unsupported/failed, duplicate or skipped.
+NON_VERDICT_STATUSES = frozenset({"failed", "unsupported", "duplicate", "skipped"})
+
+
+def is_verdict_row(status: object, has_result: bool) -> bool:
+    """True when a scan row is counted by its verdict (R5)."""
+    return has_result and str(status) not in NON_VERDICT_STATUSES

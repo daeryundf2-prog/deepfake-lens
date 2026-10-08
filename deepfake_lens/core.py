@@ -104,6 +104,7 @@ from .result_types import (  # noqa: F401
     Verdict,
     band_for_verdict,
     check_label,
+    is_verdict_row,
 )
 from .serialization import (  # noqa: F401
     _classification_result_from_json,
@@ -181,7 +182,17 @@ def scan_directory(
     deep_signals: bool = False,
     thresholds: object | None = None,
     should_stop: Callable[[], bool] | None = None,
+    progress: "ScanProgress | None" = None,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
+    """Scan a folder: enumerate, expand archives, analyze every entry.
+
+    ``progress(item, done, planned)`` is called once per finished row —
+    analyzed files, archive members, archive container rows, symlink and
+    unreadable-directory rows — as it completes (R1: the streaming API
+    reports per-file progress from the same scan the CLI runs). ``planned``
+    is the number of rows known so far; the final, sorted list is the
+    return value.
+    """
     root = Path(directory)
     if not root.is_dir():
         raise NotADirectoryError(str(root))
@@ -199,7 +210,83 @@ def scan_directory(
             capped = True
             break
         paths.append(path)
+    return scan_paths(
+        paths, root=root, capped=capped, iter_errors=iter_errors, symlinks=symlinks,
+        text_bytes=text_bytes, metadata_bytes=metadata_bytes,
+        pixel_mode=pixel_mode, pixel_max_side=pixel_max_side,
+        heatmaps=heatmaps, heatmap_dir=heatmap_dir, model_path=model_path,
+        cache_path=cache_path, workers=workers, max_file_bytes=max_file_bytes,
+        dedupe=dedupe, hash_db_path=hash_db_path, deep_signals=deep_signals,
+        thresholds=thresholds, should_stop=should_stop, progress=progress,
+    )
 
+
+# progress(item, done, planned) — see scan_directory.
+ScanProgress = Callable[[ScanItem, int, int], None]
+
+
+class _ProgressReporter:
+    """Thread-safe per-row progress counter around a ScanProgress callback.
+
+    A failing callback (client gone, queue closed) is logged and never
+    aborts the scan — the rows are still returned.
+    """
+
+    def __init__(self, callback: ScanProgress | None, planned: int) -> None:
+        import threading
+
+        self._callback = callback
+        self._planned = planned
+        self._done = 0
+        self._lock = threading.Lock()
+
+    def __call__(self, item: ScanItem) -> None:
+        if self._callback is None:
+            return
+        with self._lock:
+            self._done += 1
+            done = self._done
+            planned = max(self._planned, done)
+        try:
+            self._callback(item, done, planned)
+        except Exception:
+            logger.exception("scan progress callback failed")
+
+
+def scan_paths(
+    paths: list[Path],
+    *,
+    root: Path,
+    capped: bool = False,
+    iter_errors: list[tuple[Path, OSError]] | None = None,
+    symlinks: list[Path] | None = None,
+    text_bytes: int = DEFAULT_TEXT_BYTES,
+    metadata_bytes: int = DEFAULT_METADATA_BYTES,
+    pixel_mode: str = "off",
+    pixel_max_side: int = DEFAULT_PIXEL_MAX_SIDE,
+    heatmaps: bool = False,
+    heatmap_dir: Path | None = None,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None = None,
+    cache_path: Path | None = None,
+    workers: int = 1,
+    max_file_bytes: int | None = None,
+    dedupe: bool = False,
+    hash_db_path: Path | None = None,
+    deep_signals: bool = False,
+    thresholds: object | None = None,
+    should_stop: Callable[[], bool] | None = None,
+    progress: ScanProgress | None = None,
+) -> tuple[BatchScanSummary, list[ScanItem]]:
+    """Analyze already-enumerated ``paths`` under ``root`` like a folder scan.
+
+    The body of :func:`scan_directory` after enumeration: archives are
+    expanded into member rows plus a container row, symlinks and
+    unreadable directories become skipped/failed rows. A single archive
+    file (``paths=[archive]``, ``root=archive.parent``) is analyzed exactly
+    as it would be inside a scanned folder (R1).
+    """
+    iter_errors = list(iter_errors or [])
+    symlinks = list(symlinks or [])
     # Archive containers are expanded into member jobs up front: each
     # member is analyzed like a regular file with an "archive::inner"
     # display path, and the archive itself gets a container row that
@@ -243,6 +330,7 @@ def scan_directory(
                 member_rel = member.relative_to(dest).as_posix()
                 specs.append((member, f"{rel}::{member_rel}"))
 
+        report = _ProgressReporter(progress, len(specs) + len(archive_members) + len(iter_errors) + len(symlinks))
         summary, items = _scan_specs(
             specs, duplicates_paths=[p for p, d in specs if d is None],
             archive_members=archive_members, archive_meta=archive_meta, root=root, dedupe=dedupe,
@@ -252,10 +340,12 @@ def scan_directory(
             heatmaps=heatmaps, heatmap_dir=heatmap_dir, model_path=model_path,
             cache_path=cache_path, workers=workers, deep_signals=deep_signals,
             capped=capped, thresholds=thresholds, should_stop=should_stop,
+            report=report,
         )
         if iter_errors or symlinks:
+            extra: list[ScanItem] = []
             for err_path, exc in iter_errors:
-                items.append(ScanItem(
+                extra.append(ScanItem(
                     _display_path(err_path, root=root), err_path.name,
                     "unknown", "failed", 0,
                     error=f"폴더를 읽을 수 없습니다: {exc}",
@@ -263,11 +353,14 @@ def scan_directory(
             # D10: a symlink in the evidence folder is listed (never followed)
             # so the report accounts for every directory entry it was given.
             for link in symlinks:
-                items.append(ScanItem(
+                extra.append(ScanItem(
                     _display_path(link, root=root), link.name,
                     "unknown", "skipped", 0,
                     error=SYMLINK_SKIP_REASON,
                 ))
+            for row in extra:
+                report(row)
+            items.extend(extra)
             items = sort_items(items)
             summary = summarize(items, capped=summary.capped, cached=summary.cached)
         return summary, items
@@ -353,9 +446,9 @@ def _archive_container_item(
         verdict = "압축 파일: 판단 불가 — 아카이브에서 분석 가능한 구성 파일이 없습니다." + first_rejection
     band = band_for_verdict(verdict_code)
     return ScanItem(
-        # "expanded" (not "analyzed") keeps the roll-up row out of the
-        # verdict counts — members already carry their own verdicts, and
-        # counting the container too would double every member's tally.
+        # "expanded" marks the roll-up row; it is counted by its verdict
+        # like any other row (R5) — the CLI table and GUI show it with
+        # that verdict, and the header must agree with them.
         rel, name, "archive", "expanded" if analyzed_members else "unknown", size,
         ClassificationResult(
             score=max((i.result.score for i in analyzed_members if i.result is not None), default=0),
@@ -396,8 +489,17 @@ def _scan_specs(
     capped: bool,
     thresholds: object | None = None,
     should_stop: Callable[[], bool] | None = None,
+    report: Callable[[ScanItem], None] | None = None,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
-    """Analyze (path, display) spec pairs — the inner loop of scan_directory."""
+    """Analyze (path, display) spec pairs — the inner loop of scan_directory.
+
+    ``report`` is called with each finished row (members, files, container
+    rows) as it completes.
+    """
+    def _report(item: ScanItem) -> None:
+        if report is not None:
+            report(item)
+
     fingerprints: dict[Path, str] = {}  # per-scan SHA-256 memo shared by dedupe, cache key, item.sha256 (G11)
     duplicates = _duplicate_map(duplicates_paths, root=root, max_file_bytes=max_file_bytes, hash_db_path=hash_db_path, fingerprints=fingerprints) if dedupe or hash_db_path else {}
     cache = _load_scan_cache(cache_path)
@@ -494,18 +596,23 @@ def _scan_specs(
                 cache_items[key] = item.to_json()
         _write_scan_cache(cache_path, cache)
 
+    def analyze_and_report(spec: tuple[Path, str | None]) -> tuple[ScanItem, str | None, bool]:
+        outcome = analyze_one(spec)
+        _report(outcome[0])
+        return outcome
+
     analyzed: list[tuple[ScanItem, str | None, bool]] = []
     if workers > 1 and len(specs) > 1:
         # Each worker still checks should_stop so a cancel short-circuits
         # remaining items instead of running every analysis to completion.
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            analyzed = list(executor.map(analyze_one, specs))
+            analyzed = list(executor.map(analyze_and_report, specs))
     else:
         try:
             for spec in specs:
                 if should_stop is not None and should_stop():
                     break
-                analyzed.append(analyze_one(spec))
+                analyzed.append(analyze_and_report(spec))
                 if len(analyzed) % _CACHE_FLUSH_EVERY == 0:
                     flush_cache(analyzed[-_CACHE_FLUSH_EVERY:])
         finally:
@@ -519,7 +626,7 @@ def _scan_specs(
     for rel, member_items in archive_members.items():
         meta = archive_meta.get(rel, {})
         arc_path = meta.get("path", Path(rel))
-        items.append(_archive_container_item(
+        container = _archive_container_item(
             rel, arc_path.name, arc_path, fmt=meta.get("fmt") or archive_format(rel),
             members=len(member_items), skipped=meta.get("skipped", 0),
             warnings=meta.get("warnings", []), member_items=member_items,
@@ -528,7 +635,9 @@ def _scan_specs(
             missing_dependency=meta.get("missing_dependency"),
             # D9: the container's own digest binds the archive into a signed report.
             sha256=_content_sha256(arc_path, fingerprints) or None,
-        ))
+        )
+        _report(container)
+        items.append(container)
 
     sorted_items = sort_items(items)
     return summarize(sorted_items, capped=capped, cached=cached_count), sorted_items
@@ -1709,7 +1818,11 @@ def sort_items(items: list[ScanItem]) -> list[ScanItem]:
 
 
 def summarize(items: list[ScanItem], *, capped: bool, cached: int = 0) -> BatchScanSummary:
-    analyzed = [item for item in items if item.status == "analyzed" and item.result]
+    # R5: archive container rows are counted by their verdict like any other
+    # row with a result (they used to land in unsupported_or_failed), so the
+    # header counts equal the CLI table and the GUI pills.
+    analyzed = [item for item in items if is_verdict_row(item.status, item.result is not None)]
+    verdict_rows = {id(item) for item in analyzed}
 
     def count(verdict: Verdict) -> int:
         return sum(1 for item in analyzed if item.result and item.result.verdict_code == verdict)
@@ -1721,7 +1834,9 @@ def summarize(items: list[ScanItem], *, capped: bool, cached: int = 0) -> BatchS
         medium=sum(1 for item in analyzed if item.result and item.result.band == RiskBand.MEDIUM),
         unknown=sum(1 for item in analyzed if item.result and item.result.band == RiskBand.UNKNOWN),
         low=sum(1 for item in analyzed if item.result and item.result.band == RiskBand.LOW),
-        unsupported_or_failed=sum(1 for item in items if item.status not in {"analyzed", "duplicate", "skipped"}),
+        unsupported_or_failed=sum(
+            1 for item in items if id(item) not in verdict_rows and item.status not in {"duplicate", "skipped"}
+        ),
         capped=capped,
         cached=cached,
         duplicates=sum(1 for item in items if item.status == "duplicate"),

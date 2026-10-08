@@ -850,16 +850,18 @@ class SummaryParityTest(unittest.TestCase):
     def test_web_summary_matches_core_contract(self):
         from deepfake_lens.webapp_api import _summarize_records
         summary = _summarize_records(self._rows(), "test")
-        # container/failed rows never count as analyzed
+        # R5: an archive container row with a result is counted by its
+        # verdict (undetermined here) like the CLI table and GUI show it;
+        # only the failed row lands in unsupported_or_failed.
         self.assertEqual(summary["total"], 6)
-        self.assertEqual(summary["analyzed"], 2)
+        self.assertEqual(summary["analyzed"], 3)
         # D16: verdict counts only — the legacy band keys are not serialized.
         self.assertEqual(summary["manipulation_evidence"], 1)
         self.assertEqual(summary["authenticity_evidence"], 1)
-        self.assertEqual(summary["undetermined"], 0)
+        self.assertEqual(summary["undetermined"], 1)
         for legacy in ("high", "medium", "low", "unknown"):
             self.assertNotIn(legacy, summary)
-        self.assertEqual(summary["unsupported_or_failed"], 2)
+        self.assertEqual(summary["unsupported_or_failed"], 1)
         self.assertEqual(summary["duplicates"], 1)
         self.assertEqual(summary["skipped"], 1)
         self.assertEqual(summary["external_model_active"], 1)
@@ -887,11 +889,12 @@ class SummaryParityTest(unittest.TestCase):
             ScanItem("big.iso", "big.iso", "unknown", "skipped", 10),
         ]
         summary = summarize(items, capped=False)
-        self.assertEqual(summary.analyzed, 2)
+        # R5: the archive container row is counted by its verdict/band.
+        self.assertEqual(summary.analyzed, 3)
         self.assertEqual(summary.high, 1)
         self.assertEqual(summary.low, 1)
-        self.assertEqual(summary.unknown, 0)
-        self.assertEqual(summary.unsupported_or_failed, 2)
+        self.assertEqual(summary.unknown, 1)
+        self.assertEqual(summary.unsupported_or_failed, 1)
         self.assertEqual(summary.duplicates, 1)
         self.assertEqual(summary.skipped, 1)
 

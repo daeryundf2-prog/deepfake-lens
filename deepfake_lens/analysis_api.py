@@ -30,9 +30,12 @@ from .core import (
     DEFAULT_TEXT_BYTES,
     BatchScanSummary,
     ScanItem,
+    ScanProgress,
     _thresholds_json,
+    _with_content_sha256,
     analyze_file,
     scan_directory,
+    scan_paths,
     scan_to_json,
     summarize,
 )
@@ -273,6 +276,10 @@ def analyze_path(
         deep_signals=options.deep_signals,
         thresholds=thresholds,
     )
+    # The row carries the analyzed bytes' SHA-256 like a folder-scan row
+    # (uploads, single-file checks), so every leg reports the same digest.
+    if item.status != "failed":
+        item = _with_content_sha256(item, Path(path), None)
     fusion = _fusion_profile(options)
     if fusion is not None and item.result is not None:
         from .fusion import apply_fusion_to_items
@@ -287,8 +294,15 @@ def scan_folder(
     should_stop: Callable[[], bool] | None = None,
     *,
     warn: WarnFn | None = None,
+    progress: ScanProgress | None = None,
 ) -> tuple[BatchScanSummary, list[ScanItem], Any]:
     """Scan a folder; returns ``(summary, items, thresholds)``.
+
+    ``progress(item, done, planned)`` is called with every row as it
+    completes (archive members and container rows, symlink rows included)
+    — streaming front ends report from it instead of walking the folder
+    themselves (R1). Rows passed to ``progress`` are pre-fusion; the
+    returned items are final.
 
     Raises ``NotADirectoryError``/``OSError`` like ``core.scan_directory``.
     """
@@ -313,14 +327,56 @@ def scan_folder(
         deep_signals=options.deep_signals,
         thresholds=thresholds,
         should_stop=should_stop,
+        progress=progress,
     )
+    return _with_fusion(summary, items, options) + (thresholds,)
+
+
+def scan_file(
+    path: Path | str,
+    options: AnalysisOptions,
+    *,
+    thresholds: Any = _UNSET,
+    progress: ScanProgress | None = None,
+) -> tuple[BatchScanSummary, list[ScanItem], Any]:
+    """Analyze one file as a folder scan of its parent would; ``(summary, items, thresholds)``.
+
+    A regular file yields one row (same as :func:`analyze_path`); an
+    archive yields its member rows plus the container row with refused
+    members recorded per member (R1) — so ``/api/check`` with an archive
+    path reports what ``scan`` reports for that archive.
+    """
+    file_path = Path(path)
+    if thresholds is _UNSET:
+        thresholds = load_thresholds(options)
+    summary, items = scan_paths(
+        [file_path],
+        root=file_path.parent,
+        text_bytes=options.text_bytes,
+        metadata_bytes=options.metadata_bytes,
+        pixel_mode=options.pixel_mode,
+        pixel_max_side=options.pixel_max_side,
+        heatmaps=options.heatmaps,
+        heatmap_dir=options.heatmap_dir,
+        model_path=options.engine_profiles(),
+        max_file_bytes=options.max_file_bytes,
+        deep_signals=options.deep_signals,
+        thresholds=thresholds,
+        progress=progress,
+    )
+    return _with_fusion(summary, items, options) + (thresholds,)
+
+
+def _with_fusion(
+    summary: BatchScanSummary, items: list[ScanItem], options: AnalysisOptions,
+) -> tuple[BatchScanSummary, list[ScanItem]]:
     fusion = _fusion_profile(options)
     if fusion is not None:
         from .fusion import apply_fusion_to_items
 
         items = apply_fusion_to_items(items, fusion)
         summary = summarize(items, capped=summary.capped, cached=summary.cached)
-    return summary, items, thresholds
+    return summary, items
 
 
 def scan_payload(summary: BatchScanSummary, items: list[ScanItem], thresholds: Any, options: AnalysisOptions) -> dict[str, object]:
@@ -415,6 +471,7 @@ __all__ = [
     "default_engine_profiles",
     "load_thresholds",
     "provenance",
+    "scan_file",
     "scan_folder",
     "scan_payload",
 ]

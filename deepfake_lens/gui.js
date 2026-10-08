@@ -249,7 +249,8 @@
 
         function verdictOf(item) {
             const r = (item && item.result) || null;
-            if (!r || item.status === 'failed' || item.status === 'unsupported') return 'other';
+            // R5: same rule as result_types.is_verdict_row — container rows count by verdict.
+            if (!r || ['failed', 'unsupported', 'duplicate', 'skipped'].includes(item.status)) return 'other';
             return r.verdict_code || 'undetermined';
         }
         function checkLabel(check) {
