@@ -210,16 +210,27 @@ def _contains_generation_fields(normalized: str) -> bool:
     return sum(1 for field in fields if field in normalized) >= 2
 
 
+# D11: every text source hint below comes from words in the text itself —
+# lexical evidence that a person writing *about* ChatGPT or AI produces just
+# as well. It is shown as "참고: …" with confidence UNKNOWN and never as a
+# medium/high attribution.
+TEXT_SOURCE_REFERENCE_NOTE = "원문 어휘에서 나온 참고 단서이며, 작성 도구나 작성자를 판별한 결과가 아닙니다."
+
+
 def guess_text_source(normalized_text: str, ai_identity_hits: int) -> SourceGuess:
     if "chatgpt" in normalized_text or "openai" in normalized_text:
-        return SourceGuess("ChatGPT/OpenAI 단서 있음", SourceConfidence.MEDIUM, ["원문에 ChatGPT 또는 OpenAI가 직접 언급되었습니다."])
+        return _text_reference_guess("참고: 원문에 ChatGPT/OpenAI 언급", "원문에 ChatGPT 또는 OpenAI가 언급되었습니다.")
     if "claude" in normalized_text or "anthropic" in normalized_text:
-        return SourceGuess("Claude 단서 있음", SourceConfidence.MEDIUM, ["원문에 Claude 또는 Anthropic이 직접 언급되었습니다."])
+        return _text_reference_guess("참고: 원문에 Claude/Anthropic 언급", "원문에 Claude 또는 Anthropic이 언급되었습니다.")
     if "gemini" in normalized_text or "bard" in normalized_text:
-        return SourceGuess("Gemini/Bard 단서 있음", SourceConfidence.MEDIUM, ["원문에 Gemini 또는 Bard가 직접 언급되었습니다."])
+        return _text_reference_guess("참고: 원문에 Gemini/Bard 언급", "원문에 Gemini 또는 Bard가 언급되었습니다.")
     if ai_identity_hits:
-        return SourceGuess("AI 어시스턴트 문체 추정", SourceConfidence.MEDIUM, ["AI 또는 언어 모델임을 직접 암시하는 문구가 있습니다."])
+        return _text_reference_guess("참고: AI 어시스턴트 문체 유사", "AI 또는 언어 모델을 언급하는 문구가 있습니다.")
     return SourceGuess.unknown()
+
+
+def _text_reference_guess(label: str, reason: str) -> SourceGuess:
+    return SourceGuess(label, SourceConfidence.UNKNOWN, [reason, TEXT_SOURCE_REFERENCE_NOTE])
 
 
 def _technical_document_density(text: str, lines: list[str]) -> float:

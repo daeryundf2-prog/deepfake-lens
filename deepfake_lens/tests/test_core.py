@@ -43,7 +43,10 @@ class DeepfakeLensCoreTest(unittest.TestCase):
         self.assertEqual(result.verdict_code, Verdict.UNDETERMINED)
         self.assertEqual(result.grade, Grade.REFERENCE)
         self.assertTrue(any(item.title == "AI 자기표현 문구" and item.kind == EvidenceKind.LEXICAL for item in result.evidence))
-        self.assertEqual(result.source_guess.label, "AI 어시스턴트 문체 추정")
+        # D11: a lexical source hint is labeled 참고 with confidence
+        # unknown (was: "AI 어시스턴트 문체 추정", medium).
+        self.assertEqual(result.source_guess.label, "참고: AI 어시스턴트 문체 유사")
+        self.assertEqual(result.source_guess.confidence, SourceConfidence.UNKNOWN)
 
     def test_generic_ai_like_text_does_not_invent_vendor(self) -> None:
         result = analyze_text("결론적으로 이 문제는 다양한 관점에서 접근해야 합니다. 균형 잡힌 이해가 도움이 됩니다.")
