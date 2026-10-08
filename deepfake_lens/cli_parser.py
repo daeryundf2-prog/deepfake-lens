@@ -342,6 +342,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     doctor_parser = subparsers.add_parser("doctor", help="diagnose model weights, accelerators, and dependencies")
     doctor_parser.add_argument("--format", choices=["table", "json"], default="table")
     doctor_parser.add_argument("--json-out", type=Path, help="write the diagnostic report as JSON")
+    doctor_parser.add_argument("--models-dir", type=Path, help="models directory to diagnose (default: packaged models/ or $DEEPFAKE_LENS_MODELS_DIR)")
 
     faceswap_parser = subparsers.add_parser("faceswap-seam", help="analyze localized face-swap boundary seams, Poisson feathering, and sensor noise mismatch")
     faceswap_parser.add_argument("--thresholds", type=Path, help="layer-threshold profile JSON overriding heuristic cutoffs")

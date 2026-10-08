@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import threading
 from collections import OrderedDict
 
 
@@ -53,31 +54,52 @@ class _ModelLRU(OrderedDict):
     Evicting least-recently-used entries keeps a bounded residency while
     still avoiding per-file reloads. Instances register themselves in
     ``_MODEL_CACHES`` so ``clear_all_model_caches`` reaches every cache.
+
+    Thread-safe (G34): scans run file workers in a thread pool and the web
+    servers analyze on request threads, so get/set/clear take a per-cache
+    re-entrant lock (``move_to_end`` during a concurrent eviction would
+    otherwise raise KeyError or corrupt the order). Evicted models are
+    released outside the lock — ``gc.collect`` can be slow.
     """
 
     def __init__(self, limit: int) -> None:
         super().__init__()
         self.limit = limit
+        self._lock = threading.RLock()
         _MODEL_CACHES.append(self)
 
     def __getitem__(self, key):
-        value = super().__getitem__(key)
-        self.move_to_end(key)
-        return value
+        with self._lock:
+            value = super().__getitem__(key)
+            self.move_to_end(key)
+            return value
 
     def get(self, key, default=None):
-        try:
-            return self[key]
-        except KeyError:
-            return default
+        with self._lock:
+            try:
+                return self[key]
+            except KeyError:
+                return default
 
     def __setitem__(self, key, value):
-        if key in self:
-            del self[key]
-        super().__setitem__(key, value)
-        while len(self) > self.limit:
-            _, evicted = self.popitem(last=False)
-            _release_cached_model(evicted)
+        evicted: list[object] = []
+        with self._lock:
+            if key in self:
+                super().__delitem__(key)
+            super().__setitem__(key, value)
+            while len(self) > self.limit:
+                _, old = self.popitem(last=False)
+                evicted.append(old)
+        for entry in evicted:
+            _release_cached_model(entry)
+
+    def __delitem__(self, key):
+        with self._lock:
+            super().__delitem__(key)
+
+    def clear(self) -> None:
+        with self._lock:
+            super().clear()
 
 
 def clear_all_model_caches() -> None:

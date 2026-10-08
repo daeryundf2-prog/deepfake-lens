@@ -3,12 +3,16 @@ import tarfile
 import zipfile
 from pathlib import Path
 import unittest
+from typing import Sequence
 from unittest.mock import patch
 
 from deepfake_lens.archives import (
+    ExtractionBudget,
     archive_format,
     extract_archive,
     is_archive,
+    _7z_link_names,
+    _rar_member_rejected,
     _safe_member_name,
 )
 from deepfake_lens.core import analyze_file, scan_directory
@@ -188,6 +192,218 @@ class ScanIntegrationTests(unittest.TestCase):
         item = analyze_file(zpath)
         self.assertEqual(item.kind, "archive")
         self.assertEqual(item.status, "analyzed")
+
+
+def _zip_payload(members: dict[str, bytes]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+    return buffer.getvalue()
+
+
+class ExtractionBudgetTests(unittest.TestCase):
+    """G34: one aggregate budget per top-level archive, threaded through nesting."""
+
+    def setUp(self) -> None:
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_default_budget_limits(self) -> None:
+        budget = ExtractionBudget.default()
+        self.assertEqual(budget.total_bytes, 2 * 1024 * 1024 * 1024)
+        self.assertEqual(budget.total_members, 5000)
+        self.assertEqual(budget.nested_archives, 50)
+
+    def test_nested_archive_budget(self) -> None:
+        inner = {f"in{i}.zip": _zip_payload({f"n{i}.txt": b"inner text content"}) for i in range(5)}
+        zpath = self.tmp / "outer.zip"
+        make_zip(zpath, inner)
+        budget = ExtractionBudget(nested_archives=2)
+        out = extract_archive(zpath, self.tmp / "out", budget=budget)
+        self.assertEqual(budget.nested_used, 2)
+        self.assertEqual(sorted(m.name for m in out.members), ["n0.txt", "n1.txt"])
+        self.assertEqual(out.skipped, 3)
+        self.assertTrue(any("중첩 압축 예산" in w for w in out.warnings), out.warnings)
+
+    def test_byte_budget_counts_written_bytes(self) -> None:
+        zpath = self.tmp / "a.zip"
+        make_zip(zpath, {f"m{i}.bin": bytes([i]) * 100 for i in range(3)})
+        budget = ExtractionBudget(total_bytes=250)
+        out = extract_archive(zpath, self.tmp / "out", budget=budget)
+        self.assertEqual(len(out.members), 2)
+        self.assertLessEqual(budget.bytes_used, 250)
+        self.assertTrue(any("총량 예산" in w for w in out.warnings), out.warnings)
+
+    def test_member_budget_shared_across_nesting(self) -> None:
+        inner = {f"in{i}.zip": _zip_payload({f"n{i}-{j}.txt": b"x" * 10 for j in range(3)}) for i in range(2)}
+        zpath = self.tmp / "outer.zip"
+        make_zip(zpath, inner)
+        budget = ExtractionBudget(total_members=5)
+        out = extract_archive(zpath, self.tmp / "out", budget=budget)
+        # 2 inner zips + 3 members of the first; the second inner zip gets none.
+        self.assertEqual(budget.members_used, 5)
+        self.assertEqual(sorted(m.name for m in out.members), ["in1.zip", "n0-0.txt", "n0-1.txt", "n0-2.txt"])
+        self.assertTrue(any("멤버 수 예산" in w for w in out.warnings), out.warnings)
+
+    def test_same_stem_inner_archives_do_not_collide(self) -> None:
+        zpath = self.tmp / "outer.zip"
+        make_zip(zpath, {
+            "a/x.zip": _zip_payload({"one.txt": b"first inner"}),
+            "b/x.zip": _zip_payload({"two.txt": b"second inner"}),
+        })
+        out = extract_archive(zpath, self.tmp / "out")
+        self.assertEqual(sorted(m.name for m in out.members), ["one.txt", "two.txt"])
+
+    def test_docstring_does_not_claim_tar_filter(self) -> None:
+        import deepfake_lens.archives as archives_module
+
+        self.assertNotIn('filter="data"', archives_module.__doc__ or "")
+
+
+class _FakeRarInfo:
+    def __init__(self, filename: str, data: bytes, *, symlink: bool = False, redir: object = None, regular: bool = True) -> None:
+        self.filename = filename
+        self.file_size = len(data)
+        self.data = data
+        self.file_redir = redir
+        self._symlink = symlink
+        self._regular = regular
+
+    def isdir(self) -> bool:
+        return False
+
+    def is_symlink(self) -> bool:
+        return self._symlink
+
+    def is_file(self) -> bool:
+        return self._regular and not self._symlink
+
+
+class _FakeRarFile:
+    infos: list[_FakeRarInfo] = []
+
+    def __init__(self, path: object) -> None:
+        self.path = path
+
+    def __enter__(self) -> "_FakeRarFile":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def infolist(self) -> list[_FakeRarInfo]:
+        return list(self.infos)
+
+    def open(self, info: _FakeRarInfo) -> io.BytesIO:
+        return io.BytesIO(info.data)
+
+
+class _Fake7zEntry:
+    def __init__(self, filename: str, data: bytes, *, symlink: bool = False) -> None:
+        self.filename = filename
+        self.data = data
+        self.uncompressed = len(data)
+        self.is_directory = False
+        self._symlink = symlink
+
+    @property
+    def is_symlink(self) -> bool:
+        return self._symlink
+
+
+class _FakeSevenZipFile:
+    entries: list[_Fake7zEntry] = []
+    extracted: list[str] = []
+
+    def __init__(self, path: object) -> None:
+        self.files = list(self.entries)
+
+    def __enter__(self) -> "_FakeSevenZipFile":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def list(self) -> list[_Fake7zEntry]:
+        return list(self.entries)
+
+    def extract(self, dest: Path, targets: "Sequence[str]") -> None:
+        by_name = {entry.filename: entry for entry in self.entries}
+        for name in targets:
+            _FakeSevenZipFile.extracted.append(name)
+            target = Path(dest) / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(by_name[name].data)
+
+
+class OptionalFormatLinkTests(unittest.TestCase):
+    """G34: 7z/rar symlink (and other non-regular) members are refused.
+
+    py7zr/rarfile are optional and absent in CI, so the libraries are
+    replaced by fakes exposing the member attributes they document.
+    """
+
+    def setUp(self) -> None:
+        import tempfile
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_rar_symlink_and_redirect_members_skipped(self) -> None:
+        import sys
+        import types
+
+        module = types.ModuleType("rarfile")
+        module.RarFile = _FakeRarFile  # type: ignore[attr-defined]
+        _FakeRarFile.infos = [
+            _FakeRarInfo("ok.txt", b"regular rar member"),
+            _FakeRarInfo("link", b"/etc/passwd", symlink=True),
+            _FakeRarInfo("hard", b"", redir=(4, 0, "ok.txt")),
+            _FakeRarInfo("device", b"", regular=False),
+        ]
+        archive = self.tmp / "a.rar"
+        archive.write_bytes(b"Rar!")
+        with patch.dict(sys.modules, {"rarfile": module}):
+            out = extract_archive(archive, self.tmp / "out")
+        self.assertEqual([m.name for m in out.members], ["ok.txt"])
+        self.assertEqual(out.skipped, 3)
+        self.assertFalse((self.tmp / "out" / "link").exists())
+
+    def test_7z_symlink_members_skipped(self) -> None:
+        import sys
+        import types
+
+        module = types.ModuleType("py7zr")
+        module.SevenZipFile = _FakeSevenZipFile  # type: ignore[attr-defined]
+        _FakeSevenZipFile.entries = [
+            _Fake7zEntry("ok.txt", b"regular 7z member"),
+            _Fake7zEntry("link", b"/etc", symlink=True),
+        ]
+        _FakeSevenZipFile.extracted = []
+        archive = self.tmp / "a.7z"
+        archive.write_bytes(b"7z")
+        with patch.dict(sys.modules, {"py7zr": module}):
+            out = extract_archive(archive, self.tmp / "out")
+        self.assertEqual([m.name for m in out.members], ["ok.txt"])
+        self.assertEqual(out.skipped, 1)
+        self.assertEqual(_FakeSevenZipFile.extracted, ["ok.txt"])
+
+    def test_link_predicates(self) -> None:
+        self.assertTrue(_rar_member_rejected(_FakeRarInfo("l", b"", symlink=True)))
+        self.assertTrue(_rar_member_rejected(_FakeRarInfo("h", b"", redir=(4, 0, "x"))))
+        self.assertFalse(_rar_member_rejected(_FakeRarInfo("f", b"data")))
+
+        class Archive:
+            files = [_Fake7zEntry("a", b""), _Fake7zEntry("b", b"", symlink=True)]
+
+        self.assertEqual(_7z_link_names(Archive()), {"b"})
 
 
 if __name__ == "__main__":

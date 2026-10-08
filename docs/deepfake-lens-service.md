@@ -9,6 +9,10 @@ files on request, so exposure beyond loopback is an explicit, guarded choice.
 | REST API | `deepfake-lens api-serve` (`deepfake_lens.api_server`) | FastAPI + uvicorn (optional deps) | `X-API-Token` header when `--token` is set; loopback Host allowlist otherwise |
 | Web GUI | `deepfake-lens web` (`deepfake_lens.webapp`) | stdlib `http.server` | loopback bind + Host-header allowlist; `--allow-lan` to override |
 
+`api-serve` without `fastapi`/`uvicorn` installed prints a Korean install
+hint (`pip install fastapi uvicorn`, or use the stdlib `web` server) to
+stderr and **exits with status 2** — no traceback (G29).
+
 ## One analysis entry point (G7)
 
 The CLI (`scan`, `batch`, `evidence-statement`), the web GUI (`/api/scan`,
@@ -65,6 +69,13 @@ the stream endpoints, `/api/scan`) all analyze through
   `/api/scan`, `/api/scan-status`, `/api/scan-cancel`, `/api/analyze-file`,
   `/api/heatmap`, `/api/preview` (G8). Local tools/curl must send the header
   explicitly.
+- Streaming jobs (`/api/check/stream`, `/api/scan/stream`) are capped at 32
+  in flight; a 33rd gets **429** `{"detail": "too many jobs in flight; …"}`.
+  A client that disconnects mid-stream cancels its job at the next stage
+  boundary. The web server's async scan jobs share the same cap of 32.
+- Synchronous analysis never blocks the API's event loop: analysis handlers
+  are plain `def` (FastAPI's thread pool) and upload/report/feedback bodies
+  are processed with `run_in_threadpool` (G34).
 - There is no rate limiting, TLS, or per-user isolation — put a reverse proxy
   in front if you need those, and keep `--token` mandatory outside loopback.
 
@@ -157,5 +168,10 @@ scanner checks between files — partial results still come back as `done`.
   label**; `limitations` on each result are part of the contract.
 - Optional analyzers degrade to `available: false`/errors when their extras
   are missing — a healthy service response, not a crash.
+- Archives (scan and upload) are expanded under one aggregate budget per
+  top-level archive — 2 GiB written, 5000 members, 50 nested archives,
+  nesting depth 2 — and symlink/hardlink/device members (zip, tar, 7z, rar)
+  are never materialized (G34). A container that hits a budget is
+  `판단 불가` with the reason in `limitations`.
 - The service has no persistence, queueing, or auth beyond the token; it is a
   thin documented shell over the same modules the CLI uses.

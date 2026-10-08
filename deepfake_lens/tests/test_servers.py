@@ -901,10 +901,34 @@ class SummaryParityTest(unittest.TestCase):
         self.assertEqual(web["unsupported_or_failed"], core.unsupported_or_failed)
 
 
+class ApiServeMissingDependenciesTest(unittest.TestCase):
+    """G29: `api-serve` without fastapi/uvicorn exits 2 with a Korean hint, no traceback."""
+
+    def test_api_serve_exits_2_with_install_hint(self) -> None:
+        import contextlib
+        import io
+
+        from deepfake_lens import cli
+
+        err = io.StringIO()
+        with patch.object(api_server, "missing_server_dependencies", return_value=["fastapi", "uvicorn"]), \
+                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as ctx:
+            cli.main(["api-serve", "--port", "0"])
+        self.assertEqual(ctx.exception.code, 2)
+        message = err.getvalue()
+        self.assertIn("pip install fastapi uvicorn", message)
+        self.assertIn("설치", message)
+        self.assertNotIn("Traceback", message)
+
+    def test_missing_dependencies_reflect_environment(self) -> None:
+        expected = [name for name in api_server.SERVER_DEPENDENCIES if importlib.util.find_spec(name) is None]
+        self.assertEqual(api_server.missing_server_dependencies(), expected)
+
+
 @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed")
 class ApiServerHardeningTest(unittest.TestCase):
-    """G8 on the FastAPI server: preview/heatmap tuples, nosniff, client
-    header on scan GETs, request paths confined (400)."""
+    """G8/G34 on the FastAPI server: preview/heatmap tuples, nosniff, client
+    header on scan GETs, job cap (429), request paths confined (400)."""
 
     _LOCAL = {"host": "localhost"}
 
@@ -950,6 +974,11 @@ class ApiServerHardeningTest(unittest.TestCase):
         self.assertEqual(denied.status_code, 403)
         self.assertTrue(denied.headers["content-type"].startswith("text/plain"))
         self.assertEqual(denied.headers["x-content-type-options"], "nosniff")
+
+    def test_job_registry_cap_returns_429(self) -> None:
+        with patch.object(api_server, "MAX_JOBS", 0):
+            res = self.client.post("/api/check/stream", params={"text": "테스트 문장입니다. " * 4}, headers=self._gui())
+        self.assertEqual(res.status_code, 429)
 
     def test_model_path_outside_models_dir_is_400(self) -> None:
         res = self.client.get("/api/scan", params={"folder": str(self.root), "model_path": "/etc/passwd"}, headers=self._gui())

@@ -6,10 +6,18 @@ each payload. Guards against the classic archive attack surface:
 
 - zip-slip / path traversal (``..``, absolute paths, drive letters, ADS
   ``:`` names) — members are name-checked AND resolve-checked under dest
-- zip bombs — cumulative uncompressed-byte cap, per-member cap, and a
-  compression-ratio cap for deflate members
-- symlink/hardlink/device members — skipped (zip external_attr bits,
-  tarfile ``filter="data"``)
+- zip bombs — per-archive and aggregate uncompressed-byte caps counted on
+  the bytes actually written (declared sizes can lie), a per-member cap,
+  and a compression-ratio cap for deflate members
+- nesting bombs (G34) — one :class:`ExtractionBudget` per top-level archive
+  is threaded through every nested extraction: total bytes written, total
+  members, and number of nested archives opened are bounded across the
+  whole tree, not per level
+- symlink/hardlink/device members — skipped: zip ``external_attr`` mode
+  bits, tar members that are not regular files (``TarInfo.isreg()``; the
+  bytes are copied via ``extractfile``, never ``extract``/``extractall``),
+  7z ``is_symlink``/junction entries and rar ``is_symlink()``/redirect
+  (``file_redir``) or otherwise non-regular entries
 - member-count cap — quirk archives with tens of thousands of entries
 
 ``.zip`` and tar variants use the stdlib; ``.7z`` (py7zr) and ``.rar``
@@ -18,22 +26,34 @@ each payload. Guards against the classic archive attack surface:
 
 from __future__ import annotations
 
-import os
 import tarfile
+import zlib
 import zipfile
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath
+from typing import IO, Any
 
 SUPPORTED_ARCHIVE_EXTENSIONS = {
     ".zip", ".tar", ".tgz", ".tar.gz", ".tar.bz2", ".tbz2",
     ".tar.xz", ".txz", ".7z", ".rar",
 }
 
+# Per-archive limits (one container level).
 MAX_ARCHIVE_MEMBERS = 1000
 MAX_ARCHIVE_TOTAL_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_MEMBER_BYTES = 256 * 1024 * 1024
 MAX_ARCHIVE_RATIO = 200
 MAX_NESTED_DEPTH = 2
+
+# Aggregate limits across one top-level archive and everything nested in it
+# (phase-0 spec WP-H, G34): 2 GiB written, 5000 members, 50 nested archives.
+# The per-archive limits above apply to each level; these bound the tree —
+# 100 inner zips of 512 MB each would otherwise write 51 GB.
+TOTAL_EXTRACTION_BYTES = 2 * 1024 * 1024 * 1024
+TOTAL_EXTRACTION_MEMBERS = 5000
+TOTAL_NESTED_ARCHIVES = 50
+
+_COPY_CHUNK_BYTES = 1024 * 1024
 
 # Windows device names that can never be created as files.
 _WINDOWS_RESERVED = {
@@ -48,6 +68,54 @@ class ArchiveExtraction:
     members: list[Path] = field(default_factory=list)
     skipped: int = 0
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
+class ExtractionBudget:
+    """Aggregate extraction allowance for one top-level archive tree (G34).
+
+    Every extractor charges the bytes it actually writes and each member it
+    keeps; ``extract_archive`` charges each nested archive it opens. Once a
+    dimension is exhausted the remaining members are skipped with a warning.
+    """
+
+    total_bytes: int = TOTAL_EXTRACTION_BYTES
+    total_members: int = TOTAL_EXTRACTION_MEMBERS
+    nested_archives: int = TOTAL_NESTED_ARCHIVES
+    bytes_used: int = 0
+    members_used: int = 0
+    nested_used: int = 0
+    exhausted_warned: set[str] = field(default_factory=set)
+
+    @classmethod
+    def default(cls) -> "ExtractionBudget":
+        """A fresh budget from the module limits (read at call time)."""
+        return cls(
+            total_bytes=TOTAL_EXTRACTION_BYTES,
+            total_members=TOTAL_EXTRACTION_MEMBERS,
+            nested_archives=TOTAL_NESTED_ARCHIVES,
+        )
+
+    def bytes_left(self) -> int:
+        return max(0, self.total_bytes - self.bytes_used)
+
+    def members_left(self) -> int:
+        return max(0, self.total_members - self.members_used)
+
+    def nested_left(self) -> int:
+        return max(0, self.nested_archives - self.nested_used)
+
+    def note_exhausted(self, kind: str, out: ArchiveExtraction) -> None:
+        """Warn once per budget dimension per tree."""
+        if kind in self.exhausted_warned:
+            return
+        self.exhausted_warned.add(kind)
+        if kind == "bytes":
+            out.warnings.append(f"압축 해제 총량 예산({self.total_bytes // (1024 * 1024)}MB) 소진 — 나머지 생략")
+        elif kind == "members":
+            out.warnings.append(f"압축 해제 멤버 수 예산({self.total_members}) 소진 — 나머지 생략")
+        else:
+            out.warnings.append(f"중첩 압축 예산({self.nested_archives}개) 소진 — 나머지 중첩 압축 미해제")
 
 
 def archive_format(path: Path | str) -> str | None:
@@ -113,15 +181,73 @@ def _is_zip_symlink(info: zipfile.ZipInfo) -> bool:
     return (info.external_attr >> 16) & 0o170000 == 0o120000
 
 
-def _extract_zip(path: Path, dest: Path, out: ArchiveExtraction) -> None:
+def _member_cap(per_archive_total: int, budget: ExtractionBudget) -> int:
+    """Bytes the next member may write: per-member, per-archive and tree caps."""
+    return max(0, min(MAX_ARCHIVE_MEMBER_BYTES, MAX_ARCHIVE_TOTAL_BYTES - per_archive_total, budget.bytes_left()))
+
+
+def _member_allowed(out: ArchiveExtraction, budget: ExtractionBudget) -> bool:
+    """False (with a warning) once the per-archive or tree member cap is hit."""
+    if len(out.members) >= MAX_ARCHIVE_MEMBERS:
+        out.warnings.append(f"멤버 수 상한({MAX_ARCHIVE_MEMBERS}) 도달 — 나머지 생략")
+        return False
+    if budget.members_left() <= 0:
+        budget.note_exhausted("members", out)
+        return False
+    return True
+
+
+def _declared_fits(declared: int, per_archive_total: int, out: ArchiveExtraction, budget: ExtractionBudget) -> bool:
+    """False (with a warning) when a member's declared size breaks a total cap."""
+    if per_archive_total + declared > MAX_ARCHIVE_TOTAL_BYTES:
+        out.warnings.append(f"해제 총량 상한({MAX_ARCHIVE_TOTAL_BYTES // (1024 * 1024)}MB) 도달 — 나머지 생략")
+        return False
+    if declared > budget.bytes_left():
+        budget.note_exhausted("bytes", out)
+        return False
+    return True
+
+
+def _copy_capped(src: IO[bytes], target: Path, cap: int) -> tuple[int, bool]:
+    """Stream ``src`` into ``target`` writing at most ``cap`` bytes.
+
+    Returns ``(written, truncated)``. Declared member sizes can lie (forged
+    local/central headers), so the cap applies to bytes actually produced.
+    """
+    written = 0
+    truncated = False
+    with target.open("wb") as dst:
+        while True:
+            chunk = src.read(_COPY_CHUNK_BYTES)
+            if not chunk:
+                break
+            remaining = cap - written
+            if len(chunk) > remaining:
+                dst.write(chunk[:remaining])
+                written += remaining
+                truncated = True
+                break
+            dst.write(chunk)
+            written += len(chunk)
+    return written, truncated
+
+
+def _charge(out: ArchiveExtraction, budget: ExtractionBudget, target: Path, rel: str, written: int, truncated: bool) -> None:
+    budget.bytes_used += written
+    budget.members_used += 1
+    if truncated:
+        out.warnings.append(f"{rel}: 크기 상한 초과로 일부만 해제됨")
+    out.members.append(target)
+
+
+def _extract_zip(path: Path, dest: Path, out: ArchiveExtraction, budget: ExtractionBudget) -> None:
     total = 0
     with zipfile.ZipFile(path) as zf:
         for info in zf.infolist():
-            if len(out.members) >= MAX_ARCHIVE_MEMBERS:
-                out.warnings.append(f"멤버 수 상한({MAX_ARCHIVE_MEMBERS}) 도달 — 나머지 생략")
-                break
             if info.is_dir():
                 continue
+            if not _member_allowed(out, budget):
+                break
             if _is_zip_symlink(info):
                 out.skipped += 1
                 continue
@@ -135,8 +261,7 @@ def _extract_zip(path: Path, dest: Path, out: ArchiveExtraction) -> None:
             if info.compress_size and info.file_size // max(1, info.compress_size) > MAX_ARCHIVE_RATIO:
                 out.skipped += 1
                 continue
-            if total + info.file_size > MAX_ARCHIVE_TOTAL_BYTES:
-                out.warnings.append(f"해제 총량 상한({MAX_ARCHIVE_TOTAL_BYTES // (1024 * 1024)}MB) 도달 — 나머지 생략")
+            if not _declared_fits(info.file_size, total, out, budget):
                 break
             target = _dest_for(dest, rel)
             if target is None:
@@ -144,50 +269,36 @@ def _extract_zip(path: Path, dest: Path, out: ArchiveExtraction) -> None:
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             try:
-                written = 0
-                truncated = False
-                with zf.open(info) as src, target.open("wb") as dst:
-                    while True:
-                        chunk = src.read(1024 * 1024)
-                        if not chunk:
-                            break
-                        # Cap real bytes written — declared member sizes
-                        # can lie (forged local/central headers).
-                        remaining = MAX_ARCHIVE_MEMBER_BYTES - written
-                        if len(chunk) > remaining:
-                            dst.write(chunk[:remaining])
-                            truncated = True
-                            break
-                        dst.write(chunk)
-                        written += len(chunk)
-                        if total + written > MAX_ARCHIVE_TOTAL_BYTES:
-                            truncated = True
-                            break
-            except (OSError, zipfile.BadZipFile, RuntimeError):
+                with zf.open(info) as src:
+                    written, truncated = _copy_capped(src, target, _member_cap(total, budget))
+            except (OSError, zipfile.BadZipFile, RuntimeError, EOFError, ValueError, zlib.error):
+                # Corrupt member data (bad CRC, truncated stream, encrypted):
+                # drop the partial file so it is neither analyzed nor left
+                # occupying budget-free disk space.
+                target.unlink(missing_ok=True)
                 out.skipped += 1
                 continue
             total += written
-            if truncated:
-                out.warnings.append(f"{rel}: 크기 상한 초과로 일부만 해제됨")
-            out.members.append(target)
+            _charge(out, budget, target, rel, written, truncated)
 
 
-def _extract_tar(path: Path, dest: Path, out: ArchiveExtraction) -> None:
+def _extract_tar(path: Path, dest: Path, out: ArchiveExtraction, budget: ExtractionBudget) -> None:
     total = 0
     with tarfile.open(path) as tf:
         for member in tf.getmembers():
-            if len(out.members) >= MAX_ARCHIVE_MEMBERS:
-                out.warnings.append(f"멤버 수 상한({MAX_ARCHIVE_MEMBERS}) 도달 — 나머지 생략")
+            if not _member_allowed(out, budget):
                 break
+            # Symlinks, hardlinks, devices and FIFOs are never materialized:
+            # only regular files are copied, and only via extractfile().
             if not member.isreg():
-                out.skipped += 1
+                if not member.isdir():
+                    out.skipped += 1
                 continue
             rel = _safe_member_name(member.name)
             if rel is None or member.size > MAX_ARCHIVE_MEMBER_BYTES:
                 out.skipped += 1
                 continue
-            if total + member.size > MAX_ARCHIVE_TOTAL_BYTES:
-                out.warnings.append(f"해제 총량 상한({MAX_ARCHIVE_TOTAL_BYTES // (1024 * 1024)}MB) 도달 — 나머지 생략")
+            if not _declared_fits(member.size, total, out, budget):
                 break
             target = _dest_for(dest, rel)
             if target is None:
@@ -199,33 +310,42 @@ def _extract_tar(path: Path, dest: Path, out: ArchiveExtraction) -> None:
                 if src is None:
                     out.skipped += 1
                     continue
-                written = 0
-                truncated = False
-                with src, target.open("wb") as dst:
-                    while True:
-                        chunk = src.read(1024 * 1024)
-                        if not chunk:
-                            break
-                        remaining = MAX_ARCHIVE_MEMBER_BYTES - written
-                        if len(chunk) > remaining:
-                            dst.write(chunk[:remaining])
-                            truncated = True
-                            break
-                        dst.write(chunk)
-                        written += len(chunk)
-                        if total + written > MAX_ARCHIVE_TOTAL_BYTES:
-                            truncated = True
-                            break
-            except (OSError, tarfile.TarError):
+                with src:
+                    written, truncated = _copy_capped(src, target, _member_cap(total, budget))
+            except (OSError, tarfile.TarError, EOFError, zlib.error):
+                target.unlink(missing_ok=True)
                 out.skipped += 1
                 continue
             total += written
-            if truncated:
-                out.warnings.append(f"{rel}: 크기 상한 초과로 일부만 해제됨")
-            out.members.append(target)
+            _charge(out, budget, target, rel, written, truncated)
 
 
-def _extract_7z(path: Path, dest: Path, out: ArchiveExtraction) -> None:
+def _flag(entry: Any, name: str) -> bool:
+    """Read a bool attribute or zero-arg predicate method from a library entry."""
+    value = getattr(entry, name, False)
+    if callable(value):
+        try:
+            value = value()
+        except TypeError:
+            return False
+    return bool(value)
+
+
+def _7z_link_names(sf: Any) -> set[str]:
+    """Names of 7z entries that are symlinks/junctions/devices (never extracted).
+
+    py7zr exposes per-entry ``is_symlink``/``is_junction``/``is_socket`` on
+    ``SevenZipFile.files``; ``list()`` rows may carry ``is_symlink`` too.
+    """
+    names: set[str] = set()
+    entries = list(getattr(sf, "files", None) or [])
+    for entry in entries:
+        if any(_flag(entry, attr) for attr in ("is_symlink", "is_junction", "is_socket")):
+            names.add(str(getattr(entry, "filename", "")))
+    return names
+
+
+def _extract_7z(path: Path, dest: Path, out: ArchiveExtraction, budget: ExtractionBudget) -> None:
     try:
         import py7zr
     except ImportError:
@@ -234,35 +354,72 @@ def _extract_7z(path: Path, dest: Path, out: ArchiveExtraction) -> None:
     total = 0
     try:
         with py7zr.SevenZipFile(path) as sf:
+            links = _7z_link_names(sf)
             infos = {i.filename: i for i in sf.list() if not i.is_directory}
             targets: list[str] = []
             for name, info in infos.items():
                 if len(targets) >= MAX_ARCHIVE_MEMBERS:
                     out.warnings.append(f"멤버 수 상한({MAX_ARCHIVE_MEMBERS}) 도달 — 나머지 생략")
                     break
-                rel = _safe_member_name(name)
-                if rel is None or info.uncompressed > MAX_ARCHIVE_MEMBER_BYTES:
+                if len(targets) >= budget.members_left():
+                    budget.note_exhausted("members", out)
+                    break
+                if name in links or _flag(info, "is_symlink"):
                     out.skipped += 1
                     continue
-                if total + info.uncompressed > MAX_ARCHIVE_TOTAL_BYTES:
-                    out.warnings.append(f"해제 총량 상한({MAX_ARCHIVE_TOTAL_BYTES // (1024 * 1024)}MB) 도달 — 나머지 생략")
+                rel = _safe_member_name(name)
+                declared = int(getattr(info, "uncompressed", 0) or 0)
+                if rel is None or declared > MAX_ARCHIVE_MEMBER_BYTES:
+                    out.skipped += 1
+                    continue
+                if not _declared_fits(declared, total, out, budget):
                     break
-                total += info.uncompressed
+                total += declared
                 targets.append(name)
             if targets:
                 sf.extract(dest, targets=targets)
             for name in targets:
                 rel = _safe_member_name(name)
                 target = _dest_for(dest, rel) if rel else None
-                if target and target.is_file():
-                    out.members.append(target)
-                else:
+                if target is None or target.is_symlink() or not target.is_file():
+                    if target is not None and target.is_symlink():
+                        target.unlink(missing_ok=True)
                     out.skipped += 1
-    except Exception as exc:  # py7zr raises several custom error types
-        out.warnings.append(f"7z 해제 실패: {exc}")
+                    continue
+                size = target.stat().st_size
+                if size > budget.bytes_left():
+                    # Headers under-declared the payload: never keep bytes
+                    # beyond the tree budget.
+                    target.unlink(missing_ok=True)
+                    budget.note_exhausted("bytes", out)
+                    out.skipped += 1
+                    continue
+                _charge(out, budget, target, rel or name, size, False)
+    except Exception as exc:  # noqa: BLE001 - py7zr raises several custom error types
+        out.warnings.append(f"7z 해제 실패: {type(exc).__name__}: {exc}")
 
 
-def _extract_rar(path: Path, dest: Path, out: ArchiveExtraction) -> None:
+def _rar_member_rejected(info: Any) -> bool:
+    """True for rar entries that are not plain regular files.
+
+    rarfile >= 4 exposes ``is_symlink()`` and ``is_file()``; RAR5 hardlinks,
+    file copies and junctions carry a ``file_redir`` tuple. Anything that is
+    not a regular file is refused (fail-closed), not followed.
+    """
+    if _flag(info, "is_symlink"):
+        return True
+    if getattr(info, "file_redir", None):
+        return True
+    is_file = getattr(info, "is_file", None)
+    if callable(is_file):
+        try:
+            return not bool(is_file())
+        except TypeError:
+            return True
+    return False
+
+
+def _extract_rar(path: Path, dest: Path, out: ArchiveExtraction, budget: ExtractionBudget) -> None:
     try:
         import rarfile
     except ImportError:
@@ -272,34 +429,36 @@ def _extract_rar(path: Path, dest: Path, out: ArchiveExtraction) -> None:
     try:
         with rarfile.RarFile(path) as rf:
             for info in rf.infolist():
-                if len(out.members) >= MAX_ARCHIVE_MEMBERS:
-                    out.warnings.append(f"멤버 수 상한({MAX_ARCHIVE_MEMBERS}) 도달 — 나머지 생략")
-                    break
-                if info.isdir():
+                if _flag(info, "isdir") or _flag(info, "is_dir"):
                     continue
-                rel = _safe_member_name(info.filename)
-                if rel is None or info.file_size > MAX_ARCHIVE_MEMBER_BYTES:
+                if not _member_allowed(out, budget):
+                    break
+                if _rar_member_rejected(info):
                     out.skipped += 1
                     continue
-                if total + info.file_size > MAX_ARCHIVE_TOTAL_BYTES:
-                    out.warnings.append(f"해제 총량 상한({MAX_ARCHIVE_TOTAL_BYTES // (1024 * 1024)}MB) 도달 — 나머지 생략")
+                rel = _safe_member_name(str(info.filename))
+                declared = int(getattr(info, "file_size", 0) or 0)
+                if rel is None or declared > MAX_ARCHIVE_MEMBER_BYTES:
+                    out.skipped += 1
+                    continue
+                if not _declared_fits(declared, total, out, budget):
                     break
                 target = _dest_for(dest, rel)
                 if target is None:
                     out.skipped += 1
                     continue
+                target.parent.mkdir(parents=True, exist_ok=True)
                 try:
-                    rf.extract(info, dest)
-                except Exception:
+                    with rf.open(info) as src:
+                        written, truncated = _copy_capped(src, target, _member_cap(total, budget))
+                except Exception:  # noqa: BLE001 - rarfile/unrar errors vary by backend
+                    target.unlink(missing_ok=True)
                     out.skipped += 1
                     continue
-                if target.is_file():
-                    total += info.file_size
-                    out.members.append(target)
-                else:
-                    out.skipped += 1
-    except Exception as exc:
-        out.warnings.append(f"rar 해제 실패: {exc}")
+                total += written
+                _charge(out, budget, target, rel, written, truncated)
+    except Exception as exc:  # noqa: BLE001 - rarfile raises several custom error types
+        out.warnings.append(f"rar 해제 실패: {type(exc).__name__}: {exc}")
 
 
 def extract_archive(
@@ -307,33 +466,37 @@ def extract_archive(
     dest: Path | str,
     *,
     max_depth: int = MAX_NESTED_DEPTH,
+    budget: ExtractionBudget | None = None,
     _depth: int = 0,
 ) -> ArchiveExtraction:
     """Extract archive members into ``dest`` and return real file paths.
 
-    Nested archives inside the archive are re-expanded up to
-    ``max_depth`` levels; deeper ones are counted as skipped. Never
-    raises for a malformed archive — problems land in ``warnings``.
+    Nested archives inside the archive are re-expanded up to ``max_depth``
+    levels; deeper ones are counted as skipped. ``budget`` bounds the whole
+    tree (bytes written, members kept, nested archives opened); a top-level
+    call creates a fresh :meth:`ExtractionBudget.default` and passes it down.
+    Never raises for a malformed archive — problems land in ``warnings``.
     """
     src = Path(path)
     root = Path(dest)
     root.mkdir(parents=True, exist_ok=True)
+    tree_budget = budget if budget is not None else ExtractionBudget.default()
     out = ArchiveExtraction()
     fmt = archive_format(src)
     try:
         if fmt == "zip":
-            _extract_zip(src, root, out)
+            _extract_zip(src, root, out, tree_budget)
         elif fmt == "tar":
-            _extract_tar(src, root, out)
+            _extract_tar(src, root, out, tree_budget)
         elif fmt == "7z":
-            _extract_7z(src, root, out)
+            _extract_7z(src, root, out, tree_budget)
         elif fmt == "rar":
-            _extract_rar(src, root, out)
+            _extract_rar(src, root, out, tree_budget)
         else:
             out.warnings.append("지원하지 않는 압축 형식입니다.")
             return out
-    except (zipfile.BadZipFile, tarfile.TarError, OSError) as exc:
-        out.warnings.append(f"압축 해제 실패: {exc}")
+    except (zipfile.BadZipFile, tarfile.TarError, OSError, EOFError, ValueError) as exc:
+        out.warnings.append(f"압축 해제 실패: {type(exc).__name__}: {exc}")
         return out
 
     nested = [m for m in out.members if is_archive(m)]
@@ -345,7 +508,19 @@ def extract_archive(
                 out.members.remove(m)
         else:
             for m in nested:
-                sub = extract_archive(m, root / (m.stem + ".unpacked"), max_depth=max_depth, _depth=_depth + 1)
+                if tree_budget.nested_left() <= 0:
+                    tree_budget.note_exhausted("nested", out)
+                    out.members.remove(m)
+                    out.skipped += 1
+                    continue
+                tree_budget.nested_used += 1
+                # Unpack next to the inner archive (inside root) so two inner
+                # archives with the same stem in different folders never
+                # share — and overwrite — one extraction directory.
+                sub = extract_archive(
+                    m, m.parent / (m.name + ".unpacked"),
+                    max_depth=max_depth, budget=tree_budget, _depth=_depth + 1,
+                )
                 if sub.members:
                     out.members.remove(m)
                     out.members.extend(sub.members)

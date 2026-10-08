@@ -842,7 +842,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "doctor":
         from .doctor import format_report, run_diagnostics
 
-        report = run_diagnostics()
+        report = run_diagnostics(getattr(args, "models_dir", None))
         if args.json_out:
             _write_json_out(args.json_out, json.dumps(report.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":

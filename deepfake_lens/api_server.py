@@ -8,13 +8,18 @@ every /api/ route, and the CLI refuses non-localhost binds without one.
 
 Every analysis goes through :mod:`deepfake_lens.analysis_api` (G7) — the same
 options, engine set and threshold profile as the CLI and the built-in web
-GUI.
+GUI. Handlers that run synchronous analysis are plain ``def`` (FastAPI runs
+them in its thread pool) or hand the work to ``run_in_threadpool`` so a long
+scan never blocks the event loop (G34).
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
+import sys
+import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -53,6 +58,17 @@ CLIENT_HEADER_GET_PATHS = frozenset({
     "/api/preview",
 })
 
+# Streaming-job registry cap (G34): each job holds a worker thread and its
+# results until the client disconnects; 32 matches the web server's
+# _SCAN_JOB_MAX so both servers bound concurrent work the same way.
+MAX_JOBS = 32
+JOBS_FULL_MESSAGE = "too many jobs in flight; retry after a running job finishes"
+
+# Packages the API server needs at runtime; missing ones make `api-serve`
+# exit 2 with an install hint instead of a traceback (G29).
+SERVER_DEPENDENCIES = ("fastapi", "uvicorn")
+SERVER_DEPS_EXIT_CODE = 2
+
 
 @dataclass(frozen=True)
 class APIResponse:
@@ -84,6 +100,11 @@ def _default_profiles() -> Path | None:
     return models_dir if models_dir.is_dir() else None
 
 
+def missing_server_dependencies() -> list[str]:
+    """Server packages that are not importable in this environment."""
+    return [name for name in SERVER_DEPENDENCIES if importlib.util.find_spec(name) is None]
+
+
 def _api_options() -> Any:
     """AnalysisOptions for an API request: the server's models dir, defaults."""
     from .webapp_api import _web_options
@@ -102,6 +123,7 @@ def create_app(
         from fastapi import FastAPI, HTTPException, Request
         from fastapi.middleware.cors import CORSMiddleware
         from fastapi.responses import JSONResponse
+        from starlette.concurrency import run_in_threadpool
     except ImportError:
         raise ImportError("FastAPI is required. Install with: pip install fastapi uvicorn")
 
@@ -141,7 +163,7 @@ def create_app(
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["X-API-Token", "X-Deepfake-Lens-Token", CLIENT_HEADER, "Content-Type"],
     )
-    
+
     @app.get("/")
     async def root():
         return {"message": "Deepfake Lens API", "version": "0.1.0"}
@@ -180,22 +202,24 @@ def create_app(
             media_type="text/javascript; charset=utf-8",
             headers={"X-Content-Type-Options": "nosniff"},
         )
-    
+
     @app.get("/api/health")
     async def health():
         return {"status": "healthy"}
-    
+
+    # Synchronous analysis endpoints are plain `def`: FastAPI runs them in
+    # its thread pool, so a multi-second analysis never blocks the loop.
     @app.post("/api/analyze/image")
-    async def analyze_image(file_path: str):
+    def analyze_image(file_path: str):
         try:
             result = analyze_path(file_path, _api_options())
             return {"status": "success", "data": result.to_json()}
         except Exception as exc:
             logger.exception("request failed")
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-    
+
     @app.post("/api/analyze/audio")
-    async def analyze_audio(file_path: str):
+    def analyze_audio(file_path: str):
         from .audio import analyze_audio
         try:
             # Bundled audio profiles degrade gracefully when checkpoints
@@ -207,9 +231,9 @@ def create_app(
         except Exception as exc:
             logger.exception("request failed")
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-    
+
     @app.post("/api/analyze/face")
-    async def analyze_face(file_path: str):
+    def analyze_face(file_path: str):
         from .face import analyze_faces
         try:
             result = analyze_faces(file_path)
@@ -217,9 +241,9 @@ def create_app(
         except Exception as exc:
             logger.exception("request failed")
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-    
+
     @app.post("/api/analyze/text")
-    async def analyze_text(text: str):
+    def analyze_text(text: str):
         from .text_advanced import analyze_text_advanced
         try:
             result = analyze_text_advanced(text)
@@ -227,9 +251,9 @@ def create_app(
         except Exception as exc:
             logger.exception("request failed")
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-    
+
     @app.post("/api/analyze/forensic")
-    async def analyze_forensic(file_path: str):
+    def analyze_forensic(file_path: str):
         from .c2pa import analyze_metadata_forensic
         try:
             result = analyze_metadata_forensic(file_path)
@@ -237,9 +261,9 @@ def create_app(
         except Exception as exc:
             logger.exception("request failed")
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-    
+
     @app.post("/api/classify")
-    async def classify(file_path: str):
+    def classify(file_path: str):
         from .classifier import classify_metadata, classify_text_content
         from .png import read_png_metadata
         try:
@@ -260,9 +284,9 @@ def create_app(
         except Exception as exc:
             logger.exception("request failed")
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-    
+
     @app.post("/api/check")
-    async def check(
+    def check(
         file_path: str | None = None,
         text: str | None = None,
         watermark_secret: str | None = None,
@@ -345,25 +369,94 @@ def create_app(
     # per-stage progress over SSE. Jobs register in _JOBS so a client can
     # cancel between stages via /api/jobs/{id}/cancel — cancellation is
     # cooperative and takes effect at stage boundaries, not mid-analysis.
+    # G34: the registry is capped (MAX_JOBS -> 429), guarded by a lock, and
+    # a client disconnect cancels its job.
     _JOBS: dict[str, dict[str, Any]] = {}
+    _JOBS_LOCK = threading.Lock()
+
+    def _register_job() -> tuple[str, threading.Event]:
+        import uuid
+
+        with _JOBS_LOCK:
+            if len(_JOBS) >= MAX_JOBS:
+                raise HTTPException(status_code=429, detail=JOBS_FULL_MESSAGE)
+            job_id = uuid.uuid4().hex[:12]
+            cancel = threading.Event()
+            _JOBS[job_id] = {"cancel": cancel, "done": False}
+        return job_id, cancel
+
+    def _mark_done(job_id: str) -> None:
+        with _JOBS_LOCK:
+            job = _JOBS.get(job_id)
+            if job is not None:
+                job["done"] = True
+
+    def _drop_job(job_id: str) -> None:
+        with _JOBS_LOCK:
+            _JOBS.pop(job_id, None)
+
+    def _sse_response(request: Request, job_id: str, cancel: threading.Event, run: Any) -> Any:
+        """Stream ``run()``'s (event, data) tuples as SSE from a worker thread."""
+        import asyncio
+
+        from fastapi.responses import StreamingResponse
+
+        async def events():
+            loop = asyncio.get_running_loop()
+            queue: asyncio.Queue[Any] = asyncio.Queue()
+
+            def emit(evt: Any) -> None:
+                try:
+                    loop.call_soon_threadsafe(queue.put_nowait, evt)
+                except RuntimeError:
+                    # Event loop already closed (client gone, server
+                    # shutting down): stop the worker at the next stage.
+                    cancel.set()
+
+            def produce() -> None:
+                try:
+                    for evt in run():
+                        emit(evt)
+                except Exception as exc:  # noqa: BLE001 - report, don't hang
+                    logger.exception("streaming job %s failed", job_id)
+                    emit(("error", {"detail": str(exc)}))
+                finally:
+                    _mark_done(job_id)
+                    emit(None)
+
+            threading.Thread(target=produce, daemon=True, name=f"api-job-{job_id}").start()
+            finished = False
+            try:
+                while True:
+                    try:
+                        evt = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        if await request.is_disconnected():
+                            break
+                        continue
+                    if evt is None:
+                        finished = True
+                        break
+                    name, data = evt
+                    yield f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+            finally:
+                # Client disconnect (or generator close) cancels the job at
+                # its next stage boundary instead of running to completion.
+                if not finished:
+                    cancel.set()
+                _drop_job(job_id)
+
+        return StreamingResponse(events(), media_type="text/event-stream")
 
     @app.post("/api/check/stream")
     async def check_stream(
+        request: Request,
         file_path: str | None = None,
         text: str | None = None,
         watermark_secret: str | None = None,
         watermark_gamma: float = 0.25,
     ):
-        import asyncio
-        import json as _json
-        import threading
-        import uuid
-
-        from fastapi.responses import StreamingResponse
-
-        job_id = uuid.uuid4().hex[:12]
-        cancel = threading.Event()
-        _JOBS[job_id] = {"cancel": cancel, "done": False}
+        job_id, cancel = _register_job()
 
         def run_layered() -> Any:
             """Run the check stages, aborting between stages if cancelled."""
@@ -451,52 +544,30 @@ def create_app(
 
             yield ("result", payload)
 
-        async def events():
-            loop = asyncio.get_event_loop()
-            queue: asyncio.Queue[Any] = asyncio.Queue()
-
-            def produce() -> None:
-                try:
-                    for evt in run_layered():
-                        loop.call_soon_threadsafe(queue.put_nowait, evt)
-                except Exception as exc:  # noqa: BLE001 - report, don't hang
-                    loop.call_soon_threadsafe(
-                        queue.put_nowait, ("error", {"detail": str(exc)}))
-                finally:
-                    _JOBS[job_id]["done"] = True
-                    loop.call_soon_threadsafe(queue.put_nowait, None)
-
-            threading.Thread(target=produce, daemon=True).start()
-            try:
-                while True:
-                    evt = await queue.get()
-                    if evt is None:
-                        break
-                    name, data = evt
-                    yield f"event: {name}\ndata: {_json.dumps(data, ensure_ascii=False)}\n\n"
-            finally:
-                _JOBS.pop(job_id, None)
-
-        return StreamingResponse(events(), media_type="text/event-stream")
+        return _sse_response(request, job_id, cancel, run_layered)
 
     @app.post("/api/jobs/{job_id}/cancel")
     async def cancel_job(job_id: str):
-        job = _JOBS.get(job_id)
+        with _JOBS_LOCK:
+            job = _JOBS.get(job_id)
+            if job is not None:
+                job["cancel"].set()
         if job is None:
             raise HTTPException(status_code=404, detail="unknown or finished job")
-        job["cancel"].set()
         return {"status": "success", "job_id": job_id, "cancelled": True}
 
     @app.get("/api/jobs/{job_id}")
     async def job_status(job_id: str):
-        job = _JOBS.get(job_id)
-        if job is None:
+        with _JOBS_LOCK:
+            job = _JOBS.get(job_id)
+            snapshot = None if job is None else (bool(job["done"]), bool(job["cancel"].is_set()))
+        if snapshot is None:
             raise HTTPException(status_code=404, detail="unknown or finished job")
         return {
             "status": "success",
             "job_id": job_id,
-            "done": bool(job["done"]),
-            "cancelled": bool(job["cancel"].is_set()),
+            "done": snapshot[0],
+            "cancelled": snapshot[1],
         }
 
     # /api/scan/stream scans a server-local directory with per-file
@@ -505,20 +576,12 @@ def create_app(
     # limited to max_files entries; same trust level as /api/check.
     @app.post("/api/scan/stream")
     async def scan_stream(
+        request: Request,
         directory: str,
         recursive: bool = False,
         max_files: int = 200,
     ):
-        import asyncio
-        import json as _json
-        import threading
-        import uuid
-
-        from fastapi.responses import StreamingResponse
-
-        job_id = uuid.uuid4().hex[:12]
-        cancel = threading.Event()
-        _JOBS[job_id] = {"cancel": cancel, "done": False}
+        job_id, cancel = _register_job()
 
         def run_scan():
             from .core import _iter_files
@@ -537,6 +600,7 @@ def create_app(
                         break
                     paths.append(p)
             except Exception as exc:  # noqa: BLE001
+                logger.exception("directory listing failed: %s", root)
                 yield ("error", {"detail": f"listing failed: {exc}"})
                 return
             options = _api_options()
@@ -571,43 +635,18 @@ def create_app(
                                   "grade": result.get("grade"),
                                   "score": result.get("score")})
                 except Exception as exc:  # noqa: BLE001 - per-file failure is data
+                    logger.exception("analysis failed: %s", path)
                     counts["failed"] += 1
-                    items.append({"path": str(path), "status": "failed", "error": str(exc)})
+                    items.append({"path": str(path), "status": "failed", "error": failure_reason(exc)})
                 yield ("progress", {"stage": "scan", "index": index, "total": total,
                                     "path": path.name, "band": items[-1].get("band")})
             yield ("result", {"mode": "scan", "directory": str(root), "total": total,
                               "capped": capped, "counts": counts, "items": items})
 
-        async def events():
-            loop = asyncio.get_event_loop()
-            queue: asyncio.Queue[Any] = asyncio.Queue()
-
-            def produce() -> None:
-                try:
-                    for evt in run_scan():
-                        loop.call_soon_threadsafe(queue.put_nowait, evt)
-                except Exception as exc:  # noqa: BLE001 - report, don't hang
-                    loop.call_soon_threadsafe(
-                        queue.put_nowait, ("error", {"detail": str(exc)}))
-                finally:
-                    _JOBS[job_id]["done"] = True
-                    loop.call_soon_threadsafe(queue.put_nowait, None)
-
-            threading.Thread(target=produce, daemon=True).start()
-            try:
-                while True:
-                    evt = await queue.get()
-                    if evt is None:
-                        break
-                    name, data = evt
-                    yield f"event: {name}\ndata: {_json.dumps(data, ensure_ascii=False)}\n\n"
-            finally:
-                _JOBS.pop(job_id, None)
-
-        return StreamingResponse(events(), media_type="text/event-stream")
+        return _sse_response(request, job_id, cancel, run_scan)
 
     @app.post("/api/compare")
-    async def compare(file_path_a: str, file_path_b: str):
+    def compare(file_path_a: str, file_path_b: str):
         """Two-file comparison: same-speaker distance for audio pairs,
         same-author stylometry for text/document pairs."""
         from .core import compare_files
@@ -622,7 +661,7 @@ def create_app(
         return {"status": "success", "data": result}
 
     @app.post("/api/multimodal")
-    async def multimodal(
+    def multimodal(
         image_score: int | None = None,
         text_score: int | None = None,
         audio_score: int | None = None,
@@ -640,16 +679,15 @@ def create_app(
         except Exception as exc:
             logger.exception("request failed")
             raise HTTPException(status_code=500, detail=str(exc)) from exc
-    
+
     # --- GUI & Webapp compatibility endpoints ---
     # Same payload functions as the stdlib web server (webapp_api), which in
     # turn call analysis_api — so /api/scan here, in the web GUI and in the
     # CLI return the same verdicts and threshold provenance (G7).
     @app.get("/api/scan")
-    async def api_scan(request: Request):
+    def api_scan(request: Request):
         from urllib.parse import parse_qs
-        from .webapp import _scan_job_start, _scan_payload
-        from .webapp_api import ReadRootDenied, read_root_denied_body
+        from .webapp_api import ReadRootDenied, _scan_job_start, _scan_payload, read_root_denied_body
         qs = str(request.url.query)
         if parse_qs(qs).get("async", ["false"])[0].lower() in {"1", "true", "yes"}:
             try:
@@ -666,17 +704,17 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc))
 
     @app.get("/api/scan-status")
-    async def api_scan_status(request: Request):
-        from .webapp import _scan_status_payload
+    def api_scan_status(request: Request):
+        from .webapp_api import _scan_status_payload
         return _scan_status_payload(str(request.url.query))
 
     @app.get("/api/scan-cancel")
-    async def api_scan_cancel(request: Request):
-        from .webapp import _scan_cancel_payload
+    def api_scan_cancel(request: Request):
+        from .webapp_api import _scan_cancel_payload
         return _scan_cancel_payload(str(request.url.query))
 
     @app.get("/api/heatmap")
-    async def api_heatmap(request: Request):
+    def api_heatmap(request: Request):
         from fastapi import Response
         from .webapp_api import _heatmap_payload
         # G8: the payload is (status, body, error message); the media type
@@ -689,7 +727,7 @@ def create_app(
         return Response(content=data, status_code=status, media_type=media_type, headers=headers)
 
     @app.get("/api/preview")
-    async def api_preview(request: Request):
+    def api_preview(request: Request):
         from fastapi import Response
         from .webapp_api import _preview_payload
         # G8: (status, data, message, mime) — the 3rd element is the error
@@ -702,9 +740,8 @@ def create_app(
         return Response(content=data, status_code=status, media_type=media_type, headers=headers)
 
     @app.get("/api/analyze-file")
-    async def api_analyze_file(request: Request):
-        from .webapp import _analyze_file_payload
-        from .webapp_api import ReadRootDenied, read_root_denied_body
+    def api_analyze_file(request: Request):
+        from .webapp_api import ReadRootDenied, _analyze_file_payload, read_root_denied_body
         try:
             return _analyze_file_payload(str(request.url.query))
         except ReadRootDenied:
@@ -712,22 +749,22 @@ def create_app(
 
     @app.get("/api/stats")
     async def api_stats():
-        from .webapp import _stats_payload
+        from .webapp_api import _stats_payload
         return _stats_payload()
 
     @app.post("/api/analyze-upload")
     async def api_analyze_upload(request: Request):
-        from .webapp import MAX_UPLOAD_BYTES, _analyze_upload_payload
+        from .webapp_api import MAX_UPLOAD_BYTES, _analyze_upload_payload
         body = await request.body()
         if len(body) > MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=413, detail=f"upload exceeds {MAX_UPLOAD_BYTES} bytes")
         content_type = request.headers.get("content-type", "")
-        return _analyze_upload_payload(content_type, body)
+        return await run_in_threadpool(_analyze_upload_payload, content_type, body)
 
     @app.post("/api/report")
     async def api_report(request: Request):
         from fastapi import Response
-        from .webapp import _report_payload
+        from .webapp_api import _report_payload
         body = await request.body()
         fmt = request.query_params.get("format")
         try:
@@ -739,7 +776,9 @@ def create_app(
             fmt = fmt or None
         from .webapp_api import ReadRootDenied, read_root_denied_body
         try:
-            rendered = _report_payload(body, format_override=fmt, default_folder=default_folder)
+            rendered = await run_in_threadpool(
+                lambda: _report_payload(body, format_override=fmt, default_folder=default_folder)
+            )
         except ReadRootDenied:
             return JSONResponse(read_root_denied_body(), status_code=403)
         if isinstance(rendered, dict):
@@ -759,9 +798,9 @@ def create_app(
 
     @app.post("/api/feedback")
     async def api_feedback(request: Request):
-        from .webapp import _feedback_payload
+        from .webapp_api import _feedback_payload
         body = await request.body()
-        return _feedback_payload(body)
+        return await run_in_threadpool(_feedback_payload, body)
 
     @app.get("/api/artifacts/{artifact_id:path}/review")
     async def get_artifact_review(artifact_id: str):
@@ -818,6 +857,15 @@ def create_app(
     return app
 
 
+def server_dependency_hint(missing: list[str]) -> str:
+    """Korean install hint printed when ``api-serve`` cannot start."""
+    return (
+        f"오류: API 서버에 필요한 패키지가 설치되어 있지 않습니다: {', '.join(missing)}\n"
+        f"설치: pip install {' '.join(missing)}\n"
+        "설치 없이 쓰려면 내장 웹 서버를 사용하세요: deepfake-lens web"
+    )
+
+
 def run_server(
     host: str = "127.0.0.1",
     port: int = 8765,
@@ -833,11 +881,15 @@ def run_server(
 
     ``token`` enables authentication and is mandatory for non-localhost binds
     (enforced by the ``api-serve`` and ``web`` CLI commands).
+
+    G29: without fastapi/uvicorn this prints an install hint to stderr and
+    exits with status 2 (no traceback).
     """
-    try:
-        import uvicorn
-    except ImportError:
-        raise ImportError("uvicorn is required. Install with: pip install uvicorn")
+    missing = missing_server_dependencies()
+    if missing:
+        print(server_dependency_hint(missing), file=sys.stderr)
+        raise SystemExit(SERVER_DEPS_EXIT_CODE)
+    import uvicorn
 
     from .webapp_api import configure_read_roots
 
@@ -845,4 +897,3 @@ def run_server(
     app = create_app(host, port, token=token, default_folder=default_folder)
     print(f"Starting Deepfake Lens unified server on http://{host}:{port}" + (" (token required)" if token else ""))
     uvicorn.run(app, host=host, port=port)
-
