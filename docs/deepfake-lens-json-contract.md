@@ -121,7 +121,7 @@ Phase-0 classification of existing signals:
 | --- | --- |
 | `check` | `metadata`, `c2pa`, `pixel`, `external_model`, `model:<member>`, `face_manipulation`, `inpaint`, `faceswap_seam`, `rppg`, `avatar`, `lipsync`, `face_track`, `audio_analysis`, `audio_features`, `video_analysis`, `document_text`, `text_lexical`, `archive` |
 | `status` | `ran` \| `skipped` \| `failed` |
-| `reason` | Required for `skipped`/`failed`. Skips: `의존성 부재: <module>`, `얼굴 미검출`, `측정 범위 밖: 해상도 …`, `비활성화(…)`, `모델 프로필 미지정`, `모델 실행 불가: …`. Failures: `<ExceptionClass>: <message ≤200 chars>`. |
+| `reason` | Required for `skipped`/`failed`. Skips: `의존성 부재: <module>`, `얼굴 미검출`, `측정 범위 밖: 해상도 …`, `비활성화(…)`, `모델 프로필 미지정`, `모델 실행 불가: …`. Failures: `<ExceptionClass>: <message ≤200 chars>`; a model weight refused by the pin policy (G9) fails with `미고정 프로필: …` (no/empty/malformed `pin`) or `무결성 불일치: …` (checkpoint sha256 differs from `pin.sha256`). A language-gated zoo member is `skipped` with `모델 실행 불가: 언어 게이트 제외: …`. |
 
 ### Decision rule (`deepfake_lens/decision.py`)
 
@@ -147,7 +147,7 @@ Evaluated in order; the first that applies wins.
 | `verdict` | Korean sentence naming the verdict and its basis (text: starts with `참고:`). |
 | `signals` | Derived from `evidence`: `{title, detail, weight}` with `weight` 60/25/5 for strong/moderate/weak **synthetic** items and 0 for authentic/neutral ones, sorted by weight. |
 | `limitations` | Known limits; for text the legal sentence is first. A failed check is also listed here as `검사 실패 — …`. |
-| `source_guess`, `next_checks`, `model_analysis`, `pixel_analysis`, `av_audio`, `document_metadata`, `source_attribution_label` | Unchanged meaning. `model_analysis.score` is the uncalibrated raw score. |
+| `source_guess`, `next_checks`, `model_analysis`, `pixel_analysis`, `av_audio`, `document_metadata`, `source_attribution_label` | Unchanged meaning. `model_analysis.score` is the uncalibrated raw score. In a model zoo, `model_analysis.models[]` lists every member; a member excluded by the language gate has `available: false`, `confidence: "skipped"` and takes no part in the aggregate score or the spread/agreement (G33). |
 
 Reading a v1 record: missing v2 fields load as `verdict_code:
 "undetermined"`, `grade: "evidence"`, empty `evidence`/`coverage`; the

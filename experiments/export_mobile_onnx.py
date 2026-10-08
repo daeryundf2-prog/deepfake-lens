@@ -14,8 +14,8 @@ deepfake-lens.onnx (gitignored — checkpoint licenses do not permit
 redistribution; see models/NOTICE.md).
 
 Usage:
-    python experiments/export_mobile_onnx.py --profile models/cnndetection-runtime.json \
-        --checkpoint models/blur_jpg_prob0.5.pth --out deepfake-lens.onnx --quantize-int8
+    python experiments/export_mobile_onnx.py --profile models/sbi-effnet-runtime.json \
+        --checkpoint models/sbi-effnet-b0.pth --out deepfake-lens.onnx
 """
 
 from __future__ import annotations

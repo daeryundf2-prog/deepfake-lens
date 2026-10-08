@@ -162,6 +162,8 @@ files = [
     "deepfake_lens/jpegq.py",
     "deepfake_lens/ml_classifier.py",
     "deepfake_lens/model_registry.py",
+    "deepfake_lens/model_pins.py",
+    "deepfake_lens/tests/qa/test_qa_sys.py",
     "deepfake_lens/perf.py",
     "deepfake_lens/pixel_analyzer.py",
     "deepfake_lens/png.py",

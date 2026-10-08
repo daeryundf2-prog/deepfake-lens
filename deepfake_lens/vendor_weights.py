@@ -18,10 +18,28 @@ import shutil
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+from .model_pins import (
+    PIN_FIELD,
+    declared_sha256,
+    file_sha256,
+    is_commit_sha,
+    pin_target,
+    required_pin_keys,
+)
 
 
 ENV_MODELS_DIR = "DEEPFAKE_LENS_MODELS_DIR"
+
+# Upper bound on one checkpoint download (G9). The largest checkpoint any
+# profile has referenced is AIDE progan_train.pth (~3.3 GB, aide-runtime.json
+# limitations); 4 GiB leaves headroom without letting a hostile or
+# misconfigured URL fill the disk.
+MAX_CHECKPOINT_DOWNLOAD_BYTES = 4 * 1024 ** 3
+# Only TLS downloads are accepted: http:// can be rewritten in transit and
+# file:// / ftp:// read arbitrary local or unauthenticated sources.
+ALLOWED_DOWNLOAD_SCHEME = "https://"
 
 
 def default_models_dir() -> Path:
@@ -191,7 +209,7 @@ def inspect_model_manifest(models_dir: Path | str | None = None) -> VendorManife
 
         engine = str(data.get("engine", data.get("runtime", "pytorch")))
         modality = _infer_modality(name, data)
-        expected_sha = data.get("sha256") or data.get("expected_sha256")
+        expected_sha = declared_sha256(data) or None
         kind, checkpoint_rel = _profile_weight_kind(data)
 
         if kind != "local":
@@ -348,20 +366,27 @@ def fetch_weights(
     *,
     offline: bool = False,
     timeout: float = 120.0,
+    max_bytes: int = MAX_CHECKPOINT_DOWNLOAD_BYTES,
 ) -> dict[str, Any]:
     """Download profile checkpoints from their declared URLs and verify SHA-256.
 
-    Each ``*-runtime.json`` may carry ``checkpoint_url`` plus ``sha256``.
+    Each ``*-runtime.json`` may carry ``checkpoint_url`` plus ``pin.sha256``.
     Downloads stream to a temp file inside the models dir and are renamed
     only after the declared hash matches — a failed fetch never leaves a
     partial or poisoned checkpoint. ``offline=True`` refuses outright:
     air-gapped hosts must never open a socket.
 
+    G9: only ``https://`` URLs are fetched, and a download larger than
+    ``max_bytes`` is aborted. A profile without a declared ``pin.sha256``
+    is still downloaded but recorded as ``unverified`` — never ``fetched``
+    — and the adapter keeps refusing to load it until the operator pins it
+    (``deepfake-lens vendor-weights pin``).
+
     Per-profile results land in ``results`` with status
-    fetched / already-present / unsupported / failed.
+    fetched / unverified / already-present / unsupported / failed.
     """
     if offline:
-        return {"status": "skipped", "reason": "offline mode: network fetch refused", "results": [], "fetched": [], "failed": []}
+        return {"status": "skipped", "reason": "offline mode: network fetch refused", "results": [], "fetched": [], "unverified": [], "failed": []}
 
     import os
     import tempfile
@@ -370,6 +395,7 @@ def fetch_weights(
     base_dir = _resolve_models_dir(models_dir)
     results: list[dict[str, str]] = []
     fetched: list[str] = []
+    unverified: list[str] = []
     failed: list[dict[str, str]] = []
     for profile_path in sorted(base_dir.glob("*-runtime.json")):
         name = profile_path.stem.replace("-runtime", "")
@@ -387,6 +413,10 @@ def fetch_weights(
         if not url:
             results.append({"name": name, "status": "unsupported", "reason": "no checkpoint_url declared — manual provisioning required"})
             continue
+        if not str(url).lower().startswith(ALLOWED_DOWNLOAD_SCHEME):
+            entry = {"name": name, "status": "failed", "error": "checkpoint_url must be https:// (http/file/ftp refused)"}
+            results.append(entry); failed.append(entry)
+            continue
 
         # Confine the destination inside the models dir — a profile's
         # checkpoint path must not escape via ../ or absolute paths.
@@ -398,7 +428,7 @@ def fetch_weights(
             results.append(entry); failed.append(entry)
             continue
 
-        expected = str(data.get("sha256") or data.get("expected_sha256") or "")
+        expected = declared_sha256(data)
         if dest.is_file():
             try:
                 if expected and _compute_file_sha256(dest) == expected.lower():
@@ -411,21 +441,32 @@ def fetch_weights(
         fd, tmp_name = tempfile.mkstemp(dir=dest.parent, prefix=".fetch-", suffix=".part")
         try:
             digest = hashlib.sha256()
+            received = 0
             with os.fdopen(fd, "wb") as out_fh, urllib.request.urlopen(str(url), timeout=timeout) as response:
                 while True:
                     chunk = response.read(1024 * 1024)
                     if not chunk:
                         break
+                    received += len(chunk)
+                    if received > max_bytes:
+                        raise ValueError(f"download exceeds size cap ({max_bytes} bytes)")
                     digest.update(chunk)
                     out_fh.write(chunk)
             actual = digest.hexdigest()
             if expected and actual != expected.lower():
+                os.unlink(tmp_name)
                 failed.append({"name": name, "status": "failed", "error": f"sha256 mismatch (expected {expected[:12]}…, got {actual[:12]}…)"})
                 results.append(failed[-1])
                 continue
             os.replace(tmp_name, dest)
-            fetched.append(name)
-            results.append({"name": name, "status": "fetched"})
+            if expected:
+                fetched.append(name)
+                results.append({"name": name, "status": "fetched", "sha256": actual})
+            else:
+                # Presence is not verification: the bytes are on disk, but
+                # nothing vouches for them until the operator pins them.
+                unverified.append(name)
+                results.append({"name": name, "status": "unverified", "sha256": actual, "reason": "pin.sha256 미선언 — 검증 없이 저장됨"})
         except (OSError, ValueError) as exc:
             try:
                 os.unlink(tmp_name)
@@ -435,8 +476,122 @@ def fetch_weights(
             results.append(entry); failed.append(entry)
             continue
 
-    status = "ok" if not failed else "failed"
-    return {"status": status, "fetched": fetched, "failed": failed, "results": results}
+    status = "failed" if failed else ("unverified" if unverified else "ok")
+    return {"status": status, "fetched": fetched, "unverified": unverified, "failed": failed, "results": results}
+
+
+def resolve_profile_path(profile: Path | str, models_dir: Path | str | None = None) -> Path:
+    """Resolve a profile argument: an existing path, or a name in the models dir.
+
+    ``aasist``, ``aasist-runtime`` and ``aasist-runtime.json`` all name
+    ``<models_dir>/aasist-runtime.json``.
+    """
+    candidate = Path(profile)
+    if candidate.is_file():
+        return candidate.resolve()
+    base_dir = _resolve_models_dir(models_dir)
+    stem = candidate.name
+    for name in (stem, f"{stem}.json", f"{stem}-runtime.json"):
+        path = base_dir / name
+        if path.is_file():
+            return path.resolve()
+    raise FileNotFoundError(f"profile not found: {profile} (models dir {base_dir})")
+
+
+def _hub_commit_sha(model_id: str) -> str:
+    """Current commit of a Hugging Face hub model (network, lazy import)."""
+    from huggingface_hub import HfApi  # lazy: optional, online-only dependency
+
+    info = HfApi().model_info(model_id)
+    sha = str(getattr(info, "sha", "") or "").lower()
+    if not is_commit_sha(sha):
+        raise RuntimeError(f"hub returned no commit sha for {model_id}")
+    return sha
+
+
+# Profile field naming the hub model each revision key pins.
+_REVISION_SOURCES = {"revision": ("hub_model", "backbone"), "observer_revision": ("observer_model",)}
+
+
+def pin_profile(
+    profile: Path | str,
+    models_dir: Path | str | None = None,
+    *,
+    revision: str | None = None,
+    hub_resolver: Callable[[str], str] | None = None,
+) -> dict[str, Any]:
+    """Write the profile's ``pin`` from the weights it names (G9).
+
+    - ``sha256``: computed from the local checkpoint the profile (or its
+      ``inner`` profile for video-frames) points at; the file must exist.
+    - ``revision`` / ``observer_revision``: the hub model's current commit,
+      resolved with ``huggingface_hub`` (online — only on this explicit
+      command), or taken from ``revision`` when given.
+
+    Returns ``{"status": "pinned", "profile", "pin"}``, or
+    ``{"status": "needs-manual", "instructions"}`` when a hub commit cannot
+    be resolved (``huggingface_hub`` missing). The profile file is rewritten
+    atomically; nothing is written unless every required key resolved.
+    """
+    import os
+    import tempfile
+
+    path = resolve_profile_path(profile, models_dir)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"profile is not a JSON object: {path}")
+    keys = required_pin_keys(data)
+    if not keys:
+        raise ValueError(f"profile loads no weights (runtime {data.get('runtime')!r}) — nothing to pin: {path}")
+    target = pin_target(data)
+    pin: dict[str, str] = {}
+    for key in keys:
+        if key == "sha256":
+            checkpoint_rel = str(target.get("checkpoint") or target.get("path") or "")
+            if not checkpoint_rel:
+                raise ValueError(f"profile declares no checkpoint: {path}")
+            checkpoint = Path(checkpoint_rel)
+            if not checkpoint.is_absolute():
+                checkpoint = path.parent / checkpoint
+            if not checkpoint.is_file():
+                raise FileNotFoundError(f"checkpoint not found: {checkpoint}")
+            pin["sha256"] = file_sha256(checkpoint)
+            continue
+        model_id = next((str(target.get(field)) for field in _REVISION_SOURCES[key] if target.get(field)), "")
+        if not model_id:
+            raise ValueError(f"profile has no hub model id for pin.{key}: {path}")
+        if revision and key == "revision":
+            value = revision.strip().lower()
+            if not is_commit_sha(value):
+                raise ValueError("--revision must be a 40-hex commit sha (a branch or tag is not a pin)")
+            pin[key] = value
+            continue
+        resolver = hub_resolver or _hub_commit_sha
+        try:
+            pin[key] = resolver(model_id)
+        except ImportError:
+            return {
+                "status": "needs-manual",
+                "profile": str(path),
+                "instructions": (
+                    f"huggingface_hub가 설치되어 있지 않아 {model_id}의 커밋을 조회할 수 없습니다. "
+                    "'pip install huggingface_hub' 후 다시 실행하거나, 허브 페이지에서 커밋 SHA(40자리)를 확인해 "
+                    f"'deepfake-lens vendor-weights pin {path.name} --revision <커밋SHA>'로 지정하세요."
+                ),
+            }
+    data[PIN_FIELD] = {**{k: "" for k in keys}, **pin}
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".pin-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+        os.replace(tmp_name, path)
+    except OSError:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+    return {"status": "pinned", "profile": str(path), "pin": data[PIN_FIELD]}
 
 
 def bundle_offline_weights(

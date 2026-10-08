@@ -1,0 +1,250 @@
+"""QA-SYS scenarios (phase 0).
+
+QA-SYS-1 and QA-SYS-2 (WP-C, G9): a weight whose pin does not match is
+never loaded, the model check is recorded as failed and the verdict is
+undetermined. The detector is a fake ``onnx-audio`` profile pointing at a
+temporary "checkpoint" file; the runtime call is mocked, so no weights,
+torch or onnxruntime are needed. Audio is used for the end-to-end scans
+because it has no photo/non-photo gate in front of the model check.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import struct
+import tempfile
+import unittest
+import wave
+from pathlib import Path
+from unittest import mock
+
+from deepfake_lens.core import analyze_file
+from deepfake_lens.model_adapter import FAILED_CONFIDENCE, analyze_external_model
+from deepfake_lens.model_pins import MISMATCH_REASON, UNPINNED_REASON
+from deepfake_lens.result_types import ClassificationResult, CoverageEntry, CoverageStatus, Verdict
+
+RUNTIME = "deepfake_lens.model_adapter._run_onnx_audio"
+# Raw logits the fake runtime returns: softmax index 1 -> ~0.88.
+FAKE_LOGITS = [0.0, 2.0]
+
+
+def _write_wav(path: Path, *, seconds: float = 1.0, rate: int = 16000) -> Path:
+    frames = b"".join(struct.pack("<h", int(0.3 * 32767 * math.sin(2 * math.pi * 220 * n / rate))) for n in range(int(rate * seconds)))
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes(frames)
+    return path
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _one_char_changed(digest: str) -> str:
+    """The same digest with exactly one hex character altered."""
+    replacement = "0" if digest[0] != "0" else "1"
+    return replacement + digest[1:]
+
+
+class _Fixture:
+    """A temp dir with a fake checkpoint, its pinned profile and a WAV."""
+
+    def __init__(self, root: Path, name: str = "fake-detector") -> None:
+        self.root = root
+        self.checkpoint = root / f"{name}.onnx"
+        self.checkpoint.write_bytes(b"fake checkpoint v1 " + name.encode())
+        self.profile = root / f"{name}-runtime.json"
+        self.name = name
+        self.write_profile(_sha256(self.checkpoint))
+        self.media = _write_wav(root / "clip.wav")
+
+    def write_profile(self, sha256: str) -> None:
+        self.profile.write_text(
+            json.dumps(
+                {
+                    "type": "deepfake-lens-runtime-profile-v1",
+                    "name": self.name,
+                    "runtime": "onnx-audio",
+                    "modality": "audio",
+                    "checkpoint": self.checkpoint.name,
+                    "score_index": 1,
+                    "score_activation": "softmax",
+                    "pin": {"sha256": sha256},
+                    "measured_on": None,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+
+def _model_entries(result: ClassificationResult) -> list[CoverageEntry]:
+    return [entry for entry in result.coverage if entry.check == "external_model" or entry.check.startswith("model:")]
+
+
+class _IntegrityAssertions(unittest.TestCase):
+    def _assert_integrity_failure(self, result: ClassificationResult | None) -> None:
+        assert result is not None
+        [entry] = _model_entries(result)
+        self.assertEqual(entry.status, CoverageStatus.FAILED)
+        self.assertTrue(entry.reason.startswith(MISMATCH_REASON), entry.reason)
+        self.assertNotIn("의존성 부재", entry.reason)
+        self.assertEqual(result.verdict_code, Verdict.UNDETERMINED)
+        self.assertIn("판단 불가", result.verdict)
+        self.assertTrue(any("검사 실패" in item and MISMATCH_REASON in item for item in result.limitations), result.limitations)
+        self.assertEqual(result.score, 0)
+        assert result.model_analysis is not None
+        self.assertFalse(result.model_analysis.available)
+        self.assertEqual(result.model_analysis.confidence, FAILED_CONFIDENCE)
+
+
+class QaSys1PinTamperTest(_IntegrityAssertions):
+    def test_pinned_profile_baseline_runs(self) -> None:
+        """QA-SYS-1 (control): with the correct pin the fake runtime is
+        dispatched and the model check is recorded as ran."""
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = _Fixture(Path(tmp))
+            with mock.patch(RUNTIME, return_value=FAKE_LOGITS) as runtime:
+                item = analyze_file(fx.media, model_path=fx.profile)
+        runtime.assert_called_once()
+        assert item.result is not None
+        [entry] = _model_entries(item.result)
+        self.assertEqual(entry.status, CoverageStatus.RAN)
+        self.assertIsNotNone(item.result.model_analysis)
+        assert item.result.model_analysis is not None
+        self.assertTrue(item.result.model_analysis.available)
+
+    def test_sha256_changed_by_one_char_refuses_load(self) -> None:
+        """QA-SYS-1: 프로필의 sha256을 한 글자 바꾸고 검사 → 모델 로드 거부, 결론 "판단 불가: 모델 무결성 실패"."""
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = _Fixture(Path(tmp))
+            tampered = _one_char_changed(_sha256(fx.checkpoint))
+            self.assertEqual(sum(a != b for a, b in zip(tampered, _sha256(fx.checkpoint))), 1)
+            fx.write_profile(tampered)
+            with mock.patch(RUNTIME, return_value=FAKE_LOGITS) as runtime:
+                item = analyze_file(fx.media, model_path=fx.profile)
+        runtime.assert_not_called()  # the weights were never handed to a runtime
+        self._assert_integrity_failure(item.result)
+
+    def test_unpinned_profile_refuses_load(self) -> None:
+        """QA-SYS-1 (variant): an empty pin is "미고정 프로필" — load refused, 판단 불가."""
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = _Fixture(Path(tmp))
+            fx.write_profile("")
+            with mock.patch(RUNTIME, return_value=FAKE_LOGITS) as runtime:
+                item = analyze_file(fx.media, model_path=fx.profile)
+        runtime.assert_not_called()
+        assert item.result is not None
+        [entry] = _model_entries(item.result)
+        self.assertEqual(entry.status, CoverageStatus.FAILED)
+        self.assertTrue(entry.reason.startswith(UNPINNED_REASON), entry.reason)
+        self.assertEqual(item.result.verdict_code, Verdict.UNDETERMINED)
+
+    def test_tampered_member_of_a_zoo_is_reported_per_member(self) -> None:
+        """QA-SYS-1 (zoo): the tampered member gets its own failed
+        ``model:<name>`` entry; the intact member still runs; 판단 불가."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            good = _Fixture(root, "good-detector")
+            bad = _Fixture(root, "bad-detector")
+            bad.write_profile(_one_char_changed(_sha256(bad.checkpoint)))
+            with mock.patch(RUNTIME, return_value=FAKE_LOGITS) as runtime:
+                item = analyze_file(good.media, model_path=[good.profile, bad.profile])
+        self.assertEqual(runtime.call_count, 1)  # only the intact member loaded
+        assert item.result is not None
+        by_check = {entry.check: entry for entry in _model_entries(item.result)}
+        self.assertEqual(by_check["model:good-detector"].status, CoverageStatus.RAN)
+        self.assertEqual(by_check["model:bad-detector"].status, CoverageStatus.FAILED)
+        self.assertTrue(by_check["model:bad-detector"].reason.startswith(MISMATCH_REASON))
+        self.assertEqual(item.result.verdict_code, Verdict.UNDETERMINED)
+
+
+class QaSys2CheckpointSwapTest(_IntegrityAssertions):
+
+    def test_checkpoint_replaced_by_another_file_refuses_load(self) -> None:
+        """QA-SYS-2: 가중치 파일을 다른 파일로 바꾸고 검사 → 모델 로드 거부, 결론 "판단 불가: 모델 무결성 실패"."""
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = _Fixture(Path(tmp))
+            other = Path(tmp) / "other.onnx"
+            other.write_bytes(b"a different model file")
+            other.replace(fx.checkpoint)
+            with mock.patch(RUNTIME, return_value=FAKE_LOGITS) as runtime:
+                item = analyze_file(fx.media, model_path=fx.profile)
+        runtime.assert_not_called()
+        self._assert_integrity_failure(item.result)
+
+    def test_swap_between_two_scans_is_caught_on_the_second(self) -> None:
+        """QA-SYS-2 (no stale cache): the first scan verifies and runs; the
+        checkpoint is then swapped and the second scan in the same process
+        must re-hash and refuse it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = _Fixture(Path(tmp))
+            with mock.patch(RUNTIME, return_value=FAKE_LOGITS) as runtime:
+                first = analyze_file(fx.media, model_path=fx.profile)
+                fx.checkpoint.write_bytes(b"swapped after the first scan")
+                second = analyze_file(fx.media, model_path=fx.profile)
+        self.assertEqual(runtime.call_count, 1)
+        assert first.result is not None
+        self.assertEqual(_model_entries(first.result)[0].status, CoverageStatus.RAN)
+        self._assert_integrity_failure(second.result)
+
+    def test_image_runtime_swap_is_refused_at_the_adapter(self) -> None:
+        """QA-SYS-2 (image runtime): the same refusal for an ``onnx`` image profile."""
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            checkpoint = root / "img.onnx"
+            checkpoint.write_bytes(b"image weights v1")
+            profile = root / "img-runtime.json"
+            profile.write_text(
+                json.dumps({"name": "img", "runtime": "onnx", "modality": "image", "checkpoint": "img.onnx", "pin": {"sha256": _sha256(checkpoint)}}),
+                encoding="utf-8",
+            )
+            image = root / "photo.png"
+            Image.new("RGB", (128, 128), (120, 80, 40)).save(image)
+            checkpoint.write_bytes(b"image weights v2")
+            with mock.patch("deepfake_lens.model_adapter._run_onnx", return_value=[0.0]) as runtime:
+                analysis = analyze_external_model(image, profile)
+        runtime.assert_not_called()
+        assert analysis is not None
+        self.assertFalse(analysis.available)
+        self.assertEqual(analysis.confidence, FAILED_CONFIDENCE)
+        self.assertTrue(analysis.detail.startswith(MISMATCH_REASON), analysis.detail)
+
+    def test_video_frames_inner_checkpoint_swap_is_refused(self) -> None:
+        """QA-SYS-2 (video-frames): the outer pin covers the inner checkpoint."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            checkpoint = root / "inner.onnx"
+            checkpoint.write_bytes(b"inner weights v1")
+            profile = root / "vf-runtime.json"
+            profile.write_text(
+                json.dumps(
+                    {
+                        "name": "vf",
+                        "runtime": "video-frames",
+                        "modality": "video",
+                        "inner": {"runtime": "onnx", "checkpoint": "inner.onnx"},
+                        "pin": {"sha256": _sha256(checkpoint)},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            checkpoint.write_bytes(b"inner weights v2")
+            fake_cv2 = mock.MagicMock()
+            with mock.patch("deepfake_lens.model_adapter.importlib.import_module", return_value=fake_cv2), \
+                    mock.patch("deepfake_lens.model_adapter._run_onnx", return_value=[0.0]) as runtime:
+                analysis = analyze_external_model(root / "clip.mp4", profile, modality="video")
+        runtime.assert_not_called()
+        fake_cv2.VideoCapture.assert_not_called()  # refused before any frame is decoded
+        assert analysis is not None
+        self.assertEqual(analysis.confidence, FAILED_CONFIDENCE)
+        self.assertTrue(analysis.detail.startswith(MISMATCH_REASON), analysis.detail)
+
+
+if __name__ == "__main__":
+    unittest.main()

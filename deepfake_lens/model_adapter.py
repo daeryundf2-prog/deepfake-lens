@@ -11,7 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .checkpoint_integrity import load_torch_state, verify_checkpoint_sha256
+from .checkpoint_integrity import _expected_sha256, load_torch_state  # noqa: F401 — load_torch_state re-exported
+from .model_pins import PIN_FIELD, PinError, verify_pin
 from .model_cache import (  # noqa: F401 — re-exported for existing callers/tests
     _ModelLRU,
     _model_cache_limit,
@@ -61,6 +62,10 @@ logger = logging.getLogger(__name__)
 # core.model_coverage maps it to a ``failed`` coverage entry, which makes
 # the verdict undetermined (G1, fail-closed).
 FAILED_CONFIDENCE = "failed"
+
+
+# Shown with a pin failure: how to provision a pin (G9).
+PIN_HINT = "가중치 고정 필요: 'deepfake-lens vendor-weights pin <프로필>'로 체크포인트 sha256 또는 허브 커밋 revision을 프로필 pin에 기록하세요."
 
 
 def _failure_detail(context: str, exc: BaseException) -> str:
@@ -203,7 +208,13 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
         runtime = "onnx" if model_file.suffix.lower() == ".onnx" else "torchscript"
         # Resolve first — _checkpoint_path joins relative paths onto base_dir,
         # so a relative model_file would be doubled into a bogus path.
-        return _score_from_runtime_profile({"runtime": runtime, "checkpoint": str(model_file.resolve()), "name": model_file.name}, media_path, base_dir=model_file.parent)
+        resolved = model_file.resolve()
+        bare_profile: dict[str, object] = {"runtime": runtime, "checkpoint": str(resolved), "name": model_file.name}
+        # A bare checkpoint has no profile to carry a pin; its sha256
+        # sidecar (or the DEEPFAKE_LENS_CHECKPOINT_SHA256 env pin) is the
+        # pin. Without one the load is refused like any unpinned profile.
+        bare_profile[PIN_FIELD] = {"sha256": _bare_checkpoint_sha256(resolved)}
+        return _score_from_runtime_profile(bare_profile, media_path, base_dir=model_file.parent)
 
     try:
         profile = json.loads(model_file.read_text(encoding="utf-8"))
@@ -270,6 +281,16 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
         model=model_name,
         detail=f"external model profile supplied score={score}.",
     )
+
+
+def _bare_checkpoint_sha256(checkpoint: Path) -> str:
+    try:
+        return _expected_sha256(checkpoint) or ""
+    except RuntimeError:
+        # A malformed sidecar is no pin at all; the load is refused as
+        # unpinned rather than trusted.
+        logger.warning("malformed sha256 sidecar for %s", checkpoint)
+        return ""
 
 
 def _analyze_profile_set(media_path: Path, model_file: Path, profile: dict[str, object], *, model_name: str, depth: int, modality: str = "image") -> ExternalModelAnalysis:
@@ -409,12 +430,15 @@ def _aggregate_profile_results(results: list[tuple[Path, ExternalModelAnalysis]]
         weights.append(weight)
     total_weight = sum(weights)
     score = int(round(sum(result.score * weight for (_, result), weight in zip(kept, weights)) / total_weight)) if kept else 0
+    # G33: spread/agreement are computed over the members that actually
+    # contributed — a language-gated member's out-of-domain score must not
+    # create (or mask) disagreement. A duplicate assignment over `scored`
+    # used to overwrite this line.
     scores = [result.score for _, result in kept]
-    scores = [result.score for _, result in scored]
     spread = max(scores) - min(scores) if len(scores) > 1 else 0
     agreement = "n/a" if len(scores) < 2 else ("high" if spread <= AGREEMENT_SPREAD else "low")
 
-    detail = f"{len(scored)}/{len(results)} model profiles produced scores"
+    detail = f"{len(kept)}/{len(results)} model profiles produced scores"
     if scores:
         detail += f"; aggregate score={score} (weighted mean of members)"
     if len(scores) > 1:
@@ -451,25 +475,40 @@ def _aggregate_profile_results(results: list[tuple[Path, ExternalModelAnalysis]]
     else:
         confidence = _confidence_for_score(score)
 
+    gated = set(downweighted)
     return ExternalModelAnalysis(
-        available=bool(scored),
+        # Only contributing members make the aggregate available: when every
+        # scoring member was language-gated there is no usable score.
+        available=bool(kept),
         score=score,
         confidence=confidence,
         model=model_name or f"model-zoo ({len(results)} profiles)",
         detail=detail,
         limitations=limitations,
-        models=[
-            {
-                "profile": str(source),
-                "model": result.model,
-                "available": result.available,
-                "score": result.score,
-                "confidence": result.confidence,
-                "detail": result.detail,
-            }
-            for source, result in results
-        ],
+        models=[_member_entry(source, result, gated=source.stem in gated, hangul_ratio=hangul_ratio) for source, result in results],
     )
+
+
+def _member_entry(source: Path, result: ExternalModelAnalysis, *, gated: bool, hangul_ratio: float) -> dict[str, object]:
+    """Per-member ``models[]`` row; a language-gated member is reported as
+    skipped (its score did not enter the aggregate), not as a ran check."""
+    if gated:
+        return {
+            "profile": str(source),
+            "model": result.model,
+            "available": False,
+            "score": result.score,
+            "confidence": "skipped",
+            "detail": f"언어 게이트 제외: 한국어 비중 {hangul_ratio:.0%} — 학습 언어에 한국어 없음",
+        }
+    return {
+        "profile": str(source),
+        "model": result.model,
+        "available": result.available,
+        "score": result.score,
+        "confidence": result.confidence,
+        "detail": result.detail,
+    }
 
 
 def load_model_threshold(model_path: Path | str | None) -> int | None:
@@ -488,10 +527,44 @@ def load_model_threshold(model_path: Path | str | None) -> int | None:
     return None
 
 
-_PROFILE_SHA_OK: set[Path] = set()
+def _pin_failure(profile: dict[str, object], checkpoint: Path | None, *, model_name: str, profile_limitations: list[str]) -> ExternalModelAnalysis | None:
+    """Verify the profile's weight pin (G9); a refusal is a *failed* check.
+
+    Runs on every load — there is no "verified once" cache, so a checkpoint
+    swapped between two scans is caught on the second one (QA-SYS-2).
+    """
+    try:
+        verify_pin(profile, checkpoint)
+    except PinError as exc:
+        logger.warning("model load refused (%s): %s", model_name, exc.reason)
+        return ExternalModelAnalysis(
+            available=False,
+            score=0,
+            confidence=FAILED_CONFIDENCE,
+            model=model_name,
+            detail=exc.reason,
+            limitations=[PIN_HINT, *profile_limitations],
+        )
+    except OSError as exc:
+        logger.exception("checkpoint could not be hashed: %s", checkpoint)
+        return ExternalModelAnalysis(
+            available=False,
+            score=0,
+            confidence=FAILED_CONFIDENCE,
+            model=model_name,
+            detail=_failure_detail("checkpoint integrity check failed", exc),
+            limitations=list(profile_limitations),
+        )
+    return None
 
 
-def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *, base_dir: Path) -> ExternalModelAnalysis | None:
+def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *, base_dir: Path, pin_verified: bool = False) -> ExternalModelAnalysis | None:
+    """Score one file through a runtime profile.
+
+    ``pin_verified`` is set only by this module's own fan-out (per face
+    crop, per video frame) after the caller verified the pin once for the
+    whole file; every top-level load verifies it.
+    """
     runtime = str(profile.get("runtime") or "").lower()
     if runtime not in ALL_RUNTIMES:
         return None
@@ -515,8 +588,6 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
                 detail=f"{label}: no face region detected — face-manipulation member not applicable.",
                 limitations=profile_limitations,
             )
-        if profile.get("crop_faces"):
-            return _score_face_crops(crops, profile, base_dir=base_dir, model_name=model_name, profile_limitations=profile_limitations)
     # Hub-resolved runtimes (hf-text-classifier) name a model id, not a local
     # file; video-frames carries no checkpoint of its own (its inner image
     # profile does) — the exists() gate below does not apply to them.
@@ -529,23 +600,15 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
             detail=f"{runtime} checkpoint was not found: {checkpoint}",
             limitations=[*_checkpoint_hint(runtime), *profile_limitations],
         )
-    # A profile-declared sha256 is a hard provenance pin — a mismatched or
-    # tampered checkpoint must never silently produce scores.
-    declared_sha = str(profile.get("sha256") or profile.get("expected_sha256") or "")
-    if declared_sha and checkpoint.is_file() and checkpoint not in _PROFILE_SHA_OK:
-        try:
-            verify_checkpoint_sha256(checkpoint, declared_sha)
-            _PROFILE_SHA_OK.add(checkpoint)
-        except Exception as exc:
-            logger.exception("checkpoint integrity check failed: %s", checkpoint)
-            return ExternalModelAnalysis(
-                available=False,
-                score=0,
-                confidence=FAILED_CONFIDENCE,
-                model=model_name,
-                detail=_failure_detail("checkpoint integrity check failed", exc),
-                limitations=["프로파일 선언 SHA-256과 체크포인트가 불일치 — 가중치를 재프로비저닝하세요.", *profile_limitations],
-            )
+    # G9: no weight loads without a matching pin (sha256 for a local
+    # checkpoint, commit revision for a hub model). video-frames verifies
+    # its inner profile's pin once in _run_video_frames.
+    if not pin_verified and runtime not in VIDEO_RUNTIMES:
+        refused = _pin_failure(profile, checkpoint if runtime not in HUB_RUNTIMES else None, model_name=model_name, profile_limitations=profile_limitations)
+        if refused is not None:
+            return refused
+    if runtime in IMAGE_RUNTIMES and profile.get("crop_faces"):
+        return _score_face_crops(crops, profile, base_dir=base_dir, model_name=model_name, profile_limitations=profile_limitations)
     try:
         if runtime == "aide":
             values = _run_aide(checkpoint, media_path)
@@ -576,6 +639,17 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
             else:
                 values = _run_torchscript(checkpoint, array)
         score = _score_from_outputs(values, profile)
+    except PinError as exc:
+        # Second line of defence inside a runtime (e.g. an empty hub revision).
+        logger.warning("model load refused (%s): %s", model_name, exc.reason)
+        return ExternalModelAnalysis(
+            available=False,
+            score=0,
+            confidence=FAILED_CONFIDENCE,
+            model=model_name,
+            detail=exc.reason,
+            limitations=[PIN_HINT, *profile_limitations],
+        )
     except ImportError as exc:
         return ExternalModelAnalysis(
             available=False,
@@ -677,7 +751,7 @@ def _score_face_crops(crops: list, profile: dict[str, object], *, base_dir: Path
         for index, crop in enumerate(crops):
             crop_path = Path(tmp_dir) / f"face_{index}.png"
             cv2.imwrite(str(crop_path), crop)
-            result = _score_from_runtime_profile(inner, crop_path, base_dir=base_dir)
+            result = _score_from_runtime_profile(inner, crop_path, base_dir=base_dir, pin_verified=True)
             if result is not None:
                 results.append(result)
     scored = [result.score for result in results if result.available]
@@ -742,6 +816,21 @@ def _run_video_frames(
         raise RuntimeError("video-frames 'inner' profile must name an image runtime (onnx/torchscript/aide/clip-linear/torchvision)")
     frame_target = max(1, int(profile.get("frames", 8) or 8))
     cv2 = importlib.import_module("cv2")
+    # The outer profile's pin describes the inner weights (G9); verify it
+    # once here instead of re-hashing the checkpoint for every frame.
+    if PIN_FIELD not in inner and PIN_FIELD in profile:
+        inner = {**inner, PIN_FIELD: profile[PIN_FIELD]}
+    inner_checkpoint = _checkpoint_path(inner, base_dir=base_dir)
+    inner_has_weights = inner_runtime in HUB_RUNTIMES or inner_checkpoint.exists()
+    if inner_has_weights:
+        refused = _pin_failure(
+            inner,
+            inner_checkpoint if inner_runtime not in HUB_RUNTIMES else None,
+            model_name=model_name,
+            profile_limitations=_profile_limitations(profile),
+        )
+        if refused is not None:
+            return refused
 
     scored_frames: list[dict[str, object]] = []
     with tempfile.TemporaryDirectory(prefix="dfl-frames-") as tmp_dir:
@@ -749,7 +838,7 @@ def _run_video_frames(
         if not frame_paths:
             raise RuntimeError(f"no frames could be decoded from {media_path}")
         for index, frame_path in enumerate(frame_paths):
-            result = _score_from_runtime_profile(inner, frame_path, base_dir=base_dir)
+            result = _score_from_runtime_profile(inner, frame_path, base_dir=base_dir, pin_verified=inner_has_weights)
             scored_frames.append(
                 {
                     "frame": index,

@@ -3,6 +3,8 @@
   "name": "SBI EfficientNet-B0 on per-frame face crops (video-frames runtime)",
   "candidate_key": "sbi-effnet-b0-frames",
   "runtime": "video-frames",
+  "supported": false,
+  "reason": "0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
   "modality": "video",
   "frames": 8,
   "inner": {
@@ -16,7 +18,6 @@
     "name": "SBI EfficientNet-B0 (v2, diverse-domain)"
   },
   "ensemble_weight": 0.7,
-  "supported": true,
   "source_url": "local training: experiments/train_detector.py on self-blend corpus (see experiments/FACESWAP_EVALUATION.md); frame wrapper uses the committed sbi-effnet-runtime.json inner config",
   "limitations": [
     "This is the measured faceswap path for video: faces are detected per sampled frame (MediaPipe + Haar fallback) and scored by the SBI member — the member with AUROC ~0.87 on held-out face manipulation.",
@@ -25,5 +26,10 @@
     "Heavy compression/low-resolution faces degrade detection (documented in experiments/FACESWAP_EVALUATION.md).",
     "Checkpoint is not committed; reproduce via scripts + experiments/train_detector.py.",
     "Scores are a prioritization signal, not a truth label."
-  ]
+  ],
+  "pin": {
+    "sha256": ""
+  },
+  "measured_on": null,
+  "license": "로컬 학습 체크포인트(업스트림 가중치 없음) — 학습 데이터 약관 적용, source_url 참조"
 }

@@ -69,7 +69,7 @@ def analyze_video_temporal(
     """Analyze a video file for temporal inconsistencies.
 
     ``model_path`` plugs a video-modality model profile (e.g. the bundled
-    ``models/aide-frames-runtime.json`` — a ``video-frames`` runtime that
+    ``models/community-forensics-frames-runtime.json`` — a ``video-frames`` runtime that
     scores sampled frames with an image detector) into the same adapter
     contract as image/audio scans. The result lands in ``model_analysis``
     as a prioritization signal, not a truth label.

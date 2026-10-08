@@ -49,6 +49,25 @@ def _checkpoint_downloaded() -> bool:
     return CHECKPOINT_PATH.exists()
 
 
+def _enabled_copy(root: Path, *, checkpoint: Path | None = None) -> Path:
+    """An operator-enabled copy of the committed profile in ``root``.
+
+    G9/WP-C: the committed profile is ``supported: false`` (measurement gate
+    not met) and unpinned, so tests that exercise the runtime path use a
+    copy with the gate lifted and, when a checkpoint is given, a matching
+    ``pin.sha256``.
+    """
+    profile = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
+    profile.pop("supported", None)
+    profile.pop("reason", None)
+    if checkpoint is not None:
+        profile["checkpoint"] = str(checkpoint)
+        profile["pin"] = {"sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest()}
+    path = root / PROFILE_PATH.name
+    path.write_text(json.dumps(profile), encoding="utf-8")
+    return path
+
+
 def _load_script(name: str):
     spec = importlib.util.spec_from_file_location(name.replace(".py", ""), REPO_ROOT / "scripts" / name)
     module = importlib.util.module_from_spec(spec)
@@ -102,7 +121,13 @@ class AasistRuntimeProfileTest(unittest.TestCase):
             wav = root / "sample.wav"
             _write_wav(wav)
 
-            analysis = analyze_external_model(wav, PROFILE_PATH, modality="audio")
+            # G9/WP-C: the committed profile is supported:false — skipped
+            # with the measurement-gate reason before any checkpoint lookup.
+            committed = analyze_external_model(wav, PROFILE_PATH, modality="audio")
+            self.assertFalse(committed.available)
+            self.assertIn("측정 게이트", committed.detail)
+
+            analysis = analyze_external_model(wav, _enabled_copy(root), modality="audio")
 
             self.assertIsNotNone(analysis)
             self.assertFalse(analysis.available)
@@ -144,9 +169,7 @@ class AasistRuntimeProfileTest(unittest.TestCase):
             root = Path(tmp)
             fake = root / "aasist.pth"
             fake.write_bytes(b"not a real checkpoint")
-            profile_copy = root / "aasist-runtime.json"
-            profile = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
-            profile_copy.write_text(json.dumps(profile), encoding="utf-8")
+            profile_copy = _enabled_copy(root, checkpoint=fake)  # G9: pinned so the load is attempted
             wav = root / "sample.wav"
             _write_wav(wav)
 
@@ -305,9 +328,7 @@ class AasistTorchInferenceTest(unittest.TestCase):
             root = Path(tmp)
             model = module.AasistModel(module.AASIST_CONFIG)
             torch.save(model.state_dict(), root / "aasist.pth")
-            profile = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
-            profile_copy = root / "aasist-runtime.json"
-            profile_copy.write_text(json.dumps(profile), encoding="utf-8")
+            profile_copy = _enabled_copy(root, checkpoint=root / "aasist.pth")  # G9
             wav = root / "clip.wav"
             _write_wav(wav, seconds=6.0)  # >1 window exercises averaging
 
@@ -323,7 +344,8 @@ class AasistTorchInferenceTest(unittest.TestCase):
             wav = Path(tmp) / "tone.wav"
             _write_wav(wav, seconds=5.0)
 
-            analysis = analyze_external_model(wav, PROFILE_PATH, modality="audio")
+            # G9: the committed profile is supported:false and unpinned.
+            analysis = analyze_external_model(wav, _enabled_copy(Path(tmp), checkpoint=CHECKPOINT_PATH), modality="audio")
 
             self.assertTrue(analysis.available, analysis.detail)
             self.assertGreaterEqual(analysis.score, 0)

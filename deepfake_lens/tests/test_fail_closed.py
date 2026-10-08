@@ -9,6 +9,7 @@ Every test injects the fault with ``unittest.mock`` — no weights needed.
 from __future__ import annotations
 
 import ast
+import hashlib
 import importlib.util
 import json
 import struct
@@ -113,7 +114,10 @@ class ModelFailClosedTest(FailClosedAssertions):
         checkpoint = root / "fake.pth"
         checkpoint.write_bytes(b"not a real checkpoint")
         profile = root / "fake-runtime.json"
-        profile.write_text(json.dumps({"name": "fake-aide", "runtime": "aide", "checkpoint": str(checkpoint), "modality": "image"}), encoding="utf-8")
+        # G9 (WP-C): weights load only against a matching pin, so the fake
+        # profile pins its fake checkpoint to reach the inference path.
+        pin = {"sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest()}
+        profile.write_text(json.dumps({"name": "fake-aide", "runtime": "aide", "checkpoint": str(checkpoint), "modality": "image", "pin": pin}), encoding="utf-8")
         return profile
 
     def test_inference_runtime_error_is_failed(self) -> None:

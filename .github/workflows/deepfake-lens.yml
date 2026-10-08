@@ -138,6 +138,11 @@ jobs:
           python-version: "3.12"
       - name: Verify vendored contracts against PIN.json
         run: python scripts/verify_contracts.py
+      # models/README.md, models/NOTICE.md and the profile-backed entries of
+      # model_registry.py are generated from models/*-runtime.json (G9/G33);
+      # a profile edit without regenerating them fails here.
+      - name: Model docs generated from profiles
+        run: python scripts/sync_model_docs.py --check
 
   registry-links:
     runs-on: ubuntu-latest

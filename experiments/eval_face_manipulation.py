@@ -1,11 +1,12 @@
 """Face-manipulation detector evaluation harness.
 
-Measures the face-crop ViT member (models/face-manipulation-vit-runtime.json)
-on a labeled set:
+Measures a face-crop member profile (e.g. models/sbi-effnet-runtime.json)
+on a labeled set. The ViT member this harness was written for was rejected
+and removed (docs/MODEL-REJECTIONS.md), so --profile is now required:
 
     python experiments/eval_face_manipulation.py --real-dir <real faces>
         [--fake-dir <known-fake faces>]
-        [--profile models/face-manipulation-vit-runtime.json]
+        --profile models/sbi-effnet-runtime.json
         [--variants original,jpeg75,half]
         [--report experiments/face_eval_report.json]
 
@@ -123,7 +124,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--real-dir", type=Path, required=True, help="Directory of real face images (label 0)")
     parser.add_argument("--fake-dir", type=Path, help="Optional directory of known-fake faces (label 1)")
-    parser.add_argument("--profile", type=Path, default=REPO_ROOT / "models/face-manipulation-vit-runtime.json")
+    parser.add_argument("--profile", type=Path, required=True, help="face-crop runtime profile to measure")
     parser.add_argument("--variants", default="original,jpeg75,half", help="Comma list of: original,jpeg75,half")
     parser.add_argument("--sbi-per-real", type=int, default=1, help="SBI manipulations synthesized per real image")
     parser.add_argument("--seed", type=int, default=0)

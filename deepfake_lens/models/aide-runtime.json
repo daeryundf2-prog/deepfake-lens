@@ -3,6 +3,8 @@
   "name": "AIDE (ICLR 2025) progan_train",
   "candidate_key": "aide-iclr-2025",
   "runtime": "aide",
+  "supported": false,
+  "reason": "0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
   "checkpoint": "aide_progan_train.pth",
   "input_size": 256,
   "mean": [
@@ -30,5 +32,9 @@
     "The checkpoint path is relative to this profile's directory (models/); keep it out of git — it is covered by .gitignore."
   ],
   "license": "MIT",
-  "degraded_weight": 0.3
+  "degraded_weight": 0.3,
+  "pin": {
+    "sha256": ""
+  },
+  "measured_on": null
 }

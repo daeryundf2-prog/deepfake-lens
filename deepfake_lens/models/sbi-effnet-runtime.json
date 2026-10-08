@@ -1,30 +1,36 @@
 {
- "type": "deepfake-lens-runtime-profile-v1",
- "name": "SBI-trained EfficientNet-B0 v2 (local, enriched self-blend: polygon/affine masks + diverse portraits)",
- "candidate_key": "sbi-effnet-b0-local",
- "runtime": "torchvision",
- "modality": "image",
- "arch": "efficientnet_b0",
- "num_classes": 2,
- "checkpoint": "sbi-effnet-b0.pth",
- "input_size": 224,
- "score_index": 1,
- "score_activation": "softmax",
- "crop_faces": true,
- "supported": true,
- "source_url": "local training: experiments/train_detector.py --sbi --augment-degradation with enriched blending (polygon hull masks, affine misalignment) on FFHQ parquet + Wikimedia diverse portraits",
- "limitations": [
-  "Checkpoint is not committed; reproduce with experiments/train_detector.py --sbi --augment-degradation --arch efficientnet_b0.",
-  "score_bias=35 recalibrates the shifted score distribution measured on 147 held-out crops (v2 raw scores run ~16 points hotter on real faces than v1).",
-  "Measured at bias 35, threshold 50 (2026-09-20 eval, 72 real + 85 fake): overall FPR 0.044 / recall 0.405; in-domain FPR 0.000 / recall 0.405; cross-domain FPR 0.080 / recall 0.300 — dominates v1 (FPR 0.029 / recall 0.342) at every operating point.",
-  "ROC-level (bias-free): in-domain AUROC 0.96, cross-domain AUROC ~0.68. Cross-domain ranking still weak — treat member as advisory on aged/scanned/damaged portraits.",
-  "crop_faces=true: face-free images are skipped (unavailable) rather than scored.",
-  "Generic non-portrait corpus (Hemg holdout, 2026-09-20): crop_faces scored 43/55 images and FPR@50 hit 0.50 — outside face-portrait domains this member's ranking is noise; advisory only."
- ],
- "notes": [
-  "Model logits are (real=0, fake=1); score_index 1 with softmax yields the fake probability on a 0-100 scale.",
-  "Trained on 362 real faces (300 FFHQ + 62 diverse portraits) + 362 self-blend fakes with both-class JPEG/resize degradation augmentation; combined val AUROC 0.88.",
-  "Training on FFHQ only produced a cross-domain FPR of ~0.67 on old/damaged portraits; adding 62 diverse real faces dropped it to ~0.07 — see FACESWAP_EVALUATION.md."
- ],
- "score_bias": 35
+  "type": "deepfake-lens-runtime-profile-v1",
+  "name": "SBI-trained EfficientNet-B0 v2 (local, enriched self-blend: polygon/affine masks + diverse portraits)",
+  "candidate_key": "sbi-effnet-b0-local",
+  "runtime": "torchvision",
+  "supported": false,
+  "reason": "0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
+  "modality": "image",
+  "arch": "efficientnet_b0",
+  "num_classes": 2,
+  "checkpoint": "sbi-effnet-b0.pth",
+  "input_size": 224,
+  "score_index": 1,
+  "score_activation": "softmax",
+  "crop_faces": true,
+  "source_url": "local training: experiments/train_detector.py --sbi --augment-degradation with enriched blending (polygon hull masks, affine misalignment) on FFHQ parquet + Wikimedia diverse portraits",
+  "limitations": [
+    "Checkpoint is not committed; reproduce with experiments/train_detector.py --sbi --augment-degradation --arch efficientnet_b0.",
+    "score_bias=35 recalibrates the shifted score distribution measured on 147 held-out crops (v2 raw scores run ~16 points hotter on real faces than v1).",
+    "Measured at bias 35, threshold 50 (2026-09-20 eval, 72 real + 85 fake): overall FPR 0.044 / recall 0.405; in-domain FPR 0.000 / recall 0.405; cross-domain FPR 0.080 / recall 0.300 — dominates v1 (FPR 0.029 / recall 0.342) at every operating point.",
+    "ROC-level (bias-free): in-domain AUROC 0.96, cross-domain AUROC ~0.68. Cross-domain ranking still weak — treat member as advisory on aged/scanned/damaged portraits.",
+    "crop_faces=true: face-free images are skipped (unavailable) rather than scored.",
+    "Generic non-portrait corpus (Hemg holdout, 2026-09-20): crop_faces scored 43/55 images and FPR@50 hit 0.50 — outside face-portrait domains this member's ranking is noise; advisory only."
+  ],
+  "notes": [
+    "Model logits are (real=0, fake=1); score_index 1 with softmax yields the fake probability on a 0-100 scale.",
+    "Trained on 362 real faces (300 FFHQ + 62 diverse portraits) + 362 self-blend fakes with both-class JPEG/resize degradation augmentation; combined val AUROC 0.88.",
+    "Training on FFHQ only produced a cross-domain FPR of ~0.67 on old/damaged portraits; adding 62 diverse real faces dropped it to ~0.07 — see FACESWAP_EVALUATION.md."
+  ],
+  "score_bias": 35,
+  "pin": {
+    "sha256": ""
+  },
+  "measured_on": null,
+  "license": "로컬 학습 체크포인트(업스트림 가중치 없음) — 학습 데이터 약관 적용, source_url 참조"
 }

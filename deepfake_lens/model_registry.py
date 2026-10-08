@@ -4,6 +4,8 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .model_pins import empty_pin_for
+
 
 @dataclass(frozen=True)
 class DetectorCandidate:
@@ -20,7 +22,155 @@ class DetectorCandidate:
         return asdict(self)
 
 
-DETECTOR_REGISTRY = [
+# Profile-backed candidates: one per models/*-runtime.json, generated from
+# the profiles so the registry cannot drift from what actually ships (G9).
+# BEGIN GENERATED: profile candidates (scripts/sync_model_docs.py — do not edit by hand)
+_PROFILE_CANDIDATES: list[DetectorCandidate] = [
+    DetectorCandidate(
+        key="aasist-2022",
+        name="AASIST (Interspeech 2022) ASVspoof2019-LA anti-spoofing",
+        task="binary-audio-detector",
+        adapter_target="aasist runtime profile",
+        status="unmeasured",
+        priority="n/a",
+        source_url="https://github.com/clovaai/aasist",
+        notes=[
+            "프로필 models/aasist-runtime.json (runtime aasist, modality audio).",
+            "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
+            "pin: 미고정 (sha256 비어 있음); measured_on: 없음.",
+        ],
+    ),
+    DetectorCandidate(
+        key="swin-ai-image-umm-maybe",
+        name="Swin-large AI-vs-human image detector (umm-maybe)",
+        task="binary-image-detector",
+        adapter_target="hf-image-classifier runtime profile",
+        status="unmeasured",
+        priority="n/a",
+        source_url="https://huggingface.co/umm-maybe/AI-image-detector",
+        notes=[
+            "프로필 models/ai-image-swin-runtime.json (runtime hf-image-classifier, modality image).",
+            "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
+            "pin: 미고정 (revision 비어 있음); measured_on: 없음.",
+        ],
+    ),
+    DetectorCandidate(
+        key="aide-iclr-2025",
+        name="AIDE (ICLR 2025) progan_train",
+        task="binary-image-detector",
+        adapter_target="aide runtime profile",
+        status="unmeasured",
+        priority="n/a",
+        source_url="https://github.com/shilinyan99/AIDE",
+        notes=[
+            "프로필 models/aide-runtime.json (runtime aide, modality image).",
+            "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
+            "pin: 미고정 (sha256 비어 있음); measured_on: 없음.",
+        ],
+    ),
+    DetectorCandidate(
+        key="community-forensics-vit-s384-frames",
+        name="CommunityForensics ViT-S/384 per-frame (video-frames runtime)",
+        task="video-frame-detector",
+        adapter_target="video-frames runtime profile",
+        status="unmeasured",
+        priority="n/a",
+        source_url="https://huggingface.co/Red-had1911/deepfake-detector-onnx (generative_detector.onnx — Community Forensics ViT-S/384, arXiv:2411.04125, MIT)",
+        notes=[
+            "프로필 models/community-forensics-frames-runtime.json (runtime video-frames → onnx, modality video).",
+            "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
+            "pin: 미고정 (sha256 비어 있음); measured_on: 없음.",
+        ],
+    ),
+    DetectorCandidate(
+        key="community-forensics-vit-s384",
+        name="CommunityForensics ViT-S/384 (OpenSight) general AI-image detector",
+        task="binary-image-detector",
+        adapter_target="onnx runtime profile",
+        status="unmeasured",
+        priority="n/a",
+        source_url="https://huggingface.co/Red-had1911/deepfake-detector-onnx (generative_detector.onnx — direct export of the original timm checkpoint model_v11_ViT_384_base_ckpt.pt; Community Forensics, Park & Owens U-Michigan, arXiv:2411.04125, MIT)",
+        notes=[
+            "프로필 models/community-forensics-vit-runtime.json (runtime onnx, modality image).",
+            "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
+            "pin: 미고정 (sha256 비어 있음); measured_on: 없음.",
+        ],
+    ),
+    DetectorCandidate(
+        key="fakespot-detector-2024",
+        name="Fakespot AI text detector (roberta-base)",
+        task="binary-text-detector",
+        adapter_target="hf-text-classifier runtime profile",
+        status="unmeasured",
+        priority="n/a",
+        source_url="https://huggingface.co/fakespot-ai/roberta-base-ai-text-detection-v1",
+        notes=[
+            "프로필 models/fakespot-detector-runtime.json (runtime hf-text-classifier, modality text).",
+            "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
+            "pin: 미고정 (revision 비어 있음); measured_on: 없음.",
+        ],
+    ),
+    DetectorCandidate(
+        key="sbi-effnet-b0-local",
+        name="SBI-trained EfficientNet-B0 v2 (local, enriched self-blend: polygon/affine masks + diverse portraits)",
+        task="face-manipulation-detector",
+        adapter_target="torchvision runtime profile",
+        status="unmeasured",
+        priority="n/a",
+        source_url="local training: experiments/train_detector.py --sbi --augment-degradation with enriched blending (polygon hull masks, affine misalignment) on FFHQ parquet + Wikimedia diverse portraits",
+        notes=[
+            "프로필 models/sbi-effnet-runtime.json (runtime torchvision, modality image).",
+            "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
+            "pin: 미고정 (sha256 비어 있음); measured_on: 없음.",
+        ],
+    ),
+    DetectorCandidate(
+        key="sbi-effnet-b0-frames",
+        name="SBI EfficientNet-B0 on per-frame face crops (video-frames runtime)",
+        task="video-frame-detector",
+        adapter_target="video-frames runtime profile",
+        status="unmeasured",
+        priority="n/a",
+        source_url="local training: experiments/train_detector.py on self-blend corpus (see experiments/FACESWAP_EVALUATION.md); frame wrapper uses the committed sbi-effnet-runtime.json inner config",
+        notes=[
+            "프로필 models/sbi-frames-runtime.json (runtime video-frames → torchvision, modality video).",
+            "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
+            "pin: 미고정 (sha256 비어 있음); measured_on: 없음.",
+        ],
+    ),
+    DetectorCandidate(
+        key="sd-turbo-effnet-b0-local",
+        name="Local EfficientNet-B0 trained on SD-Turbo fakes vs Hemg reals",
+        task="binary-image-detector",
+        adapter_target="torchscript runtime profile",
+        status="unmeasured",
+        priority="n/a",
+        source_url="local training: experiments/train_detector.py --augment-degradation on experiments/gen_sdturbo_corpus.py output (280 SD-Turbo fakes) + Hemg/deepfake-and-real-images real class",
+        notes=[
+            "프로필 models/sd-turbo-det-runtime.json (runtime torchscript, modality image).",
+            "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
+            "pin: 미고정 (sha256 비어 있음); measured_on: 없음.",
+        ],
+    ),
+    DetectorCandidate(
+        key="wav2vec-xlsr-gustking",
+        name="Wav2Vec2-XLSR deepfake audio classifier (Gustking, In-the-Wild)",
+        task="binary-audio-detector",
+        adapter_target="hf-audio-classifier runtime profile",
+        status="unmeasured",
+        priority="n/a",
+        source_url="https://huggingface.co/Gustking/wav2vec2-large-xlsr-deepfake-audio-classification",
+        notes=[
+            "프로필 models/wav2vec-deepfake-audio-runtime.json (runtime hf-audio-classifier, modality audio).",
+            "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
+            "pin: 미고정 (revision 비어 있음); measured_on: 없음.",
+        ],
+    ),
+]
+# END GENERATED: profile candidates
+
+# Research / reference candidates and rejected detectors (hand-written).
+_OTHER_CANDIDATES = [
     DetectorCandidate(
         key="ntire-2026-robust-wild",
         name="NTIRE 2026 Robust AI-Generated Image Detection in the Wild",
@@ -32,142 +182,6 @@ DETECTOR_REGISTRY = [
         notes=[
             "Use as the robustness target: transformed, recompressed, resized, blurred, and cropped images.",
             "The challenge report is a benchmark and method survey, not one reusable checkpoint.",
-        ],
-    ),
-    DetectorCandidate(
-        key="aide-iclr-2025",
-        name="AIDE AI-generated Image DEtector with Hybrid Features",
-        task="binary-image-detector",
-        adapter_target="torchscript/onnx profile",
-        status="candidate",
-        priority="high",
-        source_url="https://github.com/shilinyan99/AIDE",
-        notes=[
-            "Good first pretrained integration candidate because code and checkpoints are public.",
-            "Hybrid features line up with the existing pixel expert ensemble.",
-            "models/aide-frames-runtime.json reuses this checkpoint per frame as an interim frame-level video screen; it is not temporal detection.",
-        ],
-    ),
-    DetectorCandidate(
-        key="univfd-cvpr-2023",
-        name="UnivFD UniversalFakeDetect CLIP ViT-L/14 linear probe",
-        task="binary-image-detector",
-        adapter_target="clip-linear runtime profile",
-        status="candidate",
-        priority="high",
-        source_url="https://github.com/YuhengLi99/UniversalFakeDetect",
-        notes=[
-            "Wired via models/univfd-runtime.json; needs transformers+torch and the released linear-head weights (not committed).",
-            "CLIP-feature probes generalize across generators better than classifier retraining, which complements AIDE's DCT view.",
-        ],
-    ),
-    DetectorCandidate(
-        key="cnndetection-cvpr-2020",
-        name="CNNDetection ResNet-50 blur+jpg",
-        task="binary-image-detector",
-        adapter_target="torchvision runtime profile",
-        status="candidate",
-        priority="medium",
-        source_url="https://github.com/PeterWang512/CNNDetection",
-        notes=[
-            "Wired via models/cnndetection-runtime.json; download blur_jpg_prob.pth per the repo README (not committed).",
-            "Classic ProGAN-era baseline; known weak transfer to diffusion generators — keep as a low-priority agreement member.",
-        ],
-    ),
-    DetectorCandidate(
-        key="swin-ai-image-umm-maybe",
-        name="Swin-large AI-vs-human image detector (umm-maybe/AI-image-detector)",
-        task="binary-image-detector",
-        adapter_target="hf-image-classifier runtime profile",
-        status="integrated",
-        priority="medium",
-        source_url="https://huggingface.co/umm-maybe/AI-image-detector",
-        notes=[
-            "Wired via models/ai-image-swin-runtime.json (score_label 'artificial'); ~870 MB hub weights download on first use.",
-            "Measured locally (2026-09): 1/4 DALL-E samples caught, real Lenna correctly scored human 0.97 — its value is real-image calibration against AIDE's false positives (Lenna: AIDE 85 vs Swin 3), not commercial-generator recall.",
-            "Opt-in member: picked up by models/ directory scans (web app, api_server, --model-path models) but kept out of the CLI default list — see experiments/IMAGE_EVALUATION.md.",
-        ],
-    ),
-    DetectorCandidate(
-        key="dire-iccv-2023",
-        name="DIRE DIffusion Reconstruction Error",
-        task="diffusion-image-detector",
-        adapter_target="documented placeholder (needs ADM diffusion pipeline)",
-        status="research",
-        priority="medium",
-        source_url="https://github.com/ZhendongWang6/DIRE",
-        notes=[
-            "Ships as models/dire-runtime.json with supported:false — no drop-in checkpoint exists.",
-            "Strong reported diffusion coverage, but per-image inversion is too heavy for the screening path until a runtime is written.",
-        ],
-    ),
-    DetectorCandidate(
-        key="vit-face-manipulation-dima806",
-        name="ViT deepfake-vs-real face classifier (dima806)",
-        task="face-manipulation-detector",
-        adapter_target="hf-image-classifier runtime profile",
-        status="rejected",
-        priority="high",
-        source_url="https://huggingface.co/dima806/deepfake_vs_real_image_detection",
-        notes=[
-            "Measured locally and rejected for manipulation detection: AUROC ~0.51 on 45 face-focused SBI pairs, ~47% FPR@50 driven by aged portraits scoring 99-100 fake.",
-            "Profiles kept as supported:false (face-manipulation-vit-*.json); the hf-image-classifier runtime + crop_faces machinery remains for the next candidate.",
-            "Its trained task (fully generated faces vs real photos) is a different problem than faceswap — see experiments/FACESWAP_EVALUATION.md.",
-        ],
-    ),
-    DetectorCandidate(
-        key="efficientnet-ffpp-2025",
-        name="EfficientNet-B0 face-manipulation detector (FaceForensics++ C23)",
-        task="face-manipulation-detector",
-        adapter_target="torchvision runtime profile",
-        status="rejected",
-        priority="high",
-        source_url="https://huggingface.co/Xicor9/efficientnet-b0-ffpp-c23",
-        notes=[
-            "Measured locally and rejected: real Lenna face scored 96% fake while an SBI-manipulated copy scored lower (86%) — inverted/unusable signal.",
-            "Profiles kept as supported:false placeholders with the measurement recorded; fetch_faceswap.py remains for anyone re-validating with better preprocessing/crops.",
-        ],
-    ),
-    DetectorCandidate(
-        key="sbi-effnet-b0-local",
-        name="SBI-trained EfficientNet-B0 (local self-blend)",
-        task="face-manipulation-detector",
-        adapter_target="torchvision runtime profile",
-        status="candidate",
-        priority="high",
-        source_url="local: experiments/train_detector.py --sbi --augment-degradation",
-        notes=[
-            "Wired via models/sbi-effnet-runtime.json; checkpoint not committed — reproduce with train_detector.py.",
-            "Measured: in-domain AUROC 0.84-0.90, FPR 0.0-0.15; cross-domain (27 diverse portraits) AUROC ~0.79, FPR ~0.07 — usable with conservative recall.",
-            "--augment-degradation fixed a measured FPR-1.0 JPEG collapse; adding diverse-domain real faces fixed a measured cross-domain FPR-0.67. See experiments/FACESWAP_EVALUATION.md.",
-        ],
-    ),
-    DetectorCandidate(
-        key="aasist-2022",
-        name="AASIST Audio Anti-Spoofing Integrated Spectro-Temporal Graph Attention",
-        task="binary-audio-detector",
-        adapter_target="aasist runtime profile",
-        status="candidate",
-        priority="high",
-        source_url="https://github.com/clovaai/aasist",
-        notes=[
-            "Wired via models/aasist-runtime.json; scripts/fetch_aasist.py downloads the in-repo AASIST.pth (~1.3 MB, not committed).",
-            "Trained on ASVspoof2019-LA — strong on TTS/VC attacks; verify cross-domain AUROC on local data before trusting thresholds.",
-        ],
-    ),
-    DetectorCandidate(
-        key="wav2vec-xlsr-gustking",
-        name="Wav2Vec2-XLSR deepfake audio classifier (In-the-Wild)",
-        task="binary-audio-detector",
-        adapter_target="hf-audio-classifier runtime profile",
-        status="integrated",
-        priority="high",
-        source_url="https://huggingface.co/Gustking/wav2vec2-large-xlsr-deepfake-audio-classification",
-        notes=[
-            "Wired via models/wav2vec-deepfake-audio-runtime.json on the new hf-audio-classifier runtime (AutoFeatureExtractor + AutoModelForAudioClassification, shared run_aasist waveform decoder).",
-            "Measured locally (2026-09): real LibriSpeech 89.7% / 8 kHz YESNO 93.0% real, SAPI TTS 91.7% fake — but a modern neural TTS sample (edge-tts) scored only 17.9% fake, so low scores are not evidence of real audio.",
-            "Complements AASIST: AASIST caught the edge-tts sample (72.9% spoof) but false-positives on low-bandwidth real speech (97.5% spoof on 8 kHz YESNO); Gustking is the better-calibrated real-speech member.",
-            "Rejected candidate: MelodyMachine/Deepfake-audio-detection-V2 returned inverted scores on local samples (real speech -> fake 100%).",
         ],
     ),
     DetectorCandidate(
@@ -223,34 +237,6 @@ DETECTOR_REGISTRY = [
         ],
     ),
     DetectorCandidate(
-        key="openai-detector-2019",
-        name="OpenAI GPT-2 output detector (RoBERTa-base fine-tune)",
-        task="binary-text-detector",
-        adapter_target="hf-text-classifier runtime profile",
-        status="candidate",
-        priority="medium",
-        source_url="https://huggingface.co/openai-community/roberta-base-openai-detector",
-        notes=[
-            "Wired via models/openai-detector-runtime.json; the ~500 MB checkpoint is fetched from Hugging Face on first use (point 'hub_model' at a local snapshot for offline).",
-            "Trained on GPT-2 outputs (2019) — OpenAI's model card warns about modern-LLM and short/non-English text; treat as a legacy baseline, re-validate on target-domain samples.",
-        ],
-    ),
-    DetectorCandidate(
-        key="fakespot-detector-2024",
-        name="Fakespot AI text detector (RoBERTa-base, modern-LLM training data)",
-        task="binary-text-detector",
-        adapter_target="hf-text-classifier runtime profile",
-        status="candidate",
-        priority="medium",
-        source_url="https://huggingface.co/fakespot-ai/roberta-base-ai-text-detection-v1",
-        notes=[
-            "Wired via models/fakespot-detector-runtime.json; fetched from Hugging Face on first use like the OpenAI detector.",
-            "Trained on newer LLM outputs than the GPT-2-era OpenAI detector — pair them as a two-member ensemble for an agreement signal.",
-            "Still English-centric and weak on short text; re-validate on target-domain samples.",
-            "Follow-up screening (2026-09) confirmed it is the strongest public text member measured: scores ~0.98 on OOD GPT-2 output and formal Korean AI-style text.",
-        ],
-    ),
-    DetectorCandidate(
         key="hc3-roberta-2023",
         name="Hello-SimpleAI chatgpt-detector-roberta (HC3 corpus)",
         task="binary-text-detector",
@@ -261,32 +247,6 @@ DETECTOR_REGISTRY = [
         notes=[
             "Screened 2026-09 and not wired: perfect on its HC3 training domain but scores ~0.00 on out-of-domain inputs (GPT-2 output, Korean AI-style text) — would only dilute the ensemble.",
             "Recorded in experiments/TEXT_DETECTION_EVAL.md (follow-up candidate screening).",
-        ],
-    ),
-    DetectorCandidate(
-        key="qwen-ppl-2025",
-        name="Qwen2.5-0.5B causal-LM perplexity screen",
-        task="zero-shot-text-detector",
-        adapter_target="causal-lm-ppl runtime profile",
-        status="candidate",
-        priority="high",
-        source_url="https://huggingface.co/Qwen/Qwen2.5-0.5B",
-        notes=[
-            "Wired via models/qwen-ppl-runtime.json; generator-agnostic perplexity screen — LLM output sits at low PPL under a different reference LM, covering generators never enumerated (Codex/Claude/Gemini/Grok/Kimi).",
-            "The only wired approach that structurally handles Korean (English-trained classifiers cannot read it); anchors [8,60] are provisional until a labeled corpus calibrates them.",
-        ],
-    ),
-    DetectorCandidate(
-        key="binoculars-2024",
-        name="Binoculars two-LM perplexity-ratio screen (Qwen2.5 pair)",
-        task="zero-shot-text-detector",
-        adapter_target="binoculars runtime profile",
-        status="candidate",
-        priority="medium",
-        source_url="https://huggingface.co/Qwen/Qwen2.5-1.5B",
-        notes=[
-            "Wired via models/binoculars-runtime.json; performer PPL over observer cross-PPL on the performer's own picks — a self-normalizing ratio more robust to domain shift than raw PPL.",
-            "Generator-agnostic like causal-lm-ppl but ~2x the cost; ratio anchors [0.85,1.05] are provisional until the labeled corpus grows.",
         ],
     ),
     DetectorCandidate(
@@ -342,7 +302,105 @@ DETECTOR_REGISTRY = [
             "Emphasizes zero-shot, out-of-the-box behavior across many generators.",
         ],
     ),
+    DetectorCandidate(
+        key="univfd-cvpr-2023",
+        name="UnivFD UniversalFakeDetect CLIP ViT-L/14 linear probe",
+        task="binary-image-detector",
+        adapter_target="removed runtime profile",
+        status="rejected",
+        priority="low",
+        source_url="https://github.com/YuhengLi99/UniversalFakeDetect",
+        notes=[
+            "Profile removed in phase 0 (WP-C); the measurement behind the removal is recorded in docs/MODEL-REJECTIONS.md.",
+        ],
+    ),
+    DetectorCandidate(
+        key="cnndetection-cvpr-2020",
+        name="CNNDetection ResNet-50 blur+jpg",
+        task="binary-image-detector",
+        adapter_target="removed runtime profile",
+        status="rejected",
+        priority="low",
+        source_url="https://github.com/PeterWang512/CNNDetection",
+        notes=[
+            "Profile removed in phase 0 (WP-C); the measurement behind the removal is recorded in docs/MODEL-REJECTIONS.md.",
+        ],
+    ),
+    DetectorCandidate(
+        key="dire-iccv-2023",
+        name="DIRE DIffusion Reconstruction Error",
+        task="diffusion-image-detector",
+        adapter_target="removed runtime profile",
+        status="rejected",
+        priority="low",
+        source_url="https://github.com/ZhendongWang6/DIRE",
+        notes=[
+            "Profile removed in phase 0 (WP-C); the measurement behind the removal is recorded in docs/MODEL-REJECTIONS.md.",
+        ],
+    ),
+    DetectorCandidate(
+        key="vit-face-manipulation-dima806",
+        name="ViT deepfake-vs-real face classifier (dima806)",
+        task="face-manipulation-detector",
+        adapter_target="removed runtime profile",
+        status="rejected",
+        priority="low",
+        source_url="https://huggingface.co/dima806/deepfake_vs_real_image_detection",
+        notes=[
+            "Profile removed in phase 0 (WP-C); the measurement behind the removal is recorded in docs/MODEL-REJECTIONS.md.",
+        ],
+    ),
+    DetectorCandidate(
+        key="efficientnet-ffpp-2025",
+        name="EfficientNet-B0 face-manipulation detector (FaceForensics++ C23)",
+        task="face-manipulation-detector",
+        adapter_target="removed runtime profile",
+        status="rejected",
+        priority="low",
+        source_url="https://huggingface.co/Xicor9/efficientnet-b0-ffpp-c23",
+        notes=[
+            "Profile removed in phase 0 (WP-C); the measurement behind the removal is recorded in docs/MODEL-REJECTIONS.md.",
+        ],
+    ),
+    DetectorCandidate(
+        key="openai-detector-2019",
+        name="OpenAI GPT-2 output detector (RoBERTa-base fine-tune)",
+        task="binary-text-detector",
+        adapter_target="removed runtime profile",
+        status="rejected",
+        priority="low",
+        source_url="https://huggingface.co/openai-community/roberta-base-openai-detector",
+        notes=[
+            "Profile removed in phase 0 (WP-C); the measurement behind the removal is recorded in docs/MODEL-REJECTIONS.md.",
+        ],
+    ),
+    DetectorCandidate(
+        key="qwen-ppl-2025",
+        name="Qwen2.5-0.5B causal-LM perplexity screen",
+        task="zero-shot-text-detector",
+        adapter_target="removed runtime profile",
+        status="rejected",
+        priority="low",
+        source_url="https://huggingface.co/Qwen/Qwen2.5-0.5B",
+        notes=[
+            "Profile removed in phase 0 (WP-C); the measurement behind the removal is recorded in docs/MODEL-REJECTIONS.md.",
+        ],
+    ),
+    DetectorCandidate(
+        key="binoculars-2024",
+        name="Binoculars two-LM perplexity-ratio screen (Qwen2.5 pair)",
+        task="zero-shot-text-detector",
+        adapter_target="removed runtime profile",
+        status="rejected",
+        priority="low",
+        source_url="https://huggingface.co/Qwen/Qwen2.5-1.5B",
+        notes=[
+            "Profile removed in phase 0 (WP-C); the measurement behind the removal is recorded in docs/MODEL-REJECTIONS.md.",
+        ],
+    ),
 ]
+
+DETECTOR_REGISTRY = [*_PROFILE_CANDIDATES, *_OTHER_CANDIDATES]
 
 
 def list_detector_candidates(*, focus: str | None = None) -> dict[str, object]:
@@ -383,7 +441,7 @@ def build_runtime_profile(
     candidate = _candidate(candidate_key)
     checkpoint_path = Path(checkpoint)
     inferred_runtime = runtime or ("onnx" if checkpoint_path.suffix.lower() == ".onnx" else "torchscript")
-    return {
+    profile: dict[str, object] = {
         "type": "deepfake-lens-runtime-profile-v1",
         "name": candidate.name,
         "candidate_key": candidate.key,
@@ -399,8 +457,14 @@ def build_runtime_profile(
         "notes": [
             "Edit input_size, mean/std, input_name, score_index, and threshold after validating the exported checkpoint.",
             "This profile does not bundle weights; it points Deepfake Lens at a local checkpoint.",
+            "Run 'deepfake-lens vendor-weights pin <profile>' to record the checkpoint sha256 — an unpinned profile is refused at load time.",
         ],
+        "measured_on": None,
     }
+    # G9: weights load only against a pin; the placeholder is filled by
+    # 'vendor-weights pin'.
+    profile["pin"] = empty_pin_for(profile)
+    return profile
 
 
 def write_runtime_profile(path: Path | str, candidate_key: str, checkpoint: Path | str, *, runtime: str | None = None, input_size: int = 224, score_index: int = 1) -> dict[str, object]:
