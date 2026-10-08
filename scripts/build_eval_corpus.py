@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
 """Build the labeled evaluation corpus used by experiments/eval_all.py.
 
-    python scripts/build_eval_corpus.py --out <corpus_dir> [--parts text,audio]
+    python scripts/build_eval_corpus.py --out <corpus_dir> [--parts text,audio] \
+        --qwen-revision <40-hex commit> --wikipedia-revision <40-hex commit>
+
+The two hub revisions are required for the text part (G10): the human side
+streams wikimedia/wikipedia and the AI side loads
+Qwen/Qwen2.5-0.5B-Instruct at exactly those commits, so the corpus can be
+rebuilt byte-for-byte later. There is no default revision; look the
+current one up with ``huggingface-cli`` / the hub "Files" tab and record it
+with the corpus manifest.
 
 Corpus layout (matches eval_all.py):
 
@@ -22,18 +30,31 @@ AI/TTS sides (Qwen ~1 GB, edge-tts network).
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
+QWEN_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
+WIKIPEDIA_DATASET = "wikimedia/wikipedia"
+WIKIPEDIA_CONFIG = "20231101.ko"
+# A full 40-hex hub commit — branch names ("main") move and are refused.
+COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 
-def build_text(out: Path, n_human: int, n_ai: int) -> None:
+
+def _commit(value: str) -> str:
+    if not COMMIT_SHA.match(value or ""):
+        raise argparse.ArgumentTypeError("40자 16진수 허브 커밋 SHA가 필요합니다(브랜치/태그 불가) — G10")
+    return value
+
+
+def build_text(out: Path, n_human: int, n_ai: int, *, qwen_revision: str, wikipedia_revision: str) -> None:
     real_dir, fake_dir = out / "text" / "real", out / "text" / "fake"
     real_dir.mkdir(parents=True, exist_ok=True)
     fake_dir.mkdir(parents=True, exist_ok=True)
 
     print("[corpus] text/real: Korean Wikipedia (streaming)...", flush=True)
     from datasets import load_dataset
-    ds = load_dataset("wikimedia/wikipedia", "20231101.ko", split="train", streaming=True)
+    ds = load_dataset(WIKIPEDIA_DATASET, WIKIPEDIA_CONFIG, split="train", streaming=True, revision=wikipedia_revision)
     n = 0
     for row in ds:
         for para in row.get("text", "").split("\n"):
@@ -56,9 +77,8 @@ def build_text(out: Path, n_human: int, n_ai: int) -> None:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    name = "Qwen/Qwen2.5-0.5B-Instruct"
-    tok = AutoTokenizer.from_pretrained(name)
-    model = AutoModelForCausalLM.from_pretrained(name, dtype=torch.float32).eval()
+    tok = AutoTokenizer.from_pretrained(QWEN_MODEL, revision=qwen_revision)
+    model = AutoModelForCausalLM.from_pretrained(QWEN_MODEL, revision=qwen_revision, dtype=torch.float32).eval()
     prompts = [
         "다음 주제에 대해 3문단짜리 설명문을 써줘: {}",
         "{}에 대해 블로그 글처럼 자연스럽게 써줘",
@@ -137,17 +157,22 @@ def build_audio(out: Path) -> None:
     print(f"  fake: {len(voices)} edge-tts clips", flush=True)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--parts", default="text,audio")
     parser.add_argument("--n-human", type=int, default=400)
     parser.add_argument("--n-ai", type=int, default=200)
-    args = parser.parse_args()
+    parser.add_argument("--qwen-revision", type=_commit, help=f"{QWEN_MODEL} hub commit (required for --parts text)")
+    parser.add_argument("--wikipedia-revision", type=_commit, help=f"{WIKIPEDIA_DATASET} hub commit (required for --parts text)")
+    args = parser.parse_args(argv)
     parts = {p.strip() for p in args.parts.split(",")}
 
     if "text" in parts:
-        build_text(args.out, args.n_human, args.n_ai)
+        missing = [flag for flag, value in (("--qwen-revision", args.qwen_revision), ("--wikipedia-revision", args.wikipedia_revision)) if not value]
+        if missing:
+            parser.error(f"--parts text에는 {', '.join(missing)}가 필요합니다(허브 revision 고정, G10)")
+        build_text(args.out, args.n_human, args.n_ai, qwen_revision=args.qwen_revision, wikipedia_revision=args.wikipedia_revision)
     if "audio" in parts:
         build_audio(args.out)
     print("[corpus] done ->", args.out, flush=True)

@@ -175,6 +175,7 @@ files = [
     "deepfake_lens/tests/qa/test_qa_sys.py",
     "deepfake_lens/tests/qa/samples.py",
     "deepfake_lens/tests/qa/test_qa_in.py",
+    "deepfake_lens/tests/test_hub_revisions.py",
     "deepfake_lens/perf.py",
     "deepfake_lens/pixel_analyzer.py",
     "deepfake_lens/png.py",

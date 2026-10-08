@@ -13,15 +13,29 @@ Model: stabilityai/sd-turbo (~1.3 GB, downloaded on first run)
 Cost: ~20 s/image on CPU at 512x512x4 steps — 280 images ~= 95 min.
 
 Usage:
-    python experiments/gen_sdturbo_corpus.py --out DIR/fake [--count 280] [--start 0]
+    python experiments/gen_sdturbo_corpus.py --out DIR/fake --revision <40-hex commit> [--count 280] [--start 0]
+
+``--revision`` (required, G10) pins stabilityai/sd-turbo to one hub commit so
+the generated corpus is reproducible; branch names are refused.
 """
 
 from __future__ import annotations
 
 import argparse
 import random
+import re
 import sys
 from pathlib import Path
+
+SD_TURBO_MODEL = "stabilityai/sd-turbo"
+# A full 40-hex hub commit — branch names ("main") move and are refused.
+COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
+
+
+def _commit(value: str) -> str:
+    if not COMMIT_SHA.match(value or ""):
+        raise argparse.ArgumentTypeError("40자 16진수 허브 커밋 SHA가 필요합니다(브랜치/태그 불가) — G10")
+    return value
 
 SUBJECTS = [
     "a street market with fruit stalls", "a mountain lake at sunrise",
@@ -71,6 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--start", type=int, default=0)
     ap.add_argument("--seed", type=int, default=20260920)
     ap.add_argument("--steps", type=int, default=4)
+    ap.add_argument("--revision", type=_commit, required=True, help=f"{SD_TURBO_MODEL} hub commit SHA (G10)")
     args = ap.parse_args(argv)
 
     import torch  # noqa: F401 - imported for side effect ordering clarity
@@ -79,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
     args.out.mkdir(parents=True, exist_ok=True)
     prompts = build_prompts(args.count, args.seed)
     pipe = AutoPipelineForText2Image.from_pretrained(
-        "stabilityai/sd-turbo", torch_dtype=torch.float32
+        SD_TURBO_MODEL, revision=args.revision, torch_dtype=torch.float32
     )
     pipe.set_progress_bar_config(disable=True)
     for i in range(args.start, min(args.count, len(prompts))):

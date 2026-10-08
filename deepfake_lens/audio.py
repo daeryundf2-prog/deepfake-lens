@@ -7,6 +7,7 @@ acoustic feature extraction, and heuristic scoring.
 from __future__ import annotations
 
 import logging
+import os
 
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -811,16 +812,44 @@ class SpeakerComparison:
         return asdict(self)
 
 
-def compare_speakers(path_a: Path | str, path_b: Path | str, *, segment_seconds: int = DEFAULT_SEGMENT_SECONDS) -> SpeakerComparison:
+# SpeechBrain ECAPA-TDNN speaker model (G10): loaded only at an explicit hub
+# commit — the ``ecapa_revision`` argument / ``--ecapa-revision`` or this
+# environment variable. There is no default revision: without one the
+# model is not fetched and the MFCC fallback runs, with the reason listed.
+ECAPA_HUB_MODEL = "speechbrain/spkrec-ecapa-voxceleb"
+ECAPA_REVISION_ENV = "DEEPFAKE_LENS_ECAPA_REVISION"
+ECAPA_UNPINNED_LIMITATION = (
+    f"ECAPA-TDNN 미사용: 허브 revision 미고정 — {ECAPA_REVISION_ENV}(40자 커밋 SHA) 또는 "
+    "--ecapa-revision을 지정해야 가중치를 내려받습니다(G10)."
+)
+
+
+def ecapa_revision(explicit: str | None = None) -> str | None:
+    """The pinned ECAPA hub commit, or None when unset/not a commit SHA."""
+    from .model_pins import is_commit_sha
+
+    value = (explicit or os.environ.get(ECAPA_REVISION_ENV) or "").strip()
+    return value if value and is_commit_sha(value) else None
+
+
+def compare_speakers(
+    path_a: Path | str,
+    path_b: Path | str,
+    *,
+    segment_seconds: int = DEFAULT_SEGMENT_SECONDS,
+    ecapa_revision_value: str | None = None,
+) -> SpeakerComparison:
     """Compare two audio files for same-speaker likelihood.
 
     Prefers a pretrained ECAPA-TDNN speaker embedding (SpeechBrain
     spkrec-ecapa-voxceleb) when the optional ``speechbrain`` package is
-    installed — a real speaker-verification model rather than the MFCC
-    distance fallback. First use downloads ~90 MB of weights into the
-    HF cache.
+    installed and a hub revision is pinned (``ecapa_revision_value`` or
+    ``$DEEPFAKE_LENS_ECAPA_REVISION``) — a real speaker-verification model
+    rather than the MFCC distance fallback. First use downloads ~90 MB of
+    weights at exactly that commit.
     """
-    ecapa = _ecapa_speaker_similarity(Path(path_a), Path(path_b))
+    revision = ecapa_revision(ecapa_revision_value)
+    ecapa = _ecapa_speaker_similarity(Path(path_a), Path(path_b), revision) if revision else None
     if ecapa is not None:
         similarity, limitations = ecapa
         # ECAPA cosine: same-speaker pairs typically land above ~0.25,
@@ -841,6 +870,8 @@ def compare_speakers(path_a: Path | str, path_b: Path | str, *, segment_seconds:
         "MFCC 기반 거리 측정이며 포렌식 화자 인식이 아닙니다.",
         "녹음 환경/코덱 차이가 있으면 같은 화자도 멀게 측정될 수 있습니다.",
     ]
+    if revision is None:
+        limitations.append(ECAPA_UNPINNED_LIMITATION)
     feat_a = _extract_features(Path(path_a), segment_seconds=segment_seconds)
     feat_b = _extract_features(Path(path_b), segment_seconds=segment_seconds)
     if feat_a is None or feat_b is None:
@@ -871,19 +902,22 @@ def compare_speakers(path_a: Path | str, path_b: Path | str, *, segment_seconds:
     return SpeakerComparison(score, distance, band, verdict, limitations)
 
 
-_ECAPA_MODEL = None
+# Loaded ECAPA models keyed by hub revision (one per pinned commit).
+_ECAPA_MODELS: dict[str, object] = {}
 
 
-def _ecapa_speaker_similarity(path_a: Path, path_b: Path) -> tuple[float, list[str]] | None:
+def _ecapa_speaker_similarity(path_a: Path, path_b: Path, revision: str) -> tuple[float, list[str]] | None:
     """ECAPA-TDNN cosine similarity via SpeechBrain, or None if unavailable.
 
-    Returns (similarity 0-1, limitations). Any failure — missing package,
-    no network for the first weight download, unreadable audio — returns
-    None so the caller falls back to the MFCC path.
+    ``revision`` is the pinned hub commit (required — G10); the weights are
+    fetched at exactly that commit into a per-revision directory. Returns
+    (similarity 0-1, limitations). Any failure — missing package, no
+    network for the first weight download, unreadable audio — returns None
+    so the caller falls back to the MFCC path.
     """
-    global _ECAPA_MODEL
+    model = _ECAPA_MODELS.get(revision)
     try:
-        if _ECAPA_MODEL is None:
+        if model is None:
             try:
                 from speechbrain.inference.speaker import SpeakerRecognition
             except ImportError:
@@ -892,12 +926,15 @@ def _ecapa_speaker_similarity(path_a: Path, path_b: Path) -> tuple[float, list[s
 
             # Windows non-admin cannot create symlinks — copy the fetched
             # weights into the local dir instead of linking the HF cache.
-            _ECAPA_MODEL = SpeakerRecognition.from_hparams(
-                source="speechbrain/spkrec-ecapa-voxceleb",
-                savedir=str(Path.home() / ".cache" / "deepfake-lens" / "spkrec-ecapa-voxceleb"),
+            model = SpeakerRecognition.from_hparams(
+                source=ECAPA_HUB_MODEL,
+                savedir=str(Path.home() / ".cache" / "deepfake-lens" / "spkrec-ecapa-voxceleb" / revision),
+                revision=revision,
                 local_strategy=LocalStrategy.COPY,
             )
+            _ECAPA_MODELS[revision] = model
     except Exception:
+        logger.warning("ECAPA-TDNN load failed at revision %s; MFCC fallback", revision, exc_info=True)
         return None
     wavs = [_ecapa_load_waveform(path) for path in (path_a, path_b)]
     if wavs[0] is None or wavs[1] is None:
@@ -905,12 +942,13 @@ def _ecapa_speaker_similarity(path_a: Path, path_b: Path) -> tuple[float, list[s
     try:
         import torch
 
-        score, _prediction = _ECAPA_MODEL.verify_batch(wavs[0].unsqueeze(0), wavs[1].unsqueeze(0))
+        score, _prediction = model.verify_batch(wavs[0].unsqueeze(0), wavs[1].unsqueeze(0))  # type: ignore[attr-defined]
         similarity = float(score.squeeze())
     except Exception:
         return None
     return similarity, [
         "ECAPA-TDNN(VoxCeleb 사전학습) 임베딩 유사도 — 포렌식 감정이 아닌 스크리닝 신호입니다.",
+        f"가중치: {ECAPA_HUB_MODEL}@{revision}",
         "다른 도메인(전화음, 극단적 잡음, 합성음)에서는 VoxCeleb 기준 임계값이 어긋날 수 있습니다.",
     ]
 

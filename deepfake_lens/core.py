@@ -1142,9 +1142,10 @@ TEXT_NEXT_CHECKS = [
 ]
 
 
-def compare_files(file_a: Path | str, file_b: Path | str) -> dict[str, object]:
+def compare_files(file_a: Path | str, file_b: Path | str, *, ecapa_revision: str | None = None) -> dict[str, object]:
     """Two-file comparison dispatch: speaker distance for audio pairs,
-    stylometry for text/document pairs."""
+    stylometry for text/document pairs. ``ecapa_revision`` pins the ECAPA
+    speaker model's hub commit (G10; else $DEEPFAKE_LENS_ECAPA_REVISION)."""
     from .audio import compare_speakers
     from .text_advanced import compare_texts
 
@@ -1152,7 +1153,7 @@ def compare_files(file_a: Path | str, file_b: Path | str) -> dict[str, object]:
     text_exts = SUPPORTED_TEXT_EXTENSIONS | SUPPORTED_DOCUMENT_EXTENSIONS | {".rst", ".log"}
     ext_a, ext_b = path_a.suffix.lower(), path_b.suffix.lower()
     if ext_a in SUPPORTED_AUDIO_EXTENSIONS and ext_b in SUPPORTED_AUDIO_EXTENSIONS:
-        result = compare_speakers(path_a, path_b)
+        result = compare_speakers(path_a, path_b, ecapa_revision_value=ecapa_revision)
         return {"kind": "speaker", "score": result.same_speaker_score, "band": result.band, "verdict": result.verdict, "distance": result.distance, "method": result.method, "limitations": result.limitations}
     if ext_a in text_exts and ext_b in text_exts:
         def _text(path: Path) -> str | None:

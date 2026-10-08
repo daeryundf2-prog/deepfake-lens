@@ -460,7 +460,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "compare":
         from .core import compare_files
-        result = compare_files(args.file_a, args.file_b)
+        result = compare_files(args.file_a, args.file_b, ecapa_revision=args.ecapa_revision)
         if args.format == "json":
             print(json.dumps(result, ensure_ascii=False, indent=2))
         else:

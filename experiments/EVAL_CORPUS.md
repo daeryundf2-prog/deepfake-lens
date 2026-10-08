@@ -26,7 +26,10 @@ the training recipe.
 ## Regenerate
 
 ```bash
-python scripts/build_eval_corpus.py --out eval_corpus --parts text,audio
+# --qwen-revision / --wikipedia-revision: 40-hex hub commits, required (G10) —
+# record them with the corpus manifest so the text side is reproducible.
+python scripts/build_eval_corpus.py --out eval_corpus --parts text,audio \
+    --qwen-revision <commit> --wikipedia-revision <commit>
 python scripts/fetch_diverse_faces.py --out eval_corpus/face_src  # then copy crops into face/real
 ```
 

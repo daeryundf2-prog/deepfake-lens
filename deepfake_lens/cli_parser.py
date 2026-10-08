@@ -209,6 +209,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     compare_parser.add_argument("file_a", type=Path, help="first file (audio pair or text/document pair)")
     compare_parser.add_argument("file_b", type=Path, help="second file")
     compare_parser.add_argument("--format", choices=["table", "json"], default="json", help="output format")
+    compare_parser.add_argument("--ecapa-revision", help="pinned hub commit SHA (40 hex) for the SpeechBrain ECAPA speaker model; default $DEEPFAKE_LENS_ECAPA_REVISION, else ECAPA is not loaded (MFCC fallback)")
 
     watermark_parser = subparsers.add_parser("watermark", help="test text for a KGW or SynthID watermark under a known secret")
     watermark_parser.add_argument("file", type=Path, help="text/document file to test")
