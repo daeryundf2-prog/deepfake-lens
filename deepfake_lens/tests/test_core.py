@@ -699,8 +699,9 @@ class DeepSignalsTest(unittest.TestCase):
         from deepfake_lens.result_types import CoverageEntry, CoverageStatus, EvidenceDirection, EvidenceItem, EvidenceStrength
 
         class _Inpaint:
-            band = "low"
-            verdict = "뚜렷한 인페인팅 의심 신호는 적습니다"
+            # D1 merge: layer modules expose reference_band/reference_note, never band/verdict.
+            reference_band = "reference"
+            reference_note = "인페인팅 후보 영역 2개 (참고)"
             regions_detected = 2
             score = 15
             limitations: list[str] = []
