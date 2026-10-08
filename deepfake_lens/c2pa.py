@@ -13,6 +13,7 @@ from __future__ import annotations
 import struct
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 
 MAX_FORENSIC_FILE_BYTES = 256 * 1024 * 1024  # 256 MB
 
@@ -38,10 +39,12 @@ class ProvenanceRecord:
 
 @dataclass(frozen=True)
 class MetadataForensicAnalysis:
+    # D1: provenance-signal weight sum, reference only — no 50/20 band and no
+    # verdict. Conclusions from metadata/C2PA come from the scan's evidence
+    # rules (evidence_rules.py), never from this score.
     score: int
-    band: str
-    band_label: str
-    verdict: str
+    reference_band: str
+    reference_note: str
     signals: list[ForensicEvidenceSignal]
     limitations: list[str]
     provenance_records: list[ProvenanceRecord]
@@ -174,24 +177,14 @@ def analyze_metadata_forensic(path: Path | str) -> MetadataForensicAnalysis:
 
     score = min(100, sum(signal.weight for signal in signals))
 
-    if score >= 50:
-        band = "high"
-        band_label = "높음"
-        verdict = "출처 표준 메타데이터가 강하게 감지됩니다."
-    elif score >= 20:
-        band = "medium"
-        band_label = "주의"
-        verdict = "일부 출처 표준 신호가 감지됩니다."
-    else:
-        band = "low"
-        band_label = "낮음"
-        verdict = "출처 표준 메타데이터가 거의 없습니다."
-
     return MetadataForensicAnalysis(
         score=score,
-        band=band,
-        band_label=band_label,
-        verdict=verdict,
+        reference_band=REFERENCE_BAND,
+        reference_note=(
+            f"출처 기록 {len(provenance_records)}건, 출처 신호 {len(signals)}개 "
+            f"(C2PA {'있음' if has_c2pa else '없음'}, SynthID {'있음' if has_synthid else '없음'}, "
+            f"워터마크 표식 {'있음' if has_watermark else '없음'}) — 신호 가중치 합 {score}/100은 미측정 참고값입니다."
+        ),
         signals=signals,
         limitations=limitations,
         provenance_records=provenance_records,
@@ -204,9 +197,8 @@ def analyze_metadata_forensic(path: Path | str) -> MetadataForensicAnalysis:
 def _error_analysis(message: str) -> MetadataForensicAnalysis:
     return MetadataForensicAnalysis(
         score=0,
-        band="unknown",
-        band_label="판단 어려움",
-        verdict=message,
+        reference_band=UNAVAILABLE_BAND,
+        reference_note=message,
         signals=[],
         limitations=[message],
         provenance_records=[],

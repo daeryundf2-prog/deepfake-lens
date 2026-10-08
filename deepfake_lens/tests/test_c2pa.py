@@ -39,8 +39,9 @@ class MetadataForensicAnalysisTest(unittest.TestCase):
         """Analysis of nonexistent file should return error analysis."""
         result = analyze_metadata_forensic(Path("/nonexistent/file.jpg"))
         self.assertEqual(result.score, 0)
-        self.assertEqual(result.band, "unknown")
-        self.assertIn("존재하지 않습니다", result.verdict)
+        # D1: band/verdict renamed to reference_band/reference_note.
+        self.assertEqual(result.reference_band, "unavailable")
+        self.assertIn("존재하지 않습니다", result.reference_note)
 
     def test_empty_file_returns_error(self) -> None:
         """Analysis of empty file should return error analysis."""
@@ -48,7 +49,7 @@ class MetadataForensicAnalysisTest(unittest.TestCase):
         tmp_path.write_bytes(b"")
         result = analyze_metadata_forensic(tmp_path)
         self.assertEqual(result.score, 0)
-        self.assertIn("비어 있습니다", result.verdict)
+        self.assertIn("비어 있습니다", result.reference_note)
         tmp_path.unlink(missing_ok=True)
 
     def test_analysis_returns_dataclass(self) -> None:
@@ -62,8 +63,11 @@ class MetadataForensicAnalysisTest(unittest.TestCase):
         data = result.to_json()
         self.assertIsInstance(data, dict)
         self.assertIn("score", data)
-        self.assertIn("band", data)
-        self.assertIn("verdict", data)
+        # D1: no old-contract band/verdict keys; reference_* instead.
+        self.assertIn("reference_band", data)
+        self.assertIn("reference_note", data)
+        for legacy in ("band", "band_label", "verdict"):
+            self.assertNotIn(legacy, data)
         self.assertIn("has_c2pa", data)
         self.assertIn("has_synthid", data)
         self.assertIn("has_watermark", data)

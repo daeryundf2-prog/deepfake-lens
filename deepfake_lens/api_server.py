@@ -402,7 +402,7 @@ def create_app(
                         ).to_json()
                     except Exception as exc:
                         logger.exception("watermark layer failed")
-                        data["watermark"] = {"available": False, "verdict": "워터마크 검사 실패", "error": failure_reason(exc)}
+                        data["watermark"] = {"available": False, "reference_band": "unavailable", "reference_note": "워터마크 검사 실패", "error": failure_reason(exc)}
                         _layer_error(data, "watermark", exc)
                 return {"status": "success", "data": data}
             if file_path:
@@ -585,7 +585,7 @@ def create_app(
                         ).to_json()
                     except Exception as exc:
                         logger.exception("watermark layer failed")
-                        wm = {"available": False, "verdict": "워터마크 검사 실패", "error": failure_reason(exc)}
+                        wm = {"available": False, "reference_band": "unavailable", "reference_note": "워터마크 검사 실패", "error": failure_reason(exc)}
                     stages.append(("watermark", wm))
                 payload = {"mode": "text", **dict(stages)}
             else:

@@ -736,7 +736,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
             watermark = detect_kgw_watermark(trimmed, secret=watermark_secret, gamma=watermark_gamma).to_json()
         except Exception as exc:
             logger.exception("watermark layer failed")
-            watermark = {"available": False, "verdict": "워터마크 검사 실패", "error": failure_reason(exc)}
+            watermark = {"available": False, "reference_band": "unavailable", "reference_note": "워터마크 검사 실패", "error": failure_reason(exc)}
             _layer_error(layer_errors, "watermark", exc)
     record = item.to_json()
     record["name"] = "pasted-text"

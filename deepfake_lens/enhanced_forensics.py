@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from .c2pa import MetadataForensicAnalysis, ProvenanceRecord, analyze_metadata_forensic
+from .layer_diagnostic import UNAVAILABLE_BAND
 
 
 @dataclass(frozen=True)
@@ -129,8 +130,8 @@ def analyze_forensic(path: Path | str) -> ForensicReport:
     # official SDK validator when the `provenance` extra is installed.
     forensic = analyze_metadata_forensic(file_path)
     evidences.extend(_evidence_from_forensic_analysis(forensic))
-    if forensic.band == "unknown":
-        legal_notes.append(f"출처 메타데이터 분석을 수행하지 못했습니다: {forensic.verdict}")
+    if forensic.reference_band == UNAVAILABLE_BAND:
+        legal_notes.append(f"출처 메타데이터 분석을 수행하지 못했습니다: {forensic.reference_note}")
     else:
         legal_notes.extend(forensic.limitations)
 

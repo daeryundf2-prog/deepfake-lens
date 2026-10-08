@@ -778,10 +778,12 @@ class SpeakerComparison:
     identification — embedding-based verification needs a dedicated model.
     """
 
-    same_speaker_score: int  # 0-100, higher = more likely same speaker
+    same_speaker_score: int  # 0-100 raw similarity mapping (unmeasured), higher = closer voices
     distance: float  # cosine distance on the feature vector
-    band: str
-    verdict: str
+    # D1: no same/unclear/different band from unmeasured 67/35 cutoffs —
+    # reference_band per layer_diagnostic and a descriptive measurement note.
+    reference_band: str
+    reference_note: str
     limitations: list[str]
     method: str = "mfcc"  # "ecapa" when the SpeechBrain path answered
 
@@ -832,16 +834,8 @@ def compare_speakers(
         # ECAPA cosine: same-speaker pairs typically land above ~0.25,
         # different speakers below ~0.15 on VoxCeleb-style audio.
         score = max(0, min(100, int(round(similarity * 160))))
-        if score >= 67:
-            band = "same"
-            verdict = "ECAPA-TDNN 임베딩 유사도가 높아 동일 화자일 가능성이 높습니다."
-        elif score >= 35:
-            band = "unclear"
-            verdict = "화자 유사성이 중간 영역입니다 — 추가 샘플 비교가 필요합니다."
-        else:
-            band = "different"
-            verdict = "ECAPA-TDNN 임베딩 유사도가 낮아 다른 화자일 가능성이 높습니다."
-        return SpeakerComparison(score, 1.0 - similarity, band, verdict, limitations, method="ecapa")
+        note = f"ECAPA-TDNN 임베딩 코사인 유사도 {similarity:.3f} (참고 원점수 {score}/100, 미측정 매핑)."
+        return SpeakerComparison(score, 1.0 - similarity, REFERENCE_BAND, note, limitations, method="ecapa")
 
     limitations: list[str] = [
         "MFCC 기반 거리 측정이며 포렌식 화자 인식이 아닙니다.",
@@ -852,7 +846,7 @@ def compare_speakers(
     feat_a = _extract_features(Path(path_a), segment_seconds=segment_seconds)
     feat_b = _extract_features(Path(path_b), segment_seconds=segment_seconds)
     if feat_a is None or feat_b is None:
-        return SpeakerComparison(0, 1.0, "unknown", "특징 추출 실패 — librosa 또는 오디오 형식을 확인하세요.", limitations + ["한쪽 파일의 특징 추출에 실패했습니다."])
+        return SpeakerComparison(0, 1.0, UNAVAILABLE_BAND, "특징 추출 실패 — librosa 또는 오디오 형식을 확인하세요.", limitations + ["한쪽 파일의 특징 추출에 실패했습니다."])
 
     import math
     vec_a = list(feat_a.mfcc_means) + [feat_a.pitch_mean, feat_a.pitch_std, feat_a.spectral_centroid / 1000.0]
@@ -865,18 +859,13 @@ def compare_speakers(
     # MFCC cosine distance ~0 = identical vector; typical same-speaker
     # recordings land under ~0.05, different speakers above ~0.2 (rough).
     score = max(0, min(100, int((1.0 - distance / 0.3) * 100)))
-    if score >= 67:
-        band = "same"
-        verdict = "두 음성의 음색 특징이 가까워 동일 화자일 가능성이 높습니다."
-    elif score >= 35:
-        band = "unclear"
-        verdict = "화자 유사성이 중간 영역입니다 — 추가 샘플 비교가 필요합니다."
-    else:
-        band = "different"
-        verdict = "두 음성의 음색 특징이 멀어 다른 화자일 가능성이 높습니다."
+    note = (
+        f"MFCC·피치 특징 코사인 거리 {distance:.4f} (참고 원점수 {score}/100, 미측정 매핑; "
+        f"샘플 길이 {feat_a.duration_seconds:.1f}초/{feat_b.duration_seconds:.1f}초)."
+    )
     if feat_a.duration_seconds < 5 or feat_b.duration_seconds < 5:
         limitations.append("한쪽 샘플이 5초 미만이라 화자 비교가 불안정합니다.")
-    return SpeakerComparison(score, distance, band, verdict, limitations)
+    return SpeakerComparison(score, distance, REFERENCE_BAND, note, limitations)
 
 
 # Loaded ECAPA models keyed by hub revision (one per pinned commit).

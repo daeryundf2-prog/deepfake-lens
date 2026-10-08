@@ -31,6 +31,7 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .vendor_weights import default_models_dir
 
 
@@ -60,10 +61,12 @@ class FaceRegion:
 
 @dataclass(frozen=True)
 class FaceAnalysis:
+    # D1: raw heuristic sum, reference only — no 67/35 band, no verdict.
+    # reference_band is REFERENCE_BAND when faces were analyzed, else
+    # UNAVAILABLE_BAND with the reason in reference_note.
     score: int
-    band: str
-    band_label: str
-    verdict: str
+    reference_band: str
+    reference_note: str
     signals: list[FaceEvidenceSignal]
     limitations: list[str]
     face_count: int
@@ -129,9 +132,8 @@ def analyze_faces(
     if not faces:
         return FaceAnalysis(
             score=0,
-            band="unknown",
-            band_label="판단 어려움",
-            verdict="얼굴이 감지되지 않았습니다.",
+            reference_band=UNAVAILABLE_BAND,
+            reference_note="얼굴이 감지되지 않았습니다.",
             signals=[],
             limitations=["얼굴이 감지되지 않아 분석할 수 없습니다."],
             face_count=0,
@@ -185,27 +187,13 @@ def analyze_faces(
 
     score = min(100, sum(signal.weight for signal in signals))
 
-    if score >= 67:
-        band = "high"
-        band_label = "높음"
-        verdict = "얼굴 조작 의심 신호가 강합니다."
-    elif score >= 35:
-        band = "medium"
-        band_label = "주의"
-        verdict = "얼굴에서 몇 가지 의심 신호가 보여 추가 확인이 필요합니다."
-    else:
-        band = "low"
-        band_label = "낮음"
-        verdict = "얼굴에서 뚜렷한 조작 의심 신호는 적습니다."
-
     manipulation_type = _classify_manipulation_type(signals)
     confidence = _calculate_confidence(score, len(faces), len(signals))
 
     return FaceAnalysis(
         score=score,
-        band=band,
-        band_label=band_label,
-        verdict=verdict,
+        reference_band=REFERENCE_BAND,
+        reference_note=raw_score_note("얼굴 조작 휴리스틱", score) + f" (얼굴 {len(faces)}개, 신호 {len(signals)}개)",
         signals=signals,
         limitations=limitations,
         face_count=len(faces),
@@ -224,9 +212,8 @@ def _unsupported_format_analysis(extension: str) -> FaceAnalysis:
     message = f"{UNSUPPORTED_FORMAT_REASON}: {extension or '(확장자 없음)'}"
     return FaceAnalysis(
         score=0,
-        band="unknown",
-        band_label="판단 어려움",
-        verdict=message,
+        reference_band=UNAVAILABLE_BAND,
+        reference_note=message,
         signals=[],
         limitations=[message],
         face_count=0,
@@ -239,9 +226,8 @@ def _unavailable_analysis(message: str) -> FaceAnalysis:
     """No detector could run — distinct from "no face" and from an error."""
     return FaceAnalysis(
         score=0,
-        band="unknown",
-        band_label="판단 어려움",
-        verdict=message,
+        reference_band=UNAVAILABLE_BAND,
+        reference_note=message,
         signals=[],
         limitations=[message],
         face_count=0,
@@ -253,9 +239,8 @@ def _unavailable_analysis(message: str) -> FaceAnalysis:
 def _error_analysis(message: str) -> FaceAnalysis:
     return FaceAnalysis(
         score=0,
-        band="unknown",
-        band_label="판단 어려움",
-        verdict=message,
+        reference_band=UNAVAILABLE_BAND,
+        reference_note=message,
         signals=[],
         limitations=[message],
         face_count=0,

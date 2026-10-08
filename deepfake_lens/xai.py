@@ -1,7 +1,8 @@
 """Explainable AI (XAI) module for deepfake detection.
 
-Provides human-readable explanations for detection decisions,
-feature importance, and decision rationale.
+Provides human-readable breakdowns of unmeasured heuristic scores:
+which signals contributed and how much. It never states a conclusion —
+conclusions come only from the scan's decision rules (D1).
 """
 
 from __future__ import annotations
@@ -9,6 +10,8 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from typing import Any
+
+from .layer_diagnostic import REFERENCE_BAND, raw_score_note
 
 
 @dataclass(frozen=True)
@@ -24,9 +27,19 @@ class FeatureImportance:
 
 @dataclass(frozen=True)
 class XAIExplanation:
+    """Human-readable breakdown of an unmeasured heuristic score (D1).
+
+    Only describes which signals made up ``overall_score``: no 67/35 band,
+    no "AI 생성 가능성 높음/자연스러운 콘텐츠" decision text, no
+    high/medium/low confidence. ``reference_band`` follows
+    :mod:`deepfake_lens.layer_diagnostic`; conclusions come only from the
+    scan's decision rules (decision.py).
+    """
+
     overall_score: int
-    band: str
-    confidence: str
+    reference_band: str
+    reference_note: str
+    signal_count: int
     summary: str
     feature_importances: list[FeatureImportance]
     decision_path: list[str]
@@ -41,18 +54,17 @@ def explain_classification(
     signals: list[dict[str, Any]],
     metadata: dict[str, Any] | None = None,
 ) -> XAIExplanation:
-    """Generate human-readable explanation for a classification result."""
+    """Describe the signals behind a raw heuristic score (no conclusion)."""
     feature_importances = []
-    decision_path = []
     limitations = []
-    
+
     # Analyze signals for feature importance
     for signal in signals:
         if isinstance(signal, dict):
             title = signal.get("title", "")
             weight = signal.get("weight", 0)
             detail = signal.get("detail", "")
-            
+
             importance = FeatureImportance(
                 feature_name=title,
                 importance_score=weight / 100.0,
@@ -60,63 +72,32 @@ def explain_classification(
                 explanation=detail,
             )
             feature_importances.append(importance)
-    
+
     # Sort by importance
     feature_importances.sort(key=lambda x: x.importance_score, reverse=True)
-    
-    # Generate decision path
-    if score >= 67:
-        decision_path.append("높은 점수 임계값(67+) 도달")
-        decision_path.append("여러 의심 신호가 동시에 활성화됨")
-        decision_path.append("AI 생성 가능성 높음으로 판단")
-    elif score >= 35:
-        decision_path.append("중간 점수 임계값(35-66) 범위")
-        decision_path.append("일부 의심 신호가 감지됨")
-        decision_path.append("추가 확인 권장")
-    else:
-        decision_path.append("낮은 점수 임계값(35 미만)")
-        decision_path.append("뚜렷한 의심 신호 부족")
-        decision_path.append("자연스러운 콘텐츠로 판단")
-    
-    # Generate summary
-    if score >= 67:
-        summary = f"이 콘텐츠는 {score}점으로 높은 AI 생성 의심 점수를 받았습니다. "
-        if feature_importances:
-            top_features = feature_importances[:3]
-            summary += f"주요 요인: {', '.join(f.feature_name for f in top_features)}."
-    elif score >= 35:
-        summary = f"이 콘텐츠는 {score}점으로 중간 수준의 의심 신호를 보입니다. "
-        summary += "추가 검토가 필요합니다."
-    else:
-        summary = f"이 콘텐츠는 {score}점으로 낮은 의심 점수를 받았습니다. "
-        summary += "자연스러운 콘텐츠로 보입니다."
-    
-    # Determine confidence
-    if len(feature_importances) >= 3 and score >= 67:
-        confidence = "high"
-    elif len(feature_importances) >= 1 and score >= 35:
-        confidence = "medium"
-    else:
-        confidence = "low"
-    
+    top = feature_importances[:3]
+
+    decision_path = [
+        f"참고 원점수 {score}/100 — 신호 가중치의 합이며 측정·보정되지 않았습니다",
+        f"신호 {len(feature_importances)}개 집계"
+        + (f" (상위: {', '.join(f.feature_name for f in top)})" if top else ""),
+        "결론은 scan의 결정 규칙(결정적 근거·보정된 확률)에서만 나옵니다",
+    ]
+    summary = f"참고 원점수 {score}/100, 신호 {len(feature_importances)}개."
+    if top:
+        summary += f" 가중치 상위 신호: {', '.join(f.feature_name for f in top)}."
+
     # Limitations
-    limitations.append("이 설명은 휴리스틱 기반 분석 결과에 기반합니다.")
+    limitations.append("이 설명은 측정되지 않은 휴리스틱 신호의 구성을 보여 줄 뿐 결론이 아닙니다.")
     limitations.append("확정적 판별이 아닌 선별 도구로 활용해야 합니다.")
     if not metadata:
         limitations.append("메타데이터가 없어 분석이 제한적일 수 있습니다.")
-    
-    # Determine band
-    if score >= 67:
-        band = "high"
-    elif score >= 35:
-        band = "medium"
-    else:
-        band = "low"
-    
+
     return XAIExplanation(
         overall_score=score,
-        band=band,
-        confidence=confidence,
+        reference_band=REFERENCE_BAND,
+        reference_note=raw_score_note("설명 대상", score),
+        signal_count=len(feature_importances),
         summary=summary,
         feature_importances=feature_importances[:10],  # Top 10
         decision_path=decision_path,
@@ -145,11 +126,12 @@ def explain_face_classification(
     if face_count > 0:
         explanation = XAIExplanation(
             overall_score=explanation.overall_score,
-            band=explanation.band,
-            confidence=explanation.confidence,
+            reference_band=explanation.reference_band,
+            reference_note=explanation.reference_note,
+            signal_count=explanation.signal_count,
             summary=explanation.summary + f" {face_count}개의 얼굴이 감지되었습니다.",
             feature_importances=explanation.feature_importances,
-            decision_path=explanation.decision_path + [f"얼굴 조작 유형: {manipulation_type}"],
+            decision_path=explanation.decision_path + [f"얼굴 조작 유형 추정(휴리스틱): {manipulation_type}"],
             limitations=explanation.limitations,
         )
     
@@ -169,8 +151,9 @@ def explain_video_classification(
     if frame_count > 0:
         explanation = XAIExplanation(
             overall_score=explanation.overall_score,
-            band=explanation.band,
-            confidence=explanation.confidence,
+            reference_band=explanation.reference_band,
+            reference_note=explanation.reference_note,
+            signal_count=explanation.signal_count,
             summary=explanation.summary + f" {frame_count}개 프레임 분석 (재생시간: {duration:.1f}초).",
             feature_importances=explanation.feature_importances,
             decision_path=explanation.decision_path,
@@ -183,9 +166,10 @@ def explain_video_classification(
 def format_explanation_text(explanation: XAIExplanation) -> str:
     """Format explanation as human-readable text."""
     lines = [
-        "=== 분석 결과 ===",
-        f"점수: {explanation.overall_score} ({explanation.band})",
-        f"신뢰도: {explanation.confidence}",
+        "=== 참고 신호 구성(결론 아님) ===",
+        f"참고 원점수(미측정): {explanation.overall_score}/100",
+        f"신호 수: {explanation.signal_count}",
+        f"참고: {explanation.reference_note}",
         "",
         "=== 요약 ===",
         f"{explanation.summary}",
@@ -198,7 +182,7 @@ def format_explanation_text(explanation: XAIExplanation) -> str:
         lines.append(f"   {feature.explanation}")
     
     lines.append("")
-    lines.append("=== 결정 경로 ===")
+    lines.append("=== 집계 경로 ===")
     for step in explanation.decision_path:
         lines.append(f"  - {step}")
     

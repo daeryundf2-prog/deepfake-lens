@@ -82,17 +82,26 @@ class XAITest(unittest.TestCase):
         explanation = explain_classification(80, signals)
         self.assertIsInstance(explanation, XAIExplanation)
         self.assertEqual(explanation.overall_score, 80)
-        self.assertEqual(explanation.band, "high")
+        # D1: the 67/35 high/medium/low band was an unmeasured cutoff that
+        # read as a conclusion; the explanation is now reference only.
+        self.assertEqual(explanation.reference_band, "reference")
+        self.assertEqual(explanation.signal_count, 1)
+        self.assertIn("80/100", explanation.reference_note)
 
     def test_explain_low_score(self) -> None:
-        """Low score should return low band."""
+        """D1: a low score yields no band and no "자연스러운 콘텐츠" conclusion."""
         explanation = explain_classification(20, [])
-        self.assertEqual(explanation.band, "low")
+        self.assertEqual(explanation.reference_band, "reference")
+        text = " ".join([explanation.summary, *explanation.decision_path])
+        for word in ("자연스러운 콘텐츠", "낮음", "가능성 높음"):
+            self.assertNotIn(word, text)
 
     def test_explain_medium_score(self) -> None:
-        """Medium score should return medium band."""
+        """D1: a mid score yields no band and no "추가 확인 권장" tier."""
         explanation = explain_classification(50, [])
-        self.assertEqual(explanation.band, "medium")
+        self.assertEqual(explanation.reference_band, "reference")
+        self.assertFalse(hasattr(explanation, "band"))
+        self.assertNotIn("중간 점수 임계값", " ".join(explanation.decision_path))
 
     def test_format_explanation_text(self) -> None:
         """format_explanation_text should return a string."""

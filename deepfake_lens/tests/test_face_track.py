@@ -30,9 +30,12 @@ class FaceTrackAnalysisTest(unittest.TestCase):
 
     def test_to_json_shape(self) -> None:
         result = analyze_face_track(Path("/nonexistent/v.mp4")).to_json()
-        for key in ("available", "score", "verdict", "embedding_drift_mean",
+        # D1: verdict renamed to reference_note (+ reference_band).
+        for key in ("available", "score", "reference_note", "reference_band", "embedding_drift_mean",
                     "landmark_jitter_mean", "box_area_delta_mean", "limitations"):
             self.assertIn(key, result)
+        self.assertNotIn("verdict", result)
+        self.assertEqual(result["reference_band"], "unavailable")
 
 
 @unittest.skipUnless(importlib.util.find_spec("numpy") is not None, "numpy not installed")

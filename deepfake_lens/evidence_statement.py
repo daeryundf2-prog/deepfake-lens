@@ -49,7 +49,9 @@ class EvidenceStatementEntry:
     purpose_of_proof: str
     sha256: str
     score: int
-    band_label: str
+    # The three-verdict label (VERDICT_LABELS) — named verdict_label, not
+    # band_label, since phase-0 statements carry no band (D1).
+    verdict_label: str
     file_path: str
     statutes: list[str]
 
@@ -295,7 +297,7 @@ def build_evidence_statement(
                 purpose_of_proof=purpose,
                 sha256=file_sha256 or "",
                 score=score,
-                band_label=band,
+                verdict_label=band,
                 file_path=item.path,
                 statutes=statutes,
             )
@@ -307,7 +309,7 @@ def build_evidence_statement(
         wa = _wa_raw if isinstance(_wa_raw, int) else 0
         wc = _wc_raw if isinstance(_wc_raw, int) else 0
         prov_lines.append(
-            f"모델 가중치: {wa}/{wc} 탑재" + (" — 신경망 엔진 미실행, 휴리스틱 전용 결과" if wa == 0 else "")
+            f"모델 가중치: {wa}/{wc} 탑재" + (" — 신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영" if wa == 0 else "")
         )
     if isinstance(thresholds, dict):
         src = thresholds.get("source", "")

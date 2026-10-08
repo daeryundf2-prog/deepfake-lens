@@ -28,6 +28,7 @@ import math
 import random
 from dataclasses import asdict, dataclass
 
+from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 from .model_pins import UNPINNED_REASON, is_commit_sha
 
 # z > 4 ≈ p < 3e-5 — the standard KGW detection threshold.
@@ -43,12 +44,15 @@ class WatermarkAnalysis:
     """KGW green-list detection result."""
 
     available: bool
-    score: int  # 0-100 watermark likelihood
-    verdict: str
+    score: int  # 0-100 z-score mapping (z=8 saturates), not a probability
+    # D1: the measured statistics as a sentence (green fraction / mean g,
+    # z, tokens, test threshold) — no "신호가 강합니다" verdict wording.
+    reference_note: str
     z_score: float | None
     green_fraction: float | None
     token_count: int
     limitations: list[str]
+    reference_band: str = REFERENCE_BAND
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
@@ -69,7 +73,7 @@ def detect_kgw_watermark(
     key the result is a calibrated "no signal", not evidence of absence.
     """
     limitations = [
-        "생성 시 사용된 비밀키/γ/토크나이저와 일치해야만 검출됩니다 — 키가 다르면 '신호 없음'이 출력됩니다.",
+        "생성 시 사용된 비밀키/γ/토크나이저와 일치해야만 검출됩니다 — 키가 다르면 z가 기대값 근처로 측정되며, 이는 워터마크 부재의 증거가 아닙니다.",
         "공개 프론티어 모델은 워터마크 키를 공개하지 않아 이 검사는 자체 생성/연구 코퍼스용입니다.",
         "편집/요약된 텍스트는 그린 비율이 희석됩니다.",
     ]
@@ -108,13 +112,11 @@ def detect_kgw_watermark(
     z = (green_count - expected) / math.sqrt(variance)
     green_fraction = green_count / trials
     score = min(100, max(0, int((z / 8.0) * 100)))  # z=8 saturates at 100
-    if z >= _Z_THRESHOLD:
-        verdict = f"그린리스트 비율 {green_fraction:.1%}(기대 {gamma:.0%}), z={z:.1f} — 워터마크 신호가 강합니다."
-    elif z >= 2.0:
-        verdict = f"그린리스트 비율 {green_fraction:.1%}, z={z:.1f} — 약한 신호, 키/γ 재확인이 필요합니다."
-    else:
-        verdict = f"그린리스트 비율 {green_fraction:.1%}(기대 {gamma:.0%}) — 이 키 기준 워터마크 신호 없음."
-    return WatermarkAnalysis(True, score, verdict, round(z, 2), round(green_fraction, 4), n, limitations)
+    note = (
+        f"그린리스트 비율 {green_fraction:.1%}(기대 {gamma:.0%}), z={z:.1f}, 검정 토큰 {trials}개 "
+        f"(검정 기준 z≥{_Z_THRESHOLD:.0f}, 이 키 기준)."
+    )
+    return WatermarkAnalysis(True, score, note, round(z, 2), round(green_fraction, 4), n, limitations)
 
 
 def _green_list(context: list[int], secret: str, vocab_size: int, gamma: float) -> frozenset[int]:
@@ -128,7 +130,7 @@ def _green_list(context: list[int], secret: str, vocab_size: int, gamma: float) 
 
 
 def _unavailable(limitations: list[str], reason: str) -> WatermarkAnalysis:
-    return WatermarkAnalysis(False, 0, f"워터마크 검사 불가 — {reason}", None, None, 0, limitations + [reason])
+    return WatermarkAnalysis(False, 0, f"워터마크 검사 불가 — {reason}", None, None, 0, limitations + [reason], reference_band=UNAVAILABLE_BAND)
 
 
 def detect_synthid_watermark(
@@ -191,10 +193,8 @@ def detect_synthid_watermark(
     # Under the null (no watermark) each g is ~U(0,1): var 1/12.
     z = (mean_g - 0.5) / math.sqrt(1.0 / (12.0 * trials))
     score = min(100, max(0, int((z / 8.0) * 100)))
-    if z >= _Z_THRESHOLD:
-        verdict = f"평균 g-값 {mean_g:.3f}(기대 0.5), z={z:.1f} — SynthID 워터마크 신호가 강합니다."
-    elif z >= 2.0:
-        verdict = f"평균 g-값 {mean_g:.3f}, z={z:.1f} — 약한 신호, 키/설정 재확인이 필요합니다."
-    else:
-        verdict = f"평균 g-값 {mean_g:.3f}(기대 0.5) — 이 키 기준 워터마크 신호 없음."
-    return WatermarkAnalysis(True, score, verdict, round(z, 2), round(mean_g, 4), int(token_ids.shape[1]), limitations)
+    note = (
+        f"SynthID 평균 g-값 {mean_g:.3f}(기대 0.5), z={z:.1f}, g-값 {trials}개 "
+        f"(검정 기준 z≥{_Z_THRESHOLD:.0f}, 이 키 기준)."
+    )
+    return WatermarkAnalysis(True, score, note, round(z, 2), round(mean_g, 4), int(token_ids.shape[1]), limitations)

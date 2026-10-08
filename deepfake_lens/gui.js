@@ -1381,7 +1381,7 @@
             if (data.watermark) {
                 const w = data.watermark;
                 parts.push(layer('워터마크 (KGW)',
-                    `<div class="kv"><b>판정</b><span>${escapeHtml(w.verdict || '')}</span><b>z-score</b><span>${w.z_score != null ? w.z_score : 'n/a'}</span><b>점수</b><span>${w.score != null ? w.score : 'n/a'}</span></div>`));
+                    `<div class="kv"><b>측정</b><span>${escapeHtml(w.reference_note || '')}</span><b>z-score</b><span>${w.z_score != null ? w.z_score : 'n/a'}</span><b>참고 원점수</b><span>${w.score != null ? w.score : 'n/a'}</span></div>`));
             }
             parts.push(listItems('참고 신호(미측정 휴리스틱 — 결론 불참여)', (r.reference_signals || []).map(s => ({ title: `${s.title} (${s.weight})`, detail: s.detail }))));
             parts.push(listItems('다음 확인', r.next_checks));

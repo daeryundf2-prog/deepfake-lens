@@ -733,10 +733,11 @@ class StylometryComparison:
     texts make it unreliable.
     """
 
-    same_author_score: int  # 0-100
+    same_author_score: int  # 0-100 raw similarity mapping (unmeasured)
     distance: float
-    band: str
-    verdict: str
+    # D1: no same/unclear/different band from unmeasured 67/35 cutoffs.
+    reference_band: str
+    reference_note: str
     limitations: list[str]
 
     def to_json(self) -> dict[str, object]:
@@ -786,15 +787,10 @@ def compare_texts(text_a: str, text_b: str) -> StylometryComparison:
     # gap by its magnitude instead.
     distance = sum(abs(a - b) / (abs(a) + abs(b) + 0.02) for a, b in zip(vec_a, vec_b)) / len(vec_a)
     score = max(0, min(100, int((1.0 - distance / 0.35) * 100)))
-    if score >= 67:
-        band = "same"
-        verdict = "문체 특징이 가까워 동일 작성자/도구일 가능성이 높습니다."
-    elif score >= 35:
-        band = "unclear"
-        verdict = "문체 유사성이 중간 영역입니다 — 더 긴 표본이 필요합니다."
-    else:
-        band = "different"
-        verdict = "문체 특징이 멀어 다른 작성자/도구일 가능성이 높습니다."
+    note = (
+        f"문체 벡터 평균 상대 차이 {distance:.4f} (참고 원점수 {score}/100, 미측정 매핑; "
+        f"표본 {len(text_a)}자/{len(text_b)}자)."
+    )
     if len(text_a) < 400 or len(text_b) < 400:
         limitations.append("한쪽 표본이 400자 미만이라 문체 비교가 불안정합니다.")
-    return StylometryComparison(score, distance, band, verdict, limitations)
+    return StylometryComparison(score, distance, REFERENCE_BAND, note, limitations)

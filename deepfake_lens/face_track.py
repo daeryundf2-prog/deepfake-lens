@@ -19,8 +19,9 @@ This module measures three track-level signals on sampled frames:
 - ``box_smoothness``: frame-to-frame change in face-box area and centre
   position, normalized by box size.
 
-Measurement only: the numbers are reported with a weak heuristic
-verdict. This is NOT a trained temporal model — thresholds are
+Measurement only: the numbers are reported with a raw heuristic score and
+a descriptive ``reference_note`` (no verdict, D1). This is NOT a trained
+temporal model — thresholds are
 calibrated on a small synthetic corpus and recorded in
 experiments/FACESWAP_EVALUATION.md.
 """
@@ -30,13 +31,14 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 from .vendor_weights import default_models_dir
 from .checkpoint_integrity import load_torch_state
 
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
 _DEFAULT_FPS = 4.0  # frames sampled per second
 _MAX_FRAMES = 96
-_MIN_TRACK = 8  # frames with a usable face required for a verdict
+_MIN_TRACK = 8  # frames with a usable face required for a measurement
 
 # Default heuristic cutoffs (measured on the small synthetic corpus recorded
 # in experiments/FACESWAP_EVALUATION.md). A ThresholdProfile
@@ -48,8 +50,8 @@ TRACK_THRESHOLDS: dict[str, float] = {
     "jitter_high": 0.08,
     "jitter_mid": 0.04,
     "area_delta": 0.15,
-    "score_high": 60.0,
-    "score_mid": 30.0,
+    # D1: the former score_high/score_mid verdict cutoffs are gone — the
+    # layer reports its raw points and measurements, never a band.
 }
 
 
@@ -76,8 +78,10 @@ def _resolve_thresholds(thresholds) -> tuple:
 @dataclass(frozen=True)
 class FaceTrackAnalysis:
     available: bool
-    score: int  # 0-100 suspicion of temporal face inconsistency
-    verdict: str
+    score: int  # 0-100 raw heuristic points for temporal face inconsistency (unmeasured)
+    # D1: descriptive measurement note (drift/jitter/area numbers), not a
+    # conclusion; reference_band per layer_diagnostic.
+    reference_note: str
     frames_sampled: int
     frames_with_face: int
     embedding_drift_mean: float | None
@@ -86,6 +90,7 @@ class FaceTrackAnalysis:
     box_area_delta_mean: float | None
     embedding_kind: str | None
     limitations: list[str]
+    reference_band: str = REFERENCE_BAND
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
@@ -155,11 +160,11 @@ def analyze_face_track(
     area_delta = _box_smoothness([b for _, _, b in usable])
 
     score = _score(drift, jitter, area_delta, t)
-    verdict = _verdict(score, t)
+    note = _reference_note(len(usable), taken, drift, jitter, area_delta)
     return FaceTrackAnalysis(
         True,
         score,
-        verdict,
+        note,
         taken,
         len(usable),
         _r(drift["mean"]) if drift else None,
@@ -307,14 +312,23 @@ def _score(drift, jitter, area_delta, t=None) -> int:
     return min(points, 100)
 
 
-def _verdict(score: int, t=None) -> str:
-    if t is None:
-        t, _ = _resolve_thresholds(None)
-    if score >= t("score_high"):
-        return "얼굴 트랙 시간-불일치가 큽니다 — 프레임 단위 합성/스왑 후보 (사람 검토 필요)."
-    if score >= t("score_mid"):
-        return "얼굴 트랙 드리프트가 경계 영역입니다 — 재촬영/압축과 구분이 필요합니다."
-    return "얼굴 트랙이 시간적으로 매끄럽습니다 — 이 신호만으로는 조작을 배제할 수 없습니다."
+def _reference_note(
+    frames_with_face: int,
+    frames_sampled: int,
+    drift: dict[str, float] | None,
+    jitter: float | None,
+    area_delta: float | None,
+) -> str:
+    """Descriptive measurement line (D1): the numbers, no verdict wording."""
+
+    def fmt(value: float | None) -> str:
+        return f"{value:.4f}" if value is not None else "측정 안 됨"
+
+    return (
+        f"얼굴 검출 프레임 {frames_with_face}/{frames_sampled}, "
+        f"임베딩 드리프트 평균 {fmt(drift['mean'] if drift else None)}·최대 {fmt(drift['max'] if drift else None)}, "
+        f"랜드마크 지터 {fmt(jitter)}, 박스 면적 변화 {fmt(area_delta)}."
+    )
 
 
 def _r(v: float) -> float:
@@ -323,5 +337,5 @@ def _r(v: float) -> float:
 
 def _unavailable(limitations: list[str], message: str) -> FaceTrackAnalysis:
     return FaceTrackAnalysis(
-        False, 0, message, 0, 0, None, None, None, None, None, limitations
+        False, 0, message, 0, 0, None, None, None, None, None, limitations, reference_band=UNAVAILABLE_BAND
     )

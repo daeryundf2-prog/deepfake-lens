@@ -586,7 +586,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.format == "json":
             print(json.dumps(result.to_json(), ensure_ascii=False, indent=2))
         else:
-            print(f"Score: {result.score} — {result.verdict}")
+            print(f"참고 원점수: {result.score} — {result.reference_note}")
             print(f"z={result.z_score}, green={result.green_fraction}, tokens={result.token_count}")
         return 0
     if args.command == "forensic":
@@ -826,7 +826,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"증거 목록 ({len(statement.entries)}건):")
             for entry in statement.entries:
                 # D1: the verdict label only — an uncalibrated score (always 0) is not printed.
-                print(f"  - [{entry.exhibit_no}] {entry.document_name} (결론: {entry.band_label})")
+                print(f"  - [{entry.exhibit_no}] {entry.document_name} (결론: {entry.verdict_label})")
                 print(f"    SHA-256: {entry.sha256}" if entry.sha256 else "    SHA-256: 해시 불가 — 원본 접근 실패")
             if args.pdf_out:
                 print(f"PDF 저장 완료: {args.pdf_out}")

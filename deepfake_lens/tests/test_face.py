@@ -44,8 +44,9 @@ class FaceAnalysisTest(unittest.TestCase):
         """Analysis of nonexistent file should return error analysis."""
         result = analyze_faces(Path("/nonexistent/image.jpg"))
         self.assertEqual(result.score, 0)
-        self.assertEqual(result.band, "unknown")
-        self.assertIn("존재하지 않습니다", result.verdict)
+        # D1: band/verdict renamed to reference_band/reference_note.
+        self.assertEqual(result.reference_band, "unavailable")
+        self.assertIn("존재하지 않습니다", result.reference_note)
 
     def test_unsupported_format_returns_error(self) -> None:
         """Analysis of unsupported format should return error analysis."""
@@ -53,7 +54,7 @@ class FaceAnalysisTest(unittest.TestCase):
         tmp_path.write_bytes(b"not image")
         result = analyze_faces(tmp_path)
         self.assertEqual(result.score, 0)
-        self.assertIn("지원하지 않는", result.verdict)
+        self.assertIn("지원하지 않는", result.reference_note)
         tmp_path.unlink(missing_ok=True)
 
     def test_unicode_path_image_is_readable(self) -> None:
@@ -74,7 +75,7 @@ class FaceAnalysisTest(unittest.TestCase):
         img_path.write_bytes(encoded.tobytes())
         try:
             result = analyze_faces(img_path)
-            self.assertNotIn("읽을 수 없", result.verdict)
+            self.assertNotIn("읽을 수 없", result.reference_note)
         finally:
             import shutil
 
@@ -91,8 +92,11 @@ class FaceAnalysisTest(unittest.TestCase):
         data = result.to_json()
         self.assertIsInstance(data, dict)
         self.assertIn("score", data)
-        self.assertIn("band", data)
-        self.assertIn("verdict", data)
+        # D1: no old-contract band/verdict keys; reference_* instead.
+        self.assertIn("reference_band", data)
+        self.assertIn("reference_note", data)
+        for legacy in ("band", "band_label", "verdict"):
+            self.assertNotIn(legacy, data)
         self.assertIn("face_count", data)
         self.assertIn("manipulation_type", data)
 
@@ -415,6 +419,7 @@ class WeightFreeDetectorTest(unittest.TestCase):
             gif.write_bytes(b"GIF89a\x01\x00\x01\x00\x00\x00\x00;")
             result = analyze_faces(gif)
         self.assertEqual(result.manipulation_type, UNSUPPORTED_FORMAT)
-        self.assertEqual(result.verdict, "지원하지 않는 이미지 형식: .gif")
+        self.assertEqual(result.reference_note, "지원하지 않는 이미지 형식: .gif")
+        self.assertEqual(result.reference_band, "unavailable")
         self.assertIn(".tif", FACE_IMAGE_EXTENSIONS)
         self.assertIn(".tiff", FACE_IMAGE_EXTENSIONS)

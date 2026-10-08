@@ -256,7 +256,7 @@ Rendered reports (`POST /api/report`, `--html-out`) additionally carry
 (`--md-out`, `--pdf-out`, `POST /api/report?format=evidence`) are backed by
 one signed body: every field of `EvidenceStatement.to_json()` (`case_no`,
 `case_name`, `plaintiff`, `defendant`, `court`, `entries[]` with
-`purpose_of_proof`/`sha256`/`statutes`, `created_at`, `law_firm`, `contact`,
+`purpose_of_proof`/`sha256`/`statutes`/`verdict_label`, `created_at`, `law_firm`, `contact`,
 `center`, `provenance_note`, `reference_note`) plus `"report_type":
 "evidence-statement"` and the four signing fields above, all inside the MAC
 except `signature`/`signature_key_id`. The Markdown and PDF print the
@@ -321,10 +321,26 @@ The layer modules themselves (`AudioAnalysis`, `VideoTemporalAnalysis`,
 `TextAdvancedAnalysis`, `QuickPixelAnalysis`, `InpaintAnalysis`,
 `MultimodalAnalysis`, `AvSyncAnalysis`, `PrnuAnalysis`, `RppgAnalysis`,
 `AvatarAnalysis`, `ThreeDAnalysis`, `AgentAnalysis`, `FaceSwapSeamAnalysis`,
-`RealtimeState`) carry `reference_band`/`reference_note` instead of
-`band`/`band_label`/`verdict`; `ai_probability`/`overall_ai_probability`
-(score/100) were removed. A video item's `result.av_audio` therefore has
-`reference_band`/`reference_note`, not the old audio band.
+`RealtimeState`, `FaceAnalysis`, `MetadataForensicAnalysis`,
+`LipsyncAnalysis`, `FaceTrackAnalysis`, `SpeakerComparison`,
+`StylometryComparison`, `WatermarkAnalysis`, `XAIExplanation`) carry
+`reference_band`/`reference_note` instead of `band`/`band_label`/`verdict`;
+`ai_probability`/`overall_ai_probability` (score/100) were removed. A video
+item's `result.av_audio` therefore has `reference_band`/`reference_note`,
+not the old audio band. `reference_note` is descriptive — the measured
+numbers ("SyncNet 오프셋 +5프레임(0.20초), 신뢰도 9.9.", "그린리스트 비율 …,
+z=…") or the reason the layer could not run — and never a conclusion
+sentence. `compare` reports `reference_band`/`reference_note` instead of the
+former `same`/`unclear`/`different` band; `XAIExplanation` reports
+`signal_count` instead of the cutoff-derived `confidence`; the
+`watermark` object of `/api/check` and `/api/analyze/text` carries
+`reference_note` (and `reference_band: "unavailable"` when the check
+failed) instead of `verdict`. Only `ClassificationResult` (and the scan
+rows that hold it) keep the read-compat `band`/`band_label` — the scan
+contract above — and its `verdict` is the three-verdict text.
+
+The evidence-statement entry's verdict label is `entries[].verdict_label`
+(formerly `band_label`; it always held the three-verdict label).
 
 ## Measurement records (phase 0, WP-I — G26/G27/G28)
 

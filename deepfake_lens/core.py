@@ -749,10 +749,10 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
                 raise CheckSkipped("얼굴 미검출")
             if face.manipulation_type == UNSUPPORTED_FORMAT:
                 # D15: GIF etc. — not applicable, never a failure.
-                raise CheckSkipped(face.verdict)
+                raise CheckSkipped(face.reference_note)
             if face.manipulation_type == "unavailable":
-                raise CheckSkipped(f"의존성 부재: {face.verdict}")
-            raise AnalyzerError(face.verdict)
+                raise CheckSkipped(f"의존성 부재: {face.reference_note}")
+            raise AnalyzerError(face.reference_note)
         return face
 
     face, entry = run_check("face_manipulation", face_check)
@@ -760,7 +760,7 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
     if face is not None:
         if face.score > 0:
             out.reference.append(deep_layer_reference(
-                "얼굴 조작 분석", f"{face.verdict} (faces={face.face_count}, {face.manipulation_type})", face.score,
+                "얼굴 조작 분석", f"얼굴 {face.face_count}개, 신호 {len(face.signals)}개, 유형 추정 {face.manipulation_type}", face.score,
             ))
         out.limitations.extend(face.limitations[:2])
 
@@ -864,14 +864,14 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
         _require_haar(cv2)
         lipsync = analyze_lipsync(path)
         if not lipsync.available:
-            _raise_unavailable(lipsync.verdict)
+            _raise_unavailable(lipsync.reference_note)
         return lipsync
 
     lipsync, entry = run_check("lipsync", lipsync_check)
     out.coverage.append(entry)
     if lipsync is not None:
         if lipsync.score > 0:
-            out.reference.append(deep_layer_reference("립싱크 일관성", lipsync.verdict, lipsync.score))
+            out.reference.append(deep_layer_reference("립싱크 일관성", lipsync.reference_note, lipsync.score))
         out.limitations.extend(lipsync.limitations[:2])
 
     def track_check():
@@ -885,14 +885,14 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
             raise CheckSkipped(f"의존성 부재: {missing}")
         track = analyze_face_track(path, thresholds=thresholds)
         if not track.available:
-            _raise_unavailable(track.verdict)
+            _raise_unavailable(track.reference_note)
         return track
 
     track, entry = run_check("face_track", track_check)
     out.coverage.append(entry)
     if track is not None:
         if track.score > 0:
-            out.reference.append(deep_layer_reference("얼굴 트랙 시간-일관성", track.verdict, track.score))
+            out.reference.append(deep_layer_reference("얼굴 트랙 시간-일관성", track.reference_note, track.score))
         out.limitations.extend(track.limitations[:2])
     return out
 
@@ -1245,7 +1245,7 @@ def compare_files(file_a: Path | str, file_b: Path | str, *, ecapa_revision: str
     ext_a, ext_b = path_a.suffix.lower(), path_b.suffix.lower()
     if ext_a in SUPPORTED_AUDIO_EXTENSIONS and ext_b in SUPPORTED_AUDIO_EXTENSIONS:
         result = compare_speakers(path_a, path_b, ecapa_revision_value=ecapa_revision)
-        return {"kind": "speaker", "score": result.same_speaker_score, "band": result.band, "verdict": result.verdict, "distance": result.distance, "method": result.method, "limitations": result.limitations}
+        return {"kind": "speaker", "score": result.same_speaker_score, "reference_band": result.reference_band, "reference_note": result.reference_note, "distance": result.distance, "method": result.method, "limitations": result.limitations}
     if ext_a in text_exts and ext_b in text_exts:
         def _text(path: Path) -> str | None:
             try:
@@ -1259,7 +1259,7 @@ def compare_files(file_a: Path | str, file_b: Path | str, *, ecapa_revision: str
         if text_a is None or text_b is None:
             return {"error": "한쪽 파일의 텍스트 추출에 실패했습니다."}
         result = compare_texts(text_a, text_b)
-        return {"kind": "stylometry", "score": result.same_author_score, "band": result.band, "verdict": result.verdict, "distance": result.distance, "limitations": result.limitations}
+        return {"kind": "stylometry", "score": result.same_author_score, "reference_band": result.reference_band, "reference_note": result.reference_note, "distance": result.distance, "limitations": result.limitations}
     return {"error": f"지원되는 쌍이 아닙니다 ({ext_a} vs {ext_b}) — 오디오끼리 또는 텍스트/문서끼리 비교하세요."}
 
 

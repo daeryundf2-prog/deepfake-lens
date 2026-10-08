@@ -60,7 +60,10 @@ class SpeakerComparisonTest(unittest.TestCase):
         _write_sine_wav(b, freq=220.0)
         with self._mfcc_only():
             result = compare_speakers(a, b)
-        self.assertEqual(result.band, "same")
+        # D1: no same/unclear/different band — the raw score and a
+        # descriptive note (reference_band "reference") instead.
+        self.assertEqual(result.reference_band, "reference")
+        self.assertIn("코사인 거리", result.reference_note)
         self.assertGreaterEqual(result.same_speaker_score, 67)
 
     def test_very_different_audio_scores_lower(self) -> None:
@@ -81,7 +84,7 @@ class SpeakerComparisonTest(unittest.TestCase):
         a = self.dir / "a.wav"
         _write_sine_wav(a)
         result = compare_speakers(a, self.dir / "missing.wav")
-        self.assertEqual(result.band, "unknown")
+        self.assertEqual(result.reference_band, "unavailable")  # D1: was band "unknown"
 
     @unittest.skipUnless(os.environ.get("DEEPFAKE_LENS_MODEL_TESTS") == "1", "set DEEPFAKE_LENS_MODEL_TESTS=1")
     def test_ecapa_self_comparison_when_available(self) -> None:
@@ -96,7 +99,7 @@ class SpeakerComparisonTest(unittest.TestCase):
         a = self.dir / "a.wav"
         _write_sine_wav(a, freq=220.0)
         result = compare_speakers(a, a)
-        self.assertIn("ECAPA", result.verdict)
+        self.assertIn("ECAPA", result.reference_note)
         self.assertGreaterEqual(result.same_speaker_score, 60)
 
 
@@ -107,7 +110,9 @@ class StylometryComparisonTest(unittest.TestCase):
         a = "인공지능 기술은 빠르게 발전하고 있으며, 다양한 산업 분야에 적용되고 있다. 또한, 윤리적 문제도 함께 논의된다. " * 8
         b = "인공지능의 발전 속도는 매우 빠르며, 여러 산업 영역에 활용되고 있다. 또한, 윤리 문제가 함께 거론된다. " * 8
         result = compare_texts(a, b)
-        self.assertEqual(result.band, "same")
+        # D1: no same/unclear/different band (see speaker comparison).
+        self.assertEqual(result.reference_band, "reference")
+        self.assertIn("상대 차이", result.reference_note)
         self.assertGreaterEqual(result.same_author_score, 67)
 
     def test_different_style_scores_lower(self) -> None:
@@ -136,7 +141,7 @@ class LipsyncTest(unittest.TestCase):
     def test_contract_fields(self) -> None:
         from deepfake_lens.lipsync import LipsyncAnalysis
 
-        payload = LipsyncAnalysis(True, 30, "verdict", 0.05, 0.4, 100, 0.01, []).to_json()
+        payload = LipsyncAnalysis(True, 30, "note", 0.05, 0.4, 100, 0.01, []).to_json()
         self.assertEqual(payload["best_correlation"], 0.05)
         self.assertIn("mouth_samples", payload)
 
@@ -158,7 +163,8 @@ class WatermarkTest(unittest.TestCase):
                 with self.subTest(revision=revision):
                     result = detect_kgw_watermark(text, secret="k", tokenizer_revision=revision)
                     self.assertFalse(result.available)
-                    self.assertIn("미고정", result.verdict)
+                    self.assertIn("미고정", result.reference_note)
+                    self.assertEqual(result.reference_band, "unavailable")
         fake_transformers.AutoTokenizer.from_pretrained.assert_not_called()
         # SynthID needs torch as well; without it the dependency message wins.
         synthid = detect_synthid_watermark(text, keys=[1, 2], tokenizer_revision="")

@@ -23,6 +23,7 @@ import subprocess
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 from .vendor_weights import default_models_dir
 
 # Correlation below this with clear speech activity = mismatch candidate.
@@ -37,8 +38,11 @@ class LipsyncAnalysis:
     """Coarse audio-visual sync measurement."""
 
     available: bool
-    score: int  # 0-100 suspicion of sync mismatch
-    verdict: str
+    score: int  # 0-100 raw heuristic points for sync mismatch (unmeasured)
+    # D1: a descriptive measurement note (correlation/offset/confidence), not
+    # a conclusion; reference_band follows layer_diagnostic (reference when
+    # measured, unavailable when the layer could not run).
+    reference_note: str
     best_correlation: float | None
     best_lag_seconds: float | None
     mouth_samples: int
@@ -49,6 +53,7 @@ class LipsyncAnalysis:
     syncnet_confidence: float | None = None
     syncnet_min_dist: float | None = None
     method: str = "heuristic"
+    reference_band: str = REFERENCE_BAND
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
@@ -100,7 +105,10 @@ def analyze_lipsync(path: Path | str, *, max_seconds: float = 20.0) -> LipsyncAn
     speech_activity = float(env.std())
     if speech_activity < 1e-4 or mou.std() < 1e-4:
         limitations.append("음성 활동 또는 입 움직임 변화가 거의 없어 동기 판별이 불가합니다.")
-        return LipsyncAnalysis(True, 0, "동기 판별 불가 — 활동량 부족", None, None, len(mouth), speech_activity, limitations)
+        return LipsyncAnalysis(
+            True, 0, f"음성 활동량 {speech_activity:.5f}, 입 움직임 변화량 {float(mou.std()):.5f} — 변화가 거의 없어 동기를 측정하지 못했습니다.",
+            None, None, len(mouth), speech_activity, limitations,
+        )
 
     env_z = (env - env.mean()) / env.std()
     mou_z = (mou - mou.mean()) / mou.std()
@@ -121,14 +129,15 @@ def analyze_lipsync(path: Path | str, *, max_seconds: float = 20.0) -> LipsyncAn
 
     if best_corr < _WEAK_CORRELATION:
         score = 30
-        verdict = f"음성-입 움직임 상관이 거의 없습니다(r={best_corr:.2f}) — 더빙/얼굴 합성 의심."
     elif abs(best_lag) > _LARGE_OFFSET_SECONDS:
         score = 25
-        verdict = f"동기 오프셋이 {best_lag:+.2f}초로 큽니다 — 오디오 교체/싱크 조작 의심."
     else:
         score = 0
-        verdict = f"음성-입 움직임이 동기화되어 있습니다(r={best_corr:.2f}, lag={best_lag:+.2f}s)."
-    return LipsyncAnalysis(True, score, verdict, round(best_corr, 4), round(best_lag, 3), len(mouth), round(speech_activity, 5), limitations)
+    note = (
+        f"음성-입 움직임 상관 r={best_corr:.2f}, 최적 지연 {best_lag:+.2f}초 "
+        f"(가산 기준: r<{_WEAK_CORRELATION} 또는 |지연|>{_LARGE_OFFSET_SECONDS}초, 미측정 휴리스틱)."
+    )
+    return LipsyncAnalysis(True, score, note, round(best_corr, 4), round(best_lag, 3), len(mouth), round(speech_activity, 5), limitations)
 
 
 def _audio_envelope(video_path: Path, *, max_seconds: float) -> tuple[list[float], float]:
@@ -217,7 +226,7 @@ def _mouth_openness_series(video_path: Path, *, max_seconds: float) -> tuple[lis
 
 
 def _unavailable(limitations: list[str], reason: str) -> LipsyncAnalysis:
-    return LipsyncAnalysis(False, 0, f"립싱크 분석 불가 — {reason}", None, None, 0, None, limitations + [reason])
+    return LipsyncAnalysis(False, 0, f"립싱크 분석 불가 — {reason}", None, None, 0, None, limitations + [reason], reference_band=UNAVAILABLE_BAND)
 
 
 _SYNCNET_PIPELINE = None
@@ -284,13 +293,14 @@ def _syncnet_analysis(video_path: Path) -> LipsyncAnalysis | None:
     # SyncNet convention: |offset| <= 3 frames and confidence >= 3 means
     # in-sync; large offset or low confidence is the dubbing/forgery side.
     if lag_seconds > 0.5 or confidence < 1.0:
-        score, verdict = 70, f"SyncNet이 유의미한 오디오-비디오 오프셋({offset_frames:+.0f}프레임, 신뢰도 {confidence:.1f})을 측정했습니다 — 더빙/재합성 후보."
+        score = 70
     elif lag_seconds > 0.2 or confidence < 3.0:
-        score, verdict = 40, f"SyncNet 측정이 경계 영역입니다(오프셋 {offset_frames:+.0f}프레임, 신뢰도 {confidence:.1f})."
+        score = 40
     else:
-        score, verdict = 0, f"SyncNet이 정상 동기 범위를 측정했습니다(오프셋 {offset_frames:+.0f}프레임, 신뢰도 {confidence:.1f})."
+        score = 0
+    note = f"SyncNet 오프셋 {offset_frames:+.0f}프레임({lag_seconds:.2f}초), 신뢰도 {confidence:.1f}."
     return LipsyncAnalysis(
-        True, score, verdict, None, round(lag_seconds, 3), len(offsets), None,
+        True, score, note, None, round(lag_seconds, 3), len(offsets), None,
         limitations, syncnet_confidence=round(confidence, 4),
         syncnet_min_dist=round(min_dist, 4) if min_dist else None,
         method="syncnet",

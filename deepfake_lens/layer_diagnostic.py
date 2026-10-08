@@ -17,9 +17,11 @@ A layer module now reports only:
 
 :func:`to_layer_diagnostic` wraps any layer payload into the JSON shape the
 standalone commands and the API print (``kind: "layer_diagnostic"``,
-``measured: false`` and the fixed :data:`LAYER_DIAGNOSTIC_NOTICE`). It also
-strips legacy ``band``/``band_label``/``verdict`` keys from modules that still
-emit them (face.py, c2pa.py), so no old-contract band leaves a front end.
+``measured: false`` and the fixed :data:`LAYER_DIAGNOSTIC_NOTICE`). No layer
+module of this package emits ``band``/``band_label``/``verdict`` any more
+(``tests/test_no_legacy_bands.py`` enforces it); the wrapper still strips
+those keys at every depth so an old saved payload or an embedded legacy
+record can never carry an old-contract band to a front end.
 
 Conclusions come only from ``scan`` / ``analysis_api.analyze_path``.
 """
