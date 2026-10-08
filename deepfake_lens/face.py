@@ -72,9 +72,27 @@ class FaceAnalysis:
     face_count: int
     manipulation_type: str
     confidence: str
+    # R7: why there is (or is not) a manipulation_type — FACE_STATUS_*.
+    # Callers branch on this, never on the display value of
+    # manipulation_type.
+    status: str = "analyzed"
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
+
+
+# R7: FaceAnalysis.status values.
+FACE_STATUS_ANALYZED = "analyzed"
+FACE_STATUS_NO_FACE = "no_face"
+FACE_STATUS_UNSUPPORTED = "unsupported_format"
+FACE_STATUS_UNAVAILABLE = "unavailable"
+FACE_STATUS_FAILED = "failed"
+# R7: display values of manipulation_type/confidence when nothing was
+# classified. The diagnostic used to print ``manipulation_type: none`` for
+# a photo with no detected face, which reads as "no manipulation"; it now
+# says what happened — no face found, or the analysis did not run.
+NO_FACE_LABEL = "얼굴 미검출"
+NOT_APPLICABLE_LABEL = "해당 없음"
 
 
 def _imread_unicode(path: Path | str):
@@ -137,8 +155,9 @@ def analyze_faces(
             signals=[],
             limitations=["얼굴이 감지되지 않아 분석할 수 없습니다."],
             face_count=0,
-            manipulation_type="none",
-            confidence="low",
+            manipulation_type=NO_FACE_LABEL,
+            confidence=NOT_APPLICABLE_LABEL,
+            status=FACE_STATUS_NO_FACE,
         )
 
     signals: list[FaceEvidenceSignal] = []
@@ -217,8 +236,9 @@ def _unsupported_format_analysis(extension: str) -> FaceAnalysis:
         signals=[],
         limitations=[message],
         face_count=0,
-        manipulation_type=UNSUPPORTED_FORMAT,
-        confidence="low",
+        manipulation_type=NOT_APPLICABLE_LABEL,
+        confidence=NOT_APPLICABLE_LABEL,
+        status=FACE_STATUS_UNSUPPORTED,
     )
 
 
@@ -231,8 +251,9 @@ def _unavailable_analysis(message: str) -> FaceAnalysis:
         signals=[],
         limitations=[message],
         face_count=0,
-        manipulation_type="unavailable",
-        confidence="low",
+        manipulation_type=NOT_APPLICABLE_LABEL,
+        confidence=NOT_APPLICABLE_LABEL,
+        status=FACE_STATUS_UNAVAILABLE,
     )
 
 
@@ -244,8 +265,9 @@ def _error_analysis(message: str) -> FaceAnalysis:
         signals=[],
         limitations=[message],
         face_count=0,
-        manipulation_type="unknown",
-        confidence="low",
+        manipulation_type=NOT_APPLICABLE_LABEL,
+        confidence=NOT_APPLICABLE_LABEL,
+        status=FACE_STATUS_FAILED,
     )
 
 

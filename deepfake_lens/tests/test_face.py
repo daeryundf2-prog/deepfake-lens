@@ -412,14 +412,92 @@ class WeightFreeDetectorTest(unittest.TestCase):
             self.assertEqual(reason, "실측 랜드마크 검출기 없음: mediapipe")
 
     def test_gif_is_unsupported_format_not_error(self) -> None:
-        from deepfake_lens.face import FACE_IMAGE_EXTENSIONS, UNSUPPORTED_FORMAT
+        from deepfake_lens.face import FACE_IMAGE_EXTENSIONS, FACE_STATUS_UNSUPPORTED, NOT_APPLICABLE_LABEL
 
         with tempfile.TemporaryDirectory() as tmp:
             gif = Path(tmp) / "anim.gif"
             gif.write_bytes(b"GIF89a\x01\x00\x01\x00\x00\x00\x00;")
             result = analyze_faces(gif)
-        self.assertEqual(result.manipulation_type, UNSUPPORTED_FORMAT)
+        # R7: the machine-readable outcome is ``status``; manipulation_type
+        # is a display value that never reads like "no manipulation".
+        self.assertEqual(result.status, FACE_STATUS_UNSUPPORTED)
+        self.assertEqual(result.manipulation_type, NOT_APPLICABLE_LABEL)
         self.assertEqual(result.reference_note, "지원하지 않는 이미지 형식: .gif")
         self.assertEqual(result.reference_band, "unavailable")
         self.assertIn(".tif", FACE_IMAGE_EXTENSIONS)
         self.assertIn(".tiff", FACE_IMAGE_EXTENSIONS)
+
+
+@unittest.skipUnless(_has_cv2(), "opencv not installed")
+class NoFaceDiagnosticLabelTest(unittest.TestCase):
+    """R7: no detected face prints manipulation_type "얼굴 미검출" and every
+    no-analysis outcome "해당 없음" — never "none"/"low", which read as
+    "no manipulation"; the scan's face_manipulation coverage is unchanged."""
+
+    def setUp(self) -> None:
+        import numpy as np
+        from PIL import Image
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.image = Path(self._tmp.name) / "scene.png"
+        rng = np.random.default_rng(7)
+        Image.fromarray(rng.integers(60, 200, size=(160, 200, 3), dtype=np.uint8)).save(self.image)
+
+    def _assert_not_none_like(self, result: FaceAnalysis) -> None:
+        payload = result.to_json()
+        for key in ("manipulation_type", "confidence"):
+            self.assertNotIn(str(payload[key]).lower(), {"none", "low", "unknown", "unavailable", "unsupported_format"}, key)
+
+    def test_no_face_reads_as_no_face(self) -> None:
+        from deepfake_lens.face import FACE_STATUS_NO_FACE, NO_FACE_LABEL, NOT_APPLICABLE_LABEL
+
+        with patch("deepfake_lens.face._detect_faces_strict", return_value=[]):
+            result = analyze_faces(self.image)
+        self.assertEqual(result.status, FACE_STATUS_NO_FACE)
+        self.assertEqual(result.manipulation_type, NO_FACE_LABEL)
+        self.assertEqual(result.confidence, NOT_APPLICABLE_LABEL)
+        self._assert_not_none_like(result)
+
+    def test_no_analysis_outcomes_read_as_not_applicable(self) -> None:
+        from deepfake_lens.face import (
+            FACE_STATUS_FAILED,
+            FACE_STATUS_UNAVAILABLE,
+            NOT_APPLICABLE_LABEL,
+            FaceDetectionError,
+            FaceDetectorUnavailable,
+        )
+
+        for exc, status in ((FaceDetectorUnavailable("검출기 없음"), FACE_STATUS_UNAVAILABLE), (FaceDetectionError("검출 실패"), FACE_STATUS_FAILED)):
+            with self.subTest(status=status), patch("deepfake_lens.face._detect_faces_strict", side_effect=exc):
+                result = analyze_faces(self.image)
+                self.assertEqual(result.status, status)
+                self.assertEqual(result.manipulation_type, NOT_APPLICABLE_LABEL)
+                self._assert_not_none_like(result)
+
+    def test_face_cli_diagnostic_and_scan_coverage(self) -> None:
+        """Real detector on a synthetic no-face scene (QA-OUT-3 fixture): the
+        `face` diagnostic says 얼굴 미검출, the scan skips the face check."""
+        import contextlib
+        import io
+        import json
+
+        from deepfake_lens.cli import main
+        from deepfake_lens.core import analyze_file
+        from deepfake_lens.image_class import PHOTO, classify_image
+        from deepfake_lens.result_types import CoverageStatus
+        from deepfake_lens.tests.qa.test_qa_out import write_scene_png
+
+        scene = write_scene_png(Path(self._tmp.name) / "scene.png", seed=3000, condition="no_face")
+        self.assertEqual(classify_image(scene).kind, PHOTO)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(main(["face", str(scene), "--format", "json"]), 0)
+        diagnostic = json.loads(out.getvalue())["diagnostic"]
+        self.assertEqual(diagnostic["manipulation_type"], "얼굴 미검출")
+        self.assertEqual(diagnostic["confidence"], "해당 없음")
+        self.assertNotIn('"none"', out.getvalue())
+        item = analyze_file(scene, deep_signals=True)
+        assert item.result is not None
+        face_entries = [entry for entry in item.result.coverage if entry.check == "face_manipulation"]
+        self.assertEqual([(entry.status, entry.reason) for entry in face_entries], [(CoverageStatus.SKIPPED, "얼굴 미검출")])

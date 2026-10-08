@@ -859,16 +859,23 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
     def face_check():
         import cv2  # noqa: F401 — dependency probe
 
-        from .face import UNSUPPORTED_FORMAT, analyze_faces
+        from .face import (
+            FACE_STATUS_ANALYZED,
+            FACE_STATUS_NO_FACE,
+            FACE_STATUS_UNAVAILABLE,
+            FACE_STATUS_UNSUPPORTED,
+            NO_FACE_LABEL,
+            analyze_faces,
+        )
 
         face = analyze_faces(path)
-        if face.face_count == 0:
-            if face.manipulation_type == "none":
-                raise CheckSkipped("얼굴 미검출")
-            if face.manipulation_type == UNSUPPORTED_FORMAT:
+        if face.status != FACE_STATUS_ANALYZED or face.face_count == 0:
+            if face.status == FACE_STATUS_NO_FACE:
+                raise CheckSkipped(NO_FACE_LABEL)
+            if face.status == FACE_STATUS_UNSUPPORTED:
                 # D15: GIF etc. — not applicable, never a failure.
                 raise CheckSkipped(face.reference_note)
-            if face.manipulation_type == "unavailable":
+            if face.status == FACE_STATUS_UNAVAILABLE:
                 raise CheckSkipped(f"의존성 부재: {face.reference_note}")
             raise AnalyzerError(face.reference_note)
         return face
