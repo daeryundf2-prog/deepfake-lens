@@ -646,7 +646,12 @@ def _validate_c2pa(path: Path) -> dict[str, object]:
     if validation is None:
         raise ModuleNotFoundError("c2pa", name="c2pa")
     if validation.get("status") == "unavailable":
-        raise AnalyzerError(f"C2PA 매니페스트를 읽었으나 검증 중 오류: {validation.get('error', '')}")
+        # D8: a reader/validation error is a failed check — whether a
+        # manifest exists is unknown, so it is never reported as absent.
+        if validation.get("error_kind") == "not_supported":
+            raise CheckSkipped(f"C2PA SDK가 지원하지 않는 형식: {validation.get('error', '')}")
+        stage = "검증" if validation.get("present") else "판독"
+        raise AnalyzerError(f"C2PA {stage} 실패: {validation.get('error', '')}")
     return validation
 
 

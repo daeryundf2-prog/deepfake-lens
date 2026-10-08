@@ -226,11 +226,15 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
     - ``valid`` / ``invalid``: the SDK read a manifest and completed
       validation. Non-``"valid"`` states usually mean the signer is not in
       the trust store rather than proof of tampering.
-    - ``absent``: the SDK could not open a manifest at all (no manifest,
-      or bytes it could not parse — the SDK does not distinguish).
-    - ``unavailable``: a manifest was opened but validation itself failed —
-      never collapse this into "absent", since a corrupt-but-present
-      manifest is forensically meaningful.
+    - ``absent``: the SDK reported that the file holds no manifest
+      (``C2paError.ManifestNotFound`` — "no JUMBF data found").
+    - ``unavailable``: the reader raised anything else (I/O error, corrupt
+      or truncated JUMBF, verify error, unsupported container — D8), or a
+      manifest was opened but validation itself failed. Never collapsed
+      into "absent": whether a manifest exists is unknown, and a
+      corrupt-but-present manifest is forensically meaningful. ``error``
+      carries ``<ExceptionClass>: <message>``; ``error_kind`` is
+      ``"not_supported"`` when the SDK does not handle the container.
 
     ``present`` remains as the boolean shorthand for "a manifest was read".
     """
@@ -240,14 +244,21 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
         return None
     try:
         reader = c2pa.Reader(str(Path(path)))
-    except Exception as exc:
-        return {"present": False, "status": "absent", "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001 - SDK error classes vary by release; classified below
+        if _is_c2pa_error(c2pa, exc, "ManifestNotFound"):
+            return {"present": False, "status": "absent", "error": str(exc)}
+        return {
+            "present": False,
+            "status": "unavailable",
+            "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+            "error_kind": "not_supported" if _is_c2pa_error(c2pa, exc, "NotSupported") else "reader_error",
+        }
     try:
         state = str(reader.get_validation_state())
         manifest = reader.get_active_manifest() or {}
         results = reader.get_validation_results() or {}
     except Exception as exc:
-        return {"present": True, "status": "unavailable", "error": str(exc)}
+        return {"present": True, "status": "unavailable", "error": f"{type(exc).__name__}: {str(exc)[:200]}", "error_kind": "validation_error"}
     finally:
         try:
             reader.close()
@@ -286,6 +297,17 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
         # distinguishes a generator's manifest from a camera's.
         "digital_source_types": sorted(_digital_source_types(manifest)),
     }
+
+
+def _is_c2pa_error(sdk: object, exc: BaseException, kind: str) -> bool:
+    """True when ``exc`` is the SDK's ``C2paError.<kind>`` (class attribute
+    in c2pa-python >= 0.10) or, for older releases, its message starts
+    with ``"<kind>:"``."""
+    base = getattr(sdk, "C2paError", None)
+    cls = getattr(base, kind, None) if base is not None else None
+    if isinstance(cls, type) and isinstance(exc, cls):
+        return True
+    return str(exc).startswith(f"{kind}:") or type(exc).__name__.endswith(kind)
 
 
 def _digital_source_types(node: object, depth: int = 0) -> set[str]:

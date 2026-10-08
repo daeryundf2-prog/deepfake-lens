@@ -219,5 +219,69 @@ class C2paSdkValidationTest(unittest.TestCase):
         self.assertFalse(summary["present"])
 
 
+class C2paReaderErrorTest(unittest.TestCase):
+    """D8: a reader exception is ``unavailable`` + a failed check, never ``absent``."""
+
+    @unittest.skipUnless(_has_c2pa_sdk(), "c2pa-python not installed")
+    def test_no_manifest_is_absent(self) -> None:
+        summary = validate_c2pa_manifest(Path(__file__).resolve().parents[2] / "fixtures" / "benchmark" / "a1111-metadata-marker.png")
+        assert summary is not None
+        self.assertEqual(summary["status"], "absent")
+        self.assertFalse(summary["present"])
+
+    @unittest.skipUnless(_has_c2pa_sdk(), "c2pa-python not installed")
+    def test_reader_exception_is_unavailable(self) -> None:
+        import tempfile
+
+        signed = (C2PA_FIXTURES / "signed-c2pa.png").read_bytes()
+        jumbf = signed.index(b"caBX")
+        with tempfile.TemporaryDirectory() as tmp:
+            cases = {
+                "empty.png": b"",
+                "cut-manifest.png": signed[: jumbf + 64],
+            }
+            for name, data in cases.items():
+                with self.subTest(name=name):
+                    path = Path(tmp) / name
+                    path.write_bytes(data)
+                    summary = validate_c2pa_manifest(path)
+                    assert summary is not None
+                    self.assertEqual(summary["status"], "unavailable", summary)
+                    self.assertFalse(summary["present"])
+                    self.assertRegex(str(summary["error"]), r"^\w+: ")
+
+    @unittest.skipUnless(_has_c2pa_sdk(), "c2pa-python not installed")
+    def test_unexpected_reader_exception_is_unavailable_and_check_failed(self) -> None:
+        from unittest import mock
+
+        from deepfake_lens.core import analyze_file
+        from deepfake_lens.result_types import CoverageStatus, Verdict
+
+        fixture = Path(__file__).resolve().parents[2] / "fixtures" / "benchmark" / "real-like-texture.png"
+        with mock.patch("c2pa.Reader", side_effect=RuntimeError("jumbf parser crashed")):
+            summary = validate_c2pa_manifest(fixture)
+            with self.assertLogs("deepfake_lens.checks", level="ERROR"):
+                item = analyze_file(fixture)
+        assert summary is not None and item.result is not None
+        self.assertEqual(summary["status"], "unavailable")
+        self.assertEqual(summary["error"], "RuntimeError: jumbf parser crashed")
+        entry = next(c for c in item.result.coverage if c.check == "c2pa")
+        self.assertEqual(entry.status, CoverageStatus.FAILED)
+        self.assertIn("RuntimeError", entry.reason)
+        self.assertEqual(item.result.verdict_code, Verdict.UNDETERMINED)
+        # An unread C2PA block is not "no metadata" (D16).
+        self.assertNotIn("메타데이터 부재", [e.title for e in item.result.evidence])
+
+    @unittest.skipUnless(_has_c2pa_sdk(), "c2pa-python not installed")
+    def test_c2pa_png_is_not_reported_as_missing_metadata(self) -> None:
+        from deepfake_lens.core import analyze_file
+
+        item = analyze_file(C2PA_FIXTURES / "signed-c2pa.png")
+        assert item.result is not None
+        titles = [e.title for e in item.result.evidence]
+        self.assertIn("C2PA 매니페스트 존재(검증 미완료)", titles)
+        self.assertNotIn("메타데이터 부재", titles)
+
+
 if __name__ == "__main__":
     unittest.main()
