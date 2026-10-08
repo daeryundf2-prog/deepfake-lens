@@ -6,7 +6,9 @@ acoustic feature extraction, and heuristic scoring.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+import logging
+
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
@@ -17,6 +19,8 @@ DEFAULT_SAMPLE_RATE = 16000
 DEFAULT_SEGMENT_SECONDS = 30
 MAX_AUDIO_BYTES = 100 * 1024 * 1024  # 100 MB
 
+
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class AudioEvidenceSignal:
@@ -69,6 +73,10 @@ class AudioAnalysis:
     # External audio model result (e.g. AASIST via models/aasist-runtime.json);
     # None when no audio-modality profile was supplied.
     model_analysis: ExternalModelAnalysis | None = None
+    # Why feature extraction produced nothing: "의존성 부재: librosa", or
+    # "<ExcType>: message" for a decode failure (G1 — the two used to share
+    # one "install librosa" message). Empty when features exist.
+    feature_error: str = ""
 
     def to_json(self) -> dict[str, object]:
         data = asdict(self)
@@ -108,9 +116,9 @@ def analyze_audio(
         return _error_analysis("파일이 비어 있습니다.")
 
     model_analysis = analyze_external_model(audio_path, model_path, modality="audio") if model_path else None
-    features = _extract_features(audio_path, segment_seconds=segment_seconds)
+    features, feature_error = _extract_features_with_reason(audio_path, segment_seconds=segment_seconds)
     if features is None:
-        return _features_failed_analysis(model_analysis)
+        return replace(_features_failed_analysis(model_analysis, feature_error), feature_error=feature_error)
 
     signals: list[AudioEvidenceSignal] = []
     limitations: list[str] = []
@@ -214,9 +222,12 @@ def _error_analysis(message: str, *, model_analysis: ExternalModelAnalysis | Non
     )
 
 
-def _features_failed_analysis(model_analysis: ExternalModelAnalysis | None) -> AudioAnalysis:
-    """Feature extraction needs librosa; an available model score still counts."""
-    message = "오디오 특징을 추출할 수 없습니다. librosa가 설치되어 있는지 확인하세요."
+def _features_failed_analysis(model_analysis: ExternalModelAnalysis | None, reason: str = "") -> AudioAnalysis:
+    """Feature extraction failed; an available model score still counts."""
+    if reason.startswith("의존성 부재"):
+        message = f"오디오 특징을 추출할 수 없습니다 ({reason}). librosa를 설치하세요."
+    else:
+        message = f"오디오 특징을 추출할 수 없습니다 ({reason or '원인 미상'})."
     model_signal = _model_evidence_signal(model_analysis)
     if model_signal is None:
         limitations = [message]
@@ -280,7 +291,23 @@ def _model_evidence_signal(model_analysis: ExternalModelAnalysis | None) -> Audi
     return AudioEvidenceSignal(title, f"{model_analysis.model}: {model_analysis.detail}", weight)
 
 
-def _extract_features(path: Path, *, segment_seconds: int) -> AudioFeatures | None:
+def _extract_features_with_reason(path: Path, *, segment_seconds: int) -> tuple[AudioFeatures | None, str]:
+    """Features plus, when there are none, the reason (dependency vs decode)."""
+    try:
+        import librosa  # noqa: F401
+    except ImportError as exc:
+        return None, f"의존성 부재: {exc.name or 'librosa'}"
+    try:
+        features = _extract_features(path, segment_seconds=segment_seconds, raise_on_decode=True)
+    except Exception as exc:
+        logger.exception("audio decode failed: %s", path)
+        return None, f"{type(exc).__name__}: {str(exc)[:200]}"
+    if features is None:
+        return None, "AnalyzerError: 디코딩된 오디오 샘플이 없습니다"
+    return features, ""
+
+
+def _extract_features(path: Path, *, segment_seconds: int, raise_on_decode: bool = False) -> AudioFeatures | None:
     """Extract acoustic features from audio file using librosa."""
     try:
         import librosa
@@ -291,6 +318,8 @@ def _extract_features(path: Path, *, segment_seconds: int) -> AudioFeatures | No
     try:
         y, sr = librosa.load(str(path), sr=DEFAULT_SAMPLE_RATE, duration=segment_seconds)
     except Exception:
+        if raise_on_decode:
+            raise
         return None
 
     if len(y) == 0:

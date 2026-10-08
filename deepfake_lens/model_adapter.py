@@ -5,6 +5,7 @@ import importlib.util
 import json
 import math
 import os
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,6 +52,23 @@ from .model_runtimes import (  # noqa: F401 — dispatch targets + shared caches
     _score_from_score_map,
     _score_from_sidecar,
 )
+
+logger = logging.getLogger(__name__)
+
+# ExternalModelAnalysis.confidence for a member that *failed* (raised, or
+# its integrity check did not match) as opposed to one that was skipped
+# (missing optional runtime, missing checkpoint, unsupported profile).
+# core.model_coverage maps it to a ``failed`` coverage entry, which makes
+# the verdict undetermined (G1, fail-closed).
+FAILED_CONFIDENCE = "failed"
+
+
+def _failure_detail(context: str, exc: BaseException) -> str:
+    """"<ExcType>: <message> (<context>)" — the coverage reason format."""
+    message = str(exc)[:200]
+    head = f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+    return f"{head} ({context})"
+
 
 # Profile-set marker: a JSON file that lists member profiles/directories so a
 # single --model-path can drive several detectors at once.
@@ -190,20 +208,22 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
     try:
         profile = json.loads(model_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
+        # A configured profile that cannot be read is an operator error —
+        # it fails the check rather than quietly dropping the detector.
         return ExternalModelAnalysis(
             available=False,
             score=0,
-            confidence="unavailable",
+            confidence=FAILED_CONFIDENCE,
             model=str(model_file),
-            detail=f"model profile could not be read: {exc}",
+            detail=_failure_detail("model profile could not be read", exc),
         )
     if not isinstance(profile, dict):
         return ExternalModelAnalysis(
             available=False,
             score=0,
-            confidence="unavailable",
+            confidence=FAILED_CONFIDENCE,
             model=str(model_file),
-            detail="model profile is not a JSON object.",
+            detail="ValueError: model profile is not a JSON object.",
         )
 
     model_name = str(profile.get("name") or profile.get("model") or model_file.name)
@@ -343,7 +363,10 @@ def _image_quality_context(media_path: Path) -> tuple[float | None, int | None]:
 
     try:
         return estimate_jpeg_quality(media_path), image_min_side(media_path)
-    except Exception:  # noqa: BLE001 - quality estimation is advisory
+    except Exception:
+        # Advisory only (ensemble weight gating): log and continue without
+        # the quality context rather than failing the model check.
+        logger.exception("image quality estimation failed for %s", media_path)
         return None, None
 
 
@@ -514,12 +537,13 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
             verify_checkpoint_sha256(checkpoint, declared_sha)
             _PROFILE_SHA_OK.add(checkpoint)
         except Exception as exc:
+            logger.exception("checkpoint integrity check failed: %s", checkpoint)
             return ExternalModelAnalysis(
                 available=False,
                 score=0,
-                confidence="unavailable",
+                confidence=FAILED_CONFIDENCE,
                 model=model_name,
-                detail=f"checkpoint integrity check failed: {exc}",
+                detail=_failure_detail("checkpoint integrity check failed", exc),
                 limitations=["프로파일 선언 SHA-256과 체크포인트가 불일치 — 가중치를 재프로비저닝하세요.", *profile_limitations],
             )
     try:
@@ -558,16 +582,19 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
             score=0,
             confidence="unavailable",
             model=model_name,
-            detail=f"{runtime} runtime is optional and not installed: {exc}",
+            detail=f"의존성 부재: {exc.name or exc} ({runtime} runtime is optional and not installed)",
             limitations=[_runtime_install_hint(runtime), *profile_limitations],
         )
-    except Exception as exc:  # noqa: BLE001 - model runtimes fail in many library-specific ways.
+    except Exception as exc:
+        # G1: an inference crash is a *failed* check (verdict undetermined),
+        # never "score 0 / unavailable" that reads like a clean result.
+        logger.exception("%s inference failed for %s", runtime, media_path)
         return ExternalModelAnalysis(
             available=False,
             score=0,
-            confidence="unavailable",
+            confidence=FAILED_CONFIDENCE,
             model=model_name,
-            detail=f"{runtime} inference failed: {exc}",
+            detail=_failure_detail(f"{runtime} inference failed", exc),
             limitations=["Verify input_size, mean/std, input_name, score_index, and checkpoint compatibility.", *profile_limitations],
         )
     return ExternalModelAnalysis(
@@ -656,10 +683,11 @@ def _score_face_crops(crops: list, profile: dict[str, object], *, base_dir: Path
     scored = [result.score for result in results if result.available]
     if not scored:
         cause = results[0].detail if results else "no crop produced a result"
+        crashed = any(result.confidence == FAILED_CONFIDENCE for result in results)
         return ExternalModelAnalysis(
             available=False,
             score=0,
-            confidence="unavailable",
+            confidence=FAILED_CONFIDENCE if crashed else "unavailable",
             model=model_name,
             detail=f"crop_faces: {len(crops)} face crop(s) detected but inference failed ({cause}).",
             limitations=profile_limitations,
@@ -726,6 +754,7 @@ def _run_video_frames(
                 {
                     "frame": index,
                     "path": str(frame_path),
+                    "failed": bool(result and result.confidence == FAILED_CONFIDENCE),
                     "available": bool(result and result.available),
                     "score": result.score if result else 0,
                     "detail": result.detail if result else "no result",
@@ -734,10 +763,11 @@ def _run_video_frames(
 
     available = [entry["score"] for entry in scored_frames if entry["available"]]
     if not available:
+        crashed = any(entry["failed"] for entry in scored_frames)
         return ExternalModelAnalysis(
             available=False,
             score=0,
-            confidence="unavailable",
+            confidence=FAILED_CONFIDENCE if crashed else "unavailable",
             model=model_name,
             detail=f"video-frames decoded {len(frame_paths)} frames but the inner runtime produced no scores.",
             limitations=_profile_limitations(profile),

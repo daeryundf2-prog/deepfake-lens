@@ -109,6 +109,16 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E9", "F821", "F541", "F811", "W605"]
+# Fail-closed gate (phase 0, G1): blind `except Exception` (BLE001) and
+# try/except/pass (S110) are errors in the four files on the verdict path.
+# Ruff has no per-file *select*, so the rules are enabled globally and
+# ignored everywhere except those files via a negated per-file pattern.
+# A broad handler there must re-raise or log the traceback
+# (logger.exception) — and record the failure in coverage/the payload.
+extend-select = ["BLE001", "S110"]
+
+[tool.ruff.lint.per-file-ignores]
+"!deepfake_lens/{core,model_adapter,webapp_api,api_server}.py" = ["BLE001", "S110"]
 
 # Gradual typing gate: the modules below were verified clean under mypy and
 # must stay so. Add a file here only after it passes — widening the list is

@@ -145,8 +145,19 @@ class FaceSwapSeamTest(unittest.TestCase):
         self.assertEqual([entry.check for entry in layers.coverage], ["face_manipulation", "inpaint", "faceswap_seam"])
         face_entry = layers.coverage[0]
         # A flat grey image has no face: recorded as a skip with a reason.
+        # Where no detector exists (OpenCV 5 without CascadeClassifier and
+        # no MediaPipe) the reason must say so instead of "얼굴 미검출" (G1).
+        from deepfake_lens.face import FaceDetectorUnavailable, _detect_faces_strict
+        try:
+            _detect_faces_strict(img)
+            expected = "얼굴 미검출"
+        except FaceDetectorUnavailable:
+            expected = None
         self.assertEqual(face_entry.status.value, "skipped")
-        self.assertEqual(face_entry.reason, "얼굴 미검출")
+        if expected:
+            self.assertEqual(face_entry.reason, expected)
+        else:
+            self.assertTrue(face_entry.reason.startswith("의존성 부재"), face_entry.reason)
 
 
 class ThresholdProfileTest(unittest.TestCase):

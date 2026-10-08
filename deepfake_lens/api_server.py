@@ -10,10 +10,20 @@ every /api/ route, and the CLI refuses non-localhost binds without one.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+from .checks import failure_reason
 from .vendor_weights import default_models_dir
+
+logger = logging.getLogger(__name__)
+
+
+def _layer_error(payload: dict[str, Any], layer: str, exc: BaseException) -> None:
+    """Record a failed auxiliary layer in the response instead of hiding it."""
+    errors = payload.setdefault("layer_errors", [])
+    errors.append({"layer": layer, "status": "failed", "reason": failure_reason(exc)})
 
 try:
     from fastapi import Request
@@ -158,7 +168,8 @@ def create_app(
             result = analyze_file(file_path, pixel_mode="off")
             return {"status": "success", "data": result.to_json()}
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc))
+            logger.exception("request failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
     
     @app.post("/api/analyze/audio")
     async def analyze_audio(file_path: str):
@@ -171,7 +182,8 @@ def create_app(
             result = analyze_audio(file_path, model_path=profiles or None)
             return {"status": "success", "data": result.to_json()}
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc))
+            logger.exception("request failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
     
     @app.post("/api/analyze/face")
     async def analyze_face(file_path: str):
@@ -180,7 +192,8 @@ def create_app(
             result = analyze_faces(file_path)
             return {"status": "success", "data": result.to_json()}
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc))
+            logger.exception("request failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
     
     @app.post("/api/analyze/text")
     async def analyze_text(text: str):
@@ -189,7 +202,8 @@ def create_app(
             result = analyze_text_advanced(text)
             return {"status": "success", "data": result.to_json()}
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc))
+            logger.exception("request failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
     
     @app.post("/api/analyze/forensic")
     async def analyze_forensic(file_path: str):
@@ -198,7 +212,8 @@ def create_app(
             result = analyze_metadata_forensic(file_path)
             return {"status": "success", "data": result.to_json()}
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc))
+            logger.exception("request failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
     
     @app.post("/api/classify")
     async def classify(file_path: str):
@@ -220,7 +235,8 @@ def create_app(
                 result = classify_metadata({})
             return {"status": "success", "data": result.to_json()}
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc))
+            logger.exception("request failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
     
     @app.post("/api/check")
     async def check(
@@ -266,8 +282,10 @@ def create_app(
                         data["watermark"] = detect_kgw_watermark(
                             trimmed, secret=watermark_secret, gamma=watermark_gamma
                         ).to_json()
-                    except Exception:
-                        data["watermark"] = {"available": False, "verdict": "워터마크 검사 실패"}
+                    except Exception as exc:
+                        logger.exception("watermark layer failed")
+                        data["watermark"] = {"available": False, "verdict": "워터마크 검사 실패", "error": failure_reason(exc)}
+                        _layer_error(data, "watermark", exc)
                 return {"status": "success", "data": data}
             if file_path:
                 path = Path(file_path)
@@ -276,22 +294,27 @@ def create_app(
                 try:
                     from .c2pa import analyze_metadata_forensic
                     data["forensic"] = analyze_metadata_forensic(path).to_json()
-                except Exception:
+                except Exception as exc:
+                    logger.exception("forensic layer failed")
                     data["forensic"] = None
+                    _layer_error(data, "forensic", exc)
                 if item.kind == "text":
                     try:
                         from .text_advanced import analyze_text_advanced
                         data["advanced"] = analyze_text_advanced(
                             path.read_text(encoding="utf-8", errors="replace")[: 256 * 1024]
                         ).to_json()
-                    except Exception:
+                    except Exception as exc:
+                        logger.exception("text-advanced layer failed")
                         data["advanced"] = None
+                        _layer_error(data, "advanced", exc)
                 return {"status": "success", "data": data}
             raise HTTPException(status_code=400, detail="file_path or text required")
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc))
+            logger.exception("request failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     # --- Streaming job API -------------------------------------------------
     # /api/check/stream runs the same layered check as /api/check but reports
@@ -364,8 +387,9 @@ def create_app(
                         wm: Any = detect_kgw_watermark(
                             trimmed, secret=watermark_secret, gamma=watermark_gamma
                         ).to_json()
-                    except Exception:
-                        wm = {"available": False, "verdict": "워터마크 검사 실패"}
+                    except Exception as exc:
+                        logger.exception("watermark layer failed")
+                        wm = {"available": False, "verdict": "워터마크 검사 실패", "error": failure_reason(exc)}
                     stages.append(("watermark", wm))
                 payload = {"mode": "text", **dict(stages)}
             else:
@@ -384,8 +408,10 @@ def create_app(
                 try:
                     from .c2pa import analyze_metadata_forensic
                     forensic: Any = analyze_metadata_forensic(path).to_json()
-                except Exception:
+                except Exception as exc:
+                    logger.exception("forensic layer failed")
                     forensic = None
+                    stages.append(("forensic_error", [{"layer": "forensic", "status": "failed", "reason": failure_reason(exc)}]))
                 stages.append(("forensic", forensic))
                 if item.kind == "text":
                     try:
@@ -393,8 +419,10 @@ def create_app(
                         stages.append(("advanced", analyze_text_advanced(
                             path.read_text(encoding="utf-8", errors="replace")[: 256 * 1024]
                         ).to_json()))
-                    except Exception:
+                    except Exception as exc:
+                        logger.exception("text-advanced layer failed")
                         stages.append(("advanced", None))
+                        stages.append(("advanced_error", [{"layer": "advanced", "status": "failed", "reason": failure_reason(exc)}]))
                 payload = {"mode": "file", **dict(stages)}
 
             yield ("result", payload)
@@ -561,7 +589,8 @@ def create_app(
         try:
             result = compare_files(Path(file_path_a), Path(file_path_b))
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc))
+            logger.exception("request failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
         if "error" in result:
             raise HTTPException(status_code=400, detail=str(result["error"]))
         return {"status": "success", "data": result}
@@ -583,7 +612,8 @@ def create_app(
             )
             return {"status": "success", "data": result.to_json()}
         except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc))
+            logger.exception("request failed")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
     
     # --- GUI & Webapp compatibility endpoints ---
     @app.get("/api/scan")
@@ -655,10 +685,11 @@ def create_app(
         fmt = request.query_params.get("format")
         try:
             parsed = json.loads(body.decode("utf-8") if body else "{}")
-            if not fmt:
+            if not fmt and isinstance(parsed, dict):
                 fmt = parsed.get("format")
-        except Exception:
-            pass
+        except (UnicodeDecodeError, ValueError):
+            # Malformed body: _report_payload below returns the JSON error.
+            fmt = fmt or None
         rendered = _report_payload(body, format_override=fmt)
         if isinstance(rendered, dict):
             return rendered

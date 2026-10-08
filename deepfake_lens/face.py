@@ -115,7 +115,12 @@ def analyze_faces(
     except Exception as exc:
         return _error_analysis(f"이미지 읽기 오류: {exc}")
 
-    faces = _detect_faces(image)
+    try:
+        faces = _detect_faces_strict(image)
+    except FaceDetectorUnavailable as exc:
+        return _unavailable_analysis(f"얼굴 검출기 없음: {exc}")
+    except FaceDetectionError as exc:
+        return _error_analysis(f"얼굴 검출 오류: {exc}")
     if not faces:
         return FaceAnalysis(
             score=0,
@@ -202,6 +207,21 @@ def analyze_faces(
     )
 
 
+def _unavailable_analysis(message: str) -> FaceAnalysis:
+    """No detector could run — distinct from "no face" and from an error."""
+    return FaceAnalysis(
+        score=0,
+        band="unknown",
+        band_label="판단 어려움",
+        verdict=message,
+        signals=[],
+        limitations=[message],
+        face_count=0,
+        manipulation_type="unavailable",
+        confidence="low",
+    )
+
+
 def _error_analysis(message: str) -> FaceAnalysis:
     return FaceAnalysis(
         score=0,
@@ -216,7 +236,56 @@ def _error_analysis(message: str) -> FaceAnalysis:
     )
 
 
+class FaceDetectorUnavailable(RuntimeError):
+    """No face detector could run (no Haar cascade XML and no MediaPipe)."""
+
+
+class FaceDetectionError(RuntimeError):
+    """Every available face detector raised; "no face" would be a lie."""
+
+
+def face_detector_unavailable_reason() -> str | None:
+    """None when at least one face detector can run, else why not.
+
+    Cheap probe (no inference) so callers can report "의존성 부재" instead
+    of "얼굴 미검출" when there is nothing that could have found a face.
+    """
+    try:
+        import cv2
+    except ImportError:
+        return "opencv 없음"
+    if hasattr(cv2, "CascadeClassifier"):
+        cv2_cascade_dir = getattr(getattr(cv2, "data", None), "haarcascades", "") or ""
+        candidates = [
+            cv2_cascade_dir + "haarcascade_frontalface_default.xml" if cv2_cascade_dir else "",
+            os.environ.get("DEEPFAKE_LENS_HAAR_CASCADE") or "",
+            str(Path(__file__).resolve().parent / "models" / "haarcascade_frontalface_default.xml"),
+        ]
+        if any(cand and Path(cand).is_file() for cand in candidates):
+            return None
+    try:
+        import mediapipe as mp
+    except ImportError:
+        return "얼굴 검출기 없음: OpenCV CascadeClassifier/Haar XML과 MediaPipe가 모두 없습니다"
+    if not hasattr(mp, "solutions"):
+        return "얼굴 검출기 없음: mediapipe에 solutions API가 없습니다"
+    return None
+
+
 def _detect_faces(image: Any) -> list[FaceRegion]:
+    """Lenient detection for helper callers (crops, gates): [] on any problem.
+
+    Analysis entry points that report "얼굴 미검출" must use
+    :func:`_detect_faces_strict` instead, so a missing or crashed detector
+    is never mistaken for an image without faces (G1/G12).
+    """
+    try:
+        return _detect_faces_strict(image)
+    except (FaceDetectorUnavailable, FaceDetectionError):
+        return []
+
+
+def _detect_faces_strict(image: Any) -> list[FaceRegion]:
     """Detect faces: OpenCV Haar first, MediaPipe FaceMesh as fallback.
 
     Haar misses valid frontal faces on generated/atypical imagery (measured
@@ -226,12 +295,14 @@ def _detect_faces(image: Any) -> list[FaceRegion]:
     """
     try:
         import cv2
-        import numpy as np
-    except ImportError:
-        return []
+        import numpy as np  # noqa: F401
+    except ImportError as exc:
+        raise FaceDetectorUnavailable(f"opencv 없음: {exc}") from exc
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     regions = []
+    detectors_run = 0
+    errors: list[BaseException] = []
     if hasattr(cv2, "CascadeClassifier"):
         faces: Any = []
         try:
@@ -251,9 +322,11 @@ def _detect_faces(image: Any) -> list[FaceRegion]:
                     face_cascade = cv2.CascadeClassifier(str(cand))
                     if not face_cascade.empty():
                         break
-            if face_cascade is not None:
+            if face_cascade is not None and not face_cascade.empty():
+                detectors_run += 1
                 faces = face_cascade.detectMultiScale(gray, 1.1, 4)
-        except cv2.error:
+        except cv2.error as exc:
+            errors.append(exc)
             faces = []
         for x, y, w, h in faces:
             landmarks, source = _face_landmarks(image, x, y, w, h)
@@ -266,10 +339,27 @@ def _detect_faces(image: Any) -> list[FaceRegion]:
             )
     if regions:
         return regions
-    return _mediapipe_detect_faces(image)
+    try:
+        mesh_regions = _mediapipe_detect_faces(image, strict=True)
+    except FaceDetectorUnavailable:
+        mesh_regions = None
+    except FaceDetectionError as exc:
+        errors.append(exc)
+        mesh_regions = None
+    if mesh_regions is not None:
+        detectors_run += 1
+        if mesh_regions:
+            return mesh_regions
+    if detectors_run == 0:
+        if errors:
+            raise FaceDetectionError(f"{type(errors[0]).__name__}: {errors[0]}") from errors[0]
+        raise FaceDetectorUnavailable("Haar cascade XML과 MediaPipe가 모두 없습니다")
+    if errors:
+        raise FaceDetectionError(f"{type(errors[0]).__name__}: {errors[0]}") from errors[0]
+    return []
 
 
-def _mediapipe_detect_faces(image: Any, max_faces: int = 3) -> list[FaceRegion]:
+def _mediapipe_detect_faces(image: Any, max_faces: int = 3, *, strict: bool = False) -> list[FaceRegion]:
     """Whole-image MediaPipe FaceMesh pass used when Haar finds nothing.
 
     Each returned mesh's landmark extent becomes the face box (expanded
@@ -279,9 +369,13 @@ def _mediapipe_detect_faces(image: Any, max_faces: int = 3) -> list[FaceRegion]:
     try:
         import cv2
         import mediapipe as mp
-    except ImportError:
+    except ImportError as exc:
+        if strict:
+            raise FaceDetectorUnavailable(f"mediapipe 없음: {exc}") from exc
         return []
     if not hasattr(mp, "solutions"):
+        if strict:
+            raise FaceDetectorUnavailable("mediapipe에 solutions API가 없습니다")
         return []
 
     try:
@@ -294,7 +388,9 @@ def _mediapipe_detect_faces(image: Any, max_faces: int = 3) -> list[FaceRegion]:
             result = face_mesh.process(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
         finally:
             face_mesh.close()
-    except Exception:
+    except Exception as exc:
+        if strict:
+            raise FaceDetectionError(f"{type(exc).__name__}: {exc}") from exc
         return []
 
     if not result.multi_face_landmarks:

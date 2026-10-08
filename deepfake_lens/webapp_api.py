@@ -8,6 +8,7 @@ read-root guard so each file stays a single readable layer.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 import shutil
@@ -20,8 +21,17 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs
 
+from .checks import failure_reason
 from .vendor_weights import default_models_dir
-from .core import BatchScanSummary, DEFAULT_METADATA_BYTES, _scan_item_from_json, analyze_file, scan_directory, scan_to_json, summarize
+
+logger = logging.getLogger(__name__)
+
+
+def _layer_error(payload: dict[str, Any], layer: str, exc: BaseException) -> None:
+    """Record a failed auxiliary layer in the response instead of hiding it."""
+    errors = payload.setdefault("layer_errors", [])
+    errors.append({"layer": layer, "status": "failed", "reason": failure_reason(exc)})
+from .core import SCAN_JSON_SCHEMA_VERSION, BatchScanSummary, DEFAULT_METADATA_BYTES, _scan_item_from_json, analyze_file, scan_directory, scan_to_json, summarize
 from .datasets import is_negative_label, is_positive_label
 from .fusion import apply_fusion_to_items, load_fusion_profile
 from .reports import write_html_report
@@ -237,19 +247,23 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
         
         # Pixel analysis (if image)
         pixel_result = None
+        response: dict[str, Any] = {}
         if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff"}:
             try:
                 pixel_result = analyze_pixels(path)
-            except Exception:
-                pass
-        
-        return {
+            except Exception as exc:
+                logger.exception("pixel layer failed for %s", path)
+                _layer_error(response, "pixel_analysis", exc)
+
+        response.update({
             "file": str(path),
             "classification": classification.to_json(),
             "forensic": forensic.to_json(),
             "pixel_analysis": pixel_result.to_json() if pixel_result else None,
-        }
+        })
+        return response
     except Exception as exc:
+        logger.exception("file analysis failed")
         # Detail stays in `detail` so the GUI shows a clean headline instead
         # of a raw exception sentence; the type/message aid local debugging.
         return {"error": "파일 분석 중 오류가 발생했습니다", "detail": f"{type(exc).__name__}: {exc}"}
@@ -299,8 +313,10 @@ def _extract_metadata(path: Path) -> dict[str, str]:
                 offset += 12 + length
                 if chunk_type == b"IEND":
                     break
-    except Exception:
-        pass
+    except (OSError, struct.error, ValueError) as exc:
+        # Truncated/corrupt header: keep the chunks parsed so far, but log
+        # it — this helper only feeds the legacy /api/analyze classifier.
+        logger.warning("metadata extraction stopped early for %s: %s", path, failure_reason(exc))
     return metadata
 
 
@@ -419,10 +435,12 @@ def _provenance() -> dict[str, object]:
     neural one downstream (GUI banner, /api/report, exported JSON).
     """
     from .vendor_weights import weights_coverage
+    cov: dict[str, object]
     try:
-        cov = weights_coverage(_models_dir())
-    except Exception:
-        cov = {}
+        cov = dict(weights_coverage(_models_dir()))
+    except Exception as exc:
+        logger.exception("weights coverage unavailable")
+        cov = {"error": failure_reason(exc)}
     return {"coverage": cov, "thresholds": {"source": "builtin_defaults", "provisional": True}}
 
 
@@ -596,11 +614,14 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
             record["name"] = filename
             items.append(record)
         except Exception as exc:
-            items.append({"name": filename, "error": str(exc)})
+            # Per-upload failure is a failed row (status "failed"), never a
+            # silently missing file.
+            logger.exception("upload analysis failed: %s", filename)
+            items.append({"name": filename, "path": filename, "status": "failed", "error": failure_reason(exc)})
     if not items:
         return {"error": "업로드된 파일이 없습니다"}
     return {
-        "schema_version": 1,
+        "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "summary": _summarize_records(items, "upload"),
         "items": items,
         **_provenance(),
@@ -626,6 +647,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
     # delete=False: Windows cannot reopen a delete=True NamedTemporaryFile,
     # so the analyzers below would hit Permission denied.
     tmp_name = ""
+    layer_errors: dict[str, Any] = {}
     try:
         with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as tmp:
             tmp.write(trimmed)
@@ -634,8 +656,10 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
         try:
             from .c2pa import analyze_metadata_forensic
             forensic = analyze_metadata_forensic(Path(tmp_name)).to_json()
-        except Exception:
+        except Exception as exc:
+            logger.exception("forensic layer failed")
             forensic = None
+            _layer_error(layer_errors, "forensic", exc)
     finally:
         if tmp_name:
             Path(tmp_name).unlink(missing_ok=True)
@@ -646,18 +670,21 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
         try:
             from .watermark import detect_kgw_watermark
             watermark = detect_kgw_watermark(trimmed, secret=watermark_secret, gamma=watermark_gamma).to_json()
-        except Exception:
-            watermark = {"available": False, "verdict": "워터마크 검사 실패"}
+        except Exception as exc:
+            logger.exception("watermark layer failed")
+            watermark = {"available": False, "verdict": "워터마크 검사 실패", "error": failure_reason(exc)}
+            _layer_error(layer_errors, "watermark", exc)
     record = item.to_json()
     record["name"] = "pasted-text"
     record["path"] = "pasted-text"
     return {
-        "schema_version": 1,
+        "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "mode": "text",
         "item": record,
         "advanced": advanced.to_json(),
         "forensic": forensic,
         "watermark": watermark,
+        **layer_errors,
         **_provenance(),
     }
 
@@ -682,7 +709,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     if is_archive(filename):
         items = _archive_upload_items(filename, suffix, payload)
         return {
-            "schema_version": 1,
+            "schema_version": SCAN_JSON_SCHEMA_VERSION,
             "mode": "files",
             "summary": _summarize_records(items, "upload"),
             "items": items,
@@ -699,29 +726,33 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
         item = analyze_file(tmp_path, model_path=model_path)
         record = item.to_json()
         forensic = None
+        layer_errors: dict[str, Any] = {}
         try:
             from .c2pa import analyze_metadata_forensic
             forensic = analyze_metadata_forensic(tmp_path).to_json()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.exception("forensic layer failed")
+            _layer_error(layer_errors, "forensic", exc)
         advanced = None
         if item.kind == "text":
             try:
                 from .text_advanced import analyze_text_advanced
                 advanced = analyze_text_advanced(payload.decode("utf-8", errors="replace")).to_json()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.exception("text-advanced layer failed")
+                _layer_error(layer_errors, "advanced", exc)
     finally:
         if tmp_name:
             Path(tmp_name).unlink(missing_ok=True)
     record["name"] = filename
     record["path"] = filename
     return {
-        "schema_version": 1,
+        "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "mode": "file",
         "item": record,
         "advanced": advanced,
         "forensic": forensic,
+        **layer_errors,
         **_provenance(),
     }
 

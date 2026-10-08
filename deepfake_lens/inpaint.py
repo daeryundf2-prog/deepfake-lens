@@ -249,8 +249,11 @@ def _edge_continuity_analysis(image) -> InpaintEvidenceSignal | None:
 
     # Analyze line orientations
     orientations = []
-    for line in lines:
-        x1, y1, x2, y2 = line[0]
+    # HoughLinesP returns (N, 1, 4) on OpenCV 4.x and may return (N, 4) on
+    # newer builds; flatten so both shapes unpack (this TypeError used to be
+    # swallowed by core as "선택 의존성 부재" — G1).
+    for line in np.asarray(lines).reshape(-1, 4):
+        x1, y1, x2, y2 = (int(v) for v in line)
         angle = math.atan2(y2 - y1, x2 - x1)
         orientations.append(angle)
 

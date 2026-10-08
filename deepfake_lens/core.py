@@ -16,7 +16,7 @@ from .archives import archive_format, extract_archive, is_archive
 from .audio import SUPPORTED_AUDIO_EXTENSIONS, AudioAnalysis, analyze_audio
 from .video_analysis import SUPPORTED_VIDEO_EXTENSIONS, VideoTemporalAnalysis, analyze_video_temporal
 from .documents import SUPPORTED_DOCUMENT_EXTENSIONS, extract_document_text
-from .model_adapter import ExternalModelAnalysis, analyze_external_model
+from .model_adapter import FAILED_CONFIDENCE, ExternalModelAnalysis, analyze_external_model
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, PixelAnalysis, analyze_image_pixels
 from .pixel import PixelExpertResult
 from .png import read_png_dimensions, read_png_metadata
@@ -64,7 +64,7 @@ DEFAULT_TEXT_BYTES = 64 * 1024
 MODEL_MIN_SIDE_PX = 128
 # ExternalModelAnalysis.confidence value marking a member that raised
 # (inference error, integrity mismatch) rather than one that was skipped.
-MODEL_FAILED_CONFIDENCE = "failed"
+MODEL_FAILED_CONFIDENCE = FAILED_CONFIDENCE
 
 logger = logging.getLogger(__name__)
 
@@ -571,6 +571,8 @@ def _model_entry(check: str, *, available: bool, confidence: str, detail: str) -
     reason = detail.strip() or "모델 결과 없음"
     if confidence == MODEL_FAILED_CONFIDENCE:
         return CoverageEntry(check, CoverageStatus.FAILED, reason)
+    if reason.startswith("의존성 부재"):
+        return CoverageEntry(check, CoverageStatus.SKIPPED, reason)
     return CoverageEntry(check, CoverageStatus.SKIPPED, f"모델 실행 불가: {reason}")
 
 
@@ -678,6 +680,8 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
         if face.face_count == 0:
             if face.manipulation_type == "none":
                 raise CheckSkipped("얼굴 미검출")
+            if face.manipulation_type == "unavailable":
+                raise CheckSkipped(f"의존성 부재: {face.verdict}")
             raise AnalyzerError(face.verdict)
         return face
 
@@ -712,8 +716,12 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
     def seam_check():
         import cv2  # noqa: F401 — dependency probe
 
+        from .face import face_detector_unavailable_reason
         from .faceswap_seam import analyze_faceswap_seam
 
+        missing = face_detector_unavailable_reason()
+        if missing:
+            raise CheckSkipped(f"의존성 부재: {missing}")
         seam = analyze_faceswap_seam(path, thresholds=thresholds)
         if seam.band == "unknown":
             if seam.face_count == 0 and "얼굴" in seam.verdict:
@@ -730,15 +738,24 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
     return out
 
 
+def _require_haar(cv2_module: object) -> None:
+    """rPPG and lip-sync call cv2.CascadeClassifier directly; OpenCV 5
+    builds without contrib lack it, which is a missing dependency, not an
+    analysis failure."""
+    if not hasattr(cv2_module, "CascadeClassifier"):
+        raise CheckSkipped("의존성 부재: cv2.CascadeClassifier (opencv-contrib)")
+
+
 def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
     """Opt-in deep video layers: rPPG, avatar, lip-sync, face-track."""
     out = DeepLayers()
 
     def rppg_check():
-        import cv2  # noqa: F401 — dependency probe
+        import cv2
 
         from .rppg import analyze_rppg
 
+        _require_haar(cv2)
         rppg = analyze_rppg(path)
         if rppg.band == "unknown":
             _raise_unavailable(rppg.verdict)
@@ -764,8 +781,11 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
         out.limitations.extend(avatar.limitations[:2])
 
     def lipsync_check():
+        import cv2
+
         from .lipsync import analyze_lipsync
 
+        _require_haar(cv2)
         lipsync = analyze_lipsync(path)
         if not lipsync.available:
             _raise_unavailable(lipsync.verdict)
@@ -779,8 +799,12 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
         out.limitations.extend(lipsync.limitations[:2])
 
     def track_check():
+        from .face import face_detector_unavailable_reason
         from .face_track import analyze_face_track
 
+        missing = face_detector_unavailable_reason()
+        if missing:
+            raise CheckSkipped(f"의존성 부재: {missing}")
         track = analyze_face_track(path, thresholds=thresholds)
         if not track.available:
             _raise_unavailable(track.verdict)
@@ -872,9 +896,14 @@ def _analyze_audio_file(
     coverage = [entry]
     if analysis.features is not None:
         coverage.append(CoverageEntry("audio_features", CoverageStatus.RAN))
+    elif analysis.feature_error.startswith("의존성 부재"):
+        coverage.append(skipped("audio_features", analysis.feature_error))
+    elif analysis.feature_error:
+        coverage.append(CoverageEntry("audio_features", CoverageStatus.FAILED, analysis.feature_error))
     elif importlib.util.find_spec("librosa") is None:
         coverage.append(skipped("audio_features", "의존성 부재: librosa"))
     else:
+        # Early-exit error analysis (empty/oversized/unreadable file).
         coverage.append(failed_entry("audio_features", AnalyzerError(analysis.verdict)))
     if analysis.model_analysis is None:
         coverage.append(_no_model_entry(model_path, "audio"))
@@ -1352,7 +1381,8 @@ def _verdict_text(
     if grade == Grade.REFERENCE:
         lexical = sum(1 for item in evidence if item.kind == EvidenceKind.LEXICAL)
         note = f" (어휘적 신호 {lexical}건은 참고 정보)" if lexical else ""
-        return f"참고: 근거 부족 — {subject}의 생성 여부는 결론을 내리지 않습니다{note}."
+        failure = f" 검사 실패: {', '.join(check_label(entry.check) for entry in failed_entries)}." if failed_entries else ""
+        return f"참고: 근거 부족 — {subject}의 생성 여부는 결론을 내리지 않습니다{note}.{failure}"
     if verdict == Verdict.MANIPULATION_EVIDENCE:
         basis = next(
             (
