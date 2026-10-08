@@ -23,8 +23,10 @@ from .pixel import PixelExpertResult
 from .png import read_png_dimensions, read_png_metadata
 from .image_metadata import (  # noqa: F401
     DEFAULT_METADATA_BYTES,
+    ImageMetadataRead,
     guess_image_source,
     read_image_metadata,
+    read_image_metadata_full,
 )
 from .checks import AnalyzerError, CheckSkipped, run_check, skipped
 from .image_class import MEASURABLE_MIN_SIDE_PX, ImageClass, classify_image, resolution_out_of_range
@@ -538,12 +540,13 @@ def analyze_file(
 
     if extension in SUPPORTED_IMAGE_EXTENSIONS:
         try:
-            metadata, dimensions = read_image_metadata(file_path, metadata_bytes=metadata_bytes)
+            metadata_read = read_image_metadata_full(file_path, metadata_bytes=metadata_bytes)
             result = _analyze_image_file(
-                file_path, metadata, dimensions,
+                file_path, metadata_read.metadata, metadata_read.dimensions,
                 root=root, pixel_mode=pixel_mode, pixel_max_side=pixel_max_side,
                 heatmaps=heatmaps, heatmap_dir=heatmap_dir, model_path=model_path,
                 deep_signals=deep_signals, thresholds=thresholds,
+                metadata_read=metadata_read,
             )
             return ScanItem(display_path, item_name, "image", "analyzed", size, result)
         except OSError as exc:
@@ -667,6 +670,7 @@ class DeepLayers:
     evidence: list[EvidenceItem] = field(default_factory=list)
     coverage: list[CoverageEntry] = field(default_factory=list)
     limitations: list[str] = field(default_factory=list)
+    reference: list[EvidenceSignal] = field(default_factory=list)
 
 
 def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
@@ -849,10 +853,18 @@ def _analyze_image_file(
     model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
     deep_signals: bool,
     thresholds: object | None,
+    metadata_read: ImageMetadataRead | None = None,
 ) -> ClassificationResult:
-    coverage: list[CoverageEntry] = [CoverageEntry("metadata", CoverageStatus.RAN)]
+    # D16: a metadata read that stopped early (truncated structure, empty
+    # file, unrecognized header, EXIF error) is a failed check, not an
+    # absence of metadata.
+    read_error = metadata_read.error if metadata_read is not None else None
+    coverage: list[CoverageEntry] = [
+        failed_entry("metadata", AnalyzerError(read_error)) if read_error else CoverageEntry("metadata", CoverageStatus.RAN)
+    ]
     c2pa_validation, entry = run_check("c2pa", lambda: _validate_c2pa(file_path))
     coverage.append(entry)
+    c2pa_unknown = entry.status == CoverageStatus.FAILED
 
     # Photo/non-photo gate (WP-D, G13): detectors are only applied to
     # photographs. A non-photo (or too small) image keeps metadata + C2PA;
@@ -897,6 +909,12 @@ def _analyze_image_file(
         deep = _deep_image_layers(file_path, thresholds) if deep_signals else _deep_disabled(DEEP_IMAGE_CHECKS)
     coverage.extend(deep.coverage)
 
+    image_format = metadata_read.image_format if metadata_read is not None else None
+    jpeg_quality = None
+    if image_format == "jpeg" and (metadata.get("exif.Make") or metadata.get("exif.Model")):
+        from .jpegq import estimate_jpeg_quality
+
+        jpeg_quality = estimate_jpeg_quality(file_path)
     return analyze_image_metadata(
         metadata,
         dimensions=dimensions,
@@ -905,8 +923,13 @@ def _analyze_image_file(
         c2pa_validation=c2pa_validation,
         coverage=coverage,
         extra_evidence=deep.evidence,
-        extra_limitations=deep.limitations,
+        extra_limitations=[*(metadata_read.notes if metadata_read is not None else []), *deep.limitations],
         image_class=image_class,
+        metadata_read_error=read_error,
+        c2pa_unknown=c2pa_unknown,
+        image_format=image_format,
+        jpeg_quality=jpeg_quality,
+        extra_reference=deep.reference,
     )
 
 
@@ -1360,6 +1383,11 @@ def analyze_image_metadata(
     extra_evidence: list[EvidenceItem] | None = None,
     extra_limitations: list[str] | None = None,
     image_class: ImageClass | None = None,
+    metadata_read_error: str | None = None,
+    c2pa_unknown: bool = False,
+    image_format: str | None = None,
+    jpeg_quality: float | None = None,
+    extra_reference: list[EvidenceSignal] | None = None,
 ) -> ClassificationResult:
     """Image result from already-collected analyzer outputs.
 
@@ -1367,9 +1395,19 @@ def analyze_image_metadata(
     benchmarks) get a coverage record synthesized from the arguments.
     ``image_class`` (the photo/non-photo gate) adds its neutral evidence
     item and, for a non-photo, the "사진 아님 — 생성 탐지 비적용" notice.
+    ``metadata_read_error`` / ``c2pa_unknown`` suppress the "메타데이터
+    부재" item when the metadata or the C2PA read did not complete (D16);
+    ``image_format`` and ``jpeg_quality`` feed the camera-EXIF rule (D7).
     """
+    c2pa_present = bool(c2pa_validation and c2pa_validation.get("present"))
     evidence = [
-        *image_metadata_evidence(metadata, dimensions),
+        *image_metadata_evidence(
+            metadata, dimensions,
+            metadata_read_error=metadata_read_error,
+            c2pa_present=c2pa_present or c2pa_unknown,
+            image_format=image_format,
+            jpeg_quality=jpeg_quality,
+        ),
         *c2pa_evidence(c2pa_validation),
         *image_class_evidence(image_class),
     ]
@@ -1378,7 +1416,7 @@ def analyze_image_metadata(
         evidence.append(model_item)
     evidence.extend(extra_evidence or [])
 
-    reference: list[EvidenceSignal] = []
+    reference: list[EvidenceSignal] = list(extra_reference or [])
     if pixel_analysis and pixel_analysis.available:
         top = " / ".join(pixel_analysis.signals[:2]) or "픽셀 전문가 신호 요약 없음"
         reference.append(reference_signal(

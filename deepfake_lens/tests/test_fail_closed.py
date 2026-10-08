@@ -318,7 +318,7 @@ class OtherModalityFailClosedTest(FailClosedAssertions):
     def test_whole_analyzer_crash_is_a_failed_row_not_a_clean_one(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             _png(Path(tmp) / "photo.png")
-            with mock.patch("deepfake_lens.core.read_image_metadata", side_effect=MemoryError("oom")), \
+            with mock.patch("deepfake_lens.core.read_image_metadata_full", side_effect=MemoryError("oom")), \
                     self.assertLogs("deepfake_lens.core", level="ERROR"):
                 summary, items = scan_directory(Path(tmp))
         self.assertEqual(items[0].status, "failed")
