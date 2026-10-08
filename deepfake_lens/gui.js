@@ -1358,9 +1358,11 @@
             }
             if (data.advanced) {
                 const a = data.advanced;
-                const sig = (a.signals || []).map(s => `<li>${escapeHtml(s.title)} (+${s.weight}) — ${escapeHtml(s.detail)}</li>`).join('');
+                // Style/fingerprint probes are lexical reference signals (G4):
+                // show the raw number, never a band or a "+points" weight.
+                const sig = (a.signals || []).map(s => `<li>${escapeHtml(s.title)} — ${escapeHtml(s.detail)}</li>`).join('');
                 const lim = (a.limitations || []).map(l => `<li>${escapeHtml(l)}</li>`).join('');
-                parts.push(layer(`스타일/지문 분석 — 점수 ${a.score != null ? a.score : 0} (${escapeHtml(a.band_label || a.band || '')})`,
+                parts.push(layer(`스타일/지문 분석(어휘적 참고 — 결론 불참여) — 원점수 ${a.score != null ? a.score : 0}`,
                     (sig ? `<ul>${sig}</ul>` : '<div class="note">발동 신호 없음</div>') + (lim ? `<ul class="c-amber">${lim}</ul>` : '')));
             }
             if (data.forensic) {

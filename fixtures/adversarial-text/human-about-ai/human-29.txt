@@ -1,0 +1,1 @@
+Our hospital's policy: an AI assistant may summarize the chart, but the physician signs the note. I like that the signature, not the model, is what makes the record legally ours.

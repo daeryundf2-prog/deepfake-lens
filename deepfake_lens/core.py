@@ -1206,6 +1206,15 @@ TEXT_LEXICAL_LIMITATION = "어휘·문체 신호(키워드, 연결 문구, 문�
 # Below this many characters, style statistics are unstable (sentence-length
 # variance and shingle repetition need several sentences) — disclosed only.
 SHORT_TEXT_CHARS = 240
+# Display thresholds for which lexical item to list (legacy heuristics,
+# unmeasured; they only choose a title — lexical items never decide).
+TEMPLATE_PHRASES_MANY = 4
+TEMPLATE_PHRASES_SOME = 2
+LIST_ITEMS_MANY = 6
+LIST_ITEMS_SOME = 3
+# Weight carried on the intermediate EvidenceSignal before it becomes a
+# lexical EvidenceItem; deliberately 0 — a keyword hit is not points.
+LEXICAL_SIGNAL_WEIGHT = 0
 
 
 def analyze_text(
@@ -1234,23 +1243,31 @@ def analyze_text(
     lines = [line.strip() for line in trimmed.splitlines() if line.strip()]
     sentences = [part.strip() for part in re.split(r"[.!?。！？\n]+", trimmed) if len(part.strip()) >= 8]
     words = re.findall(r"[\w']+", normalized, flags=re.UNICODE)
+    # Phrase and structure hits are lexical evidence only (G4): they are
+    # listed for the examiner and can never move the verdict. The legacy
+    # point weights (+35 for one "language model" mention, …) are gone;
+    # LEXICAL_SIGNAL_WEIGHT marks "not a score".
     signals: list[EvidenceSignal] = []
 
     identity_hits = sum(1 for phrase in AI_IDENTITY_PHRASES if phrase in normalized)
     if identity_hits:
-        signals.append(EvidenceSignal("AI 자기표현 문구", f"AI 또는 언어 모델임을 암시하는 표현이 {identity_hits}개 발견되었습니다.", 35))
+        signals.append(EvidenceSignal(
+            "AI 자기표현 문구",
+            f"AI 또는 언어 모델을 언급하는 표현이 {identity_hits}개 있습니다. AI에 대해 쓴 사람의 글에도 흔히 나타납니다.",
+            LEXICAL_SIGNAL_WEIGHT,
+        ))
 
     phrase_hits = sum(1 for phrase in SYNTHETIC_WRITING_PHRASES if phrase in normalized)
-    if phrase_hits >= 4:
-        signals.append(EvidenceSignal("템플릿형 문장 전개", "요약/균형/결론형 연결 문구가 반복됩니다.", 22))
-    elif phrase_hits >= 2:
-        signals.append(EvidenceSignal("정형화된 연결 문구", f"자동 생성 글에서 자주 보이는 연결 표현이 {phrase_hits}개 보입니다.", 12))
+    if phrase_hits >= TEMPLATE_PHRASES_MANY:
+        signals.append(EvidenceSignal("템플릿형 문장 전개", "요약/균형/결론형 연결 문구가 반복됩니다.", LEXICAL_SIGNAL_WEIGHT))
+    elif phrase_hits >= TEMPLATE_PHRASES_SOME:
+        signals.append(EvidenceSignal("정형화된 연결 문구", f"자동 생성 글에서 자주 보이는 연결 표현이 {phrase_hits}개 보입니다.", LEXICAL_SIGNAL_WEIGHT))
 
     list_markers = sum(1 for line in lines if re.match(r"^(\d+[\).]|[-*•])\s+.+", line))
-    if list_markers >= 6:
-        signals.append(EvidenceSignal("과도하게 균일한 목록 구조", f"목록 항목이 {list_markers}개 이어집니다.", 18))
-    elif list_markers >= 3:
-        signals.append(EvidenceSignal("목록 중심 구성", "번호/불릿 구조가 두드러집니다.", 10))
+    if list_markers >= LIST_ITEMS_MANY:
+        signals.append(EvidenceSignal("과도하게 균일한 목록 구조", f"목록 항목이 {list_markers}개 이어집니다.", LEXICAL_SIGNAL_WEIGHT))
+    elif list_markers >= LIST_ITEMS_SOME:
+        signals.append(EvidenceSignal("목록 중심 구성", "번호/불릿 구조가 두드러집니다.", LEXICAL_SIGNAL_WEIGHT))
 
     for optional in (
         _sentence_uniformity_signal(sentences),

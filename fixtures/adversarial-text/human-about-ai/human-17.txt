@@ -1,0 +1,1 @@
+Notes from the conference: three talks on language model evaluation, two on watermarking, one very honest one on why detectors fail on non-native English writers. That last one should be required viewing.

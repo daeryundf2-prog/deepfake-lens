@@ -1,0 +1,1 @@
+The ethics board asked every lab to disclose where a language model touched the grant text. Ours only used it to fix reference formatting, which took longer to explain than to do.

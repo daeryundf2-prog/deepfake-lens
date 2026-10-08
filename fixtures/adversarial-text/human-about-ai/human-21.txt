@@ -1,0 +1,1 @@
+We replaced the old keyword filter with a language model classifier and complaints went up, not down. Turns out the model flagged every message that mentioned 'AI assistant' as spam. Rolled back by Friday.
