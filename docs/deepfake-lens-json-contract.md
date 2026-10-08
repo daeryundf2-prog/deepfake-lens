@@ -136,7 +136,7 @@ Phase-0 classification of existing signals:
 | Missing metadata (`메타데이터 부재`) — only when the metadata read completed, no C2PA manifest is present (or its read failed) and no field was found; a truncated/empty/unrecognized file or an EXIF read error makes the `metadata` check `failed` instead | deterministic | neutral | weak |
 | Image class from the photo/non-photo gate (`이미지 유형: …`, layer `image_class`) | deterministic | neutral | weak |
 | External model output | statistical | synthetic if raw ≥ 50, else neutral | weak (moderate when calibrated) |
-| Deep layers (face, inpaint, face-swap seam, rPPG, avatar, lip-sync, face track) | statistical | synthetic | weak, no probability |
+| Deep layers (face, inpaint, face-swap seam, rPPG, avatar, lip-sync, face track) — uncalibrated, so `reference_signals` only, title suffixed `(참고, 미보정)`, detail with the raw 0–100 value (D13); never an evidence item | — | — | `reference_signals` only |
 | AI identity phrases, template connectors, list structure, style statistics | lexical | synthetic | weak |
 | Office document creator/producer naming an AI tool | deterministic | synthetic | moderate |
 | Pixel ensemble (plain weighted mean of its experts — no floors, G3), frequency heuristics, audio/video heuristics, fusion score | — | — | `reference_signals` only |

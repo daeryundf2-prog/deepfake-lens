@@ -16,7 +16,7 @@ Classification (phase-0 spec, WP-A):
 | camera EXIF consistent, no recompression (D7)     | deterministic | authentic | moderate |
 | square generator resolution / missing metadata     | deterministic | neutral   | weak     |
 | external model output                              | statistical   | synthetic | probability only when calibrated |
-| deep layers (face seam, inpaint, tracking …)       | statistical   | synthetic | weak, no probability |
+| deep layers (face seam, inpaint, tracking …)       | reference_signals only until calibrated (D13) |
 | AI identity phrases, template connectors, style    | lexical       | synthetic | weak     |
 | pixel ensemble / frequency / legacy heuristics     | reference_signals only |
 | image class (photo / screenshot / pattern …)      | deterministic | neutral   | weak     |
@@ -424,13 +424,23 @@ def model_evidence(model: ExternalModelAnalysis | None) -> EvidenceItem | None:
     )
 
 
-def deep_layer_evidence(title: str, detail: str, layer: str, raw_score: int) -> EvidenceItem:
-    """Uncalibrated deep-layer flag: statistical, no probability, no vote."""
-    return EvidenceItem(
-        title,
+DEEP_LAYER_REFERENCE_SUFFIX = "(참고, 미보정)"
+
+
+def deep_layer_reference(title: str, detail: str, raw_score: int) -> EvidenceSignal:
+    """An uncalibrated deep-layer output (face, inpaint, face-swap seam,
+    rPPG, avatar, lip-sync, face track) as a reference signal (D13).
+
+    Deep layers have no calibration, so they take no part in the decision
+    (WP-A table: "결정 불참여"). As evidence items they carried a synthetic
+    direction even when their own detail said "의심 신호는 적습니다", which
+    blocked decision rule 5 on clean photos; as reference signals they are
+    shown and never counted.
+    """
+    return EvidenceSignal(
+        f"{title}{DEEP_LAYER_REFERENCE_SUFFIX}",
         f"{detail} (원점수 {raw_score}/100, 미보정 — 결론에 참여하지 않습니다)",
-        EvidenceKind.STATISTICAL, EvidenceDirection.SYNTHETIC, EvidenceStrength.WEAK, layer,
-        raw_score=raw_score,
+        int(raw_score),
     )
 
 

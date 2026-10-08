@@ -37,7 +37,7 @@ from .decision import decide
 from .result_text import TEXT_LEGAL_LIMITATION
 from .evidence_rules import (
     c2pa_evidence,
-    deep_layer_evidence,
+    deep_layer_reference,
     document_metadata_evidence,
     image_class_evidence,
     image_metadata_evidence,
@@ -708,7 +708,11 @@ def _raise_unavailable(message: str) -> None:
 
 @dataclass
 class DeepLayers:
-    """Outcome of the opt-in deep layers for one file."""
+    """Outcome of the opt-in deep layers for one file.
+
+    Uncalibrated deep-layer outputs go to ``reference`` (D13) — never to
+    ``evidence``; ``evidence`` stays for a future calibrated layer.
+    """
 
     evidence: list[EvidenceItem] = field(default_factory=list)
     coverage: list[CoverageEntry] = field(default_factory=list)
@@ -721,7 +725,8 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
 
     Each layer is a separate check: a missing dependency is ``skipped``, no
     detected face is ``skipped`` "얼굴 미검출", any other exception is
-    ``failed`` (G1/G12). Flags become uncalibrated statistical evidence.
+    ``failed`` (G1/G12). Flags become reference signals (D13: no calibration,
+    so no part in the decision).
     """
     out = DeepLayers()
 
@@ -743,8 +748,8 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
     out.coverage.append(entry)
     if face is not None:
         if face.score > 0:
-            out.evidence.append(deep_layer_evidence(
-                "얼굴 조작 분석", f"{face.verdict} (faces={face.face_count}, {face.manipulation_type})", "face", face.score,
+            out.reference.append(deep_layer_reference(
+                "얼굴 조작 분석", f"{face.verdict} (faces={face.face_count}, {face.manipulation_type})", face.score,
             ))
         out.limitations.extend(face.limitations[:2])
 
@@ -762,8 +767,8 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
     out.coverage.append(entry)
     if inpaint is not None:
         if inpaint.regions_detected:
-            out.evidence.append(deep_layer_evidence(
-                "인페인팅/부분 변형 탐지", f"{inpaint.verdict} (영역 {inpaint.regions_detected}개)", "inpaint", inpaint.score,
+            out.reference.append(deep_layer_reference(
+                "인페인팅/부분 변형 탐지", f"{inpaint.verdict} (영역 {inpaint.regions_detected}개)", inpaint.score,
             ))
         out.limitations.extend(inpaint.limitations[:2])
 
@@ -787,7 +792,7 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
     out.coverage.append(entry)
     if seam is not None:
         for sig in seam.signals:
-            out.evidence.append(deep_layer_evidence(sig.title, sig.detail, "face", sig.weight))
+            out.reference.append(deep_layer_reference(sig.title, sig.detail, sig.weight))
         out.limitations.extend(seam.limitations[:2])
     return out
 
@@ -819,7 +824,7 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
     out.coverage.append(entry)
     if rppg is not None:
         if rppg.score > 0:
-            out.evidence.append(deep_layer_evidence("rPPG 맥박 신호", rppg.verdict, "rppg", rppg.score))
+            out.reference.append(deep_layer_reference("rPPG 맥박 신호", rppg.verdict, rppg.score))
         out.limitations.extend(rppg.limitations[:2])
 
     def avatar_check():
@@ -837,7 +842,7 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
         markers = [signal for signal in avatar.signals if signal.title != FORMAT_SIGNAL_TITLE]
         if markers:
             raw = min(100, sum(signal.weight for signal in markers))
-            out.evidence.append(deep_layer_evidence("아바타/디지털휴먼 탐지", avatar.verdict, "avatar", raw))
+            out.reference.append(deep_layer_reference("아바타/디지털휴먼 탐지", avatar.verdict, raw))
         out.limitations.extend(avatar.limitations[:2])
 
     def lipsync_check():
@@ -855,7 +860,7 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
     out.coverage.append(entry)
     if lipsync is not None:
         if lipsync.score > 0:
-            out.evidence.append(deep_layer_evidence("립싱크 일관성", lipsync.verdict, "lipsync", lipsync.score))
+            out.reference.append(deep_layer_reference("립싱크 일관성", lipsync.verdict, lipsync.score))
         out.limitations.extend(lipsync.limitations[:2])
 
     def track_check():
@@ -874,7 +879,7 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
     out.coverage.append(entry)
     if track is not None:
         if track.score > 0:
-            out.evidence.append(deep_layer_evidence("얼굴 트랙 시간-일관성", track.verdict, "face_track", track.score))
+            out.reference.append(deep_layer_reference("얼굴 트랙 시간-일관성", track.verdict, track.score))
         out.limitations.extend(track.limitations[:2])
     return out
 
@@ -1081,6 +1086,7 @@ def _analyze_video_file(
             source_guess=SourceGuess.unknown("영상 분석이 불완전해 출처를 판단할 단서가 없습니다."),
             limitations=deep.limitations,
             next_checks=VIDEO_NEXT_CHECKS,
+            reference_signals=deep.reference,
         )
     if analysis.model_analysis is None:
         coverage.append(_no_model_entry(model_path, "video"))
@@ -1099,7 +1105,7 @@ def _video_result(
     """Adapt a VideoTemporalAnalysis into the result contract.
 
     Temporal heuristics are reference-only; the frame model is statistical
-    evidence; deep layers are uncalibrated statistical flags.
+    evidence; deep layers are reference signals (D13).
     """
     deep = deep or DeepLayers()
     if coverage is None:
@@ -1115,6 +1121,7 @@ def _video_result(
         for signal in analysis.signals
         if not signal.title.startswith("외부 모델")
     ]
+    reference.extend(deep.reference)
     has_detail = analysis.frame_count > 0 and analysis.duration_seconds > 0
     source_guess = SourceGuess.unknown(
         "영상 파일의 컨테이너 메타데이터에서 출처 단서를 찾지 못했습니다."
