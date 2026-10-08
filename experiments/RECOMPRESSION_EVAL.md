@@ -1,3 +1,5 @@
+> ⚠ 미검증(n 부족 또는 재현 불가) — 2차 계획 WP-I 참조. 아래 수치는 클래스당 200개 미만이거나 코퍼스가 재현 불가능하여 증거로 사용할 수 없다.
+
 # Recompression / degradation robustness (2026-09-19)
 
 Field-realistic degradations applied to the eval sets — social-media
