@@ -77,6 +77,11 @@ class ArchiveExtraction:
     skipped: int = 0
     warnings: list[str] = field(default_factory=list)
     rejected: list[tuple[str, str]] = field(default_factory=list)
+    # The container could not be opened: a missing optional extractor
+    # (py7zr / rarfile) or "<ExceptionClass>: <message>" of the parse error.
+    # Only the top-level archive's own state; nested failures stay warnings.
+    missing_dependency: str | None = None
+    error: str | None = None
 
     def reject(self, name: str, reason: str) -> None:
         self.skipped += 1
@@ -412,6 +417,7 @@ def _extract_7z(path: Path, dest: Path, out: ArchiveExtraction, budget: Extracti
         import py7zr
     except ImportError:
         out.warnings.append("7z 해제에는 py7zr이 필요합니다 (pip install deepfake-lens[archive])")
+        out.missing_dependency = "py7zr"
         return
     total = 0
     try:
@@ -469,6 +475,7 @@ def _extract_7z(path: Path, dest: Path, out: ArchiveExtraction, budget: Extracti
                 _charge(out, budget, target, rel or name, size, False)
     except Exception as exc:  # noqa: BLE001 - py7zr raises several custom error types
         out.warnings.append(f"7z 해제 실패: {type(exc).__name__}: {exc}")
+        out.error = f"{type(exc).__name__}: {str(exc)[:200]}"
 
 
 def _rar_member_rejected(info: Any) -> bool:
@@ -496,6 +503,7 @@ def _extract_rar(path: Path, dest: Path, out: ArchiveExtraction, budget: Extract
         import rarfile
     except ImportError:
         out.warnings.append("rar 해제에는 rarfile이 필요합니다 (pip install deepfake-lens[archive])")
+        out.missing_dependency = "rarfile"
         return
     total = 0
     try:
@@ -540,6 +548,7 @@ def _extract_rar(path: Path, dest: Path, out: ArchiveExtraction, budget: Extract
                 _charge(out, budget, target, rel, written, truncated)
     except Exception as exc:  # noqa: BLE001 - rarfile raises several custom error types
         out.warnings.append(f"rar 해제 실패: {type(exc).__name__}: {exc}")
+        out.error = f"{type(exc).__name__}: {str(exc)[:200]}"
 
 
 def extract_archive(
@@ -578,6 +587,7 @@ def extract_archive(
             return out
     except (zipfile.BadZipFile, tarfile.TarError, OSError, EOFError, ValueError) as exc:
         out.warnings.append(f"압축 해제 실패: {type(exc).__name__}: {exc}")
+        out.error = f"{type(exc).__name__}: {str(exc)[:200]}"
         return out
 
     nested = [m for m in out.members if is_archive(m)]

@@ -74,7 +74,10 @@ per-file coverage record:
   digest (D9), so a signed report binds the container as well as its members.
 - `result`: `null` unless the item was analyzed (archive container rows
   carry a roll-up result with `status: "expanded"`, or `"unknown"` when no
-  member could be analyzed). Every member the extractor refused is a
+  member could be analyzed). The container's `archive` coverage entry is
+  `ran`, `skipped` `의존성 부재: py7zr` / `의존성 부재: rarfile` when the
+  optional extractor is missing, or `failed` `AnalyzerError: <Exception>: …`
+  when the container itself could not be parsed. Every member the extractor refused is a
   `skipped` coverage entry with check `archive_member` and reason
   `<member>: <why>` — `경로 이탈 멤버('..' …)`, `절대 경로 멤버(…)`,
   `심볼릭 링크 멤버`, `하드 링크 멤버`, `압축 예산 초과(선언 크기 N, 한도 M) — <cap>`

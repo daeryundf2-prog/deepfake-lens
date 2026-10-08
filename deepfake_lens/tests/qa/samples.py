@@ -1,4 +1,4 @@
-"""Minimal valid samples for every supported input extension (QA-IN-1).
+"""Minimal samples for every supported input extension (QA-IN-1).
 
 ``write_samples(folder)`` writes one small, structurally valid file per
 supported extension it can synthesize in this environment and returns
@@ -35,20 +35,29 @@ from deepfake_lens.core import SUPPORTED_IMAGE_EXTENSIONS, SUPPORTED_TEXT_EXTENS
 from deepfake_lens.documents import SUPPORTED_DOCUMENT_EXTENSIONS
 from deepfake_lens.video_analysis import SUPPORTED_VIDEO_EXTENSIONS
 
-# Binary formats no stdlib/Pillow/ffmpeg encoder writes. They are listed so
-# the QA record names them instead of dropping them silently.
-NO_ENCODER = {
-    ".hwp": "HWP 5 바이너리(OLE) 작성기 없음",
-    ".doc": "MS Word 97 바이너리(OLE) 작성기 없음",
-    ".xls": "MS Excel 97 바이너리(OLE) 작성기 없음",
-    ".ppt": "MS PowerPoint 97 바이너리(OLE) 작성기 없음",
-    ".rar": "RAR 압축기는 독점 소프트웨어(작성기 없음)",
+# Binary formats no stdlib/Pillow/ffmpeg encoder writes (D6/QA-IN-1): they
+# are still scanned, as minimal byte samples that carry the format's magic
+# header — an OLE2 compound-file header for .doc/.xls/.ppt, the same plus a
+# "HWP Document File" FileHeader signature for HWP 5.0, the RAR5 marker and
+# (without py7zr) the 7z signature header. The tool must answer them with
+# "미지원" or "판단 불가 + 이유", never a conclusion; MAGIC_ONLY names them.
+MAGIC_ONLY = {
+    ".hwp": "HWP 5.0 OLE 헤더 + FileHeader 서명만(본문 스트림 없음)",
+    ".doc": "OLE2 복합 문서 헤더만(Word 97 스트림 없음)",
+    ".xls": "OLE2 복합 문서 헤더만(Excel 97 스트림 없음)",
+    ".ppt": "OLE2 복합 문서 헤더만(PowerPoint 97 스트림 없음)",
+    ".rar": "RAR5 시그니처만(RAR 압축기는 독점 소프트웨어)",
 }
+SEVEN_ZIP_MAGIC_ONLY = "7z 시그니처 헤더만(py7zr 없음)"
 NO_PILLOW = "Pillow 없음"
 NO_FFMPEG = "ffmpeg 없음"
-NO_PY7ZR = "py7zr 없음"
 NO_FFMPEG_ENCODER = "ffmpeg 인코더 없음"
-UNMADE_REASONS = frozenset({NO_PILLOW, NO_FFMPEG, NO_PY7ZR, NO_FFMPEG_ENCODER, *NO_ENCODER.values()})
+UNMADE_REASONS = frozenset({NO_PILLOW, NO_FFMPEG, NO_FFMPEG_ENCODER})
+# OLE2 / Compound File Binary signature ([MS-CFB] 2.2) and its header fields
+# for a version-3 file with 512-byte sectors and an empty FAT chain.
+OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+RAR5_SIGNATURE = b"Rar!\x1a\x07\x01\x00"
+SEVEN_ZIP_SIGNATURE = b"7z\xbc\xaf\x27\x1c"
 
 SAMPLE_TEXT = "증거 메모: 2026년 10월 9일 오전 회의록 초안. 참석자 3명, 안건 2건."
 FFMPEG_TIMEOUT_SECONDS = 60
@@ -246,20 +255,60 @@ def _ffmpeg(ext: str, out: Path, variant: int) -> str | None:
 
 
 def _seven_zip(out: Path) -> str | None:
+    """A real 7z with py7zr; otherwise the 32-byte signature header only.
+
+    Returns the magic-only note when no real archive could be written.
+    """
     try:
         import py7zr
     except ImportError:
-        return NO_PY7ZR
+        # Signature, format version 0.4, then a start header (CRC, next
+        # header offset/size/CRC) pointing at nothing.
+        start = struct.pack("<QQI", 0, 0, 0)
+        out.write_bytes(SEVEN_ZIP_SIGNATURE + b"\x00\x04" + struct.pack("<I", zlib.crc32(start)) + start)
+        return SEVEN_ZIP_MAGIC_ONLY
     with py7zr.SevenZipFile(out, "w") as archive:
         archive.writestr(SAMPLE_TEXT.encode("utf-8"), "inner/memo.txt")
     return None
 
 
-def write_samples(folder: Path) -> tuple[dict[str, Path], dict[str, str]]:
-    """One sample per supported extension; returns (made, unmade-with-reason)."""
+def _ole_header(tag: bytes) -> bytes:
+    """A 512-byte OLE2 header ([MS-CFB] 2.2: v3, sector shift 9, mini sector
+    shift 6, no FAT/directory sectors) plus one sector holding ``tag`` so
+    each sample's bytes differ."""
+    header = bytearray(512)
+    header[0:8] = OLE_SIGNATURE
+    struct.pack_into("<HHHHH", header, 0x18, 0x003E, 0x0003, 0xFFFE, 9, 6)
+    struct.pack_into("<I", header, 0x30, 0xFFFFFFFE)  # first directory sector: end of chain
+    struct.pack_into("<I", header, 0x38, 4096)  # mini stream cutoff
+    struct.pack_into("<III", header, 0x3C, 0xFFFFFFFE, 0, 0xFFFFFFFE)  # no mini FAT, no DIFAT
+    for index in range(109):  # DIFAT array: all free
+        struct.pack_into("<I", header, 0x4C + 4 * index, 0xFFFFFFFF)
+    sector = tag.ljust(512, b"\x00")
+    return bytes(header) + sector
+
+
+def _magic_only(ext: str) -> bytes:
+    if ext == ".rar":
+        return RAR5_SIGNATURE + b"QA-IN-1 magic-only RAR sample".ljust(56, b"\x00")
+    if ext == ".hwp":
+        # HWP 5.0: an OLE2 file whose "FileHeader" stream starts with this
+        # 32-byte signature (HWP 5.0 file format spec, 3.2.1).
+        return _ole_header(b"HWP Document File".ljust(32, b"\x00") + b"\x00\x00\x05\x05")
+    return _ole_header(f"QA-IN-1 magic-only {ext} sample".encode("ascii"))
+
+
+def write_samples(folder: Path, magic_only: dict[str, str] | None = None) -> tuple[dict[str, Path], dict[str, str]]:
+    """One sample per supported extension; returns (made, unmade-with-reason).
+
+    ``magic_only``, when given, is filled with the extensions whose sample
+    is only a magic header (see MAGIC_ONLY) and why — they are in ``made``.
+    """
     folder.mkdir(parents=True, exist_ok=True)
     made: dict[str, Path] = {}
     unmade: dict[str, str] = {}
+    if magic_only is None:
+        magic_only = {}
     fixed: dict[str, bytes] = {
         ".txt": SAMPLE_TEXT.encode("utf-8"),
         ".md": f"# 메모\n\n{SAMPLE_TEXT}\n".encode("utf-8"),
@@ -296,13 +345,12 @@ def write_samples(folder: Path) -> tuple[dict[str, Path], dict[str, str]]:
                 unmade[ext] = reason
                 continue
         elif ext == ".7z":
-            reason = _seven_zip(target)
-            if reason:
-                unmade[ext] = reason
-                continue
-        elif ext in NO_ENCODER:
-            unmade[ext] = NO_ENCODER[ext]
-            continue
+            note = _seven_zip(target)
+            if note:
+                magic_only[ext] = note
+        elif ext in MAGIC_ONLY:
+            target.write_bytes(_magic_only(ext))
+            magic_only[ext] = MAGIC_ONLY[ext]
         else:
             raise AssertionError(f"no QA-IN-1 sample recipe for {ext}")
         made[ext] = target

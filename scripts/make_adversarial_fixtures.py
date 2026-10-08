@@ -7,15 +7,18 @@ which no generation detector has been measured (G13). Every image is
 synthesized here with numpy + Pillow from a fixed seed, so the output is
 byte-for-byte deterministic for a given ``seed``.
 
-Layout (10 images per class, ``NN.png`` = 00..09)::
+Layout (``NN.png`` = 00..; 10 images per class, except the QA-ADV-2
+screenshots: 17 chat + 17 web page + 16 document viewer = 50)::
 
-    fixtures/adversarial/gradient/        linear / radial / diagonal gradients
-    fixtures/adversarial/noise/           uniform white noise (RGB and gray)
-    fixtures/adversarial/flat/            one solid colour per image
-    fixtures/adversarial/checkerboard/    two-colour checkerboards, varied cells
-    fixtures/adversarial/blurred_noise/   white noise under a Gaussian blur
-    fixtures/adversarial/screenshot/      phone chat screenshots (1080x2400 / 1170x2532)
-    fixtures/adversarial/document_scan/   white page, grey text lines, scanner noise
+    fixtures/adversarial/gradient/          linear / radial / diagonal gradients
+    fixtures/adversarial/noise/             uniform white noise (RGB and gray)
+    fixtures/adversarial/flat/              one solid colour per image
+    fixtures/adversarial/checkerboard/      two-colour checkerboards, varied cells
+    fixtures/adversarial/blurred_noise/     white noise under a Gaussian blur
+    fixtures/adversarial/screenshot/        phone chat screenshots (1080x2400 / 1170x2532), 17
+    fixtures/adversarial/screenshot_web/    desktop browser screenshots (monitor sizes), 17
+    fixtures/adversarial/screenshot_viewer/ desktop PDF/HWP viewer screenshots, 16
+    fixtures/adversarial/document_scan/     white page, grey text lines, scanner noise
 
 The set is NOT committed (``fixtures/adversarial/`` is in .gitignore): tests
 call :func:`generate_all` into a temporary directory.
@@ -40,12 +43,21 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUT = REPO_ROOT / "fixtures" / "adversarial"
 IMAGES_PER_CLASS = 10
 
-# Pattern classes are QA-ADV-1; screenshots QA-ADV-2; document scans are an
-# extra non-photo class the gate must also catch.
+# Pattern classes are QA-ADV-1; screenshots QA-ADV-2 (chat "screenshot",
+# web page "screenshot_web", document viewer "screenshot_viewer"); document
+# scans are an extra non-photo class the gate must also catch.
 PATTERN_CLASSES = ("gradient", "noise", "flat", "checkerboard", "blurred_noise")
-SCREENSHOT_CLASSES = ("screenshot",)
+SCREENSHOT_CLASSES = ("screenshot", "screenshot_web", "screenshot_viewer")
 DOCUMENT_CLASSES = ("document_scan",)
-ALL_CLASSES = PATTERN_CLASSES + SCREENSHOT_CLASSES + DOCUMENT_CLASSES
+# New classes are appended so the per-image seed streams (keyed by the
+# class's position here) of the older classes do not change.
+ALL_CLASSES = PATTERN_CLASSES + ("screenshot",) + DOCUMENT_CLASSES + ("screenshot_web", "screenshot_viewer")
+# QA-ADV-2: 50 screenshots = 17 chat + 17 web page + 16 document viewer.
+CLASS_COUNTS = {"screenshot": 17, "screenshot_web": 17, "screenshot_viewer": 16}
+# Desktop screens (w, h) for the web-page and viewer screenshots — all in
+# image_class.SCREEN_RESOLUTIONS.
+WEB_SCREEN_SIZES = ((1920, 1080), (1366, 768), (2560, 1440), (1440, 900), (1536, 864))
+VIEWER_SCREEN_SIZES = ((1920, 1080), (1680, 1050), (2560, 1600), (1280, 800), (1920, 1200))
 
 # Sizes the pattern classes cycle through: square generator sizes and common
 # camera aspect ratios, all above the 128 px "too_small" floor.
@@ -118,6 +130,13 @@ def blurred_noise(rng: np.random.Generator, index: int) -> Image.Image:
     return Image.fromarray(base, "RGB").filter(ImageFilter.GaussianBlur(radius))
 
 
+# Desktop palettes: browser tab strips, site accents, viewer title bars and
+# canvases (light/dark themes of common browsers and PDF/HWP viewers).
+_BROWSER_CHROME = ((222, 225, 230), (32, 33, 36), (240, 240, 244), (53, 54, 58), (205, 220, 245))
+_SITE_ACCENTS = ((3, 199, 90), (26, 115, 232), (33, 37, 41), (255, 87, 34), (94, 53, 177))
+_VIEWER_TITLE = ((32, 33, 36), (240, 240, 240), (45, 45, 48), (0, 120, 212))
+_VIEWER_BACKGROUND = ((82, 86, 89), (230, 230, 230), (64, 64, 64), (200, 205, 210))
+
 # Chat-app palette: status-bar colours, bubble fills and the page background.
 _STATUS_COLORS = ((255, 255, 255), (186, 206, 224), (0, 0, 0), (245, 245, 245), (52, 120, 246))
 _BUBBLE_MINE = ((254, 229, 0), (52, 120, 246), (220, 248, 198))
@@ -173,6 +192,111 @@ def screenshot(rng: np.random.Generator, index: int) -> Image.Image:
     canvas[height - 160:] = (250, 250, 250)
     canvas[height - 160:height - 158] = (210, 210, 210)
     canvas[height - 130:height - 50, 40:width - 160] = (255, 255, 255)
+    return Image.fromarray(canvas, "RGB")
+
+
+def _word_lines(
+    canvas: np.ndarray, rng: np.random.Generator, x0: int, y0: int, x1: int, y1: int,
+    color: tuple[int, int, int], *, line_h: int = 14, gap: int = 12,
+) -> None:
+    """Rendered-text stand-in: rows of word-sized solid blocks (screen text
+    is anti-aliased glyphs on exact pixel rows; blocks keep its exact
+    horizontal runs)."""
+    y = y0
+    while y + line_h <= y1:
+        if rng.random() < 0.1:  # paragraph break
+            y += line_h + gap
+            continue
+        x = x0
+        end = x1 - (int(rng.integers(0, max(1, (x1 - x0) // 2))) if rng.random() < 0.25 else 0)
+        while x < end:
+            word = int(rng.integers(18, 110))
+            canvas[y:y + line_h, x:min(x + word, end)] = color
+            x += word + int(rng.integers(6, 14))
+        y += line_h + gap
+
+
+def _chrome_band(width: int, height: int) -> int:
+    # Covers the classifier's status-bar band (2.5 % of the long side) with
+    # a few pixels to spare — a browser tab strip / window title bar —
+    # rounded up to the 16-px JPEG MCU so a re-encode keeps the band solid.
+    return (int(round(max(width, height) * 0.025)) + 8 + 15) // 16 * 16
+
+
+def web_screenshot(rng: np.random.Generator, index: int) -> Image.Image:
+    """Desktop browser screenshot: tab strip, address bar, site header,
+    article text, image blocks and sidebar cards (QA-ADV-2 "웹페이지")."""
+    width, height = WEB_SCREEN_SIZES[index % len(WEB_SCREEN_SIZES)]
+    canvas = np.full((height, width, 3), 255, dtype=np.uint8)
+    band = _chrome_band(width, height)
+    canvas[:band] = _BROWSER_CHROME[index % len(_BROWSER_CHROME)]
+    canvas[band:band + 52] = (241, 243, 244)  # toolbar
+    canvas[band:band + 4, 12:252] = (255, 255, 255)  # active tab's lower edge
+    canvas[band + 10:band + 42, 140:width - 220] = (255, 255, 255)  # address field
+    _word_lines(canvas, rng, 170, band + 20, min(width - 260, 900), band + 34, (60, 64, 67), line_h=12)
+    canvas[band + 52:band + 53] = (218, 220, 224)
+    top = band + 53
+    accent = _SITE_ACCENTS[index % len(_SITE_ACCENTS)]
+    canvas[top:top + 72] = accent  # site header
+    for slot in range(5):
+        x = 240 + slot * 150
+        if x + 110 < width:
+            canvas[top + 30:top + 44, x:x + int(rng.integers(60, 110))] = (255, 255, 255)
+    content_top = top + 72 + 32
+    sidebar_x = int(width * 0.7)
+    left = int(width * 0.08)
+    # Article: title, hero image, paragraphs.
+    canvas[content_top:content_top + 30, left:left + int(rng.integers(300, 600))] = (32, 33, 36)
+    hero_top = content_top + 56
+    hero_h = int(height * 0.25)
+    hero = rng.uniform(60, 200, size=3)
+    canvas[hero_top:hero_top + hero_h, left:sidebar_x - 40] = hero.astype(np.uint8)
+    _word_lines(canvas, rng, left, hero_top + hero_h + 30, sidebar_x - 40, height - 40, (32, 33, 36))
+    # Sidebar cards with hairline borders.
+    y = content_top
+    while y + 160 < height - 30:
+        card_h = int(rng.integers(120, 220))
+        if y + card_h > height - 30:
+            break
+        canvas[y:y + card_h, sidebar_x:width - 40] = (248, 249, 250)
+        canvas[y, sidebar_x:width - 40] = (218, 220, 224)
+        canvas[y + card_h - 1, sidebar_x:width - 40] = (218, 220, 224)
+        canvas[y:y + card_h, sidebar_x] = (218, 220, 224)
+        canvas[y:y + card_h, width - 41] = (218, 220, 224)
+        _word_lines(canvas, rng, sidebar_x + 16, y + 16, width - 56, y + card_h - 12, (95, 99, 104), line_h=11, gap=9)
+        y += card_h + 24
+    return Image.fromarray(canvas, "RGB")
+
+
+def viewer_screenshot(rng: np.random.Generator, index: int) -> Image.Image:
+    """Desktop document-viewer screenshot (PDF/HWP viewer): title bar,
+    toolbar, thumbnail pane, a white page of text on a grey canvas,
+    scrollbar (QA-ADV-2 "문서 뷰어")."""
+    width, height = VIEWER_SCREEN_SIZES[index % len(VIEWER_SCREEN_SIZES)]
+    canvas = np.full((height, width, 3), _VIEWER_BACKGROUND[index % len(_VIEWER_BACKGROUND)], dtype=np.uint8)
+    band = _chrome_band(width, height)
+    canvas[:band] = _VIEWER_TITLE[index % len(_VIEWER_TITLE)]
+    canvas[band:band + 48] = (50, 54, 57)  # toolbar
+    for slot in range(int(rng.integers(8, 14))):
+        x = 16 + slot * 40
+        canvas[band + 12:band + 36, x:x + 24] = (138, 144, 150)  # toolbar icons
+    pane_w = 220
+    canvas[band + 48:, :pane_w] = (60, 64, 67)  # thumbnail pane
+    y = band + 72
+    while y + 200 < height:
+        canvas[y:y + 180, 40:180] = (255, 255, 255)
+        _word_lines(canvas, rng, 52, y + 14, 168, y + 170, (150, 150, 150), line_h=4, gap=5)
+        y += 210
+    page_w = int(min(width - pane_w - 120, height * 0.75))
+    page_x = pane_w + (width - pane_w - page_w) // 2
+    page_top = band + 48 + 28
+    canvas[page_top:, page_x:page_x + page_w] = (255, 255, 255)
+    canvas[page_top:, page_x + page_w:page_x + page_w + 4] = (40, 42, 44)  # page shadow
+    margin = int(page_w * 0.11)
+    _word_lines(canvas, rng, page_x + margin, page_top + margin, page_x + page_w - margin, height - 20, (34, 34, 34), line_h=13, gap=11)
+    canvas[band + 48:, width - 14:] = (70, 74, 77)  # scrollbar track
+    thumb = int(rng.integers(band + 60, max(band + 61, height - 260)))
+    canvas[thumb:thumb + 200, width - 12:width - 2] = (154, 160, 166)
     return Image.fromarray(canvas, "RGB")
 
 
@@ -252,17 +376,19 @@ GENERATORS: dict[str, Callable[[np.random.Generator, int], Image.Image]] = {
     "blurred_noise": blurred_noise,
     "screenshot": screenshot,
     "document_scan": document_scan,
+    "screenshot_web": web_screenshot,
+    "screenshot_viewer": viewer_screenshot,
 }
 
 
 _STORED_CLASSES = frozenset({"noise", "blurred_noise", "document_scan"})
 
 
-def generate_class(cls: str, out_dir: Path | str, seed: int = 0, count: int = IMAGES_PER_CLASS) -> list[Path]:
+def generate_class(cls: str, out_dir: Path | str, seed: int = 0, count: int | None = None) -> list[Path]:
     target = Path(out_dir) / cls
     target.mkdir(parents=True, exist_ok=True)
     paths = []
-    for index in range(count):
+    for index in range(CLASS_COUNTS.get(cls, IMAGES_PER_CLASS) if count is None else count):
         path = target / f"{index:02d}.png"
         # Lossless and byte-deterministic either way; noise barely compresses,
         # so those classes are stored (level 0) to keep generation fast.

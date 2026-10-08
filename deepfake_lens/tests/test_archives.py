@@ -506,6 +506,31 @@ class RejectedMemberRecordTests(unittest.TestCase):
         self.assertIn(("sub/inner.zip::../up.txt", "경로 이탈 멤버('..' — 대상 폴더 밖 쓰기 시도)"), out.rejected)
         self.assertEqual(out.skipped, len(out.rejected))
 
+    def test_missing_extractor_and_unreadable_archive_are_named_in_coverage(self) -> None:
+        import sys
+
+        from deepfake_lens.result_types import CoverageStatus, Verdict
+
+        folder = self.root / "case"
+        folder.mkdir()
+        (folder / "a.7z").write_bytes(b"7z\xbc\xaf\x27\x1c\x00\x04" + bytes(24))
+        (folder / "broken.zip").write_bytes(b"PK\x03\x04 not really a zip")
+        with patch.dict(sys.modules, {"py7zr": None}):
+            _, items = scan_directory(folder)
+        by_path = {item.path: item for item in items}
+        seven = by_path["a.7z"].result
+        assert seven is not None
+        [entry] = [c for c in seven.coverage if c.check == "archive"]
+        self.assertEqual((entry.status, entry.reason), (CoverageStatus.SKIPPED, "의존성 부재: py7zr"))
+        self.assertEqual(seven.verdict_code, Verdict.UNDETERMINED)
+        self.assertIn("의존성 부재: py7zr", seven.verdict)
+        broken = by_path["broken.zip"].result
+        assert broken is not None
+        [entry] = [c for c in broken.coverage if c.check == "archive"]
+        self.assertEqual(entry.status, CoverageStatus.FAILED)
+        self.assertIn("BadZipFile", entry.reason)
+        self.assertIn("압축 해제 실패", broken.verdict)
+
     def test_symlinks_in_scanned_folder_are_skipped_rows(self) -> None:
         import os
 

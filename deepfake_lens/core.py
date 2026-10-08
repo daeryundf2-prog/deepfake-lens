@@ -234,6 +234,8 @@ def scan_directory(
                 "path": path, "fmt": archive_format(path),
                 "skipped": extraction.skipped, "warnings": extraction.warnings,
                 "rejected": list(extraction.rejected),
+                "error": extraction.error,
+                "missing_dependency": extraction.missing_dependency,
             }
             archive_members[rel] = []
             for member in extraction.members:
@@ -286,6 +288,7 @@ def _archive_container_item(
     extraction_error: str | None = None,
     rejected: list[tuple[str, str]] | None = None,
     sha256: str | None = None,
+    missing_dependency: str | None = None,
 ) -> ScanItem:
     """Container row for an expanded archive; rolls member verdicts up.
 
@@ -319,11 +322,12 @@ def _archive_container_item(
         verdict_code = Verdict.AUTHENTICITY_EVIDENCE
     else:
         verdict_code = Verdict.UNDETERMINED
-    coverage = [
-        failed_entry("archive", AnalyzerError(extraction_error))
-        if extraction_error
-        else CoverageEntry("archive", CoverageStatus.RAN)
-    ]
+    if extraction_error:
+        coverage = [failed_entry("archive", AnalyzerError(extraction_error))]
+    elif missing_dependency:
+        coverage = [skipped_entry("archive", f"의존성 부재: {missing_dependency}")]
+    else:
+        coverage = [CoverageEntry("archive", CoverageStatus.RAN)]
     shown = rejected[:MAX_ARCHIVE_REJECTION_ENTRIES]
     coverage.extend(skipped_entry("archive_member", f"{name}: {reason}") for name, reason in shown)
     if len(rejected) > len(shown):
@@ -342,6 +346,8 @@ def _archive_container_item(
         )
     elif extraction_error:
         verdict = f"압축 파일: 판단 불가 — 압축 해제 실패({extraction_error})."
+    elif missing_dependency:
+        verdict = f"압축 파일: 판단 불가 — 의존성 부재: {missing_dependency}(압축을 풀 수 없어 구성 파일을 분석하지 않았습니다)."
     else:
         verdict = "압축 파일: 판단 불가 — 아카이브에서 분석 가능한 구성 파일이 없습니다." + first_rejection
     band = band_for_verdict(verdict_code)
@@ -518,6 +524,7 @@ def _scan_specs(
             warnings=meta.get("warnings", []), member_items=member_items,
             extraction_error=meta.get("error"),
             rejected=meta.get("rejected", []),
+            missing_dependency=meta.get("missing_dependency"),
             # D9: the container's own digest binds the archive into a signed report.
             sha256=_content_sha256(arc_path, fingerprints) or None,
         ))
