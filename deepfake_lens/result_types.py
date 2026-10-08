@@ -401,4 +401,12 @@ class BatchScanSummary:
     checks_failed: int = 0
 
     def to_json(self) -> dict[str, object]:
-        return asdict(self)
+        # D16: the summary JSON counts verdicts only. The legacy band counts
+        # (high/medium/unknown/low) stay readable as attributes for library
+        # callers, but no front end (gui.js counts verdicts itself, reports
+        # use the verdict attributes) reads them from JSON any more.
+        return {key: value for key, value in asdict(self).items() if key not in LEGACY_SUMMARY_KEYS}
+
+
+# Band-count fields of BatchScanSummary that are not serialized (D16).
+LEGACY_SUMMARY_KEYS = frozenset({"high", "medium", "unknown", "low"})

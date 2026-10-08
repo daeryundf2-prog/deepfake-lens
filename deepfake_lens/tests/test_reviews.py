@@ -91,7 +91,7 @@ class ReviewApiEndpointTest(unittest.TestCase):
 
         get_res = self.client.get(
             f"/api/artifacts/{art_id}/review",
-            headers={"host": "localhost"},
+            headers={"host": "localhost", "X-Deepfake-Lens-Client": "web-gui"},  # D16: every /api/* GET needs the client header
         )
         self.assertEqual(get_res.status_code, 200)
         get_body = get_res.json()
@@ -108,7 +108,7 @@ class ReviewApiEndpointTest(unittest.TestCase):
 
         get_res = self.client.get(
             "/api/review?path=test_query.jpg",
-            headers={"host": "localhost"},
+            headers={"host": "localhost", "X-Deepfake-Lens-Client": "web-gui"},  # D16: every /api/* GET needs the client header
         )
         self.assertEqual(get_res.status_code, 200)
         self.assertEqual(get_res.json()["review"]["note"], "Query test")
@@ -119,7 +119,7 @@ class ReviewApiEndpointTest(unittest.TestCase):
             headers={"host": "localhost", "X-Deepfake-Lens-Client": "web-gui"},
             json={"star": True},
         )
-        res = self.client.get("/api/reviews", headers={"host": "localhost"})
+        res = self.client.get("/api/reviews", headers={"host": "localhost", "X-Deepfake-Lens-Client": "web-gui"})
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertEqual(data["status"], "success")

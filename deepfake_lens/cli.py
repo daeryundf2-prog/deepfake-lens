@@ -159,12 +159,12 @@ def default_text_model_path(root: Path | None = None) -> Path | None:
 def _vendor_weights_pin(args: argparse.Namespace) -> int:
     """``vendor-weights pin <profile>``: write the profile's weight pin (G9)."""
     if not args.profile:
-        print("error: 'vendor-weights pin' needs a profile name or path", file=sys.stderr)
+        print("오류: 'vendor-weights pin'에는 프로필 이름이나 경로가 필요합니다", file=sys.stderr)
         return 2
     try:
         result = pin_profile(args.profile, args.models_dir, revision=args.revision)
     except (OSError, ValueError, RuntimeError) as exc:
-        print(f"error: 프로필 고정 실패 — {exc}", file=sys.stderr)
+        print(f"오류: 프로필 고정 실패 — {exc}", file=sys.stderr)
         return 1
     if result["status"] == "needs-manual":
         print(result["instructions"], file=sys.stderr)
@@ -457,7 +457,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 scan_payload = json.loads(args.scan_json.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
-                print(f"error: cannot read scan JSON: {exc}", file=sys.stderr)
+                print(f"오류: 검사 JSON을 읽을 수 없습니다: {exc}", file=sys.stderr)
                 return 2
             observations, unmatched = observations_from_scan_payload(scan_payload, entries)
         else:
@@ -500,7 +500,7 @@ def main(argv: list[str] | None = None) -> int:
             write_detector_registry(args.json_out, focus=args.focus)
         if args.profile_out:
             if not args.checkpoint:
-                cmd_parsers["models"].error("--profile-out requires --checkpoint")
+                cmd_parsers["models"].error("--profile-out에는 --checkpoint가 필요합니다")
             profile = write_runtime_profile(
                 args.profile_out,
                 args.candidate,
@@ -645,7 +645,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "api-serve":
         from .api_server import LOCAL_HOSTS
         if args.host not in LOCAL_HOSTS and not args.token:
-            cmd_parsers["api-serve"].error("--token is required when binding a non-localhost host; the API reads local files on request")
+            cmd_parsers["api-serve"].error("localhost가 아닌 주소에 바인딩하려면 --token이 필요합니다 — API는 요청에 따라 로컬 파일을 읽습니다")
         run_api_server(host=args.host, port=args.port, token=args.token, allow_roots=args.allow_root)
         return 0
     if args.command == "batch":
@@ -753,7 +753,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "web":
         if args.allow_lan and not args.token:
-            cmd_parsers["web"].error("--token is required with --allow-lan; the API reads and analyzes local files on request")
+            cmd_parsers["web"].error("--allow-lan에는 --token이 필요합니다 — API는 요청에 따라 로컬 파일을 읽고 분석합니다")
         run_server(args.host, args.port, default_folder=args.folder, allow_lan=args.allow_lan, token=args.token, models_dir=getattr(args, "models_dir", None), allow_roots=args.allow_root)
         return 0
     if args.command == "doctor":
@@ -780,14 +780,14 @@ def main(argv: list[str] | None = None) -> int:
                 raw_items = data.get("items", [])
                 items = [_scan_item_from_json(row) for row in raw_items if isinstance(row, dict)]
             except Exception as exc:
-                print(f"error: cannot parse scan JSON: {exc}", file=sys.stderr)
+                print(f"오류: 검사 JSON을 해석할 수 없습니다: {exc}", file=sys.stderr)
                 return 2
         elif target.is_dir():
             _, items, _ = scan_folder(target, AnalysisOptions(max_files=100), warn=thresholds_warning_printer(sys.stderr))
         elif target.is_file():
             items = [analyze_path(target, AnalysisOptions())]
         else:
-            print(f"error: target does not exist: {target}", file=sys.stderr)
+            print(f"오류: 대상이 존재하지 않습니다: {target}", file=sys.stderr)
             return 2
 
         statement = build_evidence_statement(
@@ -838,12 +838,12 @@ def main(argv: list[str] | None = None) -> int:
             return _vendor_weights_pin(args)
         _modes =[bool(args.fetch), bool(args.verify), bool(args.bundle_to), bool(args.install), bool(args.manifest_out)]
         if sum(_modes) > 1:
-            print("error: vendor-weights flags are mutually exclusive — choose one of --fetch/--verify/--bundle-to/--install/--manifest-out", file=sys.stderr)
+            print("오류: vendor-weights 옵션은 함께 쓸 수 없습니다 — --fetch/--verify/--bundle-to/--install/--manifest-out 중 하나만 지정하십시오", file=sys.stderr)
             return 2
         if args.install:
             target = args.to or args.models_dir
             if target is None:
-                print("error: --install needs a target — pass --to DIR or --models-dir DIR (or set DEEPFAKE_LENS_MODELS_DIR)", file=sys.stderr)
+                print("오류: --install에는 대상이 필요합니다 — --to DIR 또는 --models-dir DIR을 지정하십시오 (또는 DEEPFAKE_LENS_MODELS_DIR)", file=sys.stderr)
                 return 2
             res = install_bundle(args.install, target)
             print(json.dumps(res, ensure_ascii=False, indent=2))
@@ -853,7 +853,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(fetch_res, ensure_ascii=False, indent=2))
             return 0 if fetch_res["status"] in {"ok", "skipped"} else 1
         if args.offline and not args.verify and not args.bundle_to:
-            print("error: --offline only makes sense with --fetch/--verify/--bundle-to", file=sys.stderr)
+            print("오류: --offline은 --fetch/--verify/--bundle-to와 함께만 쓸 수 있습니다", file=sys.stderr)
             return 2
         if args.bundle_to:
             manifest_file = bundle_offline_weights(
@@ -904,21 +904,21 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.max_files < 1:
-        cmd_parsers["scan"].error("--max-files must be at least 1")
+        cmd_parsers["scan"].error("--max-files는 1 이상이어야 합니다")
     if args.text_bytes < 1:
-        cmd_parsers["scan"].error("--text-bytes must be at least 1")
+        cmd_parsers["scan"].error("--text-bytes는 1 이상이어야 합니다")
     if args.metadata_bytes < 1:
-        cmd_parsers["scan"].error("--metadata-bytes must be at least 1")
+        cmd_parsers["scan"].error("--metadata-bytes는 1 이상이어야 합니다")
     if args.pixel_max_side < 16:
-        cmd_parsers["scan"].error("--pixel-max-side must be at least 16")
+        cmd_parsers["scan"].error("--pixel-max-side는 16 이상이어야 합니다")
     if args.workers < 1:
-        cmd_parsers["scan"].error("--workers must be at least 1")
+        cmd_parsers["scan"].error("--workers는 1 이상이어야 합니다")
     if args.max_file_bytes is not None and args.max_file_bytes < 1:
-        cmd_parsers["scan"].error("--max-file-bytes must be at least 1")
+        cmd_parsers["scan"].error("--max-file-bytes는 1 이상이어야 합니다")
     if args.heatmaps and args.pixel != "deep":
-        cmd_parsers["scan"].error("--heatmaps requires --pixel deep")
+        cmd_parsers["scan"].error("--heatmaps에는 --pixel deep이 필요합니다")
     if args.model_path and not args.model_path.exists():
-        cmd_parsers["scan"].error("--model-path does not exist")
+        cmd_parsers["scan"].error("--model-path가 존재하지 않습니다")
     # G7: CLI, GUI and API all go through analysis_api. The default engine
     # set is every runtime profile in the models dir (--models-dir or the
     # packaged/$DEEPFAKE_LENS_MODELS_DIR one) — the adapter filters by
@@ -935,7 +935,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Analyzing {args.folder} with workers={args.workers}, pixel={args.pixel}...", file=sys.stderr)
         summary, items, thresholds = scan_folder(args.folder, options, warn=thresholds_warning_printer(sys.stderr))
     except OSError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        print(f"오류: {exc}", file=sys.stderr)
         return 2
     if args.progress:
         print(f"Done: analyzed={summary.analyzed}, cached={summary.cached}, total={summary.total}", file=sys.stderr)

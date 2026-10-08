@@ -244,7 +244,7 @@ def scan_directory(
                 items.append(ScanItem(
                     _display_path(err_path, root=root), err_path.name,
                     "unknown", "failed", 0,
-                    error=f"directory unreadable: {exc}",
+                    error=f"폴더를 읽을 수 없습니다: {exc}",
                 ))
             items = sort_items(items)
             summary = summarize(items, capped=summary.capped, cached=summary.cached)
@@ -368,21 +368,21 @@ def _scan_specs(
     def analyze_one(spec: tuple[Path, str | None]) -> tuple[ScanItem, str | None, bool]:
         path, display = spec
         if should_stop is not None and should_stop():
-            return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "skipped", 0, error="scan cancelled"), None, False
+            return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "skipped", 0, error="검사가 취소되었습니다"), None, False
         if path in duplicates:
             display_path = display or _display_path(path, root=root)
             try:
                 size = path.stat().st_size
             except OSError:
                 size = 0
-            return ScanItem(display_path, path.name, "duplicate", "duplicate", size, error="duplicate content", duplicate_of=duplicates[path], sha256=fingerprints.get(path)), None, False
+            return ScanItem(display_path, path.name, "duplicate", "duplicate", size, error="중복 내용(동일 해시)", duplicate_of=duplicates[path], sha256=fingerprints.get(path)), None, False
         if max_file_bytes is not None:
             try:
                 size = path.stat().st_size
             except OSError as exc:
                 return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "failed", 0, error=str(exc)), None, False
             if size > max_file_bytes:
-                return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "skipped", size, error=f"file exceeds --max-file-bytes ({max_file_bytes})"), None, False
+                return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "skipped", size, error=f"파일 크기가 --max-file-bytes 상한({max_file_bytes} bytes)을 초과해 건너뜀"), None, False
         # Archive members live in a temp dir with unstable paths — caching
         # them would both miss every scan and bloat the cache file.
         key = None
@@ -429,7 +429,7 @@ def _scan_specs(
             item = ScanItem(
                 display or _display_path(path, root=root),
                 path.name, "unknown", "failed", 0,
-                error=f"analysis error: {type(exc).__name__}: {exc}",
+                error=f"분석 오류: {type(exc).__name__}: {exc}",
             )
             return item, key, False
         item = _with_content_sha256(item, path, fingerprints)

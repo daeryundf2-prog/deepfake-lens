@@ -64,13 +64,12 @@ the stream endpoints, `/api/scan`) all analyze through
   Browsers cannot attach custom headers to cross-origin "simple" requests,
   so this forces a preflight the server never answers — unrelated web pages
   cannot trigger scans or write to the feedback log even on loopback.
-  `api-serve` applies the same rule to every non-GET `/api/*` request and to
-  the GETs that start, poll or cancel work or read caller-named files:
-  `/api/scan`, `/api/scan-status`, `/api/scan-cancel`, `/api/analyze-file`,
-  `/api/heatmap`, `/api/preview` (G8). Local tools/curl must send the header
+  `api-serve` applies the same rule to every `/api/*` request, GETs
+  included (`/api/stats`, `/api/reviews`, …; G8, D16) — only the liveness
+  probe `/api/health` is exempt. Local tools/curl must send the header
   explicitly.
 - Streaming jobs (`/api/check/stream`, `/api/scan/stream`) are capped at 32
-  in flight; a 33rd gets **429** `{"detail": "too many jobs in flight; …"}`.
+  in flight; a 33rd gets **429** `{"detail": "실행 중인 작업이 너무 많습니다 — …"}`.
   A client that disconnects mid-stream cancels its job at the next stage
   boundary. The web server's async scan jobs share the same cap of 32.
 - Synchronous analysis never blocks the API's event loop: analysis handlers
@@ -125,8 +124,9 @@ the HTTP connection.
 an `enumerate` progress event reports the file count first, then one
 `scan` progress event per file. Per-file failures are recorded in
 `items` (and counted under `counts.failed`) rather than aborting the
-scan. `items` entries are compact `{path, kind, status, band, score}`
-summaries — use `/api/check` per file for full detail.
+scan. `items` entries are compact `{path, kind, status, verdict_code, grade, probability}`
+summaries — use `/api/check` per file for full detail. `/api/check` returns
+`forensic` and `advanced` as layer diagnostics (raw numbers + notice, no band).
 
 ## Web GUI endpoints (`web`, default `127.0.0.1:8765`)
 

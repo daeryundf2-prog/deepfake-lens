@@ -57,8 +57,13 @@ per-file coverage record:
 | `authenticity_evidence` | Analyzed items whose verdict is `authenticity_evidence`. |
 | `undetermined` | Analyzed items whose verdict is `undetermined`. |
 | `checks_failed` | Analyzed items with at least one `failed` coverage entry. |
-| `high` / `low` / `unknown` | Legacy names for the three verdict counts above. |
-| `medium` | Legacy; always `0` in v2. |
+
+The legacy band counts `high` / `medium` / `low` / `unknown` are no longer
+serialized (phase-0 fix D16): no front end read them (the GUI counts
+verdicts itself, reports use the verdict counts), and a `medium` key that is
+always `0` invited old-contract readings. They remain readable as
+`BatchScanSummary` attributes for library callers. Web upload summaries and
+`/api/scan/stream` `counts` use the same verdict keys.
 
 ## Item fields (stable)
 

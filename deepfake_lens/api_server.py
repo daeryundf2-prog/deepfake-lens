@@ -46,9 +46,10 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 # policy below only allows loopback origins — so drive-by requests from
 # unrelated web pages cannot reach the write endpoints on a loopback bind.
 CLIENT_HEADER = "X-Deepfake-Lens-Client"
-# GET endpoints that start/cancel work or read files the caller names also
-# need the header (G8, review M1/M2): a cross-origin <img src> or link can
-# issue a "simple" GET, which must not be able to start or cancel a scan.
+# GET endpoints need the header too (G8, review M1/M2; D16): a cross-origin
+# <img src> or link can issue a "simple" GET, which must not be able to
+# start or cancel a scan or read server facts. Like the built-in web server,
+# every /api/* route requires it; only the liveness probe is exempt.
 CLIENT_HEADER_GET_PATHS = frozenset({
     "/api/scan",
     "/api/scan-cancel",
@@ -56,13 +57,15 @@ CLIENT_HEADER_GET_PATHS = frozenset({
     "/api/analyze-file",
     "/api/heatmap",
     "/api/preview",
+    "/api/stats",
 })
+CLIENT_HEADER_EXEMPT_PATHS = frozenset({"/api/health"})
 
 # Streaming-job registry cap (G34): each job holds a worker thread and its
 # results until the client disconnects; 32 matches the web server's
 # _SCAN_JOB_MAX so both servers bound concurrent work the same way.
 MAX_JOBS = 32
-JOBS_FULL_MESSAGE = "too many jobs in flight; retry after a running job finishes"
+JOBS_FULL_MESSAGE = "실행 중인 작업이 너무 많습니다 — 진행 중인 작업이 끝난 뒤 다시 시도하십시오"
 
 # Packages the API server needs at runtime; missing ones make `api-serve`
 # exit 2 with an install hint instead of a traceback (G29).
@@ -153,7 +156,7 @@ def create_app(
         from fastapi.responses import JSONResponse
         from starlette.concurrency import run_in_threadpool
     except ImportError:
-        raise ImportError("FastAPI is required. Install with: pip install fastapi uvicorn")
+        raise ImportError("FastAPI가 필요합니다. 설치: pip install fastapi uvicorn")
 
     from .analysis_api import analyze_path, load_thresholds
     from .webapp_api import ReadRootDenied, read_root_denied_body
@@ -180,7 +183,7 @@ def create_app(
             elif host_name(request.headers.get("host", "")) not in allowed_hosts:
                 return JSONResponse({"status": "error", "message": "host not allowed"}, status_code=403)
             elif (
-                request.method != "GET" or request.url.path in CLIENT_HEADER_GET_PATHS
+                request.url.path not in CLIENT_HEADER_EXEMPT_PATHS
             ) and not (request.headers.get(CLIENT_HEADER) or "").strip():
                 return JSONResponse(
                     {"status": "error", "message": f"missing {CLIENT_HEADER} header"},
@@ -374,7 +377,7 @@ def create_app(
             if text and text.strip():
                 trimmed = text.strip()
                 if len(trimmed) > 256 * 1024:
-                    raise HTTPException(status_code=400, detail="text exceeds 256KB")
+                    raise HTTPException(status_code=400, detail="텍스트가 256KB를 초과합니다")
                 from .text_advanced import analyze_text_advanced
                 # delete=False: Windows cannot reopen a delete=True temp file.
                 tmp_name = ""
@@ -427,7 +430,7 @@ def create_app(
                         data["advanced"] = None
                         _layer_error(data, "advanced", exc)
                 return {"status": "success", "data": data}
-            raise HTTPException(status_code=400, detail="file_path or text required")
+            raise HTTPException(status_code=400, detail="file_path 또는 text가 필요합니다")
         except HTTPException:
             raise
         except Exception as exc:
@@ -549,7 +552,7 @@ def create_app(
             if text and text.strip():
                 trimmed = text.strip()
                 if len(trimmed) > 256 * 1024:
-                    yield ("error", {"detail": "text exceeds 256KB"})
+                    yield ("error", {"detail": "텍스트가 256KB를 초과합니다"})
                     return
                 yield ("progress", {"stage": "core", "index": 1, "total": 3})
                 tmp_name = ""
@@ -587,7 +590,7 @@ def create_app(
                 payload = {"mode": "text", **dict(stages)}
             else:
                 if confined is None:
-                    yield ("error", {"detail": "file_path or text required"})
+                    yield ("error", {"detail": "file_path 또는 text가 필요합니다"})
                     return
                 path = confined
                 yield ("progress", {"stage": "core", "index": 1, "total": 2})
@@ -629,7 +632,7 @@ def create_app(
             if job is not None:
                 job["cancel"].set()
         if job is None:
-            raise HTTPException(status_code=404, detail="unknown or finished job")
+            raise HTTPException(status_code=404, detail="알 수 없거나 이미 끝난 작업입니다")
         return {"status": "success", "job_id": job_id, "cancelled": True}
 
     @app.get("/api/jobs/{job_id}")
@@ -638,7 +641,7 @@ def create_app(
             job = _JOBS.get(job_id)
             snapshot = None if job is None else (bool(job["done"]), bool(job["cancel"].is_set()))
         if snapshot is None:
-            raise HTTPException(status_code=404, detail="unknown or finished job")
+            raise HTTPException(status_code=404, detail="알 수 없거나 이미 끝난 작업입니다")
         return {
             "status": "success",
             "job_id": job_id,
@@ -671,7 +674,7 @@ def create_app(
 
             yield ("job", {"job_id": job_id})
             if root is None or not root.is_dir():
-                yield ("error", {"detail": "directory required"})
+                yield ("error", {"detail": "directory가 필요합니다"})
                 return
             try:
                 paths = []
@@ -683,15 +686,16 @@ def create_app(
                     paths.append(p)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("directory listing failed: %s", root)
-                yield ("error", {"detail": f"listing failed: {exc}"})
+                yield ("error", {"detail": f"폴더 목록을 읽지 못했습니다: {failure_reason(exc)}"})
                 return
             options = _api_options()
             thresholds = load_thresholds(options)
             total = len(paths)
             yield ("progress", {"stage": "enumerate", "total": total, "capped": capped})
             items: list[dict[str, Any]] = []
-            # Legacy band keys ("medium" stays 0) plus contract-v2 verdict keys.
-            counts = {"high": 0, "medium": 0, "unknown": 0, "low": 0, "failed": 0,
+            # D16: verdict counts only (no legacy band keys); "other" counts
+            # skipped/duplicate rows, "failed" unanalyzable ones.
+            counts = {"failed": 0, "other": 0,
                       "manipulation_evidence": 0, "authenticity_evidence": 0, "undetermined": 0}
             for index, path in enumerate(paths, 1):
                 if cancel.is_set():
@@ -701,27 +705,25 @@ def create_app(
                     item = analyze_path(path, options, root=root, thresholds=thresholds)
                     data = item.to_json()
                     result = data.get("result") or {}
-                    band = str(result.get("band") or "unknown")
                     status = str(data.get("status") or "failed")
                     verdict_code = str(result.get("verdict_code") or "undetermined")
                     if status == "analyzed":
-                        counts[band if band in counts else "unknown"] += 1
                         counts[verdict_code if verdict_code in counts else "undetermined"] += 1
                     elif status in {"skipped", "duplicate"}:
-                        counts["unknown"] += 1
+                        counts["other"] += 1
                     else:
                         counts["failed"] += 1
                     items.append({"path": data.get("path"), "kind": data.get("kind"),
-                                  "status": status, "band": band if status == "analyzed" else None,
+                                  "status": status,
                                   "verdict_code": verdict_code if status == "analyzed" else None,
                                   "grade": result.get("grade"),
-                                  "score": result.get("score")})
+                                  "probability": result.get("probability")})
                 except Exception as exc:  # noqa: BLE001 - per-file failure is data
                     logger.exception("analysis failed: %s", path)
                     counts["failed"] += 1
                     items.append({"path": str(path), "status": "failed", "error": failure_reason(exc)})
                 yield ("progress", {"stage": "scan", "index": index, "total": total,
-                                    "path": path.name, "band": items[-1].get("band")})
+                                    "path": path.name, "verdict_code": items[-1].get("verdict_code")})
             yield ("result", {"mode": "scan", "directory": str(root), "total": total,
                               "capped": capped, "counts": counts, "items": items})
 
@@ -850,7 +852,7 @@ def create_app(
         from .webapp_api import MAX_UPLOAD_BYTES, _analyze_upload_payload
         body = await request.body()
         if len(body) > MAX_UPLOAD_BYTES:
-            raise HTTPException(status_code=413, detail=f"upload exceeds {MAX_UPLOAD_BYTES} bytes")
+            raise HTTPException(status_code=413, detail=f"업로드 크기가 상한({MAX_UPLOAD_BYTES} bytes)을 초과합니다")
         content_type = request.headers.get("content-type", "")
         return await run_in_threadpool(_analyze_upload_payload, content_type, body)
 
@@ -910,7 +912,7 @@ def create_app(
         try:
             data = json.loads(body.decode("utf-8") if body else "{}")
         except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="invalid json body")
+            raise HTTPException(status_code=400, detail="JSON 본문을 해석할 수 없습니다")
         saved = store.save_review(artifact_id, data)
         return {"status": "success", "artifact_id": artifact_id, "review": saved}
 
@@ -921,7 +923,7 @@ def create_app(
         qs = parse_qs(str(request.url.query))
         artifact_id = qs.get("path", qs.get("artifact_id", [""]))[0]
         if not artifact_id:
-            raise HTTPException(status_code=400, detail="missing path or artifact_id query parameter")
+            raise HTTPException(status_code=400, detail="path 또는 artifact_id 쿼리 매개변수가 필요합니다")
         store = get_default_review_store()
         review = store.get_review(artifact_id)
         return {"status": "success", "artifact_id": artifact_id, "review": review}
@@ -933,10 +935,10 @@ def create_app(
         try:
             data = json.loads(body.decode("utf-8") if body else "{}")
         except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="invalid json body")
+            raise HTTPException(status_code=400, detail="JSON 본문을 해석할 수 없습니다")
         artifact_id = data.get("artifact_id", data.get("path", ""))
         if not artifact_id:
-            raise HTTPException(status_code=400, detail="missing artifact_id in payload")
+            raise HTTPException(status_code=400, detail="본문에 artifact_id가 없습니다")
         store = get_default_review_store()
         saved = store.save_review(artifact_id, data)
         return {"status": "success", "artifact_id": artifact_id, "review": saved}

@@ -9,7 +9,8 @@
         let currentJobId = null;
         let bandFilter = null;
         let textFilter = '';
-        let sortMode = 'score';
+        // D16: default 결론순 — manipulation → undetermined → authenticity → other.
+        let sortMode = 'verdict';
         let revFilter = false;
         let kbIndex = -1;
 
@@ -182,7 +183,7 @@
             const parts = [];
             const wa = cov.weights_available, wt = cov.weights_total;
             if (wt !== undefined) {
-                if ((wa || 0) === 0) parts.push('<b>휴리스틱 전용 모드</b> — 신경망 가중치가 하나도 탑재되지 않았습니다. 점수는 규칙 기반 추정입니다.');
+                if ((wa || 0) === 0) parts.push('<b>신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영</b> — 탑재된 신경망 가중치가 없어 통계적 근거는 결론에 참여하지 않습니다.');
                 else if (wa < wt) parts.push(`신경망 가중치 일부 탑재 (${wa}/${wt}) — 미탑재 엔진의 판단이 빠져 있습니다.`);
             }
             if (thr.provisional || thr.source === 'builtin_defaults') {
@@ -522,7 +523,7 @@
                 const cov = lastProvenance.coverage || {};
                 const wa = cov.weights_available, wt = cov.weights_total;
                 label.textContent = wt !== undefined
-                    ? (wa ? `뉴럴 ${wa}/${wt}` : '휴리스틱 전용')
+                    ? (wa ? `뉴럴 ${wa}/${wt}` : '신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영')
                     : `뉴럴 ${data.summary && data.summary.external_model_active ? data.summary.external_model_active : 0}`;
             }
             const banner = $('prov-banner');
@@ -1010,13 +1011,13 @@
                 const item = entry.item;
                 return ((item.name || '') + ' ' + (item.path || '')).toLowerCase().includes(needle);
             });
+            const byName = (a, b) => String(a.item.name || a.item.path || '').localeCompare(String(b.item.name || b.item.path || ''), 'ko');
             if (sortMode === 'name') {
-                filtered.sort((a, b) => String(a.item.name || a.item.path || '').localeCompare(String(b.item.name || b.item.path || ''), 'ko'));
-            } else if (sortMode === 'band') {
-                filtered.sort((a, b) => (BAND_ORDER[itemBand(a)] - BAND_ORDER[itemBand(b)]) ||
-                    ((b.item.result || {}).score || 0) - ((a.item.result || {}).score || 0));
+                filtered.sort(byName);
             } else {
-                filtered.sort((a, b) => ((b.item.result || {}).score || 0) - ((a.item.result || {}).score || 0));
+                // 결론순 (D16): verdict order, then name. The uncalibrated
+                // score is always 0 in phase 0 and never orders results.
+                filtered.sort((a, b) => (BAND_ORDER[itemBand(a)] - BAND_ORDER[itemBand(b)]) || byName(a, b));
             }
             return filtered;
         }
@@ -1325,7 +1326,7 @@
             const thr = data.thresholds || {};
             const parts = [];
             const wa = cov.weights_available, wt = cov.weights_total;
-            if (wt !== undefined && (wa || 0) === 0) parts.push('휴리스틱 전용 모드(신경망 가중치 없음)');
+            if (wt !== undefined && (wa || 0) === 0) parts.push('신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영');
             else if (wt !== undefined && wa < wt) parts.push(`신경망 가중치 일부 탑재(${wa}/${wt})`);
             if (thr.provisional || thr.source === 'builtin_defaults') parts.push('잠정 임계값(미측정)');
             if (thr.in_sample) parts.push('임계값 in-sample(참고)');

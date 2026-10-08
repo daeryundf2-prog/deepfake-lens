@@ -134,7 +134,7 @@ def _scan_job_start(query: str, *, default_folder: Path | None) -> dict[str, obj
     with _SCAN_JOBS_LOCK:
         _scan_job_evict(time.time())
         if len(_SCAN_JOBS) >= _SCAN_JOB_MAX:
-            raise ValueError("too many scan jobs in flight; retry after a running job finishes")
+            raise ValueError("실행 중인 검사 작업이 너무 많습니다 — 진행 중인 작업이 끝난 뒤 다시 시도하십시오")
         job_id = secrets.token_hex(8)
         cancel = threading.Event()
         _SCAN_JOBS[job_id] = {"status": "running", "created": time.time(), "cancel": cancel}
@@ -143,8 +143,18 @@ def _scan_job_start(query: str, *, default_folder: Path | None) -> dict[str, obj
         try:
             result = _scan_payload(query, default_folder=default_folder, should_stop=cancel.is_set)
             status = "done"
-        except Exception as exc:  # noqa: BLE001 - a worker crash must not kill the job silently
-            result = {"error": str(exc)}
+        except Exception as exc:  # noqa: BLE001 - a worker crash is recorded, not raised into the thread
+            # D16: log the traceback and record the failure as coverage +
+            # limitation — never just a bare message (fail-closed: the scan
+            # did not complete, so nothing in it may read as a conclusion).
+            logger.exception("scan job %s failed", job_id)
+            reason = failure_reason(exc)
+            result = {
+                "error": "폴더 검사 작업이 실패했습니다",
+                "detail": reason,
+                "coverage": [{"check": "scan_job", "status": "failed", "reason": reason}],
+                "limitations": [f"검사 작업 실패 — {reason}. 이 작업의 결과는 결론으로 사용할 수 없습니다."],
+            }
             status = "error"
         with _SCAN_JOBS_LOCK:
             entry = _SCAN_JOBS.get(job_id)
@@ -159,12 +169,12 @@ def _scan_status_payload(query: str) -> dict[str, object]:
     params = parse_qs(query)
     job_id = params.get("job", [""])[0].strip()
     if not job_id:
-        return {"error": "missing job parameter"}
+        return {"error": "job 매개변수가 필요합니다"}
     with _SCAN_JOBS_LOCK:
         _scan_job_evict(time.time())
         entry = _SCAN_JOBS.get(job_id)
         if entry is None:
-            return {"error": "unknown or expired job"}
+            return {"error": "알 수 없거나 만료된 작업입니다"}
         payload: dict[str, object] = {"job_id": job_id, "status": entry["status"]}
         if entry["status"] != "running":
             payload["result"] = entry.get("result")
@@ -175,11 +185,11 @@ def _scan_cancel_payload(query: str) -> dict[str, object]:
     params = parse_qs(query)
     job_id = params.get("job", [""])[0].strip()
     if not job_id:
-        return {"error": "missing job parameter"}
+        return {"error": "job 매개변수가 필요합니다"}
     with _SCAN_JOBS_LOCK:
         entry = _SCAN_JOBS.get(job_id)
         if entry is None:
-            return {"error": "unknown or expired job"}
+            return {"error": "알 수 없거나 만료된 작업입니다"}
         if entry["status"] != "running":
             return {"job_id": job_id, "status": entry["status"], "cancelled": False}
         cancel = entry.get("cancel")
@@ -391,7 +401,7 @@ def _heatmap_payload(query: str) -> tuple[int, bytes, str]:
     path_value = params.get("path", [""])[0]
     root_value = params.get("root", [""])[0]
     if not path_value:
-        return 400, b"missing path", "missing"
+        return 400, "경로가 없습니다".encode("utf-8"), "missing"
     path = Path(path_value).expanduser().resolve()
     # Heatmaps live in the tool-owned output root (never in the evidence
     # folder, R-IN-1); those are served without a read root.
@@ -400,7 +410,7 @@ def _heatmap_payload(query: str) -> tuple[int, bytes, str]:
     try:
         data = path.read_bytes()
     except OSError:
-        return 404, b"not found", "not-found"
+        return 404, "파일을 찾을 수 없습니다".encode("utf-8"), "not-found"
     return 200, data, ""
 
 
@@ -438,7 +448,7 @@ def _preview_payload(query: str) -> tuple[int, bytes, str, str]:
     path_value = params.get("path", [""])[0]
     root_value = params.get("root", [""])[0]
     if not path_value:
-        return 400, b"missing path", "missing", ""
+        return 400, "경로가 없습니다".encode("utf-8"), "missing", ""
     path = Path(path_value).expanduser().resolve()
     mime = _PREVIEW_MIME.get(path.suffix.lower())
     if mime is None or not _read_root_allows(path, root_value):
@@ -448,7 +458,7 @@ def _preview_payload(query: str) -> tuple[int, bytes, str, str]:
             return 413, b"too large", "too-large", ""
         data = path.read_bytes()
     except OSError:
-        return 404, b"not found", "not-found", ""
+        return 404, "파일을 찾을 수 없습니다".encode("utf-8"), "not-found", ""
     return 200, data, "", mime
 
 
@@ -495,10 +505,6 @@ def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str,
     def _status(item: dict[str, object]) -> str:
         return str(item.get("status") or ("failed" if item.get("error") else "analyzed"))
 
-    def _band(item: dict[str, object]) -> str:
-        result = item.get("result")
-        return str(result.get("band")) if isinstance(result, dict) else ""
-
     def _verdict(item: dict[str, object]) -> str:
         result = item.get("result")
         return str(result.get("verdict_code") or "undetermined") if isinstance(result, dict) else ""
@@ -509,9 +515,7 @@ def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str,
         return isinstance(coverage, list) and any(isinstance(e, dict) and e.get("status") == "failed" for e in coverage)
 
     analyzed = [i for i in items if _status(i) == "analyzed" and isinstance(i.get("result"), dict)]
-    high = sum(1 for item in analyzed if _band(item) == "high")
-    medium = sum(1 for item in analyzed if _band(item) == "medium")
-    low = sum(1 for item in analyzed if _band(item) == "low")
+    # D16: verdict counts only — same keys as BatchScanSummary.to_json().
     return {
         "manipulation_evidence": sum(1 for item in analyzed if _verdict(item) == "manipulation_evidence"),
         "authenticity_evidence": sum(1 for item in analyzed if _verdict(item) == "authenticity_evidence"),
@@ -519,10 +523,6 @@ def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str,
         "checks_failed": sum(1 for item in analyzed if _has_failed_check(item)),
         "total": len(items),
         "analyzed": len(analyzed),
-        "high": high,
-        "medium": medium,
-        "low": low,
-        "unknown": len(analyzed) - high - medium - low,
         "unsupported_or_failed": sum(1 for i in items if _status(i) not in {"analyzed", "duplicate", "skipped"}),
         "duplicates": sum(1 for i in items if _status(i) == "duplicate"),
         "skipped": sum(1 for i in items if _status(i) == "skipped"),
@@ -605,7 +605,7 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
     analyzed as its own row. The server never persists uploads.
     """
     if "multipart/form-data" not in content_type:
-        return {"error": "multipart/form-data upload required"}
+        return {"error": "multipart/form-data 업로드가 필요합니다"}
     from .archives import is_archive
 
     message = BytesParser(policy=email_policy).parsebytes(
@@ -859,13 +859,13 @@ def _feedback_payload(body: bytes) -> dict[str, object]:
     try:
         data = json.loads(body.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
-        return {"error": "invalid JSON body"}
+        return {"error": "JSON 본문을 해석할 수 없습니다"}
     label = str(data.get("expected_label", "") or "").strip().lower()
     if not (is_positive_label(label) or is_negative_label(label)):
-        return {"error": "expected_label must be a recognized label (e.g. synthetic, real)"}
+        return {"error": "expected_label은 인식 가능한 라벨이어야 합니다 (예: synthetic, real)"}
     path = str(data.get("path") or data.get("name") or "").strip()
     if not path:
-        return {"error": "path is required"}
+        return {"error": "path가 필요합니다"}
     entry: dict[str, object] = {
         "path": path,
         "expected_label": label,
@@ -898,7 +898,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     try:
         data = json.loads(body.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
-        return {"error": "invalid JSON body"}
+        return {"error": "JSON 본문을 해석할 수 없습니다"}
     raw_items = data.get("items")
     if not isinstance(raw_items, list) or not raw_items:
         return {"error": "items array is required"}

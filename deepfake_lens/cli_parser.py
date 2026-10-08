@@ -273,7 +273,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     api_parser.add_argument("--host", type=str, default="127.0.0.1", help="host to bind")
     api_parser.add_argument("--port", type=int, default=8765, help="port to listen on")
     api_parser.add_argument("--token", type=str, help="require an X-API-Token header on /api routes (mandatory for non-localhost hosts)")
-    api_parser.add_argument("--allow-root", type=Path, action="append", default=[], help="additional read root the API may read from (repeatable); requests for paths outside --folder/--allow-root get 403")
+    api_parser.add_argument("--allow-root", type=Path, action="append", default=[], help="read root the API may read from (repeatable); requests for paths outside every --allow-root get 403")
 
     batch_parser = subparsers.add_parser("batch", help="process files in batch")
     batch_parser.add_argument("folder", type=Path, help="folder to process")

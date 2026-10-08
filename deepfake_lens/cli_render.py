@@ -99,7 +99,7 @@ def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage:
         wa = wa_raw if isinstance(wa_raw, int) else 0
         wc = wc_raw if isinstance(wc_raw, int) else 0
         if wa == 0:
-            print("!! 신경망 가중치 미탑재 — 아래 결과는 휴리스틱 전용이며 뉴럴 엔진이 실행되지 않았습니다 !!")
+            print("!! 신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영 !!")
         elif wa < wc:
             print(f"!! 신경망 가중치 부분 탑재 ({wa}/{wc}) — 일부 뉴럴 엔진이 실행되지 않았습니다 !!")
     if thresholds is not None and getattr(thresholds, "provisional", False):
@@ -267,13 +267,13 @@ def _pixel_top_experts(pixel) -> str:
 def _parse_split_ratios(value: str) -> tuple[float, float, float]:
     parts = [part.strip() for part in value.split(",")]
     if len(parts) != 3:
-        raise argparse.ArgumentTypeError("--split-ratios must be train,val,test")
+        raise argparse.ArgumentTypeError("--split-ratios는 train,val,test 형식이어야 합니다")
     try:
         train, val, test = (float(part) for part in parts)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError("--split-ratios values must be numbers") from exc
+        raise argparse.ArgumentTypeError("--split-ratios 값은 숫자여야 합니다") from exc
     if train < 0 or val < 0 or test < 0 or train + val + test <= 0:
-        raise argparse.ArgumentTypeError("--split-ratios must be non-negative and sum to more than zero")
+        raise argparse.ArgumentTypeError("--split-ratios 값은 음수가 아니고 합이 0보다 커야 합니다")
     return train, val, test
 
 

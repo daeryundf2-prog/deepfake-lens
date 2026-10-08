@@ -6,6 +6,7 @@ Provides a web-based GUI that works on Windows, Mac, and Linux.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 import shutil
@@ -41,6 +42,7 @@ from .webapp_api import (
     _stats_payload,
 )
 
+logger = logging.getLogger(__name__)
 
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 # Custom header required on every /api/* request when no token is configured.
@@ -140,9 +142,9 @@ def build_server(
         from .webapp_api import set_models_dir
         set_models_dir(models_dir)
     if not allow_lan and host not in LOCAL_HOSTS:
-        raise ValueError("local web app binds to localhost by default; pass --allow-lan to bind elsewhere")
+        raise ValueError("로컬 웹 앱은 기본적으로 localhost에만 바인딩합니다 — 다른 주소에는 --allow-lan을 지정하십시오")
     if allow_lan and not token:
-        raise ValueError("--allow-lan requires a --token; the API reads and analyzes local files on request")
+        raise ValueError("--allow-lan에는 --token이 필요합니다 — API는 요청에 따라 로컬 파일을 읽고 분석합니다")
     if token and not allow_lan:
         import sys
 
@@ -151,13 +153,30 @@ def build_server(
     configure_read_roots(default_folder, allow_roots)
 
     class Handler(BaseHTTPRequestHandler):
+        def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
+            """Error responses as JSON ``{"error": <Korean message>}`` (D16).
+
+            The stock implementation puts ``message`` in the HTTP status
+            line, which is latin-1 only — a Korean message would raise. The
+            status line keeps the standard reason phrase; the examiner-facing
+            text travels in the UTF-8 body, where gui.js apiError reads it.
+            """
+            del explain
+            self.close_connection = True
+            text = message or self.responses.get(code, ("", ""))[0] or "요청을 처리할 수 없습니다"
+            try:
+                self._send_json({"error": text}, status=code)
+            except OSError:
+                # Client already gone; nothing left to tell it.
+                logger.debug("error response not delivered (%s)", code)
+
         def _api_allowed(self) -> bool:
             if api_request_allowed(self.headers, token=token):
                 return True
             message = (
-                "missing or invalid X-Deepfake-Lens-Token"
+                "X-Deepfake-Lens-Token이 없거나 올바르지 않습니다"
                 if token
-                else f"missing {CLIENT_HEADER} header (cross-origin requests cannot set it)"
+                else f"{CLIENT_HEADER} 헤더가 없습니다 (교차 출처 요청은 이 헤더를 붙일 수 없습니다)"
             )
             self.send_error(401, message)
             return False
@@ -239,18 +258,18 @@ def build_server(
                 qs = parse_qs(parsed.query)
                 art_id = qs.get("path", qs.get("artifact_id", [""]))[0]
                 if not art_id:
-                    self.send_error(400, "missing path or artifact_id")
+                    self.send_error(400, "path 또는 artifact_id가 필요합니다")
                     return
                 self._send_json({"status": "success", "artifact_id": art_id, "review": get_default_review_store().get_review(art_id)})
                 return
-            self.send_error(404, "not found")
+            self.send_error(404, "찾을 수 없는 경로입니다")
 
         def do_POST(self) -> None:
             if not self._guard():
                 return
             parsed = urlparse(self.path)
             if not parsed.path.startswith("/api/"):
-                self.send_error(404, "not found")
+                self.send_error(404, "찾을 수 없는 경로입니다")
                 return
             if not self._api_allowed():
                 return
@@ -273,10 +292,10 @@ def build_server(
                 try:
                     length = int(self.headers.get("Content-Length") or "0")
                 except ValueError:
-                    self.send_error(400, "invalid Content-Length")
+                    self.send_error(400, "Content-Length가 올바르지 않습니다")
                     return
                 if length <= 0 or length > 64 * 1024 * 1024:
-                    self.send_error(400, "invalid report body size")
+                    self.send_error(400, "보고서 요청 본문 크기가 올바르지 않습니다")
                     return
                 req_fmt = (parse_qs(parsed.query).get("format", [""])[0] or "").lower()
                 rendered = _report_payload(self.rfile.read(length), format_override=req_fmt or None, default_folder=default_folder)
@@ -302,10 +321,10 @@ def build_server(
                 try:
                     length = int(self.headers.get("Content-Length") or "0")
                 except ValueError:
-                    self.send_error(400, "invalid Content-Length")
+                    self.send_error(400, "Content-Length가 올바르지 않습니다")
                     return
                 if length <= 0 or length > 1024 * 1024:
-                    self.send_error(400, "invalid feedback body size")
+                    self.send_error(400, "피드백 요청 본문 크기가 올바르지 않습니다")
                     return
                 self._send_json(_feedback_payload(self.rfile.read(length)))
                 return
@@ -313,41 +332,41 @@ def build_server(
                 try:
                     length = int(self.headers.get("Content-Length") or "0")
                 except ValueError:
-                    self.send_error(400, "invalid Content-Length")
+                    self.send_error(400, "Content-Length가 올바르지 않습니다")
                     return
                 if length <= 0 or length > 1024 * 1024:
-                    self.send_error(400, "invalid review body size")
+                    self.send_error(400, "검토 요청 본문 크기가 올바르지 않습니다")
                     return
                 try:
                     raw = json.loads(self.rfile.read(length).decode("utf-8"))
                 except (json.JSONDecodeError, UnicodeDecodeError):
-                    self.send_error(400, "invalid JSON")
+                    self.send_error(400, "JSON을 해석할 수 없습니다")
                     return
                 art_id = raw.get("artifact_id", raw.get("path", ""))
                 if not art_id:
-                    self.send_error(400, "missing artifact_id")
+                    self.send_error(400, "artifact_id가 필요합니다")
                     return
                 from .reviews import get_default_review_store
                 saved = get_default_review_store().save_review(art_id, raw)
                 self._send_json({"status": "success", "artifact_id": art_id, "review": saved})
                 return
-            self.send_error(404, "not found")
+            self.send_error(404, "찾을 수 없는 경로입니다")
 
         def _handle_analyze_upload(self) -> None:
             try:
                 length = int(self.headers.get("Content-Length") or "0")
             except ValueError:
-                self.send_error(400, "invalid Content-Length")
+                self.send_error(400, "Content-Length가 올바르지 않습니다")
                 return
             if length <= 0:
-                self.send_error(400, "empty upload")
+                self.send_error(400, "업로드된 내용이 없습니다")
                 return
             if length > MAX_UPLOAD_BYTES:
-                self.send_error(413, f"upload exceeds {MAX_UPLOAD_BYTES} bytes")
+                self.send_error(413, f"업로드 크기가 상한({MAX_UPLOAD_BYTES} bytes)을 초과합니다")
                 return
             body = self.rfile.read(length)
             if len(body) != length:
-                self.send_error(400, "incomplete request body — connection dropped mid-upload")
+                self.send_error(400, "요청 본문이 불완전합니다 — 업로드 중 연결이 끊겼습니다")
                 return
             try:
                 self._send_json(_analyze_upload_payload(self.headers.get("Content-Type") or "", body))
@@ -359,14 +378,14 @@ def build_server(
             try:
                 length = int(self.headers.get("Content-Length") or "0")
             except ValueError:
-                self.send_error(400, "invalid Content-Length")
+                self.send_error(400, "Content-Length가 올바르지 않습니다")
                 return
             if length <= 0 or length > MAX_UPLOAD_BYTES:
-                self.send_error(400, "invalid compare body size")
+                self.send_error(400, "비교 요청 본문 크기가 올바르지 않습니다")
                 return
             body = self.rfile.read(length)
             if len(body) != length:
-                self.send_error(400, "incomplete request body — connection dropped mid-upload")
+                self.send_error(400, "요청 본문이 불완전합니다 — 업로드 중 연결이 끊겼습니다")
                 return
             try:
                 self._send_json(_compare_payload(self.headers.get("Content-Type") or "", body))
@@ -383,24 +402,24 @@ def build_server(
             try:
                 length = int(self.headers.get("Content-Length") or "0")
             except ValueError:
-                self.send_error(400, "invalid Content-Length")
+                self.send_error(400, "Content-Length가 올바르지 않습니다")
                 return
             if length <= 0:
-                self.send_error(400, "empty body")
+                self.send_error(400, "요청 본문이 비어 있습니다")
                 return
             if length > MAX_UPLOAD_BYTES:
-                self.send_error(413, f"body exceeds {MAX_UPLOAD_BYTES} bytes")
+                self.send_error(413, f"요청 본문이 상한({MAX_UPLOAD_BYTES} bytes)을 초과합니다")
                 return
             body = self.rfile.read(length)
             if len(body) != length:
-                self.send_error(400, "incomplete request body — connection dropped mid-upload")
+                self.send_error(400, "요청 본문이 불완전합니다 — 업로드 중 연결이 끊겼습니다")
                 return
             content_type = self.headers.get("Content-Type") or ""
             if "application/json" in content_type:
                 try:
                     payload = json.loads(body.decode("utf-8", errors="replace"))
                 except json.JSONDecodeError:
-                    self._send_json({"error": "invalid JSON body"})
+                    self._send_json({"error": "JSON 본문을 해석할 수 없습니다"})
                     return
                 secret = payload.get("watermark_secret")
                 try:
@@ -447,7 +466,7 @@ def build_server(
             """Serve a bundled GUI asset (gui.css/gui.js) — package-internal only."""
             path = Path(__file__).parent / name
             if not path.exists():
-                self.send_error(404, "not found")
+                self.send_error(404, "찾을 수 없는 경로입니다")
                 return
             body = path.read_bytes()
             self.send_response(200)

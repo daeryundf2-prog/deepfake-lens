@@ -197,6 +197,7 @@ files = [
     "deepfake_lens/tests/qa/test_qa_in_robustness.py",
     "deepfake_lens/reports.py",
     "deepfake_lens/tests/__init__.py",
+    "deepfake_lens/tests/test_d16_ui_api.py",
     "deepfake_lens/tests/test_archives.py",
     "deepfake_lens/tests/test_consolidation.py",
     "deepfake_lens/tests/test_doctor.py",
