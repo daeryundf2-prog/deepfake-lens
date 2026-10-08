@@ -10,8 +10,19 @@ import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+import logging
+
+from .checks import failed as failed_entry
+from .checks import skipped as skipped_entry
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
+from .result_types import CoverageEntry, CoverageStatus
+
+logger = logging.getLogger(__name__)
+
+# Coverage check name of a video's audio-track analysis (R2).
+AV_AUDIO_CHECK = "av_audio"
+AV_AUDIO_NO_TRACK_REASON = "오디오 트랙 없음(ffmpeg로 추출된 음성 스트림이 없습니다)"
 
 
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".flv"}
@@ -162,16 +173,8 @@ def analyze_video_temporal(
 
     av_audio = None
     if analyze_audio_track:
-        av_audio, av_note = _analyze_audio_track(video_path, model_path)
-        if av_audio is None:
-            limitations.append(av_note or "오디오 트랙 분석을 수행할 수 없습니다(ffmpeg 없음 또는 트랙 없음).")
-        else:
-            score = int(av_audio.get("score") or 0)
-            signals.append(VideoEvidenceSignal(
-                "음성 트랙 분석",
-                f"영상 내 음성의 오디오 파이프라인 점수: {score}",
-                min(score, 40),
-            ))
+        av_audio, av_entry = audio_track_check(video_path, model_path)
+        av_audio = _apply_audio_track(signals, limitations, av_audio, av_entry)
 
     # Limitations
     if len(frame_analyses) < 10:
@@ -201,15 +204,18 @@ def analyze_video_temporal(
     )
 
 
-def _analyze_audio_track(
+def audio_track_check(
     video_path: Path,
     model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
-) -> tuple[dict[str, object] | None, str | None]:
-    """Extract the video's audio stream with ffmpeg and score it.
+) -> tuple[dict[str, object] | None, CoverageEntry]:
+    """Extract the video's audio stream with ffmpeg and score it (R2).
 
-    Returns (audio_json, None) on success or (None, reason) — missing
-    ffmpeg, no audio track, or an analysis failure all degrade to a
-    limitation string rather than an exception.
+    Returns ``(audio_json, coverage)`` with its own ``av_audio`` coverage
+    entry: ``ran`` when the audio pipeline extracted features; ``skipped``
+    "의존성 부재: ffmpeg" / "의존성 부재: librosa" or "오디오 트랙 없음";
+    ``failed`` "<예외 유형>: …" when extraction or the audio analysis
+    raised or could not decode the track. ``audio_json`` is set only when
+    the check ran.
     """
     import shutil
     import subprocess
@@ -217,24 +223,61 @@ def _analyze_audio_track(
 
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
-        return None, "ffmpeg가 없어 영상 내 음성 트랙을 분석하지 못했습니다."
+        return None, skipped_entry(AV_AUDIO_CHECK, "의존성 부재: ffmpeg")
     tmp_name = ""
     try:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp_name = tmp.name
-        proc = subprocess.run(
-            [ffmpeg, "-y", "-i", str(video_path), "-vn", "-ac", "1", "-ar", "16000", tmp_name],
-            capture_output=True, timeout=120,
-        )
-        if proc.returncode != 0 or not Path(tmp_name).stat().st_size:
-            return None, "영상에서 추출 가능한 오디오 트랙이 없습니다."
-        from .audio import analyze_audio
-        return analyze_audio(tmp_name, model_path=model_path).to_json(), None
-    except (subprocess.TimeoutExpired, OSError):
-        return None, "오디오 트랙 추출이 실패했습니다."
+        try:
+            proc = subprocess.run(
+                [ffmpeg, "-y", "-i", str(video_path), "-vn", "-ac", "1", "-ar", "16000", tmp_name],
+                capture_output=True, timeout=120,
+            )
+            extracted = proc.returncode == 0 and Path(tmp_name).stat().st_size > 0
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            logger.exception("audio-track extraction failed: %s", video_path)
+            return None, failed_entry(AV_AUDIO_CHECK, exc)
+        if not extracted:
+            return None, skipped_entry(AV_AUDIO_CHECK, AV_AUDIO_NO_TRACK_REASON)
+        try:
+            from .audio import analyze_audio
+
+            audio = analyze_audio(tmp_name, model_path=model_path)
+        except ImportError as exc:
+            return None, skipped_entry(AV_AUDIO_CHECK, f"의존성 부재: {exc.name or exc}")
+        except Exception as exc:
+            logger.exception("audio-track analysis failed: %s", video_path)
+            return None, failed_entry(AV_AUDIO_CHECK, exc)
+        if audio.features is None:
+            reason = audio.feature_error or audio.reference_note or "오디오 특징을 추출하지 못했습니다"
+            if reason.startswith("의존성 부재"):
+                return None, skipped_entry(AV_AUDIO_CHECK, reason)
+            return None, CoverageEntry(AV_AUDIO_CHECK, CoverageStatus.FAILED, reason)
+        return audio.to_json(), CoverageEntry(AV_AUDIO_CHECK, CoverageStatus.RAN)
     finally:
         if tmp_name:
             Path(tmp_name).unlink(missing_ok=True)
+
+
+def _apply_audio_track(
+    signals: list[VideoEvidenceSignal],
+    limitations: list[str],
+    av_audio: dict[str, object] | None,
+    entry: CoverageEntry,
+) -> dict[str, object] | None:
+    """Fold an audio-track outcome into the temporal analysis (reference signal or limitation)."""
+    if entry.status != CoverageStatus.RAN or av_audio is None:
+        label = "미실행" if entry.status == CoverageStatus.SKIPPED else "실패"
+        limitations.append(f"영상 음성 트랙 분석 {label}: {entry.reason}")
+        return None
+    raw = av_audio.get("score")
+    score = int(raw) if isinstance(raw, (int, float)) else 0
+    signals.append(VideoEvidenceSignal(
+        "음성 트랙 분석",
+        f"영상 내 음성의 오디오 파이프라인 점수: {score}",
+        min(score, 40),
+    ))
+    return av_audio
 
 
 def _error_analysis(message: str) -> VideoTemporalAnalysis:

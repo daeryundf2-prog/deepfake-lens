@@ -15,7 +15,14 @@ from typing import Callable
 
 from .archives import archive_format, extract_archive, is_archive
 from .audio import SUPPORTED_AUDIO_EXTENSIONS, AudioAnalysis, analyze_audio
-from .video_analysis import SUPPORTED_VIDEO_EXTENSIONS, VideoTemporalAnalysis, analyze_video_temporal
+from .video_analysis import (
+    AV_AUDIO_CHECK,
+    SUPPORTED_VIDEO_EXTENSIONS,
+    VideoTemporalAnalysis,
+    _apply_audio_track,
+    analyze_video_temporal,
+    audio_track_check,
+)
 from .documents import SUPPORTED_DOCUMENT_EXTENSIONS, extract_document_text
 from .model_adapter import FAILED_CONFIDENCE, ExternalModelAnalysis, analyze_external_model
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, PixelAnalysis, analyze_image_pixels
@@ -1189,7 +1196,10 @@ def _analyze_video_file(
     def video_check() -> VideoTemporalAnalysis:
         import cv2  # noqa: F401 — dependency probe
 
-        analysis = analyze_video_temporal(file_path, model_path=model_path, analyze_audio_track=True)
+        # The audio track is its own check (R2) — run below, not inside
+        # the temporal analysis, so its outcome gets a coverage entry and
+        # an audio failure cannot fail (or hide inside) video_analysis.
+        analysis = analyze_video_temporal(file_path, model_path=model_path, analyze_audio_track=False)
         if analysis.reference_band == UNAVAILABLE_BAND and analysis.duration_seconds <= 0 and not analysis.signals:
             raise AnalyzerError(analysis.reference_note)
         return analysis
@@ -1197,6 +1207,15 @@ def _analyze_video_file(
     analysis, entry = run_check("video_analysis", video_check)
     deep = _deep_video_layers(file_path, thresholds) if deep_signals else _deep_disabled(DEEP_VIDEO_CHECKS)
     coverage: list[CoverageEntry] = [entry]
+    if analysis is not None:
+        av_audio, av_entry = audio_track_check(file_path, model_path)
+        av_signals = list(analysis.signals)
+        av_limitations = list(analysis.limitations)
+        av_audio = _apply_audio_track(av_signals, av_limitations, av_audio, av_entry)
+        analysis = replace(analysis, signals=av_signals, limitations=av_limitations, av_audio=av_audio)
+        coverage.append(av_entry)
+    else:
+        coverage.append(skipped(AV_AUDIO_CHECK, "영상 분석이 실행되지 않아 음성 트랙 검사도 수행되지 않음"))
     if analysis is None:
         if model_path is not None:
             coverage.append(skipped("external_model", "영상 분석이 실행되지 않아 모델 검사도 수행되지 않음"))

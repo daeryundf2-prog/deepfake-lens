@@ -238,3 +238,107 @@ class HfFlickerSignalTest(unittest.TestCase):
         from deepfake_lens.video_analysis import _hf_flicker_consistency
         frames = self._frames([100, 140, 100, 140])
         self.assertIsNone(_hf_flicker_consistency(frames))
+
+
+class AvAudioCoverageTest(unittest.TestCase):
+    """R2: a video's audio-track analysis has its own ``av_audio`` coverage
+    entry — ran / skipped "의존성 부재: librosa" (or ffmpeg, or no track) /
+    failed "<예외 유형>: …" — and an audio failure never fails or hides
+    inside ``video_analysis``.
+
+    ffmpeg is faked (``shutil.which`` + ``subprocess.run`` writing a WAV to
+    the requested output) so the tests run without it; the temporal
+    analysis is a stub so they need neither OpenCV nor a real video.
+    """
+
+    def setUp(self) -> None:
+        import builtins
+        import subprocess
+        from unittest import mock
+
+        from deepfake_lens.tests.test_standalone_contract import write_wav
+        from deepfake_lens.video_analysis import VideoTemporalAnalysis
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.video = Path(self._tmp.name) / "clip.mp4"
+        self.video.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+        self._real_import = builtins.__import__
+
+        def fake_run(argv, **_kwargs):
+            write_wav(Path(argv[-1]))
+            return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+        stub = VideoTemporalAnalysis(
+            score=0, reference_band="reference", reference_note="", signals=[], limitations=[],
+            frame_count=30, duration_seconds=1.0, fps=30.0, resolution=(320, 240),
+        )
+        for patcher in (
+            mock.patch("shutil.which", return_value="/usr/bin/ffmpeg"),
+            mock.patch("subprocess.run", side_effect=fake_run),
+            mock.patch("deepfake_lens.core.analyze_video_temporal", return_value=stub),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _av_entry(self):
+        from deepfake_lens.core import analyze_file
+        from deepfake_lens.result_types import CoverageStatus
+
+        item = analyze_file(self.video)
+        self.assertIsNotNone(item.result)
+        assert item.result is not None
+        by_check = {entry.check: entry for entry in item.result.coverage}
+        self.assertEqual(by_check["video_analysis"].status, CoverageStatus.RAN)
+        return item.result, by_check["av_audio"]
+
+    @unittest.skipUnless(__import__("importlib").util.find_spec("librosa") is not None, "librosa not installed")
+    def test_audio_track_ran(self) -> None:
+        from deepfake_lens.result_types import CoverageStatus
+
+        result, entry = self._av_entry()
+        self.assertEqual(entry.status, CoverageStatus.RAN)
+        self.assertIsNotNone(result.av_audio)
+
+    def test_librosa_absent_is_skipped_dependency(self) -> None:
+        from unittest import mock
+
+        from deepfake_lens.result_types import CoverageStatus
+
+        def no_librosa(name, *args, **kwargs):
+            if name == "librosa" or name.startswith("librosa."):
+                raise ModuleNotFoundError("No module named 'librosa'", name="librosa")
+            return self._real_import(name, *args, **kwargs)
+
+        with mock.patch("builtins.__import__", side_effect=no_librosa):
+            result, entry = self._av_entry()
+        self.assertEqual(entry.status, CoverageStatus.SKIPPED)
+        self.assertEqual(entry.reason, "의존성 부재: librosa")
+        self.assertIsNone(result.av_audio)
+        self.assertIn("영상 음성 트랙 분석 미실행: 의존성 부재: librosa", result.limitations)
+
+    def test_injected_exception_is_failed_with_class_name(self) -> None:
+        from unittest import mock
+
+        from deepfake_lens.result_types import CoverageStatus, Verdict
+
+        with mock.patch("deepfake_lens.audio.analyze_audio", side_effect=RuntimeError("audio boom")):
+            result, entry = self._av_entry()
+        self.assertEqual(entry.status, CoverageStatus.FAILED)
+        self.assertEqual(entry.reason, "RuntimeError: audio boom")
+        self.assertNotIn("의존성 부재", entry.reason)
+        self.assertEqual(result.verdict_code, Verdict.UNDETERMINED)
+
+    def test_missing_ffmpeg_and_missing_track_are_skipped(self) -> None:
+        import subprocess
+        from unittest import mock
+
+        from deepfake_lens.result_types import CoverageStatus
+        from deepfake_lens.video_analysis import AV_AUDIO_NO_TRACK_REASON
+
+        with mock.patch("shutil.which", return_value=None):
+            _, entry = self._av_entry()
+        self.assertEqual((entry.status, entry.reason), (CoverageStatus.SKIPPED, "의존성 부재: ffmpeg"))
+        with mock.patch("subprocess.run", return_value=subprocess.CompletedProcess([], 1, b"", b"no audio")):
+            _, entry = self._av_entry()
+        self.assertEqual((entry.status, entry.reason), (CoverageStatus.SKIPPED, AV_AUDIO_NO_TRACK_REASON))

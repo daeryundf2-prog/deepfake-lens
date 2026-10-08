@@ -251,6 +251,7 @@ CHECK_LABELS = {
     "audio_analysis": "오디오 분석",
     "audio_features": "오디오 특징 추출",
     "video_analysis": "영상 분석",
+    "av_audio": "영상 음성 트랙 분석",
     "document_text": "문서 텍스트 추출",
     "text_lexical": "어휘·문체 신호",
     "archive": "압축 해제",

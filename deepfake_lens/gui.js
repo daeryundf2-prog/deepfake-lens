@@ -241,7 +241,7 @@
             pixel: '픽셀 휴리스틱(참고)', external_model: '외부 모델',
             face_manipulation: '얼굴 검사', inpaint: '인페인팅 검사', faceswap_seam: '페이스스왑 경계면 검사',
             rppg: 'rPPG 맥박 검사', avatar: '아바타 검사', lipsync: '립싱크 검사', face_track: '얼굴 트랙 검사',
-            audio_analysis: '오디오 분석', audio_features: '오디오 특징 추출', video_analysis: '영상 분석',
+            audio_analysis: '오디오 분석', audio_features: '오디오 특징 추출', video_analysis: '영상 분석', av_audio: '영상 음성 트랙 분석',
             document_text: '문서 텍스트 추출', text_lexical: '어휘·문체 신호', archive: '압축 해제',
         };
         const COVERAGE_STATUS_LABELS = { ran: '실행', skipped: '미실행', failed: '실패' };
