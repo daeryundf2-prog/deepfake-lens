@@ -254,6 +254,7 @@ CHECK_LABELS = {
     "document_text": "문서 텍스트 추출",
     "text_lexical": "어휘·문체 신호",
     "archive": "압축 해제",
+    "archive_member": "압축 구성 파일",
 }
 
 

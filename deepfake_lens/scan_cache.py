@@ -17,8 +17,19 @@ from .profile_pins import ModelPathArg, model_path_digest, pin_tokens, profile_p
 from .result_types import ScanItem
 
 
-def _iter_files(root: Path, *, recursive: bool, allow_symlinks: bool = False, on_error: Callable[[Path, OSError], None] | None = None) -> Iterable[Path]:
+def _iter_files(
+    root: Path,
+    *,
+    recursive: bool,
+    allow_symlinks: bool = False,
+    on_error: Callable[[Path, OSError], None] | None = None,
+    on_symlink: Callable[[Path], None] | None = None,
+) -> Iterable[Path]:
     """Iterate scan targets; unreadable directories skip, not kill.
+
+    A symlinked file is not yielded unless ``allow_symlinks``; it is
+    reported through ``on_symlink`` so the scan can list it as skipped
+    (D10) instead of dropping it from the report silently.
 
     ``rglob``/``iterdir`` raise lazily mid-iteration — one permission-
     denied subdirectory must not abort a multi-hour evidence scan.
@@ -37,10 +48,18 @@ def _iter_files(root: Path, *, recursive: bool, allow_symlinks: bool = False, on
         for dirpath, dirs, files in os.walk(root, onerror=_walk_error):
             # os.walk descends into ``dirs`` in list order — sort in place.
             dirs.sort(key=lambda name: str(Path(dirpath) / name))
+            # os.walk lists a symlinked directory in ``dirs`` and never
+            # descends into it — report it like a symlinked file (D10).
+            if on_symlink is not None:
+                for name in dirs:
+                    if (Path(dirpath) / name).is_symlink():
+                        on_symlink(Path(dirpath) / name)
             for name in sorted(files, key=lambda name: str(Path(dirpath) / name)):
                 path = Path(dirpath) / name
                 try:
                     if path.is_symlink() and not allow_symlinks:
+                        if on_symlink is not None:
+                            on_symlink(path)
                         continue
                     if not path.is_file():
                         continue
@@ -59,6 +78,8 @@ def _iter_files(root: Path, *, recursive: bool, allow_symlinks: bool = False, on
     for path in entries:
         try:
             if path.is_symlink() and not allow_symlinks:
+                if on_symlink is not None:
+                    on_symlink(path)
                 continue
             if not path.is_file():
                 continue

@@ -406,5 +406,136 @@ class OptionalFormatLinkTests(unittest.TestCase):
         self.assertEqual(_7z_link_names(Archive()), {"b"})
 
 
+class RejectedMemberRecordTests(unittest.TestCase):
+    """D9/D10: every refused member and every symlink is recorded with its reason."""
+
+    def setUp(self) -> None:
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    @staticmethod
+    def _bomb_zip(path: Path) -> tuple[int, int]:
+        """A real deflate bomb member (8 MiB of zeros) next to a normal member."""
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+            zf.writestr("zeros.bin", bytes(8 * 1024 * 1024))
+            zf.writestr("ok.txt", "정상 구성 파일입니다. 사람이 쓴 짧은 메모입니다.")
+        with zipfile.ZipFile(path) as zf:
+            info = zf.getinfo("zeros.bin")
+            return info.file_size, info.compress_size
+
+    def test_hostile_members_have_specific_reasons_and_container_has_sha256(self) -> None:
+        import hashlib
+
+        from deepfake_lens.archives import MAX_ARCHIVE_RATIO
+        from deepfake_lens.result_types import CoverageStatus
+
+        folder = self.root / "case"
+        folder.mkdir()
+        arc = folder / "evil.zip"
+        declared, compressed = self._bomb_zip(arc)
+        with zipfile.ZipFile(arc, "a") as zf:
+            zf.writestr("../escape.png", b"x")
+            zf.writestr("/abs/evil.png", b"y")
+            link = zipfile.ZipInfo("link-to-etc")
+            link.create_system = 3
+            link.external_attr = 0o120777 << 16
+            zf.writestr(link, "/etc/passwd")
+        _, items = scan_directory(folder)
+        container = next(item for item in items if item.kind == "archive")
+        assert container.result is not None
+        self.assertEqual(container.sha256, hashlib.sha256(arc.read_bytes()).hexdigest())
+        entries = [entry for entry in container.result.coverage if entry.check == "archive_member"]
+        self.assertTrue(entries)
+        self.assertTrue(all(entry.status == CoverageStatus.SKIPPED for entry in entries))
+        reasons = {entry.reason for entry in entries}
+        expected_bomb = f"zeros.bin: 압축 예산 초과(선언 크기 {declared}, 한도 {compressed * MAX_ARCHIVE_RATIO})"
+        self.assertTrue(any(reason.startswith(expected_bomb) for reason in reasons), reasons)
+        self.assertIn("../escape.png: 경로 이탈 멤버('..' — 대상 폴더 밖 쓰기 시도)", reasons)
+        self.assertIn("/abs/evil.png: 절대 경로 멤버(대상 폴더 밖 쓰기 시도)", reasons)
+        self.assertIn("link-to-etc: 심볼릭 링크 멤버", reasons)
+        self.assertTrue(any("구성 파일 거부: zeros.bin — 압축 예산 초과" in lim for lim in container.result.limitations))
+        members = [item.path for item in items if item.path.startswith("evil.zip::")]
+        self.assertEqual(members, ["evil.zip::ok.txt"])
+
+    def test_declared_size_bomb_and_budget_exhaustion_reasons(self) -> None:
+        import struct
+
+        from deepfake_lens import archives
+        from deepfake_lens.archives import MAX_ARCHIVE_MEMBER_BYTES
+
+        folder = self.root / "case"
+        folder.mkdir()
+        raw = bytearray(_zip_payload({"bomb.bin": b"z" * 4096}))
+        forged = struct.pack("<I", 1 << 30)
+        local = raw.index(b"PK\x03\x04")
+        raw[local + 22:local + 26] = forged
+        central = raw.index(b"PK\x01\x02")
+        raw[central + 24:central + 28] = forged
+        (folder / "declared.zip").write_bytes(bytes(raw))
+        with zipfile.ZipFile(folder / "fat.zip", "w", compression=zipfile.ZIP_STORED) as zf:
+            for index in range(4):
+                zf.writestr(f"blob-{index}.bin", bytes([index]) * (300 * 1024))
+        with patch.object(archives, "TOTAL_EXTRACTION_BYTES", 700 * 1024):
+            _, items = scan_directory(folder)
+        by_path = {item.path: item for item in items}
+        declared_item = by_path["declared.zip"]
+        assert declared_item.result is not None
+        declared_reasons = [e.reason for e in declared_item.result.coverage if e.check == "archive_member"]
+        self.assertEqual(
+            declared_reasons,
+            [f"bomb.bin: 압축 예산 초과(선언 크기 {1 << 30}, 한도 {MAX_ARCHIVE_MEMBER_BYTES}) — 멤버당 크기 상한"],
+        )
+        self.assertIn("압축 예산 초과", declared_item.result.verdict)
+        fat_item = by_path["fat.zip"]
+        assert fat_item.result is not None
+        fat_reasons = [e.reason for e in fat_item.result.coverage if e.check == "archive_member"]
+        self.assertEqual(len(fat_reasons), 2, fat_reasons)
+        self.assertRegex(fat_reasons[0], r"^blob-2\.bin: 압축 예산 초과\(선언 크기 307200, 한도 \d+\) — 압축 해제 총량 예산 소진$")
+        self.assertEqual(fat_reasons[1], "blob-3.bin: 앞선 멤버에서 해제 예산 소진으로 미해제")
+
+    def test_nested_rejections_are_prefixed_with_the_inner_archive(self) -> None:
+        inner = _zip_payload({"../up.txt": b"escape", "fine.txt": "내부의 정상 파일입니다.".encode()})
+        arc = self.root / "outer.zip"
+        make_zip(arc, {"sub/inner.zip": inner})
+        out = extract_archive(arc, self.root / "out")
+        self.assertIn(("sub/inner.zip::../up.txt", "경로 이탈 멤버('..' — 대상 폴더 밖 쓰기 시도)"), out.rejected)
+        self.assertEqual(out.skipped, len(out.rejected))
+
+    def test_symlinks_in_scanned_folder_are_skipped_rows(self) -> None:
+        import os
+
+        from deepfake_lens.core import SYMLINK_SKIP_REASON
+
+        folder = self.root / "case"
+        (folder / "sub").mkdir(parents=True)
+        (folder / "real.txt").write_text("실제 파일 내용입니다.", encoding="utf-8")
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "secret.txt").write_text("폴더 밖 파일", encoding="utf-8")
+        try:
+            os.symlink(outside / "secret.txt", folder / "link.txt")
+            os.symlink(outside, folder / "sub" / "linked-dir")
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks not permitted on this platform")
+        for recursive in (False, True):
+            with self.subTest(recursive=recursive):
+                summary, items = scan_directory(folder, recursive=recursive)
+                by_path = {item.path: item for item in items}
+                link = by_path["link.txt"]
+                self.assertEqual(link.status, "skipped")
+                self.assertEqual(link.error, SYMLINK_SKIP_REASON)
+                self.assertTrue((link.error or "").startswith("심볼릭 링크"))
+                self.assertIsNone(link.result)
+                if recursive:
+                    self.assertEqual(by_path[str(Path("sub") / "linked-dir")].status, "skipped")
+                self.assertEqual(summary.skipped, 2 if recursive else 1)
+                self.assertFalse(any("secret.txt" in path for path in by_path))
+
+
 if __name__ == "__main__":
     unittest.main()

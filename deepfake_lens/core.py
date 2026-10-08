@@ -32,6 +32,7 @@ from .checks import AnalyzerError, CheckSkipped, run_check, skipped
 from .image_class import MEASURABLE_MIN_SIDE_PX, ImageClass, classify_image, resolution_out_of_range
 from .checks import failed as failed_entry
 from .checks import failure_reason
+from .checks import skipped as skipped_entry
 from .decision import decide
 from .result_text import TEXT_LEGAL_LIMITATION
 from .evidence_rules import (
@@ -62,6 +63,11 @@ SCAN_JSON_SCHEMA_VERSION = 2
 TOOL_VERSION = "0.1.0"  # kept in sync with pyproject version
 DEFAULT_MAX_FILES = 1000
 DEFAULT_TEXT_BYTES = 64 * 1024
+# D10: reason on the row of a symlink found in a scanned folder.
+SYMLINK_SKIP_REASON = "심볼릭 링크 — 링크를 따라가지 않으므로 분석하지 않았습니다(allow_symlinks=false)"
+# D9: rejected archive members listed one coverage entry each, up to this
+# many per container; the rest are summarized in one entry with the count.
+MAX_ARCHIVE_REJECTION_ENTRIES = 100
 # Smallest image side a detector is run on — defined once in image_class
 # (the photo/non-photo gate also uses it for ``too_small``); kept here as
 # an alias for existing callers.
@@ -106,6 +112,7 @@ from .serialization import (  # noqa: F401
 )
 from .scan_cache import (  # noqa: F401
     _cache_key,
+    _content_sha256,
     _cache_scan_context,
     _cached_scan_item,
     _with_content_sha256,
@@ -181,9 +188,11 @@ def scan_directory(
     paths: list[Path] = []
     capped = False
     iter_errors: list[tuple[Path, OSError]] = []
+    symlinks: list[Path] = []
     for path in _iter_files(
         root, recursive=recursive, allow_symlinks=allow_symlinks,
         on_error=lambda p, e: iter_errors.append((p, e)),
+        on_symlink=symlinks.append,
     ):
         if len(paths) >= max_files:
             capped = True
@@ -224,6 +233,7 @@ def scan_directory(
             archive_meta[rel] = {
                 "path": path, "fmt": archive_format(path),
                 "skipped": extraction.skipped, "warnings": extraction.warnings,
+                "rejected": list(extraction.rejected),
             }
             archive_members[rel] = []
             for member in extraction.members:
@@ -240,12 +250,20 @@ def scan_directory(
             cache_path=cache_path, workers=workers, deep_signals=deep_signals,
             capped=capped, thresholds=thresholds, should_stop=should_stop,
         )
-        if iter_errors:
+        if iter_errors or symlinks:
             for err_path, exc in iter_errors:
                 items.append(ScanItem(
                     _display_path(err_path, root=root), err_path.name,
                     "unknown", "failed", 0,
                     error=f"directory unreadable: {exc}",
+                ))
+            # D10: a symlink in the evidence folder is listed (never followed)
+            # so the report accounts for every directory entry it was given.
+            for link in symlinks:
+                items.append(ScanItem(
+                    _display_path(link, root=root), link.name,
+                    "unknown", "skipped", 0,
+                    error=SYMLINK_SKIP_REASON,
                 ))
             items = sort_items(items)
             summary = summarize(items, capped=summary.capped, cached=summary.cached)
@@ -266,14 +284,21 @@ def _archive_container_item(
     warnings: list[str],
     member_items: list[ScanItem] | None = None,
     extraction_error: str | None = None,
+    rejected: list[tuple[str, str]] | None = None,
+    sha256: str | None = None,
 ) -> ScanItem:
     """Container row for an expanded archive; rolls member verdicts up.
 
     manipulation if any member has manipulation evidence; authenticity only
     if every member was analyzed, none was skipped, and all have
     authenticity evidence; otherwise undetermined. The row carries no
-    evidence of its own — the members do.
+    evidence of its own — the members do. Each member the extractor
+    refused (traversal, absolute path, link, budget/bomb limits, …) is a
+    ``skipped`` ``archive_member`` coverage entry and a limitation naming
+    the member and the reason (D9); ``sha256`` is the archive file's
+    digest so a signed report binds the container too.
     """
+    rejected = list(rejected or [])
     try:
         size = path.stat().st_size
     except OSError:
@@ -299,17 +324,26 @@ def _archive_container_item(
         if extraction_error
         else CoverageEntry("archive", CoverageStatus.RAN)
     ]
+    shown = rejected[:MAX_ARCHIVE_REJECTION_ENTRIES]
+    coverage.extend(skipped_entry("archive_member", f"{name}: {reason}") for name, reason in shown)
+    if len(rejected) > len(shown):
+        coverage.append(skipped_entry("archive_member", f"외 {len(rejected) - len(shown)}개 구성 파일 거부(사유는 위 항목과 경고 참조)"))
     signals = [EvidenceSignal("압축 컨테이너", f"{fmt or 'archive'} 형식 — 구성 파일 {members}개 개별 분석" + (f", 스킵 {skipped}개" if skipped else ""), 0)]
     limitations = list(warnings)
+    limitations.extend(f"구성 파일 거부: {name} — {reason}" for name, reason in shown)
     limitations.append("컨테이너 행은 구성 파일 결과의 요약입니다. '아카이브::경로' 형태의 개별 결과를 확인하세요.")
+    first_rejection = f" 거부 {len(rejected)}개(예: {rejected[0][0]} — {rejected[0][1]})." if rejected else ""
     if analyzed_members:
         verdict = (
             f"압축 파일: {VERDICT_LABELS[verdict_code]} — 구성 파일 {members}개 분석"
             + (f"(조작·생성 근거 {manipulated}건)" if manipulated else "")
-            + f", {skipped}개 스킵"
+            + f", {skipped}개 스킵."
+            + first_rejection
         )
+    elif extraction_error:
+        verdict = f"압축 파일: 판단 불가 — 압축 해제 실패({extraction_error})."
     else:
-        verdict = "압축 파일: 판단 불가 — 아카이브에서 분석 가능한 구성 파일이 없습니다."
+        verdict = "압축 파일: 판단 불가 — 아카이브에서 분석 가능한 구성 파일이 없습니다." + first_rejection
     band = band_for_verdict(verdict_code)
     return ScanItem(
         # "expanded" (not "analyzed") keeps the roll-up row out of the
@@ -328,6 +362,7 @@ def _archive_container_item(
             verdict_code=verdict_code,
             coverage=coverage,
         ),
+        sha256=sha256,
     )
 
 
@@ -482,6 +517,9 @@ def _scan_specs(
             members=len(member_items), skipped=meta.get("skipped", 0),
             warnings=meta.get("warnings", []), member_items=member_items,
             extraction_error=meta.get("error"),
+            rejected=meta.get("rejected", []),
+            # D9: the container's own digest binds the archive into a signed report.
+            sha256=_content_sha256(arc_path, fingerprints) or None,
         ))
 
     sorted_items = sort_items(items)

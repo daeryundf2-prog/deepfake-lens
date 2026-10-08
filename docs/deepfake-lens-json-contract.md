@@ -70,9 +70,24 @@ per-file coverage record:
   scans for every readable file (duplicates included), `null` when the file
   was not hashed (oversize skip, unreadable, single-file analysis). It is the
   scan-cache key's content component (G11) and is covered by report
-  signatures (G30).
+  signatures (G30). Archive container rows carry the archive file's own
+  digest (D9), so a signed report binds the container as well as its members.
 - `result`: `null` unless the item was analyzed (archive container rows
-  carry a roll-up result with `status: "expanded"`).
+  carry a roll-up result with `status: "expanded"`, or `"unknown"` when no
+  member could be analyzed). Every member the extractor refused is a
+  `skipped` coverage entry with check `archive_member` and reason
+  `<member>: <why>` — `경로 이탈 멤버('..' …)`, `절대 경로 멤버(…)`,
+  `심볼릭 링크 멤버`, `하드 링크 멤버`, `압축 예산 초과(선언 크기 N, 한도 M) — <cap>`
+  (per-member cap, compression-ratio bomb, per-archive or tree byte budget),
+  `앞선 멤버에서 해제 예산 소진으로 미해제`, `중첩 압축 최대 깊이(N) 초과로 미해제`,
+  `중첩 압축 예산(N개) 소진으로 미해제`, `손상된 멤버 데이터(<Exception>: …)`;
+  members of nested archives are named `<inner archive>::<member>`. The same
+  lines appear in `limitations` as `구성 파일 거부: <member> — <why>` (at most
+  100 per container, then one `외 N개` entry).
+- A symlink found in a scanned folder (file or directory) is never followed
+  and is listed as its own row: `kind: "unknown"`, `status: "skipped"`,
+  `result: null`, `error` starting `심볼릭 링크` (D10); it counts in
+  `summary.skipped`.
 
 ## Result fields — contract v2 (stable)
 
@@ -130,7 +145,7 @@ Phase-0 classification of existing signals:
 
 | Field | Values |
 | --- | --- |
-| `check` | `metadata`, `c2pa`, `image_class`, `pixel`, `external_model`, `model:<member>`, `face_manipulation`, `inpaint`, `faceswap_seam`, `rppg`, `avatar`, `lipsync`, `face_track`, `audio_analysis`, `audio_features`, `video_analysis`, `document_text`, `text_lexical`, `archive` |
+| `check` | `metadata`, `c2pa`, `image_class`, `pixel`, `external_model`, `model:<member>`, `face_manipulation`, `inpaint`, `faceswap_seam`, `rppg`, `avatar`, `lipsync`, `face_track`, `audio_analysis`, `audio_features`, `video_analysis`, `document_text`, `text_lexical`, `archive`, `archive_member` |
 | `status` | `ran` \| `skipped` \| `failed` |
 | `reason` | Required for `skipped`/`failed`. `metadata` fails with `AnalyzerError: …` when the image's metadata could not be read completely: `JPEG 구조 불완전(SOS 마커 전에 파일 끝) …`, `PNG 구조 불완전(IEND 청크 없음) …`, `빈 파일 …`, `이미지 형식 식별 불가(… 확장자 위장 가능성)`, `EXIF 판독 실패: <Exception>: …`. `c2pa` runs when the SDK read a manifest or reported none (`ManifestNotFound` → status `absent`); any other reader/validation exception (status `unavailable`, CHARTER 4-value rule, D8) fails it with `AnalyzerError: C2PA 판독 실패: <Exception>: …` / `C2PA 검증 실패: …`, and a container the SDK does not handle is skipped `C2PA SDK가 지원하지 않는 형식: …`. Skips: `의존성 부재: <module>`, `얼굴 미검출`, `측정 범위 밖: 해상도 …`, `사진 아님: <kind>` (see below), `비활성화(…)`, `모델 프로필 미지정`, `모델 실행 불가: …`. Failures: `<ExceptionClass>: <message ≤200 chars>`; a model weight refused by the pin policy (G9) fails with `미고정 프로필: …` (no/empty/malformed `pin`) or `무결성 불일치: …` (checkpoint sha256 differs from `pin.sha256`). A language-gated zoo member is `skipped` with `모델 실행 불가: 언어 게이트 제외: …`. |
 
