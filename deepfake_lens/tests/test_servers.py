@@ -2032,7 +2032,8 @@ class DocumentedEndpointsExistTest(unittest.TestCase):
         web_rows: set[tuple[str, str]] = set()
         for line in web.splitlines():
             cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
-            match = re.fullmatch(r"(?:(GET|POST|PUT) )?`(/api/[^`]*)`", cells[0]) if len(cells) == 3 else None
+            # R11-12: the GUI paths (/, /gui, /gui.css, /gui.js) are rows of the table too.
+            match = re.fullmatch(r"(?:(GET|POST|PUT) )?`(/[^`]*)`", cells[0]) if len(cells) == 3 else None
             if match:
                 web_rows.add((match.group(1) or "GET", match.group(2)))
         return rest_rows, web_rows
@@ -2130,7 +2131,63 @@ class DocumentedEndpointsExistTest(unittest.TestCase):
         dispatched = {("GET", path) for path in re.findall(r'parsed\.path == "(/api/[^"]+)"', get_part)}
         dispatched |= {("POST", path) for path in re.findall(r'parsed\.path == "(/api/[^"]+)"', post_part)}
         self.assertGreaterEqual(len(dispatched), 15)
+        # R11-12: and the only GET paths outside /api/ are the GUI shell and its assets.
+        dispatched |= {("GET", path) for path in (*webapp.GUI_SHELL_PATHS, *webapp.GUI_STATIC_ASSETS)}
         self.assertEqual(sorted(dispatched - web_rows), [], "a web-server route missing from the web GUI table")
+        self.assertEqual(sorted(web_rows - dispatched), [], "a documented web route the server does not dispatch")
+
+    def test_web_server_unknown_paths_are_korean_404(self) -> None:
+        """R11-12 (round 11): every path outside /api/ served the GUI HTML (/docs,
+        /favicon.ico, …). Only /, /gui, /gui.css and /gui.js are served; any other path
+        is 404 {"error": "찾을 수 없는 경로입니다"} — the API server's GUI paths."""
+        import json as _json
+        import tempfile
+        import threading
+        import urllib.error
+        import urllib.request
+
+        from deepfake_lens.webapp import build_server
+
+        roots = patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
+        roots.start()
+        self.addCleanup(roots.stop)
+        with tempfile.TemporaryDirectory() as tmp:
+            server = build_server("127.0.0.1", 0, default_folder=Path(tmp))
+            threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+            self.addCleanup(server.server_close)
+            self.addCleanup(server.shutdown)
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+
+            def get(path: str) -> tuple[int, str, str]:
+                try:
+                    with urllib.request.urlopen(base + path, timeout=60) as response:
+                        return response.status, response.headers.get("Content-Type", ""), response.read().decode("utf-8", "replace")
+                except urllib.error.HTTPError as exc:
+                    return exc.code, exc.headers.get("Content-Type", ""), exc.read().decode("utf-8", "replace")
+
+            for path in ("/", "/gui", "/?folder=x"):
+                with self.subTest(path=path):
+                    status, ctype, body = get(path)
+                    self.assertEqual(status, 200)
+                    self.assertIn("text/html", ctype)
+                    self.assertIn("<html", body.lower())
+            for path, ctype_part in (("/gui.css", "text/css"), ("/gui.js", "javascript")):
+                with self.subTest(path=path):
+                    status, ctype, _ = get(path)
+                    self.assertEqual((status, ctype_part in ctype), (200, True))
+            for path in ("/docs", "/redoc", "/openapi.json", "/favicon.ico", "/gui2", "/gui/x", "/index.html",
+                         "/etc/passwd", "/..%2f..%2fetc%2fpasswd", "/api", "/apix/scan"):
+                with self.subTest(path=path):
+                    status, ctype, body = get(path)
+                    self.assertEqual(status, 404, body[:200])
+                    self.assertIn("application/json", ctype)
+                    self.assertEqual(_json.loads(body), {"error": "찾을 수 없는 경로입니다"})
+        from deepfake_lens import webapp
+
+        if HAVE_FASTAPI:
+            # The same GUI paths as api-serve.
+            api_gui = {route.path for route in api_server.create_app().routes if not route.path.startswith("/api/")}
+            self.assertEqual(api_gui, set(webapp.GUI_SHELL_PATHS) | set(webapp.GUI_STATIC_ASSETS))
 
 
 class ErrorTableEveryRowTest(unittest.TestCase):

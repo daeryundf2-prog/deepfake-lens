@@ -40,6 +40,16 @@ from .json_text import json_dumps
 
 logger = logging.getLogger(__name__)
 
+# R11-12 (round 11): every path that was not /api/* served the GUI HTML
+# (/docs, /favicon.ico, /anything) — a surface the service document did not
+# describe. The web server answers only these paths outside /api/ (the same
+# GUI paths as api-serve); any other is 404 {"error": "찾을 수 없는 경로입니다"}.
+GUI_SHELL_PATHS = frozenset({"/", "/gui"})
+GUI_STATIC_ASSETS: dict[str, tuple[str, str]] = {
+    "/gui.css": ("gui.css", "text/css; charset=utf-8"),
+    "/gui.js": ("gui.js", "text/javascript; charset=utf-8"),
+}
+
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 # Custom header required on every /api/* request when no token is configured.
 # Browsers can only attach custom headers via a CORS preflight, which this
@@ -208,13 +218,14 @@ def build_server(
 
             if not parsed.path.startswith("/api/"):
                 # Serve GUI shell + extracted static assets (carry no evidence data)
-                if parsed.path == "/gui.css":
-                    self._send_static("gui.css", "text/css; charset=utf-8")
+                if parsed.path in GUI_STATIC_ASSETS:
+                    self._send_static(*GUI_STATIC_ASSETS[parsed.path])
                     return
-                if parsed.path == "/gui.js":
-                    self._send_static("gui.js", "text/javascript; charset=utf-8")
+                if parsed.path in GUI_SHELL_PATHS:
+                    self._send_html(_load_gui())
                     return
-                self._send_html(_load_gui())
+                # R11-12: any other path is a Korean 404, not the GUI.
+                self.send_error(404, "찾을 수 없는 경로입니다")
                 return
 
             if not self._api_allowed():

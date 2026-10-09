@@ -177,15 +177,23 @@ the top level for clients of the earlier compact rows. `/api/check` returns
 ## Web GUI endpoints (`web`, default `127.0.0.1:8765`)
 
 JSON API under `/api/` (GET plus `POST /api/feedback`, `/api/report`,
-`/api/analyze-upload`, `/api/check`, `/api/compare`, `/api/review`); anything
-else serves the GUI HTML. R9-8: every path in this table and in the REST
-table above is a route of its server (`test_servers.DocumentedEndpointsExistTest`).
+`/api/analyze-upload`, `/api/check`, `/api/compare`, `/api/review`); `/` and
+`/gui` serve the GUI HTML and `/gui.css`, `/gui.js` its assets (the same GUI
+paths as `api-serve`). R11-12: any other path is **404**
+`{"error": "찾을 수 없는 경로입니다"}` (it used to serve the GUI HTML — `/docs`,
+`/favicon.ico`, anything). R9-8: every path in this table and in the REST
+table above is a route of its server, and every route is in its table
+(`test_servers.DocumentedEndpointsExistTest`).
 The GUI saves its examiner marks through `POST /api/review` (browser
 `localStorage` only as an offline fallback) — there is no `/api/review-marks`
 (it was documented here but never existed).
 
 | Path | Params | Response |
 |---|---|---|
+| `/` | — | the GUI HTML (CSP header, no inline script/style) |
+| `/gui` | — | the GUI HTML (same as `/`) |
+| `/gui.css` | — | GUI stylesheet (`text/css`) |
+| `/gui.js` | — | GUI script (`text/javascript`) |
 | `/api/scan` | `folder`, `pixel` (`off`/`fast`/`deep`), `recursive`, `max_files`, `max_file_bytes`, `dedupe`, `heatmaps`, `deep_signals`, `no_default_engine`, `model_path` / `fusion_profile` (bare file name in the models dir), `async` | the same `scan_to_json` payload the CLI prints (`{"schema_version", "summary", "coverage", "thresholds", "items"}`) or `{"error": "..."}`; with `async=1` returns `{"job_id", "status": "running"}`. **400** `{"error": ...}` for an invalid option (non-integer limit, unknown pixel mode, `model_path`/`fusion_profile` not a file name inside the models dir). **403** `{"error": "허용되지 않은 경로"}` when `folder` is outside the read roots (see below) |
 | `/api/scan-status` | `job` | `{"job_id", "status": "running"\|"done"\|"error"}` plus `result` once finished; jobs live in memory only and expire after 15 min (max 32 concurrent) |
 | `/api/scan-cancel` | `job` | Sets the job's cancel flag; the scan stops between items and returns partial results as `done`. `{"cancelled": true}` while running, `false` once finished |
