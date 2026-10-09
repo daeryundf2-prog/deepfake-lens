@@ -403,7 +403,14 @@ def build_legal_report(
 
 
 def legal_report_text(report: dict[str, Any]) -> str:
-    """Korean plain-text rendering of :func:`build_legal_report`."""
+    """Korean plain-text rendering of :func:`build_legal_report`.
+
+    B4: evidence qualifiers ("[결정적/합성/강]"), coverage statuses
+    (실행/미실행/실패) and check names (CHECK_LABELS, model display names)
+    are Korean; the JSON body keeps the raw codes.
+    """
+    from .result_text import coverage_entry_line, evidence_qualifiers_short
+
     raw_file, raw_conclusion = report.get("file"), report.get("conclusion")
     file_info: dict[str, Any] = raw_file if isinstance(raw_file, dict) else {}
     conclusion: dict[str, Any] = raw_conclusion if isinstance(raw_conclusion, dict) else {}
@@ -418,10 +425,10 @@ def legal_report_text(report: dict[str, Any]) -> str:
         "=== 파일 정보 ===",
         f"파일 경로: {file_info.get('path', '')}",
         f"파일 해시 (SHA-256): {file_info.get('sha256') or '해시 불가'}",
-        f"파일 크기: {file_info.get('size_bytes', 0)} bytes",
+        f"파일 크기: {file_info.get('size_bytes', 0)} 바이트",
         "",
         "=== 결론 ===",
-        f"{conclusion.get('verdict_label', '')} ({conclusion.get('verdict_code', '')}) · 등급: {conclusion.get('grade_label', '')}",
+        f"{conclusion.get('verdict_label', '')} · 등급: {conclusion.get('grade_label', '')}",
         str(conclusion.get("verdict", "")),
         "",
         "=== 근거 ===",
@@ -433,14 +440,13 @@ def legal_report_text(report: dict[str, Any]) -> str:
     for index, item in enumerate(evidence, 1):
         if isinstance(item, dict):
             lines.append(
-                f"{index}. [{item.get('kind')}/{item.get('direction')}/{item.get('strength')}] "
+                f"{index}. [{evidence_qualifiers_short(item.get('kind'), item.get('direction'), item.get('strength'))}] "
                 f"{item.get('title')}: {item.get('detail')}"
             )
     lines.extend(["", "=== 검사 범위 ==="])
     for entry in report.get("coverage") or []:
         if isinstance(entry, dict):
-            reason = f" — {entry['reason']}" if entry.get("reason") else ""
-            lines.append(f"- {entry.get('check')}: {entry.get('status')}{reason}")
+            lines.append(f"- {coverage_entry_line(entry)}")
     lines.extend(["", "=== 한계 ==="])
     lines.extend(f"- {item}" for item in report.get("limitations") or [])
     lines.extend(["", "=== 법적 참고사항 ==="])

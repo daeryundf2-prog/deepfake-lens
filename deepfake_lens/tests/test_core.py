@@ -253,7 +253,7 @@ class DeepfakeLensCoreTest(unittest.TestCase):
             heatmap_items = scan_directory(scan_root, recursive=True, pixel_mode="deep", heatmaps=True, heatmap_dir=root / "heatmaps")[1]
             write_html_report(html, second_summary, heatmap_items, redact_paths=True)
             write_pdf_report(pdf, second_summary, items, redact_paths=True)
-            self.assertIn("Deepfake Lens Report", html.read_text(encoding="utf-8"))
+            self.assertIn("Deepfake Lens 감정 보고서", html.read_text(encoding="utf-8"))  # B2: Korean title
             self.assertIn("data:image/png;base64", html.read_text(encoding="utf-8"))
             self.assertTrue(pdf.read_bytes().startswith(b"%PDF"))
 

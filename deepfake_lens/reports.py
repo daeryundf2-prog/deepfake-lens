@@ -9,23 +9,32 @@ from html import escape
 from pathlib import Path
 from typing import Any, Callable
 
-from .core import BatchScanSummary, ScanItem
+from .core import TOOL_VERSION, BatchScanSummary, ScanItem
 from .evaluation_metrics import format_ci
 from .result_text import (
+    HASH_UNAVAILABLE_ACCESS,
+    HASH_UNAVAILABLE_MEMBER,
+    HASH_UNAVAILABLE_SYMLINK,
     TEXT_LEGAL_LIMITATION,
     VERDICT_CODES_ASCII,
     coverage_gaps,
     deciding_evidence,
+    display_path,
     evidence_counts,
     evidence_counts_text,
     evidence_groups,
+    is_symlink_row,
     leading_limitations,
     summary_line,
     summary_line_ascii,
+    threshold_provenance_line,
     verdict_heading,
 )
-from .result_types import EVIDENCE_KIND_LABELS, VERDICT_LABELS, CoverageStatus, EvidenceKind, Grade, Verdict
+from .result_types import EVIDENCE_KIND_LABELS, VERDICT_LABELS, CoverageStatus, EvidenceKind, Grade, Verdict, check_label, is_verdict_row, status_label
 from .signing import REPORT_KEY_ENV, resolve_report_key, sign_report, signed_body_sha256
+
+# Report title (B2): the product name is an identifier, the rest Korean.
+HTML_REPORT_TITLE = "Deepfake Lens 감정 보고서"
 
 
 def _has_reference_grade(items: list[ScanItem]) -> bool:
@@ -33,24 +42,26 @@ def _has_reference_grade(items: list[ScanItem]) -> bool:
 
 
 def _threshold_provenance_line(thresholds: object | None) -> str:
-    """One-line calibration provenance for report headers.
+    """One-line calibration provenance for report headers — Korean (B2).
 
     A scan has no reason to hide that its cutoffs were the unmeasured
     builtins; a loaded profile reports its sample count so provisional
-    (n < MIN_CALIBRATION_SAMPLES) fits are visibly marked unvalidated.
+    (n < MIN_CALIBRATION_SAMPLES) fits are visibly marked unvalidated, and an
+    in-sample fit carries the same caveat as the CLI header (G28).
     """
+    return threshold_provenance_line(thresholds)
+
+
+def _threshold_provenance_ascii(thresholds: object | None) -> str:
+    """Latin-1 provenance line for the minimal PDF writer only."""
     to_json = getattr(thresholds, "to_json", None)
     payload = to_json() if callable(to_json) else (thresholds if isinstance(thresholds, dict) else {})
     if thresholds is None or not isinstance(payload, dict) or payload.get("source") == "builtin_defaults":
         return "Decision thresholds: builtin defaults (unmeasured - provisional)."
-    samples = int(payload.get("samples", 0) or 0)
     state = "PROVISIONAL (unvalidated)" if payload.get("provisional", True) else "measured"
     if payload.get("in_sample"):
-        # G28: fitted on the same rows it was evaluated on.
         state += ", in-sample (reference only)"
-    fp = str(payload.get("dataset_fingerprint", ""))[:16]
-    suffix = f", corpus fp {fp}" if fp else ""
-    return f"Decision thresholds: threshold profile {payload.get('version', '?')} — {state}, n={samples}{suffix}."
+    return f"Decision thresholds: threshold profile {payload.get('version', '?')} - {state}, n={int(payload.get('samples', 0) or 0)}."
 
 
 SIGNED_REPORT_SCRIPT_ID = "deepfake-lens-signed-report"
@@ -205,7 +216,7 @@ def write_html_report(
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <title>Deepfake Lens Report</title>
+  <title>{escape(HTML_REPORT_TITLE)}</title>
   <style>
     body {{ font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 32px; color: #1f2933; }}
     table {{ border-collapse: collapse; width: 100%; }}
@@ -223,13 +234,13 @@ def write_html_report(
   </style>
 </head>
 <body>
-  <h1>Deepfake Lens Report</h1>
+  <h1>{escape(HTML_REPORT_TITLE)}</h1>
   <p>{escape(summary_line(summary))}</p>
   <p class="note">결론은 세 가지뿐입니다 — 조작·생성 근거 있음 / 원본성 근거 있음 / 판단 불가. 결정적 근거(메타데이터·C2PA)만 결론을 내리고, 통계적(모델)·어휘적(키워드) 근거는 보정 전까지 참고로만 표시합니다. 검사가 실패한 파일은 판단 불가로 남습니다.</p>
   {legal_note}
-  <p class="note">{_threshold_provenance_line(thresholds)}</p>
+  <p class="note">{escape(_threshold_provenance_line(thresholds))}</p>
   <table>
-    <thead><tr><th>결론</th><th>근거(종류별)</th><th>검사 범위(미실행·실패)</th><th>파일</th><th>참고 신호</th><th>heatmap</th></tr></thead>
+    <thead><tr><th>결론</th><th>근거(종류별)</th><th>검사 범위(미실행·실패)</th><th>파일</th><th>참고 신호</th><th>히트맵</th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
   {_signature_html(signed_report)}
@@ -273,16 +284,30 @@ def _evidence_sha256(
 
 
 def _threshold_provenance_ko(thresholds: object | None) -> str:
-    """Korean calibration-provenance line for the forensic PDF header."""
-    to_json = getattr(thresholds, "to_json", None)
-    payload = to_json() if callable(to_json) else (thresholds if isinstance(thresholds, dict) else {})
-    if thresholds is None or not isinstance(payload, dict) or payload.get("source") == "builtin_defaults":
-        return "판정 임계값: 내장 기본값 (비측정 — 잠정; calibration 미적용)"
-    samples = int(payload.get("samples", 0) or 0)
-    state = "잠정(미검증)" if payload.get("provisional", True) else "측정됨"
-    if payload.get("in_sample"):
-        state += " · in-sample(참고)"  # G28
-    return f"판정 임계값: 프로파일 {payload.get('version', '?')} — {state}, 표본 n={samples}"
+    """Korean calibration-provenance line for the forensic PDF header (same as HTML)."""
+    return threshold_provenance_line(thresholds)
+
+
+def _hash_unavailable_reason(item: ScanItem) -> str:
+    """Why a forensic-PDF row has no hash — the evidence statement's wording (S2)."""
+    if "::" in item.path:
+        return HASH_UNAVAILABLE_MEMBER
+    if is_symlink_row(item.status, item.error):
+        return HASH_UNAVAILABLE_SYMLINK
+    return HASH_UNAVAILABLE_ACCESS
+
+
+def _pdf_font(text: str, font_ko: str, font_en: str) -> str:
+    """The Latin font only ever draws ASCII text; everything else the CJK font (B3)."""
+    return font_en if text.isascii() else font_ko
+
+
+def _shorten_middle(text: str, limit: int) -> str:
+    """Keep both ends (container name and member file) when a label is too long (S1)."""
+    if len(text) <= limit:
+        return text
+    head = max(1, limit // 2 - 1)
+    return text[:head] + "…" + text[-(limit - head - 1):]
 
 
 def write_pdf_report(
@@ -303,7 +328,7 @@ def write_pdf_report(
         "Verdicts: MANIPULATION-EVIDENCE / AUTHENTICITY-EVIDENCE / UNDETERMINED. Only deterministic",
         "evidence (metadata, C2PA) concludes; statistical (model) and lexical (keyword) evidence is",
         "reference-only until calibrated. A failed check leaves the file UNDETERMINED.",
-        _threshold_provenance_line(thresholds),
+        _threshold_provenance_ascii(thresholds),
         "",
     ]
     if _has_reference_grade(items):
@@ -408,8 +433,9 @@ def write_forensic_pdf_report(
 
     # Title Banner (Left)
     page.insert_text(pymupdf.Point(margin_l, 80), "디지털 포렌식 AI 감정보고서", fontname=font_ko, fontsize=16, color=(0.08, 0.15, 0.32))
-    page.insert_text(pymupdf.Point(margin_l, 98), "DEEPFAKE LENS FORENSIC AI DETECTION REPORT", fontname=font_en, fontsize=8, color=(0.4, 0.45, 0.5))
-    page.insert_text(pymupdf.Point(margin_l, 110), f"문서 번호: DFL-EVID-{int(time.time())}", fontname=font_en, fontsize=7.5, color=(0.5, 0.5, 0.5))
+    page.insert_text(pymupdf.Point(margin_l, 98), f"{HTML_REPORT_TITLE} — 디지털 미디어 AI 생성·조작 감정", fontname=font_ko, fontsize=8, color=(0.4, 0.45, 0.5))
+    # B3: "문서 번호" is Hangul — drawn with the CJK font (the Latin font rendered it as dots).
+    page.insert_text(pymupdf.Point(margin_l, 110), f"문서 번호: DFL-EVID-{int(time.time())}", fontname=font_ko, fontsize=7.5, color=(0.5, 0.5, 0.5))
 
     # Evidence hashes are computed once, up front, so the header's
     # integrity claim can state the real verified/total count.
@@ -419,12 +445,12 @@ def write_forensic_pdf_report(
     hashed = sum(1 for v in hash_map.values() if v)
 
     # Metadata & Case Overview Box
-    meta_box = pymupdf.Rect(margin_l, 122, margin_r, 196)
+    meta_box = pymupdf.Rect(margin_l, 122, margin_r, 220)
     page.draw_rect(meta_box, color=(0.85, 0.88, 0.92), fill=(0.98, 0.98, 0.99))
 
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     page.insert_text(pymupdf.Point(margin_l + 10, 137), "감정 의뢰: (의뢰사 상호명 입력) / (담당자 부서·직위·성명) 귀하", fontname=font_ko, fontsize=8.5, color=(0.2, 0.2, 0.2))
-    page.insert_text(pymupdf.Point(margin_l + 10, 151), f"감정 일시: {now_str} (KST)  |  분석 엔진: Deepfake Lens Forensic Suite v0.1.0", fontname=font_ko, fontsize=8.5, color=(0.2, 0.2, 0.2))
+    page.insert_text(pymupdf.Point(margin_l + 10, 151), f"감정 일시: {now_str} (KST)  |  분석 엔진: Deepfake Lens v{TOOL_VERSION}", fontname=font_ko, fontsize=8.5, color=(0.2, 0.2, 0.2))
     page.insert_text(
         pymupdf.Point(margin_l + 10, 165),
         f"감정 결과: 총 {summary.total}개" + (f"(압축 파일 {summary.container_rows}건 포함)" if summary.container_rows else "") + " — " + f"조작·생성 근거 {summary.manipulation_evidence}건, 원본성 근거 {summary.authenticity_evidence}건, 판단 불가 {summary.undetermined}건(검사 실패 {summary.checks_failed}건), 미지원/오류 {summary.unsupported_or_failed}건",
@@ -439,18 +465,19 @@ def write_forensic_pdf_report(
         fontsize=8,
         color=(0.45, 0.45, 0.45),
     )
-    page.insert_text(
-        pymupdf.Point(margin_l + 10, 191),
+    # The provenance line (with the in-sample caveat) wraps inside the box.
+    page.insert_textbox(
+        pymupdf.Rect(margin_l + 10, 181, margin_r - 8, 219),
         _threshold_provenance_ko(thresholds),
         fontname=font_ko,
-        fontsize=8,
+        fontsize=7.5,
         color=(0.45, 0.45, 0.45),
     )
 
     # Table Header
-    y = 208.0
+    y = 230.0
     page.draw_rect(pymupdf.Rect(margin_l, y, margin_r, y + 20), color=(0.8, 0.85, 0.9), fill=(0.92, 0.94, 0.97))
-    page.insert_text(pymupdf.Point(margin_l + 5, y + 14), "No.", fontname=font_en, fontsize=8, color=(0.15, 0.2, 0.35))
+    page.insert_text(pymupdf.Point(margin_l + 5, y + 14), "번호", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
     page.insert_text(pymupdf.Point(margin_l + 30, y + 14), "증거 파일명 및 SHA-256 무결성 해시", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
     page.insert_text(pymupdf.Point(margin_l + 250, y + 14), "결론", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
     page.insert_text(pymupdf.Point(margin_l + 300, y + 14), "등급", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
@@ -465,7 +492,7 @@ def write_forensic_pdf_report(
             page = create_page()
             y = 70.0
             page.draw_rect(pymupdf.Rect(margin_l, y, margin_r, y + 20), color=(0.8, 0.85, 0.9), fill=(0.92, 0.94, 0.97))
-            page.insert_text(pymupdf.Point(margin_l + 5, y + 14), "No.", fontname=font_en, fontsize=8, color=(0.15, 0.2, 0.35))
+            page.insert_text(pymupdf.Point(margin_l + 5, y + 14), "번호", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
             page.insert_text(pymupdf.Point(margin_l + 30, y + 14), "증거 파일명 및 SHA-256 무결성 해시", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
             page.insert_text(pymupdf.Point(margin_l + 250, y + 14), "결론", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
             page.insert_text(pymupdf.Point(margin_l + 300, y + 14), "등급", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
@@ -478,13 +505,14 @@ def write_forensic_pdf_report(
         page.draw_line(pymupdf.Point(margin_l, y + row_h), pymupdf.Point(margin_r, y + row_h), color=(0.9, 0.92, 0.94), width=0.5)
 
         res = item.result
-        band_str = VERDICT_LABELS[res.verdict_code] if res else (item.status or "-")
+        # B3: a row without a verdict shows its Korean status, never the raw code.
+        band_str = VERDICT_LABELS[res.verdict_code] if res and is_verdict_row(item.status, True) else status_label(item.status or "failed")
         score_val = ("참고" if res.grade == Grade.REFERENCE else "근거") if res else "-"
         source_str = evidence_counts_text(res) if res else "-"
         failed_checks = [entry for entry in res.coverage if entry.status == CoverageStatus.FAILED] if res else []
         top_item = deciding_evidence(res) if res else None
         if failed_checks:
-            sig_str = "실패: " + failed_checks[0].check
+            sig_str = "실패: " + check_label(failed_checks[0].check)
         elif top_item is not None:
             sig_str = f"[{EVIDENCE_KIND_LABELS[top_item.kind][:2]}] {top_item.title}"
         else:
@@ -498,15 +526,16 @@ def write_forensic_pdf_report(
             band_color = (0.4, 0.4, 0.4)
 
         sha256_hex = hash_map.get(item.path)
-        hash_line = f"SHA-256: {sha256_hex[:32]}…" if sha256_hex else "SHA-256: 해시 불가 — 원본 파일 접근 실패"
+        # S2: the same "why no hash" wording as the evidence statement.
+        hash_line = f"SHA-256: {sha256_hex[:32]}…" if sha256_hex else f"SHA-256: {_hash_unavailable_reason(item)}"
 
-        disp_path = Path(item.path).name if redact_paths else item.path
-        if len(disp_path) > 36:
-            disp_path = disp_path[:33] + "…"
+        # S1: archive members keep "<container>::<member>"; a long label is
+        # shortened in the middle so both the container and the file stay.
+        disp_path = _shorten_middle(display_path(item.path, redact_paths=redact_paths), 40)
 
-        page.insert_text(pymupdf.Point(margin_l + 5, y + 12), str(idx), fontname=font_en, fontsize=8, color=(0.3, 0.3, 0.3))
+        page.insert_text(pymupdf.Point(margin_l + 5, y + 12), str(idx), fontname=_pdf_font(str(idx), font_ko, font_en), fontsize=8, color=(0.3, 0.3, 0.3))
         page.insert_text(pymupdf.Point(margin_l + 30, y + 12), disp_path, fontname=font_ko, fontsize=8, color=(0.1, 0.1, 0.1))
-        page.insert_text(pymupdf.Point(margin_l + 30, y + 24), hash_line, fontname=font_en if sha256_hex else font_ko, fontsize=6.5, color=(0.5, 0.5, 0.5) if sha256_hex else (0.7, 0.3, 0.3))
+        page.insert_text(pymupdf.Point(margin_l + 30, y + 24), hash_line, fontname=_pdf_font(hash_line, font_ko, font_en), fontsize=6.5, color=(0.5, 0.5, 0.5) if sha256_hex else (0.7, 0.3, 0.3))
 
         page.insert_text(pymupdf.Point(margin_l + 250, y + 15), band_str[:8], fontname=font_ko, fontsize=7, color=band_color)
         page.insert_text(pymupdf.Point(margin_l + 300, y + 15), score_val, fontname=font_ko, fontsize=8, color=(0.1, 0.1, 0.1))
@@ -576,7 +605,7 @@ def write_forensic_pdf_report(
         p.insert_text(
             pymupdf.Point(page_w / 2 - 20, page_h - 25),
             f"- {i + 1} / {total_pages} -",
-            fontname=font_en,
+            fontname=_pdf_font(f"- {i + 1} / {total_pages} -", font_ko, font_en),
             fontsize=8,
             color=(0.5, 0.5, 0.5),
         )
@@ -617,18 +646,18 @@ def write_eval_html_report(path: Path | str, payload: dict[str, object], *, reda
 <body>
   <h1>Deepfake Lens Benchmark</h1>
   <div class="grid">
-    <div class="metric">accuracy<br><strong>{escape(str(metrics.get("accuracy", "-")))}</strong></div>
-    <div class="metric">precision<br><strong>{escape(str(metrics.get("precision", "-")))}</strong></div>
-    <div class="metric">recall [95% CI]<br><strong>{escape(format_ci(metrics.get("recall"), metrics.get("recall_ci")))}</strong></div>
-    <div class="metric">FPR [95% CI]<br><strong>{escape(format_ci(metrics.get("false_positive_rate"), metrics.get("false_positive_rate_ci")))}</strong></div>
+    <div class="metric">정확도<br><strong>{escape(str(metrics.get("accuracy", "-")))}</strong></div>
+    <div class="metric">정밀도<br><strong>{escape(str(metrics.get("precision", "-")))}</strong></div>
+    <div class="metric">재현율 [95% CI]<br><strong>{escape(format_ci(metrics.get("recall"), metrics.get("recall_ci")))}</strong></div>
+    <div class="metric">오탐률(FPR) [95% CI]<br><strong>{escape(format_ci(metrics.get("false_positive_rate"), metrics.get("false_positive_rate_ci")))}</strong></div>
     <div class="metric">AUROC [95% CI]<br><strong>{escape(format_ci(metrics.get("auroc"), metrics.get("auroc_ci")))}</strong></div>
-    <div class="metric">n_pos / n_neg<br><strong>{escape(str(metrics.get("n_pos", "-")))} / {escape(str(metrics.get("n_neg", "-")))}</strong></div>
-    <div class="metric">FP/FN<br><strong>{len(false_positives)} / {len(false_negatives)}</strong></div>
+    <div class="metric">양성 / 음성 표본 수<br><strong>{escape(str(metrics.get("n_pos", "-")))} / {escape(str(metrics.get("n_neg", "-")))}</strong></div>
+    <div class="metric">오탐 / 미탐<br><strong>{len(false_positives)} / {len(false_negatives)}</strong></div>
   </div>
-  <p>점수 기준: {escape(str(payload.get("score_basis", "raw, uncalibrated")))} — {escape(str(payload.get("score_basis_note", "")))}</p>
-  <p>Confusion: {escape(str(confusion))}</p>
+  <p>점수 기준: {escape(str(payload.get("score_basis", "보정 전 원점수")))} — {escape(str(payload.get("score_basis_note", "")))}</p>
+  <p>혼동 행렬: {escape(str(confusion))}</p>
   <table>
-    <thead><tr><th>label</th><th>predicted</th><th>score</th><th>source</th><th>guess</th><th>file</th></tr></thead>
+    <thead><tr><th>라벨</th><th>예측</th><th>점수</th><th>출처</th><th>출처 추정</th><th>파일</th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
 </body>
@@ -639,11 +668,12 @@ def write_eval_html_report(path: Path | str, payload: dict[str, object], *, reda
 
 def _html_row(item: ScanItem, *, redact_paths: bool, allow_path: Callable[[str], bool] | None = None) -> str:
     result = item.result
-    path_cell = escape(_display_path(item.path, redact_paths=redact_paths))
-    if result is None:
+    path_cell = escape(display_path(item.path, redact_paths=redact_paths))
+    if result is None or not is_verdict_row(item.status, True):
+        # B3: Korean status (건너뜀/미지원/실패/중복), never the raw code.
         return (
             "<tr>"
-            f"<td>{escape(item.status)}</td>"
+            f"<td>{escape(status_label(item.status))}</td>"
             f"<td>{escape(item.error or '')}</td>"
             "<td></td>"
             f"<td>{path_cell}</td>"
@@ -695,7 +725,8 @@ def _eval_row(row: dict[str, object], *, redact_paths: bool) -> str:
 
 
 def _display_path(path: str, *, redact_paths: bool) -> str:
-    return Path(path).name if redact_paths else path
+    # S1: archive members keep "<container>::<member>" even when redacted.
+    return display_path(path, redact_paths=redact_paths)
 
 
 HEATMAP_PLACEHOLDER = "(히트맵 생략: 허용되지 않은 경로)"
@@ -718,7 +749,7 @@ def _heatmap_img(path: str | None, *, allow_path: Callable[[str], bool] | None =
         encoded = base64.b64encode(heatmap.read_bytes()).decode("ascii")
     except OSError:
         return escape(heatmap.name)
-    return f'<img class="heatmap" alt="heatmap" src="data:image/png;base64,{encoded}">'
+    return f'<img class="heatmap" alt="히트맵" src="data:image/png;base64,{encoded}">'
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:

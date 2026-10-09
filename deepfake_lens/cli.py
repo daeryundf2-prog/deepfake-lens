@@ -799,19 +799,24 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             print(f"오류: {PdfDependencyMissing()}", file=sys.stderr)
             return 2
         items: list[ScanItem] = []
+        # S6: the threshold provenance (with the in-sample caveat) goes into
+        # the statement for every input kind.
+        stmt_thresholds: object | None = None
         if target.is_file() and target.suffix.lower() == ".json":
             try:
                 data = json.loads(target.read_text(encoding="utf-8"))
                 from .core import _scan_item_from_json
                 raw_items = data.get("items", [])
                 items = [_scan_item_from_json(row) for row in raw_items if isinstance(row, dict)]
+                stmt_thresholds = data.get("thresholds")
             except Exception as exc:
                 print(f"오류: 검사 JSON을 해석할 수 없습니다: {exc}", file=sys.stderr)
                 return 2
         elif target.is_dir():
-            _, items, _ = scan_folder(target, AnalysisOptions(max_files=100), warn=thresholds_warning_printer(sys.stderr))
+            _, items, stmt_thresholds = scan_folder(target, AnalysisOptions(max_files=100), warn=thresholds_warning_printer(sys.stderr))
         elif target.is_file():
-            items = [analyze_path(target, AnalysisOptions())]
+            stmt_thresholds = load_thresholds(AnalysisOptions(), warn=thresholds_warning_printer(sys.stderr))
+            items = [analyze_path(target, AnalysisOptions(), thresholds=stmt_thresholds)]
         else:
             print(f"오류: 대상이 존재하지 않습니다: {target}", file=sys.stderr)
             return 2
@@ -827,6 +832,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             contact=args.contact,
             center=args.center,
             coverage=weights_coverage(None),
+            thresholds=stmt_thresholds if isinstance(stmt_thresholds, dict) or stmt_thresholds is None else _thresholds_json(stmt_thresholds),
             # D5: a row without sha256 is hashed against the scanned folder,
             # never the cwd (a single file / JSON input has no scan root).
             scan_root=target if target.is_dir() else None,
