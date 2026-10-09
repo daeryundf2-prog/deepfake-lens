@@ -747,6 +747,7 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
     if _multipart_incomplete(content_type, body):
         return ApiError(MULTIPART_INCOMPLETE, 400)  # P8
     from .archives import is_archive
+    from .result_text import escape_row_path
 
     message = BytesParser(policy=email_policy).parsebytes(
         b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
@@ -778,14 +779,17 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
                 if tmp_name:
                     Path(tmp_name).unlink(missing_ok=True)
             record = item.to_json()
-            record["path"] = filename
+            # R10-6: the row path of an uploaded file is escaped like any
+            # real file's (R9-1) — "t:::c.png" is the row "t\:\:\:c.png" and
+            # never holds "::"; ``name`` keeps the name the client sent.
+            record["path"] = escape_row_path(filename)
             record["name"] = filename
             items.append(record)
         except Exception as exc:
             # Per-upload failure is a failed row (status "failed"), never a
             # silently missing file.
             logger.exception("upload analysis failed: %s", filename)
-            items.append({"name": filename, "path": filename, "status": "failed", "error": failure_reason(exc)})
+            items.append({"name": filename, "path": escape_row_path(filename), "status": "failed", "error": failure_reason(exc)})
     if not items:
         return ApiError("업로드된 파일이 없습니다", 400)
     _mark_uploads(items)  # P6
@@ -899,6 +903,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     payload = _part_bytes(part) or b""
     suffix = Path(filename).suffix[:16]
     from .archives import is_archive
+    from .result_text import escape_row_path
     options = _web_options()
     thresholds = load_thresholds(options)
     if is_archive(filename):
@@ -938,7 +943,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
         if tmp_name:
             Path(tmp_name).unlink(missing_ok=True)
     record["name"] = filename
-    record["path"] = filename
+    record["path"] = escape_row_path(filename)  # R10-6: as /api/analyze-upload
     record["source"] = UPLOAD_SOURCE  # P6
     return {
         "schema_version": SCAN_JSON_SCHEMA_VERSION,

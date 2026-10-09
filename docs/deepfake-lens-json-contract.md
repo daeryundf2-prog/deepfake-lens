@@ -143,7 +143,11 @@ always `0` invited old-contract readings. They remain readable as
   100 per container, then one `외 N개` entry). An archive uploaded to the web
   server (`/api/analyze-upload`, `/api/check`) gets the same container row —
   built by the same function, always present, `path`/`name` = the uploaded
-  file name and `sha256` = the digest of the uploaded bytes (D9).
+  file name and `sha256` = the digest of the uploaded bytes (D9). R10-6: an
+  uploaded file's row `path` (archive container or single file, on
+  `/api/analyze-upload` and `/api/check`) is escaped like any real file's
+  (`t:::c.png` → `t\:\:\:c.png`), so it never holds `::`; `name` is the name
+  the client sent.
 - R10-1 (round 10): JSON keeps every `path`, `name`, `error` and reason
   string raw. Every text rendering — the console table and the single-file
   text outputs, CSV, HTML, the scan/forensic PDF, the evidence statement

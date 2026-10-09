@@ -229,6 +229,38 @@ class AnalyzeUploadPayloadTest(unittest.TestCase):
         self.assertEqual(result["summary"]["analyzed"], 2)
         self.assertEqual({item["name"] for item in result["items"]}, {"a.txt", "b.txt"})
 
+    def test_r10_6_single_file_upload_row_path_never_holds_double_colon(self) -> None:
+        """R10-6: a non-archive upload named "t:::c.png" kept "::" in its row path
+        (contract: a real file's path "never contains '::'"); it is escaped like
+        every real file's row (R9-1) and ``name`` keeps the name sent."""
+        from deepfake_lens import webapp_api
+        from deepfake_lens.result_text import escape_row_path, unescape_row_path
+
+        data = (Path(__file__).resolve().parents[2] / "fixtures" / "benchmark" / "a1111-metadata-marker.png").read_bytes()
+        # (A "\\" in a multipart filename is a quoting escape, so names here have none.)
+        names = ("t:::c.png", "x::y.png", "::::.png", "plain.png")
+        content_type, body = self._multipart(*((name, data) for name in names))
+        result = webapp_api._analyze_upload_payload(content_type, body)
+        items = result["items"]
+        self.assertEqual([item["name"] for item in items], list(names))
+        self.assertEqual([item["path"] for item in items], [escape_row_path(name) for name in names])
+        for item in items:
+            self.assertNotIn("::", item["path"])
+            self.assertEqual(unescape_row_path(item["path"]), item["name"])
+        # /api/check (single file) — the same row path.
+        boundary = "----r106"
+        check_body = (
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"t:::c.png\"\r\n"
+            "Content-Type: application/octet-stream\r\n\r\n"
+        ).encode() + data + f"\r\n--{boundary}--\r\n".encode()
+        checked = webapp_api._check_file_payload(f"multipart/form-data; boundary={boundary}", check_body)
+        self.assertEqual((checked["item"]["path"], checked["item"]["name"]), ("t\\:\\:\\:c.png", "t:::c.png"))
+        # A failed upload row is escaped too.
+        with patch.object(webapp_api, "analyze_path", side_effect=RuntimeError("boom")):
+            content_type, body = self._multipart(("t:::c.png", data))
+            failed = webapp_api._analyze_upload_payload(content_type, body)["items"]
+        self.assertEqual([(item["path"], item["status"]) for item in failed], [("t\\:\\:\\:c.png", "failed")])
+
     def test_empty_upload_reports_error(self) -> None:
         from deepfake_lens.webapp_api import _analyze_upload_payload
 
