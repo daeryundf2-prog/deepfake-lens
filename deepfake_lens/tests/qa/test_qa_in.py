@@ -260,7 +260,7 @@ class QaIn1ReadOnlyEvidenceTest(unittest.TestCase):
         return code, json.loads((out / "scan.json").read_text(encoding="utf-8"))
 
     def test_default_heatmap_dir_is_outside_the_evidence_folder(self) -> None:
-        """QA-IN-1 (heatmaps): without --heatmap-dir heatmaps go to the tool-owned root, never into the folder."""
+        """QA-IN-1: 보조 검사 — heatmaps: without --heatmap-dir heatmaps go to the tool-owned root, never into the folder."""
         with tempfile.TemporaryDirectory() as tmp:
             evidence = Path(tmp) / "evidence"
             env = {key: value for key, value in os.environ.items() if key != core.HEATMAP_DIR_ENV}
@@ -336,7 +336,7 @@ class QaIn2DeterministicRescanTest(unittest.TestCase):
                 self.assertNotIn(str(base.resolve()), text)
 
     def test_walk_order_is_sorted_and_independent_of_os_listing_order(self) -> None:
-        """QA-IN-2: file order is the sorted path order even when the OS lists entries reversed.
+        """QA-IN-2: 보조 검사 — file order is the sorted path order even when the OS lists entries reversed.
 
         W1: one global sort by the full POSIX relative path string — a
         subfolder's files sit where their path sorts ("a-dir/inner.txt"
@@ -372,7 +372,7 @@ class QaIn2DeterministicRescanTest(unittest.TestCase):
             self.assertEqual(flat, [name for name in expected if "/" not in name])
 
     def test_max_files_cap_keeps_the_same_files(self) -> None:
-        """QA-IN-2: a capped scan keeps the first N files in sorted order on every run."""
+        """QA-IN-2: 보조 검사 — a capped scan keeps the first N files in sorted order on every run."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "case"
             _build_case_folder(root)
@@ -433,7 +433,7 @@ class QaIn4ContentKeyedCacheTest(unittest.TestCase):
         self.assertTrue(any(f"sha256:{old_hash}" in key for key in keys))
 
     def test_cache_key_has_no_path_size_or_mtime(self) -> None:
-        """QA-IN-4: keys carry content hash, options, tool version and pins — not path/size/mtime."""
+        """QA-IN-4: 보조 검사 — keys carry content hash, options, tool version and pins — not path/size/mtime."""
         self._scan()
         keys = list(json.loads(self.cache.read_text(encoding="utf-8"))["items"])
         stat = self.evidence.stat()
@@ -446,7 +446,7 @@ class QaIn4ContentKeyedCacheTest(unittest.TestCase):
             self.assertIn("pins:", key)
 
     def test_renamed_folder_hits_cache_with_current_paths(self) -> None:
-        """QA-IN-4: content keys survive a folder rename; rows report the current paths."""
+        """QA-IN-4: 보조 검사 — content keys survive a folder rename; rows report the current paths."""
         self._scan()
         renamed = self.root.with_name("case-renamed")
         self.root.rename(renamed)
@@ -456,7 +456,7 @@ class QaIn4ContentKeyedCacheTest(unittest.TestCase):
         self.assertEqual(items["evidence.txt"].path, "evidence.txt")
 
     def test_identical_content_rows_keep_their_own_paths(self) -> None:
-        """QA-IN-4: two files with the same bytes share a cache entry but not a path."""
+        """QA-IN-4: 보조 검사 — two files with the same bytes share a cache entry but not a path."""
         (self.root / "twin.txt").write_bytes(self.evidence.read_bytes())
         self._scan()
         summary, items, _ = self._scan()
@@ -465,7 +465,7 @@ class QaIn4ContentKeyedCacheTest(unittest.TestCase):
         self.assertEqual(items["evidence.txt"].path, "evidence.txt")
 
     def test_profile_pin_change_invalidates_cache(self) -> None:
-        """QA-IN-4: pinning a model profile changes every key — no replay under other weights."""
+        """QA-IN-4: 보조 검사 — pinning a model profile changes every key — no replay under other weights."""
         models = Path(self._tmp.name) / "models"
         models.mkdir()
         profile = models / "fake-runtime.json"
@@ -478,7 +478,7 @@ class QaIn4ContentKeyedCacheTest(unittest.TestCase):
         self.assertEqual((summary.cached, calls), (0, 2))
 
     def test_dedupe_hash_is_reused_not_recomputed(self) -> None:
-        """QA-IN-4: with dedupe on, each file is hashed once per scan (shared memo)."""
+        """QA-IN-4: 보조 검사 — with dedupe on, each file is hashed once per scan (shared memo)."""
         from deepfake_lens import scan_cache
 
         with patch.object(scan_cache, "_file_fingerprint", wraps=scan_cache._file_fingerprint) as fingerprint:
@@ -818,6 +818,7 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
         cls._tmp.cleanup()
 
     def test_twenty_damaged_inputs_present(self) -> None:
+        """QA-IN-5: 보조 검사 — 손상 파일 20종 이상이 모두 검사 결과 행으로 나온다."""
         self.assertGreaterEqual(len(self.damaged), 20)
         for name in self.damaged:
             self.assertIn(name, self.by_path, name)
@@ -855,7 +856,7 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
                 self.assertTrue(any(marker in text for marker in expected), f"{item.path}: none of {expected} in {text[:400]}")
 
     def test_disk_usage_stays_within_budget_and_inside_temp_dir(self) -> None:
-        """QA-IN-5: extraction never writes past the aggregate budget, no symlink lands on disk, nothing escapes."""
+        """QA-IN-5: 보조 검사 — extraction never writes past the aggregate budget, no symlink lands on disk, nothing escapes."""
         self.assertTrue(self.extractions)
         for name, (usage, links, _) in self.extractions.items():
             with self.subTest(archive=name):
@@ -865,7 +866,7 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
             self.assertFalse(candidate.exists(), candidate)
 
     def test_peak_temp_usage_polled_during_the_scan_stays_within_budget(self) -> None:
-        """QA-IN-5 (D6): peak disk use, sampled by a polling thread while the
+        """QA-IN-5: 보조 검사 — D6: peak disk use, sampled by a polling thread while the
         scan runs — per archive tree within its budget, and the whole temp
         root within (archives x budget) + a small non-archive allowance;
         everything removed afterwards."""
@@ -882,7 +883,7 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
         self.assertEqual(list(self.temp_root.iterdir()), [], "temp files left behind")
 
     def test_budget_exhaustion_is_reported(self) -> None:
-        """The fat archive hits the byte budget; the 100-inner-zip archive hits the nested-archive budget."""
+        """QA-IN-5: 보조 검사 — The fat archive hits the byte budget; the 100-inner-zip archive hits the nested-archive budget."""
         _, _, fat = self.extractions["fat.zip"]
         self.assertTrue(any("총량 예산" in w for w in fat.warnings), fat.warnings)
         _, _, nested = self.extractions["nested-100.zip"]
@@ -894,6 +895,7 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
         self.assertEqual(container.result.verdict_code, Verdict.UNDETERMINED)
 
     def test_hostile_members_are_skipped(self) -> None:
+        """QA-IN-5: 보조 검사 — 디렉터리 심볼릭 링크·절대 경로·압축 폭탄·CRC 손상 압축은 구성원을 건너뛰고, 깊은 중첩 압축은 최대 깊이 경고를 남긴다."""
         for name in ("dir-symlink.zip", "absolute-path.zip", "bomb-declared.zip", "bomb-deflate.zip", "corrupt-crc.zip"):
             with self.subTest(archive=name):
                 _, _, out = self.extractions[name]
@@ -902,7 +904,7 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
         self.assertTrue(any("최대 깊이" in w for w in deep.warnings), deep.warnings)
 
     def test_valid_files_unaffected(self) -> None:
-        """QA-IN-5: the valid files get the same result as in a clean folder."""
+        """QA-IN-5: 보조 검사 — the valid files get the same result as in a clean folder."""
         _, clean_items, _ = scan_folder(self.clean, AnalysisOptions())
         clean = {item.path: _comparable(item) for item in clean_items}
         for name in self.valid:

@@ -30,6 +30,10 @@ BASELINE_PATH = QA_DIR / "test_inventory_baseline.json"
 DELETIONS_DOC = REPO_ROOT / "docs" / "TEST-DELETIONS.md"
 
 QA_ID = re.compile(r"^(QA-[A-Z]+-\d+)(?=[:\s(]|$)")
+# G11 (round 5): the docstring first line of every test in tests/qa is either
+# "<QA-ID>: <criterion verbatim>" (the one canonical test) or
+# "<QA-ID>: 보조 검사 — <what it checks>".
+AUXILIARY_PREFIX = "보조 검사 — "
 # `Class.test_method` tokens in docs/TEST-DELETIONS.md.
 DELETION_TOKEN = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*\.test[A-Za-z0-9_]*)`")
 

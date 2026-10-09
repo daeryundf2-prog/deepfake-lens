@@ -191,11 +191,13 @@ class AdversarialGateTest(unittest.TestCase):
         self.assertEqual(checked, 50)
 
     def test_document_scans_are_not_photos(self) -> None:
+        """QA-ADV-1: 보조 검사 — 합성 문서 스캔 이미지는 document_scan(사진 아님)으로 분류되어 생성 탐지가 적용되지 않는다."""
         for path in self.paths["document_scan"]:
             with self.subTest(image=path.name):
                 self._assert_gated(path, "document_scan")
 
     def test_generation_is_deterministic(self) -> None:
+        """QA-ADV-1: 보조 검사 — 같은 시드로 노이즈·스크린샷 3종을 다시 만들면 바이트 단위로 같은 파일이 나온다(재현 가능한 픽스처)."""
         with tempfile.TemporaryDirectory() as other:
             again = self.generator.generate_all(Path(other), seed=0, classes=("noise", "screenshot", "screenshot_web", "screenshot_viewer"))
             for cls, paths in again.items():
@@ -222,6 +224,7 @@ class PhotoPositiveControlTest(unittest.TestCase):
         return _with_sidecar(path)
 
     def test_photo_like_jpeg_is_photo_and_detectors_run(self) -> None:
+        """QA-ADV-1: 보조 검사 — 양성 대조 — 사진 같은 JPEG는 사진으로 분류되고 생성 탐지 검사가 실행된다."""
         from deepfake_lens.image_class import classify_image
 
         for seed, size in ((0, (512, 512)), (1, (768, 576)), (2, (1600, 1200))):
@@ -248,6 +251,7 @@ class PhotoPositiveControlTest(unittest.TestCase):
                 self.assertEqual(result.verdict_code, Verdict.UNDETERMINED)
 
     def test_photo_like_deep_layers_are_attempted(self) -> None:
+        """QA-ADV-1: 보조 검사 — 양성 대조 — 사진에는 심층 계층(얼굴·인페인팅 등)이 시도된다."""
         path = self._photo_like(4, (640, 480))
         with patch("deepfake_lens.core._deep_image_layers") as deep:
             deep.return_value = deepfake_lens.core.DeepLayers()
@@ -255,7 +259,7 @@ class PhotoPositiveControlTest(unittest.TestCase):
         deep.assert_called_once()
 
     def test_real_photographs_are_photo(self) -> None:
-        """Real camera photos (scikit-learn's bundled china/flower JPEGs)."""
+        """QA-ADV-1: 보조 검사 — Real camera photos (scikit-learn's bundled china/flower JPEGs)."""
         try:
             import sklearn.datasets
         except ImportError:
@@ -274,6 +278,7 @@ class BenchmarkFixtureClassTest(unittest.TestCase):
     """fixtures/benchmark: whatever the class, no detector-driven verdict."""
 
     def test_benchmark_fixture_classes(self) -> None:
+        """QA-ADV-1: 보조 검사 — fixtures/benchmark 세 이미지의 유형 분류와 결론 — 작은 이미지·패턴은 판단 불가, A1111 메타데이터는 결정적 근거로 조작·생성 근거 있음."""
         from deepfake_lens.image_class import classify_image
 
         expected = {
@@ -316,6 +321,7 @@ class HumanTextsAboutAiTest(unittest.TestCase):
         cls.paths = sorted(FIXTURES.glob("human-*.txt"))
 
     def test_corpus_has_thirty_texts_with_identity_phrases(self) -> None:
+        """QA-ADV-3: 보조 검사 — AI에 대해 쓴 사람 글 픽스처 30건에 정체성 문구가 실제로 들어 있다."""
         self.assertEqual(len(self.paths), 30)
         for path in self.paths:
             text = " ".join(path.read_text(encoding="utf-8").lower().split())
@@ -350,6 +356,7 @@ class HumanTextsAboutAiTest(unittest.TestCase):
                         self.assertEqual(e.strength.value, "weak")
 
     def test_folder_scan_counts_no_conclusions(self) -> None:
+        """QA-ADV-3: 보조 검사 — 폴더 검사 요약에 사람 글 30건이 모두 있고 조작·생성 근거 있음은 0건이다."""
         summary, items = scan_directory(FIXTURES)
         texts = [item for item in items if item.name.startswith("human-")]
         self.assertEqual(len(texts), 30)
@@ -358,7 +365,7 @@ class HumanTextsAboutAiTest(unittest.TestCase):
         self.assertEqual(summary.medium, 0)
 
     def test_lexical_source_hint_is_reference_only(self) -> None:
-        """D11: the text source guess from words in the text is "참고: …" with
+        """QA-ADV-3: 보조 검사 — D11: the text source guess from words in the text is "참고: …" with
         confidence unknown — never a medium/high attribution."""
         hinted = 0
         for path in self.paths:
@@ -378,6 +385,7 @@ class HumanTextsAboutAiTest(unittest.TestCase):
             self.assertEqual((guess.label, guess.confidence), (label, SourceConfidence.UNKNOWN))
 
     def test_keyword_stacking_still_cannot_conclude(self) -> None:
+        """QA-ADV-3: 보조 검사 — 키워드를 여러 개 쌓아도 어휘적 근거는 결론을 만들지 못한다."""
         stacked = ("As an AI language model, I cannot browse. 인공지능으로서 언어 모델로서 답합니다. "
                    "결론적으로 요약하자면 다음과 같습니다. 균형 잡힌 다양한 관점이 중요합니다.\n"
                    + "\n".join(f"{i}. 항목" for i in range(1, 9)))
