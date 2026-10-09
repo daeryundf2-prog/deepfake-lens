@@ -224,6 +224,43 @@ class EnglishDetectorBypassTest(unittest.TestCase):
                 if expected is not None:
                     self.assertEqual(hit, expected)
 
+    def test_round_eight_conclusion_words_are_flagged(self) -> None:
+        """P13 (round 8): ProbablyFake, FakeImageDetected, probably_fake and AUTHENTIC passed;
+        a conclusion word alone (any case) or in a code token next to another word fails."""
+        from deepfake_lens.error_text import VERDICT_WORDS, english_prose
+
+        self.assertEqual(VERDICT_WORDS, frozenset({
+            "fake", "real", "authentic", "synthetic", "detected", "generated", "manipulated", "deepfake",
+            "genuine", "likely", "probably", "suspicious", "clean", "safe",
+        }))
+        for text, expected in {
+            "결론: ProbablyFake": "probably fake",
+            "FakeImageDetected": "fake image detected",
+            "probably_fake": "probably fake",
+            "AUTHENTIC": "authentic",
+            "결론: AUTHENTIC 입니다": "authentic",
+            "isRealPhoto": "is real photo",
+            "SYNTHETICImage": "synthetic image",
+        }.items():
+            with self.subTest(text=text):
+                self.assertEqual(english_prose(text), expected)
+        for word in sorted(VERDICT_WORDS):
+            for spelled in (word, word.upper(), word.capitalize(), f"결론: {word}", f"판정 「{word.upper()}」"):
+                with self.subTest(word=spelled):
+                    self.assertIsNotNone(english_prose(spelled), spelled)
+
+    def test_round_eight_identifiers_still_pass(self) -> None:
+        """P13 (round 8): contract identifiers and the package's own names are not verdicts."""
+        from deepfake_lens.error_text import english_prose
+
+        for text in (
+            "verdict_code", "authenticity_evidence", "manipulation_evidence", "score_is_calibrated",
+            "DEEPFAKE_LENS_REPORT_KEY 환경 변수", "deepfake_lens.cli", "real-like-texture.png", "label=real",
+            "deepfake-lens scan", "expected_label", "trainedAlgorithmicMedia",
+        ):
+            with self.subTest(text=text):
+                self.assertIsNone(english_prose(text), text)
+
     def test_identifiers_and_korean_still_pass(self) -> None:
         from deepfake_lens.error_text import english_prose
 

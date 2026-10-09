@@ -314,6 +314,14 @@ STANDALONE_ENGLISH_WORDS = frozenset("""
     uncalibrated unverified unreliable untrusted unvalidated unconfirmed unsigned inconclusive inadmissible
     ignore ignored likely unlikely probably possibly suspicious fake genuine tampered beware caution warning disclaimer
 """.split())
+# P13 (round 8): conclusion words. One of them alone in any case
+# ("AUTHENTIC", "fake") or as a part of a code-shaped token next to another
+# English word ("ProbablyFake", "FakeImageDetected", "probably_fake") is an
+# English verdict in Korean output — the camelCase/snake split used to need
+# three dictionary words, and ALL-CAPS "AUTHENTIC" passed as an acronym.
+VERDICT_WORDS = frozenset("""
+    fake real authentic synthetic detected generated manipulated deepfake genuine likely probably suspicious clean safe
+""".split())
 # Whole identifier tokens that contain dictionary-word parts (G9): the
 # phase-0 terms printed as identifiers. The packaged runtime profile names
 # are added at first use (profile_names()).
@@ -459,6 +467,30 @@ _CODE_PARTS = re.compile(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])")
 _SNAKE_TOKEN = re.compile(r"\b[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+\b")
 
 
+# P13: code-shaped tokens read for conclusion words — snake_case in any case
+# (lowercase included), camelCase and PascalCase with two or more humps.
+_VERDICT_CODE_TOKEN = re.compile(r"\b[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+\b|\b[a-z]+(?:[A-Z][a-z0-9]*)+\b|\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+\b|\b[A-Z]{2,}(?:[A-Z][a-z]+)+\b")
+
+
+def _verdict_identifier_hit(line: str) -> str | None:
+    """The parts of the first code-shaped token holding a conclusion word next to another English word (P13)."""
+    vocabulary = COMMON_ENGLISH_WORDS | STANDALONE_ENGLISH_WORDS | VERDICT_WORDS
+    for match in _VERDICT_CODE_TOKEN.finditer(line):
+        if match.group(0).lower().startswith("deepfake_lens"):
+            continue  # the package's own identifiers (DEEPFAKE_LENS_REPORT_KEY, deepfake_lens.cli)
+        parts = [part.lower() for chunk in match.group(0).split("_") for part in _CODE_PARTS.findall(chunk)]
+        verdicts = [part for part in parts if part in VERDICT_WORDS]
+        others = [part for part in parts if part in vocabulary or part in IMAGE_WORDS]
+        if verdicts and len(others) >= 2:
+            return " ".join(parts)
+    return None
+
+
+# Nouns that turn a conclusion word into a sentence-shaped identifier
+# ("FakeImageDetected", "real_photo") without being dictionary words.
+IMAGE_WORDS = frozenset({"image", "photo", "picture", "video", "audio", "voice", "face", "text", "media", "content"})
+
+
 def _sentence_identifier_hit(line: str) -> str | None:
     """The words of the first code-shaped token that spells an English sentence, or None (N12).
 
@@ -498,8 +530,8 @@ def _dictionary_words(line: str) -> tuple[list[str], list[str]]:
 
     for raw in line.split():
         whole = raw.strip("\"'“”‘’()[]{}<>|,;:!?.…*\u300c\u300d\u300e\u300f").lower()
-        if whole in STANDALONE_ENGLISH_WORDS and whole not in standalone:
-            standalone.append(whole)
+        if (whole in STANDALONE_ENGLISH_WORDS or whole in VERDICT_WORDS) and whole not in standalone:
+            standalone.append(whole)  # P13: a conclusion word alone, any case
         # N12: an English word with a Korean particle glued on
         # ("trustworthy하지", "evidence로", "inadmissible입니다") is the word.
         if _HANGUL.search(raw):
@@ -582,7 +614,7 @@ def english_dictionary_hit(text: str) -> str | None:
     text = normalize_for_detection(text)
     for line in text.splitlines() or [text]:
         words_only = _strip_word_identifiers(line)
-        sentence = _sentence_identifier_hit(words_only)
+        sentence = _sentence_identifier_hit(words_only) or _verdict_identifier_hit(words_only)
         if sentence:
             return sentence
         stripped = _strip_code_identifiers(words_only)
@@ -735,4 +767,3 @@ def read_error_ko(exc: BaseException) -> str:
         # The CLI names the file itself; "[Errno 2]" is not repeated (P9).
         return f"{_ERRNO_KO[exc.errno]}(오류 번호 {exc.errno})"
     return korean_exception_message(exc)
-
