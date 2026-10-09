@@ -1,6 +1,7 @@
 {
   "type": "deepfake-lens-runtime-profile-v1",
   "name": "CommunityForensics ViT-S/384 per-frame (video-frames runtime)",
+  "display_name": "CommunityForensics ViT-S/384 영상 프레임 생성 탐지기",
   "candidate_key": "community-forensics-vit-s384-frames",
   "runtime": "video-frames",
   "supported": false,
@@ -24,7 +25,8 @@
     ],
     "score_index": 0,
     "score_activation": "sigmoid",
-    "name": "CommunityForensics ViT-S/384"
+    "name": "CommunityForensics ViT-S/384",
+    "display_name": "CommunityForensics ViT-S/384 생성 이미지 탐지기"
   },
   "ensemble_weight": 0.6,
   "source_url": "https://huggingface.co/Red-had1911/deepfake-detector-onnx (generative_detector.onnx — Community Forensics ViT-S/384, arXiv:2411.04125, MIT)",

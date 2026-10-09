@@ -256,8 +256,17 @@
             if (!r || ['failed', 'unsupported', 'duplicate', 'skipped'].includes(item.status)) return 'other';
             return r.verdict_code || 'undetermined';
         }
+        // R4: profile name -> Korean display_name, learned from model_analysis.models.
+        const MODEL_DISPLAY_NAMES = {};
+        function learnModelNames(r) {
+            const members = ((r || {}).model_analysis || {}).models || [];
+            members.forEach(m => { if (m && m.model && m.display_name) MODEL_DISPLAY_NAMES[m.model] = m.display_name; });
+        }
         function checkLabel(check) {
-            if (String(check).startsWith('model:')) return `외부 모델(${String(check).slice(6)})`;
+            if (String(check).startsWith('model:')) {
+                const name = String(check).slice(6);
+                return `외부 모델(${MODEL_DISPLAY_NAMES[name] || name})`;
+            }
             return CHECK_LABELS[check] || check;
         }
         function coverageText(entry) {
@@ -286,6 +295,7 @@
             }).join('');
         }
         function coverageHtml(r) {
+            learnModelNames(r);
             const cov = r.coverage || [];
             if (!cov.length) return '';
             const failed = cov.filter(c => c.status === 'failed');
@@ -611,7 +621,7 @@
             const ma = r.model_analysis;
             if (ma) {
                 const members = (ma.models || []).map(m =>
-                    `<li>${escapeHtml(m.model || 'model')} — 원점수 ${m.score != null ? m.score : 'n/a'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
+                    `<li>${escapeHtml(m.display_name || m.model || '모델')} — 원점수 ${m.score != null ? m.score : 'n/a'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
                 parts.push(`<div class="dgroup"><div class="dt">외부 모델 원점수(미보정, 결론 불참여) — ${ma.score != null ? ma.score : 'n/a'}</div>${members ? `<ul>${members}</ul>` : `<div class="note">${escapeHtml(ma.detail || '')}</div>`}</div>`);
             }
             // Unmeasured heuristics (pixel ensemble, fusion, legacy audio/
@@ -1196,7 +1206,7 @@
                 const ev = r.evidence || [];
                 const titles = kind => ev.filter(x => x.kind === kind).map(x => x.title).join(' / ');
                 const failedCov = (r.coverage || []).filter(c => c.status === 'failed').map(coverageText).join(' / ');
-                csv += [f(riskLabel(verdictOf(item))), f(r.grade === 'reference' ? '참고' : (r.grade ? '근거' : '')), f(titles('deterministic')), f(titles('statistical')), f(titles('lexical')), f(failedCov), f((r.source_guess && r.source_guess.label) || ''), f((r.model_analysis && r.model_analysis.model) || ''), f(item.name || item.path), f(rev.star ? '검토됨' : ''), f(rev.note || ''), f(r.verdict || '')].join(',') + '\n';
+                csv += [f(riskLabel(verdictOf(item))), f(r.grade === 'reference' ? '참고' : (r.grade ? '근거' : '')), f(titles('deterministic')), f(titles('statistical')), f(titles('lexical')), f(failedCov), f((r.source_guess && r.source_guess.label) || ''), f((r.model_analysis && (r.model_analysis.display_name || r.model_analysis.model)) || ''), f(item.name || item.path), f(rev.star ? '검토됨' : ''), f(rev.note || ''), f(r.verdict || '')].join(',') + '\n';
             });
             download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'deepfake-lens-results.csv');
         });
@@ -1364,7 +1374,7 @@
             const ma = r.model_analysis;
             if (ma) {
                 const members = (ma.models || []).map(m =>
-                    `<li>${escapeHtml(m.model || 'model')} — ${m.score != null ? m.score : 'n/a'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
+                    `<li>${escapeHtml(m.display_name || m.model || '모델')} — ${m.score != null ? m.score : 'n/a'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
                 parts.push(layer(`외부 모델 원점수(미보정, 결론 불참여) — ${ma.score != null ? ma.score : 'n/a'}`,
                     members ? `<ul>${members}</ul>` : `<div class="note">${escapeHtml(ma.detail || '')}</div>`));
             }

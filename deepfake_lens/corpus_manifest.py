@@ -419,7 +419,7 @@ def add_corpus_parser(subparsers: Any) -> argparse.ArgumentParser:
     corpus_parser: argparse.ArgumentParser = subparsers.add_parser(
         "corpus", help="재현 가능한 코퍼스 매니페스트(corpus-manifest-v1) 생성·분할·검증"
     )
-    corpus_sub = corpus_parser.add_subparsers(dest="corpus_command")
+    corpus_sub = corpus_parser.add_subparsers(dest="corpus_command", help="하위 명령: build(생성) | split(분할) | verify(검증)")
     build = corpus_sub.add_parser("build", help="폴더 아래 모든 파일의 해시로 매니페스트 생성")
     build.add_argument("folder", type=Path, help="코퍼스 최상위 폴더")
     build.add_argument("--out", type=Path, required=True, help="저장할 매니페스트 JSON")

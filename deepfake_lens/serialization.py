@@ -201,4 +201,5 @@ def _model_analysis_from_json(data: dict[str, object]) -> ExternalModelAnalysis:
         probability_ci=_ci(data.get("probability_ci")),
         calibration_id=_opt_str(data.get("calibration_id")),
         measured_on=_opt_str(data.get("measured_on")),
+        display_name=str(data.get("display_name") or ""),
     )

@@ -1,6 +1,7 @@
 {
   "type": "deepfake-lens-runtime-profile-v1",
   "name": "SBI EfficientNet-B0 on per-frame face crops (video-frames runtime)",
+  "display_name": "SBI EfficientNet-B0 영상 얼굴 프레임 탐지기",
   "candidate_key": "sbi-effnet-b0-frames",
   "runtime": "video-frames",
   "supported": false,
@@ -17,7 +18,8 @@
     "score_bias_in_sample": true,
     "score_bias_note": "sbi-effnet-runtime.json과 같은 score_bias=35 — 성능을 보고한 그 평가 얼굴 크롭에서 골라 맞춘 값(표본 내 적합, G28). 독립 테스트 분할에서 다시 고르고 측정하기 전에는 성능 근거로 쓰지 않는다.",
     "crop_faces": true,
-    "name": "SBI EfficientNet-B0 (v2, diverse-domain)"
+    "name": "SBI EfficientNet-B0 (v2, diverse-domain)",
+    "display_name": "SBI EfficientNet-B0 얼굴 조작 탐지기(v2)"
   },
   "ensemble_weight": 0.7,
   "source_url": "local training: experiments/train_detector.py on self-blend corpus (see experiments/FACESWAP_EVALUATION.md); frame wrapper uses the committed sbi-effnet-runtime.json inner config",

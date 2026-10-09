@@ -1,6 +1,7 @@
 {
   "type": "deepfake-lens-runtime-profile-v1",
   "name": "SBI-trained EfficientNet-B0 v2 (local, enriched self-blend: polygon/affine masks + diverse portraits)",
+  "display_name": "SBI EfficientNet-B0 얼굴 조작 탐지기(로컬 학습 v2)",
   "candidate_key": "sbi-effnet-b0-local",
   "runtime": "torchvision",
   "supported": false,
@@ -15,7 +16,7 @@
   "crop_faces": true,
   "source_url": "local training: experiments/train_detector.py --sbi --augment-degradation with enriched blending (polygon hull masks, affine misalignment) on FFHQ parquet + Wikimedia diverse portraits",
   "limitations": [
-    "체크포인트는 저장소에 포함되지 않습니다. experiments/train_detector.py --sbi --augment-degradation --arch efficientnet_b0로 재현하십시오.",
+    "체크포인트는 저장소에 포함되지 않습니다. `experiments/train_detector.py --sbi --augment-degradation --arch efficientnet_b0`로 재현하십시오.",
     "score_bias=35는 성능을 보고한 같은 평가 크롭에서 맞춘 값(표본 내 적합, G28)입니다 — score_bias_note 참조.",
     "도메인 밖(오래되거나 스캔·손상된 인물 사진)에서는 순위 성능이 약하므로 참고용으로만 다루십시오(소규모 로컬 측정, 미검증 — experiments/FACESWAP_EVALUATION.md).",
     "crop_faces=true: 얼굴이 없는 이미지는 채점하지 않고 건너뜁니다(사용 불가).",

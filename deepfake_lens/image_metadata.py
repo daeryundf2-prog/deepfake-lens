@@ -375,7 +375,7 @@ def guess_image_source(metadata: dict[str, str]) -> SourceGuess:
     if _looks_like_comfyui(normalized):
         return SourceGuess("ComfyUI 추정", SourceConfidence.HIGH, ["ComfyUI workflow/prompt 구조가 발견되었습니다."])
     if _looks_like_a1111(normalized):
-        return SourceGuess("Stable Diffusion / A1111 추정", SourceConfidence.HIGH, ["프롬프트, steps, sampler, CFG, seed 같은 A1111 생성 파라미터가 발견되었습니다."])
+        return SourceGuess("Stable Diffusion / A1111 추정", SourceConfidence.HIGH, ["프롬프트와 `Steps`, `Sampler`, `CFG scale`, `Seed` 같은 A1111 생성 파라미터가 발견되었습니다."])
 
     direct = _direct_tool_guess(normalized)
     if direct:

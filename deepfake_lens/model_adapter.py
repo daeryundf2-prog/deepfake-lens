@@ -7,7 +7,7 @@ import math
 import os
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +19,7 @@ from .model_cache import (  # noqa: F401 — re-exported for existing callers/te
     _release_cached_model,
     clear_all_model_caches,
 )
-from .result_types import ExternalModelAnalysis  # noqa: F401 — re-exported
+from .result_types import ExternalModelAnalysis, register_model_display_name  # noqa: F401 — ExternalModelAnalysis re-exported
 from .model_runtimes import (  # noqa: F401 — dispatch targets + shared caches
     _AASIST_RUNNERS,
     _AIDE_RUNNERS,
@@ -66,6 +66,12 @@ FAILED_CONFIDENCE = "failed"
 
 # Shown with a pin failure: how to provision a pin (G9).
 PIN_HINT = "가중치 고정 필요: 'deepfake-lens vendor-weights pin <프로필>'로 체크포인트 sha256 또는 허브 커밋 revision을 프로필 pin에 기록하세요."
+
+
+def profile_display_name(profile: dict[str, object], fallback: str) -> str:
+    """The profile's Korean ``display_name`` (R4), else ``fallback``."""
+    value = profile.get("display_name")
+    return str(value).strip() if isinstance(value, str) and value.strip() else fallback
 
 
 def _failure_detail(context: str, exc: BaseException) -> str:
@@ -240,9 +246,16 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
         )
 
     model_name = str(profile.get("name") or profile.get("model") or model_file.name)
+    # R4: the Korean display name goes into every examiner-facing string;
+    # model_name stays the identifier in ``model``/``profile`` fields.
+    display = profile_display_name(profile, model_name)
+    register_model_display_name(model_name, display)
 
     if profile.get("type") == PROFILE_SET_TYPE:
-        return _analyze_profile_set(media_path, model_file, profile, model_name=model_name, depth=depth, modality=modality)
+        return replace(
+            _analyze_profile_set(media_path, model_file, profile, model_name=model_name, depth=depth, modality=modality),
+            display_name=display,
+        )
 
     if profile.get("supported") is False:
         reason = str(profile.get("reason") or "이 프로필은 문서화용 자리표시자이며 실행 가능한 런타임에 연결되어 있지 않습니다.")
@@ -255,8 +268,9 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
             score=0,
             confidence="unavailable",
             model=model_name,
-            detail=f"{model_name}: {reason}",
+            detail=f"{display}: {reason}",
             limitations=limitations,
+            display_name=display,
         )
 
     score = _score_from_score_map(profile, media_path)
@@ -265,7 +279,7 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
     if score is None:
         runtime_result = _score_from_runtime_profile(profile, media_path, base_dir=model_file.parent)
         if runtime_result is not None:
-            return runtime_result
+            return replace(runtime_result, display_name=display)
     if score is None:
         return ExternalModelAnalysis(
             available=False,
@@ -274,6 +288,7 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
             model=model_name,
             detail="모델 프로필은 읽었지만 이 파일의 점수가 없습니다.",
             limitations=["외부 탐지기 점수는 score_map 항목이나 .model.json 사이드카로 제공하십시오."],
+            display_name=display,
         )
 
     return ExternalModelAnalysis(
@@ -282,6 +297,7 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
         confidence=_confidence_for_score(score),
         model=model_name,
         detail=f"외부 모델 프로필이 점수 {score}를 제공했습니다.",
+        display_name=display,
     )
 
 
@@ -498,6 +514,7 @@ def _member_entry(source: Path, result: ExternalModelAnalysis, *, gated: bool, h
         return {
             "profile": str(source),
             "model": result.model,
+            "display_name": result.label,
             "available": False,
             "score": result.score,
             "confidence": "skipped",
@@ -506,6 +523,7 @@ def _member_entry(source: Path, result: ExternalModelAnalysis, *, gated: bool, h
     return {
         "profile": str(source),
         "model": result.model,
+        "display_name": result.label,
         "available": result.available,
         "score": result.score,
         "confidence": result.confidence,
@@ -599,7 +617,7 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
             score=0,
             confidence="unavailable",
             model=model_name,
-            detail=f"{runtime} 체크포인트를 찾을 수 없습니다: {checkpoint}",
+            detail=f"{runtime} 체크포인트를 찾을 수 없습니다: {checkpoint.name}",
             limitations=[*_checkpoint_hint(runtime), *profile_limitations],
         )
     # G9: no weight loads without a matching pin (sha256 for a local

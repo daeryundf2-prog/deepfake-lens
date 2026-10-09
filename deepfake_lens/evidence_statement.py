@@ -471,7 +471,7 @@ def write_evidence_statement_markdown(
 # is missing (CLI exit 2, web JSON error) — never an English traceback.
 PDF_DEPENDENCY = "pymupdf"
 PDF_DEPENDENCY_MESSAGE = (
-    "PDF 증거설명서를 만들려면 pymupdf 패키지가 필요합니다(설치: pip install pymupdf). "
+    "PDF 증거설명서를 만들려면 pymupdf 패키지가 필요합니다(설치: `pip install pymupdf`). "
     "Markdown(.md) 또는 JSON(.json) 증거설명서는 pymupdf 없이 만들 수 있습니다."
 )
 

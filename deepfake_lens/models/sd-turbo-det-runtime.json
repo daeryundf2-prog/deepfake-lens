@@ -1,6 +1,7 @@
 {
   "type": "deepfake-lens-runtime-profile-v1",
   "name": "Local EfficientNet-B0 trained on SD-Turbo fakes vs Hemg reals",
+  "display_name": "SD-Turbo 생성 이미지 탐지기(로컬 EfficientNet-B0)",
   "candidate_key": "sd-turbo-effnet-b0-local",
   "runtime": "torchscript",
   "supported": false,

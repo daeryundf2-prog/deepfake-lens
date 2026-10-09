@@ -1,6 +1,7 @@
 {
   "type": "deepfake-lens-runtime-profile-v1",
   "name": "Wav2Vec2-XLSR deepfake audio classifier (Gustking, In-the-Wild)",
+  "display_name": "Wav2Vec2-XLSR 딥페이크 음성 분류기(In-the-Wild)",
   "candidate_key": "wav2vec-xlsr-gustking",
   "runtime": "hf-audio-classifier",
   "supported": false,

@@ -125,11 +125,34 @@ _MESSAGE_KO: tuple[tuple[re.Pattern[str], str], ...] = tuple(
         (r"^Error opening (.+): Format not recogni[sz]ed\.?$", r"오디오 파일을 열 수 없습니다(형식 인식 불가): \1"),
         (r"^Error opening (.+): File contains data in an unknown format\.?$", r"오디오 파일을 열 수 없습니다(알 수 없는 데이터 형식): \1"),
         (r"^Error opening (.+): (.+)$", r"오디오 파일을 열 수 없습니다: \1 (\2)"),
-        (r"^(.*)failed to fill whole buffer$", r"\1데이터가 예상보다 짧습니다(파일 잘림)"),
         (r"^Expecting value: line (\d+) column (\d+) \(char (\d+)\)$", r"JSON 형식 오류: \1행 \2열"),
         (r"^No data left in file$", "파일에 더 읽을 데이터가 없습니다"),
         (r"^Unexpected end of data$", "데이터가 예상보다 일찍 끝났습니다"),
         (r"^Input signal length=(\d+) is too small to resample.*$", r"오디오 신호가 너무 짧습니다(길이 \1)"),
+    )
+)
+
+
+# Library message fragments translated wherever they occur inside a longer
+# message (c2pa-python wraps them as "_C2paOther: Other: <fragment>",
+# libsndfile as "Error opening '<file>': <fragment>").
+_FRAGMENT_KO: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(pattern, re.IGNORECASE), replacement)
+    for pattern, replacement in (
+        (r"asset could not be parsed: ", "파일을 해석할 수 없음: "),
+        (r"invalid header signature: expected \"([^\"]*)\", found \"([^\"]*)\"", r"헤더 서명 불일치(예상 \1, 실제 \2)"),
+        (r"Invalid block id: (\d+)", r"잘못된 블록 ID \1"),
+        (r"Could not parse input (\w+)", r"\1 입력을 해석할 수 없음"),
+        (r"\btype is unsupported\b", "지원하지 않는 형식"),
+        (r"\b(\w+) out of range\b", r"\1 범위 초과"),
+        (r"File does not exist or is not a regular file \(possibly a pipe\?\)\.?", "파일이 없거나 일반 파일이 아님"),
+        (r"Error in WAV(?:/W64/RF64)? file\. ([^()]*?)\.?(?=\)|$)", r"WAV 파일 오류(\1)"),
+        (r"No '(\w+) ?' chunk marker", r"'\1' 청크 표식 없음"),
+        (r"Malformed '(\w+) ?' chunk", r"'\1' 청크 손상"),
+        (r"Format not recogni[sz]ed\.?", "형식 인식 불가"),
+        (r"File contains data in an unknown format\.?", "알 수 없는 데이터 형식"),
+        (r"Unspecified internal error\.?", "내부 오류(세부 정보 없음)"),
+        (r"\bfailed to fill whole buffer\b", "데이터가 예상보다 짧습니다(파일 잘림)"),
     )
 )
 
@@ -142,7 +165,10 @@ def korean_exception_message(exc: BaseException) -> str:
     message = scrub_paths(str(exc)).strip()
     for pattern, replacement in _MESSAGE_KO:
         if pattern.search(message):
-            return pattern.sub(replacement, message)
+            message = pattern.sub(replacement, message)
+            break
+    for pattern, replacement in _FRAGMENT_KO:
+        message = pattern.sub(replacement, message)
     return message
 
 

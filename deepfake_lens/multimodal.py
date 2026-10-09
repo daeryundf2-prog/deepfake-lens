@@ -256,11 +256,11 @@ def analyze_av_sync(
     try:
         import cv2  # noqa: F401
     except ImportError:
-        return _av_sync_error("opencv가 설치되어 있지 않습니다. pip install opencv-python으로 설치하세요.")
+        return _av_sync_error("opencv가 설치되어 있지 않습니다. `pip install opencv-python`으로 설치하세요.")
     try:
         import librosa  # noqa: F401
     except ImportError:
-        return _av_sync_error("librosa가 설치되어 있지 않습니다. pip install librosa로 설치하세요.")
+        return _av_sync_error("librosa가 설치되어 있지 않습니다. `pip install librosa`로 설치하세요.")
 
     motion_env, motion_rate, video_seconds = _motion_envelope(video_path)
     if motion_env is None:

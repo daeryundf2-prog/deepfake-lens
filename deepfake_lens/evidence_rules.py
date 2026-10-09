@@ -244,11 +244,13 @@ def camera_exif_evidence(
     model = metadata.get("exif.Model", "").strip()
     if not make and not model:
         return []
+    # R4: values copied from the file are shown verbatim inside 「…」.
+    camera = f"{make} {model}".strip()
     if decode_problem is not None:
         damaged = decode_problem.startswith(EXIF_DECODE_FAILED_PREFIX)
         return [EvidenceItem(
             EXIF_UNEVALUATED_DAMAGED_TITLE if damaged else EXIF_UNEVALUATED_UNDECODED_TITLE,
-            f"기종 {make} {model}".strip()
+            f"기종 「{camera}」"
             + f". {decode_problem} — 이미지 본체를 확인하지 못해 EXIF 일관성 조건을 평가하지 않았습니다. 원본성 근거로 쓰지 않습니다.",
             EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "metadata",
         )]
@@ -263,7 +265,7 @@ def camera_exif_evidence(
         unmet.append("촬영시각이 미래")
     software = metadata.get("exif.Software", "").strip()
     if software and not _software_matches_camera(software, make, model):
-        unmet.append(f"Software={software[:60]}(카메라 펌웨어가 아닌 편집·생성 도구)")
+        unmet.append(f"Software=「{software[:60]}」(카메라 펌웨어가 아닌 편집·생성 도구)")
     if metadata.get("exif.GPSInfo"):
         latitude, longitude = metadata.get("exif.GPSLatitude"), metadata.get("exif.GPSLongitude")
         try:
@@ -283,9 +285,9 @@ def camera_exif_evidence(
         unmet.append("JPEG 품질 추정 불가")
     elif jpeg_quality < CAMERA_MIN_JPEG_QUALITY:
         unmet.append(f"JPEG 품질 {jpeg_quality:.0f} < {CAMERA_MIN_JPEG_QUALITY}(메신저·웹 재압축 가능성)")
-    facts = [f"기종 {make} {model}".strip()]
+    facts = [f"기종 「{camera}」"]
     if metadata.get("exif.LensModel"):
-        facts.append(f"렌즈 {metadata['exif.LensModel']}")
+        facts.append(f"렌즈 「{metadata['exif.LensModel']}」")
     if original is not None:
         facts.append(f"촬영시각 {original:%Y-%m-%d %H:%M:%S}")
     if metadata.get("exif.GPSInfo"):
@@ -300,7 +302,7 @@ def camera_exif_evidence(
         )]
     return [EvidenceItem(
         "카메라 EXIF 일관",
-        f"{', '.join(facts)}; Software {'없음' if not software else software[:60]}; 재압축 흔적 없음(품질 ≥ {CAMERA_MIN_JPEG_QUALITY}). "
+        f"{', '.join(facts)}; Software {'없음' if not software else f'「{software[:60]}」'}; 재압축 흔적 없음(품질 ≥ {CAMERA_MIN_JPEG_QUALITY}). "
         "EXIF는 다른 파일로 복사될 수 있어 단독으로 원본성 결론을 내리지 않습니다(렌즈-기종 호환표·메신저 지문 대조는 1단계).",
         EvidenceKind.DETERMINISTIC, EvidenceDirection.AUTHENTIC, EvidenceStrength.MODERATE, "metadata",
     )]
@@ -467,9 +469,9 @@ def model_evidence(model: ExternalModelAnalysis | None) -> EvidenceItem | None:
     calibrated = model.probability is not None and bool(model.calibration_id) and bool(model.measured_on)
     synthetic = (model.probability >= 0.5) if calibrated and model.probability is not None else model.score >= MODEL_RAW_SCORE_MIDPOINT
     if calibrated:
-        detail = f"{model.model}: 보정 확률 {model.probability:.2f} (보정 {model.calibration_id}, 측정 {model.measured_on})."
+        detail = f"{model.label}: 보정 확률 {model.probability:.2f} (보정 {model.calibration_id}, 측정 {model.measured_on})."
     else:
-        detail = f"{model.model}: 원점수 {model.score}/100 — 보정되지 않은 값이며 확률이 아닙니다. 결론에 참여하지 않습니다."
+        detail = f"{model.label}: 원점수 {model.score}/100 — 보정되지 않은 값이며 확률이 아닙니다. 결론에 참여하지 않습니다."
     return EvidenceItem(
         "외부 모델 출력" if calibrated else "외부 모델 원점수(미보정)",
         detail,

@@ -35,6 +35,7 @@ _PROFILE_CANDIDATES: list[DetectorCandidate] = [
         priority="n/a",
         source_url="https://github.com/clovaai/aasist",
         notes=[
+            "표시 이름: AASIST 음성 위조 탐지기(ASVspoof2019-LA).",
             "프로필 models/aasist-runtime.json (runtime aasist, modality audio).",
             "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
             "pin: 미고정 (sha256 비어 있음); measured_on: 없음.",
@@ -49,6 +50,7 @@ _PROFILE_CANDIDATES: list[DetectorCandidate] = [
         priority="n/a",
         source_url="https://huggingface.co/umm-maybe/AI-image-detector",
         notes=[
+            "표시 이름: Swin-large 생성 이미지 탐지기(umm-maybe).",
             "프로필 models/ai-image-swin-runtime.json (runtime hf-image-classifier, modality image).",
             "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
             "pin: 미고정 (revision 비어 있음); measured_on: 없음.",
@@ -63,6 +65,7 @@ _PROFILE_CANDIDATES: list[DetectorCandidate] = [
         priority="n/a",
         source_url="https://github.com/shilinyan99/AIDE",
         notes=[
+            "표시 이름: AIDE 생성 이미지 탐지기(ICLR 2025, progan_train).",
             "프로필 models/aide-runtime.json (runtime aide, modality image).",
             "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
             "pin: 미고정 (sha256 비어 있음); measured_on: 없음.",
@@ -77,6 +80,7 @@ _PROFILE_CANDIDATES: list[DetectorCandidate] = [
         priority="n/a",
         source_url="https://huggingface.co/Red-had1911/deepfake-detector-onnx (generative_detector.onnx — Community Forensics ViT-S/384, arXiv:2411.04125, MIT)",
         notes=[
+            "표시 이름: CommunityForensics ViT-S/384 영상 프레임 생성 탐지기.",
             "프로필 models/community-forensics-frames-runtime.json (runtime video-frames → onnx, modality video).",
             "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
             "pin: 미고정 (sha256 비어 있음); measured_on: 없음.",
@@ -91,6 +95,7 @@ _PROFILE_CANDIDATES: list[DetectorCandidate] = [
         priority="n/a",
         source_url="https://huggingface.co/Red-had1911/deepfake-detector-onnx (generative_detector.onnx — direct export of the original timm checkpoint model_v11_ViT_384_base_ckpt.pt; Community Forensics, Park & Owens U-Michigan, arXiv:2411.04125, MIT)",
         notes=[
+            "표시 이름: CommunityForensics ViT-S/384 생성 이미지 탐지기.",
             "프로필 models/community-forensics-vit-runtime.json (runtime onnx, modality image).",
             "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
             "pin: 미고정 (sha256 비어 있음); measured_on: 없음.",
@@ -105,6 +110,7 @@ _PROFILE_CANDIDATES: list[DetectorCandidate] = [
         priority="n/a",
         source_url="https://huggingface.co/fakespot-ai/roberta-base-ai-text-detection-v1",
         notes=[
+            "표시 이름: Fakespot AI 텍스트 탐지기(roberta-base).",
             "프로필 models/fakespot-detector-runtime.json (runtime hf-text-classifier, modality text).",
             "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
             "pin: 미고정 (revision 비어 있음); measured_on: 없음.",
@@ -119,6 +125,7 @@ _PROFILE_CANDIDATES: list[DetectorCandidate] = [
         priority="n/a",
         source_url="local training: experiments/train_detector.py --sbi --augment-degradation with enriched blending (polygon hull masks, affine misalignment) on FFHQ parquet + Wikimedia diverse portraits",
         notes=[
+            "표시 이름: SBI EfficientNet-B0 얼굴 조작 탐지기(로컬 학습 v2).",
             "프로필 models/sbi-effnet-runtime.json (runtime torchvision, modality image).",
             "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
             "pin: 미고정 (sha256 비어 있음); measured_on: 없음.",
@@ -133,6 +140,7 @@ _PROFILE_CANDIDATES: list[DetectorCandidate] = [
         priority="n/a",
         source_url="local training: experiments/train_detector.py on self-blend corpus (see experiments/FACESWAP_EVALUATION.md); frame wrapper uses the committed sbi-effnet-runtime.json inner config",
         notes=[
+            "표시 이름: SBI EfficientNet-B0 영상 얼굴 프레임 탐지기.",
             "프로필 models/sbi-frames-runtime.json (runtime video-frames → torchvision, modality video).",
             "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
             "pin: 미고정 (sha256 비어 있음); measured_on: 없음.",
@@ -147,6 +155,7 @@ _PROFILE_CANDIDATES: list[DetectorCandidate] = [
         priority="n/a",
         source_url="local training: experiments/train_detector.py --augment-degradation on experiments/gen_sdturbo_corpus.py output (280 SD-Turbo fakes) + Hemg/deepfake-and-real-images real class",
         notes=[
+            "표시 이름: SD-Turbo 생성 이미지 탐지기(로컬 EfficientNet-B0).",
             "프로필 models/sd-turbo-det-runtime.json (runtime torchscript, modality image).",
             "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
             "pin: 미고정 (sha256 비어 있음); measured_on: 없음.",
@@ -161,6 +170,7 @@ _PROFILE_CANDIDATES: list[DetectorCandidate] = [
         priority="n/a",
         source_url="https://huggingface.co/Gustking/wav2vec2-large-xlsr-deepfake-audio-classification",
         notes=[
+            "표시 이름: Wav2Vec2-XLSR 딥페이크 음성 분류기(In-the-Wild).",
             "프로필 models/wav2vec-deepfake-audio-runtime.json (runtime hf-audio-classifier, modality audio).",
             "supported: false — 0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
             "pin: 미고정 (revision 비어 있음); measured_on: 없음.",

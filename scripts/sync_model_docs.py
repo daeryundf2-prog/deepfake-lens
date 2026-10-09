@@ -48,6 +48,10 @@ def load_profiles(models_dir: Path = MODELS_DIR) -> list[tuple[str, dict]]:
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             raise SystemExit(f"profile is not a JSON object: {path}")
+        # R4: every profile carries the Korean name shown to the examiner;
+        # the raw ``name`` is an identifier only.
+        if not str(data.get("display_name") or "").strip():
+            raise SystemExit(f"profile has no Korean display_name: {path}")
         profiles.append((path.name, data))
     return profiles
 
@@ -115,12 +119,12 @@ def _cell(text: str) -> str:
 
 def readme_block(profiles: list[tuple[str, dict]]) -> str:
     lines = [
-        "| 프로필 | 검출기 | 모달리티 | 런타임 | 가중치 | pin | supported | measured_on | 표본 내 보정(G28) |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| 프로필 | 표시 이름 | 검출기(식별자 name) | 모달리티 | 런타임 | 가중치 | pin | supported | measured_on | 표본 내 보정(G28) |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for name, profile in profiles:
         lines.append(
-            f"| `{name}` | {_cell(str(profile.get('name') or name))} | {_modality(profile)} | `{_runtime(profile)}` "
+            f"| `{name}` | {_cell(str(profile.get('display_name') or ''))} | {_cell(str(profile.get('name') or name))} | {_modality(profile)} | `{_runtime(profile)}` "
             f"| {_weights(profile)} | {_pin_status(profile)} | {_supported(profile)} | {_measured(profile)} | {_in_sample(profile)} |"
         )
     return "\n".join(lines)
@@ -159,6 +163,7 @@ def registry_block(profiles: list[tuple[str, dict]]) -> str:
     for name, profile in profiles:
         supported = profile.get("supported") is not False
         notes = [
+            f"표시 이름: {profile.get('display_name')}.",
             f"프로필 models/{name} (runtime {_runtime(profile)}, modality {_modality(profile)}).",
             "supported: true" if supported else f"supported: false — {profile.get('reason') or '비활성'}",
             f"pin: {_pin_status(profile)}; measured_on: {_measured(profile)}.",

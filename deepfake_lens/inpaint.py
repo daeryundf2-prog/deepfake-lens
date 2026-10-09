@@ -61,7 +61,7 @@ def analyze_inpainting(
         import cv2
         import numpy as np
     except ImportError:
-        return _error_analysis("opencv가 설치되어 있지 않습니다. pip install opencv-python로 설치하세요.")
+        return _error_analysis("opencv가 설치되어 있지 않습니다. `pip install opencv-python`로 설치하세요.")
 
     try:
         from .face import _imread_unicode

@@ -1,6 +1,7 @@
 {
   "type": "deepfake-lens-runtime-profile-v1",
   "name": "AIDE (ICLR 2025) progan_train",
+  "display_name": "AIDE 생성 이미지 탐지기(ICLR 2025, progan_train)",
   "candidate_key": "aide-iclr-2025",
   "runtime": "aide",
   "supported": false,

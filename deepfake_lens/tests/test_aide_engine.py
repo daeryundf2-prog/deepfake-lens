@@ -119,7 +119,15 @@ class AideRuntimeProfileTest(unittest.TestCase):
             analysis = analyze_external_model(image, profile_copy)
 
             self.assertFalse(analysis.available)
-            self.assertIn(str(root / "aide_progan_train.pth"), analysis.detail)
+            # N1: the detail names the checkpoint, never its absolute path.
+            self.assertIn("체크포인트를 찾을 수 없습니다: aide_progan_train.pth", analysis.detail)
+            self.assertNotIn(str(root), analysis.detail)
+            # Resolution is relative to the copied profile: a checkpoint put
+            # next to it is found (the load then stops at the pin check).
+            (root / "aide_progan_train.pth").write_bytes(b"not a real checkpoint")
+            found = analyze_external_model(image, profile_copy)
+            self.assertFalse(found.available)
+            self.assertNotIn("찾을 수 없습니다", found.detail)
 
 
 class FetchAideTest(unittest.TestCase):

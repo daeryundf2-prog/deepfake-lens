@@ -1,6 +1,7 @@
 {
   "type": "deepfake-lens-runtime-profile-v1",
   "name": "AASIST (Interspeech 2022) ASVspoof2019-LA anti-spoofing",
+  "display_name": "AASIST 음성 위조 탐지기(ASVspoof2019-LA)",
   "candidate_key": "aasist-2022",
   "runtime": "aasist",
   "supported": false,

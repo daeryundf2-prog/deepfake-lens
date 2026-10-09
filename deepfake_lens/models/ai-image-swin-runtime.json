@@ -1,6 +1,7 @@
 {
   "type": "deepfake-lens-runtime-profile-v1",
   "name": "Swin-large AI-vs-human image detector (umm-maybe)",
+  "display_name": "Swin-large 생성 이미지 탐지기(umm-maybe)",
   "candidate_key": "swin-ai-image-umm-maybe",
   "runtime": "hf-image-classifier",
   "supported": false,

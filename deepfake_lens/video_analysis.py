@@ -102,7 +102,7 @@ def analyze_video_temporal(
     try:
         import cv2
     except ImportError:
-        return _error_analysis("opencv가 설치되어 있지 않습니다. pip install opencv-python로 설치하세요.")
+        return _error_analysis("opencv가 설치되어 있지 않습니다. `pip install opencv-python`로 설치하세요.")
 
     try:
         cap = cv2.VideoCapture(str(video_path))
@@ -182,7 +182,7 @@ def analyze_video_temporal(
     if model_analysis is not None and model_analysis.available:
         signals.append(VideoEvidenceSignal(
             "외부 모델 신경망 점수",
-            f"{model_analysis.model}: {model_analysis.detail}",
+            f"{model_analysis.label}: {model_analysis.detail}",
             model_analysis.score,
         ))
     limitations.append("로컬 휴리스틱 기반 선별 결과이며, 확정적 판별이 아닙니다.")

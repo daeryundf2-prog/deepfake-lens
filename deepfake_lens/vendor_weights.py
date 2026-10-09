@@ -575,7 +575,7 @@ def pin_profile(
                 "profile": str(path),
                 "instructions": (
                     f"huggingface_hub가 설치되어 있지 않아 {model_id}의 커밋을 조회할 수 없습니다. "
-                    "'pip install huggingface_hub' 후 다시 실행하거나, 허브 페이지에서 커밋 SHA(40자리)를 확인해 "
+                    "`pip install huggingface_hub` 후 다시 실행하거나, 허브 페이지에서 커밋 SHA(40자리)를 확인해 "
                     f"'deepfake-lens vendor-weights pin {path.name} --revision <커밋SHA>'로 지정하세요."
                 ),
             }

@@ -1583,11 +1583,12 @@ def _apply_document_metadata(result: ClassificationResult, doc_metadata: dict[st
         # "참고: " label, confidence unknown, and no leftover "no clue"
         # reason contradicting the clue just listed.
         reasons = [reason for reason in reasons if reason != NO_SOURCE_CLUE_REASON]
-        reasons.extend(f"{label_text}: {value}" for label_text, value in hints)
+        # R4: values copied from the file are shown verbatim inside 「…」.
+        reasons.extend(f"{label_text}: 「{value}」" for label_text, value in hints)
         if ai_hit:
             label = f"{REFERENCE_SOURCE_PREFIX}문서 메타데이터에 AI 도구명 기록"
             reasons.append(
-                f"문서 메타데이터에 AI 도구명이 기록되어 있습니다: {ai_hit} — 작성 도구 필드는 누구나 바꿀 수 있어 출처 확정 근거가 아닙니다."
+                f"문서 메타데이터에 AI 도구명이 기록되어 있습니다: 「{ai_hit}」 — 작성 도구 필드는 누구나 바꿀 수 있어 출처 확정 근거가 아닙니다."
             )
         elif confidence == SourceConfidence.UNKNOWN:
             label = f"{REFERENCE_SOURCE_PREFIX}문서 메타데이터의 작성 도구 단서"

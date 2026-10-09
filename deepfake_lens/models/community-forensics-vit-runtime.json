@@ -1,6 +1,7 @@
 {
   "type": "deepfake-lens-runtime-profile-v1",
   "name": "CommunityForensics ViT-S/384 (OpenSight) general AI-image detector",
+  "display_name": "CommunityForensics ViT-S/384 생성 이미지 탐지기",
   "candidate_key": "community-forensics-vit-s384",
   "runtime": "onnx",
   "supported": false,

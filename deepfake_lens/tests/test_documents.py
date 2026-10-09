@@ -72,7 +72,7 @@ class DocumentExtractionTest(unittest.TestCase):
         self.assertTrue(guess.label.startswith("참고: "), guess.label)
         self.assertEqual(guess.confidence, SourceConfidence.UNKNOWN)
         self.assertNotIn(NO_SOURCE_CLUE_REASON, guess.reasons)
-        self.assertIn("작성 애플리케이션: ChatGPT", guess.reasons)
+        self.assertIn("작성 애플리케이션: 「ChatGPT」", guess.reasons)
         self.assertEqual(item.result.to_json()["source_guess"]["confidence"], "unknown")
         self.assertEqual(item.result.grade, Grade.REFERENCE)
         self.assertEqual(item.result.verdict_code, Verdict.UNDETERMINED)

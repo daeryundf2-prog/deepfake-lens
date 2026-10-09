@@ -267,7 +267,7 @@ def _model_evidence_signal(model_analysis: ExternalModelAnalysis | None) -> Audi
         title = "외부 모델 약한 의심"
     else:
         return None
-    return AudioEvidenceSignal(title, f"{model_analysis.model}: {model_analysis.detail}", weight)
+    return AudioEvidenceSignal(title, f"{model_analysis.label}: {model_analysis.detail}", weight)
 
 
 def _extract_features_with_reason(path: Path, *, segment_seconds: int) -> tuple[AudioFeatures | None, str]:

@@ -761,13 +761,29 @@ def _reveal_evidence_chain(experts: list[PixelExpertResult]) -> list[str]:
     return chain
 
 
+# R4: Korean label of each pixel-expert family (PixelExpertResult.family).
+PIXEL_FAMILY_LABELS = {
+    "compositing": "합성 경계",
+    "external_baseline": "외부 기준선",
+    "forensic": "포렌식",
+    "frequency": "주파수",
+    "fusion": "융합",
+    "localization": "위치 추정",
+    "pixel": "픽셀",
+    "reconstruction": "재구성",
+    "retrieval": "검색",
+    "statistical": "통계",
+}
+
+
 def _agentfox_explainable_summary(experts: list[PixelExpertResult], fused: int) -> str:
     active = [expert for expert in experts if expert.available and expert.score >= 45]
     if not active:
-        return "AgentFoX-style explanation: 활성 전문가가 적어 설명할 신호가 거의 없습니다(참고 신호)."
-    families = sorted({expert.family for expert in active})
+        return "전문가 기여 설명(AgentFoX 방식): 활성 전문가가 적어 설명할 신호가 거의 없습니다(참고 신호)."
+    # R4: expert families in Korean (the expert names stay identifiers).
+    families = sorted({PIXEL_FAMILY_LABELS.get(expert.family, expert.family) for expert in active})
     names = ", ".join(expert.name for expert in sorted(active, key=lambda item: item.score, reverse=True)[:4])
-    return f"AgentFoX-style explanation: {len(active)}개 전문가({', '.join(families)})가 원점수 {fused}(참고, 미측정)에 기여했습니다: {names}."
+    return f"전문가 기여 설명(AgentFoX 방식): {len(active)}개 전문가(계열: {'·'.join(families)})가 원점수 {fused}(참고, 미측정)에 기여했습니다: {names}."
 
 
 def _implemented_references(mode: str) -> list[str]:

@@ -129,7 +129,7 @@ def analyze_prnu(target_path: Path | str, reference_paths: list[Path | str]) -> 
     try:
         import numpy as np
     except ImportError:
-        return _error_analysis("numpy가 설치되어 있지 않습니다. pip install numpy로 설치하세요.")
+        return _error_analysis("numpy가 설치되어 있지 않습니다. `pip install numpy`로 설치하세요.")
 
     def residual_for(path: Path):
         image = _load_grayscale(path)

@@ -39,6 +39,28 @@ class ExternalModelAnalysis:
     probability_ci: tuple[float, float] | None = None
     calibration_id: str | None = None
     measured_on: str | None = None
+    # R4: the profile's Korean ``display_name`` — used in every user-facing
+    # string; ``model`` stays the profile's raw ``name`` (an identifier).
+    display_name: str = ""
+
+    @property
+    def label(self) -> str:
+        """What to show the examiner: the display name, else the identifier."""
+        return self.display_name or self.model
+
+
+# R4: raw profile name -> Korean display name, filled as profiles are read,
+# so "model:<name>" coverage entries render with the display name.
+_MODEL_DISPLAY_NAMES: dict[str, str] = {}
+
+
+def register_model_display_name(name: str, display_name: str) -> None:
+    if name and display_name and display_name != name:
+        _MODEL_DISPLAY_NAMES[name] = display_name
+
+
+def model_display_name(name: str) -> str:
+    return _MODEL_DISPLAY_NAMES.get(name, name)
 
 
 class RiskBand(str, Enum):
@@ -269,7 +291,7 @@ CHECK_LABELS = {
 
 def check_label(check: str) -> str:
     if check.startswith("model:"):
-        return f"외부 모델({check.split(':', 1)[1]})"
+        return f"외부 모델({model_display_name(check.split(':', 1)[1])})"
     return CHECK_LABELS.get(check, check)
 
 

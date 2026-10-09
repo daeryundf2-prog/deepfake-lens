@@ -73,7 +73,7 @@ def analyze_rppg(path: Path | str, *, max_frames: int = 600) -> RppgAnalysis:
     try:
         import cv2
     except ImportError:
-        return _error_analysis("opencv가 설치되어 있지 않습니다. pip install opencv-python으로 설치하세요.")
+        return _error_analysis("opencv가 설치되어 있지 않습니다. `pip install opencv-python`으로 설치하세요.")
     if not hasattr(cv2, "CascadeClassifier"):
         # OpenCV 5 builds without contrib have no Haar cascade API: a missing
         # dependency, reported instead of an AttributeError traceback.

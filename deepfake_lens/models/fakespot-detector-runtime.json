@@ -1,6 +1,7 @@
 {
   "type": "deepfake-lens-runtime-profile-v1",
   "name": "Fakespot AI text detector (roberta-base)",
+  "display_name": "Fakespot AI 텍스트 탐지기(roberta-base)",
   "candidate_key": "fakespot-detector-2024",
   "runtime": "hf-text-classifier",
   "supported": false,

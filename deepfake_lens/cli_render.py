@@ -237,7 +237,7 @@ def _write_csv(path: Path, items: list[ScanItem], *, coverage: dict[str, object]
                     pixel.model if pixel and pixel.available else "",
                     pixel.fusion if pixel and pixel.available else "",
                     _pixel_top_experts(pixel) if pixel and pixel.available else "",
-                    model.model if model and model.available else "",
+                    model.label if model and model.available else "",
                     model.score if model and model.available else "",
                     pixel.heatmap_path if pixel and pixel.heatmap_path else "",
                     result.source_guess.label if result else "",

@@ -190,7 +190,8 @@ DAMAGE_REASONS: dict[str, tuple[str, ...]] = {
     "png-as.wav": ("오디오 파일을 열 수 없습니다(형식 인식 불가)", "의존성 부재: librosa", "의존성 부재: soundfile"),
     "truncated.png": ("잘린 파일",),
     "huge-dims.png": ("DecompressionBombError", "의존성 부재: numpy"),
-    "garbage.wav": ("Error in WAV", "의존성 부재: librosa", "의존성 부재: soundfile"),
+    # R4: libsndfile's "Error in WAV[/W64/RF64] file. <detail>" in Korean.
+    "garbage.wav": ("WAV 파일 오류(", "의존성 부재: librosa", "의존성 부재: soundfile"),
     "bad.pdf": ("의존성 부재: pymupdf", "문서 텍스트 추출 실패"),
     "bad.docx": ("문서 텍스트 추출 실패",),
     "bomb-declared.zip": (f"압축 예산 초과(선언 크기 {1 << 30}, 한도 {archives.MAX_ARCHIVE_MEMBER_BYTES})",),
