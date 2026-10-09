@@ -386,6 +386,9 @@ class LiveServerClientHeaderTest(unittest.TestCase):
             self.assertIn("script-src 'self'", csp)
             self.assertIn("style-src 'self'", csp)
             self.assertNotIn("unsafe-inline", csp)
+            # S5: wav/mp3/mp4 previews are blob: object URLs in <audio>/<video>.
+            self.assertIn("media-src 'self' blob:", csp)
+            self.assertIn("img-src 'self' blob:", csp)
             html = response.read()
             self.assertIn(b'href="/gui.css"', html)
             self.assertIn(b'src="/gui.js"', html)
@@ -603,6 +606,11 @@ class ApiServiceContractTest(unittest.TestCase):
         res_gui = client.get("/gui")
         self.assertEqual(res_gui.status_code, 200)
         self.assertIn("<html", res_gui.text.lower())
+        # S5: the same CSP as the stdlib server, media-src blob: included.
+        from deepfake_lens.webapp import GUI_CSP
+
+        self.assertEqual(res_gui.headers.get("content-security-policy"), GUI_CSP)
+        self.assertIn("media-src 'self' blob:", GUI_CSP)
 
     def test_unified_api_stats(self) -> None:
         client = self._client(token="s3cret")

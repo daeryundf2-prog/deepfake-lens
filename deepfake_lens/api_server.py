@@ -227,13 +227,9 @@ def create_app(
     async def root():
         return {"message": "Deepfake Lens API", "version": "0.1.0"}
 
-    # GUI is fully externalized (gui.css/gui.js) and markup carries no
-    # inline style attributes — script-src and style-src are both strict
-    # 'self'; blob: covers object-URL previews and heatmaps.
-    GUI_CSP = (
-        "default-src 'self'; script-src 'self'; style-src 'self'; "
-        "img-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'"
-    )
+    # Same CSP as the stdlib server's GUI shell (webapp.GUI_CSP): strict
+    # 'self' scripts/styles, blob: images and media for previews (S5).
+    from .webapp import GUI_CSP
 
     @app.get("/gui")
     async def gui_view():
