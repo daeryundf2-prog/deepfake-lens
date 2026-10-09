@@ -138,6 +138,36 @@ S8_ROUND5_NEGATIVES = (
 )
 
 
+# N12 (round 6): the verifier's bypasses of the round-5 heuristic — Korean
+# particles glued to English words, hyphens inside words, and camelCase /
+# snake_case sentences. Each must be flagged.
+N12_NEGATIVES = (
+    "이 점수는 trustworthy하지 않으며 evidence로 쓰면 안 됩니다",
+    "결론은 reliable한 근거가 아니고 court에서는 inadmissible입니다",
+    "non-cal-ib-rat-ed sc-ore, ig-nore",
+    "doNotUseAsEvidence",
+    "resultIsUnreliableAndShouldBeIgnored 참고",
+    "This_score_is_not_evidence",
+    "do_not_use",
+    "결론: Ig-nore",
+)
+# ...while code identifiers, Korean particles on acronyms/module names and
+# allowlisted hyphenated terms stay allowed.
+N12_ALLOWED = (
+    "verdict_code와 score_is_calibrated 필드",
+    "allow_symlinks 옵션은 기본으로 꺼져 있습니다",
+    "digitalSourceType이 trainedAlgorithmicMedia입니다",
+    "C2PA SDK가 지원하지 않는 형식",
+    "JSON으로 저장했습니다",
+    "opencv가 설치되어 있지 않습니다",
+    "in-sample 임계값입니다",
+    "EfficientNet-B0 탐지기",
+    "face_manipulation 검사",
+    "no_default_engine 옵션",
+    "서명된 보고서 JSON 저장(verify-report로 검증)",  # an allowlisted id with a particle
+)
+
+
 def checked_strings(node: Any, path: str = "", key: str | None = None) -> Iterator[tuple[str, str]]:
     """(json path, string) for every string under a checked key (lists included)."""
     if isinstance(node, dict):
@@ -334,6 +364,15 @@ class EnglishProseHeuristicTest(unittest.TestCase):
         for text in S8_ROUND5_NEGATIVES:
             with self.subTest(text=text):
                 self.assertIsNotNone(english_prose(text))
+
+    def test_round6_bypasses_fail(self) -> None:
+        """N12: particles glued to English words, hyphens inside words and code-shaped sentences are flagged."""
+        for text in N12_NEGATIVES:
+            with self.subTest(text=text):
+                self.assertIsNotNone(english_prose(text))
+        for text in N12_ALLOWED:
+            with self.subTest(text=text):
+                self.assertIsNone(english_prose(text))
 
     def test_identifier_allowlist_covers_the_hyphenated_subcommands(self) -> None:
         """G9: a subcommand name (legal-report, evidence-statement …) is an identifier, so the list must be complete."""

@@ -279,7 +279,7 @@ COMMON_ENGLISH_WORDS = frozenset("""
     real really reason record reference related reliable report result results right run safe same say says score scores
     second see seems seen set several shall she should show signal since so some something sometimes soon still such
     sure suspicious take tell than that the their them then there therefore these they thing things this those though
-    through thus to too treat true trust trusted try two uncalibrated under unknown unless unlikely unreliable unsafe
+    through thus to too treat true trust trusted trustworthy untrustworthy try two uncalibrated under unknown unless unlikely unreliable unsafe
     until untrusted unverified up upon us use used useful using usually valid validated value verified verify very
     via want was way we well were what when where whether which while who whole why will with within without would
     wrong yes yet you your always applied applies apply assessment beware cannot carefully cautiously certainly
@@ -306,6 +306,9 @@ IDENTIFIER_ALLOWLIST = frozenset({
 _LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
 _DICT_SEPARATORS = re.compile("[\\s\\-–—/·\u300c\u300d\u300e\u300f\"'“”‘’()\\[\\]{}<>|,;:!?.…*+=~^`#&%]+")
 _LETTERS_AND_DIGITS = re.compile(r"^(?=.*[A-Za-z])[A-Za-z0-9@$]+$")
+_HANGUL = re.compile("[\uac00-\ud7a3]")
+_LATIN_RUN = re.compile(r"[A-Za-z0-9@$]+")
+_HYPHENATED = re.compile(r"[A-Za-z0-9@$]+(?:-[A-Za-z0-9@$]+)+")
 _DICT_IDENTIFIERS: tuple[re.Pattern[str], ...] = (
     re.compile(r"https?://\S+"),  # URLs
     # backticked code: a shell command, at most two tokens, or code punctuation
@@ -327,6 +330,11 @@ _DICT_IDENTIFIERS: tuple[re.Pattern[str], ...] = (
     re.compile(r"(?<![\w-])--?[A-Za-z][\w-]*"),  # CLI flags
     re.compile(r"\b[\w.:\-]+=\S*"),  # key=value
     re.compile(r"\b\w+(?::[\w\-]+)+"),  # colon-joined ids (model:<name>)
+)
+# Code-shaped identifiers, stripped after the sentence-identifier check (N12):
+# snake_case / camelCase / PascalCase tokens are identifiers unless they spell
+# a sentence (``doNotUseAsEvidence``, ``This_score_is_not_evidence``).
+_DICT_CODE_IDENTIFIERS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b\w*_\w*\b"),  # snake_case identifiers
     re.compile(r"\b[a-z]+[A-Z][A-Za-z0-9]*\b"),  # camelCase
     re.compile(r"\b[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*\b"),  # PascalCase / product ids (EfficientNet)
@@ -385,11 +393,18 @@ def _strip_allowlisted(text: str) -> str:
     text = _CHOICE_SET.sub(_strip_choice_set, text)
     for token in sorted(IDENTIFIER_ALLOWLIST | profile_names(), key=len, reverse=True):
         if token in text:
-            text = re.sub(rf"(?<![\w-]){re.escape(token)}(?![\w-])", " ", text)
+            # N12: a Korean particle after the identifier ("verify-report로")
+            # still ends it — only Latin letters, digits, "_" and "-" continue a token.
+            text = re.sub(rf"(?<![A-Za-z0-9_-]){re.escape(token)}(?![A-Za-z0-9_-])", " ", text)
     return text
 
 
 def _strip_dictionary_identifiers(line: str) -> str:
+    return _strip_code_identifiers(_strip_word_identifiers(line))
+
+
+def _strip_word_identifiers(line: str) -> str:
+    """Allowlisted tokens, URLs, backticked code, names, paths, flags, key=value… (not code-shaped ids)."""
     line = _strip_allowlisted(line)
     for pattern in _DICT_IDENTIFIERS:
         if pattern.pattern.startswith(r"\b[\w.]*[\w]-?[\w.-]*/"):
@@ -398,17 +413,69 @@ def _strip_dictionary_identifiers(line: str) -> str:
             line = pattern.sub(lambda m: " " if re.search(r"[\d-]", m.group(0)) and m.group(0).count("/") == 1 else m.group(0), line)
             continue
         line = pattern.sub(" ", line)
+    return line
+
+
+def _strip_code_identifiers(line: str) -> str:
+    for pattern in _DICT_CODE_IDENTIFIERS:
+        line = pattern.sub(" ", line)
     return _ACRONYM.sub(lambda m: " " if m.group(0).rstrip("s") in KNOWN_ACRONYMS else m.group(0), line)
+
+
+# N12: a snake_case / camelCase / PascalCase token that spells a sentence is
+# prose in disguise. It is one when it splits into at least
+# SENTENCE_ID_MIN_PARTS parts of which at least SENTENCE_ID_MIN_WORDS are
+# common English words — or into SENTENCE_ID_MIN_WORDS common words one of
+# which negates or instructs (not, should, must, ignore…). Ordinary
+# identifiers (``verdict_code``, ``score_is_calibrated``, ``allow_symlinks``,
+# ``trainedAlgorithmicMedia``) stay identifiers.
+SENTENCE_ID_MIN_PARTS = 4
+SENTENCE_ID_MIN_WORDS = 3
+SENTENCE_ID_MARKERS = frozenset({"not", "never", "dont", "don", "cannot", "should", "must", "ignore", "ignored", "avoid"})
+_CODE_TOKEN = re.compile(r"\b[A-Za-z]+(?:_[A-Za-z0-9]+)+\b|\b[a-z]+(?:[A-Z][a-z0-9]*)+\b|\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*){2,}\b")
+_CODE_PARTS = re.compile(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])")
+
+
+def _sentence_identifier_hit(line: str) -> str | None:
+    """The words of the first code-shaped token that spells an English sentence, or None (N12)."""
+    for match in _CODE_TOKEN.finditer(line):
+        parts = [part.lower() for chunk in match.group(0).split("_") for part in _CODE_PARTS.findall(chunk)]
+        words = [part for part in parts if part in COMMON_ENGLISH_WORDS or part in STANDALONE_ENGLISH_WORDS]
+        if len(words) >= SENTENCE_ID_MIN_WORDS and (
+            len(parts) >= SENTENCE_ID_MIN_PARTS or any(word in SENTENCE_ID_MARKERS for word in words)
+        ):
+            return " ".join(parts)
+    return None
 
 
 def _dictionary_words(line: str) -> tuple[list[str], list[str]]:
     """(dictionary words, standalone verdict words) of one line, distinct, in order."""
     found: list[str] = []
     standalone: list[str] = []
+
+    def note(word: str) -> None:
+        if word in COMMON_ENGLISH_WORDS and word not in found:
+            found.append(word)
+        if word in STANDALONE_ENGLISH_WORDS and word not in standalone:
+            standalone.append(word)
+
     for raw in line.split():
         whole = raw.strip("\"'“”‘’()[]{}<>|,;:!?.…*\u300c\u300d\u300e\u300f").lower()
         if whole in STANDALONE_ENGLISH_WORDS and whole not in standalone:
             standalone.append(whole)
+        # N12: an English word with a Korean particle glued on
+        # ("trustworthy하지", "evidence로", "inadmissible입니다") is the word.
+        if _HANGUL.search(raw):
+            for run in _LATIN_RUN.findall(raw):
+                if _LETTERS_AND_DIGITS.match(run):
+                    note(run.translate(_LEET).lower() if re.search(r"\d", run) else run.lower())
+        # N12: hyphens inside a word ("non-cal-ib-rat-ed", "ig-nore") — the
+        # joined letters are looked up too, with a "non"/"un" prefix dropped.
+        for hyphenated in _HYPHENATED.findall(raw):
+            joined = hyphenated.replace("-", "").translate(_LEET).lower()
+            for candidate in (joined, joined.removeprefix("non"), joined.removeprefix("un")):
+                if candidate:
+                    note(candidate)
         parts = [part for part in _DICT_SEPARATORS.split(raw) if part]
         if any(re.search(r"\d", part) and re.search(r"[A-Za-z]", part) for part in parts) and "-" in raw and len(parts) > 1:
             # A hyphenated token with a digit part is a version id (layer-thresholds-v1).
@@ -425,7 +492,11 @@ def _dictionary_words(line: str) -> tuple[list[str], list[str]]:
 def english_dictionary_hit(text: str) -> str | None:
     """The offending words when a line holds two common English words (or a verdict word), else None (G9)."""
     for line in text.splitlines() or [text]:
-        stripped = _strip_dictionary_identifiers(line)
+        words_only = _strip_word_identifiers(line)
+        sentence = _sentence_identifier_hit(words_only)
+        if sentence:
+            return sentence
+        stripped = _strip_code_identifiers(words_only)
         words, standalone = _dictionary_words(stripped)
         if len(words) >= 2:
             return " ".join(words)
