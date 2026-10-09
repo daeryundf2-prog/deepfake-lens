@@ -473,7 +473,10 @@ def verify_record(out: Path) -> int:
         return 1
     changed = [name for name in _git("diff", "--name-only", commit).splitlines() if name]
     relative = _rel(out)
-    others = [name for name in changed if name != relative]
+    # The commit-traceability table (R9-10) is another generated record that is
+    # legitimately regenerated in the same final commit as this record.
+    co_generated = {relative, "docs/traceability-commits.json", "docs/TRACEABILITY-COMMITS.md"}
+    others = [name for name in changed if name not in co_generated]
     if others:
         print(f"[qa] 기록 이후 {len(others)}개 파일이 바뀌었습니다(예: {', '.join(others[:5])}) — 다시 생성하세요.", file=sys.stderr)
         return 1

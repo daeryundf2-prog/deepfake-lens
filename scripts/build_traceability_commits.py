@@ -357,6 +357,9 @@ def _json_dirty() -> bool:
 
 
 TABLE_FILES = frozenset({JSON_REL, MD_REL})
+# The conformance record (docs/CONFORMANCE.md) is another generated record that is
+# legitimately regenerated in the same final commit (WP-J).
+GENERATED_RECORD_FILES = TABLE_FILES | {"docs/CONFORMANCE.md"}
 
 
 def _later_commit_problems(head: str) -> list[str]:
@@ -371,7 +374,7 @@ def _later_commit_problems(head: str) -> list[str]:
         ]
     if later:
         changed = set(_git("diff-tree", "--no-commit-id", "--name-only", "-r", "-m", later[0]).split())
-        extra = sorted(changed - TABLE_FILES)
+        extra = sorted(changed - GENERATED_RECORD_FILES)
         if extra:
             return [
                 f"표를 재생성한 커밋 {later[0][:7]}이(가) 추적표 파일 밖의 파일도 바꿨습니다: {', '.join(extra[:10])}"

@@ -24,7 +24,6 @@ import importlib.util  # noqa: E402
 from deepfake_lens.evaluation_metrics import (
     auroc as _auroc,
     eer as _eer,
-    sweep as _sweep,
     threshold_at_fpr as _threshold_at_fpr,
     undefined_reason,
 )
