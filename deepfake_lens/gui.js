@@ -205,6 +205,21 @@
             return `<div class="prov-banner" role="status">${parts.map(p => `<p>${p}</p>`).join('')}<p class="note">이 결과는 결론과 근거로 읽으십시오; 점수는 보정된 경우에만 표시됩니다. 유죄·불법성의 확정 판정이 아닙니다.</p></div>`;
         }
 
+        // P7: inverse of result_text.escape_row_path ("\\:" -> ":", "\\\\" -> "\\").
+        function unescapeRowPath(path) {
+            if (!path.includes('\\:')) return path;
+            let out = '';
+            for (let i = 0; i < path.length; i++) {
+                if (path[i] === '\\' && i + 1 < path.length && (path[i + 1] === '\\' || path[i + 1] === ':')) {
+                    out += path[i + 1];
+                    i++;
+                } else {
+                    out += path[i];
+                }
+            }
+            return out;
+        }
+
         function escapeHtml(value) {
             return String(value).replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
         }
@@ -631,10 +646,12 @@
                 parts.push(evidenceHtml(r));
                 parts.push(coverageHtml(r));
             }
-            const hasPreview = lastScanRoot && item.path && !item.path.includes('::') &&
+            // P7: a member row has item.member (its "::" is display only); a
+            // real file's row path has "::" escaped — unescaped for the preview.
+            const hasPreview = lastScanRoot && item.path && !item.member && !item.path.includes('::') &&
                 !/^[a-zA-Z]:[\\/]|^\//.test(item.path) &&
                 (item.kind === 'image' || item.kind === 'video' || item.kind === 'audio');
-            const abs = hasPreview ? (lastScanRoot.replace(/[\\/]+$/, '') + '/' + item.path) : '';
+            const abs = hasPreview ? (lastScanRoot.replace(/[\\/]+$/, '') + '/' + unescapeRowPath(item.path)) : '';
             const hasHeatmap = Boolean(item.heatmap_path && lastScanRoot);
 
             if (item.kind === 'image' && hasPreview && hasHeatmap) {

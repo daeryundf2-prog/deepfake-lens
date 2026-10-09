@@ -361,10 +361,13 @@ def _read_prefix(path: Path, limit: int) -> bytes:
 
 
 def _display_path(path: Path, *, root: Path | None) -> str:
+    """The row path of a real file: relative to ``root``, "::" escaped (P7)."""
+    from .result_text import escape_row_path
+
     try:
-        return str(path.relative_to(root)) if root else str(path)
+        return escape_row_path(str(path.relative_to(root)) if root else str(path))
     except ValueError:
-        return str(path)
+        return escape_row_path(str(path))
 
 
 def _duplicate_map(
@@ -643,7 +646,10 @@ def _cached_scan_item(cached: object, path: Path, *, root: Path) -> ScanItem | N
     row: dict[str, object] = cached
     old_path, old_name = row.get("path"), row.get("name")
     if isinstance(old_path, str) and isinstance(old_name, str) and (old_path, old_name) != (display, path.name):
-        row = _rewrite_path_text(row, old_path, old_name, display, path.name)
+        from .result_text import unescape_row_path
+
+        # Messages name the real path; P7: the row path may be escaped.
+        row = _rewrite_path_text(row, unescape_row_path(old_path), old_name, unescape_row_path(display), path.name)
     try:
         item = _scan_item_from_json(row)
     except (ValueError, TypeError, KeyError):

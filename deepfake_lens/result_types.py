@@ -442,10 +442,18 @@ class ScanItem:
     # scanner, which also keys the scan cache on it; None when the file was
     # not hashed (single-file paths, oversize skips, unreadable files).
     sha256: str | None = None
+    # P7 (round 8): an archive member row's identity — the container row's
+    # path and the member path inside it (``path`` is their display join
+    # "<container>::<member>"). None for every other row (not serialized).
+    container: str | None = None
+    member: str | None = None
 
     def to_json(self) -> dict[str, object]:
         data = asdict(self)
         data["result"] = self.result.to_json() if self.result else None
+        for key in ("container", "member"):
+            if data[key] is None:
+                del data[key]
         return data
 
 

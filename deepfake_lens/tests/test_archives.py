@@ -704,6 +704,68 @@ class RejectedMemberRecordTests(unittest.TestCase):
         self.assertTrue(summary.capped)
 
 
+@unittest.skipIf(__import__("os").name == "nt", "':' is not allowed in Windows file names")
+class ArchiveMemberIdentityTests(unittest.TestCase):
+    """P7 (round 8): "::" in a real path collided with archive member rows — a folder
+    named "evil.zip::inner" gave two rows "evil.zip::inner/a1111.png", and a file named
+    "fake.zip::member.png" read as a member of a zip that does not exist."""
+
+    def setUp(self) -> None:
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve() / "case"
+        (self.root / "evil.zip::inner").mkdir(parents=True)
+        with zipfile.ZipFile(self.root / "evil.zip", "w") as archive:
+            archive.writestr("inner/a1111.txt", "압축 안의 메모입니다.")
+        (self.root / "evil.zip::inner" / "a1111.txt").write_text("실제 폴더의 메모입니다.", encoding="utf-8")
+        (self.root / "fake.zip::member.txt").write_text("이름에 구분자가 있는 실제 파일입니다.", encoding="utf-8")
+        (self.root / "odd.zip::x.xyz").write_bytes(b"?")
+
+    def test_escape_is_reversible_and_never_reads_as_a_member(self) -> None:
+        from deepfake_lens.result_text import escape_row_path, row_identity, unescape_row_path
+
+        names = ["a.png", "evil.zip::inner/a.png", "a\\:\\:b", "back\\slash.png", "a\\:b", "x::y\\z", "::"]
+        escaped = [escape_row_path(name) for name in names]
+        self.assertEqual(len(set(escaped)), len(names), "escaping is injective")
+        for name, shown in zip(names, escaped):
+            with self.subTest(name=name):
+                self.assertEqual(unescape_row_path(shown), name)
+                self.assertNotIn("::", shown)
+                self.assertEqual(row_identity({"path": shown}), (shown, None))
+        self.assertEqual(escape_row_path("plain/back\\slash.png"), "plain/back\\slash.png", "unchanged without '::'")
+        self.assertEqual(row_identity({"path": "a.zip::b.png", "container": "a.zip", "member": "b.png"}), ("a.zip", "b.png"))
+
+    def test_real_paths_and_members_have_distinct_rows(self) -> None:
+        from deepfake_lens.core import scan_directory
+        from deepfake_lens.result_text import unrecorded_files
+
+        summary, items = scan_directory(self.root, recursive=True)
+        rows = {item.path: item for item in items}
+        self.assertEqual(len(rows), len(items), "no duplicate row paths")
+        member = rows["evil.zip::inner/a1111.txt"]
+        self.assertEqual((member.container, member.member), ("evil.zip", "inner/a1111.txt"))
+        self.assertEqual(member.to_json()["container"], "evil.zip")
+        real = rows["evil.zip\\:\\:inner/a1111.txt"]
+        self.assertEqual((real.container, real.member), (None, None))
+        self.assertNotIn("container", real.to_json())
+        self.assertNotEqual(real.sha256, member.sha256)
+        self.assertIn("fake.zip\\:\\:member.txt", rows)
+        self.assertEqual(rows["fake.zip\\:\\:member.txt"].status, "analyzed")
+        # a real unsupported file with "::" in its name is counted, never taken for a member
+        self.assertEqual(unrecorded_files(list(items), summary).counts["unsupported"], 1)
+
+    def test_cached_rescan_keeps_the_escaped_paths(self) -> None:
+        from deepfake_lens.core import scan_directory
+
+        cache = Path(self._tmp.name) / "cache.json"
+        first = {item.path: item.to_json() for item in scan_directory(self.root, recursive=True, cache_path=cache)[1]}
+        summary, items = scan_directory(self.root, recursive=True, cache_path=cache)
+        self.assertGreater(summary.cached, 0)
+        self.assertEqual({item.path: item.to_json() for item in items}, first)
+
+
 if __name__ == "__main__":
     unittest.main()
 

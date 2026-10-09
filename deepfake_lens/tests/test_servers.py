@@ -1515,13 +1515,8 @@ class ReportSignsOnlyServerResultsTest(_ReportLegsFixture):
                     self.assertIn(expected, json.loads(raw)["error"])
 
 
-class ReportScanRootAndUploadsTest(unittest.TestCase):
-    """P1/P6 (round 8): /api/report resolved rows against the read root, not the
-    scanned folder — a report of <root>/caseA signed <root>/target.png (a
-    same-named file: its verdict and hash, no marker); an upload named like a
-    read-root file was re-analyzed and signed as that file. Rows are now
-    resolved against the request's scan_root only, and upload rows are never
-    re-analyzed or signed."""
+class _ScanRootFixture(unittest.TestCase):
+    """A read root with <root>/target.png and the scanned <root>/caseA/target.png; both server legs."""
 
     HEADERS = {"X-Deepfake-Lens-Client": "gui", "Content-Type": "application/json"}
 
@@ -1582,6 +1577,15 @@ class ReportScanRootAndUploadsTest(unittest.TestCase):
 
             legs.append(("api", api))
         return legs
+
+
+class ReportScanRootAndUploadsTest(_ScanRootFixture):
+    """P1/P6 (round 8): /api/report resolved rows against the read root, not the
+    scanned folder — a report of <root>/caseA signed <root>/target.png (a
+    same-named file: its verdict and hash, no marker); an upload named like a
+    read-root file was re-analyzed and signed as that file. Rows are now
+    resolved against the request's scan_root only, and upload rows are never
+    re-analyzed or signed."""
 
     def test_subfolder_scan_report_signs_the_subfolder_file(self) -> None:
         from deepfake_lens.signing import REPORT_KEY_ENV, verify_report
@@ -1667,6 +1671,56 @@ class ReportScanRootAndUploadsTest(unittest.TestCase):
                 status, raw = call("POST", "/api/report?format=html", json.dumps({"items": upload["items"]}).encode("utf-8"))
                 self.assertEqual(status, 200, raw[:300])
                 self.assertIn(f"[{webapp_api.UNSIGNED_CLIENT_ROW_MARKER}] target.png", raw.decode("utf-8"))
+
+
+@unittest.skipIf(os.name == "nt", "':' is not allowed in Windows file names")
+class ReportArchiveMemberIdentityTest(_ScanRootFixture):
+    """P7 (round 8): "fake.zip::member.png" (a real file) could not be reported and a real
+    folder "evil.zip::inner" collided with evil.zip's member rows. Rows are identified by
+    container/member fields; a real path's "::" is escaped."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        import zipfile
+
+        with zipfile.ZipFile(self.case / "evil.zip", "w") as archive:
+            archive.writestr("inner/a1111.png", (self.case / "target.png").read_bytes())
+        (self.case / "evil.zip::inner").mkdir()
+        _write_png(self.case / "evil.zip::inner" / "a1111.png", seed=5)
+        (self.case / "fake.zip::member.png").write_bytes((self.case / "target.png").read_bytes())
+
+    def test_every_row_is_reported_as_its_own_file(self) -> None:
+        import hashlib
+        from urllib.parse import quote
+
+        expected = {
+            "evil.zip::inner/a1111.png": self.case_sha,  # the member
+            "evil.zip\\:\\:inner/a1111.png": hashlib.sha256((self.case / "evil.zip::inner" / "a1111.png").read_bytes()).hexdigest(),
+            "fake.zip\\:\\:member.png": self.case_sha,
+            "target.png": self.case_sha,
+        }
+        for name, call in self._legs():
+            with self.subTest(leg=name):
+                status, raw = call("GET", f"/api/scan?folder={quote(str(self.case))}&recursive=true&no_default_engine=true")
+                self.assertEqual(status, 200, raw[:300])
+                scan = json.loads(raw)
+                paths = [row["path"] for row in scan["items"]]
+                self.assertEqual(len(paths), len(set(paths)), paths)
+                body = {"items": scan["items"], "scan_root": scan["scan_root"], "format": "json",
+                        "options": {"recursive": True, "no_default_engine": True}}
+                status, raw = call("POST", "/api/report", json.dumps(body).encode("utf-8"))
+                self.assertEqual(status, 200, raw[:300])
+                signed = json.loads(raw)
+                self.assertEqual(signed["excluded_items"], [])
+                got = {row["path"]: row["sha256"] for row in signed["items"]}
+                for path, digest in expected.items():
+                    self.assertEqual(got.get(path), digest, path)
+                member = next(row for row in signed["items"] if row["path"] == "evil.zip::inner/a1111.png")
+                self.assertEqual((member["container"], member["member"]), ("evil.zip", "inner/a1111.png"))
+                forged = dict(member, path="fake.zip::member.png")
+                status, raw = call("POST", "/api/report", json.dumps({"items": [forged], "scan_root": scan["scan_root"]}).encode("utf-8"))
+                self.assertEqual(status, 400, raw[:300])
+                self.assertIn(webapp_api.REPORT_ROW_IDENTITY_MISMATCH, json.loads(raw)["error"])
 
 
 class ReportItemContractMatchesSchemaTest(unittest.TestCase):

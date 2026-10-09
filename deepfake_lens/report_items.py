@@ -51,7 +51,8 @@ COVERAGE_STATUSES = ("ran", "skipped", "failed")
 # Item string fields (schema $defs.item.properties: "type": "string").
 ITEM_STRING_FIELDS = ("path", "name", "kind", "status")
 # Optional item fields that are a string or null when present.
-ITEM_OPTIONAL_STRING_FIELDS = ("error", "duplicate_of")
+# P7: container/member — an archive member row's identity.
+ITEM_OPTIONAL_STRING_FIELDS = ("error", "duplicate_of", "container", "member")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 _TYPE_LABELS = {

@@ -124,7 +124,16 @@ always `0` invited old-contract readings. They remain readable as
   The scanner unpacks a nested archive into a `<inner archive>.unpacked/`
   temporary folder, but that folder name never appears in a row, a reason or
   a report (it used to: `a.zip::b.zip.unpacked/c.png`). Everything before the
-  first `::` is the container row's `path`. The same
+  first `::` is the container row's `path`. P7 (round 8): a member row also
+  carries `container` (the container row's `path`) and `member` (the chain
+  inside it) — the row's identity; its `path` is their display join. Every
+  other row has neither field, and in a real file's `path` a `::` is escaped
+  as `\:\:` (only then is every `\` doubled, so the escape is reversible):
+  a folder named `evil.zip::inner` gives the row `evil.zip\:\:inner/a.png`,
+  distinct from the member row `evil.zip::inner/a.png`, and a file named
+  `fake.zip::member.png` is reported as itself. `POST /api/report` identifies
+  rows by these fields and refuses (400) a member row whose `path` is not
+  `container::member`. The same
   lines appear in `limitations` as `구성 파일 거부: <member> — <why>` (at most
   100 per container, then one `외 N개` entry). An archive uploaded to the web
   server (`/api/analyze-upload`, `/api/check`) gets the same container row —

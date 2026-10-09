@@ -108,6 +108,9 @@ def _scan_item_from_json(data: dict[str, object]) -> ScanItem:
         str(data.get("error")) if data.get("error") is not None else None,
         str(data.get("duplicate_of")) if data.get("duplicate_of") is not None else None,
         str(data.get("sha256")) if isinstance(data.get("sha256"), str) and data.get("sha256") else None,
+        # P7: member identity fields (absent on every other row).
+        str(data["container"]) if isinstance(data.get("container"), str) else None,
+        str(data["member"]) if isinstance(data.get("member"), str) else None,
     )
 
 

@@ -160,6 +160,53 @@ def coverage_entry_line(entry: dict[str, object]) -> str:
 # names them in full so the container is never lost and a reference such as
 # "evil.zip::inner/a.png" points at a row that exists.
 ARCHIVE_MEMBER_SEPARATOR = "::"
+# P7 (round 8): a real path with "::" in it ("evil.zip::inner/a.png" — a
+# folder named "evil.zip::inner") collided with the member row of the same
+# display string (duplicate rows; "fake.zip::member.png" could not be
+# reported). In a real file's row path "::" is escaped as "\:\:" (and, only
+# then, every "\" as "\\", so the escape is reversible), member rows carry
+# ``container``/``member`` fields, and the "::" of a display path is display
+# only. A path with neither "::" nor "\:" is unchanged.
+_ESCAPED_SEPARATOR = "\\:\\:"
+
+
+def escape_row_path(path: str) -> str:
+    """A real file's relative path as a row path: "::" can no longer read as a member separator (P7)."""
+    if ARCHIVE_MEMBER_SEPARATOR not in path and "\\:" not in path:
+        return path
+    return path.replace("\\", "\\\\").replace(ARCHIVE_MEMBER_SEPARATOR, _ESCAPED_SEPARATOR)
+
+
+def unescape_row_path(path: str) -> str:
+    """The real relative path of a top-level row path (inverse of :func:`escape_row_path`)."""
+    if "\\:" not in path:
+        return path
+    out: list[str] = []
+    index = 0
+    while index < len(path):
+        char = path[index]
+        if char == "\\" and index + 1 < len(path) and path[index + 1] in "\\:":
+            out.append(path[index + 1])
+            index += 2
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def row_identity(item: object) -> tuple[str, str | None]:
+    """(top-level row path, member path or None) of a row (P7: the fields, else the display path)."""
+    def get(name: str) -> object:
+        return item.get(name) if isinstance(item, dict) else getattr(item, name, None)
+
+    member, container = get("member"), get("container")
+    if isinstance(member, str) and isinstance(container, str):
+        return container, member
+    path = str(get("path") or "")
+    if ARCHIVE_MEMBER_SEPARATOR in path:
+        top, inner = path.split(ARCHIVE_MEMBER_SEPARATOR, 1)
+        return top, inner
+    return path, None
 
 
 def display_path(path: str, *, redact_paths: bool = False) -> str:

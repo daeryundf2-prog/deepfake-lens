@@ -773,9 +773,15 @@ def _scan_specs(
         _write_scan_cache(cache_path, cache)
 
     def analyze_and_report(spec: tuple[Path, str | None]) -> tuple[ScanItem, str | None, bool]:
-        outcome = analyze_one(spec)
-        _report(outcome[0])
-        return outcome
+        item, key, was_cached = analyze_one(spec)
+        display = spec[1]
+        if display is not None and "::" in display:
+            # P7: a member row names its container and member in fields; the
+            # container part of the display path is escaped (no "::" in it).
+            container, member = display.split("::", 1)
+            item = replace(item, container=container, member=member)
+        _report(item)
+        return item, key, was_cached
 
     analyzed: list[tuple[ScanItem, str | None, bool]] = []
     if workers > 1 and len(specs) > 1:

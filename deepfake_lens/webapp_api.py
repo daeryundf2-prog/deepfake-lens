@@ -692,7 +692,7 @@ def _archive_upload_items(
             if base != filename:
                 # Report the name the client sent (a path in the archive
                 # name is kept as given, like the pre-B1 upload rows).
-                for key in ("path", "name"):
+                for key in ("path", "name", "container"):
                     value = str(record.get(key) or "")
                     if value == base or value.startswith(base + "::"):
                         record[key] = filename + value[len(base):]
@@ -1057,6 +1057,8 @@ REPORT_SCAN_ROOT_NOT_STRING = "scan_root 값은 문자열이어야 합니다"
 REPORT_SCAN_ROOT_NOT_ABSOLUTE = "scan_root는 절대 경로여야 합니다: 「{value}」"
 REPORT_SCAN_ROOT_MISSING = "스캔 폴더를 찾을 수 없습니다: 「{value}」"
 REPORT_ROW_OUTSIDE_SCAN_ROOT = "스캔 폴더 밖의 경로라 서버가 재분석하지 않았습니다"
+# P7 (round 8): a member row's container/member fields must spell its path.
+REPORT_ROW_IDENTITY_MISMATCH = "path가 container::member와 일치하지 않습니다"
 # P6 (round 8): an upload row is never re-analyzed from the read root.
 REPORT_ROW_UPLOAD = "업로드 파일 — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다"
 
@@ -1137,8 +1139,13 @@ class _ReportHasher:
         self._temp_dirs: list[Path] = []
 
     def _candidates(self, path_text: str) -> list[tuple[Path, Path]]:
-        """(file, folder no link may sit under) pairs for a row path (P1: the scan root only)."""
-        p = Path(os.path.normpath(Path(path_text).expanduser()))
+        """(file, folder no link may sit under) pairs for a top-level row path (P1: the scan root only).
+
+        P7: the row path is unescaped ("a\\:\\:b" names the real file "a::b").
+        """
+        from .result_text import unescape_row_path
+
+        p = Path(os.path.normpath(Path(unescape_row_path(path_text)).expanduser()))
         if self.scan_root is not None:
             cand = p if p.is_absolute() else Path(os.path.normpath(self.scan_root / p))
             return [(cand, self.scan_root)] if _is_within(cand, self.scan_root) else []
@@ -1191,14 +1198,14 @@ class _ReportHasher:
 
     def sha256(self, item: Any) -> str | None:
         from .evidence_statement import _compute_sha256, _SymlinkRefused
-        from .result_text import ARCHIVE_MEMBER_SEPARATOR, is_symlink_row
+        from .result_text import is_symlink_row, row_identity
 
         if is_symlink_row(item.status, item.error):
             return None  # N2: the scan never followed the link; nor does the report
-        if ARCHIVE_MEMBER_SEPARATOR in item.path:
-            container, member = item.path.split(ARCHIVE_MEMBER_SEPARATOR, 1)
-            return self._member_digests(container).get(member)
-        path = self.resolve(item.path)
+        top, member = row_identity(item)  # P7: the fields, not a "::" in a real path
+        if member is not None:
+            return self._member_digests(top).get(member)
+        path = self.resolve(top)
         if path is None:
             return None
         root = next((r for r in self.roots if _is_within(path, r)), None)
@@ -1259,11 +1266,11 @@ def _rederive_report_items(
     for rows that could not be re-derived)``.
     """
     from .analysis_api import scan_file_run
-    from .result_text import ARCHIVE_MEMBER_SEPARATOR
+    from .result_text import ARCHIVE_MEMBER_SEPARATOR, escape_row_path, row_identity
 
-    derived_by_top: dict[str, dict[str, Any] | str] = {}
+    derived_by_top: dict[str, dict[str | None, Any] | str] = {}
     for item in posted:
-        top = item.path.split(ARCHIVE_MEMBER_SEPARATOR, 1)[0]
+        top = row_identity(item)[0]
         if top in derived_by_top:
             continue
         located = hasher.locate(top)
@@ -1276,26 +1283,30 @@ def _rederive_report_items(
             logger.info("report: %s could not be re-analyzed", top, exc_info=True)
             derived_by_top[top] = REPORT_ROW_FAILED.format(reason=failure_reason(exc))
             continue
-        name = located.name
-        rows: dict[str, Any] = {}
+        name = escape_row_path(located.name)
+        # P7: server rows keyed by member path (None = the file's own row);
+        # the scan of the single file names its rows from the file name.
+        rows: dict[str | None, Any] = {}
         for row in run.items:
-            suffix = row.path[len(name):] if row.path.startswith(name) else None
-            if suffix is None or (suffix and not suffix.startswith(ARCHIVE_MEMBER_SEPARATOR)):
+            row_top, row_member = row_identity(row)
+            if row_top != name:
                 continue
-            rows[top + suffix] = replace(row, path=top + suffix)
+            path = top if row_member is None else f"{top}{ARCHIVE_MEMBER_SEPARATOR}{row_member}"
+            rows[row_member] = replace(row, path=path, container=None if row_member is None else top, member=row_member)
         derived_by_top[top] = rows
     derived: list[Any] = []
     excluded: list[tuple[Any, str]] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str | None]] = set()
     for item in posted:
-        found = derived_by_top[item.path.split(ARCHIVE_MEMBER_SEPARATOR, 1)[0]]
+        top, member = row_identity(item)
+        found = derived_by_top[top]
         if isinstance(found, str):
             excluded.append((item, found))
-        elif item.path not in found:
+        elif member not in found:
             excluded.append((item, REPORT_ROW_NOT_DERIVED))
-        elif item.path not in seen:
-            seen.add(item.path)
-            derived.append(found[item.path])
+        elif (top, member) not in seen:
+            seen.add((top, member))
+            derived.append(found[member])
     return derived, excluded
 
 
@@ -1407,7 +1418,13 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
             # N11: a row that is not a scan-result item is refused (was
             # skipped, or rendered as a report about e.g. path 3).
             check_report_item(row)
-            items.append(_scan_item_from_json(row))
+            parsed = _scan_item_from_json(row)
+            if parsed.member is not None and (
+                parsed.container is None or parsed.path != f"{parsed.container}::{parsed.member}"
+            ):
+                # P7: the identity fields and the display path must agree.
+                return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason=REPORT_ROW_IDENTITY_MISMATCH)}
+            items.append(parsed)
         except ItemContractError as exc:
             return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason=str(exc))}
         except (TypeError, ValueError, KeyError, AttributeError) as exc:
