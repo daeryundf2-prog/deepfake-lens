@@ -26,6 +26,8 @@ from .result_text import (
     summary_line,
     threshold_provenance_line,
     threshold_provenance_lines,
+    unrecorded_files,
+    UNRECORDED_SECTION_TITLE,
     verdict_heading,
 )
 from .result_types import EVIDENCE_KIND_LABELS, VERDICT_LABELS, CoverageStatus, Grade, Verdict, check_label, is_verdict_row, status_label
@@ -98,6 +100,8 @@ def build_report_body(
         "summary": summary.to_json(),
         "thresholds": _thresholds_payload(thresholds),
         "coverage": coverage,
+        # X1: inside the signed body, like the scan JSON.
+        "unrecorded_files": unrecorded_files(list(items), summary).to_json(),
         "items": rows,
     }
 
@@ -214,6 +218,7 @@ def write_html_report(
   <p class="note">결론은 세 가지뿐입니다 — 조작·생성 근거 있음 / 원본성 근거 있음 / 판단 불가. 결정적 근거(메타데이터·C2PA)만 결론을 내리고, 통계적(모델)·어휘적(키워드) 근거는 보정 전까지 참고로만 표시합니다. 검사가 실패한 파일은 판단 불가로 남습니다.</p>
   {legal_note}
   <p class="note">{"<br>".join(escape(line) for line in threshold_provenance_lines(thresholds))}</p>
+  {_unrecorded_html(summary, items)}
   <table>
     <thead><tr><th>결론</th><th>근거(종류별)</th><th>검사 범위(미실행·실패)</th><th>파일</th><th>참고 신호</th><th>히트맵</th></tr></thead>
     <tbody>{rows}</tbody>
@@ -223,6 +228,18 @@ def write_html_report(
 </html>
 """
     output.write_text(body, encoding="utf-8")
+
+
+def _unrecorded_html(summary: BatchScanSummary, items: list[ScanItem]) -> str:
+    """The HTML "기록되지 않은 파일" section (X1): count and reasons, always present."""
+    unrecorded = unrecorded_files(list(items), summary)
+    reasons = "".join(f"<li>{escape(line)}</li>" for line in unrecorded.reason_lines())
+    return (
+        f'<section class="unrecorded" id="unrecorded-files"><h2>{escape(UNRECORDED_SECTION_TITLE)}</h2>'
+        f"<p>{escape(unrecorded.headline())}</p>"
+        + (f"<ul>{reasons}</ul>" if reasons else "")
+        + "</section>"
+    )
 
 
 def _evidence_sha256(
@@ -440,6 +457,12 @@ def _render_forensic_pdf(
         (integrity_line, 8.0, (0.45, 0.45, 0.45)),
         # N17: one PDF line per provenance line (the in-sample caveat apart).
         *((line, 7.5, (0.45, 0.45, 0.45)) for line in threshold_provenance_lines(thresholds)),
+    ])
+    # X1: the "기록되지 않은 파일" section — count and reasons, always present.
+    unrecorded = unrecorded_files(list(items), summary)
+    layout.boxed_text(UNRECORDED_SECTION_TITLE, [
+        (line, 8.0 if index == 0 else 7.5, (0.1, 0.2, 0.4) if index == 0 else (0.3, 0.3, 0.3))
+        for index, line in enumerate(unrecorded.lines())
     ])
 
     columns = layout.columns(FORENSIC_TABLE_WEIGHTS)

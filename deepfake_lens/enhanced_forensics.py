@@ -372,6 +372,7 @@ def build_legal_report(
     """
     from .analysis_api import AnalysisOptions, load_thresholds, provenance
     from .cli_standalone import analysis_result_for_path
+    from .result_text import unrecorded_files
     from .signing import sign_report
 
     file_path = Path(path)
@@ -413,6 +414,9 @@ def build_legal_report(
         "reference_signals": result.get("reference_signals", []),
         # B1: the scan rows for the file (an archive: member rows + container row).
         "rows": result.get("rows", []),
+        # X1: the "기록되지 않은 파일" section (a single file: its own row —
+        # a symlink, unsupported or skipped file has no analysis result).
+        "unrecorded_files": unrecorded_files(list(result.get("rows", []) or [])).to_json(),
         "provenance": provenance(opts, thresholds),
         "legal_notes": list(LEGAL_REPORT_NOTES),
     }
@@ -466,6 +470,12 @@ def legal_report_text(report: dict[str, Any]) -> str:
             lines.append(f"- {coverage_entry_line(entry)}")
     lines.extend(["", "=== 한계 ==="])
     lines.extend(f"- {item}" for item in report.get("limitations") or [])
+    # X1: the "기록되지 않은 파일" section, always present.
+    from .result_text import UNRECORDED_SECTION_TITLE, UnrecordedFiles
+
+    unrecorded = UnrecordedFiles.from_json(report.get("unrecorded_files")) or UnrecordedFiles({})
+    lines.extend(["", f"=== {UNRECORDED_SECTION_TITLE} ===", unrecorded.headline()])
+    lines.extend(f"- {line}" for line in unrecorded.reason_lines())
     lines.extend(["", "=== 법적 참고사항 ==="])
     lines.extend(f"- {note}" for note in report.get("legal_notes") or [])
     lines.extend(["", "=== 서명 ==="])

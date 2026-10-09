@@ -463,6 +463,10 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     evidence_stmt_parser.add_argument("--json-out", type=Path, help="서명된 증거설명서 JSON 저장(verify-report로 검증)")
     evidence_stmt_parser.add_argument("--key-file", type=Path, help="서명 키 파일(기본: DEEPFAKE_LENS_REPORT_KEY 환경 변수; 빈 파일이면 오류); 키가 없으면 모든 출력에 서명 없음 표시")
     evidence_stmt_parser.add_argument("--format", choices=["table", "json", "markdown"], default="table", help="표준 출력 형식")
+    # X1: a folder target is scanned with scan's options and defaults.
+    evidence_stmt_parser.add_argument("--recursive", action="store_true", help="폴더 입력: 하위 폴더까지 검사(scan과 같음; 기본은 바로 아래 파일만 — 건너뛴 하위 폴더 수는 '기록되지 않은 파일'에 표시)")
+    evidence_stmt_parser.add_argument("--max-files", type=int, default=DEFAULT_MAX_FILES, help=f"폴더 입력: 검사할 최대 파일 수(scan과 같은 기본값 {DEFAULT_MAX_FILES}; 초과 파일 수는 '기록되지 않은 파일'에 표시)")
+    evidence_stmt_parser.add_argument("--allow-symlinks", action="store_true", help="폴더 입력: 심볼릭 링크를 따라가 분석(scan과 같음)")
 
     vendor_parser = subparsers.add_parser("vendor-weights", help="망분리 감정실용 모델 가중치 검증·고정·오프라인 묶음")
     vendor_parser.add_argument("action", nargs="?", choices=["pin"], help="'pin <프로필>': 체크포인트 sha256 또는 허브 커밋 revision을 프로필 pin에 기록")

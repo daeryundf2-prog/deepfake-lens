@@ -9,6 +9,7 @@
     "schema_version": { "const": 2 },
     "summary": { "$ref": "#/$defs/summary" },
     "items": { "type": "array", "items": { "$ref": "#/$defs/item" } },
+    "unrecorded_files": { "$ref": "#/$defs/unrecorded_files" },
     "tool_version": { "type": "string", "description": "Signed reports only (G30): tool version, inside the MAC." },
     "model_pins": {
       "type": "array",
@@ -24,6 +25,28 @@
     "signature": { "type": ["string", "null"], "description": "HMAC-SHA256 over every field except signature and signature_key_id." }
   },
   "$defs": {
+    "unrecorded_files": {
+      "type": "object",
+      "description": "X1: files of the scanned folder without an analysis result, by reason (also in the HTML/PDF report bodies, the evidence statement and the legal report). subfolders counts folders; every other reason counts files.",
+      "required": ["total_files", "cap_reached", "reasons", "lines"],
+      "properties": {
+        "total_files": { "type": "integer", "minimum": 0 },
+        "cap_reached": { "type": "boolean" },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["code", "label", "count"],
+            "properties": {
+              "code": { "enum": ["file_cap", "subfolders", "symlink", "duplicate", "unsupported", "other_skipped"] },
+              "label": { "type": "string" },
+              "count": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "lines": { "type": "array", "items": { "type": "string" }, "description": "Korean headline followed by one line per non-zero reason." }
+      }
+    },
     "summary": {
       "type": "object",
       "required": [
@@ -37,7 +60,8 @@
       },
       "properties": {
         "container_rows": { "type": "integer", "minimum": 0, "description": "Archive container rows among the verdict rows (already in the verdict counts, R5/N5)." },
-        "subfolders_skipped": { "type": "integer", "minimum": 0, "description": "Subfolders of the scan root a non-recursive scan did not enter (0 when recursive) — never omitted silently (N8)." }
+        "subfolders_skipped": { "type": "integer", "minimum": 0, "description": "Subfolders of the scan root a non-recursive scan did not enter (0 when recursive) — never omitted silently (N8)." },
+        "files_over_cap": { "type": "integer", "minimum": 0, "description": "Files the walk found beyond the --max-files cap — never analyzed, no row (X1); 0 when not capped." }
       },
       "description": "Verdict counts only (D16): the legacy band counts high/medium/low/unknown are not serialized."
     },

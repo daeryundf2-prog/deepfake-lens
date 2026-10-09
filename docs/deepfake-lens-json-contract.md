@@ -50,6 +50,7 @@ per-file coverage record:
 | `summary` | stable | `BatchScanSummary` counts (see below). |
 | `coverage` | stable | Weight availability for the run (`weights_available`, `weights_total`, …). Not to be confused with per-item `result.coverage`. |
 | `thresholds` | stable | Threshold provenance (`source`, `provisional`, `measured`, …). A loaded profile also reports `in_sample` (cutoffs fitted on the rows they were evaluated on — G28), `note`, and `label` (`"in-sample(참고)"`, `"측정됨"`, `"잠정(미검증)"`). |
+| `unrecorded_files` | stable | X1 "기록되지 않은 파일": files of the folder without an analysis result, by reason — `{total_files, cap_reached, reasons: [{code, label, count}], lines}`; codes `file_cap` (files beyond `--max-files`, no row), `subfolders` (folders a flat scan did not enter — counts folders), `symlink`, `duplicate`, `unsupported`, `other_skipped` (size cap, FIFO/device, cancelled). `lines` is the Korean section text (headline + one line per non-zero reason). The same object is in the signed HTML/PDF report body, the evidence statement (`unrecorded_files`) and the legal report, and every rendering (console table, CSV `#` header line, HTML `<section id="unrecorded-files">`, forensic/scan PDF box, evidence statement MD/PDF section, legal-report text) prints it as a section titled `기록되지 않은 파일` — `없음` when nothing was left out. |
 | `items` | stable | Per-file scan items, conclusions first: manipulation evidence, then undetermined, then authenticity evidence, then unanalyzed rows. |
 
 ### `summary`
@@ -64,7 +65,8 @@ per-file coverage record:
 | `undetermined` | Verdict rows whose verdict is `undetermined`. |
 | `checks_failed` | Verdict rows with at least one `failed` coverage entry. |
 | `container_rows` | Verdict rows that are archive container rows (`kind: "archive"`) — already included in the three verdict counts (R5); the CLI/HTML/PDF header prints `총 N건(압축 파일 M건 포함)` and the GUI total pill `압축 파일 M건 포함` (N5). A container row carries one evidence item of its own: `압축 파일 구성원 결론 집계` — `조작·생성 근거 있음 N건 / 판단 불가 M건` (` / 원본성 근거 있음 K건` when K > 0), deterministic, neutral, moderate, layer `archive` — so the table and the evidence statement name the basis of its verdict. |
-| `subfolders_skipped` | Subfolders directly under the scanned folder that a non-recursive scan did not enter (a symlinked folder is a skipped row instead); 0 for `--recursive`. The CLI table prints `참고: 하위 폴더 N개는 검사하지 않았습니다 … --recursive`, the GUI banner says the same (N8). |
+| `subfolders_skipped` | Subfolders directly under the scanned folder that a non-recursive scan did not enter (a symlinked folder is a skipped row instead; with `--allow-symlinks` a followable linked folder is counted here — X3); 0 for `--recursive`. The CLI table prints `참고: 하위 폴더 N개는 검사하지 않았습니다 … --recursive`, the GUI banner says the same (N8). |
+| `files_over_cap` | X1: files the folder walk found beyond the `--max-files` cap (`capped: true`) — never analyzed, no row; 0 when not capped. Reported in every rendering's `기록되지 않은 파일` section and in the GUI banner. |
 
 A *verdict row* is any item with a `result` whose `status` is not `failed`,
 `unsupported`, `duplicate` or `skipped` (`result_types.is_verdict_row`) —
@@ -289,7 +291,10 @@ Rendered reports (`POST /api/report`, `--html-out`) additionally carry
 one signed body: every field of `EvidenceStatement.to_json()` (`case_no`,
 `case_name`, `plaintiff`, `defendant`, `court`, `entries[]` with
 `purpose_of_proof`/`sha256`/`statutes`/`verdict_label`, `created_at`, `law_firm`, `contact` (empty unless set by flag, request or `~/.deepfake-lens/config.json` — N17),
-`center`, `provenance_note`, `reference_note`) plus `"report_type":
+`center`, `provenance_note`, `reference_note`, `unrecorded_files` — X1, the
+top-level scan object above, counted from the statement's rows plus the
+scan summary's `files_over_cap`/`subfolders_skipped`; the Markdown prints it
+as `### [기록되지 않은 파일]`, the PDF as a box of that title) plus `"report_type":
 "evidence-statement"` and the four signing fields above, all inside the MAC
 except `signature`/`signature_key_id`. The Markdown and PDF print the
 signature, key id and the signed body's SHA-256 (or the `서명 없음` lines)
@@ -307,7 +312,8 @@ Built from the scan result of one file: `report_type: "legal-report"`,
 `reference_signals`, `rows` (B1: the file's scan rows as in the
 analysis_result `rows[]` below — an archive's member rows and container row,
 inside the signed body), `provenance` (weights coverage + threshold
-provenance), `legal_notes`, plus the four signing fields above. For an
+provenance), `legal_notes`, `unrecorded_files` (X1; the text rendering's
+`=== 기록되지 않은 파일 ===` section), plus the four signing fields above. For an
 archive the conclusion is the container row's and the text rendering adds
 a `=== 압축 구성 파일 ===` section listing the member rows.
 

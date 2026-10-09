@@ -853,6 +853,9 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         return emit_layer(args, "faceswap_seam", "페이스스왑 경계면 계층", analysis.to_json(), subject=str(args.file))
     if args.command == "evidence-statement":
         target = Path(args.target)
+        if args.max_files < 1:
+            print("오류: --max-files는 1 이상이어야 합니다", file=sys.stderr)
+            return USAGE_EXIT
         if args.pdf_out and not pdf_backend_available():
             # R6: missing optional renderer -> Korean message, exit 2, before any analysis.
             print(f"오류: {PdfDependencyMissing()}", file=sys.stderr)
@@ -861,6 +864,12 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         # S6: the threshold provenance (with the in-sample caveat) goes into
         # the statement for every input kind.
         stmt_thresholds: object | None = None
+        # X1: the scan summary behind the statement (cap, flat-scan
+        # subfolders) for its "기록되지 않은 파일" section.
+        stmt_summary: object | None = None
+        # X1: folder and file inputs are analyzed with the same options as
+        # `scan` (--max-files with scan's default, --recursive, --allow-symlinks…).
+        stmt_options = AnalysisOptions.from_cli_args(args)
         if target.is_file() and target.suffix.lower() == ".json":
             try:
                 data = json.loads(target.read_text(encoding="utf-8"))
@@ -868,13 +877,14 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
                 raw_items = data.get("items", [])
                 items = [_scan_item_from_json(row) for row in raw_items if isinstance(row, dict)]
                 stmt_thresholds = data.get("thresholds")
+                stmt_summary = data.get("summary") if isinstance(data.get("summary"), dict) else None
             except Exception as exc:
                 print(f"오류: 검사 JSON을 해석할 수 없습니다: {exc}", file=sys.stderr)
                 return 2
         elif target.is_dir():
             try:
-                run = scan_folder_run(target, AnalysisOptions(max_files=100), warn=thresholds_warning_printer(sys.stderr))
-                items, stmt_thresholds = run.items, run.thresholds
+                run = scan_folder_run(target, stmt_options, warn=thresholds_warning_printer(sys.stderr))
+                items, stmt_thresholds, stmt_summary = run.items, run.thresholds, run.summary
             except OSError as exc:
                 # S4: "오류: 폴더를 읽을 수 없습니다: … (권한이 없습니다)", exit 2.
                 print(f"오류: {exc}", file=sys.stderr)
@@ -884,8 +894,8 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             # its member rows and the container row. S6: thresholds go into
             # the statement. G6: a symbolic link (even a dangling one) is
             # the scan's skipped row, never followed.
-            stmt_thresholds = load_thresholds(AnalysisOptions(), warn=thresholds_warning_printer(sys.stderr))
-            items = analyze_rows(target, AnalysisOptions(), thresholds=stmt_thresholds)
+            stmt_thresholds = load_thresholds(stmt_options, warn=thresholds_warning_printer(sys.stderr))
+            items = analyze_rows(target, stmt_options, thresholds=stmt_thresholds)
         else:
             # Unreachable after cli_inputs (N4) unless the target vanished meanwhile.
             from .cli_inputs import MISSING
@@ -908,6 +918,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             # D5: a row without sha256 is hashed against the scanned folder,
             # never the cwd (a single file / JSON input has no scan root).
             scan_root=target if target.is_dir() else None,
+            summary=stmt_summary,
         )
         # G30: one signed body backs every output (JSON, Markdown, PDF).
         signed_statement = signed_statement_body(statement, resolve_report_key(args.key_file))
@@ -928,10 +939,15 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             print(f"원고(고소인): {statement.plaintiff}")
             print(f"피고(피의자): {statement.defendant}")
             print(f"증거 목록 ({len(statement.entries)}건):")
+            unrecorded_lines = statement.unrecorded_lines()
             for entry in statement.entries:
                 # D1: the verdict label only — an uncalibrated score (always 0) is not printed.
                 print(f"  - [{entry.exhibit_no}] {entry.document_name} (결론: {entry.verdict_label})")
                 print(f"    SHA-256: {entry.sha256}" if entry.sha256 else "    SHA-256: 해시 불가 — 원본 접근 실패")
+            # X1: the "기록되지 않은 파일" section.
+            print(f"[{unrecorded_lines[0]}]")
+            for line in unrecorded_lines[1:]:
+                print(f"  - {line}")
             if args.pdf_out:
                 print(f"PDF 저장 완료: {args.pdf_out}")
             if args.md_out:
@@ -1072,7 +1088,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         scan_payload = _maybe_sign(analysis_scan_payload(summary, items, thresholds, options), sign=args.sign, key_file=args.key_file)
         _write_json_out(args.json_out, json.dumps(scan_payload, ensure_ascii=False, indent=2) + "\n")
     if args.csv_out:
-        _write_csv(args.csv_out, items, coverage=scan_coverage, thresholds=thresholds)
+        _write_csv(args.csv_out, items, coverage=scan_coverage, thresholds=thresholds, summary=summary)
     # S3: --redact-paths also hides the tool's install path (model profile
     # paths and any other field naming it) in the HTML/PDF reports and the
     # signed body they embed; JSON/CSV/table output keeps full paths.
@@ -1115,6 +1131,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             thresholds=_thresholds_json(thresholds),
             coverage=scan_coverage,
             scan_root=args.folder,  # D5: resolve sha256-less rows here, not in the cwd
+            summary=summary,  # X1: cap / flat-scan counts for "기록되지 않은 파일"
         )
         signed_stmt = signed_statement_body(stmt, resolve_report_key(getattr(args, "key_file", None)))
         if getattr(args, "evidence_statement_out", None):

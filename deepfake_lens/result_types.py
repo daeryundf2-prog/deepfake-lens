@@ -477,6 +477,9 @@ class BatchScanSummary:
     # N8: subfolders of the scan root a non-recursive scan did not enter
     # (0 for a recursive scan) — so they are never silently omitted.
     subfolders_skipped: int = 0
+    # X1: files the walk found beyond the --max-files cap (never analyzed,
+    # no row); 0 when the scan was not capped.
+    files_over_cap: int = 0
 
     def to_json(self) -> dict[str, object]:
         # D16: the summary JSON counts verdicts only. The legacy band counts

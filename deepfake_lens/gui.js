@@ -193,6 +193,9 @@
             // N8: a non-recursive scan never omits subfolders silently.
             const skippedDirs = (lastProvenance.summary || {}).subfolders_skipped || 0;
             if (skippedDirs) parts.push(`하위 폴더 <b>${skippedDirs}개는 검사하지 않았습니다</b> — 포함하려면 '하위 폴더' 옵션을 켜고 다시 검사하십시오.`);
+            // X1: files beyond the file-count cap are never silently omitted.
+            const overCap = (lastProvenance.summary || {}).files_over_cap || 0;
+            if (overCap) parts.push(`파일 수 상한에 도달해 <b>${overCap}개 파일은 검사·기록하지 않았습니다</b> — '최대 파일 수'를 늘려 다시 검사하십시오.`);
             if (!parts.length) return '';
             return `<div class="prov-banner" role="status">${parts.map(p => `<p>${p}</p>`).join('')}<p class="note">이 결과는 결론과 근거로 읽으십시오; 점수는 보정된 경우에만 표시됩니다. 유죄·불법성의 확정 판정이 아닙니다.</p></div>`;
         }

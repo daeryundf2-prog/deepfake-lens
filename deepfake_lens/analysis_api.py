@@ -532,6 +532,7 @@ def _with_fusion(
         summary = replace(
             summarize(items, capped=summary.capped, cached=summary.cached),
             subfolders_skipped=summary.subfolders_skipped,
+            files_over_cap=summary.files_over_cap,
         )
     return summary, items
 

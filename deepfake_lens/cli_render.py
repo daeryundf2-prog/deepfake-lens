@@ -23,6 +23,7 @@ from .result_text import (
     evidence_counts_text,
     item_kind_label,
     summary_line,
+    unrecorded_files,
 )
 from .result_types import (
     EVIDENCE_KIND_LABELS,
@@ -111,6 +112,9 @@ def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage:
     if subfolders:
         # N8: a non-recursive scan never omits subfolders silently.
         print(f"참고: 하위 폴더 {subfolders}개는 검사하지 않았습니다(바로 아래 파일만 검사) — 포함하려면 --recursive 를 추가하십시오.")
+    # X1: the "기록되지 않은 파일" section — count and reasons, always printed.
+    for line in unrecorded_section_lines(items, summary):
+        print(line)
     print(
         "결론은 세 가지뿐입니다: 조작·생성 근거 있음 / 원본성 근거 있음 / 판단 불가. "
         "통계(모델)·어휘(키워드) 신호는 보정 전까지 결론을 바꾸지 않습니다."
@@ -132,6 +136,12 @@ def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage:
         print(table_row_text(item))
     if hidden:
         print(f"(원본성 근거 있음 {hidden}건은 표에서 생략했습니다 — --include-low 로 표시)")
+
+
+def unrecorded_section_lines(items: list[ScanItem], summary: object | None) -> list[str]:
+    """The console/legal-report text of the "기록되지 않은 파일" section (X1)."""
+    unrecorded = unrecorded_files(list(items), summary)
+    return [f"[{unrecorded.headline()}]", *(f"  - {line}" for line in unrecorded.reason_lines())]
 
 
 # Column header of the scan table; single-file commands print archive
@@ -183,8 +193,18 @@ CSV_CALIBRATED_SCORE_COLUMN = "보정점수(미보정시 공란)"
 CSV_VERDICT_COLUMN = "결론"
 
 
-def _write_csv(path: Path, items: list[ScanItem], *, coverage: dict[str, object] | None = None, thresholds: object | None = None) -> None:
+def _write_csv(
+    path: Path,
+    items: list[ScanItem],
+    *,
+    coverage: dict[str, object] | None = None,
+    thresholds: object | None = None,
+    summary: object | None = None,
+) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
+        # X1: the "기록되지 않은 파일" summary (count and every reason) heads
+        # the CSV like the provenance lines below.
+        handle.write(f"# {unrecorded_files(list(items), summary).summary_text()}\n")
         # Provenance is written as leading comment lines so the CSV can
         # never be mistaken for a fully-verified neural run.
         if coverage is not None:

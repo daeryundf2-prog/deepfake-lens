@@ -41,7 +41,7 @@ from .error_text import path_scrub_root
 from .checks import skipped as skipped_entry
 from .decision import decide
 from .layer_diagnostic import UNAVAILABLE_BAND
-from .result_text import TEXT_LEGAL_LIMITATION
+from .result_text import TEXT_LEGAL_LIMITATION, unrecorded_files
 from .evidence_rules import (
     c2pa_evidence,
     deep_layer_reference,
@@ -220,6 +220,7 @@ def scan_directory(
 
     paths: list[Path] = []
     capped = False
+    over_cap = 0
     iter_errors: list[tuple[Path, OSError]] = []
     symlinks: list[Path | tuple[Path, str]] = []
     for path in _iter_files(
@@ -229,11 +230,15 @@ def scan_directory(
         on_skip=lambda p, reason: symlinks.append((p, reason)),
     ):
         if len(paths) >= max_files:
+            # X1: count (never analyze) the files beyond the cap so every
+            # report can say how many were not recorded.
             capped = True
-            break
+            over_cap += 1
+            continue
         paths.append(path)
     return scan_paths(
         paths, root=root, capped=capped, iter_errors=iter_errors, symlinks=symlinks,
+        files_over_cap=over_cap,
         subfolders_skipped=0 if recursive else count_subfolders(root, follow_links=allow_symlinks), on_plan=on_plan,
         text_bytes=text_bytes, metadata_bytes=metadata_bytes,
         pixel_mode=pixel_mode, pixel_max_side=pixel_max_side,
@@ -341,6 +346,7 @@ def scan_paths(
     progress: ScanProgress | None = None,
     subfolders_skipped: int = 0,
     on_plan: Callable[[int], None] | None = None,
+    files_over_cap: int = 0,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
     """Analyze already-enumerated ``paths`` under ``root`` like a folder scan.
 
@@ -363,6 +369,7 @@ def scan_paths(
             max_file_bytes=max_file_bytes, dedupe=dedupe, hash_db_path=hash_db_path,
             deep_signals=deep_signals, thresholds=thresholds, should_stop=should_stop,
             progress=progress, subfolders_skipped=subfolders_skipped, on_plan=on_plan,
+            files_over_cap=files_over_cap,
         )
 
 
@@ -391,6 +398,7 @@ def _scan_paths(
     progress: ScanProgress | None,
     subfolders_skipped: int,
     on_plan: Callable[[int], None] | None,
+    files_over_cap: int = 0,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
     iter_errors = list(iter_errors or [])
     symlinks = list(symlinks or [])
@@ -479,8 +487,8 @@ def _scan_paths(
             items.extend(extra)
             items = sort_items(items)
             summary = summarize(items, capped=summary.capped, cached=summary.cached)
-        if subfolders_skipped:
-            summary = replace(summary, subfolders_skipped=subfolders_skipped)
+        if subfolders_skipped or files_over_cap:
+            summary = replace(summary, subfolders_skipped=subfolders_skipped, files_over_cap=files_over_cap)
         return summary, items
     finally:
         for temp_dir in temp_dirs:
@@ -2197,6 +2205,8 @@ def scan_to_json(summary: BatchScanSummary, items: list[ScanItem], *, thresholds
         # Threshold provenance: unmeasured builtin defaults vs a profile
         # fit on labeled data (with its corpus fingerprint and sample n).
         "thresholds": _thresholds_json(thresholds),
+        # X1: files of the folder without an analysis result, by reason.
+        "unrecorded_files": unrecorded_files(items, summary).to_json(),
         "items": [item.to_json() for item in items],
     }
 

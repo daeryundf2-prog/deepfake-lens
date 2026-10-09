@@ -27,7 +27,7 @@ import hashlib
 import json
 import os
 import stat
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -45,6 +45,9 @@ from .result_text import (
     is_symlink_row,
     row_label,
     threshold_provenance_lines,
+    UNRECORDED_SECTION_TITLE,
+    UnrecordedFiles,
+    unrecorded_files,
 )
 from .result_types import VERDICT_LABELS, CoverageStatus, EvidenceDirection, EvidenceKind, EvidenceStrength, Grade, Verdict, is_verdict_row, status_label
 from .signing import resolve_report_key, sign_report
@@ -90,9 +93,18 @@ class EvidenceStatement:
     provenance_note: str = ""
     # The fixed legal limitation, set when any entry is a text result.
     reference_note: str = ""
+    # X1: "기록되지 않은 파일" — files of the scanned folder without an
+    # analysis result (cap, flat scan, symlinks, duplicates, unsupported),
+    # UnrecordedFiles.to_json(); signed with the rest of the statement.
+    unrecorded_files: dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
+
+    def unrecorded_lines(self) -> list[str]:
+        """The "기록되지 않은 파일" section body (headline + reasons)."""
+        unrecorded = UnrecordedFiles.from_json(self.unrecorded_files) or UnrecordedFiles({})
+        return unrecorded.lines()
 
     def to_markdown(self) -> str:
         lines = [
@@ -129,6 +141,8 @@ class EvidenceStatement:
             "본 문서는 자동 분석 도구의 결과를 요약한 것으로, 결론(조작·생성 근거 있음/원본성 근거 있음/판단 불가)은 유죄·불법성에 대한 법적 판단이 아닙니다.",
             "",
         ])
+        unrecorded = self.unrecorded_lines()
+        lines.extend([f"### [{UNRECORDED_SECTION_TITLE}]", unrecorded[0], *(f"- {line}" for line in unrecorded[1:]), ""])
         if self.reference_note:
             lines.extend(["### [텍스트 분석 한계]", self.reference_note, ""])
         if self.provenance_note:
@@ -342,8 +356,14 @@ def build_evidence_statement(
     thresholds: object | None = None,
     coverage: dict[str, object] | None = None,
     scan_root: Path | str | None = None,
+    summary: object | None = None,
 ) -> EvidenceStatement:
     """Build an EvidenceStatement from analyzed scan items.
+
+    ``summary`` (a BatchScanSummary or the scan JSON's summary dict) adds
+    the enumeration-level "기록되지 않은 파일" reasons — files over the
+    --max-files cap, subfolders a flat scan did not enter (X1); the
+    row-level ones are counted from ``items``.
 
     ``scan_root`` is the folder the items were scanned from; it is only
     used to locate a file whose row carries no ``sha256`` (see
@@ -452,6 +472,7 @@ def build_evidence_statement(
         center=center,
         provenance_note=provenance_note,
         reference_note=TEXT_LEGAL_LIMITATION if any(i.result is not None and i.result.grade == Grade.REFERENCE for i in items) else "",
+        unrecorded_files=unrecorded_files(list(items), summary).to_json(),
     )
 
 
@@ -652,6 +673,11 @@ def _render_statement_pdf(pymupdf: Any, statement: EvidenceStatement, body: dict
         if line.strip():
             notice.append((line.strip(), 6.8, (0.4, 0.4, 0.4)))
     layout.boxed_text(STATEMENT_NOTICE_TITLE, notice)
+    # X1: the "기록되지 않은 파일" section — count and reasons, always present.
+    layout.boxed_text(UNRECORDED_SECTION_TITLE, [
+        (line, 7.5 if index == 0 else 6.8, (0.1, 0.2, 0.4) if index == 0 else (0.35, 0.35, 0.35))
+        for index, line in enumerate(statement.unrecorded_lines())
+    ])
 
     # Signoff block, kept together on one page.
     signoff = [

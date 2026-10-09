@@ -186,11 +186,148 @@ HASH_UNAVAILABLE_ACCESS = "해시 불가 — 원본 파일 접근 실패 (동일
 HASH_UNAVAILABLE_SYMLINK = "해시 불가(심볼릭 링크 — 링크를 따라가지 않음)"
 HASH_UNAVAILABLE_MEMBER = "해시 불가(압축 파일 구성원 — 압축 파일 행의 해시로 동일성을 확인하십시오)"
 SYMLINK_ROW_ERROR_PREFIX = "심볼릭 링크"
+# X3: rows of links --allow-symlinks could not follow (scan_cache reasons).
+SYMLINK_ROW_ERROR_PREFIXES = (
+    SYMLINK_ROW_ERROR_PREFIX,
+    "건너뜀: 깨진 심볼릭 링크",
+    "건너뜀: 순환 링크",
+    "건너뜀: 심볼릭 링크",
+)
 
 
 def is_symlink_row(status: object, error: object) -> bool:
-    """A row the scan skipped because it is a symbolic link (never followed)."""
-    return str(status) == "skipped" and str(error or "").startswith(SYMLINK_ROW_ERROR_PREFIX)
+    """A row the scan skipped because it is a symbolic link (not followed, or not followable — X3)."""
+    return str(status) == "skipped" and str(error or "").startswith(SYMLINK_ROW_ERROR_PREFIXES)
+
+
+# X1 (round 7): every rendered output (console table, scan JSON, HTML,
+# forensic PDF, evidence statement MD/JSON/PDF, CSV, legal-report) carries
+# a "기록되지 않은 파일" section — files of the evidence folder whose
+# content has no analysis result, by reason, with counts. Before, a capped
+# or flat scan was visible only in the console table and summary JSON.
+UNRECORDED_SECTION_TITLE = "기록되지 않은 파일"
+# (code, label, detail) — detail is formatted with the count.
+UNRECORDED_REASONS: tuple[tuple[str, str, str], ...] = (
+    ("file_cap", "파일 상한", "파일 수 상한(--max-files)에 도달해 검사하지 않은 파일 {n}개 — 행·해시가 없습니다"),
+    ("subfolders", "하위 폴더 미포함", "바로 아래 파일만 검사 — 하위 폴더 {n}개 안의 파일은 검사·기록하지 않았습니다(--recursive)"),
+    ("symlink", "심볼릭 링크", "링크를 따라가지 않았거나 따라갈 수 없는 심볼릭 링크 {n}개 — 행만 기록, 내용 미분석"),
+    ("duplicate", "중복", "같은 내용(동일 SHA-256)의 파일 {n}개 — 원본 행만 분석, 중복 행은 원본을 가리킵니다"),
+    ("unsupported", "미지원", "지원 형식이 아닌 파일 {n}개 — 행만 기록, 내용 미분석"),
+    ("other_skipped", "기타 건너뜀", "크기 상한 초과·일반 파일 아님·취소 등으로 건너뛴 파일 {n}개 — 사유는 각 행에 기록"),
+)
+# A capped scan from an older JSON (no files_over_cap count).
+UNRECORDED_CAP_COUNT_UNKNOWN = "파일 수 상한(--max-files)에 도달 — 검사하지 않은 파일 수는 기록되지 않았습니다"
+
+
+class UnrecordedFiles:
+    """Counts of evidence-folder files without an analysis result, by reason (X1).
+
+    ``subfolders`` counts folders (their files were never listed); every
+    other reason counts files. ``cap_reached`` with ``file_cap == 0`` is a
+    capped scan whose over-cap count is unknown (JSON written before X1).
+    """
+
+    def __init__(self, counts: dict[str, int], *, cap_reached: bool = False) -> None:
+        self.counts = {code: int(counts.get(code, 0) or 0) for code, _, _ in UNRECORDED_REASONS}
+        self.cap_reached = bool(cap_reached or self.counts["file_cap"])
+
+    @property
+    def total_files(self) -> int:
+        """Files without an analysis result (subfolders are counted separately)."""
+        return sum(count for code, count in self.counts.items() if code != "subfolders")
+
+    @property
+    def empty(self) -> bool:
+        return not self.cap_reached and not any(self.counts.values())
+
+    def headline(self) -> str:
+        if self.empty:
+            return f"{UNRECORDED_SECTION_TITLE}: 없음 — 분석 대상의 모든 파일에 분석 결과가 있습니다"
+        text = f"{UNRECORDED_SECTION_TITLE}: {self.total_files}개"
+        if self.counts["subfolders"]:
+            text += f" + 검사하지 않은 하위 폴더 {self.counts['subfolders']}개"
+        if self.cap_reached and not self.counts["file_cap"]:
+            text += " + 상한 초과 파일(개수 미기록)"
+        return text
+
+    def reason_lines(self) -> list[str]:
+        """One "<사유>: <설명>" line per non-zero reason."""
+        lines: list[str] = []
+        for code, label, detail in UNRECORDED_REASONS:
+            count = self.counts[code]
+            if code == "file_cap" and self.cap_reached and not count:
+                lines.append(f"{label}: {UNRECORDED_CAP_COUNT_UNKNOWN}")
+            elif count:
+                lines.append(f"{label}: {detail.format(n=count)}")
+        return lines
+
+    def lines(self) -> list[str]:
+        """Headline followed by the reason lines — the section body every renderer prints."""
+        return [self.headline(), *self.reason_lines()]
+
+    def summary_text(self) -> str:
+        """One line: "기록되지 않은 파일: 3개 — 파일 상한 2, 중복 1" (CSV comment, table footer)."""
+        parts = [f"{label} {self.counts[code]}" for code, label, _ in UNRECORDED_REASONS]
+        return f"{self.headline()} — " + ", ".join(parts)
+
+    def to_json(self) -> dict[str, object]:
+        return {
+            "total_files": self.total_files,
+            "cap_reached": self.cap_reached,
+            "reasons": [
+                {"code": code, "label": label, "count": self.counts[code]}
+                for code, label, _ in UNRECORDED_REASONS
+            ],
+            "lines": self.lines(),
+        }
+
+    @classmethod
+    def from_json(cls, data: object) -> "UnrecordedFiles | None":
+        if not isinstance(data, dict):
+            return None
+        reasons = data.get("reasons")
+        counts: dict[str, int] = {}
+        if isinstance(reasons, list):
+            for entry in reasons:
+                if isinstance(entry, dict) and isinstance(entry.get("count"), int):
+                    counts[str(entry.get("code"))] = entry["count"]
+        return cls(counts, cap_reached=bool(data.get("cap_reached")))
+
+
+def unrecorded_files(items: "list[object]", summary: object | None = None) -> UnrecordedFiles:
+    """The "기록되지 않은 파일" counts of one scan (X1).
+
+    Row-level reasons (symlink, duplicate, unsupported, other skipped) are
+    counted from ``items`` (ScanItem objects or their JSON dicts); the
+    enumeration-level ones (files over the --max-files cap, subfolders a
+    flat scan did not enter) come from ``summary`` — a BatchScanSummary or
+    the scan JSON's ``summary`` dict.
+    """
+    def field(name: str) -> object:
+        if summary is None:
+            return None
+        if isinstance(summary, dict):
+            return summary.get(name)
+        return getattr(summary, name, None)
+
+    counts = {"file_cap": 0, "subfolders": 0, "symlink": 0, "duplicate": 0, "unsupported": 0, "other_skipped": 0}
+    for item in items:
+        status = item.get("status") if isinstance(item, dict) else getattr(item, "status", None)
+        error = item.get("error") if isinstance(item, dict) else getattr(item, "error", None)
+        path = str((item.get("path") if isinstance(item, dict) else getattr(item, "path", "")) or "")
+        if "::" in path:
+            continue  # archive members are accounted for on their container row
+        if status == "duplicate":
+            counts["duplicate"] += 1
+        elif status == "unsupported":
+            counts["unsupported"] += 1
+        elif status == "skipped":
+            counts["symlink" if is_symlink_row(status, error) else "other_skipped"] += 1
+    over_cap = field("files_over_cap")
+    counts["file_cap"] = over_cap if isinstance(over_cap, int) else 0
+    subfolders = field("subfolders_skipped")
+    counts["subfolders"] = subfolders if isinstance(subfolders, int) else 0
+    return UnrecordedFiles(counts, cap_reached=bool(field("capped")))
 
 
 # S6/B2: the in-sample caveat printed wherever threshold provenance is
