@@ -1,0 +1,3473 @@
+{
+  "description": "Y13: verification finding IDs (rounds 1–7) -> phase-0 spec gap IDs (G1–G34) or 신규(스펙 외), and the 'Gaps:' line for every commit since WP-A, for the session owner's history rewrite. Round-3 and round-6 N IDs are N3-x / N6-x; round-5 G IDs are V5-G (they collide with the spec's G1–G34). Generated from the round documents (spec/verify_round*.md) and the commit messages.",
+  "wp_gaps": {
+    "WP-A": [
+      "G5",
+      "G6",
+      "G12",
+      "G24"
+    ],
+    "WP-B": [
+      "G1"
+    ],
+    "WP-C": [
+      "G2",
+      "G9",
+      "G10",
+      "G33"
+    ],
+    "WP-D": [
+      "G3",
+      "G13",
+      "G17"
+    ],
+    "WP-E": [
+      "G4"
+    ],
+    "WP-F": [
+      "G7",
+      "G8"
+    ],
+    "WP-G": [
+      "G11",
+      "G30",
+      "G31",
+      "G32"
+    ],
+    "WP-H": [
+      "G29",
+      "G34"
+    ],
+    "WP-I": [
+      "G26",
+      "G27",
+      "G28"
+    ],
+    "WP-J": []
+  },
+  "ids": [
+    {
+      "id": "D1",
+      "round": 1,
+      "source": "verify_round1.md",
+      "summary": "독립 CLI 서브커맨드가 옛 밴드(낮음/주의/높음) 출력 → 세 결론 계약 또는 계층 진단",
+      "gaps": [
+        "G5",
+        "G6",
+        "G7",
+        "G24"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "b13c677",
+        "60fd411",
+        "075e586"
+      ]
+    },
+    {
+      "id": "D2",
+      "round": 1,
+      "source": "verify_round1.md",
+      "summary": "api_server /api/analyze/*·classify·multimodal이 통합 경로 우회",
+      "gaps": [
+        "G7"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "b13c677"
+      ]
+    },
+    {
+      "id": "D3",
+      "round": 1,
+      "source": "verify_round1.md",
+      "summary": "/api/analyze-file이 forensic 밴드·게이트 없는 픽셀 점수 반환",
+      "gaps": [
+        "G7",
+        "G13",
+        "G17"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "b13c677"
+      ]
+    },
+    {
+      "id": "D4",
+      "round": 1,
+      "source": "verify_round1.md",
+      "summary": "legal-report가 scan 결과와 불일치(근거 0건)",
+      "gaps": [
+        "G7"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "b13c677"
+      ]
+    },
+    {
+      "id": "D5",
+      "round": 1,
+      "source": "verify_round1.md",
+      "summary": "증거설명서가 cwd 기준 재해시 → scan의 sha256 사용",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "ac1157c",
+        "5d21e88"
+      ]
+    },
+    {
+      "id": "D6",
+      "round": 1,
+      "source": "verify_round1.md",
+      "summary": "적합성 표 통과 기준 약함(QA-ADV-2·OUT-3·OUT-4·IN-1)",
+      "gaps": [
+        "G7",
+        "G12",
+        "G13"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "2644e0d",
+        "4a9ba73",
+        "5d4761d"
+      ]
+    },
+    {
+      "id": "D7",
+      "round": 1,
+      "source": "verify_round1.md",
+      "summary": "JPEG EXIF·XMP 미파싱(카메라 EXIF·XMP 생성 도구 근거)",
+      "gaps": [
+        "G6"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "64c6b14"
+      ]
+    },
+    {
+      "id": "D8",
+      "round": 1,
+      "source": "verify_round1.md",
+      "summary": "C2PA 리더 예외가 absent/ran으로 기록",
+      "gaps": [
+        "G1"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "58f4a0d"
+      ]
+    },
+    {
+      "id": "D9",
+      "round": 1,
+      "source": "verify_round1.md",
+      "summary": "zip 폭탄 행·거부 멤버 coverage·컨테이너 sha256 누락",
+      "gaps": [
+        "G12",
+        "G30",
+        "G34"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "07ab16c",
+        "ea376a8"
+      ]
+    },
+    {
+      "id": "D10",
+      "round": 1,
+      "source": "verify_round1.md",
+      "summary": "폴더 안 심볼릭 링크가 보고서에서 사라짐",
+      "gaps": [
+        "G12"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "07ab16c"
+      ]
+    },
+    {
+      "id": "D11",
+      "round": 1,
+      "source": "verify_round1.md",
+      "summary": "텍스트 source_guess가 결론처럼 보임",
+      "gaps": [
+        "G4",
+        "G24"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "79ea0d3"
+      ]
+    },
+    {
+      "id": "D12",
+      "round": 1,
+      "source": "verify_round1.md",
+      "summary": "pixel score/confidence 필드·CSV 열이 결론처럼 보임",
+      "gaps": [
+        "G17"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "d764fce"
+      ]
+    },
+    {
+      "id": "D13",
+      "round": 1,
+      "source": "verify_round1.md",
+      "summary": "보정 없는 심층 신호(inpaint)가 evidence에 들어가 규칙 5를 막음",
+      "gaps": [
+        "G17"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "bece7ff",
+        "60fd411"
+      ]
+    },
+    {
+      "id": "D14",
+      "round": 1,
+      "source": "verify_round1.md",
+      "summary": "서명 검증 CLI(verify-report) 없음",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "b13c677"
+      ]
+    },
+    {
+      "id": "D15",
+      "round": 1,
+      "source": "verify_round1.md",
+      "summary": "OpenCV 5에 CascadeClassifier 없음 → 얼굴 검출 불가, GIF는 skipped",
+      "gaps": [
+        "G12"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "2644e0d"
+      ]
+    },
+    {
+      "id": "D16",
+      "round": 1,
+      "source": "verify_round1.md",
+      "summary": "기타: summary 밴드 키, 영어 오류, 삼킨 예외, 측정 게이트 위조 매니페스트 등",
+      "gaps": [
+        "G1",
+        "G5",
+        "G28"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "64c6b14",
+        "1902fd4",
+        "5d4761d",
+        "cc2581e",
+        "075e586"
+      ]
+    },
+    {
+      "id": "R1",
+      "round": 2,
+      "source": "커밋 메시지(라운드 2 문서 없음)",
+      "summary": "/api/scan/stream·아카이브 /api/check가 폴더 스캔 본체를 사용",
+      "gaps": [
+        "G7"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "ca0018f",
+        "81e4173"
+      ]
+    },
+    {
+      "id": "R2",
+      "round": 2,
+      "source": "커밋 메시지(라운드 2 문서 없음)",
+      "summary": "영상의 오디오 트랙 분석이 자체 av_audio coverage 항목",
+      "gaps": [
+        "G12"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "db4bac4"
+      ]
+    },
+    {
+      "id": "R3",
+      "round": 2,
+      "source": "커밋 메시지(라운드 2 문서 없음)",
+      "summary": "문서 creator/application 메타데이터 출처 추정은 참고 전용",
+      "gaps": [
+        "G24"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "c9a0573"
+      ]
+    },
+    {
+      "id": "R4",
+      "round": 2,
+      "source": "커밋 메시지(라운드 2 문서 없음)",
+      "summary": "0단계에서 추가된 영어 사용자 문구 한국어화; 프로필의 미검증 수치 제거",
+      "gaps": [
+        "G26"
+      ],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "91e8532",
+        "d34cab5",
+        "a4cbbc2"
+      ]
+    },
+    {
+      "id": "R5",
+      "round": 2,
+      "source": "커밋 메시지(라운드 2 문서 없음)",
+      "summary": "아카이브 컨테이너 행을 결론별로 집계(요약 일치)",
+      "gaps": [
+        "G7"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "ca0018f"
+      ]
+    },
+    {
+      "id": "R6",
+      "round": 2,
+      "source": "커밋 메시지(라운드 2 문서 없음)",
+      "summary": "pymupdf 없을 때 PDF 증거설명서는 한국어 안내 exit 2(traceback 아님)",
+      "gaps": [
+        "G29"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "f13f3f3"
+      ]
+    },
+    {
+      "id": "R7",
+      "round": 2,
+      "source": "커밋 메시지(라운드 2 문서 없음)",
+      "summary": "얼굴 미검출은 '얼굴 미검출', 미분석은 '해당 없음'",
+      "gaps": [
+        "G12"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "0898fb9"
+      ]
+    },
+    {
+      "id": "R8",
+      "round": 2,
+      "source": "커밋 메시지(라운드 2 문서 없음)",
+      "summary": "C2PA SDK 실패는 'C2PA 판독 불가(사유)' — 'C2PA 없음' 아님",
+      "gaps": [
+        "G1"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "99c6f29"
+      ]
+    },
+    {
+      "id": "R9",
+      "round": 2,
+      "source": "커밋 메시지(라운드 2 문서 없음)",
+      "summary": "카메라 EXIF 일관성 근거는 디코드된 이미지에만",
+      "gaps": [
+        "G6"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "d45cfdb",
+        "81e4173"
+      ]
+    },
+    {
+      "id": "R16",
+      "round": 2,
+      "source": "커밋 메시지(라운드 2 문서 없음)",
+      "summary": "'점수는 검토 우선순위' 문구 제거; CSV 보정점수/결론 열; --include-low 의미",
+      "gaps": [
+        "G5"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "3edb8e4",
+        "81e4173",
+        "b0a24df"
+      ]
+    },
+    {
+      "id": "N3-1",
+      "round": 3,
+      "source": "커밋 메시지(라운드 3 문서 없음)",
+      "summary": "coverage 사유·오류에 파일 시스템 경로 없음",
+      "gaps": [],
+      "new": "보고서·coverage 사유에 파일 시스템 경로 노출 — 갭 목록 밖(정보 노출)",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "35d3751"
+      ]
+    },
+    {
+      "id": "N3-2",
+      "round": 3,
+      "source": "커밋 메시지(라운드 3 문서 없음)",
+      "summary": "해시할 때 심볼릭 링크를 따라가지 않음; 결론 없는 행의 상태 줄",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "539b429"
+      ]
+    },
+    {
+      "id": "N3-3",
+      "round": 3,
+      "source": "커밋 메시지(라운드 3 문서 없음)",
+      "summary": "스캔 스키마가 draft 2020-12에서 null result 허용",
+      "gaps": [],
+      "new": "계약 스키마 정확성(공통 규칙 6) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "a486c27"
+      ]
+    },
+    {
+      "id": "N3-4",
+      "round": 3,
+      "source": "커밋 메시지(라운드 3 문서 없음)",
+      "summary": "PyMuPDF import가 stdout에 출력하지 않음",
+      "gaps": [],
+      "new": "PyMuPDF import가 stdout 오염(JSON 출력 깨짐) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "a486c27"
+      ]
+    },
+    {
+      "id": "N3-5",
+      "round": 3,
+      "source": "커밋 메시지(라운드 3 문서 없음)",
+      "summary": "아카이브 컨테이너 행에 집계 근거 항목",
+      "gaps": [
+        "G12"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "214f4a5"
+      ]
+    },
+    {
+      "id": "N3-6",
+      "round": 3,
+      "source": "커밋 메시지(라운드 3 문서 없음)",
+      "summary": "C2PA 해시 불일치는 'C2PA 무결성 불일치'(원본성 근거 아님)",
+      "gaps": [
+        "G6"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "214f4a5"
+      ]
+    },
+    {
+      "id": "N3-7",
+      "round": 3,
+      "source": "커밋 메시지(라운드 3 문서 없음)",
+      "summary": "한국어 상태·help·401; 빈 키 파일은 오류(서명 없이 진행하지 않음)",
+      "gaps": [
+        "G30"
+      ],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "b0a24df"
+      ]
+    },
+    {
+      "id": "N3-8",
+      "round": 3,
+      "source": "커밋 메시지(라운드 3 문서 없음)",
+      "summary": "건너뛴 하위 폴더 수·취소 집계·로그 — 조용한 누락 없음",
+      "gaps": [
+        "G12"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "b0a24df"
+      ]
+    },
+    {
+      "id": "B1",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "단일 파일 진입점도 폴더 스캔처럼 아카이브를 펼침",
+      "gaps": [
+        "G7"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "e6a3a38"
+      ]
+    },
+    {
+      "id": "B2",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "HTML 보고서 영어 문구",
+      "gaps": [],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "6a41827"
+      ]
+    },
+    {
+      "id": "B3",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "HTML·포렌식 PDF의 raw skipped 상태, PDF 문서 번호 폰트",
+      "gaps": [],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "6a41827"
+      ]
+    },
+    {
+      "id": "B4",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "legal-report 텍스트의 raw 코드·영어",
+      "gaps": [],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "6a41827"
+      ]
+    },
+    {
+      "id": "B5",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "GUI 출처 추정·archive_member 라벨",
+      "gaps": [],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "4f688aa"
+      ]
+    },
+    {
+      "id": "B6",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "C2PA SDK 영어 오류 메시지",
+      "gaps": [],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "4923e3e"
+      ]
+    },
+    {
+      "id": "B7",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "doctor JSON 출력 오염·영어 표",
+      "gaps": [
+        "G29"
+      ],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "bdf4da1"
+      ]
+    },
+    {
+      "id": "B8",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "--pdf-out 영어 PDF → 한국어 PDF 또는 exit 2; --help 한국어",
+      "gaps": [
+        "G29"
+      ],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "eb3354f",
+        "bf6c3ae",
+        "bda6e5d",
+        "5b32de4",
+        "58bd8f3"
+      ]
+    },
+    {
+      "id": "S1",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "아카이브 멤버를 'evil.zip::a1111.png' 전체 이름으로",
+      "gaps": [],
+      "new": "보고서의 압축 멤버 전체 이름 표기 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "6a41827"
+      ]
+    },
+    {
+      "id": "S2",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "포렌식 PDF 심볼릭 링크 해시 줄 문구",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "6a41827"
+      ]
+    },
+    {
+      "id": "S3",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "--redact-paths가 models[].profile 설치 경로도 숨김",
+      "gaps": [],
+      "new": "--redact-paths가 도구 설치 경로를 남김(정보 노출) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "8b5e542"
+      ]
+    },
+    {
+      "id": "S4",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "없는 폴더/파일 입력 사유 표시, exit 2 문서화",
+      "gaps": [
+        "G29"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "c6541d9"
+      ]
+    },
+    {
+      "id": "S5",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "GUI CSP가 blob: 미디어 허용",
+      "gaps": [],
+      "new": "GUI CSP media-src blob: 누락(미리보기 실패) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "3beadcf"
+      ]
+    },
+    {
+      "id": "S6",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "증거설명서 프로비넌스에 in-sample 주의 문구",
+      "gaps": [
+        "G28"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "6a41827"
+      ]
+    },
+    {
+      "id": "S7",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "오디오 모델 limitation 중복, 비활성 프로필 안내 제외",
+      "gaps": [
+        "G28"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "40fdbd1"
+      ]
+    },
+    {
+      "id": "S8",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "test_korean_output 영어 탐지 우회",
+      "gaps": [],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "1479d4a",
+        "75a53e9"
+      ]
+    },
+    {
+      "id": "S9",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "테스트 미사용 import 2건",
+      "gaps": [],
+      "new": "미사용 import(공통 규칙 4 린트) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "3fb3bc8"
+      ]
+    },
+    {
+      "id": "W1",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "_iter_files 전역 경로 문자열 정렬",
+      "gaps": [
+        "G32"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "4e14e9c"
+      ]
+    },
+    {
+      "id": "W2",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "QA 테스트를 스펙이 명명한 4개 파일로 통합",
+      "gaps": [],
+      "new": "WP-J 파일 배치(스펙 문자 그대로) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "7d1af4c"
+      ]
+    },
+    {
+      "id": "W3",
+      "round": 4,
+      "source": "verify_round4.md",
+      "summary": "커밋 트레일러 일괄 수정(세션 소유자 작업)",
+      "gaps": [],
+      "new": "커밋 트레일러(공통 규칙 1) — 갭 목록 밖",
+      "used_in_commit_subjects": false,
+      "commits": []
+    },
+    {
+      "id": "V5-G1",
+      "round": 5,
+      "source": "verify_round5.md",
+      "summary": "forensic/classify/explain/multimodal/agent 텍스트 출력의 raw 코드",
+      "gaps": [],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "fe247ec"
+      ]
+    },
+    {
+      "id": "V5-G2",
+      "round": 5,
+      "source": "verify_round5.md",
+      "summary": "PDF 내용 손실: 페이지 밖 텍스트, 겹침, 해시 잘림",
+      "gaps": [
+        "G30"
+      ],
+      "new": "PDF 레이아웃(페이지 밖 텍스트·겹침) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "5880cfe"
+      ]
+    },
+    {
+      "id": "V5-G3",
+      "round": 5,
+      "source": "verify_round5.md",
+      "summary": "vendor-weights 영어 출력, MISSING 개수 불일치",
+      "gaps": [
+        "G9"
+      ],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "6e2847d"
+      ]
+    },
+    {
+      "id": "V5-G4",
+      "round": 5,
+      "source": "verify_round5.md",
+      "summary": "C2PA 상태값 영어(Invalid 등)",
+      "gaps": [],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "6e2847d"
+      ]
+    },
+    {
+      "id": "V5-G5",
+      "round": 5,
+      "source": "verify_round5.md",
+      "summary": "없는 파일/폴더 → 한국어 오류 exit 2",
+      "gaps": [],
+      "new": "없는 입력 파일에 traceback/빈 보고서(CLI 사용 오류) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "091bfeb"
+      ]
+    },
+    {
+      "id": "V5-G6",
+      "round": 5,
+      "source": "verify_round5.md",
+      "summary": "단일 파일 명령이 명시된 심볼릭 링크를 따라감 — 스캔과 같은 규칙",
+      "gaps": [
+        "G7"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "091bfeb"
+      ]
+    },
+    {
+      "id": "V5-G7",
+      "round": 5,
+      "source": "verify_round5.md",
+      "summary": "API 영어 오류 본문",
+      "gaps": [],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "49e62ca"
+      ]
+    },
+    {
+      "id": "V5-G8",
+      "round": 5,
+      "source": "verify_round5.md",
+      "summary": "결정 규칙 4가 프로필 threshold를 쓰지 않음(0.5 고정)",
+      "gaps": [
+        "G5"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "6e96fa2",
+        "69b4ace"
+      ]
+    },
+    {
+      "id": "V5-G9",
+      "round": 5,
+      "source": "verify_round5.md",
+      "summary": "영어 탐지기 강화(사전 규칙)와 출력 검사 범위 확대",
+      "gaps": [],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "75a53e9",
+        "1b24ae7"
+      ]
+    },
+    {
+      "id": "V5-G10",
+      "round": 5,
+      "source": "verify_round5.md",
+      "summary": "커밋 71625d0, a23e5a6 메시지에 ID 없음(세션 소유자 리워드)",
+      "gaps": [],
+      "new": "커밋 메시지 ID 누락(공통 규칙 1) — 갭 목록 밖",
+      "used_in_commit_subjects": false,
+      "commits": []
+    },
+    {
+      "id": "V5-G11",
+      "round": 5,
+      "source": "verify_round5.md",
+      "summary": "tests/qa docstring 첫 줄에 QA ID",
+      "gaps": [],
+      "new": "WP-J QA docstring 규칙 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "cdce861"
+      ]
+    },
+    {
+      "id": "V5-G12",
+      "round": 5,
+      "source": "verify_round5.md",
+      "summary": "미사용 import 제거, ruff F401 전역",
+      "gaps": [],
+      "new": "미사용 import·ruff F401(공통 규칙 4) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "f6c51d9"
+      ]
+    },
+    {
+      "id": "V5-G13",
+      "round": 5,
+      "source": "verify_round5.md",
+      "summary": "scripts/*.py --help 영어",
+      "gaps": [],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "e52731b"
+      ]
+    },
+    {
+      "id": "V5-G14",
+      "round": 5,
+      "source": "verify_round5.md",
+      "summary": "ffmpeg/mpg123 stderr를 로그로",
+      "gaps": [],
+      "new": "디코더 stderr 영어 노이즈 — 갭 목록 밖(스펙 G14 '메신저 재압축 지문'과 무관)",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "b4914b5"
+      ]
+    },
+    {
+      "id": "V5-G15",
+      "round": 5,
+      "source": "verify_round5.md",
+      "summary": "test_forensic_pdf skipUnless에 B8 주석",
+      "gaps": [],
+      "new": "skipUnless에 ID 주석(공통 규칙 2) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "58bd8f3"
+      ]
+    },
+    {
+      "id": "V5-G16",
+      "round": 5,
+      "source": "verify_round5.md",
+      "summary": "분석자 '시스템(자동)', GUI 리뷰 옵션 한국어, CSV 라벨 열, PDF 64자 해시",
+      "gaps": [
+        "G30"
+      ],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "5880cfe",
+        "8211673"
+      ]
+    },
+    {
+      "id": "N6-1",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "(=V5-G8) 보정된 통계 근거의 direction이 프로필 threshold를 따름",
+      "gaps": [
+        "G5"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "69b4ace"
+      ]
+    },
+    {
+      "id": "N6-2",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "/api/report가 심볼릭 링크 대상 해시를 서명 본문·PDF에 기록",
+      "gaps": [
+        "G30",
+        "G31"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "55072e2"
+      ]
+    },
+    {
+      "id": "N6-3",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "(=V5-G10) 커밋 71625d0 리워드(세션 소유자)",
+      "gaps": [],
+      "new": "커밋 메시지 ID 누락(공통 규칙 1) — 갭 목록 밖",
+      "used_in_commit_subjects": false,
+      "commits": []
+    },
+    {
+      "id": "N6-4",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "모든 서브커맨드 입력 경로 검사 — 한국어 오류 exit 2",
+      "gaps": [],
+      "new": "CLI 입력 경로 오류 처리(사용 오류 exit 2) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "846b0e3"
+      ]
+    },
+    {
+      "id": "N6-5",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "프레임워크 HTTP 오류 본문 영어(404/405/422/500/501)",
+      "gaps": [],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "923878d"
+      ]
+    },
+    {
+      "id": "N6-6",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "캐시 키에 확장자, 복원 행의 경로 텍스트 재생성",
+      "gaps": [
+        "G11"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "040ca3c"
+      ]
+    },
+    {
+      "id": "N6-7",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "없는 경로 처리 불일치(N4에 통합)",
+      "gaps": [],
+      "new": "CLI 입력 경로 오류 처리(N6-4에 통합) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "846b0e3"
+      ]
+    },
+    {
+      "id": "N6-8",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "스캔 표 유형 열의 raw unsupported",
+      "gaps": [],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "53d5b21"
+      ]
+    },
+    {
+      "id": "N6-9",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "stdlib /api/report가 본문 format 무시(서버 간 불일치)",
+      "gaps": [
+        "G7"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "55072e2"
+      ]
+    },
+    {
+      "id": "N6-10",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "웹/API 포렌식 PDF의 아카이브 멤버 해시",
+      "gaps": [
+        "G7",
+        "G30"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "55072e2"
+      ]
+    },
+    {
+      "id": "N6-11",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "FastAPI /api/report 잘못된 입력에 200, 항목 스키마 검증",
+      "gaps": [],
+      "new": "/api/report 요청 검증(400 + 항목 계약) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "55072e2"
+      ]
+    },
+    {
+      "id": "N6-12",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "영어 탐지기 우회(조사 접합, 하이픈, camel/snake 문장)",
+      "gaps": [],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "accb8e0"
+      ]
+    },
+    {
+      "id": "N6-13",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "사용자용 사유의 식별자(failed:zip:…, allow_symlinks=false, WP-I)",
+      "gaps": [],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "53d5b21"
+      ]
+    },
+    {
+      "id": "N6-14",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "중첩 아카이브 깊이 2 → 8(예산 안)",
+      "gaps": [
+        "G34"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "195b190"
+      ]
+    },
+    {
+      "id": "N6-15",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "scan_folder가 스펙대로 (summary, items) 반환(WP-F)",
+      "gaps": [
+        "G7"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "47a42a9"
+      ]
+    },
+    {
+      "id": "N6-16",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "tests/qa docstring 첫 줄 '<QA-ID>: <통과 기준 원문>'",
+      "gaps": [],
+      "new": "WP-J QA docstring 원문 규칙 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "e368828"
+      ]
+    },
+    {
+      "id": "N6-17",
+      "round": 6,
+      "source": "verify_round6.md",
+      "summary": "법무법인 기본값 제거, libsndfile 문구, in-sample 주의 별도 줄",
+      "gaps": [
+        "G28"
+      ],
+      "new": "내장 법무법인 기본값 제거·libsndfile 문구 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "52148b2"
+      ]
+    },
+    {
+      "id": "X1",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "기록되지 않은 파일이 조용히 누락; evidence-statement 폴더 100개 하드코딩",
+      "gaps": [
+        "G7",
+        "G12"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "c9728a0"
+      ]
+    },
+    {
+      "id": "X2",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "/api/report가 클라이언트가 보낸 결론·근거를 그대로 서명",
+      "gaps": [
+        "G30",
+        "G31"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "feaf5bb"
+      ]
+    },
+    {
+      "id": "X3",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "--allow-symlinks에서 깨진/순환 링크가 행 없이 사라짐",
+      "gaps": [
+        "G32"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "0c5099b"
+      ]
+    },
+    {
+      "id": "X4",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "/api/* 오류가 200 + {error}",
+      "gaps": [
+        "G34"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "c4078da"
+      ]
+    },
+    {
+      "id": "Y1",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "evidence-statement x.json에 items 없음 → exit 2",
+      "gaps": [],
+      "new": "CLI 입력 검증(빈 증거설명서 exit 0) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "e1376eb"
+      ]
+    },
+    {
+      "id": "Y2",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "--thresholds가 읽을 수 없는 파일이면 기본값으로 진행",
+      "gaps": [
+        "G7"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "e1376eb"
+      ]
+    },
+    {
+      "id": "Y3",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "scan \"\" → 현재 디렉토리 스캔",
+      "gaps": [],
+      "new": "CLI 입력 검증(빈 경로가 현재 폴더) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "e1376eb"
+      ]
+    },
+    {
+      "id": "Y4",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "--cache가 기존 JSON 파일을 조용히 덮어씀",
+      "gaps": [
+        "G11"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "1cd269d"
+      ]
+    },
+    {
+      "id": "Y5",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "OpenCV grfmt_png 영어가 콘솔에 출력",
+      "gaps": [],
+      "new": "OpenCV 네이티브 stderr 영어 노이즈 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "4756a40"
+      ]
+    },
+    {
+      "id": "Y6",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "ml-classify 손상 이미지 → 한국어 stderr 오류 exit 2",
+      "gaps": [],
+      "new": "CLI 오류 처리(stdout JSON 오류 exit 1) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "4756a40"
+      ]
+    },
+    {
+      "id": "Y7",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "--html-out이 폴더 → 스캔 전 오류 exit 2",
+      "gaps": [],
+      "new": "CLI 출력 경로 검증 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "e1376eb"
+      ]
+    },
+    {
+      "id": "Y8",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "웹 스캔이 max_files=-3 허용",
+      "gaps": [
+        "G34"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "5f0d361"
+      ]
+    },
+    {
+      "id": "Y9",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "중첩 멤버 이름 x.zip.unpacked/… → a.zip::b.zip::c.png 체인",
+      "gaps": [
+        "G34"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "ec46722"
+      ]
+    },
+    {
+      "id": "Y10",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "HTML 보고서에 행별 SHA-256 없음",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "used_in_commit_subjects": true,
+      "commits": [
+        "c1c959f"
+      ]
+    },
+    {
+      "id": "Y11",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "영어 탐지기 우회(대소문자 혼합 snake, 전각, 공백 없는 접합, 동형문자)",
+      "gaps": [],
+      "new": "공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "46f25c9"
+      ]
+    },
+    {
+      "id": "Y12",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "test_cli_inputs를 in-process로 20 s 미만",
+      "gaps": [],
+      "new": "테스트 실행 시간(test_cli_inputs 34.7 s) — 갭 목록 밖",
+      "used_in_commit_subjects": true,
+      "commits": [
+        "36f5864"
+      ]
+    },
+    {
+      "id": "Y13",
+      "round": 7,
+      "source": "verify_round7.md",
+      "summary": "커밋 메시지 갭 ID 누락 → 이 매핑표",
+      "gaps": [],
+      "new": "커밋 추적성(공통 규칙 1) — 갭 목록 밖",
+      "used_in_commit_subjects": false,
+      "commits": []
+    }
+  ],
+  "unused_ids": {
+    "R10": "커밋 제목에 쓰이지 않음 — 라운드 2 문서가 없어 매핑 불가(커밋 메시지(라운드 2 문서 없음))",
+    "R11": "커밋 제목에 쓰이지 않음 — 라운드 2 문서가 없어 매핑 불가(커밋 메시지(라운드 2 문서 없음))",
+    "R12": "커밋 제목에 쓰이지 않음 — 라운드 2 문서가 없어 매핑 불가(커밋 메시지(라운드 2 문서 없음))",
+    "R13": "커밋 제목에 쓰이지 않음 — 라운드 2 문서가 없어 매핑 불가(커밋 메시지(라운드 2 문서 없음))",
+    "R14": "커밋 제목에 쓰이지 않음 — 라운드 2 문서가 없어 매핑 불가(커밋 메시지(라운드 2 문서 없음))",
+    "R15": "커밋 제목에 쓰이지 않음 — 라운드 2 문서가 없어 매핑 불가(커밋 메시지(라운드 2 문서 없음))",
+    "R17": "커밋 제목에 쓰이지 않음 — 라운드 2 문서가 없어 매핑 불가(커밋 메시지(라운드 2 문서 없음))"
+  },
+  "commits": [
+    {
+      "sha": "1697cb0c4bdd5808c64fdc0dd5a3aaf0cf23e12b",
+      "short": "1697cb0",
+      "round": "wp",
+      "subject": "feat(contract): result contract v2 — three verdicts, classified evidence, coverage (WP-A)",
+      "ids": [
+        "WP-A"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G5",
+        "G6",
+        "G12",
+        "G24"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G5, G6, G12, G24",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "cbd5cbfca56e6842573dba8a89aec06dfb5406f1",
+      "short": "cbd5cbf",
+      "round": "wp",
+      "subject": "fix(fail-closed): crashed checks are \"failed\", never clean; lint gate (WP-B)",
+      "ids": [
+        "WP-B"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G1"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G1",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "34f31a9975b75d9f906b01e8f75d6cf861d44ca5",
+      "short": "34f31a9",
+      "round": "wp",
+      "subject": "fix(text): keywords are lexical evidence only, never points (WP-E)",
+      "ids": [
+        "WP-E"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G4"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G4",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "1155e99b934f510ca47ec287a51446160c686833",
+      "short": "1155e99",
+      "round": "wp",
+      "subject": "fix(models): pinned, gated model zoo; rejected profiles removed (WP-C)",
+      "ids": [
+        "WP-C"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G2",
+        "G9",
+        "G10",
+        "G33"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G2, G9, G10, G33",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "75fbde3c6e657d7c32a89c1eb2e7b02d7e5efa70",
+      "short": "75fbde3",
+      "round": "wp",
+      "subject": "fix(integrity): content-keyed cache, full-body signatures, operator-only read roots (WP-G)",
+      "ids": [
+        "WP-G"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G11",
+        "G30",
+        "G31",
+        "G32"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G11, G30, G31, G32",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "b538ea1eccb9abfa35ca2bc65edbb99b95aa082d",
+      "short": "b538ea1",
+      "round": "wp",
+      "subject": "feat(measurement): bootstrap CIs, corpus manifests, measurement gate (WP-I: G26, G27, G28)",
+      "ids": [
+        "WP-I"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "adad38022b009031cdda75429672ecb7685eb4b6",
+      "short": "adad380",
+      "round": "wp",
+      "subject": "docs: mark unverified performance numbers (WP-I: G26, G27)",
+      "ids": [
+        "WP-I"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "46a0f2c4ea55ba64287ae560432695b8de6458fb",
+      "short": "46a0f2c",
+      "round": "wp",
+      "subject": "feat(entry): one analysis entry point for CLI, GUI and API (WP-F: G7, G8)",
+      "ids": [
+        "WP-F"
+      ],
+      "gaps_named_in_subject": [
+        "G7",
+        "G8"
+      ],
+      "gaps": [
+        "G7",
+        "G8"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G7, G8",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "e6c488b292d1cdf551426b33da714343b3d44525",
+      "short": "e6c488b",
+      "round": "wp",
+      "subject": "fix(ops): doctor readiness columns, API job limits, archive budget (WP-H: G29, G34)",
+      "ids": [
+        "WP-H"
+      ],
+      "gaps_named_in_subject": [
+        "G29",
+        "G34"
+      ],
+      "gaps": [
+        "G29",
+        "G34"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G29, G34",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "cf7267498db12756aa0f939a2a0b239225ee4471",
+      "short": "cf72674",
+      "round": "wp",
+      "subject": "WP-D: photo/non-photo gate, pixel fusion without floors (G3, G13, G17)",
+      "ids": [
+        "WP-D"
+      ],
+      "gaps_named_in_subject": [
+        "G3",
+        "G13",
+        "G17"
+      ],
+      "gaps": [
+        "G3",
+        "G13",
+        "G17"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G3, G13, G17",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "0433d27c074119b14ced4b3e2188702645f77093",
+      "short": "0433d27",
+      "round": "wp",
+      "subject": "fix(heatmaps): never write into the evidence folder (G31, R-IN-1; found by QA-IN-1)",
+      "ids": [],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G31",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "27584e5a2863aafae9ceaab408bcbb3813b04edc",
+      "short": "27584e5",
+      "round": "wp",
+      "subject": "fix(avatar): accept Path — the avatar check crashed on every video (G1)",
+      "ids": [],
+      "gaps_named_in_subject": [
+        "G1"
+      ],
+      "gaps": [
+        "G1"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G1",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "8ac52f68a7154dac3e35fa59a28a4e1d413157f0",
+      "short": "8ac52f6",
+      "round": "wp",
+      "subject": "fix(api): confine every file_path/directory endpoint to the read roots (G31)",
+      "ids": [],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G31",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "ec81b9422e8d3ad6a5eb68ee1a0949f272196a06",
+      "short": "ec81b94",
+      "round": "wp",
+      "subject": "fix(hub): pin every remaining hub download to an explicit commit (G10)",
+      "ids": [],
+      "gaps_named_in_subject": [
+        "G10"
+      ],
+      "gaps": [
+        "G10"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G10",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "b464893432db54814fc9141d216716c9dd424658",
+      "short": "b464893",
+      "round": "wp",
+      "subject": "fix(scripts): fetch_* write to default_models_dir(), not repo-root models/ (G27)",
+      "ids": [],
+      "gaps_named_in_subject": [
+        "G27"
+      ],
+      "gaps": [
+        "G27"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G27",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "8dda303cec5fba17e852b90deb2d988dfb59a070",
+      "short": "8dda303",
+      "round": "wp",
+      "subject": "fix(signing): sign the evidence statement (증거설명서) like the other reports (G30)",
+      "ids": [],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "2429cbbf1ce6a24350a0decfe8937e434b29ccd9",
+      "short": "2429cbb",
+      "round": "wp",
+      "subject": "fix(models): mark the SBI score_bias as fitted in-sample (G28)",
+      "ids": [],
+      "gaps_named_in_subject": [
+        "G28"
+      ],
+      "gaps": [
+        "G28"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G28",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "96ad811ea790949dd1d35cc9afaeb1eaaa0be64d",
+      "short": "96ad811",
+      "round": "wp",
+      "subject": "feat(qa): phase-0 QA harness, traceability table and conformance gate (WP-J: G26, G28, G1, G12)",
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G28",
+        "G1",
+        "G12"
+      ],
+      "gaps": [
+        "G1",
+        "G12",
+        "G26",
+        "G28"
+      ],
+      "new_reasons": [
+        "WP-J QA 하네스·적합성 표(갭 목록 밖)"
+      ],
+      "gaps_line": "Gaps: G1, G12, G26, G28; 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "de7f9e6286a529551a007e27ce639856de60f09a",
+      "short": "de7f9e6",
+      "round": "wp",
+      "subject": "docs(qa): phase-0 conformance table from scripts/qa_phase0.py (WP-J)",
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "WP-J QA 하네스·적합성 표(갭 목록 밖)"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "ac1157ce1e53620213c6b070f0a66c1b1f2cc16b",
+      "short": "ac1157c",
+      "round": "1",
+      "subject": "fix(evidence-statement): record the scan's sha256, never re-hash against the cwd (D5)",
+      "ids": [
+        "D5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G30"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "64c6b14f648240f2cd24dfaa52ff111aac930dd8",
+      "short": "64c6b14",
+      "round": "1",
+      "subject": "feat(metadata): parse JPEG/PNG EXIF and XMP; failed reads are failures, not absence (D7, D16)",
+      "ids": [
+        "D7",
+        "D16"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G1",
+        "G5",
+        "G6",
+        "G28"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G1, G5, G6, G28",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "58f4a0d9621213d0f4a574e2ff555fa3c8936dd7",
+      "short": "58f4a0d",
+      "round": "1",
+      "subject": "fix(c2pa): reader exceptions are \"unavailable\" and a failed check, never \"absent\" (D8)",
+      "ids": [
+        "D8"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G1"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G1",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "07ab16c39c824ff62a030e66b9c97f116a50581b",
+      "short": "07ab16c",
+      "round": "1",
+      "subject": "fix(archives,scan): record every refused archive member and every symlink (D9, D10)",
+      "ids": [
+        "D9",
+        "D10"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G12",
+        "G30",
+        "G34"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G12, G30, G34",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "79ea0d300d9c31840a47d31a600f3927b17a5fa8",
+      "short": "79ea0d3",
+      "round": "1",
+      "subject": "fix(text): lexical source hints are \"참고\" with confidence unknown (D11)",
+      "ids": [
+        "D11"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G4",
+        "G24"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G4, G24",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "d764fce57211cc192d261f8dd4d1f7ce0e9016bd",
+      "short": "d764fce",
+      "round": "1",
+      "subject": "fix(pixel): raw_score / reference_confidence \"참고\" instead of score / confidence (D12)",
+      "ids": [
+        "D12"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G17"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G17",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "b13c67759ed8e6f03ca08a649977dc2b453f0276",
+      "short": "b13c677",
+      "round": "1",
+      "subject": "fix(cli,api): standalone commands speak the three-verdict / layer-diagnostic contract; legal-report from scan; verify-report (D1, D2, D3, D4, D14)",
+      "ids": [
+        "D1",
+        "D2",
+        "D3",
+        "D4",
+        "D14"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G5",
+        "G6",
+        "G7",
+        "G13",
+        "G17",
+        "G24",
+        "G30"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G5, G6, G7, G13, G17, G24, G30",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "bece7ffea5991f27ee2484023b48f2ecddd8d29d",
+      "short": "bece7ff",
+      "round": "1",
+      "subject": "fix(deep-layers): uncalibrated deep signals are reference_signals, not evidence (D13)",
+      "ids": [
+        "D13"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G17"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G17",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "1902fd46a16d764938d3544eb95e810afcd6531d",
+      "short": "1902fd4",
+      "round": "1",
+      "subject": "fix(ui,api): verdict-only summary keys, 결론순 sort, Korean errors, /api/stats header, api-serve help, logged scan-job failure (D16)",
+      "ids": [
+        "D16"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G1",
+        "G5",
+        "G28"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G1, G5, G28",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "2644e0d1559df1af076356b980a91445b3b868ed",
+      "short": "2644e0d",
+      "round": "1",
+      "subject": "feat(face): weight-free face detector; QA-OUT-3 runs the real detector; GIF face check skipped (D15, D6/QA-OUT-3)",
+      "ids": [
+        "D15",
+        "D6"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G7",
+        "G12",
+        "G13"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G7, G12, G13",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "4a9ba732a24892c1d64af37bd6d31bf606b8871d",
+      "short": "4a9ba73",
+      "round": "1",
+      "subject": "test(qa): QA-ADV-2 on 50 screenshots of three kinds; QA-IN-1 scans all 43 formats (D6)",
+      "ids": [
+        "D6"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G7",
+        "G12",
+        "G13"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G7, G12, G13",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "5d4761dc091b9bf4346e613826784688e9c275ac",
+      "short": "5d4761d",
+      "round": "1",
+      "subject": "test(qa): QA-SYS-1 verdict names the integrity failure; QA-IN-5 peak disk + specific reasons; QA-OUT-5 labeled structural; harness needs fastapi and a clean tree (D6, D16)",
+      "ids": [
+        "D6",
+        "D16"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G1",
+        "G5",
+        "G7",
+        "G12",
+        "G13",
+        "G28"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G1, G5, G7, G12, G13, G28",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "cc2581e6d0b8d9c8bb57d9416be280d1b3fc337c",
+      "short": "cc2581e",
+      "round": "1",
+      "subject": "fix(documents,gate): keep the extractor's exception class; measured_on must name a real matching manifest (D16)",
+      "ids": [
+        "D16"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G1",
+        "G5",
+        "G28"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G1, G5, G28",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "60fd4111b66c74837a7abf1a71c2a017e14301fe",
+      "short": "60fd411",
+      "round": "1",
+      "subject": "test(core): D13 fixture uses renamed reference_band/reference_note after D1 merge",
+      "ids": [
+        "D13",
+        "D1"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G5",
+        "G6",
+        "G7",
+        "G17",
+        "G24"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G5, G6, G7, G17, G24",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "5d21e886b24a13624d43d0b824c27e0d3bd6a956",
+      "short": "5d21e88",
+      "round": "1",
+      "subject": "fix(cli): evidence statements resolve sha256-less rows against the scan folder (D5)",
+      "ids": [
+        "D5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G30"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "ea376a87b981f6cbbd2eb43f97a2d5e04d3dc6e7",
+      "short": "ea376a8",
+      "round": "1",
+      "subject": "fix(web): uploaded archives record refused members like the folder scan (D9)",
+      "ids": [
+        "D9"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G12",
+        "G30",
+        "G34"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G12, G30, G34",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "075e5864f718da231ea82fc207df7f0bb47c5180",
+      "short": "075e586",
+      "round": "1",
+      "subject": "fix(layers): rename the last band/verdict fields to reference_band/reference_note; no-legacy-band regression test (D1, D16)",
+      "ids": [
+        "D1",
+        "D16"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G1",
+        "G5",
+        "G6",
+        "G7",
+        "G24",
+        "G28"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G1, G5, G6, G7, G24, G28",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "dbbef6b11e3fc76f4f34e171e02700ab6b9b971d",
+      "short": "dbbef6b",
+      "round": "1",
+      "subject": "docs(qa): regenerate CONFORMANCE.md on 94d0bcf (verification round 1 leftovers, WP-J)",
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "WP-J QA 하네스·적합성 표(갭 목록 밖)"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "ca0018f5d590e45f355f5272d213d8394e9dbc21",
+      "short": "ca0018f",
+      "round": "2",
+      "subject": "fix(api): /api/scan/stream and archive /api/check run the folder scan; container rows counted by verdict (R1, R5)",
+      "ids": [
+        "R1",
+        "R5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G7"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G7",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "db4bac40a39c98cf607a00b50b11062bffcba2f4",
+      "short": "db4bac4",
+      "round": "2",
+      "subject": "fix(video): the audio-track analysis is its own av_audio coverage entry (R2)",
+      "ids": [
+        "R2"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G12"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G12",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "c9a0573c3b0d45d49e57ce0a1a27b13ec6e5aa2c",
+      "short": "c9a0573",
+      "round": "2",
+      "subject": "fix(documents): source guess from creator/application metadata is reference-only (R3)",
+      "ids": [
+        "R3"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G24"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G24",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "f13f3f3928dea7a420f0f8f7d89a3f9d64b33e02",
+      "short": "f13f3f3",
+      "round": "2",
+      "subject": "fix(cli): PDF evidence statement without pymupdf is a Korean exit-2 message, not a traceback (R6)",
+      "ids": [
+        "R6"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G29"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G29",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "0898fb9e0e61ac13c3266093d70eed045a2b4cd3",
+      "short": "0898fb9",
+      "round": "2",
+      "subject": "fix(face): no detected face reads \"얼굴 미검출\", no analysis \"해당 없음\" — never \"none\" (R7)",
+      "ids": [
+        "R7"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G12"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G12",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "99c6f2982ac1b9d88a4d6adb0dc2c13eae26d710",
+      "short": "99c6f29",
+      "round": "2",
+      "subject": "fix(c2pa): an SDK failure reads \"C2PA 판독 불가(<reason>)\" in the provenance diagnostic, never \"C2PA 없음\" (R8)",
+      "ids": [
+        "R8"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G1"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G1",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "d45cfdb213e96cbb82939ce64a7495525b927f00",
+      "short": "d45cfdb",
+      "round": "2",
+      "subject": "fix(evidence): camera-EXIF consistency only on an image that decoded (R9)",
+      "ids": [
+        "R9"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G6"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G6",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "3edb8e40fa44e6a9eeaa3d9dfd4aea2b729761cc",
+      "short": "3edb8e4",
+      "round": "2",
+      "subject": "fix(ui): no \"scores are review priority\" wording; CSV 보정점수/결론 columns; --include-low means authenticity rows (R16)",
+      "ids": [
+        "R16"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G5"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G5",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "91e853281128927eafb5bf31a75968b7dabebdfb",
+      "short": "91e8532",
+      "round": "2",
+      "subject": "fix(i18n): Korean for user-facing English added in phase 0; profiles lose unverified figures (R4)",
+      "ids": [
+        "R4"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G26"
+      ],
+      "new_reasons": [
+        "R4(일부): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G26; 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "81e4173c1123110ac1bd12aa843e9f62485ef125",
+      "short": "81e4173",
+      "round": "2",
+      "subject": "docs(qa): regenerate CONFORMANCE.md on 9be8cf2 (verification round 2: R1-R9, R16, WP-J)",
+      "ids": [
+        "R1",
+        "R9",
+        "R16",
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G5",
+        "G6",
+        "G7"
+      ],
+      "new_reasons": [
+        "WP-J QA 하네스·적합성 표(갭 목록 밖)"
+      ],
+      "gaps_line": "Gaps: G5, G6, G7; 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "35d3751e5cd497b4273eb2fc07c5ed2e2b4dca4b",
+      "short": "35d3751",
+      "round": "3",
+      "subject": "fix(paths): coverage reasons and errors never carry a file-system path (N1)",
+      "ids": [
+        "N3-1"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "N3-1: 보고서·coverage 사유에 파일 시스템 경로 노출 — 갭 목록 밖(정보 노출)"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "539b429bf2bc0a9dbcd0e6fdf2555a4c978f8cb4",
+      "short": "539b429",
+      "round": "3",
+      "subject": "fix(statement): never follow a symlink when hashing; status line for rows without a verdict (N2)",
+      "ids": [
+        "N3-2"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G30"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "a486c2750df28ce72bff54b3044021dcc1e15306",
+      "short": "a486c27",
+      "round": "3",
+      "subject": "fix(contract,pdf): scan schema accepts null results under draft 2020-12; PyMuPDF import never prints to stdout (N3, N4)",
+      "ids": [
+        "N3-3",
+        "N3-4"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "N3-3: 계약 스키마 정확성(공통 규칙 6) — 갭 목록 밖",
+        "N3-4: PyMuPDF import가 stdout 오염(JSON 출력 깨짐) — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "214f4a5941f6f6d2f8b1e5f1d38e424835f24bbf",
+      "short": "214f4a5",
+      "round": "3",
+      "subject": "fix(evidence): archive container rows carry their roll-up item; C2PA hash mismatch is \"C2PA 무결성 불일치\" (N5, N6)",
+      "ids": [
+        "N3-5",
+        "N3-6"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G6",
+        "G12"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G6, G12",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "b0a24df4ef41c93f14d64df88f387385c4d34220",
+      "short": "b0a24df",
+      "round": "3",
+      "subject": "fix(cli,api): Korean statuses, help and 401s; empty key file, skipped subfolders, cancel counts, logs; no \"우선순위\" banners (N7, N8, R16)",
+      "ids": [
+        "N3-7",
+        "N3-8",
+        "R16"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G5",
+        "G12",
+        "G30"
+      ],
+      "new_reasons": [
+        "N3-7(일부): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G5, G12, G30; 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "d34cab57a676b3f5b519c08efcfec133718f0b15",
+      "short": "d34cab5",
+      "round": "3",
+      "subject": "fix(i18n,tests): Korean model display names; strict Korean-output test (R4 leftover)",
+      "ids": [
+        "R4"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G26"
+      ],
+      "new_reasons": [
+        "R4(일부): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G26; 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "0964219b667447e93329ed50e0449b846bfe01ec",
+      "short": "0964219",
+      "round": "3",
+      "subject": "test(qa): QA-OUT-4 compares every leg raw on the hostile folder",
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [],
+      "gaps_line": null,
+      "relabeled_subject": null
+    },
+    {
+      "sha": "328e75fbadbe811636828f0c18be18e9ad4467c0",
+      "short": "328e75f",
+      "round": "3",
+      "subject": "docs(qa): CONFORMANCE.md regenerated on a785d7a (WP-J)",
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "WP-J QA 하네스·적합성 표(갭 목록 밖)"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "3fb3bc8cb4d895abcdcfe8ae77d1347e6af66884",
+      "short": "3fb3bc8",
+      "round": "4",
+      "subject": "test: S9 drop the unused `time` and `io` test imports",
+      "ids": [
+        "S9"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "S9: 미사용 import(공통 규칙 4 린트) — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "4e14e9ce4ff7095150764bd9a11a32bf48b0c831",
+      "short": "4e14e9c",
+      "round": "4",
+      "subject": "fix(scan): W1 one global sort of the walk by POSIX relative path (G32)",
+      "ids": [
+        "W1"
+      ],
+      "gaps_named_in_subject": [
+        "G32"
+      ],
+      "gaps": [
+        "G32"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G32",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "4923e3e6265f09c9adbdadb707d1461d6c2794f3",
+      "short": "4923e3e",
+      "round": "4",
+      "subject": "fix(i18n): B6 c2pa SDK messages in Korean, untranslated library text never shown",
+      "ids": [
+        "B6"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "B6: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "7d1af4c8b5783d860adcfcd0366f1ae9ad9ad255",
+      "short": "7d1af4c",
+      "round": "4",
+      "subject": "test(qa): W2 tests/qa is exactly the four WP-J area files; manual QA marked 미실시",
+      "ids": [
+        "W2",
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "W2: WP-J 파일 배치(스펙 문자 그대로) — 갭 목록 밖",
+        "WP-J QA 하네스·적합성 표(갭 목록 밖)"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "6a418278232fa6a27dd4cc2d8110a204f3f1cfc2",
+      "short": "6a41827",
+      "round": "4",
+      "subject": "fix(i18n): B2 B3 B4 S1 S2 S6 Korean report labels, full archive-member names",
+      "ids": [
+        "B2",
+        "B3",
+        "B4",
+        "S1",
+        "S2",
+        "S6"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G28",
+        "G30"
+      ],
+      "new_reasons": [
+        "B2: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+        "B3: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+        "B4: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+        "S1: 보고서의 압축 멤버 전체 이름 표기 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G28, G30; 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "4f688aadd9054e0e3e21deda00bf95042cc02f6b",
+      "short": "4f688aa",
+      "round": "4",
+      "subject": "fix(gui): B5 Korean source-guess confidence, archive_member label, drift test",
+      "ids": [
+        "B5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "B5: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "e6a3a3866f3fdb17350a171c72347b54b74d54e9",
+      "short": "e6a3a38",
+      "round": "4",
+      "subject": "fix(analysis): B1 single-file entry points expand archives exactly like scan (G7)",
+      "ids": [
+        "B1"
+      ],
+      "gaps_named_in_subject": [
+        "G7"
+      ],
+      "gaps": [
+        "G7"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G7",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "8b5e542cef4d06548e8ff6609ea703afbab6be03",
+      "short": "8b5e542",
+      "round": "4",
+      "subject": "fix(reports): S3 --redact-paths also hides the install path (models[].profile)",
+      "ids": [
+        "S3"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "S3: --redact-paths가 도구 설치 경로를 남김(정보 노출) — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "bdf4da1fa284d63365f56800c9620b56fe02809b",
+      "short": "bdf4da1",
+      "round": "4",
+      "subject": "fix(doctor): B7 PyMuPDF via pdf_backend, JSON-clean stdout, Korean table",
+      "ids": [
+        "B7"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G29"
+      ],
+      "new_reasons": [
+        "B7(일부): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G29; 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "c6541d9d00ad6a9eb8cab01e948a0544381e8cdf",
+      "short": "c6541d9",
+      "round": "4",
+      "subject": "fix(cli): S4 scan names why a folder cannot be scanned; exit-code table",
+      "ids": [
+        "S4"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G29"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G29",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "3beadcf63bbac0d5c69041036bf1a25cf8ed09e8",
+      "short": "3beadcf",
+      "round": "4",
+      "subject": "fix(gui): S5 CSP allows blob: media so wav/mp4 previews play",
+      "ids": [
+        "S5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "S5: GUI CSP media-src blob: 누락(미리보기 실패) — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "40fdbd172d9568a67aa0e8535443986c88da36d8",
+      "short": "40fdbd1",
+      "round": "4",
+      "subject": "fix(audio): S7 model limitations listed once; gated-off profiles add none",
+      "ids": [
+        "S7"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G28"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G28",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "eb3354f5c24b9f4d1ed0e2827e0f6f39a0b1c63b",
+      "short": "eb3354f",
+      "round": "4",
+      "subject": "fix(cli): B8 Korean --pdf-out (or exit 2), every --help string in Korean",
+      "ids": [
+        "B8"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G29"
+      ],
+      "new_reasons": [
+        "B8(일부): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G29; 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "bf6c3aee706a2c9b60a4ee29dff467912bd67c37",
+      "short": "bf6c3ae",
+      "round": "4",
+      "subject": "test(qa): QA-SYS-6 web PDF without pymupdf may be a Korean error (B8 handoff)",
+      "ids": [
+        "B8"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G29"
+      ],
+      "new_reasons": [
+        "B8(일부): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G29; 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "1479d4a5781a662ebe208cf85e8b5910c693caf4",
+      "short": "1479d4a",
+      "round": "4",
+      "subject": "test(i18n): S8 sentence-level English detector over every rendered output",
+      "ids": [
+        "S8"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "S8: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "bda6e5dddad2ea196379037d520f4400c0fda736",
+      "short": "bda6e5d",
+      "round": "4",
+      "subject": "fix(reports): B8 web/API PDF without pymupdf is a Korean 501 error, Latin-1 fallback deleted",
+      "ids": [
+        "B8"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G29"
+      ],
+      "new_reasons": [
+        "B8(일부): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G29; 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "5b32de4005de11ba8b46f7e63541a6727e44bd83",
+      "short": "5b32de4",
+      "round": "4",
+      "subject": "chore(mypy): type-check the test files added with the B8 round-4 merges",
+      "ids": [
+        "B8"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G29"
+      ],
+      "new_reasons": [
+        "B8(일부): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G29; 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "a4cbbc24a23215b79dbf971ec906a65368abdc6a",
+      "short": "a4cbbc2",
+      "round": "4",
+      "subject": "fix(signing): unsigned note is Korean only (R4 leftover)",
+      "ids": [
+        "R4"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G26"
+      ],
+      "new_reasons": [
+        "R4(일부): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G26; 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "9f63b8001fbfc38a8bbd09b63e1469f648f40061",
+      "short": "9f63b80",
+      "round": "4",
+      "subject": "docs(qa): CONFORMANCE.md regenerated on 61f90d7 (WP-J)",
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "WP-J QA 하네스·적합성 표(갭 목록 밖)"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "f6c51d9430a9f98b7b154bf274ccfb4aa0a46eb7",
+      "short": "f6c51d9",
+      "round": "5",
+      "subject": "chore(lint): G12 ruff F401 enabled, every unused import in the package removed",
+      "ids": [
+        "V5-G12"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "V5-G12: 미사용 import·ruff F401(공통 규칙 4) — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": "chore(lint): V5-G12 ruff F401 enabled, every unused import in the package removed"
+    },
+    {
+      "sha": "58bd8f3a0a103c5bdf7dfe4649ad279742f90a1f",
+      "short": "58bd8f3",
+      "round": "5",
+      "subject": "test(pdf): G15 B8 ID comment on every skipUnless(pymupdf) case in test_forensic_pdf",
+      "ids": [
+        "V5-G15",
+        "B8"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G29"
+      ],
+      "new_reasons": [
+        "V5-G15: skipUnless에 ID 주석(공통 규칙 2) — 갭 목록 밖",
+        "B8(일부): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G29; 신규(스펙 외)",
+      "relabeled_subject": "test(pdf): V5-G15 B8 ID comment on every skipUnless(pymupdf) case in test_forensic_pdf"
+    },
+    {
+      "sha": "fe247ec4f7a15cfc2262f39e9543d3662099b739",
+      "short": "fe247ec",
+      "round": "5",
+      "subject": "fix(cli): G1 standalone text outputs print Korean labels, never JSON codes",
+      "ids": [
+        "V5-G1"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "V5-G1: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": "fix(cli): V5-G1 standalone text outputs print Korean labels, never JSON codes"
+    },
+    {
+      "sha": "6e2847d7591aa4e97107b83611772416e6b6d3de",
+      "short": "6e2847d",
+      "round": "5",
+      "subject": "fix(vendor-weights, c2pa): G3 Korean weights table with consistent counts; G4 C2PA state in Korean",
+      "ids": [
+        "V5-G3",
+        "V5-G4"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G9"
+      ],
+      "new_reasons": [
+        "V5-G3(일부): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+        "V5-G4: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G9; 신규(스펙 외)",
+      "relabeled_subject": "fix(vendor-weights, c2pa): V5-G3 Korean weights table with consistent counts; V5-G4 C2PA state in Korean"
+    },
+    {
+      "sha": "091bfeb7c42211df673e22aa6b2acced8af69470",
+      "short": "091bfeb",
+      "round": "5",
+      "subject": "fix(cli, api): G5 missing file/folder is a Korean usage error; G6 a named symlink is the scan's skipped row",
+      "ids": [
+        "V5-G5",
+        "V5-G6"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G7"
+      ],
+      "new_reasons": [
+        "V5-G5: 없는 입력 파일에 traceback/빈 보고서(CLI 사용 오류) — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G7; 신규(스펙 외)",
+      "relabeled_subject": "fix(cli, api): V5-G5 missing file/folder is a Korean usage error; V5-G6 a named symlink is the scan's skipped row"
+    },
+    {
+      "sha": "49e62ca278d14fb7018474f87ff2deac5c178fd9",
+      "short": "49e62ca",
+      "round": "5",
+      "subject": "fix(api): G7 /api/report request errors in Korean",
+      "ids": [
+        "V5-G7"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "V5-G7: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": "fix(api): V5-G7 /api/report request errors in Korean"
+    },
+    {
+      "sha": "6e96fa2e55e81891b32dbfc206feeda85f421a50",
+      "short": "6e96fa2",
+      "round": "5",
+      "subject": "fix(decision): G8 rule 4 uses the loaded profiles' thresholds; no 0.5 default",
+      "ids": [
+        "V5-G8"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G5"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G5",
+      "relabeled_subject": "fix(decision): V5-G8 rule 4 uses the loaded profiles' thresholds; no 0.5 default"
+    },
+    {
+      "sha": "b4914b5068371e2bf296880815e438a3b86393ee",
+      "short": "b4914b5",
+      "round": "5",
+      "subject": "fix(decoders): G14 ffmpeg and native decoder chatter stay off the console",
+      "ids": [
+        "V5-G14"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "V5-G14: 디코더 stderr 영어 노이즈 — 갭 목록 밖(스펙 G14 '메신저 재압축 지문'과 무관)"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": "fix(decoders): V5-G14 ffmpeg and native decoder chatter stay off the console"
+    },
+    {
+      "sha": "5880cfeff8011f4793468ad4462dd65788978812",
+      "short": "5880cfe",
+      "round": "5",
+      "subject": "fix(pdf): G2 measured PDF layout — no text off the page, no overlap, full hashes (G16 PDF hash)",
+      "ids": [
+        "V5-G2",
+        "V5-G16"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G30"
+      ],
+      "new_reasons": [
+        "V5-G2(일부): PDF 레이아웃(페이지 밖 텍스트·겹침) — 갭 목록 밖",
+        "V5-G16(일부): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G30; 신규(스펙 외)",
+      "relabeled_subject": "fix(pdf): V5-G2 measured PDF layout — no text off the page, no overlap, full hashes (V5-G16 PDF hash)"
+    },
+    {
+      "sha": "8211673ce726581fd3095a7e748e62c6c99d89dc",
+      "short": "8211673",
+      "round": "5",
+      "subject": "fix(labels): G16 analyst \"시스템(자동)\", Korean GUI review options, CSV label columns",
+      "ids": [
+        "V5-G16"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G30"
+      ],
+      "new_reasons": [
+        "V5-G16(일부): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G30; 신규(스펙 외)",
+      "relabeled_subject": "fix(labels): V5-G16 analyst \"시스템(자동)\", Korean GUI review options, CSV label columns"
+    },
+    {
+      "sha": "75a53e983f83da46236e3b826c2b73967f763f39",
+      "short": "75a53e9",
+      "round": "5",
+      "subject": "fix(korean): G9 stronger English detector (dictionary rule) and S8 coverage of every output",
+      "ids": [
+        "V5-G9",
+        "S8"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "V5-G9: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+        "S8: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": "fix(korean): V5-G9 stronger English detector (dictionary rule) and S8 coverage of every output"
+    },
+    {
+      "sha": "e52731bc20093f61858fe38cd9015b5cc63ddc53",
+      "short": "e52731b",
+      "round": "5",
+      "subject": "fix(scripts): G13 every scripts/*.py answers --help in Korean",
+      "ids": [
+        "V5-G13"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "V5-G13: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": "fix(scripts): V5-G13 every scripts/*.py answers --help in Korean"
+    },
+    {
+      "sha": "cdce861978a7ac5c6266b88be62298fb747a40f2",
+      "short": "cdce861",
+      "round": "5",
+      "subject": "test(qa): G11 every tests/qa docstring starts with its QA ID; meta-test enforces it",
+      "ids": [
+        "V5-G11"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "V5-G11: WP-J QA docstring 규칙 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": "test(qa): V5-G11 every tests/qa docstring starts with its QA ID; meta-test enforces it"
+    },
+    {
+      "sha": "1b24ae7ad737b8de8094db4367a2784867a47916",
+      "short": "1b24ae7",
+      "round": "5",
+      "subject": "fix(korean): G9 follow-up — an argparse choice set is an identifier, words in braces are not",
+      "ids": [
+        "V5-G9"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "V5-G9: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": "fix(korean): V5-G9 follow-up — an argparse choice set is an identifier, words in braces are not"
+    },
+    {
+      "sha": "daf01438bf2a2bcd7b3cfde37c10aac2fd75e5b5",
+      "short": "daf0143",
+      "round": "5",
+      "subject": "docs(qa): CONFORMANCE.md regenerated on f7b9cf7 (WP-J)",
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "WP-J QA 하네스·적합성 표(갭 목록 밖)"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "69b4ace5f245b3d95c6a7eacd42e8ddcee9b245f",
+      "short": "69b4ace",
+      "round": "6",
+      "subject": "fix(decision): N1 (=G8) calibrated model direction follows the profile threshold, not 0.5",
+      "ids": [
+        "N6-1",
+        "V5-G8"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G5"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G5",
+      "relabeled_subject": "fix(decision): N1 (=V5-G8) calibrated model direction follows the profile threshold, not 0.5"
+    },
+    {
+      "sha": "55072e267465bb313b60fcc4241bda0db89f548b",
+      "short": "55072e2",
+      "round": "6",
+      "subject": "fix(report): N2 N9 N10 N11 /api/report — no symlink hashing, member digests, body format, 400 + item contract",
+      "ids": [
+        "N6-2",
+        "N6-9",
+        "N6-10",
+        "N6-11"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G7",
+        "G30",
+        "G31"
+      ],
+      "new_reasons": [
+        "N6-11: /api/report 요청 검증(400 + 항목 계약) — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G7, G30, G31; 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "923878d7bf9da7e6399fa781a29d11b8ba80218c",
+      "short": "923878d",
+      "round": "6",
+      "subject": "fix(servers): N5 Korean JSON for framework HTTP errors (404/405/422/500/501) on both servers",
+      "ids": [
+        "N6-5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "N6-5: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "47a42a9197aae21ea6cc0acc11dc5c9d3681b354",
+      "short": "47a42a9",
+      "round": "6",
+      "subject": "refactor(api): N15 scan_folder/scan_file return (summary, items); ScanRun carries thresholds",
+      "ids": [
+        "N6-15"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G7"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G7",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "846b0e3226e46d700b4a070a33866bd38c950cd0",
+      "short": "846b0e3",
+      "round": "6",
+      "subject": "fix(cli): N4 N7 every subcommand checks its input paths — Korean \"오류: …\", exit 2",
+      "ids": [
+        "N6-4",
+        "N6-7"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "N6-4: CLI 입력 경로 오류 처리(사용 오류 exit 2) — 갭 목록 밖",
+        "N6-7: CLI 입력 경로 오류 처리(N6-4에 통합) — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "040ca3cb66f9a04f954ea7ba0e9197fe6851af73",
+      "short": "040ca3c",
+      "round": "6",
+      "subject": "fix(cache): N6 cache key carries the extension; restored rows get their own path text",
+      "ids": [
+        "N6-6"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G11"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G11",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "53d5b21bce1658b08ebbe8448d0134a0d765fab9",
+      "short": "53d5b21",
+      "round": "6",
+      "subject": "fix(korean): N8 N13 Korean row-kind labels; no identifiers in user-facing reasons",
+      "ids": [
+        "N6-8",
+        "N6-13"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "N6-8: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖",
+        "N6-13: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "195b190f96d6696fb5a9192734c230a5781aea39",
+      "short": "195b190",
+      "round": "6",
+      "subject": "fix(archives): N14 nested archive depth 2 -> 8 (inside the 50-nested budget)",
+      "ids": [
+        "N6-14"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G34"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G34",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "accb8e031737dab4f7522783e7d1588379f78780",
+      "short": "accb8e0",
+      "round": "6",
+      "subject": "fix(korean): N12 English detector — glued Korean particles, in-word hyphens, code-shaped sentences",
+      "ids": [
+        "N6-12"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "N6-12: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "52148b2d3b0d12a7407d6af9525a79751d89067f",
+      "short": "52148b2",
+      "round": "6",
+      "subject": "fix(reports): N17 no built-in law firm; libsndfile decode wording; in-sample caveat on its own line",
+      "ids": [
+        "N6-17"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [
+        "G28"
+      ],
+      "new_reasons": [
+        "N6-17(일부): 내장 법무법인 기본값 제거·libsndfile 문구 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G28; 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "e368828b786a37f9a5ca8f45a57f89599ce0c359",
+      "short": "e368828",
+      "round": "6",
+      "subject": "test(qa): N16 every tests/qa docstring's first line is \"<QA-ID>: <criterion verbatim>\"",
+      "ids": [
+        "N6-16"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "N6-16: WP-J QA docstring 원문 규칙 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "26e3b6fcccdad821a572550f7a566bae50ec67bf",
+      "short": "26e3b6f",
+      "round": "6",
+      "subject": "docs(qa): CONFORMANCE.md regenerated on e368828 (WP-J)",
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "WP-J QA 하네스·적합성 표(갭 목록 밖)"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "36f5864fec67f47edd774f9179a0ffd1d4e04dcb",
+      "short": "36f5864",
+      "round": "7",
+      "subject": "test(cli): Y12 input-path matrix runs in process — 30 s -> 3 s (Y12; Gaps: 신규)",
+      "ids": [
+        "Y12"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "Y12: 테스트 실행 시간(test_cli_inputs 34.7 s) — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "0c5099bd8444a259f1493464323b8f67937ccbbd",
+      "short": "0c5099b",
+      "round": "7",
+      "subject": "fix(scan): X3 allowed symlinks never vanish — broken/circular link rows, linked folders followed (X3; Gaps: G32)",
+      "ids": [
+        "X3"
+      ],
+      "gaps_named_in_subject": [
+        "G32"
+      ],
+      "gaps": [
+        "G32"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G32",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "c9728a09bd96e1346191e019e7563608f163b9d1",
+      "short": "c9728a0",
+      "round": "7",
+      "subject": "fix(reports): X1 \"기록되지 않은 파일\" section in every output; evidence-statement scans with scan's options (X1; Gaps: G7, G12)",
+      "ids": [
+        "X1"
+      ],
+      "gaps_named_in_subject": [
+        "G7",
+        "G12"
+      ],
+      "gaps": [
+        "G7",
+        "G12"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G7, G12",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "feaf5bbe3a6f0559fd9df9fe7e6e7ad0bf2a5094",
+      "short": "feaf5bb",
+      "round": "7",
+      "subject": "fix(report): X2 /api/report re-analyzes every posted row on the server and signs only server results (X2; Gaps: G30, G31)",
+      "ids": [
+        "X2"
+      ],
+      "gaps_named_in_subject": [
+        "G30",
+        "G31"
+      ],
+      "gaps": [
+        "G30",
+        "G31"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30, G31",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "c4078dab36079d2637f9c2dfce2b6ec19668d964",
+      "short": "c4078da",
+      "round": "7",
+      "subject": "fix(servers): X4 no /api/* error is a 200 — 400/404/500 + Korean on both servers; status table documented (X4; Gaps: G34)",
+      "ids": [
+        "X4"
+      ],
+      "gaps_named_in_subject": [
+        "G34"
+      ],
+      "gaps": [
+        "G34"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G34",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "e1376ebdd4af2d34075aebae4c1c177b5bdee180",
+      "short": "e1376eb",
+      "round": "7",
+      "subject": "fix(cli): Y1 Y2 Y3 Y7 usage errors before any work — JSON without items, unreadable --thresholds, empty path, output path is a folder (Y1, Y2, Y3, Y7; Gaps: G7, 신규)",
+      "ids": [
+        "Y1",
+        "Y2",
+        "Y3",
+        "Y7"
+      ],
+      "gaps_named_in_subject": [
+        "G7"
+      ],
+      "gaps": [
+        "G7"
+      ],
+      "new_reasons": [
+        "Y1: CLI 입력 검증(빈 증거설명서 exit 0) — 갭 목록 밖",
+        "Y3: CLI 입력 검증(빈 경로가 현재 폴더) — 갭 목록 밖",
+        "Y7: CLI 출력 경로 검증 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G7; 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "1cd269d0c8f79266eb270435cf89ef2a4da6cbf7",
+      "short": "1cd269d",
+      "round": "7",
+      "subject": "fix(cache): Y4 --cache never overwrites a file that is not a scan cache (Y4; Gaps: G11)",
+      "ids": [
+        "Y4"
+      ],
+      "gaps_named_in_subject": [
+        "G11"
+      ],
+      "gaps": [
+        "G11"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G11",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "4756a406f9e754a6c40ef7a45094a20f3e25aa30",
+      "short": "4756a40",
+      "round": "7",
+      "subject": "fix(decoders): Y5 Y6 OpenCV decode chatter goes to the log; ml-classify corrupt image is a Korean stderr error, exit 2 (Y5, Y6; Gaps: 신규)",
+      "ids": [
+        "Y5",
+        "Y6"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "Y5: OpenCV 네이티브 stderr 영어 노이즈 — 갭 목록 밖",
+        "Y6: CLI 오류 처리(stdout JSON 오류 exit 1) — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "5f0d3613c9ea1ea1925deb82938794a5127c86ca",
+      "short": "5f0d361",
+      "round": "7",
+      "subject": "fix(servers): Y8 web scan limits below 1 are 400, not clamped to 1 (Y8; Gaps: G34)",
+      "ids": [
+        "Y8"
+      ],
+      "gaps_named_in_subject": [
+        "G34"
+      ],
+      "gaps": [
+        "G34"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G34",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "ec46722733303255883ca614f909d70766ebd74b",
+      "short": "ec46722",
+      "round": "7",
+      "subject": "fix(archives): Y9 nested members are named by the \"::\" chain, like the refusal reasons (Y9; Gaps: G34)",
+      "ids": [
+        "Y9"
+      ],
+      "gaps_named_in_subject": [
+        "G34"
+      ],
+      "gaps": [
+        "G34"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G34",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "c1c959fe62fbbd12429013e2fd09264e943df2c1",
+      "short": "c1c959f",
+      "round": "7",
+      "subject": "fix(reports): Y10 HTML report has a per-row SHA-256 column (Y10; Gaps: G30)",
+      "ids": [
+        "Y10"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "relabeled_subject": null
+    },
+    {
+      "sha": "46f25c98e17c3f903080de1c4a231c598e5e5f4c",
+      "short": "46f25c9",
+      "round": "7",
+      "subject": "fix(korean): Y11 English detector reads case-mangled, fullwidth, glued and look-alike spellings (Y11; Gaps: 신규)",
+      "ids": [
+        "Y11"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new_reasons": [
+        "Y11: 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "relabeled_subject": null
+    }
+  ]
+}
