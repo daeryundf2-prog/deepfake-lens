@@ -139,6 +139,38 @@ class KoreanArgumentParser(argparse.ArgumentParser):
 LAW_FIRM_HELP = "보고서 머리글·서명란의 법무법인(소송대리인) 이름(기본: ~/.deepfake-lens/config.json의 law_firm, 없으면 빈칸)"
 CONTACT_HELP = "보고서 머리글의 대표전화(기본: ~/.deepfake-lens/config.json의 contact, 없으면 빈칸)"
 
+def _korean_metavars(parser: argparse.ArgumentParser) -> None:
+    """Usage lines show Korean placeholders, never English dest names (P-round-8 leftover, rule 3).
+
+    argparse prints ``--plaintiff PLAINTIFF`` by default; every value-taking
+    option without an explicit metavar gets ``<경로>``/``<정수>``/``<실수>``/``<값>``.
+    Positional arguments keep their (already Korean) metavar or dest.
+    """
+    from pathlib import Path as _Path
+
+    def _walk(target: argparse.ArgumentParser) -> None:
+        for action in target._actions:  # noqa: SLF001 — argparse offers no public walk
+            if isinstance(action, argparse._SubParsersAction):  # noqa: SLF001
+                for sub in action.choices.values():
+                    _walk(sub)
+                continue
+            if not action.option_strings or action.nargs == 0 or action.metavar is not None:
+                continue
+            if action.choices:
+                continue  # "{a,b}" choice sets are identifiers
+            typ = action.type
+            if typ is int:
+                action.metavar = "<정수>"
+            elif typ is float:
+                action.metavar = "<실수>"
+            elif typ is _Path or typ is cli_path or getattr(typ, "__name__", "") in {"cli_path", "Path"}:
+                action.metavar = "<경로>"
+            else:
+                action.metavar = "<값>"
+
+    _walk(parser)
+
+
 def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:
     parser = KoreanArgumentParser(
         prog="deepfake-lens",
@@ -543,6 +575,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
         sub.add_argument("--verbose", action="store_true", help="처리 오류의 상세 로그(트레이스백)를 표준 오류에도 출력(기본: 로그 파일에만 기록)")
 
     _refuse_empty_paths(parser)
+    _korean_metavars(parser)
     return parser, {
         "corpus": corpus_parser,
         "scan": scan_parser, "collect": collect_parser, "dataset": dataset_parser,

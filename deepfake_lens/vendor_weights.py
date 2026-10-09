@@ -552,7 +552,7 @@ def resolve_profile_path(profile: Path | str, models_dir: Path | str | None = No
         if path.is_file():
             return path.resolve()
     raise ProfileNotFoundError(
-        f"파일을 찾을 수 없습니다: {profile} — 프로필 파일 경로도, 모델 디렉터리 {base_dir}의 프로필 이름도 아닙니다"
+        f"파일을 찾을 수 없습니다: 「{profile}」 — 프로필 파일 경로도, 모델 디렉터리 「{base_dir}」의 프로필 이름도 아닙니다"
     )
 
 

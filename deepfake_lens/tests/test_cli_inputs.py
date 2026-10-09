@@ -522,7 +522,7 @@ class RoundEightUsageErrorsTest(_UsageErrorCase):
             with self.subTest(profile=profile):
                 self._assert_usage(
                     ["vendor-weights", "pin", profile, "--models-dir", str(models)],
-                    f"파일을 찾을 수 없습니다: {profile} — 프로필 파일 경로도, 모델 디렉터리 ",
+                    f"파일을 찾을 수 없습니다: 「{profile}」 — 프로필 파일 경로도, 모델 디렉터리 ",  # Z2 leftover: echoed input is quoted
                 )
 
     def test_z3_trailing_separator_on_a_file(self) -> None:
