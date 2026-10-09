@@ -552,6 +552,88 @@ class GuiResultStringsTest(unittest.TestCase):
             with self.subTest(needle=needle):
                 self.assertIn(needle, source)
 
+    # R12-6 (round 12): template expressions that build intermediate text with a
+    # raw result field, each with the shown() call that consumes the text.
+    INTERMEDIATE = {
+        "entry.reason": "${shown(coverageText(c))}",
+        "v.title": "return `<li>${shown(text)}</li>`;",
+        "v.detail || ''": "return `<li>${shown(text)}</li>`;",
+        "s.title": "return `<li>${shown(text)}</li>`;",
+    }
+    # Assignments to .value that set a form control's value, never shown text.
+    VALUE_NOT_TEXT = {"verdictSel.value = rev.verdict || 'unreviewed'"}  # a <select> option code
+
+    @staticmethod
+    def _template_expressions(source: str) -> list[tuple[int, str]]:
+        """Every ``${...}`` expression of gui.js (balanced braces; nested ones included)."""
+        found: list[tuple[int, str]] = []
+        index = source.find("${")
+        while index != -1:
+            depth, cursor = 1, index + 2
+            while cursor < len(source) and depth:
+                depth += {"{": 1, "}": -1}.get(source[cursor], 0)
+                cursor += 1
+            found.append((source.count("\n", 0, index) + 1, source[index + 2:cursor - 1]))
+            index = source.find("${", index + 2)
+        return found
+
+    @staticmethod
+    def _enclosed(expr: str, position: int) -> bool:
+        """True when ``expr[position]`` is inside a shown(…) or displayName(…) call."""
+        import re
+
+        depth = 0
+        for cursor in range(position - 1, -1, -1):
+            char = expr[cursor]
+            if char == ")":
+                depth += 1
+            elif char == "(":
+                if depth:
+                    depth -= 1
+                    continue
+                if re.search(r"(?:\bshown|\bdisplayName)$", expr[:cursor]):
+                    return True
+        return False
+
+    def test_dom_text_sinks_and_templates_use_display_name(self) -> None:
+        """R12-6 (round 12): the compare slot showed the picked file's name with
+        textContent (gui.js ``.sn``) — raw. The R11-10 check now also covers
+        textContent/innerText/value assignments and template-string expressions."""
+        import re
+
+        source = self.GUI.read_text(encoding="utf-8")
+        field = re.compile(r"\b[a-zA-Z_]+\." + self.FIELDS + r"\b(?!\.)")
+        offenders: list[str] = []
+        for match in re.finditer(r"^[^\n]*?\.(?:textContent|innerText|value)\s*=(?!=)\s*([^;\n]+)", source, re.M):
+            statement, rhs = match.group(0).strip(), match.group(1)
+            if field.search(rhs) and "displayName(" not in rhs and statement not in self.VALUE_NOT_TEXT:
+                offenders.append(f"line {source.count(chr(10), 0, match.start()) + 1}: {statement}")
+        for line, expr in self._template_expressions(source):
+            for ref in field.finditer(expr):
+                rest = expr[ref.end():].lstrip()
+                if self._enclosed(expr, ref.start()) or rest.startswith(("?", "&&")):
+                    continue  # escaped, or only tested (a condition)
+                consumer = self.INTERMEDIATE.get(expr.strip()) or self.INTERMEDIATE.get(ref.group(0))
+                if consumer is not None and consumer in source:
+                    continue  # intermediate text, consumed by shown()
+                offenders.append(f"line {line}: ${{{expr.strip()}}}")
+        self.assertEqual(offenders, [], "a result string or file name reaches the page without displayName")
+        self.assertIn("slot.querySelector('.sn').textContent = displayName(f.name);", source)
+
+    def test_the_sink_check_flags_raw_names(self) -> None:
+        import re
+
+        field = re.compile(r"\b[a-zA-Z_]+\." + self.FIELDS + r"\b(?!\.)")
+        raw = "slot.querySelector('.sn').textContent = f.name;"
+        match = re.search(r"^[^\n]*?\.(?:textContent|innerText|value)\s*=(?!=)\s*([^;\n]+)", raw, re.M)
+        assert match is not None
+        self.assertTrue(field.search(match.group(1)) and "displayName(" not in match.group(1))
+        expressions = [expr for _, expr in self._template_expressions("a `<b>${item.name}</b>` `${shown(item.name)}`")]
+        self.assertEqual(expressions, ["item.name", "shown(item.name)"])
+        self.assertFalse(self._enclosed("item.name", 0))
+        self.assertTrue(self._enclosed("shown(item.name)", 6))
+        self.assertTrue(self._enclosed("shown(a + displayName(b.name))", 22))
+
     @unittest.skipUnless(shutil.which("node"), "node required to run gui.js helpers")
     def test_shown_escapes_like_display_name(self) -> None:
         source = self.GUI.read_text(encoding="utf-8")

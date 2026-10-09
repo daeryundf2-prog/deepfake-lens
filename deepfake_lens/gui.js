@@ -1288,9 +1288,9 @@
                         result: item.result,
                     }),
                 });
-                statusEl.textContent = data.ok ? '기록됨 ✓' : ('실패: ' + (data.error || ''));
+                statusEl.textContent = data.ok ? '기록됨 ✓' : ('실패: ' + displayName(data.error || ''));  // R12-6
             } catch (e) {
-                statusEl.textContent = '실패: ' + e.message;
+                statusEl.textContent = '실패: ' + displayName(e.message);  // R12-6: a server message may echo a name
             }
         }
 
@@ -1537,7 +1537,7 @@
                 if (!f) return;
                 cmpFiles[key] = f;
                 slot.classList.add('filled');
-                slot.querySelector('.sn').textContent = f.name;
+                slot.querySelector('.sn').textContent = displayName(f.name);  // R12-6: a picked file's name, escaped
                 const old = slot.querySelector('.pv');
                 if (old) old.remove();
                 const pv = mediaTagFor(f, 'pv');
