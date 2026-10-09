@@ -19,6 +19,13 @@ each payload. Guards against the classic archive attack surface:
   7z ``is_symlink``/junction entries and rar ``is_symlink()``/redirect
   (``file_redir``) or otherwise non-regular entries
 - member-count cap — quirk archives with tens of thousands of entries
+- duplicate member names (R12-3) — every member is written to its own
+  index-numbered folder (``<dest>/<entry index>/<base name>``), so two
+  entries that normalize to the same path (the same name twice,
+  ``x/y.png`` + ``x\\y.png``, ``./p.png`` + ``p.png``, ``A.png``/``a.png``
+  on a case-insensitive file system) never overwrite each other; the row
+  name keeps the original path and a later duplicate is named ``<path>#2``
+  (``#3`` …) with the reason "중복 멤버 이름" recorded
 
 ``.zip`` and tar variants use the stdlib; ``.7z`` (py7zr) and ``.rar``
 (rarfile + unrar binary) are optional and degrade to a warning.
@@ -26,7 +33,9 @@ each payload. Guards against the classic archive attack surface:
 
 from __future__ import annotations
 
+import shutil
 import tarfile
+import unicodedata
 import zlib
 import zipfile
 from dataclasses import dataclass, field
@@ -96,13 +105,44 @@ class ArchiveExtraction:
     # Only the top-level archive's own state; nested failures stay warnings.
     missing_dependency: str | None = None
     error: str | None = None
-    # Y9: chain names of members extracted from nested archives (others
-    # are named by their path inside the extraction root).
+    # Y9: chain names of members extracted from nested archives. R12-3: every
+    # member has one — its path inside the archive (``#2`` … for a duplicate),
+    # never its index-numbered extraction folder.
     names: dict[Path, str] = field(default_factory=dict)
+    # R12-3: the "중복 멤버 이름" reason of a member renamed ``<path>#n``.
+    notes: dict[Path, str] = field(default_factory=dict)
+    # R12-3: normalized member path (NFC, case-folded) -> first raw name that claimed it.
+    claimed: dict[str, str] = field(default_factory=dict)
 
     def member_name(self, member: Path, root: Path) -> str:
         """``member``'s name inside the archive: ``dir/x.png`` or ``dir/inner.zip::x.png`` (Y9)."""
         return self.names.get(member) or _member_rel(member, root)
+
+    def claim(self, rel: str, raw: str) -> tuple[str, str | None]:
+        """R12-3: the row name for member path ``rel`` and, for a duplicate, the reason.
+
+        The first member normalizing to a path keeps it; a later one —
+        identical after separator/``./`` normalization, or differing only
+        in letter case or Unicode normalization — becomes ``<rel>#2``
+        (``#3`` …, skipping names already taken).
+        """
+        key = _claim_key(rel)
+        first = self.claimed.get(key)
+        if first is None:
+            self.claimed[key] = raw
+            return rel, None
+        number = 2
+        while _claim_key(f"{rel}#{number}") in self.claimed:
+            number += 1
+        name = f"{rel}#{number}"
+        self.claimed[_claim_key(name)] = raw
+        same = "같은 이름" if raw == first else "구분자·'./'·대소문자·유니코드 정규화 후 같은 경로"
+        reason = (
+            f"중복 멤버 이름: '{raw}'이(가) 앞선 멤버 '{first}'와 {same}입니다 — "
+            f"덮어쓰지 않고 '{name}'(으)로 구분해 따로 해제·분석했습니다"
+        )
+        self.warnings.append(reason)
+        return name, reason
 
     def reject(self, name: str, reason: str) -> None:
         self.skipped += 1
@@ -126,6 +166,30 @@ def _unsafe_name_reason(name: str) -> str:
     if ":" in normalized:
         return "허용되지 않는 이름(드라이브 문자·ADS ':' 포함)"
     return "허용되지 않는 이름(Windows 예약 장치명)"
+
+
+def _claim_key(rel: str) -> str:
+    return unicodedata.normalize("NFC", rel).casefold()
+
+
+def _member_target(dest: Path, index: int, rel: str) -> Path | None:
+    """R12-3: ``<dest>/<index>/<base name>`` — one folder per archive entry, never shared."""
+    return _dest_for(dest, f"{index:05d}/{PurePosixPath(rel).name}")
+
+
+def _place(out: ArchiveExtraction, target: Path, rel: str, raw: str) -> None:
+    """Record the extracted ``target``'s row name (and duplicate reason)."""
+    name, note = out.claim(rel, raw)
+    out.names[target] = name
+    if note:
+        out.notes[target] = note
+
+
+# R12-3: every 7z entry whose exact name another entry also uses.
+SEVEN_ZIP_DUPLICATE_REASON = (
+    "중복 멤버 이름: 같은 이름의 7z 멤버가 둘 이상입니다 — 7z 해제기(py7zr)는 이름으로만 꺼낼 수 있어 "
+    "어느 내용이 어느 멤버인지 구분할 수 없으므로 덮어쓰지 않고 모두 미해제"
+)
 
 
 def _reject_rest(out: ArchiveExtraction, names: list[str], reason: str) -> None:
@@ -341,7 +405,7 @@ def _extract_zip(path: Path, dest: Path, out: ArchiveExtraction, budget: Extract
                 out.reject(name, stop)
                 _reject_rest(out, [_zip_member_name(i) for i in infos[index + 1:]], "앞선 멤버에서 해제 예산 소진으로 미해제")
                 break
-            target = _dest_for(dest, rel)
+            target = _member_target(dest, index, rel)
             if target is None:
                 out.reject(name, "경로 이탈 멤버(해석 결과가 대상 폴더 밖)")
                 continue
@@ -357,6 +421,7 @@ def _extract_zip(path: Path, dest: Path, out: ArchiveExtraction, budget: Extract
                 out.reject(name, f"손상된 멤버 데이터({type(exc).__name__}: {exception_text(exc, 120)})")
                 continue
             total += written
+            _place(out, target, rel, name)
             _charge(out, budget, target, rel, written, truncated)
 
 
@@ -388,7 +453,7 @@ def _extract_tar(path: Path, dest: Path, out: ArchiveExtraction, budget: Extract
                 out.reject(member.name, stop)
                 _reject_rest(out, [m.name for m in members[index + 1:]], "앞선 멤버에서 해제 예산 소진으로 미해제")
                 break
-            target = _dest_for(dest, rel)
+            target = _member_target(dest, index, rel)
             if target is None:
                 out.reject(member.name, "경로 이탈 멤버(해석 결과가 대상 폴더 밖)")
                 continue
@@ -405,6 +470,7 @@ def _extract_tar(path: Path, dest: Path, out: ArchiveExtraction, budget: Extract
                 out.reject(member.name, f"손상된 멤버 데이터({type(exc).__name__}: {exception_text(exc, 120)})")
                 continue
             total += written
+            _place(out, target, rel, member.name)
             _charge(out, budget, target, rel, written, truncated)
 
 
@@ -444,20 +510,28 @@ def _extract_7z(path: Path, dest: Path, out: ArchiveExtraction, budget: Extracti
     try:
         with py7zr.SevenZipFile(path) as sf:
             links = _7z_link_names(sf)
-            infos = {i.filename: i for i in sf.list() if not i.is_directory}
-            names = list(infos)
-            targets: list[str] = []
-            for index, (name, info) in enumerate(infos.items()):
-                if len(targets) >= MAX_ARCHIVE_MEMBERS:
+            entries = [i for i in sf.list() if not i.is_directory]
+            names = [str(i.filename) for i in entries]
+            repeated = {name for name in names if names.count(name) > 1}
+            planned: list[tuple[int, str, str]] = []  # (entry index, raw name, normalized path)
+            for index, info in enumerate(entries):
+                name = names[index]
+                if len(planned) >= MAX_ARCHIVE_MEMBERS:
                     out.warnings.append(f"멤버 수 상한({MAX_ARCHIVE_MEMBERS}) 도달 — 나머지 생략")
                     _reject_rest(out, names[index:], f"멤버 수 상한({MAX_ARCHIVE_MEMBERS}) 도달로 미해제")
                     break
-                if len(targets) >= budget.members_left():
+                if len(planned) >= budget.members_left():
                     budget.note_exhausted("members", out)
                     _reject_rest(out, names[index:], f"압축 해제 멤버 수 예산({budget.total_members}) 소진으로 미해제")
                     break
                 if name in links or _flag(info, "is_symlink"):
                     out.reject(name, "심볼릭 링크 멤버")
+                    continue
+                if name in repeated:
+                    # R12-3: py7zr extracts by name only — entries sharing one exact
+                    # name land on one file (the last wins), so which bytes belong to
+                    # which entry is unknowable: none of them is extracted.
+                    out.reject(name, SEVEN_ZIP_DUPLICATE_REASON)
                     continue
                 rel = _safe_member_name(name)
                 declared = int(getattr(info, "uncompressed", 0) or 0)
@@ -474,26 +548,45 @@ def _extract_7z(path: Path, dest: Path, out: ArchiveExtraction, budget: Extracti
                     _reject_rest(out, names[index + 1:], "앞선 멤버에서 해제 예산 소진으로 미해제")
                     break
                 total += declared
-                targets.append(name)
-            if targets:
-                sf.extract(dest, targets=targets)
-            for name in targets:
-                rel = _safe_member_name(name)
-                target = _dest_for(dest, rel) if rel else None
-                if target is None or target.is_symlink() or not target.is_file():
-                    if target is not None and target.is_symlink():
-                        target.unlink(missing_ok=True)
-                    out.reject(name, "해제 결과가 일반 파일이 아님(링크·누락)")
-                    continue
-                size = target.stat().st_size
-                if size > budget.bytes_left():
-                    # Headers under-declared the payload: never keep bytes
-                    # beyond the tree budget.
-                    target.unlink(missing_ok=True)
-                    budget.note_exhausted("bytes", out)
-                    out.reject(name, budget_reason(size, budget.bytes_left(), "헤더가 실제 크기를 축소 선언"))
-                    continue
-                _charge(out, budget, target, rel or name, size, False)
+                planned.append((index, name, rel))
+            # R12-3: members whose paths collide on a case-insensitive file
+            # system go to separate batch folders, then each moves to its own
+            # index-numbered folder.
+            batches: list[list[tuple[int, str, str]]] = []
+            for item in planned:
+                key = _claim_key(item[2])
+                for batch in batches:
+                    if all(_claim_key(other[2]) != key for other in batch):
+                        batch.append(item)
+                        break
+                else:
+                    batches.append([item])
+            for number, batch in enumerate(batches):
+                if number:
+                    sf.reset()
+                batch_dir = dest / f"7z-batch-{number:03d}"
+                sf.extract(batch_dir, targets=[name for _, name, _ in batch])
+                for index, name, rel in batch:
+                    extracted = _dest_for(batch_dir, rel)
+                    target = _member_target(dest, index, rel)
+                    if extracted is None or target is None or extracted.is_symlink() or not extracted.is_file():
+                        if extracted is not None and extracted.is_symlink():
+                            extracted.unlink(missing_ok=True)
+                        out.reject(name, "해제 결과가 일반 파일이 아님(링크·누락)")
+                        continue
+                    size = extracted.stat().st_size
+                    if size > budget.bytes_left():
+                        # Headers under-declared the payload: never keep bytes
+                        # beyond the tree budget.
+                        extracted.unlink(missing_ok=True)
+                        budget.note_exhausted("bytes", out)
+                        out.reject(name, budget_reason(size, budget.bytes_left(), "헤더가 실제 크기를 축소 선언"))
+                        continue
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    extracted.replace(target)
+                    _place(out, target, rel, name)
+                    _charge(out, budget, target, rel, size, False)
+                shutil.rmtree(batch_dir, ignore_errors=True)
     except Exception as exc:  # noqa: BLE001 - py7zr raises several custom error types
         out.warnings.append(f"7z 해제 실패: {failure_reason(exc)}")
         out.error = failure_reason(exc)
@@ -553,7 +646,7 @@ def _extract_rar(path: Path, dest: Path, out: ArchiveExtraction, budget: Extract
                     out.reject(name, stop)
                     _reject_rest(out, [str(i.filename) for i in infos[index + 1:]], "앞선 멤버에서 해제 예산 소진으로 미해제")
                     break
-                target = _dest_for(dest, rel)
+                target = _member_target(dest, index, rel)
                 if target is None:
                     out.reject(name, "경로 이탈 멤버(해석 결과가 대상 폴더 밖)")
                     continue
@@ -566,6 +659,7 @@ def _extract_rar(path: Path, dest: Path, out: ArchiveExtraction, budget: Extract
                     out.reject(name, f"손상된 멤버 데이터({type(exc).__name__}: {exception_text(exc, 120)})")
                     continue
                 total += written
+                _place(out, target, rel, name)
                 _charge(out, budget, target, rel, written, truncated)
     except Exception as exc:  # noqa: BLE001 - rarfile raises several custom error types
         out.warnings.append(f"rar 해제 실패: {failure_reason(exc)}")
@@ -617,10 +711,10 @@ def extract_archive(
             out.warnings.append(f"중첩 압축 {len(nested)}개 — 최대 깊이({max_depth})로 미해제")
             for m in nested:
                 out.members.remove(m)
-                out.reject(_member_rel(m, root), f"중첩 압축 최대 깊이({max_depth}) 초과로 미해제")
+                out.reject(out.member_name(m, root), f"중첩 압축 최대 깊이({max_depth}) 초과로 미해제")
         else:
             for m in nested:
-                inner_rel = _member_rel(m, root)
+                inner_rel = out.member_name(m, root)
                 if tree_budget.nested_left() <= 0:
                     tree_budget.note_exhausted("nested", out)
                     out.members.remove(m)
@@ -641,6 +735,8 @@ def extract_archive(
                     # Y9: "<inner archive>::<member>" — the rejection chain's form.
                     for member in sub.members:
                         out.names[member] = f"{inner_rel}::{sub.member_name(member, sub_root)}"
+                        if member in sub.notes:
+                            out.notes[member] = sub.notes[member]
                 out.skipped += sub.skipped
                 out.rejected.extend((f"{inner_rel}::{name}", reason) for name, reason in sub.rejected)
                 out.warnings.extend(sub.warnings)

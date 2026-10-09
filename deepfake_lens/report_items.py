@@ -189,6 +189,10 @@ def check_report_item(row: object) -> None:
         raise ItemContractError("`size_bytes` 값은 0 이상이어야 합니다")
     for field in ITEM_OPTIONAL_STRING_FIELDS:
         _string_or_null(row.get(field), field)
+    index = row.get("member_index")
+    if index is not None and not (_is_int(index) and index >= 1):
+        # R12-3: a member row's position in its container.
+        raise ItemContractError("`member_index` 값은 1 이상의 정수 또는 null이어야 합니다")
     sha = row.get("sha256")
     if sha is not None and not (isinstance(sha, str) and SHA256_PATTERN.match(sha)):
         raise ItemContractError("`sha256` 값은 64자리 소문자 16진수 또는 null이어야 합니다")

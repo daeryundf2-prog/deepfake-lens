@@ -111,7 +111,13 @@ def _scan_item_from_json(data: dict[str, object]) -> ScanItem:
         # P7: member identity fields (absent on every other row).
         str(data["container"]) if isinstance(data.get("container"), str) else None,
         str(data["member"]) if isinstance(data.get("member"), str) else None,
+        # R12-3: the member's position in its container (absent on other rows).
+        _member_index(data.get("member_index")),
     )
+
+
+def _member_index(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
 
 
 def _classification_result_from_json(data: dict[str, object]) -> ClassificationResult:

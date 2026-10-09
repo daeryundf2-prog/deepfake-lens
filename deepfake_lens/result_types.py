@@ -447,6 +447,11 @@ class ScanItem:
     # "<container>::<member>"). None for every other row (not serialized).
     container: str | None = None
     member: str | None = None
+    # R12-3 (round 12): a member row's 1-based position among its container's
+    # extracted members (archive order; a nested archive's members follow it).
+    # With container/member it makes the row identity unique even when two
+    # entries of the archive had the same name (the later one is "<member>#2").
+    member_index: int | None = None
 
     def to_json(self) -> dict[str, object]:
         # R11-14 (round 11): ``name`` stays the raw file name (a bidi override,
@@ -462,7 +467,7 @@ class ScanItem:
             if key == "name":
                 data["display_name"] = display_name(self.name)
         data["result"] = self.result.to_json() if self.result else None
-        for key in ("container", "member"):
+        for key in ("container", "member", "member_index"):
             if data[key] is None:
                 del data[key]
         return data

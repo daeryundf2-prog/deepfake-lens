@@ -318,6 +318,7 @@ class _Fake7zEntry:
 class _FakeSevenZipFile:
     entries: list[_Fake7zEntry] = []
     extracted: list[str] = []
+    resets = 0  # R12-3: case-colliding members are extracted in separate passes
 
     def __init__(self, path: object) -> None:
         self.files = list(self.entries)
@@ -330,6 +331,9 @@ class _FakeSevenZipFile:
 
     def list(self) -> list[_Fake7zEntry]:
         return list(self.entries)
+
+    def reset(self) -> None:
+        _FakeSevenZipFile.resets += 1
 
     def extract(self, dest: Path, targets: "Sequence[str]") -> None:
         by_name = {entry.filename: entry for entry in self.entries}

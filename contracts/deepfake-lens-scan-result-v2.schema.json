@@ -112,6 +112,7 @@
         "status": { "type": "string" },
         "container": { "type": ["string", "null"], "description": "P7: archive member rows only — the container row's path (path = container + \"::\" + member); absent on every other row." },
         "member": { "type": ["string", "null"], "description": "P7: archive member rows only — the member path inside the container (a nested chain joined by \"::\"). R9-1: a row's identity is container/member only, never a \"::\" in path. A real file's row path holding \"::\" or \"\\:\" is escaped per character (every \"\\\" as \"\\\\\", every \":\" as \"\\:\"), so it never contains \"::\" and unescapes exactly." },
+        "member_index": { "type": ["integer", "null"], "minimum": 1, "description": "R12-3: archive member rows only — the member's 1-based position among its container's extracted members (archive order; a nested archive's members follow it). (container, member, member_index) is unique; two entries with the same name no longer overwrite each other — the later one's member is \"<path>#2\" (#3 …) and its limitations start with the \"중복 멤버 이름\" reason. Absent on every other row." },
         "source": { "const": "upload", "description": "P6: rows of /api/analyze-upload and /api/check (uploaded or pasted, never a file of a read root) — POST /api/report lists them under excluded_items and never re-analyzes or signs them." },
         "size_bytes": { "type": "integer", "minimum": 0 },
         "result": {

@@ -138,7 +138,19 @@ always `0` invited old-contract readings. They remain readable as
   `tri:::c.png` the row `tri\:\:\:c.png`, and a file named
   `fake.zip::member.png` is reported as itself. `POST /api/report` identifies
   rows by these fields and refuses (400) a member row whose `path` is not
-  `container::member`. The same
+  `container::member`. R12-3 (round 12): a member row also carries
+  `member_index` — its 1-based position among the container's extracted
+  members (archive order; a nested archive's members follow it) — and
+  (`container`, `member`, `member_index`) is unique. Every archive entry is
+  extracted to its own index-numbered folder, so entries that name the same
+  path — the same name twice, `x/y.png` and `x\y.png`, `./p.png` and
+  `p.png`, or names differing only in letter case or Unicode normalization
+  (one file on a case-insensitive file system) — never overwrite each other
+  and never share a `sha256` or a verdict: the first keeps its path, a later
+  one is `<path>#2` (`#3` …), and its `limitations` (and the container's)
+  start with `중복 멤버 이름: '<원래 이름>'이(가) 앞선 멤버 '<앞선 이름>'와 …`.
+  7z entries sharing one exact name cannot be told apart by the extractor
+  (it extracts by name) and are all refused (`중복 멤버 이름: … 모두 미해제`). The same
   lines appear in `limitations` as `구성 파일 거부: <member> — <why>` (at most
   100 per container, then one `외 N개` entry). An archive uploaded to the web
   server (`/api/analyze-upload`, `/api/check`) gets the same container row —

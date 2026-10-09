@@ -10,7 +10,7 @@ import tempfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable
+from typing import Callable, NamedTuple
 
 from .archives import archive_format, extract_archive, is_archive
 from .audio import SUPPORTED_AUDIO_EXTENSIONS, AudioAnalysis, analyze_audio
@@ -384,9 +384,18 @@ def scan_paths(
         )
 
 
-# (file, display path or None, (container row path, member path) of an
-# archive member or None) — R9-1: the identity travels with the spec.
-_ScanSpec = tuple[Path, str | None, tuple[str, str] | None]
+class _MemberIdentity(NamedTuple):
+    """An archive member's row identity (R9-1) and its R12-3 additions."""
+
+    container: str  # the container row's path
+    member: str  # the member path inside it ("<path>#2" for a duplicate entry name)
+    index: int  # R12-3: 1-based position among the container's extracted members
+    note: str | None  # R12-3: the "중복 멤버 이름" reason, when renamed
+
+
+# (file, display path or None, member identity of an archive member or
+# None) — R9-1: the identity travels with the spec.
+_ScanSpec = tuple[Path, str | None, _MemberIdentity | None]
 
 
 def _scan_paths(
@@ -460,10 +469,13 @@ def _scan_paths(
                 "missing_dependency": extraction.missing_dependency,
             }
             archive_members[rel] = []
-            for member in extraction.members:
+            for position, member in enumerate(extraction.members, start=1):
                 # Y9: nested members are "inner.zip::x.png" (never "inner.zip.unpacked/x.png").
+                # R12-3: a duplicate entry name is "<path>#2" (member_name); the
+                # position makes (container, member, member_index) unique.
                 member_rel = extraction.member_name(member, dest)
-                specs.append((member, member_row_path(rel, member_rel), (rel, member_rel)))
+                identity = _MemberIdentity(rel, member_rel, position, extraction.notes.get(member))
+                specs.append((member, member_row_path(rel, member_rel), identity))
 
         planned = len(specs) + len(archive_members) + len(iter_errors) + len(symlinks)
         if on_plan is not None:
@@ -791,9 +803,11 @@ def _scan_specs(
         identity = spec[2]
         if identity is not None:
             # P7/R9-1: a member row names its container and member in fields
-            # (from the spec, never from its display path).
-            container, member = identity
-            item = replace(item, container=container, member=member)
+            # (from the spec, never from its display path); R12-3: and its
+            # position, plus the reason when a duplicate name was renamed.
+            item = replace(item, container=identity.container, member=identity.member, member_index=identity.index)
+            if identity.note and item.result is not None:
+                item = replace(item, result=replace(item.result, limitations=[identity.note, *item.result.limitations]))
         _report(item)
         return item, key, was_cached
 
