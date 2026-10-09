@@ -19,6 +19,7 @@ import json
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from .json_text import json_dumps
 
 
 REPORT_KEY_ENV = "DEEPFAKE_LENS_REPORT_KEY"
@@ -201,7 +202,7 @@ def sign_report_file(path: Path | str, key: bytes | str | None) -> dict[str, obj
     """Sign a JSON report file in place; returns the signed payload."""
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     signed = sign_report(payload if isinstance(payload, dict) else {"report": payload}, key)
-    Path(path).write_text(json.dumps(signed, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    Path(path).write_text(json_dumps(signed, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return signed
 
 
@@ -224,4 +225,4 @@ def _default_model_pins() -> list[dict[str, object]]:
 
 
 def _canonical(report: dict[str, object]) -> bytes:
-    return json.dumps(report, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return json_dumps(report, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")

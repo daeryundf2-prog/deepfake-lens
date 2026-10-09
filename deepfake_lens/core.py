@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
-import json
 import logging
 import os
 import re
@@ -146,6 +145,7 @@ from .scan_cache import (  # noqa: F401
     _write_hash_db,
     _write_scan_cache,
 )
+from .json_text import json_dumps
 
 
 AI_IDENTITY_PHRASES = [
@@ -2122,7 +2122,7 @@ def _heatmap_path_for(path: Path, *, root: Path | None, heatmap_dir: Path | None
         output_root = heatmap_dir
     else:
         folder = str(Path(root or path.parent).expanduser().resolve())
-        key = hashlib.sha256(folder.encode("utf-8")).hexdigest()[:HEATMAP_FOLDER_KEY_CHARS]
+        key = hashlib.sha256(folder.encode("utf-8", "surrogateescape")).hexdigest()  # R11-1[:HEATMAP_FOLDER_KEY_CHARS]
         output_root = default_heatmap_root() / key
     try:
         relative = path.relative_to(root) if root else Path(path.name)
@@ -2245,7 +2245,7 @@ def scan_to_json(summary: BatchScanSummary, items: list[ScanItem], *, thresholds
 
 
 def scan_to_json_text(summary: BatchScanSummary, items: list[ScanItem], *, thresholds: object | None = None, models_dir: object | None = None) -> str:
-    return json.dumps(scan_to_json(summary, items, thresholds=thresholds, models_dir=models_dir), ensure_ascii=False, indent=2)
+    return json_dumps(scan_to_json(summary, items, thresholds=thresholds, models_dir=models_dir), ensure_ascii=False, indent=2)
 
 
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
+from .json_text import json_dumps
 
 
 REQUIRED_RELEASE_FILES = [
@@ -52,5 +52,5 @@ def write_release_checklist(root: Path | str, output_path: Path | str) -> dict[s
     payload = build_release_checklist(root)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return payload

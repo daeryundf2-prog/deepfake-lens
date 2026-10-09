@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from .evaluation_metrics import DEFAULT_TARGET_FPR, ci_summary
 from .fusion import FusionProfile, apply_fusion_to_result
 from .model_adapter import load_model_threshold
 from .result_types import ClassificationResult, EvidenceKind
+from .json_text import json_dumps
 
 # Contract v2 (WP-A) sets ``result.score`` to 0 unless a calibrated
 # probability exists, so evaluating on it would measure nothing. Every
@@ -299,13 +299,13 @@ def write_cases_jsonl(path: Path | str, rows: list[dict[str, object]]) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="utf-8") as handle:
         for row in rows:
-            handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+            handle.write(json_dumps(row, ensure_ascii=False) + "\n")
 
 
 def write_json_report(path: Path | str, payload: dict[str, object]) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _score_dataset(

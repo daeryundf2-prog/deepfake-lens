@@ -27,7 +27,6 @@ wording.
 from __future__ import annotations
 
 import hashlib
-import json
 import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -41,6 +40,7 @@ from .layer_diagnostic import (
 )
 from .result_text import coverage_entry_line, display_name, escape_controls, evidence_qualifiers_short, grade_label_text
 from .result_types import VERDICT_LABELS, GRADE_LABELS, Grade, ScanItem, Verdict, status_label
+from .json_text import json_dumps
 
 ANALYSIS_RESULT_NOTICE = "결론은 `scan`과 같은 경로(analysis_api.analyze_path)로 산출되었습니다."
 # Result fields that make up the three-verdict contract. Legacy derived
@@ -261,7 +261,7 @@ def format_analysis_result(payload: Mapping[str, Any]) -> str:
 
 def emit(payload: Mapping[str, Any], *, fmt: str, json_out: Path | None, text: str | None = None) -> None:
     """Print ``payload`` as JSON or text and optionally write it to ``json_out``."""
-    rendered = json.dumps(payload, ensure_ascii=False, indent=2)
+    rendered = json_dumps(payload, ensure_ascii=False, indent=2)
     if json_out is not None:
         from .cli_render import _write_json_out
 

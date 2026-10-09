@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
 import shutil
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 from .native_stderr import FFMPEG_QUIET_ARGS
+from .json_text import json_dumps
 
 
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
@@ -74,7 +74,7 @@ def write_video_frame_plan(root: Path | str, output_path: Path | str, *, frame_r
     plan = build_video_frame_plan(root, output_root=frame_root, recursive=recursive, sample_every_seconds=sample_every_seconds)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json_dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return plan
 
 

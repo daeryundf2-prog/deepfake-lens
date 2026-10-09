@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .error_text import failure_reason
+from .json_text import json_dumps
 
 
 @dataclass(frozen=True)
@@ -169,7 +170,7 @@ class BatchProcessor:
 def save_batch_results(job: BatchJob, path: Path) -> None:
     """Save batch results to a JSON file."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(job.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json_dumps(job.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def load_batch_results(path: Path) -> BatchJob | None:

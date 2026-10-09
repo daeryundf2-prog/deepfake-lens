@@ -51,6 +51,7 @@ from .analysis_api import default_engine_profiles as _engine_profiles_in
 from .core import SCAN_JSON_SCHEMA_VERSION, BatchScanSummary, DEFAULT_METADATA_BYTES, _scan_item_from_json, is_default_heatmap_output, summarize  # noqa: F401
 from .datasets import is_negative_label, is_positive_label
 from .reports import write_html_report
+from .json_text import json_dumps
 
 
 # G7: request limits live in analysis_api (AnalysisOptions.from_query);
@@ -179,6 +180,10 @@ def _scan_payload(query: str, *, default_folder: Path | None, should_stop: Calla
         # back with POST /api/report, which resolves rows against it only.
         payload["scan_root"] = scan_root_text(folder)
         return payload
+    except UnicodeError:
+        # R11-1: a codec error (a non-UTF-8 name reaching a strict encoder)
+        # is a server fault — the Korean 500 — never its English text as a 400.
+        raise
     except (OSError, ValueError) as exc:
         # X4: missing folder, a file, unreadable — the Korean reason, 400.
         return ApiError(str(exc), 400)
@@ -1034,7 +1039,7 @@ def _feedback_payload(body: bytes) -> dict[str, object]:
     feedback_file = _feedback_path()
     feedback_file.parent.mkdir(parents=True, exist_ok=True)
     with feedback_file.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        handle.write(json_dumps(entry, ensure_ascii=False) + "\n")
     return {"ok": True, "feedback_file": str(feedback_file)}
 
 
@@ -1161,7 +1166,7 @@ def report_http_response(
 
 
 def _json_bytes(payload: dict[str, object]) -> bytes:
-    return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+    return json_dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
 
 
 class _ReportHasher:

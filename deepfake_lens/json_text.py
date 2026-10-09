@@ -1,0 +1,59 @@
+"""Surrogate-safe JSON text (R11-1).
+
+On POSIX a file name is bytes. Python hands a name that is not valid UTF-8
+(a CP949 ``증거사진.png`` copied from a Korean Windows disk, say
+``b"\\xc1\\xf5\\xb0\\xc5.png"``) to the program as a ``str`` with lone
+surrogates U+DC80–U+DCFF in place of the undecodable bytes (PEP 383,
+``os.fsdecode``). ``json.dumps(..., ensure_ascii=False)`` keeps those
+surrogates as they are, and encoding the text as UTF-8 then fails
+(``UnicodeEncodeError: surrogates not allowed``): before R11-1 one such
+name made ``scan --json-out`` exit 2 with an empty file, the web server's
+``/api/scan`` answer 400 with the English codec message and the API
+server answer 500.
+
+:func:`json_dumps` is ``json.dumps`` with ``ensure_ascii=False`` whose
+result has every lone surrogate written as the JSON escape ``\\udcXX``. The
+text is plain UTF-8, it is valid JSON, and ``json.loads`` gives back the
+same surrogate-escaped ``str`` — so ``os.fsencode`` of a loaded path is the
+file's original bytes and a signature over the canonical body verifies
+after a round trip. Text without surrogates is byte-for-byte what
+``json.dumps(..., ensure_ascii=False)`` gives (existing signatures and
+pinned outputs are unchanged).
+
+A surrogate can only occur inside a JSON string literal (the JSON syntax
+itself is ASCII), so the escape is always written where an escape is
+valid. Limitation: a high surrogate directly followed by a low surrogate
+(two separate code points in a Python ``str``) is read back by any JSON
+parser as the one astral character they encode; ``os.fsdecode`` never
+yields such a pair (it only yields U+DC80–U+DCFF).
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+_SURROGATE = re.compile("[\ud800-\udfff]")
+
+
+def escape_surrogates(text: str) -> str:
+    """``text`` with each lone surrogate written as the 6-character escape ``\\uXXXX``."""
+    return _SURROGATE.sub(lambda match: f"\\u{ord(match.group()):04x}", text)
+
+
+def json_dumps(obj: Any, **kwargs: Any) -> str:
+    """``json.dumps(obj, ensure_ascii=False, **kwargs)`` with lone surrogates escaped (R11-1)."""
+    kwargs.setdefault("ensure_ascii", False)
+    return escape_surrogates(json.dumps(obj, **kwargs))
+
+
+def json_bytes(obj: Any, **kwargs: Any) -> bytes:
+    """:func:`json_dumps` as UTF-8 bytes — never raises on a surrogate-escaped name."""
+    return json_dumps(obj, **kwargs).encode("utf-8")
+
+
+def write_json(path: Path | str, obj: Any, **kwargs: Any) -> None:
+    """Write :func:`json_dumps` of ``obj`` plus a newline to ``path`` as UTF-8."""
+    Path(path).write_text(json_dumps(obj, **kwargs) + "\n", encoding="utf-8")

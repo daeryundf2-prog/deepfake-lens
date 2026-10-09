@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 from .checks import failure_reason
 from .vendor_weights import default_models_dir
+from .json_text import json_bytes, json_dumps
 
 logger = logging.getLogger(__name__)
 
@@ -242,10 +243,26 @@ def _api_json(payload: Any) -> Any:
     from .webapp_api import ApiError
 
     if isinstance(payload, ApiError):
-        from fastapi.responses import JSONResponse
-
-        return JSONResponse(dict(payload), status_code=payload.status)
+        return surrogate_safe_json_response()(dict(payload), status_code=payload.status)
     return payload
+
+
+def surrogate_safe_json_response() -> Any:
+    """R11-1: the API's JSON response class — Starlette's ``JSONResponse`` whose
+    body is :func:`~deepfake_lens.json_text.json_bytes`.
+
+    Starlette encodes ``json.dumps(..., ensure_ascii=False)`` as strict UTF-8,
+    so a row path holding a lone surrogate (a non-UTF-8 POSIX file name,
+    PEP 383) made every route that echoes it a 500. The body is the same
+    compact JSON with each surrogate written as the escape ``\\udcXX``.
+    """
+    from fastapi.responses import JSONResponse
+
+    class SurrogateSafeJSONResponse(JSONResponse):
+        def render(self, content: Any) -> bytes:
+            return json_bytes(content, allow_nan=False, indent=None, separators=(",", ":"))
+
+    return SurrogateSafeJSONResponse
 
 
 def create_app(
@@ -258,7 +275,6 @@ def create_app(
     try:
         from fastapi import FastAPI, HTTPException
         from fastapi.middleware.cors import CORSMiddleware
-        from fastapi.responses import JSONResponse
         from starlette.concurrency import run_in_threadpool
     except ImportError:
         raise ImportError("FastAPI가 필요합니다. 설치: `pip install fastapi uvicorn`")
@@ -271,7 +287,15 @@ def create_app(
     # document's REST table — an English Swagger/ReDoc UI (rule 3) that also
     # bypassed the documented surface. They are disabled; the REST table in
     # docs/deepfake-lens-service.md is the API's description.
-    app = FastAPI(title="Deepfake Lens API", version="0.1.0", docs_url=None, redoc_url=None, openapi_url=None)
+    JSONResponse = surrogate_safe_json_response()  # R11-1: every JSON body is surrogate-safe
+    app = FastAPI(
+        title="Deepfake Lens API",
+        version="0.1.0",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+        default_response_class=JSONResponse,
+    )
 
     from fastapi.exceptions import RequestValidationError
 
@@ -662,7 +686,7 @@ def create_app(
                         finished = True
                         break
                     name, data = evt
-                    yield f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                    yield f"event: {name}\ndata: {json_dumps(data, ensure_ascii=False)}\n\n"
             finally:
                 # Client disconnect (or generator close) cancels the job at
                 # its next stage boundary instead of running to completion.

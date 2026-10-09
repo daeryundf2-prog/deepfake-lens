@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from .json_text import json_dumps
 
 
 @dataclass(frozen=True)
@@ -89,5 +89,5 @@ def write_collection_plan(root: Path | str, output_path: Path | str, *, minimum_
     payload = build_collection_plan(root, minimum_per_source=minimum_per_source)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return payload

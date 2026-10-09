@@ -13,12 +13,12 @@ not one of the behavioral checks).
 
 from __future__ import annotations
 
-import json
 import tempfile
 import traceback
 import unittest
 from pathlib import Path
 from typing import Any, Callable
+from .json_text import json_dumps
 
 
 # Substring markers for network capability. "subprocess" is deliberately not
@@ -234,5 +234,5 @@ def write_security_check(root: Path | str, output_path: Path | str) -> dict[str,
     payload = build_security_check(root)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return payload

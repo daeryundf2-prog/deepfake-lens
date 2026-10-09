@@ -11,6 +11,7 @@ import json
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
+from .json_text import json_dumps
 
 
 @dataclass(frozen=True)
@@ -145,7 +146,7 @@ def save_evidence_chains(chains: list[EvidenceChain], path: Path) -> None:
     """Save evidence chains to a JSON file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     data = [chain.to_json() for chain in chains]
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_text(json_dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def load_evidence_chains(path: Path | str) -> tuple[list[EvidenceChain], list[str]]:

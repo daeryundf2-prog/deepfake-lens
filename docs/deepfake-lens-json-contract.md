@@ -162,6 +162,18 @@ always `0` invited old-contract readings. They remain readable as
   `subfolders[].path` stay raw. R10-2: a CSV cell starting with `=`, `+`,
   `-`, `@`, TAB or CR is written with a leading `'` (OWASP CSV injection);
   numeric cells are unchanged.
+- R11-1 (round 11): a POSIX file name that is not valid UTF-8 (a CP949
+  `증거` copied from a Korean Windows disk is `b"\xc1\xf5\xb0\xc5"`) reaches
+  the tool as a string with lone surrogates U+DC80–U+DCFF (PEP 383). Every
+  JSON body — `--json-out`, `--format json` on stdout, the scan cache, the
+  signed evidence statement, the web server's and the API server's
+  responses, the SSE stream — writes each lone surrogate as the JSON escape
+  `\udcXX` (`deepfake_lens/json_text.py`): the file is valid UTF-8, a JSON
+  parser gives back the same string, and `os.fsencode(path)` is the file's
+  original bytes. Signatures cover that text, so a signed report with such
+  a name verifies after a round trip. Text renderings show the name through
+  `display_name` (`\udcc1\udcf5\udcb0\udcc5.png`). The row is analysed like
+  any other and no other row is affected.
 - A symlink found in a scanned folder (file or directory) is never followed
   and is listed as its own row: `kind: "unknown"`, `status: "skipped"`,
   `result: null`, `error` starting `심볼릭 링크` (D10); it counts in

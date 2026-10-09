@@ -8,6 +8,7 @@ from .calibration import calibrate_threshold
 from .core import ClassificationResult, EvidenceSignal, ScanItem, SourceConfidence, analyze_file
 from .datasets import discover_dataset, is_positive_label
 from .evaluation_metrics import ci_summary
+from .json_text import json_dumps
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,7 @@ def load_fusion_profile(path: Path | str | None) -> FusionProfile | None:
 def write_fusion_profile(path: Path | str, profile: FusionProfile) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(profile.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json_dumps(profile.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def calibrate_fusion_profile(

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from .datasets import discover_dataset
+from .json_text import json_dumps
 
 
 def build_neural_training_plan(
@@ -70,5 +70,5 @@ def write_neural_training_plan(root: Path | str, output_path: Path | str, *, out
     payload = build_neural_training_plan(root, output_dir=output_dir, architecture=architecture, image_size=image_size, epochs=epochs)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return payload

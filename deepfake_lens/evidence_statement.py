@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import errno
 import hashlib
-import json
 import os
 import stat
 from dataclasses import asdict, dataclass, field
@@ -54,6 +53,7 @@ from .result_text import (
 )
 from .result_types import VERDICT_LABELS, CoverageStatus, EvidenceDirection, EvidenceKind, EvidenceStrength, Grade, Verdict, is_verdict_row, status_label
 from .signing import resolve_report_key, sign_report
+from .json_text import json_dumps
 
 # Marks a signed body as a 증거설명서 so it can never be mistaken for (or
 # verified as) a scan report body.
@@ -532,7 +532,7 @@ def write_evidence_statement_json(
     body = _signed(statement, signed, key)
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    p.write_text(json_dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return body
 
 

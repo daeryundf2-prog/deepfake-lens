@@ -95,6 +95,7 @@ from .vendor_weights import (
     verify_offline_integrity,
     weights_coverage,
 )
+from .json_text import json_dumps
 
 
 COMMANDS = {"doctor", "scan", "verify-report", "corpus", "collect", "dataset", "eval", "benchmark", "fusion", "calibrate", "feedback", "train", "train-neural-plan", "models", "video", "video-analysis", "audio", "face", "faceswap-seam", "evidence-statement", "vendor-weights", "inpaint", "text-advanced", "compare", "watermark", "forensic", "classify", "multimodal", "realtime", "rppg", "prnu", "evidence", "api-serve", "batch", "explain", "agent", "3d", "avatar", "pixel-analysis", "ml-classify", "legal-report", "perf", "security", "release", "web", "-h", "--help"}
@@ -200,7 +201,7 @@ def _vendor_weights_pin(args: argparse.Namespace) -> int:
     if result["status"] == "needs-manual":
         print(result["instructions"], file=sys.stderr)
         return 1
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print(json_dumps(result, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -322,7 +323,7 @@ def _legal_report_command(args: argparse.Namespace) -> int:
         key=resolve_report_key(args.key_file),
     )
     if args.json_out:
-        _write_json_out(args.json_out, json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+        _write_json_out(args.json_out, json_dumps(report, ensure_ascii=False, indent=2) + "\n")
     text = legal_report_text(report)
     members = member_rows_text(report.get("rows"))
     if members:
@@ -331,9 +332,9 @@ def _legal_report_command(args: argparse.Namespace) -> int:
     if args.output:
         args.output.write_text(text + "\n", encoding="utf-8")
     if args.format == "json":
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        print(json_dumps(report, ensure_ascii=False, indent=2))
     elif args.output:
-        print(json.dumps({"output": str(args.output), "report_id": report.get("report_id")}, ensure_ascii=False, indent=2))
+        print(json_dumps({"output": str(args.output), "report_id": report.get("report_id")}, ensure_ascii=False, indent=2))
     else:
         print(text)
     return 0
@@ -371,7 +372,7 @@ def _verify_report_command(args: argparse.Namespace) -> int:
     if result.status == "no-key":
         payload["hint"] = f"검증 키가 없습니다 — --key-file 또는 {REPORT_KEY_ENV} 환경 변수를 지정하십시오."
     if args.format == "json":
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        print(json_dumps(payload, ensure_ascii=False, indent=2))
     else:
         line = f"{result.reason}: {args.report}"
         if result.key_id:
@@ -467,7 +468,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         return _verify_report_command(args)
     if args.command == "collect":
         payload = write_collection_plan(args.folder, args.out, minimum_per_source=args.minimum_per_source)
-        print(json.dumps({"out": str(args.out), "targets": len(payload["targets"])}, ensure_ascii=False, indent=2))
+        print(json_dumps({"out": str(args.out), "targets": len(payload["targets"])}, ensure_ascii=False, indent=2))
         return 0
     if args.command == "dataset":
         recursive = not args.no_recursive
@@ -490,7 +491,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             )
         if args.robustness_out:
             write_robustness_plan(args.folder, args.robustness_out, recursive=recursive)
-        print(json.dumps(summary.to_json(), ensure_ascii=False, indent=2))
+        print(json_dumps(summary.to_json(), ensure_ascii=False, indent=2))
         return 0
     if args.command == "eval":
         fusion_profile = load_fusion_profile(args.fusion_profile)
@@ -516,7 +517,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         if args.false_negative_out:
             rows = cases.get("false_negatives", []) if isinstance(cases.get("false_negatives"), list) else []
             write_cases_jsonl(args.false_negative_out, rows)
-        print(json.dumps(payload["metrics"], ensure_ascii=False, indent=2))
+        print(json_dumps(payload["metrics"], ensure_ascii=False, indent=2))
         return 0
     if args.command == "benchmark":
         pixel_modes = _parse_csv(args.pixel_modes)
@@ -532,7 +533,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         write_benchmark(args.json_out, _maybe_sign(payload, sign=args.sign, key_file=args.key_file))
         if args.md_out:
             write_benchmark_markdown(args.md_out, payload)
-        print(json.dumps({"out": str(args.json_out), "rows": len(payload["rows"]), "best": payload["best"]}, ensure_ascii=False, indent=2))
+        print(json_dumps({"out": str(args.json_out), "rows": len(payload["rows"]), "best": payload["best"]}, ensure_ascii=False, indent=2))
         return 0
     if args.command == "fusion":
         payload = calibrate_fusion_profile(
@@ -552,7 +553,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
                 unknown_below=int(profile_payload.get("unknown_below", 8) or 8),
             ),
         )
-        print(json.dumps({"out": str(args.out), "threshold": payload["profile"]["threshold"], "metrics": payload["metrics"]}, ensure_ascii=False, indent=2))
+        print(json_dumps({"out": str(args.out), "threshold": payload["profile"]["threshold"], "metrics": payload["metrics"]}, ensure_ascii=False, indent=2))
         return 0
     if args.command == "calibrate":
         payload = calibrate_dataset(
@@ -567,7 +568,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         write_json_report(args.out, payload)
         if args.mapping_out:
             write_json_report(args.mapping_out, payload["score_calibration"])
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        print(json_dumps(payload, ensure_ascii=False, indent=2))
         return 0
     if args.command == "feedback":
         from .cli_inputs import UsageError as FeedbackUsageError  # (UsageError is local in this function)
@@ -607,7 +608,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
                     unknown_below=int(suggested.get("unknown_below", 8) or 8),
                 ),
             )
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        print(json_dumps(report, ensure_ascii=False, indent=2))
         return 0
     if args.command == "train":
         payload = train_portable_baseline(
@@ -618,7 +619,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             max_files=args.max_files,
         )
         write_json_report(args.out, payload)
-        print(json.dumps({"out": str(args.out), "threshold": payload["threshold"], "metrics": payload.get("metrics", {})}, ensure_ascii=False, indent=2))
+        print(json_dumps({"out": str(args.out), "threshold": payload["threshold"], "metrics": payload.get("metrics", {})}, ensure_ascii=False, indent=2))
         return 0
     if args.command == "models":
         payload = list_detector_candidates(focus=args.focus)
@@ -636,7 +637,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
                 score_index=args.score_index,
             )
             payload["runtime_profile"] = profile
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        print(json_dumps(payload, ensure_ascii=False, indent=2))
         return 0
     if args.command == "train-neural-plan":
         payload = write_neural_training_plan(
@@ -647,7 +648,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             image_size=args.image_size,
             epochs=args.epochs,
         )
-        print(json.dumps({"out": str(args.out), "checkpoint": payload["artifacts"]["checkpoint"]}, ensure_ascii=False, indent=2))
+        print(json_dumps({"out": str(args.out), "checkpoint": payload["artifacts"]["checkpoint"]}, ensure_ascii=False, indent=2))
         return 0
     if args.command == "video":
         payload = write_video_frame_plan(
@@ -659,8 +660,8 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         )
         if args.extract:
             payload["extraction"] = extract_video_frames(payload, limit=args.extract_limit)
-            args.out.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        print(json.dumps({"count": payload["count"], "ffmpeg_available": payload["ffmpeg_available"], "out": str(args.out)}, ensure_ascii=False, indent=2))
+            args.out.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(json_dumps({"count": payload["count"], "ffmpeg_available": payload["ffmpeg_available"], "out": str(args.out)}, ensure_ascii=False, indent=2))
         return 0
     if args.command == "audio":
         # D1: layer diagnostic only — the verdict for an audio file is `scan`.
@@ -720,7 +721,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         else:
             result = detect_kgw_watermark(text, secret=args.secret, tokenizer_model=args.tokenizer, tokenizer_revision=args.tokenizer_revision, gamma=args.gamma)
         if args.format == "json":
-            print(json.dumps(result.to_json(), ensure_ascii=False, indent=2))
+            print(json_dumps(result.to_json(), ensure_ascii=False, indent=2))
         else:
             print(f"참고 원점수: {result.score} — {result.reference_note}")
             print(f"z={result.z_score}, green={result.green_fraction}, tokens={result.token_count}")
@@ -783,9 +784,9 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         if args.output:
             from .evidence import save_evidence_chains
             save_evidence_chains([chain], args.output)
-            print(json.dumps({"output": str(args.output), "hash": chain.file_hash}, ensure_ascii=False, indent=2))
+            print(json_dumps({"output": str(args.output), "hash": chain.file_hash}, ensure_ascii=False, indent=2))
         else:
-            print(json.dumps(chain.to_json(), ensure_ascii=False, indent=2))
+            print(json_dumps(chain.to_json(), ensure_ascii=False, indent=2))
         return 0
     if args.command == "api-serve":
         from .api_server import LOCAL_HOSTS
@@ -802,10 +803,10 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         if args.output:
             from .batch import save_batch_results
             save_batch_results(job, args.output)
-            print(json.dumps({"output": str(args.output), "job_id": job.job_id, "processed": job.processed_files}, ensure_ascii=False, indent=2))
+            print(json_dumps({"output": str(args.output), "job_id": job.job_id, "processed": job.processed_files}, ensure_ascii=False, indent=2))
         else:
             summary = processor.get_summary(job.job_id)
-            print(json.dumps(summary, ensure_ascii=False, indent=2))
+            print(json_dumps(summary, ensure_ascii=False, indent=2))
         return 0
     if args.command == "explain":
         return _explain_command(args)
@@ -892,15 +893,15 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             max_files=args.max_files,
         )
         write_performance_check(args.out, payload)
-        print(json.dumps({"out": str(args.out), "files_per_second": payload["files_per_second"], "summary": payload["summary"]}, ensure_ascii=False, indent=2))
+        print(json_dumps({"out": str(args.out), "files_per_second": payload["files_per_second"], "summary": payload["summary"]}, ensure_ascii=False, indent=2))
         return 0
     if args.command == "release":
         payload = write_release_checklist(Path.cwd(), args.out)
-        print(json.dumps({"out": str(args.out), "entrypoint_present": payload["entrypoint_present"]}, ensure_ascii=False, indent=2))
+        print(json_dumps({"out": str(args.out), "entrypoint_present": payload["entrypoint_present"]}, ensure_ascii=False, indent=2))
         return 0
     if args.command == "security":
         payload = write_security_check(Path.cwd(), args.out)
-        print(json.dumps({"out": str(args.out), "passed": payload["passed"]}, ensure_ascii=False, indent=2))
+        print(json_dumps({"out": str(args.out), "passed": payload["passed"]}, ensure_ascii=False, indent=2))
         return 0
     if args.command == "web":
         if args.allow_lan and not args.token:
@@ -912,9 +913,9 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
 
         report = run_diagnostics(getattr(args, "models_dir", None))
         if args.json_out:
-            _write_json_out(args.json_out, json.dumps(report.to_json(), ensure_ascii=False, indent=2) + "\n")
+            _write_json_out(args.json_out, json_dumps(report.to_json(), ensure_ascii=False, indent=2) + "\n")
         if args.format == "json":
-            print(json.dumps(report.to_json(), ensure_ascii=False, indent=2))
+            print(json_dumps(report.to_json(), ensure_ascii=False, indent=2))
         else:
             print(format_report(report))
         return 0
@@ -1014,7 +1015,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             write_evidence_statement_json(args.json_out, statement, signed=signed_statement)
 
         if args.format == "json":
-            print(json.dumps(signed_statement, ensure_ascii=False, indent=2))
+            print(json_dumps(signed_statement, ensure_ascii=False, indent=2))
         elif args.format == "markdown":
             print(statement.to_markdown())
         else:
@@ -1055,11 +1056,11 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
                 print("오류: --install에는 대상이 필요합니다 — --to DIR 또는 --models-dir DIR을 지정하십시오 (또는 DEEPFAKE_LENS_MODELS_DIR)", file=sys.stderr)
                 return 2
             res = install_bundle(args.install, target)
-            print(json.dumps(res, ensure_ascii=False, indent=2))
+            print(json_dumps(res, ensure_ascii=False, indent=2))
             return 0 if res["status"] == "installed" else 1
         if args.fetch:
             fetch_res = fetch_weights(args.models_dir, offline=args.offline)
-            print(json.dumps(fetch_res, ensure_ascii=False, indent=2))
+            print(json_dumps(fetch_res, ensure_ascii=False, indent=2))
             return 0 if fetch_res["status"] in {"ok", "skipped"} else 1
         if args.offline and not args.verify and not args.bundle_to:
             print("오류: --offline은 --fetch/--verify/--bundle-to와 함께만 쓸 수 있습니다", file=sys.stderr)
@@ -1071,12 +1072,12 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
                 copy_weights=args.copy_weights,
                 force=args.force,
             )
-            print(json.dumps({"bundle_dir": str(args.bundle_to), "manifest": str(manifest_file)}, ensure_ascii=False, indent=2))
+            print(json_dumps({"bundle_dir": str(args.bundle_to), "manifest": str(manifest_file)}, ensure_ascii=False, indent=2))
             return 0
         if args.verify:
             verify_res = verify_offline_integrity(args.models_dir)
             if args.format == "json":
-                print(json.dumps(verify_res, ensure_ascii=False, indent=2))
+                print(json_dumps(verify_res, ensure_ascii=False, indent=2))
             else:
                 st = verify_res["status"]
                 status_str = "통과" if st == "pass" else ("통과(해시 미선언 가중치 있음)" if st == "pass-unverified" else "실패")
@@ -1099,9 +1100,9 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         manifest = inspect_model_manifest(args.models_dir)
         if args.manifest_out:
             args.manifest_out.parent.mkdir(parents=True, exist_ok=True)
-            args.manifest_out.write_text(json.dumps(manifest.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            args.manifest_out.write_text(json_dumps(manifest.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         if args.format == "json":
-            print(json.dumps(manifest.to_json(), ensure_ascii=False, indent=2))
+            print(json_dumps(manifest.to_json(), ensure_ascii=False, indent=2))
         elif args.format == "markdown":
             print(manifest.to_markdown())
         else:
@@ -1172,7 +1173,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
     scan_coverage = weights_coverage(options.resolved_models_dir())
     if args.json_out:
         scan_payload = _maybe_sign(analysis_scan_payload(summary, items, thresholds, options), sign=args.sign, key_file=args.key_file)
-        _write_json_out(args.json_out, json.dumps(scan_payload, ensure_ascii=False, indent=2) + "\n")
+        _write_json_out(args.json_out, json_dumps(scan_payload, ensure_ascii=False, indent=2) + "\n")
     if args.csv_out:
         _write_csv(args.csv_out, items, coverage=scan_coverage, thresholds=thresholds, summary=summary)
     # S3: --redact-paths also hides the tool's install path (model profile
@@ -1232,7 +1233,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             write_evidence_statement_pdf(Path(args.evidence_statement_pdf_out), stmt, signed=signed_stmt)
 
     if args.format == "json":
-        print(json.dumps(analysis_scan_payload(summary, items, thresholds, options), ensure_ascii=False, indent=2))
+        print(json_dumps(analysis_scan_payload(summary, items, thresholds, options), ensure_ascii=False, indent=2))
     else:
         _print_table(summary, items, include_low=args.include_low, coverage=scan_coverage, thresholds=thresholds)
     return 0

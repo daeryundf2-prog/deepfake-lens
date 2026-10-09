@@ -35,6 +35,7 @@ from .webapp_api import (
     api_status,
 )
 from .checks import failure_reason
+from .json_text import json_dumps
 
 logger = logging.getLogger(__name__)
 
@@ -235,11 +236,15 @@ def build_server(
                 if parse_qs(parsed.query).get("async", ["false"])[0].lower() in {"1", "true", "yes"}:
                     try:
                         self._send_json(_scan_job_start(parsed.query, default_folder=default_folder))
+                    except UnicodeError:
+                        raise  # R11-1: a codec error is a Korean 500 (below), never its English text as a 400
                     except ValueError as exc:
                         self._send_json({"error": str(exc)}, status=400)
                     return
                 try:
                     self._send_json(_scan_payload(parsed.query, default_folder=default_folder))
+                except UnicodeError:
+                    raise  # R11-1: as above
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=400)
                 return
@@ -460,7 +465,7 @@ def build_server(
         def _send_json(self, payload: dict[str, Any], status: int | None = None) -> None:
             # X4: an ApiError payload carries its own status (400/404/500).
             status = api_status(payload) if status is None else status
-            body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+            body = json_dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

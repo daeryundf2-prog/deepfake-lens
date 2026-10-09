@@ -16,6 +16,7 @@ from typing import Any, Callable, Iterable
 
 from .profile_pins import ModelPathArg, model_path_digest, pin_tokens, profile_pins
 from .result_types import ScanItem
+from .json_text import json_dumps
 
 
 def _scan_order_key(root: Path) -> Callable[[Path], str]:
@@ -575,7 +576,7 @@ def _write_scan_cache(cache_path: Path | None, cache: dict[str, object]) -> None
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
         body = {"format": SCAN_CACHE_FORMAT, **{key: value for key, value in cache.items() if key != "format"}}
-        tmp.write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp.write_text(json_dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         tmp.replace(cache_path)
     except OSError:
         pass  # cache flush failure must never mask real scan results
@@ -599,7 +600,7 @@ def _write_hash_db(hash_db_path: Path | None, hash_db: dict[str, object]) -> Non
     if hash_db_path is None:
         return
     hash_db_path.parent.mkdir(parents=True, exist_ok=True)
-    hash_db_path.write_text(json.dumps(hash_db, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    hash_db_path.write_text(json_dumps(hash_db, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _cache_key(
@@ -663,7 +664,7 @@ def _cache_key(
 
 
 def _short_digest(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
+    return hashlib.sha256(text.encode("utf-8", "surrogateescape")).hexdigest()[:32]  # R11-1
 
 
 def _content_sha256(path: Path, fingerprints: dict[Path, str] | None = None) -> str:

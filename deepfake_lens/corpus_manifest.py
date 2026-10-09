@@ -58,6 +58,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from .json_text import json_dumps
 
 SCHEMA = "corpus-manifest-v1"
 LABELS = ("real", "synthetic", "edited")
@@ -103,12 +104,13 @@ def file_sha256(path: Path) -> str:
 
 def item_id(relpath: str) -> str:
     """Stable item id: first 16 hex of SHA-256 over the POSIX relpath."""
-    return hashlib.sha256(relpath.encode("utf-8")).hexdigest()[:16]
+    # R11-1: surrogateescape — a non-UTF-8 name hashes as its own bytes.
+    return hashlib.sha256(relpath.encode("utf-8", "surrogateescape")).hexdigest()[:16]
 
 
 def canonical_items_bytes(items: list[dict[str, Any]]) -> bytes:
     ordered = sorted((_normalized_item(item) for item in items), key=lambda item: str(item["id"]))
-    return json.dumps(ordered, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return json_dumps(ordered, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
 def manifest_sha256(items: list[dict[str, Any]]) -> str:
@@ -226,7 +228,7 @@ def write_manifest(path: Path | str, manifest: dict[str, Any], *, root_hint: str
         payload["root_hint"] = root_hint
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def load_manifest(path: Path | str) -> dict[str, Any]:
@@ -453,7 +455,7 @@ def run_corpus_cli(args: argparse.Namespace) -> int:
             )
             root_hint = _relative_hint(args.folder, args.out)
             write_manifest(args.out, manifest, root_hint=root_hint)
-            print(json.dumps({
+            print(json_dumps({
                 "out": str(args.out),
                 "corpus_id": manifest["corpus_id"],
                 "items": len(manifest["items"]),
@@ -466,7 +468,7 @@ def run_corpus_cli(args: argparse.Namespace) -> int:
             report = assign_splits(manifest, seed=args.seed, ratio=parse_ratio(args.ratio), group_by=args.group_by)
             out = args.out or args.manifest
             write_manifest(out, manifest)
-            print(json.dumps({
+            print(json_dumps({
                 "out": str(out),
                 "seed": args.seed,
                 "group_by": args.group_by,

@@ -28,6 +28,7 @@ from .model_pins import (
     pin_target,
     required_pin_keys,
 )
+from .json_text import json_dumps
 
 
 ENV_MODELS_DIR = "DEEPFAKE_LENS_MODELS_DIR"
@@ -641,7 +642,7 @@ def pin_profile(
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=".pin-", suffix=".json")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(json.dumps(data, ensure_ascii=False, indent=2) + "\n")
+            handle.write(json_dumps(data, ensure_ascii=False, indent=2) + "\n")
         os.replace(tmp_name, path)
     except OSError:
         try:
@@ -687,7 +688,7 @@ def bundle_offline_weights(
     manifest_data["copy_weights"] = bool(copy_weights)
 
     manifest_file = dest / "offline_manifest.json"
-    manifest_file.write_text(json.dumps(manifest_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    manifest_file.write_text(json_dumps(manifest_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     # Copy runtime profiles + provenance docs
     for e in manifest.entries:

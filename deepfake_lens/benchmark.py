@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from .evaluate import SCORE_BASIS, SCORE_BASIS_NOTE, evaluate_dataset, evaluate_robustness_dataset
 from .evaluation_metrics import format_ci
 from .fusion import FusionProfile
+from .json_text import json_dumps
 
 
 def run_benchmark(
@@ -64,7 +64,7 @@ def run_benchmark(
 def write_benchmark(path: Path | str, payload: dict[str, object]) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def write_benchmark_markdown(path: Path | str, payload: dict[str, object]) -> None:

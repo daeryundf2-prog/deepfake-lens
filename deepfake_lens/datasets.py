@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from .json_text import json_dumps
 
 
 SUPPORTED_DATASET_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".txt", ".md"}
@@ -90,7 +90,7 @@ def write_manifest(
     payload = {"summary": summary.to_json(), "records": payload_records}
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return summary, records
 
 
@@ -134,7 +134,7 @@ def write_audit(root: Path | str, output_path: Path | str, *, recursive: bool = 
     audit = audit_dataset(root, recursive=recursive)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(audit.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json_dumps(audit.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return audit
 
 
@@ -175,7 +175,7 @@ def write_split_plan(root: Path | str, output_path: Path | str, **kwargs) -> dic
     plan = plan_dataset_splits(root, **kwargs)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json_dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return plan
 
 
@@ -210,7 +210,7 @@ def write_robustness_plan(root: Path | str, output_path: Path | str, *, recursiv
     plan = build_robustness_plan(root, recursive=recursive)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json_dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return plan
 
 
@@ -331,6 +331,6 @@ def _duplicate_groups(records: list[DatasetRecord]) -> list[dict[str, object]]:
 
 
 def _stable_unit_interval(seed: str, value: str) -> float:
-    digest = hashlib.sha256(f"{seed}:{value}".encode("utf-8")).digest()
+    digest = hashlib.sha256(f"{seed}:{value}".encode("utf-8", "surrogateescape")).digest()  # R11-1
     number = int.from_bytes(digest[:8], "big")
     return number / float(2**64 - 1)

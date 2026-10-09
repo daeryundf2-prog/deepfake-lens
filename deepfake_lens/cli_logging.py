@@ -101,7 +101,9 @@ def configure_cli_logging(verbose: bool = False, *, log_dir: Path | None = None)
     directory = log_dir if log_dir is not None else default_log_dir()
     try:
         directory.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(directory / LOG_FILE_NAME, encoding="utf-8")
+        # R11-1: a log line naming a non-UTF-8 file (lone surrogates, PEP 383)
+        # is written with backslash escapes instead of "--- Logging error ---".
+        file_handler = logging.FileHandler(directory / LOG_FILE_NAME, encoding="utf-8", errors="backslashreplace")
     except OSError:
         file_handler = None
     if file_handler is not None:

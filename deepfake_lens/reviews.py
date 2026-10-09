@@ -12,6 +12,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from .json_text import json_dumps
 
 DEFAULT_REVIEW_PATH = Path.home() / ".deepfake-lens" / "reviews.json"
 
@@ -48,7 +49,7 @@ class ReviewStore:
         temp_path = self.storage_path.with_suffix(".tmp")
         try:
             temp_path.write_text(
-                json.dumps(self._cache, ensure_ascii=False, indent=2),
+                json_dumps(self._cache, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
             temp_path.replace(self.storage_path)

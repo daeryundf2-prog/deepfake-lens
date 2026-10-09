@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .datasets import is_negative_label, is_positive_label
+from .json_text import json_dumps
 
 
 DEFAULT_THRESHOLD = 67
@@ -53,7 +54,7 @@ def load_calibration(path: Path | str | None) -> CalibrationProfile | None:
 def write_calibration(path: Path | str, profile: CalibrationProfile) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(profile.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json_dumps(profile.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def calibrate_threshold(scores: list[tuple[int, bool]], *, target_false_positive_rate: float = 0.05) -> CalibrationProfile:
@@ -289,7 +290,7 @@ def load_score_calibrator(path: Path | str | None) -> ScoreCalibrator | None:
 def write_score_calibrator(path: Path | str, calibrator: ScoreCalibrator) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(calibrator.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json_dumps(calibrator.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _labeled_pair(item: object) -> tuple[float, bool] | None:
@@ -460,7 +461,7 @@ def load_threshold_profile(path: Path | str | None) -> ThresholdProfile | None:
 def write_threshold_profile(path: Path | str, profile: ThresholdProfile) -> None:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(profile.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    output.write_text(json_dumps(profile.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _float_pairs(raw: object) -> tuple[tuple[float, float], ...]:

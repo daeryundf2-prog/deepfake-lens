@@ -35,6 +35,7 @@ from .result_text import (
 )
 from .result_types import EVIDENCE_KIND_LABELS, VERDICT_LABELS, CoverageStatus, Grade, Verdict, check_label, is_verdict_row, status_label
 from .signing import REPORT_KEY_ENV, resolve_report_key, sign_report, signed_body_sha256
+from .json_text import json_dumps
 
 # G9: Korean label of the benchmark ``score_basis`` code (the JSON keeps the code).
 SCORE_BASIS_LABELS = {"raw, uncalibrated": "보정 전 원점수"}
@@ -195,7 +196,7 @@ def _signature_html(signed: dict[str, object]) -> str:
     lines = "".join(f"<p class=\"note\">{escape(line)}</p>" for line in signature_lines_ko(signed))
     # "</" is escaped so the JSON cannot close the script element; json.loads
     # reads "<\/" back as "</", so the extracted body verifies unchanged.
-    embedded = json.dumps(signed, ensure_ascii=False, sort_keys=True).replace("</", "<\\/")
+    embedded = json_dumps(signed, ensure_ascii=False, sort_keys=True).replace("</", "<\\/")
     return (
         f'<section class="signature"><h2>보고서 서명</h2>{lines}</section>\n'
         f'<script type="application/json" id="{SIGNED_REPORT_SCRIPT_ID}">{embedded}</script>'
