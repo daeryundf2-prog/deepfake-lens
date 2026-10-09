@@ -245,7 +245,21 @@ class EvidenceStatementTest(_StatementFixture):
         from fastapi.testclient import TestClient
         from deepfake_lens.api_server import CLIENT_HEADER, create_app
 
-        app = create_app()
+        import tempfile
+        from collections import OrderedDict
+        from unittest.mock import patch
+
+        from deepfake_lens import webapp_api
+
+        # P1 (round 8): the request names the scanned folder (scan_root) —
+        # here an empty folder inside the read root; the rows are listed as
+        # unsigned and the statement PDF still renders.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        roots: Any = patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
+        roots.start()
+        self.addCleanup(roots.stop)
+        app = create_app(default_folder=Path(tmp.name).resolve())
         client = TestClient(app)
 
         # N11: item2's legacy "medium" band is not in the scan-result item
@@ -259,6 +273,7 @@ class EvidenceStatementTest(_StatementFixture):
             "items": [self.item1.to_json(), item2.to_json()],
             "format": "evidence",
             "case_no": "2026가합55555",
+            "scan_root": str(Path(tmp.name).resolve()),
         }
         resp = client.post(
             "/api/report?format=evidence",

@@ -977,7 +977,7 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
     def test_web_report_signed_with_env_key_and_tamper_detected(self) -> None:
         """QA-SYS-6: 보고서 JSON의 임의 필드(결론, 근거, note, 모델 해시) 한 글자 변경 후 검증 → 모든 경우 "변조됨".
         /api/report HTML and JSON are signed with DEEPFAKE_LENS_REPORT_KEY."""
-        body = json.dumps({"items": self.report["items"]}).encode("utf-8")
+        body = json.dumps({"items": self.report["items"], "scan_root": str(self.root)}).encode("utf-8")  # P1: rows are relative to the scanned folder
         with patch.object(webapp_api, "_READ_ROOTS", OrderedDict()), patch.dict(os.environ, {REPORT_KEY_ENV: KEY.decode()}):
             html = webapp_api._report_payload(body, "html", default_folder=self.root)
             signed_json = webapp_api._report_payload(body, "json", default_folder=self.root)
@@ -996,7 +996,7 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
     def test_web_report_without_key_says_unsigned(self) -> None:
         """QA-SYS-6: 보고서 JSON의 임의 필드(결론, 근거, note, 모델 해시) 한 글자 변경 후 검증 → 모든 경우 "변조됨".
         without a key the web report states 서명 없음 explicitly."""
-        body = json.dumps({"items": self.report["items"]}).encode("utf-8")
+        body = json.dumps({"items": self.report["items"], "scan_root": str(self.root)}).encode("utf-8")  # P1: rows are relative to the scanned folder
         env = {k: v for k, v in os.environ.items() if k != REPORT_KEY_ENV}
         with patch.object(webapp_api, "_READ_ROOTS", OrderedDict()), patch.dict(os.environ, env, clear=True):
             html = webapp_api._report_payload(body, "html", default_folder=self.root)
@@ -1028,7 +1028,7 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
         from deepfake_lens import reports
         from deepfake_lens.signing import signed_body_sha256
 
-        body = json.dumps({"items": self.report["items"]}).encode("utf-8")
+        body = json.dumps({"items": self.report["items"], "scan_root": str(self.root)}).encode("utf-8")  # P1: rows are relative to the scanned folder
         captured: list[dict[str, Any]] = []
         real_sign = reports.signed_report_body
 
@@ -1240,7 +1240,8 @@ class QaSys7ReadRootConfinementTest(_ServerFixture):
         rows = self._scan_rows_with_heatmap()
         # X2: the server re-analyzes the rows with the scan's options (the
         # posted heatmap paths are only checked, never trusted).
-        status, body = self.request("/api/report?format=html", {"items": rows, "options": {"pixel": "deep", "heatmaps": True}})
+        # P1: rows are relative to the scanned folder named by scan_root.
+        status, body = self.request("/api/report?format=html", {"items": rows, "options": {"pixel": "deep", "heatmaps": True}, "scan_root": str(self.root)})
         self.assertEqual(status, 200)
         self.assertIn(b"data:image/png;base64", body)
         self.assertNoSecret(body)
@@ -1270,7 +1271,7 @@ class QaSys7ReadRootConfinementTest(_ServerFixture):
         # N11: the row carries the contract's required "result" (null for a
         # failed row) — /api/report refuses rows outside the item contract.
         rows = [{"path": str(self.outside / "secret.txt"), "name": "secret.txt", "kind": "text", "status": "failed", "size_bytes": 0, "result": None, "sha256": "f" * 64}]
-        status, body = self.request("/api/report?format=json", {"items": rows})
+        status, body = self.request("/api/report?format=json", {"items": rows, "scan_root": str(self.root)})  # P1
         self.assertEqual(status, 200)
         payload = json.loads(body)
         self.assertEqual(payload["items"], [])

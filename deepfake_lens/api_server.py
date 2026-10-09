@@ -874,6 +874,10 @@ def create_app(
                 yield ("cancelled", {"job_id": job_id, "done": tally["done"], "processed": tally["done"], "total": tally["planned"]})
                 return
             payload = scan_payload(summary, items, thresholds, options)
+            # P1: the folder the rows are relative to, for POST /api/report.
+            from .webapp_api import scan_root_text
+
+            payload["scan_root"] = scan_root_text(root)
             # Rows are the /api/scan rows; verdict_code/grade/probability are
             # also copied to the row top level for stream clients that read
             # them there (the pre-R1 stream row shape).

@@ -123,6 +123,26 @@ def _load_gui() -> str:
     return "<h1>GUI 파일을 찾을 수 없습니다</h1>"
 
 
+def scan_root_text(folder: Path) -> str:
+    """The scanned folder as the absolute, resolved path a report request names (P1)."""
+    try:
+        return str(Path(folder).expanduser().resolve())
+    except (OSError, RuntimeError):
+        return str(Path(os.path.abspath(Path(folder).expanduser())))
+
+
+# P6 (round 8): an uploaded file is a temp copy, not a file under a read
+# root — its rows are marked so POST /api/report never re-analyzes a
+# same-named file of the read root in its place (and never signs it).
+UPLOAD_SOURCE = "upload"
+
+
+def _mark_uploads(records: list[dict[str, object]]) -> list[dict[str, object]]:
+    for record in records:
+        record["source"] = UPLOAD_SOURCE
+    return records
+
+
 def _scan_payload(query: str, *, default_folder: Path | None, should_stop: Callable[[], bool] | None = None) -> dict[str, object]:
     """Handle scan request.
 
@@ -137,7 +157,11 @@ def _scan_payload(query: str, *, default_folder: Path | None, should_stop: Calla
     options = _web_options(parse_qs(query))
     try:
         run = scan_folder_run(folder, options, should_stop=should_stop)
-        return scan_payload(run.summary, run.items, run.thresholds, options)
+        payload = scan_payload(run.summary, run.items, run.thresholds, options)
+        # P1: the folder the row paths are relative to — the GUI sends it
+        # back with POST /api/report, which resolves rows against it only.
+        payload["scan_root"] = scan_root_text(folder)
+        return payload
     except (OSError, ValueError) as exc:
         # X4: missing folder, a file, unreadable — the Korean reason, 400.
         return ApiError(str(exc), 400)
@@ -729,6 +753,7 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
             items.append({"name": filename, "path": filename, "status": "failed", "error": failure_reason(exc)})
     if not items:
         return ApiError("업로드된 파일이 없습니다", 400)
+    _mark_uploads(items)  # P6
     return {
         "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "summary": _summarize_records(items, "upload"),
@@ -807,6 +832,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
     record = item.to_json()
     record["name"] = "pasted-text"
     record["path"] = "pasted-text"
+    record["source"] = UPLOAD_SOURCE  # P6: pasted text is no file of a read root
     return {
         "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "mode": "text",
@@ -839,7 +865,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     options = _web_options()
     thresholds = load_thresholds(options)
     if is_archive(filename):
-        items = _archive_upload_items(filename, suffix, payload, options=options, thresholds=thresholds)
+        items = _mark_uploads(_archive_upload_items(filename, suffix, payload, options=options, thresholds=thresholds))  # P6
         return {
             "schema_version": SCAN_JSON_SCHEMA_VERSION,
             "mode": "files",
@@ -876,6 +902,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
             Path(tmp_name).unlink(missing_ok=True)
     record["name"] = filename
     record["path"] = filename
+    record["source"] = UPLOAD_SOURCE  # P6
     return {
         "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "mode": "file",
@@ -1021,6 +1048,17 @@ REPORT_ROW_NOT_FOUND = "읽기 루트 안에서 파일을 찾을 수 없어 서�
 REPORT_ROW_LINK_ON_PATH = "경로 중간의 폴더가 심볼릭 링크라 따라가지 않았습니다 — 서버가 재분석하지 못했습니다"
 REPORT_ROW_NOT_DERIVED = "서버 재분석 결과에 이 항목이 없습니다(압축 파일 구성이 다름)"
 REPORT_ROW_FAILED = "서버 재분석 실패: {reason}"
+# P1 (round 8): rows are relative to the folder that was scanned, not to the
+# read root — a report of <root>/caseA signed <root>/target.png (a same-named
+# file of the root). The request names the scan folder (the scan response's
+# scan_root) and every row is resolved against it only.
+REPORT_SCAN_ROOT_REQUIRED = "스캔 폴더(scan_root)가 필요합니다 — 폴더 검사 응답의 scan_root 값을 그대로 보내십시오(행 경로는 그 폴더 기준입니다)"
+REPORT_SCAN_ROOT_NOT_STRING = "scan_root 값은 문자열이어야 합니다"
+REPORT_SCAN_ROOT_NOT_ABSOLUTE = "scan_root는 절대 경로여야 합니다: 「{value}」"
+REPORT_SCAN_ROOT_MISSING = "스캔 폴더를 찾을 수 없습니다: 「{value}」"
+REPORT_ROW_OUTSIDE_SCAN_ROOT = "스캔 폴더 밖의 경로라 서버가 재분석하지 않았습니다"
+# P6 (round 8): an upload row is never re-analyzed from the read root.
+REPORT_ROW_UPLOAD = "업로드 파일 — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다"
 
 
 def report_format(body: bytes, query_format: str | None) -> str | dict[str, object]:
@@ -1090,17 +1128,26 @@ class _ReportHasher:
     report), which yields the same bytes — and digest — the scan recorded.
     """
 
-    def __init__(self, roots: list[Path]) -> None:
+    def __init__(self, roots: list[Path], scan_root: Path | None = None) -> None:
         self.roots = roots
+        # P1: the scanned folder (inside a read root) the row paths are
+        # relative to; every row is resolved against it only.
+        self.scan_root = scan_root
         self._members: dict[str, dict[str, str]] = {}
         self._temp_dirs: list[Path] = []
+
+    def _candidates(self, path_text: str) -> list[tuple[Path, Path]]:
+        """(file, folder no link may sit under) pairs for a row path (P1: the scan root only)."""
+        p = Path(os.path.normpath(Path(path_text).expanduser()))
+        if self.scan_root is not None:
+            cand = p if p.is_absolute() else Path(os.path.normpath(self.scan_root / p))
+            return [(cand, self.scan_root)] if _is_within(cand, self.scan_root) else []
+        return [(p, root) for root in self.roots] if p.is_absolute() else [(root / p, root) for root in self.roots]
 
     def resolve(self, path_text: str) -> Path | None:
         from .evidence_statement import _no_symlink_on_path, _SymlinkRefused
 
-        p = Path(os.path.normpath(Path(path_text).expanduser()))
-        pairs = [(p, root) for root in self.roots] if p.is_absolute() else [(root / p, root) for root in self.roots]
-        for cand, root in pairs:
+        for cand, root in self._candidates(path_text):
             if not _is_within(cand, root):
                 continue
             try:
@@ -1125,8 +1172,9 @@ class _ReportHasher:
         """
         from .evidence_statement import _no_symlink_on_path, _SymlinkRefused
 
-        p = Path(os.path.normpath(Path(path_text).expanduser()))
-        pairs = [(p, root) for root in self.roots] if p.is_absolute() else [(root / p, root) for root in self.roots]
+        pairs = self._candidates(path_text)
+        if self.scan_root is not None and not pairs:
+            return REPORT_ROW_OUTSIDE_SCAN_ROOT
         for cand, root in pairs:
             if not _is_within(cand, root) or cand == root:
                 continue
@@ -1154,6 +1202,8 @@ class _ReportHasher:
         if path is None:
             return None
         root = next((r for r in self.roots if _is_within(path, r)), None)
+        if self.scan_root is not None and _is_within(path, self.scan_root):
+            root = self.scan_root
         try:
             return _compute_sha256(path, root)
         except _SymlinkRefused:
@@ -1249,6 +1299,51 @@ def _rederive_report_items(
     return derived, excluded
 
 
+def _upload_row_item(row: dict[str, Any]) -> Any:
+    """A posted upload row as a ScanItem for the unsigned-rows section (P6), or None without a path."""
+    from .report_items import ItemContractError, check_report_item
+    from .result_types import ScanItem
+
+    path = row.get("path") or row.get("name")
+    if not isinstance(path, str) or not path:
+        return None
+    try:
+        check_report_item(row)
+        return replace(_scan_item_from_json(row), path=path)
+    except (ItemContractError, TypeError, ValueError, KeyError, AttributeError):
+        # A failed upload row ({name, path, status, error}) is still listed (path only, never signed).
+        logger.info("upload row %s is listed without its result", path, exc_info=True)
+        raw_status = row.get("status")
+        status = raw_status if isinstance(raw_status, str) else "failed"
+        return ScanItem(path, Path(path).name or path, "unknown", status, 0)
+
+
+def _report_scan_root(value: object, roots: list[Path], *, required: bool) -> Path | None | dict[str, object]:
+    """P1: the scanned folder named by the request — absolute, existing, inside a read root.
+
+    Raises ReadRootDenied (403) for a folder outside the roots; returns an
+    error dict (400) when it is missing (with rows to re-analyze), not a
+    string, relative or not a folder.
+    """
+    if value is None or value == "":
+        return {"error": REPORT_SCAN_ROOT_REQUIRED} if required else None
+    if not isinstance(value, str):
+        return {"error": REPORT_SCAN_ROOT_NOT_STRING}
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        return {"error": REPORT_SCAN_ROOT_NOT_ABSOLUTE.format(value=value[:200])}
+    try:
+        resolved = candidate.resolve(strict=True)
+        is_dir = resolved.is_dir()
+    except (OSError, RuntimeError):
+        is_dir = False
+    if not is_dir:
+        return {"error": REPORT_SCAN_ROOT_MISSING.format(value=value[:200])}
+    if not any(_is_within(resolved, root) for root in roots):
+        raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE)
+    return resolved
+
+
 def _excluded_rows_json(excluded: list[tuple[Any, str]]) -> list[dict[str, object]]:
     """The signed body's record of rows it does not vouch for (X2): path, marker, reason — no client verdict."""
     return [{"path": item.path, "marker": UNSIGNED_CLIENT_ROW_MARKER, "reason": reason} for item, reason in excluded]
@@ -1298,7 +1393,16 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
         format_override = fmt_or_error
 
     items = []
+    uploads: list[tuple[Any, str]] = []
     for index, row in enumerate(raw_items):
+        if isinstance(row, dict) and row.get("source") == UPLOAD_SOURCE:
+            # P6: an upload row is listed as unsigned, never re-analyzed from
+            # a same-named file of the read root.
+            upload = _upload_row_item(row)
+            if upload is None:
+                return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason="path 값이 없습니다")}
+            uploads.append((upload, REPORT_ROW_UPLOAD))
+            continue
         try:
             # N11: a row that is not a scan-result item is refused (was
             # skipped, or rendered as a report about e.g. path 3).
@@ -1317,11 +1421,6 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     # escaping path stays unread. N2: a symbolic link — the file itself or
     # a folder between the root and it — is never followed.
     roots = _effective_roots(default_folder)
-    hasher = _ReportHasher(roots)
-    _resolve_item_path = hasher.resolve
-
-    def _path_allowed(path_text: str) -> bool:
-        return _resolve_item_path(path_text) is not None
 
     def _heatmap_allowed(path_text: str) -> bool:
         try:
@@ -1337,6 +1436,24 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
         heatmap_path = getattr(pixel, "heatmap_path", None)
         if heatmap_path and not _heatmap_allowed(str(heatmap_path)):
             raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE)
+
+    if format_override.lower() == "pdf":
+        from .pdf_backend import pymupdf_available
+
+        if not pymupdf_available():
+            # B8: the Korean 501 before any re-analysis work (nothing to render with).
+            return dict(PDF_REPORT_UNAVAILABLE_BODY)
+
+    # P1: rows are resolved against the scanned folder only (inside a read
+    # root; 403 outside) — required whenever a row is to be re-analyzed.
+    scan_root = _report_scan_root(data.get("scan_root"), roots, required=bool(items))
+    if isinstance(scan_root, dict):
+        return scan_root
+    hasher = _ReportHasher(roots, scan_root)
+    _resolve_item_path = hasher.resolve
+
+    def _path_allowed(path_text: str) -> bool:
+        return _resolve_item_path(path_text) is not None
 
     # X2: nothing the client says about a file is signed. Each row is
     # re-analyzed on the server (scan_file_run inside the roots — an archive
@@ -1367,6 +1484,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
         items, excluded = _rederive_report_items(items, hasher, options, server_thresholds)
     finally:
         hasher.close()
+    excluded = uploads + excluded  # P6: upload rows first, in posted order
     thresholds = server_thresholds
     coverage = dict(weights_coverage(options.resolved_models_dir()))
     excluded_rows = _excluded_rows_json(excluded)

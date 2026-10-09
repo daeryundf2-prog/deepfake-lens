@@ -162,6 +162,17 @@ def _raw_item(item: dict[str, Any], prefixes: tuple[str, ...] = ()) -> dict[str,
     return normalized
 
 
+def _upload_row(row: dict[str, Any]) -> dict[str, Any]:
+    """An upload row without its P6 ``source: "upload"`` marker (asserted present).
+
+    P6 (round 8): upload rows carry the marker so /api/report never
+    re-analyzes a same-named read-root file in their place; the rest of the
+    row is still the scan's raw row.
+    """
+    assert row.get("source") == "upload", row.get("source")
+    return {key: value for key, value in row.items() if key != "source"}
+
+
 def _without_band(row: dict[str, Any]) -> dict[str, Any]:
     """A scan row without the legacy result.band/band_label (B1: the
     standalone analysis_result rows drop them, D1); the dropped band must be
@@ -718,7 +729,7 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
                 with self.subTest(leg="/api/check (stdlib upload)", file=name):
                     rows = data["items"] if data.get("mode") == "files" else [data["item"]]
                     expected = {path: row for path, row in cli["items"].items() if path == name or path.startswith(name + "::")}
-                    self.assertEqual({row["path"]: _raw_item(row) for row in rows}, expected)
+                    self.assertEqual({row["path"]: _raw_item(_upload_row(row)) for row in rows}, expected)
                     self.assertEqual(data["thresholds"], cli["thresholds"])
 
     @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed — API-server leg of QA-OUT-4")
@@ -966,7 +977,7 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
         payload: dict[str, Any] = webapp_api._analyze_upload_payload(f"multipart/form-data; boundary={boundary}", body)
         cli = self._cli_payload(BENCHMARK.resolve())
         self.assertEqual(payload["thresholds"], cli["thresholds"])
-        uploaded = _raw_item(payload["items"][0])
+        uploaded = _raw_item(_upload_row(payload["items"][0]))
         scanned = _raw_item(next(item for item in cli["items"] if item["path"] == "ai-like-gradient.png"))
         self.assertEqual(uploaded, scanned)
 

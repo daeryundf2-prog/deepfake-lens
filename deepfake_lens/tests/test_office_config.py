@@ -130,7 +130,7 @@ class NoBuiltInLawFirmTest(_Isolated):
             with self.subTest(format=fmt):
                 request = urllib.request.Request(
                     f"http://127.0.0.1:{server.server_address[1]}/api/report?format={fmt}",
-                    data=json.dumps({"items": rows}).encode("utf-8"),
+                    data=json.dumps({"items": rows, "scan_root": str(self.case)}).encode("utf-8"),  # P1: the scanned folder
                     headers={"X-Deepfake-Lens-Client": "gui", "Content-Type": "application/json"},
                     method="POST",
                 )

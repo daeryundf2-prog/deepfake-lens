@@ -6,6 +6,7 @@ import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from deepfake_lens import api_server
@@ -116,8 +117,23 @@ class ForensicPdfReportTest(unittest.TestCase):
 @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed")
 class ForensicPdfApiEndpointTest(unittest.TestCase):
     def setUp(self) -> None:
+        import tempfile
+        from collections import OrderedDict
+
         from fastapi.testclient import TestClient
-        self.client = TestClient(api_server.create_app())
+
+        from deepfake_lens import webapp_api
+
+        # P1 (round 8): a report request names the scanned folder (scan_root,
+        # inside the read roots); the hand-made row is not a file there, so it
+        # is listed as unsigned and the PDF still renders.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.scan_root = str(Path(tmp.name).resolve())
+        roots: Any = patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
+        roots.start()
+        self.addCleanup(roots.stop)
+        self.client = TestClient(api_server.create_app(default_folder=Path(self.scan_root)))
 
     def _payload(self) -> dict[str, object]:
         # N11: /api/report now checks every row against the scan-result item
@@ -141,7 +157,7 @@ class ForensicPdfApiEndpointTest(unittest.TestCase):
             next_checks=[],
         )
         row = ScanItem("test/photo.jpg", "photo.jpg", "image", "analyzed", 100, result).to_json()
-        return {"items": [row], "format": "pdf", "exhibit_no": "갑 제3호증"}
+        return {"items": [row], "format": "pdf", "exhibit_no": "갑 제3호증", "scan_root": self.scan_root}
 
     # B8: pymupdf is the only PDF backend (no Latin-1 fallback) — this case runs in the venv_api / extras job.
     @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf not installed — the venv_api / extras run covers this")

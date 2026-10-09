@@ -491,7 +491,9 @@
                     await new Promise(res => setTimeout(res, 1500));
                 }
                 if (!data || data.error) { toast('오류: ' + (data && data.error ? data.error : '스캔 결과 없음'), true); return; }
-                lastScanRoot = folderPath;
+                // P1: the server's resolved scan folder — /api/report resolves
+                // every row against it (not against the read root).
+                lastScanRoot = data.scan_root || folderPath;
                 processResults(data);
                 toast(`분석 완료 — ${(data.items || []).length}개 파일`);
             } catch (error) {
@@ -579,6 +581,9 @@
                 thresholds: lastProvenance.thresholds || {},
                 options: lastScanOptions,
             };
+            // P1: rows are relative to the scanned folder; uploads carry
+            // source: "upload" and are never re-analyzed (P6).
+            if (lastScanRoot) out.scan_root = lastScanRoot;
             const map = { 'case-no': 'case_no', 'case-name': 'case_name',
                           'case-plaintiff': 'plaintiff', 'case-defendant': 'defendant',
                           'case-court': 'court', 'case-firm': 'law_firm',

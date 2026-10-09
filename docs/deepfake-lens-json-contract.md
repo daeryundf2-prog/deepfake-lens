@@ -50,6 +50,7 @@ per-file coverage record:
 | `summary` | stable | `BatchScanSummary` counts (see below). |
 | `coverage` | stable | Weight availability for the run (`weights_available`, `weights_total`, …). Not to be confused with per-item `result.coverage`. |
 | `thresholds` | stable | Threshold provenance (`source`, `provisional`, `measured`, …). A loaded profile also reports `in_sample` (cutoffs fitted on the rows they were evaluated on — G28), `note`, and `label` (`"in-sample(참고)"`, `"측정됨"`, `"잠정(미검증)"`). |
+| `scan_root` | stable | Web/API folder scans only (`/api/scan`, async job results, `/api/scan/stream`) — P1: the scanned folder, absolute and resolved; every row path is relative to it and `POST /api/report` takes it back as `scan_root`. Not in the CLI JSON (QA-IN-2: no absolute paths). |
 | `unrecorded_files` | stable | X1 "기록되지 않은 파일": files of the folder without an analysis result, by reason — `{total_files, cap_reached, reasons: [{code, label, count}], lines}`; codes `file_cap` (files beyond `--max-files`, no row), `subfolders` (folders a flat scan did not enter — counts folders), `subfolder_files` (P5: the regular files inside those folders, counted recursively, symlinks neither followed nor counted; per folder in `subfolders: [{path, files, complete}]`), `archive_rejected` (P5: archive members the extractor refused — bomb/budget, path escape, links, nesting depth — per category in `archive_rejected_by_category`; names and reasons stay on the container row's `archive_member` coverage), `symlink`, `duplicate`, `unsupported`, `other_skipped` (size cap, FIFO/device, cancelled), `failed` (P5: rows that failed without a result, e.g. an unreadable folder). `없음` only when every count is 0. `lines` is the Korean section text (headline + one line per non-zero reason). The same object is in the signed HTML/PDF report body, the evidence statement (`unrecorded_files`) and the legal report, and every rendering (console table, CSV `#` header line, HTML `<section id="unrecorded-files">`, forensic/scan PDF box, evidence statement MD/PDF section, legal-report text) prints it as a section titled `기록되지 않은 파일` — `없음` when nothing was left out. |
 | `items` | stable | Per-file scan items, conclusions first: manipulation evidence, then undetermined, then authenticity evidence, then unanalyzed rows. |
 
@@ -305,7 +306,13 @@ Rendered reports (`POST /api/report`, `--html-out`) additionally carry
 
 `POST /api/report` signs **server-derived results only** (X2). The posted
 rows are a request, not evidence: every row's file is located inside the
-read roots (never through a symbolic link) and re-analyzed on the server
+folder the request names as `scan_root` (P1 — required whenever a row is to
+be re-analyzed: the `scan_root` of the `/api/scan` / `/api/scan/stream`
+response, sent back unchanged; absolute, existing, inside the read roots —
+400 when missing, not a string, relative or not a folder, 403 outside the
+roots; row paths are resolved against it only, never against the read root,
+and a path that leaves it is excluded with `스캔 폴더 밖의 경로라 서버가
+재분석하지 않았습니다`), never through a symbolic link, and re-analyzed on the server
 with `analysis_api.scan_file_run` — the scan's own body, so an archive
 yields the same member/container rows and a link the same skipped row —
 using the request's optional `options` object (the `/api/scan` query keys:
@@ -327,9 +334,12 @@ statement PDF render those rows in a separate box titled
 `서명 제외(클라이언트 제공 결과)`: one line per row with the path, the
 conclusion the client sent and the reason, outside the table and outside
 the signature. `excluded_items` is `[]` when every row was re-derived (the
-CLI's reports have no such field). Upload results (`/api/analyze-upload`)
-are not kept on the server, so a report of them is entirely excluded —
-make signed reports from folder scans.
+CLI's reports have no such field). Upload results (`/api/analyze-upload`,
+`/api/check`) are not kept on the server: their rows carry `"source":
+"upload"` (P6) and a report lists every such row under `excluded_items` with
+`업로드 파일 — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다` —
+never re-analyzed from a same-named file of the read root. Make signed
+reports from folder scans.
 
 ### Signed evidence statement (증거설명서)
 

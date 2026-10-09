@@ -10,6 +10,7 @@
     "summary": { "$ref": "#/$defs/summary" },
     "items": { "type": "array", "items": { "$ref": "#/$defs/item" } },
     "unrecorded_files": { "$ref": "#/$defs/unrecorded_files" },
+    "scan_root": { "type": "string", "description": "Web/API folder scans only (P1): the scanned folder, absolute and resolved — every row path is relative to it. POST /api/report requires it back (scan_root) and resolves rows against it only." },
     "excluded_items": {
       "type": "array",
       "description": "POST /api/report signed bodies only (X2): posted rows the server could not re-analyze inside the read roots — not in items, not signed as results; path, marker and reason only (never the client's result).",
@@ -107,6 +108,7 @@
         "name": { "type": "string" },
         "kind": { "type": "string" },
         "status": { "type": "string" },
+        "source": { "const": "upload", "description": "P6: rows of /api/analyze-upload and /api/check (uploaded or pasted, never a file of a read root) — POST /api/report lists them under excluded_items and never re-analyzes or signs them." },
         "size_bytes": { "type": "integer", "minimum": 0 },
         "result": {
           "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/result" }],

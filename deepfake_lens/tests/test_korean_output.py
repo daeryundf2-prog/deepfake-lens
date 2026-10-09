@@ -897,6 +897,7 @@ class RenderedOutputsAreKoreanTest(unittest.TestCase):
             "items": [item.to_json() for item in self.items],
             "thresholds": _thresholds_json(self.thresholds),
             "coverage": {"weights_available": 0, "weights_total": 10},
+            "scan_root": str(self.folder),  # P1 (round 8): rows are relative to the scanned folder
         }, ensure_ascii=False).encode("utf-8")
         from unittest import mock
 

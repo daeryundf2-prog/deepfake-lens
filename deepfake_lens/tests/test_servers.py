@@ -1275,7 +1275,11 @@ class _ReportLegsFixture(unittest.TestCase):
         return legs
 
     def _body(self, **extra: object) -> bytes:
-        return json.dumps({"items": self.posted, **extra}).encode("utf-8")
+        return self._json({"items": self.posted, **extra})
+
+    def _json(self, payload: dict[str, Any]) -> bytes:
+        """P1 (round 8): a report request names the scanned folder (the scan's scan_root)."""
+        return json.dumps({"scan_root": str(self.folder), **payload}).encode("utf-8")
 
 
 class ReportEvidenceHashesBothServersTest(_ReportLegsFixture):
@@ -1318,7 +1322,7 @@ class ReportEvidenceHashesBothServersTest(_ReportLegsFixture):
         row = dict(self.rows["target.png"], path="linked/target.png", name="target.png")
         for name, make in self._legs():
             with self.subTest(leg=name):
-                status, _, raw = make()("/api/report?format=json", json.dumps({"items": [row]}).encode("utf-8"))
+                status, _, raw = make()("/api/report?format=json", self._json({"items": [row]}))
                 self.assertEqual(status, 200, raw[:300])
                 payload = json.loads(raw)
                 self.assertEqual(payload["items"], [])
@@ -1443,7 +1447,7 @@ class ReportSignsOnlyServerResultsTest(_ReportLegsFixture):
         from deepfake_lens.signing import REPORT_KEY_ENV, verify_report
 
         key = "x2-server-key-0123456789abcdef"
-        body = json.dumps({"items": [self._forged()], "format": "json"}).encode("utf-8")
+        body = self._json({"items": [self._forged()], "format": "json"})
         for name, make in self._legs():
             with self.subTest(leg=name), patch.dict(os.environ, {REPORT_KEY_ENV: key}):
                 status, _, raw = make()("/api/report", body)
@@ -1470,7 +1474,7 @@ class ReportSignsOnlyServerResultsTest(_ReportLegsFixture):
         for name, make in self._legs():
             post = make()
             with self.subTest(leg=name, format="json"):
-                status, _, raw = post("/api/report", json.dumps({"items": rows, "format": "json"}).encode("utf-8"))
+                status, _, raw = post("/api/report", self._json({"items": rows, "format": "json"}))
                 self.assertEqual(status, 200, raw[:300])
                 signed = json.loads(raw)
                 self.assertEqual([row["path"] for row in signed["items"]], ["target.png"])
@@ -1482,7 +1486,7 @@ class ReportSignsOnlyServerResultsTest(_ReportLegsFixture):
             with self.subTest(leg=name, format="html"):
                 from deepfake_lens.reports import extract_signed_report
 
-                status, _, raw = post("/api/report", json.dumps({"items": rows}).encode("utf-8"))
+                status, _, raw = post("/api/report", self._json({"items": rows}))
                 self.assertEqual(status, 200, raw[:300])
                 html = raw.decode("utf-8")
                 self.assertIn('id="unsigned-client-rows"', html)
@@ -1495,7 +1499,7 @@ class ReportSignsOnlyServerResultsTest(_ReportLegsFixture):
 
                 for fmt in ("pdf", "evidence"):
                     with self.subTest(leg=name, format=fmt):
-                        status, _, raw = post("/api/report", json.dumps({"items": rows, "format": fmt}).encode("utf-8"))
+                        status, _, raw = post("/api/report", self._json({"items": rows, "format": fmt}))
                         self.assertEqual(status, 200, raw[:300])
                         with pymupdf.open(stream=raw, filetype="pdf") as doc:
                             flat = "".join("".join(page.get_text() for page in doc).split())
@@ -1506,9 +1510,163 @@ class ReportSignsOnlyServerResultsTest(_ReportLegsFixture):
             post = make()
             for options, expected in (("deep", "options 값은 JSON 객체여야 합니다"), ({"pixel": "turbo"}, "pixel은 ")):
                 with self.subTest(leg=name, options=options):
-                    status, _, raw = post("/api/report", json.dumps({"items": [self._forged()], "options": options}).encode("utf-8"))
+                    status, _, raw = post("/api/report", self._json({"items": [self._forged()], "options": options}))
                     self.assertEqual(status, 400, raw[:300])
                     self.assertIn(expected, json.loads(raw)["error"])
+
+
+class ReportScanRootAndUploadsTest(unittest.TestCase):
+    """P1/P6 (round 8): /api/report resolved rows against the read root, not the
+    scanned folder — a report of <root>/caseA signed <root>/target.png (a
+    same-named file: its verdict and hash, no marker); an upload named like a
+    read-root file was re-analyzed and signed as that file. Rows are now
+    resolved against the request's scan_root only, and upload rows are never
+    re-analyzed or signed."""
+
+    HEADERS = {"X-Deepfake-Lens-Client": "gui", "Content-Type": "application/json"}
+
+    def setUp(self) -> None:
+        import hashlib
+        import tempfile
+
+        from deepfake_lens.tests.qa.test_qa_sys import _write_generator_png
+
+        roots = patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
+        roots.start()
+        self.addCleanup(roots.stop)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        base = Path(self._tmp.name).resolve()
+        self.root = base / "root"
+        self.case = self.root / "caseA"
+        self.case.mkdir(parents=True)
+        _write_png(self.root / "target.png", seed=1)  # same name, in the read root
+        _write_generator_png(self.case / "target.png")  # the file actually scanned
+        self.outside = base / "outside"
+        self.outside.mkdir()
+        self.case_sha = hashlib.sha256((self.case / "target.png").read_bytes()).hexdigest()
+        self.root_sha = hashlib.sha256((self.root / "target.png").read_bytes()).hexdigest()
+        webapp_api.configure_read_roots(self.root)
+
+    def _legs(self):
+        import threading
+        import urllib.error
+        import urllib.request
+
+        from deepfake_lens.webapp import build_server
+
+        server = build_server("127.0.0.1", 0, default_folder=self.root)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        port = server.server_address[1]
+
+        def web(method: str, path: str, body: bytes | None = None, ctype: str = "application/json") -> tuple[int, bytes]:
+            headers = dict(self.HEADERS, **{"Content-Type": ctype})
+            request = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=body, headers=headers, method=method)
+            try:
+                with urllib.request.urlopen(request, timeout=120) as response:
+                    return response.status, response.read()
+            except urllib.error.HTTPError as exc:
+                return exc.code, exc.read()
+
+        legs = [("web", web)]
+        if HAVE_FASTAPI:
+            from fastapi.testclient import TestClient
+
+            client = TestClient(api_server.create_app(default_folder=self.root))
+
+            def api(method: str, path: str, body: bytes | None = None, ctype: str = "application/json") -> tuple[int, bytes]:
+                response = client.request(method, path, content=body, headers={"host": "localhost", **self.HEADERS, "Content-Type": ctype})
+                return response.status_code, response.content
+
+            legs.append(("api", api))
+        return legs
+
+    def test_subfolder_scan_report_signs_the_subfolder_file(self) -> None:
+        from deepfake_lens.signing import REPORT_KEY_ENV, verify_report
+        from urllib.parse import quote
+
+        key = "p1-server-key-0123456789abcdef"
+        for name, call in self._legs():
+            with self.subTest(leg=name), patch.dict(os.environ, {REPORT_KEY_ENV: key}):
+                status, raw = call("GET", f"/api/scan?folder={quote(str(self.case))}&no_default_engine=true")
+                self.assertEqual(status, 200, raw[:300])
+                scan = json.loads(raw)
+                self.assertEqual(scan["scan_root"], str(self.case))
+                [row] = scan["items"]
+                self.assertEqual((row["path"], row["result"]["verdict_code"], row["sha256"]), ("target.png", "manipulation_evidence", self.case_sha))
+                body = {"items": scan["items"], "scan_root": scan["scan_root"], "format": "json", "options": {"no_default_engine": True}}
+                status, raw = call("POST", "/api/report", json.dumps(body).encode("utf-8"))
+                self.assertEqual(status, 200, raw[:300])
+                signed = json.loads(raw)
+                [signed_row] = signed["items"]
+                self.assertEqual(signed_row["sha256"], self.case_sha, "the subfolder file, never <root>/target.png")
+                self.assertNotEqual(signed_row["sha256"], self.root_sha)
+                self.assertEqual(signed_row["result"]["verdict_code"], "manipulation_evidence")
+                self.assertEqual(signed["excluded_items"], [])
+                self.assertTrue(verify_report(signed, key.encode()).verified)
+
+    def test_scan_root_is_required_absolute_existing_and_inside_the_roots(self) -> None:
+        from deepfake_lens.tests.qa.test_qa_sys import _write_generator_png
+
+        _write_generator_png(self.outside / "target.png")
+        row = webapp_api._scan_payload(f"folder={self.case}&no_default_engine=true", default_folder=self.root)["items"][0]
+        cases = [
+            (None, 400, webapp_api.REPORT_SCAN_ROOT_REQUIRED),
+            (3, 400, webapp_api.REPORT_SCAN_ROOT_NOT_STRING),
+            ("caseA", 400, "scan_root는 절대 경로여야 합니다"),
+            (str(self.root / "nope"), 400, "스캔 폴더를 찾을 수 없습니다"),
+            (str(self.outside), 403, "허용되지 않은 경로"),
+        ]
+        for name, call in self._legs():
+            for scan_root, code, message in cases:
+                with self.subTest(leg=name, scan_root=scan_root):
+                    body: dict[str, Any] = {"items": [row], "format": "json"}
+                    if scan_root is not None:
+                        body["scan_root"] = scan_root
+                    status, raw = call("POST", "/api/report", json.dumps(body).encode("utf-8"))
+                    self.assertEqual(status, code, raw[:300])
+                    self.assertIn(message, json.loads(raw)["error"])
+                    self.assertNotIn(self.case_sha, raw.decode("utf-8"))
+            with self.subTest(leg=name, escape="../target.png"):
+                escaping = dict(row, path="../target.png", name="target.png")
+                status, raw = call("POST", "/api/report", json.dumps({"items": [escaping], "scan_root": str(self.case), "format": "json"}).encode("utf-8"))
+                self.assertEqual(status, 200, raw[:300])
+                signed = json.loads(raw)
+                self.assertEqual(signed["items"], [])
+                self.assertEqual(signed["excluded_items"][0]["reason"], webapp_api.REPORT_ROW_OUTSIDE_SCAN_ROOT)
+                self.assertNotIn(self.root_sha, raw.decode("utf-8"))
+
+    def test_upload_named_like_a_root_file_is_never_signed(self) -> None:
+        """P6: the upload rows carry source "upload"; /api/report lists them as unsigned."""
+        boundary = "----p6upload"
+        data = (self.case / "target.png").read_bytes()
+        multipart = (
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"target.png\"\r\n"
+            "Content-Type: image/png\r\n\r\n"
+        ).encode() + data + f"\r\n--{boundary}--\r\n".encode()
+        for name, call in self._legs():
+            with self.subTest(leg=name):
+                status, raw = call("POST", "/api/analyze-upload", multipart, f"multipart/form-data; boundary={boundary}")
+                self.assertEqual(status, 200, raw[:300])
+                upload = json.loads(raw)
+                self.assertEqual([(row["path"], row["source"]) for row in upload["items"]], [("target.png", "upload")])
+                for scan_root in (None, str(self.root)):
+                    body: dict[str, Any] = {"items": upload["items"], "format": "json"}
+                    if scan_root:
+                        body["scan_root"] = scan_root
+                    status, raw = call("POST", "/api/report", json.dumps(body).encode("utf-8"))
+                    self.assertEqual(status, 200, raw[:300])
+                    signed = json.loads(raw)
+                    self.assertEqual(signed["items"], [], "the read root's target.png is never re-analyzed for an upload")
+                    self.assertEqual(signed["excluded_items"], [{
+                        "path": "target.png", "marker": webapp_api.UNSIGNED_CLIENT_ROW_MARKER, "reason": webapp_api.REPORT_ROW_UPLOAD,
+                    }])
+                    self.assertNotIn(self.root_sha, raw.decode("utf-8"))
+                status, raw = call("POST", "/api/report?format=html", json.dumps({"items": upload["items"]}).encode("utf-8"))
+                self.assertEqual(status, 200, raw[:300])
+                self.assertIn(f"[{webapp_api.UNSIGNED_CLIENT_ROW_MARKER}] target.png", raw.decode("utf-8"))
 
 
 class ReportItemContractMatchesSchemaTest(unittest.TestCase):
