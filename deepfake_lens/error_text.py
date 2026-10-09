@@ -371,8 +371,18 @@ def profile_names() -> frozenset[str]:
     return _PROFILE_NAMES
 
 
+_CHOICE_SET = re.compile(r"\{([\w-]+(?:,[\w-]+)+)\}")
+
+
+def _strip_choice_set(match: re.Match[str]) -> str:
+    """An argparse choice set ({build,split,verify}) is an identifier — unless it is words in braces."""
+    members = match.group(1).split(",")
+    return " " if sum(member.lower() in COMMON_ENGLISH_WORDS for member in members) < 2 else " ".join(members)
+
+
 def _strip_allowlisted(text: str) -> str:
-    """Remove whole identifier tokens of IDENTIFIER_ALLOWLIST and the packaged profile names."""
+    """Remove whole identifier tokens: choice sets, IDENTIFIER_ALLOWLIST and the packaged profile names."""
+    text = _CHOICE_SET.sub(_strip_choice_set, text)
     for token in sorted(IDENTIFIER_ALLOWLIST | profile_names(), key=len, reverse=True):
         if token in text:
             text = re.sub(rf"(?<![\w-]){re.escape(token)}(?![\w-])", " ", text)

@@ -371,9 +371,13 @@ class EnglishProseHeuristicTest(unittest.TestCase):
             "C2PA SDK 오류(Other): 클레임의 JUMBF 구조를 만들 수 없음(매니페스트 손상)",
             "실행 1·미실행 3·실패 0",
             "evil.zip::inner/a1111.png",
+            "사용법: deepfake-lens corpus {build,split,verify} …",  # argparse choice set (identifiers)
         ):
             with self.subTest(text=text):
                 self.assertIsNone(english_prose(text))
+        # a choice set is an identifier only as a whole: prose in braces is still English
+        self.assertIsNotNone(english_prose("결론 {do not use this}"))
+        self.assertIsNotNone(english_prose("결론 {not,for,court,use}"))
 
 
 def _scan_offenders(test: unittest.TestCase, folder: Path, options: AnalysisOptions) -> list[str]:
