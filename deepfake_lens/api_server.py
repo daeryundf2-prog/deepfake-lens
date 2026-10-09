@@ -225,6 +225,28 @@ def create_app(
         # parameter location and error type codes.
         return JSONResponse(validation_error_body(exc.errors()), status_code=422)
 
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    from .webapp_api import http_error_text
+
+    @app.exception_handler(StarletteHTTPException)
+    async def korean_http_error(request: Any, exc: Any) -> Any:
+        # N5: the framework's own 404/405 bodies were English ({"detail":
+        # "Not Found"}, "Method Not Allowed"); a detail the server wrote
+        # itself is already Korean and kept.
+        return JSONResponse(
+            {"detail": http_error_text(exc.status_code, exc.detail, method=request.method)},
+            status_code=exc.status_code,
+            headers=getattr(exc, "headers", None),
+        )
+
+    @app.exception_handler(Exception)
+    async def korean_server_error(request: Any, exc: Exception) -> Any:
+        # N5: an unhandled exception is a Korean 500 (Starlette's default is
+        # the English "Internal Server Error"); the traceback goes to the log.
+        logger.error("unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
+        return JSONResponse({"detail": http_error_text(500)}, status_code=500)
+
     def _denied() -> Any:
         return JSONResponse(read_root_denied_body(), status_code=403)
 

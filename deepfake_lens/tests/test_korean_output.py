@@ -956,6 +956,14 @@ class ApiErrorBodiesAreKoreanTest(unittest.TestCase):
             ("POST", "/api/report", {}, b"{}"),
             ("POST", "/api/report", {}, b'{"items": [{"path": "a"}], "thresholds": 3}'),
             ("POST", "/api/feedback", {}, b"{}"),
+            # N5: unknown routes and wrong methods — the frameworks' own
+            # bodies were English ("Not Found", "Method Not Allowed",
+            # "Unsupported method ('PUT')").
+            ("GET", "/api/no-such-route", {}, None),
+            ("POST", "/api/no-such-route", {}, b"{}"),
+            ("PUT", "/api/scan", {}, b"{}"),
+            ("DELETE", "/api/report", {}, None),
+            ("PATCH", "/api/scan", {}, b"{}"),
         ]
 
     def _check(self, leg: str, method: str, route: str, status: int, raw: bytes, offenders: list[str]) -> None:
@@ -1019,11 +1027,109 @@ class ApiErrorBodiesAreKoreanTest(unittest.TestCase):
             ("POST", "/api/check", {}, None),
             ("GET", "/api/review", {}, None),
             ("GET", "/api/jobs/nope", {}, None),
+            # N5: FastAPI-only shapes — a page outside /api/ and a GET on a POST-only route.
+            ("GET", "/no-such-page", {}, None),
+            ("GET", "/api/report", {}, None),
         ]
         for method, route, params, body in requests:
             response = client.request(method, route, params=params, content=body, headers=headers)
             self._check("api-serve", method, route, response.status_code, response.content, offenders)
         self.assertEqual(offenders, [], "\n".join(offenders))
+
+
+class HttpDefaultErrorsAreKoreanTest(unittest.TestCase):
+    """N5: the HTTP status the frameworks answer on their own — unknown route,
+    wrong method, unsupported method, unhandled exception — carries a Korean
+    JSON error on both servers (was FastAPI ``{"detail": "Not Found"}`` /
+    ``"Method Not Allowed"`` / ``"Internal Server Error"`` and the stdlib
+    501 ``"Unsupported method ('PUT')"``)."""
+
+    HEADERS = {"X-Deepfake-Lens-Client": "gui", "Content-Type": "application/json"}
+
+    def setUp(self) -> None:
+        from collections import OrderedDict
+        from unittest import mock
+
+        from deepfake_lens import webapp_api
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        patcher = mock.patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _assert_korean(self, status: int, expected_status: int, raw: bytes, field: str, contains: str) -> None:
+        self.assertEqual(status, expected_status, raw[:200])
+        text = json.loads(raw)[field]
+        self.assertIn(contains, text)
+        self.assertIsNone(english_prose(text), text)
+
+    def test_stdlib_server(self) -> None:
+        import threading
+        import urllib.error
+        import urllib.request
+        from unittest import mock
+
+        from deepfake_lens.webapp import build_server
+
+        server = build_server("127.0.0.1", 0, default_folder=self.root)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        port = server.server_address[1]
+
+        def call(method: str, route: str) -> tuple[int, bytes]:
+            body = b"{}" if method in ("POST", "PUT", "PATCH") else None
+            request = urllib.request.Request(f"http://127.0.0.1:{port}{route}", data=body, method=method, headers=self.HEADERS)
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    return response.status, response.read()
+            except urllib.error.HTTPError as exc:
+                return exc.code, exc.read()
+
+        for method in ("GET", "POST"):
+            with self.subTest(method=method):
+                status, raw = call(method, "/api/no-such-route")
+                self._assert_korean(status, 404, raw, "error", "찾을 수 없는 경로")
+        for method in ("PUT", "DELETE", "PATCH"):
+            with self.subTest(method=method):
+                status, raw = call(method, "/api/scan")
+                self._assert_korean(status, 501, raw, "error", f"지원하지 않는 요청 메서드입니다: {method}")
+        with mock.patch("deepfake_lens.webapp._stats_payload", side_effect=RuntimeError("boom")):
+            with self.assertLogs("deepfake_lens.webapp", level="ERROR"):
+                status, raw = call("GET", "/api/stats")
+        self._assert_korean(status, 500, raw, "error", "서버 내부 오류")
+        self.assertNotIn(b"boom", raw)
+
+    @unittest.skipUnless(_have("fastapi", "httpx"), "fastapi + httpx not installed")
+    def test_fastapi_server(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from deepfake_lens.api_server import create_app
+
+        app = create_app(default_folder=self.root)
+
+        @app.get("/api/__n5_crash")
+        async def crash() -> None:
+            raise RuntimeError("boom")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        headers = {"host": "localhost", **self.HEADERS}
+        cases = (
+            ("GET", "/api/no-such-route", 404, "찾을 수 없는 경로"),
+            ("GET", "/no-such-page", 404, "찾을 수 없는 경로"),
+            ("GET", "/api/report", 405, "허용되지 않는 요청 메서드입니다: GET"),
+            ("PUT", "/api/scan", 405, "허용되지 않는 요청 메서드입니다: PUT"),
+            ("DELETE", "/api/report", 405, "허용되지 않는 요청 메서드입니다: DELETE"),
+            ("POST", "/api/classify", 422, "요청 매개변수 오류"),
+            ("GET", "/api/__n5_crash", 500, "서버 내부 오류"),
+        )
+        for method, route, status, contains in cases:
+            with self.subTest(method=method, route=route):
+                response = client.request(method, route, headers=headers)
+                self._assert_korean(response.status_code, status, response.content, "detail", contains)
+                self.assertNotIn(b"boom", response.content)
 
 
 def _doctor_text_fields(node: Any, path: str = "", key: str | None = None) -> Iterator[tuple[str, str]]:

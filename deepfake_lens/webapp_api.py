@@ -346,6 +346,51 @@ _READ_ROOTS_MAX = 64
 READ_ROOT_DENIED_MESSAGE = "허용되지 않은 경로"
 
 
+# N5: the frameworks' own error bodies were English — FastAPI {"detail":
+# "Not Found"} / "Method Not Allowed", the stdlib server's 501 "Unsupported
+# method ('PUT')". Both servers map every status they answer without a
+# Korean message of their own to this text.
+HTTP_ERROR_TEXT_KO: dict[int, str] = {
+    400: "잘못된 요청입니다",
+    401: "인증이 필요합니다",
+    403: "허용되지 않은 요청입니다",
+    404: "찾을 수 없는 경로입니다",
+    405: "이 경로에서 허용되지 않는 요청 메서드입니다",
+    408: "요청 시간이 초과되었습니다",
+    411: "요청 본문 길이(Content-Length)가 필요합니다",
+    413: "요청 본문이 너무 큽니다",
+    414: "요청 주소가 너무 깁니다",
+    415: "지원하지 않는 요청 본문 형식입니다",
+    422: "요청 매개변수 오류입니다",
+    429: "요청이 너무 많습니다 — 잠시 후 다시 시도하십시오",
+    431: "요청 헤더가 너무 큽니다",
+    500: "서버 내부 오류가 발생했습니다 — 상세는 서버 로그를 확인하십시오",
+    501: "지원하지 않는 요청 메서드입니다",
+    503: "서버를 일시적으로 사용할 수 없습니다",
+    505: "지원하지 않는 HTTP 버전입니다",
+}
+HTTP_ERROR_TEXT_FALLBACK = "요청을 처리할 수 없습니다 (HTTP {code})"
+
+
+def _has_hangul(text: str) -> bool:
+    return any("\uac00" <= ch <= "\ud7a3" for ch in text)
+
+
+def http_error_text(code: int, message: object = None, *, method: str | None = None) -> str:
+    """The Korean error text for an HTTP status (N5).
+
+    A message the server wrote itself (it carries Hangul) is kept; a
+    framework's English reason ("Not Found", "Unsupported method ('PUT')")
+    is replaced by the Korean text for the status. 405/501 name the method.
+    """
+    if isinstance(message, str) and message.strip() and _has_hangul(message):
+        return message
+    text = HTTP_ERROR_TEXT_KO.get(int(code), HTTP_ERROR_TEXT_FALLBACK.format(code=int(code)))
+    if method and int(code) in (405, 501):
+        text = f"{text}: {method.upper()}"
+    return text
+
+
 class ReadRootDenied(PermissionError):
     """The requested path is outside every operator-registered read root.
 

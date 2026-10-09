@@ -97,6 +97,14 @@ pattern; `{"items": [{"path": 3}]}` is refused, never rendered),
 evidence-statement PDF failure is 500, a missing pymupdf 501;
 a refused `/api/heatmap` / `/api/preview` path answers 403 with the body
 `허용되지 않은 경로` (header `X-Deepfake-Lens-Error: forbidden`).
+N5: statuses the frameworks answer on their own are Korean JSON too, on both
+servers (`webapp_api.http_error_text`): an unknown route is 404
+`찾을 수 없는 경로입니다`, a wrong method on api-serve 405
+`이 경로에서 허용되지 않는 요청 메서드입니다: PUT`, an unsupported method on the
+stdlib server 501 `지원하지 않는 요청 메서드입니다: PUT`, and an unhandled
+exception 500 `서버 내부 오류가 발생했습니다 — 상세는 서버 로그를 확인하십시오`
+(traceback in the server log only). api-serve puts the text in `detail`, the
+stdlib server in `error`.
 
 Every parameter that names a server-side path — `file_path`
 (`/api/analyze/image|audio|face|forensic`, `/api/classify`, `/api/check`,

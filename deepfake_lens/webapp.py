@@ -25,6 +25,7 @@ from .webapp_api import (
     report_http_response,
     ReadRootDenied,
     configure_read_roots,
+    http_error_text,
     read_root_denied_body,
     _scan_cancel_payload,
     _scan_job_start,
@@ -167,7 +168,9 @@ def build_server(
             """
             del explain
             self.close_connection = True
-            text = message or self.responses.get(code, ("", ""))[0] or "요청을 처리할 수 없습니다"
+            # N5: the stdlib's own reasons ("Unsupported method ('PUT')",
+            # "Bad request syntax …") are English — every status gets Korean.
+            text = http_error_text(code, message, method=getattr(self, "command", None))
             try:
                 self._send_json({"error": text}, status=code)
             except OSError:
@@ -217,6 +220,9 @@ def build_server(
                 self._route_get(parsed)
             except ReadRootDenied:
                 self._send_json(read_root_denied_body(), status=403)
+            except Exception:  # noqa: BLE001 - N5: a crash is a Korean 500, not a dropped connection
+                logger.exception("GET %s failed", parsed.path)
+                self.send_error(500)
 
         def _route_get(self, parsed: Any) -> None:
             # API endpoints
@@ -281,6 +287,9 @@ def build_server(
                 self._route_post(parsed)
             except ReadRootDenied:
                 self._send_json(read_root_denied_body(), status=403)
+            except Exception:  # noqa: BLE001 - N5: a crash is a Korean 500, not a dropped connection
+                logger.exception("POST %s failed", parsed.path)
+                self.send_error(500)
 
         def _route_post(self, parsed: Any) -> None:
             if parsed.path == "/api/analyze-upload":
