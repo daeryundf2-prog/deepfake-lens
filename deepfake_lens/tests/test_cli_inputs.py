@@ -6,15 +6,23 @@ with an English traceback (exit 1); ``audio``, ``face``, ``video-analysis``,
 ``dataset``… printed a report about nothing with exit 0; ``perf <file>``
 raised ``ScanFolderError``. The matrix below runs every declared input of
 every subcommand (``cli_inputs.INPUT_SPECS`` plus the shared configuration
-options) in a subprocess with a nonexistent path, a folder where a file is
-expected, a file where a folder is expected and an unsupported extension,
-and requires exit 2 (verify-report: its usage code 4), a Korean stderr
-starting with "오류:", no traceback and nothing on stdout.
+options) with a nonexistent path, a folder where a file is expected, a file
+where a folder is expected and an unsupported extension, and requires exit 2
+(verify-report: its usage code 4), a Korean stderr starting with "오류:", no
+traceback and nothing on stdout.
+
+Y12 (round 7): the matrix ran ~190 subprocesses (34.7 s). It now calls
+``cli.main`` in process with stdout/stderr captured — the input check runs
+before any work, so a bad path never gets past argument parsing — and a
+small sample still runs as real subprocesses so the process-level contract
+(exit status, no traceback on the real stderr) stays covered.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import os
 import subprocess
 import sys
@@ -45,6 +53,8 @@ OUTPUT_DESTS = frozenset({
 # --key-file is checked by its own rule (N8: missing/empty key file -> exit 2).
 SEPARATELY_CHECKED_DESTS = frozenset({"key_file"})
 WORKERS = 8
+# Y12: rows of the matrix that also run as real subprocesses (process-level check).
+SUBPROCESS_SAMPLE = 6
 
 
 class Fixtures:
@@ -217,29 +227,73 @@ class InputPathMatrixTest(unittest.TestCase):
             capture_output=True, text=True, env=env, timeout=300, cwd=str(self.fx.root),
         )
 
+    def _run_in_process(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
+        """Y12: ``cli.main(argv)`` with stdout/stderr captured — same contract, no interpreter start."""
+        from deepfake_lens import cli
+
+        out, err = io.StringIO(), io.StringIO()
+        saved = {key: os.environ.get(key) for key in ("HOME", "DEEPFAKE_LENS_LOG_DIR", "DEEPFAKE_LENS_REPORT_KEY")}
+        os.environ["HOME"] = str(self.fx.home)
+        os.environ["DEEPFAKE_LENS_LOG_DIR"] = str(self.fx.home / "logs")
+        os.environ.pop("DEEPFAKE_LENS_REPORT_KEY", None)
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                try:
+                    code = cli.main(list(argv))
+                except SystemExit as exc:  # argparse usage errors
+                    code = exc.code if isinstance(exc.code, int) else 2
+                except Exception:  # noqa: BLE001 - reported as a traceback like the subprocess run
+                    import traceback
+
+                    err.write("Traceback (most recent call last):\n" + traceback.format_exc())
+                    code = 1
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+        return subprocess.CompletedProcess(argv, code, out.getvalue(), err.getvalue())
+
+    def _problems(self, key: str, case: str, result: subprocess.CompletedProcess[str]) -> list[str]:
+        expected_rc = 4 if key == "verify-report" else 2
+        stderr = result.stderr.strip()
+        problems = []
+        if result.returncode != expected_rc:
+            problems.append(f"exit {result.returncode} (기대 {expected_rc})")
+        if not stderr.startswith("오류:"):
+            problems.append(f"stderr {stderr[:120]!r}")
+        elif EXPECTED_MESSAGE[case] not in stderr:
+            problems.append(f"메시지 {stderr[:120]!r}")
+        if "Traceback" in result.stderr:
+            problems.append("traceback")
+        if result.stdout.strip():
+            problems.append(f"stdout {result.stdout.strip()[:80]!r}")
+        return problems
+
     def test_every_input_of_every_subcommand(self) -> None:
         """N4/N7: exit 2 (verify-report 4), "오류: …" on stderr, no traceback, no stdout report."""
         rows = self._matrix()
         self.assertGreater(len(rows), 100)
-        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-            results = list(pool.map(lambda row: self._run(row[3]), rows))
         failures: list[str] = []
-        for (key, attr, case, argv), result in zip(rows, results):
-            expected_rc = 4 if key == "verify-report" else 2
-            stderr = result.stderr.strip()
-            problems = []
-            if result.returncode != expected_rc:
-                problems.append(f"exit {result.returncode} (기대 {expected_rc})")
-            if not stderr.startswith("오류:"):
-                problems.append(f"stderr {stderr[:120]!r}")
-            elif EXPECTED_MESSAGE[case] not in stderr:
-                problems.append(f"메시지 {stderr[:120]!r}")
-            if "Traceback" in result.stderr:
-                problems.append("traceback")
-            if result.stdout.strip():
-                problems.append(f"stdout {result.stdout.strip()[:80]!r}")
+        for key, attr, case, argv in rows:
+            problems = self._problems(key, case, self._run_in_process(argv))
             if problems:
                 failures.append(f"{key} {attr} [{case}] {' '.join(argv)}: {'; '.join(problems)}")
+        self.assertEqual(failures, [], "\n".join(failures))
+
+    def test_matrix_sample_as_subprocesses(self) -> None:
+        """Y12: an evenly spread sample of the matrix as real processes (exit status, real stderr)."""
+        rows = self._matrix()
+        step = max(1, len(rows) // SUBPROCESS_SAMPLE)
+        sample = rows[::step][:SUBPROCESS_SAMPLE]
+        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+            results = list(pool.map(lambda row: self._run(row[3]), sample))
+        failures = [
+            f"{key} {attr} [{case}] {' '.join(argv)}: {'; '.join(problems)}"
+            for (key, attr, case, argv), result in zip(sample, results)
+            if (problems := self._problems(key, case, result))
+        ]
         self.assertEqual(failures, [], "\n".join(failures))
 
     def test_every_path_input_of_the_parser_is_declared(self) -> None:
