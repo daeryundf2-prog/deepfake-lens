@@ -208,8 +208,14 @@ KNOWN_ACRONYMS = frozenset("""
 KNOWN_PROPER_NOUNS = (
     "Stable Diffusion", "Hugging Face", "Community Forensics", "Deepfake Lens", "Adobe Firefly", "Adobe Photoshop",
     "Microsoft Office Word", "Microsoft Word", "Microsoft Office", "Google Gemini", "Apple Silicon", "Content Credentials",
-    "Hemg", "Gustking", "In the Wild",
+    "Hemg", "Gustking", "In the Wild", "NAVER Corp",
 )
+# Python modules, packages and external tools named in dependency messages
+# (doctor, install hints) — identifiers, never prose.
+KNOWN_MODULE_NAMES = frozenset("""
+    torch torchvision transformers onnxruntime numpy librosa soundfile speechbrain mediapipe timm cv2 PIL Pillow
+    c2pa pymupdf fitz fastapi uvicorn syhwp ffmpeg ffprobe opencv scipy sklearn
+""".split())
 _IDENTIFIER_TOKENS: tuple[re.Pattern[str], ...] = (
     re.compile("\u300c[^\u300d]*\u300d"),  # metadata values copied verbatim from the evidence file (corner brackets)
     re.compile(r"https?://\S+"),  # URLs
@@ -234,6 +240,7 @@ _IDENTIFIER_TOKENS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b[A-Za-z]+(?:-[A-Za-z0-9]+)+\b"),  # hyphenated identifiers (roberta-base)
     re.compile(r"\b[0-9a-fA-F]{8,}\b"),  # hex digests / ids
     re.compile(r"\b(?:pin|sha256)\b"),
+    re.compile(r"\b(?:" + "|".join(sorted(KNOWN_MODULE_NAMES)) + r")\b"),
 )
 _ACRONYM = re.compile(r"\b[A-Z]{2,}s?\b")
 

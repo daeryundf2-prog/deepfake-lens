@@ -28,7 +28,7 @@
   "notes": [
     "런타임 'aasist'는 scripts/run_aasist.py에 위임합니다. clovaai/aasist의 models/AASIST.py(sinc-conv 전단 + 잔차 블록 6개 + 분광-시간 그래프 어텐션)를 충실히 재구현했으며 속성 이름이 공식 state dict와 일치합니다.",
     "오디오는 sample_rate의 모노로 디코딩한 뒤 window_samples(64600 ≈ 4.04초, 업스트림 평가 길이) 크기의 겹치지 않는 균등 창으로 채점합니다. 파일을 넘는 창은 건너뛰고 짧은 파일은 업스트림 pad()와 똑같이 반복 패딩합니다.",
-    "모델 로짓 순서는 (spoof=0, bonafide=1)입니다. 업스트림 평가는 index 1을 bonafide 점수로 읽으므로, score_index 0에 softmax를 적용하면 0–100 척도의 spoof/fake 확률이 됩니다.",
+    "모델 로짓 순서는 (spoof=0, bonafide=1)입니다. 업스트림 평가는 인덱스 1을 `bonafide` 점수로 읽으므로, score_index 0에 softmax를 적용하면 0–100 척도의 spoof/fake 확률이 됩니다.",
     "체크포인트 경로는 이 프로필 디렉터리(models/) 기준 상대 경로이며 .gitignore로 git에서 제외됩니다."
   ],
   "license": "MIT",

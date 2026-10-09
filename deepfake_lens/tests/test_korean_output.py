@@ -14,29 +14,37 @@ experts' bibliographic ``reference`` (paper titles, cited as published) are
 not prose and are not checked; metadata values copied from the file
 (``document_metadata``, ``docx.application`` …) are evidence, shown as is.
 
-The heuristic (round 3): every string is split into sentences (on ``.``,
-``;`` and newlines) and each sentence is checked on its own — a string
-with Hangul in it may still carry an English sentence, so Hangul exempts
-nothing. A sentence fails when, after the allowed tokens are removed, it
-still has three consecutive ASCII words (two or more letters, or the
-one-letter words ``a``/``I``), or three consecutive ALL-CAPS words. Allowed
-tokens are a tight list of things that legitimately stay in English, and
-none of them can carry a sentence:
+The heuristic (round 4, S8) is ``error_text.english_prose`` — the same
+detector that keeps untranslated library messages out of coverage reasons
+(B6). Every string is split into sentences (on ``.``, ``!``, ``?``, ``;``
+and newlines) and each sentence is checked on its own — Hangul elsewhere in
+the string exempts nothing. Identifier tokens are removed first; a sentence
+fails when two English words remain next to each other. A contraction
+(``Don't``) is one word; numeric and slash tokens (``1/4``, ``3/4``) are
+removed so they cannot split a run; an ALL-CAPS word is an acronym only when
+it is in the closed ``KNOWN_ACRONYMS`` list, otherwise it is a word.
 
-- identifiers — ``snake_case``, ``camelCase``/``PascalCase`` with an inner
-  capital, ALL-CAPS acronyms (never an English function word such as NOT,
-  AND, THE, USE), tokens containing a digit, hyphenated compounds
-  (``roberta-base``), ``key=value``, ``--cli-flags``;
-- `` `code` `` spans that look like code: a shell command (``pip …``,
-  ``python …``, ``deepfake-lens …``), at most two words, or containing
-  code punctuation — a backticked English sentence is still checked;
-- URLs and model ids / paths (anything with a ``/``);
-- exception class names (``…Error``/``…Exception``/``…Warning``);
-- file names (``name.ext``), ``sha256``, ``pin``;
+The allow-list is identifiers only, and none of them can carry a sentence:
+
+- ``snake_case``, ``camelCase``/``PascalCase`` with an inner capital,
+  tokens containing a digit, hyphenated compounds (``roberta-base``),
+  colon-joined ids (``model:<name>``), ``key=value``, ``--cli-flags``,
+  hex digests;
+- `` `code` `` spans that look like code (a shell command, at most two
+  tokens, or code punctuation) — a backticked English sentence is checked;
+- URLs, model ids and paths (anything with a ``/``), file names
+  (``name.ext``), exception class names (``…Error``/``…Exception``);
+- the closed lists in error_text: acronyms, Python module / tool names and
+  product / generator names (``Stable Diffusion``, ``Deepfake Lens`` …);
 - values copied verbatim from the evidence file's metadata, which the tool
   always prints inside ``「…」`` — and only there: the package source may
   open ``「`` solely around an interpolated value (``「{value}」``), never
   around literal text (SourceQuotesTest).
+
+Coverage (S8): scan JSON text fields, packaged profiles, and the rendered
+outputs — HTML report text (tags stripped), forensic PDF text (pymupdf),
+legal-report text, evidence statement Markdown, the doctor table and its
+JSON, the CLI scan table, and the gui.js / gui.html strings.
 
 The mixed fixture covers images with camera EXIF / generator EXIF / XMP
 DigitalSourceType / Photoshop CreatorTool / A1111 and NovelAI PNG text,
@@ -60,6 +68,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from deepfake_lens.analysis_api import AnalysisOptions, scan_folder, scan_payload
+from deepfake_lens.error_text import english_prose as shared_english_prose
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = REPO_ROOT / "deepfake_lens" / "models"
@@ -69,44 +78,8 @@ CHECKED_KEYS = frozenset({
     "source_attribution_label", "warnings", "message", "signals", "evidence_chain",
 })
 
-SENTENCE_SPLIT = re.compile(r"[.;\n]+")
-# Three consecutive ASCII words of >= 2 letters, or the articles a / I
-# (spaces or light punctuation between).
-_WORD = r"\b(?:[A-Za-z]{2,}|[aAI])\b"
-_GAP = r"[ ,:'\"()\[\]\-–—]+"
-ENGLISH_PROSE = re.compile(rf"{_WORD}(?:{_GAP}{_WORD}){{2,}}")
-# Three consecutive ALL-CAPS words: shouted prose, checked before acronyms are removed.
-ALL_CAPS_PROSE = re.compile(rf"\b[A-Z]{{2,}}\b(?:{_GAP}\b[A-Z]{{2,}}\b){{2,}}")
-# English function words that are never an acronym, even in capitals.
-_FUNCTION_WORDS = (
-    "A|AN|AND|ARE|AS|AT|BE|BUT|BY|DO|FOR|FROM|HAS|IF|IN|IS|IT|NO|NOT|OF|ON|OR|SO|THE|THIS|TO|USE|WAS|WITH"
-)
-# A backticked span counts as code only when it looks like code.
-_CODE_SPAN = re.compile(r"`((?:pip|python|deepfake-lens|experiments/)[^`]*|[^`\s]+(?: [^`\s]+)?|[^`]*[-_/.=<>:\[\]{}][^`]*)`")
-_QUOTED = (
-    re.compile(r"「[^」]*」"),  # metadata values copied verbatim from the evidence file
-    re.compile(r"https?://\S+"),  # URLs
-    _CODE_SPAN,  # code / parameter names / shell commands
-)
-ALLOWED_TOKENS = (
-    *_QUOTED,
-    re.compile(r"[\w.\-]+/[\w.\-/]+"),  # model ids and paths: org/name, models/x.json, <root>/a
-    re.compile(
-        r"\b[\w\-]+\.(?:py|json|md|pth|pt|onnx|torchscript|png|jpe?g|gif|webp|bmp|tiff?|heic|txt|wav|mp3|m4a|flac|ogg|"
-        r"mp4|mov|mkv|avi|webm|zip|tar|gz|7z|rar|xml|html|pdf|csv|docx|xlsx|pptx|hwpx?|doc|xls|ppt|log)\b",
-        re.IGNORECASE,
-    ),  # file names
-    re.compile(r"\b_?[A-Z][A-Za-z0-9_]*(?:Error|Exception|Warning)\b"),  # exception classes
-    re.compile(r"--[a-z][\w-]*"),  # CLI flags
-    re.compile(r"\b\w+=\S+"),  # key=value
-    re.compile(r"\b\w*_\w*\b"),  # snake_case identifiers
-    re.compile(r"\b[a-z]+[A-Z][A-Za-z0-9]*\b"),  # camelCase identifiers
-    re.compile(r"\b[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*\b"),  # PascalCase identifiers / product ids (EfficientNet)
-    re.compile(rf"\b(?!(?:{_FUNCTION_WORDS})\b)[A-Z0-9]{{2,}}s?\b"),  # acronyms (EXIF, JPEG, C2PA, AUROC)
-    re.compile(r"\b\w*\d\w*\b"),  # tokens with a digit (B0, v2, Wav2Vec2)
-    re.compile(r"\b[A-Za-z]+(?:-[A-Za-z0-9]+)+\b"),  # hyphenated identifiers (roberta-base)
-    re.compile(r"\b(?:sha256|pin)\b"),
-)
+# S8: one detector for the tests and for error_text's runtime fallback.
+english_prose = shared_english_prose
 
 # R4: examples of English that reached the examiner in round 3 — the
 # heuristic must flag every one of them.
@@ -128,22 +101,15 @@ AUDIT_NEGATIVES = (
 )
 
 
-def english_prose(text: str) -> str | None:
-    """The first English run in any sentence of ``text``, or None (R4 heuristic)."""
-    unquoted = text
-    for pattern in _QUOTED:
-        unquoted = pattern.sub(" ", unquoted)
-    shouted = ALL_CAPS_PROSE.search(unquoted)
-    if shouted:
-        return shouted.group(0)
-    stripped = text
-    for pattern in ALLOWED_TOKENS:
-        stripped = pattern.sub(" ", stripped)
-    for sentence in SENTENCE_SPLIT.split(stripped):
-        match = ENGLISH_PROSE.search(sentence)
-        if match:
-            return match.group(0)
-    return None
+# S8: the round-4 verifier's bypasses of the round-3 heuristic — each must
+# be flagged (two-word sentences, shouted words, contractions, numeric and
+# slash tokens between words).
+S8_NEGATIVES = (
+    "Uncalibrated score. Treat cautiously. Not proof.",
+    "UNVERIFIED SCORE, ignore it",
+    "Don't trust it! Isn't proof!",
+    "Caught 1/4 DALL-E fakes, missed 3/4",
+)
 
 
 def checked_strings(node: Any, path: str = "", key: str | None = None) -> Iterator[tuple[str, str]]:
@@ -316,6 +282,16 @@ class EnglishProseHeuristicTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNotNone(english_prose(text))
 
+    def test_round4_bypasses_fail(self) -> None:
+        """S8: the four strings that passed the round-3 heuristic."""
+        for text in S8_NEGATIVES:
+            with self.subTest(text=text):
+                self.assertIsNotNone(english_prose(text))
+        # Each sentence on its own, too.
+        for text in ("Not proof.", "Treat cautiously!", "Isn't proof?", "Don't trust", "SCORE IGNORED", "UNVERIFIED score"):
+            with self.subTest(text=text):
+                self.assertIsNotNone(english_prose(text))
+
     def test_the_verifiers_examples_fail(self) -> None:
         for text in VERIFIER_EXAMPLES:
             with self.subTest(text=text[:60]):
@@ -338,6 +314,12 @@ class EnglishProseHeuristicTest(unittest.TestCase):
             "numpy가 설치되어 있지 않습니다. `pip install numpy`로 설치하세요.",
             "EXIF·XMP·C2PA 메타데이터가 없습니다.",
             "AUROC 95% CI 하한 0.85 미충족",
+            "Stable Diffusion / A1111 추정",
+            "[ MISS] fake-audio (fake-audio-runtime.json)",
+            "의존성: import 가능 (cv2, onnxruntime, PIL, numpy)",
+            "C2PA SDK 오류(Other): 클레임의 JUMBF 구조를 만들 수 없음(매니페스트 손상)",
+            "실행 1·미실행 3·실패 0",
+            "evil.zip::inner/a1111.png",
         ):
             with self.subTest(text=text):
                 self.assertIsNone(english_prose(text))
@@ -500,6 +482,252 @@ class CliMessagesAreKoreanTest(unittest.TestCase):
         from deepfake_lens.evidence_statement import PDF_DEPENDENCY_MESSAGE
 
         self.assertIsNone(english_prose(PDF_DEPENDENCY_MESSAGE))
+
+
+def _html_visible_text(html: str) -> str:
+    """Visible text of an HTML document (script/style dropped, one line per text node)."""
+    from html.parser import HTMLParser
+
+    class _Text(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self.skip = 0
+            self.parts: list[str] = []
+
+        def handle_starttag(self, tag: str, attrs: Any) -> None:
+            if tag in ("script", "style"):
+                self.skip += 1
+
+        def handle_endtag(self, tag: str) -> None:
+            if tag in ("script", "style"):
+                self.skip -= 1
+
+        def handle_data(self, data: str) -> None:
+            if not self.skip and data.strip():
+                self.parts.append(data.strip())
+
+    parser = _Text()
+    parser.feed(html)
+    return "\n".join(parser.parts)
+
+
+def js_string_literals(source: str) -> Iterator[tuple[int, str]]:
+    """(line, text) of every string literal in JavaScript ``source``.
+
+    Comments are skipped; a template literal yields its static text with each
+    ``${…}`` expression removed (nested strings and templates inside the
+    expression are scanned as literals of their own).
+    """
+    i, n = 0, len(source)
+
+    def line_of(pos: int) -> int:
+        return source.count("\n", 0, pos) + 1
+
+    def read_quoted(pos: int, quote: str) -> tuple[str, int]:
+        out = []
+        pos += 1
+        while pos < n and source[pos] != quote:
+            if source[pos] == "\\":
+                out.append(source[pos:pos + 2])
+                pos += 2
+                continue
+            out.append(source[pos])
+            pos += 1
+        return "".join(out), pos + 1
+
+    def read_template(pos: int) -> tuple[str, int, list[tuple[int, str]]]:
+        out: list[str] = []
+        nested: list[tuple[int, str]] = []
+        pos += 1
+        while pos < n and source[pos] != "`":
+            if source[pos] == "\\":
+                out.append(source[pos:pos + 2])
+                pos += 2
+            elif source.startswith("${", pos):
+                pos, inner = skip_expression(pos + 2)
+                nested.extend(inner)
+                out.append(" ")
+            else:
+                out.append(source[pos])
+                pos += 1
+        return "".join(out), pos + 1, nested
+
+    def skip_expression(pos: int) -> tuple[int, list[tuple[int, str]]]:
+        depth, found = 1, []
+        while pos < n and depth:
+            char = source[pos]
+            if char in "'\"":
+                text, end = read_quoted(pos, char)
+                found.append((line_of(pos), text))
+                pos = end
+            elif char == "`":
+                text, end, nested = read_template(pos)
+                found.append((line_of(pos), text))
+                found.extend(nested)
+                pos = end
+            else:
+                depth += {"{": 1, "}": -1}.get(char, 0)
+                pos += 1
+        return pos, found
+
+    while i < n:
+        if source.startswith("//", i):
+            i = source.find("\n", i)
+            i = n if i == -1 else i
+        elif source.startswith("/*", i):
+            i = source.find("*/", i)
+            i = n if i == -1 else i + 2
+        elif source[i] in "'\"":
+            text, end = read_quoted(i, source[i])
+            yield line_of(i), text
+            i = end
+        elif source[i] == "`":
+            start = i
+            text, i, nested = read_template(i)
+            yield line_of(start), text
+            yield from nested
+        elif source[i] == "/" and re.match(r"[=(,:!&|?{};\[>]\s*$", source[max(0, i - 20):i].rstrip()[-1:] or ";"):
+            # A regex literal: skip to its closing slash (not a string).
+            match = re.match(r"/(?:\\.|\[(?:\\.|[^\]])*\]|[^/\\\n])+/[a-z]*", source[i:])
+            i += match.end() if match else 1
+        else:
+            i += 1
+
+
+def _offending_lines(where: str, text: str) -> list[str]:
+    offenders = []
+    for number, line in enumerate(text.splitlines(), 1):
+        run = english_prose(line)
+        if run:
+            offenders.append(f"{where}:{number}: {run!r} in {line.strip()[:160]!r}")
+    return offenders
+
+
+@unittest.skipUnless(_have("numpy", "PIL"), "numpy + Pillow needed for the mixed fixture")
+class RenderedOutputsAreKoreanTest(unittest.TestCase):
+    """S8: the rendered outputs an examiner reads, not just scan JSON."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.folder = write_mixed_folder(Path(cls._tmp.name).resolve() / "mixed")
+        cls.options = AnalysisOptions(recursive=True)
+        cls.summary, cls.items, cls.thresholds = scan_folder(cls.folder, cls.options)
+        cls.out = Path(cls._tmp.name) / "out"
+        cls.out.mkdir()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._tmp.cleanup()
+
+    def test_html_report_text(self) -> None:
+        from deepfake_lens.reports import write_html_report
+
+        offenders: list[str] = []
+        for redact in (False, True):
+            path = self.out / f"r{int(redact)}.html"
+            write_html_report(path, self.summary, self.items, redact_paths=redact, thresholds=self.thresholds)
+            offenders += _offending_lines(path.name, _html_visible_text(path.read_text(encoding="utf-8")))
+        self.assertEqual(offenders, [], "\n".join(offenders[:40]))
+
+    @unittest.skipUnless(_have("pymupdf") or _have("fitz"), "pymupdf not installed")
+    def test_forensic_pdf_text(self) -> None:
+        from deepfake_lens.pdf_backend import import_pymupdf
+        from deepfake_lens.reports import write_forensic_pdf_report, write_pdf_report
+
+        offenders: list[str] = []
+        for name, writer in (("forensic.pdf", write_forensic_pdf_report), ("simple.pdf", write_pdf_report)):
+            path = self.out / name
+            writer(path, self.summary, self.items, thresholds=self.thresholds)
+            with import_pymupdf().open(str(path)) as doc:
+                text = "\n".join(page.get_text() for page in doc)
+            self.assertIn("문서 번호", text)
+            offenders += _offending_lines(name, text)
+        self.assertEqual(offenders, [], "\n".join(offenders[:40]))
+
+    def test_evidence_statement_markdown(self) -> None:
+        from deepfake_lens.core import _thresholds_json
+        from deepfake_lens.evidence_statement import build_evidence_statement, write_evidence_statement_markdown
+
+        statement = build_evidence_statement(self.items, thresholds=_thresholds_json(self.thresholds), scan_root=self.folder)
+        path = self.out / "statement.md"
+        write_evidence_statement_markdown(path, statement)
+        text = path.read_text(encoding="utf-8").replace("<br>", "\n")
+        offenders = _offending_lines(path.name, text)
+        self.assertEqual(offenders, [], "\n".join(offenders[:40]))
+
+    def test_legal_report_text(self) -> None:
+        from deepfake_lens.enhanced_forensics import build_legal_report, legal_report_text
+
+        offenders: list[str] = []
+        for name in ("a1111.png", "bundle.zip", "truncated_nikon.jpg", "empty.jpg", "garbage.wav", "essay_en.txt", "contract_chatgpt.docx"):
+            text = legal_report_text(build_legal_report(self.folder / name, AnalysisOptions()))
+            offenders += _offending_lines(f"legal-report {name}", text)
+        self.assertEqual(offenders, [], "\n".join(offenders[:40]))
+
+    def test_cli_scan_table(self) -> None:
+        import contextlib
+
+        from deepfake_lens.vendor_weights import weights_coverage
+        from deepfake_lens.cli_render import _print_table
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            _print_table(self.summary, self.items, include_low=True, coverage=weights_coverage(None), thresholds=self.thresholds)
+        offenders = _offending_lines("scan table", out.getvalue())
+        self.assertEqual(offenders, [], "\n".join(offenders[:40]))
+
+    def test_doctor_table_and_json(self) -> None:
+        from deepfake_lens.doctor import format_report, run_diagnostics
+
+        report = run_diagnostics()
+        offenders = _offending_lines("doctor table", format_report(report))
+        payload = json.loads(json.dumps(report.to_json(), ensure_ascii=False))
+        for where, text in _doctor_text_fields(payload):
+            run = english_prose(text)
+            if run:
+                offenders.append(f"doctor json {where}: {run!r} in {text[:160]!r}")
+        self.assertEqual(offenders, [], "\n".join(offenders[:40]))
+
+
+def _doctor_text_fields(node: Any, path: str = "", key: str | None = None) -> Iterator[tuple[str, str]]:
+    """Examiner-facing doctor JSON strings (identifiers ``name``/``file``/``runtime`` and the status codes excluded)."""
+    if isinstance(node, dict):
+        for child_key, value in node.items():
+            yield from _doctor_text_fields(value, f"{path}/{child_key}", child_key)
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from _doctor_text_fields(value, f"{path}[{index}]", key)
+    elif isinstance(node, str) and key in {"detail", "display_name", "pin_detail", "runtime_deps_detail", "checkpoint_detail"}:
+        yield path, node
+
+
+class GuiStringsAreKoreanTest(unittest.TestCase):
+    """S8: gui.js label tables and notice strings, gui.html visible text."""
+
+    def test_js_literal_scanner(self) -> None:
+        source = "const a = 'x'; // 'not a literal'\nconst b = `안녕 ${f('in')} <b>끝</b>`; /* 'no' */ const c = /a'b/g;"
+        self.assertEqual([text for _, text in js_string_literals(source)], ["x", "안녕   <b>끝</b>", "in"])
+
+    def test_gui_js_strings(self) -> None:
+        source = (REPO_ROOT / "deepfake_lens" / "gui.js").read_text(encoding="utf-8")
+        offenders = []
+        literals = list(js_string_literals(source))
+        self.assertGreater(len(literals), 300)
+        for line, text in literals:
+            visible = re.sub(r"<[^>]*>", " ", text)
+            run = english_prose(visible)
+            if run:
+                offenders.append(f"gui.js:{line}: {run!r} in {text[:120]!r}")
+        self.assertEqual(offenders, [], "\n".join(offenders))
+
+    def test_gui_html_text(self) -> None:
+        html = (REPO_ROOT / "deepfake_lens" / "gui.html").read_text(encoding="utf-8")
+        offenders = _offending_lines("gui.html", _html_visible_text(html))
+        for attribute in re.findall(r'(?:placeholder|title|aria-label|alt)="([^"]*)"', html):
+            if english_prose(attribute):
+                offenders.append(f"gui.html attribute: {attribute!r}")
+        self.assertEqual(offenders, [], "\n".join(offenders))
 
 
 if __name__ == "__main__":

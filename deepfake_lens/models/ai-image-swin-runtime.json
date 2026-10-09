@@ -24,7 +24,7 @@
   ],
   "notes": [
     "AI 대 사람 이미지 세트로 미세조정한 SwinForImageClassification(Swin-large), cc-by-4.0.",
-    "score_label 'artificial'은 실행 시 id2label({0: artificial, 1: human})에서 클래스 인덱스를 찾으므로, 라벨 순서가 바뀌어도 점수가 조용히 뒤집히지 않습니다.",
+    "score_label 'artificial'은 실행 시 id2label(`{0: artificial, 1: human}`)에서 클래스 인덱스를 찾으므로, 라벨 순서가 바뀌어도 점수가 조용히 뒤집히지 않습니다.",
     "기본 실행에서는 선택 사항으로 둡니다 — AIDE 기본값 대비 이득이 크지 않다는 소규모 측정이 있었습니다(미검증, experiments/IMAGE_EVALUATION.md)."
   ],
   "license": "cc-by-4.0",
