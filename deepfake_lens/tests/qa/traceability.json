@@ -1,6 +1,6 @@
 {
   "schema": "deepfake-lens-qa-traceability-v1",
-  "description": "0단계 요구사항 → 갭 → QA 시나리오 추적표. scripts/qa_phase0.py가 이 파일을 읽어 docs/CONFORMANCE.md를 만든다. 자동 QA ID마다 docstring 첫 줄이 '<QA ID>: <criteria>'인 테스트가 정확히 1개 있어야 한다(tests/qa/test_qa_sys.py TraceabilityTest). W2: QA 테스트는 영역별 4개 파일(test_qa_in.py, test_qa_out.py, test_qa_adv.py, test_qa_sys.py)에만 있고, 자동 QA ID의 file은 정본 테스트가 있는 파일이다..",
+  "description": "0단계 요구사항 → 갭 → QA 시나리오 추적표. scripts/qa_phase0.py가 이 파일을 읽어 docs/CONFORMANCE.md를 만든다. N16: tests/qa의 모든 테스트는 docstring 첫 줄이 '<QA ID>: <criteria>'(이 표의 criteria = 명세의 통과 기준 원문)이고 둘째 줄(선택)에 그 테스트가 무엇을 검사하는지 적는다(tests/qa/test_qa_sys.py TraceabilityTest). 자동 QA ID마다 그런 테스트가 하나 이상 있어야 한다. W2: QA 테스트는 영역별 4개 파일(test_qa_in.py, test_qa_out.py, test_qa_adv.py, test_qa_sys.py)에만 있고, 자동 QA ID의 file은 그 QA ID의 테스트가 모두 있는 파일이다.",
   "criteria_source": "0단계 명세 'QA 시나리오 (통과 기준 원문)'",
   "qa": {
     "QA-IN-1": {

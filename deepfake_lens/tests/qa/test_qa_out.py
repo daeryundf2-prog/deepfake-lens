@@ -361,7 +361,8 @@ class QaOut2InferenceExceptionTest(unittest.TestCase):
                         self.assertFalse(result.score_is_calibrated)
 
     def test_failure_survives_the_unified_entry_point(self) -> None:
-        """QA-OUT-2: 보조 검사 — scan JSON: the failed entry reaches scan_folder's payload unchanged."""
+        """QA-OUT-2: 모델 추론 함수에 예외를 강제 주입(monkeypatch)하고 검사 → 커버리지에 "실패: <예외 유형>" 기록, 결론 "판단 불가". "의존성 부재"로 표기되지 않음.
+        scan JSON: the failed entry reaches scan_folder's payload unchanged."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             profile = _pinned_fake_aide(root)
@@ -438,7 +439,8 @@ class QaOut3NoFaceTest(unittest.TestCase):
         self.assertGreaterEqual(not_detected, 2 * FACE_IMAGES_PER_CONDITION)
 
     def test_real_detector_finds_frontal_faces(self) -> None:
-        """QA-OUT-3: 보조 검사 — positive control: the same unmocked detector finds 20
+        """QA-OUT-3: 얼굴 없는 사진, 측면 얼굴, 저조도 얼굴 각 20장 → 얼굴 미검출 시 커버리지에 "얼굴 검사 미실행: 얼굴 미검출" 기록. 얼굴 조작 결론이 "없음"으로 나오지 않음.
+        positive control: the same unmocked detector finds 20
         synthetic frontal faces, so its "얼굴 미검출" above is a real negative;
         a found face yields only reference signals, never a conclusion."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -455,7 +457,8 @@ class QaOut3NoFaceTest(unittest.TestCase):
                     self._assert_no_face_claim(result)
 
     def test_gif_face_check_is_skipped_not_failed(self) -> None:
-        """QA-OUT-3: 보조 검사 — D15: a GIF is outside the face layer's formats — skipped with the reason."""
+        """QA-OUT-3: 얼굴 없는 사진, 측면 얼굴, 저조도 얼굴 각 20장 → 얼굴 미검출 시 커버리지에 "얼굴 검사 미실행: 얼굴 미검출" 기록. 얼굴 조작 결론이 "없음"으로 나오지 않음.
+        D15: a GIF is outside the face layer's formats — skipped with the reason."""
         if importlib.util.find_spec("PIL") is None:
             self.skipTest("Pillow writes the GIF")
         from PIL import Image
@@ -658,7 +661,8 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
 
     @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed — API-server leg of QA-OUT-4")
     def test_api_server_leg(self) -> None:
-        """QA-OUT-4: 보조 검사 — API leg: FastAPI /api/scan and /api/scan/stream match the CLI, raw row for row."""
+        """QA-OUT-4: 같은 폴더를 CLI, GUI(/api/scan), API 서버로 각각 검사 → 세 결과의 결론·근거·확률·임계값 출처가 동일.
+        API leg: FastAPI /api/scan and /api/scan/stream match the CLI, raw row for row."""
         folder = BENCHMARK.resolve()
         cli = _norm_payload(self._cli_payload(folder), folder)
         self._assert_same(cli, _norm_payload(self._api_payload(folder), folder), "/api/scan")
@@ -695,7 +699,8 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
         self.assertEqual(summary["container_rows"], 2)
 
     def test_hostile_folder_cli_and_web_legs_identical(self) -> None:
-        """QA-OUT-4: 보조 검사 — R1: archive with an A1111 member, zip bomb and file symlink — CLI (in-process and subprocess)
+        """QA-OUT-4: 같은 폴더를 CLI, GUI(/api/scan), API 서버로 각각 검사 → 세 결과의 결론·근거·확률·임계값 출처가 동일.
+        R1: archive with an A1111 member, zip bomb and file symlink — CLI (in-process and subprocess)
         == scan_folder == /api/scan == async web scan, raw row for row; the stdlib /api/check upload of each
         file reports the scan's rows for it."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -718,7 +723,8 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
 
     @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed — API-server leg of QA-OUT-4")
     def test_hostile_folder_api_and_stream_legs_identical(self) -> None:
-        """QA-OUT-4: 보조 검사 — R1: the same hostile folder through FastAPI /api/scan and /api/scan/stream matches the CLI raw row for row."""
+        """QA-OUT-4: 같은 폴더를 CLI, GUI(/api/scan), API 서버로 각각 검사 → 세 결과의 결론·근거·확률·임계값 출처가 동일.
+        R1: the same hostile folder through FastAPI /api/scan and /api/scan/stream matches the CLI raw row for row."""
         with tempfile.TemporaryDirectory() as tmp:
             folder = write_hostile_folder(Path(tmp).resolve() / "case")
             cli = _norm_payload(self._cli_payload(folder), folder)
@@ -737,7 +743,8 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
 
     @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed — API-server leg of QA-OUT-4")
     def test_api_check_on_hostile_folder_matches_scan(self) -> None:
-        """QA-OUT-4: 보조 검사 — R1: /api/check and /api/check/stream on every hostile-folder file report the scan's raw rows
+        """QA-OUT-4: 같은 폴더를 CLI, GUI(/api/scan), API 서버로 각각 검사 → 세 결과의 결론·근거·확률·임계값 출처가 동일.
+        R1: /api/check and /api/check/stream on every hostile-folder file report the scan's raw rows
         (archives: member + container rows; the symlink is refused like the scan's skipped row)."""
         with tempfile.TemporaryDirectory() as tmp:
             folder = write_hostile_folder(Path(tmp).resolve() / "case")
@@ -786,7 +793,8 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
         return out.getvalue()
 
     def test_single_file_commands_report_the_folder_scan_rows(self) -> None:
-        """QA-OUT-4: 보조 검사 — B1: forensic, classify, explain --json, legal-report --json/text and
+        """QA-OUT-4: 같은 폴더를 CLI, GUI(/api/scan), API 서버로 각각 검사 → 세 결과의 결론·근거·확률·임계값 출처가 동일.
+        B1: forensic, classify, explain --json, legal-report --json/text and
         evidence-statement <file> --json-out on evil.zip, bomb.zip and a1111.png report the folder
         scan's raw rows for the file (archives: member rows + container row) and its conclusion;
         the text outputs list the member rows exactly as the scan table prints them."""
@@ -860,7 +868,8 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
                     self.assertEqual(sorted(entry["file_path"] for entry in statement["entries"]), sorted(expected))
 
     def test_single_file_legs_symlinks_nested_tar_and_missing(self) -> None:
-        """QA-OUT-4: 보조 검사 — 단일 파일 경로(G5/G6, round 5): 심볼릭 링크(폴더 안·밖 대상),
+        """QA-OUT-4: 같은 폴더를 CLI, GUI(/api/scan), API 서버로 각각 검사 → 세 결과의 결론·근거·확률·임계값 출처가 동일.
+        단일 파일 경로(G5/G6, round 5): 심볼릭 링크(폴더 안·밖 대상),
         중첩 zip, tar.gz, 없는 파일.
 
         forensic / classify / explain / legal-report and /api/analyze-file
@@ -946,7 +955,8 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
                 self.assertEqual(response, {"error": message.removeprefix("오류: ")})
 
     def test_upload_reports_same_threshold_provenance(self) -> None:
-        """QA-OUT-4: 보조 검사 — GUI upload: /api/analyze-upload reports the thresholds it used and the scan's raw row."""
+        """QA-OUT-4: 같은 폴더를 CLI, GUI(/api/scan), API 서버로 각각 검사 → 세 결과의 결론·근거·확률·임계값 출처가 동일.
+        GUI upload: /api/analyze-upload reports the thresholds it used and the scan's raw row."""
         boundary = "----qaout4"
         data = (BENCHMARK / "ai-like-gradient.png").read_bytes()
         body = (
@@ -1061,7 +1071,8 @@ class QaOut5ProbabilityProvenanceTest(unittest.TestCase):
         self.assertEqual(list(row["probability_ci"]), [0.86, 0.95])
 
     def test_assertion_catches_probability_without_provenance(self) -> None:
-        """QA-OUT-5: 보조 검사 — The QA-OUT-5 check itself fails on a probability with no calibration record."""
+        """QA-OUT-5: 모델 확률이 표시된 모든 결과 → 각 확률에 보정 코퍼스 ID, 측정 조건, 95% CI가 붙어 있음. 측정 범위 밖 입력(64 px 이하)은 "범위 밖"으로 표시되고 확률 없음.
+        The QA-OUT-5 check itself fails on a probability with no calibration record."""
         bare = EvidenceItem(
             title="보정 없는 확률",
             detail="합성 입력",
@@ -1078,7 +1089,8 @@ class QaOut5ProbabilityProvenanceTest(unittest.TestCase):
         self.assertFalse(result.score_is_calibrated)
 
     def test_scanned_results_have_no_unprovenanced_probability(self) -> None:
-        """QA-OUT-5: 보조 검사 — on real scans: every displayed probability has provenance (none exist without weights)."""
+        """QA-OUT-5: 모델 확률이 표시된 모든 결과 → 각 확률에 보정 코퍼스 ID, 측정 조건, 95% CI가 붙어 있음. 측정 범위 밖 입력(64 px 이하)은 "범위 밖"으로 표시되고 확률 없음.
+        on real scans: every displayed probability has provenance (none exist without weights)."""
         summary, items = scan_folder(BENCHMARK, AnalysisOptions())
         self.assertGreater(summary.analyzed, 0)
         for item in items:
@@ -1087,7 +1099,8 @@ class QaOut5ProbabilityProvenanceTest(unittest.TestCase):
 
     @unittest.skipUnless(HAVE_NUMPY, "numpy not installed (photo-like fixture generator)")
     def test_64px_image_is_out_of_range_without_probability(self) -> None:
-        """QA-OUT-5: 보조 검사 — a 64 px image gets external_model skipped "측정 범위 밖" and no probability."""
+        """QA-OUT-5: 모델 확률이 표시된 모든 결과 → 각 확률에 보정 코퍼스 ID, 측정 조건, 95% CI가 붙어 있음. 측정 범위 밖 입력(64 px 이하)은 "범위 밖"으로 표시되고 확률 없음.
+        a 64 px image gets external_model skipped "측정 범위 밖" and no probability."""
         with tempfile.TemporaryDirectory() as tmp:
             image = write_photo_like_png(Path(tmp) / "thumb.png", seed=64, width=64, height=64)
             item = analyze_file(image, model_path=REPO_ROOT / "deepfake_lens" / "models")

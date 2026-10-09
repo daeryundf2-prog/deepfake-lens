@@ -10,9 +10,10 @@
    건너뜀).
 2. Collects per-test outcome, captured stdout/stderr, log records and
    tracebacks. Each test belongs to a QA ID through its docstring
-   (``tests/qa/traceability.qa_tag``); a QA ID passes when its canonical
-   test (docstring first line = "<QA ID>: <통과 기준 원문>") passed and no
-   other test tagged with it failed.
+   (``tests/qa/traceability.qa_tag``). N16: every QA test's docstring first
+   line is "<QA ID>: <통과 기준 원문>"; a QA ID passes when at least one of its
+   tests ran and passed and none failed, is 건너뜀 when every one of them was
+   skipped, and fails when it has no test.
 3. Writes ``<log-dir>/<QA ID>.log`` per automated QA ID,
    ``<log-dir>/full-suite.log`` (one line per test, tracebacks of failures)
    and ``<log-dir>/results.json``.
@@ -20,8 +21,8 @@
    ``deepfake_lens/tests/qa/traceability.json`` and writes the conformance
    table: 요구사항 ID | 갭 ID | QA ID | 결과(통과/실패/수동/1단계) | 로그 경로.
 
-Exit 0 when every automated test passed and each automated QA ID has
-exactly one canonical test; 1 otherwise.
+Exit 0 when every automated test passed and each automated QA ID has at
+least one test carrying its criterion line; 1 otherwise.
 
 Preconditions of a recorded run (D6, D16):
 
@@ -69,10 +70,10 @@ if str(REPO_ROOT) not in sys.path:
 from deepfake_lens.tests.qa.traceability import (  # noqa: E402
     TESTS_DIR,
     automated_criteria,
-    canonical_tests,
     iter_tests,
     load_traceability,
     qa_tag,
+    tests_by_qa_id,
 )
 
 DEFAULT_LOG_DIR = REPO_ROOT / "build" / "qa-logs"
@@ -234,31 +235,38 @@ def load_suite(qa_only: bool) -> unittest.TestSuite:
 
 def qa_outcomes(
     records: dict[str, TestRecord],
-    canonical: dict[str, list[str]],
+    criterion_tests: dict[str, list[str]],
     *,
     full_suite: bool,
 ) -> dict[str, dict[str, Any]]:
-    """Automated QA ID -> {result, canonical, tests, passed, failed, skipped}."""
+    """Automated QA ID -> {result, tests, failed, skipped, notes}.
+
+    N16: ``criterion_tests`` maps each automated QA ID to its tests (every
+    test whose docstring first line is the QA ID's criterion). The result
+    folds them all with every other test tagged with the QA ID.
+    """
     outcomes: dict[str, dict[str, Any]] = {}
     suite_failures = sorted(test_id for test_id, record in records.items() if not record.ok)
-    for qa_id, canon_ids in canonical.items():
-        tagged = sorted((record for record in records.values() if record.qa_id == qa_id), key=lambda r: r.test_id)
+    for qa_id, test_ids in criterion_tests.items():
+        tagged = sorted(
+            {record.test_id: record for record in records.values() if record.qa_id == qa_id or record.test_id in test_ids}.values(),
+            key=lambda r: r.test_id,
+        )
         failed = [record.test_id for record in tagged if not record.ok]
         skipped = [record.test_id for record in tagged if record.status == "skipped"]
-        canon = canon_ids[0] if len(canon_ids) == 1 else None
-        canon_record = records.get(canon) if canon else None
+        ran = [record for record in tagged if record.status != "skipped"]
         notes: list[str] = []
-        if len(canon_ids) != 1:
+        if not test_ids:
             result = FAIL
-            notes.append(f"정본 테스트 {len(canon_ids)}개(정확히 1개여야 함)")
-        elif canon_record is None:
+            notes.append("통과 기준 원문을 docstring 첫 줄로 가진 테스트가 없음")
+        elif not tagged:
             result = FAIL
-            notes.append("정본 테스트가 실행되지 않음")
+            notes.append("테스트가 실행되지 않음")
         elif failed:
             result = FAIL
-        elif canon_record.status == "skipped":
+        elif not ran:
             result = SKIPPED
-            notes.append(f"정본 테스트 건너뜀: {canon_record.detail}")
+            notes.append("모든 테스트 건너뜀")
         else:
             result = PASS
         if skipped and result != SKIPPED:
@@ -275,7 +283,6 @@ def qa_outcomes(
                 notes.append(f"전체 스위트 {len(records)}개 실행, 실패 0건")
         outcomes[qa_id] = {
             "result": result,
-            "canonical": canon,
             "tests": [record.test_id for record in tagged],
             "failed": failed,
             "skipped": skipped,
@@ -289,7 +296,7 @@ def write_logs(log_dir: Path, records: dict[str, TestRecord], outcomes: dict[str
     paths: dict[str, Path] = {}
     for qa_id, outcome in outcomes.items():
         path = log_dir / f"{qa_id}.log"
-        lines = [f"{qa_id}: {outcome['result']}", f"정본 테스트: {outcome['canonical']}", *outcome["notes"], ""]
+        lines = [f"{qa_id}: {outcome['result']}", f"테스트 {len(outcome['tests'])}개", *outcome["notes"], ""]
         for test_id in outcome["tests"]:
             record = records[test_id]
             lines.append(f"=== {test_id} [{record.status}] {record.seconds:.2f}s")
@@ -413,16 +420,15 @@ def render(data: dict[str, Any], outcomes: dict[str, dict[str, Any]], log_paths:
         "",
         "## 자동 QA 상세",
         "",
-        "정본 테스트 = docstring 첫 줄이 \"<QA ID>: <통과 기준 원문>\"인 테스트(QA ID마다 정확히 1개). "
-        "QA ID의 결과는 정본 테스트와 같은 QA ID로 태그된 모든 테스트의 결과를 합친 것이다.",
+        "QA 테스트마다 docstring 첫 줄이 \"<QA ID>: <통과 기준 원문>\"이고 둘째 줄에 그 테스트가 검사하는 내용을 적는다(N16). "
+        "QA ID의 결과는 그 QA ID의 모든 테스트 결과를 합친 것이다(실패 하나면 실패, 전부 건너뜀이면 건너뜀).",
         "",
-        "| QA ID | 정본 테스트 | 태그된 테스트(실패/건너뜀/전체) | 결과 | 비고 |",
-        "| --- | --- | --- | --- | --- |",
+        "| QA ID | 테스트(실패/건너뜀/전체) | 결과 | 비고 |",
+        "| --- | --- | --- | --- |",
     ])
     for qa_id, outcome in outcomes.items():
-        canonical = outcome["canonical"] or "—"
         lines.append(
-            f"| {qa_id} | `{canonical}` | {len(outcome['failed'])}/{len(outcome['skipped'])}/{len(outcome['tests'])} "
+            f"| {qa_id} | {len(outcome['failed'])}/{len(outcome['skipped'])}/{len(outcome['tests'])} "
             f"| {outcome['result']} | {'; '.join(outcome['notes']) or '—'} |"
         )
     lines.extend(["", "## 수동·1단계", ""])
@@ -504,7 +510,7 @@ def main(argv: list[str] | None = None) -> int:
     criteria = automated_criteria(data)
     suite = load_suite(args.qa_only)
     tests = list(iter_tests(suite))
-    canonical = canonical_tests([test for test in tests if hasattr(test, "_testMethodName")], criteria)
+    criterion_tests = tests_by_qa_id([test for test in tests if hasattr(test, "_testMethodName")], criteria)
 
     env = environment()
     print(f"[qa] {len(tests)}개 테스트 실행 중 (commit {env['commit'][:12]}) …", flush=True)
@@ -514,22 +520,22 @@ def main(argv: list[str] | None = None) -> int:
     elapsed = time.perf_counter() - started
 
     records = result.records
-    outcomes = qa_outcomes(records, canonical, full_suite=not args.qa_only)
+    outcomes = qa_outcomes(records, criterion_tests, full_suite=not args.qa_only)
     log_paths = write_logs(args.log_dir, records, outcomes, env)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(render(data, outcomes, log_paths, records, env, full_suite=not args.qa_only), encoding="utf-8")
 
     failures = [record for record in records.values() if not record.ok]
-    bad_canonical = [qa_id for qa_id, ids in canonical.items() if len(ids) != 1]
+    untested = [qa_id for qa_id, ids in criterion_tests.items() if not ids]
     counts = summary_counts(data, outcomes)
     print(f"[qa] {elapsed:.1f}s, 테스트 {len(records)}개, 실패 {len(failures)}개")
     for record in failures:
         print(f"[qa] 실패: {record.test_id}")
-    for qa_id in bad_canonical:
-        print(f"[qa] 정본 테스트 수 오류: {qa_id} {canonical[qa_id]}")
+    for qa_id in untested:
+        print(f"[qa] 통과 기준 원문을 첫 줄로 가진 테스트 없음: {qa_id}")
     print(f"[qa] {summary_line(counts)}")
     print(f"[qa] 적합성 표: {_rel(args.out)}, 로그: {_rel(args.log_dir)}")
-    return 1 if failures or bad_canonical or counts[FAIL] else 0
+    return 1 if failures or untested or counts[FAIL] else 0
 
 
 if __name__ == "__main__":

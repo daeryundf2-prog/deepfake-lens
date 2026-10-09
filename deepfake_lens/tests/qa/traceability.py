@@ -4,9 +4,11 @@
   QA ID table plus the verbatim pass criteria).
 - ``qa_tag(test)`` maps a unittest case to its QA ID: the method docstring's
   first line when it starts with a QA ID, else the class docstring's.
-- ``is_canonical(test, criteria)`` is True when the method docstring's first
-  line is exactly ``"<QA ID>: <criteria>"`` — each automated QA ID has
-  exactly one such test.
+- ``criterion_line(qa_id, criteria)`` is the exact first line every test of
+  that QA ID carries — ``"<QA ID>: <통과 기준 원문>"`` (N16: no "보조 검사"
+  variant; what a particular test checks goes on the second line).
+- ``tests_by_qa_id(tests, criteria)`` groups the tests whose first line is
+  their QA ID's criterion line; a QA ID's result folds all of them.
 - ``source_inventory(root)`` lists ``relpath::Class.test_method`` for every
   test method defined in a ``test*.py`` file (AST, no import), the unit the
   QA-SYS-10 baseline is recorded in.
@@ -30,10 +32,10 @@ BASELINE_PATH = QA_DIR / "test_inventory_baseline.json"
 DELETIONS_DOC = REPO_ROOT / "docs" / "TEST-DELETIONS.md"
 
 QA_ID = re.compile(r"^(QA-[A-Z]+-\d+)(?=[:\s(]|$)")
-# G11 (round 5): the docstring first line of every test in tests/qa is either
-# "<QA-ID>: <criterion verbatim>" (the one canonical test) or
-# "<QA-ID>: 보조 검사 — <what it checks>".
-AUXILIARY_PREFIX = "보조 검사 — "
+# N16 (round 6): the docstring first line of EVERY test in tests/qa is
+# "<QA-ID>: <criterion verbatim from the spec>" (traceability.json
+# ``criteria``); the optional second line says what that test checks. The
+# round-5 "<QA-ID>: 보조 검사 — …" first lines are gone.
 # `Class.test_method` tokens in docs/TEST-DELETIONS.md.
 DELETION_TOKEN = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*\.test[A-Za-z0-9_]*)`")
 
@@ -72,21 +74,27 @@ def qa_tag(test: unittest.TestCase) -> str | None:
     return None
 
 
-def is_canonical(test: unittest.TestCase, criteria: dict[str, str]) -> bool:
+def criterion_line(qa_id: str, criteria: dict[str, str]) -> str:
+    """The first docstring line every test of ``qa_id`` carries (N16)."""
+    return f"{qa_id}: {criteria[qa_id]}"
+
+
+def carries_criterion(test: unittest.TestCase, criteria: dict[str, str]) -> bool:
+    """True when the method docstring's first line is its QA ID's criterion line."""
     method_doc = getattr(getattr(test, test._testMethodName, None), "__doc__", None)
     line = first_line(method_doc)
     match = QA_ID.match(line)
     if match is None:
         return False
     qa_id = match.group(1)
-    return qa_id in criteria and line == f"{qa_id}: {criteria[qa_id]}"
+    return qa_id in criteria and line == criterion_line(qa_id, criteria)
 
 
-def canonical_tests(tests: list[unittest.TestCase], criteria: dict[str, str]) -> dict[str, list[str]]:
-    """QA ID -> ids of the tests whose docstring first line is the criterion."""
+def tests_by_qa_id(tests: list[unittest.TestCase], criteria: dict[str, str]) -> dict[str, list[str]]:
+    """QA ID -> ids of the tests whose docstring first line is that QA ID's criterion line."""
     found: dict[str, list[str]] = {qa_id: [] for qa_id in criteria}
     for test in tests:
-        if is_canonical(test, criteria):
+        if carries_criterion(test, criteria):
             tag = qa_tag(test)
             assert tag is not None
             found[tag].append(test.id())
