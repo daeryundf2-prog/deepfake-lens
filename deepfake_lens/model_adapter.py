@@ -49,6 +49,7 @@ from .model_runtimes import (  # noqa: F401 — dispatch targets + shared caches
     _score_from_score_map,
     _score_from_sidecar,
 )
+from .native_stderr import quiet_native_stderr
 
 logger = logging.getLogger(__name__)
 
@@ -956,6 +957,7 @@ def _run_video_frames(
     )
 
 
+@quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
 def _extract_sampled_frames(cv2, media_path: Path, out_dir: Path, count: int) -> list[Path]:
     """Decode ``count`` evenly spaced frames to PNG files in ``out_dir``."""
     capture = cv2.VideoCapture(str(media_path))

@@ -23,6 +23,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
+from .native_stderr import quiet_native_stderr
 
 PULSE_LOW_HZ = 0.7
 PULSE_HIGH_HZ = 4.0
@@ -341,6 +342,7 @@ def _phase_coherence(pulses, fps: float, peak_hz: float) -> float | None:
     return float(abs(np.mean(np.exp(1j * np.asarray(phases)))))
 
 
+@quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
 def _face_roi_samples(
     video_path: Path, *, max_frames: int
 ) -> tuple[list[tuple[float, float, float]], list[list[tuple[float, float, float]]], float, float]:

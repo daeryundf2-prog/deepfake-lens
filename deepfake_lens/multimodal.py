@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
+from .native_stderr import quiet_native_stderr
 
 
 @dataclass(frozen=True)
@@ -451,6 +452,7 @@ def _resample_linear(series, from_rate: float, to_rate: float):
     return np.interp(positions, np.arange(len(series)), series)
 
 
+@quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
 def _motion_envelope(video_path: Path):
     """Per-frame mean absolute frame-difference energy via opencv.
 
@@ -486,6 +488,7 @@ def _motion_envelope(video_path: Path):
         capture.release()
 
 
+@quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
 def _audio_envelope(video_path: Path):
     """RMS amplitude envelope of the video's audio track via librosa.
 

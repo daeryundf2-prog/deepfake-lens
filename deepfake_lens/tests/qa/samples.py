@@ -245,7 +245,7 @@ def _ffmpeg(ext: str, out: Path, variant: int) -> str | None:
     else:
         source = ["-f", "lavfi", "-i", f"sine=frequency={220 + 20 * variant}:sample_rate=48000", "-t", "1", *_FFMPEG_AUDIO[ext]]
     done = subprocess.run(
-        [binary, "-hide_banner", "-loglevel", "error", "-y", *source, "-map_metadata", "-1", str(out)],
+        [binary, "-hide_banner", "-loglevel", "error", "-nostats", "-y", *source, "-map_metadata", "-1", str(out)],
         capture_output=True, timeout=FFMPEG_TIMEOUT_SECONDS, check=False,
     )
     if done.returncode != 0 or not out.is_file() or out.stat().st_size == 0:

@@ -35,6 +35,7 @@ from pathlib import Path
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 from .vendor_weights import default_models_dir
 from .checkpoint_integrity import load_torch_state
+from .native_stderr import quiet_native_stderr
 
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
 _DEFAULT_FPS = 4.0  # frames sampled per second
@@ -97,6 +98,7 @@ class FaceTrackAnalysis:
         return asdict(self)
 
 
+@quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
 def analyze_face_track(
     path: Path | str, *, fps: float = _DEFAULT_FPS, max_frames: int = _MAX_FRAMES, thresholds=None
 ) -> FaceTrackAnalysis:

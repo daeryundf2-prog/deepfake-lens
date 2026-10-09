@@ -25,6 +25,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 from .vendor_weights import default_models_dir
+from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
 
 # Correlation below this with clear speech activity = mismatch candidate.
 _WEAK_CORRELATION = 0.12
@@ -156,7 +157,7 @@ def _audio_envelope(video_path: Path, *, max_seconds: float) -> tuple[list[float
     try:
         subprocess.run(
             [
-                "ffmpeg", "-y", "-i", str(video_path),
+                "ffmpeg", *FFMPEG_QUIET_ARGS, "-y", "-i", str(video_path),
                 "-t", f"{max_seconds:.1f}",
                 "-vn", "-ac", "1", "-ar", str(rate), "-f", "wav", str(tmp_path),
             ],
@@ -179,6 +180,7 @@ def _audio_envelope(video_path: Path, *, max_seconds: float) -> tuple[list[float
         tmp_path.unlink(missing_ok=True)
 
 
+@quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
 def _mouth_openness_series(video_path: Path, *, max_seconds: float) -> tuple[list[float], float]:
     """Per-sample mouth-openness proxy: darkness of the lower-center face ROI.
 

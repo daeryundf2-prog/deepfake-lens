@@ -90,7 +90,7 @@ def degrade_video(src: Path, dst: Path, *, seed: int) -> None:
     vw.release()
     # Re-encode with audio passthrough + H.264 (crf 30 ≈ social re-upload).
     subprocess.run(
-        ["ffmpeg", "-y", "-loglevel", "error", "-i", str(silent), "-i", str(src),
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostats", "-y", "-i", str(silent), "-i", str(src),
          "-map", "0:v", "-map", "1:a?", "-c:v", "libx264", "-crf", "30",
          "-c:a", "aac", "-shortest", str(dst)],
         check=True,

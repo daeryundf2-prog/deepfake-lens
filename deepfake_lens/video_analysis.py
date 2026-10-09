@@ -17,6 +17,7 @@ from .checks import skipped as skipped_entry
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
 from .result_types import CoverageEntry, CoverageStatus
+from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,7 @@ class VideoTemporalAnalysis:
         return asdict(self)
 
 
+@quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
 def analyze_video_temporal(
     path: Path | str,
     *,
@@ -230,7 +232,7 @@ def audio_track_check(
             tmp_name = tmp.name
         try:
             proc = subprocess.run(
-                [ffmpeg, "-y", "-i", str(video_path), "-vn", "-ac", "1", "-ar", "16000", tmp_name],
+                [ffmpeg, *FFMPEG_QUIET_ARGS, "-y", "-i", str(video_path), "-vn", "-ac", "1", "-ar", "16000", tmp_name],
                 capture_output=True, timeout=120,
             )
             extracted = proc.returncode == 0 and Path(tmp_name).stat().st_size > 0
@@ -294,6 +296,7 @@ def _error_analysis(message: str) -> VideoTemporalAnalysis:
     )
 
 
+@quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
 def _sample_frames(
     path: Path,
     sample_rate: float,

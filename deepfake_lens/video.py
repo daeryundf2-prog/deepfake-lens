@@ -6,6 +6,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
+from .native_stderr import FFMPEG_QUIET_ARGS
 
 
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
@@ -45,9 +46,7 @@ def build_video_frame_plan(
         frame_dir = output_path / _safe_frame_dir(root_path, video_path)
         command = [
             "ffmpeg",
-            "-hide_banner",
-            "-loglevel",
-            "error",
+            *FFMPEG_QUIET_ARGS,
             "-i",
             str(video_path),
             "-vf",

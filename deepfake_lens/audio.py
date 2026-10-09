@@ -15,6 +15,7 @@ from pathlib import Path
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .error_text import exception_text, failure_reason
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
+from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
 
 
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wma", ".opus"}
@@ -286,6 +287,7 @@ def _extract_features_with_reason(path: Path, *, segment_seconds: int) -> tuple[
     return features, ""
 
 
+@quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
 def _extract_features(path: Path, *, segment_seconds: int, raise_on_decode: bool = False) -> AudioFeatures | None:
     """Extract acoustic features from audio file using librosa."""
     try:
@@ -918,6 +920,7 @@ def _ecapa_speaker_similarity(path_a: Path, path_b: Path, revision: str) -> tupl
     ]
 
 
+@quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
 def _ecapa_load_waveform(path: Path):
     """Load any audio as a 16 kHz mono waveform tensor for ECAPA.
 
@@ -953,7 +956,7 @@ def _ecapa_load_waveform(path: Path):
         fd, tmp = tempfile.mkstemp(suffix=".wav")
         os.close(fd)
         subprocess.run(
-            ["ffmpeg", "-y", "-i", str(path), "-ac", "1", "-ar", "16000", tmp],
+            ["ffmpeg", *FFMPEG_QUIET_ARGS, "-y", "-i", str(path), "-ac", "1", "-ar", "16000", tmp],
             capture_output=True, check=True, timeout=120,
         )
         return _read(Path(tmp))
