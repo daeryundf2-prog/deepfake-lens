@@ -100,6 +100,45 @@ class NativeStderrRedirectTest(unittest.TestCase):
                 text = native_log.read_text(encoding="utf-8", errors="replace")
                 self.assertNotIn("파일", text)  # only native output is captured there
 
+    def test_opencv_png_chatter_stays_off_the_console(self) -> None:
+        """Y5 (round 7): `scan --deep-signals` and the face/inpaint/faceswap-seam/ml-classify
+        layers on a broken PNG printed OpenCV's `[ERROR:0@…] global grfmt_png.cpp … IHDR chunk
+        shall be first` to the process stderr. It goes to the native-stderr log now; stderr
+        carries only Korean lines (ml-classify: its Korean error, exit 2 — Y6)."""
+        import cv2  # noqa: F401 - the layers need OpenCV; skip cleanly without it
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "case"
+            folder.mkdir()
+            broken = folder / "broken.png"
+            broken.write_bytes(b"\x89PNG\r\n\x1a\n\x00")
+            log_dir = Path(tmp) / "logs"
+            runs = {
+                "scan": (["scan", str(folder), "--format", "json", "--deep-signals"], 0),
+                "face": (["face", str(broken)], 0),
+                "inpaint": (["inpaint", str(broken)], 0),
+                "faceswap-seam": (["faceswap-seam", str(broken)], 0),
+                "ml-classify": (["ml-classify", str(broken)], 2),
+            }
+            for name, (argv, expected) in runs.items():
+                with self.subTest(command=name):
+                    done = subprocess.run(
+                        [sys.executable, "-m", "deepfake_lens", *argv],
+                        capture_output=True, env=_env(log_dir, Path(tmp)), timeout=600,
+                    )
+                    console = done.stderr.decode("utf-8", "replace")
+                    self.assertEqual(done.returncode, expected, console[-2000:])
+                    for noise in ("grfmt_png", "IHDR", "[ERROR:", "[ WARN:", "global ", "Traceback"):
+                        self.assertNotIn(noise, console)
+                    for line in console.splitlines():
+                        self.assertIsNone(english_prose(line), line)
+                    if name == "ml-classify":
+                        self.assertTrue(console.startswith("오류: 이미지를 읽을 수 없습니다"), console)
+                        self.assertEqual(done.stdout.strip(), b"")
+            native_log = log_dir / "native-stderr.log"
+            self.assertTrue(native_log.exists())
+            self.assertIn("grfmt_png", native_log.read_text(encoding="utf-8", errors="replace"))
+
 
 if __name__ == "__main__":
     unittest.main()

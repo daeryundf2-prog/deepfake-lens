@@ -65,6 +65,7 @@ class RppgAnalysis:
         return asdict(self)
 
 
+@quiet_native_stderr  # Y5: OpenCV decoder chatter (fd 2, e.g. grfmt_png) goes to the log, not the console
 def analyze_rppg(path: Path | str, *, max_frames: int = 600) -> RppgAnalysis:
     """Run the full video -> face ROI grid -> CHROM + coherence pipeline."""
     video_path = Path(path)

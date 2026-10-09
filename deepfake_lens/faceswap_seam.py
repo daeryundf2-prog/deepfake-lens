@@ -25,6 +25,7 @@ from typing import Any
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 
 from .face import FaceRegion, _detect_faces, _imread_unicode
+from .native_stderr import quiet_native_stderr
 
 
 # Default heuristic cutoffs. These literals are the shipped baseline; a
@@ -89,6 +90,7 @@ class FaceSwapSeamAnalysis:
         return asdict(self)
 
 
+@quiet_native_stderr  # Y5: OpenCV decoder chatter (fd 2, e.g. grfmt_png) goes to the log, not the console
 def analyze_faceswap_seam(
     path: Path | str,
     *,

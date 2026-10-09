@@ -25,6 +25,7 @@ from pathlib import Path
 
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .error_text import exception_text
+from .native_stderr import quiet_native_stderr
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,7 @@ class QuickPixelAnalysis:
         return asdict(self)
 
 
+@quiet_native_stderr  # Y5: OpenCV decoder chatter (fd 2, e.g. grfmt_png) goes to the log, not the console
 def analyze_pixels(path: Path | str) -> QuickPixelAnalysis:
     """Analyze image pixels for AI generation signs."""
     image_path = Path(path)

@@ -787,18 +787,24 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             import numpy as np
             from .face import _imread_unicode
         except ImportError:
-            print(json.dumps({"error": "opencv/numpy가 설치되어 있지 않습니다"}, ensure_ascii=False, indent=2))
-            return 1
-        image = _imread_unicode(args.file)
-        if image is None:
-            print(json.dumps({"error": "이미지를 읽을 수 없습니다"}, ensure_ascii=False, indent=2))
-            return 1
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        features = {
-            "mean": float(np.mean(gray)),
-            "std": float(np.std(gray)),
-            "texture_variance": float(np.var(cv2.Laplacian(gray, cv2.CV_64F))),
-        }
+            # Y6: Korean stderr, exit 2 (a missing optional dependency, R6) — never JSON on stdout.
+            print("오류: ml-classify에는 opencv와 numpy가 필요합니다(설치: pip install opencv-python-headless numpy)", file=sys.stderr)
+            return USAGE_EXIT
+        from .native_stderr import native_stderr_to_log
+
+        # Y5: OpenCV's own messages (grfmt_png …) go to the log, not the console.
+        with native_stderr_to_log():
+            image = _imread_unicode(args.file)
+            if image is None:
+                # Y6: a corrupt or undecodable image is a Korean stderr error, exit 2.
+                print(f"오류: 이미지를 읽을 수 없습니다(손상되었거나 디코드할 수 없는 이미지): {args.file}", file=sys.stderr)
+                return USAGE_EXIT
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            features = {
+                "mean": float(np.mean(gray)),
+                "std": float(np.std(gray)),
+                "texture_variance": float(np.var(cv2.Laplacian(gray, cv2.CV_64F))),
+            }
         rule_result = RuleClassifier().predict(features).to_json()
         # The rule's "ai"/"natural" label and probability_ai are not kept:
         # an unmeasured weight sum is neither a label nor a probability.

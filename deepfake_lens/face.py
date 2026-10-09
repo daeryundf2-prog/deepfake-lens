@@ -35,6 +35,7 @@ from typing import Any
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .error_text import exception_text, failure_reason
 from .vendor_weights import default_models_dir
+from .native_stderr import quiet_native_stderr
 
 
 @dataclass(frozen=True)
@@ -111,6 +112,7 @@ def manipulation_type_label(manipulation_type: str) -> str:
     return MANIPULATION_TYPE_LABELS.get(manipulation_type, manipulation_type)
 
 
+@quiet_native_stderr  # Y5: OpenCV decoder chatter (fd 2, e.g. grfmt_png) goes to the log, not the console
 def _imread_unicode(path: Path | str):
     """cv2.imread that survives non-ASCII paths on Windows.
 
@@ -130,6 +132,7 @@ def _imread_unicode(path: Path | str):
     return cv2.imdecode(data, cv2.IMREAD_COLOR)
 
 
+@quiet_native_stderr  # Y5: OpenCV decoder chatter (fd 2, e.g. grfmt_png) goes to the log, not the console
 def analyze_faces(
     path: Path | str,
 ) -> FaceAnalysis:

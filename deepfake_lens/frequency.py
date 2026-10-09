@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
+from .native_stderr import quiet_native_stderr
+
 
 MIN_FREQUENCY_ANALYSIS_SIDE = 32
 
@@ -284,6 +286,7 @@ def jpeg_double_compression_score(gray, *, block: int = 8, coeff_pos: tuple[int,
     return strength, detail
 
 
+@quiet_native_stderr  # Y5: OpenCV decoder chatter (fd 2, e.g. grfmt_png) goes to the log, not the console
 def ela_metrics(gray, *, quality: int = 75, block: int = 16) -> tuple[float, float, str]:
     """Error-Level Analysis: resave the image at a fixed JPEG quality and
     measure per-block recompression error.

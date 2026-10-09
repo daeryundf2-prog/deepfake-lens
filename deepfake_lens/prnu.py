@@ -23,6 +23,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
+from .native_stderr import quiet_native_stderr
 
 MIN_REFERENCE_IMAGES = 3
 MIN_CORRELATION = 0.10  # empirical screening floor for same-device NCC
@@ -113,6 +114,7 @@ def normalized_cross_correlation(residual, fingerprint) -> float:
     return float((left * right).sum() / denominator)
 
 
+@quiet_native_stderr  # Y5: OpenCV decoder chatter (fd 2, e.g. grfmt_png) goes to the log, not the console
 def analyze_prnu(target_path: Path | str, reference_paths: list[Path | str]) -> PrnuAnalysis:
     """Correlate a target image's residual against a reference fingerprint."""
     target = Path(target_path)
