@@ -488,7 +488,9 @@ class UnrecordedFiles:
         if code == "subfolder_files" and self.subfolder_detail:
             shown = self.subfolder_detail[:UNRECORDED_SUBFOLDERS_LISTED]
             parts = [
-                f"{display_name(entry.get('path'))} {entry.get('files')}개" + ("" if entry.get("complete", True) else " 이상(탐색 상한으로 일부만 셈)")
+                f"{display_name(entry.get('path'))} {entry.get('files')}개"
+                + ("" if entry.get("complete", True) else " 이상(탐색 상한으로 일부만 셈)")
+                + _already_counted_note(entry)
                 for entry in shown
             ]
             rest = len(self.subfolder_detail) - len(shown)
@@ -535,6 +537,12 @@ class UnrecordedFiles:
             archive_categories={str(k): v for k, v in categories.items() if isinstance(v, int)} if isinstance(categories, dict) else None,
             subfolder_detail=[entry for entry in subfolders if isinstance(entry, dict)] if isinstance(subfolders, list) else None,
         )
+
+
+def _already_counted_note(entry: dict[str, object]) -> str:
+    """R10-8: " (이미 센 폴더 N개 중복 제외)" when the count skipped folders counted under another entry."""
+    shared = entry.get("already_counted_folders")
+    return f"(이미 센 폴더 {shared}개 중복 제외)" if isinstance(shared, int) and shared > 0 else ""
 
 
 def unrecorded_files(items: "list[object]", summary: object | None = None) -> UnrecordedFiles:

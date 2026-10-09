@@ -69,14 +69,15 @@
     },
     "subfolder_detail": {
       "type": "array",
-      "description": "P5: one entry per subfolder a flat scan did not enter: regular files below it (recursive, symlinks neither followed nor counted); complete=false when the count stopped at a walk limit.",
+      "description": "P5: one entry per subfolder a flat scan did not enter: regular files below it (recursive, symlinks neither followed nor counted); complete=false when the count stopped at a walk limit. R10-8: already_counted_folders (present only when > 0) is the number of folders below it skipped because they were already counted under another entry (a folder link into an earlier one) — its files are not in this entry's files.",
       "items": {
         "type": "object",
         "required": ["path", "files", "complete"],
         "properties": {
           "path": { "type": "string" },
           "files": { "type": "integer", "minimum": 0 },
-          "complete": { "type": "boolean" }
+          "complete": { "type": "boolean" },
+          "already_counted_folders": { "type": "integer", "minimum": 1 }
         }
       }
     },

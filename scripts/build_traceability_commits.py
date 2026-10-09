@@ -32,10 +32,13 @@ table was built from is gone (rewritten without regenerating).
 
 R9-10 (round 9): it also fails when more than one commit follows
 ``range.head`` — the only commit allowed after the table's range is the
-one regenerating it — or when that commit changes anything besides
-``docs/traceability-commits.json`` and ``docs/TRACEABILITY-COMMITS.md``. A
-commit made after the table therefore needs a regeneration (as the last
-commit) before ``--check`` passes again.
+one regenerating it — or when that commit changes anything besides the
+generated records: ``docs/traceability-commits.json``,
+``docs/TRACEABILITY-COMMITS.md`` and the conformance record
+``docs/CONFORMANCE.md`` (scripts/qa_phase0.py, regenerated in the same
+final commit; R10-8 states it here and in the error message). A commit
+made after the table therefore needs a regeneration (as the last commit)
+before ``--check`` passes again.
 
 Usage:
     python scripts/build_traceability_commits.py            # regenerate for <merge-base main>..HEAD
@@ -363,7 +366,11 @@ GENERATED_RECORD_FILES = TABLE_FILES | {"docs/CONFORMANCE.md"}
 
 
 def _later_commit_problems(head: str) -> list[str]:
-    """R9-10: after ``range.head`` only the regenerating commit, touching only the two table files."""
+    """R9-10: after ``range.head`` only the regenerating commit, touching only the generated records.
+
+    Those are the two table files and docs/CONFORMANCE.md (R10-8: allowed
+    since round 9, now stated in the message too).
+    """
     if _json_dirty():
         return []  # an uncommitted regeneration: range.head must be HEAD (checked above)
     later = _git("rev-list", f"{head}..HEAD").split()
@@ -378,7 +385,7 @@ def _later_commit_problems(head: str) -> list[str]:
         if extra:
             return [
                 f"표를 재생성한 커밋 {later[0][:7]}이(가) 추적표 파일 밖의 파일도 바꿨습니다: {', '.join(extra[:10])}"
-                f"{' 외' if len(extra) > 10 else ''} — 재생성 커밋에는 {JSON_REL}과 {MD_REL}만 넣으십시오"
+                f"{' 외' if len(extra) > 10 else ''} — 재생성 커밋에는 생성 기록 파일({', '.join(sorted(GENERATED_RECORD_FILES))})만 넣으십시오"
             ]
     return []
 

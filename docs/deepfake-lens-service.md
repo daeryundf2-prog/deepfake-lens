@@ -122,6 +122,8 @@ and, for the streaming endpoints, no job is started (G31).
 | Method | Path | Params | `data` shape |
 |---|---|---|---|
 | GET | `/` | — | `{"message", "version"}` (no auth) |
+| GET | `/gui` | — | the web GUI shell (`text/html`, the `web` server's GUI; CSP `GUI_CSP`, `X-Content-Type-Options: nosniff`; no auth — the GUI's own `/api/*` calls are authenticated) |
+| GET | `/gui.css`, `/gui.js` | — | the GUI's stylesheet and script (`nosniff`) |
 | GET | `/api/health` | — | `{"status": "healthy"}` |
 | POST | `/api/analyze/image` | `file_path` | **analysis_result** (D2): `kind: "analysis_result"`, `verdict_code` (`manipulation_evidence`/`authenticity_evidence`/`undetermined`), `verdict`, `grade`, `evidence`, `coverage`, `limitations`, `reference_signals`, `sha256` — the scan result from `analysis_api.analyze_path`; no band, no uncalibrated score |
 | POST | `/api/analyze/audio` | `file_path` | analysis_result (the audio heuristics are reference signals; the audio profiles run under their pins/gates) |
@@ -140,6 +142,12 @@ and, for the streaming endpoints, no job is started (G31).
 | POST | `/api/analyze-upload`, `/api/report`, `/api/feedback`, `/api/review` | as in the web GUI table below | Same payload functions as `web`; `/api/analyze-upload` is api-serve's upload endpoint (multipart, ≤ `MAX_UPLOAD_BYTES`) |
 | GET | `/api/artifacts/{artifact_id}/review` | — | `{"status", "artifact_id", "review"}` — the examiner review stored for that artifact (`~/.deepfake-lens/reviews.json`, override `DEEPFAKE_LENS_REVIEWS`) |
 | PUT | `/api/artifacts/{artifact_id}/review` | JSON object body | saves the review; `{"status", "artifact_id", "review"}` (400 for invalid JSON or a non-object body, E33) |
+
+R10-8: these are all of api-serve's routes — FastAPI's automatic `/docs`,
+`/docs/oauth2-redirect`, `/redoc` and `/openapi.json` (an English Swagger/ReDoc
+UI outside this table) are disabled and answer 404 `찾을 수 없는 경로입니다`
+(`test_servers.DocumentedEndpointsExistTest` checks every route, not only
+`/api/*`).
 
 `file_path` is a path **on the server's filesystem**; bytes the client holds
 are analyzed through the upload endpoint `POST /api/analyze-upload`

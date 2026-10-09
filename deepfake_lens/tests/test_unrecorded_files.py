@@ -282,7 +282,10 @@ class UnrecordedFilesTest(unittest.TestCase):
             os.symlink(outside, self.folder / f"many{index:02d}")
         expected_detail = [
             {"path": "into-linked", "files": 1, "complete": True},
-            {"path": "many00", "files": 2, "complete": True},  # x.txt, y.txt — inner/ already counted
+            # x.txt, y.txt — inner/ already counted. R10-8: the entry says so
+            # (already_counted_folders, shown "(이미 센 폴더 1개 중복 제외)"); it
+            # read "many00 2개" for a folder of 3 files with no hint.
+            {"path": "many00", "files": 2, "complete": True, "already_counted_folders": 1},
             {"path": "sub", "files": 2, "complete": True},
         ]
         refused = {name: scan_cache.SYMLINK_ANCESTOR_REASON for name in ancestors}
@@ -313,6 +316,8 @@ class UnrecordedFilesTest(unittest.TestCase):
         cli_summary = json.loads(scan_json.read_text(encoding="utf-8"))["summary"]
         self.assertEqual(cli_summary["subfolder_files_skipped"], 5)
         self.assertEqual(cli_summary["subfolders_skipped_detail"], expected_detail)
+        lines = "\n".join(unrecorded_files([], cli_summary).lines())
+        self.assertIn("into-linked 1개, many00 2개(이미 센 폴더 1개 중복 제외), sub 2개", lines)
 
     def test_p5_none_only_when_nothing_is_missing(self) -> None:
         """P5 (round 8): "없음" only when every count is 0 — a failed row without a result counts."""

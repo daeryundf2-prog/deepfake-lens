@@ -39,7 +39,10 @@ _ARGPARSE_ERRORS_KO: tuple[tuple[re.Pattern[str], str], ...] = tuple(
     for pattern, replacement in (
         (r"^the following arguments are required: (.+)$", r"다음 인수가 필요합니다: \1"),
         (r"^argument (.+?): invalid choice: (.+?) \(choose from (.+)\)$", r"인수 \1: 허용되지 않은 값 \2 (선택 가능: \3)"),
-        (r"^argument (.+?): invalid (\w+) value: (.+)$", r"인수 \1: 올바르지 않은 \2 값 \3"),
+        # R10-8: was "올바르지 않은 int 값 'x'" (a Python type name in the message).
+        (r"^argument (.+?): invalid int value: (.+)$", r"인수 \1: 정수가 아닙니다: \2"),
+        (r"^argument (.+?): invalid float value: (.+)$", r"인수 \1: 숫자가 아닙니다: \2"),
+        (r"^argument (.+?): invalid (\w+) value: (.+)$", r"인수 \1: 올바르지 않은 값입니다: \3"),
         (r"^argument (.+?): expected one argument$", r"인수 \1: 값 하나가 필요합니다"),
         (r"^argument (.+?): expected at least one argument$", r"인수 \1: 값이 하나 이상 필요합니다"),
         (r"^argument (.+?): not allowed with argument (.+)$", r"인수 \1: \2 와(과) 함께 쓸 수 없습니다"),

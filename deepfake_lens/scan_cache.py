@@ -341,6 +341,13 @@ def flat_subfolder_survey(root: Path, *, follow_links: bool = False) -> FlatSubf
     followed nor counted (P5). The P3 limits (:class:`_WalkLimits`) bound
     the whole count; a folder whose count stopped there is
     ``complete: False``.
+
+    R10-8 (round 10): a folder below a counted one that was already counted
+    (through an earlier link, or a bind mount) is skipped, so that count
+    leaves its files out — "B 4개" for a linked folder of 5 files whose
+    subfolder an earlier link "A" had counted. Such an entry carries
+    ``already_counted_folders`` (the number of folders skipped) and the
+    reports print "(이미 센 폴더 N개 중복 제외)" after its count.
     """
     import os
 
@@ -367,6 +374,7 @@ def flat_subfolder_survey(root: Path, *, follow_links: bool = False) -> FlatSubf
     def count(top: Path, top_ident: tuple[int, int] | None) -> dict[str, object]:
         files = 0
         complete = True
+        already_counted = 0
         if top_ident is not None:
             visited.add(top_ident)
         stack = [top]
@@ -389,6 +397,7 @@ def flat_subfolder_survey(root: Path, *, follow_links: bool = False) -> FlatSubf
                     if child.is_dir(follow_symlinks=False):
                         ident = _dir_identity(child.path)
                         if ident is not None and ident in visited:
+                            already_counted += 1  # R10-8: shown as "(이미 센 폴더 N개 중복 제외)"
                             continue  # bind mount / already counted folder
                         if ident is not None:
                             visited.add(ident)
@@ -397,7 +406,10 @@ def flat_subfolder_survey(root: Path, *, follow_links: bool = False) -> FlatSubf
                         files += 1
                 except OSError:
                     complete = False
-        return {"path": top.name, "files": files, "complete": complete}
+        entry: dict[str, object] = {"path": top.name, "files": files, "complete": complete}
+        if already_counted:
+            entry["already_counted_folders"] = already_counted
+        return entry
 
     by_name: dict[str, dict[str, object]] = {}
     for folder in real:

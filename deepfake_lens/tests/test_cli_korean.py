@@ -120,7 +120,10 @@ class CliHelpIsKoreanTest(unittest.TestCase):
         for message, expected in (
             ("the following arguments are required: folder", "다음 인수가 필요합니다: folder"),
             ("unrecognized arguments: --nope", "알 수 없는 인수: --nope"),
-            ("argument --max-files: invalid int value: 'x'", "인수 --max-files: 올바르지 않은 int 값 'x'"),
+            # R10-8: was "올바르지 않은 int 값 'x'" — a Python type name in a Korean message.
+            ("argument --max-files: invalid int value: 'x'", "인수 --max-files: 정수가 아닙니다: 'x'"),
+            ("argument --threshold: invalid float value: 'y'", "인수 --threshold: 숫자가 아닙니다: 'y'"),
+            ("argument --when: invalid parse_date value: 'z'", "인수 --when: 올바르지 않은 값입니다: 'z'"),
             ("argument --out: expected one argument", "인수 --out: 값 하나가 필요합니다"),
         ):
             with self.subTest(message=message):

@@ -2052,9 +2052,22 @@ class DocumentedEndpointsExistTest(unittest.TestCase):
         }
         missing = sorted(row for row in rest_rows if row not in routes)
         self.assertEqual(missing, [], "documented but not a route of api-serve")
-        undocumented = sorted(row for row in routes if row[1].startswith("/api/") and row not in rest_rows)
+        # R10-8: was limited to /api/ routes — /gui, /gui.css, /gui.js and
+        # FastAPI's /docs, /docs/oauth2-redirect, /redoc, /openapi.json were
+        # routes the REST table did not list. Every route is documented now
+        # and the automatic docs are disabled.
+        undocumented = sorted(row for row in routes if row not in rest_rows)
         self.assertEqual(undocumented, [], "a route of api-serve missing from the REST table")
         self.assertIn(("POST", "/api/analyze-upload"), rest_rows)
+        self.assertTrue({("GET", "/gui"), ("GET", "/gui.css"), ("GET", "/gui.js")} <= rest_rows)
+        from fastapi.testclient import TestClient
+
+        client = TestClient(api_server.create_app())
+        for path in ("/docs", "/docs/oauth2-redirect", "/redoc", "/openapi.json"):
+            with self.subTest(path=path):
+                response = client.get(path)
+                self.assertEqual(response.status_code, 404)
+                self.assertEqual(response.json().get("detail"), "찾을 수 없는 경로입니다")
 
     def test_web_table_matches_web_server_routes(self) -> None:
         import json as _json

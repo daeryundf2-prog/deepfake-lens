@@ -95,12 +95,20 @@ def parse_feedback_rows(text: str, path: Path | str) -> list[object]:
         # A lone JSON object is a single examiner row.
         return [payload]
     rows: list[object] = []
-    for number, line in enumerate(text.splitlines(), start=1):
+    offset = 0
+    for number, raw_line in enumerate(text.splitlines(keepends=True), start=1):
+        line, start = raw_line.rstrip("\r\n"), offset
+        offset += len(raw_line)
         if not line.strip():
             continue
         try:
             rows.append(json.loads(line))
-        except (json.JSONDecodeError, RecursionError) as exc:
+        except json.JSONDecodeError as exc:
+            # R10-8: the position is reported in the file's own lines ("2행 …
+            # (2행 109열)"), not the line-relative "(1행 109열)".
+            in_file = json.JSONDecodeError(exc.msg, text, start + exc.pos)
+            raise FeedbackFileError(FEEDBACK_LINE_UNPARSABLE.format(line=number, path=path, reason=read_error_ko(in_file))) from exc
+        except RecursionError as exc:
             raise FeedbackFileError(FEEDBACK_LINE_UNPARSABLE.format(line=number, path=path, reason=read_error_ko(exc))) from exc
     return rows
 

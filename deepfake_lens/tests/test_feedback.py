@@ -88,6 +88,15 @@ class LoadFeedbackTest(unittest.TestCase):
             with self.assertRaises(FeedbackFileError) as caught:
                 load_feedback(cut)
             self.assertIn("피드백 파일 3행을 해석할 수 없습니다", str(caught.exception))
+            # R10-8: the JSON position names the same file line ("3행 …(3행 N열)"),
+            # not the line-relative "(1행 N열)"; a BOM does not shift it.
+            self.assertRegex(str(caught.exception), r"\(3행 \d+열\)$")
+            self.assertNotIn("(1행", str(caught.exception))
+            cut_bom = root / "cut_bom.jsonl"
+            cut_bom.write_bytes(b"\xef\xbb\xbf" + (rows + '{"path": "/c.png", "expected_la').encode("utf-8"))
+            with self.assertRaises(FeedbackFileError) as caught:
+                load_feedback(cut_bom)
+            self.assertRegex(str(caught.exception), r"피드백 파일 3행을 해석할 수 없습니다: .*\(3행 \d+열\)$")
             middle = root / "middle.jsonl"
             middle.write_text('{"path": "/a.png", "expected_label": "ai"}\nnot json\n{"path": "/b.png", "expected_label": "real"}\n', encoding="utf-8")
             unlabeled = root / "unlabeled.jsonl"

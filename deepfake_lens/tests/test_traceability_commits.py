@@ -170,6 +170,19 @@ class GitRoundTripTest(unittest.TestCase):
         code, text = self.run_main("--check")
         self.assertEqual(code, 1, text)
         self.assertIn("추적표 파일 밖의 파일도 바꿨습니다: f.txt", text)
+        # R10-8: the message names every file the regeneration commit may hold,
+        # the conformance record included.
+        self.assertIn("docs/CONFORMANCE.md", text)
+
+    def test_r10_8_conformance_record_may_ride_with_the_regeneration(self) -> None:
+        """R10-8: docs/CONFORMANCE.md (scripts/qa_phase0.py) is a generated record the
+        regeneration commit may carry; the docstring and the message say so."""
+        self.run_main()
+        (self.root / "docs" / "CONFORMANCE.md").write_text("# 적합성 표\n", encoding="utf-8")
+        self.commit("docs: regenerate table and conformance record (P12)")
+        code, text = self.run_main("--check")
+        self.assertEqual(code, 0, text)
+        self.assertIn("docs/CONFORMANCE.md", btc.__doc__ or "")
 
     def test_check_fails_on_hand_edit_and_on_rewritten_history(self) -> None:
         self.run_main()

@@ -266,7 +266,12 @@ def create_app(
     from .analysis_api import analyze_path, load_thresholds
     from .webapp_api import ReadRootDenied, read_root_denied_body
 
-    app = FastAPI(title="Deepfake Lens API", version="0.1.0")
+    # R10-8 (round 10): FastAPI's automatic /docs, /docs/oauth2-redirect,
+    # /redoc and /openapi.json were routes missing from the service
+    # document's REST table — an English Swagger/ReDoc UI (rule 3) that also
+    # bypassed the documented surface. They are disabled; the REST table in
+    # docs/deepfake-lens-service.md is the API's description.
+    app = FastAPI(title="Deepfake Lens API", version="0.1.0", docs_url=None, redoc_url=None, openapi_url=None)
 
     from fastapi.exceptions import RequestValidationError
 
