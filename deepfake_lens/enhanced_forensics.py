@@ -69,7 +69,7 @@ class ForensicReport:
             "=== 포렌식 분석 보고서 ===",
             f"보고서 ID: {self.report_id}",
             f"분석 일시: {self.analysis_timestamp}",
-            f"분석자: {self.analyst_id}",
+            f"분석자: {analyst_label(self.analyst_id)}",
             f"도구 버전: {self.tool_version}",
             f"관할권: {self.jurisdiction}",
             "",
@@ -106,6 +106,18 @@ class ForensicReport:
         ])
 
         return "\n".join(lines)
+
+
+# G16 (round 5): the default analyst id "system" means "no named analyst —
+# produced automatically"; the text renderings say so in Korean (the JSON
+# keeps the id).
+SYSTEM_ANALYST_ID = "system"
+SYSTEM_ANALYST_LABEL = "시스템(자동)"
+
+
+def analyst_label(analyst_id: object) -> str:
+    text = str(analyst_id or "").strip()
+    return SYSTEM_ANALYST_LABEL if text in ("", SYSTEM_ANALYST_ID) else text
 
 def analyze_forensic(path: Path | str) -> ForensicReport:
     """Perform comprehensive forensic analysis."""
@@ -423,7 +435,7 @@ def legal_report_text(report: dict[str, Any]) -> str:
         "=== 포렌식 분석 보고서 ===",
         f"보고서 ID: {report.get('report_id', '')}",
         f"분석 일시: {report.get('generated_at', '')}",
-        f"분석자: {report.get('analyst_id', '')}",
+        f"분석자: {analyst_label(report.get('analyst_id', ''))}",
         f"도구 버전: {report.get('tool_version', '')}",
         f"관할권: {report.get('jurisdiction', '')}",
         "",

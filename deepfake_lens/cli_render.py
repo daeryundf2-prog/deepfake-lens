@@ -26,6 +26,8 @@ from .result_text import (
 )
 from .result_types import (
     EVIDENCE_KIND_LABELS,
+    GRADE_LABELS,
+    SOURCE_CONFIDENCE_LABELS,
     VERDICT_LABELS,
     CoverageStatus,
     EvidenceKind,
@@ -237,6 +239,10 @@ def _write_csv(path: Path, items: list[ScanItem], *, coverage: dict[str, object]
                 "coverage_failed",
                 "coverage_skipped",
                 "score_is_calibrated",
+                # G16 (round 5): every code column has a Korean label column
+                # (appended, so earlier positions hold): kind, status, grade,
+                # source_confidence and top_evidence.
+                *CSV_LABEL_COLUMNS,
             ]
         )
         for item in items:
@@ -263,8 +269,25 @@ def _write_csv(path: Path, items: list[ScanItem], *, coverage: dict[str, object]
                     result.signals[0].title if result and result.signals else "",
                     item.error or "",
                     *_csv_v2_columns(item),
+                    *_csv_label_columns(item),
                 ]
             )
+
+
+CSV_LABEL_COLUMNS = ("kind_label", "status_label", "grade_label", "source_confidence_label", "top_evidence_label")
+
+
+def _csv_label_columns(item: ScanItem) -> list[object]:
+    """Korean labels for the code columns of one CSV row (G16)."""
+    result = item.result
+    top = deciding_evidence(result) if result else None
+    return [
+        item_kind_label(item.kind),
+        status_label(item.status) if not (result and is_verdict_row(item.status, True)) else "분석됨",
+        GRADE_LABELS[result.grade] if result else "",
+        SOURCE_CONFIDENCE_LABELS[result.source_guess.confidence] if result else "",
+        f"[{EVIDENCE_KIND_LABELS[top.kind]}] {top.title}" if top else "",
+    ]
 
 
 def _csv_v2_columns(item: ScanItem) -> list[object]:

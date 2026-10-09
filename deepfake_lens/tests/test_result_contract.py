@@ -307,6 +307,32 @@ class RendererTest(unittest.TestCase):
         self.assertEqual(by_path["note.txt"]["grade"], "reference")
         self.assertGreaterEqual(int(by_path["note.txt"]["evidence_lexical"]), 1)
 
+    def test_csv_code_columns_have_korean_label_columns(self) -> None:
+        """G16 (round 5): every code column (verdict_code, kind, status, grade,
+        source_confidence, top_evidence) has a Korean label column next to the code."""
+        from deepfake_lens.cli_render import CSV_LABEL_COLUMNS, _write_csv
+
+        path = self.root / "labels.csv"
+        _write_csv(path, self.items)
+        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if not line.startswith("#")]
+        header = next(csv.reader(lines[:1]))
+        self.assertEqual(header[-len(CSV_LABEL_COLUMNS):], list(CSV_LABEL_COLUMNS))
+        self.assertIn("verdict_label", header)
+        by_path = {row["path"]: row for row in csv.DictReader(lines)}
+        a1111 = by_path["a1111.png"]
+        self.assertEqual((a1111["verdict_code"], a1111["verdict_label"]), ("manipulation_evidence", "조작·생성 근거 있음"))
+        self.assertEqual((a1111["kind"], a1111["kind_label"]), ("image", "이미지"))
+        self.assertEqual((a1111["status"], a1111["status_label"]), ("analyzed", "분석됨"))
+        self.assertEqual((a1111["grade"], a1111["grade_label"]), ("evidence", "감정 근거로 사용 가능"))
+        self.assertTrue(a1111["top_evidence"].startswith("deterministic:"))
+        self.assertTrue(a1111["top_evidence_label"].startswith("[결정적 근거] "))
+        note = by_path["note.txt"]
+        self.assertEqual((note["grade"], note["grade_label"]), ("reference", "참고"))
+        self.assertEqual(note["source_confidence_label"], "알 수 없음")
+        for row in by_path.values():
+            for column in CSV_LABEL_COLUMNS:
+                self.assertNotRegex(row[column], r"^(?:image|text|analyzed|skipped|failed|evidence|reference|unknown|high|low)$", column)
+
     def test_csv_score_column_is_calibrated_or_blank_and_risk_is_the_conclusion(self) -> None:
         """R16: `score`/`risk` became `보정점수(미보정시 공란)`/`결론` (same positions)."""
         from dataclasses import replace

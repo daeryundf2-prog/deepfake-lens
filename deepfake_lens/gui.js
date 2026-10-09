@@ -968,10 +968,10 @@
                         <div class="rev-row">
                             <label class="rev-lbl">검토 판정:</label>
                             <select class="rev-verdict-sel">
-                                <option value="unreviewed">미검토 (Pending)</option>
-                                <option value="synthetic">인공합성 의심 (Synthetic)</option>
-                                <option value="authentic">원본 정상 (Authentic)</option>
-                                <option value="inconclusive">판단 보류 (Inconclusive)</option>
+                                <option value="unreviewed">미검토</option>
+                                <option value="synthetic">인공합성 의심</option>
+                                <option value="authentic">원본 정상</option>
+                                <option value="inconclusive">판단 보류</option>
                             </select>
                         </div>
                         <span class="rev-sync-status"></span>

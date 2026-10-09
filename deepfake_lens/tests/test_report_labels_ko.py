@@ -235,6 +235,30 @@ class LegalReportTextTest(unittest.TestCase):
             self.assertNotIn(raw, text)
 
 
+class AnalystAndReviewLabelsTest(unittest.TestCase):
+    """G16 (round 5): "분석자: system" and the GUI review options in English."""
+
+    def test_default_analyst_is_shown_as_automatic_system(self) -> None:
+        from deepfake_lens.enhanced_forensics import analyst_label, legal_report_text
+
+        self.assertEqual(analyst_label("system"), "시스템(자동)")
+        self.assertEqual(analyst_label(""), "시스템(자동)")
+        self.assertEqual(analyst_label("김감정"), "김감정")
+        text = legal_report_text({"analyst_id": "system", "file": {}, "conclusion": {}})
+        self.assertIn("분석자: 시스템(자동)", text)
+        self.assertNotIn("분석자: system", text)
+
+    def test_gui_review_options_are_korean_only(self) -> None:
+        source = (Path(__file__).resolve().parents[1] / "gui.js").read_text(encoding="utf-8")
+        options = re.findall(r'<option value="(unreviewed|synthetic|authentic|inconclusive)">([^<]*)</option>', source)
+        self.assertEqual(
+            options,
+            [("unreviewed", "미검토"), ("synthetic", "인공합성 의심"), ("authentic", "원본 정상"), ("inconclusive", "판단 보류")],
+        )
+        for english in ("(Pending)", "(Synthetic)", "(Authentic)", "(Inconclusive)"):
+            self.assertNotIn(english, source)
+
+
 class AnalysisResultTextTest(unittest.TestCase):
     """G1 (round 5): the analysis_result text rendering uses labels only."""
 
