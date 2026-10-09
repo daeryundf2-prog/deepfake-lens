@@ -516,6 +516,95 @@ class EvidenceStatementHashSourceTest(unittest.TestCase):
         self.assertEqual(statement.entries[0].sha256, "")
 
 
+@unittest.skipUnless(hasattr(os, "symlink"), "symlinks not available")
+class EvidenceStatementSymlinkTest(unittest.TestCase):
+    """N2: a symbolic link is never followed when the statement hashes a row,
+    and rows without a verdict print a Korean status line."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        base = Path(self.tmp.name).resolve()
+        self.case = base / "case"
+        self.case.mkdir()
+        (self.case / "real.txt").write_text("사건 메모 원문입니다.\n", encoding="utf-8")
+        self.outside = base / "outside-secret.txt"
+        self.outside.write_text("폴더 밖 파일 — 해시되면 안 됩니다\n", encoding="utf-8")
+        try:
+            (self.case / "in_link.txt").symlink_to("real.txt")
+            (self.case / "out_link.txt").symlink_to(self.outside)
+            (self.case / "linked_dir").symlink_to(self.case, target_is_directory=True)
+        except OSError as exc:  # pragma: no cover - Windows without privilege
+            self.skipTest(f"cannot create symlinks: {exc}")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    @staticmethod
+    def _sha(path: Path) -> str:
+        import hashlib
+
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def _entries(self, items: list[ScanItem]) -> dict[str, Any]:
+        statement = build_evidence_statement(items, scan_root=self.case)
+        return {entry.file_path: entry for entry in statement.entries}
+
+    def test_scanned_symlink_rows_are_not_hashed_and_read_as_skipped(self) -> None:
+        from deepfake_lens.analysis_api import AnalysisOptions, scan_folder
+
+        _, items, _ = scan_folder(self.case, AnalysisOptions())
+        entries = self._entries(items)
+        digests = {self._sha(self.case / "real.txt"), self._sha(self.outside)}
+        for name in ("in_link.txt", "out_link.txt"):
+            with self.subTest(row=name):
+                entry = entries[name]
+                self.assertEqual(entry.sha256, "")
+                self.assertNotIn(entry.sha256, digests)
+                purpose = entry.purpose_of_proof
+                self.assertIn("해시 불가(심볼릭 링크 — 링크를 따라가지 않음)", purpose)
+                self.assertTrue(purpose.startswith("상태: 건너뜀 — 심볼릭 링크"), purpose)
+                self.assertNotIn("자동 분석 결론: skipped", purpose)
+                self.assertNotIn("skipped", purpose)
+                self.assertEqual(entry.verdict_label, "건너뜀")
+                for digest in digests:
+                    self.assertNotIn(digest, purpose)
+        self.assertEqual(entries["real.txt"].sha256, self._sha(self.case / "real.txt"))
+
+    def test_rows_without_digest_never_follow_a_link(self) -> None:
+        """A sha256-less row (old JSON) pointing at a link — or through a
+        linked folder — is refused, never hashed through the link."""
+        rows = [
+            ScanItem("in_link.txt", "in_link.txt", "text", "analyzed", 1),
+            ScanItem("out_link.txt", "out_link.txt", "text", "analyzed", 1),
+            ScanItem("linked_dir/real.txt", "real.txt", "text", "analyzed", 1),
+        ]
+        entries = self._entries(rows)
+        for path in ("in_link.txt", "out_link.txt", "linked_dir/real.txt"):
+            with self.subTest(row=path):
+                self.assertEqual(entries[path].sha256, "")
+                self.assertIn("해시 불가(심볼릭 링크 — 링크를 따라가지 않음)", entries[path].purpose_of_proof)
+        # An absolute path to the outside link (no scan root) is refused too.
+        absolute = build_evidence_statement([ScanItem(str(self.case / "out_link.txt"), "out_link.txt", "text", "analyzed", 1)])
+        self.assertEqual(absolute.entries[0].sha256, "")
+
+    def test_non_verdict_rows_print_a_korean_status_line(self) -> None:
+        rows = [
+            ScanItem("a.xyz", "a.xyz", "unsupported", "unsupported", 3, error="지원 형식이 아닙니다."),
+            ScanItem("b.jpg", "b.jpg", "image", "failed", 0, error="분석 오류: RuntimeError: 디코더 실패"),
+            ScanItem("c.txt", "c.txt", "duplicate", "duplicate", 3, error="중복 내용(동일 해시)"),
+        ]
+        entries = self._entries(rows)
+        expected = {"a.xyz": "상태: 미지원 — 지원 형식이 아닙니다.", "b.jpg": "상태: 실패 — 분석 오류: RuntimeError: 디코더 실패", "c.txt": "상태: 중복 — 중복 내용(동일 해시)"}
+        for path, head in expected.items():
+            with self.subTest(row=path):
+                purpose = entries[path].purpose_of_proof
+                self.assertEqual(purpose.splitlines()[0], head)
+                self.assertNotIn("[자동 분석 결론:", purpose)
+        markdown = build_evidence_statement(rows, scan_root=self.case).to_markdown()
+        for raw in ("unsupported", "failed", "duplicate", "skipped"):
+            self.assertNotIn(f"결론: {raw}", markdown)
+
+
 class PdfDependencyMissingTest(unittest.TestCase):
     """R6: --evidence-statement-pdf-out (and evidence-statement --pdf-out)
     without pymupdf -> a Korean message naming the package, exit 2, no

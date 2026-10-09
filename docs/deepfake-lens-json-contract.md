@@ -355,6 +355,14 @@ contract above — and its `verdict` is the three-verdict text.
 
 The evidence-statement entry's verdict label is `entries[].verdict_label`
 (formerly `band_label`; it always held the three-verdict label).
+For a row without a verdict (status `skipped`/`unsupported`/`failed`/
+`duplicate`) it is the Korean status label (`건너뜀`/`미지원`/`실패`/`중복`)
+and `purpose_of_proof` starts with `상태: <label> — <reason>` instead of
+`[자동 분석 결론: … / 등급: …]` (N2). A row's `sha256` is the scan's digest;
+a row without one is hashed from the scan folder, never through a symbolic
+link (the file itself or any folder on its path; opened with O_NOFOLLOW) —
+such a row prints `해시 불가(심볼릭 링크 — 링크를 따라가지 않음)` and an
+archive member without a digest `해시 불가(압축 파일 구성원 — …)`.
 
 ## Measurement records (phase 0, WP-I — G26/G27/G28)
 

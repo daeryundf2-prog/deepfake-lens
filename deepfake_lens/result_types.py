@@ -430,6 +430,22 @@ LEGACY_SUMMARY_KEYS = frozenset({"high", "medium", "unknown", "low"})
 NON_VERDICT_STATUSES = frozenset({"failed", "unsupported", "duplicate", "skipped"})
 
 
+# Korean label of a row status that carries no verdict (N2/N7): shown in the
+# CLI table's 결론 column and the evidence statement's status line instead
+# of the raw status code.
+STATUS_LABELS = {
+    "skipped": "건너뜀",
+    "unsupported": "미지원",
+    "failed": "실패",
+    "duplicate": "중복",
+}
+
+
+def status_label(status: object) -> str:
+    """Korean label of a non-verdict row status (raw value if unknown)."""
+    return STATUS_LABELS.get(str(status), str(status))
+
+
 def is_verdict_row(status: object, has_result: bool) -> bool:
     """True when a scan row is counted by its verdict (R5)."""
     return has_result and str(status) not in NON_VERDICT_STATUSES

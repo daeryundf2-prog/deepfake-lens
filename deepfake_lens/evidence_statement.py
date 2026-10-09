@@ -22,8 +22,11 @@ signed JSON, or state "서명 없음" when no key is configured.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
+import os
+import stat
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -32,7 +35,7 @@ from typing import Any
 
 from .core import BatchScanSummary, ScanItem
 from .result_text import TEXT_LEGAL_LIMITATION, coverage_gaps, evidence_groups
-from .result_types import VERDICT_LABELS, CoverageStatus, EvidenceDirection, EvidenceKind, EvidenceStrength, Grade, Verdict
+from .result_types import VERDICT_LABELS, CoverageStatus, EvidenceDirection, EvidenceKind, EvidenceStrength, Grade, Verdict, is_verdict_row, status_label
 from .signing import resolve_report_key, sign_report
 
 # Marks a signed body as a 증거설명서 so it can never be mistaken for (or
@@ -126,21 +129,61 @@ class EvidenceStatement:
         return "\n".join(lines)
 
 
-def _compute_sha256(path: Path | str) -> str | None:
+# N2: why a row has no SHA-256, printed in the hash line.
+HASH_UNAVAILABLE_ACCESS = "해시 불가 — 원본 파일 접근 실패 (동일성 확인 요망)"
+HASH_UNAVAILABLE_SYMLINK = "해시 불가(심볼릭 링크 — 링크를 따라가지 않음)"
+HASH_UNAVAILABLE_MEMBER = "해시 불가(압축 파일 구성원 — 압축 파일 행의 해시로 동일성을 확인하십시오)"
+
+
+class _SymlinkRefused(Exception):
+    """The evidence path (or a folder on it) is a symbolic link (N2)."""
+
+
+def _no_symlink_on_path(path: Path, scan_root: Path | None) -> None:
+    """Raise _SymlinkRefused if ``path`` or a folder between it and ``scan_root`` is a link."""
+    parts = [path]
+    if scan_root is not None:
+        try:
+            relative: Path | None = path.relative_to(scan_root)
+        except ValueError:
+            relative = None
+        if relative is not None:
+            parts.extend(scan_root / Path(*relative.parts[:depth]) for depth in range(1, len(relative.parts)))
+    for part in parts:
+        try:
+            mode = os.lstat(part).st_mode
+        except OSError:
+            continue
+        if stat.S_ISLNK(mode):
+            raise _SymlinkRefused(str(part))
+
+
+def _compute_sha256(path: Path | str, scan_root: Path | str | None = None) -> str | None:
     """Full streaming hash of the evidence file, or None if unavailable.
 
     A path string is never hashed as a substitute for content — an absent
     hash must be rendered as 'unavailable', not as a digest-shaped value.
+    N2: a symbolic link is never followed — not the file itself, not a
+    folder between it and ``scan_root`` — and the open uses O_NOFOLLOW so
+    a link swapped in after the check is refused too (:class:`_SymlinkRefused`).
     """
     p = Path(path)
+    _no_symlink_on_path(p, Path(scan_root) if scan_root is not None else None)
     try:
-        if not p.is_file():
-            return None
+        info = os.lstat(p)
     except OSError:
+        return None
+    if not stat.S_ISREG(info.st_mode):
         return None
     h = hashlib.sha256()
     try:
-        with p.open("rb") as f:
+        fd = os.open(p, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise _SymlinkRefused(str(p)) from exc
+        return None
+    try:
+        with os.fdopen(fd, "rb") as f:
             while chunk := f.read(64 * 1024):
                 h.update(chunk)
         return h.hexdigest()
@@ -148,8 +191,8 @@ def _compute_sha256(path: Path | str) -> str | None:
         return None
 
 
-def _item_sha256(item: ScanItem, scan_root: Path | str | None) -> str | None:
-    """The evidence file's SHA-256 for one statement row (D5).
+def _item_hash(item: ScanItem, scan_root: Path | str | None) -> tuple[str | None, str]:
+    """``(sha256, unavailable reason)`` for one statement row (D5, N2).
 
     The scan already hashed the bytes it analyzed (``item.sha256``, WP-G),
     so that digest is used as is — re-reading the file later could hash a
@@ -158,18 +201,32 @@ def _item_sha256(item: ScanItem, scan_root: Path | str | None) -> str | None:
     relative ``item.path`` is resolved against ``scan_root`` (the scanned
     folder), never against the process working directory. A relative path
     with no ``scan_root`` and archive-member paths (``a.zip::x``) are not
-    hashable and yield None ("해시 불가").
+    hashable. A symlink row (the scan never followed it) and any path that
+    is or passes through a symbolic link yield
+    :data:`HASH_UNAVAILABLE_SYMLINK` — the link is never followed (N2).
     """
     if item.sha256:
-        return item.sha256
+        return item.sha256, ""
     if "::" in item.path:
-        return None
+        return None, HASH_UNAVAILABLE_MEMBER
+    if item.status == "skipped" and (item.error or "").startswith("심볼릭 링크"):
+        return None, HASH_UNAVAILABLE_SYMLINK
     path = Path(item.path)
+    root = Path(scan_root) if scan_root is not None else None
     if not path.is_absolute():
-        if scan_root is None:
-            return None
-        path = Path(scan_root) / path
-    return _compute_sha256(path)
+        if root is None:
+            return None, HASH_UNAVAILABLE_ACCESS
+        path = root / path
+    try:
+        digest = _compute_sha256(path, root)
+    except _SymlinkRefused:
+        return None, HASH_UNAVAILABLE_SYMLINK
+    return digest, "" if digest else HASH_UNAVAILABLE_ACCESS
+
+
+def _item_sha256(item: ScanItem, scan_root: Path | str | None) -> str | None:
+    """The row's SHA-256 or None (see :func:`_item_hash`)."""
+    return _item_hash(item, scan_root)[0]
 
 
 def _determine_statutes(score: int, signals: list[Any], item_kind: str, band: str) -> list[str]:
@@ -197,8 +254,9 @@ def _determine_statutes(score: int, signals: list[Any], item_kind: str, band: st
 
 def _purpose_head(item: ScanItem) -> str:
     res = item.result
-    if res is None:
-        return "분석 불가 상태의 증거물로, 별도 검증이 필요함을 소명함."
+    if res is None or not is_verdict_row(item.status, True):
+        # N2: skipped/unsupported/failed/duplicate rows carry no conclusion.
+        return f"자동 분석 결론이 없는 증거물({status_label(item.status or 'failed')})로, 별도 검증이 필요함을 소명함."
     if res.grade == Grade.REFERENCE:
         return f"{TEXT_LEGAL_LIMITATION} 본 증거물에 대한 자동 분석 결과는 결론이 아닌 참고 정보임을 소명함."
     if res.verdict_code == Verdict.MANIPULATION_EVIDENCE:
@@ -254,9 +312,12 @@ def build_evidence_statement(
             if res is not None and res.verdict_code == Verdict.MANIPULATION_EVIDENCE and res.grade == Grade.EVIDENCE
             else "unknown"
         )
-        band = VERDICT_LABELS[res.verdict_code] if res else (item.status or "판단 불가")
+        # N2: a row without a verdict (skipped/unsupported/failed/duplicate)
+        # is labelled by its Korean status, never by the raw status code.
+        verdict_row = res is not None and is_verdict_row(item.status, True)
+        band = VERDICT_LABELS[res.verdict_code] if res is not None and verdict_row else status_label(item.status or "failed")
         signals = res.signals if res else []
-        file_sha256 = _item_sha256(item, scan_root)
+        file_sha256, hash_unavailable = _item_hash(item, scan_root)
 
         exhibit_no = f"{exhibit_prefix}{idx}호증"
         doc_name = f"디지털 증거 파일 ({Path(item.path).name}) 및 AI 스크리닝 데이터"
@@ -278,11 +339,15 @@ def build_evidence_statement(
 
         statute_text = "\n".join([f"• {st}" for st in statutes]) if statutes else "• 관련 법조: 해당 없음 (결정적 근거에 의한 조작·생성 결론이 없음)"
 
-        hash_text = f"• 원본 SHA-256: {file_sha256}" if file_sha256 else "• 원본 SHA-256: 해시 불가 — 원본 파일 접근 실패 (동일성 확인 요망)"
+        hash_text = f"• 원본 SHA-256: {file_sha256}" if file_sha256 else f"• 원본 SHA-256: {hash_unavailable or HASH_UNAVAILABLE_ACCESS}"
 
-        grade_text = (res.grade_label if res else "판단 불가")
+        if verdict_row and res is not None:
+            head_line = f"[자동 분석 결론: {band} / 등급: {res.grade_label} — 유죄·불법성의 직접 증거가 아님]"
+        else:
+            reason = (item.error or "").strip() or "사유 기록 없음"
+            head_line = f"상태: {band} — {reason}"
         purpose = (
-            f"[자동 분석 결론: {band} / 등급: {grade_text} — 유죄·불법성의 직접 증거가 아님]\n"
+            f"{head_line}\n"
             f"{purpose_head}\n"
             f"{sig_text}\n"
             f"{statute_text}\n"
