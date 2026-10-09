@@ -57,3 +57,18 @@ def json_bytes(obj: Any, **kwargs: Any) -> bytes:
 def write_json(path: Path | str, obj: Any, **kwargs: Any) -> None:
     """Write :func:`json_dumps` of ``obj`` plus a newline to ``path`` as UTF-8."""
     Path(path).write_text(json_dumps(obj, **kwargs) + "\n", encoding="utf-8")
+
+
+# R11-6 (round 11): JSON embedded in an HTML ``<script>`` element. Escaping
+# only "</" left "<!--<script>" (a file name) in the element, which puts an
+# HTML parser in the script "double-escaped" state, so the element's end is
+# no longer where the report's own markup ends. The standard safe embedding
+# writes every "<", ">", "&" and U+2028/U+2029 as a JSON escape: none of them
+# can then appear raw in the element, and ``json.loads`` reads the same value.
+_SCRIPT_UNSAFE = {"<": "\\u003c", ">": "\\u003e", "&": "\\u0026", "\u2028": "\\u2028", "\u2029": "\\u2029"}
+_SCRIPT_UNSAFE_RE = re.compile("[<>&\u2028\u2029]")
+
+
+def script_safe_json(obj: Any, **kwargs: Any) -> str:
+    """:func:`json_dumps` safe to place inside an HTML ``<script>`` element (R11-6)."""
+    return _SCRIPT_UNSAFE_RE.sub(lambda match: _SCRIPT_UNSAFE[match.group()], json_dumps(obj, **kwargs))

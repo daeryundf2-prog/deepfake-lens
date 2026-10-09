@@ -220,29 +220,24 @@
             return out;
         }
 
-        // R10-1: a file name as every report shows it (result_text.display_name):
+        // R10-1/R11-4: a file name as every report shows it (result_text.display_name):
         // controls and invisible characters (CR, LF, TAB, ESC, zero-width,
-        // bidi overrides) as escapes, "|" as "\|".
+        // bidi overrides) as escapes, "|" as "\|" and every literal "\" as
+        // "\\" — injective, so two different names never look the same.
         function displayName(value) {
-            let out = '', backslashes = 0;
+            let out = '';
             for (const ch of String(value)) {
                 const code = ch.codePointAt(0);
-                if (ch === '|') {
-                    out += (backslashes % 2 ? '\\'.repeat(backslashes) : '') + '\\|';
-                    backslashes = 0;
-                    continue;
-                }
-                let piece = ch;
-                if (ch === '\n') piece = '\\n';
-                else if (ch === '\r') piece = '\\r';
-                else if (ch === '\t') piece = '\\t';
+                if (ch === '\\') out += '\\\\';
+                else if (ch === '|') out += '\\|';
+                else if (ch === '\n') out += '\\n';
+                else if (ch === '\r') out += '\\r';
+                else if (ch === '\t') out += '\\t';
                 else if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/u.test(ch)) {
-                    piece = code < 0x100 ? '\\x' + code.toString(16).padStart(2, '0')
+                    out += code < 0x100 ? '\\x' + code.toString(16).padStart(2, '0')
                         : code < 0x10000 ? '\\u' + code.toString(16).padStart(4, '0')
                         : '\\U' + code.toString(16).padStart(8, '0');
-                }
-                out += piece;
-                backslashes = ch === '\\' ? backslashes + 1 : 0;
+                } else out += ch;
             }
             return out;
         }

@@ -214,8 +214,8 @@ class EnglishDetectorBypassTest(unittest.TestCase):
             "결과notreliable입니다": "not reliable",
             "Thе rеsult is fаkе": "The result is fake",  # Cyrillic е/а look-alikes
             "саution: fаke": None,  # checked below: flagged, wording may vary
-            "sc­ore un­re­li­able": "score unreliable",  # soft hyphens
-            "un​reliable re​sult": "unreliable result",  # zero-width spaces
+            "sc\u00adore un\u00adre\u00adli\u00adable": "score unreliable",  # soft hyphens
+            "un\u200breliable re\u200bsult": "unreliable result",  # zero-width spaces
         }
         for text, expected in cases.items():
             with self.subTest(text=text):
@@ -328,7 +328,7 @@ class JsonErrorTranslationTest(unittest.TestCase):
 
         from deepfake_lens.error_text import english_prose, read_error_ko
 
-        samples = ["{bad", "[1,]", '{"a":1,}', '{"a" 1}', "[1 2]", '"abc', '{"a":"\x01"}', '"\\q"', '"\\u12"', "1 2", "﻿{}", "", "["]
+        samples = ["{bad", "[1,]", '{"a":1,}', '{"a" 1}', "[1 2]", '"abc', '{"a":"\x01"}', '"\\q"', '"\\u12"', "1 2", "\ufeff{}", "", "["]
         seen = set()
         for sample in samples:
             with self.subTest(sample=sample):

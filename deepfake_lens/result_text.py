@@ -276,26 +276,25 @@ def _escape_unescaped_pipes(text: str) -> str:
 
 
 def display_name(text: object) -> str:
-    """A file name, path or echoed string as every text report shows it (R10-1).
+    """A file name, path or echoed string as every text report shows it (R10-1, R11-4).
 
-    Controls and invisible characters become escapes (:func:`escape_controls`)
-    and a Markdown table separator "|" becomes "\\|" — a literal backslash
-    right before a "|" is doubled so the "|" stays escaped. The result is one
-    line and contains no unescaped "|".
+    Controls and invisible characters become escapes (:func:`escape_controls`),
+    a Markdown table separator "|" becomes "\\|" and — R11-4 (round 11) —
+    every literal backslash becomes "\\\\". The mapping is injective: the
+    output is a sequence of the escapes "\\\\", "\\|", "\\n", "\\r", "\\t",
+    "\\xNN", "\\uNNNN", "\\UNNNNNNNN" and characters other than "\\", so two
+    different names never look the same (before R11-4 ``bs\\|p`` and
+    ``bs\\\\|p`` were both shown ``bs\\\\\\|p``, and a literal "\\n" looked
+    like a real LF). The result is one line and contains no unescaped "|".
     """
     out: list[str] = []
-    backslashes = 0
-    for char in escape_controls(text):
-        if char == "|":
-            # A run of literal backslashes before "|" is doubled ("a\|b" ->
-            # "a\\\|b") so a Markdown reader sees "\" then an escaped "|".
-            if backslashes % 2:
-                out.append("\\" * backslashes)
+    for char in str(text):
+        if char == "\\":
+            out.append("\\\\")
+        elif char == "|":
             out.append("\\|")
-            backslashes = 0
-            continue
-        out.append(char)
-        backslashes = backslashes + 1 if char == "\\" else 0
+        else:
+            out.append(escape_controls(char))
     return "".join(out)
 
 

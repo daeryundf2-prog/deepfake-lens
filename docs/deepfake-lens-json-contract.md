@@ -155,7 +155,9 @@ always `0` invited old-contract readings. They remain readable as
   string through `result_text.display_name`: CR, LF, TAB, ESC and every
   other C0/C1 control, zero-width/bidi format characters, U+2028/U+2029 and
   lone surrogates are written `\r`, `\n`, `\t`, `\xNN`, `\uNNNN`, and `|` is
-  written `\|` (a literal `\` right before a `|` is doubled), so a name can
+  written `\|` and — R11-4 (round 11) — every literal `\` is written `\\`,
+  so the shown text is injective (no two names look the same: `bs\|p` and
+  `bs\\|p`, or a literal `\n` and a real LF, used to) and a name can
   neither rewrite a table row nor add a Markdown column. Display strings
   inside the JSON (the evidence statement's `document_name`,
   `unrecorded_files.lines`) are built from shown names; `file_path` and

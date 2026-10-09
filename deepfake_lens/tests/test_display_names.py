@@ -35,12 +35,14 @@ A1111 = Path(__file__).resolve().parents[2] / "fixtures" / "benchmark" / "a1111-
 MANIPULATION = VERDICT_LABELS[Verdict.MANIPULATION_EVIDENCE]
 AUTHENTICITY = VERDICT_LABELS[Verdict.AUTHENTICITY_EVIDENCE]
 # Hostile names, every one an A1111 PNG (조작·생성 근거 있음 by its metadata).
+# R11-9 (round 11): invisible characters are written as escape sequences
+# (\u200b, \u202e …), never raw in the source (ruff PLE2502/PLE2515).
 HOSTILE_NAMES = (
     f"x\r{AUTHENTICITY}    근거   결정 1·통계 0·어휘 0     실행 3·미실행 5·실패 0      이미지    family_photo.png",
     f"a\n| **갑 제9호증** | 위조 행 | {AUTHENTICITY} |.png",
     "e\x1b[2K\x1b[1Aesc.png",
     f"p | {AUTHENTICITY} | q.png",
-    "z​w‮flip.png",
+    "z\u200bw\u202eflip.png",
     "t\tab.png",
     "b\\|slash.png",
     '=HYPERLINK("http:evil","x").png',
@@ -48,7 +50,7 @@ HOSTILE_NAMES = (
     "+cmd.png",
     "-2+3.png",
 )
-RAW_CONTROLS = ("\r", "\x1b", "​", "‮", "\t")
+RAW_CONTROLS = ("\r", "\x1b", "\u200b", "\u202e", "\t")
 
 
 def _run(argv: list[str]) -> tuple[int, str, str]:
@@ -112,7 +114,7 @@ class _ResultRows(HTMLParser):
 class DisplayNameUnitTest(unittest.TestCase):
     def test_controls_pipes_and_invisible_characters_are_escaped(self) -> None:
         self.assertEqual(display_name("a\r\n\t\x1bb"), "a\\r\\n\\t\\x1bb")
-        self.assertEqual(display_name("z​w‮ "), "z\\u200bw\\u202e\\u2028")
+        self.assertEqual(display_name("z\u200bw\u202e\u2028"), "z\\u200bw\\u202e\\u2028")
         self.assertEqual(display_name("p | q"), "p \\| q")
         # A literal backslash before "|" is doubled so the "|" stays escaped.
         self.assertEqual(display_name("b\\|s"), "b\\\\\\|s")
@@ -134,6 +136,86 @@ class DisplayNameUnitTest(unittest.TestCase):
         self.assertEqual(csv_cell(None), None)
 
 
+# R11-4 (round 11): an alphabet of every character display_name treats
+# specially, the letters its escapes use, and plain text.
+PROPERTY_ALPHABET = (
+    "\\", "|", "n", "r", "t", "x", "u", "U", "0", "1", "a", "f", ":", " ",
+    "\n", "\r", "\t", "\x1b", "\x00", "\x85", "\u200b", "\u202e", "\u2028", "\udcc1", "\udcff", "한", "\U0001f600",
+)
+_SIMPLE = {"\\": "\\", "|": "|", "n": "\n", "r": "\r", "t": "\t"}
+_HEX_WIDTH = {"x": 2, "u": 4, "U": 8}
+
+
+def undisplay_name(shown: str) -> str:
+    """The inverse of display_name (R11-4): raises ValueError on a malformed escape."""
+    out: list[str] = []
+    index = 0
+    while index < len(shown):
+        char = shown[index]
+        if char != "\\":
+            out.append(char)
+            index += 1
+            continue
+        code = shown[index + 1] if index + 1 < len(shown) else ""
+        if code in _SIMPLE:
+            out.append(_SIMPLE[code])
+            index += 2
+        elif code in _HEX_WIDTH:
+            width = _HEX_WIDTH[code]
+            digits = shown[index + 2:index + 2 + width]
+            if len(digits) != width:
+                raise ValueError(shown)
+            out.append(chr(int(digits, 16)))
+            index += 2 + width
+        else:
+            raise ValueError(shown)
+    return "".join(out)
+
+
+def random_names(count: int, seed: int) -> list[str]:
+    import random
+
+    rng = random.Random(seed)
+    return ["".join(rng.choice(PROPERTY_ALPHABET) for _ in range(rng.randint(0, 10))) for _ in range(count)]
+
+
+class DisplayNameInjectiveTest(unittest.TestCase):
+    """R11-4 (round 11): display_name is injective — "bs\\|p" and "bs\\\\|p" were both
+    shown "bs\\\\\\|p", and a literal "\\n" looked like a real LF."""
+
+    def test_reported_collisions_are_distinct(self) -> None:
+        self.assertNotEqual(display_name("bs\\|p"), display_name("bs\\\\|p"))
+        self.assertNotEqual(display_name("a\\nb"), display_name("a\nb"))
+        self.assertEqual(display_name("a\\nb"), "a\\\\nb")
+        self.assertEqual(display_name("a\nb"), "a\\nb")
+        self.assertEqual(display_name("C:\\Users\\x"), "C:\\\\Users\\\\x")
+        self.assertEqual(display_name("\\x1b"), "\\\\x1b")
+        self.assertEqual(display_name("\x1b"), "\\x1b")
+
+    def test_random_strings_round_trip(self) -> None:
+        names = random_names(20000, seed=1104)
+        shown = {}
+        for name in names:
+            text = display_name(name)
+            self.assertEqual(undisplay_name(text), name, repr(name))
+            self.assertNotIn("\n", text)
+            self.assertEqual(len(_markdown_cells(f"| {markdown_cell(text)} | x |")), 2, repr(name))
+            other = shown.setdefault(text, name)
+            self.assertEqual(other, name, f"collision: {other!r} and {name!r} both shown {text!r}")
+
+    def test_no_collision_among_all_short_strings(self) -> None:
+        import itertools
+
+        alphabet = ("\\", "|", "n", "x", "1", "\n", "\x1b")
+        seen: dict[str, str] = {}
+        for length in range(5):
+            for chars in itertools.product(alphabet, repeat=length):
+                name = "".join(chars)
+                other = seen.setdefault(display_name(name), name)
+                self.assertEqual(other, name)
+        self.assertEqual(len(seen), sum(len(alphabet) ** n for n in range(5)))
+
+
 @unittest.skipUnless(shutil.which("node"), "node required to run gui.js helpers")
 class GuiDisplayNameTest(unittest.TestCase):
     """The GUI's displayName/csvCell (gui.js) match result_text exactly."""
@@ -141,7 +223,8 @@ class GuiDisplayNameTest(unittest.TestCase):
     def test_gui_helpers_match_python(self) -> None:
         source = (Path(__file__).resolve().parents[1] / "gui.js").read_text(encoding="utf-8")
         start, end = source.index("function displayName(value)"), source.index("function escapeHtml(value)")
-        samples = [*HOSTILE_NAMES, "\udcff.png", "plain.png"]
+        # R11-4: plus random strings over the special characters (injective rule).
+        samples = [*HOSTILE_NAMES, "\udcff.png", "plain.png", "bs\\|p", "bs\\\\|p", "a\\nb", *random_names(2000, seed=1104)]
         script = (
             source[start:end]
             + "const samples = JSON.parse(require('fs').readFileSync(0, 'utf8'));\n"
@@ -289,6 +372,77 @@ class HostileNamesInEveryRenderingTest(unittest.TestCase):
         self.assertNotIn(AUTHENTICITY.split()[0], purposes)
         with pymupdf.open(str(statement)) as document:
             self._assert_no_raw_controls("".join(page.get_text() for page in document), "statement pdf")
+
+
+class EmbeddedReportJsonTest(unittest.TestCase):
+    """R11-6 (round 11): only "</" was escaped in the report JSON embedded in the HTML
+    report's <script> element — a name "<!--<script>.png" stayed raw in it (an HTML parser
+    then enters the script "double-escaped" state). Every "<", ">", "&", U+2028 and
+    U+2029 is now a JSON escape."""
+
+    NAMES = ("<!--<script>.png", "a&b\u2028c>.png", "x<\u2029y.png")
+
+    def test_script_safe_json_unit(self) -> None:
+        from deepfake_lens.json_text import script_safe_json
+
+        value = {"<k>": "</script><!--<script>&\u2028\u2029", "n": [1, "a\udcc1"]}
+        text = script_safe_json(value, sort_keys=True)
+        for char in "<>&\u2028\u2029":
+            self.assertNotIn(char, text)
+        self.assertEqual(json.loads(text), value)
+
+    def test_html_report_embeds_inert_json(self) -> None:
+        from deepfake_lens.reports import SIGNED_REPORT_SCRIPT_ID, extract_signed_report
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            folder = root / "case"
+            folder.mkdir()
+            for name in self.NAMES:
+                (folder / name).write_bytes(A1111.read_bytes())
+            key = root / "k.key"
+            key.write_text("r11-6-key-0123456789abcdef", encoding="utf-8")
+            html_out = root / "r.html"
+            saved = os.environ.pop("DEEPFAKE_LENS_REPORT_KEY", None)
+            try:
+                code, _, stderr = _run(["scan", str(folder), "--include-low", "--html-out", str(html_out), "--key-file", str(key)])
+            finally:
+                if saved is not None:
+                    os.environ["DEEPFAKE_LENS_REPORT_KEY"] = saved
+            self.assertEqual(code, 0, stderr)
+            html = html_out.read_text(encoding="utf-8")
+        marker = f'<script type="application/json" id="{SIGNED_REPORT_SCRIPT_ID}">'
+        start = html.index(marker) + len(marker)
+        element = html[start:html.index("</script>", start)]
+        for char in "<>&\u2028\u2029":
+            self.assertNotIn(char, element)
+        body = extract_signed_report(html)
+        assert body is not None
+        self.assertEqual(sorted(item["path"] for item in body["items"]), sorted(self.NAMES))
+
+        class Scripts(HTMLParser):
+            def __init__(self) -> None:
+                super().__init__()
+                self.scripts: list[str] = []
+                self._open = False
+
+            def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+                if tag == "script":
+                    self._open = True
+                    self.scripts.append("")
+
+            def handle_endtag(self, tag: str) -> None:
+                if tag == "script":
+                    self._open = False
+
+            def handle_data(self, data: str) -> None:
+                if self._open:
+                    self.scripts[-1] += data
+
+        parser = Scripts()
+        parser.feed(html)
+        self.assertEqual(len(parser.scripts), 1)
+        self.assertEqual(json.loads(parser.scripts[0]), body)
 
 
 if __name__ == "__main__":
