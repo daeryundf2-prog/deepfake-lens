@@ -70,6 +70,12 @@ UNSUPPORTED = "지원되지 않는 형식입니다: {path} (지원 형식: {form
 SYMLINK_REFUSED = "심볼릭 링크는 따라가지 않습니다: {path} — 링크 대상 파일을 직접 지정하십시오"
 NOT_REGULAR = "일반 파일이 아닙니다: {path}"
 UNREADABLE = "경로를 확인할 수 없습니다: {path}"
+# Y2 (round 7): an explicit --thresholds file that exists but is not a
+# threshold profile was a warning and the run went on with the defaults.
+THRESHOLDS_UNREADABLE = "임계값 프로필을 읽을 수 없거나 버전이 맞지 않습니다: {path} (layer-thresholds-v1 JSON이어야 합니다)"
+# Y7 (round 7): an output file argument naming an existing folder failed
+# after the scan with a generic error and a misleading "처리 오류 1건".
+OUTPUT_IS_FOLDER = "출력 경로가 폴더입니다: {path} — 저장할 파일 이름을 지정하십시오"
 FOLDER_HINT_SCAN = " (폴더는 scan을 사용)"
 FILE_HINT_SINGLE = " (단일 파일은 forensic/classify를 사용)"
 
@@ -227,6 +233,35 @@ COMMON_INPUT_SPECS: tuple[InputSpec, ...] = (
 # vendor-weights --models-dir may name the folder an --install creates.
 COMMON_INPUT_EXEMPT: dict[str, frozenset[str]] = {"vendor-weights": frozenset({"models_dir"})}
 
+# Y7: output arguments that name a file the command writes (folders such as
+# --output-dir, --frame-root, --heatmap-dir, --to, --bundle-to are not here).
+OUTPUT_FILE_ATTRS: tuple[str, ...] = (
+    "out", "output", "json_out", "csv_out", "html_out", "pdf_out", "md_out", "forensic_pdf_out",
+    "evidence_statement_out", "evidence_statement_pdf_out", "manifest_out", "audit_out", "split_out",
+    "robustness_out", "profile_out", "false_positive_out", "false_negative_out", "mapping_out",
+    "cache", "hash_db",
+)
+
+
+def require_output_file(path: Path | str) -> Path:
+    """Refuse an output-file argument that names an existing folder (Y7) — before any work."""
+    target = Path(path)
+    try:
+        is_dir = target.is_dir()
+    except OSError as exc:
+        raise UsageError(UNREADABLE.format(path=path)) from exc
+    if is_dir:
+        raise UsageError(OUTPUT_IS_FOLDER.format(path=path))
+    return target
+
+
+def require_threshold_profile(path: Path | str) -> None:
+    """An explicit --thresholds file must load as a threshold profile (Y2): else exit 2."""
+    from .calibration import load_threshold_profile
+
+    if load_threshold_profile(path) is None:
+        raise UsageError(THRESHOLDS_UNREADABLE.format(path=path))
+
 
 def command_key(args: argparse.Namespace) -> str:
     command = str(getattr(args, "command", "") or "")
@@ -253,3 +288,10 @@ def check_command_inputs(args: argparse.Namespace) -> None:
                 folder_hint=spec.folder_hint,
                 file_hint=spec.file_hint,
             )
+    thresholds = getattr(args, "thresholds", None)
+    if thresholds is not None and "thresholds" not in exempt:
+        require_threshold_profile(thresholds)  # Y2: unreadable profile -> exit 2
+    for attr in OUTPUT_FILE_ATTRS:
+        value = getattr(args, attr, None)
+        if isinstance(value, (str, Path)) and str(value):
+            require_output_file(value)  # Y7: a folder is not an output file

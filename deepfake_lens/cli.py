@@ -874,7 +874,12 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             try:
                 data = json.loads(target.read_text(encoding="utf-8"))
                 from .core import _scan_item_from_json
-                raw_items = data.get("items", [])
+                raw_items = data.get("items")
+                if not isinstance(raw_items, list) or not any(isinstance(row, dict) for row in raw_items):
+                    # Y1: a JSON without scan rows is not a scan result — no
+                    # empty statement with exit 0.
+                    print(f"오류: 검사 JSON에 items가 없습니다(검사 결과 행 0건): {target}", file=sys.stderr)
+                    return USAGE_EXIT
                 items = [_scan_item_from_json(row) for row in raw_items if isinstance(row, dict)]
                 stmt_thresholds = data.get("thresholds")
                 stmt_summary = data.get("summary") if isinstance(data.get("summary"), dict) else None

@@ -47,8 +47,35 @@ _ARGPARSE_ERRORS_KO: tuple[tuple[re.Pattern[str], str], ...] = tuple(
         (r"^unrecognized arguments: (.+)$", r"알 수 없는 인수: \1"),
         (r"^ambiguous option: (.+?) could match (.+)$", r"모호한 옵션 \1 — 후보: \2"),
         (r"^one of the arguments (.+) is required$", r"다음 인수 중 하나가 필요합니다: \1"),
+        (r"^argument (.+?): (경로가 비어 있습니다.*)$", r"인수 \1: \2"),
     )
 )
+
+# Y3 (round 7): `scan ""` scanned the current folder — Path("") is ".". Every
+# Path-typed argument goes through :func:`cli_path`, which refuses an empty
+# (or blank) value; the error is "오류: 인수 <name>: 경로가 비어 있습니다 …",
+# exit 2, before any work.
+EMPTY_PATH_MESSAGE = '경로가 비어 있습니다 — 빈 문자열("")은 경로로 쓸 수 없습니다(현재 폴더는 . 으로 지정)'
+
+
+def cli_path(value: str) -> Path:
+    """argparse ``type`` of every path argument: a Path, never from an empty string (Y3)."""
+    if not str(value).strip():
+        raise argparse.ArgumentTypeError(EMPTY_PATH_MESSAGE)
+    return Path(value)
+
+
+cli_path.__name__ = "path"
+
+
+def _refuse_empty_paths(parser: argparse.ArgumentParser) -> None:
+    """Replace ``type=Path`` by :func:`cli_path` on ``parser`` and every subparser (Y3)."""
+    for action in parser._actions:
+        if action.type is Path:
+            action.type = cli_path
+        if isinstance(action, argparse._SubParsersAction):
+            for sub in action.choices.values():
+                _refuse_empty_paths(sub)
 
 
 def korean_argparse_error(message: str) -> str:
@@ -80,6 +107,9 @@ class KoreanArgumentParser(argparse.ArgumentParser):
             self.add_argument("-h", "--help", action="help", default=argparse.SUPPRESS, help="이 도움말을 보여 주고 끝냄")
 
     def error(self, message: str) -> NoReturn:
+        if EMPTY_PATH_MESSAGE in message:
+            # Y3: the same one-line shape as the input-path checks (cli_inputs).
+            self.exit(2, f"오류: {korean_argparse_error(message)}\n")
         self.print_usage(sys.stderr)
         self.exit(2, f"{self.prog}: 오류: {korean_argparse_error(message)}\n")
 
@@ -492,6 +522,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     for sub in subparsers.choices.values():
         sub.add_argument("--verbose", action="store_true", help="처리 오류의 상세 로그(트레이스백)를 표준 오류에도 출력(기본: 로그 파일에만 기록)")
 
+    _refuse_empty_paths(parser)
     return parser, {
         "corpus": corpus_parser,
         "scan": scan_parser, "collect": collect_parser, "dataset": dataset_parser,

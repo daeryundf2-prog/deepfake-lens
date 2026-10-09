@@ -40,7 +40,7 @@ from deepfake_lens.cli_inputs import (
     UsageError,
     require_input_path,
 )
-from deepfake_lens.cli_parser import build_parser
+from deepfake_lens.cli_parser import build_parser, cli_path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 # Path-typed options that are outputs or state the command creates, not inputs.
@@ -155,7 +155,8 @@ def _subcommand_parsers() -> dict[str, argparse.ArgumentParser]:
 
 
 def _path_actions(parser: argparse.ArgumentParser) -> dict[str, argparse.Action]:
-    return {action.dest: action for action in parser._actions if action.type is Path}
+    # Y3: path arguments use cli_parser.cli_path (refuses an empty string).
+    return {action.dest: action for action in parser._actions if action.type in (Path, cli_path)}
 
 
 def _option_string(action: argparse.Action) -> str | None:
@@ -378,3 +379,71 @@ class RequireInputPathTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RoundSevenUsageErrorsTest(unittest.TestCase):
+    """Y1/Y2/Y3/Y7 (round 7): input/option problems found before any work — exit 2, "오류: …"."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        self.folder = self.root / "case"
+        self.folder.mkdir()
+        (self.folder / "a.txt").write_text("사람이 쓴 메모입니다.", encoding="utf-8")
+        self.garbage = self.root / "garbage.json"
+        self.garbage.write_text("{not json", encoding="utf-8")
+        self.listed = self.root / "list.json"
+        self.listed.write_text("[1, 2, 3]", encoding="utf-8")
+        self.no_items = self.root / "noitems.json"
+        self.no_items.write_text('{"schema_version": 2, "summary": {}}', encoding="utf-8")
+        self.empty_items = self.root / "emptyitems.json"
+        self.empty_items.write_text('{"items": []}', encoding="utf-8")
+        self.cwd = os.getcwd()
+        os.chdir(self.folder)  # `scan ""` must not scan the working folder
+        self.addCleanup(os.chdir, self.cwd)
+
+    def _run(self, argv: list[str]) -> tuple[int, str, str]:
+        from deepfake_lens import cli
+
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = cli.main(argv)
+            except SystemExit as exc:
+                code = exc.code if isinstance(exc.code, int) else 2
+        return code, out.getvalue(), err.getvalue()
+
+    def _assert_usage(self, argv: list[str], message: str) -> None:
+        code, stdout, stderr = self._run(argv)
+        self.assertEqual(code, 2, (argv, stderr, stdout[:200]))
+        self.assertTrue(stderr.startswith("오류:"), stderr)
+        self.assertIn(message, stderr)
+        self.assertEqual(stdout.strip(), "")
+        self.assertNotIn("Traceback", stderr)
+
+    def test_y1_scan_json_without_items(self) -> None:
+        for path in (self.no_items, self.empty_items):
+            with self.subTest(path=path.name):
+                self._assert_usage(["evidence-statement", str(path)], "검사 JSON에 items가 없습니다")
+        self._assert_usage(["evidence-statement", str(self.listed)], "검사 JSON을 해석할 수 없습니다")
+
+    def test_y2_unreadable_thresholds_profile(self) -> None:
+        for path in (self.garbage, self.listed, self.no_items):
+            png = self.root / "x.png"
+            png.write_bytes(b"\x89PNG\r\n\x1a\n")
+            for argv in (["scan", str(self.folder)], ["faceswap-seam", str(png)]):
+                with self.subTest(path=path.name, command=argv[0]):
+                    self._assert_usage([*argv, "--thresholds", str(path)], "임계값 프로필을 읽을 수 없거나 버전이 맞지 않습니다: ")
+
+    def test_y3_empty_path_is_refused(self) -> None:
+        for argv in (["scan", ""], [""], ["scan", "  "], ["forensic", ""], ["scan", str(self.folder), "--json-out", ""]):
+            with self.subTest(argv=argv):
+                self._assert_usage(argv, "경로가 비어 있습니다")
+
+    def test_y7_output_path_is_a_folder(self) -> None:
+        for flag in ("--html-out", "--json-out", "--csv-out", "--evidence-statement-out"):
+            with self.subTest(flag=flag):
+                self._assert_usage(["scan", str(self.folder), flag, str(self.root)], f"출력 경로가 폴더입니다: {self.root}")
+        self._assert_usage(["evidence-statement", str(self.folder), "--md-out", str(self.root)], "출력 경로가 폴더입니다: ")
+        self._assert_usage(["legal-report", str(self.folder / "a.txt"), "--output", str(self.root)], "출력 경로가 폴더입니다: ")
