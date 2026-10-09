@@ -136,10 +136,16 @@ and, for the streaming endpoints, no job is started (G31).
 | POST | `/api/scan/stream` | `directory`, `recursive` (bool), `max_files` (≤5000, default 200) | SSE batch scan of a server-local directory through `analysis_api.scan_folder_run` (the CLI's scan): `job` → `progress` per row (`{stage: "scan", index, total, path, status, verdict_code}`) → `result` (the `/api/scan` payload — `schema_version`, `summary`, `coverage`, `thresholds`, `items` — plus `mode: "scan"`, `directory`, `total`, `capped`, `counts`; `counts` = `manipulation_evidence`/`authenticity_evidence`/`undetermined` from the summary, `other` = skipped + duplicate rows, `failed` = `unsupported_or_failed`), or `error`/`cancelled` (`{job_id, total, done, processed}` — `total` = rows the scan planned before the first file, `done` = rows reported before the cancel, `processed` = `done` for older clients; N8) |
 | POST | `/api/jobs/{job_id}/cancel` | — | Sets the job's cancellation flag; takes effect at the next stage boundary (`{"status": "success", "cancelled": true}`, 404 for unknown/finished jobs) |
 | GET | `/api/jobs/{job_id}` | — | `{"job_id", "done", "cancelled"}` for in-flight stream jobs; 404 once the job is reaped |
-| GET | `/api/scan`, `/api/scan-status`, `/api/scan-cancel`, `/api/analyze-file`, `/api/heatmap`, `/api/preview` | as in the web GUI table below | Same payload functions as `web` (identical JSON); `/api/heatmap` is `image/png` (errors `text/plain`), `/api/preview` uses the file's media type; both send `X-Content-Type-Options: nosniff` |
+| GET | `/api/scan`, `/api/scan-status`, `/api/scan-cancel`, `/api/analyze-file`, `/api/heatmap`, `/api/preview`, `/api/stats`, `/api/reviews`, `/api/review` | as in the web GUI table below | Same payload functions as `web` (identical JSON); `/api/heatmap` is `image/png` (errors `text/plain`), `/api/preview` uses the file's media type; both send `X-Content-Type-Options: nosniff` |
+| POST | `/api/analyze-upload`, `/api/report`, `/api/feedback`, `/api/review` | as in the web GUI table below | Same payload functions as `web`; `/api/analyze-upload` is api-serve's upload endpoint (multipart, ≤ `MAX_UPLOAD_BYTES`) |
+| GET | `/api/artifacts/{artifact_id}/review` | — | `{"status", "artifact_id", "review"}` — the examiner review stored for that artifact (`~/.deepfake-lens/reviews.json`, override `DEEPFAKE_LENS_REVIEWS`) |
+| PUT | `/api/artifacts/{artifact_id}/review` | JSON object body | saves the review; `{"status", "artifact_id", "review"}` (400 for invalid JSON or a non-object body, E33) |
 
-`file_path` is a path **on the server's filesystem** — there is no upload
-endpoint. Analysis failures surface as HTTP 500 with the exception text.
+`file_path` is a path **on the server's filesystem**; bytes the client holds
+are analyzed through the upload endpoint `POST /api/analyze-upload`
+(multipart — R9-8: this paragraph used to say there was none). Upload rows
+are marked `"source": "upload"` and are never signed by `/api/report` (P6).
+Analysis failures surface as HTTP 500 with the exception text.
 
 `/api/check/stream` emits SSE frames `event: <name>\ndata: <json>\n\n`.
 Stage events carry `{stage, index, total}` (`core`, `forensic`/`text-advanced`,
@@ -163,7 +169,12 @@ the top level for clients of the earlier compact rows. `/api/check` returns
 ## Web GUI endpoints (`web`, default `127.0.0.1:8765`)
 
 JSON API under `/api/` (GET plus `POST /api/feedback`, `/api/report`,
-`/api/analyze-upload`); anything else serves the GUI HTML.
+`/api/analyze-upload`, `/api/check`, `/api/compare`, `/api/review`); anything
+else serves the GUI HTML. R9-8: every path in this table and in the REST
+table above is a route of its server (`test_servers.DocumentedEndpointsExistTest`).
+The GUI saves its examiner marks through `POST /api/review` (browser
+`localStorage` only as an offline fallback) — there is no `/api/review-marks`
+(it was documented here but never existed).
 
 | Path | Params | Response |
 |---|---|---|
@@ -174,8 +185,9 @@ JSON API under `/api/` (GET plus `POST /api/feedback`, `/api/report`,
 | `/api/heatmap` | `path`, `root` | PNG bytes; 403 unless `path` is a `.png` under a **server-registered** read root (see below), 404 if missing |
 | `/api/preview` | `path`, `root` | media bytes with `nosniff`; same registered-root rule, media extensions only, ≤128 MiB |
 | `/api/stats` | — | `{"status", "version", "modules"}` |
-| `/api/review-marks` | — | `{"status", "marks": {path: {star, note, ts}}}` — durable examiner marks store (default `~/.deepfake_lens/review-marks.json`, override `DEEPFAKE_LENS_REVIEW_STORE`) |
-| POST `/api/review-marks` | JSON `{"marks": {path: {star, note, ts}}}` (≤ 8 MiB) | merges per-key marks; an entry with neither `star` nor `note` deletes the key |
+| `/api/reviews` | — | `{"status", "reviews"}` — every stored examiner review (`~/.deepfake-lens/reviews.json`, override `DEEPFAKE_LENS_REVIEWS`) |
+| `/api/review` | `path` or `artifact_id` | `{"status", "artifact_id", "review"}`; 400 without either (E33) |
+| POST `/api/review` | JSON object `{"artifact_id" (or "path"), …review fields}` | saves the review; `{"status", "artifact_id", "review"}`; 400 for invalid JSON, a non-object body, a missing or non-string `artifact_id` (E33) |
 | POST `/api/analyze-upload` | multipart file body (≤ `MAX_UPLOAD_BYTES`) | upload-analysis payload |
 | POST `/api/compare` | multipart with two files | Two-file comparison — speaker distance (audio pair) or stylometry (text pair) |
 | POST `/api/check` | JSON `{"text": "...", "watermark_secret": "...", "watermark_gamma": 0.25}` **or** one multipart file | Unified check-all: full scan + all `models/` engine members + forensic + text probes → `{mode, item, advanced?, forensic?}` |
@@ -261,6 +273,7 @@ endpoints (`/api/analyze/*`, `/api/classify`, `/api/check`, `/api/compare`,
 | E42 | POST `/api/scan/stream` (api) | `directory` empty, folder missing, a file or unreadable — checked before the stream starts (R9-3: was 200 + an SSE `error` event) | 400 | `directory가 필요합니다` / `폴더를 찾을 수 없습니다: …` / `폴더가 아니라 파일입니다: …` (scan's S4 texts, as E7) |
 | E43 | POST `/api/scan/stream` (api) | folder outside the read roots — before the stream starts | 403 | `허용되지 않은 경로` |
 | E44 | POST `/api/check/stream` (api) | neither `file_path` nor `text`; text > 256 KB — before the stream starts (R9-3: was 200 + an SSE `error` event) | 400 | `file_path 또는 text가 필요합니다` / `텍스트가 256KB를 초과합니다` |
+| E45 | POST `/api/analyze/text` (api) | `text` empty or blank (R9-8: was 200 with the result of an empty text) | 400 | `분석할 텍스트가 비어 있습니다 — text 매개변수에 분석할 글을 넣으십시오` |
 
 The streaming endpoints (`/api/scan/stream`, `/api/check/stream`) validate
 every input before the stream starts (E6, E36, E38–E40, E42–E44): an

@@ -77,6 +77,9 @@ TEXT_OR_FILE_REQUIRED = "file_path 또는 text가 필요합니다"
 # R9-3 (round 9): /api/scan/stream without a folder; like every other
 # refusal of the stream endpoints it is a 400 before the stream starts.
 DIRECTORY_REQUIRED = "directory가 필요합니다"
+# R9-8 (round 9): /api/analyze/text?text= (empty or blank) answered 200 with
+# the result of an empty text.
+TEXT_EMPTY = "분석할 텍스트가 비어 있습니다 — text 매개변수에 분석할 글을 넣으십시오"
 
 # Packages the API server needs at runtime; missing ones make `api-serve`
 # exit 2 with an install hint instead of a traceback (G29).
@@ -436,8 +439,10 @@ def create_app(
         from .cli_standalone import analyze_text_payload
         from .layer_diagnostic import to_layer_diagnostic
         from .text_advanced import analyze_text_advanced
-        if len(text.strip()) > 256 * 1024:
-            raise HTTPException(status_code=400, detail="텍스트가 256KB를 초과합니다")
+        if not text.strip():
+            raise HTTPException(status_code=400, detail=TEXT_EMPTY)
+        if len(text.strip()) > MAX_TEXT_CHARS:
+            raise HTTPException(status_code=400, detail=TEXT_TOO_LARGE)
         try:
             options = _api_options()
             data = analyze_text_payload(text, options, command="analyze/text", thresholds=load_thresholds(options))

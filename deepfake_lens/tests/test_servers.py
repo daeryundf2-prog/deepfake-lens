@@ -1927,6 +1927,118 @@ class ApiErrorStatusTest(unittest.TestCase):
         self.assertEqual(webapp_api.api_status(webapp_api._scan_status_payload("job=deadbeef")), 404)
 
 
+class DocumentedEndpointsExistTest(unittest.TestCase):
+    """R9-8 (round 9): the service document listed `/api/review-marks` (404 on the server)
+    and said api-serve had no upload endpoint (it has /api/analyze-upload). Every endpoint
+    of the REST table is a route of api-serve, every endpoint of the web GUI table a route
+    of the web server — and every /api/ route of either server is documented."""
+
+    DOC = Path(__file__).resolve().parents[2] / "docs" / "deepfake-lens-service.md"
+
+    def _tables(self) -> tuple[set[tuple[str, str]], set[tuple[str, str]]]:
+        """((method, path) of the REST table, (method, path) of the web GUI table)."""
+        import re
+
+        text = self.DOC.read_text(encoding="utf-8")
+        rest = text[text.index("## REST API endpoints"):text.index("## Web GUI endpoints")]
+        web = text[text.index("## Web GUI endpoints"):text.index("## Error status codes")]
+        rest_rows: set[tuple[str, str]] = set()
+        for line in rest.splitlines():
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            if len(cells) == 4 and re.fullmatch(r"(GET|POST|PUT|DELETE)", cells[0]):
+                for path in re.findall(r"`(/[^`]*)`", cells[1]):
+                    rest_rows.add((cells[0], path))
+        web_rows: set[tuple[str, str]] = set()
+        for line in web.splitlines():
+            cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
+            match = re.fullmatch(r"(?:(GET|POST|PUT) )?`(/api/[^`]*)`", cells[0]) if len(cells) == 3 else None
+            if match:
+                web_rows.add((match.group(1) or "GET", match.group(2)))
+        return rest_rows, web_rows
+
+    def test_rest_table_matches_api_serve_routes(self) -> None:
+        if not HAVE_FASTAPI:
+            self.skipTest("fastapi/httpx not installed")
+        import re
+
+        rest_rows, _ = self._tables()
+        self.assertGreaterEqual(len(rest_rows), 30, rest_rows)
+        routes = {
+            (method, re.sub(r"\{(\w+)(?::path)?\}", r"{\1}", route.path))
+            for route in api_server.create_app().routes
+            for method in (getattr(route, "methods", None) or ())
+            if method != "HEAD"
+        }
+        missing = sorted(row for row in rest_rows if row not in routes)
+        self.assertEqual(missing, [], "documented but not a route of api-serve")
+        undocumented = sorted(row for row in routes if row[1].startswith("/api/") and row not in rest_rows)
+        self.assertEqual(undocumented, [], "a route of api-serve missing from the REST table")
+        self.assertIn(("POST", "/api/analyze-upload"), rest_rows)
+
+    def test_web_table_matches_web_server_routes(self) -> None:
+        import json as _json
+        import tempfile
+        import threading
+        import urllib.error
+        import urllib.request
+
+        from deepfake_lens.webapp import CLIENT_HEADER, build_server
+
+        _, web_rows = self._tables()
+        self.assertGreaterEqual(len(web_rows), 15, web_rows)
+        roots = patch.object(webapp_api, "_READ_ROOTS", OrderedDict())  # the server registers its folder
+        roots.start()
+        self.addCleanup(roots.stop)
+        with tempfile.TemporaryDirectory() as tmp:
+            server = build_server("127.0.0.1", 0, default_folder=Path(tmp))
+            threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+            self.addCleanup(server.server_close)
+            self.addCleanup(server.shutdown)
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+
+            def status_and_text(method: str, path: str) -> tuple[int, str]:
+                data = b"{}" if method != "GET" else None
+                headers = {CLIENT_HEADER: "qa", "Content-Type": "application/json"}
+                request = urllib.request.Request(base + path, data=data, headers=headers, method=method)
+                try:
+                    with urllib.request.urlopen(request, timeout=60) as response:
+                        return response.status, response.read().decode("utf-8", "replace")
+                except urllib.error.HTTPError as exc:
+                    return exc.code, exc.read().decode("utf-8", "replace")
+
+            env = patch.dict(os.environ, {"DEEPFAKE_LENS_REVIEWS": str(Path(tmp) / "r.json"),
+                                          "DEEPFAKE_LENS_FEEDBACK": str(Path(tmp) / "f.jsonl")})
+            with env:
+                for method, path in sorted(web_rows):
+                    with self.subTest(method=method, path=path):
+                        status, text = status_and_text(method, path)
+                        try:
+                            body = _json.loads(text)
+                            error = body.get("error") if isinstance(body, dict) else None
+                        except ValueError:
+                            error = text
+                        self.assertFalse(status == 404 and error == "찾을 수 없는 경로입니다", (status, text[:200]))
+                # the route the document used to list is not one
+                status, text = status_and_text("GET", "/api/review-marks")
+                self.assertEqual((status, _json.loads(text)["error"]), (404, "찾을 수 없는 경로입니다"))
+        for method, path in (("GET", "/api/reviews"), ("GET", "/api/review"), ("POST", "/api/review"),
+                             ("POST", "/api/check"), ("POST", "/api/compare")):
+            self.assertIn((method, path), web_rows)
+        # and every /api/ route the web server dispatches is in the table
+        import inspect
+        import re
+
+        from deepfake_lens import webapp
+
+        source = inspect.getsource(webapp)
+        get_part = source[source.index("def do_GET"):source.index("def do_POST")]
+        post_part = source[source.index("def do_POST"):]
+        dispatched = {("GET", path) for path in re.findall(r'parsed\.path == "(/api/[^"]+)"', get_part)}
+        dispatched |= {("POST", path) for path in re.findall(r'parsed\.path == "(/api/[^"]+)"', post_part)}
+        self.assertGreaterEqual(len(dispatched), 15)
+        self.assertEqual(sorted(dispatched - web_rows), [], "a web-server route missing from the web GUI table")
+
+
 class ErrorTableEveryRowTest(unittest.TestCase):
     """P8 (round 8): every row of the error-status table (docs/deepfake-lens-service.md,
     "Error status codes") is sent to every server it names. api-serve's own file
@@ -2160,6 +2272,9 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                     case("api", "POST", "/api/check/stream?text=%20%20&file_path=", 400, api_server.TEXT_OR_FILE_REQUIRED),
                     case("api", "POST", "/api/check/stream?text=" + q("가" * 10), 400, api_server.TEXT_TOO_LARGE,
                          patches=(patch.object(api_server, "MAX_TEXT_CHARS", 4),))],
+            # R9-8 (round 9): an empty text was analyzed (200).
+            "E45": [case("api", "POST", "/api/analyze/text?text=", 400, api_server.TEXT_EMPTY),
+                    case("api", "POST", "/api/analyze/text?text=%20%0A%20", 400, api_server.TEXT_EMPTY)],
         }
 
     # -- the servers ---------------------------------------------------------------
