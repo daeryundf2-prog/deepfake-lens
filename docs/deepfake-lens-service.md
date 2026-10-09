@@ -215,49 +215,55 @@ web server and for the shared GUI endpoints on api-serve; api-serve's own
 endpoints (`/api/analyze/*`, `/api/classify`, `/api/check`, `/api/compare`,
 `/api/jobs/*`, review routes) use FastAPI's `detail`.
 
-| Endpoint (server) | Condition | Status | Korean text (`error` / `detail`) |
-|---|---|---|---|
-| any `/api/*` (both) | missing `X-Deepfake-Lens-Client` / bad token | 401 | `… 헤더가 없습니다 …` / `인증 실패: …` |
-| any `/api/*` (both) | unknown route | 404 | `찾을 수 없는 경로입니다` |
-| any `/api/*` (web / api) | method not supported / not allowed | 501 / 405 | `지원하지 않는 요청 메서드입니다: …` / `이 경로에서 허용되지 않는 요청 메서드입니다: …` |
-| any `/api/*` (both) | unhandled exception | 500 | `서버 내부 오류가 발생했습니다 — 상세는 서버 로그를 확인하십시오` |
-| GET `/api/scan` (both) | invalid option (`pixel`, non-integer limit, `model_path`/`fusion_profile` not a name in the models dir) | 400 | e.g. `max_files는 정수여야 합니다` |
-| GET `/api/scan` (both), POST `/api/scan/stream` (api) | `max_files` or `max_file_bytes` below 1 (Y8 — was clamped to 1) | 400 | `max_files는 1 이상이어야 합니다` / `max_file_bytes는 1 이상이어야 합니다` |
-| GET `/api/scan` (both) | folder missing / a file / unreadable | 400 | `폴더를 찾을 수 없습니다: …` (scan's S4 texts) |
-| GET `/api/scan` (both) | folder outside the read roots | 403 | `허용되지 않은 경로` |
-| GET `/api/scan?async=1` (both) | 32 jobs already registered | 400 | `실행 중인 검사 작업이 너무 많습니다 — …` |
-| GET `/api/scan-status`, `/api/scan-cancel` (both) | no `job` | 400 | `job 매개변수가 필요합니다` |
-| GET `/api/scan-status`, `/api/scan-cancel` (both) | unknown or expired job | 404 | `알 수 없거나 만료된 작업입니다` |
-| GET `/api/analyze-file` (both) | no `file` | 400 | `file 매개변수(파일 경로)가 필요합니다` |
-| GET `/api/analyze-file` (both) | file missing | 404 | `파일을 찾을 수 없습니다: …` |
-| GET `/api/analyze-file` (both) | a folder | 400 | `파일이 아니라 폴더입니다: … (폴더는 scan을 사용)` |
-| GET `/api/analyze-file` (both) | outside the read roots | 403 | `허용되지 않은 경로` |
-| GET `/api/analyze-file` (both) | analysis raised | 500 | `파일 분석 중 오류가 발생했습니다` (+ `detail`) |
-| GET `/api/heatmap`, `/api/preview` (both) | outside the roots / not found / not media | 403 / 404 / 400 | plain text + `X-Deepfake-Lens-Error` header |
-| POST `/api/analyze-upload` (both) | not multipart, no file part, empty or incomplete body | 400 | `multipart/form-data 업로드가 필요합니다`, `업로드된 파일이 없습니다`, … |
-| POST `/api/analyze-upload` (both) | body over `MAX_UPLOAD_BYTES` | 413 | `업로드 크기가 상한(…바이트)을 초과합니다` |
-| POST `/api/analyze-upload` (web) | analysis raised | 500 | `업로드 분석 중 오류가 발생했습니다` (+ `detail`) |
-| POST `/api/check` (web) | invalid JSON / not an object / text < 8 or > 256 KB / not multipart / no file | 400 | `JSON 본문을 해석할 수 없습니다`, `분석할 텍스트가 너무 짧습니다 (8자 이상).`, … |
-| POST `/api/check` (web) | body over `MAX_UPLOAD_BYTES` | 413 | `요청 본문이 상한(…바이트)을 초과합니다` |
-| POST `/api/check` (api) | neither `file_path` nor `text`; text > 256 KB | 400 | `file_path 또는 text가 필요합니다` |
-| POST `/api/compare` (web) | not multipart / fewer than 2 files / mixed pair | 400 | `비교할 파일 2개가 필요합니다`, … |
-| POST `/api/compare` (web) | comparison raised | 500 | `비교 분석 중 오류가 발생했습니다` (+ `detail`) |
-| POST `/api/compare` (api) | comparison error / raised | 400 / 500 | the comparison's Korean error |
-| POST `/api/report` (both) | malformed body or row, bad `format`/`options` | 400 | see "REST API endpoints" (N11, X2) |
-| POST `/api/report` (both) | a `heatmap_path` outside the roots | 403 | `허용되지 않은 경로` |
-| POST `/api/report` (both) | `scan_root` missing (with folder-scan rows), not a string, relative, not a folder (P1) | 400 | `스캔 폴더(scan_root)가 필요합니다 — …` / `scan_root 값은 문자열이어야 합니다` / `scan_root는 절대 경로여야 합니다: 「…」` / `스캔 폴더를 찾을 수 없습니다: 「…」` |
-| POST `/api/report` (both) | `scan_root` outside the read roots (P1) | 403 | `허용되지 않은 경로` |
-| POST `/api/report` (both) | evidence-statement PDF failed / pymupdf missing | 500 / 501 | `증거설명서 PDF 생성 실패: …` / `PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다…` |
-| POST `/api/feedback` (both) | invalid JSON, not an object, unknown `expected_label`, no `path` | 400 | `JSON 본문을 해석할 수 없습니다`, `expected_label은 인식 가능한 라벨이어야 합니다 …`, `path가 필요합니다` |
-| GET/POST `/api/review` (web), review routes (api) | no `path`/`artifact_id`, invalid JSON | 400 | `path 또는 artifact_id가 필요합니다`, `JSON을 해석할 수 없습니다` |
-| POST `/api/analyze/*`, `/api/classify`, `/api/check` (api) | analysis raised | 500 | the failure reason |
-| `/api/jobs/{id}`, `/api/jobs/{id}/cancel` (api) | unknown or finished job | 404 | `알 수 없거나 이미 끝난 작업입니다` |
-| POST `/api/check/stream`, `/api/scan/stream` (api) | 32 stream jobs running | 429 | `실행 중인 작업이 너무 많습니다 …` |
-| any query parameter (api) | missing / malformed | 422 | `요청 매개변수 오류 — …` |
+| ID | Endpoint (server) | Condition | Status | Korean text (`error` / `detail`) |
+|---|---|---|---|---|
+| E1 | any `/api/*` (both) | missing `X-Deepfake-Lens-Client` / bad token | 401 | `… 헤더가 없습니다 …` / `인증 실패: …` |
+| E2 | any `/api/*` (both) | unknown route | 404 | `찾을 수 없는 경로입니다` |
+| E3 | any `/api/*` (web / api) | method not supported / not allowed | 501 / 405 | `지원하지 않는 요청 메서드입니다: …` / `이 경로에서 허용되지 않는 요청 메서드입니다: …` |
+| E4 | any `/api/*` (both) | unhandled exception | 500 | `서버 내부 오류가 발생했습니다 — 상세는 서버 로그를 확인하십시오` |
+| E5 | GET `/api/scan` (both) | invalid option (`pixel`, non-integer limit, `model_path`/`fusion_profile` not a name in the models dir) | 400 | e.g. `max_files는 정수여야 합니다` |
+| E6 | GET `/api/scan` (both), POST `/api/scan/stream` (api) | `max_files` or `max_file_bytes` below 1 (Y8 — was clamped to 1) | 400 | `max_files는 1 이상이어야 합니다` / `max_file_bytes는 1 이상이어야 합니다` |
+| E7 | GET `/api/scan` (both) | folder missing / a file / unreadable | 400 | `폴더를 찾을 수 없습니다: …` (scan's S4 texts) |
+| E8 | GET `/api/scan` (both) | folder outside the read roots | 403 | `허용되지 않은 경로` |
+| E9 | GET `/api/scan?async=1` (both) | 32 jobs already registered | 400 | `실행 중인 검사 작업이 너무 많습니다 — …` |
+| E10 | GET `/api/scan-status`, `/api/scan-cancel` (both) | no `job` | 400 | `job 매개변수가 필요합니다` |
+| E11 | GET `/api/scan-status`, `/api/scan-cancel` (both) | unknown or expired job | 404 | `알 수 없거나 만료된 작업입니다` |
+| E12 | GET `/api/analyze-file` (both) | no `file` | 400 | `file 매개변수(파일 경로)가 필요합니다` |
+| E13 | GET `/api/analyze-file` (both) | file missing | 404 | `파일을 찾을 수 없습니다: …` |
+| E14 | GET `/api/analyze-file` (both) | a folder | 400 | `파일이 아니라 폴더입니다: … (폴더는 scan을 사용)` |
+| E15 | GET `/api/analyze-file` (both) | outside the read roots | 403 | `허용되지 않은 경로` |
+| E16 | GET `/api/analyze-file` (both) | analysis raised | 500 | `파일 분석 중 오류가 발생했습니다` (+ `detail`) |
+| E17 | GET `/api/heatmap`, `/api/preview` (both) | outside the roots / not found / not media (P8: preview of a non-media file inside the roots was 403) | 403 / 404 / 400 | plain text `허용되지 않은 경로` / `파일을 찾을 수 없습니다` / `미리보기를 지원하지 않는 형식입니다: …` + `X-Deepfake-Lens-Error` header |
+| E18 | POST `/api/analyze-upload` (both) | not multipart, no file part, empty body, body cut off before its closing boundary (P8 — was analyzed as a partial file, 200) | 400 | `multipart/form-data 업로드가 필요합니다`, `업로드된 파일이 없습니다`, `업로드 본문이 잘렸습니다(닫는 경계 없음) — …` |
+| E19 | POST `/api/analyze-upload` (both) | body over `MAX_UPLOAD_BYTES` | 413 | `업로드 크기가 상한(…바이트)을 초과합니다` |
+| E20 | POST `/api/analyze-upload` (web) | analysis raised | 500 | `업로드 분석 중 오류가 발생했습니다` (+ `detail`) |
+| E21 | POST `/api/check` (web) | invalid JSON / not an object / text < 8 or > 256 KB / not multipart / no file / cut-off multipart (P8) | 400 | `JSON 본문을 해석할 수 없습니다`, `요청 본문은 JSON 객체여야 합니다`, `분석할 텍스트가 너무 짧습니다 (8자 이상).`, … |
+| E22 | POST `/api/check` (web) | body over `MAX_UPLOAD_BYTES` | 413 | `요청 본문이 상한(…바이트)을 초과합니다` |
+| E23 | POST `/api/check` (api) | neither `file_path` nor `text`; text > 256 KB | 400 | `file_path 또는 text가 필요합니다` / `텍스트가 256KB를 초과합니다` |
+| E24 | POST `/api/compare` (web) | not multipart / fewer than 2 files / mixed pair / cut-off multipart (P8) | 400 | `비교할 파일 2개가 필요합니다`, … |
+| E25 | POST `/api/compare` (web) | comparison raised | 500 | `비교 분석 중 오류가 발생했습니다` (+ `detail`) |
+| E26 | POST `/api/compare` (api) | comparison error / raised | 400 / 500 | the comparison's Korean error |
+| E27 | POST `/api/report` (both) | malformed body or row (a non-object body, a member row whose `path` is not `container::member` — P7), bad `format`/`options` | 400 | see "REST API endpoints" (N11, X2) |
+| E28 | POST `/api/report` (both) | a `heatmap_path` outside the roots — in `result.pixel_analysis` or at the row's top level, checked before the row contract (P8) | 403 | `허용되지 않은 경로` |
+| E29 | POST `/api/report` (both) | `scan_root` missing (with folder-scan rows), not a string, relative, not a folder (P1) | 400 | `스캔 폴더(scan_root)가 필요합니다 — …` / `scan_root 값은 문자열이어야 합니다` / `scan_root는 절대 경로여야 합니다: 「…」` / `스캔 폴더를 찾을 수 없습니다: 「…」` |
+| E30 | POST `/api/report` (both) | `scan_root` outside the read roots (P1) | 403 | `허용되지 않은 경로` |
+| E31 | POST `/api/report` (both) | evidence-statement PDF failed / pymupdf missing | 500 / 501 | `증거설명서 PDF 생성 실패: …` / `PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다…` |
+| E32 | POST `/api/feedback` (both) | invalid JSON, not an object, unknown `expected_label`, no `path` | 400 | `JSON 본문을 해석할 수 없습니다`, `피드백 요청 본문은 JSON 객체여야 합니다`, `expected_label은 인식 가능한 라벨이어야 합니다 …`, `path가 필요합니다` |
+| E33 | GET/POST `/api/review` (web), review routes incl. PUT `/api/artifacts/{id}/review` (api) | no `path`/`artifact_id`, invalid JSON, a JSON body that is not an object (P8 — an array was a 500), a non-string `artifact_id` | 400 | `path 또는 artifact_id가 필요합니다`, `JSON을 해석할 수 없습니다`, `검토 요청 본문은 JSON 객체여야 합니다`, `artifact_id 값은 문자열이어야 합니다` |
+| E34 | POST `/api/analyze/*`, `/api/classify`, `/api/check` (api) | analysis raised | 500 | the failure reason |
+| E35 | `/api/jobs/{id}`, `/api/jobs/{id}/cancel` (api) | unknown or finished job | 404 | `알 수 없거나 이미 끝난 작업입니다` |
+| E36 | POST `/api/check/stream`, `/api/scan/stream` (api) | 32 stream jobs running | 429 | `실행 중인 작업이 너무 많습니다 …` |
+| E37 | any query parameter (api) | missing / malformed | 422 | `요청 매개변수 오류 — …` |
+| E38 | POST `/api/analyze/{image,audio,face,forensic}`, `/api/classify`, `/api/check?file_path=`, `/api/check/stream?file_path=`, `/api/compare` (api) | the named file is missing (P8 — was 200 "success" with a failed row; classify 500; compare a misleading 400) | 404 | `파일을 찾을 수 없습니다: …` |
+| E39 | the same api-serve file endpoints (api) | the named path is a folder (P8) | 400 | `파일이 아니라 폴더입니다: …` |
+| E40 | the same api-serve file endpoints (api) | outside the read roots | 403 | `허용되지 않은 경로` |
+| E41 | POST `/api/multimodal` (api) | a query parameter other than the four scores (e.g. `file_path` — P8: was ignored, 200) | 400 | `알 수 없는 매개변수입니다: … — /api/multimodal은 점수(…)만 받습니다(파일 분석은 /api/analyze/*)` |
 
-Tests: `test_servers.ApiErrorStatusTest` sends every web-server row above (and
-the shared-endpoint rows to api-serve) and checks the status and the Korean
-text.
+Tests: `test_servers.ErrorTableEveryRowTest` reads this table and sends at
+least one request per row ID to each server the row names (`web`, `api`,
+`both`), checking the status, the Korean text and that no row of the table is
+without a test (and no test without a row). `test_servers.ApiErrorStatusTest`
+keeps the round-7 spot checks.
 
 ## Honesty contract
 

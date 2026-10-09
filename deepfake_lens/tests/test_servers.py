@@ -853,8 +853,13 @@ class PreviewPayloadTest(unittest.TestCase):
             _register_read_root(Path(d))
             p = Path(d) / "a.txt"
             p.write_text("hi")
-            status, _, _, _ = _preview_payload(f"path={p}&root={d}")
-            self.assertEqual(status, 403)
+            status, body, code, _ = _preview_payload(f"path={p}&root={d}")
+            # P8 (round 8): a non-media file inside the roots is refused as a bad
+            # request (400, as the error table documents), not as a forbidden
+            # path (403 stays for paths outside the roots — the test above).
+            self.assertEqual((status, code), (400, "not-media"))
+            self.assertIn("미리보기를 지원하지 않는 형식입니다: .txt", body.decode("utf-8"))
+            self.assertNotIn(b"hi", body)
 
     def test_caller_supplied_root_cannot_widen_scope(self) -> None:
         """A forged root= must not grant access outside registered roots."""
@@ -1899,3 +1904,313 @@ class ApiErrorStatusTest(unittest.TestCase):
         payload = webapp_api._analyze_file_payload(urllib.parse.urlencode({"file": str(self.folder / "memo.txt")}))
         self.assertEqual(webapp_api.api_status(payload), 200)
         self.assertEqual(webapp_api.api_status(webapp_api._scan_status_payload("job=deadbeef")), 404)
+
+
+class ErrorTableEveryRowTest(unittest.TestCase):
+    """P8 (round 8): every row of the error-status table (docs/deepfake-lens-service.md,
+    "Error status codes") is sent to every server it names. api-serve's own file
+    endpoints answered a missing file with 200 "success" (classify: 500, compare: a
+    misleading 400), review routes a JSON array with 500 and a non-media preview with
+    403; the table said otherwise and no test covered those rows."""
+
+    DOC = Path(__file__).resolve().parents[2] / "docs" / "deepfake-lens-service.md"
+
+    def setUp(self) -> None:
+        import tempfile
+        import wave
+
+        roots = patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
+        roots.start()
+        self.addCleanup(roots.stop)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        base = Path(self._tmp.name).resolve()
+        self.folder = base / "case"
+        (self.folder / "sub").mkdir(parents=True)
+        (self.folder / "memo.txt").write_text("사건 메모입니다. 사람이 쓴 짧은 메모입니다.", encoding="utf-8")
+        _write_png(self.folder / "photo.png", seed=3)
+        with wave.open(str(self.folder / "tone.wav"), "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(8000)
+            handle.writeframes(b"\x00\x10" * 8000)
+        self.outside = base / "outside"
+        self.outside.mkdir()
+        _write_png(self.outside / "secret.png", seed=9)
+        webapp_api.configure_read_roots(self.folder)
+        feedback = patch.dict(os.environ, {"DEEPFAKE_LENS_FEEDBACK": str(base / "fb.jsonl"), "DEEPFAKE_LENS_REVIEWS": str(base / "reviews.json")})
+        feedback.start()
+        self.addCleanup(feedback.stop)
+
+    # -- the table ------------------------------------------------------------
+
+    def _table(self) -> dict[str, tuple[str, set[int]]]:
+        """Row ID -> (endpoint/server cell, statuses) from the documented table."""
+        import re
+
+        text = self.DOC.read_text(encoding="utf-8")
+        section = text[text.index("## Error status codes"):text.index("## Honesty contract")]
+        rows: dict[str, tuple[str, set[int]]] = {}
+        for line in section.splitlines():
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            if len(cells) == 5 and re.fullmatch(r"E\d+", cells[0]):
+                rows[cells[0]] = (cells[1], {int(code) for code in re.findall(r"\d{3}", cells[3])})
+        return rows
+
+    @staticmethod
+    def _servers(cell: str) -> set[str]:
+        found = set()
+        if "(both)" in cell or "(web / api)" in cell:
+            found |= {"web", "api"}
+        if "(web)" in cell:
+            found.add("web")
+        if "(api)" in cell:
+            found.add("api")
+        return found
+
+    # -- the requests ------------------------------------------------------------
+
+    def _multipart(self, *parts: tuple[str, str, bytes], close: bool = True) -> tuple[bytes, str]:
+        boundary = "----p8table"
+        body = b"".join(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"; filename=\"{name}\"\r\n"
+            "Content-Type: application/octet-stream\r\n\r\n".encode() + data + b"\r\n"
+            for field, name, data in parts
+        )
+        if close:
+            body += f"--{boundary}--\r\n".encode()
+        return body, f"multipart/form-data; boundary={boundary}"
+
+    def _cases(self) -> dict[str, list[dict[str, Any]]]:
+        from urllib.parse import quote
+
+        import deepfake_lens.webapp as webapp_module
+
+        f = self.folder
+        q = lambda path: quote(str(path))  # noqa: E731
+        row = webapp_api._scan_payload(f"folder={q(f)}&no_default_engine=true", default_folder=f)
+        memo_row = next(item for item in row["items"] if item["path"] == "memo.txt")
+        scan_root = str(f)
+
+        def raise_(*_: Any, **__: Any) -> Any:
+            raise RuntimeError("주입된 실패")
+
+        def no_pymupdf() -> Any:
+            raise ImportError("pymupdf")
+
+        def report(body: dict[str, Any]) -> bytes:
+            return json.dumps(body).encode("utf-8")
+
+        png = (f / "photo.png").read_bytes()
+        upload, upload_type = self._multipart(("files", "photo.png", png))
+        cut, cut_type = self._multipart(("files", "photo.png", png), close=False)
+        pair, pair_type = self._multipart(("a", "a.txt", "글 하나입니다. 충분히 긴 문장입니다.".encode()), ("b", "b.wav", (f / "tone.wav").read_bytes()))
+        cut_pair, _ = self._multipart(("a", "a.txt", b"one"), ("b", "b.txt", b"two"), close=False)
+        files = [
+            ("POST", "/api/analyze/image?file_path={}"), ("POST", "/api/analyze/audio?file_path={}"),
+            ("POST", "/api/analyze/face?file_path={}"), ("POST", "/api/analyze/forensic?file_path={}"),
+            ("POST", "/api/classify?file_path={}"), ("POST", "/api/check?file_path={}"),
+            ("POST", "/api/check/stream?file_path={}"),
+            ("POST", "/api/compare?file_path_a={}&file_path_b=" + q(f / "memo.txt")),
+        ]
+        jobs = {f"fake{i}": {"status": "running", "created": time.time(), "cancel": __import__("threading").Event()} for i in range(40)}
+
+        def case(server: str, method: str, path: str, status: int, text: str, body: bytes | None = None, ctype: str = "",
+                 patches: tuple[Any, ...] = (), headers: dict[str, str] | None = None) -> dict[str, Any]:
+            return {"server": server, "method": method, "path": path, "status": status, "text": text, "body": body,
+                    "ctype": ctype, "patches": patches, "headers": headers}
+
+        both = ("web", "api")
+        return {
+            "E1": [case(s, "GET", "/api/stats", 401, "헤더", headers={}) for s in both],
+            "E2": [case(s, "GET", "/api/nothing-here", 404, "찾을 수 없는 경로입니다") for s in both],
+            "E3": [case("web", "DELETE", "/api/scan", 501, "지원하지 않는 요청 메서드입니다"),
+                   case("api", "DELETE", "/api/scan", 405, "허용되지 않는 요청 메서드입니다")],
+            "E4": [case("web", "GET", "/api/stats", 500, "서버 내부 오류가 발생했습니다", patches=(patch.object(webapp_module, "_stats_payload", raise_),)),
+                   case("api", "GET", "/api/stats", 500, "서버 내부 오류가 발생했습니다", patches=(patch.object(webapp_api, "_stats_payload", raise_),))],
+            "E5": [case(s, "GET", "/api/scan?max_files=abc", 400, "max_files는 정수여야 합니다") for s in both]
+            + [case(s, "GET", f"/api/scan?folder={q(f)}&pixel=bogus", 400, "pixel") for s in both],
+            "E6": [case(s, "GET", "/api/scan?max_files=-3", 400, "max_files는 1 이상이어야 합니다") for s in both]
+            + [case(s, "GET", "/api/scan?max_file_bytes=0", 400, "max_file_bytes는 1 이상이어야 합니다") for s in both]
+            + [case("api", "POST", f"/api/scan/stream?directory={q(f)}&max_files=0", 400, "max_files는 1 이상이어야 합니다")],
+            "E7": [case(s, "GET", f"/api/scan?folder={q(f / 'gone')}&no_default_engine=true", 400, "폴더를 찾을 수 없습니다: ") for s in both]
+            + [case(s, "GET", f"/api/scan?folder={q(f / 'memo.txt')}&no_default_engine=true", 400, "폴더가 아니라 파일입니다") for s in both],
+            "E8": [case(s, "GET", f"/api/scan?folder={q(self.outside)}", 403, "허용되지 않은 경로") for s in both],
+            "E9": [case(s, "GET", f"/api/scan?folder={q(f)}&async=1", 400, "실행 중인 검사 작업이 너무 많습니다",
+                        patches=(patch.dict(webapp_api._SCAN_JOBS, jobs),)) for s in both],
+            "E10": [case(s, "GET", path, 400, webapp_api.JOB_PARAM_REQUIRED) for s in both for path in ("/api/scan-status", "/api/scan-cancel")],
+            "E11": [case(s, "GET", path + "?job=deadbeef", 404, webapp_api.JOB_UNKNOWN) for s in both for path in ("/api/scan-status", "/api/scan-cancel")],
+            "E12": [case(s, "GET", "/api/analyze-file", 400, webapp_api.FILE_PARAM_REQUIRED) for s in both],
+            "E13": [case(s, "GET", f"/api/analyze-file?file={q(f / 'nope.png')}", 404, "파일을 찾을 수 없습니다: ") for s in both],
+            "E14": [case(s, "GET", f"/api/analyze-file?file={q(f / 'sub')}", 400, "파일이 아니라 폴더입니다: ") for s in both],
+            "E15": [case(s, "GET", f"/api/analyze-file?file={q(self.outside / 'secret.png')}", 403, "허용되지 않은 경로") for s in both],
+            "E16": [case(s, "GET", f"/api/analyze-file?file={q(f / 'memo.txt')}", 500, "파일 분석 중 오류가 발생했습니다",
+                         patches=(patch("deepfake_lens.cli_standalone.analysis_result_for_path", raise_),)) for s in both],
+            "E17": [case(s, "GET", f"/api/{kind}?path={q(self.outside / 'secret.png')}&root={q(f)}", 403, "허용되지 않은 경로") for s in both for kind in ("heatmap", "preview")]
+            + [case(s, "GET", f"/api/preview?path={q(f / 'nope.png')}&root={q(f)}", 404, "파일을 찾을 수 없습니다") for s in both]
+            + [case(s, "GET", f"/api/preview?path={q(f / 'memo.txt')}&root={q(f)}", 400, "미리보기를 지원하지 않는 형식입니다: .txt") for s in both],
+            "E18": [case(s, "POST", "/api/analyze-upload", 400, "multipart/form-data 업로드가 필요합니다", b"x", "text/plain") for s in both]
+            + [case(s, "POST", "/api/analyze-upload", 400, "업로드 본문이 잘렸습니다", cut, cut_type) for s in both]
+            + [case(s, "POST", "/api/analyze-upload", 400, "업로드된 파일이 없습니다", b"------p8table--\r\n", upload_type) for s in both],
+            "E19": [case("web", "POST", "/api/analyze-upload", 413, "업로드 크기가 상한", upload, upload_type, patches=(patch.object(webapp_module, "MAX_UPLOAD_BYTES", 16),)),
+                    case("api", "POST", "/api/analyze-upload", 413, "업로드 크기가 상한", upload, upload_type, patches=(patch.object(webapp_api, "MAX_UPLOAD_BYTES", 16),))],
+            "E20": [case("web", "POST", "/api/analyze-upload", 500, "업로드 분석 중 오류가 발생했습니다", upload, upload_type,
+                         patches=(patch.object(webapp_module, "_analyze_upload_payload", raise_),))],
+            "E21": [case("web", "POST", "/api/check", 400, text, body, ctype) for body, ctype, text in (
+                (b"{oops", "application/json", "JSON 본문을 해석할 수 없습니다"),
+                (b"[1]", "application/json", "요청 본문은 JSON 객체여야 합니다"),
+                ('{"text": "짧음"}'.encode(), "application/json", "분석할 텍스트가 너무 짧습니다"),
+                (b"x", "text/plain", "multipart/form-data 또는 application/json 본문이 필요합니다"),
+                (cut, cut_type, "업로드 본문이 잘렸습니다"),
+            )],
+            "E22": [case("web", "POST", "/api/check", 413, "요청 본문이 상한", upload, upload_type, patches=(patch.object(webapp_module, "MAX_UPLOAD_BYTES", 16),))],
+            # (text > 256 KB cannot travel in a test client's query string; the
+            # limit is the same constant check as the web server's E21.)
+            "E23": [case("api", "POST", "/api/check", 400, "file_path 또는 text가 필요합니다"),
+                    case("api", "POST", "/api/check?text=", 400, "file_path 또는 text가 필요합니다")],
+            "E24": [case("web", "POST", "/api/compare", 400, text, body, ctype) for body, ctype, text in (
+                (b"x", "text/plain", "multipart/form-data 본문이 필요합니다"),
+                (upload, upload_type, "비교할 파일 2개가 필요합니다"),
+                (pair, pair_type, "지원되는 쌍이 아닙니다(.txt, .wav)"),
+                (cut_pair, pair_type, "업로드 본문이 잘렸습니다"),
+            )],
+            "E25": [case("web", "POST", "/api/compare", 500, "비교 분석 중 오류가 발생했습니다", pair, pair_type,
+                         patches=(patch.object(webapp_module, "_compare_payload", raise_),))],
+            "E26": [case("api", "POST", f"/api/compare?file_path_a={q(f / 'memo.txt')}&file_path_b={q(f / 'tone.wav')}", 400, "지원되는 쌍이 아닙니다(.txt, .wav)"),
+                    case("api", "POST", f"/api/compare?file_path_a={q(f / 'memo.txt')}&file_path_b={q(f / 'memo.txt')}", 500, "주입된 실패",
+                         patches=(patch("deepfake_lens.core.compare_files", raise_),))],
+            "E27": [case(s, "POST", "/api/report", 400, text, body, "application/json") for s in both for body, text in (
+                (b"{oops", "JSON 본문을 해석할 수 없습니다"),
+                (b"[1]", "보고서 요청 본문은 JSON 객체여야 합니다"),
+                (report({"items": [dict(memo_row, path="x.zip::y", container="x.zip", member="z")], "scan_root": scan_root}), "path가 container::member와 일치하지 않습니다"),
+                (report({"items": [memo_row], "options": "deep", "scan_root": scan_root}), "options 값은 JSON 객체여야 합니다"),
+            )],
+            "E28": [case(s, "POST", "/api/report", 403, "허용되지 않은 경로", report({"items": [{"path": "memo.txt", "heatmap_path": str(self.outside / "secret.png")}]}), "application/json") for s in both]
+            + [case(s, "POST", "/api/report", 403, "허용되지 않은 경로", report({"items": [dict(memo_row, result=dict(memo_row["result"], pixel_analysis={"heatmap_path": str(self.outside / "secret.png")}))]}), "application/json") for s in both],
+            "E29": [case(s, "POST", "/api/report", 400, text, report(body), "application/json") for s in both for body, text in (
+                ({"items": [memo_row]}, webapp_api.REPORT_SCAN_ROOT_REQUIRED),
+                ({"items": [memo_row], "scan_root": 3}, webapp_api.REPORT_SCAN_ROOT_NOT_STRING),
+                ({"items": [memo_row], "scan_root": "case"}, "scan_root는 절대 경로여야 합니다"),
+                ({"items": [memo_row], "scan_root": str(f / "gone")}, "스캔 폴더를 찾을 수 없습니다"),
+            )],
+            "E30": [case(s, "POST", "/api/report", 403, "허용되지 않은 경로", report({"items": [memo_row], "scan_root": str(self.outside)}), "application/json") for s in both],
+            "E31": [case(s, "POST", "/api/report?format=pdf", 501, "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다", report({"items": [memo_row], "scan_root": scan_root}), "application/json",
+                         patches=(patch("deepfake_lens.pdf_backend.import_pymupdf", no_pymupdf),)) for s in both]
+            + [case(s, "POST", "/api/report?format=evidence", 500, "증거설명서 PDF 생성 실패", report({"items": [memo_row], "scan_root": scan_root}), "application/json",
+                    patches=(patch("deepfake_lens.evidence_statement.write_evidence_statement_pdf", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("렌더러 없음"))),)) for s in both],
+            "E32": [case(s, "POST", "/api/feedback", 400, text, body, "application/json") for s in both for body, text in (
+                (b"{oops", "JSON 본문을 해석할 수 없습니다"), (b"[1]", "피드백 요청 본문은 JSON 객체여야 합니다"),
+                (b'{"expected_label": "maybe", "path": "a"}', "expected_label은 "), (b'{"expected_label": "real"}', "path가 필요합니다"),
+            )],
+            "E33": [case("web", "GET", "/api/review", 400, "path 또는 artifact_id가 필요합니다")]
+            + [case("web", "POST", "/api/review", 400, text, body, "application/json") for body, text in (
+                (b"{oops", "JSON을 해석할 수 없습니다"), (b"[1]", "검토 요청 본문은 JSON 객체여야 합니다"),
+                (b"{}", "artifact_id가 필요합니다"), (b'{"artifact_id": [1]}', "artifact_id 값은 문자열이어야 합니다"),
+            )]
+            + [case("api", "GET", "/api/review", 400, "path 또는 artifact_id 쿼리 매개변수가 필요합니다")]
+            + [case("api", "POST", "/api/review", 400, text, body, "application/json") for body, text in (
+                (b"{oops", "JSON 본문을 해석할 수 없습니다"), (b"[1]", "검토 요청 본문은 JSON 객체여야 합니다"),
+                (b"{}", "본문에 artifact_id가 없습니다"), (b'{"artifact_id": [1]}', "artifact_id 값은 문자열이어야 합니다"),
+            )]
+            + [case("api", "PUT", "/api/artifacts/x/review", 400, text, body, "application/json") for body, text in (
+                (b"{oops", "JSON 본문을 해석할 수 없습니다"), (b"[1]", "검토 요청 본문은 JSON 객체여야 합니다"),
+            )],
+            "E34": [case("api", "POST", path.format(q(f / "memo.txt")), 500, "주입된 실패",
+                         patches=(patch("deepfake_lens.cli_standalone.analysis_result_for_path", raise_), patch("deepfake_lens.analysis_api.analyze_file", raise_)))
+                    for _, path in files[:6] if "/face" not in path],
+            "E35": [case("api", "GET", "/api/jobs/zzz", 404, "알 수 없거나 이미 끝난 작업입니다"),
+                    case("api", "POST", "/api/jobs/zzz/cancel", 404, "알 수 없거나 이미 끝난 작업입니다")],
+            "E36": [case("api", "POST", f"/api/{path}", 429, "실행 중인 작업이 너무 많습니다", patches=(patch.object(api_server, "MAX_JOBS", 0),))
+                    for path in (f"check/stream?file_path={q(f / 'memo.txt')}", f"scan/stream?directory={q(f)}")],
+            "E37": [case("api", "POST", "/api/analyze/image", 422, "요청 매개변수 오류"),
+                    case("api", "POST", "/api/multimodal?image_score=abc", 422, "요청 매개변수 오류")],
+            "E38": [case("api", method, path.format(q(f / "nope.png")), 404, "파일을 찾을 수 없습니다: ") for method, path in files],
+            "E39": [case("api", method, path.format(q(f / "sub")), 400, "파일이 아니라 폴더입니다: ") for method, path in files],
+            "E40": [case("api", method, path.format(q(self.outside / "secret.png")), 403, "허용되지 않은 경로") for method, path in files],
+            "E41": [case("api", "POST", f"/api/multimodal?file_path={q(f / 'nope.png')}", 400, "알 수 없는 매개변수입니다: file_path"),
+                    case("api", "POST", "/api/multimodal?image_score=10&bogus=1", 400, "알 수 없는 매개변수입니다: bogus")],
+        }
+
+    # -- the servers ---------------------------------------------------------------
+
+    def _web(self):
+        import threading
+        import urllib.error
+        import urllib.request
+
+        from deepfake_lens.webapp import CLIENT_HEADER, build_server
+
+        server = build_server("127.0.0.1", 0, default_folder=self.folder)
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+
+        def send(method: str, path: str, body: bytes | None, ctype: str, headers: dict[str, str] | None) -> tuple[int, bytes]:
+            sent = {CLIENT_HEADER: "qa"} if headers is None else dict(headers)
+            if ctype:
+                sent["Content-Type"] = ctype
+            request = urllib.request.Request(base + path, data=body, headers=sent, method=method)
+            try:
+                with urllib.request.urlopen(request, timeout=120) as response:
+                    return response.status, response.read()
+            except urllib.error.HTTPError as exc:
+                return exc.code, exc.read()
+
+        return send
+
+    def _api(self):
+        from fastapi.testclient import TestClient
+
+        client = TestClient(api_server.create_app(default_folder=self.folder), raise_server_exceptions=False)
+
+        def send(method: str, path: str, body: bytes | None, ctype: str, headers: dict[str, str] | None) -> tuple[int, bytes]:
+            sent = {"host": "localhost", **({"X-Deepfake-Lens-Client": "qa"} if headers is None else headers)}
+            if ctype:
+                sent["Content-Type"] = ctype
+            response = client.request(method, path, content=body, headers=sent)
+            return response.status_code, response.content
+
+        return send
+
+    @staticmethod
+    def _text(raw: bytes) -> str:
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            return raw.decode("utf-8", "replace")
+        if isinstance(payload, dict):
+            return str(payload.get("error") or payload.get("detail") or payload.get("message") or "")
+        return ""
+
+    def test_every_table_row_has_cases_for_its_servers(self) -> None:
+        table = self._table()
+        cases = self._cases()
+        self.assertEqual(sorted(table, key=lambda k: int(k[1:])), sorted(cases, key=lambda k: int(k[1:])), "one case list per table row")
+        for row_id, (cell, statuses) in table.items():
+            with self.subTest(row=row_id):
+                self.assertEqual({c["server"] for c in cases[row_id]}, self._servers(cell), cell)
+                self.assertTrue({c["status"] for c in cases[row_id]} <= statuses, (statuses, cell))
+
+    def test_every_row_on_its_servers(self) -> None:
+        import contextlib
+
+        from deepfake_lens.error_text import english_prose
+
+        senders = {"web": self._web()}
+        if HAVE_FASTAPI:
+            senders["api"] = self._api()
+        for row_id, cases in self._cases().items():
+            for c in cases:
+                send = senders.get(c["server"])
+                if send is None:
+                    continue
+                with self.subTest(row=row_id, server=c["server"], method=c["method"], path=c["path"][:70], body=(c["body"] or b"")[:24]):
+                    with contextlib.ExitStack() as stack:
+                        for patcher in c["patches"]:
+                            stack.enter_context(patcher)
+                        status, raw = send(c["method"], c["path"], c["body"], c["ctype"], c["headers"])
+                    text = self._text(raw)
+                    self.assertEqual(status, c["status"], raw[:300])
+                    self.assertIn(c["text"], text, raw[:300])
+                    self.assertIsNone(english_prose(text.replace(str(self.folder), "").replace(str(self.outside), "")), text)

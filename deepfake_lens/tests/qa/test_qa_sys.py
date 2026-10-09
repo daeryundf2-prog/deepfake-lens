@@ -831,7 +831,7 @@ def _assert_korean_pdf_error(test: unittest.TestCase, rendered: object) -> None:
     test.assertIsInstance(rendered, dict, "without pymupdf no PDF bytes may be produced")
     assert isinstance(rendered, dict)
     test.assertEqual(rendered, {"error": webapp_api.PDF_REPORT_UNAVAILABLE_ERROR})
-    test.assertEqual(rendered["error"], "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: pip install pymupdf).")
+    test.assertEqual(rendered["error"], "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: `pip install pymupdf`).")  # P8: command in backticks
     test.assertEqual(webapp_api.report_error_status(rendered), 501)
 
 
@@ -1089,7 +1089,7 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
         self.assertEqual(status, 501)
         self.assertIn("application/json", ctype)
         self.assertFalse(payload.startswith(b"%PDF"))
-        self.assertEqual(json.loads(payload.decode("utf-8")), {"error": "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: pip install pymupdf)."})
+        self.assertEqual(json.loads(payload.decode("utf-8")), {"error": "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: `pip install pymupdf`)."})  # P8: command in backticks
 
 
 class _ServerFixture(unittest.TestCase):

@@ -1635,7 +1635,8 @@ def compare_files(file_a: Path | str, file_b: Path | str, *, ecapa_revision: str
             return {"error": "한쪽 파일의 텍스트 추출에 실패했습니다."}
         result = compare_texts(text_a, text_b)
         return {"kind": "stylometry", "score": result.same_author_score, "reference_band": result.reference_band, "reference_note": result.reference_note, "distance": result.distance, "limitations": result.limitations}
-    return {"error": f"지원되는 쌍이 아닙니다 ({ext_a} vs {ext_b}) — 오디오끼리 또는 텍스트/문서끼리 비교하세요."}
+    # P8: "(.txt vs .wav)" read as English prose to the detector.
+    return {"error": f"지원되는 쌍이 아닙니다({ext_a}, {ext_b}) — 오디오끼리 또는 텍스트/문서끼리 비교하세요."}
 
 
 

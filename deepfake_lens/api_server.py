@@ -122,6 +122,34 @@ def confine_request_path(path_text: str, default_folder: Path | None = None) -> 
     return _require_read_root(Path(path_text), default_folder)
 
 
+def require_request_file(path: Path) -> None:
+    """P8 (round 8): a named file that is missing is 404, a folder 400 — Korean, before any analysis.
+
+    api-serve's own file endpoints (/api/analyze/*, /api/classify, /api/check,
+    /api/check/stream, /api/compare) answered a missing file with 200
+    "success" and a failed row (classify: 500, compare: a misleading 400).
+    """
+    import os
+
+    from fastapi import HTTPException
+
+    from .analysis_api import SingleFileError, check_single_file
+
+    try:
+        check_single_file(path)
+    except SingleFileError as exc:
+        raise HTTPException(status_code=404 if not os.path.lexists(path) else 400, detail=str(exc)) from exc
+
+
+# P8: /api/multimodal combines caller-supplied scores; any other query
+# parameter (a file_path, a typo) is refused instead of silently ignored.
+MULTIMODAL_PARAMS = frozenset({"image_score", "text_score", "audio_score", "video_score"})
+MULTIMODAL_UNKNOWN_PARAM = "알 수 없는 매개변수입니다: {names} — /api/multimodal은 점수(image_score, text_score, audio_score, video_score)만 받습니다(파일 분석은 /api/analyze/*)"
+# P8: review bodies must be JSON objects (an array was a 500).
+REVIEW_BODY_NOT_OBJECT = "검토 요청 본문은 JSON 객체여야 합니다"
+REVIEW_ID_NOT_STRING = "artifact_id 값은 문자열이어야 합니다"
+
+
 def missing_server_dependencies() -> list[str]:
     """Server packages that are not importable in this environment."""
     return [name for name in SERVER_DEPENDENCIES if importlib.util.find_spec(name) is None]
@@ -356,6 +384,7 @@ def create_app(
             path = confine_request_path(file_path, default_folder)
         except ReadRootDenied:
             return _denied()
+        require_request_file(path)  # P8: missing 404, folder 400
         try:
             return {"status": "success", "data": _verdict_payload(path, "analyze/image")}
         except Exception as exc:
@@ -368,6 +397,7 @@ def create_app(
             path = confine_request_path(file_path, default_folder)
         except ReadRootDenied:
             return _denied()
+        require_request_file(path)  # P8: missing 404, folder 400
         try:
             # The scan path runs the audio heuristics as reference signals
             # and the bundled audio profiles under their pins/gates.
@@ -384,6 +414,7 @@ def create_app(
             path = confine_request_path(file_path, default_folder)
         except ReadRootDenied:
             return _denied()
+        require_request_file(path)  # P8: missing 404, folder 400
         try:
             result = analyze_faces(path)
             diag = to_layer_diagnostic("face", result.to_json(), layer_label="얼굴 조작 계층", subject=str(path))
@@ -420,6 +451,7 @@ def create_app(
             path = confine_request_path(file_path, default_folder)
         except ReadRootDenied:
             return _denied()
+        require_request_file(path)  # P8: missing 404, folder 400
         try:
             data = _verdict_payload(path, "analyze/forensic")
             data["layer_diagnostics"] = {
@@ -440,6 +472,7 @@ def create_app(
             path = confine_request_path(file_path, default_folder)
         except ReadRootDenied:
             return _denied()
+        require_request_file(path)  # P8: missing 404, folder 400
         try:
             data = _verdict_payload(path, "classify")
             data["tool_candidates"] = to_layer_diagnostic(
@@ -505,6 +538,7 @@ def create_app(
                     path = confine_request_path(file_path, default_folder)
                 except ReadRootDenied:
                     return _denied()
+                require_request_file(path)  # P8: missing 404, folder 400
                 if _is_archive(path):
                     # R1: an archive is expanded exactly as the folder scan
                     # expands it (member rows + container row).
@@ -634,6 +668,7 @@ def create_app(
                 confined = confine_request_path(file_path, default_folder)
             except ReadRootDenied:
                 return _denied()
+            require_request_file(confined)  # P8: 404/400 before the stream starts
         job_id, cancel = _register_job()
 
         def run_layered() -> Any:
@@ -912,6 +947,9 @@ def create_app(
             path_b = confine_request_path(file_path_b, default_folder)
         except ReadRootDenied:
             return _denied()
+        # P8: a missing file was "한쪽 파일의 텍스트 추출에 실패했습니다" (400).
+        require_request_file(path_a)
+        require_request_file(path_b)
         try:
             result = compare_files(path_a, path_b)
         except Exception as exc:
@@ -924,6 +962,7 @@ def create_app(
 
     @app.post("/api/multimodal")
     def multimodal(
+        request: Request,
         image_score: int | None = None,
         text_score: int | None = None,
         audio_score: int | None = None,
@@ -934,6 +973,9 @@ def create_app(
         # files comes from /api/analyze/* or /api/scan.
         from .layer_diagnostic import to_layer_diagnostic
         from .multimodal import analyze_multimodal
+        unknown = sorted(set(request.query_params) - MULTIMODAL_PARAMS)
+        if unknown:
+            raise HTTPException(status_code=400, detail=MULTIMODAL_UNKNOWN_PARAM.format(names=", ".join(unknown)))
         try:
             result = analyze_multimodal(
                 image_score=image_score,
@@ -1062,8 +1104,10 @@ def create_app(
         body = await request.body()
         try:
             data = json.loads(body.decode("utf-8") if body else "{}")
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             raise HTTPException(status_code=400, detail="JSON 본문을 해석할 수 없습니다")
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail=REVIEW_BODY_NOT_OBJECT)  # P8: was a 500
         saved = store.save_review(artifact_id, data)
         return {"status": "success", "artifact_id": artifact_id, "review": saved}
 
@@ -1085,11 +1129,15 @@ def create_app(
         body = await request.body()
         try:
             data = json.loads(body.decode("utf-8") if body else "{}")
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             raise HTTPException(status_code=400, detail="JSON 본문을 해석할 수 없습니다")
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail=REVIEW_BODY_NOT_OBJECT)  # P8: was a 500
         artifact_id = data.get("artifact_id", data.get("path", ""))
         if not artifact_id:
             raise HTTPException(status_code=400, detail="본문에 artifact_id가 없습니다")
+        if not isinstance(artifact_id, str):
+            raise HTTPException(status_code=400, detail=REVIEW_ID_NOT_STRING)
         store = get_default_review_store()
         saved = store.save_review(artifact_id, data)
         return {"status": "success", "artifact_id": artifact_id, "review": saved}

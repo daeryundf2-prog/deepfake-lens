@@ -351,9 +351,15 @@ def build_server(
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     self.send_error(400, "JSON을 해석할 수 없습니다")
                     return
+                if not isinstance(raw, dict):
+                    self.send_error(400, "검토 요청 본문은 JSON 객체여야 합니다")  # P8: an array was a 500
+                    return
                 art_id = raw.get("artifact_id", raw.get("path", ""))
                 if not art_id:
                     self.send_error(400, "artifact_id가 필요합니다")
+                    return
+                if not isinstance(art_id, str):
+                    self.send_error(400, "artifact_id 값은 문자열이어야 합니다")
                     return
                 from .reviews import get_default_review_store
                 saved = get_default_review_store().save_review(art_id, raw)

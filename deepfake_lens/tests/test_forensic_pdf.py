@@ -187,4 +187,4 @@ class ForensicPdfApiEndpointTest(unittest.TestCase):
         self.assertEqual(res.status_code, 501)
         self.assertIn("application/json", res.headers.get("content-type", ""))
         self.assertFalse(res.content.startswith(b"%PDF"))
-        self.assertEqual(res.json(), {"error": "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: pip install pymupdf)."})
+        self.assertEqual(res.json(), {"error": "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: `pip install pymupdf`)."})  # P8: command in backticks

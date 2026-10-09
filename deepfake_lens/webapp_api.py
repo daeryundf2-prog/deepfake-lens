@@ -131,6 +131,23 @@ def scan_root_text(folder: Path) -> str:
         return str(Path(os.path.abspath(Path(folder).expanduser())))
 
 
+# P8 (round 8): a multipart body cut off before its closing boundary was
+# parsed as far as it went — a truncated upload was analyzed (200) as if it
+# were the whole file.
+MULTIPART_INCOMPLETE = "업로드 본문이 잘렸습니다(닫는 경계 없음) — 파일을 다시 보내십시오"
+
+
+def _multipart_incomplete(content_type: str, body: bytes) -> bool:
+    """True when a multipart/form-data ``body`` lacks its closing ``--boundary--`` (P8)."""
+    import re as _re
+
+    match = _re.search(r'boundary=(?:"([^"]+)"|([^;\s]+))', content_type, _re.IGNORECASE)
+    if match is None:
+        return True
+    boundary = (match.group(1) or match.group(2)).encode("latin-1", errors="replace")
+    return b"--" + boundary + b"--" not in body
+
+
 # P6 (round 8): an uploaded file is a temp copy, not a file under a read
 # root — its rows are marked so POST /api/report never re-analyzes a
 # same-named file of the read root in its place (and never signs it).
@@ -562,6 +579,7 @@ _PREVIEW_MIME = {
 }
 MAX_PREVIEW_BYTES = 128 * 1024 * 1024
 PREVIEW_TOO_LARGE_MESSAGE = "파일이 너무 커서 미리보기를 제공하지 않습니다(상한 128 MiB)"
+PREVIEW_NOT_MEDIA_MESSAGE = "미리보기를 지원하지 않는 형식입니다: {suffix} (이미지·영상·음성만)"
 
 
 def _preview_payload(query: str) -> tuple[int, bytes, str, str]:
@@ -578,8 +596,12 @@ def _preview_payload(query: str) -> tuple[int, bytes, str, str]:
         return 400, "경로가 없습니다".encode("utf-8"), "missing", ""
     path = Path(path_value).expanduser().resolve()
     mime = _PREVIEW_MIME.get(path.suffix.lower())
-    if mime is None or not _read_root_allows(path, root_value):
+    if not _read_root_allows(path, root_value):
         return 403, READ_ROOT_DENIED_MESSAGE.encode("utf-8"), "forbidden", ""  # G9: Korean body, ASCII header code
+    if mime is None:
+        # P8 (round 8): a non-media file inside the roots was 403 (the
+        # documented status is 400 — the request, not the place, is wrong).
+        return 400, PREVIEW_NOT_MEDIA_MESSAGE.format(suffix=path.suffix or "(확장자 없음)").encode("utf-8"), "not-media", ""
     try:
         if path.stat().st_size > MAX_PREVIEW_BYTES:
             return 413, PREVIEW_TOO_LARGE_MESSAGE.encode("utf-8"), "too-large", ""
@@ -711,6 +733,8 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
     """
     if "multipart/form-data" not in content_type:
         return ApiError("multipart/form-data 업로드가 필요합니다", 400)
+    if _multipart_incomplete(content_type, body):
+        return ApiError(MULTIPART_INCOMPLETE, 400)  # P8
     from .archives import is_archive
 
     message = BytesParser(policy=email_policy).parsebytes(
@@ -849,6 +873,8 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     """Unified single-file check: full scan + forensics + text probes."""
     if "multipart/form-data" not in content_type:
         return ApiError("multipart/form-data 또는 application/json 본문이 필요합니다", 400)
+    if _multipart_incomplete(content_type, body):
+        return ApiError(MULTIPART_INCOMPLETE, 400)  # P8
     message = BytesParser(policy=email_policy).parsebytes(
         b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
     )
@@ -919,6 +945,8 @@ def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
     for text/document pairs. Both parts must carry filenames."""
     if "multipart/form-data" not in content_type:
         return ApiError("multipart/form-data 본문이 필요합니다", 400)
+    if _multipart_incomplete(content_type, body):
+        return ApiError(MULTIPART_INCOMPLETE, 400)  # P8
     message = BytesParser(policy=email_policy).parsebytes(
         b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
     )
@@ -996,7 +1024,9 @@ def _feedback_payload(body: bytes) -> dict[str, object]:
 
 # B8: /api/report?format=pdf without pymupdf answers this body with HTTP 501
 # (both the stdlib web server and the FastAPI server) instead of a PDF.
-PDF_REPORT_UNAVAILABLE_ERROR = "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: pip install pymupdf)."
+# P8: the install command in backticks, as in evidence_statement (an unquoted
+# "pip install" read as English prose).
+PDF_REPORT_UNAVAILABLE_ERROR = "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: `pip install pymupdf`)."
 PDF_REPORT_UNAVAILABLE_BODY: dict[str, object] = {"error": PDF_REPORT_UNAVAILABLE_ERROR}
 PDF_REPORT_UNAVAILABLE_STATUS = 501
 
@@ -1310,6 +1340,25 @@ def _rederive_report_items(
     return derived, excluded
 
 
+def _posted_heatmaps_allowed(row: dict[str, Any], roots: list[Path]) -> bool:
+    """Every heatmap path a posted row names (top level or result.pixel_analysis) is under the roots."""
+    result = row.get("result")
+    pixel = result.get("pixel_analysis") if isinstance(result, dict) else None
+    candidates = [row.get("heatmap_path"), pixel.get("heatmap_path") if isinstance(pixel, dict) else None]
+    for value in candidates:
+        if value is None or value == "":
+            continue
+        if not isinstance(value, str):
+            return False
+        try:
+            resolved = Path(value).expanduser().resolve()
+        except (OSError, RuntimeError):
+            return False
+        if not (any(_is_within(resolved, root) for root in roots) or is_default_heatmap_output(resolved)):
+            return False
+    return True
+
+
 def _upload_row_item(row: dict[str, Any]) -> Any:
     """A posted upload row as a ScanItem for the unsigned-rows section (P6), or None without a path."""
     from .report_items import ItemContractError, check_report_item
@@ -1402,6 +1451,14 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
         if isinstance(fmt_or_error, dict):
             return fmt_or_error
         format_override = fmt_or_error
+
+    # QA-SYS-7/P8: a heatmap_path outside the roots is a probe for host files
+    # — 403 whatever else is wrong with the row (a top-level heatmap_path
+    # included, which the GUI also reads).
+    roots_for_probe = _effective_roots(default_folder)
+    for row in raw_items:
+        if isinstance(row, dict) and not _posted_heatmaps_allowed(row, roots_for_probe):
+            raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE)
 
     items = []
     uploads: list[tuple[Any, str]] = []
