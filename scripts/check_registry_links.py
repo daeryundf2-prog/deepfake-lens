@@ -79,6 +79,11 @@ def _status_result(code: int) -> tuple[bool, str]:
 
 
 def main() -> int:
+    _repo = Path(__file__).resolve().parents[1]
+    if str(_repo) not in sys.path:
+        sys.path.insert(0, str(_repo))
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    KoreanArgumentParser(description="레지스트리·문서에 인용된 외부 URL이 모두 열리는지 확인합니다(모두 열리면 종료 코드 0, 아니면 1).").parse_args()
     entries = extract_urls()
     print(f"Checking {len(entries)} URLs from {len(SOURCES)} files...")
     failures: list[tuple[str, str, str]] = []

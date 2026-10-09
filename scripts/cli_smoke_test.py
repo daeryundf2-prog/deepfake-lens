@@ -34,6 +34,11 @@ def run_cli(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 def main() -> int:
+    _repo = Path(__file__).resolve().parents[1]
+    if str(_repo) not in sys.path:
+        sys.path.insert(0, str(_repo))
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    KoreanArgumentParser(description="번들 픽스처로 모든 deepfake-lens 하위 명령을 스모크 테스트합니다(--help 응답과 기능 점검; 모두 통과하면 종료 코드 0).").parse_args()
     sys.path.insert(0, str(REPO_ROOT))
     from deepfake_lens import cli
 

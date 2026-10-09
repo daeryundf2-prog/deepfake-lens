@@ -29,7 +29,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 import wave
@@ -655,11 +654,12 @@ def score_audio_file(model: "AasistModel", path: Path | str, *, sample_rate: int
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run the AASIST pretrained audio anti-spoofing model.")
-    parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--audio", type=Path, required=True, help="audio file to classify (PCM .wav needs no extra deps)")
-    parser.add_argument("--sample-rate", type=int, default=DEFAULT_SAMPLE_RATE)
-    parser.add_argument("--max-seconds", type=float, default=DEFAULT_MAX_SECONDS)
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="AASIST 사전학습 음성 위조 탐지 모델을 실행합니다(참고 원점수, 보정 전).")
+    parser.add_argument("--checkpoint", type=Path, required=True, help="AASIST 체크포인트 파일")
+    parser.add_argument("--audio", type=Path, required=True, help="분석할 음성 파일(PCM .wav는 추가 의존성 불필요)")
+    parser.add_argument("--sample-rate", type=int, default=DEFAULT_SAMPLE_RATE, help=f"표본화율(기본: {DEFAULT_SAMPLE_RATE})")
+    parser.add_argument("--max-seconds", type=float, default=DEFAULT_MAX_SECONDS, help=f"분석할 최대 길이(초, 기본: {DEFAULT_MAX_SECONDS})")
     args = parser.parse_args(argv)
 
     missing = [str(err) for err in (_IMPORT_ERROR, _NUMPY_ERROR) if err is not None]

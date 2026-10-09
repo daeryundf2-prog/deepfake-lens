@@ -20,6 +20,11 @@ PIN_PATH = CONTRACTS / "PIN.json"
 
 
 def main() -> int:
+    _repo = Path(__file__).resolve().parents[1]
+    if str(_repo) not in sys.path:
+        sys.path.insert(0, str(_repo))
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    KoreanArgumentParser(description="contracts/의 벤더링된 lazy-contracts 파일이 PIN.json의 고정 sha256과 같은지 확인합니다(같으면 종료 코드 0, 누락·변경이면 1).").parse_args()
     pin = json.loads(PIN_PATH.read_text(encoding="utf-8"))
     expected: dict[str, str] = pin["sha256"]
     upstream = pin.get("upstream", "?")

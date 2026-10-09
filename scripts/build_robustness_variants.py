@@ -29,7 +29,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -130,15 +129,16 @@ def records_from_folder(root: Path) -> list[dict[str, str]]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate robustness-transform variants of a labeled dataset.")
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="라벨된 데이터셋의 강건성 변환(재압축·크기 조정 등) 변형본을 만듭니다.")
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--root", type=Path, help="labeled dataset folder (ai/real paths)")
-    source.add_argument("--plan", type=Path, help="robustness-plan.json from `dataset --robustness-out`")
-    parser.add_argument("--out", type=Path, required=True, help="output root for transformed variants")
+    source.add_argument("--root", type=Path, help="라벨된 데이터셋 폴더(ai/real 경로)")
+    source.add_argument("--plan", type=Path, help="`dataset --robustness-out`이 만든 robustness-plan.json")
+    parser.add_argument("--out", type=Path, required=True, help="변형본을 쓸 최상위 폴더")
     parser.add_argument(
         "--transforms",
         default=",".join(ROBUSTNESS_TRANSFORMS),
-        help=f"comma-separated transforms (default: all of {ROBUSTNESS_TRANSFORMS})",
+        help=f"쉼표로 구분한 변환 목록(기본: {ROBUSTNESS_TRANSFORMS} 전부)",
     )
     args = parser.parse_args(argv)
 

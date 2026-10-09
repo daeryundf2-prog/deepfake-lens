@@ -31,7 +31,6 @@ Usage::
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 from typing import Callable
@@ -404,9 +403,13 @@ def generate_all(out_dir: Path | str, seed: int = 0, classes: tuple[str, ...] = 
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help=f"output directory (default: {DEFAULT_OUT})")
-    parser.add_argument("--seed", type=int, default=0)
+    _repo = Path(__file__).resolve().parents[1]
+    if str(_repo) not in sys.path:
+        sys.path.insert(0, str(_repo))
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="사진이 아닌 적대적 이미지 세트(그라데이션·노이즈·단색·체커보드·블러·스크린샷·문서 스캔)를 만듭니다(0단계 WP-D: G3/G13/G17).")
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help=f"출력 폴더(기본: {DEFAULT_OUT})")
+    parser.add_argument("--seed", type=int, default=0, help="난수 시드(기본: 0)")
     args = parser.parse_args(argv)
     written = generate_all(args.out, seed=args.seed)
     total = sum(len(paths) for paths in written.values())

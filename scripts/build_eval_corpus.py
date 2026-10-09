@@ -158,13 +158,17 @@ def build_audio(out: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
-    parser.add_argument("--out", required=True, type=Path)
-    parser.add_argument("--parts", default="text,audio")
-    parser.add_argument("--n-human", type=int, default=400)
-    parser.add_argument("--n-ai", type=int, default=200)
-    parser.add_argument("--qwen-revision", type=_commit, help=f"{QWEN_MODEL} hub commit (required for --parts text)")
-    parser.add_argument("--wikipedia-revision", type=_commit, help=f"{WIKIPEDIA_DATASET} hub commit (required for --parts text)")
+    _repo = Path(__file__).resolve().parents[1]
+    if str(_repo) not in sys.path:
+        sys.path.insert(0, str(_repo))
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="텍스트·음성 평가 코퍼스(사람/AI)를 허브 revision을 고정해 만듭니다.")
+    parser.add_argument("--out", required=True, type=Path, help="코퍼스를 쓸 폴더")
+    parser.add_argument("--parts", default="text,audio", help="만들 부분(쉼표로 구분한 `text`·`audio`; 기본: `text,audio`)")
+    parser.add_argument("--n-human", type=int, default=400, help="사람이 쓴 표본 수(기본: 400)")
+    parser.add_argument("--n-ai", type=int, default=200, help="AI 생성 표본 수(기본: 200)")
+    parser.add_argument("--qwen-revision", type=_commit, help=f"{QWEN_MODEL} 허브 커밋(--parts text에 필수)")
+    parser.add_argument("--wikipedia-revision", type=_commit, help=f"{WIKIPEDIA_DATASET} 허브 커밋(--parts text에 필수)")
     args = parser.parse_args(argv)
     parts = {p.strip() for p in args.parts.split(",")}
 

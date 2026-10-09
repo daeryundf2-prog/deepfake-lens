@@ -28,7 +28,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import re
 import sys
@@ -45,7 +44,7 @@ if str(REPO_ROOT) not in sys.path:
 # deepfake_lens/models — never a repo-root models/ nothing loads from.
 from deepfake_lens.cli import default_models_dir  # noqa: E402
 
-DEST_HELP = "destination directory (default: deepfake_lens.cli.default_models_dir() — $DEEPFAKE_LENS_MODELS_DIR or the packaged models dir)"
+DEST_HELP = "내려받을 폴더(기본: deepfake_lens.cli.default_models_dir() — $DEEPFAKE_LENS_MODELS_DIR 또는 패키지 models 폴더)"
 DEFAULT_NAME = "aide_progan_train.pth"
 
 # Official checkpoint location from the AIDE README "Model Zoo" section.
@@ -146,12 +145,13 @@ def download(url: str, dest: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Fetch the AIDE progan_train checkpoint into the models dir.")
-    parser.add_argument("--url", default=AIDE_MODEL_ZOO_URL, help="direct checkpoint download URL (default: the AIDE Model Zoo folder, which prints instructions)")
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="AIDE progan_train 체크포인트를 모델 폴더로 내려받습니다.")
+    parser.add_argument("--url", default=AIDE_MODEL_ZOO_URL, help="체크포인트 직접 다운로드 URL(기본: AIDE 모델 저장소 폴더 — 안내만 출력)")
     parser.add_argument("--dest", type=Path, default=None, help=DEST_HELP)
-    parser.add_argument("--name", default=DEFAULT_NAME, help=f"destination filename (default: {DEFAULT_NAME})")
-    parser.add_argument("--sha256", help="expected lowercase sha256 hex digest; the download fails if it does not match")
-    parser.add_argument("--force", action="store_true", help="overwrite an existing destination file")
+    parser.add_argument("--name", default=DEFAULT_NAME, help=f"저장할 파일 이름(기본: {DEFAULT_NAME})")
+    parser.add_argument("--sha256", help="기대 sha256(소문자 16진수) — 다르면 다운로드 실패")
+    parser.add_argument("--force", action="store_true", help="이미 있는 파일을 덮어씀")
     args = parser.parse_args(argv)
 
     # Windows consoles default to a legacy code page (e.g. cp949) that cannot

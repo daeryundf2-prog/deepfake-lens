@@ -15,7 +15,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import subprocess
 import sys
 import tempfile
@@ -41,10 +40,14 @@ def start_server(port: int, folder: str) -> subprocess.Popen:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--scan-dir", required=True)
-    ap.add_argument("--port", type=int, default=8899)
-    ap.add_argument("--shot", type=Path, default=Path("gui-smoke.png"))
+    _repo = Path(__file__).resolve().parents[1]
+    if str(_repo) not in sys.path:
+        sys.path.insert(0, str(_repo))
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    ap = KoreanArgumentParser(description="웹 GUI를 띄워 폴더를 검사하고 결론·근거·검사 범위가 그려지는지 확인합니다(스크린샷 저장).")
+    ap.add_argument("--scan-dir", required=True, help="GUI에서 검사할 폴더")
+    ap.add_argument("--port", type=int, default=8899, help="웹 서버 포트(기본: 8899)")
+    ap.add_argument("--shot", type=Path, default=Path("gui-smoke.png"), help="스크린샷 파일(기본: gui-smoke.png)")
     args = ap.parse_args()
 
     try:

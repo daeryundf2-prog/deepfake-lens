@@ -18,7 +18,6 @@ explanation per failing profile), 2 when the directory does not exist.
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -35,8 +34,9 @@ def main(argv: list[str] | None = None) -> int:
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
             reconfigure(encoding="utf-8", errors="replace")
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--models-dir", type=Path, default=DEFAULT_MODELS_DIR, help="profile directory (default: deepfake_lens/models)")
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="측정 게이트(0단계 WP-I, G26/G28, QA-SYS-9): supported 프로필의 측정 기록을 검사합니다.")
+    parser.add_argument("--models-dir", type=Path, default=DEFAULT_MODELS_DIR, help="프로필 폴더(기본: deepfake_lens/models)")
     args = parser.parse_args(argv)
     if not args.models_dir.is_dir():
         print(f"모델 디렉터리가 없습니다: {args.models_dir}")

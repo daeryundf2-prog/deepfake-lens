@@ -25,7 +25,6 @@ openssl binary on PATH for certificate generation.
 
 from __future__ import annotations
 
-import argparse
 import base64
 import json
 import shutil
@@ -148,8 +147,12 @@ def verify(out_path: Path) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Regenerate the C2PA test fixture.")
-    parser.add_argument("--force", action="store_true", help="overwrite an existing signed-c2pa.png")
+    _repo = Path(__file__).resolve().parents[1]
+    if str(_repo) not in sys.path:
+        sys.path.insert(0, str(_repo))
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="C2PA 테스트 픽스처(fixtures/c2pa-test/signed-c2pa.png)를 다시 만듭니다.")
+    parser.add_argument("--force", action="store_true", help="기존 signed-c2pa.png를 덮어씀")
     args = parser.parse_args(argv)
 
     target = FIXTURE_DIR / "signed-c2pa.png"

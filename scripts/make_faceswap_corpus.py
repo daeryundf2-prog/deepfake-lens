@@ -25,19 +25,22 @@ under --models-root.
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--real-dir", type=Path, required=True, help="Directory of real portrait images")
-    parser.add_argument("--out", type=Path, required=True, help="Output directory for swapped images")
-    parser.add_argument("--swapper", type=Path, required=True, help="Path to inswapper_128.onnx")
-    parser.add_argument("--models-root", type=Path, default=Path("/tmp/dfl-swap"), help="insightface model root (buffalo_l)")
-    parser.add_argument("--offset", type=int, default=17, help="Source-face index offset (prime to count)")
-    parser.add_argument("--max-images", type=int, default=0, help="Cap on inputs (0 = all)")
+    _repo = Path(__file__).resolve().parents[1]
+    if str(_repo) not in sys.path:
+        sys.path.insert(0, str(_repo))
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="실제 인물 사진에 insightface inswapper로 얼굴을 바꿔 페이스스왑 코퍼스를 만듭니다.")
+    parser.add_argument("--real-dir", type=Path, required=True, help="실제 인물 사진 폴더")
+    parser.add_argument("--out", type=Path, required=True, help="얼굴을 바꾼 이미지를 쓸 폴더")
+    parser.add_argument("--swapper", type=Path, required=True, help="inswapper_128.onnx 파일 경로")
+    parser.add_argument("--models-root", type=Path, default=Path("/tmp/dfl-swap"), help="insightface 모델 폴더(buffalo_l)")
+    parser.add_argument("--offset", type=int, default=17, help="원본 얼굴 인덱스 오프셋(개수와 서로소)")
+    parser.add_argument("--max-images", type=int, default=0, help="입력 수 상한(0 = 전부)")
     args = parser.parse_args()
 
     try:

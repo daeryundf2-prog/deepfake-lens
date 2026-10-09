@@ -12,7 +12,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 from pathlib import Path
@@ -39,13 +38,14 @@ def _load_run_aide():
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Evaluate the AIDE detector on a labeled folder.")
-    parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--root", type=Path, required=True)
-    parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--max-files", type=int)
-    parser.add_argument("--report", type=Path)
-    parser.add_argument("--target-fpr", type=float, default=0.05)
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="라벨된 폴더에서 AIDE 탐지기를 평가합니다.")
+    parser.add_argument("--checkpoint", type=Path, required=True, help="AIDE 체크포인트 파일")
+    parser.add_argument("--root", type=Path, required=True, help="라벨된 평가 폴더")
+    parser.add_argument("--batch-size", type=int, default=8, help="배치 크기(기본: 8)")
+    parser.add_argument("--max-files", type=int, help="평가할 최대 파일 수")
+    parser.add_argument("--report", type=Path, help="평가 결과 JSON을 쓸 파일")
+    parser.add_argument("--target-fpr", type=float, default=0.05, help="임계값을 정할 목표 오탐률(기본: 0.05)")
     args = parser.parse_args(argv)
     try:
         _threshold_at_fpr([], args.target_fpr)

@@ -18,7 +18,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import difflib
 import json
 import sys
@@ -205,8 +204,12 @@ def render(models_dir: Path = MODELS_DIR) -> dict[Path, str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--check", action="store_true", help="exit 1 when a generated block differs from the profiles")
+    _repo = Path(__file__).resolve().parents[1]
+    if str(_repo) not in sys.path:
+        sys.path.insert(0, str(_repo))
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="런타임 프로필에서 모델 표(models/README.md, NOTICE.md, model_registry.py)를 생성합니다(G9/G33).")
+    parser.add_argument("--check", action="store_true", help="생성 결과가 커밋된 내용과 다르면 종료 코드 1")
     args = parser.parse_args(argv)
     stale = 0
     for path, expected in render().items():

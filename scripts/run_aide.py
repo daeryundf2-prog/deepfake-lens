@@ -26,6 +26,21 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
+
+def build_parser() -> argparse.ArgumentParser:
+    """The Korean argument parser (G13) — defined before the torch imports so --help works without torch."""
+    from deepfake_lens.cli_parser import KoreanArgumentParser
+
+    parser = KoreanArgumentParser(description="AIDE 사전학습 생성 이미지 탐지기를 실행합니다(참고 원점수, 보정 전).")
+    parser.add_argument("--checkpoint", type=Path, required=True, help="AIDE 체크포인트 파일")
+    parser.add_argument("--image", type=Path, help="분석할 이미지")
+    parser.add_argument("--export-onnx", type=Path, help="결합 모델을 ONNX로 내보낼 파일")
+    return parser
+
+
+if __name__ == "__main__" and {"-h", "--help"} & set(sys.argv[1:]):
+    build_parser().parse_args()  # prints the Korean help and exits before torch is imported
+
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 import torch.nn as nn  # noqa: E402
@@ -290,14 +305,11 @@ def preprocess(pil_image, dct: DctPreprocessor) -> torch.Tensor:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Run the AIDE pretrained detector.")
-    parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--image", type=Path, help="image to classify")
-    parser.add_argument("--export-onnx", type=Path, help="export the fused model to ONNX")
+    parser = build_parser()
     args = parser.parse_args(argv)
 
     if args.image is None and args.export_onnx is None:
-        parser.error("provide --image and/or --export-onnx")
+        parser.error("--image 또는 --export-onnx 중 하나 이상이 필요합니다")
 
     model = load_model(args.checkpoint)
     dct = DctPreprocessor()

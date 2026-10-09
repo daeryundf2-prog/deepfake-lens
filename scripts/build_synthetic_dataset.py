@@ -8,7 +8,6 @@ export path end to end, not benchmark quality.
 
 from __future__ import annotations
 
-import argparse
 import json
 import math
 from pathlib import Path
@@ -45,9 +44,15 @@ def save_png(path: Path, array: np.ndarray) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--per-split", type=int, default=8)
+    import sys
+
+    _repo = Path(__file__).resolve().parents[1]
+    if str(_repo) not in sys.path:
+        sys.path.insert(0, str(_repo))
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="파이프라인 스모크 테스트용 작은 합성 라벨 이미지 데이터셋을 만듭니다(실제 탐지 성능과 무관).")
+    parser.add_argument("--out", type=Path, required=True, help="데이터셋을 쓸 폴더")
+    parser.add_argument("--per-split", type=int, default=8, help="분할·라벨마다 만들 이미지 수(기본: 8)")
     args = parser.parse_args()
 
     root = args.out

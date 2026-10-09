@@ -18,7 +18,6 @@ Prints a JSON summary (counts, formats not producible here and why).
 
 from __future__ import annotations
 
-import argparse
 import importlib.util
 import json
 import sys
@@ -86,8 +85,9 @@ def main(argv: list[str] | None = None) -> int:
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
             reconfigure(encoding="utf-8", errors="replace")
-    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
-    parser.add_argument("--out", type=Path, required=True, help="output directory (created)")
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="0단계 수동 QA 체크리스트(docs/QA-MANUAL.md)용 픽스처 폴더를 만듭니다.")
+    parser.add_argument("--out", type=Path, required=True, help="출력 폴더(새로 만듦)")
     args = parser.parse_args(argv)
     print(json.dumps(build(args.out), ensure_ascii=False, indent=2))
     return 0

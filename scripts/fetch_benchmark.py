@@ -40,7 +40,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import sys
@@ -155,12 +154,16 @@ def verify_entry(entry: dict[str, str], root: Path) -> tuple[str, str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Fetch a checksummed benchmark dataset (0_real/1_fake layout).")
-    parser.add_argument("--manifest", required=True, help="manifest JSON path or URL (see module docstring for the format)")
-    parser.add_argument("--dest", type=Path, help=f"dataset root (default: {DEFAULT_DEST_ROOT}/<manifest name>)")
-    parser.add_argument("--max-files", type=int, help="cap the number of manifest entries fetched")
-    parser.add_argument("--verify-only", action="store_true", help="check existing files against sha256 without downloading")
-    parser.add_argument("--force", action="store_true", help="redownload files that already exist")
+    _repo = Path(__file__).resolve().parents[1]
+    if str(_repo) not in sys.path:
+        sys.path.insert(0, str(_repo))
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="체크섬이 기록된 벤치마크 데이터셋(0_real/1_fake 구조)을 내려받습니다.")
+    parser.add_argument("--manifest", required=True, help="매니페스트 JSON 경로 또는 URL(형식은 모듈 설명 참조)")
+    parser.add_argument("--dest", type=Path, help=f"데이터셋 최상위 폴더(기본: {DEFAULT_DEST_ROOT}/<매니페스트 이름>)")
+    parser.add_argument("--max-files", type=int, help="내려받을 매니페스트 항목 수 상한")
+    parser.add_argument("--verify-only", action="store_true", help="내려받지 않고 기존 파일의 sha256만 확인")
+    parser.add_argument("--force", action="store_true", help="이미 있는 파일도 다시 내려받음")
     args = parser.parse_args(argv)
 
     try:

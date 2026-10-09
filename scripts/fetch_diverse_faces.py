@@ -28,7 +28,6 @@ experiments/sbi.py on sys.path — run from the repo root.
 
 from __future__ import annotations
 
-import argparse
 import json
 import sys
 import urllib.parse
@@ -92,18 +91,18 @@ def _largest_face_crop(image):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--out", type=Path, required=True, help="output directory for diverse_* folders")
-    parser.add_argument("--queries", nargs="*", default=DEFAULT_QUERIES)
-    parser.add_argument("--max-downloads", type=int, default=150)
-    parser.add_argument("--val-every", type=int, default=4, help="every Nth face goes to validation (default: 4)")
-    parser.add_argument("--seed", type=int, default=7)
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="다양한 실제 얼굴 사진을 내려받아 diverse_* 학습/검증 폴더로 나눕니다.")
+    parser.add_argument("--out", type=Path, required=True, help="diverse_* 폴더를 만들 출력 폴더")
+    parser.add_argument("--queries", nargs="*", default=DEFAULT_QUERIES, help="검색어 목록(기본: 내장 목록)")
+    parser.add_argument("--max-downloads", type=int, default=150, help="최대 다운로드 수(기본: 150)")
+    parser.add_argument("--val-every", type=int, default=4, help="N번째 얼굴마다 검증 분할로 보냄(기본: 4)")
+    parser.add_argument("--seed", type=int, default=7, help="난수 시드(기본: 7)")
     parser.add_argument(
         "--save-full",
         action="store_true",
-        help="also save each downloaded full frame under full/<prefix>_real/ "
-        "for pipelines that need the original composition (e.g. faceswap "
-        "generation — seam artifacts only exist relative to the surround)",
+        help="내려받은 원본 프레임도 full/<prefix>_real/ 아래에 저장(페이스스왑 생성처럼 원래 구도가 필요한 파이프라인용 — "
+        "경계면 흔적은 주변과의 관계에서만 생김)",
     )
     args = parser.parse_args()
 

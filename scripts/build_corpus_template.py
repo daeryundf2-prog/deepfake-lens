@@ -22,7 +22,6 @@ Existing READMEs are kept unless --force is given.
 
 from __future__ import annotations
 
-import argparse
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -195,9 +194,13 @@ def main(argv: list[str] | None = None) -> int:
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
             reconfigure(encoding="utf-8", errors="replace")
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--out", type=Path, required=True, help="directory to create the five track skeletons in")
-    parser.add_argument("--force", action="store_true", help="overwrite existing README placeholders")
+    _repo = Path(__file__).resolve().parents[1]
+    if str(_repo) not in sys.path:
+        sys.path.insert(0, str(_repo))
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="1단계 평가 트랙 다섯 개의 코퍼스 폴더 골격을 만듭니다.")
+    parser.add_argument("--out", type=Path, required=True, help="트랙 골격을 만들 폴더")
+    parser.add_argument("--force", action="store_true", help="기존 README 자리표시 파일을 덮어씀")
     args = parser.parse_args(argv)
     written = build_template(args.out, force=args.force)
     print(f"트랙 {len(TRACKS)}개 골격 생성: {args.out} (README {len(written)}개 기록)")

@@ -21,7 +21,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import sys
 import urllib.request
 from pathlib import Path
@@ -39,8 +38,9 @@ FILES = {
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Fetch SyncNet lip-sync weights into the models dir.")
-    parser.add_argument("--dest", type=Path, default=None, help="destination directory (default: deepfake_lens.cli.default_models_dir())")
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="SyncNet 립싱크 가중치를 모델 폴더로 내려받습니다.")
+    parser.add_argument("--dest", type=Path, default=None, help="내려받을 폴더(기본: deepfake_lens.cli.default_models_dir())")
     args = parser.parse_args(argv)
     models_dir = Path(args.dest) if args.dest else default_models_dir()
     models_dir.mkdir(parents=True, exist_ok=True)

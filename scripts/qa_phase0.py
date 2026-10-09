@@ -46,7 +46,6 @@ Preconditions of a recorded run (D6, D16):
 
 from __future__ import annotations
 
-import argparse
 import importlib.util
 import io
 import json
@@ -481,12 +480,13 @@ def main(argv: list[str] | None = None) -> int:
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:
             reconfigure(encoding="utf-8", errors="replace")
-    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
-    parser.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR, help="per-QA logs, full-suite.log, results.json (default: build/qa-logs)")
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="conformance table (default: docs/CONFORMANCE.md)")
-    parser.add_argument("--qa-only", action="store_true", help="run tests/qa + fail-closed/decision tests only (QA-SYS-10 -> 건너뜀)")
-    parser.add_argument("--allow-dirty", action="store_true", help="run on a work tree with uncommitted tracked changes (the record says so)")
-    parser.add_argument("--verify-record", action="store_true", help="check that --out was produced on its commit's parent and nothing else changed since")
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    parser = KoreanArgumentParser(description="0단계 QA 하네스: QA 테스트를 실행하고 docs/CONFORMANCE.md 적합성 표를 만듭니다.")
+    parser.add_argument("--log-dir", type=Path, default=DEFAULT_LOG_DIR, help="QA별 로그, full-suite.log, results.json을 쓸 폴더(기본: build/qa-logs)")
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="적합성 표 파일(기본: docs/CONFORMANCE.md)")
+    parser.add_argument("--qa-only", action="store_true", help="tests/qa와 fail-closed·결정 규칙 테스트만 실행(QA-SYS-10은 건너뜀)")
+    parser.add_argument("--allow-dirty", action="store_true", help="커밋되지 않은 변경이 있는 작업 트리에서도 실행(기록에 그 사실을 남김)")
+    parser.add_argument("--verify-record", action="store_true", help="--out 파일이 해당 커밋의 부모에서 만들어졌고 그 뒤 다른 변경이 없는지 확인")
     args = parser.parse_args(argv)
 
     if args.verify_record:

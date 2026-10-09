@@ -13,7 +13,6 @@ For evaluation only; output goes to eval_corpus/video/fake/.
 
 from __future__ import annotations
 
-import argparse
 import random
 import sys
 from pathlib import Path
@@ -83,12 +82,13 @@ def swap_video(src_video: Path, faces_dir: Path, out: Path, mode: str, rng) -> i
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--video", required=True)
-    ap.add_argument("--faces", required=True)
-    ap.add_argument("--out", required=True)
-    ap.add_argument("--mode", choices=["jitter", "smooth"], default="jitter")
-    ap.add_argument("--seed", type=int, default=0)
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    ap = KoreanArgumentParser(description="원본 영상의 얼굴을 다른 얼굴로 바꾼 합성 영상(페이스스왑 회귀 테스트용)을 만듭니다.")
+    ap.add_argument("--video", required=True, help="원본 영상 파일")
+    ap.add_argument("--faces", required=True, help="바꿔 넣을 얼굴 이미지 폴더")
+    ap.add_argument("--out", required=True, help="출력 영상 파일")
+    ap.add_argument("--mode", choices=["jitter", "smooth"], default="jitter", help="얼굴 위치 변화 방식(jitter: 흔들림, smooth: 부드럽게; 기본: jitter)")
+    ap.add_argument("--seed", type=int, default=0, help="난수 시드(기본: 0)")
     args = ap.parse_args()
     n = swap_video(
         Path(args.video), Path(args.faces), Path(args.out),

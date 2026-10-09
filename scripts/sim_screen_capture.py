@@ -11,7 +11,6 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import subprocess
 import tempfile
 from pathlib import Path
@@ -99,11 +98,17 @@ def degrade_video(src: Path, dst: Path, *, seed: int) -> None:
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--input", required=True, type=Path)
-    ap.add_argument("--output", required=True, type=Path)
-    ap.add_argument("--kind", choices=["image", "video"], required=True)
-    ap.add_argument("--seed", type=int, default=0)
+    import sys
+
+    _repo = Path(__file__).resolve().parents[1]
+    if str(_repo) not in sys.path:
+        sys.path.insert(0, str(_repo))
+    from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
+    ap = KoreanArgumentParser(description="화면 재촬영(모아레·밴딩·원근 왜곡·재인코딩)을 흉내 낸 변형본을 만듭니다.")
+    ap.add_argument("--input", required=True, type=Path, help="원본 이미지·영상 파일")
+    ap.add_argument("--output", required=True, type=Path, help="변형본을 쓸 파일")
+    ap.add_argument("--kind", choices=["image", "video"], required=True, help="입력 종류(image 또는 video)")
+    ap.add_argument("--seed", type=int, default=0, help="난수 시드(기본: 0)")
     args = ap.parse_args()
     if args.kind == "image":
         degrade_image(args.input, args.output, seed=args.seed)
