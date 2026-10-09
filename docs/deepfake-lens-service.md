@@ -258,6 +258,14 @@ endpoints (`/api/analyze/*`, `/api/classify`, `/api/check`, `/api/compare`,
 | E39 | the same api-serve file endpoints (api) | the named path is a folder (P8) | 400 | `파일이 아니라 폴더입니다: …` |
 | E40 | the same api-serve file endpoints (api) | outside the read roots | 403 | `허용되지 않은 경로` |
 | E41 | POST `/api/multimodal` (api) | a query parameter other than the four scores (e.g. `file_path` — P8: was ignored, 200) | 400 | `알 수 없는 매개변수입니다: … — /api/multimodal은 점수(…)만 받습니다(파일 분석은 /api/analyze/*)` |
+| E42 | POST `/api/scan/stream` (api) | `directory` empty, folder missing, a file or unreadable — checked before the stream starts (R9-3: was 200 + an SSE `error` event) | 400 | `directory가 필요합니다` / `폴더를 찾을 수 없습니다: …` / `폴더가 아니라 파일입니다: …` (scan's S4 texts, as E7) |
+| E43 | POST `/api/scan/stream` (api) | folder outside the read roots — before the stream starts | 403 | `허용되지 않은 경로` |
+| E44 | POST `/api/check/stream` (api) | neither `file_path` nor `text`; text > 256 KB — before the stream starts (R9-3: was 200 + an SSE `error` event) | 400 | `file_path 또는 text가 필요합니다` / `텍스트가 256KB를 초과합니다` |
+
+The streaming endpoints (`/api/scan/stream`, `/api/check/stream`) validate
+every input before the stream starts (E6, E36, E38–E40, E42–E44): an
+`event: error` inside a 200 stream is only a failure that happens while the
+analysis runs.
 
 Tests: `test_servers.ErrorTableEveryRowTest` reads this table and sends at
 least one request per row ID to each server the row names (`web`, `api`,

@@ -710,12 +710,13 @@ class ApiServiceContractTest(unittest.TestCase):
         self.assertIn("advanced", events["result"][0])
 
     def test_check_stream_requires_input(self) -> None:
+        # R9-3 (round 9): this expected an SSE "error" event inside a 200 stream
+        # (encoded the defect); the request is refused with 400 before the stream.
         client = self._client()
-        with client.stream(
-            "POST", "/api/check/stream", headers=self._SSE_HEADERS
-        ) as response:
-            events = self._collect_sse(response)
-        self.assertIn("error", events)
+        response = client.post("/api/check/stream", headers=self._SSE_HEADERS)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.headers["content-type"].split(";")[0], "application/json")
+        self.assertEqual(response.json()["detail"], api_server.TEXT_OR_FILE_REQUIRED)
 
     def test_cancel_unknown_job_is_404(self) -> None:
         client = self._client()
@@ -753,15 +754,23 @@ class ApiServiceContractTest(unittest.TestCase):
         self.assertEqual(len(result["items"]), 2)
 
     def test_scan_stream_requires_directory(self) -> None:
-        client = self._client()
-        with client.stream(
-            "POST",
-            "/api/scan/stream",
-            params={"directory": "C:/nonexistent-dir-xyz"},
-            headers=self._SSE_HEADERS,
-        ) as response:
-            events = self._collect_sse(response)
-        self.assertIn("error", events)
+        # R9-3 (round 9): this expected an SSE "error" event inside a 200 stream
+        # (encoded the defect); every bad folder is refused before the stream.
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "file.txt").write_text("파일", encoding="utf-8")
+            client = self._client(default_folder=root)
+            with patch.object(webapp_api, "_READ_ROOTS", OrderedDict()):
+                for directory, status in (("", 400), (str(root / "gone"), 400), (str(root / "file.txt"), 400),
+                                          ("C:/nonexistent-dir-xyz", 403)):
+                    with self.subTest(directory=directory):
+                        response = client.post("/api/scan/stream", params={"directory": directory}, headers=self._SSE_HEADERS)
+                        self.assertEqual(response.status_code, status, response.text[:200])
+                        self.assertEqual(response.headers["content-type"].split(";")[0], "application/json")
+                        self.assertNotIn("event:", response.text)
 
 
 if __name__ == "__main__":
@@ -2141,6 +2150,16 @@ class ErrorTableEveryRowTest(unittest.TestCase):
             "E40": [case("api", method, path.format(q(self.outside / "secret.png")), 403, "허용되지 않은 경로") for method, path in files],
             "E41": [case("api", "POST", f"/api/multimodal?file_path={q(f / 'nope.png')}", 400, "알 수 없는 매개변수입니다: file_path"),
                     case("api", "POST", "/api/multimodal?image_score=10&bogus=1", 400, "알 수 없는 매개변수입니다: bogus")],
+            # R9-3 (round 9): the stream endpoints answered these with 200 + an SSE error event.
+            "E42": [case("api", "POST", "/api/scan/stream?directory=", 400, api_server.DIRECTORY_REQUIRED),
+                    case("api", "POST", f"/api/scan/stream?directory={q(f / 'gone')}", 400, "폴더를 찾을 수 없습니다: "),
+                    case("api", "POST", f"/api/scan/stream?directory={q(f / 'memo.txt')}", 400, "폴더가 아니라 파일입니다")],
+            "E43": [case("api", "POST", f"/api/scan/stream?directory={q(self.outside)}", 403, "허용되지 않은 경로"),
+                    case("api", "POST", f"/api/scan/stream?directory={q(self.outside / 'gone')}", 403, "허용되지 않은 경로")],
+            "E44": [case("api", "POST", "/api/check/stream", 400, api_server.TEXT_OR_FILE_REQUIRED),
+                    case("api", "POST", "/api/check/stream?text=%20%20&file_path=", 400, api_server.TEXT_OR_FILE_REQUIRED),
+                    case("api", "POST", "/api/check/stream?text=" + q("가" * 10), 400, api_server.TEXT_TOO_LARGE,
+                         patches=(patch.object(api_server, "MAX_TEXT_CHARS", 4),))],
         }
 
     # -- the servers ---------------------------------------------------------------
@@ -2203,6 +2222,27 @@ class ErrorTableEveryRowTest(unittest.TestCase):
             with self.subTest(row=row_id):
                 self.assertEqual({c["server"] for c in cases[row_id]}, self._servers(cell), cell)
                 self.assertTrue({c["status"] for c in cases[row_id]} <= statuses, (statuses, cell))
+
+    def test_r9_3_stream_refusals_never_open_a_stream(self) -> None:
+        """R9-3 (round 9): a refused stream request is a JSON error, never a 200 event stream;
+        the web server has no stream endpoint (E2: 404 for the same requests)."""
+        cases = [c for row in ("E6", "E36", "E38", "E39", "E40", "E42", "E43", "E44") for c in self._cases()[row] if "/stream" in c["path"]]
+        self.assertGreaterEqual(len(cases), 12)
+        senders = {"web": self._web()}
+        if HAVE_FASTAPI:
+            senders["api"] = self._api()
+        import contextlib
+
+        for c in cases:
+            for name, send in senders.items():
+                with self.subTest(server=name, path=c["path"][:80]):
+                    with contextlib.ExitStack() as stack:
+                        for patcher in c["patches"]:
+                            stack.enter_context(patcher)
+                        status, raw = send(c["method"], c["path"], c["body"], c["ctype"], c["headers"])
+                    self.assertNotIn(b"event:", raw)
+                    self.assertIsInstance(json.loads(raw), dict)
+                    self.assertEqual(status, c["status"] if name == "api" else 404, raw[:200])
 
     def test_every_row_on_its_servers(self) -> None:
         import contextlib

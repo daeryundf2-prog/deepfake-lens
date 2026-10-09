@@ -69,6 +69,14 @@ MAX_JOBS = 32
 # the endpoint was added; the folder scan itself enforces it).
 MAX_STREAM_SCAN_FILES = 5000
 JOBS_FULL_MESSAGE = "실행 중인 작업이 너무 많습니다 — 진행 중인 작업이 끝난 뒤 다시 시도하십시오"
+# Text bodies above this many characters are refused (the web server's
+# /api/check limit, E21/E23).
+MAX_TEXT_CHARS = 256 * 1024
+TEXT_TOO_LARGE = "텍스트가 256KB를 초과합니다"
+TEXT_OR_FILE_REQUIRED = "file_path 또는 text가 필요합니다"
+# R9-3 (round 9): /api/scan/stream without a folder; like every other
+# refusal of the stream endpoints it is a 400 before the stream starts.
+DIRECTORY_REQUIRED = "directory가 필요합니다"
 
 # Packages the API server needs at runtime; missing ones make `api-serve`
 # exit 2 with an install hint instead of a traceback (G29).
@@ -504,8 +512,8 @@ def create_app(
         try:
             if text and text.strip():
                 trimmed = text.strip()
-                if len(trimmed) > 256 * 1024:
-                    raise HTTPException(status_code=400, detail="텍스트가 256KB를 초과합니다")
+                if len(trimmed) > MAX_TEXT_CHARS:
+                    raise HTTPException(status_code=400, detail=TEXT_TOO_LARGE)
                 from .text_advanced import analyze_text_advanced
                 # delete=False: Windows cannot reopen a delete=True temp file.
                 tmp_name = ""
@@ -563,7 +571,7 @@ def create_app(
                         data["advanced"] = None
                         _layer_error(data, "advanced", exc)
                 return {"status": "success", "data": data}
-            raise HTTPException(status_code=400, detail="file_path 또는 text가 필요합니다")
+            raise HTTPException(status_code=400, detail=TEXT_OR_FILE_REQUIRED)
         except HTTPException:
             raise
         except Exception as exc:
@@ -662,13 +670,22 @@ def create_app(
         watermark_secret: str | None = None,
         watermark_gamma: float = 0.25,
     ):
+        # P8/R9-3: every refusal is an HTTP error status before the stream
+        # starts (it used to be 200 + an SSE "error" event): no text and no
+        # file_path 400, text over the limit 400, a file outside the read
+        # roots 403, missing 404, a folder 400.
         confined: Path | None = None
-        if not (text and text.strip()) and file_path:
+        if text and text.strip():
+            if len(text.strip()) > MAX_TEXT_CHARS:
+                raise HTTPException(status_code=400, detail=TEXT_TOO_LARGE)
+        elif file_path:
             try:
                 confined = confine_request_path(file_path, default_folder)
             except ReadRootDenied:
                 return _denied()
-            require_request_file(confined)  # P8: 404/400 before the stream starts
+            require_request_file(confined)
+        else:
+            raise HTTPException(status_code=400, detail=TEXT_OR_FILE_REQUIRED)
         job_id, cancel = _register_job()
 
         def run_layered() -> Any:
@@ -684,10 +701,7 @@ def create_app(
                 return
 
             if text and text.strip():
-                trimmed = text.strip()
-                if len(trimmed) > 256 * 1024:
-                    yield ("error", {"detail": "텍스트가 256KB를 초과합니다"})
-                    return
+                trimmed = text.strip()  # length checked before the stream (R9-3)
                 yield ("progress", {"stage": "core", "index": 1, "total": 3})
                 tmp_name = ""
                 try:
@@ -723,9 +737,7 @@ def create_app(
                     stages.append(("watermark", wm))
                 payload = {"mode": "text", **dict(stages)}
             else:
-                if confined is None:
-                    yield ("error", {"detail": "file_path 또는 text가 필요합니다"})
-                    return
+                assert confined is not None  # validated before the stream (R9-3)
                 path = confined
                 if _is_archive(path):
                     # R1: same expansion as the folder scan; one progress
@@ -828,12 +840,22 @@ def create_app(
             from .analysis_api import MAX_FILES_TOO_SMALL
 
             raise HTTPException(status_code=400, detail=MAX_FILES_TOO_SMALL)
-        root: Path | None = None
-        if directory:
-            try:
-                root = confine_request_path(directory, default_folder)
-            except ReadRootDenied:
-                return _denied()
+        # R9-3 (round 9): the folder is validated before the stream starts —
+        # no directory 400, outside the read roots 403, missing / a file /
+        # unreadable 400 with scan's S4 text (as GET /api/scan, E7). It used
+        # to be 200 + an SSE "error" event.
+        if not directory:
+            raise HTTPException(status_code=400, detail=DIRECTORY_REQUIRED)
+        try:
+            root = confine_request_path(directory, default_folder)
+        except ReadRootDenied:
+            return _denied()
+        from .core import ScanFolderError, check_scan_folder
+
+        try:
+            check_scan_folder(root)
+        except ScanFolderError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         job_id, cancel = _register_job()
 
         def run_scan():
@@ -848,17 +870,6 @@ def create_app(
             from .analysis_api import scan_folder_run, scan_payload
 
             yield ("job", {"job_id": job_id})
-            if root is None:
-                yield ("error", {"detail": "directory가 필요합니다"})
-                return
-            from .core import ScanFolderError, check_scan_folder
-
-            try:
-                check_scan_folder(root)
-            except ScanFolderError as exc:
-                # S4: the same Korean reason as `scan` and /api/scan.
-                yield ("error", {"detail": str(exc)})
-                return
             options = dataclasses.replace(
                 _api_options(), recursive=recursive, max_files=max(1, min(max_files, MAX_STREAM_SCAN_FILES)),
             )
