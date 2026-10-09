@@ -295,3 +295,12 @@ def check_command_inputs(args: argparse.Namespace) -> None:
         value = getattr(args, attr, None)
         if isinstance(value, (str, Path)) and str(value):
             require_output_file(value)  # Y7: a folder is not an output file
+    cache = getattr(args, "cache", None)
+    if isinstance(cache, (str, Path)) and str(cache):
+        # Y4: an existing file that is not a scan cache is never overwritten.
+        from .scan_cache import CacheFileError, check_scan_cache_file
+
+        try:
+            check_scan_cache_file(cache)
+        except CacheFileError as exc:
+            raise UsageError(str(exc)) from exc

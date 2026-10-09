@@ -447,3 +447,36 @@ class RoundSevenUsageErrorsTest(unittest.TestCase):
                 self._assert_usage(["scan", str(self.folder), flag, str(self.root)], f"출력 경로가 폴더입니다: {self.root}")
         self._assert_usage(["evidence-statement", str(self.folder), "--md-out", str(self.root)], "출력 경로가 폴더입니다: ")
         self._assert_usage(["legal-report", str(self.folder / "a.txt"), "--output", str(self.root)], "출력 경로가 폴더입니다: ")
+
+    def test_y4_cache_never_overwrites_another_file(self) -> None:
+        """Y4: --cache naming an existing non-cache JSON is refused (exit 2) and left untouched."""
+        import json
+
+        from deepfake_lens.core import scan_directory
+        from deepfake_lens.scan_cache import SCAN_CACHE_FORMAT, CacheFileError
+
+        report = self.root / "report.json"
+        report.write_text('{"schema_version": 2, "items": []}', encoding="utf-8")
+        for target in (report, self.garbage, self.listed):
+            before = target.read_bytes()
+            with self.subTest(target=target.name):
+                self._assert_usage(["scan", str(self.folder), "--cache", str(target)], f"캐시 파일이 아닙니다: {target}")
+                self.assertEqual(target.read_bytes(), before)
+        with self.assertRaises(CacheFileError):
+            scan_directory(self.folder, cache_path=report)
+        self.assertEqual(report.read_text(encoding="utf-8"), '{"schema_version": 2, "items": []}')
+
+        cache = self.root / "cache.json"
+        for _ in range(2):  # new cache, then reuse of the same cache
+            code, _, stderr = self._run(["scan", str(self.folder), "--cache", str(cache), "--format", "json"])
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(json.loads(cache.read_text(encoding="utf-8"))["format"], SCAN_CACHE_FORMAT)
+        legacy = self.root / "legacy.json"
+        legacy.write_text('{"version": 1, "items": {}}', encoding="utf-8")
+        empty = self.root / "empty.json"
+        empty.write_bytes(b"")
+        for accepted in (legacy, empty):
+            with self.subTest(accepted=accepted.name):
+                code, _, stderr = self._run(["scan", str(self.folder), "--cache", str(accepted), "--format", "json"])
+                self.assertEqual(code, 0, stderr)
+                self.assertEqual(json.loads(accepted.read_text(encoding="utf-8"))["format"], SCAN_CACHE_FORMAT)

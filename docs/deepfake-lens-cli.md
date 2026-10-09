@@ -67,6 +67,7 @@ command prints a band (높음/주의/낮음) or a "의심 신호가 강합니다
   | 빈 경로 `""` (Y3 — 현재 폴더로 바뀌지 않음; 모든 경로 인수) | `오류: 인수 <이름>: 경로가 비어 있습니다 — 빈 문자열("")은 경로로 쓸 수 없습니다(현재 폴더는 . 으로 지정)` | 2 |
   | `--thresholds`가 임계값 프로필이 아님(깨진 JSON, 다른 형식, 버전 불일치 — Y2; 기본값으로 계속하지 않음) | `오류: 임계값 프로필을 읽을 수 없거나 버전이 맞지 않습니다: <경로> (layer-thresholds-v1 JSON이어야 합니다)` | 2 |
   | 출력 파일 인수(`--json-out`, `--html-out`, `--csv-out`, `--pdf-out`, `--md-out`, `--out`, `--output`, `--cache`, …)가 기존 폴더 (Y7 — 검사 전에 확인) | `오류: 출력 경로가 폴더입니다: <경로> — 저장할 파일 이름을 지정하십시오` | 2 |
+  | `--cache`가 검사 캐시가 아닌 기존 파일(보고서 JSON 등 — Y4; 덮어쓰지 않음). 캐시 파일은 `{"format": "deepfake-lens-cache-v1", "version": 1, "items": {…}}`; 없는 파일·빈 파일·머리글 이전의 `{"version", "items"}` 캐시는 그대로 사용 | `오류: 캐시 파일이 아닙니다: <경로> — --cache 파일 형식(deepfake-lens-cache-v1)이 아닌 기존 파일은 덮어쓰지 않습니다. 새 캐시 파일 경로를 지정하십시오` | 2 |
   | `evidence-statement <scan.json>`에 검사 결과 행이 없음 (Y1) | `오류: 검사 JSON에 items가 없습니다(검사 결과 행 0건): <경로>` | 2 |
 
   Inputs and their kinds (supported formats = the formats the command reads):

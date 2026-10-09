@@ -268,15 +268,64 @@ def _file_fingerprint(path: Path) -> str:
     return digest.hexdigest()
 
 
+# Y4 (round 7): --cache silently overwrote any existing JSON file (a scan
+# report, a profile) with a cache. A cache file carries this header; an
+# existing file without it is refused before the scan instead of replaced.
+SCAN_CACHE_FORMAT = "deepfake-lens-cache-v1"
+CACHE_NOT_A_CACHE = (
+    "캐시 파일이 아닙니다: {path} — --cache 파일 형식({fmt})이 아닌 기존 파일은 덮어쓰지 않습니다. "
+    "새 캐시 파일 경로를 지정하십시오"
+)
+# Keys of a cache written before the header existed (accepted and upgraded).
+_LEGACY_CACHE_KEYS = frozenset({"version", "items"})
+
+
+class CacheFileError(ValueError):
+    """``--cache`` names an existing file that is not a scan cache (Y4); ``str()`` is Korean."""
+
+
+def _is_scan_cache(payload: object) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("format") == SCAN_CACHE_FORMAT:
+        return isinstance(payload.get("items", {}), dict)
+    # A pre-Y4 cache: only {"version": 1, "items": {...}}.
+    return set(payload) <= _LEGACY_CACHE_KEYS and "items" in payload and isinstance(payload["items"], dict)
+
+
+def check_scan_cache_file(cache_path: Path | str | None) -> None:
+    """Raise :class:`CacheFileError` unless ``cache_path`` is absent, empty or a scan cache (Y4)."""
+    if cache_path is None:
+        return
+    path = Path(cache_path)
+    try:
+        if not path.exists():
+            return
+        if path.is_file() and path.stat().st_size == 0:
+            return
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError) as exc:
+        raise CacheFileError(CACHE_NOT_A_CACHE.format(path=cache_path, fmt=SCAN_CACHE_FORMAT)) from exc
+    if not _is_scan_cache(payload):
+        raise CacheFileError(CACHE_NOT_A_CACHE.format(path=cache_path, fmt=SCAN_CACHE_FORMAT))
+
+
 def _load_scan_cache(cache_path: Path | None) -> dict[str, object] | None:
+    """The cache at ``cache_path`` (a new one when absent or empty).
+
+    Y4: an existing file that is not a scan cache raises
+    :class:`CacheFileError` — it is never overwritten.
+    """
     if cache_path is None:
         return None
+    check_scan_cache_file(cache_path)
     try:
         payload = json.loads(cache_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {"version": 1, "items": {}}
+        payload = {}
     if not isinstance(payload, dict):
-        return {"version": 1, "items": {}}
+        payload = {}
+    payload["format"] = SCAN_CACHE_FORMAT
     payload.setdefault("version", 1)
     payload.setdefault("items", {})
     return payload
@@ -288,7 +337,8 @@ def _write_scan_cache(cache_path: Path | None, cache: dict[str, object]) -> None
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(cache, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        body = {"format": SCAN_CACHE_FORMAT, **{key: value for key, value in cache.items() if key != "format"}}
+        tmp.write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         tmp.replace(cache_path)
     except OSError:
         pass  # cache flush failure must never mask real scan results
