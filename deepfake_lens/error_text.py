@@ -359,6 +359,8 @@ _DICT_IDENTIFIERS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b[\w.:\-]+=\S*"),  # key=value
     re.compile(r"\b\w+(?::[\w\-]+)+"),  # colon-joined ids (model:<name>)
 )
+# R9-6: the key=value and colon-joined patterns (read by the conclusion-word rule).
+_PAIR_IDENTIFIERS = _DICT_IDENTIFIERS[-2:]
 # Code-shaped identifiers, stripped after the sentence-identifier check (N12):
 # snake_case / camelCase / PascalCase tokens are identifiers unless they spell
 # a sentence (``doNotUseAsEvidence``, ``This_score_is_not_evidence``).
@@ -431,10 +433,16 @@ def _strip_dictionary_identifiers(line: str) -> str:
     return _strip_code_identifiers(_strip_word_identifiers(line))
 
 
-def _strip_word_identifiers(line: str) -> str:
-    """Allowlisted tokens, URLs, backticked code, names, paths, flags, key=value… (not code-shaped ids)."""
+def _strip_word_identifiers(line: str, *, keep_pairs: bool = False) -> str:
+    """Allowlisted tokens, URLs, backticked code, names, paths, flags, key=value… (not code-shaped ids).
+
+    ``keep_pairs`` (R9-6) keeps ``key=value`` and colon-joined tokens for the
+    conclusion-word rule, which reads their parts.
+    """
     line = _strip_allowlisted(line)
     for pattern in _DICT_IDENTIFIERS:
+        if keep_pairs and pattern in _PAIR_IDENTIFIERS:
+            continue
         if pattern.pattern.startswith(r"\b[\w.]*[\w]-?[\w.-]*/"):
             # A model id (org/name) only when a part carries a digit or a
             # hyphen — "not/for/court/use" is words, not an id.
@@ -605,6 +613,90 @@ def _glued_hit(line: str) -> str | None:
     return None
 
 
+# R9-6 (round 9): conclusion words that passed the detector — "verdict=fake",
+# "result:fake", "결과=fake", "#fake" (key=value, colon and hash tokens were
+# identifiers), "fakes"/"faked" (inflected), "authentic입니다" (a Korean
+# ending on a conclusion word), "fake-image", "deep-fake", "AI-generated",
+# "AIGenerated", "ai_generated" (compounds). Tokens are split on "=", ":"
+# and "#"; each piece, each Latin run glued to Hangul and each compound part
+# is looked up with English inflections removed (s/es/ed/d/ing).
+_PAIR_SEPARATORS = re.compile(r"[=:#]+")
+_TOKEN_EDGE = "\"'“”‘’()[]{}<>|,;!?.…*\u300c\u300d\u300e\u300f"
+# Parts that make a compound with a conclusion word a phrase ("ai_generated",
+# "deep-fake") without being dictionary words.
+COMPOUND_PARTS = frozenset({"ai", "deep", "not", "very", "highly", "most"})
+
+
+def conclusion_word(word: str) -> str | None:
+    """The conclusion/disclaimer word ``word`` spells, its inflection removed (R9-6), or None."""
+    word = word.lower()
+    vocabulary = VERDICT_WORDS | STANDALONE_ENGLISH_WORDS
+    candidates = [word]
+    if word.endswith("s"):
+        candidates += [word[:-1], word[:-2] if word.endswith("es") else ""]
+    if word.endswith("ed"):
+        candidates += [word[:-2], word[:-1]]
+    if word.endswith("ing"):
+        candidates += [word[:-3], word[:-3] + "e"]
+    return next((candidate for candidate in candidates if len(candidate) >= 3 and candidate in vocabulary), None)
+
+
+def _compound_parts(token: str) -> list[str]:
+    """Lowercase parts of a hyphen/underscore/camel compound ("AIGenerated" -> ["ai", "generated"])."""
+    return [part.lower() for chunk in re.split(r"[-_]+", token) for part in _CODE_PARTS.findall(chunk)]
+
+
+def _verdict_compound_hit(token: str) -> str | None:
+    """A compound holding a conclusion word next to another word ("fake-image", "deep-fake", "ai_generated")."""
+    if token.lower().startswith(("deepfake_lens", "deepfake-lens")):
+        return None  # the package's own identifiers
+    parts = _compound_parts(token)
+    if len(parts) < 2:
+        return None
+    vocabulary = COMMON_ENGLISH_WORDS | STANDALONE_ENGLISH_WORDS | VERDICT_WORDS | IMAGE_WORDS | COMPOUND_PARTS
+    verdicts = [part for part in parts if conclusion_word(part)]
+    others = [part for part in parts if part in vocabulary or conclusion_word(part)]
+    if verdicts and len(others) >= 2:
+        return " ".join(parts)
+    return None
+
+
+# A Latin token glued directly to Hangul, identifiers included
+# ("authentic입니다", "DEEPFAKE_LENS_REPORT_KEY로"; not "폴더(ai/real").
+_LATIN_TOKEN = re.compile(
+    "(?<=[\uac00-\ud7a3])[A-Za-z0-9@$]+(?:[-_][A-Za-z0-9@$]+)*|[A-Za-z0-9@$]+(?:[-_][A-Za-z0-9@$]+)*(?=[\uac00-\ud7a3])"
+)
+# "<name> (<name>-runtime.json)": a token that names a file on the same line
+# (a model profile in doctor/models output) is that file's identifier.
+_FILE_STEM = re.compile(r"([A-Za-z0-9][\w.-]*?)(?:-runtime)?\.(?:json|onnx|pt|pth|safetensors|bin|torchscript)\b")
+
+
+def _conclusion_token_hit(line: str, *, file_names: str = "") -> str | None:
+    """A conclusion word as a token piece (split on "=", ":", "#"), inflected, glued to Hangul or in a compound (R9-6).
+
+    ``file_names`` is the line before identifier stripping: a token that is
+    the stem of a file name on it is an identifier.
+    """
+    stems = {match.group(1).lower() for match in _FILE_STEM.finditer(file_names)}
+    for raw in line.split():
+        for piece in _PAIR_SEPARATORS.split(raw):
+            whole = piece.strip(_TOKEN_EDGE)
+            if not whole:
+                continue
+            if _LETTERS_AND_DIGITS.match(whole) and not re.search(r"\d", whole):
+                if conclusion_word(whole) and whole.lower() not in stems:
+                    return whole.lower()
+            if _HANGUL.search(whole):
+                for run in _LATIN_TOKEN.findall(whole):
+                    if conclusion_word(run):
+                        return run.lower()
+            for compound in re.findall(r"[A-Za-z]+(?:[-_][A-Za-z]+)*", whole):
+                hit = None if compound.lower() in stems else _verdict_compound_hit(compound)
+                if hit:
+                    return hit
+    return None
+
+
 def english_dictionary_hit(text: str) -> str | None:
     """The offending words when a line holds two common English words (or a verdict word), else None (G9).
 
@@ -617,6 +709,9 @@ def english_dictionary_hit(text: str) -> str | None:
         sentence = _sentence_identifier_hit(words_only) or _verdict_identifier_hit(words_only)
         if sentence:
             return sentence
+        conclusion = _conclusion_token_hit(_strip_word_identifiers(line, keep_pairs=True), file_names=line)
+        if conclusion:
+            return conclusion
         stripped = _strip_code_identifiers(words_only)
         glued = _glued_hit(stripped)
         if glued:

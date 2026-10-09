@@ -253,11 +253,38 @@ class EnglishDetectorBypassTest(unittest.TestCase):
         """P13 (round 8): contract identifiers and the package's own names are not verdicts."""
         from deepfake_lens.error_text import english_prose
 
+        # R9-6 (round 9): "label=real" was listed here as an identifier (encoded the
+        # defect: a conclusion word as a key=value value passed) — it is flagged now
+        # (test_round_nine_conclusion_words_are_flagged).
         for text in (
             "verdict_code", "authenticity_evidence", "manipulation_evidence", "score_is_calibrated",
-            "DEEPFAKE_LENS_REPORT_KEY 환경 변수", "deepfake_lens.cli", "real-like-texture.png", "label=real",
+            "DEEPFAKE_LENS_REPORT_KEY 환경 변수", "deepfake_lens.cli", "real-like-texture.png",
             "deepfake-lens scan", "expected_label", "trainedAlgorithmicMedia",
         ):
+            with self.subTest(text=text):
+                self.assertIsNone(english_prose(text), text)
+
+    def test_round_nine_conclusion_words_are_flagged(self) -> None:
+        """R9-6 (round 9): key=value / colon / hash pieces, inflections, a Korean ending and
+        compounds of a conclusion word passed the detector."""
+        from deepfake_lens.error_text import conclusion_word, english_prose
+
+        for text, expected in {
+            "verdict=fake": "fake", "result:fake": "fake", "결과=fake": "fake", "label=real": "real",
+            "fake-image": "fake image", "deep-fake": "deep fake", "AI-generated": "ai generated",
+            "AIGenerated": "ai generated", "ai_generated": "ai generated", "fakes": "fakes", "faked": "faked",
+            "#fake": "fake", "authentic입니다": "authentic", "판정 #fake 입니다": "fake", "판정은 faking": "faking",
+            "결론=Authentic입니다": "authentic", "result:AI-Generated": "ai generated",
+        }.items():
+            with self.subTest(text=text):
+                self.assertEqual(english_prose(text), expected)
+        for word, base in {"fakes": "fake", "faked": "fake", "faking": "fake", "detected": "detected",
+                           "cleaned": "clean", "ignores": "ignore", "warnings": "warning"}.items():
+            with self.subTest(word=word):
+                self.assertEqual(conclusion_word(word), base)
+        for text in ("status=failed", "band=unknown", "warning_threshold=0.5", "model:sbi-effnet", "realtime",
+                     "--pixel deep", "pixel=deep", "verdict_code=undetermined", "kind=image", "Deepfake Lens",
+                     "deepfake-lens scan", "real-like-texture.png", "a.zip::inner/real.png"):
             with self.subTest(text=text):
                 self.assertIsNone(english_prose(text), text)
 
