@@ -130,12 +130,13 @@ class DocumentExtractionTest(unittest.TestCase):
             _, docx_meta = extract_document_text(docx)
         self.assertEqual(text, "")
         self.assertEqual(meta["extractor"], "failed:pymupdf:RuntimeError")
-        self.assertEqual(meta["extractor_error"], "RuntimeError: cannot open broken document: xref table damaged")
+        # B6: the untranslated English message is logged, not shown.
+        self.assertEqual(meta["extractor_error"], "RuntimeError: 라이브러리 오류(RuntimeError) — 상세는 로그 참조")
         self.assertEqual(docx_meta["extractor"], "failed:zip:BadZipFile")
         assert item.result is not None
         [entry] = [c for c in item.result.coverage if c.check == "document_text"]
         self.assertEqual(entry.status, CoverageStatus.FAILED)
-        self.assertIn("RuntimeError: cannot open broken document", entry.reason)
+        self.assertIn("RuntimeError: 라이브러리 오류(RuntimeError)", entry.reason)  # B6
         self.assertNotIn("extractor_error", item.result.document_metadata or {})
 
     def test_legacy_doc_marks_unavailable(self) -> None:

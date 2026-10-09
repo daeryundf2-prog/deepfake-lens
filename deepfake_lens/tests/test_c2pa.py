@@ -253,7 +253,9 @@ class C2paReaderErrorTest(unittest.TestCase):
                     assert summary is not None
                     self.assertEqual(summary["status"], "unavailable", summary)
                     self.assertFalse(summary["present"])
-                    self.assertRegex(str(summary["error"]), r"^\w+: ")
+                    # B6: the class part is the exception class, or "C2PA SDK 오류(<kind>)"
+                    # for the SDK's private _C2pa<Kind> classes.
+                    self.assertRegex(str(summary["error"]), r"^(?:\w+|C2PA SDK 오류\(\w+\)): ")
 
     @unittest.skipUnless(_has_c2pa_sdk(), "c2pa-python not installed")
     def test_unexpected_reader_exception_is_unavailable_and_check_failed(self) -> None:
@@ -269,7 +271,8 @@ class C2paReaderErrorTest(unittest.TestCase):
                 item = analyze_file(fixture)
         assert summary is not None and item.result is not None
         self.assertEqual(summary["status"], "unavailable")
-        self.assertEqual(summary["error"], "RuntimeError: jumbf parser crashed")
+        # B6: an untranslated English library message never reaches the reason.
+        self.assertEqual(summary["error"], "RuntimeError: 라이브러리 오류(RuntimeError) — 상세는 로그 참조")
         entry = next(c for c in item.result.coverage if c.check == "c2pa")
         self.assertEqual(entry.status, CoverageStatus.FAILED)
         self.assertIn("RuntimeError", entry.reason)
