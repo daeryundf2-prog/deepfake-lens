@@ -252,10 +252,17 @@ class DeepfakeLensCoreTest(unittest.TestCase):
             pdf = root / "report.pdf"
             heatmap_items = scan_directory(scan_root, recursive=True, pixel_mode="deep", heatmaps=True, heatmap_dir=root / "heatmaps")[1]
             write_html_report(html, second_summary, heatmap_items, redact_paths=True)
-            write_pdf_report(pdf, second_summary, items, redact_paths=True)
-            self.assertIn("Deepfake Lens Report", html.read_text(encoding="utf-8"))
+            from deepfake_lens.evidence_statement import PdfDependencyMissing
+            from deepfake_lens.pdf_backend import pymupdf_available
+
+            if pymupdf_available():
+                write_pdf_report(pdf, second_summary, items, redact_paths=True)
+                self.assertTrue(pdf.read_bytes().startswith(b"%PDF"))
+            else:  # B8: no English Latin-1 PDF without pymupdf
+                with self.assertRaises(PdfDependencyMissing):
+                    write_pdf_report(pdf, second_summary, items, redact_paths=True)
+            self.assertIn("Deepfake Lens 감정 보고서", html.read_text(encoding="utf-8"))  # B2: Korean title
             self.assertIn("data:image/png;base64", html.read_text(encoding="utf-8"))
-            self.assertTrue(pdf.read_bytes().startswith(b"%PDF"))
 
             model_profile = root / "external-model.json"
             model_profile.write_text(json.dumps({"type": "score-sidecar-v1", "name": "external fixture"}), encoding="utf-8")

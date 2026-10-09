@@ -8,7 +8,10 @@ same everywhere (G5/G6/G12/G24).
 
 from __future__ import annotations
 
+from pathlib import PurePath
+
 from .result_types import (
+    COVERAGE_STATUS_LABELS,
     EVIDENCE_DIRECTION_LABELS,
     EVIDENCE_KIND_LABELS,
     EVIDENCE_STRENGTH_LABELS,
@@ -17,10 +20,12 @@ from .result_types import (
     ClassificationResult,
     CoverageEntry,
     CoverageStatus,
+    EvidenceDirection,
     EvidenceItem,
     EvidenceKind,
     Grade,
     Verdict,
+    check_label,
 )
 
 # Stated first on every text result and in every report that contains one.
@@ -118,3 +123,125 @@ def summary_line_ascii(summary: BatchScanSummary) -> str:
         f"duplicates={summary.duplicates}, skipped={summary.skipped}, cached={summary.cached}"
         + (f", archive_container_rows={summary.container_rows}" if summary.container_rows else "")
     )
+
+
+# B4: compact Korean evidence qualifiers for one-line renderings (legal
+# report): "[결정적/합성/강]". Keyed by the JSON values so rows read back
+# from a report body render the same as live results.
+EVIDENCE_KIND_SHORT = {
+    EvidenceKind.DETERMINISTIC.value: "결정적",
+    EvidenceKind.STATISTICAL.value: "통계적",
+    EvidenceKind.LEXICAL.value: "어휘적",
+}
+EVIDENCE_DIRECTION_SHORT = {
+    EvidenceDirection.SYNTHETIC.value: "합성",
+    EvidenceDirection.AUTHENTIC.value: "원본",
+    EvidenceDirection.NEUTRAL.value: "중립",
+}
+EVIDENCE_STRENGTH_SHORT = {strength.value: label for strength, label in EVIDENCE_STRENGTH_LABELS.items()}
+
+
+def evidence_qualifiers_short(kind: object, direction: object, strength: object) -> str:
+    """e.g. "결정적/합성/강" from the JSON values (unknown values kept as is)."""
+    return "/".join((
+        EVIDENCE_KIND_SHORT.get(str(kind), str(kind)),
+        EVIDENCE_DIRECTION_SHORT.get(str(direction), str(direction)),
+        EVIDENCE_STRENGTH_SHORT.get(str(strength), str(strength)),
+    ))
+
+
+def coverage_status_label(status: object) -> str:
+    """Korean label of a coverage status value ("ran" -> "실행"; B3)."""
+    for key, label in COVERAGE_STATUS_LABELS.items():
+        if key.value == str(status):
+            return label
+    return str(status)
+
+
+def coverage_entry_line(entry: dict[str, object]) -> str:
+    """Korean line for a coverage entry read from JSON: "얼굴 검사: 미실행 — 얼굴 미검출"."""
+    reason = f" — {entry['reason']}" if entry.get("reason") else ""
+    return f"{check_label(str(entry.get('check', '')))}: {coverage_status_label(entry.get('status'))}{reason}"
+
+
+# S1: archive members are rows "<container>::<member>". Every rendering
+# names them in full so the container is never lost and a reference such as
+# "evil.zip::inner/a.png" points at a row that exists.
+ARCHIVE_MEMBER_SEPARATOR = "::"
+
+
+def display_path(path: str, *, redact_paths: bool = False) -> str:
+    """The row path as shown in a report.
+
+    ``redact_paths`` keeps only the container's file name — a member keeps
+    its path inside the archive ("evil.zip::inner/a1111.png"), which is not
+    a path of the examiner's machine.
+    """
+    if ARCHIVE_MEMBER_SEPARATOR in path:
+        container, member = path.split(ARCHIVE_MEMBER_SEPARATOR, 1)
+        shown = PurePath(container).name if redact_paths else container
+        return f"{shown}{ARCHIVE_MEMBER_SEPARATOR}{member}"
+    return PurePath(path).name if redact_paths else path
+
+
+def row_label(path: str) -> str:
+    """Short row name: the file name, or "<container name>::<member path>" (S1)."""
+    return display_path(path, redact_paths=True)
+
+
+# Why a row has no SHA-256 (N2, S2) — the same wording in the evidence
+# statement and the forensic PDF.
+HASH_UNAVAILABLE_ACCESS = "해시 불가 — 원본 파일 접근 실패 (동일성 확인 요망)"
+HASH_UNAVAILABLE_SYMLINK = "해시 불가(심볼릭 링크 — 링크를 따라가지 않음)"
+HASH_UNAVAILABLE_MEMBER = "해시 불가(압축 파일 구성원 — 압축 파일 행의 해시로 동일성을 확인하십시오)"
+SYMLINK_ROW_ERROR_PREFIX = "심볼릭 링크"
+
+
+def is_symlink_row(status: object, error: object) -> bool:
+    """A row the scan skipped because it is a symbolic link (never followed)."""
+    return str(status) == "skipped" and str(error or "").startswith(SYMLINK_ROW_ERROR_PREFIX)
+
+
+# S6/B2: the in-sample caveat printed wherever threshold provenance is
+# shown (CLI header, HTML, forensic PDF, evidence statement, GUI).
+IN_SAMPLE_CAVEAT = "적합에 쓴 같은 표본에서 평가된 값이라 감정 근거가 아닙니다"
+
+
+def threshold_provenance_line(thresholds: object | None) -> str:
+    """Korean one-line threshold provenance shared by every report (B2, S6).
+
+    Accepts a ThresholdProfile, its ``to_json()`` dict or the scan JSON's
+    ``thresholds`` block (``core._thresholds_json``).
+    """
+    from .calibration import IN_SAMPLE_LABEL
+
+    to_json = getattr(thresholds, "to_json", None)
+    payload = to_json() if callable(to_json) else (thresholds if isinstance(thresholds, dict) else {})
+    if thresholds is None or not isinstance(payload, dict) or payload.get("source") == "builtin_defaults":
+        return "판정 임계값: 내장 기본값(미측정 — 잠정값, 보정 미적용)"
+    samples = int(payload.get("samples", 0) or 0)
+    state = "잠정(미검증)" if payload.get("provisional", True) else "측정됨"
+    version = str(payload.get("version", "") or "").strip()
+    fingerprint = str(payload.get("dataset_fingerprint", "") or "")[:16]
+    line = f"판정 임계값: 프로필 {version or '버전 미기재'} — {state}, 표본 n={samples}"
+    if fingerprint:
+        line += f", 코퍼스 지문 {fingerprint}"
+    if payload.get("in_sample"):
+        line += f" — {IN_SAMPLE_LABEL}: {IN_SAMPLE_CAVEAT}"  # G28
+    return line
+
+
+# Korean names of the scan row kinds (CLI table, reports).
+ITEM_KIND_LABELS = {
+    "image": "이미지",
+    "video": "영상",
+    "audio": "오디오",
+    "text": "텍스트",
+    "document": "문서",
+    "archive": "압축",
+    "unknown": "알 수 없음",
+}
+
+
+def item_kind_label(kind: object) -> str:
+    return ITEM_KIND_LABELS.get(str(kind), str(kind))

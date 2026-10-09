@@ -82,6 +82,7 @@ from .evidence_statement import (
     signed_statement_body,
     write_evidence_statement_json,
     write_evidence_statement_markdown,
+    PDF_REPORT_DEPENDENCY_MESSAGE,
     PdfDependencyMissing,
     pdf_backend_available,
     write_evidence_statement_pdf,
@@ -817,26 +818,32 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             print(f"오류: {PdfDependencyMissing()}", file=sys.stderr)
             return 2
         items: list[ScanItem] = []
+        # S6: the threshold provenance (with the in-sample caveat) goes into
+        # the statement for every input kind.
+        stmt_thresholds: object | None = None
         if target.is_file() and target.suffix.lower() == ".json":
             try:
                 data = json.loads(target.read_text(encoding="utf-8"))
                 from .core import _scan_item_from_json
                 raw_items = data.get("items", [])
                 items = [_scan_item_from_json(row) for row in raw_items if isinstance(row, dict)]
+                stmt_thresholds = data.get("thresholds")
             except Exception as exc:
                 print(f"오류: 검사 JSON을 해석할 수 없습니다: {exc}", file=sys.stderr)
                 return 2
         elif target.is_dir():
             try:
-                _, items, _ = scan_folder(target, AnalysisOptions(max_files=100), warn=thresholds_warning_printer(sys.stderr))
+                _, items, stmt_thresholds = scan_folder(target, AnalysisOptions(max_files=100), warn=thresholds_warning_printer(sys.stderr))
             except OSError as exc:
                 # S4: "오류: 폴더를 읽을 수 없습니다: … (권한이 없습니다)", exit 2.
                 print(f"오류: {exc}", file=sys.stderr)
                 return 2
         elif target.is_file():
             # B1: the folder scan's rows for the file — an archive yields
-            # its member rows and the container row.
-            items = analyze_rows(target, AnalysisOptions(), thresholds=load_thresholds(AnalysisOptions(), warn=thresholds_warning_printer(sys.stderr)))
+            # its member rows and the container row. S6: thresholds go into
+            # the statement.
+            stmt_thresholds = load_thresholds(AnalysisOptions(), warn=thresholds_warning_printer(sys.stderr))
+            items = analyze_rows(target, AnalysisOptions(), thresholds=stmt_thresholds)
         else:
             print(f"오류: 대상이 존재하지 않습니다: {target}", file=sys.stderr)
             return 2
@@ -852,6 +859,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             contact=args.contact,
             center=args.center,
             coverage=weights_coverage(None),
+            thresholds=stmt_thresholds if isinstance(stmt_thresholds, dict) or stmt_thresholds is None else _thresholds_json(stmt_thresholds),
             # D5: a row without sha256 is hashed against the scanned folder,
             # never the cwd (a single file / JSON input has no scan root).
             scan_root=target if target.is_dir() else None,
@@ -993,6 +1001,11 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         # never a RuntimeError traceback after the scan finished.
         print(f"오류: {PdfDependencyMissing()}", file=sys.stderr)
         return 2
+    if (args.pdf_out or getattr(args, "forensic_pdf_out", None)) and not pdf_backend_available():
+        # B8: the scan PDF reports need pymupdf too — same refusal, never an
+        # English Latin-1 PDF.
+        print(f"오류: {PdfDependencyMissing(PDF_REPORT_DEPENDENCY_MESSAGE)}", file=sys.stderr)
+        return 2
     options = AnalysisOptions.from_cli_args(args)
     engine_profiles = options.engine_profiles()
     if engine_profiles and args.model_path is None:
@@ -1001,7 +1014,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
 
     try:
         if args.progress:
-            print(f"Analyzing {args.folder} with workers={args.workers}, pixel={args.pixel}...", file=sys.stderr)
+            print(f"검사 중: {args.folder} (workers={args.workers}, pixel={args.pixel})…", file=sys.stderr)
         summary, items, thresholds = scan_folder(args.folder, options, warn=thresholds_warning_printer(sys.stderr))
     except OSError as exc:
         # S4: core.ScanFolderError carries the reason — "폴더를 찾을 수 없습니다",
@@ -1010,7 +1023,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         print(f"오류: {exc}", file=sys.stderr)
         return 2
     if args.progress:
-        print(f"Done: analyzed={summary.analyzed}, cached={summary.cached}, total={summary.total}", file=sys.stderr)
+        print(f"검사 완료: 분석 {summary.analyzed}건, 캐시 사용 {summary.cached}건, 전체 {summary.total}건", file=sys.stderr)
 
     scan_coverage = weights_coverage(options.resolved_models_dir())
     if args.json_out:
@@ -1025,7 +1038,13 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
     if args.html_out:
         write_html_report(args.html_out, summary, report_items, redact_paths=args.redact_paths, thresholds=thresholds)
     if args.pdf_out:
-        write_pdf_report(args.pdf_out, summary, report_items, redact_paths=args.redact_paths, thresholds=thresholds)
+        write_pdf_report(
+            args.pdf_out, summary, report_items,
+            redact_paths=args.redact_paths,
+            thresholds=thresholds,
+            coverage=scan_coverage,
+            exhibit_no=getattr(args, "exhibit_no", "갑 제        호증"),
+        )
     if getattr(args, "forensic_pdf_out", None):
         write_forensic_pdf_report(
             args.forensic_pdf_out,

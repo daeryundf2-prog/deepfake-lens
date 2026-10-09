@@ -19,7 +19,7 @@
     "보정 전 원점수이며 진위 판정이 아닙니다 — 짧은 글과 영어가 아닌 글에서는 신뢰할 수 없습니다."
   ],
   "notes": [
-    "이 체크포인트의 라벨 순서는 index 0 = Human, index 1 = AI입니다 — 모델 config.json의 id2label로 확인했습니다(0=Fake인 OpenAI 탐지기와 반대)."
+    "이 체크포인트의 라벨 순서는 인덱스 0 = `Human`, 인덱스 1 = `AI`입니다 — 모델 config.json의 id2label로 확인했습니다(0=Fake인 OpenAI 탐지기와 반대)."
   ],
   "license": "Apache-2.0",
   "ensemble_weight": 0.5,

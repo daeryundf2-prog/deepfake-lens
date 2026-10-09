@@ -34,7 +34,18 @@ from pathlib import Path
 from typing import Any
 
 from .core import BatchScanSummary, ScanItem
-from .result_text import TEXT_LEGAL_LIMITATION, coverage_gaps, evidence_groups
+from .result_text import (
+    ARCHIVE_MEMBER_SEPARATOR,
+    HASH_UNAVAILABLE_ACCESS,
+    HASH_UNAVAILABLE_MEMBER,
+    HASH_UNAVAILABLE_SYMLINK,
+    TEXT_LEGAL_LIMITATION,
+    coverage_gaps,
+    evidence_groups,
+    is_symlink_row,
+    row_label,
+    threshold_provenance_line,
+)
 from .result_types import VERDICT_LABELS, CoverageStatus, EvidenceDirection, EvidenceKind, EvidenceStrength, Grade, Verdict, is_verdict_row, status_label
 from .signing import resolve_report_key, sign_report
 
@@ -111,7 +122,7 @@ class EvidenceStatement:
             integrity_line = "원본 파일에 접근할 수 없어 해시 산출이 불가하였습니다. 동일성 확인은 별도 절차로 진행하여야 합니다."
         lines.extend([
             "",
-            "### [증거 무결성 고지 (Chain of Custody)]",
+            "### [증거 무결성 고지 (증거 관리 연속성)]",
             integrity_line,
             "본 문서는 자동 분석 도구의 결과를 요약한 것으로, 결론(조작·생성 근거 있음/원본성 근거 있음/판단 불가)은 유죄·불법성에 대한 법적 판단이 아닙니다.",
             "",
@@ -129,10 +140,9 @@ class EvidenceStatement:
         return "\n".join(lines)
 
 
-# N2: why a row has no SHA-256, printed in the hash line.
-HASH_UNAVAILABLE_ACCESS = "해시 불가 — 원본 파일 접근 실패 (동일성 확인 요망)"
-HASH_UNAVAILABLE_SYMLINK = "해시 불가(심볼릭 링크 — 링크를 따라가지 않음)"
-HASH_UNAVAILABLE_MEMBER = "해시 불가(압축 파일 구성원 — 압축 파일 행의 해시로 동일성을 확인하십시오)"
+# N2: why a row has no SHA-256, printed in the hash line. The constants
+# live in result_text (shared with the forensic PDF, S2) and are re-exported
+# here under their historical names (imported above).
 
 
 class _SymlinkRefused(Exception):
@@ -207,9 +217,9 @@ def _item_hash(item: ScanItem, scan_root: Path | str | None) -> tuple[str | None
     """
     if item.sha256:
         return item.sha256, ""
-    if "::" in item.path:
+    if ARCHIVE_MEMBER_SEPARATOR in item.path:
         return None, HASH_UNAVAILABLE_MEMBER
-    if item.status == "skipped" and (item.error or "").startswith("심볼릭 링크"):
+    if is_symlink_row(item.status, item.error):
         return None, HASH_UNAVAILABLE_SYMLINK
     path = Path(item.path)
     root = Path(scan_root) if scan_root is not None else None
@@ -227,6 +237,20 @@ def _item_hash(item: ScanItem, scan_root: Path | str | None) -> tuple[str | None
 def _item_sha256(item: ScanItem, scan_root: Path | str | None) -> str | None:
     """The row's SHA-256 or None (see :func:`_item_hash`)."""
     return _item_hash(item, scan_root)[0]
+
+
+# Corner brackets around a metadata value copied verbatim from the file.
+_QUOTE_OPEN, _QUOTE_CLOSE = "\u300c", "\u300d"
+
+
+def _clip(text: str, limit: int) -> str:
+    """``text`` cut to ``limit`` chars without leaving a quoted metadata value open."""
+    if len(text) <= limit:
+        return text
+    clipped = text[:limit] + "…"
+    if clipped.count(_QUOTE_OPEN) > clipped.count(_QUOTE_CLOSE):
+        clipped += _QUOTE_CLOSE
+    return clipped
 
 
 def _determine_statutes(score: int, signals: list[Any], item_kind: str, band: str) -> list[str]:
@@ -252,7 +276,24 @@ def _determine_statutes(score: int, signals: list[Any], item_kind: str, band: st
     return statutes
 
 
-def _purpose_head(item: ScanItem) -> str:
+def _member_references(item: ScanItem, exhibits: dict[str, str], items: list[ScanItem]) -> str:
+    """Exhibit references to an archive container's member rows (S1).
+
+    Names the rows that exist in this statement ("갑 제3호증(evil.zip::inner/a.png)"),
+    manipulation-verdict members first, so the cross-reference always
+    points at a real row label.
+    """
+    prefix = item.path + ARCHIVE_MEMBER_SEPARATOR
+    members = [member for member in items if member.path.startswith(prefix)]
+    members.sort(key=lambda member: 0 if member.result is not None and member.result.verdict_code == Verdict.MANIPULATION_EVIDENCE else 1)
+    refs = [f"{exhibits[member.path]}({row_label(member.path)})" for member in members if member.path in exhibits]
+    if not refs:
+        return f"구성원 행은 이 증거설명서에 없습니다 — 검사 JSON의 '{row_label(item.path)}{ARCHIVE_MEMBER_SEPARATOR}' 행 참조"
+    shown = ", ".join(refs[:3]) + (f" 외 {len(refs) - 3}건" if len(refs) > 3 else "")
+    return f"구성원별 근거는 {shown} 참조"
+
+
+def _purpose_head(item: ScanItem, member_refs: str = "") -> str:
     res = item.result
     if res is None or not is_verdict_row(item.status, True):
         # N2: skipped/unsupported/failed/duplicate rows carry no conclusion.
@@ -264,7 +305,7 @@ def _purpose_head(item: ScanItem) -> str:
         rollup = next((e.detail for e in res.evidence if e.layer == "archive"), "")
         return (
             f"압축 파일 구성원 중 결정적 근거에 의해 조작·생성 근거가 확인된 파일이 있는 증거물임을 소명함"
-            f"(구성원 결론 집계: {rollup}; 구성원별 근거는 '{Path(item.path).name}::경로' 행 참조)."
+            f"(구성원 결론 집계: {rollup}; {member_refs or '구성원 행 참조'})."
         )
     if res.verdict_code == Verdict.MANIPULATION_EVIDENCE:
         basis = next(
@@ -308,6 +349,8 @@ def build_evidence_statement(
     """
     entries: list[EvidenceStatementEntry] = []
     now_date = datetime.now().strftime("%Y. %m. %d.")
+    # S1: exhibit number of every row, so a container can cite its members.
+    exhibits = {item.path: f"{exhibit_prefix}{idx}호증" for idx, item in enumerate(items, start=1)}
 
     for idx, item in enumerate(items, start=1):
         res = item.result
@@ -327,18 +370,20 @@ def build_evidence_statement(
         file_sha256, hash_unavailable = _item_hash(item, scan_root)
 
         exhibit_no = f"{exhibit_prefix}{idx}호증"
-        doc_name = f"디지털 증거 파일 ({Path(item.path).name}) 및 AI 스크리닝 데이터"
+        # S1: an archive member is named "<container>::<member>", never its bare file name.
+        doc_name = f"디지털 증거 파일 ({row_label(item.path)}) 및 AI 스크리닝 데이터"
         author_date = f"{law_firm}\n{now_date}"
 
         statutes = _determine_statutes(score, signals, item.kind, band_value)
 
         # The tool screens; it does not prove crimes. Purpose language
         # follows the verdict and names the evidence kind behind it.
-        purpose_head = _purpose_head(item)
+        member_refs = _member_references(item, exhibits, items) if item.kind == "archive" else ""
+        purpose_head = _purpose_head(item, member_refs)
         evidence_lines: list[str] = []
         if res is not None:
             for kind_label, lines in evidence_groups(res):
-                evidence_lines.append(f"• {kind_label}: " + "; ".join(line[:60] for line in lines[:2]) + (" 외" if len(lines) > 2 else ""))
+                evidence_lines.append(f"• {kind_label}: " + "; ".join(_clip(line, 60) for line in lines[:2]) + (" 외" if len(lines) > 2 else ""))
             gaps = coverage_gaps(res)
             if gaps:
                 evidence_lines.append("• 검사 범위: " + "; ".join(entry.describe() for entry in gaps[:3]) + (f" 외 {len(gaps) - 3}건" if len(gaps) > 3 else ""))
@@ -383,14 +428,10 @@ def build_evidence_statement(
         prov_lines.append(
             f"모델 가중치: {wa}/{wc} 탑재" + (" — 신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영" if wa == 0 else "")
         )
-    if isinstance(thresholds, dict):
-        src = thresholds.get("source", "")
-        if src == "builtin_defaults":
-            prov_lines.append("판정 임계값: 내장 기본값 — 미측정 잠정값(프로비저널)")
-        elif src:
-            n = thresholds.get("samples", "?")
-            fp = thresholds.get("dataset_fingerprint") or ""
-            prov_lines.append(f"판정 임계값: 측정 프로파일 {src} (표본 {n}건" + (f", 지문 {fp[:12]}" if fp else "") + ")")
+    if thresholds is not None:
+        # S6: the same line as the CLI header / HTML / forensic PDF,
+        # including the in-sample caveat (G28).
+        prov_lines.append(threshold_provenance_line(thresholds))
     provenance_note = "\n".join(prov_lines)
 
     return EvidenceStatement(
@@ -474,13 +515,18 @@ PDF_DEPENDENCY_MESSAGE = (
     "PDF 증거설명서를 만들려면 pymupdf 패키지가 필요합니다(설치: `pip install pymupdf`). "
     "Markdown(.md) 또는 JSON(.json) 증거설명서는 pymupdf 없이 만들 수 있습니다."
 )
+# B8: the same refusal for the scan PDF reports (--pdf-out, --forensic-pdf-out).
+PDF_REPORT_DEPENDENCY_MESSAGE = (
+    "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: `pip install pymupdf`). "
+    "HTML(--html-out), JSON(--json-out), CSV(--csv-out) 보고서는 pymupdf 없이 만들 수 있습니다."
+)
 
 
 class PdfDependencyMissing(RuntimeError):
-    """pymupdf (or its legacy ``fitz`` name) is not installed (R6)."""
+    """pymupdf (or its legacy ``fitz`` name) is not installed (R6, B8)."""
 
-    def __init__(self) -> None:
-        super().__init__(PDF_DEPENDENCY_MESSAGE)
+    def __init__(self, message: str = PDF_DEPENDENCY_MESSAGE) -> None:
+        super().__init__(message)
 
 
 def _import_pymupdf() -> Any:
@@ -519,8 +565,7 @@ def write_evidence_statement_pdf(
     output.parent.mkdir(parents=True, exist_ok=True)
 
     doc = pymupdf.open()
-    font_ko = "korea"
-    font_en = "helv"
+    font_ko = "korea"  # B3: every label is drawn with the CJK font
 
     page_w, page_h = 595.0, 842.0
     margin_l, margin_r = 45.0, 550.0

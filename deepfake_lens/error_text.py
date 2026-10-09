@@ -18,10 +18,13 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import errno
+import logging
 import os
 import re
 from pathlib import Path
 from typing import Iterator
+
+logger = logging.getLogger(__name__)
 
 # Upper bound on the exception message kept in a coverage reason — enough
 # for the examiner to identify the failure, short enough for a report cell.
@@ -110,8 +113,9 @@ _ERRNO_KO = {
 
 # (pattern, Korean replacement) for library messages seen on unreadable or
 # damaged evidence files (Pillow, zipfile, soundfile/libsndfile, c2pa-python,
-# OpenCV, json). Applied after path scrubbing; an unknown English message is
-# kept as is (still path-scrubbed) so the examiner sees the original cause.
+# OpenCV, json). Applied after path scrubbing; a message that still carries
+# English prose after both tables is replaced by :data:`LIBRARY_ERROR_FALLBACK`
+# (B6) and the raw text goes to the log only.
 _MESSAGE_KO: tuple[tuple[re.Pattern[str], str], ...] = tuple(
     (re.compile(pattern, re.IGNORECASE), replacement)
     for pattern, replacement in (
@@ -153,23 +157,158 @@ _FRAGMENT_KO: tuple[tuple[re.Pattern[str], str], ...] = tuple(
         (r"File contains data in an unknown format\.?", "알 수 없는 데이터 형식"),
         (r"Unspecified internal error\.?", "내부 오류(세부 정보 없음)"),
         (r"\bfailed to fill whole buffer\b", "데이터가 예상보다 짧습니다(파일 잘림)"),
+        # B6: c2pa-python (c2pa-rs) messages seen on damaged manifests.
+        (r"could not create valid JUMBF for claim", "클레임의 JUMBF 구조를 만들 수 없음(매니페스트 손상)"),
+        (r"invalid embedded file box", "내장 파일 박스가 손상됨"),
+        (r"unexpected end of file", "파일이 예상보다 일찍 끝남(파일 잘림)"),
+        (r"claim missing", "클레임 없음"),
+        (r"JUMBF box not found", "JUMBF 박스 없음"),
+        (r"\bmanifest not found\b", "매니페스트 없음"),
+        (r"\bno JUMBF data found\b", "JUMBF 데이터 없음"),
+        # A c2pa-python class name already rendered into a wrapped message
+        # ("_C2paOther: Other: …", "_C2paVerify: Verify: …").
+        (r"\b_C2pa(\w+): (?:\1: )?", r"C2PA SDK 오류(\1): "),
+        (r"(?<![\w(])Verify: ", "검증 단계: "),
     )
 )
 
 
+# B6: what replaces a library message the tables above do not translate —
+# the examiner sees the exception class, the raw English text goes to the
+# log (INFO, the CLI log file) and never into a coverage reason or report.
+LIBRARY_ERROR_FALLBACK = "라이브러리 오류({cls}) — 상세는 로그 참조"
+# c2pa-python raises private subclasses named ``_C2pa<Kind>`` whose message
+# repeats the kind ("Other: …"); shown as "C2PA SDK 오류(<Kind>)".
+_C2PA_CLASS = re.compile(r"^_C2pa(\w+)$")
+C2PA_SDK_ERROR = "C2PA SDK 오류({kind})"
+
+# English-prose detector (B6, shared with the R4 output tests). A text has
+# English prose when, after identifier tokens are removed, some sentence
+# still holds two consecutive English words. Identifiers are a closed set of
+# token shapes that cannot carry a sentence: snake_case / camelCase /
+# PascalCase-with-inner-capital, tokens with a digit, hyphenated compounds,
+# key=value, --flags, paths and URLs, file names, exception class names,
+# backticked code, metadata values quoted verbatim in corner brackets, the acronyms
+# below, and the product / generator names below. ALL-CAPS words that are
+# not listed acronyms count as words, so shouted prose is caught.
+_SENTENCE_END = re.compile(r"[.!?;\n]+(?:\s|$)|[!?;\n]+")
+_EN_WORD = r"(?:[A-Za-z]+(?:['’][A-Za-z]+)?)"
+_EN_GAP = r"[ \t,:'\"’()\[\]\-–—/]+"
+_EN_RUN = re.compile(rf"(?<![\w'’]){_EN_WORD}(?:{_EN_GAP}{_EN_WORD})+(?![\w'’])")
+# Acronyms and short codes that stay in English (formats, standards, units,
+# status codes printed by doctor). Any other ALL-CAPS word is a word.
+KNOWN_ACRONYMS = frozenset("""
+    AI API ASGI AUROC AV BMP C2PA CI CLI CNN CPU CSV CUDA DCT DQT ECAPA ECFS EER EXIF FPR FPS GAN GB GIF GPS GPU GUI
+    HEIC HF HMAC HTML HTTP HTTPS HWP HWPX ICC ICLR ID IDAT IPTC JPEG JPG JSON JUMBF KB KGW KR KST LAN LBP MB MFCC MISS
+    MLM MOV MP3 MP4 MPS OK ONNX OCR PDF PNG PRNU RAM REST RGB ROC SBI SDK SDXL SHA SSIM TB TIFF TPR TSV UI URL USB USM
+    UTC UTF UUID VIT WAV WARN WEBP XMP XLSR ZIP EOS EF IS RF SD TTS LR DFL NA
+""".split())
+# Product, vendor and generator names (identifiers, not prose) that are
+# written as separate capitalized words.
+KNOWN_PROPER_NOUNS = (
+    "Stable Diffusion", "Hugging Face", "Community Forensics", "Deepfake Lens", "Adobe Firefly", "Adobe Photoshop",
+    "Microsoft Office Word", "Microsoft Word", "Microsoft Office", "Google Gemini", "Apple Silicon", "Content Credentials",
+    "Hemg", "Gustking", "In the Wild", "NAVER Corp",
+)
+# Python modules, packages and external tools named in dependency messages
+# (doctor, install hints) — identifiers, never prose.
+KNOWN_MODULE_NAMES = frozenset("""
+    torch torchvision transformers onnxruntime numpy librosa soundfile speechbrain mediapipe timm cv2 PIL Pillow
+    c2pa pymupdf fitz fastapi uvicorn syhwp ffmpeg ffprobe opencv scipy sklearn
+""".split())
+_IDENTIFIER_TOKENS: tuple[re.Pattern[str], ...] = (
+    re.compile("\u300c[^\u300d]*\u300d"),  # metadata values copied verbatim from the evidence file (corner brackets)
+    re.compile(r"https?://\S+"),  # URLs
+    # backticked code: a shell command, at most two tokens, or code punctuation
+    re.compile(r"`((?:pip|python|deepfake-lens|experiments/)[^`]*|[^`\s]+(?: [^`\s]+)?|[^`]*[-_/.=<>:\[\]{}][^`]*)`"),
+    re.compile("|".join(re.escape(name) for name in sorted(KNOWN_PROPER_NOUNS, key=len, reverse=True))),
+    re.compile(r"<root>(?:[\\/][^\s'\"]*)?"),  # the scrubbed scan root and paths under it
+    re.compile(r"[\w.\-~<>]*[\\/][\w.\-/\\~<>]*"),  # paths, model ids (org/name), fractions (1/4)
+    re.compile(
+        r"\b[\w\-]+\.(?:py|js|json|md|pth|pt|onnx|torchscript|png|jpe?g|gif|webp|bmp|tiff?|heic|txt|wav|mp3|m4a|flac|ogg|"
+        r"mp4|mov|mkv|avi|webm|zip|tar|gz|7z|rar|xml|html?|pdf|csv|docx|xlsx|pptx|hwpx?|doc|xls|ppt|log|bin|exe|so|dll)\b",
+        re.IGNORECASE,
+    ),  # file names
+    re.compile(r"\b_?[A-Z][A-Za-z0-9_]*(?:Error|Exception|Warning)\b"),  # exception classes
+    re.compile(r"(?<![\w-])--?[A-Za-z][\w-]*"),  # CLI flags
+    re.compile(r"\b[\w.:\-]+=\S*"),  # key=value
+    re.compile(r"\b\w+(?::[\w\-]+)+"),  # colon-joined ids (model:<name>, failed:pymupdf:RuntimeError)
+    re.compile(r"\b\w*_\w*\b"),  # snake_case identifiers
+    re.compile(r"\b[a-z]+[A-Z][A-Za-z0-9]*\b"),  # camelCase
+    re.compile(r"\b[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*\b"),  # PascalCase / product ids (EfficientNet)
+    re.compile(r"\b\w*\d\w*\b"),  # tokens with a digit (B0, v2, sha256, 1/125)
+    re.compile(r"\b[A-Za-z]+(?:-[A-Za-z0-9]+)+\b"),  # hyphenated identifiers (roberta-base)
+    re.compile(r"\b[0-9a-fA-F]{8,}\b"),  # hex digests / ids
+    re.compile(r"\b(?:pin|sha256)\b"),
+    re.compile(r"\b(?:" + "|".join(sorted(KNOWN_MODULE_NAMES)) + r")\b"),
+)
+_ACRONYM = re.compile(r"\b[A-Z]{2,}s?\b")
+
+
+def english_prose(text: str) -> str | None:
+    """The first English run (two or more consecutive English words) in ``text``, or None.
+
+    Every sentence (split on ``.``, ``!``, ``?``, ``;`` and newlines) is
+    checked on its own; Hangul elsewhere in the text exempts nothing. A
+    contraction (``Don't``) is one word, a lone English word is not prose.
+    """
+    stripped = text
+    for pattern in _IDENTIFIER_TOKENS:
+        stripped = pattern.sub(" ", stripped)
+    stripped = _ACRONYM.sub(lambda m: " " if m.group(0).rstrip("s") in KNOWN_ACRONYMS else m.group(0), stripped)
+    for sentence in _SENTENCE_END.split(stripped):
+        match = _EN_RUN.search(sentence)
+        if match:
+            return match.group(0)
+    return None
+
+
+def _untranslated_fallback(message: str, cls: str) -> str:
+    """``message`` with its first English-prose segment (and the rest) replaced (B6).
+
+    Segments are the ``": "``-separated parts; the Korean context before the
+    English part ("C2PA 판독 실패: …") is kept.
+    """
+    fallback = LIBRARY_ERROR_FALLBACK.format(cls=cls)
+    parts = message.split(": ")
+    for index, part in enumerate(parts):
+        if english_prose(part):
+            head = ": ".join(parts[:index])
+            return f"{head}: {fallback}" if head else fallback
+    return fallback
+
+
 def korean_exception_message(exc: BaseException) -> str:
-    """The exception's message, path-scrubbed and in Korean where known (N1)."""
+    """The exception's message, path-scrubbed and in Korean where known (N1, B6).
+
+    A message the translation tables leave with English prose in it is
+    replaced by "라이브러리 오류(<ExceptionClass>) — 상세는 로그 참조"; the raw
+    (path-scrubbed) text is logged at INFO — the CLI log file — only.
+    """
     if isinstance(exc, OSError) and exc.errno in _ERRNO_KO:
         target = f": {scrub_paths(exc.filename)}" if isinstance(exc.filename, str) and exc.filename else ""
         return f"[Errno {exc.errno}] {_ERRNO_KO[exc.errno]}{target}"
     message = scrub_paths(str(exc)).strip()
+    c2pa = _C2PA_CLASS.match(type(exc).__name__)
+    if c2pa:
+        # "_C2paOther('Other: …')": the kind is already in the class label.
+        message = re.sub(rf"^{re.escape(c2pa.group(1))}: ", "", message)
     for pattern, replacement in _MESSAGE_KO:
         if pattern.search(message):
             message = pattern.sub(replacement, message)
             break
     for pattern, replacement in _FRAGMENT_KO:
         message = pattern.sub(replacement, message)
+    if english_prose(message):
+        logger.info("번역되지 않은 라이브러리 오류 메시지(%s): %s", type(exc).__name__, message)
+        message = _untranslated_fallback(message, type(exc).__name__)
     return message
+
+
+def exception_label(exc: BaseException) -> str:
+    """The class part of a failure reason: the class name, or "C2PA SDK 오류(<kind>)" (B6)."""
+    c2pa = _C2PA_CLASS.match(type(exc).__name__)
+    return C2PA_SDK_ERROR.format(kind=c2pa.group(1)) if c2pa else type(exc).__name__
 
 
 def exception_text(exc: BaseException, limit: int = FAILURE_MESSAGE_MAX_CHARS) -> str:
@@ -180,6 +319,7 @@ def exception_text(exc: BaseException, limit: int = FAILURE_MESSAGE_MAX_CHARS) -
 def failure_reason(exc: BaseException) -> str:
     """``"<ExcType>: <message>"`` for a failed coverage entry — never a full path (N1)."""
     message = exception_text(exc)
-    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+    label = exception_label(exc)
+    return f"{label}: {message}" if message else label
 
 

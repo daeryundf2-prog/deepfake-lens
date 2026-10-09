@@ -246,8 +246,17 @@
             rppg: 'rPPG 맥박 검사', avatar: '아바타 검사', lipsync: '립싱크 검사', face_track: '얼굴 트랙 검사',
             audio_analysis: '오디오 분석', audio_features: '오디오 특징 추출', video_analysis: '영상 분석', av_audio: '영상 음성 트랙 분석',
             document_text: '문서 텍스트 추출', text_lexical: '어휘·문체 신호', archive: '압축 해제',
+            archive_member: '압축 구성 파일',
         };
         const COVERAGE_STATUS_LABELS = { ran: '실행', skipped: '미실행', failed: '실패' };
+        // B5: same table as result_types.SOURCE_CONFIDENCE_LABELS; a text or
+        // reference-only guess (label "참고: …") is shown as "참고".
+        const SOURCE_CONFIDENCE_LABELS = { unknown: '알 수 없음', low: '낮음', medium: '중간', high: '높음' };
+        const REFERENCE_SOURCE_PREFIX = '참고: ';
+        function sourceConfidenceLabel(r, sg) {
+            if (String(sg.label || '').startsWith(REFERENCE_SOURCE_PREFIX) || (r && r.grade === 'reference')) return '참고';
+            return SOURCE_CONFIDENCE_LABELS[sg.confidence] || SOURCE_CONFIDENCE_LABELS.unknown;
+        }
         const TEXT_LEGAL_LIMITATION = '텍스트 생성 여부 판별은 2026년 현재 증거능력이 없으며 참고 정보입니다.';
 
         function verdictOf(item) {
@@ -621,8 +630,8 @@
             const ma = r.model_analysis;
             if (ma) {
                 const members = (ma.models || []).map(m =>
-                    `<li>${escapeHtml(m.display_name || m.model || '모델')} — 원점수 ${m.score != null ? m.score : 'n/a'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
-                parts.push(`<div class="dgroup"><div class="dt">외부 모델 원점수(미보정, 결론 불참여) — ${ma.score != null ? ma.score : 'n/a'}</div>${members ? `<ul>${members}</ul>` : `<div class="note">${escapeHtml(ma.detail || '')}</div>`}</div>`);
+                    `<li>${escapeHtml(m.display_name || m.model || '모델')} — 원점수 ${m.score != null ? m.score : '없음'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
+                parts.push(`<div class="dgroup"><div class="dt">외부 모델 원점수(미보정, 결론 불참여) — ${ma.score != null ? ma.score : '없음'}</div>${members ? `<ul>${members}</ul>` : `<div class="note">${escapeHtml(ma.detail || '')}</div>`}</div>`);
             }
             // Unmeasured heuristics (pixel ensemble, fusion, legacy audio/
             // video heuristics) — displayed for reference, never decide.
@@ -632,7 +641,7 @@
             const sg = r.source_guess;
             if (sg && sg.label) {
                 const reasons = (sg.reasons || []).map(escapeHtml).join(' ');
-                parts.push(`<div class="dgroup"><div class="dt">출처 추정 (${escapeHtml(sg.confidence || 'unknown')})</div><div class="note">${escapeHtml(sg.label)} — ${reasons}</div></div>`);
+                parts.push(`<div class="dgroup"><div class="dt">출처 추정 (${escapeHtml(sourceConfidenceLabel(r, sg))})</div><div class="note">${escapeHtml(sg.label)} — ${reasons}</div></div>`);
             }
             parts.push(`<div class="band-advice">${escapeHtml(verdictAdvice(r.verdict_code || 'undetermined', r.grade))}</div>`);
             parts.push(`<div class="caveat">결론은 결정적 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>`);
@@ -1374,8 +1383,8 @@
             const ma = r.model_analysis;
             if (ma) {
                 const members = (ma.models || []).map(m =>
-                    `<li>${escapeHtml(m.display_name || m.model || '모델')} — ${m.score != null ? m.score : 'n/a'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
-                parts.push(layer(`외부 모델 원점수(미보정, 결론 불참여) — ${ma.score != null ? ma.score : 'n/a'}`,
+                    `<li>${escapeHtml(m.display_name || m.model || '모델')} — ${m.score != null ? m.score : '없음'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
+                parts.push(layer(`외부 모델 원점수(미보정, 결론 불참여) — ${ma.score != null ? ma.score : '없음'}`,
                     members ? `<ul>${members}</ul>` : `<div class="note">${escapeHtml(ma.detail || '')}</div>`));
             }
             if (data.advanced) {
@@ -1399,7 +1408,7 @@
             if (data.watermark) {
                 const w = data.watermark;
                 parts.push(layer('워터마크 (KGW)',
-                    `<div class="kv"><b>측정</b><span>${escapeHtml(w.reference_note || '')}</span><b>z-score</b><span>${w.z_score != null ? w.z_score : 'n/a'}</span><b>참고 원점수</b><span>${w.score != null ? w.score : 'n/a'}</span></div>`));
+                    `<div class="kv"><b>측정</b><span>${escapeHtml(w.reference_note || '')}</span><b>z 점수</b><span>${w.z_score != null ? w.z_score : '없음'}</span><b>참고 원점수</b><span>${w.score != null ? w.score : '없음'}</span></div>`));
             }
             parts.push(listItems('참고 신호(미측정 휴리스틱 — 결론 불참여)', (r.reference_signals || []).map(s => ({ title: `${s.title} (${s.weight})`, detail: s.detail }))));
             parts.push(listItems('다음 확인', r.next_checks));

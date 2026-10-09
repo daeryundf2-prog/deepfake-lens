@@ -325,7 +325,8 @@ class AvAudioCoverageTest(unittest.TestCase):
         with mock.patch("deepfake_lens.audio.analyze_audio", side_effect=RuntimeError("audio boom")):
             result, entry = self._av_entry()
         self.assertEqual(entry.status, CoverageStatus.FAILED)
-        self.assertEqual(entry.reason, "RuntimeError: audio boom")
+        # B6: an English message is replaced by the Korean fallback (raw text in the log).
+        self.assertEqual(entry.reason, "RuntimeError: 라이브러리 오류(RuntimeError) — 상세는 로그 참조")
         self.assertNotIn("의존성 부재", entry.reason)
         self.assertEqual(result.verdict_code, Verdict.UNDETERMINED)
 

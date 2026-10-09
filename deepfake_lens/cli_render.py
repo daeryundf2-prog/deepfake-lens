@@ -14,12 +14,14 @@ from pathlib import Path
 
 from .calibration import IN_SAMPLE_LABEL
 from .result_text import (
+    IN_SAMPLE_CAVEAT,
     TEXT_LEGAL_LIMITATION,
     coverage_counts_text,
     coverage_gaps,
     deciding_evidence,
     evidence_counts,
     evidence_counts_text,
+    item_kind_label,
     summary_line,
 )
 from .result_types import (
@@ -100,7 +102,7 @@ def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage:
         print("!! 판정 임계값: 미측정 잠정값 — 표본 코퍼스로 보정되기 전에는 임계값을 근거로 쓰지 마십시오 !!")
     if thresholds is not None and getattr(thresholds, "in_sample", False):
         # G28: fitted and evaluated on the same rows — reference only.
-        print(f"!! 판정 임계값: {IN_SAMPLE_LABEL} — 적합에 쓴 같은 표본에서 평가된 값이라 감정 근거가 아닙니다 !!")
+        print(f"!! 판정 임계값: {IN_SAMPLE_LABEL} — {IN_SAMPLE_CAVEAT} !!")
     cap_note = " (파일 수 상한 도달)" if summary.capped else ""
     print(summary_line(summary) + cap_note)
     subfolders = getattr(summary, "subfolders_skipped", 0)
@@ -132,7 +134,7 @@ def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage:
 
 # Column header of the scan table; single-file commands print archive
 # member rows under the same header (B1).
-TABLE_HEADER = f"{'결론':<14} {'등급':<4} {'근거(결정·통계·어휘)':<18} {'검사(실행·미실행·실패)':<20} {'kind':<6} file"
+TABLE_HEADER = f"{'결론':<14} {'등급':<4} {'근거(결정·통계·어휘)':<18} {'검사(실행·미실행·실패)':<20} {'유형':<6} 파일"
 TABLE_RULE = "-" * 110
 
 
@@ -158,7 +160,7 @@ def table_row_text(item: ScanItem) -> str:
         # N7: Korean status in the 결론 column (건너뜀/미지원/실패/중복).
         verdict, grade, counts, checks = status_label(item.status), "-", "-", "-"
         reason = item.error or ""
-    return f"{verdict:<14} {grade:<4} {counts:<18} {checks:<20} {item.kind:<6} {item.path}  # {reason}"
+    return f"{verdict:<14} {grade:<4} {counts:<18} {checks:<20} {item_kind_label(item.kind):<6} {item.path}  # {reason}"
 
 
 def _is_priority_row(item: ScanItem) -> bool:
@@ -291,7 +293,7 @@ def _pixel_score_text(item: ScanItem) -> str:
     if not pixel:
         return "-"
     if not pixel.available:
-        return "n/a"
+        return "사용 불가"
     return f"{pixel.raw_score}(참고)"
 
 

@@ -108,6 +108,54 @@ class ScrubPathsTest(unittest.TestCase):
         self.assertEqual(exception_text(OSError("image file is truncated (37 bytes not processed)")), "이미지 파일이 잘려 있습니다(처리하지 못한 바이트 37개)")
         self.assertEqual(failure_reason(ValueError()), "ValueError")
 
+    def test_c2pa_sdk_messages_are_korean(self) -> None:
+        """B6: the c2pa-python class names and messages seen on damaged manifests."""
+
+        class _C2paOther(Exception):
+            pass
+
+        class _C2paVerify(Exception):
+            pass
+
+        self.assertEqual(
+            failure_reason(_C2paOther("Other: could not create valid JUMBF for claim")),
+            "C2PA SDK 오류(Other): 클레임의 JUMBF 구조를 만들 수 없음(매니페스트 손상)",
+        )
+        self.assertEqual(failure_reason(_C2paVerify("Verify: invalid embedded file box")), "C2PA SDK 오류(Verify): 내장 파일 박스가 손상됨")
+        self.assertEqual(failure_reason(_C2paOther("Other: unexpected end of file")), "C2PA SDK 오류(Other): 파일이 예상보다 일찍 끝남(파일 잘림)")
+        # A reason that already embeds the SDK class (wrapped by core) is translated too.
+        self.assertEqual(
+            exception_text(RuntimeError("C2PA 판독 실패: _C2paOther: Other: could not create valid JUMBF for claim")),
+            "C2PA 판독 실패: C2PA SDK 오류(Other): 클레임의 JUMBF 구조를 만들 수 없음(매니페스트 손상)",
+        )
+        self.assertEqual(exception_text(RuntimeError("Verify: unexpected end of file")), "검증 단계: 파일이 예상보다 일찍 끝남(파일 잘림)")
+
+    def test_untranslated_english_message_is_replaced_and_logged(self) -> None:
+        """B6: an unknown English library message never reaches a reason; the raw text goes to the log."""
+        with self.assertLogs("deepfake_lens.error_text", level="INFO") as logs:
+            reason = failure_reason(RuntimeError("the decoder hit a malformed segment"))
+        self.assertEqual(reason, "RuntimeError: 라이브러리 오류(RuntimeError) — 상세는 로그 참조")
+        self.assertTrue(any("the decoder hit a malformed segment" in line for line in logs.output), logs.output)
+
+        class _C2paSignature(Exception):
+            pass
+
+        with self.assertLogs("deepfake_lens.error_text", level="INFO"):
+            self.assertEqual(
+                failure_reason(_C2paSignature("Signature: certificate chain is not trusted here")),
+                "C2PA SDK 오류(Signature): 라이브러리 오류(_C2paSignature) — 상세는 로그 참조",
+            )
+        # The Korean context before the English part is kept.
+        with self.assertLogs("deepfake_lens.error_text", level="INFO"):
+            self.assertEqual(
+                exception_text(RuntimeError("C2PA 판독 실패: something entirely new")),
+                "C2PA 판독 실패: 라이브러리 오류(RuntimeError) — 상세는 로그 참조",
+            )
+        # Korean, identifiers and a single word pass unchanged.
+        for text in ("이미지가 손상되었습니다", "boom", "failed:pymupdf:RuntimeError", "C2PA SDK 오류(Io): 잘못된 블록 ID 101"):
+            with self.subTest(text=text):
+                self.assertEqual(exception_text(RuntimeError(text)), text)
+
     def test_root_registration_is_scoped(self) -> None:
         with path_scrub_root("/data/case"):
             pass
