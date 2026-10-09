@@ -2,13 +2,13 @@
 
 <!-- scripts/qa_phase0.py가 생성 — 손으로 고치지 말 것 -->
 
-- 검증 커밋: `9be8cf202cb09881be4c76a8255907116bc2784d` — 변경 없는 작업 트리에서 실행. 이 표는 이 커밋의 직계 자식 커밋에 단독으로 담긴다 (`python scripts/qa_phase0.py --verify-record`로 확인)
-- 생성 일시(UTC): 2026-10-09T00:32:41Z
+- 검증 커밋: `a785d7a8c342f929fd1f8f11b60a2cd7148892ab` — 변경 없는 작업 트리에서 실행. 이 표는 이 커밋의 직계 자식 커밋에 단독으로 담긴다 (`python scripts/qa_phase0.py --verify-record`로 확인)
+- 생성 일시(UTC): 2026-10-09T02:13:03Z
 - 도구 버전: deepfake-lens 0.1.0
 - 환경: Python 3.13.16 / Linux-6.18.44-fc-v80-x86_64-with-glibc2.39 / ffmpeg 있음
 - 설치된 선택 패키지: numpy, PIL, cv2, scipy, sklearn, fastapi, httpx, uvicorn, mediapipe, pymupdf, fitz
 - 없는 선택 패키지(해당 테스트는 건너뜀): librosa, soundfile, c2pa, torch, transformers, speechbrain, py7zr, rarfile
-- 실행 범위: 전체 단위 테스트 스위트 — 1077개 실행, 실패 0개, 건너뜀 28개
+- 실행 범위: 전체 단위 테스트 스위트 — 1118개 실행, 실패 0개, 건너뜀 30개
 - 신경망 가중치: 없음(모든 프로필 supported:false, 모델 경로는 가짜 프로필 + monkeypatch로 검증)
 
 **요약: 20 통과 / 0 실패 / 4 수동 / 12 1단계**
@@ -92,7 +92,7 @@
 | QA-SYS-6 | `deepfake_lens.tests.qa.test_qa_sys_integrity.QaSys6SignatureCoversWholeReportTest.test_named_fields_are_inside_the_signature` | 0/0/7 | 통과 | — |
 | QA-SYS-7 | `deepfake_lens.tests.qa.test_qa_sys_integrity.QaSys7ReadRootConfinementTest.test_unregistered_scan_and_outside_heatmap_report_are_403_with_no_bytes` | 0/0/14 | 통과 | — |
 | QA-SYS-9 | `deepfake_lens.tests.qa.test_qa_sys_gate.MeasurementGateTest.test_qa_sys_9_unmeasured_profile_fails_ci` | 0/0/1 | 통과 | — |
-| QA-SYS-10 | `deepfake_lens.tests.qa.test_qa_sys.QaSys10TestInventoryTest.test_inventory_floor_and_documented_deletions` | 0/0/3 | 통과 | 전체 스위트 1077개 실행, 실패 0건 |
+| QA-SYS-10 | `deepfake_lens.tests.qa.test_qa_sys.QaSys10TestInventoryTest.test_inventory_floor_and_documented_deletions` | 0/0/3 | 통과 | 전체 스위트 1118개 실행, 실패 0건 |
 
 ## 수동·1단계
 
