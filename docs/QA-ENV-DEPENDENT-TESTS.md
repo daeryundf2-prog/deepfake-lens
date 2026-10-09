@@ -92,7 +92,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `speechbrain/soundfile not installed` | `speaker` extra(speechbrain, soundfile, torch, torchaudio) | test_v6_probes.py |
 | `syhwp not installed` | `hwp` extra(syhwp, olefile) | test_documents.py |
 | `symbolic links to folders need privileges on Windows` | Windows가 아닌 OS(POSIX) | test_unrecorded_files.py |
-| `symlinks not available` | 심볼릭 링크를 만들 수 있는 OS·권한 | test_evidence_statement.py |
+| `symlinks not available` | 심볼릭 링크를 만들 수 있는 OS·권한 | test_corpus_manifest.py, test_evidence_statement.py |
 | `symlinks not permitted on this platform` | 심볼릭 링크를 만들 수 있는 OS·권한 | test_archives.py |
 | `the inpaint check probes for opencv` | `pixel`/`face` extra(opencv-python) | test_core.py |
 | `torch is installed; unavailable-path assertion does not apply` | torch가 없는 환경에서만 실행 | test_aasist_engine.py |

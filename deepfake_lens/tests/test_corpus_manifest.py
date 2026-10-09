@@ -21,6 +21,7 @@ from deepfake_lens.corpus_manifest import (
     manifest_sha256,
     origin_key,
     parse_ratio,
+    relpath_outside_corpus,
     run_corpus_cli,
     verify_manifest,
     write_manifest,
@@ -249,6 +250,41 @@ class VerifyAndCliTest(unittest.TestCase):
         self.assertIn("64자리", "\n".join(verify_manifest(payload, self.root)))
         payload["items"][0]["label"] = "fake"
         self.assertIn("허용되지 않는 라벨", "\n".join(verify_manifest(payload, self.root)))
+
+    def test_relpaths_outside_the_corpus_under_both_path_flavours(self) -> None:
+        """R12-8 (round 12): "C:\\x\\a.png" and "\\x" passed the containment check
+        (only "/…" and a POSIX ".." were refused), so on Windows they named files
+        outside the corpus. Both PurePosixPath and PureWindowsPath are checked."""
+        outside = [
+            "C:\\x\\a.png", "C:/x/a.png", "C:a.png", "\\x\\a.png", "\\\\server\\share\\a.png", "//server/share/a.png",
+            "/etc/passwd", "..\\..\\etc\\passwd", "real\\..\\..\\x.jpg", "../escape.jpg", "real/../../x.jpg", "", "a\x00b.jpg",
+        ]
+        for relpath in outside:
+            with self.subTest(relpath=relpath):
+                self.assertTrue(relpath_outside_corpus(relpath), relpath)
+        for relpath in ("real/galaxy-s23/kakao/r000.jpg", "real\\galaxy-s23\\kakao\\r000.jpg", "a..b.jpg", "real/..hidden.jpg"):
+            with self.subTest(relpath=relpath):
+                self.assertFalse(relpath_outside_corpus(relpath), relpath)
+        manifest, _ = build_manifest(self.root, label_from_dir=True)
+        for relpath in outside:
+            with self.subTest(verify=relpath):
+                payload = json.loads(json.dumps(manifest))
+                payload["items"][0]["relpath"] = relpath
+                payload["manifest_sha256"] = manifest_sha256(payload["items"])
+                problems = verify_manifest(payload, self.root)
+                self.assertIn(f"relpath가 코퍼스 밖을 가리킵니다: {relpath}", problems)
+                self.assertFalse(any(problem.startswith(("파일 없음", "해시 불일치")) and relpath and relpath in problem for problem in problems))
+
+    def test_symlink_out_of_the_corpus_is_outside(self) -> None:
+        secret = self.base / "secret.jpg"
+        secret.write_bytes(b"outside")
+        link = self.root / "real" / "galaxy-s23" / "original" / "link.jpg"
+        try:
+            link.symlink_to(secret)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks not available")
+        self.assertTrue(relpath_outside_corpus("real/galaxy-s23/original/link.jpg", self.root))
+        self.assertFalse(relpath_outside_corpus("real/galaxy-s23/original/r000.jpg", self.root))
 
     def test_cli_usage_errors(self) -> None:
         code, out = _run(["corpus"])

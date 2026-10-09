@@ -56,7 +56,7 @@ import random
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 from .json_text import json_dumps
 
@@ -366,6 +366,35 @@ def assign_splits(
     return SplitReport(groups=len(groups), counts=assigned)
 
 
+RELPATH_OUTSIDE = "relpath가 코퍼스 밖을 가리킵니다: {relpath}"
+
+
+def relpath_outside_corpus(relpath: str, root: Path | None = None) -> bool:
+    """R12-8 (round 12): True when ``relpath`` can name a file outside the corpus root.
+
+    Checked under both path flavours, whatever the OS running the check: a
+    POSIX absolute path, a Windows drive (``C:\\x``, drive-relative ``C:x``),
+    a rooted ``\\x``, a UNC ``\\\\server\\share``, a ``..`` part with either
+    separator, an empty path or a NUL. Before R12-8 only ``/…`` and a POSIX
+    ``..`` were refused, so ``C:\\x`` and ``\\x`` passed the check on Windows.
+    With ``root``, the resolved path must also stay inside the resolved root
+    (a symbolic link inside the corpus pointing out of it).
+    """
+    if not relpath or "\x00" in relpath:
+        return True
+    posix, windows = PurePosixPath(relpath), PureWindowsPath(relpath)
+    if posix.is_absolute() or posix.root or windows.drive or windows.root or windows.is_absolute():
+        return True
+    if ".." in posix.parts or ".." in windows.parts:
+        return True
+    if root is not None:
+        try:
+            (root / relpath).resolve().relative_to(root.resolve())
+        except (OSError, RuntimeError, ValueError):
+            return True
+    return False
+
+
 def verify_manifest(manifest: dict[str, Any], root: Path | str) -> list[str]:
     """Re-hash every file and re-check ``manifest_sha256``; Korean problems."""
     problems: list[str] = []
@@ -391,8 +420,8 @@ def verify_manifest(manifest: dict[str, Any], root: Path | str) -> list[str]:
         split = item.get("split")
         if split is not None and split not in SPLITS:
             problems.append(f"허용되지 않는 split {split!r}: {relpath}")
-        if relpath.startswith("/") or ".." in Path(relpath).parts:
-            problems.append(f"relpath가 코퍼스 밖을 가리킵니다: {relpath}")
+        if relpath_outside_corpus(relpath, root_path):
+            problems.append(RELPATH_OUTSIDE.format(relpath=relpath))
             continue
         path = root_path / relpath
         if not path.is_file():
