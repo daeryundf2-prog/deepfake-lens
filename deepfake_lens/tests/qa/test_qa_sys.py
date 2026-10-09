@@ -950,13 +950,24 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
         with patch.object(webapp_api, "_READ_ROOTS", OrderedDict()), patch.dict(os.environ, env, clear=True):
             html = webapp_api._report_payload(body, "html")
             pdf = webapp_api._report_payload(body, "pdf")
-        assert isinstance(html, bytes) and isinstance(pdf, bytes)
+        assert isinstance(html, bytes)
         self.assertIn("서명 없음", html.decode("utf-8"))
         embedded: Any = extract_signed_report(html.decode("utf-8"))
         assert embedded is not None
         self.assertIsNone(embedded["signature"])
         self.assertEqual(verify_report(embedded, KEY).reason, "서명 없음")
-        self.assertIn(UNSIGNED_PDF_MARKER, _pdf_text(pdf))
+        if HAVE_PYMUPDF:
+            assert isinstance(pdf, bytes)
+            self.assertIn("서명 없음", _pdf_text(pdf))
+        elif isinstance(pdf, dict):
+            # B8: without pymupdf no (English, Latin-1) PDF is produced — a
+            # Korean error naming the missing renderer, like evidence-statement.
+            self.assertIn("pymupdf", str(pdf.get("error", "")).lower())
+        else:
+            # Pre-B8 Latin-1 fallback writer (still on this branch until the
+            # B8 change lands): it must still say the report is unsigned.
+            assert isinstance(pdf, bytes)
+            self.assertIn(UNSIGNED_PDF_MARKER, _pdf_text(pdf))
 
 
 class _ServerFixture(unittest.TestCase):
