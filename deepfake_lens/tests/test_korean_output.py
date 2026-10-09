@@ -210,6 +210,14 @@ def write_mixed_folder(folder: Path) -> Path:
     (folder / "essay_ko.txt").write_text("나는 어제 도서관에서 언어 모델에 관한 책을 읽었다. 친구와 떡볶이를 먹었다.", encoding="utf-8")
     (folder / "contract_chatgpt.docx").write_bytes(_docx("ChatGPT", "OpenAI"))
     (folder / "contract_word.docx").write_bytes(_docx("Microsoft Office Word", "김변호사"))
+    # G4: a signed C2PA image (untrusted test signer → state "Invalid") and a
+    # copy whose pixels changed after signing (hash mismatch).
+    signed = (REPO_ROOT / "fixtures" / "c2pa-test" / "signed-c2pa.png").read_bytes()
+    (folder / "c2pa_signed.png").write_bytes(signed)
+    idat = signed.find(b"IDAT")
+    tampered = bytearray(signed)
+    tampered[idat + 40] ^= 0xFF
+    (folder / "c2pa_tampered.png").write_bytes(bytes(tampered))
     a1111 = (folder / "a1111.png").read_bytes()
     with zipfile.ZipFile(folder / "bundle.zip", "w") as archive:
         archive.writestr("in/a1111_inner.png", a1111)
@@ -334,7 +342,14 @@ def _scan_offenders(test: unittest.TestCase, folder: Path, options: AnalysisOpti
         run = english_prose(text)
         if run:
             offenders.append(f"{folder.name}{where}: {run!r} in {text[:160]!r}")
+        # G4 (round 5): the C2PA SDK's validation state is shown in Korean.
+        state = C2PA_STATE_WORD.search(text)
+        if state:
+            offenders.append(f"{folder.name}{where}: C2PA state {state.group(0)!r} in {text[:160]!r}")
     return offenders
+
+
+C2PA_STATE_WORD = re.compile(r"\b(?:Invalid|Valid|Trusted|WellFormed)\b")
 
 
 class ScanOutputIsKoreanTest(unittest.TestCase):
@@ -342,7 +357,8 @@ class ScanOutputIsKoreanTest(unittest.TestCase):
 
     def test_scan_json_text_fields_are_korean(self) -> None:
         offenders: list[str] = []
-        for folder in (REPO_ROOT / "fixtures" / "benchmark", REPO_ROOT / "experiments" / "text-corpus"):
+        # G4: the repo's C2PA fixture too (its SDK validation state was printed in English).
+        for folder in (REPO_ROOT / "fixtures" / "benchmark", REPO_ROOT / "experiments" / "text-corpus", REPO_ROOT / "fixtures" / "c2pa-test"):
             offenders.extend(_scan_offenders(self, folder, AnalysisOptions(recursive=True)))
         self.assertEqual(offenders, [], "\n".join(sorted(set(offenders))[:40]))
 

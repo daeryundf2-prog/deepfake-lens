@@ -458,3 +458,17 @@ class C2paIntegrityMismatchTest(unittest.TestCase):
         self.assertEqual(declared[1].strength, EvidenceStrength.MODERATE)  # declaration kept, never strong
         untrusted = c2pa_evidence({**base, "failure_codes": ["signingCredential.untrusted"]})
         self.assertEqual(untrusted[0].title, "C2PA 매니페스트 존재(검증 미완료)")
+        # G4 (round 5): the SDK state is printed in Korean, never "Invalid".
+        self.assertIn("검증 상태: 무효 (실패 코드 signingCredential.untrusted)", untrusted[0].detail)
+        self.assertNotIn("Invalid", untrusted[0].detail)
+
+    def test_validation_state_labels_are_korean(self) -> None:
+        """G4 (round 5): Invalid→무효, Valid→유효, Trusted→신뢰됨; an unknown state is quoted verbatim."""
+        from deepfake_lens.c2pa import c2pa_failure_codes_text, c2pa_state_label
+
+        for state, label in (("Invalid", "무효"), ("Valid", "유효"), ("Trusted", "신뢰됨"), ("WellFormed", "형식 정상(서명 검증 미완료)"), ("", "알 수 없음"), (None, "알 수 없음")):
+            with self.subTest(state=state):
+                self.assertEqual(c2pa_state_label(state), label)
+        self.assertEqual(c2pa_state_label("Frobbed"), "「Frobbed」")
+        self.assertEqual(c2pa_failure_codes_text(["b.x", "a.y"]), "실패 코드 a.y, b.x")
+        self.assertEqual(c2pa_failure_codes_text([]), "세부 코드 없음")

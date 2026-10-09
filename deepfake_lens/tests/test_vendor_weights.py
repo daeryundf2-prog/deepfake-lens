@@ -142,6 +142,38 @@ class VendorWeightsTest(unittest.TestCase):
         output = json.loads(buf.getvalue())
         self.assertEqual(output["total_profiles"], 2)
 
+    def test_cli_vendor_weights_default_table_is_korean_and_counts_match_rows(self) -> None:
+        """G3 (round 5): no "Models Directory"/"Missing: 0"/"[MISSING]"; a disabled or hub
+        profile is labelled as such, and the summary counts are the row labels' counts."""
+        from deepfake_lens.error_text import english_prose
+
+        (self.models_dir / "disabled_detector-runtime.json").write_text(
+            json.dumps({"name": "disabled_detector", "checkpoint": "gone.pth", "supported": False}), encoding="utf-8"
+        )
+        (self.models_dir / "hub_detector-runtime.json").write_text(
+            json.dumps({"name": "hub_detector", "hub_model": "org/model"}), encoding="utf-8"
+        )
+        for models_dir in (self.models_dir, None):
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                argv = ["vendor-weights"] + (["--models-dir", str(models_dir)] if models_dir else [])
+                self.assertEqual(main(argv), 0)
+            text = buf.getvalue()
+            for english in ("Models Directory", "Profiles:", "Available:", "Missing:", "MISSING", "[OK"):
+                self.assertNotIn(english, text)
+            for line in text.splitlines():
+                self.assertIsNone(english_prose(line), line)
+            rows = [line.strip() for line in text.splitlines() if line.startswith("  [")]
+            summary = text.splitlines()[1]
+            labels = [row[1:row.index("]")] for row in rows]
+            for label in set(labels):
+                self.assertIn(f"{label} {labels.count(label)}개", summary)
+            if models_dir is not None:
+                self.assertIn("  [없음] missing_detector", text)
+                self.assertIn("  [비활성 프로필(집계 제외)] disabled_detector", text)
+                self.assertIn("  [허브 모델(로컬 파일 없음)] hub_detector", text)
+                self.assertIn("없음 1개", summary)
+
     def test_cli_vendor_weights_bundle(self) -> None:
         bundle_out = self.root / "cli_bundle"
         buf = io.StringIO()

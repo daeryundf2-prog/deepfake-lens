@@ -239,6 +239,8 @@ _IDENTIFIER_TOKENS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b\w*\d\w*\b"),  # tokens with a digit (B0, v2, sha256, 1/125)
     re.compile(r"\b[A-Za-z]+(?:-[A-Za-z0-9]+)+\b"),  # hyphenated identifiers (roberta-base)
     re.compile(r"\b[0-9a-fA-F]{8,}\b"),  # hex digests / ids
+    # C2PA SDK validation codes (assertion.action.malformed, signingCredential.untrusted; G4)
+    re.compile(r"\b(?:assertion|signingCredential|claimSignature|claim|manifest|timeStamp|general|algorithm|ingredient)(?:\.[A-Za-z]\w*)+"),
     re.compile(r"\b(?:pin|sha256)\b"),
     re.compile(r"\b(?:" + "|".join(sorted(KNOWN_MODULE_NAMES)) + r")\b"),
 )

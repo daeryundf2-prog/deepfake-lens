@@ -106,6 +106,40 @@ class ModelWeightEntry:
         return asdict(self)
 
 
+# G3 (round 5): Korean labels for ModelWeightEntry.integrity_status — the
+# table, the Markdown report and the summary counts all use these, so a row
+# and the count it belongs to can never disagree (the old table printed
+# "[MISSING]" for disabled/hub profiles while "Missing: 0").
+WEIGHT_STATUS_LABELS = {
+    "verified": "검증됨(해시 일치)",
+    "unverified": "있음(선언 해시 없음 — 미검증)",
+    "mismatch": "해시 불일치",
+    "missing": "없음",
+    "unreadable": "읽기 실패",
+    "hub": "허브 모델(로컬 파일 없음)",
+    "unsupported": "비활성 프로필(집계 제외)",
+    "none": "가중치 불필요",
+    "profile-unreadable": "프로필 읽기 실패",
+}
+MODALITY_LABELS = {"image": "이미지", "audio": "음성", "text": "텍스트", "video": "영상", "unknown": "알 수 없음"}
+
+
+def weight_status_label(status: str) -> str:
+    """Korean label of an integrity status (``profile-unreadable:<Exc>`` keeps the class)."""
+    key, _, detail = status.partition(":")
+    label = WEIGHT_STATUS_LABELS.get(key, status)
+    return f"{label}({detail})" if detail and key in WEIGHT_STATUS_LABELS else label
+
+
+def weight_status_counts(entries: list["ModelWeightEntry"]) -> list[tuple[str, int]]:
+    """(label, count) per status in WEIGHT_STATUS_LABELS order — counted from the rows themselves."""
+    counts: dict[str, int] = {}
+    for entry in entries:
+        key = entry.integrity_status.split(":", 1)[0]
+        counts[key] = counts.get(key, 0) + 1
+    return [(WEIGHT_STATUS_LABELS[key], counts[key]) for key in WEIGHT_STATUS_LABELS if counts.get(key)]
+
+
 @dataclass(frozen=True)
 class VendorManifest:
     generated_at: str
@@ -119,14 +153,33 @@ class VendorManifest:
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
 
+    def to_table(self) -> str:
+        """Korean text table for ``vendor-weights`` (G3).
+
+        The status counts are taken from the rows, so a row's label and the
+        summary always agree.
+        """
+        counts = ", ".join(f"{label} {count}개" for label, count in weight_status_counts(self.entries)) or "프로필 없음"
+        lines = [
+            f"모델 폴더: {self.models_dir}",
+            f"런타임 프로필 {self.total_profiles}개 — {counts} · 로컬 가중치 용량 {self.total_bytes / (1024 * 1024):.1f} MB",
+        ]
+        for e in self.entries:
+            lines.append(
+                f"  [{weight_status_label(e.integrity_status)}] {e.name} "
+                f"({MODALITY_LABELS.get(e.modality, e.modality)}) {e.checkpoint_relpath or '-'}"
+            )
+        return "\n".join(lines)
+
     def to_markdown(self) -> str:
         lines = [
-            "# 포렌식 폐쇄망(Air-Gapped) AI 모델 가중치 검증 보고서",
+            "# 포렌식 폐쇄망 AI 모델 가중치 검증 보고서",
             "",
             f"**검증 일시**: {self.generated_at}",
             f"**모델 디렉터리**: `{self.models_dir}`",
             f"**총 런타임 프로파일**: {self.total_profiles}개",
             f"**탑재 완료 가중치**: {self.available_weights}개 (미탑재: {self.missing_weights}개)",
+            f"**상태별 프로필 수**: {', '.join(f'{label} {count}개' for label, count in weight_status_counts(self.entries)) or '없음'}",
             f"**총 가중치 용량**: {self.total_bytes / (1024 * 1024):.1f} MB",
             "",
             "| 모델명 | 모달리티 | 엔진 | 상태 | 용량 (MB) | SHA-256 무결성 해시 |",
@@ -134,10 +187,9 @@ class VendorManifest:
         ]
         for e in self.entries:
             size_mb = f"{e.size_bytes / (1024 * 1024):.2f}" if e.exists else "-"
-            hash_display = f"`{e.sha256[:16]}...`" if e.sha256 else "N/A"
-            status_badge = "✅ 정상 탑재" if e.integrity_status in ("verified", "present") else ("❌ 미탑재" if e.integrity_status == "missing" else "⚠️ 불일치")
+            hash_display = f"`{e.sha256}`" if e.sha256 else "없음"
             lines.append(
-                f"| **{e.name}** | {e.modality} | {e.engine} | {status_badge} | {size_mb} | {hash_display} |"
+                f"| **{e.name}** | {MODALITY_LABELS.get(e.modality, e.modality)} | {e.engine} | {weight_status_label(e.integrity_status)} | {size_mb} | {hash_display} |"
             )
 
         lines.extend([

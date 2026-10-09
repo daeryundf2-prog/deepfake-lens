@@ -424,8 +424,10 @@ def c2pa_evidence(validation: Mapping[str, object] | None) -> list[EvidenceItem]
     verified = validation.get("status") == "valid" and bool(validation.get("trusted")) and hash_ok
     signature = validation.get("signature")
     signer = str(signature.get("common_name", "알 수 없음")) if isinstance(signature, dict) else "알 수 없음"
-    state = str(validation.get("state", ""))
-    codes = ", ".join(sorted(failure)) or "세부 코드 없음"
+    from .c2pa import c2pa_failure_codes_text, c2pa_state_label
+
+    state = c2pa_state_label(validation.get("state"))  # G4: 무효/유효/신뢰됨, never the SDK's English word
+    codes = c2pa_failure_codes_text(sorted(failure))
     if verified and synthetic_types:
         return [EvidenceItem(
             "C2PA 서명: 생성형 AI 출처 선언",
@@ -447,12 +449,12 @@ def c2pa_evidence(validation: Mapping[str, object] | None) -> list[EvidenceItem]
     if synthetic_types:
         return [EvidenceItem(
             "C2PA 매니페스트의 생성형 AI 출처 선언(검증 미완료)",
-            f"매니페스트가 digitalSourceType={', '.join(synthetic_types)}를 선언하나 검증 상태 {state} ({codes}) — 서명 신뢰 또는 해시 검증이 완료되지 않았습니다.",
+            f"매니페스트가 digitalSourceType={', '.join(synthetic_types)}를 선언하나 검증 상태: {state} ({codes}) — 서명 신뢰 또는 해시 검증이 완료되지 않았습니다.",
             EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, "c2pa",
         )]
     return [EvidenceItem(
         "C2PA 매니페스트 존재(검증 미완료)",
-        f"서명자 {signer}, 검증 상태 {state} ({codes}). 신뢰 저장소에 없는 서명자이거나 무결성 검증이 끝나지 않아 결론 근거로 쓰지 않습니다.",
+        f"서명자 {signer}, 검증 상태: {state} ({codes}). 신뢰 저장소에 없는 서명자이거나 무결성 검증이 끝나지 않아 결론 근거로 쓰지 않습니다.",
         EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "c2pa",
     )]
 

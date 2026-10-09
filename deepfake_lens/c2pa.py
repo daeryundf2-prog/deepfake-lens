@@ -69,6 +69,32 @@ class MetadataForensicAnalysis:
         return asdict(self)
 
 
+
+# G4 (round 5): the SDK's validation state is shown in Korean. The SDK
+# reports "Valid"/"Trusted"/"Invalid" (and "WellFormed" in some releases);
+# an unknown state is printed verbatim in corner brackets (an SDK value,
+# not prose). Failure codes (assertion.action.malformed, …) are identifiers.
+C2PA_STATE_LABELS = {
+    "valid": "유효",
+    "trusted": "신뢰됨",
+    "invalid": "무효",
+    "wellformed": "형식 정상(서명 검증 미완료)",
+    "well-formed": "형식 정상(서명 검증 미완료)",
+}
+
+
+def c2pa_state_label(state: object) -> str:
+    raw = str(state or "").strip()
+    if not raw:
+        return "알 수 없음"
+    return C2PA_STATE_LABELS.get(raw.lower(), f"「{raw}」")
+
+
+def c2pa_failure_codes_text(codes: object) -> str:
+    """"실패 코드 a, b" for the SDK failure codes, or "세부 코드 없음"."""
+    listed = [str(code) for code in (codes or []) if str(code)] if isinstance(codes, (list, tuple, set)) else []
+    return f"실패 코드 {', '.join(sorted(listed))}" if listed else "세부 코드 없음"
+
 def c2pa_unreadable_label(reason: str) -> str:
     """ "C2PA 판독 불가(<reason>)" — the provenance diagnostic's wording when the SDK failed (R8)."""
     return f"C2PA 판독 불가({reason or '원인 불명'})"
@@ -134,11 +160,11 @@ def analyze_metadata_forensic(path: Path | str) -> MetadataForensicAnalysis:
         ))
         state = str(sdk_validation.get("state", ""))
         failures = list(sdk_validation.get("failure_codes") or [])
-        if state.lower() == "valid":
-            signer = str(signature.get("common_name", "unknown"))
+        if state.lower() in {"valid", "trusted"}:
+            signer = str(signature.get("common_name", "알 수 없음"))
             signals.append(ForensicEvidenceSignal(
                 "C2PA 매니페스트 검증됨",
-                f"공식 SDK 검증 상태 {state}. 서명자: {signer}.",
+                f"공식 SDK 검증 상태: {c2pa_state_label(state)}. 서명자: {signer}.",
                 20,
             ))
         elif mismatches := sorted(str(code) for code in failures if str(code).lower().endswith(".mismatch")):
@@ -152,7 +178,7 @@ def analyze_metadata_forensic(path: Path | str) -> MetadataForensicAnalysis:
         else:
             signals.append(ForensicEvidenceSignal(
                 "C2PA 매니페스트 검증 미완료",
-                f"SDK 검증 상태가 {state}입니다 ({', '.join(failures) or '세부 코드 없음'}). 신뢰 저장소에 없는 서명자일 수 있어 참고 수준입니다.",
+                f"SDK 검증 상태: {c2pa_state_label(state)} ({c2pa_failure_codes_text(failures)}). 신뢰 저장소에 없는 서명자일 수 있어 참고 수준입니다.",
                 10,
             ))
         limitations.append("C2PA 검증 결과는 공식 c2pa-python SDK 기반입니다.")

@@ -950,11 +950,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         elif args.format == "markdown":
             print(manifest.to_markdown())
         else:
-            print(f"Models Directory: {manifest.models_dir}")
-            print(f"Profiles: {manifest.total_profiles}, Available: {manifest.available_weights}, Missing: {manifest.missing_weights}, Total: {manifest.total_bytes / (1024 * 1024):.1f} MB")
-            for e in manifest.entries:
-                chk_mark = "OK" if e.exists else "MISSING"
-                print(f"  [{chk_mark:<7}] {e.name:<24} ({e.modality:<5}) {e.checkpoint_relpath}")
+            print(manifest.to_table())  # G3: Korean labels, counts from the rows
         return 0
 
     if args.max_files < 1:
