@@ -260,6 +260,42 @@ class ExifXmpFixtureTest(unittest.TestCase):
         self.assertNotIn("메타데이터 부재", [e.title for e in item.result.evidence])
         self.assertEqual(item.result.verdict_code, Verdict.UNDETERMINED)
 
+    def test_truncated_body_camera_exif_is_not_evaluated(self) -> None:
+        """R9: EXIF read intact but image data cut after SOS — the decode
+        (image_class) check fails, so no "카메라 EXIF 일관": a neutral/weak
+        "EXIF 존재(파일 손상으로 일관성 미평가)" note instead."""
+        from deepfake_lens.evidence_rules import EXIF_UNEVALUATED_DAMAGED_TITLE
+
+        full = self._jpeg("full.jpg", quality=95, exif=self._camera_exif())
+        self.assertIn("카메라 EXIF 일관", self._titles(full))  # control: intact file is consistent
+        data = full.read_bytes()
+        cut = self.root / "cut-body.jpg"
+        cut.write_bytes(data[: len(data) // 2])
+        item = analyze_file(cut)
+        assert item.result is not None
+        coverage = {c.check: c for c in item.result.coverage}
+        self.assertEqual(coverage["image_class"].status, CoverageStatus.FAILED)
+        titles = [e.title for e in item.result.evidence]
+        self.assertNotIn("카메라 EXIF 일관", titles)
+        self.assertFalse([e for e in item.result.evidence if e.direction == EvidenceDirection.AUTHENTIC], titles)
+        note = next(e for e in item.result.evidence if e.title == EXIF_UNEVALUATED_DAMAGED_TITLE)
+        self.assertEqual(note.title, "EXIF 존재(파일 손상으로 일관성 미평가)")
+        self.assertEqual((note.kind, note.direction, note.strength), (EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK))
+        self.assertIn("Canon EOS R5", note.detail)
+        self.assertIn(coverage["image_class"].reason, note.detail)
+        self.assertEqual(item.result.verdict_code, Verdict.UNDETERMINED)
+
+    def test_undecoded_image_camera_exif_is_not_evaluated(self) -> None:
+        """R9: when the decode check did not run (skipped), the EXIF rule is not applied either."""
+        from deepfake_lens.checks import CheckSkipped
+        from deepfake_lens.evidence_rules import EXIF_UNEVALUATED_UNDECODED_TITLE
+
+        path = self._jpeg("camera.jpg", quality=95, exif=self._camera_exif())
+        with mock.patch("deepfake_lens.core.classify_image", side_effect=CheckSkipped("의존성 부재: numpy")):
+            titles = self._titles(path)
+        self.assertNotIn("카메라 EXIF 일관", titles)
+        self.assertIn(EXIF_UNEVALUATED_UNDECODED_TITLE, titles)
+
     def test_without_pillow_exif_is_a_note(self) -> None:
         path = self._jpeg("camera.jpg", exif=self._camera_exif())
         real_import = builtins.__import__

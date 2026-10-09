@@ -206,14 +206,28 @@ def _software_matches_camera(software: str, make: str, model: str) -> bool:
     return bool(FIRMWARE_SOFTWARE_PATTERN.match(software.strip()))
 
 
+# R9: titles of the camera-EXIF note when the image did not decode, and
+# the prefix of a decode_problem that comes from a failed decode check.
+EXIF_UNEVALUATED_DAMAGED_TITLE = "EXIF 존재(파일 손상으로 일관성 미평가)"
+EXIF_UNEVALUATED_UNDECODED_TITLE = "EXIF 존재(디코드 검사 미실행으로 일관성 미평가)"
+EXIF_DECODE_FAILED_PREFIX = "이미지 디코드 실패"
+
+
 def camera_exif_evidence(
     metadata: Mapping[str, str],
     *,
     image_format: str | None,
     jpeg_quality: float | None,
     now: datetime | None = None,
+    decode_problem: str | None = None,
 ) -> list[EvidenceItem]:
     """"카메라 EXIF 일관" (WP-A table: deterministic/authentic/moderate, D7).
+
+    R9: the rule applies only when the image itself decoded (the
+    ``image_class`` check ran). ``decode_problem`` — set when that check
+    failed (truncated/corrupt file) or did not run — turns any camera EXIF
+    into a neutral/weak "EXIF 존재(파일 손상으로 일관성 미평가)" note: EXIF
+    read from a damaged file says nothing about the pixels it came with.
 
     All of: Make and Model present; DateTimeOriginal parseable (not before
     EXIF 1.0, not in the future); Software absent or the camera's own
@@ -230,6 +244,14 @@ def camera_exif_evidence(
     model = metadata.get("exif.Model", "").strip()
     if not make and not model:
         return []
+    if decode_problem is not None:
+        damaged = decode_problem.startswith(EXIF_DECODE_FAILED_PREFIX)
+        return [EvidenceItem(
+            EXIF_UNEVALUATED_DAMAGED_TITLE if damaged else EXIF_UNEVALUATED_UNDECODED_TITLE,
+            f"기종 {make} {model}".strip()
+            + f". {decode_problem} — 이미지 본체를 확인하지 못해 EXIF 일관성 조건을 평가하지 않았습니다. 원본성 근거로 쓰지 않습니다.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "metadata",
+        )]
     unmet: list[str] = []
     if not make or not model:
         unmet.append("기종(Make/Model) 일부 누락")
@@ -292,8 +314,12 @@ def image_metadata_evidence(
     c2pa_present: bool = False,
     image_format: str | None = None,
     jpeg_quality: float | None = None,
+    decode_problem: str | None = None,
 ) -> list[EvidenceItem]:
     """Deterministic items from parsed image metadata and header.
+
+    ``decode_problem`` (R9): the image did not decode — the camera-EXIF
+    rule is not evaluated (see camera_exif_evidence).
 
     "메타데이터 부재" is only stated when the read completed
     (``metadata_read_error`` is None), no C2PA manifest is present and no
@@ -321,7 +347,7 @@ def image_metadata_evidence(
             EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, "metadata",
         ))
     items.extend(xmp_evidence(metadata))
-    items.extend(camera_exif_evidence(metadata, image_format=image_format, jpeg_quality=jpeg_quality))
+    items.extend(camera_exif_evidence(metadata, image_format=image_format, jpeg_quality=jpeg_quality, decode_problem=decode_problem))
     if not metadata and metadata_read_error is None and not c2pa_present:
         items.append(EvidenceItem(
             "메타데이터 부재",

@@ -1586,6 +1586,22 @@ def _default_model_coverage(model_analysis: ExternalModelAnalysis | None) -> lis
     return model_coverage(model_analysis)
 
 
+def _decode_problem(coverage: list[CoverageEntry] | None) -> str | None:
+    """Why the image body is unverified, from the ``image_class`` (decode) check (R9).
+
+    None when the check ran (or no coverage was supplied — direct callers
+    pass already-decoded inputs).
+    """
+    from .evidence_rules import EXIF_DECODE_FAILED_PREFIX
+
+    entry = next((e for e in coverage or [] if e.check == "image_class"), None)
+    if entry is None or entry.status == CoverageStatus.RAN:
+        return None
+    if entry.status == CoverageStatus.FAILED:
+        return f"{EXIF_DECODE_FAILED_PREFIX}({entry.reason})"
+    return f"이미지 디코드 검사 미실행({entry.reason})"
+
+
 def analyze_image_metadata(
     metadata: dict[str, str],
     *,
@@ -1621,6 +1637,7 @@ def analyze_image_metadata(
             c2pa_present=c2pa_present or c2pa_unknown,
             image_format=image_format,
             jpeg_quality=jpeg_quality,
+            decode_problem=_decode_problem(coverage),
         ),
         *c2pa_evidence(c2pa_validation),
         *image_class_evidence(image_class),

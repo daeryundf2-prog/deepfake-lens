@@ -155,6 +155,7 @@ Phase-0 classification of existing signals:
 | C2PA manifest valid + trusted signer + `digitalCapture`, data hash match | deterministic | authentic | strong |
 | Camera EXIF consistent (`카메라 EXIF 일관`): Make + Model, parseable DateTimeOriginal (≥ 1995, not in the future), Software absent or the camera's own (vendor/model/firmware, never an editor or generator), GPS in range and dated within a day of capture, no generator name in XMP, JPEG quality estimate ≥ 90 (recompression proxy until phase 1) | deterministic | authentic | moderate |
 | Camera EXIF present but a condition above fails (`카메라 EXIF 있음(일관성 조건 미충족)`, detail names the failed conditions) | deterministic | neutral | weak |
+| Camera EXIF on an image that did not decode — the `image_class` (decode) check `failed` (`EXIF 존재(파일 손상으로 일관성 미평가)`) or did not run (`EXIF 존재(디코드 검사 미실행으로 일관성 미평가)`); the consistency rule above applies only when that check `ran` (R9) | deterministic | neutral | weak |
 | C2PA manifest present but untrusted / not validated | deterministic | neutral (synthetic/moderate if it declares AI) | weak |
 | Square generator resolution | deterministic | neutral | weak |
 | Missing metadata (`메타데이터 부재`) — only when the metadata read completed, no C2PA manifest is present (or its read failed) and no field was found; a truncated/empty/unrecognized file or an EXIF read error makes the `metadata` check `failed` instead | deterministic | neutral | weak |
