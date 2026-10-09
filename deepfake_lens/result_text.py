@@ -286,38 +286,58 @@ def display_name(text: object) -> str:
 # evidence statement. Every Markdown-active character below is written with
 # a backslash escape (CommonMark: any ASCII punctuation may be escaped), so
 # no link, image, autolink, code span, emphasis or heading can form from
-# shown text; a character already escaped (an odd run of backslashes before
-# it, as display_name writes "\\|") is left as is.
+# shown text.
 MARKDOWN_SPECIALS = frozenset("|[]()!<>`*_#~")
+# R12-5 (round 12): the rendered text must be exactly the shown text, so two
+# names never render alike. A backslash was kept when it already "escaped"
+# the next character, so display_name's two-backslash "n" (a literal
+# backslash + n) and its one-backslash "n" (a real LF) both rendered as one
+# backslash + n; an "&" started a character reference, so "&lt;" rendered
+# "<" and "&amp;" "&". Every backslash is now doubled and every "&" written
+# "&amp;" as well.
+MARKDOWN_LITERALS = {"\\": "\\\\", "&": "&amp;"}
 
 
 def _escape_markdown_specials(text: str) -> str:
-    """Every Markdown-active character not already backslash-escaped, escaped (R10-1, R11-7)."""
+    """``text`` as Markdown source that renders back to exactly ``text`` (R10-1, R11-7, R12-5).
+
+    Every backslash becomes "\\\\", every "&" "&amp;", every other
+    Markdown-active character (:data:`MARKDOWN_SPECIALS`) is backslash-escaped
+    — including the "|" of display_name's "\\|", which renders as "\\|" —
+    and whitespace at either end is a numeric character reference.
+    """
+    # Whitespace at either end is trimmed by a table cell (and by a paragraph;
+    # two trailing spaces make a hard line break), so " a.png" rendered like
+    # "a.png": it is written as a numeric character reference instead.
+    first, last = len(text) - len(text.lstrip()), len(text.rstrip())
     out: list[str] = []
-    backslashes = 0
-    for char in text:
-        if char in MARKDOWN_SPECIALS and backslashes % 2 == 0:
+    for index, char in enumerate(text):
+        if (index < first or index >= last) and char.isspace():
+            out.append(f"&#x{ord(char):x};")
+        elif char in MARKDOWN_LITERALS:
+            out.append(MARKDOWN_LITERALS[char])
+        elif char in MARKDOWN_SPECIALS:
             out.append("\\" + char)
-            backslashes = 0
-            continue
-        out.append(char)
-        backslashes = backslashes + 1 if char == "\\" else 0
+        else:
+            out.append(char)
     return "".join(out)
 
 
 def markdown_text(text: object) -> str:
-    """One line of Markdown prose: controls escaped, Markdown-active characters escaped (R11-7)."""
+    """One line of Markdown prose: controls escaped, every active character escaped (R11-7, R12-5)."""
     return _escape_markdown_specials(escape_controls(text))
 
 
 def markdown_cell(text: object) -> str:
-    """One Markdown table cell (R10-1, R11-7): the intended line breaks as "<br>",
-    any other control as an escape, every Markdown-active character
-    (:data:`MARKDOWN_SPECIALS`, "|" included) backslash-escaped.
+    """One Markdown table cell (R10-1, R11-7, R12-5): the intended line breaks
+    as "<br>", any other control as an escape, every Markdown-active
+    character (:data:`MARKDOWN_SPECIALS`, "|" included) backslash-escaped,
+    every backslash "\\\\" and every "&" "&amp;".
 
-    Safe on text already passed through :func:`display_name` (its "\\|" is
-    kept as is) and on fixed wording; a cell can never end its row, add a
-    column, or hold a link, image or other inline Markdown.
+    On text passed through :func:`display_name` the rendered cell is exactly
+    the shown name (its "\\|" renders "\\|"), so distinct names render
+    distinctly; a cell can never end its row, add a column, or hold a link,
+    image, character reference or other inline Markdown.
     """
     lines = str(text).replace("\r\n", "\n").split("\n")
     return "<br>".join(markdown_text(line) for line in lines)

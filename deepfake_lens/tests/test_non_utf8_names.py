@@ -36,7 +36,7 @@ from unittest.mock import patch
 
 from deepfake_lens import cli, webapp_api
 from deepfake_lens.json_text import escape_surrogates, json_bytes, json_dumps
-from deepfake_lens.result_text import display_name
+from deepfake_lens.result_text import display_name, markdown_cell
 from deepfake_lens.result_types import VERDICT_LABELS, Verdict
 
 HAVE_FASTAPI = importlib.util.find_spec("fastapi") is not None and importlib.util.find_spec("httpx") is not None
@@ -194,7 +194,9 @@ class NonUtf8NameCliTest(_EnvMixin):
         self.assertEqual(code, 0, stderr)
         self.assertIn(SHOWN, stdout)
         markdown = md_out.read_text(encoding="utf-8")
-        self.assertIn(SHOWN, markdown)
+        # R12-5 (round 12): the Markdown source doubles every backslash so the
+        # rendered cell reads exactly SHOWN — the source holds markdown_cell(SHOWN).
+        self.assertIn(markdown_cell(SHOWN), markdown)
         rows = [line for line in markdown.splitlines() if line.startswith("| **")]
         self.assertEqual(len(rows), 2, rows)
         for row in rows:

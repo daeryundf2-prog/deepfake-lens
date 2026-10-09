@@ -196,7 +196,14 @@ always `0` invited old-contract readings. They remain readable as
   fields, unrecorded files, provenance) backslash-escape each
   Markdown-active character `|` `[` `]` `(` `)` `!` `<` `>` `` ` `` `*` `_`
   `#` `~`, so a name's `![t](https://…)` or `[click](javascript:…)` is text,
-  never an image or a link. R11-10: the GUI shows every result string
+  never an image or a link. R12-5 (round 12): every backslash is also
+  doubled, every `&` written `&amp;` and whitespace at either end of a
+  value written as a numeric character reference, so the rendered text is
+  exactly the shown `display_name` text and two names never render alike
+  (a real LF and a literal `\n`, `&amp;` and `&`, `&lt;` and `<`, a ZWSP
+  and a literal `\u200b`, ` a.png` and `a.png` did) — checked with
+  markdown-it (exact text) and python-markdown (injective) renderings.
+  R11-10: the GUI shows every result string
   (evidence titles and details, coverage reasons, verdict text,
   limitations, signals, model and source notes, error messages) through
   `displayName`, and the HTML report's evidence lines, verdict text and

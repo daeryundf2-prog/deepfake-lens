@@ -51,6 +51,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `git not available` | git 실행 파일 | test_qa_sys.py |
 | `jsonschema not installed (dev extra) — _check_object covers the stdlib job` | `dev` extra(jsonschema) | test_json_contract.py |
 | `librosa not installed` | `audio`/`full` extra(librosa) | test_audio.py, test_v6_probes.py, test_video_analysis.py |
+| `markdown-it-py not installed (QA side venv)` | markdown-it-py(QA 사이드 venv: `pip install markdown-it-py`) | test_display_names.py |
 | `mediapipe installed` | mediapipe가 없는 환경에서만 실행(대체 경로 검사) | test_face.py |
 | `mediapipe installed — fallback path not exercised` | mediapipe가 없는 환경에서만 실행(대체 경로 검사) | test_face.py |
 | `mediapipe not installed` | `face_mediapipe` 또는 `face_tasks` extra(mediapipe) | test_face.py |
@@ -82,6 +83,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `pymupdf required for PDF generation` | pymupdf(QA 사이드 venv) | test_display_names.py, test_evidence_statement.py, test_non_utf8_names.py |
 | `pymupdf required for PDF text` | pymupdf(QA 사이드 venv) | test_office_config.py, test_servers.py |
 | `pymupdf — the venv_api / extras run covers this` | pymupdf(QA 사이드 venv) | test_pdf_layout.py |
+| `python-markdown not installed (QA side venv)` | python-markdown(QA 사이드 venv: `pip install markdown`) | test_display_names.py |
 | `root ignores folder modes; POSIX modes` | root가 아닌 사용자로 실행하는 POSIX | test_cli_inputs.py |
 | `sbi/numpy not available` | `dev` 또는 `pixel` extra(numpy) | test_phase2_detection.py |
 | `scikit-learn 미설치 — 실사진 샘플 없음` | `ml`/`full` extra(scikit-learn) | test_qa_adv.py |

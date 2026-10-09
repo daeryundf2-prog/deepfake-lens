@@ -123,7 +123,9 @@ class DisplayNameUnitTest(unittest.TestCase):
 
     def test_markdown_cell_keeps_escaped_pipes_and_breaks_lines(self) -> None:
         self.assertEqual(markdown_cell("a\nb | c"), "a<br>b \\| c")
-        self.assertEqual(markdown_cell(display_name("p | q")), "p \\| q")
+        # R12-5 (round 12): display_name's backslash-pipe was kept as is, so it
+        # rendered as a bare "|" (not as shown); its backslash is escaped too now.
+        self.assertEqual(markdown_cell(display_name("p | q")), "p \\\\\\| q")
         for raw in ("b\\|s", "b\\\\|s", "a\n| **갑 제9호증** | 위조 |"):
             cell = markdown_cell(display_name(raw))
             self.assertEqual(len(_markdown_cells(f"| {cell} | x |")), 2, raw)
@@ -219,6 +221,93 @@ class DisplayNameInjectiveTest(unittest.TestCase):
                 other = seen.setdefault(display_name(name), name)
                 self.assertEqual(other, name)
         self.assertEqual(len(seen), sum(len(alphabet) ** n for n in range(5)))
+
+
+HAVE_MARKDOWN_IT = importlib.util.find_spec("markdown_it") is not None
+HAVE_PYTHON_MARKDOWN = importlib.util.find_spec("markdown") is not None
+# R12-5: names that rendered alike before (a real LF vs a literal "\\n",
+# "&amp;" vs "&", "&lt;" vs "<", a ZWSP vs a literal "\\u200b") and friends.
+RENDER_PAIRS = [
+    ("a\nb", "a\\nb"), ("&amp;", "&"), ("&lt;", "<"), ("\u200b", "\\u200b"), ("&#124;", "|"),
+    ("p | q", "p \\| q"), ("x\\\\y", "x\\y"), ("&copy;", "\u00a9"), ("\\&", "&"), ("a\\", "a"),
+]
+RENDER_ALPHABET = (*PROPERTY_ALPHABET, "&", ";", "#", "l", "t", "g", "m", "p", "o", "[", "]", "(", ")", "!", "<", ">", "`", "*", "_", "~")
+
+
+def _cell_html_markdown_it(cells: list[str]) -> list[str]:
+    import re
+
+    from markdown_it import MarkdownIt
+
+    md = MarkdownIt("commonmark").enable("table")
+    source = "| h |\n| --- |\n" + "".join(f"| {cell} |\n" for cell in cells)
+    html = md.render(source)
+    return re.findall(r"<td>(.*?)</td>", html, re.S)
+
+
+def _cell_html_python_markdown(cells: list[str]) -> list[str]:
+    import re
+
+    import markdown
+
+    out = []
+    for cell in cells:
+        html = markdown.markdown(f"| h |\n| --- |\n| {cell} |\n", extensions=["tables"])
+        found = re.findall(r"<td>(.*?)</td>", html, re.S)
+        out.append(found[0] if len(found) == 1 else f"<!-- {len(found)} cells -->{html}")
+    return out
+
+
+class MarkdownRenderInjectiveTest(unittest.TestCase):
+    """R12-5 (round 12): the rendered evidence-statement cell of a name is injective.
+
+    Before R12-5 a real LF and a literal backslash + "n", "&amp;" and "&",
+    "&lt;" and "<", a ZWSP and a literal "\\u200b" rendered the same text: a
+    backslash display_name had written was read as an escape and an "&" as a
+    character reference. markdown_cell now escapes both.
+    """
+
+    def _names(self) -> list[str]:
+        import itertools
+        import random
+
+        rng = random.Random(1205)
+        names = [name for pair in RENDER_PAIRS for name in pair]
+        names += ["".join(rng.choice(RENDER_ALPHABET) for _ in range(rng.randint(0, 9))) for _ in range(6000)]
+        names += ["".join(chars) for length in range(4) for chars in itertools.product(("\\", "&", "|", "n", ";", "\n", "<"), repeat=length)]
+        return list(dict.fromkeys(names))
+
+    def _check(self, render: object, exact: bool) -> None:
+        import html as html_module
+
+        names = self._names()
+        cells = [markdown_cell(display_name(name)) for name in names]
+        rendered = render(cells)  # type: ignore[operator]
+        self.assertEqual(len(rendered), len(names))
+        seen: dict[str, str] = {}
+        for name, cell_html in zip(names, rendered):
+            other = seen.setdefault(cell_html, name)
+            self.assertEqual(other, name, f"{other!r} and {name!r} both render {cell_html!r}")
+            if exact:
+                # The rendered text is exactly what display_name shows.
+                self.assertNotIn("<", cell_html.replace("&lt;", ""), (name, cell_html))
+                self.assertEqual(html_module.unescape(cell_html), display_name(name), repr(name))
+        for left, right in RENDER_PAIRS:
+            self.assertNotEqual(rendered[names.index(left)], rendered[names.index(right)], (left, right))
+
+    @unittest.skipUnless(HAVE_MARKDOWN_IT, "markdown-it-py not installed (QA side venv)")
+    def test_markdown_it_render_is_injective_and_exact(self) -> None:
+        self._check(_cell_html_markdown_it, exact=True)
+
+    @unittest.skipUnless(HAVE_PYTHON_MARKDOWN, "python-markdown not installed (QA side venv)")
+    def test_python_markdown_render_is_injective(self) -> None:
+        self._check(_cell_html_python_markdown, exact=False)
+
+    def test_reported_pairs_differ_in_source(self) -> None:
+        for left, right in RENDER_PAIRS:
+            self.assertNotEqual(markdown_cell(display_name(left)), markdown_cell(display_name(right)))
+        self.assertEqual(markdown_cell("&lt;"), "&amp;lt;")
+        self.assertEqual(markdown_cell("a\\nb"), "a\\\\nb")
 
 
 @unittest.skipUnless(shutil.which("node"), "node required to run gui.js helpers")
@@ -407,7 +496,9 @@ class MarkdownSyntaxInNamesTest(unittest.TestCase):
                 self.assertEqual(self._unescaped(markdown_cell(display_name(raw))), [])
                 self.assertEqual(self._unescaped(markdown_cell(raw).replace("<br>", "")), [])
         self.assertEqual(markdown_cell("![t](u)"), "\\!\\[t\\]\\(u\\)")
-        self.assertEqual(markdown_cell(display_name("p | q")), "p \\| q")  # display_name's "\\|" kept
+        # R12-5: display_name's backslash-pipe is written as an escaped backslash
+        # plus an escaped pipe — it renders as the shown backslash-pipe.
+        self.assertEqual(markdown_cell(display_name("p | q")), "p \\\\\\| q")
 
     def test_evidence_statement_markdown_holds_no_live_markdown(self) -> None:
         import zipfile
