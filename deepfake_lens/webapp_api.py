@@ -39,6 +39,7 @@ from .analysis_api import (
     WEB_MAX_FILE_BYTES_CEILING,
     WEB_MAX_SCAN_FILES,
     AnalysisOptions,
+    InvalidOption,
     analyze_path,
     analyze_rows,
     load_thresholds,
@@ -975,6 +976,16 @@ REPORT_ITEMS_REQUIRED = "보고서에 넣을 검사 결과 항목(items 배열)�
 REPORT_FIELD_NOT_OBJECT = "{field} 값은 JSON 객체여야 합니다"
 REPORT_ITEM_MALFORMED = "검사 결과 항목 {index}번을 해석할 수 없습니다: {reason}"
 REPORT_JSON_INVALID = "JSON 본문을 해석할 수 없습니다"
+# X2 (round 7): the report never signs what the client says about a file.
+# Every posted row is re-analyzed on the server (analysis_api, the read
+# roots, the server's models dir and thresholds); its verdict, evidence,
+# coverage and SHA-256 are the server's. A row that cannot be re-analyzed
+# is left out of the signed body and rendered under this marker.
+UNSIGNED_CLIENT_ROW_MARKER = "서명 제외(클라이언트 제공 결과)"
+REPORT_ROW_NOT_FOUND = "읽기 루트 안에서 파일을 찾을 수 없어 서버가 재분석하지 못했습니다"
+REPORT_ROW_LINK_ON_PATH = "경로 중간의 폴더가 심볼릭 링크라 따라가지 않았습니다 — 서버가 재분석하지 못했습니다"
+REPORT_ROW_NOT_DERIVED = "서버 재분석 결과에 이 항목이 없습니다(압축 파일 구성이 다름)"
+REPORT_ROW_FAILED = "서버 재분석 실패: {reason}"
 
 
 def report_format(body: bytes, query_format: str | None) -> str | dict[str, object]:
@@ -1068,6 +1079,33 @@ class _ReportHasher:
                 return cand
         return None
 
+    def locate(self, path_text: str) -> Path | str:
+        """The file a posted top-level row names, for server re-analysis (X2).
+
+        Returns the path inside a read root of a regular file or of a
+        symbolic link itself (never followed — its re-analysis is the
+        scan's skipped link row), or the Korean reason it cannot be
+        re-analyzed. A folder between the root and the file that is a link
+        refuses the row (N2).
+        """
+        from .evidence_statement import _no_symlink_on_path, _SymlinkRefused
+
+        p = Path(os.path.normpath(Path(path_text).expanduser()))
+        pairs = [(p, root) for root in self.roots] if p.is_absolute() else [(root / p, root) for root in self.roots]
+        for cand, root in pairs:
+            if not _is_within(cand, root) or cand == root:
+                continue
+            try:
+                _no_symlink_on_path(cand.parent, root)
+                mode = os.lstat(cand).st_mode
+            except _SymlinkRefused:
+                return REPORT_ROW_LINK_ON_PATH
+            except OSError:
+                continue
+            if stat.S_ISREG(mode) or stat.S_ISLNK(mode):
+                return cand
+        return REPORT_ROW_NOT_FOUND
+
     def sha256(self, item: Any) -> str | None:
         from .evidence_statement import _compute_sha256, _SymlinkRefused
         from .result_text import ARCHIVE_MEMBER_SEPARATOR, is_symlink_row
@@ -1121,19 +1159,84 @@ class _ReportHasher:
         self._temp_dirs.clear()
 
 
+def _rederive_report_items(
+    posted: list[Any], hasher: "_ReportHasher", options: Any, thresholds: Any,
+) -> tuple[list[Any], list[tuple[Any, str]]]:
+    """Re-analyze every posted row on the server (X2).
+
+    Rows are grouped by their top-level file ("a.zip::x" -> "a.zip"); each
+    file is located inside the read roots (:meth:`_ReportHasher.locate`)
+    and analyzed once with ``analysis_api.scan_file_run`` — the scan's own
+    body, so an archive yields the same member and container rows and a
+    symbolic link the same skipped row. Each posted row is replaced by the
+    server row of the same path (path naming kept: the posted folder-relative
+    path). Returns ``(server rows in posted order, [(posted row, reason)]
+    for rows that could not be re-derived)``.
+    """
+    from .analysis_api import scan_file_run
+    from .result_text import ARCHIVE_MEMBER_SEPARATOR
+
+    derived_by_top: dict[str, dict[str, Any] | str] = {}
+    for item in posted:
+        top = item.path.split(ARCHIVE_MEMBER_SEPARATOR, 1)[0]
+        if top in derived_by_top:
+            continue
+        located = hasher.locate(top)
+        if isinstance(located, str):
+            derived_by_top[top] = located
+            continue
+        try:
+            run = scan_file_run(located, options, thresholds=thresholds)
+        except Exception as exc:  # noqa: BLE001 - one unreadable row must not fail the report
+            logger.info("report: %s could not be re-analyzed", top, exc_info=True)
+            derived_by_top[top] = REPORT_ROW_FAILED.format(reason=failure_reason(exc))
+            continue
+        name = located.name
+        rows: dict[str, Any] = {}
+        for row in run.items:
+            suffix = row.path[len(name):] if row.path.startswith(name) else None
+            if suffix is None or (suffix and not suffix.startswith(ARCHIVE_MEMBER_SEPARATOR)):
+                continue
+            rows[top + suffix] = replace(row, path=top + suffix)
+        derived_by_top[top] = rows
+    derived: list[Any] = []
+    excluded: list[tuple[Any, str]] = []
+    seen: set[str] = set()
+    for item in posted:
+        found = derived_by_top[item.path.split(ARCHIVE_MEMBER_SEPARATOR, 1)[0]]
+        if isinstance(found, str):
+            excluded.append((item, found))
+        elif item.path not in found:
+            excluded.append((item, REPORT_ROW_NOT_DERIVED))
+        elif item.path not in seen:
+            seen.add(item.path)
+            derived.append(found[item.path])
+    return derived, excluded
+
+
+def _excluded_rows_json(excluded: list[tuple[Any, str]]) -> list[dict[str, object]]:
+    """The signed body's record of rows it does not vouch for (X2): path, marker, reason — no client verdict."""
+    return [{"path": item.path, "marker": UNSIGNED_CLIENT_ROW_MARKER, "reason": reason} for item, reason in excluded]
+
+
 def _report_payload(body: bytes, format_override: str | None = None, *, default_folder: Path | None = None) -> bytes | dict[str, object]:
     """Render the HTML or court-admissible forensic PDF report for web-scan results.
 
     ``format=json`` returns the signed report body itself. Raises
     ReadRootDenied (-> 403) when a posted heatmap_path is outside the roots.
 
-    Accepts the items array the GUI holds (scan/upload payload rows), checks
-    every row against the scan-result item contract (N11), rebuilds
-    ScanItem objects through the same cache deserializer used on disk, and
-    returns the same report the CLI's --html-out produces — so web and CLI
-    artifacts are identical. Posted ``thresholds``/``coverage`` provenance and
-    case metadata are preserved into the artifact; a report that drops them
-    would let an uncalibrated scan masquerade as a measured one.
+    Accepts the items array the GUI holds (scan/upload payload rows) and
+    checks every row against the scan-result item contract (N11). X2: the
+    posted results are never signed — every row's file is re-analyzed on
+    the server inside the read roots (:func:`_rederive_report_items`) with
+    the server's options, models dir and threshold profile, and the report
+    (verdict, evidence, coverage, SHA-256, ``thresholds`` and ``coverage``
+    provenance) is built from those server rows only. A row that cannot be
+    re-analyzed (file not under a root, a linked folder on its path, an
+    archive member the server's extraction does not produce) is left out of
+    the signed body — the body lists its path under ``excluded_items`` — and
+    the HTML/PDF renderings show it in a separate "서명 제외(클라이언트
+    제공 결과)" section. Case metadata is taken from the request.
     """
     from .report_items import ItemContractError, check_report_item
 
@@ -1200,19 +1303,38 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
         if heatmap_path and not _heatmap_allowed(str(heatmap_path)):
             raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE)
 
-    # Client-posted sha256 values are never trusted: each row's hash is
-    # recomputed from the evidence under the roots (None when it cannot be
-    # read), once, and reused by every renderer and by the signature.
-    # N2: a symbolic-link row, or a path through a link, keeps None ("해시
-    # 불가(심볼릭 링크…)") — the CLI never follows the link either. N10: an
-    # archive member ("a.zip::x") is hashed from the container re-extracted
-    # under the roots, exactly as the scan extracted it.
+    # X2: nothing the client says about a file is signed. Each row is
+    # re-analyzed on the server (scan_file_run inside the roots — an archive
+    # re-extracted exactly as the scan extracted it, N10; a symbolic link
+    # never followed, N2) and replaced by the server's row: verdict,
+    # evidence, coverage and SHA-256. Client sha256 values were already
+    # never trusted (G11). The threshold/weights provenance is the server's
+    # too — posted ``thresholds``/``coverage`` are ignored.
     from .reports import signed_report_body
+    from .vendor_weights import weights_coverage
 
+    # The request may name the analysis options the scan used (``options``:
+    # the /api/scan query keys — pixel, heatmaps, deep_signals,
+    # no_default_engine, model_path/fusion_profile as bare names inside the
+    # models dir); they are validated like a scan request and only choose
+    # what the server runs.
+    raw_options = data.get("options")
+    if raw_options is not None and not isinstance(raw_options, dict):
+        return {"error": REPORT_FIELD_NOT_OBJECT.format(field="options")}
     try:
-        items = [replace(item, sha256=hasher.sha256(item)) for item in items]
+        options = _web_options(
+            {str(key): [str(value).lower() if isinstance(value, bool) else str(value)] for key, value in (raw_options or {}).items()},
+        )
+    except InvalidOption as exc:
+        return {"error": str(exc)}
+    server_thresholds = load_thresholds(options)
+    try:
+        items, excluded = _rederive_report_items(items, hasher, options, server_thresholds)
     finally:
         hasher.close()
+    thresholds = server_thresholds
+    coverage = dict(weights_coverage(options.resolved_models_dir()))
+    excluded_rows = _excluded_rows_json(excluded)
 
     # Same counting rule as the CLI (core.summarize) so web and CLI report
     # headers agree on every verdict count.
@@ -1225,6 +1347,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     signed = signed_report_body(
         summary, items, thresholds=thresholds, coverage=coverage,
         report_format=req_format, model_pins=profile_pins(_models_dir()),
+        excluded_items=excluded_rows,
     )
     if req_format == "json":
         return signed
@@ -1248,9 +1371,13 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
                     center=str(data.get("center") or "디지털포렌식 감정센터"),
                     thresholds=thresholds,
                     coverage=coverage,
+                    excluded_items=excluded_rows,
                 )
                 # G30: signed like the other web reports (server key + pins).
-                write_evidence_statement_pdf(tmp_path, stmt, signed=signed_statement_body(stmt, model_pins=profile_pins(_models_dir())))
+                write_evidence_statement_pdf(
+                    tmp_path, stmt, signed=signed_statement_body(stmt, model_pins=profile_pins(_models_dir())),
+                    unsigned_rows=excluded,
+                )
             except RuntimeError as exc:
                 return {"error": f"{EVIDENCE_PDF_FAILED_PREFIX}{exc}", "hint": "`pip install 'deepfake-lens[forensic]'` 후 재시도하거나 Markdown 출력을 사용하세요."}
         elif req_format == "pdf":
@@ -1268,12 +1395,13 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
                     signed_report=signed,
                     law_firm=str(data.get("law_firm") or "") or None,  # N17
                     contact=str(data.get("contact") or "") or None,
+                    unsigned_rows=excluded,
                 )
             except PdfDependencyMissing:
                 # B8: no English Latin-1 fallback PDF — a Korean error (HTTP 501).
                 return dict(PDF_REPORT_UNAVAILABLE_BODY)
         else:
-            write_html_report(tmp_path, summary, items, thresholds=thresholds, allow_path=_heatmap_allowed, signed_report=signed)
+            write_html_report(tmp_path, summary, items, thresholds=thresholds, allow_path=_heatmap_allowed, signed_report=signed, unsigned_rows=excluded)
         return tmp_path.read_bytes()
     finally:
         tmp_path.unlink(missing_ok=True)

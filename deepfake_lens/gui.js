@@ -1,5 +1,8 @@
         let results = [];
         let lastProvenance = { coverage: null, thresholds: null, summary: null };
+        // X2: the options of the last folder scan — /api/report re-analyzes
+        // every row on the server with them (the report signs only server results).
+        let lastScanOptions = {};
         let selectedFiles = [];
         let lastScanRoot = '';
         const RENDER_WINDOW = 200;
@@ -460,6 +463,12 @@
                 async: '1',
             });
             if (!$('opt-model').checked) params.set('no_default_engine', 'true');
+            lastScanOptions = {
+                pixel: pixelMode,
+                heatmaps: String($('opt-heatmaps').checked),
+                deep_signals: String($('opt-deep').checked),
+                no_default_engine: String(!$('opt-model').checked),
+            };
             setBusy(true, '폴더 분석 중… 모델 로딩 시 수 분 걸릴 수 있습니다');
             try {
                 const job = await apiJson('/api/scan?' + params.toString());
@@ -566,6 +575,7 @@
                 summary: lastProvenance.summary || {},
                 coverage: lastProvenance.coverage || {},
                 thresholds: lastProvenance.thresholds || {},
+                options: lastScanOptions,
             };
             const map = { 'case-no': 'case_no', 'case-name': 'case_name',
                           'case-plaintiff': 'plaintiff', 'case-defendant': 'defendant',

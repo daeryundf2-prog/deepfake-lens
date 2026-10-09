@@ -10,6 +10,19 @@
     "summary": { "$ref": "#/$defs/summary" },
     "items": { "type": "array", "items": { "$ref": "#/$defs/item" } },
     "unrecorded_files": { "$ref": "#/$defs/unrecorded_files" },
+    "excluded_items": {
+      "type": "array",
+      "description": "POST /api/report signed bodies only (X2): posted rows the server could not re-analyze inside the read roots — not in items, not signed as results; path, marker and reason only (never the client's result).",
+      "items": {
+        "type": "object",
+        "required": ["path", "marker", "reason"],
+        "properties": {
+          "path": { "type": "string" },
+          "marker": { "const": "서명 제외(클라이언트 제공 결과)" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
     "tool_version": { "type": "string", "description": "Signed reports only (G30): tool version, inside the MAC." },
     "model_pins": {
       "type": "array",

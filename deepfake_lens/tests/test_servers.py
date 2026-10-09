@@ -1180,18 +1180,8 @@ def _write_png(path: Path, seed: int) -> Path:
     return path
 
 
-class ReportEvidenceHashesBothServersTest(unittest.TestCase):
-    """N2/N9/N10/N11: /api/report on the stdlib web server and on api-serve.
-
-    N2: the report re-hashed rows with ``resolve()``, so a symbolic-link row
-    (``in_link.png -> target.png``) got its target's digest in the signed
-    body and both PDFs, while the scan recorded null / "해시 불가(심볼릭
-    링크)". N10: archive members were "해시 불가(압축 파일 구성원…)" on the
-    web PDFs while the CLI PDF showed the member digest. N9: the stdlib
-    server ignored the body's ``format`` and sent PDF bytes as text/html.
-    N11: malformed requests were 200 + ``{"error"}`` and ``{"items":
-    [{"path": 3}]}`` rendered an HTML report.
-    """
+class _ReportLegsFixture(unittest.TestCase):
+    """Scan fixture and the two server legs (stdlib web, api-serve) for /api/report tests."""
 
     HEADERS = {"X-Deepfake-Lens-Client": "gui", "Content-Type": "application/json"}
 
@@ -1277,6 +1267,21 @@ class ReportEvidenceHashesBothServersTest(unittest.TestCase):
     def _body(self, **extra: object) -> bytes:
         return json.dumps({"items": self.posted, **extra}).encode("utf-8")
 
+
+class ReportEvidenceHashesBothServersTest(_ReportLegsFixture):
+    """N2/N9/N10/N11: /api/report on the stdlib web server and on api-serve.
+
+    N2: the report re-hashed rows with ``resolve()``, so a symbolic-link row
+    (``in_link.png -> target.png``) got its target's digest in the signed
+    body and both PDFs, while the scan recorded null / "해시 불가(심볼릭
+    링크)". N10: archive members were "해시 불가(압축 파일 구성원…)" on the
+    web PDFs while the CLI PDF showed the member digest. N9: the stdlib
+    server ignored the body's ``format`` and sent PDF bytes as text/html.
+    N11: malformed requests were 200 + ``{"error"}`` and ``{"items":
+    [{"path": 3}]}`` rendered an HTML report.
+    """
+
+
     # -- N2/N10: signed body ------------------------------------------------
 
     def test_signed_body_keeps_symlink_unhashed_and_hashes_members(self) -> None:
@@ -1295,14 +1300,23 @@ class ReportEvidenceHashesBothServersTest(unittest.TestCase):
                 self.assertNotIn("0" * 64, raw.decode("utf-8"))  # posted digests are recomputed
 
     def test_symlink_component_on_the_path_is_not_followed(self) -> None:
-        """A row path through a linked folder (``linked/target.png``) is not hashed either."""
+        """A row path through a linked folder (``linked/target.png``) is not hashed either.
+
+        X2: nor re-analyzed — the row is left out of the signed body and listed
+        under ``excluded_items`` with the reason."""
         os.symlink(self.folder, self.folder / "linked")
         row = dict(self.rows["target.png"], path="linked/target.png", name="target.png")
         for name, make in self._legs():
             with self.subTest(leg=name):
                 status, _, raw = make()("/api/report?format=json", json.dumps({"items": [row]}).encode("utf-8"))
                 self.assertEqual(status, 200, raw[:300])
-                self.assertIsNone(json.loads(raw)["items"][0]["sha256"])
+                payload = json.loads(raw)
+                self.assertEqual(payload["items"], [])
+                self.assertEqual(payload["excluded_items"], [{
+                    "path": "linked/target.png", "marker": webapp_api.UNSIGNED_CLIENT_ROW_MARKER,
+                    "reason": webapp_api.REPORT_ROW_LINK_ON_PATH,
+                }])
+                self.assertNotIn(self.target_sha, raw.decode("utf-8"))
 
     # -- N2/N10/N9: both PDFs ----------------------------------------------
 
@@ -1382,6 +1396,109 @@ class ReportEvidenceHashesBothServersTest(unittest.TestCase):
                     self.assertIn(expected, error)
                     self.assertIsNone(english_prose(error), error)
                     self.assertNotIn(b"<html", raw)
+
+
+class ReportSignsOnlyServerResultsTest(_ReportLegsFixture):
+    """X2 (round 7): /api/report signed whatever conclusion and evidence the
+    client posted — target.png's row with midjourney.png's verdict and
+    evidence came back signed, with the real SHA-256, and verify-report said
+    "검증됨". Every row is now re-analyzed on the server; only server results
+    are signed, and a row that cannot be re-analyzed is excluded and marked."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        from deepfake_lens.cli import main as cli_main
+        from deepfake_lens.tests.qa.test_qa_sys import _write_generator_png
+
+        import contextlib
+        import io
+
+        generated = self.folder / "generated.png"
+        _write_generator_png(generated)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli_main(["scan", str(self.folder), "--format", "json"]), 0)
+        self.rows = {row["path"]: row for row in json.loads(out.getvalue())["items"]}
+        self.assertEqual(self.rows["generated.png"]["result"]["verdict_code"], "manipulation_evidence")
+        self.assertNotEqual(self.rows["target.png"]["result"]["verdict_code"], "manipulation_evidence")
+
+    def _forged(self) -> dict[str, Any]:
+        import copy
+
+        row = copy.deepcopy(self.rows["target.png"])
+        row["result"] = copy.deepcopy(self.rows["generated.png"]["result"])
+        return row
+
+    def test_forged_row_is_replaced_by_the_server_result(self) -> None:
+        from deepfake_lens.signing import REPORT_KEY_ENV, verify_report
+
+        key = "x2-server-key-0123456789abcdef"
+        body = json.dumps({"items": [self._forged()], "format": "json"}).encode("utf-8")
+        for name, make in self._legs():
+            with self.subTest(leg=name), patch.dict(os.environ, {REPORT_KEY_ENV: key}):
+                status, _, raw = make()("/api/report", body)
+                self.assertEqual(status, 200, raw[:300])
+                signed = json.loads(raw)
+                [row] = signed["items"]
+                self.assertEqual(row["path"], "target.png")
+                self.assertEqual(row["sha256"], self.target_sha)
+                # The server's own verdict and evidence for target.png — never the pasted ones.
+                self.assertEqual(row["result"]["verdict_code"], self.rows["target.png"]["result"]["verdict_code"])
+                self.assertEqual(
+                    [item["title"] for item in row["result"]["evidence"]],
+                    [item["title"] for item in self.rows["target.png"]["result"]["evidence"]],
+                )
+                self.assertEqual(signed["excluded_items"], [])
+                self.assertTrue(verify_report(signed, key.encode()).verified)
+
+    def test_rows_the_server_cannot_reanalyze_are_excluded_and_marked(self) -> None:
+        import copy
+
+        ghost = copy.deepcopy(self.rows["generated.png"])
+        ghost.update(path="gone.png", name="gone.png")
+        rows = [self._forged(), ghost]
+        for name, make in self._legs():
+            post = make()
+            with self.subTest(leg=name, format="json"):
+                status, _, raw = post("/api/report", json.dumps({"items": rows, "format": "json"}).encode("utf-8"))
+                self.assertEqual(status, 200, raw[:300])
+                signed = json.loads(raw)
+                self.assertEqual([row["path"] for row in signed["items"]], ["target.png"])
+                self.assertEqual(signed["excluded_items"], [{
+                    "path": "gone.png", "marker": webapp_api.UNSIGNED_CLIENT_ROW_MARKER,
+                    "reason": webapp_api.REPORT_ROW_NOT_FOUND,
+                }])
+                self.assertEqual(signed["summary"]["manipulation_evidence"], 0)
+            with self.subTest(leg=name, format="html"):
+                from deepfake_lens.reports import extract_signed_report
+
+                status, _, raw = post("/api/report", json.dumps({"items": rows}).encode("utf-8"))
+                self.assertEqual(status, 200, raw[:300])
+                html = raw.decode("utf-8")
+                self.assertIn('id="unsigned-client-rows"', html)
+                self.assertIn(f"[{webapp_api.UNSIGNED_CLIENT_ROW_MARKER}] gone.png — 클라이언트가 보낸 결론: 조작·생성 근거 있음", html)
+                embedded = extract_signed_report(html)
+                assert embedded is not None
+                self.assertEqual([row["path"] for row in embedded["items"]], ["target.png"])
+            if HAVE_PYMUPDF:
+                import pymupdf
+
+                for fmt in ("pdf", "evidence"):
+                    with self.subTest(leg=name, format=fmt):
+                        status, _, raw = post("/api/report", json.dumps({"items": rows, "format": fmt}).encode("utf-8"))
+                        self.assertEqual(status, 200, raw[:300])
+                        with pymupdf.open(stream=raw, filetype="pdf") as doc:
+                            flat = "".join("".join(page.get_text() for page in doc).split())
+                        self.assertIn("".join(f"[{webapp_api.UNSIGNED_CLIENT_ROW_MARKER}]gone.png".split()), flat)
+
+    def test_report_options_are_validated(self) -> None:
+        for name, make in self._legs():
+            post = make()
+            for options, expected in (("deep", "options 값은 JSON 객체여야 합니다"), ({"pixel": "turbo"}, "pixel은 ")):
+                with self.subTest(leg=name, options=options):
+                    status, _, raw = post("/api/report", json.dumps({"items": [self._forged()], "options": options}).encode("utf-8"))
+                    self.assertEqual(status, 400, raw[:300])
+                    self.assertIn(expected, json.loads(raw)["error"])
 
 
 class ReportItemContractMatchesSchemaTest(unittest.TestCase):

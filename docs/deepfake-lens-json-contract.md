@@ -281,7 +281,36 @@ top-level fields. The HMAC-SHA256 covers the canonical JSON
 | `signature` | Hex HMAC, or `null` when unsigned. |
 
 Rendered reports (`POST /api/report`, `--html-out`) additionally carry
-`report_format` and the posted `thresholds`/`coverage` in the signed body.
+`report_format`, `thresholds`/`coverage` provenance and `unrecorded_files`
+(X1) in the signed body.
+
+`POST /api/report` signs **server-derived results only** (X2). The posted
+rows are a request, not evidence: every row's file is located inside the
+read roots (never through a symbolic link) and re-analyzed on the server
+with `analysis_api.scan_file_run` — the scan's own body, so an archive
+yields the same member/container rows and a link the same skipped row —
+using the request's optional `options` object (the `/api/scan` query keys:
+`pixel`, `heatmaps`, `deep_signals`, `no_default_engine`, `model_path` /
+`fusion_profile` as bare names inside the server's models dir; validated
+like a scan request, 400 otherwise), the server's models dir and its
+threshold profile. Each signed row (verdict, evidence, coverage,
+`sha256`) is the server's row of the same path; `thresholds`/`coverage`
+are the server's provenance (posted values are only type-checked).
+A row the server cannot re-analyze is **not** in `items` and not counted in
+`summary`; the signed body lists it under `excluded_items` — `[{"path",
+"marker": "서명 제외(클라이언트 제공 결과)", "reason"}]` with reason
+`읽기 루트 안에서 파일을 찾을 수 없어 서버가 재분석하지 못했습니다`,
+`경로 중간의 폴더가 심볼릭 링크라 따라가지 않았습니다 — …`,
+`서버 재분석 결과에 이 항목이 없습니다(압축 파일 구성이 다름)` or
+`서버 재분석 실패: <사유>` — and never the client's result. The HTML report
+(`<section id="unsigned-client-rows">`), the forensic PDF and the evidence
+statement PDF render those rows in a separate box titled
+`서명 제외(클라이언트 제공 결과)`: one line per row with the path, the
+conclusion the client sent and the reason, outside the table and outside
+the signature. `excluded_items` is `[]` when every row was re-derived (the
+CLI's reports have no such field). Upload results (`/api/analyze-upload`)
+are not kept on the server, so a report of them is entirely excluded —
+make signed reports from folder scans.
 
 ### Signed evidence statement (증거설명서)
 
@@ -291,7 +320,9 @@ Rendered reports (`POST /api/report`, `--html-out`) additionally carry
 one signed body: every field of `EvidenceStatement.to_json()` (`case_no`,
 `case_name`, `plaintiff`, `defendant`, `court`, `entries[]` with
 `purpose_of_proof`/`sha256`/`statutes`/`verdict_label`, `created_at`, `law_firm`, `contact` (empty unless set by flag, request or `~/.deepfake-lens/config.json` — N17),
-`center`, `provenance_note`, `reference_note`, `unrecorded_files` — X1, the
+`center`, `provenance_note`, `reference_note`, `excluded_items` (X2 — web
+statements only: rows the server could not re-analyze, path/marker/reason;
+`[]` otherwise), `unrecorded_files` — X1, the
 top-level scan object above, counted from the statement's rows plus the
 scan summary's `files_over_cap`/`subfolders_skipped`; the Markdown prints it
 as `### [기록되지 않은 파일]`, the PDF as a box of that title) plus `"report_type":

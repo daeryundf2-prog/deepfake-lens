@@ -79,7 +79,7 @@ import urllib.request
 import wave
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, cast
 from unittest import mock
 from unittest.mock import patch
 
@@ -871,19 +871,27 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
 
     report: dict[str, Any]
     signed: dict[str, Any]
+    _tmp: tempfile.TemporaryDirectory[str]
+    root: Path
 
     @classmethod
     def setUpClass(cls) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            _write_generator_png(root / "generated.png")
-            (root / "memo.txt").write_text("회의 메모: 다음 주 일정 확인", encoding="utf-8")
-            summary, items = scan_directory(root)
+        # X2: the web report re-analyzes every row on the server, so the
+        # scanned folder stays on disk (it is the report's default folder).
+        cls._tmp = tempfile.TemporaryDirectory()
+        root = cls.root = Path(cls._tmp.name).resolve()
+        _write_generator_png(root / "generated.png")
+        (root / "memo.txt").write_text("회의 메모: 다음 주 일정 확인", encoding="utf-8")
+        summary, items = scan_directory(root)
         cls.report = scan_to_json(summary, items)
         cls.signed = sign_report(cls.report, KEY, model_pins=[
             {"profile": "aide-runtime", "pin": {"sha256": PIN_SHA}},
             {"profile": "sbi-effnet-runtime", "pin": None},
         ])
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._tmp.cleanup()
 
     def test_signed_report_verifies(self) -> None:
         """QA-SYS-6: 보고서 JSON의 임의 필드(결론, 근거, note, 모델 해시) 한 글자 변경 후 검증 → 모든 경우 "변조됨".
@@ -971,9 +979,11 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
         /api/report HTML and JSON are signed with DEEPFAKE_LENS_REPORT_KEY."""
         body = json.dumps({"items": self.report["items"]}).encode("utf-8")
         with patch.object(webapp_api, "_READ_ROOTS", OrderedDict()), patch.dict(os.environ, {REPORT_KEY_ENV: KEY.decode()}):
-            html = webapp_api._report_payload(body, "html")
-            signed_json = webapp_api._report_payload(body, "json")
+            html = webapp_api._report_payload(body, "html", default_folder=self.root)
+            signed_json = webapp_api._report_payload(body, "json", default_folder=self.root)
         assert isinstance(html, bytes) and isinstance(signed_json, dict)
+        self.assertEqual(len(cast(list[Any], signed_json["items"])), 2)  # X2: both rows re-analyzed under the default folder
+        self.assertEqual(signed_json["excluded_items"], [])
         embedded: Any = extract_signed_report(html.decode("utf-8"))
         assert embedded is not None
         self.assertTrue(verify_report(embedded, KEY).verified)
@@ -989,8 +999,8 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
         body = json.dumps({"items": self.report["items"]}).encode("utf-8")
         env = {k: v for k, v in os.environ.items() if k != REPORT_KEY_ENV}
         with patch.object(webapp_api, "_READ_ROOTS", OrderedDict()), patch.dict(os.environ, env, clear=True):
-            html = webapp_api._report_payload(body, "html")
-            pdf = webapp_api._report_payload(body, "pdf")
+            html = webapp_api._report_payload(body, "html", default_folder=self.root)
+            pdf = webapp_api._report_payload(body, "pdf", default_folder=self.root)
         assert isinstance(html, bytes)
         self.assertIn("서명 없음", html.decode("utf-8"))
         embedded: Any = extract_signed_report(html.decode("utf-8"))
@@ -1029,7 +1039,7 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
 
         with patch.object(webapp_api, "_READ_ROOTS", OrderedDict()), patch.dict(os.environ, {REPORT_KEY_ENV: KEY.decode()}), \
                 patch.object(reports, "signed_report_body", _capture):
-            pdf = webapp_api._report_payload(body, "pdf")
+            pdf = webapp_api._report_payload(body, "pdf", default_folder=self.root)
         if not HAVE_PYMUPDF:
             _assert_korean_pdf_error(self, pdf)
             return
@@ -1228,7 +1238,9 @@ class QaSys7ReadRootConfinementTest(_ServerFixture):
         """QA-SYS-7: /api/scan?folder=/ 등 등록되지 않은 경로로 요청. heatmap_path를 외부 파일로 지정한 report 요청 → 모두 403, 응답에 파일 내용 0바이트.
         control: a heatmap under the root is still inlined."""
         rows = self._scan_rows_with_heatmap()
-        status, body = self.request("/api/report?format=html", {"items": rows})
+        # X2: the server re-analyzes the rows with the scan's options (the
+        # posted heatmap paths are only checked, never trusted).
+        status, body = self.request("/api/report?format=html", {"items": rows, "options": {"pixel": "deep", "heatmaps": True}})
         self.assertEqual(status, 200)
         self.assertIn(b"data:image/png;base64", body)
         self.assertNoSecret(body)
@@ -1253,14 +1265,18 @@ class QaSys7ReadRootConfinementTest(_ServerFixture):
 
     def test_report_does_not_hash_outside_files(self) -> None:
         """QA-SYS-7: /api/scan?folder=/ 등 등록되지 않은 경로로 요청. heatmap_path를 외부 파일로 지정한 report 요청 → 모두 403, 응답에 파일 내용 0바이트.
-        an item path outside the roots is never read — its sha256 stays null."""
+        an item path outside the roots is never read — X2: it is not re-analyzed
+        either; the row is left out of the signed body (excluded_items)."""
         # N11: the row carries the contract's required "result" (null for a
         # failed row) — /api/report refuses rows outside the item contract.
         rows = [{"path": str(self.outside / "secret.txt"), "name": "secret.txt", "kind": "text", "status": "failed", "size_bytes": 0, "result": None, "sha256": "f" * 64}]
         status, body = self.request("/api/report?format=json", {"items": rows})
         self.assertEqual(status, 200)
         payload = json.loads(body)
-        self.assertIsNone(payload["items"][0]["sha256"])
+        self.assertEqual(payload["items"], [])
+        self.assertEqual([entry["path"] for entry in payload["excluded_items"]], [str(self.outside / "secret.txt")])
+        self.assertEqual(payload["excluded_items"][0]["marker"], webapp_api.UNSIGNED_CLIENT_ROW_MARKER)
+        self.assertNotIn("f" * 64, body.decode("utf-8"))
         self.assertNoSecret(body)
 
 

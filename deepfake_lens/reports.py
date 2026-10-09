@@ -73,8 +73,13 @@ def build_report_body(
     coverage: dict[str, object] | None = None,
     report_format: str = "html",
     redact_paths: bool = False,
+    excluded_items: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """The JSON body an HTML/PDF report renders — what its signature covers.
+
+    ``excluded_items`` (web reports, X2) lists the posted rows the server
+    could not re-analyze — path, marker and reason only, never the
+    client's result — so the signed body states what it does not cover.
 
     Every row carries ``sha256`` exactly as the item holds it: the scanner's
     content hash, or None. Nothing is re-read here — a row path is often
@@ -94,7 +99,7 @@ def build_report_body(
         rows.append(row)
     from .core import SCAN_JSON_SCHEMA_VERSION
 
-    return {
+    body: dict[str, object] = {
         "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "report_format": report_format,
         "summary": summary.to_json(),
@@ -104,6 +109,9 @@ def build_report_body(
         "unrecorded_files": unrecorded_files(list(items), summary).to_json(),
         "items": rows,
     }
+    if excluded_items is not None:
+        body["excluded_items"] = list(excluded_items)
+    return body
 
 
 def signed_report_body(
@@ -116,13 +124,17 @@ def signed_report_body(
     model_pins: list[dict[str, object]] | None = None,
     key: bytes | None = None,
     redact_paths: bool = False,
+    excluded_items: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """``build_report_body`` signed with ``key`` or DEEPFAKE_LENS_REPORT_KEY (G30).
 
     Without a key the body is returned with ``signature: null`` and a
     "서명 없음" note — never silently unsigned.
     """
-    body = build_report_body(summary, items, thresholds=thresholds, coverage=coverage, report_format=report_format, redact_paths=redact_paths)
+    body = build_report_body(
+        summary, items, thresholds=thresholds, coverage=coverage, report_format=report_format,
+        redact_paths=redact_paths, excluded_items=excluded_items,
+    )
     return sign_report(body, key if key is not None else resolve_report_key(), model_pins=model_pins)
 
 
@@ -176,8 +188,13 @@ def write_html_report(
     thresholds: object | None = None,
     allow_path: Callable[[str], bool] | None = None,
     signed_report: dict[str, object] | None = None,
+    unsigned_rows: list[tuple[ScanItem, str]] | None = None,
 ) -> None:
     """Write the HTML report.
+
+    ``unsigned_rows`` (web reports, X2) are posted rows the server could not
+    re-analyze: rendered in their own "서명 제외(클라이언트 제공 결과)"
+    section, outside the table and outside the signed body.
 
     ``allow_path`` (G31) decides which heatmap files may be read and inlined;
     a heatmap it rejects renders as a placeholder. None trusts every path
@@ -223,11 +240,39 @@ def write_html_report(
     <thead><tr><th>결론</th><th>근거(종류별)</th><th>검사 범위(미실행·실패)</th><th>파일</th><th>참고 신호</th><th>히트맵</th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
+  {_unsigned_rows_html(unsigned_rows)}
   {_signature_html(signed_report)}
 </body>
 </html>
 """
     output.write_text(body, encoding="utf-8")
+
+
+# X2: the web report's rows the server could not re-analyze.
+UNSIGNED_ROWS_TITLE = "서명 제외(클라이언트 제공 결과)"
+UNSIGNED_ROWS_NOTE = (
+    "아래 항목은 서버가 읽기 루트 안에서 다시 분석하지 못해 클라이언트가 보낸 결과 그대로입니다 — "
+    "서명 본문에 포함되지 않으며 감정 근거로 쓸 수 없습니다."
+)
+
+
+def unsigned_row_lines(unsigned_rows: list[tuple[ScanItem, str]] | None) -> list[str]:
+    """One line per unsigned client row: path, the client's claimed conclusion, the reason (X2)."""
+    lines: list[str] = []
+    for item, reason in unsigned_rows or []:
+        claimed = VERDICT_LABELS[item.result.verdict_code] if item.result is not None else status_label(item.status or "failed")
+        lines.append(f"[{UNSIGNED_ROWS_TITLE}] {item.path} — 클라이언트가 보낸 결론: {claimed} — {reason}")
+    return lines
+
+
+def _unsigned_rows_html(unsigned_rows: list[tuple[ScanItem, str]] | None) -> str:
+    if not unsigned_rows:
+        return ""
+    lines = "".join(f"<li>{escape(line)}</li>" for line in unsigned_row_lines(unsigned_rows))
+    return (
+        f'<section class="unsigned" id="unsigned-client-rows"><h2>{escape(UNSIGNED_ROWS_TITLE)}</h2>'
+        f'<p class="legal">{escape(UNSIGNED_ROWS_NOTE)}</p><ul>{lines}</ul></section>'
+    )
 
 
 def _unrecorded_html(summary: BatchScanSummary, items: list[ScanItem]) -> str:
@@ -332,6 +377,7 @@ def write_forensic_pdf_report(
     signed_report: dict[str, object] | None = None,
     law_firm: str | None = None,
     contact: str | None = None,
+    unsigned_rows: list[tuple[ScanItem, str]] | None = None,
 ) -> None:
     """Generate a court-admissible forensic PDF report with ECFS exhibit stamp,
     SHA-256 evidence integrity hashes and the examiner's office signoff.
@@ -363,7 +409,7 @@ def write_forensic_pdf_report(
         pymupdf, summary, items,
         redact_paths=redact_paths, exhibit_no=exhibit_no, thresholds=thresholds, coverage=coverage,
         allow_path=allow_path, resolve_path=resolve_path, signed_report=signed_report,
-        office=office_identity(law_firm, contact),
+        office=office_identity(law_firm, contact), unsigned_rows=unsigned_rows,
     ))
 
 
@@ -392,6 +438,7 @@ def _render_forensic_pdf(
     resolve_path: "Callable[[str], Path | None] | None",
     signed_report: dict[str, object],
     office: OfficeIdentity,
+    unsigned_rows: list[tuple[ScanItem, str]] | None = None,
 ) -> bytes:
     """Lay out the forensic PDF with :class:`pdf_layout.PdfLayout` (G2) and return its bytes."""
     from .pdf_layout import Cell, PdfLayout
@@ -517,6 +564,12 @@ def _render_forensic_pdf(
             on_new_page=table_header,
         )
     layout.y += 6.0
+    if unsigned_rows:
+        # X2: rows the server could not re-analyze — outside the table and the signature.
+        layout.boxed_text(UNSIGNED_ROWS_TITLE, [
+            (UNSIGNED_ROWS_NOTE, 7.5, (0.55, 0.3, 0.0)),
+            *((line, 7.0, (0.3, 0.3, 0.3)) for line in unsigned_row_lines(unsigned_rows)),
+        ])
 
     if _has_reference_grade(items):
         layout.text(layout.left, layout.right, TEXT_LEGAL_LIMITATION, 8.0, (0.55, 0.3, 0.0))

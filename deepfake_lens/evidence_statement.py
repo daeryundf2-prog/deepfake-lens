@@ -97,6 +97,9 @@ class EvidenceStatement:
     # analysis result (cap, flat scan, symlinks, duplicates, unsupported),
     # UnrecordedFiles.to_json(); signed with the rest of the statement.
     unrecorded_files: dict[str, Any] = field(default_factory=dict)
+    # X2: web statements — posted rows the server could not re-analyze
+    # (path, marker, reason; never the client's result). Empty for the CLI.
+    excluded_items: list[dict[str, Any]] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -357,6 +360,7 @@ def build_evidence_statement(
     coverage: dict[str, object] | None = None,
     scan_root: Path | str | None = None,
     summary: object | None = None,
+    excluded_items: list[dict[str, object]] | None = None,
 ) -> EvidenceStatement:
     """Build an EvidenceStatement from analyzed scan items.
 
@@ -473,6 +477,7 @@ def build_evidence_statement(
         provenance_note=provenance_note,
         reference_note=TEXT_LEGAL_LIMITATION if any(i.result is not None and i.result.grade == Grade.REFERENCE for i in items) else "",
         unrecorded_files=unrecorded_files(list(items), summary).to_json(),
+        excluded_items=[dict(entry) for entry in excluded_items or []],
     )
 
 
@@ -580,17 +585,20 @@ def write_evidence_statement_pdf(
     *,
     signed: dict[str, object] | None = None,
     key: bytes | str | None = None,
+    unsigned_rows: list[tuple[ScanItem, str]] | None = None,
 ) -> dict[str, object]:
     """Render court-admissible Evidence Statement PDF using PyMuPDF with Korean fonts.
 
     The last block prints the signature lines of the signed statement body
-    (G30); returns that body."""
+    (G30); returns that body. ``unsigned_rows`` (web, X2) are posted rows the
+    server could not re-analyze, printed in a "서명 제외(클라이언트 제공
+    결과)" box — they are not exhibits and not in the signed body."""
     body = _signed(statement, signed, key)
     pymupdf = _import_pymupdf()
 
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    data = _render_statement_pdf(pymupdf, statement, body)
+    data = _render_statement_pdf(pymupdf, statement, body, unsigned_rows=unsigned_rows)
     tmp = output.with_suffix(output.suffix + ".tmp")
     tmp.write_bytes(data)
     tmp.replace(output)
@@ -604,7 +612,10 @@ STATEMENT_TABLE_WEIGHTS = (12.5, 22.0, 18.5, 47.0)
 STATEMENT_ROW_MIN_HEIGHT = 30.0
 
 
-def _render_statement_pdf(pymupdf: Any, statement: EvidenceStatement, body: dict[str, object]) -> bytes:
+def _render_statement_pdf(
+    pymupdf: Any, statement: EvidenceStatement, body: dict[str, object],
+    *, unsigned_rows: list[tuple[ScanItem, str]] | None = None,
+) -> bytes:
     """Lay out the evidence statement with :class:`pdf_layout.PdfLayout` (G2).
 
     Every cell is wrapped to its measured column and a row that does not fit
@@ -678,6 +689,13 @@ def _render_statement_pdf(pymupdf: Any, statement: EvidenceStatement, body: dict
         (line, 7.5 if index == 0 else 6.8, (0.1, 0.2, 0.4) if index == 0 else (0.35, 0.35, 0.35))
         for index, line in enumerate(statement.unrecorded_lines())
     ])
+    if unsigned_rows:
+        from .reports import UNSIGNED_ROWS_NOTE, UNSIGNED_ROWS_TITLE, unsigned_row_lines
+
+        layout.boxed_text(UNSIGNED_ROWS_TITLE, [
+            (UNSIGNED_ROWS_NOTE, 7.0, (0.55, 0.3, 0.0)),
+            *((line, 6.8, (0.35, 0.35, 0.35)) for line in unsigned_row_lines(unsigned_rows)),
+        ])
 
     # Signoff block, kept together on one page.
     signoff = [
