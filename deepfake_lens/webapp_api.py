@@ -26,6 +26,7 @@ from urllib.parse import parse_qs
 
 from .checks import failure_reason
 from .error_text import exception_text
+from .result_text import display_name
 from .vendor_weights import default_models_dir
 
 logger = logging.getLogger(__name__)
@@ -188,7 +189,16 @@ UPLOAD_SOURCE = "upload"
 def _mark_uploads(records: list[dict[str, object]]) -> list[dict[str, object]]:
     for record in records:
         record["source"] = UPLOAD_SOURCE
+        # R11-14: an upload row's name is the client's file name (set after
+        # to_json) — its display_name follows it.
+        record["display_name"] = display_name(str(record.get("name") or ""))
     return records
+
+
+def _set_row_name(record: dict[str, object], name: str) -> None:
+    """Set a row's ``name`` and its escaped ``display_name`` together (R11-14)."""
+    record["name"] = name
+    record["display_name"] = display_name(name)
 
 
 def _scan_payload(query: str, *, default_folder: Path | None, should_stop: Callable[[], bool] | None = None) -> dict[str, object]:
@@ -904,7 +914,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
             watermark = {"available": False, "reference_band": "unavailable", "reference_note": "워터마크 검사 실패", "error": failure_reason(exc)}
             _layer_error(layer_errors, "watermark", exc)
     record = item.to_json()
-    record["name"] = "pasted-text"
+    _set_row_name(record, "pasted-text")
     record["path"] = "pasted-text"
     record["source"] = UPLOAD_SOURCE  # P6: pasted text is no file of a read root
     return {
@@ -977,7 +987,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     finally:
         if tmp_name:
             Path(tmp_name).unlink(missing_ok=True)
-    record["name"] = filename
+    _set_row_name(record, filename)
     record["path"] = escape_row_path(filename)  # R10-6: as /api/analyze-upload
     record["source"] = UPLOAD_SOURCE  # P6
     return {

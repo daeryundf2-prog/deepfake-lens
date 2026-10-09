@@ -106,7 +106,8 @@
       "required": ["path", "name", "kind", "status", "size_bytes", "result"],
       "properties": {
         "path": { "type": "string", "minLength": 1, "description": "Row path relative to the scan root; archive members as \"archive::inner\", nested archive members as the full chain \"a.zip::b.zip::c.png\" (Y9; never \".unpacked/\") (N11: /api/report refuses a row that does not fit this item contract)." },
-        "name": { "type": "string" },
+        "name": { "type": "string", "description": "The file name as it is on disk (raw: a bidi override, C1 control or lone surrogate — written as the JSON escape \\udcXX, R11-1 — stays as it is)." },
+        "display_name": { "type": "string", "description": "R11-14: name as every text report shows it (result_text.display_name — controls and invisible characters escaped, \"|\" as \"\\|\", \"\\\" as \"\\\\\"); for consumers that print the name. Emitted on every row since R11-14; absent on older records." },
         "kind": { "type": "string" },
         "status": { "type": "string" },
         "container": { "type": ["string", "null"], "description": "P7: archive member rows only — the container row's path (path = container + \"::\" + member); absent on every other row." },

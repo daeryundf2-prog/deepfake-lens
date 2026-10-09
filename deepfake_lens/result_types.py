@@ -449,7 +449,18 @@ class ScanItem:
     member: str | None = None
 
     def to_json(self) -> dict[str, object]:
-        data = asdict(self)
+        # R11-14 (round 11): ``name`` stays the raw file name (a bidi override,
+        # C1 control or lone surrogate included — it is the row's identity);
+        # ``display_name`` beside it is that name as every text report shows
+        # it (result_text.display_name: controls/invisible characters
+        # escaped, "|" and "\\" escaped), for consumers that print it.
+        from .result_text import display_name
+
+        data: dict[str, object] = {}
+        for key, value in asdict(self).items():
+            data[key] = value
+            if key == "name":
+                data["display_name"] = display_name(self.name)
         data["result"] = self.result.to_json() if self.result else None
         for key in ("container", "member"):
             if data[key] is None:

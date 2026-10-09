@@ -73,6 +73,56 @@ class ScanJsonContractTest(unittest.TestCase):
             self.assertIn("limitations", item["result"])
 
 
+class RowDisplayNameTest(unittest.TestCase):
+    """R11-14 (round 11): JSON rows keep the raw ``name`` (bidi override, C1 control) by
+    design; a ``display_name`` beside it is the escaped name every text report shows."""
+
+    NAMES = ("bidi\u202etxt.exe.txt", "c1\x85\x9b31m.txt", "pipe|bs\\x.txt", "plain.txt")
+
+    def test_scan_rows_carry_display_name(self) -> None:
+        from deepfake_lens.result_text import display_name
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in self.NAMES:
+                (root / name).write_text("plain note", encoding="utf-8")
+            summary, items = scan_directory(root)
+            payload = json.loads(scan_to_json_text(summary, items))
+        rows = {row["name"]: row for row in payload["items"]}
+        self.assertEqual(sorted(rows), sorted(self.NAMES))
+        for name, row in rows.items():
+            self.assertEqual(row["display_name"], display_name(name))
+            keys = list(row)
+            self.assertEqual(keys.index("display_name"), keys.index("name") + 1)
+        self.assertEqual(rows["bidi\u202etxt.exe.txt"]["display_name"], "bidi\\u202etxt.exe.txt")
+        self.assertEqual(rows["c1\x85\x9b31m.txt"]["display_name"], "c1\\x85\\x9b31m.txt")
+        self.assertEqual(rows["pipe|bs\\x.txt"]["display_name"], "pipe\\|bs\\\\x.txt")
+        schema = _schema()
+        self.assertIn("display_name", schema["$defs"]["item"]["properties"])
+        for row in payload["items"]:
+            _check_object(self, row, schema["$defs"]["item"], schema)
+
+    def test_upload_rows_display_name_follows_the_client_name(self) -> None:
+        import uuid
+
+        from deepfake_lens import webapp_api
+        from deepfake_lens.result_text import display_name
+
+        boundary = "r11" + uuid.uuid4().hex
+        names = ("up\u202eload.txt", "plain.txt")
+        body = b"".join(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"{name}\"\r\n"
+            "Content-Type: text/plain\r\n\r\n".encode("utf-8") + b"a plain note for the upload test\r\n"
+            for name in names
+        ) + f"--{boundary}--\r\n".encode()
+        payload = webapp_api._analyze_upload_payload(f"multipart/form-data; boundary={boundary}", body)
+        rows = payload["items"]
+        assert isinstance(rows, list)
+        self.assertEqual(sorted(row["name"] for row in rows), sorted(names))
+        for row in rows:
+            self.assertEqual(row["display_name"], display_name(row["name"]))
+
+
 def _full_result() -> ClassificationResult:
     return build_classification_result(
         subject="이미지",

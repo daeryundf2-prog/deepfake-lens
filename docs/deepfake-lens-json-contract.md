@@ -91,7 +91,7 @@ always `0` invited old-contract readings. They remain readable as
 
 ## Item fields (stable)
 
-- `path`, `name`, `kind` (`image`, `audio`, `video`, `text`, `archive`,
+- `path`, `name`, `display_name` (R11-14, see below), `kind` (`image`, `audio`, `video`, `text`, `archive`,
   `unsupported`, `duplicate`, `unknown`), `status` (`analyzed`, `failed`,
   `skipped`, `unsupported`, `duplicate`, `expanded`, `unknown`),
   `size_bytes`, `error`, `duplicate_of`.
@@ -164,6 +164,13 @@ always `0` invited old-contract readings. They remain readable as
   `subfolders[].path` stay raw. R10-2: a CSV cell starting with `=`, `+`,
   `-`, `@`, TAB or CR is written with a leading `'` (OWASP CSV injection);
   numeric cells are unchanged.
+- R11-14 (round 11): every row carries `display_name` right after `name`:
+  the name as every text report shows it (`result_text.display_name` —
+  controls, bidi/zero-width characters and lone surrogates escaped, `|` as
+  `\|`, `\` as `\\`). `name` stays raw (it is the row's identity, a bidi
+  override or C1 control included); a consumer that prints a name prints
+  `display_name`. Upload rows' `display_name` follows the client's file
+  name. Optional in the schema (older records lack it).
 - R11-1 (round 11): a POSIX file name that is not valid UTF-8 (a CP949
   `증거` copied from a Korean Windows disk is `b"\xc1\xf5\xb0\xc5"`) reaches
   the tool as a string with lone surrogates U+DC80–U+DCFF (PEP 383). Every
