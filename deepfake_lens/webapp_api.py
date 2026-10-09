@@ -52,7 +52,7 @@ from .analysis_api import default_engine_profiles as _engine_profiles_in
 from .core import SCAN_JSON_SCHEMA_VERSION, BatchScanSummary, DEFAULT_METADATA_BYTES, _scan_item_from_json, is_default_heatmap_output, summarize  # noqa: F401
 from .datasets import is_negative_label, is_positive_label
 from .reports import write_html_report
-from .json_text import json_dumps
+from .json_text import fs_b64encode, json_dumps
 
 
 # G7: request limits live in analysis_api (AnalysisOptions.from_query);
@@ -192,7 +192,17 @@ def _mark_uploads(records: list[dict[str, object]]) -> list[dict[str, object]]:
         # R11-14: an upload row's name is the client's file name (set after
         # to_json) — its display_name follows it.
         record["display_name"] = display_name(str(record.get("name") or ""))
+        _sync_path_b64(record)
     return records
+
+
+def _sync_path_b64(record: dict[str, object]) -> None:
+    """R12-4: ``path_b64`` follows a row path rewritten after to_json (upload rows
+    get the client's name in place of the temp file's), never the temp path."""
+    from .result_text import unescape_row_path
+
+    if "member" not in record and isinstance(record.get("path"), str):
+        record["path_b64"] = fs_b64encode(unescape_row_path(str(record["path"])))
 
 
 def _set_row_name(record: dict[str, object], name: str) -> None:
@@ -218,7 +228,9 @@ def _scan_payload(query: str, *, default_folder: Path | None, should_stop: Calla
         payload = scan_payload(run.summary, run.items, run.thresholds, options)
         # P1: the folder the row paths are relative to — the GUI sends it
         # back with POST /api/report, which resolves rows against it only.
-        payload["scan_root"] = scan_root_text(folder)
+        root_text = scan_root_text(folder)
+        payload["scan_root"] = root_text
+        payload["scan_root_b64"] = fs_b64encode(root_text)  # R12-4
         return payload
     except UnicodeError:
         # R11-1: a codec error (a non-UTF-8 name reaching a strict encoder)
@@ -584,10 +596,32 @@ def _read_root_allows(path: Path, root_value: str = "", default_folder: Path | N
     return any(_is_within(path, root) for root in roots)
 
 
-def _heatmap_payload(query: str) -> tuple[int, bytes, str]:
+def _media_query_paths(query: str) -> tuple[str, str]:
+    """(path, root) of a /api/preview or /api/heatmap query.
+
+    R12-4: ``path_b64``/``root_b64`` (URL-safe base64 of the file-system
+    bytes — the rows' ``path_b64``, a heatmap's ``heatmap_path_b64``, the scan
+    payload's ``scan_root_b64``) take precedence over ``path``/``root``: a
+    non-UTF-8 name cannot travel as text in a URL. A relative ``path_b64``
+    (a row path) is joined to the root. ValueError when a value is malformed.
+    """
+    from .json_text import fs_b64decode
+
     params = parse_qs(query)
-    path_value = params.get("path", [""])[0]
-    root_value = params.get("root", [""])[0]
+    path_b64 = params.get("path_b64", [""])[0]
+    root_b64 = params.get("root_b64", [""])[0]
+    root_value = fs_b64decode(root_b64) if root_b64 else params.get("root", [""])[0]
+    path_value = fs_b64decode(path_b64) if path_b64 else params.get("path", [""])[0]
+    if path_b64 and root_value and not os.path.isabs(path_value):
+        path_value = os.path.join(root_value, path_value)
+    return path_value, root_value
+
+
+def _heatmap_payload(query: str) -> tuple[int, bytes, str]:
+    try:
+        path_value, root_value = _media_query_paths(query)
+    except ValueError as exc:
+        return 400, str(exc).encode("utf-8"), "bad-path"
     if not path_value:
         return 400, "경로가 없습니다".encode("utf-8"), "missing"
     path = Path(path_value).expanduser().resolve()
@@ -634,9 +668,10 @@ def _preview_payload(query: str) -> tuple[int, bytes, str, str]:
     server-registered scan root (see _read_root_allows), must be a known
     media type, and is served with nosniff so it can only render as media.
     """
-    params = parse_qs(query)
-    path_value = params.get("path", [""])[0]
-    root_value = params.get("root", [""])[0]
+    try:
+        path_value, root_value = _media_query_paths(query)
+    except ValueError as exc:
+        return 400, str(exc).encode("utf-8"), "bad-path", ""
     if not path_value:
         return 400, "경로가 없습니다".encode("utf-8"), "missing", ""
     path = Path(path_value).expanduser().resolve()
@@ -917,6 +952,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
     _set_row_name(record, "pasted-text")
     record["path"] = "pasted-text"
     record["source"] = UPLOAD_SOURCE  # P6: pasted text is no file of a read root
+    _sync_path_b64(record)
     return {
         "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "mode": "text",
@@ -990,6 +1026,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     _set_row_name(record, filename)
     record["path"] = escape_row_path(filename)  # R10-6: as /api/analyze-upload
     record["source"] = UPLOAD_SOURCE  # P6
+    _sync_path_b64(record)
     return {
         "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "mode": "file",

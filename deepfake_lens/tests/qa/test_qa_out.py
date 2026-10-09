@@ -61,6 +61,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+from deepfake_lens.json_text import fs_b64decode, fs_b64encode
 from deepfake_lens import webapp_api
 from deepfake_lens.analysis_api import AnalysisOptions, analyze_path, analyze_rows, scan_folder, scan_folder_run, scan_payload
 from deepfake_lens.cli import main as cli_main
@@ -775,6 +776,10 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
                         # (normalized to the scan's relative path here).
                         item = _raw_item(data["item"], (str(folder) + "/",))
                         item["path"] = item["path"].removeprefix("<FOLDER>")
+                        # R12-4: path_b64 names the absolute path the row is reported
+                        # under — checked, then normalized like path itself.
+                        self.assertEqual(fs_b64decode(item["path_b64"]), str(folder / item["path"]))
+                        item["path_b64"] = fs_b64encode(item["path"])
                         checked = {item["path"]: item}
                     self.assertEqual(checked, expected)
                     with client.stream("POST", "/api/check/stream", params={"file_path": str(folder / name)}, headers=headers) as streamed:
@@ -787,6 +792,8 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
                     else:
                         streamed = _raw_item(result["item"], (str(folder) + "/",))
                         streamed["path"] = streamed["path"].removeprefix("<FOLDER>")
+                        self.assertEqual(fs_b64decode(streamed["path_b64"]), str(folder / streamed["path"]))  # R12-4
+                        streamed["path_b64"] = fs_b64encode(streamed["path"])
                         streamed_rows = {streamed["path"]: streamed}
                     self.assertEqual(streamed_rows, expected)
             # The symlink: the scan reports a skipped row (asserted above);

@@ -160,6 +160,20 @@ always `0` invited old-contract readings. They remain readable as
   `/api/analyze-upload` and `/api/check`) is escaped like any real file's
   (`t:::c.png` → `t\:\:\:c.png`), so it never holds `::`; `name` is the name
   the client sent.
+- R12-4 (round 12): every row except an archive member carries `path_b64`
+  — its real relative path (`path` with the R9-1 escape undone) as URL-safe
+  base64 of the file-system bytes (`os.fsencode`; a non-UTF-8 name's
+  original bytes) — a heatmap carries `pixel_analysis.heatmap_path_b64`
+  (the heatmap's absolute path, same encoding), and a web/API folder scan
+  carries `scan_root_b64` beside `scan_root`. `GET /api/preview` and
+  `GET /api/heatmap` on both servers accept `path_b64` and `root_b64` (a
+  relative `path_b64` is joined to the root) in place of `path`/`root`,
+  with the same read-root checks (403 outside the roots); a malformed value
+  is 400 `경로 인코딩(path_b64·root_b64)이 올바르지 않습니다 — …`. The GUI
+  requests media only this way — a lone surrogate cannot go into a URL
+  (`encodeURIComponent` threw "URI malformed") and a percent-encoded raw
+  byte reaches the server as U+FFFD — and words a loading failure in
+  Korean.
 - R10-1 (round 10): JSON keeps every `path`, `name`, `error` and reason
   string raw. Every text rendering — the console table and the single-file
   text outputs, CSV, HTML, the scan/forensic PDF, the evidence statement

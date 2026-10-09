@@ -5,6 +5,10 @@
         let lastScanOptions = {};
         let selectedFiles = [];
         let lastScanRoot = '';
+        // R12-4: the scan folder as URL-safe base64 file-system bytes (scan_root_b64);
+        // previews and heatmaps are requested by bytes — a lone surrogate (a
+        // non-UTF-8 file name) cannot go into a URL.
+        let lastScanRootB64 = '';
         const RENDER_WINDOW = 200;
         let renderedRows = 0;
         let progressTimer = null;
@@ -551,6 +555,7 @@
                 // P1: the server's resolved scan folder — /api/report resolves
                 // every row against it (not against the read root).
                 lastScanRoot = data.scan_root || folderPath;
+                lastScanRootB64 = data.scan_root_b64 || '';
                 processResults(data);
                 toast(`분석 완료 — ${(data.items || []).length}개 파일`);
             } catch (error) {
@@ -597,6 +602,7 @@
                     if (total > BATCH) startElapsed($('progress-text'), `업로드 분석 중… (${Math.min(i + BATCH, total)}/${total})`);
                 }
                 lastScanRoot = '';  // uploads are temp files; heatmaps unavailable
+                lastScanRootB64 = '';
                 processResults({ items: allItems });
                 toast(`분석 완료 — ${allItems.length}개 파일`);
                 selectedFiles = [];
@@ -691,20 +697,23 @@
             // P7/R9-1: a member row has item.member (its "::" is display only);
             // any other row is a real file whose escaped path is unescaped for
             // the preview (never read as a member by a "::" in it).
-            const hasPreview = lastScanRoot && item.path && !item.member &&
-                !/^[a-zA-Z]:[\\/]|^\//.test(item.path) &&
-                (item.kind === 'image' || item.kind === 'video' || item.kind === 'audio');
-            const abs = hasPreview ? (lastScanRoot.replace(/[\\/]+$/, '') + '/' + unescapeRowPath(item.path)) : '';
-            const hasHeatmap = Boolean(item.heatmap_path && lastScanRoot);
+            // R12-4: the file is named to the server by item.path_b64 (its real
+            // relative path as file-system bytes) and the scan folder by
+            // lastScanRootB64 — never by text, which a non-UTF-8 name breaks.
+            const hasPreview = Boolean(lastScanRoot && lastScanRootB64 && item.path_b64 && !item.member &&
+                (item.kind === 'image' || item.kind === 'video' || item.kind === 'audio'));
+            const pvB64 = hasPreview ? item.path_b64 : '';
+            const hmB64 = item.heatmap_path_b64 || ((r.pixel_analysis || {}).heatmap_path_b64) || '';
+            const hasHeatmap = Boolean(hmB64 && lastScanRoot && lastScanRootB64);
 
             if (item.kind === 'image' && hasPreview && hasHeatmap) {
-                parts.push(`<div class="forensic-studio-slot" data-pv="${escapeHtml(abs)}" data-hm="${escapeHtml(item.heatmap_path)}"><span class="note">포렌식 비교 스튜디오 준비 중…</span></div>`);
+                parts.push(`<div class="forensic-studio-slot" data-pv="${escapeHtml(pvB64)}" data-hm="${escapeHtml(hmB64)}"><span class="note">포렌식 비교 스튜디오 준비 중…</span></div>`);
             } else {
                 if (hasPreview) {
-                    parts.push(`<div class="dgroup"><div class="dt">미리보기</div><div class="pv-slot" data-pv="${escapeHtml(abs)}" data-kind="${escapeHtml(item.kind)}"><span class="note">로딩 중…</span></div></div>`);
+                    parts.push(`<div class="dgroup"><div class="dt">미리보기</div><div class="pv-slot" data-pv="${escapeHtml(pvB64)}" data-kind="${escapeHtml(item.kind)}"><span class="note">로딩 중…</span></div></div>`);
                 }
                 if (hasHeatmap) {
-                    parts.push(`<div class="dgroup"><div class="dt">픽셀 히트맵</div><div class="hm-slot" data-hm="${escapeHtml(item.heatmap_path)}"><span class="note">히트맵 로딩 중…</span></div></div>`);
+                    parts.push(`<div class="dgroup"><div class="dt">픽셀 히트맵</div><div class="hm-slot" data-hm="${escapeHtml(hmB64)}"><span class="note">히트맵 로딩 중…</span></div></div>`);
                 }
             }
             const ma = r.model_analysis;
@@ -728,10 +737,26 @@
             return parts.join('');
         }
 
+        // R12-4: /api/preview and /api/heatmap by URL-safe base64 bytes only.
+        function previewUrl(pathB64) {
+            return '/api/preview?path_b64=' + encodeURIComponent(pathB64) + '&root_b64=' + encodeURIComponent(lastScanRootB64);
+        }
+
+        function heatmapUrl(pathB64) {
+            return '/api/heatmap?path_b64=' + encodeURIComponent(pathB64) + '&root_b64=' + encodeURIComponent(lastScanRootB64);
+        }
+
+        // R12-4: a media-loading failure in Korean (a browser's own message,
+        // e.g. "URI malformed", is never shown).
+        function mediaErrorText(e) {
+            const message = e && typeof e.message === 'string' ? e.message : '';
+            return /[가-힣]/.test(message) ? message : '파일을 불러오는 중 오류가 발생했습니다';
+        }
+
         async function loadPreview(slot) {
-            const abs = slot.dataset.pv, kind = slot.dataset.kind;
+            const pathB64 = slot.dataset.pv, kind = slot.dataset.kind;
             try {
-                const res = await apiFetch('/api/preview?path=' + encodeURIComponent(abs) + '&root=' + encodeURIComponent(lastScanRoot));
+                const res = await apiFetch(previewUrl(pathB64));
                 if (!res.ok) { slot.innerHTML = `<span class="note">미리보기 불가 (${res.status})</span>`; return; }
                 const blob = await res.blob();
                 const url = URL.createObjectURL(blob);
@@ -744,14 +769,14 @@
                 slot.innerHTML = '';
                 slot.appendChild(el);
             } catch (e) {
-                slot.innerHTML = `<span class="note">미리보기 실패: ${shown(e.message)}</span>`;
+                slot.innerHTML = `<span class="note">미리보기 실패: ${shown(mediaErrorText(e))}</span>`;
             }
         }
 
         async function loadHeatmap(slot) {
             const hmPath = slot.dataset.hm;
             try {
-                const res = await apiFetch('/api/heatmap?path=' + encodeURIComponent(hmPath) + '&root=' + encodeURIComponent(lastScanRoot));
+                const res = await apiFetch(heatmapUrl(hmPath));
                 if (!res.ok) { slot.innerHTML = `<span class="note">히트맵을 불러올 수 없습니다 (${res.status})</span>`; return; }
                 const blob = await res.blob();
                 const img = document.createElement('img');
@@ -761,7 +786,7 @@
                 slot.innerHTML = '';
                 slot.appendChild(img);
             } catch (e) {
-                slot.innerHTML = `<span class="note">히트맵 로딩 실패: ${shown(e.message)}</span>`;
+                slot.innerHTML = `<span class="note">히트맵 로딩 실패: ${shown(mediaErrorText(e))}</span>`;
             }
         }
 
@@ -772,8 +797,8 @@
 
             try {
                 const [resPv, resHm] = await Promise.all([
-                    apiFetch('/api/preview?path=' + encodeURIComponent(pvPath) + '&root=' + encodeURIComponent(lastScanRoot)),
-                    apiFetch('/api/heatmap?path=' + encodeURIComponent(hmPath) + '&root=' + encodeURIComponent(lastScanRoot)),
+                    apiFetch(previewUrl(pvPath)),
+                    apiFetch(heatmapUrl(hmPath)),
                 ]);
 
                 if (!resPv.ok || !resHm.ok) {
@@ -961,7 +986,7 @@
                 slot.innerHTML = '';
                 slot.appendChild(studio);
             } catch (e) {
-                slot.innerHTML = `<span class="note">스튜디오 로딩 실패: ${shown(e.message)}</span>`;
+                slot.innerHTML = `<span class="note">스튜디오 로딩 실패: ${shown(mediaErrorText(e))}</span>`;
             }
         }
 

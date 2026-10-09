@@ -416,6 +416,12 @@ class ClassificationResult:
 
     def to_json(self) -> dict[str, object]:
         data = asdict(self)
+        pixel = data.get("pixel_analysis")
+        if isinstance(pixel, dict) and pixel.get("heatmap_path"):
+            from .json_text import fs_b64encode
+
+            # R12-4: the heatmap's absolute path as file-system bytes for /api/heatmap.
+            pixel["heatmap_path_b64"] = fs_b64encode(str(pixel["heatmap_path"]))
         data["band"] = self.band.value
         data["source_guess"]["confidence"] = self.source_guess.confidence.value
         data["verdict_code"] = self.verdict_code.value
@@ -459,11 +465,17 @@ class ScanItem:
         # ``display_name`` beside it is that name as every text report shows
         # it (result_text.display_name: controls/invisible characters
         # escaped, "|" and "\\" escaped), for consumers that print it.
-        from .result_text import display_name
+        from .json_text import fs_b64encode
+        from .result_text import display_name, unescape_row_path
 
         data: dict[str, object] = {}
         for key, value in asdict(self).items():
             data[key] = value
+            if key == "path" and self.member is None:
+                # R12-4: the row's real relative path as file-system bytes
+                # (URL-safe base64) — the GUI's preview request names the file
+                # by it (a lone surrogate cannot go into a URL).
+                data["path_b64"] = fs_b64encode(unescape_row_path(self.path))
             if key == "name":
                 data["display_name"] = display_name(self.name)
         data["result"] = self.result.to_json() if self.result else None

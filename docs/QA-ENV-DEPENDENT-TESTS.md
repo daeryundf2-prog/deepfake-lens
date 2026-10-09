@@ -39,7 +39,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `cannot create symlinks: {exc}` | 심볼릭 링크를 만들 수 있는 OS·권한(POSIX, Windows 개발자 모드) | test_cli_inputs.py, test_evidence_statement.py |
 | `checkpoint is present; auto-discovery would run real inference` | 체크포인트가 없는 환경에서만 실행(가중치를 받은 환경에서는 해당 없음) | test_aide_engine.py |
 | `checkpoint is present; unavailable-path assertion does not apply` | 체크포인트가 없는 환경에서만 실행(가중치를 받은 환경에서는 해당 없음) | test_aasist_engine.py, test_aide_engine.py |
-| `fastapi + httpx not installed` | fastapi, httpx(QA 사이드 venv: `pip install fastapi httpx uvicorn`) | test_cli_operations.py, test_d16_ui_api.py, test_forensic_pdf.py, test_korean_output.py, test_native_path.py, test_non_utf8_names.py, test_reviews.py, test_servers.py, test_standalone_contract.py |
+| `fastapi + httpx not installed` | fastapi, httpx(QA 사이드 venv: `pip install fastapi httpx uvicorn`) | test_cli_operations.py, test_d16_ui_api.py, test_forensic_pdf.py, test_korean_output.py, test_native_path.py, test_non_utf8_names.py, test_path_b64.py, test_reviews.py, test_servers.py, test_standalone_contract.py |
 | `fastapi + httpx not installed — API-server leg of QA-OUT-4` | fastapi, httpx(QA 사이드 venv) | test_qa_out.py |
 | `fastapi + httpx not installed — stream payload` | fastapi, httpx(QA 사이드 venv) + Pillow | test_json_contract.py |
 | `fastapi + httpx not installed — streaming API` | fastapi, httpx(QA 사이드 venv) | test_cli_operations.py |
@@ -54,7 +54,8 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `mediapipe installed` | mediapipe가 없는 환경에서만 실행(대체 경로 검사) | test_face.py |
 | `mediapipe installed — fallback path not exercised` | mediapipe가 없는 환경에서만 실행(대체 경로 검사) | test_face.py |
 | `mediapipe not installed` | `face_mediapipe` 또는 `face_tasks` extra(mediapipe) | test_face.py |
-| `node is not installed` | Node.js(`node`) — GUI 스크립트 검사 | test_archives.py |
+| `node + playwright + Chromium not installed (headless GUI check)` | Node.js + `playwright` npm 패키지 + Chromium(`npx playwright install chromium`) — 헤드리스 GUI 확인 | test_path_b64.py |
+| `node is not installed` | Node.js(`node`) — GUI 스크립트 검사 | test_archives.py, test_path_b64.py |
 | `node required to run gui.js helpers` | Node.js(`node`) — GUI 스크립트 검사 | test_display_names.py |
 | `not a git work tree` | git 작업 트리(얕은 복제·압축본 아님) | test_qa_sys.py |
 | `numpy + Pillow needed for the mixed fixture` | `dev` extra(numpy, Pillow) | test_korean_output.py |
@@ -99,7 +100,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `transformers/torch not installed` | `text_lm` extra(torch, transformers) | test_v6_probes.py |
 | `without torch the script exits at the dependency check first` | `text_lm` extra(torch) | test_aasist_engine.py |
 | `` {FIXTURE_DIR} missing — run `python scripts/make_benchmark_fixtures.py` `` | `scripts/make_benchmark_fixtures.py`로 만든 픽스처 | test_benchmark_e2e.py |
-| `파일 시스템이 UTF-8이 아닌 파일 이름을 허용하지 않음(Windows·macOS)` | UTF-8이 아닌 바이트 파일 이름을 허용하는 파일 시스템(리눅스 ext4·tmpfs 등) | test_native_path.py, test_non_utf8_names.py |
+| `파일 시스템이 UTF-8이 아닌 파일 이름을 허용하지 않음(Windows·macOS)` | UTF-8이 아닌 바이트 파일 이름을 허용하는 파일 시스템(리눅스 ext4·tmpfs 등) | test_native_path.py, test_non_utf8_names.py, test_path_b64.py |
 
 ## 환경 의존 기준선 테스트
 

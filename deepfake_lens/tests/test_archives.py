@@ -811,9 +811,13 @@ class ArchiveMemberIdentityTests(unittest.TestCase):
         source = (Path(__file__).resolve().parents[1] / "gui.js").read_text(encoding="utf-8")
         start = source.index("function unescapeRowPath(path)")
         end = source.index("\n        }\n", start) + len("\n        }\n")
-        preview = source[source.index("const hasPreview ="):source.index("const abs = hasPreview")]
+        # R12-4: the preview names the file by item.path_b64 (the row path
+        # unescaped server-side, then its file-system bytes) — the decision
+        # block now ends where pvB64 is taken (was "const abs = hasPreview").
+        preview = source[source.index("const hasPreview ="):source.index("const pvB64 = hasPreview")]
         self.assertNotIn("'::'", preview, "the preview decision is by item.member, not a '::' in the path")
         self.assertIn("!item.member", preview)
+        self.assertIn("item.path_b64", preview)
         node = shutil.which("node")
         if node is None:
             self.skipTest("node is not installed")

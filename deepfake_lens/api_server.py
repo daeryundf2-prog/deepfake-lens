@@ -954,9 +954,12 @@ def create_app(
                 return
             payload = scan_payload(summary, items, thresholds, options)
             # P1: the folder the rows are relative to, for POST /api/report.
+            from .json_text import fs_b64encode
             from .webapp_api import scan_root_text
 
-            payload["scan_root"] = scan_root_text(root)
+            root_text = scan_root_text(root)
+            payload["scan_root"] = root_text
+            payload["scan_root_b64"] = fs_b64encode(root_text)  # R12-4
             # Rows are the /api/scan rows; verdict_code/grade/probability are
             # also copied to the row top level for stream clients that read
             # them there (the pre-R1 stream row shape).

@@ -52,7 +52,8 @@ COVERAGE_STATUSES = ("ran", "skipped", "failed")
 ITEM_STRING_FIELDS = ("path", "name", "kind", "status")
 # Optional item fields that are a string or null when present.
 # P7: container/member — an archive member row's identity.
-ITEM_OPTIONAL_STRING_FIELDS = ("error", "duplicate_of", "container", "member")
+# R12-4: path_b64 — the row's real relative path as URL-safe base64 file-system bytes.
+ITEM_OPTIONAL_STRING_FIELDS = ("error", "duplicate_of", "container", "member", "path_b64")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 _TYPE_LABELS = {

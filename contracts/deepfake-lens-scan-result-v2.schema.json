@@ -10,6 +10,7 @@
     "summary": { "$ref": "#/$defs/summary" },
     "items": { "type": "array", "items": { "$ref": "#/$defs/item" } },
     "unrecorded_files": { "$ref": "#/$defs/unrecorded_files" },
+    "scan_root_b64": { "type": "string", "pattern": "^[A-Za-z0-9_-]+=*$", "description": "R12-4: web/API folder scans only — scan_root as URL-safe base64 of its file-system bytes (os.fsencode); the GUI sends it as root_b64 to /api/preview and /api/heatmap (a non-UTF-8 folder name cannot travel as text in a URL)." },
     "scan_root": { "type": "string", "description": "Web/API folder scans only (P1): the scanned folder, absolute and resolved — every row path is relative to it. POST /api/report requires it back (scan_root) and resolves rows against it only. R9-9: in a POST /api/report signed body (and the evidence statement it renders) scan_root is that folder relative to the read root holding it (\".\" for the root itself) — inside the MAC and printed in the report header (검사 폴더(읽기 루트 기준, 행 경로의 기준 폴더): …); absent when no folder-scan row was posted." },
     "excluded_items": {
       "type": "array",
@@ -106,6 +107,7 @@
       "required": ["path", "name", "kind", "status", "size_bytes", "result"],
       "properties": {
         "path": { "type": "string", "minLength": 1, "description": "Row path relative to the scan root; archive members as \"archive::inner\", nested archive members as the full chain \"a.zip::b.zip::c.png\" (Y9; never \".unpacked/\") (N11: /api/report refuses a row that does not fit this item contract)." },
+        "path_b64": { "type": "string", "pattern": "^[A-Za-z0-9_-]+=*$", "description": "R12-4: every row except archive members — the row's real relative path (path with the R9-1 escape undone) as URL-safe base64 of its file-system bytes (os.fsencode, a non-UTF-8 name's original bytes). GET /api/preview?path_b64=…&root_b64=<scan_root_b64> (and /api/heatmap with pixel_analysis.heatmap_path_b64) name the file by it, under the same read-root checks; a malformed value is 400." },
         "name": { "type": "string", "description": "The file name as it is on disk (raw: a bidi override, C1 control or lone surrogate — written as the JSON escape \\udcXX, R11-1 — stays as it is)." },
         "display_name": { "type": "string", "description": "R11-14: name as every text report shows it (result_text.display_name — controls and invisible characters escaped, \"|\" as \"\\|\", \"\\\" as \"\\\\\"); for consumers that print the name. Emitted on every row since R11-14; absent on older records." },
         "kind": { "type": "string" },

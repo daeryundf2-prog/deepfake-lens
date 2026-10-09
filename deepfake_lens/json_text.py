@@ -72,3 +72,37 @@ _SCRIPT_UNSAFE_RE = re.compile("[<>&\u2028\u2029]")
 def script_safe_json(obj: Any, **kwargs: Any) -> str:
     """:func:`json_dumps` safe to place inside an HTML ``<script>`` element (R11-6)."""
     return _SCRIPT_UNSAFE_RE.sub(lambda match: _SCRIPT_UNSAFE[match.group()], json_dumps(obj, **kwargs))
+
+
+# R12-4 (round 12): a path as URL-safe base64 of its file-system bytes.
+# A browser cannot put a lone surrogate into a URL (encodeURIComponent throws
+# "URI malformed") and a percent-encoded raw byte is decoded as U+FFFD by the
+# server, so the GUI names files to /api/preview and /api/heatmap by these
+# bytes — the exact os.fsencode of the path, whatever its encoding.
+PATH_B64_INVALID = "경로 인코딩(path_b64·root_b64)이 올바르지 않습니다 — 검사 결과의 값을 그대로 보내십시오"
+
+
+def fs_b64encode(path: str) -> str:
+    """URL-safe base64 (padded) of ``os.fsencode(path)``."""
+    import base64
+    import os
+
+    return base64.urlsafe_b64encode(os.fsencode(path)).decode("ascii")
+
+
+def fs_b64decode(value: str) -> str:
+    """Inverse of :func:`fs_b64encode` (``os.fsdecode`` of the bytes); ValueError when malformed."""
+    import base64
+    import binascii
+    import os
+
+    text = value.strip()
+    if not text or len(text) > 16384 or not re.fullmatch(r"[A-Za-z0-9_-]+={0,2}", text):
+        raise ValueError(PATH_B64_INVALID)
+    try:
+        raw = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError(PATH_B64_INVALID) from exc
+    if not raw or b"\x00" in raw:
+        raise ValueError(PATH_B64_INVALID)
+    return os.fsdecode(raw)

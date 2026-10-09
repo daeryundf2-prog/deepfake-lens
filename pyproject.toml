@@ -167,6 +167,7 @@ files = [
     "deepfake_lens/native_path.py",
     "deepfake_lens/tests/test_native_path.py",
     "deepfake_lens/tests/test_archive_duplicates.py",
+    "deepfake_lens/tests/test_path_b64.py",
     "deepfake_lens/tests/test_decision.py",
     "deepfake_lens/serialization.py",
     "deepfake_lens/scan_cache.py",
