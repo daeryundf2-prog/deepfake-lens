@@ -353,7 +353,13 @@ CLI's reports have no such field). Upload results (`/api/analyze-upload`,
 "upload"` (P6) and a report lists every such row under `excluded_items` with
 `업로드 파일 — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다` —
 never re-analyzed from a same-named file of the read root. Make signed
-reports from folder scans.
+reports from folder scans. R9-9 (round 9): the signed body carries
+`scan_root` — the posted `scan_root` folder relative to the read root that
+holds it (`caseA`, `caseA/deeper`, `.` for the root itself; never the
+absolute path) — inside the signature, and the HTML report
+(`<p id="scan-root">`), the forensic PDF and the evidence-statement PDF
+print it in their header as `검사 폴더(읽기 루트 기준, 행 경로의 기준 폴더): …`;
+a report of upload rows only has no `scan_root`.
 
 ### Signed evidence statement (증거설명서)
 

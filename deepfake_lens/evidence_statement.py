@@ -486,14 +486,19 @@ def signed_statement_body(
     key: bytes | str | None = None,
     *,
     model_pins: list[dict[str, object]] | None = None,
+    scan_root: str | None = None,
 ) -> dict[str, object]:
     """The statement as a signed report body (G30).
 
     ``key`` None means DEEPFAKE_LENS_REPORT_KEY; with no key at all the body
     carries ``signature: null`` and the "서명 없음" note (never silently
-    unsigned). Verify with ``signing.verify_report``.
+    unsigned). Verify with ``signing.verify_report``. ``scan_root`` (web
+    statements, R9-9): the scanned folder relative to its read root, signed
+    and printed under the case box.
     """
     body: dict[str, object] = {"report_type": EVIDENCE_STATEMENT_REPORT_TYPE, **statement.to_json()}
+    if scan_root is not None:
+        body["scan_root"] = scan_root
     return sign_report(body, key if key is not None else resolve_report_key(), model_pins=model_pins)
 
 
@@ -624,6 +629,7 @@ def _render_statement_pdf(
     (the old fixed box was left empty when the text overflowed it).
     """
     from .pdf_layout import Cell, PdfLayout
+    from .reports import scan_root_line
 
     def page_header(layout: PdfLayout) -> None:
         firm_header = f"{statement.law_firm} {statement.center}".strip()
@@ -641,6 +647,7 @@ def _render_statement_pdf(
         (f"원고(고소인)    {statement.plaintiff}", 9.5, (0.1, 0.1, 0.1)),
         (f"피고(피의자)    {statement.defendant}", 9.5, (0.1, 0.1, 0.1)),
         ("위 사건에 관하여 원고(고소인)의 소송대리인은 주장사실을 입증하기 위해 아래와 같이 증거방법을 제출합니다.", 8.2, (0.3, 0.3, 0.3)),
+        *([(root_line, 8.2, (0.3, 0.3, 0.3))] if (root_line := scan_root_line(body)) else []),  # R9-9
     ], border=(0.82, 0.86, 0.92), fill=(0.97, 0.98, 0.99))
     layout.text(layout.left, layout.right, "다        음", 11.0, (0.1, 0.1, 0.1), align=1, gap=4.0)
 

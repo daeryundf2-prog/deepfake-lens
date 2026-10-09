@@ -1625,6 +1625,52 @@ class ReportScanRootAndUploadsTest(_ScanRootFixture):
                 self.assertEqual(signed["excluded_items"], [])
                 self.assertTrue(verify_report(signed, key.encode()).verified)
 
+    def test_r9_9_scan_root_is_signed_and_shown(self) -> None:
+        """R9-9 (round 9): the signed body and the rendered reports did not say which folder
+        the row paths are relative to. The body carries scan_root relative to the read root
+        (inside the signature) and every rendering prints it in its header."""
+        from urllib.parse import quote
+
+        from deepfake_lens.pdf_backend import pymupdf_available
+        from deepfake_lens.reports import SCAN_ROOT_LABEL
+        from deepfake_lens.signing import REPORT_KEY_ENV, verify_report
+
+        key = "r9-9-server-key-0123456789abcdef"
+        nested = self.case / "deeper"
+        nested.mkdir()
+        (nested / "memo.txt").write_text("사건 메모입니다. 사람이 쓴 짧은 메모입니다.", encoding="utf-8")
+        for name, call in self._legs():
+            for folder, label in ((self.case, "caseA"), (nested, "caseA/deeper"), (self.root, ".")):
+                with self.subTest(leg=name, folder=label), patch.dict(os.environ, {REPORT_KEY_ENV: key}):
+                    status, raw = call("GET", f"/api/scan?folder={quote(str(folder))}&no_default_engine=true")
+                    self.assertEqual(status, 200, raw[:300])
+                    scan = json.loads(raw)
+                    body = {"items": scan["items"], "scan_root": scan["scan_root"], "options": {"no_default_engine": True}}
+                    status, raw = call("POST", "/api/report?format=json", json.dumps(body).encode("utf-8"))
+                    self.assertEqual(status, 200, raw[:300])
+                    signed = json.loads(raw)
+                    self.assertEqual(signed["scan_root"], label)
+                    self.assertTrue(verify_report(signed, key.encode()).verified)
+                    self.assertFalse(verify_report(dict(signed, scan_root="caseB"), key.encode()).verified, "scan_root is inside the MAC")
+                    self.assertNotIn(str(self.root), signed["scan_root"], "relative to the read root, never absolute")
+                    status, raw = call("POST", "/api/report?format=html", json.dumps(body).encode("utf-8"))
+                    self.assertEqual(status, 200, raw[:300])
+                    self.assertIn(f'<p class="scan-root" id="scan-root">{SCAN_ROOT_LABEL}: {label}</p>', raw.decode("utf-8"))
+                    if pymupdf_available() and folder == self.case:
+                        from deepfake_lens.pdf_backend import import_pymupdf
+
+                        pymupdf = import_pymupdf()
+                        for fmt in ("pdf", "evidence"):
+                            status, raw = call("POST", f"/api/report?format={fmt}", json.dumps(body).encode("utf-8"))
+                            self.assertEqual(status, 200, raw[:200])
+                            text = "".join(page.get_text() for page in pymupdf.open(stream=raw, filetype="pdf"))
+                            self.assertIn(f"{SCAN_ROOT_LABEL}: caseA", " ".join(text.split()), fmt)
+            with self.subTest(leg=name, uploads_only=True):
+                upload_row = dict(json.loads(call("GET", f"/api/scan?folder={quote(str(self.case))}&no_default_engine=true")[1])["items"][0], source="upload")
+                status, raw = call("POST", "/api/report?format=json", json.dumps({"items": [upload_row]}).encode("utf-8"))
+                self.assertEqual(status, 200, raw[:300])
+                self.assertNotIn("scan_root", json.loads(raw), "no folder scan, no scan_root")
+
     def test_scan_root_is_required_absolute_existing_and_inside_the_roots(self) -> None:
         from deepfake_lens.tests.qa.test_qa_sys import _write_generator_png
 

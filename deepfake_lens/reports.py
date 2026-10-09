@@ -74,8 +74,13 @@ def build_report_body(
     report_format: str = "html",
     redact_paths: bool = False,
     excluded_items: list[dict[str, object]] | None = None,
+    scan_root: str | None = None,
 ) -> dict[str, object]:
     """The JSON body an HTML/PDF report renders — what its signature covers.
+
+    ``scan_root`` (web reports, R9-9) is the scanned folder relative to the
+    read root holding it ("." for the root itself) — the folder every row
+    path is relative to, inside the signed body and shown in the header.
 
     ``excluded_items`` (web reports, X2) lists the posted rows the server
     could not re-analyze — path, marker and reason only, never the
@@ -111,6 +116,8 @@ def build_report_body(
     }
     if excluded_items is not None:
         body["excluded_items"] = list(excluded_items)
+    if scan_root is not None:
+        body["scan_root"] = scan_root
     return body
 
 
@@ -125,6 +132,7 @@ def signed_report_body(
     key: bytes | None = None,
     redact_paths: bool = False,
     excluded_items: list[dict[str, object]] | None = None,
+    scan_root: str | None = None,
 ) -> dict[str, object]:
     """``build_report_body`` signed with ``key`` or DEEPFAKE_LENS_REPORT_KEY (G30).
 
@@ -133,9 +141,20 @@ def signed_report_body(
     """
     body = build_report_body(
         summary, items, thresholds=thresholds, coverage=coverage, report_format=report_format,
-        redact_paths=redact_paths, excluded_items=excluded_items,
+        redact_paths=redact_paths, excluded_items=excluded_items, scan_root=scan_root,
     )
     return sign_report(body, key if key is not None else resolve_report_key(), model_pins=model_pins)
+
+
+# R9-9 (round 9): the scanned folder of a web report (signed body
+# ``scan_root``) is printed in the report header.
+SCAN_ROOT_LABEL = "검사 폴더(읽기 루트 기준, 행 경로의 기준 폴더)"
+
+
+def scan_root_line(signed: dict[str, object]) -> str | None:
+    """"검사 폴더(…): caseA" for a signed body with ``scan_root`` (R9-9), else None."""
+    value = signed.get("scan_root")
+    return f"{SCAN_ROOT_LABEL}: {value}" if isinstance(value, str) and value else None
 
 
 def signature_lines_ko(signed: dict[str, object]) -> list[str]:
@@ -233,6 +252,7 @@ def write_html_report(
 <body>
   <h1>{escape(HTML_REPORT_TITLE)}</h1>
   <p>{escape(summary_line(summary))}</p>
+  {_scan_root_html(signed_report)}
   <p class="note">결론은 세 가지뿐입니다 — 조작·생성 근거 있음 / 원본성 근거 있음 / 판단 불가. 결정적 근거(메타데이터·C2PA)만 결론을 내리고, 통계적(모델)·어휘적(키워드) 근거는 보정 전까지 참고로만 표시합니다. 검사가 실패한 파일은 판단 불가로 남습니다.</p>
   {legal_note}
   <p class="note">{"<br>".join(escape(line) for line in threshold_provenance_lines(thresholds))}</p>
@@ -264,6 +284,11 @@ def unsigned_row_lines(unsigned_rows: list[tuple[ScanItem, str]] | None) -> list
         claimed = VERDICT_LABELS[item.result.verdict_code] if item.result is not None else status_label(item.status or "failed")
         lines.append(f"[{UNSIGNED_ROWS_TITLE}] {item.path} — 클라이언트가 보낸 결론: {claimed} — {reason}")
     return lines
+
+
+def _scan_root_html(signed: dict[str, object]) -> str:
+    line = scan_root_line(signed)
+    return f'<p class="scan-root" id="scan-root">{escape(line)}</p>' if line else ""
 
 
 def _unsigned_rows_html(unsigned_rows: list[tuple[ScanItem, str]] | None) -> str:
@@ -465,6 +490,9 @@ def _render_forensic_pdf(
     layout.text(layout.left, title_x1, FORENSIC_PDF_TITLE, 16.0, (0.08, 0.15, 0.32), gap=2.0)
     layout.text(layout.left, title_x1, f"{HTML_REPORT_TITLE} — 디지털 미디어 AI 생성·조작 감정", 8.0, (0.4, 0.45, 0.5), gap=1.0)
     layout.text(layout.left, title_x1, f"문서 번호: DFL-EVID-{int(time.time())}", 7.5, (0.5, 0.5, 0.5), gap=1.0)
+    root_line = scan_root_line(signed_report)
+    if root_line:
+        layout.text(layout.left, title_x1, root_line, 7.5, (0.3, 0.3, 0.3), gap=1.0)  # R9-9
     title_bottom = layout.y
     box_x0 = layout.right - box_w
     pad = 6.0

@@ -10,7 +10,7 @@
     "summary": { "$ref": "#/$defs/summary" },
     "items": { "type": "array", "items": { "$ref": "#/$defs/item" } },
     "unrecorded_files": { "$ref": "#/$defs/unrecorded_files" },
-    "scan_root": { "type": "string", "description": "Web/API folder scans only (P1): the scanned folder, absolute and resolved — every row path is relative to it. POST /api/report requires it back (scan_root) and resolves rows against it only." },
+    "scan_root": { "type": "string", "description": "Web/API folder scans only (P1): the scanned folder, absolute and resolved — every row path is relative to it. POST /api/report requires it back (scan_root) and resolves rows against it only. R9-9: in a POST /api/report signed body (and the evidence statement it renders) scan_root is that folder relative to the read root holding it (\".\" for the root itself) — inside the MAC and printed in the report header (검사 폴더(읽기 루트 기준, 행 경로의 기준 폴더): …); absent when no folder-scan row was posted." },
     "excluded_items": {
       "type": "array",
       "description": "POST /api/report signed bodies only (X2): posted rows the server could not re-analyze inside the read roots — not in items, not signed as results; path, marker and reason only (never the client's result).",

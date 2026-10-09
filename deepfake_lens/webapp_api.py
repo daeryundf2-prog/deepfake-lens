@@ -1415,6 +1415,18 @@ def _report_scan_root(value: object, roots: list[Path], *, required: bool) -> Pa
     return resolved
 
 
+def _scan_root_label(scan_root: Path | None, roots: list[Path]) -> str | None:
+    """R9-9: the scanned folder relative to the (innermost) read root holding it ("." for the root itself)."""
+    if scan_root is None:
+        return None
+    holders = [root for root in roots if _is_within(scan_root, root)]
+    if not holders:
+        return None
+    root = max(holders, key=lambda path: len(path.parts))
+    relative = scan_root.relative_to(root).as_posix()
+    return relative or "."
+
+
 def _excluded_rows_json(excluded: list[tuple[Any, str]]) -> list[dict[str, object]]:
     """The signed body's record of rows it does not vouch for (X2): path, marker, reason — no client verdict."""
     return [{"path": item.path, "marker": UNSIGNED_CLIENT_ROW_MARKER, "reason": reason} for item, reason in excluded]
@@ -1582,10 +1594,12 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     # say "서명 없음" otherwise; the pins are those of the server's models dir.
     from .profile_pins import profile_pins
 
+    # R9-9: the scanned folder (relative to its read root) is signed and shown.
+    root_label = _scan_root_label(scan_root, roots)
     signed = signed_report_body(
         summary, items, thresholds=thresholds, coverage=coverage,
         report_format=req_format, model_pins=profile_pins(_models_dir()),
-        excluded_items=excluded_rows,
+        excluded_items=excluded_rows, scan_root=root_label,
     )
     if req_format == "json":
         return signed
@@ -1613,7 +1627,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
                 )
                 # G30: signed like the other web reports (server key + pins).
                 write_evidence_statement_pdf(
-                    tmp_path, stmt, signed=signed_statement_body(stmt, model_pins=profile_pins(_models_dir())),
+                    tmp_path, stmt, signed=signed_statement_body(stmt, model_pins=profile_pins(_models_dir()), scan_root=root_label),
                     unsigned_rows=excluded,
                 )
             except RuntimeError as exc:

@@ -7,7 +7,7 @@
     "confine_path.py": "ac4166bfdb523ab86642fdc403b7cb035298366577749d251b9fb322f1c38417"
   },
   "local": {
-    "deepfake-lens-scan-result-v2.schema.json": "c84cf1a00568c09dd8b95f684c24b5f0618c829979c87e45f54414111b271cb8",
+    "deepfake-lens-scan-result-v2.schema.json": "84fbde724d3a1e98c7439f242463c5b77f93be97a7107ec7d8df72e65b7909dd",
     "corpus-manifest-v1.schema.json": "3d7c14d44181c3b3490e6a401a202bf5073af0ad679f438bf807f73d2607c31e"
   },
   "local_note": "Project-owned contracts (not from lazy-contracts). Pinned so edits stay deliberate; update the hash in the same commit as the schema."
