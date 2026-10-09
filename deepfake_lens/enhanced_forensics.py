@@ -367,7 +367,8 @@ def build_legal_report(
     thresholds = load_thresholds(opts)
     result, _ = analysis_result_for_path(file_path, opts, command=LEGAL_REPORT_TYPE, thresholds=thresholds)
     try:
-        size = file_path.stat().st_size
+        # G6: a symbolic link is reported as itself (lstat), never its target.
+        size = file_path.lstat().st_size if file_path.is_symlink() else file_path.stat().st_size
     except OSError:
         size = 0
     now = datetime.now()

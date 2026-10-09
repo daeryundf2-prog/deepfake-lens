@@ -8,7 +8,7 @@ from pathlib import Path
 from .benchmark import run_benchmark, write_benchmark, write_benchmark_markdown
 from .collection import write_collection_plan
 from .core import ARCHIVE_ROLLUP_RULE, check_scan_folder, ScanItem, _thresholds_json
-from .analysis_api import AnalysisOptions, analyze_path, analyze_rows, load_thresholds, primary_row, scan_folder, thresholds_warning_printer
+from .analysis_api import AnalysisOptions, analyze_path, analyze_rows, is_symlink_path, load_thresholds, primary_row, scan_folder, thresholds_warning_printer
 from .analysis_api import scan_payload as analysis_scan_payload
 from .cli_parser import build_parser
 from .serialization import redact_install_paths
@@ -64,6 +64,7 @@ from .cli_standalone import (
     format_analysis_result,
     gated_pixel_layer,
     member_rows_text,
+    symlink_layer,
     tool_attribution,
 )
 from .result_types import VERDICT_LABELS, Verdict
@@ -372,8 +373,39 @@ def main(argv: list[str] | None = None) -> int:
         logs.finish()
 
 
+# G5 (round 5): the commands that analyze named files, and where the names are.
+_SINGLE_FILE_ARGS = {
+    "forensic": ("file",),
+    "classify": ("file",),
+    "explain": ("file",),
+    "legal-report": ("file",),
+    "agent": ("file",),
+    "multimodal": ("files",),
+}
+
+
+def _single_file_targets(args: argparse.Namespace) -> list[Path]:
+    targets: list[Path] = []
+    for attr in _SINGLE_FILE_ARGS.get(str(args.command), ()):
+        value = getattr(args, attr, None)
+        if value is None:
+            continue
+        targets.extend(Path(v) for v in (value if isinstance(value, (list, tuple)) else [value]))
+    return targets
+
+
 def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_parsers: dict[str, argparse.ArgumentParser]) -> int:
     """Dispatch one parsed command (body of :func:`main`)."""
+    from .analysis_api import SingleFileError, check_single_file
+
+    for target in _single_file_targets(args):
+        # G5: a missing file or a folder is a usage error (exit 2, Korean),
+        # checked before any analysis — never a traceback or a report ID.
+        try:
+            check_single_file(target)
+        except SingleFileError as exc:
+            print(f"오류: {exc}", file=sys.stderr)
+            return 2
     if args.command == "corpus":
         from .corpus_manifest import run_corpus_cli
 
@@ -629,7 +661,11 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         thresholds = load_thresholds(options, warn=thresholds_warning_printer(sys.stderr))
         payload, _ = analysis_result_for_path(args.file, options, command="forensic", thresholds=thresholds)
         payload["layer_diagnostics"] = {
-            "provenance_metadata": to_layer_diagnostic("provenance_metadata", analyze_metadata_forensic(args.file).to_json(), layer_label="출처 메타데이터 계층"),
+            "provenance_metadata": (
+                symlink_layer("provenance_metadata", "출처 메타데이터 계층")
+                if is_symlink_path(args.file)  # G6: never read through a link
+                else to_layer_diagnostic("provenance_metadata", analyze_metadata_forensic(args.file).to_json(), layer_label="출처 메타데이터 계층")
+            ),
         }
         emit(payload, fmt=args.format, json_out=args.json_out)
         return 0
@@ -639,7 +675,11 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         options = AnalysisOptions.from_cli_args(args)
         thresholds = load_thresholds(options, warn=thresholds_warning_printer(sys.stderr))
         payload, _ = analysis_result_for_path(args.file, options, command="classify", thresholds=thresholds)
-        payload["tool_candidates"] = to_layer_diagnostic("tool_attribution", tool_attribution(args.file).to_json(), layer_label="생성 도구 표지 대조")
+        payload["tool_candidates"] = (
+            symlink_layer("tool_attribution", "생성 도구 표지 대조")
+            if is_symlink_path(args.file)  # G6
+            else to_layer_diagnostic("tool_attribution", tool_attribution(args.file).to_json(), layer_label="생성 도구 표지 대조")
+        )
         emit(payload, fmt=args.format, json_out=args.json_out)
         return 0
     if args.command == "multimodal":
@@ -708,7 +748,8 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         options = AnalysisOptions.from_cli_args(args)
         thresholds = load_thresholds(options, warn=thresholds_warning_printer(sys.stderr))
         if args.file is not None:
-            text = args.file.read_text(encoding="utf-8", errors="replace")
+            # G6: a symbolic link is a skipped row; its target's text is not read.
+            text = "" if is_symlink_path(args.file) else args.file.read_text(encoding="utf-8", errors="replace")
             payload, _ = analysis_result_for_path(args.file, options, command="agent", thresholds=thresholds)
         else:
             text = args.text

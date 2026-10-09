@@ -79,6 +79,47 @@ class InvalidOption(ValueError):
     """A request option that must be refused (HTTP 400, CLI usage error)."""
 
 
+# G5 (round 5): the single-file commands (forensic, classify, explain FILE,
+# legal-report, agent --file, multimodal FILE…) refuse a path that does not
+# name a file — Korean message, CLI exit 2 — instead of an English traceback
+# or a "판단 불가" report (with a report ID) about nothing.
+SINGLE_FILE_MISSING = "파일을 찾을 수 없습니다: {path}"
+SINGLE_FILE_IS_FOLDER = "파일이 아니라 폴더입니다: {path} (폴더는 scan을 사용)"
+
+
+class SingleFileError(ValueError):
+    """The single-file target does not exist or is a folder (G5); ``str()`` is the Korean reason."""
+
+
+def check_single_file(path: Path | str) -> None:
+    """Raise :class:`SingleFileError` unless ``path`` names a file (or a symbolic link).
+
+    G6: a symbolic link is not an error — like a folder scan, it becomes a
+    skipped row ("심볼릭 링크 — 링크를 따라가지 않으므로 분석하지 않았습니다"),
+    whether or not its target exists; the target is never read.
+    """
+    target = Path(path)
+    try:
+        if target.is_symlink():
+            return
+        exists = target.exists()
+        is_dir = exists and target.is_dir()
+    except OSError:
+        return  # unreadable: analyzed (and reported failed) like a scan row
+    if not exists:
+        raise SingleFileError(SINGLE_FILE_MISSING.format(path=path))
+    if is_dir:
+        raise SingleFileError(SINGLE_FILE_IS_FOLDER.format(path=path))
+
+
+def is_symlink_path(path: Path | str) -> bool:
+    """True when ``path`` itself is a symbolic link (never followed; G6)."""
+    try:
+        return Path(path).is_symlink()
+    except OSError:
+        return False
+
+
 @dataclass(frozen=True)
 class AnalysisOptions:
     """Everything that changes an analysis result, in one place.
@@ -304,7 +345,9 @@ def analyze_path(
     """
     if thresholds is _UNSET:
         thresholds = load_thresholds(options)
-    if display is None and is_archive(path):
+    if display is None and (is_symlink_path(path) or is_archive(path)):
+        # G6: a symbolic link is a skipped row (scan's rule), an archive its
+        # container row — both from the folder scanner's own body.
         row = primary_row(analyze_rows(path, options, thresholds=thresholds))
         if root is not None:
             # Same naming rule as a row of a scan rooted at ``root``.
@@ -404,8 +447,12 @@ def scan_file(
     file_path = Path(path)
     if thresholds is _UNSET:
         thresholds = load_thresholds(options)
+    # G6: an explicitly named symbolic link gets the folder scan's rule — a
+    # skipped row with the reason, its target never opened or hashed.
+    link = is_symlink_path(file_path)
     summary, items = scan_paths(
-        [file_path],
+        [] if link else [file_path],
+        symlinks=[file_path] if link else None,
         root=file_path.parent,
         text_bytes=options.text_bytes,
         metadata_bytes=options.metadata_bytes,
@@ -523,6 +570,11 @@ def thresholds_warning_printer(stream: Any) -> WarnFn:
 __all__ = [
     "AnalysisOptions",
     "InvalidOption",
+    "SINGLE_FILE_IS_FOLDER",
+    "SINGLE_FILE_MISSING",
+    "SingleFileError",
+    "check_single_file",
+    "is_symlink_path",
     "WEB_MAX_FILE_BYTES_CEILING",
     "WEB_MAX_SCAN_FILES",
     "analyze_path",

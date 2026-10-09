@@ -147,11 +147,25 @@ def analysis_result_for_path(
     path: Path | str, options: Any, *, command: str, thresholds: Any = None,
 ) -> tuple[dict[str, Any], list[ScanItem]]:
     """``(analysis_result, rows)`` for a file — the folder scan's rows for it (B1)."""
-    from .analysis_api import analyze_rows
+    from .analysis_api import analyze_rows, is_symlink_path
 
     rows = analyze_rows(path, options, thresholds=thresholds)
-    payload = analysis_result_from_rows(rows, command=command, sha256=file_sha256(path), path=str(path))
+    # G6: a symbolic link is a skipped row; its target is never hashed.
+    digest = None if is_symlink_path(path) else file_sha256(path)
+    payload = analysis_result_from_rows(rows, command=command, sha256=digest, path=str(path))
     return payload, rows
+
+
+SYMLINK_LAYER_NOTE = "심볼릭 링크 — 링크를 따라가지 않으므로 이 계층을 실행하지 않았습니다(scan과 같은 규칙)"
+
+
+def symlink_layer(layer: str, layer_label: str) -> dict[str, Any]:
+    """The layer diagnostic for a symbolic-link target: not run, target not read (G6)."""
+    return to_layer_diagnostic(
+        layer,
+        {"reference_band": UNAVAILABLE_BAND, "reference_note": SYMLINK_LAYER_NOTE, "signals": [], "limitations": [SYMLINK_LAYER_NOTE]},
+        layer_label=layer_label,
+    )
 
 
 def member_rows_text(raw_rows: Any) -> list[str]:
@@ -361,6 +375,7 @@ __all__ = [
     "analysis_result_for_path",
     "analysis_result_from_rows",
     "analysis_result_payload",
+    "SYMLINK_LAYER_NOTE",
     "analyze_text_payload",
     "combined_verdict",
     "emit",
@@ -369,4 +384,5 @@ __all__ = [
     "format_analysis_result",
     "gated_pixel_layer",
     "member_rows_text",
+    "symlink_layer",
 ]

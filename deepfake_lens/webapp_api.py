@@ -219,11 +219,25 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
 
     if not file_path:
         return {"error": "파일 경로가 없습니다"}
+    from .analysis_api import SingleFileError, check_single_file, is_symlink_path
+    from .cli_standalone import symlink_layer
+
+    requested = Path(file_path).expanduser()
+    link = is_symlink_path(requested)
     # G31: confined to the operator roots even when none are registered
     # (then only the server's default folder) — raises ReadRootDenied (403).
-    path = _require_read_root(Path(file_path))
-    if not path.exists():
-        return {"error": f"파일이 존재하지 않습니다: {file_path}"}
+    # G6: a symbolic link is confined by where the link itself lives (its
+    # resolved folder + its own name) and analyzed like a scan row — skipped,
+    # target never opened — instead of being followed.
+    if link:
+        _require_read_root(requested.parent)
+        path = requested.parent.resolve() / requested.name
+    else:
+        path = _require_read_root(requested)
+    try:
+        check_single_file(path)
+    except SingleFileError as exc:
+        return {"error": str(exc)}
 
     options = _web_options()
     thresholds = load_thresholds(options)
@@ -235,6 +249,13 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
         # of a raw exception sentence; the type/message aid local debugging.
         return {"error": "파일 분석 중 오류가 발생했습니다", "detail": failure_reason(exc)}
     response["file"] = str(path)
+    if link:
+        response["layer_diagnostics"] = {
+            "provenance_metadata": symlink_layer("provenance_metadata", "출처 메타데이터 계층"),
+            "tool_candidates": symlink_layer("tool_attribution", "생성 도구 표지 대조"),
+        }
+        response.update(_provenance(options, thresholds))
+        return response
     layers: dict[str, Any] = {}
     try:
         from .c2pa import analyze_metadata_forensic

@@ -858,6 +858,92 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
                     self.assertEqual(statement, _normalize(json.loads(from_rows.read_text(encoding="utf-8")), prefixes))
                     self.assertEqual(sorted(entry["file_path"] for entry in statement["entries"]), sorted(expected))
 
+    def test_single_file_legs_symlinks_nested_tar_and_missing(self) -> None:
+        """QA-OUT-4: 보조 검사 — 단일 파일 경로(G5/G6, round 5): 심볼릭 링크(폴더 안·밖 대상),
+        중첩 zip, tar.gz, 없는 파일.
+
+        forensic / classify / explain / legal-report and /api/analyze-file
+        report exactly the folder scan's rows for each file: a symbolic link
+        is the scan's skipped row (never followed — no evidence, no target
+        hash), the nested zip and the tar.gz expand as in the scan; a missing
+        file or a folder is a Korean usage error (CLI exit 2, API error body),
+        never a traceback or a "판단 불가" report.
+        """
+        import io as _io
+        import tarfile
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            folder = write_hostile_folder(base / "case")
+            a1111 = (folder / "a1111.png").read_bytes()
+            inner = _io.BytesIO()
+            with zipfile.ZipFile(inner, "w") as zf:
+                zf.writestr("deep/gen.png", a1111)
+            with zipfile.ZipFile(folder / "nested.zip", "w") as zf:
+                zf.writestr("mid.zip", inner.getvalue())
+                zf.writestr("readme.txt", "메모")
+            with tarfile.open(folder / "gen.tar.gz", "w:gz") as tf:
+                info = tarfile.TarInfo("x/gen.png")
+                info.size = len(a1111)
+                tf.addfile(info, _io.BytesIO(a1111))
+            (folder / "in_link.png").symlink_to(folder / "a1111.png")
+            cli = _norm_payload(self._cli_payload(folder), folder)
+            prefixes = (str(folder),)
+            webapp_api.configure_read_roots(folder)
+            links = {"linked.png", "in_link.png"}
+            for name in ("nested.zip", "gen.tar.gz", *sorted(links)):
+                target = folder / name
+                expected = {path: row for path, row in cli["items"].items() if path == name or path.startswith(name + "::")}
+                own = expected[name]
+                with self.subTest(file=name):
+                    if name in links:
+                        self.assertEqual(own["status"], "skipped")
+                        self.assertIn("심볼릭 링크", str(own["error"]))
+                        self.assertIsNone(own["sha256"])
+                    else:
+                        self.assertGreater(len(expected), 1)  # member rows + container row
+                        self.assertEqual(own["result"]["verdict_code"], Verdict.MANIPULATION_EVIDENCE.value)
+                    for command in ("forensic", "classify", "explain", "legal-report"):
+                        payload = json.loads(self._cli_run([command, str(target), "--format", "json"]))
+                        rows = {row["path"]: _raw_item(row, prefixes) for row in payload["rows"]}
+                        self.assertEqual(rows, {path: _without_band(row) for path, row in expected.items()}, command)
+                        conclusion = payload["conclusion"] if command == "legal-report" else payload
+                        self.assertEqual(conclusion["verdict_code"], (own.get("result") or {}).get("verdict_code", Verdict.UNDETERMINED.value), command)
+                        digest = payload["file"]["sha256"] if command == "legal-report" else payload["sha256"]
+                        self.assertEqual(digest, own["sha256"], command)
+                        if name in links:
+                            self.assertEqual(payload["evidence"], [], command)  # the target was not analyzed
+                    response: dict[str, Any] = webapp_api._analyze_file_payload(urllib.parse.urlencode({"file": str(target)}))
+                    self.assertNotIn("error", response, "stdlib /api/analyze-file")
+                    rows = {row["path"]: _raw_item(row, prefixes) for row in response["rows"]}
+                    self.assertEqual(rows, {path: _without_band(row) for path, row in expected.items()}, "stdlib /api/analyze-file")
+                    self.assertEqual(response["sha256"], own["sha256"], "stdlib /api/analyze-file")
+                    if HAVE_FASTAPI:
+                        client = self._api_client(folder)
+                        api = client.get("/api/analyze-file", params={"file": str(target)}, headers={"host": "localhost", **CLIENT_HEADERS})
+                        self.assertEqual(api.status_code, 200, api.text)
+                        rows = {row["path"]: _raw_item(row, prefixes) for row in api.json()["rows"]}
+                        self.assertEqual(rows, {path: _without_band(row) for path, row in expected.items()}, "FastAPI")
+            # A missing file and a folder: Korean usage errors, nothing analyzed.
+            for target, message in (
+                (folder / "missing.png", f"오류: 파일을 찾을 수 없습니다: {folder / 'missing.png'}"),
+                (folder, f"오류: 파일이 아니라 폴더입니다: {folder} (폴더는 scan을 사용)"),
+            ):
+                for args in (
+                    ["forensic", str(target)], ["classify", str(target)], ["explain", str(target)],
+                    ["legal-report", str(target)], ["agent", "--file", str(target)], ["multimodal", str(target)],
+                ):
+                    with self.subTest(args=args[0], target=target.name):
+                        out, err = io.StringIO(), io.StringIO()
+                        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                            self.assertEqual(cli_main(args), 2)
+                        self.assertEqual(out.getvalue(), "")
+                        self.assertIn(message, err.getvalue())
+                        self.assertNotIn("Traceback", err.getvalue())
+                response = webapp_api._analyze_file_payload(urllib.parse.urlencode({"file": str(target)}))
+                self.assertEqual(response, {"error": message.removeprefix("오류: ")})
+
     def test_upload_reports_same_threshold_provenance(self) -> None:
         """QA-OUT-4 (GUI upload): /api/analyze-upload reports the thresholds it used and the scan's raw row."""
         boundary = "----qaout4"
