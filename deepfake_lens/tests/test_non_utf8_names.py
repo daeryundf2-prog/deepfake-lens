@@ -316,6 +316,47 @@ class NonUtf8NameServersTest(_EnvMixin):
         self.assertEqual(len(items), 1, items)
         self.assertEqual(items[0]["result"]["verdict_code"], Verdict.MANIPULATION_EVIDENCE.value, (name, items[0]))
 
+    # R12-10 (round 12): multipart file-name bytes -> the row's name. Before
+    # R12-10 every non-UTF-8 name became U+FFFD ("����.png").
+    UPLOAD_NAMES = (
+        (b'filename="' + CP949_NAME + b'"', "증거.png"),  # CP949 decoded
+        (b'filename="\xec\xa0\x95\xec\x83\x81.png"', "정상.png"),  # UTF-8
+        (b'filename="caf\xe9.png"', "caf\udce9.png"),  # neither: kept byte for byte
+        (b'filename="\x80\x81\xbf.png"', "\udc80\udc81\udcbf.png"),
+        (b"filename*=UTF-8''%EC%A6%9D%EA%B1%B0.png", "증거.png"),  # RFC 5987
+        (b'filename="q\\"uote.png"', 'q"uote.png'),
+    )
+
+    def _check_upload_names(self, name: str, call: Callable[..., tuple[int, bytes]]) -> None:
+        data = A1111.read_bytes()
+        for disposition, expected in self.UPLOAD_NAMES:
+            boundary = "----r12" + uuid.uuid4().hex
+            body = (
+                f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; ".encode("ascii") + disposition
+                + b"\r\nContent-Type: application/octet-stream\r\n\r\n" + data + f"\r\n--{boundary}--\r\n".encode("ascii")
+            )
+            ctype = f"multipart/form-data; boundary={boundary}"
+            # The web server's /api/check also takes a multipart upload; api-serve's
+            # /api/check takes file_path/text only (docs/deepfake-lens-service.md).
+            for endpoint in ("/api/analyze-upload", "/api/check") if name == "web" else ("/api/analyze-upload",):
+                with self.subTest(leg=name, endpoint=endpoint, disposition=disposition):
+                    status, raw = call("POST", endpoint, body, ctype)
+                    self.assertEqual(status, 200, raw[:300])
+                    payload = json.loads(raw.decode("utf-8"))
+                    row = payload["items"][0] if "items" in payload else payload["data"]["item"] if "data" in payload else payload["item"]
+                    self.assertEqual(row["name"], expected)
+                    self.assertEqual(row["display_name"], display_name(expected))
+                    self.assertNotIn("\ufffd", row["name"])
+                    self.assertNotIn("\ufffd", row["path"])
+                    self.assertEqual(row["result"]["verdict_code"], Verdict.MANIPULATION_EVIDENCE.value)
+
+    def test_web_upload_file_names(self) -> None:
+        self._check_upload_names("web", self._web())
+
+    @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed")
+    def test_api_upload_file_names(self) -> None:
+        self._check_upload_names("api", self._api())
+
     def test_web_server(self) -> None:
         self._check_leg("web", self._web())
 

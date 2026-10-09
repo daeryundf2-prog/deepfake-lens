@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import secrets
 import shutil
 import stat
@@ -715,6 +716,52 @@ def _model_active(item: dict[str, object]) -> bool:
     return isinstance(ma, dict) and bool(ma.get("available"))
 
 
+# R12-10 (round 12): the email parser decodes a multipart file name's raw
+# bytes as UTF-8 with replacement, so a CP949 name ("증거.png" from a Korean
+# Windows browser) or any other non-UTF-8 name became "����.png". The
+# Content-Disposition header is read as raw bytes (latin-1 round trip) and
+# its filename decoded as UTF-8, else CP949, else kept byte for byte with
+# surrogate escapes (shown "\\udcXX" by display_name). Encodings tried for a
+# plain filename="…" parameter, in order:
+FILENAME_ENCODINGS = ("utf-8", "cp949")
+_FILENAME_STAR = re.compile(rb"(?:^|;)\s*filename\*\s*=\s*\"?([^\";]*)\"?", re.IGNORECASE)
+_FILENAME = re.compile(rb'(?:^|;)\s*filename\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^;]*))', re.IGNORECASE)
+
+
+def _decode_filename_bytes(raw: bytes, charset: str = "") -> str:
+    """A file name's bytes as text: the declared charset, UTF-8, CP949, else surrogate escapes (R12-10)."""
+    for encoding in ((charset,) if charset else ()) + FILENAME_ENCODINGS:
+        try:
+            return raw.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return raw.decode("utf-8", "surrogateescape")
+
+
+def _part_filename(part) -> str | None:
+    """The multipart part's file name from its raw Content-Disposition bytes (R12-10)."""
+    from urllib.parse import unquote_to_bytes
+
+    raw = next((value for key, value in part.raw_items() if key.lower() == "content-disposition"), None)
+    if not isinstance(raw, str):
+        return part.get_filename()
+    # BytesParser keeps undecodable header bytes as surrogate escapes; unfold.
+    header = re.sub(rb"\r?\n[ \t]", b" ", raw.encode("ascii", "surrogateescape"))
+    star = _FILENAME_STAR.search(header)
+    if star is not None:
+        charset, _, rest = star.group(1).strip().partition(b"'")
+        _, _, encoded = rest.partition(b"'")
+        return _decode_filename_bytes(unquote_to_bytes(encoded), charset.decode("ascii", "replace"))
+    plain = _FILENAME.search(header)
+    if plain is None:
+        return part.get_filename()
+    if plain.group(1) is not None:
+        value = re.sub(rb"\\(.)", rb"\1", plain.group(1))
+    else:
+        value = plain.group(2).strip()
+    return _decode_filename_bytes(value)
+
+
 def _part_bytes(part) -> bytes | None:
     """Normalize a multipart payload to bytes (email API may return str)."""
     payload = part.get_payload(decode=True)
@@ -836,7 +883,7 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
     thresholds = load_thresholds(options)
     items: list[dict[str, object]] = []
     for part in message.iter_parts():
-        filename = part.get_filename()
+        filename = _part_filename(part)  # R12-10
         payload = _part_bytes(part)
         if not filename or payload is None:
             continue
@@ -975,12 +1022,12 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
         b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
     )
     part = next(
-        (p for p in message.iter_parts() if p.get_filename() and p.get_payload(decode=True)),
+        (p for p in message.iter_parts() if _part_filename(p) and p.get_payload(decode=True)),
         None,
     )
     if part is None:
         return ApiError("업로드된 파일이 없습니다", 400)
-    filename = part.get_filename() or "upload"
+    filename = _part_filename(part) or "upload"  # R12-10
     payload = _part_bytes(part) or b""
     suffix = Path(filename).suffix[:16]
     from .archives import is_archive
@@ -1049,14 +1096,14 @@ def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
         b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
     )
     parts = [
-        p for p in message.iter_parts() if p.get_filename() and _part_bytes(p)
+        p for p in message.iter_parts() if _part_filename(p) and _part_bytes(p)
     ]
     if len(parts) < 2:
         return ApiError("비교할 파일 2개가 필요합니다", 400)
     tmp_paths: list[Path] = []
     try:
         for part in parts[:2]:
-            suffix = Path(part.get_filename() or "upload").suffix[:16]
+            suffix = Path(_part_filename(part) or "upload").suffix[:16]
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
                 tmp.write(_part_bytes(part) or b"")
                 tmp_paths.append(Path(tmp.name))

@@ -160,6 +160,14 @@ always `0` invited old-contract readings. They remain readable as
   `/api/analyze-upload` and `/api/check`) is escaped like any real file's
   (`t:::c.png` → `t\:\:\:c.png`), so it never holds `::`; `name` is the name
   the client sent.
+- R12-10 (round 12): an uploaded file's `name` (and `path`) is the
+  multipart file name decoded from the raw `Content-Disposition` bytes —
+  `filename*=<charset>''…` per RFC 5987, else `filename="…"` as UTF-8, else
+  CP949 (a Korean Windows browser), else byte for byte with surrogate
+  escapes (JSON `\udcXX`, shown `\\udcXX` in `display_name`). It used to be
+  decoded with replacement, so every non-UTF-8 name became `����.png`. Same
+  on `/api/analyze-upload` (both servers), the web server's multipart
+  `/api/check` and `/api/compare`.
 - R12-9 (round 12): every report timestamp is ISO 8601 to the second with
   the UTC offset (`report_time.report_timestamp`, `2026-10-10T16:04:22+09:00`):
   the legal report's `generated_at` and its "분석 일시" line, the forensic
