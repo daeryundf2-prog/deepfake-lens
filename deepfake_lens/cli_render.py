@@ -31,6 +31,7 @@ from .result_types import (
     ScanItem,
     Verdict,
     is_verdict_row,
+    status_label,
 )
 from .signing import resolve_report_key, sign_report
 
@@ -86,14 +87,6 @@ def _maybe_sign(payload: dict[str, object], *, sign: bool, key_file: Path | None
     return signed
 
 
-def _has_subdirectories(folder: Path | str) -> bool:
-    """True when the scan root has child directories the non-recursive scan cannot enter."""
-    try:
-        return any(child.is_dir() for child in Path(folder).iterdir())
-    except OSError:
-        return False
-
-
 def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage: dict[str, object] | None = None, thresholds: object | None = None) -> None:
     if coverage is not None:
         wa_raw, wc_raw = coverage.get("weights_available", 0), coverage.get("weights_total", 0)
@@ -104,12 +97,16 @@ def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage:
         elif wa < wc:
             print(f"!! 신경망 가중치 부분 탑재 ({wa}/{wc}) — 일부 뉴럴 엔진이 실행되지 않았습니다 !!")
     if thresholds is not None and getattr(thresholds, "provisional", False):
-        print("!! 판정 임계값: 미측정 잠정값 — 표본 코퍼스 캘리브레이션 전까지 상대 우선순위로만 해석하세요 !!")
+        print("!! 판정 임계값: 미측정 잠정값 — 표본 코퍼스로 보정되기 전에는 임계값을 근거로 쓰지 마십시오 !!")
     if thresholds is not None and getattr(thresholds, "in_sample", False):
         # G28: fitted and evaluated on the same rows — reference only.
         print(f"!! 판정 임계값: {IN_SAMPLE_LABEL} — 적합에 쓴 같은 표본에서 평가된 값이라 감정 근거가 아닙니다 !!")
     cap_note = " (파일 수 상한 도달)" if summary.capped else ""
     print(summary_line(summary) + cap_note)
+    subfolders = getattr(summary, "subfolders_skipped", 0)
+    if subfolders:
+        # N8: a non-recursive scan never omits subfolders silently.
+        print(f"참고: 하위 폴더 {subfolders}개는 검사하지 않았습니다(바로 아래 파일만 검사) — 포함하려면 --recursive 를 추가하십시오.")
     print(
         "결론은 세 가지뿐입니다: 조작·생성 근거 있음 / 원본성 근거 있음 / 판단 불가. "
         "통계(모델)·어휘(키워드) 신호는 보정 전까지 결론을 바꾸지 않습니다."
@@ -140,7 +137,8 @@ def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage:
                 f"[{EVIDENCE_KIND_LABELS[top.kind]}] {top.title}" if top else "근거 항목 없음"
             ) + (f" | 실패: {'; '.join(entry.describe() for entry in gaps)}" if gaps else "")
         else:
-            verdict, grade, counts, checks = item.status, "-", "-", "-"
+            # N7: Korean status in the 결론 column (건너뜀/미지원/실패/중복).
+            verdict, grade, counts, checks = status_label(item.status), "-", "-", "-"
             reason = item.error or ""
         print(f"{verdict:<14} {grade:<4} {counts:<18} {checks:<20} {item.kind:<6} {item.path}  # {reason}")
     if hidden:

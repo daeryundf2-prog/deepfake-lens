@@ -67,6 +67,34 @@ class VerificationResult:
         return data
 
 
+class ReportKeyError(ValueError):
+    """An explicitly given key file is empty or unreadable (N8)."""
+
+
+# N8: Korean errors for an explicit --key-file that cannot sign.
+EMPTY_KEY_MESSAGE = "서명 키가 비어 있습니다"
+UNREADABLE_KEY_MESSAGE = "서명 키 파일을 읽을 수 없습니다"
+
+
+def load_key_file(key_file: Path | str) -> bytes:
+    """Key bytes from an explicitly given key file; :class:`ReportKeyError` if empty or unreadable.
+
+    A key file the examiner named but that holds no key must stop the run —
+    silently writing an unsigned report (or "signing" with an empty key)
+    would hide the mistake (N8).
+    """
+    path = Path(key_file)
+    try:
+        content = path.read_bytes().strip()
+    except OSError as exc:
+        from .error_text import exception_text
+
+        raise ReportKeyError(f"{UNREADABLE_KEY_MESSAGE}: {path.name} ({exception_text(exc)})") from exc
+    if not content:
+        raise ReportKeyError(f"{EMPTY_KEY_MESSAGE}: {path.name}")
+    return content
+
+
 def resolve_report_key(key_file: Path | str | None = None) -> bytes | None:
     """Key material for report signing.
 

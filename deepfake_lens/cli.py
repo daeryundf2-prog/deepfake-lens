@@ -15,7 +15,6 @@ from .calibration import MIN_CALIBRATION_SAMPLES, load_threshold_profile
 from .cli_parser import build_parser
 from .cli_render import (
     _file_text,
-    _has_subdirectories,
     _is_priority_row,
     _load_thresholds_arg,
     _maybe_sign,
@@ -37,7 +36,8 @@ from .release import write_release_checklist
 from .reports import write_eval_html_report, write_forensic_pdf_report, write_html_report, write_pdf_report
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, SUPPORTED_PIXEL_MODES
 from .security import write_security_check
-from .signing import resolve_report_key, sign_report
+from .signing import ReportKeyError, load_key_file, resolve_report_key, sign_report
+from .cli_logging import configure_cli_logging
 from .training import write_neural_training_plan
 from .audio import analyze_audio, AudioAnalysis
 from .face import analyze_faces, FaceAnalysis
@@ -343,6 +343,26 @@ def main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
+    # N8: an explicit --key-file must hold a key — checked before any work
+    # (a scan can run for hours), never discovered as an unsigned report.
+    key_file = getattr(args, "key_file", None)
+    if key_file is not None:
+        try:
+            load_key_file(key_file)
+        except ReportKeyError as exc:
+            print(f"오류: {exc}", file=sys.stderr)
+            return 4 if args.command == "verify-report" else 2
+    # N8: tracebacks of routine per-file failures go to the log file; stderr
+    # gets one Korean summary line (--verbose shows them).
+    logs = configure_cli_logging(bool(getattr(args, "verbose", False)))
+    try:
+        return _run_command(args, parser, cmd_parsers)
+    finally:
+        logs.finish()
+
+
+def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_parsers: dict[str, argparse.ArgumentParser]) -> int:
+    """Dispatch one parsed command (body of :func:`main`)."""
     if args.command == "corpus":
         from .corpus_manifest import run_corpus_cli
 
@@ -1009,9 +1029,6 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(analysis_scan_payload(summary, items, thresholds, options), ensure_ascii=False, indent=2))
     else:
         _print_table(summary, items, include_low=args.include_low, coverage=scan_coverage, thresholds=thresholds)
-        if not args.recursive and summary.total == 0 and _has_subdirectories(args.folder):
-            print()
-            print(f"힌트: '{args.folder}'의 직접 자식에는 파일이 없고 하위 폴더가 있습니다. --recursive 를 추가해 보세요.")
     return 0
 
 

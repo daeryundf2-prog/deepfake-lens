@@ -164,7 +164,7 @@ def fused_score(components: dict[str, int], profile: FusionProfile) -> int:
 
 
 FUSION_SIGNAL_TITLE = "융합 점수"
-FUSION_LIMITATION = "융합 점수는 손으로 정한 가중치의 우선순위 점수(참고)이며 결론에 참여하지 않습니다."
+FUSION_LIMITATION = "융합 점수는 손으로 정한 가중치의 참고 점수이며 결론에 참여하지 않습니다."
 
 
 def apply_fusion_to_result(result: ClassificationResult, profile: FusionProfile) -> ClassificationResult:

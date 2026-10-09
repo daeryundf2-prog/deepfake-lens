@@ -187,11 +187,14 @@
                 else if (wa < wt) parts.push(`신경망 가중치 일부 탑재 (${wa}/${wt}) — 미탑재 엔진의 판단이 빠져 있습니다.`);
             }
             if (thr.provisional || thr.source === 'builtin_defaults') {
-                parts.push('판정 임계값: <b>미측정 잠정값</b> — 라벨 코퍼스 캘리브레이션 전까지 절대 점수가 아닌 상대 우선순위로만 해석하세요.');
+                parts.push('판정 임계값: <b>미측정 잠정값</b> — 라벨 코퍼스로 보정되기 전에는 임계값을 근거로 쓰지 마십시오.');
             }
             if (thr.in_sample) parts.push('판정 임계값: <b>in-sample(참고)</b> — 적합에 쓴 같은 표본에서 평가된 값이라 감정 근거가 아닙니다.');
+            // N8: a non-recursive scan never omits subfolders silently.
+            const skippedDirs = (lastProvenance.summary || {}).subfolders_skipped || 0;
+            if (skippedDirs) parts.push(`하위 폴더 <b>${skippedDirs}개는 검사하지 않았습니다</b> — 포함하려면 '하위 폴더' 옵션을 켜고 다시 검사하십시오.`);
             if (!parts.length) return '';
-            return `<div class="prov-banner" role="status">${parts.map(p => `<p>${p}</p>`).join('')}<p class="note">이 결과는 스크리닝 우선순위 신호이며 유죄·불법성의 확정 판정이 아닙니다.</p></div>`;
+            return `<div class="prov-banner" role="status">${parts.map(p => `<p>${p}</p>`).join('')}<p class="note">이 결과는 결론과 근거로 읽으십시오; 점수는 보정된 경우에만 표시됩니다. 유죄·불법성의 확정 판정이 아닙니다.</p></div>`;
         }
 
         function escapeHtml(value) {
@@ -1336,7 +1339,7 @@
             if (thr.provisional || thr.source === 'builtin_defaults') parts.push('잠정 임계값(미측정)');
             if (thr.in_sample) parts.push('임계값 in-sample(참고)');
             if (!parts.length) return '';
-            return `<div class="prov-note">${parts.join(' · ')} — 스크리닝 우선순위 신호이며 확정 판정이 아닙니다.</div>`;
+            return `<div class="prov-note">${parts.join(' · ')} — 이 결과는 결론과 근거로 읽으십시오; 점수는 보정된 경우에만 표시됩니다.</div>`;
         }
 
         function renderQuickCheck(data) {

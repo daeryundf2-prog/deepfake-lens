@@ -193,6 +193,7 @@ def scan_directory(
     thresholds: object | None = None,
     should_stop: Callable[[], bool] | None = None,
     progress: "ScanProgress | None" = None,
+    on_plan: Callable[[int], None] | None = None,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
     """Scan a folder: enumerate, expand archives, analyze every entry.
 
@@ -202,6 +203,11 @@ def scan_directory(
     reports per-file progress from the same scan the CLI runs). ``planned``
     is the number of rows known so far; the final, sorted list is the
     return value.
+
+    ``on_plan(planned)`` is called once with the number of rows the scan
+    will report, before the first file is analyzed (N8: a cancelled stream
+    reports it as ``total``). A non-recursive scan counts the subfolders it
+    did not enter in ``summary.subfolders_skipped`` (N8).
     """
     root = Path(directory)
     if not root.is_dir():
@@ -222,6 +228,7 @@ def scan_directory(
         paths.append(path)
     return scan_paths(
         paths, root=root, capped=capped, iter_errors=iter_errors, symlinks=symlinks,
+        subfolders_skipped=0 if recursive else count_subfolders(root), on_plan=on_plan,
         text_bytes=text_bytes, metadata_bytes=metadata_bytes,
         pixel_mode=pixel_mode, pixel_max_side=pixel_max_side,
         heatmaps=heatmaps, heatmap_dir=heatmap_dir, model_path=model_path,
@@ -233,6 +240,26 @@ def scan_directory(
 
 # progress(item, done, planned) — see scan_directory.
 ScanProgress = Callable[[ScanItem, int, int], None]
+
+
+def count_subfolders(root: Path) -> int:
+    """Subfolders directly under ``root`` that a non-recursive scan does not enter (N8).
+
+    A symlinked folder is not counted — it is reported as a skipped
+    symlink row instead (D10).
+    """
+    count = 0
+    try:
+        entries = list(root.iterdir())
+    except OSError:
+        return 0
+    for entry in entries:
+        try:
+            if entry.is_dir() and not entry.is_symlink():
+                count += 1
+        except OSError:
+            continue
+    return count
 
 
 class _ProgressReporter:
@@ -286,6 +313,8 @@ def scan_paths(
     thresholds: object | None = None,
     should_stop: Callable[[], bool] | None = None,
     progress: ScanProgress | None = None,
+    subfolders_skipped: int = 0,
+    on_plan: Callable[[int], None] | None = None,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
     """Analyze already-enumerated ``paths`` under ``root`` like a folder scan.
 
@@ -307,7 +336,7 @@ def scan_paths(
             model_path=model_path, cache_path=cache_path, workers=workers,
             max_file_bytes=max_file_bytes, dedupe=dedupe, hash_db_path=hash_db_path,
             deep_signals=deep_signals, thresholds=thresholds, should_stop=should_stop,
-            progress=progress,
+            progress=progress, subfolders_skipped=subfolders_skipped, on_plan=on_plan,
         )
 
 
@@ -334,6 +363,8 @@ def _scan_paths(
     thresholds: object | None,
     should_stop: Callable[[], bool] | None,
     progress: ScanProgress | None,
+    subfolders_skipped: int,
+    on_plan: Callable[[int], None] | None,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
     iter_errors = list(iter_errors or [])
     symlinks = list(symlinks or [])
@@ -380,7 +411,13 @@ def _scan_paths(
                 member_rel = member.relative_to(dest).as_posix()
                 specs.append((member, f"{rel}::{member_rel}"))
 
-        report = _ProgressReporter(progress, len(specs) + len(archive_members) + len(iter_errors) + len(symlinks))
+        planned = len(specs) + len(archive_members) + len(iter_errors) + len(symlinks)
+        if on_plan is not None:
+            try:
+                on_plan(planned)
+            except Exception:
+                logger.exception("scan plan callback failed")
+        report = _ProgressReporter(progress, planned)
         summary, items = _scan_specs(
             specs, duplicates_paths=[p for p, d in specs if d is None],
             archive_members=archive_members, archive_meta=archive_meta, root=root, dedupe=dedupe,
@@ -413,6 +450,8 @@ def _scan_paths(
             items.extend(extra)
             items = sort_items(items)
             summary = summarize(items, capped=summary.capped, cached=summary.cached)
+        if subfolders_skipped:
+            summary = replace(summary, subfolders_skipped=subfolders_skipped)
         return summary, items
     finally:
         for temp_dir in temp_dirs:
@@ -981,12 +1020,14 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
             raise AnalyzerError(face.reference_note)
         return face
 
+    from .face import manipulation_type_label
+
     face, entry = run_check("face_manipulation", face_check)
     out.coverage.append(entry)
     if face is not None:
         if face.score > 0:
             out.reference.append(deep_layer_reference(
-                "얼굴 조작 분석", f"얼굴 {face.face_count}개, 신호 {len(face.signals)}개, 유형 추정 {face.manipulation_type}", face.score,
+                "얼굴 조작 분석", f"얼굴 {face.face_count}개, 신호 {len(face.signals)}개, 유형 추정: {manipulation_type_label(face.manipulation_type)}", face.score,
             ))
         out.limitations.extend(face.limitations[:2])
 

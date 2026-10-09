@@ -234,7 +234,7 @@ def _features_failed_analysis(model_analysis: ExternalModelAnalysis | None, reas
         )
 
     score = min(100, model_signal.weight)
-    limitations = [message, "외부 모델 점수만 반영된 결과입니다 — 우선순위 신호이며 확정 판별이 아닙니다."]
+    limitations = [message, "외부 모델 원점수만 있는 결과입니다(보정 전 — 결론에 참여하지 않음) — 이 결과는 결론과 근거로 읽으십시오; 점수는 보정된 경우에만 표시됩니다."]
     if model_analysis:
         limitations.extend(model_analysis.limitations)
     return AudioAnalysis(

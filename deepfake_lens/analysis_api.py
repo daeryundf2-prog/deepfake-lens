@@ -21,7 +21,7 @@ exists inside the server's models directory (:class:`InvalidOption` → 400).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Callable, Mapping
 
@@ -295,6 +295,7 @@ def scan_folder(
     *,
     warn: WarnFn | None = None,
     progress: ScanProgress | None = None,
+    on_plan: Callable[[int], None] | None = None,
 ) -> tuple[BatchScanSummary, list[ScanItem], Any]:
     """Scan a folder; returns ``(summary, items, thresholds)``.
 
@@ -328,6 +329,7 @@ def scan_folder(
         thresholds=thresholds,
         should_stop=should_stop,
         progress=progress,
+        on_plan=on_plan,
     )
     return _with_fusion(summary, items, options) + (thresholds,)
 
@@ -375,7 +377,10 @@ def _with_fusion(
         from .fusion import apply_fusion_to_items
 
         items = apply_fusion_to_items(items, fusion)
-        summary = summarize(items, capped=summary.capped, cached=summary.cached)
+        summary = replace(
+            summarize(items, capped=summary.capped, cached=summary.cached),
+            subfolders_skipped=summary.subfolders_skipped,
+        )
     return summary, items
 
 

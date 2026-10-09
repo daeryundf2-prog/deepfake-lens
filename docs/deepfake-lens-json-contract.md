@@ -64,6 +64,7 @@ per-file coverage record:
 | `undetermined` | Verdict rows whose verdict is `undetermined`. |
 | `checks_failed` | Verdict rows with at least one `failed` coverage entry. |
 | `container_rows` | Verdict rows that are archive container rows (`kind: "archive"`) — already included in the three verdict counts (R5); the CLI/HTML/PDF header prints `총 N건(압축 파일 M건 포함)` and the GUI total pill `압축 파일 M건 포함` (N5). A container row carries one evidence item of its own: `압축 파일 구성원 결론 집계` — `조작·생성 근거 있음 N건 / 판단 불가 M건` (` / 원본성 근거 있음 K건` when K > 0), deterministic, neutral, moderate, layer `archive` — so the table and the evidence statement name the basis of its verdict. |
+| `subfolders_skipped` | Subfolders directly under the scanned folder that a non-recursive scan did not enter (a symlinked folder is a skipped row instead); 0 for `--recursive`. The CLI table prints `참고: 하위 폴더 N개는 검사하지 않았습니다 … --recursive`, the GUI banner says the same (N8). |
 
 A *verdict row* is any item with a `result` whose `status` is not `failed`,
 `unsupported`, `duplicate` or `skipped` (`result_types.is_verdict_row`) —

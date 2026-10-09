@@ -36,7 +36,8 @@
         ]
       },
       "properties": {
-        "container_rows": { "type": "integer", "minimum": 0, "description": "Archive container rows among the verdict rows (already in the verdict counts, R5/N5)." }
+        "container_rows": { "type": "integer", "minimum": 0, "description": "Archive container rows among the verdict rows (already in the verdict counts, R5/N5)." },
+        "subfolders_skipped": { "type": "integer", "minimum": 0, "description": "Subfolders of the scan root a non-recursive scan did not enter (0 when recursive) — never omitted silently (N8)." }
       },
       "description": "Verdict counts only (D16): the legacy band counts high/medium/low/unknown are not serialized."
     },

@@ -79,7 +79,9 @@ def main() -> int:
             assert banner.is_visible(), "provenance banner not shown after degraded scan"
             banner_text = banner.inner_text()
             assert "신경망 미탑재(측정 게이트 미충족)" in banner_text, f"unexpected banner: {banner_text}"  # D16
-            assert "우선순위" in banner_text, "screening-priority disclaimer missing"
+            # R16: the disclaimer reads in the three-verdict language, never "우선순위".
+            assert "이 결과는 결론과 근거로 읽으십시오; 점수는 보정된 경우에만 표시됩니다" in banner_text, "three-verdict disclaimer missing"
+            assert "우선순위" not in banner_text, "banner still calls the result a priority signal"
             # D16: 결론순 is the default (and only verdict) ordering; no 점수순/위험도순.
             assert page.locator("#res-sort").input_value() == "verdict", "default sort must be 결론순"
             assert page.locator("#res-sort option[value='score']").count() == 0, "점수순 sort must be gone"

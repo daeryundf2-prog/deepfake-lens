@@ -120,6 +120,8 @@ def explain_face_classification(
     manipulation_type: str = "unknown",
 ) -> XAIExplanation:
     """Generate explanation for face classification."""
+    from .face import manipulation_type_label
+
     explanation = explain_classification(score, signals)
     
     # Add face-specific context
@@ -131,7 +133,7 @@ def explain_face_classification(
             signal_count=explanation.signal_count,
             summary=explanation.summary + f" {face_count}개의 얼굴이 감지되었습니다.",
             feature_importances=explanation.feature_importances,
-            decision_path=explanation.decision_path + [f"얼굴 조작 유형 추정(휴리스틱): {manipulation_type}"],
+            decision_path=explanation.decision_path + [f"얼굴 조작 유형 추정(휴리스틱): {manipulation_type_label(manipulation_type)}"],
             limitations=explanation.limitations,
         )
     

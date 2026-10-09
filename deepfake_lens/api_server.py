@@ -179,7 +179,7 @@ def create_app(
         from fastapi.responses import JSONResponse
         from starlette.concurrency import run_in_threadpool
     except ImportError:
-        raise ImportError("FastAPI가 필요합니다. 설치: pip install fastapi uvicorn")
+        raise ImportError("FastAPI가 필요합니다. 설치: `pip install fastapi uvicorn`")
 
     from .analysis_api import analyze_path, load_thresholds
     from .webapp_api import ReadRootDenied, read_root_denied_body
@@ -202,14 +202,15 @@ def create_app(
                     (supplied := request.headers.get(name)) and secrets.compare_digest(supplied, token)
                     for name in TOKEN_HEADERS
                 ):
-                    return JSONResponse({"status": "error", "message": "unauthorized"}, status_code=401)
+                    # N7: Korean body (the status code stays the machine-readable part).
+                    return JSONResponse({"status": "error", "message": "인증 실패: API 토큰이 없거나 일치하지 않습니다"}, status_code=401)
             elif host_name(request.headers.get("host", "")) not in allowed_hosts:
                 return JSONResponse({"status": "error", "message": "허용되지 않은 호스트입니다"}, status_code=403)
             elif (
                 request.url.path not in CLIENT_HEADER_EXEMPT_PATHS
             ) and not (request.headers.get(CLIENT_HEADER) or "").strip():
                 return JSONResponse(
-                    {"status": "error", "message": f"missing {CLIENT_HEADER} header"},
+                    {"status": "error", "message": f"{CLIENT_HEADER} 헤더가 필요합니다(브라우저 밖에서 온 요청 차단)"},
                     status_code=401,
                 )
         return await call_next(request)
@@ -744,8 +745,16 @@ def create_app(
             )
             events: queue.Queue[Any] = queue.Queue()
             outcome: dict[str, Any] = {}
+            # N8: rows planned (known before the first file) and rows done,
+            # for the cancelled event.
+            tally = {"planned": 0, "done": 0}
+
+            def on_plan(planned: int) -> None:
+                tally["planned"] = planned
 
             def on_row(item: Any, done: int, planned: int) -> None:
+                tally["done"] = done
+                tally["planned"] = max(tally["planned"], planned)
                 data = item.to_json()
                 result = data.get("result") or {}
                 events.put(("progress", {
@@ -756,7 +765,7 @@ def create_app(
 
             def work() -> None:
                 try:
-                    outcome["value"] = scan_folder(root, options, should_stop=cancel.is_set, progress=on_row)
+                    outcome["value"] = scan_folder(root, options, should_stop=cancel.is_set, progress=on_row, on_plan=on_plan)
                 except Exception as exc:  # noqa: BLE001 - reported as an SSE error event
                     logger.exception("streaming scan failed: %s", root)
                     outcome["error"] = exc
@@ -775,7 +784,9 @@ def create_app(
                 return
             summary, items, thresholds = outcome["value"]
             if cancel.is_set():
-                yield ("cancelled", {"job_id": job_id, "processed": sum(1 for i in items if i.error != "검사가 취소되었습니다"), "total": len(items)})
+                # N8: total = rows the scan planned, done = rows processed
+                # before the cancel (processed kept as the old name of done).
+                yield ("cancelled", {"job_id": job_id, "done": tally["done"], "processed": tally["done"], "total": tally["planned"]})
                 return
             payload = scan_payload(summary, items, thresholds, options)
             # Rows are the /api/scan rows; verdict_code/grade/probability are
@@ -1028,7 +1039,7 @@ def server_dependency_hint(missing: list[str]) -> str:
     """Korean install hint printed when ``api-serve`` cannot start."""
     return (
         f"오류: API 서버에 필요한 패키지가 설치되어 있지 않습니다: {', '.join(missing)}\n"
-        f"설치: pip install {' '.join(missing)}\n"
+        f"설치: `pip install {' '.join(missing)}`\n"
         "설치 없이 쓰려면 내장 웹 서버를 사용하세요: deepfake-lens web"
     )
 

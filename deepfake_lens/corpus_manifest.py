@@ -417,24 +417,24 @@ def _resolve_root(manifest: dict[str, Any], manifest_path: Path, root: Path | No
 def add_corpus_parser(subparsers: Any) -> argparse.ArgumentParser:
     """Register ``corpus build|split|verify`` on the CLI's subparsers."""
     corpus_parser: argparse.ArgumentParser = subparsers.add_parser(
-        "corpus", help="build, split and verify reproducible corpus manifests (corpus-manifest-v1)"
+        "corpus", help="재현 가능한 코퍼스 매니페스트(corpus-manifest-v1) 생성·분할·검증"
     )
     corpus_sub = corpus_parser.add_subparsers(dest="corpus_command")
-    build = corpus_sub.add_parser("build", help="hash every file under DIR into a manifest")
-    build.add_argument("folder", type=Path, help="corpus root directory")
-    build.add_argument("--out", type=Path, required=True, help="manifest JSON to write")
-    build.add_argument("--label-from-dir", action="store_true", help="read label/generator/variant from <label>/<generator>/<variant>/file")
-    build.add_argument("--corpus-id", help="corpus identifier (default: directory name)")
-    build.add_argument("--source-note", default="", help="provenance note copied to every item")
-    split = corpus_sub.add_parser("split", help="assign train/val/test so derived variants share a split")
-    split.add_argument("--manifest", type=Path, required=True)
-    split.add_argument("--seed", type=int, required=True)
-    split.add_argument("--ratio", default=DEFAULT_RATIO, help="train/val/test ratio (default 60/20/20)")
-    split.add_argument("--group-by", default=DEFAULT_GROUP_BY, help="item field whose equal values stay together (default: origin = sha256 of the original via derived_from)")
-    split.add_argument("--out", type=Path, help="write here instead of rewriting --manifest")
-    verify = corpus_sub.add_parser("verify", help="re-hash files and check manifest_sha256")
-    verify.add_argument("--manifest", type=Path, required=True)
-    verify.add_argument("--root", type=Path, help="corpus root (default: root_hint in the manifest, else its directory)")
+    build = corpus_sub.add_parser("build", help="폴더 아래 모든 파일의 해시로 매니페스트 생성")
+    build.add_argument("folder", type=Path, help="코퍼스 최상위 폴더")
+    build.add_argument("--out", type=Path, required=True, help="저장할 매니페스트 JSON")
+    build.add_argument("--label-from-dir", action="store_true", help="<라벨>/<생성기>/<변형>/파일 경로에서 label/generator/variant를 읽음")
+    build.add_argument("--corpus-id", help="코퍼스 식별자(기본: 폴더 이름)")
+    build.add_argument("--source-note", default="", help="모든 항목에 복사할 출처 메모")
+    split = corpus_sub.add_parser("split", help="train/val/test 배정(같은 원본의 변형은 같은 split)")
+    split.add_argument("--manifest", type=Path, required=True, help="분할할 매니페스트 JSON")
+    split.add_argument("--seed", type=int, required=True, help="분할 시드(정수)")
+    split.add_argument("--ratio", default=DEFAULT_RATIO, help="train/val/test 비율(기본 60/20/20)")
+    split.add_argument("--group-by", default=DEFAULT_GROUP_BY, help="값이 같으면 같은 split에 둘 항목 필드(기본: origin = derived_from으로 찾은 원본의 sha256)")
+    split.add_argument("--out", type=Path, help="--manifest를 덮어쓰지 않고 이 파일에 저장")
+    verify = corpus_sub.add_parser("verify", help="파일을 다시 해시해 manifest_sha256 확인")
+    verify.add_argument("--manifest", type=Path, required=True, help="검증할 매니페스트 JSON")
+    verify.add_argument("--root", type=Path, help="코퍼스 최상위 폴더(기본: 매니페스트의 root_hint, 없으면 매니페스트가 있는 폴더)")
     return corpus_parser
 
 

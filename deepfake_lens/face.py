@@ -94,6 +94,20 @@ FACE_STATUS_FAILED = "failed"
 # says what happened — no face found, or the analysis did not run.
 NO_FACE_LABEL = "얼굴 미검출"
 NOT_APPLICABLE_LABEL = "해당 없음"
+# N7: Korean display label of each manipulation_type identifier (the
+# identifier itself stays in the JSON field; text shown to the examiner
+# uses the label).
+MANIPULATION_TYPE_LABELS = {
+    "face_swap": "얼굴 교체(face swap) 추정",
+    "reenactment": "표정·동작 재연(reenactment) 추정",
+    "face_paste": "얼굴 붙여넣기 추정",
+    "unknown": "유형 미상",
+}
+
+
+def manipulation_type_label(manipulation_type: str) -> str:
+    """Korean label for a manipulation_type value (labels pass through unchanged)."""
+    return MANIPULATION_TYPE_LABELS.get(manipulation_type, manipulation_type)
 
 
 def _imread_unicode(path: Path | str):
@@ -133,7 +147,7 @@ def analyze_faces(
         import cv2
         import numpy as np
     except ImportError:
-        return _error_analysis("opencv가 설치되어 있지 않습니다. pip install opencv-python로 설치하세요.")
+        return _error_analysis("opencv가 설치되어 있지 않습니다. `pip install opencv-python`로 설치하세요.")
 
     try:
         image = _imread_unicode(image_path)

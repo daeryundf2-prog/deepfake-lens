@@ -365,6 +365,22 @@ class RendererTest(unittest.TestCase):
         self.assertNotIn("검토 우선순위", gui)
         self.assertIn("결론과 근거를 확인하십시오. 숫자 점수는 보정된 경우에만 표시됩니다.", gui)
 
+    def test_no_priority_banner_anywhere_user_facing(self) -> None:
+        """R16: no banner, note or limitation calls a result a (screening/review) "우선순위" signal."""
+        import re
+
+        package = Path(__file__).resolve().parents[1]
+        for name in ("gui.js", "gui.html", "audio.py", "cli_render.py", "fusion.py", "reports.py", "result_text.py", "evidence_statement.py", "core.py"):
+            text = (package / name).read_text(encoding="utf-8")
+            strings = re.findall(r"(?:'[^'\n]*'|\"[^\"\n]*\"|`[^`]*`|>[^<]+<)", text)
+            offenders = [s for s in strings if "우선순위" in s]
+            with self.subTest(file=name):
+                self.assertEqual(offenders, [])
+        gui_js = (package / "gui.js").read_text(encoding="utf-8")
+        self.assertEqual(gui_js.count("이 결과는 결론과 근거로 읽으십시오; 점수는 보정된 경우에만 표시됩니다"), 2)  # banner note + quick-check note
+        audio = (package / "audio.py").read_text(encoding="utf-8")
+        self.assertIn("이 결과는 결론과 근거로 읽으십시오; 점수는 보정된 경우에만 표시됩니다", audio)
+
     def test_html_report_groups_evidence_and_coverage(self) -> None:
         from deepfake_lens.reports import write_html_report
 

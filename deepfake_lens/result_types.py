@@ -412,6 +412,9 @@ class BatchScanSummary:
     # N5: archive container rows among the verdict rows (each archive adds
     # its own roll-up row beside its member rows; R5 counts it by verdict).
     container_rows: int = 0
+    # N8: subfolders of the scan root a non-recursive scan did not enter
+    # (0 for a recursive scan) — so they are never silently omitted.
+    subfolders_skipped: int = 0
 
     def to_json(self) -> dict[str, object]:
         # D16: the summary JSON counts verdicts only. The legacy band counts

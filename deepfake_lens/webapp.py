@@ -186,7 +186,7 @@ def build_server(
                 # DNS-rebinding guard: a remote page must not be able to reach
                 # this server by pointing a hostname at 127.0.0.1.
                 if host_name(self.headers.get("Host") or "") not in LOCAL_HOSTS:
-                    self.send_error(403, "host not allowed")
+                    self.send_error(403, "허용되지 않은 호스트입니다")  # N7
                     return False
             return True
 
