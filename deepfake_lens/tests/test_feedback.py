@@ -175,6 +175,73 @@ class FeedbackReportTest(unittest.TestCase):
         self.assertEqual(len(observations), 1)  # unique basename matched
         self.assertEqual(unmatched, ["/elsewhere/none.png"])
 
+    def test_r10_4_labels_join_on_the_real_path_of_escaped_and_member_rows(self) -> None:
+        """R10-4: rows of real names with "::"/"\\:" are escaped (R9-1); labels name the real file."""
+        member = _item("evil.zip::inner/a.png", 71, 71)
+        member.update({"container": "evil.zip", "member": "inner/a.png"})
+        payload = {"items": [
+            _item("tri\\:\\:\\:c.png", 61, 61),
+            _item("a\\\\\\:b.png", 62, 62),
+            _item("x\\:\\:y.png", 63, 63),
+            _item("evil.zip\\:\\:inner/a.png", 64, 64),  # a real folder named "evil.zip::inner"
+            member,
+            _item("one/dup.png", 65, 65),
+            _item("two/dup.png", 66, 66),
+        ]}
+        entries = [
+            FeedbackEntry("/case/tri:::c.png", "ai"),
+            FeedbackEntry("/case/a\\:b.png", "ai"),
+            FeedbackEntry("x::y.png", "ai"),
+            FeedbackEntry("evil.zip\\:\\:inner/a.png", "ai"),  # the recorded path of the real folder's file
+            FeedbackEntry("evil.zip::inner/a.png", "ai"),  # the recorded path of the member row
+            FeedbackEntry("/case/evil.zip::inner/a.png", "ai"),  # real folder file or member: ambiguous
+            FeedbackEntry("/case/two/dup.png", "real"),  # path suffix, not the ambiguous basename
+            FeedbackEntry("/case/dup.png", "real"),  # ambiguous basename: unmatched
+        ]
+        observations, unmatched = observations_from_scan_payload(payload, entries)
+        self.assertEqual(unmatched, ["/case/evil.zip::inner/a.png", "/case/dup.png"])
+        self.assertEqual([observation.score for observation in observations], [61, 62, 63, 64, 71, 66])
+        # The member row is reached by its container/member fields.
+        observations, unmatched = observations_from_scan_payload({"items": [member]}, [FeedbackEntry("/case/evil.zip::inner/a.png", "ai")])
+        self.assertEqual((unmatched, [observation.score for observation in observations]), ([], [71]))
+
+    def test_r10_4_feedback_cli_matches_colon_names_of_a_real_scan(self) -> None:
+        import contextlib
+        import io
+        import os
+
+        from deepfake_lens import cli
+
+        fixtures = Path(__file__).resolve().parents[2] / "fixtures" / "benchmark"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            folder = root / "colons"
+            folder.mkdir()
+            names = ("tri:::c.png", "x::y.png", "a\\:b.png", "plain.png")
+            for index, name in enumerate(names):
+                source = "a1111-metadata-marker.png" if index % 2 == 0 else "real-like-texture.png"
+                (folder / name).write_bytes((fixtures / source).read_bytes())
+            labels = root / "labels.jsonl"
+            labels.write_text("".join(json.dumps({"path": str(folder / name), "expected_label": "ai"}) + "\n" for name in names), encoding="utf-8")
+            saved = {key: os.environ.get(key) for key in ("HOME", "DEEPFAKE_LENS_LOG_DIR")}
+            os.environ["HOME"] = str(root)
+            os.environ["DEEPFAKE_LENS_LOG_DIR"] = str(root / "logs")
+            try:
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(cli.main(["scan", str(folder), "--json-out", str(root / "scan.json")]), 0)
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(cli.main(["feedback", str(labels), "--scan-json", str(root / "scan.json")]), 0)
+            finally:
+                for key, value in saved.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
+            report = json.loads(out.getvalue())
+            self.assertEqual((report["entries"], report["matched"], report["unmatched"]), (4, 4, []))
+
     def test_empty_feedback_is_noop_with_message(self) -> None:
         report = build_feedback_report([], [], [])
         self.assertEqual(report["matched"], 0)

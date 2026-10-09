@@ -36,7 +36,7 @@ command prints a band (높음/주의/낮음) or a "의심 신호가 강합니다
 - `eval <folder>`: labeled-dataset metrics (accuracy/precision/recall/FPR, AUROC, EER, per-split), each AUROC/recall/FPR with a 95% bootstrap CI and n_pos/n_neg, on raw uncalibrated member scores (`score_basis: "raw, uncalibrated"`).
 - `benchmark <folder>`: pixel-mode/model matrix benchmark.
 - `fusion <folder> --out` / `calibrate <folder> --out` / `train <folder> --out`: fusion profile, threshold calibration, portable baseline.
-- `feedback <labels.jsonl>`: join examiner verdicts (`{path, expected_label, notes?}`) to a prior `--scan-json` payload or a live rescan; emits a per-signal accuracy report and an advisory `--profile-out` fusion-weight suggestion (never applied automatically; thresholds are left unchanged).
+- `feedback <labels.jsonl>`: join examiner verdicts (`{path, expected_label, notes?}`) to a prior `--scan-json` payload or a live rescan; emits a per-signal accuracy report and an advisory `--profile-out` fusion-weight suggestion (never applied automatically; thresholds are left unchanged). A label is joined to a `--scan-json` row (R10-4) by, in order: the row's recorded `path`; its real path (the unescaped path of a real file — `tri:::c.png` for the row `tri\:\:\:c.png` — or `<container>::<member>` from a member row's fields); the row whose real path ends the label path (an absolute label against a row relative to the scan root); the file name. The first rule with candidates decides; a label that several rows fit is listed in `unmatched`.
 - `models [--focus]`: detector registry and runtime profile scaffolding.
 - `train-neural-plan <folder> --out`: neural training/ONNX handoff plan.
 - `video <folder> --out --frame-root`: video frame extraction plan (ffmpeg optional).

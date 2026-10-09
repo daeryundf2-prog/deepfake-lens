@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Iterable
 
 from .calibration import auroc, binary_metrics
 from .core import analyze_file
 from .datasets import is_negative_label, is_positive_label
 from .fusion import DEFAULT_FUSION_PROFILE, FusionProfile, component_scores, component_scores_from_json
+from .result_text import member_row_path, row_identity, unescape_row_path
 
 
 FEEDBACK_REPORT_VERSION = "feedback-report-v1"
@@ -140,29 +141,83 @@ def _entry_from_row(row: dict) -> FeedbackEntry | None:
     return FeedbackEntry(path=path, expected_label=label, notes=str(row.get("notes", "") or ""), embedded_result=embedded)
 
 
+def _real_row_path(item: dict) -> str:
+    """The real path a scan row stands for (R10-4).
+
+    A top-level row's ``path`` is escaped when the real name holds "::" or
+    "\\:" (R9-1: "tri:::c.png" is the row "tri\\:\\:\\:c.png"); a member row is
+    its ``container``/``member`` fields. Labels name real files, so the join
+    key is the unescaped path ("<container>::<member>" for a member).
+    """
+    container, member = row_identity(item)
+    real = unescape_row_path(container)
+    return real if member is None else member_row_path(real, member)
+
+
+def _path_suffix_of(entry_path: str, real: str) -> bool:
+    """``real`` (a row path relative to the scan root) ends ``entry_path`` at a path boundary."""
+    if not real:
+        return False
+    if entry_path == real:
+        return True
+    return any(entry_path.endswith(sep + real) for sep in ("/", "\\"))
+
+
+def _unique_match(
+    entry_path: str,
+    by_recorded: dict[str, dict],
+    by_real: dict[str, list[dict]],
+    real_paths: list[tuple[str, dict]],
+    by_basename: dict[str, list[dict]],
+) -> dict | None:
+    """The one scan row a label names (R10-4), or None when none or several do."""
+    if entry_path in by_recorded:
+        return by_recorded[entry_path]
+    for candidates in (
+        by_real.get(entry_path),
+        [item for real, item in real_paths if _path_suffix_of(entry_path, real)],
+        by_basename.get(PurePath(entry_path).name),
+    ):
+        if candidates:
+            return candidates[0] if len(candidates) == 1 else None
+    return None
+
+
 def observations_from_scan_payload(
     scan_payload: dict[str, object], entries: Iterable[FeedbackEntry]
 ) -> tuple[list[FeedbackObservation], list[str]]:
     """Join feedback entries to items of a prior ``scan --json-out`` payload.
 
-    Paths match exactly first, then by unique basename. Entries that match no
-    analyzed item land in the returned unmatched list.
+    R10-4 (round 10): the join key is each row's real path — the unescaped
+    top-level path, or the ``container``/``member`` fields of a member row —
+    never the escaped display path (a label for the real file "tri:::c.png"
+    did not match the row "tri\\:\\:\\:c.png"). A label matches, in order: the
+    row whose recorded ``path`` equals it; the row whose real path equals it;
+    the row whose real path ends it at a path boundary (an absolute label
+    path against a row path relative to the scan root); the row with the
+    same file name. The first rule with candidates decides, and several
+    candidates (an ambiguous label) match nothing.
+    Entries that match no analyzed item land in the returned unmatched list.
     """
     items = [item for item in scan_payload.get("items", []) if isinstance(item, dict)] if isinstance(scan_payload.get("items"), list) else []
-    by_path = {str(item.get("path", "")): item for item in items}
+    real_paths = [(_real_row_path(item), item) for item in items]
+    # Recorded row paths are distinct (R9-1); real paths can collide (a real
+    # folder "evil.zip::inner" and the member rows of evil.zip) and then
+    # match nothing rather than a guess.
+    by_recorded = {str(item.get("path", "")): item for item in items}
+    by_real: dict[str, list[dict]] = {}
+    for real, item in real_paths:
+        by_real.setdefault(real, []).append(item)
     by_basename: dict[str, list[dict]] = {}
-    for item in items:
-        by_basename.setdefault(Path(str(item.get("path", ""))).name, []).append(item)
+    for real, item in real_paths:
+        by_basename.setdefault(PurePath(real).name, []).append(item)
 
     observations: list[FeedbackObservation] = []
     unmatched: list[str] = []
     for entry in entries:
         observation = _observation_from_entry(entry)
         if observation is None:
-            item = by_path.get(entry.path)
-            if item is None:
-                candidates = by_basename.get(Path(entry.path).name, [])
-                item = candidates[0] if len(candidates) == 1 else None
+            item = _unique_match(entry.path, by_recorded, by_real, real_paths, by_basename)
             observation = _observation_from_item(entry, item) if item is not None else None
         if observation is None:
             unmatched.append(entry.path)
