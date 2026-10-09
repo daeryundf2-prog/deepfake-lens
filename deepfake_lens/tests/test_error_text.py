@@ -198,3 +198,41 @@ class UnreadableFolderScanTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EnglishDetectorBypassTest(unittest.TestCase):
+    """Y11 (round 7): spellings that passed the English detector are caught."""
+
+    def test_round_seven_bypasses_are_flagged(self) -> None:
+        from deepfake_lens.error_text import english_prose
+
+        cases = {
+            "결론: proBABLY_fAKE": "probably fake",  # case-mangled snake token
+            "PROBABLY_FAKE": "probably fake",
+            "ｕｎｒｅｌｉａｂｌｅ ｒｅｓｕｌｔ": "unreliable result",  # fullwidth Latin (NFKC)
+            "이것은AI가만든것같음probablyfakeimage": "probably fake",  # glued without spaces
+            "결과notreliable입니다": "not reliable",
+            "Thе rеsult is fаkе": "The result is fake",  # Cyrillic е/а look-alikes
+            "саution: fаke": None,  # checked below: flagged, wording may vary
+            "sc­ore un­re­li­able": "score unreliable",  # soft hyphens
+            "un​reliable re​sult": "unreliable result",  # zero-width spaces
+        }
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                hit = english_prose(text)
+                self.assertIsNotNone(hit, text)
+                if expected is not None:
+                    self.assertEqual(hit, expected)
+
+    def test_identifiers_and_korean_still_pass(self) -> None:
+        from deepfake_lens.error_text import english_prose
+
+        for text in (
+            "dataset 지문", "checkpoint 파일", "warning_threshold=0.5", "verdict_code", "score_is_calibrated",
+            "SHA-256: 0a1b", "C2PA 매니페스트", "AUROC 95% CI 하한 0.85", "Stable Diffusion / A1111 추정",
+            "`--redact-paths`", "LibsndfileError: 오디오", "BadZipFile", "faceswap 경계면", "deepfake-lens scan",
+            "결론은 세 가지뿐입니다: 조작·생성 근거 있음 / 원본성 근거 있음 / 판단 불가",
+            "ＳＨＡ－２５６ 해시", "Ｃ２ＰＡ 매니페스트",
+        ):
+            with self.subTest(text=text):
+                self.assertIsNone(english_prose(text), text)

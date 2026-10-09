@@ -21,6 +21,7 @@ import errno
 import logging
 import os
 import re
+import unicodedata
 from pathlib import Path
 from typing import Iterator
 
@@ -439,8 +440,25 @@ _CODE_TOKEN = re.compile(r"\b[A-Za-z]+(?:_[A-Za-z0-9]+)+\b|\b[a-z]+(?:[A-Z][a-z0
 _CODE_PARTS = re.compile(r"[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])")
 
 
+_SNAKE_TOKEN = re.compile(r"\b[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+\b")
+
+
 def _sentence_identifier_hit(line: str) -> str | None:
-    """The words of the first code-shaped token that spells an English sentence, or None (N12)."""
+    """The words of the first code-shaped token that spells an English sentence, or None (N12).
+
+    Y11: a snake token with any capital letter is also read with its case
+    normalized — ``proBABLY_fAKE`` is "probably fake": two dictionary words,
+    one of them a verdict word, flag it (a lowercase identifier such as
+    ``warning_threshold`` keeps the N12 rule).
+    """
+    for match in _SNAKE_TOKEN.finditer(line):
+        token = match.group(0)
+        if token == token.lower():
+            continue
+        chunks = [chunk.lower() for chunk in token.split("_") if chunk]
+        words = [chunk for chunk in chunks if chunk in COMMON_ENGLISH_WORDS or chunk in STANDALONE_ENGLISH_WORDS]
+        if len(words) >= 2 and any(word in STANDALONE_ENGLISH_WORDS for word in words):
+            return " ".join(chunks)
     for match in _CODE_TOKEN.finditer(line):
         parts = [part.lower() for chunk in match.group(0).split("_") for part in _CODE_PARTS.findall(chunk)]
         words = [part for part in parts if part in COMMON_ENGLISH_WORDS or part in STANDALONE_ENGLISH_WORDS]
@@ -492,14 +510,69 @@ def _dictionary_words(line: str) -> tuple[list[str], list[str]]:
     return found, standalone
 
 
+# Y11: words glued together without spaces ("probablyfakeimage") are split
+# by greedy longest match against the dictionary; a run of at least
+# GLUED_MIN_RUN letters that yields GLUED_MIN_WORDS words of at least
+# GLUED_MIN_WORD letters — one of at least GLUED_MIN_LONG letters — covering
+# GLUED_MIN_COVER of the run is prose. The floors keep ordinary compound
+# identifiers ("dataset" = data+set, "checkpoint") out.
+GLUED_MIN_RUN = 7
+GLUED_MIN_WORDS = 2
+GLUED_MIN_WORD = 3
+GLUED_MIN_LONG = 5
+GLUED_MIN_COVER = 0.6
+_GLUED_RUN = re.compile(r"[A-Za-z]{%d,}" % GLUED_MIN_RUN)
+
+
+def _glued_words(run: str) -> list[str]:
+    """Dictionary words found in ``run`` by greedy longest match, left to right (Y11)."""
+    vocabulary = COMMON_ENGLISH_WORDS | STANDALONE_ENGLISH_WORDS
+    lowered = run.lower()
+    found: list[str] = []
+    index = 0
+    while index < len(lowered):
+        for end in range(len(lowered), index + GLUED_MIN_WORD - 1, -1):
+            if lowered[index:end] in vocabulary:
+                found.append(lowered[index:end])
+                index = end
+                break
+        else:
+            index += 1
+    return found
+
+
+def _glued_hit(line: str) -> str | None:
+    vocabulary = COMMON_ENGLISH_WORDS | STANDALONE_ENGLISH_WORDS
+    for match in _GLUED_RUN.finditer(line):
+        run = match.group(0)
+        if run.lower() in vocabulary:
+            continue
+        words = _glued_words(run)
+        if (
+            len(words) >= GLUED_MIN_WORDS
+            and max(len(word) for word in words) >= GLUED_MIN_LONG
+            and sum(len(word) for word in words) >= GLUED_MIN_COVER * len(run)
+        ):
+            return " ".join(words)
+    return None
+
+
 def english_dictionary_hit(text: str) -> str | None:
-    """The offending words when a line holds two common English words (or a verdict word), else None (G9)."""
+    """The offending words when a line holds two common English words (or a verdict word), else None (G9).
+
+    Y11: the text is normalized first (:func:`normalize_for_detection`) and
+    words glued without spaces count (:func:`_glued_words`).
+    """
+    text = normalize_for_detection(text)
     for line in text.splitlines() or [text]:
         words_only = _strip_word_identifiers(line)
         sentence = _sentence_identifier_hit(words_only)
         if sentence:
             return sentence
         stripped = _strip_code_identifiers(words_only)
+        glued = _glued_hit(stripped)
+        if glued:
+            return glued
         words, standalone = _dictionary_words(stripped)
         if len(words) >= 2:
             return " ".join(words)
@@ -508,10 +581,35 @@ def english_dictionary_hit(text: str) -> str | None:
     return None
 
 
-def english_prose(text: str) -> str | None:
-    """English in ``text``, or None (S8, strengthened in round 5 / G9).
+# Y11 (round 7): spellings that slipped past the detector. Text is
+# normalized before both rules: NFKC (fullwidth "ｕｎｒｅｌｉａｂｌｅ" ->
+# "unreliable"), invisible characters dropped (soft hyphen, zero-width
+# space/joiners, word joiner, BOM) and Cyrillic/Greek letters that look like
+# Latin ones mapped to them ("Thе rеsult is fаkе" with Cyrillic е/а).
+_INVISIBLE_CHARS = dict.fromkeys(map(ord, "\u00ad\u200b\u200c\u200d\u2060\ufeff"), None)
+_HOMOGLYPHS = str.maketrans({
+    # Cyrillic
+    "а": "a", "в": "b", "е": "e", "к": "k", "м": "m", "н": "h", "о": "o", "р": "p", "с": "c", "т": "t",
+    "у": "y", "х": "x", "і": "i", "ј": "j", "ѕ": "s", "ԁ": "d", "һ": "h", "ӏ": "l", "ԛ": "q", "ԝ": "w",
+    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P", "С": "C", "Т": "T",
+    "У": "Y", "Х": "X", "І": "I", "Ј": "J", "Ѕ": "S", "Ԁ": "D", "Һ": "H", "Ӏ": "I", "Ԛ": "Q", "Ԝ": "W",
+    # Greek
+    "α": "a", "ε": "e", "ι": "i", "κ": "k", "ν": "v", "ο": "o", "ρ": "p", "τ": "t", "υ": "u", "χ": "x",
+    "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O",
+    "Ρ": "P", "Τ": "T", "Υ": "Y", "Χ": "X",
+})
 
-    Two rules, either flags:
+
+def normalize_for_detection(text: str) -> str:
+    """``text`` as the English detector reads it (Y11): NFKC, no invisible characters, no Latin look-alikes."""
+    return unicodedata.normalize("NFKC", text).translate(_INVISIBLE_CHARS).translate(_HOMOGLYPHS)
+
+
+def english_prose(text: str) -> str | None:
+    """English in ``text``, or None (S8, strengthened in round 5 / G9, round 7 / Y11).
+
+    The text is first normalized (:func:`normalize_for_detection`: NFKC,
+    invisible characters, Cyrillic/Greek look-alikes). Two rules, either flags:
 
     * run rule (round 4): after identifier tokens are removed, a sentence
       (split on ``.``, ``!``, ``?``, ``;`` and newlines) holds two consecutive
@@ -521,8 +619,13 @@ def english_prose(text: str) -> str | None:
       digits read as letters — or one English verdict/disclaimer word
       (:func:`english_dictionary_hit`).
 
+    The dictionary rule also reads a code-shaped token in any letter case
+    (``proBABLY_fAKE``) and a run of words glued together without spaces
+    (``probablyfakeimage``, Y11).
+
     Hangul elsewhere in the text exempts nothing.
     """
+    text = normalize_for_detection(text)
     stripped = _strip_allowlisted(text)
     for pattern in _IDENTIFIER_TOKENS:
         stripped = pattern.sub(" ", stripped)
