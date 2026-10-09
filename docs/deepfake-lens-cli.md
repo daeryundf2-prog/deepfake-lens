@@ -52,15 +52,57 @@ command prints a band (높음/주의/낮음) or a "의심 신호가 강합니다
 - `rppg <video>`: CHROM cardiac-pulse screening from face video. **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
 - `prnu <target> --reference ...`: sensor-fingerprint provenance correlation. **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
 - `evidence <file>`: forensic evidence chain with measured integrity verification.
-- Exit codes (S4): every command exits 2 on a usage error (argparse prints `usage: …`), on an explicit `--key-file` that is empty or unreadable (N8; `verify-report`: 4) and when an optional dependency a requested output needs is missing (R6/R8: PDF renderer, fastapi/uvicorn). An unexpected internal error exits 1 with the traceback in the log file. Per command:
+- Exit codes (S4, N4/N7): every command exits 2 on a usage error (argparse prints `usage: …`), on a bad **input path** (below), on an explicit `--key-file` that is empty or unreadable (N8; `verify-report`: 4) and when an optional dependency a requested output needs is missing (R6/R8: PDF renderer, fastapi/uvicorn). An unexpected internal error exits 1 with `오류: 처리 중 예기치 않은 오류가 발생했습니다(<예외 클래스>) — 상세는 로그 파일을 확인하십시오` on stderr and the traceback in the log file — never an English traceback on the console, never an empty report with exit 0.
+
+  **Input paths (N4/N7).** Every subcommand declares its input paths in `deepfake_lens/cli_inputs.py` (`INPUT_SPECS`: argument, file/folder, supported formats) and every one is checked by `require_input_path` before the command does any work. A bad path prints one line on stderr and nothing on stdout, exit 2 (`verify-report` 4, because its 2 means "키 ID 불일치"):
+
+  | 입력 문제 | stderr | 종료 코드 |
+  | --- | --- | --- |
+  | 없는 경로 | `오류: 파일을 찾을 수 없습니다: <경로>` / `오류: 폴더를 찾을 수 없습니다: <경로>` / (`evidence-statement`, `--model-path`) `오류: 파일이나 폴더를 찾을 수 없습니다: <경로>` | 2 |
+  | 파일 자리에 폴더 | `오류: 파일이 아니라 폴더입니다: <경로>` (판정 명령은 ` (폴더는 scan을 사용)` 추가) | 2 |
+  | 폴더 자리에 파일 | `오류: 폴더가 아니라 파일입니다: <경로>` (`scan`은 ` (단일 파일은 forensic/classify를 사용)` 추가) | 2 |
+  | 지원되지 않는 형식 | `오류: 지원되지 않는 형식입니다: <경로> (지원 형식: …)` | 2 |
+  | 계층 명령에 심볼릭 링크 | `오류: 심볼릭 링크는 따라가지 않습니다: <경로> — 링크 대상 파일을 직접 지정하십시오` (판정 명령은 G6대로 건너뜀 행) | 2 |
+  | 일반 파일이 아님 / 확인 불가 | `오류: 일반 파일이 아닙니다: <경로>` / `오류: 경로를 확인할 수 없습니다: <경로>` | 2 |
+
+  Inputs and their kinds (supported formats = the formats the command reads):
+
+  | 명령 | 입력 | 종류 · 형식 |
+  | --- | --- | --- |
+  | `scan`, `collect`, `dataset`, `eval`, `benchmark`, `fusion`, `calibrate`, `train`, `train-neural-plan`, `video`, `batch`, `perf`, `corpus build` | `folder` | 폴더 |
+  | `forensic`, `classify`, `explain`, `legal-report`, `multimodal FILE…` | 파일 | 파일 · scan 지원 형식(이미지·오디오·영상·텍스트·문서·압축); 심볼릭 링크는 건너뜀 행(G6) |
+  | `agent --file` | 파일 | 파일 · 텍스트/문서 |
+  | `audio` | 파일 | 파일 · 오디오(.wav .mp3 .flac .ogg .m4a .aac .wma .opus) |
+  | `face`, `inpaint`, `pixel-analysis`, `ml-classify`, `faceswap-seam`, `prnu` (+ `--reference`) | 파일 | 파일 · 이미지(.jpg .jpeg .png .webp .bmp .gif .tif .tiff) |
+  | `video-analysis`, `rppg`, `multimodal --av-sync` | 파일 | 파일 · 영상(.mp4 .mov .m4v .avi .mkv .webm .flv) |
+  | `avatar --file` | 파일 | 파일 · 영상·이미지 |
+  | `text-advanced` | 파일 | 파일 · .txt .md |
+  | `3d --file` | 파일 | 파일 · 3D(.glb .gltf .obj .fbx .ply .pcd .npy .npz)·.txt .md |
+  | `compare` | `file_a`, `file_b` | 파일 · 오디오 쌍 또는 텍스트·문서 쌍(.txt .md .rst .log + 문서); 종류가 섞이면 `오류: 두 파일의 종류가 같아야 합니다…` 2 |
+  | `watermark` | 파일 | 파일 · 텍스트·문서; `--secret`/`--synthid-keys` 둘 다 없으면 2 |
+  | `evidence` | 파일 | 파일 · 형식 제한 없음(모든 파일의 연속성 기록) |
+  | `evidence-statement` | `target` | 폴더, 검사 결과 .json 또는 scan 지원 형식의 파일 |
+  | `feedback` | `labels`, `--scan-json` | 파일 · .json/.jsonl, .json |
+  | `verify-report` | `report` | 파일 · .json (종료 코드 4) |
+  | `corpus split`, `corpus verify` | `--manifest` (+ `--root` 폴더) | 파일 · .json |
+  | `models` | `--checkpoint` | 파일 |
+  | `web` (`--folder`, `--allow-root`), `api-serve` (`--allow-root`), `vendor-weights --install` | 폴더 | 폴더 |
+  | 공통 설정 입력: `--thresholds`, `--fusion-profile`, `--calibration` | | 파일 · .json (없는 파일을 경고 후 내장 기본값으로 진행하던 동작 폐지) |
+  | 공통 설정 입력: `--model-path` | | 프로필·체크포인트 파일 또는 프로필 폴더 |
+  | 공통 설정 입력: `--models-dir` | | 폴더 (`vendor-weights`는 설치 대상일 수 있어 제외) |
+
+  `deepfake_lens/tests/test_cli_inputs.py` runs every declared input of every subcommand in a subprocess with a nonexistent path, a folder for a file, a file for a folder and an unsupported extension, and checks that no `Path`-typed input of `cli_parser` is undeclared. Per command:
 
   | 명령 | 0 | 1 | 2 | 3 | 4 |
   | --- | --- | --- | --- | --- | --- |
-  | `scan` | 검사 완료 — 결론(조작·생성 근거 있음 포함)과 무관 | 예기치 않은 내부 오류 | `오류: 폴더를 찾을 수 없습니다: <경로>` / `오류: 폴더가 아니라 파일입니다: <경로> (단일 파일은 forensic/classify를 사용)` / `오류: 폴더를 읽을 수 없습니다: <경로> (<사유>)`; 잘못된 옵션; 빈·읽을 수 없는 `--key-file`; PDF 출력에 필요한 렌더러 없음 | — | — |
-  | `verify-report` | `검증됨` | `변조됨` | `키 ID 불일치` (argparse 사용 오류도 2) | `서명 없음` | 보고서를 읽을 수 없음, 검증 키 없음, 빈·읽을 수 없는 `--key-file` |
-  | `evidence-statement` | 작성 완료 | 예기치 않은 내부 오류 | 대상 없음(`오류: 대상이 존재하지 않습니다`), 검사 JSON 해석 불가, 폴더를 읽을 수 없음(`scan`과 같은 문구), `--pdf-out`에 필요한 렌더러 없음, 빈·읽을 수 없는 `--key-file`, 잘못된 옵션 | — | — |
-  | `forensic` / `classify` / `explain FILE` / `legal-report` / `agent --file` / `multimodal FILE…` | 분석 완료 — 결론과 무관(심볼릭 링크는 건너뜀 행) | 예기치 않은 내부 오류 | `오류: 파일을 찾을 수 없습니다: <경로>` / `오류: 파일이 아니라 폴더입니다: <경로> (폴더는 scan을 사용)` (G5, 분석·보고서 ID 발급 전에 중단); 잘못된 옵션 | — | — |
-  | `api-serve` | 서버 정상 종료 | 예기치 않은 내부 오류 | fastapi/uvicorn 없음(한국어 설치 안내), localhost가 아닌 주소에 `--token` 없이 바인드, 잘못된 옵션 | — | — |
+  | `scan` | 검사 완료 — 결론(조작·생성 근거 있음 포함)과 무관 | 예기치 않은 내부 오류 | 입력 경로 오류(위 표); `오류: 폴더를 읽을 수 없습니다: <경로> (<사유>)`; 잘못된 옵션; 빈·읽을 수 없는 `--key-file`; PDF 출력에 필요한 렌더러 없음 | — | — |
+  | `verify-report` | `검증됨` | `변조됨` | `키 ID 불일치` (argparse 사용 오류도 2) | `서명 없음` | 입력 경로 오류(위 표), 보고서를 읽을 수 없음, 검증 키 없음, 빈·읽을 수 없는 `--key-file` |
+  | `evidence-statement` | 작성 완료 | 예기치 않은 내부 오류 | 입력 경로 오류(`오류: 파일이나 폴더를 찾을 수 없습니다: <경로>` 등), 검사 JSON 해석 불가, 폴더를 읽을 수 없음(`scan`과 같은 문구), `--pdf-out`에 필요한 렌더러 없음, 빈·읽을 수 없는 `--key-file`, 잘못된 옵션 | — | — |
+  | `forensic` / `classify` / `explain FILE` / `legal-report` / `agent --file` / `multimodal FILE…` | 분석 완료 — 결론과 무관(심볼릭 링크는 건너뜀 행) | 예기치 않은 내부 오류 | 입력 경로 오류(G5/N4, 분석·보고서 ID 발급 전에 중단); 잘못된 옵션 | — | — |
+  | 계층 진단 명령(`audio`, `face`, `video-analysis`, `inpaint`, `text-advanced`, `pixel-analysis`, `ml-classify`, `rppg`, `prnu`, `faceswap-seam`, `3d`, `avatar`, `compare`, `watermark`) | 계층 진단 출력 | 예기치 않은 내부 오류, 파일 내용을 읽지 못함(`ml-classify` 이미지 디코드 실패, `compare` 처리 실패, `watermark` 텍스트 추출 실패 — stderr `오류: …`) | 입력 경로 오류(위 표), 잘못된 옵션 | — | — |
+  | 폴더 명령(`collect`, `dataset`, `eval`, `benchmark`, `fusion`, `calibrate`, `train`, `train-neural-plan`, `video`, `batch`, `perf`, `corpus …`) | 완료 | 예기치 않은 내부 오류(`corpus verify`: 검증 실패) | 입력 경로 오류(위 표), 잘못된 옵션, 매니페스트 해석 불가(`corpus`) | — | — |
+  | `evidence`, `models`, `feedback`, `web`, `vendor-weights` | 완료 | 예기치 않은 내부 오류(`vendor-weights`: 고정 실패) | 입력 경로 오류(위 표), 잘못된 옵션 | — | — |
+  | `api-serve` | 서버 정상 종료 | 예기치 않은 내부 오류 | 입력 경로 오류(`--allow-root`), fastapi/uvicorn 없음(한국어 설치 안내), localhost가 아닌 주소에 `--token` 없이 바인드, 잘못된 옵션 | — | — |
 
   The web/API servers answer the same folder errors with the same Korean text in `error` (`/api/scan`).
 - Single-file commands and archives (B1): `forensic`, `classify`, `explain FILE`, `legal-report`, `evidence-statement <file>`, `multimodal FILE…` and `agent --file` analyze the file through the folder scanner's own body (`analysis_api.analyze_rows` → `core.scan_paths` with the file's folder as root). A named symbolic link follows the scan's rule (G6): it is the scan's skipped row (`심볼릭 링크 — 링크를 따라가지 않으므로 분석하지 않았습니다…`, no `sha256`), its target is never opened — the provenance/tool-marker side layers report `심볼릭 링크 — … 실행하지 않았습니다`; `/api/analyze-file` does the same (the link is confined by the folder it lives in) and answers a missing file or a folder with the same Korean text in `error`. An archive is therefore expanded exactly as `scan` expands it — the same member rows (`archive.zip::inner/path`), the same container row (verdict roll-up, rejected members, limitations) and the same SHA-256 values; the printed conclusion is the container row's and the member rows are listed under it in the scan table's wording (`legal-report` text: `=== 압축 구성 파일 ===`). The JSON carries the raw rows as `rows[]` (contract: `docs/deepfake-lens-json-contract.md`).

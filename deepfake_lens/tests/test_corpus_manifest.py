@@ -253,9 +253,14 @@ class VerifyAndCliTest(unittest.TestCase):
     def test_cli_usage_errors(self) -> None:
         code, out = _run(["corpus"])
         self.assertEqual(code, 2)
-        code, out = _run(["corpus", "verify", "--manifest", str(self.base / "missing.json")])
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code, out = _run(["corpus", "verify", "--manifest", str(self.base / "missing.json")])
         self.assertEqual(code, 2)
-        self.assertIn("오류", out)
+        # N4: errors go to stderr ("오류: 파일을 찾을 수 없습니다: …"), stdout stays empty
+        # (the message used to be printed on stdout).
+        self.assertIn("오류: 파일을 찾을 수 없습니다: ", err.getvalue())
+        self.assertEqual(out, "")
         import argparse
 
         self.assertEqual(run_corpus_cli(argparse.Namespace(corpus_command=None)), 2)

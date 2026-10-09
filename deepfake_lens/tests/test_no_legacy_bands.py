@@ -199,29 +199,43 @@ class NoLegacyBandInStandaloneJsonTest(unittest.TestCase):
         self.assertGreaterEqual(len(images), 3, "fixtures/benchmark images missing")
         return images
 
+    def _as(self, path: Path, suffix: str) -> str:
+        """``path``'s bytes under ``suffix`` (a file of the kind the command accepts)."""
+        target = Path(self._tmp.name) / f"{path.stem}{suffix}"
+        if not target.exists():
+            target.write_bytes(path.read_bytes())
+        return str(target)
+
     def _file_commands(self, path: Path) -> list[list[str]]:
         f = str(path)
+        # N4/N7: each layer command now refuses a file outside its formats
+        # (exit 2, "지원되지 않는 형식입니다"); it used to run on the benchmark
+        # PNG whatever its modality (audio/video-analysis/text-advanced/rppg/
+        # agent/compare/watermark on a .png). Those commands get the fixture's
+        # bytes under a suffix they accept — still undecodable content, so
+        # the JSON they print is the same diagnostic shape this test checks.
+        video, text = self._as(path, ".mp4"), self._as(path, ".txt")
         commands = [
-            ["audio", f, "--no-default-engine"],
-            ["video-analysis", f],
-            ["text-advanced", f],
+            ["audio", self._as(path, ".wav"), "--no-default-engine"],
+            ["video-analysis", video],
+            ["text-advanced", text],
             ["pixel-analysis", f],
             ["inpaint", f],
             ["prnu", f, "--reference", f, "--reference", f, "--reference", f],
-            ["rppg", f],
+            ["rppg", video],
             ["face", f],
             ["avatar", "--file", f],
             ["faceswap-seam", f, "--format", "json"],
             ["forensic", f],
             ["classify", f],
             ["explain", f, "--format", "json"],
-            ["agent", "--file", f],
+            ["agent", "--file", text],
             ["multimodal", f],
             ["legal-report", f, "--format", "json"],
-            ["compare", f, f],
+            ["compare", text, text],
             ["evidence", f],
             ["evidence-statement", f, "--format", "json"],
-            ["watermark", f, "--secret", "k", "--format", "json"],
+            ["watermark", text, "--secret", "k", "--format", "json"],
         ]
         if HAVE_CV2:
             commands.append(["ml-classify", f])

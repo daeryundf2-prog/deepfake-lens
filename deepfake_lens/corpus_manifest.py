@@ -51,6 +51,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 import random
 import re
 from dataclasses import dataclass
@@ -485,9 +486,10 @@ def run_corpus_cli(args: argparse.Namespace) -> int:
             print(f"검증 통과: {args.manifest} — 항목 {len(manifest['items'])}개, manifest_sha256 {manifest['manifest_sha256']}")
             return 0
     except ManifestError as exc:
-        print(f"오류: {exc}")
+        # N4: errors go to stderr like every other command's.
+        print(f"오류: {exc}", file=sys.stderr)
         return 2
-    print("사용법: deepfake-lens corpus {build,split,verify} …")
+    print("사용법: deepfake-lens corpus {build,split,verify} …", file=sys.stderr)
     return 2
 
 

@@ -83,8 +83,10 @@ def main() -> int:
         (["text-advanced", str(ai_sample)], 0),
         (["explain", "--score", "70"], 0),
         (["realtime", "--scores", "10,20,30"], 0),
-        (["rppg", "/nonexistent/video.mp4"], 0),
-        (["prnu", "/nonexistent/target.png", "--reference", "/nonexistent/r1.png", "--reference", "/nonexistent/r2.png", "--reference", "/nonexistent/r3.png"], 0),
+        # N4/N7: a nonexistent input is a usage error (exit 2, "오류: 파일을 찾을 수
+        # 없습니다: …") — these two used to print a report about nothing, exit 0.
+        (["rppg", "/nonexistent/video.mp4"], 2),
+        (["prnu", "/nonexistent/target.png", "--reference", "/nonexistent/r1.png", "--reference", "/nonexistent/r2.png", "--reference", "/nonexistent/r3.png"], 2),
         (["multimodal", "--image-score", "50", "--text-score", "10"], 0),
         (["agent", "--text", "hello world"], 0),
         (["3d", "--text", "a small cube"], 0),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -364,48 +365,44 @@ def main(argv: list[str] | None = None) -> int:
         except ReportKeyError as exc:
             print(f"오류: {exc}", file=sys.stderr)
             return 4 if args.command == "verify-report" else 2
+    # N4/N7: every input path of every subcommand is checked before any
+    # work — missing, a folder for a file (or the reverse), an unsupported
+    # format: "오류: …" on stderr, exit 2 (verify-report: its usage code 4).
+    from .cli_inputs import UsageError, check_command_inputs
+
+    try:
+        check_command_inputs(args)
+    except UsageError as exc:
+        print(f"오류: {exc}", file=sys.stderr)
+        return VERIFY_EXIT_OTHER if args.command == "verify-report" else USAGE_EXIT
     # N8: tracebacks of routine per-file failures go to the log file; stderr
     # gets one Korean summary line (--verbose shows them).
     logs = configure_cli_logging(bool(getattr(args, "verbose", False)))
     try:
         return _run_command(args, parser, cmd_parsers)
+    except UsageError as exc:
+        print(f"오류: {exc}", file=sys.stderr)
+        return VERIFY_EXIT_OTHER if args.command == "verify-report" else USAGE_EXIT
+    except Exception as exc:  # noqa: BLE001 - N4: never an English traceback on the console
+        logging.getLogger(__name__).exception("command %s failed", args.command)
+        print(f"오류: 처리 중 예기치 않은 오류가 발생했습니다({type(exc).__name__}) — 상세는 로그 파일을 확인하십시오", file=sys.stderr)
+        return UNEXPECTED_ERROR_EXIT
     finally:
         logs.finish()
 
 
-# G5 (round 5): the commands that analyze named files, and where the names are.
-_SINGLE_FILE_ARGS = {
-    "forensic": ("file",),
-    "classify": ("file",),
-    "explain": ("file",),
-    "legal-report": ("file",),
-    "agent": ("file",),
-    "multimodal": ("files",),
-}
-
-
-def _single_file_targets(args: argparse.Namespace) -> list[Path]:
-    targets: list[Path] = []
-    for attr in _SINGLE_FILE_ARGS.get(str(args.command), ()):
-        value = getattr(args, attr, None)
-        if value is None:
-            continue
-        targets.extend(Path(v) for v in (value if isinstance(value, (list, tuple)) else [value]))
-    return targets
+# Exit codes (docs/deepfake-lens-cli.md "종료 코드"): 2 = usage error (bad
+# input path, bad option value), 1 = the command ran and failed.
+USAGE_EXIT = 2
+UNEXPECTED_ERROR_EXIT = 1
 
 
 def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_parsers: dict[str, argparse.ArgumentParser]) -> int:
-    """Dispatch one parsed command (body of :func:`main`)."""
-    from .analysis_api import SingleFileError, check_single_file
+    """Dispatch one parsed command (body of :func:`main`).
 
-    for target in _single_file_targets(args):
-        # G5: a missing file or a folder is a usage error (exit 2, Korean),
-        # checked before any analysis — never a traceback or a report ID.
-        try:
-            check_single_file(target)
-        except SingleFileError as exc:
-            print(f"오류: {exc}", file=sys.stderr)
-            return 2
+    G5/N4: the input paths were checked by ``cli_inputs.check_command_inputs``
+    in :func:`main` before this runs.
+    """
     if args.command == "corpus":
         from .corpus_manifest import run_corpus_cli
 
@@ -625,18 +622,31 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         analysis = analyze_text_advanced(text)
         return emit_layer(args, "text_statistics", "텍스트 문체 통계 계층", analysis.to_json(), subject=str(args.file))
     if args.command == "compare":
+        from .cli_inputs import AUDIO_SUFFIXES, UsageError, has_supported_suffix
         from .core import compare_files
+
+        audio_pair = [has_supported_suffix(path, AUDIO_SUFFIXES) for path in (args.file_a, args.file_b)]
+        if audio_pair[0] != audio_pair[1]:
+            # N4: a mixed pair is a usage error (was an exit-1 message on stdout).
+            raise UsageError(f"두 파일의 종류가 같아야 합니다(오디오 쌍 또는 텍스트·문서 쌍): {args.file_a}, {args.file_b}")
         result = compare_files(args.file_a, args.file_b, ecapa_revision=args.ecapa_revision)
         if "error" in result:
-            emit({"error": result["error"]}, fmt="json", json_out=None) if args.format == "json" else print(f"오류: {result['error']}")
+            if args.format == "json":
+                emit({"error": result["error"]}, fmt="json", json_out=None)
+            else:
+                print(f"오류: {result['error']}", file=sys.stderr)
             return 1
         # D1: same-speaker / same-author similarity is an unmeasured
         # reference number; its former same/unclear/different band is dropped.
         return emit_layer(args, "compare", "두 파일 유사도 계층", result, subject=f"{args.file_a} ↔ {args.file_b}")
     if args.command == "watermark":
+        if not args.synthid_keys and not args.secret:
+            # N4: a usage error before the file is read (was JSON on stdout, exit 1).
+            print("오류: --secret(KGW) 또는 --synthid-keys(SynthID) 중 하나가 필요합니다.", file=sys.stderr)
+            return USAGE_EXIT
         text = _file_text(args.file)
         if text is None:
-            print(json.dumps({"error": "텍스트 추출 불가 — 지원되지 않는 형식입니다."}, ensure_ascii=False))
+            print(f"오류: 텍스트를 추출할 수 없습니다: {args.file}", file=sys.stderr)
             return 1
         if args.synthid_keys:
             from .watermark import detect_synthid_watermark
@@ -644,9 +654,6 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             keys = [int(part.strip()) for part in args.synthid_keys.split(",") if part.strip()]
             result = detect_synthid_watermark(text, keys=keys, tokenizer_model=args.tokenizer, tokenizer_revision=args.tokenizer_revision)
         else:
-            if not args.secret:
-                print(json.dumps({"error": "--secret(KGW) 또는 --synthid-keys(SynthID) 중 하나가 필요합니다."}, ensure_ascii=False))
-                return 1
             result = detect_kgw_watermark(text, secret=args.secret, tokenizer_model=args.tokenizer, tokenizer_revision=args.tokenizer_revision, gamma=args.gamma)
         if args.format == "json":
             print(json.dumps(result.to_json(), ensure_ascii=False, indent=2))
@@ -872,15 +879,19 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
                 # S4: "오류: 폴더를 읽을 수 없습니다: … (권한이 없습니다)", exit 2.
                 print(f"오류: {exc}", file=sys.stderr)
                 return 2
-        elif target.is_file():
+        elif target.is_file() or is_symlink_path(target):
             # B1: the folder scan's rows for the file — an archive yields
             # its member rows and the container row. S6: thresholds go into
-            # the statement.
+            # the statement. G6: a symbolic link (even a dangling one) is
+            # the scan's skipped row, never followed.
             stmt_thresholds = load_thresholds(AnalysisOptions(), warn=thresholds_warning_printer(sys.stderr))
             items = analyze_rows(target, AnalysisOptions(), thresholds=stmt_thresholds)
         else:
-            print(f"오류: 대상이 존재하지 않습니다: {target}", file=sys.stderr)
-            return 2
+            # Unreachable after cli_inputs (N4) unless the target vanished meanwhile.
+            from .cli_inputs import MISSING
+
+            print(f"오류: {MISSING['either'].format(path=target)}", file=sys.stderr)
+            return USAGE_EXIT
 
         statement = build_evidence_statement(
             items,

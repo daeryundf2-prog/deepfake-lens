@@ -182,7 +182,11 @@ class StandaloneCommandContractTest(unittest.TestCase):
 
     def commands(self) -> list[tuple[str, list[str], str]]:
         photo, wav, text = str(self.photo), str(self.wav), str(self.text)
-        missing_video = str(self.root / "missing.mp4")
+        # N4/N7: a missing input is now a usage error (exit 2) — these ran on
+        # a nonexistent "missing.mp4" and printed a diagnostic about nothing
+        # with exit 0. An undecodable video file gives the same diagnostic.
+        missing_video = str(self.root / "undecodable.mp4")
+        Path(missing_video).write_bytes(b"\x00\x00\x00\x18ftypisom-not-a-real-video")
         return [
             ("audio", ["audio", wav, "--no-default-engine"], "layer_diagnostic"),
             ("video-analysis", ["video-analysis", missing_video], "layer_diagnostic"),
