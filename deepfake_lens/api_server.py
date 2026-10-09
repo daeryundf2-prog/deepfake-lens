@@ -738,8 +738,16 @@ def create_app(
             from .analysis_api import scan_folder, scan_payload
 
             yield ("job", {"job_id": job_id})
-            if root is None or not root.is_dir():
+            if root is None:
                 yield ("error", {"detail": "directory가 필요합니다"})
+                return
+            from .core import ScanFolderError, check_scan_folder
+
+            try:
+                check_scan_folder(root)
+            except ScanFolderError as exc:
+                # S4: the same Korean reason as `scan` and /api/scan.
+                yield ("error", {"detail": str(exc)})
                 return
             options = dataclasses.replace(
                 _api_options(), recursive=recursive, max_files=max(1, min(max_files, MAX_STREAM_SCAN_FILES)),

@@ -43,6 +43,7 @@ from .core import (
     _thresholds_json,
     _with_content_sha256,
     analyze_file,
+    check_scan_folder,
     scan_directory,
     scan_paths,
     scan_to_json,
@@ -354,8 +355,11 @@ def scan_folder(
     themselves (R1). Rows passed to ``progress`` are pre-fusion; the
     returned items are final.
 
-    Raises ``NotADirectoryError``/``OSError`` like ``core.scan_directory``.
+    Raises ``core.ScanFolderError`` (a ``NotADirectoryError`` whose text is
+    the Korean reason — missing, a file, unreadable; S4) like
+    ``core.scan_directory``.
     """
+    check_scan_folder(Path(folder))  # S4: the reason before any threshold warning
     thresholds = load_thresholds(options, warn=warn)
     summary, items = scan_directory(
         folder,

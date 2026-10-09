@@ -309,6 +309,80 @@ class TracebacksGoToTheLogFileTest(unittest.TestCase):
         self.assertEqual((list(package.handlers), package.propagate, package.level), before)
 
 
+class ScanFolderErrorTest(unittest.TestCase):
+    """S4: a folder that cannot be scanned is a Korean reason and exit 2 — never a bare path."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name).resolve()
+
+    def _assert_error(self, argv: list[str], expected: str) -> None:
+        code, out, err = _run(argv)
+        self.assertEqual(code, 2, err)
+        self.assertEqual(out, "")
+        self.assertIn(f"오류: {expected}", err.splitlines())
+        self.assertNotIn("Traceback", err)
+        if argv[0] != "evidence-statement":
+            # The reason is the only output — no engine list or threshold warning first.
+            self.assertEqual(err.splitlines(), [f"오류: {expected}"])
+
+    def test_missing_folder(self) -> None:
+        missing = self.base / "없는 폴더"
+        for argv in (["scan", str(missing)], [str(missing)], ["scan", str(missing), "--format", "json"]):
+            with self.subTest(argv=argv[:-1] if len(argv) > 2 else argv):
+                self._assert_error(argv, f"폴더를 찾을 수 없습니다: {missing}")
+
+    def test_file_instead_of_folder(self) -> None:
+        file = self.base / "a.txt"
+        file.write_text("메모", encoding="utf-8")
+        self._assert_error(["scan", str(file)], f"폴더가 아니라 파일입니다: {file} (단일 파일은 forensic/classify를 사용)")
+
+    def test_unreadable_folder(self) -> None:
+        folder = self.base / "locked"
+        folder.mkdir()
+        real_scandir = os.scandir
+
+        def denied(path: Any = ".") -> Any:
+            if Path(path) == folder:
+                raise PermissionError(13, "Permission denied", str(path))
+            return real_scandir(path)
+
+        # Root ignores 0o000, so the refusal is injected at the listing call.
+        with mock.patch("os.scandir", denied):
+            self._assert_error(["scan", str(folder)], f"폴더를 읽을 수 없습니다: {folder} (권한이 없습니다)")
+            self._assert_error(["evidence-statement", str(folder)], f"폴더를 읽을 수 없습니다: {folder} (권한이 없습니다)")
+        if hasattr(os, "geteuid") and os.geteuid() != 0:
+            folder.chmod(0)
+            self.addCleanup(folder.chmod, 0o755)
+            self._assert_error(["scan", str(folder)], f"폴더를 읽을 수 없습니다: {folder} (권한이 없습니다)")
+
+    def test_library_and_web_report_the_same_reason(self) -> None:
+        from deepfake_lens import webapp_api
+        from deepfake_lens.analysis_api import AnalysisOptions, scan_folder
+        from deepfake_lens.core import ScanFolderError
+
+        missing = self.base / "gone"
+        with self.assertRaises(ScanFolderError) as caught:
+            scan_folder(missing, AnalysisOptions())
+        self.assertIsInstance(caught.exception, NotADirectoryError)
+        self.assertEqual(str(caught.exception), f"폴더를 찾을 수 없습니다: {missing}")
+        from collections import OrderedDict
+
+        with mock.patch.object(webapp_api, "_READ_ROOTS", OrderedDict()):
+            webapp_api.configure_read_roots(self.base)
+            payload = webapp_api._scan_payload(f"folder={missing}", default_folder=self.base)
+        self.assertEqual(payload, {"error": f"폴더를 찾을 수 없습니다: {missing}"})
+
+    def test_exit_codes_are_documented(self) -> None:
+        doc = (Path(__file__).resolve().parents[2] / "docs" / "deepfake-lens-cli.md").read_text(encoding="utf-8")
+        self.assertIn("| 명령 | 0 | 1 | 2 | 3 | 4 |", doc)
+        for command in ("`scan`", "`verify-report`", "`evidence-statement`", "`api-serve`"):
+            self.assertTrue(any(line.startswith(f"  | {command} |") for line in doc.splitlines()), command)
+        for message in ("폴더를 찾을 수 없습니다", "폴더가 아니라 파일입니다", "폴더를 읽을 수 없습니다"):
+            self.assertIn(message, doc)
+
+
 def _write_tone_wav(path: Path, seconds: float = 0.5, rate: int = 16000) -> Path:
     import math
     import wave

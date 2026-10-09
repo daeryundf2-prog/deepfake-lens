@@ -52,6 +52,16 @@ command prints a band (높음/주의/낮음) or a "의심 신호가 강합니다
 - `rppg <video>`: CHROM cardiac-pulse screening from face video. **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
 - `prnu <target> --reference ...`: sensor-fingerprint provenance correlation. **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
 - `evidence <file>`: forensic evidence chain with measured integrity verification.
+- Exit codes (S4): every command exits 2 on a usage error (argparse prints `usage: …`), on an explicit `--key-file` that is empty or unreadable (N8; `verify-report`: 4) and when an optional dependency a requested output needs is missing (R6/R8: PDF renderer, fastapi/uvicorn). An unexpected internal error exits 1 with the traceback in the log file. Per command:
+
+  | 명령 | 0 | 1 | 2 | 3 | 4 |
+  | --- | --- | --- | --- | --- | --- |
+  | `scan` | 검사 완료 — 결론(조작·생성 근거 있음 포함)과 무관 | 예기치 않은 내부 오류 | `오류: 폴더를 찾을 수 없습니다: <경로>` / `오류: 폴더가 아니라 파일입니다: <경로> (단일 파일은 forensic/classify를 사용)` / `오류: 폴더를 읽을 수 없습니다: <경로> (<사유>)`; 잘못된 옵션; 빈·읽을 수 없는 `--key-file`; PDF 출력에 필요한 렌더러 없음 | — | — |
+  | `verify-report` | `검증됨` | `변조됨` | `키 ID 불일치` (argparse 사용 오류도 2) | `서명 없음` | 보고서를 읽을 수 없음, 검증 키 없음, 빈·읽을 수 없는 `--key-file` |
+  | `evidence-statement` | 작성 완료 | 예기치 않은 내부 오류 | 대상 없음(`오류: 대상이 존재하지 않습니다`), 검사 JSON 해석 불가, 폴더를 읽을 수 없음(`scan`과 같은 문구), `--pdf-out`에 필요한 렌더러 없음, 빈·읽을 수 없는 `--key-file`, 잘못된 옵션 | — | — |
+  | `api-serve` | 서버 정상 종료 | 예기치 않은 내부 오류 | fastapi/uvicorn 없음(한국어 설치 안내), localhost가 아닌 주소에 `--token` 없이 바인드, 잘못된 옵션 | — | — |
+
+  The web/API servers answer the same folder errors with the same Korean text in `error` (`/api/scan`).
 - Single-file commands and archives (B1): `forensic`, `classify`, `explain FILE`, `legal-report`, `evidence-statement <file>`, `multimodal FILE…` and `agent --file` analyze the file through the folder scanner's own body (`analysis_api.analyze_rows` → `core.scan_paths` with the file's folder as root). An archive is therefore expanded exactly as `scan` expands it — the same member rows (`archive.zip::inner/path`), the same container row (verdict roll-up, rejected members, limitations) and the same SHA-256 values; the printed conclusion is the container row's and the member rows are listed under it in the scan table's wording (`legal-report` text: `=== 압축 구성 파일 ===`). The JSON carries the raw rows as `rows[]` (contract: `docs/deepfake-lens-json-contract.md`).
 - `api-serve [--token] [--allow-root DIR]`: REST API server (token mandatory off-localhost; contract: `docs/deepfake-lens-service.md`). Read roots come only from `--allow-root` (there is no `--folder` here); without a token every `/api/*` route except `/api/health` requires the `X-Deepfake-Lens-Client` header, like the built-in web server. Without `fastapi`/`uvicorn` it prints a Korean install hint and exits 2 (no traceback).
 - `batch <folder>`: parallel per-file analysis (same engines/thresholds as `scan`, via `analysis_api.analyze_path`).

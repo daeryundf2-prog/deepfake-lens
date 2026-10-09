@@ -210,8 +210,7 @@ def scan_directory(
     did not enter in ``summary.subfolders_skipped`` (N8).
     """
     root = Path(directory)
-    if not root.is_dir():
-        raise NotADirectoryError(str(root))
+    check_scan_folder(root)
 
     paths: list[Path] = []
     capped = False
@@ -240,6 +239,46 @@ def scan_directory(
 
 # progress(item, done, planned) — see scan_directory.
 ScanProgress = Callable[[ScanItem, int, int], None]
+
+
+class ScanFolderError(NotADirectoryError):
+    """The scan target is not a readable folder (S4).
+
+    ``str()`` is the Korean reason the CLI prints after "오류: " (exit 2) and
+    the web/API servers return as the error text. A NotADirectoryError so
+    existing ``except NotADirectoryError`` / ``except OSError`` callers keep
+    working.
+    """
+
+
+# S4: the three reasons a folder cannot be scanned.
+SCAN_FOLDER_MISSING = "폴더를 찾을 수 없습니다: {path}"
+SCAN_FOLDER_IS_FILE = "폴더가 아니라 파일입니다: {path} (단일 파일은 forensic/classify를 사용)"
+SCAN_FOLDER_UNREADABLE = "폴더를 읽을 수 없습니다: {path} ({reason})"
+
+
+def check_scan_folder(root: Path) -> None:
+    """Raise :class:`ScanFolderError` unless ``root`` is a folder that can be listed (S4)."""
+    try:
+        is_dir = root.is_dir()
+        exists = is_dir or root.exists()
+    except OSError as exc:
+        raise ScanFolderError(SCAN_FOLDER_UNREADABLE.format(path=root, reason=_folder_error_reason(exc))) from exc
+    if not exists:
+        raise ScanFolderError(SCAN_FOLDER_MISSING.format(path=root))
+    if not is_dir:
+        raise ScanFolderError(SCAN_FOLDER_IS_FILE.format(path=root))
+    try:
+        with os.scandir(root) as entries:
+            next(entries, None)
+    except OSError as exc:
+        raise ScanFolderError(SCAN_FOLDER_UNREADABLE.format(path=root, reason=_folder_error_reason(exc))) from exc
+
+
+def _folder_error_reason(exc: OSError) -> str:
+    if isinstance(exc, PermissionError):
+        return "권한이 없습니다"
+    return failure_reason(exc)
 
 
 def count_subfolders(root: Path) -> int:

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .benchmark import run_benchmark, write_benchmark, write_benchmark_markdown
 from .collection import write_collection_plan
-from .core import ARCHIVE_ROLLUP_RULE, DEFAULT_MAX_FILES, RiskBand, ScanItem, _thresholds_json, summarize
+from .core import ARCHIVE_ROLLUP_RULE, DEFAULT_MAX_FILES, check_scan_folder, RiskBand, ScanItem, _thresholds_json, summarize
 from .analysis_api import AnalysisOptions, analyze_path, analyze_rows, load_thresholds, primary_row, scan_folder, thresholds_warning_printer
 from .analysis_api import scan_payload as analysis_scan_payload
 from .calibration import MIN_CALIBRATION_SAMPLES, load_threshold_profile
@@ -827,7 +827,12 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
                 print(f"오류: 검사 JSON을 해석할 수 없습니다: {exc}", file=sys.stderr)
                 return 2
         elif target.is_dir():
-            _, items, _ = scan_folder(target, AnalysisOptions(max_files=100), warn=thresholds_warning_printer(sys.stderr))
+            try:
+                _, items, _ = scan_folder(target, AnalysisOptions(max_files=100), warn=thresholds_warning_printer(sys.stderr))
+            except OSError as exc:
+                # S4: "오류: 폴더를 읽을 수 없습니다: … (권한이 없습니다)", exit 2.
+                print(f"오류: {exc}", file=sys.stderr)
+                return 2
         elif target.is_file():
             # B1: the folder scan's rows for the file — an archive yields
             # its member rows and the container row.
@@ -968,6 +973,12 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         cmd_parsers["scan"].error("--heatmaps에는 --pixel deep이 필요합니다")
     if args.model_path and not args.model_path.exists():
         cmd_parsers["scan"].error("--model-path가 존재하지 않습니다")
+    try:
+        # S4: say why the folder cannot be scanned before any other output.
+        check_scan_folder(Path(args.folder))
+    except OSError as exc:
+        print(f"오류: {exc}", file=sys.stderr)
+        return 2
     # G7: CLI, GUI and API all go through analysis_api. The default engine
     # set is every runtime profile in the models dir (--models-dir or the
     # packaged/$DEEPFAKE_LENS_MODELS_DIR one) — the adapter filters by
@@ -993,6 +1004,9 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             print(f"Analyzing {args.folder} with workers={args.workers}, pixel={args.pixel}...", file=sys.stderr)
         summary, items, thresholds = scan_folder(args.folder, options, warn=thresholds_warning_printer(sys.stderr))
     except OSError as exc:
+        # S4: core.ScanFolderError carries the reason — "폴더를 찾을 수 없습니다",
+        # "폴더가 아니라 파일입니다 … (단일 파일은 forensic/classify를 사용)",
+        # "폴더를 읽을 수 없습니다: … (사유)" — exit 2 (docs/deepfake-lens-cli.md).
         print(f"오류: {exc}", file=sys.stderr)
         return 2
     if args.progress:
