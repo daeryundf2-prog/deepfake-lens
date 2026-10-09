@@ -166,6 +166,36 @@ def _archive_check_data(path: Path, options: Any, thresholds: Any, *, progress: 
     }
 
 
+# G9 (round 5): Korean text for FastAPI request-validation error types.
+VALIDATION_ERROR_LABELS = {
+    "missing": "값이 필요합니다",
+    "int_parsing": "정수여야 합니다",
+    "float_parsing": "숫자여야 합니다",
+    "bool_parsing": "참/거짓 값이어야 합니다",
+    "json_invalid": "JSON 본문을 해석할 수 없습니다",
+    "string_type": "문자열이어야 합니다",
+    "dict_type": "JSON 객체여야 합니다",
+    "list_type": "배열이어야 합니다",
+}
+VALIDATION_LOCATION_LABELS = {"query": "쿼리", "body": "본문", "path": "경로", "header": "헤더"}
+
+
+def validation_error_body(errors: Any) -> dict[str, object]:
+    """``{"detail": "<Korean>", "errors": [{"loc", "type"}]}`` for a FastAPI 422 (no English ``msg``)."""
+    lines: list[str] = []
+    codes: list[dict[str, object]] = []
+    for error in errors if isinstance(errors, list) else []:
+        if not isinstance(error, dict):
+            continue
+        loc = [str(part) for part in error.get("loc", ())]
+        kind = str(error.get("type", ""))
+        where = VALIDATION_LOCATION_LABELS.get(loc[0], loc[0]) if loc else "요청"
+        name = ".".join(loc[1:]) or where
+        lines.append(f"{name}({where}): {VALIDATION_ERROR_LABELS.get(kind, f'형식이 올바르지 않습니다(`{kind}`)')}")
+        codes.append({"loc": loc, "type": kind})
+    return {"detail": "요청 매개변수 오류 — " + "; ".join(lines) if lines else "요청 매개변수 오류", "errors": codes}
+
+
 def create_app(
     host: str = "127.0.0.1",
     port: int = 8765,
@@ -185,6 +215,15 @@ def create_app(
     from .webapp_api import ReadRootDenied, read_root_denied_body
 
     app = FastAPI(title="Deepfake Lens API", version="0.1.0")
+
+    from fastapi.exceptions import RequestValidationError
+
+    @app.exception_handler(RequestValidationError)
+    async def korean_validation_error(_request: Any, exc: Any) -> Any:
+        # G9 (round 5): FastAPI's default 422 body is English ("Field
+        # required"); the examiner gets the Korean reason, the machine the
+        # parameter location and error type codes.
+        return JSONResponse(validation_error_body(exc.errors()), status_code=422)
 
     def _denied() -> Any:
         return JSONResponse(read_root_denied_body(), status_code=403)

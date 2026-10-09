@@ -80,7 +80,7 @@ def write_video_frame_plan(root: Path | str, output_path: Path | str, *, frame_r
 
 def extract_video_frames(plan: dict[str, object], *, limit: int | None = None) -> dict[str, object]:
     if shutil.which("ffmpeg") is None:
-        return {"version": "video-extract-results-v1", "results": [], "error": "ffmpeg is not installed"}
+        return {"version": "video-extract-results-v1", "results": [], "error": "ffmpeg가 설치되어 있지 않습니다"}
     items = plan.get("items", []) if isinstance(plan.get("items"), list) else []
     results = []
     for item in items[:limit]:

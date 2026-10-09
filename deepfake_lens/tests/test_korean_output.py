@@ -41,10 +41,19 @@ The allow-list is identifiers only, and none of them can carry a sentence:
   open ``「`` solely around an interpolated value (``「{value}」``), never
   around literal text (SourceQuotesTest).
 
-Coverage (S8): scan JSON text fields, packaged profiles, and the rendered
-outputs — HTML report text (tags stripped), forensic PDF text (pymupdf),
-legal-report text, evidence statement Markdown, the doctor table and its
-JSON, the CLI scan table, and the gui.js / gui.html strings.
+Coverage (S8, extended in round 5 / G9): scan JSON text fields, packaged
+profiles, and the rendered outputs — HTML report text (tags stripped),
+forensic PDF text (pymupdf), legal-report text, evidence statement Markdown,
+JSON and PDF, the scan CSV (label and text columns, provenance comments), the
+web /api/report HTML/PDF/signed body, the forensic/classify/explain/agent/
+multimodal text outputs, vendor-weights (table, Markdown, --verify), the API
+error bodies of both servers, the doctor table and its JSON, the CLI scan
+table, and the gui.js / gui.html strings.
+
+Round 5 (G9) adds a dictionary rule to the detector: a line with two
+distinct common English words anywhere (split on - / · corner brackets and
+punctuation, leetspeak digits read as letters), or one English verdict /
+disclaimer word, is English — see error_text.english_dictionary_hit.
 
 The mixed fixture covers images with camera EXIF / generator EXIF / XMP
 DigitalSourceType / Photoshop CreatorTool / A1111 and NovelAI PNG text,
@@ -109,6 +118,23 @@ S8_NEGATIVES = (
     "UNVERIFIED SCORE, ignore it",
     "Don't trust it! Isn't proof!",
     "Caught 1/4 DALL-E fakes, missed 3/4",
+)
+
+
+# G9 (round 5): the verifier's bypasses of the round-4 heuristic — one-word
+# sentences, English between Hangul, separators, quoting, shouting and
+# leetspeak. Each must be flagged.
+S8_ROUND5_NEGATIVES = (
+    "Unverified. Unreliable. Ignore.",
+    "결론: Uncalibrated — 참고용",
+    "do-not-use-as-evidence",
+    "not/for/court/use",
+    "Ignore 이 점수, 참고 only",
+    "AI-generated? Likely.",
+    "\u300cDo not trust this score\u300d",
+    "Note: 점수는 PROBABLY 틀림",
+    "Th1s sc0re 1s n0t pr00f",
+    "Scores: 0.71 calibrated? no",
 )
 
 
@@ -299,6 +325,23 @@ class EnglishProseHeuristicTest(unittest.TestCase):
         for text in ("Not proof.", "Treat cautiously!", "Isn't proof?", "Don't trust", "SCORE IGNORED", "UNVERIFIED score"):
             with self.subTest(text=text):
                 self.assertIsNotNone(english_prose(text))
+
+    def test_round5_bypasses_fail(self) -> None:
+        """G9: the ten strings that passed the round-4 heuristic are flagged."""
+        from deepfake_lens.error_text import COMMON_ENGLISH_WORDS
+
+        self.assertGreaterEqual(len(COMMON_ENGLISH_WORDS), 300)
+        for text in S8_ROUND5_NEGATIVES:
+            with self.subTest(text=text):
+                self.assertIsNotNone(english_prose(text))
+
+    def test_identifier_allowlist_covers_the_hyphenated_subcommands(self) -> None:
+        """G9: a subcommand name (legal-report, evidence-statement …) is an identifier, so the list must be complete."""
+        from deepfake_lens.cli import COMMANDS
+        from deepfake_lens.error_text import IDENTIFIER_ALLOWLIST
+
+        hyphenated = {name for name in COMMANDS if "-" in name and not name.startswith("-")}
+        self.assertEqual(hyphenated - IDENTIFIER_ALLOWLIST, set())
 
     def test_the_verifiers_examples_fail(self) -> None:
         for text in VERIFIER_EXAMPLES:
@@ -610,6 +653,11 @@ def js_string_literals(source: str) -> Iterator[tuple[int, str]]:
             i += 1
 
 
+def _rejoin_quoted(text: str) -> str:
+    """A PDF wraps long cells: rejoin a \u300c…\u300d metadata value split across lines (G2/G9)."""
+    return re.sub("\u300c[^\u300d]*\u300d", lambda m: m.group(0).replace("\n", " "), text)
+
+
 def _offending_lines(where: str, text: str) -> list[str]:
     offenders = []
     for number, line in enumerate(text.splitlines(), 1):
@@ -656,7 +704,7 @@ class RenderedOutputsAreKoreanTest(unittest.TestCase):
             path = self.out / name
             writer(path, self.summary, self.items, thresholds=self.thresholds)
             with import_pymupdf().open(str(path)) as doc:
-                text = "\n".join(page.get_text() for page in doc)
+                text = _rejoin_quoted("\n".join(page.get_text() for page in doc))
             self.assertIn("문서 번호", text)
             offenders += _offending_lines(name, text)
         self.assertEqual(offenders, [], "\n".join(offenders[:40]))
@@ -737,6 +785,110 @@ class RenderedOutputsAreKoreanTest(unittest.TestCase):
                     offenders.append(f"{where}:{number}: raw code {match.group(0)!r} in {line.strip()[:160]!r}")
         self.assertEqual(offenders, [], "\n".join(offenders[:40]))
 
+    def test_csv_text_and_label_columns(self) -> None:
+        """G9: the scan CSV — every label/text column and the provenance comment lines.
+
+        Code columns (path, kind, status, verdict_code, grade,
+        source_confidence, top_evidence, pixel ids) are identifiers paired
+        with label columns (G16) and are not prose.
+        """
+        import csv
+
+        from deepfake_lens.cli_render import _write_csv
+        from deepfake_lens.vendor_weights import weights_coverage
+
+        path = self.out / "scan.csv"
+        _write_csv(path, self.items, coverage=weights_coverage(None), thresholds=self.thresholds)
+        text = path.read_text(encoding="utf-8")
+        code_columns = {
+            "path", "kind", "status", "verdict_code", "grade", "source_confidence", "top_evidence", "pixel_model",
+            "pixel_fusion", "pixel_top_experts", "heatmap_path", "score_is_calibrated",
+        }
+        offenders = _offending_lines("scan.csv comments", "\n".join(line for line in text.splitlines() if line.startswith("#")))
+        rows = list(csv.DictReader(line for line in text.splitlines() if not line.startswith("#")))
+        self.assertGreater(len(rows), 20)
+        for row in rows:
+            for column, value in row.items():
+                if column in code_columns or not value:
+                    continue
+                run = english_prose(value)
+                if run:
+                    offenders.append(f"scan.csv {row['path']} [{column}]: {run!r} in {value[:160]!r}")
+        self.assertEqual(offenders, [], "\n".join(offenders[:40]))
+
+    def test_evidence_statement_json_and_pdf(self) -> None:
+        """G9: the evidence statement JSON (every string but identifiers) and its PDF text."""
+        from deepfake_lens.core import _thresholds_json
+        from deepfake_lens.evidence_statement import build_evidence_statement, write_evidence_statement_json, write_evidence_statement_pdf
+        from deepfake_lens.pdf_backend import pymupdf_available
+
+        statement = build_evidence_statement(self.items, thresholds=_thresholds_json(self.thresholds), scan_root=self.folder)
+        body = write_evidence_statement_json(self.out / "statement.json", statement)
+        identifier_keys = {"file_path", "sha256", "signature", "signature_key_id", "report_type", "profile", "pin", "tool_version", "schema_version"}
+        offenders: list[str] = []
+        for where, text in _all_strings(body):
+            if where.rsplit("/", 1)[-1].split("[", 1)[0] in identifier_keys:
+                continue
+            run = english_prose(text)
+            if run:
+                offenders.append(f"statement.json{where}: {run!r} in {text[:160]!r}")
+        if pymupdf_available():
+            from deepfake_lens.pdf_backend import import_pymupdf
+
+            pdf = self.out / "statement.pdf"
+            write_evidence_statement_pdf(pdf, statement)
+            with import_pymupdf().open(str(pdf)) as doc:
+                offenders += _offending_lines(pdf.name, _rejoin_quoted("\n".join(page.get_text() for page in doc)))
+        self.assertEqual(offenders, [], "\n".join(offenders[:40]))
+
+    def test_web_report_html_pdf_and_signed_body(self) -> None:
+        """G9: /api/report (stdlib web server and api-serve share it): HTML text, PDF text, the signed JSON body."""
+        from deepfake_lens import webapp_api
+        from deepfake_lens.core import _thresholds_json
+        from deepfake_lens.pdf_backend import import_pymupdf, pymupdf_available
+
+        body = json.dumps({
+            "items": [item.to_json() for item in self.items],
+            "thresholds": _thresholds_json(self.thresholds),
+            "coverage": {"weights_available": 0, "weights_total": 10},
+        }, ensure_ascii=False).encode("utf-8")
+        from unittest import mock
+
+        offenders: list[str] = []
+        with mock.patch.object(webapp_api, "_READ_ROOTS", __import__("collections").OrderedDict()):
+            webapp_api.configure_read_roots(self.folder)
+            html = webapp_api._report_payload(body, "html", default_folder=self.folder)
+            self.assertIsInstance(html, bytes)
+            assert isinstance(html, bytes)
+            offenders += _offending_lines("web report.html", _html_visible_text(html.decode("utf-8")))
+            signed = webapp_api._report_payload(body, "json", default_folder=self.folder)
+            payload = json.loads(signed) if isinstance(signed, bytes) else signed
+            for where, text in checked_strings(payload):
+                run = english_prose(text)
+                if run:
+                    offenders.append(f"web report.json{where}: {run!r} in {text[:160]!r}")
+            if pymupdf_available():
+                pdf = webapp_api._report_payload(body, "pdf", default_folder=self.folder)
+                assert isinstance(pdf, bytes)
+                with import_pymupdf().open(stream=pdf, filetype="pdf") as doc:
+                    offenders += _offending_lines("web report.pdf", _rejoin_quoted("\n".join(page.get_text() for page in doc)))
+        self.assertEqual(offenders, [], "\n".join(offenders[:40]))
+
+    def test_vendor_weights_outputs(self) -> None:
+        """G9: vendor-weights table, Markdown and --verify text."""
+        import contextlib
+
+        from deepfake_lens.cli import main
+
+        offenders: list[str] = []
+        for argv in (["vendor-weights"], ["vendor-weights", "--format", "markdown"], ["vendor-weights", "--verify"]):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                main(argv)
+            self.assertTrue(out.getvalue().strip(), argv)
+            offenders += _offending_lines(" ".join(argv), out.getvalue())
+        self.assertEqual(offenders, [], "\n".join(offenders[:40]))
+
     def test_doctor_table_and_json(self) -> None:
         from deepfake_lens.doctor import format_report, run_diagnostics
 
@@ -748,6 +900,126 @@ class RenderedOutputsAreKoreanTest(unittest.TestCase):
             if run:
                 offenders.append(f"doctor json {where}: {run!r} in {text[:160]!r}")
         self.assertEqual(offenders, [], "\n".join(offenders[:40]))
+
+
+def _all_strings(node: Any, path: str = "") -> Iterator[tuple[str, str]]:
+    """(json path, string) for every string leaf."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from _all_strings(value, f"{path}/{key}")
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from _all_strings(value, f"{path}[{index}]")
+    elif isinstance(node, str):
+        yield path, node
+
+
+class ApiErrorBodiesAreKoreanTest(unittest.TestCase):
+    """G9 (round 5): error bodies of the stdlib web server and api-serve are Korean."""
+
+    def setUp(self) -> None:
+        from collections import OrderedDict
+        from unittest import mock
+
+        from deepfake_lens import webapp_api
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name).resolve()
+        (self.root / "a.png").write_bytes(b"\x89PNG\r\n\x1a\nnot really")
+        patcher = mock.patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(self._tmp.cleanup)
+        webapp_api.configure_read_roots(self.root)
+
+    def _requests(self) -> list[tuple[str, str, dict[str, str], bytes | None]]:
+        root = self.root
+        return [
+            ("GET", "/api/scan", {"folder": str(root / "missing")}, None),
+            ("GET", "/api/scan", {"folder": str(root / "a.png")}, None),
+            ("GET", "/api/scan", {"folder": str(root), "max_files": "abc"}, None),
+            ("GET", "/api/scan", {"folder": str(root), "model_path": "/etc/passwd"}, None),
+            ("GET", "/api/scan", {"folder": str(root), "fusion_profile": "../x.json"}, None),
+            ("GET", "/api/scan", {"folder": "/"}, None),
+            ("GET", "/api/scan-status", {"job": "nope"}, None),
+            ("GET", "/api/analyze-file", {}, None),
+            ("GET", "/api/analyze-file", {"file": str(root / "missing.png")}, None),
+            ("GET", "/api/analyze-file", {"file": str(root)}, None),
+            ("GET", "/api/analyze-file", {"file": "/etc/passwd"}, None),
+            ("GET", "/api/heatmap", {"path": "/etc/passwd.png"}, None),
+            ("GET", "/api/preview", {"path": "/etc/passwd"}, None),
+            ("POST", "/api/report", {}, b"{not json"),
+            ("POST", "/api/report", {}, b"{}"),
+            ("POST", "/api/report", {}, b'{"items": [{"path": "a"}], "thresholds": 3}'),
+            ("POST", "/api/feedback", {}, b"{}"),
+        ]
+
+    def _check(self, leg: str, method: str, route: str, status: int, raw: bytes, offenders: list[str]) -> None:
+        if status < 400 and not raw.lstrip().startswith(b"{"):
+            return
+        text = raw.decode("utf-8", "replace")
+        try:
+            strings = [value for _, value in _all_strings(json.loads(text))] if text.lstrip().startswith(("{", "[")) else [text]
+        except json.JSONDecodeError:
+            strings = [text]
+        if status < 400:
+            # a 200 answer counts only for its error text
+            payload = json.loads(text)
+            strings = [str(payload.get("error", ""))] if isinstance(payload, dict) and "error" in payload else []
+        for value in strings:
+            run = english_prose(value)
+            if run:
+                offenders.append(f"{leg} {method} {route} -> {status}: {run!r} in {value[:160]!r}")
+
+    def test_stdlib_web_server_error_bodies(self) -> None:
+        import threading
+        import urllib.error
+        import urllib.parse
+        import urllib.request
+
+        from deepfake_lens.webapp import CLIENT_HEADER, build_server
+
+        server = build_server("127.0.0.1", 0, default_folder=self.root)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        offenders: list[str] = []
+        try:
+            port = server.server_address[1]
+            for method, route, params, body in self._requests():
+                url = f"http://127.0.0.1:{port}{route}?{urllib.parse.urlencode(params)}"
+                request = urllib.request.Request(url, data=body, method=method, headers={CLIENT_HEADER: "gui", "Content-Type": "application/json"})
+                try:
+                    with urllib.request.urlopen(request, timeout=60) as response:
+                        status, raw = response.status, response.read()
+                except urllib.error.HTTPError as exc:
+                    status, raw = exc.code, exc.read()
+                self._check("web", method, route, status, raw, offenders)
+        finally:
+            server.shutdown()
+            server.server_close()
+        self.assertEqual(offenders, [], "\n".join(offenders))
+
+    @unittest.skipUnless(_have("fastapi", "httpx"), "fastapi + httpx not installed")
+    def test_api_serve_error_bodies(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from deepfake_lens.api_server import create_app
+
+        client = TestClient(create_app(default_folder=self.root))
+        headers = {"host": "localhost", "X-Deepfake-Lens-Client": "gui"}
+        offenders: list[str] = []
+        requests = self._requests() + [
+            ("POST", "/api/compare", {}, None),
+            ("POST", "/api/classify", {}, None),
+            ("POST", "/api/analyze/text", {}, None),
+            ("POST", "/api/analyze/image", {"file_path": "/etc/passwd"}, None),
+            ("POST", "/api/check", {}, None),
+            ("GET", "/api/review", {}, None),
+            ("GET", "/api/jobs/nope", {}, None),
+        ]
+        for method, route, params, body in requests:
+            response = client.request(method, route, params=params, content=body, headers=headers)
+            self._check("api-serve", method, route, response.status_code, response.content, offenders)
+        self.assertEqual(offenders, [], "\n".join(offenders))
 
 
 def _doctor_text_fields(node: Any, path: str = "", key: str | None = None) -> Iterator[tuple[str, str]]:
@@ -762,6 +1034,17 @@ def _doctor_text_fields(node: Any, path: str = "", key: str | None = None) -> It
         yield path, node
 
 
+def _gui_dom_identifiers() -> frozenset[str]:
+    """Element ids and CSS class names declared in gui.html / gui.css (G9: identifiers, not prose)."""
+    html = (REPO_ROOT / "deepfake_lens" / "gui.html").read_text(encoding="utf-8")
+    css = (REPO_ROOT / "deepfake_lens" / "gui.css").read_text(encoding="utf-8")
+    names: set[str] = set(re.findall(r'\bid="([\w-]+)"', html))
+    for classes in re.findall(r'\bclass="([^"]+)"', html):
+        names.update(classes.split())
+    names.update(re.findall(r"[.#]([A-Za-z][\w-]*)", re.sub(r"\{[^}]*\}", " ", css)))
+    return frozenset(names)
+
+
 class GuiStringsAreKoreanTest(unittest.TestCase):
     """S8: gui.js label tables and notice strings, gui.html visible text."""
 
@@ -774,8 +1057,14 @@ class GuiStringsAreKoreanTest(unittest.TestCase):
         offenders = []
         literals = list(js_string_literals(source))
         self.assertGreater(len(literals), 300)
+        dom_ids = _gui_dom_identifiers()
         for line, text in literals:
             visible = re.sub(r"<[^>]*>", " ", text)
+            # G9: DOM ids, CSS class names and attribute selectors used as
+            # code literals ('case-no', 'qc-out on', 'button[data-label]') are
+            # identifiers; everything else in the literal is checked.
+            visible = re.sub(r"\b[\w-]*\[[\w-]+(?:=[^\]]*)?\]", " ", visible)
+            visible = " ".join(" " if token in dom_ids else token for token in re.split(r"(\s+)", visible))
             run = english_prose(visible)
             if run:
                 offenders.append(f"gui.js:{line}: {run!r} in {text[:120]!r}")

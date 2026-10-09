@@ -430,7 +430,7 @@ def _heatmap_payload(query: str) -> tuple[int, bytes, str]:
     # Heatmaps live in the tool-owned output root (never in the evidence
     # folder, R-IN-1); those are served without a read root.
     if path.suffix.lower() != ".png" or not (_read_root_allows(path, root_value) or is_default_heatmap_output(path)):
-        return 403, b"forbidden", "forbidden"
+        return 403, READ_ROOT_DENIED_MESSAGE.encode("utf-8"), "forbidden"  # G9: Korean body, ASCII header code
     try:
         data = path.read_bytes()
     except OSError:
@@ -459,6 +459,7 @@ _PREVIEW_MIME = {
     ".opus": "audio/opus",
 }
 MAX_PREVIEW_BYTES = 128 * 1024 * 1024
+PREVIEW_TOO_LARGE_MESSAGE = "파일이 너무 커서 미리보기를 제공하지 않습니다(상한 128 MiB)"
 
 
 def _preview_payload(query: str) -> tuple[int, bytes, str, str]:
@@ -476,10 +477,10 @@ def _preview_payload(query: str) -> tuple[int, bytes, str, str]:
     path = Path(path_value).expanduser().resolve()
     mime = _PREVIEW_MIME.get(path.suffix.lower())
     if mime is None or not _read_root_allows(path, root_value):
-        return 403, b"forbidden", "forbidden", ""
+        return 403, READ_ROOT_DENIED_MESSAGE.encode("utf-8"), "forbidden", ""  # G9: Korean body, ASCII header code
     try:
         if path.stat().st_size > MAX_PREVIEW_BYTES:
-            return 413, b"too large", "too-large", ""
+            return 413, PREVIEW_TOO_LARGE_MESSAGE.encode("utf-8"), "too-large", ""
         data = path.read_bytes()
     except OSError:
         return 404, "파일을 찾을 수 없습니다".encode("utf-8"), "not-found", ""

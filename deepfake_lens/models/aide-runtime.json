@@ -29,7 +29,7 @@
   ],
   "notes": [
     "런타임 'aide'는 scripts/run_aide.py에 위임하며, AIDE의 DCT 대역 선택 전처리가 모델 클래스에 포함되어 있습니다. input_size/mean/std는 일반 이미지 전처리기가 쓰지 않고 기록용으로만 둡니다.",
-    "모델 로짓 순서는 (real=0, fake=1)입니다. score_index 1에 softmax를 적용하면 0–100 척도의 fake 확률이 됩니다.",
+    "모델 로짓 순서는 (real=0, fake=1)입니다. score_index 1에 softmax를 적용하면 0–100 척도의 `fake` 클래스 확률이 됩니다.",
     "체크포인트 경로는 이 프로필 디렉터리(models/) 기준 상대 경로이며 .gitignore로 git에서 제외됩니다."
   ],
   "license": "MIT",

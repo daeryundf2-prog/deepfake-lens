@@ -194,7 +194,7 @@ class VendorManifest:
 
         lines.extend([
             "",
-            "> [!NOTE]",
+            "> **참고**",
             "> 폐쇄망 분석 환경에서는 외부 통신이 전면 차단되므로, 분석 착수 전 전수 SHA-256 무결성 검증을 필히 완료해야 합니다.",
         ])
         return "\n".join(lines)

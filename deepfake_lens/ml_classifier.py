@@ -21,8 +21,7 @@ from .rule_classifier import (  # noqa: F401
 )
 
 warnings.warn(
-    "deepfake_lens.ml_classifier is deprecated; import from "
-    "deepfake_lens.rule_classifier instead",
+    "deepfake_lens.ml_classifier는 폐기 예정입니다 — deepfake_lens.rule_classifier에서 import하십시오",
     DeprecationWarning,
     stacklevel=2,
 )

@@ -82,7 +82,14 @@ the stream endpoints, `/api/scan`) all analyze through
 
 All analyze endpoints take parameters as **query string** values and return a
 JSON envelope `{"status": "success", "data": {...}}` or an HTTP error with
-`{"detail": "..."}`. `/api/*` routes require auth as above.
+`{"detail": "..."}`. `/api/*` routes require auth as above. Every error text is
+Korean (G7/G9, round 5): a missing or malformed query parameter is **422**
+`{"detail": "요청 매개변수 오류 — <이름>(쿼리): 값이 필요합니다", "errors": [{"loc", "type"}]}`
+(FastAPI's English `msg` is not returned); `/api/report` request errors are
+`{"error": "보고서에 넣을 검사 결과 항목(items 배열)이 필요합니다"}`,
+`"<field> 값은 JSON 객체여야 합니다"`, `"검사 결과 항목 N번을 해석할 수 없습니다: …"`;
+a refused `/api/heatmap` / `/api/preview` path answers 403 with the body
+`허용되지 않은 경로` (header `X-Deepfake-Lens-Error: forbidden`).
 
 Every parameter that names a server-side path — `file_path`
 (`/api/analyze/image|audio|face|forensic`, `/api/classify`, `/api/check`,

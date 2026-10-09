@@ -247,14 +247,199 @@ _IDENTIFIER_TOKENS: tuple[re.Pattern[str], ...] = (
 _ACRONYM = re.compile(r"\b[A-Z]{2,}s?\b")
 
 
-def english_prose(text: str) -> str | None:
-    """The first English run (two or more consecutive English words) in ``text``, or None.
+# ---------------------------------------------------------------------------
+# Round 5 (G9): dictionary rule. The run rule above is bypassed by one-word
+# sentences ("Unverified. Unreliable. Ignore."), English words separated by
+# Hangul ("Ignore 이 점수, 참고 only"), separators ("do-not-use-as-evidence",
+# "not/for/court/use"), quoting ("「Do not trust this score」") and leetspeak
+# ("Th1s sc0re 1s n0t pr00f"). The dictionary rule tokenizes every line on
+# spaces and on - / · 「」 『』 quotes, brackets and punctuation, maps digits
+# inside letter tokens back to letters (0→o, 1→i, 3→e, 4→a, 5→s, 7→t), and
+# flags a line holding two or more distinct common English words
+# (COMMON_ENGLISH_WORDS) — or one of the disclaimer/verdict words
+# (STANDALONE_ENGLISH_WORDS) standing as a word of its own. Only whole
+# identifier tokens are removed first: URLs, file names and paths, model ids,
+# exception class names, CLI flags, key=value, snake/camel case, hex, the
+# acronym / product / module lists above and the packaged profile names
+# (IDENTIFIER_ALLOWLIST). Hyphenated tokens are split unless they carry a
+# digit (version ids such as layer-thresholds-v1) or are on the allowlist.
+# ---------------------------------------------------------------------------
+COMMON_ENGLISH_WORDS = frozenset("""
+    about above according across after again against all almost alone along already also although always am among an
+    and another any anything are around as ask at authentic available avoid away back bad based be because been before
+    being below best better between both but by calibrated calibration can cannot careful case caution certain check
+    checked claim clean clear come conclusion confidence confirm consider could court current data decide decision
+    definitely detect detected did different do does doing done don down during each easy either else enough error
+    especially even ever every evidence exact example fail failed failure false far few file final find fine first for
+    found free from full further genuine get give given go good great had has have having he help her here high him his
+    how however if ignore ignored important in indeed instead into is it its itself just keep know known label large
+    last later least less let like likely little long look low made main make many may maybe me might more most much
+    must my need needed never new next no none nor not note nothing now of off often ok on once one only open or order
+    other others our out over own part passed perhaps place please possible possibly probably proof proven quite rather
+    real really reason record reference related reliable report result results right run safe same say says score scores
+    second see seems seen set several shall she should show signal since so some something sometimes soon still such
+    sure suspicious take tell than that the their them then there therefore these they thing things this those though
+    through thus to too treat true trust trusted try two uncalibrated under unknown unless unlikely unreliable unsafe
+    until untrusted unverified up upon us use used useful using usually valid validated value verified verify very
+    via want was way we well were what when where whether which while who whole why will with within without would
+    wrong yes yet you your always applied applies apply assessment beware cannot carefully cautiously certainly
+    consult courtroom determined disclaimer doubt exactly false fake guaranteed hint indicative ineligible
+    inadmissible manual meaning mistake only otherwise please probable proves prove prohibited purpose purposes
+    question reasonable recommend refer regard reject rejected review risky screening should solely suggest
+    tampered unconfirmed unsigned unvalidated warning whatever
+""".split())
+# Words that alone, as a word of their own, are an English verdict or
+# disclaimer in Korean output ("결론: Uncalibrated — 참고용").
+STANDALONE_ENGLISH_WORDS = frozenset("""
+    uncalibrated unverified unreliable untrusted unvalidated unconfirmed unsigned inconclusive inadmissible
+    ignore ignored likely unlikely probably possibly suspicious fake genuine tampered beware caution warning disclaimer
+""".split())
+# Whole identifier tokens that contain dictionary-word parts (G9): the
+# phase-0 terms printed as identifiers. The packaged runtime profile names
+# are added at first use (profile_names()).
+IDENTIFIER_ALLOWLIST = frozenset({
+    "in-sample", "out-of-sample", "pre-screen", "fail-closed", "read-root", "allow-root", "key-file",
+    # hyphenated deepfake-lens subcommands (cli.COMMANDS; test_error_text checks the list stays complete)
+    "legal-report", "evidence-statement", "verify-report", "vendor-weights", "video-analysis", "text-advanced",
+    "pixel-analysis", "ml-classify", "faceswap-seam", "train-neural-plan", "api-serve", "deepfake-lens",
+})
+_LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
+_DICT_SEPARATORS = re.compile("[\\s\\-–—/·\u300c\u300d\u300e\u300f\"'“”‘’()\\[\\]{}<>|,;:!?.…*+=~^`#&%]+")
+_LETTERS_AND_DIGITS = re.compile(r"^(?=.*[A-Za-z])[A-Za-z0-9@$]+$")
+_DICT_IDENTIFIERS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"https?://\S+"),  # URLs
+    # backticked code: a shell command, at most two tokens, or code punctuation
+    re.compile(r"`((?:pip|python|deepfake-lens|experiments/)[^`]*|[^`\s]+(?: [^`\s]+)?|[^`]*[-_/.=<>:\[\]{}][^`]*)`"),
+    re.compile("|".join(re.escape(name) for name in sorted(KNOWN_PROPER_NOUNS, key=len, reverse=True))),
+    re.compile(r"<root>(?:[\\/][^\s'\"]*)?"),  # the scrubbed scan root and paths under it
+    re.compile("(?<![\\w])(?:[A-Za-z]:[\\\\/]|/|~/)[^\\s'\"\u300c\u300d]*"),  # absolute paths
+    # file names / paths ending in a file extension (archive members "a.zip::in/x.png" included)
+    re.compile(
+        r"[\w.\-~<>:/\\]*\.(?:py|js|json|md|pth|pt|onnx|torchscript|png|jpe?g|gif|webp|bmp|tiff?|heic|txt|wav|mp3|m4a|flac|ogg|"
+        r"mp4|mov|mkv|avi|webm|zip|tar|gz|7z|rar|xml|html?|pdf|csv|docx|xlsx|pptx|hwpx?|doc|xls|ppt|log|bin|exe|so|dll|unpacked)\b"
+        r"(?:::[\w.\-/]+)?",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\b[\w.]*[\w]-?[\w.-]*/[\w.-]+"),  # model ids org/name — only kept when a part has a digit or hyphen (checked below)
+    # C2PA SDK validation codes (before the camelCase rule takes their first half)
+    re.compile(r"\b(?:assertion|signingCredential|claimSignature|claim|manifest|timeStamp|general|algorithm|ingredient)(?:\.[A-Za-z]\w*)+"),
+    re.compile(r"\b_?[A-Z][A-Za-z0-9_]*(?:Error|Exception|Warning)\b"),  # exception classes
+    re.compile(r"(?<![\w-])--?[A-Za-z][\w-]*"),  # CLI flags
+    re.compile(r"\b[\w.:\-]+=\S*"),  # key=value
+    re.compile(r"\b\w+(?::[\w\-]+)+"),  # colon-joined ids (model:<name>)
+    re.compile(r"\b\w*_\w*\b"),  # snake_case identifiers
+    re.compile(r"\b[a-z]+[A-Z][A-Za-z0-9]*\b"),  # camelCase
+    re.compile(r"\b[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*\b"),  # PascalCase / product ids (EfficientNet)
+    re.compile(r"\b[0-9a-fA-F]{8,}\b"),  # hex digests / ids
+    re.compile(r"\b(?:" + "|".join(sorted(KNOWN_MODULE_NAMES)) + r")\b"),
+    # dotted names inside this package (decision.decide, analysis_api.analyze_path)
+    re.compile(
+        r"\b(?:deepfake_lens\.)?(?:"
+        + "|".join(sorted(path.stem for path in Path(__file__).resolve().parent.glob("*.py") if not path.stem.startswith("_")))
+        + r")(?:\.\w+)+"
+    ),
+)
+_PROFILE_NAMES: frozenset[str] | None = None
 
-    Every sentence (split on ``.``, ``!``, ``?``, ``;`` and newlines) is
-    checked on its own; Hangul elsewhere in the text exempts nothing. A
-    contraction (``Don't``) is one word, a lone English word is not prose.
+
+def profile_names() -> frozenset[str]:
+    """Packaged runtime-profile names and file stems — identifiers, never prose (G9)."""
+    global _PROFILE_NAMES
+    if _PROFILE_NAMES is None:
+        import json
+
+        names: set[str] = set()
+        for path in (Path(__file__).resolve().parent / "models").glob("*-runtime.json"):
+            names.add(path.stem)
+            names.add(path.stem.removesuffix("-runtime"))
+            try:
+                name = json.loads(path.read_text(encoding="utf-8")).get("name")
+            except (OSError, ValueError, AttributeError):
+                continue
+            if isinstance(name, str) and not re.search(r"\s", name):
+                names.add(name)  # a name with spaces is not an identifier token
+            # Latin name parts of the Korean display name (architecture,
+            # vendor and dataset ids: Swin-large, umm-maybe, In-the-Wild).
+            try:
+                display = json.loads(path.read_text(encoding="utf-8")).get("display_name")
+            except (OSError, ValueError, AttributeError):
+                display = None
+            if isinstance(display, str):
+                names.update(re.findall(r"[A-Za-z0-9][A-Za-z0-9.]*(?:-[A-Za-z0-9.]+)+", display))
+        names.add("WP-I")  # the phase-0 work package id
+        _PROFILE_NAMES = frozenset(names)
+    return _PROFILE_NAMES
+
+
+def _strip_allowlisted(text: str) -> str:
+    """Remove whole identifier tokens of IDENTIFIER_ALLOWLIST and the packaged profile names."""
+    for token in sorted(IDENTIFIER_ALLOWLIST | profile_names(), key=len, reverse=True):
+        if token in text:
+            text = re.sub(rf"(?<![\w-]){re.escape(token)}(?![\w-])", " ", text)
+    return text
+
+
+def _strip_dictionary_identifiers(line: str) -> str:
+    line = _strip_allowlisted(line)
+    for pattern in _DICT_IDENTIFIERS:
+        if pattern.pattern.startswith(r"\b[\w.]*[\w]-?[\w.-]*/"):
+            # A model id (org/name) only when a part carries a digit or a
+            # hyphen — "not/for/court/use" is words, not an id.
+            line = pattern.sub(lambda m: " " if re.search(r"[\d-]", m.group(0)) and m.group(0).count("/") == 1 else m.group(0), line)
+            continue
+        line = pattern.sub(" ", line)
+    return _ACRONYM.sub(lambda m: " " if m.group(0).rstrip("s") in KNOWN_ACRONYMS else m.group(0), line)
+
+
+def _dictionary_words(line: str) -> tuple[list[str], list[str]]:
+    """(dictionary words, standalone verdict words) of one line, distinct, in order."""
+    found: list[str] = []
+    standalone: list[str] = []
+    for raw in line.split():
+        whole = raw.strip("\"'“”‘’()[]{}<>|,;:!?.…*\u300c\u300d\u300e\u300f").lower()
+        if whole in STANDALONE_ENGLISH_WORDS and whole not in standalone:
+            standalone.append(whole)
+        parts = [part for part in _DICT_SEPARATORS.split(raw) if part]
+        if any(re.search(r"\d", part) and re.search(r"[A-Za-z]", part) for part in parts) and "-" in raw and len(parts) > 1:
+            # A hyphenated token with a digit part is a version id (layer-thresholds-v1).
+            continue
+        for part in parts:
+            if not _LETTERS_AND_DIGITS.match(part):
+                continue
+            word = part.translate(_LEET).lower() if re.search(r"\d", part) else part.lower()
+            if word in COMMON_ENGLISH_WORDS and word not in found:
+                found.append(word)
+    return found, standalone
+
+
+def english_dictionary_hit(text: str) -> str | None:
+    """The offending words when a line holds two common English words (or a verdict word), else None (G9)."""
+    for line in text.splitlines() or [text]:
+        stripped = _strip_dictionary_identifiers(line)
+        words, standalone = _dictionary_words(stripped)
+        if len(words) >= 2:
+            return " ".join(words)
+        if standalone:
+            return standalone[0]
+    return None
+
+
+def english_prose(text: str) -> str | None:
+    """English in ``text``, or None (S8, strengthened in round 5 / G9).
+
+    Two rules, either flags:
+
+    * run rule (round 4): after identifier tokens are removed, a sentence
+      (split on ``.``, ``!``, ``?``, ``;`` and newlines) holds two consecutive
+      English words; a contraction (``Don't``) is one word;
+    * dictionary rule (round 5): a line holds two distinct common English
+      words anywhere — split on ``-`` ``/`` ``·``, corner brackets and punctuation,
+      digits read as letters — or one English verdict/disclaimer word
+      (:func:`english_dictionary_hit`).
+
+    Hangul elsewhere in the text exempts nothing.
     """
-    stripped = text
+    stripped = _strip_allowlisted(text)
     for pattern in _IDENTIFIER_TOKENS:
         stripped = pattern.sub(" ", stripped)
     stripped = _ACRONYM.sub(lambda m: " " if m.group(0).rstrip("s") in KNOWN_ACRONYMS else m.group(0), stripped)
@@ -262,7 +447,7 @@ def english_prose(text: str) -> str | None:
         match = _EN_RUN.search(sentence)
         if match:
             return match.group(0)
-    return None
+    return english_dictionary_hit(text)
 
 
 def _untranslated_fallback(message: str, cls: str) -> str:

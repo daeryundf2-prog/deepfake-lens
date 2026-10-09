@@ -91,7 +91,7 @@ def calibrate_fusion_profile(
         "metrics_ci": ci,
         "score_basis": "raw, uncalibrated",
         "in_sample": True,
-        "note": "융합 임계값은 같은 표본에서 맞추고 같은 표본에서 평가한 in-sample 값(참고)이며 원점수(raw, uncalibrated) 기반입니다.",
+        "note": "융합 임계값은 같은 표본에서 맞추고 같은 표본에서 평가한 in-sample 값(참고)이며 보정 전 원점수 기반입니다.",
         "rows": rows,
     }
 

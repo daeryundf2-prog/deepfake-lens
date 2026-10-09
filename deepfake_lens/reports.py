@@ -30,6 +30,9 @@ from .result_text import (
 from .result_types import EVIDENCE_KIND_LABELS, VERDICT_LABELS, CoverageStatus, Grade, Verdict, check_label, is_verdict_row, status_label
 from .signing import REPORT_KEY_ENV, resolve_report_key, sign_report, signed_body_sha256
 
+# G9: Korean label of the benchmark ``score_basis`` code (the JSON keeps the code).
+SCORE_BASIS_LABELS = {"raw, uncalibrated": "보정 전 원점수"}
+
 # Report title (B2): the product name is an identifier, the rest Korean.
 HTML_REPORT_TITLE = "Deepfake Lens 감정 보고서"
 
@@ -547,7 +550,7 @@ def write_eval_html_report(path: Path | str, payload: dict[str, object], *, reda
     <div class="metric">양성 / 음성 표본 수<br><strong>{escape(str(metrics.get("n_pos", "-")))} / {escape(str(metrics.get("n_neg", "-")))}</strong></div>
     <div class="metric">오탐 / 미탐<br><strong>{len(false_positives)} / {len(false_negatives)}</strong></div>
   </div>
-  <p>점수 기준: {escape(str(payload.get("score_basis", "보정 전 원점수")))} — {escape(str(payload.get("score_basis_note", "")))}</p>
+  <p>점수 기준: {escape(SCORE_BASIS_LABELS.get(str(payload.get("score_basis", "")), str(payload.get("score_basis", "보정 전 원점수"))))} — {escape(str(payload.get("score_basis_note", "")))}</p>
   <p>혼동 행렬: {escape(str(confusion))}</p>
   <table>
     <thead><tr><th>라벨</th><th>예측</th><th>점수</th><th>출처</th><th>출처 추정</th><th>파일</th></tr></thead>
