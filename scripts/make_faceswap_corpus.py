@@ -45,7 +45,7 @@ def main() -> int:
 
     try:
         import cv2
-        import numpy as np
+        import numpy as np  # noqa: F401 — availability probe
         from insightface.app import FaceAnalysis
         from insightface.model_zoo import get_model
     except ImportError as exc:
