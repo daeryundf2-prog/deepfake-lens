@@ -2,11 +2,11 @@
 
 <!-- 생성 파일: scripts/build_traceability_commits.py가 docs/traceability-commits.json과 git 히스토리에서 만든다. 손으로 고치지 말 것 — 매핑은 JSON의 ids[]를 고친 뒤 스크립트를 다시 실행한다. -->
 
-Y13/P12: 검증 결함 ID(라운드 1–9)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
+Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..81e94ea`(병합 커밋 제외, 커밋 152개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..4c2e7b1`(병합 커밋 제외, 커밋 163개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 133개 — 스펙 갭에 매핑 78개(그중 신규 사유 병기 9개), 신규(스펙 외)만 55개.
+요약: ID 156개 — 스펙 갭에 매핑 96개(그중 신규 사유 병기 21개), 신규(스펙 외)만 60개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -160,6 +160,29 @@ Y13/P12: 검증 결함 ID(라운드 1–9)를 0단계 스펙의 갭 ID(G1–G34)
 | R9-8 | 9 | 서비스 문서의 /api/review-marks(404)·'업로드 엔드포인트 없음' 오기, 빈 /api/analyze/text 200 → 문서 정정, 400, 엔드포인트 메타테스트 | G8 | 신규(스펙 외): 서비스 문서 정합성 — 갭 목록 밖 | 4ef3b62 |
 | R9-9 | 9 | 서명 본문·렌더 보고서에 scan_root 미기록 → 읽기 루트 기준 상대 경로를 서명 본문에 기록, 보고서 헤더에 표시 | G30, G31 |  | 6919550 |
 | R9-10 | 9 | build_traceability_commits --check가 표 이후 커밋 수와 무관하게 통과 → 재생성 커밋 1개(추적표 파일만)를 초과하면 실패 | — | 신규(스펙 외): 커밋 추적성(공통 규칙 1) — 갭 목록 밖 | d2036db, b88ef92, 3e256fc, eefacd1, fc1a568, 21717bd |
+| R10-1 | 10 | 파일명이 평문 출력에 원문 그대로(CR·ESC·LF·'\|') → 모든 렌더에서 result_text.display_name로 이스케이프 | G6, G30 | 신규(스펙 외): 보고서 렌더링 무결성 — 갭 목록 밖 | fde64d0 |
+| R10-2 | 10 | CSV 수식 주입(=,+,-,@,TAB,CR) → 앞에 ' 붙이기 | G30 | 신규(스펙 외): CSV 수식 주입 — 갭 목록 밖 | fde64d0 |
+| R10-3 | 10 | TEST-DELETIONS.md가 리라이트 이전 해시 인용·skip을 통과로 표시 → 커밋 제목으로 인용, skip이면 건너뜀(환경) | — | 신규(스펙 외): QA 기록 정확성 — 갭 목록 밖 | e601adf, b600a58 |
+| R10-4 | 10 | feedback --scan-json이 '::'/'\:' 포함 실제 파일명 라벨 미매칭 → 원문 경로·(container, member)로 조인 | G30, G34 |  | e1a9598 |
+| R10-5 | 10 | 예기치 않은 오류의 종료 코드(verify-report 깊은 JSON 1, --port 범위) → 문서화된 입력 오류 코드 | G29 |  | 40e7ec6 |
+| R10-6 | 10 | 단일 파일 업로드 행 경로의 '::' 미이스케이프 → 실제 파일과 같이 이스케이프 | G30, G34 |  | 768a3f3 |
+| R10-7 | 10 | 영어 탐지기 미탐(【fake】, verdict→fake) → 화살표·전각 괄호를 토큰 경계로 | — | 신규(스펙 외): 출력 한국어 규칙(공통 규칙 3) — 갭 목록 밖 | e9b881f |
+| R10-8 | 10 | 한국어 int/float 메시지, feedback 행 번호, R9-10 메시지의 CONFORMANCE.md, 중복 제외 표기, api-serve 라우트 문서화 | G8, G12 | 신규(스펙 외): 문서·메시지 정합성 — 갭 목록 밖 | 7d3c508 |
+| R10-9 | 10 | R9-4 메타테스트가 이름 패턴만 검사 → Path 형 인수는 전부 쓰기 대상 등록 또는 읽기 전용 선언 | G31 |  | 81e94ea |
+| R11-1 | 11 | UTF-8이 아닌 파일명(PEP 383 surrogate)이 스캔 전체를 깨뜨림(CLI exit 2·빈 JSON, 웹 400 영어, API 500) → 모든 JSON을 surrogate-safe(\udcXX)로, 행은 정상 분석 | G30 | 신규(스펙 외): 비 UTF-8 파일명 처리 — 갭 목록 밖 | 3b12bd1 |
+| R11-2 | 11 | QA-SYS-10이 전체 스위트의 skip을 무시하고 통과 표시 → skip이 있으면 건너뜀(환경)·목록 기재, 환경 의존 테스트 문서화 | — | 신규(스펙 외): QA 기록 정확성 — 갭 목록 밖 | d10e95f |
+| R11-3 | 11 | /api/report, /api/feedback 깊은 중첩 JSON → 500 → 400 'JSON 중첩이 너무 깊습니다' | G34 | 신규(스펙 외): 요청 본문 처리 — 갭 목록 밖 | b661b3f |
+| R11-4 | 11 | display_name의 '\\|' 이스케이프가 단사가 아님 → 모든 백슬래시를 '\\'로 | G30 | 신규(스펙 외): 보고서 렌더링 무결성 — 갭 목록 밖 | e402a18 |
+| R11-5 | 11 | 영어 탐지기 미탐(fake✓, ▶fake◀, fake的 …) → 비 ASCII S*/P*·CJK 한자를 토큰 경계로 | — | 신규(스펙 외): 출력 한국어 규칙(공통 규칙 3) — 갭 목록 밖 | 8388572 |
+| R11-6 | 11 | HTML 보고서 임베드 JSON에 '<!--<script>' 원문 → < > & U+2028/2029 이스케이프 | G30 | 신규(스펙 외): 보고서 렌더링 무결성 — 갭 목록 밖 | e402a18 |
+| R11-7 | 11 | 증거설명서 Markdown에 이름의 링크/이미지 문법 미중화 → Markdown 활성 문자 이스케이프 | G30 | 신규(스펙 외): 보고서 렌더링 무결성 — 갭 목록 밖 | 4c2e7b1 |
+| R11-8 | 11 | '상세는 로그 참조 — 상세는 로그 파일' 중복 → 한 번만 | G29 |  | 51eac89 |
+| R11-9 | 11 | 테스트 소스의 raw RLO/zero-width 문자 → 이스케이프 시퀀스, ruff PLE2502/2515 활성화 | — | 신규(스펙 외): 소스 위생 — 갭 목록 밖 | e402a18 |
+| R11-10 | 11 | GUI 근거 제목·상세 등이 displayName을 거치지 않음 → 모든 결과 문자열에 적용(HTML 보고서와 동일) | G30 | 신규(스펙 외): 보고서 렌더링 무결성 — 갭 목록 밖 | 4c2e7b1 |
+| R11-11 | 11 | str 형 경로 옵션이 R10-9 메타테스트를 우회 → 이름·도움말·기본값으로 경로 인수 판별 | G31 |  | 5161a8b |
+| R11-12 | 11 | 웹 서버가 모든 미지 경로에 GUI 제공 → '/', '/gui*', '/api/*' 외 404 한국어 JSON | G31 | 신규(스펙 외): 서비스 표면 정합성 — 갭 목록 밖 | 40a862a |
+| R11-13 | 11 | CSV 전각 ＝＋－＠ 미보호 → NFKC 기준 수식 문자 보호 | G30 | 신규(스펙 외): CSV 수식 주입 — 갭 목록 밖 | 4c2e7b1 |
+| R11-14 | 11 | JSON stdout에 raw bidi/C1 유지 → 행에 display_name(이스케이프본) 추가, name 원문 유지 | G30 | 신규(스펙 외): JSON 계약 — 갭 목록 밖 | 8292a74 |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -171,7 +194,7 @@ Y13/P12: 검증 결함 ID(라운드 1–9)를 0단계 스펙의 갭 ID(G1–G34)
 - R15: 커밋 제목에 쓰이지 않음 — 라운드 2 문서가 없어 매핑 불가(커밋 메시지(라운드 2 문서 없음))
 - R17: 커밋 제목에 쓰이지 않음 — 라운드 2 문서가 없어 매핑 불가(커밋 메시지(라운드 2 문서 없음))
 
-근거: `verify_round1/4/5/6/7/8/9.md`(라운드 2·3은 문서가 없어 해당 커밋 메시지), 스펙 WP 머리글의 갭 목록.
+근거: `verify_round1/4/5/6/7/8/9/10/11.md`(라운드 2·3은 문서가 없어 해당 커밋 메시지), 스펙 WP 머리글의 갭 목록.
 
 라운드 3의 N은 커밋 제목에 N1–N8만 쓰였다(N3-1…N3-8). 라운드 6의 N3(=V5-G10, 커밋 리워드)은 세션 소유자 작업이라 커밋 제목에 없다.
 
@@ -331,11 +354,22 @@ P14: Gaps를 제목 괄호에만 적은 커밋(예: `(Z1-Z5; Gaps: G7, 신규)`)
 | eefacd1 | 9 | WP-J, R9-10 | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 3e256fc (WP-J, R9-10; Gaps: G26, G27, G28) |
 | fc1a568 | 9 | R9-10 | Gaps: 신규(스펙 외) | subject | fix(scripts): keep the sweep re-export tests import; noqa the availability probe (R9-10 follow-up; Gaps: 신규) |
 | 21717bd | 9 | WP-J, R9-10 | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on fc1a568 (WP-J, R9-10; Gaps: G26, G27, G28) |
-| fde64d0 | 9 | R10-1, R10-2 | Gaps: G6, G30; 신규(스펙 외) | subject | fix(reports): R10-1 file names shown through result_text.display_name in every rendering; R10-2 CSV formula cells guarded (R10-1, R10-2; Gaps: G6, G30, 신규) |
-| e601adf | 9 | R10-3 | Gaps: 신규(스펙 외) | subject | fix(qa): R10-3 deleted tests cite their commit by subject; QA-SYS-10 fails when it is not in HEAD's history; a skipped test makes a QA ID 건너뜀(환경) (R10-3; Gaps: 신규) |
-| e1a9598 | 9 | R10-4 | Gaps: G30, G34 | subject | fix(feedback): R10-4 labels join scan rows on the real path, not the escaped display path (R10-4; Gaps: G30, G34) |
-| 40e7ec6 | 9 | R10-5 | Gaps: G29 | subject | fix(cli): R10-5 unusable inputs exit with the documented code; --port checked 1-65535; no per-row error note without rows (R10-5; Gaps: G29) |
-| 768a3f3 | 9 | R10-6 | Gaps: G30, G34 | subject | fix(web): R10-6 single-file upload rows escape "::" in their path like every real file (R10-6; Gaps: G30, G34) |
-| e9b881f | 9 | R10-7 | Gaps: 신규(스펙 외) | subject | fix(text): R10-7 arrows and CJK/angle brackets are token boundaries of the English detector (R10-7; Gaps: 신규) |
-| 7d3c508 | 9 | R10-8 | Gaps: G8, G12; 신규(스펙 외) | subject | fix(cli,docs): R10-8 Korean int/float messages, feedback positions in file lines, CONFORMANCE.md named in the R9-10 check, "(이미 센 폴더 N개 중복 제외)", every api-serve route documented (R10-8; Gaps: G8, G12, 신규) |
-| 81e94ea | 9 | R10-9 | Gaps: G31 | subject | test(cli): R10-9 every Path-typed argument is a registered write target or declared read-only (R10-9; Gaps: G31) |
+| fde64d0 | 10 | R10-1, R10-2 | Gaps: G6, G30; 신규(스펙 외) | subject | fix(reports): R10-1 file names shown through result_text.display_name in every rendering; R10-2 CSV formula cells guarded (R10-1, R10-2; Gaps: G6, G30, 신규) |
+| e601adf | 10 | R10-3 | Gaps: 신규(스펙 외) | subject | fix(qa): R10-3 deleted tests cite their commit by subject; QA-SYS-10 fails when it is not in HEAD's history; a skipped test makes a QA ID 건너뜀(환경) (R10-3; Gaps: 신규) |
+| e1a9598 | 10 | R10-4 | Gaps: G30, G34 | subject | fix(feedback): R10-4 labels join scan rows on the real path, not the escaped display path (R10-4; Gaps: G30, G34) |
+| 40e7ec6 | 10 | R10-5 | Gaps: G29 | subject | fix(cli): R10-5 unusable inputs exit with the documented code; --port checked 1-65535; no per-row error note without rows (R10-5; Gaps: G29) |
+| 768a3f3 | 10 | R10-6 | Gaps: G30, G34 | subject | fix(web): R10-6 single-file upload rows escape "::" in their path like every real file (R10-6; Gaps: G30, G34) |
+| e9b881f | 10 | R10-7 | Gaps: 신규(스펙 외) | subject | fix(text): R10-7 arrows and CJK/angle brackets are token boundaries of the English detector (R10-7; Gaps: 신규) |
+| 7d3c508 | 10 | R10-8 | Gaps: G8, G12; 신규(스펙 외) | subject | fix(cli,docs): R10-8 Korean int/float messages, feedback positions in file lines, CONFORMANCE.md named in the R9-10 check, "(이미 센 폴더 N개 중복 제외)", every api-serve route documented (R10-8; Gaps: G8, G12, 신규) |
+| 81e94ea | 10 | R10-9 | Gaps: G31 | subject | test(cli): R10-9 every Path-typed argument is a registered write target or declared read-only (R10-9; Gaps: G31) |
+| b600a58 | 10 | WP-J, R10-3 | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 81e94ea (WP-J, R10-3; Gaps: G26, G27, G28) |
+| 3b12bd1 | 11 | R11-1 | Gaps: G30; 신규(스펙 외) | subject | fix(io): R11-1 non-UTF-8 file names (PEP 383 surrogates) never break a scan — surrogate-safe JSON everywhere (R11-1; Gaps: G30, 신규) |
+| d10e95f | 11 | R11-2 | Gaps: 신규(스펙 외) | subject | fix(qa): R11-2 QA-SYS-10 counts the full suite's skips as 건너뜀(환경) and lists them; environment-dependent tests documented in docs/QA-ENV-DEPENDENT-TESTS.md (R11-2; Gaps: 신규) |
+| b661b3f | 11 | R11-3 | Gaps: G34; 신규(스펙 외) | subject | fix(web,api): R11-3 a request body nested past the JSON recursion limit is a 400 "JSON 중첩이 너무 깊습니다" on both servers, never a 500 (R11-3; Gaps: G34, 신규) |
+| e402a18 | 11 | R11-4, R11-6, R11-9 | Gaps: G30; 신규(스펙 외) | subject | fix(reports): R11-4 display_name is injective (every "\" shown "\\"); R11-6 report JSON embedded in <script> escapes < > & U+2028 U+2029; R11-9 no raw invisible characters in source (R11-4, R11-6, R11-9; Gaps: G30, 신규) |
+| 8388572 | 11 | R11-5 | Gaps: 신규(스펙 외) | subject | fix(text): R11-5 every non-ASCII symbol/punctuation character, CJK ideograph and kana is a token boundary of the English detector (R11-5; Gaps: 신규) |
+| 51eac89 | 11 | R11-8 | Gaps: G29 | subject | fix(cli): R11-8 an input error names the log once — "(라이브러리 오류(X)) — 상세는 로그 파일 …" (R11-8; Gaps: G29) |
+| 5161a8b | 11 | R11-11 | Gaps: G31 | subject | test(cli): R11-11 str-typed path options are classified by the R10-9 meta-test too (R11-11; Gaps: G31) |
+| 40a862a | 11 | R11-12 | Gaps: G31; 신규(스펙 외) | subject | fix(web): R11-12 the web server answers 404 "찾을 수 없는 경로입니다" for every path that is not /, /gui, /gui.css, /gui.js or /api/* (R11-12; Gaps: G31, 신규) |
+| 8292a74 | 11 | R11-14 | Gaps: G30; 신규(스펙 외) | subject | feat(json): R11-14 every JSON row carries display_name — the escaped name — beside the raw name (R11-14; Gaps: G30, 신규) |
+| 4c2e7b1 | 11 | R11-7, R11-10, R11-13 | Gaps: G30; 신규(스펙 외) | subject | fix(reports,gui): R11-7 Markdown-active characters escaped in the evidence statement; R11-10 every GUI result string through displayName; R11-13 fullwidth CSV formula prefixes guarded (R11-7, R11-10, R11-13; Gaps: G30, 신규) |

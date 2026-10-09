@@ -1,14 +1,14 @@
 {
   "schema": "deepfake-lens-traceability-commits-v2",
-  "description": "Y13/P12: 검증 결함 ID(라운드 1–9)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).",
+  "description": "Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).",
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "81e94eab46fa9cb65f4058509e24db8c01779722",
+    "head": "4c2e7b12f73b08a8f1e4e7a476ca04ea3d0426b8",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
-    "근거: `verify_round1/4/5/6/7/8/9.md`(라운드 2·3은 문서가 없어 해당 커밋 메시지), 스펙 WP 머리글의 갭 목록.",
+    "근거: `verify_round1/4/5/6/7/8/9/10/11.md`(라운드 2·3은 문서가 없어 해당 커밋 메시지), 스펙 WP 머리글의 갭 목록.",
     "라운드 3의 N은 커밋 제목에 N1–N8만 쓰였다(N3-1…N3-8). 라운드 6의 N3(=V5-G10, 커밋 리워드)은 세션 소유자 작업이라 커밋 제목에 없다.",
     "Z3 → G7 근거: R-OUT-6(진입점이 같은 입력을 같게 다룸) — CLI 진입점이 `Path()`로 끝 구분자를 지워, OS가 ENOTDIR로 거부하는 경로(`photo.png/`)를 다른 파일 경로처럼 분석했다.",
     "P12: 라운드 8 검증 때 이 표의 해시 115개가 전부 히스토리 리라이트 이전 값이었다 — 이제 표는 현재 히스토리에서 제목으로 매칭해 재생성되고(`pre_rewrite_subject`에 리라이트 전 제목), CI가 `--check`로 최신 여부를 확인한다.",
@@ -1863,6 +1863,323 @@
         "eefacd1",
         "fc1a568",
         "21717bd"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R10-1",
+      "round": 10,
+      "source": "verify_round10.md",
+      "summary": "파일명이 평문 출력에 원문 그대로(CR·ESC·LF·'|') → 모든 렌더에서 result_text.display_name로 이스케이프",
+      "gaps": [
+        "G6",
+        "G30"
+      ],
+      "new": "보고서 렌더링 무결성 — 갭 목록 밖",
+      "commits": [
+        "fde64d0"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R10-2",
+      "round": 10,
+      "source": "verify_round10.md",
+      "summary": "CSV 수식 주입(=,+,-,@,TAB,CR) → 앞에 ' 붙이기",
+      "gaps": [
+        "G30"
+      ],
+      "new": "CSV 수식 주입 — 갭 목록 밖",
+      "commits": [
+        "fde64d0"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R10-3",
+      "round": 10,
+      "source": "verify_round10.md",
+      "summary": "TEST-DELETIONS.md가 리라이트 이전 해시 인용·skip을 통과로 표시 → 커밋 제목으로 인용, skip이면 건너뜀(환경)",
+      "gaps": [],
+      "new": "QA 기록 정확성 — 갭 목록 밖",
+      "commits": [
+        "e601adf",
+        "b600a58"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R10-4",
+      "round": 10,
+      "source": "verify_round10.md",
+      "summary": "feedback --scan-json이 '::'/'\\:' 포함 실제 파일명 라벨 미매칭 → 원문 경로·(container, member)로 조인",
+      "gaps": [
+        "G30",
+        "G34"
+      ],
+      "new": null,
+      "commits": [
+        "e1a9598"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R10-5",
+      "round": 10,
+      "source": "verify_round10.md",
+      "summary": "예기치 않은 오류의 종료 코드(verify-report 깊은 JSON 1, --port 범위) → 문서화된 입력 오류 코드",
+      "gaps": [
+        "G29"
+      ],
+      "new": null,
+      "commits": [
+        "40e7ec6"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R10-6",
+      "round": 10,
+      "source": "verify_round10.md",
+      "summary": "단일 파일 업로드 행 경로의 '::' 미이스케이프 → 실제 파일과 같이 이스케이프",
+      "gaps": [
+        "G30",
+        "G34"
+      ],
+      "new": null,
+      "commits": [
+        "768a3f3"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R10-7",
+      "round": 10,
+      "source": "verify_round10.md",
+      "summary": "영어 탐지기 미탐(【fake】, verdict→fake) → 화살표·전각 괄호를 토큰 경계로",
+      "gaps": [],
+      "new": "출력 한국어 규칙(공통 규칙 3) — 갭 목록 밖",
+      "commits": [
+        "e9b881f"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R10-8",
+      "round": 10,
+      "source": "verify_round10.md",
+      "summary": "한국어 int/float 메시지, feedback 행 번호, R9-10 메시지의 CONFORMANCE.md, 중복 제외 표기, api-serve 라우트 문서화",
+      "gaps": [
+        "G8",
+        "G12"
+      ],
+      "new": "문서·메시지 정합성 — 갭 목록 밖",
+      "commits": [
+        "7d3c508"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R10-9",
+      "round": 10,
+      "source": "verify_round10.md",
+      "summary": "R9-4 메타테스트가 이름 패턴만 검사 → Path 형 인수는 전부 쓰기 대상 등록 또는 읽기 전용 선언",
+      "gaps": [
+        "G31"
+      ],
+      "new": null,
+      "commits": [
+        "81e94ea"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R11-1",
+      "round": 11,
+      "source": "verify_round11.md",
+      "summary": "UTF-8이 아닌 파일명(PEP 383 surrogate)이 스캔 전체를 깨뜨림(CLI exit 2·빈 JSON, 웹 400 영어, API 500) → 모든 JSON을 surrogate-safe(\\udcXX)로, 행은 정상 분석",
+      "gaps": [
+        "G30"
+      ],
+      "new": "비 UTF-8 파일명 처리 — 갭 목록 밖",
+      "commits": [
+        "3b12bd1"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R11-2",
+      "round": 11,
+      "source": "verify_round11.md",
+      "summary": "QA-SYS-10이 전체 스위트의 skip을 무시하고 통과 표시 → skip이 있으면 건너뜀(환경)·목록 기재, 환경 의존 테스트 문서화",
+      "gaps": [],
+      "new": "QA 기록 정확성 — 갭 목록 밖",
+      "commits": [
+        "d10e95f"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R11-3",
+      "round": 11,
+      "source": "verify_round11.md",
+      "summary": "/api/report, /api/feedback 깊은 중첩 JSON → 500 → 400 'JSON 중첩이 너무 깊습니다'",
+      "gaps": [
+        "G34"
+      ],
+      "new": "요청 본문 처리 — 갭 목록 밖",
+      "commits": [
+        "b661b3f"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R11-4",
+      "round": 11,
+      "source": "verify_round11.md",
+      "summary": "display_name의 '\\|' 이스케이프가 단사가 아님 → 모든 백슬래시를 '\\\\'로",
+      "gaps": [
+        "G30"
+      ],
+      "new": "보고서 렌더링 무결성 — 갭 목록 밖",
+      "commits": [
+        "e402a18"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R11-5",
+      "round": 11,
+      "source": "verify_round11.md",
+      "summary": "영어 탐지기 미탐(fake✓, ▶fake◀, fake的 …) → 비 ASCII S*/P*·CJK 한자를 토큰 경계로",
+      "gaps": [],
+      "new": "출력 한국어 규칙(공통 규칙 3) — 갭 목록 밖",
+      "commits": [
+        "8388572"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R11-6",
+      "round": 11,
+      "source": "verify_round11.md",
+      "summary": "HTML 보고서 임베드 JSON에 '<!--<script>' 원문 → < > & U+2028/2029 이스케이프",
+      "gaps": [
+        "G30"
+      ],
+      "new": "보고서 렌더링 무결성 — 갭 목록 밖",
+      "commits": [
+        "e402a18"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R11-7",
+      "round": 11,
+      "source": "verify_round11.md",
+      "summary": "증거설명서 Markdown에 이름의 링크/이미지 문법 미중화 → Markdown 활성 문자 이스케이프",
+      "gaps": [
+        "G30"
+      ],
+      "new": "보고서 렌더링 무결성 — 갭 목록 밖",
+      "commits": [
+        "4c2e7b1"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R11-8",
+      "round": 11,
+      "source": "verify_round11.md",
+      "summary": "'상세는 로그 참조 — 상세는 로그 파일' 중복 → 한 번만",
+      "gaps": [
+        "G29"
+      ],
+      "new": null,
+      "commits": [
+        "51eac89"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R11-9",
+      "round": 11,
+      "source": "verify_round11.md",
+      "summary": "테스트 소스의 raw RLO/zero-width 문자 → 이스케이프 시퀀스, ruff PLE2502/2515 활성화",
+      "gaps": [],
+      "new": "소스 위생 — 갭 목록 밖",
+      "commits": [
+        "e402a18"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R11-10",
+      "round": 11,
+      "source": "verify_round11.md",
+      "summary": "GUI 근거 제목·상세 등이 displayName을 거치지 않음 → 모든 결과 문자열에 적용(HTML 보고서와 동일)",
+      "gaps": [
+        "G30"
+      ],
+      "new": "보고서 렌더링 무결성 — 갭 목록 밖",
+      "commits": [
+        "4c2e7b1"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R11-11",
+      "round": 11,
+      "source": "verify_round11.md",
+      "summary": "str 형 경로 옵션이 R10-9 메타테스트를 우회 → 이름·도움말·기본값으로 경로 인수 판별",
+      "gaps": [
+        "G31"
+      ],
+      "new": null,
+      "commits": [
+        "5161a8b"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R11-12",
+      "round": 11,
+      "source": "verify_round11.md",
+      "summary": "웹 서버가 모든 미지 경로에 GUI 제공 → '/', '/gui*', '/api/*' 외 404 한국어 JSON",
+      "gaps": [
+        "G31"
+      ],
+      "new": "서비스 표면 정합성 — 갭 목록 밖",
+      "commits": [
+        "40a862a"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R11-13",
+      "round": 11,
+      "source": "verify_round11.md",
+      "summary": "CSV 전각 ＝＋－＠ 미보호 → NFKC 기준 수식 문자 보호",
+      "gaps": [
+        "G30"
+      ],
+      "new": "CSV 수식 주입 — 갭 목록 밖",
+      "commits": [
+        "4c2e7b1"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R11-14",
+      "round": 11,
+      "source": "verify_round11.md",
+      "summary": "JSON stdout에 raw bidi/C1 유지 → 행에 display_name(이스케이프본) 추가, name 원문 유지",
+      "gaps": [
+        "G30"
+      ],
+      "new": "JSON 계약 — 갭 목록 밖",
+      "commits": [
+        "8292a74"
       ],
       "used_in_commit_subjects": true
     }
@@ -4778,7 +5095,7 @@
     {
       "sha": "fde64d09c03f8fc77733e0c3157ba4de24f00165",
       "short": "fde64d0",
-      "round": "9",
+      "round": "10",
       "subject": "fix(reports): R10-1 file names shown through result_text.display_name in every rendering; R10-2 CSV formula cells guarded (R10-1, R10-2; Gaps: G6, G30, 신규)",
       "pre_rewrite_subject": null,
       "ids": [
@@ -4801,7 +5118,7 @@
     {
       "sha": "e601adf034d48b1a67dfa9f3d9d3d01c0dda432c",
       "short": "e601adf",
-      "round": "9",
+      "round": "10",
       "subject": "fix(qa): R10-3 deleted tests cite their commit by subject; QA-SYS-10 fails when it is not in HEAD's history; a skipped test makes a QA ID 건너뜀(환경) (R10-3; Gaps: 신규)",
       "pre_rewrite_subject": null,
       "ids": [
@@ -4817,7 +5134,7 @@
     {
       "sha": "e1a9598fb67dbf3fe6458fe1db66de72ff1dc308",
       "short": "e1a9598",
-      "round": "9",
+      "round": "10",
       "subject": "fix(feedback): R10-4 labels join scan rows on the real path, not the escaped display path (R10-4; Gaps: G30, G34)",
       "pre_rewrite_subject": null,
       "ids": [
@@ -4839,7 +5156,7 @@
     {
       "sha": "40e7ec6029bb94c607ee0b2766059b1ebfa34ffe",
       "short": "40e7ec6",
-      "round": "9",
+      "round": "10",
       "subject": "fix(cli): R10-5 unusable inputs exit with the documented code; --port checked 1-65535; no per-row error note without rows (R10-5; Gaps: G29)",
       "pre_rewrite_subject": null,
       "ids": [
@@ -4859,7 +5176,7 @@
     {
       "sha": "768a3f3990069722f50d4ef254b1b88f216ba9f2",
       "short": "768a3f3",
-      "round": "9",
+      "round": "10",
       "subject": "fix(web): R10-6 single-file upload rows escape \"::\" in their path like every real file (R10-6; Gaps: G30, G34)",
       "pre_rewrite_subject": null,
       "ids": [
@@ -4881,7 +5198,7 @@
     {
       "sha": "e9b881f38da2235ac0e4a7efae115811502a04e6",
       "short": "e9b881f",
-      "round": "9",
+      "round": "10",
       "subject": "fix(text): R10-7 arrows and CJK/angle brackets are token boundaries of the English detector (R10-7; Gaps: 신규)",
       "pre_rewrite_subject": null,
       "ids": [
@@ -4897,7 +5214,7 @@
     {
       "sha": "7d3c50800aedf1a936585062bf3756d0ef3b17c3",
       "short": "7d3c508",
-      "round": "9",
+      "round": "10",
       "subject": "fix(cli,docs): R10-8 Korean int/float messages, feedback positions in file lines, CONFORMANCE.md named in the R9-10 check, \"(이미 센 폴더 N개 중복 제외)\", every api-serve route documented (R10-8; Gaps: G8, G12, 신규)",
       "pre_rewrite_subject": null,
       "ids": [
@@ -4919,7 +5236,7 @@
     {
       "sha": "81e94eab46fa9cb65f4058509e24db8c01779722",
       "short": "81e94ea",
-      "round": "9",
+      "round": "10",
       "subject": "test(cli): R10-9 every Path-typed argument is a registered write target or declared read-only (R10-9; Gaps: G31)",
       "pre_rewrite_subject": null,
       "ids": [
@@ -4934,6 +5251,249 @@
       "new": false,
       "new_reasons": [],
       "gaps_line": "Gaps: G31",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "b600a580ae1a7381edc984ff8691adfff95cb414",
+      "short": "b600a58",
+      "round": "10",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on 81e94ea (WP-J, R10-3; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J",
+        "R10-3"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [
+        "R10-3: QA 기록 정확성 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "3b12bd130f3c8c00e664ed6e5d1b375eba359922",
+      "short": "3b12bd1",
+      "round": "11",
+      "subject": "fix(io): R11-1 non-UTF-8 file names (PEP 383 surrogates) never break a scan — surrogate-safe JSON everywhere (R11-1; Gaps: G30, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R11-1"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R11-1: 비 UTF-8 파일명 처리 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G30; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "d10e95ff727e9d032f5a4d76855fc5fd822006f3",
+      "short": "d10e95f",
+      "round": "11",
+      "subject": "fix(qa): R11-2 QA-SYS-10 counts the full suite's skips as 건너뜀(환경) and lists them; environment-dependent tests documented in docs/QA-ENV-DEPENDENT-TESTS.md (R11-2; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R11-2"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R11-2: QA 기록 정확성 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "b661b3fa4043988f0c229c8e2660ab262ff97791",
+      "short": "b661b3f",
+      "round": "11",
+      "subject": "fix(web,api): R11-3 a request body nested past the JSON recursion limit is a 400 \"JSON 중첩이 너무 깊습니다\" on both servers, never a 500 (R11-3; Gaps: G34, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R11-3"
+      ],
+      "gaps_named_in_subject": [
+        "G34"
+      ],
+      "gaps": [
+        "G34"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R11-3: 요청 본문 처리 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G34; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "e402a18b6bd17a62f45998d11f43dcc882e4ae66",
+      "short": "e402a18",
+      "round": "11",
+      "subject": "fix(reports): R11-4 display_name is injective (every \"\\\" shown \"\\\\\"); R11-6 report JSON embedded in <script> escapes < > & U+2028 U+2029; R11-9 no raw invisible characters in source (R11-4, R11-6, R11-9; Gaps: G30, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R11-4",
+        "R11-6",
+        "R11-9"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R11-4: 보고서 렌더링 무결성 — 갭 목록 밖",
+        "R11-6: 보고서 렌더링 무결성 — 갭 목록 밖",
+        "R11-9: 소스 위생 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G30; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "8388572c0420bb3c4e36bf13ac63d545e0e0c77e",
+      "short": "8388572",
+      "round": "11",
+      "subject": "fix(text): R11-5 every non-ASCII symbol/punctuation character, CJK ideograph and kana is a token boundary of the English detector (R11-5; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R11-5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R11-5: 출력 한국어 규칙(공통 규칙 3) — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "51eac890fb7af19c26d25944f9889dcaf0f43a54",
+      "short": "51eac89",
+      "round": "11",
+      "subject": "fix(cli): R11-8 an input error names the log once — \"(라이브러리 오류(X)) — 상세는 로그 파일 …\" (R11-8; Gaps: G29)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R11-8"
+      ],
+      "gaps_named_in_subject": [
+        "G29"
+      ],
+      "gaps": [
+        "G29"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G29",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "5161a8b8cfedeb81f3e5c497fe2c5fdcfa79d8d9",
+      "short": "5161a8b",
+      "round": "11",
+      "subject": "test(cli): R11-11 str-typed path options are classified by the R10-9 meta-test too (R11-11; Gaps: G31)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R11-11"
+      ],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G31",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "40a862a0dce0f35e8895e9da09fd16d775c4cc32",
+      "short": "40a862a",
+      "round": "11",
+      "subject": "fix(web): R11-12 the web server answers 404 \"찾을 수 없는 경로입니다\" for every path that is not /, /gui, /gui.css, /gui.js or /api/* (R11-12; Gaps: G31, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R11-12"
+      ],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R11-12: 서비스 표면 정합성 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G31; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "8292a74f0145a04be43adff78da3e0df6c1285af",
+      "short": "8292a74",
+      "round": "11",
+      "subject": "feat(json): R11-14 every JSON row carries display_name — the escaped name — beside the raw name (R11-14; Gaps: G30, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R11-14"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R11-14: JSON 계약 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G30; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "4c2e7b12f73b08a8f1e4e7a476ca04ea3d0426b8",
+      "short": "4c2e7b1",
+      "round": "11",
+      "subject": "fix(reports,gui): R11-7 Markdown-active characters escaped in the evidence statement; R11-10 every GUI result string through displayName; R11-13 fullwidth CSV formula prefixes guarded (R11-7, R11-10, R11-13; Gaps: G30, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R11-7",
+        "R11-10",
+        "R11-13"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R11-7: 보고서 렌더링 무결성 — 갭 목록 밖",
+        "R11-10: 보고서 렌더링 무결성 — 갭 목록 밖",
+        "R11-13: CSV 수식 주입 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G30; 신규(스펙 외)",
       "gaps_source": "subject"
     }
   ]
