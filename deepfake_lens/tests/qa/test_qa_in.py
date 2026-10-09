@@ -809,7 +809,7 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
                 mock.patch("deepfake_lens.core.extract_archive", measured_extract), \
                 mock.patch.object(tempfile, "tempdir", str(cls.temp_root)), \
                 _TempUsagePoller(cls.temp_root) as poller:
-            cls.summary, cls.items, _ = scan_folder(cls.folder, AnalysisOptions(max_files=100))
+            cls.summary, cls.items = scan_folder(cls.folder, AnalysisOptions(max_files=100))
         cls.poller = poller
         cls.by_path = {item.path: item for item in cls.items}
 
@@ -905,7 +905,7 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
 
     def test_valid_files_unaffected(self) -> None:
         """QA-IN-5: 보조 검사 — the valid files get the same result as in a clean folder."""
-        _, clean_items, _ = scan_folder(self.clean, AnalysisOptions())
+        _, clean_items = scan_folder(self.clean, AnalysisOptions())
         clean = {item.path: _comparable(item) for item in clean_items}
         for name in self.valid:
             with self.subTest(path=name):

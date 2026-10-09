@@ -8,7 +8,8 @@ depending on which door it came through (G7).
 
 Every front end now builds an :class:`AnalysisOptions` (``from_cli_args`` for
 argparse, ``from_query`` for HTTP query strings) and calls only
-:func:`analyze_rows` / :func:`analyze_path` (one file) or :func:`scan_folder`.
+:func:`analyze_rows` / :func:`analyze_path` (one file) or :func:`scan_folder`
+(``(summary, items)``; :func:`scan_folder_run` adds the threshold profile).
 
 B1: one file goes through the folder scanner's own body
 (``core.scan_paths`` with the file's folder as root, :func:`scan_file`), so
@@ -381,6 +382,22 @@ def analyze_path(
     return item
 
 
+@dataclass(frozen=True)
+class ScanRun:
+    """One scan's result with the threshold profile it was decided with (N15).
+
+    :func:`scan_folder` / :func:`scan_file` return ``(summary, items)`` as
+    the phase-0 spec states; front ends that also report the threshold
+    provenance (``scan_payload``, the CLI's ``thresholds`` line, the
+    evidence statement) call :func:`scan_folder_run` / :func:`scan_file_run`,
+    which return this instead of a third tuple member.
+    """
+
+    summary: BatchScanSummary
+    items: list[ScanItem]
+    thresholds: Any
+
+
 def scan_folder(
     folder: Path | str,
     options: AnalysisOptions,
@@ -389,8 +406,26 @@ def scan_folder(
     warn: WarnFn | None = None,
     progress: ScanProgress | None = None,
     on_plan: Callable[[int], None] | None = None,
-) -> tuple[BatchScanSummary, list[ScanItem], Any]:
-    """Scan a folder; returns ``(summary, items, thresholds)``.
+) -> tuple[BatchScanSummary, list[ScanItem]]:
+    """Scan a folder; returns ``(summary, items)`` (WP-F; N15 — was a 3-tuple).
+
+    The threshold profile used is :func:`load_thresholds` (options); call
+    :func:`scan_folder_run` to get it with the result.
+    """
+    run = scan_folder_run(folder, options, should_stop, warn=warn, progress=progress, on_plan=on_plan)
+    return run.summary, run.items
+
+
+def scan_folder_run(
+    folder: Path | str,
+    options: AnalysisOptions,
+    should_stop: Callable[[], bool] | None = None,
+    *,
+    warn: WarnFn | None = None,
+    progress: ScanProgress | None = None,
+    on_plan: Callable[[int], None] | None = None,
+) -> ScanRun:
+    """Scan a folder; returns a :class:`ScanRun` (summary, items, thresholds).
 
     ``progress(item, done, planned)`` is called with every row as it
     completes (archive members and container rows, symlink rows included)
@@ -427,7 +462,8 @@ def scan_folder(
         progress=progress,
         on_plan=on_plan,
     )
-    return _with_fusion(summary, items, options) + (thresholds,)
+    summary, items = _with_fusion(summary, items, options)
+    return ScanRun(summary, items, thresholds)
 
 
 def scan_file(
@@ -436,8 +472,23 @@ def scan_file(
     *,
     thresholds: Any = _UNSET,
     progress: ScanProgress | None = None,
-) -> tuple[BatchScanSummary, list[ScanItem], Any]:
-    """Analyze one file as a folder scan of its parent would; ``(summary, items, thresholds)``.
+) -> tuple[BatchScanSummary, list[ScanItem]]:
+    """Analyze one file as a folder scan of its parent would; ``(summary, items)`` (N15).
+
+    :func:`scan_file_run` also returns the threshold profile used.
+    """
+    run = scan_file_run(path, options, thresholds=thresholds, progress=progress)
+    return run.summary, run.items
+
+
+def scan_file_run(
+    path: Path | str,
+    options: AnalysisOptions,
+    *,
+    thresholds: Any = _UNSET,
+    progress: ScanProgress | None = None,
+) -> ScanRun:
+    """:func:`scan_file` as a :class:`ScanRun` (summary, items, thresholds).
 
     A regular file yields one row (same as :func:`analyze_path`); an
     archive yields its member rows plus the container row with refused
@@ -466,7 +517,8 @@ def scan_file(
         thresholds=thresholds,
         progress=progress,
     )
-    return _with_fusion(summary, items, options) + (thresholds,)
+    summary, items = _with_fusion(summary, items, options)
+    return ScanRun(summary, items, thresholds)
 
 
 def _with_fusion(

@@ -512,7 +512,7 @@ class QaSys3DoctorMatchesScanTest(unittest.TestCase):
         self.assertEqual(by_name["fake-audio"].checkpoint, "missing")
         self.assertFalse(by_name["fake-audio"].runnable)
         self.assertIn("[ MISS] fake-audio", format_report(report))
-        _, items, _ = scan_folder(self.media, AnalysisOptions(models_dir=self.models))
+        _, items = scan_folder(self.media, AnalysisOptions(models_dir=self.models))
         ran = _ran_models(items, AUDIO_NAME)
         self.assertEqual(ran, self._doctor_runnable_for("audio"))
         self.assertNotIn("fake-audio", ran)
@@ -547,7 +547,7 @@ class QaSys3DoctorMatchesScanTest(unittest.TestCase):
         from deepfake_lens.tests.qa.test_qa_out import write_photo_like_png
 
         write_photo_like_png(self.media / IMAGE_NAME, seed=3, width=256, height=256)
-        _, items, _ = scan_folder(self.media, AnalysisOptions(models_dir=self.models))
+        _, items = scan_folder(self.media, AnalysisOptions(models_dir=self.models))
         ran = _ran_models(items, IMAGE_NAME)
         doctor_runnable = self._doctor_runnable_for("image")
         self.assertEqual(ran, doctor_runnable)
@@ -555,7 +555,7 @@ class QaSys3DoctorMatchesScanTest(unittest.TestCase):
 
     def test_runnable_count_matches_audio_scan_coverage(self) -> None:
         """QA-SYS-3: 보조 검사 — gate-free modality: doctor's runnable audio profiles == model:<name> ran."""
-        _, items, _ = scan_folder(self.media, AnalysisOptions(models_dir=self.models))
+        _, items = scan_folder(self.media, AnalysisOptions(models_dir=self.models))
         ran = _ran_models(items, AUDIO_NAME)
         self.assertEqual(ran, self._doctor_runnable_for("audio"))
         self.assertEqual(ran, {"score-map"})

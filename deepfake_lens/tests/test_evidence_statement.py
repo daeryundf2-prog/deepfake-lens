@@ -450,7 +450,7 @@ class EvidenceStatementHashSourceTest(unittest.TestCase):
         from deepfake_lens.analysis_api import AnalysisOptions, scan_folder
 
         os.chdir(self.decoy_dir)
-        _, items, _ = scan_folder(self.case.resolve(), AnalysisOptions())
+        _, items = scan_folder(self.case.resolve(), AnalysisOptions())
         self.assertTrue(all(item.sha256 for item in items))
         self._assert_statement_hashes(items, scan_root=None)
 
@@ -458,7 +458,7 @@ class EvidenceStatementHashSourceTest(unittest.TestCase):
         from deepfake_lens.analysis_api import AnalysisOptions, scan_folder
 
         os.chdir(self.base)
-        _, items, _ = scan_folder(Path("case"), AnalysisOptions())
+        _, items = scan_folder(Path("case"), AnalysisOptions())
         os.chdir(self.decoy_dir)  # the statement is built from elsewhere
         self._assert_statement_hashes(items, scan_root=None)
 
@@ -483,15 +483,16 @@ class EvidenceStatementHashSourceTest(unittest.TestCase):
         from unittest import mock
 
         from deepfake_lens import cli
-        from deepfake_lens.analysis_api import scan_folder as real_scan_folder
+        from deepfake_lens.analysis_api import ScanRun, scan_folder_run as real_scan_folder_run
 
-        def scan_without_digests(*args: object, **kwargs: object) -> tuple[object, list[ScanItem], object]:
-            summary, items, thresholds = real_scan_folder(*args, **kwargs)  # type: ignore[arg-type]
-            stripped = [dataclasses.replace(item, sha256=None) for item in items]
-            return summary, stripped, thresholds
+        def scan_without_digests(*args: object, **kwargs: object) -> ScanRun:
+            run = real_scan_folder_run(*args, **kwargs)  # type: ignore[arg-type]
+            stripped = [dataclasses.replace(item, sha256=None) for item in run.items]
+            return dataclasses.replace(run, items=stripped)
 
         os.chdir(self.decoy_dir)
-        with mock.patch.object(cli, "scan_folder", scan_without_digests), mock.patch("sys.stdout", new_callable=io.StringIO):
+        # N15: the CLI calls scan_folder_run (scan_folder is the 2-tuple API).
+        with mock.patch.object(cli, "scan_folder_run", scan_without_digests), mock.patch("sys.stdout", new_callable=io.StringIO):
             self.assertEqual(cli.main(argv), 0)
         body = json.loads(out.read_text(encoding="utf-8"))
         return {entry["file_path"]: entry["sha256"] for entry in body["entries"]}
@@ -559,7 +560,7 @@ class EvidenceStatementSymlinkTest(unittest.TestCase):
     def test_scanned_symlink_rows_are_not_hashed_and_read_as_skipped(self) -> None:
         from deepfake_lens.analysis_api import AnalysisOptions, scan_folder
 
-        _, items, _ = scan_folder(self.case, AnalysisOptions())
+        _, items = scan_folder(self.case, AnalysisOptions())
         entries = self._entries(items)
         digests = {self._sha(self.case / "real.txt"), self._sha(self.outside)}
         for name in ("in_link.txt", "out_link.txt"):
@@ -636,7 +637,8 @@ class PdfDependencyMissingTest(unittest.TestCase):
         from unittest import mock
 
         err = io.StringIO()
-        with mock.patch("deepfake_lens.cli.scan_folder", side_effect=AssertionError("scan must not start")), \
+        # N15: the CLI scans through scan_folder_run (scan_folder is the 2-tuple API).
+        with mock.patch("deepfake_lens.cli.scan_folder_run", side_effect=AssertionError("scan must not start")), \
                 redirect_stdout(io.StringIO()), redirect_stderr(err):
             code = main(argv)
         return code, err.getvalue()

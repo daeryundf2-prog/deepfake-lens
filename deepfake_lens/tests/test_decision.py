@@ -414,7 +414,7 @@ class CalibratedDirectionFromProfileThresholdTest(unittest.TestCase):
                 }), encoding="utf-8")
                 options = AnalysisOptions(models_dir=models, model_path=profile)
                 with mock.patch("deepfake_lens.core.analyze_external_model", return_value=self._model(0.40)):
-                    _summary, items = scan_folder(folder, options)[:2]
+                    _summary, items = scan_folder(folder, options)
                 [row] = items
                 assert row.result is not None
                 self.assertEqual(row.result.verdict_code, expected)

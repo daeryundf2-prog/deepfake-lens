@@ -8,7 +8,7 @@ from pathlib import Path
 from .benchmark import run_benchmark, write_benchmark, write_benchmark_markdown
 from .collection import write_collection_plan
 from .core import ARCHIVE_ROLLUP_RULE, check_scan_folder, ScanItem, _thresholds_json
-from .analysis_api import AnalysisOptions, analyze_path, analyze_rows, is_symlink_path, load_thresholds, primary_row, scan_folder, thresholds_warning_printer
+from .analysis_api import AnalysisOptions, analyze_path, analyze_rows, is_symlink_path, load_thresholds, primary_row, scan_folder_run, thresholds_warning_printer
 from .analysis_api import scan_payload as analysis_scan_payload
 from .cli_parser import build_parser
 from .serialization import redact_install_paths
@@ -866,7 +866,8 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
                 return 2
         elif target.is_dir():
             try:
-                _, items, stmt_thresholds = scan_folder(target, AnalysisOptions(max_files=100), warn=thresholds_warning_printer(sys.stderr))
+                run = scan_folder_run(target, AnalysisOptions(max_files=100), warn=thresholds_warning_printer(sys.stderr))
+                items, stmt_thresholds = run.items, run.thresholds
             except OSError as exc:
                 # S4: "오류: 폴더를 읽을 수 없습니다: … (권한이 없습니다)", exit 2.
                 print(f"오류: {exc}", file=sys.stderr)
@@ -1044,7 +1045,8 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
     try:
         if args.progress:
             print(f"검사 중: {args.folder} (workers={args.workers}, pixel={args.pixel})…", file=sys.stderr)
-        summary, items, thresholds = scan_folder(args.folder, options, warn=thresholds_warning_printer(sys.stderr))
+        run = scan_folder_run(args.folder, options, warn=thresholds_warning_printer(sys.stderr))
+        summary, items, thresholds = run.summary, run.items, run.thresholds
     except OSError as exc:
         # S4: core.ScanFolderError carries the reason — "폴더를 찾을 수 없습니다",
         # "폴더가 아니라 파일입니다 … (단일 파일은 forensic/classify를 사용)",

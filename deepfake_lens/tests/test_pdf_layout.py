@@ -98,12 +98,13 @@ class HostileFolderPdfTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        from deepfake_lens.analysis_api import AnalysisOptions, scan_folder
+        from deepfake_lens.analysis_api import AnalysisOptions, scan_folder_run
 
         cls._tmp = tempfile.TemporaryDirectory()
         base = Path(cls._tmp.name).resolve()
         cls.folder = write_hostile_pdf_folder(base / "case")
-        cls.summary, cls.items, cls.thresholds = scan_folder(cls.folder, AnalysisOptions(recursive=True))
+        run = scan_folder_run(cls.folder, AnalysisOptions(recursive=True))
+        cls.summary, cls.items, cls.thresholds = run.summary, run.items, run.thresholds
         cls.out = base / "out"
         cls.out.mkdir()
 

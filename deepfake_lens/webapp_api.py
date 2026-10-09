@@ -43,7 +43,7 @@ from .analysis_api import (
     analyze_rows,
     load_thresholds,
     provenance,
-    scan_folder,
+    scan_folder_run,
     scan_payload,
 )
 from .analysis_api import default_engine_profiles as _engine_profiles_in
@@ -106,8 +106,8 @@ def _scan_payload(query: str, *, default_folder: Path | None, should_stop: Calla
     # InvalidOption (a ValueError) -> HTTP 400 before any file is read.
     options = _web_options(parse_qs(query))
     try:
-        summary, items, thresholds = scan_folder(folder, options, should_stop=should_stop)
-        return scan_payload(summary, items, thresholds, options)
+        run = scan_folder_run(folder, options, should_stop=should_stop)
+        return scan_payload(run.summary, run.items, run.thresholds, options)
     except (OSError, ValueError) as exc:
         return {"error": str(exc)}
 

@@ -76,7 +76,7 @@ import zipfile
 from pathlib import Path
 from typing import Any, Iterator
 
-from deepfake_lens.analysis_api import AnalysisOptions, scan_folder, scan_payload
+from deepfake_lens.analysis_api import AnalysisOptions, scan_folder, scan_folder_run, scan_payload
 from deepfake_lens.error_text import english_prose as shared_english_prose
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -381,7 +381,8 @@ class EnglishProseHeuristicTest(unittest.TestCase):
 
 
 def _scan_offenders(test: unittest.TestCase, folder: Path, options: AnalysisOptions) -> list[str]:
-    summary, items, thresholds = scan_folder(folder, options)
+    run = scan_folder_run(folder, options)
+    summary, items, thresholds = run.summary, run.items, run.thresholds
     test.assertGreater(len(items), 0, folder)
     payload = json.loads(json.dumps(scan_payload(summary, items, thresholds, options), ensure_ascii=False))
     offenders = []
@@ -416,7 +417,7 @@ class ScanOutputIsKoreanTest(unittest.TestCase):
             folder = write_mixed_folder(Path(tmp).resolve() / "mixed")
             # The fixture really spans the media kinds: audio, video (when
             # ffmpeg made one), documents (docx, pdf) and archives.
-            summary, items, _ = scan_folder(folder, AnalysisOptions(recursive=True))
+            summary, items = scan_folder(folder, AnalysisOptions(recursive=True))
             kinds = {(item.kind, Path(item.path.split("::")[0]).suffix.lower()) for item in items}
             for expected in (("audio", ".wav"), ("text", ".docx"), ("text", ".pdf"), ("archive", ".zip")):
                 self.assertIn(expected, kinds)
@@ -494,7 +495,8 @@ class ModelDisplayNameTest(unittest.TestCase):
             folder = Path(tmp)
             write_photo_like_png(folder / "photo.png", seed=7)  # a photo: the image engines are consulted
             (folder / "voice.wav").write_bytes(_wav_bytes())  # the audio engines
-            summary, items, thresholds = scan_folder(folder, options)
+            run = scan_folder_run(folder, options)
+            summary, items, thresholds = run.summary, run.items, run.thresholds
         payload = json.loads(json.dumps(scan_payload(summary, items, thresholds, options), ensure_ascii=False))
         seen_members = 0
         for item in payload["items"]:
@@ -680,7 +682,8 @@ class RenderedOutputsAreKoreanTest(unittest.TestCase):
         cls._tmp = tempfile.TemporaryDirectory()
         cls.folder = write_mixed_folder(Path(cls._tmp.name).resolve() / "mixed")
         cls.options = AnalysisOptions(recursive=True)
-        cls.summary, cls.items, cls.thresholds = scan_folder(cls.folder, cls.options)
+        run = scan_folder_run(cls.folder, cls.options)
+        cls.summary, cls.items, cls.thresholds = run.summary, run.items, run.thresholds
         cls.out = Path(cls._tmp.name) / "out"
         cls.out.mkdir()
 

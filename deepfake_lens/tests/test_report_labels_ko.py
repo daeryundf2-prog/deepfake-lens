@@ -24,7 +24,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from deepfake_lens.analysis_api import AnalysisOptions, scan_folder
+from deepfake_lens.analysis_api import AnalysisOptions, scan_folder_run
 from deepfake_lens.result_types import BatchScanSummary, ScanItem
 from deepfake_lens.result_text import HASH_UNAVAILABLE_SYMLINK, IN_SAMPLE_CAVEAT
 
@@ -94,7 +94,8 @@ class RenderedLabelsTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls._tmp = tempfile.TemporaryDirectory()
         cls.folder = write_case(Path(cls._tmp.name).resolve() / "case")
-        cls.summary, cls.items, cls.thresholds = scan_folder(cls.folder, AnalysisOptions(recursive=True))
+        run = scan_folder_run(cls.folder, AnalysisOptions(recursive=True))
+        cls.summary, cls.items, cls.thresholds = run.summary, run.items, run.thresholds
         cls.paths = {item.path for item in cls.items}
 
     @classmethod

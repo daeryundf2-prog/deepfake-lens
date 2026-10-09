@@ -376,7 +376,7 @@ class AudioRowLimitationsTest(unittest.TestCase):
                 handle.setsampwidth(2)
                 handle.setframerate(16000)
                 handle.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * 220 * n / 16000))) for n in range(16000)))
-            _, items, _ = scan_folder(folder, AnalysisOptions())
+            _, items = scan_folder(folder, AnalysisOptions())
         [row] = items
         assert row.result is not None
         limitations = row.result.limitations

@@ -157,7 +157,7 @@ def _archive_check_data(path: Path, options: Any, thresholds: Any, *, progress: 
     from .analysis_api import scan_file
     from .core import SCAN_JSON_SCHEMA_VERSION
 
-    summary, items, _ = scan_file(path, options, thresholds=thresholds, progress=progress)
+    summary, items = scan_file(path, options, thresholds=thresholds, progress=progress)
     return {
         "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "mode": "files",
@@ -792,7 +792,7 @@ def create_app(
             import dataclasses
             import queue
 
-            from .analysis_api import scan_folder, scan_payload
+            from .analysis_api import scan_folder_run, scan_payload
 
             yield ("job", {"job_id": job_id})
             if root is None:
@@ -831,7 +831,7 @@ def create_app(
 
             def work() -> None:
                 try:
-                    outcome["value"] = scan_folder(root, options, should_stop=cancel.is_set, progress=on_row, on_plan=on_plan)
+                    outcome["value"] = scan_folder_run(root, options, should_stop=cancel.is_set, progress=on_row, on_plan=on_plan)
                 except Exception as exc:  # noqa: BLE001 - reported as an SSE error event
                     logger.exception("streaming scan failed: %s", root)
                     outcome["error"] = exc
@@ -848,7 +848,8 @@ def create_app(
             if "error" in outcome:
                 yield ("error", {"detail": f"폴더 검사 실패: {failure_reason(outcome['error'])}"})
                 return
-            summary, items, thresholds = outcome["value"]
+            run = outcome["value"]
+            summary, items, thresholds = run.summary, run.items, run.thresholds
             if cancel.is_set():
                 # N8: total = rows the scan planned, done = rows processed
                 # before the cancel (processed kept as the old name of done).

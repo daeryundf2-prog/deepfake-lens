@@ -20,7 +20,12 @@ uploads, `/api/check`) and the REST API (`/api/analyze/image`, `/api/check`,
 the stream endpoints, `/api/scan`) all analyze through
 `deepfake_lens.analysis_api`: an `AnalysisOptions` object
 (`from_cli_args` / `from_query`) and the two functions `analyze_path` and
-`scan_folder`. Consequences:
+`scan_folder`. `scan_folder(folder, options)` returns `(summary, items)` as
+the phase-0 spec states (N15 — it returned a third member, the threshold
+profile); a front end that reports threshold provenance calls
+`scan_folder_run(folder, options)`, which returns a `ScanRun(summary,
+items, thresholds)` with the profile `load_thresholds(options)` resolved
+(`scan_file` / `scan_file_run` likewise for one file). Consequences:
 
 - **Same engine set.** The default model set is every `*-runtime.json` in
   the models dir (`--models-dir` / `web --models-dir` /
@@ -128,7 +133,7 @@ and, for the streaming endpoints, no job is started (G31).
 | POST | `/api/compare` | `file_path_a` + `file_path_b` | layer_diagnostic — same-speaker distance (audio pairs) or same-author stylometry (text/document pairs) under `diagnostic`; no same/different band |
 | POST | `/api/check` | `file_path` **or** `text` | Unified check-all: core scan + every `models/` member that fits the modality + C2PA/forensic + text fingerprint probes in one `{mode, item, advanced?, forensic?}` payload. An archive `file_path` is expanded exactly as the folder scan expands it: `{mode: "files", summary, items}` with the member rows and the container row (refused members as `archive_member` coverage) |
 | POST | `/api/check/stream` | same as `/api/check` | Server-Sent Events (`text/event-stream`): `job` → `progress` per stage → `result` (same payload as `/api/check`), or `error`/`cancelled` |
-| POST | `/api/scan/stream` | `directory`, `recursive` (bool), `max_files` (≤5000, default 200) | SSE batch scan of a server-local directory through `analysis_api.scan_folder` (the CLI's scan): `job` → `progress` per row (`{stage: "scan", index, total, path, status, verdict_code}`) → `result` (the `/api/scan` payload — `schema_version`, `summary`, `coverage`, `thresholds`, `items` — plus `mode: "scan"`, `directory`, `total`, `capped`, `counts`; `counts` = `manipulation_evidence`/`authenticity_evidence`/`undetermined` from the summary, `other` = skipped + duplicate rows, `failed` = `unsupported_or_failed`), or `error`/`cancelled` (`{job_id, total, done, processed}` — `total` = rows the scan planned before the first file, `done` = rows reported before the cancel, `processed` = `done` for older clients; N8) |
+| POST | `/api/scan/stream` | `directory`, `recursive` (bool), `max_files` (≤5000, default 200) | SSE batch scan of a server-local directory through `analysis_api.scan_folder_run` (the CLI's scan): `job` → `progress` per row (`{stage: "scan", index, total, path, status, verdict_code}`) → `result` (the `/api/scan` payload — `schema_version`, `summary`, `coverage`, `thresholds`, `items` — plus `mode: "scan"`, `directory`, `total`, `capped`, `counts`; `counts` = `manipulation_evidence`/`authenticity_evidence`/`undetermined` from the summary, `other` = skipped + duplicate rows, `failed` = `unsupported_or_failed`), or `error`/`cancelled` (`{job_id, total, done, processed}` — `total` = rows the scan planned before the first file, `done` = rows reported before the cancel, `processed` = `done` for older clients; N8) |
 | POST | `/api/jobs/{job_id}/cancel` | — | Sets the job's cancellation flag; takes effect at the next stage boundary (`{"status": "success", "cancelled": true}`, 404 for unknown/finished jobs) |
 | GET | `/api/jobs/{job_id}` | — | `{"job_id", "done", "cancelled"}` for in-flight stream jobs; 404 once the job is reaped |
 | GET | `/api/scan`, `/api/scan-status`, `/api/scan-cancel`, `/api/analyze-file`, `/api/heatmap`, `/api/preview` | as in the web GUI table below | Same payload functions as `web` (identical JSON); `/api/heatmap` is `image/png` (errors `text/plain`), `/api/preview` uses the file's media type; both send `X-Content-Type-Options: nosniff` |
@@ -143,7 +148,7 @@ finishes before the job stops, so latency-critical callers should also close
 the HTTP connection.
 
 `/api/scan/stream` reuses the same job/cancel machinery for directories.
-It runs `analysis_api.scan_folder` — never its own folder walk — so the
+It runs `analysis_api.scan_folder_run` — never its own folder walk — so the
 rows are the CLI's rows (R1): archives are expanded into member rows plus a
 container row with every refused member (traversal, absolute path, link,
 bomb/budget) recorded as `archive_member` coverage, symlinked files appear

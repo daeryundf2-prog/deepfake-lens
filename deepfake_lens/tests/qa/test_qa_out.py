@@ -62,7 +62,7 @@ from typing import Any
 from unittest import mock
 
 from deepfake_lens import webapp_api
-from deepfake_lens.analysis_api import AnalysisOptions, analyze_path, analyze_rows, scan_folder, scan_payload
+from deepfake_lens.analysis_api import AnalysisOptions, analyze_path, analyze_rows, scan_folder, scan_folder_run, scan_payload
 from deepfake_lens.cli import main as cli_main
 from deepfake_lens.core import analyze_file, build_classification_result
 from deepfake_lens.result_text import TEXT_LEGAL_LIMITATION
@@ -370,7 +370,7 @@ class QaOut2InferenceExceptionTest(unittest.TestCase):
             write_scene_png(media / "scene.png", seed=77)
             with mock.patch("deepfake_lens.model_adapter._run_aide", side_effect=RuntimeError("boom")), \
                     self.assertLogs("deepfake_lens.model_adapter", level="ERROR"):
-                summary, items, _ = scan_folder(media, AnalysisOptions(model_path=profile))
+                summary, items = scan_folder(media, AnalysisOptions(model_path=profile))
         payload = items[0].to_json()
         coverage = {entry["check"]: entry for entry in payload["result"]["coverage"]}
         self.assertEqual(coverage["external_model"]["status"], "failed")
@@ -619,7 +619,8 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
     def _direct_payload(self, folder: Path) -> dict[str, Any]:
         """The library leg: analysis_api.scan_folder with the CLI's default options."""
         options = AnalysisOptions.from_cli_args(type("Args", (), {})())
-        summary, items, thresholds = scan_folder(folder, options)
+        run = scan_folder_run(folder, options)
+        summary, items, thresholds = run.summary, run.items, run.thresholds
         payload: dict[str, Any] = json.loads(json.dumps(scan_payload(summary, items, thresholds, options), ensure_ascii=False))
         return payload
 
@@ -970,7 +971,7 @@ class QaOut1NoWeightsTest(unittest.TestCase):
             folder = Path(tmp)
             for index in range(100):
                 write_photo_like_png(folder / f"photo-{index:03d}.png", seed=index, width=160 + (index % 5) * 16, height=128 + (index % 3) * 16)
-            summary, items, _ = scan_folder(folder, AnalysisOptions(max_files=200))
+            summary, items = scan_folder(folder, AnalysisOptions(max_files=200))
         self.assertEqual(summary.analyzed, 100)
         for item in items:
             with self.subTest(path=item.path):
@@ -1078,7 +1079,7 @@ class QaOut5ProbabilityProvenanceTest(unittest.TestCase):
 
     def test_scanned_results_have_no_unprovenanced_probability(self) -> None:
         """QA-OUT-5: 보조 검사 — on real scans: every displayed probability has provenance (none exist without weights)."""
-        summary, items, _ = scan_folder(BENCHMARK, AnalysisOptions())
+        summary, items = scan_folder(BENCHMARK, AnalysisOptions())
         self.assertGreater(summary.analyzed, 0)
         for item in items:
             if item.result is not None:
@@ -1108,7 +1109,7 @@ class QaOut6TextIsReferenceTest(unittest.TestCase):
         """QA-OUT-6: 텍스트 파일 50개 검사 → 모든 결론 등급이 "참고", 보고서에 법적 한계 문구 존재."""
         texts: list[ScanItem] = []
         for corpus in TEXT_CORPORA:
-            _, items, _ = scan_folder(corpus, AnalysisOptions(recursive=True))
+            _, items = scan_folder(corpus, AnalysisOptions(recursive=True))
             texts.extend(item for item in items if item.kind == "text" and item.status == "analyzed")
         self.assertGreaterEqual(len(texts), 50)
         for item in texts:

@@ -145,7 +145,8 @@ class EmptyKeyFileTest(unittest.TestCase):
     def test_scan_sign_with_empty_key_file_exits_2_before_scanning(self) -> None:
         from deepfake_lens import cli
 
-        with mock.patch.object(cli, "scan_folder", side_effect=AssertionError("scan must not start")):
+        # N15: the CLI scans through scan_folder_run (scan_folder is the 2-tuple API).
+        with mock.patch.object(cli, "scan_folder_run", side_effect=AssertionError("scan must not start")):
             code, out, err = _run(["scan", str(self.case), "--json-out", str(self.root / "r.json"), "--sign", "--key-file", str(self.empty_key)])
         self.assertEqual(code, 2)
         self.assertIn("오류: 서명 키가 비어 있습니다", err)
@@ -194,10 +195,11 @@ class SubfoldersSkippedTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_non_recursive_scan_counts_and_prints_skipped_subfolders(self) -> None:
-        from deepfake_lens.analysis_api import AnalysisOptions, scan_folder, scan_payload
+        from deepfake_lens.analysis_api import AnalysisOptions, scan_folder_run, scan_payload
 
         options = AnalysisOptions()
-        summary, items, thresholds = scan_folder(self.case, options)
+        run = scan_folder_run(self.case, options)
+        summary, items, thresholds = run.summary, run.items, run.thresholds
         self.assertEqual(summary.subfolders_skipped, 2)  # sub-a, sub-b; the symlinked dir is its own row
         payload_summary: Any = scan_payload(summary, items, thresholds, options)["summary"]
         self.assertEqual(payload_summary["subfolders_skipped"], 2)
@@ -210,11 +212,44 @@ class SubfoldersSkippedTest(unittest.TestCase):
     def test_recursive_scan_reports_none(self) -> None:
         from deepfake_lens.analysis_api import AnalysisOptions, scan_folder
 
-        summary, items, _ = scan_folder(self.case, AnalysisOptions(recursive=True))
+        summary, items = scan_folder(self.case, AnalysisOptions(recursive=True))
         self.assertEqual(summary.subfolders_skipped, 0)
         self.assertIn("sub-a/inner.txt", [item.path for item in items])
         _, out, _ = _run(["scan", str(self.case), "--recursive"])
         self.assertNotIn("하위 폴더", out)
+
+    def test_scan_folder_returns_summary_and_items(self) -> None:
+        """N15: scan_folder/scan_file return the spec's (summary, items) 2-tuple
+        (they returned (summary, items, thresholds)); scan_folder_run /
+        scan_file_run carry the threshold profile load_thresholds resolves."""
+        import json
+
+        from deepfake_lens.analysis_api import (
+            AnalysisOptions, ScanRun, load_thresholds, scan_file, scan_file_run, scan_folder, scan_folder_run,
+        )
+        from deepfake_lens.core import BatchScanSummary, _thresholds_json
+
+        models = Path(self.tmp.name) / "models"
+        models.mkdir()
+        (models / "thresholds.json").write_text(json.dumps({
+            "version": "layer-thresholds-v1", "values": {"image": 70}, "in_sample": True, "samples": 10,
+        }), encoding="utf-8")
+        options = AnalysisOptions(models_dir=models, no_default_engine=True)
+        self.assertIsNotNone(load_thresholds(options))
+        result = scan_folder(self.case, options)
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+        summary, items = result
+        self.assertIsInstance(summary, BatchScanSummary)
+        run = scan_folder_run(self.case, options)
+        self.assertIsInstance(run, ScanRun)
+        self.assertEqual([item.path for item in run.items], [item.path for item in items])
+        self.assertEqual(_thresholds_json(run.thresholds), _thresholds_json(load_thresholds(options)))
+        file_result = scan_file(self.case / "top.txt", options)
+        self.assertEqual(len(file_result), 2)
+        file_run = scan_file_run(self.case / "top.txt", options)
+        self.assertEqual([item.path for item in file_run.items], [item.path for item in file_result[1]])
+        self.assertEqual(_thresholds_json(file_run.thresholds), _thresholds_json(load_thresholds(options)))
 
 
 @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed — streaming API")
@@ -463,7 +498,7 @@ class RedactInstallPathsTest(unittest.TestCase):
         from deepfake_lens.analysis_api import AnalysisOptions, scan_folder
         from deepfake_lens.serialization import redact_install_paths
 
-        _, items, _ = scan_folder(self.case, AnalysisOptions())
+        _, items = scan_folder(self.case, AnalysisOptions())
         wav = next(item for item in items if item.path == "tone.wav")
         assert wav.result is not None and wav.result.model_analysis is not None
         root = self.roots[0]

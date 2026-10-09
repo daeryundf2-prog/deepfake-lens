@@ -240,13 +240,14 @@ class ScanJsonSchemaValidationTest(unittest.TestCase):
 
     @unittest.skipUnless(HAVE_PIL, "Pillow not installed")
     def test_real_scan_with_every_row_shape_validates(self) -> None:
-        from deepfake_lens.analysis_api import AnalysisOptions, scan_folder, scan_payload
+        from deepfake_lens.analysis_api import AnalysisOptions, scan_folder_run, scan_payload
         from deepfake_lens.signing import sign_report
 
         with tempfile.TemporaryDirectory() as tmp:
             folder = write_contract_folder(Path(tmp) / "case")
             options = AnalysisOptions(dedupe=True)
-            summary, items, thresholds = scan_folder(folder, options)
+            run = scan_folder_run(folder, options)
+            summary, items, thresholds = run.summary, run.items, run.thresholds
             payload = json.loads(json.dumps(scan_payload(summary, items, thresholds, options), ensure_ascii=False))
         statuses = {item["status"] for item in payload["items"]}
         kinds = {item["kind"] for item in payload["items"]}

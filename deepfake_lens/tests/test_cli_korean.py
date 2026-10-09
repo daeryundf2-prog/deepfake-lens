@@ -42,7 +42,8 @@ class ScanPdfDependencyTest(unittest.TestCase):
 
     def _run(self, argv: list[str]) -> tuple[int, str, str]:
         out, err = io.StringIO(), io.StringIO()
-        with mock.patch("deepfake_lens.cli.scan_folder", side_effect=AssertionError("scan must not start")), \
+        # N15: the CLI scans through scan_folder_run (scan_folder is the 2-tuple API).
+        with mock.patch("deepfake_lens.cli.scan_folder_run", side_effect=AssertionError("scan must not start")), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = main(argv)
         return code, out.getvalue(), err.getvalue()
