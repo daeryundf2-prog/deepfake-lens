@@ -35,6 +35,7 @@ from .webapp_api import (
     ReadRootDenied,
     configure_read_roots,
     read_root_denied_body,
+    report_error_status,
     _scan_cancel_payload,
     _scan_job_start,
     _scan_payload,
@@ -313,7 +314,7 @@ def build_server(
                 req_fmt = (parse_qs(parsed.query).get("format", [""])[0] or "").lower()
                 rendered = _report_payload(self.rfile.read(length), format_override=req_fmt or None, default_folder=default_folder)
                 if isinstance(rendered, dict):
-                    self._send_json(rendered)
+                    self._send_json(rendered, status=report_error_status(rendered))
                 else:
                     body = rendered
                     is_pdf = req_fmt in ("pdf", "evidence", "evidence-statement")
@@ -375,7 +376,7 @@ def build_server(
                 self.send_error(400, "업로드된 내용이 없습니다")
                 return
             if length > MAX_UPLOAD_BYTES:
-                self.send_error(413, f"업로드 크기가 상한({MAX_UPLOAD_BYTES} bytes)을 초과합니다")
+                self.send_error(413, f"업로드 크기가 상한({MAX_UPLOAD_BYTES}바이트)을 초과합니다")
                 return
             body = self.rfile.read(length)
             if len(body) != length:
@@ -421,7 +422,7 @@ def build_server(
                 self.send_error(400, "요청 본문이 비어 있습니다")
                 return
             if length > MAX_UPLOAD_BYTES:
-                self.send_error(413, f"요청 본문이 상한({MAX_UPLOAD_BYTES} bytes)을 초과합니다")
+                self.send_error(413, f"요청 본문이 상한({MAX_UPLOAD_BYTES}바이트)을 초과합니다")
                 return
             body = self.rfile.read(length)
             if len(body) != length:

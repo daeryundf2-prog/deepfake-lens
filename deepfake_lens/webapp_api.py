@@ -862,6 +862,22 @@ def _feedback_payload(body: bytes) -> dict[str, object]:
     return {"ok": True, "feedback_file": str(feedback_file)}
 
 
+# B8: /api/report?format=pdf without pymupdf answers this body with HTTP 501
+# (both the stdlib web server and the FastAPI server) instead of a PDF.
+PDF_REPORT_UNAVAILABLE_ERROR = "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: pip install pymupdf)."
+PDF_REPORT_UNAVAILABLE_BODY: dict[str, object] = {"error": PDF_REPORT_UNAVAILABLE_ERROR}
+PDF_REPORT_UNAVAILABLE_STATUS = 501
+
+
+def report_error_status(body: dict[str, object]) -> int:
+    """HTTP status for a JSON body returned by ``_report_payload``.
+
+    501 for the missing PDF renderer (B8); the other report errors keep their
+    existing 200 + ``{"error": ...}`` contract.
+    """
+    return PDF_REPORT_UNAVAILABLE_STATUS if body.get("error") == PDF_REPORT_UNAVAILABLE_ERROR else 200
+
+
 def _report_payload(body: bytes, format_override: str | None = None, *, default_folder: Path | None = None) -> bytes | dict[str, object]:
     """Render the HTML or court-admissible forensic PDF report for web-scan results.
 
@@ -980,17 +996,22 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
             except RuntimeError as exc:
                 return {"error": f"증거설명서 PDF 생성 실패: {exc}", "hint": "`pip install 'deepfake-lens[forensic]'` 후 재시도하거나 Markdown 출력을 사용하세요."}
         elif req_format == "pdf":
+            from .evidence_statement import PdfDependencyMissing
             from .reports import write_forensic_pdf_report
             exhibit_no = str(data.get("exhibit_no") or "갑 제        호증")
-            write_forensic_pdf_report(
-                tmp_path, summary, items,
-                exhibit_no=exhibit_no,
-                thresholds=thresholds,
-                coverage=coverage,
-                resolve_path=_resolve_item_path,
-                allow_path=_path_allowed,
-                signed_report=signed,
-            )
+            try:
+                write_forensic_pdf_report(
+                    tmp_path, summary, items,
+                    exhibit_no=exhibit_no,
+                    thresholds=thresholds,
+                    coverage=coverage,
+                    resolve_path=_resolve_item_path,
+                    allow_path=_path_allowed,
+                    signed_report=signed,
+                )
+            except PdfDependencyMissing:
+                # B8: no English Latin-1 fallback PDF — a Korean error (HTTP 501).
+                return dict(PDF_REPORT_UNAVAILABLE_BODY)
         else:
             write_html_report(tmp_path, summary, items, thresholds=thresholds, allow_path=_heatmap_allowed, signed_report=signed)
         return tmp_path.read_bytes()

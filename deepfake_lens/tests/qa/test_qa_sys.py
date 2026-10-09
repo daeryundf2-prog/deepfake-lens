@@ -781,23 +781,27 @@ def _write_secret_png(path: Path) -> None:
         handle.write(SECRET)
 
 
-# The forensic PDF prints "서명 없음" with pymupdf (Korean font, compressed
-# streams) and "UNSIGNED" from the Latin-1 fallback writer without it.
+# The web forensic PDF needs pymupdf (Korean font). Without it /api/report
+# answers a Korean JSON error with HTTP 501 — there is no Latin-1 fallback
+# PDF any more (B8).
 HAVE_PYMUPDF = importlib.util.find_spec("pymupdf") is not None or importlib.util.find_spec("fitz") is not None
-UNSIGNED_PDF_MARKER = "서명 없음" if HAVE_PYMUPDF else "UNSIGNED"
 
 
 def _pdf_text(pdf: bytes) -> str:
-    """Text of a rendered PDF: pymupdf extraction when available, else the raw
-    Latin-1 bytes of the uncompressed fallback writer."""
-    if not HAVE_PYMUPDF:
-        return pdf.decode("latin-1")
-    try:
-        import pymupdf
-    except ImportError:
-        import fitz as pymupdf
-    with pymupdf.open(stream=pdf, filetype="pdf") as doc:
+    """Text of a rendered PDF (pymupdf extraction; only called with pymupdf)."""
+    from deepfake_lens.pdf_backend import import_pymupdf
+
+    with import_pymupdf().open(stream=pdf, filetype="pdf") as doc:
         return "".join(page.get_text() for page in doc)
+
+
+def _assert_korean_pdf_error(test: unittest.TestCase, rendered: object) -> None:
+    """B8: the web PDF without pymupdf is exactly the Korean error body (501), no PDF."""
+    test.assertIsInstance(rendered, dict, "without pymupdf no PDF bytes may be produced")
+    assert isinstance(rendered, dict)
+    test.assertEqual(rendered, {"error": webapp_api.PDF_REPORT_UNAVAILABLE_ERROR})
+    test.assertEqual(rendered["error"], "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: pip install pymupdf).")
+    test.assertEqual(webapp_api.report_error_status(rendered), 501)
 
 
 def _leaves(node: Any, prefix: tuple[Any, ...] = ()) -> Iterator[tuple[tuple[Any, ...], Any]]:
@@ -957,17 +961,86 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
         self.assertIsNone(embedded["signature"])
         self.assertEqual(verify_report(embedded, KEY).reason, "서명 없음")
         if HAVE_PYMUPDF:
-            assert isinstance(pdf, bytes)
-            self.assertIn("서명 없음", _pdf_text(pdf))
-        elif isinstance(pdf, dict):
-            # B8: without pymupdf no (English, Latin-1) PDF is produced — a
-            # Korean error naming the missing renderer, like evidence-statement.
-            self.assertIn("pymupdf", str(pdf.get("error", "")).lower())
+            assert isinstance(pdf, bytes), pdf
+            text = _pdf_text(pdf)
+            self.assertIn("보고서 서명: 서명 없음", text)
+            self.assertNotIn("UNSIGNED", text)
         else:
-            # Pre-B8 Latin-1 fallback writer (still on this branch until the
-            # B8 change lands): it must still say the report is unsigned.
-            assert isinstance(pdf, bytes)
-            self.assertIn(UNSIGNED_PDF_MARKER, _pdf_text(pdf))
+            # B8: without pymupdf no (English, Latin-1) PDF is produced.
+            _assert_korean_pdf_error(self, pdf)
+
+    def test_web_pdf_report_is_korean_and_its_signature_verifies(self) -> None:
+        """QA-SYS-6: /api/report?format=pdf is the Korean forensic PDF carrying a verifying signature (pymupdf), else the Korean 501 error.
+
+        With pymupdf (API venv) the PDF prints the HMAC signature and the
+        signed body's SHA-256 of exactly the body /api/report signed, and that
+        body verifies with the key. Without pymupdf the route returns only
+        the Korean error — never a Latin-1 English PDF (B8).
+        """
+        from deepfake_lens import reports
+        from deepfake_lens.signing import signed_body_sha256
+
+        body = json.dumps({"items": self.report["items"]}).encode("utf-8")
+        captured: list[dict[str, Any]] = []
+        real_sign = reports.signed_report_body
+
+        def _capture(*args: Any, **kwargs: Any) -> dict[str, object]:
+            signed_body = real_sign(*args, **kwargs)
+            captured.append(dict(signed_body))
+            return signed_body
+
+        with patch.object(webapp_api, "_READ_ROOTS", OrderedDict()), patch.dict(os.environ, {REPORT_KEY_ENV: KEY.decode()}), \
+                patch.object(reports, "signed_report_body", _capture):
+            pdf = webapp_api._report_payload(body, "pdf")
+        if not HAVE_PYMUPDF:
+            _assert_korean_pdf_error(self, pdf)
+            return
+        assert isinstance(pdf, bytes), pdf
+        self.assertTrue(pdf.startswith(b"%PDF-"))
+        self.assertEqual(len(captured), 1)
+        signed_body = captured[0]
+        self.assertEqual(signed_body["report_format"], "pdf")
+        self.assertTrue(verify_report(json.loads(json.dumps(signed_body)), KEY).verified)
+        text = _pdf_text(pdf)
+        self.assertIn("디지털포렌식 감정센터", text)
+        self.assertIn(f"보고서 서명: HMAC-SHA256 서명됨 — 키 ID {signed_body['signature_key_id']}", text)
+        self.assertIn(str(signed_body["signature"]), text.replace("\n", ""))
+        self.assertIn(f"서명 본문 SHA-256: {signed_body_sha256(signed_body)}", text)
+        for english in ("UNSIGNED", "Signature:", "Latin-1", "UNDETERMINED"):
+            self.assertNotIn(english, text)
+
+    def test_web_pdf_without_pymupdf_is_korean_501(self) -> None:
+        """QA-SYS-6: with pymupdf made unimportable, /api/report?format=pdf on the live web server is HTTP 501 + the Korean error and no PDF (B8)."""
+        from deepfake_lens import webapp
+        from deepfake_lens.webapp import CLIENT_HEADER
+
+        def _missing() -> Any:
+            raise ImportError("pymupdf")
+
+        with patch.object(webapp_api, "_READ_ROOTS", OrderedDict()), patch("deepfake_lens.pdf_backend.import_pymupdf", _missing):
+            self.assertEqual(webapp_api._report_payload(json.dumps({"items": self.report["items"]}).encode("utf-8"), "pdf"),
+                             {"error": webapp_api.PDF_REPORT_UNAVAILABLE_ERROR})
+            with tempfile.TemporaryDirectory() as tmp:
+                server = webapp.build_server("127.0.0.1", 0, default_folder=Path(tmp))
+                thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True)
+                thread.start()
+                try:
+                    req = urllib.request.Request(
+                        f"http://127.0.0.1:{server.server_address[1]}/api/report?format=pdf",
+                        data=json.dumps({"items": self.report["items"]}).encode("utf-8"),
+                        headers={CLIENT_HEADER: "qa", "Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with self.assertRaises(urllib.error.HTTPError) as ctx:
+                        urllib.request.urlopen(req, timeout=30)
+                    status, ctype, payload = ctx.exception.code, ctx.exception.headers.get("Content-Type", ""), ctx.exception.read()
+                finally:
+                    server.shutdown()
+                    server.server_close()
+        self.assertEqual(status, 501)
+        self.assertIn("application/json", ctype)
+        self.assertFalse(payload.startswith(b"%PDF"))
+        self.assertEqual(json.loads(payload.decode("utf-8")), {"error": "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: pip install pymupdf)."})
 
 
 class _ServerFixture(unittest.TestCase):

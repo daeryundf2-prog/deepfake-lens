@@ -693,7 +693,7 @@ def _scan_specs(
             except OSError as exc:
                 return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "failed", 0, error=failure_reason(exc)), None, False
             if size > max_file_bytes:
-                return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "skipped", size, error=f"파일 크기가 --max-file-bytes 상한({max_file_bytes} bytes)을 초과해 건너뜀"), None, False
+                return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "skipped", size, error=f"파일 크기가 --max-file-bytes 상한({max_file_bytes}바이트)을 초과해 건너뜀"), None, False
         # Archive members live in a temp dir with unstable paths — caching
         # them would both miss every scan and bloat the cache file.
         key = None

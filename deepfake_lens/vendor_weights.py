@@ -449,7 +449,7 @@ def fetch_weights(
                         break
                     received += len(chunk)
                     if received > max_bytes:
-                        raise ValueError(f"다운로드가 크기 상한({max_bytes} bytes)을 넘었습니다")
+                        raise ValueError(f"다운로드가 크기 상한({max_bytes}바이트)을 넘었습니다")
                     digest.update(chunk)
                     out_fh.write(chunk)
             actual = digest.hexdigest()

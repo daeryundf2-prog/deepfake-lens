@@ -6,6 +6,7 @@ import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from deepfake_lens import api_server
 from deepfake_lens.core import (
@@ -17,6 +18,7 @@ from deepfake_lens.core import (
     SourceConfidence,
     SourceGuess,
 )
+from deepfake_lens.evidence_statement import PDF_REPORT_DEPENDENCY_MESSAGE, PdfDependencyMissing
 from deepfake_lens.reports import write_forensic_pdf_report
 
 HAVE_FASTAPI = importlib.util.find_spec("fastapi") is not None and importlib.util.find_spec("httpx") is not None
@@ -54,6 +56,20 @@ class ForensicPdfReportTest(unittest.TestCase):
         )
         self.items = [self.item1, self.item2]
 
+    def test_without_pymupdf_refuses_in_korean_and_writes_nothing(self) -> None:
+        """B8: no Latin-1 English fallback PDF — PdfDependencyMissing (Korean), no file."""
+        def _missing() -> object:
+            raise ImportError("pymupdf")
+
+        with tempfile.TemporaryDirectory() as tmp, patch("deepfake_lens.pdf_backend.import_pymupdf", _missing):
+            out_pdf = Path(tmp) / "forensic_report.pdf"
+            with self.assertRaises(PdfDependencyMissing) as ctx:
+                write_forensic_pdf_report(out_pdf, self.summary, self.items, exhibit_no="갑 제1호증")
+            self.assertEqual(str(ctx.exception), PDF_REPORT_DEPENDENCY_MESSAGE)
+            self.assertFalse(out_pdf.exists())
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf not installed — the venv_api / extras run covers this")
     def test_write_forensic_pdf_generates_valid_pdf(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out_pdf = Path(tmp) / "forensic_report.pdf"
@@ -66,18 +82,16 @@ class ForensicPdfReportTest(unittest.TestCase):
             self.assertTrue(out_pdf.is_file())
             raw = out_pdf.read_bytes()
             self.assertTrue(raw.startswith(b"%PDF-"))
-            if HAVE_PYMUPDF:
-                self.assertGreater(len(raw), 1500)
+            self.assertGreater(len(raw), 1500)
+            import pymupdf
+            doc = pymupdf.open(str(out_pdf))
+            self.assertGreaterEqual(doc.page_count, 1)
+            text = doc[0].get_text()
+            self.assertIn("대륜", text)
+            self.assertIn("갑 제1호증", text)
+            self.assertIn("SHA-256", text)
 
-            if HAVE_PYMUPDF:
-                import pymupdf
-                doc = pymupdf.open(str(out_pdf))
-                self.assertGreaterEqual(doc.page_count, 1)
-                text = doc[0].get_text()
-                self.assertIn("대륜", text)
-                self.assertIn("갑 제1호증", text)
-                self.assertIn("SHA-256", text)
-
+    @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf not installed — the venv_api / extras run covers this")
     def test_redact_paths_in_forensic_pdf(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out_pdf = Path(tmp) / "redacted_report.pdf"
@@ -88,12 +102,11 @@ class ForensicPdfReportTest(unittest.TestCase):
                 redact_paths=True,
             )
             self.assertTrue(out_pdf.is_file())
-            if HAVE_PYMUPDF:
-                import pymupdf
-                doc = pymupdf.open(str(out_pdf))
-                text = doc[0].get_text()
-                self.assertIn("cctv_frame_01.png", text)
-                self.assertNotIn("sample/cctv_frame_01.png", text)
+            import pymupdf
+            doc = pymupdf.open(str(out_pdf))
+            text = doc[0].get_text()
+            self.assertIn("cctv_frame_01.png", text)
+            self.assertNotIn("sample/cctv_frame_01.png", text)
 
 
 @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed")
@@ -102,8 +115,8 @@ class ForensicPdfApiEndpointTest(unittest.TestCase):
         from fastapi.testclient import TestClient
         self.client = TestClient(api_server.create_app())
 
-    def test_api_report_pdf_format_query(self) -> None:
-        payload = {
+    def _payload(self) -> dict[str, object]:
+        return {
             "items": [
                 {
                     "path": "test/photo.jpg",
@@ -126,6 +139,10 @@ class ForensicPdfApiEndpointTest(unittest.TestCase):
             "format": "pdf",
             "exhibit_no": "갑 제3호증",
         }
+
+    @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf not installed — the venv_api / extras run covers this")
+    def test_api_report_pdf_format_query(self) -> None:
+        payload = self._payload()
         res = self.client.post(
             "/api/report?format=pdf",
             headers={"host": "localhost", "X-Deepfake-Lens-Client": "gui"},
@@ -135,3 +152,19 @@ class ForensicPdfApiEndpointTest(unittest.TestCase):
         self.assertIn("application/pdf", res.headers.get("content-type", ""))
         self.assertIn("deepfake-lens-forensic-report.pdf", res.headers.get("content-disposition", ""))
         self.assertTrue(res.content.startswith(b"%PDF-"))
+
+    def test_api_report_pdf_without_pymupdf_is_korean_501(self) -> None:
+        """B8: api-serve /api/report?format=pdf without pymupdf → 501 + Korean JSON error, no PDF."""
+        def _missing() -> object:
+            raise ImportError("pymupdf")
+
+        with patch("deepfake_lens.pdf_backend.import_pymupdf", _missing):
+            res = self.client.post(
+                "/api/report?format=pdf",
+                headers={"host": "localhost", "X-Deepfake-Lens-Client": "gui"},
+                json=self._payload(),
+            )
+        self.assertEqual(res.status_code, 501)
+        self.assertIn("application/json", res.headers.get("content-type", ""))
+        self.assertFalse(res.content.startswith(b"%PDF"))
+        self.assertEqual(res.json(), {"error": "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: pip install pymupdf)."})

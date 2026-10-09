@@ -33,13 +33,6 @@ TEXT_LEGAL_LIMITATION = "텍스트 생성 여부 판별은 2026년 현재 증거
 
 KIND_ORDER = (EvidenceKind.DETERMINISTIC, EvidenceKind.STATISTICAL, EvidenceKind.LEXICAL)
 
-# Short ASCII codes for Latin-1-only outputs (minimal PDF).
-VERDICT_CODES_ASCII = {
-    Verdict.MANIPULATION_EVIDENCE: "MANIPULATION-EVIDENCE",
-    Verdict.AUTHENTICITY_EVIDENCE: "AUTHENTICITY-EVIDENCE",
-    Verdict.UNDETERMINED: "UNDETERMINED",
-}
-
 
 def verdict_heading(result: ClassificationResult) -> str:
     """e.g. "조작·생성 근거 있음 [감정 근거로 사용 가능]"."""
@@ -112,16 +105,6 @@ def summary_line(summary: BatchScanSummary) -> str:
         f"원본성 근거 있음 {summary.authenticity_evidence}건, 판단 불가 {summary.undetermined}건"
         f"(검사 실패 포함 {summary.checks_failed}건), 미지원/분석 실패 {summary.unsupported_or_failed}건, "
         f"중복 {summary.duplicates}건, 건너뜀 {summary.skipped}건"
-    )
-
-
-def summary_line_ascii(summary: BatchScanSummary) -> str:
-    return (
-        f"Scanned {summary.total} files: manipulation_evidence={summary.manipulation_evidence}, "
-        f"authenticity_evidence={summary.authenticity_evidence}, undetermined={summary.undetermined} "
-        f"(with failed checks={summary.checks_failed}), unsupported/failed={summary.unsupported_or_failed}, "
-        f"duplicates={summary.duplicates}, skipped={summary.skipped}, cached={summary.cached}"
-        + (f", archive_container_rows={summary.container_rows}" if summary.container_rows else "")
     )
 
 

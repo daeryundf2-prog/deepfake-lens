@@ -16,7 +16,6 @@ from .result_text import (
     HASH_UNAVAILABLE_MEMBER,
     HASH_UNAVAILABLE_SYMLINK,
     TEXT_LEGAL_LIMITATION,
-    VERDICT_CODES_ASCII,
     coverage_gaps,
     deciding_evidence,
     display_path,
@@ -26,7 +25,6 @@ from .result_text import (
     is_symlink_row,
     leading_limitations,
     summary_line,
-    summary_line_ascii,
     threshold_provenance_line,
     verdict_heading,
 )
@@ -50,18 +48,6 @@ def _threshold_provenance_line(thresholds: object | None) -> str:
     in-sample fit carries the same caveat as the CLI header (G28).
     """
     return threshold_provenance_line(thresholds)
-
-
-def _threshold_provenance_ascii(thresholds: object | None) -> str:
-    """Latin-1 provenance line for the minimal PDF writer only."""
-    to_json = getattr(thresholds, "to_json", None)
-    payload = to_json() if callable(to_json) else (thresholds if isinstance(thresholds, dict) else {})
-    if thresholds is None or not isinstance(payload, dict) or payload.get("source") == "builtin_defaults":
-        return "Decision thresholds: builtin defaults (unmeasured - provisional)."
-    state = "PROVISIONAL (unvalidated)" if payload.get("provisional", True) else "measured"
-    if payload.get("in_sample"):
-        state += ", in-sample (reference only)"
-    return f"Decision thresholds: threshold profile {payload.get('version', '?')} - {state}, n={int(payload.get('samples', 0) or 0)}."
 
 
 SIGNED_REPORT_SCRIPT_ID = "deepfake-lens-signed-report"
@@ -144,20 +130,6 @@ def signature_lines_ko(signed: dict[str, object]) -> list[str]:
     return [
         f"보고서 서명: 서명 없음 — {REPORT_KEY_ENV}가 설정되지 않아 이 보고서는 서명되지 않았습니다.",
         f"본문 SHA-256(참고, 서명 아님): {signed_body_sha256(signed)}",
-    ]
-
-
-def signature_lines_ascii(signed: dict[str, object]) -> list[str]:
-    """Latin-1 signature lines for the minimal PDF writer."""
-    if signed.get("signature"):
-        return [
-            f"Signature: HMAC-SHA256, key id {signed.get('signature_key_id')}",
-            f"  {signed.get('signature')}",
-            f"Signed body SHA-256: {signed_body_sha256(signed)}",
-        ]
-    return [
-        f"Signature: UNSIGNED - no report key ({REPORT_KEY_ENV} not set)",
-        f"Body SHA-256 (not a signature): {signed_body_sha256(signed)}",
     ]
 
 
@@ -327,11 +299,6 @@ def write_pdf_report(
     with a Korean message — it never writes the old Latin-1-only (English)
     PDF. The CLI checks this before the scan starts (exit 2, as R6).
     """
-    from .evidence_statement import PDF_REPORT_DEPENDENCY_MESSAGE, PdfDependencyMissing
-    from .pdf_backend import pymupdf_available
-
-    if not pymupdf_available():
-        raise PdfDependencyMissing(PDF_REPORT_DEPENDENCY_MESSAGE)
     write_forensic_pdf_report(
         path, summary, items,
         redact_paths=redact_paths,
@@ -340,71 +307,6 @@ def write_pdf_report(
         coverage=coverage,
         signed_report=signed_report,
     )
-
-
-def _write_degraded_text_pdf(
-    path: Path | str,
-    summary: BatchScanSummary,
-    items: list[ScanItem],
-    *,
-    redact_paths: bool = False,
-    thresholds: object | None = None,
-    degrade_note: str | None = None,
-    signed_report: dict[str, object] | None = None,
-) -> None:
-    """Latin-1 text PDF — only the web report's fallback when pymupdf is missing.
-
-    No CLI path reaches it (the CLI refuses before scanning, B8); the web
-    path keeps it until its QA-SYS-6 test expects the Korean JSON error
-    instead (see the round-4 report).
-    """
-    if signed_report is None:
-        signed_report = signed_report_body(summary, items, thresholds=thresholds, report_format="pdf", redact_paths=redact_paths)
-    lines = [
-        "Deepfake Lens Report",
-        summary_line_ascii(summary),
-        "Verdicts: MANIPULATION-EVIDENCE / AUTHENTICITY-EVIDENCE / UNDETERMINED. Only deterministic",
-        "evidence (metadata, C2PA) concludes; statistical (model) and lexical (keyword) evidence is",
-        "reference-only until calibrated. A failed check leaves the file UNDETERMINED.",
-        _threshold_provenance_ascii(thresholds),
-        "",
-    ]
-    if _has_reference_grade(items):
-        lines.insert(2, "TEXT RESULTS: reference grade only - text-generation detection has no evidentiary value (2026).")
-    if degrade_note:
-        lines.append(f"NOTE: {degrade_note}")
-        lines.append("")
-    shown = items[:80]
-    if len(items) > len(shown):
-        lines.append(f"NOTE: {len(items)} items scanned; first {len(shown)} shown — see JSON/CSV output for the remainder.")
-        lines.append("")
-    for item in shown:
-        result = item.result
-        if result is None:
-            lines.append(f"{item.status} {_display_path(item.path, redact_paths=redact_paths)} {item.error or ''}")
-            continue
-        counts = evidence_counts(result)
-        failed = sum(1 for entry in result.coverage if entry.status == CoverageStatus.FAILED)
-        skipped = sum(1 for entry in result.coverage if entry.status == CoverageStatus.SKIPPED)
-        top = deciding_evidence(result)
-        lines.append(
-            f"{VERDICT_CODES_ASCII[result.verdict_code]} grade={result.grade.value} "
-            f"det={counts[EvidenceKind.DETERMINISTIC]} stat={counts[EvidenceKind.STATISTICAL]} lex={counts[EvidenceKind.LEXICAL]} "
-            f"checks_failed={failed} skipped={skipped} {_display_path(item.path, redact_paths=redact_paths)}"
-            + (f" [{top.kind.value}] {top.title}" if top else "")
-        )
-    lines.append("")
-    lines.extend(signature_lines_ascii(signed_report))
-    if any(ord(char) > 255 for line in lines for char in line):
-        # The minimal PDF writer is Latin-1 only; state the limitation
-        # instead of silently turning Korean labels into '?'.
-        lines = [
-            "NOTE: this simple PDF is Latin-1 only; non-Latin text",
-            "(e.g. Korean evidence titles) appears as '?'.",
-            "Use --html-out for a full Unicode report.",
-            "",
-        ] + lines
-    _write_minimal_pdf(Path(path), lines)
 
 
 def write_forensic_pdf_report(
@@ -425,23 +327,20 @@ def write_forensic_pdf_report(
 
     The signature block (G30) states the HMAC signature and the signed body's
     SHA-256, or "서명 없음" when no report key is configured.
+
+    Without pymupdf this raises :class:`~deepfake_lens.evidence_statement.PdfDependencyMissing`
+    (Korean message) and writes nothing — there is no Latin-1 fallback (B8).
     """
     if signed_report is None:
         signed_report = signed_report_body(summary, items, thresholds=thresholds, coverage=coverage, report_format="pdf", redact_paths=redact_paths)
+    from .evidence_statement import PDF_REPORT_DEPENDENCY_MESSAGE, PdfDependencyMissing
     from .pdf_backend import import_pymupdf
 
     try:
         pymupdf = import_pymupdf()  # N4: pymupdf first; a legacy fitz import never prints to stdout
-    except ImportError:
-        _write_degraded_text_pdf(
-            path, summary, items,
-            redact_paths=redact_paths,
-            thresholds=thresholds,
-            signed_report=signed_report,
-            # The simple PDF is Latin-1 only, so this note stays ASCII.
-            degrade_note="pymupdf not installed — this is a simplified text report, NOT the ECFS-stamped forensic layout. Install the 'forensic' extra for the court artifact.",
-        )
-        return
+    except ImportError as exc:
+        # B8: no English Latin-1 fallback PDF — refuse in Korean; nothing is written.
+        raise PdfDependencyMissing(PDF_REPORT_DEPENDENCY_MESSAGE) from exc
 
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -804,36 +703,3 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
     except BaseException:
         os.unlink(tmp)
         raise
-
-
-def _write_minimal_pdf(path: Path, lines: list[str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    content_lines = ["BT", "/F1 11 Tf", "50 780 Td"]
-    for index, line in enumerate(lines):
-        if index:
-            content_lines.append("0 -15 Td")
-        content_lines.append(f"({_pdf_escape(line[:110])}) Tj")
-    content_lines.append("ET")
-    stream = "\n".join(content_lines).encode("latin-1", errors="replace")
-    objects = [
-        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n",
-        b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n",
-        b"3 0 obj << /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /MediaBox [0 0 612 792] /Contents 5 0 R >> endobj\n",
-        b"4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n",
-        b"5 0 obj << /Length " + str(len(stream)).encode("ascii") + b" >> stream\n" + stream + b"\nendstream endobj\n",
-    ]
-    output = bytearray(b"%PDF-1.4\n")
-    offsets = [0]
-    for obj in objects:
-        offsets.append(len(output))
-        output.extend(obj)
-    xref = len(output)
-    output.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("ascii"))
-    for offset in offsets[1:]:
-        output.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
-    output.extend(f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode("ascii"))
-    _atomic_write_bytes(path, bytes(output))
-
-
-def _pdf_escape(text: str) -> str:
-    return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")

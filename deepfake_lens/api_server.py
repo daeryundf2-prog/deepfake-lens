@@ -940,7 +940,7 @@ def create_app(
         from .webapp_api import MAX_UPLOAD_BYTES, _analyze_upload_payload
         body = await request.body()
         if len(body) > MAX_UPLOAD_BYTES:
-            raise HTTPException(status_code=413, detail=f"업로드 크기가 상한({MAX_UPLOAD_BYTES} bytes)을 초과합니다")
+            raise HTTPException(status_code=413, detail=f"업로드 크기가 상한({MAX_UPLOAD_BYTES}바이트)을 초과합니다")
         content_type = request.headers.get("content-type", "")
         return await run_in_threadpool(_analyze_upload_payload, content_type, body)
 
@@ -957,7 +957,7 @@ def create_app(
         except (UnicodeDecodeError, ValueError):
             # Malformed body: _report_payload below returns the JSON error.
             fmt = fmt or None
-        from .webapp_api import ReadRootDenied, read_root_denied_body
+        from .webapp_api import ReadRootDenied, read_root_denied_body, report_error_status
         try:
             rendered = await run_in_threadpool(
                 lambda: _report_payload(body, format_override=fmt, default_folder=default_folder)
@@ -965,7 +965,8 @@ def create_app(
         except ReadRootDenied:
             return JSONResponse(read_root_denied_body(), status_code=403)
         if isinstance(rendered, dict):
-            return rendered
+            # B8: a missing PDF renderer is 501 with a Korean error, never a PDF.
+            return JSONResponse(rendered, status_code=report_error_status(rendered))
         if (fmt or "").lower() in ("pdf", "evidence", "evidence-statement"):
             fn = "deepfake-lens-evidence-statement.pdf" if (fmt or "").lower() in ("evidence", "evidence-statement") else "deepfake-lens-forensic-report.pdf"
             return Response(

@@ -392,17 +392,17 @@ class RendererTest(unittest.TestCase):
 
     def test_minimal_pdf_states_verdict_codes(self) -> None:
         """B8: --pdf-out renders the verdicts in Korean (forensic renderer); without
-        pymupdf only the web fallback still writes the Latin-1 text PDF."""
+        pymupdf every PDF writer refuses in Korean — no Latin-1 text PDF exists."""
+        from deepfake_lens.evidence_statement import PdfDependencyMissing
         from deepfake_lens.pdf_backend import import_pymupdf, pymupdf_available
         from deepfake_lens.reports import write_forensic_pdf_report, write_pdf_report
 
         path = self.root / "r.pdf"
         if not pymupdf_available():
-            write_forensic_pdf_report(path, self.summary, self.items)
-            raw = path.read_bytes()
-            self.assertIn(b"MANIPULATION-EVIDENCE", raw)
-            self.assertIn(b"UNDETERMINED", raw)
-            self.assertIn(b"no evidentiary value", raw)
+            for writer in (write_forensic_pdf_report, write_pdf_report):
+                with self.assertRaises(PdfDependencyMissing):
+                    writer(path, self.summary, self.items)
+                self.assertFalse(path.exists())
             return
         write_pdf_report(path, self.summary, self.items)
         with import_pymupdf().open(str(path)) as doc:
