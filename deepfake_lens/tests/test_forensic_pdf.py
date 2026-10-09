@@ -69,6 +69,7 @@ class ForensicPdfReportTest(unittest.TestCase):
             self.assertFalse(out_pdf.exists())
             self.assertEqual(list(Path(tmp).iterdir()), [])
 
+    # B8: pymupdf is the only PDF backend (no Latin-1 fallback) — this case runs in the venv_api / extras job.
     @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf not installed — the venv_api / extras run covers this")
     def test_write_forensic_pdf_generates_valid_pdf(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -91,6 +92,7 @@ class ForensicPdfReportTest(unittest.TestCase):
             self.assertIn("갑 제1호증", text)
             self.assertIn("SHA-256", text)
 
+    # B8: pymupdf is the only PDF backend (no Latin-1 fallback) — this case runs in the venv_api / extras job.
     @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf not installed — the venv_api / extras run covers this")
     def test_redact_paths_in_forensic_pdf(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -140,6 +142,7 @@ class ForensicPdfApiEndpointTest(unittest.TestCase):
             "exhibit_no": "갑 제3호증",
         }
 
+    # B8: pymupdf is the only PDF backend (no Latin-1 fallback) — this case runs in the venv_api / extras job.
     @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf not installed — the venv_api / extras run covers this")
     def test_api_report_pdf_format_query(self) -> None:
         payload = self._payload()
