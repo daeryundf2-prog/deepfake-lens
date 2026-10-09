@@ -2,11 +2,11 @@
 
 <!-- 생성 파일: scripts/build_traceability_commits.py가 docs/traceability-commits.json과 git 히스토리에서 만든다. 손으로 고치지 말 것 — 매핑은 JSON의 ids[]를 고친 뒤 스크립트를 다시 실행한다. -->
 
-Y13/P12: 검증 결함 ID(라운드 1–8)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
+Y13/P12: 검증 결함 ID(라운드 1–9)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..1b8f2b1`(병합 커밋 제외, 커밋 128개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..d2036db`(병합 커밋 제외, 커밋 139개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 123개 — 스펙 갭에 매핑 71개(그중 신규 사유 병기 8개), 신규(스펙 외)만 52개.
+요약: ID 133개 — 스펙 갭에 매핑 78개(그중 신규 사유 병기 9개), 신규(스펙 외)만 55개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -147,9 +147,19 @@ Y13/P12: 검증 결함 ID(라운드 1–8)를 0단계 스펙의 갭 ID(G1–G34)
 | P9 | 8 | Y1/Z4 오류에 영어 예외 상세(JSONDecodeError 메시지) | — | 신규(스펙 외): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖 | edafb9a |
 | P10 | 8 | 읽기 전용 출력 폴더가 스캔 후에야 실패('처리 오류 N건'으로 오해) | — | 신규(스펙 외): CLI 출력 경로 검증(Y7/Z5 연장) — 갭 목록 밖 | 4ce5a7e |
 | P11 | 8 | --json-out 등이 검사 대상 폴더 안·입력 JSON을 가리킬 수 있음 | G31 |  | 4ce5a7e |
-| P12 | 8 | Y13 추적성 표의 해시가 전부 리라이트 이전 → 현재 히스토리에서 재생성하는 스크립트와 CI --check | — | 신규(스펙 외): 커밋 추적성(공통 규칙 1) — 갭 목록 밖 | 3baee5c, c19738e |
+| P12 | 8 | Y13 추적성 표의 해시가 전부 리라이트 이전 → 현재 히스토리에서 재생성하는 스크립트와 CI --check | — | 신규(스펙 외): 커밋 추적성(공통 규칙 1) — 갭 목록 밖 | 3baee5c, c19738e, d64923b |
 | P13 | 8 | 영어 탐지기 우회: ProbablyFake, FakeImageDetected, probably_fake, AUTHENTIC — 결론 단어 단독 등장 | — | 신규(스펙 외): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖 | e63c0c4 |
 | P14 | 8 | Gaps를 제목에만 적은 커밋 — 규칙상 허용, 추적표 스크립트가 제목·본문 모두 인식 | — | 신규(스펙 외): 커밋 추적성(공통 규칙 1) — 갭 목록 밖 | 3baee5c |
+| R9-1 | 9 | 실제 경로 'tri:::c.png'의 이스케이프가 '::'를 남김 → 행 식별자는 container/member 필드만, 실제 경로는 ':'·'\' 문자 단위 이스케이프 | G30, G34 |  | 614d1cb |
+| R9-2 | 9 | --allow-symlinks 평면 스캔의 하위 폴더 파일 수가 '/'·'..'·'.'·자기 자신 링크를 따라가고 같은 폴더를 링크 수만큼 집계 → P3 워커 규칙 | G12, G32, G34 |  | cb8dd1d |
+| R9-3 | 9 | /api/scan/stream·/api/check/stream이 잘못된 입력에 200 + SSE error 이벤트 → 스트림 시작 전 400/403 JSON | G8, G34 |  | aa2b705 |
+| R9-4 | 9 | video --frame-root·train-neural-plan --output-dir 등 출력 폴더 옵션이 검사 폴더 안 생성 허용 → 전부 등록, 파서 메타테스트 | G31 |  | 63ea0a1 |
+| R9-5 | 9 | 피드백 라벨 파일의 BOM·잘린 JSONL 줄을 0건으로 읽고 종료 코드 0 → BOM 제거, 잘린 줄 n행 오류 exit 2 | G7 |  | 63ea0a1 |
+| R9-6 | 9 | 영어 탐지기 미탐: verdict=fake, result:fake, #fake, fakes/faked, authentic입니다, fake-image, AI-generated 등 | — | 신규(스펙 외): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖 | 4b2708a |
+| R9-7 | 9 | --install BUNDLE_DIR·위치 인수 folder/file/report 등 영어 플레이스홀더, 에코된 입력의 개행 미이스케이프 | — | 신규(스펙 외): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖 | ada58f7 |
+| R9-8 | 9 | 서비스 문서의 /api/review-marks(404)·'업로드 엔드포인트 없음' 오기, 빈 /api/analyze/text 200 → 문서 정정, 400, 엔드포인트 메타테스트 | G8 | 신규(스펙 외): 서비스 문서 정합성 — 갭 목록 밖 | 4ef3b62 |
+| R9-9 | 9 | 서명 본문·렌더 보고서에 scan_root 미기록 → 읽기 루트 기준 상대 경로를 서명 본문에 기록, 보고서 헤더에 표시 | G30, G31 |  | 6919550 |
+| R9-10 | 9 | build_traceability_commits --check가 표 이후 커밋 수와 무관하게 통과 → 재생성 커밋 1개(추적표 파일만)를 초과하면 실패 | — | 신규(스펙 외): 커밋 추적성(공통 규칙 1) — 갭 목록 밖 | d2036db |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -161,7 +171,7 @@ Y13/P12: 검증 결함 ID(라운드 1–8)를 0단계 스펙의 갭 ID(G1–G34)
 - R15: 커밋 제목에 쓰이지 않음 — 라운드 2 문서가 없어 매핑 불가(커밋 메시지(라운드 2 문서 없음))
 - R17: 커밋 제목에 쓰이지 않음 — 라운드 2 문서가 없어 매핑 불가(커밋 메시지(라운드 2 문서 없음))
 
-근거: `verify_round1/4/5/6/7/8.md`(라운드 2·3은 문서가 없어 해당 커밋 메시지), 스펙 WP 머리글의 갭 목록.
+근거: `verify_round1/4/5/6/7/8/9.md`(라운드 2·3은 문서가 없어 해당 커밋 메시지), 스펙 WP 머리글의 갭 목록.
 
 라운드 3의 N은 커밋 제목에 N1–N8만 쓰였다(N3-1…N3-8). 라운드 6의 N3(=V5-G10, 커밋 리워드)은 세션 소유자 작업이라 커밋 제목에 없다.
 
@@ -305,3 +315,14 @@ P14: Gaps를 제목 괄호에만 적은 커밋(예: `(Z1-Z5; Gaps: G7, 신규)`)
 | aa0afa7 | 8 | P8 | Gaps: G8, G34 | body | fix(servers): P8 api-serve file endpoints 404/400 for missing files and folders; non-object review bodies, non-media preview, cut-off uploads; every error-table row tested (P8; Gaps: G8, G34) |
 | c19738e | 8 | P12 | Gaps: 신규(스펙 외) | body | docs(qa): P12 traceability table regenerated on aa0afa7 — covers up to the parent of this commit (P12; Gaps: 신규) |
 | 1b8f2b1 | 8 | Z2 | Gaps: 신규(스펙 외) | subject | fix(cli): Korean usage placeholders and quoted echoed input in usage errors (Z2 leftover, edge8; Gaps: 신규) |
+| d64923b | 8 | P12 | Gaps: 신규(스펙 외) | subject | docs(qa): traceability table regenerated (P12; Gaps: 신규) |
+| 187dbd7 | 8 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md regenerated on d64923b (WP-J; Gaps: G26, G27, G28) |
+| 614d1cb | 9 | R9-1 | Gaps: G30, G34 | subject | fix(rows): R9-1 row identity is the container/member fields only; a real path escapes every ':' and '\' (R9-1; Gaps: G30, G34) |
+| cb8dd1d | 9 | R9-2 | Gaps: G12, G32, G34 | subject | fix(scan): R9-2 flat --allow-symlinks subfolder count uses the P3 walker rules — each folder once, no ancestor links, deterministic (R9-2; Gaps: G12, G32, G34) |
+| aa2b705 | 9 | R9-3 | Gaps: G8, G34 | subject | fix(api): R9-3 stream endpoints validate every input before the stream starts — 400/403 JSON, never 200 + an SSE error (R9-3; Gaps: G8, G34) |
+| 63ea0a1 | 9 | R9-4, R9-5 | Gaps: G31, G7 | subject | fix(cli): R9-4 every output-folder option is kept out of the examined folder; R9-5 feedback labels with a BOM or a cut-off line (R9-4, R9-5; Gaps: G31, G7) |
+| 4b2708a | 9 | R9-6 | Gaps: 신규(스펙 외) | subject | fix(text): R9-6 the English detector reads key=value, colon and hash pieces, inflections, Korean endings and compounds of conclusion words (R9-6; Gaps: 신규) |
+| ada58f7 | 9 | R9-7 | Gaps: 신규(스펙 외) | subject | fix(cli): R9-7 Korean positional placeholders and --install <묶음 폴더>; echoed input shows newlines and control characters as escapes (R9-7; Gaps: 신규) |
+| 4ef3b62 | 9 | R9-8 | Gaps: G8; 신규(스펙 외) | subject | docs(service): R9-8 the endpoint tables list exactly the routes each server has; empty /api/analyze/text is 400 (R9-8; Gaps: G8, 신규) |
+| 6919550 | 9 | R9-9 | Gaps: G30, G31 | subject | fix(report): R9-9 the signed web report records scan_root (relative to its read root) and every rendering prints it in the header (R9-9; Gaps: G30, G31) |
+| d2036db | 9 | R9-10 | Gaps: 신규(스펙 외) | subject | fix(qa): R9-10 build_traceability_commits --check fails when anything but one table-only regeneration commit follows the table (R9-10; Gaps: 신규) |
