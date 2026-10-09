@@ -71,9 +71,15 @@ SCAN_JSON_SCHEMA_VERSION = 2
 TOOL_VERSION = "0.1.0"  # kept in sync with pyproject version
 DEFAULT_MAX_FILES = 1000
 DEFAULT_TEXT_BYTES = 64 * 1024
-# D10: reason on the row of a symlink found in a scanned folder.
-# N13: Korean, not the option identifier "(allow_symlinks=false)".
-SYMLINK_SKIP_REASON = "심볼릭 링크 — 링크를 따라가지 않으므로 분석하지 않았습니다(심볼릭 링크 허용 안 함)"
+# D10/N13/X3: reasons on the rows of symlinks and non-regular files found in
+# a scanned folder — defined in scan_cache (the walker), re-exported here.
+from .scan_cache import (  # noqa: E402, F401 - re-exported
+    NOT_REGULAR_FILE_REASON,
+    SYMLINK_DANGLING_REASON,
+    SYMLINK_LOOP_REASON,
+    SYMLINK_SKIP_REASON,
+    count_subfolders,
+)
 # D9: rejected archive members listed one coverage entry each, up to this
 # many per container; the rest are summarized in one entry with the count.
 MAX_ARCHIVE_REJECTION_ENTRIES = 100
@@ -215,11 +221,12 @@ def scan_directory(
     paths: list[Path] = []
     capped = False
     iter_errors: list[tuple[Path, OSError]] = []
-    symlinks: list[Path] = []
+    symlinks: list[Path | tuple[Path, str]] = []
     for path in _iter_files(
         root, recursive=recursive, allow_symlinks=allow_symlinks,
         on_error=lambda p, e: iter_errors.append((p, e)),
         on_symlink=symlinks.append,
+        on_skip=lambda p, reason: symlinks.append((p, reason)),
     ):
         if len(paths) >= max_files:
             capped = True
@@ -227,7 +234,7 @@ def scan_directory(
         paths.append(path)
     return scan_paths(
         paths, root=root, capped=capped, iter_errors=iter_errors, symlinks=symlinks,
-        subfolders_skipped=0 if recursive else count_subfolders(root), on_plan=on_plan,
+        subfolders_skipped=0 if recursive else count_subfolders(root, follow_links=allow_symlinks), on_plan=on_plan,
         text_bytes=text_bytes, metadata_bytes=metadata_bytes,
         pixel_mode=pixel_mode, pixel_max_side=pixel_max_side,
         heatmaps=heatmaps, heatmap_dir=heatmap_dir, model_path=model_path,
@@ -281,26 +288,6 @@ def _folder_error_reason(exc: OSError) -> str:
     return failure_reason(exc)
 
 
-def count_subfolders(root: Path) -> int:
-    """Subfolders directly under ``root`` that a non-recursive scan does not enter (N8).
-
-    A symlinked folder is not counted — it is reported as a skipped
-    symlink row instead (D10).
-    """
-    count = 0
-    try:
-        entries = list(root.iterdir())
-    except OSError:
-        return 0
-    for entry in entries:
-        try:
-            if entry.is_dir() and not entry.is_symlink():
-                count += 1
-        except OSError:
-            continue
-    return count
-
-
 class _ProgressReporter:
     """Thread-safe per-row progress counter around a ScanProgress callback.
 
@@ -335,7 +322,7 @@ def scan_paths(
     root: Path,
     capped: bool = False,
     iter_errors: list[tuple[Path, OSError]] | None = None,
-    symlinks: list[Path] | None = None,
+    symlinks: list[Path | tuple[Path, str]] | None = None,
     text_bytes: int = DEFAULT_TEXT_BYTES,
     metadata_bytes: int = DEFAULT_METADATA_BYTES,
     pixel_mode: str = "off",
@@ -385,7 +372,7 @@ def _scan_paths(
     root: Path,
     capped: bool,
     iter_errors: list[tuple[Path, OSError]] | None,
-    symlinks: list[Path] | None,
+    symlinks: list[Path | tuple[Path, str]] | None,
     text_bytes: int,
     metadata_bytes: int,
     pixel_mode: str,
@@ -478,11 +465,14 @@ def _scan_paths(
                 ))
             # D10: a symlink in the evidence folder is listed (never followed)
             # so the report accounts for every directory entry it was given.
-            for link in symlinks:
+            # X3: an entry the walker could not follow (broken/circular link,
+            # FIFO/device) comes with its own reason.
+            for entry in symlinks:
+                link, reason = entry if isinstance(entry, tuple) else (entry, SYMLINK_SKIP_REASON)
                 extra.append(ScanItem(
                     _display_path(link, root=root), link.name,
                     "unknown", "skipped", 0,
-                    error=SYMLINK_SKIP_REASON,
+                    error=reason,
                 ))
             for row in extra:
                 report(row)

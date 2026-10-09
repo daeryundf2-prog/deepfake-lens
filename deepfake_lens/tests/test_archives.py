@@ -560,6 +560,58 @@ class RejectedMemberRecordTests(unittest.TestCase):
                 self.assertEqual(summary.skipped, 2 if recursive else 1)
                 self.assertFalse(any("secret.txt" in path for path in by_path))
 
+    def test_allowed_symlinks_never_vanish(self) -> None:
+        """X3: with allow_symlinks a broken, self-referencing or circular link is a
+        skipped row with its reason; a linked folder is followed by a recursive scan
+        and counted as a skipped subfolder by a flat one — never "(심볼릭 링크 허용 안 함)"."""
+        import os
+
+        from deepfake_lens.core import (
+            NOT_REGULAR_FILE_REASON,
+            SYMLINK_DANGLING_REASON,
+            SYMLINK_LOOP_REASON,
+            SYMLINK_SKIP_REASON,
+        )
+
+        folder = self.root / "symcase"
+        (folder / "d" / "e").mkdir(parents=True)
+        (folder / "real.txt").write_text("실제 파일 내용입니다.", encoding="utf-8")
+        (folder / "d" / "n.txt").write_text("하위 폴더 파일입니다.", encoding="utf-8")
+        try:
+            os.symlink("nope.txt", folder / "dangling.txt")
+            os.symlink("self.txt", folder / "self.txt")
+            os.symlink("b.txt", folder / "a.txt")
+            os.symlink("a.txt", folder / "b.txt")
+            os.symlink("real.txt", folder / "good.txt")
+            os.symlink("d", folder / "dlink")
+            os.symlink("..", folder / "d" / "e" / "up")
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks not permitted on this platform")
+        fifo = hasattr(os, "mkfifo")
+        if fifo:
+            os.mkfifo(folder / "pipe.txt")
+        loops = {"self.txt", "a.txt", "b.txt"}
+        for recursive in (False, True):
+            with self.subTest(recursive=recursive):
+                summary, items = scan_directory(folder, recursive=recursive, allow_symlinks=True)
+                by_path = {item.path: item for item in items}
+                self.assertEqual(by_path["dangling.txt"].error, SYMLINK_DANGLING_REASON)
+                for name in loops:
+                    self.assertEqual((by_path[name].status, by_path[name].error), ("skipped", SYMLINK_LOOP_REASON))
+                self.assertEqual(by_path["good.txt"].status, "analyzed")
+                if fifo:
+                    self.assertEqual((by_path["pipe.txt"].status, by_path["pipe.txt"].error), ("skipped", NOT_REGULAR_FILE_REASON))
+                self.assertFalse(any(item.error == SYMLINK_SKIP_REASON for item in items))
+                if recursive:
+                    self.assertEqual(by_path["dlink/n.txt"].status, "analyzed")
+                    self.assertEqual(by_path["d/e/up"].error, SYMLINK_LOOP_REASON)
+                    self.assertEqual(summary.subfolders_skipped, 0)
+                else:
+                    self.assertNotIn("dlink", by_path)
+                    self.assertEqual(summary.subfolders_skipped, 2)  # d and the linked dlink
+                self.assertEqual(summary.total, len(items))
+                self.assertEqual(summary.skipped, 4 + int(fifo) + (2 if recursive else 0))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -131,7 +131,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     scan_parser.add_argument("--center", type=str, default="디지털포렌식 감정센터", help="법원 제출 문서에 적을 감정센터 이름")
     scan_parser.add_argument("--hash-db", type=Path, help="반복 검사 사이에 중복 판정용 해시를 보관할 파일")
     scan_parser.add_argument("--max-file-bytes", type=int, help="이 크기(바이트)보다 큰 파일은 건너뜀(건너뛴 행으로 기록)")
-    scan_parser.add_argument("--allow-symlinks", action="store_true", help="심볼릭 링크 파일을 따라가 분석(기본은 따라가지 않고 건너뜀 행으로 기록)")
+    scan_parser.add_argument("--allow-symlinks", action="store_true", help="심볼릭 링크를 따라가 분석 — 링크된 폴더는 --recursive일 때 들어감; 깨진·순환 링크는 사유와 함께 건너뜀 행(기본은 따라가지 않고 건너뜀 행으로 기록)")
     scan_parser.add_argument("--progress", action="store_true", help="진행 상황을 표준 오류로 간단히 출력")
     scan_parser.add_argument("--html-out", type=Path, help="HTML 보고서 저장")
     scan_parser.add_argument("--pdf-out", type=Path, help="한국어 PDF 보고서 저장(감정 PDF와 같은 렌더러, pymupdf 필요 — 없으면 검사 전에 종료 코드 2로 중단)")

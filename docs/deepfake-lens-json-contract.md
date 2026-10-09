@@ -120,6 +120,15 @@ always `0` invited old-contract readings. They remain readable as
   and is listed as its own row: `kind: "unknown"`, `status: "skipped"`,
   `result: null`, `error` starting `심볼릭 링크` (D10); it counts in
   `summary.skipped`.
+- With `--allow-symlinks` (X3) a link to a file is analyzed under the link's
+  own path; a link to a folder is followed by a `--recursive` scan (its files
+  are listed as `<link>/…`) and counted in `summary.subfolders_skipped` by a
+  flat one. A link that cannot be followed is still a `skipped` row:
+  `error` = `건너뜀: 깨진 심볼릭 링크 — 링크 대상이 없습니다` (missing
+  target) or `건너뜀: 순환 링크 — 링크가 자기 자신이나 상위 폴더를 가리킵니다`
+  (self-loop, circular chain, a link back to a folder on the current path).
+- A FIFO, socket or device node in a scanned folder is never opened; it is a
+  `skipped` row with `error` = `건너뜀: 일반 파일이 아닙니다(파이프·소켓·장치 파일) — 열지 않았습니다` (X3).
 
 ## Result fields — contract v2 (stable)
 

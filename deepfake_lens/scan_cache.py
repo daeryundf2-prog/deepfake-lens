@@ -36,6 +36,43 @@ def _scan_order_key(root: Path) -> Callable[[Path], str]:
     return key
 
 
+# D10/N13: reason on the row of a symlink found in a scanned folder when
+# symlinks are not allowed (the default).
+SYMLINK_SKIP_REASON = "심볼릭 링크 — 링크를 따라가지 않으므로 분석하지 않았습니다(심볼릭 링크 허용 안 함)"
+# X3 (round 7): with --allow-symlinks a link is followed; one that cannot be
+# followed is still a row with its reason (it used to vanish from the rows
+# and from summary.total).
+SYMLINK_DANGLING_REASON = "건너뜀: 깨진 심볼릭 링크 — 링크 대상이 없습니다"
+SYMLINK_LOOP_REASON = "건너뜀: 순환 링크 — 링크가 자기 자신이나 상위 폴더를 가리킵니다"
+SYMLINK_UNREADABLE_REASON = "건너뜀: 심볼릭 링크 대상을 읽을 수 없습니다({reason})"
+# X3: a FIFO, socket or device node in the evidence folder is listed, never
+# opened (reading a FIFO blocks) and never dropped silently.
+NOT_REGULAR_FILE_REASON = "건너뜀: 일반 파일이 아닙니다(파이프·소켓·장치 파일) — 열지 않았습니다"
+
+
+def symlink_problem(path: Path) -> str | None:
+    """Why an allowed symlink cannot be followed (X3), or None when its target exists.
+
+    A self-referencing or circular chain is "순환 링크", a missing target
+    "깨진 심볼릭 링크"; any other error names its reason.
+    """
+    import errno
+
+    try:
+        path.resolve(strict=True)
+    except RuntimeError:  # Python < 3.13 reports a symlink loop this way
+        return SYMLINK_LOOP_REASON
+    except FileNotFoundError:
+        return SYMLINK_DANGLING_REASON
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            return SYMLINK_LOOP_REASON
+        if exc.errno == errno.ENOENT:
+            return SYMLINK_DANGLING_REASON
+        return SYMLINK_UNREADABLE_REASON.format(reason=exc.strerror or type(exc).__name__)
+    return None
+
+
 def _iter_files(
     root: Path,
     *,
@@ -43,6 +80,7 @@ def _iter_files(
     allow_symlinks: bool = False,
     on_error: Callable[[Path, OSError], None] | None = None,
     on_symlink: Callable[[Path], None] | None = None,
+    on_skip: Callable[[Path, str], None] | None = None,
 ) -> Iterable[Path]:
     """Iterate scan targets; unreadable directories skip, not kill.
 
@@ -50,27 +88,36 @@ def _iter_files(
     reported through ``on_symlink`` so the scan can list it as skipped
     (D10) instead of dropping it from the report silently.
 
-    ``rglob``/``iterdir`` raise lazily mid-iteration — one permission-
-    denied subdirectory must not abort a multi-hour evidence scan.
+    X3: with ``allow_symlinks`` a link to a file is yielded, a link to a
+    folder is followed by a recursive walk (not entered by a flat one — it
+    is a subfolder, counted by :func:`count_subfolders`), and a link that
+    cannot be followed — missing target, a self-loop or a link back to a
+    folder on the current path — is reported through ``on_skip(path,
+    reason)``. A FIFO, socket or device node is reported the same way
+    (never opened). Nothing in the folder is dropped without a row.
+
+    Directory read errors go to ``on_error`` — one permission-denied
+    subdirectory must not abort a multi-hour evidence scan.
 
     Order is deterministic (G32, W1): the whole walk is collected first and
     yielded in one global sort by the POSIX relative path string
     (:func:`_scan_order_key`), the same on every OS. The OS directory order
     (creation order on ext4, hash order elsewhere) used to decide which
     files a max-files cap kept and which copy dedupe called the original.
-    Symlinks are reported through ``on_symlink`` in the same order, before
+    Symlinks and skipped entries are reported in the same order, before
     the first file is yielded.
     """
+    import os
+
     key = _scan_order_key(root)
     found: list[Path] = []
     links: list[Path] = []
+    skipped: list[tuple[Path, str]] = []
 
-    def _consider(path: Path) -> None:
+    def _file(path: Path) -> None:
         try:
-            if path.is_symlink() and not allow_symlinks:
-                links.append(path)
-                return
             if not path.is_file():
+                skipped.append((path, NOT_REGULAR_FILE_REASON))
                 return
         except OSError:
             return
@@ -78,35 +125,83 @@ def _iter_files(
             return
         found.append(path)
 
-    if recursive:
-        def _walk_error(exc: OSError) -> None:
-            if on_error is not None:
-                on_error(Path(getattr(exc, "filename", None) or root), exc)
-        import os
-        for dirpath, dirs, files in os.walk(root, onerror=_walk_error):
-            # Descend in a fixed order so on_error callbacks are reproducible
-            # too; the yielded order comes from the global sort below.
-            dirs.sort()
-            # os.walk lists a symlinked directory in ``dirs`` and never
-            # descends into it — report it like a symlinked file (D10).
-            for name in dirs:
-                if (Path(dirpath) / name).is_symlink():
-                    links.append(Path(dirpath) / name)
-            for name in files:
-                _consider(Path(dirpath) / name)
-    else:
+    def _walk(folder: Path, ancestors: frozenset[str]) -> None:
         try:
-            entries = list(root.iterdir())
+            with os.scandir(folder) as handle:
+                entries = sorted(handle, key=lambda entry: entry.name)
         except OSError as exc:
             if on_error is not None:
-                on_error(root, exc)
+                on_error(folder, exc)
             return
-        for path in entries:
-            _consider(path)
+        for entry in entries:
+            path = Path(entry.path)
+            try:
+                is_link = entry.is_symlink()
+                is_dir = not is_link and entry.is_dir(follow_symlinks=False)
+            except OSError:
+                continue
+            if is_dir:
+                if recursive:
+                    _walk(path, ancestors | {os.path.realpath(path)})
+                continue
+            if not is_link:
+                _file(path)
+                continue
+            if not allow_symlinks:
+                links.append(path)
+                continue
+            problem = symlink_problem(path)
+            if problem is not None:
+                skipped.append((path, problem))
+                continue
+            try:
+                target_is_dir = path.is_dir()
+            except OSError:
+                target_is_dir = False
+            if not target_is_dir:
+                _file(path)
+                continue
+            if not recursive:
+                continue  # a subfolder of a flat scan (count_subfolders counts it)
+            real = os.path.realpath(path)
+            if real in ancestors:
+                skipped.append((path, SYMLINK_LOOP_REASON))
+                continue
+            _walk(path, ancestors | {real})
+
+    _walk(root, frozenset({os.path.realpath(root)}))
     if on_symlink is not None:
         for link in sorted(links, key=key):
             on_symlink(link)
+    if on_skip is not None:
+        for path, reason in sorted(skipped, key=lambda pair: key(pair[0])):
+            on_skip(path, reason)
     yield from sorted(found, key=key)
+
+
+def count_subfolders(root: Path, *, follow_links: bool = False) -> int:
+    """Subfolders directly under ``root`` that a non-recursive scan does not enter (N8).
+
+    A symlinked folder is not counted unless ``follow_links`` (X3:
+    --allow-symlinks) — without it, it is reported as a skipped symlink row
+    instead (D10). A link that cannot be followed is never counted (it has
+    its own row).
+    """
+    count = 0
+    try:
+        entries = list(root.iterdir())
+    except OSError:
+        return 0
+    for entry in entries:
+        try:
+            if entry.is_symlink():
+                if follow_links and symlink_problem(entry) is None and entry.is_dir():
+                    count += 1
+            elif entry.is_dir():
+                count += 1
+        except OSError:
+            continue
+    return count
 
 
 def _read_prefix(path: Path, limit: int) -> bytes:
