@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "d2036db29914fbee64a6b99377aa77328fdd0b58",
+    "head": "3e256fcae28605232fe61f52a89333128bcc7d2b",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -1857,7 +1857,9 @@
       "gaps": [],
       "new": "커밋 추적성(공통 규칙 1) — 갭 목록 밖",
       "commits": [
-        "d2036db"
+        "d2036db",
+        "b88ef92",
+        "3e256fc"
       ],
       "used_in_commit_subjects": true
     }
@@ -4649,6 +4651,42 @@
       "short": "d2036db",
       "round": "9",
       "subject": "fix(qa): R9-10 build_traceability_commits --check fails when anything but one table-only regeneration commit follows the table (R9-10; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R9-10"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R9-10: 커밋 추적성(공통 규칙 1) — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "b88ef92d15e3a6bd54f4664639cc4356f74ebca7",
+      "short": "b88ef92",
+      "round": "9",
+      "subject": "docs(qa): traceability table regenerated with the round-9 IDs — covers up to the parent of this commit (R9-10; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R9-10"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R9-10: 커밋 추적성(공통 규칙 1) — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "3e256fcae28605232fe61f52a89333128bcc7d2b",
+      "short": "3e256fc",
+      "round": "9",
+      "subject": "fix(qa): generated records may be co-committed; unused imports in scripts (R9-10; Gaps: 신규)",
       "pre_rewrite_subject": null,
       "ids": [
         "R9-10"
