@@ -48,8 +48,14 @@ class _StatementFixture(unittest.TestCase):
     """Two scan items (a manipulation verdict and a legacy medium row) with real files."""
 
     def setUp(self) -> None:
+        from unittest import mock
+
         self.tmp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp_dir.name)
+        # N17: hermetic — no operator config file supplies an office identity.
+        config = mock.patch.dict(os.environ, {"DEEPFAKE_LENS_CONFIG": str(self.root / "no-config.json")})
+        config.start()
+        self.addCleanup(config.stop)
 
         sig1 = EvidenceSignal(title="안면 윤곽선 경계면 주파수 단절", detail="라플라시안 주파수 잔차 이상", weight=30)
         res1 = ClassificationResult(
@@ -123,8 +129,9 @@ class EvidenceStatementTest(_StatementFixture):
         self.assertEqual(len(statement.entries), 2)
         self.assertEqual(statement.entries[0].exhibit_no, "갑 제1호증")
         self.assertEqual(statement.entries[1].exhibit_no, "갑 제2호증")
-        self.assertIn("법무법인(유한) 대륜", statement.law_firm)
-        self.assertEqual(statement.contact, "02-780-1128")
+        # N17: no built-in office identity (was "법무법인(유한) 대륜" / "02-780-1128").
+        self.assertEqual(statement.law_firm, "")
+        self.assertEqual(statement.contact, "")
 
         # Verify statutory mapping
         statutes = statement.entries[0].statutes
@@ -135,12 +142,14 @@ class EvidenceStatementTest(_StatementFixture):
         self.assertEqual(len(statement.entries[0].sha256), 64)
 
     def test_markdown_generation(self) -> None:
-        statement = build_evidence_statement(self.items)
+        # N17: the office identity is the caller's (was the built-in "02-780-1128").
+        statement = build_evidence_statement(self.items, law_firm="법무법인 예시", contact="02-0000-0000")
         md = statement.to_markdown()
         self.assertIn("# 증  거  설  명  서", md)
         self.assertIn("| 호증 | 서증(증거)의 명칭 |", md)
         self.assertIn("갑 제1호증", md)
-        self.assertIn("02-780-1128", md)
+        self.assertIn("02-0000-0000", md)
+        self.assertIn("법무법인 예시 디지털포렌식 감정센터", md)
 
         md_path = self.root / "statement.md"
         write_evidence_statement_markdown(md_path, statement)

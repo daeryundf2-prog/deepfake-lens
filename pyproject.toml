@@ -142,6 +142,8 @@ files = [
     "deepfake_lens/layer_diagnostic.py",
     "deepfake_lens/cli_standalone.py",
     "deepfake_lens/cli_inputs.py",
+    "deepfake_lens/office_config.py",
+    "deepfake_lens/tests/test_office_config.py",
     "deepfake_lens/tests/test_cli_inputs.py",
     "deepfake_lens/tests/test_standalone_contract.py",
     "deepfake_lens/checks.py",

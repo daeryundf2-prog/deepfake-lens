@@ -88,7 +88,9 @@ class ForensicPdfReportTest(unittest.TestCase):
             doc = pymupdf.open(str(out_pdf))
             self.assertGreaterEqual(doc.page_count, 1)
             text = doc[0].get_text()
-            self.assertIn("대륜", text)
+            # N17: no built-in law firm in the header (was "법무법인(유한) 대륜 …").
+            self.assertNotIn("대륜", text)
+            self.assertIn("디지털포렌식 감정센터", text)
             self.assertIn("갑 제1호증", text)
             self.assertIn("SHA-256", text)
 

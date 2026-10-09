@@ -1242,8 +1242,9 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
                     plaintiff=str(data.get("plaintiff") or "(의뢰사 상호명 입력) 귀하"),
                     defendant=str(data.get("defendant") or "(피고/피의자 성명 입력)"),
                     court=str(data.get("court") or "○○지방법원 귀중"),
-                    law_firm=str(data.get("law_firm") or "법무법인(유한) 대륜"),
-                    contact=str(data.get("contact") or ""),
+                    # N17: the request's value, else the operator config, else blank.
+                    law_firm=str(data.get("law_firm") or "") or None,
+                    contact=str(data.get("contact") or "") or None,
                     center=str(data.get("center") or "디지털포렌식 감정센터"),
                     thresholds=thresholds,
                     coverage=coverage,
@@ -1265,6 +1266,8 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
                     resolve_path=_resolve_item_path,
                     allow_path=_path_allowed,
                     signed_report=signed,
+                    law_firm=str(data.get("law_firm") or "") or None,  # N17
+                    contact=str(data.get("contact") or "") or None,
                 )
             except PdfDependencyMissing:
                 # B8: no English Latin-1 fallback PDF — a Korean error (HTTP 501).

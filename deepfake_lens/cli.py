@@ -1086,6 +1086,8 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             thresholds=thresholds,
             coverage=scan_coverage,
             exhibit_no=getattr(args, "exhibit_no", "갑 제        호증"),
+            law_firm=getattr(args, "law_firm", None),  # N17
+            contact=getattr(args, "contact", None),
         )
     if getattr(args, "forensic_pdf_out", None):
         write_forensic_pdf_report(
@@ -1096,6 +1098,8 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             exhibit_no=getattr(args, "exhibit_no", "갑 제        호증"),
             thresholds=thresholds,
             coverage=scan_coverage,
+            law_firm=getattr(args, "law_firm", None),  # N17
+            contact=getattr(args, "contact", None),
         )
     if getattr(args, "evidence_statement_out", None) or getattr(args, "evidence_statement_pdf_out", None):
         stmt = build_evidence_statement(
@@ -1105,8 +1109,8 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             plaintiff=getattr(args, "plaintiff", "(의뢰사 상호명 입력) 귀하"),
             defendant=getattr(args, "defendant", "(피고/피의자 성명 입력)"),
             court=getattr(args, "court", "○○지방법원 귀중"),
-            law_firm=getattr(args, "law_firm", "법무법인(유한) 대륜"),
-            contact=getattr(args, "contact", "02-780-1128"),
+            law_firm=getattr(args, "law_firm", None),  # N17: flag, else config, else blank
+            contact=getattr(args, "contact", None),
             center=getattr(args, "center", "디지털포렌식 감정센터"),
             thresholds=_thresholds_json(thresholds),
             coverage=scan_coverage,

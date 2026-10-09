@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from .core import ScanItem
+from .office_config import DEFAULT_CENTER, office_identity
 from .result_text import (
     ARCHIVE_MEMBER_SEPARATOR,
     HASH_UNAVAILABLE_ACCESS,
@@ -43,7 +44,7 @@ from .result_text import (
     evidence_groups,
     is_symlink_row,
     row_label,
-    threshold_provenance_line,
+    threshold_provenance_lines,
 )
 from .result_types import VERDICT_LABELS, CoverageStatus, EvidenceDirection, EvidenceKind, EvidenceStrength, Grade, Verdict, is_verdict_row, status_label
 from .signing import resolve_report_key, sign_report
@@ -81,9 +82,11 @@ class EvidenceStatement:
     court: str
     entries: list[EvidenceStatementEntry]
     created_at: str
-    law_firm: str = "법무법인(유한) 대륜"
-    contact: str = "02-780-1128"
-    center: str = "디지털포렌식 감정센터"
+    # N17: no built-in office identity — blank unless the operator sets it
+    # (--law-firm/--contact, the request, or ~/.deepfake-lens/config.json).
+    law_firm: str = ""
+    contact: str = ""
+    center: str = DEFAULT_CENTER
     provenance_note: str = ""
     # The fixed legal limitation, set when any entry is a text result.
     reference_note: str = ""
@@ -132,7 +135,7 @@ class EvidenceStatement:
             lines.extend(["### [분석 프로비넌스]", self.provenance_note, ""])
         lines.extend([
             f"**제출일자**: {self.created_at}",
-            f"**원고(고소인) 소송대리인**: {self.law_firm} {self.center}",
+            f"**원고(고소인) 소송대리인**: {f'{self.law_firm} {self.center}'.strip()}",
             f"**대표전화**: {self.contact}",
             f"**제출처**: **{self.court}**",
         ])
@@ -333,9 +336,9 @@ def build_evidence_statement(
     defendant: str = "(피고/피의자 성명 입력)",
     court: str = "○○지방법원 귀중",
     exhibit_prefix: str = "갑 제",
-    law_firm: str = "법무법인(유한) 대륜",
-    contact: str = "02-780-1128",
-    center: str = "디지털포렌식 감정센터",
+    law_firm: str | None = None,
+    contact: str | None = None,
+    center: str = DEFAULT_CENTER,
     thresholds: object | None = None,
     coverage: dict[str, object] | None = None,
     scan_root: Path | str | None = None,
@@ -344,8 +347,11 @@ def build_evidence_statement(
 
     ``scan_root`` is the folder the items were scanned from; it is only
     used to locate a file whose row carries no ``sha256`` (see
-    :func:`_item_sha256`).
+    :func:`_item_sha256`). ``law_firm`` / ``contact`` left as None come from
+    the operator config (``office_config``) and are blank without one (N17).
     """
+    office = office_identity(law_firm, contact, center=center)
+    law_firm, contact, center = office.law_firm, office.contact, office.center
     entries: list[EvidenceStatementEntry] = []
     now_date = datetime.now().strftime("%Y. %m. %d.")
     # S1: exhibit number of every row, so a container can cite its members.
@@ -371,7 +377,7 @@ def build_evidence_statement(
         exhibit_no = f"{exhibit_prefix}{idx}호증"
         # S1: an archive member is named "<container>::<member>", never its bare file name.
         doc_name = f"디지털 증거 파일 ({row_label(item.path)}) 및 AI 스크리닝 데이터"
-        author_date = f"{law_firm}\n{now_date}"
+        author_date = f"{law_firm}\n{now_date}" if law_firm else now_date
 
         statutes = _determine_statutes(score, signals, item.kind, band_value)
 
@@ -430,7 +436,7 @@ def build_evidence_statement(
     if thresholds is not None:
         # S6: the same line as the CLI header / HTML / forensic PDF,
         # including the in-sample caveat (G28).
-        prov_lines.append(threshold_provenance_line(thresholds))
+        prov_lines.extend(threshold_provenance_lines(thresholds))  # N17: caveat on its own line
     provenance_note = "\n".join(prov_lines)
 
     return EvidenceStatement(
@@ -650,7 +656,7 @@ def _render_statement_pdf(pymupdf: Any, statement: EvidenceStatement, body: dict
     # Signoff block, kept together on one page.
     signoff = [
         (statement.created_at, 10.0, (0.1, 0.1, 0.1)),
-        (f"원고(고소인) 소송대리인  {statement.law_firm}", 10.5, (0.08, 0.15, 0.32)),
+        (f"원고(고소인) 소송대리인  {statement.law_firm}".rstrip(), 10.5, (0.08, 0.15, 0.32)),
         ("담당변호사 : ○ ○ ○,  ○ ○ ○", 9.5, (0.2, 0.2, 0.2)),
         ("디지털포렌식센터 수석감정관 : ○ ○ ○  (인)", 9.5, (0.2, 0.2, 0.2)),
     ]

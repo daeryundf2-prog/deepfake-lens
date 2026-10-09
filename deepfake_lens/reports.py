@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from .core import TOOL_VERSION, BatchScanSummary, ScanItem
 from .evaluation_metrics import format_ci
+from .office_config import OfficeIdentity, office_identity
 from .result_text import (
     HASH_UNAVAILABLE_ACCESS,
     HASH_UNAVAILABLE_MEMBER,
@@ -24,6 +25,7 @@ from .result_text import (
     leading_limitations,
     summary_line,
     threshold_provenance_line,
+    threshold_provenance_lines,
     verdict_heading,
 )
 from .result_types import EVIDENCE_KIND_LABELS, VERDICT_LABELS, CoverageStatus, Grade, Verdict, check_label, is_verdict_row, status_label
@@ -211,7 +213,7 @@ def write_html_report(
   <p>{escape(summary_line(summary))}</p>
   <p class="note">결론은 세 가지뿐입니다 — 조작·생성 근거 있음 / 원본성 근거 있음 / 판단 불가. 결정적 근거(메타데이터·C2PA)만 결론을 내리고, 통계적(모델)·어휘적(키워드) 근거는 보정 전까지 참고로만 표시합니다. 검사가 실패한 파일은 판단 불가로 남습니다.</p>
   {legal_note}
-  <p class="note">{escape(_threshold_provenance_line(thresholds))}</p>
+  <p class="note">{"<br>".join(escape(line) for line in threshold_provenance_lines(thresholds))}</p>
   <table>
     <thead><tr><th>결론</th><th>근거(종류별)</th><th>검사 범위(미실행·실패)</th><th>파일</th><th>참고 신호</th><th>히트맵</th></tr></thead>
     <tbody>{rows}</tbody>
@@ -278,6 +280,8 @@ def write_pdf_report(
     coverage: dict[str, object] | None = None,
     exhibit_no: str = "갑 제        호증",
     signed_report: dict[str, object] | None = None,
+    law_firm: str | None = None,
+    contact: str | None = None,
 ) -> None:
     """``scan --pdf-out``: the Korean forensic PDF renderer (B8).
 
@@ -292,6 +296,8 @@ def write_pdf_report(
         thresholds=thresholds,
         coverage=coverage,
         signed_report=signed_report,
+        law_firm=law_firm,
+        contact=contact,
     )
 
 
@@ -307,9 +313,15 @@ def write_forensic_pdf_report(
     allow_path: "Callable[[str], bool] | None" = None,
     resolve_path: "Callable[[str], Path | None] | None" = None,
     signed_report: dict[str, object] | None = None,
+    law_firm: str | None = None,
+    contact: str | None = None,
 ) -> None:
     """Generate a court-admissible forensic PDF report with ECFS exhibit stamp,
-    SHA-256 evidence integrity hashes, and Daeryun Law Firm forensic signoff.
+    SHA-256 evidence integrity hashes and the examiner's office signoff.
+
+    N17: the office name and phone come from ``law_firm`` / ``contact`` or the
+    operator config (:mod:`deepfake_lens.office_config`) — blank otherwise,
+    never a built-in firm.
 
     The signature block (G30) states the HMAC signature and the signed body's
     SHA-256, or "서명 없음" when no report key is configured.
@@ -334,13 +346,12 @@ def write_forensic_pdf_report(
         pymupdf, summary, items,
         redact_paths=redact_paths, exhibit_no=exhibit_no, thresholds=thresholds, coverage=coverage,
         allow_path=allow_path, resolve_path=resolve_path, signed_report=signed_report,
+        office=office_identity(law_firm, contact),
     ))
 
 
 # Forensic PDF text (G2: every string is measured and wrapped by pdf_layout —
 # no fixed x offsets, no character cuts).
-FIRM_NAME = "법무법인(유한) 대륜 디지털포렌식 감정센터"
-FIRM_CONTACT = "서울특별시 강남구 테헤란로 114, 역삼빌딩 | 대표전화: 02-780-1128"
 FORENSIC_PDF_TITLE = "디지털 포렌식 AI 감정보고서"
 FORENSIC_TABLE_HEADERS = ("번호", "증거 파일명 및 SHA-256 무결성 해시", "결론", "등급", "근거 종류", "주요 근거/검사 실패")
 # Relative column widths of the evidence table (번호 … 주요 근거).
@@ -363,15 +374,19 @@ def _render_forensic_pdf(
     allow_path: "Callable[[str], bool] | None",
     resolve_path: "Callable[[str], Path | None] | None",
     signed_report: dict[str, object],
+    office: OfficeIdentity,
 ) -> bytes:
     """Lay out the forensic PDF with :class:`pdf_layout.PdfLayout` (G2) and return its bytes."""
     from .pdf_layout import Cell, PdfLayout
 
     header_blue = (0.15, 0.25, 0.45)
+    firm_name = office.header
+    contact_line = f"대표전화: {office.contact}" if office.contact else ""
 
     def page_header(layout: PdfLayout) -> None:
-        layout.text(layout.left, layout.right, FIRM_NAME, 9.0, header_blue, gap=0.5)
-        layout.text(layout.left, layout.right, FIRM_CONTACT, 7.5, (0.5, 0.5, 0.5), gap=2.0)
+        layout.text(layout.left, layout.right, firm_name, 9.0, header_blue, gap=0.5)
+        if contact_line:
+            layout.text(layout.left, layout.right, contact_line, 7.5, (0.5, 0.5, 0.5), gap=2.0)
         layout.page.draw_line(pymupdf.Point(layout.left, layout.y), pymupdf.Point(layout.right, layout.y), color=(0.85, 0.88, 0.92), width=0.8)
         layout.y += 6.0
 
@@ -423,7 +438,8 @@ def _render_forensic_pdf(
         (f"감정 일시: {now_str} (KST)  |  분석 엔진: Deepfake Lens v{TOOL_VERSION}", 8.5, (0.2, 0.2, 0.2)),
         (result_line, 8.5, (0.1, 0.2, 0.4)),
         (integrity_line, 8.0, (0.45, 0.45, 0.45)),
-        (_threshold_provenance_ko(thresholds), 7.5, (0.45, 0.45, 0.45)),
+        # N17: one PDF line per provenance line (the in-sample caveat apart).
+        *((line, 7.5, (0.45, 0.45, 0.45)) for line in threshold_provenance_lines(thresholds)),
     ])
 
     columns = layout.columns(FORENSIC_TABLE_WEIGHTS)
@@ -485,11 +501,11 @@ def _render_forensic_pdf(
 
     _wa = coverage.get("weights_available", 0) if coverage else 0
     if isinstance(_wa, (int, float)) and _wa > 0:
-        engine_text = f"사법절차 적격성 고지: 본 감정서는 {FIRM_NAME}의 뉴럴 앙상블 + 로컬 휴리스틱 분석에 따른 스크리닝 결과입니다."
+        engine_text = f"사법절차 적격성 고지: 본 감정서는 {firm_name}의 뉴럴 앙상블 + 로컬 휴리스틱 분석에 따른 스크리닝 결과입니다."
     elif coverage is not None:
         engine_text = "사법절차 적격성 고지: 본 감정서는 신경망 가중치 미탑재 상태의 로컬 휴리스틱 분석에 따른 스크리닝 결과입니다 (뉴럴 엔진 미실행)."
     else:
-        engine_text = f"사법절차 적격성 고지: 본 감정서는 {FIRM_NAME}의 로컬 스크리닝 분석 결과입니다."
+        engine_text = f"사법절차 적격성 고지: 본 감정서는 {firm_name}의 로컬 스크리닝 분석 결과입니다."
     if hashed == len(items):
         integrity_text = "무결성 확약: 상기 기재된 증거물 일체는 SHA-256 해시 검증을 필하였으며, 채증·보존 과정에서 위변조되지 않았음을 확인합니다."
     else:
@@ -499,7 +515,7 @@ def _render_forensic_pdf(
         (integrity_text, 7.5, (0.4, 0.4, 0.4)),
     ])
     layout.ensure_space(layout.line_height(9.0) + 4.0)
-    layout.text(layout.left, layout.right, f"{FIRM_NAME} 감정관 (직인생략)", 9.0, header_blue, align=2, gap=6.0)
+    layout.text(layout.left, layout.right, f"{firm_name} 감정관 (직인생략)", 9.0, header_blue, align=2, gap=6.0)
     for line in signature_lines_ko(signed_report):
         layout.text(layout.left, layout.right, line, 6.5, (0.35, 0.35, 0.35), gap=0.5)
 

@@ -84,6 +84,11 @@ class KoreanArgumentParser(argparse.ArgumentParser):
         self.exit(2, f"{self.prog}: 오류: {korean_argparse_error(message)}\n")
 
 
+# N17: no built-in office identity — the flag, else ~/.deepfake-lens/config.json
+# ("law_firm"/"contact"), else blank.
+LAW_FIRM_HELP = "보고서 머리글·서명란의 법무법인(소송대리인) 이름(기본: ~/.deepfake-lens/config.json의 law_firm, 없으면 빈칸)"
+CONTACT_HELP = "보고서 머리글의 대표전화(기본: ~/.deepfake-lens/config.json의 contact, 없으면 빈칸)"
+
 def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.ArgumentParser]]:
     parser = KoreanArgumentParser(
         prog="deepfake-lens",
@@ -121,8 +126,8 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     scan_parser.add_argument("--deep-signals", action="store_true", help="선택형 심층 검사 실행: 이미지 얼굴 조작·인페인팅, 영상 rPPG·아바타·입모양 동기")
     scan_parser.add_argument("--thresholds", type=Path, help=THRESHOLDS_HELP)
     scan_parser.add_argument("--models-dir", type=Path, help="모델 폴더(프로필+가중치). 기본: 패키지 models/ 또는 $DEEPFAKE_LENS_MODELS_DIR")
-    scan_parser.add_argument("--law-firm", type=str, default="법무법인(유한) 대륜", help="법원 제출 문서에 적을 법무법인 이름")
-    scan_parser.add_argument("--contact", type=str, default="02-780-1128", help="법원 제출 문서에 적을 대표전화")
+    scan_parser.add_argument("--law-firm", type=str, default=None, help=LAW_FIRM_HELP)
+    scan_parser.add_argument("--contact", type=str, default=None, help=CONTACT_HELP)
     scan_parser.add_argument("--center", type=str, default="디지털포렌식 감정센터", help="법원 제출 문서에 적을 감정센터 이름")
     scan_parser.add_argument("--hash-db", type=Path, help="반복 검사 사이에 중복 판정용 해시를 보관할 파일")
     scan_parser.add_argument("--max-file-bytes", type=int, help="이 크기(바이트)보다 큰 파일은 건너뜀(건너뛴 행으로 기록)")
@@ -450,8 +455,8 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     evidence_stmt_parser.add_argument("--plaintiff", type=str, default="(의뢰사 상호명 입력) 귀하", help="원고(고소인)")
     evidence_stmt_parser.add_argument("--defendant", type=str, default="(피고/피의자 성명 입력)", help="피고(피고소인)")
     evidence_stmt_parser.add_argument("--court", type=str, default="○○지방법원 귀중", help="제출처(관할법원/수사관서)")
-    evidence_stmt_parser.add_argument("--law-firm", type=str, default="법무법인(유한) 대륜", help="소송대리인 상호(머리글)")
-    evidence_stmt_parser.add_argument("--contact", type=str, default="02-780-1128", help="머리글의 대표전화")
+    evidence_stmt_parser.add_argument("--law-firm", type=str, default=None, help=LAW_FIRM_HELP)
+    evidence_stmt_parser.add_argument("--contact", type=str, default=None, help=CONTACT_HELP)
     evidence_stmt_parser.add_argument("--center", type=str, default="디지털포렌식 감정센터", help="머리글의 감정센터 이름")
     evidence_stmt_parser.add_argument("--pdf-out", type=Path, help="증거설명서 PDF 저장")
     evidence_stmt_parser.add_argument("--md-out", type=Path, help="증거설명서 Markdown 저장")

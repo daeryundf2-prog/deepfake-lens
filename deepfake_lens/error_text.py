@@ -149,7 +149,10 @@ _FRAGMENT_KO: tuple[tuple[re.Pattern[str], str], ...] = tuple(
         (r"Could not parse input (\w+)", r"\1 입력을 해석할 수 없음"),
         (r"\btype is unsupported\b", "지원하지 않는 형식"),
         (r"\b(\w+) out of range\b", r"\1 범위 초과"),
-        (r"File does not exist or is not a regular file \(possibly a pipe\?\)\.?", "파일이 없거나 일반 파일이 아님"),
+        # N17: libsndfile says this for an existing file it cannot decode (a
+        # truncated MP3, an unsupported codec) — the analyzers only open files
+        # that exist (missing inputs are refused before, cli_inputs/N4).
+        (r"File does not exist or is not a regular file \(possibly a pipe\?\)\.?", "오디오 디코드 실패(파일 손상 또는 미지원 코덱)"),
         (r"Error in WAV(?:/W64/RF64)? file\. ([^()]*?)\.?(?=\)|$)", r"WAV 파일 오류(\1)"),
         (r"No '(\w+) ?' chunk marker", r"'\1' 청크 표식 없음"),
         (r"Malformed '(\w+) ?' chunk", r"'\1' 청크 손상"),

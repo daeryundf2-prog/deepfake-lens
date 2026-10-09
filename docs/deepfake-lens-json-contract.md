@@ -279,7 +279,7 @@ Rendered reports (`POST /api/report`, `--html-out`) additionally carry
 (`--md-out`, `--pdf-out`, `POST /api/report?format=evidence`) are backed by
 one signed body: every field of `EvidenceStatement.to_json()` (`case_no`,
 `case_name`, `plaintiff`, `defendant`, `court`, `entries[]` with
-`purpose_of_proof`/`sha256`/`statutes`/`verdict_label`, `created_at`, `law_firm`, `contact`,
+`purpose_of_proof`/`sha256`/`statutes`/`verdict_label`, `created_at`, `law_firm`, `contact` (empty unless set by flag, request or `~/.deepfake-lens/config.json` — N17),
 `center`, `provenance_note`, `reference_note`) plus `"report_type":
 "evidence-statement"` and the four signing fields above, all inside the MAC
 except `signature`/`signature_key_id`. The Markdown and PDF print the

@@ -198,28 +198,40 @@ def is_symlink_row(status: object, error: object) -> bool:
 IN_SAMPLE_CAVEAT = "적합에 쓴 같은 표본에서 평가된 값이라 감정 근거가 아닙니다"
 
 
-def threshold_provenance_line(thresholds: object | None) -> str:
-    """Korean one-line threshold provenance shared by every report (B2, S6).
+def threshold_provenance_lines(thresholds: object | None) -> list[str]:
+    """Korean threshold provenance shared by every report (B2, S6, N17).
 
     Accepts a ThresholdProfile, its ``to_json()`` dict or the scan JSON's
-    ``thresholds`` block (``core._thresholds_json``).
+    ``thresholds`` block (``core._thresholds_json``). N17: an in-sample
+    profile is labelled in-sample — never "측정됨" — and its caveat is a line
+    of its own (the forensic PDF printed "측정됨 … — in-sample(참고): …" on one
+    line, two contradicting states side by side).
     """
     from .calibration import IN_SAMPLE_LABEL
 
     to_json = getattr(thresholds, "to_json", None)
     payload = to_json() if callable(to_json) else (thresholds if isinstance(thresholds, dict) else {})
     if thresholds is None or not isinstance(payload, dict) or payload.get("source") == "builtin_defaults":
-        return "판정 임계값: 내장 기본값(미측정 — 잠정값, 보정 미적용)"
+        return ["판정 임계값: 내장 기본값(미측정 — 잠정값, 보정 미적용)"]
     samples = int(payload.get("samples", 0) or 0)
-    state = "잠정(미검증)" if payload.get("provisional", True) else "측정됨"
+    if payload.get("in_sample"):
+        state = IN_SAMPLE_LABEL  # G28: fitted on the evaluated sample — not a measurement
+    else:
+        state = "잠정(미검증)" if payload.get("provisional", True) else "측정됨"
     version = str(payload.get("version", "") or "").strip()
     fingerprint = str(payload.get("dataset_fingerprint", "") or "")[:16]
     line = f"판정 임계값: 프로필 {version or '버전 미기재'} — {state}, 표본 n={samples}"
     if fingerprint:
         line += f", 코퍼스 지문 {fingerprint}"
+    lines = [line]
     if payload.get("in_sample"):
-        line += f" — {IN_SAMPLE_LABEL}: {IN_SAMPLE_CAVEAT}"  # G28
-    return line
+        lines.append(f"{IN_SAMPLE_LABEL}: {IN_SAMPLE_CAVEAT}")  # G28
+    return lines
+
+
+def threshold_provenance_line(thresholds: object | None) -> str:
+    """:func:`threshold_provenance_lines` joined with newlines (text renderers)."""
+    return "\n".join(threshold_provenance_lines(thresholds))
 
 
 # Korean names of the scan row kinds (CLI table, CSV kind_label, reports).
