@@ -5,7 +5,6 @@ Provides a web-based GUI that works on Windows, Mac, and Linux.
 
 from __future__ import annotations
 
-import json
 import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -23,6 +22,8 @@ from .webapp_api import (
     _load_gui,
     _preview_payload,
     report_http_response,
+    JsonBodyError,
+    load_json_body,
     ReadRootDenied,
     configure_read_roots,
     http_error_text,
@@ -352,9 +353,9 @@ def build_server(
                     self.send_error(400, "검토 요청 본문 크기가 올바르지 않습니다")
                     return
                 try:
-                    raw = json.loads(self.rfile.read(length).decode("utf-8"))
-                except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):  # R10-5
-                    self.send_error(400, "JSON을 해석할 수 없습니다")
+                    raw = load_json_body(self.rfile.read(length))
+                except JsonBodyError as exc:  # R10-5, R11-3
+                    self.send_error(400, str(exc))
                     return
                 if not isinstance(raw, dict):
                     self.send_error(400, "검토 요청 본문은 JSON 객체여야 합니다")  # P8: an array was a 500
@@ -439,9 +440,9 @@ def build_server(
             content_type = self.headers.get("Content-Type") or ""
             if "application/json" in content_type:
                 try:
-                    payload = json.loads(body.decode("utf-8", errors="replace"))
-                except (json.JSONDecodeError, RecursionError):  # R10-5: too-deep nesting is a 400
-                    self._send_json({"error": "JSON 본문을 해석할 수 없습니다"}, status=400)
+                    payload = load_json_body(body, errors="replace")
+                except JsonBodyError as exc:  # R10-5, R11-3: too-deep nesting is a 400 of its own
+                    self._send_json({"error": str(exc)}, status=400)
                     return
                 if not isinstance(payload, dict):
                     self._send_json({"error": "요청 본문은 JSON 객체여야 합니다"}, status=400)

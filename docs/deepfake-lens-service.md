@@ -263,13 +263,13 @@ endpoints (`/api/analyze/*`, `/api/classify`, `/api/check`, `/api/compare`,
 | E24 | POST `/api/compare` (web) | not multipart / fewer than 2 files / mixed pair / cut-off multipart (P8) | 400 | `비교할 파일 2개가 필요합니다`, … |
 | E25 | POST `/api/compare` (web) | comparison raised | 500 | `비교 분석 중 오류가 발생했습니다` (+ `detail`) |
 | E26 | POST `/api/compare` (api) | comparison error / raised | 400 / 500 | the comparison's Korean error |
-| E27 | POST `/api/report` (both) | malformed body or row (a non-object body, a member row whose `path` is not `container::member` — P7), bad `format`/`options` | 400 | see "REST API endpoints" (N11, X2) |
+| E27 | POST `/api/report` (both) | malformed body or row (a non-object body, a member row whose `path` is not `container::member` — P7), bad `format`/`options`, a body nested past the JSON parser's recursion limit (R11-3 — was a 500) | 400 | see "REST API endpoints" (N11, X2); `JSON 중첩이 너무 깊습니다` |
 | E28 | POST `/api/report` (both) | a `heatmap_path` outside the roots — in `result.pixel_analysis` or at the row's top level, checked before the row contract (P8) | 403 | `허용되지 않은 경로` |
 | E29 | POST `/api/report` (both) | `scan_root` missing (with folder-scan rows), not a string, relative, not a folder (P1) | 400 | `스캔 폴더(scan_root)가 필요합니다 — …` / `scan_root 값은 문자열이어야 합니다` / `scan_root는 절대 경로여야 합니다: 「…」` / `스캔 폴더를 찾을 수 없습니다: 「…」` |
 | E30 | POST `/api/report` (both) | `scan_root` outside the read roots (P1) | 403 | `허용되지 않은 경로` |
 | E31 | POST `/api/report` (both) | evidence-statement PDF failed / pymupdf missing | 500 / 501 | `증거설명서 PDF 생성 실패: …` / `PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다…` |
-| E32 | POST `/api/feedback` (both) | invalid JSON, not an object, unknown `expected_label`, no `path` | 400 | `JSON 본문을 해석할 수 없습니다`, `피드백 요청 본문은 JSON 객체여야 합니다`, `expected_label은 인식 가능한 라벨이어야 합니다 …`, `path가 필요합니다` |
-| E33 | GET/POST `/api/review` (web), review routes incl. PUT `/api/artifacts/{id}/review` (api) | no `path`/`artifact_id`, invalid JSON, a JSON body that is not an object (P8 — an array was a 500), a non-string `artifact_id` | 400 | `path 또는 artifact_id가 필요합니다`, `JSON을 해석할 수 없습니다`, `검토 요청 본문은 JSON 객체여야 합니다`, `artifact_id 값은 문자열이어야 합니다` |
+| E32 | POST `/api/feedback` (both) | invalid JSON, too-deep JSON (R11-3 — was a 500), not an object, unknown `expected_label`, no `path` | 400 | `JSON 본문을 해석할 수 없습니다`, `JSON 중첩이 너무 깊습니다`, `피드백 요청 본문은 JSON 객체여야 합니다`, `expected_label은 인식 가능한 라벨이어야 합니다 …`, `path가 필요합니다` |
+| E33 | GET/POST `/api/review` (web), review routes incl. PUT `/api/artifacts/{id}/review` (api) | no `path`/`artifact_id`, invalid or too-deep JSON (R11-3), a JSON body that is not an object (P8 — an array was a 500), a non-string `artifact_id` | 400 | `path 또는 artifact_id가 필요합니다`, `JSON 본문을 해석할 수 없습니다`, `JSON 중첩이 너무 깊습니다`, `검토 요청 본문은 JSON 객체여야 합니다`, `artifact_id 값은 문자열이어야 합니다` |
 | E34 | POST `/api/analyze/*`, `/api/classify`, `/api/check` (api) | analysis raised | 500 | the failure reason |
 | E35 | `/api/jobs/{id}`, `/api/jobs/{id}/cancel` (api) | unknown or finished job | 404 | `알 수 없거나 이미 끝난 작업입니다` |
 | E36 | POST `/api/check/stream`, `/api/scan/stream` (api) | 32 stream jobs running | 429 | `실행 중인 작업이 너무 많습니다 …` |

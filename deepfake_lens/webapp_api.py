@@ -81,6 +81,36 @@ def default_engine_profiles(root: Path | None = None) -> list[Path]:
     return _engine_profiles_in(Path(root) if root is not None else _models_dir())
 
 
+# R11-3 (round 11): a request body nested deeper than the JSON parser's
+# recursion limit (``{"items": [[[[…]]]]}`` 50 000 deep) raised RecursionError
+# out of POST /api/report and /api/feedback — a 500 on both servers. Every
+# JSON request body is read through :func:`load_json_body`: a too-deep body
+# is a 400 "JSON 중첩이 너무 깊습니다", an unparsable one a 400 "JSON 본문을
+# 해석할 수 없습니다".
+JSON_BODY_INVALID = "JSON 본문을 해석할 수 없습니다"
+JSON_BODY_TOO_DEEP = "JSON 중첩이 너무 깊습니다"
+
+
+class JsonBodyError(ValueError):
+    """A request body that is not usable JSON; ``str(exc)`` is the Korean reason (R11-3)."""
+
+
+def load_json_body(body: bytes, *, empty: object = None, errors: str = "strict") -> object:
+    """``json.loads`` of a UTF-8 request body (``empty`` for an empty body).
+
+    Raises :class:`JsonBodyError` with :data:`JSON_BODY_TOO_DEEP` on a
+    RecursionError and :data:`JSON_BODY_INVALID` on any other parse error.
+    """
+    if not body and empty is not None:
+        return empty
+    try:
+        return json.loads(body.decode("utf-8", errors=errors))
+    except RecursionError:
+        raise JsonBodyError(JSON_BODY_TOO_DEEP) from None
+    except (ValueError, UnicodeDecodeError):
+        raise JsonBodyError(JSON_BODY_INVALID) from None
+
+
 class ApiError(dict):
     """A Korean JSON error body ``{"error": …}`` that carries its HTTP status (X4).
 
@@ -1016,9 +1046,9 @@ def _feedback_payload(body: bytes) -> dict[str, object]:
     the scan result so labeled rows need no rescan.
     """
     try:
-        data = json.loads(body.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
-        return ApiError("JSON 본문을 해석할 수 없습니다", 400)
+        data = load_json_body(body)
+    except JsonBodyError as exc:
+        return ApiError(str(exc), 400)  # R11-3: a too-deep body was a 500
     if not isinstance(data, dict):
         return ApiError("피드백 요청 본문은 JSON 객체여야 합니다", 400)
     label = str(data.get("expected_label", "") or "").strip().lower()
@@ -1088,7 +1118,7 @@ REPORT_BODY_NOT_OBJECT = "보고서 요청 본문은 JSON 객체여야 합니다
 REPORT_ITEMS_REQUIRED = "보고서에 넣을 검사 결과 항목(items 배열)이 필요합니다"
 REPORT_FIELD_NOT_OBJECT = "{field} 값은 JSON 객체여야 합니다"
 REPORT_ITEM_MALFORMED = "검사 결과 항목 {index}번을 해석할 수 없습니다: {reason}"
-REPORT_JSON_INVALID = "JSON 본문을 해석할 수 없습니다"
+REPORT_JSON_INVALID = JSON_BODY_INVALID
 # X2 (round 7): the report never signs what the client says about a file.
 # Every posted row is re-analyzed on the server (analysis_api, the read
 # roots, the server's models dir and thresholds); its verdict, evidence,
@@ -1123,9 +1153,9 @@ def report_format(body: bytes, query_format: str | None) -> str | dict[str, obje
     value: object = query_format or None
     if value is None:
         try:
-            data = json.loads(body.decode("utf-8")) if body else None
-        except (ValueError, UnicodeDecodeError):
-            data = None
+            data = load_json_body(body) if body else None
+        except JsonBodyError:
+            data = None  # the body itself is refused by _report_payload (R11-3)
         value = data.get("format") if isinstance(data, dict) else None
     if value is None or value == "":
         return "html"
@@ -1464,9 +1494,9 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     from .report_items import ItemContractError, check_report_item
 
     try:
-        data = json.loads(body.decode("utf-8"))
-    except (ValueError, UnicodeDecodeError):
-        return {"error": REPORT_JSON_INVALID}
+        data = load_json_body(body)
+    except JsonBodyError as exc:
+        return {"error": str(exc)}  # R11-3: a too-deep body was a 500
     if not isinstance(data, dict):
         return {"error": REPORT_BODY_NOT_OBJECT}
     raw_items = data.get("items")

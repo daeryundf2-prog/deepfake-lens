@@ -16,7 +16,6 @@ scan never blocks the event loop (G34).
 from __future__ import annotations
 
 import importlib.util
-import json
 import logging
 import sys
 import threading
@@ -280,7 +279,7 @@ def create_app(
         raise ImportError("FastAPI가 필요합니다. 설치: `pip install fastapi uvicorn`")
 
     from .analysis_api import analyze_path, load_thresholds
-    from .webapp_api import ReadRootDenied, read_root_denied_body
+    from .webapp_api import JsonBodyError, ReadRootDenied, load_json_body, read_root_denied_body
 
     # R10-8 (round 10): FastAPI's automatic /docs, /docs/oauth2-redirect,
     # /redoc and /openapi.json were routes missing from the service
@@ -1148,9 +1147,9 @@ def create_app(
         store = get_default_review_store()
         body = await request.body()
         try:
-            data = json.loads(body.decode("utf-8") if body else "{}")
-        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):  # R10-5
-            raise HTTPException(status_code=400, detail="JSON 본문을 해석할 수 없습니다")
+            data = load_json_body(body, empty={})
+        except JsonBodyError as exc:  # R10-5, R11-3: "JSON 중첩이 너무 깊습니다" for a too-deep body
+            raise HTTPException(status_code=400, detail=str(exc))
         if not isinstance(data, dict):
             raise HTTPException(status_code=400, detail=REVIEW_BODY_NOT_OBJECT)  # P8: was a 500
         saved = store.save_review(artifact_id, data)
@@ -1173,9 +1172,9 @@ def create_app(
         from .reviews import get_default_review_store
         body = await request.body()
         try:
-            data = json.loads(body.decode("utf-8") if body else "{}")
-        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):  # R10-5
-            raise HTTPException(status_code=400, detail="JSON 본문을 해석할 수 없습니다")
+            data = load_json_body(body, empty={})
+        except JsonBodyError as exc:  # R10-5, R11-3: "JSON 중첩이 너무 깊습니다" for a too-deep body
+            raise HTTPException(status_code=400, detail=str(exc))
         if not isinstance(data, dict):
             raise HTTPException(status_code=400, detail=REVIEW_BODY_NOT_OBJECT)  # P8: was a 500
         artifact_id = data.get("artifact_id", data.get("path", ""))

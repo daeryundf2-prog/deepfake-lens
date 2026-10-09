@@ -2248,6 +2248,9 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                     "ctype": ctype, "patches": patches, "headers": headers}
 
         both = ("web", "api")
+        # R11-3: a body nested past the JSON parser's recursion limit.
+        DEEP = 50_000
+        deep = b'{"items": ' + b"[" * DEEP + b"]" * DEEP + b"}"
         return {
             "E1": [case(s, "GET", "/api/stats", 401, "헤더", headers={}) for s in both],
             "E2": [case(s, "GET", "/api/nothing-here", 404, "찾을 수 없는 경로입니다") for s in both],
@@ -2308,6 +2311,9 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                          patches=(patch("deepfake_lens.core.compare_files", raise_),))],
             "E27": [case(s, "POST", "/api/report", 400, text, body, "application/json") for s in both for body, text in (
                 (b"{oops", "JSON 본문을 해석할 수 없습니다"),
+                # R11-3 (round 11): a too-deep body was a 500 (RecursionError).
+                (deep, "JSON 중첩이 너무 깊습니다"),
+                (b'{"items": [{"path": "a", "x": ' + b"[" * DEEP + b"]" * DEEP + b"}]}", "JSON 중첩이 너무 깊습니다"),
                 (b"[1]", "보고서 요청 본문은 JSON 객체여야 합니다"),
                 (report({"items": [dict(memo_row, path="x.zip::y", container="x.zip", member="z")], "scan_root": scan_root}), "path가 container::member와 일치하지 않습니다"),
                 (report({"items": [memo_row], "options": "deep", "scan_root": scan_root}), "options 값은 JSON 객체여야 합니다"),
@@ -2327,20 +2333,26 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                     patches=(patch("deepfake_lens.evidence_statement.write_evidence_statement_pdf", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("렌더러 없음"))),)) for s in both],
             "E32": [case(s, "POST", "/api/feedback", 400, text, body, "application/json") for s in both for body, text in (
                 (b"{oops", "JSON 본문을 해석할 수 없습니다"), (b"[1]", "피드백 요청 본문은 JSON 객체여야 합니다"),
+                (deep, "JSON 중첩이 너무 깊습니다"),  # R11-3: was a 500
                 (b'{"expected_label": "maybe", "path": "a"}', "expected_label은 "), (b'{"expected_label": "real"}', "path가 필요합니다"),
             )],
             "E33": [case("web", "GET", "/api/review", 400, "path 또는 artifact_id가 필요합니다")]
             + [case("web", "POST", "/api/review", 400, text, body, "application/json") for body, text in (
-                (b"{oops", "JSON을 해석할 수 없습니다"), (b"[1]", "검토 요청 본문은 JSON 객체여야 합니다"),
+                # R11-3: was "JSON을 해석할 수 없습니다" — every server now says
+                # "JSON 본문을 해석할 수 없습니다" (one parser, load_json_body).
+                (b"{oops", "JSON 본문을 해석할 수 없습니다"), (b"[1]", "검토 요청 본문은 JSON 객체여야 합니다"),
+                (deep, "JSON 중첩이 너무 깊습니다"),
                 (b"{}", "artifact_id가 필요합니다"), (b'{"artifact_id": [1]}', "artifact_id 값은 문자열이어야 합니다"),
             )]
             + [case("api", "GET", "/api/review", 400, "path 또는 artifact_id 쿼리 매개변수가 필요합니다")]
             + [case("api", "POST", "/api/review", 400, text, body, "application/json") for body, text in (
                 (b"{oops", "JSON 본문을 해석할 수 없습니다"), (b"[1]", "검토 요청 본문은 JSON 객체여야 합니다"),
+                (deep, "JSON 중첩이 너무 깊습니다"),
                 (b"{}", "본문에 artifact_id가 없습니다"), (b'{"artifact_id": [1]}', "artifact_id 값은 문자열이어야 합니다"),
             )]
             + [case("api", "PUT", "/api/artifacts/x/review", 400, text, body, "application/json") for body, text in (
                 (b"{oops", "JSON 본문을 해석할 수 없습니다"), (b"[1]", "검토 요청 본문은 JSON 객체여야 합니다"),
+                (deep, "JSON 중첩이 너무 깊습니다"),
             )],
             "E34": [case("api", "POST", path.format(q(f / "memo.txt")), 500, "주입된 실패",
                          patches=(patch("deepfake_lens.cli_standalone.analysis_result_for_path", raise_), patch("deepfake_lens.analysis_api.analyze_file", raise_)))
