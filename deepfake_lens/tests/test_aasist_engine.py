@@ -21,10 +21,9 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
-from unittest import mock
 
 from deepfake_lens.audio import analyze_audio
-from deepfake_lens.cli import DEFAULT_AUDIO_ENGINE_PROFILE, default_audio_model_path, main as cli_main
+from deepfake_lens.cli import default_audio_model_path, main as cli_main
 from deepfake_lens.core import analyze_file, scan_directory
 from deepfake_lens.model_adapter import analyze_external_model, load_model_threshold
 

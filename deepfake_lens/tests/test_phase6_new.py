@@ -5,18 +5,12 @@ from __future__ import annotations
 import unittest
 
 from deepfake_lens.ai_agent import (
-    AgentAnalysis,
-    AgentEvidenceSignal,
     analyze_agent_content,
 )
 from deepfake_lens.threed import (
-    ThreeDAnalysis,
-    ThreeDEvidenceSignal,
     analyze_3d_content,
 )
 from deepfake_lens.avatar import (
-    AvatarAnalysis,
-    AvatarEvidenceSignal,
     analyze_avatar,
 )
 

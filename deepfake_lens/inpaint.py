@@ -6,6 +6,7 @@ object removal, or partial editing techniques.
 
 from __future__ import annotations
 
+import importlib
 import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -58,8 +59,8 @@ def analyze_inpainting(
         return _error_analysis(f"지원하지 않는 이미지 형식입니다: {extension}")
 
     try:
-        import cv2
-        import numpy as np
+        importlib.import_module("cv2")  # availability probe (G12: was an unused import)
+        importlib.import_module("numpy")  # availability probe (G12: was an unused import)
     except ImportError:
         return _error_analysis("opencv가 설치되어 있지 않습니다. `pip install opencv-python`로 설치하세요.")
 

@@ -28,6 +28,7 @@ experiments/FACESWAP_EVALUATION.md.
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -110,7 +111,7 @@ def analyze_face_track(
         limitations.append("적용된 임계값 프로파일이 표본 부족으로 임시(provisional) 상태입니다 — 측정 기반으로 검증되지 않았습니다.")
     try:
         import cv2
-        import numpy as np
+        importlib.import_module("numpy")  # availability probe (G12: was an unused import)
     except ImportError:
         return _unavailable(limitations, "cv2/numpy가 없어 얼굴 트랙 분석을 건너뜁니다.")
 

@@ -10,7 +10,6 @@ from deepfake_lens.archives import (
     ExtractionBudget,
     archive_format,
     extract_archive,
-    is_archive,
     _7z_link_names,
     _rar_member_rejected,
     _safe_member_name,

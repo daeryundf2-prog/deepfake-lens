@@ -8,7 +8,6 @@ tool-fingerprint helpers feeding ``analyze_text`` — plus source guessing.
 from __future__ import annotations
 
 import re
-import struct
 
 from .result_types import EvidenceSignal, SourceConfidence, SourceGuess
 

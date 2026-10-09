@@ -105,13 +105,15 @@ exclude_also = [
 ]
 
 # Lint gate: true-positive rules only (syntax, undefined names, f-string
-# placeholders, redefinitions, invalid escapes). Widening the rule set is a
-# deliberate follow-up — keep CI green, not noisy.
+# placeholders, redefinitions, invalid escapes) plus unused imports (F401,
+# round-5 G12 — an availability probe uses importlib.import_module, a
+# re-export goes in __all__ or carries an explicit noqa). Widening the rule
+# set further is a deliberate follow-up — keep CI green, not noisy.
 [tool.ruff]
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E9", "F821", "F541", "F811", "W605"]
+select = ["E9", "F401", "F821", "F541", "F811", "W605"]
 # Fail-closed gate (phase 0, G1): blind `except Exception` (BLE001) and
 # try/except/pass (S110) are errors in the four files on the verdict path.
 # Ruff has no per-file *select*, so the rules are enabled globally and

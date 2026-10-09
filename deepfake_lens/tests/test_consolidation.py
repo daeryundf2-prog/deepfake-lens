@@ -272,7 +272,6 @@ class ElaExpertTest(unittest.TestCase):
 
     def _jpeg_pair(self, tmp: Path) -> tuple[Path, Path]:
         """Control JPEG vs the same frame with an uncompressed patch pasted in."""
-        import io
         import numpy as np
         from PIL import Image
 

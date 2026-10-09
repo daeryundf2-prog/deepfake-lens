@@ -1,28 +1,23 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import sys
 from pathlib import Path
 
 from .benchmark import run_benchmark, write_benchmark, write_benchmark_markdown
 from .collection import write_collection_plan
-from .core import ARCHIVE_ROLLUP_RULE, DEFAULT_MAX_FILES, check_scan_folder, RiskBand, ScanItem, _thresholds_json, summarize
+from .core import ARCHIVE_ROLLUP_RULE, check_scan_folder, ScanItem, _thresholds_json
 from .analysis_api import AnalysisOptions, analyze_path, analyze_rows, load_thresholds, primary_row, scan_folder, thresholds_warning_printer
 from .analysis_api import scan_payload as analysis_scan_payload
-from .calibration import MIN_CALIBRATION_SAMPLES, load_threshold_profile
 from .cli_parser import build_parser
 from .serialization import redact_install_paths
 from .cli_render import (
     _file_text,
-    _is_priority_row,
     _load_thresholds_arg,
     _maybe_sign,
     _parse_csv,
     _parse_split_ratios,
-    _pixel_score_text,
-    _pixel_top_experts,
     _print_table,
     _write_csv,
     _write_json_out,
@@ -30,45 +25,42 @@ from .cli_render import (
 from .datasets import write_audit, write_manifest, write_robustness_plan, write_split_plan
 from .evaluate import calibrate_dataset, evaluate_dataset, evaluate_robustness_dataset, train_portable_baseline, write_cases_jsonl, write_json_report
 from .feedback import build_feedback_report, load_feedback, observations_from_scan_payload, observations_live
-from .fusion import FusionProfile, apply_fusion_to_items, calibrate_fusion_profile, load_fusion_profile, write_fusion_profile
+from .fusion import FusionProfile, calibrate_fusion_profile, load_fusion_profile, write_fusion_profile
 from .model_registry import list_detector_candidates, write_detector_registry, write_runtime_profile
 from .perf import run_performance_check, write_performance_check
 from .release import write_release_checklist
 from .reports import write_eval_html_report, write_forensic_pdf_report, write_html_report, write_pdf_report
-from .pixel import DEFAULT_PIXEL_MAX_SIDE, SUPPORTED_PIXEL_MODES
 from .security import write_security_check
-from .signing import ReportKeyError, load_key_file, resolve_report_key, sign_report
+from .signing import ReportKeyError, load_key_file, resolve_report_key
 from .cli_logging import configure_cli_logging
 from .training import write_neural_training_plan
-from .audio import analyze_audio, AudioAnalysis
-from .face import analyze_faces, FaceAnalysis
+from .audio import analyze_audio
+from .face import analyze_faces
 from .video import extract_video_frames, write_video_frame_plan
-from .video_analysis import analyze_video_temporal, VideoTemporalAnalysis
-from .inpaint import analyze_inpainting, InpaintAnalysis
-from .text_advanced import analyze_text_advanced, TextAdvancedAnalysis
+from .video_analysis import analyze_video_temporal
+from .inpaint import analyze_inpainting
+from .text_advanced import analyze_text_advanced
 from .watermark import detect_kgw_watermark
-from .c2pa import analyze_metadata_forensic, MetadataForensicAnalysis
-from .multimodal import analyze_av_sync, analyze_multimodal, MultimodalAnalysis
-from .realtime import RealtimeDetector, create_realtime_detector
-from .rppg import analyze_rppg, RppgAnalysis
-from .prnu import analyze_prnu, PrnuAnalysis
-from .evidence import create_evidence_chain, generate_forensic_report
+from .c2pa import analyze_metadata_forensic
+from .multimodal import analyze_av_sync, analyze_multimodal
+from .realtime import create_realtime_detector
+from .rppg import analyze_rppg
+from .prnu import analyze_prnu
+from .evidence import create_evidence_chain
 from .api_server import run_server as run_api_server
 from .batch import BatchProcessor
-from .ai_agent import analyze_agent_content, AgentAnalysis
-from .threed import analyze_3d_content, ThreeDAnalysis
-from .avatar import analyze_avatar, AvatarAnalysis
+from .ai_agent import analyze_agent_content
+from .threed import analyze_3d_content
+from .avatar import analyze_avatar
 from .rule_classifier import RuleClassifier
 from .layer_diagnostic import ANALYSIS_RESULT_KIND, to_layer_diagnostic
 from .cli_standalone import (
     ANALYSIS_RESULT_NOTICE,
     analysis_result_for_path,
-    analysis_result_payload,
     analyze_text_payload,
     combined_verdict,
     emit,
     emit_layer,
-    file_sha256,
     format_analysis_result,
     gated_pixel_layer,
     member_rows_text,

@@ -19,7 +19,6 @@ from .result_text import (
     coverage_gaps,
     deciding_evidence,
     display_path,
-    evidence_counts,
     evidence_counts_text,
     evidence_groups,
     is_symlink_row,
@@ -28,7 +27,7 @@ from .result_text import (
     threshold_provenance_line,
     verdict_heading,
 )
-from .result_types import EVIDENCE_KIND_LABELS, VERDICT_LABELS, CoverageStatus, EvidenceKind, Grade, Verdict, check_label, is_verdict_row, status_label
+from .result_types import EVIDENCE_KIND_LABELS, VERDICT_LABELS, CoverageStatus, Grade, Verdict, check_label, is_verdict_row, status_label
 from .signing import REPORT_KEY_ENV, resolve_report_key, sign_report, signed_body_sha256
 
 # Report title (B2): the product name is an identifier, the rest Korean.

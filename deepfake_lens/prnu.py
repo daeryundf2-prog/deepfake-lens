@@ -18,10 +18,11 @@ keeps the dominant PRNU component).
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
+from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 
 MIN_REFERENCE_IMAGES = 3
 MIN_CORRELATION = 0.10  # empirical screening floor for same-device NCC
@@ -127,7 +128,7 @@ def analyze_prnu(target_path: Path | str, reference_paths: list[Path | str]) -> 
             return _error_analysis(f"파일이 존재하지 않습니다: {path}")
 
     try:
-        import numpy as np
+        importlib.import_module("numpy")  # availability probe (G12: was an unused import)
     except ImportError:
         return _error_analysis("numpy가 설치되어 있지 않습니다. `pip install numpy`로 설치하세요.")
 

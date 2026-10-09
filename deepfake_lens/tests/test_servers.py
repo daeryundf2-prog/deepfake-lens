@@ -150,7 +150,7 @@ class AnalyzeUploadPayloadTest(unittest.TestCase):
         self.assertIn("error", result)
 
     def test_multipart_files_are_analyzed(self) -> None:
-        from deepfake_lens import webapp, webapp_api
+        from deepfake_lens import webapp_api
         from deepfake_lens.core import ScanItem
 
         def fake_analyze(path, **kwargs):
@@ -198,7 +198,7 @@ class CheckPayloadTest(unittest.TestCase):
         return ScanItem(str(path), Path(str(path)).name, "text", "analyzed", 4, result=None)
 
     def test_text_check_runs_all_text_layers(self) -> None:
-        from deepfake_lens import webapp, webapp_api
+        from deepfake_lens import webapp_api
 
         from deepfake_lens import analysis_api
 
@@ -220,7 +220,7 @@ class CheckPayloadTest(unittest.TestCase):
         self.assertIn("error", _check_text_payload("짧음"))
 
     def test_file_check_runs_scan_and_forensic(self) -> None:
-        from deepfake_lens import webapp, webapp_api
+        from deepfake_lens import webapp_api
 
         from deepfake_lens import analysis_api
 
@@ -243,7 +243,7 @@ class FeedbackPayloadTest(unittest.TestCase):
 
     def _with_feedback_path(self, fn):
         import tempfile
-        from deepfake_lens import webapp, webapp_api
+        from deepfake_lens import webapp
 
         with tempfile.TemporaryDirectory() as tmp:
             original = os.environ.get("DEEPFAKE_LENS_FEEDBACK")
@@ -332,7 +332,7 @@ class LiveServerClientHeaderTest(unittest.TestCase):
         import socket
         import threading
         import urllib.request
-        from deepfake_lens import webapp, webapp_api
+        from deepfake_lens import webapp
 
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
@@ -426,7 +426,7 @@ class AsyncScanJobTest(unittest.TestCase):
     """The async=1 scan job API: start returns a job id, status polls to done."""
 
     def setUp(self) -> None:
-        from deepfake_lens import webapp, webapp_api
+        from deepfake_lens import webapp_api
 
         registry = patch.object(webapp_api, "_SCAN_JOBS", {})
         registry.start()
@@ -437,7 +437,7 @@ class AsyncScanJobTest(unittest.TestCase):
 
     def test_job_lifecycle(self) -> None:
         import tempfile
-        from deepfake_lens import webapp, webapp_api
+        from deepfake_lens import webapp_api
 
         with tempfile.TemporaryDirectory() as tmp:
             fixture = Path(tmp) / "a.txt"
@@ -465,13 +465,13 @@ class AsyncScanJobTest(unittest.TestCase):
             self.assertIn("error", webapp_api._scan_status_payload("job=deadbeef"))
 
     def test_missing_job_parameter_is_error(self) -> None:
-        from deepfake_lens import webapp, webapp_api
+        from deepfake_lens import webapp_api
 
         self.assertIn("error", webapp_api._scan_status_payload(""))
 
     def test_cancel_payload(self) -> None:
         import threading
-        from deepfake_lens import webapp, webapp_api
+        from deepfake_lens import webapp_api
 
         self.assertIn("error", webapp_api._scan_cancel_payload(""))
         self.assertIn("error", webapp_api._scan_cancel_payload("job=deadbeef"))
@@ -508,7 +508,7 @@ class AsyncScanJobTest(unittest.TestCase):
             self.assertLess(len(items), 5)
 
     def test_job_cap_refuses_overflow(self) -> None:
-        from deepfake_lens import webapp, webapp_api
+        from deepfake_lens import webapp_api
 
         with webapp_api._SCAN_JOBS_LOCK:
             for i in range(webapp_api._SCAN_JOB_MAX):
@@ -535,7 +535,7 @@ class ApiServeTokenGateTest(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 2)
 
     def test_run_server_refuses_allow_lan_without_token(self) -> None:
-        from deepfake_lens import webapp, webapp_api
+        from deepfake_lens import webapp
 
         with self.assertRaises(ValueError):
             webapp.run_server("0.0.0.0", 0, allow_lan=True)
@@ -545,7 +545,7 @@ class ServiceContractTest(unittest.TestCase):
     """Pin the documented service contract: loopback defaults and guards."""
 
     def test_servers_default_to_loopback(self) -> None:
-        from deepfake_lens import webapp, webapp_api
+        from deepfake_lens import webapp
 
         self.assertEqual(inspect.signature(api_server.run_server).parameters["host"].default, "127.0.0.1")
         self.assertEqual(inspect.signature(api_server.create_app).parameters["host"].default, "127.0.0.1")
@@ -557,7 +557,7 @@ class ServiceContractTest(unittest.TestCase):
         self.assertNotIn(api_server.host_name("attacker.example.com"), api_server.LOCAL_HOSTS)
 
     def test_webapp_refuses_non_loopback_without_allow_lan(self) -> None:
-        from deepfake_lens import webapp, webapp_api
+        from deepfake_lens import webapp
 
         with self.assertRaises(ValueError):
             webapp.run_server("0.0.0.0", 0)
@@ -755,7 +755,7 @@ class PreviewPayloadTest(unittest.TestCase):
     """GET /api/preview serves media under a server-registered root only."""
 
     def setUp(self) -> None:
-        from deepfake_lens import webapp, webapp_api
+        from deepfake_lens import webapp_api
 
         # G31: the registry is an insertion-ordered OrderedDict (oldest
         # registration evicted first), no longer a set.

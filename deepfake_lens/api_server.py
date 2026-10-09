@@ -174,7 +174,7 @@ def create_app(
 ) -> Any:
     """Create a FastAPI application."""
     try:
-        from fastapi import FastAPI, HTTPException, Request
+        from fastapi import FastAPI, HTTPException
         from fastapi.middleware.cors import CORSMiddleware
         from fastapi.responses import JSONResponse
         from starlette.concurrency import run_in_threadpool

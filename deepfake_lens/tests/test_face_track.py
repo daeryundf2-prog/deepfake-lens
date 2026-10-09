@@ -7,7 +7,6 @@ import unittest
 from pathlib import Path
 
 from deepfake_lens.face_track import (
-    FaceTrackAnalysis,
     _box_smoothness,
     _consecutive_cosine,
     _landmark_jitter,

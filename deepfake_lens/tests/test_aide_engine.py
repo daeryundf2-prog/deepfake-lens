@@ -11,7 +11,7 @@ import zlib
 from pathlib import Path
 from unittest import mock
 
-from deepfake_lens.cli import DEFAULT_ENGINE_PROFILE, default_model_path, main as cli_main
+from deepfake_lens.cli import default_model_path, main as cli_main
 from deepfake_lens.core import analyze_file
 from deepfake_lens.model_adapter import analyze_external_model, load_model_threshold
 

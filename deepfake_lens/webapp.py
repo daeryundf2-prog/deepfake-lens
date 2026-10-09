@@ -7,21 +7,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import secrets
-import shutil
-import tempfile
-import threading
-import time
-from email.parser import BytesParser
-from email.policy import default as email_policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 from .webapp_api import (
     MAX_UPLOAD_BYTES,
-    MAX_UPLOAD_FILES,
     _analyze_file_payload,
     _analyze_upload_payload,
     _check_file_payload,

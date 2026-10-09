@@ -9,7 +9,6 @@ from pathlib import Path
 
 from deepfake_lens.calibration import (
     MIN_CALIBRATION_SAMPLES,
-    ScoreCalibrator,
     _isotonic_knots,
     calibrate_scores,
     load_score_calibrator,

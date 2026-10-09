@@ -52,6 +52,7 @@ __all__ = [
     "MultimodalAnalysis",
     "AvSyncAnalysis",
     "RealtimeDetector",
+    "RealtimeState",
     "RppgAnalysis",
     "PrnuAnalysis",
     "FrequencyFeatures",

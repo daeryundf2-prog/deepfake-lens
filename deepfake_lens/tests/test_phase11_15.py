@@ -10,19 +10,16 @@ from deepfake_lens.evidence import (
     EvidenceChain,
     ForensicReport,
     create_evidence_chain,
-    verify_integrity,
     generate_forensic_report,
 )
 from deepfake_lens.xai import (
     XAIExplanation,
-    FeatureImportance,
     explain_classification,
     format_explanation_text,
 )
 from deepfake_lens.batch import (
     BatchProcessor,
     BatchJob,
-    BatchResult,
 )
 
 

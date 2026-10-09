@@ -248,8 +248,6 @@ class MultiRoiRppgTest(unittest.TestCase):
 
     @unittest.skipUnless(_has_numpy(), "numpy not installed")
     def test_coherent_rois_report_high_phase_coherence(self) -> None:
-        import numpy as np
-
         from deepfake_lens.rppg import rppg_from_roi_samples
 
         rois = self._roi_series([0.0, 0.1, -0.1, 0.05])

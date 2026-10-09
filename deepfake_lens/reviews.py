@@ -8,7 +8,6 @@ from being lost or isolated in client-side browser localStorage.
 from __future__ import annotations
 
 import json
-import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path

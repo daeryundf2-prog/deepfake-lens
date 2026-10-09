@@ -210,7 +210,6 @@ class C2paSdkValidationTest(unittest.TestCase):
     def test_video_container_parses_for_manifest(self) -> None:
         """MP4 is a supported C2PA container — the SDK must parse it and
         report 'no manifest' (not None, which would mean it couldn't run)."""
-        import struct
         import tempfile
 
         # Minimal valid-ish mp4: ftyp box + free box — enough for the SDK

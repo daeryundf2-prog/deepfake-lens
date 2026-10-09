@@ -5,7 +5,6 @@ from __future__ import annotations
 import unittest
 
 from deepfake_lens.multimodal import (
-    AvSyncAnalysis,
     MultimodalAnalysis,
     MultimodalEvidenceSignal,
     analyze_av_sync,

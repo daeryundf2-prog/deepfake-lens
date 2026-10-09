@@ -133,8 +133,6 @@ class PrnuTest(unittest.TestCase):
 
     @unittest.skipUnless(_has_numpy(), "numpy not installed")
     def test_same_camera_correlates_other_camera_does_not(self) -> None:
-        import numpy as np
-
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
             camera_a = self._camera_images(tmp_path, camera_seed=100, count=5)

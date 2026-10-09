@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
+from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 
 PULSE_LOW_HZ = 0.7
 PULSE_HIGH_HZ = 4.0
@@ -353,7 +353,6 @@ def _face_roi_samples(
     guards absorb — so every sampled frame stays aligned.
     """
     import cv2
-    import numpy as np
 
     capture = cv2.VideoCapture(str(video_path))
     if not capture.isOpened():

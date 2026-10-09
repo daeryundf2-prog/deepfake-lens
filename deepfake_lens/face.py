@@ -27,6 +27,7 @@ With neither available the labelled box-ratio estimate stays active.
 
 from __future__ import annotations
 
+import importlib
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -144,8 +145,8 @@ def analyze_faces(
         return _unsupported_format_analysis(extension)
 
     try:
-        import cv2
-        import numpy as np
+        importlib.import_module("cv2")  # availability probe (G12: was an unused import)
+        importlib.import_module("numpy")  # availability probe (G12: was an unused import)
     except ImportError:
         return _error_analysis("opencv가 설치되어 있지 않습니다. `pip install opencv-python`로 설치하세요.")
 
@@ -304,8 +305,8 @@ def face_detector_unavailable_reason(*, require_landmarks: bool = False) -> str 
     (MediaPipe) — the face-track layer uses only those.
     """
     try:
-        import cv2
-        import numpy  # noqa: F401
+        importlib.import_module("cv2")  # availability probe (G12: was an unused import)
+        importlib.import_module("numpy")  # availability probe (G12)
     except ImportError:
         return "opencv 없음"
     if require_landmarks:

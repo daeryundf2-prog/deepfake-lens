@@ -139,7 +139,6 @@ class FaceAnalysisTest(unittest.TestCase):
     def test_circular_hue_same_red_family_does_not_fire(self) -> None:
         """Face hue 5 vs surround hue 175 is the same red family on the
         OpenCV hue circle and must not read as a 170-unit mismatch."""
-        import cv2
         import numpy as np
 
         from deepfake_lens.face import FaceRegion, _color_temperature

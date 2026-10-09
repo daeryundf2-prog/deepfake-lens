@@ -17,13 +17,9 @@ veto — and when no external signal ran, the result carries an explicit
 
 from __future__ import annotations
 
-import math
 import json
-import struct
-import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
 
 from .error_text import exception_text
 

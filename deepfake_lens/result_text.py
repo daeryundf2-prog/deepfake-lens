@@ -24,7 +24,6 @@ from .result_types import (
     EvidenceItem,
     EvidenceKind,
     Grade,
-    Verdict,
     check_label,
 )
 

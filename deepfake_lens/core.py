@@ -26,8 +26,6 @@ from .video_analysis import (
 from .documents import SUPPORTED_DOCUMENT_EXTENSIONS, extract_document_text
 from .model_adapter import FAILED_CONFIDENCE, ExternalModelAnalysis, analyze_external_model
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, PixelAnalysis, analyze_image_pixels
-from .pixel import PixelExpertResult
-from .png import read_png_dimensions, read_png_metadata
 from .image_metadata import (  # noqa: F401
     DEFAULT_METADATA_BYTES,
     ImageMetadataRead,

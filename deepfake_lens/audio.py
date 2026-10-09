@@ -907,8 +907,6 @@ def _ecapa_speaker_similarity(path_a: Path, path_b: Path, revision: str) -> tupl
     if wavs[0] is None or wavs[1] is None:
         return None
     try:
-        import torch
-
         score, _prediction = model.verify_batch(wavs[0].unsqueeze(0), wavs[1].unsqueeze(0))  # type: ignore[attr-defined]
         similarity = float(score.squeeze())
     except Exception:

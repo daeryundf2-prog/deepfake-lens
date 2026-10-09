@@ -27,13 +27,12 @@ import hashlib
 import json
 import os
 import stat
-import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .core import BatchScanSummary, ScanItem
+from .core import ScanItem
 from .result_text import (
     ARCHIVE_MEMBER_SEPARATOR,
     HASH_UNAVAILABLE_ACCESS,

@@ -19,6 +19,7 @@ deeper analysis than was run. Neither tier is a truth label; see
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -71,7 +72,7 @@ def analyze_pixels(path: Path | str) -> QuickPixelAnalysis:
 
     try:
         import cv2
-        import numpy as np
+        importlib.import_module("numpy")  # availability probe (G12: was an unused import)
     except ImportError:
         return _error_analysis("opencv/numpy가 설치되어 있지 않습니다.")
 

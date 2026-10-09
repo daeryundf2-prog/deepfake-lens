@@ -3,13 +3,9 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
-import math
-import os
 import logging
-import re
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
 
 from .checkpoint_integrity import _expected_sha256, load_torch_state  # noqa: F401 — load_torch_state re-exported
 from .model_pins import PIN_FIELD, PinError, verify_pin
