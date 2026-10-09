@@ -66,6 +66,10 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(btc.subject_ids("fix: a (Z1-Z5; Gaps: G7, 신규)"), ["Z1", "Z2", "Z3", "Z4", "Z5"])
         self.assertEqual(btc.subject_ids("docs(qa): regenerated (WP-J)"), ["WP-J"])
         self.assertEqual(btc.subject_ids("chore: nothing here"), [])
+        # R9-10: round-9 IDs; "R9-10" is not the range R9..R10
+        self.assertEqual(btc.subject_ids("fix: a (R9-4, R9-5; Gaps: G31, G7)"), ["R9-4", "R9-5"])
+        self.assertEqual(btc.subject_ids("fix: a (R9-10; Gaps: 신규)"), ["R9-10"])
+        self.assertEqual(btc.subject_ids("fix: a (R9-1; Gaps: G30, G34)"), ["R9-1"])
 
     def test_subject_without_gaps(self) -> None:
         self.assertEqual(btc.subject_without_gaps("test(qa): leg raw (QA-OUT-4; Gaps: G7, G8)"), "test(qa): leg raw")
@@ -144,9 +148,28 @@ class GitRoundTripTest(unittest.TestCase):
         self.assertEqual((matched["new_reasons"], matched["round"], matched["pre_rewrite_subject"]), (["P9: curated"], "7", "fix: old subject"))
         self.assertEqual([i["commits"] for i in table["ids"]], [[one["short"]], [matched["short"]]])
         self.assertIn(one["short"], self.md_path.read_text(encoding="utf-8"))
-        # later commits that do not touch the table are fine
+        # R9-10 (round 9): this asserted that "later commits that do not touch the
+        # table are fine" (encoded the defect — the table went stale unnoticed). A
+        # commit after the regenerating one fails --check until the table is
+        # regenerated again as the last commit.
         self.commit("fix: later (P1; Gaps: G30)", "c")
-        self.assertEqual(self.run_main("--check")[0], 0)
+        code, text = self.run_main("--check")
+        self.assertEqual(code, 1, text)
+        self.assertIn("표 이후 커밋이 2개입니다", text)
+        self.assertEqual(self.run_main()[0], 0)
+        self.commit("docs: regenerate table again (P12)")
+        code, text = self.run_main("--check")
+        self.assertEqual(code, 0, text)
+        self.assertIn("표 이후 커밋 1개(재생성 커밋만)", text)
+
+    def test_r9_10_regeneration_commit_touches_only_the_table(self) -> None:
+        """R9-10: the one commit after the table may change only the two table files."""
+        self.run_main()
+        (self.root / "f.txt").write_text("sneaked", encoding="utf-8")
+        self.commit("docs: regenerate table (P12)")  # -A: f.txt rides along
+        code, text = self.run_main("--check")
+        self.assertEqual(code, 1, text)
+        self.assertIn("추적표 파일 밖의 파일도 바꿨습니다: f.txt", text)
 
     def test_check_fails_on_hand_edit_and_on_rewritten_history(self) -> None:
         self.run_main()

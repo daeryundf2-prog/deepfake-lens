@@ -30,6 +30,13 @@ that range and fails when the committed JSON/Markdown differ, when
 (or HEAD itself, for an uncommitted regeneration), or when the history the
 table was built from is gone (rewritten without regenerating).
 
+R9-10 (round 9): it also fails when more than one commit follows
+``range.head`` — the only commit allowed after the table's range is the
+one regenerating it — or when that commit changes anything besides
+``docs/traceability-commits.json`` and ``docs/TRACEABILITY-COMMITS.md``. A
+commit made after the table therefore needs a regeneration (as the last
+commit) before ``--check`` passes again.
+
 Usage:
     python scripts/build_traceability_commits.py            # regenerate for <merge-base main>..HEAD
     python scripts/build_traceability_commits.py --check    # exit 1 if stale (CI; needs full history)
@@ -48,6 +55,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 JSON_PATH = REPO_ROOT / "docs" / "traceability-commits.json"
 MD_PATH = REPO_ROOT / "docs" / "TRACEABILITY-COMMITS.md"
 JSON_REL = "docs/traceability-commits.json"
+MD_REL = "docs/TRACEABILITY-COMMITS.md"
 SCHEMA = "deepfake-lens-traceability-commits-v2"
 NEW_LABEL = "신규(스펙 외)"
 
@@ -55,7 +63,10 @@ GAP_TOKEN = re.compile(r"(?<![\w-])G([1-9]\d?)(?![\w-])")
 GAPS_LINE = re.compile(r"^Gaps:\s*(.+?)\s*$", re.MULTILINE)
 SUBJECT_GAPS = re.compile(r"Gaps:\s*([^)]*)")
 TRAILING_PAREN = re.compile(r"\s*\(([^()]*)\)\s*$")
-ID_TOKEN = re.compile(r"^(?:WP-[A-J]|QA-[A-Z]+-\d+|N[36]-\d+|V5-G\d+|[A-Z]\d+)$")
+ID_TOKEN = re.compile(r"^(?:WP-[A-J]|QA-[A-Z]+-\d+|N[36]-\d+|V5-G\d+|R\d+-\d+|[A-Z]\d+)$")
+# R9-10: round-9 finding IDs ("R9-1" … "R9-10") are IDs, never a range ("R9-10"
+# is not R9..R10 — the round-2 IDs R9 and R10).
+ROUND_ID = re.compile(r"^R\d+-\d+$")
 ID_RANGE = re.compile(r"^([A-Z])(\d+)-(?:\1)?(\d+)$")
 
 
@@ -157,6 +168,9 @@ def subject_ids(subject: str) -> list[str]:
             continue
         for token in re.split(r"[,\s]+", part):
             token = token.strip().rstrip(":")
+            if ROUND_ID.match(token):
+                ids.append(token)
+                continue
             span = ID_RANGE.match(token)
             if span and int(span.group(2)) < int(span.group(3)):
                 ids.extend(f"{span.group(1)}{n}" for n in range(int(span.group(2)), int(span.group(3)) + 1))
@@ -342,6 +356,30 @@ def _json_dirty() -> bool:
     return bool(_git("status", "--porcelain", "--", JSON_REL).strip())
 
 
+TABLE_FILES = frozenset({JSON_REL, MD_REL})
+
+
+def _later_commit_problems(head: str) -> list[str]:
+    """R9-10: after ``range.head`` only the regenerating commit, touching only the two table files."""
+    if _json_dirty():
+        return []  # an uncommitted regeneration: range.head must be HEAD (checked above)
+    later = _git("rev-list", f"{head}..HEAD").split()
+    if len(later) > 1:
+        return [
+            f"표 이후 커밋이 {len(later)}개입니다({head[:7]}..HEAD) — 표의 범위 뒤에는 표를 재생성한 커밋 1개만 올 수 있습니다. "
+            "python scripts/build_traceability_commits.py 로 재생성해 마지막 커밋으로 넣으십시오"
+        ]
+    if later:
+        changed = set(_git("diff-tree", "--no-commit-id", "--name-only", "-r", "-m", later[0]).split())
+        extra = sorted(changed - TABLE_FILES)
+        if extra:
+            return [
+                f"표를 재생성한 커밋 {later[0][:7]}이(가) 추적표 파일 밖의 파일도 바꿨습니다: {', '.join(extra[:10])}"
+                f"{' 외' if len(extra) > 10 else ''} — 재생성 커밋에는 {JSON_REL}과 {MD_REL}만 넣으십시오"
+            ]
+    return []
+
+
 def check(committed_json: str, committed_md: str) -> list[str]:
     """Problems with the committed table (empty list = current)."""
     try:
@@ -370,6 +408,7 @@ def check(committed_json: str, committed_md: str) -> list[str]:
             f"range.head {head[:7]}이(가) 표를 마지막으로 재생성한 커밋의 부모({expected_parent[:7]})가 아닙니다 — "
             "표는 재생성 커밋의 부모까지를 덮어야 합니다"
         )
+    problems += _later_commit_problems(head)
     expected = build(data, base, head)
     if dump_json(expected) != committed_json:
         problems.append(f"{JSON_REL}이(가) 히스토리에서 다시 만든 표와 다릅니다 — python scripts/build_traceability_commits.py 를 실행하십시오")
@@ -397,8 +436,8 @@ def main(argv: list[str] | None = None) -> int:
             if problems:
                 return 1
             data = json.loads(committed_json)
-            later = _git("rev-list", "--count", "--no-merges", f"{data['range']['head']}..HEAD").strip()
-            print(f"추적표 최신: 커밋 {len(data['commits'])}개({data['range']['base'][:7]}..{data['range']['head'][:7]}), 표 이후 커밋 {later}개(재생성 커밋 포함)")
+            later = _git("rev-list", "--count", f"{data['range']['head']}..HEAD").strip()
+            print(f"추적표 최신: 커밋 {len(data['commits'])}개({data['range']['base'][:7]}..{data['range']['head'][:7]}), 표 이후 커밋 {later}개(재생성 커밋만)")
             return 0
         data = json.loads(committed_json)
         table = build(data, default_base(args.base), _rev("HEAD"))
