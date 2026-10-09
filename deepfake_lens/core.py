@@ -1373,11 +1373,13 @@ def _audio_result(analysis: AudioAnalysis, *, coverage: list[CoverageEntry] | No
         SourceConfidence.LOW if source_known else SourceConfidence.UNKNOWN,
         [analysis.source_guess] if source_known else ["오디오에서 출처를 판단할 단서가 부족합니다."],
     )
-    limitations = [
+    # S7: audio.analyze_audio already folds the model limitations into
+    # analysis.limitations; each line is listed once, first occurrence kept.
+    limitations = list(dict.fromkeys([
         "오디오 음향 휴리스틱은 측정 전 참고 신호이며 결론에 참여하지 않습니다.",
         *analysis.limitations,
         *(analysis.model_analysis.limitations if analysis.model_analysis else []),
-    ]
+    ]))
     return build_classification_result(
         subject="오디오",
         evidence=evidence,
