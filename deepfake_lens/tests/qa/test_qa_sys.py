@@ -105,17 +105,23 @@ from deepfake_lens.signing import REPORT_KEY_ENV, sign_report, verify_report
 from .traceability import (
     BASELINE_PATH,
     DELETIONS_DOC,
+    ENV_DEPENDENT_DOC,
     QA_DIR,
     REPO_ROOT,
     TESTS_DIR,
     automated_criteria,
+    UNRESOLVED_REASON,
     criterion_line,
     documented_deletions,
+    documented_env_reasons,
+    documented_env_tests,
     first_line,
     iter_tests,
     load_traceability,
     qa_tag,
     short_names,
+    skip_reason_sites,
+    skipping_tests,
     source_inventory,
     tests_by_qa_id,
 )
@@ -1503,6 +1509,85 @@ class TraceabilityTest(unittest.TestCase):
                         self.assertIn(f"| {qa_id} | {entry['title']} | 미실시(기록 없음) |", manual_doc)
 
 
+class QaSys10EnvDependentTestsDocTest(unittest.TestCase):
+    """QA-SYS-10: environment-dependent tests are documented, not deleted (R11-2)."""
+
+    def test_every_skip_reason_is_documented(self) -> None:
+        """QA-SYS-10: 기존 633개 테스트 중 유지 대상 전부 통과. 삭제된 테스트는 삭제 이유가 커밋 메시지에 기록.
+        R11-2: every skip reason in the test sources (skip decorators, skipTest, SkipTest) is a
+        row of docs/QA-ENV-DEPENDENT-TESTS.md with the environment that enables it; no row is stale."""
+        sites = skip_reason_sites()
+        self.assertGreater(len(sites), 100)  # the extractor sees the suite's skips
+        unresolved = [f"{path}:{line}" for path, line, reason in sites if reason == UNRESOLVED_REASON]
+        self.assertEqual(unresolved, [], "a skip reason must be a literal, a module constant or an f-string")
+        reasons = {reason for _, _, reason in sites}
+        documented = documented_env_reasons()
+        self.assertEqual(sorted(reasons - documented), [], f"skip reasons missing from {ENV_DEPENDENT_DOC.name}")
+        self.assertEqual(sorted(documented - reasons), [], f"stale reasons in {ENV_DEPENDENT_DOC.name}")
+        text = ENV_DEPENDENT_DOC.read_text(encoding="utf-8")
+        section = text.split("## 건너뛰기 사유", 1)[1].split("\n## ", 1)[0]
+        for row in (line for line in section.splitlines() if line.startswith("| `")):
+            cells = [cell.strip() for cell in row.strip("|").replace("\\|", "\x00").split("|")]
+            with self.subTest(row=row[:80]):
+                self.assertEqual(len(cells), 3, row)
+                self.assertTrue(cells[1] and cells[1] != "—", "the enabling extras/tools are named")
+
+    def test_every_env_dependent_baseline_test_is_listed(self) -> None:
+        """QA-SYS-10: 기존 633개 테스트 중 유지 대상 전부 통과. 삭제된 테스트는 삭제 이유가 커밋 메시지에 기록.
+        R11-2: the baseline table of docs/QA-ENV-DEPENDENT-TESTS.md is exactly the 633-test
+        baseline's tests that have a skip path, each with its reasons; none of them is in
+        docs/TEST-DELETIONS.md (a skip is not a deletion)."""
+        rows = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))["tests"]
+        baseline = {str(row["name"]).split("::", 1)[1] for row in rows if row["pre_phase0"]}
+        found = skipping_tests()
+        expected = {run for run, (defined, _) in found.items() if defined in baseline}
+        self.assertGreater(len(expected), 50)
+        self.assertEqual(documented_env_tests(), expected)
+        text = ENV_DEPENDENT_DOC.read_text(encoding="utf-8")
+        for run in sorted(expected):
+            row = next(line for line in text.splitlines() if line.startswith(f"| `{run}` |"))
+            for reason in found[run][1]:
+                with self.subTest(test=run, reason=reason):
+                    self.assertIn(reason.replace("|", "\\|"), row)
+        self.assertFalse(expected & set(documented_deletions()), "an environment-dependent test is not a deletion")
+
+    def test_static_skip_extractor_follows_helpers(self) -> None:
+        """QA-SYS-10: 기존 633개 테스트 중 유지 대상 전부 통과. 삭제된 테스트는 삭제 이유가 커밋 메시지에 기록.
+        R11-2: the extractor sees class decorators, setUp, same-module helpers and imported helpers."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "helpers.py").write_text(
+                "import unittest\n"
+                "def need_tool():\n    raise unittest.SkipTest(\"tool missing\")\n",
+                encoding="utf-8",
+            )
+            (root / "test_x.py").write_text(
+                "import unittest\n"
+                "from helpers import need_tool\n"
+                "REASON = \"const reason\"\n"
+                "def _helper():\n    raise unittest.SkipTest(f\"dyn {1 + 1}\")\n"
+                "@unittest.skipUnless(False, REASON)\n"
+                "class A(unittest.TestCase):\n    def test_a(self):\n        pass\n"
+                "class B(unittest.TestCase):\n"
+                "    def setUp(self):\n        self._check()\n"
+                "    def _check(self):\n        _helper()\n"
+                "    def test_b(self):\n        pass\n"
+                "class C(unittest.TestCase):\n    def test_plain(self):\n        pass\n"
+                "    @unittest.skipIf(True, \"deco\")\n    def test_deco(self):\n        pass\n"
+                "class D(B):\n    def test_d(self):\n        self.skipTest(\"inline\")\n"
+                "class E(unittest.TestCase):\n    def test_e(self):\n        need_tool()\n",
+                encoding="utf-8",
+            )
+            found = skipping_tests(root, base=root)
+        self.assertEqual(found["A.test_a"], ("A.test_a", {"const reason"}))
+        self.assertEqual(found["B.test_b"], ("B.test_b", {"dyn {1 + 1}"}))
+        self.assertEqual(found["C.test_deco"], ("C.test_deco", {"deco"}))
+        self.assertNotIn("C.test_plain", found)
+        self.assertEqual(found["D.test_d"], ("D.test_d", {"dyn {1 + 1}", "inline"}))
+        self.assertEqual(found["D.test_b"], ("B.test_b", {"dyn {1 + 1}"}))
+        self.assertEqual(found["E.test_e"], ("E.test_e", {"tool missing"}))
+
+
 class HarnessLogicTest(unittest.TestCase):
     """scripts/qa_phase0.py result folding (no suite run)."""
 
@@ -1559,6 +1644,33 @@ class HarnessLogicTest(unittest.TestCase):
         self.assertTrue(any("건너뛴 관련 테스트" in note for note in outcomes["QA-IN-1"]["notes"]))
         counts = {"통과": 1, "실패": 1, "수동": 0, "1단계": 0, "건너뜀(환경)": 2}
         self.assertEqual(self.harness.summary_line(counts), "1 통과 / 1 실패 / 0 수동 / 0 1단계 / 2 건너뜀(환경)")
+
+    def test_full_suite_skips_make_sys10_env_skipped_with_the_list(self) -> None:
+        """QA-SYS-10: 기존 633개 테스트 중 유지 대상 전부 통과. 삭제된 테스트는 삭제 이유가 커밋 메시지에 기록.
+        R11-2: a full-suite run with any skipped test records QA-SYS-10 as 건너뜀(환경), with the
+        skipped tests, their reasons and the baseline share in the note — never 통과."""
+        records = self._records(SYS_10__canon="passed", IN_1__a="passed")
+        records["deepfake_lens.tests.test_x.FooTest.test_pdf"] = self.harness.TestRecord(
+            "deepfake_lens.tests.test_x.FooTest.test_pdf", None, status="skipped", detail="pymupdf not installed")
+        records["deepfake_lens.tests.test_y.BarTest.test_new"] = self.harness.TestRecord(
+            "deepfake_lens.tests.test_y.BarTest.test_new", None, status="skipped", detail="node is not installed")
+        outcomes = self.harness.qa_outcomes(
+            records, {"QA-IN-1": ["IN_1__a"], "QA-SYS-10": ["SYS_10__canon"]}, full_suite=True, baseline={"FooTest.test_pdf"},
+        )
+        sys10 = outcomes["QA-SYS-10"]
+        self.assertEqual(sys10["result"], "건너뜀(환경)")
+        self.assertEqual(outcomes["QA-IN-1"]["result"], "통과")  # a skip elsewhere does not touch other QA IDs
+        self.assertEqual(len(sys10["suite_skipped"]), 2)
+        note = "; ".join(sys10["notes"])
+        self.assertIn("건너뜀(환경) 2건(기존 1개 기준선 중 1건)", note)
+        self.assertIn("docs/QA-ENV-DEPENDENT-TESTS.md", note)
+        self.assertIn("pymupdf not installed: FooTest.test_pdf", note)
+        self.assertIn("node is not installed: BarTest.test_new", note)
+        # Without skips the full suite still passes QA-SYS-10.
+        records = self._records(SYS_10__canon="passed", IN_1__a="passed")
+        outcomes = self.harness.qa_outcomes(records, {"QA-SYS-10": ["SYS_10__canon"]}, full_suite=True, baseline=set())
+        self.assertEqual(outcomes["QA-SYS-10"]["result"], "통과")
+        self.assertIn("건너뜀 0건", "; ".join(outcomes["QA-SYS-10"]["notes"]))
 
     def test_summary_and_rows_cover_every_requirement(self) -> None:
         """QA-SYS-10: 기존 633개 테스트 중 유지 대상 전부 통과. 삭제된 테스트는 삭제 이유가 커밋 메시지에 기록.

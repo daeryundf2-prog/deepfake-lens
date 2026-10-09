@@ -364,7 +364,7 @@ class RequireInputPathTest(unittest.TestCase):
         try:
             os.symlink(self.file, link)
         except OSError as exc:  # pragma: no cover - no symlink support
-            self.skipTest(str(exc))
+            self.skipTest(f"cannot create symlinks: {exc}")
         self.assertEqual(require_input_path(link, "file", symlinks="allow"), link)
         with self.assertRaises(UsageError) as ctx:
             require_input_path(link, "file")

@@ -15,7 +15,10 @@
    failed or it has no test, is 건너뜀(환경) when any of its tests was
    skipped (R10-3: a missing package, git history or tool is an environment
    gap, not a pass), and passes only when every one of its tests ran and
-   passed.
+   passed. R11-2: QA-SYS-10 ("유지 대상 전부 통과") also folds the whole
+   suite — any skipped test in the full run makes it 건너뜀(환경), and its
+   note lists every skipped test by reason with the count inside the 633-test
+   baseline; the enabling extras are in docs/QA-ENV-DEPENDENT-TESTS.md.
 3. Writes ``<log-dir>/<QA ID>.log`` per automated QA ID,
    ``<log-dir>/full-suite.log`` (one line per test, tracebacks of failures)
    and ``<log-dir>/results.json``.
@@ -70,11 +73,14 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from deepfake_lens.tests.qa.traceability import (  # noqa: E402
+    BASELINE_PATH,
+    ENV_DEPENDENT_DOC,
     TESTS_DIR,
     automated_criteria,
     iter_tests,
     load_traceability,
     qa_tag,
+    skipping_tests,
     tests_by_qa_id,
 )
 
@@ -241,6 +247,7 @@ def qa_outcomes(
     criterion_tests: dict[str, list[str]],
     *,
     full_suite: bool,
+    baseline: set[str] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Automated QA ID -> {result, tests, failed, skipped, notes}.
 
@@ -249,6 +256,7 @@ def qa_outcomes(
     folds them all with every other test tagged with the QA ID.
     """
     outcomes: dict[str, dict[str, Any]] = {}
+    baseline = load_baseline() if baseline is None else baseline
     suite_failures = sorted(test_id for test_id, record in records.items() if not record.ok)
     for qa_id, test_ids in criterion_tests.items():
         tagged = sorted(
@@ -277,6 +285,7 @@ def qa_outcomes(
         if skipped:
             notes.append("건너뛴 관련 테스트: " + ", ".join(
                 f"{test_id.rsplit('.', 1)[-1]} ({records[test_id].detail})" for test_id in skipped))
+        suite_skipped: list[str] = []
         if qa_id == FULL_SUITE_QA_ID:
             if not full_suite:
                 result = SKIPPED if result == PASS else result
@@ -285,15 +294,55 @@ def qa_outcomes(
                 result = FAIL
                 notes.append(f"전체 스위트 실패 {len(suite_failures)}건")
             else:
-                notes.append(f"전체 스위트 {len(records)}개 실행, 실패 0건")
+                # R11-2 (round 11): the full suite's own skips were ignored —
+                # the API-venv record showed QA-SYS-10 통과 with 14 of the 633
+                # baseline tests skipped. Any skip in the suite is
+                # 건너뜀(환경), and the skipped tests are listed with reasons.
+                suite_skipped = sorted(test_id for test_id, record in records.items() if record.status == "skipped")
+                if suite_skipped:
+                    result = SKIPPED if result == PASS else result
+                    notes.extend(full_suite_skip_notes(records, suite_skipped, baseline))
+                else:
+                    notes.append(f"전체 스위트 {len(records)}개 실행, 실패 0건, 건너뜀 0건")
         outcomes[qa_id] = {
             "result": result,
             "tests": [record.test_id for record in tagged],
             "failed": failed,
             "skipped": skipped,
+            "suite_skipped": suite_skipped,
             "notes": notes,
         }
     return outcomes
+
+
+def short_test_name(test_id: str) -> str:
+    """``Class.test_method`` of a unittest id (the unit of the QA-SYS-10 baseline)."""
+    return ".".join(test_id.rsplit(".", 2)[-2:])
+
+
+def load_baseline() -> set[str]:
+    """``Class.test_method`` of the 633 pre-phase-0 baseline tests (QA-SYS-10)."""
+    rows = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))["tests"]
+    return {str(row["name"]).split("::", 1)[1] for row in rows if row["pre_phase0"]}
+
+
+def full_suite_skip_notes(records: dict[str, TestRecord], suite_skipped: list[str], baseline: set[str]) -> list[str]:
+    """R11-2: the QA-SYS-10 note for a full-suite run with skips — counts, the
+    baseline share, and every skipped test grouped by its reason."""
+    defined = {name: entry[0] for name, entry in skipping_tests().items()}
+    in_baseline = [
+        test_id for test_id in suite_skipped
+        if short_test_name(test_id) in baseline or defined.get(short_test_name(test_id)) in baseline
+    ]
+    by_reason: dict[str, list[str]] = {}
+    for test_id in suite_skipped:
+        by_reason.setdefault(records[test_id].detail or "(사유 없음)", []).append(short_test_name(test_id))
+    listed = "; ".join(f"{reason}: {', '.join(names)}" for reason, names in sorted(by_reason.items()))
+    return [
+        f"전체 스위트 {len(records)}개 실행, 실패 0건, {SKIPPED} {len(suite_skipped)}건"
+        f"(기존 {len(baseline)}개 기준선 중 {len(in_baseline)}건) — 사유와 활성화 extras는 {_rel(ENV_DEPENDENT_DOC)}",
+        f"건너뛴 테스트(사유: 테스트): {listed}",
+    ]
 
 
 def write_logs(log_dir: Path, records: dict[str, TestRecord], outcomes: dict[str, dict[str, Any]], env: dict[str, Any]) -> dict[str, Path]:
@@ -433,9 +482,10 @@ def render(data: dict[str, Any], outcomes: dict[str, dict[str, Any]], log_paths:
         "| --- | --- | --- | --- |",
     ])
     for qa_id, outcome in outcomes.items():
+        note = "; ".join(outcome["notes"]).replace("|", "\\|") or "—"  # a skip reason may hold "|"
         lines.append(
             f"| {qa_id} | {len(outcome['failed'])}/{len(outcome['skipped'])}/{len(outcome['tests'])} "
-            f"| {outcome['result']} | {'; '.join(outcome['notes']) or '—'} |"
+            f"| {outcome['result']} | {note} |"
         )
     lines.extend(["", "## 수동·1단계", ""])
     for qa_id, entry in data["qa"].items():
