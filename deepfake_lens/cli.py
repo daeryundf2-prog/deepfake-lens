@@ -35,6 +35,7 @@ from .reports import write_eval_html_report, write_forensic_pdf_report, write_ht
 from .security import write_security_check
 from .signing import ReportKeyError, load_key_file, resolve_report_key
 from .cli_logging import configure_cli_logging
+from .error_text import read_error_ko
 from .training import write_neural_training_plan
 from .audio import analyze_audio
 from .face import analyze_faces
@@ -426,9 +427,19 @@ def main(argv: list[str] | None = None) -> int:
     except UsageError as exc:
         print(f"오류: {escape_echo(exc)}", file=sys.stderr)
         return VERIFY_EXIT_OTHER if args.command == "verify-report" else USAGE_EXIT
+    except (RecursionError, ValueError) as exc:
+        # R10-5 (round 10): an input the command could not take — a JSON
+        # nested past the recursion limit, a value it cannot use — is an
+        # input error with the documented code (verify-report 4, else 2),
+        # never 1 (verify-report's 1 means "변조됨").
+        logs.command_errors += 1
+        logging.getLogger(__name__).exception("command %s: input error", args.command)
+        print(f"오류: {INPUT_ERROR_MESSAGE.format(reason=escape_echo(read_error_ko(exc)), log=logs.log_hint())}", file=sys.stderr)
+        return VERIFY_EXIT_OTHER if args.command == "verify-report" else USAGE_EXIT
     except Exception as exc:  # noqa: BLE001 - N4: never an English traceback on the console
+        logs.command_errors += 1
         logging.getLogger(__name__).exception("command %s failed", args.command)
-        print(f"오류: 처리 중 예기치 않은 오류가 발생했습니다({type(exc).__name__}) — 상세는 로그 파일을 확인하십시오", file=sys.stderr)
+        print(f"오류: 처리 중 예기치 않은 오류가 발생했습니다({type(exc).__name__}) — 상세는 {logs.log_hint()}", file=sys.stderr)
         return UNEXPECTED_ERROR_EXIT
     finally:
         logs.finish()
@@ -438,6 +449,8 @@ def main(argv: list[str] | None = None) -> int:
 # input path, bad option value), 1 = the command ran and failed.
 USAGE_EXIT = 2
 UNEXPECTED_ERROR_EXIT = 1
+# R10-5: RecursionError/ValueError escaping a command (an unusable input).
+INPUT_ERROR_MESSAGE = "입력을 처리할 수 없습니다({reason}) — 상세는 {log}"
 
 
 def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_parsers: dict[str, argparse.ArgumentParser]) -> int:

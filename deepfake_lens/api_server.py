@@ -1120,7 +1120,7 @@ def create_app(
         body = await request.body()
         try:
             data = json.loads(body.decode("utf-8") if body else "{}")
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):  # R10-5
             raise HTTPException(status_code=400, detail="JSON 본문을 해석할 수 없습니다")
         if not isinstance(data, dict):
             raise HTTPException(status_code=400, detail=REVIEW_BODY_NOT_OBJECT)  # P8: was a 500
@@ -1145,7 +1145,7 @@ def create_app(
         body = await request.body()
         try:
             data = json.loads(body.decode("utf-8") if body else "{}")
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):  # R10-5
             raise HTTPException(status_code=400, detail="JSON 본문을 해석할 수 없습니다")
         if not isinstance(data, dict):
             raise HTTPException(status_code=400, detail=REVIEW_BODY_NOT_OBJECT)  # P8: was a 500

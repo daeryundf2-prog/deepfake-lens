@@ -1012,7 +1012,10 @@ class ApiServeMissingDependenciesTest(unittest.TestCase):
         err = io.StringIO()
         with patch.object(api_server, "missing_server_dependencies", return_value=["fastapi", "uvicorn"]), \
                 contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as ctx:
-            cli.main(["api-serve", "--port", "0"])
+            # R10-5: was "--port 0" — the port is now checked first (1–65535,
+            # exit 2 before anything else), so a valid port reaches the
+            # dependency check this test is about.
+            cli.main(["api-serve", "--port", "8765"])
         self.assertEqual(ctx.exception.code, 2)
         message = err.getvalue()
         self.assertIn("pip install fastapi uvicorn", message)

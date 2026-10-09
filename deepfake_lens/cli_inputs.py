@@ -158,7 +158,7 @@ def read_json_input(path: Path | str, what: str, *, require_object: bool = True)
     text = read_text_input(path, what)
     try:
         payload = json.loads(text)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, RecursionError) as exc:  # R10-5: too-deep nesting is unreadable input
         raise UsageError(INPUT_JSON_ERROR.format(what=object_particle(what), path=path, reason=read_error_ko(exc))) from exc
     if require_object and not isinstance(payload, dict):
         raise UsageError(INPUT_NOT_OBJECT.format(what=object_particle(what), path=path, kind=json_kind_ko(payload)))
@@ -381,7 +381,7 @@ def require_threshold_profile(path: Path | str) -> None:
     text = read_text_input(path, "임계값 파일")
     try:
         json.loads(text)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, RecursionError) as exc:  # R10-5
         raise UsageError(f"{THRESHOLDS_UNREADABLE.format(path=path)} — {read_error_ko(exc)}") from exc
     if load_threshold_profile(path) is None:
         raise UsageError(THRESHOLDS_UNREADABLE.format(path=path))

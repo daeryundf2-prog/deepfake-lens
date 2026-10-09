@@ -850,6 +850,11 @@ def decode_error_ko(exc: UnicodeDecodeError) -> str:
     return f"{exc.encoding.upper() if exc.encoding else '텍스트'} 텍스트가 아닙니다(바이트 위치 {exc.start})"
 
 
+# R10-5 (round 10): a JSON input nested deeper than Python's recursion limit
+# (json.loads raises RecursionError) is an unreadable input, not an internal error.
+JSON_TOO_DEEP_KO = "JSON 중첩이 너무 깊습니다(파이썬 재귀 한도 초과)"
+
+
 def read_error_ko(exc: BaseException) -> str:
     """Korean reason a file input could not be read or parsed (P4/P9)."""
     import json
@@ -858,6 +863,9 @@ def read_error_ko(exc: BaseException) -> str:
         return decode_error_ko(exc)
     if isinstance(exc, json.JSONDecodeError):
         return json_error_ko(exc)
+    if isinstance(exc, RecursionError):
+        # R10-5: "[[[[…]]]]" nested past Python's recursion limit.
+        return JSON_TOO_DEEP_KO
     if isinstance(exc, OSError) and exc.errno in _ERRNO_KO:
         # The CLI names the file itself; "[Errno 2]" is not repeated (P9).
         return f"{_ERRNO_KO[exc.errno]}(오류 번호 {exc.errno})"

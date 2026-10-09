@@ -163,7 +163,7 @@ def load_evidence_chains(path: Path | str) -> tuple[list[EvidenceChain], list[st
 
     try:
         data = json.loads(evidence_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, RecursionError) as exc:  # R10-5
         return [], [f"JSON 형식 오류: {exc}"]
     if not isinstance(data, list):
         return [], ["최상위 구조가 예상과 다릅니다(체인 목록이어야 합니다)"]

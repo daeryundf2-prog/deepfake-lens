@@ -514,3 +514,76 @@ class RedactInstallPathsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InputErrorExitCodesTest(unittest.TestCase):
+    """R10-5 (round 10): an unusable input exits with the documented code, never 1.
+
+    A JSON nested past the recursion limit made ``verify-report`` exit 1 (its
+    "변조됨" code) and ``evidence-statement`` exit 1 (documented: 2); ``web``/
+    ``api-serve --port -1|99999`` reached the socket (OverflowError, exit 1);
+    and a command that failed before producing any row still printed "처리
+    오류 1건 — 각 행의 검사 범위(coverage)에 사유가 기록".
+    """
+
+    ROW_NOTE = "참고: 판독 불가·손상 파일 등 처리 오류"
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.deep = self.root / "deep.json"
+        self.deep.write_text("[" * 100000 + "]" * 100000, encoding="utf-8")
+        self.deep_object = self.root / "deep_object.json"
+        self.deep_object.write_text('{"items": ' + "[" * 100000 + "]" * 100000 + "}", encoding="utf-8")
+        self.env = {"DEEPFAKE_LENS_LOG_DIR": str(self.root / "logs"), "HOME": str(self.root)}
+
+    def test_deeply_nested_json_is_an_input_error(self) -> None:
+        for argv, expected in (
+            (["verify-report", str(self.deep)], 4),
+            (["verify-report", str(self.deep_object)], 4),
+            (["evidence-statement", str(self.deep)], 2),
+            (["evidence-statement", str(self.deep_object)], 2),
+            (["feedback", str(self.deep)], 2),
+        ):
+            with self.subTest(argv=argv[0], file=Path(argv[1]).name):
+                code, _, err = _run(argv, env=self.env)
+                self.assertEqual(code, expected, err)
+                self.assertIn("JSON 중첩이 너무 깊습니다", err)
+                self.assertNotIn(self.ROW_NOTE, err)
+                self.assertNotIn("Traceback", err)
+
+    def test_port_outside_1_to_65535_is_a_usage_error(self) -> None:
+        for command in ("web", "api-serve"):
+            for port in ("-1", "0", "65536", "99999", "x"):
+                with self.subTest(command=command, port=port):
+                    err = io.StringIO()
+                    with mock.patch.dict(os.environ, self.env), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                        with self.assertRaises(SystemExit) as raised:
+                            cli_main([command, "--port", port])
+                    self.assertEqual(raised.exception.code, 2)
+                    self.assertIn("인수 --port: 포트는 1–65535 범위의 정수여야 합니다", err.getvalue())
+                    self.assertNotIn("argument", err.getvalue())
+        from deepfake_lens.cli_parser import port_number
+
+        self.assertEqual((port_number("1"), port_number("65535")), (1, 65535))
+
+    def test_value_or_recursion_error_of_a_command_uses_the_input_error_code(self) -> None:
+        for exc in (RecursionError("maximum recursion depth exceeded"), ValueError("bad value")):
+            for argv, expected in ((["verify-report", str(self.deep)], 4), (["doctor"], 2)):
+                with self.subTest(exc=type(exc).__name__, command=argv[0]):
+                    with mock.patch("deepfake_lens.cli._run_command", side_effect=exc), \
+                            mock.patch("deepfake_lens.cli_inputs.read_json_input", return_value={}):
+                        code, _, err = _run(argv, env=self.env)
+                    self.assertEqual(code, expected, err)
+                    self.assertIn("오류: 입력을 처리할 수 없습니다", err)
+                    self.assertIn(str(self.root / "logs" / "deepfake-lens.log"), err)
+                    self.assertNotIn(self.ROW_NOTE, err)  # no row was produced
+
+    def test_unexpected_error_names_the_log_and_claims_no_rows(self) -> None:
+        with mock.patch("deepfake_lens.cli._run_command", side_effect=RuntimeError("boom")):
+            code, _, err = _run(["doctor"], env=self.env)
+        self.assertEqual(code, 1)
+        self.assertIn("예기치 않은 오류가 발생했습니다(RuntimeError)", err)
+        self.assertIn(str(self.root / "logs" / "deepfake-lens.log"), err)
+        self.assertNotIn(self.ROW_NOTE, err)

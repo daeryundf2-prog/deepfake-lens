@@ -234,7 +234,7 @@ def load_manifest(path: Path | str) -> dict[str, Any]:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
     except OSError as exc:
         raise ManifestError(f"매니페스트를 읽을 수 없습니다: {path} ({exc})") from exc
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, RecursionError) as exc:  # R10-5: too-deep nesting is a damaged manifest
         raise ManifestError(f"매니페스트 JSON이 손상되었습니다: {path} ({exc})") from exc
     if not isinstance(payload, dict) or payload.get("schema") != SCHEMA:
         raise ManifestError(f"스키마가 {SCHEMA}가 아닙니다: {path}")

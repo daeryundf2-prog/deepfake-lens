@@ -48,6 +48,8 @@ _ARGPARSE_ERRORS_KO: tuple[tuple[re.Pattern[str], str], ...] = tuple(
         (r"^ambiguous option: (.+?) could match (.+)$", r"모호한 옵션 \1 — 후보: \2"),
         (r"^one of the arguments (.+) is required$", r"다음 인수 중 하나가 필요합니다: \1"),
         (r"^argument (.+?): (경로가 비어 있습니다.*)$", r"인수 \1: \2"),
+        # R10-5: every Korean ArgumentTypeError (port range, ratios …).
+        (r"^argument (.+?): ([\uac00-\ud7a3].*)$", r"인수 \1: \2"),
     )
 )
 
@@ -105,6 +107,24 @@ def _refuse_empty_paths(parser: argparse.ArgumentParser) -> None:
 # "\xNN"/"\uNNNN". R10-1: the one implementation is
 # result_text.escape_controls (shared with display_name, which every report
 # uses for file names); it also shows zero-width/bidi format characters.
+
+
+# R10-5 (round 10): --port -1 / 99999 reached the socket call (OverflowError,
+# exit 1). A TCP port to listen on is 1-65535 (RFC 6335 §6; 0 would ask the
+# OS for a random port, which a browser URL cannot name).
+PORT_MIN, PORT_MAX = 1, 65535
+PORT_RANGE_MESSAGE = f"포트는 {PORT_MIN}–{PORT_MAX} 범위의 정수여야 합니다: {{value}}"
+
+
+def port_number(text: str) -> int:
+    """argparse type of ``--port``: an integer in 1–65535 (R10-5), else exit 2."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(PORT_RANGE_MESSAGE.format(value=escape_echo(repr(text)))) from None
+    if not PORT_MIN <= value <= PORT_MAX:
+        raise argparse.ArgumentTypeError(PORT_RANGE_MESSAGE.format(value=value))
+    return value
 
 
 def escape_echo(text: object) -> str:
@@ -477,7 +497,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
 
     api_parser = subparsers.add_parser("api-serve", help="REST API 서버 시작(fastapi/uvicorn 필요)")
     api_parser.add_argument("--host", type=str, default="127.0.0.1", help="바인딩할 호스트")
-    api_parser.add_argument("--port", type=int, default=8765, help="수신 포트")
+    api_parser.add_argument("--port", type=port_number, default=8765, metavar="<포트>", help=f"수신 포트({PORT_MIN}–{PORT_MAX})")
     api_parser.add_argument("--token", type=str, help="/api 요청에 X-API-Token 헤더를 요구(localhost 외 호스트에서는 필수)")
     api_parser.add_argument("--allow-root", type=Path, action="append", default=[], help="API가 읽을 수 있는 폴더(반복 지정 가능); 모든 --allow-root 밖의 경로 요청은 403")
 
@@ -551,7 +571,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     web_parser = subparsers.add_parser("web", help="로컬 웹 앱(GUI) 시작")
     web_parser.add_argument("--folder", type=Path, help="GUI가 처음 열 증거 폴더(읽기 허용 폴더로 등록됨)")
     web_parser.add_argument("--host", default="127.0.0.1", help="바인딩할 호스트")
-    web_parser.add_argument("--port", type=int, default=8765, help="수신 포트")
+    web_parser.add_argument("--port", type=port_number, default=8765, metavar="<포트>", help=f"수신 포트({PORT_MIN}–{PORT_MAX})")
     web_parser.add_argument("--allow-lan", action="store_true", help="같은 네트워크의 다른 기기 접속 허용(--token 필수)")
     web_parser.add_argument("--token", default=None, help="--allow-lan 때 요구할 API 토큰")
     web_parser.add_argument("--models-dir", type=Path, help="vendor-weights --install로 준비한 모델 폴더")

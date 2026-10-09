@@ -348,7 +348,7 @@ def build_server(
                     return
                 try:
                     raw = json.loads(self.rfile.read(length).decode("utf-8"))
-                except (json.JSONDecodeError, UnicodeDecodeError):
+                except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):  # R10-5
                     self.send_error(400, "JSON을 해석할 수 없습니다")
                     return
                 if not isinstance(raw, dict):
@@ -435,7 +435,7 @@ def build_server(
             if "application/json" in content_type:
                 try:
                     payload = json.loads(body.decode("utf-8", errors="replace"))
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, RecursionError):  # R10-5: too-deep nesting is a 400
                     self._send_json({"error": "JSON 본문을 해석할 수 없습니다"}, status=400)
                     return
                 if not isinstance(payload, dict):

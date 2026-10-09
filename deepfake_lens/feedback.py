@@ -84,7 +84,7 @@ def parse_feedback_rows(text: str, path: Path | str) -> list[object]:
     text = text.removeprefix("\ufeff")
     try:
         payload = json.loads(text)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError):  # R10-5: a too-deep document is read line by line (and refused)
         payload = None
     if isinstance(payload, list):
         return payload
@@ -100,7 +100,7 @@ def parse_feedback_rows(text: str, path: Path | str) -> list[object]:
             continue
         try:
             rows.append(json.loads(line))
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, RecursionError) as exc:
             raise FeedbackFileError(FEEDBACK_LINE_UNPARSABLE.format(line=number, path=path, reason=read_error_ko(exc))) from exc
     return rows
 
