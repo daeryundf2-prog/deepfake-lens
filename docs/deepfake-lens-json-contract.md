@@ -160,6 +160,17 @@ always `0` invited old-contract readings. They remain readable as
   `/api/analyze-upload` and `/api/check`) is escaped like any real file's
   (`t:::c.png` → `t\:\:\:c.png`), so it never holds `::`; `name` is the name
   the client sent.
+- R12-7 (round 12): a row's `sha256` is the hash of the bytes its verdict
+  came from. The scanner takes the file's state (size, `mtime_ns`, inode,
+  device) before and after the analysis and its SHA-256 after it — and
+  before it too for files up to 64 MiB (`core.REHASH_MAX_BYTES`), so a
+  rewrite that restores size and mtime is caught; a larger file is compared
+  by state and by the scan's earlier hash when one was taken (dedupe,
+  cache). When anything differs the row is `판단 불가` whatever its
+  evidence (a deterministic item no longer decides), `sha256` is `null`,
+  and `coverage` holds `{"check": "file_integrity", "status": "failed",
+  "reason": "분석 중 파일 변경 — 판단 불가: …"}` (label 분석 전후 파일
+  동일성); the row is never cached.
 - R12-4 (round 12): every row except an archive member carries `path_b64`
   — its real relative path (`path` with the R9-1 escape undone) as URL-safe
   base64 of the file-system bytes (`os.fsencode`; a non-UTF-8 name's

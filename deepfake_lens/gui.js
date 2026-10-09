@@ -315,7 +315,7 @@
             rppg: 'rPPG 맥박 검사', avatar: '아바타 검사', lipsync: '립싱크 검사', face_track: '얼굴 트랙 검사',
             audio_analysis: '오디오 분석', audio_features: '오디오 특징 추출', video_analysis: '영상 분석', av_audio: '영상 음성 트랙 분석',
             document_text: '문서 텍스트 추출', text_lexical: '어휘·문체 신호', archive: '압축 해제',
-            archive_member: '압축 구성 파일',
+            archive_member: '압축 구성 파일', file_integrity: '분석 전후 파일 동일성',
         };
         const COVERAGE_STATUS_LABELS = { ran: '실행', skipped: '미실행', failed: '실패' };
         // B5: same table as result_types.SOURCE_CONFIDENCE_LABELS; a text or

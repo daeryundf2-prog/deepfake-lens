@@ -326,6 +326,7 @@ CHECK_LABELS = {
     "text_lexical": "어휘·문체 신호",
     "archive": "압축 해제",
     "archive_member": "압축 구성 파일",
+    "file_integrity": "분석 전후 파일 동일성",
 }
 
 

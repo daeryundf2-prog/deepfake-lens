@@ -751,6 +751,12 @@ def _scan_specs(
             cached_item = _cached_scan_item(cache_items.get(key) if key and isinstance(cache_items, dict) else None, path, root=root)
             if cached_item is not None:
                 return _with_content_sha256(cached_item, path, fingerprints), key, True
+        # R12-7: the file's state before the analysis — compared afterwards so a
+        # file rewritten mid-analysis never gets a hash its verdict was not made from.
+        before = _file_state(path)
+        pre_digest = fingerprints.get(path) or (
+            _file_fingerprint(path) if before is not None and before[0] <= REHASH_MAX_BYTES else None
+        )
         try:
             item = analyze_file(
             path,
@@ -779,7 +785,14 @@ def _scan_specs(
                 error=f"분석 오류: {failure_reason(exc)}",
             )
             return item, key, False
-        item = _with_content_sha256(item, path, fingerprints)
+        post_digest = _file_fingerprint(path)
+        if before is None or _file_state(path) != before or not post_digest or (pre_digest is not None and pre_digest != post_digest):
+            logger.warning("file changed during analysis: %s", path)
+            fingerprints.pop(path, None)
+            item, key = _changed_during_analysis(item), None  # never cached
+        else:
+            fingerprints[path] = post_digest
+            item = _with_content_sha256(item, path, fingerprints)
         if identity is not None:
             archive_members.setdefault(identity[0], []).append(item)
         return item, key, False
@@ -851,6 +864,56 @@ def _scan_specs(
 
     sorted_items = sort_items(items)
     return summarize(sorted_items, capped=capped, cached=cached_count), sorted_items
+
+# R12-7 (round 12): a file rewritten while it was analyzed got the hash of
+# other bytes than the ones its verdict came from. Its state (size, mtime_ns,
+# inode, device) is taken before and after the analysis and its SHA-256
+# after it — and, up to this size, also before it (a rewrite that restores
+# the size and mtime is caught too; larger files are compared by state and
+# by the scan's earlier hash when one was taken). 64 MiB covers photos,
+# documents and short clips at the cost of one more read.
+REHASH_MAX_BYTES = 64 * 1024 * 1024
+FILE_INTEGRITY_CHECK = "file_integrity"
+FILE_CHANGED_REASON = (
+    "분석 중 파일 변경 — 판단 불가: 분석 전후로 크기·수정 시각·inode 또는 내용 해시가 다릅니다 "
+    "(분석한 바이트를 특정할 수 없어 해시를 기록하지 않았습니다 — 파일이 바뀌지 않는 상태에서 다시 검사하십시오)"
+)
+
+
+def _file_state(path: Path) -> tuple[int, int, int, int] | None:
+    try:
+        info = os.stat(path)
+    except OSError:
+        return None
+    return (info.st_size, info.st_mtime_ns, info.st_ino, info.st_dev)
+
+
+def _changed_during_analysis(item: ScanItem) -> ScanItem:
+    """R12-7: the row of a file that changed while it was analyzed — 판단 불가, no hash.
+
+    Its evidence came from bytes that can no longer be identified, so even a
+    deterministic synthetic item does not decide (rule 2 does not apply).
+    """
+    entry = CoverageEntry(FILE_INTEGRITY_CHECK, CoverageStatus.FAILED, FILE_CHANGED_REASON)
+    result = item.result
+    if result is None:
+        return replace(item, sha256=None, error=item.error or FILE_CHANGED_REASON)
+    changed = replace(
+        result,
+        score=0,
+        ai_score=0,
+        probability=None,
+        probability_ci=None,
+        score_is_calibrated=False,
+        band=band_for_verdict(Verdict.UNDETERMINED),
+        band_label=VERDICT_LABELS[Verdict.UNDETERMINED],
+        verdict_code=Verdict.UNDETERMINED,
+        verdict=f"{item.name}: 판단 불가 — {FILE_CHANGED_REASON}",
+        coverage=[*result.coverage, entry],
+        limitations=[f"검사 실패 — {entry.describe()}", *result.limitations],
+    )
+    return replace(item, result=changed, sha256=None)
+
 
 def analyze_file(
     path: Path | str,
