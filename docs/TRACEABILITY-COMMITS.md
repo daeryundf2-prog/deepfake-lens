@@ -4,7 +4,7 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–8)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..53251a3`(병합 커밋 제외, 커밋 116개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..aa0afa7`(병합 커밋 제외, 커밋 126개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
 요약: ID 123개 — 스펙 갭에 매핑 71개(그중 신규 사유 병기 8개), 신규(스펙 외)만 52개.
 
@@ -136,20 +136,20 @@ Y13/P12: 검증 결함 ID(라운드 1–8)를 0단계 스펙의 갭 ID(G1–G34)
 | Z3 | 8 | forensic <파일>/ (끝 구분자) → 폴더가 아니라 파일입니다 exit 2, 모든 명령의 require_input_path에서 정규화 | G7 |  | 12af9d0 |
 | Z4 | 8 | verify-report 깨진·객체 아닌 JSON → stderr 오류: 보고서 JSON을 해석할 수 없습니다 exit 4(종전 stdout '읽을 수 없음') | — | 신규(스펙 외): CLI 오류 처리(stdout 대신 stderr, 문서화된 exit 4) — 갭 목록 밖 | 12af9d0 |
 | Z5 | 8 | --*-out 출력이 없는 폴더 안 → 검사 전 오류: 출력 폴더가 없습니다 exit 2, 폴더를 만들지 않음 | — | 신규(스펙 외): CLI 출력 경로 검증(Y7 연장) — 갭 목록 밖 | 12af9d0 |
-| P1 | 8 | /api/report가 행을 스캔 폴더가 아니라 read root 기준으로 해석 → 하위 폴더 스캔 보고서가 루트의 동명 파일을 서명 | G30, G31 |  | — |
-| P2 | 8 | 캐시 이름 변경 치환이 파일명을 정규식 템플릿으로 사용 → 백슬래시 파일명에서 warm --cache 스캔 exit 1 | G11 |  | — |
-| P3 | 8 | --recursive --allow-symlinks가 디렉토리 링크를 무한 추적(루트 상위·상호 링크) | G32, G34 |  | — |
-| P4 | 8 | 비UTF-8 --thresholds 등 파일 읽기 진입점의 UnicodeDecodeError traceback → 한국어 exit 2 | G7 |  | — |
-| P5 | 8 | 거부된 아카이브 멤버·건너뛴 하위 폴더 안 파일이 '기록되지 않은 파일'에 미집계 | G12, G34 |  | — |
-| P6 | 8 | 업로드 파일명이 read root 파일명과 같으면 루트 파일로 재분석되어 서명 | G30, G31 |  | — |
-| P7 | 8 | 실제 경로의 '::'가 아카이브 멤버 경로와 충돌 → 행 식별자 container/member 필드, 표시 '::' 이스케이프 | G30, G34 |  | — |
-| P8 | 8 | api-serve 고유 엔드포인트가 없는 파일에 200/500, 비객체 JSON 본문 500, 비미디어 preview 403 | G8, G34 |  | — |
-| P9 | 8 | Y1/Z4 오류에 영어 예외 상세(JSONDecodeError 메시지) | — | 신규(스펙 외): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖 | — |
-| P10 | 8 | 읽기 전용 출력 폴더가 스캔 후에야 실패('처리 오류 N건'으로 오해) | — | 신규(스펙 외): CLI 출력 경로 검증(Y7/Z5 연장) — 갭 목록 밖 | — |
-| P11 | 8 | --json-out 등이 검사 대상 폴더 안·입력 JSON을 가리킬 수 있음 | G31 |  | — |
-| P12 | 8 | Y13 추적성 표의 해시가 전부 리라이트 이전 → 현재 히스토리에서 재생성하는 스크립트와 CI --check | — | 신규(스펙 외): 커밋 추적성(공통 규칙 1) — 갭 목록 밖 | — |
-| P13 | 8 | 영어 탐지기 우회: ProbablyFake, FakeImageDetected, probably_fake, AUTHENTIC — 결론 단어 단독 등장 | — | 신규(스펙 외): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖 | — |
-| P14 | 8 | Gaps를 제목에만 적은 커밋 — 규칙상 허용, 추적표 스크립트가 제목·본문 모두 인식 | — | 신규(스펙 외): 커밋 추적성(공통 규칙 1) — 갭 목록 밖 | — |
+| P1 | 8 | /api/report가 행을 스캔 폴더가 아니라 read root 기준으로 해석 → 하위 폴더 스캔 보고서가 루트의 동명 파일을 서명 | G30, G31 |  | 6e5fe69 |
+| P2 | 8 | 캐시 이름 변경 치환이 파일명을 정규식 템플릿으로 사용 → 백슬래시 파일명에서 warm --cache 스캔 exit 1 | G11 |  | fb1b52b |
+| P3 | 8 | --recursive --allow-symlinks가 디렉토리 링크를 무한 추적(루트 상위·상호 링크) | G32, G34 |  | 62bd96e |
+| P4 | 8 | 비UTF-8 --thresholds 등 파일 읽기 진입점의 UnicodeDecodeError traceback → 한국어 exit 2 | G7 |  | edafb9a |
+| P5 | 8 | 거부된 아카이브 멤버·건너뛴 하위 폴더 안 파일이 '기록되지 않은 파일'에 미집계 | G12, G34 |  | 00bd8a5 |
+| P6 | 8 | 업로드 파일명이 read root 파일명과 같으면 루트 파일로 재분석되어 서명 | G30, G31 |  | 6e5fe69 |
+| P7 | 8 | 실제 경로의 '::'가 아카이브 멤버 경로와 충돌 → 행 식별자 container/member 필드, 표시 '::' 이스케이프 | G30, G34 |  | 9d89129 |
+| P8 | 8 | api-serve 고유 엔드포인트가 없는 파일에 200/500, 비객체 JSON 본문 500, 비미디어 preview 403 | G8, G34 |  | aa0afa7 |
+| P9 | 8 | Y1/Z4 오류에 영어 예외 상세(JSONDecodeError 메시지) | — | 신규(스펙 외): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖 | edafb9a |
+| P10 | 8 | 읽기 전용 출력 폴더가 스캔 후에야 실패('처리 오류 N건'으로 오해) | — | 신규(스펙 외): CLI 출력 경로 검증(Y7/Z5 연장) — 갭 목록 밖 | 4ce5a7e |
+| P11 | 8 | --json-out 등이 검사 대상 폴더 안·입력 JSON을 가리킬 수 있음 | G31 |  | 4ce5a7e |
+| P12 | 8 | Y13 추적성 표의 해시가 전부 리라이트 이전 → 현재 히스토리에서 재생성하는 스크립트와 CI --check | — | 신규(스펙 외): 커밋 추적성(공통 규칙 1) — 갭 목록 밖 | 3baee5c |
+| P13 | 8 | 영어 탐지기 우회: ProbablyFake, FakeImageDetected, probably_fake, AUTHENTIC — 결론 단어 단독 등장 | — | 신규(스펙 외): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖 | e63c0c4 |
+| P14 | 8 | Gaps를 제목에만 적은 커밋 — 규칙상 허용, 추적표 스크립트가 제목·본문 모두 인식 | — | 신규(스펙 외): 커밋 추적성(공통 규칙 1) — 갭 목록 밖 | 3baee5c |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -293,3 +293,13 @@ P14: Gaps를 제목 괄호에만 적은 커밋(예: `(Z1-Z5; Gaps: G7, 신규)`)
 | 382fb18 | 7 | Y13 | Gaps: 신규(스펙 외) | subject | docs(qa): Y13 verification-ID -> spec-gap mapping table and JSON for the commit-message rewrite (Y13; Gaps: 신규) |
 | 12af9d0 | 8 | Z1, Z2, Z3, Z4, Z5 | Gaps: G7; 신규(스펙 외) | subject | fix(cli): Z1-Z5 usage errors for realtime/vendor-weights/trailing slash/verify-report/output folders (Z1-Z5; Gaps: G7, 신규) |
 | 53251a3 | 8 | WP-J | Gaps: G26, G27, G28 | body | docs(qa): CONFORMANCE.md regenerated on 12af9d0 (WP-J) |
+| 3baee5c | 8 | P12, P14 | Gaps: 신규(스펙 외) | body | docs(qa): P12 traceability table regenerated from the current history by script; CI --check (P12, P14; Gaps: 신규) |
+| fb1b52b | 8 | P2 | Gaps: G11 | body | fix(cache): P2 a cached row's file name is inserted literally, never as a regex template (P2; Gaps: G11) |
+| 62bd96e | 8 | P3 | Gaps: G32, G34 | body | fix(scan): P3 symlinked folders to the root's parents or to each other end the walk; walk limits (P3; Gaps: G32, G34) |
+| edafb9a | 8 | P4, P9 | Gaps: G7; 신규(스펙 외) | body | fix(cli): P4 P9 every file input reports encoding/read/JSON errors in Korean before any work, exit 2 (P4, P9; Gaps: G7, 신규) |
+| 4ce5a7e | 8 | P10, P11 | Gaps: G31; 신규(스펙 외) | body | fix(cli): P10 P11 outputs checked before any work — writable folder, never inside the examined folder or on an input (P10, P11; Gaps: G31, 신규) |
+| e63c0c4 | 8 | P13 | Gaps: 신규(스펙 외) | body | fix(korean): P13 conclusion words fail the English detector alone or inside code tokens (P13; Gaps: 신규) |
+| 00bd8a5 | 8 | P5 | Gaps: G12, G34 | body | fix(reports): P5 refused archive members, files inside skipped subfolders and failed rows are "기록되지 않은 파일" (P5; Gaps: G12, G34) |
+| 6e5fe69 | 8 | P1, P6 | Gaps: G30, G31 | body | fix(report): P1 P6 /api/report resolves rows against the scan's scan_root only; upload rows are never re-analyzed or signed (P1, P6; Gaps: G30, G31) |
+| 9d89129 | 8 | P7 | Gaps: G30, G34 | body | fix(rows): P7 archive members are identified by container/member fields; "::" in a real path is escaped (P7; Gaps: G30, G34) |
+| aa0afa7 | 8 | P8 | Gaps: G8, G34 | body | fix(servers): P8 api-serve file endpoints 404/400 for missing files and folders; non-object review bodies, non-media preview, cut-off uploads; every error-table row tested (P8; Gaps: G8, G34) |
