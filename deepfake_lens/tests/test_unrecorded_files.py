@@ -179,6 +179,93 @@ class UnrecordedFilesTest(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertIn("심볼릭 링크: ", stdout)
 
+    def test_p5_refused_archive_members_are_unrecorded_files(self) -> None:
+        """P5 (round 8): legal-report on a zip bomb said "없음 — 모든 파일에 분석 결과가 있습니다";
+        refused members (bomb, path escape, link) are counted with their categories."""
+        import stat
+        import zipfile
+
+        arc = self.out / "evil.zip"
+        with zipfile.ZipFile(arc, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+            zf.writestr("zeros.bin", bytes(8 * 1024 * 1024))
+            zf.writestr("ok.txt", "정상 구성 파일입니다. 사람이 쓴 짧은 메모입니다.")
+            zf.writestr("../escape.txt", "밖으로 나가려는 멤버")
+            link = zipfile.ZipInfo("link.txt")
+            link.external_attr = (stat.S_IFLNK | 0o777) << 16
+            zf.writestr(link, "ok.txt")
+        out = self.out / "lr-zip.json"
+        code, stdout, _ = _run(["legal-report", str(arc), "--json-out", str(out)])
+        self.assertEqual(code, 0)
+        body = json.loads(out.read_text(encoding="utf-8"))["unrecorded_files"]
+        counts = {entry["code"]: entry["count"] for entry in body["reasons"]}
+        self.assertEqual(counts["archive_rejected"], 3)
+        self.assertEqual(body["total_files"], 3)
+        self.assertEqual(body["archive_rejected_by_category"], {"압축 폭탄·예산 초과": 1, "경로 이탈": 1, "링크·특수 파일": 1})
+        self.assertNotIn("없음", "\n".join(body["lines"]))
+        self.assertIn("압축 거부 멤버: 압축 파일에서 거부되어 추출·분석하지 않은 구성 파일 3개", stdout)
+        self.assertNotIn("모든 파일에 분석 결과가 있습니다", stdout)
+
+    def test_p5_flat_scan_counts_the_files_inside_skipped_subfolders(self) -> None:
+        """P5 (round 8): a flat scan counted the subfolders it skipped but not the files inside;
+        each subfolder's files are counted recursively (symlinks neither followed nor counted)."""
+        (self.folder / "sub" / "deeper").mkdir()
+        (self.folder / "sub" / "deeper" / "a.txt").write_text("더 깊은 메모", encoding="utf-8")
+        (self.folder / "sub2").mkdir()
+        for name in ("b.txt", "c.txt"):
+            (self.folder / "sub2" / name).write_text("두 번째 하위 폴더", encoding="utf-8")
+        outside = self.out / "elsewhere"
+        outside.mkdir()
+        (outside / "not-counted.txt").write_text("링크 대상", encoding="utf-8")
+        with contextlib.suppress(OSError, NotImplementedError):
+            os.symlink(outside, self.folder / "sub2" / "linked")
+            os.symlink("b.txt", self.folder / "sub2" / "b-link.txt")
+        scan_json = self.out / "flat.json"
+        code, stdout, _ = _run(["scan", str(self.folder), "--json-out", str(scan_json), "--max-files", "500"])
+        self.assertEqual(code, 0)
+        payload = json.loads(scan_json.read_text(encoding="utf-8"))
+        summary = payload["summary"]
+        self.assertEqual(summary["subfolders_skipped"], 2)
+        self.assertEqual(summary["subfolder_files_skipped"], 4)  # sub: inner.txt, deeper/a.txt; sub2: b.txt, c.txt
+        self.assertEqual(summary["subfolders_skipped_detail"], [
+            {"path": "sub", "files": 2, "complete": True}, {"path": "sub2", "files": 2, "complete": True},
+        ])
+        lines = "\n".join(payload["unrecorded_files"]["lines"])
+        self.assertIn("하위 폴더 안 파일: 검사하지 않은 하위 폴더 안의 파일 4개(심볼릭 링크 제외)", lines)
+        self.assertIn("폴더별: sub 2개, sub2 2개", lines)
+        self.assertIn("폴더별: sub 2개, sub2 2개", stdout)
+        self.assertIn("그 안의 파일 4개 미검사", stdout)
+        statement = self.out / "flat-es.json"
+        self.assertEqual(_run(["evidence-statement", str(scan_json), "--json-out", str(statement)])[0], 0)
+        body = json.loads(statement.read_text(encoding="utf-8"))["unrecorded_files"]
+        self.assertEqual({entry["code"]: entry["count"] for entry in body["reasons"]}["subfolder_files"], 4)
+        code, _, _ = _run(["scan", str(self.folder), "--recursive", "--json-out", str(scan_json), "--max-files", "500"])
+        self.assertEqual(json.loads(scan_json.read_text(encoding="utf-8"))["summary"]["subfolder_files_skipped"], 0)
+
+    def test_p5_subfolder_count_stops_at_the_walk_limit(self) -> None:
+        """P5 (round 8): the subfolder count is bounded by the walk limits and says so."""
+        from unittest import mock
+
+        from deepfake_lens import scan_cache
+
+        (self.folder / "sub" / "deeper").mkdir()
+        (self.folder / "sub" / "deeper" / "a.txt").write_text("더 깊은 메모", encoding="utf-8")
+        with mock.patch.object(scan_cache, "MAX_WALK_DIRS", 1):
+            detail = scan_cache.subfolder_file_counts(self.folder)
+        self.assertEqual(detail, [{"path": "sub", "files": 1, "complete": False}])
+        text = "\n".join(unrecorded_files([], {"subfolders_skipped": 1, "subfolder_files_skipped": 1, "subfolders_skipped_detail": detail}).lines())
+        self.assertIn("sub 1개 이상(탐색 상한으로 일부만 셈)", text)
+
+    def test_p5_none_only_when_nothing_is_missing(self) -> None:
+        """P5 (round 8): "없음" only when every count is 0 — a failed row without a result counts."""
+        failed = unrecorded_files([{"path": "locked", "status": "failed", "result": None, "error": "읽기 실패"}])
+        self.assertFalse(failed.empty)
+        self.assertEqual(failed.total_files, 1)
+        self.assertIn("처리 실패: 읽기 실패 등으로 분석 결과가 없는 행 1개", "\n".join(failed.lines()))
+        self.assertTrue(unrecorded_files([{"path": "a.txt", "status": "analyzed", "result": {"coverage": []}}]).empty)
+        roundtrip = UnrecordedFiles.from_json(failed.to_json())
+        assert roundtrip is not None
+        self.assertEqual(roundtrip.to_json(), failed.to_json())
+
     def test_old_scan_json_without_count(self) -> None:
         """A capped summary without files_over_cap (pre-X1 JSON) still says the cap was reached."""
         unrecorded = unrecorded_files([], {"capped": True})

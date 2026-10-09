@@ -8,6 +8,7 @@ same everywhere (G5/G6/G12/G24).
 
 from __future__ import annotations
 
+import re
 from pathlib import PurePath
 
 from .result_types import (
@@ -210,11 +211,41 @@ UNRECORDED_SECTION_TITLE = "기록되지 않은 파일"
 UNRECORDED_REASONS: tuple[tuple[str, str, str], ...] = (
     ("file_cap", "파일 상한", "파일 수 상한(--max-files)에 도달해 검사하지 않은 파일 {n}개 — 행·해시가 없습니다"),
     ("subfolders", "하위 폴더 미포함", "바로 아래 파일만 검사 — 하위 폴더 {n}개 안의 파일은 검사·기록하지 않았습니다(--recursive)"),
+    # P5 (round 8): the files inside those subfolders, counted recursively
+    # (symlinks neither followed nor counted), per folder.
+    ("subfolder_files", "하위 폴더 안 파일", "검사하지 않은 하위 폴더 안의 파일 {n}개(심볼릭 링크 제외) — 행·해시가 없습니다"),
+    # P5: archive members the extractor refused (bomb/budget, path escape,
+    # links, nesting depth) — named with the reason on the container row.
+    ("archive_rejected", "압축 거부 멤버", "압축 파일에서 거부되어 추출·분석하지 않은 구성 파일 {n}개 — 이름·사유는 압축 파일 행에 기록"),
     ("symlink", "심볼릭 링크", "링크를 따라가지 않았거나 따라갈 수 없는 심볼릭 링크 {n}개 — 행만 기록, 내용 미분석"),
     ("duplicate", "중복", "같은 내용(동일 SHA-256)의 파일 {n}개 — 원본 행만 분석, 중복 행은 원본을 가리킵니다"),
     ("unsupported", "미지원", "지원 형식이 아닌 파일 {n}개 — 행만 기록, 내용 미분석"),
     ("other_skipped", "기타 건너뜀", "크기 상한 초과·일반 파일 아님·취소 등으로 건너뛴 파일 {n}개 — 사유는 각 행에 기록"),
+    # P5: a row that failed without an analysis result (an unreadable
+    # folder, a file that could not be opened) — "없음" only when truly 0.
+    ("failed", "처리 실패", "읽기 실패 등으로 분석 결과가 없는 행 {n}개 — 사유는 각 행에 기록"),
 )
+# P5: categories of refused archive members, matched on the extractor's
+# reason text (archives.py) in this order; anything else is "기타".
+ARCHIVE_REJECTION_CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("링크·특수 파일", ("링크", "일반 파일이 아닌", "일반 파일이 아님")),
+    ("경로 이탈", ("경로 이탈", "절대 경로")),
+    ("중첩 깊이 초과", ("깊이",)),
+    ("압축 폭탄·예산 초과", ("예산", "압축률", "폭탄")),
+)
+ARCHIVE_REJECTION_OTHER = "기타"
+# The container row's summary entry when more members were refused than listed (core.MAX_ARCHIVE_REJECTION_ENTRIES).
+_MORE_REJECTED = re.compile(r"^외 (\d+)개 구성 파일 거부")
+
+
+def archive_rejection_category(reason: str) -> str:
+    """The P5 category of one refused archive member's reason."""
+    for label, needles in ARCHIVE_REJECTION_CATEGORIES:
+        if any(needle in reason for needle in needles):
+            return label
+    return ARCHIVE_REJECTION_OTHER
+# P5: per-folder file counts listed in the "하위 폴더 안 파일" line.
+UNRECORDED_SUBFOLDERS_LISTED = 20
 # A capped scan from an older JSON (no files_over_cap count).
 UNRECORDED_CAP_COUNT_UNKNOWN = "파일 수 상한(--max-files)에 도달 — 검사하지 않은 파일 수는 기록되지 않았습니다"
 
@@ -227,9 +258,19 @@ class UnrecordedFiles:
     capped scan whose over-cap count is unknown (JSON written before X1).
     """
 
-    def __init__(self, counts: dict[str, int], *, cap_reached: bool = False) -> None:
+    def __init__(
+        self,
+        counts: dict[str, int],
+        *,
+        cap_reached: bool = False,
+        archive_categories: dict[str, int] | None = None,
+        subfolder_detail: list[dict[str, object]] | None = None,
+    ) -> None:
         self.counts = {code: int(counts.get(code, 0) or 0) for code, _, _ in UNRECORDED_REASONS}
         self.cap_reached = bool(cap_reached or self.counts["file_cap"])
+        # P5: refused archive members by category; files per skipped subfolder.
+        self.archive_categories = {key: int(value) for key, value in (archive_categories or {}).items() if int(value)}
+        self.subfolder_detail = [dict(entry) for entry in (subfolder_detail or []) if isinstance(entry, dict)]
 
     @property
     def total_files(self) -> int:
@@ -258,8 +299,22 @@ class UnrecordedFiles:
             if code == "file_cap" and self.cap_reached and not count:
                 lines.append(f"{label}: {UNRECORDED_CAP_COUNT_UNKNOWN}")
             elif count:
-                lines.append(f"{label}: {detail.format(n=count)}")
+                lines.append(f"{label}: {detail.format(n=count)}{self._breakdown(code)}")
         return lines
+
+    def _breakdown(self, code: str) -> str:
+        """P5: " (분류: …)" for refused archive members, " — 폴더별: …" for subfolder files."""
+        if code == "archive_rejected" and self.archive_categories:
+            return " (분류: " + ", ".join(f"{label} {count}개" for label, count in self.archive_categories.items()) + ")"
+        if code == "subfolder_files" and self.subfolder_detail:
+            shown = self.subfolder_detail[:UNRECORDED_SUBFOLDERS_LISTED]
+            parts = [
+                f"{entry.get('path')} {entry.get('files')}개" + ("" if entry.get("complete", True) else " 이상(탐색 상한으로 일부만 셈)")
+                for entry in shown
+            ]
+            rest = len(self.subfolder_detail) - len(shown)
+            return " — 폴더별: " + ", ".join(parts) + (f" 외 폴더 {rest}개" if rest > 0 else "")
+        return ""
 
     def lines(self) -> list[str]:
         """Headline followed by the reason lines — the section body every renderer prints."""
@@ -278,6 +333,8 @@ class UnrecordedFiles:
                 {"code": code, "label": label, "count": self.counts[code]}
                 for code, label, _ in UNRECORDED_REASONS
             ],
+            "archive_rejected_by_category": dict(self.archive_categories),
+            "subfolders": [dict(entry) for entry in self.subfolder_detail],
             "lines": self.lines(),
         }
 
@@ -291,7 +348,14 @@ class UnrecordedFiles:
             for entry in reasons:
                 if isinstance(entry, dict) and isinstance(entry.get("count"), int):
                     counts[str(entry.get("code"))] = entry["count"]
-        return cls(counts, cap_reached=bool(data.get("cap_reached")))
+        categories = data.get("archive_rejected_by_category")
+        subfolders = data.get("subfolders")
+        return cls(
+            counts,
+            cap_reached=bool(data.get("cap_reached")),
+            archive_categories={str(k): v for k, v in categories.items() if isinstance(v, int)} if isinstance(categories, dict) else None,
+            subfolder_detail=[entry for entry in subfolders if isinstance(entry, dict)] if isinstance(subfolders, list) else None,
+        )
 
 
 def unrecorded_files(items: "list[object]", summary: object | None = None) -> UnrecordedFiles:
@@ -310,24 +374,66 @@ def unrecorded_files(items: "list[object]", summary: object | None = None) -> Un
             return summary.get(name)
         return getattr(summary, name, None)
 
-    counts = {"file_cap": 0, "subfolders": 0, "symlink": 0, "duplicate": 0, "unsupported": 0, "other_skipped": 0}
+    counts = {code: 0 for code, _, _ in UNRECORDED_REASONS}
+    categories: dict[str, int] = {}
     for item in items:
         status = item.get("status") if isinstance(item, dict) else getattr(item, "status", None)
         error = item.get("error") if isinstance(item, dict) else getattr(item, "error", None)
         path = str((item.get("path") if isinstance(item, dict) else getattr(item, "path", "")) or "")
-        if "::" in path:
+        if _is_member_row(item, path):
             continue  # archive members are accounted for on their container row
+        kind = item.get("kind") if isinstance(item, dict) else getattr(item, "kind", None)
+        result = item.get("result") if isinstance(item, dict) else getattr(item, "result", None)
+        if kind == "archive":
+            for reason in _rejected_member_reasons(result):
+                more = _MORE_REJECTED.match(reason)
+                count = int(more.group(1)) if more else 1
+                counts["archive_rejected"] += count
+                # "<member>: <reason>" — the category is read from the reason only.
+                label = ARCHIVE_REJECTION_OTHER if more else archive_rejection_category(reason.partition(": ")[2] or reason)
+                categories[label] = categories.get(label, 0) + count
         if status == "duplicate":
             counts["duplicate"] += 1
         elif status == "unsupported":
             counts["unsupported"] += 1
         elif status == "skipped":
             counts["symlink" if is_symlink_row(status, error) else "other_skipped"] += 1
+        elif status == "failed" and not result:
+            counts["failed"] += 1
     over_cap = field("files_over_cap")
     counts["file_cap"] = over_cap if isinstance(over_cap, int) else 0
     subfolders = field("subfolders_skipped")
     counts["subfolders"] = subfolders if isinstance(subfolders, int) else 0
-    return UnrecordedFiles(counts, cap_reached=bool(field("capped")))
+    inside = field("subfolder_files_skipped")
+    counts["subfolder_files"] = inside if isinstance(inside, int) else 0
+    detail = field("subfolders_skipped_detail")
+    return UnrecordedFiles(
+        counts,
+        cap_reached=bool(field("capped")),
+        archive_categories=categories,
+        subfolder_detail=[entry for entry in detail if isinstance(entry, dict)] if isinstance(detail, list) else None,
+    )
+
+
+def _is_member_row(item: object, path: str) -> bool:
+    """P7: an archive member row (``container``/``member`` fields, else the "::" display path)."""
+    member = item.get("member") if isinstance(item, dict) else getattr(item, "member", None)
+    if member is not None:
+        return bool(member)
+    return "::" in path
+
+
+def _rejected_member_reasons(result: object) -> list[str]:
+    """Reasons of the ``archive_member`` skipped coverage entries of a container row (D9, P5)."""
+    coverage = result.get("coverage") if isinstance(result, dict) else getattr(result, "coverage", None)
+    reasons: list[str] = []
+    for entry in coverage or []:
+        check = entry.get("check") if isinstance(entry, dict) else getattr(entry, "check", None)
+        status = entry.get("status") if isinstance(entry, dict) else getattr(entry, "status", None)
+        reason = entry.get("reason") if isinstance(entry, dict) else getattr(entry, "reason", None)
+        if check == "archive_member" and str(getattr(status, "value", status)) == "skipped":
+            reasons.append(str(reason or ""))
+    return reasons
 
 
 # S6/B2: the in-sample caveat printed wherever threshold provenance is

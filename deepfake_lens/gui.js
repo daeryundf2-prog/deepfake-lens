@@ -195,7 +195,9 @@
             if (thr.in_sample) parts.push('판정 임계값: <b>in-sample(참고)</b> — 적합에 쓴 같은 표본에서 평가된 값이라 감정 근거가 아닙니다.');
             // N8: a non-recursive scan never omits subfolders silently.
             const skippedDirs = (lastProvenance.summary || {}).subfolders_skipped || 0;
-            if (skippedDirs) parts.push(`하위 폴더 <b>${skippedDirs}개는 검사하지 않았습니다</b> — 포함하려면 '하위 폴더' 옵션을 켜고 다시 검사하십시오.`);
+            // P5: and the files inside them (recursive count, symlinks excluded).
+            const skippedDirFiles = (lastProvenance.summary || {}).subfolder_files_skipped || 0;
+            if (skippedDirs) parts.push(`하위 폴더 <b>${skippedDirs}개(안의 파일 ${skippedDirFiles}개)는 검사하지 않았습니다</b> — 포함하려면 '하위 폴더' 옵션을 켜고 다시 검사하십시오.`);
             // X1: files beyond the file-count cap are never silently omitted.
             const overCap = (lastProvenance.summary || {}).files_over_cap || 0;
             if (overCap) parts.push(`파일 수 상한에 도달해 <b>${overCap}개 파일은 검사·기록하지 않았습니다</b> — '최대 파일 수'를 늘려 다시 검사하십시오.`);

@@ -111,7 +111,8 @@ def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage:
     subfolders = getattr(summary, "subfolders_skipped", 0)
     if subfolders:
         # N8: a non-recursive scan never omits subfolders silently.
-        print(f"참고: 하위 폴더 {subfolders}개는 검사하지 않았습니다(바로 아래 파일만 검사) — 포함하려면 --recursive 를 추가하십시오.")
+        inside = getattr(summary, "subfolder_files_skipped", 0) or 0  # P5
+        print(f"참고: 하위 폴더 {subfolders}개는 검사하지 않았습니다(그 안의 파일 {inside}개 미검사 — 바로 아래 파일만 검사) — 포함하려면 --recursive 를 추가하십시오.")
     # X1: the "기록되지 않은 파일" section — count and reasons, always printed.
     for line in unrecorded_section_lines(items, summary):
         print(line)

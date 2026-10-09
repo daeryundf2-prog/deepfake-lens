@@ -480,6 +480,11 @@ class BatchScanSummary:
     # X1: files the walk found beyond the --max-files cap (never analyzed,
     # no row); 0 when the scan was not capped.
     files_over_cap: int = 0
+    # P5 (round 8): regular files inside those subfolders (recursive count,
+    # symlinks not followed nor counted) and the per-folder detail
+    # [{"path", "files", "complete"}] — a flat scan said only "하위 폴더 N개".
+    subfolder_files_skipped: int = 0
+    subfolders_skipped_detail: list[dict[str, object]] = field(default_factory=list)
 
     def to_json(self) -> dict[str, object]:
         # D16: the summary JSON counts verdicts only. The legacy band counts

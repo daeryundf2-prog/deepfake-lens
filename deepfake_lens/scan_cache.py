@@ -297,6 +297,64 @@ def count_subfolders(root: Path, *, follow_links: bool = False) -> int:
     return count
 
 
+def subfolder_file_counts(root: Path, *, follow_links: bool = False) -> list[dict[str, object]]:
+    """Files inside each subfolder a flat scan does not enter (P5, round 8).
+
+    One entry per folder :func:`count_subfolders` counts, in name order:
+    ``{"path": <name>, "files": <regular files below it, recursively>,
+    "complete": <False when the count stopped at a walk limit>}``. Symbolic
+    links inside are neither followed nor counted; the walk stops at
+    :data:`MAX_WALK_DIRS` folders or :data:`MAX_WALK_SECONDS` seconds over
+    all subfolders, and the folder being counted is marked incomplete.
+    """
+    import os
+    import time
+
+    out: list[dict[str, object]] = []
+    try:
+        entries = sorted(root.iterdir(), key=lambda entry: entry.name)
+    except OSError:
+        return out
+    deadline = time.monotonic() + MAX_WALK_SECONDS
+    dirs = 0
+    for entry in entries:
+        try:
+            if entry.is_symlink():
+                if not (follow_links and symlink_problem(entry) is None and entry.is_dir()):
+                    continue
+            elif not entry.is_dir():
+                continue
+        except OSError:
+            continue
+        files = 0
+        complete = True
+        stack = [entry]
+        while stack:
+            if dirs >= MAX_WALK_DIRS or time.monotonic() > deadline:
+                complete = False
+                break
+            folder = stack.pop()
+            dirs += 1
+            try:
+                with os.scandir(folder) as handle:
+                    children = list(handle)
+            except OSError:
+                complete = False
+                continue
+            for child in children:
+                try:
+                    if child.is_symlink():
+                        continue
+                    if child.is_dir(follow_symlinks=False):
+                        stack.append(Path(child.path))
+                    elif child.is_file(follow_symlinks=False):
+                        files += 1
+                except OSError:
+                    complete = False
+        out.append({"path": entry.name, "files": files, "complete": complete})
+    return out
+
+
 def _read_prefix(path: Path, limit: int) -> bytes:
     with path.open("rb") as handle:
         return handle.read(max(0, limit))

@@ -79,6 +79,7 @@ from .scan_cache import (  # noqa: E402, F401 - re-exported
     SYMLINK_LOOP_REASON,
     SYMLINK_SKIP_REASON,
     count_subfolders,
+    subfolder_file_counts,
 )
 # D9: rejected archive members listed one coverage entry each, up to this
 # many per container; the rest are summarized in one entry with the count.
@@ -241,6 +242,7 @@ def scan_directory(
         paths, root=root, capped=capped, iter_errors=iter_errors, symlinks=symlinks,
         files_over_cap=over_cap,
         subfolders_skipped=0 if recursive else count_subfolders(root, follow_links=allow_symlinks), on_plan=on_plan,
+        subfolder_files=None if recursive else subfolder_file_counts(root, follow_links=allow_symlinks),
         text_bytes=text_bytes, metadata_bytes=metadata_bytes,
         pixel_mode=pixel_mode, pixel_max_side=pixel_max_side,
         heatmaps=heatmaps, heatmap_dir=heatmap_dir, model_path=model_path,
@@ -348,6 +350,7 @@ def scan_paths(
     subfolders_skipped: int = 0,
     on_plan: Callable[[int], None] | None = None,
     files_over_cap: int = 0,
+    subfolder_files: list[dict[str, object]] | None = None,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
     """Analyze already-enumerated ``paths`` under ``root`` like a folder scan.
 
@@ -370,7 +373,7 @@ def scan_paths(
             max_file_bytes=max_file_bytes, dedupe=dedupe, hash_db_path=hash_db_path,
             deep_signals=deep_signals, thresholds=thresholds, should_stop=should_stop,
             progress=progress, subfolders_skipped=subfolders_skipped, on_plan=on_plan,
-            files_over_cap=files_over_cap,
+            files_over_cap=files_over_cap, subfolder_files=subfolder_files,
         )
 
 
@@ -400,6 +403,7 @@ def _scan_paths(
     subfolders_skipped: int,
     on_plan: Callable[[int], None] | None,
     files_over_cap: int = 0,
+    subfolder_files: list[dict[str, object]] | None = None,
 ) -> tuple[BatchScanSummary, list[ScanItem]]:
     iter_errors = list(iter_errors or [])
     symlinks = list(symlinks or [])
@@ -489,8 +493,14 @@ def _scan_paths(
             items.extend(extra)
             items = sort_items(items)
             summary = summarize(items, capped=summary.capped, cached=summary.cached)
-        if subfolders_skipped or files_over_cap:
-            summary = replace(summary, subfolders_skipped=subfolders_skipped, files_over_cap=files_over_cap)
+        if subfolders_skipped or files_over_cap or subfolder_files:
+            detail = list(subfolder_files or [])
+            summary = replace(
+                summary, subfolders_skipped=subfolders_skipped, files_over_cap=files_over_cap,
+                # P5: files inside the subfolders a flat scan did not enter.
+                subfolder_files_skipped=sum(entry["files"] for entry in detail if isinstance(entry.get("files"), int)),
+                subfolders_skipped_detail=detail,
+            )
         return summary, items
     finally:
         for temp_dir in temp_dirs:
