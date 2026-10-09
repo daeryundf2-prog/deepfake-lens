@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass, replace
-from datetime import datetime
+from .report_time import report_timestamp  # R12-9: ISO 8601 with the UTC offset
 from pathlib import Path
 from .json_text import json_dumps
 
@@ -83,7 +83,7 @@ def create_evidence_chain(
         file_hash=file_hash,
         file_path=str(path.absolute()),
         file_size=file_size,
-        analysis_timestamp=datetime.now().isoformat(),
+        analysis_timestamp=report_timestamp(),
         analyst_id=analyst_id,
         tool_version=tool_version,
         parameters=parameters or {},
@@ -118,7 +118,7 @@ def create_audit_trail(
     """Create an audit trail entry."""
     return AuditTrail(
         action=action,
-        timestamp=datetime.now().isoformat(),
+        timestamp=report_timestamp(),
         user=user,
         details=details or {},
     )
@@ -135,7 +135,7 @@ def generate_forensic_report(
     return ForensicReport(
         evidence_chains=evidence_chains,
         audit_trail=audit_trail,
-        report_date=datetime.now().isoformat(),
+        report_date=report_timestamp(),
         total_files=len(evidence_chains),
         verified_count=verified_count,
         integrity_score=integrity_score,

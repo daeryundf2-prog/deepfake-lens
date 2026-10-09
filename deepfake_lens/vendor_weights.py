@@ -16,7 +16,7 @@ import hashlib
 import json
 import shutil
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from .report_time import report_timestamp  # R12-9: ISO 8601 with the UTC offset
 from pathlib import Path
 from typing import Any, Callable
 
@@ -234,7 +234,7 @@ def inspect_model_manifest(models_dir: Path | str | None = None) -> VendorManife
 
     if not base_dir.is_dir():
         return VendorManifest(
-            generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            generated_at=report_timestamp(),
             models_dir=str(base_dir),
             total_profiles=0,
             available_weights=0,
@@ -321,7 +321,7 @@ def inspect_model_manifest(models_dir: Path | str | None = None) -> VendorManife
         )
 
     return VendorManifest(
-        generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        generated_at=report_timestamp(),
         models_dir=str(base_dir),
         total_profiles=len(entries),
         available_weights=available_cnt,

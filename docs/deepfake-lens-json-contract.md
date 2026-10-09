@@ -160,6 +160,15 @@ always `0` invited old-contract readings. They remain readable as
   `/api/analyze-upload` and `/api/check`) is escaped like any real file's
   (`t:::c.png` → `t\:\:\:c.png`), so it never holds `::`; `name` is the name
   the client sent.
+- R12-9 (round 12): every report timestamp is ISO 8601 to the second with
+  the UTC offset (`report_time.report_timestamp`, `2026-10-10T16:04:22+09:00`):
+  the legal report's `generated_at` and its "분석 일시" line, the forensic
+  record's `analysis_timestamp`/`checksum_timestamp`, the PDF report's
+  "감정 일시" (it was local time labelled "(KST)" in every zone), the
+  evidence-chain records, the vendor-weights report's `generated_at` and
+  batch jobs' `start_time`/`end_time`. Identifiers built from the same
+  moment (`LR-YYYYMMDDHHMMSS-…`) use its local digits. The evidence
+  statement's 제출일자 stays the court date `YYYY. MM. DD.` (no time of day).
 - R12-7 (round 12): a row's `sha256` is the hash of the bytes its verdict
   came from. The scanner takes the file's state (size, `mtime_ns`, inode,
   device) before and after the analysis and its SHA-256 after it — and

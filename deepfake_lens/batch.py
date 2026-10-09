@@ -15,6 +15,7 @@ from typing import Any, Callable
 
 from .error_text import failure_reason
 from .json_text import json_dumps
+from .report_time import report_timestamp  # R12-9: ISO 8601 with the UTC offset
 
 
 @dataclass(frozen=True)
@@ -104,8 +105,8 @@ class BatchProcessor:
             total_files=len(files),
             processed_files=processed,
             failed_files=failed,
-            start_time=time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(start_time)),
-            end_time=time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(end_time)),
+            start_time=report_timestamp(start_time),  # R12-9: ISO 8601 with the UTC offset
+            end_time=report_timestamp(end_time),
             results=[r.to_json() for r in results],
         )
         

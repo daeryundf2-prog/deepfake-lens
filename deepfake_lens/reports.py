@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import time
-from datetime import datetime
+from .report_time import report_timestamp  # R12-9: ISO 8601 with the UTC offset
 from html import escape
 from pathlib import Path
 from typing import Any, Callable
@@ -521,7 +521,7 @@ def _render_forensic_pdf(
     hash_map = {item.path: item.sha256 or _evidence_sha256(item.path, allow_path, resolve_path) for item in items}
     hashed = sum(1 for v in hash_map.values() if v)
 
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = report_timestamp()  # R12-9: ISO 8601 with the UTC offset (was local time labelled "KST")
     result_line = (
         f"감정 결과: 총 {summary.total}개"
         + (f"(압축 파일 {summary.container_rows}건 포함)" if summary.container_rows else "")
@@ -533,7 +533,7 @@ def _render_forensic_pdf(
     )
     layout.boxed_text("", [
         ("감정 의뢰: (의뢰사 상호명 입력) / (담당자 부서·직위·성명) 귀하", 8.5, (0.2, 0.2, 0.2)),
-        (f"감정 일시: {now_str} (KST)  |  분석 엔진: Deepfake Lens v{TOOL_VERSION}", 8.5, (0.2, 0.2, 0.2)),
+        (f"감정 일시: {now_str}  |  분석 엔진: Deepfake Lens v{TOOL_VERSION}", 8.5, (0.2, 0.2, 0.2)),
         (result_line, 8.5, (0.1, 0.2, 0.4)),
         (integrity_line, 8.0, (0.45, 0.45, 0.45)),
         # N17: one PDF line per provenance line (the in-sample caveat apart).

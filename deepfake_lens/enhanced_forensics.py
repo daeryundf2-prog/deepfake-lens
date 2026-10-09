@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from .report_time import REPORT_ID_STAMP, report_moment, report_timestamp
 from pathlib import Path
 from typing import Any
 
@@ -164,8 +164,9 @@ def analyze_forensic(path: Path | str) -> ForensicReport:
     legal_notes.append("파일 무결성은 SHA-256 해시로 검증되었습니다.")
 
     # Generate report ID and content checksum
-    report_id = f"FR-{datetime.now().strftime('%Y%m%d%H%M%S')}-{file_hash[:8]}"
-    checksum_timestamp = datetime.now().isoformat()
+    moment = report_moment()  # R12-9: one aware moment for the id and the timestamps
+    report_id = f"FR-{moment.strftime(REPORT_ID_STAMP)}-{file_hash[:8]}"
+    checksum_timestamp = report_timestamp(moment)
     checksum_data = f"{file_hash}:{checksum_timestamp}:{package_version()}"
     integrity_checksum = hashlib.sha256(checksum_data.encode()).hexdigest()
 
@@ -173,7 +174,7 @@ def analyze_forensic(path: Path | str) -> ForensicReport:
         file_path=str(file_path.absolute()),
         file_hash=file_hash,
         file_size=file_size,
-        analysis_timestamp=datetime.now().isoformat(),
+        analysis_timestamp=report_timestamp(moment),
         evidences=evidences,
         overall_confidence=overall_confidence,
         legal_notes=legal_notes,
@@ -192,7 +193,7 @@ def _error_report(message: str) -> ForensicReport:
         file_path="",
         file_hash="",
         file_size=0,
-        analysis_timestamp=datetime.now().isoformat(),
+        analysis_timestamp=report_timestamp(),
         evidences=[],
         overall_confidence=0.0,
         legal_notes=[message],
@@ -384,13 +385,13 @@ def build_legal_report(
         size = file_path.lstat().st_size if file_path.is_symlink() else file_path.stat().st_size
     except OSError:
         size = 0
-    now = datetime.now()
+    now = report_moment()  # R12-9: ISO 8601 with the UTC offset
     sha = str(result.get("sha256") or "")
     report: dict[str, Any] = {
         "report_type": LEGAL_REPORT_TYPE,
         "report_format_version": LEGAL_REPORT_FORMAT_VERSION,
-        "report_id": f"LR-{now.strftime('%Y%m%d%H%M%S')}-{sha[:8] or 'nohash'}",
-        "generated_at": now.isoformat(timespec="seconds"),
+        "report_id": f"LR-{now.strftime(REPORT_ID_STAMP)}-{sha[:8] or 'nohash'}",
+        "generated_at": report_timestamp(now),
         "analyst_id": analyst_id,
         "jurisdiction": jurisdiction,
         "tool_version": package_version(),

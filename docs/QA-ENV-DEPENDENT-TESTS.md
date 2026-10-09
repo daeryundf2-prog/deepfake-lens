@@ -32,6 +32,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `Pillow not installed` | `dev` extra(Pillow) | test_cli_operations.py, test_error_text.py, test_json_contract.py, test_model_zoo.py |
 | `Pillow writes the GIF` | `dev` extra(Pillow — GIF 픽스처 작성) | test_qa_out.py |
 | `Qwen2.5-0.5B tokenizer not cached` | `text_lm` extra(torch, transformers) + Qwen2.5-0.5B 토크나이저 HF 캐시 | test_v6_probes.py |
+| `TZ needs time.tzset (POSIX)` | POSIX(`time.tzset` — 자식 프로세스의 `TZ` 환경 변수로 시간대 전환) | test_report_time.py |
 | `backslash is a path separator on Windows` | Windows가 아닌 OS(POSIX) | test_qa_in.py |
 | `c2pa-python and fixture required` | `provenance`/`dev` extra(c2pa-python) + `scripts/build_c2pa_fixture.py` 픽스처 | test_result_contract.py |
 | `c2pa-python not installed` | `provenance`/`dev` extra(c2pa-python) | test_c2pa.py |
@@ -80,7 +81,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `pymupdf (and numpy for the fixture) — the venv_api / extras run covers this` | pymupdf + numpy(QA 사이드 venv) | test_pdf_layout.py |
 | `pymupdf not installed` | pymupdf(QA 사이드 venv: `pip install pymupdf`) | test_cli_korean.py, test_evidence_statement.py, test_korean_output.py, test_report_labels_ko.py |
 | `pymupdf not installed — the venv_api / extras run covers this` | pymupdf(QA 사이드 venv) | test_forensic_pdf.py, test_pdf_backend.py |
-| `pymupdf required for PDF generation` | pymupdf(QA 사이드 venv) | test_display_names.py, test_evidence_statement.py, test_non_utf8_names.py |
+| `pymupdf required for PDF generation` | pymupdf(QA 사이드 venv) | test_display_names.py, test_evidence_statement.py, test_non_utf8_names.py, test_report_time.py |
 | `pymupdf required for PDF text` | pymupdf(QA 사이드 venv) | test_office_config.py, test_servers.py |
 | `pymupdf — the venv_api / extras run covers this` | pymupdf(QA 사이드 venv) | test_pdf_layout.py |
 | `python-markdown not installed (QA side venv)` | python-markdown(QA 사이드 venv: `pip install markdown`) | test_display_names.py |
