@@ -1,0 +1,151 @@
+"""N1: exception messages in user-facing fields carry no file-system paths.
+
+A coverage ``reason`` (and the limitations, reports and evidence statement
+built from it) used to copy an exception message verbatim — Pillow,
+soundfile, zipfile and c2pa put the full path of the evidence file in it.
+``error_text.failure_reason`` now replaces the scan root with ``<root>`` and
+any other absolute path with its base name, and gives well-known library
+messages in Korean. These tests pin the scrubber and scan a folder of
+unreadable files end to end: no ``reason``/``limitations``/``detail``/
+``error``/``verdict`` string may contain an absolute path, and the
+``--redact-paths`` HTML report contains no absolute path at all.
+"""
+
+from __future__ import annotations
+
+import errno
+import importlib.util
+import io
+import json
+import re
+import tempfile
+import unittest
+import zipfile
+from pathlib import Path
+from typing import Any, Iterator
+
+from deepfake_lens.error_text import (
+    ROOT_PLACEHOLDER,
+    exception_text,
+    failure_reason,
+    path_scrub_root,
+    scrub_paths,
+)
+
+HAVE_PIL = importlib.util.find_spec("PIL") is not None
+# Fields an examiner reads; none may carry a path of the examiner's machine.
+TEXT_KEYS = frozenset({"reason", "limitations", "detail", "error", "verdict", "title", "reference_note", "next_checks"})
+# An absolute POSIX path with at least two components, or a Windows drive path.
+ABSOLUTE_PATH = re.compile(r"(?<![\w.~<>/:=#-])/(?:[^\s/'\"`:;,()\[\]]+/)+[^\s/'\"`:;,()\[\]]+|\b[A-Za-z]:\\")
+
+
+def write_unreadable_folder(folder: Path) -> Path:
+    """Files every reader rejects, plus one nested copy (scanned recursively)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "empty.jpg").write_bytes(b"")
+    (folder / "fake_ext.gif").write_bytes(b"this is not a gif at all\n" * 8)
+    (folder / "fake.mp3").write_bytes(bytes((i * 37 + 11) % 256 for i in range(3000)))
+    (folder / "garbage.wav").write_bytes(b"RIFF\x00\x00\x00\x00WAVEjunkjunk")
+    (folder / "broken.docx").write_bytes(b"PK\x03\x04 not really a zip")
+    (folder / "broken.zip").write_bytes(b"PK\x05\x06" + b"\x00" * 10)
+    (folder / "empty.png").write_bytes(b"")
+    if HAVE_PIL:
+        from PIL import Image
+
+        buffer = io.BytesIO()
+        Image.new("RGB", (300, 200), (120, 90, 60)).save(buffer, format="JPEG", quality=90)
+        (folder / "truncated.jpg").write_bytes(buffer.getvalue()[: len(buffer.getvalue()) // 3])
+    with zipfile.ZipFile(folder / "bundle.zip", "w") as archive:
+        archive.writestr("inner/empty.jpg", b"")
+        archive.writestr("inner/fake.gif", b"GIF89a junk")
+    sub = folder / "sub dir"
+    sub.mkdir(exist_ok=True)
+    (sub / "empty.jpg").write_bytes(b"")
+    return folder
+
+
+def text_fields(node: Any, key: str | None = None, path: str = "") -> Iterator[tuple[str, str]]:
+    """(json path, string) for every string under a TEXT_KEYS key."""
+    if isinstance(node, dict):
+        for child_key, value in node.items():
+            yield from text_fields(value, child_key, f"{path}/{child_key}")
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from text_fields(value, key, f"{path}[{index}]")
+    elif isinstance(node, str) and key in TEXT_KEYS:
+        yield path, node
+
+
+class ScrubPathsTest(unittest.TestCase):
+    def test_root_becomes_placeholder_and_other_paths_their_base_name(self) -> None:
+        with path_scrub_root("/srv/evidence/case-7"):
+            self.assertEqual(
+                scrub_paths("cannot open '/srv/evidence/case-7/sub/a.jpg'"),
+                f"cannot open '{ROOT_PLACEHOLDER}/sub/a.jpg'",
+            )
+            # A sibling folder sharing the prefix is not the root.
+            self.assertEqual(scrub_paths("open /srv/evidence/case-70/b.jpg failed"), "open b.jpg failed")
+            self.assertEqual(scrub_paths("tmp /tmp/dflens-arc-x1/gen/m.png bad"), "tmp m.png bad")
+            self.assertEqual(scrub_paths("Error opening '/home/u/My Docs/v.wav': x"), "Error opening 'v.wav': x")
+            self.assertEqual(scrub_paths(r"C:\Users\kim\Desktop\x.png bad"), "x.png bad")
+
+    def test_non_paths_are_left_alone(self) -> None:
+        for text in (
+            "https://huggingface.co/org/model",
+            "노출 1/125초, image/jpeg",
+            "self#jumbf=/c2pa/urn:uuid:1/c2pa.assertions",
+            "<root>/sub/a.jpg",
+            "fakespot-ai/roberta-base",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(scrub_paths(text), text)
+
+    def test_failure_reason_keeps_the_class_and_drops_the_path(self) -> None:
+        with path_scrub_root("/data/case"):
+            reason = failure_reason(FileNotFoundError(errno.ENOENT, "No such file or directory", "/data/case/x/y.jpg"))
+            self.assertEqual(reason, f"FileNotFoundError: [Errno {errno.ENOENT}] 파일 또는 폴더가 없습니다: {ROOT_PLACEHOLDER}/x/y.jpg")
+            self.assertNotIn("/data/case", failure_reason(RuntimeError("bad file /data/case/z.png")))
+        self.assertEqual(exception_text(OSError("image file is truncated (37 bytes not processed)")), "이미지 파일이 잘려 있습니다(처리하지 못한 바이트 37개)")
+        self.assertEqual(failure_reason(ValueError()), "ValueError")
+
+    def test_root_registration_is_scoped(self) -> None:
+        with path_scrub_root("/data/case"):
+            pass
+        self.assertEqual(scrub_paths("/data/case/a.jpg"), "a.jpg")
+
+
+@unittest.skipUnless(HAVE_PIL, "Pillow not installed")
+class UnreadableFolderScanTest(unittest.TestCase):
+    """N1: a scan of unreadable files reports causes without any absolute path."""
+
+    def test_no_absolute_path_in_text_fields_or_redacted_report(self) -> None:
+        from deepfake_lens.analysis_api import AnalysisOptions, scan_folder, scan_payload
+        from deepfake_lens.reports import write_html_report
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = write_unreadable_folder(Path(tmp).resolve() / "evidence case")
+            options = AnalysisOptions(recursive=True)
+            summary, items, thresholds = scan_folder(folder, options)
+            payload = json.loads(json.dumps(scan_payload(summary, items, thresholds, options), ensure_ascii=False))
+            fields = list(text_fields(payload["items"]))
+            self.assertTrue(fields)
+            offenders = [
+                f"{where}: {text[:160]}"
+                for where, text in fields
+                if ABSOLUTE_PATH.search(text) or tmp in text or str(folder) in text
+            ]
+            self.assertEqual(offenders, [], "\n".join(offenders))
+            # The unreadable files do fail, with the cause in Korean or the class name.
+            reasons = [text for where, text in fields if where.endswith("/reason")]
+            self.assertTrue(any("이미지 형식을 인식할 수 없습니다" in reason for reason in reasons), reasons)
+            self.assertTrue(any(ROOT_PLACEHOLDER in reason for reason in reasons), reasons)
+
+            report = Path(tmp) / "report.html"
+            write_html_report(report, summary, items, redact_paths=True, thresholds=thresholds)
+            html = report.read_text(encoding="utf-8")
+            self.assertNotIn(str(folder), html)
+            self.assertNotIn(tmp, html)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -14,6 +14,7 @@ import struct
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
+from .error_text import exception_text, failure_reason
 
 MAX_FORENSIC_FILE_BYTES = 256 * 1024 * 1024  # 256 MB
 
@@ -82,7 +83,7 @@ def analyze_metadata_forensic(path: Path | str) -> MetadataForensicAnalysis:
     try:
         file_size = file_path.stat().st_size
     except OSError as exc:
-        return _error_analysis(f"파일 정보를 읽을 수 없습니다: {exc}")
+        return _error_analysis(f"파일 정보를 읽을 수 없습니다: {exception_text(exc)}")
 
     if file_size > MAX_FORENSIC_FILE_BYTES:
         return _error_analysis(f"파일이 너무 큽니다: {file_size} bytes (최대 {MAX_FORENSIC_FILE_BYTES})")
@@ -90,7 +91,7 @@ def analyze_metadata_forensic(path: Path | str) -> MetadataForensicAnalysis:
     try:
         data = file_path.read_bytes()
     except OSError as exc:
-        return _error_analysis(f"파일 읽기 오류: {exc}")
+        return _error_analysis(f"파일 읽기 오류: {exception_text(exc)}")
 
     if len(data) == 0:
         return _error_analysis("파일이 비어 있습니다.")
@@ -272,11 +273,11 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
         reader = c2pa.Reader(str(Path(path)))
     except Exception as exc:  # noqa: BLE001 - SDK error classes vary by release; classified below
         if _is_c2pa_error(c2pa, exc, "ManifestNotFound"):
-            return {"present": False, "status": "absent", "error": str(exc)}
+            return {"present": False, "status": "absent", "error": exception_text(exc)}
         return {
             "present": False,
             "status": "unavailable",
-            "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+            "error": failure_reason(exc),
             "error_kind": "not_supported" if _is_c2pa_error(c2pa, exc, "NotSupported") else "reader_error",
         }
     try:
@@ -284,7 +285,7 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
         manifest = reader.get_active_manifest() or {}
         results = reader.get_validation_results() or {}
     except Exception as exc:
-        return {"present": True, "status": "unavailable", "error": f"{type(exc).__name__}: {str(exc)[:200]}", "error_kind": "validation_error"}
+        return {"present": True, "status": "unavailable", "error": failure_reason(exc), "error_kind": "validation_error"}
     finally:
         try:
             reader.close()

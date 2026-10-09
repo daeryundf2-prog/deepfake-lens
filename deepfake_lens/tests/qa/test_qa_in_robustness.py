@@ -186,7 +186,8 @@ DAMAGE_REASONS: dict[str, tuple[str, ...]] = {
     "empty.wav": ("파일이 비어 있습니다",),
     "text-as.jpg": ("확장자 위장",),
     "zip-as.png": ("확장자 위장",),
-    "png-as.wav": ("Format not recognised", "의존성 부재: librosa", "의존성 부재: soundfile"),
+    # N1: libsndfile's "Format not recognised" is reported in Korean.
+    "png-as.wav": ("오디오 파일을 열 수 없습니다(형식 인식 불가)", "의존성 부재: librosa", "의존성 부재: soundfile"),
     "truncated.png": ("잘린 파일",),
     "huge-dims.png": ("DecompressionBombError", "의존성 부재: numpy"),
     "garbage.wav": ("Error in WAV", "의존성 부재: librosa", "의존성 부재: soundfile"),

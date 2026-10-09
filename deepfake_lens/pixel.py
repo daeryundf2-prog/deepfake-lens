@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
+from .error_text import exception_text
+
 from .pixel_raster import (  # noqa: F401
     MAX_DECOMPRESSED_IMAGE_BYTES,
     PixelRaster,
@@ -654,7 +656,7 @@ def _ivy_xdetector_adapter(path: Path) -> PixelExpertResult:
                 0,
                 0.20,
                 False,
-                f"Ivy-xDetector sidecar를 읽지 못했습니다: {exc}",
+                f"Ivy-xDetector sidecar를 읽지 못했습니다: {exception_text(exc)}",
                 "Ivy-xDetector external explainable VLM baseline",
                 "sidecar_adapter",
             )

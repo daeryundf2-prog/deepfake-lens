@@ -68,6 +68,11 @@ def _build_case_folder(root: Path) -> None:
     image = Image.new("RGB", (64, 64))
     image.putdata([((x * 3) % 256, (y * 9) % 256, 77) for y in range(64) for x in range(64)])
     image.save(root / "photo.png")
+    # N1: unreadable files whose reader errors used to carry the full path
+    # (Pillow, soundfile) — a rename must not change their coverage reasons.
+    (root / "empty.jpg").write_bytes(b"")
+    (root / "fake.gif").write_bytes(b"not a gif, only text\n" * 4)
+    (root / "fake.mp3").write_bytes(bytes((index * 37 + 11) % 256 for index in range(3000)))
 
 
 def _normalize(payload: Any, roots: list[Path]) -> Any:
@@ -298,6 +303,17 @@ class QaIn2DeterministicRescanTest(unittest.TestCase):
             self.assertEqual(duplicate["duplicate_of"], "a-first.txt")
             hashed = [item for item in payloads[0]["items"] if item.get("sha256")]
             self.assertTrue(hashed)
+            # N1: the unreadable files failed checks with a reason that names
+            # the file relative to the scan root, never by its absolute path.
+            reasons = [
+                entry["reason"]
+                for item in payloads[0]["items"] if item["path"] in {"empty.jpg", "fake.gif", "fake.mp3"}
+                for entry in (item.get("result") or {}).get("coverage", []) if entry["status"] == "failed"
+            ]
+            self.assertTrue(reasons)
+            for text in [*reasons, *(json.dumps(payload, ensure_ascii=False) for payload in payloads)]:
+                self.assertNotIn(str(base), text)
+                self.assertNotIn(str(base.resolve()), text)
 
     def test_walk_order_is_sorted_and_independent_of_os_listing_order(self) -> None:
         """QA-IN-2: file order is the sorted path order even when the OS lists entries reversed."""
@@ -305,7 +321,8 @@ class QaIn2DeterministicRescanTest(unittest.TestCase):
             root = Path(tmp) / "case"
             _build_case_folder(root)
             expected = [
-                "B-upper.txt", "a-first.txt", "copy-of-a.txt", "m-bundle.zip", "photo.png", "z-last.txt",
+                "B-upper.txt", "a-first.txt", "copy-of-a.txt", "empty.jpg", "fake.gif", "fake.mp3",
+                "m-bundle.zip", "photo.png", "z-last.txt",
                 "a-dir/inner.txt", "sub/c.txt", "sub/y.txt",
             ]
             plain = [path.relative_to(root).as_posix() for path in _iter_files(root, recursive=True)]
@@ -326,7 +343,7 @@ class QaIn2DeterministicRescanTest(unittest.TestCase):
             real_iterdir = Path.iterdir
             with patch.object(Path, "iterdir", lambda self: reversed(list(real_iterdir(self)))):
                 flat = [path.name for path in _iter_files(root, recursive=False)]
-            self.assertEqual(flat, expected[:6])
+            self.assertEqual(flat, expected[:9])
 
     def test_max_files_cap_keeps_the_same_files(self) -> None:
         """QA-IN-2: a capped scan keeps the first N files in sorted order on every run."""

@@ -39,6 +39,7 @@ from .checks import AnalyzerError, CheckSkipped, run_check, skipped
 from .image_class import MEASURABLE_MIN_SIDE_PX, ImageClass, classify_image, resolution_out_of_range
 from .checks import failed as failed_entry
 from .checks import failure_reason
+from .error_text import path_scrub_root
 from .checks import skipped as skipped_entry
 from .decision import decide
 from .layer_diagnostic import UNAVAILABLE_BAND
@@ -293,7 +294,47 @@ def scan_paths(
     unreadable directories become skipped/failed rows. A single archive
     file (``paths=[archive]``, ``root=archive.parent``) is analyzed exactly
     as it would be inside a scanned folder (R1).
+
+    N1: ``root`` is registered with :func:`error_text.path_scrub_root` for
+    the whole scan, so an exception message in any row reads ``<root>/…``
+    (other absolute paths: base name only).
     """
+    with path_scrub_root(root):
+        return _scan_paths(
+            paths, root=root, capped=capped, iter_errors=iter_errors, symlinks=symlinks,
+            text_bytes=text_bytes, metadata_bytes=metadata_bytes, pixel_mode=pixel_mode,
+            pixel_max_side=pixel_max_side, heatmaps=heatmaps, heatmap_dir=heatmap_dir,
+            model_path=model_path, cache_path=cache_path, workers=workers,
+            max_file_bytes=max_file_bytes, dedupe=dedupe, hash_db_path=hash_db_path,
+            deep_signals=deep_signals, thresholds=thresholds, should_stop=should_stop,
+            progress=progress,
+        )
+
+
+def _scan_paths(
+    paths: list[Path],
+    *,
+    root: Path,
+    capped: bool,
+    iter_errors: list[tuple[Path, OSError]] | None,
+    symlinks: list[Path] | None,
+    text_bytes: int,
+    metadata_bytes: int,
+    pixel_mode: str,
+    pixel_max_side: int,
+    heatmaps: bool,
+    heatmap_dir: Path | None,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
+    cache_path: Path | None,
+    workers: int,
+    max_file_bytes: int | None,
+    dedupe: bool,
+    hash_db_path: Path | None,
+    deep_signals: bool,
+    thresholds: object | None,
+    should_stop: Callable[[], bool] | None,
+    progress: ScanProgress | None,
+) -> tuple[BatchScanSummary, list[ScanItem]]:
     iter_errors = list(iter_errors or [])
     symlinks = list(symlinks or [])
     # Archive containers are expanded into member jobs up front: each
@@ -322,7 +363,7 @@ def scan_paths(
                 logger.exception("archive extraction failed: %s", path)
                 archive_meta[rel] = {
                     "path": path, "fmt": archive_format(path),
-                    "skipped": 0, "warnings": [f"압축 해제 실패: {exc}"],
+                    "skipped": 0, "warnings": [f"압축 해제 실패: {failure_reason(exc)}"],
                     "error": failure_reason(exc),
                 }
                 archive_members[rel] = []
@@ -357,7 +398,7 @@ def scan_paths(
                 extra.append(ScanItem(
                     _display_path(err_path, root=root), err_path.name,
                     "unknown", "failed", 0,
-                    error=f"폴더를 읽을 수 없습니다: {exc}",
+                    error=f"폴더를 읽을 수 없습니다: {failure_reason(exc)}",
                 ))
             # D10: a symlink in the evidence folder is listed (never followed)
             # so the report accounts for every directory entry it was given.
@@ -534,7 +575,7 @@ def _scan_specs(
             try:
                 size = path.stat().st_size
             except OSError as exc:
-                return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "failed", 0, error=str(exc)), None, False
+                return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "failed", 0, error=failure_reason(exc)), None, False
             if size > max_file_bytes:
                 return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "skipped", size, error=f"파일 크기가 --max-file-bytes 상한({max_file_bytes} bytes)을 초과해 건너뜀"), None, False
         # Archive members live in a temp dir with unstable paths — caching
@@ -583,7 +624,7 @@ def _scan_specs(
             item = ScanItem(
                 display or _display_path(path, root=root),
                 path.name, "unknown", "failed", 0,
-                error=f"분석 오류: {type(exc).__name__}: {exc}",
+                error=f"분석 오류: {failure_reason(exc)}",
             )
             return item, key, False
         item = _with_content_sha256(item, path, fingerprints)
@@ -666,13 +707,43 @@ def analyze_file(
     deep_signals: bool = False,
     thresholds: "object | None" = None,
 ) -> ScanItem:
+    """Analyze one file into a scan row.
+
+    N1: ``root`` (or, without one, the file's folder) is registered for
+    path scrubbing while the file is analyzed — this also covers worker
+    threads, which do not inherit the scan's context.
+    """
+    with path_scrub_root(root if root is not None else Path(path).parent):
+        return _analyze_file(
+            path, root=root, display=display, text_bytes=text_bytes, metadata_bytes=metadata_bytes,
+            pixel_mode=pixel_mode, pixel_max_side=pixel_max_side, heatmaps=heatmaps,
+            heatmap_dir=heatmap_dir, model_path=model_path, deep_signals=deep_signals,
+            thresholds=thresholds,
+        )
+
+
+def _analyze_file(
+    path: Path | str,
+    *,
+    root: Path | None,
+    display: str | None,
+    text_bytes: int,
+    metadata_bytes: int,
+    pixel_mode: str,
+    pixel_max_side: int,
+    heatmaps: bool,
+    heatmap_dir: Path | None,
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
+    deep_signals: bool,
+    thresholds: "object | None",
+) -> ScanItem:
     file_path = Path(path)
     display_path = display or _display_path(file_path, root=root)
     item_name = display or file_path.name
     try:
         size = file_path.stat().st_size
     except OSError as exc:
-        return ScanItem(display_path, item_name, "unknown", "failed", 0, error=str(exc))
+        return ScanItem(display_path, item_name, "unknown", "failed", 0, error=failure_reason(exc))
     extension = file_path.suffix.lower()
 
     if is_archive(file_path):
@@ -700,7 +771,7 @@ def analyze_file(
                 _analyze_text_file(file_path, extension, text_bytes=text_bytes, model_path=model_path),
             )
         except OSError as exc:
-            return ScanItem(display_path, item_name, "text", "failed", size, error=str(exc))
+            return ScanItem(display_path, item_name, "text", "failed", size, error=failure_reason(exc))
 
     if extension in SUPPORTED_IMAGE_EXTENSIONS:
         try:
@@ -714,7 +785,7 @@ def analyze_file(
             )
             return ScanItem(display_path, item_name, "image", "analyzed", size, result)
         except OSError as exc:
-            return ScanItem(display_path, item_name, "image", "failed", size, error=str(exc))
+            return ScanItem(display_path, item_name, "image", "failed", size, error=failure_reason(exc))
 
     if extension in SUPPORTED_AUDIO_EXTENSIONS:
         return ScanItem(display_path, item_name, "audio", "analyzed", size, _analyze_audio_file(file_path, model_path=model_path))

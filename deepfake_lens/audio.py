@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
+from .error_text import exception_text, failure_reason
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
 
 
@@ -111,7 +112,7 @@ def analyze_audio(
     try:
         file_size = audio_path.stat().st_size
     except OSError as exc:
-        return _error_analysis(f"파일 정보를 읽을 수 없습니다: {exc}")
+        return _error_analysis(f"파일 정보를 읽을 수 없습니다: {exception_text(exc)}")
 
     if file_size > MAX_AUDIO_BYTES:
         return _error_analysis(f"파일이 너무 큽니다: {file_size} bytes (최대 {MAX_AUDIO_BYTES})")
@@ -279,7 +280,7 @@ def _extract_features_with_reason(path: Path, *, segment_seconds: int) -> tuple[
         features = _extract_features(path, segment_seconds=segment_seconds, raise_on_decode=True)
     except Exception as exc:
         logger.exception("audio decode failed: %s", path)
-        return None, f"{type(exc).__name__}: {str(exc)[:200]}"
+        return None, failure_reason(exc)  # N1: soundfile/librosa messages carry the full path
     if features is None:
         return None, "AnalyzerError: 디코딩된 오디오 샘플이 없습니다"
     return features, ""

@@ -203,7 +203,9 @@ def _read_exif_into(path: Path, metadata: dict[str, str], read: ImageMetadataRea
             elif isinstance(raw_xmp, bytes):
                 packet = raw_xmp
     except Exception as exc:  # noqa: BLE001 - Pillow raises many decoder-specific types; recorded as a failed read
-        return None, f"EXIF 판독 실패: {type(exc).__name__}: {str(exc)[:160]}"
+        from .error_text import exception_text
+
+        return None, f"EXIF 판독 실패: {type(exc).__name__}: {exception_text(exc, 160)}"
     metadata.update(values)
     read.exif_read = True
     return packet, None

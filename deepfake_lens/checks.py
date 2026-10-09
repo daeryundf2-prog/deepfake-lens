@@ -12,6 +12,9 @@ a :class:`~deepfake_lens.result_types.CoverageEntry`:
 A failed entry makes ``decision.decide`` return ``undetermined`` unless
 strong deterministic synthetic evidence exists. The traceback is logged so
 the failure can be investigated; it is never swallowed.
+
+N1: the "<message>" part is path-scrubbed and, for well-known library
+messages, Korean — see :mod:`deepfake_lens.error_text`.
 """
 
 from __future__ import annotations
@@ -19,16 +22,13 @@ from __future__ import annotations
 import logging
 from typing import Callable, TypeVar
 
+# N1: re-exported — failure reasons are built (path-scrubbed) in error_text.
+from .error_text import FAILURE_MESSAGE_MAX_CHARS, exception_text, failure_reason, path_scrub_root, scrub_paths  # noqa: F401
 from .result_types import CoverageEntry, CoverageStatus
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-# Upper bound on the exception message kept in a coverage reason — enough
-# for the examiner to identify the failure, short enough for a report cell.
-FAILURE_MESSAGE_MAX_CHARS = 200
-
 
 class CheckSkipped(Exception):
     """Raised inside a check to record a deliberate, explained skip.
@@ -57,11 +57,6 @@ def skipped(check: str, reason: str) -> CoverageEntry:
 
 def failed(check: str, exc: BaseException) -> CoverageEntry:
     return CoverageEntry(check, CoverageStatus.FAILED, failure_reason(exc))
-
-
-def failure_reason(exc: BaseException) -> str:
-    message = str(exc)[:FAILURE_MESSAGE_MAX_CHARS]
-    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
 def dependency_reason(exc: ImportError) -> str:

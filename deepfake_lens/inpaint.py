@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
+from .error_text import exception_text
 
 
 @dataclass(frozen=True)
@@ -69,7 +70,7 @@ def analyze_inpainting(
         if image is None:
             return _error_analysis("이미지를 읽을 수 없습니다.")
     except Exception as exc:
-        return _error_analysis(f"이미지 읽기 오류: {exc}")
+        return _error_analysis(f"이미지 읽기 오류: {exception_text(exc)}")
 
     signals: list[InpaintEvidenceSignal] = []
     limitations: list[str] = []

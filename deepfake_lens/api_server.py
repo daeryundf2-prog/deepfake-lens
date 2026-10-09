@@ -288,7 +288,7 @@ def create_app(
             return {"status": "success", "data": _verdict_payload(path, "analyze/image")}
         except Exception as exc:
             logger.exception("request failed")
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail=failure_reason(exc)) from exc
 
     @app.post("/api/analyze/audio")
     def analyze_audio(file_path: str):
@@ -302,7 +302,7 @@ def create_app(
             return {"status": "success", "data": _verdict_payload(path, "analyze/audio")}
         except Exception as exc:
             logger.exception("request failed")
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail=failure_reason(exc)) from exc
 
     @app.post("/api/analyze/face")
     def analyze_face(file_path: str):
@@ -318,7 +318,7 @@ def create_app(
             return {"status": "success", "data": diag}
         except Exception as exc:
             logger.exception("request failed")
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail=failure_reason(exc)) from exc
 
     @app.post("/api/analyze/text")
     def analyze_text(text: str):
@@ -338,7 +338,7 @@ def create_app(
             return {"status": "success", "data": data}
         except Exception as exc:
             logger.exception("request failed")
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail=failure_reason(exc)) from exc
 
     @app.post("/api/analyze/forensic")
     def analyze_forensic(file_path: str):
@@ -358,7 +358,7 @@ def create_app(
             return {"status": "success", "data": data}
         except Exception as exc:
             logger.exception("request failed")
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail=failure_reason(exc)) from exc
 
     @app.post("/api/classify")
     def classify(file_path: str):
@@ -376,7 +376,7 @@ def create_app(
             return {"status": "success", "data": data}
         except Exception as exc:
             logger.exception("request failed")
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail=failure_reason(exc)) from exc
 
     @app.post("/api/check")
     def check(
@@ -462,7 +462,7 @@ def create_app(
             raise
         except Exception as exc:
             logger.exception("request failed")
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail=failure_reason(exc)) from exc
 
     # --- Streaming job API -------------------------------------------------
     # /api/check/stream runs the same layered check as /api/check but reports
@@ -519,7 +519,7 @@ def create_app(
                         emit(evt)
                 except Exception as exc:  # noqa: BLE001 - report, don't hang
                     logger.exception("streaming job %s failed", job_id)
-                    emit(("error", {"detail": str(exc)}))
+                    emit(("error", {"detail": failure_reason(exc)}))
                 finally:
                     _mark_done(job_id)
                     emit(None)
@@ -816,7 +816,7 @@ def create_app(
             result = compare_files(path_a, path_b)
         except Exception as exc:
             logger.exception("request failed")
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail=failure_reason(exc)) from exc
         if "error" in result:
             raise HTTPException(status_code=400, detail=str(result["error"]))
         from .webapp_api import compare_layer
@@ -845,7 +845,7 @@ def create_app(
             return {"status": "success", "data": diag}
         except Exception as exc:
             logger.exception("request failed")
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            raise HTTPException(status_code=500, detail=failure_reason(exc)) from exc
 
     # --- GUI & Webapp compatibility endpoints ---
     # Same payload functions as the stdlib web server (webapp_api), which in

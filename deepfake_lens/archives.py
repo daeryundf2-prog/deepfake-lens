@@ -33,6 +33,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import IO, Any
 
+from .error_text import exception_text, failure_reason
+
 SUPPORTED_ARCHIVE_EXTENSIONS = {
     ".zip", ".tar", ".tgz", ".tar.gz", ".tar.bz2", ".tbz2",
     ".tar.xz", ".txz", ".7z", ".rar",
@@ -333,7 +335,7 @@ def _extract_zip(path: Path, dest: Path, out: ArchiveExtraction, budget: Extract
                 # drop the partial file so it is neither analyzed nor left
                 # occupying budget-free disk space.
                 target.unlink(missing_ok=True)
-                out.reject(name, f"손상된 멤버 데이터({type(exc).__name__}: {str(exc)[:120]})")
+                out.reject(name, f"손상된 멤버 데이터({type(exc).__name__}: {exception_text(exc, 120)})")
                 continue
             total += written
             _charge(out, budget, target, rel, written, truncated)
@@ -381,7 +383,7 @@ def _extract_tar(path: Path, dest: Path, out: ArchiveExtraction, budget: Extract
                     written, truncated = _copy_capped(src, target, _member_cap(total, budget))
             except (OSError, tarfile.TarError, EOFError, zlib.error) as exc:
                 target.unlink(missing_ok=True)
-                out.reject(member.name, f"손상된 멤버 데이터({type(exc).__name__}: {str(exc)[:120]})")
+                out.reject(member.name, f"손상된 멤버 데이터({type(exc).__name__}: {exception_text(exc, 120)})")
                 continue
             total += written
             _charge(out, budget, target, rel, written, truncated)
@@ -474,8 +476,8 @@ def _extract_7z(path: Path, dest: Path, out: ArchiveExtraction, budget: Extracti
                     continue
                 _charge(out, budget, target, rel or name, size, False)
     except Exception as exc:  # noqa: BLE001 - py7zr raises several custom error types
-        out.warnings.append(f"7z 해제 실패: {type(exc).__name__}: {exc}")
-        out.error = f"{type(exc).__name__}: {str(exc)[:200]}"
+        out.warnings.append(f"7z 해제 실패: {failure_reason(exc)}")
+        out.error = failure_reason(exc)
 
 
 def _rar_member_rejected(info: Any) -> bool:
@@ -542,13 +544,13 @@ def _extract_rar(path: Path, dest: Path, out: ArchiveExtraction, budget: Extract
                         written, truncated = _copy_capped(src, target, _member_cap(total, budget))
                 except Exception as exc:  # noqa: BLE001 - rarfile/unrar errors vary by backend
                     target.unlink(missing_ok=True)
-                    out.reject(name, f"손상된 멤버 데이터({type(exc).__name__}: {str(exc)[:120]})")
+                    out.reject(name, f"손상된 멤버 데이터({type(exc).__name__}: {exception_text(exc, 120)})")
                     continue
                 total += written
                 _charge(out, budget, target, rel, written, truncated)
     except Exception as exc:  # noqa: BLE001 - rarfile raises several custom error types
-        out.warnings.append(f"rar 해제 실패: {type(exc).__name__}: {exc}")
-        out.error = f"{type(exc).__name__}: {str(exc)[:200]}"
+        out.warnings.append(f"rar 해제 실패: {failure_reason(exc)}")
+        out.error = failure_reason(exc)
 
 
 def extract_archive(
@@ -586,8 +588,8 @@ def extract_archive(
             out.warnings.append("지원하지 않는 압축 형식입니다.")
             return out
     except (zipfile.BadZipFile, tarfile.TarError, OSError, EOFError, ValueError) as exc:
-        out.warnings.append(f"압축 해제 실패: {type(exc).__name__}: {exc}")
-        out.error = f"{type(exc).__name__}: {str(exc)[:200]}"
+        out.warnings.append(f"압축 해제 실패: {failure_reason(exc)}")
+        out.error = failure_reason(exc)
         return out
 
     nested = [m for m in out.members if is_archive(m)]

@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from .error_text import exception_text
+
 
 MAX_DECOMPRESSED_IMAGE_BYTES = 96 * 1024 * 1024
 
@@ -38,7 +40,7 @@ def _load_raster(path: Path, *, max_side: int) -> tuple[PixelRaster | None, list
         with path.open("rb") as handle:
             data = handle.read(MAX_SOURCE_IMAGE_BYTES + 1)
     except OSError as exc:
-        return None, [f"이미지 픽셀을 읽지 못했습니다: {exc}"]
+        return None, [f"이미지 픽셀을 읽지 못했습니다: {exception_text(exc)}"]
     if len(data) > MAX_SOURCE_IMAGE_BYTES:
         return None, [f"이미지 파일이 너무 큽니다 ({MAX_SOURCE_IMAGE_BYTES // (1024 * 1024)}MB 상한)."]
 
@@ -73,7 +75,7 @@ def _load_with_optional_pillow(path: Path, *, max_side: int) -> tuple[PixelRaste
                 pixels = tuple((int(r), int(g), int(b)) for r, g, b in image.getdata())
             return PixelRaster(width, height, pixels, "pillow"), []
     except Exception as exc:  # pragma: no cover - depends on optional Pillow codecs
-        return None, [f"Pillow로 이미지 픽셀을 읽지 못했습니다: {exc}"]
+        return None, [f"Pillow로 이미지 픽셀을 읽지 못했습니다: {exception_text(exc)}"]
 
 
 def _load_png_raster(data: bytes, *, max_side: int) -> tuple[PixelRaster | None, str | None]:

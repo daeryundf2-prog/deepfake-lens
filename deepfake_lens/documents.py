@@ -30,7 +30,9 @@ def _failed(meta: dict[str, str], backend: str, exc: BaseException) -> None:
     """
     logger.warning("document extraction failed (%s)", backend, exc_info=exc)
     meta["extractor"] = f"failed:{backend}:{type(exc).__name__}"
-    message = str(exc)[:EXTRACTOR_ERROR_MAX_CHARS]
+    from .error_text import exception_text
+
+    message = exception_text(exc, EXTRACTOR_ERROR_MAX_CHARS)  # N1: no full paths, Korean where known
     meta["extractor_error"] = f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 # Extensions routed to this module from analyze_file.

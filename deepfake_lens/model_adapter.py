@@ -70,9 +70,9 @@ PIN_HINT = "가중치 고정 필요: 'deepfake-lens vendor-weights pin <프로�
 
 def _failure_detail(context: str, exc: BaseException) -> str:
     """"<ExcType>: <message> (<context>)" — the coverage reason format."""
-    message = str(exc)[:200]
-    head = f"{type(exc).__name__}: {message}" if message else type(exc).__name__
-    return f"{head} ({context})"
+    from .error_text import failure_reason
+
+    return f"{failure_reason(exc)} ({context})"  # N1: path-scrubbed
 
 
 # Profile-set marker: a JSON file that lists member profiles/directories so a

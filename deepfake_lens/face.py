@@ -32,6 +32,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
+from .error_text import exception_text, failure_reason
 from .vendor_weights import default_models_dir
 
 
@@ -139,14 +140,14 @@ def analyze_faces(
         if image is None:
             return _error_analysis("이미지를 읽을 수 없습니다.")
     except Exception as exc:
-        return _error_analysis(f"이미지 읽기 오류: {exc}")
+        return _error_analysis(f"이미지 읽기 오류: {exception_text(exc)}")
 
     try:
         faces = _detect_faces_strict(image)
     except FaceDetectorUnavailable as exc:
-        return _unavailable_analysis(f"얼굴 검출기 없음: {exc}")
+        return _unavailable_analysis(f"얼굴 검출기 없음: {exception_text(exc)}")
     except FaceDetectionError as exc:
-        return _error_analysis(f"얼굴 검출 오류: {exc}")
+        return _error_analysis(f"얼굴 검출 오류: {exception_text(exc)}")
     if not faces:
         return FaceAnalysis(
             score=0,
@@ -434,7 +435,7 @@ def _mediapipe_detect_faces(image: Any, max_faces: int = 3, *, strict: bool = Fa
             face_mesh.close()
     except Exception as exc:
         if strict:
-            raise FaceDetectionError(f"{type(exc).__name__}: {exc}") from exc
+            raise FaceDetectionError(failure_reason(exc)) from exc
         return []
 
     if not result.multi_face_landmarks:

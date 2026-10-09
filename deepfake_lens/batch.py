@@ -13,6 +13,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from .error_text import failure_reason
+
 
 @dataclass(frozen=True)
 class BatchJob:
@@ -89,7 +91,7 @@ class BatchProcessor:
                         file_path=str(file),
                         status="error",
                         result=None,
-                        error=str(exc),
+                        error=failure_reason(exc),
                         processing_time=0.0,
                     ))
         
@@ -132,7 +134,7 @@ class BatchProcessor:
                 file_path=str(file),
                 status="error",
                 result=None,
-                error=str(exc),
+                error=failure_reason(exc),
                 processing_time=processing_time,
             )
     
