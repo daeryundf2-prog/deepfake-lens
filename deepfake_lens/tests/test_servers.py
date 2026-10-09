@@ -2190,6 +2190,74 @@ class DocumentedEndpointsExistTest(unittest.TestCase):
             self.assertEqual(api_gui, set(webapp.GUI_SHELL_PATHS) | set(webapp.GUI_STATIC_ASSETS))
 
 
+class TrailingSlashParityTest(unittest.TestCase):
+    """R12-11 (round 12): api-serve redirected "/gui/" to "/gui" (Starlette's
+    redirect_slashes, 307) while the stdlib web server answered 404. A path with
+    a trailing slash is not a route on either server: both answer 404 (Korean
+    body), never a redirect."""
+
+    PATHS = ("/gui/", "/gui.css/", "/gui.js/", "/api/scan/", "/api/scan-status/", "/api/reviews/", "/api/version/")
+
+    def _web_statuses(self) -> dict[str, tuple[int, str]]:
+        import tempfile
+        import threading
+        import urllib.error
+        import urllib.request
+
+        from deepfake_lens.webapp import build_server
+
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *args: object, **kwargs: object) -> None:
+                return None
+
+        roots = patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
+        roots.start()
+        self.addCleanup(roots.stop)
+        out: dict[str, tuple[int, str]] = {}
+        with tempfile.TemporaryDirectory() as tmp:
+            server = build_server("127.0.0.1", 0, default_folder=Path(tmp))
+            threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+            try:
+                opener = urllib.request.build_opener(NoRedirect)
+                for path in self.PATHS:
+                    request = urllib.request.Request(
+                        f"http://127.0.0.1:{server.server_address[1]}{path}", headers={"X-Deepfake-Lens-Client": "gui"}
+                    )
+                    try:
+                        with opener.open(request, timeout=60) as response:
+                            out[path] = (response.status, response.read().decode("utf-8", "replace"))
+                    except urllib.error.HTTPError as exc:
+                        out[path] = (exc.code, exc.read().decode("utf-8", "replace"))
+            finally:
+                server.shutdown()
+                server.server_close()
+        return out
+
+    def test_web_server(self) -> None:
+        for path, (status, body) in self._web_statuses().items():
+            with self.subTest(path=path):
+                self.assertEqual(status, 404, body[:200])
+                self.assertIn("찾을 수 없는 경로입니다", body)
+
+    @unittest.skipUnless(HAVE_FASTAPI, "fastapi/httpx not installed")
+    def test_api_server_matches_the_web_server(self) -> None:
+        from fastapi.testclient import TestClient
+
+        client = TestClient(api_server.create_app(), raise_server_exceptions=False)
+        web = self._web_statuses()
+        for path in self.PATHS:
+            with self.subTest(path=path):
+                response = client.get(path, headers={"host": "localhost", "X-Deepfake-Lens-Client": "gui"}, follow_redirects=False)
+                self.assertEqual(response.status_code, 404, (path, response.headers.get("location"), response.text[:200]))
+                self.assertNotIn("location", {key.lower() for key in response.headers})
+                self.assertIn("찾을 수 없는 경로입니다", response.text)
+                self.assertEqual(response.status_code, web[path][0])
+        # The paths without the slash are still served by both.
+        for path in ("/gui", "/gui.css", "/gui.js"):
+            with self.subTest(path=path):
+                self.assertEqual(client.get(path, headers={"host": "localhost"}).status_code, 200)
+
+
 class ErrorTableEveryRowTest(unittest.TestCase):
     """P8 (round 8): every row of the error-status table (docs/deepfake-lens-service.md,
     "Error status codes") is sent to every server it names. api-serve's own file

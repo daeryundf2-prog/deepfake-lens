@@ -181,7 +181,9 @@ JSON API under `/api/` (GET plus `POST /api/feedback`, `/api/report`,
 `/gui` serve the GUI HTML and `/gui.css`, `/gui.js` its assets (the same GUI
 paths as `api-serve`). R11-12: any other path is **404**
 `{"error": "찾을 수 없는 경로입니다"}` (it used to serve the GUI HTML — `/docs`,
-`/favicon.ico`, anything). R9-8: every path in this table and in the REST
+`/favicon.ico`, anything). R12-11: a trailing slash (`/gui/`, `/gui.js/`,
+`/api/scan/`, …) is not a route on either server — both answer 404 (`api-serve`
+used to redirect `/gui/` to `/gui`; its `redirect_slashes` is off). R9-8: every path in this table and in the REST
 table above is a route of its server, and every route is in its table
 (`test_servers.DocumentedEndpointsExistTest`).
 The GUI saves its examiner marks through `POST /api/review` (browser

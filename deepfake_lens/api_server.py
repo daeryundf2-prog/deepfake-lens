@@ -294,6 +294,9 @@ def create_app(
         redoc_url=None,
         openapi_url=None,
         default_response_class=JSONResponse,
+        # R12-11 (round 12): Starlette redirected "/gui/" to "/gui" (307) while the
+        # stdlib web server answered 404 — a trailing slash is now 404 on both.
+        redirect_slashes=False,
     )
 
     from fastapi.exceptions import RequestValidationError
