@@ -993,11 +993,23 @@ def _no_model_entry(model_path: object | None, modality: str) -> CoverageEntry:
     return skipped("external_model", f"{modality} 형식에 맞는 모델 프로필 없음")
 
 
+C2PA_EMPTY_FILE = "빈 파일 — C2PA 매니페스트를 읽을 수 없습니다"
+
+
 def _validate_c2pa(path: Path) -> dict[str, object]:
     import c2pa  # noqa: F401 — dependency probe: absent SDK is "skipped", not "failed"
 
     from .c2pa import validate_c2pa_manifest
 
+    try:
+        empty = path.stat().st_size == 0
+    except OSError:
+        empty = False
+    if empty:
+        # N6: an empty file is one outcome whatever its extension — the SDK
+        # answered an I/O error for ".png" (failed) but "not supported" for
+        # ".jpg" (skipped), so two identical empty files disagreed.
+        raise AnalyzerError(C2PA_EMPTY_FILE)
     validation = validate_c2pa_manifest(path)
     if validation is None:
         raise ModuleNotFoundError("c2pa", name="c2pa")

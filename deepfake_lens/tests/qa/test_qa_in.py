@@ -477,6 +477,49 @@ class QaIn4ContentKeyedCacheTest(unittest.TestCase):
             summary, _, calls = self._scan()
         self.assertEqual((summary.cached, calls), (0, 2))
 
+    def test_same_bytes_other_name_or_extension_matches_an_uncached_scan(self) -> None:
+        """QA-IN-4: 보조 검사 — N6: a cached scan gives every row exactly what an uncached scan gives.
+
+        N6: a cached scan gives every row exactly what an uncached scan gives —
+        zero.png did not replay empty.jpg's row (whose text named
+        '<root>/empty.jpg' and whose C2PA entry was the .jpg outcome), and a
+        same-bytes copy under another name gets its own path in every text.
+        """
+        folder = Path(self._tmp.name) / "n6"
+        folder.mkdir()
+        (folder / "empty.jpg").write_bytes(b"")
+        (folder / "zero.png").write_bytes(b"")
+        garbage = b"not an image at all " * 8
+        (folder / "garbage.jpg").write_bytes(garbage)
+        (folder / "garbage-copy.jpg").write_bytes(garbage)
+        cache = Path(self._tmp.name) / "n6-cache.json"
+
+        def rows(**kwargs: Any) -> dict[str, dict[str, Any]]:
+            summary, items = scan_directory(folder, **kwargs)
+            self.last_cached = summary.cached
+            return {item.name: item.to_json() for item in items}
+
+        uncached = rows()
+        rows(cache_path=cache)
+        cached = rows(cache_path=cache)
+        self.assertEqual(self.last_cached, 4, "every row must come from the cache on the second scan")
+        self.assertEqual(sorted(cached), sorted(uncached))
+        for name in uncached:
+            with self.subTest(name=name):
+                self.assertEqual(cached[name], uncached[name])
+        self.assertNotIn("empty.jpg", json.dumps(cached["zero.png"], ensure_ascii=False))
+        self.assertNotIn("garbage.jpg", json.dumps(cached["garbage-copy.jpg"], ensure_ascii=False))
+        self.assertIn("garbage-copy.jpg", json.dumps(cached["garbage-copy.jpg"], ensure_ascii=False))
+        # The empty file's C2PA outcome no longer depends on its extension.
+        c2pa = {
+            name: [entry for entry in (row["result"] or {}).get("coverage", []) if entry["check"] == "c2pa"]
+            for name, row in uncached.items() if name in ("empty.jpg", "zero.png")
+        }
+        self.assertEqual(c2pa["empty.jpg"], c2pa["zero.png"])
+        keys = list(json.loads(cache.read_text(encoding="utf-8"))["items"])
+        self.assertTrue(any("ext:.png" in key for key in keys))
+        self.assertTrue(any("ext:.jpg" in key for key in keys))
+
     def test_dedupe_hash_is_reused_not_recomputed(self) -> None:
         """QA-IN-4: 보조 검사 — with dedupe on, each file is hashed once per scan (shared memo)."""
         from deepfake_lens import scan_cache

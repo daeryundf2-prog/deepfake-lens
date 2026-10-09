@@ -8,10 +8,11 @@ compatibility with existing call sites and tests.
 from __future__ import annotations
 
 import hashlib
+import re
 import json
 from dataclasses import replace
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 
 from .profile_pins import ModelPathArg, model_path_digest, pin_tokens, profile_pins
 from .result_types import ScanItem
@@ -234,14 +235,19 @@ def _cache_key(
     fingerprints: dict[Path, str] | None = None,
     scan_context: str | None = None,
 ) -> str:
-    """Content-addressed cache key (G11).
+    """Content-addressed cache key (G11, N6).
 
-    key = SHA-256(file bytes) + hash(analysis options) + tool version +
-    sorted profile-pin list (+ threshold/weights provenance). Path, size
-    and mtime are deliberately absent: a same-size edit whose mtime was
-    restored must miss (QA-IN-4), and a renamed folder must still hit.
-    ``root`` is accepted for call-site compatibility and ignored. Returns
-    "" (never cacheable) when the file cannot be read.
+    key = SHA-256(file bytes) + the file's extension + hash(analysis
+    options) + tool version + sorted profile-pin list (+ threshold/weights
+    provenance). Path, size and mtime are deliberately absent: a same-size
+    edit whose mtime was restored must miss (QA-IN-4), and a renamed folder
+    must still hit. N6: the extension is part of the key because it selects
+    the analysis — the kind (image/audio/…) and the reader (the C2PA SDK
+    decides the format from it: an empty ``.png`` is an I/O failure, an
+    empty ``.jpg`` an unsupported format) — so ``zero.png`` no longer
+    replays ``empty.jpg``'s row. ``root`` is accepted for call-site
+    compatibility and ignored. Returns "" (never cacheable) when the file
+    cannot be read.
     """
     del root
     digest = _content_sha256(path, fingerprints)
@@ -264,6 +270,7 @@ def _cache_key(
         [
             CACHE_KEY_VERSION,
             f"sha256:{digest}",
+            f"ext:{cache_extension(path)}",
             f"opts:{_short_digest(options)}",
             context,
             # Threshold/weights provenance — a cached verdict computed under
@@ -296,7 +303,16 @@ def _content_sha256(path: Path, fingerprints: dict[Path, str] | None = None) -> 
 
 # Bumped whenever the key layout changes so entries written under an older
 # layout (the path+size+mtime keys before G11) can never match.
-CACHE_KEY_VERSION = "content-v2"
+CACHE_KEY_VERSION = "content-v3"  # v3 (N6): + extension
+
+
+def cache_extension(path: Path) -> str:
+    """The lowercased extension that selects the analysis (compound archive suffixes kept)."""
+    name = path.name.lower()
+    for compound in (".tar.gz", ".tar.bz2", ".tar.xz"):
+        if name.endswith(compound):
+            return compound
+    return path.suffix.lower()
 
 
 def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | None = None) -> str:
@@ -316,24 +332,64 @@ def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | No
 def _cached_scan_item(cached: object, path: Path, *, root: Path) -> ScanItem | None:
     """Rebuild a cached row for the file at ``path``, or None to re-analyze.
 
-    The key is content-only, so the stored row may come from a file with the
-    same bytes elsewhere (or from before a folder rename): path and name are
-    rewritten to the current file. A row whose heatmap no longer exists is a
-    miss rather than a replay with a dead link.
+    The key is content + extension, so the stored row may come from a file
+    with the same bytes elsewhere (or from before a folder rename): path and
+    name are rewritten to the current file, and so is every path-dependent
+    text in the row (N6 — an error message that named "<root>/empty.jpg"
+    must name the file this row is about). A row whose heatmap no longer
+    exists is a miss rather than a replay with a dead link.
     """
     if not isinstance(cached, dict):
         return None
     from .serialization import _scan_item_from_json
 
+    display = _display_path(path, root=root)
+    row: dict[str, object] = cached
+    old_path, old_name = row.get("path"), row.get("name")
+    if isinstance(old_path, str) and isinstance(old_name, str) and (old_path, old_name) != (display, path.name):
+        row = _rewrite_path_text(row, old_path, old_name, display, path.name)
     try:
-        item = _scan_item_from_json(cached)
+        item = _scan_item_from_json(row)
     except (ValueError, TypeError, KeyError):
         return None  # corrupt entry — re-analyze
     pixel = item.result.pixel_analysis if item.result is not None else None
     heatmap_path = getattr(pixel, "heatmap_path", None)
     if heatmap_path and not Path(heatmap_path).is_file():
         return None
-    return replace(item, path=_display_path(path, root=root), name=path.name)
+    return replace(item, path=display, name=path.name)
+
+
+def _rewrite_path_text(node: object, old_path: str, old_name: str, new_path: str, new_name: str) -> Any:
+    """``node`` with every mention of the cached file's path/name replaced by the current file's (N6).
+
+    Messages carry the file as ``<root>/<relative path>`` (scrubbed root,
+    either separator) or, for paths outside the root, as its base name
+    (``error_text.scrub_paths``); both forms are rewritten — the name only
+    as a whole path token, so "e.png" inside "the.png" is left alone.
+    """
+    from .error_text import ROOT_PLACEHOLDER
+
+    pairs = [
+        (f"{ROOT_PLACEHOLDER}/{old_path}", f"{ROOT_PLACEHOLDER}/{new_path}"),
+        (f"{ROOT_PLACEHOLDER}\\{old_path.replace('/', chr(92))}", f"{ROOT_PLACEHOLDER}\\{new_path.replace('/', chr(92))}"),
+    ]
+    name_pattern = re.compile(rf"(?<![\w.\-]){re.escape(old_name)}(?![\w.\-])") if old_name and old_name != new_name else None
+
+    def fix(text: str) -> str:
+        for old, new in pairs:
+            text = text.replace(old, new)
+        return name_pattern.sub(new_name, text) if name_pattern is not None else text
+
+    def walk(value: object) -> object:
+        if isinstance(value, str):
+            return fix(value)
+        if isinstance(value, list):
+            return [walk(entry) for entry in value]
+        if isinstance(value, dict):
+            return {key: walk(entry) for key, entry in value.items()}
+        return value
+
+    return walk(node)
 
 
 def _with_content_sha256(item: ScanItem, path: Path, fingerprints: dict[Path, str] | None) -> ScanItem:
