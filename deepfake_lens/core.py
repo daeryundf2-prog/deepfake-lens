@@ -51,6 +51,7 @@ from .evidence_rules import (
     lexical_evidence,
     model_evidence,
     reference_signal,
+    with_calibrated_directions,
 )
 from .text_heuristics import (  # noqa: F401
     _frontier_llm_fingerprints,
@@ -1364,7 +1365,7 @@ def _audio_result(
         if analysis.model_analysis is not None:
             coverage.extend(model_coverage(analysis.model_analysis))
     evidence: list[EvidenceItem] = []
-    model_item = model_evidence(analysis.model_analysis)
+    model_item = model_evidence(analysis.model_analysis, probability_thresholds)  # N1
     if model_item is not None:
         evidence.append(model_item)
     reference = [
@@ -1467,7 +1468,7 @@ def _video_result(
         if analysis.model_analysis is not None:
             coverage.extend(model_coverage(analysis.model_analysis))
     evidence: list[EvidenceItem] = list(deep.evidence)
-    model_item = model_evidence(analysis.model_analysis)
+    model_item = model_evidence(analysis.model_analysis, probability_thresholds)  # N1
     if model_item is not None:
         evidence.append(model_item)
     reference = [
@@ -1549,8 +1550,9 @@ def _analyze_text_file(
         if tmp_text_path is not None:
             tmp_text_path.unlink(missing_ok=True)
     coverage.extend(model_entries)
-    result = analyze_text(text, model_analysis=model_analysis, coverage=coverage)
-    return _apply_document_metadata(result, doc_metadata)
+    thresholds = profile_probability_thresholds(model_path)  # N1
+    result = analyze_text(text, model_analysis=model_analysis, coverage=coverage, probability_thresholds=thresholds)
+    return _apply_document_metadata(result, doc_metadata, probability_thresholds=thresholds)
 
 
 AUDIO_NEXT_CHECKS = [
@@ -1613,7 +1615,12 @@ _DOCUMENT_AI_HINT = re.compile(
 )
 
 
-def _apply_document_metadata(result: ClassificationResult, doc_metadata: dict[str, str]) -> ClassificationResult:
+def _apply_document_metadata(
+    result: ClassificationResult,
+    doc_metadata: dict[str, str],
+    *,
+    probability_thresholds: dict[str, float] | None = None,
+) -> ClassificationResult:
     """Fold office-document provenance metadata into the text result.
 
     Extraction notes (unavailable/failed extractors) become limitations;
@@ -1674,6 +1681,7 @@ def _apply_document_metadata(result: ClassificationResult, doc_metadata: dict[st
         next_checks=result.next_checks,
         reference_signals=result.reference_signals,
         model_analysis=result.model_analysis,
+        probability_thresholds=probability_thresholds,  # N1
     )
     return replace(rebuilt, document_metadata=preserved or result.document_metadata)
 
@@ -1698,6 +1706,7 @@ def analyze_text(
     *,
     model_analysis: ExternalModelAnalysis | None = None,
     coverage: list[CoverageEntry] | None = None,
+    probability_thresholds: dict[str, float] | None = None,
 ) -> ClassificationResult:
     """Text screening — always reference grade with the legal limitation
     first (G24). Phrase/style signals are lexical evidence only (G4)."""
@@ -1755,7 +1764,7 @@ def analyze_text(
     signals.extend(_frontier_llm_fingerprints(trimmed, normalized, sentences, words))
 
     evidence = lexical_evidence(signals)
-    model_item = model_evidence(model_analysis)
+    model_item = model_evidence(model_analysis, probability_thresholds)  # N1
     if model_item is not None:
         evidence.append(model_item)
 
@@ -1782,6 +1791,7 @@ def analyze_text(
         limitations=limitations,
         next_checks=TEXT_NEXT_CHECKS,
         model_analysis=model_analysis,
+        probability_thresholds=probability_thresholds,  # N1
     )
 
 
@@ -1849,7 +1859,7 @@ def analyze_image_metadata(
         *c2pa_evidence(c2pa_validation),
         *image_class_evidence(image_class),
     ]
-    model_item = model_evidence(model_analysis)
+    model_item = model_evidence(model_analysis, probability_thresholds)  # N1
     if model_item is not None:
         evidence.append(model_item)
     evidence.extend(extra_evidence or [])
@@ -1989,7 +1999,9 @@ def build_classification_result(
     band from the verdict (never MEDIUM), score from a calibrated
     probability only (else 0), signals from the evidence list.
     """
-    ordered = _ordered_evidence(list(evidence))
+    # N1: a calibrated statistical item points toward synthesis iff its
+    # probability reaches the profile threshold for its calibration id.
+    ordered = _ordered_evidence(with_calibrated_directions(evidence, probability_thresholds))
     entries = list(coverage)
     verdict_code = decide(ordered, entries, grade, probability_thresholds)
     calibrated = [item for item in ordered if item.kind == EvidenceKind.STATISTICAL and item.is_calibrated]

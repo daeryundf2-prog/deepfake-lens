@@ -169,7 +169,7 @@ Phase-0 classification of existing signals:
 | Square generator resolution | deterministic | neutral | weak |
 | Missing metadata (`메타데이터 부재`) — only when the metadata read completed, no C2PA manifest is present (or its read failed) and no field was found; a truncated/empty/unrecognized file or an EXIF read error makes the `metadata` check `failed` instead | deterministic | neutral | weak |
 | Image class from the photo/non-photo gate (`이미지 유형: …`, layer `image_class`) | deterministic | neutral | weak |
-| External model output | statistical | synthetic if raw ≥ 50, else neutral | weak (moderate when calibrated) |
+| External model output | statistical | uncalibrated: synthetic if raw ≥ 50, else neutral; calibrated: synthetic iff probability ≥ the profile threshold for its calibration id, else neutral (N1) | weak (moderate when calibrated) |
 | Deep layers (face, inpaint, face-swap seam, rPPG, avatar, lip-sync, face track) — uncalibrated, so `reference_signals` only, title suffixed `(참고, 미보정)`, detail with the raw 0–100 value (D13); never an evidence item | — | — | `reference_signals` only |
 | AI identity phrases, template connectors, list structure, style statistics | lexical | synthetic | weak |
 | Office document creator/producer naming an AI tool | deterministic | synthetic | moderate |
@@ -438,6 +438,16 @@ item only when its `calibration_id` has an entry and `probability >= `
 that value — a calibration id with no profile threshold never fires rule 4
 (the former 0.5 fallback was removed in round 5). No packaged phase-0 profile
 carries `calibration_id`, so rule 4 cannot fire in phase 0.
+
+N1: the `direction` of a calibrated statistical item (one with
+`probability`, `calibration_id` and `measured_on`) is derived from the same
+threshold: `synthetic` iff `probability >= thresholds[calibration_id]`,
+otherwise `neutral` (also `neutral` when no profile supplies a threshold).
+There is no fixed 0.5 cut — a profile with threshold 30 and an output of
+p=0.40 is `synthetic` and fires rule 4. `build_classification_result`
+re-derives the direction of every calibrated item it is given
+(`evidence_rules.with_calibrated_directions`), so rules 4 and 5 always see
+the profile threshold.
 
 ### Profile `measured_on`
 

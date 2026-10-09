@@ -314,3 +314,110 @@ class ProfileThresholdWiringTest(unittest.TestCase):
                     assert row.result is not None
                     self.assertTrue(any(e.calibration_id == "cal-x" for e in row.result.evidence), row.result.evidence)
                     self.assertEqual(row.result.verdict_code, expected)
+
+
+class CalibratedDirectionFromProfileThresholdTest(unittest.TestCase):
+    """N1 (=G8): a calibrated statistical item's direction comes from the
+    profile threshold, not a fixed 0.5 cut.
+
+    model_evidence used to set direction=synthetic only for p >= 0.5, so a
+    profile with a measured threshold below 0.5 (p=0.40, threshold 0.30)
+    could never reach rule 4 and stayed "판단 불가".
+    """
+
+    @staticmethod
+    def _model(p: float):
+        from deepfake_lens.result_types import ExternalModelAnalysis
+
+        return ExternalModelAnalysis(
+            available=True, score=int(round(p * 100)), confidence="medium", model="cal-model", detail="보정된 모델",
+            probability=p, probability_ci=(p - 0.05, p + 0.05), calibration_id="cal-x", measured_on="corpus-x@test",
+        )
+
+    def _result(self, evidence, thresholds):
+        from deepfake_lens.core import build_classification_result
+        from deepfake_lens.result_types import SourceGuess
+
+        return build_classification_result(
+            subject="이미지", evidence=evidence, coverage=[RAN], source_guess=SourceGuess.unknown(),
+            limitations=[], next_checks=[], probability_thresholds=thresholds,
+        )
+
+    def test_model_evidence_direction_follows_threshold(self) -> None:
+        from deepfake_lens.evidence_rules import model_evidence
+
+        cases = (({"cal-x": 0.30}, SYN), ({"cal-x": 0.45}, NEU), ({"cal-x": 0.40}, SYN), (None, NEU), ({"cal-y": 0.1}, NEU))
+        for thresholds, expected in cases:
+            with self.subTest(thresholds=thresholds):
+                item_ = model_evidence(self._model(0.40), thresholds)
+                assert item_ is not None
+                self.assertEqual(item_.direction, expected)
+                self.assertEqual(item_.probability, 0.40)
+
+    def test_build_classification_result_end_to_end(self) -> None:
+        from deepfake_lens.evidence_rules import model_evidence
+
+        for thresholds, expected in (({"cal-x": 0.30}, MANIP), ({"cal-x": 0.45}, UNDET)):
+            with self.subTest(thresholds=thresholds):
+                model_item = model_evidence(self._model(0.40), thresholds)
+                assert model_item is not None
+                result = self._result([model_item], thresholds)
+                self.assertEqual(result.verdict_code, expected)
+                self.assertEqual(result.probability, 0.40)
+
+    def test_builder_rederives_direction_of_prebuilt_items(self) -> None:
+        """An item built with the old 0.5 rule (neutral at p=0.40) still decides by the profile threshold."""
+        neutral = calibrated(0.40, cal="cal-x", direction=NEU)
+        synthetic = calibrated(0.40, cal="cal-x", direction=SYN)
+        for prebuilt in (neutral, synthetic):
+            with self.subTest(direction=prebuilt.direction):
+                low = self._result([prebuilt], {"cal-x": 0.30})
+                high = self._result([prebuilt], {"cal-x": 0.45})
+                self.assertEqual(low.verdict_code, MANIP)
+                self.assertEqual(high.verdict_code, UNDET)
+                self.assertEqual([e.direction for e in low.evidence], [SYN])
+                self.assertEqual([e.direction for e in high.evidence], [NEU])
+
+    def test_below_threshold_calibrated_item_does_not_block_authenticity(self) -> None:
+        """Below its threshold the item is neutral, so rule 5 is not contradicted."""
+        result = self._result([DET_AUTH_STRONG, calibrated(0.40, cal="cal-x")], {"cal-x": 0.45})
+        self.assertEqual(result.verdict_code, AUTHV)
+
+    def test_scan_folder_uses_sub_half_profile_threshold(self) -> None:
+        """Scan level: a fake calibrated profile with threshold 30 and a runtime returning p=0.40."""
+        import json
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        from deepfake_lens.analysis_api import AnalysisOptions, scan_folder
+
+        try:
+            from deepfake_lens.tests.qa.test_qa_out import write_photo_like_png
+        except ImportError as exc:  # pragma: no cover - numpy missing
+            self.skipTest(f"photo fixture unavailable: {exc}")
+        for threshold, expected in ((30, MANIP), (45, UNDET)):
+            with self.subTest(threshold=threshold), tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                folder = base / "case"
+                models = base / "models"
+                folder.mkdir()
+                models.mkdir()
+                try:
+                    write_photo_like_png(folder / "photo.png", seed=3)
+                except ImportError as exc:  # pragma: no cover - numpy missing
+                    self.skipTest(f"numpy unavailable: {exc}")
+                profile = models / "cal-runtime.json"
+                profile.write_text(json.dumps({
+                    "name": "cal", "runtime": "onnx", "modality": "image",
+                    "calibration_id": "cal-x", "threshold": threshold,
+                }), encoding="utf-8")
+                options = AnalysisOptions(models_dir=models, model_path=profile)
+                with mock.patch("deepfake_lens.core.analyze_external_model", return_value=self._model(0.40)):
+                    _summary, items = scan_folder(folder, options)[:2]
+                [row] = items
+                assert row.result is not None
+                self.assertEqual(row.result.verdict_code, expected)
+                model_items = [e for e in row.result.evidence if e.calibration_id == "cal-x"]
+                self.assertEqual(len(model_items), 1)
+                self.assertEqual(model_items[0].direction, SYN if expected == MANIP else NEU)

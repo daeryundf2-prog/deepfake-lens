@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 from .image_class import DIRECTION_NEUTRAL_NOTE, ImageClass
@@ -459,26 +460,73 @@ def c2pa_evidence(validation: Mapping[str, object] | None) -> list[EvidenceItem]
     )]
 
 
-def model_evidence(model: ExternalModelAnalysis | None) -> EvidenceItem | None:
+def calibrated_direction(
+    probability: float | None,
+    calibration_id: str | None,
+    thresholds: Mapping[str, float] | None,
+) -> EvidenceDirection:
+    """Direction of a calibrated statistical item: its profile threshold decides (N1, G8).
+
+    ``synthetic`` iff ``probability >= thresholds[calibration_id]``; with no
+    probability or no threshold for the calibration id it is ``neutral``.
+    The former fixed 0.5 cut made decision rule 4 unreachable for any
+    profile whose measured threshold is below 0.5 (p=0.40 with threshold
+    0.30 stayed "판단 불가"). There is no default cut: a calibration id
+    no profile has measured a threshold for is never synthetic.
+    """
+    if probability is None or not calibration_id or not thresholds or calibration_id not in thresholds:
+        return EvidenceDirection.NEUTRAL
+    return EvidenceDirection.SYNTHETIC if probability >= float(thresholds[calibration_id]) else EvidenceDirection.NEUTRAL
+
+
+def with_calibrated_directions(
+    items: Iterable[EvidenceItem], thresholds: Mapping[str, float] | None,
+) -> list[EvidenceItem]:
+    """Re-derive the direction of every calibrated statistical item from
+    ``thresholds`` (N1) — ``core.build_classification_result`` applies this
+    so rule 4 and rule 5 always see the profile's threshold, whoever built
+    the item."""
+    out: list[EvidenceItem] = []
+    for item in items:
+        if item.kind == EvidenceKind.STATISTICAL and item.is_calibrated:
+            direction = calibrated_direction(item.probability, item.calibration_id, thresholds)
+            if direction != item.direction:
+                item = replace(item, direction=direction)
+        out.append(item)
+    return out
+
+
+def model_evidence(
+    model: ExternalModelAnalysis | None,
+    thresholds: Mapping[str, float] | None = None,
+) -> EvidenceItem | None:
     """Statistical item for an external model result that produced a score.
 
     Calibration fields come from the model profile once WP-I measures it;
     until then ``probability`` stays None and the raw score is kept as
     ``raw_score`` so it cannot be read as a probability (QA-OUT-5).
+    A calibrated item's direction comes from the profile threshold for its
+    calibration id (``thresholds``, N1), never from a fixed 0.5 cut.
     """
     if model is None or not model.available:
         return None
     calibrated = model.probability is not None and bool(model.calibration_id) and bool(model.measured_on)
-    synthetic = (model.probability >= 0.5) if calibrated and model.probability is not None else model.score >= MODEL_RAW_SCORE_MIDPOINT
     if calibrated:
-        detail = f"{model.label}: 보정 확률 {model.probability:.2f} (보정 {model.calibration_id}, 측정 {model.measured_on})."
+        direction = calibrated_direction(model.probability, model.calibration_id, thresholds)
+        threshold = thresholds.get(model.calibration_id or "") if thresholds else None
+        cut = f"프로필 임계값 {threshold:.2f}" if threshold is not None else "프로필 임계값 없음 — 결론에 참여하지 않습니다"
+        detail = (
+            f"{model.label}: 보정 확률 {model.probability:.2f} ({cut}; "
+            f"보정 {model.calibration_id}, 측정 {model.measured_on})."
+        )
     else:
+        direction = EvidenceDirection.SYNTHETIC if model.score >= MODEL_RAW_SCORE_MIDPOINT else EvidenceDirection.NEUTRAL
         detail = f"{model.label}: 원점수 {model.score}/100 — 보정되지 않은 값이며 확률이 아닙니다. 결론에 참여하지 않습니다."
     return EvidenceItem(
         "외부 모델 출력" if calibrated else "외부 모델 원점수(미보정)",
         detail,
         EvidenceKind.STATISTICAL,
-        EvidenceDirection.SYNTHETIC if synthetic else EvidenceDirection.NEUTRAL,
+        direction,
         EvidenceStrength.MODERATE if calibrated else EvidenceStrength.WEAK,
         "model",
         probability=model.probability if calibrated else None,
