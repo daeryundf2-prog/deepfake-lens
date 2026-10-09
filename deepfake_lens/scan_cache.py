@@ -17,6 +17,24 @@ from .profile_pins import ModelPathArg, model_path_digest, pin_tokens, profile_p
 from .result_types import ScanItem
 
 
+def _scan_order_key(root: Path) -> Callable[[Path], str]:
+    """Sort key of the scan order (G32, W1): the POSIX relative path string.
+
+    One global order over the whole walk — "sub/a.txt" sorts between
+    "su.txt" and "z.txt" by plain string comparison, never "files of a
+    folder first, then its subfolders" — and the same on every OS (Windows
+    separators are normalized to "/").
+    """
+
+    def key(path: Path) -> str:
+        try:
+            return path.relative_to(root).as_posix()
+        except ValueError:
+            return path.as_posix()
+
+    return key
+
+
 def _iter_files(
     root: Path,
     *,
@@ -34,60 +52,60 @@ def _iter_files(
     ``rglob``/``iterdir`` raise lazily mid-iteration — one permission-
     denied subdirectory must not abort a multi-hour evidence scan.
 
-    Order is deterministic (G32): each directory level is sorted by the
-    path string, a directory's files before its subdirectories. The OS
-    directory order (creation order on ext4, hash order elsewhere) used to
-    decide which files a max-files cap kept and which copy dedupe called
-    the original.
+    Order is deterministic (G32, W1): the whole walk is collected first and
+    yielded in one global sort by the POSIX relative path string
+    (:func:`_scan_order_key`), the same on every OS. The OS directory order
+    (creation order on ext4, hash order elsewhere) used to decide which
+    files a max-files cap kept and which copy dedupe called the original.
+    Symlinks are reported through ``on_symlink`` in the same order, before
+    the first file is yielded.
     """
+    key = _scan_order_key(root)
+    found: list[Path] = []
+    links: list[Path] = []
+
+    def _consider(path: Path) -> None:
+        try:
+            if path.is_symlink() and not allow_symlinks:
+                links.append(path)
+                return
+            if not path.is_file():
+                return
+        except OSError:
+            return
+        if path.name.endswith((".ivy.json", ".model.json")):
+            return
+        found.append(path)
+
     if recursive:
         def _walk_error(exc: OSError) -> None:
             if on_error is not None:
                 on_error(Path(getattr(exc, "filename", None) or root), exc)
         import os
         for dirpath, dirs, files in os.walk(root, onerror=_walk_error):
-            # os.walk descends into ``dirs`` in list order — sort in place.
-            dirs.sort(key=lambda name: str(Path(dirpath) / name))
+            # Descend in a fixed order so on_error callbacks are reproducible
+            # too; the yielded order comes from the global sort below.
+            dirs.sort()
             # os.walk lists a symlinked directory in ``dirs`` and never
             # descends into it — report it like a symlinked file (D10).
-            if on_symlink is not None:
-                for name in dirs:
-                    if (Path(dirpath) / name).is_symlink():
-                        on_symlink(Path(dirpath) / name)
-            for name in sorted(files, key=lambda name: str(Path(dirpath) / name)):
-                path = Path(dirpath) / name
-                try:
-                    if path.is_symlink() and not allow_symlinks:
-                        if on_symlink is not None:
-                            on_symlink(path)
-                        continue
-                    if not path.is_file():
-                        continue
-                except OSError:
-                    continue
-                if name.endswith((".ivy.json", ".model.json")):
-                    continue
-                yield path
-        return
-    try:
-        entries = sorted(root.iterdir(), key=str)
-    except OSError as exc:
-        if on_error is not None:
-            on_error(root, exc)
-        return
-    for path in entries:
+            for name in dirs:
+                if (Path(dirpath) / name).is_symlink():
+                    links.append(Path(dirpath) / name)
+            for name in files:
+                _consider(Path(dirpath) / name)
+    else:
         try:
-            if path.is_symlink() and not allow_symlinks:
-                if on_symlink is not None:
-                    on_symlink(path)
-                continue
-            if not path.is_file():
-                continue
-        except OSError:
-            continue
-        if path.name.endswith((".ivy.json", ".model.json")):
-            continue
-        yield path
+            entries = list(root.iterdir())
+        except OSError as exc:
+            if on_error is not None:
+                on_error(root, exc)
+            return
+        for path in entries:
+            _consider(path)
+    if on_symlink is not None:
+        for link in sorted(links, key=key):
+            on_symlink(link)
+    yield from sorted(found, key=key)
 
 
 def _read_prefix(path: Path, limit: int) -> bytes:

@@ -316,15 +316,21 @@ class QaIn2DeterministicRescanTest(unittest.TestCase):
                 self.assertNotIn(str(base.resolve()), text)
 
     def test_walk_order_is_sorted_and_independent_of_os_listing_order(self) -> None:
-        """QA-IN-2: file order is the sorted path order even when the OS lists entries reversed."""
+        """QA-IN-2: file order is the sorted path order even when the OS lists entries reversed.
+
+        W1: one global sort by the full POSIX relative path string — a
+        subfolder's files sit where their path sorts ("a-dir/inner.txt"
+        before "a-first.txt", "sub/y.txt" before "z-last.txt"), not after
+        every file of the parent folder.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "case"
             _build_case_folder(root)
             expected = [
-                "B-upper.txt", "a-first.txt", "copy-of-a.txt", "empty.jpg", "fake.gif", "fake.mp3",
-                "m-bundle.zip", "photo.png", "z-last.txt",
-                "a-dir/inner.txt", "sub/c.txt", "sub/y.txt",
+                "B-upper.txt", "a-dir/inner.txt", "a-first.txt", "copy-of-a.txt", "empty.jpg", "fake.gif",
+                "fake.mp3", "m-bundle.zip", "photo.png", "sub/c.txt", "sub/y.txt", "z-last.txt",
             ]
+            self.assertEqual(expected, sorted(expected), "the expected order is plain string order")
             plain = [path.relative_to(root).as_posix() for path in _iter_files(root, recursive=True)]
             self.assertEqual(plain, expected)
 
@@ -343,7 +349,7 @@ class QaIn2DeterministicRescanTest(unittest.TestCase):
             real_iterdir = Path.iterdir
             with patch.object(Path, "iterdir", lambda self: reversed(list(real_iterdir(self)))):
                 flat = [path.name for path in _iter_files(root, recursive=False)]
-            self.assertEqual(flat, expected[:9])
+            self.assertEqual(flat, [name for name in expected if "/" not in name])
 
     def test_max_files_cap_keeps_the_same_files(self) -> None:
         """QA-IN-2: a capped scan keeps the first N files in sorted order on every run."""
