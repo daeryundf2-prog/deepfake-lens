@@ -144,6 +144,20 @@ always `0` invited old-contract readings. They remain readable as
   server (`/api/analyze-upload`, `/api/check`) gets the same container row —
   built by the same function, always present, `path`/`name` = the uploaded
   file name and `sha256` = the digest of the uploaded bytes (D9).
+- R10-1 (round 10): JSON keeps every `path`, `name`, `error` and reason
+  string raw. Every text rendering — the console table and the single-file
+  text outputs, CSV, HTML, the scan/forensic PDF, the evidence statement
+  (Markdown, PDF, console) and the GUI — shows a file name, path or echoed
+  string through `result_text.display_name`: CR, LF, TAB, ESC and every
+  other C0/C1 control, zero-width/bidi format characters, U+2028/U+2029 and
+  lone surrogates are written `\r`, `\n`, `\t`, `\xNN`, `\uNNNN`, and `|` is
+  written `\|` (a literal `\` right before a `|` is doubled), so a name can
+  neither rewrite a table row nor add a Markdown column. Display strings
+  inside the JSON (the evidence statement's `document_name`,
+  `unrecorded_files.lines`) are built from shown names; `file_path` and
+  `subfolders[].path` stay raw. R10-2: a CSV cell starting with `=`, `+`,
+  `-`, `@`, TAB or CR is written with a leading `'` (OWASP CSV injection);
+  numeric cells are unchanged.
 - A symlink found in a scanned folder (file or directory) is never followed
   and is listed as its own row: `kind: "unknown"`, `status: "skipped"`,
   `result: null`, `error` starting `심볼릭 링크` (D10); it counts in

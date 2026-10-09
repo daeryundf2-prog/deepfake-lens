@@ -9,6 +9,7 @@ same everywhere (G5/G6/G12/G24).
 from __future__ import annotations
 
 import re
+import unicodedata
 from pathlib import PurePath
 
 from .result_types import (
@@ -225,18 +226,129 @@ def is_member_row(item: object) -> bool:
     return row_identity(item)[1] is not None
 
 
-def display_path(path: str, *, redact_paths: bool = False) -> str:
-    """The row path as shown in a report.
+# R10-1 (round 10): a file name is attacker-controlled text. Printed raw, a
+# name with a CR overwrote the CLI table row ("x<CR>원본성 근거 있음 …
+# family_photo.png" over an A1111 image whose JSON verdict is 조작·생성 근거
+# 있음), an ESC sequence reached the terminal, and a LF or "|" in a name
+# forged a Markdown evidence-statement row or shifted its columns. Every
+# plain-text/Markdown/CSV/HTML/PDF rendering of a file name, path or other
+# echoed string goes through :func:`display_name`: C0/C1 controls (CR, LF,
+# TAB, ESC …), format characters (zero-width, bidi overrides), line/paragraph
+# separators and lone surrogates (undecodable bytes of a POSIX name) are
+# written as "\r", "\n", "\t", "\xNN", "\uNNNN"; "|" is written "\|". JSON
+# keeps the raw string (it is the row identity).
+_CONTROL_ESCAPES = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
+# Unicode categories shown as escapes: Cc control, Cf format (U+200B
+# zero-width space, U+202E right-to-left override …), Zl/Zp line and
+# paragraph separators, Cs surrogates.
+_ESCAPED_CATEGORIES = frozenset({"Cc", "Cf", "Zl", "Zp", "Cs"})
 
-    ``redact_paths`` keeps only the container's file name — a member keeps
-    its path inside the archive ("evil.zip::inner/a1111.png"), which is not
-    a path of the examiner's machine.
+
+def escape_controls(text: object) -> str:
+    """``text`` with every control/invisible character written as an escape (R9-7, R10-1)."""
+    out: list[str] = []
+    for char in str(text):
+        if char in _CONTROL_ESCAPES:
+            out.append(_CONTROL_ESCAPES[char])
+        elif unicodedata.category(char) in _ESCAPED_CATEGORIES:
+            code = ord(char)
+            out.append(f"\\x{code:02x}" if code < 0x100 else f"\\u{code:04x}" if code < 0x10000 else f"\\U{code:08x}")
+        else:
+            out.append(char)
+    return "".join(out)
+
+
+def _escape_unescaped_pipes(text: str) -> str:
+    """Every "|" not already escaped as "\\|" written "\\|" (R10-1).
+
+    A "|" is escaped when an odd number of backslashes precedes it.
     """
+    out: list[str] = []
+    backslashes = 0
+    for char in text:
+        if char == "|" and backslashes % 2 == 0:
+            out.append("\\|")
+            backslashes = 0
+            continue
+        out.append(char)
+        backslashes = backslashes + 1 if char == "\\" else 0
+    return "".join(out)
+
+
+def display_name(text: object) -> str:
+    """A file name, path or echoed string as every text report shows it (R10-1).
+
+    Controls and invisible characters become escapes (:func:`escape_controls`)
+    and a Markdown table separator "|" becomes "\\|" — a literal backslash
+    right before a "|" is doubled so the "|" stays escaped. The result is one
+    line and contains no unescaped "|".
+    """
+    out: list[str] = []
+    backslashes = 0
+    for char in escape_controls(text):
+        if char == "|":
+            # A run of literal backslashes before "|" is doubled ("a\|b" ->
+            # "a\\\|b") so a Markdown reader sees "\" then an escaped "|".
+            if backslashes % 2:
+                out.append("\\" * backslashes)
+            out.append("\\|")
+            backslashes = 0
+            continue
+        out.append(char)
+        backslashes = backslashes + 1 if char == "\\" else 0
+    return "".join(out)
+
+
+def markdown_cell(text: object) -> str:
+    """One Markdown table cell (R10-1): the intended line breaks as "<br>",
+    any other control as an escape, every unescaped "|" as "\\|".
+
+    Safe on text already passed through :func:`display_name` (its "\\|" is
+    kept as is) and on fixed wording; a cell can never end its row or add
+    a column.
+    """
+    lines = str(text).replace("\r\n", "\n").split("\n")
+    return "<br>".join(_escape_unescaped_pipes(escape_controls(line)) for line in lines)
+
+
+# R10-2 (round 10): a CSV cell that starts with one of these is read as a
+# formula by spreadsheet programs (OWASP "CSV Injection": =, +, -, @, TAB,
+# CR); such a cell is written with a leading "'" so it stays text.
+CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_cell(value: object) -> object:
+    """One CSV cell: text as :func:`display_name` shows it, formula-guarded (R10-1, R10-2).
+
+    Numbers and booleans are written as they are (a negative number is a
+    number, not a formula); text that starts with a formula character —
+    checked on the raw text and on the shown text — gets a leading "'".
+    """
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    raw = str(value)
+    shown = display_name(raw)
+    if raw.startswith(CSV_FORMULA_PREFIXES) or shown.startswith(CSV_FORMULA_PREFIXES):
+        return "'" + shown
+    return shown
+
+
+def shown_row_path(path: str, *, redact_paths: bool = False) -> str:
+    """The row path a report shows, raw (JSON bodies): ``redact_paths`` keeps
+    only the container's file name — a member keeps its path inside the
+    archive ("evil.zip::inner/a1111.png"), which is not a path of the
+    examiner's machine."""
     if ARCHIVE_MEMBER_SEPARATOR in path:
         container, member = path.split(ARCHIVE_MEMBER_SEPARATOR, 1)
         shown = PurePath(container).name if redact_paths else container
         return f"{shown}{ARCHIVE_MEMBER_SEPARATOR}{member}"
     return PurePath(path).name if redact_paths else path
+
+
+def display_path(path: str, *, redact_paths: bool = False) -> str:
+    """The row path as shown in a text report (:func:`shown_row_path` through
+    :func:`display_name`, R10-1)."""
+    return display_name(shown_row_path(path, redact_paths=redact_paths))
 
 
 def row_label(path: str) -> str:
@@ -376,7 +488,7 @@ class UnrecordedFiles:
         if code == "subfolder_files" and self.subfolder_detail:
             shown = self.subfolder_detail[:UNRECORDED_SUBFOLDERS_LISTED]
             parts = [
-                f"{entry.get('path')} {entry.get('files')}개" + ("" if entry.get("complete", True) else " 이상(탐색 상한으로 일부만 셈)")
+                f"{display_name(entry.get('path'))} {entry.get('files')}개" + ("" if entry.get("complete", True) else " 이상(탐색 상한으로 일부만 셈)")
                 for entry in shown
             ]
             rest = len(self.subfolder_detail) - len(shown)

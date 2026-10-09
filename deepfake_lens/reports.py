@@ -18,7 +18,10 @@ from .result_text import (
     TEXT_LEGAL_LIMITATION,
     coverage_gaps,
     deciding_evidence,
+    display_name,
     display_path,
+    escape_controls,
+    shown_row_path,
     evidence_counts_text,
     evidence_groups,
     is_symlink_row,
@@ -98,9 +101,10 @@ def build_report_body(
         row["sha256"] = item.sha256
         if redact_paths:
             # The embedded/signed body must not undo --redact-paths.
-            row["path"] = _display_path(item.path, redact_paths=True)
+            # R10-1: the JSON body keeps the raw (redacted) name — only text renderings escape it.
+            row["path"] = shown_row_path(item.path, redact_paths=True)
             if item.duplicate_of:
-                row["duplicate_of"] = _display_path(item.duplicate_of, redact_paths=True)
+                row["duplicate_of"] = shown_row_path(item.duplicate_of, redact_paths=True)
         rows.append(row)
     from .core import SCAN_JSON_SCHEMA_VERSION
 
@@ -282,7 +286,7 @@ def unsigned_row_lines(unsigned_rows: list[tuple[ScanItem, str]] | None) -> list
     lines: list[str] = []
     for item, reason in unsigned_rows or []:
         claimed = VERDICT_LABELS[item.result.verdict_code] if item.result is not None else status_label(item.status or "failed")
-        lines.append(f"[{UNSIGNED_ROWS_TITLE}] {item.path} — 클라이언트가 보낸 결론: {claimed} — {reason}")
+        lines.append(f"[{UNSIGNED_ROWS_TITLE}] {display_name(item.path)} — 클라이언트가 보낸 결론: {claimed} — {display_name(reason)}")
     return lines
 
 
@@ -564,9 +568,9 @@ def _render_forensic_pdf(
         if failed_checks:
             sig_str = "실패: " + ", ".join(check_label(entry.check) for entry in failed_checks)
         elif top_item is not None:
-            sig_str = f"[{EVIDENCE_KIND_LABELS[top_item.kind][:2]}] {top_item.title}"
+            sig_str = f"[{EVIDENCE_KIND_LABELS[top_item.kind][:2]}] {display_name(top_item.title)}"
         else:
-            sig_str = item.error or "근거 항목 없음"
+            sig_str = display_name(item.error or "") or "근거 항목 없음"
         if res and res.verdict_code == Verdict.MANIPULATION_EVIDENCE:
             band_color = (0.8, 0.15, 0.15)
         elif res and res.verdict_code == Verdict.AUTHENTICITY_EVIDENCE:
@@ -695,7 +699,7 @@ def _html_row(item: ScanItem, *, redact_paths: bool, allow_path: Callable[[str],
         return (
             "<tr>"
             f"<td>{escape(status_label(item.status))}</td>"
-            f"<td>{escape(item.error or '')}</td>"
+            f"<td>{escape(display_name(item.error or ''))}</td>"
             "<td></td>"
             f"<td>{path_cell}</td>"
             f"{_html_sha256_cell(item)}"
@@ -710,12 +714,12 @@ def _html_row(item: ScanItem, *, redact_paths: bool, allow_path: Callable[[str],
     if result.grade == Grade.REFERENCE:
         evidence_parts.append(f'<div class="legal">{escape(leading_limitations(result)[0])}</div>')
     for kind_label, lines in evidence_groups(result):
-        evidence_parts.append(f'<div class="kind">{escape(kind_label)}</div><ul>' + "".join(f"<li>{escape(line)}</li>" for line in lines) + "</ul>")
+        evidence_parts.append(f'<div class="kind">{escape(kind_label)}</div><ul>' + "".join(f"<li>{escape(escape_controls(line))}</li>" for line in lines) + "</ul>")
     if not evidence_parts:
         evidence_parts.append("근거 항목 없음")
     gaps = coverage_gaps(result)
     gap_cell = "<ul>" + "".join(
-        f'<li class="{"gap-failed" if entry.status == CoverageStatus.FAILED else ""}">{escape(entry.describe())}</li>' for entry in gaps
+        f'<li class="{"gap-failed" if entry.status == CoverageStatus.FAILED else ""}">{escape(display_name(entry.describe()))}</li>' for entry in gaps
     ) + "</ul>" if gaps else "전 검사 실행"
     reference = "; ".join(f"{signal.title} ({signal.weight})" for signal in result.reference_signals) or "-"
     heatmap = ""

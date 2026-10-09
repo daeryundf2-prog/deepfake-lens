@@ -39,7 +39,7 @@ from .layer_diagnostic import (
     format_layer_diagnostic,
     to_layer_diagnostic,
 )
-from .result_text import coverage_entry_line, evidence_qualifiers_short, grade_label_text
+from .result_text import coverage_entry_line, display_name, escape_controls, evidence_qualifiers_short, grade_label_text
 from .result_types import VERDICT_LABELS, GRADE_LABELS, Grade, ScanItem, Verdict, status_label
 
 ANALYSIS_RESULT_NOTICE = "결론은 `scan`과 같은 경로(analysis_api.analyze_path)로 산출되었습니다."
@@ -224,7 +224,9 @@ def format_analysis_result(payload: Mapping[str, Any]) -> str:
     grade_text = payload.get("grade_label") or grade_label_text(payload.get("grade"))
     lines = [
         f"[결론] {verdict_label} · 등급: {grade_text}",
-        f"대상: {payload.get('path')}",
+        # R10-1: the file name and every echoed string through display_name /
+        # escape_controls — a CR/LF/ESC in a name cannot add or rewrite a line.
+        f"대상: {display_name(payload.get('path'))}",
     ]
     if payload.get("sha256"):
         lines.append(f"SHA-256: {payload['sha256']}")
@@ -236,13 +238,13 @@ def format_analysis_result(payload: Mapping[str, Any]) -> str:
         for item in evidence:
             if isinstance(item, Mapping):
                 qualifiers = evidence_qualifiers_short(item.get("kind"), item.get("direction"), item.get("strength"))
-                lines.append(f"  - [{qualifiers}] {item.get('title')}: {item.get('detail')}")
+                lines.append(f"  - [{qualifiers}] {escape_controls(item.get('title'))}: {escape_controls(item.get('detail'))}")
     coverage = payload.get("coverage") if isinstance(payload.get("coverage"), list) else []
     if coverage:
         lines.append("검사 범위:")
         for entry in coverage:
             if isinstance(entry, Mapping):
-                lines.append(f"  - {coverage_entry_line(dict(entry))}")
+                lines.append(f"  - {escape_controls(coverage_entry_line(dict(entry)))}")
     for key, title in (("rule", "결정 규칙"),):
         if payload.get(key):
             lines.append(f"{title}: {payload[key]}")
@@ -251,7 +253,7 @@ def format_analysis_result(payload: Mapping[str, Any]) -> str:
         lines.append("구성 파일별 결정 규칙:")
         for entry in member_rules:
             if isinstance(entry, Mapping):
-                lines.append(f"  - {entry.get('path')}: {entry.get('rule')}")
+                lines.append(f"  - {display_name(entry.get('path'))}: {escape_controls(entry.get('rule'))}")
     lines.extend(member_rows_text(payload.get("rows")))
     lines.append(str(payload.get("notice", ANALYSIS_RESULT_NOTICE)))
     return "\n".join(lines)

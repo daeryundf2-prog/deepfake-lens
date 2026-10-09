@@ -102,24 +102,16 @@ def _refuse_empty_paths(parser: argparse.ArgumentParser) -> None:
 # argparse's "invalid choice: 'tur<LF>bo'") printed its newlines and control
 # characters raw, so one error spanned several lines. Echoed text shows them
 # as escapes: "\n", "\r", "\t", other C0/C1 controls and U+2028/U+2029 as
-# "\xNN"/"\uNNNN".
-_ECHO_ESCAPES = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
+# "\xNN"/"\uNNNN". R10-1: the one implementation is
+# result_text.escape_controls (shared with display_name, which every report
+# uses for file names); it also shows zero-width/bidi format characters.
 
 
 def escape_echo(text: object) -> str:
-    """``text`` with newlines and other control characters written as escapes (R9-7)."""
-    import unicodedata
+    """``text`` with newlines and other control characters written as escapes (R9-7, R10-1)."""
+    from .result_text import escape_controls
 
-    out: list[str] = []
-    for char in str(text):
-        if char in _ECHO_ESCAPES:
-            out.append(_ECHO_ESCAPES[char])
-        elif unicodedata.category(char) in ("Cc", "Zl", "Zp"):
-            code = ord(char)
-            out.append(f"\\x{code:02x}" if code < 0x100 else f"\\u{code:04x}")
-        else:
-            out.append(char)
-    return "".join(out)
+    return escape_controls(text)
 
 
 def korean_argparse_error(message: str) -> str:

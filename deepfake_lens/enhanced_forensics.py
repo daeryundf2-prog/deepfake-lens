@@ -430,7 +430,7 @@ def legal_report_text(report: dict[str, Any]) -> str:
     (실행/미실행/실패) and check names (CHECK_LABELS, model display names)
     are Korean; the JSON body keeps the raw codes.
     """
-    from .result_text import coverage_entry_line, evidence_qualifiers_short
+    from .result_text import coverage_entry_line, display_name, escape_controls, evidence_qualifiers_short
 
     raw_file, raw_conclusion = report.get("file"), report.get("conclusion")
     file_info: dict[str, Any] = raw_file if isinstance(raw_file, dict) else {}
@@ -444,7 +444,7 @@ def legal_report_text(report: dict[str, Any]) -> str:
         f"관할권: {report.get('jurisdiction', '')}",
         "",
         "=== 파일 정보 ===",
-        f"파일 경로: {file_info.get('path', '')}",
+        f"파일 경로: {display_name(file_info.get('path', ''))}",
         f"파일 해시 (SHA-256): {file_info.get('sha256') or '해시 불가'}",
         f"파일 크기: {file_info.get('size_bytes', 0)} 바이트",
         "",
@@ -462,14 +462,14 @@ def legal_report_text(report: dict[str, Any]) -> str:
         if isinstance(item, dict):
             lines.append(
                 f"{index}. [{evidence_qualifiers_short(item.get('kind'), item.get('direction'), item.get('strength'))}] "
-                f"{item.get('title')}: {item.get('detail')}"
+                f"{escape_controls(item.get('title'))}: {escape_controls(item.get('detail'))}"
             )
     lines.extend(["", "=== 검사 범위 ==="])
     for entry in report.get("coverage") or []:
         if isinstance(entry, dict):
-            lines.append(f"- {coverage_entry_line(entry)}")
+            lines.append(f"- {escape_controls(coverage_entry_line(entry))}")
     lines.extend(["", "=== 한계 ==="])
-    lines.extend(f"- {item}" for item in report.get("limitations") or [])
+    lines.extend(f"- {escape_controls(item)}" for item in report.get("limitations") or [])
     # X1: the "기록되지 않은 파일" section, always present.
     from .result_text import UNRECORDED_SECTION_TITLE, UnrecordedFiles
 

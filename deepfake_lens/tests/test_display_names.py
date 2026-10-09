@@ -1,0 +1,295 @@
+"""R10-1/R10-2 (round 10): a file name can never rewrite a report row.
+
+A file name is attacker-controlled text. Printed raw, a CR in a name
+overwrote the CLI table row (an A1111 image whose JSON verdict is 조작·생성
+근거 있음 read "원본성 근거 있음 … family_photo.png"), an ESC sequence
+reached the terminal, and a LF or "|" in a name forged a Markdown
+evidence-statement row ("| **갑 제9호증** | … 원본성 근거 있음 |") or shifted
+its columns. Every rendering (CLI table, Markdown, CSV, HTML, PDF) shows
+names through ``result_text.display_name``; CSV cells that start with a
+formula character are prefixed with "'" (OWASP CSV injection).
+"""
+
+from __future__ import annotations
+
+import contextlib
+import csv
+import importlib.util
+import io
+import json
+import os
+import shutil
+import subprocess
+import tempfile
+import unittest
+from html.parser import HTMLParser
+from pathlib import Path
+
+from deepfake_lens import cli
+from deepfake_lens.cli_render import CSV_VERDICT_COLUMN, TABLE_RULE
+from deepfake_lens.result_text import csv_cell, display_name, markdown_cell
+from deepfake_lens.result_types import VERDICT_LABELS, Verdict
+
+HAVE_PYMUPDF = importlib.util.find_spec("pymupdf") is not None or importlib.util.find_spec("fitz") is not None
+A1111 = Path(__file__).resolve().parents[2] / "fixtures" / "benchmark" / "a1111-metadata-marker.png"
+MANIPULATION = VERDICT_LABELS[Verdict.MANIPULATION_EVIDENCE]
+AUTHENTICITY = VERDICT_LABELS[Verdict.AUTHENTICITY_EVIDENCE]
+# Hostile names, every one an A1111 PNG (조작·생성 근거 있음 by its metadata).
+HOSTILE_NAMES = (
+    f"x\r{AUTHENTICITY}    근거   결정 1·통계 0·어휘 0     실행 3·미실행 5·실패 0      이미지    family_photo.png",
+    f"a\n| **갑 제9호증** | 위조 행 | {AUTHENTICITY} |.png",
+    "e\x1b[2K\x1b[1Aesc.png",
+    f"p | {AUTHENTICITY} | q.png",
+    "z​w‮flip.png",
+    "t\tab.png",
+    "b\\|slash.png",
+    '=HYPERLINK("http:evil","x").png',
+    "@SUM(1+1).png",
+    "+cmd.png",
+    "-2+3.png",
+)
+RAW_CONTROLS = ("\r", "\x1b", "​", "‮", "\t")
+
+
+def _run(argv: list[str]) -> tuple[int, str, str]:
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        try:
+            code = cli.main(argv)
+        except SystemExit as exc:
+            code = exc.code if isinstance(exc.code, int) else 2
+    return code, out.getvalue(), err.getvalue()
+
+
+def _markdown_cells(row: str) -> list[str]:
+    """Cells of one Markdown table row, split on unescaped "|" only (GFM)."""
+    cells: list[str] = []
+    current: list[str] = []
+    backslashes = 0
+    for char in row:
+        if char == "|" and backslashes % 2 == 0:
+            cells.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+        backslashes = backslashes + 1 if char == "\\" else 0
+    cells.append("".join(current))
+    return [cell.strip() for cell in cells[1:-1]]
+
+
+class _ResultRows(HTMLParser):
+    """Rows of the HTML report's result table (those with a SHA-256 cell)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.rows: list[list[str]] = []
+        self._row: list[str] | None = None
+        self._cell: list[str] | None = None
+        self._has_hash = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "tr":
+            self._row, self._has_hash = [], False
+        elif tag == "td" and self._row is not None:
+            self._cell = []
+            if ("class", "sha256") in attrs:
+                self._has_hash = True
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "td" and self._row is not None and self._cell is not None:
+            self._row.append("".join(self._cell))
+            self._cell = None
+        elif tag == "tr" and self._row is not None:
+            if self._has_hash:
+                self.rows.append(self._row)
+            self._row = None
+
+    def handle_data(self, data: str) -> None:
+        if self._cell is not None:
+            self._cell.append(data)
+
+
+class DisplayNameUnitTest(unittest.TestCase):
+    def test_controls_pipes_and_invisible_characters_are_escaped(self) -> None:
+        self.assertEqual(display_name("a\r\n\t\x1bb"), "a\\r\\n\\t\\x1bb")
+        self.assertEqual(display_name("z​w‮ "), "z\\u200bw\\u202e\\u2028")
+        self.assertEqual(display_name("p | q"), "p \\| q")
+        # A literal backslash before "|" is doubled so the "|" stays escaped.
+        self.assertEqual(display_name("b\\|s"), "b\\\\\\|s")
+        self.assertEqual(display_name("plain 한글.png"), "plain 한글.png")
+        self.assertEqual(display_name("\udcff"), "\\udcff")  # an undecodable POSIX byte
+
+    def test_markdown_cell_keeps_escaped_pipes_and_breaks_lines(self) -> None:
+        self.assertEqual(markdown_cell("a\nb | c"), "a<br>b \\| c")
+        self.assertEqual(markdown_cell(display_name("p | q")), "p \\| q")
+        for raw in ("b\\|s", "b\\\\|s", "a\n| **갑 제9호증** | 위조 |"):
+            cell = markdown_cell(display_name(raw))
+            self.assertEqual(len(_markdown_cells(f"| {cell} | x |")), 2, raw)
+
+    def test_csv_cell_guards_formulas(self) -> None:
+        for raw in ("=1+1", "+1", "-1", "@SUM(1)", "\t=1", "\r=1"):
+            self.assertTrue(str(csv_cell(raw)).startswith("'"), raw)
+        self.assertEqual(csv_cell("a.png"), "a.png")
+        self.assertEqual(csv_cell(-3), -3)  # a number stays a number
+        self.assertEqual(csv_cell(None), None)
+
+
+@unittest.skipUnless(shutil.which("node"), "node required to run gui.js helpers")
+class GuiDisplayNameTest(unittest.TestCase):
+    """The GUI's displayName/csvCell (gui.js) match result_text exactly."""
+
+    def test_gui_helpers_match_python(self) -> None:
+        source = (Path(__file__).resolve().parents[1] / "gui.js").read_text(encoding="utf-8")
+        start, end = source.index("function displayName(value)"), source.index("function escapeHtml(value)")
+        samples = [*HOSTILE_NAMES, "\udcff.png", "plain.png"]
+        script = (
+            source[start:end]
+            + "const samples = JSON.parse(require('fs').readFileSync(0, 'utf8'));\n"
+            + "process.stdout.write(JSON.stringify(samples.map(s => [displayName(s), csvCell(s)])));\n"
+        )
+        result = subprocess.run(
+            ["node", "-e", script], input=json.dumps(samples), capture_output=True, text=True, check=True, timeout=60,
+        )
+        expected = []
+        for sample in samples:
+            cell = str(csv_cell(sample))
+            quoted = '"' + cell.replace('"', '""') + '"' if any(char in cell for char in '",\r\n') else cell
+            expected.append([display_name(sample), quoted])
+        self.assertEqual(json.loads(result.stdout), expected)
+
+
+class HostileNamesInEveryRenderingTest(unittest.TestCase):
+    """R10-1: hostile names cannot change the conclusion column of any rendering."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        root = Path(self._tmp.name).resolve()
+        self.folder = root / "case"
+        self.folder.mkdir()
+        data = A1111.read_bytes()
+        for name in HOSTILE_NAMES:
+            (self.folder / name).write_bytes(data)
+        self.out = root / "out"
+        self.out.mkdir()
+        home = root / "home"
+        home.mkdir()
+        saved = {key: os.environ.get(key) for key in ("HOME", "DEEPFAKE_LENS_LOG_DIR", "DEEPFAKE_LENS_REPORT_KEY")}
+        os.environ["HOME"] = str(home)
+        os.environ["DEEPFAKE_LENS_LOG_DIR"] = str(home / "logs")
+        os.environ.pop("DEEPFAKE_LENS_REPORT_KEY", None)
+
+        def restore() -> None:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+        self.addCleanup(restore)
+
+    def _assert_no_raw_controls(self, text: str, label: str) -> None:
+        for char in RAW_CONTROLS:
+            self.assertNotIn(char, text, f"{label}: raw {char!r}")
+
+    def test_cli_table_csv_and_html(self) -> None:
+        csv_out, html_out = self.out / "r.csv", self.out / "r.html"
+        code, stdout, _ = _run(["scan", str(self.folder), "--include-low", "--csv-out", str(csv_out), "--html-out", str(html_out)])
+        self.assertEqual(code, 0)
+        # CLI table: one line per file, each concluding 조작·생성 근거 있음.
+        self._assert_no_raw_controls(stdout, "table")
+        table = stdout.split(TABLE_RULE + "\n", 1)[1].splitlines()
+        rows = [line for line in table if line.strip()]
+        self.assertEqual(len(rows), len(HOSTILE_NAMES), rows)
+        for line in rows:
+            self.assertTrue(line.startswith(MANIPULATION), line)
+        for name in HOSTILE_NAMES:
+            self.assertEqual(sum(display_name(name) in line for line in rows), 1, name)
+        # CSV: one row per file, the 결론 column unchanged, formulas guarded.
+        lines = [line for line in csv_out.read_text(encoding="utf-8").splitlines(keepends=True) if not line.startswith("#")]
+        records = list(csv.reader(lines))
+        header, body = records[0], records[1:]
+        self.assertEqual(len(body), len(HOSTILE_NAMES))
+        verdict_col, path_col = header.index(CSV_VERDICT_COLUMN), header.index("path")
+        for record in body:
+            self.assertEqual(record[verdict_col], MANIPULATION, record[path_col])
+            self._assert_no_raw_controls(record[path_col], "csv")
+            for cell in record:
+                self.assertFalse(cell.startswith(("=", "+", "-", "@")), cell)
+        paths = sorted(record[path_col] for record in body)
+        self.assertIn("'" + display_name('=HYPERLINK("http:evil","x").png'), paths)
+        self.assertIn("'@SUM(1+1).png", paths)
+        # HTML: one result row per file, the conclusion cell unchanged.
+        parser = _ResultRows()
+        parser.feed(html_out.read_text(encoding="utf-8"))
+        self.assertEqual(len(parser.rows), len(HOSTILE_NAMES))
+        for row in parser.rows:
+            self.assertTrue(row[0].startswith(MANIPULATION), row[0])
+            self._assert_no_raw_controls(row[3], "html")
+        self.assertEqual(sorted(row[3] for row in parser.rows), sorted(display_name(name) for name in HOSTILE_NAMES))
+
+    def test_evidence_statement_markdown(self) -> None:
+        md_out = self.out / "s.md"
+        code, stdout, _ = _run(["evidence-statement", str(self.folder), "--md-out", str(md_out)])
+        self.assertEqual(code, 0)
+        self._assert_no_raw_controls(stdout, "statement text")
+        text = md_out.read_text(encoding="utf-8")
+        self._assert_no_raw_controls(text, "markdown")
+        rows = [line for line in text.splitlines() if line.startswith("| **")]
+        self.assertEqual(len(rows), len(HOSTILE_NAMES), rows)
+        exhibits = []
+        for row in rows:
+            cells = _markdown_cells(row)
+            self.assertEqual(len(cells), 4, row)  # 호증 | 명칭 | 작성자 및 일자 | 입증취지
+            exhibits.append(cells[0])
+            self.assertIn(f"[자동 분석 결론: {MANIPULATION} /", cells[3])
+            self.assertNotIn(AUTHENTICITY, cells[3])
+        self.assertEqual(exhibits, [f"**갑 제{index}호증**" for index in range(1, len(HOSTILE_NAMES) + 1)])
+        self.assertEqual(sum("갑 제9호증" in line for line in text.splitlines() if line.startswith("| **갑 제9호증**")), 1)
+
+    @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf required for PDF generation")
+    def test_pdf_conclusion_columns(self) -> None:
+        from deepfake_lens.pdf_backend import import_pymupdf
+
+        pymupdf = import_pymupdf()
+        forensic, statement = self.out / "f.pdf", self.out / "s.pdf"
+        code, _, _ = _run(["scan", str(self.folder), "--include-low", "--forensic-pdf-out", str(forensic)])
+        self.assertEqual(code, 0)
+        code, _, _ = _run(["evidence-statement", str(self.folder), "--pdf-out", str(statement)])
+        self.assertEqual(code, 0)
+
+        def column_words(path: Path, header: str, next_header: str | None) -> list[str]:
+            """Words under ``header`` (left of ``next_header``) on every page, in reading order."""
+            words: list[str] = []
+            with pymupdf.open(str(path)) as document:
+                for page in document:
+                    page_words = page.get_text("words")
+                    heads = [w for w in page_words if w[4] == header]
+                    if not heads:
+                        continue
+                    nexts = [w for w in page_words if next_header is not None and w[4] == next_header]
+                    left, top = heads[0][0] - 2.0, heads[0][3]
+                    right = nexts[0][0] - 2.0 if nexts else page.rect.width
+                    words.extend(w[4] for w in page_words if left <= w[0] < right and w[1] > top)
+            return words
+
+        # Forensic PDF: the 결론 column holds one 조작·생성 verdict per file.
+        verdicts = column_words(forensic, "결론", "등급")
+        self.assertEqual(verdicts.count(MANIPULATION.split()[0]), len(HOSTILE_NAMES), verdicts)
+        self.assertNotIn(AUTHENTICITY.split()[0], verdicts)
+        with pymupdf.open(str(forensic)) as document:
+            self._assert_no_raw_controls("".join(page.get_text() for page in document), "forensic pdf")
+        # Evidence-statement PDF: one exhibit per file, each purpose cell
+        # opening with "[자동 분석 결론: 조작·생성 근거 있음".
+        exhibits = [word for word in column_words(statement, "호증", "서증(증거)의") if word.endswith("호증")]
+        self.assertEqual(exhibits, [f"제{index}호증" for index in range(1, len(HOSTILE_NAMES) + 1)])
+        purposes = column_words(statement, "입증취지", None)
+        conclusions = [purposes[index + 1] for index, word in enumerate(purposes[:-1]) if word == "결론:"]
+        self.assertEqual(conclusions, [MANIPULATION.split()[0]] * len(HOSTILE_NAMES))
+        self.assertNotIn(AUTHENTICITY.split()[0], purposes)
+        with pymupdf.open(str(statement)) as document:
+            self._assert_no_raw_controls("".join(page.get_text() for page in document), "statement pdf")
+
+
+if __name__ == "__main__":
+    unittest.main()

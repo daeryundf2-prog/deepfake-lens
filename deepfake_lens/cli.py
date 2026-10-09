@@ -697,7 +697,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             return USAGE_EXIT
         text = _file_text(args.file)
         if text is None:
-            print(f"오류: 텍스트를 추출할 수 없습니다: {args.file}", file=sys.stderr)
+            print(f"오류: 텍스트를 추출할 수 없습니다: {escape_echo(args.file)}", file=sys.stderr)
             return 1
         if args.synthid_keys:
             from .watermark import detect_synthid_watermark
@@ -848,7 +848,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             image = _imread_unicode(args.file)
             if image is None:
                 # Y6: a corrupt or undecodable image is a Korean stderr error, exit 2.
-                print(f"오류: 이미지를 읽을 수 없습니다(손상되었거나 디코드할 수 없는 이미지): {args.file}", file=sys.stderr)
+                print(f"오류: 이미지를 읽을 수 없습니다(손상되었거나 디코드할 수 없는 이미지): {escape_echo(args.file)}", file=sys.stderr)
                 return USAGE_EXIT
             gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             features = {
@@ -939,7 +939,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             if not isinstance(raw_items, list) or not any(isinstance(row, dict) for row in raw_items):
                 # Y1: a JSON without scan rows is not a scan result — no
                 # empty statement with exit 0.
-                print(f"오류: 검사 JSON에 items가 없습니다(검사 결과 행 0건): {target}", file=sys.stderr)
+                print(f"오류: 검사 JSON에 items가 없습니다(검사 결과 행 0건): {escape_echo(target)}", file=sys.stderr)
                 return USAGE_EXIT
             items = []
             for index, row in enumerate(raw_items, start=1):
@@ -948,7 +948,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
                 try:
                     items.append(_scan_item_from_json(row))
                 except (ValueError, TypeError, KeyError, AttributeError) as exc:
-                    print(f"오류: 검사 JSON을 해석할 수 없습니다: {target} — {index}번째 행의 형식이 맞지 않습니다({type(exc).__name__})", file=sys.stderr)
+                    print(f"오류: 검사 JSON을 해석할 수 없습니다: {escape_echo(target)} — {index}번째 행의 형식이 맞지 않습니다({type(exc).__name__})", file=sys.stderr)
                     return USAGE_EXIT
             stmt_thresholds = data.get("thresholds")
             stmt_summary = data.get("summary") if isinstance(data.get("summary"), dict) else None
@@ -1005,26 +1005,28 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         elif args.format == "markdown":
             print(statement.to_markdown())
         else:
-            print(f"=== {statement.case_name} 증거설명서 ===")
-            print(f"사건번호: {statement.case_no}")
-            print(f"원고(고소인): {statement.plaintiff}")
-            print(f"피고(피의자): {statement.defendant}")
+            # R10-1: every echoed value through escape_echo (names in
+            # document_name are already display_name'd).
+            print(f"=== {escape_echo(statement.case_name)} 증거설명서 ===")
+            print(f"사건번호: {escape_echo(statement.case_no)}")
+            print(f"원고(고소인): {escape_echo(statement.plaintiff)}")
+            print(f"피고(피의자): {escape_echo(statement.defendant)}")
             print(f"증거 목록 ({len(statement.entries)}건):")
             unrecorded_lines = statement.unrecorded_lines()
             for entry in statement.entries:
                 # D1: the verdict label only — an uncalibrated score (always 0) is not printed.
-                print(f"  - [{entry.exhibit_no}] {entry.document_name} (결론: {entry.verdict_label})")
+                print(f"  - [{entry.exhibit_no}] {escape_echo(entry.document_name)} (결론: {entry.verdict_label})")
                 print(f"    SHA-256: {entry.sha256}" if entry.sha256 else "    SHA-256: 해시 불가 — 원본 접근 실패")
             # X1: the "기록되지 않은 파일" section.
-            print(f"[{unrecorded_lines[0]}]")
+            print(f"[{escape_echo(unrecorded_lines[0])}]")
             for line in unrecorded_lines[1:]:
-                print(f"  - {line}")
+                print(f"  - {escape_echo(line)}")
             if args.pdf_out:
-                print(f"PDF 저장 완료: {args.pdf_out}")
+                print(f"PDF 저장 완료: {escape_echo(args.pdf_out)}")
             if args.md_out:
-                print(f"Markdown 저장 완료: {args.md_out}")
+                print(f"Markdown 저장 완료: {escape_echo(args.md_out)}")
             if args.json_out:
-                print(f"서명 JSON 저장 완료: {args.json_out}")
+                print(f"서명 JSON 저장 완료: {escape_echo(args.json_out)}")
             print("서명: " + ("HMAC-SHA256 " + str(signed_statement.get("signature_key_id")) if signed_statement.get("signature") else "서명 없음 (키 미설정)"))
         return 0
     if args.command == "vendor-weights":
@@ -1142,7 +1144,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
 
     try:
         if args.progress:
-            print(f"검사 중: {args.folder} (workers={args.workers}, pixel={args.pixel})…", file=sys.stderr)
+            print(f"검사 중: {escape_echo(args.folder)} (workers={args.workers}, pixel={args.pixel})…", file=sys.stderr)
         run = scan_folder_run(args.folder, options, warn=thresholds_warning_printer(sys.stderr))
         summary, items, thresholds = run.summary, run.items, run.thresholds
     except OSError as exc:

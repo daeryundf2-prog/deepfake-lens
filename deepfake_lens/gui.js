@@ -220,6 +220,43 @@
             return out;
         }
 
+        // R10-1: a file name as every report shows it (result_text.display_name):
+        // controls and invisible characters (CR, LF, TAB, ESC, zero-width,
+        // bidi overrides) as escapes, "|" as "\|".
+        function displayName(value) {
+            let out = '', backslashes = 0;
+            for (const ch of String(value)) {
+                const code = ch.codePointAt(0);
+                if (ch === '|') {
+                    out += (backslashes % 2 ? '\\'.repeat(backslashes) : '') + '\\|';
+                    backslashes = 0;
+                    continue;
+                }
+                let piece = ch;
+                if (ch === '\n') piece = '\\n';
+                else if (ch === '\r') piece = '\\r';
+                else if (ch === '\t') piece = '\\t';
+                else if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/u.test(ch)) {
+                    piece = code < 0x100 ? '\\x' + code.toString(16).padStart(2, '0')
+                        : code < 0x10000 ? '\\u' + code.toString(16).padStart(4, '0')
+                        : '\\U' + code.toString(16).padStart(8, '0');
+                }
+                out += piece;
+                backslashes = ch === '\\' ? backslashes + 1 : 0;
+            }
+            return out;
+        }
+
+        // R10-2: a CSV cell that starts with =, +, -, @, TAB or CR is read
+        // as a formula by spreadsheets (OWASP CSV injection) — prefixed with "'".
+        function csvCell(value) {
+            const raw = String(value);
+            let text = displayName(raw);
+            if (/^[=+\-@\t\r]/.test(raw) || /^[=+\-@\t\r]/.test(text)) text = "'" + text;
+            const quoted = /[",\r\n]/.test(text);
+            return quoted ? '"' + text.replace(/"/g, '""') + '"' : text;
+        }
+
         function escapeHtml(value) {
             return String(value).replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
         }
@@ -639,7 +676,7 @@
         function detailHtml(item) {
             const r = item.result || {};
             const parts = [];
-            if (item.error) parts.push(`<div class="verdict">분석 실패: ${escapeHtml(item.error)}</div>`);
+            if (item.error) parts.push(`<div class="verdict">분석 실패: ${escapeHtml(displayName(item.error))}</div>`);
             // Order: verdict, then evidence grouped by kind, then coverage.
             if (item.result) {
                 parts.push(verdictHeadHtml(r));
@@ -952,7 +989,7 @@
                         <span class="num bc-${band}">${escapeHtml(ringText)}</span>
                     </div>
                     <div class="res-info">
-                        <div class="res-name">${escapeHtml(item.name || item.path || '파일')}</div>
+                        <div class="res-name">${escapeHtml(displayName(item.name || item.path || '파일'))}</div>
                         <div class="res-sub">
                             <span class="band-pill band-${band}">${escapeHtml(riskLabel(verdict))}</span>
                             ${r.grade === 'reference' ? '<span class="grade-pill">참고</span>' : ''}
@@ -1244,7 +1281,7 @@
         });
         $('exp-csv').addEventListener('click', () => {
             if (!results.length) { toast('분석 결과가 없습니다', true); return; }
-            const f = v => /[",\r\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+            const f = csvCell;
             // BOM prefix keeps Korean intact when the CSV is opened in Excel.
             let csv = '﻿결론,등급,결정적 근거,통계적 근거,어휘적 근거,검사 실패,출처 추정,모델,파일명,검토,메모,판정 문장\n';
             results.forEach(e => {
@@ -1409,8 +1446,8 @@
             parts.push(`<div class="qc-head">
                 <span class="big bc-${band}">${escapeHtml(r.score_is_calibrated ? String(Number(r.score) || 0) : ({ high: '!', low: '✓', medium: '?' }[band] || '–'))}</span>
                 <div><span class="band-pill band-${band}">${escapeHtml(riskLabel(verdict))}</span>
-                <div class="note mt-4">${escapeHtml(item.name || '')}</div></div></div>`);
-            if (item.error) parts.push(`<div class="verdict">분석 실패: ${escapeHtml(item.error)}</div>`);
+                <div class="note mt-4">${escapeHtml(displayName(item.name || ''))}</div></div></div>`);
+            if (item.error) parts.push(`<div class="verdict">분석 실패: ${escapeHtml(displayName(item.error))}</div>`);
             if (item.result) {
                 parts.push(verdictHeadHtml(r));
                 parts.push(evidenceHtml(r));

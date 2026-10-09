@@ -18,7 +18,9 @@ from .result_text import (
     TEXT_LEGAL_LIMITATION,
     coverage_counts_text,
     coverage_gaps,
+    csv_cell,
     deciding_evidence,
+    display_name,
     evidence_counts,
     evidence_counts_text,
     item_kind_label,
@@ -167,13 +169,15 @@ def table_row_text(item: ScanItem) -> str:
         top = deciding_evidence(result)
         gaps = [entry for entry in coverage_gaps(result) if entry.status == CoverageStatus.FAILED]
         reason = (
-            f"[{EVIDENCE_KIND_LABELS[top.kind]}] {top.title}" if top else "근거 항목 없음"
-        ) + (f" | 실패: {'; '.join(entry.describe() for entry in gaps)}" if gaps else "")
+            f"[{EVIDENCE_KIND_LABELS[top.kind]}] {display_name(top.title)}" if top else "근거 항목 없음"
+        ) + (f" | 실패: {'; '.join(display_name(entry.describe()) for entry in gaps)}" if gaps else "")
     else:
         # N7: Korean status in the 결론 column (건너뜀/미지원/실패/중복).
         verdict, grade, counts, checks = status_label(item.status), "-", "-", "-"
-        reason = item.error or ""
-    return f"{verdict:<14} {grade:<4} {counts:<18} {checks:<20} {item_kind_label(item.kind):<6} {item.path}  # {reason}"
+        reason = display_name(item.error or "")
+    # R10-1: the file name (and every echoed string) is shown through
+    # display_name — a CR/LF/ESC or "|" in a name cannot rewrite the row.
+    return f"{verdict:<14} {grade:<4} {counts:<18} {checks:<20} {item_kind_label(item.kind):<6} {display_name(item.path)}  # {reason}"
 
 
 def _is_priority_row(item: ScanItem) -> bool:
@@ -205,7 +209,7 @@ def _write_csv(
     with path.open("w", newline="", encoding="utf-8") as handle:
         # X1: the "기록되지 않은 파일" summary (count and every reason) heads
         # the CSV like the provenance lines below.
-        handle.write(f"# {unrecorded_files(list(items), summary).summary_text()}\n")
+        handle.write(f"# {display_name(unrecorded_files(list(items), summary).summary_text())}\n")
         # Provenance is written as leading comment lines so the CSV can
         # never be mistaken for a fully-verified neural run.
         if coverage is not None:
@@ -226,6 +230,8 @@ def _write_csv(
                 handle.write(f"# thresholds_source=profile:{tp.get('version')} provisional={tp.get('provisional')} samples={tp.get('samples')} fingerprint={tp.get('dataset_fingerprint')}{in_sample}\n")
         else:
             handle.write("# thresholds_source=builtin_defaults provisional=true\n")
+        # R10-1/R10-2: every data cell goes through csv_cell — names shown
+        # with display_name, a leading =, +, -, @, TAB or CR guarded by "'".
         writer = csv.writer(handle)
         writer.writerow(
             [
@@ -270,7 +276,7 @@ def _write_csv(
             result = item.result
             pixel = result.pixel_analysis if result else None
             model = result.model_analysis if result else None
-            writer.writerow(
+            writer.writerow([csv_cell(cell) for cell in
                 [
                     item.path,
                     item.kind,
@@ -292,7 +298,7 @@ def _write_csv(
                     *_csv_v2_columns(item),
                     *_csv_label_columns(item),
                 ]
-            )
+            ])
 
 
 CSV_LABEL_COLUMNS = ("kind_label", "status_label", "grade_label", "source_confidence_label", "top_evidence_label")

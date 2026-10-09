@@ -119,9 +119,12 @@ def to_layer_diagnostic(
 
 def format_layer_diagnostic(diag: Mapping[str, Any]) -> str:
     """Plain-text rendering of a layer diagnostic (``--format table``)."""
+    from .result_text import display_name, escape_controls
+
     lines = [f"[{diag.get('title', LAYER_DIAGNOSTIC_TITLE)}] {diag.get('layer_label') or diag.get('layer', '')}"]
     if diag.get("subject"):
-        lines.append(f"대상: {diag['subject']}")
+        # R10-1: an echoed file name is shown through display_name.
+        lines.append(f"대상: {display_name(diag['subject'])}")
     lines.append(str(diag.get("notice", LAYER_DIAGNOSTIC_NOTICE)))
     if diag.get("raw_score") is not None:
         lines.append(f"참고 원점수(미측정): {diag['raw_score']}/100")
@@ -130,7 +133,7 @@ def format_layer_diagnostic(diag: Mapping[str, Any]) -> str:
     raw_body = diag.get("diagnostic")
     body: Mapping[str, Any] = raw_body if isinstance(raw_body, Mapping) else {}
     measurements = [
-        f"{key}={value}"
+        f"{key}={escape_controls(value)}"
         for key, value in body.items()
         if key not in {"signals", "limitations"} and not isinstance(value, (Mapping, list, tuple))
     ]
@@ -145,12 +148,12 @@ def format_layer_diagnostic(diag: Mapping[str, Any]) -> str:
         lines.append("참고 신호:")
         for signal in signals:
             if isinstance(signal, Mapping):
-                lines.append(f"  - [{signal.get('weight', '')}] {signal.get('title', '')}: {signal.get('detail', '')}")
+                lines.append(f"  - [{signal.get('weight', '')}] {escape_controls(signal.get('title', ''))}: {escape_controls(signal.get('detail', ''))}")
     raw_limitations = body.get("limitations")
     limitations: list[Any] = raw_limitations if isinstance(raw_limitations, list) else []
     if limitations:
         lines.append("한계:")
-        lines.extend(f"  - {item}" for item in limitations)
+        lines.extend(f"  - {escape_controls(item)}" for item in limitations)
     return "\n".join(lines)
 
 

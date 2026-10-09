@@ -41,8 +41,11 @@ from .result_text import (
     HASH_UNAVAILABLE_SYMLINK,
     TEXT_LEGAL_LIMITATION,
     coverage_gaps,
+    display_name,
+    escape_controls,
     evidence_groups,
     is_symlink_row,
+    markdown_cell,
     row_label,
     threshold_provenance_lines,
     UNRECORDED_SECTION_TITLE,
@@ -110,12 +113,17 @@ class EvidenceStatement:
         return unrecorded.lines()
 
     def to_markdown(self) -> str:
+        # R10-1: every table cell goes through markdown_cell (line breaks as
+        # <br>, controls escaped, "|" as "\|") and every other line through
+        # escape_controls — a file name or field value can neither end a
+        # table row (a forged "| **갑 제9호증** | … |" row) nor add a column.
+        one_line = escape_controls
         lines = [
             "# 증  거  설  명  서",
             "",
-            f"**사    건**: {self.case_no} {self.case_name}",
-            f"**원    고 (고소인)**: {self.plaintiff}",
-            f"**피    고 (피의자)**: {self.defendant}",
+            f"**사    건**: {one_line(self.case_no)} {one_line(self.case_name)}",
+            f"**원    고 (고소인)**: {one_line(self.plaintiff)}",
+            f"**피    고 (피의자)**: {one_line(self.defendant)}",
             "",
             "위 사건에 관하여 원고(고소인)의 대리인은 그 주장사실을 입증하기 위하여 다음과 같이 증거방법을 제출합니다.",
             "",
@@ -125,9 +133,9 @@ class EvidenceStatement:
             "| :--- | :--- | :--- | :--- |",
         ]
         for entry in self.entries:
-            safe_purpose = entry.purpose_of_proof.replace("\n", "<br>")
             lines.append(
-                f"| **{entry.exhibit_no}** | {entry.document_name} | {entry.author_date} | {safe_purpose} |"
+                f"| **{markdown_cell(entry.exhibit_no)}** | {markdown_cell(entry.document_name)} | "
+                f"{markdown_cell(entry.author_date)} | {markdown_cell(entry.purpose_of_proof)} |"
             )
 
         hashed = sum(1 for e in self.entries if e.sha256)
@@ -145,16 +153,16 @@ class EvidenceStatement:
             "",
         ])
         unrecorded = self.unrecorded_lines()
-        lines.extend([f"### [{UNRECORDED_SECTION_TITLE}]", unrecorded[0], *(f"- {line}" for line in unrecorded[1:]), ""])
+        lines.extend([f"### [{UNRECORDED_SECTION_TITLE}]", one_line(unrecorded[0]), *(f"- {one_line(line)}" for line in unrecorded[1:]), ""])
         if self.reference_note:
             lines.extend(["### [텍스트 분석 한계]", self.reference_note, ""])
         if self.provenance_note:
-            lines.extend(["### [분석 프로비넌스]", self.provenance_note, ""])
+            lines.extend(["### [분석 프로비넌스]", *(one_line(line) for line in self.provenance_note.split("\n")), ""])
         lines.extend([
-            f"**제출일자**: {self.created_at}",
-            f"**원고(고소인) 소송대리인**: {f'{self.law_firm} {self.center}'.strip()}",
-            f"**대표전화**: {self.contact}",
-            f"**제출처**: **{self.court}**",
+            f"**제출일자**: {one_line(self.created_at)}",
+            f"**원고(고소인) 소송대리인**: {one_line(f'{self.law_firm} {self.center}'.strip())}",
+            f"**대표전화**: {one_line(self.contact)}",
+            f"**제출처**: **{one_line(self.court)}**",
         ])
         return "\n".join(lines)
 
@@ -321,7 +329,7 @@ def _purpose_head(item: ScanItem, member_refs: str = "") -> str:
         return f"{TEXT_LEGAL_LIMITATION} 본 증거물에 대한 자동 분석 결과는 결론이 아닌 참고 정보임을 소명함."
     if res.verdict_code == Verdict.MANIPULATION_EVIDENCE and item.kind == "archive":
         # N5: a container row concludes from its members, not from its own bytes.
-        rollup = next((e.detail for e in res.evidence if e.layer == "archive"), "")
+        rollup = display_name(next((e.detail for e in res.evidence if e.layer == "archive"), ""))
         return (
             f"압축 파일 구성원 중 결정적 근거에 의해 조작·생성 근거가 확인된 파일이 있는 증거물임을 소명함"
             f"(구성원 결론 집계: {rollup}; {member_refs or '구성원 행 참조'})."
@@ -331,16 +339,16 @@ def _purpose_head(item: ScanItem, member_refs: str = "") -> str:
             (e.title for e in res.evidence if e.kind == EvidenceKind.DETERMINISTIC and e.direction == EvidenceDirection.SYNTHETIC and e.strength == EvidenceStrength.STRONG),
             "결정적 근거",
         )
-        return f"결정적 근거({basis})에 의해 조작·생성 근거가 확인된 증거물임을 소명함."
+        return f"결정적 근거({display_name(basis)})에 의해 조작·생성 근거가 확인된 증거물임을 소명함."
     if res.verdict_code == Verdict.AUTHENTICITY_EVIDENCE:
         basis = next(
             (e.title for e in res.evidence if e.direction == EvidenceDirection.AUTHENTIC and e.strength == EvidenceStrength.STRONG),
             "결정적 근거",
         )
-        return f"결정적 근거({basis})에 의해 원본성 근거가 확인된 증거물임을 소명함."
+        return f"결정적 근거({display_name(basis)})에 의해 원본성 근거가 확인된 증거물임을 소명함."
     failed = [entry for entry in res.coverage if entry.status == CoverageStatus.FAILED]
     if failed:
-        return f"검사 실패({', '.join(entry.describe() for entry in failed)})로 판단 불가 상태이며, 별도 검증이 필요함을 소명함."
+        return f"검사 실패({', '.join(display_name(entry.describe()) for entry in failed)})로 판단 불가 상태이며, 별도 검증이 필요함을 소명함."
     return "결론을 뒷받침할 결정적 근거가 없어 판단 불가 상태이며(원본이라는 뜻이 아님), 별도 검증이 필요함을 소명함."
 
 
@@ -412,10 +420,10 @@ def build_evidence_statement(
         evidence_lines: list[str] = []
         if res is not None:
             for kind_label, lines in evidence_groups(res):
-                evidence_lines.append(f"• {kind_label}: " + "; ".join(_clip(line, 60) for line in lines[:2]) + (" 외" if len(lines) > 2 else ""))
+                evidence_lines.append(f"• {kind_label}: " + "; ".join(display_name(_clip(line, 60)) for line in lines[:2]) + (" 외" if len(lines) > 2 else ""))
             gaps = coverage_gaps(res)
             if gaps:
-                evidence_lines.append("• 검사 범위: " + "; ".join(entry.describe() for entry in gaps[:3]) + (f" 외 {len(gaps) - 3}건" if len(gaps) > 3 else ""))
+                evidence_lines.append("• 검사 범위: " + "; ".join(display_name(entry.describe()) for entry in gaps[:3]) + (f" 외 {len(gaps) - 3}건" if len(gaps) > 3 else ""))
         sig_text = "\n".join(evidence_lines) if evidence_lines else "• 근거 항목 없음"
 
         statute_text = "\n".join([f"• {st}" for st in statutes]) if statutes else "• 관련 법조: 해당 없음 (결정적 근거에 의한 조작·생성 결론이 없음)"
@@ -425,7 +433,7 @@ def build_evidence_statement(
         if verdict_row and res is not None:
             head_line = f"[자동 분석 결론: {band} / 등급: {res.grade_label} — 유죄·불법성의 직접 증거가 아님]"
         else:
-            reason = (item.error or "").strip() or "사유 기록 없음"
+            reason = display_name((item.error or "").strip()) or "사유 기록 없음"
             head_line = f"상태: {band} — {reason}"
         purpose = (
             f"{head_line}\n"
