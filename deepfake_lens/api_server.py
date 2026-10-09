@@ -788,6 +788,11 @@ def create_app(
         recursive: bool = False,
         max_files: int = 200,
     ):
+        if max_files < 1:
+            # Y8: a zero/negative limit is refused (400), not clamped to 1.
+            from .analysis_api import MAX_FILES_TOO_SMALL
+
+            raise HTTPException(status_code=400, detail=MAX_FILES_TOO_SMALL)
         root: Path | None = None
         if directory:
             try:

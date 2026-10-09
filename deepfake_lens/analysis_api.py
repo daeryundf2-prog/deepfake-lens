@@ -80,6 +80,11 @@ class InvalidOption(ValueError):
     """A request option that must be refused (HTTP 400, CLI usage error)."""
 
 
+# Y8: the CLI's wording for the same limits (cli.py --max-files / --max-file-bytes).
+MAX_FILES_TOO_SMALL = "max_files는 1 이상이어야 합니다"
+MAX_FILE_BYTES_TOO_SMALL = "max_file_bytes는 1 이상이어야 합니다"
+
+
 # G5 (round 5): the single-file commands (forensic, classify, explain FILE,
 # legal-report, agent --file, multimodal FILE…) refuse a path that does not
 # name a file — Korean message, CLI exit 2 — instead of an English traceback
@@ -207,14 +212,21 @@ class AnalysisOptions:
             max_files = int(_param(params, "max_files", str(WEB_DEFAULT_MAX_FILES)))
         except ValueError as exc:
             raise InvalidOption("max_files는 정수여야 합니다") from exc
-        max_files = max(1, min(max_files, WEB_MAX_SCAN_FILES))
+        if max_files < 1:
+            # Y8 (round 7): a zero/negative limit was silently clamped to 1 —
+            # refused like the CLI's --max-files < 1 (HTTP 400).
+            raise InvalidOption(MAX_FILES_TOO_SMALL)
+        max_files = min(max_files, WEB_MAX_SCAN_FILES)  # above the ceiling: clamped (documented)
         max_file_bytes: int | None = None
         raw_bytes = _param(params, "max_file_bytes", "")
         if raw_bytes.strip():
             try:
-                max_file_bytes = min(int(raw_bytes), WEB_MAX_FILE_BYTES_CEILING)
+                max_file_bytes = int(raw_bytes)
             except ValueError as exc:
                 raise InvalidOption("max_file_bytes는 정수여야 합니다") from exc
+            if max_file_bytes < 1:
+                raise InvalidOption(MAX_FILE_BYTES_TOO_SMALL)  # Y8
+            max_file_bytes = min(max_file_bytes, WEB_MAX_FILE_BYTES_CEILING)
         resolved_dir = Path(models_dir).expanduser().resolve() if models_dir else default_models_dir()
         model_name = _param(params, "model_path", "").strip()
         fusion_name = _param(params, "fusion_profile", "").strip()

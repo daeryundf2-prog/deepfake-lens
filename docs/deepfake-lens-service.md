@@ -197,7 +197,8 @@ When a `root` argument is supplied it must also contain the file, so a
 forged `root=C:\` can never widen the read scope.
 
 Limits (clamped, not optional): `max_files ≤ 2000`,
-`max_file_bytes ≤ 1 GiB`, `heatmaps` only with `--pixel deep`.
+`max_file_bytes ≤ 1 GiB`, `heatmaps` only with `--pixel deep`. A value
+below 1 is refused with 400 (Y8), never raised to 1.
 The bundled GUI uses `async=1` + `/api/scan-status` polling so a long scan
 never holds one request open; the synchronous form still works for tools.
 The GUI's cancel button calls `/api/scan-cancel`, which sets a flag the
@@ -221,6 +222,7 @@ endpoints (`/api/analyze/*`, `/api/classify`, `/api/check`, `/api/compare`,
 | any `/api/*` (web / api) | method not supported / not allowed | 501 / 405 | `지원하지 않는 요청 메서드입니다: …` / `이 경로에서 허용되지 않는 요청 메서드입니다: …` |
 | any `/api/*` (both) | unhandled exception | 500 | `서버 내부 오류가 발생했습니다 — 상세는 서버 로그를 확인하십시오` |
 | GET `/api/scan` (both) | invalid option (`pixel`, non-integer limit, `model_path`/`fusion_profile` not a name in the models dir) | 400 | e.g. `max_files는 정수여야 합니다` |
+| GET `/api/scan` (both), POST `/api/scan/stream` (api) | `max_files` or `max_file_bytes` below 1 (Y8 — was clamped to 1) | 400 | `max_files는 1 이상이어야 합니다` / `max_file_bytes는 1 이상이어야 합니다` |
 | GET `/api/scan` (both) | folder missing / a file / unreadable | 400 | `폴더를 찾을 수 없습니다: …` (scan's S4 texts) |
 | GET `/api/scan` (both) | folder outside the read roots | 403 | `허용되지 않은 경로` |
 | GET `/api/scan?async=1` (both) | 32 jobs already registered | 400 | `실행 중인 검사 작업이 너무 많습니다 — …` |

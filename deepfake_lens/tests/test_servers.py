@@ -123,9 +123,19 @@ class ScanPayloadValidationTest(unittest.TestCase):
         captured = self._capture_scan_kwargs("max_files=999999&folder=.")
         self.assertEqual(captured["max_files"], MAX_SCAN_FILES)
 
-    def test_max_files_floors_at_one(self) -> None:
-        captured = self._capture_scan_kwargs("max_files=0&folder=.")
-        self.assertEqual(captured["max_files"], 1)
+    def test_zero_or_negative_limits_are_refused(self) -> None:
+        """Y8 (round 7): max_files=-3 / 0 was clamped to 1 and the scan ran; now 400 (InvalidOption)."""
+        from deepfake_lens.analysis_api import InvalidOption
+
+        for query, message in (
+            ("max_files=0&folder=.", "max_files는 1 이상이어야 합니다"),
+            ("max_files=-3&folder=.", "max_files는 1 이상이어야 합니다"),
+            ("max_file_bytes=-5&folder=.", "max_file_bytes는 1 이상이어야 합니다"),
+            ("max_file_bytes=0&folder=.", "max_file_bytes는 1 이상이어야 합니다"),
+        ):
+            with self.subTest(query=query), self.assertRaises(InvalidOption) as ctx:
+                _scan_payload(query, default_folder=None)
+            self.assertEqual(str(ctx.exception), message)
 
     def test_max_file_bytes_is_clamped_to_ceiling(self) -> None:
         captured = self._capture_scan_kwargs("max_file_bytes=99999999999999&folder=.")
@@ -1587,6 +1597,9 @@ class ApiErrorStatusTest(unittest.TestCase):
             ("GET", "/api/scan-status?job=deadbeef", None, "", 404, webapp_api.JOB_UNKNOWN),
             ("GET", f"/api/scan?folder={gone}&no_default_engine=true", None, "", 400, "폴더를 찾을 수 없습니다: "),
             ("GET", "/api/scan?max_files=abc", None, "", 400, "max_files는 정수여야 합니다"),
+            ("GET", "/api/scan?max_files=-3", None, "", 400, "max_files는 1 이상이어야 합니다"),  # Y8
+            ("GET", "/api/scan?max_files=-3&async=1", None, "", 400, "max_files는 1 이상이어야 합니다"),  # Y8
+            ("GET", "/api/scan?max_file_bytes=-5", None, "", 400, "max_file_bytes는 1 이상이어야 합니다"),  # Y8
             ("GET", "/api/scan?folder=/", None, "", 403, "허용되지 않은 경로"),
             ("POST", "/api/analyze-upload", b"x", "text/plain", 400, "multipart/form-data 업로드가 필요합니다"),
             ("POST", "/api/feedback", b"{oops", "application/json", 400, "JSON 본문을 해석할 수 없습니다"),
@@ -1663,6 +1676,9 @@ class ApiErrorStatusTest(unittest.TestCase):
             return response.status_code, payload
 
         self._check("api", self._shared_rows(), send)
+        # Y8: the stream scan's own max_files query value.
+        status, payload = send("POST", f"/api/scan/stream?directory={self.folder}&max_files=-1", None, "")
+        self.assertEqual((status, payload), (400, {"error": "max_files는 1 이상이어야 합니다"}))
 
     def test_success_is_still_200(self) -> None:
         """The control: a valid request of an endpoint that had a 200 error still answers 200."""
