@@ -255,6 +255,65 @@ class UnrecordedFilesTest(unittest.TestCase):
         text = "\n".join(unrecorded_files([], {"subfolders_skipped": 1, "subfolder_files_skipped": 1, "subfolders_skipped_detail": detail}).lines())
         self.assertIn("sub 1개 이상(탐색 상한으로 일부만 셈)", text)
 
+    @unittest.skipIf(os.name == "nt", "symbolic links to folders need privileges on Windows")
+    def test_r9_2_flat_allow_symlinks_counts_each_folder_once(self) -> None:
+        """R9-2 (round 9): a flat --allow-symlinks scan's subfolder count followed every folder
+        link — "/" walked the whole file system (146 800 files, a different number each run),
+        "..", "." and a link to the folder itself re-counted it, 50 links to one folder counted
+        it 50 times. The count now applies the P3 walker's rules and is deterministic."""
+        from deepfake_lens import scan_cache
+        from deepfake_lens.core import scan_directory
+
+        (self.folder / "sub" / "deeper").mkdir()
+        (self.folder / "sub" / "deeper" / "a.txt").write_text("더 깊은 메모", encoding="utf-8")
+        outside = self.out / "elsewhere"
+        (outside / "inner").mkdir(parents=True)
+        for name in ("x.txt", "y.txt", "inner/z.txt"):
+            (outside / name).write_text("링크 대상 폴더의 파일", encoding="utf-8")
+        ancestors = {"to-root": "/", "to-parent": "..", "to-dot": ".", "to-self": str(self.folder)}
+        for name, target in ancestors.items():
+            os.symlink(target, self.folder / name)
+        os.symlink("self-loop", self.folder / "self-loop")
+        os.symlink(self.folder / "sub" / "deeper", self.folder / "into-sub")
+        # a link into a folder another link also reaches: links are counted in
+        # name order, every folder once — "into-linked" (inner) before "many00"
+        os.symlink(outside / "inner", self.folder / "into-linked")
+        for index in range(50):
+            os.symlink(outside, self.folder / f"many{index:02d}")
+        expected_detail = [
+            {"path": "into-linked", "files": 1, "complete": True},
+            {"path": "many00", "files": 2, "complete": True},  # x.txt, y.txt — inner/ already counted
+            {"path": "sub", "files": 2, "complete": True},
+        ]
+        refused = {name: scan_cache.SYMLINK_ANCESTOR_REASON for name in ancestors}
+        refused.update({f"many{index:02d}": scan_cache.SYMLINK_DUPLICATE_REASON for index in range(1, 50)})
+        refused["into-sub"] = scan_cache.SYMLINK_DUPLICATE_REASON  # sub/deeper: counted with the real "sub"
+        survey = scan_cache.flat_subfolder_survey(self.folder, follow_links=True)
+        self.assertEqual(survey.detail, expected_detail)
+        self.assertEqual({path.name: reason for path, reason in survey.refused}, refused)
+        self.assertEqual(scan_cache.count_subfolders(self.folder, follow_links=True), 3)
+        self.assertEqual(scan_cache.subfolder_file_counts(self.folder, follow_links=True), expected_detail)
+        # without --allow-symlinks no link is a subfolder (each is a symlink row)
+        self.assertEqual(scan_cache.flat_subfolder_survey(self.folder).detail, [{"path": "sub", "files": 2, "complete": True}])
+        runs = []
+        for _ in range(2):
+            summary, items = scan_directory(self.folder, recursive=False, allow_symlinks=True, max_files=500)
+            rows = {item.path: (item.status, item.error) for item in items}
+            for name, reason in refused.items():
+                self.assertEqual(rows[name], ("skipped", reason), name)
+            self.assertEqual(rows["self-loop"], ("skipped", scan_cache.SYMLINK_LOOP_REASON))
+            self.assertEqual((summary.subfolders_skipped, summary.subfolder_files_skipped), (3, 5))
+            self.assertEqual(summary.subfolders_skipped_detail, expected_detail)
+            counts = unrecorded_files(list(items), summary).counts
+            self.assertEqual(counts["symlink"], len(refused) + 1)  # + self-loop (link.txt is followed: analyzed)
+            runs.append([item.to_json() for item in items])
+        self.assertEqual(runs[0], runs[1], "the same folder gives the same rows on every run")
+        scan_json = self.out / "flat-links.json"
+        self.assertEqual(_run(["scan", str(self.folder), "--allow-symlinks", "--max-files", "500", "--json-out", str(scan_json)])[0], 0)
+        cli_summary = json.loads(scan_json.read_text(encoding="utf-8"))["summary"]
+        self.assertEqual(cli_summary["subfolder_files_skipped"], 5)
+        self.assertEqual(cli_summary["subfolders_skipped_detail"], expected_detail)
+
     def test_p5_none_only_when_nothing_is_missing(self) -> None:
         """P5 (round 8): "없음" only when every count is 0 — a failed row without a result counts."""
         failed = unrecorded_files([{"path": "locked", "status": "failed", "result": None, "error": "읽기 실패"}])

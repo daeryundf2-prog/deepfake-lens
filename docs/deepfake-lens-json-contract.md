@@ -69,7 +69,7 @@ per-file coverage record:
 | `subfolders_skipped` | Subfolders directly under the scanned folder that a non-recursive scan did not enter (a symlinked folder is a skipped row instead; with `--allow-symlinks` a followable linked folder is counted here — X3); 0 for `--recursive`. The CLI table prints `참고: 하위 폴더 N개는 검사하지 않았습니다 … --recursive`, the GUI banner says the same (N8). |
 | `files_over_cap` | X1: files the folder walk found beyond the `--max-files` cap (`capped: true`) — never analyzed, no row; 0 when not capped. Reported in every rendering's `기록되지 않은 파일` section and in the GUI banner. |
 | `subfolder_files_skipped` | P5: regular files inside the `subfolders_skipped` folders (recursive count, symlinks neither followed nor counted); 0 for `--recursive`. |
-| `subfolders_skipped_detail` | P5: `[{path, files, complete}]` per skipped subfolder (`complete: false` when the count stopped at a walk limit). |
+| `subfolders_skipped_detail` | P5: `[{path, files, complete}]` per skipped subfolder (`complete: false` when the count stopped at a walk limit). R9-2: with `--allow-symlinks` a folder link is a subfolder only when the P3 walker would enter it — a link to the scanned folder or above it (`/`, `..`, `.`, its own path) or to a folder already counted is a skipped row (`건너뜀: 순환/상위 링크 …` / `건너뜀: 이미 따라간 링크 대상 …`, counted as `symlink`), every folder is counted once ((st_dev, st_ino) visited set; real subfolders first, then links, in name order) and the count is the same on every run. |
 
 A *verdict row* is any item with a `result` whose `status` is not `failed`,
 `unsupported`, `duplicate` or `skipped` (`result_types.is_verdict_row`) —

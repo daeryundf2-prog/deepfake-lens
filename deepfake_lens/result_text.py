@@ -256,6 +256,10 @@ SYMLINK_ROW_ERROR_PREFIXES = (
     "건너뜀: 깨진 심볼릭 링크",
     "건너뜀: 순환 링크",
     "건너뜀: 심볼릭 링크",
+    # P3/R9-2: a folder link to the scanned folder or above it, or to a
+    # folder already entered, is a link that was not followed.
+    "건너뜀: 순환/상위 링크",
+    "건너뜀: 이미 따라간 링크 대상",
 )
 
 

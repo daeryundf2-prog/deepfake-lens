@@ -79,6 +79,7 @@ from .scan_cache import (  # noqa: E402, F401 - re-exported
     SYMLINK_LOOP_REASON,
     SYMLINK_SKIP_REASON,
     count_subfolders,
+    flat_subfolder_survey,
     subfolder_file_counts,
 )
 # D9: rejected archive members listed one coverage entry each, up to this
@@ -238,11 +239,17 @@ def scan_directory(
             over_cap += 1
             continue
         paths.append(path)
+    # R9-2: a flat scan surveys its subfolders once (P3 walker rules); a
+    # folder link it does not count (to the folder itself or above it, or to
+    # a folder already counted) is a row with its reason.
+    survey = None if recursive else flat_subfolder_survey(root, follow_links=allow_symlinks)
+    if survey is not None:
+        symlinks.extend(survey.refused)
     return scan_paths(
         paths, root=root, capped=capped, iter_errors=iter_errors, symlinks=symlinks,
         files_over_cap=over_cap,
-        subfolders_skipped=0 if recursive else count_subfolders(root, follow_links=allow_symlinks), on_plan=on_plan,
-        subfolder_files=None if recursive else subfolder_file_counts(root, follow_links=allow_symlinks),
+        subfolders_skipped=0 if survey is None else len(survey.detail), on_plan=on_plan,
+        subfolder_files=None if survey is None else survey.detail,
         text_bytes=text_bytes, metadata_bytes=metadata_bytes,
         pixel_mode=pixel_mode, pixel_max_side=pixel_max_side,
         heatmaps=heatmaps, heatmap_dir=heatmap_dir, model_path=model_path,

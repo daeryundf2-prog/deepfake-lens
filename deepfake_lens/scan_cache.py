@@ -120,6 +120,60 @@ def _root_and_parents(root: Path) -> set[tuple[int, int]]:
         current = parent
 
 
+class _WalkLimits:
+    """The P3 backstop limits of one walk (folders, seconds, files).
+
+    R9-2: shared by the scan walk (:func:`_iter_files`) and the flat-scan
+    subfolder count (:func:`flat_subfolder_survey`).
+    """
+
+    def __init__(self, file_limit: int | None = None) -> None:
+        import time
+
+        self.dirs_entered = 0
+        self.file_limit = file_limit
+        self.deadline = time.monotonic() + MAX_WALK_SECONDS
+
+    def hit(self, files: int = 0) -> str | None:
+        """The limit reached (Korean label for :data:`WALK_LIMIT_REASON`), or None."""
+        import time
+
+        if self.dirs_entered >= MAX_WALK_DIRS:
+            return f"폴더 {MAX_WALK_DIRS}개"
+        if self.file_limit is not None and files >= self.file_limit:
+            return f"파일 {self.file_limit}개"
+        if time.monotonic() > self.deadline:
+            return f"{int(MAX_WALK_SECONDS)}초"
+        return None
+
+
+def _link_refusal(
+    path: Path,
+    *,
+    root_parents: set[tuple[int, int]],
+    ancestors: frozenset[tuple[int, int]],
+    entered: set[tuple[int, int]],
+) -> tuple[str | None, tuple[int, int] | None]:
+    """(why a followable link to a folder is not entered, or None; the target's (st_dev, st_ino)).
+
+    P3: a link to the scanned folder or a folder above it (``/``, ``..``,
+    ``.``, the folder's own path) is :data:`SYMLINK_ANCESTOR_REASON`, a
+    link back to a folder on the current path :data:`SYMLINK_LOOP_REASON`,
+    a folder already entered :data:`SYMLINK_DUPLICATE_REASON`. R9-2: the
+    flat-scan subfolder count applies the same rule.
+    """
+    ident = _dir_identity(path)
+    if ident is None:
+        return SYMLINK_UNREADABLE_REASON.format(reason="상태를 읽을 수 없음"), None
+    if ident in root_parents:
+        return SYMLINK_ANCESTOR_REASON, ident
+    if ident in ancestors:
+        return SYMLINK_LOOP_REASON, ident
+    if ident in entered:
+        return SYMLINK_DUPLICATE_REASON, ident
+    return None, ident
+
+
 def _iter_files(
     root: Path,
     *,
@@ -164,7 +218,6 @@ def _iter_files(
     the first file is yielded.
     """
     import os
-    import time
 
     key = _scan_order_key(root)
     found: list[Path] = []
@@ -172,18 +225,7 @@ def _iter_files(
     skipped: list[tuple[Path, str]] = []
     root_parents = _root_and_parents(root) if allow_symlinks and recursive else set()
     link_entered: set[tuple[int, int]] = set()
-    file_limit = None if max_files is None else max_files + MAX_WALK_FILES_BEYOND_CAP
-    deadline = time.monotonic() + MAX_WALK_SECONDS
-    dirs_entered = 0
-
-    def _limit_hit() -> str | None:
-        if dirs_entered >= MAX_WALK_DIRS:
-            return f"폴더 {MAX_WALK_DIRS}개"
-        if file_limit is not None and len(found) >= file_limit:
-            return f"파일 {file_limit}개"
-        if time.monotonic() > deadline:
-            return f"{int(MAX_WALK_SECONDS)}초"
-        return None
+    limits = _WalkLimits(None if max_files is None else max_files + MAX_WALK_FILES_BEYOND_CAP)
 
     def _file(path: Path) -> None:
         try:
@@ -197,13 +239,12 @@ def _iter_files(
         found.append(path)
 
     def _walk(folder: Path, ancestors: frozenset[tuple[int, int]]) -> None:
-        nonlocal dirs_entered
         if folder != root:
-            limit = _limit_hit()
+            limit = limits.hit(len(found))
             if limit is not None:
                 skipped.append((folder, WALK_LIMIT_REASON.format(limit=limit)))
                 return
-        dirs_entered += 1
+        limits.dirs_entered += 1
         try:
             with os.scandir(folder) as handle:
                 entries = sorted(handle, key=lambda entry: entry.name)
@@ -244,19 +285,12 @@ def _iter_files(
                 _file(path)
                 continue
             if not recursive:
-                continue  # a subfolder of a flat scan (count_subfolders counts it)
-            ident = _dir_identity(path)
-            if ident is None:
-                skipped.append((path, SYMLINK_UNREADABLE_REASON.format(reason="상태를 읽을 수 없음")))
+                # a subfolder of a flat scan: flat_subfolder_survey counts it
+                # or gives it a row (R9-2: a link it does not count)
                 continue
-            if ident in root_parents:
-                skipped.append((path, SYMLINK_ANCESTOR_REASON))
-                continue
-            if ident in ancestors:
-                skipped.append((path, SYMLINK_LOOP_REASON))
-                continue
-            if ident in link_entered:
-                skipped.append((path, SYMLINK_DUPLICATE_REASON))
+            refusal, ident = _link_refusal(path, root_parents=root_parents, ancestors=ancestors, entered=link_entered)
+            if refusal is not None or ident is None:
+                skipped.append((path, refusal or SYMLINK_UNREADABLE_REASON.format(reason="상태를 읽을 수 없음")))
                 continue
             link_entered.add(ident)
             _walk(path, ancestors | {ident})
@@ -272,87 +306,124 @@ def _iter_files(
     yield from sorted(found, key=key)
 
 
-def count_subfolders(root: Path, *, follow_links: bool = False) -> int:
-    """Subfolders directly under ``root`` that a non-recursive scan does not enter (N8).
+class FlatSubfolders:
+    """What a flat (non-recursive) scan leaves out below the folder (N8, P5, R9-2).
 
-    A symlinked folder is not counted unless ``follow_links`` (X3:
-    --allow-symlinks) — without it, it is reported as a skipped symlink row
-    instead (D10). A link that cannot be followed is never counted (it has
-    its own row).
+    ``detail``: one ``{"path", "files", "complete"}`` entry per subfolder
+    it does not enter, in name order — the regular files below it,
+    counted recursively. ``refused``: ``(link, reason)`` for each folder
+    link (``--allow-symlinks``) that is not counted — its row reason.
     """
-    count = 0
+
+    def __init__(self, detail: list[dict[str, object]], refused: list[tuple[Path, str]]) -> None:
+        self.detail = detail
+        self.refused = refused
+
+
+def flat_subfolder_survey(root: Path, *, follow_links: bool = False) -> FlatSubfolders:
+    """The subfolders a flat scan does not enter and the files inside them (N8, P5, R9-2).
+
+    A symbolic link to a folder is a subfolder only with ``follow_links``
+    (X3: --allow-symlinks; without it, it is a skipped symlink row — D10)
+    and only when it can be followed (else it has its own row — X3).
+
+    R9-2 (round 9): the count used to follow every folder link, so a link
+    to ``/`` walked the whole file system (146 800 files, a different
+    number each run), ``..``, ``.`` and a link to the folder itself
+    re-counted the scanned folder, and 50 links to one folder counted it 50
+    times. It now uses the P3 walker's rules: a link to the scanned folder
+    or a folder above it is refused (:data:`SYMLINK_ANCESTOR_REASON`), and
+    every folder — real or linked — is counted once ((st_dev, st_ino)
+    visited set over the whole count; a link to a folder already counted is
+    :data:`SYMLINK_DUPLICATE_REASON`). Real subfolders are counted first,
+    then links, each in name order, and every listing is sorted, so the
+    result is the same on every run. Links inside a subfolder are neither
+    followed nor counted (P5). The P3 limits (:class:`_WalkLimits`) bound
+    the whole count; a folder whose count stopped there is
+    ``complete: False``.
+    """
+    import os
+
     try:
-        entries = list(root.iterdir())
+        entries = sorted(root.iterdir(), key=lambda entry: entry.name)
     except OSError:
-        return 0
+        return FlatSubfolders([], [])
+    real: list[Path] = []
+    linked: list[Path] = []
     for entry in entries:
         try:
             if entry.is_symlink():
                 if follow_links and symlink_problem(entry) is None and entry.is_dir():
-                    count += 1
+                    linked.append(entry)
             elif entry.is_dir():
-                count += 1
+                real.append(entry)
         except OSError:
             continue
-    return count
+    limits = _WalkLimits()
+    root_ident = _dir_identity(root)
+    visited: set[tuple[int, int]] = {root_ident} if root_ident else set()
+    root_parents = _root_and_parents(root) if linked else set()
 
-
-def subfolder_file_counts(root: Path, *, follow_links: bool = False) -> list[dict[str, object]]:
-    """Files inside each subfolder a flat scan does not enter (P5, round 8).
-
-    One entry per folder :func:`count_subfolders` counts, in name order:
-    ``{"path": <name>, "files": <regular files below it, recursively>,
-    "complete": <False when the count stopped at a walk limit>}``. Symbolic
-    links inside are neither followed nor counted; the walk stops at
-    :data:`MAX_WALK_DIRS` folders or :data:`MAX_WALK_SECONDS` seconds over
-    all subfolders, and the folder being counted is marked incomplete.
-    """
-    import os
-    import time
-
-    out: list[dict[str, object]] = []
-    try:
-        entries = sorted(root.iterdir(), key=lambda entry: entry.name)
-    except OSError:
-        return out
-    deadline = time.monotonic() + MAX_WALK_SECONDS
-    dirs = 0
-    for entry in entries:
-        try:
-            if entry.is_symlink():
-                if not (follow_links and symlink_problem(entry) is None and entry.is_dir()):
-                    continue
-            elif not entry.is_dir():
-                continue
-        except OSError:
-            continue
+    def count(top: Path, top_ident: tuple[int, int] | None) -> dict[str, object]:
         files = 0
         complete = True
-        stack = [entry]
+        if top_ident is not None:
+            visited.add(top_ident)
+        stack = [top]
         while stack:
-            if dirs >= MAX_WALK_DIRS or time.monotonic() > deadline:
+            if limits.hit() is not None:
                 complete = False
                 break
             folder = stack.pop()
-            dirs += 1
+            limits.dirs_entered += 1
             try:
                 with os.scandir(folder) as handle:
-                    children = list(handle)
+                    children = sorted(handle, key=lambda child: child.name, reverse=True)
             except OSError:
                 complete = False
                 continue
             for child in children:
                 try:
                     if child.is_symlink():
-                        continue
+                        continue  # P5: links inside are neither followed nor counted
                     if child.is_dir(follow_symlinks=False):
+                        ident = _dir_identity(child.path)
+                        if ident is not None and ident in visited:
+                            continue  # bind mount / already counted folder
+                        if ident is not None:
+                            visited.add(ident)
                         stack.append(Path(child.path))
                     elif child.is_file(follow_symlinks=False):
                         files += 1
                 except OSError:
                     complete = False
-        out.append({"path": entry.name, "files": files, "complete": complete})
-    return out
+        return {"path": top.name, "files": files, "complete": complete}
+
+    by_name: dict[str, dict[str, object]] = {}
+    for folder in real:
+        by_name[folder.name] = count(folder, _dir_identity(folder))
+    refused: list[tuple[Path, str]] = []
+    for link in linked:
+        reason, ident = _link_refusal(link, root_parents=root_parents, ancestors=frozenset(), entered=visited)
+        if reason is not None or ident is None:
+            refused.append((link, reason or SYMLINK_UNREADABLE_REASON.format(reason="상태를 읽을 수 없음")))
+            continue
+        by_name[link.name] = count(link, ident)
+    return FlatSubfolders([by_name[name] for name in sorted(by_name)], refused)
+
+
+def count_subfolders(root: Path, *, follow_links: bool = False) -> int:
+    """Subfolders directly under ``root`` that a non-recursive scan does not enter (N8).
+
+    The folders :func:`flat_subfolder_survey` counts (R9-2: a refused
+    folder link is a row, not a subfolder).
+    """
+    return len(flat_subfolder_survey(root, follow_links=follow_links).detail)
+
+
+def subfolder_file_counts(root: Path, *, follow_links: bool = False) -> list[dict[str, object]]:
+    """Files inside each subfolder a flat scan does not enter (P5) — :func:`flat_subfolder_survey`'s detail."""
+    return flat_subfolder_survey(root, follow_links=follow_links).detail
 
 
 def _read_prefix(path: Path, limit: int) -> bytes:

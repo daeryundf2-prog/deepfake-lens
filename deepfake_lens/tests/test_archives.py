@@ -572,6 +572,7 @@ class RejectedMemberRecordTests(unittest.TestCase):
             SYMLINK_LOOP_REASON,
             SYMLINK_SKIP_REASON,
         )
+        from deepfake_lens.scan_cache import SYMLINK_DUPLICATE_REASON
 
         folder = self.root / "symcase"
         (folder / "d" / "e").mkdir(parents=True)
@@ -607,10 +608,13 @@ class RejectedMemberRecordTests(unittest.TestCase):
                     self.assertEqual(by_path["d/e/up"].error, SYMLINK_LOOP_REASON)
                     self.assertEqual(summary.subfolders_skipped, 0)
                 else:
-                    self.assertNotIn("dlink", by_path)
-                    self.assertEqual(summary.subfolders_skipped, 2)  # d and the linked dlink
+                    # R9-2 (round 9): this expected "d and the linked dlink" — the same
+                    # folder counted twice (encoded the defect). A flat scan counts each
+                    # folder once; dlink -> d is a "이미 따라간 링크 대상" row.
+                    self.assertEqual((by_path["dlink"].status, by_path["dlink"].error), ("skipped", SYMLINK_DUPLICATE_REASON))
+                    self.assertEqual(summary.subfolders_skipped, 1)
                 self.assertEqual(summary.total, len(items))
-                self.assertEqual(summary.skipped, 4 + int(fifo) + (2 if recursive else 0))
+                self.assertEqual(summary.skipped, 4 + int(fifo) + (2 if recursive else 1))
 
     def _scan_with_deadline(self, folder: Path, seconds: float = 60.0, **kwargs: Any) -> tuple[Any, dict[str, Any]]:
         """scan_directory in a thread; fails (instead of hanging the suite) when it does not finish."""
