@@ -24,6 +24,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qs
 
 from .checks import failure_reason
+from .error_text import exception_text
 from .vendor_weights import default_models_dir
 
 logger = logging.getLogger(__name__)
@@ -863,7 +864,7 @@ def _feedback_payload(body: bytes) -> dict[str, object]:
         return {"error": "JSON 본문을 해석할 수 없습니다"}
     label = str(data.get("expected_label", "") or "").strip().lower()
     if not (is_positive_label(label) or is_negative_label(label)):
-        return {"error": "expected_label은 인식 가능한 라벨이어야 합니다 (예: synthetic, real)"}
+        return {"error": "expected_label은 인식 가능한 라벨이어야 합니다 (예: `synthetic`, `real`)"}
     path = str(data.get("path") or data.get("name") or "").strip()
     if not path:
         return {"error": "path가 필요합니다"}
@@ -899,6 +900,14 @@ def report_error_status(body: dict[str, object]) -> int:
     return PDF_REPORT_UNAVAILABLE_STATUS if body.get("error") == PDF_REPORT_UNAVAILABLE_ERROR else 200
 
 
+# G7 (round 5): /api/report request errors in Korean (were "items array is
+# required", "thresholds must be an object", "malformed item: …").
+REPORT_BODY_NOT_OBJECT = "보고서 요청 본문은 JSON 객체여야 합니다"
+REPORT_ITEMS_REQUIRED = "보고서에 넣을 검사 결과 항목(items 배열)이 필요합니다"
+REPORT_FIELD_NOT_OBJECT = "{field} 값은 JSON 객체여야 합니다"
+REPORT_ITEM_MALFORMED = "검사 결과 항목 {index}번을 해석할 수 없습니다: {reason}"
+
+
 def _report_payload(body: bytes, format_override: str | None = None, *, default_folder: Path | None = None) -> bytes | dict[str, object]:
     """Render the HTML or court-admissible forensic PDF report for web-scan results.
 
@@ -916,23 +925,30 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
         data = json.loads(body.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
         return {"error": "JSON 본문을 해석할 수 없습니다"}
+    if not isinstance(data, dict):
+        return {"error": REPORT_BODY_NOT_OBJECT}
     raw_items = data.get("items")
     if not isinstance(raw_items, list) or not raw_items:
-        return {"error": "items array is required"}
+        return {"error": REPORT_ITEMS_REQUIRED}
 
     thresholds = data.get("thresholds")
     if thresholds is not None and not isinstance(thresholds, dict):
-        return {"error": "thresholds must be an object"}
+        return {"error": REPORT_FIELD_NOT_OBJECT.format(field="thresholds")}
     coverage = data.get("coverage")
     if coverage is not None and not isinstance(coverage, dict):
-        return {"error": "coverage must be an object"}
+        return {"error": REPORT_FIELD_NOT_OBJECT.format(field="coverage")}
 
-    try:
-        items = [_scan_item_from_json(row) for row in raw_items if isinstance(row, dict)]
-    except (TypeError, ValueError) as exc:
-        return {"error": f"malformed item: {exc}"}
+    items = []
+    for index, row in enumerate(raw_items):
+        if not isinstance(row, dict):
+            continue
+        try:
+            items.append(_scan_item_from_json(row))
+        except (TypeError, ValueError, KeyError, AttributeError) as exc:
+            logger.info("report item %d could not be read", index, exc_info=True)
+            return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason=exception_text(exc))}
     if not items:
-        return {"error": "items array is required"}
+        return {"error": REPORT_ITEMS_REQUIRED}
 
     # G31: every disk read this report makes — evidence hashing and heatmap
     # embedding — is confined to the operator read roots (or, with none

@@ -44,6 +44,52 @@ class HostNameTest(unittest.TestCase):
         self.assertNotIn(host_name("attacker.example.com"), {"127.0.0.1", "localhost", "::1"})
 
 
+class ReportRequestErrorsAreKoreanTest(unittest.TestCase):
+    """G7 (round 5): /api/report request errors were English ("items array is required",
+    "thresholds must be an object", "coverage must be an object", "malformed item: …")."""
+
+    CASES: tuple[tuple[object, str], ...] = (
+        ({}, "보고서에 넣을 검사 결과 항목(items 배열)이 필요합니다"),
+        ({"items": []}, "보고서에 넣을 검사 결과 항목(items 배열)이 필요합니다"),
+        ({"items": ["x"]}, "보고서에 넣을 검사 결과 항목(items 배열)이 필요합니다"),
+        ({"items": [{"path": "a.png"}], "thresholds": "x"}, "thresholds 값은 JSON 객체여야 합니다"),
+        ({"items": [{"path": "a.png"}], "coverage": []}, "coverage 값은 JSON 객체여야 합니다"),
+        ([1, 2], "보고서 요청 본문은 JSON 객체여야 합니다"),
+    )
+
+    def _check(self, body: dict[str, object] | bytes, expected: str | None = None) -> str:
+        from deepfake_lens.error_text import english_prose
+
+        result = webapp_api._report_payload(body if isinstance(body, bytes) else json.dumps(body).encode("utf-8"))
+        assert isinstance(result, dict), result
+        message = str(result["error"])
+        if expected is not None:
+            self.assertEqual(message, expected)
+        self.assertIsNone(english_prose(message), message)
+        return message
+
+    def test_report_request_errors(self) -> None:
+        for body, expected in self.CASES:
+            with self.subTest(body=body):
+                self._check(json.dumps(body).encode("utf-8"), expected)
+        self._check(b"{not json", "JSON 본문을 해석할 수 없습니다")
+
+    def test_malformed_item_names_the_item_in_korean(self) -> None:
+        message = self._check({"items": [{"path": "a.png", "result": {"verdict_code": "bogus"}}]})
+        self.assertTrue(message.startswith("검사 결과 항목 1번을 해석할 수 없습니다: "), message)
+        self.assertNotIn("malformed", message)
+
+    @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed")
+    def test_api_serve_report_errors(self) -> None:
+        from fastapi.testclient import TestClient
+
+        client = TestClient(api_server.create_app())
+        for body, expected in self.CASES[:5]:
+            with self.subTest(body=body):
+                response = client.post("/api/report", headers={"host": "localhost", "X-Deepfake-Lens-Client": "gui"}, json=body)
+                self.assertEqual(response.json().get("error") or response.json().get("detail"), expected, response.text)
+
+
 class ScanPayloadValidationTest(unittest.TestCase):
     """_scan_payload must reject non-integer limits and clamp unbounded values."""
 

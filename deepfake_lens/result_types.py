@@ -502,6 +502,9 @@ NON_VERDICT_STATUSES = frozenset({"failed", "unsupported", "duplicate", "skipped
 # CLI table's 결론 column and the evidence statement's status line instead
 # of the raw status code.
 STATUS_LABELS = {
+    # G7: a posted row with status "analyzed" but no result (malformed web
+    # report body) must not show the raw code either.
+    "analyzed": "분석됨(결과 없음)",
     "skipped": "건너뜀",
     "unsupported": "미지원",
     "failed": "실패",
