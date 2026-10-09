@@ -2,13 +2,13 @@
 
 <!-- scripts/qa_phase0.py가 생성 — 손으로 고치지 말 것 -->
 
-- 검증 커밋: `e368828b786a37f9a5ca8f45a57f89599ce0c359` — 변경 없는 작업 트리에서 실행. 이 표는 이 커밋의 직계 자식 커밋에 단독으로 담긴다 (`python scripts/qa_phase0.py --verify-record`로 확인)
-- 생성 일시(UTC): 2026-10-09T08:53:51Z
+- 검증 커밋: `12af9d07802ef2c269a59c3b93e9f6e7ebddca4e` — 변경 없는 작업 트리에서 실행. 이 표는 이 커밋의 직계 자식 커밋에 단독으로 담긴다 (`python scripts/qa_phase0.py --verify-record`로 확인)
+- 생성 일시(UTC): 2026-10-09T10:53:29Z
 - 도구 버전: deepfake-lens 0.1.0
 - 환경: Python 3.13.16 / Linux-6.18.44-fc-v80-x86_64-with-glibc2.39 / ffmpeg 있음
 - 설치된 선택 패키지: numpy, PIL, cv2, scipy, sklearn, fastapi, httpx, uvicorn, mediapipe, pymupdf, fitz
 - 없는 선택 패키지(해당 테스트는 건너뜀): librosa, soundfile, c2pa, torch, transformers, speechbrain, py7zr, rarfile
-- 실행 범위: 전체 단위 테스트 스위트 — 1239개 실행, 실패 0개, 건너뜀 30개
+- 실행 범위: 전체 단위 테스트 스위트 — 1268개 실행, 실패 0개, 건너뜀 30개
 - 신경망 가중치: 없음(모든 프로필 supported:false, 모델 경로는 가짜 프로필 + monkeypatch로 검증)
 
 **요약: 20 통과 / 0 실패 / 4 수동 / 12 1단계**
@@ -92,7 +92,7 @@ QA 테스트마다 docstring 첫 줄이 "<QA ID>: <통과 기준 원문>"이고 
 | QA-SYS-6 | 0/0/9 | 통과 | — |
 | QA-SYS-7 | 0/0/14 | 통과 | — |
 | QA-SYS-9 | 0/0/8 | 통과 | — |
-| QA-SYS-10 | 0/0/17 | 통과 | 전체 스위트 1239개 실행, 실패 0건 |
+| QA-SYS-10 | 0/0/17 | 통과 | 전체 스위트 1268개 실행, 실패 0건 |
 
 ## 수동·1단계
 
