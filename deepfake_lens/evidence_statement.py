@@ -510,6 +510,7 @@ def write_evidence_statement_markdown(
 # R6: the PDF renderer's optional dependency and the message shown when it
 # is missing (CLI exit 2, web JSON error) — never an English traceback.
 PDF_DEPENDENCY = "pymupdf"
+STATEMENT_NOTICE_TITLE = "무결성/해석 고지"
 PDF_DEPENDENCY_MESSAGE = (
     "PDF 증거설명서를 만들려면 pymupdf 패키지가 필요합니다(설치: `pip install pymupdf`). "
     "Markdown(.md) 또는 JSON(.json) 증거설명서는 pymupdf 없이 만들 수 있습니다."
@@ -562,174 +563,114 @@ def write_evidence_statement_pdf(
 
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-
-    doc = pymupdf.open()
-    font_ko = "korea"  # B3: every label is drawn with the CJK font
-
-    page_w, page_h = 595.0, 842.0
-    margin_l, margin_r = 45.0, 550.0
-
-    def create_page() -> Any:
-        page = doc.new_page(width=page_w, height=page_h)
-        # Header banner
-        firm_header = f"{statement.law_firm} {statement.center}".strip()
-        page.insert_text(pymupdf.Point(margin_l, 35), firm_header, fontname=font_ko, fontsize=9, color=(0.15, 0.25, 0.45))
-        contact_line = f"대한민국 법원 전자소송(ECFS) 표준 서식  |  대표전화: {statement.contact}" if statement.contact else "대한민국 법원 전자소송(ECFS) 표준 서식"
-        page.insert_text(pymupdf.Point(margin_l, 46), contact_line, fontname=font_ko, fontsize=7.5, color=(0.5, 0.5, 0.5))
-        page.draw_line(pymupdf.Point(margin_l, 52), pymupdf.Point(margin_r, 52), color=(0.85, 0.88, 0.92), width=0.8)
-        return page
-
-    page = create_page()
-
-    # Document Title
-    page.insert_text(pymupdf.Point(215, 80), "증  거  설  명  서", fontname=font_ko, fontsize=18, color=(0.08, 0.15, 0.32))
-
-    # Case info block
-    box_rect = pymupdf.Rect(margin_l, 98, margin_r, 168)
-    page.draw_rect(box_rect, color=(0.82, 0.86, 0.92), fill=(0.97, 0.98, 0.99))
-
-    page.insert_text(pymupdf.Point(margin_l + 12, 115), f"사        건    {statement.case_no}  {statement.case_name}", fontname=font_ko, fontsize=9.5, color=(0.1, 0.1, 0.1))
-    page.insert_text(pymupdf.Point(margin_l + 12, 131), f"원고(고소인)    {statement.plaintiff}", fontname=font_ko, fontsize=9.5, color=(0.1, 0.1, 0.1))
-    page.insert_text(pymupdf.Point(margin_l + 12, 147), f"피고(피의자)    {statement.defendant}", fontname=font_ko, fontsize=9.5, color=(0.1, 0.1, 0.1))
-    page.insert_text(pymupdf.Point(margin_l + 12, 161), "위 사건에 관하여 원고(고소인)의 소송대리인은 주장사실을 입증하기 위해 아래와 같이 증거방법을 제출합니다.", fontname=font_ko, fontsize=8.2, color=(0.3, 0.3, 0.3))
-
-    page.insert_text(pymupdf.Point(265, 185), "다        음", fontname=font_ko, fontsize=11, color=(0.1, 0.1, 0.1))
-
-    hdr_h = 20.0
-    col4_w = (margin_r - 5) - (margin_l + 285)
-
-    def draw_table_header(y_top: float) -> None:
-        page.draw_rect(pymupdf.Rect(margin_l, y_top, margin_r, y_top + hdr_h), color=(0.75, 0.8, 0.88), fill=(0.9, 0.93, 0.97))
-        page.insert_text(pymupdf.Point(margin_l + 8, y_top + 14), "호증", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
-        page.insert_text(pymupdf.Point(margin_l + 55, y_top + 14), "서증(증거)의 명칭", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
-        page.insert_text(pymupdf.Point(margin_l + 180, y_top + 14), "작성자 및 일자", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
-        page.insert_text(pymupdf.Point(margin_l + 285, y_top + 14), "입증취지 및 위법성 요건 대조", fontname=font_ko, fontsize=8.5, color=(0.12, 0.2, 0.35))
-
-    # Measure each row's required height across ALL free-text cells —
-    # insert_textbox returns the spare height, negative on overflow, so
-    # needed = rect_height - spare. Measuring only the widest column would
-    # let a long document name silently clip.
-    col2_w, col3_w = 120.0, 100.0
-    measure = pymupdf.open()
-    probe_page = measure.new_page(width=page_w, height=page_h)
-    row_heights: list[float] = []
-    fitted_purpose: list[str] = []
-    fitted_doc: list[str] = []
-    fitted_author: list[str] = []
-    for entry in statement.entries:
-        def _needed(width: float, text: str, size: float) -> float:
-            probe = pymupdf.Rect(0, 0, width, 2000)
-            return probe.height - probe_page.insert_textbox(probe, text or " ", fontname=font_ko, fontsize=size)
-
-        def _fit(width: float, text: str, size: float, max_h: float) -> str:
-            """Trim text so it renders inside max_h — with an explicit
-            ellipsis marker instead of silent clipping (a clipped purpose
-            statement would hide legal mapping from the filing)."""
-            text = text or " "
-            if _needed(width, text, size) <= max_h:
-                return text
-            marker = " …(이후 내용 생략 — 원문은 감정 데이터 참조)"
-            lo, hi = 0, len(text)
-            while lo < hi:
-                mid = (lo + hi + 1) // 2
-                if _needed(width, text[:mid].rstrip() + marker, size) <= max_h:
-                    lo = mid
-                else:
-                    hi = mid - 1
-            return text[:lo].rstrip() + marker
-
-        fitted_purpose.append(_fit(col4_w, entry.purpose_of_proof, 6.8, 606.0))
-        fitted_doc.append(_fit(col2_w, entry.document_name, 7.5, 606.0))
-        fitted_author.append(_fit(col3_w, entry.author_date, 7.5, 606.0))
-        needed = max(
-            _needed(col4_w, fitted_purpose[-1], 6.8),
-            _needed(col2_w, fitted_doc[-1], 7.5),
-            _needed(col3_w, fitted_author[-1], 7.5),
-        )
-        row_heights.append(min(max(58.0, needed + 10.0), 620.0))
-    measure.close()
-
-    # Table Header
-    y = 196.0
-    draw_table_header(y)
-    y += hdr_h
-
-    # Table rows
-    for idx, entry in enumerate(statement.entries):
-        row_h = row_heights[idx]
-        if y + row_h > 720:
-            page = create_page()
-            y = 70.0
-            draw_table_header(y)
-            y += hdr_h
-
-        # Alternating background
-        if idx % 2 == 1:
-            page.draw_rect(pymupdf.Rect(margin_l, y, margin_r, y + row_h), color=(0.97, 0.98, 0.99), fill=(0.97, 0.98, 0.99))
-        page.draw_line(pymupdf.Point(margin_l, y + row_h), pymupdf.Point(margin_r, y + row_h), color=(0.88, 0.9, 0.93), width=0.5)
-
-        # Col 1: Exhibit No
-        page.insert_text(pymupdf.Point(margin_l + 8, y + 20), entry.exhibit_no, fontname=font_ko, fontsize=8.5, color=(0.1, 0.15, 0.3))
-
-        # Col 2: Document Name
-        doc_rect = pymupdf.Rect(margin_l + 55, y + 6, margin_l + 175, y + row_h - 4)
-        page.insert_textbox(doc_rect, fitted_doc[idx], fontname=font_ko, fontsize=7.5, color=(0.2, 0.2, 0.2))
-
-        # Col 3: Author and Date
-        auth_rect = pymupdf.Rect(margin_l + 180, y + 6, margin_l + 280, y + row_h - 4)
-        page.insert_textbox(auth_rect, fitted_author[idx], fontname=font_ko, fontsize=7.5, color=(0.3, 0.3, 0.3))
-
-        # Col 4: Purpose of proof & legal mapping
-        purpose_rect = pymupdf.Rect(margin_l + 285, y + 4, margin_r - 5, y + row_h - 4)
-        # Compact single-line summary with statutes
-        page.insert_textbox(purpose_rect, fitted_purpose[idx], fontname=font_ko, fontsize=6.8, color=(0.15, 0.15, 0.15))
-
-        y += row_h
-
-    # Provenance + integrity disclosure (screening caveat goes on every copy)
-    hashed = sum(1 for e in statement.entries if e.sha256)
-    if y + 130 > 760:
-        page = create_page()
-        y = 70.0
-    disc_box = pymupdf.Rect(margin_l, y, margin_r, y + 55)
-    page.draw_rect(disc_box, color=(0.85, 0.88, 0.92), fill=(0.98, 0.98, 0.99))
-    page.insert_text(pymupdf.Point(margin_l + 8, y + 14), "무결성/해석 고지", fontname=font_ko, fontsize=8, color=(0.35, 0.35, 0.35))
-    page.insert_textbox(
-        pymupdf.Rect(margin_l + 8, y + 18, margin_r - 8, y + 52),
-        (f"원본 해시 산출: {hashed}/{len(statement.entries)}건. "
-         "본 문서의 결론은 자동 분석 결과로 유죄·불법성의 직접 증거가 아니며, 정밀 감정은 별도로 수행되어야 합니다. "
-         + (statement.reference_note + " " if statement.reference_note else "")
-         + statement.provenance_note.replace("\n", " / ")),
-        fontname=font_ko, fontsize=6.8, color=(0.4, 0.4, 0.4),
-    )
-    y += 65.0
-
-    # Signoff Block
-    if y + 90 > 760:
-        page = create_page()
-        y = 70.0
-    else:
-        y += 20.0
-
-    page.insert_text(pymupdf.Point(235, y + 15), statement.created_at, fontname=font_ko, fontsize=10, color=(0.1, 0.1, 0.1))
-    page.insert_text(pymupdf.Point(180, y + 35), f"원고(고소인) 소송대리인  {statement.law_firm}", fontname=font_ko, fontsize=10.5, color=(0.08, 0.15, 0.32))
-    page.insert_text(pymupdf.Point(195, y + 50), "담당변호사 : ○ ○ ○,  ○ ○ ○", fontname=font_ko, fontsize=9.5, color=(0.2, 0.2, 0.2))
-    page.insert_text(pymupdf.Point(185, y + 63), "디지털포렌식센터 수석감정관 : ○ ○ ○  (인)", fontname=font_ko, fontsize=9.5, color=(0.2, 0.2, 0.2))
-
-    page.insert_text(pymupdf.Point(margin_l, y + 85), statement.court, fontname=font_ko, fontsize=12, color=(0.05, 0.05, 0.05))
-
-    # G30: signature block (or the explicit "서명 없음" lines).
-    sig_lines = statement_signature_lines(body)
-    sig_y = y + 105.0
-    if sig_y + 9.0 * len(sig_lines) > 800:
-        page = create_page()
-        sig_y = 70.0
-    for line in sig_lines:
-        page.insert_text(pymupdf.Point(margin_l, sig_y), line, fontname=font_ko, fontsize=6.5, color=(0.35, 0.35, 0.35))
-        sig_y += 9.0
-
+    data = _render_statement_pdf(pymupdf, statement, body)
     tmp = output.with_suffix(output.suffix + ".tmp")
-    doc.save(str(tmp))
-    doc.close()
+    tmp.write_bytes(data)
     tmp.replace(output)
     return body
+
+
+# Evidence-statement PDF table (G2): relative column widths of
+# 호증 | 서증(증거)의 명칭 | 작성자 및 일자 | 입증취지 및 위법성 요건 대조.
+STATEMENT_TABLE_HEADERS = ("호증", "서증(증거)의 명칭", "작성자 및 일자", "입증취지 및 위법성 요건 대조")
+STATEMENT_TABLE_WEIGHTS = (12.5, 22.0, 18.5, 47.0)
+STATEMENT_ROW_MIN_HEIGHT = 30.0
+
+
+def _render_statement_pdf(pymupdf: Any, statement: EvidenceStatement, body: dict[str, object]) -> bytes:
+    """Lay out the evidence statement with :class:`pdf_layout.PdfLayout` (G2).
+
+    Every cell is wrapped to its measured column and a row that does not fit
+    continues on the next page — no purpose text is cut or replaced by
+    "…(이후 내용 생략…)", and the 무결성/해석 고지 box is as tall as its text
+    (the old fixed box was left empty when the text overflowed it).
+    """
+    from .pdf_layout import Cell, PdfLayout
+
+    def page_header(layout: PdfLayout) -> None:
+        firm_header = f"{statement.law_firm} {statement.center}".strip()
+        layout.text(layout.left, layout.right, firm_header, 9.0, (0.15, 0.25, 0.45), gap=0.5)
+        contact_line = f"대한민국 법원 전자소송(ECFS) 표준 서식  |  대표전화: {statement.contact}" if statement.contact else "대한민국 법원 전자소송(ECFS) 표준 서식"
+        layout.text(layout.left, layout.right, contact_line, 7.5, (0.5, 0.5, 0.5), gap=2.0)
+        layout.page.draw_line(pymupdf.Point(layout.left, layout.y), pymupdf.Point(layout.right, layout.y), color=(0.85, 0.88, 0.92), width=0.8)
+        layout.y += 6.0
+
+    layout = PdfLayout(pymupdf, header=page_header)
+    layout.new_page()
+    layout.text(layout.left, layout.right, "증  거  설  명  서", 18.0, (0.08, 0.15, 0.32), align=1, gap=6.0)
+    layout.boxed_text("", [
+        (f"사        건    {statement.case_no}  {statement.case_name}", 9.5, (0.1, 0.1, 0.1)),
+        (f"원고(고소인)    {statement.plaintiff}", 9.5, (0.1, 0.1, 0.1)),
+        (f"피고(피의자)    {statement.defendant}", 9.5, (0.1, 0.1, 0.1)),
+        ("위 사건에 관하여 원고(고소인)의 소송대리인은 주장사실을 입증하기 위해 아래와 같이 증거방법을 제출합니다.", 8.2, (0.3, 0.3, 0.3)),
+    ], border=(0.82, 0.86, 0.92), fill=(0.97, 0.98, 0.99))
+    layout.text(layout.left, layout.right, "다        음", 11.0, (0.1, 0.1, 0.1), align=1, gap=4.0)
+
+    columns = layout.columns(STATEMENT_TABLE_WEIGHTS)
+    header_color = (0.12, 0.2, 0.35)
+
+    def table_header(current: PdfLayout) -> None:
+        current.draw_row(
+            columns,
+            [Cell(index, label, 8.5, header_color) for index, label in enumerate(STATEMENT_TABLE_HEADERS)],
+            fill=(0.9, 0.93, 0.97), rule=(0.75, 0.8, 0.88),
+        )
+
+    layout.ensure_space(80.0)
+    table_header(layout)
+    for idx, entry in enumerate(statement.entries):
+        layout.draw_row(
+            columns,
+            [
+                Cell(0, entry.exhibit_no, 8.5, (0.1, 0.15, 0.3)),
+                Cell(1, entry.document_name or " ", 7.5, (0.2, 0.2, 0.2)),
+                Cell(2, entry.author_date or " ", 7.5, (0.3, 0.3, 0.3)),
+                Cell(3, entry.purpose_of_proof or " ", 6.8, (0.15, 0.15, 0.15)),
+            ],
+            fill=(0.97, 0.98, 0.99) if idx % 2 == 1 else None,
+            rule=(0.88, 0.9, 0.93),
+            min_height=STATEMENT_ROW_MIN_HEIGHT,
+            on_new_page=table_header,
+        )
+    layout.y += 8.0
+
+    # Provenance + integrity disclosure (screening caveat goes on every copy).
+    hashed = sum(1 for e in statement.entries if e.sha256)
+    notice = [
+        (f"원본 해시 산출: {hashed}/{len(statement.entries)}건.", 6.8, (0.4, 0.4, 0.4)),
+        ("본 문서의 결론은 자동 분석 결과로 유죄·불법성의 직접 증거가 아니며, 정밀 감정은 별도로 수행되어야 합니다.", 6.8, (0.4, 0.4, 0.4)),
+    ]
+    if statement.reference_note:
+        notice.append((statement.reference_note, 6.8, (0.4, 0.4, 0.4)))
+    for line in statement.provenance_note.split("\n"):
+        if line.strip():
+            notice.append((line.strip(), 6.8, (0.4, 0.4, 0.4)))
+    layout.boxed_text(STATEMENT_NOTICE_TITLE, notice)
+
+    # Signoff block, kept together on one page.
+    signoff = [
+        (statement.created_at, 10.0, (0.1, 0.1, 0.1)),
+        (f"원고(고소인) 소송대리인  {statement.law_firm}", 10.5, (0.08, 0.15, 0.32)),
+        ("담당변호사 : ○ ○ ○,  ○ ○ ○", 9.5, (0.2, 0.2, 0.2)),
+        ("디지털포렌식센터 수석감정관 : ○ ○ ○  (인)", 9.5, (0.2, 0.2, 0.2)),
+    ]
+    # The signoff, the court line and the G30 signature lines (or the
+    # explicit "서명 없음" lines) stay together on one page.
+    signature = [(line, 6.5, (0.35, 0.35, 0.35)) for line in statement_signature_lines(body)]
+    court = [(statement.court, 12.0, (0.05, 0.05, 0.05))]
+    needed = sum(
+        layout.block_height(layout.wrap(text, layout.content_width, size), size) + 3.0
+        for text, size, _ in (*signoff, *court, *signature)
+    )
+    layout.ensure_space(needed + 20.0)
+    layout.y += 8.0
+    for text, size, color in signoff:
+        layout.text(layout.left, layout.right, text, size, color, align=1, gap=3.0)
+    layout.y += 6.0
+    for text, size, color in court:
+        layout.text(layout.left, layout.right, text, size, color, gap=6.0)
+    for text, size, color in signature:
+        layout.text(layout.left, layout.right, text, size, color, gap=0.5)
+
+    layout.footer(lambda page_no, total: f"- {page_no} / {total} -")
+    return layout.to_bytes()

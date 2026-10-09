@@ -145,6 +145,8 @@ files = [
     "deepfake_lens/error_text.py",
     "deepfake_lens/tests/test_error_text.py",
     "deepfake_lens/pdf_backend.py",
+    "deepfake_lens/pdf_layout.py",
+    "deepfake_lens/tests/test_pdf_layout.py",
     "deepfake_lens/tests/test_pdf_backend.py",
     "deepfake_lens/cli_logging.py",
     "deepfake_lens/tests/test_cli_operations.py",

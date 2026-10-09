@@ -190,7 +190,9 @@ class RenderedLabelsTest(unittest.TestCase):
         self.assertIn(re.sub(r"\s+", "", IN_SAMPLE_CAVEAT), re.sub(r"\s+", "", text))
         self.assertNotRegex(text, r"\b(?:skipped|unsupported|duplicate)\b")
         if (self.folder / "link.png").is_symlink():
-            self.assertIn(HASH_UNAVAILABLE_SYMLINK, text)  # S2
+            # G2: cell text now wraps inside its measured column (it ran off
+            # the page before), so the phrase is compared without whitespace.
+            self.assertIn(re.sub(r"\s+", "", HASH_UNAVAILABLE_SYMLINK), re.sub(r"\s+", "", text))  # S2
             self.assertIn("건너뜀", text)
         latin = [span for span in spans if "helv" in span["font"].lower() or "helvetica" in span["font"].lower()]
         self.assertTrue(all(span["text"].isascii() for span in latin), [span["text"] for span in latin if not span["text"].isascii()])

@@ -268,19 +268,6 @@ def _hash_unavailable_reason(item: ScanItem) -> str:
     return HASH_UNAVAILABLE_ACCESS
 
 
-def _pdf_font(text: str, font_ko: str, font_en: str) -> str:
-    """The Latin font only ever draws ASCII text; everything else the CJK font (B3)."""
-    return font_en if text.isascii() else font_ko
-
-
-def _shorten_middle(text: str, limit: int) -> str:
-    """Keep both ends (container name and member file) when a label is too long (S1)."""
-    if len(text) <= limit:
-        return text
-    head = max(1, limit // 2 - 1)
-    return text[:head] + "…" + text[-(limit - head - 1):]
-
-
 def write_pdf_report(
     path: Path | str,
     summary: BatchScanSummary,
@@ -343,35 +330,76 @@ def write_forensic_pdf_report(
 
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write_bytes(output, _render_forensic_pdf(
+        pymupdf, summary, items,
+        redact_paths=redact_paths, exhibit_no=exhibit_no, thresholds=thresholds, coverage=coverage,
+        allow_path=allow_path, resolve_path=resolve_path, signed_report=signed_report,
+    ))
 
-    doc = pymupdf.open()
-    font_ko = "korea"
-    font_en = "helv"
 
-    page_w, page_h = 595.0, 842.0
-    margin_l, margin_r = 45.0, 550.0
+# Forensic PDF text (G2: every string is measured and wrapped by pdf_layout —
+# no fixed x offsets, no character cuts).
+FIRM_NAME = "법무법인(유한) 대륜 디지털포렌식 감정센터"
+FIRM_CONTACT = "서울특별시 강남구 테헤란로 114, 역삼빌딩 | 대표전화: 02-780-1128"
+FORENSIC_PDF_TITLE = "디지털 포렌식 AI 감정보고서"
+FORENSIC_TABLE_HEADERS = ("번호", "증거 파일명 및 SHA-256 무결성 해시", "결론", "등급", "근거 종류", "주요 근거/검사 실패")
+# Relative column widths of the evidence table (번호 … 주요 근거).
+FORENSIC_TABLE_WEIGHTS = (5.0, 35.0, 12.0, 7.0, 14.0, 27.0)
+FORENSIC_DECISION_NOTE = (
+    "결론은 결정적 근거(메타데이터·C2PA)로만 내리며, 통계적·어휘적 근거와 검사 실패 내역은 "
+    "JSON 산출물의 evidence/coverage에 전부 기록됩니다."
+)
 
-    def create_page() -> Any:
-        page = doc.new_page(width=page_w, height=page_h)
-        page.insert_text(pymupdf.Point(margin_l, 35), "법무법인(유한) 대륜 디지털포렌식 감정센터", fontname=font_ko, fontsize=9, color=(0.15, 0.25, 0.45))
-        page.insert_text(pymupdf.Point(margin_l, 46), "서울특별시 강남구 테헤란로 114, 역삼빌딩 | 대표전화: 02-780-1128", fontname=font_ko, fontsize=7.5, color=(0.5, 0.5, 0.5))
-        page.draw_line(pymupdf.Point(margin_l, 52), pymupdf.Point(margin_r, 52), color=(0.85, 0.88, 0.92), width=0.8)
-        return page
 
-    page = create_page()
+def _render_forensic_pdf(
+    pymupdf: Any,
+    summary: BatchScanSummary,
+    items: list[ScanItem],
+    *,
+    redact_paths: bool,
+    exhibit_no: str,
+    thresholds: object | None,
+    coverage: dict[str, object] | None,
+    allow_path: "Callable[[str], bool] | None",
+    resolve_path: "Callable[[str], Path | None] | None",
+    signed_report: dict[str, object],
+) -> bytes:
+    """Lay out the forensic PDF with :class:`pdf_layout.PdfLayout` (G2) and return its bytes."""
+    from .pdf_layout import Cell, PdfLayout
 
-    # Court Exhibit Box (Top Right)
-    page.draw_rect(pymupdf.Rect(415, 60, 550, 112), color=(0.18, 0.32, 0.55), width=1.2)
-    page.draw_rect(pymupdf.Rect(415, 60, 550, 75), color=(0.93, 0.95, 0.98), fill=(0.93, 0.95, 0.98))
-    page.insert_text(pymupdf.Point(423, 71), "증거 표찰 (ECFS 규격)", fontname=font_ko, fontsize=8, color=(0.18, 0.32, 0.55))
-    page.insert_text(pymupdf.Point(423, 93), exhibit_no, fontname=font_ko, fontsize=11, color=(0.1, 0.1, 0.1))
-    page.insert_text(pymupdf.Point(423, 106), "증거명: 디지털 미디어 AI 감정서", fontname=font_ko, fontsize=7.5, color=(0.4, 0.4, 0.4))
+    header_blue = (0.15, 0.25, 0.45)
 
-    # Title Banner (Left)
-    page.insert_text(pymupdf.Point(margin_l, 80), "디지털 포렌식 AI 감정보고서", fontname=font_ko, fontsize=16, color=(0.08, 0.15, 0.32))
-    page.insert_text(pymupdf.Point(margin_l, 98), f"{HTML_REPORT_TITLE} — 디지털 미디어 AI 생성·조작 감정", fontname=font_ko, fontsize=8, color=(0.4, 0.45, 0.5))
-    # B3: "문서 번호" is Hangul — drawn with the CJK font (the Latin font rendered it as dots).
-    page.insert_text(pymupdf.Point(margin_l, 110), f"문서 번호: DFL-EVID-{int(time.time())}", fontname=font_ko, fontsize=7.5, color=(0.5, 0.5, 0.5))
+    def page_header(layout: PdfLayout) -> None:
+        layout.text(layout.left, layout.right, FIRM_NAME, 9.0, header_blue, gap=0.5)
+        layout.text(layout.left, layout.right, FIRM_CONTACT, 7.5, (0.5, 0.5, 0.5), gap=2.0)
+        layout.page.draw_line(pymupdf.Point(layout.left, layout.y), pymupdf.Point(layout.right, layout.y), color=(0.85, 0.88, 0.92), width=0.8)
+        layout.y += 6.0
+
+    layout = PdfLayout(pymupdf, header=page_header)
+    layout.new_page()
+
+    # Title (left) and the ECFS exhibit box (right), side by side.
+    box_w = 150.0
+    title_x1 = layout.right - box_w - 12.0
+    top = layout.y
+    layout.text(layout.left, title_x1, FORENSIC_PDF_TITLE, 16.0, (0.08, 0.15, 0.32), gap=2.0)
+    layout.text(layout.left, title_x1, f"{HTML_REPORT_TITLE} — 디지털 미디어 AI 생성·조작 감정", 8.0, (0.4, 0.45, 0.5), gap=1.0)
+    layout.text(layout.left, title_x1, f"문서 번호: DFL-EVID-{int(time.time())}", 7.5, (0.5, 0.5, 0.5), gap=1.0)
+    title_bottom = layout.y
+    box_x0 = layout.right - box_w
+    pad = 6.0
+    label_lines = layout.wrap("증거 표찰 (ECFS 규격)", box_w - 2 * pad, 8.0)
+    exhibit_lines = layout.wrap(exhibit_no, box_w - 2 * pad, 11.0)
+    name_lines = layout.wrap("증거명: 디지털 미디어 AI 감정서", box_w - 2 * pad, 7.5)
+    label_h = layout.block_height(label_lines, 8.0) + 4.0
+    box_h = label_h + layout.block_height(exhibit_lines, 11.0) + layout.block_height(name_lines, 7.5) + 3 * pad
+    layout.page.draw_rect(pymupdf.Rect(box_x0, top, layout.right, top + label_h), color=(0.93, 0.95, 0.98), fill=(0.93, 0.95, 0.98))
+    layout.page.draw_rect(pymupdf.Rect(box_x0, top, layout.right, top + box_h), color=(0.18, 0.32, 0.55), width=1.2)
+    y = top + 2.0
+    y += layout.draw_lines(box_x0 + pad, layout.right - pad, y, label_lines, 8.0, (0.18, 0.32, 0.55)) + pad
+    y += layout.draw_lines(box_x0 + pad, layout.right - pad, y, exhibit_lines, 11.0, (0.1, 0.1, 0.1)) + pad / 2
+    layout.draw_lines(box_x0 + pad, layout.right - pad, y, name_lines, 7.5, (0.4, 0.4, 0.4))
+    layout.y = max(title_bottom, top + box_h) + 8.0
 
     # Evidence hashes are computed once, up front, so the header's
     # integrity claim can state the real verified/total count.
@@ -380,174 +408,103 @@ def write_forensic_pdf_report(
     hash_map = {item.path: item.sha256 or _evidence_sha256(item.path, allow_path, resolve_path) for item in items}
     hashed = sum(1 for v in hash_map.values() if v)
 
-    # Metadata & Case Overview Box
-    meta_box = pymupdf.Rect(margin_l, 122, margin_r, 220)
-    page.draw_rect(meta_box, color=(0.85, 0.88, 0.92), fill=(0.98, 0.98, 0.99))
-
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    page.insert_text(pymupdf.Point(margin_l + 10, 137), "감정 의뢰: (의뢰사 상호명 입력) / (담당자 부서·직위·성명) 귀하", fontname=font_ko, fontsize=8.5, color=(0.2, 0.2, 0.2))
-    page.insert_text(pymupdf.Point(margin_l + 10, 151), f"감정 일시: {now_str} (KST)  |  분석 엔진: Deepfake Lens v{TOOL_VERSION}", fontname=font_ko, fontsize=8.5, color=(0.2, 0.2, 0.2))
-    page.insert_text(
-        pymupdf.Point(margin_l + 10, 165),
-        f"감정 결과: 총 {summary.total}개" + (f"(압축 파일 {summary.container_rows}건 포함)" if summary.container_rows else "") + " — " + f"조작·생성 근거 {summary.manipulation_evidence}건, 원본성 근거 {summary.authenticity_evidence}건, 판단 불가 {summary.undetermined}건(검사 실패 {summary.checks_failed}건), 미지원/오류 {summary.unsupported_or_failed}건",
-        fontname=font_ko,
-        fontsize=8.5,
-        color=(0.1, 0.2, 0.4),
+    result_line = (
+        f"감정 결과: 총 {summary.total}개"
+        + (f"(압축 파일 {summary.container_rows}건 포함)" if summary.container_rows else "")
+        + f" — 조작·생성 근거 {summary.manipulation_evidence}건, 원본성 근거 {summary.authenticity_evidence}건, "
+        f"판단 불가 {summary.undetermined}건(검사 실패 {summary.checks_failed}건), 미지원/오류 {summary.unsupported_or_failed}건"
     )
-    page.insert_text(
-        pymupdf.Point(margin_l + 10, 178),
-        f"무결성 확인: {hashed}/{len(items)} 파일 SHA-256 전체 해시 계산" + ("  |  보안 등급: 사법기관 제출용 대외비" if hashed == len(items) else "  |  해시 불가 항목 포함 — 원본 접근 필요"),
-        fontname=font_ko,
-        fontsize=8,
-        color=(0.45, 0.45, 0.45),
+    integrity_line = f"무결성 확인: {hashed}/{len(items)} 파일 SHA-256 전체 해시 계산" + (
+        "  |  보안 등급: 사법기관 제출용 대외비" if hashed == len(items) else "  |  해시 불가 항목 포함 — 원본 접근 필요"
     )
-    # The provenance line (with the in-sample caveat) wraps inside the box.
-    page.insert_textbox(
-        pymupdf.Rect(margin_l + 10, 181, margin_r - 8, 219),
-        _threshold_provenance_ko(thresholds),
-        fontname=font_ko,
-        fontsize=7.5,
-        color=(0.45, 0.45, 0.45),
-    )
+    layout.boxed_text("", [
+        ("감정 의뢰: (의뢰사 상호명 입력) / (담당자 부서·직위·성명) 귀하", 8.5, (0.2, 0.2, 0.2)),
+        (f"감정 일시: {now_str} (KST)  |  분석 엔진: Deepfake Lens v{TOOL_VERSION}", 8.5, (0.2, 0.2, 0.2)),
+        (result_line, 8.5, (0.1, 0.2, 0.4)),
+        (integrity_line, 8.0, (0.45, 0.45, 0.45)),
+        (_threshold_provenance_ko(thresholds), 7.5, (0.45, 0.45, 0.45)),
+    ])
 
-    # Table Header
-    y = 230.0
-    page.draw_rect(pymupdf.Rect(margin_l, y, margin_r, y + 20), color=(0.8, 0.85, 0.9), fill=(0.92, 0.94, 0.97))
-    page.insert_text(pymupdf.Point(margin_l + 5, y + 14), "번호", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-    page.insert_text(pymupdf.Point(margin_l + 30, y + 14), "증거 파일명 및 SHA-256 무결성 해시", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-    page.insert_text(pymupdf.Point(margin_l + 250, y + 14), "결론", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-    page.insert_text(pymupdf.Point(margin_l + 300, y + 14), "등급", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-    page.insert_text(pymupdf.Point(margin_l + 345, y + 14), "근거 종류", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-    page.insert_text(pymupdf.Point(margin_l + 420, y + 14), "주요 근거/검사 실패", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-    y += 20.0
+    columns = layout.columns(FORENSIC_TABLE_WEIGHTS)
+    header_color = (0.15, 0.2, 0.35)
 
-    row_h = 28.0
+    def table_header(current: PdfLayout) -> None:
+        current.draw_row(
+            columns,
+            [Cell(index, label, 7.5, header_color) for index, label in enumerate(FORENSIC_TABLE_HEADERS)],
+            fill=(0.92, 0.94, 0.97), rule=(0.8, 0.85, 0.9),
+        )
 
+    layout.ensure_space(60.0)
+    table_header(layout)
     for idx, item in enumerate(items, start=1):
-        if y + row_h > 720:
-            page = create_page()
-            y = 70.0
-            page.draw_rect(pymupdf.Rect(margin_l, y, margin_r, y + 20), color=(0.8, 0.85, 0.9), fill=(0.92, 0.94, 0.97))
-            page.insert_text(pymupdf.Point(margin_l + 5, y + 14), "번호", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-            page.insert_text(pymupdf.Point(margin_l + 30, y + 14), "증거 파일명 및 SHA-256 무결성 해시", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-            page.insert_text(pymupdf.Point(margin_l + 250, y + 14), "결론", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-            page.insert_text(pymupdf.Point(margin_l + 300, y + 14), "등급", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-            page.insert_text(pymupdf.Point(margin_l + 345, y + 14), "근거 종류", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-            page.insert_text(pymupdf.Point(margin_l + 420, y + 14), "주요 근거/검사 실패", fontname=font_ko, fontsize=8, color=(0.15, 0.2, 0.35))
-            y += 20.0
-
-        if idx % 2 == 0:
-            page.draw_rect(pymupdf.Rect(margin_l, y, margin_r, y + row_h), color=(0.96, 0.97, 0.98), fill=(0.96, 0.97, 0.98))
-        page.draw_line(pymupdf.Point(margin_l, y + row_h), pymupdf.Point(margin_r, y + row_h), color=(0.9, 0.92, 0.94), width=0.5)
-
         res = item.result
         # B3: a row without a verdict shows its Korean status, never the raw code.
         band_str = VERDICT_LABELS[res.verdict_code] if res and is_verdict_row(item.status, True) else status_label(item.status or "failed")
-        score_val = ("참고" if res.grade == Grade.REFERENCE else "근거") if res else "-"
-        source_str = evidence_counts_text(res) if res else "-"
+        grade_str = ("참고" if res.grade == Grade.REFERENCE else "근거") if res else "-"
+        kinds_str = evidence_counts_text(res) if res else "-"
         failed_checks = [entry for entry in res.coverage if entry.status == CoverageStatus.FAILED] if res else []
         top_item = deciding_evidence(res) if res else None
         if failed_checks:
-            sig_str = "실패: " + check_label(failed_checks[0].check)
+            sig_str = "실패: " + ", ".join(check_label(entry.check) for entry in failed_checks)
         elif top_item is not None:
             sig_str = f"[{EVIDENCE_KIND_LABELS[top_item.kind][:2]}] {top_item.title}"
         else:
             sig_str = item.error or "근거 항목 없음"
-
         if res and res.verdict_code == Verdict.MANIPULATION_EVIDENCE:
             band_color = (0.8, 0.15, 0.15)
         elif res and res.verdict_code == Verdict.AUTHENTICITY_EVIDENCE:
             band_color = (0.1, 0.55, 0.25)
         else:
             band_color = (0.4, 0.4, 0.4)
-
         sha256_hex = hash_map.get(item.path)
-        # S2: the same "why no hash" wording as the evidence statement.
-        hash_line = f"SHA-256: {sha256_hex[:32]}…" if sha256_hex else f"SHA-256: {_hash_unavailable_reason(item)}"
-
-        # S1: archive members keep "<container>::<member>"; a long label is
-        # shortened in the middle so both the container and the file stay.
-        disp_path = _shorten_middle(display_path(item.path, redact_paths=redact_paths), 40)
-
-        page.insert_text(pymupdf.Point(margin_l + 5, y + 12), str(idx), fontname=_pdf_font(str(idx), font_ko, font_en), fontsize=8, color=(0.3, 0.3, 0.3))
-        page.insert_text(pymupdf.Point(margin_l + 30, y + 12), disp_path, fontname=font_ko, fontsize=8, color=(0.1, 0.1, 0.1))
-        page.insert_text(pymupdf.Point(margin_l + 30, y + 24), hash_line, fontname=_pdf_font(hash_line, font_ko, font_en), fontsize=6.5, color=(0.5, 0.5, 0.5) if sha256_hex else (0.7, 0.3, 0.3))
-
-        page.insert_text(pymupdf.Point(margin_l + 250, y + 15), band_str[:8], fontname=font_ko, fontsize=7, color=band_color)
-        page.insert_text(pymupdf.Point(margin_l + 300, y + 15), score_val, fontname=font_ko, fontsize=8, color=(0.1, 0.1, 0.1))
-        page.insert_text(pymupdf.Point(margin_l + 345, y + 15), source_str[:12], fontname=font_ko, fontsize=7.5, color=(0.3, 0.3, 0.3))
-        page.insert_text(pymupdf.Point(margin_l + 420, y + 15), sig_str[:18], fontname=font_ko, fontsize=7.5, color=(0.2, 0.2, 0.2))
-
-        y += row_h
-
-    if y + 120 > 750:
-        page = create_page()
-        y = 70.0
+        # G16/S2: the full 64-hex digest (wrapped inside the column), or the
+        # evidence statement's "why no hash" wording.
+        hash_line = f"SHA-256: {sha256_hex}" if sha256_hex else f"SHA-256: {_hash_unavailable_reason(item)}"
+        # S1: archive members keep "<container>::<member>" — shown in full, wrapped.
+        disp_path = display_path(item.path, redact_paths=redact_paths)
+        layout.draw_row(
+            columns,
+            [
+                Cell(0, str(idx), 7.5, (0.3, 0.3, 0.3)),
+                Cell(1, f"{disp_path}\n{hash_line}", 7.0, (0.1, 0.1, 0.1)),
+                Cell(2, band_str, 7.5, band_color),
+                Cell(3, grade_str, 7.5, (0.1, 0.1, 0.1)),
+                Cell(4, kinds_str, 7.0, (0.3, 0.3, 0.3)),
+                Cell(5, sig_str, 7.0, (0.2, 0.2, 0.2)),
+            ],
+            fill=(0.96, 0.97, 0.98) if idx % 2 == 0 else None,
+            on_new_page=table_header,
+        )
+    layout.y += 6.0
 
     if _has_reference_grade(items):
-        y += 12.0
-        page.insert_text(pymupdf.Point(margin_l, y), TEXT_LEGAL_LIMITATION, fontname=font_ko, fontsize=8, color=(0.55, 0.3, 0.0))
-    y += 12.0
-    page.insert_text(
-        pymupdf.Point(margin_l, y),
-        "결론은 결정적 근거(메타데이터·C2PA)로만 내리며, 통계적·어휘적 근거와 검사 실패 내역은 JSON 산출물의 evidence/coverage에 전부 기록됩니다.",
-        fontname=font_ko, fontsize=7, color=(0.4, 0.4, 0.4),
-    )
+        layout.text(layout.left, layout.right, TEXT_LEGAL_LIMITATION, 8.0, (0.55, 0.3, 0.0))
+    layout.text(layout.left, layout.right, FORENSIC_DECISION_NOTE, 7.0, (0.4, 0.4, 0.4), gap=4.0)
 
-    y += 15.0
-    sign_box = pymupdf.Rect(margin_l, y, margin_r, y + 65)
-    page.draw_rect(sign_box, color=(0.8, 0.85, 0.9), fill=(0.97, 0.98, 0.99))
     _wa = coverage.get("weights_available", 0) if coverage else 0
     if isinstance(_wa, (int, float)) and _wa > 0:
-        engine_text = "사법절차 적격성 고지: 본 감정서는 법무법인(유한) 대륜 디지털포렌식 감정센터의 뉴럴 앙상블 + 로컬 휴리스틱 분석에 따른 스크리닝 결과입니다."
+        engine_text = f"사법절차 적격성 고지: 본 감정서는 {FIRM_NAME}의 뉴럴 앙상블 + 로컬 휴리스틱 분석에 따른 스크리닝 결과입니다."
     elif coverage is not None:
         engine_text = "사법절차 적격성 고지: 본 감정서는 신경망 가중치 미탑재 상태의 로컬 휴리스틱 분석에 따른 스크리닝 결과입니다 (뉴럴 엔진 미실행)."
     else:
-        engine_text = "사법절차 적격성 고지: 본 감정서는 법무법인(유한) 대륜 디지털포렌식 감정센터의 로컬 스크리닝 분석 결과입니다."
-    page.insert_text(
-        pymupdf.Point(margin_l + 10, y + 16),
-        engine_text,
-        fontname=font_ko,
-        fontsize=7.5,
-        color=(0.4, 0.4, 0.4),
-    )
+        engine_text = f"사법절차 적격성 고지: 본 감정서는 {FIRM_NAME}의 로컬 스크리닝 분석 결과입니다."
     if hashed == len(items):
         integrity_text = "무결성 확약: 상기 기재된 증거물 일체는 SHA-256 해시 검증을 필하였으며, 채증·보존 과정에서 위변조되지 않았음을 확인합니다."
     else:
         integrity_text = f"무결성 고지: 해시가 계산된 {hashed}건은 채증 시점 값을 기재하였으며, 해시 불가 {len(items) - hashed}건은 별도 표기하였습니다."
-    page.insert_text(
-        pymupdf.Point(margin_l + 10, y + 29),
-        integrity_text,
-        fontname=font_ko,
-        fontsize=7.5,
-        color=(0.4, 0.4, 0.4),
-    )
-    page.insert_text(
-        pymupdf.Point(margin_l + 280, y + 50),
-        "법무법인(유한) 대륜 디지털포렌식 감정관 (직인생략)",
-        fontname=font_ko,
-        fontsize=9,
-        color=(0.15, 0.25, 0.45),
-    )
-
-    sig_y = y + 76.0
+    layout.boxed_text("", [
+        (engine_text, 7.5, (0.4, 0.4, 0.4)),
+        (integrity_text, 7.5, (0.4, 0.4, 0.4)),
+    ])
+    layout.ensure_space(layout.line_height(9.0) + 4.0)
+    layout.text(layout.left, layout.right, f"{FIRM_NAME} 감정관 (직인생략)", 9.0, header_blue, align=2, gap=6.0)
     for line in signature_lines_ko(signed_report):
-        page.insert_text(pymupdf.Point(margin_l, sig_y), line, fontname=font_ko, fontsize=6.5, color=(0.35, 0.35, 0.35))
-        sig_y += 9.0
+        layout.text(layout.left, layout.right, line, 6.5, (0.35, 0.35, 0.35), gap=0.5)
 
-    total_pages = doc.page_count
-    for i in range(total_pages):
-        p = doc[i]
-        p.insert_text(
-            pymupdf.Point(page_w / 2 - 20, page_h - 25),
-            f"- {i + 1} / {total_pages} -",
-            fontname=_pdf_font(f"- {i + 1} / {total_pages} -", font_ko, font_en),
-            fontsize=8,
-            color=(0.5, 0.5, 0.5),
-        )
-
-    _atomic_write_bytes(output, doc.tobytes())
-    doc.close()
+    layout.footer(lambda page_no, total: f"- {page_no} / {total} -")
+    return layout.to_bytes()
 
 
 def write_eval_html_report(path: Path | str, payload: dict[str, object], *, redact_paths: bool = False) -> None:
