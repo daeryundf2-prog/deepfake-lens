@@ -975,8 +975,11 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
         (folder / "too-deep.zip").write_bytes(too_deep)
         _, items = scan_folder(folder, AnalysisOptions())
         rows = {item.path: item for item in items}
-        member = "nested-3.zip::level2.zip.unpacked/level3.zip.unpacked/a1111.png"
+        # Y9 (round 7): nested members are named by the "::" chain, as the
+        # rejection reasons are — never by the ".unpacked" extraction folder.
+        member = "nested-3.zip::level2.zip::level3.zip::a1111.png"
         self.assertIn(member, rows, sorted(rows))
+        self.assertFalse(any(".unpacked" in path for path in rows), sorted(rows))
         assert rows[member].result is not None
         self.assertEqual(rows[member].result.verdict_code, Verdict.MANIPULATION_EVIDENCE)
         container = rows["nested-3.zip"]
@@ -986,6 +989,9 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
         assert deep.result is not None
         reasons = [entry.reason for entry in deep.result.coverage if entry.check == "archive_member"]
         self.assertTrue(any(f"중첩 압축 최대 깊이({archives.MAX_NESTED_DEPTH}) 초과로 미해제" in reason for reason in reasons), reasons)
+        self.assertFalse(any(".unpacked" in reason for reason in reasons), reasons)
+        deep_chain = "::".join(f"d{level}.zip" for level in range(archives.MAX_NESTED_DEPTH - 1, 0, -1))
+        self.assertTrue(any(reason.startswith(deep_chain) for reason in reasons), reasons)
         self.assertFalse(any(path.startswith("too-deep.zip::") and path.endswith("a1111.png") for path in rows))
 
     def test_valid_files_unaffected(self) -> None:

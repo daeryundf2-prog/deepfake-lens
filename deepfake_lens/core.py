@@ -442,7 +442,8 @@ def _scan_paths(
             }
             archive_members[rel] = []
             for member in extraction.members:
-                member_rel = member.relative_to(dest).as_posix()
+                # Y9: nested members are "inner.zip::x.png" (never "inner.zip.unpacked/x.png").
+                member_rel = extraction.member_name(member, dest)
                 specs.append((member, f"{rel}::{member_rel}"))
 
         planned = len(specs) + len(archive_members) + len(iter_errors) + len(symlinks)

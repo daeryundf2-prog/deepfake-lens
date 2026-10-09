@@ -112,7 +112,16 @@ always `0` invited old-contract readings. They remain readable as
   (per-member cap, compression-ratio bomb, per-archive or tree byte budget),
   `앞선 멤버에서 해제 예산 소진으로 미해제`, `중첩 압축 최대 깊이(N) 초과로 미해제` (N = `archives.MAX_NESTED_DEPTH` = 8 levels, the top-level archive included; N14 — was 2),
   `중첩 압축 예산(N개) 소진으로 미해제`, `손상된 멤버 데이터(<Exception>: …)`;
-  members of nested archives are named `<inner archive>::<member>`. The same
+  members of nested archives are named `<inner archive>::<member>`.
+  Y9 — one naming rule for rows and reasons: an archive member row's `path`
+  is the `::` chain from the scanned folder down to the file —
+  `a.zip::dir/b.png`, a member of a nested archive `a.zip::dir/b.zip::c.png`,
+  any depth `a.zip::b.zip::c.zip::d.png` — exactly the chain the refusal
+  reasons use (`a.zip` coverage: `b.zip::c.zip::x: 중첩 압축 최대 깊이…`).
+  The scanner unpacks a nested archive into a `<inner archive>.unpacked/`
+  temporary folder, but that folder name never appears in a row, a reason or
+  a report (it used to: `a.zip::b.zip.unpacked/c.png`). Everything before the
+  first `::` is the container row's `path`. The same
   lines appear in `limitations` as `구성 파일 거부: <member> — <why>` (at most
   100 per container, then one `외 N개` entry). An archive uploaded to the web
   server (`/api/analyze-upload`, `/api/check`) gets the same container row —

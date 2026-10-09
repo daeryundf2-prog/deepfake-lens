@@ -78,6 +78,13 @@ class ArchiveExtraction:
     (D9): path traversal, absolute path, link/device entry, budget or bomb
     limits, corrupt data, nesting limits. Names of members of nested
     archives are prefixed ``<inner archive>::``. ``skipped`` is its count.
+
+    Y9 (round 7): an extracted member's *name* follows the same chain —
+    ``inner/b.zip::c.png`` for ``c.png`` inside ``inner/b.zip`` (any depth:
+    ``b.zip::c.zip::d.png``) — :meth:`member_name`. The scan row is
+    ``<archive>::<member name>``. Nested archives are still unpacked into
+    ``<inner archive>.unpacked/`` folders on disk, but that folder name never
+    reaches a row (it used to: ``a.zip::inner/b.zip.unpacked/c.png``).
     """
 
     members: list[Path] = field(default_factory=list)
@@ -89,6 +96,13 @@ class ArchiveExtraction:
     # Only the top-level archive's own state; nested failures stay warnings.
     missing_dependency: str | None = None
     error: str | None = None
+    # Y9: chain names of members extracted from nested archives (others
+    # are named by their path inside the extraction root).
+    names: dict[Path, str] = field(default_factory=dict)
+
+    def member_name(self, member: Path, root: Path) -> str:
+        """``member``'s name inside the archive: ``dir/x.png`` or ``dir/inner.zip::x.png`` (Y9)."""
+        return self.names.get(member) or _member_rel(member, root)
 
     def reject(self, name: str, reason: str) -> None:
         self.skipped += 1
@@ -616,13 +630,17 @@ def extract_archive(
                 # Unpack next to the inner archive (inside root) so two inner
                 # archives with the same stem in different folders never
                 # share — and overwrite — one extraction directory.
+                sub_root = m.parent / (m.name + ".unpacked")
                 sub = extract_archive(
-                    m, m.parent / (m.name + ".unpacked"),
+                    m, sub_root,
                     max_depth=max_depth, budget=tree_budget, _depth=_depth + 1,
                 )
                 if sub.members:
                     out.members.remove(m)
                     out.members.extend(sub.members)
+                    # Y9: "<inner archive>::<member>" — the rejection chain's form.
+                    for member in sub.members:
+                        out.names[member] = f"{inner_rel}::{sub.member_name(member, sub_root)}"
                 out.skipped += sub.skipped
                 out.rejected.extend((f"{inner_rel}::{name}", reason) for name, reason in sub.rejected)
                 out.warnings.extend(sub.warnings)

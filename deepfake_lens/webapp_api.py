@@ -1185,7 +1185,7 @@ class _ReportHasher:
             except _SymlinkRefused:
                 continue
             if digest:
-                digests[member.relative_to(dest).as_posix()] = digest
+                digests[extraction.member_name(member, dest)] = digest  # Y9: the scan's member name
         return digests
 
     def close(self) -> None:
