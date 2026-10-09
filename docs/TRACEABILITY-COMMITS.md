@@ -4,7 +4,7 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–8)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..aa0afa7`(병합 커밋 제외, 커밋 126개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..1b8f2b1`(병합 커밋 제외, 커밋 128개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
 요약: ID 123개 — 스펙 갭에 매핑 71개(그중 신규 사유 병기 8개), 신규(스펙 외)만 52개.
 
@@ -132,7 +132,7 @@ Y13/P12: 검증 결함 ID(라운드 1–8)를 0단계 스펙의 갭 ID(G1–G34)
 | Y12 | 7 | test_cli_inputs를 in-process로 20 s 미만 | — | 신규(스펙 외): 테스트 실행 시간(test_cli_inputs 34.7 s) — 갭 목록 밖 | 67c953b |
 | Y13 | 7 | 커밋 메시지 갭 ID 누락 → 이 매핑표 | — | 신규(스펙 외): 커밋 추적성(공통 규칙 1) — 갭 목록 밖 | 382fb18 |
 | Z1 | 8 | realtime --scores abc → 사용 오류 exit 2(종전 exit 1·처리 오류 1건) | — | 신규(스펙 외): CLI 옵션 값 검증(사용 오류 exit 2) — 갭 목록 밖 | 12af9d0 |
-| Z2 | 8 | vendor-weights pin <없는 프로필> → 오류: 파일을 찾을 수 없습니다 exit 2(종전 exit 1) | — | 신규(스펙 외): CLI 입력 경로 오류 처리(사용 오류 exit 2) — 갭 목록 밖 | 12af9d0 |
+| Z2 | 8 | vendor-weights pin <없는 프로필> → 오류: 파일을 찾을 수 없습니다 exit 2(종전 exit 1) | — | 신규(스펙 외): CLI 입력 경로 오류 처리(사용 오류 exit 2) — 갭 목록 밖 | 12af9d0, 1b8f2b1 |
 | Z3 | 8 | forensic <파일>/ (끝 구분자) → 폴더가 아니라 파일입니다 exit 2, 모든 명령의 require_input_path에서 정규화 | G7 |  | 12af9d0 |
 | Z4 | 8 | verify-report 깨진·객체 아닌 JSON → stderr 오류: 보고서 JSON을 해석할 수 없습니다 exit 4(종전 stdout '읽을 수 없음') | — | 신규(스펙 외): CLI 오류 처리(stdout 대신 stderr, 문서화된 exit 4) — 갭 목록 밖 | 12af9d0 |
 | Z5 | 8 | --*-out 출력이 없는 폴더 안 → 검사 전 오류: 출력 폴더가 없습니다 exit 2, 폴더를 만들지 않음 | — | 신규(스펙 외): CLI 출력 경로 검증(Y7 연장) — 갭 목록 밖 | 12af9d0 |
@@ -147,7 +147,7 @@ Y13/P12: 검증 결함 ID(라운드 1–8)를 0단계 스펙의 갭 ID(G1–G34)
 | P9 | 8 | Y1/Z4 오류에 영어 예외 상세(JSONDecodeError 메시지) | — | 신규(스펙 외): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖 | edafb9a |
 | P10 | 8 | 읽기 전용 출력 폴더가 스캔 후에야 실패('처리 오류 N건'으로 오해) | — | 신규(스펙 외): CLI 출력 경로 검증(Y7/Z5 연장) — 갭 목록 밖 | 4ce5a7e |
 | P11 | 8 | --json-out 등이 검사 대상 폴더 안·입력 JSON을 가리킬 수 있음 | G31 |  | 4ce5a7e |
-| P12 | 8 | Y13 추적성 표의 해시가 전부 리라이트 이전 → 현재 히스토리에서 재생성하는 스크립트와 CI --check | — | 신규(스펙 외): 커밋 추적성(공통 규칙 1) — 갭 목록 밖 | 3baee5c |
+| P12 | 8 | Y13 추적성 표의 해시가 전부 리라이트 이전 → 현재 히스토리에서 재생성하는 스크립트와 CI --check | — | 신규(스펙 외): 커밋 추적성(공통 규칙 1) — 갭 목록 밖 | 3baee5c, c19738e |
 | P13 | 8 | 영어 탐지기 우회: ProbablyFake, FakeImageDetected, probably_fake, AUTHENTIC — 결론 단어 단독 등장 | — | 신규(스펙 외): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖 | e63c0c4 |
 | P14 | 8 | Gaps를 제목에만 적은 커밋 — 규칙상 허용, 추적표 스크립트가 제목·본문 모두 인식 | — | 신규(스펙 외): 커밋 추적성(공통 규칙 1) — 갭 목록 밖 | 3baee5c |
 
@@ -303,3 +303,5 @@ P14: Gaps를 제목 괄호에만 적은 커밋(예: `(Z1-Z5; Gaps: G7, 신규)`)
 | 6e5fe69 | 8 | P1, P6 | Gaps: G30, G31 | body | fix(report): P1 P6 /api/report resolves rows against the scan's scan_root only; upload rows are never re-analyzed or signed (P1, P6; Gaps: G30, G31) |
 | 9d89129 | 8 | P7 | Gaps: G30, G34 | body | fix(rows): P7 archive members are identified by container/member fields; "::" in a real path is escaped (P7; Gaps: G30, G34) |
 | aa0afa7 | 8 | P8 | Gaps: G8, G34 | body | fix(servers): P8 api-serve file endpoints 404/400 for missing files and folders; non-object review bodies, non-media preview, cut-off uploads; every error-table row tested (P8; Gaps: G8, G34) |
+| c19738e | 8 | P12 | Gaps: 신규(스펙 외) | body | docs(qa): P12 traceability table regenerated on aa0afa7 — covers up to the parent of this commit (P12; Gaps: 신규) |
+| 1b8f2b1 | 8 | Z2 | Gaps: 신규(스펙 외) | subject | fix(cli): Korean usage placeholders and quoted echoed input in usage errors (Z2 leftover, edge8; Gaps: 신규) |

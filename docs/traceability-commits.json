@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "aa0afa7c5eb203a8265ebf81f0093398e06bc85c",
+    "head": "1b8f2b11b98cd7f70b3dea0f4bc30e5bfe16b850",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -1485,7 +1485,8 @@
       "gaps": [],
       "new": "CLI 입력 경로 오류 처리(사용 오류 exit 2) — 갭 목록 밖",
       "commits": [
-        "12af9d0"
+        "12af9d0",
+        "1b8f2b1"
       ],
       "used_in_commit_subjects": true
     },
@@ -1691,7 +1692,8 @@
       "gaps": [],
       "new": "커밋 추적성(공통 규칙 1) — 갭 목록 밖",
       "commits": [
-        "3baee5c"
+        "3baee5c",
+        "c19738e"
       ],
       "used_in_commit_subjects": true
     },
@@ -4252,6 +4254,42 @@
       "new_reasons": [],
       "gaps_line": "Gaps: G8, G34",
       "gaps_source": "body"
+    },
+    {
+      "sha": "c19738e86ee982738d231f13261e1a50dab9eb31",
+      "short": "c19738e",
+      "round": "8",
+      "subject": "docs(qa): P12 traceability table regenerated on aa0afa7 — covers up to the parent of this commit (P12; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "P12"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "P12: 커밋 추적성(공통 규칙 1) — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "body"
+    },
+    {
+      "sha": "1b8f2b11b98cd7f70b3dea0f4bc30e5bfe16b850",
+      "short": "1b8f2b1",
+      "round": "8",
+      "subject": "fix(cli): Korean usage placeholders and quoted echoed input in usage errors (Z2 leftover, edge8; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "Z2"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "Z2: CLI 입력 경로 오류 처리(사용 오류 exit 2) — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
     }
   ]
 }
