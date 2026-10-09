@@ -743,9 +743,25 @@ _HOMOGLYPHS = str.maketrans({
 })
 
 
+# R10-7 (round 10): "【fake】" and "verdict→fake" passed the detector — CJK
+# brackets and arrows glued the conclusion word to its neighbours. Arrows
+# (U+2190–21FF, U+27F0–27FF, U+2794–27BF dingbat arrows such as ➜, U+2900–297F,
+# U+2B00–2BFF) and CJK/angle brackets (U+3008–301B: 〈〉《》『』【】〔〕〖〗〘〙〚〛;
+# ⟨⟩ U+27E8–27EF; ‹› «») are token boundaries: each is read as a space.
+# 「」 (U+300C/300D) stay: they quote metadata copied verbatim from the
+# evidence file, which the identifier rules strip as one unit (the
+# dictionary rule already splits on them).
+_TOKEN_BOUNDARY = re.compile(
+    "[\u2190-\u21ff\u27f0-\u27ff\u2794-\u27bf\u2900-\u297f\u2b00-\u2bff"
+    "\u3008-\u300b\u300e-\u301b\u27e8-\u27ef\u2039\u203a\u00ab\u00bb]"
+)
+
+
 def normalize_for_detection(text: str) -> str:
-    """``text`` as the English detector reads it (Y11): NFKC, no invisible characters, no Latin look-alikes."""
-    return unicodedata.normalize("NFKC", text).translate(_INVISIBLE_CHARS).translate(_HOMOGLYPHS)
+    """``text`` as the English detector reads it (Y11): NFKC, no invisible characters, no Latin
+    look-alikes, arrows and CJK/angle brackets as spaces (R10-7)."""
+    normalized = unicodedata.normalize("NFKC", text).translate(_INVISIBLE_CHARS).translate(_HOMOGLYPHS)
+    return _TOKEN_BOUNDARY.sub(" ", normalized)
 
 
 def english_prose(text: str) -> str | None:

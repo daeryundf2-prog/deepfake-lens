@@ -288,6 +288,23 @@ class EnglishDetectorBypassTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNone(english_prose(text), text)
 
+    def test_round_ten_brackets_and_arrows_are_token_boundaries(self) -> None:
+        """R10-7 (round 10): "【fake】" and "verdict→fake" passed the detector — CJK brackets
+        and arrows glued the conclusion word to its neighbours."""
+        from deepfake_lens.error_text import english_prose
+
+        for text, expected in {
+            "【fake】": "fake", "verdict→fake": "verdict fake", "결과→fake": "fake", "결과⇒fake": "fake",
+            "결과➜fake": "fake", "『fake』": "fake", "〈fake〉": "fake", "《fake》": "fake", "〔real〕": "real",
+            "〖fake〗": "fake", "⟨fake⟩": "fake", "«fake»": "fake", "‹fake›": "fake", "결론⟶authentic": "authentic",
+            "판정【AI-generated】입니다": "ai generated", "결과←fake": "fake", "결과⤳fake": "fake", "결과⬅fake": "fake",
+        }.items():
+            with self.subTest(text=text):
+                self.assertEqual(english_prose(text), expected)
+        for text in ("결과 → 판단 불가", "【조작·생성 근거 있음】", "「Canon EOS R5」 카메라", "〈SHA-256〉 해시", "결과⇒원본성 근거 있음"):
+            with self.subTest(text=text):
+                self.assertIsNone(english_prose(text), text)
+
     def test_identifiers_and_korean_still_pass(self) -> None:
         from deepfake_lens.error_text import english_prose
 
