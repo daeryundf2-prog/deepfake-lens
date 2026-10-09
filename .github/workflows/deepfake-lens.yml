@@ -146,6 +146,27 @@ jobs:
       - name: Model docs generated from profiles
         run: python scripts/sync_model_docs.py --check
 
+  traceability:
+    # P12 (round 8): docs/traceability-commits.json + TRACEABILITY-COMMITS.md
+    # are rebuilt from `git log <range.base>..<range.head>` (range.head = the
+    # parent of the commit that regenerated the table). A hand edit, a
+    # history rewrite without regenerating, or a table committed for an
+    # older HEAD fails here. Needs the full history, not a shallow clone.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install package (stdlib-only)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - name: Commit traceability table matches the history
+        run: python scripts/build_traceability_commits.py --check
+
   measurement-gate:
     # Phase 0, WP-I (G26/G28, QA-SYS-9): every runtime profile that is
     # supported (or omits `supported`) must carry a `measured_on` record from
