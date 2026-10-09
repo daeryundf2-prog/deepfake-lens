@@ -102,6 +102,8 @@ def to_layer_diagnostic(
         "kind": LAYER_DIAGNOSTIC_KIND,
         "title": LAYER_DIAGNOSTIC_TITLE,
         "layer": layer,
+        # G1: the Korean name of the layer for text renderings (``layer`` is the id).
+        "layer_label": label,
         "measured": False,
         "notice": LAYER_DIAGNOSTIC_NOTICE,
     }
@@ -117,7 +119,7 @@ def to_layer_diagnostic(
 
 def format_layer_diagnostic(diag: Mapping[str, Any]) -> str:
     """Plain-text rendering of a layer diagnostic (``--format table``)."""
-    lines = [f"[{diag.get('title', LAYER_DIAGNOSTIC_TITLE)}] {diag.get('layer', '')}"]
+    lines = [f"[{diag.get('title', LAYER_DIAGNOSTIC_TITLE)}] {diag.get('layer_label') or diag.get('layer', '')}"]
     if diag.get("subject"):
         lines.append(f"대상: {diag['subject']}")
     lines.append(str(diag.get("notice", LAYER_DIAGNOSTIC_NOTICE)))
@@ -127,10 +129,16 @@ def format_layer_diagnostic(diag: Mapping[str, Any]) -> str:
         lines.append(f"참고: {diag['reference_note']}")
     raw_body = diag.get("diagnostic")
     body: Mapping[str, Any] = raw_body if isinstance(raw_body, Mapping) else {}
-    for key, value in body.items():
-        if key in {"signals", "limitations"} or isinstance(value, (Mapping, list, tuple)):
-            continue
-        lines.append(f"{key}: {value}")
+    measurements = [
+        f"{key}={value}"
+        for key, value in body.items()
+        if key not in {"signals", "limitations"} and not isinstance(value, (Mapping, list, tuple))
+    ]
+    if measurements:
+        # G1: raw field ids are shown as identifiers (key=value), not as a
+        # sentence; the meaning is in the Korean notes and signals below.
+        lines.append("측정값(필드=값):")
+        lines.extend(f"  {entry}" for entry in measurements)
     raw_signals = body.get("signals")
     signals: list[Any] = raw_signals if isinstance(raw_signals, list) else []
     if signals:

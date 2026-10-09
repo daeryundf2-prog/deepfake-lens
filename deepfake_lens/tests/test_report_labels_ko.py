@@ -233,5 +233,58 @@ class LegalReportTextTest(unittest.TestCase):
             self.assertNotIn(raw, text)
 
 
+class AnalysisResultTextTest(unittest.TestCase):
+    """G1 (round 5): the analysis_result text rendering uses labels only."""
+
+    def test_codes_render_as_korean_labels(self) -> None:
+        from unittest import mock
+
+        from deepfake_lens import result_types
+        from deepfake_lens.cli_standalone import format_analysis_result
+
+        payload = {
+            "path": "a.png",
+            "verdict_code": "manipulation_evidence",
+            "grade": "reference",
+            "evidence": [{"title": "생성 도구 메타데이터", "detail": "d", "kind": "deterministic", "direction": "synthetic", "strength": "strong"}],
+            "coverage": [
+                {"check": "metadata", "status": "ran"},
+                {"check": "model:Swin-large AI-vs-human image detector (umm-maybe)", "status": "skipped", "reason": "모델 실행 불가"},
+            ],
+        }
+        # The display-name registry is empty in a fresh process (a report
+        # re-rendered from JSON): the packaged profiles still name the model.
+        with mock.patch.dict(result_types._MODEL_DISPLAY_NAMES, {}, clear=True), mock.patch.object(result_types, "_PACKAGED_NAMES_LOADED", False):
+            text = format_analysis_result(payload)
+        for expected in (
+            "[결론] 조작·생성 근거 있음 · 등급: 참고",
+            "[결정적/합성/강] 생성 도구 메타데이터: d",
+            "- 메타데이터: 실행",
+            "- 외부 모델(Swin-large 생성 이미지 탐지기(umm-maybe)): 미실행 — 모델 실행 불가",
+        ):
+            self.assertIn(expected, text)
+        for raw in ("manipulation_evidence", "deterministic", "synthetic", "strong", ": ran", "skipped", "reference", "model:"):
+            self.assertNotIn(raw, text)
+
+    def test_row_without_result_has_korean_status_and_labels(self) -> None:
+        from deepfake_lens.cli_standalone import analysis_result_payload, format_analysis_result
+
+        payload = analysis_result_payload(ScanItem("x.bin", "x.bin", "unknown", "unsupported", 3, result=None), command="forensic")
+        self.assertEqual(payload["verdict_label"], "판단 불가")
+        self.assertEqual(payload["grade_label"], "참고")
+        self.assertIn("판단 불가 — 미지원", payload["verdict"])
+        self.assertNotIn("unsupported", format_analysis_result(payload))
+
+    def test_layer_diagnostic_heading_is_the_korean_label(self) -> None:
+        from deepfake_lens.layer_diagnostic import format_layer_diagnostic, to_layer_diagnostic
+
+        diag = to_layer_diagnostic("explain_score", {"score": 50, "available": True}, layer_label="점수 설명")
+        self.assertEqual(diag["layer_label"], "점수 설명")
+        text = format_layer_diagnostic(diag)
+        self.assertTrue(text.splitlines()[0].endswith("] 점수 설명"), text)
+        self.assertIn("  available=True", text)
+        self.assertNotIn("explain_score", text)
+
+
 if __name__ == "__main__":
     unittest.main()

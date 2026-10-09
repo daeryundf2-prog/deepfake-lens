@@ -59,7 +59,47 @@ def register_model_display_name(name: str, display_name: str) -> None:
         _MODEL_DISPLAY_NAMES[name] = display_name
 
 
+_PACKAGED_NAMES_LOADED = False
+
+
+def _load_profile_display_names() -> None:
+    """Fill the registry from the packaged (and configured) runtime profiles once (G1).
+
+    A coverage entry ``model:<name>`` can be rendered before — or without —
+    the adapter reading that profile (a skipped member, a report re-rendered
+    from JSON); its label must still be the Korean ``display_name``.
+    """
+    global _PACKAGED_NAMES_LOADED
+    if _PACKAGED_NAMES_LOADED:
+        return
+    _PACKAGED_NAMES_LOADED = True
+    import json
+    import os
+    from pathlib import Path
+
+    folders = [Path(__file__).resolve().parent / "models"]
+    configured = os.environ.get("DEEPFAKE_LENS_MODELS_DIR")
+    if configured:
+        folders.append(Path(configured))
+    for folder in folders:
+        try:
+            profiles = sorted(folder.glob("*-runtime.json"))
+        except OSError:
+            continue
+        for profile_path in profiles:
+            try:
+                data = json.loads(profile_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, ValueError):
+                continue
+            if isinstance(data, dict):
+                name, display = str(data.get("name") or ""), str(data.get("display_name") or "")
+                if name and name not in _MODEL_DISPLAY_NAMES:
+                    register_model_display_name(name, display)
+
+
 def model_display_name(name: str) -> str:
+    if name not in _MODEL_DISPLAY_NAMES:
+        _load_profile_display_names()
     return _MODEL_DISPLAY_NAMES.get(name, name)
 
 

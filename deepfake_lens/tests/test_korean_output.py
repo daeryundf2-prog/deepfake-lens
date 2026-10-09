@@ -677,6 +677,50 @@ class RenderedOutputsAreKoreanTest(unittest.TestCase):
         offenders = _offending_lines("scan table", out.getvalue())
         self.assertEqual(offenders, [], "\n".join(offenders[:40]))
 
+    def test_standalone_command_text(self) -> None:
+        """G1 (round 5): forensic/classify/explain/agent/multimodal text output — labels only.
+
+        The verifier found ``(manipulation_evidence)``,
+        ``[deterministic/synthetic/strong]``, ``metadata: ran``,
+        ``model:<raw profile name>: skipped`` and ``등급: reference`` in these
+        renderings; the JSON codes belong in ``--format json`` only.
+        """
+        import contextlib
+
+        from deepfake_lens.cli import main
+
+        raw_codes = re.compile(
+            r"\b(?:manipulation_evidence|authenticity_evidence|undetermined|deterministic|statistical|lexical"
+            r"|synthetic|authentic|neutral|strong|moderate|weak)\b|: (?:ran|skipped|failed)\b"
+            r"|등급: (?:evidence|reference)\b|\bmodel:|\] [a-z]+_[a-z_]+$"
+        )
+        commands: list[list[str]] = []
+        for name in ("a1111.png", "exif_canon.jpg", "bundle.zip", "empty.jpg", "garbage.wav", "essay_en.txt", "contract_chatgpt.docx"):
+            path = str(self.folder / name)
+            commands += [["forensic", path, "--format", "table"], ["classify", path, "--format", "table"], ["explain", path]]
+        commands += [
+            ["agent", "--file", str(self.folder / "essay_en.txt"), "--format", "table"],
+            ["agent", "--text", "As an AI language model, I cannot do that.", "--format", "table"],
+            ["multimodal", str(self.folder / "a1111.png"), str(self.folder / "essay_ko.txt"), "--format", "table"],
+            ["explain", "--score", "50"],
+        ]
+        offenders: list[str] = []
+        for argv in commands:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                main(argv)
+            text = out.getvalue()
+            self.assertTrue(text.strip(), argv)
+            where = " ".join([argv[0], Path(argv[1]).name if len(argv) > 1 else ""])
+            offenders += _offending_lines(where, text)
+            for number, line in enumerate(text.splitlines(), 1):
+                if line.startswith("대상:"):
+                    continue  # the path the examiner named, verbatim
+                match = raw_codes.search(line)
+                if match:
+                    offenders.append(f"{where}:{number}: raw code {match.group(0)!r} in {line.strip()[:160]!r}")
+        self.assertEqual(offenders, [], "\n".join(offenders[:40]))
+
     def test_doctor_table_and_json(self) -> None:
         from deepfake_lens.doctor import format_report, run_diagnostics
 

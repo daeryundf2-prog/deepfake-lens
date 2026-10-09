@@ -39,7 +39,8 @@ from .layer_diagnostic import (
     format_layer_diagnostic,
     to_layer_diagnostic,
 )
-from .result_types import VERDICT_LABELS, GRADE_LABELS, Grade, ScanItem, Verdict
+from .result_text import coverage_entry_line, evidence_qualifiers_short, grade_label_text
+from .result_types import VERDICT_LABELS, GRADE_LABELS, Grade, ScanItem, Verdict, status_label
 
 ANALYSIS_RESULT_NOTICE = "결론은 `scan`과 같은 경로(analysis_api.analyze_path)로 산출되었습니다."
 # Result fields that make up the three-verdict contract. Legacy derived
@@ -88,8 +89,11 @@ def analysis_result_payload(item: ScanItem, *, command: str, sha256: str | None 
         # Unsupported or failed file: no conclusion is possible.
         payload.update(
             verdict_code=Verdict.UNDETERMINED.value,
-            verdict=f"{VERDICT_LABELS[Verdict.UNDETERMINED]} — {item.error or item.status}",
+            verdict_label=VERDICT_LABELS[Verdict.UNDETERMINED],
+            # G1: the Korean status label, never the raw status code.
+            verdict=f"{VERDICT_LABELS[Verdict.UNDETERMINED]} — {item.error or status_label(item.status)}",
             grade=Grade.REFERENCE.value,
+            grade_label=GRADE_LABELS[Grade.REFERENCE],
             evidence=[],
             coverage=[],
             limitations=[item.error] if item.error else [],
@@ -193,9 +197,19 @@ def analyze_text_payload(text: str, options: Any, *, command: str, thresholds: A
 
 
 def format_analysis_result(payload: Mapping[str, Any]) -> str:
+    """Korean text rendering of an analysis_result (``--format table``).
+
+    G1 (round 5): only labels reach the examiner — the verdict and grade
+    labels, the evidence qualifiers ("결정적/합성/강") and the coverage
+    check/status labels ("얼굴 검사: 미실행 — …"); the JSON codes
+    (``manipulation_evidence``, ``deterministic``, ``ran``, ``model:<name>``)
+    stay in ``--format json``.
+    """
+    verdict_code = str(payload.get("verdict_code") or Verdict.UNDETERMINED.value)
+    verdict_label = payload.get("verdict_label") or VERDICT_LABELS.get(Verdict(verdict_code), VERDICT_LABELS[Verdict.UNDETERMINED])
+    grade_text = payload.get("grade_label") or grade_label_text(payload.get("grade"))
     lines = [
-        f"[결론] {payload.get('verdict_label') or VERDICT_LABELS[Verdict(payload.get('verdict_code', 'undetermined'))]}"
-        f" ({payload.get('verdict_code')}) · 등급: {payload.get('grade_label') or payload.get('grade')}",
+        f"[결론] {verdict_label} · 등급: {grade_text}",
         f"대상: {payload.get('path')}",
     ]
     if payload.get("sha256"):
@@ -207,17 +221,14 @@ def format_analysis_result(payload: Mapping[str, Any]) -> str:
         lines.append("근거:")
         for item in evidence:
             if isinstance(item, Mapping):
-                lines.append(
-                    f"  - [{item.get('kind')}/{item.get('direction')}/{item.get('strength')}] "
-                    f"{item.get('title')}: {item.get('detail')}"
-                )
+                qualifiers = evidence_qualifiers_short(item.get("kind"), item.get("direction"), item.get("strength"))
+                lines.append(f"  - [{qualifiers}] {item.get('title')}: {item.get('detail')}")
     coverage = payload.get("coverage") if isinstance(payload.get("coverage"), list) else []
     if coverage:
         lines.append("검사 범위:")
         for entry in coverage:
             if isinstance(entry, Mapping):
-                reason = f" — {entry['reason']}" if entry.get("reason") else ""
-                lines.append(f"  - {entry.get('check')}: {entry.get('status')}{reason}")
+                lines.append(f"  - {coverage_entry_line(dict(entry))}")
     for key, title in (("rule", "결정 규칙"),):
         if payload.get(key):
             lines.append(f"{title}: {payload[key]}")

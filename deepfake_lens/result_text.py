@@ -12,6 +12,7 @@ from pathlib import PurePath
 
 from .result_types import (
     COVERAGE_STATUS_LABELS,
+    GRADE_LABELS,
     EVIDENCE_DIRECTION_LABELS,
     EVIDENCE_KIND_LABELS,
     EVIDENCE_STRENGTH_LABELS,
@@ -130,6 +131,14 @@ def evidence_qualifiers_short(kind: object, direction: object, strength: object)
         EVIDENCE_DIRECTION_SHORT.get(str(direction), str(direction)),
         EVIDENCE_STRENGTH_SHORT.get(str(strength), str(strength)),
     ))
+
+
+def grade_label_text(grade: object) -> str:
+    """Korean label of a grade value ("reference" -> "참고"; G1)."""
+    for key, label in GRADE_LABELS.items():
+        if key.value == str(grade):
+            return label
+    return GRADE_LABELS[Grade.REFERENCE] if grade is None else str(grade)
 
 
 def coverage_status_label(status: object) -> str:

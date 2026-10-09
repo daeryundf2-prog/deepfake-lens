@@ -343,6 +343,11 @@ the roll-up rule and adds `member_rules[]` (`path`, `rule_number`, `rule`,
 optional `rule_note`) for the member rows; `rule_number` is absent for the
 container. The text renderings (`--format table`, `explain` text) list the
 member rows under the scan table's header in the scan table's wording.
+The text renderings print labels only (G1): the verdict and grade labels,
+evidence qualifiers as `[결정적/합성/강]` and coverage lines as
+`<check label>: 실행|미실행|실패 — <reason>` (`외부 모델(<display_name>)` for a
+`model:<name>` entry); the JSON codes appear only in `--format json`. A row
+without a result carries `verdict_label` `판단 불가` and `grade_label` `참고`.
 
 **`layer_diagnostic`** — `audio`, `video-analysis`, `text-advanced`,
 `pixel-analysis`, `inpaint`, `prnu`, `rppg`, `face`, `avatar`, `3d`,
@@ -355,6 +360,7 @@ member rows under the scan table's header in the scan table's wording.
 | `kind` | `"layer_diagnostic"` |
 | `title` | `"계층 진단(참고 신호 · 미측정)"` |
 | `layer` | Layer id (`audio`, `video_temporal`, `text_statistics`, `pixel_prescreen`, `inpaint`, `prnu`, `rppg`, `face`, `avatar`, `threed`, `realtime`, `faceswap_seam`, `compare`, `rule_features`, `provenance_metadata`, `tool_attribution`, `multimodal_scores`, `agent_markers`). |
+| `layer_label` | Korean name of the layer (e.g. `점수 설명`, `멀티모달 원점수 조합`); the text rendering (`--format table`) heads the output with it instead of the `layer` id (round 5, G1). |
 | `measured` | Always `false`. |
 | `notice` | Fixed: "이 출력은 측정되지 않은 참고 신호이며 결론이 아닙니다. 결론은 `scan`을 사용하십시오." |
 | `reference_band` | `reference` (the layer ran; numbers are reference only) or `unavailable` (it could not run). Never a band. |
