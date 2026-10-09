@@ -8,6 +8,7 @@ only when c2pa-python is installed (pip install 'deepfake-lens[provenance]').
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -285,6 +286,76 @@ class C2paReaderErrorTest(unittest.TestCase):
         titles = [e.title for e in item.result.evidence]
         self.assertIn("C2PA 매니페스트 존재(검증 미완료)", titles)
         self.assertNotIn("메타데이터 부재", titles)
+
+
+class C2paUnreadableDiagnosticTest(unittest.TestCase):
+    """R8: when the SDK fails (scan coverage ``c2pa failed``) the provenance
+    diagnostic says "C2PA 판독 불가(<reason>)" with c2pa_status
+    ``unavailable`` — never "C2PA 없음" or "출처 표준 메타데이터가 발견되지
+    않았습니다"."""
+
+    def _assert_unreadable(self, analysis: object, reason: str) -> None:
+        payload = analysis.to_json()  # type: ignore[attr-defined]
+        text = json.dumps(payload, ensure_ascii=False)
+        self.assertEqual(payload["c2pa_status"], "unavailable")
+        self.assertEqual(payload["c2pa_error"], reason)
+        self.assertIn(f"C2PA 판독 불가({reason})", payload["reference_note"])
+        self.assertIn(f"C2PA 판독 불가({reason})", [signal["title"] for signal in payload["signals"]])
+        self.assertTrue(any(lim.startswith(f"C2PA 판독 불가({reason})") for lim in payload["limitations"]))
+        self.assertNotIn("C2PA 없음", text)
+        self.assertNotIn("출처 표준 메타데이터가 발견되지 않았습니다", text)
+
+    def test_sdk_reader_failure_is_unreadable_not_absent(self) -> None:
+        from unittest import mock
+
+        fixture = REPO_ROOT / "fixtures" / "benchmark" / "real-like-texture.png"
+        reason = "RuntimeError: jumbf parser crashed"
+        failed = {"present": False, "status": "unavailable", "error": reason, "error_kind": "reader_error"}
+        with mock.patch("deepfake_lens.c2pa.validate_c2pa_manifest", return_value=failed):
+            analysis = analyze_metadata_forensic(fixture)
+        self._assert_unreadable(analysis, reason)
+
+    def test_validation_failure_after_open_is_unreadable(self) -> None:
+        from unittest import mock
+
+        fixture = REPO_ROOT / "fixtures" / "benchmark" / "real-like-texture.png"
+        reason = "ValueError: validation crashed"
+        failed = {"present": True, "status": "unavailable", "error": reason, "error_kind": "validation_error"}
+        with mock.patch("deepfake_lens.c2pa.validate_c2pa_manifest", return_value=failed):
+            analysis = analyze_metadata_forensic(fixture)
+        self._assert_unreadable(analysis, reason)
+        self.assertNotIn("C2PA 매니페스트 검증 미완료", [signal.title for signal in analysis.signals])
+
+    def test_absent_manifest_still_reads_absent(self) -> None:
+        from unittest import mock
+
+        fixture = REPO_ROOT / "fixtures" / "benchmark" / "real-like-texture.png"
+        with mock.patch("deepfake_lens.c2pa.validate_c2pa_manifest", return_value={"present": False, "status": "absent", "error": ""}):
+            analysis = analyze_metadata_forensic(fixture)
+        self.assertEqual(analysis.c2pa_status, "absent")
+        self.assertIn("C2PA 없음", analysis.reference_note)
+
+    @unittest.skipUnless(_has_c2pa_sdk(), "c2pa-python not installed")
+    def test_truncated_manifest_scan_and_diagnostic_agree(self) -> None:
+        """Real SDK on a manifest cut mid-JUMBF: scan coverage c2pa failed and
+        the forensic diagnostic says 판독 불가 with the same SDK error."""
+        import tempfile
+
+        from deepfake_lens.core import analyze_file
+        from deepfake_lens.result_types import CoverageStatus
+
+        signed = (C2PA_FIXTURES / "signed-c2pa.png").read_bytes()
+        jumbf = signed.index(b"caBX")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "cut-manifest.png"
+            path.write_bytes(signed[: jumbf + 64])
+            item = analyze_file(path)
+            analysis = analyze_metadata_forensic(path)
+        assert item.result is not None
+        entry = next(c for c in item.result.coverage if c.check == "c2pa")
+        self.assertEqual(entry.status, CoverageStatus.FAILED)
+        self._assert_unreadable(analysis, analysis.c2pa_error)
+        self.assertIn(analysis.c2pa_error, entry.reason)
 
 
 if __name__ == "__main__":

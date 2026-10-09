@@ -18,6 +18,11 @@ from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 MAX_FORENSIC_FILE_BYTES = 256 * 1024 * 1024  # 256 MB
 
 
+# R8: MetadataForensicAnalysis.c2pa_status when the c2pa SDK is not installed.
+C2PA_STATUS_SDK_MISSING = "sdk_missing"
+C2PA_STATUS_UNAVAILABLE = "unavailable"
+
+
 @dataclass(frozen=True)
 class ForensicEvidenceSignal:
     title: str
@@ -51,9 +56,21 @@ class MetadataForensicAnalysis:
     has_c2pa: bool
     has_synthid: bool
     has_watermark: bool
+    # R8: the SDK's C2PA status (validate_c2pa_manifest: valid / invalid /
+    # absent / unavailable), or "sdk_missing" when only the byte scan ran.
+    # "unavailable" means the reader failed — whether a manifest exists is
+    # unknown, so the diagnostic says "C2PA 판독 불가(<reason>)", never
+    # "C2PA 없음".
+    c2pa_status: str = C2PA_STATUS_SDK_MISSING
+    c2pa_error: str = ""
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
+
+
+def c2pa_unreadable_label(reason: str) -> str:
+    """ "C2PA 판독 불가(<reason>)" — the provenance diagnostic's wording when the SDK failed (R8)."""
+    return f"C2PA 판독 불가({reason or '원인 불명'})"
 
 
 def analyze_metadata_forensic(path: Path | str) -> MetadataForensicAnalysis:
@@ -89,7 +106,22 @@ def analyze_metadata_forensic(path: Path | str) -> MetadataForensicAnalysis:
     # When the manifest is verifiably present (or absent), the byte-scan
     # fallback below is not authoritative and is skipped/demoted.
     sdk_validation = validate_c2pa_manifest(file_path)
-    if sdk_validation is not None and sdk_validation.get("present"):
+    c2pa_status = C2PA_STATUS_SDK_MISSING if sdk_validation is None else str(sdk_validation.get("status") or C2PA_STATUS_UNAVAILABLE)
+    c2pa_error = ""
+    if sdk_validation is not None and c2pa_status == C2PA_STATUS_UNAVAILABLE:
+        # R8: the reader or validation raised (corrupt/truncated JUMBF,
+        # unsupported container, I/O). Not "no manifest" — unknown.
+        c2pa_error = str(sdk_validation.get("error") or "")
+        has_c2pa = bool(sdk_validation.get("present"))
+        unreadable = c2pa_unreadable_label(c2pa_error)
+        signals.append(ForensicEvidenceSignal(
+            unreadable,
+            "공식 C2PA SDK가 매니페스트를 판독하지 못했습니다. 매니페스트가 없다는 뜻이 아니며, "
+            "손상·절단되었거나 SDK가 지원하지 않는 형식일 수 있습니다.",
+            0,
+        ))
+        limitations.append(f"{unreadable} — 출처 표준 메타데이터(C2PA)의 존재 여부를 확인하지 못했습니다.")
+    elif sdk_validation is not None and sdk_validation.get("present"):
         has_c2pa = True
         signature = sdk_validation.get("signature") or {}
         provenance_records.append(ProvenanceRecord(
@@ -171,7 +203,7 @@ def analyze_metadata_forensic(path: Path | str) -> MetadataForensicAnalysis:
     signals.extend(jpeg_signals)
 
     # Limitations
-    if not provenance_records:
+    if not provenance_records and c2pa_status != C2PA_STATUS_UNAVAILABLE:
         limitations.append("출처 표준 메타데이터가 발견되지 않았습니다.")
     limitations.append("로컬 포렌식 분석 결과이며, 공식 검증이 필요합니다.")
 
@@ -182,7 +214,7 @@ def analyze_metadata_forensic(path: Path | str) -> MetadataForensicAnalysis:
         reference_band=REFERENCE_BAND,
         reference_note=(
             f"출처 기록 {len(provenance_records)}건, 출처 신호 {len(signals)}개 "
-            f"(C2PA {'있음' if has_c2pa else '없음'}, SynthID {'있음' if has_synthid else '없음'}, "
+            f"({c2pa_unreadable_label(c2pa_error) if c2pa_status == C2PA_STATUS_UNAVAILABLE else 'C2PA ' + ('있음' if has_c2pa else '없음')}, SynthID {'있음' if has_synthid else '없음'}, "
             f"워터마크 표식 {'있음' if has_watermark else '없음'}) — 신호 가중치 합 {score}/100은 미측정 참고값입니다."
         ),
         signals=signals,
@@ -191,6 +223,8 @@ def analyze_metadata_forensic(path: Path | str) -> MetadataForensicAnalysis:
         has_c2pa=has_c2pa,
         has_synthid=has_synthid,
         has_watermark=has_watermark,
+        c2pa_status=c2pa_status,
+        c2pa_error=c2pa_error,
     )
 
 
