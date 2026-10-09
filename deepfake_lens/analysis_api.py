@@ -8,7 +8,15 @@ depending on which door it came through (G7).
 
 Every front end now builds an :class:`AnalysisOptions` (``from_cli_args`` for
 argparse, ``from_query`` for HTTP query strings) and calls only
-:func:`analyze_path` or :func:`scan_folder`. Thresholds are resolved once per
+:func:`analyze_rows` / :func:`analyze_path` (one file) or :func:`scan_folder`.
+
+B1: one file goes through the folder scanner's own body
+(``core.scan_paths`` with the file's folder as root, :func:`scan_file`), so
+an archive given to ``forensic``/``classify``/``explain``/``legal-report``/
+``evidence-statement <file>`` or ``/api/check`` is expanded exactly as
+``scan`` expands it: the same member rows ("archive::inner"), the same
+container row (verdict roll-up, coverage, rejected members, limitations)
+and the same sha256 values. Thresholds are resolved once per
 call by :func:`load_thresholds` — the explicit ``--thresholds`` file, else
 ``<models_dir>/thresholds.json`` — so a CLI scan and a GUI scan of the same
 folder report the same ``thresholds`` provenance and the same verdicts.
@@ -25,6 +33,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Callable, Mapping
 
+from .archives import is_archive
 from .core import (
     DEFAULT_MAX_FILES,
     DEFAULT_TEXT_BYTES,
@@ -246,6 +255,32 @@ def load_thresholds(options: AnalysisOptions, *, warn: WarnFn | None = None) -> 
     return profile
 
 
+def analyze_rows(
+    path: Path | str,
+    options: AnalysisOptions,
+    *,
+    thresholds: Any = _UNSET,
+    progress: ScanProgress | None = None,
+) -> list[ScanItem]:
+    """Every row a scan of the file's folder reports for this one file (B1).
+
+    A regular file yields one row; an archive yields its member rows
+    ("archive::inner") plus the container row, in scan order. Row paths are
+    relative to the file's folder — exactly the folder scan's rows for the
+    file. The single-file commands print :func:`primary_row` as the
+    conclusion and list the member rows under it.
+    """
+    return scan_file(path, options, thresholds=thresholds, progress=progress)[1]
+
+
+def primary_row(rows: list[ScanItem]) -> ScanItem:
+    """The row for the file itself: the container row of an archive, else the only row."""
+    if not rows:
+        raise ValueError("no rows")
+    top = [row for row in rows if "::" not in row.path]
+    return top[0] if top else rows[0]
+
+
 def analyze_path(
     path: Path | str,
     options: AnalysisOptions,
@@ -254,14 +289,28 @@ def analyze_path(
     display: str | None = None,
     thresholds: Any = _UNSET,
 ) -> ScanItem:
-    """Analyze one file exactly as a folder scan would.
+    """Analyze one file exactly as a folder scan would; returns its row.
 
     ``thresholds`` lets a caller that analyzes many files (upload batches,
     streaming scans) resolve the profile once (None = builtin defaults); when
     omitted it is loaded here.
+
+    B1: an archive is expanded like ``scan`` expands it and the returned row
+    is its container row (verdict rolled up from the members, rejected
+    members in coverage, the archive's sha256); use :func:`analyze_rows` to
+    get the member rows too. ``display`` marks an already-extracted member
+    (upload paths), which is analyzed as itself.
     """
     if thresholds is _UNSET:
         thresholds = load_thresholds(options)
+    if display is None and is_archive(path):
+        row = primary_row(analyze_rows(path, options, thresholds=thresholds))
+        if root is not None:
+            # Same naming rule as a row of a scan rooted at ``root``.
+            from .scan_cache import _display_path
+
+            row = replace(row, path=_display_path(Path(path), root=root))
+        return row
     item = analyze_file(
         path,
         root=root,
@@ -473,8 +522,10 @@ __all__ = [
     "WEB_MAX_FILE_BYTES_CEILING",
     "WEB_MAX_SCAN_FILES",
     "analyze_path",
+    "analyze_rows",
     "default_engine_profiles",
     "load_thresholds",
+    "primary_row",
     "provenance",
     "scan_file",
     "scan_folder",

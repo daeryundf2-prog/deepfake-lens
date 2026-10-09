@@ -8,8 +8,8 @@ from pathlib import Path
 
 from .benchmark import run_benchmark, write_benchmark, write_benchmark_markdown
 from .collection import write_collection_plan
-from .core import DEFAULT_MAX_FILES, RiskBand, ScanItem, _thresholds_json, summarize
-from .analysis_api import AnalysisOptions, analyze_path, load_thresholds, scan_folder, thresholds_warning_printer
+from .core import ARCHIVE_ROLLUP_RULE, DEFAULT_MAX_FILES, RiskBand, ScanItem, _thresholds_json, summarize
+from .analysis_api import AnalysisOptions, analyze_path, analyze_rows, load_thresholds, primary_row, scan_folder, thresholds_warning_printer
 from .analysis_api import scan_payload as analysis_scan_payload
 from .calibration import MIN_CALIBRATION_SAMPLES, load_threshold_profile
 from .cli_parser import build_parser
@@ -61,6 +61,7 @@ from .rule_classifier import RuleClassifier
 from .layer_diagnostic import ANALYSIS_RESULT_KIND, to_layer_diagnostic
 from .cli_standalone import (
     ANALYSIS_RESULT_NOTICE,
+    analysis_result_for_path,
     analysis_result_payload,
     analyze_text_payload,
     combined_verdict,
@@ -69,6 +70,7 @@ from .cli_standalone import (
     file_sha256,
     format_analysis_result,
     gated_pixel_layer,
+    member_rows_text,
     tool_attribution,
 )
 from .result_types import VERDICT_LABELS, Verdict
@@ -212,7 +214,7 @@ def _multimodal_command(args: argparse.Namespace) -> int:
     options = AnalysisOptions.from_cli_args(args)
     thresholds = load_thresholds(options, warn=thresholds_warning_printer(sys.stderr))
     per_file = [
-        analysis_result_payload(analyze_path(path, options, thresholds=thresholds), command="multimodal", sha256=file_sha256(path))
+        analysis_result_for_path(path, options, command="multimodal", thresholds=thresholds)[0]
         for path in files
     ]
     verdict_code, explanation = combined_verdict(per_file)
@@ -257,16 +259,27 @@ def _explain_command(args: argparse.Namespace) -> int:
         emit(to_layer_diagnostic("explain_score", raw, layer_label="점수 설명"), fmt="json" if args.format == "json" else "table", json_out=None)
         return 0
     options = AnalysisOptions.from_cli_args(args)
-    item = analyze_path(args.file, options, thresholds=load_thresholds(options, warn=thresholds_warning_printer(sys.stderr)))
-    payload = analysis_result_payload(item, command="explain", sha256=file_sha256(args.file))
-    if item.result is not None:
-        verdict, rule = decide_with_rule(item.result.evidence, item.result.coverage, item.result.grade)
-        payload["rule_number"] = rule
-        payload["rule"] = RULE_DESCRIPTIONS[rule]
-        if verdict != item.result.verdict_code:
-            payload["rule_note"] = "결정 규칙 재현 결과가 기록된 결론과 다릅니다 — 보정 임계값 프로필을 확인하십시오."
+    thresholds = load_thresholds(options, warn=thresholds_warning_printer(sys.stderr))
+    # B1: the scan rows for the file — an archive is expanded like scan.
+    payload, rows = analysis_result_for_path(args.file, options, command="explain", thresholds=thresholds)
+    item = primary_row(rows)
+
+    def explain_row(row: ScanItem) -> dict[str, object]:
+        if row.result is None:
+            return {"rule": "분석 결과가 없어 결정 규칙을 적용하지 못했습니다 → 판단 불가"}
+        verdict, rule = decide_with_rule(row.result.evidence, row.result.coverage, row.result.grade)
+        out: dict[str, object] = {"rule_number": rule, "rule": RULE_DESCRIPTIONS[rule]}
+        if verdict != row.result.verdict_code:
+            out["rule_note"] = "결정 규칙 재현 결과가 기록된 결론과 다릅니다 — 보정 임계값 프로필을 확인하십시오."
+        return out
+
+    if item.kind == "archive" and len(rows) > 1:
+        # The container verdict is the members' roll-up, not a decide()
+        # result; each member row has its own rule.
+        payload["rule"] = ARCHIVE_ROLLUP_RULE
+        payload["member_rules"] = [{"path": row.path, **explain_row(row)} for row in rows if row is not item]
     else:
-        payload["rule"] = "분석 결과가 없어 결정 규칙을 적용하지 못했습니다 → 판단 불가"
+        payload.update(explain_row(item))
     emit(payload, fmt="json" if args.format == "json" else "table", json_out=None)
     return 0
 
@@ -284,6 +297,10 @@ def _legal_report_command(args: argparse.Namespace) -> int:
     if args.json_out:
         _write_json_out(args.json_out, json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     text = legal_report_text(report)
+    members = member_rows_text(report.get("rows"))
+    if members:
+        # B1: an archive's member rows, in the scan table's wording.
+        text += "\n\n=== 압축 구성 파일 ===\n" + "\n".join(members)
     if args.output:
         args.output.write_text(text + "\n", encoding="utf-8")
     if args.format == "json":
@@ -613,9 +630,10 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         return 0
     if args.command == "forensic":
         # D1: "is it fake" answers come from analysis_api — same as scan.
+        # B1: an archive is expanded like scan (container + member rows).
         options = AnalysisOptions.from_cli_args(args)
-        item = analyze_path(args.file, options, thresholds=load_thresholds(options, warn=thresholds_warning_printer(sys.stderr)))
-        payload = analysis_result_payload(item, command="forensic", sha256=file_sha256(args.file))
+        thresholds = load_thresholds(options, warn=thresholds_warning_printer(sys.stderr))
+        payload, _ = analysis_result_for_path(args.file, options, command="forensic", thresholds=thresholds)
         payload["layer_diagnostics"] = {
             "provenance_metadata": to_layer_diagnostic("provenance_metadata", analyze_metadata_forensic(args.file).to_json(), layer_label="출처 메타데이터 계층"),
         }
@@ -625,8 +643,8 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         # D1: the conclusion is the scan verdict; tool attribution is a
         # reference list of marker matches, never a verdict.
         options = AnalysisOptions.from_cli_args(args)
-        item = analyze_path(args.file, options, thresholds=load_thresholds(options, warn=thresholds_warning_printer(sys.stderr)))
-        payload = analysis_result_payload(item, command="classify", sha256=file_sha256(args.file))
+        thresholds = load_thresholds(options, warn=thresholds_warning_printer(sys.stderr))
+        payload, _ = analysis_result_for_path(args.file, options, command="classify", thresholds=thresholds)
         payload["tool_candidates"] = to_layer_diagnostic("tool_attribution", tool_attribution(args.file).to_json(), layer_label="생성 도구 표지 대조")
         emit(payload, fmt=args.format, json_out=args.json_out)
         return 0
@@ -697,8 +715,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         thresholds = load_thresholds(options, warn=thresholds_warning_printer(sys.stderr))
         if args.file is not None:
             text = args.file.read_text(encoding="utf-8", errors="replace")
-            item = analyze_path(args.file, options, thresholds=thresholds)
-            payload = analysis_result_payload(item, command="agent", sha256=file_sha256(args.file))
+            payload, _ = analysis_result_for_path(args.file, options, command="agent", thresholds=thresholds)
         else:
             text = args.text
             payload = analyze_text_payload(text, options, command="agent", thresholds=thresholds)
@@ -811,7 +828,9 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         elif target.is_dir():
             _, items, _ = scan_folder(target, AnalysisOptions(max_files=100), warn=thresholds_warning_printer(sys.stderr))
         elif target.is_file():
-            items = [analyze_path(target, AnalysisOptions())]
+            # B1: the folder scan's rows for the file — an archive yields
+            # its member rows and the container row.
+            items = analyze_rows(target, AnalysisOptions(), thresholds=load_thresholds(AnalysisOptions(), warn=thresholds_warning_printer(sys.stderr)))
         else:
             print(f"오류: 대상이 존재하지 않습니다: {target}", file=sys.stderr)
             return 2

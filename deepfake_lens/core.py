@@ -460,6 +460,14 @@ def _scan_paths(
 
 # N5: title of the container row's roll-up evidence item.
 ARCHIVE_ROLLUP_TITLE = "압축 파일 구성원 결론 집계"
+# B1: how a container row's verdict is derived (``explain`` on an archive;
+# the member rows carry their own decision rule). Mirrors
+# _archive_container_item below.
+ARCHIVE_ROLLUP_RULE = (
+    "압축 파일 — 컨테이너 행의 결론은 구성 파일 결론의 집계입니다: 조작·생성 근거가 있는 구성 파일이 "
+    "하나라도 있으면 조작·생성 근거 있음, 모든 구성 파일이 원본성 근거 있음이고 스킵·거부·경고가 없을 때만 "
+    "원본성 근거 있음, 그 외에는 판단 불가. 구성 파일별 결정 규칙은 '아카이브::경로' 행을 보십시오."
+)
 
 
 def archive_rollup_detail(manipulated: int, undetermined: int, authentic: int = 0) -> str:
@@ -816,20 +824,26 @@ def _analyze_file(
     extension = file_path.suffix.lower()
 
     if is_archive(file_path):
-        # Single-item callers get a container row; member-level results
-        # come through scan_directory / upload paths that expand first.
-        # An unexpanded container is undetermined — never a clean verdict.
+        # B1: every entry point expands an archive before it gets here —
+        # scan_paths (folder scans, analysis_api.analyze_rows/analyze_path
+        # for single files, /api/check, uploads) turns it into member rows
+        # plus a container row. This row is only reached for an archive
+        # nested inside one whose extraction yielded no members (the parent
+        # container lists the reason) or by a direct core.analyze_file
+        # call. An unexpanded container is undetermined — never a clean
+        # verdict.
         return ScanItem(
             display_path, item_name, "archive", "analyzed", size,
             build_classification_result(
                 subject="압축 파일",
                 evidence=[],
-                coverage=[skipped("archive", "단일 파일 분석에서는 압축 내부를 펼치지 않습니다")],
+                coverage=[skipped("archive", "이 행에서는 압축 내부를 펼치지 않았습니다(중첩 압축이면 상위 압축 행의 경고·거부 항목 참조)")],
                 source_guess=SourceGuess.unknown("압축 컨테이너에는 출처 추정이 적용되지 않습니다."),
                 limitations=[
-                    f"{archive_format(file_path)} 압축 파일 — 내부 파일은 폴더 스캔 또는 업로드 경로에서 개별 분석됩니다.",
+                    f"{archive_format(file_path)} 압축 파일 — 이 행은 내부 파일을 분석하지 않았습니다. "
+                    "압축 파일은 scan·forensic 등 모든 명령에서 '아카이브::경로' 행으로 펼쳐집니다.",
                 ],
-                next_checks=["압축 파일이 포함된 폴더를 스캔하거나 업로드하세요."],
+                next_checks=["이 압축 파일을 scan 또는 forensic으로 직접 검사해 구성 파일 행을 확인하세요."],
             ),
         )
 

@@ -273,11 +273,12 @@ def create_app(
     # are layer diagnostics (reference numbers, no band). /api/analyze/face
     # is a layer diagnostic only, like the `face` CLI command.
     def _verdict_payload(path: Path, command: str) -> dict[str, Any]:
-        from .cli_standalone import analysis_result_payload, file_sha256
+        from .cli_standalone import analysis_result_for_path
 
+        # B1: an archive is expanded like the folder scan (rows).
         options = _api_options()
-        item = analyze_path(path, options, thresholds=load_thresholds(options))
-        return analysis_result_payload(item, command=command, sha256=file_sha256(path))
+        payload, _ = analysis_result_for_path(path, options, command=command, thresholds=load_thresholds(options))
+        return payload
 
     @app.post("/api/analyze/image")
     def analyze_image(file_path: str):

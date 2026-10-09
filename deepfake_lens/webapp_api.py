@@ -38,6 +38,7 @@ from .analysis_api import (
     WEB_MAX_SCAN_FILES,
     AnalysisOptions,
     analyze_path,
+    analyze_rows,
     load_thresholds,
     provenance,
     scan_folder,
@@ -201,14 +202,16 @@ def _scan_cancel_payload(query: str) -> dict[str, object]:
 def _analyze_file_payload(query: str) -> dict[str, object]:
     """Single-file analysis (``/api/analyze-file``).
 
-    D3: the conclusion is the scan result (``analysis_api.analyze_path``,
-    three verdicts) — the same path, photo gate and thresholds as /api/scan.
+    D3: the conclusion is the scan result (``analysis_api.analyze_rows``,
+    three verdicts) — the same path, photo gate and thresholds as /api/scan;
+    an archive is expanded like the folder scan (B1) and ``rows`` lists the
+    member and container rows.
     The provenance-metadata scan and the tool-marker match ride along as
     layer diagnostics (reference, no band). No pixel pre-screen runs here:
     scan's own pixel layer is gated by the photo classifier and recorded in
     coverage.
     """
-    from .cli_standalone import analysis_result_payload, file_sha256, tool_attribution
+    from .cli_standalone import analysis_result_for_path, tool_attribution
     from .layer_diagnostic import to_layer_diagnostic
 
     params = parse_qs(query)
@@ -225,13 +228,12 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
     options = _web_options()
     thresholds = load_thresholds(options)
     try:
-        item = analyze_path(path, options, thresholds=thresholds)
+        response, _ = analysis_result_for_path(path, options, command="analyze-file", thresholds=thresholds)
     except Exception as exc:
         logger.exception("file analysis failed")
         # Detail stays in `detail` so the GUI shows a clean headline instead
         # of a raw exception sentence; the type/message aid local debugging.
         return {"error": "파일 분석 중 오류가 발생했습니다", "detail": failure_reason(exc)}
-    response: dict[str, Any] = analysis_result_payload(item, command="analyze-file", sha256=file_sha256(path))
     response["file"] = str(path)
     layers: dict[str, Any] = {}
     try:
@@ -540,82 +542,39 @@ def _summarize_records(items: list[dict[str, object]], source: str) -> dict[str,
 def _archive_upload_items(
     filename: str, suffix: str, payload: bytes, *, options: AnalysisOptions, thresholds: Any,
 ) -> list[dict[str, object]]:
-    """Extract an uploaded archive to a temp dir and analyze each member.
+    """Analyze an uploaded archive exactly as a folder scan analyzes it (B1).
 
-    Members are reported as ``archive.zip::inner/path.png`` rows; the
-    archive bytes and extracted tree are deleted before returning. The
-    container row is built exactly like the folder scan's
-    (``core._archive_container_item``, D9): every member the extractor
-    refused (``ArchiveExtraction.rejected`` — traversal, absolute path,
-    link, "압축 예산 초과(...)" bomb/budget limits) is a skipped
-    ``archive_member`` coverage entry plus a limitation on the container,
-    an unopenable archive (``error``) is a failed ``archive`` check and a
-    missing extractor (``missing_dependency``) a skipped one; the row
-    carries the uploaded archive's SHA-256.
+    The bytes are written under their own file name into a fresh temp
+    folder and handed to ``analysis_api.analyze_rows`` — the folder
+    scanner's own body — so the rows are the scan's rows: members as
+    ``archive.zip::inner/path.png``, the container row with every refused
+    member (traversal, absolute path, link, "압축 예산 초과(...)" bomb/budget
+    limits) as a skipped ``archive_member`` coverage entry plus a
+    limitation, an unopenable archive as a failed ``archive`` check, a
+    missing extractor as a skipped one, and the uploaded archive's SHA-256.
+    The temp folder (archive and extracted tree) is deleted before
+    returning. ``suffix`` is kept for the call sites; the name carries it.
     """
-    import hashlib
-
-    from .archives import archive_format, extract_archive
-    from .core import ScanItem, _archive_container_item
-
-    tmp_name = ""
-    dest = ""
+    del suffix
+    base = Path(filename.replace("\\", "/")).name or "upload.zip"
+    folder = Path(tempfile.mkdtemp(prefix="dflens-up-")).resolve()
     try:
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-            tmp.write(payload)
-            tmp_name = tmp.name
-        # resolve: mkdtemp may return a symlinked path (/var→/private/var on
-        # macOS); members come back resolved, so relative_to needs the real path.
-        dest = str(Path(tempfile.mkdtemp(prefix="dflens-up-")).resolve())
-        members: list[Path] = []
-        skipped = 0
-        warnings: list[str] = []
-        rejected: list[tuple[str, str]] = []
-        extraction_error: str | None = None
-        missing_dependency: str | None = None
-        try:
-            extraction = extract_archive(tmp_name, dest)
-        except Exception as exc:
-            # Same as the folder scan: a corrupt/unreadable archive becomes a
-            # failed container row, never a silently missing upload.
-            logger.exception("archive extraction failed: %s", filename)
-            warnings = [f"압축 해제 실패: {exc}"]
-            extraction_error = failure_reason(exc)
-        else:
-            members = list(extraction.members)
-            skipped = extraction.skipped
-            warnings = list(extraction.warnings)
-            rejected = list(extraction.rejected)
-            extraction_error = extraction.error
-            missing_dependency = extraction.missing_dependency
-        items: list[dict[str, object]] = []
-        member_items: list[ScanItem] = []
-        for member in members:
-            rel = member.relative_to(dest).as_posix()
-            display = f"{filename}::{rel}"
-            item = analyze_path(member, options, display=display, thresholds=thresholds)
-            member_items.append(item)
-            record = item.to_json()
-            record["path"] = display
-            record["name"] = display
-            items.append(record)
-        container = _archive_container_item(
-            filename, filename, Path(tmp_name),
-            fmt=archive_format(filename), members=len(member_items), skipped=skipped,
-            warnings=warnings, member_items=member_items, extraction_error=extraction_error,
-            rejected=rejected, sha256=hashlib.sha256(payload).hexdigest(),
-            missing_dependency=missing_dependency,
-        )
-        record = container.to_json()
-        record["path"] = filename
-        record["name"] = filename
-        items.append(record)
-        return items
+        target = folder / base
+        target.write_bytes(payload)
+        records: list[dict[str, object]] = []
+        for row in analyze_rows(target, options, thresholds=thresholds):
+            record = row.to_json()
+            if base != filename:
+                # Report the name the client sent (a path in the archive
+                # name is kept as given, like the pre-B1 upload rows).
+                for key in ("path", "name"):
+                    value = str(record.get(key) or "")
+                    if value == base or value.startswith(base + "::"):
+                        record[key] = filename + value[len(base):]
+            records.append(record)
+        return records
     finally:
-        if tmp_name:
-            Path(tmp_name).unlink(missing_ok=True)
-        if dest:
-            shutil.rmtree(dest, ignore_errors=True)
+        shutil.rmtree(folder, ignore_errors=True)
 
 
 def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]:
