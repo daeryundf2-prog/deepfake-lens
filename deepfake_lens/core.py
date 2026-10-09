@@ -41,7 +41,7 @@ from .error_text import path_scrub_root
 from .checks import skipped as skipped_entry
 from .decision import decide
 from .layer_diagnostic import UNAVAILABLE_BAND
-from .result_text import TEXT_LEGAL_LIMITATION, unrecorded_files
+from .result_text import TEXT_LEGAL_LIMITATION, member_row_path, unrecorded_files
 from .evidence_rules import (
     c2pa_evidence,
     deep_layer_reference,
@@ -377,6 +377,11 @@ def scan_paths(
         )
 
 
+# (file, display path or None, (container row path, member path) of an
+# archive member or None) — R9-1: the identity travels with the spec.
+_ScanSpec = tuple[Path, str | None, tuple[str, str] | None]
+
+
 def _scan_paths(
     paths: list[Path],
     *,
@@ -412,14 +417,16 @@ def _scan_paths(
     # display path, and the archive itself gets a container row that
     # aggregates the worst member band. Temp extraction dirs are removed
     # in the finally block below.
-    specs: list[tuple[Path, str | None]] = []
+    # R9-1: a member spec carries its (container, member) identity; the
+    # "::" display path is built from it and never split back.
+    specs: list[_ScanSpec] = []
     archive_members: dict[str, list[ScanItem]] = {}
     archive_meta: dict[str, dict] = {}
     temp_dirs: list[Path] = []
     try:
         for path in paths:
             if not is_archive(path):
-                specs.append((path, None))
+                specs.append((path, None, None))
                 continue
             rel = _display_path(path, root=root)
             dest = Path(tempfile.mkdtemp(prefix="dflens-arc-"))
@@ -449,7 +456,7 @@ def _scan_paths(
             for member in extraction.members:
                 # Y9: nested members are "inner.zip::x.png" (never "inner.zip.unpacked/x.png").
                 member_rel = extraction.member_name(member, dest)
-                specs.append((member, f"{rel}::{member_rel}"))
+                specs.append((member, member_row_path(rel, member_rel), (rel, member_rel)))
 
         planned = len(specs) + len(archive_members) + len(iter_errors) + len(symlinks)
         if on_plan is not None:
@@ -459,7 +466,7 @@ def _scan_paths(
                 logger.exception("scan plan callback failed")
         report = _ProgressReporter(progress, planned)
         summary, items = _scan_specs(
-            specs, duplicates_paths=[p for p, d in specs if d is None],
+            specs, duplicates_paths=[p for p, d, _ in specs if d is None],
             archive_members=archive_members, archive_meta=archive_meta, root=root, dedupe=dedupe,
             max_file_bytes=max_file_bytes, hash_db_path=hash_db_path,
             text_bytes=text_bytes, metadata_bytes=metadata_bytes,
@@ -643,7 +650,7 @@ def _archive_container_item(
 
 
 def _scan_specs(
-    specs: list[tuple[Path, str | None]],
+    specs: list[_ScanSpec],
     *,
     duplicates_paths: list[Path],
     archive_members: dict[str, list[ScanItem]],
@@ -686,8 +693,8 @@ def _scan_specs(
     cache_provenance = _cache_provenance(thresholds) if cache is not None else ""
     scan_context = _cache_scan_context(model_path) if cache is not None else ""
 
-    def analyze_one(spec: tuple[Path, str | None]) -> tuple[ScanItem, str | None, bool]:
-        path, display = spec
+    def analyze_one(spec: _ScanSpec) -> tuple[ScanItem, str | None, bool]:
+        path, display, identity = spec
         if should_stop is not None and should_stop():
             return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "skipped", 0, error="검사가 취소되었습니다"), None, False
         if path in duplicates:
@@ -754,8 +761,8 @@ def _scan_specs(
             )
             return item, key, False
         item = _with_content_sha256(item, path, fingerprints)
-        if display is not None and "::" in display:
-            archive_members.setdefault(display.split("::", 1)[0], []).append(item)
+        if identity is not None:
+            archive_members.setdefault(identity[0], []).append(item)
         return item, key, False
 
     # Flush per-item results into the cache as the scan proceeds — a
@@ -772,13 +779,13 @@ def _scan_specs(
                 cache_items[key] = item.to_json()
         _write_scan_cache(cache_path, cache)
 
-    def analyze_and_report(spec: tuple[Path, str | None]) -> tuple[ScanItem, str | None, bool]:
+    def analyze_and_report(spec: _ScanSpec) -> tuple[ScanItem, str | None, bool]:
         item, key, was_cached = analyze_one(spec)
-        display = spec[1]
-        if display is not None and "::" in display:
-            # P7: a member row names its container and member in fields; the
-            # container part of the display path is escaped (no "::" in it).
-            container, member = display.split("::", 1)
+        identity = spec[2]
+        if identity is not None:
+            # P7/R9-1: a member row names its container and member in fields
+            # (from the spec, never from its display path).
+            container, member = identity
             item = replace(item, container=container, member=member)
         _report(item)
         return item, key, was_cached

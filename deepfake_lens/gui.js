@@ -646,9 +646,10 @@
                 parts.push(evidenceHtml(r));
                 parts.push(coverageHtml(r));
             }
-            // P7: a member row has item.member (its "::" is display only); a
-            // real file's row path has "::" escaped — unescaped for the preview.
-            const hasPreview = lastScanRoot && item.path && !item.member && !item.path.includes('::') &&
+            // P7/R9-1: a member row has item.member (its "::" is display only);
+            // any other row is a real file whose escaped path is unescaped for
+            // the preview (never read as a member by a "::" in it).
+            const hasPreview = lastScanRoot && item.path && !item.member &&
                 !/^[a-zA-Z]:[\\/]|^\//.test(item.path) &&
                 (item.kind === 'image' || item.kind === 'video' || item.kind === 'audio');
             const abs = hasPreview ? (lastScanRoot.replace(/[\\/]+$/, '') + '/' + unescapeRowPath(item.path)) : '';

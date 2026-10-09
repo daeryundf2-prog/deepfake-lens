@@ -109,7 +109,7 @@
         "kind": { "type": "string" },
         "status": { "type": "string" },
         "container": { "type": ["string", "null"], "description": "P7: archive member rows only — the container row's path (path = container + \"::\" + member); absent on every other row." },
-        "member": { "type": ["string", "null"], "description": "P7: archive member rows only — the member path inside the container (a nested chain joined by \"::\"). In a real file's row path \"::\" is escaped as \"\\:\\:\" (and then \"\\\\\" as \"\\\\\\\\\"), so it never reads as a member." },
+        "member": { "type": ["string", "null"], "description": "P7: archive member rows only — the member path inside the container (a nested chain joined by \"::\"). R9-1: a row's identity is container/member only, never a \"::\" in path. A real file's row path holding \"::\" or \"\\:\" is escaped per character (every \"\\\" as \"\\\\\", every \":\" as \"\\:\"), so it never contains \"::\" and unescapes exactly." },
         "source": { "const": "upload", "description": "P6: rows of /api/analyze-upload and /api/check (uploaded or pasted, never a file of a read root) — POST /api/report lists them under excluded_items and never re-analyzes or signs them." },
         "size_bytes": { "type": "integer", "minimum": 0 },
         "result": {

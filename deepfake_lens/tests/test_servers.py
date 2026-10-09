@@ -1693,6 +1693,10 @@ class ReportArchiveMemberIdentityTest(_ScanRootFixture):
         (self.case / "evil.zip::inner").mkdir()
         _write_png(self.case / "evil.zip::inner" / "a1111.png", seed=5)
         (self.case / "fake.zip::member.png").write_bytes((self.case / "target.png").read_bytes())
+        # R9-1 (round 9): odd colon runs and "\\::" kept "::" after the old escape.
+        (self.case / "tri:::colon.png").write_bytes((self.case / "target.png").read_bytes())
+        _write_png(self.case / "x\\::y.png", seed=7)
+        (self.case / "quad::::q.xyz").write_bytes(b"?")
 
     def test_every_row_is_reported_as_its_own_file(self) -> None:
         import hashlib
@@ -1703,6 +1707,8 @@ class ReportArchiveMemberIdentityTest(_ScanRootFixture):
             "evil.zip\\:\\:inner/a1111.png": hashlib.sha256((self.case / "evil.zip::inner" / "a1111.png").read_bytes()).hexdigest(),
             "fake.zip\\:\\:member.png": self.case_sha,
             "target.png": self.case_sha,
+            "tri\\:\\:\\:colon.png": self.case_sha,  # R9-1
+            "x\\\\\\:\\:y.png": hashlib.sha256((self.case / "x\\::y.png").read_bytes()).hexdigest(),  # R9-1
         }
         for name, call in self._legs():
             with self.subTest(leg=name):
@@ -1720,6 +1726,12 @@ class ReportArchiveMemberIdentityTest(_ScanRootFixture):
                 got = {row["path"]: row["sha256"] for row in signed["items"]}
                 for path, digest in expected.items():
                     self.assertEqual(got.get(path), digest, path)
+                # R9-1: only evil.zip's member has member fields; the real
+                # unsupported "quad::::q.xyz" is counted as unsupported.
+                self.assertEqual([row["path"] for row in signed["items"] if row.get("member")], ["evil.zip::inner/a1111.png"])
+                self.assertTrue(all("::" not in row["path"] for row in signed["items"] if not row.get("member")))
+                counts = {entry["code"]: entry["count"] for entry in signed["unrecorded_files"]["reasons"]}
+                self.assertEqual(counts["unsupported"], 1, counts)
                 member = next(row for row in signed["items"] if row["path"] == "evil.zip::inner/a1111.png")
                 self.assertEqual((member["container"], member["member"]), ("evil.zip", "inner/a1111.png"))
                 forged = dict(member, path="fake.zip::member.png")

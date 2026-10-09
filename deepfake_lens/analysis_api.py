@@ -332,7 +332,7 @@ def primary_row(rows: list[ScanItem]) -> ScanItem:
     """The row for the file itself: the container row of an archive, else the only row."""
     if not rows:
         raise ValueError("no rows")
-    top = [row for row in rows if "::" not in row.path]
+    top = [row for row in rows if row.member is None]  # R9-1: by the member field
     return top[0] if top else rows[0]
 
 

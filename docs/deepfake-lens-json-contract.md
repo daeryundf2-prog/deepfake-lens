@@ -126,11 +126,16 @@ always `0` invited old-contract readings. They remain readable as
   a report (it used to: `a.zip::b.zip.unpacked/c.png`). Everything before the
   first `::` is the container row's `path`. P7 (round 8): a member row also
   carries `container` (the container row's `path`) and `member` (the chain
-  inside it) — the row's identity; its `path` is their display join. Every
-  other row has neither field, and in a real file's `path` a `::` is escaped
-  as `\:\:` (only then is every `\` doubled, so the escape is reversible):
+  inside it) — the row's identity; its `path` is their display join and is
+  never split back (R9-1: reports, the GUI and the unrecorded-file counts
+  read the fields only). Every other row has neither field. R9-1 (round 9):
+  a real file's `path` that contains `::` or `\:` is escaped character by
+  character — every `\` as `\\` and every `:` as `\:` — so it never holds
+  `::` (the round-8 escape of `::` alone left `tri\:\::c.png`) and unescaping
+  is its exact inverse; any other path is unchanged:
   a folder named `evil.zip::inner` gives the row `evil.zip\:\:inner/a.png`,
-  distinct from the member row `evil.zip::inner/a.png`, and a file named
+  distinct from the member row `evil.zip::inner/a.png`, a file named
+  `tri:::c.png` the row `tri\:\:\:c.png`, and a file named
   `fake.zip::member.png` is reported as itself. `POST /api/report` identifies
   rows by these fields and refuses (400) a member row whose `path` is not
   `container::member`. The same

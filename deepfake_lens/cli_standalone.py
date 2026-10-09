@@ -180,7 +180,7 @@ def member_rows_text(raw_rows: Any) -> list[str]:
     from .serialization import _scan_item_from_json
 
     items = [_scan_item_from_json(dict(row)) for row in raw_rows if isinstance(row, Mapping)]
-    members = [item for item in items if "::" in item.path]
+    members = [item for item in items if item.member is not None]  # R9-1: by the member field
     if not members:
         return []
     return [

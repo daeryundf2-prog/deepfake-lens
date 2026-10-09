@@ -163,18 +163,23 @@ ARCHIVE_MEMBER_SEPARATOR = "::"
 # P7 (round 8): a real path with "::" in it ("evil.zip::inner/a.png" — a
 # folder named "evil.zip::inner") collided with the member row of the same
 # display string (duplicate rows; "fake.zip::member.png" could not be
-# reported). In a real file's row path "::" is escaped as "\:\:" (and, only
-# then, every "\" as "\\", so the escape is reversible), member rows carry
-# ``container``/``member`` fields, and the "::" of a display path is display
-# only. A path with neither "::" nor "\:" is unchanged.
-_ESCAPED_SEPARATOR = "\\:\\:"
+# reported). Member rows carry ``container``/``member`` fields and a row's
+# identity is those fields (:func:`row_identity`) — the "::" of a display
+# path is display only and is never split back.
+# R9-1 (round 9): the escape of a real path was "::" -> "\:\:", which left
+# "::" in "tri:::c.png" ("tri\:\::c.png"). A real file's row path that
+# contains "::" or "\:" now escapes character by character: every "\" as
+# "\\" and every ":" as "\:" — so no ":" of an escaped path follows another
+# ":" (no "::" at all), and :func:`unescape_row_path` is its exact inverse
+# (an escaped path always holds "\:", an unchanged one never does). A path
+# with neither "::" nor "\:" is unchanged.
 
 
 def escape_row_path(path: str) -> str:
-    """A real file's relative path as a row path: "::" can no longer read as a member separator (P7)."""
+    """A real file's relative path as a row path: no "::" in it, reversibly (P7, R9-1)."""
     if ARCHIVE_MEMBER_SEPARATOR not in path and "\\:" not in path:
         return path
-    return path.replace("\\", "\\\\").replace(ARCHIVE_MEMBER_SEPARATOR, _ESCAPED_SEPARATOR)
+    return path.replace("\\", "\\\\").replace(":", "\\:")
 
 
 def unescape_row_path(path: str) -> str:
@@ -194,19 +199,30 @@ def unescape_row_path(path: str) -> str:
     return "".join(out)
 
 
+def member_row_path(container: str, member: str) -> str:
+    """The display path of an archive member row: "<container row path>::<member>" (display only)."""
+    return f"{container}{ARCHIVE_MEMBER_SEPARATOR}{member}"
+
+
 def row_identity(item: object) -> tuple[str, str | None]:
-    """(top-level row path, member path or None) of a row (P7: the fields, else the display path)."""
+    """(top-level row path, member path or None) of a row.
+
+    P7/R9-1: a member row is identified by its ``container``/``member``
+    fields only; every other row is its own (escaped) path. The "::" of a
+    display path is never split back.
+    """
     def get(name: str) -> object:
         return item.get(name) if isinstance(item, dict) else getattr(item, name, None)
 
     member, container = get("member"), get("container")
     if isinstance(member, str) and isinstance(container, str):
         return container, member
-    path = str(get("path") or "")
-    if ARCHIVE_MEMBER_SEPARATOR in path:
-        top, inner = path.split(ARCHIVE_MEMBER_SEPARATOR, 1)
-        return top, inner
-    return path, None
+    return str(get("path") or ""), None
+
+
+def is_member_row(item: object) -> bool:
+    """P7/R9-1: an archive member row — by its ``member`` field, never by a "::" in the path."""
+    return row_identity(item)[1] is not None
 
 
 def display_path(path: str, *, redact_paths: bool = False) -> str:
@@ -426,8 +442,7 @@ def unrecorded_files(items: "list[object]", summary: object | None = None) -> Un
     for item in items:
         status = item.get("status") if isinstance(item, dict) else getattr(item, "status", None)
         error = item.get("error") if isinstance(item, dict) else getattr(item, "error", None)
-        path = str((item.get("path") if isinstance(item, dict) else getattr(item, "path", "")) or "")
-        if _is_member_row(item, path):
+        if is_member_row(item):
             continue  # archive members are accounted for on their container row
         kind = item.get("kind") if isinstance(item, dict) else getattr(item, "kind", None)
         result = item.get("result") if isinstance(item, dict) else getattr(item, "result", None)
@@ -460,14 +475,6 @@ def unrecorded_files(items: "list[object]", summary: object | None = None) -> Un
         archive_categories=categories,
         subfolder_detail=[entry for entry in detail if isinstance(entry, dict)] if isinstance(detail, list) else None,
     )
-
-
-def _is_member_row(item: object, path: str) -> bool:
-    """P7: an archive member row (``container``/``member`` fields, else the "::" display path)."""
-    member = item.get("member") if isinstance(item, dict) else getattr(item, "member", None)
-    if member is not None:
-        return bool(member)
-    return "::" in path
 
 
 def _rejected_member_reasons(result: object) -> list[str]:

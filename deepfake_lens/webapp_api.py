@@ -708,16 +708,27 @@ def _archive_upload_items(
     try:
         target = folder / base
         target.write_bytes(payload)
+        from .result_text import escape_row_path, member_row_path
+
         records: list[dict[str, object]] = []
+        shown = escape_row_path(filename)
         for row in analyze_rows(target, options, thresholds=thresholds):
             record = row.to_json()
             if base != filename:
                 # Report the name the client sent (a path in the archive
                 # name is kept as given, like the pre-B1 upload rows).
-                for key in ("path", "name", "container"):
-                    value = str(record.get(key) or "")
-                    if value == base or value.startswith(base + "::"):
-                        record[key] = filename + value[len(base):]
+                # R9-1: a member row is renamed through its container/member
+                # fields — never by splitting its "::" display path.
+                old_path = record.get("path")
+                if row.member is not None:
+                    record["container"] = shown
+                    record["path"] = member_row_path(shown, row.member)
+                elif old_path == escape_row_path(base):
+                    record["path"] = shown
+                if record.get("name") == base:
+                    record["name"] = filename
+                elif record.get("name") == old_path:
+                    record["name"] = record["path"]
             records.append(record)
         return records
     finally:
@@ -1296,7 +1307,7 @@ def _rederive_report_items(
     for rows that could not be re-derived)``.
     """
     from .analysis_api import scan_file_run
-    from .result_text import ARCHIVE_MEMBER_SEPARATOR, escape_row_path, row_identity
+    from .result_text import escape_row_path, member_row_path, row_identity
 
     derived_by_top: dict[str, dict[str | None, Any] | str] = {}
     for item in posted:
@@ -1321,7 +1332,7 @@ def _rederive_report_items(
             row_top, row_member = row_identity(row)
             if row_top != name:
                 continue
-            path = top if row_member is None else f"{top}{ARCHIVE_MEMBER_SEPARATOR}{row_member}"
+            path = top if row_member is None else member_row_path(top, row_member)
             rows[row_member] = replace(row, path=path, container=None if row_member is None else top, member=row_member)
         derived_by_top[top] = rows
     derived: list[Any] = []

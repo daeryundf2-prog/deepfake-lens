@@ -737,6 +737,85 @@ class ArchiveMemberIdentityTests(unittest.TestCase):
         self.assertEqual(escape_row_path("plain/back\\slash.png"), "plain/back\\slash.png", "unchanged without '::'")
         self.assertEqual(row_identity({"path": "a.zip::b.png", "container": "a.zip", "member": "b.png"}), ("a.zip", "b.png"))
 
+    def test_escape_round_trips_every_colon_backslash_run(self) -> None:
+        """R9-1 (round 9): "tri:::c.png" escaped to "tri\\:\\::c.png", which still held "::".
+        Property: over every string of ":", "\\" and "a" up to length 6 (and random
+        longer ones with "/" and "."), the escape has no "::", is injective, never
+        reads as a member (row identity by fields) and unescapes to the original."""
+        import itertools
+        import random
+
+        from deepfake_lens.result_text import escape_row_path, is_member_row, row_identity, unescape_row_path
+
+        names = ["".join(chars) for length in range(7) for chars in itertools.product(":\\a", repeat=length)]
+        rng = random.Random(9)
+        names += ["".join(rng.choice(":\\a/.") for _ in range(rng.randint(7, 24))) for _ in range(3000)]
+        names += ["tri:::c.png", ":::", "::::", "\\:", "\\\\::", "a\\::b", "x\\:\\:y.png"]
+        seen: dict[str, str] = {}
+        for name in names:
+            shown = escape_row_path(name)
+            self.assertNotIn("::", shown, name)
+            self.assertEqual(unescape_row_path(shown), name, name)
+            self.assertEqual(seen.setdefault(shown, name), name, f"escape collision: {name!r} / {seen[shown]!r}")
+            self.assertEqual(row_identity({"path": shown}), (shown, None))
+            self.assertFalse(is_member_row({"path": shown}))
+            if "::" not in name and "\\:" not in name:
+                self.assertEqual(shown, name, "a path with neither '::' nor '\\:' is unchanged")
+        self.assertEqual(escape_row_path("tri:::c.png"), "tri\\:\\:\\:c.png")
+        # a display path is never split back: without the fields a "::" path is one top-level row
+        self.assertEqual(row_identity({"path": "a.zip::b.png"}), ("a.zip::b.png", None))
+
+    def test_odd_colon_runs_are_their_own_rows(self) -> None:
+        """R9-1: three or more colons ("tri:::c", "quad::::q") and "\\::" are real files —
+        own rows, no member fields, never counted as archive members."""
+        from deepfake_lens.core import scan_directory
+        from deepfake_lens.result_text import unescape_row_path, unrecorded_files
+
+        for name in ("tri:::c.txt", "quad::::q.txt", "x\\::y.txt", "tri:::odd.xyz"):
+            (self.root / name).write_text(f"{name} 실제 파일입니다.", encoding="utf-8")
+        summary, items = scan_directory(self.root, recursive=True)
+        rows = {item.path: item for item in items}
+        self.assertEqual(len(rows), len(items), "no duplicate row paths")
+        for name in ("tri:::c.txt", "quad::::q.txt", "x\\::y.txt", "tri:::odd.xyz"):
+            with self.subTest(name=name):
+                row = next(item for item in items if unescape_row_path(item.path) == name and item.member is None)
+                self.assertNotIn("::", row.path)
+                self.assertEqual((row.container, row.member), (None, None))
+                self.assertIn(row.status, ("analyzed", "unsupported"))
+        self.assertEqual(rows["tri\\:\\:\\:c.txt"].status, "analyzed")
+        # odd.zip::x.xyz and tri:::odd.xyz: both real unsupported files, counted as such
+        self.assertEqual(unrecorded_files(list(items), summary).counts["unsupported"], 2)
+        self.assertEqual(
+            sorted(item.path for item in items if item.member is not None),
+            ["evil.zip::inner/a1111.txt"],
+        )
+
+    def test_gui_unescape_matches_python(self) -> None:
+        """R9-1: the GUI preview unescapes the row path with the inverse of
+        result_text.escape_row_path and never takes a "::" for a member."""
+        import itertools
+        import json
+        import shutil
+        import subprocess
+
+        from deepfake_lens.result_text import escape_row_path
+
+        source = (Path(__file__).resolve().parents[1] / "gui.js").read_text(encoding="utf-8")
+        start = source.index("function unescapeRowPath(path)")
+        end = source.index("\n        }\n", start) + len("\n        }\n")
+        preview = source[source.index("const hasPreview ="):source.index("const abs = hasPreview")]
+        self.assertNotIn("'::'", preview, "the preview decision is by item.member, not a '::' in the path")
+        self.assertIn("!item.member", preview)
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is not installed")
+        names = ["".join(chars) for length in range(7) for chars in itertools.product(":\\a", repeat=length)]
+        script = source[start:end] + "\nconst input = JSON.parse(require('fs').readFileSync(0, 'utf8'));\n" \
+            "process.stdout.write(JSON.stringify(input.map(unescapeRowPath)));\n"
+        done = subprocess.run([node, "-e", script], input=json.dumps([escape_row_path(n) for n in names]),
+                              capture_output=True, text=True, timeout=120, check=True)
+        self.assertEqual(json.loads(done.stdout), names)
+
     def test_real_paths_and_members_have_distinct_rows(self) -> None:
         from deepfake_lens.core import scan_directory
         from deepfake_lens.result_text import unrecorded_files

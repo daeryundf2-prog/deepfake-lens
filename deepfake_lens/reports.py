@@ -326,7 +326,7 @@ def _threshold_provenance_ko(thresholds: object | None) -> str:
 
 def _hash_unavailable_reason(item: ScanItem) -> str:
     """Why a forensic-PDF row has no hash — the evidence statement's wording (S2)."""
-    if "::" in item.path:
+    if item.member is not None:  # R9-1: the member field, never a "::" in the path
         return HASH_UNAVAILABLE_MEMBER
     if is_symlink_row(item.status, item.error):
         return HASH_UNAVAILABLE_SYMLINK
