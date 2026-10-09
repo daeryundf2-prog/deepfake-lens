@@ -579,6 +579,13 @@ class InputErrorExitCodesTest(unittest.TestCase):
                     self.assertIn("오류: 입력을 처리할 수 없습니다", err)
                     self.assertIn(str(self.root / "logs" / "deepfake-lens.log"), err)
                     self.assertNotIn(self.ROW_NOTE, err)  # no row was produced
+                    # R11-8 (round 11): "(라이브러리 오류(ValueError) — 상세는 로그 참조) —
+                    # 상세는 로그 파일 …" pointed to the log twice.
+                    line = next(text for text in err.splitlines() if text.startswith("오류: 입력을 처리할 수 없습니다"))
+                    self.assertEqual(line.count("상세는"), 1, line)
+                    self.assertNotIn("로그 참조", line)
+                    if isinstance(exc, ValueError):
+                        self.assertIn("입력을 처리할 수 없습니다(라이브러리 오류(ValueError)) — 상세는 로그 파일 ", line)
 
     def test_unexpected_error_names_the_log_and_claims_no_rows(self) -> None:
         with mock.patch("deepfake_lens.cli._run_command", side_effect=RuntimeError("boom")):
