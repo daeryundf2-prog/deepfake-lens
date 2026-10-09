@@ -23,9 +23,12 @@ when checks report missing pieces — doctor reports state, it does not gate.
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import importlib.util
+import io
 import json
+import logging
 import shutil
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -46,6 +49,8 @@ from .model_pins import (
 )
 from .vendor_weights import default_models_dir
 
+logger = logging.getLogger(__name__)
+
 # (import name, pip package, what it enables)
 OPTIONAL_DEPS = [
     ("torch", "torch", "AASIST / torchvision / SBI 런타임"),
@@ -61,7 +66,9 @@ OPTIONAL_DEPS = [
     ("mediapipe", "mediapipe", "FaceMesh 얼굴 검출(대체 경로)"),
     ("c2pa", "c2pa-python", "C2PA 매니페스트 검증"),
     ("syhwp", "syhwp", "HWP/HWPX 문서 해석"),
-    ("fitz", "PyMuPDF", "PDF 렌더링 포렌식·PDF 증거설명서"),
+    # B7: imported through pdf_backend.import_pymupdf (pymupdf first, the
+    # legacy fitz name only with stdout captured) — never a bare `import fitz`.
+    ("pymupdf", "PyMuPDF", "PDF 렌더링 포렌식·PDF 증거설명서"),
     ("fastapi", "fastapi", "통합 비동기 REST API 서버"),
     ("uvicorn", "uvicorn", "통합 API 서비스용 ASGI 서버"),
 ]
@@ -92,6 +99,15 @@ RUNTIME_MODULES: dict[str, tuple[str, ...]] = {
 # Profiles that score from data carried in the profile itself (no weights).
 _WEIGHTLESS_TYPES = {"score-sidecar-v1", "deepfake-lens-portable-threshold-v1"}
 
+def _import_dependency(name: str) -> Any:
+    """Import an optional dependency; PyMuPDF only through pdf_backend (B7)."""
+    if name == "pymupdf":
+        from .pdf_backend import import_pymupdf
+
+        return import_pymupdf()
+    return importlib.import_module(name)
+
+
 # Column states.
 OK = "ok"
 MISSING = "missing"
@@ -120,6 +136,13 @@ class ProfileStatus:
     runtime_deps_detail: str
     checkpoint: str   # ok | missing | mismatch | n/a
     checkpoint_detail: str
+    # B7: the profile's Korean display name, shown in the table; ``name``
+    # stays the identifier (runnable names, JSON consumers).
+    display_name: str = ""
+
+    @property
+    def label(self) -> str:
+        return self.display_name or self.name
 
     @property
     def runnable(self) -> bool:
@@ -322,6 +345,7 @@ def profile_status(profile_path: Path, *, import_cache: dict[str, str | None] | 
     deps_state, deps_detail = _deps_column(runtime, inner_runtime, cache)
     ckpt_state, ckpt_detail = _checkpoint_column(target, profile_path.parent)
     return ProfileStatus(
+        display_name=str(profile.get("display_name") or ""),
         name=name,
         file=profile_path.name,
         runtime=runtime or "score-map",
@@ -359,13 +383,29 @@ def _check_accelerators() -> list[Check]:
     try:
         ort = importlib.import_module("onnxruntime")
         providers = ", ".join(ort.get_available_providers())
-        checks.append(Check("onnxruntime", "ok", f"providers: {providers}"))
+        checks.append(Check("onnxruntime", "ok", f"실행 공급자: {providers}"))
     except ImportError:
         checks.append(Check("onnxruntime", "missing", "onnxruntime 미설치"))
     return checks
 
 
 def run_diagnostics(models_dir: Path | None = None) -> DoctorReport:
+    """Run every check. Anything an import prints to stdout goes to the log (B7).
+
+    ``doctor --format json`` prints JSON on stdout; an optional dependency
+    that prints on import (PyMuPDF's legacy ``fitz`` deprecation notice,
+    CUDA banners) must not corrupt it.
+    """
+    captured = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(captured):
+            return _run_diagnostics(models_dir)
+    finally:
+        if captured.getvalue().strip():
+            logger.info("doctor: 가져오기 중 표준 출력(로그로만 기록): %s", captured.getvalue().strip())
+
+
+def _run_diagnostics(models_dir: Path | None) -> DoctorReport:
     report = DoctorReport()
     root = Path(models_dir) if models_dir is not None else default_models_dir()
     import_cache: dict[str, str | None] = {}
@@ -382,7 +422,7 @@ def run_diagnostics(models_dir: Path | None = None) -> DoctorReport:
     report.accelerators = _check_accelerators()
     for import_name, package, purpose in OPTIONAL_DEPS:
         try:
-            module = importlib.import_module(import_name)
+            module = _import_dependency(import_name)
             version = getattr(module, "__version__", "?")
             report.dependencies.append(Check(package, "ok", f"v{version} — {purpose}"))
         except ImportError:
@@ -393,7 +433,14 @@ def run_diagnostics(models_dir: Path | None = None) -> DoctorReport:
     return report
 
 
-_COLUMN_MARK = {OK: "OK", NOT_APPLICABLE: "n/a", MISSING: "MISS", MISMATCH: "불일치"}
+_COLUMN_MARK = {OK: "OK", NOT_APPLICABLE: "해당 없음", MISSING: "MISS", MISMATCH: "불일치"}
+# B7: Korean section headers of the doctor table.
+SECTION_TITLES = {
+    "model_profiles": "모델 프로필",
+    "accelerators": "가속기",
+    "dependencies": "의존성",
+    "tools": "외부 도구",
+}
 
 
 def format_report(report: DoctorReport) -> str:
@@ -408,34 +455,32 @@ def format_report(report: DoctorReport) -> str:
     if not runnable:
         lines.append(
             "!! 실행 가능한 모델 프로필 없음 — 검사 결과는 결정적 근거(메타데이터·C2PA)와 참고 신호뿐이며 "
-            "모델 검사는 coverage에 skipped/failed로 기록됩니다 !!"
+            "모델 검사는 검사 범위(coverage)에 미실행/실패로 기록됩니다 !!"
         )
-    lines.append("\n== Model profiles ==")
-    lines.append(f"{'':7} {'프로필':<34} {'pin':<6} {'의존성':<6} {'체크포인트':<8} 실행 가능")
+    lines.append(f"\n== {SECTION_TITLES['model_profiles']} ==")
+    lines.append("(프로필마다 표시 이름(프로필 파일), 그 아래 pin · 의존성 · 체크포인트 · 실행 가능)")
     for status in report.model_profiles:
         check = status.summary_check()
+        lines.append(f"[{icon.get(check.status, '????')}] {status.label} ({status.file})")
+        lines.append(f"         pin: {_COLUMN_MARK.get(status.pin, status.pin)} — {status.pin_detail}")
+        lines.append(f"         의존성: {_COLUMN_MARK.get(status.runtime_deps, status.runtime_deps)} — {status.runtime_deps_detail}")
+        lines.append(f"         체크포인트: {_COLUMN_MARK.get(status.checkpoint, status.checkpoint)} — {status.checkpoint_detail}")
         lines.append(
-            f"[{icon.get(check.status, '????')}] {status.name[:34]:<34} "
-            f"{_COLUMN_MARK.get(status.pin, status.pin):<6} "
-            f"{_COLUMN_MARK.get(status.runtime_deps, status.runtime_deps):<6} "
-            f"{_COLUMN_MARK.get(status.checkpoint, status.checkpoint):<8} "
-            + ("예" if status.runnable else ("아니오 (supported:false)" if not status.supported else "아니오"))
+            "         실행 가능: "
+            + ("예" if status.runnable else ("아니오 (supported:false — 측정 게이트 미충족)" if not status.supported else "아니오"))
         )
-        lines.append(f"         pin: {status.pin_detail}")
-        lines.append(f"         의존성: {status.runtime_deps_detail}")
-        lines.append(f"         체크포인트: {status.checkpoint_detail}")
     for check in report.profiles:
         if check.name == "thresholds.json" or not report.model_profiles:
             lines.append(f"[{icon.get(check.status, '????')}] {check.name}: {check.detail}")
     for section, checks in (
-        ("Accelerators", report.accelerators),
-        ("Dependencies", report.dependencies),
-        ("External tools", report.tools),
+        (SECTION_TITLES["accelerators"], report.accelerators),
+        (SECTION_TITLES["dependencies"], report.dependencies),
+        (SECTION_TITLES["tools"], report.tools),
     ):
         lines.append(f"\n== {section} ==")
         for check in checks:
             lines.append(f"[{icon.get(check.status, '????')}] {check.name}: {check.detail}")
     missing = sum(1 for c in (*report.profiles, *report.dependencies, *report.tools) if c.status == "missing")
     warned = sum(1 for c in (*report.profiles, *report.accelerators, *report.dependencies) if c.status == "warn")
-    lines.append(f"\nsummary: 실행 가능 {len(runnable)}/{total}, {missing} missing, {warned} warnings")
+    lines.append(f"\n요약: 실행 가능 {len(runnable)}/{total}, 누락 {missing}건, 경고 {warned}건")
     return "\n".join(lines)

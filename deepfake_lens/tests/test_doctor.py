@@ -176,13 +176,69 @@ class DoctorCliTest(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             rc = cli.main(["doctor"])
         self.assertEqual(rc, 0)
-        self.assertIn("Model profiles", buf.getvalue())
+        self.assertIn("== 모델 프로필 ==", buf.getvalue())  # B7: Korean section headers
 
     def test_report_format_covers_all_sections(self) -> None:
         report = run_diagnostics()
         text = format_report(report)
-        for section in ("Model profiles", "Accelerators", "Dependencies", "External tools"):
-            self.assertIn(section, text)
+        for section in ("모델 프로필", "가속기", "의존성", "외부 도구"):  # B7: Korean section headers
+            self.assertIn(f"== {section} ==", text)
+        for english in ("Model profiles", "Accelerators", "Dependencies", "External tools", "summary:", " missing,", " warnings"):
+            self.assertNotIn(english, text)
+
+    def test_table_uses_display_names(self) -> None:
+        """B7: the table names each profile by its Korean display_name; the raw name stays in JSON."""
+        report = run_diagnostics()
+        text = format_report(report)
+        profiles = [status for status in report.model_profiles if status.display_name]
+        self.assertTrue(profiles)
+        for status in profiles:
+            self.assertIn(f"] {status.display_name} ({status.file})", text)
+            self.assertNotIn(f"] {status.name}", text)
+            self.assertEqual(status.to_json()["display_name"], status.display_name)
+
+    def test_json_stdout_parses_in_a_fresh_process(self) -> None:
+        """B7: `doctor --format json` stdout is JSON even when PyMuPDF is installed.
+
+        A fresh interpreter, so PyMuPDF's legacy ``fitz`` import (which
+        prints a deprecation line to stdout) is not already cached.
+        """
+        import os
+        import subprocess
+        import sys
+
+        repo = Path(__file__).resolve().parents[2]
+        env = dict(os.environ, PYTHONPATH=str(repo) + os.pathsep + os.environ.get("PYTHONPATH", ""))
+        proc = subprocess.run(
+            [sys.executable, "-m", "deepfake_lens", "doctor", "--format", "json"],
+            cwd=repo, env=env, capture_output=True, text=True, timeout=300, check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[-2000:])
+        payload = json.loads(proc.stdout)
+        self.assertIn("model_profiles", payload)
+        names = {check["name"] for check in payload["dependencies"]}
+        self.assertIn("PyMuPDF", names)
+        self.assertNotIn("deprecated", proc.stdout)
+
+    def test_pymupdf_is_imported_through_pdf_backend(self) -> None:
+        """B7: doctor never imports the legacy fitz module directly."""
+        from deepfake_lens import doctor as doctor_module
+
+        calls: list[str] = []
+        real = doctor_module.importlib.import_module
+
+        def spy(name: str, package: str | None = None) -> object:
+            calls.append(name)
+            return real(name, package)
+
+        with mock.patch.object(doctor_module.importlib, "import_module", side_effect=spy), \
+                mock.patch("deepfake_lens.pdf_backend.import_pymupdf", side_effect=ImportError("no pymupdf")) as backend:
+            report = run_diagnostics()
+        self.assertNotIn("fitz", calls)
+        self.assertNotIn("pymupdf", calls)
+        backend.assert_called()
+        [pymupdf_check] = [check for check in report.dependencies if check.name == "PyMuPDF"]
+        self.assertEqual(pymupdf_check.status, "missing")
 
 
 if __name__ == "__main__":
