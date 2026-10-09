@@ -515,6 +515,11 @@ def _rewrite_path_text(node: object, old_path: str, old_name: str, new_path: str
     from .error_text import ROOT_PLACEHOLDER
 
     pairs = [
+        # P2: library messages quote the path with repr() ("cannot identify
+        # image file '<root>/back\\\\slash.jpg'"), so the quoted, escaped form
+        # is rewritten first — to the escaped form of the new path, exactly
+        # what an uncached analysis of that file would have written.
+        (repr(f"{ROOT_PLACEHOLDER}/{old_path}"), repr(f"{ROOT_PLACEHOLDER}/{new_path}")),
         (f"{ROOT_PLACEHOLDER}/{old_path}", f"{ROOT_PLACEHOLDER}/{new_path}"),
         (f"{ROOT_PLACEHOLDER}\\{old_path.replace('/', chr(92))}", f"{ROOT_PLACEHOLDER}\\{new_path.replace('/', chr(92))}"),
     ]
@@ -523,7 +528,10 @@ def _rewrite_path_text(node: object, old_path: str, old_name: str, new_path: str
     def fix(text: str) -> str:
         for old, new in pairs:
             text = text.replace(old, new)
-        return name_pattern.sub(new_name, text) if name_pattern is not None else text
+        # P2: a function replacement — ``new_name`` is a file name, not a
+        # regex template; a name with "\", "\1" or "\g<0>" must be inserted
+        # literally instead of raising re.error (PatternError) mid-scan.
+        return name_pattern.sub(lambda _match: new_name, text) if name_pattern is not None else text
 
     def walk(value: object) -> object:
         if isinstance(value, str):

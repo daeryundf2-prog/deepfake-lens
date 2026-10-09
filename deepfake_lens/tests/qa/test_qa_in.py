@@ -528,6 +528,32 @@ class QaIn4ContentKeyedCacheTest(unittest.TestCase):
         self.assertTrue(any("ext:.png" in key for key in keys))
         self.assertTrue(any("ext:.jpg" in key for key in keys))
 
+    @unittest.skipIf(os.name == "nt", "backslash is a path separator on Windows")
+    def test_cached_row_for_name_with_regex_template_chars(self) -> None:
+        """QA-IN-4: 마지막 바이트만 바꾼 동일 크기 파일을 같은 경로에 넣고 touch -r로 mtime 복원 후 재검사 → 캐시 미사용, 새로 분석, 해시가 다르게 기록.
+        P2 (round 8): a renamed/duplicated file whose name has "\\", "$", "\\1" or "\\g<0>" replays from cache literally.
+
+        The name was used as a re.sub replacement template — a warm cached
+        scan died with re.error (PatternError), exit 1 and no output.
+        """
+        folder = Path(self._tmp.name) / "p2"
+        folder.mkdir()
+        garbage = b"not an image at all " * 8
+        (folder / "garbage.jpg").write_bytes(garbage)
+        cache = Path(self._tmp.name) / "p2-cache.json"
+        scan_directory(folder, cache_path=cache)
+        hostile = ["back\\slash.jpg", "dollar$1.jpg", "group\\1.jpg", "whole\\g<0>.jpg"]
+        (folder / "garbage.jpg").rename(folder / hostile[0])  # rename …
+        for name in hostile[1:]:
+            (folder / name).write_bytes(garbage)  # … and same-content duplicates
+        summary, items = scan_directory(folder, cache_path=cache)
+        self.assertEqual(summary.cached, len(hostile))
+        uncached = {item.name: item.to_json() for item in scan_directory(folder)[1]}
+        for item in items:
+            with self.subTest(name=item.name):
+                self.assertEqual(item.to_json(), uncached[item.name])
+                self.assertNotIn("garbage.jpg", json.dumps(item.to_json(), ensure_ascii=False))
+
     def test_dedupe_hash_is_reused_not_recomputed(self) -> None:
         """QA-IN-4: 마지막 바이트만 바꾼 동일 크기 파일을 같은 경로에 넣고 touch -r로 mtime 복원 후 재검사 → 캐시 미사용, 새로 분석, 해시가 다르게 기록.
         with dedupe on, each file is hashed once per scan (shared memo)."""
