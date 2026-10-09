@@ -427,7 +427,7 @@ def write_forensic_pdf_report(
     page.insert_text(pymupdf.Point(margin_l + 10, 151), f"감정 일시: {now_str} (KST)  |  분석 엔진: Deepfake Lens Forensic Suite v0.1.0", fontname=font_ko, fontsize=8.5, color=(0.2, 0.2, 0.2))
     page.insert_text(
         pymupdf.Point(margin_l + 10, 165),
-        f"감정 결과: 총 {summary.total}개 — 조작·생성 근거 {summary.manipulation_evidence}건, 원본성 근거 {summary.authenticity_evidence}건, 판단 불가 {summary.undetermined}건(검사 실패 {summary.checks_failed}건), 미지원/오류 {summary.unsupported_or_failed}건",
+        f"감정 결과: 총 {summary.total}개" + (f"(압축 파일 {summary.container_rows}건 포함)" if summary.container_rows else "") + " — " + f"조작·생성 근거 {summary.manipulation_evidence}건, 원본성 근거 {summary.authenticity_evidence}건, 판단 불가 {summary.undetermined}건(검사 실패 {summary.checks_failed}건), 미지원/오류 {summary.unsupported_or_failed}건",
         fontname=font_ko,
         fontsize=8.5,
         color=(0.1, 0.2, 0.4),

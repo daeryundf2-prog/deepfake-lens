@@ -259,6 +259,13 @@ def _purpose_head(item: ScanItem) -> str:
         return f"자동 분석 결론이 없는 증거물({status_label(item.status or 'failed')})로, 별도 검증이 필요함을 소명함."
     if res.grade == Grade.REFERENCE:
         return f"{TEXT_LEGAL_LIMITATION} 본 증거물에 대한 자동 분석 결과는 결론이 아닌 참고 정보임을 소명함."
+    if res.verdict_code == Verdict.MANIPULATION_EVIDENCE and item.kind == "archive":
+        # N5: a container row concludes from its members, not from its own bytes.
+        rollup = next((e.detail for e in res.evidence if e.layer == "archive"), "")
+        return (
+            f"압축 파일 구성원 중 결정적 근거에 의해 조작·생성 근거가 확인된 파일이 있는 증거물임을 소명함"
+            f"(구성원 결론 집계: {rollup}; 구성원별 근거는 '{Path(item.path).name}::경로' 행 참조)."
+        )
     if res.verdict_code == Verdict.MANIPULATION_EVIDENCE:
         basis = next(
             (e.title for e in res.evidence if e.kind == EvidenceKind.DETERMINISTIC and e.direction == EvidenceDirection.SYNTHETIC and e.strength == EvidenceStrength.STRONG),

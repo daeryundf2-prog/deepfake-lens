@@ -1040,7 +1040,11 @@
             $('stat-auth').textContent = bands.authenticity_evidence;
             $('stat-other').textContent = bands.other;
             $('stat-total').textContent = results.length;
-            $('stat-model-label').textContent = `뉴럴 ${modelActive}`;
+            // N5: archive container rows are counted by verdict; say how many.
+            const containers = summary.container_rows != null
+                ? summary.container_rows
+                : results.filter(entry => entry.item.kind === 'archive' && entry.item.result).length;
+            $('stat-model-label').textContent = (containers ? `압축 파일 ${containers}건 포함 · ` : '') + `뉴럴 ${modelActive}`;
             const total = Math.max(1, results.length);
             $('distbar').innerHTML =
                 `<div class="bg-red"></div>` +

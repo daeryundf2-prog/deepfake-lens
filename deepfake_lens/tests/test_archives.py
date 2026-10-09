@@ -729,10 +729,78 @@ class ArchiveContainerCountTests(unittest.TestCase):
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(cli_main(["scan", str(self.folder)]), 0)
         text = out.getvalue()
-        header = re.search(r"총 (\d+)건 — 조작·생성 근거 있음 (\d+)건, 원본성 근거 있음 (\d+)건, 판단 불가 (\d+)건.*미지원/분석 실패 (\d+)건", text)
+        # N5: "(압축 파일 N건 포함)" says how many counted rows are containers.
+        header = re.search(r"총 (\d+)건\(압축 파일 (\d+)건 포함\) — 조작·생성 근거 있음 (\d+)건, 원본성 근거 있음 (\d+)건, 판단 불가 (\d+)건.*미지원/분석 실패 (\d+)건", text)
         assert header is not None, text
-        total, manipulated, authentic, undetermined, failed = (int(value) for value in header.groups())
-        self.assertEqual((total, manipulated, authentic, undetermined, failed), (2, 2, 0, 0, 0))
+        total, containers, manipulated, authentic, undetermined, failed = (int(value) for value in header.groups())
+        self.assertEqual((total, containers, manipulated, authentic, undetermined, failed), (2, 1, 2, 0, 0, 0))
         table_rows = [line for line in text.splitlines() if line.startswith("조작·생성 근거 있음")]
         self.assertEqual(len(table_rows), manipulated)
         self.assertTrue(any(line.rstrip().split("  #")[0].endswith("case.zip") for line in table_rows), table_rows)
+
+
+class ArchiveContainerRollupEvidenceTests(unittest.TestCase):
+    """N5: a container row names what its verdict rests on (the member roll-up)."""
+
+    def setUp(self) -> None:
+        import tempfile
+
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        a1111 = (Path(__file__).resolve().parents[2] / "fixtures" / "benchmark" / "a1111-metadata-marker.png").read_bytes()
+        with zipfile.ZipFile(self.root / "case.zip", "w") as zf:
+            zf.writestr("gen/a1111.png", a1111)
+            zf.writestr("notes/memo.txt", "평범한 회의 메모입니다.")
+        (self.root / "plain.txt").write_text("폴더의 다른 메모", encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_container_row_carries_the_rollup_item_and_summary_counts_it(self) -> None:
+        import contextlib
+
+        from deepfake_lens.cli_render import _print_table
+        from deepfake_lens.core import ARCHIVE_ROLLUP_TITLE
+        from deepfake_lens.evidence_statement import build_evidence_statement
+        from deepfake_lens.result_text import summary_line
+        from deepfake_lens.result_types import EvidenceDirection, EvidenceKind, EvidenceStrength, Verdict
+
+        summary, items = scan_directory(self.root)
+        container = next(item for item in items if item.path == "case.zip")
+        self.assertIsNotNone(container.result)
+        assert container.result is not None
+        self.assertEqual(container.result.verdict_code, Verdict.MANIPULATION_EVIDENCE)
+        self.assertEqual(len(container.result.evidence), 1)
+        rollup = container.result.evidence[0]
+        self.assertEqual(rollup.title, ARCHIVE_ROLLUP_TITLE)
+        self.assertEqual(rollup.detail, "조작·생성 근거 있음 1건 / 판단 불가 1건")
+        self.assertEqual(
+            (rollup.kind, rollup.direction, rollup.strength, rollup.layer),
+            (EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.MODERATE, "archive"),
+        )
+        # R5 counting is unchanged; the header says how many rows are containers.
+        self.assertEqual(summary.container_rows, 1)
+        self.assertEqual(summary.manipulation_evidence, 2)  # the member and the container
+        self.assertIn("총 4건(압축 파일 1건 포함)", summary_line(summary))
+        self.assertEqual(summary.to_json()["container_rows"], 1)
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            _print_table(summary, items, include_low=True)
+        container_line = next(line for line in out.getvalue().splitlines() if line.rstrip().endswith("# [결정] " + ARCHIVE_ROLLUP_TITLE) or " case.zip  #" in line)
+        self.assertIn(ARCHIVE_ROLLUP_TITLE, container_line)
+        self.assertNotIn("근거 항목 없음", container_line)
+        self.assertIn("(압축 파일 1건 포함)", out.getvalue())
+
+        statement = build_evidence_statement(items, scan_root=self.root)
+        entry = next(e for e in statement.entries if e.file_path == "case.zip")
+        self.assertNotIn("근거 항목 없음", entry.purpose_of_proof)
+        self.assertNotIn("결정적 근거(결정적 근거)", entry.purpose_of_proof)
+        self.assertIn("압축 파일 구성원 중 결정적 근거에 의해 조작·생성 근거가 확인된 파일이 있는 증거물임을 소명함", entry.purpose_of_proof)
+        self.assertIn("조작·생성 근거 있음 1건 / 판단 불가 1건", entry.purpose_of_proof)
+
+    def test_rollup_detail_lists_authenticity_only_when_present(self) -> None:
+        from deepfake_lens.core import archive_rollup_detail
+
+        self.assertEqual(archive_rollup_detail(0, 3), "조작·생성 근거 있음 0건 / 판단 불가 3건")
+        self.assertEqual(archive_rollup_detail(1, 0, 2), "조작·생성 근거 있음 1건 / 판단 불가 0건 / 원본성 근거 있음 2건")

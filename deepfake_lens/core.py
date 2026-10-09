@@ -419,6 +419,21 @@ def _scan_paths(
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+# N5: title of the container row's roll-up evidence item.
+ARCHIVE_ROLLUP_TITLE = "압축 파일 구성원 결론 집계"
+
+
+def archive_rollup_detail(manipulated: int, undetermined: int, authentic: int = 0) -> str:
+    """"조작·생성 근거 있음 N건 / 판단 불가 M건" (+ 원본성 when present) for a container row."""
+    detail = (
+        f"{VERDICT_LABELS[Verdict.MANIPULATION_EVIDENCE]} {manipulated}건 / "
+        f"{VERDICT_LABELS[Verdict.UNDETERMINED]} {undetermined}건"
+    )
+    if authentic:
+        detail += f" / {VERDICT_LABELS[Verdict.AUTHENTICITY_EVIDENCE]} {authentic}건"
+    return detail
+
+
 def _archive_container_item(
     rel: str,
     name: str,
@@ -438,8 +453,10 @@ def _archive_container_item(
 
     manipulation if any member has manipulation evidence; authenticity only
     if every member was analyzed, none was skipped, and all have
-    authenticity evidence; otherwise undetermined. The row carries no
-    evidence of its own — the members do. Each member the extractor
+    authenticity evidence; otherwise undetermined. The members carry the
+    evidence; the row's own single item is the deterministic, neutral
+    roll-up "압축 파일 구성원 결론 집계: 조작·생성 근거 있음 N건 / 판단 불가
+    M건" (N5), so the table and the evidence statement name the basis. Each member the extractor
     refused (traversal, absolute path, link, budget/bomb limits, …) is a
     ``skipped`` ``archive_member`` coverage entry and a limitation naming
     the member and the reason (D9); ``sha256`` is the archive file's
@@ -453,6 +470,8 @@ def _archive_container_item(
     analyzed_members = [i for i in (member_items or []) if i.result is not None and i.status == "analyzed"]
     verdicts = [i.result.verdict_code for i in analyzed_members if i.result is not None]
     manipulated = sum(1 for v in verdicts if v == Verdict.MANIPULATION_EVIDENCE)
+    undetermined_members = sum(1 for v in verdicts if v == Verdict.UNDETERMINED)
+    authentic_members = sum(1 for v in verdicts if v == Verdict.AUTHENTICITY_EVIDENCE)
     if manipulated:
         verdict_code = Verdict.MANIPULATION_EVIDENCE
     elif (
@@ -477,6 +496,16 @@ def _archive_container_item(
     if len(rejected) > len(shown):
         coverage.append(skipped_entry("archive_member", f"외 {len(rejected) - len(shown)}개 구성 파일 거부(사유는 위 항목과 경고 참조)"))
     signals = [EvidenceSignal("압축 컨테이너", f"{fmt or 'archive'} 형식 — 구성 파일 {members}개 개별 분석" + (f", 스킵 {skipped}개" if skipped else ""), 0)]
+    # N5: the roll-up is the container row's own (deterministic, neutral)
+    # evidence item, so the CLI table and the evidence statement name what
+    # the verdict rests on instead of "근거 항목 없음".
+    evidence: list[EvidenceItem] = []
+    if analyzed_members:
+        evidence.append(EvidenceItem(
+            ARCHIVE_ROLLUP_TITLE,
+            archive_rollup_detail(manipulated, undetermined_members, authentic_members),
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.MODERATE, "archive",
+        ))
     limitations = list(warnings)
     limitations.extend(f"구성 파일 거부: {name} — {reason}" for name, reason in shown)
     limitations.append("컨테이너 행은 구성 파일 결과의 요약입니다. '아카이브::경로' 형태의 개별 결과를 확인하세요.")
@@ -511,6 +540,7 @@ def _archive_container_item(
             next_checks=["구성 파일 중 조작·생성 근거가 있는 항목부터 검토하세요."],
             verdict_code=verdict_code,
             coverage=coverage,
+            evidence=evidence,
         ),
         sha256=sha256,
     )
@@ -1974,6 +2004,7 @@ def summarize(items: list[ScanItem], *, capped: bool, cached: int = 0) -> BatchS
             1 for item in analyzed
             if item.result and any(entry.status == CoverageStatus.FAILED for entry in item.result.coverage)
         ),
+        container_rows=sum(1 for item in analyzed if item.kind == "archive"),
     )
 
 

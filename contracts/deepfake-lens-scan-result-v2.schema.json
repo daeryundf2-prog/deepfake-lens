@@ -35,6 +35,9 @@
           { "required": ["high"] }, { "required": ["medium"] }, { "required": ["low"] }, { "required": ["unknown"] }
         ]
       },
+      "properties": {
+        "container_rows": { "type": "integer", "minimum": 0, "description": "Archive container rows among the verdict rows (already in the verdict counts, R5/N5)." }
+      },
       "description": "Verdict counts only (D16): the legacy band counts high/medium/low/unknown are not serialized."
     },
     "item": {

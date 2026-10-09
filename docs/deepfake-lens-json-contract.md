@@ -63,6 +63,7 @@ per-file coverage record:
 | `authenticity_evidence` | Verdict rows whose verdict is `authenticity_evidence`. |
 | `undetermined` | Verdict rows whose verdict is `undetermined`. |
 | `checks_failed` | Verdict rows with at least one `failed` coverage entry. |
+| `container_rows` | Verdict rows that are archive container rows (`kind: "archive"`) — already included in the three verdict counts (R5); the CLI/HTML/PDF header prints `총 N건(압축 파일 M건 포함)` and the GUI total pill `압축 파일 M건 포함` (N5). A container row carries one evidence item of its own: `압축 파일 구성원 결론 집계` — `조작·생성 근거 있음 N건 / 판단 불가 M건` (` / 원본성 근거 있음 K건` when K > 0), deterministic, neutral, moderate, layer `archive` — so the table and the evidence statement name the basis of its verdict. |
 
 A *verdict row* is any item with a `result` whose `status` is not `failed`,
 `unsupported`, `duplicate` or `skipped` (`result_types.is_verdict_row`) —
@@ -162,6 +163,7 @@ Phase-0 classification of existing signals:
 | Camera EXIF consistent (`카메라 EXIF 일관`): Make + Model, parseable DateTimeOriginal (≥ 1995, not in the future), Software absent or the camera's own (vendor/model/firmware, never an editor or generator), GPS in range and dated within a day of capture, no generator name in XMP, JPEG quality estimate ≥ 90 (recompression proxy until phase 1) | deterministic | authentic | moderate |
 | Camera EXIF present but a condition above fails (`카메라 EXIF 있음(일관성 조건 미충족)`, detail names the failed conditions) | deterministic | neutral | weak |
 | Camera EXIF on an image that did not decode — the `image_class` (decode) check `failed` (`EXIF 존재(파일 손상으로 일관성 미평가)`) or did not run (`EXIF 존재(디코드 검사 미실행으로 일관성 미평가)`); the consistency rule above applies only when that check `ran` (R9) | deterministic | neutral | weak |
+| C2PA manifest whose hashes no longer match (`*.mismatch` status code: `assertion.hashedURI.mismatch`, `assertion.dataHash.mismatch`, … — content changed after signing): `C2PA 무결성 불일치` — `매니페스트 해시 불일치 — 서명 이후 내용이 변경됨 (<codes>)`, never the untrusted-signer wording; an AI `digitalSourceType` it declares is kept as a synthetic/moderate item (N6) | deterministic | neutral | strong |
 | C2PA manifest present but untrusted / not validated | deterministic | neutral (synthetic/moderate if it declares AI) | weak |
 | Square generator resolution | deterministic | neutral | weak |
 | Missing metadata (`메타데이터 부재`) — only when the metadata read completed, no C2PA manifest is present (or its read failed) and no field was found; a truncated/empty/unrecognized file or an EXIF read error makes the `metadata` check `failed` instead | deterministic | neutral | weak |

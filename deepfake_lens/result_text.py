@@ -99,8 +99,11 @@ def leading_limitations(result: ClassificationResult) -> list[str]:
 
 
 def summary_line(summary: BatchScanSummary) -> str:
+    # N5: archive container rows are counted by their verdict (R5); the
+    # header says how many of the rows are such roll-up rows.
+    containers = f"(압축 파일 {summary.container_rows}건 포함)" if summary.container_rows else ""
     return (
-        f"총 {summary.total}건 — 조작·생성 근거 있음 {summary.manipulation_evidence}건, "
+        f"총 {summary.total}건{containers} — 조작·생성 근거 있음 {summary.manipulation_evidence}건, "
         f"원본성 근거 있음 {summary.authenticity_evidence}건, 판단 불가 {summary.undetermined}건"
         f"(검사 실패 포함 {summary.checks_failed}건), 미지원/분석 실패 {summary.unsupported_or_failed}건, "
         f"중복 {summary.duplicates}건, 건너뜀 {summary.skipped}건"
@@ -113,4 +116,5 @@ def summary_line_ascii(summary: BatchScanSummary) -> str:
         f"authenticity_evidence={summary.authenticity_evidence}, undetermined={summary.undetermined} "
         f"(with failed checks={summary.checks_failed}), unsupported/failed={summary.unsupported_or_failed}, "
         f"duplicates={summary.duplicates}, skipped={summary.skipped}, cached={summary.cached}"
+        + (f", archive_container_rows={summary.container_rows}" if summary.container_rows else "")
     )

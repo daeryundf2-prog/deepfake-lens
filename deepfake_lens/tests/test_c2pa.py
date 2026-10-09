@@ -360,3 +360,99 @@ class C2paUnreadableDiagnosticTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _tampered_fixture(where: str) -> bytes:
+    """signed-c2pa.png with bytes changed after signing.
+
+    ``asset``: one byte of pixel data in the IDAT chunk after the caBX
+    manifest (CRC recomputed, so the PNG stays well-formed) — C2PA reports
+    ``assertion.dataHash.mismatch``. ``assertion``: 64 bytes inverted in the
+    middle of the manifest's embedded assertion data — ``assertion.hashedURI.mismatch``.
+    """
+    import struct
+    import zlib
+
+    data = bytearray((C2PA_FIXTURES / "signed-c2pa.png").read_bytes())
+    chunks: dict[bytes, tuple[int, int]] = {}
+    offset = 8
+    while offset < len(data):
+        (length,) = struct.unpack(">I", data[offset:offset + 4])
+        chunks.setdefault(bytes(data[offset + 4:offset + 8]), (offset, length))
+        offset += 12 + length
+    if where == "asset":
+        start, length = chunks[b"IDAT"]
+        data[start + 8 + length // 2] ^= 0xFF
+        crc = zlib.crc32(bytes(data[start + 4:start + 8 + length])) & 0xFFFFFFFF
+        data[start + 8 + length:start + 12 + length] = struct.pack(">I", crc)
+    else:
+        start, length = chunks[b"caBX"]
+        middle = start + 8 + length // 2
+        for index in range(middle, middle + 64):
+            data[index] ^= 0xFF
+    return bytes(data)
+
+
+class C2paIntegrityMismatchTest(unittest.TestCase):
+    """N6: a valid-looking manifest over changed bytes is "C2PA 무결성 불일치"
+    (매니페스트 해시 불일치 — 서명 이후 내용이 변경됨): deterministic, neutral,
+    strong — never the untrusted-signer wording."""
+
+    UNTRUSTED_WORDING = ("신뢰 저장소에 없는 서명자", "검증 미완료")
+
+    def _check(self, where: str, code: str) -> None:
+        from deepfake_lens.core import analyze_file
+        from deepfake_lens.result_types import EvidenceDirection, EvidenceKind, EvidenceStrength, Verdict
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / f"tampered-{where}.png"
+            path.write_bytes(_tampered_fixture(where))
+            validation = validate_c2pa_manifest(path)
+            assert validation is not None
+            self.assertIn(code, validation.get("failure_codes") or [])
+            item = analyze_file(path)
+            forensic = analyze_metadata_forensic(path).to_json()
+        assert item.result is not None
+        c2pa_items = [e for e in item.result.evidence if e.layer == "c2pa"]
+        self.assertEqual([e.title for e in c2pa_items], ["C2PA 무결성 불일치"])
+        integrity = c2pa_items[0]
+        self.assertTrue(integrity.detail.startswith("매니페스트 해시 불일치 — 서명 이후 내용이 변경됨"), integrity.detail)
+        self.assertIn(code, integrity.detail)
+        self.assertEqual(
+            (integrity.kind, integrity.direction, integrity.strength),
+            (EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.STRONG),
+        )
+        self.assertEqual(item.result.verdict_code, Verdict.UNDETERMINED)
+        text = json.dumps(item.result.to_json(), ensure_ascii=False)
+        for wording in self.UNTRUSTED_WORDING:
+            self.assertNotIn(wording, text)
+        forensic_text = json.dumps(forensic, ensure_ascii=False)
+        self.assertIn("C2PA 무결성 불일치", forensic_text)
+        self.assertIn("매니페스트 해시 불일치 — 서명 이후 내용이 변경됨", forensic_text)
+        self.assertNotIn("신뢰 저장소에 없는 서명자", forensic_text)
+
+    @unittest.skipUnless(_has_c2pa_sdk(), "c2pa-python not installed")
+    def test_asset_bytes_changed_after_signing(self) -> None:
+        self._check("asset", "assertion.dataHash.mismatch")
+
+    @unittest.skipUnless(_has_c2pa_sdk(), "c2pa-python not installed")
+    def test_assertion_bytes_changed_after_signing(self) -> None:
+        self._check("assertion", "assertion.hashedURI.mismatch")
+
+    def test_rule_on_synthetic_validation_records(self) -> None:
+        """No SDK needed: the evidence rule on recorded validation dicts."""
+        from deepfake_lens.evidence_rules import c2pa_evidence
+        from deepfake_lens.result_types import EvidenceDirection, EvidenceStrength
+
+        base = {
+            "present": True, "status": "invalid", "state": "Invalid", "trusted": False,
+            "signature": {"common_name": "Some Signer"},
+            "success_codes": ["claimSignature.validated"],
+        }
+        tampered = c2pa_evidence({**base, "failure_codes": ["signingCredential.untrusted", "assertion.hashedURI.mismatch"]})
+        self.assertEqual([(e.title, e.direction, e.strength) for e in tampered], [("C2PA 무결성 불일치", EvidenceDirection.NEUTRAL, EvidenceStrength.STRONG)])
+        declared = c2pa_evidence({**base, "failure_codes": ["assertion.dataHash.mismatch"], "digital_source_types": ["http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia"]})
+        self.assertEqual(declared[0].title, "C2PA 무결성 불일치")
+        self.assertEqual(declared[1].strength, EvidenceStrength.MODERATE)  # declaration kept, never strong
+        untrusted = c2pa_evidence({**base, "failure_codes": ["signingCredential.untrusted"]})
+        self.assertEqual(untrusted[0].title, "C2PA 매니페스트 존재(검증 미완료)")

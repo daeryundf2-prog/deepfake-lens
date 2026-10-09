@@ -141,6 +141,14 @@ def analyze_metadata_forensic(path: Path | str) -> MetadataForensicAnalysis:
                 f"공식 SDK 검증 상태 {state}. 서명자: {signer}.",
                 20,
             ))
+        elif mismatches := sorted(str(code) for code in failures if str(code).lower().endswith(".mismatch")):
+            # N6: content changed after signing — never the untrusted-signer wording.
+            signals.append(ForensicEvidenceSignal(
+                "C2PA 무결성 불일치",
+                f"매니페스트 해시 불일치 — 서명 이후 내용이 변경됨 ({', '.join(mismatches)}).",
+                10,
+            ))
+            limitations.append("C2PA 무결성 불일치: 매니페스트가 서명한 내용과 현재 파일이 다릅니다.")
         else:
             signals.append(ForensicEvidenceSignal(
                 "C2PA 매니페스트 검증 미완료",

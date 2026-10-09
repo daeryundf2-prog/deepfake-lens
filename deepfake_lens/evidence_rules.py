@@ -374,10 +374,45 @@ def _codes(raw: object) -> set[str]:
     return {str(code) for code in raw} if isinstance(raw, (list, tuple, set)) else set()
 
 
+# N6: C2PA status codes that mean the signed manifest no longer matches the
+# bytes it covers — assertion.hashedURI.mismatch (an assertion changed),
+# assertion.dataHash/bmffHash/boxesHash/collectionHash.mismatch (asset bytes
+# changed), claimSignature.mismatch (claim changed). C2PA 2.x spec, §15
+# "Validation" status codes.
+C2PA_INTEGRITY_TITLE = "C2PA 무결성 불일치"
+C2PA_INTEGRITY_DETAIL = "매니페스트 해시 불일치 — 서명 이후 내용이 변경됨"
+
+
+def c2pa_integrity_mismatch_codes(failure_codes: object) -> list[str]:
+    """The failure codes that say signed content was altered (N6)."""
+    return sorted(code for code in _codes(failure_codes) if code.lower().endswith(".mismatch"))
+
+
 def c2pa_evidence(validation: Mapping[str, object] | None) -> list[EvidenceItem]:
-    """Deterministic items from ``c2pa.validate_c2pa_manifest`` output."""
+    """Deterministic items from ``c2pa.validate_c2pa_manifest`` output.
+
+    N6: a hash mismatch (content changed after signing) is reported as
+    "C2PA 무결성 불일치" — deterministic, neutral, strong — never with the
+    untrusted-signer wording, whatever the signer's trust status.
+    """
     if not validation or not validation.get("present"):
         return []
+    mismatches = c2pa_integrity_mismatch_codes(validation.get("failure_codes"))
+    if mismatches:
+        items = [EvidenceItem(
+            C2PA_INTEGRITY_TITLE,
+            f"{C2PA_INTEGRITY_DETAIL} ({', '.join(mismatches)}). 매니페스트가 서명한 내용과 현재 파일이 다르므로 "
+            "매니페스트의 출처 선언을 이 파일의 근거로 쓸 수 없습니다.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.STRONG, "c2pa",
+        )]
+        declared = sorted(_c2pa_source_types(validation) & C2PA_SYNTHETIC_SOURCE_TYPES)
+        if declared:
+            items.append(EvidenceItem(
+                "C2PA 매니페스트의 생성형 AI 출처 선언(무결성 불일치)",
+                f"매니페스트가 digitalSourceType={', '.join(declared)}를 선언했으나 서명 이후 내용이 변경되어(해시 불일치) 결론 근거로 쓰지 않습니다.",
+                EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, "c2pa",
+            ))
+        return items
     source_types = _c2pa_source_types(validation)
     synthetic_types = sorted(source_types & C2PA_SYNTHETIC_SOURCE_TYPES)
     capture = bool(source_types & C2PA_CAPTURE_SOURCE_TYPES)
