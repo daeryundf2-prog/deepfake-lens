@@ -802,8 +802,14 @@ def normalize_for_detection(text: str) -> str:
 
     A symbol that NFKC would spell as letters ("fake™" -> "fakeTM", one
     camelCase identifier) is a boundary before NFKC as well (R11-5).
+    R12-12 (round 12): every format character (category Cf — TAG characters
+    U+E0000–U+E007F, invisible operators, bidi marks, Mongolian vowel
+    separator, interlinear annotation marks, …) is dropped first; only the
+    soft hyphen, zero-width space/joiners, word joiner and BOM were, so
+    "fa<TAG a>ke" or "<TAG>fake" hid the word.
     """
     if not text.isascii():
+        text = "".join(char for char in text if unicodedata.category(char) != "Cf")
         text = "".join(" " if _spells_letters(char) else char for char in text)
     normalized = unicodedata.normalize("NFKC", text).translate(_INVISIBLE_CHARS).translate(_HOMOGLYPHS)
     return _token_boundaries(normalized)

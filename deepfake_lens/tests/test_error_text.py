@@ -334,6 +334,33 @@ class EnglishDetectorBypassTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNone(english_prose(text), text)
 
+    def test_round_twelve_format_characters_are_dropped(self) -> None:
+        """R12-12 (round 12): a word after or inside TAG characters (U+E0000-U+E007F) passed the
+        detector — only six invisible characters were dropped. Every format character (Cf) is
+        removed before the check."""
+        import sys
+        import unicodedata
+
+        from deepfake_lens.error_text import english_prose
+
+        for text, expected in {
+            "결론: fa\U000e0061ke": "fake", "결론: \U000e0001fake": "fake", "판정 real\U000e007f": "real",
+            "\U000e0066\U000e0061real": "real", "fa\u2062ke 결론": "fake", "fa\u180eke": "fake",
+            "fa\ufff9ke": "fake", "f\u061cake": "fake", "re\u200eal": "real", "au\u2066thentic\u2069": "authentic",
+        }.items():
+            with self.subTest(text=text):
+                self.assertEqual(english_prose(text), expected)
+        # Every Cf code point (BMP and astral), inside and before the word.
+        formats = [chr(code) for code in range(sys.maxunicode + 1) if unicodedata.category(chr(code)) == "Cf"]
+        self.assertGreater(len(formats), 150)
+        for char in formats:
+            with self.subTest(char=hex(ord(char))):
+                self.assertEqual(english_prose(f"결론 fa{char}ke"), "fake")
+                self.assertEqual(english_prose(f"결론 {char}fake"), "fake")
+        for text in ("판단 불가\U000e0001 결론", "조작\u200b·생성 근거 있음", "\ufeff결정 2·통계 0"):
+            with self.subTest(text=text):
+                self.assertIsNone(english_prose(text), text)
+
     def test_identifiers_and_korean_still_pass(self) -> None:
         from deepfake_lens.error_text import english_prose
 
