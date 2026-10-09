@@ -315,3 +315,116 @@ class AnalysisResultTextTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ScanTableKindLabelsTest(unittest.TestCase):
+    """N8: the scan table's 유형 column printed the raw kind ``unsupported``
+    (and ``duplicate``); every row kind now has a Korean label."""
+
+    def test_unsupported_and_duplicate_rows_have_korean_type(self) -> None:
+        from deepfake_lens.cli_render import _print_table
+        from deepfake_lens.core import scan_directory
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "unknown.xyz").write_bytes(b"???")
+            (root / "a.txt").write_text("메모입니다.", encoding="utf-8")
+            (root / "b.txt").write_text("메모입니다.", encoding="utf-8")  # duplicate of a.txt
+            summary, items = scan_directory(root, dedupe=True)
+            self.assertEqual(sorted(item.kind for item in items), ["duplicate", "text", "unsupported"])
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                _print_table(summary, items, include_low=True)
+        text = out.getvalue()
+        unsupported_line = next(line for line in text.splitlines() if "unknown.xyz" in line)
+        duplicate_line = next(line for line in text.splitlines() if "b.txt" in line)
+        self.assertIn("미지원 형식", unsupported_line)
+        self.assertIn("중복", duplicate_line)
+        self.assertNotRegex(text, r"\bunsupported\b|\bduplicate\b")
+
+    def test_every_row_kind_has_a_label(self) -> None:
+        """Each kind literal core/archives give a ScanItem is in ITEM_KIND_LABELS; an unknown kind is never raw."""
+        from deepfake_lens.result_text import ITEM_KIND_FALLBACK, ITEM_KIND_LABELS, item_kind_label
+
+        package = Path(__file__).resolve().parents[1]
+        source = "\n".join(path.read_text(encoding="utf-8") for path in package.glob("*.py"))
+        kinds = set(re.findall(r'ScanItem\([^)]*?,\s*[\w.]+,\s*"([a-z_]+)",\s*"[a-z_]+"', source))
+        kinds |= set(re.findall(r'ScanItem\(\s*[\w.()]+,\s*[\w.()"]+,\s*"([a-z_]+)"', source))
+        self.assertTrue({"image", "unsupported", "duplicate", "unknown", "archive"} <= kinds, kinds)
+        self.assertEqual(sorted(kind for kind in kinds if kind not in ITEM_KIND_LABELS), [])
+        self.assertEqual(item_kind_label("something-new"), ITEM_KIND_FALLBACK)
+
+
+class UserReasonsHaveNoIdentifiersTest(unittest.TestCase):
+    """N13: user-facing reasons carried identifiers — ``(failed:zip:BadZipFile)``,
+    ``(allow_symlinks=false)``, ``WP-I`` (and ``deep_signals=false`` / ``pixel=off``);
+    they are Korean descriptions now ("압축 파일 손상(BadZipFile)", "심볼릭 링크
+    허용 안 함", "2차 계획 측정 단계")."""
+
+    IDENTIFIER_PATTERNS = (
+        re.compile(r"\b[a-z_]+=(?:false|true|off|on)\b"),
+        re.compile(r"\b(?:failed|unavailable|skipped):[\w-]+"),
+        re.compile(r"\bWP-[A-Z]\b"),
+    )
+
+    def _strings(self, node: Any) -> list[str]:
+        if isinstance(node, str):
+            return [node]
+        if isinstance(node, dict):
+            return [text for key, value in node.items() if key not in {"document_metadata"} for text in self._strings(value)]
+        if isinstance(node, list):
+            return [text for value in node for text in self._strings(value)]
+        return []
+
+    def test_scan_rows_and_profile_reasons(self) -> None:
+        from deepfake_lens.analysis_api import scan_payload
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "broken.docx").write_bytes(b"PK\x03\x04 not really a zip")
+            (root / "memo.txt").write_text("메모입니다.", encoding="utf-8")
+            (root / "photo.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+            if hasattr(os, "symlink"):
+                with contextlib.suppress(OSError):
+                    (root / "link.png").symlink_to("photo.png")
+            options = AnalysisOptions()
+            run = scan_folder_run(root, options)
+            payload = scan_payload(run.summary, run.items, run.thresholds, options)
+        items: Any = payload["items"]
+        rows = {row["path"]: row for row in items}
+        docx_reasons = [entry["reason"] for entry in rows["broken.docx"]["result"]["coverage"] if entry["check"] == "document_text"]
+        self.assertEqual(len(docx_reasons), 1)
+        self.assertIn("압축 파일 손상(BadZipFile)", docx_reasons[0])
+        if "link.png" in rows:
+            self.assertIn("심볼릭 링크 허용 안 함", rows["link.png"]["error"])
+        model_reasons = [entry["reason"] for row in rows.values() for entry in (row["result"] or {}).get("coverage", []) if entry["check"].startswith("model:")]
+        self.assertTrue(any("2차 계획 측정 단계" in reason for reason in model_reasons), model_reasons)
+        offenders = [
+            (pattern.pattern, text) for text in self._strings(payload["items"]) for pattern in self.IDENTIFIER_PATTERNS if pattern.search(text)
+        ]
+        self.assertEqual(offenders, [])
+
+    def test_extractor_text(self) -> None:
+        from deepfake_lens.documents import extractor_text
+
+        self.assertEqual(extractor_text("failed:zip:BadZipFile"), "압축 파일 손상(BadZipFile)")
+        self.assertEqual(extractor_text("failed:pymupdf:RuntimeError"), "PDF 읽기 실패(RuntimeError)")
+        self.assertEqual(extractor_text("failed:no-document-xml"), "문서 본문(XML)이 없음")
+        self.assertEqual(extractor_text("unavailable:ole-legacy"), "구형 OLE 문서(.doc/.xls/.ppt) 추출기 없음")
+        self.assertEqual(extractor_text("skipped:too-large"), "파일이 추출 상한보다 큼")
+        from deepfake_lens.documents import extractor_dependency
+
+        self.assertEqual(extractor_dependency("unavailable:pymupdf"), "pymupdf")
+        self.assertEqual(extractor_dependency("unavailable:ole-legacy"), "구형 OLE 문서(.doc/.xls/.ppt) 추출기")
+        for code in ("failed:zip:BadZipFile", "unavailable:pymupdf", "skipped:too-large", "failed:other:ValueError", "unavailable:x"):
+            text = extractor_text(code)
+            self.assertFalse(any(pattern.search(text) for pattern in self.IDENTIFIER_PATTERNS), text)
+
+    def test_packaged_profile_reasons_name_no_work_package(self) -> None:
+        import json
+
+        models = Path(__file__).resolve().parents[1] / "models"
+        for profile in sorted(models.glob("*-runtime.json")):
+            with self.subTest(profile=profile.name):
+                text = json.dumps(json.loads(profile.read_text(encoding="utf-8")), ensure_ascii=False)
+                self.assertNotRegex(text, r"\bWP-[A-Z]\b")

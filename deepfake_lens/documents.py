@@ -20,6 +20,56 @@ logger = logging.getLogger(__name__)
 EXTRACTOR_ERROR_MAX_CHARS = 200
 
 
+# N13: the machine-readable ``extractor`` code ("failed:zip:BadZipFile",
+# "unavailable:ole-legacy", "skipped:too-large") stays in the metadata; what
+# the examiner reads is this Korean description (exception class names kept).
+_EXTRACTOR_BACKEND_FAILED = {
+    "zip": "문서 압축 구조 읽기 실패",
+    "pymupdf": "PDF 읽기 실패",
+    "syhwp": "HWP 읽기 실패",
+}
+_EXTRACTOR_FAILED_KNOWN = {
+    ("zip", "BadZipFile"): "압축 파일 손상",
+}
+_EXTRACTOR_CODES = {
+    "failed:no-document-xml": "문서 본문(XML)이 없음",
+    "unavailable:ole-legacy": "구형 OLE 문서(.doc/.xls/.ppt) 추출기 없음",
+    "unavailable:pymupdf": "PDF 추출기(pymupdf) 미설치",
+    "unavailable:syhwp": "HWP 추출기(syhwp) 미설치",
+    "skipped:too-large": "파일이 추출 상한보다 큼",
+}
+
+
+# "unavailable:<dep>" → the dependency named in "의존성 부재: <module>" (WP-B wording).
+_EXTRACTOR_DEPENDENCIES = {
+    "pymupdf": "pymupdf",
+    "syhwp": "syhwp",
+    "ole-legacy": "구형 OLE 문서(.doc/.xls/.ppt) 추출기",
+}
+
+
+def extractor_dependency(extractor: str) -> str:
+    """The missing dependency of an ``unavailable:<dep>`` code, for "의존성 부재: …" (N13)."""
+    dep = extractor.partition(":")[2]
+    return _EXTRACTOR_DEPENDENCIES.get(dep, "문서 추출기")
+
+
+def extractor_text(extractor: str) -> str:
+    """Korean description of an ``extractor`` code (N13), e.g. "압축 파일 손상(BadZipFile)"."""
+    if extractor in _EXTRACTOR_CODES:
+        return _EXTRACTOR_CODES[extractor]
+    kind, _, rest = extractor.partition(":")
+    if kind == "failed":
+        backend, _, exc_class = rest.partition(":")
+        label = _EXTRACTOR_FAILED_KNOWN.get((backend, exc_class)) or _EXTRACTOR_BACKEND_FAILED.get(backend, "문서 추출기 실패")
+        return f"{label}({exc_class})" if exc_class else label
+    if kind == "unavailable":
+        return f"추출기 미설치({rest})" if rest else "추출기 미설치"
+    if kind == "skipped":
+        return "추출 범위 밖"
+    return "문서 추출 상태 알 수 없음"
+
+
 def _failed(meta: dict[str, str], backend: str, exc: BaseException) -> None:
     """Record an extractor failure with its exception class (D16).
 

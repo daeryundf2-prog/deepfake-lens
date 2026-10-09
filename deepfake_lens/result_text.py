@@ -222,7 +222,9 @@ def threshold_provenance_line(thresholds: object | None) -> str:
     return line
 
 
-# Korean names of the scan row kinds (CLI table, reports).
+# Korean names of the scan row kinds (CLI table, CSV kind_label, reports).
+# N8: every kind a row can carry has a label — "unsupported" and "duplicate"
+# were printed raw in the scan table's type column.
 ITEM_KIND_LABELS = {
     "image": "이미지",
     "video": "영상",
@@ -230,9 +232,13 @@ ITEM_KIND_LABELS = {
     "text": "텍스트",
     "document": "문서",
     "archive": "압축",
+    "unsupported": "미지원 형식",
+    "duplicate": "중복",
     "unknown": "알 수 없음",
 }
+# A kind outside the table (a row from a newer tool version) is never shown raw.
+ITEM_KIND_FALLBACK = "기타"
 
 
 def item_kind_label(kind: object) -> str:
-    return ITEM_KIND_LABELS.get(str(kind), str(kind))
+    return ITEM_KIND_LABELS.get(str(kind), ITEM_KIND_FALLBACK)

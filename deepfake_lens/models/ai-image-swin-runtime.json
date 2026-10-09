@@ -5,7 +5,7 @@
   "candidate_key": "swin-ai-image-umm-maybe",
   "runtime": "hf-image-classifier",
   "supported": false,
-  "reason": "0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — WP-I 측정 전까지 비활성.",
+  "reason": "0단계: 측정 게이트(클래스당 200건, AUROC 95% CI 하한 0.85) 미충족 — 2차 계획 측정 단계 전까지 비활성.",
   "modality": "image",
   "hub_model": "umm-maybe/AI-image-detector",
   "score_label": "artificial",
@@ -20,7 +20,7 @@
     "공개 평가 프로토콜이 없는 AutoTrain 미세조정 모델이며, 생성기별 탐지율은 검증되지 않았습니다.",
     "CLI 기본 멤버 목록에는 없으며 models/ 디렉터리를 가리키는 검사(웹 앱, api_server, --model-path models)에서 자동으로 포함됩니다.",
     "점수는 보정 전 원점수이며 진위 판정이 아닙니다.",
-    "G33: 같은 허브 가중치(umm-maybe/AI-image-detector)를 2026-09-21에 다시 측정했을 때 어느 라벨 해석으로도 분리가 나타나지 않았습니다(docs/MODEL-REJECTIONS.md). 두 측정이 상충하므로 WP-I에서 다시 측정할 때까지 프로필을 비활성으로 둡니다."
+    "G33: 같은 허브 가중치(umm-maybe/AI-image-detector)를 2026-09-21에 다시 측정했을 때 어느 라벨 해석으로도 분리가 나타나지 않았습니다(docs/MODEL-REJECTIONS.md). 두 측정이 상충하므로 2차 계획 측정 단계에서 다시 측정할 때까지 프로필을 비활성으로 둡니다."
   ],
   "notes": [
     "AI 대 사람 이미지 세트로 미세조정한 SwinForImageClassification(Swin-large), cc-by-4.0.",

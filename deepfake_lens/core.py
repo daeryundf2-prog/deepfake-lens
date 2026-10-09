@@ -23,7 +23,7 @@ from .video_analysis import (
     analyze_video_temporal,
     audio_track_check,
 )
-from .documents import SUPPORTED_DOCUMENT_EXTENSIONS, extract_document_text
+from .documents import SUPPORTED_DOCUMENT_EXTENSIONS, extract_document_text, extractor_dependency, extractor_text
 from .model_adapter import FAILED_CONFIDENCE, ExternalModelAnalysis, analyze_external_model, profile_probability_thresholds
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, PixelAnalysis, analyze_image_pixels
 from .image_metadata import (  # noqa: F401
@@ -72,7 +72,8 @@ TOOL_VERSION = "0.1.0"  # kept in sync with pyproject version
 DEFAULT_MAX_FILES = 1000
 DEFAULT_TEXT_BYTES = 64 * 1024
 # D10: reason on the row of a symlink found in a scanned folder.
-SYMLINK_SKIP_REASON = "심볼릭 링크 — 링크를 따라가지 않으므로 분석하지 않았습니다(allow_symlinks=false)"
+# N13: Korean, not the option identifier "(allow_symlinks=false)".
+SYMLINK_SKIP_REASON = "심볼릭 링크 — 링크를 따라가지 않으므로 분석하지 않았습니다(심볼릭 링크 허용 안 함)"
 # D9: rejected archive members listed one coverage entry each, up to this
 # many per container; the rest are summarized in one entry with the count.
 MAX_ARCHIVE_REJECTION_ENTRIES = 100
@@ -928,7 +929,8 @@ def _analyze_file(
 
 DEEP_IMAGE_CHECKS = ("face_manipulation", "inpaint", "faceswap_seam")
 DEEP_VIDEO_CHECKS = ("rppg", "avatar", "lipsync", "face_track")
-DEEP_DISABLED_REASON = "비활성화(deep_signals=false)"
+PIXEL_DISABLED_REASON = "비활성화(픽셀 검사를 켜지 않음) — 참고 신호 전용 검사"  # N13: was "(pixel=off)"
+DEEP_DISABLED_REASON = "비활성화(심층 신호 검사를 켜지 않음)"  # N13: was "(deep_signals=false)"
 # Shown in the verdict sentence and first limitation of a gated image (WP-D).
 NON_PHOTO_NOTICE = "사진 아님 — 생성 탐지 비적용"
 OUT_OF_RANGE_NOTICE = "측정 범위 밖(해상도) — 생성 탐지 비적용"
@@ -1271,7 +1273,7 @@ def _analyze_image_file(
     if gate:
         coverage.append(skipped("pixel", gate))
     elif pixel_mode == "off":
-        coverage.append(skipped("pixel", "비활성화(pixel=off) — 참고 신호 전용 검사"))
+        coverage.append(skipped("pixel", PIXEL_DISABLED_REASON))
     else:
         pixel_analysis, entry = run_check(
             "pixel",
@@ -1531,16 +1533,17 @@ def _analyze_text_file(
         text, doc_metadata = extracted if extracted is not None else ("", {})
         extractor = doc_metadata.get("extractor", "")
         if entry.status == CoverageStatus.RAN:
+            # N13: Korean descriptions, not the "failed:zip:BadZipFile" code.
             if extractor.startswith("unavailable:"):
-                entry = skipped("document_text", f"의존성 부재: {extractor.split(':', 1)[1]}")
+                entry = skipped("document_text", f"의존성 부재: {extractor_dependency(extractor)}")
             elif extractor.startswith("skipped:"):
-                entry = skipped("document_text", f"측정 범위 밖: {extractor.split(':', 1)[1]}")
+                entry = skipped("document_text", f"측정 범위 밖: {extractor_text(extractor)}")
             elif extractor.startswith("failed:"):
                 # D16: the extractor's exception class and message are kept.
                 cause = doc_metadata.get("extractor_error")
                 entry = failed_entry(
                     "document_text",
-                    AnalyzerError(f"문서 텍스트 추출 실패 ({extractor})" + (f" — {cause}" if cause else "")),
+                    AnalyzerError(f"문서 텍스트 추출 실패 ({extractor_text(extractor)})" + (f" — {cause}" if cause else "")),
                 )
         coverage.append(entry)
         # Binary containers (docx/hwp/pdf) must not reach the text members
@@ -1645,7 +1648,7 @@ def _apply_document_metadata(
     limitations = list(result.limitations)
     extractor = doc_metadata.get("extractor", "")
     if extractor.startswith("unavailable:") or extractor.startswith("failed:") or extractor.startswith("skipped:"):
-        limitations.append(f"문서 텍스트 추출 불가 ({extractor}) — 텍스트 신호는 추출된 부분만 반영합니다.")
+        limitations.append(f"문서 텍스트 추출 불가 ({extractor_text(extractor)}) — 텍스트 신호는 추출된 부분만 반영합니다.")
     reasons = list(result.source_guess.reasons)
     label = result.source_guess.label
     confidence = result.source_guess.confidence

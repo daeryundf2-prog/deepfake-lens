@@ -262,7 +262,8 @@ class ImageLayerFailClosedTest(FailClosedAssertions):
         assert item.result is not None
         reasons = {e.check: e.reason for e in item.result.coverage}
         for check in ("face_manipulation", "inpaint", "faceswap_seam"):
-            self.assertEqual(reasons[check], "비활성화(deep_signals=false)")
+            # N13: Korean reason (was the option identifier "(deep_signals=false)").
+            self.assertEqual(reasons[check], "비활성화(심층 신호 검사를 켜지 않음)")
 
 
 class OtherModalityFailClosedTest(FailClosedAssertions):
