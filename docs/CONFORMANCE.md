@@ -2,13 +2,13 @@
 
 <!-- scripts/qa_phase0.py가 생성 — 손으로 고치지 말 것 -->
 
-- 검증 커밋: `f7b9cf7c709b3c655f4c1a0ed6d95533fe7d7b03` — 변경 없는 작업 트리에서 실행. 이 표는 이 커밋의 직계 자식 커밋에 단독으로 담긴다 (`python scripts/qa_phase0.py --verify-record`로 확인)
-- 생성 일시(UTC): 2026-10-09T06:04:37Z
+- 검증 커밋: `e368828b786a37f9a5ca8f45a57f89599ce0c359` — 변경 없는 작업 트리에서 실행. 이 표는 이 커밋의 직계 자식 커밋에 단독으로 담긴다 (`python scripts/qa_phase0.py --verify-record`로 확인)
+- 생성 일시(UTC): 2026-10-09T08:53:51Z
 - 도구 버전: deepfake-lens 0.1.0
 - 환경: Python 3.13.16 / Linux-6.18.44-fc-v80-x86_64-with-glibc2.39 / ffmpeg 있음
 - 설치된 선택 패키지: numpy, PIL, cv2, scipy, sklearn, fastapi, httpx, uvicorn, mediapipe, pymupdf, fitz
 - 없는 선택 패키지(해당 테스트는 건너뜀): librosa, soundfile, c2pa, torch, transformers, speechbrain, py7zr, rarfile
-- 실행 범위: 전체 단위 테스트 스위트 — 1200개 실행, 실패 0개, 건너뜀 30개
+- 실행 범위: 전체 단위 테스트 스위트 — 1239개 실행, 실패 0개, 건너뜀 30개
 - 신경망 가중치: 없음(모든 프로필 supported:false, 모델 경로는 가짜 프로필 + monkeypatch로 검증)
 
 **요약: 20 통과 / 0 실패 / 4 수동 / 12 1단계**
@@ -69,30 +69,30 @@
 
 ## 자동 QA 상세
 
-정본 테스트 = docstring 첫 줄이 "<QA ID>: <통과 기준 원문>"인 테스트(QA ID마다 정확히 1개). QA ID의 결과는 정본 테스트와 같은 QA ID로 태그된 모든 테스트의 결과를 합친 것이다.
+QA 테스트마다 docstring 첫 줄이 "<QA ID>: <통과 기준 원문>"이고 둘째 줄에 그 테스트가 검사하는 내용을 적는다(N16). QA ID의 결과는 그 QA ID의 모든 테스트 결과를 합친 것이다(실패 하나면 실패, 전부 건너뜀이면 건너뜀).
 
-| QA ID | 정본 테스트 | 태그된 테스트(실패/건너뜀/전체) | 결과 | 비고 |
-| --- | --- | --- | --- | --- |
-| QA-IN-1 | `deepfake_lens.tests.qa.test_qa_in.QaIn1ReadOnlyEvidenceTest.test_full_scan_leaves_read_only_folder_untouched` | 0/0/2 | 통과 | — |
-| QA-IN-2 | `deepfake_lens.tests.qa.test_qa_in.QaIn2DeterministicRescanTest.test_three_scans_across_restart_and_rename_are_byte_identical` | 0/0/3 | 통과 | — |
-| QA-IN-4 | `deepfake_lens.tests.qa.test_qa_in.QaIn4ContentKeyedCacheTest.test_same_size_edit_with_restored_mtime_is_reanalyzed` | 0/0/6 | 통과 | — |
-| QA-IN-5 | `deepfake_lens.tests.qa.test_qa_in.QaIn5DamagedInputsTest.test_each_damaged_input_is_undetermined_unsupported_or_failed_with_reason` | 0/0/7 | 통과 | — |
-| QA-OUT-1 | `deepfake_lens.tests.qa.test_qa_out.QaOut1NoWeightsTest.test_hundred_photos_without_weights` | 0/0/2 | 통과 | — |
-| QA-OUT-2 | `deepfake_lens.tests.qa.test_qa_out.QaOut2InferenceExceptionTest.test_injected_inference_exceptions_are_failed_and_undetermined` | 0/0/7 | 통과 | — |
-| QA-OUT-3 | `deepfake_lens.tests.qa.test_qa_out.QaOut3NoFaceTest.test_no_face_profile_and_low_light_record_face_check_not_run` | 0/0/4 | 통과 | — |
-| QA-OUT-4 | `deepfake_lens.tests.qa.test_qa_out.QaOut4SameResultEverywhereTest.test_cli_gui_api_identical_on_benchmark_fixtures` | 0/0/8 | 통과 | — |
-| QA-OUT-5 | `deepfake_lens.tests.qa.test_qa_out.QaOut5ProbabilityProvenanceTest.test_synthetic_calibrated_probability_carries_provenance` | 0/0/4 | 통과 | — |
-| QA-OUT-6 | `deepfake_lens.tests.qa.test_qa_out.QaOut6TextIsReferenceTest.test_text_corpora_are_reference_grade` | 0/0/1 | 통과 | — |
-| QA-ADV-1 | `deepfake_lens.tests.qa.test_qa_adv.AdversarialGateTest.test_qa_adv_1_pattern_images_are_not_photos` | 0/0/7 | 통과 | — |
-| QA-ADV-2 | `deepfake_lens.tests.qa.test_qa_adv.AdversarialGateTest.test_qa_adv_2_screenshots_are_classified_and_gated` | 0/0/1 | 통과 | — |
-| QA-ADV-3 | `deepfake_lens.tests.qa.test_qa_adv.HumanTextsAboutAiTest.test_keyword_is_listed_but_never_concludes` | 0/0/5 | 통과 | — |
-| QA-SYS-1 | `deepfake_lens.tests.qa.test_qa_sys.QaSys1PinTamperTest.test_sha256_changed_by_one_char_refuses_load` | 0/0/4 | 통과 | — |
-| QA-SYS-2 | `deepfake_lens.tests.qa.test_qa_sys.QaSys2CheckpointSwapTest.test_checkpoint_replaced_by_another_file_refuses_load` | 0/0/4 | 통과 | — |
-| QA-SYS-3 | `deepfake_lens.tests.qa.test_qa_sys.QaSys3DoctorMatchesScanTest.test_deleted_model_is_miss_and_runnable_summary_matches_scan` | 0/0/5 | 통과 | — |
-| QA-SYS-6 | `deepfake_lens.tests.qa.test_qa_sys.QaSys6SignatureCoversWholeReportTest.test_named_fields_are_inside_the_signature` | 0/0/9 | 통과 | — |
-| QA-SYS-7 | `deepfake_lens.tests.qa.test_qa_sys.QaSys7ReadRootConfinementTest.test_unregistered_scan_and_outside_heatmap_report_are_403_with_no_bytes` | 0/0/14 | 통과 | — |
-| QA-SYS-9 | `deepfake_lens.tests.qa.test_qa_sys.MeasurementGateTest.test_qa_sys_9_unmeasured_profile_fails_ci` | 0/0/8 | 통과 | — |
-| QA-SYS-10 | `deepfake_lens.tests.qa.test_qa_sys.QaSys10TestInventoryTest.test_inventory_floor_and_documented_deletions` | 0/0/17 | 통과 | 전체 스위트 1200개 실행, 실패 0건 |
+| QA ID | 테스트(실패/건너뜀/전체) | 결과 | 비고 |
+| --- | --- | --- | --- |
+| QA-IN-1 | 0/0/2 | 통과 | — |
+| QA-IN-2 | 0/0/3 | 통과 | — |
+| QA-IN-4 | 0/0/7 | 통과 | — |
+| QA-IN-5 | 0/0/8 | 통과 | — |
+| QA-OUT-1 | 0/0/2 | 통과 | — |
+| QA-OUT-2 | 0/0/7 | 통과 | — |
+| QA-OUT-3 | 0/0/4 | 통과 | — |
+| QA-OUT-4 | 0/0/8 | 통과 | — |
+| QA-OUT-5 | 0/0/4 | 통과 | — |
+| QA-OUT-6 | 0/0/1 | 통과 | — |
+| QA-ADV-1 | 0/0/7 | 통과 | — |
+| QA-ADV-2 | 0/0/1 | 통과 | — |
+| QA-ADV-3 | 0/0/5 | 통과 | — |
+| QA-SYS-1 | 0/0/4 | 통과 | — |
+| QA-SYS-2 | 0/0/4 | 통과 | — |
+| QA-SYS-3 | 0/0/5 | 통과 | — |
+| QA-SYS-6 | 0/0/9 | 통과 | — |
+| QA-SYS-7 | 0/0/14 | 통과 | — |
+| QA-SYS-9 | 0/0/8 | 통과 | — |
+| QA-SYS-10 | 0/0/17 | 통과 | 전체 스위트 1239개 실행, 실패 0건 |
 
 ## 수동·1단계
 
