@@ -305,6 +305,35 @@ class EnglishDetectorBypassTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNone(english_prose(text), text)
 
+    def test_round_eleven_symbols_punctuation_and_cjk_are_token_boundaries(self) -> None:
+        """R11-5 (round 11): a conclusion word glued to a symbol ("fake\u2713", "\u25b6fake\u25c0",
+        "판정\u2605real", "\u2714real", "fake\u26a0", "결론\u25cfreal") or to a CJK ideograph
+        ("fake\u7684") passed the detector. Every non-ASCII S*/P* character, CJK ideograph and
+        kana is a token boundary."""
+        import unicodedata
+
+        from deepfake_lens.error_text import english_prose
+
+        for text, expected in {
+            "fake\u2713": "fake", "\u25b6fake\u25c0": "fake", "fake\u7684": "fake", "판정\u2605real": "real",
+            "\u2714real": "real", "fake\u26a0": "fake", "결론\u25cfreal": "real", "fake\u3067\u3059": "fake",
+            "결과\u00a7authentic": "authentic", "\u00bfreal?": "real", "fake\u2122": "fake", "fake\u20a9": "fake",
+            "\u2022real\u2022": "real", "\u300afake\u300b": "fake", "\u5224\u5b9afake\u7d50\u679c": "fake",
+            "\u00b4fake": "fake", "fa\u0331ke": "fake", "fake\u20dd": "fake",
+        }.items():
+            with self.subTest(text=text):
+                self.assertEqual(english_prose(text), expected)
+        # Every symbol/punctuation category, sampled across the BMP.
+        for code in range(0xA0, 0x3000):
+            char = chr(code)
+            if unicodedata.category(char)[0] in "SP" and char not in "\u2018\u2019":
+                with self.subTest(char=hex(code)):
+                    self.assertEqual(english_prose(f"결론{char}fake"), "fake")
+        for text in ("조작·생성 근거 있음", "결정 2·통계 0·어휘 0", "검사 범위 — 실행 3 · 미실행 5", "「Canon EOS R5」 카메라",
+                     "PNG·JPG·TXT·MD·DOCX·MKV·TAR 등", "결과 ★ 판단 불가", "\u7d50\u679c: 판단 불가"):
+            with self.subTest(text=text):
+                self.assertIsNone(english_prose(text), text)
+
     def test_identifiers_and_korean_still_pass(self) -> None:
         from deepfake_lens.error_text import english_prose
 

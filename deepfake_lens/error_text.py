@@ -222,7 +222,10 @@ KNOWN_ACRONYMS = frozenset("""
     HEIC HF HMAC HTML HTTP HTTPS HWP HWPX ICC ICLR ID IDAT IPTC JPEG JPG JSON JUMBF KB KGW KR KST LAN LBP MB MFCC MISS
     MLM MOV MP3 MP4 MPS OK ONNX OCR PDF PNG PRNU RAM REST RGB ROC SBI SDK SDXL SHA SSIM TB TIFF TPR TSV UI URL USB USM
     UTC UTF UUID VIT WAV WARN WEBP XMP XLSR ZIP EOS EF IS RF SD TTS LR DFL NA
+    TXT MD DOCX XLSX PPTX DOC XLS PPT MKV AVI WEBM FLAC OGG AAC WMA TAR GZ RAR
 """.split())
+# R11-5: the file-format names above (TXT … RAR) — "PNG·JPG·TXT·MD·MKV·TAR 등"
+# is read word by word now that "·" is a token boundary.
 # Product, vendor and generator names (identifiers, not prose) that are
 # written as separate capitalized words.
 KNOWN_PROPER_NOUNS = (
@@ -744,24 +747,66 @@ _HOMOGLYPHS = str.maketrans({
 
 
 # R10-7 (round 10): "【fake】" and "verdict→fake" passed the detector — CJK
-# brackets and arrows glued the conclusion word to its neighbours. Arrows
-# (U+2190–21FF, U+27F0–27FF, U+2794–27BF dingbat arrows such as ➜, U+2900–297F,
-# U+2B00–2BFF) and CJK/angle brackets (U+3008–301B: 〈〉《》『』【】〔〕〖〗〘〙〚〛;
-# ⟨⟩ U+27E8–27EF; ‹› «») are token boundaries: each is read as a space.
-# 「」 (U+300C/300D) stay: they quote metadata copied verbatim from the
-# evidence file, which the identifier rules strip as one unit (the
-# dictionary rule already splits on them).
-_TOKEN_BOUNDARY = re.compile(
-    "[\u2190-\u21ff\u27f0-\u27ff\u2794-\u27bf\u2900-\u297f\u2b00-\u2bff"
-    "\u3008-\u300b\u300e-\u301b\u27e8-\u27ef\u2039\u203a\u00ab\u00bb]"
+# brackets and arrows glued the conclusion word to its neighbours.
+# R11-5 (round 11): so did every other symbol and punctuation mark
+# ("fake✓", "▶fake◀", "판정★real", "✔real", "fake⚠", "결론●real") and a CJK
+# ideograph suffix ("fake的"). Every non-ASCII character of a Unicode
+# symbol (S*) or punctuation (P*) category, every CJK ideograph and every
+# kana is now a token boundary (read as a space). ASCII punctuation keeps
+# its meaning for the identifier rules (snake_case "_", key=value "=",
+# paths "/", flags "-", "model:<name>" …). Kept as they are: 「」
+# (U+300C/300D — they quote metadata copied verbatim from the evidence file,
+# which the identifier rules strip as one unit) and the typographic
+# apostrophes ‘ ’ (U+2018/2019 — "Don’t" is one word, as "Don't").
+_BOUNDARY_KEEP = frozenset("\u300c\u300d\u2018\u2019")
+_CJK_LETTERS = re.compile(
+    "[\u2e80-\u2fdf\u3005-\u3007\u3021-\u3029\u3038-\u303b\u3040-\u30ff\u31f0-\u31ff"
+    "\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0003134f]"
 )
+
+
+def _is_token_boundary(char: str) -> bool:
+    """A non-ASCII symbol/punctuation character, CJK ideograph or kana (R10-7, R11-5)."""
+    if char < "\x80" or char in _BOUNDARY_KEEP:
+        return False
+    return unicodedata.category(char)[0] in "SP" or _CJK_LETTERS.match(char) is not None
+
+
+def _token_boundaries(text: str) -> str:
+    """``text`` with every token-boundary character (:func:`_is_token_boundary`) as a space
+    and every combining mark (Mn, Me) dropped — a spacing accent such as "´" is a space
+    plus a combining mark after NFKC, and a mark glued to a word ("fa\u0331ke") hid it (R11-5)."""
+    if text.isascii():
+        return text
+    out: list[str] = []
+    for char in text:
+        if _is_token_boundary(char):
+            out.append(" ")
+        elif char >= "\u0300" and unicodedata.category(char) in ("Mn", "Me"):
+            continue
+        else:
+            out.append(char)
+    return "".join(out)
+
+
+def _spells_letters(char: str) -> bool:
+    """A symbol/punctuation character whose NFKC form holds letters or digits ("™" -> "TM", "㎏" -> "kg")."""
+    if char < "\x80" or unicodedata.category(char)[0] not in "SP":
+        return False
+    return any(part.isalnum() for part in unicodedata.normalize("NFKC", char))
 
 
 def normalize_for_detection(text: str) -> str:
     """``text`` as the English detector reads it (Y11): NFKC, no invisible characters, no Latin
-    look-alikes, arrows and CJK/angle brackets as spaces (R10-7)."""
+    look-alikes, non-ASCII symbols/punctuation and CJK ideographs as spaces (R10-7, R11-5).
+
+    A symbol that NFKC would spell as letters ("fake™" -> "fakeTM", one
+    camelCase identifier) is a boundary before NFKC as well (R11-5).
+    """
+    if not text.isascii():
+        text = "".join(" " if _spells_letters(char) else char for char in text)
     normalized = unicodedata.normalize("NFKC", text).translate(_INVISIBLE_CHARS).translate(_HOMOGLYPHS)
-    return _TOKEN_BOUNDARY.sub(" ", normalized)
+    return _token_boundaries(normalized)
 
 
 def english_prose(text: str) -> str | None:
