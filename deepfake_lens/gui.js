@@ -94,7 +94,7 @@
         function toast(msg, isErr) {
             const el = document.createElement('div');
             el.className = 'toast' + (isErr ? ' err' : '');
-            el.textContent = msg;
+            el.textContent = displayName(msg);  // R11-10: server messages may echo a name
             $('toasts').appendChild(el);
             setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, isErr ? 5000 : 2800);
         }
@@ -244,16 +244,26 @@
 
         // R10-2: a CSV cell that starts with =, +, -, @, TAB or CR is read
         // as a formula by spreadsheets (OWASP CSV injection) — prefixed with "'".
+        // R11-13: so is one that starts with a fullwidth/compatibility form of
+        // them ("＝", "＋", "－", "＠", "﹦" …: NFKC of the first character).
         function csvCell(value) {
             const raw = String(value);
             let text = displayName(raw);
-            if (/^[=+\-@\t\r]/.test(raw) || /^[=+\-@\t\r]/.test(text)) text = "'" + text;
+            const formula = s => /^[=+\-@\t\r]/.test(s) || /^[=+\-@\t\r]/.test(([...s][0] || '').normalize('NFKC'));
+            if (formula(raw) || formula(text)) text = "'" + text;
             const quoted = /[",\r\n]/.test(text);
             return quoted ? '"' + text.replace(/"/g, '""') + '"' : text;
         }
 
         function escapeHtml(value) {
             return String(value).replace(/[&<>"']/g, ch => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch]));
+        }
+        // R11-10: every string a result carries (evidence titles and details,
+        // coverage reasons, verdict text, limitations, signals, model and
+        // source notes) is shown through displayName — controls, bidi and
+        // zero-width characters escaped — as the HTML report shows them.
+        function shown(value) {
+            return escapeHtml(displayName(value));
         }
 
         /* ── onboarding guide ────────────────────── */
@@ -351,9 +361,9 @@
                 if (!rows.length) return '';
                 const lis = rows.map(e => {
                     const prob = (e.probability != null && e.calibration_id)
-                        ? ` · p=${Number(e.probability).toFixed(2)}${e.probability_ci ? ` (95% CI ${Number(e.probability_ci[0]).toFixed(2)}–${Number(e.probability_ci[1]).toFixed(2)})` : ''} · 보정 ${escapeHtml(e.calibration_id)}`
+                        ? ` · p=${Number(e.probability).toFixed(2)}${e.probability_ci ? ` (95% CI ${Number(e.probability_ci[0]).toFixed(2)}–${Number(e.probability_ci[1]).toFixed(2)})` : ''} · 보정 ${shown(e.calibration_id)}`
                         : '';
-                    return `<li class="ev-item ev-${escapeHtml(e.direction)}"><b>${escapeHtml(e.title)}</b> <span class="ev-badge">${escapeHtml(DIRECTION_LABELS[e.direction] || e.direction)}·${escapeHtml(STRENGTH_LABELS[e.strength] || e.strength)}${prob}</span><div class="note">${escapeHtml(e.detail || '')}</div></li>`;
+                    return `<li class="ev-item ev-${escapeHtml(e.direction)}"><b>${shown(e.title)}</b> <span class="ev-badge">${escapeHtml(DIRECTION_LABELS[e.direction] || e.direction)}·${escapeHtml(STRENGTH_LABELS[e.strength] || e.strength)}${prob}</span><div class="note">${shown(e.detail || '')}</div></li>`;
                 }).join('');
                 return `<div class="dgroup ev-group ev-kind-${kind}" data-kind="${kind}"><div class="dt">${KIND_LABELS[kind]} (${rows.length})</div><div class="note">${KIND_NOTES[kind]}</div><ul>${lis}</ul></div>`;
             }).join('');
@@ -365,11 +375,11 @@
             const failed = cov.filter(c => c.status === 'failed');
             const skipped = cov.filter(c => c.status === 'skipped');
             const ran = cov.filter(c => c.status === 'ran');
-            const li = (c, cls) => `<li class="${cls}">${escapeHtml(coverageText(c))}</li>`;
+            const li = (c, cls) => `<li class="${cls}">${shown(coverageText(c))}</li>`;
             return `<div class="dgroup cov-group"><div class="dt">검사 범위 — 실행 ${ran.length} · 미실행 ${skipped.length} · 실패 ${failed.length}</div><ul>` +
                 failed.map(c => li(c, 'cov-failed')).join('') +
                 skipped.map(c => li(c, 'cov-skipped')).join('') +
-                (ran.length ? `<li class="cov-ran">실행: ${ran.map(c => escapeHtml(checkLabel(c.check))).join(', ')}</li>` : '') +
+                (ran.length ? `<li class="cov-ran">실행: ${ran.map(c => shown(checkLabel(c.check))).join(', ')}</li>` : '') +
                 '</ul></div>';
         }
         function verdictHeadHtml(r) {
@@ -377,7 +387,7 @@
             const grade = r.grade === 'reference' ? '참고' : '감정 근거로 사용 가능';
             const parts = [`<div class="verdict-head v-${escapeHtml(v)}" data-verdict="${escapeHtml(v)}"><span class="band-pill band-${bandCls(v)}">${escapeHtml(VERDICT_LABELS[v] || v)}</span> <span class="grade-pill">${escapeHtml(grade)}</span></div>`];
             if (r.grade === 'reference') parts.push(`<div class="legal-note">${escapeHtml(TEXT_LEGAL_LIMITATION)}</div>`);
-            if (r.verdict) parts.push(`<div class="verdict">${escapeHtml(r.verdict)}</div>`);
+            if (r.verdict) parts.push(`<div class="verdict">${shown(r.verdict)}</div>`);
             return parts.join('');
         }
 
@@ -476,7 +486,7 @@
                 const name = file.webkitRelativePath || file.name;
                 const chip = document.createElement('span');
                 chip.className = 'chipfile';
-                chip.innerHTML = `<span class="nm">${escapeHtml(name)}</span><span>${(file.size/1024).toFixed(0)}K</span>`;
+                chip.innerHTML = `<span class="nm">${shown(name)}</span><span>${(file.size/1024).toFixed(0)}K</span>`;
                 const x = document.createElement('button');
                 x.className = 'x'; x.textContent = '✕'; x.setAttribute('aria-label', '제거');
                 x.addEventListener('click', ev => { ev.stopPropagation(); selectedFiles.splice(i, 1); renderFileChips(); });
@@ -663,7 +673,7 @@
             if (!values || !values.length) return '';
             const rows = values.map(v => {
                 const text = typeof v === 'string' ? v : (v.title ? `${v.title}: ${v.detail || ''}` : JSON.stringify(v));
-                return `<li>${escapeHtml(text)}</li>`;
+                return `<li>${shown(text)}</li>`;
             }).join('');
             return `<div class="dgroup ${cls || ''}"><div class="dt">${title}</div><ul>${rows}</ul></div>`;
         }
@@ -671,7 +681,7 @@
         function detailHtml(item) {
             const r = item.result || {};
             const parts = [];
-            if (item.error) parts.push(`<div class="verdict">분석 실패: ${escapeHtml(displayName(item.error))}</div>`);
+            if (item.error) parts.push(`<div class="verdict">분석 실패: ${shown(item.error)}</div>`);
             // Order: verdict, then evidence grouped by kind, then coverage.
             if (item.result) {
                 parts.push(verdictHeadHtml(r));
@@ -700,8 +710,8 @@
             const ma = r.model_analysis;
             if (ma) {
                 const members = (ma.models || []).map(m =>
-                    `<li>${escapeHtml(m.display_name || m.model || '모델')} — 원점수 ${m.score != null ? m.score : '없음'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
-                parts.push(`<div class="dgroup"><div class="dt">외부 모델 원점수(미보정, 결론 불참여) — ${ma.score != null ? ma.score : '없음'}</div>${members ? `<ul>${members}</ul>` : `<div class="note">${escapeHtml(ma.detail || '')}</div>`}</div>`);
+                    `<li>${shown(m.display_name || m.model || '모델')} — 원점수 ${m.score != null ? m.score : '없음'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
+                parts.push(`<div class="dgroup"><div class="dt">외부 모델 원점수(미보정, 결론 불참여) — ${ma.score != null ? ma.score : '없음'}</div>${members ? `<ul>${members}</ul>` : `<div class="note">${shown(ma.detail || '')}</div>`}</div>`);
             }
             // Unmeasured heuristics (pixel ensemble, fusion, legacy audio/
             // video heuristics) — displayed for reference, never decide.
@@ -710,8 +720,8 @@
             parts.push(listItems('다음 확인', r.next_checks));
             const sg = r.source_guess;
             if (sg && sg.label) {
-                const reasons = (sg.reasons || []).map(escapeHtml).join(' ');
-                parts.push(`<div class="dgroup"><div class="dt">출처 추정 (${escapeHtml(sourceConfidenceLabel(r, sg))})</div><div class="note">${escapeHtml(sg.label)} — ${reasons}</div></div>`);
+                const reasons = (sg.reasons || []).map(shown).join(' ');
+                parts.push(`<div class="dgroup"><div class="dt">출처 추정 (${escapeHtml(sourceConfidenceLabel(r, sg))})</div><div class="note">${shown(sg.label)} — ${reasons}</div></div>`);
             }
             parts.push(`<div class="band-advice">${escapeHtml(verdictAdvice(r.verdict_code || 'undetermined', r.grade))}</div>`);
             parts.push(`<div class="caveat">결론은 결정적 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>`);
@@ -734,7 +744,7 @@
                 slot.innerHTML = '';
                 slot.appendChild(el);
             } catch (e) {
-                slot.innerHTML = `<span class="note">미리보기 실패: ${escapeHtml(e.message)}</span>`;
+                slot.innerHTML = `<span class="note">미리보기 실패: ${shown(e.message)}</span>`;
             }
         }
 
@@ -751,7 +761,7 @@
                 slot.innerHTML = '';
                 slot.appendChild(img);
             } catch (e) {
-                slot.innerHTML = `<span class="note">히트맵 로딩 실패: ${escapeHtml(e.message)}</span>`;
+                slot.innerHTML = `<span class="note">히트맵 로딩 실패: ${shown(e.message)}</span>`;
             }
         }
 
@@ -951,7 +961,7 @@
                 slot.innerHTML = '';
                 slot.appendChild(studio);
             } catch (e) {
-                slot.innerHTML = `<span class="note">스튜디오 로딩 실패: ${escapeHtml(e.message)}</span>`;
+                slot.innerHTML = `<span class="note">스튜디오 로딩 실패: ${shown(e.message)}</span>`;
             }
         }
 
@@ -984,13 +994,13 @@
                         <span class="num bc-${band}">${escapeHtml(ringText)}</span>
                     </div>
                     <div class="res-info">
-                        <div class="res-name">${escapeHtml(displayName(item.name || item.path || '파일'))}</div>
+                        <div class="res-name">${shown(item.name || item.path || '파일')}</div>
                         <div class="res-sub">
                             <span class="band-pill band-${band}">${escapeHtml(riskLabel(verdict))}</span>
                             ${r.grade === 'reference' ? '<span class="grade-pill">참고</span>' : ''}
                             <span class="ev-counts" title="결정적·통계적·어휘적 근거 수">결정 ${evCounts[0]} · 통계 ${evCounts[1]} · 어휘 ${evCounts[2]}</span>
                             ${failedChecks ? `<span class="c-red">검사 실패 ${failedChecks}</span>` : ''}
-                            <span>${escapeHtml(tool)}</span>
+                            <span>${shown(tool)}</span>
                             ${r.model_analysis && r.model_analysis.available !== false ? '<span class="nn-badge">NN</span>' : ''}
                             ${rev.star ? '<span class="rev-badge">검토됨</span>' : ''}
                             ${item.error ? '<span class="c-red">분석 실패</span>' : ''}
@@ -1393,7 +1403,7 @@
                 const data = await apiJson('/api/check', options);
                 if (data.error) {
                     box.className = 'qc-out on';
-                    box.innerHTML = `<div class="verdict c-red">오류: ${escapeHtml(data.error)}</div>`;
+                    box.innerHTML = `<div class="verdict c-red">오류: ${shown(data.error)}</div>`;
                     return;
                 }
                 if (data.mode === 'files') {
@@ -1407,7 +1417,7 @@
                 renderQuickCheck(data);
             } catch (e) {
                 box.className = 'qc-out on';
-                box.innerHTML = `<div class="verdict c-red">검사 실패: ${escapeHtml(e.message)}</div>`;
+                box.innerHTML = `<div class="verdict c-red">검사 실패: ${shown(e.message)}</div>`;
             } finally {
                 stopElapsed(status);
                 ['qc-text-btn', 'qc-file-btn'].forEach(id => $(id).disabled = false);
@@ -1441,8 +1451,8 @@
             parts.push(`<div class="qc-head">
                 <span class="big bc-${band}">${escapeHtml(r.score_is_calibrated ? String(Number(r.score) || 0) : ({ high: '!', low: '✓', medium: '?' }[band] || '–'))}</span>
                 <div><span class="band-pill band-${band}">${escapeHtml(riskLabel(verdict))}</span>
-                <div class="note mt-4">${escapeHtml(displayName(item.name || ''))}</div></div></div>`);
-            if (item.error) parts.push(`<div class="verdict">분석 실패: ${escapeHtml(displayName(item.error))}</div>`);
+                <div class="note mt-4">${shown(item.name || '')}</div></div></div>`);
+            if (item.error) parts.push(`<div class="verdict">분석 실패: ${shown(item.error)}</div>`);
             if (item.result) {
                 parts.push(verdictHeadHtml(r));
                 parts.push(evidenceHtml(r));
@@ -1453,32 +1463,32 @@
             const ma = r.model_analysis;
             if (ma) {
                 const members = (ma.models || []).map(m =>
-                    `<li>${escapeHtml(m.display_name || m.model || '모델')} — ${m.score != null ? m.score : '없음'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
+                    `<li>${shown(m.display_name || m.model || '모델')} — ${m.score != null ? m.score : '없음'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
                 parts.push(layer(`외부 모델 원점수(미보정, 결론 불참여) — ${ma.score != null ? ma.score : '없음'}`,
-                    members ? `<ul>${members}</ul>` : `<div class="note">${escapeHtml(ma.detail || '')}</div>`));
+                    members ? `<ul>${members}</ul>` : `<div class="note">${shown(ma.detail || '')}</div>`));
             }
             if (data.advanced) {
                 // D1: layer diagnostic — raw numbers with the fixed notice,
                 // never a band or a "+points" weight (G4).
                 const a = data.advanced, body = a.diagnostic || a;
-                const sig = (body.signals || []).map(s => `<li>${escapeHtml(s.title)} — ${escapeHtml(s.detail)}</li>`).join('');
-                const lim = (body.limitations || []).map(l => `<li>${escapeHtml(l)}</li>`).join('');
+                const sig = (body.signals || []).map(s => `<li>${shown(s.title)} — ${shown(s.detail)}</li>`).join('');
+                const lim = (body.limitations || []).map(l => `<li>${shown(l)}</li>`).join('');
                 parts.push(layer(`스타일/지문 분석 · 계층 진단(참고 신호 · 미측정) — 원점수 ${a.raw_score != null ? a.raw_score : 0}`,
-                    (a.notice ? `<div class="note">${escapeHtml(a.notice)}</div>` : '') +
+                    (a.notice ? `<div class="note">${shown(a.notice)}</div>` : '') +
                     (sig ? `<ul>${sig}</ul>` : '<div class="note">발동 신호 없음</div>') + (lim ? `<ul class="c-amber">${lim}</ul>` : '')));
             }
             if (data.forensic) {
                 const fr = data.forensic, body = fr.diagnostic || fr;
-                const sig = (body.signals || []).map(s => `<li>${escapeHtml(s.title)} — ${escapeHtml(s.detail)}</li>`).join('');
-                const prov = (body.provenance_records || []).map(p => `<li>${escapeHtml(p.kind || p.source || p.standard || 'record')}: ${escapeHtml(p.summary || p.detail || p.provider || '')}</li>`).join('');
+                const sig = (body.signals || []).map(s => `<li>${shown(s.title)} — ${shown(s.detail)}</li>`).join('');
+                const prov = (body.provenance_records || []).map(p => `<li>${shown(p.kind || p.source || p.standard || 'record')}: ${shown(p.summary || p.detail || p.provider || '')}</li>`).join('');
                 parts.push(layer(`메타데이터 / C2PA · 계층 진단(참고 신호 · 미측정) — 원점수 ${fr.raw_score != null ? fr.raw_score : 0}`,
-                    (fr.notice ? `<div class="note">${escapeHtml(fr.notice)}</div>` : '') +
+                    (fr.notice ? `<div class="note">${shown(fr.notice)}</div>` : '') +
                     ((sig ? `<ul>${sig}</ul>` : '') + (prov ? `<ul>${prov}</ul>` : '') || '<div class="note">단서 없음</div>')));
             }
             if (data.watermark) {
                 const w = data.watermark;
                 parts.push(layer('워터마크 (KGW)',
-                    `<div class="kv"><b>측정</b><span>${escapeHtml(w.reference_note || '')}</span><b>z 점수</b><span>${w.z_score != null ? w.z_score : '없음'}</span><b>참고 원점수</b><span>${w.score != null ? w.score : '없음'}</span></div>`));
+                    `<div class="kv"><b>측정</b><span>${shown(w.reference_note || '')}</span><b>z 점수</b><span>${w.z_score != null ? w.z_score : '없음'}</span><b>참고 원점수</b><span>${w.score != null ? w.score : '없음'}</span></div>`));
             }
             parts.push(listItems('참고 신호(미측정 휴리스틱 — 결론 불참여)', (r.reference_signals || []).map(s => ({ title: `${s.title} (${s.weight})`, detail: s.detail }))));
             parts.push(listItems('다음 확인', r.next_checks));
@@ -1525,13 +1535,13 @@
                 const data = await apiJson('/api/compare', { method: 'POST', body: form });
                 box.classList.add('on');
                 if (data.error) {
-                    box.innerHTML = `<div class="verdict c-red">오류: ${escapeHtml(data.error)}</div>`;
+                    box.innerHTML = `<div class="verdict c-red">오류: ${shown(data.error)}</div>`;
                     return;
                 }
                 renderCompare(data);
             } catch (e) {
                 box.classList.add('on');
-                box.innerHTML = `<div class="verdict c-red">비교 실패: ${escapeHtml(e.message)}</div>`;
+                box.innerHTML = `<div class="verdict c-red">비교 실패: ${shown(e.message)}</div>`;
             } finally {
                 stopElapsed(status);
                 $('cmp-btn').disabled = false;
@@ -1549,9 +1559,9 @@
             parts.push(`<div class="qc-head">
                 <span class="big bc-other">${Number(score) || 0}</span>
                 <div><span class="band-pill band-unknown">계층 진단(참고 신호 · 미측정)</span>
-                <div class="note mt-4">${escapeHtml(kind)}${body.method ? ' · ' + escapeHtml(body.method) : ''}</div></div></div>`);
-            if (data.notice) parts.push(`<div class="note">${escapeHtml(data.notice)}</div>`);
-            if (data.reference_note) parts.push(`<div class="verdict">${escapeHtml(data.reference_note)}</div>`);
+                <div class="note mt-4">${shown(kind)}${body.method ? ' · ' + shown(body.method) : ''}</div></div></div>`);
+            if (data.notice) parts.push(`<div class="note">${shown(data.notice)}</div>`);
+            if (data.reference_note) parts.push(`<div class="verdict">${shown(data.reference_note)}</div>`);
             parts.push(provenanceNoteHtml(data));
             const kv = [];
             if (body.distance != null) kv.push(`<b>거리</b><span>${escapeHtml(String(body.distance))}</span>`);

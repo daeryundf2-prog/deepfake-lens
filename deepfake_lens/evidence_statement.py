@@ -41,7 +41,7 @@ from .result_text import (
     TEXT_LEGAL_LIMITATION,
     coverage_gaps,
     display_name,
-    escape_controls,
+    markdown_text,
     evidence_groups,
     is_symlink_row,
     markdown_cell,
@@ -117,7 +117,10 @@ class EvidenceStatement:
         # <br>, controls escaped, "|" as "\|") and every other line through
         # escape_controls — a file name or field value can neither end a
         # table row (a forged "| **갑 제9호증** | … |" row) nor add a column.
-        one_line = escape_controls
+        # R11-7: both also backslash-escape every Markdown-active character
+        # ([ ] ( ) ! < > ` * _ # ~), so a name's "![t](https://…)" or
+        # "[click](javascript:…)" is text, never an image or a link.
+        one_line = markdown_text
         lines = [
             "# 증  거  설  명  서",
             "",

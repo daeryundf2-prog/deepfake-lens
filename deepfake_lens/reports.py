@@ -20,7 +20,6 @@ from .result_text import (
     deciding_evidence,
     display_name,
     display_path,
-    escape_controls,
     shown_row_path,
     evidence_counts_text,
     evidence_groups,
@@ -710,20 +709,21 @@ def _html_row(item: ScanItem, *, redact_paths: bool, allow_path: Callable[[str],
         )
     verdict_cell = (
         f'<span class="v-{escape(result.verdict_code.value)}">{escape(verdict_heading(result))}</span>'
-        f"<br>{escape(result.verdict)}"
+        f"<br>{escape(display_name(result.verdict))}"
     )
     evidence_parts: list[str] = []
     if result.grade == Grade.REFERENCE:
         evidence_parts.append(f'<div class="legal">{escape(leading_limitations(result)[0])}</div>')
     for kind_label, lines in evidence_groups(result):
-        evidence_parts.append(f'<div class="kind">{escape(kind_label)}</div><ul>' + "".join(f"<li>{escape(escape_controls(line))}</li>" for line in lines) + "</ul>")
+        # R11-10: evidence lines through display_name, as the GUI shows them.
+        evidence_parts.append(f'<div class="kind">{escape(kind_label)}</div><ul>' + "".join(f"<li>{escape(display_name(line))}</li>" for line in lines) + "</ul>")
     if not evidence_parts:
         evidence_parts.append("근거 항목 없음")
     gaps = coverage_gaps(result)
     gap_cell = "<ul>" + "".join(
         f'<li class="{"gap-failed" if entry.status == CoverageStatus.FAILED else ""}">{escape(display_name(entry.describe()))}</li>' for entry in gaps
     ) + "</ul>" if gaps else "전 검사 실행"
-    reference = "; ".join(f"{signal.title} ({signal.weight})" for signal in result.reference_signals) or "-"
+    reference = "; ".join(f"{display_name(signal.title)} ({signal.weight})" for signal in result.reference_signals) or "-"
     heatmap = ""
     if result.pixel_analysis and result.pixel_analysis.available:
         heatmap = _heatmap_img(result.pixel_analysis.heatmap_path, allow_path=allow_path)

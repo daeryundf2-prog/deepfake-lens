@@ -131,6 +131,11 @@ class DisplayNameUnitTest(unittest.TestCase):
     def test_csv_cell_guards_formulas(self) -> None:
         for raw in ("=1+1", "+1", "-1", "@SUM(1)", "\t=1", "\r=1"):
             self.assertTrue(str(csv_cell(raw)).startswith("'"), raw)
+        # R11-13 (round 11): fullwidth "＝＋－＠" (and other compatibility forms
+        # NFKC maps onto a formula character) were not guarded.
+        for raw in ("\uff1d1+1", "\uff0b1", "\uff0d1", "\uff20SUM(1)", "\ufe661", "\ufe621", "\ufe631", "\ufe6bx"):
+            self.assertEqual(csv_cell(raw), "'" + raw, raw)
+        self.assertEqual(csv_cell("a\uff1d1"), "a\uff1d1")  # not at the start
         self.assertEqual(csv_cell("a.png"), "a.png")
         self.assertEqual(csv_cell(-3), -3)  # a number stays a number
         self.assertEqual(csv_cell(None), None)
@@ -224,7 +229,8 @@ class GuiDisplayNameTest(unittest.TestCase):
         source = (Path(__file__).resolve().parents[1] / "gui.js").read_text(encoding="utf-8")
         start, end = source.index("function displayName(value)"), source.index("function escapeHtml(value)")
         # R11-4: plus random strings over the special characters (injective rule).
-        samples = [*HOSTILE_NAMES, "\udcff.png", "plain.png", "bs\\|p", "bs\\\\|p", "a\\nb", *random_names(2000, seed=1104)]
+        samples = [*HOSTILE_NAMES, "\udcff.png", "plain.png", "bs\\|p", "bs\\\\|p", "a\\nb", *random_names(2000, seed=1104),
+                   "\uff1d1+1", "\uff0b1", "\uff0d1", "\uff20x", "\ufe661", "a\uff1d1"]  # R11-13
         script = (
             source[start:end]
             + "const samples = JSON.parse(require('fs').readFileSync(0, 'utf8'));\n"
@@ -372,6 +378,122 @@ class HostileNamesInEveryRenderingTest(unittest.TestCase):
         self.assertNotIn(AUTHENTICITY.split()[0], purposes)
         with pymupdf.open(str(statement)) as document:
             self._assert_no_raw_controls("".join(page.get_text() for page in document), "statement pdf")
+
+
+class MarkdownSyntaxInNamesTest(unittest.TestCase):
+    """R11-7 (round 11): an archive member "![t](https:/evil.example/t.png)/[click](javascript:
+    alert(1)).png" became a live image and link in the evidence statement's Markdown.
+    Every Markdown-active character of shown text is backslash-escaped."""
+
+    MEMBER = "![t](https:/evil.example/t.png)/[click](javascript:alert(1)).png"
+    SUBFOLDER = "[x](javascript:y) <b>`code`</b> *em* _u_ #h ~s~"
+
+    @staticmethod
+    def _unescaped(text: str) -> list[str]:
+        """Markdown-active characters in ``text`` not preceded by an odd run of backslashes."""
+        from deepfake_lens.result_text import MARKDOWN_SPECIALS
+
+        found: list[str] = []
+        backslashes = 0
+        for char in text:
+            if char in MARKDOWN_SPECIALS and backslashes % 2 == 0:
+                found.append(char)
+            backslashes = backslashes + 1 if char == "\\" else 0
+        return found
+
+    def test_unit(self) -> None:
+        for raw in (self.MEMBER, self.SUBFOLDER, "a\\[b", "a\\\\[b", "plain 한글"):
+            with self.subTest(raw=raw):
+                self.assertEqual(self._unescaped(markdown_cell(display_name(raw))), [])
+                self.assertEqual(self._unescaped(markdown_cell(raw).replace("<br>", "")), [])
+        self.assertEqual(markdown_cell("![t](u)"), "\\!\\[t\\]\\(u\\)")
+        self.assertEqual(markdown_cell(display_name("p | q")), "p \\| q")  # display_name's "\\|" kept
+
+    def test_evidence_statement_markdown_holds_no_live_markdown(self) -> None:
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            folder = root / "case"
+            (folder / self.SUBFOLDER).mkdir(parents=True)
+            (folder / self.SUBFOLDER / "inner.txt").write_text("x", encoding="utf-8")
+            with zipfile.ZipFile(folder / "e.zip", "w") as archive:
+                archive.writestr(self.MEMBER, A1111.read_bytes())
+            md_out = root / "s.md"
+            code, stdout, stderr = _run(["evidence-statement", str(folder), "--md-out", str(md_out), "--format", "markdown"])
+            self.assertEqual(code, 0, stderr)
+            text = md_out.read_text(encoding="utf-8")
+        for rendered in (text, stdout):
+            self.assertNotIn("](", rendered)
+            self.assertNotIn("![", rendered)
+        rows = [line for line in text.splitlines() if line.startswith("| **")]
+        self.assertTrue(rows)
+        for row in rows:
+            for cell in _markdown_cells(row)[1:]:  # every cell but the bold exhibit number
+                self.assertEqual(self._unescaped(cell.replace("<br>", " ")), [], cell)
+        # The member name (refused by the extractor: ":" in it) is named in the container's row, inert.
+        self.assertTrue(any("\\!\\[t\\]\\(https:/evil.example/t.png\\)" in row for row in rows), rows)
+        unrecorded = [line for line in text.splitlines() if "javascript:y" in line and not line.startswith("|")]
+        self.assertTrue(unrecorded, "the skipped subfolder is named in the unrecorded-files section")
+        for line in unrecorded:
+            self.assertEqual(self._unescaped(line.removeprefix("- ")), [], line)
+
+
+class GuiResultStringsTest(unittest.TestCase):
+    """R11-10 (round 11): the GUI showed evidence titles and details (gui.js evidenceHtml)
+    and other result strings with escapeHtml only — a bidi override or zero-width
+    character in them reached the page. Every result string goes through shown() =
+    escapeHtml(displayName(…)), as the HTML report shows them through display_name."""
+
+    GUI = Path(__file__).resolve().parents[1] / "gui.js"
+    # Result fields an escapeHtml(...) call must never take directly.
+    FIELDS = r"(title|detail|reason|verdict|notice|reference_note|summary|message|error|label|display_name|method|name|path|model|calibration_id)"
+
+    def test_no_result_string_bypasses_display_name(self) -> None:
+        import re
+
+        source = self.GUI.read_text(encoding="utf-8")
+        self.assertIn("function shown(value) {\n            return escapeHtml(displayName(value));", source)
+        direct = re.findall(r"escapeHtml\(\s*[^()]*?\b[a-z]+\." + self.FIELDS + r"\b[^)]*\)", source)
+        self.assertEqual(direct, [], "pass result strings through shown(), not escapeHtml()")
+        for needle in ("shown(e.title)", "shown(e.detail || '')", "shown(coverageText(c))", "shown(r.verdict)", "return `<li>${shown(text)}</li>`;",
+                       "map(shown)", "shown(sg.label)", "shown(item.error)", "el.textContent = displayName(msg);"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, source)
+
+    @unittest.skipUnless(shutil.which("node"), "node required to run gui.js helpers")
+    def test_shown_escapes_like_display_name(self) -> None:
+        source = self.GUI.read_text(encoding="utf-8")
+        start, end = source.index("function displayName(value)"), source.index("/* ── onboarding guide")
+        samples = ["t\u202eitle", "zw\u200bdetail <b>&</b>", "a|b\\c", "\udcc1"]
+        script = (
+            source[start:end]
+            + "const samples = JSON.parse(require('fs').readFileSync(0, 'utf8'));\n"
+            + "process.stdout.write(JSON.stringify(samples.map(s => shown(s))));\n"
+        )
+        result = subprocess.run(["node", "-e", script], input=json.dumps(samples), capture_output=True, text=True, check=True, timeout=60)
+        from html import escape
+
+        self.assertEqual(json.loads(result.stdout), [escape(display_name(sample)) for sample in samples])
+
+    def test_html_report_evidence_lines_use_display_name(self) -> None:
+        from deepfake_lens.reports import _html_row
+        from deepfake_lens.result_types import (
+            ClassificationResult, EvidenceDirection, EvidenceItem, EvidenceKind, EvidenceStrength, RiskBand, ScanItem, SourceConfidence,
+            SourceGuess,
+        )
+
+        result = ClassificationResult(
+            score=0, band=RiskBand.UNKNOWN, band_label="판단 불가", verdict="판단 불가 \u202e|x", signals=[], limitations=[],
+            source_guess=SourceGuess("출처 단서 없음", SourceConfidence.UNKNOWN, []), next_checks=[],
+            evidence=[EvidenceItem("제목\u202ex|y", "상세\u200b\\z", EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "metadata")],
+        )
+        row = _html_row(ScanItem("a.png", "a.png", "image", "analyzed", 1, result), redact_paths=False)
+        for raw in ("\u202e", "\u200b"):
+            self.assertNotIn(raw, row)
+        self.assertIn("제목\\u202ex\\|y", row)
+        self.assertIn("상세\\u200b\\\\z", row)
+        self.assertIn("판단 불가 \\u202e\\|x", row)
 
 
 class EmbeddedReportJsonTest(unittest.TestCase):

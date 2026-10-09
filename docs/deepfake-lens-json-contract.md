@@ -163,7 +163,18 @@ always `0` invited old-contract readings. They remain readable as
   `unrecorded_files.lines`) are built from shown names; `file_path` and
   `subfolders[].path` stay raw. R10-2: a CSV cell starting with `=`, `+`,
   `-`, `@`, TAB or CR is written with a leading `'` (OWASP CSV injection);
-  numeric cells are unchanged.
+  numeric cells are unchanged. R11-13 (round 11): so is a cell whose first
+  character's NFKC form is one of them (fullwidth `＝` `＋` `－` `＠`, small
+  `﹦` `﹢` `﹣` `﹫`), in the CLI CSV and the GUI CSV export. R11-7: every
+  Markdown table cell and the evidence statement's other value lines (case
+  fields, unrecorded files, provenance) backslash-escape each
+  Markdown-active character `|` `[` `]` `(` `)` `!` `<` `>` `` ` `` `*` `_`
+  `#` `~`, so a name's `![t](https://…)` or `[click](javascript:…)` is text,
+  never an image or a link. R11-10: the GUI shows every result string
+  (evidence titles and details, coverage reasons, verdict text,
+  limitations, signals, model and source notes, error messages) through
+  `displayName`, and the HTML report's evidence lines, verdict text and
+  reference signals through `display_name` — the same text in both.
 - R11-14 (round 11): every row carries `display_name` right after `name`:
   the name as every text report shows it (`result_text.display_name` —
   controls, bidi/zero-width characters and lone surrogates escaped, `|` as

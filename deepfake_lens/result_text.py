@@ -258,23 +258,6 @@ def escape_controls(text: object) -> str:
     return "".join(out)
 
 
-def _escape_unescaped_pipes(text: str) -> str:
-    """Every "|" not already escaped as "\\|" written "\\|" (R10-1).
-
-    A "|" is escaped when an odd number of backslashes precedes it.
-    """
-    out: list[str] = []
-    backslashes = 0
-    for char in text:
-        if char == "|" and backslashes % 2 == 0:
-            out.append("\\|")
-            backslashes = 0
-            continue
-        out.append(char)
-        backslashes = backslashes + 1 if char == "\\" else 0
-    return "".join(out)
-
-
 def display_name(text: object) -> str:
     """A file name, path or echoed string as every text report shows it (R10-1, R11-4).
 
@@ -298,16 +281,46 @@ def display_name(text: object) -> str:
     return "".join(out)
 
 
+# R11-7 (round 11): a name such as "![t](https://evil/t.png)" or
+# "[click](javascript:alert(1))" became a live Markdown image/link in the
+# evidence statement. Every Markdown-active character below is written with
+# a backslash escape (CommonMark: any ASCII punctuation may be escaped), so
+# no link, image, autolink, code span, emphasis or heading can form from
+# shown text; a character already escaped (an odd run of backslashes before
+# it, as display_name writes "\\|") is left as is.
+MARKDOWN_SPECIALS = frozenset("|[]()!<>`*_#~")
+
+
+def _escape_markdown_specials(text: str) -> str:
+    """Every Markdown-active character not already backslash-escaped, escaped (R10-1, R11-7)."""
+    out: list[str] = []
+    backslashes = 0
+    for char in text:
+        if char in MARKDOWN_SPECIALS and backslashes % 2 == 0:
+            out.append("\\" + char)
+            backslashes = 0
+            continue
+        out.append(char)
+        backslashes = backslashes + 1 if char == "\\" else 0
+    return "".join(out)
+
+
+def markdown_text(text: object) -> str:
+    """One line of Markdown prose: controls escaped, Markdown-active characters escaped (R11-7)."""
+    return _escape_markdown_specials(escape_controls(text))
+
+
 def markdown_cell(text: object) -> str:
-    """One Markdown table cell (R10-1): the intended line breaks as "<br>",
-    any other control as an escape, every unescaped "|" as "\\|".
+    """One Markdown table cell (R10-1, R11-7): the intended line breaks as "<br>",
+    any other control as an escape, every Markdown-active character
+    (:data:`MARKDOWN_SPECIALS`, "|" included) backslash-escaped.
 
     Safe on text already passed through :func:`display_name` (its "\\|" is
-    kept as is) and on fixed wording; a cell can never end its row or add
-    a column.
+    kept as is) and on fixed wording; a cell can never end its row, add a
+    column, or hold a link, image or other inline Markdown.
     """
     lines = str(text).replace("\r\n", "\n").split("\n")
-    return "<br>".join(_escape_unescaped_pipes(escape_controls(line)) for line in lines)
+    return "<br>".join(markdown_text(line) for line in lines)
 
 
 # R10-2 (round 10): a CSV cell that starts with one of these is read as a
@@ -316,18 +329,28 @@ def markdown_cell(text: object) -> str:
 CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
+def starts_like_formula(text: str) -> bool:
+    """True when ``text`` starts with a formula character (R10-2) — R11-13
+    (round 11): also its fullwidth or other compatibility form ("＝", "＋",
+    "－", "＠", "﹦" …), which spreadsheet IMEs and NFKC read as the ASCII one."""
+    if not text:
+        return False
+    return text.startswith(CSV_FORMULA_PREFIXES) or unicodedata.normalize("NFKC", text[0]).startswith(CSV_FORMULA_PREFIXES)
+
+
 def csv_cell(value: object) -> object:
-    """One CSV cell: text as :func:`display_name` shows it, formula-guarded (R10-1, R10-2).
+    """One CSV cell: text as :func:`display_name` shows it, formula-guarded (R10-1, R10-2, R11-13).
 
     Numbers and booleans are written as they are (a negative number is a
-    number, not a formula); text that starts with a formula character —
-    checked on the raw text and on the shown text — gets a leading "'".
+    number, not a formula); text that starts with a formula character or
+    its fullwidth form — checked on the raw text and on the shown text —
+    gets a leading "'".
     """
     if value is None or isinstance(value, (bool, int, float)):
         return value
     raw = str(value)
     shown = display_name(raw)
-    if raw.startswith(CSV_FORMULA_PREFIXES) or shown.startswith(CSV_FORMULA_PREFIXES):
+    if starts_like_formula(raw) or starts_like_formula(shown):
         return "'" + shown
     return shown
 
