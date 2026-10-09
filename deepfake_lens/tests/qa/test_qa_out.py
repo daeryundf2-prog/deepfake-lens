@@ -22,11 +22,18 @@ which calls ``analysis_api.scan_folder``), the stdlib web server
 (``webapp.build_server`` + a real HTTP GET /api/scan, synchronous and the
 ``async=1`` job + /api/scan-status poll) and — when fastapi and httpx are
 installed — the FastAPI server (/api/scan and the SSE /api/scan/stream),
-and requires identical verdicts, evidence, coverage and threshold
-provenance item for item. R1: the hostile folder (an archive with an A1111
-member next to traversal/absolute/link members, a deflate bomb, a
-symlinked file) must come out of every leg with the same member, container
-and symlink rows as the CLI.
+plus the library call ``analysis_api.scan_folder``, and requires the same
+raw scan JSON row for row (round 3): every item field — verdict text,
+evidence with detail and layer, coverage reasons, limitations,
+source_guess, model/pixel analysis, sha256 — and the whole summary
+(analyzed, capped, cached, container_rows, subfolders_skipped, every count)
+plus threshold and weight provenance. Only wall-clock timestamps, absolute
+paths under the scanned folder and heatmap locations are normalized; the
+stream's copied row fields are checked against the row's result and
+dropped. R1: the hostile folder (an archive with an A1111 member next to
+traversal/absolute/link members, a deflate bomb, a symlinked file) must
+come out of every leg — and of /api/check and /api/check/stream for each of
+its files — with the same member, container and symlink rows as the CLI.
 """
 
 from __future__ import annotations
@@ -111,32 +118,84 @@ def write_photo_like_png(path: Path, *, seed: int, width: int = 192, height: int
     return path
 
 
-def _norm_item(item: dict[str, Any]) -> dict[str, Any]:
-    """The comparable core of one scan item (QA-OUT-4)."""
+# QA-OUT-4 (round 3): legs are compared on the raw scan JSON. Only values
+# that legitimately differ between two runs are normalized: wall-clock
+# timestamps, absolute paths under the scanned folder (a leg may name the
+# folder differently) and heatmap file locations.
+VOLATILE_KEYS = frozenset({"generated_at", "scanned_at", "timestamp", "elapsed_ms", "duration_ms"})
+# The stream copies these result fields to the row top level (pre-R1 row
+# shape); they are checked against the row's result, then dropped.
+STREAM_ROW_EXTRAS = ("verdict_code", "grade", "probability")
+
+
+def _normalize(node: Any, prefixes: tuple[str, ...]) -> Any:
+    if isinstance(node, dict):
+        out: dict[str, Any] = {}
+        for key, value in node.items():
+            if key in VOLATILE_KEYS:
+                continue
+            if key == "heatmap_path" and value:
+                out[key] = "<HEATMAP>"
+                continue
+            out[key] = _normalize(value, prefixes)
+        return out
+    if isinstance(node, list):
+        return [_normalize(value, prefixes) for value in node]
+    if isinstance(node, str):
+        for prefix in prefixes:
+            if prefix and node.startswith(prefix):
+                return "<FOLDER>" + node[len(prefix):]
+    return node
+
+
+def _raw_item(item: dict[str, Any], prefixes: tuple[str, ...] = ()) -> dict[str, Any]:
+    """One scan row as emitted — every field (detail, layer, limitations,
+    verdict text, source_guess, coverage reasons, …) — normalized only for
+    timestamps, absolute folder paths and heatmap locations."""
+    normalized: dict[str, Any] = _normalize(item, prefixes)
+    return normalized
+
+
+def _strip_stream_extras(test: unittest.TestCase, payload: dict[str, Any]) -> dict[str, Any]:
+    """Check the stream's copied row fields against the row's result, then drop them."""
+    rows = []
+    for row in payload["items"]:
+        row = dict(row)
+        result = row.get("result") or {}
+        for key in STREAM_ROW_EXTRAS:
+            test.assertIn(key, row)
+            test.assertEqual(row.pop(key), result.get(key), f"{row.get('path')}: stream {key}")
+        rows.append(row)
+    return {**payload, "items": rows}
+
+
+def _norm_payload(payload: dict[str, Any], folder: Path | None = None) -> dict[str, Any]:
+    prefixes: tuple[str, ...] = ()
+    if folder is not None:
+        prefixes = tuple(sorted({str(folder), str(folder.resolve())}, key=len, reverse=True))
+    return {
+        "items": {item["path"]: _raw_item(item, prefixes) for item in payload["items"]},
+        "order": [item["path"] for item in payload["items"]],
+        "thresholds": payload["thresholds"],
+        "coverage": payload.get("coverage"),
+        "schema_version": payload.get("schema_version"),
+        # The whole summary — analyzed, capped, cached, container_rows,
+        # subfolders_skipped, external_model_active, every count.
+        "summary": payload["summary"],
+    }
+
+
+def _core(item: dict[str, Any]) -> dict[str, Any]:
+    """Short view of a raw row for the scenario assertions below."""
     result = item.get("result") or {}
     return {
         "status": item.get("status"),
-        "kind": item.get("kind"),
         "verdict_code": result.get("verdict_code"),
         "grade": result.get("grade"),
-        "probability": result.get("probability"),
         "evidence": [(e.get("title"), e.get("kind"), e.get("direction"), e.get("strength")) for e in result.get("evidence", [])],
         "coverage": [(c.get("check"), c.get("status"), c.get("reason")) for c in result.get("coverage", [])],
         "sha256": item.get("sha256"),
         "error": item.get("error"),
-    }
-
-
-def _norm_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "items": {item["path"]: _norm_item(item) for item in payload["items"]},
-        "order": [item["path"] for item in payload["items"]],
-        "thresholds": payload["thresholds"],
-        "verdicts": {
-            key: payload["summary"][key]
-            for key in ("total", "manipulation_evidence", "authenticity_evidence", "undetermined", "checks_failed",
-                        "unsupported_or_failed", "duplicates", "skipped")
-        },
     }
 
 
@@ -411,6 +470,49 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
             self.assertEqual(cli_main(["scan", str(folder), "--format", "json"]), 0)
         return json.loads(out.getvalue())
 
+    def _cli_subprocess_payload(self, folder: Path) -> dict[str, Any]:
+        """The CLI as a user runs it: ``python -m deepfake_lens scan <folder> --format json`` in a child process."""
+        import os
+        import subprocess
+        import sys
+
+        env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, (str(REPO_ROOT), os.environ.get("PYTHONPATH"))))}
+        completed = subprocess.run(
+            [sys.executable, "-m", "deepfake_lens", "scan", str(folder), "--format", "json"],
+            capture_output=True, env=env, timeout=600, check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8", "replace")[-2000:])
+        payload: dict[str, Any] = json.loads(completed.stdout.decode("utf-8"))
+        return payload
+
+    def _web_check_upload(self, folder: Path, names: tuple[str, ...]) -> dict[str, dict[str, Any]]:
+        """The stdlib server's POST /api/check (multipart upload) for each file: {name: response data}."""
+        from deepfake_lens.webapp import build_server
+
+        server = build_server("127.0.0.1", 0, default_folder=folder)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        out: dict[str, dict[str, Any]] = {}
+        try:
+            port = server.server_address[1]
+            boundary = "----qaout4check"
+            for name in names:
+                body = (
+                    f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\n"
+                    "Content-Type: application/octet-stream\r\n\r\n"
+                ).encode() + (folder / name).read_bytes() + f"\r\n--{boundary}--\r\n".encode()
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/api/check", data=body, method="POST",
+                    headers={**CLIENT_HEADERS, "Content-Type": f"multipart/form-data; boundary={boundary}"},
+                )
+                with urllib.request.urlopen(request, timeout=120) as response:
+                    self.assertEqual(response.status, 200)
+                    out[name] = json.loads(response.read().decode("utf-8"))
+        finally:
+            server.shutdown()
+            server.server_close()
+        return out
+
     def _web_payload(self, folder: Path) -> dict[str, Any]:
         from deepfake_lens.webapp import build_server
 
@@ -493,42 +595,57 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
         self.assertEqual(len(events.get("result", [])), 1, list(events))
         return events["result"][0], events.get("progress", [])
 
+    def _direct_payload(self, folder: Path) -> dict[str, Any]:
+        """The library leg: analysis_api.scan_folder with the CLI's default options."""
+        options = AnalysisOptions.from_cli_args(type("Args", (), {})())
+        summary, items, thresholds = scan_folder(folder, options)
+        payload: dict[str, Any] = json.loads(json.dumps(scan_payload(summary, items, thresholds, options), ensure_ascii=False))
+        return payload
+
+    def _assert_same(self, reference: dict[str, Any], other: dict[str, Any], leg: str) -> None:
+        """Raw item-for-item equality, with a readable first difference."""
+        self.assertEqual(reference["order"], other["order"], f"{leg}: row order")
+        for path, row in reference["items"].items():
+            self.assertEqual(row, other["items"].get(path), f"{leg}: row {path}")
+        self.assertEqual(reference, other, leg)
+
     def test_cli_gui_api_identical_on_benchmark_fixtures(self) -> None:
         """QA-OUT-4: 같은 폴더를 CLI, GUI(/api/scan), API 서버로 각각 검사 → 세 결과의 결론·근거·확률·임계값 출처가 동일.
 
-        Identical verdict/grade/evidence/coverage/thresholds across the CLI
-        and the stdlib web server here; the FastAPI leg is
-        test_api_server_leg (skipped without fastapi/httpx).
+        Raw rows (verdict text, evidence with detail/layer, coverage reasons,
+        limitations, source_guess, model/pixel analysis, sha256) and the
+        whole summary are identical across the CLI, the library call and
+        the stdlib web server here; the FastAPI leg is test_api_server_leg
+        (skipped without fastapi/httpx).
         """
         folder = BENCHMARK.resolve()
-        cli = _norm_payload(self._cli_payload(folder))
-        options = AnalysisOptions.from_cli_args(type("Args", (), {})())
-        summary, items, thresholds = scan_folder(folder, options)
-        direct = _norm_payload(scan_payload(summary, items, thresholds, options))
-        web = _norm_payload(self._web_payload(folder))
+        cli = _norm_payload(self._cli_payload(folder), folder)
+        direct = _norm_payload(self._direct_payload(folder), folder)
+        web = _norm_payload(self._web_payload(folder), folder)
 
         self.assertEqual(len(cli["items"]), 4)  # 3 PNG fixtures + README.md
-        self.assertEqual(cli, direct)
-        self.assertEqual(cli, web)
+        self._assert_same(cli, direct, "scan_folder")
+        self._assert_same(cli, _norm_payload(self._cli_subprocess_payload(folder), folder), "CLI subprocess")
+        self._assert_same(cli, web, "/api/scan (stdlib)")
         # G7: the GUI used to report builtin_defaults while the CLI loaded the
         # measured profile; both now report the packaged profile.
         self.assertEqual(web["thresholds"]["source"], "threshold_profile")
         self.assertTrue(web["thresholds"]["measured"])
         if HAVE_FASTAPI:
-            self.assertEqual(cli, _norm_payload(self._api_payload(folder)))
+            self._assert_same(cli, _norm_payload(self._api_payload(folder), folder), "/api/scan (FastAPI)")
 
     @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed — API-server leg of QA-OUT-4")
     def test_api_server_leg(self) -> None:
-        """QA-OUT-4 (API leg): FastAPI /api/scan and /api/scan/stream match the CLI."""
+        """QA-OUT-4 (API leg): FastAPI /api/scan and /api/scan/stream match the CLI, raw row for row."""
         folder = BENCHMARK.resolve()
-        cli = _norm_payload(self._cli_payload(folder))
-        self.assertEqual(cli, _norm_payload(self._api_payload(folder)))
+        cli = _norm_payload(self._cli_payload(folder), folder)
+        self._assert_same(cli, _norm_payload(self._api_payload(folder), folder), "/api/scan")
         stream, _ = self._api_stream_payload(folder)
-        self.assertEqual(cli, _norm_payload(stream))
+        self._assert_same(cli, _norm_payload(_strip_stream_extras(self, stream), folder), "/api/scan/stream")
 
     def _assert_hostile_rows(self, cli: dict[str, Any]) -> None:
         """What the CLI itself must report for the R1 hostile folder."""
-        items = cli["items"]
+        items = {path: _core(row) for path, row in cli["items"].items()}
         member = items["evil.zip::ok/a1111.png"]
         self.assertEqual(member["verdict_code"], Verdict.MANIPULATION_EVIDENCE.value)
         self.assertEqual(member["grade"], Grade.EVIDENCE.value)
@@ -546,32 +663,47 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
             self.assertRegex(str(items[path]["sha256"]), r"^[0-9a-f]{64}$", path)
         # R5: container rows are counted by their verdict, never as
         # unsupported/failed — header == table.
-        verdicts = cli["verdicts"]
-        self.assertEqual(verdicts["unsupported_or_failed"], 0)
-        self.assertEqual(verdicts["manipulation_evidence"], 3)  # a1111.png, the member, evil.zip
-        self.assertEqual(verdicts["undetermined"], 1)  # bomb.zip
-        self.assertEqual(verdicts["skipped"], 1)  # linked.png
-        self.assertEqual(verdicts["total"], 5)
+        summary = cli["summary"]
+        self.assertEqual(summary["unsupported_or_failed"], 0)
+        self.assertEqual(summary["manipulation_evidence"], 3)  # a1111.png, the member, evil.zip
+        self.assertEqual(summary["undetermined"], 1)  # bomb.zip
+        self.assertEqual(summary["skipped"], 1)  # linked.png
+        self.assertEqual(summary["total"], 5)
+        self.assertEqual(summary["analyzed"], 4)
+        self.assertEqual(summary["container_rows"], 2)
 
     def test_hostile_folder_cli_and_web_legs_identical(self) -> None:
-        """QA-OUT-4 (R1): archive with an A1111 member, zip bomb and file symlink — CLI == /api/scan == async web scan, item for item."""
+        """QA-OUT-4 (R1): archive with an A1111 member, zip bomb and file symlink — CLI (in-process and subprocess)
+        == scan_folder == /api/scan == async web scan, raw row for row; the stdlib /api/check upload of each
+        file reports the scan's rows for it."""
         with tempfile.TemporaryDirectory() as tmp:
             folder = write_hostile_folder(Path(tmp).resolve() / "case")
-            cli = _norm_payload(self._cli_payload(folder))
+            cli = _norm_payload(self._cli_payload(folder), folder)
             self._assert_hostile_rows(cli)
-            self.assertEqual(cli, _norm_payload(self._web_payload(folder)))
-            self.assertEqual(cli, _norm_payload(self._web_async_payload(folder)))
+            self._assert_same(cli, _norm_payload(self._cli_subprocess_payload(folder), folder), "CLI subprocess")
+            self._assert_same(cli, _norm_payload(self._direct_payload(folder), folder), "scan_folder")
+            self._assert_same(cli, _norm_payload(self._web_payload(folder), folder), "/api/scan (stdlib)")
+            self._assert_same(cli, _norm_payload(self._web_async_payload(folder), folder), "/api/scan?async=1")
+            # The symlink is not uploadable as a link (its bytes would be the
+            # target's); its scan row is the skipped one asserted above.
+            names = ("evil.zip", "bomb.zip", "a1111.png")
+            for name, data in self._web_check_upload(folder, names).items():
+                with self.subTest(leg="/api/check (stdlib upload)", file=name):
+                    rows = data["items"] if data.get("mode") == "files" else [data["item"]]
+                    expected = {path: row for path, row in cli["items"].items() if path == name or path.startswith(name + "::")}
+                    self.assertEqual({row["path"]: _raw_item(row) for row in rows}, expected)
+                    self.assertEqual(data["thresholds"], cli["thresholds"])
 
     @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed — API-server leg of QA-OUT-4")
     def test_hostile_folder_api_and_stream_legs_identical(self) -> None:
-        """QA-OUT-4 (R1): the same hostile folder through FastAPI /api/scan and /api/scan/stream matches the CLI item for item."""
+        """QA-OUT-4 (R1): the same hostile folder through FastAPI /api/scan and /api/scan/stream matches the CLI raw row for row."""
         with tempfile.TemporaryDirectory() as tmp:
             folder = write_hostile_folder(Path(tmp).resolve() / "case")
-            cli = _norm_payload(self._cli_payload(folder))
+            cli = _norm_payload(self._cli_payload(folder), folder)
             self._assert_hostile_rows(cli)
-            self.assertEqual(cli, _norm_payload(self._api_payload(folder)))
+            self._assert_same(cli, _norm_payload(self._api_payload(folder), folder), "/api/scan (FastAPI)")
             stream, progress = self._api_stream_payload(folder)
-            self.assertEqual(cli, _norm_payload(stream))
+            self._assert_same(cli, _norm_payload(_strip_stream_extras(self, stream), folder), "/api/scan/stream")
             # Stream extras: counts mirror the summary; one progress event
             # per row (member, container, symlink rows included).
             self.assertEqual(stream["counts"], {
@@ -582,27 +714,51 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
             self.assertEqual(scanned[-1]["index"], len(cli["items"]))
 
     @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed — API-server leg of QA-OUT-4")
-    def test_api_check_with_archive_path_expands_like_scan(self) -> None:
-        """QA-OUT-4 (R1): /api/check and /api/check/stream on an archive path report the scan's member + container rows."""
+    def test_api_check_on_hostile_folder_matches_scan(self) -> None:
+        """QA-OUT-4 (R1): /api/check and /api/check/stream on every hostile-folder file report the scan's raw rows
+        (archives: member + container rows; the symlink is refused like the scan's skipped row)."""
         with tempfile.TemporaryDirectory() as tmp:
             folder = write_hostile_folder(Path(tmp).resolve() / "case")
-            cli = _norm_payload(self._cli_payload(folder))
+            cli = _norm_payload(self._cli_payload(folder), folder)
             client = self._api_client(folder)
             headers = {"host": "localhost", **CLIENT_HEADERS}
-            response = client.post("/api/check", params={"file_path": str(folder / "evil.zip")}, headers=headers)
-            self.assertEqual(response.status_code, 200, response.text)
-            data = response.json()["data"]
-            self.assertEqual(data["mode"], "files")
-            checked = {item["path"]: _norm_item(item) for item in data["items"]}
-            self.assertEqual(checked, {path: row for path, row in cli["items"].items() if path.startswith("evil.zip")})
-            with client.stream("POST", "/api/check/stream", params={"file_path": str(folder / "evil.zip")}, headers=headers) as streamed:
-                body = "".join(streamed.iter_text())
-            result_block = next(block for block in body.split("\n\n") if block.startswith("event: result"))
-            result = json.loads("".join(line[len("data: "):] for line in result_block.splitlines() if line.startswith("data: ")))
-            self.assertEqual({item["path"]: _norm_item(item) for item in result["items"]}, checked)
+            for name in ("evil.zip", "bomb.zip", "a1111.png"):
+                with self.subTest(file=name):
+                    response = client.post("/api/check", params={"file_path": str(folder / name)}, headers=headers)
+                    self.assertEqual(response.status_code, 200, response.text)
+                    data = response.json()["data"]
+                    expected = {path: row for path, row in cli["items"].items() if path == name or path.startswith(name + "::")}
+                    if data.get("mode") == "files":
+                        checked = {item["path"]: _raw_item(item, (str(folder),)) for item in data["items"]}
+                    else:
+                        # A single file is reported under its absolute path
+                        # (normalized to the scan's relative path here).
+                        item = _raw_item(data["item"], (str(folder) + "/",))
+                        item["path"] = item["path"].removeprefix("<FOLDER>")
+                        checked = {item["path"]: item}
+                    self.assertEqual(checked, expected)
+                    with client.stream("POST", "/api/check/stream", params={"file_path": str(folder / name)}, headers=headers) as streamed:
+                        body = "".join(streamed.iter_text())
+                    result_block = next(block for block in body.split("\n\n") if block.startswith("event: result"))
+                    result = json.loads("".join(line[len("data: "):] for line in result_block.splitlines() if line.startswith("data: ")))
+                    self.assertEqual(result.get("mode"), data.get("mode"))
+                    if result.get("mode") == "files":
+                        streamed_rows = {item["path"]: _raw_item(item, (str(folder),)) for item in result["items"]}
+                    else:
+                        streamed = _raw_item(result["item"], (str(folder) + "/",))
+                        streamed["path"] = streamed["path"].removeprefix("<FOLDER>")
+                        streamed_rows = {streamed["path"]: streamed}
+                    self.assertEqual(streamed_rows, expected)
+            # The symlink: the scan reports a skipped row (asserted above);
+            # /api/check and its stream refuse the path outright.
+            self.assertEqual(cli["items"]["linked.png"]["status"], "skipped")
+            response = client.post("/api/check", params={"file_path": str(folder / "linked.png")}, headers=headers)
+            self.assertEqual(response.status_code, 403, response.text)
+            with client.stream("POST", "/api/check/stream", params={"file_path": str(folder / "linked.png")}, headers=headers) as streamed:
+                self.assertEqual(streamed.status_code, 403)
 
     def test_upload_reports_same_threshold_provenance(self) -> None:
-        """QA-OUT-4 (GUI upload): /api/analyze-upload reports the thresholds it used, not builtin defaults."""
+        """QA-OUT-4 (GUI upload): /api/analyze-upload reports the thresholds it used and the scan's raw row."""
         boundary = "----qaout4"
         data = (BENCHMARK / "ai-like-gradient.png").read_bytes()
         body = (
@@ -612,8 +768,8 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
         payload: dict[str, Any] = webapp_api._analyze_upload_payload(f"multipart/form-data; boundary={boundary}", body)
         cli = self._cli_payload(BENCHMARK.resolve())
         self.assertEqual(payload["thresholds"], cli["thresholds"])
-        uploaded = _norm_item(payload["items"][0])
-        scanned = _norm_item(next(item for item in cli["items"] if item["path"] == "ai-like-gradient.png"))
+        uploaded = _raw_item(payload["items"][0])
+        scanned = _raw_item(next(item for item in cli["items"] if item["path"] == "ai-like-gradient.png"))
         self.assertEqual(uploaded, scanned)
 
 
