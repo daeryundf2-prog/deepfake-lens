@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import unittest
 
-from deepfake_lens.decision import DEFAULT_PROBABILITY_THRESHOLD, decide
+from deepfake_lens.decision import decide
 from deepfake_lens.result_types import (
     CoverageEntry,
     CoverageStatus,
@@ -37,6 +37,12 @@ def calibrated(p: float | None, *, cal: str | None = "cal-1", measured: str | No
                direction=SYN) -> EvidenceItem:
     return item(S, direction, MOD, probability=p, calibration_id=cal, measured_on=measured, probability_ci=(0.1, 0.9))
 
+
+# G8 (round 5): rule 4 uses the loaded profile's threshold for the item's
+# calibration id; the former 0.5 fallback (DEFAULT_PROBABILITY_THRESHOLD) is
+# gone. The tests that relied on it now pass this profile threshold.
+PROFILE_THRESHOLD = 0.5
+CAL_THRESHOLDS = {"cal-1": PROFILE_THRESHOLD}
 
 RAN = CoverageEntry("metadata", CoverageStatus.RAN)
 SKIP = CoverageEntry("external_model", CoverageStatus.SKIPPED, "모델 프로필 미지정")
@@ -102,10 +108,12 @@ class Rule3FailClosedTest(unittest.TestCase):
 
 class Rule4CalibratedStatisticalTest(unittest.TestCase):
     def test_probability_equal_to_threshold_concludes(self) -> None:
-        self.assertEqual(decide([calibrated(DEFAULT_PROBABILITY_THRESHOLD)], [RAN], EV), MANIP)
+        # G8: the threshold is the profile's (was the implicit 0.5 default).
+        self.assertEqual(decide([calibrated(PROFILE_THRESHOLD)], [RAN], EV, CAL_THRESHOLDS), MANIP)
 
     def test_probability_just_below_threshold_does_not(self) -> None:
-        self.assertEqual(decide([calibrated(DEFAULT_PROBABILITY_THRESHOLD - 1e-9)], [RAN], EV), UNDET)
+        # G8: the threshold is the profile's (was the implicit 0.5 default).
+        self.assertEqual(decide([calibrated(PROFILE_THRESHOLD - 1e-9)], [RAN], EV, CAL_THRESHOLDS), UNDET)
 
     def test_missing_calibration_id_does_not(self) -> None:
         self.assertEqual(decide([calibrated(0.99, cal=None)], [RAN], EV), UNDET)
@@ -121,8 +129,23 @@ class Rule4CalibratedStatisticalTest(unittest.TestCase):
         self.assertEqual(decide([calibrated(0.7)], [RAN], EV, thresholds), UNDET)
         self.assertEqual(decide([calibrated(0.8)], [RAN], EV, thresholds), MANIP)
 
-    def test_threshold_for_other_calibration_falls_back_to_default(self) -> None:
-        self.assertEqual(decide([calibrated(0.6)], [RAN], EV, {"cal-other": 0.95}), MANIP)
+    def test_threshold_for_other_calibration_does_not_apply(self) -> None:
+        # G8 (round 5): encoded the defect — a calibration id without a
+        # profile threshold fell back to 0.5 and concluded (was MANIP).
+        self.assertEqual(decide([calibrated(0.6)], [RAN], EV, {"cal-other": 0.95}), UNDET)
+
+    def test_no_thresholds_at_all_never_fires_rule_4(self) -> None:
+        """G8: without a profile threshold for the calibration id, rule 4 is skipped."""
+        for probability in (0.5, 0.9, 1.0):
+            with self.subTest(probability=probability):
+                self.assertEqual(decide([calibrated(probability)], [RAN], EV), UNDET)
+                self.assertEqual(decide([calibrated(probability)], [RAN], EV, {}), UNDET)
+
+    def test_each_calibration_id_uses_its_own_threshold(self) -> None:
+        """G8: thresholds are keyed by calibration id."""
+        thresholds = {"cal-a": 0.9, "cal-b": 0.3}
+        self.assertEqual(decide([calibrated(0.5, cal="cal-a")], [RAN], EV, thresholds), UNDET)
+        self.assertEqual(decide([calibrated(0.5, cal="cal-b")], [RAN], EV, thresholds), MANIP)
 
     def test_neutral_direction_does_not_conclude(self) -> None:
         self.assertEqual(decide([calibrated(0.99, direction=NEU)], [RAN], EV), UNDET)
@@ -132,7 +155,8 @@ class Rule4CalibratedStatisticalTest(unittest.TestCase):
         self.assertEqual(decide([lexical], [RAN], EV), UNDET)
 
     def test_calibrated_statistical_beats_authenticity(self) -> None:
-        self.assertEqual(decide([DET_AUTH_STRONG, calibrated(0.9)], [RAN], EV), MANIP)
+        # G8: with its profile threshold (was the implicit 0.5 default).
+        self.assertEqual(decide([DET_AUTH_STRONG, calibrated(0.9)], [RAN], EV, CAL_THRESHOLDS), MANIP)
 
 
 class Rule5AuthenticityTest(unittest.TestCase):
@@ -207,3 +231,86 @@ class BandDerivationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ProfileThresholdWiringTest(unittest.TestCase):
+    """G8 (round 5): rule 4 gets the loaded profiles' ``threshold`` per calibration id.
+
+    No caller used to pass ``probability_thresholds``, so rule 4 always cut
+    at the 0.5 default whatever the profile said.
+    """
+
+    def _profile(self, folder, name: str, **fields: object):
+        import json
+
+        path = folder / f"{name}-runtime.json"
+        path.write_text(json.dumps({"name": name, "runtime": "onnx", "modality": "image", **fields}), encoding="utf-8")
+        return path
+
+    def test_collects_calibration_id_to_threshold_over_profiles_and_sets(self) -> None:
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from deepfake_lens.model_adapter import profile_probability_thresholds
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            a = self._profile(folder, "a", calibration_id="cal-a", threshold=80)
+            self._profile(folder, "b", calibration_id="cal-b", threshold=35.5)
+            self._profile(folder, "no-threshold", calibration_id="cal-c")
+            self._profile(folder, "no-calibration", threshold=67)
+            self._profile(folder, "bad", calibration_id="cal-d", threshold="high")
+            self._profile(folder, "range", calibration_id="cal-e", threshold=140)
+            (folder / "set.json").write_text(json.dumps({"type": "deepfake-lens-profile-set-v1", "profiles": ["a-runtime.json"]}), encoding="utf-8")
+            self.assertEqual(profile_probability_thresholds(folder), {"cal-a": 0.8, "cal-b": 0.355})
+            self.assertEqual(profile_probability_thresholds([a]), {"cal-a": 0.8})
+            self.assertEqual(profile_probability_thresholds(folder / "set.json"), {"cal-a": 0.8})
+            self.assertEqual(profile_probability_thresholds(None), {})
+            self.assertEqual(profile_probability_thresholds(folder / "missing-runtime.json"), {})
+
+    def test_packaged_profiles_contribute_no_threshold(self) -> None:
+        """Phase 0: no packaged profile is calibrated, so rule 4 cannot fire."""
+        from pathlib import Path
+
+        from deepfake_lens.model_adapter import profile_probability_thresholds
+
+        models = Path(__file__).resolve().parents[1] / "models"
+        self.assertEqual(profile_probability_thresholds(models), {})
+
+    def test_scan_uses_the_profile_threshold(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        from deepfake_lens.core import analyze_file
+        from deepfake_lens.result_types import ExternalModelAnalysis
+
+        try:
+            from deepfake_lens.tests.qa.test_qa_out import write_photo_like_png
+        except ImportError as exc:  # pragma: no cover - numpy missing
+            self.skipTest(f"photo fixture unavailable: {exc}")
+
+        calibrated_output = ExternalModelAnalysis(
+            available=True, score=90, confidence="high", model="cal-model", detail="보정된 모델",
+            probability=0.9, probability_ci=(0.85, 0.94), calibration_id="cal-x", measured_on="corpus-x@test",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            try:
+                photo = write_photo_like_png(folder / "photo.png", seed=3)
+            except ImportError as exc:  # pragma: no cover - numpy missing
+                self.skipTest(f"numpy unavailable: {exc}")
+            cases: tuple[tuple[dict[str, object], Verdict], ...] = (
+                ({"calibration_id": "cal-x", "threshold": 80}, MANIP),   # 0.9 >= 0.80
+                ({"calibration_id": "cal-x", "threshold": 95}, UNDET),   # 0.9 <  0.95
+                ({"calibration_id": "cal-x"}, UNDET),                    # no threshold: rule 4 skipped
+                ({"calibration_id": "cal-other", "threshold": 10}, UNDET),  # another calibration id
+            )
+            for index, (fields, expected) in enumerate(cases):
+                profile = self._profile(folder, f"p{index}", **fields)
+                with self.subTest(fields=fields), mock.patch("deepfake_lens.core.analyze_external_model", return_value=calibrated_output):
+                    row = analyze_file(photo, model_path=profile)
+                    assert row.result is not None
+                    self.assertTrue(any(e.calibration_id == "cal-x" for e in row.result.evidence), row.result.evidence)
+                    self.assertEqual(row.result.verdict_code, expected)

@@ -24,7 +24,7 @@ from .video_analysis import (
     audio_track_check,
 )
 from .documents import SUPPORTED_DOCUMENT_EXTENSIONS, extract_document_text
-from .model_adapter import FAILED_CONFIDENCE, ExternalModelAnalysis, analyze_external_model
+from .model_adapter import FAILED_CONFIDENCE, ExternalModelAnalysis, analyze_external_model, profile_probability_thresholds
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, PixelAnalysis, analyze_image_pixels
 from .image_metadata import (  # noqa: F401
     DEFAULT_METADATA_BYTES,
@@ -1309,6 +1309,8 @@ def _analyze_image_file(
         image_format=image_format,
         jpeg_quality=jpeg_quality,
         extra_reference=deep.reference,
+        # G8: rule 4's thresholds are the loaded profiles' (calibration id -> threshold/100).
+        probability_thresholds=profile_probability_thresholds(model_path),
     )
 
 
@@ -1343,10 +1345,15 @@ def _analyze_audio_file(
         coverage.append(_no_model_entry(model_path, "audio"))
     else:
         coverage.extend(model_coverage(analysis.model_analysis))
-    return _audio_result(analysis, coverage=coverage)
+    return _audio_result(analysis, coverage=coverage, probability_thresholds=profile_probability_thresholds(model_path))  # G8
 
 
-def _audio_result(analysis: AudioAnalysis, *, coverage: list[CoverageEntry] | None = None) -> ClassificationResult:
+def _audio_result(
+    analysis: AudioAnalysis,
+    *,
+    coverage: list[CoverageEntry] | None = None,
+    probability_thresholds: dict[str, float] | None = None,
+) -> ClassificationResult:
     """Adapt an AudioAnalysis into the result contract.
 
     Audio: legacy acoustic heuristics are reference-only; the model is
@@ -1387,6 +1394,7 @@ def _audio_result(analysis: AudioAnalysis, *, coverage: list[CoverageEntry] | No
         next_checks=AUDIO_NEXT_CHECKS,
         reference_signals=reference,
         model_analysis=analysis.model_analysis,
+        probability_thresholds=probability_thresholds,  # G8
     )
 
 
@@ -1438,7 +1446,7 @@ def _analyze_video_file(
     else:
         coverage.extend(model_coverage(analysis.model_analysis))
     coverage.extend(deep.coverage)
-    return _video_result(analysis, coverage=coverage, deep=deep)
+    return _video_result(analysis, coverage=coverage, deep=deep, probability_thresholds=profile_probability_thresholds(model_path))  # G8
 
 
 def _video_result(
@@ -1446,6 +1454,7 @@ def _video_result(
     *,
     coverage: list[CoverageEntry] | None = None,
     deep: DeepLayers | None = None,
+    probability_thresholds: dict[str, float] | None = None,
 ) -> ClassificationResult:
     """Adapt a VideoTemporalAnalysis into the result contract.
 
@@ -1489,6 +1498,7 @@ def _video_result(
         reference_signals=reference,
         model_analysis=analysis.model_analysis,
         av_audio=analysis.av_audio,
+        probability_thresholds=probability_thresholds,  # G8
     )
 
 
@@ -1814,6 +1824,7 @@ def analyze_image_metadata(
     image_format: str | None = None,
     jpeg_quality: float | None = None,
     extra_reference: list[EvidenceSignal] | None = None,
+    probability_thresholds: dict[str, float] | None = None,
 ) -> ClassificationResult:
     """Image result from already-collected analyzer outputs.
 
@@ -1885,6 +1896,7 @@ def analyze_image_metadata(
         reference_signals=reference,
         pixel_analysis=pixel_analysis,
         model_analysis=model_analysis,
+        probability_thresholds=probability_thresholds,
     )
 
 

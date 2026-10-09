@@ -48,6 +48,7 @@ test_every_profile_is_gated_and_carries_an_empty_pin."
 
 | 테스트 | 커밋 | 이유 | 새 이름 |
 | --- | --- | --- | --- |
+| `Rule4CalibratedStatisticalTest.test_threshold_for_other_calibration_falls_back_to_default` | G8 (검증 라운드 5) | 결함을 고정하던 테스트: 프로필 임계값이 없는 calibration_id가 0.5 기본값으로 규칙 4를 발동한다고 기대했다(기본값 제거). 같은 입력에서 판단 불가를 기대하도록 고치고 이름을 바꿨다. 커밋 메시지에 옛 이름 기재 | `Rule4CalibratedStatisticalTest.test_threshold_for_other_calibration_does_not_apply` |
 | `VideoFramesRuntimeTest.test_committed_aide_frames_profile_matches_video_modality` | 2b39313 (WP-C) | aide-frames-runtime.json 삭제. 커밋 메시지: "frames-profile contract retargeted to the remaining video-frames profiles" | `VideoFramesRuntimeTest.test_committed_frames_profiles_match_video_modality` |
 
 ## 파일 이동 (삭제 아님)

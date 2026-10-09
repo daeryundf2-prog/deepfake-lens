@@ -11,7 +11,8 @@ probability at or above the profile threshold.
    (kept even when some check failed; the failure stays in coverage)
 3. any coverage entry with status failed                -> undetermined
 4. any calibrated statistical synthetic item whose
-   probability >= its threshold                         -> manipulation_evidence
+   probability >= its profile threshold (a calibration
+   id without one never fires)                          -> manipulation_evidence
 5. any deterministic + authentic + strong item, and no
    synthetic-direction item other than lexical ones     -> authenticity_evidence
 6. otherwise                                            -> undetermined
@@ -32,17 +33,17 @@ from .result_types import (
     Verdict,
 )
 
-# Fallback decision threshold for a calibrated statistical item whose
-# calibration id has no entry in ``thresholds``. 0.5 is the Bayes-optimal
-# cut for a calibrated probability under equal priors and costs; profiles
-# override it per calibration id once WP-I measures them.
-DEFAULT_PROBABILITY_THRESHOLD = 0.5
+def _threshold_for(item: EvidenceItem, thresholds: Mapping[str, float] | None) -> float | None:
+    """The profile threshold for the item's calibration id, or None (G8).
 
-
-def _threshold_for(item: EvidenceItem, thresholds: Mapping[str, float] | None) -> float:
+    Round 5: there is no fallback cut any more (the former 0.5 default let
+    rule 4 fire for a calibration id no profile had measured a threshold
+    for). Thresholds come from the loaded profiles' ``threshold`` via
+    ``model_adapter.profile_probability_thresholds``.
+    """
     if thresholds and item.calibration_id and item.calibration_id in thresholds:
         return float(thresholds[item.calibration_id])
-    return DEFAULT_PROBABILITY_THRESHOLD
+    return None
 
 
 # Korean description of each rule, for ``deepfake-lens explain`` (D1).
@@ -94,14 +95,17 @@ def decide_with_rule(
         return Verdict.UNDETERMINED, 3
 
     # Rule 4 — calibrated statistical evidence above its measured threshold.
+    # A calibration id with no profile threshold never fires (G8).
     for item in items:
+        threshold = _threshold_for(item, thresholds)
         if (
             item.kind == EvidenceKind.STATISTICAL
             and item.direction == EvidenceDirection.SYNTHETIC
             and item.calibration_id
             and item.measured_on
             and item.probability is not None
-            and item.probability >= _threshold_for(item, thresholds)
+            and threshold is not None
+            and item.probability >= threshold
         ):
             return Verdict.MANIPULATION_EVIDENCE, 4
 

@@ -426,6 +426,19 @@ and links a variant to `<label>/<generator>/original/<same stem>.*` through
 `derived_from`. `corpus split --group-by origin` (default) keeps every item
 that derives from one original — and exact duplicates — in one split.
 
+### Profile `calibration_id` / `threshold` (decision rule 4, G8)
+
+A runtime profile whose probabilities are calibrated names its calibration
+mapping in `calibration_id` (string) and its operating cut in `threshold`
+(0-100). `model_adapter.profile_probability_thresholds(model_path)` collects
+`{calibration_id: threshold / 100}` over every profile in use (profile sets
+contribute their members) and `core.build_classification_result` passes it to
+`decision.decide` as `thresholds`. Rule 4 fires for a calibrated statistical
+item only when its `calibration_id` has an entry and `probability >= `
+that value — a calibration id with no profile threshold never fires rule 4
+(the former 0.5 fallback was removed in round 5). No packaged phase-0 profile
+carries `calibration_id`, so rule 4 cannot fire in phase 0.
+
 ### Profile `measured_on`
 
 Every `deepfake_lens/models/*-runtime.json` may carry `measured_on`

@@ -530,6 +530,59 @@ def _member_entry(source: Path, result: ExternalModelAnalysis, *, gated: bool, h
     }
 
 
+def _profile_threshold_entry(profile: dict[str, object]) -> tuple[str, float] | None:
+    """``(calibration_id, threshold / 100)`` of one runtime profile, or None (G8).
+
+    The profile's ``threshold`` (0-100, the cut its measurement fixed) is the
+    rule-4 threshold for probabilities carrying its ``calibration_id``. A
+    profile without both — every phase-0 profile — contributes nothing, so
+    rule 4 cannot fire for that calibration id (no 0.5 default).
+    """
+    calibration_id = profile.get("calibration_id")
+    threshold = profile.get("threshold")
+    if not isinstance(calibration_id, str) or not calibration_id.strip():
+        return None
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not 0 <= float(threshold) <= 100:
+        return None
+    return calibration_id.strip(), float(threshold) / 100.0
+
+
+def profile_probability_thresholds(
+    model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
+    *,
+    _depth: int = 0,
+) -> dict[str, float]:
+    """``{calibration_id: threshold / 100}`` over every profile ``model_path`` names (G8).
+
+    Profile sets contribute their members. Unreadable files and profiles
+    without a calibration id or a numeric 0-100 ``threshold`` are skipped.
+    This is what :func:`core.build_classification_result` hands to
+    ``decision.decide`` as ``thresholds`` — the decision never invents one.
+    """
+    if model_path is None or _depth >= _MAX_PROFILE_DEPTH:
+        return {}
+    out: dict[str, float] = {}
+    for source in _model_sources(model_path):
+        if source.suffix.lower() != ".json":
+            continue
+        try:
+            profile = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(profile, dict):
+            continue
+        if profile.get("type") == PROFILE_SET_TYPE:
+            members = profile.get("profiles")
+            for member in members if isinstance(members, list) else []:
+                raw = Path(str(member))
+                out.update(profile_probability_thresholds(raw if raw.is_absolute() else source.parent / raw, _depth=_depth + 1))
+            continue
+        entry = _profile_threshold_entry(profile)
+        if entry is not None:
+            out[entry[0]] = entry[1]
+    return out
+
+
 def load_model_threshold(model_path: Path | str | None) -> int | None:
     if model_path is None:
         return None
