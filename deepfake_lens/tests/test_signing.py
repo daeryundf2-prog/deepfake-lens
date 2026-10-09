@@ -61,7 +61,7 @@ class SignVerifyTest(unittest.TestCase):
     def test_missing_key_writes_unsigned_with_note(self) -> None:
         signed = sign_report(_report(), None)
         self.assertIsNone(signed["signature"])
-        self.assertIn("unsigned", signed["signature_note"])
+        self.assertIn("서명 없음", signed["signature_note"])  # R4: note is Korean-only
         result = verify_report(signed, KEY)
         self.assertFalse(result.verified)
         self.assertEqual(result.status, "unsigned")
@@ -167,7 +167,7 @@ class CliSigningTest(unittest.TestCase):
             self.assertEqual(rc, 0)
             payload = json.loads(out.read_text(encoding="utf-8"))
             self.assertIsNone(payload["signature"])
-            self.assertIn("unsigned", payload["signature_note"])
+            self.assertIn("서명 없음", payload["signature_note"])  # R4: note is Korean-only
 
 
 if __name__ == "__main__":

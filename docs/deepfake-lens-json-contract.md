@@ -265,7 +265,7 @@ top-level fields. The HMAC-SHA256 covers the canonical JSON
 | --- | --- |
 | `tool_version` | Deepfake Lens version that produced the report. |
 | `model_pins` | `[{"profile": "<profile file stem>", "pin": {"sha256"\|"revision": …} \| null}]` for every runtime profile in the effective models dir (plus explicit `--model-path` profiles), sorted by name. `null` = unpinned. |
-| `signature_note` | Korean note: what the HMAC proves, or `서명 없음 (unsigned): …` when no key was configured. Inside the MAC. |
+| `signature_note` | Korean note: what the HMAC proves, or `서명 없음: …` when no key was configured. Inside the MAC. |
 | `signature_key_id` | `hmac-sha256-v1:<first 12 hex of SHA-256(key)>`. Outside the MAC; a mismatch with the verifying key is reported as `키 ID 불일치`. |
 | `signature` | Hex HMAC, or `null` when unsigned. |
 

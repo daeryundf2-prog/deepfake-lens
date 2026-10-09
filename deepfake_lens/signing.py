@@ -33,7 +33,7 @@ SIGNED_NOTE = (
     "signature/signature_key_id를 제외한 본문 전체(이 문구 포함)가 서명 범위입니다."
 )
 UNSIGNED_NOTE = (
-    f"서명 없음 (unsigned): 보고서 서명 키가 설정되지 않았습니다 — {REPORT_KEY_ENV} 환경 변수 또는 --key-file을 지정하세요."
+    f"서명 없음: 보고서 서명 키가 설정되지 않았습니다 — {REPORT_KEY_ENV} 환경 변수 또는 --key-file을 지정하세요."
 )
 
 # The only fields outside the MAC: the signature and the key id it was made
