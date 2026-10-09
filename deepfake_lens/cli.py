@@ -79,6 +79,7 @@ from .evidence_statement import (
     signed_statement_body,
     write_evidence_statement_json,
     write_evidence_statement_markdown,
+    PDF_REPORT_DEPENDENCY_MESSAGE,
     PdfDependencyMissing,
     pdf_backend_available,
     write_evidence_statement_pdf,
@@ -968,6 +969,11 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         # never a RuntimeError traceback after the scan finished.
         print(f"오류: {PdfDependencyMissing()}", file=sys.stderr)
         return 2
+    if (args.pdf_out or getattr(args, "forensic_pdf_out", None)) and not pdf_backend_available():
+        # B8: the scan PDF reports need pymupdf too — same refusal, never an
+        # English Latin-1 PDF.
+        print(f"오류: {PdfDependencyMissing(PDF_REPORT_DEPENDENCY_MESSAGE)}", file=sys.stderr)
+        return 2
     options = AnalysisOptions.from_cli_args(args)
     engine_profiles = options.engine_profiles()
     if engine_profiles and args.model_path is None:
@@ -976,13 +982,13 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
 
     try:
         if args.progress:
-            print(f"Analyzing {args.folder} with workers={args.workers}, pixel={args.pixel}...", file=sys.stderr)
+            print(f"검사 중: {args.folder} (workers={args.workers}, pixel={args.pixel})…", file=sys.stderr)
         summary, items, thresholds = scan_folder(args.folder, options, warn=thresholds_warning_printer(sys.stderr))
     except OSError as exc:
         print(f"오류: {exc}", file=sys.stderr)
         return 2
     if args.progress:
-        print(f"Done: analyzed={summary.analyzed}, cached={summary.cached}, total={summary.total}", file=sys.stderr)
+        print(f"검사 완료: 분석 {summary.analyzed}건, 캐시 사용 {summary.cached}건, 전체 {summary.total}건", file=sys.stderr)
 
     scan_coverage = weights_coverage(options.resolved_models_dir())
     if args.json_out:
@@ -993,7 +999,13 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
     if args.html_out:
         write_html_report(args.html_out, summary, items, redact_paths=args.redact_paths, thresholds=thresholds)
     if args.pdf_out:
-        write_pdf_report(args.pdf_out, summary, items, redact_paths=args.redact_paths, thresholds=thresholds)
+        write_pdf_report(
+            args.pdf_out, summary, items,
+            redact_paths=args.redact_paths,
+            thresholds=thresholds,
+            coverage=scan_coverage,
+            exhibit_no=getattr(args, "exhibit_no", "갑 제        호증"),
+        )
     if getattr(args, "forensic_pdf_out", None):
         write_forensic_pdf_report(
             args.forensic_pdf_out,

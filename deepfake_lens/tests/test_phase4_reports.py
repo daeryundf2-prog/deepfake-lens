@@ -67,23 +67,48 @@ class PdfLatin1NoticeTest(unittest.TestCase):
         result = analyze_text("as an AI language model I conclude")
         return ScanItem(path=str(path), name=path.name, kind="text", status="analyzed", size_bytes=10, result=result)
 
+    # B8: the --pdf-out report is the Korean forensic renderer; the old
+    # Latin-1 writer (and its "NOTE: this simple PDF is Latin-1 only"
+    # notice) is gone from this path. Without pymupdf it refuses in Korean.
+    # Names kept from the baseline (QA-SYS-10 inventory); the bodies now pin
+    # B8: Korean text instead of the old Latin-1 notice.
     def test_korean_content_gets_latin1_notice(self) -> None:
+        from deepfake_lens.evidence_statement import PDF_REPORT_DEPENDENCY_MESSAGE, PdfDependencyMissing
+        from deepfake_lens.pdf_backend import import_pymupdf, pymupdf_available
+        from deepfake_lens.result_text import TEXT_LEGAL_LIMITATION
+
         with tempfile.TemporaryDirectory() as tmp:
             sample = Path(tmp) / "sample.txt"
             sample.write_text("hello", encoding="utf-8")
             out = Path(tmp) / "report.pdf"
+            if not pymupdf_available():
+                with self.assertRaises(PdfDependencyMissing) as ctx:
+                    write_pdf_report(out, self._summary(), [self._item(sample)])
+                self.assertEqual(str(ctx.exception), PDF_REPORT_DEPENDENCY_MESSAGE)
+                self.assertFalse(out.exists())
+                return
             write_pdf_report(out, self._summary(), [self._item(sample)])
-            raw = out.read_bytes()
-            self.assertIn(b"NOTE: this simple PDF is Latin-1 only", raw)
+            pymupdf = import_pymupdf()
+            with pymupdf.open(str(out)) as doc:
+                text = "".join(page.get_text() for page in doc)
+            self.assertIn("판단 불가", text)
+            self.assertIn(TEXT_LEGAL_LIMITATION[:20], text)
+            self.assertNotIn("Latin-1", text)
+            self.assertNotIn("UNDETERMINED", text)
 
     def test_ascii_only_content_has_no_notice(self) -> None:
-        from deepfake_lens.core import ScanItem
+        """B8: no PDF path of --pdf-out prints the Latin-1 notice any more."""
+        from deepfake_lens.evidence_statement import PdfDependencyMissing
+        from deepfake_lens.pdf_backend import pymupdf_available
 
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "report.pdf"
+            if not pymupdf_available():
+                with self.assertRaises(PdfDependencyMissing):
+                    write_pdf_report(out, self._summary(), [])
+                return
             write_pdf_report(out, self._summary(), [])
-            raw = out.read_bytes()
-            self.assertNotIn(b"NOTE: this simple PDF", raw)
+            self.assertNotIn(b"NOTE: this simple PDF", out.read_bytes())
 
 
 class EerTest(unittest.TestCase):

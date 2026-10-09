@@ -391,14 +391,25 @@ class RendererTest(unittest.TestCase):
             self.assertIn(needle, html)
 
     def test_minimal_pdf_states_verdict_codes(self) -> None:
-        from deepfake_lens.reports import write_pdf_report
+        """B8: --pdf-out renders the verdicts in Korean (forensic renderer); without
+        pymupdf only the web fallback still writes the Latin-1 text PDF."""
+        from deepfake_lens.pdf_backend import import_pymupdf, pymupdf_available
+        from deepfake_lens.reports import write_forensic_pdf_report, write_pdf_report
 
         path = self.root / "r.pdf"
+        if not pymupdf_available():
+            write_forensic_pdf_report(path, self.summary, self.items)
+            raw = path.read_bytes()
+            self.assertIn(b"MANIPULATION-EVIDENCE", raw)
+            self.assertIn(b"UNDETERMINED", raw)
+            self.assertIn(b"no evidentiary value", raw)
+            return
         write_pdf_report(path, self.summary, self.items)
-        raw = path.read_bytes()
-        self.assertIn(b"MANIPULATION-EVIDENCE", raw)
-        self.assertIn(b"UNDETERMINED", raw)
-        self.assertIn(b"no evidentiary value", raw)
+        with import_pymupdf().open(str(path)) as doc:
+            text = "".join(page.get_text() for page in doc)
+        self.assertIn("조작·생성 근거", text)
+        self.assertIn("판단 불가", text)
+        self.assertIn(TEXT_LEGAL_LIMITATION[:20], text)
 
     def test_evidence_statement_follows_verdict(self) -> None:
         from deepfake_lens.evidence_statement import build_evidence_statement

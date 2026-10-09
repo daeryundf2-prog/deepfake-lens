@@ -317,9 +317,47 @@ def write_pdf_report(
     *,
     redact_paths: bool = False,
     thresholds: object | None = None,
+    coverage: dict[str, object] | None = None,
+    exhibit_no: str = "갑 제        호증",
+    signed_report: dict[str, object] | None = None,
+) -> None:
+    """``scan --pdf-out``: the Korean forensic PDF renderer (B8).
+
+    Without pymupdf this raises :class:`~deepfake_lens.evidence_statement.PdfDependencyMissing`
+    with a Korean message — it never writes the old Latin-1-only (English)
+    PDF. The CLI checks this before the scan starts (exit 2, as R6).
+    """
+    from .evidence_statement import PDF_REPORT_DEPENDENCY_MESSAGE, PdfDependencyMissing
+    from .pdf_backend import pymupdf_available
+
+    if not pymupdf_available():
+        raise PdfDependencyMissing(PDF_REPORT_DEPENDENCY_MESSAGE)
+    write_forensic_pdf_report(
+        path, summary, items,
+        redact_paths=redact_paths,
+        exhibit_no=exhibit_no,
+        thresholds=thresholds,
+        coverage=coverage,
+        signed_report=signed_report,
+    )
+
+
+def _write_degraded_text_pdf(
+    path: Path | str,
+    summary: BatchScanSummary,
+    items: list[ScanItem],
+    *,
+    redact_paths: bool = False,
+    thresholds: object | None = None,
     degrade_note: str | None = None,
     signed_report: dict[str, object] | None = None,
 ) -> None:
+    """Latin-1 text PDF — only the web report's fallback when pymupdf is missing.
+
+    No CLI path reaches it (the CLI refuses before scanning, B8); the web
+    path keeps it until its QA-SYS-6 test expects the Korean JSON error
+    instead (see the round-4 report).
+    """
     if signed_report is None:
         signed_report = signed_report_body(summary, items, thresholds=thresholds, report_format="pdf", redact_paths=redact_paths)
     lines = [
@@ -395,7 +433,7 @@ def write_forensic_pdf_report(
     try:
         pymupdf = import_pymupdf()  # N4: pymupdf first; a legacy fitz import never prints to stdout
     except ImportError:
-        write_pdf_report(
+        _write_degraded_text_pdf(
             path, summary, items,
             redact_paths=redact_paths,
             thresholds=thresholds,

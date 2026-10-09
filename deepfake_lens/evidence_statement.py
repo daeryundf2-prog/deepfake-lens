@@ -515,13 +515,18 @@ PDF_DEPENDENCY_MESSAGE = (
     "PDF 증거설명서를 만들려면 pymupdf 패키지가 필요합니다(설치: `pip install pymupdf`). "
     "Markdown(.md) 또는 JSON(.json) 증거설명서는 pymupdf 없이 만들 수 있습니다."
 )
+# B8: the same refusal for the scan PDF reports (--pdf-out, --forensic-pdf-out).
+PDF_REPORT_DEPENDENCY_MESSAGE = (
+    "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다(설치: `pip install pymupdf`). "
+    "HTML(--html-out), JSON(--json-out), CSV(--csv-out) 보고서는 pymupdf 없이 만들 수 있습니다."
+)
 
 
 class PdfDependencyMissing(RuntimeError):
-    """pymupdf (or its legacy ``fitz`` name) is not installed (R6)."""
+    """pymupdf (or its legacy ``fitz`` name) is not installed (R6, B8)."""
 
-    def __init__(self) -> None:
-        super().__init__(PDF_DEPENDENCY_MESSAGE)
+    def __init__(self, message: str = PDF_DEPENDENCY_MESSAGE) -> None:
+        super().__init__(message)
 
 
 def _import_pymupdf() -> Any:
