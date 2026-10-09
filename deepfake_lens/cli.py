@@ -12,7 +12,7 @@ from .core import ARCHIVE_ROLLUP_RULE, check_scan_folder, ScanItem, _thresholds_
 from .analysis_api import AnalysisOptions, analyze_path, analyze_rows, is_symlink_path, load_thresholds, primary_row, scan_folder_run, thresholds_warning_printer
 from .analysis_api import scan_payload as analysis_scan_payload
 from .cli_inputs import UsageError
-from .cli_parser import build_parser
+from .cli_parser import build_parser, escape_echo
 from .serialization import redact_install_paths
 from .cli_render import (
     _file_text,
@@ -189,7 +189,7 @@ def _vendor_weights_pin(args: argparse.Namespace) -> int:
     except ProfileNotFoundError as exc:
         # Z2: a profile that is neither a file nor a name in the models dir
         # is a usage error (exit 2), not a pin failure (exit 1).
-        print(f"오류: {exc}", file=sys.stderr)
+        print(f"오류: {escape_echo(exc)}", file=sys.stderr)
         return 2
     try:
         result = pin_profile(args.profile, args.models_dir, revision=args.revision)
@@ -406,7 +406,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             load_key_file(key_file)
         except ReportKeyError as exc:
-            print(f"오류: {exc}", file=sys.stderr)
+            print(f"오류: {escape_echo(exc)}", file=sys.stderr)
             return 4 if args.command == "verify-report" else 2
     # N4/N7: every input path of every subcommand is checked before any
     # work — missing, a folder for a file (or the reverse), an unsupported
@@ -416,7 +416,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         check_command_inputs(args)
     except UsageError as exc:
-        print(f"오류: {exc}", file=sys.stderr)
+        print(f"오류: {escape_echo(exc)}", file=sys.stderr)
         return VERIFY_EXIT_OTHER if args.command == "verify-report" else USAGE_EXIT
     # N8: tracebacks of routine per-file failures go to the log file; stderr
     # gets one Korean summary line (--verbose shows them).
@@ -424,7 +424,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return _run_command(args, parser, cmd_parsers)
     except UsageError as exc:
-        print(f"오류: {exc}", file=sys.stderr)
+        print(f"오류: {escape_echo(exc)}", file=sys.stderr)
         return VERIFY_EXIT_OTHER if args.command == "verify-report" else USAGE_EXIT
     except Exception as exc:  # noqa: BLE001 - N4: never an English traceback on the console
         logging.getLogger(__name__).exception("command %s failed", args.command)
@@ -958,7 +958,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
                 items, stmt_thresholds, stmt_summary = run.items, run.thresholds, run.summary
             except OSError as exc:
                 # S4: "오류: 폴더를 읽을 수 없습니다: … (권한이 없습니다)", exit 2.
-                print(f"오류: {exc}", file=sys.stderr)
+                print(f"오류: {escape_echo(exc)}", file=sys.stderr)
                 return 2
         elif target.is_file() or is_symlink_path(target):
             # B1: the folder scan's rows for the file — an archive yields
@@ -971,7 +971,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             # Unreachable after cli_inputs (N4) unless the target vanished meanwhile.
             from .cli_inputs import MISSING
 
-            print(f"오류: {MISSING['either'].format(path=target)}", file=sys.stderr)
+            print(f"오류: {escape_echo(MISSING['either'].format(path=target))}", file=sys.stderr)
             return USAGE_EXIT
 
         statement = build_evidence_statement(
@@ -1113,7 +1113,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         # S4: say why the folder cannot be scanned before any other output.
         check_scan_folder(Path(args.folder))
     except OSError as exc:
-        print(f"오류: {exc}", file=sys.stderr)
+        print(f"오류: {escape_echo(exc)}", file=sys.stderr)
         return 2
     # G7: CLI, GUI and API all go through analysis_api. The default engine
     # set is every runtime profile in the models dir (--models-dir or the
@@ -1149,7 +1149,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         # S4: core.ScanFolderError carries the reason — "폴더를 찾을 수 없습니다",
         # "폴더가 아니라 파일입니다 … (단일 파일은 forensic/classify를 사용)",
         # "폴더를 읽을 수 없습니다: … (사유)" — exit 2 (docs/deepfake-lens-cli.md).
-        print(f"오류: {exc}", file=sys.stderr)
+        print(f"오류: {escape_echo(exc)}", file=sys.stderr)
         return 2
     if args.progress:
         print(f"검사 완료: 분석 {summary.analyzed}건, 캐시 사용 {summary.cached}건, 전체 {summary.total}건", file=sys.stderr)

@@ -98,6 +98,30 @@ def _refuse_empty_paths(parser: argparse.ArgumentParser) -> None:
                 _refuse_empty_paths(sub)
 
 
+# R9-7 (round 9): user input echoed in an error ("폴더를 찾을 수 없습니다: a<LF>b",
+# argparse's "invalid choice: 'tur<LF>bo'") printed its newlines and control
+# characters raw, so one error spanned several lines. Echoed text shows them
+# as escapes: "\n", "\r", "\t", other C0/C1 controls and U+2028/U+2029 as
+# "\xNN"/"\uNNNN".
+_ECHO_ESCAPES = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
+
+
+def escape_echo(text: object) -> str:
+    """``text`` with newlines and other control characters written as escapes (R9-7)."""
+    import unicodedata
+
+    out: list[str] = []
+    for char in str(text):
+        if char in _ECHO_ESCAPES:
+            out.append(_ECHO_ESCAPES[char])
+        elif unicodedata.category(char) in ("Cc", "Zl", "Zp"):
+            code = ord(char)
+            out.append(f"\\x{code:02x}" if code < 0x100 else f"\\u{code:04x}")
+        else:
+            out.append(char)
+    return "".join(out)
+
+
 def korean_argparse_error(message: str) -> str:
     """argparse's English error message in Korean (unknown messages unchanged)."""
     for pattern, replacement in _ARGPARSE_ERRORS_KO:
@@ -127,6 +151,7 @@ class KoreanArgumentParser(argparse.ArgumentParser):
             self.add_argument("-h", "--help", action="help", default=argparse.SUPPRESS, help="이 도움말을 보여 주고 끝냄")
 
     def error(self, message: str) -> NoReturn:
+        message = escape_echo(message)  # R9-7: an echoed value never spans lines
         if EMPTY_PATH_MESSAGE in message:
             # Y3: the same one-line shape as the input-path checks (cli_inputs).
             self.exit(2, f"오류: {korean_argparse_error(message)}\n")
@@ -139,12 +164,29 @@ class KoreanArgumentParser(argparse.ArgumentParser):
 LAW_FIRM_HELP = "보고서 머리글·서명란의 법무법인(소송대리인) 이름(기본: ~/.deepfake-lens/config.json의 law_firm, 없으면 빈칸)"
 CONTACT_HELP = "보고서 머리글의 대표전화(기본: ~/.deepfake-lens/config.json의 contact, 없으면 빈칸)"
 
+# R9-7 (round 9): positional arguments were shown by their English dest
+# ("folder", "file", "file_a", "report") in usage lines and in "다음 인수가
+# 필요합니다: …". Each positional dest without a Korean metavar gets one.
+POSITIONAL_METAVARS: dict[str, str] = {
+    "folder": "<폴더>",
+    "file": "<파일>",
+    "files": "<파일>",
+    "file_a": "<파일A>",
+    "file_b": "<파일B>",
+    "report": "<보고서>",
+    "labels": "<라벨 파일>",
+    "target": "<대상>",
+    "profile": "<프로필>",
+}
+
+
 def _korean_metavars(parser: argparse.ArgumentParser) -> None:
     """Usage lines show Korean placeholders, never English dest names (P-round-8 leftover, rule 3).
 
     argparse prints ``--plaintiff PLAINTIFF`` by default; every value-taking
     option without an explicit metavar gets ``<경로>``/``<정수>``/``<실수>``/``<값>``.
-    Positional arguments keep their (already Korean) metavar or dest.
+    R9-7: a positional argument without a metavar gets its
+    :data:`POSITIONAL_METAVARS` placeholder (a choice set stays as is).
     """
     from pathlib import Path as _Path
 
@@ -154,7 +196,11 @@ def _korean_metavars(parser: argparse.ArgumentParser) -> None:
                 for sub in action.choices.values():
                     _walk(sub)
                 continue
-            if not action.option_strings or action.nargs == 0 or action.metavar is not None:
+            if not action.option_strings:
+                if action.metavar is None and not action.choices and action.dest in POSITIONAL_METAVARS:
+                    action.metavar = POSITIONAL_METAVARS[action.dest]
+                continue
+            if action.nargs == 0 or action.metavar is not None:
                 continue
             if action.choices:
                 continue  # "{a,b}" choice sets are identifiers
@@ -562,7 +608,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     vendor_parser.add_argument("--bundle-to", type=Path, help="오프라인 가중치 묶음을 이 폴더로 내보내기")
     vendor_parser.add_argument("--copy-weights", action="store_true", help="큰 가중치 파일도 묶음 폴더에 복사")
     vendor_parser.add_argument("--force", action="store_true", help="비어 있지 않은 대상 폴더에도 묶음 생성 허용")
-    vendor_parser.add_argument("--install", type=Path, metavar="BUNDLE_DIR", help="내려받은 묶음을 --models-dir(또는 --to 대상)에 설치")
+    vendor_parser.add_argument("--install", type=Path, metavar="<묶음 폴더>", help="내려받은 묶음을 --models-dir(또는 --to 대상)에 설치")
     vendor_parser.add_argument("--to", type=Path, help="--install 대상 모델 폴더(기본: --models-dir / DEEPFAKE_LENS_MODELS_DIR)")
     vendor_parser.add_argument("--format", choices=["table", "json", "markdown"], default="table", help="표준 출력 형식")
 

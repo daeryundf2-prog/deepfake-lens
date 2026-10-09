@@ -127,5 +127,62 @@ class CliHelpIsKoreanTest(unittest.TestCase):
                 self.assertEqual(korean_argparse_error(message), expected)
 
 
+class RoundNinePlaceholdersTest(unittest.TestCase):
+    """R9-7 (round 9): `--install BUNDLE_DIR`, positional placeholders shown by their English
+    dest (folder, file, file_a, report) and echoed input with raw newlines."""
+
+    def _run(self, argv: list[str]) -> tuple[int, str]:
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            try:
+                code = main(argv)
+            except SystemExit as exc:
+                code = exc.code if isinstance(exc.code, int) else 2
+        return code, err.getvalue()
+
+    def test_usage_lines_have_no_latin_placeholder(self) -> None:
+        import re
+
+        parser, subs = build_parser()
+        for name, sub in [("deepfake-lens", parser), *subs.items()]:
+            with self.subTest(command=name):
+                usage = sub.format_usage()
+                tokens = re.findall(r"(?<![-\w{,])([A-Za-z][A-Za-z0-9_]*)(?![\w}-])", usage.replace(sub.prog, " "))
+                # every remaining Latin token is an option flag (stripped above by the lookbehind on "-")
+                self.assertEqual(tokens, [], usage)
+        expected = {"scan": "<폴더>", "audio": "<파일>", "compare": "<파일A> <파일B>", "verify-report": "<보고서>",
+                    "feedback": "<라벨 파일>", "evidence-statement": "<대상>", "multimodal": "[<파일> ...]"}
+        for name, placeholder in expected.items():
+            with self.subTest(command=name):
+                self.assertIn(placeholder, subs[name].format_usage())
+        self.assertIn("--install <묶음 폴더>", subs["vendor-weights"].format_help())
+        self.assertNotIn("BUNDLE_DIR", subs["vendor-weights"].format_help())
+
+    def test_missing_positional_is_named_in_korean(self) -> None:
+        for argv, name in ((["scan"], "<폴더>"), (["compare", "a.txt"], "<파일B>"), (["verify-report"], "<보고서>")):
+            with self.subTest(argv=argv):
+                code, stderr = self._run(argv)
+                self.assertEqual(code, 2)
+                self.assertIn(f"오류: 다음 인수가 필요합니다: {name}", stderr)
+                self.assertIsNone(english_prose(stderr), stderr)
+
+    def test_echoed_input_is_one_line(self) -> None:
+        from deepfake_lens.cli_parser import escape_echo
+
+        self.assertEqual(escape_echo("a\nb\r\tc\x07d\u2028e"), "a\\nb\\r\\tc\\x07d\\u2028e")
+        for argv, shown in (
+            (["scan", "없는\n폴더"], "오류: 폴더를 찾을 수 없습니다: 없는\\n폴더"),
+            (["scan", str(BENCHMARK), "--pixel", "tur\nbo"], "허용되지 않은 값 'tur\\nbo'"),
+            (["forensic", "x\r\ny.png"], "x\\r\\ny.png"),
+        ):
+            with self.subTest(argv=argv):
+                code, stderr = self._run(argv)
+                self.assertEqual(code, 2)
+                self.assertIn(shown, stderr)
+                error_lines = [line for line in stderr.splitlines() if "오류:" in line]
+                self.assertEqual(len(error_lines), 1, stderr)
+                self.assertTrue(error_lines[0].rstrip().endswith(shown.split(": ")[-1]) or shown in error_lines[0], stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
