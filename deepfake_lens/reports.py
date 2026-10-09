@@ -227,6 +227,7 @@ def write_html_report(
     .gap-failed {{ color: #b42318; }}
     ul {{ margin: 2px 0 2px 16px; padding: 0; }}
     img.heatmap {{ width: 96px; height: 96px; object-fit: cover; image-rendering: pixelated; border: 1px solid #d8dee9; }}
+    td.sha256 {{ font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px; word-break: break-all; max-width: 18ch; }}
   </style>
 </head>
 <body>
@@ -237,7 +238,7 @@ def write_html_report(
   <p class="note">{"<br>".join(escape(line) for line in threshold_provenance_lines(thresholds))}</p>
   {_unrecorded_html(summary, items)}
   <table>
-    <thead><tr><th>결론</th><th>근거(종류별)</th><th>검사 범위(미실행·실패)</th><th>파일</th><th>참고 신호</th><th>히트맵</th></tr></thead>
+    <thead><tr><th>결론</th><th>근거(종류별)</th><th>검사 범위(미실행·실패)</th><th>파일</th><th>SHA-256</th><th>참고 신호</th><th>히트맵</th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
   {_unsigned_rows_html(unsigned_rows)}
@@ -651,6 +652,13 @@ def write_eval_html_report(path: Path | str, payload: dict[str, object], *, reda
     output.write_text(body, encoding="utf-8")
 
 
+def _html_sha256_cell(item: ScanItem) -> str:
+    """Y10: the row's full SHA-256 (as the scan recorded it), or why there is none — the PDFs' wording."""
+    if item.sha256:
+        return f'<td class="sha256">{escape(item.sha256)}</td>'
+    return f'<td class="sha256">{escape(_hash_unavailable_reason(item))}</td>'
+
+
 def _html_row(item: ScanItem, *, redact_paths: bool, allow_path: Callable[[str], bool] | None = None) -> str:
     result = item.result
     path_cell = escape(display_path(item.path, redact_paths=redact_paths))
@@ -662,6 +670,7 @@ def _html_row(item: ScanItem, *, redact_paths: bool, allow_path: Callable[[str],
             f"<td>{escape(item.error or '')}</td>"
             "<td></td>"
             f"<td>{path_cell}</td>"
+            f"{_html_sha256_cell(item)}"
             "<td></td><td></td>"
             "</tr>"
         )
@@ -690,6 +699,7 @@ def _html_row(item: ScanItem, *, redact_paths: bool, allow_path: Callable[[str],
         f"<td>{''.join(evidence_parts)}</td>"
         f"<td>{gap_cell}</td>"
         f"<td>{path_cell}</td>"
+        f"{_html_sha256_cell(item)}"
         f"<td>{escape(reference)}</td>"
         f"<td>{heatmap}</td>"
         "</tr>"

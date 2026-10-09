@@ -111,6 +111,58 @@ class PdfLatin1NoticeTest(unittest.TestCase):
             self.assertNotIn(b"NOTE: this simple PDF", out.read_bytes())
 
 
+class HtmlRowHashTest(unittest.TestCase):
+    """Y10 (round 7): the HTML report had no per-row hash (the PDFs did) —
+    every row now shows its full SHA-256, or the PDFs' "해시 불가" reason."""
+
+    def test_every_html_row_carries_its_sha256(self) -> None:
+        import hashlib
+        import os
+        import re
+        import zipfile
+
+        from deepfake_lens.core import scan_directory
+        from deepfake_lens.reports import write_html_report
+        from deepfake_lens.result_text import HASH_UNAVAILABLE_SYMLINK
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "case"
+            folder.mkdir()
+            (folder / "memo.txt").write_text("사건 메모입니다.", encoding="utf-8")
+            (folder / "other.md").write_text("다른 메모입니다.", encoding="utf-8")
+            with zipfile.ZipFile(folder / "bundle.zip", "w") as archive:
+                archive.writestr("inner/note.txt", "압축 안의 메모입니다.")
+            links = 0
+            try:
+                os.symlink("memo.txt", folder / "link.txt")
+                links = 1
+            except (OSError, NotImplementedError):
+                pass
+            summary, items = scan_directory(folder)
+            out = Path(tmp) / "report.html"
+            write_html_report(out, summary, items)
+            html = out.read_text(encoding="utf-8")
+        self.assertIn("<th>SHA-256</th>", html)
+        body = html.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
+        rows = re.findall(r"<tr>(.*?)</tr>", body, flags=re.S)
+        self.assertEqual(len(rows), len(items))
+        cells = [re.search(r'<td class="sha256">(.*?)</td>', row, flags=re.S) for row in rows]
+        self.assertTrue(all(cells), rows)
+        by_path = {item.path: item for item in items}
+        self.assertEqual(by_path["memo.txt"].sha256, hashlib.sha256("사건 메모입니다.".encode("utf-8")).hexdigest())
+        for item in items:
+            row = next(row for row in rows if f"<td>{item.path}</td>" in row)
+            cell = re.search(r'<td class="sha256">(.*?)</td>', row, flags=re.S)
+            assert cell is not None
+            if item.sha256:
+                self.assertEqual(cell.group(1), item.sha256, item.path)
+            else:
+                self.assertTrue(cell.group(1).startswith("해시 불가"), (item.path, cell.group(1)))
+        self.assertTrue(by_path["bundle.zip::inner/note.txt"].sha256)
+        if links:
+            self.assertIn(f'<td class="sha256">{HASH_UNAVAILABLE_SYMLINK}</td>', html)
+
+
 class EerTest(unittest.TestCase):
     def test_separable_scores_have_near_zero_eer(self) -> None:
         scores = [(5, False), (95, True)] * 10
