@@ -13,6 +13,7 @@ from .analysis_api import AnalysisOptions, analyze_path, analyze_rows, load_thre
 from .analysis_api import scan_payload as analysis_scan_payload
 from .calibration import MIN_CALIBRATION_SAMPLES, load_threshold_profile
 from .cli_parser import build_parser
+from .serialization import redact_install_paths
 from .cli_render import (
     _file_text,
     _is_priority_row,
@@ -1003,15 +1004,19 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         _write_json_out(args.json_out, json.dumps(scan_payload, ensure_ascii=False, indent=2) + "\n")
     if args.csv_out:
         _write_csv(args.csv_out, items, coverage=scan_coverage, thresholds=thresholds)
+    # S3: --redact-paths also hides the tool's install path (model profile
+    # paths and any other field naming it) in the HTML/PDF reports and the
+    # signed body they embed; JSON/CSV/table output keeps full paths.
+    report_items = redact_install_paths(items) if args.redact_paths else items
     if args.html_out:
-        write_html_report(args.html_out, summary, items, redact_paths=args.redact_paths, thresholds=thresholds)
+        write_html_report(args.html_out, summary, report_items, redact_paths=args.redact_paths, thresholds=thresholds)
     if args.pdf_out:
-        write_pdf_report(args.pdf_out, summary, items, redact_paths=args.redact_paths, thresholds=thresholds)
+        write_pdf_report(args.pdf_out, summary, report_items, redact_paths=args.redact_paths, thresholds=thresholds)
     if getattr(args, "forensic_pdf_out", None):
         write_forensic_pdf_report(
             args.forensic_pdf_out,
             summary,
-            items,
+            report_items,
             redact_paths=args.redact_paths,
             exhibit_no=getattr(args, "exhibit_no", "갑 제        호증"),
             thresholds=thresholds,

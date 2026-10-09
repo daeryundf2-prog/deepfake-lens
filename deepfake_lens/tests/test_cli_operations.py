@@ -309,5 +309,99 @@ class TracebacksGoToTheLogFileTest(unittest.TestCase):
         self.assertEqual((list(package.handlers), package.propagate, package.level), before)
 
 
+def _write_tone_wav(path: Path, seconds: float = 0.5, rate: int = 16000) -> Path:
+    import math
+    import wave
+
+    frames = b"".join(int(8000 * math.sin(2 * math.pi * 220 * n / rate)).to_bytes(2, "little", signed=True) for n in range(int(seconds * rate)))
+    with wave.open(str(path), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes(frames)
+    return path
+
+
+def _profiles(node: Any) -> list[str]:
+    """Every models[].profile value in a JSON tree (not the signed body's model_pins names)."""
+    found: list[str] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "models" and isinstance(value, list):
+                found.extend(str(m["profile"]) for m in value if isinstance(m, dict) and "profile" in m)
+            found.extend(_profiles(value))
+    elif isinstance(node, list):
+        for value in node:
+            found.extend(_profiles(value))
+    return found
+
+
+class RedactInstallPathsTest(unittest.TestCase):
+    """S3: --redact-paths reduces models[].profile (and any other install-path value) to the bare file name."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = Path(self.tmp.name).resolve()
+        self.case = self.base / "case"
+        self.case.mkdir()
+        _write_tone_wav(self.case / "tone.wav")
+        (self.case / "memo.txt").write_text("회의 메모: 다음 주 일정 확인", encoding="utf-8")
+        from deepfake_lens.serialization import install_roots
+
+        self.roots = install_roots()
+
+    def _leaks(self, text: str) -> list[str]:
+        return [root for root in self.roots if root in text] + (["site-packages"] if "site-packages" in text else [])
+
+    def test_html_report_and_signed_body_name_profiles_by_file_name_only(self) -> None:
+        from deepfake_lens.reports import extract_signed_report
+
+        code, out, _ = _run(["scan", str(self.case), "--format", "json"])
+        self.assertEqual(code, 0)
+        full = _profiles(json.loads(out))
+        self.assertTrue(full, "the wav row lists the audio model profiles")
+        # Without --redact-paths the JSON keeps the profile path.
+        self.assertTrue(all(Path(profile).is_absolute() for profile in full), full)
+
+        redacted_html, plain_html = self.base / "redacted.html", self.base / "plain.html"
+        pdf, forensic_pdf = self.base / "r.pdf", self.base / "r-forensic.pdf"
+        code, _, err = _run(["scan", str(self.case), "--redact-paths", "--html-out", str(redacted_html), "--pdf-out", str(pdf), "--forensic-pdf-out", str(forensic_pdf)])
+        if code == 2 and "PDF" in err:
+            code, _, err = _run(["scan", str(self.case), "--redact-paths", "--html-out", str(redacted_html)])
+        self.assertEqual(code, 0, err)
+        html = redacted_html.read_text(encoding="utf-8")
+        self.assertEqual(self._leaks(html), [])
+        body = extract_signed_report(html)
+        assert body is not None
+        profiles = _profiles(body)
+        self.assertEqual(sorted(profiles), sorted(Path(profile).name for profile in full))
+        self.assertTrue(all("/" not in profile and "\\" not in profile for profile in profiles), profiles)
+
+        self.assertEqual(_run(["scan", str(self.case), "--html-out", str(plain_html)])[0], 0)
+        plain_body = extract_signed_report(plain_html.read_text(encoding="utf-8"))
+        assert plain_body is not None
+        self.assertEqual(sorted(_profiles(plain_body)), sorted(full), "non-redacted reports keep the path")
+
+    def test_redact_install_paths_rewrites_every_install_path_value(self) -> None:
+        from dataclasses import replace
+
+        from deepfake_lens.analysis_api import AnalysisOptions, scan_folder
+        from deepfake_lens.serialization import redact_install_paths
+
+        _, items, _ = scan_folder(self.case, AnalysisOptions())
+        wav = next(item for item in items if item.path == "tone.wav")
+        assert wav.result is not None and wav.result.model_analysis is not None
+        root = self.roots[0]
+        planted = replace(wav, result=replace(wav.result, limitations=[*wav.result.limitations, f"프로필 {root}/deepfake_lens/models/x-runtime.json 확인"]))
+        [redacted] = redact_install_paths([planted])
+        text = json.dumps(redacted.to_json(), ensure_ascii=False)
+        self.assertEqual(self._leaks(text), [])
+        self.assertIn("프로필 x-runtime.json 확인", text)
+        self.assertEqual(redacted.result.verdict_code, wav.result.verdict_code)  # type: ignore[union-attr]
+        # The input row is untouched (the JSON output keeps full paths).
+        self.assertTrue(all(Path(p).is_absolute() for p in _profiles(wav.to_json())))
+
+
 if __name__ == "__main__":
     unittest.main()
