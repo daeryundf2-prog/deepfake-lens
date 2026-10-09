@@ -4,7 +4,7 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–9)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..fc1a568`(병합 커밋 제외, 커밋 143개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..81e94ea`(병합 커밋 제외, 커밋 152개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
 요약: ID 133개 — 스펙 갭에 매핑 78개(그중 신규 사유 병기 9개), 신규(스펙 외)만 55개.
 
@@ -159,7 +159,7 @@ Y13/P12: 검증 결함 ID(라운드 1–9)를 0단계 스펙의 갭 ID(G1–G34)
 | R9-7 | 9 | --install BUNDLE_DIR·위치 인수 folder/file/report 등 영어 플레이스홀더, 에코된 입력의 개행 미이스케이프 | — | 신규(스펙 외): 공통 규칙 3(출력 문자열은 한국어) 위반 — 갭 목록 밖 | ada58f7 |
 | R9-8 | 9 | 서비스 문서의 /api/review-marks(404)·'업로드 엔드포인트 없음' 오기, 빈 /api/analyze/text 200 → 문서 정정, 400, 엔드포인트 메타테스트 | G8 | 신규(스펙 외): 서비스 문서 정합성 — 갭 목록 밖 | 4ef3b62 |
 | R9-9 | 9 | 서명 본문·렌더 보고서에 scan_root 미기록 → 읽기 루트 기준 상대 경로를 서명 본문에 기록, 보고서 헤더에 표시 | G30, G31 |  | 6919550 |
-| R9-10 | 9 | build_traceability_commits --check가 표 이후 커밋 수와 무관하게 통과 → 재생성 커밋 1개(추적표 파일만)를 초과하면 실패 | — | 신규(스펙 외): 커밋 추적성(공통 규칙 1) — 갭 목록 밖 | d2036db, b88ef92, 3e256fc, eefacd1, fc1a568 |
+| R9-10 | 9 | build_traceability_commits --check가 표 이후 커밋 수와 무관하게 통과 → 재생성 커밋 1개(추적표 파일만)를 초과하면 실패 | — | 신규(스펙 외): 커밋 추적성(공통 규칙 1) — 갭 목록 밖 | d2036db, b88ef92, 3e256fc, eefacd1, fc1a568, 21717bd |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -330,3 +330,12 @@ P14: Gaps를 제목 괄호에만 적은 커밋(예: `(Z1-Z5; Gaps: G7, 신규)`)
 | 3e256fc | 9 | R9-10 | Gaps: 신규(스펙 외) | subject | fix(qa): generated records may be co-committed; unused imports in scripts (R9-10; Gaps: 신규) |
 | eefacd1 | 9 | WP-J, R9-10 | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 3e256fc (WP-J, R9-10; Gaps: G26, G27, G28) |
 | fc1a568 | 9 | R9-10 | Gaps: 신규(스펙 외) | subject | fix(scripts): keep the sweep re-export tests import; noqa the availability probe (R9-10 follow-up; Gaps: 신규) |
+| 21717bd | 9 | WP-J, R9-10 | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on fc1a568 (WP-J, R9-10; Gaps: G26, G27, G28) |
+| fde64d0 | 9 | R10-1, R10-2 | Gaps: G6, G30; 신규(스펙 외) | subject | fix(reports): R10-1 file names shown through result_text.display_name in every rendering; R10-2 CSV formula cells guarded (R10-1, R10-2; Gaps: G6, G30, 신규) |
+| e601adf | 9 | R10-3 | Gaps: 신규(스펙 외) | subject | fix(qa): R10-3 deleted tests cite their commit by subject; QA-SYS-10 fails when it is not in HEAD's history; a skipped test makes a QA ID 건너뜀(환경) (R10-3; Gaps: 신규) |
+| e1a9598 | 9 | R10-4 | Gaps: G30, G34 | subject | fix(feedback): R10-4 labels join scan rows on the real path, not the escaped display path (R10-4; Gaps: G30, G34) |
+| 40e7ec6 | 9 | R10-5 | Gaps: G29 | subject | fix(cli): R10-5 unusable inputs exit with the documented code; --port checked 1-65535; no per-row error note without rows (R10-5; Gaps: G29) |
+| 768a3f3 | 9 | R10-6 | Gaps: G30, G34 | subject | fix(web): R10-6 single-file upload rows escape "::" in their path like every real file (R10-6; Gaps: G30, G34) |
+| e9b881f | 9 | R10-7 | Gaps: 신규(스펙 외) | subject | fix(text): R10-7 arrows and CJK/angle brackets are token boundaries of the English detector (R10-7; Gaps: 신규) |
+| 7d3c508 | 9 | R10-8 | Gaps: G8, G12; 신규(스펙 외) | subject | fix(cli,docs): R10-8 Korean int/float messages, feedback positions in file lines, CONFORMANCE.md named in the R9-10 check, "(이미 센 폴더 N개 중복 제외)", every api-serve route documented (R10-8; Gaps: G8, G12, 신규) |
+| 81e94ea | 9 | R10-9 | Gaps: G31 | subject | test(cli): R10-9 every Path-typed argument is a registered write target or declared read-only (R10-9; Gaps: G31) |

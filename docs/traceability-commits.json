@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "fc1a568b199cf68e1754a86759f95f653127c305",
+    "head": "81e94eab46fa9cb65f4058509e24db8c01779722",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -1861,7 +1861,8 @@
         "b88ef92",
         "3e256fc",
         "eefacd1",
-        "fc1a568"
+        "fc1a568",
+        "21717bd"
       ],
       "used_in_commit_subjects": true
     }
@@ -4745,6 +4746,194 @@
         "R9-10: 커밋 추적성(공통 규칙 1) — 갭 목록 밖"
       ],
       "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "21717bd519bd1b5f4081ec50150f7c1ca15780e4",
+      "short": "21717bd",
+      "round": "9",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on fc1a568 (WP-J, R9-10; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J",
+        "R9-10"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [
+        "R9-10: 커밋 추적성(공통 규칙 1) — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "fde64d09c03f8fc77733e0c3157ba4de24f00165",
+      "short": "fde64d0",
+      "round": "9",
+      "subject": "fix(reports): R10-1 file names shown through result_text.display_name in every rendering; R10-2 CSV formula cells guarded (R10-1, R10-2; Gaps: G6, G30, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R10-1",
+        "R10-2"
+      ],
+      "gaps_named_in_subject": [
+        "G6",
+        "G30"
+      ],
+      "gaps": [
+        "G6",
+        "G30"
+      ],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G6, G30; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "e601adf034d48b1a67dfa9f3d9d3d01c0dda432c",
+      "short": "e601adf",
+      "round": "9",
+      "subject": "fix(qa): R10-3 deleted tests cite their commit by subject; QA-SYS-10 fails when it is not in HEAD's history; a skipped test makes a QA ID 건너뜀(환경) (R10-3; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R10-3"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "e1a9598fb67dbf3fe6458fe1db66de72ff1dc308",
+      "short": "e1a9598",
+      "round": "9",
+      "subject": "fix(feedback): R10-4 labels join scan rows on the real path, not the escaped display path (R10-4; Gaps: G30, G34)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R10-4"
+      ],
+      "gaps_named_in_subject": [
+        "G30",
+        "G34"
+      ],
+      "gaps": [
+        "G30",
+        "G34"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30, G34",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "40e7ec6029bb94c607ee0b2766059b1ebfa34ffe",
+      "short": "40e7ec6",
+      "round": "9",
+      "subject": "fix(cli): R10-5 unusable inputs exit with the documented code; --port checked 1-65535; no per-row error note without rows (R10-5; Gaps: G29)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R10-5"
+      ],
+      "gaps_named_in_subject": [
+        "G29"
+      ],
+      "gaps": [
+        "G29"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G29",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "768a3f3990069722f50d4ef254b1b88f216ba9f2",
+      "short": "768a3f3",
+      "round": "9",
+      "subject": "fix(web): R10-6 single-file upload rows escape \"::\" in their path like every real file (R10-6; Gaps: G30, G34)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R10-6"
+      ],
+      "gaps_named_in_subject": [
+        "G30",
+        "G34"
+      ],
+      "gaps": [
+        "G30",
+        "G34"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30, G34",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "e9b881f38da2235ac0e4a7efae115811502a04e6",
+      "short": "e9b881f",
+      "round": "9",
+      "subject": "fix(text): R10-7 arrows and CJK/angle brackets are token boundaries of the English detector (R10-7; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R10-7"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "7d3c50800aedf1a936585062bf3756d0ef3b17c3",
+      "short": "7d3c508",
+      "round": "9",
+      "subject": "fix(cli,docs): R10-8 Korean int/float messages, feedback positions in file lines, CONFORMANCE.md named in the R9-10 check, \"(이미 센 폴더 N개 중복 제외)\", every api-serve route documented (R10-8; Gaps: G8, G12, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R10-8"
+      ],
+      "gaps_named_in_subject": [
+        "G8",
+        "G12"
+      ],
+      "gaps": [
+        "G8",
+        "G12"
+      ],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G8, G12; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "81e94eab46fa9cb65f4058509e24db8c01779722",
+      "short": "81e94ea",
+      "round": "9",
+      "subject": "test(cli): R10-9 every Path-typed argument is a registered write target or declared read-only (R10-9; Gaps: G31)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R10-9"
+      ],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G31",
       "gaps_source": "subject"
     }
   ]

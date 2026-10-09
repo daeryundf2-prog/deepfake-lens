@@ -2,13 +2,13 @@
 
 <!-- scripts/qa_phase0.py가 생성 — 손으로 고치지 말 것 -->
 
-- 검증 커밋: `fc1a568b199cf68e1754a86759f95f653127c305` — 변경 없는 작업 트리에서 실행. 이 표는 이 커밋의 직계 자식 커밋에 단독으로 담긴다 (`python scripts/qa_phase0.py --verify-record`로 확인)
-- 생성 일시(UTC): 2026-10-09T17:38:08Z
+- 검증 커밋: `81e94eab46fa9cb65f4058509e24db8c01779722` — 변경 없는 작업 트리에서 실행. 이 표는 이 커밋의 직계 자식 커밋에 단독으로 담긴다 (`python scripts/qa_phase0.py --verify-record`로 확인)
+- 생성 일시(UTC): 2026-10-09T19:34:29Z
 - 도구 버전: deepfake-lens 0.1.0
 - 환경: Python 3.13.16 / Linux-6.18.44-fc-v80-x86_64-with-glibc2.39 / ffmpeg 있음
 - 설치된 선택 패키지: numpy, PIL, cv2, scipy, sklearn, fastapi, httpx, uvicorn, mediapipe, pymupdf, fitz
 - 없는 선택 패키지(해당 테스트는 건너뜀): librosa, soundfile, c2pa, torch, transformers, speechbrain, py7zr, rarfile
-- 실행 범위: 전체 단위 테스트 스위트 — 1320개 실행, 실패 0개, 건너뜀 31개
+- 실행 범위: 전체 단위 테스트 스위트 — 1337개 실행, 실패 0개, 건너뜀 31개
 - 신경망 가중치: 없음(모든 프로필 supported:false, 모델 경로는 가짜 프로필 + monkeypatch로 검증)
 
 **요약: 20 통과 / 0 실패 / 4 수동 / 12 1단계**
@@ -69,7 +69,7 @@
 
 ## 자동 QA 상세
 
-QA 테스트마다 docstring 첫 줄이 "<QA ID>: <통과 기준 원문>"이고 둘째 줄에 그 테스트가 검사하는 내용을 적는다(N16). QA ID의 결과는 그 QA ID의 모든 테스트 결과를 합친 것이다(실패 하나면 실패, 전부 건너뜀이면 건너뜀).
+QA 테스트마다 docstring 첫 줄이 "<QA ID>: <통과 기준 원문>"이고 둘째 줄에 그 테스트가 검사하는 내용을 적는다(N16). QA ID의 결과는 그 QA ID의 모든 테스트 결과를 합친 것이다(실패 하나면 실패, 건너뛴 테스트가 하나라도 있으면 건너뜀(환경), 모든 테스트가 실행되어 통과했을 때만 통과).
 
 | QA ID | 테스트(실패/건너뜀/전체) | 결과 | 비고 |
 | --- | --- | --- | --- |
@@ -92,7 +92,7 @@ QA 테스트마다 docstring 첫 줄이 "<QA ID>: <통과 기준 원문>"이고 
 | QA-SYS-6 | 0/0/9 | 통과 | — |
 | QA-SYS-7 | 0/0/14 | 통과 | — |
 | QA-SYS-9 | 0/0/8 | 통과 | — |
-| QA-SYS-10 | 0/0/17 | 통과 | 전체 스위트 1320개 실행, 실패 0건 |
+| QA-SYS-10 | 0/0/17 | 통과 | 전체 스위트 1337개 실행, 실패 0건 |
 
 ## 수동·1단계
 
