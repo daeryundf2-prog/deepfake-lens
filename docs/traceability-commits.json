@@ -1,5 +1,5 @@
 {
-  "description": "Y13: verification finding IDs (rounds 1–7) -> phase-0 spec gap IDs (G1–G34) or 신규(스펙 외), and the 'Gaps:' line for every commit since WP-A, for the session owner's history rewrite. Round-3 and round-6 N IDs are N3-x / N6-x; round-5 G IDs are V5-G (they collide with the spec's G1–G34). Generated from the round documents (spec/verify_round*.md) and the commit messages.",
+  "description": "Y13: verification finding IDs (rounds 1–7, plus Z1–Z5 of round 8) -> phase-0 spec gap IDs (G1–G34) or 신규(스펙 외), and the 'Gaps:' line for every commit since WP-A, for the session owner's history rewrite. Round-3 and round-6 N IDs are N3-x / N6-x; round-5 G IDs are V5-G (they collide with the spec's G1–G34). Generated from the round documents (spec/verify_round*.md) and the commit messages.",
   "wp_gaps": {
     "WP-A": [
       "G5",
@@ -1446,6 +1446,58 @@
       "summary": "커밋 메시지 갭 ID 누락 → 이 매핑표",
       "gaps": [],
       "new": "커밋 추적성(공통 규칙 1) — 갭 목록 밖",
+      "used_in_commit_subjects": false,
+      "commits": []
+    },
+    {
+      "id": "Z1",
+      "round": 8,
+      "source": "verify_round8 (edge.py)",
+      "summary": "realtime --scores abc → 사용 오류 exit 2(종전 exit 1·처리 오류 1건)",
+      "gaps": [],
+      "new": "CLI 옵션 값 검증(사용 오류 exit 2) — 갭 목록 밖",
+      "used_in_commit_subjects": false,
+      "commits": []
+    },
+    {
+      "id": "Z2",
+      "round": 8,
+      "source": "verify_round8 (edge.py)",
+      "summary": "vendor-weights pin <없는 프로필> → 오류: 파일을 찾을 수 없습니다 exit 2(종전 exit 1)",
+      "gaps": [],
+      "new": "CLI 입력 경로 오류 처리(사용 오류 exit 2) — 갭 목록 밖",
+      "used_in_commit_subjects": false,
+      "commits": []
+    },
+    {
+      "id": "Z3",
+      "round": 8,
+      "source": "verify_round8 (edge.py)",
+      "summary": "forensic <파일>/ (끝 구분자) → 폴더가 아니라 파일입니다 exit 2, 모든 명령의 require_input_path에서 정규화",
+      "gaps": [
+        "G7"
+      ],
+      "new": null,
+      "used_in_commit_subjects": false,
+      "commits": []
+    },
+    {
+      "id": "Z4",
+      "round": 8,
+      "source": "verify_round8 (edge.py)",
+      "summary": "verify-report 깨진·객체 아닌 JSON → stderr 오류: 보고서 JSON을 해석할 수 없습니다 exit 4(종전 stdout '읽을 수 없음')",
+      "gaps": [],
+      "new": "CLI 오류 처리(stdout 대신 stderr, 문서화된 exit 4) — 갭 목록 밖",
+      "used_in_commit_subjects": false,
+      "commits": []
+    },
+    {
+      "id": "Z5",
+      "round": 8,
+      "source": "verify_round8 (edge.py)",
+      "summary": "--*-out 출력이 없는 폴더 안 → 검사 전 오류: 출력 폴더가 없습니다 exit 2, 폴더를 만들지 않음",
+      "gaps": [],
+      "new": "CLI 출력 경로 검증(Y7 연장) — 갭 목록 밖",
       "used_in_commit_subjects": false,
       "commits": []
     }

@@ -11,6 +11,7 @@ from .collection import write_collection_plan
 from .core import ARCHIVE_ROLLUP_RULE, check_scan_folder, ScanItem, _thresholds_json
 from .analysis_api import AnalysisOptions, analyze_path, analyze_rows, is_symlink_path, load_thresholds, primary_row, scan_folder_run, thresholds_warning_printer
 from .analysis_api import scan_payload as analysis_scan_payload
+from .cli_inputs import UsageError
 from .cli_parser import build_parser
 from .serialization import redact_install_paths
 from .cli_render import (
@@ -88,6 +89,8 @@ from .vendor_weights import (
     inspect_model_manifest,
     install_bundle,
     pin_profile,
+    ProfileNotFoundError,
+    resolve_profile_path,
     verify_offline_integrity,
     weights_coverage,
 )
@@ -156,10 +159,37 @@ def default_text_model_path(root: Path | None = None) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+def _parse_realtime_scores(raw: str | None) -> list[int]:
+    """``realtime --scores 10,20,30`` → integers; anything else is a usage error (Z1, exit 2).
+
+    ``--scores abc`` used to raise ValueError inside the command (exit 1,
+    "처리 오류 1건" and a log traceback).
+    """
+    if not raw:
+        return []
+    scores: list[int] = []
+    for part in raw.split(","):
+        text = part.strip()
+        if not text:
+            continue
+        try:
+            scores.append(int(text))
+        except ValueError:
+            raise UsageError(f"--scores에는 쉼표로 구분한 정수만 쓸 수 있습니다: {text!r} (예: --scores 10,20,30)") from None
+    return scores
+
+
 def _vendor_weights_pin(args: argparse.Namespace) -> int:
     """``vendor-weights pin <profile>``: write the profile's weight pin (G9)."""
     if not args.profile:
         print("오류: 'vendor-weights pin'에는 프로필 이름이나 경로가 필요합니다", file=sys.stderr)
+        return 2
+    try:
+        resolve_profile_path(args.profile, args.models_dir)
+    except ProfileNotFoundError as exc:
+        # Z2: a profile that is neither a file nor a name in the models dir
+        # is a usage error (exit 2), not a pin failure (exit 1).
+        print(f"오류: {exc}", file=sys.stderr)
         return 2
     try:
         result = pin_profile(args.profile, args.models_dir, revision=args.revision)
@@ -313,6 +343,20 @@ VERIFY_EXIT_CODES = {"verified": 0, "tampered": 1, "key-mismatch": 2, "unsigned"
 VERIFY_EXIT_OTHER = 4
 
 
+def _load_report_json(path: Path) -> dict[str, object]:
+    """The report to verify as a JSON object, or a usage error (Z4: exit 4, stderr only).
+
+    A corrupt or non-object file used to print ``읽을 수 없음: …`` on stdout.
+    """
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise UsageError(f"보고서 JSON을 해석할 수 없습니다: {path} ({exc})") from exc
+    if not isinstance(loaded, dict):
+        raise UsageError(f"보고서 JSON을 해석할 수 없습니다: {path} (JSON 객체가 아니라 {type(loaded).__name__}입니다)")
+    return loaded
+
+
 def _verify_report_command(args: argparse.Namespace) -> int:
     """``verify-report REPORT.json [--key-file F]`` (D14).
 
@@ -322,7 +366,7 @@ def _verify_report_command(args: argparse.Namespace) -> int:
     from .signing import REPORT_KEY_ENV, verify_report
 
     key = resolve_report_key(args.key_file)
-    result = verify_report(args.report, key)
+    result = verify_report(_load_report_json(args.report), key)
     payload = {"report": str(args.report), **result.to_json()}
     if result.status == "no-key":
         payload["hint"] = f"검증 키가 없습니다 — --key-file 또는 {REPORT_KEY_ENV} 환경 변수를 지정하십시오."
@@ -368,7 +412,7 @@ def main(argv: list[str] | None = None) -> int:
     # N4/N7: every input path of every subcommand is checked before any
     # work — missing, a folder for a file (or the reverse), an unsupported
     # format: "오류: …" on stderr, exit 2 (verify-report: its usage code 4).
-    from .cli_inputs import UsageError, check_command_inputs
+    from .cli_inputs import check_command_inputs
 
     try:
         check_command_inputs(args)
@@ -696,7 +740,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             window_size=args.window_size,
             alert_threshold=args.alert_threshold,
         )
-        scores = [int(part) for part in args.scores.split(",") if part.strip()] if args.scores else []
+        scores = _parse_realtime_scores(args.scores)
         state = detector.idle_state()
         for score in scores:
             state = detector.process_frame(score)

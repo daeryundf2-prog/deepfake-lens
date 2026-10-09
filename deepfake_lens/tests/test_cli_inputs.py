@@ -377,12 +377,9 @@ class RequireInputPathTest(unittest.TestCase):
         self.assertEqual(cli_inputs.TEXT_SUFFIXES, frozenset(SUPPORTED_TEXT_EXTENSIONS))
 
 
-if __name__ == "__main__":
-    unittest.main()
 
-
-class RoundSevenUsageErrorsTest(unittest.TestCase):
-    """Y1/Y2/Y3/Y7 (round 7): input/option problems found before any work — exit 2, "오류: …"."""
+class _UsageErrorCase(unittest.TestCase):
+    """Shared fixtures of the round-7/round-8 usage-error tests: ``cli.main`` in process."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -421,6 +418,10 @@ class RoundSevenUsageErrorsTest(unittest.TestCase):
         self.assertIn(message, stderr)
         self.assertEqual(stdout.strip(), "")
         self.assertNotIn("Traceback", stderr)
+
+
+class RoundSevenUsageErrorsTest(_UsageErrorCase):
+    """Y1/Y2/Y3/Y7 (round 7): input/option problems found before any work — exit 2, "오류: …"."""
 
     def test_y1_scan_json_without_items(self) -> None:
         for path in (self.no_items, self.empty_items):
@@ -480,3 +481,116 @@ class RoundSevenUsageErrorsTest(unittest.TestCase):
                 code, _, stderr = self._run(["scan", str(self.folder), "--cache", str(accepted), "--format", "json"])
                 self.assertEqual(code, 0, stderr)
                 self.assertEqual(json.loads(accepted.read_text(encoding="utf-8"))["format"], SCAN_CACHE_FORMAT)
+
+
+class RoundEightUsageErrorsTest(_UsageErrorCase):
+    """Z1–Z5: usage errors that ran the command or used the wrong exit code — "오류: …" on stderr, no stdout."""
+
+    def _assert_usage_code(self, argv: list[str], message: str, code: int) -> None:
+        got, stdout, stderr = self._run(argv)
+        self.assertEqual(got, code, (argv, stderr, stdout[:200]))
+        self.assertTrue(stderr.startswith("오류:"), stderr)
+        self.assertIn(message, stderr)
+        self.assertEqual(stdout.strip(), "")
+        self.assertNotIn("Traceback", stderr)
+
+    def test_z1_realtime_scores_must_be_integers(self) -> None:
+        import json
+
+        for raw in ("abc", "10,x,30", "12.5"):
+            with self.subTest(scores=raw):
+                self._assert_usage(["realtime", "--scores", raw], "--scores에는 쉼표로 구분한 정수만 쓸 수 있습니다")
+        code, stdout, stderr = self._run(["realtime", "--scores", "10, 20,,30", "--format", "json"])
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(json.loads(stdout)["diagnostic"]["summary"]["frame_count"], 3)
+
+    def test_z1_realtime_as_subprocess(self) -> None:
+        env = dict(os.environ, PYTHONPATH=str(REPO_ROOT), HOME=str(self.root), DEEPFAKE_LENS_LOG_DIR=str(self.root / "logs"))
+        result = subprocess.run(
+            [sys.executable, "-m", "deepfake_lens", "realtime", "--scores", "abc"],
+            capture_output=True, text=True, env=env, timeout=300, cwd=str(self.root),
+        )
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertTrue(result.stderr.startswith("오류: --scores"), result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_z2_vendor_weights_pin_missing_profile(self) -> None:
+        models = self.root / "models"
+        models.mkdir()
+        for profile in ("nonexistent-profile", str(self.root / "no.json")):
+            with self.subTest(profile=profile):
+                self._assert_usage(
+                    ["vendor-weights", "pin", profile, "--models-dir", str(models)],
+                    f"파일을 찾을 수 없습니다: {profile} — 프로필 파일 경로도, 모델 디렉터리 ",
+                )
+
+    def test_z3_trailing_separator_on_a_file(self) -> None:
+        from deepfake_lens.cli_inputs import TRAILING_SEPARATOR_HINT
+
+        png = self.root / "photo.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\n")
+        note = self.folder / "a.txt"
+        for argv in (
+            ["forensic", f"{png}/"],
+            ["classify", f"{png}/"],
+            ["face", f"{png}/"],
+            ["legal-report", f"{note}/"],
+            ["scan", f"{note}/"],
+        ):
+            with self.subTest(argv=argv):
+                self._assert_usage(argv, f"폴더가 아니라 파일입니다: {argv[1]}{'' if argv[0] != 'scan' else ' (단일 파일은'}")
+                _, _, stderr = self._run(argv)
+                self.assertIn(TRAILING_SEPARATOR_HINT.strip(" —"), stderr)
+        self._assert_usage_code(["verify-report", f"{self.garbage}/"], "폴더가 아니라 파일입니다: ", 4)
+        # A folder with a trailing separator is still a folder.
+        code, _, stderr = self._run(["scan", f"{self.folder}/", "--format", "json"])
+        self.assertEqual(code, 0, stderr)
+
+    def test_z3_require_input_path_reads_the_typed_text(self) -> None:
+        from deepfake_lens.cli_parser import cli_path
+
+        png = self.root / "photo.png"
+        png.write_bytes(b"x")
+        for value in (f"{png}/", cli_path(f"{png}/")):
+            with self.subTest(value=repr(value)):
+                with self.assertRaises(UsageError) as ctx:
+                    require_input_path(value, "file", symlinks="allow")
+                self.assertTrue(str(ctx.exception).startswith(f"폴더가 아니라 파일입니다: {png}/ — "), str(ctx.exception))
+        self.assertEqual(require_input_path(cli_path(f"{self.folder}/"), "folder"), self.folder)
+        with self.assertRaises(UsageError) as ctx:
+            require_input_path(f"{self.root / 'none.png'}/", "file")
+        self.assertTrue(str(ctx.exception).startswith("파일을 찾을 수 없습니다: "), str(ctx.exception))
+        self.assertEqual(require_input_path(png, "file"), png)  # a plain Path (no typed text) is unchanged
+
+    def test_z4_verify_report_unparseable_json(self) -> None:
+        for path, detail in ((self.garbage, "Expecting"), (self.listed, "JSON 객체가 아니라 list입니다")):
+            with self.subTest(path=path.name):
+                self._assert_usage_code(["verify-report", str(path)], f"보고서 JSON을 해석할 수 없습니다: {path} (", 4)
+                _, _, stderr = self._run(["verify-report", str(path), "--format", "json"])
+                self.assertIn(detail, stderr)
+
+    def test_z5_output_into_missing_folder(self) -> None:
+        missing = self.root / "nodir" / "x"
+        png = self.root / "photo.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\n")
+        cases = [
+            ["scan", str(self.folder), "--json-out", str(missing / "r.json")],
+            ["scan", str(self.folder), "--csv-out", str(missing / "r.csv")],
+            ["scan", str(self.folder), "--html-out", str(missing / "r.html")],
+            ["scan", str(self.folder), "--pdf-out", str(missing / "r.pdf")],
+            ["scan", str(self.folder), "--evidence-statement-out", str(missing / "s.md")],
+            ["forensic", str(png), "--json-out", str(missing / "r.json")],
+            ["evidence-statement", str(self.folder), "--md-out", str(missing / "s.md")],
+            ["dataset", str(self.folder), "--manifest-out", str(missing / "m.json")],
+        ]
+        for argv in cases:
+            with self.subTest(argv=argv[0] + " " + argv[-2]):
+                self._assert_usage(argv, f"출력 폴더가 없습니다: {missing} — ")
+                self.assertFalse((self.root / "nodir").exists())
+        # --out / --cache keep creating their folder (only --*-out is checked).
+        code, _, stderr = self._run(["scan", str(self.folder), "--cache", str(missing / "c.json"), "--format", "json"])
+        self.assertEqual(code, 0, stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

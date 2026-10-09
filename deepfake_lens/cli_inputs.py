@@ -16,6 +16,8 @@ mismatch"):
 * missing path       → ``파일을 찾을 수 없습니다: …`` / ``폴더를 찾을 수 없습니다: …``
 * a folder for a file → ``파일이 아니라 폴더입니다: …``
 * a file for a folder → ``폴더가 아니라 파일입니다: …``
+* a file named with a trailing separator (``photo.png/``, Z3) → ``폴더가 아니라
+  파일입니다: … — 경로 끝의 구분자('/')는 폴더를 뜻합니다 …`` (every command)
 * unsupported format → ``지원되지 않는 형식입니다: … (지원 형식: …)``
 * a symbolic link given to a layer command → ``심볼릭 링크는 따라가지 않습니다: …``
   (the verdict commands keep G6: a link is a skipped row, never read).
@@ -28,6 +30,7 @@ through a subprocess matrix and checks that no Path-typed input argument of
 from __future__ import annotations
 
 import argparse
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -76,6 +79,12 @@ THRESHOLDS_UNREADABLE = "임계값 프로필을 읽을 수 없거나 버전이 �
 # Y7 (round 7): an output file argument naming an existing folder failed
 # after the scan with a generic error and a misleading "처리 오류 1건".
 OUTPUT_IS_FOLDER = "출력 경로가 폴더입니다: {path} — 저장할 파일 이름을 지정하십시오"
+# Z3: "photo.png/" names a folder; Path() drops the trailing separator, so
+# without this check the file was analyzed as if the slash were not there.
+TRAILING_SEPARATOR_HINT = " — 경로 끝의 구분자('/')는 폴더를 뜻합니다. 파일이면 구분자 없이 지정하십시오"
+# Z5: an output file whose parent folder does not exist; folders are never
+# created for an output argument (a typo would scatter reports).
+OUTPUT_FOLDER_MISSING = "출력 폴더가 없습니다: {folder} — 출력 폴더는 자동으로 만들지 않습니다. 폴더를 먼저 만들거나 기존 폴더를 지정하십시오"
 FOLDER_HINT_SCAN = " (폴더는 scan을 사용)"
 FILE_HINT_SINGLE = " (단일 파일은 forensic/classify를 사용)"
 
@@ -92,6 +101,23 @@ def has_supported_suffix(path: Path | str, suffixes: frozenset[str]) -> bool:
     """True when the file name ends with one of ``suffixes`` (``.tar.gz`` included), case-insensitive."""
     name = Path(path).name.lower()
     return any(name.endswith(suffix) for suffix in suffixes)
+
+
+_SEPARATORS = tuple(sep for sep in (os.sep, os.altsep) if sep)
+
+
+def _names_file_as_folder(shown: str) -> bool:
+    """Z3: ``shown`` ends with a path separator but names an existing non-folder.
+
+    ``Path("photo.png/")`` is ``Path("photo.png")``, so the raw string is
+    checked. A missing path or a dangling link falls through to the usual
+    rules (missing / symbolic link).
+    """
+    stripped = shown.rstrip("".join(_SEPARATORS))
+    if not stripped or stripped == shown:
+        return False
+    # os.path.exists/isdir follow links and report an unreadable path as False.
+    return os.path.exists(stripped) and not os.path.isdir(stripped)
 
 
 def require_input_path(
@@ -114,6 +140,10 @@ def require_input_path(
     """
     target = Path(path)
     shown = str(path)
+    # Z3: the text as typed (cli_parser.CliPath keeps it; Path() drops a trailing "/").
+    typed = path if isinstance(path, str) else str(getattr(path, "cli_text", "") or shown)
+    if _names_file_as_folder(typed):
+        raise UsageError(IS_FILE.format(path=typed, hint=file_hint + TRAILING_SEPARATOR_HINT))
     try:
         is_link = target.is_symlink()
     except OSError as exc:
@@ -235,6 +265,9 @@ COMMON_INPUT_EXEMPT: dict[str, frozenset[str]] = {"vendor-weights": frozenset({"
 
 # Y7: output arguments that name a file the command writes (folders such as
 # --output-dir, --frame-root, --heatmap-dir, --to, --bundle-to are not here).
+# Z5: the ``*_out`` ones (--json-out, --csv-out, --html-out, --pdf-out, …)
+# also need an existing parent folder; --out/--output/--cache/--hash-db keep
+# creating theirs.
 OUTPUT_FILE_ATTRS: tuple[str, ...] = (
     "out", "output", "json_out", "csv_out", "html_out", "pdf_out", "md_out", "forensic_pdf_out",
     "evidence_statement_out", "evidence_statement_pdf_out", "manifest_out", "audit_out", "split_out",
@@ -243,15 +276,22 @@ OUTPUT_FILE_ATTRS: tuple[str, ...] = (
 )
 
 
-def require_output_file(path: Path | str) -> Path:
-    """Refuse an output-file argument that names an existing folder (Y7) — before any work."""
+def require_output_file(path: Path | str, *, parent_must_exist: bool = False) -> Path:
+    """Refuse an output-file argument that names an existing folder (Y7) — before any work.
+
+    ``parent_must_exist`` (Z5, the ``--*-out`` options): the folder the file
+    goes into must already exist; it is never created.
+    """
     target = Path(path)
     try:
         is_dir = target.is_dir()
+        parent_ok = not parent_must_exist or target.parent.is_dir()
     except OSError as exc:
         raise UsageError(UNREADABLE.format(path=path)) from exc
     if is_dir:
         raise UsageError(OUTPUT_IS_FOLDER.format(path=path))
+    if not parent_ok:
+        raise UsageError(OUTPUT_FOLDER_MISSING.format(folder=target.parent))
     return target
 
 
@@ -294,7 +334,8 @@ def check_command_inputs(args: argparse.Namespace) -> None:
     for attr in OUTPUT_FILE_ATTRS:
         value = getattr(args, attr, None)
         if isinstance(value, (str, Path)) and str(value):
-            require_output_file(value)  # Y7: a folder is not an output file
+            # Y7: a folder is not an output file; Z5: --*-out needs an existing folder.
+            require_output_file(value, parent_must_exist=attr.endswith("_out"))
     cache = getattr(args, "cache", None)
     if isinstance(cache, (str, Path)) and str(cache):
         # Y4: an existing file that is not a scan cache is never overwritten.

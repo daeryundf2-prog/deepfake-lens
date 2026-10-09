@@ -61,12 +61,14 @@ command prints a band (높음/주의/낮음) or a "의심 신호가 강합니다
   | 없는 경로 | `오류: 파일을 찾을 수 없습니다: <경로>` / `오류: 폴더를 찾을 수 없습니다: <경로>` / (`evidence-statement`, `--model-path`) `오류: 파일이나 폴더를 찾을 수 없습니다: <경로>` | 2 |
   | 파일 자리에 폴더 | `오류: 파일이 아니라 폴더입니다: <경로>` (판정 명령은 ` (폴더는 scan을 사용)` 추가) | 2 |
   | 폴더 자리에 파일 | `오류: 폴더가 아니라 파일입니다: <경로>` (`scan`은 ` (단일 파일은 forensic/classify를 사용)` 추가) | 2 |
+  | 파일 경로 끝에 구분자 (`photo.png/` — Z3; 모든 명령의 입력 경로, 분석하지 않음. 폴더 끝의 `/`는 그대로 허용) | `오류: 폴더가 아니라 파일입니다: <입력한 경로> — 경로 끝의 구분자('/')는 폴더를 뜻합니다. 파일이면 구분자 없이 지정하십시오` | 2 |
   | 지원되지 않는 형식 | `오류: 지원되지 않는 형식입니다: <경로> (지원 형식: …)` | 2 |
   | 계층 명령에 심볼릭 링크 | `오류: 심볼릭 링크는 따라가지 않습니다: <경로> — 링크 대상 파일을 직접 지정하십시오` (판정 명령은 G6대로 건너뜀 행) | 2 |
   | 일반 파일이 아님 / 확인 불가 | `오류: 일반 파일이 아닙니다: <경로>` / `오류: 경로를 확인할 수 없습니다: <경로>` | 2 |
   | 빈 경로 `""` (Y3 — 현재 폴더로 바뀌지 않음; 모든 경로 인수) | `오류: 인수 <이름>: 경로가 비어 있습니다 — 빈 문자열("")은 경로로 쓸 수 없습니다(현재 폴더는 . 으로 지정)` | 2 |
   | `--thresholds`가 임계값 프로필이 아님(깨진 JSON, 다른 형식, 버전 불일치 — Y2; 기본값으로 계속하지 않음) | `오류: 임계값 프로필을 읽을 수 없거나 버전이 맞지 않습니다: <경로> (layer-thresholds-v1 JSON이어야 합니다)` | 2 |
   | 출력 파일 인수(`--json-out`, `--html-out`, `--csv-out`, `--pdf-out`, `--md-out`, `--out`, `--output`, `--cache`, …)가 기존 폴더 (Y7 — 검사 전에 확인) | `오류: 출력 경로가 폴더입니다: <경로> — 저장할 파일 이름을 지정하십시오` | 2 |
+  | `--*-out` 출력 파일(`--json-out`, `--csv-out`, `--html-out`, `--pdf-out`, `--md-out`, `--forensic-pdf-out`, `--evidence-statement-out`, `--manifest-out`, …)의 상위 폴더가 없음 (Z5 — 검사 전에 확인, 폴더를 만들지 않음; `--out`, `--output`, `--cache`, `--hash-db`는 종전대로 상위 폴더를 만듦) | `오류: 출력 폴더가 없습니다: <상위 폴더> — 출력 폴더는 자동으로 만들지 않습니다. 폴더를 먼저 만들거나 기존 폴더를 지정하십시오` | 2 |
   | `--cache`가 검사 캐시가 아닌 기존 파일(보고서 JSON 등 — Y4; 덮어쓰지 않음). 캐시 파일은 `{"format": "deepfake-lens-cache-v1", "version": 1, "items": {…}}`; 없는 파일·빈 파일·머리글 이전의 `{"version", "items"}` 캐시는 그대로 사용 | `오류: 캐시 파일이 아닙니다: <경로> — --cache 파일 형식(deepfake-lens-cache-v1)이 아닌 기존 파일은 덮어쓰지 않습니다. 새 캐시 파일 경로를 지정하십시오` | 2 |
   | `evidence-statement <scan.json>`에 검사 결과 행이 없음 (Y1) | `오류: 검사 JSON에 items가 없습니다(검사 결과 행 0건): <경로>` | 2 |
 
@@ -101,12 +103,12 @@ command prints a band (높음/주의/낮음) or a "의심 신호가 강합니다
   | 명령 | 0 | 1 | 2 | 3 | 4 |
   | --- | --- | --- | --- | --- | --- |
   | `scan` | 검사 완료 — 결론(조작·생성 근거 있음 포함)과 무관 | 예기치 않은 내부 오류 | 입력 경로 오류(위 표); `오류: 폴더를 읽을 수 없습니다: <경로> (<사유>)`; 잘못된 옵션; 빈·읽을 수 없는 `--key-file`; PDF 출력에 필요한 렌더러 없음 | — | — |
-  | `verify-report` | `검증됨` | `변조됨` | `키 ID 불일치` (argparse 사용 오류도 2) | `서명 없음` | 입력 경로 오류(위 표), 보고서를 읽을 수 없음, 검증 키 없음, 빈·읽을 수 없는 `--key-file` |
+  | `verify-report` | `검증됨` | `변조됨` | `키 ID 불일치` (argparse 사용 오류도 2) | `서명 없음` | 입력 경로 오류(위 표), 보고서 JSON 해석 불가(깨진 JSON·JSON 객체가 아님 — Z4: stderr `오류: 보고서 JSON을 해석할 수 없습니다: <경로> (<사유>)`, stdout 없음), 검증 키 없음, 빈·읽을 수 없는 `--key-file` |
   | `evidence-statement` | 작성 완료 | 예기치 않은 내부 오류 | 입력 경로 오류(`오류: 파일이나 폴더를 찾을 수 없습니다: <경로>` 등), 검사 JSON 해석 불가, 폴더를 읽을 수 없음(`scan`과 같은 문구), `--pdf-out`에 필요한 렌더러 없음, 빈·읽을 수 없는 `--key-file`, 잘못된 옵션 | — | — |
   | `forensic` / `classify` / `explain FILE` / `legal-report` / `agent --file` / `multimodal FILE…` | 분석 완료 — 결론과 무관(심볼릭 링크는 건너뜀 행) | 예기치 않은 내부 오류 | 입력 경로 오류(G5/N4, 분석·보고서 ID 발급 전에 중단); 잘못된 옵션 | — | — |
-  | 계층 진단 명령(`audio`, `face`, `video-analysis`, `inpaint`, `text-advanced`, `pixel-analysis`, `ml-classify`, `rppg`, `prnu`, `faceswap-seam`, `3d`, `avatar`, `compare`, `watermark`) | 계층 진단 출력 | 예기치 않은 내부 오류, 파일 내용을 읽지 못함(`compare` 처리 실패, `watermark` 텍스트 추출 실패 — stderr `오류: …`) | 입력 경로 오류(위 표), 잘못된 옵션; `ml-classify` 이미지 디코드 실패(Y6: stderr `오류: 이미지를 읽을 수 없습니다(손상되었거나 디코드할 수 없는 이미지): <경로>`, stdout 없음) 또는 opencv/numpy 없음 | — | — |
+  | 계층 진단 명령(`audio`, `face`, `video-analysis`, `inpaint`, `text-advanced`, `pixel-analysis`, `ml-classify`, `rppg`, `prnu`, `faceswap-seam`, `3d`, `avatar`, `compare`, `watermark`, `realtime`) | 계층 진단 출력 | 예기치 않은 내부 오류, 파일 내용을 읽지 못함(`compare` 처리 실패, `watermark` 텍스트 추출 실패 — stderr `오류: …`) | 입력 경로 오류(위 표), 잘못된 옵션; `realtime --scores`에 정수가 아닌 값(Z1: `오류: --scores에는 쉼표로 구분한 정수만 쓸 수 있습니다: '<값>' (예: --scores 10,20,30)`); `ml-classify` 이미지 디코드 실패(Y6: stderr `오류: 이미지를 읽을 수 없습니다(손상되었거나 디코드할 수 없는 이미지): <경로>`, stdout 없음) 또는 opencv/numpy 없음 | — | — |
   | 폴더 명령(`collect`, `dataset`, `eval`, `benchmark`, `fusion`, `calibrate`, `train`, `train-neural-plan`, `video`, `batch`, `perf`, `corpus …`) | 완료 | 예기치 않은 내부 오류(`corpus verify`: 검증 실패) | 입력 경로 오류(위 표), 잘못된 옵션, 매니페스트 해석 불가(`corpus`) | — | — |
-  | `evidence`, `models`, `feedback`, `web`, `vendor-weights` | 완료 | 예기치 않은 내부 오류(`vendor-weights`: 고정 실패) | 입력 경로 오류(위 표), 잘못된 옵션 | — | — |
+  | `evidence`, `models`, `feedback`, `web`, `vendor-weights` | 완료 | 예기치 않은 내부 오류(`vendor-weights`: 고정 실패 — 체크포인트 없음, 허브 조회 실패 등) | 입력 경로 오류(위 표), 잘못된 옵션; `vendor-weights pin`의 프로필이 파일도 모델 디렉터리의 프로필 이름도 아님(Z2: `오류: 파일을 찾을 수 없습니다: <프로필> — 프로필 파일 경로도, 모델 디렉터리 <경로>의 프로필 이름도 아닙니다`) | — | — |
   | `api-serve` | 서버 정상 종료 | 예기치 않은 내부 오류 | 입력 경로 오류(`--allow-root`), fastapi/uvicorn 없음(한국어 설치 안내), localhost가 아닌 주소에 `--token` 없이 바인드, 잘못된 옵션 | — | — |
 
   The web/API servers answer the same folder errors with the same Korean text in `error` (`/api/scan`).
@@ -118,7 +120,7 @@ command prints a band (높음/주의/낮음) or a "의심 신호가 강합니다
 - `pixel-analysis <file>`: cv2-based quick pixel screen (QuickPixelAnalysis, `analysis_tier="pre-screen"` — the scan pipeline's `--pixel` ensemble is a separate tier), behind the same photo/non-photo gate as `scan` (a non-photo is `reference_band: unavailable`, "사진 아님: …"). **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
 - `ml-classify <file>`: feature-threshold rules (requires opencv/numpy; a corrupt image is `오류: …` on stderr, exit 2 — Y6); reports `rule_weight_sum` and `rules_matched`, never an ai/natural label or probability. **계층 진단(참고 신호 · 미측정)** — `kind: "layer_diagnostic"`, `measured: false`, raw numbers, `reference_band` (`reference`/`unavailable`), no band, no verdict.
 - `legal-report <file> [--output F] [--json-out F] [--key-file F] [--analyst-id ID] [--format text|json]`: legal-style report built from the scan result (`analysis_api.analyze_path`): conclusion (`verdict_code`, grade), every evidence item (kind/direction/strength/layer), every coverage entry, limitations, threshold provenance, file SHA-256 and the package `tool_version`. `--json-out` writes the body signed with HMAC-SHA256 when a key is set (`--key-file` or `DEEPFAKE_LENS_REPORT_KEY`), otherwise with the 서명 없음 note; check it with `verify-report`.
-- `verify-report <report.json> [--key-file F] [--format text|json]`: verify a signed report (scan `--json-out --sign`, `legal-report --json-out`, `evidence-statement --json-out`, …). The key comes from `--key-file` or `DEEPFAKE_LENS_REPORT_KEY`. Prints one of `검증됨` (exit 0), `변조됨` (exit 1 — any byte of the signed body changed), `키 ID 불일치` (exit 2 — signed under a different key), `서명 없음` (exit 3 — the report carries no signature); an unreadable file or a missing key exits 4.
+- `verify-report <report.json> [--key-file F] [--format text|json]`: verify a signed report (scan `--json-out --sign`, `legal-report --json-out`, `evidence-statement --json-out`, …). The key comes from `--key-file` or `DEEPFAKE_LENS_REPORT_KEY`. Prints one of `검증됨` (exit 0), `변조됨` (exit 1 — any byte of the signed body changed), `키 ID 불일치` (exit 2 — signed under a different key), `서명 없음` (exit 3 — the report carries no signature); a missing key, or a report that is not a JSON object (corrupt JSON, a list, … — Z4: `오류: 보고서 JSON을 해석할 수 없습니다: <경로> (<사유>)` on stderr, nothing on stdout) exits 4.
 - `perf <folder> --out`: throughput/cache/duplicate-rate report.
 - `security --out` / `release --out`: guardrail and release-readiness reports.
 - `web`: local web GUI (localhost; Host-header guarded; contract: `docs/deepfake-lens-service.md`).

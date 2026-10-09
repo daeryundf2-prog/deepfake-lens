@@ -532,6 +532,10 @@ def fetch_weights(
     return {"status": status, "fetched": fetched, "unverified": unverified, "failed": failed, "results": results}
 
 
+class ProfileNotFoundError(FileNotFoundError):
+    """Z2: the profile argument is neither a file nor a profile name in the models dir (CLI: exit 2)."""
+
+
 def resolve_profile_path(profile: Path | str, models_dir: Path | str | None = None) -> Path:
     """Resolve a profile argument: an existing path, or a name in the models dir.
 
@@ -547,7 +551,9 @@ def resolve_profile_path(profile: Path | str, models_dir: Path | str | None = No
         path = base_dir / name
         if path.is_file():
             return path.resolve()
-    raise FileNotFoundError(f"프로필을 찾을 수 없습니다: {profile} (모델 디렉터리 {base_dir})")
+    raise ProfileNotFoundError(
+        f"파일을 찾을 수 없습니다: {profile} — 프로필 파일 경로도, 모델 디렉터리 {base_dir}의 프로필 이름도 아닙니다"
+    )
 
 
 def _hub_commit_sha(model_id: str) -> str:

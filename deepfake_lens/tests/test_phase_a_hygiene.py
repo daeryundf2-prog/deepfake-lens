@@ -106,19 +106,28 @@ class EvidenceLoaderTest(unittest.TestCase):
 
 
 class JsonOutParentCreationTest(unittest.TestCase):
-    def test_scan_json_out_creates_missing_parents(self) -> None:
+    # Z5 (Gaps: 신규): this test pinned the old behaviour — --json-out created
+    # missing parent folders (a typo scattered reports into new folders). A
+    # missing parent is now a usage error before the scan (exit 2, nothing
+    # created); an existing parent still gets the report.
+    def test_scan_json_out_refuses_missing_parents(self) -> None:
         from deepfake_lens import cli
 
         repo_root = Path(__file__).resolve().parent.parent.parent
+        sample = str(repo_root / "fixtures" / "deepfake-lens-sample")
         with tempfile.TemporaryDirectory() as tmp:
             out_path = Path(tmp) / "deep" / "nested" / "report.json"
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                exit_code = cli.main(["scan", sample, "--recursive", "--no-default-engine", "--json-out", str(out_path)])
+            self.assertEqual(exit_code, 2)
+            self.assertIn(f"오류: 출력 폴더가 없습니다: {out_path.parent}", err.getvalue())
+            self.assertFalse((Path(tmp) / "deep").exists())
+
+            out_path.parent.mkdir(parents=True)
             with contextlib.redirect_stdout(io.StringIO()):
-                exit_code = cli.main([
-                "scan", str(repo_root / "fixtures" / "deepfake-lens-sample"),
-                    "--recursive", "--no-default-engine", "--json-out", str(out_path),
-                ])
+                exit_code = cli.main(["scan", sample, "--recursive", "--no-default-engine", "--json-out", str(out_path)])
             self.assertEqual(exit_code, 0)
-            self.assertTrue(out_path.exists())
             payload = json.loads(out_path.read_text(encoding="utf-8"))
             self.assertIn("items", payload)
 

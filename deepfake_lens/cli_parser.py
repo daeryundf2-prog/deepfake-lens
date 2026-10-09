@@ -58,11 +58,31 @@ _ARGPARSE_ERRORS_KO: tuple[tuple[re.Pattern[str], str], ...] = tuple(
 EMPTY_PATH_MESSAGE = '경로가 비어 있습니다 — 빈 문자열("")은 경로로 쓸 수 없습니다(현재 폴더는 . 으로 지정)'
 
 
+if sys.platform == "win32":  # pragma: no cover - the concrete Path class of the platform
+    from pathlib import WindowsPath as _ConcretePath
+else:
+    from pathlib import PosixPath as _ConcretePath
+
+
+class CliPath(_ConcretePath):
+    """A Path that keeps the command-line text it was parsed from (Z3).
+
+    ``Path("photo.png/")`` is ``Path("photo.png")``: the trailing separator
+    — "this names a folder" — is gone before ``cli_inputs.require_input_path``
+    sees the argument. ``cli_text`` keeps it; paths derived from this one
+    (``/``, ``.parent``, unpickled copies) have none and fall back to ``str()``.
+    """
+
+    cli_text: str
+
+
 def cli_path(value: str) -> Path:
     """argparse ``type`` of every path argument: a Path, never from an empty string (Y3)."""
     if not str(value).strip():
         raise argparse.ArgumentTypeError(EMPTY_PATH_MESSAGE)
-    return Path(value)
+    path = CliPath(value)
+    path.cli_text = str(value)
+    return path
 
 
 cli_path.__name__ = "path"
