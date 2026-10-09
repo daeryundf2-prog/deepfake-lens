@@ -144,9 +144,12 @@ class CliSigningTest(unittest.TestCase):
         from deepfake_lens.cli import main
 
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp) / "case"
+            root.mkdir()
             (root / "note.txt").write_text("plain note", encoding="utf-8")
-            out = root / "report.json"
+            # P11 (round 8): the report used to be written into the scanned
+            # folder itself — now refused (exit 2); it goes next to it.
+            out = Path(tmp) / "report.json"
             with patch.dict(os.environ, {REPORT_KEY_ENV: "cli-secret"}):
                 rc = main(["scan", str(root), "--no-default-engine", "--json-out", str(out), "--sign", "--format", "json"])
             self.assertEqual(rc, 0)
@@ -158,9 +161,12 @@ class CliSigningTest(unittest.TestCase):
         from deepfake_lens.cli import main
 
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp) / "case"
+            root.mkdir()
             (root / "note.txt").write_text("plain note", encoding="utf-8")
-            out = root / "report.json"
+            # P11 (round 8): the report used to be written into the scanned
+            # folder itself — now refused (exit 2); it goes next to it.
+            out = Path(tmp) / "report.json"
             env = {key: value for key, value in os.environ.items() if key != REPORT_KEY_ENV}
             with patch.dict(os.environ, env, clear=True):
                 rc = main(["scan", str(root), "--no-default-engine", "--json-out", str(out), "--sign", "--format", "json"])

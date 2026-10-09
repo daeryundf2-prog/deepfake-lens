@@ -653,6 +653,77 @@ class RoundEightUsageErrorsTest(_UsageErrorCase):
         self._assert_usage(["scan", str(self.folder), "--sign", "--json-out", str(self.root / "r.json"), "--key-file", str(missing)],
                            "서명 키 파일을 읽을 수 없습니다: nokey (파일 또는 폴더가 없습니다(오류 번호 2))")
 
+    def test_p11_output_never_inside_the_examined_folder_or_on_an_input(self) -> None:
+        """P11 (round 8): --json-out & co. inside the scanned folder wrote into the evidence
+        (a report over t1.png), and an output equal to the input JSON overwrote it."""
+        photo = self.folder / "photo.png"
+        photo.write_bytes(b"\x89PNG\r\n\x1a\n")
+        scan_json = self.root / "scan.json"
+        code, _, stderr = self._run(["scan", str(self.folder), "--json-out", str(scan_json)])
+        self.assertEqual(code, 0, stderr)
+        before = {path.name: path.read_bytes() for path in self.folder.iterdir()}
+        scan_before = scan_json.read_bytes()
+        inside = [
+            ["scan", str(self.folder), "--json-out", str(self.folder / "r.json")],
+            ["scan", str(self.folder), "--html-out", str(self.folder / "r.html")],
+            ["scan", str(self.folder), "--cache", str(self.folder / "c.json")],
+            ["scan", str(self.folder), "--heatmap-dir", str(self.folder / "maps")],
+            ["scan", ".", "--json-out", "r.json"],  # relative, cwd = the folder
+            ["evidence-statement", str(self.folder), "--md-out", str(self.folder / "s.md")],
+        ]
+        for argv in inside:
+            with self.subTest(argv=" ".join(argv[-2:])):
+                self._assert_usage(argv, "출력 경로가 검사 대상 폴더 안에 있습니다: ")
+        same = [
+            (["scan", str(self.folder), "--json-out", str(photo)], photo),  # also inside
+            (["forensic", str(photo), "--json-out", str(photo)], photo),
+            (["evidence-statement", str(scan_json), "--json-out", str(scan_json)], scan_json),
+            (["evidence-statement", str(scan_json), "--md-out", str(scan_json)], scan_json),
+        ]
+        for argv, target in same:
+            with self.subTest(argv=" ".join(argv[:1] + argv[-2:])):
+                code, stdout, stderr = self._run(argv)
+                self.assertEqual(code, 2, stderr)
+                self.assertTrue(
+                    f"출력 경로가 입력 파일과 같습니다: {target}" in stderr or "출력 경로가 검사 대상 폴더 안에 있습니다: " in stderr, stderr
+                )
+        self.assertEqual({path.name: path.read_bytes() for path in self.folder.iterdir()}, before)
+        self.assertEqual(scan_json.read_bytes(), scan_before)
+        code, _, stderr = self._run(["forensic", str(photo), "--json-out", str(self.root / "f.json")])
+        self.assertEqual(code, 0, stderr)  # next to the evidence, not on it: fine
+
+    def test_p10_unwritable_output_folder_is_refused_before_the_scan(self) -> None:
+        """P10 (round 8): a read-only output folder failed after the scan ("처리 오류 N건")."""
+        import errno
+        import tempfile as tempfile_module
+
+        out_dir = self.root / "out"
+        out_dir.mkdir()
+        denied = PermissionError(errno.EACCES, "Permission denied")
+        with mock.patch.object(tempfile_module, "mkstemp", side_effect=denied), \
+                mock.patch("deepfake_lens.cli.scan_folder_run") as scan:
+            self._assert_usage(["scan", str(self.folder), "--json-out", str(out_dir / "r.json")],
+                               f"출력 폴더에 쓸 수 없습니다: {out_dir} (접근 권한이 없습니다(오류 번호 13)) — 검사 전에 확인했습니다")
+            scan.assert_not_called()
+        with mock.patch("deepfake_lens.cli_inputs.os.access", return_value=False):
+            self._assert_usage(["evidence-statement", str(self.folder), "--md-out", str(out_dir / "s.md")],
+                               f"출력 폴더에 쓸 수 없습니다: {out_dir} (쓰기 권한이 없습니다)")
+        self.assertEqual(list(out_dir.iterdir()), [], "the probe file is removed")
+        if sys.platform.startswith("linux") and Path("/proc/self").exists():
+            self._assert_usage(["scan", str(self.folder), "--json-out", "/proc/deepfake-lens-p10.json"], "출력 폴더에 쓸 수 없습니다: /proc (")
+        code, _, stderr = self._run(["scan", str(self.folder), "--json-out", str(out_dir / "r.json")])
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual([path.name for path in out_dir.iterdir()], ["r.json"])
+
+    @unittest.skipIf(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0), "root ignores folder modes; POSIX modes")
+    def test_p10_read_only_folder_mode(self) -> None:
+        """P10 (round 8): a 0o555 output folder (non-root) is refused before the scan."""
+        out_dir = self.root / "ro"
+        out_dir.mkdir()
+        out_dir.chmod(0o555)
+        self.addCleanup(out_dir.chmod, 0o755)
+        self._assert_usage(["scan", str(self.folder), "--json-out", str(out_dir / "r.json")], f"출력 폴더에 쓸 수 없습니다: {out_dir} (")
+
     def test_z5_output_into_missing_folder(self) -> None:
         missing = self.root / "nodir" / "x"
         png = self.root / "photo.png"

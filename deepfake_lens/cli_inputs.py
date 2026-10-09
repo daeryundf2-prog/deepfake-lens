@@ -85,6 +85,18 @@ TRAILING_SEPARATOR_HINT = " — 경로 끝의 구분자('/')는 폴더를 뜻합
 # Z5: an output file whose parent folder does not exist; folders are never
 # created for an output argument (a typo would scatter reports).
 OUTPUT_FOLDER_MISSING = "출력 폴더가 없습니다: {folder} — 출력 폴더는 자동으로 만들지 않습니다. 폴더를 먼저 만들거나 기존 폴더를 지정하십시오"
+# P10 (round 8): a read-only output folder failed only after the scan, as a
+# misleading "처리 오류 N건". Checked before any work (os.access + creating
+# and removing a probe file — os.access alone says yes to root on a
+# read-only mount).
+OUTPUT_FOLDER_NOT_WRITABLE = "출력 폴더에 쓸 수 없습니다: {folder} ({reason}) — 검사 전에 확인했습니다. 쓰기 가능한 폴더를 지정하십시오"
+OUTPUT_FILE_NOT_WRITABLE = "출력 파일에 쓸 수 없습니다: {path} ({reason}) — 검사 전에 확인했습니다"
+NO_WRITE_PERMISSION = "쓰기 권한이 없습니다"
+# P11 (round 8): --json-out & co. could name a file inside the folder being
+# examined (overwriting evidence) or the input JSON itself.
+OUTPUT_INSIDE_INPUT = "출력 경로가 검사 대상 폴더 안에 있습니다: {path} — 검사 대상 폴더({folder}) 밖에 저장하십시오(증거 폴더에는 아무것도 쓰지 않습니다)"
+OUTPUT_IS_INPUT = "출력 경로가 입력 파일과 같습니다: {path} — 입력 파일은 덮어쓰지 않습니다. 다른 파일 이름을 지정하십시오"
+WRITE_PROBE_PREFIX = ".deepfake-lens-write-check-"
 FOLDER_HINT_SCAN = " (폴더는 scan을 사용)"
 FILE_HINT_SINGLE = " (단일 파일은 forensic/classify를 사용)"
 
@@ -417,6 +429,88 @@ def check_json_inputs(args: argparse.Namespace) -> None:
             read_json_input(config, "설정 파일")
 
 
+# Output folders (not files) that must not land in the examined folder (P11).
+OUTPUT_FOLDER_ATTRS: tuple[str, ...] = ("heatmap_dir",)
+
+
+def _resolved(value: Path | str) -> Path:
+    try:
+        return Path(value).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return Path(os.path.abspath(Path(value).expanduser()))
+
+
+def _input_paths(args: argparse.Namespace, specs: tuple[InputSpec, ...]) -> tuple[list[Path], list[Path]]:
+    """(folders, files) the command reads, resolved (P11)."""
+    folders: list[Path] = []
+    files: list[Path] = []
+    for spec in specs:
+        value = getattr(args, spec.attr, None)
+        for item in value if isinstance(value, (list, tuple)) else [value]:
+            if not isinstance(item, (str, Path)) or not str(item):
+                continue
+            path = _resolved(item)
+            try:
+                is_dir = path.is_dir()
+            except OSError:
+                continue
+            (folders if is_dir else files).append(path)
+    return folders, files
+
+
+def _inside(path: Path, folder: Path) -> bool:
+    try:
+        path.relative_to(folder)
+    except ValueError:
+        return False
+    return True
+
+
+def require_writable_output(path: Path | str) -> None:
+    """P10: the output file (or the folder it will be created in) can be written — else exit 2."""
+    import tempfile
+
+    from .error_text import read_error_ko
+
+    target = Path(path).expanduser()
+    if target.exists():
+        if not os.access(target, os.W_OK):
+            raise UsageError(OUTPUT_FILE_NOT_WRITABLE.format(path=path, reason=NO_WRITE_PERMISSION))
+    folder = target.parent if str(target.parent) else Path(".")
+    while not folder.exists() and folder != folder.parent:
+        folder = folder.parent  # --out/--cache create their folder: check where it would be made
+    if not os.access(folder, os.W_OK | os.X_OK):
+        raise UsageError(OUTPUT_FOLDER_NOT_WRITABLE.format(folder=folder, reason=NO_WRITE_PERMISSION))
+    try:
+        handle, probe = tempfile.mkstemp(prefix=WRITE_PROBE_PREFIX, dir=folder)
+    except OSError as exc:
+        raise UsageError(OUTPUT_FOLDER_NOT_WRITABLE.format(folder=folder, reason=read_error_ko(exc))) from exc
+    os.close(handle)
+    try:
+        os.unlink(probe)
+    except OSError:
+        pass
+
+
+def check_output_targets(args: argparse.Namespace, key: str, common: tuple[InputSpec, ...]) -> None:
+    """P11: no output inside an examined folder or on an input file; P10: outputs writable."""
+    folders, files = _input_paths(args, INPUT_SPECS.get(key, ()))
+    _, config_files = _input_paths(args, common)
+    files += config_files
+    for attr in (*OUTPUT_FILE_ATTRS, *OUTPUT_FOLDER_ATTRS):
+        value = getattr(args, attr, None)
+        if not isinstance(value, (str, Path)) or not str(value):
+            continue
+        target = _resolved(value)
+        for folder in folders:
+            if _inside(target, folder):
+                raise UsageError(OUTPUT_INSIDE_INPUT.format(path=value, folder=folder))
+        if attr not in OUTPUT_FOLDER_ATTRS and any(target == source for source in files):
+            raise UsageError(OUTPUT_IS_INPUT.format(path=value))
+        if attr not in OUTPUT_FOLDER_ATTRS:
+            require_writable_output(value)
+
+
 def command_key(args: argparse.Namespace) -> str:
     command = str(getattr(args, "command", "") or "")
     if command == "corpus":
@@ -451,6 +545,7 @@ def check_command_inputs(args: argparse.Namespace) -> None:
         if isinstance(value, (str, Path)) and str(value):
             # Y7: a folder is not an output file; Z5: --*-out needs an existing folder.
             require_output_file(value, parent_must_exist=attr.endswith("_out"))
+    check_output_targets(args, key, common)  # P10/P11: before any work
     cache = getattr(args, "cache", None)
     if isinstance(cache, (str, Path)) and str(cache):
         # Y4: an existing file that is not a scan cache is never overwritten.
