@@ -50,6 +50,8 @@ def by_value(table: dict) -> dict[str, str]:
 
 
 class GuiLabelTablesTest(unittest.TestCase):
+    source: str
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.source = GUI_JS.read_text(encoding="utf-8")

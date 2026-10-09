@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from deepfake_lens.analysis_api import AnalysisOptions, scan_folder
+from deepfake_lens.result_types import BatchScanSummary, ScanItem
 from deepfake_lens.result_text import HASH_UNAVAILABLE_SYMLINK, IN_SAMPLE_CAVEAT
 
 HAVE_PIL = importlib.util.find_spec("PIL") is not None and importlib.util.find_spec("numpy") is not None
@@ -82,6 +83,13 @@ def html_text(path: Path) -> str:
 
 @unittest.skipUnless(HAVE_PIL, "Pillow + numpy needed for the fixture")
 class RenderedLabelsTest(unittest.TestCase):
+    _tmp: tempfile.TemporaryDirectory[str]
+    folder: Path
+    summary: BatchScanSummary
+    items: list[ScanItem]
+    thresholds: Any
+    paths: set[str]
+
     @classmethod
     def setUpClass(cls) -> None:
         cls._tmp = tempfile.TemporaryDirectory()
