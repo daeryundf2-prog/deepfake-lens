@@ -51,7 +51,13 @@ ALLOWED_NETWORK_FILES = {"security.py", "webapp.py", "vendor_weights.py"}
 # QA suites run by the security check. Tests ship only in the source tree
 # (pyproject excludes deepfake_lens.tests from the wheel); without them the
 # check reports a failure instead of silently passing.
-SECURITY_QA_MODULES = ("deepfake_lens.tests.qa.test_qa_sys_integrity",)
+# W2: QA-SYS-6/7 live in tests/qa/test_qa_sys.py (one file per QA area);
+# only their classes run here, not the whole QA-SYS module.
+SECURITY_QA_MODULES = (
+    "deepfake_lens.tests.qa.test_qa_sys.QaSys6SignatureCoversWholeReportTest",
+    "deepfake_lens.tests.qa.test_qa_sys.QaSys7ReadRootConfinementTest",
+    "deepfake_lens.tests.qa.test_qa_sys.QaSys7ReadRootUnitTest",
+)
 
 
 def _check_web_binds_localhost() -> tuple[bool, str]:

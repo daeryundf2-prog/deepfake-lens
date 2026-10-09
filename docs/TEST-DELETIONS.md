@@ -13,6 +13,9 @@ QA-SYS-10 통과 기준: "기존 633개 테스트 중 유지 대상 전부 통�
   있을 때). "유지 대상 전부 통과"는 `scripts/qa_phase0.py`가 전체 스위트를 돌려 함께
   판정한다.
 - 비교 단위는 `Class.test_method`이다. 파일만 옮긴 테스트(아래 "파일 이동")는 삭제가 아니다.
+  W2(검증 라운드 4)에서 `tests/qa/`는 명세 WP-J가 명명한 4개 파일(`test_qa_in.py`,
+  `test_qa_out.py`, `test_qa_adv.py`, `test_qa_sys.py`)로 합쳐졌다 — 클래스 단위 이동이며
+  삭제된 테스트는 없다.
 
 조사 방법: `git log --format='%h %s' dad9730..HEAD -i --grep='delet'`는 커밋 8개를 후보로
 내지만("No deletions", "deleted checkpoint" 같은 문구 포함), 커밋마다
@@ -52,3 +55,9 @@ test_every_profile_is_gated_and_carries_an_empty_pin."
 | 테스트 파일 | 커밋 | 새 위치 |
 | --- | --- | --- |
 | `deepfake_lens/tests/test_qa_adv3_keywords.py` (`HumanTextsAboutAiTest`, 4개) | WP-J | `deepfake_lens/tests/qa/test_qa_adv3.py` |
+| `deepfake_lens/tests/qa/test_qa_adv3.py` (`HumanTextsAboutAiTest`, 클래스·테스트·docstring 그대로) | W2 (검증 라운드 4) | `deepfake_lens/tests/qa/test_qa_adv.py` |
+| `deepfake_lens/tests/qa/test_qa_in_robustness.py` (`QaIn5DamagedInputsTest`, 클래스·테스트·docstring 그대로) | W2 (검증 라운드 4) | `deepfake_lens/tests/qa/test_qa_in.py` |
+| `deepfake_lens/tests/qa/test_qa_sys_doctor.py` (`QaSys3DoctorMatchesScanTest`, 클래스·테스트·docstring 그대로) | W2 (검증 라운드 4) | `deepfake_lens/tests/qa/test_qa_sys.py` |
+| `deepfake_lens/tests/qa/test_qa_sys_gate.py` (`MeasurementGateTest`, 클래스·테스트·docstring 그대로) | W2 (검증 라운드 4) | `deepfake_lens/tests/qa/test_qa_sys.py` |
+| `deepfake_lens/tests/qa/test_qa_sys_integrity.py` (`QaSys6SignatureCoversWholeReportTest`, `QaSys7ReadRootConfinementTest`, `QaSys7ReadRootUnitTest`, 클래스·테스트·docstring 그대로) | W2 (검증 라운드 4) | `deepfake_lens/tests/qa/test_qa_sys.py` |
+| `deepfake_lens/tests/qa/test_qa_traceability.py` (`TraceabilityTest`, `HarnessLogicTest`, 클래스·테스트·docstring 그대로) | W2 (검증 라운드 4) | `deepfake_lens/tests/qa/test_qa_sys.py` |

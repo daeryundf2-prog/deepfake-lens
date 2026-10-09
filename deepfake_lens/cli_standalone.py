@@ -15,6 +15,13 @@ Two shapes only:
 Neither shape carries a ``band`` key; the analysis_result carries
 ``verdict_code`` (manipulation_evidence / authenticity_evidence /
 undetermined) and never a score that was not calibrated.
+
+B1: an analysis_result built from a path (:func:`analysis_result_for_path`)
+also carries ``rows`` — the raw scan rows ``scan`` reports for the file
+(one row, or an archive's member rows plus its container row). The
+top-level verdict is the file's own row (the container row of an
+archive); the text rendering lists the member rows in the scan table's
+wording.
 """
 
 from __future__ import annotations
@@ -97,6 +104,75 @@ def analysis_result_payload(item: ScanItem, *, command: str, sha256: str | None 
     return payload
 
 
+def analysis_result_from_rows(
+    rows: list[ScanItem], *, command: str, sha256: str | None = None, path: str | None = None,
+) -> dict[str, Any]:
+    """analysis_result for one file from its scan rows (B1).
+
+    The conclusion fields come from the file's own row (an archive's
+    container row); ``rows`` holds every row raw, exactly as ``scan``
+    reports it. ``path`` overrides the displayed target (the path the
+    user named), ``sha256`` is the fallback digest when the row has none.
+    """
+    from .analysis_api import primary_row
+
+    primary = primary_row(rows)
+    payload = analysis_result_payload(primary, command=command, sha256=sha256)
+    if path is not None:
+        payload["path"] = path
+    payload["rows"] = [standalone_row(row) for row in rows]
+    return payload
+
+
+# Legacy result keys a standalone shape never carries (D1): the band is
+# derived from verdict_code (band_for_verdict) and adds no information.
+STANDALONE_ROW_DROPPED_KEYS = ("band", "band_label")
+
+
+def standalone_row(row: ScanItem) -> dict[str, Any]:
+    """A scan row as ``scan`` emits it, minus the legacy band keys (B1/D1)."""
+    data = row.to_json()
+    result = data.get("result")
+    if isinstance(result, dict):
+        for key in STANDALONE_ROW_DROPPED_KEYS:
+            result.pop(key, None)
+    return data
+
+
+def analysis_result_for_path(
+    path: Path | str, options: Any, *, command: str, thresholds: Any = None,
+) -> tuple[dict[str, Any], list[ScanItem]]:
+    """``(analysis_result, rows)`` for a file — the folder scan's rows for it (B1)."""
+    from .analysis_api import analyze_rows
+
+    rows = analyze_rows(path, options, thresholds=thresholds)
+    payload = analysis_result_from_rows(rows, command=command, sha256=file_sha256(path), path=str(path))
+    return payload, rows
+
+
+def member_rows_text(raw_rows: Any) -> list[str]:
+    """The member rows of an archive result in the scan table's wording (B1).
+
+    ``raw_rows`` is the ``rows`` list of an analysis_result / legal report.
+    Empty for a regular file (one row).
+    """
+    if not isinstance(raw_rows, list) or len(raw_rows) < 2:
+        return []
+    from .cli_render import TABLE_HEADER, TABLE_RULE, table_row_text
+    from .serialization import _scan_item_from_json
+
+    items = [_scan_item_from_json(dict(row)) for row in raw_rows if isinstance(row, Mapping)]
+    members = [item for item in items if "::" in item.path]
+    if not members:
+        return []
+    return [
+        f"구성 파일 {len(members)}개 (scan 표와 같은 행):",
+        TABLE_HEADER,
+        TABLE_RULE,
+        *(table_row_text(item) for item in members),
+    ]
+
+
 def analyze_text_payload(text: str, options: Any, *, command: str, thresholds: Any = None) -> dict[str, Any]:
     """analysis_result for raw text: written to a temp .txt, analyzed like a file."""
     from .analysis_api import analyze_path
@@ -145,6 +221,13 @@ def format_analysis_result(payload: Mapping[str, Any]) -> str:
     for key, title in (("rule", "결정 규칙"),):
         if payload.get(key):
             lines.append(f"{title}: {payload[key]}")
+    member_rules = payload.get("member_rules")
+    if isinstance(member_rules, list) and member_rules:
+        lines.append("구성 파일별 결정 규칙:")
+        for entry in member_rules:
+            if isinstance(entry, Mapping):
+                lines.append(f"  - {entry.get('path')}: {entry.get('rule')}")
+    lines.extend(member_rows_text(payload.get("rows")))
     lines.append(str(payload.get("notice", ANALYSIS_RESULT_NOTICE)))
     return "\n".join(lines)
 
@@ -264,6 +347,8 @@ def combined_verdict(payloads: Iterable[Mapping[str, Any]]) -> tuple[str, str]:
 __all__ = [
     "ANALYSIS_RESULT_NOTICE",
     "LAYER_DIAGNOSTIC_NOTICE",
+    "analysis_result_for_path",
+    "analysis_result_from_rows",
     "analysis_result_payload",
     "analyze_text_payload",
     "combined_verdict",
@@ -272,4 +357,5 @@ __all__ = [
     "file_sha256",
     "format_analysis_result",
     "gated_pixel_layer",
+    "member_rows_text",
 ]

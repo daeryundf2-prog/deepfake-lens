@@ -208,7 +208,12 @@ class CommittedProfilesTest(unittest.TestCase):
         self.assertFalse(analysis.available)
         self.assertIn("Placeholder", analysis.model)
         self.assertIn("not wired", analysis.detail.lower())
-        self.assertTrue(any("example.invalid/placeholder" in item for item in analysis.limitations))
+        # S7 (verify round 4): a supported:false profile no longer injects its
+        # fetch hint or run-time caveats into limitations — the gate reason in
+        # `detail` (coverage "모델 실행 불가: …") is enough. This assertion used
+        # to require the fetch hint there.
+        self.assertEqual(analysis.limitations, [])
+        self.assertFalse(any("example.invalid/placeholder" in item for item in analysis.limitations))
 
     def test_crop_faces_gates_off_faceless_image(self) -> None:
         """crop_faces profiles must skip face-free images before inference."""

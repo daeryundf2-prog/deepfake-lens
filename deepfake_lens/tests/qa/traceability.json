@@ -1,89 +1,109 @@
 {
   "schema": "deepfake-lens-qa-traceability-v1",
-  "description": "0단계 요구사항 → 갭 → QA 시나리오 추적표. scripts/qa_phase0.py가 이 파일을 읽어 docs/CONFORMANCE.md를 만든다. 자동 QA ID마다 docstring 첫 줄이 '<QA ID>: <criteria>'인 테스트가 정확히 1개 있어야 한다(tests/qa/test_qa_traceability.py).",
+  "description": "0단계 요구사항 → 갭 → QA 시나리오 추적표. scripts/qa_phase0.py가 이 파일을 읽어 docs/CONFORMANCE.md를 만든다. 자동 QA ID마다 docstring 첫 줄이 '<QA ID>: <criteria>'인 테스트가 정확히 1개 있어야 한다(tests/qa/test_qa_sys.py TraceabilityTest). W2: QA 테스트는 영역별 4개 파일(test_qa_in.py, test_qa_out.py, test_qa_adv.py, test_qa_sys.py)에만 있고, 자동 QA ID의 file은 정본 테스트가 있는 파일이다..",
   "criteria_source": "0단계 명세 'QA 시나리오 (통과 기준 원문)'",
   "qa": {
     "QA-IN-1": {
       "mode": "automated",
-      "criteria": "지원 형식 전부의 샘플 1개씩을 읽기 전용 폴더에 두고 전체 검사 → 모든 파일의 검사 전후 SHA-256 동일, mtime 불변, 폴더에 새 파일 0개."
+      "criteria": "지원 형식 전부의 샘플 1개씩을 읽기 전용 폴더에 두고 전체 검사 → 모든 파일의 검사 전후 SHA-256 동일, mtime 불변, 폴더에 새 파일 0개.",
+      "file": "deepfake_lens/tests/qa/test_qa_in.py"
     },
     "QA-IN-2": {
       "mode": "automated",
-      "criteria": "같은 폴더를 3회 검사(중간에 프로세스 재시작, 폴더 이름 변경) → 타임스탬프·절대경로 필드를 제외한 JSON이 바이트 단위로 동일. 파일 순서 동일."
+      "criteria": "같은 폴더를 3회 검사(중간에 프로세스 재시작, 폴더 이름 변경) → 타임스탬프·절대경로 필드를 제외한 JSON이 바이트 단위로 동일. 파일 순서 동일.",
+      "file": "deepfake_lens/tests/qa/test_qa_in.py"
     },
     "QA-IN-4": {
       "mode": "automated",
-      "criteria": "마지막 바이트만 바꾼 동일 크기 파일을 같은 경로에 넣고 touch -r로 mtime 복원 후 재검사 → 캐시 미사용, 새로 분석, 해시가 다르게 기록."
+      "criteria": "마지막 바이트만 바꾼 동일 크기 파일을 같은 경로에 넣고 touch -r로 mtime 복원 후 재검사 → 캐시 미사용, 새로 분석, 해시가 다르게 기록.",
+      "file": "deepfake_lens/tests/qa/test_qa_in.py"
     },
     "QA-IN-5": {
       "mode": "automated",
-      "criteria": "손상 파일 20종(잘린 JPEG, 깨진 mp4 moov, 빈 파일, 확장자 위장, zip 폭탄, 중첩 zip 100개) → 프로세스 생존, 각 파일이 \"판단 불가 + 이유\" 또는 \"미지원\". 디스크 사용 상한 초과 없음. 다른 파일 결과에 영향 없음."
+      "criteria": "손상 파일 20종(잘린 JPEG, 깨진 mp4 moov, 빈 파일, 확장자 위장, zip 폭탄, 중첩 zip 100개) → 프로세스 생존, 각 파일이 \"판단 불가 + 이유\" 또는 \"미지원\". 디스크 사용 상한 초과 없음. 다른 파일 결과에 영향 없음.",
+      "file": "deepfake_lens/tests/qa/test_qa_in.py"
     },
     "QA-OUT-1": {
       "mode": "automated",
-      "criteria": "신경망 가중치를 제거한 상태에서 사진 100장 검사 → 결론이 \"판단 불가\" 또는 결정적 근거에 의한 결론뿐. \"낮음/깨끗함\"이 통계적 근거 없이 나오는 건 0개."
+      "criteria": "신경망 가중치를 제거한 상태에서 사진 100장 검사 → 결론이 \"판단 불가\" 또는 결정적 근거에 의한 결론뿐. \"낮음/깨끗함\"이 통계적 근거 없이 나오는 건 0개.",
+      "file": "deepfake_lens/tests/qa/test_qa_out.py"
     },
     "QA-OUT-2": {
       "mode": "automated",
-      "criteria": "모델 추론 함수에 예외를 강제 주입(monkeypatch)하고 검사 → 커버리지에 \"실패: <예외 유형>\" 기록, 결론 \"판단 불가\". \"의존성 부재\"로 표기되지 않음."
+      "criteria": "모델 추론 함수에 예외를 강제 주입(monkeypatch)하고 검사 → 커버리지에 \"실패: <예외 유형>\" 기록, 결론 \"판단 불가\". \"의존성 부재\"로 표기되지 않음.",
+      "file": "deepfake_lens/tests/qa/test_qa_out.py"
     },
     "QA-OUT-3": {
       "mode": "automated",
-      "criteria": "얼굴 없는 사진, 측면 얼굴, 저조도 얼굴 각 20장 → 얼굴 미검출 시 커버리지에 \"얼굴 검사 미실행: 얼굴 미검출\" 기록. 얼굴 조작 결론이 \"없음\"으로 나오지 않음."
+      "criteria": "얼굴 없는 사진, 측면 얼굴, 저조도 얼굴 각 20장 → 얼굴 미검출 시 커버리지에 \"얼굴 검사 미실행: 얼굴 미검출\" 기록. 얼굴 조작 결론이 \"없음\"으로 나오지 않음.",
+      "file": "deepfake_lens/tests/qa/test_qa_out.py"
     },
     "QA-OUT-4": {
       "mode": "automated",
-      "criteria": "같은 폴더를 CLI, GUI(/api/scan), API 서버로 각각 검사 → 세 결과의 결론·근거·확률·임계값 출처가 동일."
+      "criteria": "같은 폴더를 CLI, GUI(/api/scan), API 서버로 각각 검사 → 세 결과의 결론·근거·확률·임계값 출처가 동일.",
+      "file": "deepfake_lens/tests/qa/test_qa_out.py"
     },
     "QA-OUT-5": {
       "mode": "automated",
       "criteria": "모델 확률이 표시된 모든 결과 → 각 확률에 보정 코퍼스 ID, 측정 조건, 95% CI가 붙어 있음. 측정 범위 밖 입력(64 px 이하)은 \"범위 밖\"으로 표시되고 확률 없음.",
       "label": "구조 검사(0단계에 보정 모델 없음)",
-      "note": "0단계에는 보정된 모델이 없어 확률이 붙는 실제 결과가 없다. 정본 테스트는 합성 EvidenceItem으로 출처 필드의 구조만 검사하고, 실제 스캔에서는 확률이 0건임을 확인한다."
+      "note": "0단계에는 보정된 모델이 없어 확률이 붙는 실제 결과가 없다. 정본 테스트는 합성 EvidenceItem으로 출처 필드의 구조만 검사하고, 실제 스캔에서는 확률이 0건임을 확인한다.",
+      "file": "deepfake_lens/tests/qa/test_qa_out.py"
     },
     "QA-OUT-6": {
       "mode": "automated",
-      "criteria": "텍스트 파일 50개 검사 → 모든 결론 등급이 \"참고\", 보고서에 법적 한계 문구 존재."
+      "criteria": "텍스트 파일 50개 검사 → 모든 결론 등급이 \"참고\", 보고서에 법적 한계 문구 존재.",
+      "file": "deepfake_lens/tests/qa/test_qa_out.py"
     },
     "QA-ADV-1": {
       "mode": "automated",
-      "criteria": "그라데이션, 랜덤 노이즈, 단색, 체커보드, 블러 노이즈 각 10장 → 전부 \"사진 아님 — 생성 탐지 비적용\". 의심 판정 0."
+      "criteria": "그라데이션, 랜덤 노이즈, 단색, 체커보드, 블러 노이즈 각 10장 → 전부 \"사진 아님 — 생성 탐지 비적용\". 의심 판정 0.",
+      "file": "deepfake_lens/tests/qa/test_qa_adv.py"
     },
     "QA-ADV-2": {
       "mode": "automated",
-      "criteria": "스크린샷 50장(카톡 대화, 웹페이지, 문서 뷰어) → 스크린샷으로 분류, 생성 탐지 미적용, 의심 판정 0."
+      "criteria": "스크린샷 50장(카톡 대화, 웹페이지, 문서 뷰어) → 스크린샷으로 분류, 생성 탐지 미적용, 의심 판정 0.",
+      "file": "deepfake_lens/tests/qa/test_qa_adv.py"
     },
     "QA-ADV-3": {
       "mode": "automated",
-      "criteria": "AI에 대해 쓴 사람 글 30건(\"언어 모델\", \"as an AI\" 포함) → 키워드는 근거 목록에 나타나되 결론은 \"참고 — 근거 부족\"."
+      "criteria": "AI에 대해 쓴 사람 글 30건(\"언어 모델\", \"as an AI\" 포함) → 키워드는 근거 목록에 나타나되 결론은 \"참고 — 근거 부족\".",
+      "file": "deepfake_lens/tests/qa/test_qa_adv.py"
     },
     "QA-SYS-1": {
       "mode": "automated",
-      "criteria": "프로필의 sha256을 한 글자 바꾸고 검사 → 모델 로드 거부, 결론 \"판단 불가: 모델 무결성 실패\"."
+      "criteria": "프로필의 sha256을 한 글자 바꾸고 검사 → 모델 로드 거부, 결론 \"판단 불가: 모델 무결성 실패\".",
+      "file": "deepfake_lens/tests/qa/test_qa_sys.py"
     },
     "QA-SYS-2": {
       "mode": "automated",
-      "criteria": "가중치 파일을 다른 파일로 바꾸고 검사 → 동일."
+      "criteria": "가중치 파일을 다른 파일로 바꾸고 검사 → 동일.",
+      "file": "deepfake_lens/tests/qa/test_qa_sys.py"
     },
     "QA-SYS-3": {
       "mode": "automated",
-      "criteria": "필수 모델 하나를 삭제한 환경에서 doctor 실행 → 해당 모델 MISS, \"실행 가능\" 요약이 실제 검사 결과의 coverage와 일치."
+      "criteria": "필수 모델 하나를 삭제한 환경에서 doctor 실행 → 해당 모델 MISS, \"실행 가능\" 요약이 실제 검사 결과의 coverage와 일치.",
+      "file": "deepfake_lens/tests/qa/test_qa_sys.py"
     },
     "QA-SYS-6": {
       "mode": "automated",
-      "criteria": "보고서 JSON의 임의 필드(결론, 근거, note, 모델 해시) 한 글자 변경 후 검증 → 모든 경우 \"변조됨\"."
+      "criteria": "보고서 JSON의 임의 필드(결론, 근거, note, 모델 해시) 한 글자 변경 후 검증 → 모든 경우 \"변조됨\".",
+      "file": "deepfake_lens/tests/qa/test_qa_sys.py"
     },
     "QA-SYS-7": {
       "mode": "automated",
-      "criteria": "/api/scan?folder=/ 등 등록되지 않은 경로로 요청. heatmap_path를 외부 파일로 지정한 report 요청 → 모두 403, 응답에 파일 내용 0바이트."
+      "criteria": "/api/scan?folder=/ 등 등록되지 않은 경로로 요청. heatmap_path를 외부 파일로 지정한 report 요청 → 모두 403, 응답에 파일 내용 0바이트.",
+      "file": "deepfake_lens/tests/qa/test_qa_sys.py"
     },
     "QA-SYS-9": {
       "mode": "automated",
-      "criteria": "측정 기록 없는 프로필을 models/에 추가하고 PR → CI 실패."
+      "criteria": "측정 기록 없는 프로필을 models/에 추가하고 PR → CI 실패.",
+      "file": "deepfake_lens/tests/qa/test_qa_sys.py"
     },
     "QA-SYS-10": {
       "mode": "automated",
-      "criteria": "기존 633개 테스트 중 유지 대상 전부 통과. 삭제된 테스트는 삭제 이유가 커밋 메시지에 기록."
+      "criteria": "기존 633개 테스트 중 유지 대상 전부 통과. 삭제된 테스트는 삭제 이유가 커밋 메시지에 기록.",
+      "file": "deepfake_lens/tests/qa/test_qa_sys.py"
     },
     "QA-IN-3": {
       "mode": "manual",
@@ -443,5 +463,11 @@
   ],
   "gaps_without_qa": {
     "G33": "umm-maybe 가중치 이중 프로필 + _aggregate_profile_results 덮어쓰기 버그 — QA 시나리오 없음, 회귀 테스트 tests/test_model_zoo.py의 test_gated_member_takes_no_part_in_spread_or_agreement, test_all_members_gated_is_not_available로 고정"
+  },
+  "test_files": {
+    "QA-IN-*": "deepfake_lens/tests/qa/test_qa_in.py",
+    "QA-OUT-*": "deepfake_lens/tests/qa/test_qa_out.py",
+    "QA-ADV-*": "deepfake_lens/tests/qa/test_qa_adv.py",
+    "QA-SYS-*": "deepfake_lens/tests/qa/test_qa_sys.py"
   }
 }

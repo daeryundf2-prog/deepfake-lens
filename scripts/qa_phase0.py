@@ -4,8 +4,10 @@
     python scripts/qa_phase0.py [--log-dir build/qa-logs] [--out docs/CONFORMANCE.md] [--qa-only]
 
 1. Runs the whole unit-test suite in-process (QA-SYS-10 needs "유지 대상 전부
-   통과"); ``--qa-only`` runs just ``tests/qa`` plus the fail-closed and
-   decision tests (QA-SYS-10 is then reported as 건너뜀).
+   통과"); ``--qa-only`` runs just ``tests/qa`` — the four area files
+   test_qa_in.py / test_qa_out.py / test_qa_adv.py / test_qa_sys.py (W2) —
+   plus the fail-closed and decision tests (QA-SYS-10 is then reported as
+   건너뜀).
 2. Collects per-test outcome, captured stdout/stderr, log records and
    tracebacks. Each test belongs to a QA ID through its docstring
    (``tests/qa/traceability.qa_tag``); a QA ID passes when its canonical

@@ -227,13 +227,9 @@ def create_app(
     async def root():
         return {"message": "Deepfake Lens API", "version": "0.1.0"}
 
-    # GUI is fully externalized (gui.css/gui.js) and markup carries no
-    # inline style attributes — script-src and style-src are both strict
-    # 'self'; blob: covers object-URL previews and heatmaps.
-    GUI_CSP = (
-        "default-src 'self'; script-src 'self'; style-src 'self'; "
-        "img-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'"
-    )
+    # Same CSP as the stdlib server's GUI shell (webapp.GUI_CSP): strict
+    # 'self' scripts/styles, blob: images and media for previews (S5).
+    from .webapp import GUI_CSP
 
     @app.get("/gui")
     async def gui_view():
@@ -273,11 +269,12 @@ def create_app(
     # are layer diagnostics (reference numbers, no band). /api/analyze/face
     # is a layer diagnostic only, like the `face` CLI command.
     def _verdict_payload(path: Path, command: str) -> dict[str, Any]:
-        from .cli_standalone import analysis_result_payload, file_sha256
+        from .cli_standalone import analysis_result_for_path
 
+        # B1: an archive is expanded like the folder scan (rows).
         options = _api_options()
-        item = analyze_path(path, options, thresholds=load_thresholds(options))
-        return analysis_result_payload(item, command=command, sha256=file_sha256(path))
+        payload, _ = analysis_result_for_path(path, options, command=command, thresholds=load_thresholds(options))
+        return payload
 
     @app.post("/api/analyze/image")
     def analyze_image(file_path: str):
@@ -737,8 +734,16 @@ def create_app(
             from .analysis_api import scan_folder, scan_payload
 
             yield ("job", {"job_id": job_id})
-            if root is None or not root.is_dir():
+            if root is None:
                 yield ("error", {"detail": "directory가 필요합니다"})
+                return
+            from .core import ScanFolderError, check_scan_folder
+
+            try:
+                check_scan_folder(root)
+            except ScanFolderError as exc:
+                # S4: the same Korean reason as `scan` and /api/scan.
+                yield ("error", {"detail": str(exc)})
                 return
             options = dataclasses.replace(
                 _api_options(), recursive=recursive, max_files=max(1, min(max_files, MAX_STREAM_SCAN_FILES)),

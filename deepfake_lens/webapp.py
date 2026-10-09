@@ -54,6 +54,19 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 CLIENT_HEADER = "X-Deepfake-Lens-Client"
 CLIENT_HEADER_VALUE = "gui"
 
+# Content-Security-Policy of the GUI shell, shared by this server and the
+# FastAPI /gui route (api_server). The GUI is fully externalized
+# (gui.css/gui.js) and its markup carries no inline style attributes —
+# script-src and style-src are both strict 'self'. blob: covers the
+# object-URL previews: img-src for images and heatmaps, media-src for the
+# <audio>/<video> previews of wav/mp3/mp4 files (S5 — without it the
+# browser refuses to play them); 'self' keeps same-origin media working.
+GUI_CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self'; "
+    "img-src 'self' blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'"
+)
+
+
 def host_name(header_value: str) -> str:
     """Extract the hostname part of a Host header (handles [::1]:port)."""
     value = header_value.strip().lower()
@@ -449,14 +462,7 @@ def build_server(
             body = html.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
-            # GUI is fully externalized (gui.css/gui.js) and markup carries
-            # no inline style attributes — script-src and style-src are both
-            # strict 'self'. blob: covers object-URL previews and heatmaps.
-            self.send_header(
-                "Content-Security-Policy",
-                "default-src 'self'; script-src 'self'; style-src 'self'; "
-                "img-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'",
-            )
+            self.send_header("Content-Security-Policy", GUI_CSP)
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()

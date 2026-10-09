@@ -349,21 +349,23 @@ def build_legal_report(
     """Legal report for one file, built from the scan result (D4).
 
     The conclusion, evidence list and coverage are exactly what
-    ``analysis_api.analyze_path`` returns for the file — an a1111 PNG shows
+    ``analysis_api.analyze_rows`` returns for the file — an a1111 PNG shows
     its deterministic generator-metadata evidence and
-    ``manipulation_evidence``. The body is signed with ``key`` (HMAC-SHA256)
-    when one is given, otherwise it carries the "서명 없음" note; verify it
-    with ``deepfake-lens verify-report``.
+    ``manipulation_evidence``. B1: an archive is expanded like ``scan``
+    expands it; the conclusion is its container row and ``rows`` carries
+    every raw scan row (members and container) inside the signed body. The
+    body is signed with ``key`` (HMAC-SHA256) when one is given, otherwise
+    it carries the "서명 없음" note; verify it with
+    ``deepfake-lens verify-report``.
     """
-    from .analysis_api import AnalysisOptions, analyze_path, load_thresholds, provenance
-    from .cli_standalone import analysis_result_payload, file_sha256
+    from .analysis_api import AnalysisOptions, load_thresholds, provenance
+    from .cli_standalone import analysis_result_for_path
     from .signing import sign_report
 
     file_path = Path(path)
     opts = options if options is not None else AnalysisOptions()
     thresholds = load_thresholds(opts)
-    item = analyze_path(file_path, opts, thresholds=thresholds)
-    result = analysis_result_payload(item, command=LEGAL_REPORT_TYPE, sha256=file_sha256(file_path))
+    result, _ = analysis_result_for_path(file_path, opts, command=LEGAL_REPORT_TYPE, thresholds=thresholds)
     try:
         size = file_path.stat().st_size
     except OSError:
@@ -396,6 +398,8 @@ def build_legal_report(
         "coverage": result.get("coverage", []),
         "limitations": result.get("limitations", []),
         "reference_signals": result.get("reference_signals", []),
+        # B1: the scan rows for the file (an archive: member rows + container row).
+        "rows": result.get("rows", []),
         "provenance": provenance(opts, thresholds),
         "legal_notes": list(LEGAL_REPORT_NOTES),
     }

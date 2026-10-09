@@ -34,6 +34,12 @@ dropped. R1: the hostile folder (an archive with an A1111 member next to
 traversal/absolute/link members, a deflate bomb, a symlinked file) must
 come out of every leg — and of /api/check and /api/check/stream for each of
 its files — with the same member, container and symlink rows as the CLI.
+B1: the single-file commands (``forensic``, ``classify``, ``explain``,
+``legal-report``, ``evidence-statement <file>``) and
+``analysis_api.analyze_rows``/``analyze_path`` on evil.zip, bomb.zip and
+a1111.png report the folder scan's raw rows for the file (the standalone
+shape drops only the legacy band keys, D1) and its conclusion; their text
+outputs list the member rows exactly as the scan table prints them.
 """
 
 from __future__ import annotations
@@ -56,7 +62,7 @@ from typing import Any
 from unittest import mock
 
 from deepfake_lens import webapp_api
-from deepfake_lens.analysis_api import AnalysisOptions, scan_folder, scan_payload
+from deepfake_lens.analysis_api import AnalysisOptions, analyze_path, analyze_rows, scan_folder, scan_payload
 from deepfake_lens.cli import main as cli_main
 from deepfake_lens.core import analyze_file, build_classification_result
 from deepfake_lens.result_text import TEXT_LEGAL_LIMITATION
@@ -154,6 +160,21 @@ def _raw_item(item: dict[str, Any], prefixes: tuple[str, ...] = ()) -> dict[str,
     timestamps, absolute folder paths and heatmap locations."""
     normalized: dict[str, Any] = _normalize(item, prefixes)
     return normalized
+
+
+def _without_band(row: dict[str, Any]) -> dict[str, Any]:
+    """A scan row without the legacy result.band/band_label (B1: the
+    standalone analysis_result rows drop them, D1); the dropped band must be
+    the one derived from verdict_code."""
+    from deepfake_lens.result_types import band_for_verdict
+
+    out = json.loads(json.dumps(row))
+    result = out.get("result")
+    if isinstance(result, dict):
+        band = result.pop("band", None)
+        result.pop("band_label", None)
+        assert band == band_for_verdict(Verdict(result["verdict_code"])).value, (row.get("path"), band)
+    return dict(out)
 
 
 def _strip_stream_extras(test: unittest.TestCase, payload: dict[str, Any]) -> dict[str, Any]:
@@ -756,6 +777,86 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
             self.assertEqual(response.status_code, 403, response.text)
             with client.stream("POST", "/api/check/stream", params={"file_path": str(folder / "linked.png")}, headers=headers) as streamed:
                 self.assertEqual(streamed.status_code, 403)
+
+    def _cli_run(self, args: list[str]) -> str:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli_main(args), 0, args)
+        return out.getvalue()
+
+    def test_single_file_commands_report_the_folder_scan_rows(self) -> None:
+        """QA-OUT-4 (B1): forensic, classify, explain --json, legal-report --json/text and
+        evidence-statement <file> --json-out on evil.zip, bomb.zip and a1111.png report the folder
+        scan's raw rows for the file (archives: member rows + container row) and its conclusion;
+        the text outputs list the member rows exactly as the scan table prints them."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            folder = write_hostile_folder(base / "case")
+            raw_scan = self._cli_payload(folder)
+            cli = _norm_payload(raw_scan, folder)
+            table = self._cli_run(["scan", str(folder), "--include-low"]).splitlines()
+            prefixes = (str(folder),)
+            for name in ("evil.zip", "bomb.zip", "a1111.png"):
+                target = folder / name
+                expected = {path: row for path, row in cli["items"].items() if path == name or path.startswith(name + "::")}
+                own = expected[name]["result"]
+                with self.subTest(file=name):
+                    if name.endswith(".zip"):
+                        self.assertGreater(len(expected), 1 if name == "evil.zip" else 0)
+                        self.assertEqual(expected[name]["kind"], "archive")
+                    for command in ("forensic", "classify", "explain", "legal-report"):
+                        payload = json.loads(self._cli_run([command, str(target), "--format", "json"]))
+                        rows = {row["path"]: _raw_item(row, prefixes) for row in payload["rows"]}
+                        # Raw scan rows; a standalone shape never carries the
+                        # legacy band keys (D1), which derive from verdict_code.
+                        self.assertEqual(rows, {path: _without_band(row) for path, row in expected.items()}, command)
+                        conclusion = payload["conclusion"] if command == "legal-report" else payload
+                        self.assertEqual(conclusion["verdict_code"], own["verdict_code"], command)
+                        self.assertEqual(conclusion["verdict"], own["verdict"], command)
+                        for key in ("evidence", "coverage", "limitations", "reference_signals"):
+                            self.assertEqual(payload[key], own[key], f"{command}: {key}")
+                        digest = payload["file"]["sha256"] if command == "legal-report" else payload["sha256"]
+                        self.assertEqual(digest, expected[name]["sha256"], command)
+                        if command == "explain":
+                            # The container verdict is the roll-up; each member has its own rule.
+                            members = sorted(path for path in expected if "::" in path)
+                            self.assertEqual(sorted(entry["path"] for entry in payload.get("member_rules", [])), members)
+                            self.assertNotIn("rule_note", payload)
+                            self.assertTrue(all("rule_note" not in entry for entry in payload.get("member_rules", [])))
+                    if name == "evil.zip":
+                        self.assertEqual(own["verdict_code"], Verdict.MANIPULATION_EVIDENCE.value)
+                    # The library entry points behind those commands.
+                    options = AnalysisOptions.from_cli_args(type("Args", (), {})())
+                    self.assertEqual(
+                        {row.path: _raw_item(row.to_json(), prefixes) for row in analyze_rows(target, options)}, expected,
+                    )
+                    if name.endswith(".zip"):
+                        self.assertEqual(_raw_item(analyze_path(target, options).to_json(), prefixes), expected[name])
+                    # Text: every member row reads exactly as in the scan table.
+                    member_lines = [line for line in table if f" {name}::" in line]
+                    self.assertEqual(len(member_lines), len(expected) - 1)
+                    for args in (
+                        ["forensic", str(target), "--format", "table"],
+                        ["classify", str(target), "--format", "table"],
+                        ["explain", str(target)],
+                        ["legal-report", str(target)],
+                    ):
+                        text = self._cli_run(args).splitlines()
+                        for line in member_lines:
+                            self.assertIn(line, text, args[0])
+                    # evidence-statement <file> == evidence-statement on the
+                    # folder scan's rows for that file.
+                    rows_json = base / f"{name}.rows.json"
+                    rows_json.write_text(json.dumps({
+                        **raw_scan,
+                        "items": [row for row in raw_scan["items"] if row["path"] == name or row["path"].startswith(name + "::")],
+                    }, ensure_ascii=False), encoding="utf-8")
+                    single, from_rows = base / f"{name}.single.json", base / f"{name}.from-rows.json"
+                    self._cli_run(["evidence-statement", str(target), "--json-out", str(single)])
+                    self._cli_run(["evidence-statement", str(rows_json), "--json-out", str(from_rows)])
+                    statement = _normalize(json.loads(single.read_text(encoding="utf-8")), prefixes)
+                    self.assertEqual(statement, _normalize(json.loads(from_rows.read_text(encoding="utf-8")), prefixes))
+                    self.assertEqual(sorted(entry["file_path"] for entry in statement["entries"]), sorted(expected))
 
     def test_upload_reports_same_threshold_provenance(self) -> None:
         """QA-OUT-4 (GUI upload): /api/analyze-upload reports the thresholds it used and the scan's raw row."""

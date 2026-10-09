@@ -258,18 +258,18 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
         )
 
     if profile.get("supported") is False:
+        # S7: a gated-off profile never ran — its gate reason (detail →
+        # coverage "모델 실행 불가: …") is the whole story. Its download/fetch
+        # hints and its run-time caveats describe a model that did not run
+        # and are not added to the row's limitations.
         reason = str(profile.get("reason") or "이 프로필은 문서화용 자리표시자이며 실행 가능한 런타임에 연결되어 있지 않습니다.")
-        fetch_hint = str(profile.get("fetch") or "").strip()
-        limitations = _profile_limitations(profile)
-        if fetch_hint:
-            limitations = [fetch_hint, *limitations]
         return ExternalModelAnalysis(
             available=False,
             score=0,
             confidence="unavailable",
             model=model_name,
             detail=f"{display}: {reason}",
-            limitations=limitations,
+            limitations=[],
             display_name=display,
         )
 
@@ -482,7 +482,10 @@ def _aggregate_profile_results(results: list[tuple[Path, ExternalModelAnalysis]]
         for item in result.limitations:
             if item not in limitations:
                 limitations.append(item)
-    limitations.append("외부 모델 집계 점수는 실행된 멤버의 가중 평균인 보정 전 원점수이며 진위 판정이 아닙니다.")
+    if kept:
+        # S7: only an aggregate that exists needs the caveat; with no member
+        # run the coverage entries ("모델 실행 불가: …") say why.
+        limitations.append("외부 모델 집계 점수는 실행된 멤버의 가중 평균인 보정 전 원점수이며 진위 판정이 아닙니다.")
     if agreement == "low":
         limitations.append(f"모델 멤버 간 점수가 엇갈립니다(편차 {spread}점) — 메타데이터·출처 신호를 먼저 검토하십시오.")
 

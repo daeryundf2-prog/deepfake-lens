@@ -210,8 +210,7 @@ def scan_directory(
     did not enter in ``summary.subfolders_skipped`` (N8).
     """
     root = Path(directory)
-    if not root.is_dir():
-        raise NotADirectoryError(str(root))
+    check_scan_folder(root)
 
     paths: list[Path] = []
     capped = False
@@ -240,6 +239,46 @@ def scan_directory(
 
 # progress(item, done, planned) — see scan_directory.
 ScanProgress = Callable[[ScanItem, int, int], None]
+
+
+class ScanFolderError(NotADirectoryError):
+    """The scan target is not a readable folder (S4).
+
+    ``str()`` is the Korean reason the CLI prints after "오류: " (exit 2) and
+    the web/API servers return as the error text. A NotADirectoryError so
+    existing ``except NotADirectoryError`` / ``except OSError`` callers keep
+    working.
+    """
+
+
+# S4: the three reasons a folder cannot be scanned.
+SCAN_FOLDER_MISSING = "폴더를 찾을 수 없습니다: {path}"
+SCAN_FOLDER_IS_FILE = "폴더가 아니라 파일입니다: {path} (단일 파일은 forensic/classify를 사용)"
+SCAN_FOLDER_UNREADABLE = "폴더를 읽을 수 없습니다: {path} ({reason})"
+
+
+def check_scan_folder(root: Path) -> None:
+    """Raise :class:`ScanFolderError` unless ``root`` is a folder that can be listed (S4)."""
+    try:
+        is_dir = root.is_dir()
+        exists = is_dir or root.exists()
+    except OSError as exc:
+        raise ScanFolderError(SCAN_FOLDER_UNREADABLE.format(path=root, reason=_folder_error_reason(exc))) from exc
+    if not exists:
+        raise ScanFolderError(SCAN_FOLDER_MISSING.format(path=root))
+    if not is_dir:
+        raise ScanFolderError(SCAN_FOLDER_IS_FILE.format(path=root))
+    try:
+        with os.scandir(root) as entries:
+            next(entries, None)
+    except OSError as exc:
+        raise ScanFolderError(SCAN_FOLDER_UNREADABLE.format(path=root, reason=_folder_error_reason(exc))) from exc
+
+
+def _folder_error_reason(exc: OSError) -> str:
+    if isinstance(exc, PermissionError):
+        return "권한이 없습니다"
+    return failure_reason(exc)
 
 
 def count_subfolders(root: Path) -> int:
@@ -460,6 +499,14 @@ def _scan_paths(
 
 # N5: title of the container row's roll-up evidence item.
 ARCHIVE_ROLLUP_TITLE = "압축 파일 구성원 결론 집계"
+# B1: how a container row's verdict is derived (``explain`` on an archive;
+# the member rows carry their own decision rule). Mirrors
+# _archive_container_item below.
+ARCHIVE_ROLLUP_RULE = (
+    "압축 파일 — 컨테이너 행의 결론은 구성 파일 결론의 집계입니다: 조작·생성 근거가 있는 구성 파일이 "
+    "하나라도 있으면 조작·생성 근거 있음, 모든 구성 파일이 원본성 근거 있음이고 스킵·거부·경고가 없을 때만 "
+    "원본성 근거 있음, 그 외에는 판단 불가. 구성 파일별 결정 규칙은 '아카이브::경로' 행을 보십시오."
+)
 
 
 def archive_rollup_detail(manipulated: int, undetermined: int, authentic: int = 0) -> str:
@@ -816,20 +863,26 @@ def _analyze_file(
     extension = file_path.suffix.lower()
 
     if is_archive(file_path):
-        # Single-item callers get a container row; member-level results
-        # come through scan_directory / upload paths that expand first.
-        # An unexpanded container is undetermined — never a clean verdict.
+        # B1: every entry point expands an archive before it gets here —
+        # scan_paths (folder scans, analysis_api.analyze_rows/analyze_path
+        # for single files, /api/check, uploads) turns it into member rows
+        # plus a container row. This row is only reached for an archive
+        # nested inside one whose extraction yielded no members (the parent
+        # container lists the reason) or by a direct core.analyze_file
+        # call. An unexpanded container is undetermined — never a clean
+        # verdict.
         return ScanItem(
             display_path, item_name, "archive", "analyzed", size,
             build_classification_result(
                 subject="압축 파일",
                 evidence=[],
-                coverage=[skipped("archive", "단일 파일 분석에서는 압축 내부를 펼치지 않습니다")],
+                coverage=[skipped("archive", "이 행에서는 압축 내부를 펼치지 않았습니다(중첩 압축이면 상위 압축 행의 경고·거부 항목 참조)")],
                 source_guess=SourceGuess.unknown("압축 컨테이너에는 출처 추정이 적용되지 않습니다."),
                 limitations=[
-                    f"{archive_format(file_path)} 압축 파일 — 내부 파일은 폴더 스캔 또는 업로드 경로에서 개별 분석됩니다.",
+                    f"{archive_format(file_path)} 압축 파일 — 이 행은 내부 파일을 분석하지 않았습니다. "
+                    "압축 파일은 scan·forensic 등 모든 명령에서 '아카이브::경로' 행으로 펼쳐집니다.",
                 ],
-                next_checks=["압축 파일이 포함된 폴더를 스캔하거나 업로드하세요."],
+                next_checks=["이 압축 파일을 scan 또는 forensic으로 직접 검사해 구성 파일 행을 확인하세요."],
             ),
         )
 
@@ -1320,11 +1373,13 @@ def _audio_result(analysis: AudioAnalysis, *, coverage: list[CoverageEntry] | No
         SourceConfidence.LOW if source_known else SourceConfidence.UNKNOWN,
         [analysis.source_guess] if source_known else ["오디오에서 출처를 판단할 단서가 부족합니다."],
     )
-    limitations = [
+    # S7: audio.analyze_audio already folds the model limitations into
+    # analysis.limitations; each line is listed once, first occurrence kept.
+    limitations = list(dict.fromkeys([
         "오디오 음향 휴리스틱은 측정 전 참고 신호이며 결론에 참여하지 않습니다.",
         *analysis.limitations,
         *(analysis.model_analysis.limitations if analysis.model_analysis else []),
-    ]
+    ]))
     return build_classification_result(
         subject="오디오",
         evidence=evidence,

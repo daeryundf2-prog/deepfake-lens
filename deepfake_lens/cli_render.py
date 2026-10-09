@@ -114,8 +114,8 @@ def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage:
     if any(item.result and item.result.grade == Grade.REFERENCE for item in items):
         print(f"참고: {TEXT_LEGAL_LIMITATION}")
     print()
-    print(f"{'결론':<14} {'등급':<4} {'근거(결정·통계·어휘)':<18} {'검사(실행·미실행·실패)':<20} {'kind':<6} file")
-    print("-" * 110)
+    print(TABLE_HEADER)
+    print(TABLE_RULE)
     # R5/R16: every row is shown except "원본성 근거 있음" rows, which
     # --include-low adds; the omitted count is printed so the table always
     # reconciles with the header counts.
@@ -125,24 +125,40 @@ def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage:
         print("표시할 행이 없습니다. --include-low 로 원본성 근거 있음 행을 함께 볼 수 있습니다.")
         return
     for item in visible:
-        if item.result:
-            result = item.result
-            verdict = VERDICT_LABELS[result.verdict_code]
-            grade = "참고" if result.grade == Grade.REFERENCE else "근거"
-            counts = evidence_counts_text(result)
-            checks = coverage_counts_text(result)
-            top = deciding_evidence(result)
-            gaps = [entry for entry in coverage_gaps(result) if entry.status == CoverageStatus.FAILED]
-            reason = (
-                f"[{EVIDENCE_KIND_LABELS[top.kind]}] {top.title}" if top else "근거 항목 없음"
-            ) + (f" | 실패: {'; '.join(entry.describe() for entry in gaps)}" if gaps else "")
-        else:
-            # N7: Korean status in the 결론 column (건너뜀/미지원/실패/중복).
-            verdict, grade, counts, checks = status_label(item.status), "-", "-", "-"
-            reason = item.error or ""
-        print(f"{verdict:<14} {grade:<4} {counts:<18} {checks:<20} {item.kind:<6} {item.path}  # {reason}")
+        print(table_row_text(item))
     if hidden:
         print(f"(원본성 근거 있음 {hidden}건은 표에서 생략했습니다 — --include-low 로 표시)")
+
+
+# Column header of the scan table; single-file commands print archive
+# member rows under the same header (B1).
+TABLE_HEADER = f"{'결론':<14} {'등급':<4} {'근거(결정·통계·어휘)':<18} {'검사(실행·미실행·실패)':<20} {'kind':<6} file"
+TABLE_RULE = "-" * 110
+
+
+def table_row_text(item: ScanItem) -> str:
+    """One scan-table row — the exact wording ``scan`` prints for ``item``.
+
+    Shared by the folder table and the member listing of the single-file
+    commands (``forensic``, ``classify``, ``explain``, ``legal-report``), so
+    an archive member reads the same in both (B1).
+    """
+    if item.result:
+        result = item.result
+        verdict = VERDICT_LABELS[result.verdict_code]
+        grade = "참고" if result.grade == Grade.REFERENCE else "근거"
+        counts = evidence_counts_text(result)
+        checks = coverage_counts_text(result)
+        top = deciding_evidence(result)
+        gaps = [entry for entry in coverage_gaps(result) if entry.status == CoverageStatus.FAILED]
+        reason = (
+            f"[{EVIDENCE_KIND_LABELS[top.kind]}] {top.title}" if top else "근거 항목 없음"
+        ) + (f" | 실패: {'; '.join(entry.describe() for entry in gaps)}" if gaps else "")
+    else:
+        # N7: Korean status in the 결론 column (건너뜀/미지원/실패/중복).
+        verdict, grade, counts, checks = status_label(item.status), "-", "-", "-"
+        reason = item.error or ""
+    return f"{verdict:<14} {grade:<4} {counts:<18} {checks:<20} {item.kind:<6} {item.path}  # {reason}"
 
 
 def _is_priority_row(item: ScanItem) -> bool:

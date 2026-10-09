@@ -7,6 +7,10 @@ from ``core.py`` so the pipeline file stays focused on analysis.
 
 from __future__ import annotations
 
+import dataclasses
+import re
+from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from .model_adapter import ExternalModelAnalysis
@@ -203,3 +207,78 @@ def _model_analysis_from_json(data: dict[str, object]) -> ExternalModelAnalysis:
         measured_on=_opt_str(data.get("measured_on")),
         display_name=str(data.get("display_name") or ""),
     )
+
+
+# -- --redact-paths (S3) -------------------------------------------------------
+
+# Keys whose value names a model profile file; redacted output keeps only
+# the file name (``aide-runtime.json``), wherever the profile lives.
+PROFILE_PATH_KEYS = frozenset({"profile", "profile_path", "model_path", "checkpoint_path"})
+# Values the report itself must still open (the heatmap image it embeds);
+# they point at the tool's output root, not at the installation.
+UNREDACTED_KEYS = frozenset({"heatmap_path"})
+
+
+def install_roots() -> tuple[str, ...]:
+    """Directories that reveal where the tool is installed (S3).
+
+    The package's parent (a source checkout or ``site-packages``), the
+    effective models dir (``$DEEPFAKE_LENS_MODELS_DIR`` or the packaged
+    one) and the interpreter's purelib/platlib — longest first, so the most
+    specific prefix is stripped.
+    """
+    import sysconfig
+
+    from .vendor_weights import default_models_dir
+
+    package = Path(__file__).resolve().parent
+    candidates = {str(package.parent), str(package), str(default_models_dir())}
+    for key in ("purelib", "platlib"):
+        value = sysconfig.get_paths().get(key)
+        if value:
+            candidates.add(str(Path(value).resolve()))
+            candidates.add(str(value))
+    return tuple(sorted((c for c in candidates if c and c not in {"/", "."}), key=len, reverse=True))
+
+
+def _install_path_pattern(roots: tuple[str, ...]) -> re.Pattern[str]:
+    # <root>/<dir>/.../ up to the last separator — the file name stays.
+    alternation = "|".join(re.escape(root.rstrip("/\\")) for root in roots)
+    return re.compile(rf"(?:{alternation})[/\\](?:[^\s'\"/\\]+[/\\])*")
+
+
+def redact_install_paths(items: list[ScanItem]) -> list[ScanItem]:
+    """Rows for a ``--redact-paths`` report: no value names the install path (S3).
+
+    ``model_analysis.models[].profile`` (and any other profile-path key)
+    becomes the bare profile file name; any other string carrying one of
+    :func:`install_roots` keeps only the file name after it. Everything else
+    is unchanged; the input rows are not modified. Non-redacted output keeps
+    the full paths.
+    """
+    pattern = _install_path_pattern(install_roots())
+    return [_redact(item, pattern) for item in items]
+
+
+def _redact(value: Any, pattern: re.Pattern[str], key: str | None = None) -> Any:
+    if key in UNREDACTED_KEYS or isinstance(value, Enum):  # str-valued enums stay enums
+        return value
+    if isinstance(value, str):
+        if key in PROFILE_PATH_KEYS and ("/" in value or "\\" in value):
+            return Path(value.replace("\\", "/")).name
+        return pattern.sub("", value)
+    if isinstance(value, Enum) or value is None or isinstance(value, (bool, int, float)):
+        return value
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        changes = {
+            f.name: _redact(getattr(value, f.name), pattern, f.name)
+            for f in dataclasses.fields(value) if f.init
+        }
+        return dataclasses.replace(value, **changes)
+    if isinstance(value, dict):
+        return {k: _redact(v, pattern, str(k)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact(v, pattern, key) for v in value]
+    if isinstance(value, tuple):
+        return tuple(_redact(v, pattern, key) for v in value)
+    return value

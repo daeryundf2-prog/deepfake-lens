@@ -346,3 +346,49 @@ class V4PhysicalSignalsTest(unittest.TestCase):
         self.assertIsNotNone(_harmonic_analysis(self._features(harmonic_cv=0.05)))
         self.assertIsNone(_harmonic_analysis(self._features(harmonic_cv=0.5)))
         self.assertIsNone(_harmonic_analysis(self._features(harmonic_cv=0.05, pitch_mean=0.0)))
+
+
+class AudioRowLimitationsTest(unittest.TestCase):
+    """S7: an audio row lists each limitation once and no download hint of a gated-off model."""
+
+    # Phrases of the packaged audio profiles' download/fetch hints.
+    DOWNLOAD_HINTS = ("내려받", "fetch_", "scripts/fetch", "다운로드")
+
+    def test_wav_row_with_the_packaged_gated_profiles(self) -> None:
+        import json
+        import math
+        import struct
+        import wave
+
+        from deepfake_lens.analysis_api import AnalysisOptions, scan_folder
+        from deepfake_lens.vendor_weights import default_models_dir
+
+        audio_profiles = [
+            path for path in sorted(default_models_dir().glob("*-runtime.json"))
+            if json.loads(path.read_text(encoding="utf-8")).get("modality") == "audio"
+        ]
+        self.assertTrue(audio_profiles)
+        self.assertTrue(all(json.loads(p.read_text(encoding="utf-8")).get("supported") is False for p in audio_profiles))
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            with wave.open(str(folder / "tone.wav"), "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(16000)
+                handle.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * 220 * n / 16000))) for n in range(16000)))
+            _, items, _ = scan_folder(folder, AnalysisOptions())
+        [row] = items
+        assert row.result is not None
+        limitations = row.result.limitations
+        self.assertEqual(len(limitations), len(set(limitations)), limitations)
+        hints = [line for line in limitations if any(hint in line for hint in self.DOWNLOAD_HINTS)]
+        self.assertEqual(hints, [])
+        # No member ran, so no aggregate-score caveat either.
+        self.assertFalse(any("외부 모델 집계 점수" in line for line in limitations), limitations)
+        # The gate reason is recorded once per profile, in coverage.
+        model_entries = [entry for entry in row.result.coverage if entry.check.startswith("model:")]
+        self.assertEqual(len(model_entries), len(audio_profiles))
+        for entry in model_entries:
+            self.assertEqual(entry.status.value, "skipped")
+            self.assertIn("측정 게이트", entry.reason)
+

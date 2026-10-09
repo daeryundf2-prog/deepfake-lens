@@ -295,8 +295,12 @@ Built from the scan result of one file: `report_type: "legal-report"`,
 `size_bytes`, `kind`, `status`), `conclusion` (`verdict_code`,
 `verdict_label`, `verdict`, `grade`, `grade_label`), `evidence[]` and
 `coverage[]` exactly as in the scan item, `limitations`,
-`reference_signals`, `provenance` (weights coverage + threshold provenance),
-`legal_notes`, plus the four signing fields above.
+`reference_signals`, `rows` (B1: the file's scan rows as in the
+analysis_result `rows[]` below — an archive's member rows and container row,
+inside the signed body), `provenance` (weights coverage + threshold
+provenance), `legal_notes`, plus the four signing fields above. For an
+archive the conclusion is the container row's and the text rendering adds
+a `=== 압축 구성 파일 ===` section listing the member rows.
 
 ### Verifying (`verify-report`, D14)
 
@@ -321,6 +325,24 @@ same values `scan` produces for the file (legacy `band`/`score`/`signals`
 are omitted). Extras: `layer_diagnostics.{provenance_metadata,
 text_statistics, agent_markers, multimodal_scores}`, `tool_candidates`,
 `items[]` (multimodal), `rule_number`/`rule` (explain).
+
+`rows[]` (B1) — every command/endpoint above that analyzes a path
+(`forensic`, `classify`, `explain FILE`, `agent --file`, each `items[]`
+entry of `multimodal FILE…`, `/api/analyze/*`, `/api/classify`,
+`/api/analyze-file`) carries the scan rows `scan` reports for that file in a
+scan of its folder: one row for a regular file; for an archive the member
+rows (`path` `"<archive>::<inner path>"`) plus the container row (`path`
+`"<archive>"`), each exactly as in the scan JSON `items[]` except that the
+legacy `result.band`/`result.band_label` are dropped (derived from
+`verdict_code`; D1). Row paths are relative to the file's folder; the
+top-level `path` is the path the caller named. For an archive the top-level
+verdict, evidence, coverage, limitations and `sha256` are the container
+row's (the roll-up "압축 파일 구성원 결론 집계", rejected members as skipped
+`archive_member` coverage entries). `explain` on an archive sets `rule` to
+the roll-up rule and adds `member_rules[]` (`path`, `rule_number`, `rule`,
+optional `rule_note`) for the member rows; `rule_number` is absent for the
+container. The text renderings (`--format table`, `explain` text) list the
+member rows under the scan table's header in the scan table's wording.
 
 **`layer_diagnostic`** — `audio`, `video-analysis`, `text-advanced`,
 `pixel-analysis`, `inpaint`, `prnu`, `rppg`, `face`, `avatar`, `3d`,
