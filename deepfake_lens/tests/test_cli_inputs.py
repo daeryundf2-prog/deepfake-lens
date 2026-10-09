@@ -781,6 +781,35 @@ class RoundNineOutputFolderTest(_UsageErrorCase):
         self.assertEqual(unregistered, {}, "register each in cli_inputs (output file/folder, or not an output)")
         self.assertEqual(set(cli_inputs.OUTPUT_FOLDER_ATTRS) & set(cli_inputs.PATH_OPTIONS_NOT_OUTPUT), set())
 
+    def test_every_path_argument_is_a_registered_output_or_declared_read_only(self) -> None:
+        """R10-9 (round 10): the name pattern above ("*-dir", "*-root", "--out*") misses a
+        future write option such as --frames or --dest. Every Path-typed argument of
+        every subcommand must be a registered write target or declared read-only."""
+        import argparse
+        from pathlib import Path
+
+        from deepfake_lens import cli_inputs
+        from deepfake_lens.cli_parser import build_parser
+
+        self.assertEqual(cli_inputs.unclassified_path_arguments(build_parser()[0]), {})
+        write = {*cli_inputs.OUTPUT_FILE_ATTRS, *cli_inputs.OUTPUT_FOLDER_ATTRS}
+        read_only = {*cli_inputs.PATH_OPTIONS_NOT_OUTPUT, *cli_inputs.PATH_OPTIONS_READ_ONLY}
+        self.assertEqual(write & read_only, set(), "an argument is either written or only read")
+        # A new Path option the registries do not know is reported, whatever its name.
+        parser, _ = build_parser()
+        subparsers = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
+        video = subparsers.choices["video"]
+        video.add_argument("--frames", type=Path)
+        corpus_build = next(
+            action for action in subparsers.choices["corpus"]._actions if isinstance(action, argparse._SubParsersAction)
+        ).choices["build"]
+        corpus_build.add_argument("--dest", type=Path)
+        subparsers.choices["scan"].add_argument("export", type=Path, nargs="?")
+        self.assertEqual(
+            cli_inputs.unclassified_path_arguments(parser),
+            {"video --frames": "frames", "corpus build --dest": "dest", "scan export": "export"},
+        )
+
     def test_output_folders_inside_the_examined_folder_are_refused(self) -> None:
         bundle = self.root / "bundle"
         bundle.mkdir()

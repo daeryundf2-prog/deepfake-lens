@@ -104,7 +104,7 @@ command prints a band (높음/주의/낮음) or a "의심 신호가 강합니다
   | 공통 설정 입력: `--model-path` | | 프로필·체크포인트 파일 또는 프로필 폴더 |
   | 공통 설정 입력: `--models-dir` | | 폴더 (`vendor-weights`는 설치 대상일 수 있어 제외) |
 
-  `deepfake_lens/tests/test_cli_inputs.py` runs every declared input of every subcommand in a subprocess with a nonexistent path, a folder for a file, a file for a folder and an unsupported extension, and checks that no `Path`-typed input of `cli_parser` is undeclared. Per command:
+  `deepfake_lens/tests/test_cli_inputs.py` runs every declared input of every subcommand in a subprocess with a nonexistent path, a folder for a file, a file for a folder and an unsupported extension, and checks that no `Path`-typed input of `cli_parser` is undeclared. R10-9: every `Path`-typed argument of every subcommand is either a registered write target (`OUTPUT_FILE_ATTRS`, `OUTPUT_FOLDER_ATTRS`, `COMMAND_OUTPUT_FOLDER_ATTRS` — checked against the examined folder before any work) or declared read-only (`INPUT_SPECS`, `COMMON_INPUT_SPECS`, `PATH_OPTIONS_NOT_OUTPUT`, `PATH_OPTIONS_READ_ONLY`); `cli_inputs.unclassified_path_arguments` lists any other, whatever its name (a new `--frames` or `--dest`), and the test requires none. Per command:
 
   | 명령 | 0 | 1 | 2 | 3 | 4 |
   | --- | --- | --- | --- | --- | --- |

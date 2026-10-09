@@ -443,7 +443,8 @@ def check_json_inputs(args: argparse.Namespace) -> None:
 # folders inside the examined folder. Every option that names a folder the
 # command writes is listed; test_cli_inputs checks that every parser option
 # named "*-dir", "*-root" or "--out*" is in OUTPUT_FILE_ATTRS,
-# OUTPUT_FOLDER_ATTRS or PATH_OPTIONS_NOT_OUTPUT.
+# OUTPUT_FOLDER_ATTRS or PATH_OPTIONS_NOT_OUTPUT — and (R10-9, below) that
+# every Path-typed argument, whatever its name, is classified.
 OUTPUT_FOLDER_ATTRS: tuple[str, ...] = ("heatmap_dir", "frame_root", "output_dir", "to", "bundle_to")
 # Options whose name looks like an output ("*-dir", "*-root") but that the
 # command only reads (or that take no path) — attribute -> why.
@@ -456,6 +457,44 @@ PATH_OPTIONS_NOT_OUTPUT: dict[str, str] = {
 # Folders written only by some commands (vendor-weights installs into and
 # pins profiles in --models-dir when --to is not given).
 COMMAND_OUTPUT_FOLDER_ATTRS: dict[str, tuple[str, ...]] = {"vendor-weights": ("models_dir",)}
+# R10-9 (round 10): the R9-4 meta-test only looked at options *named* like an
+# output ("*-dir", "*-root", "--out*"), so a future write option such as
+# --frames or --dest would have escaped the examined-folder check. Every
+# Path-typed argument of every subcommand is now classified: a write target
+# (OUTPUT_FILE_ATTRS, OUTPUT_FOLDER_ATTRS, COMMAND_OUTPUT_FOLDER_ATTRS) or a
+# read-only path — the command's INPUT_SPECS, COMMON_INPUT_SPECS,
+# PATH_OPTIONS_NOT_OUTPUT or this table (attribute -> why it is only read).
+# :func:`unclassified_path_arguments` lists the rest; the test requires none.
+PATH_OPTIONS_READ_ONLY: dict[str, str] = {
+    "key_file": "보고서 서명 키 파일 — 읽기만 함(--key-file)",
+}
+
+
+def unclassified_path_arguments(parser: argparse.ArgumentParser) -> dict[str, str]:
+    """``"<command> <option>" -> dest`` of every Path-typed argument that is
+    neither a registered write target nor declared read-only (R10-9)."""
+    from .cli_parser import cli_path
+
+    write = {*OUTPUT_FILE_ATTRS, *OUTPUT_FOLDER_ATTRS}
+    read_only = {*PATH_OPTIONS_NOT_OUTPUT, *PATH_OPTIONS_READ_ONLY, *(spec.attr for spec in COMMON_INPUT_SPECS)}
+    found: dict[str, str] = {}
+
+    def walk(current: argparse.ArgumentParser, command: str) -> None:
+        inputs = {spec.attr for spec in INPUT_SPECS.get(command, ())}
+        command_writes = set(COMMAND_OUTPUT_FOLDER_ATTRS.get(command, ()))
+        for action in current._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for name, sub in action.choices.items():
+                    walk(sub, f"{command} {name}".strip())
+                continue
+            if action.type not in (Path, cli_path):
+                continue
+            if action.dest in write or action.dest in command_writes or action.dest in inputs or action.dest in read_only:
+                continue
+            found[f"{command} {'/'.join(action.option_strings) or action.dest}".strip()] = action.dest
+
+    walk(parser, "")
+    return found
 
 
 def _resolved(value: Path | str) -> Path:
