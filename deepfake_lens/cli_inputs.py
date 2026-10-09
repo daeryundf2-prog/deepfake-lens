@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -467,16 +468,49 @@ COMMAND_OUTPUT_FOLDER_ATTRS: dict[str, tuple[str, ...]] = {"vendor-weights": ("m
 # :func:`unclassified_path_arguments` lists the rest; the test requires none.
 PATH_OPTIONS_READ_ONLY: dict[str, str] = {
     "key_file": "보고서 서명 키 파일 — 읽기만 함(--key-file)",
+    "tokenizer": "watermark --tokenizer: HF 토크나이저 이름 또는 로컬 토크나이저 폴더 — 읽기만 함",
 }
+# R11-11 (round 11): a path option typed ``str`` (no ``type=Path``) bypassed
+# the R10-9 check. An argument is now also path-like when its option
+# strings, dest, help or metavar name a path (PATH_WORDS) or its default is
+# a Path. A path-like argument the command edits in place (not under an
+# examined folder) is listed here; a ``str`` argument whose help only
+# mentions a path word but takes no path is in STR_OPTIONS_NOT_PATHS.
+PATH_OPTIONS_EDITED_IN_PLACE: dict[str, str] = {
+    "profile": "vendor-weights pin: 모델 프로필 이름 또는 그 JSON 파일 — pin 값을 그 프로필 파일에 기록(감정 대상 폴더와 무관)",
+}
+STR_OPTIONS_NOT_PATHS: dict[str, str] = {
+    "corpus_id": "corpus build --corpus-id: 코퍼스 식별자(문자열) — 도움말의 '폴더 이름'은 기본값 설명",
+}
+PATH_WORDS = re.compile(r"경로|폴더|파일|디렉터리|dir|path|file|folder", re.IGNORECASE)
+_FLAG_ACTIONS = (
+    argparse._StoreTrueAction, argparse._StoreFalseAction, argparse._StoreConstAction,
+    argparse._HelpAction, argparse._VersionAction, argparse._CountAction,
+)
+
+
+def is_path_argument(action: argparse.Action) -> bool:
+    """A Path-typed argument, or (R11-11) a ``str`` one whose names/help/metavar
+    say it takes a path or whose default is a Path."""
+    from .cli_parser import cli_path
+
+    if action.type in (Path, cli_path):
+        return True
+    if isinstance(action, _FLAG_ACTIONS) or action.type not in (None, str) or action.choices is not None:
+        return False
+    if isinstance(action.default, Path):
+        return True
+    text = " ".join([*action.option_strings, action.dest, str(action.help or ""), str(action.metavar or "")])
+    return PATH_WORDS.search(text) is not None
 
 
 def unclassified_path_arguments(parser: argparse.ArgumentParser) -> dict[str, str]:
-    """``"<command> <option>" -> dest`` of every Path-typed argument that is
-    neither a registered write target nor declared read-only (R10-9)."""
-    from .cli_parser import cli_path
-
-    write = {*OUTPUT_FILE_ATTRS, *OUTPUT_FOLDER_ATTRS}
-    read_only = {*PATH_OPTIONS_NOT_OUTPUT, *PATH_OPTIONS_READ_ONLY, *(spec.attr for spec in COMMON_INPUT_SPECS)}
+    """``"<command> <option>" -> dest`` of every path argument (:func:`is_path_argument`)
+    that is neither a registered write target nor declared read-only (R10-9, R11-11)."""
+    write = {*OUTPUT_FILE_ATTRS, *OUTPUT_FOLDER_ATTRS, *PATH_OPTIONS_EDITED_IN_PLACE}
+    read_only = {
+        *PATH_OPTIONS_NOT_OUTPUT, *PATH_OPTIONS_READ_ONLY, *STR_OPTIONS_NOT_PATHS, *(spec.attr for spec in COMMON_INPUT_SPECS),
+    }
     found: dict[str, str] = {}
 
     def walk(current: argparse.ArgumentParser, command: str) -> None:
@@ -487,7 +521,7 @@ def unclassified_path_arguments(parser: argparse.ArgumentParser) -> dict[str, st
                 for name, sub in action.choices.items():
                     walk(sub, f"{command} {name}".strip())
                 continue
-            if action.type not in (Path, cli_path):
+            if not is_path_argument(action):
                 continue
             if action.dest in write or action.dest in command_writes or action.dest in inputs or action.dest in read_only:
                 continue

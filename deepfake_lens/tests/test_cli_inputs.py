@@ -805,10 +805,54 @@ class RoundNineOutputFolderTest(_UsageErrorCase):
         ).choices["build"]
         corpus_build.add_argument("--dest", type=Path)
         subparsers.choices["scan"].add_argument("export", type=Path, nargs="?")
+        # R11-11 (round 11): a path option typed str bypassed this check — one is
+        # found by its name, its help or metavar, or a Path default.
+        subparsers.choices["scan"].add_argument("--dump-dir")
+        subparsers.choices["scan"].add_argument("--save", help="결과를 저장할 경로")
+        subparsers.choices["scan"].add_argument("--target", metavar="<폴더>")
+        subparsers.choices["scan"].add_argument("--spool", default=Path("spool"))
+        subparsers.choices["scan"].add_argument("--label", help="보고서 머리글 문구")  # not a path
+        subparsers.choices["scan"].add_argument("--mode-file", choices=["a", "b"])  # a choice, not a path
         self.assertEqual(
             cli_inputs.unclassified_path_arguments(parser),
-            {"video --frames": "frames", "corpus build --dest": "dest", "scan export": "export"},
+            {
+                "video --frames": "frames", "corpus build --dest": "dest", "scan export": "export",
+                "scan --dump-dir": "dump_dir", "scan --save": "save", "scan --target": "target", "scan --spool": "spool",
+            },
         )
+
+    def test_str_path_options_are_classified(self) -> None:
+        """R11-11 (round 11): the str-typed path options of the real parser are classified —
+        watermark --tokenizer read-only, vendor-weights' profile edited in place, corpus
+        build --corpus-id not a path — and the tables do not overlap."""
+        import argparse
+
+        from deepfake_lens import cli_inputs
+        from deepfake_lens.cli_parser import build_parser
+
+        parser, _ = build_parser()
+        found: dict[str, str] = {}
+
+        def walk(current: argparse.ArgumentParser, command: str) -> None:
+            for action in current._actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    for name, sub in action.choices.items():
+                        walk(sub, f"{command} {name}".strip())
+                elif cli_inputs.is_path_argument(action) and action.type in (None, str):
+                    found[f"{command} {'/'.join(action.option_strings) or action.dest}"] = action.dest
+
+        walk(parser, "")
+        self.assertEqual(found, {"watermark --tokenizer": "tokenizer", "vendor-weights profile": "profile", "corpus build --corpus-id": "corpus_id"})
+        self.assertIn("tokenizer", cli_inputs.PATH_OPTIONS_READ_ONLY)
+        self.assertIn("profile", cli_inputs.PATH_OPTIONS_EDITED_IN_PLACE)
+        self.assertIn("corpus_id", cli_inputs.STR_OPTIONS_NOT_PATHS)
+        tables = (
+            set(cli_inputs.OUTPUT_FILE_ATTRS) | set(cli_inputs.OUTPUT_FOLDER_ATTRS), set(cli_inputs.PATH_OPTIONS_READ_ONLY),
+            set(cli_inputs.PATH_OPTIONS_EDITED_IN_PLACE), set(cli_inputs.STR_OPTIONS_NOT_PATHS),
+        )
+        for index, table in enumerate(tables):
+            for other in tables[index + 1:]:
+                self.assertEqual(table & other, set())
 
     def test_output_folders_inside_the_examined_folder_are_refused(self) -> None:
         bundle = self.root / "bundle"
