@@ -57,42 +57,67 @@ class FeedbackObservation:
     signals: tuple[tuple[str, int], ...]
 
 
+# R9-5 (round 9): a labels file with a UTF-8 BOM, or a cut-off JSONL line,
+# was read as 0 labels and the command exited 0. The BOM is stripped; a line
+# that is not JSON is an error naming its line number (exit 2 in the CLI).
+FEEDBACK_LINE_UNPARSABLE = "피드백 파일 {line}행을 해석할 수 없습니다: {path} — {reason}"
+FEEDBACK_NO_LABELS = (
+    "피드백 파일에 사용할 수 있는 라벨 행이 없습니다: {path} (행 {rows}개) — 행마다 `path`(또는 `file`)와 "
+    "인식 가능한 `expected_label` 값(`ai`, `synthetic`, `real`, `authentic` 등)이 필요합니다"
+)
+
+
+class FeedbackFileError(ValueError):
+    """A labels file that cannot be parsed; ``str()`` is the Korean reason (R9-5)."""
+
+
+def parse_feedback_rows(text: str, path: Path | str) -> list[object]:
+    """The rows of a labels file's text: a JSON array/object, else JSON Lines (R9-5).
+
+    A leading UTF-8 BOM is ignored. In JSON Lines every non-blank line must
+    parse — :class:`FeedbackFileError` names the first line that does not
+    (a cut-off file is never read as fewer labels).
+    """
+    from .error_text import read_error_ko
+
+    text = text.removeprefix("\ufeff")
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict):
+        for key in ("records", "items", "feedback", "entries"):
+            if isinstance(payload.get(key), list):
+                return list(payload[key])
+        # A lone JSON object is a single examiner row.
+        return [payload]
+    rows: list[object] = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            raise FeedbackFileError(FEEDBACK_LINE_UNPARSABLE.format(line=number, path=path, reason=read_error_ko(exc))) from exc
+    return rows
+
+
 def load_feedback(path: Path | str) -> list[FeedbackEntry]:
     """Load examiner labels from JSONL or a JSON array.
 
     Accepted keys per row: ``path``/``file``, ``expected_label``/``label``/
     ``expected``/``verdict``, optional ``notes``, and optional ``result``
     (an embedded scan result dict). Rows without a usable path or a
-    recognized positive/negative label are skipped.
+    recognized positive/negative label are skipped. A line that is not JSON
+    raises :class:`FeedbackFileError` (R9-5).
     """
     try:
         text = Path(path).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):  # P4: the CLI refuses these first (cli_inputs)
         return []
-    rows: list[object] = []
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
-        payload = None
-    if isinstance(payload, list):
-        rows = payload
-    elif isinstance(payload, dict):
-        for key in ("records", "items", "feedback", "entries"):
-            if isinstance(payload.get(key), list):
-                rows = payload[key]
-                break
-        else:
-            # A lone JSON object is a single examiner row.
-            rows = [payload]
-    else:
-        rows = []
-        for line in text.splitlines():
-            if not line.strip():
-                continue
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
+    rows = parse_feedback_rows(text, path)
     entries = []
     for row in rows:
         if not isinstance(row, dict):

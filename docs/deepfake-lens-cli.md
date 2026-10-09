@@ -70,11 +70,13 @@ command prints a band (높음/주의/낮음) or a "의심 신호가 강합니다
   | 읽어 들이는 파일이 UTF-8이 아님·읽기 실패·JSON 형식 오류·JSON 객체가 아님 (P4/P9 — `--thresholds`, `--fusion-profile`, `--calibration`, `--model-path <프로필.json>`, `--hash-db`, `feedback` 라벨·`--scan-json`, `corpus --manifest`, `evidence-statement <scan.json>`, `verify-report`(종료 4), `--law-firm`이 있는 명령의 설정 파일 `~/.deepfake-lens/config.json`) | `오류: <무엇>을 읽을 수 없습니다(인코딩): <경로> (UTF-8 텍스트가 아닙니다(바이트 위치 N))` / `오류: <무엇>을 읽을 수 없습니다: <경로> (<사유>(오류 번호 N))` / `오류: <무엇>을 해석할 수 없습니다: <경로> (JSON 형식 오류: <사유>(<행>행 <열>열))` / `… (JSON 객체가 아니라 배열입니다)` — 사유는 한국어(영어 예외 문구·파이썬 형식 이름 없음) | 2 |
   | 출력 파일 인수(`--json-out`, `--html-out`, `--csv-out`, `--pdf-out`, `--md-out`, `--out`, `--output`, `--cache`, …)가 기존 폴더 (Y7 — 검사 전에 확인) | `오류: 출력 경로가 폴더입니다: <경로> — 저장할 파일 이름을 지정하십시오` | 2 |
   | `--*-out` 출력 파일(`--json-out`, `--csv-out`, `--html-out`, `--pdf-out`, `--md-out`, `--forensic-pdf-out`, `--evidence-statement-out`, `--manifest-out`, …)의 상위 폴더가 없음 (Z5 — 검사 전에 확인, 폴더를 만들지 않음; `--out`, `--output`, `--cache`, `--hash-db`는 종전대로 상위 폴더를 만듦) | `오류: 출력 폴더가 없습니다: <상위 폴더> — 출력 폴더는 자동으로 만들지 않습니다. 폴더를 먼저 만들거나 기존 폴더를 지정하십시오` | 2 |
-  | 출력 파일 인수가 검사 대상 폴더 안(`--json-out`, `--cache`, `--heatmap-dir` 등 모든 출력 — P11; 증거 폴더에는 아무것도 쓰지 않음) | `오류: 출력 경로가 검사 대상 폴더 안에 있습니다: <경로> — 검사 대상 폴더(<폴더>) 밖에 저장하십시오(증거 폴더에는 아무것도 쓰지 않습니다)` | 2 |
+  | 출력 파일 인수가 검사 대상 폴더 안(`--json-out`, `--cache`, `--heatmap-dir` 등 모든 출력 — P11; R9-4: 출력 폴더 `video --frame-root`, `train-neural-plan --output-dir`, `vendor-weights --to`/`--bundle-to`/`--models-dir`(설치 묶음 안)도 — 증거 폴더에는 아무것도 쓰지 않음) | `오류: 출력 경로가 검사 대상 폴더 안에 있습니다: <경로> — 검사 대상 폴더(<폴더>) 밖에 저장하십시오(증거 폴더에는 아무것도 쓰지 않습니다)` | 2 |
   | 출력 파일 인수가 입력 파일과 같음(입력 검사 JSON, 증거 파일, 프로필 — P11; 덮어쓰지 않음) | `오류: 출력 경로가 입력 파일과 같습니다: <경로> — 입력 파일은 덮어쓰지 않습니다. 다른 파일 이름을 지정하십시오` | 2 |
   | 출력 폴더(또는 만들어질 위치의 상위 폴더)에 쓸 수 없음 — 읽기 전용 폴더·마운트 (P10; 검사 전에 os.access와 임시 파일 생성·삭제로 확인 — 종전에는 검사 뒤 '처리 오류 N건') | `오류: 출력 폴더에 쓸 수 없습니다: <폴더> (<사유>) — 검사 전에 확인했습니다. 쓰기 가능한 폴더를 지정하십시오` / `오류: 출력 파일에 쓸 수 없습니다: <경로> (쓰기 권한이 없습니다) — 검사 전에 확인했습니다` | 2 |
   | `--cache`가 검사 캐시가 아닌 기존 파일(보고서 JSON 등 — Y4; 덮어쓰지 않음). 캐시 파일은 `{"format": "deepfake-lens-cache-v1", "version": 1, "items": {…}}`; 없는 파일·빈 파일·머리글 이전의 `{"version", "items"}` 캐시는 그대로 사용 | `오류: 캐시 파일이 아닙니다: <경로> — --cache 파일 형식(deepfake-lens-cache-v1)이 아닌 기존 파일은 덮어쓰지 않습니다. 새 캐시 파일 경로를 지정하십시오` | 2 |
   | `evidence-statement <scan.json>`에 검사 결과 행이 없음 (Y1) | `오류: 검사 JSON에 items가 없습니다(검사 결과 행 0건): <경로>` | 2 |
+  | `feedback` 라벨 파일(JSONL)의 한 행이 JSON이 아님 — 잘린 줄 포함 (R9-5; 앞의 UTF-8 BOM은 무시하고 읽음 — 종전에는 BOM·잘린 줄을 0건으로 읽고 종료 코드 0) | `오류: 피드백 파일 <n>행을 해석할 수 없습니다: <경로> — <이유>` | 2 |
+  | `feedback` 라벨 파일에 쓸 수 있는 라벨 행이 없음(path·인식 가능한 expected_label 없음 — R9-5) | `오류: 피드백 파일에 사용할 수 있는 라벨 행이 없습니다: <경로> (행 <n>개) — …` | 2 |
 
   Inputs and their kinds (supported formats = the formats the command reads):
 

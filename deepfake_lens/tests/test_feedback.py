@@ -56,13 +56,67 @@ class LoadFeedbackTest(unittest.TestCase):
                 '{"path": "/a.png", "expected_label": "ai", "notes": "looks synthetic"}\n'
                 '{"path": "/b.png", "verdict": "real"}\n'
                 '{"path": "/c.png", "expected_label": "unknown"}\n'  # skipped: not pos/neg
-                '{"file": "/d.png", "label": "fake"}\n'
-                "not json at all\n",
+                '{"file": "/d.png", "label": "fake"}\n',
+                # R9-5 (round 9): this fixture ended with a "not json at all" line that was
+                # silently skipped (encoded the defect) — such a line is now an error
+                # (test_r9_5_bom_and_cut_off_lines).
                 encoding="utf-8",
             )
             entries = load_feedback(path)
         self.assertEqual([entry.path for entry in entries], ["/a.png", "/b.png", "/d.png"])
         self.assertEqual(entries[0].notes, "looks synthetic")
+
+    def test_r9_5_bom_and_cut_off_lines(self) -> None:
+        """R9-5 (round 9): a BOM or a cut-off JSONL line was read as 0 labels (exit 0)."""
+        import contextlib
+        import io
+
+        from deepfake_lens import cli
+        from deepfake_lens.feedback import FeedbackFileError
+
+        rows = '{"path": "/a.png", "expected_label": "ai"}\n{"path": "/b.png", "expected_label": "real"}\n'
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bom = root / "bom.jsonl"
+            bom.write_bytes(b"\xef\xbb\xbf" + rows.encode("utf-8"))
+            self.assertEqual([entry.path for entry in load_feedback(bom)], ["/a.png", "/b.png"])
+            bom_array = root / "bom.json"
+            bom_array.write_bytes(b"\xef\xbb\xbf" + json.dumps([{"path": "/a.png", "expected_label": "ai"}]).encode())
+            self.assertEqual(len(load_feedback(bom_array)), 1)
+            cut = root / "cut.jsonl"
+            cut.write_text(rows + '{"path": "/c.png", "expected_la', encoding="utf-8")
+            with self.assertRaises(FeedbackFileError) as caught:
+                load_feedback(cut)
+            self.assertIn("피드백 파일 3행을 해석할 수 없습니다", str(caught.exception))
+            middle = root / "middle.jsonl"
+            middle.write_text('{"path": "/a.png", "expected_label": "ai"}\nnot json\n{"path": "/b.png", "expected_label": "real"}\n', encoding="utf-8")
+            unlabeled = root / "unlabeled.jsonl"
+            unlabeled.write_text('{"schema": "x", "name": "café"}\n', encoding="utf-8")
+            scan = root / "scan.json"
+            scan.write_text(json.dumps(_scan_payload()), encoding="utf-8")
+
+            def run(argv: list[str]) -> tuple[int, str, str]:
+                out, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    try:
+                        code = cli.main(argv)
+                    except SystemExit as exc:
+                        code = exc.code if isinstance(exc.code, int) else 2
+                return code, out.getvalue(), err.getvalue()
+
+            for labels, message in (
+                (cut, "오류: 피드백 파일 3행을 해석할 수 없습니다: "),
+                (middle, "오류: 피드백 파일 2행을 해석할 수 없습니다: "),
+                (unlabeled, "오류: 피드백 파일에 사용할 수 있는 라벨 행이 없습니다: "),
+            ):
+                with self.subTest(labels=labels.name):
+                    code, stdout, stderr = run(["feedback", str(labels), "--scan-json", str(scan)])
+                    self.assertEqual(code, 2, stderr)
+                    self.assertTrue(stderr.startswith(message), stderr)
+                    self.assertEqual(stdout, "")
+            code, stdout, stderr = run(["feedback", str(bom), "--scan-json", str(scan)])
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(json.loads(stdout)["entries"], 2)
 
     def test_json_array_and_missing_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

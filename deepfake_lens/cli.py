@@ -557,7 +557,17 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
     if args.command == "feedback":
-        entries = load_feedback(args.labels)
+        from .cli_inputs import UsageError as FeedbackUsageError  # (UsageError is local in this function)
+        from .feedback import FEEDBACK_NO_LABELS, FeedbackFileError, parse_feedback_rows
+
+        try:
+            entries = load_feedback(args.labels)
+        except FeedbackFileError as exc:
+            raise FeedbackUsageError(str(exc)) from exc
+        if not entries:
+            # R9-5: no usable label is a usage error, never a silent empty report.
+            rows = parse_feedback_rows(Path(args.labels).read_text(encoding="utf-8"), args.labels)
+            raise FeedbackUsageError(FEEDBACK_NO_LABELS.format(path=args.labels, rows=len(rows)))
         if args.scan_json:
             from .cli_inputs import read_json_input
 

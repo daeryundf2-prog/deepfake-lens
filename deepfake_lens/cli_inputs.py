@@ -411,7 +411,15 @@ def check_json_inputs(args: argparse.Namespace) -> None:
     for attr, what, commands in TEXT_INPUT_ATTRS:
         value = getattr(args, attr, None)
         if isinstance(value, (str, Path)) and str(value) and (commands is None or key in commands) and Path(value).is_file():
-            read_text_input(value, what)
+            text = read_text_input(value, what)
+            if attr == "labels":
+                # R9-5: a BOM is ignored; a line that is not JSON is exit 2 (never 0 labels).
+                from .feedback import FeedbackFileError, parse_feedback_rows
+
+                try:
+                    parse_feedback_rows(text, value)
+                except FeedbackFileError as exc:
+                    raise UsageError(str(exc)) from exc
     model_paths = getattr(args, "model_path", None)
     for model_path in model_paths if isinstance(model_paths, (list, tuple)) else [model_paths]:
         if isinstance(model_path, (str, Path)) and str(model_path) and Path(model_path).suffix.lower() == ".json" and Path(model_path).is_file():
@@ -430,7 +438,24 @@ def check_json_inputs(args: argparse.Namespace) -> None:
 
 
 # Output folders (not files) that must not land in the examined folder (P11).
-OUTPUT_FOLDER_ATTRS: tuple[str, ...] = ("heatmap_dir",)
+# R9-4 (round 9): only --heatmap-dir was listed, so `video --frame-root
+# <folder>/frames --extract` and `train-neural-plan --output-dir` created
+# folders inside the examined folder. Every option that names a folder the
+# command writes is listed; test_cli_inputs checks that every parser option
+# named "*-dir", "*-root" or "--out*" is in OUTPUT_FILE_ATTRS,
+# OUTPUT_FOLDER_ATTRS or PATH_OPTIONS_NOT_OUTPUT.
+OUTPUT_FOLDER_ATTRS: tuple[str, ...] = ("heatmap_dir", "frame_root", "output_dir", "to", "bundle_to")
+# Options whose name looks like an output ("*-dir", "*-root") but that the
+# command only reads (or that take no path) — attribute -> why.
+PATH_OPTIONS_NOT_OUTPUT: dict[str, str] = {
+    "allow_root": "읽기 루트 등록(web, api-serve) — 서버가 읽는 폴더",
+    "models_dir": "모델 프로필 폴더(입력 — vendor-weights에서만 출력: COMMAND_OUTPUT_FOLDER_ATTRS)",
+    "root": "corpus verify가 읽는 코퍼스 루트(입력)",
+    "label_from_dir": "플래그(경로를 받지 않음)",
+}
+# Folders written only by some commands (vendor-weights installs into and
+# pins profiles in --models-dir when --to is not given).
+COMMAND_OUTPUT_FOLDER_ATTRS: dict[str, tuple[str, ...]] = {"vendor-weights": ("models_dir",)}
 
 
 def _resolved(value: Path | str) -> Path:
@@ -497,7 +522,8 @@ def check_output_targets(args: argparse.Namespace, key: str, common: tuple[Input
     folders, files = _input_paths(args, INPUT_SPECS.get(key, ()))
     _, config_files = _input_paths(args, common)
     files += config_files
-    for attr in (*OUTPUT_FILE_ATTRS, *OUTPUT_FOLDER_ATTRS):
+    output_folders = (*OUTPUT_FOLDER_ATTRS, *COMMAND_OUTPUT_FOLDER_ATTRS.get(key, ()))
+    for attr in (*OUTPUT_FILE_ATTRS, *output_folders):
         value = getattr(args, attr, None)
         if not isinstance(value, (str, Path)) or not str(value):
             continue
@@ -505,9 +531,9 @@ def check_output_targets(args: argparse.Namespace, key: str, common: tuple[Input
         for folder in folders:
             if _inside(target, folder):
                 raise UsageError(OUTPUT_INSIDE_INPUT.format(path=value, folder=folder))
-        if attr not in OUTPUT_FOLDER_ATTRS and any(target == source for source in files):
+        if attr not in output_folders and any(target == source for source in files):
             raise UsageError(OUTPUT_IS_INPUT.format(path=value))
-        if attr not in OUTPUT_FOLDER_ATTRS:
+        if attr not in output_folders:
             require_writable_output(value)
 
 

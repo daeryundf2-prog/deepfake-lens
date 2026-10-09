@@ -747,5 +747,60 @@ class RoundEightUsageErrorsTest(_UsageErrorCase):
         self.assertEqual(code, 0, stderr)
 
 
+class RoundNineOutputFolderTest(_UsageErrorCase):
+    """R9-4 (round 9): output-folder options other than --heatmap-dir could create folders
+    inside the examined folder (`video --frame-root <folder>/frames --extract`,
+    `train-neural-plan --output-dir`)."""
+
+    def test_every_output_like_option_is_registered(self) -> None:
+        import argparse
+        import re
+
+        from deepfake_lens import cli_inputs
+        from deepfake_lens.cli_parser import build_parser
+
+        registered = {
+            *cli_inputs.OUTPUT_FILE_ATTRS, *cli_inputs.OUTPUT_FOLDER_ATTRS, *cli_inputs.PATH_OPTIONS_NOT_OUTPUT,
+        }
+        seen: dict[str, str] = {}
+
+        def walk(parser: argparse.ArgumentParser, name: str) -> None:
+            for action in parser._actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    for sub_name, sub in action.choices.items():
+                        walk(sub, f"{name} {sub_name}".strip())
+                    continue
+                for option in action.option_strings:
+                    if re.fullmatch(r"--.*-(dir|root)|--out.*", option):
+                        seen[f"{name} {option}"] = action.dest
+
+        walk(build_parser()[0], "")
+        self.assertIn("video --frame-root", seen)
+        self.assertIn("train-neural-plan --output-dir", seen)
+        unregistered = {where: dest for where, dest in seen.items() if dest not in registered}
+        self.assertEqual(unregistered, {}, "register each in cli_inputs (output file/folder, or not an output)")
+        self.assertEqual(set(cli_inputs.OUTPUT_FOLDER_ATTRS) & set(cli_inputs.PATH_OPTIONS_NOT_OUTPUT), set())
+
+    def test_output_folders_inside_the_examined_folder_are_refused(self) -> None:
+        bundle = self.root / "bundle"
+        bundle.mkdir()
+        cases = [
+            ["video", str(self.folder), "--out", str(self.root / "v.json"), "--frame-root", str(self.folder / "frames"), "--extract"],
+            ["video", str(self.folder), "--out", str(self.root / "v.json"), "--frame-root", str(self.folder / "frames")],
+            ["video", str(self.folder), "--out", str(self.root / "v.json"), "--frame-root", str(self.folder)],
+            ["train-neural-plan", str(self.folder), "--out", str(self.root / "n.json"), "--output-dir", str(self.folder / "train")],
+            ["vendor-weights", "--install", str(bundle), "--to", str(bundle / "models")],
+            ["vendor-weights", "--install", str(bundle), "--models-dir", str(bundle / "models")],
+        ]
+        for argv in cases:
+            with self.subTest(argv=" ".join(argv[:1] + argv[-3:])):
+                self._assert_usage(argv, "출력 경로가 검사 대상 폴더 안에 있습니다: ")
+        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["a.txt"])
+        self.assertEqual(list(bundle.iterdir()), [])
+        # beside the examined folder: accepted
+        code, _, stderr = self._run(["train-neural-plan", str(self.folder), "--out", str(self.root / "n.json"), "--output-dir", str(self.root / "train")])
+        self.assertEqual(code, 0, stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
