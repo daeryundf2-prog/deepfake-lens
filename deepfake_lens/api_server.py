@@ -204,7 +204,7 @@ def create_app(
                 ):
                     return JSONResponse({"status": "error", "message": "unauthorized"}, status_code=401)
             elif host_name(request.headers.get("host", "")) not in allowed_hosts:
-                return JSONResponse({"status": "error", "message": "host not allowed"}, status_code=403)
+                return JSONResponse({"status": "error", "message": "허용되지 않은 호스트입니다"}, status_code=403)
             elif (
                 request.url.path not in CLIENT_HEADER_EXEMPT_PATHS
             ) and not (request.headers.get(CLIENT_HEADER) or "").strip():
@@ -1062,5 +1062,5 @@ def run_server(
 
     configure_read_roots(default_folder, allow_roots)
     app = create_app(host, port, token=token, default_folder=default_folder)
-    print(f"Starting Deepfake Lens unified server on http://{host}:{port}" + (" (token required)" if token else ""))
+    print(f"Deepfake Lens 통합 서버 시작: http://{host}:{port}" + (" (토큰 필요)" if token else ""))
     uvicorn.run(app, host=host, port=port)

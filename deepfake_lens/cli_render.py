@@ -82,7 +82,7 @@ def _maybe_sign(payload: dict[str, object], *, sign: bool, key_file: Path | None
         return payload
     signed = sign_report(payload, resolve_report_key(key_file))
     if signed.get("signature") is None:
-        print("note: report written unsigned (no key; set DEEPFAKE_LENS_REPORT_KEY or --key-file)", file=sys.stderr)
+        print("참고: 서명 키가 없어 보고서를 서명 없이 저장했습니다(DEEPFAKE_LENS_REPORT_KEY 또는 --key-file 지정).", file=sys.stderr)
     return signed
 
 
@@ -108,7 +108,7 @@ def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage:
     if thresholds is not None and getattr(thresholds, "in_sample", False):
         # G28: fitted and evaluated on the same rows — reference only.
         print(f"!! 판정 임계값: {IN_SAMPLE_LABEL} — 적합에 쓴 같은 표본에서 평가된 값이라 감정 근거가 아닙니다 !!")
-    cap_note = " (cap reached)" if summary.capped else ""
+    cap_note = " (파일 수 상한 도달)" if summary.capped else ""
     print(summary_line(summary) + cap_note)
     print(
         "결론은 세 가지뿐입니다: 조작·생성 근거 있음 / 원본성 근거 있음 / 판단 불가. "

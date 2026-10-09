@@ -100,7 +100,7 @@ def analyze_faceswap_seam(
         import cv2
         import numpy as np
     except ImportError:
-        return _error_analysis("opencv-python is required for face-swap seam analysis.")
+        return _error_analysis("의존성 부재: opencv-python — 페이스스왑 경계면 분석에 필요합니다.")
 
     image = image_matrix
     if image is None:

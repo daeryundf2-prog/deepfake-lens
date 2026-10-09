@@ -252,8 +252,8 @@ def train_portable_baseline(
         "pixel_mode": pixel_mode,
         "metrics": calibration.get("metrics", {}),
         "notes": [
-            "This is a portable threshold baseline trained from local Deepfake Lens scores.",
-            "It is not a neural checkpoint; use it as a calibration/model adapter until a verified pretrained model is added.",
+            "로컬 Deepfake Lens 점수로 맞춘 이식용 임계값 기준선입니다.",
+            "신경망 체크포인트가 아닙니다. 검증된 사전학습 모델이 추가될 때까지 보정/모델 어댑터로만 쓰십시오.",
         ],
     }
 
@@ -334,7 +334,7 @@ def _score_dataset(
         scope = {
             "records_used": len(used_records),
             "records_total": len(labeled),
-            "policy": "all-records (no explicit splits found; metrics are in-sample)",
+            "policy": "all-records(명시적 분할 없음 — 지표는 표본 내 값입니다)",
         }
     scores: list[tuple[int, bool]] = []
     unanalyzed = 0

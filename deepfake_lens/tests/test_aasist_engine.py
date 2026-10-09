@@ -106,8 +106,8 @@ class AasistRuntimeProfileTest(unittest.TestCase):
         # Relative checkpoint paths resolve against the profile directory.
         self.assertEqual((PROFILE_PATH.parent / profile["checkpoint"]).name, "aasist.pth")
         # Honest limitations: checkpoint not committed + not a truth label.
-        self.assertTrue(any("not committed" in item for item in profile["limitations"]))
-        self.assertTrue(any("not a truth label" in item for item in profile["limitations"]))
+        self.assertTrue(any("저장소에 포함되지 않습니다" in item for item in profile["limitations"]))  # R4: Korean profile text
+        self.assertTrue(any("진위 판정이 아닙니다" in item for item in profile["limitations"]))  # R4
 
     def test_load_model_threshold_reads_profile(self) -> None:
         self.assertEqual(load_model_threshold(PROFILE_PATH), 67)
@@ -132,7 +132,7 @@ class AasistRuntimeProfileTest(unittest.TestCase):
             self.assertIsNotNone(analysis)
             self.assertFalse(analysis.available)
             self.assertEqual(analysis.score, 0)
-            self.assertIn("checkpoint was not found", analysis.detail)
+            self.assertIn("체크포인트를 찾을 수 없습니다", analysis.detail)  # R4
             self.assertIn("AASIST", analysis.model)
             self.assertTrue(any("fetch_aasist" in item for item in analysis.limitations))
 

@@ -148,7 +148,7 @@ def build_server(
     if token and not allow_lan:
         import sys
 
-        print("note: --token set on a loopback bind; /api/* still enforces it", file=sys.stderr)
+        print("참고: 루프백 바인드에 --token이 지정되었습니다. /api/*는 토큰을 계속 요구합니다.", file=sys.stderr)
     # The only place read roots are registered (G31): operator setup.
     configure_read_roots(default_folder, allow_roots)
 

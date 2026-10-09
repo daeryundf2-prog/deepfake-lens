@@ -24,16 +24,16 @@
   "ensemble_weight": 0.6,
   "source_url": "https://huggingface.co/Red-had1911/deepfake-detector-onnx (generative_detector.onnx — direct export of the original timm checkpoint model_v11_ViT_384_base_ckpt.pt; Community Forensics, Park & Owens U-Michigan, arXiv:2411.04125, MIT)",
   "limitations": [
-    "Checkpoint is not committed; download generative_detector.onnx from Red-had1911/deepfake-detector-onnx.",
-    "Trained on 2.7M samples across ~4,800 generators (Community Forensics, 2024).",
-    "Measured locally (2026-09-21, mixed 55-sample corpus): AUROC 0.56, FPR@50 0.04, recall@50 0.14 — precision is strong (reals read ~0.00-0.06) but recall is generator-limited: DALL-E mean 0.55, SD-Turbo recall 0.00, Hemg face-manipulation fakes read ~0.04 (that class belongs to crop_faces members).",
-    "Same-repo faceswap_detector.onnx was also evaluated on face crops and rejected — no separation between real faces and SBI blends (real 0.01-1.0, fake 0.02-0.99 overlapping).",
-    "The onnx-community auto-converted export (model.onnx, 2-logit) produces flat ~0.4-0.7 scores on every input — DO NOT use it; this profile uses the direct single-logit export.",
-    "Card preprocessing is resize-440 + center-crop-384; the adapter applies a direct 384 resize (small domain shift).",
-    "Scores are a prioritization signal, not a truth label."
+    "체크포인트는 저장소에 포함되지 않습니다. Red-had1911/deepfake-detector-onnx에서 generative_detector.onnx를 내려받으십시오.",
+    "Community Forensics(2024)의 약 4,800개 생성기, 270만 표본으로 학습되었습니다.",
+    "생성기에 따라 탐지율이 제한되며, 얼굴 조작 유형은 이 모델의 대상이 아닙니다(crop_faces 멤버의 영역). 로컬 측정 수치는 미검증입니다(experiments/IMAGE_EVALUATION.md).",
+    "같은 저장소의 faceswap_detector.onnx도 얼굴 크롭에서 평가했으나 실제 얼굴과 SBI 합성 얼굴을 분리하지 못해 기각했습니다(docs/MODEL-REJECTIONS.md).",
+    "onnx-community 자동 변환본(model.onnx, 2-logit)은 모든 입력에 0.4–0.7 근처의 평탄한 점수를 내므로 사용하지 마십시오. 이 프로필은 직접 내보낸 단일 로짓 모델을 씁니다.",
+    "모델 카드의 전처리는 440 리사이즈 + 384 중앙 크롭이지만 어댑터는 384로 바로 리사이즈합니다(작은 도메인 차이).",
+    "점수는 보정 전 원점수이며 진위 판정이 아닙니다."
   ],
   "notes": [
-    "Output (N,1) logit; sigmoid = P(AI-generated) on 0-100 scale."
+    "출력은 (N,1) 로짓이며 sigmoid = 0–100 척도의 P(AI 생성)입니다."
   ],
   "pin": {
     "sha256": ""

@@ -27,7 +27,7 @@ REAL_TARGETS = [
         folder="real/camera-original",
         minimum_samples=500,
         required_variants=["original", "jpeg_q95", "jpeg_q75", "screenshot", "social_recompress"],
-        notes=["Prefer owned or licensed camera originals with intact metadata."],
+        notes=["메타데이터가 온전한, 소유하거나 라이선스를 받은 카메라 원본을 우선하십시오."],
     ),
     CollectionTarget(
         key="social-real",
@@ -36,20 +36,20 @@ REAL_TARGETS = [
         folder="real/social-recompress",
         minimum_samples=500,
         required_variants=["downloaded", "screenshot"],
-        notes=["Use real posts only when collection rights and consent are clear."],
+        notes=["수집 권한과 동의가 분명한 실제 게시물만 사용하십시오."],
     ),
 ]
 
 
 AI_TARGETS = [
-    CollectionTarget("sdxl", "ai", "diffusion", "ai/sdxl", 500, ["png", "jpeg_q95", "jpeg_q75", "resize_50", "social_recompress"], ["Record checkpoint, sampler, seed, prompt, and negative prompt when available."]),
-    CollectionTarget("flux", "ai", "diffusion", "ai/flux", 500, ["png", "jpeg_q95", "jpeg_q75", "resize_50", "social_recompress"], ["Keep Black Forest Labs model/version metadata when available."]),
-    CollectionTarget("midjourney", "ai", "closed-diffusion", "ai/midjourney", 500, ["downloaded", "screenshot", "social_recompress"], ["Record version, upscale mode, prompt, and job metadata when available."]),
-    CollectionTarget("dall-e-openai", "ai", "closed-diffusion", "ai/dall-e-openai", 500, ["downloaded", "screenshot", "social_recompress"], ["Record OpenAI model name and generation settings when available."]),
-    CollectionTarget("firefly", "ai", "closed-diffusion", "ai/firefly", 300, ["downloaded", "jpeg_q95", "social_recompress"], ["Track Content Credentials or metadata fields separately."]),
-    CollectionTarget("ideogram", "ai", "closed-diffusion", "ai/ideogram", 300, ["downloaded", "screenshot", "social_recompress"], ["Include text-heavy images because artifacts differ from photo-style images."]),
-    CollectionTarget("imagen-gemini", "ai", "closed-diffusion", "ai/imagen-gemini", 300, ["downloaded", "screenshot", "social_recompress"], ["Record Gemini/Imagen model/version when available."]),
-    CollectionTarget("grok-xai", "ai", "closed-diffusion", "ai/grok-xai", 300, ["downloaded", "screenshot", "social_recompress"], ["Keep platform download path separate from screenshots."]),
+    CollectionTarget("sdxl", "ai", "diffusion", "ai/sdxl", 500, ["png", "jpeg_q95", "jpeg_q75", "resize_50", "social_recompress"], ["가능하면 체크포인트, 샘플러, 시드, 프롬프트, 네거티브 프롬프트를 기록하십시오."]),
+    CollectionTarget("flux", "ai", "diffusion", "ai/flux", 500, ["png", "jpeg_q95", "jpeg_q75", "resize_50", "social_recompress"], ["가능하면 Black Forest Labs 모델/버전 메타데이터를 보존하십시오."]),
+    CollectionTarget("midjourney", "ai", "closed-diffusion", "ai/midjourney", 500, ["downloaded", "screenshot", "social_recompress"], ["가능하면 버전, 업스케일 방식, 프롬프트, 작업 메타데이터를 기록하십시오."]),
+    CollectionTarget("dall-e-openai", "ai", "closed-diffusion", "ai/dall-e-openai", 500, ["downloaded", "screenshot", "social_recompress"], ["가능하면 OpenAI 모델명과 생성 설정을 기록하십시오."]),
+    CollectionTarget("firefly", "ai", "closed-diffusion", "ai/firefly", 300, ["downloaded", "jpeg_q95", "social_recompress"], ["Content Credentials나 메타데이터 필드를 따로 기록하십시오."]),
+    CollectionTarget("ideogram", "ai", "closed-diffusion", "ai/ideogram", 300, ["downloaded", "screenshot", "social_recompress"], ["글자가 많은 이미지도 포함하십시오 — 사진형 이미지와 흔적이 다릅니다."]),
+    CollectionTarget("imagen-gemini", "ai", "closed-diffusion", "ai/imagen-gemini", 300, ["downloaded", "screenshot", "social_recompress"], ["가능하면 Gemini/Imagen 모델/버전을 기록하십시오."]),
+    CollectionTarget("grok-xai", "ai", "closed-diffusion", "ai/grok-xai", 300, ["downloaded", "screenshot", "social_recompress"], ["플랫폼 다운로드본과 스크린샷을 분리해 두십시오."]),
 ]
 
 
@@ -77,10 +77,10 @@ def build_collection_plan(root: Path | str, *, minimum_per_source: int | None = 
         ],
         "splits": {"train": 0.8, "val": 0.1, "test": 0.1},
         "acceptance": [
-            "Each positive and negative family has enough clean and transformed samples.",
-            "Every sample has a provenance record before use in training or public reports.",
-            "False-positive real samples are retained as hard negatives, not discarded.",
-            "No private or non-consensual media is imported into the benchmark.",
+            "양성·음성 계열마다 원본과 변환본 표본이 충분합니다.",
+            "학습이나 공개 보고서에 쓰기 전에 모든 표본에 출처 기록이 있습니다.",
+            "오탐된 실제 표본은 버리지 않고 어려운 음성 표본으로 보존합니다.",
+            "사적이거나 동의 없는 매체는 벤치마크에 넣지 않습니다.",
         ],
     }
 

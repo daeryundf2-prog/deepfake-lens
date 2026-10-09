@@ -98,7 +98,7 @@ def extract_video_frames(plan: dict[str, object], *, limit: int | None = None) -
                 {
                     "path": item.get("path", ""),
                     "returncode": -1,
-                    "stderr": "rejected: only ffmpeg commands are allowed",
+                    "stderr": "거부됨: ffmpeg 명령만 허용됩니다",
                 }
             )
             continue
@@ -110,7 +110,7 @@ def extract_video_frames(plan: dict[str, object], *, limit: int | None = None) -
                 {
                     "path": item.get("path", ""),
                     "returncode": -1,
-                    "stderr": f"timed out after {FFMPEG_TIMEOUT_SECONDS}s",
+                    "stderr": f"{FFMPEG_TIMEOUT_SECONDS}초 후 시간 초과",
                 }
             )
             continue

@@ -58,10 +58,10 @@ def build_neural_training_plan(
             + str(output_path / "benchmark.json"),
         ],
         "guardrails": [
-            "Do not train on unknown-label files.",
-            "Keep real camera hard negatives that trigger false positives.",
-            "Report clean and transformed robustness metrics separately.",
-            "Export ONNX/TorchScript only after validation metrics are recorded.",
+            "라벨을 알 수 없는 파일로 학습하지 마십시오.",
+            "오탐을 일으키는 실제 카메라 표본을 어려운 음성 표본으로 유지하십시오.",
+            "원본과 변환본의 강건성 지표를 따로 보고하십시오.",
+            "검증 지표를 기록한 뒤에만 ONNX/TorchScript로 내보내십시오.",
         ],
     }
 

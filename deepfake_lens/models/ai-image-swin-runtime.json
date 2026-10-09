@@ -14,18 +14,17 @@
   "threshold": 67,
   "source_url": "https://huggingface.co/umm-maybe/AI-image-detector",
   "limitations": [
-    "Hub weights are not committed; transformers downloads ~870 MB on first use (set hub_model to a local snapshot directory for offline runs).",
-    "Measured locally (2026-09) on 4 DALL-E samples + Lenna: caught 1 of 4 (artificial 0.77), missed 3 (0.01/0.00/0.35); correctly scored real Lenna human 0.97.",
-    "Complements AIDE mainly as real-image calibration (AIDE scored real Lenna 85% fake; this model 3%) — it does NOT close the commercial-generator recall gap; DALL-E-family recall stays weak.",
-    "AutoTrain fine-tune without a published eval protocol; per-generator recall is unverified beyond the local samples above.",
-    "Not in the CLI default member list — it is picked up automatically by scans pointed at the models/ directory (web app, api_server, --model-path models).",
-    "Scores are a prioritization signal, not a truth label.",
-    "G33: the same hub weights (umm-maybe/AI-image-detector) were re-measured on 2026-09-21 and showed no separation under either label reading (see docs/MODEL-REJECTIONS.md). The two measurements conflict, so the profile stays disabled until WP-I re-measures it."
+    "허브 가중치는 저장소에 포함되지 않습니다. 첫 사용 시 transformers가 약 870 MB를 내려받습니다(오프라인 실행은 hub_model을 로컬 스냅샷 디렉터리로 지정).",
+    "AIDE의 실제 이미지 오탐을 보완하는 용도로 검토되었을 뿐, 상용 생성기(DALL-E 계열) 탐지율 공백을 메우지 못합니다(소규모 로컬 측정, 미검증 — experiments/IMAGE_EVALUATION.md).",
+    "공개 평가 프로토콜이 없는 AutoTrain 미세조정 모델이며, 생성기별 탐지율은 검증되지 않았습니다.",
+    "CLI 기본 멤버 목록에는 없으며 models/ 디렉터리를 가리키는 검사(웹 앱, api_server, --model-path models)에서 자동으로 포함됩니다.",
+    "점수는 보정 전 원점수이며 진위 판정이 아닙니다.",
+    "G33: 같은 허브 가중치(umm-maybe/AI-image-detector)를 2026-09-21에 다시 측정했을 때 어느 라벨 해석으로도 분리가 나타나지 않았습니다(docs/MODEL-REJECTIONS.md). 두 측정이 상충하므로 WP-I에서 다시 측정할 때까지 프로필을 비활성으로 둡니다."
   ],
   "notes": [
-    "SwinForImageClassification (Swin-large) fine-tuned on AI-vs-human image sets, cc-by-4.0, ~355k HF downloads.",
-    "score_label 'artificial' resolves the class index from id2label ({0: artificial, 1: human}) at runtime — label order cannot silently invert the score.",
-    "Kept opt-in for default runs: the measured marginal gain over the AIDE default is modest (it dilutes strong AIDE hits on some generators while correcting AIDE's false positives on processed real photos) — see experiments/IMAGE_EVALUATION.md."
+    "AI 대 사람 이미지 세트로 미세조정한 SwinForImageClassification(Swin-large), cc-by-4.0.",
+    "score_label 'artificial'은 실행 시 id2label({0: artificial, 1: human})에서 클래스 인덱스를 찾으므로, 라벨 순서가 바뀌어도 점수가 조용히 뒤집히지 않습니다.",
+    "기본 실행에서는 선택 사항으로 둡니다 — AIDE 기본값 대비 이득이 크지 않다는 소규모 측정이 있었습니다(미검증, experiments/IMAGE_EVALUATION.md)."
   ],
   "license": "cc-by-4.0",
   "pin": {

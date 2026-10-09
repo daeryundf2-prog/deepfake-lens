@@ -29,10 +29,10 @@
   "ensemble_weight": 0.6,
   "source_url": "https://huggingface.co/Red-had1911/deepfake-detector-onnx (generative_detector.onnx — Community Forensics ViT-S/384, arXiv:2411.04125, MIT)",
   "limitations": [
-    "Frame-level generated-image detection, not a temporal/lip-sync/faceswap model — fully AI-generated video (Sora-class) frames may flag; face-swapped real video will NOT (that class needs crop_faces members on extracted faces).",
-    "Requires the ONNX checkpoint (not committed) and opencv for frame decoding.",
-    "Inherits the image member's measured profile: precision high, recall generator-limited; heavy recompression collapses scores.",
-    "Scores are a prioritization signal, not a truth label."
+    "프레임 단위 생성 이미지 탐지이며 시간축/립싱크/페이스스왑 모델이 아닙니다 — 완전 생성 영상(Sora급) 프레임은 반응할 수 있지만 실제 영상에 얼굴만 바꾼 영상은 반응하지 않습니다(그 유형은 추출한 얼굴에 대한 crop_faces 멤버가 필요).",
+    "ONNX 체크포인트(저장소 미포함)와 프레임 디코딩용 opencv가 필요합니다.",
+    "이미지 멤버의 특성을 그대로 따릅니다: 생성기에 따라 탐지율이 제한되고, 강한 재압축은 점수를 무너뜨립니다.",
+    "점수는 보정 전 원점수이며 진위 판정이 아닙니다."
   ],
   "pin": {
     "sha256": ""

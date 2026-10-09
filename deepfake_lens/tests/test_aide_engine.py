@@ -94,7 +94,7 @@ class AideRuntimeProfileTest(unittest.TestCase):
             self.assertIsNotNone(analysis)
             self.assertFalse(analysis.available)
             self.assertEqual(analysis.score, 0)
-            self.assertIn("checkpoint was not found", analysis.detail)
+            self.assertIn("체크포인트를 찾을 수 없습니다", analysis.detail)  # R4
             self.assertIn("AIDE", analysis.model)
             self.assertTrue(any("fetch_aide" in item for item in analysis.limitations))
 

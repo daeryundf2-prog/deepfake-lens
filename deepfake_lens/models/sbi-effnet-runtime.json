@@ -15,17 +15,16 @@
   "crop_faces": true,
   "source_url": "local training: experiments/train_detector.py --sbi --augment-degradation with enriched blending (polygon hull masks, affine misalignment) on FFHQ parquet + Wikimedia diverse portraits",
   "limitations": [
-    "Checkpoint is not committed; reproduce with experiments/train_detector.py --sbi --augment-degradation --arch efficientnet_b0.",
-    "score_bias=35 recalibrates the shifted score distribution measured on 147 held-out crops (v2 raw scores run ~16 points hotter on real faces than v1).",
-    "Measured at bias 35, threshold 50 (2026-09-20 eval, 72 real + 85 fake): overall FPR 0.044 / recall 0.405; in-domain FPR 0.000 / recall 0.405; cross-domain FPR 0.080 / recall 0.300 — dominates v1 (FPR 0.029 / recall 0.342) at every operating point.",
-    "ROC-level (bias-free): in-domain AUROC 0.96, cross-domain AUROC ~0.68. Cross-domain ranking still weak — treat member as advisory on aged/scanned/damaged portraits.",
-    "crop_faces=true: face-free images are skipped (unavailable) rather than scored.",
-    "Generic non-portrait corpus (Hemg holdout, 2026-09-20): crop_faces scored 43/55 images and FPR@50 hit 0.50 — outside face-portrait domains this member's ranking is noise; advisory only."
+    "체크포인트는 저장소에 포함되지 않습니다. experiments/train_detector.py --sbi --augment-degradation --arch efficientnet_b0로 재현하십시오.",
+    "score_bias=35는 성능을 보고한 같은 평가 크롭에서 맞춘 값(표본 내 적합, G28)입니다 — score_bias_note 참조.",
+    "도메인 밖(오래되거나 스캔·손상된 인물 사진)에서는 순위 성능이 약하므로 참고용으로만 다루십시오(소규모 로컬 측정, 미검증 — experiments/FACESWAP_EVALUATION.md).",
+    "crop_faces=true: 얼굴이 없는 이미지는 채점하지 않고 건너뜁니다(사용 불가).",
+    "인물 사진이 아닌 일반 이미지에서는 이 멤버의 순위가 무의미합니다 — 참고용으로만 쓰십시오."
   ],
   "notes": [
-    "Model logits are (real=0, fake=1); score_index 1 with softmax yields the fake probability on a 0-100 scale.",
-    "Trained on 362 real faces (300 FFHQ + 62 diverse portraits) + 362 self-blend fakes with both-class JPEG/resize degradation augmentation; combined val AUROC 0.88.",
-    "Training on FFHQ only produced a cross-domain FPR of ~0.67 on old/damaged portraits; adding 62 diverse real faces dropped it to ~0.07 — see FACESWAP_EVALUATION.md."
+    "모델 로짓 순서는 (real=0, fake=1)입니다. score_index 1에 softmax를 적용하면 0–100 척도의 fake 확률이 됩니다.",
+    "실제 얼굴 362개(FFHQ 300 + 다양한 인물 62)와 같은 수의 자기합성(self-blend) 가짜로, 두 클래스 모두 JPEG/리사이즈 열화 증강을 적용해 학습했습니다.",
+    "FFHQ만으로 학습하면 오래되거나 손상된 인물 사진에서 오탐이 많았고, 다양한 실제 얼굴을 추가해 줄였습니다 — experiments/FACESWAP_EVALUATION.md(미검증) 참조."
   ],
   "score_bias": 35,
   "score_bias_in_sample": true,

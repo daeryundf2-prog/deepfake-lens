@@ -144,7 +144,7 @@ class BatchProcessor:
         """Get summary statistics for a batch job."""
         job = self.jobs.get(job_id)
         if job is None:
-            return {"error": "Job not found"}
+            return {"error": "작업을 찾을 수 없습니다"}
         
         processing_times = []
         for result_json in job.results:

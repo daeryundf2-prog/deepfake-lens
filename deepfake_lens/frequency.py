@@ -50,7 +50,7 @@ def frequency_features(gray_2d) -> FrequencyFeatures:
 
     image = np.asarray(gray_2d, dtype=np.float64)
     if min(image.shape) < MIN_FREQUENCY_ANALYSIS_SIDE:
-        raise ValueError("image too small for frequency analysis")
+        raise ValueError("주파수 분석을 하기에 이미지가 너무 작습니다")
 
     power, freq_radius = _power_spectrum(image)
     slope = _radial_slope(power, freq_radius)

@@ -103,7 +103,7 @@ class FeedbackReportTest(unittest.TestCase):
         self.assertGreater(weights["pixel"], 0.9)
         # Threshold is never silently changed: it matches the base profile.
         self.assertEqual(suggested["threshold"], DEFAULT_FUSION_PROFILE.threshold)
-        self.assertTrue(any("advisory" in note for note in report["notes"]))
+        self.assertTrue(any("자동으로 적용되지 않습니다" in note for note in report["notes"]))  # R4
 
     def test_no_separating_component_keeps_base_weights(self) -> None:
         items = [_item(f"/data/x_{i}.png", 50, 50) for i in range(6)]
@@ -113,7 +113,7 @@ class FeedbackReportTest(unittest.TestCase):
         weights = report["suggested_profile"]["weights"]
         self.assertAlmostEqual(sum(weights.values()), 1.0)
         self.assertEqual(weights, {key: round(value, 4) for key, value in DEFAULT_FUSION_PROFILE.weights.items()})
-        self.assertTrue(any("no component separated" in note for note in report["notes"]))
+        self.assertTrue(any("분리한 구성 요소가 없습니다" in note for note in report["notes"]))  # R4
 
     def test_unmatched_and_basename_matching(self) -> None:
         entries = [FeedbackEntry("ai_0.png", "ai"), FeedbackEntry("/elsewhere/none.png", "real")]
@@ -126,7 +126,7 @@ class FeedbackReportTest(unittest.TestCase):
         self.assertEqual(report["matched"], 0)
         self.assertIsNone(report["suggested_profile"])
         self.assertIsNone(report["agreement"])
-        self.assertTrue(any("no examiner labels" in note for note in report["notes"]))
+        self.assertTrue(any("감정인 라벨이 없어" in note for note in report["notes"]))  # R4
 
     def test_embedded_scan_row_needs_no_scan_payload(self) -> None:
         row = {"path": "/p.png", "expected_label": "ai", "result": _item("/p.png", 88, 70)["result"]}

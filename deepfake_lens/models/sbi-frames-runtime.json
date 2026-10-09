@@ -22,12 +22,12 @@
   "ensemble_weight": 0.7,
   "source_url": "local training: experiments/train_detector.py on self-blend corpus (see experiments/FACESWAP_EVALUATION.md); frame wrapper uses the committed sbi-effnet-runtime.json inner config",
   "limitations": [
-    "This is the measured faceswap path for video: faces are detected per sampled frame (MediaPipe + Haar fallback) and scored by the SBI member — the member with AUROC ~0.87 on held-out face manipulation.",
-    "Frames without detectable faces are skipped, not scored as authentic.",
-    "Not a temporal model — per-frame face scores are averaged; lip-sync/inter-frame drift is not modeled.",
-    "Heavy compression/low-resolution faces degrade detection (documented in experiments/FACESWAP_EVALUATION.md).",
-    "Checkpoint is not committed; reproduce via scripts + experiments/train_detector.py.",
-    "Scores are a prioritization signal, not a truth label."
+    "영상의 페이스스왑 경로입니다: 샘플링한 프레임마다 얼굴을 검출(MediaPipe + Haar 대체)하고 SBI 멤버로 채점합니다. SBI 멤버의 측정 수치는 미검증입니다(experiments/FACESWAP_EVALUATION.md).",
+    "얼굴이 검출되지 않은 프레임은 건너뛰며, 진본으로 채점하지 않습니다.",
+    "시간축 모델이 아닙니다 — 프레임별 얼굴 점수를 평균하며 립싱크·프레임 간 드리프트는 모델링하지 않습니다.",
+    "강한 압축이나 저해상도 얼굴은 탐지를 떨어뜨립니다(experiments/FACESWAP_EVALUATION.md).",
+    "체크포인트는 저장소에 포함되지 않습니다. scripts와 experiments/train_detector.py로 재현하십시오.",
+    "점수는 보정 전 원점수이며 진위 판정이 아닙니다."
   ],
   "pin": {
     "sha256": ""

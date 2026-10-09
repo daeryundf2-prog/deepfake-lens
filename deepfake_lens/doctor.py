@@ -48,22 +48,22 @@ from .vendor_weights import default_models_dir
 
 # (import name, pip package, what it enables)
 OPTIONAL_DEPS = [
-    ("torch", "torch", "AASIST / torchvision / SBI runtimes"),
-    ("torchvision", "torchvision", "torchvision runtime (CNNDetection, SBI-EffNet)"),
-    ("transformers", "transformers", "HF image/audio/text classifiers"),
-    ("onnxruntime", "onnxruntime", "ONNX runtime + mobile export path"),
-    ("cv2", "opencv-python", "face detection, video frames, image forensics"),
-    ("PIL", "Pillow", "image decoding"),
-    ("numpy", "numpy", "all signal processing"),
-    ("librosa", "librosa", "audio waveform decode + heuristics"),
-    ("soundfile", "soundfile", "lossless audio decode"),
-    ("speechbrain", "speechbrain", "ECAPA-TDNN speaker verification"),
-    ("mediapipe", "mediapipe", "FaceMesh face detection fallback"),
-    ("c2pa", "c2pa-python", "C2PA manifest verification"),
-    ("syhwp", "syhwp", "HWP/HWPX document parsing"),
-    ("fitz", "PyMuPDF", "PDF rendering forensics"),
-    ("fastapi", "fastapi", "unified async REST API server"),
-    ("uvicorn", "uvicorn", "ASGI server for unified API service"),
+    ("torch", "torch", "AASIST / torchvision / SBI 런타임"),
+    ("torchvision", "torchvision", "torchvision 런타임(SBI-EffNet)"),
+    ("transformers", "transformers", "HF 이미지/오디오/텍스트 분류기"),
+    ("onnxruntime", "onnxruntime", "ONNX 런타임 + 모바일 내보내기 경로"),
+    ("cv2", "opencv-python", "얼굴 검출, 영상 프레임, 이미지 포렌식"),
+    ("PIL", "Pillow", "이미지 디코딩"),
+    ("numpy", "numpy", "모든 신호 처리"),
+    ("librosa", "librosa", "오디오 파형 디코딩 + 휴리스틱"),
+    ("soundfile", "soundfile", "무손실 오디오 디코딩"),
+    ("speechbrain", "speechbrain", "ECAPA-TDNN 화자 검증"),
+    ("mediapipe", "mediapipe", "FaceMesh 얼굴 검출(대체 경로)"),
+    ("c2pa", "c2pa-python", "C2PA 매니페스트 검증"),
+    ("syhwp", "syhwp", "HWP/HWPX 문서 해석"),
+    ("fitz", "PyMuPDF", "PDF 렌더링 포렌식·PDF 증거설명서"),
+    ("fastapi", "fastapi", "통합 비동기 REST API 서버"),
+    ("uvicorn", "uvicorn", "통합 API 서비스용 ASGI 서버"),
 ]
 
 EXTERNAL_TOOLS = ["ffmpeg", "ffprobe"]
@@ -186,23 +186,23 @@ def _check_thresholds(root: Path) -> Check:
         return Check(
             "thresholds.json",
             "warn",
-            "absent — scans use builtin unmeasured heuristic thresholds "
-            "(fit one with experiments/eval_seam_thresholds.py on a labeled corpus)",
+            "없음 — 검사는 측정되지 않은 내장 휴리스틱 임계값을 씁니다 "
+            "(라벨 코퍼스에서 experiments/eval_seam_thresholds.py로 맞추십시오)",
         )
     profile = load_threshold_profile(path)
     if profile is None:
-        return Check("thresholds.json", "warn", "unreadable or wrong schema version")
+        return Check("thresholds.json", "warn", "읽을 수 없거나 스키마 버전이 맞지 않습니다")
     label = threshold_display_label(profile)
     if profile.provisional:
         return Check(
             "thresholds.json",
             "warn",
-            f"{label} — provisional: {profile.provisional_reason}; cutoffs unvalidated",
+            f"{label} — 잠정값: {profile.provisional_reason}; 검증되지 않은 임계값",
         )
     fp = profile.dataset_fingerprint[:16]
-    detail = f"{label} — measured n={profile.samples}"
+    detail = f"{label} — 측정 표본 n={profile.samples}"
     if fp:
-        detail += f", corpus fp {fp}"
+        detail += f", 코퍼스 지문 {fp}"
     if profile.in_sample:
         # G28: fitted and evaluated on the same rows — not evidence-grade.
         detail += " — 적합에 쓴 같은 표본에서 평가된 값이라 감정 근거가 아닌 참고값입니다"
@@ -346,22 +346,22 @@ def _check_accelerators() -> list[Check]:
         torch = importlib.import_module("torch")
         cuda = bool(torch.cuda.is_available())
         mps = bool(hasattr(torch, "backends") and hasattr(torch.backends, "mps") and torch.backends.mps.is_available())
-        detail = f"torch {torch.__version__}, CUDA {'available' if cuda else 'not available'}, MPS {'available' if mps else 'not available'}"
+        detail = f"torch {torch.__version__}, CUDA {'사용 가능' if cuda else '사용 불가'}, MPS {'사용 가능' if mps else '사용 불가'}"
         if cuda:
             detail += f" ({torch.cuda.get_device_name(0)})"
         elif mps:
             detail += " (Apple Silicon GPU)"
         checks.append(Check("torch", "ok" if (cuda or mps) else "warn", detail))
         dml = getattr(torch, "directml", None) or importlib.util.find_spec("torch_directml")
-        checks.append(Check("directml", "ok" if dml else "warn", "DirectML " + ("detected" if dml else "not installed")))
+        checks.append(Check("directml", "ok" if dml else "warn", "DirectML " + ("감지됨" if dml else "설치되지 않음")))
     except ImportError:
-        checks.append(Check("torch", "missing", "torch not installed — neural runtimes disabled"))
+        checks.append(Check("torch", "missing", "torch 미설치 — 신경망 런타임 비활성"))
     try:
         ort = importlib.import_module("onnxruntime")
         providers = ", ".join(ort.get_available_providers())
         checks.append(Check("onnxruntime", "ok", f"providers: {providers}"))
     except ImportError:
-        checks.append(Check("onnxruntime", "missing", "onnxruntime not installed"))
+        checks.append(Check("onnxruntime", "missing", "onnxruntime 미설치"))
     return checks
 
 
@@ -377,7 +377,7 @@ def run_diagnostics(models_dir: Path | None = None) -> DoctorReport:
             report.model_profiles.append(status)
             report.profiles.append(status.summary_check())
     else:
-        report.profiles.append(Check(str(root), "warn", "models directory not found"))
+        report.profiles.append(Check(str(root), "warn", "모델 디렉터리를 찾을 수 없습니다"))
     report.profiles.append(_check_thresholds(root))
     report.accelerators = _check_accelerators()
     for import_name, package, purpose in OPTIONAL_DEPS:
@@ -386,10 +386,10 @@ def run_diagnostics(models_dir: Path | None = None) -> DoctorReport:
             version = getattr(module, "__version__", "?")
             report.dependencies.append(Check(package, "ok", f"v{version} — {purpose}"))
         except ImportError:
-            report.dependencies.append(Check(package, "missing", f"not installed — {purpose}"))
+            report.dependencies.append(Check(package, "missing", f"미설치 — {purpose}"))
     for tool in EXTERNAL_TOOLS:
         found = shutil.which(tool)
-        report.tools.append(Check(tool, "ok" if found else "missing", found or "not on PATH"))
+        report.tools.append(Check(tool, "ok" if found else "missing", found or "PATH에 없음"))
     return report
 
 

@@ -98,16 +98,16 @@ def audit_dataset(root: Path | str, *, recursive: bool = True) -> DatasetAudit:
     summary, records = discover_dataset(root, recursive=recursive)
     issues: list[str] = []
     if summary.total == 0:
-        issues.append("dataset contains no supported files")
+        issues.append("데이터셋에 지원 형식 파일이 없습니다")
     if summary.positive == 0:
-        issues.append("dataset has no positive ai/fake/synthetic labels")
+        issues.append("데이터셋에 양성(ai/fake/synthetic) 라벨이 없습니다")
     if summary.negative == 0:
-        issues.append("dataset has no negative real/camera/authentic labels")
+        issues.append("데이터셋에 음성(real/camera/authentic) 라벨이 없습니다")
     if summary.unknown:
-        issues.append(f"dataset has {summary.unknown} files with unknown labels")
+        issues.append(f"라벨을 알 수 없는 파일이 {summary.unknown}개 있습니다")
     missing_splits = {"train", "val", "test"} - set(summary.splits)
     if missing_splits:
-        issues.append("dataset is missing explicit splits: " + ", ".join(sorted(missing_splits)))
+        issues.append("명시적 분할이 없습니다: " + ", ".join(sorted(missing_splits)))
 
     positive_records = [record for record in records if is_positive_label(record.label)]
     masks = sum(1 for record in positive_records if record.mask_path)
@@ -118,7 +118,7 @@ def audit_dataset(root: Path | str, *, recursive: bool = True) -> DatasetAudit:
     }
     duplicate_groups = _duplicate_groups(records)
     if duplicate_groups:
-        issues.append(f"dataset has {len(duplicate_groups)} duplicate content groups")
+        issues.append(f"내용이 같은 중복 그룹이 {len(duplicate_groups)}개 있습니다")
 
     return DatasetAudit(
         summary=summary,
@@ -150,7 +150,7 @@ def plan_dataset_splits(
     summary, records = discover_dataset(root, recursive=recursive)
     total_ratio = train_ratio + val_ratio + test_ratio
     if total_ratio <= 0:
-        raise ValueError("split ratios must add up to a positive number")
+        raise ValueError("분할 비율의 합은 양수여야 합니다")
     train_cut = train_ratio / total_ratio
     val_cut = (train_ratio + val_ratio) / total_ratio
     planned = []
@@ -200,8 +200,8 @@ def build_robustness_plan(root: Path | str, *, recursive: bool = True) -> dict[s
         "transforms": ROBUSTNESS_TRANSFORMS,
         "items": items,
         "notes": [
-            "Generate these variants with an external image tool, then place them under folders named by transform.",
-            "Evaluate clean and transformed folders separately to measure robustness drop.",
+            "이 변형본은 외부 이미지 도구로 만든 뒤 변환 이름의 폴더에 넣으십시오.",
+            "원본 폴더와 변환 폴더를 따로 평가해 강건성 저하를 측정하십시오.",
         ],
     }
 

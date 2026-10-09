@@ -13,12 +13,12 @@
   "threshold": 67,
   "source_url": "https://huggingface.co/fakespot-ai/roberta-base-ai-text-detection-v1",
   "limitations": [
-    "Trained on newer LLM outputs than the GPT-2-era OpenAI detector, but still an English-centric classifier — re-validate on target-domain samples before trusting thresholds.",
-    "The model is fetched from Hugging Face on first use (~500 MB into the HF cache); set 'hub_model' to a local snapshot directory to run fully offline.",
-    "Prioritization signal, not a truth label — short text and non-English text remain unreliable."
+    "GPT-2 시대의 OpenAI 탐지기보다 최신 LLM 출력으로 학습되었지만 여전히 영어 중심 분류기입니다 — 임계값을 신뢰하기 전에 대상 도메인 표본으로 다시 검증하십시오.",
+    "첫 사용 시 Hugging Face에서 모델(약 500 MB)을 HF 캐시로 내려받습니다. 완전 오프라인 실행은 'hub_model'을 로컬 스냅샷 디렉터리로 지정하십시오.",
+    "보정 전 원점수이며 진위 판정이 아닙니다 — 짧은 글과 영어가 아닌 글에서는 신뢰할 수 없습니다."
   ],
   "notes": [
-    "Label order for this checkpoint is index 0 = Human, index 1 = AI — verified against the model's config.json id2label (opposite of the OpenAI detector, which is 0=Fake)."
+    "이 체크포인트의 라벨 순서는 index 0 = Human, index 1 = AI입니다 — 모델 config.json의 id2label로 확인했습니다(0=Fake인 OpenAI 탐지기와 반대)."
   ],
   "license": "Apache-2.0",
   "ensemble_weight": 0.5,

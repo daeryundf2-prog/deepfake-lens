@@ -318,8 +318,8 @@ class MultiProfileAggregationTest(unittest.TestCase):
         self.assertEqual(len(analysis.models), 2)
         self.assertEqual({m["model"] for m in analysis.models}, {"model-a", "model-b"})
         self.assertTrue(all(m["available"] for m in analysis.models))
-        self.assertIn("agreement: high", analysis.detail)
-        self.assertTrue(any("prioritization signal" in item for item in analysis.limitations))
+        self.assertIn("일치도: 높음", analysis.detail)  # R4
+        self.assertTrue(any("진위 판정이 아닙니다" in item for item in analysis.limitations))  # R4
 
     def test_disagreement_drops_confidence_and_flags_limitation(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -338,8 +338,8 @@ class MultiProfileAggregationTest(unittest.TestCase):
 
         self.assertTrue(analysis.available)
         self.assertEqual(analysis.confidence, "low")
-        self.assertIn("agreement: low", analysis.detail)
-        self.assertTrue(any("disagree" in item for item in analysis.limitations))
+        self.assertIn("일치도: 낮음", analysis.detail)  # R4
+        self.assertTrue(any("엇갈립니다" in item for item in analysis.limitations))  # R4
 
     def test_partial_availability_scores_only_available_members(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -358,10 +358,10 @@ class MultiProfileAggregationTest(unittest.TestCase):
 
         self.assertTrue(analysis.available)
         self.assertEqual(analysis.score, 72)
-        self.assertIn("1/2 model profiles", analysis.detail)
+        self.assertIn("모델 프로필 2개 중 1개", analysis.detail)  # R4
         members = {m["model"]: m for m in analysis.models}
         self.assertFalse(members["model-b"]["available"])
-        self.assertIn("checkpoint was not found", members["model-b"]["detail"])
+        self.assertIn("체크포인트를 찾을 수 없습니다", members["model-b"]["detail"])  # R4
 
     def test_all_members_missing_degrades_cleanly(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -380,7 +380,7 @@ class MultiProfileAggregationTest(unittest.TestCase):
         self.assertFalse(analysis.available)
         self.assertEqual(analysis.score, 0)
         self.assertEqual(analysis.confidence, "unavailable")
-        self.assertIn("0/2 model profiles", analysis.detail)
+        self.assertIn("모델 프로필 2개 중 0개", analysis.detail)  # R4
         self.assertEqual(len(analysis.models), 2)
 
     def test_onnx_audio_missing_checkpoint_reports_unavailable(self) -> None:
@@ -412,7 +412,7 @@ class MultiProfileAggregationTest(unittest.TestCase):
         self.assertFalse(analysis.available)
         self.assertEqual(analysis.score, 0)
         self.assertEqual(analysis.confidence, "unavailable")
-        self.assertIn("checkpoint", analysis.detail)
+        self.assertIn("체크포인트", analysis.detail)  # R4
 
     def test_profile_set_resolves_members_relative_to_set(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -489,7 +489,7 @@ class MultiProfileAggregationTest(unittest.TestCase):
         self.assertEqual(high_q.score, 60)
         # q40: fragile down-weighted to 0.05 -> aggregate slides toward 40
         self.assertLessEqual(low_q.score, 45)
-        self.assertTrue(any("down-weighted" in item for item in low_q.limitations))
+        self.assertTrue(any("가중치를 낮췄습니다" in item for item in low_q.limitations))  # R4
 
     @unittest.skipUnless(importlib.util.find_spec("PIL") is not None, "Pillow not installed")
     def test_low_resolution_flagged_as_unreliable(self) -> None:
@@ -504,7 +504,7 @@ class MultiProfileAggregationTest(unittest.TestCase):
             a.write_text(json.dumps(_score_map_profile("model-a", {"tiny.jpg": 80})), encoding="utf-8")
             b.write_text(json.dumps(_score_map_profile("model-b", {"tiny.jpg": 40})), encoding="utf-8")
             analysis = analyze_external_model(small, [a, b])
-        self.assertTrue(any("below every member" in item for item in analysis.limitations))
+        self.assertTrue(any("기본 해상도보다 작습니다" in item for item in analysis.limitations))  # R4
 
     def test_empty_directory_is_graceful(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -513,7 +513,7 @@ class MultiProfileAggregationTest(unittest.TestCase):
             _write_rgb_png(image)
             analysis = analyze_external_model(image, root)
         self.assertFalse(analysis.available)
-        self.assertIn("no model profiles", analysis.detail)
+        self.assertIn("모델 프로필을 찾을 수 없습니다", analysis.detail)  # R4
 
     def test_committed_zoo_directory_runs_all_profiles(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -595,7 +595,7 @@ class VideoFramesRuntimeTest(unittest.TestCase):
         self.assertFalse(analysis.available)
         self.assertGreaterEqual(len(analysis.models), 1)
         self.assertTrue(all(not frame["available"] for frame in analysis.models))
-        self.assertIn("no scores", analysis.detail)
+        self.assertIn("점수를 내지 못했습니다", analysis.detail)  # R4
 
     def test_missing_inner_profile_is_graceful_error(self) -> None:
         """A video-frames profile without 'inner' must degrade, not crash."""
@@ -620,12 +620,12 @@ class VideoFramesRuntimeTest(unittest.TestCase):
 
         self.assertIsNotNone(analysis)
         self.assertFalse(analysis.available)
-        self.assertIn("image runtime", analysis.detail)
+        self.assertIn("이미지 런타임", analysis.detail)  # R4
 
     def test_inner_validation_precedes_optional_import(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             profile_path = Path(tmp) / "vf-runtime.json"
-            for inner, detail in ((None, "inner"), ({"runtime": "video-frames"}, "image runtime")):
+            for inner, detail in ((None, "inner"), ({"runtime": "video-frames"}, "이미지 런타임")):  # R4
                 with self.subTest(inner=inner):
                     profile_path.write_text(json.dumps(self._profile(inner)), encoding="utf-8")
                     with patch("deepfake_lens.model_adapter.importlib.import_module", side_effect=ImportError("cv2 unavailable")) as optional_import:
@@ -640,7 +640,7 @@ class VideoFramesRuntimeTest(unittest.TestCase):
                 analysis = analyze_external_model(Path(tmp) / "clip.mp4", profile_path, modality="video")
             self.assertIsNotNone(analysis)
             self.assertFalse(analysis.available)
-            self.assertIn("optional and not installed", analysis.detail)
+            self.assertIn("선택 설치 항목이며 설치되어 있지 않습니다", analysis.detail)  # R4
             optional_import.assert_called_once_with("cv2")
 
     def test_video_profile_does_not_match_image_files(self) -> None:
@@ -797,7 +797,7 @@ class LanguageGateTest(unittest.TestCase):
             fused = _aggregate_profile_results(results, hangul_ratio=0.9)
         # en-only member is excluded, so score = multilingual member's 10
         self.assertEqual(fused.score, 10)
-        self.assertTrue(any("excluded" in item for item in fused.limitations))
+        self.assertTrue(any("제외했습니다" in item for item in fused.limitations))  # R4
 
     def test_no_downweight_on_english_text(self) -> None:
         import tempfile
@@ -835,10 +835,10 @@ class LanguageGateTest(unittest.TestCase):
             ]
             fused = _aggregate_profile_results(results, hangul_ratio=0.9)
         # Spread over the two contributing members is 5, not 98 - 10 = 88.
-        self.assertIn("member spread=5", fused.detail)
-        self.assertIn("agreement: high", fused.detail)
+        self.assertIn("멤버 간 편차 5", fused.detail)  # R4
+        self.assertIn("일치도: 높음", fused.detail)  # R4
         self.assertFalse(any("disagree" in item for item in fused.limitations))
-        self.assertIn("2/3 model profiles", fused.detail)
+        self.assertIn("모델 프로필 3개 중 2개", fused.detail)  # R4
         self.assertEqual(fused.score, 12)
         # The gated member is reported as skipped, so its coverage entry is
         # "skipped", not "ran".
@@ -864,7 +864,7 @@ class LanguageGateTest(unittest.TestCase):
                 (ko_b, ExternalModelAnalysis(True, 90, "high", "ko-b", "", [])),
             ]
             fused = _aggregate_profile_results(results, hangul_ratio=0.9)
-        self.assertIn("member spread=80", fused.detail)
+        self.assertIn("멤버 간 편차 80", fused.detail)  # R4
         self.assertEqual(fused.confidence, "low")
 
     def test_all_members_gated_is_not_available(self) -> None:
@@ -883,7 +883,7 @@ class LanguageGateTest(unittest.TestCase):
             fused = _aggregate_profile_results(results, hangul_ratio=0.9)
         self.assertFalse(fused.available)
         self.assertEqual(fused.confidence, "unavailable")
-        self.assertIn("0/2 model profiles", fused.detail)
+        self.assertIn("모델 프로필 2개 중 0개", fused.detail)  # R4
 
 
 class ModelCacheLRUTest(unittest.TestCase):

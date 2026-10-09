@@ -85,7 +85,7 @@ class CalibrateScoresTest(unittest.TestCase):
         self.assertEqual(calibrator.method, "insufficient-data")
         self.assertFalse(calibrator.ready)
         self.assertEqual(calibrator.transform(50), (None, "uncalibrated"))
-        self.assertTrue(any("insufficient" in note for note in calibrator.notes))
+        self.assertTrue(any("라벨 데이터 부족" in note for note in calibrator.notes))  # R4
 
     def test_single_class_is_insufficient(self) -> None:
         calibrator = calibrate_scores([(score, True) for score in range(60, 60 + MIN_CALIBRATION_SAMPLES)])

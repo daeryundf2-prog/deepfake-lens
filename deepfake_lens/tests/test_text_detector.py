@@ -59,7 +59,7 @@ class TextDetectorProfileTest(unittest.TestCase):
         # id2label verified against the model config: index 1 = AI.
         self.assertEqual(profile["score_index"], 1)
         self.assertEqual(profile["score_activation"], "softmax")
-        self.assertTrue(any("not a truth label" in item for item in profile["limitations"]))
+        self.assertTrue(any("진위 판정이 아닙니다" in item for item in profile["limitations"]))  # R4
         self.assertEqual(profile["trained_languages"], ["en"])
         # G9: hub models are pinned by commit revision; phase 0 ships it empty.
         self.assertEqual(profile["pin"], {"revision": ""})

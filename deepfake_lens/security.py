@@ -199,7 +199,7 @@ def build_security_check(root: Path | str) -> dict[str, object]:
         text = path.read_text(encoding="utf-8")
         markers = [marker for marker in NETWORK_MARKERS if marker in text]
         if markers and path.name not in ALLOWED_NETWORK_FILES:
-            findings.append({"path": str(path), "severity": "high", "issue": "unexpected network-capable import or call", "markers": markers})
+            findings.append({"path": str(path), "severity": "high", "issue": "예상하지 못한 네트워크 가능 import 또는 호출", "markers": markers})
     checks: list[dict[str, object]] = []
     for name, check in _INLINE_CHECKS:
         try:

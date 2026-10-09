@@ -231,17 +231,17 @@ def load_thresholds(options: AnalysisOptions, *, warn: WarnFn | None = None) -> 
         path = auto
     profile = load_threshold_profile(path)
     if profile is None:
-        emit(f"warning: threshold profile unreadable or wrong version: {path}")
+        emit(f"경고: 임계값 프로필을 읽을 수 없거나 버전이 맞지 않습니다: {path}")
         return None
     if profile.provisional:
         emit(
-            f"warning: threshold profile {path} is provisional "
-            f"({profile.provisional_reason}); thresholds are unvalidated"
+            f"경고: 임계값 프로필 {path}은(는) 잠정값입니다"
+            f"({profile.provisional_reason}) — 검증되지 않은 임계값입니다"
         )
     if profile.in_sample:
         emit(
-            f"warning: threshold profile {path} is {IN_SAMPLE_LABEL} — cutoffs were fitted on the rows "
-            "they were evaluated on (G28); treat as reference only"
+            f"경고: 임계값 프로필 {path}은(는) {IN_SAMPLE_LABEL}입니다 — 평가에 쓴 같은 표본에서 맞춘 "
+            "임계값이므로(G28) 참고로만 쓰십시오"
         )
     return profile
 

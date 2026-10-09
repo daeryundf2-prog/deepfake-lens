@@ -879,21 +879,21 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(verify_res, ensure_ascii=False, indent=2))
             else:
                 st = verify_res["status"]
-                status_str = "PASS" if st == "pass" else ("PASS (unverified weights present)" if st == "pass-unverified" else "FAIL")
-                print(f"Offline Model Integrity: {status_str}")
-                print(f"Profiles: {verify_res['total_profiles']}, Local checkpoints: {verify_res['local_checkpoints']}, Verified: {verify_res['verified']}, Size: {verify_res['total_size_mb']} MB")
+                status_str = "통과" if st == "pass" else ("통과(해시 미선언 가중치 있음)" if st == "pass-unverified" else "실패")
+                print(f"오프라인 모델 무결성: {status_str}")
+                print(f"프로필 {verify_res['total_profiles']}개, 로컬 체크포인트 {verify_res['local_checkpoints']}개, 검증됨 {verify_res['verified']}개, 크기 {verify_res['total_size_mb']} MB")
                 if verify_res["unverified"]:
-                    print(f"Unverified (no declared hash): {', '.join(verify_res['unverified'])}")
+                    print(f"미검증(선언된 해시 없음): {', '.join(verify_res['unverified'])}")
                 if verify_res["mismatches"]:
-                    print("Mismatched Checkpoints:")
+                    print("해시 불일치 체크포인트:")
                     for m in verify_res["mismatches"]:
                         print(f"  - {m['name']}: {m['checkpoint_relpath']}")
                 if verify_res["missing"]:
-                    print(f"Missing Checkpoints: {', '.join(verify_res['missing'])}")
+                    print(f"없는 체크포인트: {', '.join(verify_res['missing'])}")
                 if verify_res.get("hub_resolved"):
-                    print(f"Hub-resolved (no local weight): {', '.join(verify_res['hub_resolved'])}")
+                    print(f"허브 모델(로컬 가중치 없음): {', '.join(verify_res['hub_resolved'])}")
                 if verify_res.get("unsupported"):
-                    print(f"Unsupported profiles (not counted): {', '.join(verify_res['unsupported'])}")
+                    print(f"비활성 프로필(집계 제외): {', '.join(verify_res['unsupported'])}")
             return 0 if verify_res["status"] in ("pass", "pass-unverified") else 1
 
         manifest = inspect_model_manifest(args.models_dir)
@@ -946,7 +946,7 @@ def main(argv: list[str] | None = None) -> int:
     engine_profiles = options.engine_profiles()
     if engine_profiles and args.model_path is None:
         names = [p.name for p in engine_profiles] if isinstance(engine_profiles, list) else [str(engine_profiles)]
-        print(f"default engine profiles ({options.resolved_models_dir()}): {names}", file=sys.stderr)
+        print(f"기본 엔진 프로필({options.resolved_models_dir()}): {names}", file=sys.stderr)
 
     try:
         if args.progress:

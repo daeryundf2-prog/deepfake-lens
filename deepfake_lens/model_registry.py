@@ -180,8 +180,8 @@ _OTHER_CANDIDATES = [
         priority="high",
         source_url="https://arxiv.org/abs/2604.11487",
         notes=[
-            "Use as the robustness target: transformed, recompressed, resized, blurred, and cropped images.",
-            "The challenge report is a benchmark and method survey, not one reusable checkpoint.",
+            "강건성 평가 대상으로 사용: 변환·재압축·리사이즈·블러·크롭 이미지.",
+            "챌린지 보고서는 벤치마크·방법 조사이며 재사용 가능한 단일 체크포인트가 아닙니다.",
         ],
     ),
     DetectorCandidate(
@@ -193,8 +193,8 @@ _OTHER_CANDIDATES = [
         priority="high",
         source_url="https://github.com/yinglinzheng/FTCN",
         notes=[
-            "True temporal detector (temporal-transformer over frame features) — the right long-term target for video, unlike the interim frame-level video-frames bridge.",
-            "Checkpoint availability and FaceForensics++ training domain must be verified before wiring; do not claim support without a working profile.",
+            "진짜 시간축 탐지기(프레임 특징 위의 temporal-transformer) — 임시 프레임 단위 video-frames 경로와 달리 영상의 장기 목표입니다.",
+            "연결 전에 체크포인트 공개 여부와 FaceForensics++ 학습 도메인을 확인해야 하며, 동작하는 프로필 없이 지원한다고 표시하지 마십시오.",
         ],
     ),
     DetectorCandidate(
@@ -206,8 +206,8 @@ _OTHER_CANDIDATES = [
         priority="medium",
         source_url="https://huggingface.co/models",
         notes=[
-            "Surveyed 2026-09-19: no usable public reenactment (Face2Face/FOMM-style) or face-morphing detector checkpoint found on HF — only student demos and unrelated repos.",
-            "The honest interim coverage for reenactment is the SBI-trained crop detector (if it validates) plus the temporal-consistency heuristic; revisit when a vetted checkpoint appears.",
+            "2026-09-19 조사: HF에서 쓸 만한 공개 재연(Face2Face/FOMM 계열)·얼굴 모핑 탐지 체크포인트를 찾지 못했습니다 — 학생 데모와 무관한 저장소뿐이었습니다.",
+            "재연 유형의 임시 범위는 SBI로 학습한 크롭 탐지기(검증될 경우)와 시간축 일관성 휴리스틱뿐이며, 검증된 체크포인트가 나오면 다시 검토합니다.",
         ],
     ),
     DetectorCandidate(
@@ -219,8 +219,8 @@ _OTHER_CANDIDATES = [
         priority="high",
         source_url="https://github.com/ahaliassos/LipForensics",
         notes=[
-            "Targets mouth-motion semantics, which the frame-level video-frames path cannot see; needs face-crop preprocessing before scoring.",
-            "Verify released weights, preprocessing pipeline, and license before claiming support.",
+            "프레임 단위 video-frames 경로가 볼 수 없는 입 움직임 의미를 다루며, 채점 전에 얼굴 크롭 전처리가 필요합니다.",
+            "지원을 표시하기 전에 공개 가중치, 전처리 파이프라인, 라이선스를 확인하십시오.",
         ],
     ),
     DetectorCandidate(
@@ -232,8 +232,8 @@ _OTHER_CANDIDATES = [
         priority="medium",
         source_url="https://github.com/ZhendongWang6/AltFreezing",
         notes=[
-            "Reported strong FaceForensics++ and cross-dataset results; candidate when a dedicated temporal runtime is written.",
-            "Do not claim support until weights and license are verified.",
+            "FaceForensics++와 교차 데이터셋 결과가 좋다고 보고되었습니다. 전용 시간축 런타임을 작성할 때의 후보입니다.",
+            "가중치와 라이선스를 확인하기 전에는 지원한다고 표시하지 마십시오.",
         ],
     ),
     DetectorCandidate(
@@ -245,8 +245,8 @@ _OTHER_CANDIDATES = [
         priority="low",
         source_url="https://huggingface.co/Hello-SimpleAI/chatgpt-detector-roberta",
         notes=[
-            "Screened 2026-09 and not wired: perfect on its HC3 training domain but scores ~0.00 on out-of-domain inputs (GPT-2 output, Korean AI-style text) — would only dilute the ensemble.",
-            "Recorded in experiments/TEXT_DETECTION_EVAL.md (follow-up candidate screening).",
+            "2026-09 선별 후 연결하지 않음: HC3 학습 도메인 밖 입력(GPT-2 출력, 한국어 AI 문체 글)에서 반응하지 않아 앙상블을 희석할 뿐입니다(소규모 측정, 미검증).",
+            "experiments/TEXT_DETECTION_EVAL.md(후속 후보 선별)에 기록되어 있습니다.",
         ],
     ),
     DetectorCandidate(
@@ -258,8 +258,8 @@ _OTHER_CANDIDATES = [
         priority="medium",
         source_url="https://rbetser.github.io/CLIDE/",
         notes=[
-            "Zero-shot direction is useful for generators not represented in local training data.",
-            "Requires CLIP-style feature extraction; keep optional until dependencies are explicit.",
+            "로컬 학습 데이터에 없는 생성기에는 제로샷 방향이 유용합니다.",
+            "CLIP 계열 특징 추출이 필요하므로 의존성이 명확해질 때까지 선택 사항으로 둡니다.",
         ],
     ),
     DetectorCandidate(
@@ -271,8 +271,8 @@ _OTHER_CANDIDATES = [
         priority="medium",
         source_url="https://github.com/ljppp117/Dual-Path-AI-Generated-Image-Detection",
         notes=[
-            "Patch selection over texture-rich and texture-poor regions maps to local heatmap review.",
-            "Useful for source-agnostic artifact detection after dataset evaluation is stable.",
+            "질감이 많은 영역과 적은 영역의 패치 선택이 로컬 히트맵 검토와 대응됩니다.",
+            "데이터셋 평가가 안정된 뒤 출처와 무관한 흔적 탐지에 유용합니다.",
         ],
     ),
     DetectorCandidate(
@@ -284,9 +284,9 @@ _OTHER_CANDIDATES = [
         priority="medium",
         source_url="",
         notes=[
-            "Diffusion-specific generalization candidate.",
-            "Do not claim support until weights and license are verified.",
-            "Cited MDPI link returned 403 to automated checks and could not be verified; removed by scripts/check_registry_links.py.",
+            "확산 모델 특화 일반화 후보.",
+            "가중치와 라이선스를 확인하기 전에는 지원한다고 표시하지 마십시오.",
+            "인용된 MDPI 링크가 자동 검사에서 403을 반환해 확인할 수 없었으며, scripts/check_registry_links.py로 제거했습니다.",
         ],
     ),
     DetectorCandidate(
@@ -298,8 +298,8 @@ _OTHER_CANDIDATES = [
         priority="high",
         source_url="https://arxiv.org/abs/2604.11487",
         notes=[
-            "Use to decide which pretrained detectors deserve local adapter work first.",
-            "Emphasizes zero-shot, out-of-the-box behavior across many generators.",
+            "어떤 사전학습 탐지기에 로컬 어댑터 작업을 먼저 할지 정하는 데 씁니다.",
+            "여러 생성기에 대한 제로샷·즉시 사용 동작을 강조합니다.",
         ],
     ),
     DetectorCandidate(
@@ -311,7 +311,7 @@ _OTHER_CANDIDATES = [
         priority="low",
         source_url="https://github.com/YuhengLi99/UniversalFakeDetect",
         notes=[
-            "Profile removed in phase 0 (WP-C); the measurement behind the removal is recorded in docs/MODEL-REJECTIONS.md.",
+            "0단계(WP-C)에서 프로필을 삭제했습니다. 삭제 근거가 된 측정은 docs/MODEL-REJECTIONS.md에 기록되어 있습니다.",
         ],
     ),
     DetectorCandidate(
@@ -323,7 +323,7 @@ _OTHER_CANDIDATES = [
         priority="low",
         source_url="https://github.com/PeterWang512/CNNDetection",
         notes=[
-            "Profile removed in phase 0 (WP-C); the measurement behind the removal is recorded in docs/MODEL-REJECTIONS.md.",
+            "0단계(WP-C)에서 프로필을 삭제했습니다. 삭제 근거가 된 측정은 docs/MODEL-REJECTIONS.md에 기록되어 있습니다.",
         ],
     ),
     DetectorCandidate(
@@ -335,7 +335,7 @@ _OTHER_CANDIDATES = [
         priority="low",
         source_url="https://github.com/ZhendongWang6/DIRE",
         notes=[
-            "Profile removed in phase 0 (WP-C); the measurement behind the removal is recorded in docs/MODEL-REJECTIONS.md.",
+            "0단계(WP-C)에서 프로필을 삭제했습니다. 삭제 근거가 된 측정은 docs/MODEL-REJECTIONS.md에 기록되어 있습니다.",
         ],
     ),
     DetectorCandidate(
@@ -347,7 +347,7 @@ _OTHER_CANDIDATES = [
         priority="low",
         source_url="https://huggingface.co/dima806/deepfake_vs_real_image_detection",
         notes=[
-            "Profile removed in phase 0 (WP-C); the measurement behind the removal is recorded in docs/MODEL-REJECTIONS.md.",
+            "0단계(WP-C)에서 프로필을 삭제했습니다. 삭제 근거가 된 측정은 docs/MODEL-REJECTIONS.md에 기록되어 있습니다.",
         ],
     ),
     DetectorCandidate(
@@ -359,7 +359,7 @@ _OTHER_CANDIDATES = [
         priority="low",
         source_url="https://huggingface.co/Xicor9/efficientnet-b0-ffpp-c23",
         notes=[
-            "Profile removed in phase 0 (WP-C); the measurement behind the removal is recorded in docs/MODEL-REJECTIONS.md.",
+            "0단계(WP-C)에서 프로필을 삭제했습니다. 삭제 근거가 된 측정은 docs/MODEL-REJECTIONS.md에 기록되어 있습니다.",
         ],
     ),
     DetectorCandidate(
@@ -371,7 +371,7 @@ _OTHER_CANDIDATES = [
         priority="low",
         source_url="https://huggingface.co/openai-community/roberta-base-openai-detector",
         notes=[
-            "Profile removed in phase 0 (WP-C); the measurement behind the removal is recorded in docs/MODEL-REJECTIONS.md.",
+            "0단계(WP-C)에서 프로필을 삭제했습니다. 삭제 근거가 된 측정은 docs/MODEL-REJECTIONS.md에 기록되어 있습니다.",
         ],
     ),
     DetectorCandidate(
@@ -383,7 +383,7 @@ _OTHER_CANDIDATES = [
         priority="low",
         source_url="https://huggingface.co/Qwen/Qwen2.5-0.5B",
         notes=[
-            "Profile removed in phase 0 (WP-C); the measurement behind the removal is recorded in docs/MODEL-REJECTIONS.md.",
+            "0단계(WP-C)에서 프로필을 삭제했습니다. 삭제 근거가 된 측정은 docs/MODEL-REJECTIONS.md에 기록되어 있습니다.",
         ],
     ),
     DetectorCandidate(
@@ -395,7 +395,7 @@ _OTHER_CANDIDATES = [
         priority="low",
         source_url="https://huggingface.co/Qwen/Qwen2.5-1.5B",
         notes=[
-            "Profile removed in phase 0 (WP-C); the measurement behind the removal is recorded in docs/MODEL-REJECTIONS.md.",
+            "0단계(WP-C)에서 프로필을 삭제했습니다. 삭제 근거가 된 측정은 docs/MODEL-REJECTIONS.md에 기록되어 있습니다.",
         ],
     ),
 ]
@@ -455,9 +455,9 @@ def build_runtime_profile(
         "threshold": 67,
         "source_url": candidate.source_url,
         "notes": [
-            "Edit input_size, mean/std, input_name, score_index, and threshold after validating the exported checkpoint.",
-            "This profile does not bundle weights; it points Deepfake Lens at a local checkpoint.",
-            "Run 'deepfake-lens vendor-weights pin <profile>' to record the checkpoint sha256 — an unpinned profile is refused at load time.",
+            "내보낸 체크포인트를 검증한 뒤 input_size, mean/std, input_name, score_index, threshold를 수정하십시오.",
+            "이 프로필은 가중치를 포함하지 않으며 Deepfake Lens가 로컬 체크포인트를 가리키게 할 뿐입니다.",
+            "'deepfake-lens vendor-weights pin <프로필>'로 체크포인트 sha256을 기록하십시오 — 고정되지 않은 프로필은 로드 시 거부됩니다.",
         ],
         "measured_on": None,
     }

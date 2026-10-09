@@ -80,6 +80,8 @@ def _failure_detail(context: str, exc: BaseException) -> str:
 PROFILE_SET_TYPE = "deepfake-lens-profile-set-v1"
 # Scores farther apart than this count as member disagreement.
 AGREEMENT_SPREAD = 20
+# Display labels of the zoo agreement value in model_analysis.detail (R4).
+AGREEMENT_LABELS = {"high": "높음", "low": "낮음", "n/a": "해당 없음"}
 _MAX_PROFILE_DEPTH = 4
 
 # Runtimes are bound to a media modality: image runtimes consume pixels via
@@ -128,8 +130,8 @@ def analyze_external_model(
             score=0,
             confidence="unavailable",
             model=str(model_path),
-            detail=f"no model profiles found under {model_path}",
-            limitations=["Point --model-path at a profile JSON, a profile set, or a directory containing *-runtime.json profiles."],
+            detail=f"모델 프로필을 찾을 수 없습니다: {model_path}",
+            limitations=["--model-path에는 프로필 JSON, 프로필 세트 또는 *-runtime.json 프로필이 있는 디렉터리를 지정하십시오."],
         )
     sources = [source for source in sources if _profile_matches_modality(source, modality)]
     if not sources:
@@ -226,7 +228,7 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
             score=0,
             confidence=FAILED_CONFIDENCE,
             model=str(model_file),
-            detail=_failure_detail("model profile could not be read", exc),
+            detail=_failure_detail("모델 프로필을 읽을 수 없습니다", exc),
         )
     if not isinstance(profile, dict):
         return ExternalModelAnalysis(
@@ -234,7 +236,7 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
             score=0,
             confidence=FAILED_CONFIDENCE,
             model=str(model_file),
-            detail="ValueError: model profile is not a JSON object.",
+            detail="ValueError: 모델 프로필이 JSON 객체가 아닙니다.",
         )
 
     model_name = str(profile.get("name") or profile.get("model") or model_file.name)
@@ -243,7 +245,7 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
         return _analyze_profile_set(media_path, model_file, profile, model_name=model_name, depth=depth, modality=modality)
 
     if profile.get("supported") is False:
-        reason = str(profile.get("reason") or "this profile is a documented placeholder and is not wired to a runnable runtime.")
+        reason = str(profile.get("reason") or "이 프로필은 문서화용 자리표시자이며 실행 가능한 런타임에 연결되어 있지 않습니다.")
         fetch_hint = str(profile.get("fetch") or "").strip()
         limitations = _profile_limitations(profile)
         if fetch_hint:
@@ -270,8 +272,8 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
             score=0,
             confidence="unavailable",
             model=model_name,
-            detail="model profile loaded, but no per-file score was available.",
-            limitations=["Use score_map entries or a .model.json sidecar for external detector scores."],
+            detail="모델 프로필은 읽었지만 이 파일의 점수가 없습니다.",
+            limitations=["외부 탐지기 점수는 score_map 항목이나 .model.json 사이드카로 제공하십시오."],
         )
 
     return ExternalModelAnalysis(
@@ -279,7 +281,7 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
         score=score,
         confidence=_confidence_for_score(score),
         model=model_name,
-        detail=f"external model profile supplied score={score}.",
+        detail=f"외부 모델 프로필이 점수 {score}를 제공했습니다.",
     )
 
 
@@ -302,7 +304,7 @@ def _analyze_profile_set(media_path: Path, model_file: Path, profile: dict[str, 
             score=0,
             confidence="unavailable",
             model=model_name,
-            detail="profile set has no usable member profiles (empty list or nested too deep).",
+            detail="프로필 세트에 사용할 수 있는 멤버 프로필이 없습니다(빈 목록이거나 중첩이 너무 깊음).",
         )
     sources: list[Path] = []
     for member in members:
@@ -316,7 +318,7 @@ def _analyze_profile_set(media_path: Path, model_file: Path, profile: dict[str, 
             score=0,
             confidence="unavailable",
             model=model_name,
-            detail=f"profile set {model_file.name} resolved to no member profiles.",
+            detail=f"프로필 세트 {model_file.name}에서 멤버 프로필을 찾지 못했습니다.",
         )
     hangul_ratio = _media_hangul_ratio(media_path) if modality == "text" else 0.0
     jpeg_qf, min_side = _image_quality_context(media_path) if modality == "image" else (None, None)
@@ -438,35 +440,35 @@ def _aggregate_profile_results(results: list[tuple[Path, ExternalModelAnalysis]]
     spread = max(scores) - min(scores) if len(scores) > 1 else 0
     agreement = "n/a" if len(scores) < 2 else ("high" if spread <= AGREEMENT_SPREAD else "low")
 
-    detail = f"{len(kept)}/{len(results)} model profiles produced scores"
+    detail = f"모델 프로필 {len(results)}개 중 {len(kept)}개가 점수를 냈습니다"
     if scores:
-        detail += f"; aggregate score={score} (weighted mean of members)"
+        detail += f"; 집계 점수 {score}(멤버 가중 평균)"
     if len(scores) > 1:
-        detail += f"; member spread={spread} (agreement: {agreement})"
+        detail += f"; 멤버 간 편차 {spread}(일치도: {AGREEMENT_LABELS.get(agreement, agreement)})"
 
     limitations: list[str] = []
     if downweighted:
         limitations.append(
-            f"English-only members {', '.join(downweighted)} were excluded on Korean-dominant text "
-            f"(hangul ratio {hangul_ratio:.0%}) — measured false-positive on human Korean was 98/100."
+            f"영어 전용 멤버 {', '.join(downweighted)}는 한국어가 주인 글(한글 비율 {hangul_ratio:.0%})에서 제외했습니다 "
+            "— 사람이 쓴 한국어 글에서 오탐이 관찰되었습니다(소규모 측정, 미검증)."
         )
     if degraded_adjusted:
         limitations.append(
-            f"JPEG quality ~{jpeg_qf:.0f}: recompression-fragile members {', '.join(degraded_adjusted)} "
-            "down-weighted (measured collapse on re-encoded inputs — see RECOMPRESSION_EVAL.md)."
+            f"JPEG 품질 약 {jpeg_qf:.0f}: 재압축에 약한 멤버 {', '.join(degraded_adjusted)}의 가중치를 낮췄습니다 "
+            "(재인코딩 입력에서 점수 붕괴 관찰 — experiments/RECOMPRESSION_EVAL.md, 미검증)."
         )
     if min_side is not None and min_side < 128:
         limitations.append(
-            f"Input is {min_side}px on its smallest side — below every member's native resolution; "
-            "measured AUROC on 32x32 thumbnails is ~0.5 (chance). Treat scores as unreliable."
+            f"입력의 짧은 변이 {min_side}px로 모든 멤버의 기본 해상도보다 작습니다 "
+            "— 작은 썸네일에서는 점수가 우연 수준이므로 신뢰할 수 없습니다."
         )
     for _, result in results:
         for item in result.limitations:
             if item not in limitations:
                 limitations.append(item)
-    limitations.append("Aggregated external scores are a weighted mean of available members — a prioritization signal, not a truth label.")
+    limitations.append("외부 모델 집계 점수는 실행된 멤버의 가중 평균인 보정 전 원점수이며 진위 판정이 아닙니다.")
     if agreement == "low":
-        limitations.append(f"Model zoo members disagree (spread {spread} points); weigh metadata/provenance signals before triage.")
+        limitations.append(f"모델 멤버 간 점수가 엇갈립니다(편차 {spread}점) — 메타데이터·출처 신호를 먼저 검토하십시오.")
 
     if not kept:
         confidence = "unavailable"
@@ -552,7 +554,7 @@ def _pin_failure(profile: dict[str, object], checkpoint: Path | None, *, model_n
             score=0,
             confidence=FAILED_CONFIDENCE,
             model=model_name,
-            detail=_failure_detail("checkpoint integrity check failed", exc),
+            detail=_failure_detail("체크포인트 무결성 검사 실패", exc),
             limitations=list(profile_limitations),
         )
     return None
@@ -585,7 +587,7 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
                 score=0,
                 confidence="skipped",
                 model=model_name,
-                detail=f"{label}: no face region detected — face-manipulation member not applicable.",
+                detail=f"{label}: 얼굴 영역이 검출되지 않아 얼굴 조작 멤버를 적용하지 않았습니다.",
                 limitations=profile_limitations,
             )
     # Hub-resolved runtimes (hf-text-classifier) name a model id, not a local
@@ -597,7 +599,7 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
             score=0,
             confidence="unavailable",
             model=model_name,
-            detail=f"{runtime} checkpoint was not found: {checkpoint}",
+            detail=f"{runtime} 체크포인트를 찾을 수 없습니다: {checkpoint}",
             limitations=[*_checkpoint_hint(runtime), *profile_limitations],
         )
     # G9: no weight loads without a matching pin (sha256 for a local
@@ -656,7 +658,7 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
             score=0,
             confidence="unavailable",
             model=model_name,
-            detail=f"의존성 부재: {exc.name or exc} ({runtime} runtime is optional and not installed)",
+            detail=f"의존성 부재: {exc.name or exc} ({runtime} 런타임은 선택 설치 항목이며 설치되어 있지 않습니다)",
             limitations=[_runtime_install_hint(runtime), *profile_limitations],
         )
     except Exception as exc:
@@ -668,15 +670,15 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
             score=0,
             confidence=FAILED_CONFIDENCE,
             model=model_name,
-            detail=_failure_detail(f"{runtime} inference failed", exc),
-            limitations=["Verify input_size, mean/std, input_name, score_index, and checkpoint compatibility.", *profile_limitations],
+            detail=_failure_detail(f"{runtime} 추론 실패", exc),
+            limitations=["input_size, mean/std, input_name, score_index와 체크포인트 호환성을 확인하십시오.", *profile_limitations],
         )
     return ExternalModelAnalysis(
         available=True,
         score=score,
         confidence=_confidence_for_score(score),
         model=model_name,
-        detail=f"{runtime} runtime supplied score={score}.",
+        detail=f"{runtime} 런타임이 점수 {score}를 제공했습니다.",
         limitations=list(profile_limitations),
     )
 
@@ -756,14 +758,14 @@ def _score_face_crops(crops: list, profile: dict[str, object], *, base_dir: Path
                 results.append(result)
     scored = [result.score for result in results if result.available]
     if not scored:
-        cause = results[0].detail if results else "no crop produced a result"
+        cause = results[0].detail if results else "결과를 낸 얼굴 크롭이 없습니다"
         crashed = any(result.confidence == FAILED_CONFIDENCE for result in results)
         return ExternalModelAnalysis(
             available=False,
             score=0,
             confidence=FAILED_CONFIDENCE if crashed else "unavailable",
             model=model_name,
-            detail=f"crop_faces: {len(crops)} face crop(s) detected but inference failed ({cause}).",
+            detail=f"crop_faces: 얼굴 크롭 {len(crops)}개를 검출했지만 추론에 실패했습니다({cause}).",
             limitations=profile_limitations,
         )
     if aggregate == "mean":
@@ -775,7 +777,7 @@ def _score_face_crops(crops: list, profile: dict[str, object], *, base_dir: Path
         score=score,
         confidence=_confidence_for_score(score),
         model=model_name,
-        detail=f"crop_faces scored {len(scored)}/{len(crops)} face crop(s); aggregate={aggregate} -> {score}.",
+        detail=f"crop_faces: 얼굴 크롭 {len(crops)}개 중 {len(scored)}개 채점, 집계({aggregate}) {score}.",
         limitations=list(profile_limitations),
         models=[
             {"crop": index, "available": result.available, "score": result.score, "detail": result.detail}
@@ -810,10 +812,10 @@ def _run_video_frames(
 
     inner = profile.get("inner") or profile.get("frame_profile")
     if not isinstance(inner, dict):
-        raise RuntimeError("video-frames profile needs an 'inner' image-runtime profile object")
+        raise RuntimeError("video-frames 프로필에는 'inner' 이미지 런타임 프로필 객체가 필요합니다")
     inner_runtime = str(inner.get("runtime") or "").lower()
     if inner_runtime in VIDEO_RUNTIMES or not inner_runtime:
-        raise RuntimeError("video-frames 'inner' profile must name an image runtime (onnx/torchscript/aide/clip-linear/torchvision)")
+        raise RuntimeError("video-frames의 'inner' 프로필은 이미지 런타임(onnx/torchscript/aide/clip-linear/torchvision)을 지정해야 합니다")
     frame_target = max(1, int(profile.get("frames", 8) or 8))
     cv2 = importlib.import_module("cv2")
     # The outer profile's pin describes the inner weights (G9); verify it
@@ -836,7 +838,7 @@ def _run_video_frames(
     with tempfile.TemporaryDirectory(prefix="dfl-frames-") as tmp_dir:
         frame_paths = _extract_sampled_frames(cv2, media_path, Path(tmp_dir), frame_target)
         if not frame_paths:
-            raise RuntimeError(f"no frames could be decoded from {media_path}")
+            raise RuntimeError(f"영상에서 프레임을 디코딩하지 못했습니다: {media_path}")
         for index, frame_path in enumerate(frame_paths):
             result = _score_from_runtime_profile(inner, frame_path, base_dir=base_dir, pin_verified=inner_has_weights)
             scored_frames.append(
@@ -846,7 +848,7 @@ def _run_video_frames(
                     "failed": bool(result and result.confidence == FAILED_CONFIDENCE),
                     "available": bool(result and result.available),
                     "score": result.score if result else 0,
-                    "detail": result.detail if result else "no result",
+                    "detail": result.detail if result else "결과 없음",
                 }
             )
 
@@ -858,21 +860,21 @@ def _run_video_frames(
             score=0,
             confidence=FAILED_CONFIDENCE if crashed else "unavailable",
             model=model_name,
-            detail=f"video-frames decoded {len(frame_paths)} frames but the inner runtime produced no scores.",
+            detail=f"video-frames: 프레임 {len(frame_paths)}개를 디코딩했지만 내부 런타임이 점수를 내지 못했습니다.",
             limitations=_profile_limitations(profile),
             models=scored_frames,
         )
     score = int(round(sum(available) / len(available)))
     spread = max(available) - min(available) if len(available) > 1 else 0
-    detail = f"video-frames runtime scored {len(available)}/{len(frame_paths)} frames; mean={score}"
+    detail = f"video-frames 런타임: 프레임 {len(frame_paths)}개 중 {len(available)}개 채점, 평균 {score}"
     if len(available) > 1:
-        detail += f"; frame spread={spread}"
+        detail += f"; 프레임 간 편차 {spread}"
     limitations = list(_profile_limitations(profile))
     limitations.append(
-        "Frame-level image detection, not a temporal/lip-sync model — frame scores are averaged and inter-frame consistency is not modeled."
+        "프레임 단위 이미지 탐지이며 시간축/립싱크 모델이 아닙니다 — 프레임 점수를 평균하며 프레임 간 일관성은 모델링하지 않습니다."
     )
     if spread > AGREEMENT_SPREAD:
-        limitations.append(f"Frame scores disagree by {spread} points — possible temporal inconsistency or borderline frames.")
+        limitations.append(f"프레임 점수가 {spread}점 엇갈립니다 — 시간축 불일치이거나 경계선상의 프레임일 수 있습니다.")
     return ExternalModelAnalysis(
         available=True,
         score=score,
@@ -888,7 +890,7 @@ def _extract_sampled_frames(cv2, media_path: Path, out_dir: Path, count: int) ->
     """Decode ``count`` evenly spaced frames to PNG files in ``out_dir``."""
     capture = cv2.VideoCapture(str(media_path))
     if not capture.isOpened():
-        raise RuntimeError(f"video could not be opened: {media_path}")
+        raise RuntimeError(f"영상을 열 수 없습니다: {media_path}")
     try:
         total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
         if total <= 0:

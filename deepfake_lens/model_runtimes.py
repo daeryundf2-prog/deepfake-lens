@@ -49,44 +49,44 @@ def _profile_limitations(profile: dict[str, object]) -> list[str]:
 
 def _checkpoint_hint(runtime: str) -> list[str]:
     if runtime == "aide":
-        return ["Fetch the checkpoint with scripts/fetch_aide.py, or point 'checkpoint' at a local progan_train.pth."]
+        return ["scripts/fetch_aide.py로 체크포인트를 내려받거나 'checkpoint'를 로컬 progan_train.pth로 지정하십시오."]
     if runtime == "aasist":
-        return ["Fetch the checkpoint with scripts/fetch_aasist.py (downloads the official AASIST.pth, ~1.3 MB), or point 'checkpoint' at a local AASIST state dict."]
+        return ["scripts/fetch_aasist.py로 체크포인트(공식 AASIST.pth, 약 1.3 MB)를 내려받거나 'checkpoint'를 로컬 AASIST state dict로 지정하십시오."]
     if runtime == "onnx-audio":
-        return ["Download the ONNX checkpoint named by the profile's source_url into the profile's checkpoint path."]
+        return ["프로필 source_url의 ONNX 체크포인트를 프로필의 checkpoint 경로에 내려받으십시오."]
     if runtime == "clip-linear":
-        return ["Download the detector's linear-head weights and point 'checkpoint' at the .pth file; the CLIP backbone named in 'backbone' is fetched by transformers on first use."]
+        return ["탐지기의 linear-head 가중치를 내려받아 'checkpoint'를 .pth 파일로 지정하십시오. 'backbone'의 CLIP 백본은 첫 사용 시 transformers가 내려받습니다."]
     if runtime == "hf-text-classifier":
-        return ["The model id in 'hub_model' is fetched by transformers on first use; set it to a local snapshot directory to run fully offline."]
+        return ["'hub_model'의 모델은 첫 사용 시 transformers가 내려받습니다. 완전 오프라인 실행은 로컬 스냅샷 디렉터리로 지정하십시오."]
     if runtime == "causal-lm-ppl":
-        return ["The reference LM id in 'hub_model' is fetched by transformers on first use (~1 GB); set it to a local snapshot directory to run fully offline."]
+        return ["'hub_model'의 기준 LM(약 1 GB)은 첫 사용 시 transformers가 내려받습니다. 완전 오프라인 실행은 로컬 스냅샷 디렉터리로 지정하십시오."]
     if runtime == "binoculars":
-        return ["The performer/observer LM ids in 'hub_model'/'observer_model' are fetched by transformers on first use; set them to local snapshot directories to run fully offline."]
+        return ["'hub_model'/'observer_model'의 performer/observer LM은 첫 사용 시 transformers가 내려받습니다. 완전 오프라인 실행은 로컬 스냅샷 디렉터리로 지정하십시오."]
     if runtime == "torchvision":
-        return ["Download the detector's published state-dict checkpoint and point 'checkpoint' at the .pth file."]
-    return ["Use an absolute checkpoint path or a path relative to the model profile."]
+        return ["탐지기가 공개한 state-dict 체크포인트를 내려받아 'checkpoint'를 .pth 파일로 지정하십시오."]
+    return ["체크포인트는 절대 경로나 모델 프로필 기준 상대 경로로 지정하십시오."]
 
 
 def _runtime_install_hint(runtime: str) -> str:
     if runtime == "aide":
-        return "Install the optional research stack (torch, torchvision, timm, Pillow, numpy) to enable the AIDE engine."
+        return "AIDE 엔진을 쓰려면 선택 연구 스택(torch, torchvision, timm, Pillow, numpy)을 설치하십시오."
     if runtime == "aasist":
-        return "Install the optional research stack (torch, numpy) to enable the AASIST engine; PCM .wav files need no other decoder."
+        return "AASIST 엔진을 쓰려면 선택 연구 스택(torch, numpy)을 설치하십시오. PCM .wav 파일은 다른 디코더가 필요 없습니다."
     if runtime == "clip-linear":
-        return "Install the optional clip-linear stack (torch, transformers, Pillow) to enable the CLIP linear-probe runtime."
+        return "CLIP linear-probe 런타임을 쓰려면 선택 clip-linear 스택(torch, transformers, Pillow)을 설치하십시오."
     if runtime == "hf-text-classifier":
-        return "Install the optional hf-text-classifier stack (torch, transformers) to enable the text-detector runtime."
+        return "텍스트 탐지기 런타임을 쓰려면 선택 hf-text-classifier 스택(torch, transformers)을 설치하십시오."
     if runtime == "causal-lm-ppl":
-        return "Install the optional causal-lm-ppl stack (torch, transformers) to enable the perplexity-screen runtime."
+        return "perplexity 선별 런타임을 쓰려면 선택 causal-lm-ppl 스택(torch, transformers)을 설치하십시오."
     if runtime == "binoculars":
-        return "Install the optional binoculars stack (torch, transformers) to enable the two-LM perplexity-ratio runtime."
+        return "두 LM perplexity 비율 런타임을 쓰려면 선택 binoculars 스택(torch, transformers)을 설치하십시오."
     if runtime == "torchvision":
-        return "Install the optional torchvision stack (torch, torchvision, Pillow, numpy) to enable the torchvision runtime."
+        return "torchvision 런타임을 쓰려면 선택 torchvision 스택(torch, torchvision, Pillow, numpy)을 설치하십시오."
     if runtime == "video-frames":
-        return "Install opencv plus the stack required by the inner image profile to enable the video-frames runtime."
+        return "video-frames 런타임을 쓰려면 opencv와 내부 이미지 프로필이 요구하는 스택을 설치하십시오."
     if runtime == "onnx-audio":
-        return "Install onnxruntime and numpy to enable the raw-waveform ONNX audio runtime; PCM .wav files need no other decoder."
-    return "Install Pillow plus onnxruntime or torch in the local environment to enable neural inference."
+        return "원시 파형 ONNX 오디오 런타임을 쓰려면 onnxruntime과 numpy를 설치하십시오. PCM .wav 파일은 다른 디코더가 필요 없습니다."
+    return "신경망 추론을 쓰려면 로컬 환경에 Pillow와 onnxruntime 또는 torch를 설치하십시오."
 
 
 # The AIDE engine keeps its 3.3 GB checkpoint resident between files; keyed by
@@ -104,10 +104,10 @@ def _aide_runner(checkpoint: Path) -> tuple[object, object, object]:
     repo_root = Path(__file__).resolve().parent.parent
     script = repo_root / "scripts" / "run_aide.py"
     if not script.is_file():
-        raise RuntimeError(f"AIDE runner script is missing: {script}")
+        raise RuntimeError(f"AIDE 실행 스크립트가 없습니다: {script}")
     spec = importlib.util.spec_from_file_location("deepfake_lens_aide_runner", script)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"could not load AIDE runner: {script}")
+        raise RuntimeError(f"AIDE 실행 스크립트를 불러올 수 없습니다: {script}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     runner = (module, module.load_model(checkpoint), module.DctPreprocessor())
@@ -142,10 +142,10 @@ def _aasist_module():
         repo_root = Path(__file__).resolve().parent.parent
         script = repo_root / "scripts" / "run_aasist.py"
         if not script.is_file():
-            raise RuntimeError(f"AASIST runner script is missing: {script}")
+            raise RuntimeError(f"AASIST 실행 스크립트가 없습니다: {script}")
         spec = importlib.util.spec_from_file_location("deepfake_lens_aasist_runner", script)
         if spec is None or spec.loader is None:
-            raise RuntimeError(f"could not load AASIST runner: {script}")
+            raise RuntimeError(f"AASIST 실행 스크립트를 불러올 수 없습니다: {script}")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         _AASIST_MODULE = module
@@ -220,7 +220,7 @@ def _run_hf_audio_classifier(media_path: Path, profile: dict[str, object]) -> li
     torch = importlib.import_module("torch")
     hub_model = str(profile.get("hub_model") or "")
     if not hub_model:
-        raise RuntimeError("hf-audio-classifier profile needs a 'hub_model' field (e.g. Gustking/wav2vec2-large-xlsr-deepfake-audio-classification)")
+        raise RuntimeError("hf-audio-classifier 프로필에는 'hub_model' 필드가 필요합니다(예: Gustking/wav2vec2-large-xlsr-deepfake-audio-classification)")
     extractor, model = _hf_audio_model(hub_model, require_revision(profile))
     sample_rate = int(getattr(extractor, "sampling_rate", 16000) or 16000)
     max_seconds = float(profile.get("max_seconds", 15) or 15)
@@ -234,7 +234,7 @@ def _run_hf_audio_classifier(media_path: Path, profile: dict[str, object]) -> li
         id2label = getattr(model.config, "id2label", None) or {}
         target = next((int(idx) for idx, name in id2label.items() if str(name).lower() == score_label), None)
         if target is None or target >= len(values):
-            raise RuntimeError(f"score_label '{score_label}' not found in model labels {id2label}")
+            raise RuntimeError(f"score_label '{score_label}'이(가) 모델 라벨 {id2label}에 없습니다")
         shifted = [value - max(values) for value in values]
         exps = [math.exp(max(-80.0, min(80.0, value))) for value in shifted]
         return [exps[target] / max(1e-12, sum(exps))]
@@ -305,11 +305,11 @@ def _load_linear_head(checkpoint: Path):
         weight = next((value for name, value in nested.items() if str(name).lower().endswith("weight") and hasattr(value, "ndim") and value.ndim == 2), None)
         bias = next((value for name, value in nested.items() if str(name).lower().endswith("bias") and hasattr(value, "reshape")), None)
         if weight is None:
-            raise RuntimeError(f"linear head checkpoint has no 2-D weight tensor: {checkpoint}")
+            raise RuntimeError(f"linear head 체크포인트에 2차원 가중치 텐서가 없습니다: {checkpoint}")
     else:
         weight, bias = state, None
         if getattr(weight, "ndim", 0) != 2:
-            raise RuntimeError(f"linear head checkpoint must be a state dict or a 2-D weight tensor: {checkpoint}")
+            raise RuntimeError(f"linear head 체크포인트는 state dict 또는 2차원 가중치 텐서여야 합니다: {checkpoint}")
     weight = weight.float()
     if bias is None:
         bias = torch.zeros(weight.shape[0])
@@ -379,7 +379,7 @@ def _run_hf_text_classifier(media_path: Path, profile: dict[str, object]) -> lis
     torch = importlib.import_module("torch")
     hub_model = str(profile.get("hub_model") or "")
     if not hub_model:
-        raise RuntimeError("hf-text-classifier profile needs a 'hub_model' field (e.g. fakespot-ai/roberta-base-ai-text-detection-v1)")
+        raise RuntimeError("hf-text-classifier 프로필에는 'hub_model' 필드가 필요합니다(예: fakespot-ai/roberta-base-ai-text-detection-v1)")
     tokenizer, model = _hf_text_model(hub_model, require_revision(profile))
     raw = media_path.read_bytes()[:_HF_TEXT_MAX_BYTES]
     text = raw.decode("utf-8", errors="replace")
@@ -421,7 +421,7 @@ def _run_hf_image_classifier(media_path: Path, profile: dict[str, object]) -> li
     image_module = importlib.import_module("PIL.Image")
     hub_model = str(profile.get("hub_model") or "")
     if not hub_model:
-        raise RuntimeError("hf-image-classifier profile needs a 'hub_model' field (e.g. umm-maybe/AI-image-detector)")
+        raise RuntimeError("hf-image-classifier 프로필에는 'hub_model' 필드가 필요합니다(예: umm-maybe/AI-image-detector)")
     processor, model = _hf_image_model(hub_model, require_revision(profile))
     image = image_module.open(media_path).convert("RGB")
     inputs = processor(images=image, return_tensors="pt")
@@ -433,7 +433,7 @@ def _run_hf_image_classifier(media_path: Path, profile: dict[str, object]) -> li
         id2label = getattr(model.config, "id2label", None) or {}
         target = next((int(idx) for idx, name in id2label.items() if str(name).lower() == score_label), None)
         if target is None or target >= len(values):
-            raise RuntimeError(f"score_label '{score_label}' not found in model labels {id2label}")
+            raise RuntimeError(f"score_label '{score_label}'이(가) 모델 라벨 {id2label}에 없습니다")
         shifted = [value - max(values) for value in values]
         exps = [math.exp(max(-80.0, min(80.0, value))) for value in shifted]
         return [exps[target] / max(1e-12, sum(exps))]
@@ -523,14 +523,14 @@ def _run_causal_lm_ppl(media_path: Path, profile: dict[str, object], *, model_na
     torch = importlib.import_module("torch")
     hub_model = str(profile.get("hub_model") or "")
     if not hub_model:
-        raise RuntimeError("causal-lm-ppl profile needs a 'hub_model' field (e.g. Qwen/Qwen2.5-0.5B)")
+        raise RuntimeError("causal-lm-ppl 프로필에는 'hub_model' 필드가 필요합니다(예: Qwen/Qwen2.5-0.5B)")
     profile_limitations = _profile_limitations(profile)
     raw = media_path.read_bytes()[:_PPL_MAX_BYTES]
     text = raw.decode("utf-8", errors="replace")
     if not text.strip():
         return ExternalModelAnalysis(
             available=False, score=0, confidence="unavailable", model=model_name,
-            detail="causal-lm-ppl: file decodes to empty text.",
+            detail="causal-lm-ppl: 파일을 디코딩한 텍스트가 비어 있습니다.",
             limitations=list(profile_limitations),
         )
     tokenizer, model = _causal_lm_model(hub_model, require_revision(profile))
@@ -583,7 +583,7 @@ def _run_causal_lm_ppl(media_path: Path, profile: dict[str, object], *, model_na
     if best_ppl is None:
         return ExternalModelAnalysis(
             available=False, score=0, confidence="unavailable", model=model_name,
-            detail=f"causal-lm-ppl: fewer than {_PPL_MIN_TOKENS} scored tokens in every view.",
+            detail=f"causal-lm-ppl: 모든 보기에서 채점된 토큰이 {_PPL_MIN_TOKENS}개 미만입니다.",
             limitations=list(profile_limitations),
         )
     ppl = best_ppl
@@ -625,14 +625,14 @@ def _run_binoculars(media_path: Path, profile: dict[str, object], *, model_name:
     performer_id = str(profile.get("hub_model") or "")
     observer_id = str(profile.get("observer_model") or "")
     if not performer_id or not observer_id:
-        raise RuntimeError("binoculars profile needs 'hub_model' (performer) and 'observer_model' fields")
+        raise RuntimeError("binoculars 프로필에는 'hub_model'(performer)과 'observer_model' 필드가 필요합니다")
     profile_limitations = _profile_limitations(profile)
     raw = media_path.read_bytes()[:_PPL_MAX_BYTES]
     text = raw.decode("utf-8", errors="replace")
     if not text.strip():
         return ExternalModelAnalysis(
             available=False, score=0, confidence="unavailable", model=model_name,
-            detail="binoculars: file decodes to empty text.",
+            detail="binoculars: 파일을 디코딩한 텍스트가 비어 있습니다.",
             limitations=list(profile_limitations),
         )
     tokenizer, performer = _causal_lm_model(performer_id, require_revision(profile))
@@ -686,7 +686,7 @@ def _run_binoculars(media_path: Path, profile: dict[str, object], *, model_name:
     if best_ratio is None:
         return ExternalModelAnalysis(
             available=False, score=0, confidence="unavailable", model=model_name,
-            detail=f"binoculars: fewer than {_PPL_MIN_TOKENS} scored tokens in every view.",
+            detail=f"binoculars: 모든 보기에서 채점된 토큰이 {_PPL_MIN_TOKENS}개 미만입니다.",
             limitations=list(profile_limitations),
         )
     ratio_low = float(profile.get("ratio_low", 0.85) or 0.85)
@@ -724,7 +724,7 @@ def _run_torchvision(checkpoint: Path, array, profile: dict[str, object]) -> lis
     if model is None:
         model_fn = getattr(torchvision_models, arch, None)
         if model_fn is None:
-            raise RuntimeError(f"torchvision.models has no architecture named '{arch}'")
+            raise RuntimeError(f"torchvision.models에 '{arch}' 아키텍처가 없습니다")
         model = model_fn(weights=None)
         if hasattr(model, "fc"):
             model.fc = torch.nn.Linear(model.fc.in_features, num_classes)
@@ -733,14 +733,14 @@ def _run_torchvision(checkpoint: Path, array, profile: dict[str, object]) -> lis
             head = model.classifier
             if isinstance(head, torch.nn.Sequential):
                 if not isinstance(head[-1], torch.nn.Linear):
-                    raise RuntimeError(f"torchvision arch '{arch}' classifier tail is not Linear")
+                    raise RuntimeError(f"torchvision '{arch}'의 classifier 끝 층이 Linear가 아닙니다")
                 head[-1] = torch.nn.Linear(head[-1].in_features, num_classes)
             elif isinstance(head, torch.nn.Linear):
                 model.classifier = torch.nn.Linear(head.in_features, num_classes)
             else:
-                raise RuntimeError(f"torchvision arch '{arch}' classifier is not Linear/Sequential")
+                raise RuntimeError(f"torchvision '{arch}'의 classifier가 Linear/Sequential이 아닙니다")
         else:
-            raise RuntimeError(f"torchvision arch '{arch}' has no fc/classifier head to rewire for num_classes={num_classes}")
+            raise RuntimeError(f"torchvision '{arch}'에 num_classes={num_classes}로 바꿀 fc/classifier 헤드가 없습니다")
         state = load_torch_state(checkpoint)
         if isinstance(state, dict):
             for wrapper in ("state_dict", "model", "net"):

@@ -386,7 +386,7 @@ def fetch_weights(
     fetched / unverified / already-present / unsupported / failed.
     """
     if offline:
-        return {"status": "skipped", "reason": "offline mode: network fetch refused", "results": [], "fetched": [], "unverified": [], "failed": []}
+        return {"status": "skipped", "reason": "오프라인 모드: 네트워크 다운로드를 거부했습니다", "results": [], "fetched": [], "unverified": [], "failed": []}
 
     import os
     import tempfile
@@ -402,19 +402,19 @@ def fetch_weights(
         try:
             data = json.loads(profile_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            entry = {"name": name, "status": "failed", "error": f"profile unreadable: {type(exc).__name__}"}
+            entry = {"name": name, "status": "failed", "error": f"프로필을 읽을 수 없습니다: {type(exc).__name__}"}
             results.append(entry); failed.append(entry)
             continue
         kind, checkpoint_rel = _profile_weight_kind(data)
         url = data.get("checkpoint_url")
         if kind != "local" or not checkpoint_rel:
-            results.append({"name": name, "status": "unsupported", "reason": f"profile kind '{kind}' has no fetchable local checkpoint"})
+            results.append({"name": name, "status": "unsupported", "reason": f"프로필 종류 '{kind}'에는 내려받을 로컬 체크포인트가 없습니다"})
             continue
         if not url:
-            results.append({"name": name, "status": "unsupported", "reason": "no checkpoint_url declared — manual provisioning required"})
+            results.append({"name": name, "status": "unsupported", "reason": "checkpoint_url이 선언되지 않았습니다 — 수동으로 배치해야 합니다"})
             continue
         if not str(url).lower().startswith(ALLOWED_DOWNLOAD_SCHEME):
-            entry = {"name": name, "status": "failed", "error": "checkpoint_url must be https:// (http/file/ftp refused)"}
+            entry = {"name": name, "status": "failed", "error": "checkpoint_url은 https://여야 합니다(http/file/ftp 거부)"}
             results.append(entry); failed.append(entry)
             continue
 
@@ -424,7 +424,7 @@ def fetch_weights(
         try:
             dest.relative_to(base_dir)
         except ValueError:
-            entry = {"name": name, "status": "failed", "error": "checkpoint path escapes models dir"}
+            entry = {"name": name, "status": "failed", "error": "체크포인트 경로가 모델 디렉터리를 벗어납니다"}
             results.append(entry); failed.append(entry)
             continue
 
@@ -449,13 +449,13 @@ def fetch_weights(
                         break
                     received += len(chunk)
                     if received > max_bytes:
-                        raise ValueError(f"download exceeds size cap ({max_bytes} bytes)")
+                        raise ValueError(f"다운로드가 크기 상한({max_bytes} bytes)을 넘었습니다")
                     digest.update(chunk)
                     out_fh.write(chunk)
             actual = digest.hexdigest()
             if expected and actual != expected.lower():
                 os.unlink(tmp_name)
-                failed.append({"name": name, "status": "failed", "error": f"sha256 mismatch (expected {expected[:12]}…, got {actual[:12]}…)"})
+                failed.append({"name": name, "status": "failed", "error": f"sha256 불일치(기대값 {expected[:12]}…, 실제 {actual[:12]}…)"})
                 results.append(failed[-1])
                 continue
             os.replace(tmp_name, dest)
@@ -472,7 +472,7 @@ def fetch_weights(
                 os.unlink(tmp_name)
             except OSError:
                 pass
-            entry = {"name": name, "status": "failed", "error": f"download failed: {exc}"}
+            entry = {"name": name, "status": "failed", "error": f"다운로드 실패: {exc}"}
             results.append(entry); failed.append(entry)
             continue
 
@@ -495,7 +495,7 @@ def resolve_profile_path(profile: Path | str, models_dir: Path | str | None = No
         path = base_dir / name
         if path.is_file():
             return path.resolve()
-    raise FileNotFoundError(f"profile not found: {profile} (models dir {base_dir})")
+    raise FileNotFoundError(f"프로필을 찾을 수 없습니다: {profile} (모델 디렉터리 {base_dir})")
 
 
 def _hub_commit_sha(model_id: str) -> str:
@@ -505,7 +505,7 @@ def _hub_commit_sha(model_id: str) -> str:
     info = HfApi().model_info(model_id)
     sha = str(getattr(info, "sha", "") or "").lower()
     if not is_commit_sha(sha):
-        raise RuntimeError(f"hub returned no commit sha for {model_id}")
+        raise RuntimeError(f"허브가 {model_id}의 커밋 sha를 돌려주지 않았습니다")
     return sha
 
 
@@ -549,21 +549,21 @@ def pin_profile(
         if key == "sha256":
             checkpoint_rel = str(target.get("checkpoint") or target.get("path") or "")
             if not checkpoint_rel:
-                raise ValueError(f"profile declares no checkpoint: {path}")
+                raise ValueError(f"프로필에 체크포인트가 선언되어 있지 않습니다: {path}")
             checkpoint = Path(checkpoint_rel)
             if not checkpoint.is_absolute():
                 checkpoint = path.parent / checkpoint
             if not checkpoint.is_file():
-                raise FileNotFoundError(f"checkpoint not found: {checkpoint}")
+                raise FileNotFoundError(f"체크포인트를 찾을 수 없습니다: {checkpoint}")
             pin["sha256"] = file_sha256(checkpoint)
             continue
         model_id = next((str(target.get(field)) for field in _REVISION_SOURCES[key] if target.get(field)), "")
         if not model_id:
-            raise ValueError(f"profile has no hub model id for pin.{key}: {path}")
+            raise ValueError(f"프로필에 pin.{key}에 쓸 허브 모델 id가 없습니다: {path}")
         if revision and key == "revision":
             value = revision.strip().lower()
             if not is_commit_sha(value):
-                raise ValueError("--revision must be a 40-hex commit sha (a branch or tag is not a pin)")
+                raise ValueError("--revision은 40자리 16진수 커밋 sha여야 합니다(브랜치나 태그는 고정값이 아닙니다)")
             pin[key] = value
             continue
         resolver = hub_resolver or _hub_commit_sha
@@ -614,7 +614,7 @@ def bundle_offline_weights(
     """
     dest = Path(dest_dir).resolve()
     if dest.exists() and any(dest.iterdir()) and not force:
-        raise SystemExit(f"bundle destination is not empty: {dest} (pass --force to overwrite)")
+        raise SystemExit(f"번들 대상 폴더가 비어 있지 않습니다: {dest} (덮어쓰려면 --force)")
     dest.mkdir(parents=True, exist_ok=True)
 
     manifest = inspect_model_manifest(models_dir)
@@ -657,7 +657,7 @@ def bundle_offline_weights(
 
     if copy_weights and missing_required:
         raise SystemExit(
-            "incomplete bundle: required weights absent -> " + ", ".join(missing_required)
+            "불완전한 번들: 필요한 가중치가 없습니다 -> " + ", ".join(missing_required)
         )
     return manifest_file
 
@@ -674,7 +674,7 @@ def install_bundle(
     bundle = Path(bundle_dir).resolve()
     target = Path(target_dir).resolve()
     if not (bundle / "offline_manifest.json").is_file():
-        return {"status": "failed", "error": f"not a bundle directory: {bundle}"}
+        return {"status": "failed", "error": f"번들 디렉터리가 아닙니다: {bundle}"}
     target.mkdir(parents=True, exist_ok=True)
     for src in sorted(bundle.iterdir()):
         if src.is_file():

@@ -15,19 +15,17 @@
   "threshold": 67,
   "source_url": "https://huggingface.co/Gustking/wav2vec2-large-xlsr-deepfake-audio-classification",
   "limitations": [
-    "Hub weights are not committed; transformers downloads ~1.2 GB on first use (set hub_model to a local snapshot directory for offline runs).",
-    "Fine-tuned on the 'In-the-Wild' audio deepfake dataset — coverage of generators outside that dataset is unverified.",
-    "Measured locally (2026-09): catches older synthesizer TTS (SAPI fake 91.7%) and is well-calibrated on real speech (LibriSpeech real 89.7%, YESNO 8 kHz real 93.0%).",
-    "Edge-tts sweeps (2026-09): recall ~4/7 at 0.5 — voice- and text-dependent (en_guy 0.60 caught; en_aria 0.25 missed). Korean-text batch A scored 0.21-0.44 but batch B scored 0.57-0.91 — the variance is sample-dependent, not a systematic language gap. A low score is not evidence of real audio.",
-    "Only the first ~15 s is scored; longer files are truncated.",
-    "Scores are a prioritization signal, not a truth label.",
-    "Expanded sweep (40 edge-tts voices / 12 real controls, 2026-09-20): fake recall@50 0.78, real FPR@50 0.00 — best-calibrated member on real speech in the measured set; union with AASIST reaches 0.93 recall."
+    "허브 가중치는 저장소에 포함되지 않습니다. 첫 사용 시 transformers가 약 1.2 GB를 내려받습니다(오프라인 실행은 hub_model을 로컬 스냅샷 디렉터리로 지정).",
+    "'In-the-Wild' 오디오 딥페이크 데이터셋으로 미세조정되었으며, 그 데이터셋 밖 생성기에 대한 탐지 범위는 검증되지 않았습니다.",
+    "음성·문장에 따라 탐지 여부가 달라지는 소규모 측정 결과가 있습니다(미검증 — experiments/AUDIO_EVALUATION.md). 낮은 점수는 실제 음성이라는 근거가 아닙니다.",
+    "앞부분 약 15초만 채점하며 긴 파일은 잘립니다.",
+    "점수는 보정 전 원점수이며 진위 판정이 아닙니다."
   ],
   "notes": [
-    "Wav2Vec2ForSequenceClassification fine-tuned on In-the-Wild (real vs generated speech collected in the wild), Apache-2.0.",
-    "score_label 'fake' resolves the class index from id2label at runtime ({0: 'real', 1: 'fake'} in this checkpoint) — label order cannot silently invert the score.",
-    "Pairs with the AASIST member as complementary coverage: AASIST catches generators outside In-the-Wild but false-positives on low-bandwidth real speech (8 kHz telephone audio scored 97.5% spoof); this model is better calibrated on real speech but misses newer TTS. Disagreement between the two is itself a review signal.",
-    "Empirical comparison vs the rejected MelodyMachine/Deepfake-audio-detection-V2 candidate: that checkpoint returned inverted scores on local samples (real speech -> fake 100%), so it is not wired."
+    "In-the-Wild(실제 환경에서 수집한 실제 대 생성 음성)로 미세조정한 Wav2Vec2ForSequenceClassification, Apache-2.0.",
+    "score_label 'fake'는 실행 시 id2label(이 체크포인트는 {0: 'real', 1: 'fake'})에서 클래스 인덱스를 찾으므로, 라벨 순서가 바뀌어도 점수가 조용히 뒤집히지 않습니다.",
+    "AASIST 멤버와 상호 보완 범위로 짝을 이룹니다: AASIST는 대역폭이 낮은 실제 음성에서 오탐이 있고, 이 모델은 최신 TTS를 놓칠 수 있습니다. 두 멤버의 불일치 자체가 검토 신호입니다.",
+    "기각된 MelodyMachine/Deepfake-audio-detection-V2 후보는 로컬 표본에서 점수가 뒤집혀 나와(실제 음성 → fake) 연결하지 않았습니다(docs/MODEL-REJECTIONS.md)."
   ],
   "license": "apache-2.0",
   "pin": {

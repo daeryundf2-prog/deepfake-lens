@@ -61,7 +61,7 @@ def prnu_residual(gray_2d):
 
     image = np.asarray(gray_2d, dtype=np.float64)
     if image.ndim != 2 or min(image.shape) < 40:
-        raise ValueError("prnu residual needs a 2-D array of at least 40x40")
+        raise ValueError("PRNU 잔차에는 40x40 이상의 2차원 배열이 필요합니다")
     sigma = 1.0
     border = 2 * max(1, int(sigma * 3))
     denoised = _gaussian_denoise(image, sigma=sigma)
@@ -103,7 +103,7 @@ def normalized_cross_correlation(residual, fingerprint) -> float:
     left = np.asarray(residual, dtype=np.float64).ravel()
     right = np.asarray(fingerprint, dtype=np.float64).ravel()
     if left.shape != right.shape or left.size == 0:
-        raise ValueError("residual and fingerprint shapes must match and be non-empty")
+        raise ValueError("잔차와 지문의 형태가 같고 비어 있지 않아야 합니다")
     left -= left.mean()
     right -= right.mean()
     denominator = np.sqrt((left * left).sum() * (right * right).sum())

@@ -22,14 +22,14 @@
   "threshold": 67,
   "source_url": "https://github.com/shilinyan99/AIDE",
   "limitations": [
-    "Checkpoint is not committed; run scripts/fetch_aide.py to download progan_train.pth (~3.3 GB, research license).",
-    "Measured locally (2026-09): JPEG recompression collapses fake scores (DALL-E 91->6 at q50) and real-image false positives alike (Lenna 85->12 at q75) — below q75 this member is auto down-weighted via 'degraded_weight'. See experiments/RECOMPRESSION_EVAL.md.",
-    "AIDE scores are a prioritization signal, not a truth label; see experiments/AIDE_EVALUATION.md for measured AUROC and cross-generator caveats."
+    "체크포인트는 저장소에 포함되지 않습니다. scripts/fetch_aide.py로 progan_train.pth(~3.3 GB, 연구용 라이선스)를 내려받으십시오.",
+    "JPEG 재압축은 생성 이미지 점수와 실제 이미지 오탐을 함께 무너뜨립니다. 품질 75 미만에서는 'degraded_weight'로 이 멤버의 가중치를 자동으로 낮춥니다(소규모 로컬 측정, 미검증 — experiments/RECOMPRESSION_EVAL.md).",
+    "AIDE 점수는 보정 전 원점수이며 진위 판정이 아닙니다. 생성기 간 일반화 주의사항은 experiments/AIDE_EVALUATION.md(미검증)를 참조하십시오."
   ],
   "notes": [
-    "Runtime 'aide' delegates to scripts/run_aide.py, which bakes AIDE's DCT band-selection preprocessing into the model class; input_size/mean/std are recorded for reference rather than consumed by the generic image preprocessor.",
-    "Model logits are (real=0, fake=1); score_index 1 with softmax yields the fake probability on a 0-100 scale.",
-    "The checkpoint path is relative to this profile's directory (models/); keep it out of git — it is covered by .gitignore."
+    "런타임 'aide'는 scripts/run_aide.py에 위임하며, AIDE의 DCT 대역 선택 전처리가 모델 클래스에 포함되어 있습니다. input_size/mean/std는 일반 이미지 전처리기가 쓰지 않고 기록용으로만 둡니다.",
+    "모델 로짓 순서는 (real=0, fake=1)입니다. score_index 1에 softmax를 적용하면 0–100 척도의 fake 확률이 됩니다.",
+    "체크포인트 경로는 이 프로필 디렉터리(models/) 기준 상대 경로이며 .gitignore로 git에서 제외됩니다."
   ],
   "license": "MIT",
   "degraded_weight": 0.3,

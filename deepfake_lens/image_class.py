@@ -264,7 +264,7 @@ def _load_rgb(source: ImageSource) -> tuple[np.ndarray, tuple[int, int], np.ndar
         if array.ndim == 2:
             array = np.repeat(array[..., None], 3, axis=2)
         if array.ndim != 3 or array.shape[2] < 3:
-            raise ValueError(f"unsupported array shape {array.shape}")
+            raise ValueError(f"지원하지 않는 배열 형태입니다: {array.shape}")
         array = array[..., :3]
         if array.dtype != np.uint8:
             array = np.clip(np.round(array.astype(np.float64)), 0, 255).astype(np.uint8)

@@ -17,19 +17,18 @@
   "source_url": "https://github.com/clovaai/aasist",
   "checkpoint_url": "https://raw.githubusercontent.com/clovaai/aasist/main/models/weights/AASIST.pth",
   "limitations": [
-    "Checkpoint is not committed; run scripts/fetch_aasist.py to download AASIST.pth (~1.3 MB) into models/aasist.pth.",
-    "AASIST code and weights are MIT-licensed (NAVER Corp.) but the model was trained on ASVspoof2019-LA, whose dataset terms are research-oriented; treat the checkpoint as research-use, not a redistributed asset of this repo.",
-    "Trained on ASVspoof2019 LA attacks (TTS/VC): generalization to newer neural codecs and commercial voice-clone services is not guaranteed — a low score is not evidence of real audio.",
-    "Measured locally (2026-09): edge-tts 7-voice recall ~1/7 at 0.5 (voice-dependent), and false-positives on low-bandwidth real speech (8 kHz YESNO scored 0.93 spoof). Pairs with the wav2vec member which is calibrated better on real speech but weak on some TTS voices.",
-    "Only the first ~30s is scored, in ~4s windows whose logits are averaged; very long files are not fully covered.",
-    "Scores are a prioritization signal, not a truth label.",
-    "Expanded sweep (40 edge-tts voices / 12 real controls, 2026-09-20): fake recall@50 0.72, real FPR@50 0.08. Combined with wav2vec, union recall reaches 0.93; both missed only 3 English voices."
+    "체크포인트는 저장소에 포함되지 않습니다. scripts/fetch_aasist.py로 AASIST.pth(~1.3 MB)를 models/aasist.pth에 내려받으십시오.",
+    "AASIST 코드와 가중치는 MIT 라이선스(NAVER Corp.)이지만 학습 데이터 ASVspoof2019-LA의 약관이 연구용이므로, 체크포인트는 연구용으로 취급하며 이 저장소의 재배포 자산이 아닙니다.",
+    "ASVspoof2019 LA 공격(TTS/VC)으로 학습되어 최신 신경 코덱과 상용 음성 복제 서비스로의 일반화는 보장되지 않습니다 — 낮은 점수는 실제 음성이라는 근거가 아닙니다.",
+    "대역폭이 낮은 실제 음성(8 kHz 전화 음성 등)에서 오탐 사례가 관찰되었습니다(소규모 로컬 측정, 미검증 — experiments/AUDIO_EVALUATION.md).",
+    "앞부분 약 30초만 약 4초 창 단위로 채점해 로짓을 평균합니다. 긴 파일은 전부 검사되지 않습니다.",
+    "점수는 보정 전 원점수이며 진위 판정이 아닙니다."
   ],
   "notes": [
-    "Runtime 'aasist' delegates to scripts/run_aasist.py, a faithful reimplementation of clovaai/aasist models/AASIST.py (sinc-conv front-end + 6 residual blocks + spectro-temporal graph attention); attribute names match the official state dict.",
-    "Audio is decoded to mono at sample_rate, then scored in non-overlapping evenly-spaced windows of window_samples (64600 ~= 4.04s, the upstream evaluation cut); windows beyond the file are skipped and short files are loop-padded exactly like upstream pad().",
-    "Model logits are (spoof=0, bonafide=1) — upstream's own eval reads index 1 as the bonafide score, so score_index 0 with softmax yields the spoof/fake probability on a 0-100 scale.",
-    "The checkpoint path is relative to this profile's directory (models/); keep it out of git — it is covered by .gitignore."
+    "런타임 'aasist'는 scripts/run_aasist.py에 위임합니다. clovaai/aasist의 models/AASIST.py(sinc-conv 전단 + 잔차 블록 6개 + 분광-시간 그래프 어텐션)를 충실히 재구현했으며 속성 이름이 공식 state dict와 일치합니다.",
+    "오디오는 sample_rate의 모노로 디코딩한 뒤 window_samples(64600 ≈ 4.04초, 업스트림 평가 길이) 크기의 겹치지 않는 균등 창으로 채점합니다. 파일을 넘는 창은 건너뛰고 짧은 파일은 업스트림 pad()와 똑같이 반복 패딩합니다.",
+    "모델 로짓 순서는 (spoof=0, bonafide=1)입니다. 업스트림 평가는 index 1을 bonafide 점수로 읽으므로, score_index 0에 softmax를 적용하면 0–100 척도의 spoof/fake 확률이 됩니다.",
+    "체크포인트 경로는 이 프로필 디렉터리(models/) 기준 상대 경로이며 .gitignore로 git에서 제외됩니다."
   ],
   "license": "MIT",
   "pin": {

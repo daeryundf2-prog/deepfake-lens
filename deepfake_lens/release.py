@@ -41,9 +41,9 @@ def build_release_checklist(root: Path | str) -> dict[str, object]:
         "commands": RELEASE_CHECK_COMMANDS,
         "entrypoint_present": 'deepfake-lens = "deepfake_lens.cli:main"' in pyproject,
         "notes": [
-            "Run all commands before tagging a release.",
-            "Do not publish pretrained weights until dataset license, model license, and calibration report are recorded.",
-            "Keep scan/eval/train local-only by default.",
+            "릴리스 태그를 달기 전에 모든 명령을 실행하십시오.",
+            "데이터셋 라이선스, 모델 라이선스, 보정 보고서를 기록하기 전에는 사전학습 가중치를 공개하지 마십시오.",
+            "scan/eval/train은 기본적으로 로컬에서만 실행하십시오.",
         ],
     }
 

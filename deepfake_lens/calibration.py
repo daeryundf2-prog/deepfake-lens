@@ -240,13 +240,13 @@ def calibrate_scores(
     positives = sum(1 for _, positive in pairs if positive)
     negatives = len(pairs) - positives
     notes = [
-        "calibrated values are dataset-dependent screening confidences, not truth probabilities",
-        "scores remain prioritization evidence, not final truth labels",
+        "보정값은 데이터셋에 따라 달라지는 선별용 신뢰도이며 진위 확률이 아닙니다",
+        "점수는 최종 진위 판정이 아닙니다",
     ]
     if len(pairs) < min_samples or positives < min_per_class or negatives < min_per_class:
         notes.append(
-            f"insufficient labeled data ({len(pairs)} usable samples, {positives} positive, "
-            f"{negatives} negative; need >= {min_samples} samples and >= {min_per_class} per class)"
+            f"라벨 데이터 부족(사용 가능 {len(pairs)}건, 양성 {positives}건, "
+            f"음성 {negatives}건; {min_samples}건 이상, 클래스당 {min_per_class}건 이상 필요)"
         )
         return ScoreCalibrator(
             CALIBRATOR_VERSION, "insufficient-data", (), (), len(pairs), positives, negatives, dataset_fingerprint, tuple(notes)

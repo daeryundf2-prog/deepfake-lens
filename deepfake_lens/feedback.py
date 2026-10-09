@@ -14,15 +14,15 @@ from .fusion import DEFAULT_FUSION_PROFILE, FusionProfile, component_scores, com
 FEEDBACK_REPORT_VERSION = "feedback-report-v1"
 
 _NO_OBSERVATIONS_NOTE = (
-    "no examiner labels matched usable scan results; no weight suggestion emitted"
+    "검사 결과와 일치하는 감정인 라벨이 없어 가중치 제안을 만들지 않았습니다"
 )
 _SUGGESTION_NOTE = (
-    "suggested_profile is advisory only: nothing is applied automatically. "
-    "Review the report, then pass the profile file via --fusion-profile to use it."
+    "suggested_profile은 제안일 뿐 자동으로 적용되지 않습니다. "
+    "보고서를 검토한 뒤 사용하려면 --fusion-profile로 프로필 파일을 지정하십시오."
 )
 _THRESHOLD_NOTE = (
-    "suggested_profile keeps the base profile threshold unchanged; refit "
-    "thresholds explicitly with `calibrate` or `fusion` instead of editing here."
+    "suggested_profile은 기준 프로필의 임계값을 바꾸지 않습니다. 임계값은 여기서 고치지 말고 "
+    "`calibrate` 또는 `fusion`으로 명시적으로 다시 맞추십시오."
 )
 
 
@@ -269,8 +269,8 @@ def suggest_fusion_weights(
     total = sum(raw.values())
     if total <= 0:
         notes.append(
-            "no component separated examiner labels (all AUROC <= 0.5); "
-            "suggested weights keep the base profile normalized"
+            "감정인 라벨을 분리한 구성 요소가 없습니다(모든 AUROC <= 0.5). "
+            "제안 가중치는 기준 프로필을 정규화한 값 그대로입니다"
         )
         base_total = sum(max(0.0, value) for value in base_weights.values()) or 1.0
         suggested = {key: max(0.0, base_weights[key]) / base_total for key in keys}

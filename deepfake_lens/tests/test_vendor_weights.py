@@ -185,7 +185,7 @@ class FetchAndCoverageTest(unittest.TestCase):
     def test_fetch_offline_refuses_network(self) -> None:
         result = fetch_weights(self.models_dir, offline=True)
         self.assertEqual(result["status"], "skipped")
-        self.assertIn("offline", result["reason"])
+        self.assertIn("오프라인", result["reason"])  # R4
         self.assertEqual(result["failed"], [])
 
     def test_fetch_skips_profiles_without_url(self) -> None:
@@ -260,7 +260,7 @@ class FetchAndCoverageTest(unittest.TestCase):
             result = fetch_weights(self.models_dir)
         self.assertEqual(result["fetched"], [])
         self.assertEqual(len(result["failed"]), 1)
-        self.assertIn("sha256 mismatch", result["failed"][0]["error"])
+        self.assertIn("sha256 불일치", result["failed"][0]["error"])  # R4
         self.assertFalse((self.models_dir / "bad.pth").exists())
 
     def test_cli_vendor_weights_fetch_offline(self) -> None:
@@ -344,7 +344,7 @@ class FetchHardeningTest(unittest.TestCase):
         with mock.patch("urllib.request.urlopen", return_value=_FakeResponse(b"x" * 64)):
             result = fetch_weights(self.models_dir, max_bytes=16)
         self.assertEqual(result["status"], "failed")
-        self.assertIn("size cap", result["failed"][0]["error"])
+        self.assertIn("크기 상한", result["failed"][0]["error"])  # R4
         self.assertFalse((self.models_dir / "net.pth").exists())
         self.assertEqual(list(self.models_dir.glob(".fetch-*")), [])
 

@@ -89,7 +89,7 @@ class EvidenceLoaderTest(unittest.TestCase):
             chains, issues = load_evidence_chains(chains_file)
             self.assertEqual(len(chains), 1)
             self.assertEqual(len(issues), 1)
-            self.assertIn("entry 1", issues[0])
+            self.assertIn("항목 1", issues[0])  # R4
 
     def test_invalid_json_reports_issue(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -97,12 +97,12 @@ class EvidenceLoaderTest(unittest.TestCase):
             chains_file.write_text("{not json", encoding="utf-8")
             chains, issues = load_evidence_chains(chains_file)
             self.assertEqual(chains, [])
-            self.assertTrue(any("invalid JSON" in issue for issue in issues))
+            self.assertTrue(any("JSON 형식 오류" in issue for issue in issues))  # R4
 
     def test_missing_file_reports_issue(self) -> None:
         chains, issues = load_evidence_chains("/nonexistent/chains.json")
         self.assertEqual(chains, [])
-        self.assertTrue(any("not found" in issue for issue in issues))
+        self.assertTrue(any("찾을 수 없습니다" in issue for issue in issues))  # R4
 
 
 class JsonOutParentCreationTest(unittest.TestCase):

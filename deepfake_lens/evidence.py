@@ -159,14 +159,14 @@ def load_evidence_chains(path: Path | str) -> tuple[list[EvidenceChain], list[st
     """
     evidence_path = Path(path)
     if not evidence_path.exists():
-        return [], [f"file not found: {evidence_path}"]
+        return [], [f"파일을 찾을 수 없습니다: {evidence_path}"]
 
     try:
         data = json.loads(evidence_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        return [], [f"invalid JSON: {exc}"]
+        return [], [f"JSON 형식 오류: {exc}"]
     if not isinstance(data, list):
-        return [], ["unexpected top-level structure (expected a list of chains)"]
+        return [], ["최상위 구조가 예상과 다릅니다(체인 목록이어야 합니다)"]
 
     chains: list[EvidenceChain] = []
     issues: list[str] = []
@@ -174,7 +174,7 @@ def load_evidence_chains(path: Path | str) -> tuple[list[EvidenceChain], list[st
         try:
             chains.append(EvidenceChain(**item))
         except TypeError as exc:
-            issues.append(f"entry {index} skipped: {exc}")
+            issues.append(f"항목 {index} 건너뜀: {exc}")
     return chains, issues
 
 
