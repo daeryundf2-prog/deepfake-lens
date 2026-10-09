@@ -63,6 +63,9 @@ dev = [
   "Pillow>=10.0",
   "c2pa-python>=0.6",
   "coverage>=7.4",
+  # N3: test_json_contract validates real scan/stream payloads against
+  # contracts/deepfake-lens-scan-result-v2.schema.json (draft 2020-12).
+  "jsonschema>=4.18",
 ]
 
 [project.scripts]
@@ -139,6 +142,8 @@ files = [
     "deepfake_lens/checks.py",
     "deepfake_lens/error_text.py",
     "deepfake_lens/tests/test_error_text.py",
+    "deepfake_lens/pdf_backend.py",
+    "deepfake_lens/tests/test_pdf_backend.py",
     "deepfake_lens/evidence_rules.py",
     "deepfake_lens/image_class.py",
     "deepfake_lens/tests/test_image_class.py",

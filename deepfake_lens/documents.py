@@ -75,8 +75,10 @@ def extract_document_text(path: Path | str) -> tuple[str, dict[str, str]]:
 
 
 def _extract_pdf(path: Path, meta: dict[str, str]) -> tuple[str, dict[str, str]]:
+    from .pdf_backend import import_pymupdf
+
     try:
-        import fitz  # pymupdf
+        fitz = import_pymupdf()  # N4: never the stdout-printing bare `import fitz`
     except ImportError:
         meta["extractor"] = "unavailable:pymupdf"
         return "", meta

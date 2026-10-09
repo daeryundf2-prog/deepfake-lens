@@ -119,7 +119,9 @@ class DocumentExtractionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pdf = Path(tmp) / "broken.pdf"
             pdf.write_bytes(b"%PDF-1.7\n%broken\n")
-            with mock.patch.dict(sys.modules, {"fitz": _BrokenFitz("fitz")}):
+            # N4: pdf_backend imports ``pymupdf`` first, then legacy ``fitz``.
+            broken = _BrokenFitz("fitz")
+            with mock.patch.dict(sys.modules, {"pymupdf": broken, "fitz": broken}):
                 text, meta = extract_document_text(pdf)
                 with self.assertLogs("deepfake_lens.documents", level="WARNING"):
                     item = analyze_file(pdf)

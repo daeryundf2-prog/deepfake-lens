@@ -477,14 +477,12 @@ class PdfDependencyMissing(RuntimeError):
 
 
 def _import_pymupdf() -> Any:
+    from .pdf_backend import import_pymupdf
+
     try:
-        import pymupdf
-    except ImportError:
-        try:
-            import fitz as pymupdf
-        except ImportError as exc:
-            raise PdfDependencyMissing() from exc
-    return pymupdf
+        return import_pymupdf()  # N4: no fitz deprecation warning on stdout
+    except ImportError as exc:
+        raise PdfDependencyMissing() from exc
 
 
 def pdf_backend_available() -> bool:

@@ -41,7 +41,10 @@
       "type": "object",
       "required": ["path", "name", "kind", "status", "size_bytes", "result"],
       "properties": {
-        "result": { "type": ["object", "null"], "$ref": "#/$defs/result" },
+        "result": {
+          "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/result" }],
+          "description": "null for a row without analysis (skipped, unsupported, failed, duplicate); draft 2020-12 applies a sibling $ref, so null must be its own anyOf branch (N3)."
+        },
         "sha256": {
           "type": ["string", "null"],
           "pattern": "^[0-9a-f]{64}$",
@@ -91,6 +94,8 @@
     "coverage_entry": {
       "type": "object",
       "required": ["check", "status", "reason"],
+      "if": { "properties": { "status": { "enum": ["skipped", "failed"] } } },
+      "then": { "properties": { "reason": { "minLength": 1 } } },
       "properties": {
         "check": { "type": "string" },
         "status": { "enum": ["ran", "skipped", "failed"] },

@@ -365,20 +365,20 @@ def write_forensic_pdf_report(
     """
     if signed_report is None:
         signed_report = signed_report_body(summary, items, thresholds=thresholds, coverage=coverage, report_format="pdf", redact_paths=redact_paths)
+    from .pdf_backend import import_pymupdf
+
     try:
-        import pymupdf
+        pymupdf = import_pymupdf()  # N4: pymupdf first; a legacy fitz import never prints to stdout
     except ImportError:
-        try:
-            import fitz as pymupdf
-        except ImportError:
-            write_pdf_report(
-                path, summary, items,
-                redact_paths=redact_paths,
-                thresholds=thresholds,
-                signed_report=signed_report,
-                degrade_note="pymupdf not installed — this is a simplified text report, NOT the ECFS-stamped forensic layout. Install the 'forensic' extra for the court artifact.",
-            )
-            return
+        write_pdf_report(
+            path, summary, items,
+            redact_paths=redact_paths,
+            thresholds=thresholds,
+            signed_report=signed_report,
+            # The simple PDF is Latin-1 only, so this note stays ASCII.
+            degrade_note="pymupdf not installed — this is a simplified text report, NOT the ECFS-stamped forensic layout. Install the 'forensic' extra for the court artifact.",
+        )
+        return
 
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)

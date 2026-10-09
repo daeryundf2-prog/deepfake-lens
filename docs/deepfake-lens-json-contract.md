@@ -10,7 +10,13 @@ The machine-readable schema is
 (project-owned, pinned in `contracts/PIN.json` under `local`;
 `scripts/verify_contracts.py` fails on unpinned edits, and
 `deepfake_lens/tests/test_json_contract.py` validates real scan output
-against it).
+against it — with the draft 2020-12 `jsonschema` validator when the dev
+extra is installed: a folder scan with every row shape (analyzed, archive
+container/members, symlink `skipped`, `duplicate`, `unsupported`, failed
+checks), the signed and unsigned bodies, `/api/scan` and the
+`/api/scan/stream` result event; a stdlib subset checker otherwise). A row's
+`result` is `null` or a result object (`anyOf`, N3), and a `skipped`/
+`failed` coverage entry must have a non-empty `reason`.
 
 ## Version 2 (phase 0) — what changed and why
 
