@@ -358,7 +358,9 @@ class QaSys2CheckpointSwapTest(_IntegrityAssertions):
 
 
 # Test-count floor: the inventory right before WP-C removed tests (commit
-# 35cbc8e, WP-A..E applied) — recorded in tests/qa/test_inventory_baseline.json.
+# "fix(text): keywords are lexical evidence only, never points (WP-E)", WP-A..E
+# applied; hash before the history rewrite 35cbc8e) — recorded in
+# tests/qa/test_inventory_baseline.json.
 WP_BASELINE_FLOOR = 739
 PRE_PHASE0_COUNT = 633
 DELETED_SECTION = "삭제"
@@ -420,21 +422,43 @@ class QaSys10TestInventoryTest(unittest.TestCase):
 
     def test_deletion_reasons_are_in_commit_messages(self) -> None:
         """QA-SYS-10: 기존 633개 테스트 중 유지 대상 전부 통과. 삭제된 테스트는 삭제 이유가 커밋 메시지에 기록.
-        each deleted test's commit message names it (needs git history; skipped on a shallow clone)."""
+        each deleted test's commit — cited by subject — is in HEAD's history and its message names the test.
+
+        R10-3 (round 10): was looked up by hash and skipped when the hash was
+        missing — the cited hash was from before a history rewrite, so every
+        clone skipped while the conformance table said 통과. The commit is now
+        found by its subject (``git log --fixed-strings --grep`` on HEAD) and
+        a subject that is not in HEAD's history fails; only a missing git
+        executable or work tree (an environment without history) skips.
+        """
         git = shutil.which("git")
         if git is None:
             self.skipTest("git not available")
+        inside = subprocess.run([git, "rev-parse", "--is-inside-work-tree"], cwd=REPO_ROOT, capture_output=True, text=True, check=False)
+        if inside.returncode != 0 or inside.stdout.strip() != "true":
+            self.skipTest("not a git work tree")
         text = DELETIONS_DOC.read_text(encoding="utf-8")
         deleted = [name for name, section in self.documented.items() if section == DELETED_SECTION]
         self.assertTrue(deleted)
         for name in deleted:
             row = next(line for line in text.splitlines() if f"`{name}`" in line)
-            commit = row.strip("|").split("|")[1].strip().split()[0]
-            done = subprocess.run([git, "log", "-1", "--format=%B", commit], cwd=REPO_ROOT, capture_output=True, text=True, check=False)
-            if done.returncode != 0:
-                self.skipTest(f"commit {commit} not in this clone (shallow checkout)")
-            with self.subTest(test=name, commit=commit):
-                self.assertIn(name.split(".", 1)[1], done.stdout, "the deletion is not explained in its commit message")
+            cell = row.strip("|").split("|")[1]
+            subjects = re.findall(r"`([^`]+)`", cell)
+            with self.subTest(test=name):
+                self.assertTrue(subjects, f"the 커밋 cell of {name} cites no commit subject in backticks: {cell!r}")
+                subject = subjects[0]
+                done = subprocess.run(
+                    [git, "log", "HEAD", "--fixed-strings", f"--grep={subject}", "--format=%H%x1f%s%x1f%B%x1e"],
+                    cwd=REPO_ROOT, capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(done.returncode, 0, done.stderr)
+                commits = [entry.split("\x1f", 2) for entry in done.stdout.split("\x1e") if entry.strip()]
+                matching = [body for _, commit_subject, body in commits if commit_subject.strip() == subject]
+                self.assertTrue(matching, f"no commit with the subject {subject!r} in HEAD's history (shallow clone or rewritten history)")
+                self.assertTrue(
+                    any(name.split(".", 1)[1] in body for body in matching),
+                    f"the deletion of {name} is not explained in the message of {subject!r}",
+                )
 
 
 # ============================================================================
@@ -1514,7 +1538,7 @@ class HarnessLogicTest(unittest.TestCase):
 
     def test_untested_qa_id_fails_and_skips_are_not_passes(self) -> None:
         """QA-SYS-10: 기존 633개 테스트 중 유지 대상 전부 통과. 삭제된 테스트는 삭제 이유가 커밋 메시지에 기록.
-        테스트가 없는 QA ID는 실패, 모든 테스트가 건너뜀이면 건너뜀(통과 아님), 여러 테스트가 모두 통과하면 통과다.
+        테스트가 없는 QA ID는 실패, 건너뛴 테스트가 하나라도 있으면 건너뜀(환경)(통과 아님), 여러 테스트가 모두 통과하면 통과다.
 
         N16: was "exactly one canonical test" — QA-IN-2 with two criterion
         tests now passes; a QA ID with none still fails.
@@ -1526,10 +1550,15 @@ class HarnessLogicTest(unittest.TestCase):
             full_suite=True,
         )
         self.assertEqual(outcomes["QA-IN-2"]["result"], "통과")
-        self.assertEqual(outcomes["QA-IN-4"]["result"], "건너뜀")
+        self.assertEqual(outcomes["QA-IN-4"]["result"], "건너뜀(환경)")
         self.assertEqual(outcomes["QA-IN-5"]["result"], "실패")
-        self.assertEqual(outcomes["QA-IN-1"]["result"], "통과")
+        # R10-3: was "통과" — one passed and one skipped test made the QA ID
+        # pass (a clone without the WP-C commit showed QA-SYS-10 통과 with
+        # its commit-message test skipped). Any skip is 건너뜀(환경).
+        self.assertEqual(outcomes["QA-IN-1"]["result"], "건너뜀(환경)")
         self.assertTrue(any("건너뛴 관련 테스트" in note for note in outcomes["QA-IN-1"]["notes"]))
+        counts = {"통과": 1, "실패": 1, "수동": 0, "1단계": 0, "건너뜀(환경)": 2}
+        self.assertEqual(self.harness.summary_line(counts), "1 통과 / 1 실패 / 0 수동 / 0 1단계 / 2 건너뜀(환경)")
 
     def test_summary_and_rows_cover_every_requirement(self) -> None:
         """QA-SYS-10: 기존 633개 테스트 중 유지 대상 전부 통과. 삭제된 테스트는 삭제 이유가 커밋 메시지에 기록.

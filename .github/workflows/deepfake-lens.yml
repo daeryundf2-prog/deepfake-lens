@@ -22,6 +22,10 @@ jobs:
         python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v5
+        with:
+          # R10-3: QA-SYS-10 finds each deleted test's commit by subject in
+          # HEAD's history and fails (no longer skips) on a shallow clone.
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
@@ -73,6 +77,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # R10-3: QA-SYS-10 finds each deleted test's commit by subject in
+          # HEAD's history and fails (no longer skips) on a shallow clone.
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -91,6 +99,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # R10-3: QA-SYS-10 finds each deleted test's commit by subject in
+          # HEAD's history and fails (no longer skips) on a shallow clone.
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"

@@ -3,11 +3,14 @@
  "description": "QA-SYS-10 기준선. 각 항목은 'relpath::Class.test_method'(module-level 클래스에 직접 정의된 test* 메서드, AST 집계 — tests/qa/traceability.source_inventory와 같은 규칙). 비교는 파일 부분을 뺀 'Class.test_method'로 한다(파일 이동은 삭제가 아님).",
  "pre_phase0": {
   "commit": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
+  "subject": "feat(calibration): first MEASURED thresholds — real faceswap corpus via inswapper",
   "label": "0단계 시작 전(명세의 '기존 633개')",
   "count": 633
  },
  "wp_baseline": {
   "commit": "35cbc8e1c4c376368865a12744b58b3751250799",
+  "subject": "fix(text): keywords are lexical evidence only, never points (WP-E)",
+  "commit_note": "R10-3: 히스토리 재작성 이전 해시(참고) — 커밋은 subject로 찾는다",
   "label": "WP-A..E 반영 후, WP-C 삭제 직전(하한 739)",
   "count": 739
  },

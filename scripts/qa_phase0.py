@@ -7,13 +7,15 @@
    통과"); ``--qa-only`` runs just ``tests/qa`` — the four area files
    test_qa_in.py / test_qa_out.py / test_qa_adv.py / test_qa_sys.py (W2) —
    plus the fail-closed and decision tests (QA-SYS-10 is then reported as
-   건너뜀).
+   건너뜀(환경)).
 2. Collects per-test outcome, captured stdout/stderr, log records and
    tracebacks. Each test belongs to a QA ID through its docstring
    (``tests/qa/traceability.qa_tag``). N16: every QA test's docstring first
-   line is "<QA ID>: <통과 기준 원문>"; a QA ID passes when at least one of its
-   tests ran and passed and none failed, is 건너뜀 when every one of them was
-   skipped, and fails when it has no test.
+   line is "<QA ID>: <통과 기준 원문>"; a QA ID fails when one of its tests
+   failed or it has no test, is 건너뜀(환경) when any of its tests was
+   skipped (R10-3: a missing package, git history or tool is an environment
+   gap, not a pass), and passes only when every one of its tests ran and
+   passed.
 3. Writes ``<log-dir>/<QA ID>.log`` per automated QA ID,
    ``<log-dir>/full-suite.log`` (one line per test, tracebacks of failures)
    and ``<log-dir>/results.json``.
@@ -86,7 +88,8 @@ EXTRAS = (
     "torch", "transformers", "mediapipe", "pymupdf", "fitz", "speechbrain", "py7zr", "rarfile",
 )
 
-PASS, FAIL, MANUAL, PHASE1, SKIPPED = "통과", "실패", "수동", "1단계", "건너뜀"
+# R10-3 (round 10): a QA ID with a skipped test is "건너뜀(환경)", never "통과".
+PASS, FAIL, MANUAL, PHASE1, SKIPPED = "통과", "실패", "수동", "1단계", "건너뜀(환경)"
 # QA-OUT-4's API-server leg needs these; a recorded run without them fails.
 REQUIRED_FOR_RECORD = ("fastapi", "httpx")
 SIDE_VENV_HINT = (
@@ -264,12 +267,14 @@ def qa_outcomes(
             notes.append("테스트가 실행되지 않음")
         elif failed:
             result = FAIL
-        elif not ran:
+        elif skipped:
+            # R10-3: one skipped test is enough — "통과" only when every test ran and passed.
             result = SKIPPED
-            notes.append("모든 테스트 건너뜀")
+            if not ran:
+                notes.append("모든 테스트 건너뜀")
         else:
             result = PASS
-        if skipped and result != SKIPPED:
+        if skipped:
             notes.append("건너뛴 관련 테스트: " + ", ".join(
                 f"{test_id.rsplit('.', 1)[-1]} ({records[test_id].detail})" for test_id in skipped))
         if qa_id == FULL_SUITE_QA_ID:
@@ -376,7 +381,7 @@ def summary_counts(data: dict[str, Any], outcomes: dict[str, dict[str, Any]]) ->
 def summary_line(counts: dict[str, int]) -> str:
     line = f"{counts[PASS]} 통과 / {counts[FAIL]} 실패 / {counts[MANUAL]} 수동 / {counts[PHASE1]} 1단계"
     if counts[SKIPPED]:
-        line += f" / {counts[SKIPPED]} 건너뜀"
+        line += f" / {counts[SKIPPED]} {SKIPPED}"
     return line
 
 
@@ -421,7 +426,8 @@ def render(data: dict[str, Any], outcomes: dict[str, dict[str, Any]], log_paths:
         "## 자동 QA 상세",
         "",
         "QA 테스트마다 docstring 첫 줄이 \"<QA ID>: <통과 기준 원문>\"이고 둘째 줄에 그 테스트가 검사하는 내용을 적는다(N16). "
-        "QA ID의 결과는 그 QA ID의 모든 테스트 결과를 합친 것이다(실패 하나면 실패, 전부 건너뜀이면 건너뜀).",
+        "QA ID의 결과는 그 QA ID의 모든 테스트 결과를 합친 것이다(실패 하나면 실패, 건너뛴 테스트가 하나라도 있으면 "
+        "건너뜀(환경), 모든 테스트가 실행되어 통과했을 때만 통과).",
         "",
         "| QA ID | 테스트(실패/건너뜀/전체) | 결과 | 비고 |",
         "| --- | --- | --- | --- |",
