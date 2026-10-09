@@ -612,6 +612,97 @@ class RejectedMemberRecordTests(unittest.TestCase):
                 self.assertEqual(summary.total, len(items))
                 self.assertEqual(summary.skipped, 4 + int(fifo) + (2 if recursive else 0))
 
+    def _scan_with_deadline(self, folder: Path, seconds: float = 60.0, **kwargs: Any) -> tuple[Any, dict[str, Any]]:
+        """scan_directory in a thread; fails (instead of hanging the suite) when it does not finish."""
+        import threading
+
+        from deepfake_lens.core import scan_directory
+
+        box: dict[str, Any] = {}
+
+        def run() -> None:
+            box["out"] = scan_directory(folder, **kwargs)
+
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+        worker.join(seconds)
+        self.assertFalse(worker.is_alive(), f"scan did not finish within {seconds} s (P3: endless symlink walk)")
+        summary, items = box["out"]
+        return summary, {item.path: item for item in items}
+
+    def test_links_to_root_parents_and_mutual_links_terminate(self) -> None:
+        """P3 (round 8): --recursive --allow-symlinks followed a link to "/" (the whole file
+        system) and links between two folders without end. A link to the scanned folder or
+        any folder above it is a "순환/상위 링크" row, a folder entered through one link is
+        not entered through another, and the walk ends."""
+        import os
+
+        from deepfake_lens.scan_cache import (
+            SYMLINK_ANCESTOR_REASON,
+            SYMLINK_DUPLICATE_REASON,
+            SYMLINK_LOOP_REASON,
+        )
+
+        folder = self.root / "p3"
+        (folder / "x").mkdir(parents=True)
+        (folder / "y").mkdir()
+        (folder / "a.txt").write_text("검사 폴더의 파일입니다.", encoding="utf-8")
+        (folder / "x" / "in_x.txt").write_text("x 폴더의 파일입니다.", encoding="utf-8")
+        shared = self.root / "shared"
+        shared.mkdir()
+        (shared / "s.txt").write_text("공유 폴더의 파일입니다.", encoding="utf-8")
+        try:
+            os.symlink(os.path.abspath(os.sep), folder / "to_fs_root")
+            os.symlink("..", folder / "to_parent")
+            os.symlink(".", folder / "to_self")
+            os.symlink(os.path.join("..", "y"), folder / "x" / "ly")
+            os.symlink(os.path.join("..", "x"), folder / "y" / "lx")
+            os.symlink(shared, folder / "s1")
+            os.symlink(shared, folder / "s2")
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks not permitted on this platform")
+        summary, by_path = self._scan_with_deadline(folder, recursive=True, allow_symlinks=True)
+        for name in ("to_fs_root", "to_parent", "to_self"):
+            self.assertEqual((by_path[name].status, by_path[name].error), ("skipped", SYMLINK_ANCESTOR_REASON), name)
+        self.assertEqual(by_path["x/ly/lx"].error, SYMLINK_LOOP_REASON)
+        self.assertEqual(by_path["y/lx/ly"].error, SYMLINK_LOOP_REASON)
+        self.assertEqual(by_path["s1/s.txt"].status, "analyzed")
+        self.assertEqual(by_path["s2"].error, SYMLINK_DUPLICATE_REASON)
+        self.assertNotIn("s2/s.txt", by_path)
+        self.assertFalse(any(path.startswith(("to_fs_root/", "to_parent/", "to_self/")) for path in by_path))
+        self.assertEqual(summary.total, len(by_path))
+
+    def test_walk_limits_leave_a_row_per_unopened_folder(self) -> None:
+        """P3 (round 8): the walk has folder, file and time limits; a folder it does not
+        open because a limit was reached is a row with the reason, never a silent gap."""
+        from deepfake_lens import scan_cache
+
+        folder = self.root / "p3-limits"
+        for name in ("a", "b", "c", "d"):
+            (folder / name / "deep").mkdir(parents=True)
+            (folder / name / "deep" / "f.txt").write_text(f"{name} 폴더의 파일입니다.", encoding="utf-8")
+        (folder / "top.txt").write_text("최상위 파일입니다.", encoding="utf-8")
+
+        def unopened(by_path: dict[str, Any]) -> dict[str, str]:
+            return {path: item.error for path, item in by_path.items() if (item.error or "").startswith("건너뜀: 탐색 상한 도달")}
+
+        with patch.object(scan_cache, "MAX_WALK_DIRS", 3):  # root, a, a/deep
+            summary, by_path = self._scan_with_deadline(folder, recursive=True)
+        self.assertEqual(sorted(unopened(by_path)), ["b", "c", "d"])
+        self.assertIn("폴더 3개", by_path["b"].error)
+        self.assertEqual(by_path["a/deep/f.txt"].status, "analyzed")
+        self.assertEqual(summary.total, len(by_path))
+
+        with patch.object(scan_cache, "MAX_WALK_SECONDS", -1.0):
+            _, by_path = self._scan_with_deadline(folder, recursive=True)
+        self.assertEqual(sorted(unopened(by_path)), ["a", "b", "c", "d"])
+        self.assertEqual(by_path["top.txt"].status, "analyzed")
+
+        with patch.object(scan_cache, "MAX_WALK_FILES_BEYOND_CAP", 1):  # max_files 1 + 1 extra
+            summary, by_path = self._scan_with_deadline(folder, recursive=True, max_files=1)
+        self.assertEqual(sorted(unopened(by_path)), ["c", "d"])
+        self.assertTrue(summary.capped)
+
 
 if __name__ == "__main__":
     unittest.main()

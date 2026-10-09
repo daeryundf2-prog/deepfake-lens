@@ -228,6 +228,7 @@ def scan_directory(
         on_error=lambda p, e: iter_errors.append((p, e)),
         on_symlink=symlinks.append,
         on_skip=lambda p, reason: symlinks.append((p, reason)),
+        max_files=max_files,
     ):
         if len(paths) >= max_files:
             # X1: count (never analyze) the files beyond the cap so every

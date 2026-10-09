@@ -138,6 +138,14 @@ always `0` invited old-contract readings. They remain readable as
   `error` = `건너뜀: 깨진 심볼릭 링크 — 링크 대상이 없습니다` (missing
   target) or `건너뜀: 순환 링크 — 링크가 자기 자신이나 상위 폴더를 가리킵니다`
   (self-loop, circular chain, a link back to a folder on the current path).
+  P3: a link to a folder that is the scanned folder itself or any folder
+  above it (`/`, `..` from the root) is `건너뜀: 순환/상위 링크 — 링크가 검사
+  폴더 자신이나 그 상위 폴더를 가리킵니다`; a folder already entered through
+  another link (same device and inode) is `건너뜀: 이미 따라간 링크 대상 — 같은
+  폴더를 링크로 두 번 검사하지 않습니다`. The walk stops opening folders after
+  20 000 folders, 300 s, or `max_files` + 100 000 files; each folder it did not
+  open is a `skipped` row `건너뜀: 탐색 상한 도달(<limit>) — 이 폴더 이하는 열지
+  않았습니다`.
 - A FIFO, socket or device node in a scanned folder is never opened; it is a
   `skipped` row with `error` = `건너뜀: 일반 파일이 아닙니다(파이프·소켓·장치 파일) — 열지 않았습니다` (X3).
 

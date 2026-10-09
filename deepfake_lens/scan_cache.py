@@ -73,6 +73,53 @@ def symlink_problem(path: Path) -> str | None:
     return None
 
 
+# P3 (round 8): --recursive --allow-symlinks followed a link to "/" (or to
+# any folder above the scanned one) and walked the whole file system; two
+# folders linking to each other re-entered each other through every path.
+# A link whose target folder is the scanned folder itself or one of its
+# parents is a loop row; a folder already entered through another link is
+# not entered twice ((st_dev, st_ino) visited set — the real folder and one
+# link to it are both walked, as in X3).
+SYMLINK_ANCESTOR_REASON = "건너뜀: 순환/상위 링크 — 링크가 검사 폴더 자신이나 그 상위 폴더를 가리킵니다"
+SYMLINK_DUPLICATE_REASON = "건너뜀: 이미 따라간 링크 대상 — 같은 폴더를 링크로 두 번 검사하지 않습니다"
+# P3: backstop limits on the walk itself (listing only, no analysis). A
+# local evidence tree of 20 000 folders lists in seconds; the limits trip on
+# a link into a huge tree (a system folder, a network share) and stop the
+# walk with a row per folder left unopened instead of hanging the scan.
+MAX_WALK_DIRS = 20_000
+# Files counted beyond --max-files (X1 reports how many were not recorded);
+# past this many extra files no further folder is opened.
+MAX_WALK_FILES_BEYOND_CAP = 100_000
+MAX_WALK_SECONDS = 300.0
+WALK_LIMIT_REASON = "건너뜀: 탐색 상한 도달({limit}) — 이 폴더 이하는 열지 않았습니다"
+
+
+def _dir_identity(path: Path | str) -> tuple[int, int] | None:
+    import os
+
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino)
+
+
+def _root_and_parents(root: Path) -> set[tuple[int, int]]:
+    """(st_dev, st_ino) of the scanned folder and every folder above it (P3)."""
+    import os
+
+    out: set[tuple[int, int]] = set()
+    current = os.path.realpath(root)
+    while True:
+        ident = _dir_identity(current)
+        if ident is not None:
+            out.add(ident)
+        parent = os.path.dirname(current)
+        if parent == current:
+            return out
+        current = parent
+
+
 def _iter_files(
     root: Path,
     *,
@@ -81,6 +128,7 @@ def _iter_files(
     on_error: Callable[[Path, OSError], None] | None = None,
     on_symlink: Callable[[Path], None] | None = None,
     on_skip: Callable[[Path, str], None] | None = None,
+    max_files: int | None = None,
 ) -> Iterable[Path]:
     """Iterate scan targets; unreadable directories skip, not kill.
 
@@ -96,6 +144,14 @@ def _iter_files(
     reason)``. A FIFO, socket or device node is reported the same way
     (never opened). Nothing in the folder is dropped without a row.
 
+    P3: a link to the scanned folder or any folder above it (``/``, ``..``
+    from the root) is a loop row (:data:`SYMLINK_ANCESTOR_REASON`); a folder
+    already entered through a link is not entered through a second one
+    (:data:`SYMLINK_DUPLICATE_REASON`). The walk stops opening folders after
+    :data:`MAX_WALK_DIRS` folders, :data:`MAX_WALK_SECONDS` seconds or
+    ``max_files`` + :data:`MAX_WALK_FILES_BEYOND_CAP` files; every folder
+    left unopened is a row (:data:`WALK_LIMIT_REASON`).
+
     Directory read errors go to ``on_error`` — one permission-denied
     subdirectory must not abort a multi-hour evidence scan.
 
@@ -108,11 +164,26 @@ def _iter_files(
     the first file is yielded.
     """
     import os
+    import time
 
     key = _scan_order_key(root)
     found: list[Path] = []
     links: list[Path] = []
     skipped: list[tuple[Path, str]] = []
+    root_parents = _root_and_parents(root) if allow_symlinks and recursive else set()
+    link_entered: set[tuple[int, int]] = set()
+    file_limit = None if max_files is None else max_files + MAX_WALK_FILES_BEYOND_CAP
+    deadline = time.monotonic() + MAX_WALK_SECONDS
+    dirs_entered = 0
+
+    def _limit_hit() -> str | None:
+        if dirs_entered >= MAX_WALK_DIRS:
+            return f"폴더 {MAX_WALK_DIRS}개"
+        if file_limit is not None and len(found) >= file_limit:
+            return f"파일 {file_limit}개"
+        if time.monotonic() > deadline:
+            return f"{int(MAX_WALK_SECONDS)}초"
+        return None
 
     def _file(path: Path) -> None:
         try:
@@ -125,7 +196,14 @@ def _iter_files(
             return
         found.append(path)
 
-    def _walk(folder: Path, ancestors: frozenset[str]) -> None:
+    def _walk(folder: Path, ancestors: frozenset[tuple[int, int]]) -> None:
+        nonlocal dirs_entered
+        if folder != root:
+            limit = _limit_hit()
+            if limit is not None:
+                skipped.append((folder, WALK_LIMIT_REASON.format(limit=limit)))
+                return
+        dirs_entered += 1
         try:
             with os.scandir(folder) as handle:
                 entries = sorted(handle, key=lambda entry: entry.name)
@@ -142,7 +220,11 @@ def _iter_files(
                 continue
             if is_dir:
                 if recursive:
-                    _walk(path, ancestors | {os.path.realpath(path)})
+                    ident = _dir_identity(path)
+                    if ident is not None and ident in ancestors:  # bind-mount loop
+                        skipped.append((path, SYMLINK_LOOP_REASON))
+                        continue
+                    _walk(path, ancestors | ({ident} if ident else set()))
                 continue
             if not is_link:
                 _file(path)
@@ -163,13 +245,24 @@ def _iter_files(
                 continue
             if not recursive:
                 continue  # a subfolder of a flat scan (count_subfolders counts it)
-            real = os.path.realpath(path)
-            if real in ancestors:
+            ident = _dir_identity(path)
+            if ident is None:
+                skipped.append((path, SYMLINK_UNREADABLE_REASON.format(reason="상태를 읽을 수 없음")))
+                continue
+            if ident in root_parents:
+                skipped.append((path, SYMLINK_ANCESTOR_REASON))
+                continue
+            if ident in ancestors:
                 skipped.append((path, SYMLINK_LOOP_REASON))
                 continue
-            _walk(path, ancestors | {real})
+            if ident in link_entered:
+                skipped.append((path, SYMLINK_DUPLICATE_REASON))
+                continue
+            link_entered.add(ident)
+            _walk(path, ancestors | {ident})
 
-    _walk(root, frozenset({os.path.realpath(root)}))
+    root_ident = _dir_identity(root)
+    _walk(root, frozenset({root_ident} if root_ident else set()))
     if on_symlink is not None:
         for link in sorted(links, key=key):
             on_symlink(link)
