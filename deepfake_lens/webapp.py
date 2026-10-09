@@ -32,7 +32,9 @@ from .webapp_api import (
     _scan_payload,
     _scan_status_payload,
     _stats_payload,
+    api_status,
 )
+from .checks import failure_reason
 
 logger = logging.getLogger(__name__)
 
@@ -377,8 +379,9 @@ def build_server(
                 return
             try:
                 self._send_json(_analyze_upload_payload(self.headers.get("Content-Type") or "", body))
-            except Exception as exc:
-                self._send_json({"error": "업로드 분석 중 오류가 발생했습니다", "detail": f"{type(exc).__name__}: {exc}"})
+            except Exception as exc:  # noqa: BLE001 - X4: an internal failure is a Korean 500
+                logger.exception("upload analysis failed")
+                self._send_json({"error": "업로드 분석 중 오류가 발생했습니다", "detail": failure_reason(exc)}, status=500)
 
         def _handle_compare(self) -> None:
             """Two-file comparison: speaker or stylometry by extension pair."""
@@ -396,8 +399,9 @@ def build_server(
                 return
             try:
                 self._send_json(_compare_payload(self.headers.get("Content-Type") or "", body))
-            except Exception as exc:
-                self._send_json({"error": "비교 분석 중 오류가 발생했습니다", "detail": f"{type(exc).__name__}: {exc}"})
+            except Exception as exc:  # noqa: BLE001 - X4: an internal failure is a Korean 500
+                logger.exception("compare failed")
+                self._send_json({"error": "비교 분석 중 오류가 발생했습니다", "detail": failure_reason(exc)}, status=500)
 
         def _handle_check(self) -> None:
             """Unified check-all: JSON {text} or a single multipart file.
@@ -426,7 +430,10 @@ def build_server(
                 try:
                     payload = json.loads(body.decode("utf-8", errors="replace"))
                 except json.JSONDecodeError:
-                    self._send_json({"error": "JSON 본문을 해석할 수 없습니다"})
+                    self._send_json({"error": "JSON 본문을 해석할 수 없습니다"}, status=400)
+                    return
+                if not isinstance(payload, dict):
+                    self._send_json({"error": "요청 본문은 JSON 객체여야 합니다"}, status=400)
                     return
                 secret = payload.get("watermark_secret")
                 try:
@@ -444,7 +451,9 @@ def build_server(
         def log_message(self, format: str, *args) -> None:
             return
         
-        def _send_json(self, payload: dict[str, Any], status: int = 200) -> None:
+        def _send_json(self, payload: dict[str, Any], status: int | None = None) -> None:
+            # X4: an ApiError payload carries its own status (400/404/500).
+            status = api_status(payload) if status is None else status
             body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")

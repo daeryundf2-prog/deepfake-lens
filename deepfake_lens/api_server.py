@@ -196,6 +196,19 @@ def validation_error_body(errors: Any) -> dict[str, object]:
     return {"detail": "요청 매개변수 오류 — " + "; ".join(lines) if lines else "요청 매개변수 오류", "errors": codes}
 
 
+def _api_json(payload: Any) -> Any:
+    """X4: an ``/api/*`` payload as the response — an :class:`~deepfake_lens.webapp_api.ApiError`
+    is sent with its own status (400/404/500) and Korean ``{"error"}`` body,
+    exactly like the stdlib web server; anything else is returned as is (200)."""
+    from .webapp_api import ApiError
+
+    if isinstance(payload, ApiError):
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(dict(payload), status_code=payload.status)
+    return payload
+
+
 def create_app(
     host: str = "127.0.0.1",
     port: int = 8765,
@@ -942,7 +955,7 @@ def create_app(
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
         try:
-            return _scan_payload(qs, default_folder=default_folder)
+            return _api_json(_scan_payload(qs, default_folder=default_folder))
         except ReadRootDenied:
             return JSONResponse(read_root_denied_body(), status_code=403)
         except ValueError as exc:
@@ -951,12 +964,12 @@ def create_app(
     @app.get("/api/scan-status")
     def api_scan_status(request: Request):
         from .webapp_api import _scan_status_payload
-        return _scan_status_payload(str(request.url.query))
+        return _api_json(_scan_status_payload(str(request.url.query)))
 
     @app.get("/api/scan-cancel")
     def api_scan_cancel(request: Request):
         from .webapp_api import _scan_cancel_payload
-        return _scan_cancel_payload(str(request.url.query))
+        return _api_json(_scan_cancel_payload(str(request.url.query)))
 
     @app.get("/api/heatmap")
     def api_heatmap(request: Request):
@@ -988,7 +1001,7 @@ def create_app(
     def api_analyze_file(request: Request):
         from .webapp_api import ReadRootDenied, _analyze_file_payload, read_root_denied_body
         try:
-            return _analyze_file_payload(str(request.url.query))
+            return _api_json(_analyze_file_payload(str(request.url.query)))
         except ReadRootDenied:
             return JSONResponse(read_root_denied_body(), status_code=403)
 
@@ -1004,7 +1017,7 @@ def create_app(
         if len(body) > MAX_UPLOAD_BYTES:
             raise HTTPException(status_code=413, detail=f"업로드 크기가 상한({MAX_UPLOAD_BYTES}바이트)을 초과합니다")
         content_type = request.headers.get("content-type", "")
-        return await run_in_threadpool(_analyze_upload_payload, content_type, body)
+        return _api_json(await run_in_threadpool(_analyze_upload_payload, content_type, body))
 
     @app.post("/api/report")
     async def api_report(request: Request):
@@ -1024,7 +1037,7 @@ def create_app(
     async def api_feedback(request: Request):
         from .webapp_api import _feedback_payload
         body = await request.body()
-        return await run_in_threadpool(_feedback_payload, body)
+        return _api_json(await run_in_threadpool(_feedback_payload, body))
 
     @app.get("/api/artifacts/{artifact_id:path}/review")
     async def get_artifact_review(artifact_id: str):

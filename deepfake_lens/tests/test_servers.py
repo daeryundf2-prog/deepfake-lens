@@ -1546,3 +1546,128 @@ class ReportItemContractMatchesSchemaTest(unittest.TestCase):
         for row in payload["items"]:
             with self.subTest(path=row["path"]):
                 check_report_item(row)
+
+
+class ApiErrorStatusTest(unittest.TestCase):
+    """X4 (round 7): no /api/* error is a 200. ``GET /api/analyze-file`` without
+    ``file``, ``/api/scan-cancel`` without a job and ``/api/scan-status`` for an
+    unknown job answered 200 + {"error"} on both servers; every row of the
+    error-status table (docs/deepfake-lens-service.md) is checked here."""
+
+    def setUp(self) -> None:
+        import tempfile
+
+        roots = patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
+        roots.start()
+        self.addCleanup(roots.stop)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.folder = Path(self._tmp.name).resolve() / "case"
+        (self.folder / "sub").mkdir(parents=True)
+        (self.folder / "memo.txt").write_text("사건 메모입니다.", encoding="utf-8")
+        webapp_api.configure_read_roots(self.folder)  # the operator's root (as `web --folder`)
+        feedback = patch.dict(os.environ, {"DEEPFAKE_LENS_FEEDBACK": str(Path(self._tmp.name) / "fb.jsonl")})
+        feedback.start()
+        self.addCleanup(feedback.stop)
+
+    # (method, path, body, content type, status, Korean text) — shared endpoints.
+    def _shared_rows(self) -> list[tuple[str, str, bytes | None, str, int, str]]:
+        import urllib.parse
+
+        missing = urllib.parse.quote(str(self.folder / "nothing.png"))
+        sub = urllib.parse.quote(str(self.folder / "sub"))
+        gone = urllib.parse.quote(str(self.folder / "gone"))
+        return [
+            ("GET", "/api/analyze-file", None, "", 400, webapp_api.FILE_PARAM_REQUIRED),
+            ("GET", f"/api/analyze-file?file={missing}", None, "", 404, "파일을 찾을 수 없습니다: "),
+            ("GET", f"/api/analyze-file?file={sub}", None, "", 400, "파일이 아니라 폴더입니다: "),
+            ("GET", "/api/scan-cancel", None, "", 400, webapp_api.JOB_PARAM_REQUIRED),
+            ("GET", "/api/scan-cancel?job=deadbeef", None, "", 404, webapp_api.JOB_UNKNOWN),
+            ("GET", "/api/scan-status", None, "", 400, webapp_api.JOB_PARAM_REQUIRED),
+            ("GET", "/api/scan-status?job=deadbeef", None, "", 404, webapp_api.JOB_UNKNOWN),
+            ("GET", f"/api/scan?folder={gone}&no_default_engine=true", None, "", 400, "폴더를 찾을 수 없습니다: "),
+            ("GET", "/api/scan?max_files=abc", None, "", 400, "max_files는 정수여야 합니다"),
+            ("GET", "/api/scan?folder=/", None, "", 403, "허용되지 않은 경로"),
+            ("POST", "/api/analyze-upload", b"x", "text/plain", 400, "multipart/form-data 업로드가 필요합니다"),
+            ("POST", "/api/feedback", b"{oops", "application/json", 400, "JSON 본문을 해석할 수 없습니다"),
+            ("POST", "/api/feedback", b"[1]", "application/json", 400, "피드백 요청 본문은 JSON 객체여야 합니다"),
+            ("POST", "/api/feedback", b'{"expected_label": "maybe", "path": "a"}', "application/json", 400, "expected_label은 "),
+            ("POST", "/api/feedback", b'{"expected_label": "real"}', "application/json", 400, "path가 필요합니다"),
+            ("POST", "/api/report", b"{}", "application/json", 400, "items 배열"),
+        ]
+
+    # Rows only the stdlib web server has (its /api/check and /api/compare take uploads).
+    def _web_rows(self) -> list[tuple[str, str, bytes | None, str, int, str]]:
+        return [
+            ("POST", "/api/check", b"{oops", "application/json", 400, "JSON 본문을 해석할 수 없습니다"),
+            ("POST", "/api/check", b"[1]", "application/json", 400, "요청 본문은 JSON 객체여야 합니다"),
+            ("POST", "/api/check", '{"text": "짧음"}'.encode("utf-8"), "application/json", 400, "분석할 텍스트가 너무 짧습니다"),
+            ("POST", "/api/check", b"x", "text/plain", 400, "multipart/form-data 또는 application/json 본문이 필요합니다"),
+            ("POST", "/api/compare", b"x", "text/plain", 400, "multipart/form-data 본문이 필요합니다"),
+            ("GET", "/api/review", None, "", 400, "path 또는 artifact_id가 필요합니다"),
+            ("GET", "/api/nothing-here", None, "", 404, "찾을 수 없는 경로입니다"),
+        ]
+
+    def _check(self, leg: str, rows: list[tuple[str, str, bytes | None, str, int, str]], send: Any) -> None:
+        from deepfake_lens.error_text import english_prose
+
+        for method, path, body, ctype, expected, text in rows:
+            with self.subTest(leg=leg, method=method, path=path[:60], body=(body or b"")[:30]):
+                status, payload = send(method, path, body, ctype)
+                self.assertEqual(status, expected, payload)
+                error = payload.get("error") if isinstance(payload, dict) else None
+                self.assertIsInstance(error, str, payload)
+                self.assertIn(text, error)
+                self.assertIsNone(english_prose(error), error)
+
+    def test_stdlib_web_server(self) -> None:
+        import threading
+        import urllib.error
+        import urllib.request
+
+        from deepfake_lens.webapp import CLIENT_HEADER, build_server
+
+        server = build_server("127.0.0.1", 0, default_folder=self.folder)
+        threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        base = f"http://127.0.0.1:{server.server_address[1]}"
+
+        def send(method: str, path: str, body: bytes | None, ctype: str) -> tuple[int, Any]:
+            headers = {CLIENT_HEADER: "qa"}
+            if ctype:
+                headers["Content-Type"] = ctype
+            request = urllib.request.Request(base + path, data=body, headers=headers, method=method)
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    return response.status, json.loads(response.read() or b"null")
+            except urllib.error.HTTPError as exc:
+                return exc.code, json.loads(exc.read() or b"null")
+
+        self._check("web", self._shared_rows() + self._web_rows(), send)
+
+    @unittest.skipUnless(HAVE_FASTAPI, "fastapi/httpx required")
+    def test_api_server_shared_endpoints(self) -> None:
+        from fastapi.testclient import TestClient
+
+        client = TestClient(api_server.create_app(default_folder=self.folder))
+
+        def send(method: str, path: str, body: bytes | None, ctype: str) -> tuple[int, Any]:
+            headers = {"host": "localhost", "X-Deepfake-Lens-Client": "qa"}
+            if ctype:
+                headers["Content-Type"] = ctype
+            response = client.request(method, path, content=body, headers=headers)
+            payload = response.json()
+            if isinstance(payload, dict) and "error" not in payload and "detail" in payload:
+                payload = {"error": payload["detail"]}
+            return response.status_code, payload
+
+        self._check("api", self._shared_rows(), send)
+
+    def test_success_is_still_200(self) -> None:
+        """The control: a valid request of an endpoint that had a 200 error still answers 200."""
+        import urllib.parse
+
+        payload = webapp_api._analyze_file_payload(urllib.parse.urlencode({"file": str(self.folder / "memo.txt")}))
+        self.assertEqual(webapp_api.api_status(payload), 200)
+        self.assertEqual(webapp_api.api_status(webapp_api._scan_status_payload("job=deadbeef")), 404)

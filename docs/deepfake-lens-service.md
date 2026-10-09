@@ -203,6 +203,58 @@ never holds one request open; the synchronous form still works for tools.
 The GUI's cancel button calls `/api/scan-cancel`, which sets a flag the
 scanner checks between files — partial results still come back as `done`.
 
+## Error status codes — every `/api/*` endpoint (X4)
+
+No `/api/*` endpoint answers an error with 200: every refusal carries an HTTP
+error status and a Korean text. The web GUI server (`web`) and api-serve share
+the payload functions (`webapp_api`), which return their errors as
+`webapp_api.ApiError` (a `{"error": …}` dict with its status); both servers
+send that status (api-serve: `api_server._api_json`). Body key: `error` on the
+web server and for the shared GUI endpoints on api-serve; api-serve's own
+endpoints (`/api/analyze/*`, `/api/classify`, `/api/check`, `/api/compare`,
+`/api/jobs/*`, review routes) use FastAPI's `detail`.
+
+| Endpoint (server) | Condition | Status | Korean text (`error` / `detail`) |
+|---|---|---|---|
+| any `/api/*` (both) | missing `X-Deepfake-Lens-Client` / bad token | 401 | `… 헤더가 없습니다 …` / `인증 실패: …` |
+| any `/api/*` (both) | unknown route | 404 | `찾을 수 없는 경로입니다` |
+| any `/api/*` (web / api) | method not supported / not allowed | 501 / 405 | `지원하지 않는 요청 메서드입니다: …` / `이 경로에서 허용되지 않는 요청 메서드입니다: …` |
+| any `/api/*` (both) | unhandled exception | 500 | `서버 내부 오류가 발생했습니다 — 상세는 서버 로그를 확인하십시오` |
+| GET `/api/scan` (both) | invalid option (`pixel`, non-integer limit, `model_path`/`fusion_profile` not a name in the models dir) | 400 | e.g. `max_files는 정수여야 합니다` |
+| GET `/api/scan` (both) | folder missing / a file / unreadable | 400 | `폴더를 찾을 수 없습니다: …` (scan's S4 texts) |
+| GET `/api/scan` (both) | folder outside the read roots | 403 | `허용되지 않은 경로` |
+| GET `/api/scan?async=1` (both) | 32 jobs already registered | 400 | `실행 중인 검사 작업이 너무 많습니다 — …` |
+| GET `/api/scan-status`, `/api/scan-cancel` (both) | no `job` | 400 | `job 매개변수가 필요합니다` |
+| GET `/api/scan-status`, `/api/scan-cancel` (both) | unknown or expired job | 404 | `알 수 없거나 만료된 작업입니다` |
+| GET `/api/analyze-file` (both) | no `file` | 400 | `file 매개변수(파일 경로)가 필요합니다` |
+| GET `/api/analyze-file` (both) | file missing | 404 | `파일을 찾을 수 없습니다: …` |
+| GET `/api/analyze-file` (both) | a folder | 400 | `파일이 아니라 폴더입니다: … (폴더는 scan을 사용)` |
+| GET `/api/analyze-file` (both) | outside the read roots | 403 | `허용되지 않은 경로` |
+| GET `/api/analyze-file` (both) | analysis raised | 500 | `파일 분석 중 오류가 발생했습니다` (+ `detail`) |
+| GET `/api/heatmap`, `/api/preview` (both) | outside the roots / not found / not media | 403 / 404 / 400 | plain text + `X-Deepfake-Lens-Error` header |
+| POST `/api/analyze-upload` (both) | not multipart, no file part, empty or incomplete body | 400 | `multipart/form-data 업로드가 필요합니다`, `업로드된 파일이 없습니다`, … |
+| POST `/api/analyze-upload` (both) | body over `MAX_UPLOAD_BYTES` | 413 | `업로드 크기가 상한(…바이트)을 초과합니다` |
+| POST `/api/analyze-upload` (web) | analysis raised | 500 | `업로드 분석 중 오류가 발생했습니다` (+ `detail`) |
+| POST `/api/check` (web) | invalid JSON / not an object / text < 8 or > 256 KB / not multipart / no file | 400 | `JSON 본문을 해석할 수 없습니다`, `분석할 텍스트가 너무 짧습니다 (8자 이상).`, … |
+| POST `/api/check` (web) | body over `MAX_UPLOAD_BYTES` | 413 | `요청 본문이 상한(…바이트)을 초과합니다` |
+| POST `/api/check` (api) | neither `file_path` nor `text`; text > 256 KB | 400 | `file_path 또는 text가 필요합니다` |
+| POST `/api/compare` (web) | not multipart / fewer than 2 files / mixed pair | 400 | `비교할 파일 2개가 필요합니다`, … |
+| POST `/api/compare` (web) | comparison raised | 500 | `비교 분석 중 오류가 발생했습니다` (+ `detail`) |
+| POST `/api/compare` (api) | comparison error / raised | 400 / 500 | the comparison's Korean error |
+| POST `/api/report` (both) | malformed body or row, bad `format`/`options` | 400 | see "REST API endpoints" (N11, X2) |
+| POST `/api/report` (both) | a `heatmap_path` outside the roots | 403 | `허용되지 않은 경로` |
+| POST `/api/report` (both) | evidence-statement PDF failed / pymupdf missing | 500 / 501 | `증거설명서 PDF 생성 실패: …` / `PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다…` |
+| POST `/api/feedback` (both) | invalid JSON, not an object, unknown `expected_label`, no `path` | 400 | `JSON 본문을 해석할 수 없습니다`, `expected_label은 인식 가능한 라벨이어야 합니다 …`, `path가 필요합니다` |
+| GET/POST `/api/review` (web), review routes (api) | no `path`/`artifact_id`, invalid JSON | 400 | `path 또는 artifact_id가 필요합니다`, `JSON을 해석할 수 없습니다` |
+| POST `/api/analyze/*`, `/api/classify`, `/api/check` (api) | analysis raised | 500 | the failure reason |
+| `/api/jobs/{id}`, `/api/jobs/{id}/cancel` (api) | unknown or finished job | 404 | `알 수 없거나 이미 끝난 작업입니다` |
+| POST `/api/check/stream`, `/api/scan/stream` (api) | 32 stream jobs running | 429 | `실행 중인 작업이 너무 많습니다 …` |
+| any query parameter (api) | missing / malformed | 422 | `요청 매개변수 오류 — …` |
+
+Tests: `test_servers.ApiErrorStatusTest` sends every web-server row above (and
+the shared-endpoint rows to api-serve) and checks the status and the Korean
+text.
+
 ## Honesty contract
 
 - Every score is a **prioritization signal for review order, not a truth

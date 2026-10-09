@@ -80,6 +80,35 @@ def default_engine_profiles(root: Path | None = None) -> list[Path]:
     return _engine_profiles_in(Path(root) if root is not None else _models_dir())
 
 
+class ApiError(dict):
+    """A Korean JSON error body ``{"error": …}`` that carries its HTTP status (X4).
+
+    Round 7: ``GET /api/analyze-file`` without ``file``, ``/api/scan-cancel``
+    without ``job`` and ``/api/scan-status`` for an unknown job answered
+    200 + ``{"error"}`` on both servers. Every ``/api/*`` payload function now
+    returns its errors as ApiError; both servers send ``status``
+    (:func:`api_status`) — 400 for a bad request, 404 for a missing job or
+    file, 500 for an internal failure (docs/deepfake-lens-service.md, "오류
+    상태 코드"). It is still a dict, so library callers keep reading
+    ``payload["error"]``.
+    """
+
+    def __init__(self, message: str, status: int = 400, **extra: object) -> None:
+        super().__init__(error=message, **extra)
+        self.status = status
+
+
+def api_status(payload: object) -> int:
+    """HTTP status of a payload returned by an ``/api/*`` handler (200 unless an :class:`ApiError`)."""
+    return payload.status if isinstance(payload, ApiError) else 200
+
+
+# X4: Korean error texts shared by both servers.
+JOB_PARAM_REQUIRED = "job 매개변수가 필요합니다"
+JOB_UNKNOWN = "알 수 없거나 만료된 작업입니다"
+FILE_PARAM_REQUIRED = "file 매개변수(파일 경로)가 필요합니다"
+
+
 def _web_options(params: dict[str, list[str]] | None = None) -> AnalysisOptions:
     """AnalysisOptions for a web request (InvalidOption -> HTTP 400)."""
     return AnalysisOptions.from_query(params or {}, models_dir=_models_dir())
@@ -110,7 +139,8 @@ def _scan_payload(query: str, *, default_folder: Path | None, should_stop: Calla
         run = scan_folder_run(folder, options, should_stop=should_stop)
         return scan_payload(run.summary, run.items, run.thresholds, options)
     except (OSError, ValueError) as exc:
-        return {"error": str(exc)}
+        # X4: missing folder, a file, unreadable — the Korean reason, 400.
+        return ApiError(str(exc), 400)
 
 
 # In-memory scan-job registry for /api/scan?async=1. ThreadingHTTPServer
@@ -173,12 +203,12 @@ def _scan_status_payload(query: str) -> dict[str, object]:
     params = parse_qs(query)
     job_id = params.get("job", [""])[0].strip()
     if not job_id:
-        return {"error": "job 매개변수가 필요합니다"}
+        return ApiError(JOB_PARAM_REQUIRED, 400)  # X4
     with _SCAN_JOBS_LOCK:
         _scan_job_evict(time.time())
         entry = _SCAN_JOBS.get(job_id)
         if entry is None:
-            return {"error": "알 수 없거나 만료된 작업입니다"}
+            return ApiError(JOB_UNKNOWN, 404)  # X4
         payload: dict[str, object] = {"job_id": job_id, "status": entry["status"]}
         if entry["status"] != "running":
             payload["result"] = entry.get("result")
@@ -189,11 +219,11 @@ def _scan_cancel_payload(query: str) -> dict[str, object]:
     params = parse_qs(query)
     job_id = params.get("job", [""])[0].strip()
     if not job_id:
-        return {"error": "job 매개변수가 필요합니다"}
+        return ApiError(JOB_PARAM_REQUIRED, 400)  # X4
     with _SCAN_JOBS_LOCK:
         entry = _SCAN_JOBS.get(job_id)
         if entry is None:
-            return {"error": "알 수 없거나 만료된 작업입니다"}
+            return ApiError(JOB_UNKNOWN, 404)  # X4
         if entry["status"] != "running":
             return {"job_id": job_id, "status": entry["status"], "cancelled": False}
         cancel = entry.get("cancel")
@@ -221,7 +251,7 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
     file_path = params.get("file", [""])[0]
 
     if not file_path:
-        return {"error": "파일 경로가 없습니다"}
+        return ApiError(FILE_PARAM_REQUIRED, 400)  # X4
     from .analysis_api import SingleFileError, check_single_file, is_symlink_path
     from .cli_standalone import symlink_layer
 
@@ -240,7 +270,8 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
     try:
         check_single_file(path)
     except SingleFileError as exc:
-        return {"error": str(exc)}
+        # X4: a missing file is 404, a folder 400.
+        return ApiError(str(exc), 404 if not path.exists() else 400)
 
     options = _web_options()
     thresholds = load_thresholds(options)
@@ -250,7 +281,7 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
         logger.exception("file analysis failed")
         # Detail stays in `detail` so the GUI shows a clean headline instead
         # of a raw exception sentence; the type/message aid local debugging.
-        return {"error": "파일 분석 중 오류가 발생했습니다", "detail": failure_reason(exc)}
+        return ApiError("파일 분석 중 오류가 발생했습니다", 500, detail=failure_reason(exc))
     response["file"] = str(path)
     if link:
         response["layer_diagnostics"] = {
@@ -655,7 +686,7 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
     analyzed as its own row. The server never persists uploads.
     """
     if "multipart/form-data" not in content_type:
-        return {"error": "multipart/form-data 업로드가 필요합니다"}
+        return ApiError("multipart/form-data 업로드가 필요합니다", 400)
     from .archives import is_archive
 
     message = BytesParser(policy=email_policy).parsebytes(
@@ -697,7 +728,7 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
             logger.exception("upload analysis failed: %s", filename)
             items.append({"name": filename, "path": filename, "status": "failed", "error": failure_reason(exc)})
     if not items:
-        return {"error": "업로드된 파일이 없습니다"}
+        return ApiError("업로드된 파일이 없습니다", 400)
     return {
         "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "summary": _summarize_records(items, "upload"),
@@ -738,9 +769,9 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
     """
     trimmed = text.strip()
     if len(trimmed) < 8:
-        return {"error": "분석할 텍스트가 너무 짧습니다 (8자 이상)."}
+        return ApiError("분석할 텍스트가 너무 짧습니다 (8자 이상).", 400)
     if len(trimmed) > 256 * 1024:
-        return {"error": "텍스트가 256KB를 초과합니다."}
+        return ApiError("텍스트가 256KB를 초과합니다.", 400)
     options = _web_options()
     thresholds = load_thresholds(options)
     # delete=False: Windows cannot reopen a delete=True NamedTemporaryFile,
@@ -791,7 +822,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
 def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     """Unified single-file check: full scan + forensics + text probes."""
     if "multipart/form-data" not in content_type:
-        return {"error": "multipart/form-data 또는 application/json 본문이 필요합니다"}
+        return ApiError("multipart/form-data 또는 application/json 본문이 필요합니다", 400)
     message = BytesParser(policy=email_policy).parsebytes(
         b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
     )
@@ -800,7 +831,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
         None,
     )
     if part is None:
-        return {"error": "업로드된 파일이 없습니다"}
+        return ApiError("업로드된 파일이 없습니다", 400)
     filename = part.get_filename() or "upload"
     payload = _part_bytes(part) or b""
     suffix = Path(filename).suffix[:16]
@@ -860,7 +891,7 @@ def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
     """Two-file comparison: speaker distance for audio pairs, stylometry
     for text/document pairs. Both parts must carry filenames."""
     if "multipart/form-data" not in content_type:
-        return {"error": "multipart/form-data 본문이 필요합니다"}
+        return ApiError("multipart/form-data 본문이 필요합니다", 400)
     message = BytesParser(policy=email_policy).parsebytes(
         b"Content-Type: " + content_type.encode("latin-1") + b"\r\n\r\n" + body
     )
@@ -868,7 +899,7 @@ def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
         p for p in message.iter_parts() if p.get_filename() and _part_bytes(p)
     ]
     if len(parts) < 2:
-        return {"error": "비교할 파일 2개가 필요합니다"}
+        return ApiError("비교할 파일 2개가 필요합니다", 400)
     tmp_paths: list[Path] = []
     try:
         for part in parts[:2]:
@@ -885,6 +916,8 @@ def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
             diag = compare_layer(result)
             diag.update(_provenance(options, load_thresholds(options)))
             return diag
+        if isinstance(result, dict) and result.get("error"):
+            return ApiError(str(result["error"]), 400)  # X4: e.g. a mixed audio/text pair
         return result
     finally:
         for tmp_path in tmp_paths:
@@ -909,13 +942,15 @@ def _feedback_payload(body: bytes) -> dict[str, object]:
     try:
         data = json.loads(body.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
-        return {"error": "JSON 본문을 해석할 수 없습니다"}
+        return ApiError("JSON 본문을 해석할 수 없습니다", 400)
+    if not isinstance(data, dict):
+        return ApiError("피드백 요청 본문은 JSON 객체여야 합니다", 400)
     label = str(data.get("expected_label", "") or "").strip().lower()
     if not (is_positive_label(label) or is_negative_label(label)):
-        return {"error": "expected_label은 인식 가능한 라벨이어야 합니다 (예: `synthetic`, `real`)"}
+        return ApiError("expected_label은 인식 가능한 라벨이어야 합니다 (예: `synthetic`, `real`)", 400)
     path = str(data.get("path") or data.get("name") or "").strip()
     if not path:
-        return {"error": "path가 필요합니다"}
+        return ApiError("path가 필요합니다", 400)
     entry: dict[str, object] = {
         "path": path,
         "expected_label": label,
