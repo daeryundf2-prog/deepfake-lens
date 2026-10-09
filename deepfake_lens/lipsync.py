@@ -23,6 +23,7 @@ import subprocess
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from .native_path import native_safe_path
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 from .vendor_weights import default_models_dir
 from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
@@ -155,16 +156,17 @@ def _audio_envelope(video_path: Path, *, max_seconds: float) -> tuple[list[float
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp_path = Path(tmp.name)
     try:
-        subprocess.run(
-            [
-                "ffmpeg", *FFMPEG_QUIET_ARGS, "-y", "-i", str(video_path),
-                "-t", f"{max_seconds:.1f}",
-                "-vn", "-ac", "1", "-ar", str(rate), "-f", "wav", str(tmp_path),
-            ],
-            capture_output=True,
-            timeout=_FFMPEG_TIMEOUT_SECONDS,
-            check=True,
-        )
+        with native_safe_path(video_path) as native_video:  # R12-1
+            subprocess.run(
+                [
+                    "ffmpeg", *FFMPEG_QUIET_ARGS, "-y", "-i", native_video,
+                    "-t", f"{max_seconds:.1f}",
+                    "-vn", "-ac", "1", "-ar", str(rate), "-f", "wav", str(tmp_path),
+                ],
+                capture_output=True,
+                timeout=_FFMPEG_TIMEOUT_SECONDS,
+                check=True,
+            )
         with wave.open(str(tmp_path), "rb") as handle:
             frames = handle.readframes(handle.getnframes())
             width = handle.getsampwidth()
@@ -190,41 +192,42 @@ def _mouth_openness_series(video_path: Path, *, max_seconds: float) -> tuple[lis
     import cv2
     import numpy as np
 
-    capture = cv2.VideoCapture(str(video_path))
-    if not capture.isOpened():
-        return [], 0.1
-    try:
-        fps = float(capture.get(cv2.CAP_PROP_FPS) or 25.0)
-        total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        max_frames = min(total, int(max_seconds * fps)) if total > 0 else int(max_seconds * fps)
-        stride = max(1, int(fps * 0.1))
-        cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        series: list[float] = []
-        last_roi: tuple[int, int, int, int] | None = None
-        index = 0
-        while index < max_frames:
-            capture.set(cv2.CAP_PROP_POS_FRAMES, index)
-            ok, frame = capture.read()
-            if not ok:
-                break
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = cascade.detectMultiScale(gray, 1.1, 4)
-            if len(faces):
-                x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
-                last_roi = (x, y, w, h)
-            elif last_roi is None:
+    with native_safe_path(video_path) as native_video:  # R12-1: never a non-ASCII name to cv2
+        capture = cv2.VideoCapture(native_video)
+        if not capture.isOpened():
+            return [], 0.1
+        try:
+            fps = float(capture.get(cv2.CAP_PROP_FPS) or 25.0)
+            total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            max_frames = min(total, int(max_seconds * fps)) if total > 0 else int(max_seconds * fps)
+            stride = max(1, int(fps * 0.1))
+            cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+            series: list[float] = []
+            last_roi: tuple[int, int, int, int] | None = None
+            index = 0
+            while index < max_frames:
+                capture.set(cv2.CAP_PROP_POS_FRAMES, index)
+                ok, frame = capture.read()
+                if not ok:
+                    break
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                faces = cascade.detectMultiScale(gray, 1.1, 4)
+                if len(faces):
+                    x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+                    last_roi = (x, y, w, h)
+                elif last_roi is None:
+                    index += stride
+                    continue
+                x, y, w, h = last_roi
+                mx1, mx2 = int(x + w * 0.3), int(x + w * 0.7)
+                my1, my2 = int(y + h * 0.65), int(y + h * 0.9)
+                roi = gray[max(0, my1) : my2, max(0, mx1) : mx2]
+                if roi.size:
+                    series.append(255.0 - float(np.mean(roi)))
                 index += stride
-                continue
-            x, y, w, h = last_roi
-            mx1, mx2 = int(x + w * 0.3), int(x + w * 0.7)
-            my1, my2 = int(y + h * 0.65), int(y + h * 0.9)
-            roi = gray[max(0, my1) : my2, max(0, mx1) : mx2]
-            if roi.size:
-                series.append(255.0 - float(np.mean(roi)))
-            index += stride
-        return series, stride / fps if fps > 0 else 0.1
-    finally:
-        capture.release()
+            return series, stride / fps if fps > 0 else 0.1
+        finally:
+            capture.release()
 
 
 def _unavailable(limitations: list[str], reason: str) -> LipsyncAnalysis:
@@ -267,9 +270,9 @@ def _syncnet_analysis(video_path: Path) -> LipsyncAnalysis | None:
 
         # syncnet-python prints ffmpeg progress and framewise confidence to
         # stdout — redirect to stderr so JSON consumers get a clean channel.
-        with contextlib.redirect_stdout(sys.stderr):
+        with contextlib.redirect_stdout(sys.stderr), native_safe_path(video_path) as native_video:  # R12-1
             offsets, confs, dists, max_conf, min_dist, _json, has_face = (
-                _SYNCNET_PIPELINE.inference(str(video_path))
+                _SYNCNET_PIPELINE.inference(native_video)
             )
     except Exception:
         # Latch only when the pipeline never constructed — a per-file

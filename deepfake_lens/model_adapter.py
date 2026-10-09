@@ -7,6 +7,7 @@ import logging
 from dataclasses import replace
 from pathlib import Path
 
+from .native_path import native_safe_path
 from .checkpoint_integrity import _expected_sha256, load_torch_state  # noqa: F401 — load_torch_state re-exported
 from .model_pins import PIN_FIELD, PinError, verify_pin
 from .model_cache import (  # noqa: F401 — re-exported for existing callers/tests
@@ -960,31 +961,32 @@ def _run_video_frames(
 @quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
 def _extract_sampled_frames(cv2, media_path: Path, out_dir: Path, count: int) -> list[Path]:
     """Decode ``count`` evenly spaced frames to PNG files in ``out_dir``."""
-    capture = cv2.VideoCapture(str(media_path))
-    if not capture.isOpened():
-        raise RuntimeError(f"영상을 열 수 없습니다: {media_path}")
-    try:
-        total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
-        if total <= 0:
-            # Streaming/unknown-length sources: take the first frames.
-            indices = list(range(count))
-        else:
-            indices = sorted({min(total - 1, int(i * total / count)) for i in range(count)})
-        frames: list[Path] = []
-        wanted = iter(indices)
-        target = next(wanted, None)
-        current = 0
-        while target is not None:
-            ok, frame = capture.read()
-            if not ok:
-                break
-            if current == target:
-                out_path = out_dir / f"frame-{current:05d}.png"
-                cv2.imwrite(str(out_path), frame)
-                if out_path.is_file():
-                    frames.append(out_path)
-                target = next(wanted, None)
-            current += 1
-        return frames
-    finally:
-        capture.release()
+    with native_safe_path(media_path) as native_video:  # R12-1: never a non-ASCII name to cv2
+        capture = cv2.VideoCapture(native_video)
+        if not capture.isOpened():
+            raise RuntimeError(f"영상을 열 수 없습니다: {media_path}")
+        try:
+            total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+            if total <= 0:
+                # Streaming/unknown-length sources: take the first frames.
+                indices = list(range(count))
+            else:
+                indices = sorted({min(total - 1, int(i * total / count)) for i in range(count)})
+            frames: list[Path] = []
+            wanted = iter(indices)
+            target = next(wanted, None)
+            current = 0
+            while target is not None:
+                ok, frame = capture.read()
+                if not ok:
+                    break
+                if current == target:
+                    out_path = out_dir / f"frame-{current:05d}.png"
+                    cv2.imwrite(str(out_path), frame)
+                    if out_path.is_file():
+                        frames.append(out_path)
+                    target = next(wanted, None)
+                current += 1
+            return frames
+        finally:
+            capture.release()

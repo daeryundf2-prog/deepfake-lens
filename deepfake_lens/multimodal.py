@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Sequence
 
+from .native_path import native_safe_path
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .native_stderr import quiet_native_stderr
 
@@ -464,28 +465,29 @@ def _motion_envelope(video_path: Path):
     except ImportError:
         return None, 0.0, 0.0
 
-    capture = cv2.VideoCapture(str(video_path))
-    if not capture.isOpened():
-        return None, 0.0, 0.0
-    try:
-        fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
-        total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        envelope: list[float] = []
-        previous = None
-        while True:
-            ok, frame = capture.read()
-            if not ok:
-                break
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float64)
-            if previous is not None:
-                envelope.append(float(np.abs(gray - previous).mean()))
-            previous = gray
-        video_seconds = total / fps if fps > 0 else 0.0
-        if not envelope:
-            return None, 0.0, video_seconds
-        return envelope, fps, video_seconds
-    finally:
-        capture.release()
+    with native_safe_path(video_path) as native_video:  # R12-1: never a non-ASCII name to cv2
+        capture = cv2.VideoCapture(native_video)
+        if not capture.isOpened():
+            return None, 0.0, 0.0
+        try:
+            fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
+            total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            envelope: list[float] = []
+            previous = None
+            while True:
+                ok, frame = capture.read()
+                if not ok:
+                    break
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float64)
+                if previous is not None:
+                    envelope.append(float(np.abs(gray - previous).mean()))
+                previous = gray
+            video_seconds = total / fps if fps > 0 else 0.0
+            if not envelope:
+                return None, 0.0, video_seconds
+            return envelope, fps, video_seconds
+        finally:
+            capture.release()
 
 
 @quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
@@ -502,7 +504,8 @@ def _audio_envelope(video_path: Path):
     sample_rate = 22050
     hop = 512
     try:
-        y, sr = librosa.load(str(video_path), sr=sample_rate, mono=True)
+        with native_safe_path(video_path) as native_media:  # R12-2: libsndfile/audioread need an ASCII name
+            y, sr = librosa.load(native_media, sr=sample_rate, mono=True)
     except Exception:
         return None, 0.0, 0.0
     if y is None or len(y) < hop:

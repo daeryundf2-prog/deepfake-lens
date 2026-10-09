@@ -5,6 +5,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
+from .native_path import NativePathError, native_safe_path
 from .native_stderr import FFMPEG_QUIET_ARGS
 from .json_text import json_dumps
 
@@ -102,8 +103,15 @@ def extract_video_frames(plan: dict[str, object], *, limit: int | None = None) -
             )
             continue
         frame_dir.mkdir(parents=True, exist_ok=True)
+        # R12-1: the input after "-i" reaches ffmpeg under an ASCII staged name.
+        source_index = command.index("-i") + 1 if "-i" in command[:-1] else -1
         try:
-            completed = subprocess.run(command, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=FFMPEG_TIMEOUT_SECONDS)
+            with native_safe_path(command[source_index] if source_index > 0 else "") as native_source:
+                staged = [native_source if index == source_index else part for index, part in enumerate(command)]
+                completed = subprocess.run(staged, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=FFMPEG_TIMEOUT_SECONDS)
+        except NativePathError as exc:
+            results.append({"path": item.get("path", ""), "returncode": -1, "stderr": str(exc)})
+            continue
         except subprocess.TimeoutExpired:
             results.append(
                 {

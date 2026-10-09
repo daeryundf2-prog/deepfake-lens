@@ -14,6 +14,7 @@ import struct
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
+from .native_path import native_safe_path
 from .error_text import exception_text, failure_reason
 
 MAX_FORENSIC_FILE_BYTES = 256 * 1024 * 1024  # 256 MB
@@ -303,28 +304,30 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
         import c2pa
     except ImportError:
         return None
-    try:
-        reader = c2pa.Reader(str(Path(path)))
-    except Exception as exc:  # noqa: BLE001 - SDK error classes vary by release; classified below
-        if _is_c2pa_error(c2pa, exc, "ManifestNotFound"):
-            return {"present": False, "status": "absent", "error": exception_text(exc)}
-        return {
-            "present": False,
-            "status": "unavailable",
-            "error": failure_reason(exc),
-            "error_kind": "not_supported" if _is_c2pa_error(c2pa, exc, "NotSupported") else "reader_error",
-        }
-    try:
-        state = str(reader.get_validation_state())
-        manifest = reader.get_active_manifest() or {}
-        results = reader.get_validation_results() or {}
-    except Exception as exc:
-        return {"present": True, "status": "unavailable", "error": failure_reason(exc), "error_kind": "validation_error"}
-    finally:
+    # R12-1: the SDK is native — it only ever sees an ASCII staged name.
+    with native_safe_path(path) as native_media:
         try:
-            reader.close()
-        except Exception:
-            pass
+            reader = c2pa.Reader(native_media)
+        except Exception as exc:  # noqa: BLE001 - SDK error classes vary by release; classified below
+            if _is_c2pa_error(c2pa, exc, "ManifestNotFound"):
+                return {"present": False, "status": "absent", "error": exception_text(exc)}
+            return {
+                "present": False,
+                "status": "unavailable",
+                "error": failure_reason(exc),
+                "error_kind": "not_supported" if _is_c2pa_error(c2pa, exc, "NotSupported") else "reader_error",
+            }
+        try:
+            state = str(reader.get_validation_state())
+            manifest = reader.get_active_manifest() or {}
+            results = reader.get_validation_results() or {}
+        except Exception as exc:
+            return {"present": True, "status": "unavailable", "error": failure_reason(exc), "error_kind": "validation_error"}
+        finally:
+            try:
+                reader.close()
+            except Exception:
+                pass
 
     success_codes: list[str] = []
     failure_codes: list[str] = []

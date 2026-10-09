@@ -32,6 +32,7 @@ import importlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .native_path import native_safe_path
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 from .vendor_weights import default_models_dir
 from .checkpoint_integrity import load_torch_state
@@ -117,38 +118,39 @@ def analyze_face_track(
     except ImportError:
         return _unavailable(limitations, "cv2/numpy가 없어 얼굴 트랙 분석을 건너뜁니다.")
 
-    cap = cv2.VideoCapture(str(video_path))
-    if not cap.isOpened():
-        return _unavailable(limitations, "영상을 디코딩할 수 없습니다.")
-    try:
-        src_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-        step = max(1, int(round(src_fps / fps)))
-        crops: list = []
-        landmarks_seq: list = []
-        boxes: list = []
-        idx, taken = 0, 0
-        while taken < max_frames:
-            ok = cap.grab()
-            if not ok:
-                break
-            if idx % step == 0:
-                ok, frame = cap.retrieve()
+    with native_safe_path(video_path) as native_video:  # R12-1: never a non-ASCII name to cv2
+        cap = cv2.VideoCapture(native_video)
+        if not cap.isOpened():
+            return _unavailable(limitations, "영상을 디코딩할 수 없습니다.")
+        try:
+            src_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+            step = max(1, int(round(src_fps / fps)))
+            crops: list = []
+            landmarks_seq: list = []
+            boxes: list = []
+            idx, taken = 0, 0
+            while taken < max_frames:
+                ok = cap.grab()
                 if not ok:
                     break
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                face = _largest_face(rgb)
-                if face is not None:
-                    crops.append(_crop_face(rgb, face))
-                    landmarks_seq.append(face.get("landmarks"))
-                    boxes.append(face["box"])
-                else:
-                    crops.append(None)
-                    landmarks_seq.append(None)
-                    boxes.append(None)
-                taken += 1
-            idx += 1
-    finally:
-        cap.release()
+                if idx % step == 0:
+                    ok, frame = cap.retrieve()
+                    if not ok:
+                        break
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    face = _largest_face(rgb)
+                    if face is not None:
+                        crops.append(_crop_face(rgb, face))
+                        landmarks_seq.append(face.get("landmarks"))
+                        boxes.append(face["box"])
+                    else:
+                        crops.append(None)
+                        landmarks_seq.append(None)
+                        boxes.append(None)
+                    taken += 1
+                idx += 1
+        finally:
+            cap.release()
 
     usable = [(c, l, b) for c, l, b in zip(crops, landmarks_seq, boxes) if c is not None]
     if len(usable) < _MIN_TRACK:

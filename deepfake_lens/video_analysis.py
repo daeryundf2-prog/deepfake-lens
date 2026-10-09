@@ -17,6 +17,7 @@ from .checks import skipped as skipped_entry
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
 from .result_types import CoverageEntry, CoverageStatus
+from .native_path import NativePathError, native_safe_path
 from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
 
 logger = logging.getLogger(__name__)
@@ -107,20 +108,23 @@ def analyze_video_temporal(
         return _error_analysis("opencv가 설치되어 있지 않습니다. `pip install opencv-python`로 설치하세요.")
 
     try:
-        cap = cv2.VideoCapture(str(video_path))
-        if not cap.isOpened():
-            return _error_analysis("비디오를 열 수 없습니다.")
+        # R12-1: a non-UTF-8 name crashed cv2 (SIGSEGV) — ASCII staged name only.
+        with native_safe_path(video_path) as native_video:
+            cap = cv2.VideoCapture(native_video)
+            opened = cap.isOpened()
+            if opened:
+                try:
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    duration = frame_count / max(1, fps)
+                finally:
+                    cap.release()
     except Exception as exc:
         return _error_analysis(f"비디오 열기 오류: {exc}")
-
-    try:
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        duration = frame_count / max(1, fps)
-    finally:
-        cap.release()
+    if not opened:
+        return _error_analysis("비디오를 열 수 없습니다.")
 
     # Sample frames
     frame_analyses = _sample_frames(video_path, frame_sample_rate, max_frames)
@@ -231,12 +235,13 @@ def audio_track_check(
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp_name = tmp.name
         try:
-            proc = subprocess.run(
-                [ffmpeg, *FFMPEG_QUIET_ARGS, "-y", "-i", str(video_path), "-vn", "-ac", "1", "-ar", "16000", tmp_name],
-                capture_output=True, timeout=120,
-            )
+            with native_safe_path(video_path) as native_video:  # R12-1
+                proc = subprocess.run(
+                    [ffmpeg, *FFMPEG_QUIET_ARGS, "-y", "-i", native_video, "-vn", "-ac", "1", "-ar", "16000", tmp_name],
+                    capture_output=True, timeout=120,
+                )
             extracted = proc.returncode == 0 and Path(tmp_name).stat().st_size > 0
-        except (subprocess.TimeoutExpired, OSError) as exc:
+        except (subprocess.TimeoutExpired, OSError, NativePathError) as exc:
             logger.exception("audio-track extraction failed: %s", video_path)
             return None, failed_entry(AV_AUDIO_CHECK, exc)
         if not extracted:
@@ -305,11 +310,18 @@ def _sample_frames(
     """Sample frames from video at specified rate."""
     try:
         import cv2
-        import numpy as np
+        import numpy  # noqa: F401 - availability probe; frames are decoded with it
     except ImportError:
         return []
 
-    cap = cv2.VideoCapture(str(path))
+    with native_safe_path(path) as native_video:  # R12-1
+        return _sample_open_frames(cv2.VideoCapture(native_video), sample_rate, max_frames)
+
+
+def _sample_open_frames(cap, sample_rate: float, max_frames: int) -> list[FrameAnalysis]:
+    import cv2
+    import numpy as np
+
     if not cap.isOpened():
         return []
 

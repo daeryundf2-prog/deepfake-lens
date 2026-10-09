@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .native_path import native_safe_path
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 from .native_stderr import quiet_native_stderr
 
@@ -357,38 +358,39 @@ def _face_roi_samples(
     """
     import cv2
 
-    capture = cv2.VideoCapture(str(video_path))
-    if not capture.isOpened():
-        return [], [], 0.0, 0.0
-    try:
-        fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
-        total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-        aggregate: list[tuple[float, float, float]] = []
-        roi_frames: list[list[tuple[float, float, float]]] = []
-        frame_index = 0
-        stride = max(1, int(fps * 0.2)) if fps > 0 else 1  # ~5 samples/second
-        while frame_index < total and len(aggregate) < max_frames:
-            capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-            ok, frame = capture.read()
-            if not ok:
-                break
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = cascade.detectMultiScale(gray, 1.1, 4)
-            if len(faces):
-                x, y, w, h = max(faces, key=lambda face: face[2] * face[3])
-                roi = frame[max(0, y) : y + h, max(0, x) : x + w]
-                if roi.size:
-                    mean_b, mean_g, mean_r = (float(channel) for channel in cv2.mean(roi)[:3])
-                    aggregate.append((mean_r, mean_g, mean_b))
-                    roi_frames.append(_grid_cell_means(roi, grid=ROI_GRID))
-            frame_index += stride
-        # Transpose per-frame cell lists into per-cell series.
-        roi_series = [list(series) for series in zip(*roi_frames)] if roi_frames else []
-        duration = total / fps if fps > 0 else 0.0
-        return aggregate, roi_series, fps, duration
-    finally:
-        capture.release()
+    with native_safe_path(video_path) as native_video:  # R12-1: never a non-ASCII name to cv2
+        capture = cv2.VideoCapture(native_video)
+        if not capture.isOpened():
+            return [], [], 0.0, 0.0
+        try:
+            fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
+            total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+            aggregate: list[tuple[float, float, float]] = []
+            roi_frames: list[list[tuple[float, float, float]]] = []
+            frame_index = 0
+            stride = max(1, int(fps * 0.2)) if fps > 0 else 1  # ~5 samples/second
+            while frame_index < total and len(aggregate) < max_frames:
+                capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+                ok, frame = capture.read()
+                if not ok:
+                    break
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                faces = cascade.detectMultiScale(gray, 1.1, 4)
+                if len(faces):
+                    x, y, w, h = max(faces, key=lambda face: face[2] * face[3])
+                    roi = frame[max(0, y) : y + h, max(0, x) : x + w]
+                    if roi.size:
+                        mean_b, mean_g, mean_r = (float(channel) for channel in cv2.mean(roi)[:3])
+                        aggregate.append((mean_r, mean_g, mean_b))
+                        roi_frames.append(_grid_cell_means(roi, grid=ROI_GRID))
+                frame_index += stride
+            # Transpose per-frame cell lists into per-cell series.
+            roi_series = [list(series) for series in zip(*roi_frames)] if roi_frames else []
+            duration = total / fps if fps > 0 else 0.0
+            return aggregate, roi_series, fps, duration
+        finally:
+            capture.release()
 
 
 def _grid_cell_means(roi, *, grid: int) -> list[tuple[float, float, float]]:

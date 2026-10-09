@@ -15,6 +15,7 @@ from pathlib import Path
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .error_text import exception_text, failure_reason
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
+from .native_path import native_safe_path
 from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
 
 
@@ -297,7 +298,9 @@ def _extract_features(path: Path, *, segment_seconds: int, raise_on_decode: bool
         return None
 
     try:
-        y, sr = librosa.load(str(path), sr=DEFAULT_SAMPLE_RATE, duration=segment_seconds)
+        # R12-2: libsndfile/audioread raise UnicodeEncodeError on a non-UTF-8 name.
+        with native_safe_path(path) as native_audio:
+            y, sr = librosa.load(native_audio, sr=DEFAULT_SAMPLE_RATE, duration=segment_seconds)
     except Exception:
         if raise_on_decode:
             raise
@@ -936,7 +939,8 @@ def _ecapa_load_waveform(path: Path):
         import soundfile as sf
         import torch
 
-        data, sample_rate = sf.read(str(wav_path), dtype="float32", always_2d=True)
+        with native_safe_path(wav_path) as native_audio:  # R12-2
+            data, sample_rate = sf.read(native_audio, dtype="float32", always_2d=True)
         waveform = torch.from_numpy(data.T)  # (channels, samples)
         if waveform.shape[0] > 1:
             waveform = waveform.mean(dim=0, keepdim=True)
@@ -955,10 +959,11 @@ def _ecapa_load_waveform(path: Path):
 
         fd, tmp = tempfile.mkstemp(suffix=".wav")
         os.close(fd)
-        subprocess.run(
-            ["ffmpeg", *FFMPEG_QUIET_ARGS, "-y", "-i", str(path), "-ac", "1", "-ar", "16000", tmp],
-            capture_output=True, check=True, timeout=120,
-        )
+        with native_safe_path(path) as native_audio:  # R12-1
+            subprocess.run(
+                ["ffmpeg", *FFMPEG_QUIET_ARGS, "-y", "-i", native_audio, "-ac", "1", "-ar", "16000", tmp],
+                capture_output=True, check=True, timeout=120,
+            )
         return _read(Path(tmp))
     except Exception:
         return None

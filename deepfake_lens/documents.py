@@ -15,6 +15,8 @@ import re
 import zipfile
 from pathlib import Path
 
+from .native_path import native_safe_path
+
 logger = logging.getLogger(__name__)
 # Longest exception message kept in ``extractor_error`` (as checks.run_check).
 EXTRACTOR_ERROR_MAX_CHARS = 200
@@ -133,14 +135,16 @@ def _extract_pdf(path: Path, meta: dict[str, str]) -> tuple[str, dict[str, str]]
         meta["extractor"] = "unavailable:pymupdf"
         return "", meta
     try:
-        doc = fitz.open(path)
-        text_parts = []
-        for page in doc:
-            text_parts.append(page.get_text())
-            if sum(len(t) for t in text_parts) > MAX_EXTRACTED_CHARS:
-                break
-        info = doc.metadata or {}
-        doc.close()
+        # R12-2: pymupdf raised FileDataError on a non-UTF-8 name — ASCII staged name.
+        with native_safe_path(path) as native_pdf:
+            doc = fitz.open(native_pdf)
+            text_parts = []
+            for page in doc:
+                text_parts.append(page.get_text())
+                if sum(len(t) for t in text_parts) > MAX_EXTRACTED_CHARS:
+                    break
+            info = doc.metadata or {}
+            doc.close()
     except Exception as exc:  # noqa: BLE001 - pymupdf raises its own error types; class kept in the record
         _failed(meta, "pymupdf", exc)
         return "", meta

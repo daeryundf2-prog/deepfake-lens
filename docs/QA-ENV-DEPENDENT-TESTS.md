@@ -26,6 +26,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | 사유(소스 원문) | 테스트가 실행되는 환경(필요 extras·도구) | 파일 |
 | --- | --- | --- |
 | `':' is not allowed in Windows file names` | Windows가 아닌 OS(POSIX) | test_archives.py, test_servers.py |
+| `OpenCV mp4v 인코더 없음` | `pixel`/`video` extra(opencv-python — mp4v 인코더 포함 빌드) | test_native_path.py |
 | `Pillow + numpy needed for the fixture` | `dev` extra(Pillow, numpy) | test_report_labels_ko.py |
 | `Pillow + numpy required to write EXIF/XMP fixtures` | `dev` extra(Pillow, numpy) | test_image_metadata_exif.py |
 | `Pillow not installed` | `dev` extra(Pillow) | test_cli_operations.py, test_error_text.py, test_json_contract.py, test_model_zoo.py |
@@ -38,7 +39,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `cannot create symlinks: {exc}` | 심볼릭 링크를 만들 수 있는 OS·권한(POSIX, Windows 개발자 모드) | test_cli_inputs.py, test_evidence_statement.py |
 | `checkpoint is present; auto-discovery would run real inference` | 체크포인트가 없는 환경에서만 실행(가중치를 받은 환경에서는 해당 없음) | test_aide_engine.py |
 | `checkpoint is present; unavailable-path assertion does not apply` | 체크포인트가 없는 환경에서만 실행(가중치를 받은 환경에서는 해당 없음) | test_aasist_engine.py, test_aide_engine.py |
-| `fastapi + httpx not installed` | fastapi, httpx(QA 사이드 venv: `pip install fastapi httpx uvicorn`) | test_cli_operations.py, test_d16_ui_api.py, test_forensic_pdf.py, test_korean_output.py, test_non_utf8_names.py, test_reviews.py, test_servers.py, test_standalone_contract.py |
+| `fastapi + httpx not installed` | fastapi, httpx(QA 사이드 venv: `pip install fastapi httpx uvicorn`) | test_cli_operations.py, test_d16_ui_api.py, test_forensic_pdf.py, test_korean_output.py, test_native_path.py, test_non_utf8_names.py, test_reviews.py, test_servers.py, test_standalone_contract.py |
 | `fastapi + httpx not installed — API-server leg of QA-OUT-4` | fastapi, httpx(QA 사이드 venv) | test_qa_out.py |
 | `fastapi + httpx not installed — stream payload` | fastapi, httpx(QA 사이드 venv) + Pillow | test_json_contract.py |
 | `fastapi + httpx not installed — streaming API` | fastapi, httpx(QA 사이드 venv) | test_cli_operations.py |
@@ -69,7 +70,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `numpy/opencv not installed` | `pixel` extra(opencv-python, numpy) | test_v6_probes.py |
 | `numpy/scipy not installed` | `audio`/`full` extra(numpy, scipy) | test_phase1_math.py |
 | `official checkpoint not fetched` | `scripts/fetch_aasist.py` 등으로 받은 공식 체크포인트(망분리 감정실에서는 vendor-weights 묶음) | test_aasist_engine.py |
-| `opencv not installed` | `pixel`/`video`/`face` extra(opencv-python) | test_face.py, test_model_zoo.py |
+| `opencv not installed` | `pixel`/`video`/`face` extra(opencv-python) | test_face.py, test_model_zoo.py, test_native_path.py |
 | `opencv required` | `pixel`/`video`/`face` extra(opencv-python) | test_faceswap_seam.py, test_fail_closed.py |
 | `opencv/numpy not installed` | `pixel` extra(opencv-python, numpy) | test_consolidation.py |
 | `opencv/numpy required` | `pixel` extra(opencv-python, numpy) | test_standalone_contract.py |
@@ -98,7 +99,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `transformers/torch not installed` | `text_lm` extra(torch, transformers) | test_v6_probes.py |
 | `without torch the script exits at the dependency check first` | `text_lm` extra(torch) | test_aasist_engine.py |
 | `` {FIXTURE_DIR} missing — run `python scripts/make_benchmark_fixtures.py` `` | `scripts/make_benchmark_fixtures.py`로 만든 픽스처 | test_benchmark_e2e.py |
-| `파일 시스템이 UTF-8이 아닌 파일 이름을 허용하지 않음(Windows·macOS)` | UTF-8이 아닌 바이트 파일 이름을 허용하는 파일 시스템(리눅스 ext4·tmpfs 등) | test_non_utf8_names.py |
+| `파일 시스템이 UTF-8이 아닌 파일 이름을 허용하지 않음(Windows·macOS)` | UTF-8이 아닌 바이트 파일 이름을 허용하는 파일 시스템(리눅스 ext4·tmpfs 등) | test_native_path.py, test_non_utf8_names.py |
 
 ## 환경 의존 기준선 테스트
 
