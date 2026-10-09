@@ -1218,7 +1218,9 @@ class QaSys7ReadRootConfinementTest(_ServerFixture):
 
     def test_report_does_not_hash_outside_files(self) -> None:
         """QA-SYS-7: 보조 검사 — an item path outside the roots is never read — its sha256 stays null."""
-        rows = [{"path": str(self.outside / "secret.txt"), "name": "secret.txt", "kind": "text", "status": "failed", "size_bytes": 0, "sha256": "f" * 64}]
+        # N11: the row carries the contract's required "result" (null for a
+        # failed row) — /api/report refuses rows outside the item contract.
+        rows = [{"path": str(self.outside / "secret.txt"), "name": "secret.txt", "kind": "text", "status": "failed", "size_bytes": 0, "result": None, "sha256": "f" * 64}]
         status, body = self.request("/api/report?format=json", {"items": rows})
         self.assertEqual(status, 200)
         payload = json.loads(body)

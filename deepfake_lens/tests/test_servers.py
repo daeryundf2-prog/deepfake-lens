@@ -51,7 +51,9 @@ class ReportRequestErrorsAreKoreanTest(unittest.TestCase):
     CASES: tuple[tuple[object, str], ...] = (
         ({}, "보고서에 넣을 검사 결과 항목(items 배열)이 필요합니다"),
         ({"items": []}, "보고서에 넣을 검사 결과 항목(items 배열)이 필요합니다"),
-        ({"items": ["x"]}, "보고서에 넣을 검사 결과 항목(items 배열)이 필요합니다"),
+        # N11: a non-object row is refused by number (was silently skipped,
+        # leaving "items required" — or a report about the rows that remained).
+        ({"items": ["x"]}, "검사 결과 항목 1번을 해석할 수 없습니다: 항목은 JSON 객체여야 합니다"),
         ({"items": [{"path": "a.png"}], "thresholds": "x"}, "thresholds 값은 JSON 객체여야 합니다"),
         ({"items": [{"path": "a.png"}], "coverage": []}, "coverage 값은 JSON 객체여야 합니다"),
         ([1, 2], "보고서 요청 본문은 JSON 객체여야 합니다"),
@@ -1157,3 +1159,273 @@ class ApiServerFilePathConfinementTest(ApiServerConfinementUnitTest):
         self.assertEqual(res.status_code, 200)
         self.assertIn("event: result", res.text)
         self.assertIn("memo.txt", res.text)
+
+
+HAVE_PYMUPDF = importlib.util.find_spec("pymupdf") is not None
+
+
+def _write_png(path: Path, seed: int) -> Path:
+    """A small valid RGB PNG (stdlib only) whose bytes depend on ``seed``."""
+    import struct
+    import zlib
+
+    width = height = 32
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+
+    rows = b"".join(b"\x00" + bytes(((x * 7 + y * 3 + seed) % 256) for x in range(width) for _ in range(3)) for y in range(height))
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+    return path
+
+
+class ReportEvidenceHashesBothServersTest(unittest.TestCase):
+    """N2/N9/N10/N11: /api/report on the stdlib web server and on api-serve.
+
+    N2: the report re-hashed rows with ``resolve()``, so a symbolic-link row
+    (``in_link.png -> target.png``) got its target's digest in the signed
+    body and both PDFs, while the scan recorded null / "해시 불가(심볼릭
+    링크)". N10: archive members were "해시 불가(압축 파일 구성원…)" on the
+    web PDFs while the CLI PDF showed the member digest. N9: the stdlib
+    server ignored the body's ``format`` and sent PDF bytes as text/html.
+    N11: malformed requests were 200 + ``{"error"}`` and ``{"items":
+    [{"path": 3}]}`` rendered an HTML report.
+    """
+
+    HEADERS = {"X-Deepfake-Lens-Client": "gui", "Content-Type": "application/json"}
+
+    def setUp(self) -> None:
+        import contextlib
+        import io
+        import tempfile
+        import zipfile
+
+        from deepfake_lens.cli import main as cli_main
+
+        roots = patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
+        roots.start()
+        self.addCleanup(roots.stop)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.folder = Path(self._tmp.name).resolve() / "case"
+        self.folder.mkdir()
+        _write_png(self.folder / "target.png", seed=1)
+        os.symlink("target.png", self.folder / "in_link.png")
+        with zipfile.ZipFile(self.folder / "bundle.zip", "w") as archive:
+            archive.writestr("inner/member.png", _write_png(Path(self._tmp.name) / "m.png", seed=2).read_bytes())
+            archive.writestr("notes.txt", "메모입니다.")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli_main(["scan", str(self.folder), "--format", "json"]), 0)
+        self.scan = json.loads(out.getvalue())
+        self.rows = {row["path"]: row for row in self.scan["items"]}
+        import hashlib
+
+        self.target_sha = hashlib.sha256((self.folder / "target.png").read_bytes()).hexdigest()
+        self.member_sha = hashlib.sha256(_write_png(Path(self._tmp.name) / "m2.png", seed=2).read_bytes()).hexdigest()
+        # The scan itself: link row unhashed, member rows hashed.
+        self.assertIsNone(self.rows["in_link.png"].get("sha256"))
+        self.assertEqual(self.rows["target.png"]["sha256"], self.target_sha)
+        self.assertEqual(self.rows["bundle.zip::inner/member.png"]["sha256"], self.member_sha)
+        self.assertTrue(self.rows["bundle.zip::notes.txt"]["sha256"])
+        # A client-posted digest is never trusted: post junk for every row.
+        self.posted = [dict(row, sha256="0" * 64) if row.get("sha256") else dict(row) for row in self.scan["items"]]
+
+    # -- legs ---------------------------------------------------------------
+
+    def _stdlib_leg(self):
+        import threading
+        import urllib.error
+        import urllib.request
+
+        from deepfake_lens.webapp import build_server
+
+        server = build_server("127.0.0.1", 0, default_folder=self.folder)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        port = server.server_address[1]
+
+        def post(path: str, body: bytes) -> tuple[int, str, bytes]:
+            request = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=body, headers=self.HEADERS, method="POST")
+            try:
+                with urllib.request.urlopen(request, timeout=120) as response:
+                    return response.status, response.headers.get("Content-Type", ""), response.read()
+            except urllib.error.HTTPError as exc:
+                return exc.code, exc.headers.get("Content-Type", ""), exc.read()
+
+        return post
+
+    def _fastapi_leg(self):
+        from fastapi.testclient import TestClient
+
+        client = TestClient(api_server.create_app(default_folder=self.folder))
+
+        def post(path: str, body: bytes) -> tuple[int, str, bytes]:
+            response = client.post(path, content=body, headers={"host": "localhost", **self.HEADERS})
+            return response.status_code, response.headers.get("content-type", ""), response.content
+
+        return post
+
+    def _legs(self):
+        legs = [("web", self._stdlib_leg)]
+        if HAVE_FASTAPI:
+            legs.append(("api", self._fastapi_leg))
+        return legs
+
+    def _body(self, **extra: object) -> bytes:
+        return json.dumps({"items": self.posted, **extra}).encode("utf-8")
+
+    # -- N2/N10: signed body ------------------------------------------------
+
+    def test_signed_body_keeps_symlink_unhashed_and_hashes_members(self) -> None:
+        for name, make in self._legs():
+            with self.subTest(leg=name):
+                post = make()
+                status, content_type, raw = post("/api/report?format=json", self._body())
+                self.assertEqual(status, 200, raw[:300])
+                self.assertIn("application/json", content_type)
+                signed = {row["path"]: row for row in json.loads(raw)["items"]}
+                self.assertIsNone(signed["in_link.png"]["sha256"])  # N2: not target.png's digest
+                self.assertEqual(signed["target.png"]["sha256"], self.target_sha)
+                self.assertEqual(signed["bundle.zip::inner/member.png"]["sha256"], self.member_sha)  # N10
+                self.assertEqual(signed["bundle.zip::notes.txt"]["sha256"], self.rows["bundle.zip::notes.txt"]["sha256"])
+                self.assertEqual(signed["bundle.zip"]["sha256"], self.rows["bundle.zip"]["sha256"])
+                self.assertNotIn("0" * 64, raw.decode("utf-8"))  # posted digests are recomputed
+
+    def test_symlink_component_on_the_path_is_not_followed(self) -> None:
+        """A row path through a linked folder (``linked/target.png``) is not hashed either."""
+        os.symlink(self.folder, self.folder / "linked")
+        row = dict(self.rows["target.png"], path="linked/target.png", name="target.png")
+        for name, make in self._legs():
+            with self.subTest(leg=name):
+                status, _, raw = make()("/api/report?format=json", json.dumps({"items": [row]}).encode("utf-8"))
+                self.assertEqual(status, 200, raw[:300])
+                self.assertIsNone(json.loads(raw)["items"][0]["sha256"])
+
+    # -- N2/N10/N9: both PDFs ----------------------------------------------
+
+    @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf required for PDF text")
+    def test_both_pdfs_show_symlink_unhashed_and_member_digests(self) -> None:
+        import pymupdf
+
+        from deepfake_lens.result_text import HASH_UNAVAILABLE_SYMLINK
+
+        for name, make in self._legs():
+            post = make()
+            for fmt in ("pdf", "evidence"):
+                with self.subTest(leg=name, format=fmt):
+                    # N9: the format travels in the JSON body only.
+                    status, content_type, raw = post("/api/report", self._body(format=fmt))
+                    self.assertEqual(status, 200, raw[:300])
+                    self.assertEqual(content_type, "application/pdf")
+                    self.assertTrue(raw.startswith(b"%PDF-"))
+                    with pymupdf.open(stream=raw, filetype="pdf") as doc:
+                        text = "\n".join(page.get_text() for page in doc)
+                    flat = "".join(text.split())
+                    # N2: the target's digest appears once (its own row), never for the link.
+                    self.assertEqual(flat.count(self.target_sha), 1, text)
+                    self.assertIn("".join(HASH_UNAVAILABLE_SYMLINK.split())[:20], flat)
+                    # N10: the member digest is printed; no member row is "해시 불가(압축 파일 구성원".
+                    self.assertIn(self.member_sha, flat)
+                    self.assertNotIn("해시불가(압축파일구성원", flat)
+                    self.assertNotIn("0" * 64, flat)
+
+    # -- N9: format in the body, HTML default ---------------------------------
+
+    def test_format_from_body_sets_content_type(self) -> None:
+        for name, make in self._legs():
+            post = make()
+            with self.subTest(leg=name):
+                status, content_type, raw = post("/api/report", self._body())
+                self.assertEqual(status, 200)
+                self.assertIn("text/html", content_type)
+                status, content_type, raw = post("/api/report", self._body(format="json"))
+                self.assertEqual(status, 200)
+                self.assertIn("application/json", content_type)
+                self.assertIn("items", json.loads(raw))
+                # ?format= wins over the body
+                status, content_type, _ = post("/api/report?format=html", self._body(format="json"))
+                self.assertIn("text/html", content_type)
+
+    # -- N11: malformed requests are 400 + Korean --------------------------------
+
+    def test_malformed_requests_are_400_in_korean(self) -> None:
+        from deepfake_lens.error_text import english_prose
+
+        bad: list[tuple[bytes, str]] = [
+            (b"{not json", "JSON 본문을 해석할 수 없습니다"),
+            (b"[1, 2]", "보고서 요청 본문은 JSON 객체여야 합니다"),
+            (b"{}", "보고서에 넣을 검사 결과 항목(items 배열)이 필요합니다"),
+            (b'{"items": []}', "보고서에 넣을 검사 결과 항목(items 배열)이 필요합니다"),
+            (b'{"items": [{"path": 3}]}', "검사 결과 항목 1번을 해석할 수 없습니다: "),
+            (json.dumps({"items": [dict(self.posted[0], path=3)]}).encode(), "검사 결과 항목 1번을 해석할 수 없습니다: `path` 값은 문자열이어야 합니다"),
+            (json.dumps({"items": ["x"]}).encode(), "검사 결과 항목 1번을 해석할 수 없습니다: 항목은 JSON 객체여야 합니다"),
+            (json.dumps({"items": [dict(self.posted[0], size_bytes="9")]}).encode(), "`size_bytes` 값은 정수이어야 합니다"),
+            (json.dumps({"items": [dict(self.posted[0], sha256="abc")]}).encode(), "`sha256` 값은 64자리"),
+            (json.dumps({"items": self.posted, "format": "docx"}).encode(), "지원되지 않는 보고서 형식입니다: 「docx」"),
+            (json.dumps({"items": self.posted, "format": 3}).encode(), "`format` 값은 문자열이어야 합니다"),
+            (json.dumps({"items": self.posted, "thresholds": 3}).encode(), "thresholds 값은 JSON 객체여야 합니다"),
+        ]
+        broken_result = dict(self.posted[0])
+        broken_result["result"] = dict(broken_result["result"] or {}, verdict_code="bogus")
+        bad.append((json.dumps({"items": [broken_result]}).encode(), "`result.verdict_code` 값이 허용 목록"))
+        for name, make in self._legs():
+            post = make()
+            for body, expected in bad:
+                with self.subTest(leg=name, body=body[:60]):
+                    status, content_type, raw = post("/api/report", body)
+                    self.assertEqual(status, 400, raw[:300])
+                    self.assertIn("application/json", content_type)
+                    error = json.loads(raw)["error"]
+                    self.assertIn(expected, error)
+                    self.assertIsNone(english_prose(error), error)
+                    self.assertNotIn(b"<html", raw)
+
+
+class ReportItemContractMatchesSchemaTest(unittest.TestCase):
+    """N11: the stdlib item validator states exactly what the contract schema states."""
+
+    def test_required_fields_and_enums_match_the_schema(self) -> None:
+        from deepfake_lens import report_items
+
+        schema_path = Path(__file__).resolve().parents[2] / "contracts" / "deepfake-lens-scan-result-v2.schema.json"
+        defs = json.loads(schema_path.read_text(encoding="utf-8"))["$defs"]
+        self.assertEqual(list(report_items.ITEM_REQUIRED), defs["item"]["required"])
+        self.assertEqual(list(report_items.RESULT_REQUIRED), defs["result"]["required"])
+        self.assertEqual(list(report_items.EVIDENCE_REQUIRED), defs["evidence_item"]["required"])
+        self.assertEqual(list(report_items.COVERAGE_REQUIRED), defs["coverage_entry"]["required"])
+        self.assertEqual(list(report_items.SIGNAL_REQUIRED), defs["signal"]["required"])
+        result = defs["result"]["properties"]
+        self.assertEqual(list(report_items.VERDICT_CODES), result["verdict_code"]["enum"])
+        self.assertEqual(list(report_items.VERDICT_LABELS), result["verdict_label"]["enum"])
+        self.assertEqual(list(report_items.GRADES), result["grade"]["enum"])
+        self.assertEqual(list(report_items.BANDS), result["band"]["enum"])
+        evidence = defs["evidence_item"]["properties"]
+        self.assertEqual(list(report_items.EVIDENCE_KINDS), evidence["kind"]["enum"])
+        self.assertEqual(list(report_items.EVIDENCE_DIRECTIONS), evidence["direction"]["enum"])
+        self.assertEqual(list(report_items.EVIDENCE_STRENGTHS), evidence["strength"]["enum"])
+        self.assertEqual(list(report_items.COVERAGE_STATUSES), defs["coverage_entry"]["properties"]["status"]["enum"])
+        self.assertEqual(report_items.SHA256_PATTERN.pattern, defs["item"]["properties"]["sha256"]["pattern"])
+        item_props = defs["item"]["properties"]
+        for field in report_items.ITEM_STRING_FIELDS:
+            self.assertEqual(item_props[field]["type"], "string", field)
+        self.assertEqual(item_props["size_bytes"]["type"], "integer")
+
+    def test_real_scan_rows_pass(self) -> None:
+        import tempfile
+
+        from deepfake_lens.core import scan_directory, scan_to_json
+        from deepfake_lens.report_items import check_report_item
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_png(root / "a.png", seed=3)
+            (root / "note.txt").write_text("사람이 쓴 글입니다.", encoding="utf-8")
+            (root / "x.xyz").write_bytes(b"???")
+            os.symlink("a.png", root / "link.png")
+            payload = scan_to_json(*scan_directory(root))
+        for row in payload["items"]:
+            with self.subTest(path=row["path"]):
+                check_report_item(row)

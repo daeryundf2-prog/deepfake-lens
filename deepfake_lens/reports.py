@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import time
 from datetime import datetime
@@ -235,7 +234,11 @@ def _evidence_sha256(
     render ``None`` as "hash unavailable", not as a hex value.
     ``resolve`` maps a stored row path (often relative) to the real
     evidence file so web reports hash the same bytes the CLI hashes.
+    N2: a symbolic link is never followed — the path is checked with
+    ``lstat`` and opened with ``O_NOFOLLOW``, so a link row stays None
+    ("해시 불가(심볼릭 링크 …)") instead of carrying its target's digest.
     """
+    from .evidence_statement import _compute_sha256, _SymlinkRefused
 
     p = Path(path_text)
     if resolve is not None:
@@ -246,14 +249,8 @@ def _evidence_sha256(
     if allow is not None and not allow(path_text):
         return None
     try:
-        if not p.is_file():
-            return None
-        digest = hashlib.sha256()
-        with p.open("rb") as fh:
-            for chunk in iter(lambda: fh.read(1 << 20), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
-    except OSError:
+        return _compute_sha256(p)
+    except _SymlinkRefused:
         return None
 
 

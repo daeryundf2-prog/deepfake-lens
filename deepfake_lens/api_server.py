@@ -986,38 +986,16 @@ def create_app(
     @app.post("/api/report")
     async def api_report(request: Request):
         from fastapi import Response
-        from .webapp_api import _report_payload
+
+        from .webapp_api import report_http_response
+
         body = await request.body()
-        fmt = request.query_params.get("format")
-        try:
-            parsed = json.loads(body.decode("utf-8") if body else "{}")
-            if not fmt and isinstance(parsed, dict):
-                fmt = parsed.get("format")
-        except (UnicodeDecodeError, ValueError):
-            # Malformed body: _report_payload below returns the JSON error.
-            fmt = fmt or None
-        from .webapp_api import ReadRootDenied, read_root_denied_body, report_error_status
-        try:
-            rendered = await run_in_threadpool(
-                lambda: _report_payload(body, format_override=fmt, default_folder=default_folder)
-            )
-        except ReadRootDenied:
-            return JSONResponse(read_root_denied_body(), status_code=403)
-        if isinstance(rendered, dict):
-            # B8: a missing PDF renderer is 501 with a Korean error, never a PDF.
-            return JSONResponse(rendered, status_code=report_error_status(rendered))
-        if (fmt or "").lower() in ("pdf", "evidence", "evidence-statement"):
-            fn = "deepfake-lens-evidence-statement.pdf" if (fmt or "").lower() in ("evidence", "evidence-statement") else "deepfake-lens-forensic-report.pdf"
-            return Response(
-                content=rendered,
-                media_type="application/pdf",
-                headers={"Content-Disposition": f'attachment; filename="{fn}"'},
-            )
-        return Response(
-            content=rendered,
-            media_type="text/html; charset=utf-8",
-            headers={"Content-Disposition": 'attachment; filename="deepfake-lens-report.html"'},
+        # N9/N11: one response builder for both servers — format from
+        # ?format= or the JSON body, malformed requests 400 in Korean.
+        status, content_type, content, headers = await run_in_threadpool(
+            lambda: report_http_response(body, request.query_params.get("format"), default_folder=default_folder)
         )
+        return Response(content=content, status_code=status, media_type=content_type, headers=headers)
 
     @app.post("/api/feedback")
     async def api_feedback(request: Request):

@@ -22,11 +22,10 @@ from .webapp_api import (
     _heatmap_payload,
     _load_gui,
     _preview_payload,
-    _report_payload,
+    report_http_response,
     ReadRootDenied,
     configure_read_roots,
     read_root_denied_body,
-    report_error_status,
     _scan_cancel_payload,
     _scan_job_start,
     _scan_payload,
@@ -302,25 +301,19 @@ def build_server(
                 if length <= 0 or length > 64 * 1024 * 1024:
                     self.send_error(400, "보고서 요청 본문 크기가 올바르지 않습니다")
                     return
-                req_fmt = (parse_qs(parsed.query).get("format", [""])[0] or "").lower()
-                rendered = _report_payload(self.rfile.read(length), format_override=req_fmt or None, default_folder=default_folder)
-                if isinstance(rendered, dict):
-                    self._send_json(rendered, status=report_error_status(rendered))
-                else:
-                    body = rendered
-                    is_pdf = req_fmt in ("pdf", "evidence", "evidence-statement")
-                    if req_fmt in ("evidence", "evidence-statement"):
-                        filename = "deepfake-lens-evidence-statement.pdf"
-                    elif is_pdf:
-                        filename = "deepfake-lens-forensic-report.pdf"
-                    else:
-                        filename = "deepfake-lens-report.html"
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/pdf" if is_pdf else "text/html; charset=utf-8")
-                    self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
+                # N9/N11: format from ?format= or the JSON body, Korean 400s —
+                # the same response the FastAPI server gives.
+                req_fmt = parse_qs(parsed.query).get("format", [""])[0] or None
+                status, content_type, body, headers = report_http_response(
+                    self.rfile.read(length), req_fmt, default_folder=default_folder,
+                )
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                for name, value in headers.items():
+                    self.send_header(name, value)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
                 return
             if parsed.path == "/api/feedback":
                 try:

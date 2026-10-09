@@ -86,8 +86,15 @@ JSON envelope `{"status": "success", "data": {...}}` or an HTTP error with
 Korean (G7/G9, round 5): a missing or malformed query parameter is **422**
 `{"detail": "요청 매개변수 오류 — <이름>(쿼리): 값이 필요합니다", "errors": [{"loc", "type"}]}`
 (FastAPI's English `msg` is not returned); `/api/report` request errors are
+**400** (N11; both servers — was 200) with
 `{"error": "보고서에 넣을 검사 결과 항목(items 배열)이 필요합니다"}`,
-`"<field> 값은 JSON 객체여야 합니다"`, `"검사 결과 항목 N번을 해석할 수 없습니다: …"`;
+`"<field> 값은 JSON 객체여야 합니다"`, `"검사 결과 항목 N번을 해석할 수 없습니다: …"`
+(every posted row is checked against the scan-result item contract —
+`contracts/deepfake-lens-scan-result-v2.schema.json` `$defs.item`, via
+`report_items.check_report_item`: required fields, types, enums, the sha256
+pattern; `{"items": [{"path": 3}]}` is refused, never rendered),
+`"지원되지 않는 보고서 형식입니다: 「…」 (…)"`; a server-side
+evidence-statement PDF failure is 500, a missing pymupdf 501;
 a refused `/api/heatmap` / `/api/preview` path answers 403 with the body
 `허용되지 않은 경로` (header `X-Deepfake-Lens-Error: forbidden`).
 
@@ -159,7 +166,7 @@ JSON API under `/api/` (GET plus `POST /api/feedback`, `/api/report`,
 | POST `/api/analyze-upload` | multipart file body (≤ `MAX_UPLOAD_BYTES`) | upload-analysis payload |
 | POST `/api/compare` | multipart with two files | Two-file comparison — speaker distance (audio pair) or stylometry (text pair) |
 | POST `/api/check` | JSON `{"text": "...", "watermark_secret": "...", "watermark_gamma": 0.25}` **or** one multipart file | Unified check-all: full scan + all `models/` engine members + forensic + text probes → `{mode, item, advanced?, forensic?}` |
-| POST `/api/report` | scan JSON body (≤ 64 MiB); `?format=html` (default) / `pdf` / `evidence` / `json` | rendered standalone HTML report, forensic PDF, evidence statement, or (`json`) the signed report body. Signed with `DEEPFAKE_LENS_REPORT_KEY` when set, otherwise marked `서명 없음`. Every item `sha256` is recomputed server-side from files under the read roots (posted hashes are ignored; unreadable → `null`). **403** when any item's `heatmap_path` is outside the read roots |
+| POST `/api/report` | scan JSON body (≤ 64 MiB); `?format=html` (default) / `pdf` / `evidence` / `json` | rendered standalone HTML report, forensic PDF, evidence statement, or (`json`) the signed report body. The format is `?format=`, else the JSON body's `"format"`, else `html` (N9: both servers set `Content-Type` from that one value — `application/pdf` for `pdf`/`evidence`). Signed with `DEEPFAKE_LENS_REPORT_KEY` when set, otherwise marked `서명 없음`. Every item `sha256` is recomputed server-side from files under the read roots (posted hashes are ignored; unreadable → `null`): a symbolic-link row, or a path through a linked folder, stays `null` / `해시 불가(심볼릭 링크 — 링크를 따라가지 않음)` (N2 — the link is never followed, as in the CLI); an archive member row `a.zip::x` is hashed from the container re-extracted under the roots with the scanner's own extractor, so it carries the same digest as the scan row (N10). **400** for a malformed request (N11), **403** when any item's `heatmap_path` is outside the read roots |
 | POST `/api/feedback` | feedback JSON body (≤ 1 MiB) | appends to `~/.deepfake-lens/feedback.jsonl` |
 
 Read-root rule (G31) for `/api/scan`, `/api/analyze-file`,

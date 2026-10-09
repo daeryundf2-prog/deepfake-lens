@@ -45,6 +45,11 @@
       "type": "object",
       "required": ["path", "name", "kind", "status", "size_bytes", "result"],
       "properties": {
+        "path": { "type": "string", "minLength": 1, "description": "Row path relative to the scan root; archive members as \"archive::inner\" (N11: /api/report refuses a row that does not fit this item contract)." },
+        "name": { "type": "string" },
+        "kind": { "type": "string" },
+        "status": { "type": "string" },
+        "size_bytes": { "type": "integer", "minimum": 0 },
         "result": {
           "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/result" }],
           "description": "null for a row without analysis (skipped, unsupported, failed, duplicate); draft 2020-12 applies a sibling $ref, so null must be its own anyOf branch (N3)."

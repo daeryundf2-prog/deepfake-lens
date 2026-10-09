@@ -12,6 +12,7 @@ import logging
 import os
 import secrets
 import shutil
+import stat
 import tempfile
 import threading
 import time
@@ -892,13 +893,34 @@ PDF_REPORT_UNAVAILABLE_BODY: dict[str, object] = {"error": PDF_REPORT_UNAVAILABL
 PDF_REPORT_UNAVAILABLE_STATUS = 501
 
 
+# N11: /api/report answers a malformed request with HTTP 400 and a Korean
+# error (was 200 + {"error"}); a renderer failure on the server side is 500.
+REPORT_BAD_REQUEST_STATUS = 400
+REPORT_RENDER_FAILED_STATUS = 500
+EVIDENCE_PDF_FAILED_PREFIX = "증거설명서 PDF 생성 실패: "
+# N9: the report format comes from ?format= or, failing that, the JSON body's
+# "format" — both servers decide the content type from the same value.
+REPORT_FORMATS = ("html", "pdf", "evidence", "evidence-statement", "json")
+PDF_REPORT_FORMATS = ("pdf", "evidence", "evidence-statement")
+REPORT_FORMAT_UNSUPPORTED = "지원되지 않는 보고서 형식입니다: 「{value}」 (`html`, `pdf`, `evidence`, `json` 중 하나)"
+REPORT_FORMAT_NOT_STRING = "`format` 값은 문자열이어야 합니다"
+
+
 def report_error_status(body: dict[str, object]) -> int:
     """HTTP status for a JSON body returned by ``_report_payload``.
 
-    501 for the missing PDF renderer (B8); the other report errors keep their
-    existing 200 + ``{"error": ...}`` contract.
+    200 for the signed report body (``format=json``); 501 for the missing
+    PDF renderer (B8); 500 when the evidence-statement PDF could not be
+    built; 400 for every request error (N11 — was 200 + ``{"error": ...}``).
     """
-    return PDF_REPORT_UNAVAILABLE_STATUS if body.get("error") == PDF_REPORT_UNAVAILABLE_ERROR else 200
+    error = body.get("error")
+    if error is None:
+        return 200
+    if error == PDF_REPORT_UNAVAILABLE_ERROR:
+        return PDF_REPORT_UNAVAILABLE_STATUS
+    if isinstance(error, str) and error.startswith(EVIDENCE_PDF_FAILED_PREFIX):
+        return REPORT_RENDER_FAILED_STATUS
+    return REPORT_BAD_REQUEST_STATUS
 
 
 # G7 (round 5): /api/report request errors in Korean (were "items array is
@@ -907,6 +929,151 @@ REPORT_BODY_NOT_OBJECT = "보고서 요청 본문은 JSON 객체여야 합니다
 REPORT_ITEMS_REQUIRED = "보고서에 넣을 검사 결과 항목(items 배열)이 필요합니다"
 REPORT_FIELD_NOT_OBJECT = "{field} 값은 JSON 객체여야 합니다"
 REPORT_ITEM_MALFORMED = "검사 결과 항목 {index}번을 해석할 수 없습니다: {reason}"
+REPORT_JSON_INVALID = "JSON 본문을 해석할 수 없습니다"
+
+
+def report_format(body: bytes, query_format: str | None) -> str | dict[str, object]:
+    """The effective report format (N9): ``?format=`` first, else the body's ``format``, else html.
+
+    Returns a ``{"error": …}`` dict (HTTP 400) for a value outside
+    :data:`REPORT_FORMATS`; an unreadable body is left to ``_report_payload``.
+    """
+    value: object = query_format or None
+    if value is None:
+        try:
+            data = json.loads(body.decode("utf-8")) if body else None
+        except (ValueError, UnicodeDecodeError):
+            data = None
+        value = data.get("format") if isinstance(data, dict) else None
+    if value is None or value == "":
+        return "html"
+    if not isinstance(value, str):
+        return {"error": REPORT_FORMAT_NOT_STRING}
+    fmt = value.strip().lower()
+    if fmt not in REPORT_FORMATS:
+        return {"error": REPORT_FORMAT_UNSUPPORTED.format(value=value[:40])}
+    return fmt
+
+
+def report_http_response(
+    body: bytes, query_format: str | None, *, default_folder: Path | None = None,
+) -> tuple[int, str, bytes, dict[str, str]]:
+    """``(status, content type, body, extra headers)`` for POST /api/report.
+
+    Both servers (stdlib ``webapp`` and FastAPI ``api_server``) answer
+    through this one function, so the format (N9), the error statuses
+    (N11) and the content type of a PDF can no longer differ between them.
+    """
+    fmt = report_format(body, query_format)
+    if isinstance(fmt, dict):
+        rendered: bytes | dict[str, object] = fmt
+    else:
+        try:
+            rendered = _report_payload(body, fmt, default_folder=default_folder)
+        except ReadRootDenied:
+            rendered = read_root_denied_body()
+            return 403, "application/json; charset=utf-8", _json_bytes(rendered), {}
+    if isinstance(rendered, dict):
+        return report_error_status(rendered), "application/json; charset=utf-8", _json_bytes(rendered), {}
+    assert isinstance(fmt, str)
+    if fmt in ("evidence", "evidence-statement"):
+        return 200, "application/pdf", rendered, {"Content-Disposition": 'attachment; filename="deepfake-lens-evidence-statement.pdf"'}
+    if fmt == "pdf":
+        return 200, "application/pdf", rendered, {"Content-Disposition": 'attachment; filename="deepfake-lens-forensic-report.pdf"'}
+    return 200, "text/html; charset=utf-8", rendered, {"Content-Disposition": 'attachment; filename="deepfake-lens-report.html"'}
+
+
+def _json_bytes(payload: dict[str, object]) -> bytes:
+    return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+
+
+class _ReportHasher:
+    """SHA-256 of each posted row's evidence, read only under the read roots (G31, N2, N10).
+
+    ``resolve`` maps a row path to the regular file it names inside a root
+    without following any symbolic link (the file itself or a folder
+    between the root and it) — so a link row can never be hashed as its
+    target. ``sha256`` hashes that file with ``O_NOFOLLOW``; an archive
+    member row ("a.zip::x") is hashed from the container re-extracted with
+    the scanner's own ``extract_archive`` (one extraction per container per
+    report), which yields the same bytes — and digest — the scan recorded.
+    """
+
+    def __init__(self, roots: list[Path]) -> None:
+        self.roots = roots
+        self._members: dict[str, dict[str, str]] = {}
+        self._temp_dirs: list[Path] = []
+
+    def resolve(self, path_text: str) -> Path | None:
+        from .evidence_statement import _no_symlink_on_path, _SymlinkRefused
+
+        p = Path(os.path.normpath(Path(path_text).expanduser()))
+        pairs = [(p, root) for root in self.roots] if p.is_absolute() else [(root / p, root) for root in self.roots]
+        for cand, root in pairs:
+            if not _is_within(cand, root):
+                continue
+            try:
+                _no_symlink_on_path(cand, root)
+                mode = os.lstat(cand).st_mode
+            except _SymlinkRefused:
+                return None  # N2: a link is never followed
+            except OSError:
+                continue
+            if stat.S_ISREG(mode):
+                return cand
+        return None
+
+    def sha256(self, item: Any) -> str | None:
+        from .evidence_statement import _compute_sha256, _SymlinkRefused
+        from .result_text import ARCHIVE_MEMBER_SEPARATOR, is_symlink_row
+
+        if is_symlink_row(item.status, item.error):
+            return None  # N2: the scan never followed the link; nor does the report
+        if ARCHIVE_MEMBER_SEPARATOR in item.path:
+            container, member = item.path.split(ARCHIVE_MEMBER_SEPARATOR, 1)
+            return self._member_digests(container).get(member)
+        path = self.resolve(item.path)
+        if path is None:
+            return None
+        root = next((r for r in self.roots if _is_within(path, r)), None)
+        try:
+            return _compute_sha256(path, root)
+        except _SymlinkRefused:
+            return None
+
+    def _member_digests(self, container_text: str) -> dict[str, str]:
+        if container_text in self._members:
+            return self._members[container_text]
+        digests: dict[str, str] = {}
+        self._members[container_text] = digests
+        container = self.resolve(container_text)
+        if container is None:
+            return digests
+        from .archives import extract_archive, is_archive
+        from .evidence_statement import _compute_sha256, _SymlinkRefused
+
+        if not is_archive(container):
+            return digests
+        dest = Path(tempfile.mkdtemp(prefix="dflens-report-")).resolve()
+        self._temp_dirs.append(dest)
+        try:
+            extraction = extract_archive(container, dest)
+        except (OSError, ValueError, RuntimeError):
+            logger.info("report: archive %s could not be re-extracted", container, exc_info=True)
+            return digests
+        for member in extraction.members:
+            try:
+                digest = _compute_sha256(member, dest)
+            except _SymlinkRefused:
+                continue
+            if digest:
+                digests[member.relative_to(dest).as_posix()] = digest
+        return digests
+
+    def close(self) -> None:
+        for path in self._temp_dirs:
+            shutil.rmtree(path, ignore_errors=True)
+        self._temp_dirs.clear()
 
 
 def _report_payload(body: bytes, format_override: str | None = None, *, default_folder: Path | None = None) -> bytes | dict[str, object]:
@@ -915,17 +1082,20 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     ``format=json`` returns the signed report body itself. Raises
     ReadRootDenied (-> 403) when a posted heatmap_path is outside the roots.
 
-    Accepts the items array the GUI holds (scan/upload payload rows), rebuilds
+    Accepts the items array the GUI holds (scan/upload payload rows), checks
+    every row against the scan-result item contract (N11), rebuilds
     ScanItem objects through the same cache deserializer used on disk, and
     returns the same report the CLI's --html-out produces — so web and CLI
     artifacts are identical. Posted ``thresholds``/``coverage`` provenance and
     case metadata are preserved into the artifact; a report that drops them
     would let an uncalibrated scan masquerade as a measured one.
     """
+    from .report_items import ItemContractError, check_report_item
+
     try:
         data = json.loads(body.decode("utf-8"))
     except (ValueError, UnicodeDecodeError):
-        return {"error": "JSON 본문을 해석할 수 없습니다"}
+        return {"error": REPORT_JSON_INVALID}
     if not isinstance(data, dict):
         return {"error": REPORT_BODY_NOT_OBJECT}
     raw_items = data.get("items")
@@ -938,37 +1108,34 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     coverage = data.get("coverage")
     if coverage is not None and not isinstance(coverage, dict):
         return {"error": REPORT_FIELD_NOT_OBJECT.format(field="coverage")}
+    if format_override is None:
+        fmt_or_error = report_format(body, None)
+        if isinstance(fmt_or_error, dict):
+            return fmt_or_error
+        format_override = fmt_or_error
 
     items = []
     for index, row in enumerate(raw_items):
-        if not isinstance(row, dict):
-            continue
         try:
+            # N11: a row that is not a scan-result item is refused (was
+            # skipped, or rendered as a report about e.g. path 3).
+            check_report_item(row)
             items.append(_scan_item_from_json(row))
+        except ItemContractError as exc:
+            return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason=str(exc))}
         except (TypeError, ValueError, KeyError, AttributeError) as exc:
             logger.info("report item %d could not be read", index, exc_info=True)
             return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason=exception_text(exc))}
-    if not items:
-        return {"error": REPORT_ITEMS_REQUIRED}
 
     # G31: every disk read this report makes — evidence hashing and heatmap
     # embedding — is confined to the operator read roots (or, with none
     # registered, the server's default folder). Scan rows carry relative
     # paths, so they are resolved against the roots; an unresolved or
-    # escaping path stays unread.
+    # escaping path stays unread. N2: a symbolic link — the file itself or
+    # a folder between the root and it — is never followed.
     roots = _effective_roots(default_folder)
-
-    def _resolve_item_path(path_text: str) -> Path | None:
-        p = Path(path_text).expanduser()
-        candidates = [p] if p.is_absolute() else [root / p for root in roots]
-        for cand in candidates:
-            try:
-                resolved = cand.resolve()
-            except OSError:
-                continue
-            if resolved.is_file() and any(_is_within(resolved, r) for r in roots):
-                return resolved
-        return None
+    hasher = _ReportHasher(roots)
+    _resolve_item_path = hasher.resolve
 
     def _path_allowed(path_text: str) -> bool:
         return _resolve_item_path(path_text) is not None
@@ -989,16 +1156,23 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
             raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE)
 
     # Client-posted sha256 values are never trusted: each row's hash is
-    # recomputed from the evidence file under the roots (None when it cannot
-    # be read), once, and reused by every renderer and by the signature.
-    from .reports import _evidence_sha256, signed_report_body
+    # recomputed from the evidence under the roots (None when it cannot be
+    # read), once, and reused by every renderer and by the signature.
+    # N2: a symbolic-link row, or a path through a link, keeps None ("해시
+    # 불가(심볼릭 링크…)") — the CLI never follows the link either. N10: an
+    # archive member ("a.zip::x") is hashed from the container re-extracted
+    # under the roots, exactly as the scan extracted it.
+    from .reports import signed_report_body
 
-    items = [replace(item, sha256=_evidence_sha256(item.path, _path_allowed, _resolve_item_path)) for item in items]
+    try:
+        items = [replace(item, sha256=hasher.sha256(item)) for item in items]
+    finally:
+        hasher.close()
 
     # Same counting rule as the CLI (core.summarize) so web and CLI report
     # headers agree on every verdict count.
     summary = summarize(items, capped=False)
-    req_format = (format_override or data.get("format") or "html").lower()
+    req_format = format_override.lower()
     # G30: web reports are signed when DEEPFAKE_LENS_REPORT_KEY is set and
     # say "서명 없음" otherwise; the pins are those of the server's models dir.
     from .profile_pins import profile_pins
@@ -1032,7 +1206,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
                 # G30: signed like the other web reports (server key + pins).
                 write_evidence_statement_pdf(tmp_path, stmt, signed=signed_statement_body(stmt, model_pins=profile_pins(_models_dir())))
             except RuntimeError as exc:
-                return {"error": f"증거설명서 PDF 생성 실패: {exc}", "hint": "`pip install 'deepfake-lens[forensic]'` 후 재시도하거나 Markdown 출력을 사용하세요."}
+                return {"error": f"{EVIDENCE_PDF_FAILED_PREFIX}{exc}", "hint": "`pip install 'deepfake-lens[forensic]'` 후 재시도하거나 Markdown 출력을 사용하세요."}
         elif req_format == "pdf":
             from .evidence_statement import PdfDependencyMissing
             from .reports import write_forensic_pdf_report

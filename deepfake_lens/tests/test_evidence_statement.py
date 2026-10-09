@@ -239,8 +239,15 @@ class EvidenceStatementTest(_StatementFixture):
         app = create_app()
         client = TestClient(app)
 
+        # N11: item2's legacy "medium" band is not in the scan-result item
+        # contract and /api/report now refuses it (400); the posted copy
+        # carries the band the contract derives for an undetermined verdict.
+        from dataclasses import replace as dc_replace
+
+        assert self.item2.result is not None
+        item2 = dc_replace(self.item2, result=dc_replace(self.item2.result, band=RiskBand.UNKNOWN))
         payload = {
-            "items": [self.item1.to_json(), self.item2.to_json()],
+            "items": [self.item1.to_json(), item2.to_json()],
             "format": "evidence",
             "case_no": "2026가합55555",
         }

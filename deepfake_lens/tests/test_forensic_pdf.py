@@ -118,29 +118,28 @@ class ForensicPdfApiEndpointTest(unittest.TestCase):
         self.client = TestClient(api_server.create_app())
 
     def _payload(self) -> dict[str, object]:
-        return {
-            "items": [
-                {
-                    "path": "test/photo.jpg",
-                    "name": "photo.jpg",
-                    "kind": "image",
-                    "status": "analyzed",
-                    "size_bytes": 100,
-                    "result": {
-                        "score": 90,
-                        "band": "high",
-                        "band_label": "AI 의심",
-                        "verdict": "합성 의심",
-                        "signals": [{"title": "노이즈 결손", "detail": "인공 생성 패턴", "weight": 25}],
-                        "limitations": [],
-                        "source_guess": {"label": "SDXL", "confidence": "high"},
-                        "next_checks": [],
-                    },
-                }
-            ],
-            "format": "pdf",
-            "exhibit_no": "갑 제3호증",
-        }
+        # N11: /api/report now checks every row against the scan-result item
+        # contract; the hand-written legacy row this used (band/score only,
+        # no verdict_code/evidence/coverage) is refused with 400. The row is
+        # built through the result contract instead.
+        from deepfake_lens.core import ScanItem, SourceGuess, build_classification_result
+        from deepfake_lens.result_types import (
+            CoverageEntry, CoverageStatus, EvidenceDirection, EvidenceItem, EvidenceKind, EvidenceStrength,
+        )
+
+        result = build_classification_result(
+            subject="이미지",
+            evidence=[EvidenceItem(
+                "C2PA 서명: 생성형 AI 출처 선언", "trainedAlgorithmicMedia",
+                EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "c2pa",
+            )],
+            coverage=[CoverageEntry("metadata", CoverageStatus.RAN)],
+            source_guess=SourceGuess.unknown(),
+            limitations=[],
+            next_checks=[],
+        )
+        row = ScanItem("test/photo.jpg", "photo.jpg", "image", "analyzed", 100, result).to_json()
+        return {"items": [row], "format": "pdf", "exhibit_no": "갑 제3호증"}
 
     # B8: pymupdf is the only PDF backend (no Latin-1 fallback) — this case runs in the venv_api / extras job.
     @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf not installed — the venv_api / extras run covers this")
