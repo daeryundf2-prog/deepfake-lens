@@ -130,7 +130,23 @@ _MESSAGE_KO: tuple[tuple[re.Pattern[str], str], ...] = tuple(
         (r"^Error opening (.+): Format not recogni[sz]ed\.?$", r"오디오 파일을 열 수 없습니다(형식 인식 불가): \1"),
         (r"^Error opening (.+): File contains data in an unknown format\.?$", r"오디오 파일을 열 수 없습니다(알 수 없는 데이터 형식): \1"),
         (r"^Error opening (.+): (.+)$", r"오디오 파일을 열 수 없습니다: \1 (\2)"),
-        (r"^Expecting value: line (\d+) column (\d+) \(char (\d+)\)$", r"JSON 형식 오류: \1행 \2열"),
+        # P9 (round 8): every json.JSONDecodeError message — the position is
+        # kept as numbers only ("JSON 형식 오류: 값이 필요합니다(1행 2열)").
+        *((rf"^{re.escape(english)}: line (\d+) column (\d+) \(char (\d+)\)$", rf"JSON 형식 오류: {korean}(\1행 \2열)")
+          for english, korean in (
+              ("Expecting value", "값이 필요합니다"),
+              ("Expecting property name enclosed in double quotes", "속성 이름은 큰따옴표로 감싸야 합니다"),
+              ("Expecting ':' delimiter", "':' 구분자가 필요합니다"),
+              ("Expecting ',' delimiter", "',' 구분자가 필요합니다"),
+              ("Unterminated string starting at", "문자열이 닫히지 않았습니다"),
+              ("Invalid control character at", "허용되지 않는 제어 문자가 있습니다"),
+              ("Invalid \\escape", "잘못된 이스케이프 문자"),
+              ("Invalid \\uXXXX escape", "잘못된 유니코드 이스케이프"),
+              ("Extra data", "JSON 값 뒤에 남는 데이터가 있습니다"),
+              ("Illegal trailing comma before end of object", "객체 끝 앞에 쉼표가 있습니다"),
+              ("Illegal trailing comma before end of array", "배열 끝 앞에 쉼표가 있습니다"),
+              ("Unexpected UTF-8 BOM (decode using utf-8-sig)", "파일 앞에 UTF-8 BOM이 있습니다"),
+          )),
         (r"^No data left in file$", "파일에 더 읽을 데이터가 없습니다"),
         (r"^Unexpected end of data$", "데이터가 예상보다 일찍 끝났습니다"),
         (r"^Input signal length=(\d+) is too small to resample.*$", r"오디오 신호가 너무 짧습니다(길이 \1)"),
@@ -696,4 +712,27 @@ def failure_reason(exc: BaseException) -> str:
     label = exception_label(exc)
     return f"{label}: {message}" if message else label
 
+
+def json_error_ko(exc: ValueError) -> str:
+    """Korean text of a JSON parse error — position as numbers only (P9)."""
+    return korean_exception_message(exc)
+
+
+def decode_error_ko(exc: UnicodeDecodeError) -> str:
+    """Korean text of a text-decoding error (P4): the byte offset, no codec prose."""
+    return f"{exc.encoding.upper() if exc.encoding else '텍스트'} 텍스트가 아닙니다(바이트 위치 {exc.start})"
+
+
+def read_error_ko(exc: BaseException) -> str:
+    """Korean reason a file input could not be read or parsed (P4/P9)."""
+    import json
+
+    if isinstance(exc, UnicodeDecodeError):
+        return decode_error_ko(exc)
+    if isinstance(exc, json.JSONDecodeError):
+        return json_error_ko(exc)
+    if isinstance(exc, OSError) and exc.errno in _ERRNO_KO:
+        # The CLI names the file itself; "[Errno 2]" is not repeated (P9).
+        return f"{_ERRNO_KO[exc.errno]}(오류 번호 {exc.errno})"
+    return korean_exception_message(exc)
 

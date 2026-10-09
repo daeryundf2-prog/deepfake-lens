@@ -236,3 +236,37 @@ class EnglishDetectorBypassTest(unittest.TestCase):
         ):
             with self.subTest(text=text):
                 self.assertIsNone(english_prose(text), text)
+
+
+class JsonErrorTranslationTest(unittest.TestCase):
+    """P9 (round 8): json.JSONDecodeError messages reached the CLI in English
+    ("Expecting property name enclosed in double quotes: line 1 column 2 (char 1)")."""
+
+    def test_every_json_error_is_korean_with_numeric_position(self) -> None:
+        import json
+
+        from deepfake_lens.error_text import english_prose, read_error_ko
+
+        samples = ["{bad", "[1,]", '{"a":1,}', '{"a" 1}', "[1 2]", '"abc', '{"a":"\x01"}', '"\\q"', '"\\u12"', "1 2", "﻿{}", "", "["]
+        seen = set()
+        for sample in samples:
+            with self.subTest(sample=sample):
+                with self.assertRaises(json.JSONDecodeError) as caught:
+                    json.loads(sample)
+                text = read_error_ko(caught.exception)
+                seen.add(caught.exception.msg)
+                self.assertTrue(text.startswith("JSON 형식 오류: "), text)
+                self.assertTrue(text.endswith(f"({caught.exception.lineno}행 {caught.exception.colno}열)"), text)
+                self.assertIsNone(english_prose(text), text)
+                self.assertNotIn(caught.exception.msg, text)
+        self.assertGreaterEqual(len(seen), 12, seen)
+
+    def test_decode_and_os_errors(self) -> None:
+        from deepfake_lens.error_text import read_error_ko
+
+        with self.assertRaises(UnicodeDecodeError) as caught:
+            b"ok\x85".decode("utf-8")
+        self.assertEqual(read_error_ko(caught.exception), "UTF-8 텍스트가 아닙니다(바이트 위치 2)")
+        with self.assertRaises(OSError) as missing:
+            open(Path(tempfile.gettempdir()) / "deepfake-lens-p9-missing" / "x.json", encoding="utf-8")
+        self.assertEqual(read_error_ko(missing.exception), "파일 또는 폴더가 없습니다(오류 번호 2)")

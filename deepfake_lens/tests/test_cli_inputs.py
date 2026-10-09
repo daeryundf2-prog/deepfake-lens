@@ -31,6 +31,7 @@ import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
+from unittest import mock
 
 from deepfake_lens.cli_inputs import (
     COMMON_INPUT_EXEMPT,
@@ -563,11 +564,94 @@ class RoundEightUsageErrorsTest(_UsageErrorCase):
         self.assertEqual(require_input_path(png, "file"), png)  # a plain Path (no typed text) is unchanged
 
     def test_z4_verify_report_unparseable_json(self) -> None:
-        for path, detail in ((self.garbage, "Expecting"), (self.listed, "JSON 객체가 아니라 list입니다")):
+        # P9 (round 8): the detail was the English json message ("Expecting …")
+        # and the Python type name ("list"); it is Korean, position as numbers.
+        from deepfake_lens.error_text import english_prose
+
+        for path, detail in ((self.garbage, "JSON 형식 오류: 속성 이름은 큰따옴표로 감싸야 합니다(1행 2열)"), (self.listed, "JSON 객체가 아니라 배열입니다")):
             with self.subTest(path=path.name):
                 self._assert_usage_code(["verify-report", str(path)], f"보고서 JSON을 해석할 수 없습니다: {path} (", 4)
                 _, _, stderr = self._run(["verify-report", str(path), "--format", "json"])
                 self.assertIn(detail, stderr)
+                self.assertNotIn("Expecting", stderr)
+                self.assertNotIn("list", stderr.replace(str(path), ""))
+                self.assertIsNone(english_prose(stderr.replace(str(path), "")))
+
+    def _assert_korean_only(self, stderr: str, *paths: Path) -> None:
+        from deepfake_lens.error_text import english_prose
+
+        text = stderr
+        for path in paths:
+            text = text.replace(str(path), "")
+        self.assertIsNone(english_prose(text), stderr)
+        for english in ("Expecting", "codec", "decode", "Errno", "list", "dict"):
+            self.assertNotIn(english, text, stderr)
+
+    def test_p4_every_file_input_reports_encoding_and_syntax_in_korean(self) -> None:
+        """P4/P9 (round 8): a non-UTF-8 --thresholds file was a UnicodeDecodeError traceback
+        (exit 1); every file input (thresholds, fusion/calibration/model profile, scan
+        JSON, report JSON, manifest, labels, hash DB, config file) now says what could not
+        be read or parsed, in Korean, before any work — exit 2 (verify-report: 4)."""
+        binary = self.root / "binary.json"
+        binary.write_bytes(b"\x85\xff\xfe binary \x00 not utf-8")
+        binary_jsonl = self.root / "labels.jsonl"
+        binary_jsonl.write_bytes(b"\x85\xff\xfe")
+        encoding = "(UTF-8 텍스트가 아닙니다(바이트 위치 0))"
+        png = self.root / "photo.png"
+        png.write_bytes(b"\x89PNG\r\n\x1a\n")
+        cases: list[tuple[list[str], str, int]] = [
+            (["scan", str(self.folder), "--thresholds", str(binary)], f"임계값 파일을 읽을 수 없습니다(인코딩): {binary} {encoding}", 2),
+            (["faceswap-seam", str(png), "--thresholds", str(binary)], f"임계값 파일을 읽을 수 없습니다(인코딩): {binary} {encoding}", 2),
+            (["scan", str(self.folder), "--fusion-profile", str(binary)], f"융합 프로필 파일을 읽을 수 없습니다(인코딩): {binary}", 2),
+            (["scan", str(self.folder), "--fusion-profile", str(self.garbage)], f"융합 프로필 파일을 해석할 수 없습니다: {self.garbage} (JSON 형식 오류: 속성 이름은 큰따옴표로 감싸야 합니다(1행 2열))", 2),
+            (["scan", str(self.folder), "--fusion-profile", str(self.listed)], f"융합 프로필 파일을 해석할 수 없습니다: {self.listed} (JSON 객체가 아니라 배열입니다)", 2),
+            (["scan", str(self.folder), "--model-path", str(binary)], f"모델 프로필 파일을 읽을 수 없습니다(인코딩): {binary}", 2),
+            (["scan", str(self.folder), "--model-path", str(self.garbage)], f"모델 프로필 파일을 해석할 수 없습니다: {self.garbage}", 2),
+            (["scan", str(self.folder), "--hash-db", str(binary)], f"해시 DB 파일을 읽을 수 없습니다(인코딩): {binary}", 2),
+            (["eval", str(self.folder), "--calibration", str(binary)], f"보정 프로필 파일을 읽을 수 없습니다(인코딩): {binary}", 2),
+            (["evidence-statement", str(binary)], f"검사 JSON을 읽을 수 없습니다(인코딩): {binary} {encoding}", 2),
+            (["evidence-statement", str(self.garbage)], f"검사 JSON을 해석할 수 없습니다: {self.garbage} (JSON 형식 오류: 속성 이름은 큰따옴표로 감싸야 합니다(1행 2열))", 2),
+            (["evidence-statement", str(self.listed)], f"검사 JSON을 해석할 수 없습니다: {self.listed} (JSON 객체가 아니라 배열입니다)", 2),
+            (["verify-report", str(binary)], f"보고서 JSON을 읽을 수 없습니다(인코딩): {binary} {encoding}", 4),
+            (["feedback", str(binary_jsonl)], f"라벨 파일을 읽을 수 없습니다(인코딩): {binary_jsonl}", 2),
+            (["feedback", str(self.garbage), "--scan-json", str(binary)], f"검사 JSON을 읽을 수 없습니다(인코딩): {binary}", 2),
+            (["corpus", "verify", "--manifest", str(binary)], f"매니페스트 파일을 읽을 수 없습니다(인코딩): {binary}", 2),
+            (["corpus", "split", "--manifest", str(self.garbage), "--seed", "1"], f"매니페스트 파일을 해석할 수 없습니다: {self.garbage}", 2),
+        ]
+        for argv, message, code in cases:
+            with self.subTest(argv=" ".join(argv[:1] + argv[-2:])):
+                got, stdout, stderr = self._run(argv)
+                self.assertEqual(got, code, (argv, stderr))
+                self.assertTrue(stderr.startswith("오류:"), stderr)
+                self.assertIn(message, stderr)
+                self.assertNotIn("Traceback", stderr)
+                self._assert_korean_only(stderr, binary, binary_jsonl, self.garbage, self.listed)
+
+    def test_p4_broken_config_file_and_scan_json_rows(self) -> None:
+        """P4/P9 (round 8): a broken config file is an error for the commands that print the
+        office identity; a scan JSON row that is not a scan row is named by its position."""
+        config = self.root / "config.json"
+        config.write_bytes(b"\xff\xfe{")
+        with mock.patch.dict(os.environ, {"DEEPFAKE_LENS_CONFIG": str(config)}):
+            for argv in (["scan", str(self.folder)], ["evidence-statement", str(self.folder)]):
+                with self.subTest(argv=argv[0]):
+                    self._assert_usage(argv, f"설정 파일을 읽을 수 없습니다(인코딩): {config}")
+            config.write_text('{"law_firm": ', encoding="utf-8")
+            self._assert_usage(["scan", str(self.folder)], f"설정 파일을 해석할 수 없습니다: {config} (JSON 형식 오류: 값이 필요합니다(1행 14열))")
+            code, _, stderr = self._run(["realtime", "--scores", "10,20"])  # no office identity: not read
+            self.assertEqual(code, 0, stderr)
+        bad_rows = self.root / "badrows.json"
+        bad_rows.write_text('{"items": [{"path": "a.txt", "result": {"verdict_code": "zzz"}}]}', encoding="utf-8")
+        code, _, stderr = self._run(["evidence-statement", str(bad_rows)])
+        self.assertEqual(code, 2, stderr)
+        self.assertIn(f"검사 JSON을 해석할 수 없습니다: {bad_rows} — 1번째 행의 형식이 맞지 않습니다", stderr)
+        self._assert_korean_only(stderr, bad_rows)
+
+    def test_p9_key_file_reason_is_korean_only(self) -> None:
+        """P9 (round 8): "([Errno 2] 파일 또는 폴더가 없습니다: nokey)" → Korean reason with the number."""
+        missing = self.root / "nokey"
+        self._assert_usage(["scan", str(self.folder), "--sign", "--json-out", str(self.root / "r.json"), "--key-file", str(missing)],
+                           "서명 키 파일을 읽을 수 없습니다: nokey (파일 또는 폴더가 없습니다(오류 번호 2))")
 
     def test_z5_output_into_missing_folder(self) -> None:
         missing = self.root / "nodir" / "x"

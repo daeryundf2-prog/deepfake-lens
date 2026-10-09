@@ -93,6 +93,66 @@ class UsageError(Exception):
     """A command-line usage error; ``str()`` is the Korean reason (``cli.main`` → ``오류: …``, exit 2)."""
 
 
+# P4 (round 8): a non-UTF-8 --thresholds file died with a UnicodeDecodeError
+# traceback (exit 1). Every file the CLI reads as configuration or as a prior
+# result (threshold/fusion/calibration/model profile, scan JSON, report JSON,
+# manifest, labels, hash DB, config file) is read through these helpers: an
+# OSError, a decoding error or a JSON syntax error is "오류: …" in Korean,
+# exit 2. P9: the reason is Korean too (error_text.read_error_ko — the
+# position as numbers only, never the English json/codec message).
+INPUT_ENCODING_ERROR = "{what} 읽을 수 없습니다(인코딩): {path} ({reason})"
+INPUT_JSON_ERROR = "{what} 해석할 수 없습니다: {path} ({reason})"
+INPUT_READ_ERROR = "{what} 읽을 수 없습니다: {path} ({reason})"
+INPUT_NOT_OBJECT = "{what} 해석할 수 없습니다: {path} (JSON 객체가 아니라 {kind}입니다)"
+_JSON_KIND_KO = {list: "배열", str: "문자열", int: "숫자", float: "숫자", bool: "참/거짓 값", type(None): "null"}
+
+
+def object_particle(word: str) -> str:
+    """``word`` with its object particle: 을 after a final consonant, 를 after a vowel, else 을(를).
+
+    "JSON" is read 제이슨 (을).
+    """
+    if word.endswith("JSON"):
+        return f"{word}을"
+    last = word.rstrip()[-1:] if word.strip() else ""
+    if "가" <= last <= "힣":
+        return f"{word}{'을' if (ord(last) - 0xAC00) % 28 else '를'}"
+    return f"{word}을(를)"
+
+
+def json_kind_ko(value: object) -> str:
+    """Korean name of a JSON value's type (P9: never ``list``/``str``)."""
+    return _JSON_KIND_KO.get(type(value), "객체 아닌 값")
+
+
+def read_text_input(path: Path | str, what: str) -> str:
+    """``path`` as UTF-8 text, or :class:`UsageError` naming ``what`` (P4)."""
+    from .error_text import read_error_ko
+
+    try:
+        return Path(path).read_bytes().decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise UsageError(INPUT_ENCODING_ERROR.format(what=object_particle(what), path=path, reason=read_error_ko(exc))) from exc
+    except OSError as exc:
+        raise UsageError(INPUT_READ_ERROR.format(what=object_particle(what), path=path, reason=read_error_ko(exc))) from exc
+
+
+def read_json_input(path: Path | str, what: str, *, require_object: bool = True) -> object:
+    """``path`` parsed as JSON (an object unless ``require_object`` is False), or :class:`UsageError` (P4/P9)."""
+    import json
+
+    from .error_text import read_error_ko
+
+    text = read_text_input(path, what)
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise UsageError(INPUT_JSON_ERROR.format(what=object_particle(what), path=path, reason=read_error_ko(exc))) from exc
+    if require_object and not isinstance(payload, dict):
+        raise UsageError(INPUT_NOT_OBJECT.format(what=object_particle(what), path=path, kind=json_kind_ko(payload)))
+    return payload
+
+
 def _formats(suffixes: frozenset[str]) -> str:
     return ", ".join(sorted(suffixes))
 
@@ -296,11 +356,65 @@ def require_output_file(path: Path | str, *, parent_must_exist: bool = False) ->
 
 
 def require_threshold_profile(path: Path | str) -> None:
-    """An explicit --thresholds file must load as a threshold profile (Y2): else exit 2."""
-    from .calibration import load_threshold_profile
+    """An explicit --thresholds file must load as a threshold profile (Y2): else exit 2.
 
+    P4: a file that cannot be read, is not UTF-8 or is not JSON says so
+    ("임계값 파일을 읽을 수 없습니다(인코딩): …") instead of a traceback.
+    """
+    import json
+
+    from .calibration import load_threshold_profile
+    from .error_text import read_error_ko
+
+    text = read_text_input(path, "임계값 파일")
+    try:
+        json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise UsageError(f"{THRESHOLDS_UNREADABLE.format(path=path)} — {read_error_ko(exc)}") from exc
     if load_threshold_profile(path) is None:
         raise UsageError(THRESHOLDS_UNREADABLE.format(path=path))
+
+
+# P4: JSON inputs checked before any work — (attribute, what, commands or
+# None for every command that has the attribute). --thresholds has its own
+# check above; --model-path is checked when it names a .json profile.
+JSON_INPUT_ATTRS: tuple[tuple[str, str, frozenset[str] | None], ...] = (
+    ("fusion_profile", "융합 프로필 파일", None),
+    ("calibration", "보정 프로필 파일", None),
+    ("scan_json", "검사 JSON", frozenset({"feedback"})),
+    ("manifest", "매니페스트 파일", frozenset({"corpus split", "corpus verify"})),
+)
+TEXT_INPUT_ATTRS: tuple[tuple[str, str, frozenset[str] | None], ...] = (
+    ("labels", "라벨 파일", frozenset({"feedback"})),
+)
+
+
+def check_json_inputs(args: argparse.Namespace) -> None:
+    """P4: every configuration/prior-result file the command reads parses — else exit 2, Korean."""
+    key = command_key(args)
+    for attr, what, commands in JSON_INPUT_ATTRS:
+        value = getattr(args, attr, None)
+        if isinstance(value, (str, Path)) and str(value) and (commands is None or key in commands) and Path(value).is_file():
+            read_json_input(value, what)
+    for attr, what, commands in TEXT_INPUT_ATTRS:
+        value = getattr(args, attr, None)
+        if isinstance(value, (str, Path)) and str(value) and (commands is None or key in commands) and Path(value).is_file():
+            read_text_input(value, what)
+    model_paths = getattr(args, "model_path", None)
+    for model_path in model_paths if isinstance(model_paths, (list, tuple)) else [model_paths]:
+        if isinstance(model_path, (str, Path)) and str(model_path) and Path(model_path).suffix.lower() == ".json" and Path(model_path).is_file():
+            read_json_input(model_path, "모델 프로필 파일")
+    hash_db = getattr(args, "hash_db", None)
+    if isinstance(hash_db, (str, Path)) and str(hash_db) and Path(hash_db).is_file() and Path(hash_db).stat().st_size:
+        read_json_input(hash_db, "해시 DB 파일")
+    if hasattr(args, "law_firm"):
+        # The commands whose reports carry the office identity read the
+        # config file; a broken one is an error, not a blank header.
+        from .office_config import config_path
+
+        config = config_path()
+        if config.is_file():
+            read_json_input(config, "설정 파일")
 
 
 def command_key(args: argparse.Namespace) -> str:
@@ -331,6 +445,7 @@ def check_command_inputs(args: argparse.Namespace) -> None:
     thresholds = getattr(args, "thresholds", None)
     if thresholds is not None and "thresholds" not in exempt:
         require_threshold_profile(thresholds)  # Y2: unreadable profile -> exit 2
+    check_json_inputs(args)  # P4: undecodable/unparsable input files -> exit 2
     for attr in OUTPUT_FILE_ATTRS:
         value = getattr(args, attr, None)
         if isinstance(value, (str, Path)) and str(value):

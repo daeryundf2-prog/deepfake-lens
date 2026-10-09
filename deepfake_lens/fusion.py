@@ -33,7 +33,7 @@ def load_fusion_profile(path: Path | str | None) -> FusionProfile | None:
         return None
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # P4: ValueError covers JSONDecodeError and UnicodeDecodeError
         return None
     weights = payload.get("weights") if isinstance(payload.get("weights"), dict) else DEFAULT_FUSION_PROFILE.weights
     return FusionProfile(

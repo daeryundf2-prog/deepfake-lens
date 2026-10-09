@@ -37,7 +37,7 @@ def load_calibration(path: Path | str | None) -> CalibrationProfile | None:
         return None
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # P4: ValueError covers JSONDecodeError and UnicodeDecodeError
         return None
     threshold = payload.get("threshold")
     if not isinstance(threshold, (int, float)):
@@ -267,7 +267,7 @@ def load_score_calibrator(path: Path | str | None) -> ScoreCalibrator | None:
         return None
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # P4: ValueError covers JSONDecodeError and UnicodeDecodeError
         return None
     if not isinstance(payload, dict) or payload.get("version") != CALIBRATOR_VERSION:
         return None
@@ -436,7 +436,7 @@ def load_threshold_profile(path: Path | str | None) -> ThresholdProfile | None:
         return None
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # P4: ValueError covers JSONDecodeError and UnicodeDecodeError
         return None
     if not isinstance(payload, dict) or payload.get("version") != THRESHOLD_PROFILE_VERSION:
         return None

@@ -67,7 +67,7 @@ def load_feedback(path: Path | str) -> list[FeedbackEntry]:
     """
     try:
         text = Path(path).read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeDecodeError):  # P4: the CLI refuses these first (cli_inputs)
         return []
     rows: list[object] = []
     try:

@@ -87,9 +87,10 @@ def load_key_file(key_file: Path | str) -> bytes:
     try:
         content = path.read_bytes().strip()
     except OSError as exc:
-        from .error_text import exception_text
+        from .error_text import read_error_ko
 
-        raise ReportKeyError(f"{UNREADABLE_KEY_MESSAGE}: {path.name} ({exception_text(exc)})") from exc
+        # P9: "파일 또는 폴더가 없습니다(오류 번호 2)" — no "[Errno 2]".
+        raise ReportKeyError(f"{UNREADABLE_KEY_MESSAGE}: {path.name} ({read_error_ko(exc)})") from exc
     if not content:
         raise ReportKeyError(f"{EMPTY_KEY_MESSAGE}: {path.name}")
     return content

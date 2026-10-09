@@ -414,7 +414,7 @@ def _load_scan_cache(cache_path: Path | None) -> dict[str, object] | None:
     check_scan_cache_file(cache_path)
     try:
         payload = json.loads(cache_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # P4: ValueError covers JSONDecodeError and UnicodeDecodeError
         payload = {}
     if not isinstance(payload, dict):
         payload = {}
@@ -442,7 +442,7 @@ def _load_hash_db(hash_db_path: Path | None) -> dict[str, object] | None:
         return None
     try:
         payload = json.loads(hash_db_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # P4: ValueError covers JSONDecodeError and UnicodeDecodeError
         return {"version": 1, "hashes": {}}
     if not isinstance(payload, dict):
         return {"version": 1, "hashes": {}}

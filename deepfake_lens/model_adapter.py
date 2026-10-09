@@ -182,7 +182,7 @@ def _profile_modality(source: Path) -> str:
         return "any"
     try:
         profile = json.loads(source.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # P4: ValueError covers JSONDecodeError and UnicodeDecodeError
         return "any"  # unreadable profiles surface their own error later
     if not isinstance(profile, dict):
         return "any"
@@ -223,7 +223,7 @@ def _analyze_profile_file(media_path: Path, model_file: Path, *, depth: int, mod
 
     try:
         profile = json.loads(model_file.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError) as exc:  # P4: + UnicodeDecodeError
         # A configured profile that cannot be read is an operator error —
         # it fails the check rather than quietly dropping the detector.
         return ExternalModelAnalysis(
@@ -592,7 +592,7 @@ def load_model_threshold(model_path: Path | str | None) -> int | None:
         return None
     try:
         profile = json.loads(model_file.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):  # P4: ValueError covers JSONDecodeError and UnicodeDecodeError
         return None
     value = profile.get("threshold")
     if isinstance(value, (int, float)):

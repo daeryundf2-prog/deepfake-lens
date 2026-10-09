@@ -348,12 +348,11 @@ def _load_report_json(path: Path) -> dict[str, object]:
 
     A corrupt or non-object file used to print ``읽을 수 없음: …`` on stdout.
     """
-    try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise UsageError(f"보고서 JSON을 해석할 수 없습니다: {path} ({exc})") from exc
-    if not isinstance(loaded, dict):
-        raise UsageError(f"보고서 JSON을 해석할 수 없습니다: {path} (JSON 객체가 아니라 {type(loaded).__name__}입니다)")
+    from .cli_inputs import read_json_input
+
+    # P9: the reason is Korean (no json/codec English, no Python type names).
+    loaded = read_json_input(path, "보고서 JSON")
+    assert isinstance(loaded, dict)
     return loaded
 
 
@@ -560,11 +559,9 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
     if args.command == "feedback":
         entries = load_feedback(args.labels)
         if args.scan_json:
-            try:
-                scan_payload = json.loads(args.scan_json.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                print(f"오류: 검사 JSON을 읽을 수 없습니다: {exc}", file=sys.stderr)
-                return 2
+            from .cli_inputs import read_json_input
+
+            scan_payload = read_json_input(args.scan_json, "검사 JSON")  # P4: UsageError -> exit 2
             observations, unmatched = observations_from_scan_payload(scan_payload, entries)
         else:
             observations, unmatched = observations_live(
@@ -921,21 +918,30 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         # `scan` (--max-files with scan's default, --recursive, --allow-symlinks…).
         stmt_options = AnalysisOptions.from_cli_args(args)
         if target.is_file() and target.suffix.lower() == ".json":
-            try:
-                data = json.loads(target.read_text(encoding="utf-8"))
-                from .core import _scan_item_from_json
-                raw_items = data.get("items")
-                if not isinstance(raw_items, list) or not any(isinstance(row, dict) for row in raw_items):
-                    # Y1: a JSON without scan rows is not a scan result — no
-                    # empty statement with exit 0.
-                    print(f"오류: 검사 JSON에 items가 없습니다(검사 결과 행 0건): {target}", file=sys.stderr)
+            from .cli_inputs import read_json_input
+            from .core import _scan_item_from_json
+
+            # P4/P9: unreadable, non-UTF-8, invalid or non-object JSON is a
+            # Korean usage error (UsageError -> exit 2), no English detail.
+            data = read_json_input(target, "검사 JSON")
+            assert isinstance(data, dict)
+            raw_items = data.get("items")
+            if not isinstance(raw_items, list) or not any(isinstance(row, dict) for row in raw_items):
+                # Y1: a JSON without scan rows is not a scan result — no
+                # empty statement with exit 0.
+                print(f"오류: 검사 JSON에 items가 없습니다(검사 결과 행 0건): {target}", file=sys.stderr)
+                return USAGE_EXIT
+            items = []
+            for index, row in enumerate(raw_items, start=1):
+                if not isinstance(row, dict):
+                    continue
+                try:
+                    items.append(_scan_item_from_json(row))
+                except (ValueError, TypeError, KeyError, AttributeError) as exc:
+                    print(f"오류: 검사 JSON을 해석할 수 없습니다: {target} — {index}번째 행의 형식이 맞지 않습니다({type(exc).__name__})", file=sys.stderr)
                     return USAGE_EXIT
-                items = [_scan_item_from_json(row) for row in raw_items if isinstance(row, dict)]
-                stmt_thresholds = data.get("thresholds")
-                stmt_summary = data.get("summary") if isinstance(data.get("summary"), dict) else None
-            except Exception as exc:
-                print(f"오류: 검사 JSON을 해석할 수 없습니다: {exc}", file=sys.stderr)
-                return 2
+            stmt_thresholds = data.get("thresholds")
+            stmt_summary = data.get("summary") if isinstance(data.get("summary"), dict) else None
         elif target.is_dir():
             try:
                 run = scan_folder_run(target, stmt_options, warn=thresholds_warning_printer(sys.stderr))
