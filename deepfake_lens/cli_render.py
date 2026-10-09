@@ -159,6 +159,12 @@ def _is_priority_row(item: ScanItem) -> bool:
     return item.result.verdict_code != Verdict.AUTHENTICITY_EVIDENCE
 
 
+# R16: CSV header names of the two v1 columns that used to read "score"
+# (an uncalibrated number) and "risk" (a band).
+CSV_CALIBRATED_SCORE_COLUMN = "보정점수(미보정시 공란)"
+CSV_VERDICT_COLUMN = "결론"
+
+
 def _write_csv(path: Path, items: list[ScanItem], *, coverage: dict[str, object] | None = None, thresholds: object | None = None) -> None:
     with path.open("w", newline="", encoding="utf-8") as handle:
         # Provenance is written as leading comment lines so the CSV can
@@ -187,8 +193,11 @@ def _write_csv(path: Path, items: list[ScanItem], *, coverage: dict[str, object]
                 "path",
                 "kind",
                 "status",
-                "score",
-                "risk",
+                # R16: the score is a calibrated probability x 100 or nothing
+                # (blank when uncalibrated); the old "risk" column is the
+                # three-way conclusion. Same column positions as v1.
+                CSV_CALIBRATED_SCORE_COLUMN,
+                CSV_VERDICT_COLUMN,
                 "참고_픽셀_원점수",
                 "참고_픽셀_신뢰도",
                 "pixel_model",
@@ -223,8 +232,8 @@ def _write_csv(path: Path, items: list[ScanItem], *, coverage: dict[str, object]
                     item.path,
                     item.kind,
                     item.status,
-                    result.score if result else "",
-                    result.band_label if result else "",
+                    result.score if result and result.score_is_calibrated else "",
+                    VERDICT_LABELS[result.verdict_code] if result else "",
                     pixel.raw_score if pixel and pixel.available else "",
                     pixel.reference_confidence if pixel and pixel.available else "",
                     pixel.model if pixel and pixel.available else "",

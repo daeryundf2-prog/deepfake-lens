@@ -307,6 +307,64 @@ class RendererTest(unittest.TestCase):
         self.assertEqual(by_path["note.txt"]["grade"], "reference")
         self.assertGreaterEqual(int(by_path["note.txt"]["evidence_lexical"]), 1)
 
+    def test_csv_score_column_is_calibrated_or_blank_and_risk_is_the_conclusion(self) -> None:
+        """R16: `score`/`risk` became `보정점수(미보정시 공란)`/`결론` (same positions)."""
+        from dataclasses import replace
+
+        from deepfake_lens.cli_render import CSV_CALIBRATED_SCORE_COLUMN, CSV_VERDICT_COLUMN, _write_csv
+
+        path = self.root / "r16.csv"
+        calibrated = [
+            replace(item, result=replace(item.result, score=73, score_is_calibrated=True)) if item.path == "note.txt" and item.result else item
+            for item in self.items
+        ]
+        _write_csv(path, calibrated)
+        lines = [line for line in path.read_text(encoding="utf-8").splitlines() if not line.startswith("#")]
+        header = next(csv.reader(lines[:1]))
+        self.assertEqual(header[3:5], [CSV_CALIBRATED_SCORE_COLUMN, CSV_VERDICT_COLUMN])
+        self.assertEqual(header[3:5], ["보정점수(미보정시 공란)", "결론"])
+        self.assertNotIn("score", header)
+        self.assertNotIn("risk", header)
+        by_path = {row["path"]: row for row in csv.DictReader(lines)}
+        self.assertEqual(by_path["a1111.png"][CSV_CALIBRATED_SCORE_COLUMN], "")
+        self.assertEqual(by_path["a1111.png"][CSV_VERDICT_COLUMN], "조작·생성 근거 있음")
+        self.assertEqual(by_path["note.txt"][CSV_CALIBRATED_SCORE_COLUMN], "73")
+        self.assertEqual(by_path["note.txt"][CSV_VERDICT_COLUMN], "판단 불가")
+
+    def test_include_low_means_authenticity_rows(self) -> None:
+        """R16: --include-low (alias --include-authentic) adds only "원본성 근거 있음" rows; help is Korean."""
+        from dataclasses import replace
+
+        from deepfake_lens.cli_parser import build_parser
+        from deepfake_lens.cli_render import _print_table
+
+        authentic = [
+            replace(item, result=replace(item.result, verdict_code=Verdict.AUTHENTICITY_EVIDENCE)) if item.path == "note.txt" and item.result else item
+            for item in self.items
+        ]
+        default, included = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(default):
+            _print_table(self.summary, authentic, include_low=False)
+        with contextlib.redirect_stdout(included):
+            _print_table(self.summary, authentic, include_low=True)
+        self.assertNotIn("note.txt", default.getvalue())
+        self.assertIn("원본성 근거 있음 1건은 표에서 생략했습니다", default.getvalue())
+        self.assertIn("a1111.png", default.getvalue())
+        self.assertIn("note.txt", included.getvalue())
+        parser, sub = build_parser()
+        self.assertTrue(parser.parse_args(["scan", ".", "--include-authentic"]).include_low)
+        self.assertTrue(parser.parse_args(["scan", ".", "--include-low"]).include_low)
+        scan_help = next(a for a in sub["scan"]._actions if "--include-low" in a.option_strings)
+        assert scan_help.help is not None
+        self.assertIn("원본성 근거 있음", scan_help.help)
+        self.assertNotIn("low-signal", scan_help.help)
+
+    def test_gui_does_not_call_scores_review_priority(self) -> None:
+        """R16: the GUI note no longer says scores are a review priority."""
+        gui = (Path(__file__).resolve().parents[1] / "gui.html").read_text(encoding="utf-8")
+        self.assertNotIn("검토 우선순위", gui)
+        self.assertIn("결론과 근거를 확인하십시오. 숫자 점수는 보정된 경우에만 표시됩니다.", gui)
+
     def test_html_report_groups_evidence_and_coverage(self) -> None:
         from deepfake_lens.reports import write_html_report
 

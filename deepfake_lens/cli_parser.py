@@ -21,7 +21,14 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     scan_parser.add_argument("folder", type=Path, help="folder to scan")
     scan_parser.add_argument("--recursive", action="store_true", help="scan recursively instead of direct children only")
     scan_parser.add_argument("--max-files", type=int, default=DEFAULT_MAX_FILES, help=f"maximum files to inspect (default: {DEFAULT_MAX_FILES})")
-    scan_parser.add_argument("--include-low", action="store_true", help="print low-signal and unsupported rows in the table")
+    scan_parser.add_argument(
+        "--include-low",
+        "--include-authentic",
+        dest="include_low",
+        action="store_true",
+        help="표에 '원본성 근거 있음' 행도 포함합니다(기본은 생략하고 생략 건수만 표시). "
+        "--include-low는 호환을 위해 남긴 이름이며 '낮은 위험' 행이라는 뜻이 아닙니다.",
+    )
     scan_parser.add_argument("--format", choices=["table", "json"], default="table", help="stdout format")
     scan_parser.add_argument("--json-out", type=Path, help="write full JSON report")
     scan_parser.add_argument("--csv-out", type=Path, help="write compact CSV report")
