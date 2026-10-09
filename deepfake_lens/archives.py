@@ -45,7 +45,12 @@ MAX_ARCHIVE_MEMBERS = 1000
 MAX_ARCHIVE_TOTAL_BYTES = 512 * 1024 * 1024
 MAX_ARCHIVE_MEMBER_BYTES = 256 * 1024 * 1024
 MAX_ARCHIVE_RATIO = 200
-MAX_NESTED_DEPTH = 2
+# Archive levels expanded below the top-level archive, the top included
+# (N14: was 2 — an archive three levels deep was "판단 불가" because its
+# innermost files were never reached). 8 levels stay well inside the tree
+# budget below (50 nested archives, 5000 members, 2 GiB); a deeper archive
+# is still reported per member: "중첩 압축 최대 깊이(8) 초과로 미해제".
+MAX_NESTED_DEPTH = 8
 
 # Aggregate limits across one top-level archive and everything nested in it
 # (phase-0 spec WP-H, G34): 2 GiB written, 5000 members, 50 nested archives.

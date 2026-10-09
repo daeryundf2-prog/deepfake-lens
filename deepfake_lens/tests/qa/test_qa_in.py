@@ -587,7 +587,8 @@ def _nested_hundred() -> bytes:
     return _zip_bytes(inner, compression=zipfile.ZIP_STORED)
 
 
-def _deeply_nested(levels: int = 8) -> bytes:
+def _deeply_nested(levels: int = archives.MAX_NESTED_DEPTH) -> bytes:
+    """``levels`` zips inside the top-level one: the innermost lies one level past the depth limit."""
     payload = _zip_bytes({"deep.txt": "가장 깊은 곳의 문서입니다.".encode()})
     for level in range(levels):
         payload = _zip_bytes({f"level-{level}.zip": payload})
@@ -945,6 +946,32 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
                 self.assertGreater(out.skipped, 0, out)
         _, _, deep = self.extractions["deep-nested.zip"]
         self.assertTrue(any("최대 깊이" in w for w in deep.warnings), deep.warnings)
+
+    def test_three_level_nesting_is_expanded_and_deeper_is_refused_by_depth(self) -> None:
+        """QA-IN-5: 보조 검사 — N14: a file three archive levels deep is analyzed; past the depth limit the member is refused with the depth reason."""
+        folder = Path(self._tmp.name) / "n14"
+        folder.mkdir()
+        marker = A1111_PNG.read_bytes()
+        three = _zip_bytes({"level2.zip": _zip_bytes({"level3.zip": _zip_bytes({"a1111.png": marker})})})
+        (folder / "nested-3.zip").write_bytes(three)
+        too_deep = _zip_bytes({"a1111.png": marker})
+        for level in range(archives.MAX_NESTED_DEPTH):
+            too_deep = _zip_bytes({f"d{level}.zip": too_deep})
+        (folder / "too-deep.zip").write_bytes(too_deep)
+        _, items = scan_folder(folder, AnalysisOptions())
+        rows = {item.path: item for item in items}
+        member = "nested-3.zip::level2.zip.unpacked/level3.zip.unpacked/a1111.png"
+        self.assertIn(member, rows, sorted(rows))
+        assert rows[member].result is not None
+        self.assertEqual(rows[member].result.verdict_code, Verdict.MANIPULATION_EVIDENCE)
+        container = rows["nested-3.zip"]
+        assert container.result is not None
+        self.assertEqual(container.result.verdict_code, Verdict.MANIPULATION_EVIDENCE)
+        deep = rows["too-deep.zip"]
+        assert deep.result is not None
+        reasons = [entry.reason for entry in deep.result.coverage if entry.check == "archive_member"]
+        self.assertTrue(any(f"중첩 압축 최대 깊이({archives.MAX_NESTED_DEPTH}) 초과로 미해제" in reason for reason in reasons), reasons)
+        self.assertFalse(any(path.startswith("too-deep.zip::") and path.endswith("a1111.png") for path in rows))
 
     def test_valid_files_unaffected(self) -> None:
         """QA-IN-5: 보조 검사 — the valid files get the same result as in a clean folder."""

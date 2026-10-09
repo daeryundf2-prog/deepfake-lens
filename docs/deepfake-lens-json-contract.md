@@ -108,7 +108,7 @@ always `0` invited old-contract readings. They remain readable as
   `<member>: <why>` — `경로 이탈 멤버('..' …)`, `절대 경로 멤버(…)`,
   `심볼릭 링크 멤버`, `하드 링크 멤버`, `압축 예산 초과(선언 크기 N, 한도 M) — <cap>`
   (per-member cap, compression-ratio bomb, per-archive or tree byte budget),
-  `앞선 멤버에서 해제 예산 소진으로 미해제`, `중첩 압축 최대 깊이(N) 초과로 미해제`,
+  `앞선 멤버에서 해제 예산 소진으로 미해제`, `중첩 압축 최대 깊이(N) 초과로 미해제` (N = `archives.MAX_NESTED_DEPTH` = 8 levels, the top-level archive included; N14 — was 2),
   `중첩 압축 예산(N개) 소진으로 미해제`, `손상된 멤버 데이터(<Exception>: …)`;
   members of nested archives are named `<inner archive>::<member>`. The same
   lines appear in `limitations` as `구성 파일 거부: <member> — <why>` (at most
