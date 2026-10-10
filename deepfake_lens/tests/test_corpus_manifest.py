@@ -5,11 +5,13 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
 from deepfake_lens.cli import main as cli_main
+from deepfake_lens.result_text import display_name
 from deepfake_lens.corpus_manifest import (
     SCHEMA,
     ManifestError,
@@ -39,6 +41,9 @@ def _make_corpus(root: Path, *, originals: int = 12) -> None:
                 path.write_bytes(f"{label}-{index}-{variant}".encode())
     (root / "README.md").write_text("ignored", encoding="utf-8")
     (root / "real" / "galaxy-s23" / "notes.xyz").write_text("unknown suffix", encoding="utf-8")
+
+
+NON_UTF8_SKIP = "파일 시스템이 UTF-8이 아닌 파일 이름을 허용하지 않음(Windows·macOS)"
 
 
 def _run(argv: list[str]) -> tuple[int, str]:
@@ -272,8 +277,47 @@ class VerifyAndCliTest(unittest.TestCase):
                 payload["items"][0]["relpath"] = relpath
                 payload["manifest_sha256"] = manifest_sha256(payload["items"])
                 problems = verify_manifest(payload, self.root)
-                self.assertIn(f"relpath가 코퍼스 밖을 가리킵니다: {relpath}", problems)
+                # R13-5 (round 13): the relpath is shown through display_name ("\\" doubled,
+                # NUL as "\x00"); this assertion used to expect the raw relpath.
+                self.assertIn(f"relpath가 코퍼스 밖을 가리킵니다: {display_name(relpath)}", problems)
                 self.assertFalse(any(problem.startswith(("파일 없음", "해시 불일치")) and relpath and relpath in problem for problem in problems))
+
+    def test_non_utf8_relpaths_are_shown_distinctly(self) -> None:
+        """R13-5 (round 13): two tampered non-UTF-8 names printed as one "r?.jpg".
+
+        ``corpus verify`` printed the raw relpath; the console (UTF-8,
+        errors="replace") turned each undecodable byte into "?", so
+        "r\\xc1.jpg" and "r\\xc2.jpg" read the same. Problems name a relpath
+        through display_name (escaped, injective).
+        """
+        folder = os.fsencode(self.root / "real" / "galaxy-s23" / "original")
+        names = (b"r\xc1.jpg", b"r\xc2.jpg")
+        try:
+            for name in names:
+                with open(folder + b"/" + name, "wb") as handle:
+                    handle.write(b"\xff\xd8\xff" + name)
+        except (OSError, UnicodeError):
+            self.skipTest(NON_UTF8_SKIP)
+        if names[0] not in os.listdir(folder):  # bytes listing of a bytes path
+            self.skipTest(NON_UTF8_SKIP)
+        manifest, _ = build_manifest(self.root, label_from_dir=True)
+        write_manifest(self.manifest_path, manifest)
+        for name in names:
+            with open(folder + b"/" + name, "ab") as handle:
+                handle.write(b"tampered")
+        raw = io.BytesIO()
+        out = io.TextIOWrapper(raw, encoding="utf-8", errors="replace")  # the console's settings
+        with contextlib.redirect_stdout(out):
+            code = cli_main(["corpus", "verify", "--manifest", str(self.manifest_path), "--root", str(self.root)])
+        out.flush()
+        self.assertEqual(code, 1)
+        lines = [line for line in raw.getvalue().decode("utf-8").splitlines() if "해시 불일치" in line]
+        self.assertEqual(len(lines), 2, raw.getvalue().decode("utf-8"))
+        self.assertNotIn("?", "".join(lines))
+        self.assertEqual(len({line.split(" (")[0] for line in lines}), 2, lines)  # two different names
+        for name in names:
+            shown = display_name("real/galaxy-s23/original/" + os.fsdecode(name))
+            self.assertTrue(any(f"해시 불일치: {shown} (" in line for line in lines), (shown, lines))
 
     def test_symlink_out_of_the_corpus_is_outside(self) -> None:
         secret = self.base / "secret.jpg"

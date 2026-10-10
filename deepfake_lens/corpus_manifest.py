@@ -59,6 +59,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 from .json_text import json_dumps
+from .result_text import display_name
 
 SCHEMA = "corpus-manifest-v1"
 LABELS = ("real", "synthetic", "edited")
@@ -235,13 +236,13 @@ def load_manifest(path: Path | str) -> dict[str, Any]:
     try:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
     except OSError as exc:
-        raise ManifestError(f"매니페스트를 읽을 수 없습니다: {path} ({exc})") from exc
+        raise ManifestError(f"매니페스트를 읽을 수 없습니다: {display_name(path)} ({exc})") from exc
     except (json.JSONDecodeError, RecursionError) as exc:  # R10-5: too-deep nesting is a damaged manifest
-        raise ManifestError(f"매니페스트 JSON이 손상되었습니다: {path} ({exc})") from exc
+        raise ManifestError(f"매니페스트 JSON이 손상되었습니다: {display_name(path)} ({exc})") from exc
     if not isinstance(payload, dict) or payload.get("schema") != SCHEMA:
-        raise ManifestError(f"스키마가 {SCHEMA}가 아닙니다: {path}")
+        raise ManifestError(f"스키마가 {SCHEMA}가 아닙니다: {display_name(path)}")
     if not isinstance(payload.get("items"), list):
-        raise ManifestError(f"items 배열이 없습니다: {path}")
+        raise ManifestError(f"items 배열이 없습니다: {display_name(path)}")
     return payload
 
 
@@ -396,7 +397,13 @@ def relpath_outside_corpus(relpath: str, root: Path | None = None) -> bool:
 
 
 def verify_manifest(manifest: dict[str, Any], root: Path | str) -> list[str]:
-    """Re-hash every file and re-check ``manifest_sha256``; Korean problems."""
+    """Re-hash every file and re-check ``manifest_sha256``; Korean problems.
+
+    R13-5 (round 13): a relpath is named through ``display_name`` — a
+    non-UTF-8 name ("r\\udcc1.jpg") printed raw became "r?.jpg" on the
+    console (two different files looked the same); its escapes are
+    injective and survive any console encoding.
+    """
     problems: list[str] = []
     items: list[dict[str, Any]] = manifest.get("items", [])
     root_path = Path(root)
@@ -409,27 +416,28 @@ def verify_manifest(manifest: dict[str, Any], root: Path | str) -> list[str]:
     for item in items:
         ident = str(item.get("id"))
         relpath = str(item.get("relpath", ""))
+        shown = display_name(relpath)  # R13-5
         if ident in seen_ids:
             problems.append(f"중복 id: {ident}")
         seen_ids.add(ident)
         label = item.get("label")
         if label is None:
-            problems.append(f"라벨 없음: {relpath}")
+            problems.append(f"라벨 없음: {shown}")
         elif label not in LABELS:
-            problems.append(f"허용되지 않는 라벨 {label!r}: {relpath}")
+            problems.append(f"허용되지 않는 라벨 {label!r}: {shown}")
         split = item.get("split")
         if split is not None and split not in SPLITS:
-            problems.append(f"허용되지 않는 split {split!r}: {relpath}")
+            problems.append(f"허용되지 않는 split {split!r}: {shown}")
         if relpath_outside_corpus(relpath, root_path):
-            problems.append(RELPATH_OUTSIDE.format(relpath=relpath))
+            problems.append(RELPATH_OUTSIDE.format(relpath=shown))
             continue
         path = root_path / relpath
         if not path.is_file():
-            problems.append(f"파일 없음: {relpath}")
+            problems.append(f"파일 없음: {shown}")
             continue
         actual = file_sha256(path)
         if actual != item.get("sha256"):
-            problems.append(f"해시 불일치: {relpath} (기록 {str(item.get('sha256'))[:12]}…, 실제 {actual[:12]}…)")
+            problems.append(f"해시 불일치: {shown} (기록 {str(item.get('sha256'))[:12]}…, 실제 {actual[:12]}…)")
     return problems
 
 
@@ -510,11 +518,11 @@ def run_corpus_cli(args: argparse.Namespace) -> int:
             root = _resolve_root(manifest, args.manifest, args.root)
             problems = verify_manifest(manifest, root)
             if problems:
-                print(f"검증 실패: {args.manifest} — 문제 {len(problems)}건")
+                print(f"검증 실패: {display_name(args.manifest)} — 문제 {len(problems)}건")
                 for problem in problems:
                     print(f"  - {problem}")
                 return 1
-            print(f"검증 통과: {args.manifest} — 항목 {len(manifest['items'])}개, manifest_sha256 {manifest['manifest_sha256']}")
+            print(f"검증 통과: {display_name(args.manifest)} — 항목 {len(manifest['items'])}개, manifest_sha256 {manifest['manifest_sha256']}")
             return 0
     except ManifestError as exc:
         # N4: errors go to stderr like every other command's.
