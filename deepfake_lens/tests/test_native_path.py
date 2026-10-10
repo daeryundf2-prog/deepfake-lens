@@ -259,6 +259,245 @@ class NativeSafePathUnitTest(unittest.TestCase):
         self.assertIn("ASCII 임시 폴더", str(caught.exception))
 
 
+class WindowsStagingOrderTest(unittest.TestCase):
+    """R13-8 (round 13): on Windows a hard link, then the ASCII 8.3 short name, then a copy (Windows API mocked).
+
+    Without symbolic links and with the evidence on another drive than the
+    temp folder, every Korean-named file used to be copied in full (up to
+    2 GB) for the native decoder.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.name = _write_bytes_name(self.root, CP949_STEM + b".mp4", b"\x00\x00\x00\x18ftypmp42" + bytes(range(200)))
+        self.source = self.root / self.name
+        self.digest = hashlib.sha256(self.source.read_bytes()).hexdigest()
+        windows = mock.patch.object(native_path, "_is_windows", return_value=True)
+        windows.start()
+        self.addCleanup(windows.stop)
+        # Windows has no unprivileged symbolic links: the route must not try one.
+        no_symlink = mock.patch.object(native_path.os, "symlink", side_effect=AssertionError("symlink tried on Windows"))
+        no_symlink.start()
+        self.addCleanup(no_symlink.stop)
+
+    def _short_alias(self) -> str:
+        """An ASCII name for the same file, standing in for its 8.3 short name."""
+        alias_dir = self.root / "SHORT~1"
+        alias_dir.mkdir(exist_ok=True)
+        alias = alias_dir / "EVIDEN~1.MP4"
+        if not alias.exists():
+            os.link(self.source, alias)
+        return str(alias)
+
+    def test_hard_link_first(self) -> None:
+        with mock.patch.object(native_path, "_short_path_name", side_effect=AssertionError("short name before link")):
+            with native_safe_path(self.source) as native:
+                self.assertTrue(native.startswith(native_path.session_dir()))
+                self.assertEqual(os.stat(native).st_ino, os.stat(self.source).st_ino)  # a hard link
+                staged = native
+        self.assertFalse(os.path.lexists(staged))
+
+    def test_short_name_when_the_link_is_refused_nothing_is_copied(self) -> None:
+        from deepfake_lens.error_text import failure_reason, path_scrub_root
+
+        alias = self._short_alias()
+        before = native_path.staged_names()
+        with mock.patch.object(native_path.os, "link", side_effect=OSError("cross-device")), mock.patch.object(
+            native_path, "_short_path_name", return_value=alias
+        ), mock.patch.object(native_path.shutil, "copyfile", side_effect=AssertionError("copied")):
+            with path_scrub_root(self.root):
+                try:
+                    with native_safe_path(self.source) as native:
+                        self.assertEqual(native, alias)
+                        self.assertEqual(native_path.staged_names(), before)  # nothing staged
+                        self.assertEqual(hashlib.sha256(Path(native).read_bytes()).hexdigest(), self.digest)
+                        raise RuntimeError(f"Error opening {native!r}: Format not recognised.")
+                except RuntimeError as exc:
+                    reason = failure_reason(exc)
+        # The short name is the evidence file itself: never removed.
+        self.assertTrue(os.path.exists(alias))
+        self.assertTrue(self.source.exists())
+        self.assertNotIn("EVIDEN~1", reason)
+        self.assertIn(repr(f"<root>/{self.name}"), reason)
+
+    def test_copy_when_there_is_no_short_name(self) -> None:
+        with mock.patch.object(native_path.os, "link", side_effect=OSError("cross-device")), mock.patch.object(
+            native_path, "_short_path_name", return_value=None
+        ):
+            with native_safe_path(self.source) as native:
+                self.assertEqual(os.stat(native).st_nlink, 1)
+                self.assertEqual(os.stat(native).st_mode & 0o777, 0o400)
+                self.assertEqual(hashlib.sha256(Path(native).read_bytes()).hexdigest(), self.digest)
+                copied = native
+        self.assertFalse(os.path.lexists(copied))
+
+    def test_copy_over_the_cap_is_a_failed_check_with_the_reason(self) -> None:
+        from deepfake_lens.checks import run_check
+        from deepfake_lens.error_text import english_prose
+        from deepfake_lens.result_types import CoverageStatus
+
+        def decode() -> None:
+            with native_safe_path(self.source):
+                self.fail("must not yield")
+
+        with mock.patch.object(native_path.os, "link", side_effect=OSError("cross-device")), mock.patch.object(
+            native_path, "_short_path_name", return_value=None
+        ), mock.patch.object(native_path, "NATIVE_COPY_MAX_BYTES", 10):
+            _, entry = run_check("audio_features", decode)
+        self.assertEqual(entry.status, CoverageStatus.FAILED)
+        self.assertIn("NativePathError", entry.reason)
+        self.assertIn("판단 불가: 네이티브 디코더용 임시 사본 상한 초과", entry.reason)
+        self.assertIn("짧은 이름(8.3)", entry.reason)
+        self.assertIsNone(english_prose(entry.reason), entry.reason)
+
+    def test_no_short_name_lookup_off_windows(self) -> None:
+        with mock.patch.object(native_path, "_is_windows", return_value=False):
+            self.assertIsNone(native_path._short_path_name(str(self.source)))
+
+
+@unittest.skipIf(os.name == "nt", "POSIX signals")
+class SessionFolderCleanupTest(unittest.TestCase):
+    """R13-4 (round 13): the staging folder does not outlive the process.
+
+    SIGTERM (no atexit) and SIGINT left the per-process folder in TMPDIR;
+    now the handlers remove it before the signal's previous action, and a
+    folder of a process that died anyway (SIGKILL) is swept by the next one.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = Path(self._tmp.name).resolve()
+
+    def _child(self, mode: str, signum: int) -> tuple[int, list[str]]:
+        script = textwrap.dedent(
+            """
+            import os, sys, threading, time
+            from pathlib import Path
+            from deepfake_lens import native_path
+            folder, mode = Path(sys.argv[1]), sys.argv[2]
+            source = folder / "증거.mp4"
+            source.write_bytes(b"x" * 64)
+            if mode == "thread":
+                native_path.install_cleanup_handlers()  # what the CLI does at start
+            def hold():
+                with native_safe_path(source) as native:
+                    print(os.path.dirname(native), flush=True)
+                    time.sleep(60)
+            from deepfake_lens.native_path import native_safe_path
+            try:
+                if mode == "thread":
+                    worker = threading.Thread(target=hold, daemon=True)
+                    worker.start()
+                    while worker.is_alive():
+                        time.sleep(0.05)
+                else:
+                    hold()
+            except KeyboardInterrupt:
+                sys.exit(3)
+            """
+        )
+        env = {**_child_env(self.base), native_path.NATIVE_TMP_ENV: str(self.base)}
+        proc = subprocess.Popen(
+            [sys.executable, "-c", script, str(self.base), mode], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=str(self.base)
+        )
+        assert proc.stdout is not None and proc.stderr is not None
+        folder = proc.stdout.readline().decode("utf-8").strip()
+        self.assertTrue(folder and os.path.isdir(folder), (folder, proc.stderr.read()[-500:] if proc.poll() is not None else ""))
+        self.assertEqual(os.path.basename(folder).split("-")[3], str(proc.pid))  # <prefix><pid>-<random>
+        proc.send_signal(signum)
+        code = proc.wait(timeout=30)
+        proc.stdout.close()
+        proc.stderr.close()
+        return code, [name for name in os.listdir(self.base) if name.startswith(native_path.SESSION_PREFIX)]
+
+    def test_sigterm_removes_the_folder_and_still_terminates(self) -> None:
+        import signal
+
+        for mode in ("main", "thread"):
+            with self.subTest(mode=mode):
+                code, left = self._child(mode, signal.SIGTERM)
+                self.assertEqual(code, -signal.SIGTERM)  # the default action still ran
+                self.assertEqual(left, [])
+
+    def test_sigint_removes_the_folder_and_still_raises_keyboard_interrupt(self) -> None:
+        import signal
+
+        code, left = self._child("main", signal.SIGINT)
+        self.assertEqual(code, 3)  # the previous handler (KeyboardInterrupt) still ran
+        self.assertEqual(left, [])
+
+    def test_stale_folders_of_dead_processes_are_swept(self) -> None:
+        import time
+
+        dead = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"], capture_output=True, text=True, check=True)
+        dead_pid = int(dead.stdout)
+        live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        self.addCleanup(live.wait)
+        self.addCleanup(live.kill)
+        evidence = self.base / "evidence.bin"
+        evidence.write_bytes(b"evidence")
+        prefix = native_path.SESSION_PREFIX
+        old = time.time() - 2 * native_path.STALE_LEGACY_SECONDS
+        made = {
+            f"{prefix}{dead_pid}-aaaa": old,  # owner gone, old: swept
+            f"{prefix}{dead_pid}-bbbb": None,  # owner gone, just touched: kept (another PID namespace?)
+            f"{prefix}{live.pid}-cccc": old,  # owner alive: kept
+            f"{prefix}{os.getpid()}-dddd": old,  # this process: kept
+            f"{prefix}legacyold": old,  # before R13-4, a day old: swept
+            f"{prefix}legacynew": None,  # before R13-4, recent: kept
+        }
+        for name, mtime in made.items():
+            folder = self.base / name
+            folder.mkdir()
+            os.symlink(evidence, folder / "000001-0123456789ab.bin")
+            copy = folder / "000002-0123456789ab.bin"
+            copy.write_bytes(b"copy")
+            copy.chmod(0o400)
+            if mtime is not None:
+                os.utime(folder, (mtime, mtime))
+        os.symlink(self.base / f"{prefix}{dead_pid}-aaaa", self.base / f"{prefix}{dead_pid}-link")  # a link: never followed
+        (self.base / "other-folder").mkdir()
+        removed = native_path.sweep_stale_sessions(str(self.base))
+        self.assertEqual(removed, [f"{prefix}{dead_pid}-aaaa", f"{prefix}legacyold"])
+        left = sorted(os.listdir(self.base))
+        self.assertEqual(
+            left,
+            sorted([*(name for name in made if name not in removed), f"{prefix}{dead_pid}-link", "other-folder", "evidence.bin"]),
+        )
+        self.assertEqual(evidence.read_bytes(), b"evidence")  # links removed, never their targets
+
+    def test_a_new_session_folder_sweeps_first_and_carries_the_pid(self) -> None:
+        import time
+
+        dead = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"], capture_output=True, text=True, check=True)
+        stale = self.base / f"{native_path.SESSION_PREFIX}{int(dead.stdout)}-zzzz"
+        stale.mkdir()
+        old = time.time() - 2 * native_path.STALE_MIN_AGE_SECONDS
+        os.utime(stale, (old, old))
+        with mock.patch.object(native_path, "_SESSION_DIR", None), mock.patch.object(native_path, "_SESSION_DIRS", []), mock.patch.object(
+            native_path, "_base_candidates", return_value=[str(self.base)]
+        ), mock.patch.object(native_path, "install_cleanup_handlers") as install:
+            created = native_path.session_dir()
+            self.assertTrue(os.path.basename(created).startswith(f"{native_path.SESSION_PREFIX}{os.getpid()}-"))
+            self.assertFalse(stale.exists())
+            install.assert_called_once_with()
+            native_path.cleanup_session()
+            self.assertFalse(os.path.exists(created))
+
+    def test_the_cli_installs_the_handlers_at_start(self) -> None:
+        import contextlib
+        import io
+
+        from deepfake_lens import cli
+
+        with mock.patch.object(native_path, "install_cleanup_handlers") as install, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.main([]), 0)
+        install.assert_called_once_with()
+
+
 # Native call sites: (module alias, attribute). Every such call in the
 # package must sit inside ``with native_safe_path(...) as <name>:`` and pass
 # <name> (or a value built from it in the same block).

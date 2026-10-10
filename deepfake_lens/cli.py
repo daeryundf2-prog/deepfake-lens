@@ -384,6 +384,12 @@ def _verify_report_command(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # R13-4: a SIGTERM/SIGINT removes the native decoders' staging folder
+    # first — installed here, in the main thread, because staging may first
+    # happen in a worker thread (--workers, the servers' request threads).
+    from .native_path import install_cleanup_handlers
+
+    install_cleanup_handlers()
     # Windows consoles default to a legacy code page (e.g. cp949) that cannot
     # encode Korean text or em-dashes; reconfiguring to UTF-8 keeps print()
     # from crashing there. StringIO-style test doubles lack reconfigure.

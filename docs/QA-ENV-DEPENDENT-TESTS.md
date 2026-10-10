@@ -27,6 +27,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | --- | --- | --- |
 | `':' is not allowed in Windows file names` | Windows가 아닌 OS(POSIX) | test_archives.py, test_servers.py |
 | `OpenCV mp4v 인코더 없음` | `pixel`/`video` extra(opencv-python — mp4v 인코더 포함 빌드) | test_native_path.py |
+| `POSIX signals` | Windows가 아닌 OS(POSIX — 자식 프로세스에 SIGTERM/SIGINT를 보내 기본 동작과 스테이징 폴더 정리 확인) | test_native_path.py |
 | `Pillow + numpy needed for the fixture` | `dev` extra(Pillow, numpy) | test_report_labels_ko.py |
 | `Pillow + numpy required to write EXIF/XMP fixtures` | `dev` extra(Pillow, numpy) | test_image_metadata_exif.py |
 | `Pillow not installed` | `dev` extra(Pillow) | test_cli_operations.py, test_error_text.py, test_json_contract.py, test_model_zoo.py |
