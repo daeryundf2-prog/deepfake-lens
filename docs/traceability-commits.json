@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "0ce6d1b176c4d6b15e1d8efd8b804d34449898e2",
+    "head": "76955b91ca1261f0d88eb970b84161465c3cc083",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -7359,6 +7359,46 @@
         "R16-15: 테스트 도구 — 갭 목록 밖"
       ],
       "gaps_line": "Gaps: G13, G34",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "ad02d2be5af569c6584b3c1a5a87bc89058c0451",
+      "short": "ad02d2b",
+      "round": "16",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on 0ce6d1b, round-16 IDs mapped (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "76955b91ca1261f0d88eb970b84161465c3cc083",
+      "short": "76955b9",
+      "round": "16",
+      "subject": "docs(phase0): handoff — spec, round 1-17 verification findings and resume guide (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
       "gaps_source": "subject"
     }
   ]

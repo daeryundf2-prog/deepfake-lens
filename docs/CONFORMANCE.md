@@ -2,8 +2,8 @@
 
 <!-- scripts/qa_phase0.py가 생성 — 손으로 고치지 말 것 -->
 
-- 검증 커밋: `0ce6d1b176c4d6b15e1d8efd8b804d34449898e2` — 변경 없는 작업 트리에서 실행. 이 표는 이 커밋의 직계 자식 커밋에 단독으로 담긴다 (`python scripts/qa_phase0.py --verify-record`로 확인)
-- 생성 일시(UTC): 2026-10-10T21:29:45Z
+- 검증 커밋: `76955b91ca1261f0d88eb970b84161465c3cc083` — 변경 없는 작업 트리에서 실행. 이 표는 이 커밋의 직계 자식 커밋에 단독으로 담긴다 (`python scripts/qa_phase0.py --verify-record`로 확인)
+- 생성 일시(UTC): 2026-10-10T23:13:20Z
 - 도구 버전: deepfake-lens 0.1.0
 - 환경: Python 3.13.16 / Linux-6.18.44-fc-v114-x86_64-with-glibc2.39 / ffmpeg 있음
 - 설치된 선택 패키지: numpy, PIL, cv2, scipy, sklearn, fastapi, httpx, uvicorn, mediapipe, pymupdf, fitz

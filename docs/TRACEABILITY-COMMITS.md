@@ -4,7 +4,7 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..0ce6d1b`(병합 커밋 제외, 커밋 213개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..76955b9`(병합 커밋 제외, 커밋 215개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
 요약: ID 208개 — 스펙 갭에 매핑 140개(그중 신규 사유 병기 48개), 신규(스펙 외)만 68개.
 
@@ -475,3 +475,5 @@ P14: Gaps를 제목 괄호에만 적은 커밋(예: `(Z1-Z5; Gaps: G7, 신규)`)
 | ee091ac | 16 | R16-10 | Gaps: G34 | subject | fix(native): R16-10 the temp-folder fallback names who chose the unusable folder (HTML, scan JSON) and the evidence statement records it (R16-10; Gaps: G34) |
 | 1653be9 | 16 | R16-11, R16-12 | Gaps: G26; 신규(스펙 외) | subject | test(qa): R16-11 the telemetry strace leg skips where ptrace is denied; R16-12 the two commit-history tests share one rule and one failure message, documented (R16-11, R16-12; Gaps: G26, 신규) |
 | 0ce6d1b | 16 | R16-13, R16-15 | Gaps: G13, G34 | subject | fix(cli): R16-13 Ctrl-C ends the CLI with "중단됨(사용자 요청)" and exit 130 after the cleanup; R16-15 with_default_signals.py reports a command that cannot start in Korean, exit 127/126 (R16-13, R16-15; Gaps: G13, G34) |
+| ad02d2b | 16 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 0ce6d1b, round-16 IDs mapped (WP-J; Gaps: G26, G27, G28) |
+| 76955b9 | 16 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): handoff — spec, round 1-17 verification findings and resume guide (WP-J; Gaps: 신규) |
