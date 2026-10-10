@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "68035c305122b50543a20b8933a10116ad2657d8",
+    "head": "130dddd6836cd9f973ef2a32533e71f967b31060",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -2350,6 +2350,133 @@
       "new": "테스트 도구(영어 탐지기) — 갭 목록 밖",
       "commits": [
         "68035c3"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R13-1",
+      "round": 13,
+      "source": "verify_round13.md",
+      "summary": "스테이징 임시 이름이 오디오 디코드 실패 사유에 누출 → 실행 간 JSON 차이·ASCII 사본과 불일치·캐시 오염 → staged→원래 경로 역매핑",
+      "gaps": [
+        "G11",
+        "G32"
+      ],
+      "new": "비 ASCII 파일명 스테이징 — 갭 목록 밖",
+      "commits": [
+        "9ee4bf8",
+        "130dddd"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R13-2",
+      "round": 13,
+      "source": "verify_round13.md",
+      "summary": "압축 파일이 추출 중 재작성되면 컨테이너 sha256이 추출 바이트와 다름 → 전후 비교, 판단 불가·해시 없음",
+      "gaps": [
+        "G11",
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "476e412"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R13-3",
+      "round": 13,
+      "source": "verify_round13.md",
+      "summary": "non-UTF-8 경로를 /api/analyze-file·/api/scan으로 지정 불가 → file_b64·folder_b64",
+      "gaps": [
+        "G8",
+        "G31"
+      ],
+      "new": "비 UTF-8 경로 주소 지정 — 갭 목록 밖",
+      "commits": [
+        "6a4aded"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R13-4",
+      "round": 13,
+      "source": "verify_round13.md",
+      "summary": "SIGTERM·강제 종료 시 스테이징 폴더 잔류 → 신호 처리 정리 + 오래된 폴더 청소",
+      "gaps": [],
+      "new": "임시 파일 정리 — 갭 목록 밖",
+      "commits": [
+        "faf6b5d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R13-5",
+      "round": 13,
+      "source": "verify_round13.md",
+      "summary": "corpus verify가 non-UTF-8 relpath를 r?.jpg로 출력 → display_name",
+      "gaps": [
+        "G27"
+      ],
+      "new": "표시 단사성 — 갭 목록 밖",
+      "commits": [
+        "a9721b2"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R13-6",
+      "round": 13,
+      "source": "verify_round13.md",
+      "summary": "중첩 중복 멤버 행에 중복 사유 없음 → 멤버 행 coverage에 기록",
+      "gaps": [
+        "G12",
+        "G34"
+      ],
+      "new": null,
+      "commits": [
+        "a4f9b08"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R13-7",
+      "round": 13,
+      "source": "verify_round13.md",
+      "summary": "cv2.imwrite가 한글 임시 경로에서 실패(Windows 위험) → imencode + Python 쓰기, 메타테스트 확장",
+      "gaps": [
+        "G1"
+      ],
+      "new": "Windows 한글 사용자 경로 — 갭 목록 밖",
+      "commits": [
+        "0f22403"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R13-8",
+      "round": 13,
+      "source": "verify_round13.md",
+      "summary": "Windows에서 한글 이름 파일 전량 복사 → 하드링크 → 8.3 짧은 이름 → 복사(상한)",
+      "gaps": [],
+      "new": "Windows 스테이징 성능 — 갭 목록 밖",
+      "commits": [
+        "faf6b5d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R13-9",
+      "round": 13,
+      "source": "verify_round13.md",
+      "summary": "렌더된 Markdown에서 GFM 자동 링크 → . : @ / 이스케이프",
+      "gaps": [
+        "G30"
+      ],
+      "new": "Markdown 자동 링크 — 갭 목록 밖",
+      "commits": [
+        "ec8e4da"
       ],
       "used_in_commit_subjects": true
     }
@@ -5933,6 +6060,240 @@
         "R12-12: 테스트 도구(영어 탐지기) — 갭 목록 밖"
       ],
       "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "9085e5e174572b85f8a1be05247b38cf7e567848",
+      "short": "9085e5e",
+      "round": "12",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on 68035c3, round-12 IDs mapped (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "9ee4bf8d76abb1ca986358653932e1be8e4665ac",
+      "short": "9ee4bf8",
+      "round": "13",
+      "subject": "fix(native): R13-1 a staged ASCII name never reaches a reason — native_safe_path maps it back to the original path; the cache rewrite is one pass (R13-1; Gaps: G32, G11, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R13-1"
+      ],
+      "gaps_named_in_subject": [
+        "G32",
+        "G11"
+      ],
+      "gaps": [
+        "G32",
+        "G11"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R13-1: 비 ASCII 파일명 스테이징 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G32, G11; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "476e4128e9158e54e9637bd0c70acf8aaf6a9def",
+      "short": "476e412",
+      "round": "13",
+      "subject": "fix(scan): R13-2 an archive rewritten while its members are extracted is 판단 불가 with no hash — container and every member row (R13-2; Gaps: G11, G30, G34)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R13-2"
+      ],
+      "gaps_named_in_subject": [
+        "G11",
+        "G30",
+        "G34"
+      ],
+      "gaps": [
+        "G11",
+        "G30",
+        "G34"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G11, G30, G34",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "6a4aded93719c1e150fb6118263f7c189677817d",
+      "short": "6a4aded",
+      "round": "13",
+      "subject": "feat(web,api): R13-3 /api/analyze-file takes file_b64 and /api/scan folder_b64 — a non-UTF-8 path is addressable on both servers (R13-3; Gaps: G31, G8, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R13-3"
+      ],
+      "gaps_named_in_subject": [
+        "G31",
+        "G8"
+      ],
+      "gaps": [
+        "G31",
+        "G8"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R13-3: 비 UTF-8 경로 주소 지정 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G31, G8; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "faf6b5d197372aff605239387e9372ed44972edd",
+      "short": "faf6b5d",
+      "round": "13",
+      "subject": "fix(native): R13-4 the staging folder is removed on SIGTERM/SIGINT and stale ones are swept; R13-8 Windows stages by hard link, then the 8.3 short name, then a capped copy (R13-4, R13-8; Gaps: G34, G1, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R13-4",
+        "R13-8"
+      ],
+      "gaps_named_in_subject": [
+        "G34",
+        "G1"
+      ],
+      "gaps": [
+        "G34",
+        "G1"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R13-4: 임시 파일 정리 — 갭 목록 밖",
+        "R13-8: Windows 스테이징 성능 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G34, G1; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "a9721b2703580e4020196725648130c23f8f9e1d",
+      "short": "a9721b2",
+      "round": "13",
+      "subject": "fix(corpus): R13-5 corpus verify names a relpath through display_name — two non-UTF-8 names no longer both print \"r?.jpg\" (R13-5; Gaps: G27, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R13-5"
+      ],
+      "gaps_named_in_subject": [
+        "G27"
+      ],
+      "gaps": [
+        "G27"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R13-5: 표시 단사성 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G27; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "a4f9b08748c38c55dee6c35db1c963fca229ab37",
+      "short": "a4f9b08",
+      "round": "13",
+      "subject": "fix(archives): R13-6 a duplicate-name reason is the member row's own coverage entry — nested members of a renamed inner archive carry it too (R13-6; Gaps: G34, G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R13-6"
+      ],
+      "gaps_named_in_subject": [
+        "G34",
+        "G30"
+      ],
+      "gaps": [
+        "G34",
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G34, G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "0f22403a3bd1ed0b47eabb294657c6dea2080741",
+      "short": "0f22403",
+      "round": "13",
+      "subject": "fix(native): R13-7 face crops and video frames are written with imencode + Python — a Korean or non-UTF-8 temp folder works; the meta-test resolves cv2 aliases and covers sub-packages (R13-7; Gaps: G1, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R13-7"
+      ],
+      "gaps_named_in_subject": [
+        "G1"
+      ],
+      "gaps": [
+        "G1"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R13-7: Windows 한글 사용자 경로 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G1; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "ec8e4dadeda5ff94ec4a2c8180bd6cd0dc7fb567",
+      "short": "ec8e4da",
+      "round": "13",
+      "subject": "fix(reports): R13-9 Markdown escapes \".\", \":\", \"@\" and \"/\" — no GFM/linkify autolink (www., http(s)://, ftp://, //host, e-mail, bare domain) forms from a name (R13-9; Gaps: G30, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R13-9"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R13-9: Markdown 자동 링크 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G30; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "130dddd6836cd9f973ef2a32533e71f967b31060",
+      "short": "130dddd",
+      "round": "13",
+      "subject": "fix(native): R13-1 follow-up — a quoted non-UTF-8 name in a reason reads as in its row (repr()'s \"\\udcc1\" escapes undone), the cache rewrite gives the same form (R13-1; Gaps: G32, G11, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R13-1"
+      ],
+      "gaps_named_in_subject": [
+        "G32",
+        "G11"
+      ],
+      "gaps": [
+        "G32",
+        "G11"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R13-1: 비 ASCII 파일명 스테이징 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G32, G11; 신규(스펙 외)",
       "gaps_source": "subject"
     }
   ]

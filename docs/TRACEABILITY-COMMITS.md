@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..68035c3`(병합 커밋 제외, 커밋 175개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..130dddd`(병합 커밋 제외, 커밋 185개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 168개 — 스펙 갭에 매핑 107개(그중 신규 사유 병기 30개), 신규(스펙 외)만 61개.
+요약: ID 177개 — 스펙 갭에 매핑 114개(그중 신규 사유 병기 35개), 신규(스펙 외)만 63개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -195,6 +195,15 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R12-10 | 12 | non-UTF-8 multipart 파일명이 U+FFFD로 손실 → 원시 바이트 보존 | G30 | 신규(스펙 외): 업로드 파일명 — 갭 목록 밖 | 63cf82e |
 | R12-11 | 12 | 후행 슬래시 /gui/ 동작이 두 서버에서 다름 → 둘 다 404 | G31 | 신규(스펙 외): 라우트 일관성 — 갭 목록 밖 | db73702 |
 | R12-12 | 12 | 영어 탐지기가 TAG 문자 뒤 단어 미탐 → Cf 문자 제거 | — | 신규(스펙 외): 테스트 도구(영어 탐지기) — 갭 목록 밖 | 68035c3 |
+| R13-1 | 13 | 스테이징 임시 이름이 오디오 디코드 실패 사유에 누출 → 실행 간 JSON 차이·ASCII 사본과 불일치·캐시 오염 → staged→원래 경로 역매핑 | G11, G32 | 신규(스펙 외): 비 ASCII 파일명 스테이징 — 갭 목록 밖 | 9ee4bf8, 130dddd |
+| R13-2 | 13 | 압축 파일이 추출 중 재작성되면 컨테이너 sha256이 추출 바이트와 다름 → 전후 비교, 판단 불가·해시 없음 | G11, G30 |  | 476e412 |
+| R13-3 | 13 | non-UTF-8 경로를 /api/analyze-file·/api/scan으로 지정 불가 → file_b64·folder_b64 | G8, G31 | 신규(스펙 외): 비 UTF-8 경로 주소 지정 — 갭 목록 밖 | 6a4aded |
+| R13-4 | 13 | SIGTERM·강제 종료 시 스테이징 폴더 잔류 → 신호 처리 정리 + 오래된 폴더 청소 | — | 신규(스펙 외): 임시 파일 정리 — 갭 목록 밖 | faf6b5d |
+| R13-5 | 13 | corpus verify가 non-UTF-8 relpath를 r?.jpg로 출력 → display_name | G27 | 신규(스펙 외): 표시 단사성 — 갭 목록 밖 | a9721b2 |
+| R13-6 | 13 | 중첩 중복 멤버 행에 중복 사유 없음 → 멤버 행 coverage에 기록 | G12, G34 |  | a4f9b08 |
+| R13-7 | 13 | cv2.imwrite가 한글 임시 경로에서 실패(Windows 위험) → imencode + Python 쓰기, 메타테스트 확장 | G1 | 신규(스펙 외): Windows 한글 사용자 경로 — 갭 목록 밖 | 0f22403 |
+| R13-8 | 13 | Windows에서 한글 이름 파일 전량 복사 → 하드링크 → 8.3 짧은 이름 → 복사(상한) | — | 신규(스펙 외): Windows 스테이징 성능 — 갭 목록 밖 | faf6b5d |
+| R13-9 | 13 | 렌더된 Markdown에서 GFM 자동 링크 → . : @ / 이스케이프 | G30 | 신규(스펙 외): Markdown 자동 링크 — 갭 목록 밖 | ec8e4da |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -397,3 +406,13 @@ P14: Gaps를 제목 괄호에만 적은 커밋(예: `(Z1-Z5; Gaps: G7, 신규)`)
 | 63cf82e | 12 | R12-10 | Gaps: G30; 신규(스펙 외) | subject | fix(web): R12-10 multipart file names keep their bytes — raw Content-Disposition decoded as RFC 5987, UTF-8, CP949, else surrogate escapes (R12-10; Gaps: G30, 신규) |
 | db73702 | 12 | R12-11 | Gaps: G31; 신규(스펙 외) | subject | fix(api): R12-11 a trailing slash is 404 on both servers — api-serve no longer redirects /gui/ to /gui (R12-11; Gaps: G31, 신규) |
 | 68035c3 | 12 | R12-12 | Gaps: 신규(스펙 외) | subject | fix(text): R12-12 the English detector drops every format character (Cf) — TAG characters no longer hide a word (R12-12; Gaps: 신규) |
+| 9085e5e | 12 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 68035c3, round-12 IDs mapped (WP-J; Gaps: G26, G27, G28) |
+| 9ee4bf8 | 13 | R13-1 | Gaps: G32, G11; 신규(스펙 외) | subject | fix(native): R13-1 a staged ASCII name never reaches a reason — native_safe_path maps it back to the original path; the cache rewrite is one pass (R13-1; Gaps: G32, G11, 신규) |
+| 476e412 | 13 | R13-2 | Gaps: G11, G30, G34 | subject | fix(scan): R13-2 an archive rewritten while its members are extracted is 판단 불가 with no hash — container and every member row (R13-2; Gaps: G11, G30, G34) |
+| 6a4aded | 13 | R13-3 | Gaps: G31, G8; 신규(스펙 외) | subject | feat(web,api): R13-3 /api/analyze-file takes file_b64 and /api/scan folder_b64 — a non-UTF-8 path is addressable on both servers (R13-3; Gaps: G31, G8, 신규) |
+| faf6b5d | 13 | R13-4, R13-8 | Gaps: G34, G1; 신규(스펙 외) | subject | fix(native): R13-4 the staging folder is removed on SIGTERM/SIGINT and stale ones are swept; R13-8 Windows stages by hard link, then the 8.3 short name, then a capped copy (R13-4, R13-8; Gaps: G34, G1, 신규) |
+| a9721b2 | 13 | R13-5 | Gaps: G27; 신규(스펙 외) | subject | fix(corpus): R13-5 corpus verify names a relpath through display_name — two non-UTF-8 names no longer both print "r?.jpg" (R13-5; Gaps: G27, 신규) |
+| a4f9b08 | 13 | R13-6 | Gaps: G34, G30 | subject | fix(archives): R13-6 a duplicate-name reason is the member row's own coverage entry — nested members of a renamed inner archive carry it too (R13-6; Gaps: G34, G30) |
+| 0f22403 | 13 | R13-7 | Gaps: G1; 신규(스펙 외) | subject | fix(native): R13-7 face crops and video frames are written with imencode + Python — a Korean or non-UTF-8 temp folder works; the meta-test resolves cv2 aliases and covers sub-packages (R13-7; Gaps: G1, 신규) |
+| ec8e4da | 13 | R13-9 | Gaps: G30; 신규(스펙 외) | subject | fix(reports): R13-9 Markdown escapes ".", ":", "@" and "/" — no GFM/linkify autolink (www., http(s)://, ftp://, //host, e-mail, bare domain) forms from a name (R13-9; Gaps: G30, 신규) |
+| 130dddd | 13 | R13-1 | Gaps: G32, G11; 신규(스펙 외) | subject | fix(native): R13-1 follow-up — a quoted non-UTF-8 name in a reason reads as in its row (repr()'s "\udcc1" escapes undone), the cache rewrite gives the same form (R13-1; Gaps: G32, G11, 신규) |
