@@ -540,6 +540,9 @@ def _scan_paths(
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+# R13-6: the coverage entry of a member row renamed "<path>#n" (or extracted
+# from such an inner archive) — status ran, reason "중복 멤버 이름: …".
+ARCHIVE_MEMBER_NAME_CHECK = "archive_member_name"
 # N5: title of the container row's roll-up evidence item.
 ARCHIVE_ROLLUP_TITLE = "압축 파일 구성원 결론 집계"
 # B1: how a container row's verdict is derived (``explain`` on an archive;
@@ -831,7 +834,13 @@ def _scan_specs(
             # position, plus the reason when a duplicate name was renamed.
             item = replace(item, container=identity.container, member=identity.member, member_index=identity.index)
             if identity.note and item.result is not None:
-                item = replace(item, result=replace(item.result, limitations=[identity.note, *item.result.limitations]))
+                # R13-6 (round 13): the reason is also the row's own coverage
+                # entry, not only a limitation (and the container's warning).
+                item = replace(item, result=replace(
+                    item.result,
+                    limitations=[identity.note, *item.result.limitations],
+                    coverage=[*item.result.coverage, CoverageEntry(ARCHIVE_MEMBER_NAME_CHECK, CoverageStatus.RAN, identity.note)],
+                ))
         _report(item)
         return item, key, was_cached
 

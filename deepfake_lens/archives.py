@@ -185,6 +185,8 @@ def _place(out: ArchiveExtraction, target: Path, rel: str, raw: str) -> None:
         out.notes[target] = note
 
 
+# R13-6: joins an inner archive's duplicate-name reason and its member's own.
+MEMBER_NOTE_SEPARATOR = " / "
 # R12-3: every 7z entry whose exact name another entry also uses.
 SEVEN_ZIP_DUPLICATE_REASON = (
     "중복 멤버 이름: 같은 이름의 7z 멤버가 둘 이상입니다 — 7z 해제기(py7zr)는 이름으로만 꺼낼 수 있어 "
@@ -732,11 +734,16 @@ def extract_archive(
                 if sub.members:
                     out.members.remove(m)
                     out.members.extend(sub.members)
+                    # R13-6 (round 13): an inner archive renamed "inner.zip#2" (a
+                    # duplicate entry name) is not a row itself; its reason goes
+                    # to every member row it yields, before the member's own.
+                    inner_note = out.notes.pop(m, None)
                     # Y9: "<inner archive>::<member>" — the rejection chain's form.
                     for member in sub.members:
                         out.names[member] = f"{inner_rel}::{sub.member_name(member, sub_root)}"
-                        if member in sub.notes:
-                            out.notes[member] = sub.notes[member]
+                        notes = [note for note in (inner_note, sub.notes.get(member)) if note]
+                        if notes:
+                            out.notes[member] = MEMBER_NOTE_SEPARATOR.join(notes)
                 out.skipped += sub.skipped
                 out.rejected.extend((f"{inner_rel}::{name}", reason) for name, reason in sub.rejected)
                 out.warnings.extend(sub.warnings)

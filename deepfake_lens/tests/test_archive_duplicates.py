@@ -34,9 +34,9 @@ from typing import Any
 from unittest.mock import patch
 
 from deepfake_lens import webapp_api
-from deepfake_lens.archives import SEVEN_ZIP_DUPLICATE_REASON, extract_archive
-from deepfake_lens.core import scan_directory
-from deepfake_lens.result_types import ScanItem, Verdict
+from deepfake_lens.archives import MEMBER_NOTE_SEPARATOR, SEVEN_ZIP_DUPLICATE_REASON, extract_archive
+from deepfake_lens.core import ARCHIVE_MEMBER_NAME_CHECK, scan_directory
+from deepfake_lens.result_types import CoverageStatus, ScanItem, Verdict, check_label
 from deepfake_lens.serialization import _scan_item_from_json
 from deepfake_lens.tests.test_archives import _Fake7zEntry, _FakeRarFile, _FakeRarInfo, _FakeSevenZipFile
 
@@ -170,6 +170,14 @@ class ExtractionTest(unittest.TestCase):
         for member in out.members:
             if out.member_name(member, root).endswith("in.png#2"):
                 self.assertIn(DUPLICATE, out.notes[member])
+        # R13-6 (round 13): this test checked only the inner duplicates, so the
+        # members of the renamed "inner.zip#2" carried no reason at all. Each
+        # one carries the inner archive's reason first (then its own).
+        notes = {out.member_name(member, root): out.notes.get(member, "") for member in out.members}
+        for name in ("inner.zip#2::in.png", "inner.zip#2::in.png#2"):
+            self.assertTrue(notes[name].startswith(f"{DUPLICATE}: 'inner.zip'"), (name, notes[name]))
+        self.assertIn(MEMBER_NOTE_SEPARATOR + f"{DUPLICATE}: 'in.png'", notes["inner.zip#2::in.png#2"])
+        self.assertNotIn("inner.zip::in.png", [name for name, note in notes.items() if note])
 
 
 class ScanRowsTest(unittest.TestCase):
@@ -214,6 +222,42 @@ class ScanRowsTest(unittest.TestCase):
             assert box.result is not None
             self.assertEqual(box.result.verdict_code, Verdict.MANIPULATION_EVIDENCE, container)
             self.assertTrue(any(DUPLICATE in line for line in box.result.limitations), container)
+
+    def test_duplicate_reason_is_the_rows_own_coverage_entry(self) -> None:
+        """R13-6 (round 13): "중복 멤버 이름" is in the member row's coverage, nested rows included.
+
+        A renamed member row had the reason only in its limitations, and a
+        member of a renamed inner archive (``inner.zip#2::x.png``) had it
+        nowhere on the row — only in the container's warnings.
+        """
+        folder = self.tmp / "r13"
+        folder.mkdir()
+        inner_a = io.BytesIO()
+        with zipfile.ZipFile(inner_a, "w") as zf:
+            zf.writestr("x.png", TEXTURE)
+        inner_b = io.BytesIO()
+        with zipfile.ZipFile(inner_b, "w") as zf:
+            zf.writestr("x.png", A1111)
+        _zip(folder / "outer.zip", [("inner.zip", inner_a.getvalue()), ("inner.zip", inner_b.getvalue()), ("y.png", TEXTURE), ("y.png", A1111)])
+        rows = {item.member: item for item in self._scan(folder) if item.member is not None}
+        self.assertEqual(sorted(rows), ["inner.zip#2::x.png", "inner.zip::x.png", "y.png", "y.png#2"])
+        for member, renamed in (("inner.zip#2::x.png", "inner.zip"), ("y.png#2", "y.png")):
+            result = rows[member].result
+            assert result is not None
+            entries = [entry for entry in result.coverage if entry.check == ARCHIVE_MEMBER_NAME_CHECK]
+            self.assertEqual(len(entries), 1, (member, result.coverage))
+            self.assertEqual(entries[0].status, CoverageStatus.RAN)
+            self.assertTrue(entries[0].reason.startswith(f"{DUPLICATE}: '{renamed}'"), entries[0].reason)
+            self.assertEqual(result.limitations[0], entries[0].reason)
+            payload: Any = rows[member].to_json()
+            self.assertIn(entries[0].reason, payload["result"]["coverage"][-1]["reason"])
+            # The A1111 member still decides by its own evidence (a ran entry is no failure).
+            self.assertEqual(result.verdict_code, Verdict.MANIPULATION_EVIDENCE, member)
+        for member in ("inner.zip::x.png", "y.png"):
+            result = rows[member].result
+            assert result is not None
+            self.assertFalse(any(entry.check == ARCHIVE_MEMBER_NAME_CHECK for entry in result.coverage), member)
+        self.assertEqual(check_label(ARCHIVE_MEMBER_NAME_CHECK), "압축 구성 파일 이름 구분")
 
     def test_member_index_round_trips_through_json(self) -> None:
         folder = self.tmp / "rt"
