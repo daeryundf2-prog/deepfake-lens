@@ -158,6 +158,41 @@ class DoctorProfileCheckTest(unittest.TestCase):
         self.assertIn(IN_SAMPLE_LABEL, text)
 
 
+class DoctorAssetPinTest(unittest.TestCase):
+    """R16-9 (round 16): doctor shows each model asset's pin state (table and JSON) — it used to show none."""
+
+    def test_every_asset_state_is_reported(self) -> None:
+        import os
+
+        from deepfake_lens.model_assets import FACE_LANDMARKER, HAAR_FRONTALFACE, PACKAGED_MANIFEST, SYNCNET_WEIGHTS
+
+        bundled = PACKAGED_MANIFEST.parent / HAAR_FRONTALFACE
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp).resolve()
+            payload = json.loads(PACKAGED_MANIFEST.read_text(encoding="utf-8"))
+            for entry in payload["assets"]:
+                if entry["name"] == SYNCNET_WEIGHTS:
+                    entry["sha256"] = hashlib.sha256(b"syncnet").hexdigest()  # pinned, file absent
+            (folder / "assets.json").write_text(json.dumps(payload), encoding="utf-8")
+            (folder / FACE_LANDMARKER).write_bytes(b"unpinned task")  # present, no pin
+            other = folder / "my_cascade.xml"
+            other.write_bytes(bundled.read_bytes() + b" ")  # override with other bytes
+            with mock.patch.dict(os.environ, {"DEEPFAKE_LENS_HAAR_CASCADE": str(other)}):
+                report = run_diagnostics(folder)
+            states = {row["asset"]: row["state"] for row in report.model_assets}
+            self.assertEqual(states, {HAAR_FRONTALFACE: "mismatch", FACE_LANDMARKER: "unpinned", SYNCNET_WEIGHTS: "absent", "sfd_face.pth": "unpinned"})
+            rows = {row["asset"]: row for row in json.loads(json.dumps(report.to_json()))["model_assets"]}
+            self.assertEqual(rows[HAAR_FRONTALFACE]["override"], "DEEPFAKE_LENS_HAAR_CASCADE")
+            self.assertIn("로드 거부", str(rows[FACE_LANDMARKER]["detail"]))
+            table = format_report(report)
+            self.assertIn("== 모델 자산 핀(models/assets.json) ==", table)
+            for asset in states:
+                self.assertIn(asset, table)
+            self.assertIn("sha256 불일치", table)
+            report = run_diagnostics(folder)  # no override: the bundled cascade, pinned and matching
+        self.assertEqual({row["asset"]: row["state"] for row in report.model_assets}[HAAR_FRONTALFACE], "ok")
+
+
 class DoctorCliTest(unittest.TestCase):
     def test_doctor_json_output_parses(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

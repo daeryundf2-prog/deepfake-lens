@@ -179,6 +179,10 @@ class DoctorReport:
     dependencies: list[Check] = field(default_factory=list)
     tools: list[Check] = field(default_factory=list)
     model_profiles: list[ProfileStatus] = field(default_factory=list)
+    # R16-9 (round 16): per model asset (models/assets.json) its pin state —
+    # model_assets.asset_status rows (asset, pinned, present, sha256_ok,
+    # path, override, state, detail, used_by).
+    model_assets: list[dict[str, object]] = field(default_factory=list)
 
     @property
     def runnable_profiles(self) -> list[str]:
@@ -191,6 +195,7 @@ class DoctorReport:
             "dependencies": [asdict(check) for check in self.dependencies],
             "tools": [asdict(check) for check in self.tools],
             "model_profiles": [status.to_json() for status in self.model_profiles],
+            "model_assets": [dict(row) for row in self.model_assets],
             "runnable": {
                 "count": len(self.runnable_profiles),
                 "total": len(self.model_profiles),
@@ -424,6 +429,9 @@ def _run_diagnostics(models_dir: Path | None) -> DoctorReport:
     else:
         report.profiles.append(Check(str(root), "warn", "모델 디렉터리를 찾을 수 없습니다"))
     report.profiles.append(_check_thresholds(root))
+    from .model_assets import asset_status
+
+    report.model_assets = asset_status(root)  # R16-9
     report.accelerators = _check_accelerators()
     for import_name, package, purpose in OPTIONAL_DEPS:
         try:
@@ -439,9 +447,12 @@ def _run_diagnostics(models_dir: Path | None) -> DoctorReport:
 
 
 _COLUMN_MARK = {OK: "OK", NOT_APPLICABLE: "해당 없음", MISSING: "MISS", MISMATCH: "불일치"}
+# R16-9: the 5-character mark of each model_assets.asset_status state.
+_ASSET_MARK = {"ok": " OK  ", "mismatch": "불일치", "unpinned": "핀없음", "absent": "파일없음"}
 # B7: Korean section headers of the doctor table.
 SECTION_TITLES = {
     "model_profiles": "모델 프로필",
+    "model_assets": "모델 자산 핀(models/assets.json)",
     "accelerators": "가속기",
     "dependencies": "의존성",
     "tools": "외부 도구",
@@ -477,6 +488,13 @@ def format_report(report: DoctorReport) -> str:
     for check in report.profiles:
         if check.name == "thresholds.json" or not report.model_profiles:
             lines.append(f"[{icon.get(check.status, '????')}] {check.name}: {check.detail}")
+    # R16-9: the pin state of every model asset (Haar cascade, FaceLandmarker, SyncNet weights).
+    lines.append(f"\n== {SECTION_TITLES['model_assets']} ==")
+    lines.append("(자산마다 핀 상태 — OK: 고정·일치, 불일치/핀 없음: 로드 거부, 파일 없음: 그 경로 미실행)")
+    for row in report.model_assets:
+        mark = _ASSET_MARK.get(str(row.get("state")), "????")
+        override = f", {row['override']}" if row.get("override") else ""
+        lines.append(f"[{mark}] {row['asset']}: {row['detail']} ({row['path']}{override})")
     for section, checks in (
         (SECTION_TITLES["accelerators"], report.accelerators),
         (SECTION_TITLES["dependencies"], report.dependencies),

@@ -220,21 +220,59 @@ def asset_pin_tokens(models_dir: Path | str | None = None) -> list[str]:
     return tokens
 
 
+# R16-9: the environment variable that replaces an asset's file (what the loaders read).
+ASSET_OVERRIDE_ENV = {HAAR_FRONTALFACE: "DEEPFAKE_LENS_HAAR_CASCADE", FACE_LANDMARKER: "DEEPFAKE_LENS_FACE_LANDMARKER"}
+# R16-9: asset_status "state" values.
+ASSET_OK = "ok"
+ASSET_UNPINNED = "unpinned"
+ASSET_MISMATCH = "mismatch"
+ASSET_ABSENT = "absent"
+
+
 def asset_status(models_dir: Path | str | None = None) -> list[dict[str, object]]:
-    """Per registered asset: pinned, present in the models directory, digest matches (doctor)."""
+    """Per registered asset: pinned, present, digest matches — and (R16-9) its pin state for doctor.
+
+    The file checked is the one the loader reads: the override variable's
+    file when it is set (``DEEPFAKE_LENS_HAAR_CASCADE`` /
+    ``DEEPFAKE_LENS_FACE_LANDMARKER``), else ``<models dir>/<asset>`` (the
+    bundled cascade for the Haar XML). ``state``: ``ok`` (pinned, present,
+    digest matches), ``mismatch`` (pinned, other bytes — refused),
+    ``unpinned`` (no pin — refused if present), ``absent`` (pinned, no file);
+    ``detail`` says it in Korean.
+    """
     folder = Path(models_dir) if models_dir is not None else _models_dir()
     entries = load_manifest(manifest_path(folder))
     rows: list[dict[str, object]] = []
     for name in sorted(entries):
         expected = expected_sha256(name, entries)
-        candidate = folder / name
-        if not candidate.is_file() and name == HAAR_FRONTALFACE:
+        override = os.environ.get(ASSET_OVERRIDE_ENV.get(name, ""), "").strip() if name in ASSET_OVERRIDE_ENV else ""
+        candidate = Path(override).expanduser() if override else folder / name
+        if not override and not candidate.is_file() and name == HAAR_FRONTALFACE:
             candidate = PACKAGED_MANIFEST.parent / name
         present = candidate.is_file()
         matches: bool | None = None
         if present and expected:
             matches = _file_sha256(candidate) == expected
-        rows.append({"asset": name, "pinned": expected is not None, "present": present, "sha256_ok": matches, "path": str(candidate)})
+        if expected is None:
+            state = ASSET_UNPINNED
+            detail = (
+                "핀 없음 — 파일이 있지만 로드 거부(쓰는 검사는 failed: 미고정 모델); `vendor-weights pin-asset`으로 고정"
+                if present else "핀 없음, 파일 없음 — 내려받아 `vendor-weights pin-asset`으로 고정하기 전에는 쓰지 않음"
+            )
+        elif not present:
+            state = ASSET_ABSENT
+            detail = "고정됨, 파일 없음 — 이 자산을 쓰는 경로는 실행되지 않음"
+        elif matches:
+            state = ASSET_OK
+            detail = f"고정됨, sha256 일치({expected[:12]}…)"
+        else:
+            state = ASSET_MISMATCH
+            detail = f"고정됨, sha256 불일치 — 로드 거부(쓰는 검사는 failed: 미고정 모델; 기대 {expected[:12]}…)"
+        rows.append({
+            "asset": name, "pinned": expected is not None, "present": present, "sha256_ok": matches, "path": str(candidate),
+            "override": ASSET_OVERRIDE_ENV.get(name) if override else None, "state": state, "detail": detail,
+            "used_by": str((entries.get(name) or {}).get("used_by") or ""),
+        })
     return rows
 
 
@@ -294,7 +332,12 @@ def pin_asset(asset: str, file: Path | str | None = None, models_dir: Path | str
 
 
 __all__ = [
+    "ASSET_ABSENT",
     "ASSET_MANIFEST_NAME",
+    "ASSET_MISMATCH",
+    "ASSET_OK",
+    "ASSET_OVERRIDE_ENV",
+    "ASSET_UNPINNED",
     "ASSET_MANIFEST_SCHEMA",
     "AssetPinError",
     "FACE_LANDMARKER",
