@@ -210,6 +210,72 @@ class PreviewByBytesServersTest(_ServerCase):
         self._check_leg("api", self._api())
 
 
+class FileAndFolderByBytesServersTest(_ServerCase):
+    """R13-3 (round 13): /api/analyze-file and /api/scan address a non-UTF-8 path by its bytes.
+
+    ``?file=`` / ``?folder=`` could not name such a path at all (a percent-
+    encoded raw byte is decoded as U+FFFD: 404 / 400); ``file_b64`` /
+    ``folder_b64`` take URL-safe base64 of the file-system bytes, under the
+    same read-root checks, on both servers.
+    """
+
+    SUB = b"sub\xc1\xf5"
+
+    def _check_leg(self, leg: str, get: Callable[[str], tuple[int, bytes, str]]) -> None:
+        folder = os.fsencode(self.folder)
+        os.makedirs(folder + b"/" + self.SUB, exist_ok=True)
+        with open(folder + b"/" + self.SUB + b"/" + CP949_NAME, "wb") as handle:
+            handle.write(self.photo)
+        target = folder + b"/" + CP949_NAME
+        # Before: the text parameter cannot carry the bytes.
+        status, _, _ = get("/api/analyze-file?file=" + quote(target))
+        self.assertEqual(status, 404, leg)
+        status, _, _ = get("/api/scan?folder=" + quote(folder + b"/" + self.SUB))
+        self.assertEqual(status, 400, leg)
+        # file_b64: the same analysis as the ASCII-named copy.
+        status, body, _ = get("/api/analyze-file?file_b64=" + _b64(target))
+        self.assertEqual(status, 200, (leg, body[:300]))
+        named = json.loads(body)
+        self.assertEqual(os.fsencode(fs_b64decode(named["file_b64"])), target)
+        status, body, _ = get("/api/analyze-file?file=" + quote(str(self.folder / "plain.png")))
+        self.assertEqual(status, 200, (leg, body[:300]))
+        plain = json.loads(body)
+        for key in ("verdict_code", "grade", "evidence"):
+            self.assertEqual(named.get(key), plain.get(key), (leg, key))
+        # folder_b64: the subfolder is scanned (not the default folder), sync and async.
+        status, body, _ = get("/api/scan?folder_b64=" + _b64(folder + b"/" + self.SUB))
+        self.assertEqual(status, 200, (leg, body[:300]))
+        scan = json.loads(body)
+        self.assertEqual(os.fsencode(fs_b64decode(scan["scan_root_b64"])), folder + b"/" + self.SUB)
+        self.assertEqual([item["path"] for item in scan["items"]], [NAME], leg)
+        status, body, _ = get("/api/scan?async=1&folder_b64=" + _b64(folder + b"/" + self.SUB))
+        self.assertEqual(status, 200, (leg, body[:300]))
+        self.assertIn("job_id", json.loads(body))
+        # Same read-root checks as the text parameters.
+        outside_folder = os.fsencode(self.folder.parent)
+        for query in (
+            "/api/analyze-file?file_b64=" + _b64(os.fsencode(self.outside)),
+            "/api/analyze-file?file_b64=" + _b64(b"../outside.png"),
+            "/api/scan?folder_b64=" + _b64(outside_folder),
+            "/api/scan?async=1&folder_b64=" + _b64(outside_folder),
+        ):
+            status, body, _ = get(query)
+            self.assertEqual(status, 403, (leg, query, body[:200]))
+            self.assertNotIn(self.photo[:64], body)
+        # A malformed value is the Korean 400.
+        for query in ("/api/analyze-file?file_b64=%40%40", "/api/scan?folder_b64=%40%40", "/api/scan?async=1&folder_b64=%40%40"):
+            status, body, _ = get(query)
+            self.assertEqual(status, 400, (leg, query))
+            self.assertIn(PATH_B64_INVALID, json.loads(body).get("error") or json.loads(body).get("detail"), (leg, query))
+
+    def test_web_server(self) -> None:
+        self._check_leg("web", self._web())
+
+    @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed")
+    def test_api_server(self) -> None:
+        self._check_leg("api", self._api())
+
+
 class GuiSourceTest(unittest.TestCase):
     """The GUI never builds a media URL from a path as text."""
 

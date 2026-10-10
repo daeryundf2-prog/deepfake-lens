@@ -205,11 +205,16 @@ always `0` invited old-contract readings. They remain readable as
   `GET /api/heatmap` on both servers accept `path_b64` and `root_b64` (a
   relative `path_b64` is joined to the root) in place of `path`/`root`,
   with the same read-root checks (403 outside the roots); a malformed value
-  is 400 `경로 인코딩(path_b64·root_b64)이 올바르지 않습니다 — …`. The GUI
-  requests media only this way — a lone surrogate cannot go into a URL
-  (`encodeURIComponent` threw "URI malformed") and a percent-encoded raw
-  byte reaches the server as U+FFFD — and words a loading failure in
-  Korean.
+  is 400 `경로 인코딩(path_b64·root_b64·file_b64·folder_b64)이 올바르지
+  않습니다 — …`. The GUI requests media only this way — a lone surrogate
+  cannot go into a URL (`encodeURIComponent` threw "URI malformed") and a
+  percent-encoded raw byte reaches the server as U+FFFD — and words a
+  loading failure in Korean.
+- R13-3 (round 13): likewise `GET /api/analyze-file` takes `file_b64` and
+  `GET /api/scan` (also `async=1`) `folder_b64` in place of `file`/`folder`
+  — the same encoding, the same read-root checks (403 outside the roots),
+  the same 400 for a malformed value (service doc E46). The analyze-file
+  response carries `file_b64` beside `file`.
 - R10-1 (round 10): JSON keeps every `path`, `name`, `error` and reason
   string raw. Every text rendering — the console table and the single-file
   text outputs, CSV, HTML, the scan/forensic PDF, the evidence statement
@@ -538,7 +543,9 @@ a `band`, `band_label`, or a high/medium/low value anywhere.
 same values `scan` produces for the file (legacy `band`/`score`/`signals`
 are omitted). Extras: `layer_diagnostics.{provenance_metadata,
 text_statistics, agent_markers, multimodal_scores}`, `tool_candidates`,
-`items[]` (multimodal), `rule_number`/`rule` (explain).
+`items[]` (multimodal), `rule_number`/`rule` (explain); `/api/analyze-file`
+also `file` and (R13-3) `file_b64` — the analysed path and its file-system
+bytes as URL-safe base64.
 
 `rows[]` (B1) — every command/endpoint above that analyzes a path
 (`forensic`, `classify`, `explain FILE`, `agent --file`, each `items[]`

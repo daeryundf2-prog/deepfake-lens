@@ -79,7 +79,9 @@ def script_safe_json(obj: Any, **kwargs: Any) -> str:
 # "URI malformed") and a percent-encoded raw byte is decoded as U+FFFD by the
 # server, so the GUI names files to /api/preview and /api/heatmap by these
 # bytes — the exact os.fsencode of the path, whatever its encoding.
-PATH_B64_INVALID = "경로 인코딩(path_b64·root_b64)이 올바르지 않습니다 — 검사 결과의 값을 그대로 보내십시오"
+# R13-3 (round 13): /api/analyze-file and /api/scan take file_b64 / folder_b64
+# the same way.
+PATH_B64_INVALID = "경로 인코딩(path_b64·root_b64·file_b64·folder_b64)이 올바르지 않습니다 — 검사 결과의 값을 그대로 보내십시오"
 
 
 def fs_b64encode(path: str) -> str:

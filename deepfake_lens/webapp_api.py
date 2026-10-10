@@ -347,7 +347,10 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
     from .layer_diagnostic import to_layer_diagnostic
 
     params = parse_qs(query)
-    file_path = params.get("file", [""])[0]
+    try:
+        file_path = _b64_or_text(params, "file")  # R13-3: file_b64 for a non-UTF-8 name
+    except ValueError as exc:
+        return ApiError(str(exc), 400)
 
     if not file_path:
         return ApiError(FILE_PARAM_REQUIRED, 400)  # X4
@@ -382,6 +385,7 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
         # of a raw exception sentence; the type/message aid local debugging.
         return ApiError("파일 분석 중 오류가 발생했습니다", 500, detail=failure_reason(exc))
     response["file"] = str(path)
+    response["file_b64"] = fs_b64encode(str(path))  # R13-3: the bytes, for a non-UTF-8 name
     if link:
         response["layer_diagnostics"] = {
             "provenance_metadata": symlink_layer("provenance_metadata", "출처 메타데이터 계층"),
@@ -574,8 +578,28 @@ def _require_read_root(path: Path, default_folder: Path | None = None) -> Path:
     return resolved
 
 
+def _b64_or_text(params: dict[str, list[str]], name: str) -> str:
+    """R13-3: ``<name>_b64`` (URL-safe base64 of the file-system bytes) when given, else ``<name>``.
+
+    A non-UTF-8 name cannot travel as text in a URL — a percent-encoded raw
+    byte is decoded as U+FFFD — so ``file_b64``/``folder_b64`` (the values of
+    a row's ``path_b64`` joined to ``scan_root_b64``, or ``os.fsencode`` of
+    the path) take precedence, exactly as ``path_b64`` does for previews
+    (R12-4). The decoded path is confined to the read roots like the text
+    one. ValueError (:data:`json_text.PATH_B64_INVALID`) when malformed.
+    """
+    from .json_text import fs_b64decode
+
+    encoded = params.get(f"{name}_b64", [""])[0]
+    if encoded:
+        return fs_b64decode(encoded)
+    return params.get(name, [""])[0]
+
+
 def _requested_folder(query: str, default_folder: Path | None) -> Path:
     params = parse_qs(query)
+    if params.get("folder_b64", [""])[0]:
+        return Path(_b64_or_text(params, "folder")).expanduser()  # R13-3
     return Path(params.get("folder", [str(default_folder or ".")])[0]).expanduser()
 
 

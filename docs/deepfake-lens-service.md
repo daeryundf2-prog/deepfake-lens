@@ -196,10 +196,10 @@ The GUI saves its examiner marks through `POST /api/review` (browser
 | `/gui` | — | the GUI HTML (same as `/`) |
 | `/gui.css` | — | GUI stylesheet (`text/css`) |
 | `/gui.js` | — | GUI script (`text/javascript`) |
-| `/api/scan` | `folder`, `pixel` (`off`/`fast`/`deep`), `recursive`, `max_files`, `max_file_bytes`, `dedupe`, `heatmaps`, `deep_signals`, `no_default_engine`, `model_path` / `fusion_profile` (bare file name in the models dir), `async` | the same `scan_to_json` payload the CLI prints (`{"schema_version", "summary", "coverage", "thresholds", "items"}`) or `{"error": "..."}`; with `async=1` returns `{"job_id", "status": "running"}`. **400** `{"error": ...}` for an invalid option (non-integer limit, unknown pixel mode, `model_path`/`fusion_profile` not a file name inside the models dir). **403** `{"error": "허용되지 않은 경로"}` when `folder` is outside the read roots (see below) |
+| `/api/scan` | `folder` (or `folder_b64` — R13-3: URL-safe base64 of the folder's file-system bytes, for a non-UTF-8 path; takes precedence), `pixel` (`off`/`fast`/`deep`), `recursive`, `max_files`, `max_file_bytes`, `dedupe`, `heatmaps`, `deep_signals`, `no_default_engine`, `model_path` / `fusion_profile` (bare file name in the models dir), `async` | the same `scan_to_json` payload the CLI prints (`{"schema_version", "summary", "coverage", "thresholds", "items"}`) or `{"error": "..."}`; with `async=1` returns `{"job_id", "status": "running"}`. **400** `{"error": ...}` for an invalid option (non-integer limit, unknown pixel mode, `model_path`/`fusion_profile` not a file name inside the models dir). **403** `{"error": "허용되지 않은 경로"}` when `folder` is outside the read roots (see below) |
 | `/api/scan-status` | `job` | `{"job_id", "status": "running"\|"done"\|"error"}` plus `result` once finished; jobs live in memory only and expire after 15 min (max 32 concurrent) |
 | `/api/scan-cancel` | `job` | Sets the job's cancel flag; the scan stops between items and returns partial results as `done`. `{"cancelled": true}` while running, `false` once finished |
-| `/api/analyze-file` | `file` | analysis_result (D3: the scan result — verdict_code, evidence, coverage; the scan's own photo-gated pixel layer only) + `layer_diagnostics.provenance_metadata` / `.tool_candidates`, or `{"error"}` (+`detail` for unexpected failures). No ungated pixel pre-screen and no band. **403** `{"error": "허용되지 않은 경로"}` when `file` is outside the read roots |
+| `/api/analyze-file` | `file` (or `file_b64` — R13-3: URL-safe base64 of the file-system bytes, for a non-UTF-8 name; takes precedence; the response carries `file_b64` beside `file`) | analysis_result (D3: the scan result — verdict_code, evidence, coverage; the scan's own photo-gated pixel layer only) + `layer_diagnostics.provenance_metadata` / `.tool_candidates`, or `{"error"}` (+`detail` for unexpected failures). No ungated pixel pre-screen and no band. **403** `{"error": "허용되지 않은 경로"}` when `file` is outside the read roots |
 | `/api/heatmap` | `path`, `root` | PNG bytes; 403 unless `path` is a `.png` under a **server-registered** read root (see below), 404 if missing |
 | `/api/preview` | `path`, `root` | media bytes with `nosniff`; same registered-root rule, media extensions only, ≤128 MiB |
 | `/api/stats` | — | `{"status", "version", "modules"}` |
@@ -254,14 +254,14 @@ endpoints (`/api/analyze/*`, `/api/classify`, `/api/check`, `/api/compare`,
 | E5 | GET `/api/scan` (both) | invalid option (`pixel`, non-integer limit, `model_path`/`fusion_profile` not a name in the models dir) | 400 | e.g. `max_files는 정수여야 합니다` |
 | E6 | GET `/api/scan` (both), POST `/api/scan/stream` (api) | `max_files` or `max_file_bytes` below 1 (Y8 — was clamped to 1) | 400 | `max_files는 1 이상이어야 합니다` / `max_file_bytes는 1 이상이어야 합니다` |
 | E7 | GET `/api/scan` (both) | folder missing / a file / unreadable | 400 | `폴더를 찾을 수 없습니다: …` (scan's S4 texts) |
-| E8 | GET `/api/scan` (both) | folder outside the read roots | 403 | `허용되지 않은 경로` |
+| E8 | GET `/api/scan` (both) | folder (`folder` or `folder_b64`) outside the read roots | 403 | `허용되지 않은 경로` |
 | E9 | GET `/api/scan?async=1` (both) | 32 jobs already registered | 400 | `실행 중인 검사 작업이 너무 많습니다 — …` |
 | E10 | GET `/api/scan-status`, `/api/scan-cancel` (both) | no `job` | 400 | `job 매개변수가 필요합니다` |
 | E11 | GET `/api/scan-status`, `/api/scan-cancel` (both) | unknown or expired job | 404 | `알 수 없거나 만료된 작업입니다` |
 | E12 | GET `/api/analyze-file` (both) | no `file` | 400 | `file 매개변수(파일 경로)가 필요합니다` |
 | E13 | GET `/api/analyze-file` (both) | file missing | 404 | `파일을 찾을 수 없습니다: …` |
 | E14 | GET `/api/analyze-file` (both) | a folder | 400 | `파일이 아니라 폴더입니다: … (폴더는 scan을 사용)` |
-| E15 | GET `/api/analyze-file` (both) | outside the read roots | 403 | `허용되지 않은 경로` |
+| E15 | GET `/api/analyze-file` (both) | outside the read roots (`file` or `file_b64`) | 403 | `허용되지 않은 경로` |
 | E16 | GET `/api/analyze-file` (both) | analysis raised | 500 | `파일 분석 중 오류가 발생했습니다` (+ `detail`) |
 | E17 | GET `/api/heatmap`, `/api/preview` (both) | outside the roots / not found / not media (P8: preview of a non-media file inside the roots was 403) | 403 / 404 / 400 | plain text `허용되지 않은 경로` / `파일을 찾을 수 없습니다` / `미리보기를 지원하지 않는 형식입니다: …` + `X-Deepfake-Lens-Error` header |
 | E18 | POST `/api/analyze-upload` (both) | not multipart, no file part, empty body, body cut off before its closing boundary (P8 — was analyzed as a partial file, 200) | 400 | `multipart/form-data 업로드가 필요합니다`, `업로드된 파일이 없습니다`, `업로드 본문이 잘렸습니다(닫는 경계 없음) — …` |
@@ -292,6 +292,7 @@ endpoints (`/api/analyze/*`, `/api/classify`, `/api/check`, `/api/compare`,
 | E43 | POST `/api/scan/stream` (api) | folder outside the read roots — before the stream starts | 403 | `허용되지 않은 경로` |
 | E44 | POST `/api/check/stream` (api) | neither `file_path` nor `text`; text > 256 KB — before the stream starts (R9-3: was 200 + an SSE `error` event) | 400 | `file_path 또는 text가 필요합니다` / `텍스트가 256KB를 초과합니다` |
 | E45 | POST `/api/analyze/text` (api) | `text` empty or blank (R9-8: was 200 with the result of an empty text) | 400 | `분석할 텍스트가 비어 있습니다 — text 매개변수에 분석할 글을 넣으십시오` |
+| E46 | GET `/api/analyze-file` `file_b64`, `/api/scan` `folder_b64` (also `async=1`), `/api/preview`/`/api/heatmap` `path_b64`/`root_b64` (both) | not URL-safe base64, empty after decoding, or a NUL byte (R12-4, R13-3) | 400 | `경로 인코딩(path_b64·root_b64·file_b64·folder_b64)이 올바르지 않습니다 — 검사 결과의 값을 그대로 보내십시오` (preview/heatmap: plain text) |
 
 The streaming endpoints (`/api/scan/stream`, `/api/check/stream`) validate
 every input before the stream starts (E6, E36, E38–E40, E42–E44): an

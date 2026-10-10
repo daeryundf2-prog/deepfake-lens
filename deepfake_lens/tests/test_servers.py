@@ -19,6 +19,7 @@ from unittest.mock import patch
 
 from deepfake_lens import api_server
 from deepfake_lens import webapp_api
+from deepfake_lens.json_text import PATH_B64_INVALID, fs_b64encode
 from deepfake_lens.webapp import host_name
 from deepfake_lens.webapp_api import MAX_FILE_BYTES_CEILING, MAX_SCAN_FILES, _scan_payload
 
@@ -1920,6 +1921,12 @@ class ApiErrorStatusTest(unittest.TestCase):
             ("GET", "/api/scan?max_files=-3&async=1", None, "", 400, "max_files는 1 이상이어야 합니다"),  # Y8
             ("GET", "/api/scan?max_file_bytes=-5", None, "", 400, "max_file_bytes는 1 이상이어야 합니다"),  # Y8
             ("GET", "/api/scan?folder=/", None, "", 403, "허용되지 않은 경로"),
+            # R13-3: the base64 forms of file/folder (E46; outside the roots E8/E15).
+            ("GET", "/api/analyze-file?file_b64=%40%40", None, "", 400, PATH_B64_INVALID),
+            ("GET", "/api/scan?folder_b64=%40%40", None, "", 400, PATH_B64_INVALID),
+            ("GET", "/api/scan?folder_b64=%40%40&async=1", None, "", 400, PATH_B64_INVALID),
+            ("GET", "/api/scan?folder_b64=" + fs_b64encode("/"), None, "", 403, "허용되지 않은 경로"),
+            ("GET", "/api/analyze-file?file_b64=" + fs_b64encode("/etc/hostname"), None, "", 403, "허용되지 않은 경로"),
             ("POST", "/api/analyze-upload", b"x", "text/plain", 400, "multipart/form-data 업로드가 필요합니다"),
             ("POST", "/api/feedback", b"{oops", "application/json", 400, "JSON 본문을 해석할 수 없습니다"),
             ("POST", "/api/feedback", b"[1]", "application/json", 400, "피드백 요청 본문은 JSON 객체여야 합니다"),
@@ -2390,7 +2397,8 @@ class ErrorTableEveryRowTest(unittest.TestCase):
             + [case("api", "POST", f"/api/scan/stream?directory={q(f)}&max_files=0", 400, "max_files는 1 이상이어야 합니다")],
             "E7": [case(s, "GET", f"/api/scan?folder={q(f / 'gone')}&no_default_engine=true", 400, "폴더를 찾을 수 없습니다: ") for s in both]
             + [case(s, "GET", f"/api/scan?folder={q(f / 'memo.txt')}&no_default_engine=true", 400, "폴더가 아니라 파일입니다") for s in both],
-            "E8": [case(s, "GET", f"/api/scan?folder={q(self.outside)}", 403, "허용되지 않은 경로") for s in both],
+            "E8": [case(s, "GET", f"/api/scan?folder={q(self.outside)}", 403, "허용되지 않은 경로") for s in both]
+            + [case(s, "GET", f"/api/scan?folder_b64={fs_b64encode(str(self.outside))}", 403, "허용되지 않은 경로") for s in both],  # R13-3
             "E9": [case(s, "GET", f"/api/scan?folder={q(f)}&async=1", 400, "실행 중인 검사 작업이 너무 많습니다",
                         patches=(patch.dict(webapp_api._SCAN_JOBS, jobs),)) for s in both],
             "E10": [case(s, "GET", path, 400, webapp_api.JOB_PARAM_REQUIRED) for s in both for path in ("/api/scan-status", "/api/scan-cancel")],
@@ -2398,7 +2406,8 @@ class ErrorTableEveryRowTest(unittest.TestCase):
             "E12": [case(s, "GET", "/api/analyze-file", 400, webapp_api.FILE_PARAM_REQUIRED) for s in both],
             "E13": [case(s, "GET", f"/api/analyze-file?file={q(f / 'nope.png')}", 404, "파일을 찾을 수 없습니다: ") for s in both],
             "E14": [case(s, "GET", f"/api/analyze-file?file={q(f / 'sub')}", 400, "파일이 아니라 폴더입니다: ") for s in both],
-            "E15": [case(s, "GET", f"/api/analyze-file?file={q(self.outside / 'secret.png')}", 403, "허용되지 않은 경로") for s in both],
+            "E15": [case(s, "GET", f"/api/analyze-file?file={q(self.outside / 'secret.png')}", 403, "허용되지 않은 경로") for s in both]
+            + [case(s, "GET", f"/api/analyze-file?file_b64={fs_b64encode(str(self.outside / 'secret.png'))}", 403, "허용되지 않은 경로") for s in both],  # R13-3
             "E16": [case(s, "GET", f"/api/analyze-file?file={q(f / 'memo.txt')}", 500, "파일 분석 중 오류가 발생했습니다",
                          patches=(patch("deepfake_lens.cli_standalone.analysis_result_for_path", raise_),)) for s in both],
             "E17": [case(s, "GET", f"/api/{kind}?path={q(self.outside / 'secret.png')}&root={q(f)}", 403, "허용되지 않은 경로") for s in both for kind in ("heatmap", "preview")]
@@ -2506,6 +2515,11 @@ class ErrorTableEveryRowTest(unittest.TestCase):
             # R9-8 (round 9): an empty text was analyzed (200).
             "E45": [case("api", "POST", "/api/analyze/text?text=", 400, api_server.TEXT_EMPTY),
                     case("api", "POST", "/api/analyze/text?text=%20%0A%20", 400, api_server.TEXT_EMPTY)],
+            # R12-4 / R13-3: a malformed base64 path parameter.
+            "E46": [case(s, "GET", path, 400, PATH_B64_INVALID) for s in both for path in (
+                "/api/analyze-file?file_b64=%40%40", "/api/scan?folder_b64=%40%40", "/api/scan?async=1&folder_b64=AA%3D%3D",
+                f"/api/preview?path_b64=%40%40&root={q(f)}", "/api/heatmap?path_b64=x.png&root_b64=%40%40",
+            )],
         }
 
     # -- the servers ---------------------------------------------------------------
