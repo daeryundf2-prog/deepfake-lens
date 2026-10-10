@@ -193,9 +193,14 @@ always `0` invited old-contract readings. They remain readable as
   and `coverage` holds `{"check": "file_integrity", "status": "failed",
   "reason": "분석 중 파일 변경 — 판단 불가: …"}` (label 분석 전후 파일
   동일성); the row is never cached.
-- R13-2 (round 13): the same holds for an archive. Its state (and hash, up
-  to the same size) is taken before extraction and compared with its state
-  and hash right after it; the container row's `sha256` is that post-
+  R14-6 (round 14): on POSIX the state also carries `ctime_ns` (the inode
+  change time, which `touch -r` cannot restore), so a same-size rewrite of a
+  file over 64 MiB with its mtime restored is caught too.
+- R13-2 (round 13): the same holds for an archive. Its state and hash
+  (R14-6: at any size — an archive over 64 MiB rewritten in place with
+  `touch -r` kept the new bytes' hash with members from the old ones) are
+  taken before extraction and compared with its state and hash right after
+  it; the container row's `sha256` is that post-
   extraction hash — the bytes its members came from. When anything differs
   the container row is `판단 불가` with the `file_integrity` entry above,
   and every member row of it is `판단 불가` with `sha256: null` and

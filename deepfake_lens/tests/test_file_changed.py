@@ -102,6 +102,21 @@ class FileChangedDuringAnalysisTest(unittest.TestCase):
         with patch.object(core, "REHASH_MAX_BYTES", 0):  # no pre-analysis hash
             self._assert_flagged(self._scan_rewriting(lambda path: path.write_bytes(A1111 + b"x")))
 
+    @unittest.skipIf(os.name == "nt", "ctime is the creation time on Windows")
+    def test_large_file_same_size_rewrite_with_restored_mtime_is_caught_by_ctime(self) -> None:
+        """R14-6 (round 14): above REHASH_MAX_BYTES (no pre-analysis hash) the state's ctime_ns catches ``touch -r``."""
+
+        def rewrite(path: Path) -> None:
+            stat = os.stat(path)
+            data = bytearray(path.read_bytes())
+            data[-1] ^= 0xFF
+            with open(path, "r+b") as handle:  # same inode, same size
+                handle.write(bytes(data))
+            os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+
+        with patch.object(core, "REHASH_MAX_BYTES", 0):  # no pre-analysis hash
+            self._assert_flagged(self._scan_rewriting(rewrite))
+
     def test_replaced_file_is_caught_by_inode(self) -> None:
         def replace_file(path: Path) -> None:
             stat = os.stat(path)
@@ -218,8 +233,33 @@ class ArchiveChangedDuringExtractionTest(unittest.TestCase):
             os.utime(spare, ns=(stat.st_atime_ns, stat.st_mtime_ns))
             os.replace(spare, path)
 
-        with patch.object(core, "REHASH_MAX_BYTES", 0):  # state only
+        # R14-6: an archive is hashed before extraction at any size now (the
+        # patch no longer turns that off); the bytes are the same, the inode decides.
+        with patch.object(core, "REHASH_MAX_BYTES", 0):
             self._assert_flagged(self._scan_rewriting(replace_file))
+
+    def test_large_archive_same_size_rewrite_with_restored_mtime_is_caught(self) -> None:
+        """R14-6 (round 14): an archive over REHASH_MAX_BYTES rewritten in place, same size, ``touch -r``.
+
+        It was compared by (size, mtime, inode) only and kept the hash of the
+        new bytes with members from the old ones. Now it is hashed before
+        extraction at any size and its state carries ctime_ns: either catches
+        it — the hash alone where the OS has no change time (Windows).
+        """
+
+        def rewrite(path: Path) -> None:
+            stat = os.stat(path)
+            data = bytearray(path.read_bytes())
+            data[-1] ^= 0xFF  # the zip comment-length byte: same size, same inode
+            with open(path, "r+b") as handle:
+                handle.write(bytes(data))
+            os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+
+        for has_ctime in (True, False):
+            with self.subTest(state_has_ctime=has_ctime):
+                (self.folder / "hot.zip").write_bytes(ZA)
+                with patch.object(core, "REHASH_MAX_BYTES", 0), patch.object(core, "STATE_HAS_CTIME", has_ctime and os.name != "nt"):
+                    self._assert_flagged(self._scan_rewriting(rewrite))
 
     def test_unreadable_archive_rewritten_is_flagged_too(self) -> None:
         (self.folder / "hot.zip").write_bytes(b"PK\x03\x04 not really a zip")

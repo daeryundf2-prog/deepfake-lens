@@ -448,11 +448,12 @@ def _scan_paths(
             dest = Path(tempfile.mkdtemp(prefix="dflens-arc-"))
             temp_dirs.append(dest)
             dest = dest.resolve()
-            # R13-2: the container's state (and, up to REHASH_MAX_BYTES, its
-            # hash) before extraction — compared with the state and hash right
-            # after it, so the recorded container hash is the one of the bytes
-            # its members came from.
-            before, pre_digest = _state_and_digest(path)
+            # R13-2: the container's state and hash before extraction —
+            # compared with the state and hash right after it, so the recorded
+            # container hash is the one of the bytes its members came from.
+            # R14-6: hashed before at any size (a same-size rewrite with
+            # ``touch -r`` of an archive over REHASH_MAX_BYTES was missed).
+            before, pre_digest = _container_state_and_digest(path)
             try:
                 extraction = extract_archive(path, dest)
             except Exception as exc:
@@ -892,12 +893,20 @@ def _scan_specs(
 
 # R12-7 (round 12): a file rewritten while it was analyzed got the hash of
 # other bytes than the ones its verdict came from. Its state (size, mtime_ns,
-# inode, device) is taken before and after the analysis and its SHA-256
-# after it — and, up to this size, also before it (a rewrite that restores
-# the size and mtime is caught too; larger files are compared by state and
-# by the scan's earlier hash when one was taken). 64 MiB covers photos,
-# documents and short clips at the cost of one more read.
+# inode, device and — R14-6, where the OS keeps one — ctime_ns) is taken
+# before and after the analysis and its SHA-256 after it — and, up to this
+# size, also before it (a rewrite that restores the size and mtime is caught
+# too; larger files are compared by state, whose ctime no ``touch -r`` can
+# restore on POSIX, and by the scan's earlier hash when one was taken).
+# 64 MiB covers photos, documents and short clips at the cost of one more
+# read. R14-6: an archive is hashed before extraction at any size.
 REHASH_MAX_BYTES = 64 * 1024 * 1024
+# R14-6: whether st_ctime_ns is the inode change time here — POSIX. On
+# Windows it is the creation time (Python < 3.15), which a rewrite in place
+# does not change; there the state has no ctime and the hash decides.
+STATE_HAS_CTIME = os.name != "nt"
+# R12-7 / R14-6: (size, mtime_ns, inode, device, ctime_ns or 0) — see _file_state.
+FileState = tuple[int, int, int, int, int]
 FILE_INTEGRITY_CHECK = "file_integrity"
 FILE_CHANGED_REASON = (
     "분석 중 파일 변경 — 판단 불가: 분석 전후로 크기·수정 시각·inode 또는 내용 해시가 다릅니다 "
@@ -915,31 +924,32 @@ ARCHIVE_MEMBER_CHANGED_REASON = (
 )
 
 
-def _state_and_digest(path: Path) -> tuple[tuple[int, int, int, int] | None, str | None]:
-    """R12-7/R13-2: (state, SHA-256 when at most REHASH_MAX_BYTES) of ``path``."""
+def _container_state_and_digest(path: Path) -> tuple[FileState | None, str | None]:
+    """R13-2 / R14-6: (state, SHA-256) of an archive before extraction — hashed at any size."""
     state = _file_state(path)
-    digest = _file_fingerprint(path) if state is not None and state[0] <= REHASH_MAX_BYTES else None
-    return state, digest
+    return state, (_file_fingerprint(path) or None) if state is not None else None
 
 
-def _container_integrity(path: Path, before: tuple[int, int, int, int] | None, pre_digest: str | None) -> dict[str, object]:
+def _container_integrity(path: Path, before: FileState | None, pre_digest: str | None) -> dict[str, object]:
     """R13-2: ``{"changed": bool, "sha256": digest or None}`` of an archive just extracted.
 
-    Changed when its state (size, mtime_ns, inode, device) differs from
-    ``before``, it can no longer be hashed, or the hash differs from the one
-    taken before extraction; then no hash is recorded.
+    Changed when its state (size, mtime_ns, inode, device, ctime_ns where
+    kept) differs from ``before``, it can no longer be hashed, or the hash
+    differs from the one taken before extraction (R14-6: always taken, at
+    any size); then no hash is recorded.
     """
     post_digest = _file_fingerprint(path)
     changed = before is None or _file_state(path) != before or not post_digest or (pre_digest is not None and pre_digest != post_digest)
     return {"changed": changed, "sha256": None if changed else post_digest}
 
 
-def _file_state(path: Path) -> tuple[int, int, int, int] | None:
+def _file_state(path: Path) -> FileState | None:
+    """R12-7: (size, mtime_ns, inode, device, ctime_ns — 0 where it is not the change time)."""
     try:
         info = os.stat(path)
     except OSError:
         return None
-    return (info.st_size, info.st_mtime_ns, info.st_ino, info.st_dev)
+    return (info.st_size, info.st_mtime_ns, info.st_ino, info.st_dev, info.st_ctime_ns if STATE_HAS_CTIME else 0)
 
 
 def _changed_during_analysis(item: ScanItem, *, reason: str = FILE_CHANGED_REASON) -> ScanItem:

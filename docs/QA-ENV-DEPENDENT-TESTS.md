@@ -41,6 +41,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `cannot create symlinks: {exc}` | 심볼릭 링크를 만들 수 있는 OS·권한(POSIX, Windows 개발자 모드) | test_cli_inputs.py, test_evidence_statement.py |
 | `checkpoint is present; auto-discovery would run real inference` | 체크포인트가 없는 환경에서만 실행(가중치를 받은 환경에서는 해당 없음) | test_aide_engine.py |
 | `checkpoint is present; unavailable-path assertion does not apply` | 체크포인트가 없는 환경에서만 실행(가중치를 받은 환경에서는 해당 없음) | test_aasist_engine.py, test_aide_engine.py |
+| `ctime is the creation time on Windows` | Windows가 아닌 OS(POSIX — `st_ctime_ns`가 inode 변경 시각이라 `touch -r`로 되돌릴 수 없음) | test_file_changed.py |
 | `fastapi + httpx not installed` | fastapi, httpx(QA 사이드 venv: `pip install fastapi httpx uvicorn`) | test_cli_operations.py, test_d16_ui_api.py, test_forensic_pdf.py, test_korean_output.py, test_native_path.py, test_non_utf8_names.py, test_path_b64.py, test_reviews.py, test_servers.py, test_standalone_contract.py |
 | `fastapi + httpx not installed — API-server leg of QA-OUT-4` | fastapi, httpx(QA 사이드 venv) | test_qa_out.py |
 | `fastapi + httpx not installed — stream payload` | fastapi, httpx(QA 사이드 venv) + Pillow | test_json_contract.py |
