@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..f13fda6`(병합 커밋 제외, 커밋 202개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..0ce6d1b`(병합 커밋 제외, 커밋 213개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 193개 — 스펙 갭에 매핑 128개(그중 신규 사유 병기 45개), 신규(스펙 외)만 65개.
+요약: ID 208개 — 스펙 갭에 매핑 140개(그중 신규 사유 병기 48개), 신규(스펙 외)만 68개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -220,6 +220,21 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R15-6 | 15 | 비ASCII TMPDIR 시 조용한 대체 → 한국어 안내·temp_folder 기록·DEEPFAKE_LENS_TMPDIR | G12 | 신규(스펙 외): 임시 폴더 — 갭 목록 밖 | 56c817d |
 | R15-7 | 15 | OUTPUT_FORMAT_GENERATION 수동 관리 → 골든 출력 해시 메타테스트 | G11 |  | 64f4dac |
 | R15-8 | 15 | mediapipe→sounddevice가 gcc/ld를 띄워 TMPDIR에 임시 파일 → sounddevice 차단 | G34 | 신규(스펙 외): 임시 파일 — 갭 목록 밖 | f13fda6 |
+| R16-1 | 16 | faceswap_seam·face_track이 검출기 오류를 '얼굴 미검출'로 기록 → strict 검출, 오류는 failed | G12, G1 |  | 9d7f118 |
+| R16-2 | 16 | Haar 재정의 cascade가 다른 바이트면 조용히 무시 → 재정의만 사용, 불일치는 failed | G9, G10 |  | 9d7f118 |
+| R16-3 | 16 | 장기 실행 서버에서 재핀·핀 제거 후 옛 자산 바이트 사용 → 핀 키 캐시 | G9, G10 |  | 11cf522 |
+| R16-4 | 16 | mediapipe import가 matplotlib으로 fc-list 자식·세션 밖 파일 생성 → matplotlib 스텁 | G34 | 신규(스펙 외): 임시 파일·자식 프로세스 — 갭 목록 밖 | b0c0285 |
+| R16-5 | 16 | 골든 출력이 의존성 기반 출력 변경을 못 잡고 정당한 세대 증가를 막음 → stdlib/full 두 세트, 한국어 상수 해시, 사유 기록 증가 허용 | G11 |  | ce487f2 |
+| R16-6 | 16 | ffmpeg가 운영자 터미널 상속 → -nostdin, stdin=DEVNULL | — | 신규(스펙 외): 터미널 상태 — 갭 목록 밖 | d9e178b |
+| R16-7 | 16 | 직계 자식만 추적해 래퍼 손자 고아 → 프로세스 그룹·서브리퍼 감독 프로세스 | G34 | 신규(스펙 외): 자식 프로세스 정리 — 갭 목록 밖 | d9e178b |
+| R16-8 | 16 | pin-asset 오류에 영어 errno·내부 tmp 이름 → 한국어 | G13 |  | 42f0344 |
+| R16-9 | 16 | doctor가 자산 핀 상태 미표시 → 표·JSON에 자산 핀 상태 | G29 |  | fcde16a |
+| R16-10 | 16 | 임시 폴더 문구가 원인 무관·증거설명서 누락 → 원인별 문구, 증거설명서 기록 | G30 | 신규(스펙 외): 임시 폴더 — 갭 목록 밖 | ee091ac |
+| R16-11 | 16 | ptrace 거부 환경에서 텔레메트리 테스트 실패 → 분리·skip | — | 신규(스펙 외): 테스트 환경 — 갭 목록 밖 | 1653be9 |
+| R16-12 | 16 | git 이력 규칙 문서 불일치 → 공유 규칙·문서 갱신 | G27 |  | 1653be9 |
+| R16-13 | 16 | Ctrl-C 영어 traceback → 정리 후 '중단됨' exit 130 | G13 |  | 0ce6d1b |
+| R16-14 | 16 | vendor-weights --verify 없는 폴더에 통과 rc 0 → exit 2 | G29 |  | 42f0344 |
+| R16-15 | 16 | with_default_signals.py 영어 traceback → 한국어 exit 127/126 | — | 신규(스펙 외): 테스트 도구 — 갭 목록 밖 | 0ce6d1b |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -449,3 +464,14 @@ P14: Gaps를 제목 괄호에만 적은 커밋(예: `(Z1-Z5; Gaps: G7, 신규)`)
 | 56c817d | 15 | R15-6 | Gaps: G34; 신규(스펙 외) | subject | fix(native): R15-6 a temp folder that cannot be used is reported — Korean notice on stderr once, temp_folder in the scan result and report, DEEPFAKE_LENS_TMPDIR chooses it (R15-6; Gaps: G34, 신규) |
 | 64f4dac | 15 | R15-7 | Gaps: G11; 신규(스펙 외) | subject | test(cache): R15-7 a golden-output meta-test ties OUTPUT_FORMAT_GENERATION to the scan output — a changed golden under the same generation fails (R15-7; Gaps: G11, 신규) |
 | f13fda6 | 15 | R15-8 | Gaps: G34; 신규(스펙 외) | subject | fix(face): R15-8 MediaPipe is imported without sounddevice — no ldconfig/gcc/ld children and no cc*/tmp* files in TMPDIR (R15-8; Gaps: G34, 신규) |
+| 2da7a31 | 15 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on f13fda6, round-15 IDs mapped (WP-J; Gaps: G26, G27, G28) |
+| ce487f2 | 16 | R16-5 | Gaps: G11 | subject | test(cache): R16-5 the golden record adds a full-extras scan and a hash of the Korean constants of result_text/core; a raised generation is accepted when recorded with a reason (R16-5; Gaps: G11) |
+| 9d7f118 | 16 | R16-1, R16-2 | Gaps: G1, G9, G12 | subject | fix(face): R16-1/R16-2 every face layer detects strictly — a refused, unloadable or crashing detector is failed with the cause; a DEEPFAKE_LENS_HAAR_CASCADE override is the only cascade tried (R16-1, R16-2; Gaps: G1, G9, G12) |
+| 11cf522 | 16 | R16-3 | Gaps: G9 | subject | fix(assets): R16-3 the in-process caches of verified asset bytes are keyed on the current pin — a re-pin, a removed pin or a swapped weight file takes effect without a restart (R16-3; Gaps: G9) |
+| b0c0285 | 16 | R16-4 | Gaps: G34 | subject | fix(face): R16-4 MediaPipe is imported with matplotlib served as an inert stub — no fc-list children and no font-cache file; the test now checks the whole process tree and every file (R16-4; Gaps: G34) |
+| d9e178b | 16 | R16-6, R16-7 | Gaps: G34 | subject | fix(native): R16-6/R16-7 children get /dev/null as stdin (ffmpeg -nostdin) and run in their own session under a Linux supervisor — stop, timeout and a SIGKILLed scan end the whole process tree, grandchildren included (R16-6, R16-7; Gaps: G34) |
+| 42f0344 | 16 | R16-8, R16-14 | Gaps: G29 | subject | fix(cli): R16-8/R16-14 vendor-weights refuses a --models-dir that is not a folder (Korean, exit 2) and pin-asset reports a manifest write error in Korean without the temp file name (R16-8, R16-14; Gaps: G29) |
+| fcde16a | 16 | R16-9 | Gaps: G29, G9 | subject | feat(doctor): R16-9 doctor shows every model asset's pin state — table section and JSON model_assets[] (R16-9; Gaps: G29, G9) |
+| ee091ac | 16 | R16-10 | Gaps: G34 | subject | fix(native): R16-10 the temp-folder fallback names who chose the unusable folder (HTML, scan JSON) and the evidence statement records it (R16-10; Gaps: G34) |
+| 1653be9 | 16 | R16-11, R16-12 | Gaps: G26; 신규(스펙 외) | subject | test(qa): R16-11 the telemetry strace leg skips where ptrace is denied; R16-12 the two commit-history tests share one rule and one failure message, documented (R16-11, R16-12; Gaps: G26, 신규) |
+| 0ce6d1b | 16 | R16-13, R16-15 | Gaps: G13, G34 | subject | fix(cli): R16-13 Ctrl-C ends the CLI with "중단됨(사용자 요청)" and exit 130 after the cleanup; R16-15 with_default_signals.py reports a command that cannot start in Korean, exit 127/126 (R16-13, R16-15; Gaps: G13, G34) |
