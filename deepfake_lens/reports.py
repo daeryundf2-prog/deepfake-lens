@@ -311,12 +311,19 @@ def _unsigned_rows_html(unsigned_rows: list[tuple[ScanItem, str]] | None) -> str
 
 
 def temp_folder_line(location: object) -> str:
-    """R15-6: the Korean line for a run whose temp files went to a fallback folder ("" otherwise)."""
+    """R15-6: the Korean line for a run whose temp files went to a fallback folder ("" otherwise).
+
+    R16-10 (round 16): names who chose the folder that could not be used —
+    it said "시스템 임시 폴더" even when DEEPFAKE_LENS_TMPDIR named it.
+    """
     if not isinstance(location, dict) or not location.get("fallback"):
         return ""
+    override_env = location.get("override_env", "DEEPFAKE_LENS_TMPDIR")
+    requested_by = str(location.get("requested_by") or "system")
+    named = f"환경 변수 {requested_by}에 지정된 폴더" if requested_by != "system" else "시스템 임시 폴더"
     return (
-        f"임시 폴더: 시스템 임시 폴더를 쓸 수 없어({location.get('reason', '')}) 대체 폴더 {location.get('base', '')}에 "
-        f"임시 파일을 만들었습니다(지정: 환경 변수 {location.get('override_env', 'DEEPFAKE_LENS_TMPDIR')})."
+        f"임시 폴더: {named}를 쓸 수 없어({location.get('reason', '')}) 대체 폴더 {location.get('base', '')}에 "
+        f"임시 파일을 만들었습니다(지정: 환경 변수 {override_env})."
     )
 
 

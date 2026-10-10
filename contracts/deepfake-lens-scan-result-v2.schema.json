@@ -12,13 +12,15 @@
     "unrecorded_files": { "$ref": "#/$defs/unrecorded_files" },
     "temp_folder": {
       "type": "object",
-      "description": "R15-6: where the run's temp files were made — fallback=false in the temp folder the operator/system named; fallback=true with the folder used (base), the Korean reason the named one was unusable and the variable that chooses it (override_env = DEEPFAKE_LENS_TMPDIR).",
+      "description": "R15-6: where the run's temp files were made — fallback=false in the temp folder the operator/system named; fallback=true with the folder used (base), the Korean reason the named one was unusable and the variable that chooses it (override_env = DEEPFAKE_LENS_TMPDIR). R16-10: requested is the folder that could not be used and requested_by who named it (DEEPFAKE_LENS_TMPDIR, DEEPFAKE_LENS_NATIVE_TMPDIR or the system temp folder).",
       "required": ["fallback"],
       "properties": {
         "fallback": { "type": "boolean" },
         "base": { "type": "string" },
         "reason": { "type": "string" },
-        "override_env": { "const": "DEEPFAKE_LENS_TMPDIR" }
+        "override_env": { "const": "DEEPFAKE_LENS_TMPDIR" },
+        "requested": { "type": "string" },
+        "requested_by": { "enum": ["DEEPFAKE_LENS_TMPDIR", "DEEPFAKE_LENS_NATIVE_TMPDIR", "system"] }
       }
     },
     "scan_root_b64": { "type": "string", "pattern": "^[A-Za-z0-9_-]+=*$", "description": "R12-4: web/API folder scans only — scan_root as URL-safe base64 of its file-system bytes (os.fsencode); the GUI sends it as root_b64 to /api/preview and /api/heatmap (a non-UTF-8 folder name cannot travel as text in a URL)." },

@@ -103,6 +103,10 @@ class EvidenceStatement:
     # X2: web statements — posted rows the server could not re-analyze
     # (path, marker, reason; never the client's result). Empty for the CLI.
     excluded_items: list[dict[str, Any]] = field(default_factory=list)
+    # R16-10 (round 16): where the run's temp files were made
+    # (native_path.temp_location(), the scan result's ``temp_folder``); a
+    # fallback is also a line of provenance_note ("임시 폴더: …").
+    temp_folder: dict[str, Any] = field(default_factory=lambda: {"fallback": False})
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -472,6 +476,14 @@ def build_evidence_statement(
         # S6: the same line as the CLI header / HTML / forensic PDF,
         # including the in-sample caveat (G28).
         prov_lines.extend(threshold_provenance_lines(thresholds))  # N17: caveat on its own line
+    # R16-10: the temp-folder fallback (who named the unusable folder, where
+    # the temp files went) — it was only in the HTML report.
+    from .native_path import temp_location
+    from .reports import temp_folder_line
+
+    temp_folder = temp_location()
+    if temp_folder_line(temp_folder):
+        prov_lines.append(temp_folder_line(temp_folder))
     provenance_note = "\n".join(prov_lines)
 
     return EvidenceStatement(
@@ -489,6 +501,7 @@ def build_evidence_statement(
         reference_note=TEXT_LEGAL_LIMITATION if any(i.result is not None and i.result.grade == Grade.REFERENCE for i in items) else "",
         unrecorded_files=unrecorded_files(list(items), summary).to_json(),
         excluded_items=[dict(entry) for entry in excluded_items or []],
+        temp_folder=temp_folder,
     )
 
 

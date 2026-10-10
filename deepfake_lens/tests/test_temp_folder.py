@@ -70,7 +70,11 @@ class TempFolderFallbackTest(unittest.TestCase):
         self.assertIn("DEEPFAKE_LENS_TMPDIR", notices[0])
         self.assertEqual(
             payload["temp_folder"],
-            {"fallback": True, "base": str(self.ascii_tmp), "reason": "경로에 ASCII가 아닌 문자가 있음", "override_env": "DEEPFAKE_LENS_TMPDIR"},
+            {
+                "fallback": True, "base": str(self.ascii_tmp), "reason": "경로에 ASCII가 아닌 문자가 있음", "override_env": "DEEPFAKE_LENS_TMPDIR",
+                # R16-10: who named the unusable folder, and which folder.
+                "requested": str(self.korean_tmp), "requested_by": "DEEPFAKE_LENS_TMPDIR",
+            },
         )
         self.assertEqual(os.listdir(self.ascii_tmp), [])  # the session folder was used there and removed
         self.assertEqual(os.listdir(self.korean_tmp), [])
@@ -104,7 +108,49 @@ class TempFolderFallbackTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-800:])
         html = out.read_text(encoding="utf-8")
         self.assertIn('id="temp-folder"', html)
-        self.assertIn("임시 폴더: 시스템 임시 폴더를 쓸 수 없어(경로에 ASCII가 아닌 문자가 있음)", html)
+        # R16-10 (round 16): DEEPFAKE_LENS_TMPDIR named the unusable folder here —
+        # this test used to expect "시스템 임시 폴더를 쓸 수 없어" (the defect).
+        self.assertIn("임시 폴더: 환경 변수 DEEPFAKE_LENS_TMPDIR에 지정된 폴더를 쓸 수 없어(경로에 ASCII가 아닌 문자가 있음)", html)
+        self.assertNotIn("시스템 임시 폴더", html)
+
+    def test_the_wording_names_who_chose_the_folder(self) -> None:
+        """R16-10: the system temp folder, DEEPFAKE_LENS_TMPDIR or DEEPFAKE_LENS_NATIVE_TMPDIR."""
+        from deepfake_lens.reports import temp_folder_line
+
+        base = {"fallback": True, "base": "/tmp", "reason": "폴더가 없음", "override_env": "DEEPFAKE_LENS_TMPDIR"}
+        self.assertIn("시스템 임시 폴더를 쓸 수 없어(폴더가 없음)", temp_folder_line({**base, "requested_by": "system"}))
+        self.assertIn("시스템 임시 폴더를 쓸 수 없어", temp_folder_line(base))  # an R15-6 record
+        self.assertIn("환경 변수 DEEPFAKE_LENS_NATIVE_TMPDIR에 지정된 폴더를 쓸 수 없어", temp_folder_line({**base, "requested_by": "DEEPFAKE_LENS_NATIVE_TMPDIR"}))
+        self.assertEqual(temp_folder_line({"fallback": False}), "")
+        with mock.patch.dict(os.environ, {native_path.TMP_ENV: str(self.korean_tmp)}), mock.patch.object(native_path, "_SESSION_DIR", None), mock.patch.object(
+            native_path, "_base_candidates", return_value=[str(self.korean_tmp), str(self.ascii_tmp)]
+        ):
+            self.assertEqual(native_path.temp_location()["requested_by"], native_path.TMP_ENV)
+        with mock.patch.object(native_path, "_SESSION_DIR", None), mock.patch.object(
+            native_path, "_base_candidates", return_value=[str(self.root / "없음"), str(self.ascii_tmp)]
+        ), mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(native_path.TMP_ENV, None)
+            os.environ.pop(native_path.NATIVE_TMP_ENV, None)
+            self.assertEqual(native_path.temp_location()["requested_by"], "system")
+
+    def test_the_evidence_statement_records_the_fallback(self) -> None:
+        """R16-10: the evidence statement had no temp-folder line; now its JSON, Markdown (and PDF notice) carry it."""
+        out = self.root / "statement.json"
+        md = self.root / "statement.md"
+        env = _env(self.root, TMPDIR=str(self.korean_tmp), **{native_path.TMP_ENV: str(self.korean_tmp), native_path.NATIVE_TMP_ENV: str(self.ascii_tmp)})
+        done = subprocess.run(
+            [sys.executable, "-m", "deepfake_lens", "evidence-statement", str(self.case), "--json-out", str(out), "--md-out", str(md)],
+            capture_output=True, env=env, timeout=CHILD_TIMEOUT_SECONDS, cwd=str(self.root),
+        )
+        self.assertEqual(done.returncode, 0, done.stderr[-800:])
+        body = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual(body["temp_folder"]["requested_by"], "DEEPFAKE_LENS_TMPDIR")
+        self.assertEqual(body["temp_folder"]["base"], str(self.ascii_tmp))
+        line = "임시 폴더: 환경 변수 DEEPFAKE_LENS_TMPDIR에 지정된 폴더를 쓸 수 없어(경로에 ASCII가 아닌 문자가 있음)"
+        self.assertIn(line, body["provenance_note"])  # inside the signed body
+        from deepfake_lens.result_text import markdown_text
+
+        self.assertIn(markdown_text(line), md.read_text(encoding="utf-8"))  # the 분석 프로비넌스 section
 
     def test_the_dry_run_answer_matches_what_session_dir_does(self) -> None:
         with mock.patch.object(native_path, "_SESSION_DIR", None), mock.patch.object(native_path, "_SESSION_DIRS", []), mock.patch.object(

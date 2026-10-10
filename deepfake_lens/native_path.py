@@ -174,6 +174,9 @@ TEMP_FALLBACK_NOTICE = (
     "알림: 임시 폴더 {requested}을(를) 쓸 수 없어({reason}) 이 실행의 임시 파일(압축 해제 최대 2 GB 포함)을 "
     "{base}에 만듭니다. 다른 위치를 쓰려면 환경 변수 " + TMP_ENV + "에 ASCII 경로의 폴더를 지정하십시오."
 )
+# R16-10 (round 16): who named the temp folder that could not be used —
+# ``requested_by`` of temp_location(): one of the two variables, or the system.
+TEMP_REQUESTED_BY_SYSTEM = "system"
 _COUNTER = itertools.count(1)
 _HANDLERS_INSTALLED = False
 _ATEXIT_REGISTERED = False
@@ -574,7 +577,7 @@ def _record_temp_location(created: str, base: str, skipped: list[tuple[str, str]
         _TEMP_LOCATIONS[created] = {"fallback": False}
         return
     requested, reason = first
-    _TEMP_LOCATIONS[created] = {"fallback": True, "base": base, "reason": reason, "override_env": TMP_ENV}
+    _TEMP_LOCATIONS[created] = _fallback_location(base, reason, requested)
     logger.info("native_safe_path: temp folder %r unusable (%s); session folder in %s", requested, reason, base)
     if not _TEMP_NOTICE_SHOWN:
         _TEMP_NOTICE_SHOWN = True
@@ -582,6 +585,22 @@ def _record_temp_location(created: str, base: str, skipped: list[tuple[str, str]
             print(TEMP_FALLBACK_NOTICE.format(requested=repr(requested), reason=reason, base=base), file=sys.stderr, flush=True)
         except (OSError, ValueError):
             pass  # no usable stderr: the result still records it
+
+
+def _requested_by(requested: str) -> str:
+    """R16-10: the variable that named ``requested`` (``DEEPFAKE_LENS_TMPDIR`` first), else the system."""
+    for name in (TMP_ENV, NATIVE_TMP_ENV):
+        if os.environ.get(name) == requested:
+            return name
+    return TEMP_REQUESTED_BY_SYSTEM
+
+
+def _fallback_location(base: str, reason: str, requested: str) -> dict[str, object]:
+    """R15-6/R16-10: the ``temp_folder`` record of a run whose temp files went to ``base`` instead of ``requested``."""
+    return {
+        "fallback": True, "base": base, "reason": reason, "override_env": TMP_ENV,
+        "requested": requested, "requested_by": _requested_by(requested),
+    }
 
 
 def temp_location() -> dict[str, object]:
@@ -601,7 +620,7 @@ def temp_location() -> dict[str, object]:
             if index == 0:
                 return {"fallback": False}
             reason = _unusable_base(candidates[0]) or "쓸 수 없음"
-            return {"fallback": True, "base": base, "reason": reason, "override_env": TMP_ENV}
+            return _fallback_location(base, reason, candidates[0])
     return {"fallback": False}
 
 
