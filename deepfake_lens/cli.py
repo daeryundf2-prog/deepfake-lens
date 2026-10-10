@@ -1076,6 +1076,14 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             print("서명: " + ("HMAC-SHA256 " + str(signed_statement.get("signature_key_id")) if signed_statement.get("signature") else "서명 없음 (키 미설정)"))
         return 0
     if args.command == "vendor-weights":
+        # R16-14 / R16-8 (round 16): a --models-dir that is not a folder is an
+        # error (exit 2) before anything reads it — `--verify` used to say
+        # "통과" (0 profiles), `pin-asset` printed an English errno with an
+        # internal temp file name. (--install creates its target.)
+        if args.models_dir is not None and not args.install and not Path(args.models_dir).is_dir():
+            reason = "모델 폴더가 없습니다" if not Path(args.models_dir).exists() else "모델 폴더가 아니라 파일입니다"
+            print(f"오류: {reason}: {escape_echo(args.models_dir)} (--models-dir)", file=sys.stderr)
+            return 2
         if args.action == "pin":
             return _vendor_weights_pin(args)
         if args.action == "pin-asset":

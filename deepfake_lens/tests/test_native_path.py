@@ -1487,6 +1487,7 @@ TEMPFILE_ALLOWED = {
     # Atomic replace: the temp file must be on the target's volume, next to it.
     ("vendor_weights.py", "fetch_weights"): "atomic rename next to the downloaded weights",
     ("vendor_weights.py", "pin_profile"): "atomic rename next to the profile",
+    ("model_assets.py", "pin_asset"): "atomic rename next to the asset manifest (R16-8)",
     ("reports.py", "_atomic_write_bytes"): "atomic rename next to the report",
     # A probe that the output folder is writable — it must be made there.
     ("cli_inputs.py", "require_writable_output"): "write probe in the output folder",

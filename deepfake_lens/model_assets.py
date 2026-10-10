@@ -255,6 +255,9 @@ def pin_asset(asset: str, file: Path | str | None = None, models_dir: Path | str
     directory has none).
     """
     folder = Path(models_dir) if models_dir is not None else _models_dir()
+    if not folder.is_dir():
+        # R16-8 (round 16): said "[Errno 2] No such file or directory: '<폴더>/assets.json.tmp'".
+        raise ValueError(f"모델 폴더가 없습니다: {folder}" if not folder.exists() else f"모델 폴더가 아니라 파일입니다: {folder}")
     governing = manifest_path(folder)
     try:
         payload = json.loads(governing.read_text(encoding="utf-8"))
@@ -274,9 +277,19 @@ def pin_asset(asset: str, file: Path | str | None = None, models_dir: Path | str
     entry["sha256"] = digest
     target = folder / ASSET_MANIFEST_NAME
     text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
-    tmp = target.with_name(target.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    os.replace(tmp, target)
+    tmp = ""
+    try:
+        fd, tmp = tempfile.mkstemp(prefix=".assets-", suffix=".json", dir=folder)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(tmp, target)
+    except OSError as exc:
+        if tmp:
+            Path(tmp).unlink(missing_ok=True)
+        # R16-8: Korean, and the manifest's name — never the internal temp file's.
+        from .error_text import read_error_ko
+
+        raise ValueError(f"자산 매니페스트를 쓸 수 없습니다: {target} — {read_error_ko(exc)}") from exc
     return {"asset": asset, "sha256": digest, "file": str(source), "manifest": str(target)}
 
 

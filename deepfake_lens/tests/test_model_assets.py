@@ -469,6 +469,51 @@ class PinAssetCommandTest(unittest.TestCase):
                 self.assertEqual(cli.main(["vendor-weights", "pin-asset", "unknown.task", "--models-dir", str(folder)]), 1)
             self.assertIn("등록되지 않은 자산", err.getvalue())
 
+    def test_a_models_dir_that_is_not_a_folder_is_a_korean_error_exit_2(self) -> None:
+        """R16-8 / R16-14 (round 16): pin-asset printed "[Errno 2] … assets.json.tmp"; --verify said "통과" with rc 0."""
+        from deepfake_lens import cli
+
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp).resolve() / "없는 폴더"
+            a_file = Path(tmp).resolve() / "file.txt"
+            a_file.write_text("x", encoding="utf-8")
+            cases = [
+                (["vendor-weights", "pin-asset", HAAR_FRONTALFACE, "--asset-file", str(BUNDLED_HAAR), "--models-dir", str(missing)], "모델 폴더가 없습니다"),
+                (["vendor-weights", "--verify", "--models-dir", str(missing)], "모델 폴더가 없습니다"),
+                (["vendor-weights", "--verify", "--format", "json", "--models-dir", str(missing)], "모델 폴더가 없습니다"),
+                (["vendor-weights", "--models-dir", str(missing)], "모델 폴더가 없습니다"),
+                (["vendor-weights", "--verify", "--models-dir", str(a_file)], "모델 폴더가 아니라 파일입니다"),
+            ]
+            for argv, reason in cases:
+                with self.subTest(argv=argv[1:3]):
+                    out, err = io.StringIO(), io.StringIO()
+                    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                        code = cli.main(argv)
+                    self.assertEqual(code, 2)
+                    self.assertIn(reason, err.getvalue())
+                    self.assertNotIn("통과", out.getvalue())
+                    for english in ("Errno", "No such file", ".tmp"):
+                        self.assertNotIn(english, err.getvalue())
+            self.assertFalse(missing.exists())  # nothing created
+
+    def test_a_manifest_that_cannot_be_written_is_reported_without_the_temp_name(self) -> None:
+        """R16-8: the write error is Korean, names assets.json, and the temp file is removed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp).resolve()
+            (folder / FACE_LANDMARKER).write_bytes(b"copy")
+            with mock.patch.object(model_assets.os, "replace", side_effect=PermissionError(13, "Permission denied")):
+                with self.assertRaises(ValueError) as caught:
+                    model_assets.pin_asset(FACE_LANDMARKER, models_dir=folder)
+            message = str(caught.exception)
+            self.assertIn("자산 매니페스트를 쓸 수 없습니다", message)
+            self.assertIn("접근 권한이 없습니다", message)
+            self.assertNotIn("Permission denied", message)
+            self.assertNotIn(".assets-", message)
+            self.assertEqual(sorted(path.name for path in folder.iterdir()), [FACE_LANDMARKER])  # no temp file left
+            with self.assertRaises(ValueError) as missing:
+                model_assets.pin_asset(FACE_LANDMARKER, models_dir=folder / "없음")
+            self.assertEqual(str(missing.exception), f"모델 폴더가 없습니다: {folder / '없음'}")
+
     def test_pinning_an_asset_changes_the_scan_cache_context(self) -> None:
         from deepfake_lens.scan_cache import _cache_scan_context
 

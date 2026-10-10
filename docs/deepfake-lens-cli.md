@@ -429,6 +429,14 @@ python -m deepfake_lens vendor-weights pin-asset face_landmarker.task          #
 python -m deepfake_lens vendor-weights pin-asset sfd_face.pth --asset-file /media/usb/sfd_face.pth
 ```
 
+R16-8 / R16-14 (round 16): every `vendor-weights` mode except `--install`
+(which creates its target) refuses a `--models-dir` that does not exist or
+is a file — `오류: 모델 폴더가 없습니다: <경로> (--models-dir)`, exit 2 —
+before reading it: `--verify` used to report "통과" for 0 profiles (exit 0)
+and `pin-asset` an English errno naming an internal temp file. A manifest
+that cannot be written is reported in Korean under its own name
+(`자산 매니페스트를 쓸 수 없습니다: …/assets.json — 접근 권한이 없습니다(오류 번호 13)`).
+
 In phase 0 every committed profile is also `supported: false` (measurement
 gate not met), so the default engines below are recorded as skipped until
 WP-I measures them. There is no default text engine. Removed profiles are
