@@ -101,6 +101,8 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `set DEEPFAKE_LENS_MODEL_TESTS=1` | 환경 변수 `DEEPFAKE_LENS_MODEL_TESTS=1` + 실제 가중치(수동 모델 테스트) | test_v6_probes.py |
 | `set DEEPFAKE_LENS_TEST_HWP to a real .hwp file` | `hwp` extra(syhwp, olefile) + 환경 변수 `DEEPFAKE_LENS_TEST_HWP`(실제 .hwp 픽스처) | test_documents.py |
 | `speechbrain/soundfile not installed` | `speaker` extra(speechbrain, soundfile, torch, torchaudio) | test_v6_probes.py |
+| `strace not installed` | `strace` 실행 파일(Linux) — MediaPipe 가져오기 중 자손 프로세스의 execve를 이름과 무관하게 셈(R16-4; audit hook·RUSAGE_CHILDREN 검사는 strace 없이도 실행) | test_mediapipe_import.py |
+| `strace를 쓸 수 없음(ptrace 거부)` | ptrace가 허용된 환경(컨테이너의 seccomp·Yama 설정) — R16-4 strace 검사만 건너뜀 | test_mediapipe_import.py |
 | `syhwp not installed` | `hwp` extra(syhwp, olefile) | test_documents.py |
 | `symbolic links to folders need privileges on Windows` | Windows가 아닌 OS(POSIX) | test_unrecorded_files.py |
 | `symlinks not available` | 심볼릭 링크를 만들 수 있는 OS·권한 | test_corpus_manifest.py, test_evidence_statement.py |
@@ -114,7 +116,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `without torch the script exits at the dependency check first` | `text_lm` extra(torch) | test_aasist_engine.py |
 | `` {FIXTURE_DIR} missing — run `python scripts/make_benchmark_fixtures.py` `` | `scripts/make_benchmark_fixtures.py`로 만든 픽스처 | test_benchmark_e2e.py |
 | `대조군: 이 onnxruntime은 텔레메트리 파일을 만들지 않음` | onnxruntime이 가져올 때 텔레메트리 장치 ID를 쓰는 환경(1.2x Linux 휠, R15-2) — 그렇지 않은 버전에서는 대조군이 성립하지 않아 건너뜀 | test_telemetry.py |
-| `대조군: 이 환경의 mediapipe 가져오기는 자식 프로세스를 띄우지 않음` | mediapipe 가져오기가 sounddevice→ctypes.util.find_library로 ldconfig/gcc/ld를 띄우는 환경(Linux, R15-8) — 그렇지 않은 환경에서는 대조군이 성립하지 않아 건너뜀 | test_mediapipe_import.py |
+| `대조군: 이 환경의 mediapipe 가져오기는 자식 프로세스도 파일도 만들지 않음` | 그냥 `import mediapipe`가 자식 프로세스(sounddevice→ctypes.util.find_library의 ldconfig/gcc/ld, matplotlib 글꼴 캐시의 fc-list)나 파일(`~/.cache/matplotlib` 등)을 만드는 환경(Linux, R15-8/R16-4) — 그렇지 않은 환경에서는 대조군이 성립하지 않아 건너뜀 | test_mediapipe_import.py |
 | `파일 시스템이 UTF-8이 아닌 파일 이름을 허용하지 않음(Windows·macOS)` | UTF-8이 아닌 바이트 파일 이름을 허용하는 파일 시스템(리눅스 ext4·tmpfs 등) | test_corpus_manifest.py, test_native_path.py, test_non_utf8_names.py, test_path_b64.py |
 
 ## 환경 의존 기준선 테스트
