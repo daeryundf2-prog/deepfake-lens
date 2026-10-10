@@ -1,9 +1,30 @@
 {
-  "note": "R15-7: sha256 of the normalised scan JSON of the fixed fixture folder (deepfake_lens/tests/golden_output.py), per scan_cache.OUTPUT_FORMAT_GENERATION. Appended by scripts/update_golden_output.py; never edit an entry.",
+  "note": "R15-7/R16-5: per scan_cache.OUTPUT_FORMAT_GENERATION, sha256 of the normalised scan JSON of the fixed fixture folder (deepfake_lens/tests/golden_output.py) in a stdlib-only child (sets.stdlib; 'sha256' repeats it) and in a child with the site packages (sets.full-extras, recorded in full_extras_environment), and of the user-facing Korean constants of result_text and core (constants_sha256), with the reason the generation was raised. Appended by scripts/update_golden_output.py; never edit an entry.",
   "history": [
     {
       "generation": 3,
       "sha256": "b9c75d982f520951e9848f8d4817ca468d72320df07f2a19fc09aed2631be928"
+    },
+    {
+      "generation": 4,
+      "reason": "R16-5: 골든 기록에 full-extras 스캔과 한국어 문구 상수 해시를 더하고 픽스처에 그라데이션 PNG(새 행 gradient.png)를 더함 — 기존 행의 문구는 바뀌지 않음",
+      "sha256": "3e348b6c789b9a050295681403033584eab4afa4ddfa1ef1cc12beb643442f2f",
+      "sets": {
+        "stdlib": "3e348b6c789b9a050295681403033584eab4afa4ddfa1ef1cc12beb643442f2f",
+        "full-extras": "86e3817098603496e9e3f42e201c7ad443a0ea894c46ebebb7548a6ba6a61685"
+      },
+      "constants_sha256": "ef32094a2a60f52bb5f8728be4d8e01fe723fd2de34f1071263e09d83470113b",
+      "constants_count": 53,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.3",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

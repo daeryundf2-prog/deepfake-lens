@@ -750,8 +750,9 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 232cfbd. BUMP THIS in every commit that changes what a row says for the
 # same input (docs/deepfake-lens-cli.md, "Scan order and cache") and record
 # the new golden output in the same commit (R15-7:
-# scripts/update_golden_output.py; tests/test_output_generation.py fails a
-# changed golden under an unchanged generation).
+# scripts/update_golden_output.py --reason '<사유>'; tests/test_output_generation.py
+# fails a changed golden — stdlib scan, full-extras scan or the Korean
+# constants of result_text/core, R16-5 — under an unchanged generation).
 # 1: R14-3 — reasons name the original file, never a staging name (R13-1),
 #    and an evidence folder named like a staging folder keeps its name (R14-4).
 # 2: R14-5 — a Haar cascade that does not load is a failed face / rPPG /
@@ -759,7 +760,10 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 3: R15-3 — a model asset that is not pinned (models/assets.json) is a
 #    failed check "AssetPinError: 미고정 모델: <자산>" instead of being loaded
 #    (FaceLandmarker landmarks, SyncNet lip-sync, a Haar cascade override).
-OUTPUT_FORMAT_GENERATION = 3
+# 4: R16-5 — the golden record gains the full-extras scan and the constants
+#    hash, and the fixture a gradient PNG; no row text changed (the raise
+#    records the new golden sets; tests/golden_output.json gives the reason).
+OUTPUT_FORMAT_GENERATION = 4
 
 
 def cache_extension(path: Path) -> str:

@@ -53,9 +53,11 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `fastapi/httpx required` | fastapi, httpx(QA 사이드 venv) | test_servers.py |
 | `ffmpeg 없음` | `ffmpeg` 실행 파일(PATH) — 음성 트랙이 있는 시험 영상을 만들고 추출 임시 파일을 관찰; 실제 ffmpeg 자식이 실행 중일 때 종료 신호(R15-1) | test_native_path.py, test_shutdown.py |
 | `ffmpeg가 시험 영상을 만들지 못함` | `ffmpeg`(lavfi 입력, mpeg4·aac 인코더 포함 빌드) | test_native_path.py |
+| `full-extras 골든은 다른 환경에서 기록됨: {difference}` | 골든 기록(`deepfake_lens/tests/golden_output.json`)의 `full_extras_environment`와 같은 선택 모듈·버전 구성(R16-5 — 0단계 기록 환경은 주 venv: `dev`+`full` extras). 다른 구성에서는 full-extras 골든 비교만 건너뛰고 stdlib 골든·문구 상수 해시는 항상 비교 | test_output_generation.py |
+| `full-extras 모듈 없음: {missing}` | `dev`+`full` extras(numpy, opencv, Pillow, scipy, librosa, scikit-learn, c2pa — R16-5 full-extras 골든이 비사진 안내 문구를 포함하는지 확인) | test_output_generation.py |
 | `git binary required` | git 실행 파일과 작업 트리(얕은 복제·압축본 아님) | test_traceability_commits.py |
 | `git not available` | git 실행 파일 | test_qa_sys.py |
-| `golden output recorded on POSIX (path and OS error wording)` | Windows가 아닌 OS(POSIX — 골든 스캔 출력은 POSIX 경로·OS 오류 문구 기준으로 기록, R15-7) | test_output_generation.py |
+| `golden output recorded on POSIX (path and OS error wording)` | Windows가 아닌 OS(POSIX — 골든 스캔 출력은 POSIX 경로·OS 오류 문구 기준으로 기록, R15-7/R16-5) | test_output_generation.py |
 | `jsonschema not installed (dev extra) — _check_object covers the stdlib job` | `dev` extra(jsonschema) | test_json_contract.py |
 | `librosa not installed` | `audio`/`full` extra(librosa) | test_audio.py, test_v6_probes.py, test_video_analysis.py |
 | `markdown-it-py + linkify-it-py not installed (QA side venv)` | markdown-it-py + linkify-it-py(QA 사이드 venv: `pip install markdown-it-py linkify-it-py`) — GFM식 자동 링크(linkify) 렌더 확인 | test_display_names.py |
