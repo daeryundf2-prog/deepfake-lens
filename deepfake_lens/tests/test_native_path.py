@@ -48,6 +48,9 @@ HAVE_PYMUPDF = importlib.util.find_spec("pymupdf") is not None or importlib.util
 CP949_STEM = b"\xc1\xf5\xb0\xc5"
 NON_UTF8_SKIP = "파일 시스템이 UTF-8이 아닌 파일 이름을 허용하지 않음(Windows·macOS)"
 CHILD_TIMEOUT_SECONDS = 600
+# R14-1: Korean-named mp4 + wav pairs in the signalled scan — enough decoding
+# time (a few seconds) for the signals to land while names are staged.
+R14_1_FILES = 24
 
 
 def _write_bytes_name(folder: Path, name: bytes, data: bytes) -> str:
@@ -531,6 +534,81 @@ class SessionFolderCleanupTest(unittest.TestCase):
         code, left = self._child("main", signal.SIGINT)
         self.assertEqual(code, 3)  # the previous handler (KeyboardInterrupt) still ran
         self.assertEqual(left, [])
+
+    def test_only_a_default_action_gets_the_cleanup_handler(self) -> None:
+        """R14-1: an ignored signal stays ignored, a Python handler stays in place, SIG_DFL is wrapped."""
+        script = textwrap.dedent(
+            """
+            import json, signal
+            from deepfake_lens import native_path
+            def own(signum, frame):
+                pass
+            signal.signal(signal.SIGHUP, signal.SIG_IGN)
+            signal.signal(signal.SIGINT, own)
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            native_path.install_cleanup_handlers()
+            print(json.dumps({
+                "hup_ignored": signal.getsignal(signal.SIGHUP) == signal.SIG_IGN,
+                "int_own": signal.getsignal(signal.SIGINT) is own,
+                "term_wrapped": signal.getsignal(signal.SIGTERM) is native_path._cleanup_then_default,
+            }))
+            """
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, env=_child_env(self.base), timeout=CHILD_TIMEOUT_SECONDS, cwd=str(self.base)
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr[-500:])
+        self.assertEqual(json.loads(proc.stdout), {"hup_ignored": True, "int_own": True, "term_wrapped": True})
+
+    @unittest.skipUnless(HAVE_CV2, "opencv not installed")
+    def test_ignored_sighup_and_sigint_leave_the_scan_unchanged(self) -> None:
+        """R14-1 (round 14): a ``nohup`` scan (SIGHUP ignored, SIGINT ignored as in a background job) survives both untouched.
+
+        The cleanup handler used to replace the inherited SIG_IGN: a hang-up
+        removed the live staging folder and the scan went on, so the file being
+        decoded became a false ``failed`` row ("System error").
+        """
+        import signal
+        import time
+
+        mp4, wav = _mp4_bytes(self.base), _wav_bytes()
+        case = self.base / "case"
+        case.mkdir()
+        for index in range(R14_1_FILES):
+            (case / f"증거{index:02d}_clip.mp4").write_bytes(mp4)
+            (case / f"증거{index:02d}_tone.wav").write_bytes(wav)
+
+        def ignore_both() -> None:
+            signal.signal(signal.SIGHUP, signal.SIG_IGN)
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+        def scan(tag: str, send_signals: bool) -> tuple[str, int]:
+            tmp = self.base / f"tmp_{tag}"
+            tmp.mkdir()
+            out = self.base / f"{tag}.json"
+            env = {**_child_env(self.base / f"home_{tag}"), "TMPDIR": str(tmp)}
+            command = [sys.executable, "-m", "deepfake_lens", "scan", str(case), "--include-low", "--format", "json", "--workers", "2"]
+            with open(out, "wb") as handle:
+                proc = subprocess.Popen(command, stdout=handle, stderr=subprocess.DEVNULL, env=env, cwd=str(self.base), preexec_fn=ignore_both)
+                sent = 0
+                deadline = time.monotonic() + CHILD_TIMEOUT_SECONDS
+                while proc.poll() is None and time.monotonic() < deadline:
+                    staged = [name for folder in tmp.glob(f"{native_path.SESSION_PREFIX}*") for name in os.listdir(folder)]
+                    if send_signals and staged:
+                        proc.send_signal(signal.SIGHUP)
+                        proc.send_signal(signal.SIGINT)
+                        sent += 1
+                    time.sleep(0.02)
+                self.assertEqual(proc.wait(timeout=CHILD_TIMEOUT_SECONDS), 0, tag)
+            payload = json.loads(out.read_text(encoding="utf-8"))
+            failed = [(item["path"], c["check"]) for item in payload["items"] for c in item["result"]["coverage"] if c["status"] == "failed"]
+            self.assertEqual(failed, [], tag)
+            return json.dumps(_normalized(payload, []), ensure_ascii=True, sort_keys=True), sent
+
+        reference, _ = scan("reference", send_signals=False)
+        signalled, sent = scan("signalled", send_signals=True)
+        self.assertGreater(sent, 0, "no signal reached the scan while a name was staged")
+        self.assertEqual(signalled, reference)
 
     def test_stale_folders_of_dead_processes_are_swept(self) -> None:
         import time

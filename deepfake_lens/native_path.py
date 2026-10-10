@@ -39,7 +39,11 @@ The staged name is removed when the ``with`` block ends and the session
 folder at interpreter exit. R13-4 (round 13): also on SIGTERM / SIGINT
 (SIGHUP, SIGBREAK where they exist) — :func:`install_cleanup_handlers`,
 called by the CLI at start and by :func:`session_dir` in the main thread,
-removes it before the signal's previous action runs — and a folder left by
+removes it before the default action ends the process. R14-1 (round 14):
+only where the inherited action *is* the default — an ignored signal
+(``nohup``'s SIGHUP, a background job's SIGINT) stays ignored and the scan
+keeps its staged names; a Python handler stays in place and the atexit hook
+removes the folder if the process then exits — and a folder left by
 a process killed outright (SIGKILL, power loss) is swept the next time a
 session folder is made: its name carries the owning process id
 (``deepfake-lens-native-<pid>-<random>``), and a folder of the current
@@ -285,29 +289,49 @@ def cleanup_session() -> None:
     _SESSION_DIR = None
 
 
-def _cleanup_then(previous: Any) -> Callable[[int, Any], None]:
+def _cleanup_then_default(signum: int, frame: Any) -> None:
+    """R14-1: the handler put in place of ``SIG_DFL`` — remove the folder, then the default action.
+
+    Installed only where the inherited action is ``SIG_DFL`` for a signal
+    whose default action ends the process (SIGTERM, SIGINT without Python's
+    handler, SIGHUP, SIGBREAK), so the process is about to end: nothing is
+    being decoded from the folder afterwards.
+    """
     import signal
 
-    def handler(signum: int, frame: Any) -> None:
-        cleanup_session()
-        if callable(previous):
-            previous(signum, frame)  # e.g. SIGINT's default_int_handler: KeyboardInterrupt
-            return
-        if previous == signal.SIG_IGN:
-            return
-        # SIG_DFL (or a handler set outside Python): the default action.
-        signal.signal(signum, signal.SIG_DFL)
-        os.kill(os.getpid(), signum)
+    cleanup_session()
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
 
-    return handler
+
+def _wants_cleanup_handler(previous: Any) -> bool:
+    """R14-1: whether the inherited action of a signal is replaced by :func:`_cleanup_then_default`.
+
+    - ``SIG_IGN`` (``nohup`` for SIGHUP, a background job for SIGINT): the
+      process is told to survive the signal — no handler; removing the live
+      staging folder made the file being decoded a false ``failed`` row
+      ("System error") while the scan went on;
+    - a Python handler (SIGINT's ``default_int_handler``, an embedding
+      application's own): left in place — it decides whether the process
+      ends; when it does (KeyboardInterrupt, SystemExit), the ``with`` blocks
+      unwind and the atexit hook removes the folder after the workers stop;
+    - a handler set outside Python (``None``): unknown, left in place;
+    - ``SIG_DFL``: the process ends — the folder is removed first (atexit
+      never runs when a signal's default action ends the process).
+    """
+    import signal
+
+    return previous == signal.SIG_DFL
 
 
 def install_cleanup_handlers() -> bool:
-    """R13-4: remove the session folder on SIGTERM / SIGINT (SIGHUP, SIGBREAK) before their previous action.
+    """R13-4 / R14-1: remove the session folder on SIGTERM / SIGINT (SIGHUP, SIGBREAK) when it ends the process.
 
-    Signal handlers can only be set from the main thread; elsewhere this
-    returns False (the CLI calls it at start, so staging in a worker thread
-    is covered). Idempotent.
+    Only a signal whose inherited action is ``SIG_DFL`` gets the handler
+    (:func:`_wants_cleanup_handler`): an ignored signal stays ignored and a
+    Python handler stays the handler. Signal handlers can only be set from
+    the main thread; elsewhere this returns False (the CLI calls it at
+    start, so staging in a worker thread is covered). Idempotent.
     """
     global _HANDLERS_INSTALLED
     if _HANDLERS_INSTALLED:
@@ -321,7 +345,8 @@ def install_cleanup_handlers() -> bool:
         if signum is None:
             continue
         try:
-            signal.signal(signum, _cleanup_then(signal.getsignal(signum)))
+            if _wants_cleanup_handler(signal.getsignal(signum)):
+                signal.signal(signum, _cleanup_then_default)
         except (OSError, RuntimeError, ValueError):
             logger.debug("native_safe_path: no cleanup handler for %s", name)
     _HANDLERS_INSTALLED = True
