@@ -98,13 +98,44 @@ def _is_sha256(value: object) -> bool:
     return isinstance(value, str) and len(value) == 64 and set(value) <= _HEX
 
 
+def manifest_state(path: Path | str | None = None) -> tuple[str, int, int, int, int]:
+    """R16-3: ``(path, mtime_ns, ctime_ns, size, inode)`` of the governing manifest (-1s when it cannot be read).
+
+    Part of every cache key of verified asset bytes, and what
+    :func:`load_manifest` re-reads the manifest on.
+    """
+    target = Path(path) if path is not None else manifest_path()
+    try:
+        info = target.stat()
+    except OSError:
+        return (str(target), -1, -1, -1, -1)
+    return (str(target), info.st_mtime_ns, info.st_ctime_ns, info.st_size, info.st_ino)
+
+
+# R16-3: the parsed manifest per path, with the file state it was parsed from.
+_MANIFESTS: dict[str, tuple[tuple[str, int, int, int, int], dict[str, dict[str, Any]]]] = {}
+
+
 def load_manifest(path: Path | str | None = None) -> dict[str, dict[str, Any]]:
     """``{name: entry}`` of the manifest at ``path`` (default :func:`manifest_path`).
 
     A manifest that cannot be read or has another schema pins nothing —
     every asset is then refused (fail-closed), never loaded unverified.
+    R16-3 (round 16): consulted on every use and re-parsed whenever the
+    file's state (:func:`manifest_state`) changed — a re-pin or a removed
+    pin takes effect in a running process.
     """
     target = Path(path) if path is not None else manifest_path()
+    state = manifest_state(target)
+    cached = _MANIFESTS.get(str(target))
+    if cached is not None and cached[0] == state and state[1] != -1:
+        return cached[1]
+    entries = _parse_manifest(target)
+    _MANIFESTS[str(target)] = (state, entries)
+    return entries
+
+
+def _parse_manifest(target: Path) -> dict[str, dict[str, Any]]:
     try:
         payload = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, ValueError, UnicodeError):
@@ -128,9 +159,14 @@ def expected_sha256(asset: str, manifest: dict[str, dict[str, Any]] | None = Non
     return value.lower() if isinstance(value, str) and _is_sha256(value.lower()) else None
 
 
-def check_bytes(asset: str, data: bytes, manifest: dict[str, dict[str, Any]] | None = None) -> None:
-    """Raise :class:`AssetPinError` unless ``data`` is exactly the pinned ``asset``."""
-    expected = expected_sha256(asset, manifest)
+def check_bytes(asset: str, data: bytes, manifest: dict[str, dict[str, Any]] | None = None, *, expected: str | None = None) -> None:
+    """Raise :class:`AssetPinError` unless ``data`` is exactly the pinned ``asset``.
+
+    ``expected`` (R16-3): check against this digest — the pin a caller keyed
+    its cache on — instead of reading the manifest again.
+    """
+    if expected is None:
+        expected = expected_sha256(asset, manifest)
     if expected is None:
         raise AssetPinError(asset)
     actual = hashlib.sha256(data).hexdigest()
@@ -138,22 +174,23 @@ def check_bytes(asset: str, data: bytes, manifest: dict[str, dict[str, Any]] | N
         raise _mismatch_error(asset, expected, actual)
 
 
-def verified_bytes(asset: str, path: Path | str) -> bytes:
-    """The bytes of ``path`` after they were checked against the pin of ``asset`` (read once)."""
+def verified_bytes(asset: str, path: Path | str, *, expected: str | None = None) -> bytes:
+    """The bytes of ``path`` after they were checked against the pin of ``asset`` (read once; ``expected`` see :func:`check_bytes`)."""
     with open(path, "rb") as handle:
         data = handle.read()
-    check_bytes(asset, data)
+    check_bytes(asset, data, expected=expected)
     return data
 
 
-def verified_copy(asset: str, path: Path | str) -> str:
+def verified_copy(asset: str, path: Path | str, *, expected: str | None = None) -> str:
     """A private copy of ``path`` in the session folder holding exactly the verified bytes.
 
     For loaders that only take a file name (OpenCV, third-party
     ``torch.load``). The caller removes it when the loader is done (or the
     session cleanup does). The copy keeps the original's extension.
     """
-    expected = expected_sha256(asset)
+    if expected is None:
+        expected = expected_sha256(asset)
     if expected is None:
         raise AssetPinError(asset)
     digest = hashlib.sha256()
@@ -259,6 +296,7 @@ __all__ = [
     "expected_sha256",
     "load_manifest",
     "manifest_path",
+    "manifest_state",
     "pin_asset",
     "sha256_mismatch_detail",
     "verified_bytes",

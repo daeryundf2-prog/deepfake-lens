@@ -418,7 +418,11 @@ track, the face crops of `requires_face`/`crop_faces` model members) uses
 strict detection — a detector that cannot run or raises (a refused cascade, a
 MediaPipe crash, `cv2.error`) is failed `얼굴 검출 오류: …`, never skipped
 "얼굴 미검출"; and a detector error is no longer dropped when a later
-detector finds a face.
+detector finds a face. R16-3: the pins are read on every use (the manifest is
+re-parsed whenever its file state changes) and are part of the in-process
+caches — the verified FaceLandmarker bytes and the SyncNet pipeline — so a
+`pin-asset` re-pin, a removed pin or a swapped weight file takes effect in a
+running `web`/`api-serve` process without a restart.
 
 ```sh
 python -m deepfake_lens vendor-weights pin-asset face_landmarker.task          # sha256 of <models dir>/face_landmarker.task

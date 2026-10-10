@@ -292,6 +292,28 @@ class FaceLandmarkerPinTest(unittest.TestCase):
         self.assertEqual(entry.status, CoverageStatus.FAILED)
         self.assertEqual(entry.reason, f"AssetPinError: 미고정 모델: {FACE_LANDMARKER}")
 
+    def test_a_repin_and_a_removed_pin_take_effect_in_the_same_process(self) -> None:
+        """R16-3 (round 16): the verified-bytes cache followed the file's stat only — a long-running server
+        kept serving bytes a re-pin or a removed pin no longer allows. The key now holds the current pin."""
+        from deepfake_lens import face
+
+        data = self.asset.read_bytes()
+        with _models_dir({FACE_LANDMARKER: _sha(data)}) as folder:
+            self.assertEqual(face._verified_facelandmarker(self.asset), data)
+            _set_pin(folder, FACE_LANDMARKER, _sha(b"another trusted copy"))  # re-pinned to other bytes
+            with self.assertRaises(AssetPinError) as caught:
+                face._verified_facelandmarker(self.asset)
+            self.assertIn("sha256 불일치", str(caught.exception))
+            _set_pin(folder, FACE_LANDMARKER, "")  # pin removed
+            with self.assertRaises(AssetPinError) as caught:
+                face._verified_facelandmarker(self.asset)
+            self.assertEqual(str(caught.exception), f"미고정 모델: {FACE_LANDMARKER}")
+            (folder / "assets.json").write_text("{broken", encoding="utf-8")  # manifest unreadable: pins nothing
+            with self.assertRaises(AssetPinError):
+                face._verified_facelandmarker(self.asset)
+        with _models_dir({FACE_LANDMARKER: _sha(data)}):
+            self.assertEqual(face._verified_facelandmarker(self.asset), data)  # pinned again: served
+
 
 class SyncNetPinTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -300,7 +322,12 @@ class SyncNetPinTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name).resolve()
-        for patch in (mock.patch.object(lipsync, "_SYNCNET_PIPELINE", None), mock.patch.object(lipsync, "_SYNCNET_FAILED", False)):
+        for patch in (
+            mock.patch.object(lipsync, "_SYNCNET_PIPELINE", None),
+            mock.patch.object(lipsync, "_SYNCNET_FAILED", False),
+            mock.patch.object(lipsync, "_SYNCNET_KEY", None),  # R16-3
+            mock.patch.object(lipsync, "_SYNCNET_BROKEN_KEY", None),
+        ):
             patch.start()
             self.addCleanup(patch.stop)
         self.built: list[dict[str, Any]] = []
@@ -381,6 +408,43 @@ class SyncNetPinTest(unittest.TestCase):
                 lipsync._syncnet_analysis(self.root / "clip.mp4")
         self.assertIn(f"미고정 모델: {SYNCNET_WEIGHTS} — sha256 불일치", str(caught.exception))
         self.assertEqual(self.built, [])
+
+    def test_a_repin_and_a_removed_pin_take_effect_in_the_same_process(self) -> None:
+        """R16-3 (round 16): the SyncNet pipeline was built once per process and reused after a re-pin or a removed pin."""
+        from deepfake_lens import lipsync
+
+        pins = {name: _sha(data) for name, data in self.weights.items()}
+        clip = self.root / "clip.mp4"
+        with _models_dir(pins) as folder, contextlib.redirect_stderr(io.StringIO()):
+            self._provision(folder)
+            self.assertIsNotNone(lipsync._syncnet_analysis(clip))
+            self.assertIsNotNone(lipsync._syncnet_analysis(clip))
+            self.assertEqual(len(self.built), 1)  # unchanged pins: the pipeline is reused
+            _set_pin(folder, SYNCNET_WEIGHTS, _sha(b"other syncnet weights"))
+            with self.assertRaises(AssetPinError) as caught:
+                lipsync._syncnet_analysis(clip)
+            self.assertIn(f"미고정 모델: {SYNCNET_WEIGHTS} — sha256 불일치", str(caught.exception))
+            _set_pin(folder, SYNCNET_WEIGHTS, "")
+            with self.assertRaises(AssetPinError) as caught:
+                lipsync._syncnet_analysis(clip)
+            self.assertEqual(str(caught.exception), f"미고정 모델: {SYNCNET_WEIGHTS}")
+            self.assertEqual(len(self.built), 1)  # never rebuilt from refused bytes
+            _set_pin(folder, SYNCNET_WEIGHTS, pins[SYNCNET_WEIGHTS])
+            self.assertIsNotNone(lipsync._syncnet_analysis(clip))
+            self.assertEqual(len(self.built), 2)  # pinned again: rebuilt from freshly verified copies
+            (folder / SYNCNET_WEIGHTS).write_bytes(b"swapped after the build")
+            with self.assertRaises(AssetPinError):
+                lipsync._syncnet_analysis(clip)  # the file changed: verified again, refused
+
+
+def _set_pin(folder: Path, asset: str, digest: str) -> None:
+    """Rewrite ``asset``'s sha256 in ``folder``/assets.json in place (what an operator's re-pin or edit does)."""
+    manifest = folder / "assets.json"
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    for entry in payload["assets"]:
+        if entry["name"] == asset:
+            entry["sha256"] = digest
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
 
 
 class PinAssetCommandTest(unittest.TestCase):

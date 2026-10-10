@@ -41,6 +41,8 @@ from .model_assets import (
     HAAR_FRONTALFACE,
     UNPINNED_ASSET_PREFIX,
     AssetPinError,
+    expected_sha256,
+    manifest_state,
     sha256_mismatch_detail,
     verified_bytes,
     verified_copy,
@@ -814,18 +816,24 @@ _FACE_LANDMARKER_ENV = "DEEPFAKE_LENS_FACE_LANDMARKER"
 _FACE_LANDMARKER_ASSET = default_models_dir() / "face_landmarker.task"
 
 
-# R15-3: verified FaceLandmarker bytes per (path, size, mtime, inode) — read
-# and hashed once per process, not per detected face.
-_VERIFIED_LANDMARKER: dict[tuple[str, int, int, int], bytes] = {}
+# R15-3: verified FaceLandmarker bytes, read and hashed once per key, not per
+# detected face. R16-3 (round 16): the key is the file's (path, size, mtime,
+# inode) *and* the pin it was verified against plus the manifest's state —
+# it used to be the file's stat only, so a re-pin or a removed pin (the
+# manifest is read on every use) did not reach a running process.
+_VERIFIED_LANDMARKER: dict[tuple[object, ...], bytes] = {}
 
 
 def _verified_facelandmarker(path: Path) -> bytes:
     """The pinned FaceLandmarker bytes read from ``path`` (:class:`AssetPinError` otherwise)."""
+    expected = expected_sha256(FACE_LANDMARKER)  # the current pin (manifest re-read when it changed)
+    if expected is None:
+        raise AssetPinError(FACE_LANDMARKER)
     info = path.stat()
-    key = (str(path), info.st_size, info.st_mtime_ns, info.st_ino)
+    key = (str(path), info.st_size, info.st_mtime_ns, info.st_ino, expected, manifest_state())
     cached = _VERIFIED_LANDMARKER.get(key)
     if cached is None:
-        cached = verified_bytes(FACE_LANDMARKER, path)
+        cached = verified_bytes(FACE_LANDMARKER, path, expected=expected)
         _VERIFIED_LANDMARKER.clear()
         _VERIFIED_LANDMARKER[key] = cached
     return cached

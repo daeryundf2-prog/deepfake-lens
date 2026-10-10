@@ -30,7 +30,7 @@ from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 from .vendor_weights import default_models_dir
 from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
 from .checkpoint_integrity import force_weights_only
-from .model_assets import S3FD_WEIGHTS, SYNCNET_WEIGHTS, AssetPinError, verified_copy
+from .model_assets import S3FD_WEIGHTS, SYNCNET_WEIGHTS, AssetPinError, expected_sha256, manifest_state, verified_copy
 from .shutdown import run_child
 
 # Correlation below this with clear speech activity = mismatch candidate.
@@ -240,10 +240,18 @@ def _unavailable(limitations: list[str], reason: str) -> LipsyncAnalysis:
 
 
 _SYNCNET_PIPELINE = None
+# R16-3 (round 16): what the cached pipeline was built from — the manifest
+# state, both pins and both weight files' (path, size, mtime, inode). The
+# pipeline used to be built once per process and reused after a re-pin or a
+# removed pin; it is now rebuilt (re-verified) whenever this key changes.
+_SYNCNET_KEY: tuple[object, ...] | None = None
+# syncnet-python is not importable (latched: the package does not appear mid-run).
 _SYNCNET_FAILED = False
+# R16-3: the key whose pipeline construction raised (not retried for the same files and pins).
+_SYNCNET_BROKEN_KEY: tuple[object, ...] | None = None
 
 
-def _syncnet_pipeline(models_dir: Path) -> Any:
+def _syncnet_pipeline(models_dir: Path, expected: tuple[str, str] | None = None) -> Any:
     """R15-3: the SyncNet pipeline built from the *verified* weights, or None when they are not provisioned.
 
     Both weight files must be registered in the asset manifest with a
@@ -252,7 +260,8 @@ def _syncnet_pipeline(models_dir: Path) -> Any:
     check is ``failed`` — instead of being handed to the third-party
     ``torch.load``. The pipeline gets private copies of the verified bytes
     and loads them with ``weights_only=True`` forced; the copies are removed
-    once it has loaded.
+    once it has loaded. ``expected`` (R16-3): the (s3fd, syncnet) pins the
+    caller keyed its cache on.
     """
     from syncnet_python.syncnet_pipeline import SyncNetPipeline
 
@@ -262,13 +271,35 @@ def _syncnet_pipeline(models_dir: Path) -> Any:
         return None
     copies: list[str] = []
     try:
-        copies.append(verified_copy(S3FD_WEIGHTS, s3fd))
-        copies.append(verified_copy(SYNCNET_WEIGHTS, syncnet))
+        copies.append(verified_copy(S3FD_WEIGHTS, s3fd, expected=expected[0] if expected else None))
+        copies.append(verified_copy(SYNCNET_WEIGHTS, syncnet, expected=expected[1] if expected else None))
         with force_weights_only():
             return SyncNetPipeline({"s3fd_weights": copies[0], "syncnet_weights": copies[1]}, device="cpu")
     finally:
         for copy in copies:
             Path(copy).unlink(missing_ok=True)
+
+
+def _syncnet_key(models_dir: Path) -> tuple[object, ...] | None:
+    """R16-3: the cache key of the pipeline for ``models_dir`` — None when the weights are not provisioned.
+
+    Reads the current pins (the manifest is re-read when it changed); a
+    weight file that is present but not pinned raises :class:`AssetPinError`.
+    """
+    files = (models_dir / S3FD_WEIGHTS, models_dir / SYNCNET_WEIGHTS)
+    if not all(path.is_file() for path in files):
+        return None
+    pins = []
+    for asset in (S3FD_WEIGHTS, SYNCNET_WEIGHTS):
+        expected = expected_sha256(asset)
+        if expected is None:
+            raise AssetPinError(asset)
+        pins.append(expected)
+    stats = []
+    for path in files:
+        info = path.stat()
+        stats.append((str(path), info.st_size, info.st_mtime_ns, info.st_ino))
+    return (manifest_state(), tuple(pins), tuple(stats))
 
 
 def _syncnet_analysis(video_path: Path) -> LipsyncAnalysis | None:
@@ -278,27 +309,36 @@ def _syncnet_analysis(video_path: Path) -> LipsyncAnalysis | None:
     files (``models/syncnet_v2.model`` ~2.6 MB, ``models/sfd_face.pth``
     ~90 MB). Returns None on any failure so the heuristic path runs —
     except R15-3: weights that are present but not pinned (or not the
-    pinned bytes) raise :class:`AssetPinError`.
+    pinned bytes) raise :class:`AssetPinError`. R16-3: the pins and the
+    weight files are checked on every call and the pipeline rebuilt from
+    freshly verified bytes when either changed.
     """
-    global _SYNCNET_PIPELINE, _SYNCNET_FAILED
+    global _SYNCNET_PIPELINE, _SYNCNET_KEY, _SYNCNET_FAILED, _SYNCNET_BROKEN_KEY
     if _SYNCNET_FAILED:
         return None
-    if _SYNCNET_PIPELINE is None:
+    try:
+        import syncnet_python.syncnet_pipeline  # noqa: F401  (availability probe)
+    except ImportError:
+        _SYNCNET_FAILED = True
+        return None
+    models_dir = default_models_dir()
+    key = _syncnet_key(models_dir)  # R15-3: AssetPinError is never latched — every video records the refusal
+    if key is None or key == _SYNCNET_BROKEN_KEY:
+        return None
+    if _SYNCNET_PIPELINE is None or key != _SYNCNET_KEY:
+        _SYNCNET_PIPELINE, _SYNCNET_KEY = None, None
+        pins = key[1]
+        assert isinstance(pins, tuple)
         try:
-            import syncnet_python.syncnet_pipeline  # noqa: F401  (availability probe)
-        except ImportError:
-            _SYNCNET_FAILED = True
-            return None
-        try:
-            _SYNCNET_PIPELINE = _syncnet_pipeline(default_models_dir())
+            pipeline = _syncnet_pipeline(models_dir, expected=(str(pins[0]), str(pins[1])))
         except AssetPinError:
-            raise  # R15-3: never latched — every video records the refusal
+            raise
         except Exception:
-            _SYNCNET_FAILED = True
+            _SYNCNET_BROKEN_KEY = key
             return None
-        if _SYNCNET_PIPELINE is None:
-            _SYNCNET_FAILED = True
+        if pipeline is None:
             return None
+        _SYNCNET_PIPELINE, _SYNCNET_KEY = pipeline, key
     try:
         import contextlib
         import sys
