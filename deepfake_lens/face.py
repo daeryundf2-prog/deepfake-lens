@@ -35,6 +35,7 @@ from typing import Any
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .error_text import exception_text, failure_reason
 from .vendor_weights import default_models_dir
+from .native_path import CascadeLoadError, NativePathError, load_cascade
 from .native_stderr import quiet_native_stderr
 
 
@@ -290,6 +291,47 @@ def _error_analysis(message: str) -> FaceAnalysis:
     )
 
 
+def haar_cascade_candidates() -> list[str]:
+    """The Haar frontal-face cascade files to try, in order (existing files only).
+
+    OpenCV 5.x keeps CascadeClassifier (xobjdetect) but no longer ships the
+    cascade XML — the bundled copy under models/ keeps air-gapped installs
+    detecting faces; ``DEEPFAKE_LENS_HAAR_CASCADE`` names another.
+    """
+    import cv2
+
+    cv2_data = getattr(cv2, "data", None)
+    cv2_cascade_dir = getattr(cv2_data, "haarcascades", "") or ""
+    candidates = [
+        cv2_cascade_dir + "haarcascade_frontalface_default.xml" if cv2_cascade_dir else "",
+        os.environ.get("DEEPFAKE_LENS_HAAR_CASCADE") or "",
+        str(Path(__file__).resolve().parent / "models" / "haarcascade_frontalface_default.xml"),
+    ]
+    return [candidate for candidate in candidates if candidate and Path(candidate).is_file()]
+
+
+def load_face_cascade() -> Any:
+    """R14-5 (round 14): the first Haar cascade that loads, None when there is no cascade file at all.
+
+    Every file goes through :func:`native_path.load_cascade` (never a raw
+    ``cv2.CascadeClassifier(path)``: a Korean Windows install path loaded
+    nothing and the face checks said "얼굴 미검출"). Files that exist but
+    none of which loads raise :class:`CascadeLoadError` — the check that
+    needed the detector is ``failed``.
+    """
+    failures: list[BaseException] = []
+    for candidate in haar_cascade_candidates():
+        try:
+            return load_cascade(candidate)
+        except (CascadeLoadError, NativePathError) as exc:
+            failures.append(exc)
+    if len(failures) == 1:
+        raise failures[0]
+    if failures:
+        raise CascadeLoadError("; ".join(str(exc) for exc in failures)) from failures[-1]
+    return None
+
+
 class FaceDetectorUnavailable(RuntimeError):
     """No face detector could run (no Haar cascade XML and no MediaPipe)."""
 
@@ -359,23 +401,14 @@ def _detect_faces_strict(image: Any) -> list[FaceRegion]:
     if hasattr(cv2, "CascadeClassifier"):
         faces: Any = []
         try:
-            # OpenCV 5.x keeps CascadeClassifier (xobjdetect) but no longer
-            # ships the cascade XML — fall back to the bundled copy under
-            # models/ so air-gapped installs still detect faces.
-            cv2_data = getattr(cv2, "data", None)
-            cv2_cascade_dir = getattr(cv2_data, "haarcascades", "") or ""
-            candidates = [
-                cv2_cascade_dir + "haarcascade_frontalface_default.xml" if cv2_cascade_dir else "",
-                os.environ.get("DEEPFAKE_LENS_HAAR_CASCADE") or "",
-                str(Path(__file__).resolve().parent / "models" / "haarcascade_frontalface_default.xml"),
-            ]
-            face_cascade = None
-            for cand in candidates:
-                if cand and Path(str(cand)).is_file():
-                    face_cascade = cv2.CascadeClassifier(str(cand))
-                    if not face_cascade.empty():
-                        break
-            if face_cascade is not None and not face_cascade.empty():
+            # R14-5: loaded through native_safe_path; a cascade file that
+            # exists but does not load is an error, never "no face".
+            try:
+                face_cascade = load_face_cascade()
+            except CascadeLoadError as exc:
+                errors.append(exc)
+                face_cascade = None
+            if face_cascade is not None:
                 detectors_run += 1
                 faces = face_cascade.detectMultiScale(gray, 1.1, 4)
         except cv2.error as exc:

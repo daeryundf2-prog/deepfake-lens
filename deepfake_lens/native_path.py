@@ -762,6 +762,29 @@ def _unlink_staged(staged: str, original: str | None = None) -> None:
         logger.warning("native_safe_path: copy marker of %s not removed", staged)
 
 
+class CascadeLoadError(RuntimeError):
+    """R14-5: a Haar cascade file exists but OpenCV could not load it (``str()`` is Korean)."""
+
+
+def load_cascade(path: str | os.PathLike[str]) -> Any:
+    """R14-5 (round 14): ``cv2.CascadeClassifier`` for any path — the file name goes through :func:`native_safe_path`.
+
+    ``cv2.CascadeClassifier(path)`` takes a narrow ``char*`` name: under a
+    Korean Windows install path (``C:\\Users\\김…\\site-packages\\cv2\\data``)
+    it silently loads nothing (``empty()``), and the face checks then
+    reported "얼굴 미검출" from a detector that never ran. An empty cascade
+    raises :class:`CascadeLoadError`, so the check that needed it is
+    ``failed``.
+    """
+    import cv2
+
+    with native_safe_path(path) as native:
+        cascade = cv2.CascadeClassifier(native)  # type: ignore[attr-defined]  # (OpenCV 5 stubs: contrib only)
+    if cascade is None or cascade.empty():
+        raise CascadeLoadError(f"Haar 얼굴 검출기 파일을 불러오지 못했습니다: {os.fspath(path)!r}")
+    return cascade
+
+
 def imwrite_any(path: str | os.PathLike[str], image: Any, params: list[int] | tuple[int, ...] = ()) -> bool:
     """R13-7 (round 13): ``cv2.imwrite`` for any path — encoded in memory, written by Python.
 
@@ -794,12 +817,14 @@ def staged_names() -> list[str]:
 
 __all__ = [
     "COPY_CAP_EXCEEDED",
+    "CascadeLoadError",
     "NATIVE_COPY_MAX_BYTES",
     "NativePathError",
     "cleanup_session",
     "imwrite_any",
     "install_cleanup_handlers",
     "is_native_safe",
+    "load_cascade",
     "native_safe_path",
     "restore_original_names",
     "session_dir",

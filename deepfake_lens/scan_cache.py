@@ -745,7 +745,9 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # same input (docs/deepfake-lens-cli.md, "Scan order and cache").
 # 1: R14-3 — reasons name the original file, never a staging name (R13-1),
 #    and an evidence folder named like a staging folder keeps its name (R14-4).
-OUTPUT_FORMAT_GENERATION = 1
+# 2: R14-5 — a Haar cascade that does not load is a failed face / rPPG /
+#    lip-sync check, no longer "얼굴 미검출".
+OUTPUT_FORMAT_GENERATION = 2
 
 
 def cache_extension(path: Path) -> str:

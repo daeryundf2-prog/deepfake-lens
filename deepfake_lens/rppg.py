@@ -21,8 +21,9 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
-from .native_path import native_safe_path
+from .native_path import CascadeLoadError, native_safe_path
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 from .native_stderr import quiet_native_stderr
 
@@ -365,7 +366,7 @@ def _face_roi_samples(
         try:
             fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
             total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-            cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+            cascade = _face_cascade()  # R14-5: native_safe_path; a cascade that does not load raises
             aggregate: list[tuple[float, float, float]] = []
             roi_frames: list[list[tuple[float, float, float]]] = []
             frame_index = 0
@@ -410,3 +411,13 @@ def _grid_cell_means(roi, *, grid: int) -> list[tuple[float, float, float]]:
             mean_b, mean_g, mean_r = (float(channel) for channel in cv2.mean(cell)[:3])
             cells.append((mean_r, mean_g, mean_b))
     return cells
+
+
+def _face_cascade() -> Any:
+    """R14-5: the Haar face cascade (face.load_face_cascade); none at all is a load failure here."""
+    from .face import load_face_cascade
+
+    cascade = load_face_cascade()
+    if cascade is None:
+        raise CascadeLoadError("Haar 얼굴 검출기 파일이 없습니다")
+    return cascade

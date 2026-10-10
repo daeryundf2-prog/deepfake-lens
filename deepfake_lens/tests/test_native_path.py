@@ -1213,6 +1213,7 @@ class EvidenceInvariantFullScanTest(unittest.TestCase):
 NATIVE_CALLS = {
     ("cv2", "VideoCapture"),
     ("cv2", "imread"),
+    ("cv2", "CascadeClassifier"),  # R14-5: the cascade XML is opened by name too
     ("librosa", "load"),
     ("sf", "read"),
     ("soundfile", "read"),
@@ -1369,6 +1370,7 @@ class NativeCallMetaTest(unittest.TestCase):
             "documents.py:fitz.open",
             "c2pa.py:c2pa.Reader",
             "video.py:subprocess.run",
+            "native_path.py:cv2.CascadeClassifier",  # R14-5
         ):
             self.assertIn(expected, seen)
 
@@ -1700,6 +1702,98 @@ class StagedNamesNeverLeakEndToEndTest(unittest.TestCase):
             nested = next(other for ascii_path, other in self.pairs if ascii_path == "tone.m4a" and other.startswith("sub"))
             reason = next(entry["reason"] for entry in rows[nested]["result"]["coverage"] if entry["check"] == "audio_features")
             self.assertIn(f"'<root>/{nested}'", reason)  # the name as in its row
+
+
+class _NarrowCascade:
+    """Stands in for ``cv2.CascadeClassifier``: like OpenCV's narrow ``char*`` name, a non-ASCII path loads nothing."""
+
+    opened: list[str] = []
+    loads = True
+
+    def __init__(self, path: str = "") -> None:
+        type(self).opened.append(path)
+        self._empty = not (type(self).loads and path.isascii() and os.path.isfile(path))
+
+    def empty(self) -> bool:
+        return self._empty
+
+    def detectMultiScale(self, *args: Any) -> list:  # noqa: N802 - OpenCV's name
+        return []
+
+
+@unittest.skipUnless(HAVE_CV2, "opencv not installed")
+class CascadeThroughNativePathTest(unittest.TestCase):
+    """R14-5 (round 14): the Haar cascade is opened through native_safe_path; one that does not load is a failed check.
+
+    ``cv2.CascadeClassifier(path)`` was not on the native-call list: under a
+    Korean Windows install path it silently loaded nothing, and face / rPPG
+    / lip-sync then reported no face from a detector that never ran.
+    """
+
+    def setUp(self) -> None:
+        import cv2
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        self.xml = self.root / "설치 경로" / "haarcascade_frontalface_default.xml"
+        self.xml.parent.mkdir()
+        self.xml.write_bytes((PACKAGE / "models" / "haarcascade_frontalface_default.xml").read_bytes())
+        _NarrowCascade.opened = []
+        _NarrowCascade.loads = True
+        patcher = mock.patch.object(cv2, "CascadeClassifier", _NarrowCascade, create=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        # Only the Korean-path copy is a candidate.
+        candidates = mock.patch("deepfake_lens.face.haar_cascade_candidates", return_value=[str(self.xml)])
+        candidates.start()
+        self.addCleanup(candidates.stop)
+
+    def test_a_korean_cascade_path_loads_through_an_ascii_name(self) -> None:
+        cascade = native_path.load_cascade(self.xml)
+        self.assertFalse(cascade.empty())
+        self.assertEqual(len(_NarrowCascade.opened), 1)
+        self.assertTrue(_NarrowCascade.opened[0].isascii(), _NarrowCascade.opened)
+        self.assertFalse(os.path.lexists(_NarrowCascade.opened[0]))  # the staged name is gone afterwards
+
+    def test_a_cascade_that_does_not_load_raises(self) -> None:
+        _NarrowCascade.loads = False
+        with self.assertRaises(native_path.CascadeLoadError) as caught:
+            native_path.load_cascade(self.xml)
+        self.assertRegex(str(caught.exception), "[가-힣]")
+
+    def test_face_detection_with_an_unloadable_cascade_is_an_error_not_no_face(self) -> None:
+        import numpy as np
+
+        from deepfake_lens import face
+
+        _NarrowCascade.loads = False
+        blank: Any = np.full((160, 160, 3), 128, np.uint8)
+        with mock.patch.object(face, "_mediapipe_detect_faces", side_effect=face.FaceDetectorUnavailable("mediapipe 없음")):
+            with self.assertRaises(face.FaceDetectionError) as caught:
+                face._detect_faces_strict(blank)
+        self.assertIn("CascadeLoadError", str(caught.exception))
+        _NarrowCascade.loads = True
+        with mock.patch.object(face, "_mediapipe_detect_faces", side_effect=face.FaceDetectorUnavailable("mediapipe 없음")):
+            self.assertEqual(face._detect_faces_strict(blank), [])  # loaded: a real "no face"
+        self.assertTrue(all(path.isascii() for path in _NarrowCascade.opened))
+
+    def test_rppg_with_an_unloadable_cascade_is_a_failed_check(self) -> None:
+        from deepfake_lens import core
+        from deepfake_lens.result_types import CoverageStatus
+
+        video = self.root / "clip.mp4"
+        video.write_bytes(_mp4_bytes(self.root))
+        _NarrowCascade.loads = False
+        layers = core._deep_video_layers(video)
+        entries = {entry.check: entry for entry in layers.coverage}
+        self.assertEqual(entries["rppg"].status, CoverageStatus.FAILED, entries["rppg"])
+        self.assertIn("CascadeLoadError", entries["rppg"].reason)
+        # And the lip-sync mouth series: the same failure, not an empty series.
+        from deepfake_lens import lipsync
+
+        with self.assertRaises(native_path.CascadeLoadError):
+            lipsync._mouth_openness_series(video, max_seconds=1.0)
 
 
 class OldCacheRowsTest(unittest.TestCase):

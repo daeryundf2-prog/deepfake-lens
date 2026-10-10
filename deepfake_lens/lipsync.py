@@ -23,7 +23,9 @@ import subprocess
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from .native_path import native_safe_path
+from typing import Any
+
+from .native_path import CascadeLoadError, native_safe_path
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 from .vendor_weights import default_models_dir
 from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
@@ -201,7 +203,7 @@ def _mouth_openness_series(video_path: Path, *, max_seconds: float) -> tuple[lis
             total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
             max_frames = min(total, int(max_seconds * fps)) if total > 0 else int(max_seconds * fps)
             stride = max(1, int(fps * 0.1))
-            cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+            cascade = _face_cascade()  # R14-5: native_safe_path; a cascade that does not load raises
             series: list[float] = []
             last_roi: tuple[int, int, int, int] | None = None
             index = 0
@@ -310,3 +312,13 @@ def _syncnet_analysis(video_path: Path) -> LipsyncAnalysis | None:
         syncnet_min_dist=round(min_dist, 4) if min_dist else None,
         method="syncnet",
     )
+
+
+def _face_cascade() -> Any:
+    """R14-5: the Haar face cascade (face.load_face_cascade); none at all is a load failure here."""
+    from .face import load_face_cascade
+
+    cascade = load_face_cascade()
+    if cascade is None:
+        raise CascadeLoadError("Haar 얼굴 검출기 파일이 없습니다")
+    return cascade
