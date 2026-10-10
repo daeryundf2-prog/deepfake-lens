@@ -80,6 +80,12 @@ the defaults are `supported: false`, so they are recorded as skipped.
 
 ## Other assets (not runtime profiles)
 
+R15-3: each asset below is pinned in `assets.json` (sha256, source,
+license); an unpinned or different file is never loaded — the check that
+needs it fails `미고정 모델: <자산>`. The bundled Haar cascade is pinned; the
+downloadable assets ship unpinned (no official digest): after fetching, pin
+a copy you trust with `deepfake-lens vendor-weights pin-asset <자산>`.
+
 - `face_landmarker.task` — MediaPipe Tasks-API model for `face.py`'s
   measured-landmark path on tasks-only mediapipe builds (>=0.10.30 / 1.x).
   Fetch with `scripts/fetch_facelandmarker.py` or point

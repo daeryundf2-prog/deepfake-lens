@@ -36,6 +36,7 @@ from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .error_text import exception_text, failure_reason
 from .vendor_weights import default_models_dir
 from .native_path import CascadeLoadError, NativePathError, load_cascade
+from .model_assets import FACE_LANDMARKER, HAAR_FRONTALFACE, AssetPinError, verified_bytes, verified_copy
 from .native_stderr import quiet_native_stderr
 
 
@@ -296,7 +297,9 @@ def haar_cascade_candidates() -> list[str]:
 
     OpenCV 5.x keeps CascadeClassifier (xobjdetect) but no longer ships the
     cascade XML — the bundled copy under models/ keeps air-gapped installs
-    detecting faces; ``DEEPFAKE_LENS_HAAR_CASCADE`` names another.
+    detecting faces; ``DEEPFAKE_LENS_HAAR_CASCADE`` names another. R15-3:
+    every candidate must hold the pinned bytes (``models/assets.json``) —
+    :func:`load_face_cascade` refuses any other file.
     """
     import cv2
 
@@ -310,6 +313,25 @@ def haar_cascade_candidates() -> list[str]:
     return [candidate for candidate in candidates if candidate and Path(candidate).is_file()]
 
 
+def _load_pinned_cascade(candidate: str) -> Any:
+    """R15-3: the cascade at ``candidate`` loaded from a private copy of its verified bytes.
+
+    The bytes are checked against the pin of ``haarcascade_frontalface_default.xml``
+    while they are copied (:func:`model_assets.verified_copy`), and OpenCV
+    opens the copy — a file that is not the pinned cascade (a
+    ``DEEPFAKE_LENS_HAAR_CASCADE`` override, a swapped file) is refused with
+    :class:`AssetPinError` "미고정 모델: …". A copy that does not load is
+    reported under the candidate's own name.
+    """
+    copy = verified_copy(HAAR_FRONTALFACE, candidate)
+    try:
+        return load_cascade(copy)
+    except CascadeLoadError as exc:
+        raise CascadeLoadError(f"Haar 얼굴 검출기 파일을 불러오지 못했습니다: {candidate!r}") from exc
+    finally:
+        Path(copy).unlink(missing_ok=True)
+
+
 def load_face_cascade() -> Any:
     """R14-5 (round 14): the first Haar cascade that loads, None when there is no cascade file at all.
 
@@ -317,17 +339,21 @@ def load_face_cascade() -> Any:
     ``cv2.CascadeClassifier(path)``: a Korean Windows install path loaded
     nothing and the face checks said "얼굴 미검출"). Files that exist but
     none of which loads raise :class:`CascadeLoadError` — the check that
-    needed the detector is ``failed``.
+    needed the detector is ``failed``. R15-3 (round 15): only the pinned
+    cascade bytes are loaded (:func:`_load_pinned_cascade`); when every
+    candidate is refused for its pin the :class:`AssetPinError` is raised.
     """
     failures: list[BaseException] = []
     for candidate in haar_cascade_candidates():
         try:
-            return load_cascade(candidate)
-        except (CascadeLoadError, NativePathError) as exc:
+            return _load_pinned_cascade(candidate)
+        except (CascadeLoadError, NativePathError, AssetPinError) as exc:
             failures.append(exc)
     if len(failures) == 1:
         raise failures[0]
     if failures:
+        if all(isinstance(exc, AssetPinError) for exc in failures):
+            raise AssetPinError(HAAR_FRONTALFACE, "; ".join(str(exc) for exc in failures)) from failures[-1]
         raise CascadeLoadError("; ".join(str(exc) for exc in failures)) from failures[-1]
     return None
 
@@ -405,7 +431,7 @@ def _detect_faces_strict(image: Any) -> list[FaceRegion]:
             # exists but does not load is an error, never "no face".
             try:
                 face_cascade = load_face_cascade()
-            except CascadeLoadError as exc:
+            except (CascadeLoadError, AssetPinError) as exc:  # R15-3: an unpinned cascade is an error too
                 errors.append(exc)
                 face_cascade = None
             if face_cascade is not None:
@@ -725,6 +751,23 @@ _FACE_LANDMARKER_ENV = "DEEPFAKE_LENS_FACE_LANDMARKER"
 _FACE_LANDMARKER_ASSET = default_models_dir() / "face_landmarker.task"
 
 
+# R15-3: verified FaceLandmarker bytes per (path, size, mtime, inode) — read
+# and hashed once per process, not per detected face.
+_VERIFIED_LANDMARKER: dict[tuple[str, int, int, int], bytes] = {}
+
+
+def _verified_facelandmarker(path: Path) -> bytes:
+    """The pinned FaceLandmarker bytes read from ``path`` (:class:`AssetPinError` otherwise)."""
+    info = path.stat()
+    key = (str(path), info.st_size, info.st_mtime_ns, info.st_ino)
+    cached = _VERIFIED_LANDMARKER.get(key)
+    if cached is None:
+        cached = verified_bytes(FACE_LANDMARKER, path)
+        _VERIFIED_LANDMARKER.clear()
+        _VERIFIED_LANDMARKER[key] = cached
+    return cached
+
+
 def _facelandmarker_model_path() -> Path | None:
     """Resolve the FaceLandmarker .task asset, if one is provisioned."""
     override = os.environ.get(_FACE_LANDMARKER_ENV, "").strip()
@@ -817,6 +860,11 @@ def _facelandmarker_landmarks(image, x: int, y: int, w: int, h: int) -> list[tup
     model_path = _facelandmarker_model_path()
     if model_path is None:
         return None
+    # R15-3: the asset's bytes are checked against its pin (models/assets.json)
+    # and handed to MediaPipe as a buffer — an unpinned or different file is
+    # refused (AssetPinError "미고정 모델: face_landmarker.task", the face
+    # check is failed), never loaded and never silently skipped.
+    model_bytes = _verified_facelandmarker(model_path)
     try:
         import cv2
         import mediapipe as mp
@@ -830,7 +878,7 @@ def _facelandmarker_landmarks(image, x: int, y: int, w: int, h: int) -> list[tup
         if crop.size == 0:
             return None
         options = mp_vision.FaceLandmarkerOptions(
-            base_options=mp_python.BaseOptions(model_asset_path=str(model_path)),
+            base_options=mp_python.BaseOptions(model_asset_buffer=model_bytes),
             running_mode=mp_vision.RunningMode.IMAGE,
             num_faces=1,
             min_face_detection_confidence=0.5,

@@ -133,6 +133,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"sha256: {digest} (no --sha256 supplied; record this digest)" if not args.sha256 else f"sha256: {digest} (verified)")
     print(f"saved {dest} ({size_mib:.2f} MiB)")
     print("face.py auto-discovers face_landmarker.task in the effective models dir; DEEPFAKE_LENS_FACE_LANDMARKER overrides the path.")
+    # R15-3: an unpinned asset is never loaded (models/assets.json).
+    print("고정 필요(R15-3): 이 사본을 신뢰하면 `deepfake-lens vendor-weights pin-asset face_landmarker.task`로 sha256을 assets.json에 기록하십시오 — 고정 전에는 로드되지 않습니다(미고정 모델).")
     return 0
 
 

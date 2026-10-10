@@ -15,9 +15,13 @@ policy lives in one place:
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import os
+import threading
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any, Iterator
 
 
 def _expected_sha256(checkpoint: Path) -> str | None:
@@ -70,3 +74,35 @@ def load_torch_state(checkpoint: Path | str, *, expected_sha256: str | None = No
     import torch
 
     return torch.load(str(checkpoint), map_location="cpu", weights_only=True)
+
+
+# R15-3: one forced-weights_only window at a time (torch.load is module-global).
+_FORCE_LOCK = threading.Lock()
+
+
+@contextmanager
+def force_weights_only() -> Iterator[None]:
+    """R15-3 (round 15): every ``torch.load`` inside the block runs with ``weights_only=True``.
+
+    For third-party loaders we cannot route through :func:`load_torch_state`
+    (the SyncNet pipeline calls ``torch.load(path)`` itself): an explicit
+    ``weights_only=False`` is overridden too, so a checkpoint that needs
+    arbitrary unpickling fails to load (the check is ``failed``) instead of
+    running code. The paths those loaders get are private copies of verified
+    bytes (``model_assets.verified_copy``).
+    """
+    import torch
+
+    with _FORCE_LOCK:
+        original = torch.load
+
+        @functools.wraps(original)
+        def safe_load(*args: Any, **kwargs: Any) -> Any:
+            kwargs["weights_only"] = True
+            return original(*args, **kwargs)
+
+        torch.load = safe_load
+        try:
+            yield
+        finally:
+            torch.load = original

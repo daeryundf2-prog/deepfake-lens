@@ -58,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"  saved {target.stat().st_size} bytes -> {target}")
     print("Done. SyncNet path in deepfake_lens.lipsync will pick these up.")
+    # R15-3: unpinned weights are never handed to torch.load (models/assets.json).
+    print("고정 필요(R15-3): 두 파일을 신뢰하면 `deepfake-lens vendor-weights pin-asset sfd_face.pth`와 `… pin-asset syncnet_v2.model`로 sha256을 assets.json에 기록하십시오 — 고정 전에는 로드되지 않습니다(미고정 모델).")
     return 0
 
 

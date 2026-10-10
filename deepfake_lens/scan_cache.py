@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
 from .profile_pins import ModelPathArg, model_path_digest, pin_tokens, profile_pins
+from .model_assets import asset_pin_tokens
 from .result_types import ScanItem
 from .json_text import json_dumps
 from . import shutdown
@@ -752,7 +753,10 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    and an evidence folder named like a staging folder keeps its name (R14-4).
 # 2: R14-5 — a Haar cascade that does not load is a failed face / rPPG /
 #    lip-sync check, no longer "얼굴 미검출".
-OUTPUT_FORMAT_GENERATION = 2
+# 3: R15-3 — a model asset that is not pinned (models/assets.json) is a
+#    failed check "AssetPinError: 미고정 모델: <자산>" instead of being loaded
+#    (FaceLandmarker landmarks, SyncNet lip-sync, a Haar cascade override).
+OUTPUT_FORMAT_GENERATION = 3
 
 
 def cache_extension(path: Path) -> str:
@@ -775,6 +779,9 @@ def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | No
     from .core import TOOL_VERSION
 
     tokens = pin_tokens(profile_pins(models_dir, model_path))
+    # R15-3: the non-profile model assets' pins too — pinning a FaceLandmarker
+    # / SyncNet file turns a refused ("미고정 모델") check into one that ran.
+    tokens += asset_pin_tokens(models_dir)
     return f"tool:{TOOL_VERSION}|pins:{_short_digest(chr(10).join(tokens))}"
 
 

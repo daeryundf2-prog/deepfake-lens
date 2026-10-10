@@ -29,6 +29,8 @@ from .native_path import CascadeLoadError, native_safe_path, scratch_dir
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 from .vendor_weights import default_models_dir
 from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
+from .checkpoint_integrity import force_weights_only
+from .model_assets import S3FD_WEIGHTS, SYNCNET_WEIGHTS, AssetPinError, verified_copy
 from .shutdown import run_child
 
 # Correlation below this with clear speech activity = mismatch candidate.
@@ -241,33 +243,63 @@ _SYNCNET_PIPELINE = None
 _SYNCNET_FAILED = False
 
 
+def _syncnet_pipeline(models_dir: Path) -> Any:
+    """R15-3: the SyncNet pipeline built from the *verified* weights, or None when they are not provisioned.
+
+    Both weight files must be registered in the asset manifest with a
+    sha256 their bytes match (``model_assets``): an unpinned or different
+    file raises :class:`AssetPinError` "미고정 모델: …" — the lip-sync
+    check is ``failed`` — instead of being handed to the third-party
+    ``torch.load``. The pipeline gets private copies of the verified bytes
+    and loads them with ``weights_only=True`` forced; the copies are removed
+    once it has loaded.
+    """
+    from syncnet_python.syncnet_pipeline import SyncNetPipeline
+
+    s3fd = models_dir / S3FD_WEIGHTS
+    syncnet = models_dir / SYNCNET_WEIGHTS
+    if not (s3fd.is_file() and syncnet.is_file()):
+        return None
+    copies: list[str] = []
+    try:
+        copies.append(verified_copy(S3FD_WEIGHTS, s3fd))
+        copies.append(verified_copy(SYNCNET_WEIGHTS, syncnet))
+        with force_weights_only():
+            return SyncNetPipeline({"s3fd_weights": copies[0], "syncnet_weights": copies[1]}, device="cpu")
+    finally:
+        for copy in copies:
+            Path(copy).unlink(missing_ok=True)
+
+
 def _syncnet_analysis(video_path: Path) -> LipsyncAnalysis | None:
     """Pretrained SyncNet offset/confidence, or None when unavailable.
 
     Requires the optional ``syncnet-python`` package plus both weight
     files (``models/syncnet_v2.model`` ~2.6 MB, ``models/sfd_face.pth``
-    ~90 MB). Returns None on any failure so the heuristic path runs.
+    ~90 MB). Returns None on any failure so the heuristic path runs —
+    except R15-3: weights that are present but not pinned (or not the
+    pinned bytes) raise :class:`AssetPinError`.
     """
     global _SYNCNET_PIPELINE, _SYNCNET_FAILED
     if _SYNCNET_FAILED:
         return None
-    try:
+    if _SYNCNET_PIPELINE is None:
+        try:
+            import syncnet_python.syncnet_pipeline  # noqa: F401  (availability probe)
+        except ImportError:
+            _SYNCNET_FAILED = True
+            return None
+        try:
+            _SYNCNET_PIPELINE = _syncnet_pipeline(default_models_dir())
+        except AssetPinError:
+            raise  # R15-3: never latched — every video records the refusal
+        except Exception:
+            _SYNCNET_FAILED = True
+            return None
         if _SYNCNET_PIPELINE is None:
-            from syncnet_python.syncnet_pipeline import SyncNetPipeline
-
-            models_dir = default_models_dir()
-            s3fd = models_dir / "sfd_face.pth"
-            syncnet = models_dir / "syncnet_v2.model"
-            if not (s3fd.is_file() and syncnet.is_file()):
-                _SYNCNET_FAILED = True
-                return None
-            _SYNCNET_PIPELINE = SyncNetPipeline(
-                {
-                    "s3fd_weights": str(s3fd),
-                    "syncnet_weights": str(syncnet),
-                },
-                device="cpu",
-            )
+            _SYNCNET_FAILED = True
+            return None
+    try:
         import contextlib
         import sys
 
@@ -278,11 +310,8 @@ def _syncnet_analysis(video_path: Path) -> LipsyncAnalysis | None:
                 _SYNCNET_PIPELINE.inference(native_video)
             )
     except Exception:
-        # Latch only when the pipeline never constructed — a per-file
-        # inference failure (corrupt video, no decodable stream) must not
-        # permanently disable SyncNet for the rest of the process.
-        if _SYNCNET_PIPELINE is None:
-            _SYNCNET_FAILED = True
+        # A per-file inference failure (corrupt video, no decodable stream)
+        # must not permanently disable SyncNet for the rest of the process.
         return None
 
     limitations = [

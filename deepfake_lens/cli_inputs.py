@@ -313,7 +313,8 @@ INPUT_SPECS: dict[str, tuple[InputSpec, ...]] = {
     "models": (InputSpec("checkpoint", "file", None),),
     "web": (_folder("folder"), _folder("allow_root")),
     "api-serve": (_folder("allow_root"),),
-    "vendor-weights": (_folder("install"),),
+    # R15-3: pin-asset --asset-file — the model asset whose sha256 is recorded (any format).
+    "vendor-weights": (_folder("install"), InputSpec("asset_file", "file", None)),
     "corpus build": (_folder("folder"),),
     "corpus split": (InputSpec("manifest", "file", JSON_SUFFIXES),),
     "corpus verify": (InputSpec("manifest", "file", JSON_SUFFIXES), _folder("root")),
@@ -477,7 +478,7 @@ PATH_OPTIONS_READ_ONLY: dict[str, str] = {
 # examined folder) is listed here; a ``str`` argument whose help only
 # mentions a path word but takes no path is in STR_OPTIONS_NOT_PATHS.
 PATH_OPTIONS_EDITED_IN_PLACE: dict[str, str] = {
-    "profile": "vendor-weights pin: 모델 프로필 이름 또는 그 JSON 파일 — pin 값을 그 프로필 파일에 기록(감정 대상 폴더와 무관)",
+    "profile": "vendor-weights pin: 모델 프로필 이름 또는 그 JSON 파일 — pin 값을 그 프로필 파일에 기록(감정 대상 폴더와 무관); pin-asset: 자산 이름 — 모델 폴더의 assets.json에 기록(R15-3)",
 }
 STR_OPTIONS_NOT_PATHS: dict[str, str] = {
     "corpus_id": "corpus build --corpus-id: 코퍼스 식별자(문자열) — 도움말의 '폴더 이름'은 기본값 설명",

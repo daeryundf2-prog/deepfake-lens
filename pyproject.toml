@@ -168,6 +168,8 @@ files = [
     "deepfake_lens/tests/test_native_path.py",
     "deepfake_lens/check_skipped.py",
     "deepfake_lens/shutdown.py",
+    "deepfake_lens/model_assets.py",
+    "deepfake_lens/tests/test_model_assets.py",
     "deepfake_lens/tests/test_shutdown.py",
     "deepfake_lens/tests/test_archive_duplicates.py",
     "deepfake_lens/tests/test_path_b64.py",

@@ -133,7 +133,12 @@ BUILDERS: dict[str, Builder] = {
     "models": lambda fx, bad: ["models", "--checkpoint", bad.get("checkpoint", str(fx.ckpt)), "--profile-out", _o(fx, "prof.json")],
     "web": lambda fx, bad: ["web", "--folder", bad.get("folder", str(fx.folder)), "--allow-root", bad.get("allow_root", str(fx.folder))],
     "api-serve": lambda fx, bad: ["api-serve", "--allow-root", bad.get("allow_root", str(fx.folder))],
-    "vendor-weights": lambda fx, bad: ["vendor-weights", "--install", bad.get("install", str(fx.folder))],
+    # R15-3: pin-asset --asset-file is an input too (the asset whose sha256 is recorded).
+    "vendor-weights": lambda fx, bad: (
+        ["vendor-weights", "pin-asset", "face_landmarker.task", "--asset-file", bad["asset_file"], "--models-dir", str(fx.folder)]
+        if "asset_file" in bad
+        else ["vendor-weights", "--install", bad.get("install", str(fx.folder))]
+    ),
     "corpus build": lambda fx, bad: ["corpus", "build", bad.get("folder", str(fx.folder)), "--out", _o(fx, "cm.json")],
     "corpus split": lambda fx, bad: ["corpus", "split", "--manifest", bad.get("manifest", str(fx.json)), "--seed", "1"],
     "corpus verify": lambda fx, bad: ["corpus", "verify", "--manifest", bad.get("manifest", str(fx.json)), "--root", bad.get("root", str(fx.folder))],

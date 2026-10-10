@@ -612,8 +612,9 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     evidence_stmt_parser.add_argument("--allow-symlinks", action="store_true", help="폴더 입력: 심볼릭 링크를 따라가 분석(scan과 같음)")
 
     vendor_parser = subparsers.add_parser("vendor-weights", help="망분리 감정실용 모델 가중치 검증·고정·오프라인 묶음")
-    vendor_parser.add_argument("action", nargs="?", choices=["pin"], help="'pin <프로필>': 체크포인트 sha256 또는 허브 커밋 revision을 프로필 pin에 기록")
-    vendor_parser.add_argument("profile", nargs="?", help="'pin' 대상 프로필 이름(예: aasist) 또는 경로")
+    vendor_parser.add_argument("action", nargs="?", choices=["pin", "pin-asset"], help="'pin <프로필>': 체크포인트 sha256 또는 허브 커밋 revision을 프로필 pin에 기록; 'pin-asset <자산>'(R15-3): 프로필이 아닌 모델 자산(face_landmarker.task, syncnet_v2.model, sfd_face.pth 등)의 sha256을 모델 폴더의 assets.json에 기록")
+    vendor_parser.add_argument("profile", nargs="?", help="'pin' 대상 프로필 이름(예: aasist) 또는 경로; 'pin-asset' 대상 자산 이름")
+    vendor_parser.add_argument("--asset-file", type=Path, help="'pin-asset'에서 해시를 잴 자산 파일(기본: 모델 폴더의 <자산 이름>) — 읽기만 함")
     vendor_parser.add_argument("--revision", help="허브 모델 'pin'에서 허브 조회 대신 쓸 40자리 16진 커밋")
     vendor_parser.add_argument("--models-dir", type=Path, help="모델 폴더 경로(기본: 패키지 models/)")
     vendor_parser.add_argument("--verify", action="store_true", help="오프라인 가중치의 SHA-256 무결성 검증")

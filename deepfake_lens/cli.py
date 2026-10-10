@@ -181,6 +181,22 @@ def _parse_realtime_scores(raw: str | None) -> list[int]:
     return scores
 
 
+def _vendor_weights_pin_asset(args: argparse.Namespace) -> int:
+    """R15-3: ``vendor-weights pin-asset <자산>`` — record a non-profile model asset's sha256 (models/assets.json)."""
+    from .model_assets import pin_asset
+
+    if not args.profile:
+        print("오류: 'vendor-weights pin-asset'에는 자산 이름이 필요합니다(예: face_landmarker.task)", file=sys.stderr)
+        return 2
+    try:
+        result = pin_asset(args.profile, args.asset_file, args.models_dir)
+    except (OSError, ValueError) as exc:
+        print(f"오류: 자산 고정 실패 — {escape_echo(exc)}", file=sys.stderr)
+        return 1
+    print(json_dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _vendor_weights_pin(args: argparse.Namespace) -> int:
     """``vendor-weights pin <profile>``: write the profile's weight pin (G9)."""
     if not args.profile:
@@ -1062,6 +1078,8 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
     if args.command == "vendor-weights":
         if args.action == "pin":
             return _vendor_weights_pin(args)
+        if args.action == "pin-asset":
+            return _vendor_weights_pin_asset(args)
         _modes =[bool(args.fetch), bool(args.verify), bool(args.bundle_to), bool(args.install), bool(args.manifest_out)]
         if sum(_modes) > 1:
             print("오류: vendor-weights 옵션은 함께 쓸 수 없습니다 — --fetch/--verify/--bundle-to/--install/--manifest-out 중 하나만 지정하십시오", file=sys.stderr)

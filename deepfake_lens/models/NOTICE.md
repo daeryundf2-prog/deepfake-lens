@@ -32,6 +32,10 @@ The profile table is generated from each profile's `source_url` and
 
 Profiles removed in phase 0 are listed in `docs/MODEL-REJECTIONS.md`.
 
+Every asset in this section and the next is registered in `assets.json`
+(R15-3: name, sha256, source, license) and loaded only when its bytes match
+the pin.
+
 ## Bundled detector assets
 
 - `haarcascade_frontalface_default.xml` — OpenCV frontal-face cascade

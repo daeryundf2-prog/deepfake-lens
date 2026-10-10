@@ -1,0 +1,34 @@
+{
+  "schema": "model-assets-v1",
+  "note": "R15-3: model assets that are not runtime profiles. A loader reads the asset's bytes once, checks them against sha256 here and hands the loader exactly those bytes; an asset that is not registered, has an empty sha256 or does not match is refused (coverage failed \"미고정 모델: <자산>\"). Empty sha256 = no official digest published: pin a copy you trust with `deepfake-lens vendor-weights pin-asset <name>` (writes <models dir>/assets.json).",
+  "assets": [
+    {
+      "name": "haarcascade_frontalface_default.xml",
+      "sha256": "0f7d4527844eb514d4a4948e822da90fbb16a34a0bbbbc6adc6498747a5aafb0",
+      "source": "OpenCV data/haarcascades/haarcascade_frontalface_default.xml (bundled in deepfake_lens/models; cv2.data copy and DEEPFAKE_LENS_HAAR_CASCADE must have the same bytes)",
+      "license": "Intel License Agreement for Open Source Computer Vision Library (BSD-3-Clause-style, header of the XML)",
+      "used_by": "face.py, rppg.py, lipsync.py (Haar frontal-face detection)"
+    },
+    {
+      "name": "face_landmarker.task",
+      "sha256": "",
+      "source": "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task (scripts/fetch_facelandmarker.py; or DEEPFAKE_LENS_FACE_LANDMARKER)",
+      "license": "Apache-2.0 (MediaPipe model card) — verify at https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker",
+      "used_by": "face.py (Tasks-API FaceLandmarker landmarks)"
+    },
+    {
+      "name": "syncnet_v2.model",
+      "sha256": "",
+      "source": "https://www.robots.ox.ac.uk/~vgg/software/lipsync/data/syncnet_v2.model (scripts/fetch_syncnet.py)",
+      "license": "Research/non-commercial (Oxford VGG hosting terms) — do not redistribute",
+      "used_by": "lipsync.py (SyncNet audio-visual offset)"
+    },
+    {
+      "name": "sfd_face.pth",
+      "sha256": "",
+      "source": "https://www.robots.ox.ac.uk/~vgg/software/lipsync/data/sfd_face.pth (scripts/fetch_syncnet.py)",
+      "license": "Research/non-commercial (Oxford VGG hosting terms) — do not redistribute",
+      "used_by": "lipsync.py (S3FD face detector of the SyncNet pipeline)"
+    }
+  ]
+}
