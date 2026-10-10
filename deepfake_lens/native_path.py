@@ -63,9 +63,16 @@ When no route works (copy over the cap, no ASCII temp folder)
 needed the decoder is recorded as ``failed`` — never silently skipped,
 never handed the raw name.
 
+R13-7 (round 13): OpenCV *writes* take the same narrow name, and their
+target is a temp folder that is non-ASCII under a Korean Windows user name
+(a non-UTF-8 TMPDIR crashed the process): :func:`imwrite_any` encodes in
+memory and writes with Python instead of ``cv2.imwrite``.
+
 ``deepfake_lens/tests/test_native_path.py`` holds the AST meta-test that
-every native call site in the package is inside ``with
-native_safe_path(...) as <name>:`` and passes ``<name>``.
+every native call site in the package (sub-packages included, aliases
+such as ``import cv2 as cv`` resolved) is inside ``with
+native_safe_path(...) as <name>:`` and passes ``<name>``, and that no
+``cv2.imwrite`` / ``cv2.VideoWriter`` call remains.
 """
 
 from __future__ import annotations
@@ -553,6 +560,27 @@ def _unlink_staged(staged: str) -> None:
             logger.warning("native_safe_path: staged name %s not removed", staged)
 
 
+def imwrite_any(path: str | os.PathLike[str], image: Any, params: list[int] | tuple[int, ...] = ()) -> bool:
+    """R13-7 (round 13): ``cv2.imwrite`` for any path — encoded in memory, written by Python.
+
+    ``cv2.imwrite`` takes a narrow ``char*`` name: a temp folder under a
+    Korean Windows user name (``C:\\Users\\김…\\AppData\\Local\\Temp``) is not
+    writable through it, and a non-UTF-8 POSIX TMPDIR crashes the process
+    (SIGSEGV, like ``cv2.VideoCapture`` before R12-1). ``cv2.imencode`` takes
+    the extension only; Python's ``open`` takes any name. False when the
+    image cannot be encoded (as ``cv2.imwrite`` returns False).
+    """
+    import cv2
+
+    suffix = os.path.splitext(os.fspath(path))[1] or ".png"
+    ok, encoded = cv2.imencode(suffix, image, list(params))
+    if not ok:
+        return False
+    with open(path, "wb") as handle:
+        handle.write(encoded.tobytes())
+    return True
+
+
 def staged_names() -> list[str]:
     """Names currently in the session folder (for tests)."""
     with _LOCK:
@@ -567,6 +595,7 @@ __all__ = [
     "NATIVE_COPY_MAX_BYTES",
     "NativePathError",
     "cleanup_session",
+    "imwrite_any",
     "install_cleanup_handlers",
     "is_native_safe",
     "native_safe_path",

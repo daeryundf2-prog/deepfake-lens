@@ -7,7 +7,7 @@ import logging
 from dataclasses import replace
 from pathlib import Path
 
-from .native_path import native_safe_path
+from .native_path import imwrite_any, native_safe_path
 from .checkpoint_integrity import _expected_sha256, load_torch_state  # noqa: F401 — load_torch_state re-exported
 from .model_pins import PIN_FIELD, PinError, verify_pin
 from .model_cache import (  # noqa: F401 — re-exported for existing callers/tests
@@ -816,15 +816,15 @@ def _score_face_crops(crops: list, profile: dict[str, object], *, base_dir: Path
     """
     import tempfile
 
-    import cv2
-
     inner = {key: value for key, value in profile.items() if key not in {"crop_faces", "requires_face", "crop_aggregate", "crop_margin"}}
     aggregate = str(profile.get("crop_aggregate") or "max").lower()
     results: list[ExternalModelAnalysis] = []
     with tempfile.TemporaryDirectory(prefix="dfl-faces-") as tmp_dir:
         for index, crop in enumerate(crops):
             crop_path = Path(tmp_dir) / f"face_{index}.png"
-            cv2.imwrite(str(crop_path), crop)
+            # R13-7: never cv2.imwrite — the temp folder may be non-ASCII.
+            if not imwrite_any(crop_path, crop):
+                continue
             result = _score_from_runtime_profile(inner, crop_path, base_dir=base_dir, pin_verified=True)
             if result is not None:
                 results.append(result)
@@ -916,7 +916,9 @@ def _run_video_frames(
             scored_frames.append(
                 {
                     "frame": index,
-                    "path": str(frame_path),
+                    # R13-7: the frame file's name, not its random temp path
+                    # (a scan's output never depends on a temp folder name).
+                    "path": frame_path.name,
                     "failed": bool(result and result.confidence == FAILED_CONFIDENCE),
                     "available": bool(result and result.available),
                     "score": result.score if result else 0,
@@ -982,8 +984,8 @@ def _extract_sampled_frames(cv2, media_path: Path, out_dir: Path, count: int) ->
                     break
                 if current == target:
                     out_path = out_dir / f"frame-{current:05d}.png"
-                    cv2.imwrite(str(out_path), frame)
-                    if out_path.is_file():
+                    # R13-7: never cv2.imwrite — the temp folder may be non-ASCII.
+                    if imwrite_any(out_path, frame) and out_path.is_file():
                         frames.append(out_path)
                     target = next(wanted, None)
                 current += 1

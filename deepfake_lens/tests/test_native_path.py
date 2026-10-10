@@ -357,6 +357,92 @@ class WindowsStagingOrderTest(unittest.TestCase):
             self.assertIsNone(native_path._short_path_name(str(self.source)))
 
 
+@unittest.skipUnless(HAVE_CV2, "opencv not installed")
+class NonAsciiTempFolderTest(unittest.TestCase):
+    """R13-7 (round 13): face crops and video frames are written into a non-ASCII temp folder.
+
+    ``cv2.imwrite`` wrote them under ``tempfile`` — a Korean Windows user name
+    puts Korean in that path, which OpenCV's narrow name cannot open, and a
+    non-UTF-8 TMPDIR crashed the process (SIGSEGV). Run in a child process so
+    a crash is an assertion, not the end of the test run.
+    """
+
+    SCRIPT = textwrap.dedent(
+        """
+        import json, sys, tempfile
+        from pathlib import Path
+        from unittest import mock
+        import cv2, numpy as np
+        from deepfake_lens import model_adapter
+        from deepfake_lens.result_types import ExternalModelAnalysis
+        assert not tempfile.gettempdir().isascii(), tempfile.gettempdir()
+        seen = []
+        def fake_score(profile, path, **kwargs):
+            from PIL import Image
+            with Image.open(path) as image:
+                image.load()
+                seen.append(list(image.size))
+            return ExternalModelAnalysis(available=True, score=40, confidence="reference", model="fake", detail="ok")
+        crops = [np.full((40 + 8 * i, 48, 3), 60 * i, np.uint8) for i in range(3)]
+        with mock.patch.object(model_adapter, "_score_from_runtime_profile", fake_score):
+            result = model_adapter._score_face_crops(crops, {"runtime": "onnx"}, base_dir=Path("."), model_name="fake", profile_limitations=[])
+        with tempfile.TemporaryDirectory(prefix="dfl-frames-") as tmp:
+            assert not tmp.isascii()
+            frames = model_adapter._extract_sampled_frames(cv2, Path(sys.argv[1]), Path(tmp), 4)
+            decoded = [cv2.imdecode(np.fromfile(str(f), np.uint8), cv2.IMREAD_COLOR).shape[:2] for f in frames]
+        print(json.dumps({"seen": seen, "available": result.available, "decoded": [list(d) for d in decoded]}))
+        """
+    )
+
+    def test_crops_and_frames_under_a_korean_or_non_utf8_temp_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            video = root / "clip.mp4"
+            video.write_bytes(_mp4_bytes(root))
+            for label, name in (("korean", "임시 폴더".encode()), ("non-utf8", b"tmp" + CP949_STEM)):
+                with self.subTest(label):
+                    folder = os.fsencode(root) + b"/" + name
+                    try:
+                        os.mkdir(folder)
+                    except (OSError, UnicodeError):
+                        self.skipTest(NON_UTF8_SKIP)
+                    env = {**_child_env(root / "home"), "TMPDIR": os.fsdecode(folder)}
+                    proc = subprocess.run(
+                        [sys.executable, "-c", self.SCRIPT, str(video)], capture_output=True, env=env, timeout=CHILD_TIMEOUT_SECONDS, cwd=str(root)
+                    )
+                    self.assertEqual(proc.returncode, 0, (label, proc.returncode, proc.stderr[-800:]))
+                    out = json.loads(proc.stdout.decode("utf-8").strip().splitlines()[-1])
+                    self.assertEqual(out["seen"], [[48, 40], [48, 48], [48, 56]], label)  # every crop written and read back
+                    self.assertTrue(out["available"], label)
+                    self.assertEqual(len(out["decoded"]), 4, label)
+                    self.assertTrue(all(shape == [64, 64] for shape in out["decoded"]), out)
+                    self.assertEqual(os.listdir(folder), [], f"{label}: temp files left behind")
+
+    def test_frame_rows_name_the_frame_not_its_temp_path(self) -> None:
+        """R13-7: a per-frame row named its random temp file ("/tmp/dfl-frames-x1y2/frame-00003.png")."""
+        import re
+
+        from deepfake_lens import model_adapter
+        from deepfake_lens.result_types import ExternalModelAnalysis
+
+        def fake_score(profile: object, path: Path, **kwargs: object) -> ExternalModelAnalysis:
+            self.assertTrue(Path(path).is_file())
+            return ExternalModelAnalysis(available=True, score=40, confidence="reference", model="fake", detail="ok")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video = root / "clip.mp4"
+            video.write_bytes(_mp4_bytes(root))
+            profile = {"runtime": "video-frames", "frames": 3, "inner": {"runtime": "onnx", "checkpoint": "absent.onnx"}}
+            with mock.patch.object(model_adapter, "_score_from_runtime_profile", fake_score):
+                result = model_adapter._run_video_frames(video, profile, model_name="fake", base_dir=root)
+        paths = [entry["path"] for entry in result.models]
+        self.assertEqual(len(paths), 3, result.models)
+        for path in paths:
+            self.assertRegex(str(path), r"^frame-\d{5}\.png$")
+        self.assertIsNone(re.search(r"dfl-frames-|[\\/]", " ".join(map(str, paths))))
+
+
 @unittest.skipIf(os.name == "nt", "POSIX signals")
 class SessionFolderCleanupTest(unittest.TestCase):
     """R13-4 (round 13): the staging folder does not outlive the process.
@@ -521,15 +607,55 @@ NATIVE_CALLS = {
 }
 
 
+# R13-7 (round 13): OpenCV writers take a narrow file name too — a non-ASCII
+# temp folder (a Korean Windows user name; a non-UTF-8 TMPDIR crashed the
+# process). They are not allowed anywhere in the package: native_path.
+# imwrite_any encodes in memory and writes with Python.
+BANNED_NATIVE_WRITES = {("cv2", "imwrite"), ("cv2", "VideoWriter")}
+
+
 def _names(node: ast.AST) -> set[str]:
     return {sub.id for sub in ast.walk(node) if isinstance(sub, ast.Name)}
 
 
+def _import_aliases(tree: ast.AST) -> tuple[dict[str, str], dict[str, tuple[str, str]]]:
+    """R13-7: ``{local name: module}`` and ``{local name: (module, attribute)}`` of a module.
+
+    ``import cv2 as cv``, ``X = importlib.import_module("cv2")`` and
+    ``from cv2 import imread as read`` all name the same native calls.
+    """
+    modules: dict[str, str] = {}
+    members: dict[str, tuple[str, str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                modules[alias.asname or alias.name.split(".")[0]] = alias.name.split(".")[0] if alias.asname is None else alias.name
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            for alias in node.names:
+                members[alias.asname or alias.name] = (node.module.split(".")[0], alias.name)
+        elif (
+            isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute)
+            and node.value.func.attr == "import_module"
+            and node.value.args
+            and isinstance(node.value.args[0], ast.Constant)
+            and isinstance(node.value.args[0].value, str)
+        ):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    modules[target.id] = node.value.args[0].value.split(".")[0]
+    return modules, members
+
+
 class _NativeCallVisitor(ast.NodeVisitor):
-    def __init__(self) -> None:
+    def __init__(self, tree: ast.AST | None = None) -> None:
         # Stack of (with-target name, names derived from it inside the block).
         self.scopes: list[tuple[str, set[str]]] = []
         self.sites: list[tuple[int, str, bool]] = []
+        # R13-7: banned writer calls (line, call).
+        self.banned: list[tuple[int, str]] = []
+        self.modules, self.members = _import_aliases(tree) if tree is not None else ({}, {})
 
     def visit_With(self, node: ast.With) -> None:
         pushed = 0
@@ -556,15 +682,24 @@ class _NativeCallVisitor(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         func = node.func
+        keys: set[tuple[str, str]] = set()
+        shown = ""
         if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-            key = (func.value.id, func.attr)
-            # pymupdf.open() with no argument creates a new document — no file name.
-            if key in NATIVE_CALLS and (node.args or node.keywords):
-                used: set[str] = set()
-                for arg in [*node.args, *(kw.value for kw in node.keywords)]:
-                    used |= _names(arg)
-                ok = any(used & derived for _, derived in self.scopes)
-                self.sites.append((node.lineno, f"{func.value.id}.{func.attr}", ok))
+            # The spelled name (``sf.read``) and the module it stands for (R13-7: ``cv.imread``).
+            keys = {(func.value.id, func.attr), (self.modules.get(func.value.id, func.value.id), func.attr)}
+            shown = f"{func.value.id}.{func.attr}"
+        elif isinstance(func, ast.Name) and func.id in self.members:
+            keys = {self.members[func.id]}  # R13-7: ``from cv2 import imread``
+            shown = ".".join(self.members[func.id])
+        if keys & BANNED_NATIVE_WRITES:
+            self.banned.append((node.lineno, shown))
+        # pymupdf.open() with no argument creates a new document — no file name.
+        if keys & NATIVE_CALLS and (node.args or node.keywords):
+            used: set[str] = set()
+            for arg in [*node.args, *(kw.value for kw in node.keywords)]:
+                used |= _names(arg)
+            ok = any(used & derived for _, derived in self.scopes)
+            self.sites.append((node.lineno, shown, ok))
         self.generic_visit(node)
 
 
@@ -574,17 +709,24 @@ class NativeCallMetaTest(unittest.TestCase):
     def test_every_native_call_site_uses_native_safe_path(self) -> None:
         offenders: list[str] = []
         seen: list[str] = []
-        for source in sorted(PACKAGE.glob("*.py")):
+        # R13-7: every package module, sub-packages included (the tests write
+        # their fixtures into ASCII temp folders and are not package code).
+        sources = [path for path in sorted(PACKAGE.rglob("*.py")) if "tests" not in path.relative_to(PACKAGE).parts]
+        self.assertIn(PACKAGE / "native_path.py", sources)
+        for source in sources:
+            label = source.relative_to(PACKAGE).as_posix()
             tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
             for node in ast.walk(tree):
                 if isinstance(node, ast.ImportFrom) and node.module == "subprocess":
-                    offenders.append(f"{source.name}:{node.lineno} from subprocess import … (bypasses the check)")
-            visitor = _NativeCallVisitor()
+                    offenders.append(f"{label}:{node.lineno} from subprocess import … (bypasses the check)")
+            visitor = _NativeCallVisitor(tree)
             visitor.visit(tree)
             for line, call, ok in visitor.sites:
-                seen.append(f"{source.name}:{call}")
+                seen.append(f"{label}:{call}")
                 if not ok:
-                    offenders.append(f"{source.name}:{line} {call} outside `with native_safe_path(...) as <name>`")
+                    offenders.append(f"{label}:{line} {call} outside `with native_safe_path(...) as <name>`")
+            for line, call in visitor.banned:
+                offenders.append(f"{label}:{line} {call} (R13-7: use native_path.imwrite_any)")
         self.assertEqual(offenders, [])
         # Non-vacuous: the known sites were found.
         for expected in (
@@ -620,6 +762,30 @@ class NativeCallMetaTest(unittest.TestCase):
         visitor = _NativeCallVisitor()
         visitor.visit(ast.parse(bad))
         self.assertEqual([ok for _, _, ok in visitor.sites], [False])
+
+    def test_the_visitor_resolves_aliases_and_bans_writers(self) -> None:
+        """R13-7: ``import cv2 as cv``, ``from cv2 import …`` and import_module are seen; writers are banned."""
+        bad = textwrap.dedent(
+            """
+            import importlib
+            import cv2 as cv
+            from cv2 import imread as read, imwrite
+            def f(path, image):
+                cv.VideoCapture(path)
+                read(path)
+                cv.imwrite(path, image)
+                imwrite(path, image)
+                ocv = importlib.import_module("cv2")
+                ocv.VideoWriter(path, 0, 1.0, (2, 2))
+                with native_safe_path(path) as native:
+                    cv.imread(native)
+            """
+        )
+        tree = ast.parse(bad)
+        visitor = _NativeCallVisitor(tree)
+        visitor.visit(tree)
+        self.assertEqual([(call, ok) for _, call, ok in visitor.sites], [("cv.VideoCapture", False), ("cv2.imread", False), ("cv.imread", True)])
+        self.assertEqual([call for _, call in visitor.banned], ["cv.imwrite", "cv2.imwrite", "ocv.VideoWriter"])
 
 
 class NonUtf8MediaEndToEndTest(unittest.TestCase):
