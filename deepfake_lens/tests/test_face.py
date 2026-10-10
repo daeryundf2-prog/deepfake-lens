@@ -30,8 +30,11 @@ def _has_cv2() -> bool:
 
 def _has_mediapipe() -> bool:
     try:
-        import mediapipe  # noqa: F401
+        # R15-8: through the package's helper — a plain import ran sounddevice's
+        # find_library (ldconfig/gcc/ld) in the test process too.
+        from deepfake_lens.mediapipe_import import import_mediapipe
 
+        import_mediapipe()
         return True
     except ImportError:
         return False

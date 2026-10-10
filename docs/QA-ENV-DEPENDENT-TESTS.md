@@ -112,6 +112,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `without torch the script exits at the dependency check first` | `text_lm` extra(torch) | test_aasist_engine.py |
 | `` {FIXTURE_DIR} missing — run `python scripts/make_benchmark_fixtures.py` `` | `scripts/make_benchmark_fixtures.py`로 만든 픽스처 | test_benchmark_e2e.py |
 | `대조군: 이 onnxruntime은 텔레메트리 파일을 만들지 않음` | onnxruntime이 가져올 때 텔레메트리 장치 ID를 쓰는 환경(1.2x Linux 휠, R15-2) — 그렇지 않은 버전에서는 대조군이 성립하지 않아 건너뜀 | test_telemetry.py |
+| `대조군: 이 환경의 mediapipe 가져오기는 자식 프로세스를 띄우지 않음` | mediapipe 가져오기가 sounddevice→ctypes.util.find_library로 ldconfig/gcc/ld를 띄우는 환경(Linux, R15-8) — 그렇지 않은 환경에서는 대조군이 성립하지 않아 건너뜀 | test_mediapipe_import.py |
 | `파일 시스템이 UTF-8이 아닌 파일 이름을 허용하지 않음(Windows·macOS)` | UTF-8이 아닌 바이트 파일 이름을 허용하는 파일 시스템(리눅스 ext4·tmpfs 등) | test_corpus_manifest.py, test_native_path.py, test_non_utf8_names.py, test_path_b64.py |
 
 ## 환경 의존 기준선 테스트

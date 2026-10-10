@@ -38,6 +38,8 @@ from .vendor_weights import default_models_dir
 from .native_path import CascadeLoadError, NativePathError, load_cascade
 from .model_assets import FACE_LANDMARKER, HAAR_FRONTALFACE, AssetPinError, verified_bytes, verified_copy
 from .native_stderr import quiet_native_stderr
+# R15-8: MediaPipe is imported with sounddevice blocked (no ldconfig/gcc/ld children, no TMPDIR files).
+from .mediapipe_import import import_mediapipe
 
 
 @dataclass(frozen=True)
@@ -382,7 +384,7 @@ def face_detector_unavailable_reason(*, require_landmarks: bool = False) -> str 
         return "opencv 없음"
     if require_landmarks:
         try:
-            import mediapipe  # noqa: F401
+            import_mediapipe()
         except ImportError:
             return "실측 랜드마크 검출기 없음: mediapipe"
         return None
@@ -490,7 +492,7 @@ def _mediapipe_detect_faces(image: Any, max_faces: int = 3, *, strict: bool = Fa
     """
     try:
         import cv2
-        import mediapipe as mp
+        mp = import_mediapipe()
     except ImportError as exc:
         if strict:
             raise FaceDetectorUnavailable(f"mediapipe 없음: {exc}") from exc
@@ -813,7 +815,7 @@ def _mediapipe_landmarks(image, x: int, y: int, w: int, h: int) -> list[tuple[in
     """
     try:
         import cv2
-        import mediapipe as mp
+        mp = import_mediapipe()
     except ImportError:
         return None
 
@@ -867,9 +869,9 @@ def _facelandmarker_landmarks(image, x: int, y: int, w: int, h: int) -> list[tup
     model_bytes = _verified_facelandmarker(model_path)
     try:
         import cv2
-        import mediapipe as mp
-        from mediapipe.tasks import python as mp_python
-        from mediapipe.tasks.python import vision as mp_vision
+        mp = import_mediapipe()
+        mp_python = import_mediapipe("mediapipe.tasks.python")
+        mp_vision = import_mediapipe("mediapipe.tasks.python.vision")
     except (ImportError, AttributeError):
         return None
 

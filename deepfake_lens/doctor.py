@@ -105,6 +105,11 @@ def _import_dependency(name: str) -> Any:
         from .pdf_backend import import_pymupdf
 
         return import_pymupdf()
+    if name == "mediapipe":
+        # R15-8: without sounddevice's find_library (ldconfig/gcc/ld children, TMPDIR files).
+        from .mediapipe_import import import_mediapipe
+
+        return import_mediapipe()
     return importlib.import_module(name)
 
 

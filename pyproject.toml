@@ -170,6 +170,8 @@ files = [
     "deepfake_lens/tests/test_native_path.py",
     "deepfake_lens/check_skipped.py",
     "deepfake_lens/shutdown.py",
+    "deepfake_lens/mediapipe_import.py",
+    "deepfake_lens/tests/test_mediapipe_import.py",
     "deepfake_lens/tests/golden_output.py",
     "deepfake_lens/tests/test_output_generation.py",
     "deepfake_lens/telemetry_opt_out.py",
