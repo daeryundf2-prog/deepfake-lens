@@ -17,6 +17,7 @@ from .error_text import exception_text, failure_reason
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
 from .native_path import native_safe_path, scratch_dir
 from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
+from .shutdown import run_child
 
 
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wma", ".opus"}
@@ -932,7 +933,6 @@ def _ecapa_load_waveform(path: Path):
     mishandles absolute Windows paths, so we hand it tensors via
     verify_batch instead of filenames.
     """
-    import subprocess
     import tempfile
 
     def _read(wav_path: Path):
@@ -960,7 +960,7 @@ def _ecapa_load_waveform(path: Path):
         fd, tmp = tempfile.mkstemp(suffix=".wav", dir=scratch_dir())
         os.close(fd)
         with native_safe_path(path) as native_audio:  # R12-1
-            subprocess.run(
+            run_child(  # R15-1: a tracked child, stopped by the shutdown cleanup
                 ["ffmpeg", *FFMPEG_QUIET_ARGS, "-y", "-i", native_audio, "-ac", "1", "-ar", "16000", tmp],
                 capture_output=True, check=True, timeout=120,
             )

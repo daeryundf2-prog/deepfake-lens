@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterable
 from .native_path import NativePathError, native_safe_path
 from .native_stderr import FFMPEG_QUIET_ARGS
+from .shutdown import run_child
 from .json_text import json_dumps
 
 
@@ -108,7 +109,8 @@ def extract_video_frames(plan: dict[str, object], *, limit: int | None = None) -
         try:
             with native_safe_path(command[source_index] if source_index > 0 else "") as native_source:
                 staged = [native_source if index == source_index else part for index, part in enumerate(command)]
-                completed = subprocess.run(staged, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=FFMPEG_TIMEOUT_SECONDS)
+                completed = run_child(staged, check=False,  # R15-1: tracked child
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=FFMPEG_TIMEOUT_SECONDS)
         except NativePathError as exc:
             results.append({"path": item.get("path", ""), "returncode": -1, "stderr": str(exc)})
             continue

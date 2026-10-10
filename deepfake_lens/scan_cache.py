@@ -17,6 +17,7 @@ from typing import Any, Callable, Iterable, Iterator
 from .profile_pins import ModelPathArg, model_path_digest, pin_tokens, profile_pins
 from .result_types import ScanItem
 from .json_text import json_dumps
+from . import shutdown
 
 
 def _scan_order_key(root: Path) -> Callable[[Path], str]:
@@ -619,6 +620,10 @@ ROW_NAME_KEYS = ("path", "name", "display_name", "path_b64", "member")
 
 def _write_scan_cache(cache_path: Path | None, cache: dict[str, object]) -> None:
     if cache_path is None:
+        return
+    if shutdown.active():
+        # R15-1: the process is ending — rows made now may carry checks
+        # refused "종료 중"; such a row must never be replayed by a later scan.
         return
     try:
         cache_path.parent.mkdir(parents=True, exist_ok=True)

@@ -275,7 +275,8 @@ class AvAudioCoverageTest(unittest.TestCase):
         )
         for patcher in (
             mock.patch("shutil.which", return_value="/usr/bin/ffmpeg"),
-            mock.patch("subprocess.run", side_effect=fake_run),
+            # R15-1: ffmpeg runs through shutdown.run_child (a tracked child), not subprocess.run.
+            mock.patch("deepfake_lens.video_analysis.run_child", side_effect=fake_run),
             mock.patch("deepfake_lens.core.analyze_video_temporal", return_value=stub),
         ):
             patcher.start()
@@ -340,6 +341,7 @@ class AvAudioCoverageTest(unittest.TestCase):
         with mock.patch("shutil.which", return_value=None):
             _, entry = self._av_entry()
         self.assertEqual((entry.status, entry.reason), (CoverageStatus.SKIPPED, "의존성 부재: ffmpeg"))
-        with mock.patch("subprocess.run", return_value=subprocess.CompletedProcess([], 1, b"", b"no audio")):
+        # R15-1: ffmpeg runs through shutdown.run_child (a tracked child), not subprocess.run.
+        with mock.patch("deepfake_lens.video_analysis.run_child", return_value=subprocess.CompletedProcess([], 1, b"", b"no audio")):
             _, entry = self._av_entry()
         self.assertEqual((entry.status, entry.reason), (CoverageStatus.SKIPPED, AV_AUDIO_NO_TRACK_REASON))

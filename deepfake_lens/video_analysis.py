@@ -19,6 +19,7 @@ from .model_adapter import ExternalModelAnalysis, analyze_external_model
 from .result_types import CoverageEntry, CoverageStatus
 from .native_path import NativePathError, native_safe_path, scratch_dir
 from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
+from .shutdown import run_child
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +237,7 @@ def audio_track_check(
             tmp_name = tmp.name
         try:
             with native_safe_path(video_path) as native_video:  # R12-1
-                proc = subprocess.run(
+                proc = run_child(  # R15-1: a tracked child, stopped by the shutdown cleanup
                     [ffmpeg, *FFMPEG_QUIET_ARGS, "-y", "-i", native_video, "-vn", "-ac", "1", "-ar", "16000", tmp_name],
                     capture_output=True, timeout=120,
                 )

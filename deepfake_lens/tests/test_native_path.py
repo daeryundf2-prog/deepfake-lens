@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any, Iterator
 from unittest import mock
 
-from deepfake_lens import native_path
+from deepfake_lens import native_path, shutdown
 from deepfake_lens.native_path import NativePathError, is_native_safe, native_safe_path
 from deepfake_lens.result_types import Verdict
 
@@ -139,6 +139,47 @@ def _child_env(home: Path) -> dict[str, str]:
     )
     env.pop("DEEPFAKE_LENS_REPORT_KEY", None)
     return env
+
+
+def _ffmpeg_children(pid: int) -> list[int]:
+    """R15-1: the running ``ffmpeg`` children of ``pid`` (Linux /proc; through the PR_SET_PDEATHSIG trampoline too)."""
+    found: list[int] = []
+    try:
+        tasks = os.listdir(f"/proc/{pid}/task")
+    except OSError:
+        return found
+    for task in tasks:
+        try:
+            with open(f"/proc/{pid}/task/{task}/children", encoding="ascii") as handle:
+                children = [int(text) for text in handle.read().split()]
+        except OSError:
+            continue
+        for child in children:
+            try:
+                with open(f"/proc/{child}/cmdline", "rb") as handle:
+                    argv = handle.read().split(b"\0")
+            except OSError:
+                continue
+            if any(os.path.basename(part) == b"ffmpeg" for part in argv) and _alive(child):
+                found.append(child)
+    return found
+
+
+def _alive(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as handle:
+            return handle.read().rsplit(b")", 1)[-1].split()[0] not in (b"Z", b"X")
+    except OSError:
+        return False
+
+
+def _wait_gone(pids: list[int], seconds: float = 5.0) -> list[int]:
+    deadline = time.monotonic() + seconds
+    alive = [pid for pid in pids if _alive(pid)]
+    while alive and time.monotonic() < deadline:
+        time.sleep(0.02)
+        alive = [pid for pid in alive if _alive(pid)]
+    return alive
 
 
 def _scan_rows(stdout: bytes) -> dict[str, dict]:
@@ -1241,7 +1282,13 @@ NATIVE_CALLS = {
     ("subprocess", "call"),
     ("subprocess", "check_call"),
     ("subprocess", "check_output"),
+    # R15-1 (round 15): every child process is started through the tracked
+    # runner shutdown.run_child (``from .shutdown import run_child``).
+    ("shutdown", "run_child"),
 }
+# R15-1: the runner itself — its Popen gets an argv its callers staged (their
+# run_child calls are the checked sites).
+NATIVE_CALL_EXEMPT = {("shutdown.py", "subprocess.Popen")}
 
 
 # R13-7 (round 13): OpenCV writers take a narrow file name too — a non-ASCII
@@ -1270,6 +1317,10 @@ def _import_aliases(tree: ast.AST) -> tuple[dict[str, str], dict[str, tuple[str,
         elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
             for alias in node.names:
                 members[alias.asname or alias.name] = (node.module.split(".")[0], alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level > 0:
+            # R15-1: a package-relative import (``from .shutdown import run_child``).
+            for alias in node.names:
+                members[alias.asname or alias.name] = (node.module.split(".")[-1], alias.name)
         elif (
             isinstance(node, ast.Assign)
             and isinstance(node.value, ast.Call)
@@ -1360,7 +1411,7 @@ class NativeCallMetaTest(unittest.TestCase):
             visitor.visit(tree)
             for line, call, ok in visitor.sites:
                 seen.append(f"{label}:{call}")
-                if not ok:
+                if not ok and (label, call) not in NATIVE_CALL_EXEMPT:
                     offenders.append(f"{label}:{line} {call} outside `with native_safe_path(...) as <name>`")
             for line, call in visitor.banned:
                 offenders.append(f"{label}:{line} {call} (R13-7: use native_path.imwrite_any)")
@@ -1368,10 +1419,10 @@ class NativeCallMetaTest(unittest.TestCase):
         # Non-vacuous: the known sites were found.
         for expected in (
             "video_analysis.py:cv2.VideoCapture",
-            "video_analysis.py:subprocess.run",
+            "video_analysis.py:shutdown.run_child",  # R15-1: was subprocess.run
             "face_track.py:cv2.VideoCapture",
             "lipsync.py:cv2.VideoCapture",
-            "lipsync.py:subprocess.run",
+            "lipsync.py:shutdown.run_child",  # R15-1: was subprocess.run
             "lipsync.py:_SYNCNET_PIPELINE.inference",
             "model_adapter.py:cv2.VideoCapture",
             "multimodal.py:cv2.VideoCapture",
@@ -1379,13 +1430,15 @@ class NativeCallMetaTest(unittest.TestCase):
             "rppg.py:cv2.VideoCapture",
             "audio.py:librosa.load",
             "audio.py:sf.read",
-            "audio.py:subprocess.run",
+            "audio.py:shutdown.run_child",  # R15-1: was subprocess.run
             "documents.py:fitz.open",
             "c2pa.py:c2pa.Reader",
-            "video.py:subprocess.run",
+            "video.py:shutdown.run_child",  # R15-1: was subprocess.run
             "native_path.py:cv2.CascadeClassifier",  # R14-5
         ):
             self.assertIn(expected, seen)
+        for label, call in NATIVE_CALL_EXEMPT:
+            self.assertIn(f"{label}:{call}", seen, "stale exemption")
 
     def test_the_visitor_flags_a_raw_call(self) -> None:
         bad = textwrap.dedent(
@@ -1537,11 +1590,23 @@ class TempFilesInTheSessionFolderTest(unittest.TestCase):
     @unittest.skipIf(os.name == "nt", "POSIX signals")
     @unittest.skipUnless(HAVE_CV2, "opencv not installed")
     def test_a_killed_scan_leaves_nothing_outside_the_session_folder(self) -> None:
+        """R14-7 / R15-1: the signal lands while a temp wav exists and (Linux) an ffmpeg child of the scan runs.
+
+        R15-1 (round 15): this test was flaky (1 of 8 API-venv runs left the
+        folder after SIGTERM) because the cleanup raced the workers and the
+        ffmpeg children — a real defect, now fixed. The state is forced
+        instead of hoped for: the signal is sent only once a ``.wav`` is in
+        the session folder *and* (where /proc shows it) an ``ffmpeg`` child of
+        the two-worker scan is running; SIGHUP takes the same path as SIGTERM
+        and is checked too; and no child may outlive the scan (SIGKILL: Linux
+        PR_SET_PDEATHSIG).
+        """
         import shutil
         import signal
 
         if shutil.which("ffmpeg") is None:
             self.skipTest("ffmpeg 없음")
+        linux = sys.platform.startswith("linux")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
             case = root / "case"
@@ -1556,16 +1621,18 @@ class TempFilesInTheSessionFolderTest(unittest.TestCase):
                 self.skipTest("ffmpeg가 시험 영상을 만들지 못함")
             for index in range(R14_7_FILES):
                 shutil.copyfile(clip, case / f"녹화 {index:02d}.mp4")
-            for signum in (signal.SIGKILL, signal.SIGTERM):
+            for signum in (signal.SIGKILL, signal.SIGTERM, signal.SIGHUP):
                 with self.subTest(signal=signum.name):
                     base = root / f"tmp_{signum.name}"
                     base.mkdir()
                     env = {**_child_env(root / f"home_{signum.name}"), "TMPDIR": str(base)}
+                    command = [sys.executable, "-m", "deepfake_lens", "scan", str(case), "--include-low", "--format", "json", "--workers", "2"]
                     proc = subprocess.Popen(
-                        [sys.executable, "-m", "deepfake_lens", "scan", str(case), "--include-low", "--format", "json", "--workers", "2"],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=str(root),
+                        shutdown.with_default_signals(command), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=str(root),
                     )
                     seen_wav = False
+                    transient: set[str] = set()
+                    ffmpeg_children: list[int] = []
                     deadline = time.monotonic() + CHILD_TIMEOUT_SECONDS
                     while proc.poll() is None and time.monotonic() < deadline:
                         for folder in base.glob(f"{native_path.SESSION_PREFIX}*"):
@@ -1573,18 +1640,29 @@ class TempFilesInTheSessionFolderTest(unittest.TestCase):
                                 seen_wav = seen_wav or any(name.endswith(".wav") for name in os.listdir(folder))
                             except OSError:
                                 pass
-                        # Never anything at the top level but session folders.
-                        self.assertEqual([n for n in os.listdir(base) if not n.startswith(native_path.SESSION_PREFIX)], [])
-                        if seen_wav:
+                        # Never anything at the top level but session folders —
+                        # bar the file Python's tempfile.gettempdir() writes and
+                        # removes at once to probe TMPDIR (an 8-character random
+                        # name): an entry counts only if it is still there later.
+                        transient.update(n for n in os.listdir(base) if not n.startswith(native_path.SESSION_PREFIX))
+                        ffmpeg_children = _ffmpeg_children(proc.pid) if linux else []
+                        if seen_wav and (ffmpeg_children or not linux):
                             proc.send_signal(signum)
                             break
-                        time.sleep(0.005)
+                        time.sleep(0.002)
                     proc.wait(timeout=CHILD_TIMEOUT_SECONDS)
+                    self.assertEqual(sorted(name for name in transient if os.path.lexists(base / name)), [])
+                    self.assertTrue(all(len(name) == 8 for name in transient), transient)  # only tempfile's probe name shape
                     self.assertTrue(seen_wav, "no audio-track temp file was seen in the session folder")
+                    if linux:
+                        self.assertTrue(ffmpeg_children, "the signal was not sent while an ffmpeg child ran")
+                        self.assertEqual(_wait_gone(ffmpeg_children), [], "an ffmpeg child outlived the scan")
                     left = os.listdir(base)
                     self.assertEqual([name for name in left if not name.startswith(native_path.SESSION_PREFIX)], [], left)
-                    if signum == signal.SIGTERM:
+                    if signum != signal.SIGKILL:
                         self.assertEqual(left, [])  # the handler removed the folder and everything in it
+                        time.sleep(0.5)
+                        self.assertEqual(os.listdir(base), [])  # and nothing re-created it
                     else:
                         # SIGKILL: the next run's sweep removes the dead process's folder, temp files and all.
                         self.assertEqual(len(left), 1, left)

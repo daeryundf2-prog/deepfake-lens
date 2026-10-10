@@ -25,21 +25,13 @@ from typing import Callable, TypeVar
 # N1: re-exported — failure reasons are built (path-scrubbed) in error_text.
 from .error_text import FAILURE_MESSAGE_MAX_CHARS, exception_text, failure_reason, path_scrub_root, scrub_paths  # noqa: F401
 from .result_types import CoverageEntry, CoverageStatus
+# R15-1: defined in a leaf module so shutdown/native_path can subclass it
+# ("종료 중") without an import cycle; re-exported here as before.
+from .check_skipped import CheckSkipped  # noqa: F401  (re-export)
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
-
-class CheckSkipped(Exception):
-    """Raised inside a check to record a deliberate, explained skip.
-
-    Used for "not applicable" outcomes that are not errors, e.g. no face
-    detected or input outside the measured range.
-    """
-
-    def __init__(self, reason: str) -> None:
-        super().__init__(reason)
-        self.reason = reason
 
 
 class AnalyzerError(RuntimeError):

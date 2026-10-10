@@ -53,6 +53,17 @@ session folder is made: its name carries the owning process id
 (``deepfake-lens-native-<pid>-<random>``), and a folder of the current
 user whose process is gone is removed.
 
+R15-1 (round 15): the cleanup is final. It first sets the "종료 중" flag
+(:mod:`deepfake_lens.shutdown`): no new session folder, staged name or child
+process is made after it — such a call raises
+:class:`~deepfake_lens.shutdown.ShuttingDown`, a ``CheckSkipped`` "종료 중" —
+and it waits (bounded) for the other threads to finish the step they are
+in; it then stops every tracked child (``ffmpeg``: terminate → wait →
+kill), removes the folders until they are gone (a bounded number of
+attempts) and only then lets the signal's default action end the process.
+The session folder is no longer reset to "none" by the cleanup while the
+process is ending, so a worker cannot make a fresh one nobody removes.
+
 R13-1 (round 13): a decoder that cannot open the staged name quotes it in
 its exception ("Error opening '/tmp/deepfake-lens-native-…/000035-
 df0fda9674ca.m4a'"), and that random name used to reach the coverage
@@ -101,6 +112,9 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from typing import Any, Callable, Iterator
 
+from . import shutdown
+from .shutdown import ShuttingDown
+
 logger = logging.getLogger(__name__)
 
 # Largest file copied when no link (and, on Windows, no ASCII short name) can be made.
@@ -138,11 +152,19 @@ COPY_CAP_EXCEEDED = "판단 불가: 네이티브 디코더용 임시 사본 상�
 # copy's "<st_dev>:<st_ino>"; only a file whose marker names its own inode
 # may have its read-only flag cleared before removal (Windows).
 COPY_MARKER_SUFFIX = ".dfl-copy"
+# R15-1: how many times the cleanup removes the session folders before it
+# gives up (logged), and the pause between attempts. A folder still has
+# entries only while a thread that started before the "종료 중" flag finishes
+# its step; 40 x 25 ms = 1 s covers that on a loaded machine and bounds an
+# unremovable folder (immutable, foreign owner) to a second.
+CLEANUP_ATTEMPTS = 40
+CLEANUP_RETRY_SECONDS = 0.025
 
 _LOCK = threading.Lock()
 _SESSION_DIR: str | None = None
 _COUNTER = itertools.count(1)
 _HANDLERS_INSTALLED = False
+_ATEXIT_REGISTERED = False
 # R14-7: the session folder for temp files when no ASCII staging folder exists.
 _SCRATCH_FALLBACK: str | None = None
 
@@ -396,18 +418,50 @@ def sweep_stale_sessions(base: str) -> list[str]:
     return removed
 
 
-def cleanup_session() -> None:
-    """R13-4: remove this process's session folder(s) now (atexit, signal handlers).
+def cleanup_session(attempts: int = CLEANUP_ATTEMPTS) -> bool:
+    """R13-4 / R15-1: remove this process's session folder(s) now; True when none is left.
 
+    R15-1: removed until gone — up to ``attempts`` passes, the list re-read
+    each time (a folder registered meanwhile is included) — instead of one
+    ``rmtree`` whose failure (a name staged during it) was only logged.
     No lock: a signal handler runs in the main thread between bytecodes and
     may interrupt a holder of :data:`_LOCK`; copying the list is atomic.
+    While the process is ending (:func:`shutdown.active`) the session folder
+    is not reset to "none": nothing may make a new one.
     """
     global _SESSION_DIR, _SCRATCH_FALLBACK
-    for folder in list(_SESSION_DIRS):
-        if os.path.isdir(folder):
+    left: list[str] = []
+    for attempt in range(max(1, attempts)):
+        left = [folder for folder in list(_SESSION_DIRS) if os.path.lexists(folder)]
+        if not left:
+            break
+        if attempt:
+            time.sleep(CLEANUP_RETRY_SECONDS)
+        for folder in left:
             _remove_tree(folder)
-    _SESSION_DIR = None
-    _SCRATCH_FALLBACK = None
+        left = [folder for folder in list(_SESSION_DIRS) if os.path.lexists(folder)]
+        if not left:
+            break
+    for folder in left:
+        logger.warning("native_safe_path: session folder %s not removed after %d attempts", folder, attempts)
+    if not shutdown.active():
+        _SESSION_DIR = None
+        _SCRATCH_FALLBACK = None
+    return not left
+
+
+def shutdown_session() -> bool:
+    """R15-1: the process is ending — "종료 중" flag, children stopped, folders removed until gone.
+
+    Signal-handler safe (no lock). True when no session folder is left.
+    """
+    shutdown.begin()
+    return cleanup_session()
+
+
+def _at_exit() -> None:
+    """R15-1: the atexit hook — the same final cleanup as a signal (daemon threads may still run)."""
+    shutdown_session()
 
 
 def _cleanup_then_default(signum: int, frame: Any) -> None:
@@ -420,7 +474,7 @@ def _cleanup_then_default(signum: int, frame: Any) -> None:
     """
     import signal
 
-    cleanup_session()
+    shutdown_session()  # R15-1: flag, children stopped, folders removed until gone
     signal.signal(signum, signal.SIG_DFL)
     os.kill(os.getpid(), signum)
 
@@ -474,14 +528,26 @@ def install_cleanup_handlers() -> bool:
     return True
 
 
+def _register_session_folder(created: str) -> None:
+    """Record a new session folder (caller holds :data:`_LOCK`, inside ``shutdown.guarded()``)."""
+    global _ATEXIT_REGISTERED
+    _SESSION_DIRS.append(created)
+    if not _ATEXIT_REGISTERED:
+        atexit.register(_at_exit)
+        _ATEXIT_REGISTERED = True
+
+
 def session_dir() -> str:
     """The per-process staging folder (created on first use, ASCII path).
 
     R13-4: named ``<prefix><pid>-<random>``; stale folders of dead
-    processes in the same base are swept first.
+    processes in the same base are swept first. R15-1: refused
+    (:class:`ShuttingDown` "종료 중") once the process is ending — the
+    existing folder is not handed out any more and no new one is made.
     """
     global _SESSION_DIR
-    with _LOCK:
+    shutdown.refuse_if_active()
+    with _LOCK, shutdown.guarded():
         if _SESSION_DIR is not None and os.path.isdir(_SESSION_DIR):
             return _SESSION_DIR
         for base in _base_candidates():
@@ -493,8 +559,7 @@ def session_dir() -> str:
             except OSError:
                 continue
             _SESSION_DIR = created
-            _SESSION_DIRS.append(created)
-            atexit.register(_remove_tree, created)
+            _register_session_folder(created)
             break
         else:
             created = ""
@@ -526,15 +591,14 @@ def scratch_dir() -> str:
         return session_dir()
     except NativePathError:
         pass
-    with _LOCK:
+    with _LOCK, shutdown.guarded():  # R15-1: refused once the process is ending
         if _SCRATCH_FALLBACK is not None and os.path.isdir(_SCRATCH_FALLBACK):
             return _SCRATCH_FALLBACK
         base = tempfile.gettempdir()
         sweep_stale_sessions(base)
         created = tempfile.mkdtemp(prefix=f"{SESSION_PREFIX}{os.getpid()}-", dir=base)
         _SCRATCH_FALLBACK = created
-        _SESSION_DIRS.append(created)
-        atexit.register(_remove_tree, created)
+        _register_session_folder(created)
     install_cleanup_handlers()
     return created
 
@@ -733,18 +797,22 @@ def _stage(source: str) -> tuple[str, bool]:
     folder = session_dir()
     target = os.path.join(folder, f"{next(_COUNTER):06d}-{uuid.uuid4().hex[:12]}{_ascii_suffix(source)}")
     _register_alias(target, source)
-    if not _is_windows():
-        try:
-            os.symlink(absolute, target)
-            return target, True
-        except OSError:
-            logger.debug("native_safe_path: symlink refused for staged name %s", target)
-    else:
-        short = _short_path_name(absolute)
-        if short is not None:
-            _register_short_alias(short, source)
-            return short, False
-    return _copy_staged(absolute, target), True
+    # R15-1: the staged name is made inside a guarded step — refused once the
+    # process is ending, and waited for by the cleanup when it started before.
+    with shutdown.guarded():
+        if not _is_windows():
+            try:
+                os.symlink(absolute, target)
+                return target, True
+            except OSError:
+                shutdown.refuse_if_active()  # the folder went away under a final cleanup
+                logger.debug("native_safe_path: symlink refused for staged name %s", target)
+        else:
+            short = _short_path_name(absolute)
+            if short is not None:
+                _register_short_alias(short, source)
+                return short, False
+        return _copy_staged(absolute, target), True
 
 
 @contextmanager
@@ -855,6 +923,7 @@ __all__ = [
     "CascadeLoadError",
     "NATIVE_COPY_MAX_BYTES",
     "NativePathError",
+    "ShuttingDown",
     "cleanup_session",
     "imwrite_any",
     "install_cleanup_handlers",
@@ -864,6 +933,7 @@ __all__ = [
     "restore_original_names",
     "scratch_dir",
     "session_dir",
+    "shutdown_session",
     "staged_names",
     "sweep_stale_sessions",
 ]
