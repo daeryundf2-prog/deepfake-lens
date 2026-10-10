@@ -19,6 +19,7 @@ test runner.
 from __future__ import annotations
 
 import ast
+import contextlib
 import hashlib
 import importlib.util
 import json
@@ -29,9 +30,11 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 import wave
 from pathlib import Path
+from typing import Any, Iterator
 from unittest import mock
 
 from deepfake_lens import native_path
@@ -48,6 +51,8 @@ HAVE_PYMUPDF = importlib.util.find_spec("pymupdf") is not None or importlib.util
 CP949_STEM = b"\xc1\xf5\xb0\xc5"
 NON_UTF8_SKIP = "파일 시스템이 UTF-8이 아닌 파일 이름을 허용하지 않음(Windows·macOS)"
 CHILD_TIMEOUT_SECONDS = 600
+# R14-2: the real os.chmod (some tests record every call through a mock).
+_REAL_CHMOD = os.chmod
 # R14-1: Korean-named mp4 + wav pairs in the signalled scan — enough decoding
 # time (a few seconds) for the signals to land while names are staged.
 R14_1_FILES = 24
@@ -185,20 +190,30 @@ class NativeSafePathUnitTest(unittest.TestCase):
             self.assertEqual(before.st_ctime_ns, after.st_ctime_ns)
         self.assertEqual(sorted(os.listdir(self.root)), [self.name])
 
-    def test_hard_link_then_read_only_copy_when_symlink_is_refused(self) -> None:
+    def test_read_only_copy_when_symlink_is_refused_never_a_hard_link(self) -> None:
+        # R14-2 (round 14): this test used to expect a hard link as the second
+        # route — a hard link changes the evidence inode's ctime and link
+        # count, which the evidence invariant forbids; the route is now
+        # symlink, then copy, and os.link is never called.
         digest = hashlib.sha256(self.source.read_bytes()).hexdigest()
-        with mock.patch.object(native_path.os, "symlink", side_effect=OSError("refused")):
+        before = os.stat(self.source)
+        with mock.patch.object(native_path.os, "symlink", side_effect=OSError("refused")), mock.patch.object(
+            native_path.os, "link", side_effect=AssertionError("hard link tried")
+        ):
             with native_safe_path(self.source) as native:
                 self.assertFalse(os.path.islink(native))
+                info = os.stat(native)
+                self.assertNotEqual((info.st_dev, info.st_ino), (before.st_dev, before.st_ino))  # a copy, not a link
+                self.assertEqual(info.st_nlink, 1)
+                self.assertEqual(info.st_mode & 0o777, 0o400)
                 self.assertEqual(hashlib.sha256(Path(native).read_bytes()).hexdigest(), digest)
-            with mock.patch.object(native_path.os, "link", side_effect=OSError("cross-device")):
-                with native_safe_path(self.source) as native:
-                    self.assertFalse(os.path.islink(native))
-                    self.assertEqual(os.stat(native).st_nlink, 1)  # a copy, not a link
-                    self.assertEqual(os.stat(native).st_mode & 0o777, 0o400)
-                    self.assertEqual(hashlib.sha256(Path(native).read_bytes()).hexdigest(), digest)
-                    copied = native
-                self.assertFalse(os.path.lexists(copied))
+                # R14-2: the marker names exactly this copy's inode.
+                self.assertEqual(native_path._marked_identity(native), (info.st_dev, info.st_ino))
+                copied = native
+            self.assertFalse(os.path.lexists(copied))
+            self.assertFalse(os.path.lexists(copied + native_path.COPY_MARKER_SUFFIX))
+        after = os.stat(self.source)
+        self.assertEqual((before.st_mode, before.st_nlink, before.st_ctime_ns), (after.st_mode, after.st_nlink, after.st_ctime_ns))
 
     def test_copy_over_the_cap_fails_closed_in_korean(self) -> None:
         with mock.patch.object(native_path.os, "symlink", side_effect=OSError("refused")), mock.patch.object(
@@ -280,11 +295,14 @@ class NativeSafePathUnitTest(unittest.TestCase):
 
 
 class WindowsStagingOrderTest(unittest.TestCase):
-    """R13-8 (round 13): on Windows a hard link, then the ASCII 8.3 short name, then a copy (Windows API mocked).
+    """R13-8 / R14-2: on Windows the ASCII 8.3 short name, then a copy — never a hard link (Windows API mocked).
 
     Without symbolic links and with the evidence on another drive than the
     temp folder, every Korean-named file used to be copied in full (up to
-    2 GB) for the native decoder.
+    2 GB) for the native decoder. R14-2 (round 14): the hard link that came
+    first changed the evidence file's link count and NTFS change time, and
+    its read-only attribute is the evidence file's — clearing it to remove
+    the link changed the evidence; no route creates one now.
     """
 
     def setUp(self) -> None:
@@ -298,9 +316,14 @@ class WindowsStagingOrderTest(unittest.TestCase):
         windows.start()
         self.addCleanup(windows.stop)
         # Windows has no unprivileged symbolic links: the route must not try one.
+        self._real_link = os.link
         no_symlink = mock.patch.object(native_path.os, "symlink", side_effect=AssertionError("symlink tried on Windows"))
         no_symlink.start()
         self.addCleanup(no_symlink.stop)
+        # R14-2: nor a hard link.
+        no_link = mock.patch.object(native_path.os, "link", side_effect=AssertionError("hard link tried"))
+        no_link.start()
+        self.addCleanup(no_link.stop)
 
     def _short_alias(self) -> str:
         """An ASCII name for the same file, standing in for its 8.3 short name."""
@@ -308,25 +331,20 @@ class WindowsStagingOrderTest(unittest.TestCase):
         alias_dir.mkdir(exist_ok=True)
         alias = alias_dir / "EVIDEN~1.MP4"
         if not alias.exists():
-            os.link(self.source, alias)
+            self._real_link(self.source, alias)  # the test's stand-in for the 8.3 name, not the code under test
         return str(alias)
 
-    def test_hard_link_first(self) -> None:
-        with mock.patch.object(native_path, "_short_path_name", side_effect=AssertionError("short name before link")):
-            with native_safe_path(self.source) as native:
-                self.assertTrue(native.startswith(native_path.session_dir()))
-                self.assertEqual(os.stat(native).st_ino, os.stat(self.source).st_ino)  # a hard link
-                staged = native
-        self.assertFalse(os.path.lexists(staged))
-
-    def test_short_name_when_the_link_is_refused_nothing_is_copied(self) -> None:
+    def test_short_name_first_nothing_is_created_or_copied(self) -> None:
+        # R14-2 (round 14): replaces "test_hard_link_first" — the hard link it
+        # expected first modified the evidence file's metadata; the 8.3 name
+        # (nothing created, nothing touched) now comes first.
         from deepfake_lens.error_text import failure_reason, path_scrub_root
 
         alias = self._short_alias()
         before = native_path.staged_names()
-        with mock.patch.object(native_path.os, "link", side_effect=OSError("cross-device")), mock.patch.object(
-            native_path, "_short_path_name", return_value=alias
-        ), mock.patch.object(native_path.shutil, "copyfile", side_effect=AssertionError("copied")):
+        with mock.patch.object(native_path, "_short_path_name", return_value=alias), mock.patch.object(
+            native_path.shutil, "copyfile", side_effect=AssertionError("copied")
+        ):
             with path_scrub_root(self.root):
                 try:
                     with native_safe_path(self.source) as native:
@@ -343,15 +361,39 @@ class WindowsStagingOrderTest(unittest.TestCase):
         self.assertIn(f"'<root>/{self.name}'", reason)
 
     def test_copy_when_there_is_no_short_name(self) -> None:
-        with mock.patch.object(native_path.os, "link", side_effect=OSError("cross-device")), mock.patch.object(
-            native_path, "_short_path_name", return_value=None
-        ):
-            with native_safe_path(self.source) as native:
-                self.assertEqual(os.stat(native).st_nlink, 1)
-                self.assertEqual(os.stat(native).st_mode & 0o777, 0o400)
-                self.assertEqual(hashlib.sha256(Path(native).read_bytes()).hexdigest(), self.digest)
-                copied = native
-        self.assertFalse(os.path.lexists(copied))
+        """R14-2: a read-only copy only where a no-follow chmod can clear the flag again; only the copy is ever released."""
+        real_chmod, real_unlink = os.chmod, os.unlink
+        for no_follow in (True, False):
+            with self.subTest(no_follow_chmod=no_follow):
+                calls: list[tuple[str, dict]] = []
+                denied: set[str] = set()
+
+                def chmod(path: str, mode: int, **kwargs: object) -> None:
+                    calls.append((os.fspath(path), dict(kwargs)))
+                    real_chmod(path, mode)  # (POSIX ignores the flag for a regular file)
+
+                def unlink(path: str, *args: Any, **kwargs: Any) -> None:
+                    # What Windows does to a read-only file: DeleteFile is refused.
+                    if not args and not kwargs and os.path.isfile(path) and not os.lstat(path).st_mode & 0o200:
+                        denied.add(os.fspath(path))
+                        raise PermissionError(13, "Access is denied", path)
+                    real_unlink(path, *args, **kwargs)
+
+                with mock.patch.object(native_path, "_short_path_name", return_value=None), mock.patch.object(
+                    native_path, "_can_chmod_without_following", return_value=no_follow
+                ), mock.patch.object(native_path.os, "chmod", side_effect=chmod), mock.patch.object(native_path.os, "unlink", side_effect=unlink):
+                    with native_safe_path(self.source) as native:
+                        info = os.lstat(native)
+                        self.assertEqual(info.st_nlink, 1)
+                        self.assertNotEqual(info.st_ino, os.stat(self.source).st_ino)
+                        self.assertEqual(info.st_mode & 0o777 == 0o400, no_follow)  # read-only only when releasable
+                        self.assertEqual(hashlib.sha256(Path(native).read_bytes()).hexdigest(), self.digest)
+                        copied = native
+                self.assertFalse(os.path.lexists(copied))
+                self.assertFalse(os.path.lexists(copied + native_path.COPY_MARKER_SUFFIX))
+                self.assertEqual(denied, {copied} if no_follow else set())
+                # Every chmod: on the copy, never following a link.
+                self.assertEqual(calls, [(copied, {"follow_symlinks": False})] * (2 if no_follow else 0))
 
     def test_copy_over_the_cap_is_a_failed_check_with_the_reason(self) -> None:
         from deepfake_lens.checks import run_check
@@ -677,6 +719,448 @@ class SessionFolderCleanupTest(unittest.TestCase):
         with mock.patch.object(native_path, "install_cleanup_handlers") as install, contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(cli.main([]), 0)
         install.assert_called_once_with()
+
+
+def _evidence_state(path: Path) -> tuple:
+    """Everything about an evidence file a scan must leave as it was (R14-2).
+
+    Bytes, size, mode, mtime and ctime (ns), extended attributes and file
+    flags / Windows attributes where the OS has them. Excluded: atime (a
+    read may update it) and the link count (the instruction's "nlink-
+    excluded" snapshot).
+    """
+    info = os.lstat(path)
+    xattrs: tuple = ()
+    if hasattr(os, "listxattr"):
+        try:
+            xattrs = tuple(sorted((name, os.getxattr(path, name, follow_symlinks=False)) for name in os.listxattr(path, follow_symlinks=False)))
+        except OSError:
+            xattrs = ("<unreadable>",)
+    return (
+        hashlib.sha256(path.read_bytes()).hexdigest(),
+        info.st_size,
+        info.st_mode,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        getattr(info, "st_flags", None),
+        getattr(info, "st_file_attributes", None),
+        xattrs,
+    )
+
+
+@contextlib.contextmanager
+def _isolated_session(base: Path) -> Iterator[None]:
+    """A private session folder under ``base`` (this test process's real one is left alone)."""
+    with mock.patch.object(native_path, "_SESSION_DIR", None), mock.patch.object(native_path, "_SESSION_DIRS", []), mock.patch.object(
+        native_path, "_base_candidates", return_value=[str(base)]
+    ), mock.patch.object(native_path, "install_cleanup_handlers"):
+        yield
+
+
+def _chattr(flag: str, path: str) -> bool:
+    """``chattr <flag> path``; True when it took effect (root on a file system that supports it)."""
+    import shutil
+
+    if os.name == "nt" or shutil.which("chattr") is None:
+        return False
+    return subprocess.run(["chattr", flag, path], capture_output=True).returncode == 0
+
+
+@contextlib.contextmanager
+def _unremovable(folder: str) -> Iterator[str]:
+    """R14-2: make ``folder``'s entries impossible to remove; yields how ("chmod", "chattr" or "mock").
+
+    The real thing where the OS allows it — a write-protected folder for a
+    normal user, an immutable one (``chattr +i``) for root, who ignores the
+    folder's mode — else every unlink/rmdir inside it is refused.
+    """
+    real_unlink, real_rmdir = os.unlink, os.rmdir
+    if hasattr(os, "geteuid") and os.geteuid() != 0:
+        _REAL_CHMOD(folder, 0o500)
+        try:
+            yield "chmod"
+        finally:
+            _REAL_CHMOD(folder, 0o700)
+        return
+    if _chattr("+i", folder):
+        try:
+            yield "chattr"
+        finally:
+            _chattr("-i", folder)
+        return
+
+    def refuse(function: Any) -> Any:
+        def call(path: Any, *args: Any, **kwargs: Any) -> None:
+            if os.fspath(path).startswith(folder) or kwargs.get("dir_fd") is not None:
+                raise PermissionError(1, "Operation not permitted", path)
+            function(path, *args, **kwargs)
+
+        return call
+
+    with mock.patch.object(os, "unlink", side_effect=refuse(real_unlink)), mock.patch.object(os, "rmdir", side_effect=refuse(real_rmdir)):
+        yield "mock"
+
+
+class EvidenceNeverModifiedTest(unittest.TestCase):
+    """R14-2 (round 14): removing a staged name never changes the evidence file.
+
+    When the staged symbolic link could not be unlinked (immutable or
+    write-protected staging folder), the fallback ``chmod`` followed the
+    link and made the 0444 evidence file 0600 (its ctime changed); the
+    stale-folder sweep did the same. On Windows the hard link that was the
+    first route shares the evidence file's read-only attribute.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = Path(self._tmp.name).resolve()
+        self.case = self.base / "case"
+        self.case.mkdir()
+        self.evidence = self.case / "증거.jpg"
+        self.evidence.write_bytes(b"EVIDENCE" * 64)
+        self.evidence.chmod(0o444)
+        self.addCleanup(self.evidence.chmod, 0o644)
+        self.chmods: list[str] = []
+        real_chmod = os.chmod
+
+        def recording_chmod(path: Any, mode: int, **kwargs: Any) -> None:
+            self.chmods.append(os.fspath(path))
+            real_chmod(path, mode, **kwargs)
+
+        patcher = mock.patch.object(native_path.os, "chmod", side_effect=recording_chmod)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _routes(self) -> list[tuple[str, Any]]:
+        refuse_symlink = mock.patch.object(native_path.os, "symlink", side_effect=OSError("refused"))
+        return [("symlink", contextlib.nullcontext()), ("copy", refuse_symlink)]
+
+    def test_unremovable_staging_folder_leaves_the_evidence_untouched(self) -> None:
+        before = _evidence_state(self.evidence)
+        for route, patch in self._routes():
+            with self.subTest(route=route), _isolated_session(self.base), patch:
+                self.chmods.clear()
+                staging = native_safe_path(self.evidence)
+                native = staging.__enter__()
+                folder = os.path.dirname(native)
+                self.assertEqual(os.path.islink(native), route == "symlink")
+                with _unremovable(folder) as how:
+                    staging.__exit__(None, None, None)  # the with block ends: the unlink is refused …
+                    self.assertTrue(os.path.lexists(native), how)
+                    native_path.cleanup_session()  # … and so is the folder's removal (atexit / signal path)
+                    self.assertTrue(os.path.lexists(native), how)
+                self.assertEqual(_evidence_state(self.evidence), before, (route, how))
+                # Not a single chmod on the evidence or through a link (only the fresh copy is made 0400).
+                self.assertEqual([path for path in self.chmods if path != native], [], (route, how))
+                native_path.cleanup_session()
+                self.assertFalse(os.path.lexists(folder))
+
+    def test_unremovable_stale_folder_is_left_and_the_evidence_untouched(self) -> None:
+        before = _evidence_state(self.evidence)
+        dead = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"], capture_output=True, text=True, check=True)
+        stale = self.base / f"{native_path.SESSION_PREFIX}{int(dead.stdout)}-zz"
+        stale.mkdir()
+        os.symlink(self.evidence, stale / "000001-0123456789ab.jpg")
+        # A forged marker naming the evidence inode does not make the link "ours".
+        info = os.stat(self.evidence)
+        (stale / f"000001-0123456789ab.jpg{native_path.COPY_MARKER_SUFFIX}").write_text(f"{info.st_dev}:{info.st_ino}", encoding="ascii")
+        old = time.time() - 2 * native_path.STALE_MIN_AGE_SECONDS
+        os.utime(stale, (old, old))
+        with mock.patch.object(native_path, "_can_chmod_without_following", return_value=True):
+            for windows in (False, True):
+                with self.subTest(windows=windows), mock.patch.object(native_path, "_is_windows", return_value=windows):
+                    with _unremovable(str(stale)) as how, mock.patch.object(native_path, "_win_pid_alive", return_value=False):
+                        removed = native_path.sweep_stale_sessions(str(self.base))
+                    self.assertEqual(removed, [], how)
+                    self.assertTrue(os.path.islink(stale / "000001-0123456789ab.jpg"), how)
+                    self.assertEqual(_evidence_state(self.evidence), before, how)
+                    self.assertEqual(self.chmods, [], how)
+        os.utime(stale, (old, old))
+        self.assertEqual(native_path.sweep_stale_sessions(str(self.base)), [stale.name])
+        self.assertEqual(_evidence_state(self.evidence), before)
+
+    def test_windows_hard_link_of_an_older_version_is_never_released(self) -> None:
+        """R14-8: a pre-R14 Windows staging folder holds a hard link to read-only evidence — its attribute is never cleared."""
+        dead = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"], capture_output=True, text=True, check=True)
+        stale = self.base / f"{native_path.SESSION_PREFIX}{int(dead.stdout)}-hl"
+        stale.mkdir()
+        link = stale / "000001-0123456789ab.jpg"
+        os.link(self.evidence, link)
+        info = os.stat(self.evidence)
+        before = _evidence_state(self.evidence)  # (the test's own hard link changed the ctime once)
+        # Even a marker naming the inode: a link count > 1 is never released.
+        (stale / f"{link.name}{native_path.COPY_MARKER_SUFFIX}").write_text(f"{info.st_dev}:{info.st_ino}", encoding="ascii")
+        old = time.time() - 2 * native_path.STALE_MIN_AGE_SECONDS
+        os.utime(stale, (old, old))
+        real_unlink = os.unlink
+
+        def windows_unlink(path: Any, *args: Any, **kwargs: Any) -> None:
+            # DeleteFile refuses a read-only file — a hard link shares the evidence's flag.
+            if os.path.basename(os.fspath(path)) == link.name:
+                raise PermissionError(13, "Access is denied", path)
+            real_unlink(path, *args, **kwargs)
+
+        with mock.patch.object(native_path, "_is_windows", return_value=True), mock.patch.object(
+            native_path, "_can_chmod_without_following", return_value=True
+        ), mock.patch.object(native_path, "_win_pid_alive", return_value=False), mock.patch.object(os, "unlink", side_effect=windows_unlink):
+            self.assertFalse(native_path._release_copy(str(link), str(self.evidence)))
+            native_path.sweep_stale_sessions(str(self.base))
+            native_path._unlink_staged(str(link), str(self.evidence))
+        self.assertTrue(link.exists())
+        self.assertEqual(self.chmods, [])
+        self.assertEqual(_evidence_state(self.evidence), before)
+        self.assertEqual(os.stat(self.evidence).st_mode & 0o777, 0o444)
+
+    def test_a_marked_copy_is_released_and_removed_on_windows(self) -> None:
+        """R14-2: the one file the guard releases — a regular copy, link count 1, whose marker names its inode."""
+        with _isolated_session(self.base), mock.patch.object(native_path, "_is_windows", return_value=True), mock.patch.object(
+            native_path, "_can_chmod_without_following", return_value=True
+        ), mock.patch.object(native_path, "_short_path_name", return_value=None):
+            with native_safe_path(self.evidence) as native:
+                self.assertEqual(os.lstat(native).st_mode & 0o777, 0o400)
+            self.assertFalse(os.path.lexists(native))
+            folder = native_path.session_dir()
+            copy = os.path.join(folder, "000009-0123456789ab.jpg")
+            Path(copy).write_bytes(b"copy")
+            os.chmod(copy, 0o400)
+            self.assertFalse(native_path._release_copy(copy))  # no marker: not ours
+            Path(copy + native_path.COPY_MARKER_SUFFIX).write_text("1:2", encoding="ascii")
+            self.assertFalse(native_path._release_copy(copy))  # a marker for another inode
+            info = os.lstat(copy)
+            Path(copy + native_path.COPY_MARKER_SUFFIX).write_text(f"{info.st_dev}:{info.st_ino}", encoding="ascii")
+            self.assertTrue(native_path._release_copy(copy))
+            native_path.cleanup_session()
+            self.assertFalse(os.path.lexists(folder))
+        self.assertEqual([path for path in self.chmods if path not in (native, copy)], [])
+        self.assertEqual(os.stat(self.evidence).st_mode & 0o777, 0o444)
+
+
+class _FakeFunction:
+    """A kernel32 export: checks its signature was declared, converts every argument with it, then answers."""
+
+    def __init__(self, name: str, answer: Any) -> None:
+        self.name, self.answer = name, answer
+        self.argtypes: list[Any] | None = None
+        self.restype: Any = "unset"
+        self.calls: list[tuple] = []
+
+    def __call__(self, *args: Any) -> Any:
+        assert self.argtypes is not None and self.restype != "unset", f"{self.name}: signature not declared"
+        assert len(args) == len(self.argtypes), f"{self.name}: {len(args)} arguments for {len(self.argtypes)}"
+        for argtype, arg in zip(self.argtypes, args):
+            argtype.from_param(arg)  # raises TypeError / ArgumentError like the real FFI call
+        self.calls.append(args)
+        return self.answer(*args)
+
+
+class _FakeKernel32:
+    def __init__(self, **answers: Any) -> None:
+        self.functions = {name: _FakeFunction(name, answer) for name, answer in answers.items()}
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self.__dict__["functions"][name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+
+class WindowsCtypesWrapperTest(unittest.TestCase):
+    """R14-8 (round 14): the Windows-only ctypes calls run against a fake ``ctypes.WinDLL``.
+
+    ``_short_path_name`` and the Windows ``_pid_alive`` branch were only ever
+    replaced wholesale by mocks; now the wrapper itself runs: declared
+    signatures (``HANDLE`` restype — a 64-bit handle is not truncated),
+    buffer size, NUL accounting, error codes and handle closing.
+    """
+
+    def _with(self, kernel32: _FakeKernel32, last_error: int = 0) -> contextlib.ExitStack:
+        import ctypes
+
+        stack = contextlib.ExitStack()
+        loaded: list[tuple] = []
+
+        def win_dll(name: str, **kwargs: Any) -> _FakeKernel32:
+            loaded.append((name, kwargs))
+            return kernel32
+
+        stack.enter_context(mock.patch.object(ctypes, "WinDLL", side_effect=win_dll, create=True))
+        stack.enter_context(mock.patch.object(ctypes, "get_last_error", return_value=last_error, create=True))
+        stack.enter_context(mock.patch.object(native_path, "_is_windows", return_value=True))
+        stack.callback(lambda: self.assertTrue(all(entry == ("kernel32", {"use_last_error": True}) for entry in loaded), loaded))
+        return stack
+
+    def _short_kernel(self, short: str, *, grow: bool = False, fail: bool = False) -> _FakeKernel32:
+        def get_short_path_name(path: str, buffer: Any, size: int) -> int:
+            if fail:
+                return 0
+            needed = len(short) + 1  # with the terminating NUL
+            if buffer is None or size < needed:
+                return needed + (5 if grow and buffer is not None else 0)
+            if grow:
+                return needed + 5  # the name grew between the two calls
+            buffer.value = short
+            return len(short)  # without the NUL
+
+        return _FakeKernel32(GetShortPathNameW=get_short_path_name, OpenProcess=None, GetExitCodeProcess=None, CloseHandle=None)
+
+    def test_short_path_name_signature_buffer_and_results(self) -> None:
+        from ctypes import wintypes
+
+        long_path = "D:\\증거\\녹음 파일.m4a"
+        kernel32 = self._short_kernel("D:\\8B1F~1\\4D5C~1.M4A")
+        with self._with(kernel32):
+            self.assertEqual(native_path._short_path_name(long_path), "D:\\8B1F~1\\4D5C~1.M4A")
+        function = kernel32.functions["GetShortPathNameW"]
+        self.assertEqual(function.argtypes, [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD])
+        self.assertIs(function.restype, wintypes.DWORD)
+        (first, second) = function.calls
+        self.assertEqual(first, (long_path, None, 0))
+        self.assertEqual(second[0], long_path)
+        self.assertEqual(second[2], len("D:\\8B1F~1\\4D5C~1.M4A") + 1)  # exactly the size asked for
+        import ctypes
+
+        self.assertEqual(ctypes.sizeof(second[1]), ctypes.sizeof(ctypes.c_wchar) * second[2])
+        for label, fake, expected in (
+            ("error (0)", self._short_kernel("X", fail=True), None),
+            ("grew between calls", self._short_kernel("D:\\A~1.M4A", grow=True), None),
+            ("8.3 disabled: the long name back", self._short_kernel(long_path), None),
+            ("short name not ASCII", self._short_kernel("D:\\증거~1\\A.M4A"), None),
+        ):
+            with self.subTest(label), self._with(fake):
+                self.assertEqual(native_path._short_path_name(long_path), expected)
+
+    def _process_kernel(self, *, handle: int | None, exit_ok: bool = True, code: int = 259) -> _FakeKernel32:
+        def get_exit_code(handle_value: Any, pointer: Any) -> int:
+            if not exit_ok:
+                return 0
+            pointer._obj.value = code
+            return 1
+
+        return _FakeKernel32(
+            GetShortPathNameW=None,
+            OpenProcess=lambda access, inherit, pid: handle,
+            GetExitCodeProcess=get_exit_code,
+            CloseHandle=lambda handle_value: 1,
+        )
+
+    def test_pid_alive_signatures_error_codes_and_handle_closing(self) -> None:
+        from ctypes import wintypes
+
+        big_handle = 0x7FFF_0000_1234  # beyond 32 bits: a c_int restype would truncate it
+        kernel32 = self._process_kernel(handle=big_handle, code=259)
+        with self._with(kernel32):
+            self.assertTrue(native_path._pid_alive(4242))
+        open_process = kernel32.functions["OpenProcess"]
+        self.assertEqual(open_process.argtypes, [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD])
+        self.assertIs(open_process.restype, wintypes.HANDLE)
+        self.assertEqual(open_process.calls, [(native_path._PROCESS_QUERY_LIMITED_INFORMATION, False, 4242)])
+        exit_code = kernel32.functions["GetExitCodeProcess"]
+        self.assertEqual(exit_code.argtypes, [wintypes.HANDLE, wintypes.LPDWORD])
+        self.assertIs(exit_code.restype, wintypes.BOOL)
+        self.assertEqual(exit_code.calls[0][0], big_handle)
+        close = kernel32.functions["CloseHandle"]
+        self.assertEqual((close.argtypes, close.restype), ([wintypes.HANDLE], wintypes.BOOL))
+        self.assertEqual(close.calls, [(big_handle,)])
+        for label, fake, last_error, expected in (
+            ("exited (code 0)", self._process_kernel(handle=8, code=0), 0, False),
+            ("exit code unreadable", self._process_kernel(handle=8, exit_ok=False), 0, True),
+            ("no such process (ERROR_INVALID_PARAMETER)", self._process_kernel(handle=None), native_path._ERROR_INVALID_PARAMETER, False),
+            ("access denied (another user's process)", self._process_kernel(handle=None), 5, True),
+        ):
+            with self.subTest(label), self._with(fake, last_error=last_error):
+                self.assertEqual(native_path._pid_alive(77), expected)
+                if fake.functions["OpenProcess"].answer(0, False, 0):
+                    self.assertEqual(len(fake.functions["CloseHandle"].calls), 1)  # always closed
+                else:
+                    self.assertEqual(fake.functions["CloseHandle"].calls, [])
+        with self._with(self._process_kernel(handle=8)):
+            self.assertFalse(native_path._pid_alive(0))  # never asked
+
+
+EVIDENCE_INVARIANT_SCRIPT = textwrap.dedent(
+    """
+    import os, sys
+    from unittest import mock
+    from deepfake_lens import cli
+    if sys.argv[1] == "copy":
+        # Force the copy route: no symbolic link can be made.
+        mock.patch.object(os, "symlink", side_effect=OSError("refused")).start()
+    sys.exit(cli.main(["scan", sys.argv[2], "--recursive", "--include-low", "--format", "json", "--workers", "2",
+                       "--json-out", sys.argv[3], "--deep-signals"]))
+    """
+)
+
+
+class EvidenceInvariantFullScanTest(unittest.TestCase):
+    """R14-2 (round 14), hard invariant: a full scan with staging forced leaves every evidence file exactly as it was.
+
+    Every evidence name is Korean (or not UTF-8), so every native decoder
+    call stages it; the scan runs once with the symbolic-link route and once
+    with links refused (copy route). Each file's bytes, size, mode, mtime,
+    ctime, extended attributes and flags are compared (atime and link count
+    excluded), and the folder holds exactly the same entries afterwards.
+    Some files are read-only (0444) — a chmod reaching them shows as a mode
+    and ctime change.
+    """
+
+    def test_full_scan_never_modifies_an_evidence_file(self) -> None:
+        import io
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            case = root / "case"
+            (case / "하위 폴더").mkdir(parents=True)
+            files: dict[str, bytes] = {
+                "증거 사진.png": A1111.read_bytes(),
+                "녹음 1.wav": _wav_bytes(),
+                "문서.pdf": _pdf_bytes(),
+                "메모.txt": "AI 언어 모델에 대한 사람의 글입니다.\n".encode(),
+                "하위 폴더/깨진 녹음.m4a": b"\x00\x00\x00\x18ftypM4A " + bytes(range(256)) * 8,
+                "하위 폴더/깨진 영상.mp4": b"\x00\x00\x00\x18ftypmp42" + bytes(range(256)) * 8,
+            }
+            if HAVE_CV2:
+                files["영상.mp4"] = _mp4_bytes(root)
+            archive = io.BytesIO()
+            with zipfile.ZipFile(archive, "w") as handle:
+                handle.writestr("안의 녹음.wav", _wav_bytes())
+                handle.writestr("안의 사진.png", A1111.read_bytes())
+            files["압축.zip"] = archive.getvalue()
+            for index, (name, data) in enumerate(sorted(files.items())):
+                (case / name).write_bytes(data)
+                if index % 2 == 0:
+                    (case / name).chmod(0o444)
+            try:
+                _write_bytes_name(case, CP949_STEM + b".wav", _wav_bytes())  # a non-UTF-8 name too, where the OS allows it
+            except unittest.SkipTest:
+                pass
+            paths = sorted(path for path in case.rglob("*") if path.is_file())
+            before = {path: _evidence_state(path) for path in paths}
+            listing = sorted(os.fsencode(path) for path in case.rglob("*"))
+            for route in ("symlink", "copy"):
+                with self.subTest(route=route):
+                    tmpdir = root / f"tmp_{route}"
+                    tmpdir.mkdir()
+                    out = root / f"{route}.json"
+                    env = {**_child_env(root / f"home_{route}"), "TMPDIR": str(tmpdir)}
+                    proc = subprocess.run(
+                        [sys.executable, "-c", EVIDENCE_INVARIANT_SCRIPT, route, str(case), str(out)],
+                        capture_output=True, env=env, timeout=CHILD_TIMEOUT_SECONDS, cwd=str(root),
+                    )
+                    self.assertIn(proc.returncode, (0, 1), proc.stderr[-800:])
+                    rows = json.loads(out.read_text(encoding="utf-8"))["items"]
+                    self.assertGreaterEqual(len(rows), len(paths))
+                    for path in paths:
+                        self.assertEqual(_evidence_state(path), before[path], f"{route}: {path.relative_to(case)!a} modified")
+                    self.assertEqual(sorted(os.fsencode(path) for path in case.rglob("*")), listing, route)
+                    self.assertEqual(os.listdir(tmpdir), [], f"{route}: temp files left behind")
+                    # Non-vacuous: a staged decoder ran on a Korean name.
+                    ran = {c["check"] for row in rows if row["path"] == "녹음 1.wav" for c in row["result"]["coverage"] if c["status"] == "ran"}
+                    if importlib.util.find_spec("librosa") is not None:
+                        self.assertIn("audio_features", ran)
+            for path in paths:
+                path.chmod(0o644)
 
 
 # Native call sites: (module alias, attribute). Every such call in the

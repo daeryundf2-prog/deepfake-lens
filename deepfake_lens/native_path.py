@@ -16,22 +16,26 @@ SyncNet): it yields a path made only of ASCII characters that names the
 same bytes. An ASCII path is passed through untouched. Any other path is
 *staged* in a per-process session folder under the system temp directory
 (never the evidence folder — QA-IN-1) under an ASCII name
-``<n>-<random><.ext>``. On POSIX:
+``<n>-<random><.ext>``.
+
+R14-2 (round 14): the evidence file itself is never modified in any way —
+not its bytes, mode, ``ctime``, link count or (Windows) attributes. So no
+route creates a hard link (that changes the evidence inode's ``ctime`` and
+link count on POSIX, its link count and change time on NTFS), and nothing
+is ever ``chmod``-ed except a copy this process made (see
+:func:`_release_copy`). On POSIX:
 
 1. a symbolic link to the original — it does not touch the evidence
-   file's inode at all (a hard link would change its ``ctime`` and link
-   count, which an examiner may later have to explain);
-2. otherwise a hard link (the R12-1 required fix; same volume only);
-3. otherwise a read-only copy, only up to :data:`NATIVE_COPY_MAX_BYTES`.
+   file's inode at all;
+2. otherwise a read-only copy, only up to :data:`NATIVE_COPY_MAX_BYTES`.
 
 R13-8 (round 13): on Windows (no symbolic links without privilege; the
 evidence often on another drive than the temp folder) every Korean-named
 file used to be copied in full, up to 2 GB. There the order is:
 
-1. a hard link (same volume);
-2. the file's 8.3 short name (``GetShortPathNameW``) when it is ASCII —
-   nothing is created or copied at all;
-3. a read-only copy up to :data:`NATIVE_COPY_MAX_BYTES`; a larger file is
+1. the file's 8.3 short name (``GetShortPathNameW``) when it is ASCII —
+   nothing is created, copied or touched at all;
+2. a copy up to :data:`NATIVE_COPY_MAX_BYTES`; a larger file is
    :class:`NativePathError` "판단 불가: 네이티브 디코더용 임시 사본 상한
    초과", so the check that needed the decoder is ``failed``.
 
@@ -130,6 +134,10 @@ _STILL_ACTIVE = 259
 _ERROR_INVALID_PARAMETER = 87
 # R13-8: the message of a file that would need a copy over the cap.
 COPY_CAP_EXCEEDED = "판단 불가: 네이티브 디코더용 임시 사본 상한 초과"
+# R14-2: a copy this process made is marked by a sidecar file holding the
+# copy's "<st_dev>:<st_ino>"; only a file whose marker names its own inode
+# may have its read-only flag cleared before removal (Windows).
+COPY_MARKER_SUFFIX = ".dfl-copy"
 
 _LOCK = threading.Lock()
 _SESSION_DIR: str | None = None
@@ -189,22 +197,90 @@ def _is_windows() -> bool:
     return os.name == "nt"
 
 
-def _remove_tree(path: str) -> None:
-    """``shutil.rmtree`` that also removes read-only copies (Windows); errors ignored."""
-    if not os.path.lexists(path):
-        return
+def _can_chmod_without_following() -> bool:
+    """R14-2: whether ``os.chmod(..., follow_symlinks=False)`` exists here (Windows 3.13+, BSD/macOS)."""
+    return os.chmod in os.supports_follow_symlinks
 
-    def writable_then_retry(function: Callable[..., Any], target: str, *_: Any) -> None:
+
+def _marked_identity(path: str) -> tuple[int, int] | None:
+    """R14-2: the ``(st_dev, st_ino)`` the copy marker of ``path`` records, or None."""
+    marker = path + COPY_MARKER_SUFFIX
+    try:
+        if not stat.S_ISREG(os.lstat(marker).st_mode):
+            return None
+        with open(marker, encoding="ascii") as handle:
+            device, inode = handle.read(64).strip().split(":")
+        return int(device), int(inode)
+    except (OSError, ValueError, UnicodeError):
+        return None
+
+
+def _release_copy(path: str, original: str | None = None) -> bool:
+    """R14-2: make the read-only copy at ``path`` removable — never anything else.
+
+    Only Windows needs this (POSIX removal does not depend on the file's
+    mode, so nothing is ever ``chmod``-ed there). The flag is cleared only
+    when every test holds: ``path`` is a regular file and not a link, its
+    link count is 1 (a hard link shares the evidence file's attributes),
+    it is not the ``original``'s inode, its copy marker names exactly its
+    inode, and ``os.chmod`` can be told not to follow a link — where it
+    cannot, nothing is changed (the copy stays and is logged).
+    """
+    if not _is_windows() or not _can_chmod_without_following():
+        return False
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+        return False
+    if _marked_identity(path) != (info.st_dev, info.st_ino):
+        return False
+    if original is not None:
         try:
-            os.chmod(target, stat.S_IWUSR | stat.S_IRUSR)
-            function(target)
+            source = os.stat(original)
         except OSError:
-            logger.debug("native_safe_path: %s not removed", target)
+            source = None
+        if source is not None and (source.st_dev, source.st_ino) == (info.st_dev, info.st_ino):
+            return False
+    try:
+        os.chmod(path, stat.S_IWUSR | stat.S_IRUSR, follow_symlinks=False)
+    except (OSError, NotImplementedError):
+        return False
+    return True
+
+
+def _remove_tree(path: str) -> None:
+    """``shutil.rmtree`` of a session folder; errors logged, never a mode change outside our copies.
+
+    R14-2: the error handler used to ``chmod`` whatever could not be
+    removed — through a staged symbolic link that is the evidence file
+    (0444 -> 0600, its ``ctime`` changed), and on Windows a hard link's
+    read-only attribute is the evidence file's. Now only the copies this
+    process (or an earlier run) made are released first
+    (:func:`_release_copy`); everything else that cannot be removed stays.
+    """
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return
+    if not stat.S_ISDIR(info.st_mode):
+        return
+    try:
+        names = os.listdir(path)
+    except OSError:
+        names = []
+    for name in names:
+        if name.endswith(COPY_MARKER_SUFFIX):
+            _release_copy(os.path.join(path, name[: -len(COPY_MARKER_SUFFIX)]))
+
+    def log_only(function: Callable[..., Any], target: str, *_: Any) -> None:
+        logger.debug("native_safe_path: %s not removed (%s)", target, getattr(function, "__name__", function))
 
     if sys.version_info >= (3, 12):
-        shutil.rmtree(path, onexc=writable_then_retry)
+        shutil.rmtree(path, onexc=log_only)
     else:  # pragma: no cover - Python < 3.12
-        shutil.rmtree(path, onerror=writable_then_retry)
+        shutil.rmtree(path, onerror=log_only)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -213,19 +289,7 @@ def _pid_alive(pid: int) -> bool:
         return False
     if _is_windows():
         # os.kill(pid, 0) would TerminateProcess on Windows — ask, never signal.
-        import ctypes
-
-        kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-        handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        if not handle:
-            return getattr(ctypes, "get_last_error")() != _ERROR_INVALID_PARAMETER
-        try:
-            code = ctypes.c_ulong()
-            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
-                return True
-            return code.value == _STILL_ACTIVE
-        finally:
-            kernel32.CloseHandle(handle)
+        return _win_pid_alive(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -233,6 +297,60 @@ def _pid_alive(pid: int) -> bool:
     except OSError:
         return True  # EPERM: another user's live process
     return True
+
+
+def _kernel32() -> Any:
+    """R14-8: ``kernel32`` with the signatures this module calls (the one ctypes entry point).
+
+    Every function gets explicit ``argtypes``/``restype``: without them a
+    64-bit ``HANDLE`` comes back as a C ``int`` (truncated) and a Python int
+    is passed where a ``DWORD`` is expected. The tests replace
+    ``ctypes.WinDLL`` with a recorder and check these signatures.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
+    kernel32.GetShortPathNameW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+    kernel32.GetShortPathNameW.restype = wintypes.DWORD
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, wintypes.LPDWORD]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    return kernel32
+
+
+def _win_last_error() -> int:
+    """R14-8: the thread's last Win32 error as ctypes saved it (``use_last_error=True``)."""
+    import ctypes
+
+    return int(getattr(ctypes, "get_last_error")())
+
+
+def _win_pid_alive(pid: int) -> bool:
+    """R13-4 / R14-8: Windows — True unless ``pid`` is known to be gone.
+
+    ``OpenProcess`` failing with ERROR_INVALID_PARAMETER means no such
+    process; any other failure (access denied: another user's process) and
+    an exit code that cannot be read count as alive. The handle is always
+    closed.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = _kernel32()
+    handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return _win_last_error() != _ERROR_INVALID_PARAMETER
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True
+        return int(code.value) == _STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def sweep_stale_sessions(base: str) -> list[str]:
@@ -487,18 +605,18 @@ def _short_path_name(path: str) -> str | None:
     if not _is_windows():
         return None
     import ctypes
-    from ctypes import wintypes
 
-    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
-    function = kernel32.GetShortPathNameW
-    function.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
-    function.restype = wintypes.DWORD
-    needed = function(path, None, 0)
-    if not needed:
+    function = _kernel32().GetShortPathNameW
+    # R14-8: with no buffer the call returns the size needed *including* the
+    # terminating NUL; with a buffer, the characters written *excluding* it —
+    # so a result >= the buffer size means the name grew in between (retry
+    # is not worth it: no short name), and 0 is an error (GetLastError).
+    needed = int(function(path, None, 0))
+    if needed <= 0:
         return None
     buffer = ctypes.create_unicode_buffer(needed)
-    written = function(path, buffer, needed)
-    if not written or written >= needed:
+    written = int(function(path, buffer, needed))
+    if written <= 0 or written >= needed:
         return None
     short = buffer.value
     return short if short.isascii() and short != path else None
@@ -511,22 +629,33 @@ def _copy_staged(absolute: str, target: str) -> str:
         raise NativePathError(f"비ASCII 이름의 파일을 열 수 없습니다({type(exc).__name__})") from exc
     if size > NATIVE_COPY_MAX_BYTES:
         raise NativePathError(
-            f"{COPY_CAP_EXCEEDED} — 비ASCII 이름의 파일을 링크할 수 없고"
-            + (" ASCII 짧은 이름(8.3)도 없어" if _is_windows() else "")
+            f"{COPY_CAP_EXCEEDED} — 비ASCII 이름의 파일에"
+            + (" ASCII 짧은 이름(8.3)이 없어" if _is_windows() else " 심볼릭 링크를 만들 수 없어")
             + f" 사본이 필요하지만 크기({size}바이트)가 사본 상한({NATIVE_COPY_MAX_BYTES}바이트)을 넘어"
             " 네이티브 디코더로 열지 않았습니다"
         )
     shutil.copyfile(absolute, target)
-    os.chmod(target, stat.S_IRUSR)
+    copied = os.lstat(target)
+    # R14-2: the marker that lets removal clear this copy's read-only flag
+    # (Windows) — it names the copy's own inode, so it never vouches for a
+    # link or for any other file.
+    with open(target + COPY_MARKER_SUFFIX, "x", encoding="ascii") as marker:
+        marker.write(f"{copied.st_dev}:{copied.st_ino}")
+    if not _is_windows():
+        os.chmod(target, stat.S_IRUSR)  # a fresh regular file in our 0700 folder
+    elif _can_chmod_without_following():
+        os.chmod(target, stat.S_IRUSR, follow_symlinks=False)
+    # (Windows without a no-follow chmod: the copy stays writable — removing a
+    # read-only copy would need a chmod that could follow a link.)
     return target
 
 
 def _stage(source: str) -> tuple[str, bool]:
     """An ASCII name for ``source`` and whether it is ours to remove afterwards.
 
-    POSIX: symbolic link, hard link, copy. R13-8 — Windows: hard link,
-    ASCII 8.3 short name (the evidence file itself; nothing to remove),
-    copy.
+    POSIX: symbolic link, copy. R13-8 / R14-2 — Windows: ASCII 8.3 short
+    name (the evidence file itself; nothing to remove), copy. Never a hard
+    link (R14-2: it modifies the evidence file's metadata).
     """
     absolute = os.path.abspath(source)
     folder = session_dir()
@@ -538,15 +667,11 @@ def _stage(source: str) -> tuple[str, bool]:
             return target, True
         except OSError:
             logger.debug("native_safe_path: symlink refused for staged name %s", target)
-    try:
-        os.link(absolute, target)
-        return target, True
-    except OSError:
-        logger.debug("native_safe_path: hard link refused for staged name %s", target)
-    short = _short_path_name(absolute)
-    if short is not None:
-        _register_short_alias(short, source)
-        return short, False
+    else:
+        short = _short_path_name(absolute)
+        if short is not None:
+            _register_short_alias(short, source)
+            return short, False
     return _copy_staged(absolute, target), True
 
 
@@ -568,21 +693,36 @@ def native_safe_path(path: str | os.PathLike[str]) -> Iterator[str]:
         yield staged
     finally:
         if owned:
-            _unlink_staged(staged)
+            _unlink_staged(staged, os.path.abspath(text))
 
 
-def _unlink_staged(staged: str) -> None:
+def _try_unlink(path: str) -> bool:
+    """``os.unlink`` that reports instead of raising (True when ``path`` is gone)."""
     try:
-        os.unlink(staged)
+        os.unlink(path)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _unlink_staged(staged: str, original: str | None = None) -> None:
+    """Remove a staged name (and its copy marker); R14-2: never a mode change but on our own copy.
+
+    The fallback used to ``chmod`` the staged name when its removal failed —
+    through a symbolic link that is the evidence file. Now only a verified
+    copy (:func:`_release_copy`; Windows read-only flag) is made writable.
+    """
+    if not _try_unlink(staged) and not (_release_copy(staged, original) and _try_unlink(staged)):
+        logger.warning("native_safe_path: staged name %s not removed", staged)
+        return
+    try:
+        os.unlink(staged + COPY_MARKER_SUFFIX)
     except FileNotFoundError:
         pass
     except OSError:
-        # A read-only copy on Windows: clear the flag, then remove.
-        try:
-            os.chmod(staged, stat.S_IWUSR | stat.S_IRUSR)
-            os.unlink(staged)
-        except OSError:
-            logger.warning("native_safe_path: staged name %s not removed", staged)
+        logger.warning("native_safe_path: copy marker of %s not removed", staged)
 
 
 def imwrite_any(path: str | os.PathLike[str], image: Any, params: list[int] | tuple[int, ...] = ()) -> bool:
