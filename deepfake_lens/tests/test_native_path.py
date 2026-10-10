@@ -635,19 +635,15 @@ class SessionFolderCleanupTest(unittest.TestCase):
             """
         )
         env = {**_child_env(self.base), native_path.NATIVE_TMP_ENV: str(self.base)}
-        import signal
-
-        def default_actions() -> None:
-            # R14-1 (round 14): the child starts with SIGINT/SIGTERM at their
-            # default, as under an interactive terminal. A test run started as
-            # a background job inherits SIGINT as SIG_IGN, and an ignored signal
-            # now stays ignored (R14-1) — the child would sleep through it.
-            signal.signal(signal.SIGINT, signal.SIG_DFL)
-            signal.signal(signal.SIGTERM, signal.SIG_DFL)
-
+        # R14-1 (round 14): the child starts with SIGINT/SIGTERM at their
+        # default, as under an interactive terminal. A test run started as a
+        # background job inherits SIGINT as SIG_IGN, and an ignored signal now
+        # stays ignored (R14-1) — the child would sleep through it.
+        # R15-5 (round 15): set in an exec trampoline, not preexec_fn (which is
+        # not fork-safe in this threaded test process; ruff PLW1509).
         proc = subprocess.Popen(
-            [sys.executable, "-c", script, str(self.base), mode],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=str(self.base), preexec_fn=default_actions,
+            shutdown.with_signals({"SIGINT": "SIG_DFL", "SIGTERM": "SIG_DFL"}, [sys.executable, "-c", script, str(self.base), mode]),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=str(self.base),
         )
         assert proc.stdout is not None and proc.stderr is not None
         folder = proc.stdout.readline().decode("utf-8").strip()
@@ -718,9 +714,9 @@ class SessionFolderCleanupTest(unittest.TestCase):
             (case / f"증거{index:02d}_clip.mp4").write_bytes(mp4)
             (case / f"증거{index:02d}_tone.wav").write_bytes(wav)
 
-        def ignore_both() -> None:
-            signal.signal(signal.SIGHUP, signal.SIG_IGN)
-            signal.signal(signal.SIGINT, signal.SIG_IGN)
+        # R15-5 (round 15): SIGHUP/SIGINT ignored as under nohup in a background
+        # job — set in an exec trampoline, not preexec_fn (not fork-safe here).
+        ignore_both = {"SIGHUP": "SIG_IGN", "SIGINT": "SIG_IGN"}
 
         def scan(tag: str, send_signals: bool) -> tuple[str, int]:
             tmp = self.base / f"tmp_{tag}"
@@ -729,7 +725,7 @@ class SessionFolderCleanupTest(unittest.TestCase):
             env = {**_child_env(self.base / f"home_{tag}"), "TMPDIR": str(tmp)}
             command = [sys.executable, "-m", "deepfake_lens", "scan", str(case), "--include-low", "--format", "json", "--workers", "2"]
             with open(out, "wb") as handle:
-                proc = subprocess.Popen(command, stdout=handle, stderr=subprocess.DEVNULL, env=env, cwd=str(self.base), preexec_fn=ignore_both)
+                proc = subprocess.Popen(shutdown.with_signals(ignore_both, command), stdout=handle, stderr=subprocess.DEVNULL, env=env, cwd=str(self.base))
                 sent = 0
                 deadline = time.monotonic() + CHILD_TIMEOUT_SECONDS
                 while proc.poll() is None and time.monotonic() < deadline:

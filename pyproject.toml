@@ -115,7 +115,9 @@ target-version = "py311"
 [tool.ruff.lint]
 # R11-9: PLE2502/PLE2510–PLE2515 — no raw bidi, zero-width or control
 # characters in source (write them as escape sequences).
-select = ["E9", "F401", "F821", "F541", "F811", "W605", "PLE2502", "PLE2510", "PLE2512", "PLE2513", "PLE2514", "PLE2515"]
+# R15-5: PLW1509 — no preexec_fn (not fork-safe in a process with threads;
+# set signal dispositions with deepfake_lens.shutdown.with_signals instead).
+select = ["E9", "F401", "F821", "F541", "F811", "W605", "PLE2502", "PLE2510", "PLE2512", "PLE2513", "PLE2514", "PLE2515", "PLW1509"]
 # Fail-closed gate (phase 0, G1): blind `except Exception` (BLE001) and
 # try/except/pass (S110) are errors in the four files on the verdict path.
 # Ruff has no per-file *select*, so the rules are enabled globally and
