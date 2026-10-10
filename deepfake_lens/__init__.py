@@ -1,6 +1,13 @@
 """Local AI-generated material screening CLI."""
 
-from .core import (
+# R15-2 (round 15): third-party telemetry off before anything else is imported
+# — onnxruntime's import wrote a device id and tried
+# mobile.events.data.microsoft.com (see telemetry_opt_out).
+from . import telemetry_opt_out as _telemetry_opt_out  # R15-2: before every other import
+
+_telemetry_opt_out.apply()
+
+from .core import (  # noqa: E402
     BatchScanSummary,
     ClassificationResult,
     EvidenceSignal,

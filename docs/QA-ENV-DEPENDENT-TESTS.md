@@ -79,6 +79,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `numpy/opencv not installed` | `pixel` extra(opencv-python, numpy) | test_v6_probes.py |
 | `numpy/scipy not installed` | `audio`/`full` extra(numpy, scipy) | test_phase1_math.py |
 | `official checkpoint not fetched` | `scripts/fetch_aasist.py` 등으로 받은 공식 체크포인트(망분리 감정실에서는 vendor-weights 묶음) | test_aasist_engine.py |
+| `onnxruntime not installed` | onnxruntime(선택 런타임 — 모델 프로필의 ONNX 실행; 텔레메트리 차단 확인, R15-2) | test_telemetry.py |
 | `opencv not installed` | `pixel`/`video`/`face` extra(opencv-python) | test_face.py, test_model_zoo.py, test_native_path.py |
 | `opencv required` | `pixel`/`video`/`face` extra(opencv-python) | test_faceswap_seam.py, test_fail_closed.py |
 | `opencv/numpy not installed` | `pixel` extra(opencv-python, numpy) | test_consolidation.py |
@@ -109,6 +110,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `transformers/torch not installed` | `text_lm` extra(torch, transformers) | test_v6_probes.py |
 | `without torch the script exits at the dependency check first` | `text_lm` extra(torch) | test_aasist_engine.py |
 | `` {FIXTURE_DIR} missing — run `python scripts/make_benchmark_fixtures.py` `` | `scripts/make_benchmark_fixtures.py`로 만든 픽스처 | test_benchmark_e2e.py |
+| `대조군: 이 onnxruntime은 텔레메트리 파일을 만들지 않음` | onnxruntime이 가져올 때 텔레메트리 장치 ID를 쓰는 환경(1.2x Linux 휠, R15-2) — 그렇지 않은 버전에서는 대조군이 성립하지 않아 건너뜀 | test_telemetry.py |
 | `파일 시스템이 UTF-8이 아닌 파일 이름을 허용하지 않음(Windows·macOS)` | UTF-8이 아닌 바이트 파일 이름을 허용하는 파일 시스템(리눅스 ext4·tmpfs 등) | test_corpus_manifest.py, test_native_path.py, test_non_utf8_names.py, test_path_b64.py |
 
 ## 환경 의존 기준선 테스트

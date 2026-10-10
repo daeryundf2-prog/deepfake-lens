@@ -12,6 +12,11 @@ on:
 env:
   HF_HUB_OFFLINE: "1"
   TRANSFORMERS_OFFLINE: "1"
+  # R15-2: the same telemetry opt-outs deepfake_lens/__init__.py sets
+  # (telemetry_opt_out.TELEMETRY_OPT_OUT), for every step and child process.
+  ORT_DISABLE_TELEMETRY: "1"
+  HF_HUB_DISABLE_TELEMETRY: "1"
+  DO_NOT_TRACK: "1"
 
 jobs:
   python:
