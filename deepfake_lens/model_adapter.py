@@ -7,7 +7,7 @@ import logging
 from dataclasses import replace
 from pathlib import Path
 
-from .native_path import imwrite_any, native_safe_path
+from .native_path import imwrite_any, native_safe_path, scratch_dir
 from .checkpoint_integrity import _expected_sha256, load_torch_state  # noqa: F401 — load_torch_state re-exported
 from .model_pins import PIN_FIELD, PinError, verify_pin
 from .model_cache import (  # noqa: F401 — re-exported for existing callers/tests
@@ -819,7 +819,7 @@ def _score_face_crops(crops: list, profile: dict[str, object], *, base_dir: Path
     inner = {key: value for key, value in profile.items() if key not in {"crop_faces", "requires_face", "crop_aggregate", "crop_margin"}}
     aggregate = str(profile.get("crop_aggregate") or "max").lower()
     results: list[ExternalModelAnalysis] = []
-    with tempfile.TemporaryDirectory(prefix="dfl-faces-") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="dfl-faces-", dir=scratch_dir()) as tmp_dir:
         for index, crop in enumerate(crops):
             crop_path = Path(tmp_dir) / f"face_{index}.png"
             # R13-7: never cv2.imwrite — the temp folder may be non-ASCII.
@@ -907,7 +907,7 @@ def _run_video_frames(
             return refused
 
     scored_frames: list[dict[str, object]] = []
-    with tempfile.TemporaryDirectory(prefix="dfl-frames-") as tmp_dir:
+    with tempfile.TemporaryDirectory(prefix="dfl-frames-", dir=scratch_dir()) as tmp_dir:
         frame_paths = _extract_sampled_frames(cv2, media_path, Path(tmp_dir), frame_target)
         if not frame_paths:
             raise RuntimeError(f"영상에서 프레임을 디코딩하지 못했습니다: {media_path}")

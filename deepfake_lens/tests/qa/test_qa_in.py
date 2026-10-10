@@ -50,7 +50,7 @@ from unittest import mock
 from unittest.mock import patch
 
 import deepfake_lens
-from deepfake_lens import archives, core
+from deepfake_lens import archives, core, native_path
 from deepfake_lens.analysis_api import AnalysisOptions, scan_folder
 from deepfake_lens.core import scan_directory
 from deepfake_lens.result_types import ScanItem, Verdict
@@ -877,6 +877,18 @@ class _TempUsagePoller:
             total += size
             if child.name.startswith("dflens-arc-"):
                 self.peak_by_dir[child.name] = max(self.peak_by_dir.get(child.name, 0), size)
+            elif child.name.startswith(native_path.SESSION_PREFIX):
+                # R14-7 (round 14): extraction folders are made inside the
+                # process's session folder (removed at exit / on a fatal signal,
+                # swept after SIGKILL), one level below the temp root.
+                try:
+                    inner = list(child.iterdir())
+                except OSError:
+                    inner = []
+                for grandchild in inner:
+                    if grandchild.name.startswith("dflens-arc-"):
+                        peak = _tree_bytes(grandchild)
+                        self.peak_by_dir[grandchild.name] = max(self.peak_by_dir.get(grandchild.name, 0), peak)
         self.peak_total = max(self.peak_total, total)
         self.polls += 1
 
@@ -938,6 +950,7 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
     by_path: dict[str, ScanItem]
     summary: Any
     temp_root: Path
+    session_folders: list[str]
     poller: _TempUsagePoller
 
     @classmethod
@@ -967,11 +980,20 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
         # polling thread measures while the scan runs (peak, not post hoc).
         cls.temp_root = root / "scan-temp"
         cls.temp_root.mkdir()
+        # R14-7: every temp file is made in the session folder — a fresh one,
+        # in this root (not the test process's own), removed when the scan is
+        # done, as at the end of a CLI run.
         with mock.patch.object(archives, "TOTAL_EXTRACTION_BYTES", TEST_BUDGET_BYTES), \
                 mock.patch("deepfake_lens.core.extract_archive", measured_extract), \
                 mock.patch.object(tempfile, "tempdir", str(cls.temp_root)), \
+                mock.patch.object(native_path, "_SESSION_DIR", None), mock.patch.object(native_path, "_SESSION_DIRS", []), \
+                mock.patch.object(native_path, "_SCRATCH_FALLBACK", None), \
+                mock.patch.object(native_path, "_base_candidates", return_value=[str(cls.temp_root)]), \
+                mock.patch.object(native_path, "install_cleanup_handlers"), \
                 _TempUsagePoller(cls.temp_root) as poller:
             cls.summary, cls.items = scan_folder(cls.folder, AnalysisOptions(max_files=100))
+            cls.session_folders = [child.name for child in cls.temp_root.iterdir() if child.name.startswith(native_path.SESSION_PREFIX)]
+            native_path.cleanup_session()
         cls.poller = poller
         cls.by_path = {item.path: item for item in cls.items}
 
@@ -1037,6 +1059,7 @@ class QaIn5DamagedInputsTest(unittest.TestCase):
         everything removed afterwards."""
         poller = self.poller
         self.assertGreater(poller.polls, 1, "the poller never sampled the scan")
+        self.assertEqual(len(self.session_folders), 1, self.session_folders)  # R14-7: all of it in one session folder
         archive_count = sum(1 for name in self.damaged if archives.is_archive(name))
         self.assertTrue(poller.peak_by_dir, "no extraction dir was observed")
         self.assertLessEqual(len(poller.peak_by_dir), archive_count)

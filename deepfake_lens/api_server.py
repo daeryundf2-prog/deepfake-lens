@@ -23,6 +23,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 from .checks import failure_reason
+from .native_path import scratch_dir
 from .vendor_weights import default_models_dir
 from .json_text import json_bytes, json_dumps
 
@@ -554,7 +555,7 @@ def create_app(
                 # delete=False: Windows cannot reopen a delete=True temp file.
                 tmp_name = ""
                 try:
-                    with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as tmp:
+                    with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False, dir=scratch_dir()) as tmp:
                         tmp.write(trimmed)
                         tmp_name = tmp.name
                     item = analyze_path(tmp_name, options, thresholds=thresholds)
@@ -741,7 +742,7 @@ def create_app(
                 yield ("progress", {"stage": "core", "index": 1, "total": 3})
                 tmp_name = ""
                 try:
-                    with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as tmp:
+                    with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False, dir=scratch_dir()) as tmp:
                         tmp.write(trimmed)
                         tmp_name = tmp.name
                     item = analyze_path(tmp_name, options, thresholds=thresholds)

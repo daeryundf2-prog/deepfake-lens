@@ -41,6 +41,7 @@ from .layer_diagnostic import (
 from .result_text import coverage_entry_line, display_name, escape_controls, evidence_qualifiers_short, grade_label_text
 from .result_types import VERDICT_LABELS, GRADE_LABELS, Grade, ScanItem, Verdict, status_label
 from .json_text import json_dumps
+from .native_path import scratch_dir
 
 ANALYSIS_RESULT_NOTICE = "결론은 `scan`과 같은 경로(analysis_api.analyze_path)로 산출되었습니다."
 # Result fields that make up the three-verdict contract. Legacy derived
@@ -198,7 +199,7 @@ def analyze_text_payload(text: str, options: Any, *, command: str, thresholds: A
     tmp_name = ""
     try:
         # delete=False: Windows cannot reopen a delete=True temp file.
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False, dir=scratch_dir()) as tmp:
             tmp.write(text)
             tmp_name = tmp.name
         item = analyze_path(tmp_name, options, thresholds=thresholds)

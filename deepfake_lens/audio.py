@@ -15,7 +15,7 @@ from pathlib import Path
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .error_text import exception_text, failure_reason
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
-from .native_path import native_safe_path
+from .native_path import native_safe_path, scratch_dir
 from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
 
 
@@ -957,7 +957,7 @@ def _ecapa_load_waveform(path: Path):
     try:
         import os
 
-        fd, tmp = tempfile.mkstemp(suffix=".wav")
+        fd, tmp = tempfile.mkstemp(suffix=".wav", dir=scratch_dir())
         os.close(fd)
         with native_safe_path(path) as native_audio:  # R12-1
             subprocess.run(

@@ -26,6 +26,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qs
 
 from .checks import failure_reason
+from .native_path import scratch_dir
 from .error_text import exception_text
 from .result_text import display_name
 from .vendor_weights import default_models_dir
@@ -855,7 +856,7 @@ def _archive_upload_items(
     """
     del suffix
     base = Path(filename.replace("\\", "/")).name or "upload.zip"
-    folder = Path(tempfile.mkdtemp(prefix="dflens-up-")).resolve()
+    folder = Path(tempfile.mkdtemp(prefix="dflens-up-", dir=scratch_dir())).resolve()
     try:
         target = folder / base
         target.write_bytes(payload)
@@ -922,7 +923,7 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
             # delete=False: Windows cannot reopen a delete=True temp file.
             tmp_name = ""
             try:
-                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=scratch_dir()) as tmp:
                     tmp.write(payload)
                     tmp_name = tmp.name
                 item = analyze_path(tmp_name, options, thresholds=thresholds)
@@ -994,7 +995,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
     tmp_name = ""
     layer_errors: dict[str, Any] = {}
     try:
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", encoding="utf-8", delete=False, dir=scratch_dir()) as tmp:
             tmp.write(trimmed)
             tmp_name = tmp.name
         item = analyze_path(tmp_name, options, thresholds=thresholds)
@@ -1069,7 +1070,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
         }
     tmp_name = ""
     try:
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=scratch_dir()) as tmp:
             tmp.write(payload)
             tmp_name = tmp.name
         tmp_path = Path(tmp_name)
@@ -1128,7 +1129,7 @@ def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
     try:
         for part in parts[:2]:
             suffix = Path(_part_filename(part) or "upload").suffix[:16]
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=scratch_dir()) as tmp:
                 tmp.write(_part_bytes(part) or b"")
                 tmp_paths.append(Path(tmp.name))
         from .core import compare_files
@@ -1428,7 +1429,7 @@ class _ReportHasher:
 
         if not is_archive(container):
             return digests
-        dest = Path(tempfile.mkdtemp(prefix="dflens-report-")).resolve()
+        dest = Path(tempfile.mkdtemp(prefix="dflens-report-", dir=scratch_dir())).resolve()
         self._temp_dirs.append(dest)
         try:
             extraction = extract_archive(container, dest)
@@ -1762,7 +1763,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     if req_format == "json":
         return signed
     suffix = ".pdf" if req_format in ("pdf", "evidence", "evidence-statement") else ".html"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=scratch_dir()) as tmp:
         tmp_path = Path(tmp.name)
     try:
         if req_format in ("evidence", "evidence-statement"):

@@ -50,6 +50,8 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `fastapi installed; the missing-dep branch does not apply` | fastapi가 없는 환경에서만 실행(CI 기본 venv) | test_servers.py |
 | `fastapi/httpx not installed` | fastapi, httpx(QA 사이드 venv) | test_servers.py |
 | `fastapi/httpx required` | fastapi, httpx(QA 사이드 venv) | test_servers.py |
+| `ffmpeg 없음` | `ffmpeg` 실행 파일(PATH) — 음성 트랙이 있는 시험 영상을 만들고 추출 임시 파일을 관찰 | test_native_path.py |
+| `ffmpeg가 시험 영상을 만들지 못함` | `ffmpeg`(lavfi 입력, mpeg4·aac 인코더 포함 빌드) | test_native_path.py |
 | `git binary required` | git 실행 파일과 작업 트리(얕은 복제·압축본 아님) | test_traceability_commits.py |
 | `git not available` | git 실행 파일 | test_qa_sys.py |
 | `jsonschema not installed (dev extra) — _check_object covers the stdlib job` | `dev` extra(jsonschema) | test_json_contract.py |

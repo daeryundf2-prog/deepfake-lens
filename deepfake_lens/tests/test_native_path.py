@@ -56,6 +56,8 @@ _REAL_CHMOD = os.chmod
 # R14-1: Korean-named mp4 + wav pairs in the signalled scan — enough decoding
 # time (a few seconds) for the signals to land while names are staged.
 R14_1_FILES = 24
+# R14-7: videos with an audio track in the killed scan (each extraction makes a temp wav).
+R14_7_FILES = 12
 
 
 def _write_bytes_name(folder: Path, name: bytes, data: bytes) -> str:
@@ -1422,6 +1424,192 @@ class NativeCallMetaTest(unittest.TestCase):
         visitor.visit(tree)
         self.assertEqual([(call, ok) for _, call, ok in visitor.sites], [("cv.VideoCapture", False), ("cv2.imread", False), ("cv.imread", True)])
         self.assertEqual([call for _, call in visitor.banned], ["cv.imwrite", "cv2.imwrite", "ocv.VideoWriter"])
+
+
+# R14-7 (round 14): tempfile functions that create a file or folder. Every
+# call in the package must pass ``dir=scratch_dir()`` (the session folder,
+# removed at exit / on a fatal signal and swept after SIGKILL) — except the
+# allowlisted ones below, each with the reason it cannot.
+TEMPFILE_CREATORS = {"mkstemp", "mkdtemp", "NamedTemporaryFile", "TemporaryDirectory", "TemporaryFile", "SpooledTemporaryFile", "mktemp"}
+TEMPFILE_ALLOWED = {
+    # The session folder itself (and its fallback) is made in the temp base.
+    ("native_path.py", "session_dir"): "the session folder is created here",
+    ("native_path.py", "scratch_dir"): "the fallback session folder is created here",
+    # Atomic replace: the temp file must be on the target's volume, next to it.
+    ("vendor_weights.py", "fetch_weights"): "atomic rename next to the downloaded weights",
+    ("vendor_weights.py", "pin_profile"): "atomic rename next to the profile",
+    ("reports.py", "_atomic_write_bytes"): "atomic rename next to the report",
+    # A probe that the output folder is writable — it must be made there.
+    ("cli_inputs.py", "require_writable_output"): "write probe in the output folder",
+}
+
+
+class _TempfileVisitor(ast.NodeVisitor):
+    """R14-7: (line, function, call, uses dir=scratch_dir()) of every tempfile creator call."""
+
+    def __init__(self, tree: ast.AST) -> None:
+        self.modules, self.members = _import_aliases(tree)
+        self.functions: list[str] = []
+        self.calls: list[tuple[int, str, str, bool]] = []
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.functions.append(node.name)
+        self.generic_visit(node)
+        self.functions.pop()
+
+    visit_AsyncFunctionDef = visit_FunctionDef  # type: ignore[assignment]
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        name = ""
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and self.modules.get(func.value.id, func.value.id) == "tempfile":
+            name = func.attr
+        elif isinstance(func, ast.Name) and self.members.get(func.id, ("", ""))[0] == "tempfile":
+            name = self.members[func.id][1]
+        if name in TEMPFILE_CREATORS:
+            directory = next((kw.value for kw in node.keywords if kw.arg == "dir"), None)
+            ok = (
+                isinstance(directory, ast.Call)
+                and not directory.args
+                and (
+                    (isinstance(directory.func, ast.Name) and directory.func.id == "scratch_dir")
+                    or (isinstance(directory.func, ast.Attribute) and directory.func.attr == "scratch_dir")
+                )
+            )
+            self.calls.append((node.lineno, self.functions[0] if self.functions else "<module>", name, ok))
+        self.generic_visit(node)
+
+
+class TempFilesInTheSessionFolderTest(unittest.TestCase):
+    """R14-7 (round 14): every temp file is made in the session folder, so the existing cleanup removes it.
+
+    A SIGKILLed (or SIGTERMed) scan left ``tmp*.wav`` (audio tracks pulled
+    from videos), extraction folders and upload copies directly in TMPDIR,
+    where neither the signal handler nor the next run's sweep looked.
+    """
+
+    def test_every_tempfile_call_uses_the_session_folder(self) -> None:
+        offenders: list[str] = []
+        seen: list[str] = []
+        sources = [path for path in sorted(PACKAGE.rglob("*.py")) if "tests" not in path.relative_to(PACKAGE).parts]
+        for source in sources:
+            label = source.relative_to(PACKAGE).as_posix()
+            tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+            visitor = _TempfileVisitor(tree)
+            visitor.visit(tree)
+            for line, function, call, ok in visitor.calls:
+                seen.append(f"{label}:{function}")
+                if not ok and (label, function) not in TEMPFILE_ALLOWED:
+                    offenders.append(f"{label}:{line} tempfile.{call} in {function}() without dir=scratch_dir()")
+                if call == "mktemp":
+                    offenders.append(f"{label}:{line} tempfile.mktemp (insecure, and not in the session folder)")
+        self.assertEqual(offenders, [])
+        # Non-vacuous: the known call sites were found, and every allowlist entry is still used.
+        for expected in (
+            "video_analysis.py:audio_track_check",  # the tmp*.wav a killed scan left (R14-7)
+            "audio.py:_ecapa_load_waveform",
+            "lipsync.py:_audio_envelope",
+            "core.py:_scan_paths",  # archive extraction
+            "model_adapter.py:_run_video_frames",
+            "webapp_api.py:_archive_upload_items",
+            "api_server.py:create_app",
+        ):
+            self.assertIn(expected, seen)
+        for label, function in TEMPFILE_ALLOWED:
+            self.assertIn(f"{label}:{function}", seen, "stale allowlist entry")
+
+    def test_the_visitor_flags_a_bare_call(self) -> None:
+        bad = textwrap.dedent(
+            """
+            import tempfile as tf
+            from tempfile import mkstemp
+            def f():
+                tf.mkdtemp(prefix="x-")
+                mkstemp(suffix=".wav", dir="/tmp")
+                tf.NamedTemporaryFile(dir=scratch_dir())
+            """
+        )
+        tree = ast.parse(bad)
+        visitor = _TempfileVisitor(tree)
+        visitor.visit(tree)
+        self.assertEqual([(call, ok) for _, _, call, ok in visitor.calls], [("mkdtemp", False), ("mkstemp", False), ("NamedTemporaryFile", True)])
+
+    @unittest.skipIf(os.name == "nt", "POSIX signals")
+    @unittest.skipUnless(HAVE_CV2, "opencv not installed")
+    def test_a_killed_scan_leaves_nothing_outside_the_session_folder(self) -> None:
+        import shutil
+        import signal
+
+        if shutil.which("ffmpeg") is None:
+            self.skipTest("ffmpeg 없음")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            case = root / "case"
+            case.mkdir()
+            clip = root / "clip.mp4"
+            made = subprocess.run(
+                ["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-f", "lavfi", "-i",
+                 "color=c=gray:s=64x64:d=3", "-shortest", "-c:v", "mpeg4", "-c:a", "aac", str(clip)],
+                capture_output=True,
+            )
+            if made.returncode != 0:
+                self.skipTest("ffmpeg가 시험 영상을 만들지 못함")
+            for index in range(R14_7_FILES):
+                shutil.copyfile(clip, case / f"녹화 {index:02d}.mp4")
+            for signum in (signal.SIGKILL, signal.SIGTERM):
+                with self.subTest(signal=signum.name):
+                    base = root / f"tmp_{signum.name}"
+                    base.mkdir()
+                    env = {**_child_env(root / f"home_{signum.name}"), "TMPDIR": str(base)}
+                    proc = subprocess.Popen(
+                        [sys.executable, "-m", "deepfake_lens", "scan", str(case), "--include-low", "--format", "json", "--workers", "2"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=str(root),
+                    )
+                    seen_wav = False
+                    deadline = time.monotonic() + CHILD_TIMEOUT_SECONDS
+                    while proc.poll() is None and time.monotonic() < deadline:
+                        for folder in base.glob(f"{native_path.SESSION_PREFIX}*"):
+                            try:
+                                seen_wav = seen_wav or any(name.endswith(".wav") for name in os.listdir(folder))
+                            except OSError:
+                                pass
+                        # Never anything at the top level but session folders.
+                        self.assertEqual([n for n in os.listdir(base) if not n.startswith(native_path.SESSION_PREFIX)], [])
+                        if seen_wav:
+                            proc.send_signal(signum)
+                            break
+                        time.sleep(0.005)
+                    proc.wait(timeout=CHILD_TIMEOUT_SECONDS)
+                    self.assertTrue(seen_wav, "no audio-track temp file was seen in the session folder")
+                    left = os.listdir(base)
+                    self.assertEqual([name for name in left if not name.startswith(native_path.SESSION_PREFIX)], [], left)
+                    if signum == signal.SIGTERM:
+                        self.assertEqual(left, [])  # the handler removed the folder and everything in it
+                    else:
+                        # SIGKILL: the next run's sweep removes the dead process's folder, temp files and all.
+                        self.assertEqual(len(left), 1, left)
+                        old = time.time() - 2 * native_path.STALE_MIN_AGE_SECONDS
+                        os.utime(base / left[0], (old, old))
+                        self.assertEqual(native_path.sweep_stale_sessions(str(base)), left)
+                        self.assertEqual(os.listdir(base), [])
+
+    def test_scratch_dir_falls_back_to_a_session_folder_in_the_temp_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve() / "임시"
+            base.mkdir()
+            with mock.patch.object(native_path, "_SESSION_DIR", None), mock.patch.object(native_path, "_SESSION_DIRS", []), mock.patch.object(
+                native_path, "_SCRATCH_FALLBACK", None
+            ), mock.patch.object(native_path, "_base_candidates", return_value=["/없는/폴더"]), mock.patch.object(
+                native_path.tempfile, "gettempdir", return_value=str(base)
+            ), mock.patch.object(native_path, "install_cleanup_handlers"):
+                folder = native_path.scratch_dir()
+                self.assertEqual(os.path.dirname(folder), str(base))
+                self.assertTrue(os.path.basename(folder).startswith(f"{native_path.SESSION_PREFIX}{os.getpid()}-"))
+                self.assertEqual(native_path.scratch_dir(), folder)
+                with self.assertRaises(NativePathError):
+                    native_path.session_dir()  # staging still needs an ASCII folder
+                native_path.cleanup_session()
+                self.assertFalse(os.path.exists(folder))
 
 
 class NonUtf8MediaEndToEndTest(unittest.TestCase):

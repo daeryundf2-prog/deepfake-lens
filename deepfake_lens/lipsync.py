@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from .native_path import CascadeLoadError, native_safe_path
+from .native_path import CascadeLoadError, native_safe_path, scratch_dir
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 from .vendor_weights import default_models_dir
 from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
@@ -155,7 +155,7 @@ def _audio_envelope(video_path: Path, *, max_seconds: float) -> tuple[list[float
 
     window_seconds = 0.04
     rate = 8000
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=scratch_dir()) as tmp:
         tmp_path = Path(tmp.name)
     try:
         with native_safe_path(video_path) as native_video:  # R12-1

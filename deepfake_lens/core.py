@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, NamedTuple
 
 from .archives import archive_format, extract_archive, is_archive
+from .native_path import scratch_dir
 from .audio import SUPPORTED_AUDIO_EXTENSIONS, AudioAnalysis, analyze_audio
 from .video_analysis import (
     AV_AUDIO_CHECK,
@@ -445,7 +446,7 @@ def _scan_paths(
                 specs.append((path, None, None))
                 continue
             rel = _display_path(path, root=root)
-            dest = Path(tempfile.mkdtemp(prefix="dflens-arc-"))
+            dest = Path(tempfile.mkdtemp(prefix="dflens-arc-", dir=scratch_dir()))
             temp_dirs.append(dest)
             dest = dest.resolve()
             # R13-2: the container's state and hash before extraction —
@@ -1723,7 +1724,7 @@ def _analyze_text_file(
         # as raw bytes — feed the extracted text instead so PPL/binoculars
         # and the language gate see real prose.
         if text.strip():
-            fd, tmp_name = tempfile.mkstemp(suffix=".txt", prefix="dflens-")
+            fd, tmp_name = tempfile.mkstemp(suffix=".txt", prefix="dflens-", dir=scratch_dir())
             try:
                 os.write(fd, text.encode("utf-8", errors="replace"))
             finally:

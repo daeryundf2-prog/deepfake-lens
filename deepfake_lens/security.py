@@ -19,6 +19,7 @@ import unittest
 from pathlib import Path
 from typing import Any, Callable
 from .json_text import json_dumps
+from .native_path import scratch_dir
 
 
 # Substring markers for network capability. "subprocess" is deliberately not
@@ -95,7 +96,7 @@ def _check_client_header_required() -> tuple[bool, str]:
 def _check_symlinks_opt_in() -> tuple[bool | None, str]:
     from .scan_cache import _iter_files
 
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(dir=scratch_dir()) as tmp:
         root = Path(tmp)
         (root / "target.txt").write_text("x", encoding="utf-8")
         try:
@@ -111,7 +112,7 @@ def _check_symlinks_opt_in() -> tuple[bool | None, str]:
 def _check_oversize_skip() -> tuple[bool, str]:
     from .core import scan_directory
 
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(dir=scratch_dir()) as tmp:
         (Path(tmp) / "big.txt").write_text("0123456789", encoding="utf-8")
         _, items = scan_directory(tmp, max_file_bytes=4)
     statuses = [item.status for item in items]
@@ -124,7 +125,7 @@ def _check_report_redaction() -> tuple[bool, str]:
 
     secret_dir = "case-7731-suspect-home"
     items = [ScanItem(f"{secret_dir}/photo.txt", "photo.txt", "text", "failed", 0, error="x")]
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(dir=scratch_dir()) as tmp:
         out = Path(tmp) / "report.html"
         write_html_report(out, summarize(items, capped=False), items, redact_paths=True)
         html = out.read_text(encoding="utf-8")

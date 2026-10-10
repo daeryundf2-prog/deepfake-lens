@@ -143,6 +143,8 @@ _LOCK = threading.Lock()
 _SESSION_DIR: str | None = None
 _COUNTER = itertools.count(1)
 _HANDLERS_INSTALLED = False
+# R14-7: the session folder for temp files when no ASCII staging folder exists.
+_SCRATCH_FALLBACK: str | None = None
 
 # R13-8: a Windows 8.3 short path handed to a decoder -> the original path.
 _SHORT_ALIASES: OrderedDict[str, str] = OrderedDict()
@@ -400,11 +402,12 @@ def cleanup_session() -> None:
     No lock: a signal handler runs in the main thread between bytecodes and
     may interrupt a holder of :data:`_LOCK`; copying the list is atomic.
     """
-    global _SESSION_DIR
+    global _SESSION_DIR, _SCRATCH_FALLBACK
     for folder in list(_SESSION_DIRS):
         if os.path.isdir(folder):
             _remove_tree(folder)
     _SESSION_DIR = None
+    _SCRATCH_FALLBACK = None
 
 
 def _cleanup_then_default(signum: int, frame: Any) -> None:
@@ -502,6 +505,38 @@ def session_dir() -> str:
         "비ASCII 파일 이름을 네이티브 디코더에 넘길 ASCII 임시 폴더가 없습니다"
         f"(환경 변수 {NATIVE_TMP_ENV}로 ASCII 경로의 폴더를 지정하십시오)"
     )
+
+
+def scratch_dir() -> str:
+    """R14-7 (round 14): the folder every temporary file and folder of this process is made in.
+
+    The session folder (:func:`session_dir`) — so the atexit / signal
+    cleanup and the next run's sweep of a dead process's folder (SIGKILL,
+    power loss) remove them with the staged names; temp files made directly
+    in TMPDIR (``tmp*.wav``, extraction folders, uploads) used to be left
+    behind by a killed scan. When no ASCII temp folder exists for staging,
+    a session folder is made in the system temp folder anyway (Python
+    writes any name; only native decoders need ASCII) and cleaned up the
+    same way. ``deepfake_lens/tests/test_native_path.py`` checks with an AST
+    meta-test that every ``tempfile`` call in the package passes
+    ``dir=scratch_dir()``.
+    """
+    global _SCRATCH_FALLBACK
+    try:
+        return session_dir()
+    except NativePathError:
+        pass
+    with _LOCK:
+        if _SCRATCH_FALLBACK is not None and os.path.isdir(_SCRATCH_FALLBACK):
+            return _SCRATCH_FALLBACK
+        base = tempfile.gettempdir()
+        sweep_stale_sessions(base)
+        created = tempfile.mkdtemp(prefix=f"{SESSION_PREFIX}{os.getpid()}-", dir=base)
+        _SCRATCH_FALLBACK = created
+        _SESSION_DIRS.append(created)
+        atexit.register(_remove_tree, created)
+    install_cleanup_handlers()
+    return created
 
 
 def _register_alias(staged: str, original: str) -> None:
@@ -827,6 +862,7 @@ __all__ = [
     "load_cascade",
     "native_safe_path",
     "restore_original_names",
+    "scratch_dir",
     "session_dir",
     "staged_names",
     "sweep_stale_sessions",

@@ -17,7 +17,7 @@ from .checks import skipped as skipped_entry
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
 from .result_types import CoverageEntry, CoverageStatus
-from .native_path import NativePathError, native_safe_path
+from .native_path import NativePathError, native_safe_path, scratch_dir
 from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
 
 logger = logging.getLogger(__name__)
@@ -232,7 +232,7 @@ def audio_track_check(
         return None, skipped_entry(AV_AUDIO_CHECK, "의존성 부재: ffmpeg")
     tmp_name = ""
     try:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=scratch_dir()) as tmp:
             tmp_name = tmp.name
         try:
             with native_safe_path(video_path) as native_video:  # R12-1
