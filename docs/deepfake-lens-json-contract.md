@@ -249,6 +249,11 @@ always `0` invited old-contract readings. They remain readable as
   (a real LF and a literal `\n`, `&amp;` and `&`, `&lt;` and `<`, a ZWSP
   and a literal `\u200b`, ` a.png` and `a.png` did) — checked with
   markdown-it (exact text) and python-markdown (injective) renderings.
+  R13-9 (round 13): GFM's extended autolinks and markdown-it's linkify
+  need no `<…>` (`www.x.com`, `https://x`, `ftp://x`, `mailto:`,
+  `a@b.co`, linkify's bare `evil.kr` and `//host`), so `.`, `:`, `@` and
+  `/` are backslash-escaped too — no link forms, the rendered text is still exactly
+  the shown text (checked with markdown-it + linkify-it-py).
   R11-10: the GUI shows every result string
   (evidence titles and details, coverage reasons, verdict text,
   limitations, signals, model and source notes, error messages) through

@@ -27,7 +27,7 @@ from pathlib import Path
 
 from deepfake_lens import cli
 from deepfake_lens.cli_render import CSV_VERDICT_COLUMN, TABLE_RULE
-from deepfake_lens.result_text import csv_cell, display_name, markdown_cell
+from deepfake_lens.result_text import csv_cell, display_name, markdown_cell, markdown_text
 from deepfake_lens.result_types import VERDICT_LABELS, Verdict
 
 HAVE_PYMUPDF = importlib.util.find_spec("pymupdf") is not None or importlib.util.find_spec("fitz") is not None
@@ -310,6 +310,89 @@ class MarkdownRenderInjectiveTest(unittest.TestCase):
         self.assertEqual(markdown_cell("a\\nb"), "a\\\\nb")
 
 
+HAVE_LINKIFY = HAVE_MARKDOWN_IT and importlib.util.find_spec("linkify_it") is not None
+# R13-9: names a GFM/linkify renderer would turn into links in plain text.
+AUTOLINK_NAMES = [
+    "www.example.com.png", "see www.e.co now", "http://e.co/x.png", "https://evil.example/t.png", "ftp://host/x",
+    "mailto:a@b.co", "xmpp:user@host.example", "kim@lawfirm.co.kr.pdf", "evidence.kr", "보고서 evil.com 사본.pdf",
+    "//localhost/x.png", "a.b.c@d.e.f", "HTTPS://CAPS.EXAMPLE", "1.5x.jpg", "www.", "user@", "x:y",
+]
+
+
+def _unescaped(source: str) -> str:
+    """The characters of Markdown ``source`` not taken by a backslash escape."""
+    out, index = [], 0
+    while index < len(source):
+        if source[index] == "\\" and index + 1 < len(source):
+            index += 2
+            continue
+        out.append(source[index])
+        index += 1
+    return "".join(out)
+
+
+class MarkdownAutolinkTest(unittest.TestCase):
+    """R13-9 (round 13): no GFM extended autolink (www., http(s)://, ftp://, e-mail) forms from a name.
+
+    R11-7 escaped "<" so "<https://…>" could not form, but GFM and
+    markdown-it's linkify link plain "www.x.com", "https://x", "//host" and
+    "a@b.co" without brackets. Every ".", ":", "@" and "/" is now escaped.
+    """
+
+    def test_autolink_triggers_are_escaped_in_the_source(self) -> None:
+        for name in AUTOLINK_NAMES:
+            for source in (markdown_cell(display_name(name)), markdown_text(display_name(name))):
+                with self.subTest(name=name, source=source):
+                    plain = _unescaped(source)
+                    for trigger in (".", ":", "@", "/"):
+                        self.assertNotIn(trigger, plain)
+
+    @unittest.skipUnless(HAVE_LINKIFY, "markdown-it-py + linkify-it-py not installed (QA side venv)")
+    def test_markdown_it_linkify_renders_no_link_and_the_exact_text(self) -> None:
+        import html as html_module
+        import re
+
+        from markdown_it import MarkdownIt
+
+        md = MarkdownIt("commonmark", {"linkify": True}).enable(["table", "linkify"])
+        # Non-vacuous: unescaped, these names are links.
+        self.assertIn("<a ", md.render("| h |\n| --- |\n| www.example.com |\n"))
+        self.assertIn("<a ", md.render("kim@lawfirm.co.kr\n"))
+        for name in AUTOLINK_NAMES:
+            with self.subTest(name=name):
+                cell = md.render(f"| h |\n| --- |\n| {markdown_cell(display_name(name))} |\n")
+                self.assertNotIn("<a ", cell)
+                found = re.findall(r"<td>(.*?)</td>", cell, re.S)
+                self.assertEqual([html_module.unescape(text) for text in found], [display_name(name)])
+                prose = md.render(f"- 사유: {markdown_text(display_name(name))}\n")
+                self.assertNotIn("<a ", prose)
+                self.assertIn(html_module.escape(display_name(name), quote=False), prose)
+
+    @unittest.skipUnless(HAVE_LINKIFY, "markdown-it-py + linkify-it-py not installed (QA side venv)")
+    def test_linkify_render_stays_injective_and_exact(self) -> None:
+        import html as html_module
+        import itertools
+        import random
+        import re
+
+        from markdown_it import MarkdownIt
+
+        md = MarkdownIt("commonmark", {"linkify": True}).enable(["table", "linkify"])
+        rng = random.Random(1309)
+        alphabet = (*RENDER_ALPHABET, ".", ":", "@", "/", "w", "h", "e", "c", "o", "k", "r", "x", "y")
+        names = list(AUTOLINK_NAMES) + ["".join(rng.choice(alphabet) for _ in range(rng.randint(0, 12))) for _ in range(4000)]
+        names += ["".join(chars) for chars in itertools.product(("w", ".", ":", "@", "/", "a"), repeat=4)]
+        names = list(dict.fromkeys(names))
+        source = "| h |\n| --- |\n" + "".join(f"| {markdown_cell(display_name(name))} |\n" for name in names)
+        cells = re.findall(r"<td>(.*?)</td>", md.render(source), re.S)
+        self.assertEqual(len(cells), len(names))
+        seen: dict[str, str] = {}
+        for name, cell in zip(names, cells):
+            self.assertNotIn("<a ", cell, name)
+            self.assertEqual(html_module.unescape(cell), display_name(name), repr(name))
+            self.assertEqual(seen.setdefault(cell, name), name)
+
+
 @unittest.skipUnless(shutil.which("node"), "node required to run gui.js helpers")
 class GuiDisplayNameTest(unittest.TestCase):
     """The GUI's displayName/csvCell (gui.js) match result_text exactly."""
@@ -420,7 +503,9 @@ class HostileNamesInEveryRenderingTest(unittest.TestCase):
             cells = _markdown_cells(row)
             self.assertEqual(len(cells), 4, row)  # 호증 | 명칭 | 작성자 및 일자 | 입증취지
             exhibits.append(cells[0])
-            self.assertIn(f"[자동 분석 결론: {MANIPULATION} /", cells[3])
+            # R13-9 (round 13): ":" and "/" are escaped in the Markdown source too
+            # (autolinks); this assertion used to expect them bare.
+            self.assertIn(f"[자동 분석 결론\\: {MANIPULATION} \\/", cells[3])
             self.assertNotIn(AUTHENTICITY, cells[3])
         self.assertEqual(exhibits, [f"**갑 제{index}호증**" for index in range(1, len(HOSTILE_NAMES) + 1)])
         self.assertEqual(sum("갑 제9호증" in line for line in text.splitlines() if line.startswith("| **갑 제9호증**")), 1)
@@ -523,8 +608,11 @@ class MarkdownSyntaxInNamesTest(unittest.TestCase):
             for cell in _markdown_cells(row)[1:]:  # every cell but the bold exhibit number
                 self.assertEqual(self._unescaped(cell.replace("<br>", " ")), [], cell)
         # The member name (refused by the extractor: ":" in it) is named in the container's row, inert.
-        self.assertTrue(any("\\!\\[t\\]\\(https:/evil.example/t.png\\)" in row for row in rows), rows)
-        unrecorded = [line for line in text.splitlines() if "javascript:y" in line and not line.startswith("|")]
+        # R13-9 (round 13): ".", ":" and "/" are escaped too (no autolink); this
+        # assertion used to expect "https:/evil.example/t.png" bare.
+        self.assertTrue(any("\\!\\[t\\]\\(https\\:\\/evil\\.example\\/t\\.png\\)" in row for row in rows), rows)
+        # R13-9 (round 13): the ":" is escaped too; this filter used to look for it bare.
+        unrecorded = [line for line in text.splitlines() if "javascript\\:y" in line and not line.startswith("|")]
         self.assertTrue(unrecorded, "the skipped subfolder is named in the unrecorded-files section")
         for line in unrecorded:
             self.assertEqual(self._unescaped(line.removeprefix("- ")), [], line)

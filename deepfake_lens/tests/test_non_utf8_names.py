@@ -36,7 +36,7 @@ from unittest.mock import patch
 
 from deepfake_lens import cli, webapp_api
 from deepfake_lens.json_text import escape_surrogates, json_bytes, json_dumps
-from deepfake_lens.result_text import display_name, markdown_cell
+from deepfake_lens.result_text import display_name, markdown_cell, markdown_text
 from deepfake_lens.result_types import VERDICT_LABELS, Verdict
 
 HAVE_FASTAPI = importlib.util.find_spec("fastapi") is not None and importlib.util.find_spec("httpx") is not None
@@ -200,7 +200,9 @@ class NonUtf8NameCliTest(_EnvMixin):
         rows = [line for line in markdown.splitlines() if line.startswith("| **")]
         self.assertEqual(len(rows), 2, rows)
         for row in rows:
-            self.assertIn(f"[자동 분석 결론: {MANIPULATION} /", row)
+            # R13-9 (round 13): the source escapes ":" and "/" too (no autolink);
+            # this assertion used to expect them bare — compare the Markdown source form.
+            self.assertIn(markdown_text(f"[자동 분석 결론: {MANIPULATION} /"), row)
         # The signed statement JSON is valid UTF-8 holding the escaped name.
         raw = json_out.read_text(encoding="utf-8")
         self.assertIn("\\udcc1\\udcf5\\udcb0\\udcc5", raw)

@@ -288,6 +288,14 @@ def display_name(text: object) -> str:
 # no link, image, autolink, code span, emphasis or heading can form from
 # shown text.
 MARKDOWN_SPECIALS = frozenset("|[]()!<>`*_#~")
+# R13-9 (round 13): GFM's extended autolinks (and markdown-it's linkify) need
+# no "<…>" — "www.example.com", "https://x", "ftp://x", "mailto:a@b.co" and
+# "user@example.com" in plain text become links, and linkify-it also links
+# bare domains ("evidence.kr") and protocol-relative "//host". Every ".",
+# ":", "@" and "/" is backslash-escaped too (CommonMark: any ASCII
+# punctuation may be), which splits the text the autolink scanners see — no
+# zero-width characters, so the rendered text is still exactly the shown text.
+MARKDOWN_AUTOLINK_SPECIALS = frozenset(".:@/")
 # R12-5 (round 12): the rendered text must be exactly the shown text, so two
 # names never render alike. A backslash was kept when it already "escaped"
 # the next character, so display_name's two-backslash "n" (a literal
@@ -302,7 +310,8 @@ def _escape_markdown_specials(text: str) -> str:
     """``text`` as Markdown source that renders back to exactly ``text`` (R10-1, R11-7, R12-5).
 
     Every backslash becomes "\\\\", every "&" "&amp;", every other
-    Markdown-active character (:data:`MARKDOWN_SPECIALS`) is backslash-escaped
+    Markdown-active character (:data:`MARKDOWN_SPECIALS`, and R13-9 the
+    autolink triggers :data:`MARKDOWN_AUTOLINK_SPECIALS`) is backslash-escaped
     — including the "|" of display_name's "\\|", which renders as "\\|" —
     and whitespace at either end is a numeric character reference.
     """
@@ -316,7 +325,7 @@ def _escape_markdown_specials(text: str) -> str:
             out.append(f"&#x{ord(char):x};")
         elif char in MARKDOWN_LITERALS:
             out.append(MARKDOWN_LITERALS[char])
-        elif char in MARKDOWN_SPECIALS:
+        elif char in MARKDOWN_SPECIALS or char in MARKDOWN_AUTOLINK_SPECIALS:
             out.append("\\" + char)
         else:
             out.append(char)

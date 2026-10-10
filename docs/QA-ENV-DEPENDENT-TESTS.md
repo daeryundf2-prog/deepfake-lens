@@ -53,6 +53,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `git not available` | git 실행 파일 | test_qa_sys.py |
 | `jsonschema not installed (dev extra) — _check_object covers the stdlib job` | `dev` extra(jsonschema) | test_json_contract.py |
 | `librosa not installed` | `audio`/`full` extra(librosa) | test_audio.py, test_v6_probes.py, test_video_analysis.py |
+| `markdown-it-py + linkify-it-py not installed (QA side venv)` | markdown-it-py + linkify-it-py(QA 사이드 venv: `pip install markdown-it-py linkify-it-py`) — GFM식 자동 링크(linkify) 렌더 확인 | test_display_names.py |
 | `markdown-it-py not installed (QA side venv)` | markdown-it-py(QA 사이드 venv: `pip install markdown-it-py`) | test_display_names.py |
 | `mediapipe installed` | mediapipe가 없는 환경에서만 실행(대체 경로 검사) | test_face.py |
 | `mediapipe installed — fallback path not exercised` | mediapipe가 없는 환경에서만 실행(대체 경로 검사) | test_face.py |
