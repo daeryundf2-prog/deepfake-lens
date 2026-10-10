@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..4c2e7b1`(병합 커밋 제외, 커밋 163개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..68035c3`(병합 커밋 제외, 커밋 175개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 156개 — 스펙 갭에 매핑 96개(그중 신규 사유 병기 21개), 신규(스펙 외)만 60개.
+요약: ID 168개 — 스펙 갭에 매핑 107개(그중 신규 사유 병기 30개), 신규(스펙 외)만 61개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -170,7 +170,7 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R10-8 | 10 | 한국어 int/float 메시지, feedback 행 번호, R9-10 메시지의 CONFORMANCE.md, 중복 제외 표기, api-serve 라우트 문서화 | G8, G12 | 신규(스펙 외): 문서·메시지 정합성 — 갭 목록 밖 | 7d3c508 |
 | R10-9 | 10 | R9-4 메타테스트가 이름 패턴만 검사 → Path 형 인수는 전부 쓰기 대상 등록 또는 읽기 전용 선언 | G31 |  | 81e94ea |
 | R11-1 | 11 | UTF-8이 아닌 파일명(PEP 383 surrogate)이 스캔 전체를 깨뜨림(CLI exit 2·빈 JSON, 웹 400 영어, API 500) → 모든 JSON을 surrogate-safe(\udcXX)로, 행은 정상 분석 | G30 | 신규(스펙 외): 비 UTF-8 파일명 처리 — 갭 목록 밖 | 3b12bd1 |
-| R11-2 | 11 | QA-SYS-10이 전체 스위트의 skip을 무시하고 통과 표시 → skip이 있으면 건너뜀(환경)·목록 기재, 환경 의존 테스트 문서화 | — | 신규(스펙 외): QA 기록 정확성 — 갭 목록 밖 | d10e95f |
+| R11-2 | 11 | QA-SYS-10이 전체 스위트의 skip을 무시하고 통과 표시 → skip이 있으면 건너뜀(환경)·목록 기재, 환경 의존 테스트 문서화 | — | 신규(스펙 외): QA 기록 정확성 — 갭 목록 밖 | d10e95f, 77a5463 |
 | R11-3 | 11 | /api/report, /api/feedback 깊은 중첩 JSON → 500 → 400 'JSON 중첩이 너무 깊습니다' | G34 | 신규(스펙 외): 요청 본문 처리 — 갭 목록 밖 | b661b3f |
 | R11-4 | 11 | display_name의 '\\|' 이스케이프가 단사가 아님 → 모든 백슬래시를 '\\'로 | G30 | 신규(스펙 외): 보고서 렌더링 무결성 — 갭 목록 밖 | e402a18 |
 | R11-5 | 11 | 영어 탐지기 미탐(fake✓, ▶fake◀, fake的 …) → 비 ASCII S*/P*·CJK 한자를 토큰 경계로 | — | 신규(스펙 외): 출력 한국어 규칙(공통 규칙 3) — 갭 목록 밖 | 8388572 |
@@ -183,6 +183,18 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R11-12 | 11 | 웹 서버가 모든 미지 경로에 GUI 제공 → '/', '/gui*', '/api/*' 외 404 한국어 JSON | G31 | 신규(스펙 외): 서비스 표면 정합성 — 갭 목록 밖 | 40a862a |
 | R11-13 | 11 | CSV 전각 ＝＋－＠ 미보호 → NFKC 기준 수식 문자 보호 | G30 | 신규(스펙 외): CSV 수식 주입 — 갭 목록 밖 | 4c2e7b1 |
 | R11-14 | 11 | JSON stdout에 raw bidi/C1 유지 → 행에 display_name(이스케이프본) 추가, name 원문 유지 | G30 | 신규(스펙 외): JSON 계약 — 갭 목록 밖 | 8292a74 |
+| R12-1 | 12 | UTF-8이 아닌 이름의 영상이 cv2.VideoCapture segfault로 스캔 전체·웹 서버를 죽임 → native_safe_path가 ASCII 이름으로 스테이징 | G1 | 신규(스펙 외): 비 UTF-8 파일명의 네이티브 디코더 크래시 — 갭 목록 밖 | d8e05ea |
+| R12-2 | 12 | non-UTF-8 이름의 오디오·PDF 검사 실패 → 같은 내용 ASCII 사본과 동일 분석 | G1 | 신규(스펙 외): 비 UTF-8 파일명 — 갭 목록 밖 | d8e05ea |
+| R12-3 | 12 | zip/tar 중복 멤버 경로가 서로 덮어써 sha256·근거 소실 → 항목별 고유 추출, #2 접미, member_index | G34, G30 |  | d710000 |
+| R12-4 | 12 | GUI 미리보기/히트맵이 non-UTF-8 행에서 영어 'URI malformed' → path_b64/root_b64 | G8, G31 | 신규(스펙 외): 비 UTF-8 경로 주소 지정 — 갭 목록 밖 | 22ab09b |
+| R12-5 | 12 | 증거설명서 MD 렌더에서 서로 다른 이름이 같게 보임 → \, & 이스케이프 | G30 | 신규(스펙 외): 표시 단사성 — 갭 목록 밖 | 0ac910e |
+| R12-6 | 12 | GUI 비교 슬롯이 파일명을 원문 표시 → displayName, 메타테스트 확장 | G30 | 신규(스펙 외): 표시 이스케이프 — 갭 목록 밖 | 0a482cb |
+| R12-7 | 12 | 스캔 중 변경된 파일이 다른 바이트의 sha256으로 기록 → 전후 상태 비교, 변경 시 판단 불가 | G11, G30 |  | 6457bcf |
+| R12-8 | 12 | Windows식 relpath가 corpus verify 포함 검사 통과 → 양쪽 경로 규칙으로 거부 | G27 | 신규(스펙 외): 경로 탈출 — 갭 목록 밖 | 041fb7f |
+| R12-9 | 12 | 보고서 타임스탬프가 시간대 없는 로컬 시각 → ISO 8601 + UTC 오프셋 | G30 | 신규(스펙 외): 타임스탬프 형식 — 갭 목록 밖 | 5b002a4 |
+| R12-10 | 12 | non-UTF-8 multipart 파일명이 U+FFFD로 손실 → 원시 바이트 보존 | G30 | 신규(스펙 외): 업로드 파일명 — 갭 목록 밖 | 63cf82e |
+| R12-11 | 12 | 후행 슬래시 /gui/ 동작이 두 서버에서 다름 → 둘 다 404 | G31 | 신규(스펙 외): 라우트 일관성 — 갭 목록 밖 | db73702 |
+| R12-12 | 12 | 영어 탐지기가 TAG 문자 뒤 단어 미탐 → Cf 문자 제거 | — | 신규(스펙 외): 테스트 도구(영어 탐지기) — 갭 목록 밖 | 68035c3 |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -373,3 +385,15 @@ P14: Gaps를 제목 괄호에만 적은 커밋(예: `(Z1-Z5; Gaps: G7, 신규)`)
 | 40a862a | 11 | R11-12 | Gaps: G31; 신규(스펙 외) | subject | fix(web): R11-12 the web server answers 404 "찾을 수 없는 경로입니다" for every path that is not /, /gui, /gui.css, /gui.js or /api/* (R11-12; Gaps: G31, 신규) |
 | 8292a74 | 11 | R11-14 | Gaps: G30; 신규(스펙 외) | subject | feat(json): R11-14 every JSON row carries display_name — the escaped name — beside the raw name (R11-14; Gaps: G30, 신규) |
 | 4c2e7b1 | 11 | R11-7, R11-10, R11-13 | Gaps: G30; 신규(스펙 외) | subject | fix(reports,gui): R11-7 Markdown-active characters escaped in the evidence statement; R11-10 every GUI result string through displayName; R11-13 fullwidth CSV formula prefixes guarded (R11-7, R11-10, R11-13; Gaps: G30, 신규) |
+| 77a5463 | 11 | WP-J, R11-2 | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 4c2e7b1 (WP-J, R11-2; Gaps: G26, G27, G28) |
+| d8e05ea | 12 | R12-1, R12-2 | Gaps: G1; 신규(스펙 외) | subject | fix(native): R12-1 native decoders never see a non-ASCII file name — native_safe_path stages an ASCII name; R12-2 audio and PDF of a non-UTF-8 name analysed like their ASCII copy (R12-1, R12-2; Gaps: G1, 신규) |
+| d710000 | 12 | R12-3 | Gaps: G34, G30 | subject | fix(archives): R12-3 archive entries naming the same path never overwrite each other — one index-numbered folder per entry, later duplicates "<path>#2" with the reason, member_index in the row identity (R12-3; Gaps: G34, G30) |
+| 22ab09b | 12 | R12-4 | Gaps: G8, G31; 신규(스펙 외) | subject | fix(gui,web): R12-4 previews and heatmaps are requested by file-system bytes — rows carry path_b64, scans scan_root_b64, both servers accept path_b64/root_b64; Korean loading errors (R12-4; Gaps: G8, G31, 신규) |
+| 0ac910e | 12 | R12-5 | Gaps: G30; 신규(스펙 외) | subject | fix(reports): R12-5 the evidence statement's Markdown renders exactly the shown name — backslashes doubled, "&" as "&amp;", edge whitespace as character references (R12-5; Gaps: G30, 신규) |
+| 0a482cb | 12 | R12-6 | Gaps: G30; 신규(스펙 외) | subject | fix(gui): R12-6 the compare slot and the feedback status show names through displayName; the R11-10 check covers textContent/innerText/value and template strings (R12-6; Gaps: G30, 신규) |
+| 6457bcf | 12 | R12-7 | Gaps: G11, G30 | subject | fix(scan): R12-7 a file rewritten while it is analyzed is 판단 불가 with no hash — state compared before/after, hash taken before and after (R12-7; Gaps: G11, G30) |
+| 041fb7f | 12 | R12-8 | Gaps: G27; 신규(스펙 외) | subject | fix(corpus): R12-8 corpus verify refuses relpaths that leave the corpus under either path flavour — drive, root, UNC, ".." with "\" (R12-8; Gaps: G27, 신규) |
+| 5b002a4 | 12 | R12-9 | Gaps: G30; 신규(스펙 외) | subject | fix(reports): R12-9 every report timestamp is ISO 8601 with the UTC offset — legal report, PDF "감정 일시", forensic and evidence records, vendor report, batch jobs (R12-9; Gaps: G30, 신규) |
+| 63cf82e | 12 | R12-10 | Gaps: G30; 신규(스펙 외) | subject | fix(web): R12-10 multipart file names keep their bytes — raw Content-Disposition decoded as RFC 5987, UTF-8, CP949, else surrogate escapes (R12-10; Gaps: G30, 신규) |
+| db73702 | 12 | R12-11 | Gaps: G31; 신규(스펙 외) | subject | fix(api): R12-11 a trailing slash is 404 on both servers — api-serve no longer redirects /gui/ to /gui (R12-11; Gaps: G31, 신규) |
+| 68035c3 | 12 | R12-12 | Gaps: 신규(스펙 외) | subject | fix(text): R12-12 the English detector drops every format character (Cf) — TAG characters no longer hide a word (R12-12; Gaps: 신규) |
