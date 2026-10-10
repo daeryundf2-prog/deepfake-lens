@@ -55,6 +55,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `ffmpeg가 시험 영상을 만들지 못함` | `ffmpeg`(lavfi 입력, mpeg4·aac 인코더 포함 빌드) | test_native_path.py |
 | `git binary required` | git 실행 파일과 작업 트리(얕은 복제·압축본 아님) | test_traceability_commits.py |
 | `git not available` | git 실행 파일 | test_qa_sys.py |
+| `golden output recorded on POSIX (path and OS error wording)` | Windows가 아닌 OS(POSIX — 골든 스캔 출력은 POSIX 경로·OS 오류 문구 기준으로 기록, R15-7) | test_output_generation.py |
 | `jsonschema not installed (dev extra) — _check_object covers the stdlib job` | `dev` extra(jsonschema) | test_json_contract.py |
 | `librosa not installed` | `audio`/`full` extra(librosa) | test_audio.py, test_v6_probes.py, test_video_analysis.py |
 | `markdown-it-py + linkify-it-py not installed (QA side venv)` | markdown-it-py + linkify-it-py(QA 사이드 venv: `pip install markdown-it-py linkify-it-py`) — GFM식 자동 링크(linkify) 렌더 확인 | test_display_names.py |

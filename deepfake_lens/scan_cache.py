@@ -748,7 +748,10 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # version alone does not change between commits, so a row written by
 # 9085e5e (staged temp names in its reasons) was replayed unchanged at
 # 232cfbd. BUMP THIS in every commit that changes what a row says for the
-# same input (docs/deepfake-lens-cli.md, "Scan order and cache").
+# same input (docs/deepfake-lens-cli.md, "Scan order and cache") and record
+# the new golden output in the same commit (R15-7:
+# scripts/update_golden_output.py; tests/test_output_generation.py fails a
+# changed golden under an unchanged generation).
 # 1: R14-3 — reasons name the original file, never a staging name (R13-1),
 #    and an evidence folder named like a staging folder keeps its name (R14-4).
 # 2: R14-5 — a Haar cascade that does not load is a failed face / rPPG /

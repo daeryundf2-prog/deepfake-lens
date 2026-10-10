@@ -1,0 +1,9 @@
+{
+  "note": "R15-7: sha256 of the normalised scan JSON of the fixed fixture folder (deepfake_lens/tests/golden_output.py), per scan_cache.OUTPUT_FORMAT_GENERATION. Appended by scripts/update_golden_output.py; never edit an entry.",
+  "history": [
+    {
+      "generation": 3,
+      "sha256": "b9c75d982f520951e9848f8d4817ca468d72320df07f2a19fc09aed2631be928"
+    }
+  ]
+}
