@@ -222,8 +222,10 @@ class NativeSafePathUnitTest(unittest.TestCase):
             self.assertFalse(os.path.lexists(staged))
             self.assertNotIn(os.path.basename(staged), reason)
             self.assertNotIn(native_path.SESSION_PREFIX, reason)
-            # Quoted the way the decoder quotes: repr() of the original (as Pillow writes it).
-            self.assertIn(repr(f"<root>/{self.name}"), reason)
+            # Quoted as the decoder quotes (repr()), the name as in its row: a lone
+            # surrogate is the character itself, not repr()'s "\\udcc1" text.
+            self.assertIn(f"'<root>/{self.name}'", reason)
+            self.assertNotIn("\\udc", reason)
             # Only the base name (what some decoders print) -> the original's base name.
             bare = native_path.restore_original_names(f"cannot read {os.path.basename(staged)}")
             self.assertEqual(bare, f"cannot read {self.name}")
@@ -236,6 +238,21 @@ class NativeSafePathUnitTest(unittest.TestCase):
                 plain = native_path.restore_original_names(f"open {folder}\\{name} failed")
             self.assertEqual(quoted, repr("D:\\증거\\녹음 1.m4a"))
             self.assertEqual(plain, "open D:\\증거\\녹음 1.m4a failed")
+
+    def test_repr_surrogate_escapes_read_as_the_rows_name(self) -> None:
+        """R13-1: "\\udcc1" text from repr() becomes the character; an escaped backslash does not."""
+        from deepfake_lens.error_text import scrub_paths, unescape_surrogates
+
+        self.assertEqual(unescape_surrogates(repr("<root>/r\udcc1.jpg")), "'<root>/r\udcc1.jpg'")
+        self.assertEqual(unescape_surrogates(repr("<root>/back\\udcc1.jpg")), repr("<root>/back\\udcc1.jpg"))  # literal text
+        self.assertEqual(unescape_surrogates(repr("a\\b\udcff")), "'a\\\\b\udcff'")
+        self.assertEqual(unescape_surrogates("\\ud800 \\u00e9"), "\\ud800 \\u00e9")  # only U+DC80–U+DCFF
+        # A non-UTF-8 scan root is matched in a repr()-quoted message too.
+        root = "/case/\udcc1\udcf5"
+        from deepfake_lens.error_text import path_scrub_root
+
+        with path_scrub_root(root):
+            self.assertEqual(scrub_paths(f"cannot identify image file {root + '/x.png'!r}"), "cannot identify image file '<root>/x.png'")
 
     def test_unregistered_staging_names_become_fixed_placeholders(self) -> None:
         """R13-1: another process's (or an evicted) staging name is never shown as it is."""
@@ -320,7 +337,7 @@ class WindowsStagingOrderTest(unittest.TestCase):
         self.assertTrue(os.path.exists(alias))
         self.assertTrue(self.source.exists())
         self.assertNotIn("EVIDEN~1", reason)
-        self.assertIn(repr(f"<root>/{self.name}"), reason)
+        self.assertIn(f"'<root>/{self.name}'", reason)
 
     def test_copy_when_there_is_no_short_name(self) -> None:
         with mock.patch.object(native_path.os, "link", side_effect=OSError("cross-device")), mock.patch.object(
@@ -947,6 +964,7 @@ def _damaged_inputs() -> dict[str, bytes]:
         "broken.mp4": b"\x00\x00\x00\x18ftypmp42" + junk,
         "broken.pdf": b"%PDF-1.4\n" + junk,
         "cut.jpg": jpeg.getvalue()[:200],
+        "garbage.png": b"not an image at all " * 8,  # Pillow quotes the real path with repr()
         "notes.xyz": b"unsupported type\n",
     }
 
@@ -1063,11 +1081,8 @@ class StagedNamesNeverLeakEndToEndTest(unittest.TestCase):
         rows = self._rows(runs["cold"])
         self.assertEqual(len(rows), len({path for pair in self.pairs for path in pair}))
         for ascii_path, other in self.pairs:
-            # Quoted paths are repr()-escaped (a lone surrogate as "\\udcc1"), as Pillow writes them.
-            renames = [
-                (repr(other)[1:-1], ascii_path), (other, ascii_path),
-                (repr(os.path.basename(other))[1:-1], os.path.basename(ascii_path)), (os.path.basename(other), os.path.basename(ascii_path)),
-            ]
+            # A message names the file as its row does (raw name, no repr() escapes).
+            renames = [(other, ascii_path), (os.path.basename(other), os.path.basename(ascii_path))]
             self.assertEqual(
                 _normalized(rows[other], renames), _normalized(rows[ascii_path], []), f"{other!a} differs from {ascii_path}"
             )
@@ -1078,7 +1093,7 @@ class StagedNamesNeverLeakEndToEndTest(unittest.TestCase):
             self.assertIn("'<root>/녹음 1 tone.m4a'", reason)
             nested = next(other for ascii_path, other in self.pairs if ascii_path == "tone.m4a" and other.startswith("sub"))
             reason = next(entry["reason"] for entry in rows[nested]["result"]["coverage"] if entry["check"] == "audio_features")
-            self.assertIn(repr(f"<root>/{nested}"), reason)
+            self.assertIn(f"'<root>/{nested}'", reason)  # the name as in its row
 
 
 if __name__ == "__main__":

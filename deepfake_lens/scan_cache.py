@@ -753,14 +753,20 @@ def _rewrite_path_text(node: object, old_path: str, old_name: str, new_path: str
     (``error_text.scrub_paths``); both forms are rewritten — the name only
     as a whole path token, so "e.png" inside "the.png" is left alone.
     """
-    from .error_text import ROOT_PLACEHOLDER
+    from .error_text import ROOT_PLACEHOLDER, unescape_surrogates
+
+    def quoted(path: str) -> str:
+        # R13-1: repr() with its surrogate escapes undone — the quoted form
+        # error_text.scrub_paths gives every message.
+        return unescape_surrogates(repr(f"{ROOT_PLACEHOLDER}/{path}"))
 
     pairs = [
         # P2: library messages quote the path with repr() ("cannot identify
         # image file '<root>/back\\\\slash.jpg'"), so the quoted, escaped form
         # is rewritten first — to the escaped form of the new path, exactly
         # what an uncached analysis of that file would have written.
-        (repr(f"{ROOT_PLACEHOLDER}/{old_path}"), repr(f"{ROOT_PLACEHOLDER}/{new_path}")),
+        (quoted(old_path), quoted(new_path)),
+        (repr(f"{ROOT_PLACEHOLDER}/{old_path}"), quoted(new_path)),  # a row cached before R13-1
         (f"{ROOT_PLACEHOLDER}/{old_path}", f"{ROOT_PLACEHOLDER}/{new_path}"),
         (f"{ROOT_PLACEHOLDER}\\{old_path.replace('/', chr(92))}", f"{ROOT_PLACEHOLDER}\\{new_path.replace('/', chr(92))}"),
     ]

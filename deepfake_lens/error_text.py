@@ -89,6 +89,22 @@ def path_scrub_root(*roots: Path | str | None) -> Iterator[None]:
         _SCRUB_ROOTS.reset(token)
 
 
+# R13-1 (round 13): repr() — how soundfile, Pillow and the staged-name
+# restore quote a path — writes an undecodable byte of a POSIX name (a lone
+# surrogate, PEP 383) as the six characters "\\udcc1"; the row's path holds
+# the character itself. A reason names the file as its row does: each such
+# escape (after an even number of backslashes, i.e. not itself escaped)
+# becomes the character again. Backslashes stay as repr() doubled them (P2).
+_SURROGATE_ESCAPE = re.compile(r"(?<!\\)((?:\\\\)*)\\u(dc[89a-f][0-9a-f])", re.IGNORECASE)
+
+
+def unescape_surrogates(text: str) -> str:
+    """``text`` with repr()'s ``\\udc80``–``\\udcff`` escapes as the surrogate characters (R13-1)."""
+    if "\\u" not in text:
+        return text
+    return _SURROGATE_ESCAPE.sub(lambda match: match.group(1) + chr(int(match.group(2), 16)), text)
+
+
 def _basename(match: re.Match[str]) -> str:
     text = match.group(0)
     return re.split(r"[\\/]", text)[-1] or text
@@ -98,8 +114,10 @@ def scrub_paths(text: str) -> str:
     """``text`` with the scan root as ``<root>`` and other absolute paths as base names (N1)."""
     if not text:
         return text
-    # R13-1: a staged temp name never reaches a reason — the original path does.
-    text = restore_original_names(text)
+    # R13-1: a staged temp name never reaches a reason — the original path does,
+    # and a quoted non-UTF-8 name reads as in its row (before the root is
+    # matched, so a non-UTF-8 scan root is recognised too).
+    text = unescape_surrogates(restore_original_names(text))
     for root in _SCRUB_ROOTS.get():
         # A root is replaced only as a whole path component: "/x/case" must
         # not turn "/x/case2/a.jpg" into "<root>2/a.jpg".
