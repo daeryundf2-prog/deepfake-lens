@@ -9,8 +9,14 @@ with ``<root>`` and every other absolute path with its base name;
 exception message, and well-known library messages are given in Korean
 (:func:`korean_exception_message`).
 
-A leaf module (standard library only) so every analyzer can import it
-without an import cycle through ``result_types``.
+A leaf module (standard library only, plus the equally leaf
+:mod:`deepfake_lens.native_path`) so every analyzer can import it without an
+import cycle through ``result_types``.
+
+R13-1: a staged ASCII name that a native decoder quoted in its message
+(``native_path.native_safe_path``) is first put back to the original path
+(:func:`native_path.restore_original_names`), then scrubbed like any other
+path — so the reason is the one an ASCII-named copy would get.
 """
 
 from __future__ import annotations
@@ -24,6 +30,8 @@ import re
 import unicodedata
 from pathlib import Path
 from typing import Iterator
+
+from .native_path import restore_original_names
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +48,14 @@ _SCRUB_ROOTS: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar("
 # Characters that end a path inside a message: whitespace, quotes and the
 # punctuation libraries put around a path ("'…'", "(…)", "[…]", "…:").
 _PATH_STOP = r"\s'\"`:;,()\[\]{}<>|"
-# An absolute POSIX path: a "/" not preceded by a word character, another
-# separator, a placeholder ">" or URI punctuation ("://", "#…=/", "1/125").
-_POSIX_ABSOLUTE = re.compile(rf"(?<![\w.~<>/\\:=#@%+-])/(?:[^/\\{_PATH_STOP}]+/)*[^/\\{_PATH_STOP}]+")
+# An absolute POSIX path: a "/" at the start or after whitespace or the
+# punctuation libraries put around a path — never after a character that can
+# end a path segment (a word character, another separator, a placeholder
+# ">", URI punctuation "://", "#…=/", "1/125"). R13-1: the test is "allowed
+# before", not "forbidden before": a lone surrogate (an undecodable byte of a
+# POSIX name, "sub\udcb0\udcc5/a.wav") or "!" / "&" ending a folder name is
+# part of the path, so "<root>/sub\udcb0\udcc5/a.wav" keeps its folder.
+_POSIX_ABSOLUTE = re.compile(r"(?<![^\s'\"`;,()\[\]{}|])/" + rf"(?:[^/\\{_PATH_STOP}]+/)*[^/\\{_PATH_STOP}]+")
 # An absolute Windows path: drive letter + separator, or a UNC share.
 _WINDOWS_ABSOLUTE = re.compile(rf"(?<![\w])(?:[A-Za-z]:|\\\\[^\\/{_PATH_STOP}]+)[\\/](?:[^\\/{_PATH_STOP}]+[\\/])*[^\\/{_PATH_STOP}]+")
 
@@ -85,6 +98,8 @@ def scrub_paths(text: str) -> str:
     """``text`` with the scan root as ``<root>`` and other absolute paths as base names (N1)."""
     if not text:
         return text
+    # R13-1: a staged temp name never reaches a reason — the original path does.
+    text = restore_original_names(text)
     for root in _SCRUB_ROOTS.get():
         # A root is replaced only as a whole path component: "/x/case" must
         # not turn "/x/case2/a.jpg" into "<root>2/a.jpg".

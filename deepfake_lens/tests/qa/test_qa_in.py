@@ -31,6 +31,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import importlib
+import importlib.util
 import io
 import json
 import os
@@ -336,6 +337,61 @@ class QaIn2DeterministicRescanTest(unittest.TestCase):
                 self.assertNotIn(str(base), text)
                 self.assertNotIn(str(base.resolve()), text)
 
+    def test_korean_named_undecodable_audio_is_byte_identical_across_runs(self) -> None:
+        """QA-IN-2: 같은 폴더를 3회 검사(중간에 프로세스 재시작, 폴더 이름 변경) → 타임스탬프·절대경로 필드를 제외한 JSON이 바이트 단위로 동일. 파일 순서 동일.
+
+        R13-1 (round 13, regression of this QA item): a Korean-named audio
+        file that libsndfile cannot decode ("녹음 1.m4a") is staged under a
+        random ASCII temp name for the decoder (R12-1/2), and that name used
+        to reach the failure reason, so every run's JSON differed. The reason
+        must name ``<root>/녹음 1.m4a`` — the text its ASCII copy gets.
+        """
+        from deepfake_lens.cli import main
+        from deepfake_lens.native_path import SESSION_PREFIX
+
+        garbage_m4a = b"\x00\x00\x00\x18ftypM4A " + bytes((index * 53 + 7) % 256 for index in range(4000))
+        broken_flac = b"fLaC" + bytes((index * 29 + 3) % 256 for index in range(4000))
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            folder = base / "case-original"
+            folder.mkdir()
+            for name, data in (("녹음 1.m4a", garbage_m4a), ("rec 1.m4a", garbage_m4a), ("통화녹음.flac", broken_flac), ("call.flac", broken_flac)):
+                (folder / name).write_bytes(data)
+            outs = [base / f"scan{index}.json" for index in range(3)]
+
+            def args(target: Path, out: Path) -> list[str]:
+                # No --dedupe: the Korean copy must get its own analysed row.
+                return [arg for arg in _scan_args(target, out) if arg != "--dedupe"]
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(args(folder, outs[0])), 0)
+            completed = subprocess.run(
+                [sys.executable, "-m", "deepfake_lens", *args(folder, outs[1])],
+                cwd=str(base), env=_clean_env(), capture_output=True, text=True, timeout=300,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr[-2000:])
+            renamed = base / "case-renamed"
+            folder.rename(renamed)
+            with _fresh_package_import() as fresh_cli, contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(fresh_cli.main(args(renamed, outs[2])), 0)
+            raw = [out.read_text(encoding="utf-8") for out in outs]
+            payloads = [json.loads(text) for text in raw]
+        texts = [json.dumps(_normalize(payload, [folder, renamed]), ensure_ascii=False, indent=2) for payload in payloads]
+        self.assertEqual(texts[0], texts[1], "process restart changed the scan JSON")
+        self.assertEqual(texts[0], texts[2], "folder rename / re-import changed the scan JSON")
+        for text in raw:
+            self.assertNotIn(SESSION_PREFIX, text)
+            self.assertNotRegex(text, r"\d{6}-[0-9a-f]{12}")
+        rows = {item["path"]: item for item in payloads[0]["items"]}
+
+        def reasons(path: str) -> list[str]:
+            return [entry["reason"] for entry in (rows[path].get("result") or {}).get("coverage", []) if entry["check"] == "audio_features"]
+
+        for korean, ascii_name in (("녹음 1.m4a", "rec 1.m4a"), ("통화녹음.flac", "call.flac")):
+            self.assertEqual(reasons(korean), [reason.replace(ascii_name, korean) for reason in reasons(ascii_name)], korean)
+        if importlib.util.find_spec("librosa") is not None:
+            self.assertTrue(any("<root>/녹음 1.m4a" in reason for reason in reasons("녹음 1.m4a")), reasons("녹음 1.m4a"))
+
     def test_walk_order_is_sorted_and_independent_of_os_listing_order(self) -> None:
         """QA-IN-2: 같은 폴더를 3회 검사(중간에 프로세스 재시작, 폴더 이름 변경) → 타임스탬프·절대경로 필드를 제외한 JSON이 바이트 단위로 동일. 파일 순서 동일.
         file order is the sorted path order even when the OS lists entries reversed.
@@ -553,6 +609,33 @@ class QaIn4ContentKeyedCacheTest(unittest.TestCase):
             with self.subTest(name=item.name):
                 self.assertEqual(item.to_json(), uncached[item.name])
                 self.assertNotIn("garbage.jpg", json.dumps(item.to_json(), ensure_ascii=False))
+
+    def test_cached_row_for_a_name_that_contains_the_old_name(self) -> None:
+        """QA-IN-4: 마지막 바이트만 바꾼 동일 크기 파일을 같은 경로에 넣고 touch -r로 mtime 복원 후 재검사 → 캐시 미사용, 새로 분석, 해시가 다르게 기록.
+        R13-1 (round 13): "garbage.jpg" replayed as "증거 garbage.jpg" names the file once.
+
+        The path forms and then the bare name were replaced one after the
+        other, so the bare name matched again inside the path just inserted
+        ("<root>/증거 증거 garbage.jpg") and a warm scan differed from a cold one.
+        """
+        folder = Path(self._tmp.name) / "r13"
+        folder.mkdir()
+        garbage = b"not an image at all " * 8
+        (folder / "garbage.jpg").write_bytes(garbage)
+        cache = Path(self._tmp.name) / "r13-cache.json"
+        scan_directory(folder, cache_path=cache)
+        for name in ("증거 garbage.jpg", "x garbage.jpg", "garbage.jpg.jpg"):
+            (folder / name).write_bytes(garbage)
+        summary, items = scan_directory(folder, cache_path=cache)
+        self.assertEqual(summary.cached, 4)
+        uncached = {item.name: item.to_json() for item in scan_directory(folder)[1]}
+        for item in items:
+            with self.subTest(name=item.name):
+                self.assertEqual(item.to_json(), uncached[item.name])
+        reasons = json.dumps([item.to_json() for item in items], ensure_ascii=False)
+        self.assertIn("<root>/증거 garbage.jpg", reasons)
+        self.assertNotIn("증거 증거", reasons)
+        self.assertNotIn("x x garbage", reasons)
 
     def test_dedupe_hash_is_reused_not_recomputed(self) -> None:
         """QA-IN-4: 마지막 바이트만 바꾼 동일 크기 파일을 같은 경로에 넣고 touch -r로 mtime 복원 후 재검사 → 캐시 미사용, 새로 분석, 해시가 다르게 기록.

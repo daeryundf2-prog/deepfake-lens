@@ -25,7 +25,20 @@ same bytes. An ASCII path is passed through untouched. Any other path is
 3. otherwise a read-only copy, only up to :data:`NATIVE_COPY_MAX_BYTES`.
 
 The staged name is removed when the ``with`` block ends and the session
-folder at interpreter exit. When no route works (copy over the cap, no
+folder at interpreter exit.
+
+R13-1 (round 13): a decoder that cannot open the staged name quotes it in
+its exception ("Error opening '/tmp/deepfake-lens-native-…/000035-
+df0fda9674ca.m4a'"), and that random name used to reach the coverage
+reason, limitations, CSV, HTML and the report — so two scans of the same
+folder differed (QA-IN-2) and a non-ASCII row differed from its ASCII
+copy (R12-2). Every staged name is therefore registered with the original
+path it stands for, and :func:`restore_original_names` (applied first by
+``error_text.scrub_paths``, which every failure reason goes through) puts
+the original path back — exactly the text the decoder would have quoted
+had it been given the original name. A staging folder or name that is
+not (or no longer) registered is replaced by a fixed placeholder, so no
+staging name can appear in any output. When no route works (copy over the cap, no
 ASCII temp folder) :class:`NativePathError` is raised with a Korean
 message, so the check that needed the decoder is recorded as ``failed`` —
 never silently skipped, never handed the raw name.
@@ -45,7 +58,9 @@ import shutil
 import stat
 import tempfile
 import threading
+import re
 import uuid
+from collections import OrderedDict
 from contextlib import contextmanager
 from typing import Iterator
 
@@ -64,6 +79,25 @@ MAX_SUFFIX_CHARS = 12
 _LOCK = threading.Lock()
 _SESSION_DIR: str | None = None
 _COUNTER = itertools.count(1)
+
+# R13-1: staged base name -> the original path text it stands for. Bounded
+# (oldest out first): an exception is turned into its reason right after the
+# ``with`` block that raised it, so only recent names are ever looked up; the
+# bound keeps a very large scan from growing the map without limit.
+NATIVE_ALIAS_MAX = 65536
+_ALIASES: OrderedDict[str, str] = OrderedDict()
+# Every session folder this process created (normally one).
+_SESSION_DIRS: list[str] = []
+# A staged base name: "<6-digit counter>-<12 hex><.ext>" (see _stage).
+_STAGED_BASE = r"\d{6}-[0-9a-f]{12}(?:\.[0-9a-z]{1,%d})?" % (MAX_SUFFIX_CHARS - 1)
+_STAGED_NAME = re.compile(rf"(?<![\w.-])({_STAGED_BASE})(?![\w.-])")
+# Any session folder (this process's or another's, a stale one), with the
+# staged name under it when there is one.
+_SESSION_PATH = re.compile(re.escape(SESSION_PREFIX) + rf"[A-Za-z0-9_]+(?:(?:\\\\|[\\/])({_STAGED_BASE})(?![\w.-]))?")
+# R13-1: what a staging folder / name that is not registered is shown as —
+# fixed text, so a scan's output never depends on a random temp name.
+STAGED_FOLDER_PLACEHOLDER = "<네이티브 디코더용 임시 폴더>"
+STAGED_NAME_PLACEHOLDER = "<네이티브 디코더용 임시 이름>"
 
 
 class NativePathError(RuntimeError):
@@ -107,6 +141,7 @@ def session_dir() -> str:
             except OSError:
                 continue
             _SESSION_DIR = created
+            _SESSION_DIRS.append(created)
             atexit.register(shutil.rmtree, created, True)
             return created
         raise NativePathError(
@@ -115,9 +150,79 @@ def session_dir() -> str:
         )
 
 
+def _register_alias(staged: str, original: str) -> None:
+    """R13-1: remember that ``staged`` stands for ``original`` (as given)."""
+    with _LOCK:
+        _ALIASES[os.path.basename(staged)] = original
+        while len(_ALIASES) > NATIVE_ALIAS_MAX:
+            _ALIASES.popitem(last=False)
+
+
+def _alias(name: str) -> str | None:
+    with _LOCK:
+        return _ALIASES.get(name)
+
+
+def _replace_staged_paths(text: str, folder: str) -> str:
+    """Full staged paths under ``folder`` -> the originals, quoted the way the decoder quoted them.
+
+    A decoder that quotes a path does it with ``repr()`` ("Error opening
+    '/tmp/…/000001-….m4a'"): a quoted staged path becomes ``repr(original)``
+    — what that decoder writes for the original name, and the form the scan
+    cache rewrites quoted paths to (P2) — so a lone surrogate shows as
+    ``\\udcc1`` exactly as in a Pillow message. An unquoted one becomes the
+    original as given; a Windows ``repr()`` doubles the separators.
+    """
+    for escaped in (False, True):
+        shown = folder.replace("\\", "\\\\") if escaped else folder
+        if shown not in text:
+            continue
+        separator = r"(?:\\\\|/)" if escaped else r"[\\/]"
+        pattern = re.compile(r"(?P<quote>['\"]?)" + re.escape(shown) + separator + rf"(?P<name>{_STAGED_BASE})(?![\w.-])(?P=quote)")
+
+        def original(match: re.Match[str], escaped: bool = escaped) -> str:
+            known = _alias(match.group("name"))
+            if known is None:
+                return match.group("quote") + STAGED_NAME_PLACEHOLDER + match.group("quote")
+            if match.group("quote"):
+                return repr(known)
+            # An unquoted repr() text (rare): separators doubled the same way.
+            return known.replace("\\", "\\\\") if escaped else known
+
+        text = pattern.sub(original, text)
+    return text
+
+
+def restore_original_names(text: str) -> str:
+    """``text`` with every staged name replaced by the original path it stands for (R13-1).
+
+    A full staged path becomes the original path as it was handed to
+    :func:`native_safe_path` (``repr()``-quoted when the decoder quoted it);
+    a bare staged base name becomes the original's base name — what the
+    decoder would have printed for the original. A staging folder or name
+    this process does not know becomes a fixed placeholder.
+    """
+    if not text or (SESSION_PREFIX not in text and not _STAGED_NAME.search(text)):
+        return text
+    with _LOCK:
+        folders = sorted(_SESSION_DIRS, key=len, reverse=True)
+    for folder in folders:
+        text = _replace_staged_paths(text, folder)
+
+    def bare(match: re.Match[str]) -> str:
+        known = _alias(match.group(1))
+        if known is None:
+            return match.group(0)  # not ours: an evidence file may be named like this
+        return re.split(r"[\\/]", known)[-1] or known
+
+    text = _STAGED_NAME.sub(bare, text)
+    return _SESSION_PATH.sub(lambda m: STAGED_NAME_PLACEHOLDER if m.group(1) else STAGED_FOLDER_PLACEHOLDER, text)
+
+
 def _stage(source: str) -> str:
     folder = session_dir()
     target = os.path.join(folder, f"{next(_COUNTER):06d}-{uuid.uuid4().hex[:12]}{_ascii_suffix(source)}")
+    _register_alias(target, source)
     absolute = os.path.abspath(source)
     if os.name != "nt":
         try:
@@ -188,6 +293,7 @@ __all__ = [
     "NativePathError",
     "is_native_safe",
     "native_safe_path",
+    "restore_original_names",
     "session_dir",
     "staged_names",
 ]

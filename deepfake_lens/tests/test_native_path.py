@@ -23,6 +23,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -205,6 +206,49 @@ class NativeSafePathUnitTest(unittest.TestCase):
                     self.fail("must not yield")
         self.assertIn("사본 상한", str(caught.exception))
         self.assertRegex(str(caught.exception), "[가-힣]")
+
+    def test_a_decoder_message_names_the_original_path_not_the_staged_one(self) -> None:
+        """R13-1: the staged ASCII name a decoder quotes is put back to the original path."""
+        from deepfake_lens.error_text import failure_reason, path_scrub_root
+
+        with path_scrub_root(self.root):
+            try:
+                with native_safe_path(self.source) as native:
+                    staged = native
+                    # What soundfile / pymupdf raise: the path they were given, repr()-quoted.
+                    raise RuntimeError(f"Error opening {native!r}: Format not recognised.")
+            except RuntimeError as exc:
+                reason = failure_reason(exc)
+            self.assertFalse(os.path.lexists(staged))
+            self.assertNotIn(os.path.basename(staged), reason)
+            self.assertNotIn(native_path.SESSION_PREFIX, reason)
+            # Quoted the way the decoder quotes: repr() of the original (as Pillow writes it).
+            self.assertIn(repr(f"<root>/{self.name}"), reason)
+            # Only the base name (what some decoders print) -> the original's base name.
+            bare = native_path.restore_original_names(f"cannot read {os.path.basename(staged)}")
+            self.assertEqual(bare, f"cannot read {self.name}")
+            # Windows repr() doubles the separators; the original comes back escaped the same way.
+            folder = "C:\\Users\\kim\\AppData\\Local\\Temp\\" + native_path.SESSION_PREFIX + "x1y2"
+            name = "000042-00112233aabb.m4a"
+            aliases = native_path.OrderedDict({name: "D:\\증거\\녹음 1.m4a"})
+            with mock.patch.object(native_path, "_SESSION_DIRS", [folder]), mock.patch.object(native_path, "_ALIASES", aliases):
+                quoted = native_path.restore_original_names(repr(folder + "\\" + name))
+                plain = native_path.restore_original_names(f"open {folder}\\{name} failed")
+            self.assertEqual(quoted, repr("D:\\증거\\녹음 1.m4a"))
+            self.assertEqual(plain, "open D:\\증거\\녹음 1.m4a failed")
+
+    def test_unregistered_staging_names_become_fixed_placeholders(self) -> None:
+        """R13-1: another process's (or an evicted) staging name is never shown as it is."""
+        text = f"Error opening '/tmp/{native_path.SESSION_PREFIX}ab12_cd/000123-0123456789ab.m4a'"
+        shown = native_path.restore_original_names(text)
+        self.assertEqual(shown, f"Error opening '/tmp/{native_path.STAGED_NAME_PLACEHOLDER}'")
+        self.assertEqual(native_path.restore_original_names(f"in {native_path.SESSION_PREFIX}zz9"), f"in {native_path.STAGED_FOLDER_PLACEHOLDER}")
+        # An evidence file that merely looks like a staged name is left alone.
+        self.assertEqual(native_path.restore_original_names("'<root>/000123-0123456789ab.m4a'"), "'<root>/000123-0123456789ab.m4a'")
+        with native_safe_path(self.source) as native:
+            folder, name = os.path.split(native)
+        with mock.patch.object(native_path, "_ALIASES", native_path.OrderedDict()):
+            self.assertEqual(native_path.restore_original_names(os.path.join(folder, name)), native_path.STAGED_NAME_PLACEHOLDER)
 
     def test_no_ascii_temp_folder_fails_closed(self) -> None:
         with mock.patch.object(native_path, "_SESSION_DIR", None), mock.patch.object(
@@ -471,6 +515,165 @@ class NonUtf8MediaEndToEndTest(unittest.TestCase):
     @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed")
     def test_api_server_survives_a_non_utf8_mp4(self) -> None:
         self._check_server("api")
+
+
+# R13-1: what a staging name looks like in any output (folder prefix or name).
+STAGED_TEXT = re.compile(re.escape(native_path.SESSION_PREFIX) + r"|\d{6}-[0-9a-f]{12}|" + re.escape("<네이티브 디코더용 임시"))
+# Wall-clock fields of a scan JSON (as in QA-IN-2) plus the cache-replay flag.
+VOLATILE_KEYS = {"measured_at", "generated_at", "created_at", "timestamp", "scanned_at", "fitted_at", "cached"}
+# Name-bearing row keys (they differ between a file and its copy by design).
+NAME_KEYS = {"path", "display_name", "path_b64", "name"}
+
+
+def _damaged_inputs() -> dict[str, bytes]:
+    """Undecodable / unsupported / damaged audio, video, PDF and image bytes (stem.ext -> bytes)."""
+    import io
+
+    from PIL import Image
+
+    jpeg = io.BytesIO()
+    Image.new("RGB", (160, 120), (90, 120, 150)).save(jpeg, "JPEG")
+    junk = bytes((index * 53 + 7) % 256 for index in range(4000))
+    return {
+        "garbage.wav": b"RIFF\x00\x10\x00\x00WAVEfmt " + junk,  # no 'data' chunk
+        "tone.m4a": b"\x00\x00\x00\x18ftypM4A " + junk,  # libsndfile: format not recognised
+        "broken.flac": b"fLaC" + junk,
+        "cut.wav": _wav_bytes()[:30],  # header only
+        "broken.mp4": b"\x00\x00\x00\x18ftypmp42" + junk,
+        "broken.pdf": b"%PDF-1.4\n" + junk,
+        "cut.jpg": jpeg.getvalue()[:200],
+        "notes.xyz": b"unsupported type\n",
+    }
+
+
+def _normalized(node: object, renames: list[tuple[str, str]]) -> object:
+    if isinstance(node, dict):
+        return {key: _normalized(value, renames) for key, value in node.items() if key not in VOLATILE_KEYS | NAME_KEYS}
+    if isinstance(node, list):
+        return [_normalized(value, renames) for value in node]
+    if isinstance(node, str):
+        for old, new in renames:
+            node = node.replace(old, new)
+        return node
+    return node
+
+
+class StagedNamesNeverLeakEndToEndTest(unittest.TestCase):
+    """R13-1 (round 13): no staging name in any output; a Korean / non-UTF-8 name's row equals its ASCII copy's.
+
+    Damaged audio (undecodable m4a, broken flac, wav without data, header-only
+    wav), video, PDF, image and an unsupported type, each under an ASCII name,
+    a Korean name, a CP949 (non-UTF-8) name and inside a non-UTF-8 folder. A
+    decoder that fails on the staged ASCII name quoted it ("'000035-
+    df0fda9674ca.m4a'") in the reason, which made every run differ and the
+    copy's row differ from the ASCII one; a content-keyed cache then gave the
+    ASCII file another file's temp name.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        self.home = self.root / "home"
+        self.home.mkdir()
+        self.folder = self.root / "case"
+        self.folder.mkdir()
+        sub = os.fsencode(self.folder) + b"/sub" + CP949_STEM[:2]
+        try:
+            os.mkdir(sub)
+        except (OSError, UnicodeError):
+            raise unittest.SkipTest(NON_UTF8_SKIP)
+        self.pairs: list[tuple[str, str]] = []  # (ASCII row path, other row path)
+        for name, data in _damaged_inputs().items():
+            stem, ext = os.path.splitext(name)
+            (self.folder / name).write_bytes(data)
+            korean = f"녹음 1 {stem}{ext}"
+            (self.folder / korean).write_bytes(data)
+            cp949 = _write_bytes_name(self.folder, CP949_STEM + stem.encode() + ext.encode(), data)
+            with open(sub + b"/" + name.encode(), "wb") as handle:
+                handle.write(data)
+            nested = os.fsdecode(b"sub" + CP949_STEM[:2] + b"/" + name.encode())
+            self.pairs += [(name, korean), (name, cp949), (name, nested)]
+
+    def _scan(self, tag: str, *extra: str) -> dict[str, Path]:
+        outputs = {kind: self.root / f"{tag}.{kind}" for kind in ("json", "csv", "html", "md")}
+        args = [
+            "--json-out", str(outputs["json"]), "--csv-out", str(outputs["csv"]),
+            "--html-out", str(outputs["html"]), "--evidence-statement-out", str(outputs["md"]),
+        ]
+        if HAVE_PYMUPDF:
+            outputs["pdf"] = self.root / f"{tag}.pdf"
+            args += ["--pdf-out", str(outputs["pdf"])]
+        tmp = self.root / f"tmp_{tag}"
+        tmp.mkdir()
+        env = {**_child_env(self.home), "TMPDIR": str(tmp)}
+        proc = subprocess.run(
+            [sys.executable, "-m", "deepfake_lens", "scan", str(self.folder), "--recursive", "--include-low", "--format", "json", *args, *extra],
+            capture_output=True, env=env, timeout=CHILD_TIMEOUT_SECONDS, cwd=str(self.root),
+        )
+        self.assertEqual(proc.returncode, 0, (tag, proc.stderr[-800:]))
+        outputs["stdout"] = self.root / f"{tag}.stdout.json"
+        outputs["stdout"].write_bytes(proc.stdout)
+        self.assertEqual(os.listdir(tmp), [], f"{tag}: staging folder left behind")
+        return outputs
+
+    def _texts(self, outputs: dict[str, Path]) -> dict[str, str]:
+        texts = {kind: path.read_bytes().decode("utf-8", "surrogateescape") for kind, path in outputs.items() if kind != "pdf"}
+        if "pdf" in outputs:
+            import pymupdf
+
+            with pymupdf.open(str(outputs["pdf"])) as document:
+                texts["pdf"] = "\n".join(page.get_text() for page in document)
+        return texts
+
+    def _rows(self, outputs: dict[str, Path]) -> dict[str, dict]:
+        return {item["path"]: item for item in json.loads(outputs["json"].read_text(encoding="utf-8"))["items"]}
+
+    def _stable(self, outputs: dict[str, Path]) -> str:
+        def strip(node: object) -> object:
+            if isinstance(node, dict):
+                return {key: strip(value) for key, value in node.items() if key not in VOLATILE_KEYS}
+            if isinstance(node, list):
+                return [strip(value) for value in node]
+            return node
+
+        return json.dumps(strip(json.loads(outputs["json"].read_text(encoding="utf-8"))), ensure_ascii=True, sort_keys=True)
+
+    def test_rows_equal_their_ascii_copies_across_runs_and_warm_cache(self) -> None:
+        cache = self.root / "cache.json"
+        runs = {
+            "cold": self._scan("cold", "--cache", str(cache)),
+            "again": self._scan("again"),
+            "warm": self._scan("warm", "--cache", str(cache)),
+            "workers": self._scan("workers", "--workers", "3"),
+        }
+        for tag, outputs in runs.items():
+            for kind, text in self._texts(outputs).items():
+                self.assertIsNone(STAGED_TEXT.search(text), (tag, kind, STAGED_TEXT.search(text)))
+        # Non-vacuous: the warm run replayed rows from the content-keyed cache.
+        self.assertGreater(json.loads(runs["warm"]["json"].read_text(encoding="utf-8"))["summary"]["cached"], 0)
+        reference = self._stable(runs["cold"])
+        for tag in ("again", "warm", "workers"):
+            self.assertEqual(self._stable(runs[tag]), reference, f"{tag} differs from the cold run")
+        rows = self._rows(runs["cold"])
+        self.assertEqual(len(rows), len({path for pair in self.pairs for path in pair}))
+        for ascii_path, other in self.pairs:
+            # Quoted paths are repr()-escaped (a lone surrogate as "\\udcc1"), as Pillow writes them.
+            renames = [
+                (repr(other)[1:-1], ascii_path), (other, ascii_path),
+                (repr(os.path.basename(other))[1:-1], os.path.basename(ascii_path)), (os.path.basename(other), os.path.basename(ascii_path)),
+            ]
+            self.assertEqual(
+                _normalized(rows[other], renames), _normalized(rows[ascii_path], []), f"{other!a} differs from {ascii_path}"
+            )
+        # Non-vacuous: with librosa the undecodable audio failed with a reason naming the file.
+        if importlib.util.find_spec("librosa") is not None:
+            korean = rows["녹음 1 tone.m4a"]["result"]["coverage"]
+            reason = next(entry["reason"] for entry in korean if entry["check"] == "audio_features")
+            self.assertIn("'<root>/녹음 1 tone.m4a'", reason)
+            nested = next(other for ascii_path, other in self.pairs if ascii_path == "tone.m4a" and other.startswith("sub"))
+            reason = next(entry["reason"] for entry in rows[nested]["result"]["coverage"] if entry["check"] == "audio_features")
+            self.assertIn(repr(f"<root>/{nested}"), reason)
 
 
 if __name__ == "__main__":

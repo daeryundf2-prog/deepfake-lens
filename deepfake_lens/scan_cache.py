@@ -764,15 +764,23 @@ def _rewrite_path_text(node: object, old_path: str, old_name: str, new_path: str
         (f"{ROOT_PLACEHOLDER}/{old_path}", f"{ROOT_PLACEHOLDER}/{new_path}"),
         (f"{ROOT_PLACEHOLDER}\\{old_path.replace('/', chr(92))}", f"{ROOT_PLACEHOLDER}\\{new_path.replace('/', chr(92))}"),
     ]
-    name_pattern = re.compile(rf"(?<![\w.\-]){re.escape(old_name)}(?![\w.\-])") if old_name and old_name != new_name else None
+    # R13-1 (round 13): one pass over the text, every form at once — the old
+    # sequence (paths, then the bare name) re-scanned the text it had just
+    # inserted, so "cut.wav" -> "녹음 1 cut.wav" became "녹음 1 녹음 1 cut.wav"
+    # (the name re-matched after the space), and a warm cache differed from a
+    # cold scan. At each position the longest form (the quoted path) wins.
+    forms = [(re.escape(old), new) for old, new in pairs if old != new]
+    if old_name and old_name != new_name:
+        forms.append((rf"(?<![\w.\-]){re.escape(old_name)}(?![\w.\-])", new_name))
+    combined = re.compile("|".join(f"({pattern})" for pattern, _ in forms)) if forms else None
 
     def fix(text: str) -> str:
-        for old, new in pairs:
-            text = text.replace(old, new)
         # P2: a function replacement — ``new_name`` is a file name, not a
         # regex template; a name with "\", "\1" or "\g<0>" must be inserted
         # literally instead of raising re.error (PatternError) mid-scan.
-        return name_pattern.sub(lambda _match: new_name, text) if name_pattern is not None else text
+        if combined is None:
+            return text
+        return combined.sub(lambda match: forms[(match.lastindex or 1) - 1][1], text)
 
     def walk(value: object) -> object:
         if isinstance(value, str):
