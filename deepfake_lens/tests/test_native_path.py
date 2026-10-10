@@ -272,18 +272,62 @@ class NativeSafePathUnitTest(unittest.TestCase):
         with path_scrub_root(root):
             self.assertEqual(scrub_paths(f"cannot identify image file {root + '/x.png'!r}"), "cannot identify image file '<root>/x.png'")
 
-    def test_unregistered_staging_names_become_fixed_placeholders(self) -> None:
-        """R13-1: another process's (or an evicted) staging name is never shown as it is."""
-        text = f"Error opening '/tmp/{native_path.SESSION_PREFIX}ab12_cd/000123-0123456789ab.m4a'"
-        shown = native_path.restore_original_names(text)
-        self.assertEqual(shown, f"Error opening '/tmp/{native_path.STAGED_NAME_PLACEHOLDER}'")
-        self.assertEqual(native_path.restore_original_names(f"in {native_path.SESSION_PREFIX}zz9"), f"in {native_path.STAGED_FOLDER_PLACEHOLDER}")
-        # An evidence file that merely looks like a staged name is left alone.
-        self.assertEqual(native_path.restore_original_names("'<root>/000123-0123456789ab.m4a'"), "'<root>/000123-0123456789ab.m4a'")
+    def test_only_registered_staging_text_is_replaced(self) -> None:
+        """R13-1 / R14-4: this process's evicted staged name is a placeholder; a look-alike that is not ours is text.
+
+        R14-4 (round 14): this test used to expect any session-folder-shaped
+        text to become a placeholder — so an evidence folder named
+        "deepfake-lens-native-7-ab" was shown as the staging folder. Only the
+        folders this process created (by exact path) are replaced now.
+        """
+        for text in (
+            f"Error opening '/tmp/{native_path.SESSION_PREFIX}ab12_cd/000123-0123456789ab.m4a'",  # not this process's folder
+            f"in {native_path.SESSION_PREFIX}zz9",
+            f"'<root>/{native_path.SESSION_PREFIX}7-ab/g.wav'",  # an evidence folder named like one
+            "'<root>/000123-0123456789ab.m4a'",  # an evidence file named like a staged name
+        ):
+            self.assertEqual(native_path.restore_original_names(text), text)
         with native_safe_path(self.source) as native:
             folder, name = os.path.split(native)
         with mock.patch.object(native_path, "_ALIASES", native_path.OrderedDict()):
             self.assertEqual(native_path.restore_original_names(os.path.join(folder, name)), native_path.STAGED_NAME_PLACEHOLDER)
+            self.assertEqual(native_path.restore_original_names(f"cannot list {folder}: busy"), f"cannot list {native_path.STAGED_FOLDER_PLACEHOLDER}: busy")
+        # The registered folder as the tail of a longer path is not the folder.
+        unknown = "000999-0123456789ab.mp4"
+        self.assertEqual(native_path.restore_original_names(f"'{folder}/{unknown}'"), f"'{native_path.STAGED_NAME_PLACEHOLDER}'")
+        longer = "/case" + folder
+        self.assertEqual(native_path.restore_original_names(f"'{longer}/{unknown}'"), f"'{longer}/{unknown}'")
+
+    def test_evidence_folders_named_like_session_folders_keep_their_names(self) -> None:
+        """R14-4 (E1, E65): a reason names a look-alike evidence folder as it is; a root below one stays <root>."""
+        from deepfake_lens.error_text import failure_reason, path_scrub_root
+
+        def reason(root: Path, path: Path) -> str:
+            with path_scrub_root(root):
+                try:
+                    with native_safe_path(path) as native:
+                        raise RuntimeError(f"Error opening {native!r}: Format not recognised.")
+                except RuntimeError as exc:
+                    return failure_reason(exc)
+
+        lookalike = self.root / f"{native_path.SESSION_PREFIX}7-ab"
+        plain = self.root / "dfl-plain-7-ab"
+        for folder in (lookalike, plain):
+            folder.mkdir()
+            (folder / "녹음.wav").write_bytes(b"RIFF")
+            (folder / "g.wav").write_bytes(b"RIFF")
+        for name in ("녹음.wav", "g.wav"):
+            shown = reason(self.root, lookalike / name)  # E1
+            self.assertEqual(shown, reason(self.root, plain / name).replace("dfl-plain-7-ab", lookalike.name))
+            self.assertIn(f"'<root>/{lookalike.name}/{name}'", shown)
+        case = self.root / f"{native_path.SESSION_PREFIX}9-x" / "case"  # E65
+        case.mkdir(parents=True)
+        for name in ("녹음.wav", "g.wav"):
+            (case / name).write_bytes(b"RIFF")
+            shown = reason(case, case / name)
+            self.assertIn(f"'<root>/{name}'", shown)
+            self.assertNotIn(str(self.root), shown)
+            self.assertNotIn(native_path.STAGED_FOLDER_PLACEHOLDER, shown)
 
     def test_no_ascii_temp_folder_fails_closed(self) -> None:
         with mock.patch.object(native_path, "_SESSION_DIR", None), mock.patch.object(
@@ -1656,6 +1700,108 @@ class StagedNamesNeverLeakEndToEndTest(unittest.TestCase):
             nested = next(other for ascii_path, other in self.pairs if ascii_path == "tone.m4a" and other.startswith("sub"))
             reason = next(entry["reason"] for entry in rows[nested]["result"]["coverage"] if entry["check"] == "audio_features")
             self.assertIn(f"'<root>/{nested}'", reason)  # the name as in its row
+
+
+class OldCacheRowsTest(unittest.TestCase):
+    """R14-3 (round 14): a cache row written before R13-1 (staged temp names in its text) is never replayed.
+
+    A cache written by 9085e5e had the same key at 232cfbd (same tool
+    version, same key layout): the old row came back with "'000002-
+    e92739787767.m4a'" in its reason and an ASCII file inherited another
+    file's temp name. The key now carries the output-format generation
+    (``content-v4|fmt:<n>``) and a row carrying staging text is dropped when
+    the cache is loaded.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        self.folder = self.root / "case"
+        self.folder.mkdir()
+        damaged = _damaged_inputs()
+        for name in ("tone.m4a", "garbage.wav", "garbage.png"):
+            (self.folder / name).write_bytes(damaged[name])
+            (self.folder / f"녹음 {name}").write_bytes(damaged[name])
+        self.cache = self.root / "cache.json"
+
+    def _scan(self) -> tuple[Any, dict[str, Any]]:
+        from deepfake_lens.core import scan_directory
+
+        summary, items = scan_directory(self.folder, cache_path=self.cache)
+        return summary, {item.path: item.to_json() for item in items}
+
+    def test_rows_with_staging_text_or_an_old_key_are_not_replayed(self) -> None:
+        from deepfake_lens import scan_cache
+
+        _, cold = self._scan()
+        payload = json.loads(self.cache.read_text(encoding="utf-8"))
+        items = payload["items"]
+        self.assertTrue(items and all(key.startswith(f"content-v4|fmt:{scan_cache.OUTPUT_FORMAT_GENERATION}|") for key in items), list(items)[:2])
+        poisoned = {}
+        for key, row in items.items():
+            # One row per content key: the stored row may be the Korean copy's.
+            if row["path"].endswith("tone.m4a"):
+                # What 9085e5e wrote: the staged name in the reasons instead of the file.
+                own = f"'<root>/{row['path']}'"
+                row = json.loads(json.dumps(row))
+                for entry in row["result"]["coverage"]:
+                    entry["reason"] = (entry.get("reason") or "").replace(own, "'000002-e92739787767.m4a'")
+                row["result"]["limitations"] = [text.replace(own, "'000002-e92739787767.m4a'") for text in row["result"]["limitations"]]
+                # (Without librosa there is no decoder reason to rewrite: the old text, added.)
+                row["result"]["limitations"].append("검사 실패 — audio_features: LibsndfileError: Error opening '000002-e92739787767.m4a'")
+                poisoned[key] = row
+                # The same row under the pre-R14-3 key layout (no fmt:).
+                old_key = key.replace(f"content-v4|fmt:{scan_cache.OUTPUT_FORMAT_GENERATION}|", "content-v3|")
+                poisoned[old_key] = row
+            if row["path"].endswith("garbage.wav"):
+                row = json.loads(json.dumps(row))
+                row["result"]["limitations"].append(f"/tmp/{native_path.SESSION_PREFIX}4242-ab12cd/000003-28031c5572eb.wav")
+                poisoned[key] = row
+        self.assertEqual(len(poisoned), 3)
+        self.assertTrue(all(scan_cache.row_mentions_staging(row) for row in poisoned.values()))
+        items.update(poisoned)
+        self.cache.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        summary, warm = self._scan()
+        for path, row in warm.items():
+            self.assertIsNone(STAGED_TEXT.search(json.dumps(row, ensure_ascii=False)), path)
+            strip = lambda node: {k: v for k, v in node.items() if k not in VOLATILE_KEYS}  # noqa: E731
+            self.assertEqual(_normalized(strip(row), []), _normalized(strip(cold[path]), []), path)
+        # The rows of the two poisoned contents (each file and its Korean copy)
+        # were analysed again; the clean ones (garbage.png and its copy) replayed.
+        again = [path for path in cold if path.endswith(("tone.m4a", "garbage.wav"))]
+        self.assertEqual(len(again), 4)
+        self.assertEqual(summary.cached, len(cold) - len(again))
+        rewritten = json.loads(self.cache.read_text(encoding="utf-8"))["items"]
+        self.assertFalse(any(scan_cache.row_mentions_staging(row) for row in rewritten.values()))
+        self.assertFalse(any(key.startswith("content-v3|") for key in rewritten))
+
+    def test_own_names_that_look_like_staging_text_do_not_count(self) -> None:
+        """R14-3 / R14-4: a file or folder *named* like staging text keeps its rows cacheable."""
+        from deepfake_lens.scan_cache import row_mentions_staging
+
+        named = {
+            "path": "000001-0123456789ab.wav", "name": "000001-0123456789ab.wav",
+            "result": {"coverage": [{"reason": "LibsndfileError: Error opening '<root>/000001-0123456789ab.wav'"}]},
+        }
+        folder = {
+            "path": f"{native_path.SESSION_PREFIX}7-ab/g.wav", "name": "g.wav",
+            "result": {"coverage": [{"reason": f"Error opening '<root>/{native_path.SESSION_PREFIX}7-ab/g.wav'"}]},
+        }
+        self.assertFalse(row_mentions_staging(named))
+        self.assertFalse(row_mentions_staging(folder))
+        leaked = json.loads(json.dumps(named).replace("<root>/000001-0123456789ab.wav", "000009-0123456789ab.wav"))
+        self.assertTrue(row_mentions_staging(leaked))
+
+    def test_a_new_output_generation_misses_the_old_rows(self) -> None:
+        from deepfake_lens import scan_cache
+
+        self._scan()
+        with mock.patch.object(scan_cache, "OUTPUT_FORMAT_GENERATION", scan_cache.OUTPUT_FORMAT_GENERATION + 1):
+            summary, _ = self._scan()
+        self.assertEqual(summary.cached, 0)
+        summary, _ = self._scan()
+        self.assertGreater(summary.cached, 0)
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ import re
 import json
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Iterator
 
 from .profile_pins import ModelPathArg, model_path_digest, pin_tokens, profile_pins
 from .result_types import ScanItem
@@ -566,7 +566,55 @@ def _load_scan_cache(cache_path: Path | None) -> dict[str, object] | None:
     payload["format"] = SCAN_CACHE_FORMAT
     payload.setdefault("version", 1)
     payload.setdefault("items", {})
+    items = payload["items"]
+    if isinstance(items, dict):
+        # R14-3 (round 14): a row whose text names a native decoder's staging
+        # folder or staged name (written before R13-1 restored the original
+        # names) is never replayed — it would bring the temp name back and
+        # give an ASCII file another file's temp name.
+        stale = [key for key, row in items.items() if row_mentions_staging(row)]
+        for key in stale:
+            del items[key]
     return payload
+
+
+def row_mentions_staging(row: object) -> bool:
+    """R14-3: whether a cached row's text carries native-staging text (folder prefix, staged name, placeholder).
+
+    The row's own path, name and member name are not counted (an evidence
+    file may be named like a staged name; R14-4).
+    """
+    from .native_path import STAGING_TEXT
+
+    if not isinstance(row, dict):
+        return False
+    own: set[str] = set()
+    for key in ROW_NAME_KEYS:
+        value = row.get(key)
+        if isinstance(value, str):
+            own.update(part for part in re.split(r"[\\/]|::", value) if part)
+    parts = sorted(own, key=len, reverse=True)
+
+    def strings(node: object) -> Iterator[str]:
+        if isinstance(node, str):
+            yield node
+        elif isinstance(node, list):
+            for entry in node:
+                yield from strings(entry)
+        elif isinstance(node, dict):
+            for entry in node.values():
+                yield from strings(entry)
+
+    for text in strings({key: value for key, value in row.items() if key not in ROW_NAME_KEYS}):
+        for part in parts:
+            text = text.replace(part, "")
+        if STAGING_TEXT.search(text):
+            return True
+    return False
+
+
+# R14-3: the name-bearing keys of a cached row.
+ROW_NAME_KEYS = ("path", "name", "display_name", "path_b64", "member")
 
 
 def _write_scan_cache(cache_path: Path | None, cache: dict[str, object]) -> None:
@@ -652,6 +700,7 @@ def _cache_key(
     return "|".join(
         [
             CACHE_KEY_VERSION,
+            f"fmt:{OUTPUT_FORMAT_GENERATION}",
             f"sha256:{digest}",
             f"ext:{cache_extension(path)}",
             f"opts:{_short_digest(options)}",
@@ -686,7 +735,17 @@ def _content_sha256(path: Path, fingerprints: dict[Path, str] | None = None) -> 
 
 # Bumped whenever the key layout changes so entries written under an older
 # layout (the path+size+mtime keys before G11) can never match.
-CACHE_KEY_VERSION = "content-v3"  # v3 (N6): + extension
+CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output format generation
+# R14-3 (round 14): the generation of the rules that turn an analysis into a
+# row's text — reasons, limitations, verdict wording, path scrubbing, name
+# restoring. A cached row is the text an older commit wrote; the tool
+# version alone does not change between commits, so a row written by
+# 9085e5e (staged temp names in its reasons) was replayed unchanged at
+# 232cfbd. BUMP THIS in every commit that changes what a row says for the
+# same input (docs/deepfake-lens-cli.md, "Scan order and cache").
+# 1: R14-3 — reasons name the original file, never a staging name (R13-1),
+#    and an evidence folder named like a staging folder keeps its name (R14-4).
+OUTPUT_FORMAT_GENERATION = 1
 
 
 def cache_extension(path: Path) -> str:

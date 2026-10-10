@@ -157,9 +157,9 @@ _SESSION_DIRS: list[str] = []
 # A staged base name: "<6-digit counter>-<12 hex><.ext>" (see _stage).
 _STAGED_BASE = r"\d{6}-[0-9a-f]{12}(?:\.[0-9a-z]{1,%d})?" % (MAX_SUFFIX_CHARS - 1)
 _STAGED_NAME = re.compile(rf"(?<![\w.-])({_STAGED_BASE})(?![\w.-])")
-# Any session folder (this process's or another's, a stale one), with the
-# staged name under it when there is one.
-_SESSION_PATH = re.compile(re.escape(SESSION_PREFIX) + rf"[A-Za-z0-9_-]+(?:(?:\\\\|[\\/])({_STAGED_BASE})(?![\w.-]))?")
+# R14-3: any native-staging text (a session folder prefix, a staged base name,
+# a placeholder) — a cached row carrying it is never replayed (scan_cache).
+STAGING_TEXT = re.compile(rf"{re.escape(SESSION_PREFIX)}|{_STAGED_NAME.pattern}|{re.escape('<네이티브 디코더용 임시')}")
 # R13-1: what a staging folder / name that is not registered is shown as —
 # fixed text, so a scan's output never depends on a random temp name.
 STAGED_FOLDER_PLACEHOLDER = "<네이티브 디코더용 임시 폴더>"
@@ -537,6 +537,35 @@ def _replace_short_paths(text: str) -> str:
     return text
 
 
+# R14-4: a registered folder is matched only as a whole path — never as the
+# tail of a longer one ("/case/tmp/deepfake-lens-native-…" is not
+# "/tmp/deepfake-lens-native-…").
+_PATH_BEFORE = r"(?<![\w.~/\\-])"
+# R14-4: what may follow a folder named on its own (end, space, quote, punctuation).
+_PATH_AFTER = r"(?=$|[\s'\"`:;,()\[\]{}<>|])"
+
+
+def _session_text_forms() -> list[str]:
+    """R14-4: the session folders this process created, as given and resolved (longest first).
+
+    Only these exact absolute paths — each made by :func:`session_dir` with
+    ``mkdtemp`` directly in a temp base — are ever replaced in a message;
+    an evidence folder that merely *looks* like a session folder
+    ("deepfake-lens-native-7-ab") is text like any other.
+    """
+    with _LOCK:
+        folders = list(_SESSION_DIRS)
+    forms: set[str] = set()
+    for folder in folders:
+        forms.add(folder)
+        if os.path.isabs(folder):
+            try:
+                forms.add(os.path.realpath(folder))  # a decoder may print the resolved path (TMPDIR a link)
+            except (OSError, ValueError):
+                pass
+    return sorted(forms, key=len, reverse=True)
+
+
 def _replace_staged_paths(text: str, folder: str) -> str:
     """Full staged paths under ``folder`` -> the originals, quoted the way the decoder quoted them.
 
@@ -545,14 +574,19 @@ def _replace_staged_paths(text: str, folder: str) -> str:
     — what that decoder writes for the original name, and the form the scan
     cache rewrites quoted paths to (P2) — so a lone surrogate shows as
     ``\\udcc1`` exactly as in a Pillow message. An unquoted one becomes the
-    original as given; a Windows ``repr()`` doubles the separators.
+    original as given; a Windows ``repr()`` doubles the separators. A name
+    in ``folder`` that is not (or no longer) registered becomes
+    :data:`STAGED_NAME_PLACEHOLDER`, and ``folder`` named on its own
+    :data:`STAGED_FOLDER_PLACEHOLDER` — ``folder`` is this process's own.
     """
     for escaped in (False, True):
         shown = folder.replace("\\", "\\\\") if escaped else folder
         if shown not in text:
             continue
         separator = r"(?:\\\\|/)" if escaped else r"[\\/]"
-        pattern = re.compile(r"(?P<quote>['\"]?)" + re.escape(shown) + separator + rf"(?P<name>{_STAGED_BASE})(?![\w.-])(?P=quote)")
+        pattern = re.compile(
+            r"(?P<quote>['\"]?)" + _PATH_BEFORE + re.escape(shown) + separator + rf"(?P<name>{_STAGED_BASE})(?![\w.-])(?P=quote)"
+        )
 
         def original(match: re.Match[str], escaped: bool = escaped) -> str:
             known = _alias(match.group("name"))
@@ -564,6 +598,7 @@ def _replace_staged_paths(text: str, folder: str) -> str:
             return known.replace("\\", "\\\\") if escaped else known
 
         text = pattern.sub(original, text)
+        text = re.sub(_PATH_BEFORE + re.escape(shown) + _PATH_AFTER, lambda _: STAGED_FOLDER_PLACEHOLDER, text)
     return text
 
 
@@ -573,17 +608,20 @@ def restore_original_names(text: str) -> str:
     A full staged path becomes the original path as it was handed to
     :func:`native_safe_path` (``repr()``-quoted when the decoder quoted it);
     a bare staged base name becomes the original's base name — what the
-    decoder would have printed for the original. A staging folder or name
-    this process does not know becomes a fixed placeholder.
+    decoder would have printed for the original. R14-4 (round 14): only
+    what this process registered is replaced — its own session folders (by
+    their exact absolute paths) and its own staged names. There is no
+    pattern replacement any more: an evidence folder named
+    "deepfake-lens-native-7-ab" used to be shown as the staging-folder
+    placeholder, and a scan root below such a folder lost its ``<root>/``.
     """
     if not text:
         return text
     text = _replace_short_paths(text)
-    if SESSION_PREFIX not in text and not _STAGED_NAME.search(text):
+    forms = _session_text_forms()
+    if not any(form in text or form.replace("\\", "\\\\") in text for form in forms) and not _STAGED_NAME.search(text):
         return text
-    with _LOCK:
-        folders = sorted(_SESSION_DIRS, key=len, reverse=True)
-    for folder in folders:
+    for folder in forms:
         text = _replace_staged_paths(text, folder)
 
     def bare(match: re.Match[str]) -> str:
@@ -592,8 +630,7 @@ def restore_original_names(text: str) -> str:
             return match.group(0)  # not ours: an evidence file may be named like this
         return re.split(r"[\\/]", known)[-1] or known
 
-    text = _STAGED_NAME.sub(bare, text)
-    return _SESSION_PATH.sub(lambda m: STAGED_NAME_PLACEHOLDER if m.group(1) else STAGED_FOLDER_PLACEHOLDER, text)
+    return _STAGED_NAME.sub(bare, text)
 
 
 def _short_path_name(path: str) -> str | None:
