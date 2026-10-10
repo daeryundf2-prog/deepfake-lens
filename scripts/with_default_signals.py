@@ -13,7 +13,10 @@ through this script:
 
 This process is single-threaded when it resets the dispositions, then it
 ``exec``-s the command (``deepfake_lens.shutdown.with_default_signals`` is
-the same for a ``subprocess.Popen`` argv). Exit code: the command's.
+the same for a ``subprocess.Popen`` argv). Exit code: the command's;
+R16-15 (round 16): a command that cannot be started (not found, not
+executable) is a Korean error on stderr and exit 127 (126 when it exists but
+cannot be executed) — the shell's codes — instead of an English traceback.
 """
 
 from __future__ import annotations
@@ -27,6 +30,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from deepfake_lens.shutdown import HARNESS_DEFAULT_SIGNALS  # noqa: E402
+
+# R16-15: the shell's exit codes for a command that was not found / cannot be executed (POSIX sh, "Exit Status").
+NOT_FOUND_EXIT = 127
+NOT_EXECUTABLE_EXIT = 126
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -51,12 +58,24 @@ def main(argv: list[str] | None = None) -> int:
             signal.signal(signum, signal.SIG_DFL)
     sys.stdout.flush()
     sys.stderr.flush()
-    if os.name == "nt":  # no exec on Windows: run and pass the exit code on
-        import subprocess
+    try:
+        if os.name == "nt":  # no exec on Windows: run and pass the exit code on
+            import subprocess
 
-        return subprocess.call(command)
-    os.execvp(command[0], command)
-    return 127  # not reached
+            return subprocess.call(command)
+        os.execvp(command[0], command)
+    except FileNotFoundError:
+        print(f"오류: 실행할 명령을 찾을 수 없습니다: {command[0]!r} (PATH에 없거나 경로가 틀림)", file=sys.stderr)
+        return NOT_FOUND_EXIT
+    except PermissionError:
+        print(f"오류: 명령을 실행할 권한이 없습니다: {command[0]!r}", file=sys.stderr)
+        return NOT_EXECUTABLE_EXIT
+    except OSError as exc:
+        from deepfake_lens.error_text import read_error_ko
+
+        print(f"오류: 명령을 실행할 수 없습니다: {command[0]!r} — {read_error_ko(exc)}", file=sys.stderr)
+        return NOT_EXECUTABLE_EXIT
+    return NOT_FOUND_EXIT  # not reached (exec replaced this process)
 
 
 if __name__ == "__main__":

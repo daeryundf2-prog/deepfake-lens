@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import sys
+import threading
 from pathlib import Path
 
 from .benchmark import run_benchmark, write_benchmark, write_benchmark_markdown
@@ -399,7 +400,44 @@ def _verify_report_command(args: argparse.Namespace) -> int:
     return VERIFY_EXIT_CODES.get(result.status, VERIFY_EXIT_OTHER)
 
 
+# R16-13 (round 16): Ctrl-C (KeyboardInterrupt) ends the CLI with this Korean
+# line on stderr — after the cleanup — and the shell's 128 + SIGINT code; it
+# used to end with an English KeyboardInterrupt traceback.
+INTERRUPTED_MESSAGE = "중단됨(사용자 요청)"
+INTERRUPTED_EXIT = 130
+
+
 def main(argv: list[str] | None = None) -> int:
+    """The ``deepfake-lens`` command (R16-13: an interrupt is a Korean line and exit 130, never a traceback)."""
+    try:
+        return _main(argv)
+    except KeyboardInterrupt:
+        return interrupted_exit()
+
+
+def interrupted_exit() -> int:
+    """R16-13: clean up like a terminating signal does (flag, children, session folders), then say so; 130."""
+    import signal
+
+    try:
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGINT, signal.SIG_IGN)  # a second Ctrl-C does not interrupt the cleanup
+    except (OSError, ValueError):
+        pass
+    from .native_path import shutdown_session
+
+    try:
+        shutdown_session()
+    except Exception:  # noqa: BLE001 - the interrupt is still reported; the cause goes to the log
+        logging.getLogger(__name__).exception("cleanup after an interrupt failed")
+    try:
+        print(f"{INTERRUPTED_MESSAGE} — 임시 파일과 자식 프로세스를 정리하고 종료합니다.", file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        pass
+    return INTERRUPTED_EXIT
+
+
+def _main(argv: list[str] | None = None) -> int:
     # R13-4: a SIGTERM/SIGINT removes the native decoders' staging folder
     # first — installed here, in the main thread, because staging may first
     # happen in a worker thread (--workers, the servers' request threads).
