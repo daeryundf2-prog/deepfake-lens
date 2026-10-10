@@ -592,8 +592,19 @@ class SessionFolderCleanupTest(unittest.TestCase):
             """
         )
         env = {**_child_env(self.base), native_path.NATIVE_TMP_ENV: str(self.base)}
+        import signal
+
+        def default_actions() -> None:
+            # R14-1 (round 14): the child starts with SIGINT/SIGTERM at their
+            # default, as under an interactive terminal. A test run started as
+            # a background job inherits SIGINT as SIG_IGN, and an ignored signal
+            # now stays ignored (R14-1) — the child would sleep through it.
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+
         proc = subprocess.Popen(
-            [sys.executable, "-c", script, str(self.base), mode], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=str(self.base)
+            [sys.executable, "-c", script, str(self.base), mode],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=str(self.base), preexec_fn=default_actions,
         )
         assert proc.stdout is not None and proc.stderr is not None
         folder = proc.stdout.readline().decode("utf-8").strip()
