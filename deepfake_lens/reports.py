@@ -35,6 +35,7 @@ from .result_text import (
 from .result_types import EVIDENCE_KIND_LABELS, VERDICT_LABELS, CoverageStatus, Grade, Verdict, check_label, is_verdict_row, status_label
 from .signing import REPORT_KEY_ENV, resolve_report_key, sign_report, signed_body_sha256
 from .json_text import script_safe_json
+from .native_path import temp_location  # R15-6: temp_folder in the report body
 
 # G9: Korean label of the benchmark ``score_basis`` code (the JSON keeps the code).
 SCORE_BASIS_LABELS = {"raw, uncalibrated": "보정 전 원점수"}
@@ -116,6 +117,8 @@ def build_report_body(
         "coverage": coverage,
         # X1: inside the signed body, like the scan JSON.
         "unrecorded_files": unrecorded_files(list(items), summary).to_json(),
+        # R15-6: where the run's temp files went (a fallback folder is reported).
+        "temp_folder": temp_location(),
         "items": rows,
     }
     if excluded_items is not None:
@@ -262,6 +265,7 @@ def write_html_report(
   {legal_note}
   <p class="note">{"<br>".join(escape(line) for line in threshold_provenance_lines(thresholds))}</p>
   {_unrecorded_html(summary, items)}
+  {_temp_folder_html(signed_report)}
   <table>
     <thead><tr><th>결론</th><th>근거(종류별)</th><th>검사 범위(미실행·실패)</th><th>파일</th><th>SHA-256</th><th>참고 신호</th><th>히트맵</th></tr></thead>
     <tbody>{rows}</tbody>
@@ -304,6 +308,21 @@ def _unsigned_rows_html(unsigned_rows: list[tuple[ScanItem, str]] | None) -> str
         f'<section class="unsigned" id="unsigned-client-rows"><h2>{escape(UNSIGNED_ROWS_TITLE)}</h2>'
         f'<p class="legal">{escape(UNSIGNED_ROWS_NOTE)}</p><ul>{lines}</ul></section>'
     )
+
+
+def temp_folder_line(location: object) -> str:
+    """R15-6: the Korean line for a run whose temp files went to a fallback folder ("" otherwise)."""
+    if not isinstance(location, dict) or not location.get("fallback"):
+        return ""
+    return (
+        f"임시 폴더: 시스템 임시 폴더를 쓸 수 없어({location.get('reason', '')}) 대체 폴더 {location.get('base', '')}에 "
+        f"임시 파일을 만들었습니다(지정: 환경 변수 {location.get('override_env', 'DEEPFAKE_LENS_TMPDIR')})."
+    )
+
+
+def _temp_folder_html(signed_report: dict[str, object]) -> str:
+    line = temp_folder_line(signed_report.get("temp_folder"))
+    return f'<p class="note" id="temp-folder">{escape(line)}</p>' if line else ""
 
 
 def _unrecorded_html(summary: BatchScanSummary, items: list[ScanItem]) -> str:

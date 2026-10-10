@@ -123,6 +123,9 @@ logger = logging.getLogger(__name__)
 NATIVE_COPY_MAX_BYTES = 2 * 1024 * 1024 * 1024
 # Operator override for the staging base folder (must itself be ASCII).
 NATIVE_TMP_ENV = "DEEPFAKE_LENS_NATIVE_TMPDIR"
+# R15-6 (round 15): the operator's choice of the folder every temp file of a
+# run is made in (the session folder's base; ASCII path) — tried first.
+TMP_ENV = "DEEPFAKE_LENS_TMPDIR"
 SESSION_PREFIX = "deepfake-lens-native-"
 # Extensions longer than this are not real container suffixes; dropped.
 MAX_SUFFIX_CHARS = 12
@@ -162,6 +165,15 @@ CLEANUP_RETRY_SECONDS = 0.025
 
 _LOCK = threading.Lock()
 _SESSION_DIR: str | None = None
+# R15-6: session folder -> where it was made and why (temp_location()).
+_TEMP_LOCATIONS: dict[str, dict[str, object]] = {}
+_TEMP_NOTICE_SHOWN = False
+# R15-6: the stderr notice when the temp files of a run go elsewhere than the
+# temp folder the system (or DEEPFAKE_LENS_TMPDIR) names — printed once.
+TEMP_FALLBACK_NOTICE = (
+    "알림: 임시 폴더 {requested}을(를) 쓸 수 없어({reason}) 이 실행의 임시 파일(압축 해제 최대 2 GB 포함)을 "
+    "{base}에 만듭니다. 다른 위치를 쓰려면 환경 변수 " + TMP_ENV + "에 ASCII 경로의 폴더를 지정하십시오."
+)
 _COUNTER = itertools.count(1)
 _HANDLERS_INSTALLED = False
 _ATEXIT_REGISTERED = False
@@ -209,9 +221,10 @@ def _ascii_suffix(path: str) -> str:
 
 def _base_candidates() -> list[str]:
     candidates = []
-    override = os.environ.get(NATIVE_TMP_ENV)
-    if override:
-        candidates.append(override)
+    for name in (TMP_ENV, NATIVE_TMP_ENV):
+        override = os.environ.get(name)
+        if override:
+            candidates.append(override)
     candidates.append(tempfile.gettempdir())
     candidates.append("C:\\Windows\\Temp" if os.name == "nt" else "/tmp")
     return candidates
@@ -537,6 +550,61 @@ def _register_session_folder(created: str) -> None:
         _ATEXIT_REGISTERED = True
 
 
+def _unusable_base(base: str) -> str:
+    """R15-6: why ``base`` cannot hold the session folder ("" when it can)."""
+    if not base.isascii():
+        return "경로에 ASCII가 아닌 문자가 있음"
+    if not os.path.isdir(base):
+        return "폴더가 없음"
+    return ""
+
+
+def _record_temp_location(created: str, base: str, skipped: list[tuple[str, str]]) -> None:
+    """R15-6: remember where the session folder went; tell the operator (once) when it is not the folder they named.
+
+    A first candidate (``DEEPFAKE_LENS_TMPDIR``, ``DEEPFAKE_LENS_NATIVE_TMPDIR``
+    or the system temp folder) that could not be used used to send every
+    temp file of the run — up to a 2 GB extraction — silently to ``/tmp``
+    (``C:\\Windows\\Temp``). The notice goes to stderr once per process and
+    the location is part of every scan result (``temp_folder``).
+    """
+    global _TEMP_NOTICE_SHOWN
+    first = skipped[0] if skipped and skipped[0][0] != base else None
+    if first is None:
+        _TEMP_LOCATIONS[created] = {"fallback": False}
+        return
+    requested, reason = first
+    _TEMP_LOCATIONS[created] = {"fallback": True, "base": base, "reason": reason, "override_env": TMP_ENV}
+    logger.info("native_safe_path: temp folder %r unusable (%s); session folder in %s", requested, reason, base)
+    if not _TEMP_NOTICE_SHOWN:
+        _TEMP_NOTICE_SHOWN = True
+        try:
+            print(TEMP_FALLBACK_NOTICE.format(requested=repr(requested), reason=reason, base=base), file=sys.stderr, flush=True)
+        except (OSError, ValueError):
+            pass  # no usable stderr: the result still records it
+
+
+def temp_location() -> dict[str, object]:
+    """R15-6: where this run's temp files are made — ``{"fallback": False}``, or the fallback folder and why.
+
+    The folder in use when one exists; otherwise what :func:`session_dir`
+    would choose now (no folder is made).
+    """
+    with _LOCK:
+        folder = _SESSION_DIR
+        recorded = _TEMP_LOCATIONS.get(folder) if folder is not None else None
+    if recorded is not None:
+        return dict(recorded)
+    candidates = _base_candidates()
+    for index, base in enumerate(candidates):
+        if not _unusable_base(base) and os.access(base, os.W_OK):
+            if index == 0:
+                return {"fallback": False}
+            reason = _unusable_base(candidates[0]) or "쓸 수 없음"
+            return {"fallback": True, "base": base, "reason": reason, "override_env": TMP_ENV}
+    return {"fallback": False}
+
+
 def session_dir() -> str:
     """The per-process staging folder (created on first use, ASCII path).
 
@@ -550,16 +618,21 @@ def session_dir() -> str:
     with _LOCK, shutdown.guarded():
         if _SESSION_DIR is not None and os.path.isdir(_SESSION_DIR):
             return _SESSION_DIR
+        skipped: list[tuple[str, str]] = []
         for base in _base_candidates():
-            if not base.isascii() or not os.path.isdir(base):
+            unusable = _unusable_base(base)
+            if unusable:
+                skipped.append((base, unusable))
                 continue
             sweep_stale_sessions(base)
             try:
                 created = tempfile.mkdtemp(prefix=f"{SESSION_PREFIX}{os.getpid()}-", dir=base)
-            except OSError:
+            except OSError as exc:
+                skipped.append((base, f"폴더를 만들 수 없음({type(exc).__name__})"))
                 continue
             _SESSION_DIR = created
             _register_session_folder(created)
+            _record_temp_location(created, base, skipped)
             break
         else:
             created = ""
@@ -936,4 +1009,5 @@ __all__ = [
     "shutdown_session",
     "staged_names",
     "sweep_stale_sessions",
+    "temp_location",
 ]

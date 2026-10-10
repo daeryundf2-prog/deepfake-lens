@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, NamedTuple
 
 from .archives import archive_format, extract_archive, is_archive
-from .native_path import scratch_dir
+from .native_path import scratch_dir, temp_location
 from .audio import SUPPORTED_AUDIO_EXTENSIONS, AudioAnalysis, analyze_audio
 from .video_analysis import (
     AV_AUDIO_CHECK,
@@ -2384,6 +2384,10 @@ def scan_to_json(summary: BatchScanSummary, items: list[ScanItem], *, thresholds
         "thresholds": _thresholds_json(thresholds),
         # X1: files of the folder without an analysis result, by reason.
         "unrecorded_files": unrecorded_files(items, summary).to_json(),
+        # R15-6: where the run's temp files went ({"fallback": false}, or the
+        # fallback folder and why — a non-ASCII TMPDIR used to send them to
+        # /tmp silently).
+        "temp_folder": temp_location(),
         "items": [item.to_json() for item in items],
     }
 

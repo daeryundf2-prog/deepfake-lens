@@ -363,6 +363,20 @@ python -m deepfake_lens models --candidate aide-iclr-2025 --checkpoint models/ai
 python -m deepfake_lens scan samples --model-path artifacts/aide-profile.json
 ```
 
+### Temp folder (R15-6)
+
+Every temp file of a run (native decoders' staged names, audio tracks pulled
+from videos, archive extraction up to 2 GB, uploads) is made in one session
+folder `deepfake-lens-native-<pid>-<random>` under the first usable of:
+`DEEPFAKE_LENS_TMPDIR` (operator's choice, ASCII path), the legacy
+`DEEPFAKE_LENS_NATIVE_TMPDIR`, the system temp folder (`TMPDIR`/`TEMP`), then
+`/tmp` (`C:\Windows\Temp`). Native decoders need an ASCII path, so a temp
+folder under a Korean user name is skipped; when the folder used is not the
+first one, a Korean notice goes to stderr once
+(`알림: 임시 폴더 …을(를) 쓸 수 없어(…) 이 실행의 임시 파일(압축 해제 최대 2 GB 포함)을 …에 만듭니다. …`)
+and the scan result records it (`temp_folder`, see the JSON contract). Set
+`DEEPFAKE_LENS_TMPDIR` to a folder with room for the largest extraction.
+
 ### Weight pins (phase 0, G9/G10)
 
 No weight loads without a pin. Every runtime profile carries a `pin` object —
