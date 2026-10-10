@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "130dddd6836cd9f973ef2a32533e71f967b31060",
+    "head": "b0f5f812b3b6492c2d8780ae4f06595b26935d10",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -2477,6 +2477,123 @@
       "new": "Markdown 자동 링크 — 갭 목록 밖",
       "commits": [
         "ec8e4da"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R14-1",
+      "round": 14,
+      "source": "verify_round14.md",
+      "summary": "상속된 SIG_IGN 위에도 정리 핸들러 설치 → nohup 스캔이 SIGHUP에 스테이징 폴더 삭제·가짜 실패 → SIG_IGN 유지",
+      "gaps": [
+        "G1",
+        "G34"
+      ],
+      "new": "신호 처리 — 갭 목록 밖",
+      "commits": [
+        "b914bce",
+        "cf1fe06"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R14-2",
+      "round": 14,
+      "source": "verify_round14.md",
+      "summary": "스테이징 정리 시 링크를 따라 chmod해 증거 파일 권한 변경 → 링크·하드링크 chmod 금지",
+      "gaps": [
+        "G30"
+      ],
+      "new": "증거 무변경 — 갭 목록 밖",
+      "commits": [
+        "0a9f42b"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R14-3",
+      "round": 14,
+      "source": "verify_round14.md",
+      "summary": "R13-1 이전 캐시 행이 재생되어 옛 스테이징 이름 부활 → content-v4 키, 출력 형식 세대, 오염 행 무효화",
+      "gaps": [
+        "G11"
+      ],
+      "new": null,
+      "commits": [
+        "fd4bc0a"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R14-4",
+      "round": 14,
+      "source": "verify_round14.md",
+      "summary": "이름 복원기가 스테이징 폴더 모양 문자열을 무엇이든 치환 → 이 프로세스의 등록 폴더만",
+      "gaps": [
+        "G32"
+      ],
+      "new": "표시 단사성 — 갭 목록 밖",
+      "commits": [
+        "fd4bc0a"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R14-5",
+      "round": 14,
+      "source": "verify_round14.md",
+      "summary": "CascadeClassifier가 native_safe_path 미경유(Windows 한글 경로 위험) → 경유, 로드 실패는 failed",
+      "gaps": [
+        "G1",
+        "G12"
+      ],
+      "new": "Windows 한글 경로 — 갭 목록 밖",
+      "commits": [
+        "7fefde4"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R14-6",
+      "round": 14,
+      "source": "verify_round14.md",
+      "summary": "64 MB 초과 컨테이너가 같은 크기 재작성+touch -r을 놓침 → ctime_ns 비교, 모든 크기 추출 전 해시",
+      "gaps": [
+        "G11",
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "045566a"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R14-7",
+      "round": 14,
+      "source": "verify_round14.md",
+      "summary": "SIGKILL 시 스테이징 외 임시 파일 잔류 → 모든 임시 파일을 세션 폴더에",
+      "gaps": [
+        "G34",
+        "G1"
+      ],
+      "new": "임시 파일 정리 — 갭 목록 밖",
+      "commits": [
+        "b0f5f81"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R14-8",
+      "round": 14,
+      "source": "verify_round14.md",
+      "summary": "Windows ctypes 분기가 실행된 적 없음 → 가짜 WinDLL로 시그니처·반환 처리 검증",
+      "gaps": [
+        "G1"
+      ],
+      "new": "Windows 경로 — 갭 목록 밖",
+      "commits": [
+        "0a9f42b"
       ],
       "used_in_commit_subjects": true
     }
@@ -6294,6 +6411,197 @@
         "R13-1: 비 ASCII 파일명 스테이징 — 갭 목록 밖"
       ],
       "gaps_line": "Gaps: G32, G11; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "232cfbdb01ab4df1c5cc65c8e33e2713e8795c83",
+      "short": "232cfbd",
+      "round": "13",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on 130dddd, round-13 IDs mapped (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "b914bced58367c6908c5f01b738b9c9609ed9bf5",
+      "short": "b914bce",
+      "round": "14",
+      "subject": "fix(native): R14-1 an inherited SIG_IGN stays ignored — a nohup scan survives SIGHUP/SIGINT with its staging folder; only a default action gets the cleanup handler (R14-1; Gaps: G34, G1, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R14-1"
+      ],
+      "gaps_named_in_subject": [
+        "G34",
+        "G1"
+      ],
+      "gaps": [
+        "G34",
+        "G1"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R14-1: 신호 처리 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G34, G1; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "0a9f42b2f7a2298d525a58f8c486ac33d9ec3919",
+      "short": "0a9f42b",
+      "round": "14",
+      "subject": "fix(native): R14-2 removing a staged name never changes the evidence file — no chmod through a link, no hard links; R14-8 the Windows ctypes calls run against a fake WinDLL (R14-2, R14-8; Gaps: G30, G1, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R14-2",
+        "R14-8"
+      ],
+      "gaps_named_in_subject": [
+        "G30",
+        "G1"
+      ],
+      "gaps": [
+        "G30",
+        "G1"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R14-2: 증거 무변경 — 갭 목록 밖",
+        "R14-8: Windows 경로 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G30, G1; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "fd4bc0a32d2eef86168f9197452f1fffc4c43a08",
+      "short": "fd4bc0a",
+      "round": "14",
+      "subject": "fix(cache): R14-3 a cache row written before R13-1 is never replayed — key content-v4 with an output-format generation, rows carrying staging text dropped on load; R14-4 only this process's own staging folders and names are restored (R14-3, R14-4; Gaps: G11, G32, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R14-3",
+        "R14-4"
+      ],
+      "gaps_named_in_subject": [
+        "G11",
+        "G32"
+      ],
+      "gaps": [
+        "G11",
+        "G32"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R14-4: 표시 단사성 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G11, G32; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "7fefde477e9275923a6c05c7304ce4df31bfccdf",
+      "short": "7fefde4",
+      "round": "14",
+      "subject": "fix(native): R14-5 the Haar cascade is opened through native_safe_path — a cascade that does not load is a failed face / rPPG / lip-sync check, never \"얼굴 미검출\" (R14-5; Gaps: G12, G1, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R14-5"
+      ],
+      "gaps_named_in_subject": [
+        "G12",
+        "G1"
+      ],
+      "gaps": [
+        "G12",
+        "G1"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R14-5: Windows 한글 경로 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G12, G1; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "cf1fe063e2b458f96f8fafbd05b3ffbe1d379ba8",
+      "short": "cf1fe06",
+      "round": "14",
+      "subject": "test(native): R14-1 follow-up — the SIGINT cleanup test's child starts with SIGINT/SIGTERM at their default (R14-1; Gaps: G34, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R14-1"
+      ],
+      "gaps_named_in_subject": [
+        "G34"
+      ],
+      "gaps": [
+        "G34"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R14-1: 신호 처리 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G34; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "045566aff5f62334aa82fef0ff8f01c2a6b3dc05",
+      "short": "045566a",
+      "round": "14",
+      "subject": "fix(scan): R14-6 a same-size rewrite with touch -r is caught above 64 MiB — the state carries ctime_ns (POSIX) and an archive is hashed before extraction at any size (R14-6; Gaps: G11, G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R14-6"
+      ],
+      "gaps_named_in_subject": [
+        "G11",
+        "G30"
+      ],
+      "gaps": [
+        "G11",
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G11, G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "b0f5f812b3b6492c2d8780ae4f06595b26935d10",
+      "short": "b0f5f81",
+      "round": "14",
+      "subject": "fix(native): R14-7 every temp file is made in the session folder — a killed scan leaves nothing the cleanup and the next run's sweep do not remove (R14-7; Gaps: G34, G1, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R14-7"
+      ],
+      "gaps_named_in_subject": [
+        "G34",
+        "G1"
+      ],
+      "gaps": [
+        "G34",
+        "G1"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R14-7: 임시 파일 정리 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G34, G1; 신규(스펙 외)",
       "gaps_source": "subject"
     }
   ]

@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..130dddd`(병합 커밋 제외, 커밋 185개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..b0f5f81`(병합 커밋 제외, 커밋 193개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 177개 — 스펙 갭에 매핑 114개(그중 신규 사유 병기 35개), 신규(스펙 외)만 63개.
+요약: ID 185개 — 스펙 갭에 매핑 122개(그중 신규 사유 병기 41개), 신규(스펙 외)만 63개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -204,6 +204,14 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R13-7 | 13 | cv2.imwrite가 한글 임시 경로에서 실패(Windows 위험) → imencode + Python 쓰기, 메타테스트 확장 | G1 | 신규(스펙 외): Windows 한글 사용자 경로 — 갭 목록 밖 | 0f22403 |
 | R13-8 | 13 | Windows에서 한글 이름 파일 전량 복사 → 하드링크 → 8.3 짧은 이름 → 복사(상한) | — | 신규(스펙 외): Windows 스테이징 성능 — 갭 목록 밖 | faf6b5d |
 | R13-9 | 13 | 렌더된 Markdown에서 GFM 자동 링크 → . : @ / 이스케이프 | G30 | 신규(스펙 외): Markdown 자동 링크 — 갭 목록 밖 | ec8e4da |
+| R14-1 | 14 | 상속된 SIG_IGN 위에도 정리 핸들러 설치 → nohup 스캔이 SIGHUP에 스테이징 폴더 삭제·가짜 실패 → SIG_IGN 유지 | G1, G34 | 신규(스펙 외): 신호 처리 — 갭 목록 밖 | b914bce, cf1fe06 |
+| R14-2 | 14 | 스테이징 정리 시 링크를 따라 chmod해 증거 파일 권한 변경 → 링크·하드링크 chmod 금지 | G30 | 신규(스펙 외): 증거 무변경 — 갭 목록 밖 | 0a9f42b |
+| R14-3 | 14 | R13-1 이전 캐시 행이 재생되어 옛 스테이징 이름 부활 → content-v4 키, 출력 형식 세대, 오염 행 무효화 | G11 |  | fd4bc0a |
+| R14-4 | 14 | 이름 복원기가 스테이징 폴더 모양 문자열을 무엇이든 치환 → 이 프로세스의 등록 폴더만 | G32 | 신규(스펙 외): 표시 단사성 — 갭 목록 밖 | fd4bc0a |
+| R14-5 | 14 | CascadeClassifier가 native_safe_path 미경유(Windows 한글 경로 위험) → 경유, 로드 실패는 failed | G1, G12 | 신규(스펙 외): Windows 한글 경로 — 갭 목록 밖 | 7fefde4 |
+| R14-6 | 14 | 64 MB 초과 컨테이너가 같은 크기 재작성+touch -r을 놓침 → ctime_ns 비교, 모든 크기 추출 전 해시 | G11, G30 |  | 045566a |
+| R14-7 | 14 | SIGKILL 시 스테이징 외 임시 파일 잔류 → 모든 임시 파일을 세션 폴더에 | G34, G1 | 신규(스펙 외): 임시 파일 정리 — 갭 목록 밖 | b0f5f81 |
+| R14-8 | 14 | Windows ctypes 분기가 실행된 적 없음 → 가짜 WinDLL로 시그니처·반환 처리 검증 | G1 | 신규(스펙 외): Windows 경로 — 갭 목록 밖 | 0a9f42b |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -416,3 +424,11 @@ P14: Gaps를 제목 괄호에만 적은 커밋(예: `(Z1-Z5; Gaps: G7, 신규)`)
 | 0f22403 | 13 | R13-7 | Gaps: G1; 신규(스펙 외) | subject | fix(native): R13-7 face crops and video frames are written with imencode + Python — a Korean or non-UTF-8 temp folder works; the meta-test resolves cv2 aliases and covers sub-packages (R13-7; Gaps: G1, 신규) |
 | ec8e4da | 13 | R13-9 | Gaps: G30; 신규(스펙 외) | subject | fix(reports): R13-9 Markdown escapes ".", ":", "@" and "/" — no GFM/linkify autolink (www., http(s)://, ftp://, //host, e-mail, bare domain) forms from a name (R13-9; Gaps: G30, 신규) |
 | 130dddd | 13 | R13-1 | Gaps: G32, G11; 신규(스펙 외) | subject | fix(native): R13-1 follow-up — a quoted non-UTF-8 name in a reason reads as in its row (repr()'s "\udcc1" escapes undone), the cache rewrite gives the same form (R13-1; Gaps: G32, G11, 신규) |
+| 232cfbd | 13 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 130dddd, round-13 IDs mapped (WP-J; Gaps: G26, G27, G28) |
+| b914bce | 14 | R14-1 | Gaps: G34, G1; 신규(스펙 외) | subject | fix(native): R14-1 an inherited SIG_IGN stays ignored — a nohup scan survives SIGHUP/SIGINT with its staging folder; only a default action gets the cleanup handler (R14-1; Gaps: G34, G1, 신규) |
+| 0a9f42b | 14 | R14-2, R14-8 | Gaps: G30, G1; 신규(스펙 외) | subject | fix(native): R14-2 removing a staged name never changes the evidence file — no chmod through a link, no hard links; R14-8 the Windows ctypes calls run against a fake WinDLL (R14-2, R14-8; Gaps: G30, G1, 신규) |
+| fd4bc0a | 14 | R14-3, R14-4 | Gaps: G11, G32; 신규(스펙 외) | subject | fix(cache): R14-3 a cache row written before R13-1 is never replayed — key content-v4 with an output-format generation, rows carrying staging text dropped on load; R14-4 only this process's own staging folders and names are restored (R14-3, R14-4; Gaps: G11, G32, 신규) |
+| 7fefde4 | 14 | R14-5 | Gaps: G12, G1; 신규(스펙 외) | subject | fix(native): R14-5 the Haar cascade is opened through native_safe_path — a cascade that does not load is a failed face / rPPG / lip-sync check, never "얼굴 미검출" (R14-5; Gaps: G12, G1, 신규) |
+| cf1fe06 | 14 | R14-1 | Gaps: G34; 신규(스펙 외) | subject | test(native): R14-1 follow-up — the SIGINT cleanup test's child starts with SIGINT/SIGTERM at their default (R14-1; Gaps: G34, 신규) |
+| 045566a | 14 | R14-6 | Gaps: G11, G30 | subject | fix(scan): R14-6 a same-size rewrite with touch -r is caught above 64 MiB — the state carries ctime_ns (POSIX) and an archive is hashed before extraction at any size (R14-6; Gaps: G11, G30) |
+| b0f5f81 | 14 | R14-7 | Gaps: G34, G1; 신규(스펙 외) | subject | fix(native): R14-7 every temp file is made in the session folder — a killed scan leaves nothing the cleanup and the next run's sweep do not remove (R14-7; Gaps: G34, G1, 신규) |
