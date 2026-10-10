@@ -101,8 +101,7 @@ class TelemetryOptOutTest(unittest.TestCase):
         )
         self.assertEqual(done.stdout.split(), ["yes", "1"], done.stderr[-800:])
 
-    @unittest.skipUnless(HAVE_ONNXRUNTIME, "onnxruntime not installed")
-    def test_doctor_and_onnxruntime_write_no_device_id_and_connect_nowhere(self) -> None:
+    def _control_writes_a_device_id(self) -> None:
         control = self.root / "control"
         control.mkdir()
         control_run = subprocess.run(
@@ -114,6 +113,7 @@ class TelemetryOptOutTest(unittest.TestCase):
             self.skipTest("대조군: 이 onnxruntime은 텔레메트리 파일을 만들지 않음")
         self.assertTrue((control / "cache" / ORT_STATE / "deviceid").exists())  # the control writes it
 
+    def _run_case(self, strace: str | None) -> tuple[Path, subprocess.CompletedProcess[str], Path]:
         case = self.root / "case"
         case.mkdir()
         script = AUDIT_PRELUDE + textwrap.dedent(
@@ -130,18 +130,42 @@ class TelemetryOptOutTest(unittest.TestCase):
         )
         command = [sys.executable, "-c", script]
         trace = case / "connect.strace"
-        strace = shutil.which("strace")
         if strace is not None:
             command = [strace, "-f", "-qq", "-e", "trace=connect", "-o", str(trace), *command]
         done = subprocess.run(command, capture_output=True, text=True, env=_env(case), timeout=CHILD_TIMEOUT_SECONDS)
+        return case, done, trace
+
+    @unittest.skipUnless(HAVE_ONNXRUNTIME, "onnxruntime not installed")
+    def test_doctor_and_onnxruntime_write_no_device_id_and_connect_nowhere(self) -> None:
+        self._control_writes_a_device_id()
+        case, done, _ = self._run_case(None)
         self.assertEqual(done.returncode, 0, done.stderr[-800:])
         self.assertEqual(json.loads(done.stdout.strip().splitlines()[-1]), [])  # no Python-level connect
         self.assertFalse((case / "cache" / ORT_STATE).exists(), sorted(str(p) for p in (case / "cache").rglob("*")))
         self.assertFalse((case / "home" / ".cache" / ORT_STATE).exists())
-        if strace is not None and trace.exists():
-            # Any IP connect counts (a local proxy is still the way out).
-            outbound = [line for line in trace.read_text(encoding="utf-8", errors="replace").splitlines() if re.search(r"AF_INET6?", line)]
-            self.assertEqual(outbound, [])  # no native connect either (onnxruntime's C++ client)
+
+    @unittest.skipUnless(HAVE_ONNXRUNTIME, "onnxruntime not installed")
+    def test_no_native_connect_under_strace(self) -> None:
+        """R16-11 (round 16): the strace leg is its own test — skipped (not failed) where strace is missing or ptrace is denied.
+
+        It used to wrap the whole check in strace when the binary existed, so a
+        container that denies ptrace (seccomp, Yama) failed the test instead of
+        skipping the native-connect leg.
+        """
+        strace = shutil.which("strace")
+        if strace is None:
+            self.skipTest("strace not installed")
+        probe = subprocess.run([strace, "-f", "-qq", "-e", "trace=connect", "-o", os.devnull, sys.executable, "-c", "pass"], capture_output=True, timeout=CHILD_TIMEOUT_SECONDS)
+        if probe.returncode != 0:
+            self.skipTest("strace를 쓸 수 없음(ptrace 거부)")
+        self._control_writes_a_device_id()
+        case, done, trace = self._run_case(strace)
+        self.assertEqual(done.returncode, 0, done.stderr[-800:])
+        self.assertEqual(json.loads(done.stdout.strip().splitlines()[-1]), [])
+        self.assertTrue(trace.exists())
+        # Any IP connect counts (a local proxy is still the way out).
+        outbound = [line for line in trace.read_text(encoding="utf-8", errors="replace").splitlines() if re.search(r"AF_INET6?", line)]
+        self.assertEqual(outbound, [])  # no native connect either (onnxruntime's C++ client)
 
 
 if __name__ == "__main__":

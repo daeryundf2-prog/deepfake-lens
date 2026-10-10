@@ -20,6 +20,18 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
   트리 + POSIX(root가 아닌 사용자). 신경망 가중치·torch가 필요한 테스트
   (`text_lm`, `speaker`, 수동 모델 테스트)는 0단계 기록 환경에서 건너뛰는 것이
   정상이며, 그 경우 QA-SYS-10은 "건너뜀(환경)"이다.
+- **얕은 복제(R16-12)**: 커밋 이력에서 커밋을 제목으로 찾는 두 테스트 —
+  `test_qa_sys.py`의 `test_deletion_reasons_are_in_commit_messages`(삭제된
+  테스트의 삭제 이유가 커밋 메시지에 있음)와 `test_shutdown.py`의
+  `test_the_history_document_names_real_commits`(`KNOWN-HISTORICAL-ISSUES.md`가
+  실제 커밋을 가리킴) — 는 같은 규칙을 따른다: git 실행 파일이 없거나 작업
+  트리가 아니면 건너뛰고, 인용된 커밋이 HEAD 이력에 없으면(`--depth 1` 같은
+  얕은 복제, 재작성된 이력) **실패**한다. 메시지는 둘이 같다
+  (`deepfake_lens/tests/git_history.py`의 `missing_commit_message` — 얕은
+  복제이면 `git fetch --unshallow`를 안내). 인용된 커밋까지 담은 얕은 복제는
+  통과한다(이 저장소의 작업 사본도 얕은 복제다). 얕은 복제에서 두 테스트가
+  실패하는 것은 환경 탓이 아니라 검사할 이력이 없다는 뜻이므로 건너뜀으로
+  바꾸지 않는다.
 
 ## 건너뛰기 사유
 
@@ -56,7 +68,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `full-extras 골든은 다른 환경에서 기록됨: {difference}` | 골든 기록(`deepfake_lens/tests/golden_output.json`)의 `full_extras_environment`와 같은 선택 모듈·버전 구성(R16-5 — 0단계 기록 환경은 주 venv: `dev`+`full` extras). 다른 구성에서는 full-extras 골든 비교만 건너뛰고 stdlib 골든·문구 상수 해시는 항상 비교 | test_output_generation.py |
 | `full-extras 모듈 없음: {missing}` | `dev`+`full` extras(numpy, opencv, Pillow, scipy, librosa, scikit-learn, c2pa — R16-5 full-extras 골든이 비사진 안내 문구를 포함하는지 확인) | test_output_generation.py |
 | `git binary required` | git 실행 파일과 작업 트리(얕은 복제·압축본 아님) | test_traceability_commits.py |
-| `git not available` | git 실행 파일 | test_qa_sys.py |
+| `git not available` | git 실행 파일 | test_output_generation.py, test_qa_sys.py, test_shutdown.py |
 | `golden output recorded on POSIX (path and OS error wording)` | Windows가 아닌 OS(POSIX — 골든 스캔 출력은 POSIX 경로·OS 오류 문구 기준으로 기록, R15-7/R16-5) | test_output_generation.py |
 | `jsonschema not installed (dev extra) — _check_object covers the stdlib job` | `dev` extra(jsonschema) | test_json_contract.py |
 | `librosa not installed` | `audio`/`full` extra(librosa) | test_audio.py, test_v6_probes.py, test_video_analysis.py |
@@ -68,7 +80,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `node + playwright + Chromium not installed (headless GUI check)` | Node.js + `playwright` npm 패키지 + Chromium(`npx playwright install chromium`) — 헤드리스 GUI 확인 | test_path_b64.py |
 | `node is not installed` | Node.js(`node`) — GUI 스크립트 검사 | test_archives.py, test_path_b64.py |
 | `node required to run gui.js helpers` | Node.js(`node`) — GUI 스크립트 검사 | test_display_names.py |
-| `not a git work tree` | git 작업 트리(얕은 복제·압축본 아님) | test_qa_sys.py |
+| `not a git work tree` | git 작업 트리(압축본·내보낸 사본 아님). R16-12: 얕은 복제(shallow clone)는 건너뛰지 않는다 — 인용된 커밋이 잘린 이력에 없으면 test_qa_sys.py·test_shutdown.py가 같은 규칙·같은 메시지(`HEAD 이력에 제목이 …인 커밋이 없습니다 — 얕은 복제(shallow clone)라 이력이 잘려 있습니다 …`)로 **실패**한다(아래 "얕은 복제" 참조) | test_output_generation.py, test_qa_sys.py, test_shutdown.py |
 | `numpy + Pillow needed for the mixed fixture` | `dev` extra(numpy, Pillow) | test_korean_output.py |
 | `numpy + opencv required (scene generator, face layer)` | `pixel`/`face` extra(opencv-python, numpy) | test_qa_out.py |
 | `numpy needed for the photo-like fixture` | `dev` 또는 `pixel` extra(numpy) | test_korean_output.py |
@@ -101,8 +113,8 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `set DEEPFAKE_LENS_MODEL_TESTS=1` | 환경 변수 `DEEPFAKE_LENS_MODEL_TESTS=1` + 실제 가중치(수동 모델 테스트) | test_v6_probes.py |
 | `set DEEPFAKE_LENS_TEST_HWP to a real .hwp file` | `hwp` extra(syhwp, olefile) + 환경 변수 `DEEPFAKE_LENS_TEST_HWP`(실제 .hwp 픽스처) | test_documents.py |
 | `speechbrain/soundfile not installed` | `speaker` extra(speechbrain, soundfile, torch, torchaudio) | test_v6_probes.py |
-| `strace not installed` | `strace` 실행 파일(Linux) — MediaPipe 가져오기 중 자손 프로세스의 execve를 이름과 무관하게 셈(R16-4; audit hook·RUSAGE_CHILDREN 검사는 strace 없이도 실행) | test_mediapipe_import.py |
-| `strace를 쓸 수 없음(ptrace 거부)` | ptrace가 허용된 환경(컨테이너의 seccomp·Yama 설정) — R16-4 strace 검사만 건너뜀 | test_mediapipe_import.py |
+| `strace not installed` | `strace` 실행 파일(Linux) — MediaPipe 가져오기 중 자손 프로세스의 execve를 이름과 무관하게 셈(R16-4; audit hook·RUSAGE_CHILDREN 검사는 strace 없이도 실행); onnxruntime의 네이티브 connect 확인(R16-11 — 파이썬 수준 connect·텔레메트리 파일 검사는 별도 테스트로 strace 없이 실행) | test_mediapipe_import.py, test_telemetry.py |
+| `strace를 쓸 수 없음(ptrace 거부)` | ptrace가 허용된 환경(컨테이너의 seccomp·Yama 설정) — strace 검사만 건너뜀(R16-4; R16-11: 텔레메트리 시험은 strace가 있으면 전체를 strace로 감싸 ptrace 거부 환경에서 실패했음 — 이제 strace를 `true`로 먼저 시험해 쓸 수 없으면 그 검사만 건너뜀) | test_mediapipe_import.py, test_telemetry.py |
 | `syhwp not installed` | `hwp` extra(syhwp, olefile) | test_documents.py |
 | `symbolic links to folders need privileges on Windows` | Windows가 아닌 OS(POSIX) | test_unrecorded_files.py |
 | `symlinks not available` | 심볼릭 링크를 만들 수 있는 OS·권한 | test_corpus_manifest.py, test_evidence_statement.py |

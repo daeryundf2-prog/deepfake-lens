@@ -176,6 +176,7 @@ files = [
     "deepfake_lens/tests/test_output_generation.py",
     "deepfake_lens/telemetry_opt_out.py",
     "deepfake_lens/tests/test_telemetry.py",
+    "deepfake_lens/tests/git_history.py",
     "deepfake_lens/model_assets.py",
     "deepfake_lens/tests/test_model_assets.py",
     "deepfake_lens/tests/test_face_detector_strict.py",

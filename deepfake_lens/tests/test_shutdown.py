@@ -787,10 +787,12 @@ class HarnessChildrenStartWithDefaultSignalsTest(unittest.TestCase):
         inside = subprocess.run([git, "rev-parse", "--is-inside-work-tree"], cwd=REPO, capture_output=True, text=True, check=False)
         if inside.returncode != 0 or inside.stdout.strip() != "true":
             self.skipTest("not a git work tree")
+        from deepfake_lens.tests.git_history import missing_commit_message  # R16-12: one rule, one message
         for subject in subjects:
             with self.subTest(subject=subject[:60]):
                 found = subprocess.run([git, "log", "HEAD", "--fixed-strings", f"--grep={subject}", "--format=%s"], cwd=REPO, capture_output=True, text=True, check=False)
-                self.assertIn(subject, found.stdout.splitlines())
+                # R16-12: a missing commit fails with the same explanation as test_qa_sys (it said only "not found in []").
+                self.assertIn(subject, found.stdout.splitlines(), missing_commit_message(git, REPO, subject))
 
 
 if __name__ == "__main__":

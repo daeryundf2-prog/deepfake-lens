@@ -443,6 +443,7 @@ class QaSys10TestInventoryTest(unittest.TestCase):
         inside = subprocess.run([git, "rev-parse", "--is-inside-work-tree"], cwd=REPO_ROOT, capture_output=True, text=True, check=False)
         if inside.returncode != 0 or inside.stdout.strip() != "true":
             self.skipTest("not a git work tree")
+        from deepfake_lens.tests.git_history import missing_commit_message  # R16-12: one rule, one message
         text = DELETIONS_DOC.read_text(encoding="utf-8")
         deleted = [name for name, section in self.documented.items() if section == DELETED_SECTION]
         self.assertTrue(deleted)
@@ -460,7 +461,7 @@ class QaSys10TestInventoryTest(unittest.TestCase):
                 self.assertEqual(done.returncode, 0, done.stderr)
                 commits = [entry.split("\x1f", 2) for entry in done.stdout.split("\x1e") if entry.strip()]
                 matching = [body for _, commit_subject, body in commits if commit_subject.strip() == subject]
-                self.assertTrue(matching, f"no commit with the subject {subject!r} in HEAD's history (shallow clone or rewritten history)")
+                self.assertTrue(matching, missing_commit_message(git, REPO_ROOT, subject))
                 self.assertTrue(
                     any(name.split(".", 1)[1] in body for body in matching),
                     f"the deletion of {name} is not explained in the message of {subject!r}",
