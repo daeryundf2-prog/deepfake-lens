@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..b0f5f81`(병합 커밋 제외, 커밋 193개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..f13fda6`(병합 커밋 제외, 커밋 202개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 185개 — 스펙 갭에 매핑 122개(그중 신규 사유 병기 41개), 신규(스펙 외)만 63개.
+요약: ID 193개 — 스펙 갭에 매핑 128개(그중 신규 사유 병기 45개), 신규(스펙 외)만 65개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -212,6 +212,14 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R14-6 | 14 | 64 MB 초과 컨테이너가 같은 크기 재작성+touch -r을 놓침 → ctime_ns 비교, 모든 크기 추출 전 해시 | G11, G30 |  | 045566a |
 | R14-7 | 14 | SIGKILL 시 스테이징 외 임시 파일 잔류 → 모든 임시 파일을 세션 폴더에 | G34, G1 | 신규(스펙 외): 임시 파일 정리 — 갭 목록 밖 | b0f5f81 |
 | R14-8 | 14 | Windows ctypes 분기가 실행된 적 없음 → 가짜 WinDLL로 시그니처·반환 처리 검증 | G1 | 신규(스펙 외): Windows 경로 — 갭 목록 밖 | 0a9f42b |
+| R15-1 | 15 | SIGTERM/SIGHUP 정리 경쟁(워커가 정리 중 생성, 새 세션 폴더, ffmpeg 자식 미종료) → 종료 플래그, 자식 종료·PDEATHSIG, 재시도 | G1, G34 | 신규(스펙 외): 신호 처리 — 갭 목록 밖 | 15c88af |
+| R15-2 | 15 | onnxruntime import 시 텔레메트리 연결 시도·deviceid 생성 → 패키지 최상위에서 텔레메트리 차단 변수 | G9 | 신규(스펙 외): 오프라인 보장(R-IN-4) | c5115ae |
+| R15-3 | 15 | FaceLandmarker·SyncNet·Haar 재정의가 핀 없이 로드 → models/assets.json 자산 핀, 미고정은 거부 | G9, G10 |  | 8f06324 |
+| R15-4 | 15 | 과거 커밋이 SIGINT 무시 상속 환경에서 자체 테스트 실패 → 이력 문서화, 테스트 자식 신호 기본값 | — | 신규(스펙 외): 테스트 환경 — 갭 목록 밖 | 0b44e2d |
+| R15-5 | 15 | 스레드 테스트 프로세스의 fork-unsafe preexec_fn → exec 트램펄린, PLW1509 | — | 신규(스펙 외): 테스트 안전성 — 갭 목록 밖 | a1b44d1 |
+| R15-6 | 15 | 비ASCII TMPDIR 시 조용한 대체 → 한국어 안내·temp_folder 기록·DEEPFAKE_LENS_TMPDIR | G12 | 신규(스펙 외): 임시 폴더 — 갭 목록 밖 | 56c817d |
+| R15-7 | 15 | OUTPUT_FORMAT_GENERATION 수동 관리 → 골든 출력 해시 메타테스트 | G11 |  | 64f4dac |
+| R15-8 | 15 | mediapipe→sounddevice가 gcc/ld를 띄워 TMPDIR에 임시 파일 → sounddevice 차단 | G34 | 신규(스펙 외): 임시 파일 — 갭 목록 밖 | f13fda6 |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -432,3 +440,12 @@ P14: Gaps를 제목 괄호에만 적은 커밋(예: `(Z1-Z5; Gaps: G7, 신규)`)
 | cf1fe06 | 14 | R14-1 | Gaps: G34; 신규(스펙 외) | subject | test(native): R14-1 follow-up — the SIGINT cleanup test's child starts with SIGINT/SIGTERM at their default (R14-1; Gaps: G34, 신규) |
 | 045566a | 14 | R14-6 | Gaps: G11, G30 | subject | fix(scan): R14-6 a same-size rewrite with touch -r is caught above 64 MiB — the state carries ctime_ns (POSIX) and an archive is hashed before extraction at any size (R14-6; Gaps: G11, G30) |
 | b0f5f81 | 14 | R14-7 | Gaps: G34, G1; 신규(스펙 외) | subject | fix(native): R14-7 every temp file is made in the session folder — a killed scan leaves nothing the cleanup and the next run's sweep do not remove (R14-7; Gaps: G34, G1, 신규) |
+| 815a108 | 14 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on b0f5f81, round-14 IDs mapped (WP-J; Gaps: G26, G27, G28) |
+| 15c88af | 15 | R15-1 | Gaps: G34, G1; 신규(스펙 외) | subject | fix(native): R15-1 a SIGTERM/SIGHUP cleanup is final — "종료 중" flag, ffmpeg children stopped, folders removed until gone; SIGKILL takes the children along (R15-1; Gaps: G34, G1, 신규) |
+| 8f06324 | 15 | R15-3 | Gaps: G9, G1; 신규(스펙 외) | subject | fix(models): R15-3 no model asset loads without a sha256 pin — models/assets.json pins FaceLandmarker, SyncNet and the Haar cascade; refused assets fail the check "미고정 모델" (R15-3; Gaps: G9, G1, 신규) |
+| c5115ae | 15 | R15-2 | Gaps: 신규(스펙 외) | subject | fix(privacy): R15-2 third-party telemetry is off before any dependency loads — ORT_DISABLE_TELEMETRY and the other opt-outs set first in deepfake_lens/__init__.py (R15-2; Gaps: 신규) |
+| 0b44e2d | 15 | R15-4 | Gaps: G34; 신규(스펙 외) | subject | docs(qa): R15-4 the SIGINT-ignored test failures of the R14-1…R14-5 commits are recorded; the harness always starts children with SIGINT/SIGTERM/SIGHUP at their default (R15-4; Gaps: G34, 신규) |
+| a1b44d1 | 15 | R15-5 | Gaps: 신규(스펙 외) | subject | test(native): R15-5 no preexec_fn in the threaded test process — signal dispositions set in an exec trampoline; ruff PLW1509 on (R15-5; Gaps: 신규) |
+| 56c817d | 15 | R15-6 | Gaps: G34; 신규(스펙 외) | subject | fix(native): R15-6 a temp folder that cannot be used is reported — Korean notice on stderr once, temp_folder in the scan result and report, DEEPFAKE_LENS_TMPDIR chooses it (R15-6; Gaps: G34, 신규) |
+| 64f4dac | 15 | R15-7 | Gaps: G11; 신규(스펙 외) | subject | test(cache): R15-7 a golden-output meta-test ties OUTPUT_FORMAT_GENERATION to the scan output — a changed golden under the same generation fails (R15-7; Gaps: G11, 신규) |
+| f13fda6 | 15 | R15-8 | Gaps: G34; 신규(스펙 외) | subject | fix(face): R15-8 MediaPipe is imported without sounddevice — no ldconfig/gcc/ld children and no cc*/tmp* files in TMPDIR (R15-8; Gaps: G34, 신규) |

@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "b0f5f812b3b6492c2d8780ae4f06595b26935d10",
+    "head": "f13fda692e4551110936906843aed4945fa1ab62",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -2594,6 +2594,116 @@
       "new": "Windows 경로 — 갭 목록 밖",
       "commits": [
         "0a9f42b"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R15-1",
+      "round": 15,
+      "source": "verify_round15.md",
+      "summary": "SIGTERM/SIGHUP 정리 경쟁(워커가 정리 중 생성, 새 세션 폴더, ffmpeg 자식 미종료) → 종료 플래그, 자식 종료·PDEATHSIG, 재시도",
+      "gaps": [
+        "G1",
+        "G34"
+      ],
+      "new": "신호 처리 — 갭 목록 밖",
+      "commits": [
+        "15c88af"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R15-2",
+      "round": 15,
+      "source": "verify_round15.md",
+      "summary": "onnxruntime import 시 텔레메트리 연결 시도·deviceid 생성 → 패키지 최상위에서 텔레메트리 차단 변수",
+      "gaps": [
+        "G9"
+      ],
+      "new": "오프라인 보장(R-IN-4)",
+      "commits": [
+        "c5115ae"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R15-3",
+      "round": 15,
+      "source": "verify_round15.md",
+      "summary": "FaceLandmarker·SyncNet·Haar 재정의가 핀 없이 로드 → models/assets.json 자산 핀, 미고정은 거부",
+      "gaps": [
+        "G9",
+        "G10"
+      ],
+      "new": null,
+      "commits": [
+        "8f06324"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R15-4",
+      "round": 15,
+      "source": "verify_round15.md",
+      "summary": "과거 커밋이 SIGINT 무시 상속 환경에서 자체 테스트 실패 → 이력 문서화, 테스트 자식 신호 기본값",
+      "gaps": [],
+      "new": "테스트 환경 — 갭 목록 밖",
+      "commits": [
+        "0b44e2d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R15-5",
+      "round": 15,
+      "source": "verify_round15.md",
+      "summary": "스레드 테스트 프로세스의 fork-unsafe preexec_fn → exec 트램펄린, PLW1509",
+      "gaps": [],
+      "new": "테스트 안전성 — 갭 목록 밖",
+      "commits": [
+        "a1b44d1"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R15-6",
+      "round": 15,
+      "source": "verify_round15.md",
+      "summary": "비ASCII TMPDIR 시 조용한 대체 → 한국어 안내·temp_folder 기록·DEEPFAKE_LENS_TMPDIR",
+      "gaps": [
+        "G12"
+      ],
+      "new": "임시 폴더 — 갭 목록 밖",
+      "commits": [
+        "56c817d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R15-7",
+      "round": 15,
+      "source": "verify_round15.md",
+      "summary": "OUTPUT_FORMAT_GENERATION 수동 관리 → 골든 출력 해시 메타테스트",
+      "gaps": [
+        "G11"
+      ],
+      "new": null,
+      "commits": [
+        "64f4dac"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R15-8",
+      "round": 15,
+      "source": "verify_round15.md",
+      "summary": "mediapipe→sounddevice가 gcc/ld를 띄워 TMPDIR에 임시 파일 → sounddevice 차단",
+      "gaps": [
+        "G34"
+      ],
+      "new": "임시 파일 — 갭 목록 밖",
+      "commits": [
+        "f13fda6"
       ],
       "used_in_commit_subjects": true
     }
@@ -6602,6 +6712,198 @@
         "R14-7: 임시 파일 정리 — 갭 목록 밖"
       ],
       "gaps_line": "Gaps: G34, G1; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "815a1080e95937ee85b85a7b265f8eb6be25ad78",
+      "short": "815a108",
+      "round": "14",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on b0f5f81, round-14 IDs mapped (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "15c88afe87f5285585436c59b1ee5d6ed407c084",
+      "short": "15c88af",
+      "round": "15",
+      "subject": "fix(native): R15-1 a SIGTERM/SIGHUP cleanup is final — \"종료 중\" flag, ffmpeg children stopped, folders removed until gone; SIGKILL takes the children along (R15-1; Gaps: G34, G1, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R15-1"
+      ],
+      "gaps_named_in_subject": [
+        "G34",
+        "G1"
+      ],
+      "gaps": [
+        "G34",
+        "G1"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R15-1: 신호 처리 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G34, G1; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "8f0632441c0b825c3d4eba3f5b00ce46579009cc",
+      "short": "8f06324",
+      "round": "15",
+      "subject": "fix(models): R15-3 no model asset loads without a sha256 pin — models/assets.json pins FaceLandmarker, SyncNet and the Haar cascade; refused assets fail the check \"미고정 모델\" (R15-3; Gaps: G9, G1, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R15-3"
+      ],
+      "gaps_named_in_subject": [
+        "G9",
+        "G1"
+      ],
+      "gaps": [
+        "G9",
+        "G1"
+      ],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G9, G1; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "c5115ae02913d846dfffee7e56863c7fd732dd18",
+      "short": "c5115ae",
+      "round": "15",
+      "subject": "fix(privacy): R15-2 third-party telemetry is off before any dependency loads — ORT_DISABLE_TELEMETRY and the other opt-outs set first in deepfake_lens/__init__.py (R15-2; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R15-2"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R15-2: 오프라인 보장(R-IN-4)"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "0b44e2d6127da44d4f73dd895011885da5a66c53",
+      "short": "0b44e2d",
+      "round": "15",
+      "subject": "docs(qa): R15-4 the SIGINT-ignored test failures of the R14-1…R14-5 commits are recorded; the harness always starts children with SIGINT/SIGTERM/SIGHUP at their default (R15-4; Gaps: G34, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R15-4"
+      ],
+      "gaps_named_in_subject": [
+        "G34"
+      ],
+      "gaps": [
+        "G34"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R15-4: 테스트 환경 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G34; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "a1b44d1f30954b6d8e35e1d0a012c79e820be716",
+      "short": "a1b44d1",
+      "round": "15",
+      "subject": "test(native): R15-5 no preexec_fn in the threaded test process — signal dispositions set in an exec trampoline; ruff PLW1509 on (R15-5; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R15-5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R15-5: 테스트 안전성 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "56c817dfb928a3fdb67656b1b3b0a0e25a868b16",
+      "short": "56c817d",
+      "round": "15",
+      "subject": "fix(native): R15-6 a temp folder that cannot be used is reported — Korean notice on stderr once, temp_folder in the scan result and report, DEEPFAKE_LENS_TMPDIR chooses it (R15-6; Gaps: G34, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R15-6"
+      ],
+      "gaps_named_in_subject": [
+        "G34"
+      ],
+      "gaps": [
+        "G34"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R15-6: 임시 폴더 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G34; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "64f4dac3f7fdcf57fe3f91f39e57ce7f8416a51b",
+      "short": "64f4dac",
+      "round": "15",
+      "subject": "test(cache): R15-7 a golden-output meta-test ties OUTPUT_FORMAT_GENERATION to the scan output — a changed golden under the same generation fails (R15-7; Gaps: G11, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R15-7"
+      ],
+      "gaps_named_in_subject": [
+        "G11"
+      ],
+      "gaps": [
+        "G11"
+      ],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G11; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "f13fda692e4551110936906843aed4945fa1ab62",
+      "short": "f13fda6",
+      "round": "15",
+      "subject": "fix(face): R15-8 MediaPipe is imported without sounddevice — no ldconfig/gcc/ld children and no cc*/tmp* files in TMPDIR (R15-8; Gaps: G34, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R15-8"
+      ],
+      "gaps_named_in_subject": [
+        "G34"
+      ],
+      "gaps": [
+        "G34"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R15-8: 임시 파일 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G34; 신규(스펙 외)",
       "gaps_source": "subject"
     }
   ]
