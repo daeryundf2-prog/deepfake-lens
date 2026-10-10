@@ -316,6 +316,39 @@ def with_signals(dispositions: dict[str, str], argv: Sequence[str | os.PathLike[
     return [sys.executable, "-I", "-S", "-c", SIGNALS_TRAMPOLINE, json.dumps(dispositions), _resolve_program(parts[0]), *parts[1:]]
 
 
+def children_start_with_default_signals(signals: Sequence[str] = HARNESS_DEFAULT_SIGNALS) -> list[str]:
+    """R15-4: from now on every child of this process starts with ``signals`` at their default action.
+
+    An *ignored* signal survives ``exec``; a *caught* one is reset to the
+    default by it. So each of ``signals`` this process inherited as
+    ``SIG_IGN`` gets a handler that does nothing: this process still ignores
+    it, and every program it starts (``subprocess``, any exec) begins with
+    the default action — as under an interactive terminal. Called by the
+    test package (``deepfake_lens/tests/__init__.py``) and the QA harness.
+    Main thread only (elsewhere nothing changes). Returns the names changed.
+    """
+    import signal
+
+    if threading.current_thread() is not threading.main_thread():
+        return []
+    changed: list[str] = []
+    for name in signals:
+        signum = getattr(signal, name, None)
+        if signum is None:
+            continue
+        try:
+            if signal.getsignal(signum) == signal.SIG_IGN:
+                signal.signal(signum, _still_ignored)
+                changed.append(name)
+        except (OSError, RuntimeError, ValueError):
+            continue
+    return changed
+
+
+def _still_ignored(signum: int, frame: Any) -> None:
+    """R15-4: the handler that keeps an inherited SIG_IGN in effect here while exec resets it for children."""
+
+
 def with_default_signals(argv: Sequence[str | os.PathLike[str]]) -> list[str]:
     """R15-4: ``argv`` started with :data:`HARNESS_DEFAULT_SIGNALS` at their default action, whatever was inherited."""
     return with_signals({name: "SIG_DFL" for name in HARNESS_DEFAULT_SIGNALS}, argv)
@@ -332,6 +365,7 @@ __all__ = [
     "ShuttingDown",
     "active",
     "begin",
+    "children_start_with_default_signals",
     "guarded",
     "refuse_if_active",
     "run_child",

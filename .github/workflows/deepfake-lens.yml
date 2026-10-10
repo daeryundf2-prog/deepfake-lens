@@ -50,10 +50,12 @@ jobs:
         run: |
           python -m pip install mypy
           python -m mypy
+      # R15-4: the suite (and every child it starts) runs with SIGINT/SIGTERM/
+      # SIGHUP at their default action, whatever the runner's shell inherited.
       - name: Unit tests (under coverage)
         run: |
           python -m pip install coverage
-          python -m coverage run -m unittest discover deepfake_lens/tests -v
+          python scripts/with_default_signals.py -- python -m coverage run -m unittest discover deepfake_lens/tests -v
       # Coverage gate: this no-extras environment measured 53.57% (2026-10) —
       # much lower than the extras job because optional-dependency modules go
       # largely uncovered here. Gated only on 3.12 so the floor is not at the
@@ -98,7 +100,7 @@ jobs:
       # The suite must pass on Windows too: the CLI prints non-ASCII output
       # (Korean labels, em-dashes) and tests must not assume POSIX /tmp.
       - name: Unit tests
-        run: python -m unittest discover deepfake_lens/tests
+        run: python scripts/with_default_signals.py -- python -m unittest discover deepfake_lens/tests
 
   python-extras:
     runs-on: ubuntu-latest
@@ -120,7 +122,7 @@ jobs:
       - name: Unit tests (optional-dependency paths enabled, under coverage)
         run: |
           python -m pip install coverage
-          python -m coverage run -m unittest discover deepfake_lens/tests -v
+          python scripts/with_default_signals.py -- python -m coverage run -m unittest discover deepfake_lens/tests -v
       # The C2PA SDK gates three tests in test_c2pa.py; with the fixture now
       # committed, install the provenance extra so those run in CI too.
       - name: Install provenance extra (c2pa-python)
@@ -228,7 +230,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e . numpy Pillow opencv-python-headless scipy librosa soundfile scikit-learn fastapi httpx jsonschema
       - name: QA harness (writes build/qa-logs and docs/CONFORMANCE.md)
-        run: python scripts/qa_phase0.py --log-dir build/qa-logs --out docs/CONFORMANCE.md
+        run: python scripts/with_default_signals.py -- python scripts/qa_phase0.py --log-dir build/qa-logs --out docs/CONFORMANCE.md
       # R15-1: a real scan is signalled mid-flight (a temp wav in the session
       # folder, an ffmpeg child running) 20 times per signal; anything left in
       # TMPDIR or any child outliving the scan fails the job (100 runs locally).

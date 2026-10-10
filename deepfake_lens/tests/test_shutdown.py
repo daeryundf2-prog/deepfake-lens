@@ -486,5 +486,79 @@ class EveryChildIsTrackedMetaTest(unittest.TestCase):
         self.assertEqual(spawning_calls(tree), [(4, "subprocess.run"), (5, "os.system"), (6, "os.posix_spawn")])
 
 
+@unittest.skipIf(os.name == "nt", "POSIX signals")
+class HarnessChildrenStartWithDefaultSignalsTest(unittest.TestCase):
+    """R15-4 (round 15): a harness that inherited SIGINT/SIGHUP/SIGTERM as ignored starts its children with the default.
+
+    The R14-1 … R14-5 commits failed their own SIGINT test when the suite ran
+    with SIGINT ignored (a background job): the child inherited SIG_IGN.
+    """
+
+    PROBE = (
+        "import json, signal\n"
+        "def shown(handler):\n"
+        "    return 'SIG_IGN' if handler == signal.SIG_IGN else 'SIG_DFL' if handler == signal.SIG_DFL else getattr(handler, '__name__', repr(handler))\n"
+        "print(json.dumps({name: shown(signal.getsignal(getattr(signal, name))) for name in ('SIGINT', 'SIGTERM', 'SIGHUP')}))\n"
+    )
+
+    def _child_dispositions(self, harness: str) -> dict[str, str]:
+        ignored = {"SIGINT": "SIG_IGN", "SIGTERM": "SIG_IGN", "SIGHUP": "SIG_IGN"}
+        script = harness + "\nimport subprocess, sys\n" + f"sys.stdout.write(subprocess.run([sys.executable, '-c', {self.PROBE!r}], capture_output=True, text=True).stdout)\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            done = subprocess.run(
+                shutdown.with_signals(ignored, [sys.executable, "-c", script]), capture_output=True, text=True, env=child_env(Path(tmp)), timeout=CHILD_TIMEOUT_SECONDS
+            )
+        self.assertEqual(done.returncode, 0, done.stderr[-800:])
+        return json.loads(done.stdout.strip().splitlines()[-1])
+
+    def test_without_the_harness_the_ignored_signals_are_inherited(self) -> None:
+        seen = self._child_dispositions("pass")
+        self.assertEqual(seen, {"SIGINT": "SIG_IGN", "SIGTERM": "SIG_IGN", "SIGHUP": "SIG_IGN"})  # the R14 failure condition
+
+    def test_the_test_package_resets_them_for_children(self) -> None:
+        seen = self._child_dispositions("import deepfake_lens.tests")
+        # SIGINT at its default: a Python child installs its KeyboardInterrupt handler.
+        self.assertEqual(seen, {"SIGINT": "default_int_handler", "SIGTERM": "SIG_DFL", "SIGHUP": "SIG_DFL"})
+
+    def test_the_harness_itself_still_ignores_them(self) -> None:
+        script = (
+            "import os, signal, time\nimport deepfake_lens.tests\n"
+            "os.kill(os.getpid(), signal.SIGHUP); os.kill(os.getpid(), signal.SIGINT); os.kill(os.getpid(), signal.SIGTERM)\n"
+            "time.sleep(0.2); print('alive')\n"
+        )
+        ignored = {"SIGINT": "SIG_IGN", "SIGTERM": "SIG_IGN", "SIGHUP": "SIG_IGN"}
+        with tempfile.TemporaryDirectory() as tmp:
+            done = subprocess.run(shutdown.with_signals(ignored, [sys.executable, "-c", script]), capture_output=True, text=True, env=child_env(Path(tmp)), timeout=CHILD_TIMEOUT_SECONDS)
+        self.assertEqual((done.returncode, done.stdout.strip()), (0, "alive"), done.stderr[-800:])
+
+    def test_qa_harness_and_ci_reset_them(self) -> None:
+        qa = ast.parse((REPO / "scripts" / "qa_phase0.py").read_text(encoding="utf-8"))
+        main = next(node for node in qa.body if isinstance(node, ast.FunctionDef) and node.name == "main")
+        calls = [node.func.id for node in ast.walk(main) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)]
+        self.assertIn("children_start_with_default_signals", calls)
+        workflow = (REPO / ".github" / "workflows" / "deepfake-lens.yml").read_text(encoding="utf-8")
+        runs = [line.strip() for line in workflow.splitlines() if "unittest discover" in line or "qa_phase0.py --log-dir" in line]
+        self.assertTrue(runs)
+        self.assertEqual([line for line in runs if "with_default_signals.py --" not in line], [])
+
+    def test_the_history_document_names_real_commits(self) -> None:
+        import re
+        import shutil as _shutil
+
+        text = (REPO / "docs" / "KNOWN-HISTORICAL-ISSUES.md").read_text(encoding="utf-8")
+        subjects = re.findall(r"`((?:fix|test)\([^`]*\(R14-[^`]*\))`", text)
+        self.assertEqual(len(subjects), 5)  # four affected commits and the fix
+        git = _shutil.which("git")
+        if git is None:
+            self.skipTest("git not available")
+        inside = subprocess.run([git, "rev-parse", "--is-inside-work-tree"], cwd=REPO, capture_output=True, text=True, check=False)
+        if inside.returncode != 0 or inside.stdout.strip() != "true":
+            self.skipTest("not a git work tree")
+        for subject in subjects:
+            with self.subTest(subject=subject[:60]):
+                found = subprocess.run([git, "log", "HEAD", "--fixed-strings", f"--grep={subject}", "--format=%s"], cwd=REPO, capture_output=True, text=True, check=False)
+                self.assertIn(subject, found.stdout.splitlines())
+
+
 if __name__ == "__main__":
     unittest.main()

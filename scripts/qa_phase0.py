@@ -556,6 +556,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.verify_record:
         return verify_record(args.out)
+    # R15-4: the suite's child processes start with SIGINT/SIGTERM/SIGHUP at
+    # their default, whatever this harness inherited (nohup, a background job).
+    from deepfake_lens.shutdown import children_start_with_default_signals
+
+    reset = children_start_with_default_signals()
+    if reset:
+        print(f"[qa] 물려받은 무시 신호를 자식 프로세스에서 기본 동작으로 되돌림: {', '.join(reset)}", flush=True)
     missing = [name for name in REQUIRED_FOR_RECORD if importlib.util.find_spec(name) is None]
     if missing:
         print(f"[qa] fastapi 필요: {', '.join(missing)} 없음 — QA-OUT-4의 API 서버 레그를 건너뛴 기록은 통과로 쓸 수 없습니다.", file=sys.stderr)
