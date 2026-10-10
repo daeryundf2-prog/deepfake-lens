@@ -1,4 +1,4 @@
-"""R15-1 (round 15): a SIGTERM / SIGHUP leaves nothing; a SIGKILL takes the ffmpeg children with it.
+"""R15-1 / R16-6 / R16-7: a SIGTERM / SIGHUP leaves nothing; a SIGKILL takes the ffmpeg children — and grandchildren — with it.
 
 The verifier's race harness (SIGTERM as soon as a session folder holds a
 ``.wav``) left the folder in 20 of 40 runs under load and 6 of 20 idle:
@@ -326,15 +326,49 @@ class ShuttingDownRefusesTest(unittest.TestCase):
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "PR_SET_PDEATHSIG is Linux")
     def test_linux_children_carry_the_parent_death_signal(self) -> None:
-        done = shutdown.run_child(["grep", "-E", "^(PPid|SigIgn):", "/proc/self/status"], capture_output=True, text=True, check=True)
-        fields = dict(line.split(":\t") for line in done.stdout.splitlines())
-        self.assertEqual(int(fields["PPid"]), os.getpid())  # the trampoline exec-ed in place: our direct child
-        self.assertEqual(int(fields["SigIgn"], 16) & (1 << (signal.SIGPIPE - 1)), 0)  # SIGPIPE back at its default
-        probe = shutdown.run_child(
-            [sys.executable, "-c", "import ctypes, signal; v = ctypes.c_int(); ctypes.CDLL(None).prctl(2, ctypes.byref(v)); print(v.value)"],
-            capture_output=True, text=True, check=True,
-        )  # PR_GET_PDEATHSIG = 2 (survives exec of a non-setuid program)
-        self.assertEqual(int(probe.stdout), int(signal.SIGKILL))
+        # R16-7 (round 16): this test asserted the R15-1 design — the program
+        # exec-ed in place as our direct child with PR_SET_PDEATHSIG SIGKILL,
+        # which left a wrapper's grandchild running after a SIGKILL. Now the
+        # program runs under the supervisor (our direct child, session and
+        # group leader, subreaper, PDEATHSIG SIGTERM) in a process group of
+        # its own, bound to the supervisor with PDEATHSIG SIGKILL.
+        probe = textwrap.dedent(
+            """
+            import ctypes, json, os, signal
+            libc = ctypes.CDLL(None)
+            def prctl_get(option):
+                value = ctypes.c_int()
+                libc.prctl(option, ctypes.byref(value), 0, 0, 0)
+                return value.value
+            supervisor = os.getppid()
+            sup_status = dict(line.split(":\\t", 1) for line in open(f"/proc/{supervisor}/status").read().splitlines() if ":\\t" in line)
+            print(json.dumps({
+                "pid": os.getpid(), "pgid": os.getpgid(0), "pdeathsig": prctl_get(2), "supervisor": supervisor, "supervisor_ppid": int(sup_status["PPid"]),
+                "supervisor_sid": os.getsid(supervisor), "supervisor_pgid": os.getpgid(supervisor),
+            }))
+            """
+        )
+        done = shutdown.run_child([sys.executable, "-c", probe], capture_output=True, text=True, check=True)
+        fields = json.loads(done.stdout)
+        self.assertEqual(fields["supervisor_ppid"], os.getpid())  # the supervisor is our direct child
+        self.assertEqual((fields["supervisor_sid"], fields["supervisor_pgid"]), (fields["supervisor"], fields["supervisor"]))  # new session
+        self.assertEqual(fields["pgid"], fields["pid"])  # the program leads a group of its own …
+        self.assertNotEqual(fields["pgid"], os.getpgid(0))  # … not ours
+        self.assertEqual(fields["pdeathsig"], int(signal.SIGKILL))  # bound to the supervisor
+        # SIGPIPE back at its default in the program (grep: a Python program ignores it itself at start-up).
+        status = shutdown.run_child(["grep", "-E", "^SigIgn:", "/proc/self/status"], capture_output=True, text=True, check=True)
+        self.assertEqual(int(status.stdout.split(":\t")[1], 16) & (1 << (signal.SIGPIPE - 1)), 0)
+        self.assertIn("PR_SET_CHILD_SUBREAPER", shutdown.__doc__ or "")
+        self.assertIn(f"prctl({shutdown._PR_SET_CHILD_SUBREAPER}, 1)", shutdown.CHILD_SUPERVISOR)
+        self.assertIn(f"prctl({shutdown._PR_SET_PDEATHSIG}, int(signal.SIGTERM))", shutdown.CHILD_SUPERVISOR)
+
+    def test_a_child_never_gets_the_terminal_as_stdin(self) -> None:
+        """R16-6: stdin is /dev/null unless given; every ffmpeg call carries -nostdin."""
+        from deepfake_lens.native_stderr import FFMPEG_QUIET_ARGS
+
+        done = shutdown.run_child([sys.executable, "-c", "import os, sys; print(os.path.realpath('/proc/self/fd/0') if os.path.exists('/proc/self/fd/0') else sys.stdin.isatty())"], capture_output=True, text=True, check=True)
+        self.assertIn(done.stdout.strip(), ("/dev/null", "False"))
+        self.assertIn("-nostdin", FFMPEG_QUIET_ARGS)
 
 
 @unittest.skipIf(os.name == "nt", "POSIX signals")
@@ -421,6 +455,205 @@ class KilledParentTakesItsChildrenTest(unittest.TestCase):
             before = out.stat().st_mtime_ns if out.exists() else None
             time.sleep(STAYS_GONE_SECONDS)
             self.assertEqual(out.stat().st_mtime_ns if out.exists() else None, before)  # nobody rewrites it
+
+
+# R16-7: a wrapper "ffmpeg" (sh, not exec) whose own child does the work — the
+# grandchild the R15-1 design left running when the wrapper was killed.
+WRAPPER_FFMPEG = '#!/bin/sh\n"$DFL_PYTHON" -c "$DFL_REWRITER" "$1"\necho wrapper-done\n'
+# R16-7: runs a wrapper child, prints the grandchild's pid, then waits (SIGKILLed by the test).
+WRAPPED_PARENT_SCRIPT = textwrap.dedent(
+    """
+    import json, os, sys, threading, time
+    from deepfake_lens import shutdown
+
+    out = sys.argv[1]
+
+    def descendants(pid):
+        found, stack = [], [pid]
+        while stack:
+            current = stack.pop()
+            try:
+                tasks = os.listdir(f"/proc/{current}/task")
+            except OSError:
+                continue
+            for task in tasks:
+                try:
+                    children = [int(c) for c in open(f"/proc/{current}/task/{task}/children").read().split()]
+                except OSError:
+                    continue
+                found += children
+                stack += children
+        return found
+
+    threading.Thread(target=shutdown.run_child, args=(["ffmpeg", out],), kwargs={"capture_output": True}, daemon=True).start()
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        workers = [pid for pid in descendants(os.getpid()) if b"DFL_REWRITER_MARK" in open(f"/proc/{pid}/cmdline", "rb").read()]
+        if workers and os.path.exists(out) and os.path.getsize(out):
+            break
+        time.sleep(0.01)
+    else:
+        sys.exit("grandchild never ran")
+    print(json.dumps({"grandchildren": workers, "children": shutdown.running_children()}), flush=True)
+    while True:
+        time.sleep(0.05)
+    """
+)
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "PR_SET_PDEATHSIG is Linux")
+class WrapperGrandchildTest(unittest.TestCase):
+    """R16-7 (round 16): a wrapper script's grandchild ends with the scan — SIGKILL, shutdown, timeout."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        self.mark = f"{os.getpid()}-{self.id()}"  # this test's grandchildren only (suites may run side by side)
+        bindir = self.root / "bin"
+        bindir.mkdir()
+        wrapper = bindir / "ffmpeg"
+        wrapper.write_text(WRAPPER_FFMPEG, encoding="utf-8")
+        wrapper.chmod(0o755)
+        self.env = {
+            **child_env(self.root / "home"),
+            "PATH": str(bindir) + os.pathsep + os.environ.get("PATH", ""),
+            "DFL_PYTHON": sys.executable,
+            "DFL_REWRITER": f"# DFL_REWRITER_MARK {self.mark}\n" + REWRITER,
+        }
+        self.out = self.root / "out.wav"
+
+    def _assert_stays_unwritten(self) -> None:
+        before = self.out.stat().st_mtime_ns if self.out.exists() else None
+        time.sleep(STAYS_GONE_SECONDS)
+        self.assertEqual(self.out.stat().st_mtime_ns if self.out.exists() else None, before)  # nobody rewrites it
+
+    def test_sigkill_of_the_parent_ends_the_grandchild(self) -> None:
+        for repeat in range(REPEATS):
+            with self.subTest(repeat=repeat):
+                self.out.unlink(missing_ok=True)
+                proc = subprocess.Popen([sys.executable, "-c", WRAPPED_PARENT_SCRIPT, str(self.out)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env)
+                try:
+                    assert proc.stdout is not None
+                    line = proc.stdout.readline().decode("utf-8")
+                    if not line:
+                        proc.wait(timeout=CHILD_TIMEOUT_SECONDS)
+                        self.fail(f"child ended before READY: {proc.stderr.read()[-800:] if proc.stderr else b''!r}")
+                    ready = json.loads(line)
+                    self.assertTrue(ready["grandchildren"] and all(process_alive(pid) for pid in ready["grandchildren"]))
+                    proc.kill()
+                    proc.wait(timeout=CHILD_TIMEOUT_SECONDS)
+                finally:
+                    if proc.poll() is None:
+                        proc.kill()
+                        proc.wait()
+                    for stream in (proc.stdout, proc.stderr):
+                        if stream is not None:
+                            stream.close()
+                self.assertEqual(wait_gone(ready["children"] + ready["grandchildren"]), [])
+                self._assert_stays_unwritten()
+
+    def _start_in_thread(self, **kwargs: Any) -> tuple[threading.Thread, list[BaseException | None]]:
+        outcome: list[BaseException | None] = []
+
+        def run() -> None:
+            try:
+                shutdown.run_child(["ffmpeg", str(self.out)], capture_output=True, **kwargs)
+                outcome.append(None)
+            except BaseException as exc:  # noqa: BLE001 - recorded for the assertion
+                outcome.append(exc)
+
+        with mock.patch.dict(os.environ, self.env):
+            worker = threading.Thread(target=run)
+            worker.start()
+            deadline = time.monotonic() + CHILD_TIMEOUT_SECONDS
+            while not (self.out.exists() and self.out.stat().st_size) and time.monotonic() < deadline:
+                time.sleep(0.01)
+        return worker, outcome
+
+    def _grandchildren(self) -> list[int]:
+        found: list[int] = []
+        for pid in os.listdir("/proc"):
+            if pid.isdigit():
+                try:
+                    if f"DFL_REWRITER_MARK {self.mark}".encode() in Path(f"/proc/{pid}/cmdline").read_bytes():
+                        found.append(int(pid))
+                except OSError:
+                    continue
+        return [pid for pid in found if process_alive(pid)]
+
+    def test_shutdown_stops_the_whole_group(self) -> None:
+        with _IsolatedSession(self.root):
+            worker, outcome = self._start_in_thread()
+            grandchildren = self._grandchildren()
+            self.assertTrue(grandchildren)
+            shutdown.begin()
+            worker.join(timeout=CHILD_TIMEOUT_SECONDS)
+            self.assertEqual(wait_gone(grandchildren), [])
+            self.assertIsInstance(outcome[0], shutdown.ShuttingDown)
+            self._assert_stays_unwritten()
+
+    def test_a_timeout_stops_the_whole_group(self) -> None:
+        with mock.patch.dict(os.environ, self.env):
+            started = time.monotonic()
+            with self.assertRaises(subprocess.TimeoutExpired):
+                shutdown.run_child(["ffmpeg", str(self.out)], capture_output=True, timeout=1.0)
+            elapsed = time.monotonic() - started
+        self.assertEqual(self._grandchildren(), [])
+        self.assertLess(elapsed, 1.0 + shutdown.CHILD_TERM_GRACE_SECONDS + shutdown.CHILD_KILL_GRACE_SECONDS + 2.0)
+        self._assert_stays_unwritten()
+
+    def test_a_normal_end_reports_the_status_and_leaves_nothing(self) -> None:
+        script = "sleep 30 &\necho started\nexit 5\n"  # leaves a background job behind
+        done = shutdown.run_child(["sh", "-c", script], capture_output=True, text=True, timeout=CHILD_TIMEOUT_SECONDS)
+        self.assertEqual((done.returncode, done.stdout), (5, "started\n"))
+        killed = shutdown.run_child(["sh", "-c", "kill -TERM $$"], capture_output=True)
+        self.assertEqual(killed.returncode, -signal.SIGTERM)  # a signal death is reported as one
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "PR_SET_PDEATHSIG is Linux")
+class TerminalSurvivesTest(unittest.TestCase):
+    """R16-6 (round 16): a child that would put its stdin terminal in raw mode cannot — the terminal keeps echo."""
+
+    def test_the_terminal_keeps_echo(self) -> None:
+        import pty
+        import termios
+
+        child_code = textwrap.dedent(
+            """
+            import sys
+            from deepfake_lens import shutdown
+            raw = "import sys, tty\\ntry:\\n    tty.setraw(0)\\nexcept Exception:\\n    sys.exit(9)\\n"
+            done = shutdown.run_child([sys.executable, "-c", raw])
+            print("RC", done.returncode, flush=True)
+            """
+        )
+        pid, fd = pty.fork()
+        if pid == 0:  # pragma: no cover - the forked child
+            try:
+                os.environ.update(child_env(Path(tempfile.gettempdir())))
+                os.execv(sys.executable, [sys.executable, "-c", child_code])
+            finally:
+                os._exit(127)
+        output = b""
+        try:
+            deadline = time.monotonic() + CHILD_TIMEOUT_SECONDS
+            while time.monotonic() < deadline:
+                try:
+                    chunk = os.read(fd, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                output += chunk
+                if b"RC" in output and output.endswith(b"\n"):
+                    break
+            lflag = termios.tcgetattr(fd)[3]
+        finally:
+            os.waitpid(pid, 0)
+            os.close(fd)
+        self.assertIn(b"RC 9", output)  # stdin was not a terminal: setraw failed
+        self.assertEqual(lflag & (termios.ECHO | termios.ICANON), termios.ECHO | termios.ICANON)
 
 
 # R15-1: every child process of the package is started (and so tracked) by

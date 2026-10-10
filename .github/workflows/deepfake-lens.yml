@@ -234,11 +234,13 @@ jobs:
       # R15-1: a real scan is signalled mid-flight (a temp wav in the session
       # folder, an ffmpeg child running) 20 times per signal; anything left in
       # TMPDIR or any child outliving the scan fails the job (100 runs locally).
-      - name: Shutdown stress (SIGTERM / SIGHUP / SIGKILL, 20 runs each)
+      - name: Shutdown stress (SIGTERM / SIGHUP / SIGKILL, 20 runs each; R16-7 also with an sh-wrapped ffmpeg)
         run: |
           python scripts/stress_shutdown.py --runs 20 --signal TERM
           python scripts/stress_shutdown.py --runs 20 --signal HUP
           python scripts/stress_shutdown.py --runs 20 --signal KILL
+          python scripts/stress_shutdown.py --runs 10 --signal TERM --wrapped-ffmpeg
+          python scripts/stress_shutdown.py --runs 10 --signal KILL --wrapped-ffmpeg
       - name: Upload QA logs and conformance table
         if: always()
         uses: actions/upload-artifact@v4

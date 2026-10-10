@@ -10,11 +10,14 @@ session folder holds a ``.wav`` and — on Linux, where /proc shows it — an
 - (SIGTERM / SIGHUP) anything is left in its TMPDIR, at once or half a
   second later (an orphaned ``ffmpeg -y`` re-creating its output);
 - any child of the scan is still running (all signals; for SIGKILL that is
-  Linux PR_SET_PDEATHSIG);
+  Linux PR_SET_PDEATHSIG); R16-7 (round 16): any *descendant* — every
+  process under the scan when the signal was sent, grandchildren included
+  (``--wrapped-ffmpeg`` puts an ``sh`` wrapper named ``ffmpeg`` first on
+  PATH, so each real ``ffmpeg`` is a grandchild of the scan's child);
 - (SIGKILL) more than the one session folder is left, or the next run's
   sweep does not remove it.
 
-    python scripts/stress_shutdown.py [--runs 100] [--signal TERM|HUP|KILL]
+    python scripts/stress_shutdown.py [--runs 100] [--signal TERM|HUP|KILL] [--wrapped-ffmpeg]
 
 The children start with SIGINT/SIGTERM/SIGHUP at their default action
 (R15-4) whatever this script inherited. Exit 0 when every run passed, 1
@@ -73,10 +76,45 @@ def _children(pid: int) -> list[int]:
     return [child for child in found if _alive(child)]
 
 
+def _descendants(pid: int) -> list[int]:
+    """R16-7: every live process under ``pid`` (children, grandchildren, …)."""
+    found: list[int] = []
+    stack = [pid]
+    while stack:
+        children = _children(stack.pop())
+        found.extend(children)
+        stack.extend(children)
+    return found
+
+
+# R16-7: a wrapper "ffmpeg" that runs the real one as its own child (no exec),
+# reading the input in real time four times over (-re -stream_loop 3: ~12 s
+# for the 3 s clip) so a grandchild that outlived the scan is still running
+# when the run is checked.
+WRAPPER_SCRIPT = '#!/bin/sh\n"$DFL_REAL_FFMPEG" -re -stream_loop 3 "$@"\n'
+
+
+def _wrapper_dir(work: Path) -> Path:
+    folder = work / "wrapped-bin"
+    folder.mkdir(exist_ok=True)
+    wrapper = folder / "ffmpeg"
+    wrapper.write_text(WRAPPER_SCRIPT, encoding="utf-8")
+    wrapper.chmod(0o755)
+    return folder
+
+
 def _is_ffmpeg(pid: int) -> bool:
     try:
         with open(f"/proc/{pid}/cmdline", "rb") as handle:
             return any(os.path.basename(part) == b"ffmpeg" for part in handle.read().split(b"\0"))
+    except OSError:
+        return False
+
+
+def _is_wrapper(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as handle:
+            return b"wrapped-bin" in handle.read()
     except OSError:
         return False
 
@@ -97,13 +135,16 @@ def _make_case(work: Path, files: int) -> Path:
     return case
 
 
-def run_once(work: Path, case: Path, index: int, signum: int, python: str) -> dict[str, object]:
+def run_once(work: Path, case: Path, index: int, signum: int, python: str, wrapped: bool = False) -> dict[str, object]:
     base = work / f"tmp{index}"
     shutil.rmtree(base, ignore_errors=True)
     base.mkdir()
     home = work / "home"
     env = {**os.environ, "TMPDIR": str(base), "HOME": str(home), "DEEPFAKE_LENS_LOG_DIR": str(home / "logs"),
            "PYTHONPATH": os.pathsep.join(filter(None, (str(REPO_ROOT), os.environ.get("PYTHONPATH"))))}
+    if wrapped:
+        env["DFL_REAL_FFMPEG"] = shutil.which("ffmpeg") or "ffmpeg"
+        env["PATH"] = str(_wrapper_dir(work)) + os.pathsep + env.get("PATH", "")
     command = [python, "-m", "deepfake_lens", "scan", str(case), "--include-low", "--format", "json", "--workers", "2"]
     proc = subprocess.Popen(with_default_signals(command), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, cwd=str(work))
     linux = sys.platform.startswith("linux")
@@ -117,8 +158,9 @@ def run_once(work: Path, case: Path, index: int, signum: int, python: str) -> di
                 wav = wav or any(name.endswith(".wav") for name in os.listdir(folder))
             except OSError:
                 continue
-        children = _children(proc.pid) if linux else []
-        if wav and (not linux or any(_is_ffmpeg(child) for child in children)):
+        children = _descendants(proc.pid) if linux else []  # R16-7: the whole tree
+        real_ffmpeg = [child for child in children if _is_ffmpeg(child) and (not wrapped or not _is_wrapper(child))]
+        if wav and (not linux or real_ffmpeg):
             proc.send_signal(signum)
             sent = True
             break
@@ -140,7 +182,7 @@ def run_once(work: Path, case: Path, index: int, signum: int, python: str) -> di
     if not sent:
         problems.append("신호를 보낼 시점(임시 wav + ffmpeg 실행 중)을 잡지 못함")
     if orphans:
-        problems.append(f"스캔 종료 후에도 실행 중인 자식 프로세스: {orphans}")
+        problems.append(f"스캔 종료 후에도 실행 중인 자손 프로세스: {orphans}")
     if signum == signal.SIGKILL:
         if len(left_later) > 1 or any(not name.startswith(SESSION_PREFIX) for name in left_later):
             problems.append(f"SIGKILL 후 남은 항목: {left_later}")
@@ -164,12 +206,13 @@ def main(argv: list[str] | None = None) -> int:
             reconfigure(encoding="utf-8", errors="replace")
     from deepfake_lens.cli_parser import KoreanArgumentParser  # G13: Korean --help
 
-    parser = KoreanArgumentParser(description="종료 스트레스 시험(R15-1): 실행 중인 스캔에 신호를 보내 남는 임시 항목·자식 프로세스가 없는지 반복 확인합니다.")
+    parser = KoreanArgumentParser(description="종료 스트레스 시험(R15-1, R16-7): 실행 중인 스캔에 신호를 보내 남는 임시 항목·자손 프로세스가 없는지 반복 확인합니다.")
     parser.add_argument("--runs", type=int, default=DEFAULT_RUNS, help=f"반복 횟수(기본 {DEFAULT_RUNS}, CI는 20)")
     parser.add_argument("--signal", choices=("TERM", "HUP", "KILL"), default="TERM", help="보낼 신호(기본 TERM)")
     parser.add_argument("--files", type=int, default=DEFAULT_FILES, help=f"스캔할 영상 수(기본 {DEFAULT_FILES})")
     parser.add_argument("--work", type=Path, default=None, help="작업 폴더(기본: 새 임시 폴더, 끝나면 삭제)")
     parser.add_argument("--python", default=sys.executable, help="스캔을 실행할 파이썬(기본: 이 파이썬)")
+    parser.add_argument("--wrapped-ffmpeg", action="store_true", help="R16-7: 진짜 ffmpeg를 자식으로 실행하는 sh 래퍼를 PATH 앞에 둠(손자 프로세스 정리 확인)")
     args = parser.parse_args(argv)
     if shutil.which("ffmpeg") is None:
         print("ffmpeg가 없어 시험 영상을 만들 수 없습니다.")
@@ -182,11 +225,12 @@ def main(argv: list[str] | None = None) -> int:
         case = _make_case(work, args.files)
         failed = 0
         for index in range(args.runs):
-            outcome = run_once(work, case, index, signum, args.python)
+            outcome = run_once(work, case, index, signum, args.python, args.wrapped_ffmpeg)
             if outcome["problems"]:
                 failed += 1
                 print(json.dumps(outcome, ensure_ascii=False), flush=True)
-        print(f"종료 스트레스 시험: 신호 SIG{args.signal}, {args.runs}회 중 실패 {failed}회")
+        wrapped = ", sh 래퍼 ffmpeg(손자)" if args.wrapped_ffmpeg else ""
+        print(f"종료 스트레스 시험: 신호 SIG{args.signal}{wrapped}, {args.runs}회 중 실패 {failed}회")
         return 1 if failed else 0
     finally:
         if owned:

@@ -25,16 +25,32 @@ This module holds what the cleanup needs to make that impossible:
   meta-test in ``tests/test_shutdown.py`` keeps it that way) and tracked
   until it ends; :func:`begin` stops each one: ``terminate`` → wait →
   ``kill`` → wait.
-- on Linux each child is also bound to this process with
-  ``PR_SET_PDEATHSIG`` (SIGKILL): a SIGKILLed scan, which runs no handler at
-  all, takes its ``ffmpeg`` children with it. ``preexec_fn`` is not
-  fork-safe in a threaded process (R15-5), so the child is started through
-  a tiny exec trampoline (``python -I -S -c …``) that sets the flag and then
-  ``execv``-s the real program; the trampoline also checks that its parent
-  is still this process (a parent killed before ``prctl`` ran is not seen
-  by the flag). Elsewhere (macOS, Windows, a frozen build without a Python
-  interpreter) the tracked children are stopped by the handler and the
-  atexit hook; a hard kill of the parent leaves them to their own timeout.
+- R16-6 (round 16): a child's stdin is ``/dev/null`` unless the caller
+  passes one (``ffmpeg`` also gets ``-nostdin``): it used to inherit the
+  operator's terminal, and an ``ffmpeg`` killed together with the scan left
+  the terminal with echo off.
+- R16-7 (round 16): a child is started in a new session and process group
+  (``start_new_session=True``) and is stopped by signalling the whole group
+  (``killpg``) — grandchildren included (a wrapper script ``sh → ffmpeg``
+  used to leave its ``ffmpeg`` running after the wrapper was killed).
+- on Linux each child runs under a small supervisor (``python -I -S -c``
+  :data:`CHILD_SUPERVISOR`, the leader of the child's session): it is bound
+  to this process with ``PR_SET_PDEATHSIG`` (SIGTERM — a SIGKILLed scan,
+  which runs no handler at all, still ends its children) and is a
+  ``PR_SET_CHILD_SUBREAPER``, so a grandchild orphaned by its parent's death
+  is re-parented to it, not to init. It starts the program in a process
+  group of its own (PR_SET_PDEATHSIG SIGKILL bound to the supervisor), waits
+  for it, then signals that group and every orphan it adopted — SIGTERM, a
+  grace of :data:`SUPERVISOR_TERM_GRACE_SECONDS`, SIGKILL — when it is told
+  to stop (or this process died), and SIGKILL to anything the program left
+  behind when it ends normally; it exits with the program's status.
+  ``preexec_fn`` is not fork-safe in a threaded process (R15-5), hence the
+  separate interpreter; it also checks that its parent is still this
+  process (a parent killed before ``prctl`` ran is not seen by the flag).
+  Elsewhere (macOS, Windows, a frozen build without a Python interpreter)
+  the tracked children (and, on POSIX, their process groups) are stopped by
+  the handler and the atexit hook; a hard kill of the parent leaves them to
+  their own timeout.
 
 Signal-handler safety: :func:`begin` runs inside a signal handler in the
 main thread, which may have been interrupted while holding any lock — so it
@@ -73,25 +89,115 @@ CHILD_TERM_GRACE_SECONDS = 2.0
 CHILD_KILL_GRACE_SECONDS = 2.0
 # Poll interval while waiting for the above.
 _POLL_SECONDS = 0.005
-# R15-1: <linux/prctl.h> PR_SET_PDEATHSIG.
+# R15-1: <linux/prctl.h> PR_SET_PDEATHSIG; R16-7: PR_SET_CHILD_SUBREAPER.
 _PR_SET_PDEATHSIG = 1
-# R15-1: the exec trampoline (Linux). argv: <parent pid> <program> <args…>.
-# Python itself ignores SIGPIPE (and SIGXFSZ) at start-up and an ignored
-# signal survives exec, so both are put back to their default first — what
-# ``subprocess``'s restore_signals does for a direct exec.
-PDEATHSIG_TRAMPOLINE = (
-    "import ctypes, os, signal, sys\n"
-    "try:\n"
-    f"    ctypes.CDLL(None, use_errno=True).prctl({_PR_SET_PDEATHSIG}, int(signal.SIGKILL), 0, 0, 0)\n"
-    "except (OSError, AttributeError):\n"
-    "    pass\n"
-    "if os.getppid() != int(sys.argv[1]):\n"
-    "    os._exit(1)\n"
-    "for name in ('SIGPIPE', 'SIGXFSZ'):\n"
-    "    if hasattr(signal, name):\n"
-    "        signal.signal(getattr(signal, name), signal.SIG_DFL)\n"
-    "os.execv(sys.argv[2], sys.argv[2:])\n"
-)
+_PR_SET_CHILD_SUBREAPER = 36
+# R16-7: how long the supervisor gives the program's process group (and the
+# orphans it adopted) after SIGTERM before SIGKILL — below
+# CHILD_TERM_GRACE_SECONDS, so the supervisor is done before this process
+# would escalate to SIGKILL of the supervisor itself.
+SUPERVISOR_TERM_GRACE_SECONDS = 1.0
+# R16-7 (round 16): the child supervisor (Linux), replacing the R15-1 exec
+# trampoline. argv: <parent pid> <grace seconds> <program> <args…>. See the
+# module docstring. Python itself ignores SIGPIPE (and SIGXFSZ) at start-up
+# and an ignored signal survives exec, so the program gets both back at
+# their default — what ``subprocess``'s restore_signals does for a direct
+# exec — and SIGTERM/SIGHUP/SIGINT at their default too.
+CHILD_SUPERVISOR = f"""
+import ctypes, os, signal, sys, time
+PARENT, GRACE, ARGV = int(sys.argv[1]), float(sys.argv[2]), sys.argv[3:]
+STOPS = ("SIGTERM", "SIGHUP", "SIGINT")
+class Stop(Exception):
+    pass
+received = []
+def on_stop(signum, frame):
+    received.append(signum)
+    raise Stop()
+for name in STOPS:
+    signal.signal(getattr(signal, name), on_stop)
+libc = ctypes.CDLL(None, use_errno=True)
+def prctl(option, value):
+    try:
+        libc.prctl(option, value, 0, 0, 0)
+    except (OSError, AttributeError):
+        pass
+pid = -1
+statuses = {{}}
+try:
+    prctl({_PR_SET_CHILD_SUBREAPER}, 1)
+    prctl({_PR_SET_PDEATHSIG}, int(signal.SIGTERM))
+    if os.getppid() != PARENT:
+        raise Stop()
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.setpgid(0, 0)
+            prctl({_PR_SET_PDEATHSIG}, int(signal.SIGKILL))
+            for name in (*STOPS, "SIGPIPE", "SIGXFSZ"):
+                if hasattr(signal, name):
+                    signal.signal(getattr(signal, name), signal.SIG_DFL)
+            os.execv(ARGV[0], ARGV)
+        finally:
+            os._exit(127)
+    try:
+        os.setpgid(pid, pid)
+    except OSError:
+        pass
+    os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT)
+except Stop:
+    pass
+for name in STOPS:
+    signal.signal(getattr(signal, name), signal.SIG_IGN)
+def adopted():
+    out = []
+    for task in os.listdir("/proc/self/task"):
+        try:
+            with open("/proc/self/task/" + task + "/children") as handle:
+                out += [int(value) for value in handle.read().split()]
+        except OSError:
+            pass
+    return out
+def send(signum):
+    if pid > 0:
+        try:
+            os.killpg(pid, signum)
+        except OSError:
+            pass
+    for child in adopted():
+        try:
+            os.kill(child, signum)
+        except OSError:
+            pass
+def reap(seconds):
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            got, status = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            return
+        if got:
+            statuses[got] = status
+        elif time.monotonic() >= deadline:
+            return
+        else:
+            time.sleep(0.005)
+if received:
+    send(signal.SIGTERM)
+    reap(GRACE)
+send(signal.SIGKILL)
+reap(GRACE)
+if received or pid not in statuses:
+    signum = received[0] if received else signal.SIGKILL
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+    os._exit(128 + signum)
+code = os.waitstatus_to_exitcode(statuses[pid])
+if code < 0:
+    signal.signal(-code, signal.SIG_DFL)
+    os.kill(os.getpid(), -code)
+    os._exit(128 - code)
+os._exit(code)
+"""
 
 
 class ShuttingDown(CheckSkipped):
@@ -174,12 +280,49 @@ def _wait_all(procs: list[subprocess.Popen[Any]], seconds: float) -> list[subpro
     return left
 
 
-def _signal_child(proc: subprocess.Popen[Any], kill: bool) -> None:
+def _supervised_groups(proc: subprocess.Popen[Any]) -> list[int]:
+    """R16-7: the process groups of the programs a Linux supervisor runs (each program leads its own)."""
+    if not _SUPERVISED:
+        return []
+    groups: list[int] = []
     try:
-        if kill:
-            proc.kill()
-        else:
-            proc.terminate()
+        tasks = os.listdir(f"/proc/{proc.pid}/task")
+    except OSError:
+        return []
+    for task in tasks:
+        try:
+            with open(f"/proc/{proc.pid}/task/{task}/children", encoding="ascii") as handle:
+                groups += [int(value) for value in handle.read().split()]
+        except (OSError, ValueError):
+            continue
+    return groups
+
+
+def _signal_child(proc: subprocess.Popen[Any], kill: bool) -> None:
+    """Signal a tracked child's whole process group (R16-7); on Windows the child only."""
+    import signal
+
+    if os.name != "posix":
+        try:
+            if kill:
+                proc.kill()
+            else:
+                proc.terminate()
+        except OSError:  # already gone
+            pass
+        return
+    signum = signal.SIGKILL if kill else signal.SIGTERM
+    if proc.returncode is not None:
+        return  # reaped: its pid (and group id) may belong to another process by now
+    if kill:
+        # The supervisor is killed outright: end the program groups it ran first.
+        for group in _supervised_groups(proc):
+            try:
+                os.killpg(group, signum)
+            except OSError:
+                pass
+    try:
+        os.killpg(proc.pid, signum)  # the child leads its own session and group (start_new_session)
     except OSError:  # already gone
         pass
 
@@ -227,11 +370,26 @@ def _resolve_program(program: str) -> str:
     return os.path.abspath(found)
 
 
+# R16-7: children run under CHILD_SUPERVISOR (Linux with a Python interpreter).
+_SUPERVISED = sys.platform.startswith("linux") and not getattr(sys, "frozen", False) and bool(sys.executable)
+
+
 def _bind_to_parent(argv: list[str]) -> list[str]:
-    """R15-1: Linux — ``argv`` started through the PR_SET_PDEATHSIG trampoline; elsewhere unchanged."""
-    if not sys.platform.startswith("linux") or getattr(sys, "frozen", False) or not sys.executable:
+    """R15-1/R16-7: Linux — ``argv`` started under :data:`CHILD_SUPERVISOR`; elsewhere unchanged."""
+    if not _SUPERVISED:
         return argv
-    return [sys.executable, "-I", "-S", "-c", PDEATHSIG_TRAMPOLINE, str(os.getpid()), *argv]
+    return [sys.executable, "-I", "-S", "-c", CHILD_SUPERVISOR, str(os.getpid()), str(SUPERVISOR_TERM_GRACE_SECONDS), *argv]
+
+
+def _stop_one(proc: subprocess.Popen[Any]) -> None:
+    """R16-7: stop one tracked child like :func:`stop_children` does (group SIGTERM → grace → SIGKILL) and reap it."""
+    _signal_child(proc, kill=False)
+    if _wait_all([proc], CHILD_TERM_GRACE_SECONDS):
+        _signal_child(proc, kill=True)
+    try:
+        proc.wait(timeout=CHILD_KILL_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        logger.warning("child process %s did not end", proc.pid)
 
 
 def run_child(
@@ -256,23 +414,25 @@ def run_child(
         raise ValueError("run_child: empty command")
     if capture_output:
         stdout = stderr = subprocess.PIPE
+    if stdin is None:
+        stdin = subprocess.DEVNULL  # R16-6: never the operator's terminal
     launch = _bind_to_parent([_resolve_program(argv[0]), *argv[1:]])
     with guarded():
-        proc = subprocess.Popen(launch, stdin=stdin, stdout=stdout, stderr=stderr, text=text)
+        # R16-7: a new session and process group — stopped with killpg, grandchildren included.
+        proc = subprocess.Popen(launch, stdin=stdin, stdout=stdout, stderr=stderr, text=text, start_new_session=os.name == "posix")
         with _CHILDREN_LOCK:
             _CHILDREN[proc.pid] = proc
     try:
         if _SHUTTING_DOWN:  # begin() ran while Popen did: it may not have seen this child
-            _signal_child(proc, kill=True)
+            _signal_child(proc, kill=False)
         try:
             out, err = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
-            proc.kill()
+            _stop_one(proc)  # R16-7: the whole group, through the supervisor
             exc.output, exc.stderr = proc.communicate()
             raise
         except BaseException:
-            proc.kill()
-            proc.wait()
+            _stop_one(proc)
             raise
     finally:
         with _CHILDREN_LOCK:
@@ -356,12 +516,13 @@ def with_default_signals(argv: Sequence[str | os.PathLike[str]]) -> list[str]:
 
 __all__ = [
     "CHILD_KILL_GRACE_SECONDS",
+    "CHILD_SUPERVISOR",
     "HARNESS_DEFAULT_SIGNALS",
     "SIGNALS_TRAMPOLINE",
     "CHILD_TERM_GRACE_SECONDS",
-    "PDEATHSIG_TRAMPOLINE",
     "PENDING_SETTLE_SECONDS",
     "SHUTDOWN_REASON",
+    "SUPERVISOR_TERM_GRACE_SECONDS",
     "ShuttingDown",
     "active",
     "begin",

@@ -35,7 +35,11 @@ from .cli_logging import default_log_dir
 
 NATIVE_STDERR_LOG = "native-stderr.log"
 # Every ffmpeg invocation (G14): errors only, no banner, no progress stats.
-FFMPEG_QUIET_ARGS = ("-hide_banner", "-loglevel", "error", "-nostats")
+# R16-6 (round 16): -nostdin — ffmpeg never reads (or puts into raw mode) a
+# terminal; a scan SIGKILLed during an ffmpeg run left the operator's
+# terminal with echo off. shutdown.run_child also gives children /dev/null
+# as stdin.
+FFMPEG_QUIET_ARGS = ("-nostdin", "-hide_banner", "-loglevel", "error", "-nostats")
 
 logger = logging.getLogger(__name__)
 
