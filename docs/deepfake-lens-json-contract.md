@@ -188,6 +188,14 @@ always `0` invited old-contract readings. They remain readable as
   and `coverage` holds `{"check": "file_integrity", "status": "failed",
   "reason": "분석 중 파일 변경 — 판단 불가: …"}` (label 분석 전후 파일
   동일성); the row is never cached.
+- R13-2 (round 13): the same holds for an archive. Its state (and hash, up
+  to the same size) is taken before extraction and compared with its state
+  and hash right after it; the container row's `sha256` is that post-
+  extraction hash — the bytes its members came from. When anything differs
+  the container row is `판단 불가` with the `file_integrity` entry above,
+  and every member row of it is `판단 불가` with `sha256: null` and
+  `{"check": "file_integrity", "status": "failed", "reason": "분석 중 파일
+  변경 — 판단 불가: 이 구성 파일을 꺼낸 압축 파일이 추출 전후로 …"}`.
 - R12-4 (round 12): every row except an archive member carries `path_b64`
   — its real relative path (`path` with the R9-1 escape undone) as URL-safe
   base64 of the file-system bytes (`os.fsencode`; a non-UTF-8 name's

@@ -448,6 +448,11 @@ def _scan_paths(
             dest = Path(tempfile.mkdtemp(prefix="dflens-arc-"))
             temp_dirs.append(dest)
             dest = dest.resolve()
+            # R13-2: the container's state (and, up to REHASH_MAX_BYTES, its
+            # hash) before extraction — compared with the state and hash right
+            # after it, so the recorded container hash is the one of the bytes
+            # its members came from.
+            before, pre_digest = _state_and_digest(path)
             try:
                 extraction = extract_archive(path, dest)
             except Exception as exc:
@@ -458,6 +463,7 @@ def _scan_paths(
                     "path": path, "fmt": archive_format(path),
                     "skipped": 0, "warnings": [f"압축 해제 실패: {failure_reason(exc)}"],
                     "error": failure_reason(exc),
+                    **_container_integrity(path, before, pre_digest),
                 }
                 archive_members[rel] = []
                 continue
@@ -467,6 +473,7 @@ def _scan_paths(
                 "rejected": list(extraction.rejected),
                 "error": extraction.error,
                 "missing_dependency": extraction.missing_dependency,
+                **_container_integrity(path, before, pre_digest),
             }
             archive_members[rel] = []
             for position, member in enumerate(extraction.members, start=1):
@@ -794,6 +801,10 @@ def _scan_specs(
             fingerprints[path] = post_digest
             item = _with_content_sha256(item, path, fingerprints)
         if identity is not None:
+            if archive_meta.get(identity.container, {}).get("changed"):
+                # R13-2: the container was rewritten while its members were
+                # extracted — which archive this member came from is unknown.
+                item = _changed_during_analysis(item, reason=ARCHIVE_MEMBER_CHANGED_REASON)
             archive_members.setdefault(identity[0], []).append(item)
         return item, key, False
 
@@ -857,8 +868,13 @@ def _scan_specs(
             rejected=meta.get("rejected", []),
             missing_dependency=meta.get("missing_dependency"),
             # D9: the container's own digest binds the archive into a signed report.
-            sha256=_content_sha256(arc_path, fingerprints) or None,
+            # R13-2: the digest taken right after extraction (the bytes the
+            # members came from), never one taken later.
+            sha256=(meta["sha256"] or None) if "sha256" in meta else (_content_sha256(arc_path, fingerprints) or None),
         )
+        if meta.get("changed"):
+            logger.warning("archive changed during extraction: %s", arc_path)
+            container = _changed_during_analysis(container)
         _report(container)
         items.append(container)
 
@@ -880,6 +896,35 @@ FILE_CHANGED_REASON = (
 )
 
 
+# R13-2 (round 13): an archive rewritten while its members were extracted
+# had the new archive's hash on its container row and members from the old
+# one. Every member row of such a container is 판단 불가 with this reason.
+ARCHIVE_MEMBER_CHANGED_REASON = (
+    "분석 중 파일 변경 — 판단 불가: 이 구성 파일을 꺼낸 압축 파일이 추출 전후로 크기·수정 시각·inode 또는 "
+    "내용 해시가 다릅니다(어느 판의 압축 파일에서 나온 구성 파일인지 특정할 수 없어 해시를 기록하지 않았습니다 — "
+    "파일이 바뀌지 않는 상태에서 다시 검사하십시오)"
+)
+
+
+def _state_and_digest(path: Path) -> tuple[tuple[int, int, int, int] | None, str | None]:
+    """R12-7/R13-2: (state, SHA-256 when at most REHASH_MAX_BYTES) of ``path``."""
+    state = _file_state(path)
+    digest = _file_fingerprint(path) if state is not None and state[0] <= REHASH_MAX_BYTES else None
+    return state, digest
+
+
+def _container_integrity(path: Path, before: tuple[int, int, int, int] | None, pre_digest: str | None) -> dict[str, object]:
+    """R13-2: ``{"changed": bool, "sha256": digest or None}`` of an archive just extracted.
+
+    Changed when its state (size, mtime_ns, inode, device) differs from
+    ``before``, it can no longer be hashed, or the hash differs from the one
+    taken before extraction; then no hash is recorded.
+    """
+    post_digest = _file_fingerprint(path)
+    changed = before is None or _file_state(path) != before or not post_digest or (pre_digest is not None and pre_digest != post_digest)
+    return {"changed": changed, "sha256": None if changed else post_digest}
+
+
 def _file_state(path: Path) -> tuple[int, int, int, int] | None:
     try:
         info = os.stat(path)
@@ -888,16 +933,18 @@ def _file_state(path: Path) -> tuple[int, int, int, int] | None:
     return (info.st_size, info.st_mtime_ns, info.st_ino, info.st_dev)
 
 
-def _changed_during_analysis(item: ScanItem) -> ScanItem:
+def _changed_during_analysis(item: ScanItem, *, reason: str = FILE_CHANGED_REASON) -> ScanItem:
     """R12-7: the row of a file that changed while it was analyzed — 판단 불가, no hash.
 
     Its evidence came from bytes that can no longer be identified, so even a
     deterministic synthetic item does not decide (rule 2 does not apply).
+    R13-2: also an archive rewritten while it was extracted and each of its
+    member rows (``reason`` = :data:`ARCHIVE_MEMBER_CHANGED_REASON`).
     """
-    entry = CoverageEntry(FILE_INTEGRITY_CHECK, CoverageStatus.FAILED, FILE_CHANGED_REASON)
+    entry = CoverageEntry(FILE_INTEGRITY_CHECK, CoverageStatus.FAILED, reason)
     result = item.result
     if result is None:
-        return replace(item, sha256=None, error=item.error or FILE_CHANGED_REASON)
+        return replace(item, sha256=None, error=item.error or reason)
     changed = replace(
         result,
         score=0,
@@ -908,7 +955,7 @@ def _changed_during_analysis(item: ScanItem) -> ScanItem:
         band=band_for_verdict(Verdict.UNDETERMINED),
         band_label=VERDICT_LABELS[Verdict.UNDETERMINED],
         verdict_code=Verdict.UNDETERMINED,
-        verdict=f"{item.name}: 판단 불가 — {FILE_CHANGED_REASON}",
+        verdict=f"{item.name}: 판단 불가 — {reason}",
         coverage=[*result.coverage, entry],
         limitations=[f"검사 실패 — {entry.describe()}", *result.limitations],
     )
