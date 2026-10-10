@@ -408,7 +408,17 @@ copies in the session folder (SyncNet's own `torch.load` runs with
 cascade (so `DEEPFAKE_LENS_HAAR_CASCADE` and the `cv2.data` copy must hold
 the same bytes); the downloadable assets ship with an empty `sha256` — no
 official digest is published — and load only after the operator pins a copy
-they trust:
+they trust. R16-2 (round 16): when `DEEPFAKE_LENS_HAAR_CASCADE` is set it is
+the only cascade tried — a file with other bytes makes the face, rPPG,
+lip-sync, face-swap-seam and face-track checks failed `미고정 모델: 재정의
+cascade sha256 불일치(기대 …, 실제 …) — DEEPFAKE_LENS_HAAR_CASCADE`, a missing
+file `재정의 cascade 파일이 없습니다(…)`; the bundled cascade is not loaded in
+its place. R16-1: every face layer (face manipulation, face-swap seam, face
+track, the face crops of `requires_face`/`crop_faces` model members) uses
+strict detection — a detector that cannot run or raises (a refused cascade, a
+MediaPipe crash, `cv2.error`) is failed `얼굴 검출 오류: …`, never skipped
+"얼굴 미검출"; and a detector error is no longer dropped when a later
+detector finds a face.
 
 ```sh
 python -m deepfake_lens vendor-weights pin-asset face_landmarker.task          # sha256 of <models dir>/face_landmarker.task

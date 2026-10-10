@@ -763,7 +763,11 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 4: R16-5 — the golden record gains the full-extras scan and the constants
 #    hash, and the fixture a gradient PNG; no row text changed (the raise
 #    records the new golden sets; tests/golden_output.json gives the reason).
-OUTPUT_FORMAT_GENERATION = 4
+# 5: R16-1/R16-2 — a face detector that cannot run or raises is a failed
+#    faceswap_seam / face_track / face-crop model member ("얼굴 검출 오류: …",
+#    was skipped "얼굴 미검출"); a DEEPFAKE_LENS_HAAR_CASCADE override with other
+#    bytes fails every face layer instead of loading the bundled cascade.
+OUTPUT_FORMAT_GENERATION = 5
 
 
 def cache_extension(path: Path) -> str:

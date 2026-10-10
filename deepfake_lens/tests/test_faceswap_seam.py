@@ -62,7 +62,7 @@ class FaceSwapSeamTest(unittest.TestCase):
         cv2.imwrite(str(img_path), img)
 
         tiny = FaceRegion(x=10, y=10, width=20, height=20, landmarks=[], confidence=0.9)
-        with patch.object(seam_mod, "_detect_faces", return_value=[tiny]):
+        with patch.object(seam_mod, "_detect_faces_strict", return_value=[tiny]):
             analysis = analyze_faceswap_seam(img_path)
 
         self.assertEqual(analysis.reference_band, "unavailable")  # D1: layer modules report reference_band/reference_note, never a band
@@ -252,6 +252,6 @@ class ThresholdProfileTest(unittest.TestCase):
         profile = ThresholdProfile(
             version=THRESHOLD_PROFILE_VERSION, values={}, samples=3
         )
-        with patch.object(seam_mod, "_detect_faces", return_value=[face]):
+        with patch.object(seam_mod, "_detect_faces_strict", return_value=[face]):
             analysis = analyze_faceswap_seam("ignored.png", image_matrix=img, thresholds=profile)
         self.assertTrue(any("provisional" in lim or "임시" in lim for lim in analysis.limitations))

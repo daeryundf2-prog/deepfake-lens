@@ -37,6 +37,8 @@ from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 from .vendor_weights import default_models_dir
 from .checkpoint_integrity import load_torch_state
 from .native_stderr import quiet_native_stderr
+from .error_text import exception_text
+from .face import FACE_DETECTION_ERROR, FACE_DETECTOR_MISSING, FaceDetectionError, FaceDetectorUnavailable
 
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
 _DEFAULT_FPS = 4.0  # frames sampled per second
@@ -138,7 +140,15 @@ def analyze_face_track(
                     if not ok:
                         break
                     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    face = _largest_face(rgb)
+                    # R16-1 (round 16): strict detection — a detector that
+                    # could not run or raised ends the layer with that cause,
+                    # never "얼굴이 검출된 프레임이 0개".
+                    try:
+                        face = _largest_face(rgb)
+                    except FaceDetectorUnavailable as exc:
+                        return _unavailable(limitations, f"의존성 부재: {FACE_DETECTOR_MISSING}: {exception_text(exc)}")
+                    except FaceDetectionError as exc:
+                        return _unavailable(limitations, f"{FACE_DETECTION_ERROR}: {exception_text(exc)}")
                     if face is not None:
                         crops.append(_crop_face(rgb, face))
                         landmarks_seq.append(face.get("landmarks"))
@@ -182,11 +192,11 @@ def analyze_face_track(
 
 
 def _largest_face(rgb) -> dict | None:
-    """Largest measured-landmark face in one frame, or None."""
-    from .face import _detect_faces
+    """Largest measured-landmark face in one frame, or None (R16-1: detector errors raise)."""
+    from .face import _detect_faces_strict
 
     best = None
-    for region in _detect_faces(rgb):
+    for region in _detect_faces_strict(rgb):
         if region.landmarks_source not in ("mediapipe-facelandmarker", "mediapipe-facemesh"):
             continue
         if best is None or region.width * region.height > best["box"][2] * best["box"][3]:

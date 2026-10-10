@@ -154,7 +154,7 @@ class HaarCascadePinTest(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    def test_an_override_with_other_bytes_is_refused_and_the_pinned_one_loads(self) -> None:
+    def test_an_override_with_other_bytes_is_refused_and_nothing_loads_in_its_place(self) -> None:
         from deepfake_lens import face
 
         other = self.root / "my_cascade.xml"
@@ -163,10 +163,15 @@ class HaarCascadePinTest(unittest.TestCase):
             with mock.patch.object(face, "haar_cascade_candidates", return_value=[str(other)]):
                 with self.assertRaises(AssetPinError) as caught:
                     face.load_face_cascade()
-                self.assertIn(f"미고정 모델: {HAAR_FRONTALFACE}", str(caught.exception))
+                self.assertIn("미고정 모델: 재정의 cascade sha256 불일치", str(caught.exception))
                 self.assertEqual(_Cascade.opened, [])  # never handed to OpenCV
-            # The real candidate list: the override is refused, the bundled copy loads.
-            cascade = face.load_face_cascade()
+            # R16-2 (round 16): the real candidate list holds only the override —
+            # this test used to assert that the bundled copy then loaded silently
+            # (the defect: the operator's override was ignored, docs said failed).
+            with self.assertRaises(face.OverrideCascadePinError):
+                face.load_face_cascade()
+            self.assertEqual(_Cascade.opened, [])
+        cascade = face.load_face_cascade()  # no override: the bundled copy
         self.assertFalse(cascade.empty())
         self.assertEqual(len(_Cascade.opened), 1)
         opened, data = _Cascade.opened[0]

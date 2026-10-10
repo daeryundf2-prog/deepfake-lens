@@ -651,7 +651,22 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
     # 'crop_faces' goes further: each detected face region is cropped and
     # scored individually, then aggregated ('crop_aggregate', default max).
     if runtime in IMAGE_RUNTIMES and (profile.get("requires_face") or profile.get("crop_faces")):
-        crops = _face_crops(media_path, margin=float(profile.get("crop_margin", 0.25) or 0.25))
+        from .error_text import failure_reason
+        from .face import FACE_DETECTION_ERROR, FaceDetectionError, FaceDetectorUnavailable
+
+        try:
+            crops = _face_crops(media_path, margin=float(profile.get("crop_margin", 0.25) or 0.25))
+        except (FaceDetectionError, FaceDetectorUnavailable) as exc:
+            # R16-1 (round 16): a face detector that could not run or raised
+            # is a failed member, not "얼굴 영역이 검출되지 않아".
+            return ExternalModelAnalysis(
+                available=False,
+                score=0,
+                confidence=FAILED_CONFIDENCE,
+                model=model_name,
+                detail=f"{FACE_DETECTION_ERROR}: {failure_reason(exc)}",
+                limitations=profile_limitations,
+            )
         if not crops:
             label = "crop_faces" if profile.get("crop_faces") else "requires_face"
             return ExternalModelAnalysis(
@@ -755,39 +770,21 @@ def _score_from_runtime_profile(profile: dict[str, object], media_path: Path, *,
     )
 
 
-def _has_face(media_path: Path) -> bool:
-    """True only when at least one face region is detected in the image.
-
-    Face-conditioned members are meaningless off-face, so an unchecked or
-    unreadable image fails closed (skip) — consistent with the project's
-    precision-over-recall posture.
-    """
-    try:
-        import cv2  # noqa: F401
-    except ImportError:
-        return False
-    from .face import _detect_faces, _imread_unicode
-
-    image = _imread_unicode(media_path)
-    if image is None:
-        return False
-
-    return bool(_detect_faces(image))
-
-
 def _face_crops(media_path: Path, *, margin: float = 0.25) -> list:
     """Detected face regions cropped from the image (BGR ndarrays).
 
     Each box is expanded by ``margin`` (25% default — manipulation cues
     live at the blend boundary, so a bare face oval loses context) and
     clipped to the image. Empty when the image is unreadable or no face
-    is detected — callers treat that as the requires_face gate.
+    is detected — callers treat that as the requires_face gate. R16-1:
+    a detector that could not run or raised propagates
+    (``face.FaceDetectionError`` / ``FaceDetectorUnavailable``).
     """
     try:
         import cv2  # noqa: F401
     except ImportError:
         return []
-    from .face import _detect_faces, _imread_unicode
+    from .face import _detect_faces_strict as _detect_faces, _imread_unicode
 
     image = _imread_unicode(media_path)
     if image is None:

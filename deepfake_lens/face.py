@@ -36,7 +36,15 @@ from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .error_text import exception_text, failure_reason
 from .vendor_weights import default_models_dir
 from .native_path import CascadeLoadError, NativePathError, load_cascade
-from .model_assets import FACE_LANDMARKER, HAAR_FRONTALFACE, AssetPinError, verified_bytes, verified_copy
+from .model_assets import (
+    FACE_LANDMARKER,
+    HAAR_FRONTALFACE,
+    UNPINNED_ASSET_PREFIX,
+    AssetPinError,
+    sha256_mismatch_detail,
+    verified_bytes,
+    verified_copy,
+)
 from .native_stderr import quiet_native_stderr
 # R15-8: MediaPipe is imported with sounddevice blocked (no ldconfig/gcc/ld children, no TMPDIR files).
 from .mediapipe_import import import_mediapipe
@@ -167,9 +175,9 @@ def analyze_faces(
     try:
         faces = _detect_faces_strict(image)
     except FaceDetectorUnavailable as exc:
-        return _unavailable_analysis(f"얼굴 검출기 없음: {exception_text(exc)}")
+        return _unavailable_analysis(f"{FACE_DETECTOR_MISSING}: {exception_text(exc)}")
     except FaceDetectionError as exc:
-        return _error_analysis(f"얼굴 검출 오류: {exception_text(exc)}")
+        return _error_analysis(f"{FACE_DETECTION_ERROR}: {exception_text(exc)}")
     if not faces:
         return FaceAnalysis(
             score=0,
@@ -294,38 +302,71 @@ def _error_analysis(message: str) -> FaceAnalysis:
     )
 
 
+# R16-2 (round 16): the environment variable naming the one Haar cascade to use.
+HAAR_CASCADE_ENV = "DEEPFAKE_LENS_HAAR_CASCADE"
+# R16-2: the reason prefix of an override whose bytes are not the pinned cascade.
+OVERRIDE_CASCADE_MISMATCH = "재정의 cascade sha256 불일치"
+
+
+class OverrideCascadePinError(AssetPinError):
+    """R16-2: ``DEEPFAKE_LENS_HAAR_CASCADE`` names a file that is not the pinned cascade ("미고정 모델: 재정의 cascade sha256 불일치 …")."""
+
+    def __init__(self, detail: str) -> None:
+        self.asset = HAAR_FRONTALFACE
+        RuntimeError.__init__(self, f"{UNPINNED_ASSET_PREFIX}: {OVERRIDE_CASCADE_MISMATCH}({detail}) — {HAAR_CASCADE_ENV}")
+
+
+def haar_cascade_override() -> str | None:
+    """R16-2: the cascade ``DEEPFAKE_LENS_HAAR_CASCADE`` names, or None when it is not set."""
+    value = os.environ.get(HAAR_CASCADE_ENV, "").strip()
+    return value or None
+
+
 def haar_cascade_candidates() -> list[str]:
     """The Haar frontal-face cascade files to try, in order (existing files only).
 
     OpenCV 5.x keeps CascadeClassifier (xobjdetect) but no longer ships the
     cascade XML — the bundled copy under models/ keeps air-gapped installs
-    detecting faces; ``DEEPFAKE_LENS_HAAR_CASCADE`` names another. R15-3:
-    every candidate must hold the pinned bytes (``models/assets.json``) —
-    :func:`load_face_cascade` refuses any other file.
+    detecting faces. R16-2 (round 16): when ``DEEPFAKE_LENS_HAAR_CASCADE``
+    is set it is the *only* candidate — it used to be tried after OpenCV's
+    copy and before the bundled one, so an override with other bytes was
+    refused for its pin and the bundled cascade silently loaded instead.
+    R15-3: every candidate must hold the pinned bytes (``models/assets.json``)
+    — :func:`load_face_cascade` refuses any other file.
     """
+    override = haar_cascade_override()
+    if override is not None:
+        return [override] if Path(override).is_file() else []
     import cv2
 
     cv2_data = getattr(cv2, "data", None)
     cv2_cascade_dir = getattr(cv2_data, "haarcascades", "") or ""
     candidates = [
         cv2_cascade_dir + "haarcascade_frontalface_default.xml" if cv2_cascade_dir else "",
-        os.environ.get("DEEPFAKE_LENS_HAAR_CASCADE") or "",
         str(Path(__file__).resolve().parent / "models" / "haarcascade_frontalface_default.xml"),
     ]
     return [candidate for candidate in candidates if candidate and Path(candidate).is_file()]
 
 
-def _load_pinned_cascade(candidate: str) -> Any:
+def _load_pinned_cascade(candidate: str, *, override: bool = False) -> Any:
     """R15-3: the cascade at ``candidate`` loaded from a private copy of its verified bytes.
 
     The bytes are checked against the pin of ``haarcascade_frontalface_default.xml``
     while they are copied (:func:`model_assets.verified_copy`), and OpenCV
-    opens the copy — a file that is not the pinned cascade (a
-    ``DEEPFAKE_LENS_HAAR_CASCADE`` override, a swapped file) is refused with
-    :class:`AssetPinError` "미고정 모델: …". A copy that does not load is
-    reported under the candidate's own name.
+    opens the copy — a file that is not the pinned cascade (a swapped file)
+    is refused with :class:`AssetPinError` "미고정 모델: …"; R16-2: for the
+    ``DEEPFAKE_LENS_HAAR_CASCADE`` override the refusal is
+    :class:`OverrideCascadePinError` "미고정 모델: 재정의 cascade sha256
+    불일치 …". A copy that does not load is reported under the candidate's
+    own name.
     """
-    copy = verified_copy(HAAR_FRONTALFACE, candidate)
+    try:
+        copy = verified_copy(HAAR_FRONTALFACE, candidate)
+    except AssetPinError as exc:
+        actual = sha256_mismatch_detail(exc) if override else None
+        if actual is not None:
+            raise OverrideCascadePinError(actual) from exc
+        raise
     try:
         return load_cascade(copy)
     except CascadeLoadError as exc:
@@ -344,7 +385,16 @@ def load_face_cascade() -> Any:
     needed the detector is ``failed``. R15-3 (round 15): only the pinned
     cascade bytes are loaded (:func:`_load_pinned_cascade`); when every
     candidate is refused for its pin the :class:`AssetPinError` is raised.
+    R16-2 (round 16): a ``DEEPFAKE_LENS_HAAR_CASCADE`` override is the only
+    file tried — one that does not exist raises :class:`CascadeLoadError`,
+    one with other bytes :class:`OverrideCascadePinError`; the bundled
+    cascade is never loaded in its place.
     """
+    override = haar_cascade_override()
+    if override is not None:
+        if not Path(override).is_file():
+            raise CascadeLoadError(f"재정의 cascade 파일이 없습니다({HAAR_CASCADE_ENV}): {Path(override).name!r}")
+        return _load_pinned_cascade(override, override=True)
     failures: list[BaseException] = []
     for candidate in haar_cascade_candidates():
         try:
@@ -362,6 +412,13 @@ def load_face_cascade() -> Any:
 
 class FaceDetectorUnavailable(RuntimeError):
     """No face detector could run (no Haar cascade XML and no MediaPipe)."""
+
+
+# R16-1 (round 16): the reason prefixes of a face layer whose detector could
+# not run / raised — shared by face_manipulation, faceswap_seam and
+# face_track so core tells them from "얼굴 미검출" by prefix, not by wording.
+FACE_DETECTOR_MISSING = "얼굴 검출기 없음"
+FACE_DETECTION_ERROR = "얼굴 검출 오류"
 
 
 class FaceDetectionError(RuntimeError):
@@ -392,11 +449,13 @@ def face_detector_unavailable_reason(*, require_landmarks: bool = False) -> str 
 
 
 def _detect_faces(image: Any) -> list[FaceRegion]:
-    """Lenient detection for helper callers (crops, gates): [] on any problem.
+    """Lenient detection for helper scripts and experiments: [] on any problem.
 
-    Analysis entry points that report "얼굴 미검출" must use
-    :func:`_detect_faces_strict` instead, so a missing or crashed detector
-    is never mistaken for an image without faces (G1/G12).
+    Every analysis in the package — face_manipulation, faceswap_seam,
+    face_track and the model face crops (R16-1, round 16: the last three
+    used this and recorded a refused or crashed detector as "얼굴 미검출")
+    — uses :func:`_detect_faces_strict`, so a missing or crashed detector is
+    never mistaken for an image without faces (G1/G12).
     """
     try:
         return _detect_faces_strict(image)
@@ -415,6 +474,13 @@ def _detect_faces_strict(image: Any) -> list[FaceRegion]:
     no CascadeClassifier, so on a stock install the heuristic is the
     detector that runs; ``FaceRegion.detector`` names the one that found
     each face.
+
+    R16-1/R16-2 (round 16): a detector that raised — a cascade that does not
+    load or is refused for its pin (an override with other bytes), a
+    MediaPipe crash, a ``cv2.error`` — raises :class:`FaceDetectionError`
+    at once; the next detector is not tried in its place (an error used to
+    be dropped when a later detector found a face, or turned into "no face"
+    by the lenient callers).
     """
     try:
         import cv2
@@ -442,6 +508,8 @@ def _detect_faces_strict(image: Any) -> list[FaceRegion]:
         except cv2.error as exc:
             errors.append(exc)
             faces = []
+        if errors:  # R16-1/R16-2: never fall through to another detector
+            raise FaceDetectionError(f"{type(errors[0]).__name__}: {errors[0]}") from errors[0]
         for x, y, w, h in faces:
             landmarks, source = _face_landmarks(image, x, y, w, h)
             regions.append(
@@ -457,9 +525,7 @@ def _detect_faces_strict(image: Any) -> list[FaceRegion]:
         mesh_regions = _mediapipe_detect_faces(image, strict=True)
     except FaceDetectorUnavailable:
         mesh_regions = None
-    except FaceDetectionError as exc:
-        errors.append(exc)
-        mesh_regions = None
+    # R16-1: a MediaPipe crash (FaceDetectionError) propagates — not "no face".
     if mesh_regions is not None:
         detectors_run += 1
         if mesh_regions:
@@ -469,17 +535,12 @@ def _detect_faces_strict(image: Any) -> list[FaceRegion]:
     try:
         heuristic_regions = _skin_eye_heuristic_faces(image)
     except cv2.error as exc:
-        errors.append(exc)
-    else:
-        detectors_run += 1
-        if heuristic_regions:
-            return heuristic_regions
+        raise FaceDetectionError(f"{type(exc).__name__}: {exc}") from exc
+    detectors_run += 1
+    if heuristic_regions:
+        return heuristic_regions
     if detectors_run == 0:
-        if errors:
-            raise FaceDetectionError(f"{type(errors[0]).__name__}: {errors[0]}") from errors[0]
         raise FaceDetectorUnavailable("Haar cascade XML과 MediaPipe가 모두 없습니다")
-    if errors:
-        raise FaceDetectionError(f"{type(errors[0]).__name__}: {errors[0]}") from errors[0]
     return []
 
 

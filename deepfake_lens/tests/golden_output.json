@@ -25,6 +25,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 5,
+      "reason": "R16-1/R16-2: 얼굴 검출기 오류는 faceswap_seam·face_track·얼굴 크롭 모델 멤버에서 failed(얼굴 검출 오류)이고 DEEPFAKE_LENS_HAAR_CASCADE 재정의가 고정 바이트가 아니면 얼굴 계층 전부 failed — 고정 픽스처(심층 신호 꺼짐)의 행은 바뀌지 않음",
+      "sha256": "3e348b6c789b9a050295681403033584eab4afa4ddfa1ef1cc12beb643442f2f",
+      "sets": {
+        "stdlib": "3e348b6c789b9a050295681403033584eab4afa4ddfa1ef1cc12beb643442f2f",
+        "full-extras": "86e3817098603496e9e3f42e201c7ad443a0ea894c46ebebb7548a6ba6a61685"
+      },
+      "constants_sha256": "ef32094a2a60f52bb5f8728be4d8e01fe723fd2de34f1071263e09d83470113b",
+      "constants_count": 53,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.3",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

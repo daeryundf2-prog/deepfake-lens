@@ -62,9 +62,23 @@ S3FD_WEIGHTS = "sfd_face.pth"
 class AssetPinError(RuntimeError):
     """R15-3: a model asset that is not pinned, or whose bytes do not match its pin (``str()`` is Korean)."""
 
-    def __init__(self, asset: str, detail: str = "") -> None:
+    # R16-2: "기대 <12 hex>…, 실제 <12 hex>…" of a digest mismatch, None when the asset is not pinned.
+    mismatch: str | None = None
+
+    def __init__(self, asset: str, detail: str = "", *, mismatch: str | None = None) -> None:
         self.asset = asset
+        self.mismatch = mismatch
         super().__init__(f"{UNPINNED_ASSET_PREFIX}: {asset}" + (f" — {detail}" if detail else ""))
+
+
+def _mismatch_error(asset: str, expected: str, actual: str) -> AssetPinError:
+    mismatch = f"기대 {expected[:12]}…, 실제 {actual[:12]}…"
+    return AssetPinError(asset, f"sha256 불일치({mismatch})", mismatch=mismatch)
+
+
+def sha256_mismatch_detail(exc: AssetPinError) -> str | None:
+    """R16-2: the "기대 …, 실제 …" part of a digest-mismatch refusal, None for an unpinned asset."""
+    return exc.mismatch
 
 
 def _models_dir() -> Path:
@@ -121,7 +135,7 @@ def check_bytes(asset: str, data: bytes, manifest: dict[str, dict[str, Any]] | N
         raise AssetPinError(asset)
     actual = hashlib.sha256(data).hexdigest()
     if actual != expected:
-        raise AssetPinError(asset, f"sha256 불일치(기대 {expected[:12]}…, 실제 {actual[:12]}…)")
+        raise _mismatch_error(asset, expected, actual)
 
 
 def verified_bytes(asset: str, path: Path | str) -> bytes:
@@ -152,7 +166,7 @@ def verified_copy(asset: str, path: Path | str) -> str:
                 target.write(chunk)
         actual = digest.hexdigest()
         if actual != expected:
-            raise AssetPinError(asset, f"sha256 불일치(기대 {expected[:12]}…, 실제 {actual[:12]}…)")
+            raise _mismatch_error(asset, expected, actual)
     except BaseException:
         Path(copy).unlink(missing_ok=True)
         raise
@@ -246,6 +260,7 @@ __all__ = [
     "load_manifest",
     "manifest_path",
     "pin_asset",
+    "sha256_mismatch_detail",
     "verified_bytes",
     "verified_copy",
 ]

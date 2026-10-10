@@ -1212,6 +1212,25 @@ def _raise_unavailable(message: str) -> None:
     raise CheckSkipped(message or "적용 불가")
 
 
+def _raise_face_layer_unavailable(note: str, *, no_face: bool) -> None:
+    """R16-1 (round 16): a face layer's "unavailable" result as a coverage outcome.
+
+    A detector that raised (``face.FACE_DETECTION_ERROR`` prefix — a refused
+    or unloadable cascade, a MediaPipe crash, cv2.error) is ``failed`` with
+    the cause; a detector that could not run at all is ``skipped`` "의존성
+    부재"; only a real detection run that found nothing is "얼굴 미검출".
+    """
+    from .face import FACE_DETECTION_ERROR, NO_FACE_LABEL
+
+    if note.startswith(FACE_DETECTION_ERROR):
+        raise AnalyzerError(note)
+    if note.startswith("의존성 부재"):
+        raise CheckSkipped(note)
+    if no_face:
+        raise CheckSkipped(NO_FACE_LABEL)
+    _raise_unavailable(note)
+
+
 @dataclass
 class DeepLayers:
     """Outcome of the opt-in deep layers for one file.
@@ -1294,6 +1313,7 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
         import cv2  # noqa: F401 — dependency probe
 
         from .face import face_detector_unavailable_reason
+        from .faceswap_seam import NO_FACE_NOTE as SEAM_NO_FACE_NOTE
         from .faceswap_seam import analyze_faceswap_seam
 
         missing = face_detector_unavailable_reason()
@@ -1301,9 +1321,7 @@ def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
             raise CheckSkipped(f"의존성 부재: {missing}")
         seam = analyze_faceswap_seam(path, thresholds=thresholds)
         if seam.reference_band == UNAVAILABLE_BAND:
-            if seam.face_count == 0 and "얼굴" in seam.reference_note:
-                raise CheckSkipped("얼굴 미검출")
-            _raise_unavailable(seam.reference_note)
+            _raise_face_layer_unavailable(seam.reference_note, no_face=seam.reference_note == SEAM_NO_FACE_NOTE)
         return seam
 
     seam, entry = run_check("faceswap_seam", seam_check)
@@ -1392,7 +1410,7 @@ def _deep_video_layers(path: Path, thresholds=None) -> DeepLayers:
             raise CheckSkipped(f"의존성 부재: {missing}")
         track = analyze_face_track(path, thresholds=thresholds)
         if not track.available:
-            _raise_unavailable(track.reference_note)
+            _raise_face_layer_unavailable(track.reference_note, no_face=False)
         return track
 
     track, entry = run_check("face_track", track_check)

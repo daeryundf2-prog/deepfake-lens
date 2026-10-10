@@ -24,7 +24,16 @@ from typing import Any
 
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 
-from .face import FaceRegion, _detect_faces, _imread_unicode
+from .error_text import exception_text
+from .face import (
+    FACE_DETECTION_ERROR,
+    FACE_DETECTOR_MISSING,
+    FaceDetectionError,
+    FaceDetectorUnavailable,
+    FaceRegion,
+    _detect_faces_strict,
+    _imread_unicode,
+)
 from .native_stderr import quiet_native_stderr
 
 
@@ -63,6 +72,10 @@ def _resolve_thresholds(thresholds: Any) -> tuple[Any, bool]:
                 merged[short] = float(raw)
         return lambda key: merged[key], False
     return lambda key: SEAM_THRESHOLDS[key], False
+
+
+# R16-1: the reference note of an image in which the detectors ran and found no face.
+NO_FACE_NOTE = "얼굴 영역이 감지되지 않아 페이스스왑 경계면 분석을 수행할 수 없습니다."
 
 
 @dataclass(frozen=True)
@@ -113,12 +126,20 @@ def analyze_faceswap_seam(
         if image is None:
             return _error_analysis("이미지를 디코딩할 수 없습니다.")
 
-    faces = _detect_faces(image)
+    # R16-1 (round 16): strict detection — a detector that could not run or
+    # raised (a refused cascade, a MediaPipe crash, cv2.error) is reported
+    # as such, never as "얼굴 미검출" (the lenient _detect_faces did that).
+    try:
+        faces = _detect_faces_strict(image)
+    except FaceDetectorUnavailable as exc:
+        return _error_analysis(f"의존성 부재: {FACE_DETECTOR_MISSING}: {exception_text(exc)}")
+    except FaceDetectionError as exc:
+        return _error_analysis(f"{FACE_DETECTION_ERROR}: {exception_text(exc)}")
     if not faces:
         return FaceSwapSeamAnalysis(
             score=0,
             reference_band=UNAVAILABLE_BAND,
-            reference_note="얼굴 영역이 감지되지 않아 페이스스왑 경계면 분석을 수행할 수 없습니다.",
+            reference_note=NO_FACE_NOTE,
             signals=[],
             limitations=["이미지에서 유효한 얼굴을 찾지 못했습니다."],
             face_count=0,
