@@ -245,43 +245,51 @@ def asset_pin_tokens(models_dir: Path | str | None = None) -> list[str]:
 _FILE_DIGESTS: dict[tuple[str, int, int, int, int], str] = {}
 
 
-def _loader_files(asset: str) -> list[Path]:
-    """R17-7: the files a loader may read for ``asset`` without an override, in its order.
+def _loader_files(asset: str) -> list[tuple[str, Path]]:
+    """R17-7: the files a loader may read for ``asset`` without an override, in its order, with their role.
 
-    Haar: OpenCV's own copy, then the bundled one (``face.haar_cascade_candidates``);
-    the others: ``<effective models dir>/<asset>`` (FaceLandmarker, SyncNet).
+    Haar: OpenCV's own copy (role ``opencv``), then the bundled one
+    (``bundled``; ``face.haar_cascade_candidates``); the others:
+    ``<effective models dir>/<asset>`` (``models``; FaceLandmarker, SyncNet).
     """
     if asset == HAAR_FRONTALFACE:
-        files: list[Path] = []
+        files: list[tuple[str, Path]] = []
         try:
             import cv2
 
             data_dir = getattr(getattr(cv2, "data", None), "haarcascades", "") or ""
             if data_dir:
-                files.append(Path(data_dir + HAAR_FRONTALFACE))
+                files.append(("opencv", Path(data_dir + HAAR_FRONTALFACE)))
         except ImportError:
             pass
-        files.append(PACKAGED_MANIFEST.parent / HAAR_FRONTALFACE)
+        files.append(("bundled", PACKAGED_MANIFEST.parent / HAAR_FRONTALFACE))
         return files
-    return [_models_dir() / asset]
+    return [("models", _models_dir() / asset)]
 
 
 def _file_token(path: Path) -> str:
+    """R18-1 (round 18): the state of the file at ``path`` — its sha256, ``absent``, ``not-a-file`` or ``unreadable``.
+
+    Never the path itself: R17-7 put ``<absolute path>:<sha256>`` into the
+    scan-cache key, so the same assets in another venv or install folder
+    gave another key (WP-G: no paths in cache keys). The caller labels the
+    token with the file's role.
+    """
     try:
         info = path.stat()
-    except OSError:
-        return f"{path}:absent"
+    except (OSError, ValueError):
+        return "absent"
     if not path.is_file():
-        return f"{path}:not-a-file"
+        return "not-a-file"
     key = (str(path), info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino)
     digest = _FILE_DIGESTS.get(key)
     if digest is None:
         try:
             digest = _file_sha256(path)
         except OSError:
-            return f"{path}:unreadable"
+            return "unreadable"
         _FILE_DIGESTS[key] = digest
-    return f"{path}:{digest}"
+    return digest
 
 
 def asset_file_tokens() -> list[str]:
@@ -290,17 +298,26 @@ def asset_file_tokens() -> list[str]:
     The key held the pins only, so a failed check caused by the files
     themselves (a ``DEEPFAKE_LENS_HAAR_CASCADE`` with other bytes: "미고정
     모델: 재정의 cascade sha256 불일치") was replayed after the override was
-    fixed, and the reverse. Each token names the override variable's value
-    (as :func:`asset_override` reads it) or the loader's default files, with
-    each file's sha256 (``absent`` when there is none).
+    fixed, and the reverse. Each token names whether the override variable
+    is set (as :func:`asset_override` reads it) or the loader's default
+    files by role (``opencv`` / ``bundled`` / ``models``), with each file's
+    sha256 (``absent`` when there is none).
+
+    R18-1 (round 18): no path is in a token — only the asset name, the role
+    and the file state — so the key is the same for the same bytes in any
+    install folder or venv. An override naming no file adds its file *name*
+    (the coverage reason quotes it: "재정의 … 파일이 없습니다: 'x.xml'").
     """
     tokens: list[str] = []
     for asset in KNOWN_ASSETS:
         override = asset_override(asset)
         if override is not None:
-            tokens.append(f"asset-file:{asset}:override:{_file_token(override)}")
+            state = _file_token(override)
+            if state in ("absent", "not-a-file"):
+                state += f":{override.name}"
+            tokens.append(f"asset-file:{asset}:override:{state}")
         else:
-            tokens.append(f"asset-file:{asset}:" + "|".join(_file_token(path) for path in _loader_files(asset)))
+            tokens.append(f"asset-file:{asset}:" + "|".join(f"{role}:{_file_token(path)}" for role, path in _loader_files(asset)))
     return tokens
 
 

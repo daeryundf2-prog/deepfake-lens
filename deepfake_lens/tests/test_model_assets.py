@@ -591,7 +591,10 @@ class CacheKeyFollowsAssetFilesTest(unittest.TestCase):
                 fixed = self._context()
             with mock.patch.dict(os.environ, {"DEEPFAKE_LENS_HAAR_CASCADE": str(BUNDLED_HAAR)}):
                 bundled = self._context()
-        self.assertEqual(len({unset, with_wrong, fixed, bundled}), 4)
+        # R18-1 (round 18): this test expected the override of the fixed file and the override of the
+        # bundled file — the same bytes at two paths — to give two keys; that was the path in the key.
+        self.assertEqual(len({unset, with_wrong, fixed}), 3)
+        self.assertEqual(fixed, bundled)
 
     def test_a_swapped_models_folder_asset_changes_the_key(self) -> None:
         with _models_dir({}) as folder, mock.patch.dict(os.environ, {"DEEPFAKE_LENS_FACE_LANDMARKER": ""}):
@@ -601,6 +604,62 @@ class CacheKeyFollowsAssetFilesTest(unittest.TestCase):
             _rewrite_in_place(folder / FACE_LANDMARKER, b"task two")  # same size: the stat must still move (R17-12)
             two = self._context()
         self.assertEqual(len({absent, one, two}), 3)
+
+
+_CONTEXT_SCRIPT = "from deepfake_lens.scan_cache import _cache_scan_context; print(_cache_scan_context(None))"
+
+
+class CacheKeyHasNoInstallPathTest(unittest.TestCase):
+    """R18-1 (round 18): R17-7 put absolute asset paths (OpenCV data folder, the package folder, the models
+    folder) into the scan-cache key — the same version with the same assets gave another key in another
+    venv or install folder (WP-G: no paths in cache keys)."""
+
+    def _install(self, root: Path) -> Path:
+        import shutil
+
+        shutil.copytree(PACKAGE, root / "deepfake_lens", ignore=shutil.ignore_patterns("tests", "__pycache__", "*.pyc"))
+        return root
+
+    def _context_in(self, install: Path, **extra: str) -> str:
+        import subprocess
+
+        env = {key: value for key, value in os.environ.items() if not key.startswith("DEEPFAKE_LENS_")}
+        env.update(PYTHONPATH=str(install), PYTHONDONTWRITEBYTECODE="1", **extra)
+        done = subprocess.run([sys.executable, "-c", _CONTEXT_SCRIPT], cwd=install, env=env, capture_output=True, text=True, timeout=120)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return done.stdout.strip()
+
+    def test_two_install_folders_give_the_same_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            first = self._install(Path(tmp, "install-a"))
+            second = self._install(Path(tmp, "elsewhere", "install-b"))
+            self.assertEqual(self._context_in(first), self._context_in(second))
+            # The intent of R17-7 stays: an override with other bytes is another key, in either install.
+            override = Path(tmp, "cascade.xml")
+            override.write_bytes(BUNDLED_HAAR.read_bytes() + b" ")
+            changed = self._context_in(second, DEEPFAKE_LENS_HAAR_CASCADE=str(override))
+            self.assertNotEqual(changed, self._context_in(second))
+            self.assertEqual(changed, self._context_in(first, DEEPFAKE_LENS_HAAR_CASCADE=str(override)))
+
+    def test_no_token_names_a_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp).resolve()
+            data_one, data_two = folder / "venv-one" / "cv2data", folder / "venv-two" / "cv2data"
+            for data in (data_one, data_two):
+                data.mkdir(parents=True)
+                (data / HAAR_FRONTALFACE).write_bytes(BUNDLED_HAAR.read_bytes())
+            fake_cv2 = types.SimpleNamespace(data=types.SimpleNamespace(haarcascades=f"{data_one}{os.sep}"))
+            with mock.patch.dict(sys.modules, {"cv2": fake_cv2}), mock.patch.dict(os.environ, {"DEEPFAKE_LENS_HAAR_CASCADE": ""}):
+                one = model_assets.asset_file_tokens()
+                fake_cv2.data.haarcascades = f"{data_two}{os.sep}"
+                two = model_assets.asset_file_tokens()
+                (data_two / HAAR_FRONTALFACE).write_bytes(b"other bytes")
+                other = model_assets.asset_file_tokens()
+        self.assertEqual(one, two)
+        self.assertNotEqual(two, other)
+        for token in one + other:
+            self.assertNotIn(os.sep + "venv-", token)
+            self.assertNotIn(str(PACKAGE), token)
 
 
 if __name__ == "__main__":
