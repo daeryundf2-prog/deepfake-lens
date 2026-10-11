@@ -599,7 +599,10 @@
         // GUI-REV3 J-9: one order everywhere — headline, strip and ledger sort.
         const UNDET_SPLIT = ['cue', 'c2pa', 'failed', 'none', 'reference'];
         function cueEvidence(r) {
-            return ((r && r.evidence) || []).filter(e => e.kind === 'deterministic' && e.direction !== 'neutral');
+            // GUI-REV4 K-6: a cue is record evidence that did NOT reach a conclusion — on a row
+            // with a conclusion the same evidence is decisive, never a "단서".
+            if (!r || (r.verdict_code || 'undetermined') !== 'undetermined') return [];
+            return (r.evidence || []).filter(e => e.kind === 'deterministic' && e.direction !== 'neutral');
         }
         function unverifiedRecords(r) {
             return ((r && r.evidence) || []).filter(e => e.kind === 'deterministic' && e.direction === 'neutral' && e.layer === 'c2pa');
@@ -795,9 +798,14 @@
             const thr = lastProvenance.thresholds || {};
             if (thr.in_sample) lines.push('판정 임계값은 적합에 쓴 같은 표본에서 평가된 값(in-sample)이라 감정 근거가 아님');
             if (thr.provisional || thr.source === 'builtin_defaults') lines.push('판정 임계값은 미측정 잠정값');
-            const failed = results.filter(e => failedChecks(e.item).length).length;
-            const failedCue = results.filter(e => failedChecks(e.item).length && cueEvidence(e.item.result).length).length;
+            // K-6: only 판단 불가 rows are "판단 불가"; a row with a conclusion and a failed check
+            // is said separately.
+            const undetermined = results.filter(e => itemBand(e) === 'undetermined');
+            const failed = undetermined.filter(e => failedChecks(e.item).length).length;
+            const failedCue = undetermined.filter(e => failedChecks(e.item).length && cueEvidence(e.item.result).length).length;
             if (failed) lines.push(`검사가 실패한 파일 ${failed}개` + (failedCue ? `(그중 단서가 있는 ${failedCue}개)` : '') + ' — 해당 파일은 판단 불가');
+            const concludedFailed = results.filter(e => (itemBand(e) === 'manipulation_evidence' || itemBand(e) === 'authenticity_evidence') && failedChecks(e.item).length).length;
+            if (concludedFailed) lines.push(`결론은 났지만 일부 검사 실패 ${concludedFailed}개 — 실패한 검사는 근거에 쓰이지 않음`);
             if (results.some(e => (e.item.result || {}).grade === 'reference')) lines.push(TEXT_LEGAL_LIMITATION);
             const partial = partialResultNote(lastProvenance.summary);
             if (partial) lines.push(partial);

@@ -213,6 +213,20 @@ class LedgerReasonTest(unittest.TestCase):
         self.assertEqual(out, ["분석 못 함 — 중복 · 원본: 조작·생성 근거 있음",
                                "같은 내용의 파일: a_dalle.jpg — 원본 결론: 조작·생성 근거 있음", "other"])
 
+    def test_a_concluded_row_with_a_failed_check_is_not_called_undetermined(self) -> None:
+        """GUI-REV4 K-6: mj_trunc-like rows (a conclusion plus failed checks) are counted apart; decisive evidence is no cue."""
+        manip = _row("manipulation_evidence", evidence=[{"kind": "deterministic", "direction": "synthetic", "strength": "strong", "title": "생성 도구", "detail": ""}],
+                     coverage=[{"check": "c2pa", "status": "failed", "reason": "잘림"}])
+        failed = _row(coverage=[{"check": "metadata", "status": "failed", "reason": "잘림"}])
+        out = _run(
+            f"results = {json.dumps([manip, failed], ensure_ascii=False)}.map(function (item) {{ return {{item: item}}; }});\n"
+            "console.log(JSON.stringify([reportLimitLines(), cueEvidence(results[0].item.result).length]));"
+        )
+        assert isinstance(out, list)
+        self.assertIn("검사가 실패한 파일 1개 — 해당 파일은 판단 불가", out[0])
+        self.assertIn("결론은 났지만 일부 검사 실패 1개 — 실패한 검사는 근거에 쓰이지 않음", out[0])
+        self.assertEqual(out[1], 0)
+
     def test_skipped_checks_are_grouped_by_reason_and_every_name_stays(self) -> None:
         coverage = [{"check": f"model:{name}", "status": "skipped", "reason": f"모델 실행 불가: {name}: {GATE}"} for name in MODELS]
         coverage += [{"check": check, "status": "skipped", "reason": "비활성화(심층 신호 검사를 켜지 않음)"} for check in ("face_manipulation", "inpaint")]
