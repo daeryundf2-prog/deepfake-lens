@@ -304,7 +304,13 @@ def main() -> int:
             if page.evaluate("pdfAvailable") is True:
                 preview_equals_pdf()
             page.uncheck("#inc-undet")
-            a4_ready()
+            if page.evaluate("selectedEntries().length") == 0:
+                # A folder without evidence-bearing rows (e.g. the adversarial set): with 판단 불가
+                # unticked nothing is chosen — the preview must still settle and say so.
+                assert "고른 서증이 없습니다" in a4_ready(), page.locator("#a4").inner_text()
+                print("gui_smoke: no evidence-bearing rows — checked the empty-choice preview")
+            else:
+                a4_ready()
             # GUI-REV G-1: every row is posted for every format; the choice only names exhibits.
             total_rows = page.evaluate("results.length")
             for kind in ("evidence", "pdf", "html", "json"):

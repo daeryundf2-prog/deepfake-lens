@@ -513,6 +513,27 @@ class ExportFeedbackSourceTest(unittest.TestCase):
         self.assertLess(body.index("exportStickyNote = '';"), body.index("const why = exportBlockReason(kind, sel);"))
 
 
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class A4EmptyChoiceTest(unittest.TestCase):
+    def test_a_preview_with_nothing_to_draw_is_settled(self) -> None:
+        """GUI gate (Linux reference run): with no results, or results but no chosen exhibit, the
+        preview says so and is marked ready at once — it stayed not-ready for good."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        out = _node(
+            "const box = {dataset: {}, innerHTML: ''}; const $ = () => box; let a4Timer = null; let a4Seq = 0;\n"
+            "let results = []; const loadA4 = () => { throw new Error('no fetch expected'); };\n"
+            + _function(source, "renderA4") +
+            "renderA4([]); const none = [box.dataset.ready, box.innerHTML];\n"
+            "results = [{item: {path: 'a.png'}}]; renderA4([]); const empty = [box.dataset.ready, box.innerHTML];\n"
+            "console.log(JSON.stringify([none, empty]));")
+        assert isinstance(out, list)
+        (ready_none, html_none), (ready_empty, html_empty) = out
+        self.assertNotEqual(ready_none, "")
+        self.assertIn("검사 결과가 없습니다", html_none)
+        self.assertNotEqual(ready_empty, "")
+        self.assertIn("고른 서증이 없습니다", html_empty)
+
+
 class ExportNoteParticleTest(unittest.TestCase):
     def test_no_particle_is_glued_to_a_format_name(self) -> None:
         """GUI-REV4 K-7: "서명된 JSON를" — the export note never glues 을/를 to the format name."""

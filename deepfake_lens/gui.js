@@ -2365,8 +2365,15 @@
             a4Seq += 1;
             const box = $('a4');
             box.dataset.ready = '';
-            if (!results.length) { box.innerHTML = '<p class="miss">검사 결과가 없습니다.</p>'; return; }
-            if (!sel.length) { box.innerHTML = '<p class="miss">서증으로 넣을 파일을 고르면 증거설명서 서식 그대로 미리 봅니다.</p>'; return; }
+            // GUI-GATE (Linux reference run): a preview with nothing to draw is settled at once —
+            // it said so but stayed "not ready" for good (e.g. a folder whose rows are all
+            // 판단 불가 with that group unticked: 0 exhibits).
+            if (!results.length) { box.innerHTML = '<p class="miss">검사 결과가 없습니다.</p>'; box.dataset.ready = String(a4Seq); return; }
+            if (!sel.length) {
+                box.innerHTML = '<p class="miss">고른 서증이 없습니다 — 서증으로 넣을 파일을 고르면 증거설명서 서식 그대로 미리 봅니다.</p>';
+                box.dataset.ready = String(a4Seq);
+                return;
+            }
             const seq = a4Seq;
             a4Timer = setTimeout(() => loadA4(seq), 250);
         }
