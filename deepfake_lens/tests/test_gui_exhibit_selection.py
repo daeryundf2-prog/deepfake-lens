@@ -134,6 +134,26 @@ class WebReportSelectionTest(unittest.TestCase):
         self.assertEqual(appendix, sorted(row["path"] for row in self.rows[1:]))
         self.assertEqual(signed["unrecorded_files"]["total_files"], self.summary["unsupported_or_failed"])
 
+    def test_rendered_pdf_lists_the_appendix(self) -> None:
+        """GUI-REV G-10: the real evidence-statement PDF (pymupdf) prints the appendix rows and hashes."""
+        from deepfake_lens.pdf_backend import import_pymupdf, pymupdf_available
+
+        if not pymupdf_available():
+            self.skipTest("pymupdf is not installed")
+        chosen = [self.rows[0]["path"]]
+        pdf = webapp_api._report_payload(self._body(exhibit_paths=chosen, submitter_side="plaintiff"), "evidence", default_folder=self.folder)
+        assert isinstance(pdf, bytes), pdf
+        with import_pymupdf().open(stream=pdf, filetype="pdf") as doc:
+            text = "".join(page.get_text() for page in doc).replace("\n", "")
+        self.assertIn(SELECTION_APPENDIX_TITLE, text)
+        self.assertIn(f"서증으로 넣지 않은 파일 {len(self.rows) - 1}개", text)
+        for row in self.rows[1:]:
+            self.assertIn(row["path"], text)
+            if row.get("sha256"):
+                self.assertIn(row["sha256"], text)
+        self.assertIn("갑 제1호증", text)
+        self.assertNotIn("갑 제2호증", text)
+
     def test_other_formats_carry_every_row_whatever_the_choice(self) -> None:
         signed = webapp_api._report_payload(self._body(exhibit_paths=[self.rows[0]["path"]]), "json", default_folder=self.folder)
         assert isinstance(signed, dict)
