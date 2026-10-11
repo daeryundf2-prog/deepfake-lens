@@ -79,6 +79,19 @@ class TempFolderFallbackTest(unittest.TestCase):
         self.assertEqual(os.listdir(self.ascii_tmp), [])  # the session folder was used there and removed
         self.assertEqual(os.listdir(self.korean_tmp), [])
 
+    def test_a_tmpdir_that_is_a_file_is_named_as_one(self) -> None:
+        """R17-11 (round 17): DEEPFAKE_LENS_TMPDIR naming a file was reported "(폴더가 없음)"."""
+        a_file = self.root / "tmp-file"
+        a_file.write_text("x", encoding="utf-8")
+        env = _env(self.root, TMPDIR=str(self.ascii_tmp), **{native_path.TMP_ENV: str(a_file)})
+        payload, stderr = self._scan(env)
+        self.assertEqual(payload["temp_folder"]["reason"], "폴더가 아니라 파일임")
+        self.assertEqual(payload["temp_folder"]["requested"], str(a_file))
+        notices = [line for line in stderr.splitlines() if line.startswith(NOTICE_HEAD)]
+        self.assertEqual(len(notices), 1, stderr[-800:])
+        self.assertIn("(폴더가 아니라 파일임)", notices[0])
+        self.assertNotIn("폴더가 없음", notices[0])
+
     def test_deepfake_lens_tmpdir_is_used_without_a_notice(self) -> None:
         chosen = self.root / "chosen"
         chosen.mkdir()

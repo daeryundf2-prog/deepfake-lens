@@ -558,7 +558,8 @@ def _unusable_base(base: str) -> str:
     if not base.isascii():
         return "경로에 ASCII가 아닌 문자가 있음"
     if not os.path.isdir(base):
-        return "폴더가 없음"
+        # R17-11 (round 17): a file there said "폴더가 없음".
+        return "폴더가 아니라 파일임" if os.path.exists(base) else "폴더가 없음"
     return ""
 
 
