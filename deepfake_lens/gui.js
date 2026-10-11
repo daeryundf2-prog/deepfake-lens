@@ -816,7 +816,9 @@
         // GUI-REV2 H-8: the case fields are kept for the tab, so they are tied to the
         // folder they were entered (or confirmed) for; another folder asks again.
         let caseFolder = '';
-        function caseScope() { return lastScanRoot ? 'root:' + lastScanRoot : (results.length ? 'upload' : ''); }
+        // J-4: each upload (or archive quick check) is its own scope, not one shared 'upload'.
+        let lastUploadScope = '';
+        function caseScope() { return lastScanRoot ? 'root:' + lastScanRoot : (results.length ? lastUploadScope || 'upload' : ''); }
         function caseHasValues() { return Object.keys(CASE_FIELDS).some(id => caseValue(id)) || Boolean(submitterSide()); }
         function caseNeedsConfirm(folder, scope, hasValues) {
             return Boolean(hasValues && folder && scope && folder !== scope);
@@ -824,10 +826,12 @@
         function caseUnconfirmed() { return caseNeedsConfirm(caseFolder, caseScope(), caseHasValues()); }
         function confirmCaseFolder() {
             caseFolder = caseScope();
-            saveCase(true);
+            saveCase();
         }
-        function saveCase(keepFolder) {
-            if (!keepFolder && caseScope()) caseFolder = caseScope();
+        // GUI-REV3 J-4: saving never rebinds the case to the current folder — only the
+        // "이 폴더의 사건이 맞음" button or a new 사건번호/사건명 does (editing 법무법인 or
+        // the side silently cleared the H-8 confirmation).
+        function saveCase() {
             const out = {};
             Object.keys(CASE_FIELDS).forEach(k => { out[k] = $(k).value; });
             out.side = submitterSide();
@@ -858,7 +862,9 @@
             if (side) side.checked = true;
             if (typeof saved.folder === 'string') caseFolder = saved.folder;
         } catch (e) { /* no saved case */ }
-        const onCaseChange = () => {
+        const onCaseChange = event => {
+            const identity = event && event.target && (event.target.id === 'case-no' || event.target.id === 'case-name');
+            if (identity && caseScope()) caseFolder = caseScope();
             saveCase();
             updateCaseLine();
             if (currentView === 'report') renderReport();
@@ -1299,6 +1305,7 @@
                 }
                 lastScanRoot = '';  // uploads are temp files; heatmaps unavailable
                 lastScanRootB64 = '';
+                lastUploadScope = 'upload:' + Date.now().toString(36) + ':' + (selectedFiles[0] ? (selectedFiles[0].webkitRelativePath || selectedFiles[0].name) : '');
                 processResults({ items: allItems, coverage: stagedCoverage, thresholds: stagedThresholds });
                 toast(`분석 완료 — ${allItems.length}개 파일`);
                 selectedFiles = [];
@@ -2425,6 +2432,7 @@
                     box.innerHTML = '';
                     lastScanRoot = '';
                     lastScanRootB64 = '';
+                    lastUploadScope = 'check:' + Date.now().toString(36);
                     retireErrors();
                     processResults(data);
                     toast(`압축 해제 — ${(data.items || []).length}개 파일 분석됨`);

@@ -431,8 +431,25 @@ def main() -> int:
                 page.wait_for_function("() => currentView === 'report'")
                 assert "다른 검사" in page.locator("#report-checks").inner_text(), "the case fields of another folder must be confirmed"
                 assert "확인" in page.evaluate("exportBlockReason('evidence', selectedEntries())")
+                # GUI-REV3 J-4: editing another case field or the side does not clear it.
+                page.evaluate("document.querySelector('.case-more').open = true")
+                page.fill("#case-firm", "법무법인 시험")
+                page.check("input[name='submitter-side'][value='plaintiff']")
+                assert "다른 검사" in page.locator("#report-checks").inner_text(), "editing 법무법인/의뢰 측 silently confirmed the folder"
+                page.check("input[name='submitter-side'][value='defendant']")
                 page.get_by_role("button", name="이 폴더의 사건이 맞음").click()
                 assert "다른 검사" not in page.locator("#report-checks").inner_text()
+
+            # GUI-REV3 J-4: each upload is its own scope — a second, unrelated upload asks again.
+            for index in range(2):
+                page.evaluate("location.hash = '#/scan'")
+                page.evaluate(f"addFiles([new File(['올린 글 {index}'], 'upload{index}.txt', {{type: 'text/plain'}})])")
+                page.click("#upload-btn")
+                page.wait_for_function("() => scanBusy === false && results.length > 0", timeout=60_000)
+                page.evaluate("location.hash = '#/report'")
+                page.wait_for_function("() => currentView === 'report'")
+                assert "다른 검사" in page.locator("#report-checks").inner_text(), f"upload {index}: the case fields of another scope must be confirmed"
+                page.get_by_role("button", name="이 폴더의 사건이 맞음").click()
 
             # 7. CSP/console errors: none tolerated. No request leaves the local server
             #    (fonts are local stacks; nothing is fetched from the network).
