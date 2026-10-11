@@ -4,6 +4,10 @@
 원점수(미보정, 결론 불참여) — 0" (gui.js result card and layer view): an
 unmeasured 0 that reads like a measurement (G1, QA-OUT-5 "확률 없음"). It is
 now "없음 — 미실행(<사유>)"; a member that did not run says the same.
+
+R19-10 (round 19): the layer diagnostics (style/fingerprint, metadata/C2PA)
+said "원점수 0" when ``raw_score`` was null — the same unmeasured 0. They say
+"원점수 없음" now (rawScoreText).
 """
 
 from __future__ import annotations
@@ -37,6 +41,15 @@ class ModelScoreSourceTest(unittest.TestCase):
         self.assertNotIn("(사용 불가)", source)
 
 
+class LayerRawScoreSourceTest(unittest.TestCase):
+    def test_a_missing_layer_score_is_not_zero(self) -> None:
+        source = GUI_JS.read_text(encoding="utf-8")
+        self.assertNotRegex(source, r"raw_score != null \? \w+\.raw_score : 0")
+        self.assertIn("계층 진단(참고 신호 · 미측정) — 원점수 ${rawScoreText(a.raw_score)}", source)
+        self.assertIn("계층 진단(참고 신호 · 미측정) — 원점수 ${rawScoreText(fr.raw_score)}", source)
+        self.assertIn("function rawScoreText(value) { return value != null ? String(value) : '없음'; }", source)
+
+
 def _js_engine() -> list[str] | None:
     if shutil.which("node"):
         return ["node"]
@@ -62,6 +75,20 @@ class ModelScoreBehaviourTest(unittest.TestCase):
             done = subprocess.run([*engine, str(path)], capture_output=True, text=True, timeout=60)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout.strip().splitlines(), ["없음 — 미실행(모델 프로필 미지정)", "0", "73", "없음 — 미실행(사유 기록 없음)"])
+
+
+    def test_raw_score_text(self) -> None:
+        engine = _js_engine()
+        assert engine is not None
+        line = next(line for line in GUI_JS.read_text(encoding="utf-8").splitlines() if "function rawScoreText(" in line)
+        body = line + "\nvar out = [rawScoreText(null), rawScoreText(undefined), rawScoreText(0), rawScoreText(12)];\n"
+        script = f"{body}console.log(out.join('\\n'));" if engine[0] == "node" else f"function run() {{\n{body}return out.join('\\n');\n}}"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "raw.js"
+            path.write_text(script, encoding="utf-8")
+            done = subprocess.run([*engine, str(path)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.strip().splitlines(), ["없음", "없음", "0", "12"])
 
 
 if __name__ == "__main__":

@@ -215,6 +215,8 @@
 
         // R18-17 (round 18): a model that did not run (available === false) has no score —
         // its 0 was shown as "외부 모델 원점수(미보정, 결론 불참여) — 0", like a measurement.
+        // R19-10 (round 19): a layer diagnostic without a score says "없음" — "원점수 0" read as a measured 0.
+        function rawScoreText(value) { return value != null ? String(value) : '없음'; }
         function modelScoreText(entry) {
             if (!entry || entry.available === false) {
                 const why = entry && (entry.detail || entry.reason || entry.error);
@@ -1608,7 +1610,7 @@
                 const a = data.advanced, body = a.diagnostic || a;
                 const sig = (body.signals || []).map(s => `<li>${shown(s.title)} — ${shown(s.detail)}</li>`).join('');
                 const lim = (body.limitations || []).map(l => `<li>${shown(l)}</li>`).join('');
-                parts.push(layer(`스타일/지문 분석 · 계층 진단(참고 신호 · 미측정) — 원점수 ${a.raw_score != null ? a.raw_score : 0}`,
+                parts.push(layer(`스타일/지문 분석 · 계층 진단(참고 신호 · 미측정) — 원점수 ${rawScoreText(a.raw_score)}`,
                     (a.notice ? `<div class="note">${shown(a.notice)}</div>` : '') +
                     (sig ? `<ul>${sig}</ul>` : '<div class="note">발동 신호 없음</div>') + (lim ? `<ul class="c-amber">${lim}</ul>` : '')));
             }
@@ -1616,7 +1618,7 @@
                 const fr = data.forensic, body = fr.diagnostic || fr;
                 const sig = (body.signals || []).map(s => `<li>${shown(s.title)} — ${shown(s.detail)}</li>`).join('');
                 const prov = (body.provenance_records || []).map(p => `<li>${shown(p.kind || p.source || p.standard || 'record')}: ${shown(p.summary || p.detail || p.provider || '')}</li>`).join('');
-                parts.push(layer(`메타데이터 / C2PA · 계층 진단(참고 신호 · 미측정) — 원점수 ${fr.raw_score != null ? fr.raw_score : 0}`,
+                parts.push(layer(`메타데이터 / C2PA · 계층 진단(참고 신호 · 미측정) — 원점수 ${rawScoreText(fr.raw_score)}`,
                     (fr.notice ? `<div class="note">${shown(fr.notice)}</div>` : '') +
                     ((sig ? `<ul>${sig}</ul>` : '') + (prov ? `<ul>${prov}</ul>` : '') || '<div class="note">단서 없음</div>')));
             }
@@ -1689,10 +1691,11 @@
             const box = $('cmp-result');
             const body = data.diagnostic || data;
             const kind = body.kind === 'speaker' ? '화자 유사도 (음성)' : body.kind === 'stylometry' ? '필자 유사도 (텍스트)' : (body.kind || '비교');
-            const score = data.raw_score != null ? data.raw_score : 0;
+            // R19-10: no score is "없음", never a measured-looking 0.
+            const score = data.raw_score != null ? String(Number(data.raw_score) || 0) : rawScoreText(null);
             const parts = [];
             parts.push(`<div class="qc-head">
-                <span class="big bc-other">${Number(score) || 0}</span>
+                <span class="big bc-other">${escapeHtml(score)}</span>
                 <div><span class="band-pill band-unknown">계층 진단(참고 신호 · 미측정)</span>
                 <div class="note mt-4">${shown(kind)}${body.method ? ' · ' + shown(body.method) : ''}</div></div></div>`);
             if (data.notice) parts.push(`<div class="note">${shown(data.notice)}</div>`);
