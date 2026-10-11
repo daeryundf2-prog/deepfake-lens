@@ -484,7 +484,11 @@ def _main(argv: list[str] | None = None) -> int:
 
     parser, cmd_parsers = build_parser()
 
-    args = parser.parse_args(argv)
+    # R18-19 (f) (round 18): an argument the subcommand does not take (`api-serve --folder X`) was
+    # reported by the top-level parser with the top-level usage; the subcommand's parser reports it now.
+    args, extras = parser.parse_known_args(argv)
+    if extras:
+        (cmd_parsers.get(str(args.command)) or parser).error(f"unrecognized arguments: {' '.join(extras)}")
     if args.command is None:
         parser.print_help()
         return 0

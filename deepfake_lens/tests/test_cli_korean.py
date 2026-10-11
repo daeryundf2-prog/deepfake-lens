@@ -189,3 +189,28 @@ class RoundNinePlaceholdersTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnknownArgumentUsageTest(unittest.TestCase):
+    """R18-19 (f) (round 18): `api-serve --folder X` (an argument api-serve does not take) printed the top-level
+    usage ("사용법: deepfake-lens [-h] {doctor,scan,…}"); the subcommand's own usage is shown now."""
+
+    def _run(self, argv: list[str]) -> tuple[int, str]:
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            try:
+                code = main(argv)
+            except SystemExit as exc:
+                code = int(exc.code or 0)
+        return code, err.getvalue()
+
+    def test_the_subcommand_reports_its_unknown_argument(self) -> None:
+        for argv, prog in ((["api-serve", "--folder", "/tmp"], "api-serve"), (["doctor", "--nope"], "doctor")):
+            with self.subTest(argv=argv):
+                code, err = self._run(argv)
+                self.assertEqual(code, 2, err)
+                usage = err.splitlines()[0]
+                self.assertTrue(usage.startswith("사용법:"), err)
+                self.assertIn(prog, usage)
+                self.assertNotIn("{doctor,scan", err)  # not the top-level command list
+                self.assertIn(f"{prog}: 오류: 알 수 없는 인수: {' '.join(argv[1:])}", err)
