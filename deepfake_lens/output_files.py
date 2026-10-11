@@ -73,7 +73,14 @@ def write_output_bytes(path: Path | str, data: bytes) -> None:
         except OSError as exc:
             raise OutputWriteError(path, exc) from exc
         return
+    from .native_path import track_output_temp, untrack_output_temp
+
     temp = target.with_name(f".{target.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+    # R20-6 (round 20): a SIGTERM or SIGHUP during the write ends the process in native_path's
+    # cleanup handler (the default action re-raised) — no ``except`` below runs there, and
+    # ".<name>.<pid>.<id>.tmp" was left next to the output. The handler's shutdown_session
+    # removes the temp files tracked here.
+    track_output_temp(str(temp))
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         with open(temp, "xb") as handle:
@@ -82,8 +89,10 @@ def write_output_bytes(path: Path | str, data: bytes) -> None:
             os.fsync(handle.fileno())
         os.replace(temp, target)
     except BaseException as exc:
-        # R19-6 (round 19): every exception removes the temp file — a Ctrl-C (KeyboardInterrupt) or a
-        # SIGTERM's SystemExit during the write left ".<name>.<pid>.<id>.tmp" next to the output.
+        # R19-6 (round 19): an exception raised in this thread during the write — an OSError, a
+        # Ctrl-C's KeyboardInterrupt, a SystemExit — removes the temp file here. R20-6: a SIGTERM /
+        # SIGHUP does not raise here (see above); SIGKILL, or a signal the process ignores or handles
+        # with a Python handler of its own, leaves the file.
         try:
             temp.unlink(missing_ok=True)
         except OSError:
@@ -91,6 +100,8 @@ def write_output_bytes(path: Path | str, data: bytes) -> None:
         if isinstance(exc, OSError):
             raise OutputWriteError(target, exc) from exc
         raise
+    finally:
+        untrack_output_temp(str(temp))
 
 
 def write_output_text(path: Path | str, text: str) -> None:

@@ -194,6 +194,30 @@ NATIVE_ALIAS_MAX = 65536
 _ALIASES: OrderedDict[str, str] = OrderedDict()
 # Every session folder this process created (normally one).
 _SESSION_DIRS: list[str] = []
+# R20-6 (round 20): output temp files being written now (output_files.write_output_bytes), removed by
+# shutdown_session — a SIGTERM / SIGHUP during the write ends the process through _cleanup_then_default,
+# where no ``except`` of the writer runs. A dict (insertion order, atomic add/pop under the GIL), no lock.
+_OUTPUT_TEMPS: dict[str, None] = {}
+
+
+def track_output_temp(path: str) -> None:
+    """R20-6: ``path`` is an output temp file being written; :func:`shutdown_session` removes it."""
+    _OUTPUT_TEMPS[path] = None
+
+
+def untrack_output_temp(path: str) -> None:
+    """R20-6: the write of ``path`` is over (renamed over its target or removed)."""
+    _OUTPUT_TEMPS.pop(path, None)
+
+
+def _remove_output_temps() -> None:
+    """R20-6: remove the output temp files still being written (signal-handler safe: no lock, no import)."""
+    for path in list(_OUTPUT_TEMPS):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        _OUTPUT_TEMPS.pop(path, None)
 # A staged base name: "<6-digit counter>-<12 hex><.ext>" (see _stage).
 _STAGED_BASE = r"\d{6}-[0-9a-f]{12}(?:\.[0-9a-z]{1,%d})?" % (MAX_SUFFIX_CHARS - 1)
 _STAGED_NAME = re.compile(rf"(?<![\w.-])({_STAGED_BASE})(?![\w.-])")
@@ -515,8 +539,11 @@ def shutdown_session() -> bool:
     """R15-1: the process is ending — "종료 중" flag, children stopped, folders removed until gone.
 
     Signal-handler safe (no lock). True when no session folder is left.
+    R20-6: also removes the output temp files being written
+    (:func:`track_output_temp`).
     """
     shutdown.begin()
+    _remove_output_temps()
     return cleanup_session()
 
 
