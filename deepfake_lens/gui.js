@@ -542,15 +542,30 @@
             const hit = ((r && r.coverage) || []).find(c => c.status === 'skipped' && SCOPE_REASON.test(String(c.reason || '')));
             return hit ? String(hit.reason) : '';
         }
+        // GUI-REV G-2/G-3: why a 판단 불가 row is undetermined — one kind per row:
+        // reference (text, 참고 전용), failed (a check failed), cue (it carries
+        // record evidence that does not reach a conclusion — never "근거 없음"),
+        // none (no record evidence).
+        const UNDET_KINDS = { cue: '단서만 있음', none: '근거 없음', failed: '검사 실패', reference: '참고 전용' };
+        function cueEvidence(r) {
+            return ((r && r.evidence) || []).filter(e => e.kind === 'deterministic' && e.direction !== 'neutral');
+        }
+        function undeterminedKind(item) {
+            const r = item.result || {};
+            if (r.grade === 'reference') return 'reference';
+            if (failedChecks(item).length) return 'failed';
+            if (cueEvidence(r).length) return 'cue';
+            return 'none';
+        }
+        // A decisive check (metadata, C2PA, image type) that did not run for a
+        // reason other than the file's scope — e.g. a missing dependency.
+        function decisiveNotRun(r) {
+            return ((r && r.coverage) || []).filter(c => c.status === 'skipped' && DECISIVE_CHECKS.includes(c.check) && !SCOPE_REASON.test(String(c.reason || '')));
+        }
         function shortVerdict(item) {
             const v = verdictOf(item);
-            const r = item.result || {};
             if (v === 'other') return '분석 못 함 — ' + (STATUS_LABELS[item.status] || '기타');
-            if (v === 'undetermined') {
-                if (r.grade === 'reference') return '판단 불가 — 참고 전용';
-                if (failedChecks(item).length) return '판단 불가 — 검사 실패';
-                return '판단 불가 — 근거 없음';
-            }
+            if (v === 'undetermined') return '판단 불가 — ' + UNDET_KINDS[undeterminedKind(item)];
             return VERDICT_SHORT[v];
         }
         function decisiveEvidence(r, v) {
@@ -574,9 +589,22 @@
                 if (top) return top.detail ? top.title + ' — ' + top.detail : top.title;
                 return VERDICT_SHORT[v];
             }
+            const kind = undeterminedKind(item);
+            if (kind === 'reference') return '참고 전용 — 텍스트 생성 판별은 결론을 내지 않음';
             const failed = failedChecks(item);
-            if (failed.length) return '검사 실패 — ' + failed.map(c => checkLabel(c.check)).join(', ');
-            if (r.grade === 'reference') return '참고 전용 — 텍스트 생성 판별은 결론을 내지 않음';
+            if (kind === 'failed') return '검사 실패 — ' + failed.map(c => checkLabel(c.check)).join(', ');
+            // G-3: a decisive check that did not run leads, ahead of the file's scope.
+            const notRun = decisiveNotRun(r);
+            const notRunText = notRun.length ? '결정 검사 미실행 — ' + notRun.map(c => checkLabel(c.check) + ': ' + (c.reason || '사유 기록 없음')).join('; ') : '';
+            if (kind === 'cue') {
+                const cues = cueEvidence(r);
+                const head = `결론에 못 미친 근거 ${cues.length}건 — ` + cues[0].title;
+                return notRunText ? notRunText + ' · ' + head : head;
+            }
+            if (notRunText) return notRunText;
+            // A C2PA record that could not be verified is named before the scope.
+            const c2pa = ((r.evidence || []).find(e => e.kind === 'deterministic' && e.layer === 'c2pa'));
+            if (c2pa) return '근거 없음 · ' + c2pa.title;
             const scope = scopeReason(r);
             if (scope) return '근거 없음 · ' + scope;
             return '근거 없음 — 원본이라는 뜻 아님';
@@ -590,8 +618,11 @@
                 return { unsupported: '지원하지 않는 형식이라 분석하지 않았습니다.', failed: '파일을 처리하지 못했습니다.',
                          duplicate: '같은 내용의 파일을 이미 검사했습니다.', skipped: '검사를 건너뛰었습니다.' }[item.status] || '분석하지 못했습니다.';
             }
-            if (r.grade === 'reference') return '텍스트는 참고 정보만 제공합니다 — 결론을 내지 않습니다.';
-            if (failedChecks(item).length) return '검사가 실패해 결론을 내리지 않았습니다.';
+            const kind = undeterminedKind(item);
+            if (kind === 'reference') return '텍스트는 참고 정보만 제공합니다 — 결론을 내지 않습니다.';
+            if (kind === 'failed') return '검사가 실패해 결론을 내리지 않았습니다.';
+            if (kind === 'cue') return '기록에 단서가 있지만 결론을 낼 만큼은 아닙니다.';
+            if (decisiveNotRun(r).length) return '결정 검사를 실행하지 못해 결론을 내리지 않았습니다.';
             return '판단할 근거를 찾지 못했습니다.';
         }
         function noEvidenceText(item) {
@@ -1182,6 +1213,12 @@
             return bands;
         }
 
+        function undeterminedCounts() {
+            const kinds = { cue: 0, none: 0, failed: 0, reference: 0 };
+            results.forEach(e => { if (itemBand(e) === 'undetermined') kinds[undeterminedKind(e.item)]++; });
+            return kinds;
+        }
+
         function renderSummary() {
             const b = bandCounts();
             const n = results.length;
@@ -1190,7 +1227,10 @@
                 ? `${n}개 중 ${found}개에서 결론 근거를 찾았습니다.`
                 : `${n}개 중 결론 근거를 찾은 파일은 없습니다.`;
             const sub = [];
-            if (b.undetermined) sub.push(`${found ? '나머지 ' : ''}${b.undetermined}개는 근거가 없어 판단하지 않았습니다 — <strong>원본이라는 뜻이 아닙니다.</strong>`);
+            // G-3: 판단 불가 is split by why — never all called "근거가 없어".
+            const kinds = undeterminedCounts();
+            const split = ['cue', 'none', 'failed', 'reference'].filter(k => kinds[k]).map(k => `${UNDET_KINDS[k]} ${kinds[k]}`).join(' · ');
+            if (b.undetermined) sub.push(`${found ? '나머지 ' : ''}${b.undetermined}개는 판단 불가(${split})입니다 — <strong>원본이라는 뜻이 아닙니다.</strong>`);
             if (b.other) sub.push(`${b.other}개는 분석하지 못했습니다.`);
             $('sum-sub').innerHTML = sub.join(' ');
             $('sum-sub').hidden = !sub.length;
@@ -1198,8 +1238,7 @@
             $('stat-auth').textContent = b.authenticity_evidence;
             $('stat-undet').textContent = b.undetermined;
             $('stat-other').textContent = b.other;
-            const failedUndet = results.filter(e => itemBand(e) === 'undetermined' && failedChecks(e.item).length).length;
-            $('sub-undet').textContent = '근거 없음 — 원본이라는 뜻 아님' + (failedUndet ? ` · 검사 실패 ${failedUndet}` : '');
+            $('sub-undet').textContent = (split || '원본이라는 뜻 아님') + (b.undetermined ? ' — 원본이라는 뜻 아님' : '');
             const statuses = {};
             results.filter(e => itemBand(e) === 'other').forEach(e => {
                 const label = STATUS_LABELS[e.item.status] || '기타';
@@ -1237,7 +1276,10 @@
         const BAND_ORDER = { manipulation_evidence: 0, authenticity_evidence: 1, undetermined: 2, other: 3 };
         // Rows are told apart by their path in the scanned folder (two subfolders may hold 00.png).
         const byName = (a, b) => String(a.item.path || a.item.name || '').localeCompare(String(b.item.path || b.item.name || ''), 'ko');
-        const byVerdict = (a, b) => (BAND_ORDER[itemBand(a)] - BAND_ORDER[itemBand(b)]) || byName(a, b);
+        // G-2: inside 판단 불가, rows with cues come before rows without evidence.
+        const UNDET_ORDER = { cue: 0, failed: 1, none: 2, reference: 3 };
+        const rank = e => BAND_ORDER[itemBand(e)] * 10 + (itemBand(e) === 'undetermined' ? UNDET_ORDER[undeterminedKind(e.item)] : 0);
+        const byVerdict = (a, b) => (rank(a) - rank(b)) || byName(a, b);
         function filteredResults() {
             const needle = textFilter.trim().toLowerCase();
             const filtered = results.filter(entry => {

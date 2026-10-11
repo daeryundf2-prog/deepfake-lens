@@ -52,6 +52,8 @@ def _helpers() -> str:
         _function(source, "modelScoreText"),
         _section(source, "        /* ── verdict vocabulary", "        /* ── views"),
         _function(source, "evItemHtml"),
+        _function(source, "undeterminedCounts"),
+        _section(source, "        // Evidence-bearing rows first", "        function filteredResults("),
         _function(source, "skippedHtml"),
     ])
 
@@ -94,7 +96,18 @@ class LedgerReasonTest(unittest.TestCase):
             ]),
             "text": {**_row(grade="reference"), "kind": "text"},
             "scope": _row(coverage=[{"check": "pixel", "status": "skipped", "reason": "사진 아님: pattern"}]),
+            # GUI-REV G-2: "plain" has no record evidence at all — only then is it "근거 없음".
             "plain": _row(),
+            # G-2: a 판단 불가 row that carries record evidence below a conclusion is never "근거 없음".
+            "cue": _row(evidence=[{"kind": "deterministic", "direction": "synthetic", "strength": "moderate",
+                                   "title": "생성 도구 메타데이터 단서", "detail": "Description: Midjourney v6"}],
+                        coverage=[{"check": "pixel", "status": "skipped", "reason": "측정 범위 밖: 해상도 64x64"}]),
+            # G-3: a decisive check that did not run leads ahead of the scope reason.
+            "c2pa_missing": _row(coverage=[{"check": "c2pa", "status": "skipped", "reason": "의존성 부재: c2pa"},
+                                           {"check": "pixel", "status": "skipped", "reason": "측정 범위 밖: 해상도 32x32"}]),
+            "c2pa_unverified": _row(evidence=[{"kind": "deterministic", "direction": "neutral", "strength": "weak", "layer": "c2pa",
+                                               "title": "C2PA 매니페스트 존재(검증 미완료)", "detail": ""}],
+                                    coverage=[{"check": "pixel", "status": "skipped", "reason": "측정 범위 밖: 해상도 32x32"}]),
             "unsupported": {"path": "n.xyz", "name": "n.xyz", "kind": "unsupported", "status": "unsupported", "result": None, "error": "지원 형식이 아닙니다."},
             "failed_row": {"path": "f.png", "name": "f.png", "kind": "image", "status": "failed", "result": None, "error": None},
         }
@@ -113,10 +126,34 @@ class LedgerReasonTest(unittest.TestCase):
         self.assertEqual(out["scope"][0], "근거 없음 · 사진 아님: pattern")
         self.assertEqual(out["plain"][0], "근거 없음 — 원본이라는 뜻 아님")
         self.assertIn("원본", out["plain"][0])
+        self.assertEqual(out["cue"][:3], ["결론에 못 미친 근거 1건 — 생성 도구 메타데이터 단서", "판단 불가 — 단서만 있음",
+                                          "기록에 단서가 있지만 결론을 낼 만큼은 아닙니다."])
+        self.assertNotIn("근거 없음", out["cue"][0] + out["cue"][1])
+        self.assertEqual(out["c2pa_missing"][0], "결정 검사 미실행 — C2PA 출처 검증: 의존성 부재: c2pa")
+        self.assertEqual(out["c2pa_missing"][2], "결정 검사를 실행하지 못해 결론을 내리지 않았습니다.")
+        self.assertEqual(out["c2pa_unverified"][0], "근거 없음 · C2PA 매니페스트 존재(검증 미완료)")
         # U-9: not analyzed rows say why, and 미지원 is not 처리 실패.
         self.assertEqual(out["unsupported"][:2], ["지원 형식이 아닙니다.", "분석 못 함 — 미지원 형식"])
         self.assertEqual(out["failed_row"][1], "분석 못 함 — 처리 실패")
         self.assertNotEqual(out["unsupported"][2], out["failed_row"][2])
+
+    def test_headline_split_and_cue_rows_sort_before_rows_without_evidence(self) -> None:
+        """GUI-REV G-2/G-3: 판단 불가 counts by kind; cue rows sort ahead of evidence-less ones."""
+        cue = _row(evidence=[{"kind": "deterministic", "direction": "synthetic", "strength": "moderate", "title": "단서", "detail": ""}])
+        cue["path"] = "z-cue.png"
+        failed = _row(coverage=[{"check": "metadata", "status": "failed", "reason": "잘림"}])
+        failed["path"] = "b-failed.png"
+        text = {**_row(grade="reference"), "path": "c.txt"}
+        plain = {**_row(), "path": "a-plain.png"}
+        rows = [plain, text, failed, cue]
+        out = _run(
+            f"results = {json.dumps(rows, ensure_ascii=False)}.map(function (item) {{ return {{item: item}}; }});\n"
+            "var order = results.slice().sort(byVerdict).map(function (e) { return e.item.path; });\n"
+            "console.log(JSON.stringify([undeterminedCounts(), order]));"
+        )
+        assert isinstance(out, list)
+        self.assertEqual(out[0], {"cue": 1, "none": 1, "failed": 1, "reference": 1})
+        self.assertEqual(out[1], ["z-cue.png", "b-failed.png", "a-plain.png", "c.txt"])
 
     def test_skipped_checks_are_grouped_by_reason_and_every_name_stays(self) -> None:
         coverage = [{"check": f"model:{name}", "status": "skipped", "reason": f"모델 실행 불가: {name}: {GATE}"} for name in MODELS]
