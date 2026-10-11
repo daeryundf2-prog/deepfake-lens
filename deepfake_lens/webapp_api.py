@@ -1302,6 +1302,8 @@ UNSIGNED_CLIENT_ROW_MARKER = "서명 제외(클라이언트 제공 결과)"
 REPORT_ROW_NOT_FOUND = "읽기 루트 안에서 파일을 찾을 수 없어 서버가 재분석하지 못했습니다"
 REPORT_ROW_LINK_ON_PATH = "경로 중간의 폴더가 심볼릭 링크라 따라가지 않았습니다 — 서버가 재분석하지 못했습니다"
 REPORT_ROW_NOT_DERIVED = "서버 재분석 결과에 이 항목이 없습니다(압축 파일 구성이 다름)"
+# R20-1 (round 20): the posted row's entry is now a folder the scan would not have listed this way.
+REPORT_ROW_KIND_CHANGED = "검사 때와 항목 종류가 다릅니다(지금은 읽을 수 있는 폴더) — 서버가 재분석하지 못했습니다"
 REPORT_ROW_FAILED = "서버 재분석 실패: {reason}"
 # P1 (round 8): rows are relative to the folder that was scanned, not to the
 # read root — a report of <root>/caseA signed <root>/target.png (a same-named
@@ -1323,7 +1325,7 @@ REPORT_ROW_UPLOAD = "업로드 파일 — 서버 읽기 폴더의 파일이 아�
 REPORT_ROWS_CHANGED = "검사 뒤 바뀐 파일이 있습니다 — 다시 검사하십시오(보고서를 만들지 않았습니다)"
 REPORT_ROWS_CHANGED_STATUS = 409
 # R19-13: the excluded reasons that mean "the file changed after the scan" (not "never re-analyzable").
-_CHANGED_AFTER_SCAN_REASONS = (REPORT_ROW_NOT_FOUND, REPORT_ROW_NOT_DERIVED)
+_CHANGED_AFTER_SCAN_REASONS = (REPORT_ROW_NOT_FOUND, REPORT_ROW_NOT_DERIVED, REPORT_ROW_KIND_CHANGED)
 
 
 def report_format(body: bytes, query_format: str | None) -> str | dict[str, object]:
@@ -1432,13 +1434,18 @@ class _ReportHasher:
         return None
 
     def locate(self, path_text: str) -> Path | str:
-        """The file a posted top-level row names, for server re-analysis (X2).
+        """The entry a posted top-level row names, for server re-analysis (X2).
 
-        Returns the path inside a read root of a regular file or of a
-        symbolic link itself (never followed — its re-analysis is the
-        scan's skipped link row), or the Korean reason it cannot be
-        re-analyzed. A folder between the root and the file that is a link
-        refuses the row (N2).
+        Returns the path inside a read root of any entry that exists — a
+        regular file, a symbolic link itself (never followed — its
+        re-analysis is the scan's skipped link row) and, R20-1 (round 20),
+        a FIFO, socket, device node or folder (the scan's skipped or
+        failed row, :func:`_unanalyzed_entry_row`) — or the Korean reason
+        it cannot be re-analyzed. :data:`REPORT_ROW_NOT_FOUND` only when
+        nothing is there (``lstat`` fails): a FIFO the scan listed as
+        skipped was "not found", and every report of its folder was 409.
+        A folder between the root and the entry that is a link refuses the
+        row (N2).
         """
         from .evidence_statement import _no_symlink_on_path, _SymlinkRefused
 
@@ -1450,13 +1457,12 @@ class _ReportHasher:
                 continue
             try:
                 _no_symlink_on_path(cand.parent, root)
-                mode = os.lstat(cand).st_mode
+                os.lstat(cand)  # R20-1: any entry that exists is located; its kind decides its row
             except _SymlinkRefused:
                 return REPORT_ROW_LINK_ON_PATH
             except OSError:
                 continue
-            if stat.S_ISREG(mode) or stat.S_ISLNK(mode):
-                return cand
+            return cand
         return REPORT_ROW_NOT_FOUND
 
     def sha256(self, item: Any) -> str | None:
@@ -1549,6 +1555,10 @@ def _rederive_report_items(
         if isinstance(located, str):
             derived_by_top[top] = located
             continue
+        unanalyzed = _unanalyzed_entry_row(located, top, item)
+        if unanalyzed is not None:
+            derived_by_top[top] = unanalyzed
+            continue
         try:
             run = scan_file_run(located, options, thresholds=thresholds)
         except Exception as exc:  # noqa: BLE001 - one unreadable row must not fail the report
@@ -1589,6 +1599,51 @@ def _rederive_report_items(
                 changed.append(_changed_row(item, server, None))
             derived.append(server)
     return derived, excluded, changed
+
+
+def _unanalyzed_entry_row(located: Path, top: str, posted: Any) -> dict[str | None, Any] | str | None:
+    """R20-1 (round 20): the scan's own row of an entry it lists without analyzing, or None for a file it analyzes.
+
+    The walk (``scan_cache._iter_files``) never analyzes a FIFO, socket,
+    device node or pseudo-file-system file (a skipped row with
+    :func:`scan_cache.unscannable_file_reason`) and gives a folder it could
+    not list a failed row (:data:`scan_cache.UNREADABLE_FOLDER_ROW_REASON`).
+    The re-analysis classifies the entry the same way, so the server row
+    is compared like with like: an unchanged FIFO is the same skipped row
+    (signed as listed, as the scan listed it), a file replaced by a FIFO
+    after the scan differs (analyzed → skipped: 409). A folder that can be
+    listed now is the scan's skipped row only when the posted row is one of
+    the walk's own folder rows (a walk limit or a bind-mount loop); any
+    other row of a readable folder is :data:`REPORT_ROW_KIND_CHANGED`.
+    Returns ``{None: row}``, a changed-reason string, or None.
+    """
+    from .result_types import ScanItem
+    from .scan_cache import SYMLINK_LOOP_REASON, UNREADABLE_FOLDER_ROW_REASON, WALK_LIMIT_REASON, unscannable_file_reason
+
+    try:
+        mode = os.lstat(located).st_mode
+    except OSError:
+        return REPORT_ROW_NOT_FOUND
+    if stat.S_ISLNK(mode):
+        return None  # scan_file_run gives a link the scan's skipped link row (G6)
+    if stat.S_ISDIR(mode):
+        try:
+            with os.scandir(located) as handle:
+                next(handle, None)
+        except OSError as exc:
+            return {None: ScanItem(top, located.name, "unknown", "failed", 0, error=UNREADABLE_FOLDER_ROW_REASON.format(reason=failure_reason(exc)))}
+        posted_error = posted.error if isinstance(posted.error, str) else ""
+        walk_limit = WALK_LIMIT_REASON.split("(", 1)[0]
+        if posted.status == "skipped" and (posted_error.startswith(walk_limit) or posted_error == SYMLINK_LOOP_REASON):
+            return {None: ScanItem(top, located.name, "unknown", "skipped", 0, error=posted_error)}
+        return REPORT_ROW_KIND_CHANGED
+    try:
+        reason = unscannable_file_reason(located)
+    except OSError as exc:
+        return REPORT_ROW_FAILED.format(reason=failure_reason(exc))
+    if reason is None:
+        return None
+    return {None: ScanItem(top, located.name, "unknown", "skipped", 0, error=reason)}
 
 
 def _row_signature(item: Any) -> tuple[object, object, object]:

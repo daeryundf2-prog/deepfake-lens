@@ -42,6 +42,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `core_pattern is a pipe or a path — no core file in the working directory to look for` | Linux에서 `/proc/sys/kernel/core_pattern`이 `core`처럼 파이프·경로가 아닌 이름(코어 파일이 작업 폴더에 생기는 설정 — 게이트 이미지가 그렇다; R18-9) | test_shutdown.py |
 | `':' is not allowed in Windows file names` | Windows가 아닌 OS(POSIX) | test_archives.py, test_servers.py |
 | `OpenCV mp4v 인코더 없음` | `pixel`/`video` extra(opencv-python — mp4v 인코더 포함 빌드) | test_native_path.py |
+| `POSIX FIFO` | Windows가 아닌 OS(POSIX `os.mkfifo` — 검사 폴더의 FIFO·소켓이 보고서 재분석에서 스캔과 같은 건너뜀 행이 되는지 확인, R20-1) | test_servers.py |
 | `POSIX signals` | Windows가 아닌 OS(POSIX — 자식 프로세스에 SIGTERM/SIGINT/SIGHUP을 보내 기본 동작과 스테이징 폴더 정리 확인) | test_audio_worker.py, test_native_path.py, test_shutdown.py |
 | `PR_SET_PDEATHSIG is Linux` | Linux(`prctl(PR_SET_PDEATHSIG)` — 부모가 SIGKILL로 죽으면 ffmpeg 등 자식 프로세스도 함께 종료, R15-1) | test_shutdown.py |
 | `Pillow + numpy needed for the fixture` | `dev` extra(Pillow, numpy) | test_report_labels_ko.py |
@@ -112,7 +113,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `pymupdf required for PDF text` | pymupdf(QA 사이드 venv) | test_office_config.py, test_servers.py |
 | `pymupdf — the venv_api / extras run covers this` | pymupdf(QA 사이드 venv) | test_pdf_layout.py |
 | `python-markdown not installed (QA side venv)` | python-markdown(QA 사이드 venv: `pip install markdown`) | test_display_names.py |
-| `root ignores folder modes; POSIX modes` | root가 아닌 사용자로 실행하는 POSIX | test_cli_inputs.py |
+| `root ignores folder modes; POSIX modes` | root가 아닌 사용자로 실행하는 POSIX | test_cli_inputs.py, test_servers.py |
 | `sbi/numpy not available` | `dev` 또는 `pixel` extra(numpy) | test_phase2_detection.py |
 | `scikit-learn 미설치 — 실사진 샘플 없음` | `ml`/`full` extra(scikit-learn) | test_qa_adv.py |
 | `set DEEPFAKE_LENS_MODEL_TESTS=1` | 환경 변수 `DEEPFAKE_LENS_MODEL_TESTS=1` + 실제 가중치(수동 모델 테스트) | test_v6_probes.py |

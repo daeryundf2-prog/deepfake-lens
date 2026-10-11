@@ -1682,6 +1682,88 @@ class ReportRefusesChangedRowsTest(_ReportLegsFixture):
                 self.assertEqual({row["path"]: row["sha256"] for row in signed["items"]}, {path: row.get("sha256") for path, row in rows.items()})
 
 
+class ReportSignsSpecialEntriesAsScannedTest(_ReportLegsFixture):
+    """R20-1 (round 20): R19-13 counted every posted row the server could not "find" as changed. A FIFO, a socket
+    or an unreadable subfolder — listed by the scan as skipped / failed, never analyzed — was "not found" (the
+    report only located regular files and links), so every report of such a folder was 409 in every format on
+    both servers (2130892: 200). The server now classifies the entry the way the scan's walk does and compares
+    like with like; a present entry is never "not found". The R19-13 refusals still hold (a file replaced by a
+    FIFO after the scan is 409)."""
+
+    FORMATS = ReportRefusesChangedRowsTest.FORMATS
+    _scan = ReportRefusesChangedRowsTest._scan
+    _assert_refused = ReportRefusesChangedRowsTest._assert_refused
+
+    def _special_entries(self) -> list[str]:
+        import socket
+
+        os.mkfifo(self.folder / "pipe.jpg")
+        names = ["pipe.jpg"]
+        sock = socket.socket(socket.AF_UNIX)
+        self.addCleanup(sock.close)
+        try:
+            sock.bind(str(self.folder / "sock.png"))
+            names.append("sock.png")
+        except OSError:  # a temp path longer than sun_path (macOS: 104 bytes)
+            pass
+        return names
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFO")
+    def test_a_fifo_and_a_socket_are_signed_as_the_scan_listed_them(self) -> None:
+        names = self._special_entries()
+        rows = self._scan()
+        for name in names:
+            self.assertEqual(rows[name]["status"], "skipped")
+        posted = list(rows.values())
+        for leg, make in self._legs():
+            post = make()
+            for fmt in self.FORMATS:
+                with self.subTest(leg=leg, format=fmt):
+                    status, _, raw = post("/api/report", self._json({"items": posted, "format": fmt}))
+                    self.assertNotEqual(status, 409, raw[:400])
+                    if fmt in ("json", "html") or HAVE_PYMUPDF:
+                        self.assertEqual(status, 200, raw[:300])
+            status, _, raw = post("/api/report", self._json({"items": posted, "format": "json"}))
+            signed = {row["path"]: row for row in json.loads(raw)["items"]}
+            for name in names:
+                self.assertEqual((signed[name]["status"], signed[name]["error"]), (rows[name]["status"], rows[name]["error"]))
+
+    @unittest.skipUnless(hasattr(os, "geteuid") and os.geteuid() != 0, "root ignores folder modes; POSIX modes")
+    def test_an_unreadable_subfolder_is_signed_as_the_scans_failed_row(self) -> None:
+        locked = self.folder / "locked"
+        locked.mkdir()
+        _write_png(locked / "in.png", seed=3)
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o755)
+        rows = self._scan("--recursive")
+        self.assertEqual(rows["locked"]["status"], "failed")
+        for leg, make in self._legs():
+            with self.subTest(leg=leg):
+                status, _, raw = make()("/api/report", self._json({"items": list(rows.values()), "format": "json"}))
+                self.assertEqual(status, 200, raw[:400])
+                signed = {row["path"]: row for row in json.loads(raw)["items"]}
+                self.assertEqual(signed["locked"]["status"], "failed")
+        locked.chmod(0o755)  # readable now: the folder row no longer matches what is there
+        [entry] = self._assert_refused(list(rows.values()), "locked")
+        self.assertEqual(entry["reason"], webapp_api.REPORT_ROW_KIND_CHANGED)
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "POSIX FIFO")
+    def test_a_file_replaced_by_a_fifo_after_the_scan_is_still_409(self) -> None:
+        """The R19-13 defect stays closed: an analyzed row whose file is now a FIFO differs (analyzed → skipped)."""
+        rows = self._scan()
+        (self.folder / "target.png").unlink()
+        os.mkfifo(self.folder / "target.png")
+        [entry] = self._assert_refused([rows["target.png"], rows["bundle.zip::notes.txt"]], "target.png")
+        self.assertEqual((entry["posted_status"], entry["server_status"]), ("analyzed", "skipped"))
+        self.assertNotIn("reason", entry)
+
+    def test_a_missing_file_is_still_not_found(self) -> None:
+        rows = self._scan()
+        (self.folder / "target.png").unlink()
+        [entry] = self._assert_refused([rows["target.png"]], "target.png")
+        self.assertEqual(entry["reason"], webapp_api.REPORT_ROW_NOT_FOUND)
+
+
 class ReportRecordsAnalysisOptionsTest(_ReportLegsFixture):
     """R19-3 (round 19): /api/report re-analyzed the posted rows with the posted ``options`` and the report did not
     say which — a GUI that sent the options of another scan got a signed report with other coverage (pixel and

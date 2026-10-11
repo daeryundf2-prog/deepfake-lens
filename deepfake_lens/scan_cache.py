@@ -83,6 +83,25 @@ def special_filesystem_file(path: Path) -> bool:
         return False
 
 
+def unscannable_file_reason(path: Path) -> str | None:
+    """Why the walk lists a (non-folder) entry as a skipped row instead of analyzing it, or None for a file it analyzes.
+
+    X3: a FIFO, socket or device node (:data:`NOT_REGULAR_FILE_REASON`);
+    R18-10: a file on a kernel pseudo file system
+    (:data:`SPECIAL_FILESYSTEM_REASON`). R20-1 (round 20): the report's
+    re-analysis of a posted row (``webapp_api._rederive_report_items``)
+    classifies the entry with this same function, so a FIFO the scan
+    skipped is the same skipped row there — not "file not found".
+    ``path.is_file()`` follows a link (an allowed one). Raises OSError
+    only when the entry cannot be examined at all.
+    """
+    if not path.is_file():
+        return NOT_REGULAR_FILE_REASON
+    if special_filesystem_file(path):  # R18-10
+        return SPECIAL_FILESYSTEM_REASON
+    return None
+
+
 def symlink_problem(path: Path) -> str | None:
     """Why an allowed symlink cannot be followed (X3), or None when its target exists.
 
@@ -125,6 +144,9 @@ MAX_WALK_DIRS = 20_000
 MAX_WALK_FILES_BEYOND_CAP = 100_000
 MAX_WALK_SECONDS = 300.0
 WALK_LIMIT_REASON = "건너뜀: 탐색 상한 도달({limit}) — 이 폴더 이하는 열지 않았습니다"
+# The row of a folder the walk could not list (``on_error``); R20-1: also the
+# report re-analysis's row of a posted unreadable-folder row.
+UNREADABLE_FOLDER_ROW_REASON = "폴더를 읽을 수 없습니다: {reason}"
 
 
 def _dir_identity(path: Path | str) -> tuple[int, int] | None:
@@ -262,13 +284,11 @@ def _iter_files(
 
     def _file(path: Path) -> None:
         try:
-            if not path.is_file():
-                skipped.append((path, NOT_REGULAR_FILE_REASON))
-                return
+            reason = unscannable_file_reason(path)  # R20-1: shared with the report's re-analysis
         except OSError:
             return
-        if special_filesystem_file(path):  # R18-10
-            skipped.append((path, SPECIAL_FILESYSTEM_REASON))
+        if reason is not None:
+            skipped.append((path, reason))
             return
         if path.name.endswith((".ivy.json", ".model.json")):
             return

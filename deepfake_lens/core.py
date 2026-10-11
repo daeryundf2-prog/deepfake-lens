@@ -506,12 +506,14 @@ def _scan_paths(
             report=report,
         )
         if iter_errors or symlinks:
+            from .scan_cache import UNREADABLE_FOLDER_ROW_REASON  # R20-1: shared with the report re-analysis
+
             extra: list[ScanItem] = []
             for err_path, exc in iter_errors:
                 extra.append(ScanItem(
                     _display_path(err_path, root=root), err_path.name,
                     "unknown", "failed", 0,
-                    error=f"폴더를 읽을 수 없습니다: {failure_reason(exc)}",
+                    error=UNREADABLE_FOLDER_ROW_REASON.format(reason=failure_reason(exc)),
                 ))
             # D10: a symlink in the evidence folder is listed (never followed)
             # so the report accounts for every directory entry it was given.
