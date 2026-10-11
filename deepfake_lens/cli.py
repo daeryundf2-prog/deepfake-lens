@@ -562,6 +562,19 @@ def _main(argv: list[str] | None = None) -> int:
             logs.finish()
 
 
+def _models_dir_and_source(models_dir: Path | None) -> tuple[Path, str]:
+    """R18-19 (b) (round 18): the models folder vendor-weights uses and what named it (for its messages)."""
+    import os
+
+    from .vendor_weights import ENV_MODELS_DIR
+
+    if models_dir is not None:
+        return Path(models_dir), "--models-dir"
+    if os.environ.get(ENV_MODELS_DIR):
+        return default_models_dir(), ENV_MODELS_DIR
+    return default_models_dir(), "기본 모델 폴더"
+
+
 # R18-19 (a): failed extractions listed on stderr (the rest are in the --out JSON).
 VIDEO_FAILURES_LISTED = 10
 
@@ -1216,9 +1229,12 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         # error (exit 2) before anything reads it — `--verify` used to say
         # "통과" (0 profiles), `pin-asset` printed an English errno with an
         # internal temp file name. (--install creates its target.)
-        if args.models_dir is not None and not args.install and not Path(args.models_dir).is_dir():
-            reason = "모델 폴더가 없습니다" if not Path(args.models_dir).exists() else "모델 폴더가 아니라 파일입니다"
-            print(f"오류: {reason}: {escape_echo(args.models_dir)} (--models-dir)", file=sys.stderr)
+        # R18-19 (b) (round 18): the same for a folder named by DEEPFAKE_LENS_MODELS_DIR, and every
+        # message names where the folder came from — it always said "(--models-dir)".
+        models_folder, models_source = _models_dir_and_source(args.models_dir)
+        if models_source != "기본 모델 폴더" and not args.install and not models_folder.is_dir():
+            reason = "모델 폴더가 없습니다" if not models_folder.exists() else "모델 폴더가 아니라 파일입니다"
+            print(f"오류: {reason}: {escape_echo(models_folder)} ({models_source})", file=sys.stderr)
             return 2
         if args.action == "pin":
             return _vendor_weights_pin(args)
@@ -1257,9 +1273,8 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             if not verify_res["total_profiles"]:
                 # R17-10 (round 17): an empty (or wrong) existing folder said
                 # "통과 … 프로필 0개" with exit 0 — nothing was verified.
-                folder = args.models_dir if args.models_dir is not None else default_models_dir()
                 print(
-                    f"오류: 런타임 프로필(*-runtime.json)이 하나도 없어 검증할 대상이 없습니다: {escape_echo(folder)} (--models-dir)",
+                    f"오류: 런타임 프로필(*-runtime.json)이 하나도 없어 검증할 대상이 없습니다: {escape_echo(models_folder)} ({models_source})",
                     file=sys.stderr,
                 )
                 return 2

@@ -539,6 +539,33 @@ class PinAssetCommandTest(unittest.TestCase):
             self.assertIn(code, (0, 1))  # a folder with profiles is verified as before (pass, or 1 for what fails)
             self.assertIn("오프라인 모델 무결성", out.getvalue())
 
+    def test_verify_names_where_the_folder_came_from(self) -> None:
+        """R18-19 (b) (round 18): a folder from DEEPFAKE_LENS_MODELS_DIR was reported "(--models-dir)", and a
+        missing folder or a file named by the variable said "프로필이 하나도 없어" instead of what --models-dir says."""
+        from deepfake_lens import cli
+
+        def run(argv: list[str], env: dict[str, str]) -> tuple[int, str]:
+            err = io.StringIO()
+            with mock.patch.dict(os.environ, env), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                return cli.main(argv), err.getvalue()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            empty = root / "빈 폴더"
+            empty.mkdir()
+            a_file = root / "file.json"
+            a_file.write_text("{}", encoding="utf-8")
+            code, err = run(["vendor-weights", "--verify"], {"DEEPFAKE_LENS_MODELS_DIR": str(empty)})
+            self.assertEqual(code, 2)
+            self.assertIn(f"검증할 대상이 없습니다: {empty} (DEEPFAKE_LENS_MODELS_DIR)", err)
+            self.assertNotIn("--models-dir", err)
+            code, err = run(["vendor-weights", "--verify"], {"DEEPFAKE_LENS_MODELS_DIR": str(root / "없음")})
+            self.assertEqual((code, err.strip()), (2, f"오류: 모델 폴더가 없습니다: {root / '없음'} (DEEPFAKE_LENS_MODELS_DIR)"))
+            code, err = run(["vendor-weights", "--verify"], {"DEEPFAKE_LENS_MODELS_DIR": str(a_file)})
+            self.assertEqual((code, err.strip()), (2, f"오류: 모델 폴더가 아니라 파일입니다: {a_file} (DEEPFAKE_LENS_MODELS_DIR)"))
+            code, err = run(["vendor-weights", "--verify", "--models-dir", str(empty)], {"DEEPFAKE_LENS_MODELS_DIR": ""})
+            self.assertIn(f"검증할 대상이 없습니다: {empty} (--models-dir)", err)
+
     def test_a_manifest_that_cannot_be_written_is_reported_without_the_temp_name(self) -> None:
         """R16-8: the write error is Korean, names assets.json, and the temp file is removed."""
         with tempfile.TemporaryDirectory() as tmp:
