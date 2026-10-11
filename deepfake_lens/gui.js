@@ -206,6 +206,16 @@
             return `검사 취소 — 폴더 전체가 아닌 부분 결과입니다: 분석하지 않은 파일 ${n}개(행·해시 없음). 폴더 전체의 결과로 쓰지 마십시오.`;
         }
 
+        // R18-17 (round 18): a model that did not run (available === false) has no score —
+        // its 0 was shown as "외부 모델 원점수(미보정, 결론 불참여) — 0", like a measurement.
+        function modelScoreText(entry) {
+            if (!entry || entry.available === false) {
+                const why = entry && (entry.detail || entry.reason || entry.error);
+                return `없음 — 미실행(${shown(why || '사유 기록 없음')})`;
+            }
+            return entry.score != null ? escapeHtml(String(entry.score)) : '없음';
+        }
+
         function provenanceBannerHtml() {
             const cov = lastProvenance.coverage || {};
             const thr = lastProvenance.thresholds || {};
@@ -785,8 +795,8 @@
             const ma = r.model_analysis;
             if (ma) {
                 const members = (ma.models || []).map(m =>
-                    `<li>${shown(m.display_name || m.model || '모델')} — 원점수 ${m.score != null ? m.score : '없음'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
-                parts.push(`<div class="dgroup"><div class="dt">외부 모델 원점수(미보정, 결론 불참여) — ${ma.score != null ? ma.score : '없음'}</div>${members ? `<ul>${members}</ul>` : `<div class="note">${shown(ma.detail || '')}</div>`}</div>`);
+                    `<li>${shown(m.display_name || m.model || '모델')} — 원점수 ${modelScoreText(m)}</li>`).join('');
+                parts.push(`<div class="dgroup"><div class="dt">외부 모델 원점수(미보정, 결론 불참여) — ${modelScoreText(ma)}</div>${members ? `<ul>${members}</ul>` : `<div class="note">${shown(ma.detail || '')}</div>`}</div>`);
             }
             // Unmeasured heuristics (pixel ensemble, fusion, legacy audio/
             // video heuristics) — displayed for reference, never decide.
@@ -1558,8 +1568,8 @@
             const ma = r.model_analysis;
             if (ma) {
                 const members = (ma.models || []).map(m =>
-                    `<li>${shown(m.display_name || m.model || '모델')} — ${m.score != null ? m.score : '없음'}${m.available === false ? ' (사용 불가)' : ''}</li>`).join('');
-                parts.push(layer(`외부 모델 원점수(미보정, 결론 불참여) — ${ma.score != null ? ma.score : '없음'}`,
+                    `<li>${shown(m.display_name || m.model || '모델')} — ${modelScoreText(m)}</li>`).join('');
+                parts.push(layer(`외부 모델 원점수(미보정, 결론 불참여) — ${modelScoreText(ma)}`,
                     members ? `<ul>${members}</ul>` : `<div class="note">${shown(ma.detail || '')}</div>`));
             }
             if (data.advanced) {
