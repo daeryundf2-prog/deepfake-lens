@@ -22,6 +22,7 @@ import io
 import os
 import shutil
 import tempfile
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -113,6 +114,15 @@ class FileChangedDuringAnalysisTest(unittest.TestCase):
             with open(path, "r+b") as handle:  # same inode, same size
                 handle.write(bytes(data))
             os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+            # R17-12: the change time must move — on a kernel whose file clock
+            # ticks at ~1 ms a rewrite in the same tick keeps it (documented
+            # residual); an edit that late is what the test means, so wait
+            # for the next tick and touch again (utime sets ctime to now).
+            deadline = time.monotonic() + 2.0
+            while os.stat(path).st_ctime_ns == stat.st_ctime_ns and time.monotonic() < deadline:
+                time.sleep(0.002)
+                os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+            self.assertNotEqual(os.stat(path).st_ctime_ns, stat.st_ctime_ns)
 
         with patch.object(core, "REHASH_MAX_BYTES", 0):  # no pre-analysis hash
             self._assert_flagged(self._scan_rewriting(rewrite))

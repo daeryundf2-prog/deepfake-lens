@@ -437,6 +437,23 @@ class SyncNetPinTest(unittest.TestCase):
                 lipsync._syncnet_analysis(clip)  # the file changed: verified again, refused
 
 
+def _rewrite_in_place(path: Path, data: bytes) -> None:
+    """Rewrite ``path`` in place and make sure its mtime moved past the previous one.
+
+    R17-12: the product notices a changed manifest / asset file by its
+    (mtime, ctime, size, inode); a rewrite with the same size inside one tick
+    of the file-system clock (≈1 ms on some kernels) leaves all four equal —
+    the documented residual (HANDOFF §7). An operator's edit is not made
+    within a millisecond of the previous one, so the test moves the mtime
+    forward when the clock did not, instead of depending on its granularity.
+    """
+    before = path.stat().st_mtime_ns if path.exists() else None
+    path.write_bytes(data)
+    if before is not None and path.stat().st_mtime_ns <= before:
+        later = before + 1_000_000
+        os.utime(path, ns=(later, later))
+
+
 def _set_pin(folder: Path, asset: str, digest: str) -> None:
     """Rewrite ``asset``'s sha256 in ``folder``/assets.json in place (what an operator's re-pin or edit does)."""
     manifest = folder / "assets.json"
@@ -444,7 +461,8 @@ def _set_pin(folder: Path, asset: str, digest: str) -> None:
     for entry in payload["assets"]:
         if entry["name"] == asset:
             entry["sha256"] = digest
-    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    # R17-12: a re-pin keeps the size (64 hex digits) — the stat must still change.
+    _rewrite_in_place(manifest, json.dumps(payload).encode("utf-8"))
 
 
 class PinAssetCommandTest(unittest.TestCase):
