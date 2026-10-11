@@ -57,6 +57,11 @@ This module holds what the cleanup needs to make that impossible:
   session of its own, several levels down, is adopted only when its own
   parent dies, so each round signals what was adopted since the last; and
   after a timeout the child's output is read with a time limit.
+  R18-9 (round 18): the supervisor sets RLIMIT_CORE to 0 (soft and hard,
+  inherited by the program) and clears its dumpable flag before it re-raises
+  the program's signal — a SIGSEGV re-raised with core files enabled left a
+  ``core`` file in the working directory (the scan's — possibly the
+  evidence folder).
   Elsewhere (macOS, Windows, a frozen build without a Python interpreter)
   the tracked children (and, on POSIX, their process groups) are stopped by
   the handler and the atexit hook; a hard kill of the parent leaves them to
@@ -102,6 +107,8 @@ _POLL_SECONDS = 0.005
 # R15-1: <linux/prctl.h> PR_SET_PDEATHSIG; R16-7: PR_SET_CHILD_SUBREAPER.
 _PR_SET_PDEATHSIG = 1
 _PR_SET_CHILD_SUBREAPER = 36
+# R18-9: <linux/prctl.h> PR_SET_DUMPABLE.
+_PR_SET_DUMPABLE = 4
 # R16-7: how long the supervisor gives the program's process group (and the
 # orphans it adopted) after SIGTERM before SIGKILL — below
 # CHILD_TERM_GRACE_SECONDS, so the supervisor is done before this process
@@ -133,7 +140,17 @@ def prctl(option, value):
         libc.prctl(option, value, 0, 0, 0)
     except (OSError, AttributeError):
         pass
+# R18-9: no core dump from the supervisor or the program — a supervisor that
+# re-raised its program's SIGSEGV dumped "core" into its working directory
+# (the scan's, possibly the evidence folder) when core files were enabled.
+# The hard limit 0 is inherited by the program and everything it starts.
+try:
+    import resource
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+except (ImportError, ValueError, OSError):
+    pass
 def die(signum):
+    prctl({_PR_SET_DUMPABLE}, 0)  # R18-9: not even through a core_pattern pipe
     # R17-2: SIGKILL/SIGSTOP cannot be given a disposition (signal() is EINVAL).
     if signum not in (signal.SIGKILL, signal.SIGSTOP):
         signal.signal(signum, signal.SIG_DFL)

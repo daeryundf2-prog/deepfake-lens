@@ -637,6 +637,55 @@ class WrapperGrandchildTest(_WrapperFixture):
         self.assertEqual((killed.returncode, killed.stderr), (-signal.SIGKILL, b""))
 
 
+def _core_files_land_in_the_cwd() -> bool:
+    """R18-9: a plain (non-pipe) core_pattern — a dumped core would be a file in the crashing process's directory."""
+    try:
+        pattern = Path("/proc/sys/kernel/core_pattern").read_text(encoding="ascii").strip()
+    except OSError:
+        return False
+    return bool(pattern) and not pattern.startswith("|") and "/" not in pattern
+
+
+# R18-9: run in a fresh interpreter whose soft core limit is raised to the hard one, in a scratch working directory.
+_CORE_SCRIPT = """
+import os, resource, sys
+from deepfake_lens import shutdown
+soft, hard = resource.getrlimit(resource.RLIMIT_CORE)
+resource.setrlimit(resource.RLIMIT_CORE, (hard, hard))
+os.chdir(sys.argv[1])
+done = shutdown.run_child(["sh", "-c", sys.argv[2]], capture_output=True, text=True, timeout=60)
+print(done.returncode)
+print(done.stdout.strip())
+"""
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "PR_SET_PDEATHSIG is Linux")
+class SupervisorLeavesNoCoreTest(unittest.TestCase):
+    """R18-9 (round 18): the supervisor re-raised its program's SIGSEGV with core files enabled and left a ``core``
+    file in its working directory — the scan's, possibly the evidence folder (QA-IN-1: no new file there)."""
+
+    def _run(self, script: str) -> tuple[list[str], list[str]]:
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ, PYTHONPATH=str(REPO))
+            done = subprocess.run(
+                [sys.executable, "-c", _CORE_SCRIPT, tmp, script], capture_output=True, text=True, timeout=CHILD_TIMEOUT_SECONDS, env=env,
+            )
+            self.assertEqual(done.returncode, 0, done.stderr)
+            return done.stdout.split("\n"), sorted(os.listdir(tmp))
+
+    def test_the_program_inherits_no_core_limit(self) -> None:
+        lines, _ = self._run("ulimit -c")
+        self.assertEqual(lines[:2], ["0", "0"])
+
+    @unittest.skipUnless(_core_files_land_in_the_cwd(), "core_pattern is a pipe or a path — no core file in the working directory to look for")
+    def test_a_re_raised_sigsegv_dumps_no_core(self) -> None:
+        for script in ("ulimit -c 0; kill -SEGV $$", "kill -SEGV $$"):  # the verifier's program, and one with cores on
+            with self.subTest(script=script):
+                lines, left = self._run(script)
+                self.assertEqual(lines[0], str(-signal.SIGSEGV))  # still reported as the program's signal
+                self.assertEqual(left, [])
+
+
 @unittest.skipUnless(sys.platform.startswith("linux"), "PR_SET_PDEATHSIG is Linux")
 class SupervisorSecondSignalTest(_WrapperFixture):
     """R17-1 (round 17): a second stop signal right after the first never ends the supervisor before it stopped the program.
