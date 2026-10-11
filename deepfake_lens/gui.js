@@ -2226,6 +2226,7 @@
             if (kind === 'evidence' && !sel.length) return '증거설명서의 서증으로 넣을 파일을 고르십시오.';
             if ((kind === 'evidence' || kind === 'pdf') && pdfAvailable === false) return 'PDF(증거설명서·감정 보고서)는 PDF 엔진(pymupdf)이 설치되어 있지 않아 만들 수 없습니다.';
             if (kind === 'evidence' && !(caseValue('case-no') && caseValue('case-name'))) return '사건번호와 사건명을 채우면 증거설명서를 내보낼 수 있습니다.';
+            if (kind === 'pdf' && !submitterSide()) return '의뢰 측(원고·고소인 측 / 피고·피의자 측)을 고르면 감정 보고서 PDF의 호증 칸이 정해집니다.';
             if (kind === 'evidence' && !submitterSide()) return '의뢰 측(원고·고소인 측 / 피고·피의자 측)을 고르면 증거설명서를 내보낼 수 있습니다.';
             return '';
         }
@@ -2310,13 +2311,28 @@
         function docHtml(text) {
             return String(text == null ? '' : text).split('\n').map(line => escapeHtml(line)).join('<br>');
         }
+        // GUI-REV3 J-6: before a side is chosen the server draws its default (원고·갑)
+        // form; the preview marks every side-dependent text "(의뢰 측 미선택)" instead.
+        const NO_SIDE = '(의뢰 측 미선택)';
+        function unsidedText(text) {
+            return String(text).replace(/[갑을] 제(\d+)호증/g, NO_SIDE + ' 제$1호증')
+                .replace(/(원고\(고소인\)|피고\(피의자\))(의 )?(소송대리인|대리인|변호인)/g, NO_SIDE + '$2제출인');
+        }
         function a4Html(body) {
+            if (!submitterSide()) {
+                body = Object.assign({}, body, {
+                    entries: (body.entries || []).map(e => Object.assign({}, e, { exhibit_no: unsidedText(e.exhibit_no), purpose_of_proof: unsidedText(e.purpose_of_proof) })),
+                    case_lines: (body.case_lines || []).map(unsidedText),
+                    signoff: (body.signoff || []).map(unsidedText),
+                    boxes: (body.boxes || []).map(([heading, boxLines]) => [heading, boxLines.map(unsidedText)]),
+                });
+            }
             const lines = list => list.map(line => `<p>${docHtml(line)}</p>`).join('');
             const head = (body.table_headers || []).map(h => `<th scope="col">${docHtml(h)}</th>`).join('');
             const rows = (body.entries || []).map(e => `<tr data-exhibit="${docHtml(e.exhibit_no)}" data-path="${shown(e.file_path)}">` +
                 `<td>${docHtml(e.exhibit_no)}</td><td>${docHtml(e.document_name)}</td><td>${docHtml(e.author_date)}</td><td class="a4-purpose">${docHtml(e.purpose_of_proof)}</td></tr>`).join('');
             const boxes = (body.boxes || []).map(([heading, boxLines]) => `<section class="a4-box"><div class="a4-h">${docHtml(heading)}</div>${lines(boxLines)}</section>`).join('');
-            return `<div class="a4-top"><span>미리보기 — 서명 전</span><span>서버의 증거설명서 서식</span></div>` +
+            return `<div class="a4-top"><span>미리보기 — 서명 전</span><span>${submitterSide() ? '서버의 증거설명서 서식' : NO_SIDE + ' — 의뢰 측을 고르면 갑/을과 제출 문구가 정해집니다'}</span></div>` +
                 `<div class="a4-title">${shown(body.title)}</div>` +
                 `<section class="a4-box">${lines(body.case_lines || [])}${body.scan_root_line ? lines([body.scan_root_line]) : ''}</section>` +
                 '<div class="a4-h a4-center">다        음</div>' +
@@ -2339,7 +2355,8 @@
         function exportPayload(kind) {
             const extra = { format: EXPORT_SPECS[kind][0] };
             // GUI-REV2 H-3: the forensic PDF's exhibit box follows the chosen side (갑/을).
-            if (kind === 'pdf') extra.exhibit_no = (submitterSide() === 'defendant' ? '을' : '갑') + ' 제        호증';
+            // J-6: no side, no 갑/을 (the export waits for the side anyway).
+            if (kind === 'pdf') extra.exhibit_no = (submitterSide() ? (submitterSide() === 'defendant' ? '을 ' : '갑 ') : '') + '제        호증';
             if (kind === 'evidence') extra.exhibit_paths = selectedEntries().map(e => e.item.path);
             return reportPayload(extra);
         }

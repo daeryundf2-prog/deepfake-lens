@@ -220,6 +220,12 @@ def main() -> int:
             assert page.locator("input[name='submitter-side']:checked").count() == 0, "의뢰 측 must have no default"
             assert "의뢰 측을 고르지 않았습니다" in page.locator("#report-checks").inner_text()
             assert "의뢰 측" in page.evaluate("exportBlockReason('evidence', selectedEntries())")
+            # GUI-REV3 J-6: no side yet — the preview says so instead of drawing the 원고·갑
+            #     form, and the forensic PDF waits for the side too.
+            unsided = a4_ready()
+            assert "(의뢰 측 미선택)" in unsided, "the preview must mark the missing side"
+            assert "갑 제1호증" not in unsided and "원고(고소인)의 소송대리인은" not in unsided, "the preview drew the plaintiff form without a side"
+            assert "의뢰 측" in page.evaluate("exportBlockReason('pdf', selectedEntries())")
             page.check("input[name='submitter-side'][value='defendant']")
             assert "을 제1호증" in a4_ready()
             assert page.evaluate("exportPayload('evidence').submitter_side") == "defendant"
