@@ -63,11 +63,16 @@ def main() -> int:
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="chrome", headless=True)
             page = browser.new_page()
-            page.on("console", lambda m: console_errors.append(m.text) if m.type == "error" else None)
+            # The browser's own /favicon.ico probe is a 404 by design (R11-12: only the
+            # GUI paths are served) — not an error of the page.
+            page.on("console", lambda m: console_errors.append(m.text)
+                    if m.type == "error" and not str((m.location or {}).get("url", "")).endswith("/favicon.ico") else None)
             page.on("pageerror", lambda e: console_errors.append(str(e)))
 
             requests: list[str] = []
             page.on("request", lambda r: requests.append(r.url))
+            failed_responses: list[str] = []
+            page.on("response", lambda r: failed_responses.append(f"{r.status} {r.url}") if r.status >= 400 else None)
 
             page.goto(f"http://127.0.0.1:{args.port}/gui", wait_until="networkidle")
 
@@ -77,7 +82,7 @@ def main() -> int:
             #    prefilled from /api/stats default_folder (U-8).
             assert page.locator("#analyze-btn").count() == 1, "scan button missing"
             assert page.locator("#prov-banner").is_hidden(), "banner must start hidden"
-            page.wait_for_function("document.getElementById('folder-path').value !== ''", timeout=10_000)
+            page.wait_for_function("() => document.getElementById('folder-path').value !== ''", timeout=10_000)
             assert Path(page.input_value("#folder-path")).resolve() == Path(args.scan_dir).resolve(), "folder not prefilled from --folder"
             assert page.locator("a.skip-link[href='#main']").count() == 1, "skip link missing"
 
@@ -88,7 +93,7 @@ def main() -> int:
             page.keyboard.press("Enter")
             page.wait_for_selector("#results-section:not([hidden])", timeout=180_000)
             # A11Y-4: focus lands on the conclusion headline, never on <body>.
-            page.wait_for_function("document.activeElement && document.activeElement.id === 'sum-h'", timeout=10_000)
+            page.wait_for_function("() => document.activeElement && document.activeElement.id === 'sum-h'", timeout=10_000)
             headline = page.locator("#sum-h").inner_text()
             assert "개 중 " in headline and headline.endswith("."), headline
             bar = page.locator("#progress")
@@ -169,7 +174,7 @@ def main() -> int:
 
             # 5. Report screen: case fields have no defaults and block the evidence statement.
             page.click("a[data-view-link='report']")
-            page.wait_for_function("document.activeElement && document.activeElement.id === 'rep-h'")
+            page.wait_for_function("() => document.activeElement && document.activeElement.id === 'rep-h'")
             assert page.input_value("#case-no") == "" and page.input_value("#case-name") == "", "case fields must start empty"
             assert "필수" in page.locator("#report-checks").inner_text()
             assert page.get_attribute("#exp-evidence", "aria-disabled") == "true", "evidence statement must wait for 사건번호·사건명"
@@ -191,7 +196,7 @@ def main() -> int:
             #    (fonts are local stacks; nothing is fetched from the network).
             csp = [e for e in console_errors if "Content Security Policy" in e or "Refused" in e]
             assert not csp, f"CSP violations: {csp}"
-            assert not console_errors, f"console errors: {console_errors[:5]}"
+            assert not console_errors, f"console errors: {console_errors[:5]} (failed responses: {failed_responses[:5]})"
             outside = [url for url in requests if not url.startswith((f"http://127.0.0.1:{args.port}/", "blob:", "data:"))]
             assert not outside, f"requests outside the local server: {outside[:5]}"
 
