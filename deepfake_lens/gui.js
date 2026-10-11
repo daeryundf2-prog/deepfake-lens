@@ -3,6 +3,8 @@
         // X2: the options of the last folder scan — /api/report re-analyzes
         // every row on the server with them (the report signs only server results).
         let lastScanOptions = {};
+        // R19-3: the server job whose result is on screen (its cancel count is verified by the server).
+        let lastScanJob = '';
         let selectedFiles = [];
         let lastScanRoot = '';
         // R12-4: the scan folder as URL-safe base64 file-system bytes (scan_root_b64);
@@ -500,9 +502,19 @@
             });
         });
 
+        // R19-3: the export buttons too — a report made while a scan runs would
+        // mix the rows on screen with the options of the scan in progress.
         const SCAN_INPUTS = ['folder-path', 'analyze-btn', 'max-files',
             'opt-recursive', 'opt-dedupe', 'opt-heatmaps', 'opt-model',
-            'opt-deep', 'dir-picker-btn', 'upload-btn', 'upload-clear'];
+            'opt-deep', 'dir-picker-btn', 'upload-btn', 'upload-clear',
+            'exp-json', 'exp-csv', 'exp-report', 'exp-pdf', 'exp-evidence', 'exp-clear'];
+
+        // R19-3: every export handler refuses while a scan runs (a click that beat the disabled state).
+        function exportBlocked() {
+            if (!scanBusy) return false;
+            toast('검사 중에는 내보낼 수 없습니다 — 검사가 끝난 뒤 다시 시도하십시오', true);
+            return true;
+        }
 
         function setBusy(busy, text) {
             scanBusy = busy;
@@ -605,7 +617,9 @@
                 async: '1',
             });
             if (!$('opt-model').checked) params.set('no_default_engine', 'true');
-            lastScanOptions = {
+            // R19-3: the options of this scan become lastScanOptions only with its results
+            // (an error or a cancel before results left the old rows with these options).
+            const scanOptions = {
                 pixel: pixelMode,
                 heatmaps: String($('opt-heatmaps').checked),
                 deep_signals: String($('opt-deep').checked),
@@ -635,6 +649,8 @@
                 // every row against it (not against the read root).
                 lastScanRoot = data.scan_root || folderPath;
                 lastScanRootB64 = data.scan_root_b64 || '';
+                lastScanOptions = scanOptions;  // R19-3: with the rows they produced
+                lastScanJob = job.job_id;
                 processResults(data);
                 // R18-3: "분석 완료" was shown for a cancelled scan too.
                 if (partialResultNote(data.summary)) toast(`검사 취소 — 부분 결과 ${(data.items || []).length}개 행, 분석하지 않은 파일 ${data.summary.files_cancelled || 0}개`, true);
@@ -684,6 +700,8 @@
                 }
                 lastScanRoot = '';  // uploads are temp files; heatmaps unavailable
                 lastScanRootB64 = '';
+                lastScanOptions = {};  // R19-3: upload rows are never re-analyzed (P6)
+                lastScanJob = '';
                 processResults({ items: allItems });
                 toast(`분석 완료 — ${allItems.length}개 파일`);
                 selectedFiles = [];
@@ -728,6 +746,7 @@
             // P1: rows are relative to the scanned folder; uploads carry
             // source: "upload" and are never re-analyzed (P6).
             if (lastScanRoot) out.scan_root = lastScanRoot;
+            if (lastScanJob) out.scan_job = lastScanJob;  // R19-3: the server checks a cancel count against its job
             const map = { 'case-no': 'case_no', 'case-name': 'case_name',
                           'case-plaintiff': 'plaintiff', 'case-defendant': 'defendant',
                           'case-court': 'court', 'case-firm': 'law_firm',
@@ -1383,6 +1402,7 @@
             URL.revokeObjectURL(url);
         }
         $('exp-json').addEventListener('click', () => {
+            if (exportBlocked()) return;
             if (!results.length) { toast('분석 결과가 없습니다', true); return; }
             const enriched = results.map(e => {
                 const rev = reviewStore[itemKey(e.item)];
@@ -1394,6 +1414,7 @@
             download(new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' }), 'deepfake-lens-results.json');
         });
         $('exp-csv').addEventListener('click', () => {
+            if (exportBlocked()) return;
             if (!results.length) { toast('분석 결과가 없습니다', true); return; }
             const f = csvCell;
             // BOM prefix keeps Korean intact when the CSV is opened in Excel.
@@ -1410,6 +1431,7 @@
             download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'deepfake-lens-results.csv');
         });
         $('exp-report').addEventListener('click', async () => {
+            if (exportBlocked()) return;
             if (!results.length) { toast('분석 결과가 없습니다', true); return; }
             try {
                 const res = await apiFetch('/api/report', {
@@ -1426,6 +1448,7 @@
             } catch (e) { toast('리포트 오류: ' + e.message, true); }
         });
         $('exp-pdf').addEventListener('click', async () => {
+            if (exportBlocked()) return;
             if (!results.length) { toast('분석 결과가 없습니다', true); return; }
             try {
                 toast('포렌식 감정 PDF 생성 중…');
@@ -1444,6 +1467,7 @@
             } catch (e) { toast('PDF 생성 오류: ' + e.message, true); }
         });
         $('exp-evidence').addEventListener('click', async () => {
+            if (exportBlocked()) return;
             if (!results.length) { toast('분석 결과가 없습니다', true); return; }
             try {
                 toast('전자소송 증거설명서(PDF) 생성 중…');
@@ -1462,6 +1486,7 @@
             } catch (e) { toast('증거설명서 오류: ' + e.message, true); }
         });
         $('exp-clear').addEventListener('click', () => {
+            if (exportBlocked()) return;
             results = [];
             $('results-section').hidden = true;
         });

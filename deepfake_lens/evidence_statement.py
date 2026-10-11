@@ -511,6 +511,7 @@ def signed_statement_body(
     *,
     model_pins: list[dict[str, object]] | None = None,
     scan_root: str | None = None,
+    analysis_options: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """The statement as a signed report body (G30).
 
@@ -523,6 +524,8 @@ def signed_statement_body(
     body: dict[str, object] = {"report_type": EVIDENCE_STATEMENT_REPORT_TYPE, **statement.to_json()}
     if scan_root is not None:
         body["scan_root"] = scan_root
+    if analysis_options is not None:
+        body["analysis_options"] = dict(analysis_options)  # R19-3: the options the server re-analyzed with
     return sign_report(body, key if key is not None else resolve_report_key(), model_pins=model_pins)
 
 
@@ -653,7 +656,7 @@ def _render_statement_pdf(
     (the old fixed box was left empty when the text overflowed it).
     """
     from .pdf_layout import Cell, PdfLayout
-    from .reports import scan_root_line
+    from .reports import analysis_options_line, scan_root_line
 
     def page_header(layout: PdfLayout) -> None:
         firm_header = f"{statement.law_firm} {statement.center}".strip()
@@ -672,6 +675,7 @@ def _render_statement_pdf(
         (f"피고(피의자)    {statement.defendant}", 9.5, (0.1, 0.1, 0.1)),
         ("위 사건에 관하여 원고(고소인)의 소송대리인은 주장사실을 입증하기 위해 아래와 같이 증거방법을 제출합니다.", 8.2, (0.3, 0.3, 0.3)),
         *([(root_line, 8.2, (0.3, 0.3, 0.3))] if (root_line := scan_root_line(body)) else []),  # R9-9
+        *([(options_line, 8.2, (0.3, 0.3, 0.3))] if (options_line := analysis_options_line(body)) else []),  # R19-3
     ], border=(0.82, 0.86, 0.92), fill=(0.97, 0.98, 0.99))
     layout.text(layout.left, layout.right, "다        음", 11.0, (0.1, 0.1, 0.1), align=1, gap=4.0)
 

@@ -79,8 +79,16 @@ def build_report_body(
     redact_paths: bool = False,
     excluded_items: list[dict[str, object]] | None = None,
     scan_root: str | None = None,
+    analysis_options: dict[str, object] | None = None,
+    files_cancelled_source: str | None = None,
 ) -> dict[str, object]:
     """The JSON body an HTML/PDF report renders — what its signature covers.
+
+    R19-3 (round 19), web reports: ``analysis_options`` — the options the
+    server re-analyzed the rows with; ``files_cancelled_source`` — "server"
+    when the cancelled count came from the server's own scan job,
+    "unverified" when the client said "cancelled" and the count could not be
+    checked (it is then 0).
 
     ``scan_root`` (web reports, R9-9) is the scanned folder relative to the
     read root holding it ("." for the root itself) — the folder every row
@@ -125,6 +133,10 @@ def build_report_body(
         body["excluded_items"] = list(excluded_items)
     if scan_root is not None:
         body["scan_root"] = scan_root
+    if analysis_options is not None:
+        body["analysis_options"] = dict(analysis_options)
+    if files_cancelled_source is not None:
+        body["files_cancelled_source"] = files_cancelled_source
     return body
 
 
@@ -140,6 +152,8 @@ def signed_report_body(
     redact_paths: bool = False,
     excluded_items: list[dict[str, object]] | None = None,
     scan_root: str | None = None,
+    analysis_options: dict[str, object] | None = None,
+    files_cancelled_source: str | None = None,
 ) -> dict[str, object]:
     """``build_report_body`` signed with ``key`` or DEEPFAKE_LENS_REPORT_KEY (G30).
 
@@ -149,6 +163,7 @@ def signed_report_body(
     body = build_report_body(
         summary, items, thresholds=thresholds, coverage=coverage, report_format=report_format,
         redact_paths=redact_paths, excluded_items=excluded_items, scan_root=scan_root,
+        analysis_options=analysis_options, files_cancelled_source=files_cancelled_source,
     )
     return sign_report(body, key if key is not None else resolve_report_key(), model_pins=model_pins)
 
@@ -156,6 +171,30 @@ def signed_report_body(
 # R9-9 (round 9): the scanned folder of a web report (signed body
 # ``scan_root``) is printed in the report header.
 SCAN_ROOT_LABEL = "검사 폴더(읽기 루트 기준, 행 경로의 기준 폴더)"
+
+
+# R19-3 (round 19): the options a web report re-analyzed every row with.
+ANALYSIS_OPTIONS_LABEL = "재분석 옵션(서버가 이 옵션으로 모든 행을 다시 분석)"
+
+
+def analysis_options_line(signed: dict[str, object]) -> str | None:
+    """"재분석 옵션(…): 픽셀 off · 히트맵 끔 · …" for a signed body with ``analysis_options`` (R19-3), else None."""
+    options = signed.get("analysis_options")
+    if not isinstance(options, dict):
+        return None
+    onoff = lambda value: "켬" if value else "끔"  # noqa: E731
+    parts = [
+        f"픽셀 {options.get('pixel')}",
+        f"히트맵 {onoff(options.get('heatmaps'))}",
+        f"심층 신호 {onoff(options.get('deep_signals'))}",
+        f"기본 엔진 {onoff(options.get('default_engine'))}",
+    ]
+    models = options.get("model_path")
+    if isinstance(models, list) and models:
+        parts.append("모델 프로필 " + ", ".join(str(name) for name in models))
+    if options.get("fusion_profile"):
+        parts.append(f"융합 프로필 {options.get('fusion_profile')}")
+    return f"{ANALYSIS_OPTIONS_LABEL}: " + " · ".join(parts)
 
 
 def scan_root_line(signed: dict[str, object]) -> str | None:
@@ -297,7 +336,9 @@ def unsigned_row_lines(unsigned_rows: list[tuple[ScanItem, str]] | None) -> list
 
 def _scan_root_html(signed: dict[str, object]) -> str:
     line = scan_root_line(signed)
-    return f'<p class="scan-root" id="scan-root">{escape(line)}</p>' if line else ""
+    html = f'<p class="scan-root" id="scan-root">{escape(line)}</p>' if line else ""
+    options = analysis_options_line(signed)  # R19-3
+    return html + (f'<p class="scan-root" id="analysis-options">{escape(options)}</p>' if options else "")
 
 
 def _unsigned_rows_html(unsigned_rows: list[tuple[ScanItem, str]] | None) -> str:
@@ -524,6 +565,9 @@ def _render_forensic_pdf(
     root_line = scan_root_line(signed_report)
     if root_line:
         layout.text(layout.left, title_x1, root_line, 7.5, (0.3, 0.3, 0.3), gap=1.0)  # R9-9
+    options_line = analysis_options_line(signed_report)
+    if options_line:
+        layout.text(layout.left, title_x1, options_line, 7.5, (0.3, 0.3, 0.3), gap=1.0)  # R19-3
     title_bottom = layout.y
     box_x0 = layout.right - box_w
     pad = 6.0

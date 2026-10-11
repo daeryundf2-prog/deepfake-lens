@@ -111,6 +111,11 @@ def cancelled_note(summary: object | None) -> str:
     count = summary.get("files_cancelled") if isinstance(summary, dict) else getattr(summary, "files_cancelled", 0)
     if cancelled is not True:
         return ""
+    if getattr(summary, "files_cancelled_unverified", False):
+        # R19-3: the posted count of a web report the server could not check — never shown as a number.
+        from .result_types import CANCELLED_COUNT_UNVERIFIED
+
+        return f"[{CANCELLED_PARTIAL_RESULT}: {CANCELLED_COUNT_UNVERIFIED}] "
     return f"[{CANCELLED_PARTIAL_RESULT}: 분석하지 않은 파일 {count if isinstance(count, int) else 0}개] "
 
 

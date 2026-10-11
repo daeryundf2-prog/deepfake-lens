@@ -319,14 +319,53 @@ def _scan_status_payload(query: str) -> dict[str, object]:
         return payload
 
 
-def _with_posted_cancel(summary: Any, posted: object) -> Any:
-    """R18-3: ``summary`` marked cancelled with the posted ``files_cancelled`` when the posted summary says so."""
-    if not isinstance(posted, dict) or posted.get("cancelled") is not True:
-        return summary
-    count = posted.get("files_cancelled")
+def _with_posted_cancel(summary: Any, posted: object, job_id: object = None, scan_root: Path | None = None) -> tuple[Any, str | None]:
+    """R18-3: ``summary`` marked cancelled when the posted summary says so; R19-3: with a count the server checked.
+
+    The caveat ("부분 결과") is taken from the client — it can only add a
+    warning. R19-3 (round 19): the posted ``files_cancelled`` went into the
+    signed body unchecked (10**18 was signed). The count is now the
+    server's: from its own scan job named by ``scan_job`` (finished
+    "cancelled", same scan folder) — source ``"server"``; otherwise the count
+    is 0 and the summary is marked unverified (the renderings say the
+    number could not be checked) — source ``"unverified"``. Returns
+    ``(summary, source)``; source None when the post did not say cancelled.
+    """
     from dataclasses import replace
 
-    return replace(summary, cancelled=True, files_cancelled=count if isinstance(count, int) and not isinstance(count, bool) and count > 0 else 0)
+    if not isinstance(posted, dict) or posted.get("cancelled") is not True:
+        return summary, None
+    count: object = None
+    if isinstance(job_id, str) and job_id and scan_root is not None:
+        with _SCAN_JOBS_LOCK:
+            entry = _SCAN_JOBS.get(job_id)
+            result = entry.get("result") if entry is not None and entry.get("status") == "cancelled" else None
+        job_summary = result.get("summary") if isinstance(result, dict) else None
+        if isinstance(job_summary, dict) and isinstance(result, dict) and result.get("scan_root") == scan_root_text(scan_root):
+            count = job_summary.get("files_cancelled")
+    if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+        return replace(summary, cancelled=True, files_cancelled=count), "server"
+    return replace(summary, cancelled=True, files_cancelled=0, files_cancelled_unverified=True), "unverified"
+
+
+def report_analysis_options(options: AnalysisOptions) -> dict[str, object]:
+    """R19-3 (round 19): the analysis options a web report re-analyzed every row with — names, never paths.
+
+    The GUI posted the options of the scan it was *running*, not of the rows
+    on screen, and the server re-analyzed with them; the report did not say
+    which options it used. The signed body now carries them
+    (``analysis_options``) and every rendering prints them.
+    """
+    model_path = options.model_path
+    models = [Path(path).name for path in (model_path if isinstance(model_path, tuple) else (model_path,)) if path is not None]
+    return {
+        "pixel": options.pixel_mode,
+        "heatmaps": bool(options.heatmaps),
+        "deep_signals": bool(options.deep_signals),
+        "default_engine": not options.no_default_engine,
+        "model_path": models,
+        "fusion_profile": Path(options.fusion_profile).name if options.fusion_profile is not None else None,
+    }
 
 
 def _scan_cancel_payload(query: str) -> dict[str, object]:
@@ -1848,7 +1887,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     # R18-3 (round 18): a cancelled scan's report says it is a partial result.
     # The client's claim is taken as given — it can only add the caveat and
     # the "사용자 취소" count, never remove a row or change a verdict.
-    summary = _with_posted_cancel(summary, data.get("summary"))
+    summary, cancel_source = _with_posted_cancel(summary, data.get("summary"), data.get("scan_job"), scan_root)
     req_format = format_override.lower()
     # G30: web reports are signed when DEEPFAKE_LENS_REPORT_KEY is set and
     # say "서명 없음" otherwise; the pins are those of the server's models dir.
@@ -1856,10 +1895,13 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
 
     # R9-9: the scanned folder (relative to its read root) is signed and shown.
     root_label = _scan_root_label(scan_root, roots)
+    # R19-3 (round 19): the options the server re-analyzed with are signed and printed.
+    analysis_options = report_analysis_options(options)
     signed = signed_report_body(
         summary, items, thresholds=thresholds, coverage=coverage,
         report_format=req_format, model_pins=profile_pins(_models_dir()),
         excluded_items=excluded_rows, scan_root=root_label,
+        analysis_options=analysis_options, files_cancelled_source=cancel_source,
     )
     if req_format == "json":
         return signed
@@ -1889,7 +1931,9 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
                 )
                 # G30: signed like the other web reports (server key + pins).
                 write_evidence_statement_pdf(
-                    tmp_path, stmt, signed=signed_statement_body(stmt, model_pins=profile_pins(_models_dir()), scan_root=root_label),
+                    tmp_path, stmt, signed=signed_statement_body(
+                        stmt, model_pins=profile_pins(_models_dir()), scan_root=root_label, analysis_options=analysis_options,
+                    ),
                     unsigned_rows=excluded,
                 )
             except RuntimeError as exc:

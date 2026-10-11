@@ -144,16 +144,28 @@ class WebJobIsCancelledTest(unittest.TestCase):
         assert isinstance(result, dict)
         self.assertTrue(result["summary"]["cancelled"])
         self.assertEqual(result["summary"]["total"] + result["summary"]["files_cancelled"], 6)
+        # R19-3 (round 19): a report naming this job gets the job's count, whatever the client posts.
+        empty = core.summarize([], capped=False)
+        marked, source = webapp_api._with_posted_cancel(empty, {"cancelled": True, "files_cancelled": 10**18}, job_id, folder)
+        self.assertEqual((source, marked.files_cancelled), ("server", result["summary"]["files_cancelled"]))
+        self.assertFalse(marked.files_cancelled_unverified)
+        # Another folder, or an unknown job: unverified.
+        other, source = webapp_api._with_posted_cancel(empty, {"cancelled": True, "files_cancelled": 10**18}, job_id, folder.parent)
+        self.assertEqual((source, other.files_cancelled, other.files_cancelled_unverified), ("unverified", 0, True))
 
     def test_a_report_of_a_cancelled_scan_says_partial(self) -> None:
+        """R19-3 (round 19): the posted files_cancelled (7 here) used to be signed as given — 10**18 was. Without a
+        server job to check it against the count is 0 and the summary line says it is unverified."""
         summary = core.summarize([], capped=False)
-        marked = webapp_api._with_posted_cancel(summary, {"cancelled": True, "files_cancelled": 7})
+        marked, source = webapp_api._with_posted_cancel(summary, {"cancelled": True, "files_cancelled": 7})
         self.assertTrue(marked.cancelled)
-        self.assertEqual(marked.files_cancelled, 7)
-        self.assertIn("사용자 취소", " ".join(unrecorded_files([], marked).lines()))
+        self.assertEqual((source, marked.files_cancelled, marked.files_cancelled_unverified), ("unverified", 0, True))
+        self.assertIn("분석하지 않은 파일 수는 서버가 확인하지 못했습니다", summary_line(marked))
+        self.assertNotIn("7", summary_line(marked).split("]")[0])
+        self.assertNotIn("files_cancelled_unverified", marked.to_json())  # the summary JSON is unchanged
         # A posted summary can only add the caveat.
-        self.assertIs(webapp_api._with_posted_cancel(summary, {"cancelled": False, "files_cancelled": 7}), summary)
-        self.assertEqual(webapp_api._with_posted_cancel(summary, {"cancelled": True, "files_cancelled": -3}).files_cancelled, 0)
+        self.assertEqual(webapp_api._with_posted_cancel(summary, {"cancelled": False, "files_cancelled": 7}), (summary, None))
+        self.assertEqual(webapp_api._with_posted_cancel(summary, {"cancelled": True, "files_cancelled": -3})[0].files_cancelled, 0)
 
     def test_html_report_and_evidence_statement_say_partial(self) -> None:
         from deepfake_lens.evidence_statement import build_evidence_statement

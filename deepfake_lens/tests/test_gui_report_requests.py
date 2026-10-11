@@ -1,5 +1,14 @@
 """GUI report requests (gui.js).
 
+R19-3 (round 19): the GUI could re-analyze the rows on screen with other
+options and export that as a signed report — ``lastScanOptions`` was set when
+a folder scan was *submitted* (the rows changed only with its results; an
+error or another scan left old rows with new options), the export buttons
+stayed enabled during a scan, and the report did not say which options it
+used. The options now change with the rows, the exports are disabled and
+refused while a scan runs, and the job id goes with the report so the server
+can check a cancelled scan's count.
+
 R19-13 (round 19): a report refused with 409 because files changed after the
 scan names those files in the error the GUI shows.
 
@@ -50,6 +59,37 @@ def _run_js(body: str) -> str:
     if done.returncode != 0:
         raise AssertionError(done.stderr)
     return (done.stdout or done.stderr).strip()
+
+
+EXPORT_BUTTONS = ("exp-json", "exp-csv", "exp-report", "exp-pdf", "exp-evidence", "exp-clear")
+
+
+class ScanOptionsFollowTheRowsTest(unittest.TestCase):
+    def test_options_are_set_with_the_results_not_on_submit(self) -> None:
+        source = GUI_JS.read_text(encoding="utf-8")
+        handler = source[source.index("$('analyze-btn').addEventListener"):source.index("$('scan-cancel').addEventListener")]
+        submitted = handler.index("setBusy(true")
+        self.assertNotIn("lastScanOptions =", handler[:submitted])  # not when the scan is submitted
+        applied = handler.index("processResults(data)")
+        self.assertIn("lastScanOptions = scanOptions;", handler[submitted:applied])
+        self.assertIn("lastScanJob = job.job_id;", handler[submitted:applied])
+        self.assertLess(handler.index("lastScanRoot = data.scan_root"), handler.index("lastScanOptions = scanOptions;"))
+        upload = source[source.index("$('upload-btn').addEventListener"):source.index("function processResults(")]
+        self.assertIn("lastScanOptions = {};", upload)
+        self.assertIn("lastScanJob = '';", upload)
+        self.assertIn("if (lastScanJob) out.scan_job = lastScanJob;", _function("reportPayload"))
+
+    def test_exports_are_disabled_and_refused_while_scanning(self) -> None:
+        source = GUI_JS.read_text(encoding="utf-8")
+        inputs = source[source.index("const SCAN_INPUTS = ["):]
+        inputs = inputs[:inputs.index("];")]
+        for button in EXPORT_BUTTONS:
+            with self.subTest(button=button):
+                self.assertIn(f"'{button}'", inputs)
+                start = source.index(f"$('{button}').addEventListener('click'")
+                first = source[start:source.index("\n", source.index("\n", start) + 1)]
+                self.assertIn("if (exportBlocked()) return;", first)
+        self.assertIn("if (!scanBusy) return false;", _function("exportBlocked"))
 
 
 class ChangedRowsErrorSourceTest(unittest.TestCase):

@@ -1682,6 +1682,50 @@ class ReportRefusesChangedRowsTest(_ReportLegsFixture):
                 self.assertEqual({row["path"]: row["sha256"] for row in signed["items"]}, {path: row.get("sha256") for path, row in rows.items()})
 
 
+class ReportRecordsAnalysisOptionsTest(_ReportLegsFixture):
+    """R19-3 (round 19): /api/report re-analyzed the posted rows with the posted ``options`` and the report did not
+    say which — a GUI that sent the options of another scan got a signed report with other coverage (pixel and
+    inpaint "ran" where the screen said skipped). The signed body now carries ``analysis_options`` and every
+    rendering prints them."""
+
+    def test_the_options_are_signed_and_printed(self) -> None:
+        from deepfake_lens.reports import ANALYSIS_OPTIONS_LABEL, extract_signed_report
+
+        rows = [self.rows["target.png"]]
+        options = {"pixel": "deep", "deep_signals": "true", "heatmaps": "false", "no_default_engine": "true"}
+        for name, make in self._legs():
+            post = make()
+            with self.subTest(leg=name, format="json"):
+                status, _, raw = post("/api/report", self._json({"items": rows, "format": "json", "options": options}))
+                self.assertIn(status, (200, 409), raw[:300])
+                if status == 200:
+                    self.assertEqual(json.loads(raw)["analysis_options"], {
+                        "pixel": "deep", "heatmaps": False, "deep_signals": True, "default_engine": False,
+                        "model_path": [], "fusion_profile": None,
+                    })
+            with self.subTest(leg=name, format="html"):
+                status, _, raw = post("/api/report", self._json({"items": rows, "options": {"no_default_engine": "true"}}))
+                self.assertEqual(status, 200, raw[:300])
+                html = raw.decode("utf-8")
+                self.assertIn(f"{ANALYSIS_OPTIONS_LABEL}: 픽셀 off · 히트맵 끔 · 심층 신호 끔 · 기본 엔진 끔", html)
+                embedded = extract_signed_report(html)
+                assert embedded is not None
+                self.assertEqual(embedded["analysis_options"]["pixel"], "off")
+
+    def test_a_posted_cancel_count_is_not_signed_unchecked(self) -> None:
+        rows = [self.rows["target.png"]]
+        summary = {"cancelled": True, "files_cancelled": 10**18}
+        for name, make in self._legs():
+            with self.subTest(leg=name):
+                status, _, raw = make()("/api/report", self._json({"items": rows, "format": "json", "summary": summary, "scan_job": "nope"}))
+                self.assertEqual(status, 200, raw[:300])
+                signed = json.loads(raw)
+                self.assertEqual(signed["summary"]["files_cancelled"], 0)
+                self.assertTrue(signed["summary"]["cancelled"])
+                self.assertEqual(signed["files_cancelled_source"], "unverified")
+                self.assertNotIn(str(10**18), raw.decode("utf-8"))
+
+
 class _ScanRootFixture(unittest.TestCase):
     """A read root with <root>/target.png and the scanned <root>/caseA/target.png; both server legs."""
 
