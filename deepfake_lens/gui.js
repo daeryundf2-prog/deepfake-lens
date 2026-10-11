@@ -132,8 +132,23 @@
                 (next ? next.querySelector('button') : $('main')).focus();
             });
             box.append(text, close);
+            box.dataset.scan = String(scanGeneration);
             region.appendChild(box);
             while (region.children.length > 4) region.firstElementChild.remove();
+        }
+
+        // GUI-REV G-4: an error belongs to the scan it was raised in. When a new
+        // scan starts, the earlier ones stay readable but are marked "이전 검사"
+        // (they no longer describe the results on screen).
+        let scanGeneration = 0;
+        function retireErrors() {
+            scanGeneration += 1;
+            document.querySelectorAll('#error-region .err-item').forEach(box => {
+                if (box.classList.contains('err-old')) return;
+                box.classList.add('err-old');
+                const head = box.querySelector('.err-text b');
+                head.textContent = '이전 검사 · ' + head.textContent;
+            });
         }
 
         function toast(msg, isErr, label) {
@@ -1011,6 +1026,7 @@
 
         async function runScanJob(jobId, folderPath) {
             currentJobId = jobId;
+            retireErrors();
             progressStart('검사 중', true);
             setBusy(true);
             let state = null;
@@ -1135,6 +1151,7 @@
         $('upload-btn').addEventListener('click', async () => {
             if (!selectedFiles.length || scanBusy) return;
             const BATCH = 20;
+            retireErrors();
             progressStart('올린 파일 검사 중', false);
             setBusy(true);
             try {
@@ -2207,6 +2224,7 @@
                     box.innerHTML = '';
                     lastScanRoot = '';
                     lastScanRootB64 = '';
+                    retireErrors();
                     processResults(data);
                     toast(`압축 해제 — ${(data.items || []).length}개 파일 분석됨`);
                     navigate('ledger', $('sum-h'));

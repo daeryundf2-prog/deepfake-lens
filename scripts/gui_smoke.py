@@ -86,6 +86,19 @@ def main() -> int:
             assert Path(page.input_value("#folder-path")).resolve() == Path(args.scan_dir).resolve(), "folder not prefilled from --folder"
             assert page.locator("a.skip-link[href='#main']").count() == 1, "skip link missing"
 
+            # GUI-REV G-4: an error of one attempt (a folder outside the read roots)
+            # is marked "이전 검사" once the next scan starts — not left standing
+            # above results it does not describe.
+            prefilled = page.input_value("#folder-path")
+            page.fill("#folder-path", "/")
+            page.keyboard.press("Enter")
+            page.wait_for_selector("#error-region .err-item", timeout=10_000)
+            assert "허용되지 않은 경로" in page.locator("#error-region").inner_text()
+            page.fill("#folder-path", prefilled)
+            # The 403 above was asked for; the browser logs it as a failed resource.
+            console_errors[:] = [e for e in console_errors if "status of 403" not in e]
+            failed_responses.clear()
+
             # 2. Run a real folder scan through the UI — Enter in the folder box submits (U-8).
             page.locator("#scan-options summary").click()
             page.check("#opt-recursive")
@@ -94,6 +107,9 @@ def main() -> int:
             page.wait_for_selector("#results-section:not([hidden])", timeout=180_000)
             # A11Y-4: focus lands on the conclusion headline, never on <body>.
             page.wait_for_function("() => document.activeElement && document.activeElement.id === 'sum-h'", timeout=10_000)
+            stale = page.locator("#error-region .err-item")
+            assert stale.count() >= 1 and all("이전 검사" in stale.nth(i).inner_text() for i in range(stale.count())), \
+                "an earlier attempt's error must be marked 이전 검사 (G-4)"
             headline = page.locator("#sum-h").inner_text()
             assert "개 중 " in headline and headline.endswith("."), headline
             bar = page.locator("#progress")
