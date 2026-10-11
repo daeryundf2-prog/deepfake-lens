@@ -229,6 +229,8 @@ def main() -> int:
             page.check("input[name='submitter-side'][value='defendant']")
             assert "을 제1호증" in a4_ready()
             assert page.evaluate("exportPayload('evidence').submitter_side") == "defendant"
+            # GUI-REV3 J-10: the empty boxes are named apart.
+            assert "원고·고소인 칸과 피고·피의자 칸이 비어 있습니다" in page.locator("#report-checks").inner_text()
             # GUI-REV2 H-3: the forensic PDF's exhibit box follows the side.
             assert page.evaluate("exportPayload('pdf').exhibit_no").startswith("을 제"), "forensic PDF exhibit box must follow the side"
             assert "의뢰 측" not in page.evaluate("exportBlockReason('evidence', selectedEntries())")

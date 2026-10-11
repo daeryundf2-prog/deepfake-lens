@@ -260,7 +260,8 @@ class WebReportSelectionTest(unittest.TestCase):
             assert isinstance(out, dict), out
             bodies[side] = out
         self.assertEqual((bodies["plaintiff"]["plaintiff"], bodies["plaintiff"]["defendant"]), ("(의뢰사 상호명 입력) 귀하", "(피고/피의자 성명 입력)"))
-        self.assertEqual((bodies["defendant"]["plaintiff"], bodies["defendant"]["defendant"]), ("(원고/고소인 성명 입력)", "(의뢰인 성명 입력) 귀하"))
+        # GUI-REV3 J-10: no "귀하" in the defendant box (it pinned "(의뢰인 성명 입력) 귀하").
+        self.assertEqual((bodies["defendant"]["plaintiff"], bodies["defendant"]["defendant"]), ("(원고/고소인 성명 입력)", "(의뢰인 성명 입력)"))
         self.assertTrue(all("피고·피의자 측 제출" in entry["purpose_of_proof"] for entry in bodies["defendant"]["entries"]))
 
     def test_rendered_defendant_pdf_says_byeonhoin(self) -> None:
@@ -334,6 +335,15 @@ class WebReportSelectionTest(unittest.TestCase):
         unknown = webapp_api._report_payload(self._body(exhibit_paths=["nope.png"]), "evidence-json", default_folder=self.folder)
         assert isinstance(unknown, dict)
         self.assertEqual(unknown["code"], "exhibit_unknown")
+
+    def test_unsupported_format_lists_every_format(self) -> None:
+        """GUI-REV3 J-10: the refusal names evidence-json and evidence-preview too (both servers share it)."""
+        out = webapp_api.report_format(b"", "docx")
+        assert isinstance(out, dict)
+        for name in webapp_api.REPORT_FORMATS:
+            self.assertIn(f"`{name}`", out["error"])
+        self.assertIn("`evidence-json`", out["error"])
+        self.assertIn("`evidence-preview`", out["error"])
 
     def test_malformed_choice_is_refused(self) -> None:
         for extra in ({"exhibit_paths": "a.txt"}, {"exhibit_paths": [1]}, {"submitter_side": "court"}):

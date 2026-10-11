@@ -1286,7 +1286,8 @@ EVIDENCE_PDF_FAILED_PREFIX = "증거설명서 PDF 생성 실패: "
 # "format" — both servers decide the content type from the same value.
 REPORT_FORMATS = ("html", "pdf", "evidence", "evidence-statement", "json", "evidence-json", "evidence-preview")
 PDF_REPORT_FORMATS = ("pdf", "evidence", "evidence-statement")
-REPORT_FORMAT_UNSUPPORTED = "지원되지 않는 보고서 형식입니다: 「{value}」 (`html`, `pdf`, `evidence`, `json` 중 하나)"
+# GUI-REV3 J-10: the list is REPORT_FORMATS itself (it missed evidence-json / evidence-preview).
+REPORT_FORMAT_UNSUPPORTED = "지원되지 않는 보고서 형식입니다: 「{value}」 (" + ", ".join(f"`{name}`" for name in REPORT_FORMATS) + " 중 하나)"
 REPORT_FORMAT_NOT_STRING = "`format` 값은 문자열이어야 합니다"
 
 

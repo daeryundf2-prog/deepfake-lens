@@ -2217,9 +2217,10 @@
             const pl = caseValue('case-plaintiff'), df = caseValue('case-defendant');
             if (!pl || !df) {
                 // H-3: the empty box is named as the form names it; the client is on the chosen side.
-                const empty = [!pl ? '원고·고소인' : '', !df ? '피고·피의자' : ''].filter(Boolean).join('·');
+                // J-10: "원고·고소인 칸과 피고·피의자 칸" — the old "·" join ran the box names together.
+                const empty = [!pl ? '원고·고소인 칸' : '', !df ? '피고·피의자 칸' : ''].filter(Boolean).join('과 ');
                 const client = submitterSide() === 'defendant' ? '피고·피의자(의뢰인)' : submitterSide() === 'plaintiff' ? '원고·고소인(의뢰인)' : '';
-                out.push({ tag: 'info', text: `${empty} 칸이 비어 있습니다 — 증거설명서에는 "(… 입력)" 자리표시로 남습니다.` + (client ? ` 의뢰인 자리: ${client}.` : ''),
+                out.push({ tag: 'info', text: `${empty}이 비어 있습니다 — 증거설명서에는 "(… 입력)" 자리표시로 남습니다.` + (client ? ` 의뢰인 자리: ${client}.` : ''),
                     act: ['입력', () => $(pl ? 'case-defendant' : 'case-plaintiff').focus()] });
             }
             const side = submitterSide();

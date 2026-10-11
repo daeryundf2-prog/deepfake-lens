@@ -70,7 +70,8 @@ SIDE_WORDING: dict[str, dict[str, Any]] = {
     "plaintiff": {"md_agent": "대리인", "pdf_agent": "소송대리인", "signoff_agent": "소송대리인", "statutes": True,
                   "placeholders": ("(의뢰사 상호명 입력) 귀하", "(피고/피의자 성명 입력)")},
     "defendant": {"md_agent": "변호인", "pdf_agent": "변호인", "signoff_agent": "변호인", "statutes": False,
-                  "placeholders": ("(원고/고소인 성명 입력)", "(의뢰인 성명 입력) 귀하")},
+                  # J-10: a party box takes a name, not the "귀하" of the plaintiff form's client line.
+                  "placeholders": ("(원고/고소인 성명 입력)", "(의뢰인 성명 입력)")},
 }
 NO_STATUTE_DEFENDANT = "• 관련 법조: 기재하지 않음(피고·피의자 측 제출)"
 
