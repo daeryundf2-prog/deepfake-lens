@@ -887,7 +887,7 @@
             if (prog.at) prog.serverElapsed = elapsedNow();
             prog.running = false;
             paintTime();
-            if (document.activeElement === $('scan-cancel')) $('prog-h').focus();
+            if (document.activeElement === $('scan-cancel')) focusSafely($('prog-h'));
             $('scan-cancel').hidden = true;
             $('cancel-note').hidden = true;
             $('progress').classList.remove('indeterminate');
@@ -1078,7 +1078,9 @@
                 if (state.status === 'cancelled' || partialResultNote(data.summary)) {
                     progressFinish('cancelled', data);
                     setBusy(false);
-                    $('view-results-btn').focus();
+                    // G-6: focus a control the examiner can see — on another screen
+                    // the button is hidden and focus fell to <body>.
+                    focusSafely($('view-results-btn'));
                 } else {
                     progressFinish('done', data);
                     setBusy(false);
@@ -1152,6 +1154,12 @@
             }
         });
 
+        function focusSafely(el) {
+            const visible = el && el.getClientRects().length > 0;
+            const target = visible ? el : viewHeading(currentView);
+            if (target) target.focus();
+        }
+
         function resumeJob() {
             let saved = null;
             try { saved = JSON.parse(sessionStorage.getItem(JOB_STORE) || 'null'); } catch (e) { saved = null; }
@@ -1159,6 +1167,8 @@
             const options = saved.options && typeof saved.options === 'object' ? saved.options : {};
             if (typeof saved.folder === 'string') $('folder-path').value = saved.folder;
             toast('진행 중이던 검사에 다시 연결합니다');
+            // GUI-REV G-6: a reconnected scan is shown, not left behind an empty ledger.
+            if (currentView !== 'scan') navigate('scan');
             runScanJob(saved.job, typeof saved.folder === 'string' ? saved.folder : '', options);
             return true;
         }

@@ -224,6 +224,44 @@ def main() -> int:
             assert page.evaluate("lastScanOptions.pixel") == "fast", "the new scan's options were not attached to its results"
             assert page.locator("#busy-band").is_hidden()
 
+            # 5c. GUI-REV G-6: a scan reconnected after a reload is shown (검사 screen),
+            #     the ledger says it runs, and a cancelled result handled on another
+            #     screen leaves focus on a visible element, never <body>.
+            import urllib.request
+
+            def hold(route: object) -> None:
+                route.fulfill(status=200, content_type="application/json", body=held)  # type: ignore[attr-defined]
+
+            page.route("**/api/scan-status*", hold)
+            page.evaluate("location.hash = '#/scan'")
+            page.click("#analyze-btn")
+            page.wait_for_function("() => scanBusy === true", timeout=10_000)
+            job_id = page.evaluate("JSON.parse(sessionStorage.getItem('dfl.scan-job')).job")
+            page.evaluate("location.hash = '#/ledger'")
+            page.reload(wait_until="networkidle")
+            page.wait_for_function("() => scanBusy === true", timeout=10_000)
+            assert page.evaluate("location.hash") == "#/scan", "a reconnected scan must be shown on the 검사 screen"
+            page.evaluate("location.hash = '#/ledger'")
+            assert page.locator("#busy-band").is_visible(), "the ledger must say a scan is running"
+            final: dict = {}
+            for _ in range(600):
+                request = urllib.request.Request(f"http://127.0.0.1:{args.port}/api/scan-status?job={job_id}", headers={"X-Deepfake-Lens-Client": "gui"})
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    final = _json.loads(response.read())
+                if final["status"] != "running":
+                    break
+                time.sleep(0.2)
+            final["status"] = "cancelled"
+            final["result"]["summary"].update(cancelled=True, files_cancelled=3)
+            # The newer route wins; the hold is removed after it, so no poll slips through.
+            page.route("**/api/scan-status*", lambda route: route.fulfill(status=200, content_type="application/json", body=_json.dumps(final)))
+            page.unroute("**/api/scan-status*", hold)
+            page.wait_for_function("() => scanBusy === false", timeout=30_000)
+            assert page.evaluate("document.activeElement !== document.body"), "focus fell to <body> after a cancelled scan"
+            page.unroute("**/api/scan-status*")
+            page.evaluate("location.hash = '#/ledger'")
+            assert page.locator("#partial-banner").is_visible(), "the partial-result banner (R18-3) must show"
+
             # 6. Reflow (WCAG 1.4.10): no horizontal page scroll at 375px on any screen.
             page.set_viewport_size({"width": 375, "height": 812})
             for view in ("scan", "ledger", "report", "tools"):
