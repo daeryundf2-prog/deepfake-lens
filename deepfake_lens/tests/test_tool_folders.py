@@ -27,7 +27,8 @@ from collections import OrderedDict
 from pathlib import Path
 from unittest import mock
 
-from deepfake_lens import webapp_api
+from deepfake_lens import core, webapp_api
+from deepfake_lens.native_path import ToolFolderError, tool_folder_from_env
 
 PACKAGE = Path(__file__).resolve().parents[1]
 NO_SUCH_USER = "~dfl-r19-no-such-user"
@@ -37,6 +38,64 @@ def _run(args: list[str], cwd: Path, **env: str) -> subprocess.CompletedProcess[
     base = {key: value for key, value in os.environ.items() if not key.startswith("DEEPFAKE_LENS_")}
     base.update(PYTHONPATH=str(PACKAGE.parent), HOME=str(cwd.parent / "home"), **env)
     return subprocess.run([sys.executable, "-m", "deepfake_lens", *args], cwd=cwd, env=base, capture_output=True, text=True, timeout=300)
+
+
+class ToolFolderVariableTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.case = Path(self._tmp.name).resolve() / "case"
+        self.case.mkdir()
+        (self.case / "memo.txt").write_text("사람이 쓴 짧은 메모입니다.", encoding="utf-8")
+        self.listing = sorted(os.listdir(self.case))
+
+    def assert_untouched(self) -> None:
+        self.assertEqual(sorted(os.listdir(self.case)), self.listing)
+
+    def test_a_relative_log_folder_inside_the_scanned_folder_is_exit_2(self) -> None:
+        for value in ("logs", "./nested/logs"):
+            with self.subTest(value=value):
+                done = _run(["scan", "."], self.case, DEEPFAKE_LENS_LOG_DIR=value)
+                self.assertEqual(done.returncode, 2, done.stderr)
+                self.assertIn("환경 변수 DEEPFAKE_LENS_LOG_DIR의 폴더가 검사 대상 폴더 안에 있습니다", done.stderr)
+                self.assertNotIn("Traceback", done.stderr)
+                self.assert_untouched()
+
+    def test_an_unknown_home_in_a_variable_is_exit_2(self) -> None:
+        for env in ("DEEPFAKE_LENS_LOG_DIR", "DEEPFAKE_LENS_HEATMAP_DIR"):
+            with self.subTest(env=env):
+                done = _run(["scan", ".", "--pixel", "deep", "--heatmaps"], self.case, **{env: f"{NO_SUCH_USER}/l"})
+                self.assertEqual(done.returncode, 2, done.stderr)
+                self.assertIn(f"환경 변수 {env}의 경로를 해석할 수 없습니다", done.stderr)
+                self.assert_untouched()
+
+    def test_a_heatmap_folder_inside_the_scanned_folder_is_exit_2(self) -> None:
+        done = _run(["scan", str(self.case), "--pixel", "deep", "--heatmaps"], self.case.parent, DEEPFAKE_LENS_HEATMAP_DIR=str(self.case / "hm"))
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertIn("환경 변수 DEEPFAKE_LENS_HEATMAP_DIR의 폴더가 검사 대상 폴더 안에 있습니다", done.stderr)
+        self.assert_untouched()
+        # Without --heatmaps the variable is not used, and a folder outside is fine.
+        self.assertEqual(_run(["scan", str(self.case)], self.case.parent, DEEPFAKE_LENS_HEATMAP_DIR=str(self.case / "hm")).returncode, 0)
+        outside = _run(["scan", str(self.case)], self.case.parent, DEEPFAKE_LENS_LOG_DIR=str(self.case.parent / "logs"))
+        self.assertEqual(outside.returncode, 0, outside.stderr)
+        self.assert_untouched()
+
+    def test_the_variable_is_made_absolute_and_an_unknown_home_raises(self) -> None:
+        with mock.patch.dict(os.environ, {"X_R19_DIR": "rel/dir"}):
+            self.assertEqual(tool_folder_from_env("X_R19_DIR", Path("/d")), Path(os.path.abspath("rel/dir")))
+        with mock.patch.dict(os.environ, {"X_R19_DIR": "  "}):
+            self.assertEqual(tool_folder_from_env("X_R19_DIR", Path("/d")), Path("/d"))
+        with mock.patch.dict(os.environ, {"X_R19_DIR": f"{NO_SUCH_USER}/x"}), self.assertRaises(ToolFolderError):
+            tool_folder_from_env("X_R19_DIR", Path("/d"))
+
+    def test_a_web_scan_never_writes_heatmaps_inside_the_scanned_folder(self) -> None:
+        with mock.patch.dict(os.environ, {core.HEATMAP_DIR_ENV: str(self.case / "hm")}):
+            target = core._heatmap_path_for(self.case / "a.png", root=self.case, heatmap_dir=None)
+            self.assertFalse(str(target).startswith(str(self.case)), target)
+            self.assertTrue(core.is_default_heatmap_output(target.with_name("a.png" + core.HEATMAP_SUFFIX)))
+        with mock.patch.dict(os.environ, {core.HEATMAP_DIR_ENV: str(self.case.parent / "hm")}):
+            target = core._heatmap_path_for(self.case / "a.png", root=self.case, heatmap_dir=None)
+            self.assertTrue(str(target).startswith(str(self.case.parent / "hm")), target)
 
 
 class UnknownHomeInArgumentsTest(unittest.TestCase):

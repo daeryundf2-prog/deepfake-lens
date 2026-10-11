@@ -629,6 +629,43 @@ def check_output_targets(args: argparse.Namespace, key: str, common: tuple[Input
             raise UsageError(OUTPUT_IS_INPUT.format(path=value))
         if attr not in output_folders:
             require_writable_output(value)
+    check_tool_folders(args, folders)
+
+
+# R19-4 (round 19): a tool folder named by a variable inside a scanned folder.
+TOOL_FOLDER_INSIDE_INPUT = (
+    "환경 변수 {env}의 폴더가 검사 대상 폴더 안에 있습니다: {path} — 검사 대상 폴더({folder}) 밖의 절대 경로로 지정하십시오"
+    "(증거 폴더에는 아무것도 쓰지 않습니다)"
+)
+
+
+def check_tool_folders(args: argparse.Namespace, folders: list[Path]) -> None:
+    """R19-4 (round 19): DEEPFAKE_LENS_LOG_DIR and (with --heatmaps, no --heatmap-dir) DEEPFAKE_LENS_HEATMAP_DIR.
+
+    They were not checked like the output arguments (P11): a relative value
+    (``logs``, or ``~nouser/l`` read literally since R18-2) put the log and
+    heatmap folders into the working folder, an absolute one could name a
+    folder inside the evidence. A ``~user`` that names no account is exit 2;
+    a folder inside a folder the command reads is exit 2.
+    """
+    from .cli_logging import LOG_DIR_ENV
+    from .core import HEATMAP_DIR_ENV
+    from .native_path import ToolFolderError, tool_folder_from_env
+
+    checks = [LOG_DIR_ENV]
+    if getattr(args, "heatmaps", False) and not getattr(args, "heatmap_dir", None):
+        checks.append(HEATMAP_DIR_ENV)
+    for env in checks:
+        if not os.environ.get(env, "").strip():
+            continue
+        try:
+            target = tool_folder_from_env(env, Path("."))
+        except ToolFolderError as exc:
+            raise UsageError(str(exc)) from None
+        resolved = _resolved(target)
+        for folder in folders:
+            if _inside(resolved, folder):
+                raise UsageError(TOOL_FOLDER_INSIDE_INPUT.format(env=env, path=target, folder=folder))
 
 
 def command_key(args: argparse.Namespace) -> str:

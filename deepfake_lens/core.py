@@ -2304,8 +2304,17 @@ HEATMAP_FOLDER_KEY_CHARS = 16
 def default_heatmap_root() -> Path:
     """Tool-owned heatmap output root: ``$DEEPFAKE_LENS_HEATMAP_DIR`` or
     ``~/.cache/deepfake-lens/heatmaps``. Never inside the evidence."""
-    env = os.environ.get(HEATMAP_DIR_ENV)
-    return expand_user(env) if env else Path.home() / ".cache" / "deepfake-lens" / "heatmaps"  # R18-2: ~nouser
+    from .native_path import ToolFolderError, tool_folder_from_env
+
+    try:
+        return tool_folder_from_env(HEATMAP_DIR_ENV, builtin_heatmap_root())  # R19-4: absolute
+    except ToolFolderError:
+        return builtin_heatmap_root()  # the CLI refuses it before any work (R19-4)
+
+
+def builtin_heatmap_root() -> Path:
+    """The heatmap folder without the override: ``~/.cache/deepfake-lens/heatmaps``."""
+    return Path.home() / ".cache" / "deepfake-lens" / "heatmaps"
 
 
 def is_default_heatmap_output(path: Path | str) -> bool:
@@ -2314,8 +2323,10 @@ def is_default_heatmap_output(path: Path | str) -> bool:
     output, not caller-chosen files)."""
     try:
         resolved = expand_user(path).resolve()  # R19-5
-        resolved.relative_to(default_heatmap_root().resolve())
+        roots = {default_heatmap_root().resolve(), builtin_heatmap_root().resolve()}  # R19-4: the fallback too
     except (OSError, RuntimeError, ValueError):
+        return False
+    if not any(resolved.is_relative_to(root) for root in roots):
         return False
     return resolved.name.endswith(HEATMAP_SUFFIX)
 
@@ -2326,7 +2337,13 @@ def _heatmap_path_for(path: Path, *, root: Path | None, heatmap_dir: Path | None
     else:
         folder = str(expand_user(root or path.parent).resolve())  # R19-5
         key = hashlib.sha256(folder.encode("utf-8", "surrogateescape")).hexdigest()  # R11-1[:HEATMAP_FOLDER_KEY_CHARS]
-        output_root = default_heatmap_root() / key
+        base = default_heatmap_root()
+        if _inside_folder(base, Path(folder)):
+            # R19-4 (round 19): DEEPFAKE_LENS_HEATMAP_DIR inside the scanned folder (the CLI refuses it
+            # with exit 2; the web server's scans land here) — the built-in folder instead, never the evidence.
+            logger.warning("heatmap folder %s is inside the scanned folder — using %s", base, builtin_heatmap_root())
+            base = builtin_heatmap_root()
+        output_root = base / key
     try:
         relative = path.relative_to(root) if root else Path(path.name)
     except ValueError:
@@ -2334,6 +2351,16 @@ def _heatmap_path_for(path: Path, *, root: Path | None, heatmap_dir: Path | None
     safe_parts = [part.replace("/", "_").replace("\\", "_") for part in relative.parts]
     output_name = "__".join(safe_parts) + HEATMAP_SUFFIX
     return output_root / output_name
+
+
+def _inside_folder(path: Path, folder: Path) -> bool:
+    """R19-4: True when ``path`` (resolved) is ``folder`` or under it."""
+    try:
+        resolved = Path(os.path.realpath(path))
+        resolved.relative_to(Path(os.path.realpath(folder)))
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def sort_items(items: list[ScanItem]) -> list[ScanItem]:

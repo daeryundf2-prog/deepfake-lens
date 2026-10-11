@@ -714,9 +714,17 @@ class UnknownUserOverrideTest(unittest.TestCase):
             ("DEEPFAKE_LENS_LOG_DIR", default_log_dir), ("DEEPFAKE_LENS_HEATMAP_DIR", default_heatmap_root),
             ("DEEPFAKE_LENS_CONFIG", config_path),
         )
+        # R19-4 (round 19): this expected the log and heatmap folders to be the literal relative path
+        # "~nouser/x" — which put them into the working (evidence) folder. They now fall back to the built-in
+        # folder (the CLI refuses the variable with exit 2 first); none of the readers raises.
+        from deepfake_lens.cli_logging import builtin_log_dir
+        from deepfake_lens.core import builtin_heatmap_root
+
+        expected = {"DEEPFAKE_LENS_LOG_DIR": builtin_log_dir(), "DEEPFAKE_LENS_HEATMAP_DIR": builtin_heatmap_root(),
+                    "DEEPFAKE_LENS_CONFIG": Path(f"{_NO_SUCH_USER}/x")}
         for env, reader in cases:
             with self.subTest(env=env), mock.patch.dict(os.environ, {env: f"{_NO_SUCH_USER}/x"}):
-                self.assertEqual(reader(), Path(f"{_NO_SUCH_USER}/x"))
+                self.assertEqual(reader(), expected[env])
 
     def test_a_failing_file_state_is_a_token(self) -> None:
         with mock.patch.object(model_assets, "_file_token", side_effect=RuntimeError("boom")):
