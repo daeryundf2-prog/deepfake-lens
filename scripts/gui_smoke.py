@@ -290,10 +290,17 @@ def main() -> int:
             for button in ("#exp-evidence", "#exp-pdf", "#exp-report", "#exp-signed"):
                 assert page.get_attribute(button, "aria-disabled") == "true", f"{button} must wait for the running scan"
             assert page.evaluate("JSON.stringify(lastScanOptions)") == before_options, "options changed before the new results arrived"
+            # GUI-REV2 H-5: the examiner is typing on the report screen when the scan ends —
+            #     no screen change, no focus move; the band says it finished.
+            page.focus("#case-name")
             page.unroute("**/api/scan-status*")
             page.wait_for_function("() => scanBusy === false", timeout=180_000)
             assert page.evaluate("lastScanOptions.pixel") == "fast", "the new scan's options were not attached to its results"
-            assert page.locator("#busy-band").is_hidden()
+            assert page.evaluate("location.hash") == "#/report", "a finished scan must not move the examiner off the report screen"
+            assert page.evaluate("document.activeElement.id") == "case-name", "a finished scan must not take the focus"
+            assert "검사가 끝났습니다" in page.locator("#busy-band").inner_text()
+            page.click("#busy-band-link")
+            page.wait_for_function("() => currentView === 'ledger' && document.getElementById('busy-band').hidden", timeout=10_000)
 
             # 5c. GUI-REV G-6: a scan reconnected after a reload is shown (검사 screen),
             #     the ledger says it runs, and a cancelled result handled on another

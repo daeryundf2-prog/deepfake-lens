@@ -993,12 +993,38 @@
         }
         // GUI-REV G-5/G-6: while a scan runs, every other screen says so — the
         // ledger and report still hold the previous results (or none yet).
+        // GUI-REV2 H-5: a finished scan opens the ledger only from the 검사 screen.
+        // Elsewhere (the examiner may be typing) the band says it finished and
+        // links to the results — no screen change, no focus move (WCAG 3.2.2).
+        let scanDoneNotice = false;
+        function showResultsWhenDone() {
+            if (currentView === 'scan') {
+                navigate('ledger', $('sum-h'));
+                return;
+            }
+            scanDoneNotice = true;
+            updateBusyBand();
+        }
         function updateBusyBand() {
             const band = $('busy-band');
-            band.hidden = !(scanBusy && currentView !== 'scan');
-            $('busy-band-text').textContent = results.length
-                ? '새 검사 진행 중 — 아래는 이전 결과입니다. 끝나기 전에는 내보낼 수 없습니다.'
-                : '새 검사 진행 중입니다.';
+            const link = $('busy-band-link');
+            if (scanBusy) scanDoneNotice = false;
+            if (currentView === 'ledger') scanDoneNotice = false;
+            if (scanBusy && currentView !== 'scan') {
+                band.hidden = false;
+                $('busy-band-text').textContent = results.length
+                    ? '새 검사 진행 중 — 아래는 이전 결과입니다. 끝나기 전에는 내보낼 수 없습니다.'
+                    : '새 검사 진행 중입니다.';
+                link.href = '#/scan';
+                link.textContent = '진행 상황 보기';
+            } else if (scanDoneNotice) {
+                band.hidden = false;
+                $('busy-band-text').textContent = '검사가 끝났습니다.';
+                link.href = '#/ledger';
+                link.textContent = '결과 보기';
+            } else {
+                band.hidden = true;
+            }
         }
         function pixelMode() {
             const on = document.querySelector('input[name="pixel-mode"]:checked');
@@ -1139,7 +1165,7 @@
                 } else {
                     progressFinish('done', data);
                     setBusy(false);
-                    navigate('ledger', $('sum-h'));
+                    showResultsWhenDone();
                 }
             } catch (error) {
                 toast('검사 중 오류: ' + error.message, true);
@@ -1259,7 +1285,7 @@
                 renderFileChips();
                 progressFinish('done', { items: allItems });
                 setBusy(false);
-                navigate('ledger', $('sum-h'));
+                showResultsWhenDone();
             } catch (error) {
                 toast('분석 중 오류: ' + error.message, true);
                 progressFinish('error');
