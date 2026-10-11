@@ -547,3 +547,5 @@ select.field { padding-right: 8px; }
 .a4 .a4-signoff { margin-top: 12px; text-align: center; }
 .a4 .a4-court { font-weight: 700; margin-top: 6px; }
 .a4 .a4-sign { margin-top: 8px; color: #5C6067; font-size: 10px; }
+.row.row-changed { box-shadow: inset 4px 0 0 var(--manip); }
+.row.row-changed .row-reason { color: var(--manip); font-weight: 600; }

@@ -24,9 +24,10 @@ import time
 from pathlib import Path
 
 
-def start_server(port: int, folder: str) -> subprocess.Popen:
+def start_server(port: int, folder: str, extra_roots: tuple[str, ...] = ()) -> subprocess.Popen:
+    roots = [arg for root in extra_roots for arg in ("--allow-root", root)]
     proc = subprocess.Popen(
-        [sys.executable, "-m", "deepfake_lens", "web", "--host", "127.0.0.1", "--port", str(port), "--folder", folder],
+        [sys.executable, "-m", "deepfake_lens", "web", "--host", "127.0.0.1", "--port", str(port), "--folder", folder, *roots],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
     )
     for _ in range(50):
@@ -57,7 +58,18 @@ def main() -> int:
     except ImportError:
         sys.exit("pip install playwright first")
 
-    server = start_server(args.port, args.scan_dir)
+    # R19-13 step: a scratch folder (a copy of two files of the scan folder) that the
+    # smoke may change on disk — the examiner's folder itself is never written to.
+    import shutil as _shutil
+    import tempfile as _tempfile
+
+    mutable = Path(_tempfile.mkdtemp(prefix="gui-smoke-mutable-"))
+    candidates = [path for path in sorted(Path(args.scan_dir).rglob("*")) if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".txt"}]
+    for source in candidates[:2]:
+        _shutil.copy2(source, mutable / source.name)
+    if not any(mutable.iterdir()):
+        (mutable / "note.txt").write_text("시험용 글입니다.", encoding="utf-8")
+    server = start_server(args.port, args.scan_dir, (str(mutable),))
     try:
         console_errors: list[str] = []
         with sync_playwright() as p:
@@ -263,7 +275,9 @@ def main() -> int:
             preview_text = a4_ready()
             for absent in ("결론 요약", "검사의 한계", "판단할 근거가 없었으며", "특이 사항 없음"):
                 assert absent not in preview_text, f"preview shows {absent!r}, which the PDF does not have"
-            if page.evaluate("pdfAvailable") is True:
+            def preview_equals_pdf() -> None:
+                """Every preview line and table cell is in the downloaded evidence PDF, box titles in order."""
+                a4_ready()
                 preview_lines = page.evaluate("[...document.querySelectorAll('#a4 .a4-box p, #a4 .a4-signoff p')].map(p => p.textContent)")
                 box_titles = page.evaluate("[...document.querySelectorAll('#a4 .a4-box .a4-h')].map(h => h.textContent)")
                 with page.expect_download() as statement_download:
@@ -282,6 +296,9 @@ def main() -> int:
                     assert "".join(cell.split()) in pdf_flat, f"preview cell not in the PDF: {cell[:80]!r}"
                 positions = [pdf_flat.find("".join(title.split())) for title in box_titles]
                 assert all(position >= 0 for position in positions) and positions == sorted(positions), (box_titles, positions)
+
+            if page.evaluate("pdfAvailable") is True:
+                preview_equals_pdf()
             page.uncheck("#inc-undet")
             a4_ready()
             # GUI-REV G-1: every row is posted for every format; the choice only names exhibits.
@@ -498,6 +515,49 @@ def main() -> int:
             page.wait_for_function("() => currentView === 'report'")
             if dup_manip:
                 assert f"부록으로 가는 중복 행 중 조작·생성 근거 있음 {dup_manip}개" in page.locator("#report-checks").inner_text()
+            # Merge of R19-13: duplicate rows stay duplicates in the export when their bytes still
+            # match, so the dedupe preview (incl. 기록되지 않은 파일 and the 분석 못 함 exhibits) now
+            # equals the signed PDF.
+            if page.evaluate("pdfAvailable") is True and page.evaluate("caseUnconfirmed()"):
+                page.get_by_role("button", name="이 폴더의 사건이 맞음").click()
+            if page.evaluate("pdfAvailable") is True:
+                page.check("#inc-other")
+                page.check("#inc-undet")
+                preview_equals_pdf()
+                page.uncheck("#inc-other")
+                page.uncheck("#inc-undet")
+
+            # Merge of R19-13: a file changed on disk after the scan — the export is refused
+            # (409), the error names it with both verdicts and offers 다시 검사, the row is
+            # marked; scanned again, the export goes through.
+            page.evaluate("location.hash = '#/scan'")
+            page.fill("#folder-path", str(mutable))
+            page.click("#analyze-btn")
+            page.wait_for_function("() => scanBusy === false && currentView === 'ledger' && results.length > 0", timeout=180_000)
+            page.evaluate("location.hash = '#/report'")
+            page.wait_for_function("() => currentView === 'report'")
+            if page.evaluate("caseUnconfirmed()"):
+                page.get_by_role("button", name="이 폴더의 사건이 맞음").click()
+            victim = sorted(mutable.iterdir())[0]
+            victim.write_bytes(victim.read_bytes() + b"\nchanged after the scan")
+            page.click("#exp-signed")
+            page.wait_for_selector("#error-region .err-item:has-text('검사 뒤 바뀐 파일')", timeout=120_000)
+            refused = page.locator("#error-region .err-item", has_text="검사 뒤 바뀐 파일").last
+            assert victim.name in refused.inner_text(), refused.inner_text()
+            assert refused.get_by_role("button", name="다시 검사").count() == 1
+            assert page.evaluate(f"changedPaths.has({_json.dumps(victim.name)})"), "the changed row is not marked"
+            console_errors[:] = [e for e in console_errors if "status of 409" not in e]
+            refused.get_by_role("button", name="다시 검사").click()
+            page.wait_for_function("() => currentView === 'scan'")
+            assert Path(page.input_value("#folder-path")).resolve() == mutable.resolve()
+            page.click("#analyze-btn")
+            page.wait_for_function("() => scanBusy === false && currentView === 'ledger' && results.length > 0", timeout=180_000)
+            assert page.evaluate("changedPaths.size") == 0
+            page.evaluate("location.hash = '#/report'")
+            page.wait_for_function("() => currentView === 'report'")
+            with page.expect_download() as signed_again:
+                page.click("#exp-signed")
+            assert _json.loads(Path(signed_again.value.path()).read_text(encoding="utf-8"))["summary"]["total"] == page.evaluate("results.length")
 
             # 7. CSP/console errors: none tolerated. No request leaves the local server
             #    (fonts are local stacks; nothing is fetched from the network).
@@ -513,6 +573,7 @@ def main() -> int:
         return 0
     finally:
         server.terminate()
+        _shutil.rmtree(mutable, ignore_errors=True)
 
 
 if __name__ == "__main__":

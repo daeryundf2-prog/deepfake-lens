@@ -206,7 +206,7 @@ reference signals, previews and technical fields behind disclosures, failed
 checks always visible), `#/report` (export checklist — 사건번호 and 사건명 are
 required for the evidence statement —, the verdict groups to include, PDF /
 HTML / signed JSON through `POST /api/report`, a preview) and `#/tools`
-(`/api/check`, `/api/compare`).
+(`/api/check`, `/api/compare`). A 409 (R19-13) from an export lists the changed files with the ledger's and the server's verdict, marks those rows "검사 뒤 바뀜 — 다시 검사" and offers 다시 검사; the preview says the export is refused when files changed.
 
 | Path | Params | Response |
 |---|---|---|

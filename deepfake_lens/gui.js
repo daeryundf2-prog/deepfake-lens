@@ -113,7 +113,7 @@
 
         // A11Y-6: an error stays on the page (the error region under the top
         // bar) until the examiner closes it — never only a toast that fades.
-        function showError(msg, label, fromScan) {
+        function showError(msg, label, fromScan, action) {
             const region = $('error-region');
             const box = document.createElement('div');
             box.className = 'err-item';
@@ -133,7 +133,17 @@
                 box.remove();
                 (next ? next.querySelector('button') : $('main')).focus();
             });
-            box.append(text, close);
+            box.append(text);
+            if (action) {
+                // GUI-REV3 merge (R19-13): an error can offer its remedy (e.g. 다시 검사).
+                const act = document.createElement('button');
+                act.type = 'button';
+                act.className = 'btn btn-sm btn-primary';
+                act.textContent = action[0];
+                act.addEventListener('click', action[1]);
+                box.append(act);
+            }
+            box.append(close);
             // GUI-REV2 H-10: only a scan's own errors carry its generation; a quick
             // check or export error is never later marked "이전 검사".
             if (fromScan) box.dataset.scan = String(scanGeneration);
@@ -640,6 +650,11 @@
         }
         // One line per row: why this row has its conclusion.
         function rowReason(item) {
+            // R19-13: a row the server found changed since the scan says so first.
+            if (changedPaths.has(String(item.path))) return '검사 뒤 바뀜 — 다시 검사 · ' + rowReasonOf(item);
+            return rowReasonOf(item);
+        }
+        function rowReasonOf(item) {
             const r = item.result;
             const v = verdictOf(item);
             if (v === 'other' || !r) {
@@ -1384,6 +1399,7 @@
             $('rev-filter').setAttribute('aria-pressed', 'false');
             selectedEntry = null;
             groupsTouched = false;
+            changedPaths = new Set();
             // H-8: case fields typed before the first scan belong to it.
             if (!caseFolder && caseHasValues()) confirmCaseFolder();
             renderResults();
@@ -1527,7 +1543,7 @@
             const li = document.createElement('li');
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = 'row';
+            btn.className = changedPaths.has(String(item.path)) ? 'row row-changed' : 'row';
             btn.dataset.verdict = v;
             btn.tabIndex = -1;
             const cov = cc.total
@@ -1758,6 +1774,8 @@
                 `<div class="d-meta">${shown(metaLine(item))}</div>` +
                 `<button type="button" class="linkbtn d-back">목록으로 돌아가기</button></div>`);
             const body = [];
+            // R19-13: the server found this file changed since the scan.
+            if (changedPaths.has(String(item.path))) body.push('<section class="d-sec d-fail"><h3>검사 뒤 바뀜</h3><p>서버가 다시 분석해 보니 검사 때와 다릅니다(파일이 바뀌었거나 지워짐). 이 결과로는 내보낼 수 없습니다 — 폴더를 다시 검사하십시오.</p></section>');
             // 근거: the records that carry the conclusion, then neutral records.
             const decisive = decisiveEvidence(r, v);
             const neutral = ((r && r.evidence) || []).filter(e => e.kind === 'deterministic' && e.direction === 'neutral');
@@ -2402,7 +2420,7 @@
                 boxes +
                 ((body.unsigned || []).length ? `<section class="a4-box">${lines(body.unsigned)}</section>` : '') +
                 `<div class="a4-signoff">${lines(body.signoff || [])}<p class="a4-court">${docHtml(body.court)}</p></div>` +
-                '<p class="a4-sign">서명은 내보낼 때 서버가 서명 키로 붙입니다(키가 없으면 "서명 없음").</p>';
+                '<p class="a4-sign">서명은 내보낼 때 서버가 서명 키로 붙입니다(키가 없으면 "서명 없음"). 내보낼 때 서버가 파일을 다시 분석해, 검사 뒤 바뀌었거나 지워진 파일이 있으면 내보내기를 거부합니다.</p>';
         }
 
         const EXPORT_SPECS = {
@@ -2436,7 +2454,25 @@
             const lostPaths = new Set(lost.map(row => String(row.path)));
             const unknown = (Array.isArray(body && body.unknown_exhibit_paths) ? body.unknown_exhibit_paths : []).filter(path => !lostPaths.has(String(path)));
             if (unknown.length) parts.push('이 보고서의 행이 아닌 경로: ' + listed(unknown, String));
+            // R19-13 (409): files changed after the scan — each with what the ledger shows and
+            // what the server's re-analysis found.
+            const changed = Array.isArray(body && body.changed_rows) ? body.changed_rows : [];
+            const verdictText = (code, status) => code ? (VERDICT_LABELS[code] || String(code)) : (STATUS_LABELS[status] || (status ? String(status) : '다시 분석 못 함'));
+            if (changed.length) parts.push('검사 뒤 바뀐 파일: ' + listed(changed, row => String(row.path) + '(' + verdictText(row.posted_verdict, row.posted_status) + ' → ' +
+                (row.server_verdict || row.server_status ? verdictText(row.server_verdict, row.server_status) : '다시 분석 못 함' + (row.reason ? ': ' + String(row.reason) : '')) + ')'));
             return parts.join(' — ');
+        }
+        // R19-13: the rows the server found changed after the scan — marked in the ledger
+        // until the folder is scanned again.
+        let changedPaths = new Set();
+        function markChangedRows(rows) {
+            changedPaths = new Set(rows.map(row => String(row.path)));
+            if (results.length) renderList();
+        }
+        function rescanFolder() {
+            navigate('scan');
+            if (lastScanRoot) $('folder-path').value = lastScanRoot;
+            $('analyze-btn').focus();
         }
         async function exportReport(kind) {
             if (exportBlocked()) return;
@@ -2457,12 +2493,22 @@
                 const type = res.headers.get('Content-Type') || '';
                 if (!res.ok || !type.includes(spec[1])) {
                     let message;
+                    let changedRows = [];
                     if (type.includes('application/json')) {
-                        try { message = exportErrorText(await res.json(), res.status); } catch (e) { message = '서버 오류 (HTTP ' + res.status + ')'; }
+                        try {
+                            const errorBody = await res.json();
+                            message = exportErrorText(errorBody, res.status);
+                            if (res.status === 409 && Array.isArray(errorBody.changed_rows)) changedRows = errorBody.changed_rows;
+                        } catch (e) { message = '서버 오류 (HTTP ' + res.status + ')'; }
                     } else {
                         message = await apiError(res);
                     }
-                    toast(spec[3] + ' 생성 실패: ' + message, true);
+                    if (changedRows.length) {
+                        markChangedRows(changedRows);
+                        showError(spec[3] + ' 생성 거부: ' + message, '검사 뒤 바뀜', false, ['다시 검사', rescanFolder]);
+                    } else {
+                        toast(spec[3] + ' 생성 실패: ' + message, true);
+                    }
                     $('export-note').textContent = spec[3] + '를 만들지 못했습니다.';
                     return;
                 }

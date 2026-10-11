@@ -47,7 +47,7 @@ def _function(source: str, name: str) -> str:
 def _helpers() -> str:
     source = GUI_JS.read_text(encoding="utf-8")
     return "\n".join([
-        "var results = []; var lastProvenance = { coverage: null, thresholds: null, summary: null };",
+        "var results = []; var lastProvenance = { coverage: null, thresholds: null, summary: null }; var changedPaths = new Set();",
         _section(source, "        function displayName(value)", "        /* ── verdict vocabulary"),
         _function(source, "modelScoreText"),
         _function(source, "partialResultNote"),
@@ -314,7 +314,8 @@ class ExportErrorTextTest(unittest.TestCase):
         body = {"error": "서증으로 고른 파일 1개를 서버가 다시 분석할 수 없습니다", "code": "exhibit_not_rederived",
                 "not_rederived_exhibit_paths": [{"path": "dalle.jpg", "reason": "파일을 찾을 수 없습니다"}],
                 "unknown_exhibit_paths": ["dalle.jpg", *(f"x{i}.png" for i in range(7))]}
-        script = "const EXPORT_ERROR_PATHS = 5;\n" + _function(source, "exportErrorText") + f"console.log(JSON.stringify(exportErrorText({json.dumps(body, ensure_ascii=False)}, 400)));"
+        script = ("const EXPORT_ERROR_PATHS = 5;\nconst VERDICT_LABELS = {manipulation_evidence: '조작·생성 근거 있음', undetermined: '판단 불가'};\n"
+                  "const STATUS_LABELS = {duplicate: '중복'};\n") + _function(source, "exportErrorText") + f"console.log(JSON.stringify(exportErrorText({json.dumps(body, ensure_ascii=False)}, 400)));"
         node = shutil.which("node")
         assert node is not None
         with tempfile.TemporaryDirectory() as tmp:
@@ -325,6 +326,36 @@ class ExportErrorTextTest(unittest.TestCase):
         text = json.loads(done.stdout)
         self.assertIn("다시 분석할 수 없는 서증: dalle.jpg(파일을 찾을 수 없습니다)", text)
         self.assertIn("이 보고서의 행이 아닌 경로: x0.png, x1.png, x2.png, x3.png, x4.png 외 2개", text)
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class ChangedRowsTest(unittest.TestCase):
+    def test_a_409_names_the_changed_files_and_marks_their_rows(self) -> None:
+        """Merge of R19-13: the refused export lists posted vs server verdicts; the rows say 검사 뒤 바뀜."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        body = {"error": "검사 뒤 바뀐 파일이 있습니다 — 다시 검사하십시오(보고서를 만들지 않았습니다)", "changed_rows": [
+            {"path": "dalle.jpg", "posted_verdict": "manipulation_evidence", "server_verdict": "undetermined", "posted_status": "analyzed", "server_status": "analyzed"},
+            {"path": "gone.png", "posted_verdict": "undetermined", "server_verdict": None, "posted_status": "analyzed", "server_status": None, "reason": "파일을 찾을 수 없음"},
+            *({"path": f"x{i}.png", "posted_verdict": "undetermined", "server_verdict": "undetermined"} for i in range(5)),
+        ]}
+        script = ("const EXPORT_ERROR_PATHS = 5;\nconst VERDICT_LABELS = {manipulation_evidence: '조작·생성 근거 있음', undetermined: '판단 불가'};\n"
+                  "const STATUS_LABELS = {};\n") + _function(source, "exportErrorText") + f"console.log(JSON.stringify(exportErrorText({json.dumps(body, ensure_ascii=False)}, 409)));"
+        node = shutil.which("node")
+        assert node is not None
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "changed.js"
+            path.write_text(script, encoding="utf-8")
+            done = subprocess.run([node, str(path)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        text = json.loads(done.stdout)
+        self.assertIn("검사 뒤 바뀐 파일: dalle.jpg(조작·생성 근거 있음 → 판단 불가), gone.png(판단 불가 → 다시 분석 못 함: 파일을 찾을 수 없음)", text)
+        self.assertIn("외 2개", text)
+        out = _run(
+            f"results = [{{item: {json.dumps(_row(), ensure_ascii=False)}}}];\n"
+            "changedPaths = new Set(['a.png']);\n"
+            "console.log(JSON.stringify(rowReason(results[0].item)));"
+        )
+        self.assertTrue(str(out).startswith("검사 뒤 바뀜 — 다시 검사 · "), out)
 
 
 class GuiAccessibilitySourceTest(unittest.TestCase):
