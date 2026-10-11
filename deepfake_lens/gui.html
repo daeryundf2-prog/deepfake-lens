@@ -47,9 +47,16 @@
                                 <div class="case-grid">
                                     <label class="lbl">사건번호 <span class="req">증거설명서에 필수</span><input class="field" id="case-no" autocomplete="off"></label>
                                     <label class="lbl">사건명 <span class="req">증거설명서에 필수</span><input class="field" id="case-name" autocomplete="off"></label>
-                                    <label class="lbl">의뢰인(원고·고소인 측)<input class="field" id="case-plaintiff" autocomplete="off"></label>
+                                    <label class="lbl">원고·고소인<input class="field" id="case-plaintiff" autocomplete="off"></label>
                                     <label class="lbl">피고·피의자<input class="field" id="case-defendant" autocomplete="off"></label>
                                 </div>
+                                <fieldset class="side-choice">
+                                    <legend>의뢰 측 <span class="req">증거설명서에 필수 · 기본값 없음</span></legend>
+                                    <div class="radios">
+                                        <label class="check"><input type="radio" name="submitter-side" value="plaintiff">원고·고소인 측 (갑호증)</label>
+                                        <label class="check"><input type="radio" name="submitter-side" value="defendant">피고·피의자 측 (을호증)</label>
+                                    </div>
+                                </fieldset>
                                 <details class="case-more">
                                     <summary>그 밖의 항목 (제출 법원·법무법인·감정센터·연락처)</summary>
                                     <div class="case-grid">

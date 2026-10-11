@@ -712,6 +712,23 @@
             return { short, gated: [...gated], missing: Object.entries(missing) };
         }
 
+        // GUI-REV G-9(c): the preview's "검사의 한계" from the scan's own limits —
+        // never "특이 사항 없음" while thresholds are in-sample or checks failed.
+        function reportLimitLines() {
+            // The specific threshold lines below replace the notice's short one.
+            const lines = envFacts().short.filter(line => line !== '판정 임계값은 참고용입니다');
+            const thr = lastProvenance.thresholds || {};
+            if (thr.in_sample) lines.push('판정 임계값은 적합에 쓴 같은 표본에서 평가된 값(in-sample)이라 감정 근거가 아님');
+            if (thr.provisional || thr.source === 'builtin_defaults') lines.push('판정 임계값은 미측정 잠정값');
+            const failed = results.filter(e => failedChecks(e.item).length).length;
+            if (failed) lines.push(`검사가 실패한 파일 ${failed}개 — 해당 파일은 판단 불가`);
+            if (results.some(e => (e.item.result || {}).grade === 'reference')) lines.push(TEXT_LEGAL_LIMITATION);
+            const partial = partialResultNote(lastProvenance.summary);
+            if (partial) lines.push(partial);
+            if (!results.length) return ['검사 결과 없음'];
+            return lines.length ? lines : ['기록된 검사 한계 없음 — 결론은 파일에 남은 기록에만 근거함'];
+        }
+
         /* ── views ───────────────────────────────── */
         const VIEWS = ['scan', 'ledger', 'report', 'tools'];
         const VIEW_TITLES = { scan: '검사', ledger: '사건 대장', report: '감정서 만들기', tools: '빠른 검사·비교' };
@@ -764,6 +781,18 @@
                               'case-center': 'center', 'case-contact': 'contact' };
         const CASE_STORE = 'dfl.case';
         function caseValue(id) { return $(id).value.trim(); }
+        // GUI-REV G-9: the submitting side has no default — the examiner picks it.
+        const SIDES = { plaintiff: ['원고·고소인 측', '갑'], defendant: ['피고·피의자 측', '을'] };
+        function submitterSide() {
+            const on = document.querySelector('input[name="submitter-side"]:checked');
+            return on ? on.value : '';
+        }
+        function saveCase() {
+            const out = {};
+            Object.keys(CASE_FIELDS).forEach(k => { out[k] = $(k).value; });
+            out.side = submitterSide();
+            try { sessionStorage.setItem(CASE_STORE, JSON.stringify(out)); } catch (e) { /* storage full — non-fatal */ }
+        }
         function updateCaseLine() {
             const no = caseValue('case-no'), name = caseValue('case-name');
             $('case-line-title').textContent = no || name ? [no, name].filter(Boolean).join(' · ') : '사건 정보 없음';
@@ -784,14 +813,16 @@
         try {
             const saved = JSON.parse(sessionStorage.getItem(CASE_STORE) || '{}');
             Object.keys(CASE_FIELDS).forEach(id => { if (typeof saved[id] === 'string') $(id).value = saved[id]; });
+            const side = document.querySelector(`input[name="submitter-side"][value="${saved.side === 'defendant' ? 'defendant' : saved.side === 'plaintiff' ? 'plaintiff' : 'none'}"]`);
+            if (side) side.checked = true;
         } catch (e) { /* no saved case */ }
-        Object.keys(CASE_FIELDS).forEach(id => $(id).addEventListener('input', () => {
-            const out = {};
-            Object.keys(CASE_FIELDS).forEach(k => { out[k] = $(k).value; });
-            try { sessionStorage.setItem(CASE_STORE, JSON.stringify(out)); } catch (e) { /* storage full — non-fatal */ }
+        const onCaseChange = () => {
+            saveCase();
             updateCaseLine();
             if (currentView === 'report') renderReport();
-        }));
+        };
+        Object.keys(CASE_FIELDS).forEach(id => $(id).addEventListener('input', onCaseChange));
+        document.querySelectorAll('input[name="submitter-side"]').forEach(el => el.addEventListener('change', onCaseChange));
 
         /* ── scan: progress panel ────────────────── */
         const prog = { serverElapsed: 0, at: 0, done: 0, total: null, timer: null, quarter: 0, running: false };
@@ -1243,6 +1274,7 @@
             // P1: rows are relative to the scanned folder; uploads carry
             // source: "upload" and are never re-analyzed (P6).
             if (lastScanRoot) out.scan_root = lastScanRoot;
+            if (submitterSide()) out.submitter_side = submitterSide();
             for (const [id, key] of Object.entries(CASE_FIELDS)) {
                 const el = $(id);
                 if (el && el.value.trim()) out[key] = el.value.trim();
@@ -2036,6 +2068,8 @@
         });
         $('exp-clear').addEventListener('click', () => {
             closeMenu();
+            // G-9(d): clearing is not undoable — ask first.
+            if (!results.length || !window.confirm(`화면의 검사 결과 ${results.length}개를 지웁니다. 검토 기록은 남습니다. 지울까요?`)) return;
             results = [];
             lastProvenance = { coverage: null, thresholds: null, summary: null };
             selectedEntry = null;
@@ -2066,7 +2100,10 @@
                 : { tag: 'req', text: '사건번호와 사건명이 비어 있습니다 — 증거설명서에 필요합니다.', act: ['입력', () => $(no ? 'case-name' : 'case-no').focus()] });
             const pl = caseValue('case-plaintiff'), df = caseValue('case-defendant');
             if (!pl || !df) out.push({ tag: 'info', text: '의뢰인 또는 피고·피의자가 비어 있습니다 — 증거설명서에는 "(… 입력)" 자리표시로 남습니다.', act: ['입력', () => $(pl ? 'case-defendant' : 'case-plaintiff').focus()] });
-            out.push({ tag: 'info', text: '증거설명서는 원고(고소인) 측 제출 양식(갑호증)입니다.' });
+            const side = submitterSide();
+            out.push(side
+                ? { tag: 'ok', text: `의뢰 측: ${SIDES[side][0]} — 서증은 ${SIDES[side][1]}호증으로 번호를 붙입니다.` }
+                : { tag: 'req', text: '의뢰 측을 고르지 않았습니다 — 기본값은 없습니다(증거설명서에 필요).', act: ['고르기', () => document.querySelector('input[name="submitter-side"]').focus()] });
             if (results.length) {
                 const partial = partialResultNote(lastProvenance.summary);
                 out.push(partial ? { tag: 'warn', text: partial } : { tag: 'ok', text: '전체 검사 결과입니다(중단 없음).' });
@@ -2084,10 +2121,20 @@
             if (scanBusy) return '새 검사가 진행 중입니다 — 끝난 뒤 내보내십시오. 지금 화면의 결과는 이전 검사입니다.';
             if (!results.length) return '검사 결과가 없습니다.';
             if (kind === 'evidence' && !sel.length) return '증거설명서의 서증으로 넣을 파일을 고르십시오.';
-            if ((kind === 'evidence' || kind === 'pdf') && pdfAvailable === false) return 'PDF 엔진(pymupdf)이 설치되어 있지 않습니다.';
+            if ((kind === 'evidence' || kind === 'pdf') && pdfAvailable === false) return 'PDF(증거설명서·감정 보고서)는 PDF 엔진(pymupdf)이 설치되어 있지 않아 만들 수 없습니다.';
             if (kind === 'evidence' && !(caseValue('case-no') && caseValue('case-name'))) return '사건번호와 사건명을 채우면 증거설명서를 내보낼 수 있습니다.';
+            if (kind === 'evidence' && !submitterSide()) return '의뢰 측(원고·고소인 측 / 피고·피의자 측)을 고르면 증거설명서를 내보낼 수 있습니다.';
             return '';
         }
+        // G-9(b): the note says which formats can be made now and why the others cannot.
+        function exportNote(sel) {
+            const ready = Object.keys(EXPORT_BUTTONS).filter(kind => !exportBlockReason(kind, sel)).map(kind => EXPORT_LABELS[kind]);
+            const blocked = Object.keys(EXPORT_BUTTONS).filter(kind => exportBlockReason(kind, sel));
+            const reasons = [...new Set(blocked.map(kind => exportBlockReason(kind, sel)))];
+            const head = ready.length ? `지금 내보낼 수 있는 형식: ${ready.join(', ')}.` : '지금은 내보낼 수 있는 형식이 없습니다.';
+            return [head, ...reasons].join(' ');
+        }
+        const EXPORT_LABELS = { evidence: '증거설명서 PDF', pdf: '감정 보고서 PDF', html: 'HTML 보고서', json: '서명된 JSON' };
         const EXPORT_BUTTONS = { evidence: 'exp-evidence', pdf: 'exp-pdf', html: 'exp-report', json: 'exp-signed' };
         function renderReport() {
             const b = bandCounts();
@@ -2115,8 +2162,7 @@
                 list.appendChild(li);
             });
             Object.entries(EXPORT_BUTTONS).forEach(([kind, id]) => setBusyButton($(id), Boolean(exportBlockReason(kind, sel))));
-            const why = exportBlockReason('evidence', sel);
-            $('export-note').textContent = why || '증거설명서를 내보낼 수 있습니다. 서명 키가 설정된 서버는 문서에 서명합니다.';
+            $('export-note').textContent = exportNote(sel);
             renderA4(sel);
         }
         function summarySentence() {
@@ -2130,11 +2176,11 @@
             const miss = '<span class="miss">미기재</span>';
             const val = id => caseValue(id) ? shown(caseValue(id)) : miss;
             const shownRows = sel.slice(0, 10);
-            const rows = shownRows.map((e, i) => `<tr><td>갑 제${i + 1}호증</td><td>${shown(e.item.path || e.item.name || '파일')}</td><td>${escapeHtml(shortVerdict(e.item))}</td></tr>`).join('') +
+            const prefix = (SIDES[submitterSide()] || ['', '갑'])[1];
+            const rows = shownRows.map((e, i) => `<tr><td>${prefix} 제${i + 1}호증</td><td>${shown(e.item.path || e.item.name || '파일')}</td><td>${escapeHtml(shortVerdict(e.item))}</td></tr>`).join('') +
                 (sel.length > shownRows.length ? `<tr><td colspan="3">외 ${sel.length - shownRows.length}건</td></tr>` : '') +
                 (sel.length ? '' : `<tr><td colspan="3">${miss}</td></tr>`);
             const rest = results.length - sel.length;
-            const env = envFacts();
             const partial = partialResultNote(lastProvenance.summary);
             $('a4').innerHTML =
                 `<div class="a4-top"><span>${val('case-no')}</span><span>미리보기</span></div>` +
@@ -2149,7 +2195,7 @@
                 (partial ? `<p><b>${shown(partial)}</b></p>` : '') +
                 `<table><caption>서증 목록</caption><thead><tr><th scope="col">호증</th><th scope="col">파일</th><th scope="col">결론</th></tr></thead><tbody>${rows}</tbody></table>` +
                 (rest > 0 ? `<p class="a4-appendix">부록: 서증으로 넣지 않은 파일 ${rest}개 (결론·SHA-256 기재)</p>` : '') +
-                `<div class="a4-h">2. 검사의 한계</div><p>${escapeHtml(env.short.length ? env.short.join('. ') + '.' : '특이 사항 없음')}</p>`;
+                `<div class="a4-h">2. 검사의 한계</div><ul class="a4-limits">${reportLimitLines().map(line => `<li>${shown(line)}</li>`).join('')}</ul>`;
         }
 
         const EXPORT_SPECS = {

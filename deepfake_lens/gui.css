@@ -535,3 +535,7 @@ select.field { padding-right: 8px; }
 .err-item.err-old { border-color: var(--line); border-width: 1px; }
 .err-item.err-old .err-text b { color: var(--muted); }
 .busy-band { margin: 0 0 16px; padding: 10px 14px; border: 2px dashed var(--ink); border-radius: 4px; background: var(--panel); font-weight: 600; }
+.side-choice { margin: 0; padding: 0; border: 0; min-width: 0; }
+.side-choice legend { font-weight: 600; padding: 0; }
+.side-choice .req { font-weight: 400; font-size: 13px; color: var(--muted); }
+.a4 .a4-limits { margin: 4px 0 0; padding-left: 16px; }

@@ -50,6 +50,7 @@ def _helpers() -> str:
         "var results = []; var lastProvenance = { coverage: null, thresholds: null, summary: null };",
         _section(source, "        function displayName(value)", "        /* ── verdict vocabulary"),
         _function(source, "modelScoreText"),
+        _function(source, "partialResultNote"),
         _section(source, "        /* ── verdict vocabulary", "        /* ── views"),
         _function(source, "evItemHtml"),
         _function(source, "undeterminedCounts"),
@@ -154,6 +155,21 @@ class LedgerReasonTest(unittest.TestCase):
         assert isinstance(out, list)
         self.assertEqual(out[0], {"cue": 1, "none": 1, "failed": 1, "reference": 1})
         self.assertEqual(out[1], ["z-cue.png", "b-failed.png", "a-plain.png", "c.txt"])
+
+    def test_report_limits_come_from_the_scan(self) -> None:
+        """GUI-REV G-9(c): the preview never says "특이 사항 없음" while thresholds are in-sample."""
+        out = _run(
+            f"results = [{{item: {json.dumps(_row(), ensure_ascii=False)}}}];\n"
+            "lastProvenance.coverage = {weights_total: 0, weights_available: 1};\n"
+            "lastProvenance.thresholds = {in_sample: true};\n"
+            "var inSample = reportLimitLines();\n"
+            "lastProvenance.thresholds = {};\n"
+            "console.log(JSON.stringify([inSample, reportLimitLines()]));"
+        )
+        assert isinstance(out, list)
+        self.assertEqual(out[0], ["판정 임계값은 적합에 쓴 같은 표본에서 평가된 값(in-sample)이라 감정 근거가 아님"])
+        self.assertEqual(out[1], ["기록된 검사 한계 없음 — 결론은 파일에 남은 기록에만 근거함"])
+        self.assertNotIn("특이 사항 없음", json.dumps(out, ensure_ascii=False))
 
     def test_skipped_checks_are_grouped_by_reason_and_every_name_stays(self) -> None:
         coverage = [{"check": f"model:{name}", "status": "skipped", "reason": f"모델 실행 불가: {name}: {GATE}"} for name in MODELS]

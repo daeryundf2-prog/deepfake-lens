@@ -16,6 +16,9 @@ grouped by work pass rather than release.
 - `/api/scan-status` reports `done`/`total`/`current`/`recent`/
   `elapsed_seconds`; a running scan job is no longer evicted after 15
   minutes; `/api/stats` adds `default_folder`(`_b64`) and `pdf_available`.
+- GUI-REV (adversarial review of 39e11d9): exports carry every row; the
+  evidence statement takes `exhibit_paths` (the rest in a signed appendix)
+  and `submitter_side` (갑/을호증, chosen in the GUI, no default).
 
 ## 2026-09 — web GUI report download + examiner feedback + model licenses
 

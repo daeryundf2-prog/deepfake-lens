@@ -197,6 +197,27 @@ def main() -> int:
             page.fill("#case-no", "2024가단0000")
             page.fill("#case-name", "시험 사건")
             assert "2024가단0000" in page.locator("#a4").inner_text()
+            # GUI-REV G-9: the submitting side has no default and is required for the
+            # evidence statement; the choice numbers the exhibits (갑/을) and is posted.
+            assert page.locator("input[name='submitter-side']:checked").count() == 0, "의뢰 측 must have no default"
+            assert "의뢰 측을 고르지 않았습니다" in page.locator("#report-checks").inner_text()
+            assert "의뢰 측" in page.evaluate("exportBlockReason('evidence', selectedEntries())")
+            page.check("input[name='submitter-side'][value='defendant']")
+            assert "을 제1호증" in page.locator("#a4").inner_text() or page.evaluate("selectedEntries().length") == 0
+            assert page.evaluate("exportPayload('evidence').submitter_side") == "defendant"
+            assert "의뢰 측" not in page.evaluate("exportBlockReason('evidence', selectedEntries())")
+            note = page.locator("#export-note").inner_text()
+            assert "지금 내보낼 수 있는 형식" in note and "HTML 보고서" in note, note
+            # G-9(c): the preview's limits come from the scan, not "특이 사항 없음".
+            assert "특이 사항 없음" not in page.locator("#a4").inner_text()
+            # GUI-REV G-1: every row is posted for every format; the choice only names exhibits.
+            total_rows = page.evaluate("results.length")
+            for kind in ("evidence", "pdf", "html", "json"):
+                assert page.evaluate(f"exportPayload('{kind}').items.length") == total_rows, f"{kind} export dropped rows"
+            chosen = page.evaluate("exportPayload('evidence').exhibit_paths.length")
+            assert chosen == page.evaluate("selectedEntries().length") and chosen <= total_rows
+            if chosen < total_rows:
+                assert f"서증으로 넣지 않은 파일 {total_rows - chosen}개" in page.locator("#a4").inner_text()
 
             # 5b. GUI-REV G-5: while a new scan runs the other screens say the rows are
             #     the previous scan's, exports wait, and the new options are not
@@ -283,6 +304,22 @@ def main() -> int:
                 assert width <= 375, f"{view}: page scrolls sideways at 375px ({width}px)"
             page.set_viewport_size({"width": 1440, "height": 900})
             page.evaluate("location.hash = '#/ledger'")
+
+            # 6b. GUI-REV G-1/G-10: the signed JSON the report screen downloads covers the
+            #     whole scan (summary total == ledger rows) whatever the exhibit choice.
+            page.evaluate("location.hash = '#/report'")
+            with page.expect_download() as download_info:
+                page.click("#exp-signed")
+            signed = _json.loads(Path(download_info.value.path()).read_text(encoding="utf-8"))
+            rows_now = page.evaluate("results.length")
+            uploads = page.evaluate("results.filter(e => e.item.source === 'upload').length")
+            assert signed["summary"]["total"] == rows_now - uploads, (signed["summary"]["total"], rows_now)
+            assert len(signed["items"]) + len(signed.get("excluded_items", [])) == rows_now
+            # G-9(d): clearing the ledger asks first; dismissing keeps the results.
+            page.evaluate("location.hash = '#/ledger'")
+            page.once("dialog", lambda dialog: dialog.dismiss())
+            page.evaluate("document.getElementById('exp-clear').click()")
+            assert page.evaluate("results.length") == rows_now, "results cleared without confirmation"
 
             # 7. CSP/console errors: none tolerated. No request leaves the local server
             #    (fonts are local stacks; nothing is fetched from the network).
