@@ -1764,6 +1764,74 @@ class ReportSignsSpecialEntriesAsScannedTest(_ReportLegsFixture):
         self.assertEqual(entry["reason"], webapp_api.REPORT_ROW_NOT_FOUND)
 
 
+class ReportVerifiesPostedDuplicatesTest(_ReportLegsFixture):
+    """R20-4 (round 20): a posted dedupe duplicate's ``duplicate_of`` was not checked. A manipulated file posted as
+    "a duplicate of itself" (``duplicate_of`` = its own path, ``result`` null), or of a byte-identical file that was
+    not posted, was signed as a duplicate row without any analysis — 200, summary manipulation_evidence 0,
+    verify-report 검증됨. ``duplicate_of`` must now name another posted row that is not a duplicate (else 400), and
+    the copy's bytes are compared with that row's server re-derivation (else 409)."""
+
+    FORMATS = ReportRefusesChangedRowsTest.FORMATS
+    _scan = ReportRefusesChangedRowsTest._scan
+    _assert_refused = ReportRefusesChangedRowsTest._assert_refused
+
+    def setUp(self) -> None:
+        super().setUp()
+        from deepfake_lens.tests.qa.test_qa_sys import _write_generator_png
+
+        _write_generator_png(self.folder / "gen.png")
+        (self.folder / "zcopy.png").write_bytes((self.folder / "gen.png").read_bytes())
+        self.dedupe_rows = self._scan("--dedupe")
+        self.assertEqual(self.dedupe_rows["gen.png"]["result"]["verdict_code"], "manipulation_evidence")
+        self.assertEqual(self.dedupe_rows["zcopy.png"]["duplicate_of"], "gen.png")
+
+    def _as_duplicate_of(self, row: dict[str, Any], target: str) -> dict[str, Any]:
+        return dict(row, status="duplicate", duplicate_of=target, result=None)
+
+    def _assert_bad_request(self, rows: list[dict[str, Any]], path: str) -> None:
+        for leg, make in self._legs():
+            post = make()
+            for fmt in self.FORMATS:
+                with self.subTest(leg=leg, format=fmt):
+                    status, _, raw = post("/api/report", self._json({"items": rows, "format": fmt}))
+                    self.assertEqual(status, 400, raw[:300])
+                    error = json.loads(raw)["error"]
+                    self.assertTrue(error.startswith(f"검사 결과 항목 「{path}」의 duplicate_of"), error)
+
+    def test_a_row_posted_as_a_duplicate_of_itself_is_refused(self) -> None:
+        gen = self._as_duplicate_of(self.dedupe_rows["gen.png"], "gen.png")
+        self._assert_bad_request([gen, self.dedupe_rows["target.png"]], "gen.png")
+
+    def test_a_duplicate_of_a_row_that_is_not_posted_is_refused(self) -> None:
+        gen = self._as_duplicate_of(self.dedupe_rows["gen.png"], "zcopy.png")  # same bytes on disk, never posted
+        self._assert_bad_request([gen, self.dedupe_rows["target.png"]], "gen.png")
+
+    def test_a_duplicate_of_another_duplicate_is_refused(self) -> None:
+        rows = dict(self.dedupe_rows)
+        gen = self._as_duplicate_of(rows["gen.png"], "zcopy.png")
+        self._assert_bad_request([gen, rows["zcopy.png"], rows["target.png"]], "gen.png")
+
+    def test_a_duplicate_of_a_posted_row_with_other_bytes_is_409(self) -> None:
+        target = self._as_duplicate_of(self.dedupe_rows["target.png"], "gen.png")  # target.png is not a copy of gen.png
+        [entry] = self._assert_refused([self.dedupe_rows["gen.png"], target], "target.png")
+        self.assertEqual((entry["posted_status"], entry["server_status"]), ("duplicate", "analyzed"))
+
+    def test_the_scans_own_duplicate_is_still_signed_as_a_duplicate(self) -> None:
+        """R19-13 (J-2) stays closed: the scan's duplicate row is a duplicate of the posted original, not a full analysis."""
+        posted = list(self.dedupe_rows.values())
+        for leg, make in self._legs():
+            with self.subTest(leg=leg):
+                status, _, raw = make()("/api/report", self._json({"items": posted, "format": "json"}))
+                self.assertEqual(status, 200, raw[:300])
+                signed = {row["path"]: row for row in json.loads(raw)["items"]}
+                self.assertEqual((signed["zcopy.png"]["status"], signed["zcopy.png"]["duplicate_of"]), ("duplicate", "gen.png"))
+                self.assertIsNone(signed["zcopy.png"]["result"])
+                self.assertEqual(signed["gen.png"]["result"]["verdict_code"], "manipulation_evidence")
+        _write_png(self.folder / "gen.png", seed=8)  # the original changed: its own row differs (409)
+        changed = self._assert_refused(posted, "gen.png")
+        self.assertIn("gen.png", [entry["path"] for entry in changed])
+
+
 class ReportRecordsAnalysisOptionsTest(_ReportLegsFixture):
     """R19-3 (round 19): /api/report re-analyzed the posted rows with the posted ``options`` and the report did not
     say which — a GUI that sent the options of another scan got a signed report with other coverage (pixel and
@@ -2693,6 +2761,8 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                 (b'{"items": [{"path": "a", "x": ' + b"[" * DEEP + b"]" * DEEP + b"}]}", "JSON 중첩이 너무 깊습니다"),
                 (b"[1]", "보고서 요청 본문은 JSON 객체여야 합니다"),
                 (report({"items": [dict(memo_row, path="x.zip::y", container="x.zip", member="z")], "scan_root": scan_root}), "path가 container::member와 일치하지 않습니다"),
+                # R20-4 (round 20): a duplicate of itself was signed with no analysis.
+                (report({"items": [dict(memo_row, status="duplicate", duplicate_of="memo.txt", result=None)], "scan_root": scan_root}), "검사 결과 항목 「memo.txt」의 duplicate_of"),
                 (report({"items": [memo_row], "options": "deep", "scan_root": scan_root}), "options 값은 JSON 객체여야 합니다"),
             )],
             "E28": [case(s, "POST", "/api/report", 403, "허용되지 않은 경로", report({"items": [{"path": "memo.txt", "heatmap_path": str(self.outside / "secret.png")}]}), "application/json") for s in both]

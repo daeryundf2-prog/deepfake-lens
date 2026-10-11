@@ -1326,6 +1326,13 @@ REPORT_ROW_UPLOAD = "업로드 파일 — 서버 읽기 폴더의 파일이 아�
 # file changed after the scan. No report is signed: 409 with ``changed_rows``.
 REPORT_ROWS_CHANGED = "검사 뒤 바뀐 파일이 있습니다 — 다시 검사하십시오(보고서를 만들지 않았습니다)"
 REPORT_ROWS_CHANGED_STATUS = 409
+# R20-4 (round 20): a posted dedupe duplicate names, as ``duplicate_of``, a row it is not a copy of in this
+# report — itself, a row not posted, or another duplicate. Signed as a duplicate it carried no analysis at all
+# (a manipulated file posted as "a duplicate of itself" was signed with manipulation_evidence 0). HTTP 400.
+REPORT_DUPLICATE_OF_INVALID = (
+    "검사 결과 항목 「{path}」의 duplicate_of 「{target}」가 이 보고서에 게시된 원본 행이 아닙니다"
+    "(자기 자신·게시되지 않은 행·다른 중복 행은 원본이 될 수 없습니다) — 폴더 검사 결과를 그대로 보내십시오"
+)
 # R19-13: the excluded reasons that mean "the file changed after the scan" (not "never re-analyzable").
 _CHANGED_AFTER_SCAN_REASONS = (REPORT_ROW_NOT_FOUND, REPORT_ROW_NOT_DERIVED, REPORT_ROW_KIND_CHANGED)
 
@@ -1597,7 +1604,7 @@ def _rederive_report_items(
             seen.add((top, member))
             server = found[member]
             if item.status == "duplicate" and item.duplicate_of:
-                server = _as_duplicate(item, server, hasher)
+                server = _as_duplicate(item, server, _derived_row(derived_by_top, str(item.duplicate_of)))
             if _row_signature(item) != _row_signature(server):
                 changed.append(_changed_row(item, server, None))
             derived.append(server)
@@ -1649,6 +1656,17 @@ def _unanalyzed_entry_row(located: Path, top: str, posted: Any) -> dict[str | No
     return {None: ScanItem(top, located.name, "unknown", "skipped", 0, error=reason)}
 
 
+def _derived_row(derived_by_top: dict[str, dict[str | None, Any] | str], path: str) -> Any | None:
+    """R20-4: the server row re-derived for a posted row path ("a.png", or an archive member "a.zip::m"), or None."""
+    for top, rows in derived_by_top.items():
+        if isinstance(rows, str):
+            continue
+        for member, row in rows.items():
+            if row.path == path or (member is None and top == path):
+                return row
+    return None
+
+
 def _row_signature(item: Any) -> tuple[object, object, object]:
     """R19-13: what must agree between a posted row and the server's — sha256, status, verdict_code."""
     verdict = item.result.verdict_code.value if item.result is not None else None
@@ -1670,24 +1688,42 @@ def _changed_row(posted: Any, server: Any | None, reason: str | None) -> dict[st
     return entry
 
 
-def _as_duplicate(posted: Any, server: Any, hasher: "_ReportHasher") -> Any:
+def _posted_duplicate_error(posted: list[Any]) -> str | None:
+    """R20-4 (round 20): why a posted dedupe duplicate row is not a duplicate of a row of this report, or None.
+
+    ``duplicate_of`` must name another posted row (its ``path``) that is not
+    itself a duplicate — the scan's original, whose analysis the report
+    signs. A self-duplicate, an original that is not posted or a chain of
+    duplicates is refused (400) before any re-analysis.
+    """
+    originals = {item.path for item in posted if item.status != "duplicate"}
+    for item in posted:
+        if item.status != "duplicate":
+            continue
+        target = item.duplicate_of
+        if not isinstance(target, str) or not target or target == item.path or target not in originals:
+            return REPORT_DUPLICATE_OF_INVALID.format(path=str(item.path)[:200], target=str(target)[:200])
+    return None
+
+
+def _as_duplicate(posted: Any, server: Any, original: Any | None) -> Any:
     """R19-13 (J-2): the server row of a posted dedupe duplicate — a duplicate row when the bytes still match ``duplicate_of``.
 
     The scan wrote no analysis for a duplicate (status "duplicate",
     "중복 내용(동일 해시)"); re-analyzing the copy signed a full analysis in
-    its place. The server hashes the file named by ``duplicate_of`` (an
-    archive member "a.zip::m" from the re-extracted archive): equal to the
-    copy's server sha256 → the scan's duplicate row with the server's
-    sha256; otherwise the full server row (which then differs from the
-    posted row).
+    its place. R20-4 (round 20): ``original`` is the server's re-derived row
+    of ``duplicate_of`` — a posted, non-duplicate row of this report
+    (:func:`_posted_duplicate_error`), signed with its own analysis; the
+    file named by ``duplicate_of`` used to be hashed from disk even when it
+    was not posted (its analysis then appeared nowhere in the report).
+    Its server sha256 equal to the copy's → the scan's duplicate row with
+    the server's sha256; otherwise the full server row (which then differs
+    from the posted row: 409).
     """
     from .result_types import ScanItem
 
     target = str(posted.duplicate_of)
-    container, sep, member = target.partition("::")
-    probe = ScanItem(target, Path(member or container).name, "file", "ok", 0, container=container if sep else None, member=member if sep else None)
-    target_sha = hasher.sha256(probe)
-    if not server.sha256 or target_sha != server.sha256:
+    if original is None or original.status == "duplicate" or not server.sha256 or original.sha256 != server.sha256:
         return server
     return ScanItem(
         server.path, server.name, "duplicate", "duplicate", server.size_bytes, error=posted.error,
@@ -1927,6 +1963,10 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     except InvalidOption as exc:
         return {"error": str(exc)}
     server_thresholds = load_thresholds(options)
+    duplicate_error = _posted_duplicate_error(items)
+    if duplicate_error is not None:
+        hasher.close()
+        return {"error": duplicate_error}  # R20-4: 400
     try:
         items, excluded, changed = _rederive_report_items(items, hasher, options, server_thresholds)
     finally:
