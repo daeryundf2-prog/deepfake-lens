@@ -276,7 +276,11 @@ def _scan_job_start(query: str, *, default_folder: Path | None) -> dict[str, obj
     def work() -> None:
         try:
             result = _scan_payload(query, default_folder=default_folder, should_stop=cancel.is_set)
-            status = "done"
+            # R18-3 (round 18): a scan the cancel cut short is "cancelled" (its
+            # partial result kept, summary.cancelled) — it was "done", like a
+            # complete scan.
+            summary = result.get("summary") if isinstance(result, dict) else None
+            status = "cancelled" if isinstance(summary, dict) and summary.get("cancelled") is True else "done"
         except Exception as exc:  # noqa: BLE001 - a worker crash is recorded, not raised into the thread
             # D16: log the traceback and record the failure as coverage +
             # limitation — never just a bare message (fail-closed: the scan
@@ -313,6 +317,16 @@ def _scan_status_payload(query: str) -> dict[str, object]:
         if entry["status"] != "running":
             payload["result"] = entry.get("result")
         return payload
+
+
+def _with_posted_cancel(summary: Any, posted: object) -> Any:
+    """R18-3: ``summary`` marked cancelled with the posted ``files_cancelled`` when the posted summary says so."""
+    if not isinstance(posted, dict) or posted.get("cancelled") is not True:
+        return summary
+    count = posted.get("files_cancelled")
+    from dataclasses import replace
+
+    return replace(summary, cancelled=True, files_cancelled=count if isinstance(count, int) and not isinstance(count, bool) and count > 0 else 0)
 
 
 def _scan_cancel_payload(query: str) -> dict[str, object]:
@@ -1748,6 +1762,10 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     # Same counting rule as the CLI (core.summarize) so web and CLI report
     # headers agree on every verdict count.
     summary = summarize(items, capped=False)
+    # R18-3 (round 18): a cancelled scan's report says it is a partial result.
+    # The client's claim is taken as given — it can only add the caveat and
+    # the "사용자 취소" count, never remove a row or change a verdict.
+    summary = _with_posted_cancel(summary, data.get("summary"))
     req_format = format_override.lower()
     # G30: web reports are signed when DEEPFAKE_LENS_REPORT_KEY is set and
     # say "서명 없음" otherwise; the pins are those of the server's models dir.
@@ -1783,6 +1801,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
                     thresholds=thresholds,
                     coverage=coverage,
                     excluded_items=excluded_rows,
+                    summary=summary,  # R18-3: the "사용자 취소" count of a cancelled scan
                 )
                 # G30: signed like the other web reports (server key + pins).
                 write_evidence_statement_pdf(

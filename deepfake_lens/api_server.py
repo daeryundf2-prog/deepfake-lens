@@ -951,11 +951,6 @@ def create_app(
                 return
             run = outcome["value"]
             summary, items, thresholds = run.summary, run.items, run.thresholds
-            if cancel.is_set():
-                # N8: total = rows the scan planned, done = rows processed
-                # before the cancel (processed kept as the old name of done).
-                yield ("cancelled", {"job_id": job_id, "done": tally["done"], "processed": tally["done"], "total": tally["planned"]})
-                return
             payload = scan_payload(summary, items, thresholds, options)
             # P1: the folder the rows are relative to, for POST /api/report.
             from .json_text import fs_b64encode
@@ -964,6 +959,16 @@ def create_app(
             root_text = scan_root_text(root)
             payload["scan_root"] = root_text
             payload["scan_root_b64"] = fs_b64encode(root_text)  # R12-4
+            if cancel.is_set():
+                # N8: total = rows the scan planned, done = rows processed
+                # before the cancel (processed kept as the old name of done).
+                # R18-3 (round 18): and the partial result — summary.cancelled,
+                # the files never started counted as unrecorded "사용자 취소".
+                yield ("cancelled", {
+                    "job_id": job_id, "done": tally["done"], "processed": tally["done"], "total": tally["planned"],
+                    "files_cancelled": summary.files_cancelled, "partial": payload,
+                })
+                return
             # Rows are the /api/scan rows; verdict_code/grade/probability are
             # also copied to the row top level for stream clients that read
             # them there (the pre-R1 stream row shape).

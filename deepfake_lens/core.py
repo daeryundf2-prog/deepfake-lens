@@ -527,7 +527,10 @@ def _scan_paths(
                 report(row)
             items.extend(extra)
             items = sort_items(items)
-            summary = summarize(items, capped=summary.capped, cached=summary.cached)
+            summary = replace(
+                summarize(items, capped=summary.capped, cached=summary.cached),
+                cancelled=summary.cancelled, files_cancelled=summary.files_cancelled,  # R18-3
+            )
         if subfolders_skipped or files_over_cap or subfolder_files:
             detail = list(subfolder_files or [])
             summary = replace(
@@ -726,8 +729,6 @@ def _scan_specs(
 
     def analyze_one(spec: _ScanSpec) -> tuple[ScanItem, str | None, bool]:
         path, display, identity = spec
-        if should_stop is not None and should_stop():
-            return ScanItem(display or _display_path(path, root=root), path.name, "unknown", "skipped", 0, error="검사가 취소되었습니다"), None, False
         if path in duplicates:
             display_path = display or _display_path(path, root=root)
             try:
@@ -827,7 +828,11 @@ def _scan_specs(
                 cache_items[key] = item.to_json()
         _write_scan_cache(cache_path, cache)
 
-    def analyze_and_report(spec: _ScanSpec) -> tuple[ScanItem, str | None, bool]:
+    def analyze_and_report(spec: _ScanSpec) -> tuple[ScanItem, str | None, bool] | None:
+        # R18-3 (round 18): a spec not started before the cancel gets no row —
+        # it is counted (summary.files_cancelled, unrecorded "사용자 취소").
+        if should_stop is not None and should_stop():
+            return None
         item, key, was_cached = analyze_one(spec)
         identity = spec[2]
         if identity is not None:
@@ -847,21 +852,36 @@ def _scan_specs(
         return item, key, was_cached
 
     analyzed: list[tuple[ScanItem, str | None, bool]] = []
+    # R18-3 (round 18): the specs a cancel left unanalyzed. The sequential loop
+    # used to ``break`` and the rest vanished — no row, no count (300 files,
+    # cancel after 5: summary.total 3, the other 297 nowhere).
+    cancelled: list[_ScanSpec] = []
     if workers > 1 and len(specs) > 1:
         # Each worker still checks should_stop so a cancel short-circuits
         # remaining items instead of running every analysis to completion.
         with ThreadPoolExecutor(max_workers=workers) as executor:
-            analyzed = list(executor.map(analyze_and_report, specs))
+            outcomes = list(executor.map(analyze_and_report, specs))
+        for spec, outcome in zip(specs, outcomes):
+            if outcome is None:
+                cancelled.append(spec)
+            else:
+                analyzed.append(outcome)
     else:
         try:
-            for spec in specs:
-                if should_stop is not None and should_stop():
+            for position, spec in enumerate(specs):
+                outcome = analyze_and_report(spec)
+                if outcome is None:
+                    cancelled.extend(specs[position:])
                     break
-                analyzed.append(analyze_and_report(spec))
+                analyzed.append(outcome)
                 if len(analyzed) % _CACHE_FLUSH_EVERY == 0:
                     flush_cache(analyzed[-_CACHE_FLUSH_EVERY:])
         finally:
             flush_cache(analyzed)
+    cancelled_members: dict[str, int] = {}
+    for _, _, identity in cancelled:
+        if identity is not None:
+            cancelled_members[identity.container] = cancelled_members.get(identity.container, 0) + 1
 
     cached_count = sum(1 for _, _, was_cached in analyzed if was_cached)
     items = [item for item, _, _ in analyzed]
@@ -871,10 +891,13 @@ def _scan_specs(
     for rel, member_items in archive_members.items():
         meta = archive_meta.get(rel, {})
         arc_path = meta.get("path", Path(rel))
+        not_started = cancelled_members.get(rel, 0)
         container = _archive_container_item(
             rel, arc_path.name, arc_path, fmt=meta.get("fmt") or archive_format(rel),
             members=len(member_items), skipped=meta.get("skipped", 0),
-            warnings=meta.get("warnings", []), member_items=member_items,
+            # R18-3: members a cancel left unanalyzed — the roll-up is then never "원본성 근거 있음".
+            warnings=[*meta.get("warnings", []), *([CANCELLED_MEMBERS_WARNING.format(n=not_started)] if not_started else [])],
+            member_items=member_items,
             extraction_error=meta.get("error"),
             rejected=meta.get("rejected", []),
             missing_dependency=meta.get("missing_dependency"),
@@ -890,7 +913,15 @@ def _scan_specs(
         items.append(container)
 
     sorted_items = sort_items(items)
-    return summarize(sorted_items, capped=capped, cached=cached_count), sorted_items
+    summary = summarize(sorted_items, capped=capped, cached=cached_count)
+    if cancelled:
+        summary = replace(summary, cancelled=True, files_cancelled=len(cancelled))
+    return summary, sorted_items
+
+
+# R18-3 (round 18): the container-row warning (a limitation) of an archive
+# whose members were not all analyzed before a cancel.
+CANCELLED_MEMBERS_WARNING = "검사 취소 — 구성 파일 {n}개를 분석하지 않았습니다(부분 결과)"
 
 # R12-7 (round 12): a file rewritten while it was analyzed got the hash of
 # other bytes than the ones its verdict came from. Its state (size, mtime_ns,

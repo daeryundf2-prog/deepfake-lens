@@ -523,6 +523,12 @@ class BatchScanSummary:
     # [{"path", "files", "complete"}] — a flat scan said only "하위 폴더 N개".
     subfolder_files_skipped: int = 0
     subfolders_skipped_detail: list[dict[str, object]] = field(default_factory=list)
+    # R18-3 (round 18): the scan was cancelled before every file was
+    # analyzed; files_cancelled files (and archive members) got no row —
+    # they are the unrecorded reason "사용자 취소". A cancel that came after
+    # the last file leaves both at their defaults.
+    cancelled: bool = False
+    files_cancelled: int = 0
 
     def to_json(self) -> dict[str, object]:
         # D16: the summary JSON counts verdicts only. The legacy band counts

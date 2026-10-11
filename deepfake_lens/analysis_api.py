@@ -547,6 +547,7 @@ def _with_fusion(
             files_over_cap=summary.files_over_cap,
             subfolder_files_skipped=summary.subfolder_files_skipped,
             subfolders_skipped_detail=summary.subfolders_skipped_detail,
+            cancelled=summary.cancelled, files_cancelled=summary.files_cancelled,  # R18-3
         )
     return summary, items
 

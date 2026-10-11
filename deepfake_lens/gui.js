@@ -184,10 +184,20 @@
             }
         }
 
+        // R18-3 (round 18): result_text.cancelled_note — the scan was cancelled before every file was analyzed.
+        function partialResultNote(summary) {
+            if (!summary || summary.cancelled !== true) return '';
+            const n = Number.isInteger(summary.files_cancelled) ? summary.files_cancelled : 0;
+            return `검사 취소 — 폴더 전체가 아닌 부분 결과입니다: 분석하지 않은 파일 ${n}개(행·해시 없음). 폴더 전체의 결과로 쓰지 마십시오.`;
+        }
+
         function provenanceBannerHtml() {
             const cov = lastProvenance.coverage || {};
             const thr = lastProvenance.thresholds || {};
             const parts = [];
+            // R18-3: a cancelled scan is a partial result — said first, never shown as a complete folder.
+            const cancelledNote = partialResultNote(lastProvenance.summary);
+            if (cancelledNote) parts.push(`<b>${shown(cancelledNote)}</b>`);
             const wa = cov.weights_available, wt = cov.weights_total;
             if (wt !== undefined) {
                 if ((wa || 0) === 0) parts.push('<b>신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영</b> — 탑재된 신경망 가중치가 없어 통계적 근거는 결론에 참여하지 않습니다.');
@@ -557,7 +567,9 @@
                 lastScanRoot = data.scan_root || folderPath;
                 lastScanRootB64 = data.scan_root_b64 || '';
                 processResults(data);
-                toast(`분석 완료 — ${(data.items || []).length}개 파일`);
+                // R18-3: "분석 완료" was shown for a cancelled scan too.
+                if (partialResultNote(data.summary)) toast(`검사 취소 — 부분 결과 ${(data.items || []).length}개 행, 분석하지 않은 파일 ${data.summary.files_cancelled || 0}개`, true);
+                else toast(`분석 완료 — ${(data.items || []).length}개 파일`);
             } catch (error) {
                 toast('분석 중 오류: ' + error.message, true);
             } finally {
@@ -1307,13 +1319,17 @@
                 const rev = reviewStore[itemKey(e.item)];
                 return rev ? { ...e.item, review: rev } : e.item;
             });
-            download(new Blob([JSON.stringify(enriched, null, 2)], { type: 'application/json' }), 'deepfake-lens-results.json');
+            // R18-3: a cancelled scan's export says it is partial (an object with the note and the summary).
+            const partial = partialResultNote(lastProvenance.summary);
+            const exported = partial ? { partial_result: partial, summary: lastProvenance.summary, items: enriched } : enriched;
+            download(new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' }), 'deepfake-lens-results.json');
         });
         $('exp-csv').addEventListener('click', () => {
             if (!results.length) { toast('분석 결과가 없습니다', true); return; }
             const f = csvCell;
             // BOM prefix keeps Korean intact when the CSV is opened in Excel.
-            let csv = '﻿결론,등급,결정적 근거,통계적 근거,어휘적 근거,검사 실패,출처 추정,모델,파일명,검토,메모,판정 문장\n';
+            const partial = partialResultNote(lastProvenance.summary);  // R18-3: a cancelled scan's CSV starts with the note
+            let csv = '﻿' + (partial ? `# ${partial}\n` : '') + '결론,등급,결정적 근거,통계적 근거,어휘적 근거,검사 실패,출처 추정,모델,파일명,검토,메모,판정 문장\n';
             results.forEach(e => {
                 const item = e.item, r = item.result || {};
                 const rev = reviewStore[itemKey(item)] || {};

@@ -98,12 +98,29 @@ def leading_limitations(result: ClassificationResult) -> list[str]:
     return [TEXT_LEGAL_LIMITATION, *(lim for lim in result.limitations if lim != TEXT_LEGAL_LIMITATION)]
 
 
+# R18-3 (round 18): what every rendering of a cancelled scan says — the
+# headline of its "기록되지 않은 파일" section and the start of its summary line.
+CANCELLED_PARTIAL_RESULT = "검사 취소 — 폴더 전체가 아닌 부분 결과입니다"
+
+
+def cancelled_note(summary: object | None) -> str:
+    """R18-3: "[검사 취소 — … 부분 결과입니다: 분석하지 않은 파일 N개] " for a cancelled scan's summary, else ""."""
+    if summary is None:
+        return ""
+    cancelled = summary.get("cancelled") if isinstance(summary, dict) else getattr(summary, "cancelled", False)
+    count = summary.get("files_cancelled") if isinstance(summary, dict) else getattr(summary, "files_cancelled", 0)
+    if cancelled is not True:
+        return ""
+    return f"[{CANCELLED_PARTIAL_RESULT}: 분석하지 않은 파일 {count if isinstance(count, int) else 0}개] "
+
+
 def summary_line(summary: BatchScanSummary) -> str:
     # N5: archive container rows are counted by their verdict (R5); the
     # header says how many of the rows are such roll-up rows.
     containers = f"(압축 파일 {summary.container_rows}건 포함)" if summary.container_rows else ""
     return (
-        f"총 {summary.total}건{containers} — 조작·생성 근거 있음 {summary.manipulation_evidence}건, "
+        cancelled_note(summary)  # R18-3
+        + f"총 {summary.total}건{containers} — 조작·생성 근거 있음 {summary.manipulation_evidence}건, "
         f"원본성 근거 있음 {summary.authenticity_evidence}건, 판단 불가 {summary.undetermined}건"
         f"(검사 실패 포함 {summary.checks_failed}건), 미지원/분석 실패 {summary.unsupported_or_failed}건, "
         f"중복 {summary.duplicates}건, 건너뜀 {summary.skipped}건"
@@ -450,10 +467,13 @@ UNRECORDED_REASONS: tuple[tuple[str, str, str], ...] = (
     ("symlink", "심볼릭 링크", "링크를 따라가지 않았거나 따라갈 수 없는 심볼릭 링크 {n}개 — 행만 기록, 내용 미분석"),
     ("duplicate", "중복", "같은 내용(동일 SHA-256)의 파일 {n}개 — 원본 행만 분석, 중복 행은 원본을 가리킵니다"),
     ("unsupported", "미지원", "지원 형식이 아닌 파일 {n}개 — 행만 기록, 내용 미분석"),
-    ("other_skipped", "기타 건너뜀", "크기 상한 초과·일반 파일 아님·취소 등으로 건너뛴 파일 {n}개 — 사유는 각 행에 기록"),
+    ("other_skipped", "기타 건너뜀", "크기 상한 초과·일반 파일 아님 등으로 건너뛴 파일 {n}개 — 사유는 각 행에 기록"),
     # P5: a row that failed without an analysis result (an unreadable
     # folder, a file that could not be opened) — "없음" only when truly 0.
     ("failed", "처리 실패", "읽기 실패 등으로 분석 결과가 없는 행 {n}개 — 사유는 각 행에 기록"),
+    # R18-3 (round 18): files (and archive members) a cancelled scan did not
+    # start — no row; they used to vanish without a count.
+    ("cancelled", "사용자 취소", "검사가 취소되어 분석하지 않은 파일 {n}개(압축 파일 구성 파일 포함) — 행·해시가 없습니다"),
 )
 # P5: categories of refused archive members, matched on the extractor's
 # reason text (archives.py) in this order; anything else is "기타".
@@ -519,6 +539,8 @@ class UnrecordedFiles:
             text += f" + 검사하지 않은 하위 폴더 {self.counts['subfolders']}개"
         if self.cap_reached and not self.counts["file_cap"]:
             text += " + 상한 초과 파일(개수 미기록)"
+        if self.counts["cancelled"]:
+            text += f" — {CANCELLED_PARTIAL_RESULT}"  # R18-3
         return text
 
     def reason_lines(self) -> list[str]:
@@ -644,6 +666,8 @@ def unrecorded_files(items: "list[object]", summary: object | None = None) -> Un
     inside = field("subfolder_files_skipped")
     counts["subfolder_files"] = inside if isinstance(inside, int) else 0
     detail = field("subfolders_skipped_detail")
+    cancelled = field("files_cancelled")  # R18-3
+    counts["cancelled"] = cancelled if isinstance(cancelled, int) and cancelled > 0 else 0
     return UnrecordedFiles(
         counts,
         cap_reached=bool(field("capped")),

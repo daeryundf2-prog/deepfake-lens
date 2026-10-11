@@ -767,7 +767,10 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    faceswap_seam / face_track / face-crop model member ("얼굴 검출 오류: …",
 #    was skipped "얼굴 미검출"); a DEEPFAKE_LENS_HAAR_CASCADE override with other
 #    bytes fails every face layer instead of loading the bundled cascade.
-OUTPUT_FORMAT_GENERATION = 5
+# 6: R18-3 — unrecorded_files gains the reason "cancelled" (사용자 취소) and
+#    the summary cancelled / files_cancelled; the "other_skipped" text no
+#    longer names cancels (a cancelled file has no row).
+OUTPUT_FORMAT_GENERATION = 6
 
 
 def cache_extension(path: Path) -> str:
