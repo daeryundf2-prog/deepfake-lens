@@ -1488,7 +1488,9 @@ TEMPFILE_ALLOWED = {
     ("vendor_weights.py", "fetch_weights"): "atomic rename next to the downloaded weights",
     ("vendor_weights.py", "pin_profile"): "atomic rename next to the profile",
     ("model_assets.py", "pin_asset"): "atomic rename next to the asset manifest (R16-8)",
-    ("reports.py", "_atomic_write_bytes"): "atomic rename next to the report",
+    # R18-15 (round 18): reports._atomic_write_bytes no longer calls tempfile — every output file goes
+    # through output_files.write_output_bytes (an exclusive open of a sibling ".<name>.<pid>.<id>.tmp",
+    # then os.replace); this entry would be unused, which the test below rejects.
     # A probe that the output folder is writable — it must be made there.
     ("cli_inputs.py", "require_writable_output"): "write probe in the output folder",
 }

@@ -13,6 +13,7 @@ from .core import ARCHIVE_ROLLUP_RULE, check_scan_folder, ScanItem, _thresholds_
 from .analysis_api import AnalysisOptions, analyze_path, analyze_rows, is_symlink_path, load_thresholds, primary_row, scan_folder_run, thresholds_warning_printer
 from .analysis_api import scan_payload as analysis_scan_payload
 from .cli_inputs import UsageError
+from .output_files import OutputWriteError, StdoutGuard, StdoutWriteError, write_output_text
 from .cli_parser import build_parser, escape_echo
 from .serialization import redact_install_paths
 from .cli_render import (
@@ -347,7 +348,7 @@ def _legal_report_command(args: argparse.Namespace) -> int:
         # B1: an archive's member rows, in the scan table's wording.
         text += "\n\n=== 압축 구성 파일 ===\n" + "\n".join(members)
     if args.output:
-        args.output.write_text(text + "\n", encoding="utf-8")
+        write_output_text(args.output, text + "\n")  # R18-15
     if args.format == "json":
         print(json_dumps(report, ensure_ascii=False, indent=2))
     elif args.output:
@@ -414,13 +415,30 @@ from .interrupt_guard import INTERRUPTED_EXIT, INTERRUPTED_MESSAGE  # noqa: E402
 
 def main(argv: list[str] | None = None) -> int:
     """The ``deepfake-lens`` command (R16-13: an interrupt is a Korean line and exit 130, never a traceback)."""
+    from .output_files import BROKEN_PIPE_EXIT, OUTPUT_ERRNOS, STDOUT_WRITE_FAILED, silence_stdout
+
     try:
         from .interrupt_guard import release
 
         release()  # R17-8: the import is over — a Ctrl-C from here runs the cleanup below
-        return _main(argv)
+        code = _main(argv)
+        try:
+            if sys.stdout is not None:
+                sys.stdout.flush()  # R18-15: a reader that left (| head) or a full disk is seen here, not at interpreter exit
+        except OSError as exc:
+            if isinstance(exc, BrokenPipeError) or exc.errno not in OUTPUT_ERRNOS:
+                raise
+            silence_stdout()  # the buffer is dropped, not flushed again at exit
+            print(f"오류: {STDOUT_WRITE_FAILED.format(reason=read_error_ko(exc))}", file=sys.stderr)
+            return UNEXPECTED_ERROR_EXIT
+        return code
     except KeyboardInterrupt:
         return interrupted_exit()
+    except BrokenPipeError:
+        # R18-15 (round 18): `scan … | head` was "예기치 않은 오류(BrokenPipeError)", exit 1 — the
+        # reader went away on purpose; end quietly like a tool killed by SIGPIPE.
+        silence_stdout()
+        return BROKEN_PIPE_EXIT
 
 
 def interrupted_exit() -> int:
@@ -469,6 +487,12 @@ def _main(argv: list[str] | None = None) -> int:
     if args.command is None:
         parser.print_help()
         return 0
+    from .output_files import STDOUT_CLOSED_MESSAGE, stdout_is_closed
+
+    if stdout_is_closed():
+        # R18-15 (round 18): the result was silently lost with exit 0.
+        print(f"오류: {STDOUT_CLOSED_MESSAGE}", file=sys.stderr)
+        return USAGE_EXIT
     # N8: an explicit --key-file must hold a key — checked before any work
     # (a scan can run for hours), never discovered as an unsigned report.
     key_file = getattr(args, "key_file", None)
@@ -492,6 +516,8 @@ def _main(argv: list[str] | None = None) -> int:
     # gets one Korean summary line (--verbose shows them).
     logs = configure_cli_logging(bool(getattr(args, "verbose", False)))
     interrupted = False
+    console = sys.stdout
+    sys.stdout = StdoutGuard(console)  # R18-15: a failed write of the result is reported, not "예기치 않은 오류"
     try:
         return _run_command(args, parser, cmd_parsers)
     except KeyboardInterrupt:
@@ -506,6 +532,14 @@ def _main(argv: list[str] | None = None) -> int:
     except UsageError as exc:
         print(f"오류: {escape_echo(exc)}", file=sys.stderr)
         return VERIFY_EXIT_OTHER if args.command == "verify-report" else USAGE_EXIT
+    except BrokenPipeError:
+        raise  # R18-15: main() ends it quietly (141)
+    except (OutputWriteError, StdoutWriteError) as exc:
+        # R18-15 (round 18): a full disk was "예기치 않은 오류(OSError)" after the whole scan.
+        logs.command_errors += 1
+        logging.getLogger(__name__).info("command %s: output not written: %s", args.command, exc)
+        print(f"오류: {escape_echo(exc)}", file=sys.stderr)
+        return UNEXPECTED_ERROR_EXIT
     except (RecursionError, ValueError) as exc:
         # R10-5 (round 10): an input the command could not take — a JSON
         # nested past the recursion limit, a value it cannot use — is an
@@ -521,6 +555,8 @@ def _main(argv: list[str] | None = None) -> int:
         print(f"오류: 처리 중 예기치 않은 오류가 발생했습니다({type(exc).__name__}) — 상세는 {logs.log_hint()}", file=sys.stderr)
         return UNEXPECTED_ERROR_EXIT
     finally:
+        if isinstance(sys.stdout, StdoutGuard):
+            sys.stdout = console
         if not interrupted:
             logs.finish()
 
@@ -749,7 +785,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         )
         if args.extract:
             payload["extraction"] = extract_video_frames(payload, limit=args.extract_limit)
-            args.out.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            write_output_text(args.out, json_dumps(payload, ensure_ascii=False, indent=2) + "\n")  # R18-15
         print(json_dumps({"count": payload["count"], "ffmpeg_available": payload["ffmpeg_available"], "out": str(args.out)}, ensure_ascii=False, indent=2))
         return 0
     if args.command == "audio":
@@ -1213,7 +1249,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         manifest = inspect_model_manifest(args.models_dir)
         if args.manifest_out:
             args.manifest_out.parent.mkdir(parents=True, exist_ok=True)
-            args.manifest_out.write_text(json_dumps(manifest.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            write_output_text(args.manifest_out, json_dumps(manifest.to_json(), ensure_ascii=False, indent=2) + "\n")  # R18-15
         if args.format == "json":
             print(json_dumps(manifest.to_json(), ensure_ascii=False, indent=2))
         elif args.format == "markdown":

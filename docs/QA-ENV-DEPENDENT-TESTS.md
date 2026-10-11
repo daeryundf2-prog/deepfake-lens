@@ -37,6 +37,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 
 | 사유(소스 원문) | 테스트가 실행되는 환경(필요 extras·도구) | 파일 |
 | --- | --- | --- |
+| `Linux /dev/full needed` | Linux(`/dev/full` — 디스크 가득 참(ENOSPC)을 흉내 내는 장치; R18-15) | test_output_files.py |
 | `Linux /proc needed` | Linux(`/proc` — `--allow-symlinks`가 `/proc`·`/sys` 가상 파일을 따라가지 않음을 확인, R18-10) | test_special_filesystem.py |
 | `core_pattern is a pipe or a path — no core file in the working directory to look for` | Linux에서 `/proc/sys/kernel/core_pattern`이 `core`처럼 파이프·경로가 아닌 이름(코어 파일이 작업 폴더에 생기는 설정 — 게이트 이미지가 그렇다; R18-9) | test_shutdown.py |
 | `':' is not allowed in Windows file names` | Windows가 아닌 OS(POSIX) | test_archives.py, test_servers.py |

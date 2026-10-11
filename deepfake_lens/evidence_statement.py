@@ -546,9 +546,9 @@ def write_evidence_statement_json(
 ) -> dict[str, object]:
     """Write the signed statement body as JSON; returns it."""
     body = _signed(statement, signed, key)
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json_dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    from .output_files import write_output_text
+
+    write_output_text(path, json_dumps(body, ensure_ascii=False, indent=2) + "\n")  # R18-15: whole or not at all
     return body
 
 
@@ -561,10 +561,10 @@ def write_evidence_statement_markdown(
 ) -> dict[str, object]:
     """Markdown statement followed by the signature section (G30)."""
     body = _signed(statement, signed, key)
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
+    from .output_files import write_output_text
+
     lines = [statement.to_markdown(), "", SIGNATURE_SECTION_TITLE, *statement_signature_lines(body), ""]
-    p.write_text("\n".join(lines), encoding="utf-8")
+    write_output_text(path, "\n".join(lines))  # R18-15: whole or not at all
     return body
 
 
@@ -628,9 +628,9 @@ def write_evidence_statement_pdf(
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     data = _render_statement_pdf(pymupdf, statement, body, unsigned_rows=unsigned_rows)
-    tmp = output.with_suffix(output.suffix + ".tmp")
-    tmp.write_bytes(data)
-    tmp.replace(output)
+    from .output_files import write_output_bytes
+
+    write_output_bytes(output, data)  # R18-15: a failure is OutputWriteError (Korean), the old file untouched
     return body
 
 

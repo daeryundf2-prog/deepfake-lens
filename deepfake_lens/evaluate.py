@@ -303,9 +303,9 @@ def write_cases_jsonl(path: Path | str, rows: list[dict[str, object]]) -> None:
 
 
 def write_json_report(path: Path | str, payload: dict[str, object]) -> None:
-    output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    from .output_files import write_output_text
+
+    write_output_text(path, json_dumps(payload, ensure_ascii=False, indent=2) + "\n")  # R18-15: whole or not at all
 
 
 def _score_dataset(

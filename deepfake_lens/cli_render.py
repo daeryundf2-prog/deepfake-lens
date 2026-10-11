@@ -73,10 +73,15 @@ def _load_thresholds_arg(args: argparse.Namespace):
 
 
 def _write_json_out(path: Path, payload: str) -> None:
-    """Write a JSON artifact, creating parent directories on demand."""
-    output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(payload, encoding="utf-8")
+    """Write a JSON artifact, creating parent directories on demand.
+
+    R18-15 (round 18): written whole (temp file + rename) — an interrupted
+    or failed write no longer leaves the previous report truncated; a
+    failure is :class:`output_files.OutputWriteError` (Korean).
+    """
+    from .output_files import write_output_text
+
+    write_output_text(path, payload)
 
 
 def _maybe_sign(payload: dict[str, object], *, sign: bool, key_file: Path | None) -> dict[str, object]:
@@ -206,7 +211,11 @@ def _write_csv(
     thresholds: object | None = None,
     summary: object | None = None,
 ) -> None:
-    with path.open("w", newline="", encoding="utf-8") as handle:
+    import io
+
+    from .output_files import write_output_text
+
+    with io.StringIO(newline="") as handle:  # R18-15: built in memory, written whole below
         # X1: the "기록되지 않은 파일" summary (count and every reason) heads
         # the CSV like the provenance lines below.
         handle.write(f"# {display_name(unrecorded_files(list(items), summary).summary_text())}\n")
@@ -299,6 +308,7 @@ def _write_csv(
                     *_csv_label_columns(item),
                 ]
             ])
+        write_output_text(path, handle.getvalue())
 
 
 CSV_LABEL_COLUMNS = ("kind_label", "status_label", "grade_label", "source_confidence_label", "top_evidence_label")

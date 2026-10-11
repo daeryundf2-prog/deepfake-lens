@@ -275,7 +275,7 @@ def write_html_report(
 </body>
 </html>
 """
-    output.write_text(body, encoding="utf-8")
+    _write_report_text(output, body)  # R18-15: whole or not at all
 
 
 # X2: the web report's rows the server could not re-analyze.
@@ -708,7 +708,7 @@ def write_eval_html_report(path: Path | str, payload: dict[str, object], *, reda
 </body>
 </html>
 """
-    output.write_text(body, encoding="utf-8")
+    _write_report_text(output, body)  # R18-15: whole or not at all
 
 
 def _html_sha256_cell(item: ScanItem) -> str:
@@ -808,16 +808,14 @@ def _heatmap_img(path: str | None, *, allow_path: Callable[[str], bool] | None =
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
-    """Write via temp file + os.replace so a crash cannot leave a half-written artifact."""
-    import os
-    import tempfile
+    """Write via temp file + os.replace so a crash cannot leave a half-written artifact (R18-15: OutputWriteError on failure)."""
+    from .output_files import write_output_bytes
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-        os.replace(tmp, path)
-    except BaseException:
-        os.unlink(tmp)
-        raise
+    write_output_bytes(path, data)
+
+
+def _write_report_text(path: Path, text: str) -> None:
+    """R18-15 (round 18): an HTML report written whole (temp file + rename); a failure is OutputWriteError."""
+    from .output_files import write_output_text
+
+    write_output_text(path, text)
