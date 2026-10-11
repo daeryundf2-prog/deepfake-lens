@@ -1170,6 +1170,15 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             return 0
         if args.verify:
             verify_res = verify_offline_integrity(args.models_dir)
+            if not verify_res["total_profiles"]:
+                # R17-10 (round 17): an empty (or wrong) existing folder said
+                # "통과 … 프로필 0개" with exit 0 — nothing was verified.
+                folder = args.models_dir if args.models_dir is not None else default_models_dir()
+                print(
+                    f"오류: 런타임 프로필(*-runtime.json)이 하나도 없어 검증할 대상이 없습니다: {escape_echo(folder)} (--models-dir)",
+                    file=sys.stderr,
+                )
+                return 2
             if args.format == "json":
                 print(json_dumps(verify_res, ensure_ascii=False, indent=2))
             else:

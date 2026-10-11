@@ -514,6 +514,31 @@ class PinAssetCommandTest(unittest.TestCase):
                         self.assertNotIn(english, err.getvalue())
             self.assertFalse(missing.exists())  # nothing created
 
+    def test_verify_of_a_folder_without_profiles_is_an_error_exit_2(self) -> None:
+        """R17-10 (round 17): `--verify --models-dir <empty or wrong existing folder>` said "통과 … 프로필 0개", exit 0."""
+        from deepfake_lens import cli
+
+        with tempfile.TemporaryDirectory() as tmp:
+            empty = Path(tmp).resolve() / "빈 폴더"
+            empty.mkdir()
+            wrong = Path(tmp).resolve() / "다른 폴더"
+            wrong.mkdir()
+            (wrong / "notes.txt").write_text("모델 아님", encoding="utf-8")
+            for folder in (empty, wrong):
+                for extra in ([], ["--format", "json"]):
+                    with self.subTest(folder=folder.name, extra=extra):
+                        out, err = io.StringIO(), io.StringIO()
+                        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                            code = cli.main(["vendor-weights", "--verify", *extra, "--models-dir", str(folder)])
+                        self.assertEqual(code, 2)
+                        self.assertIn("런타임 프로필(*-runtime.json)이 하나도 없어", err.getvalue())
+                        self.assertNotIn("통과", out.getvalue())
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                code = cli.main(["vendor-weights", "--verify", "--models-dir", str(PACKAGE / "models")])
+            self.assertIn(code, (0, 1))  # a folder with profiles is verified as before (pass, or 1 for what fails)
+            self.assertIn("오프라인 모델 무결성", out.getvalue())
+
     def test_a_manifest_that_cannot_be_written_is_reported_without_the_temp_name(self) -> None:
         """R16-8: the write error is Korean, names assets.json, and the temp file is removed."""
         with tempfile.TemporaryDirectory() as tmp:

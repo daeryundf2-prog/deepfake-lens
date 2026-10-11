@@ -436,6 +436,10 @@ before reading it: `--verify` used to report "통과" for 0 profiles (exit 0)
 and `pin-asset` an English errno naming an internal temp file. A manifest
 that cannot be written is reported in Korean under its own name
 (`자산 매니페스트를 쓸 수 없습니다: …/assets.json — 접근 권한이 없습니다(오류 번호 13)`).
+R17-10 (round 17): `--verify` of an existing folder that holds no runtime
+profile (`*-runtime.json`) — empty, or the wrong folder — is an error too:
+`오류: 런타임 프로필(*-runtime.json)이 하나도 없어 검증할 대상이 없습니다: <경로> (--models-dir)`,
+exit 2 (it said "통과 … 프로필 0개", exit 0).
 
 In phase 0 every committed profile is also `supported: false` (measurement
 gate not met), so the default engines below are recorded as skipped until
