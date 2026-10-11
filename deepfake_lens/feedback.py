@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePath
 from typing import Iterable
 
+from .audio_worker import in_worker_scope
 from .calibration import auroc, binary_metrics
 from .core import analyze_file
 from .datasets import is_negative_label, is_positive_label
@@ -234,6 +235,7 @@ def observations_from_scan_payload(
     return observations, unmatched
 
 
+@in_worker_scope  # R20-2: one audio worker for all files (was one per file)
 def observations_live(
     entries: Iterable[FeedbackEntry],
     *,

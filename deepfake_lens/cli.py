@@ -1008,7 +1008,11 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         files = sorted((path for path in args.folder.glob("*") if path.is_file()), key=lambda p: str(p))
         batch_options = AnalysisOptions.from_cli_args(args)
         batch_thresholds = load_thresholds(batch_options, warn=thresholds_warning_printer(sys.stderr))
-        job = processor.process_batch(files, lambda f: analyze_path(f, batch_options, thresholds=batch_thresholds).to_json())
+        from .audio_worker import worker_scope
+
+        # R20-2: one audio worker per batch thread for all files (was one per file).
+        with worker_scope() as audio_workers:
+            job = processor.process_batch(files, audio_workers.bind(lambda f: analyze_path(f, batch_options, thresholds=batch_thresholds).to_json()))
         if args.output:
             from .batch import save_batch_results
             save_batch_results(job, args.output)

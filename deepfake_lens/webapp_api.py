@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs
 
+from .audio_worker import in_worker_scope
 from .checks import failure_reason
 from .native_path import expand_user, scratch_dir
 from .error_text import exception_text
@@ -940,6 +941,7 @@ def _archive_upload_items(
         shutil.rmtree(folder, ignore_errors=True)
 
 
+@in_worker_scope  # R20-2: one audio worker for all files (was one per file)
 def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]:
     """Analyze files uploaded via multipart/form-data.
 
@@ -1520,6 +1522,7 @@ class _ReportHasher:
         self._temp_dirs.clear()
 
 
+@in_worker_scope  # R20-2: one audio worker for all files (was one per file)
 def _rederive_report_items(
     posted: list[Any], hasher: "_ReportHasher", options: Any, thresholds: Any,
 ) -> tuple[list[Any], list[tuple[Any, str]], list[dict[str, object]]]:

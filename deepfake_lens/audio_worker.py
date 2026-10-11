@@ -28,10 +28,21 @@ Two changes close it:
    :func:`shutdown.start_tracked` — supervised, tracked, stopped on
    shutdown like every child). A native crash ends the worker, not the
    scan: the check is ``failed`` "NativeCrashError: … (신호 SIGSEGV)".
-   Inside a scan (:func:`worker_scope`) each scanning thread keeps one
-   worker (its supervisor is bound to that thread) and the scan ends them
-   all; outside a scan a worker serves one request. A worker also exits
-   after :data:`WORKER_IDLE_SECONDS` without a request.
+   Inside a :func:`worker_scope` each thread keeps one worker (its
+   supervisor is bound to that thread) and the scope ends them all; a
+   call outside any scope starts a worker for that one request. A worker
+   also exits after :data:`WORKER_IDLE_SECONDS` without a request.
+
+R20-2 (round 20): every command and request that analyzes more than one
+file opens a scope — a folder scan (core), ``batch`` (its thread pool's
+tasks bound with :meth:`WorkerScope.bind`), ``eval`` / ``benchmark`` /
+calibration (evaluate), ``feedback``, ``fusion``, a web upload (both
+servers) and the report's re-analysis — so one worker serves all of its
+files. They used to start one worker per file (about 2 s each, 7 s
+without a published numba cache): batch of 100 WAV files 11.8 s → 87 s,
+an upload of 30 WAV files 3.2 s → 30 s. A scope opened while another is
+active on the same thread is that scope (a scan inside a report keeps
+the report's worker); the outermost one ends the workers.
 
 A decode error raised in the worker is rebuilt in this process as an
 exception of the same class name, message, errno and file name, so
@@ -66,6 +77,8 @@ NUMBA_CACHE_ENV = "NUMBA_CACHE_DIR"
 # an idle worker a little earlier, so it never sends to one that is exiting.
 WORKER_IDLE_SECONDS = 300.0
 _POOL_RETIRE_SECONDS = 240.0
+# R20-2: the thread-count variables of the numeric libraries a worker loads (numpy's BLAS, OpenMP, numba).
+WORKER_THREAD_ENV = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS")
 # R19-2: one extraction (decode of at most --segment seconds + features).
 WORKER_REQUEST_TIMEOUT_SECONDS = 600.0
 # R19-2: the reason of a worker that died during a request.
@@ -280,12 +293,23 @@ def _native_log() -> IO[bytes] | None:
 
 class _Worker:
     def __init__(self) -> None:
+        # The thread that started it: its supervisor dies with that thread
+        # (PR_SET_PDEATHSIG), so only that thread may use it.
+        self.owner = threading.current_thread()
         self.cache_dir, self.seeded = private_cache_dir()
         self.published = self.seeded
         self.expired = False
         self.last_used = time.monotonic()
         env = dict(os.environ)
         env[NUMBA_CACHE_ENV] = self.cache_dir
+        # R20-2 (round 20): one worker extracts one file at a time (a scan gets its parallelism from
+        # one worker per thread), so its numeric libraries run one thread each unless the operator
+        # chose otherwise. With the default (a thread per core) every worker's OpenMP / OpenBLAS pool
+        # spun on all cores: a scan of 300 audio/video files used 190-220 s of CPU for 50 s of wall
+        # time (2130892, in-process: the same), and 4 workers made a scan 16-22 % slower than
+        # 2130892. The features are byte-identical (the 300-row comparison).
+        for name in WORKER_THREAD_ENV:
+            env.setdefault(name, "1")
         log = _native_log()
         try:
             self.proc = shutdown.start_tracked(
@@ -339,13 +363,15 @@ class _Worker:
                 pass
 
 
-# R19-2: where workers live. Inside a scan (:func:`worker_scope`, entered by
-# core._scan_specs) each thread of the scan keeps one worker for the scan's
-# files and the scope ends them when the scan ends. The Linux supervisor of a
-# child is bound to the thread that started it (PR_SET_PDEATHSIG fires when
-# that thread ends), so a worker is only ever used by the thread that started
-# it. Outside a scan (one file: classify, the web server's analyze-file) a
-# worker serves one request and is ended. No worker outlives its scan.
+# R19-2: where workers live. Inside a scope (:func:`worker_scope`, entered by
+# core._scan_specs and, R20-2, by every multi-file command and request) each
+# thread keeps one worker for the scope's files and the scope ends them when
+# it ends. The Linux supervisor of a child is bound to the thread that started
+# it (PR_SET_PDEATHSIG fires when that thread ends), so a worker is only ever
+# used by the thread that started it (R20-2: checked by thread object, not
+# only by ident — a finished pool thread's ident can be reused). Outside any
+# scope (one file: classify, the web server's analyze-file) a worker serves
+# one request and is ended. No worker outlives its scope.
 _LOCAL = threading.local()
 _ALL: list[_Worker] = []
 _ALL_LOCK = threading.Lock()
@@ -372,17 +398,30 @@ class WorkerScope:
         return run
 
     def worker(self) -> _Worker:
+        me = threading.current_thread()
         ident = threading.get_ident()
         with self._lock:
             worker = self._workers.get(ident)
-        if worker is not None and worker.alive() and time.monotonic() - worker.last_used < _POOL_RETIRE_SECONDS:
+            # R20-2: the workers of threads that have ended (a finished thread
+            # pool of a scan inside this scope) — their supervisors are gone.
+            ended = [(key, held) for key, held in self._workers.items() if not held.owner.is_alive()]
+            for key, _ in ended:
+                del self._workers[key]
+        for _, held in ended:
+            _forget(held)
+        if worker is not None and worker.owner is me and worker.alive() and time.monotonic() - worker.last_used < _POOL_RETIRE_SECONDS:
             return worker
-        if worker is not None:
+        if worker is not None and all(worker is not held for _, held in ended):
             _forget(worker)
         worker = _start()
         with self._lock:
             self._workers[ident] = worker
         return worker
+
+    def size(self) -> int:
+        """How many workers the scope holds (tests)."""
+        with self._lock:
+            return len(self._workers)
 
     def close(self) -> None:
         with self._lock:
@@ -394,15 +433,35 @@ class WorkerScope:
 
 @contextmanager
 def worker_scope() -> Iterator[WorkerScope]:
-    """R19-2: the audio workers of one scan — this thread's scope until the end, then every worker ended."""
-    scope = WorkerScope()
+    """R19-2: the audio workers of one scan — this thread's scope until the end, then every worker ended.
+
+    R20-2: inside an active scope of this thread, the same scope (the
+    outermost one ends the workers) — a scan run by a multi-file command
+    keeps the command's worker instead of starting another.
+    """
     previous = getattr(_LOCAL, "scope", None)
+    if previous is not None:
+        yield previous
+        return
+    scope = WorkerScope()
     _LOCAL.scope = scope
     try:
         yield scope
     finally:
         _LOCAL.scope = previous
         scope.close()
+
+
+def in_worker_scope(func: Callable[..., T]) -> Callable[..., T]:
+    """R20-2: ``func`` run inside :func:`worker_scope` — for a function that analyzes many files on this thread."""
+    import functools
+
+    @functools.wraps(func)
+    def run(*args: Any, **kwargs: Any) -> T:
+        with worker_scope():
+            return func(*args, **kwargs)
+
+    return run
 
 
 def _start() -> _Worker:
@@ -459,7 +518,7 @@ def extract_features(native_path: str, *, segment_seconds: int) -> dict[str, Any
             reply = worker.ask(request, WORKER_REQUEST_TIMEOUT_SECONDS)
         finally:
             if scope is None:
-                _forget(worker)  # outside a scan: one request per worker
+                _forget(worker)  # outside a scope: one request per worker
         if reply is not None:
             if "features" in reply and reply["features"] is not None and not worker.published:
                 worker.published = True

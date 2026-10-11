@@ -4,6 +4,7 @@ import hashlib
 from dataclasses import replace
 from pathlib import Path
 
+from .audio_worker import in_worker_scope
 from .calibration import DEFAULT_THRESHOLD, auroc, binary_metrics, calibrate_scores, calibrate_threshold, eer, load_calibration
 from .core import analyze_file
 from .datasets import ROBUSTNESS_TRANSFORMS, discover_dataset, file_fingerprint, is_negative_label, is_positive_label
@@ -82,6 +83,7 @@ def metrics_with_ci(pairs: list[tuple[int, bool]], threshold: int) -> dict[str, 
     return metrics
 
 
+@in_worker_scope  # R20-2: one audio worker for all files (was one per file)
 def evaluate_dataset(
     root: Path | str,
     *,
@@ -307,6 +309,7 @@ def write_json_report(path: Path | str, payload: dict[str, object]) -> None:
     write_output_text(path, json_dumps(payload, ensure_ascii=False, indent=2) + "\n")  # R18-15: whole or not at all
 
 
+@in_worker_scope  # R20-2: one audio worker for all files (was one per file)
 def _score_dataset(
     root: Path | str, *, pixel_mode: str, pixel_max_side: int, max_files: int | None, thresholds: object | None = None
 ) -> tuple[list[tuple[int, bool]], dict[str, object]]:
