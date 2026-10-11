@@ -297,9 +297,24 @@ def _escape_code(code: int) -> str:
 
 
 def _invisible_or_space(char: str) -> bool:
-    """R18-11: a space other than U+0020 (category Zs) or a default-ignorable code point."""
+    """R18-11: a space other than U+0020 (category Zs) or a default-ignorable code point.
+
+    R19-8 (round 19): also U+2800 BRAILLE PATTERN BLANK (category So, renders as
+    a blank: "a\u2800b.jpg" looked like "a b.jpg") and private-use characters
+    (category Co — no standard glyph; U+E000…, U+F0000…).
+    """
     code = ord(char)
-    return (unicodedata.category(char) == "Zs" and char != " ") or any(low <= code <= high for low, high in DEFAULT_IGNORABLE_RANGES)
+    category = unicodedata.category(char)
+    return (
+        (category == "Zs" and char != " ")
+        or code == BRAILLE_PATTERN_BLANK
+        or category == "Co"
+        or any(low <= code <= high for low, high in DEFAULT_IGNORABLE_RANGES)
+    )
+
+
+# R19-8: a symbol that renders as an empty cell.
+BRAILLE_PATTERN_BLANK = 0x2800
 
 
 def _composes_with_previous(char: str) -> bool:

@@ -226,7 +226,8 @@ class DisplayNameInjectiveTest(unittest.TestCase):
 
 # R18-11: characters that render like others — NFD jamo and a combining accent, spaces other than
 # U+0020, Hangul fillers, a variation selector — plus their look-alikes.
-LOOKALIKE_ALPHABET = ("\u1112", "\u1161", "\u11ab", "\ud55c", "e", "\u0301", "\u00e9", " ", "\u00a0", "\u3000", "\u3164", "\u115f", "\ufe0f", "a", "\\")
+LOOKALIKE_ALPHABET = ("\u1112", "\u1161", "\u11ab", "\ud55c", "e", "\u0301", "\u00e9", " ", "\u00a0", "\u3000", "\u3164", "\u115f", "\ufe0f", "a", "\\",
+                      "\u2800", "\ue000", "\U000f0000")  # R19-8
 
 
 class DisplayNameLookalikeTest(unittest.TestCase):
@@ -247,6 +248,11 @@ class DisplayNameLookalikeTest(unittest.TestCase):
         self.assertEqual(display_name("a b.jpg"), "a b.jpg")
         self.assertEqual(display_name("e\u0301"), "\\x65\\u0301")
         self.assertEqual(display_name("\u00e9"), "\u00e9")
+        # R19-8 (round 19): U+2800 renders blank; private-use characters have no standard glyph.
+        self.assertEqual(display_name("a\u2800b.jpg"), "a\\u2800b.jpg")
+        self.assertEqual(display_name("a\ue000b.jpg"), "a\\ue000b.jpg")
+        self.assertEqual(display_name("a\U000f0000b.jpg"), "a\\U000f0000b.jpg")
+        self.assertEqual(display_name("a\u2801b.jpg"), "a\u2801b.jpg")  # a visible Braille pattern stays
 
     def test_what_is_shown_unescaped_is_nfc_and_visible(self) -> None:
         import unicodedata
@@ -450,7 +456,8 @@ class GuiDisplayNameTest(unittest.TestCase):
         start, end = source.index("function displayName(value)"), source.index("function escapeHtml(value)")
         # R11-4: plus random strings over the special characters (injective rule).
         samples = [*HOSTILE_NAMES, "\udcff.png", "plain.png", "bs\\|p", "bs\\\\|p", "a\\nb", *random_names(2000, seed=1104),
-                   "\uff1d1+1", "\uff0b1", "\uff0d1", "\uff20x", "\ufe661", "a\uff1d1"]  # R11-13
+                   "\uff1d1+1", "\uff0b1", "\uff0d1", "\uff20x", "\ufe661", "a\uff1d1",  # R11-13
+                   "a\u2800b.jpg", "a\ue000b.jpg", "a\U000f0000b.jpg", "a\u2801b", "\u2800\u0301"]  # R19-8
         script = (
             source[start:end]
             + "const samples = JSON.parse(require('fs').readFileSync(0, 'utf8'));\n"

@@ -804,7 +804,10 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 7: R19-7 — an APNG's frame data (fdAT) is skipped like IDAT: its metadata
 #    entry no longer says "메타데이터 청크를 … 읽음 — 이후 fdAT 청크…", and a
 #    metadata chunk after the frames is read.
-OUTPUT_FORMAT_GENERATION = 7
+# 8: R19-8 — display_name escapes U+2800 (BRAILLE PATTERN BLANK) and
+#    private-use characters (category Co): a row named with them is shown
+#    "\\u2800" / "\\ue000" in every text rendering.
+OUTPUT_FORMAT_GENERATION = 8
 
 
 def cache_extension(path: Path) -> str:

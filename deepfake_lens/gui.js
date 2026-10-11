@@ -326,7 +326,9 @@
         function escapedAlone(ch) { return ch === '\\' || ch === '|' || controlLike(ch) || invisibleOrSpace(ch); }
         function invisibleOrSpace(ch) {
             const code = ch.codePointAt(0);
-            return (/\p{Zs}/u.test(ch) && ch !== ' ') || DEFAULT_IGNORABLE_RANGES.some(([low, high]) => code >= low && code <= high);
+            // R19-8: U+2800 (renders blank) and private-use characters (\p{Co}) too — as result_text.
+            return (/\p{Zs}/u.test(ch) && ch !== ' ') || code === 0x2800 || /\p{Co}/u.test(ch)
+                || DEFAULT_IGNORABLE_RANGES.some(([low, high]) => code >= low && code <= high);
         }
 
         // R10-2: a CSV cell that starts with =, +, -, @, TAB or CR is read
