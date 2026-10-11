@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..bc99d8a`(병합 커밋 제외, 커밋 252개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..9142684`(병합 커밋 제외, 커밋 268개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 239개 — 스펙 갭에 매핑 169개(그중 신규 사유 병기 53개), 신규(스펙 외)만 70개.
+요약: ID 252개 — 스펙 갭에 매핑 179개(그중 신규 사유 병기 58개), 신규(스펙 외)만 73개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -266,6 +266,19 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R18-17 | 18 | GUI가 실행 안 된 모델에 원점수 0 표시 | G1 |  | 9ecd4ed |
 | R18-18 | 18 | agent 계층 진단이 confidence·agent_type 등급 출력 | G4, G24 |  | 48a07ce |
 | R18-19 | 18 | 잡다한 표시 불일치 (a)~(f) | G26, G29, G1 | 신규(스펙 외): 사용자 표시 — 갭 목록 밖 | a155537, 804ce5c, afd7036, 3df21ce, c9e1f81, bc99d8a |
+| R19-1 | 19 | the scan-cache key carries the runtime — which optional modules are found, their versions  | G11, G1 |  | b829570 |
+| R19-2 | 19 | librosa feature extraction runs in a supervised worker process and numba compiles into a p | G1 | 신규(스펙 외): 갭 목록 밖 항목 포함 | de59997 |
+| R19-3 | 19 | the GUI's report options change with the rows on screen, exports are disabled and refused  | G7, G30 |  | b7b27c5 |
+| R19-4 | 19 | DEEPFAKE_LENS_LOG_DIR and DEEPFAKE_LENS_HEATMAP_DIR are absolute and checked like output p | G31 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 2525982 |
+| R19-5 | 19 | every path argument and web request parameter takes an unknown "~user" literally — no Engl | G34 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 767f7d8 |
+| R19-6 | 19 | every remaining output writer goes through the whole-file writer, whose temp file is remov | G34 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 47d80c9 |
+| R19-7 | 19 | an APNG's frame data (fdAT) is skipped by seeking like IDAT — not read as a metadata chunk | G12, G1 |  | c3f9594 |
+| R19-8 | 19 | display_name escapes U+2800 BRAILLE PATTERN BLANK and private-use characters — "a⠀b.jpg" n | G30 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 8ffd1cf |
+| R19-9 | 19 | an unknown argument of a nested subcommand is reported by that subcommand's parser, and an | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | d70f460 |
+| R19-10 | 19 | a layer diagnostic or comparison without a score shows "없음" — not "원점수 0" | G1 |  | bc3eea1 |
+| R19-11 | 19 | the evidence statement names no charge or statute — a manipulation row leaves "관련 법조" to t | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | f6726cd |
+| R19-12 | 19 | HANDOFF.md describes the current state — R17/R18 fixed, R19-1…R19-13 fixed on this branch, | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 9142684 |
+| R19-13 | 19 | /api/report refuses with 409 and changed_rows when its re-analysis of a posted row differs | G30, G7 |  | 15185a0 |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -549,3 +562,19 @@ R18-14: ids[]의 갭 매핑을 커밋 제목·본문의 `Gaps:`에 맞췄다 —
 | 3df21ce | 18 | R18-19 | Gaps: 신규(스펙 외) | subject | fix(archives): R18-19d zip member names without the UTF-8 flag are decoded as cp949 — euc-kr left the cp949 extension syllables ("똠방각하") as cp437 mojibake (R18-19; Gaps: 신규) |
 | c9e1f81 | 18 | R18-19 | Gaps: G26 | subject | fix(qa): R18-19e `qa_phase0.py --verify-record` in a shallow clone says the parent commit is not fetched — not "다시 생성하세요" (R18-19; Gaps: G26) |
 | bc99d8a | 18 | R18-19 | Gaps: 신규(스펙 외) | subject | fix(cli): R18-19f an argument a subcommand does not take is reported by that subcommand's parser with its own usage — not the top-level usage (R18-19; Gaps: 신규) |
+| 2130892 | 18 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on bc99d8a, round-18 IDs mapped (WP-J; Gaps: G26, G27, G28) |
+| a5aca29 | 18 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): round-19 verification findings (WP-J; Gaps: 신규) |
+| b829570 | 19 | R19-1 | Gaps: G11, G1 | subject | fix(cache): R19-1 the scan-cache key carries the runtime — which optional modules are found, their versions and module-file hashes, cv2/CascadeClassifier and ffmpeg — never a path (R19-1; Gaps: G11, G1) |
+| de59997 | 19 | R19-2 | Gaps: G1; 신규(스펙 외) | subject | fix(audio): R19-2 librosa feature extraction runs in a supervised worker process and numba compiles into a private cache — a native crash fails audio_features instead of killing the scan, and concurrent scans share no numba cache files (R19-2; Gaps: G1, 신규) |
+| 66293b1 | 19 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): round-19 finding R19-13 added by the coordinator — /api/report signs a re-analysis that differs from the posted rows (WP-J; Gaps: 신규) |
+| 15185a0 | 19 | R19-13 | Gaps: G30, G7 | subject | fix(report): R19-13 /api/report refuses with 409 and changed_rows when its re-analysis of a posted row differs in sha256, status or verdict, or the row's file is gone — it signed the re-analysis silently (R19-13; Gaps: G30, G7) |
+| b7b27c5 | 19 | R19-3 | Gaps: G7, G30 | subject | fix(gui): R19-3 the GUI's report options change with the rows on screen, exports are disabled and refused during a scan, the signed web report records the options it re-analyzed with, and a posted cancel count is signed only when the server's job confirms it (R19-3; Gaps: G7, G30) |
+| 767f7d8 | 19 | R19-5 | Gaps: G34; 신규(스펙 외) | subject | fix(cli): R19-5 every path argument and web request parameter takes an unknown "~user" literally — no English RuntimeError traceback, no HTTP 500 (R19-5; Gaps: G34, 신규) |
+| 2525982 | 19 | R19-4 | Gaps: G31; 신규(스펙 외) | subject | fix(cli): R19-4 DEEPFAKE_LENS_LOG_DIR and DEEPFAKE_LENS_HEATMAP_DIR are absolute and checked like output paths — inside a scanned folder or an unknown "~user" is exit 2 before any work (R19-4; Gaps: G31, 신규) |
+| 47d80c9 | 19 | R19-6 | Gaps: G34; 신규(스펙 외) | subject | fix(output): R19-6 every remaining output writer goes through the whole-file writer, whose temp file is removed on any exception, and the docs list exactly what is covered (R19-6; Gaps: G34, 신규) |
+| bc3eea1 | 19 | R19-10 | Gaps: G1 | subject | fix(gui): R19-10 a layer diagnostic or comparison without a score shows "없음" — not "원점수 0" (R19-10; Gaps: G1) |
+| f6726cd | 19 | R19-11 | Gaps: 신규(스펙 외) | subject | fix(report): R19-11 the evidence statement names no charge or statute — a manipulation row leaves "관련 법조" to the examiner (R19-11; Gaps: 신규) |
+| d70f460 | 19 | R19-9 | Gaps: 신규(스펙 외) | subject | fix(cli): R19-9 an unknown argument of a nested subcommand is reported by that subcommand's parser, and an unknown option before a command by the top-level parser (R19-9; Gaps: 신규) |
+| c3f9594 | 19 | R19-7 | Gaps: G12, G1 | subject | fix(metadata): R19-7 an APNG's frame data (fdAT) is skipped by seeking like IDAT — not read as a metadata chunk against --metadata-bytes (R19-7; Gaps: G12, G1) |
+| 8ffd1cf | 19 | R19-8 | Gaps: G30; 신규(스펙 외) | subject | fix(report): R19-8 display_name escapes U+2800 BRAILLE PATTERN BLANK and private-use characters — "a⠀b.jpg" no longer looks like "a b.jpg" (R19-8; Gaps: G30, 신규) |
+| 9142684 | 19 | R19-12 | Gaps: 신규(스펙 외) | subject | docs(phase0): R19-12 HANDOFF.md describes the current state — R17/R18 fixed, R19-1…R19-13 fixed on this branch, 1,684 tests, the round-18/19 documents and the Docker gate image (R19-12; Gaps: 신규) |
