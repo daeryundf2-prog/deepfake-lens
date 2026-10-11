@@ -2289,12 +2289,20 @@
             }
             box.dataset.ready = String(seq);
         }
+        // GUI-REV3 J-3: the preview's texts are the server template's own output — the
+        // text the PDF prints. File names in it are already escaped by the server
+        // (display_name/row_label), so applying displayName() again doubled every
+        // backslash and turned the template's line breaks into the two characters
+        // "\n". Each line is HTML-escaped as it is and the lines are joined with <br>.
+        function docHtml(text) {
+            return String(text == null ? '' : text).split('\n').map(line => escapeHtml(line)).join('<br>');
+        }
         function a4Html(body) {
-            const lines = list => list.map(line => `<p>${shown(line)}</p>`).join('');
-            const head = (body.table_headers || []).map(h => `<th scope="col">${shown(h)}</th>`).join('');
-            const rows = (body.entries || []).map(e => `<tr data-exhibit="${shown(e.exhibit_no)}" data-path="${shown(e.file_path)}">` +
-                `<td>${shown(e.exhibit_no)}</td><td>${shown(e.document_name)}</td><td>${shown(e.author_date)}</td><td class="a4-purpose">${shown(e.purpose_of_proof)}</td></tr>`).join('');
-            const boxes = (body.boxes || []).map(([title, boxLines]) => `<section class="a4-box"><div class="a4-h">${shown(title)}</div>${lines(boxLines)}</section>`).join('');
+            const lines = list => list.map(line => `<p>${docHtml(line)}</p>`).join('');
+            const head = (body.table_headers || []).map(h => `<th scope="col">${docHtml(h)}</th>`).join('');
+            const rows = (body.entries || []).map(e => `<tr data-exhibit="${docHtml(e.exhibit_no)}" data-path="${shown(e.file_path)}">` +
+                `<td>${docHtml(e.exhibit_no)}</td><td>${docHtml(e.document_name)}</td><td>${docHtml(e.author_date)}</td><td class="a4-purpose">${docHtml(e.purpose_of_proof)}</td></tr>`).join('');
+            const boxes = (body.boxes || []).map(([heading, boxLines]) => `<section class="a4-box"><div class="a4-h">${docHtml(heading)}</div>${lines(boxLines)}</section>`).join('');
             return `<div class="a4-top"><span>미리보기 — 서명 전</span><span>서버의 증거설명서 서식</span></div>` +
                 `<div class="a4-title">${shown(body.title)}</div>` +
                 `<section class="a4-box">${lines(body.case_lines || [])}${body.scan_root_line ? lines([body.scan_root_line]) : ''}</section>` +
@@ -2302,7 +2310,7 @@
                 `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>` +
                 boxes +
                 ((body.unsigned || []).length ? `<section class="a4-box">${lines(body.unsigned)}</section>` : '') +
-                `<div class="a4-signoff">${lines(body.signoff || [])}<p class="a4-court">${shown(body.court)}</p></div>` +
+                `<div class="a4-signoff">${lines(body.signoff || [])}<p class="a4-court">${docHtml(body.court)}</p></div>` +
                 '<p class="a4-sign">서명은 내보낼 때 서버가 서명 키로 붙입니다(키가 없으면 "서명 없음").</p>';
         }
 

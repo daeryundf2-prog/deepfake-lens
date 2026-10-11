@@ -266,6 +266,12 @@ def main() -> int:
                     pdf_flat = "".join("".join(page_.get_text().split()) for page_ in document)
                 for line in preview_lines:
                     assert "".join(line.split()) in pdf_flat, f"preview line not in the PDF: {line[:80]!r}"
+                # GUI-REV3 J-3: the table cells too — no literal "\n", every cell's text in the PDF.
+                cells = page.evaluate("[...document.querySelectorAll('#a4 tr[data-exhibit] td')].map(td => td.innerText)")
+                assert cells, "no preview table cells"
+                for cell in cells:
+                    # (a literal "\\n" from the old rendering is not in the PDF, which breaks the line)
+                    assert "".join(cell.split()) in pdf_flat, f"preview cell not in the PDF: {cell[:80]!r}"
                 positions = [pdf_flat.find("".join(title.split())) for title in box_titles]
                 assert all(position >= 0 for position in positions) and positions == sorted(positions), (box_titles, positions)
             page.uncheck("#inc-undet")
