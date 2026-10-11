@@ -1042,8 +1042,9 @@ def imwrite_any(path: str | os.PathLike[str], image: Any, params: list[int] | tu
     ok, encoded = cv2.imencode(suffix, image, list(params))
     if not ok:
         return False
-    with open(path, "wb") as handle:
-        handle.write(encoded.tobytes())
+    from .output_files import write_output_bytes
+
+    write_output_bytes(path, encoded.tobytes())  # R19-6: written whole (an OSError subclass on failure, as before)
     return True
 
 

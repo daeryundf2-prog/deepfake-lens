@@ -237,7 +237,9 @@ def sign_report_file(path: Path | str, key: bytes | str | None) -> dict[str, obj
     """Sign a JSON report file in place; returns the signed payload."""
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     signed = sign_report(payload if isinstance(payload, dict) else {"report": payload}, key)
-    Path(path).write_text(json_dumps(signed, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    from .output_files import write_output_text
+
+    write_output_text(path, json_dumps(signed, ensure_ascii=False, indent=2) + "\n")  # R19-6
     return signed
 
 

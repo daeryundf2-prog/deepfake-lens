@@ -81,12 +81,16 @@ def write_output_bytes(path: Path | str, data: bytes) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp, target)
-    except OSError as exc:
+    except BaseException as exc:
+        # R19-6 (round 19): every exception removes the temp file — a Ctrl-C (KeyboardInterrupt) or a
+        # SIGTERM's SystemExit during the write left ".<name>.<pid>.<id>.tmp" next to the output.
         try:
             temp.unlink(missing_ok=True)
         except OSError:
             pass
-        raise OutputWriteError(target, exc) from exc
+        if isinstance(exc, OSError):
+            raise OutputWriteError(target, exc) from exc
+        raise
 
 
 def write_output_text(path: Path | str, text: str) -> None:

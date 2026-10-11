@@ -295,11 +295,10 @@ def evaluate_robustness_dataset(
 
 
 def write_cases_jsonl(path: Path | str, rows: list[dict[str, object]]) -> None:
-    output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("w", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json_dumps(row, ensure_ascii=False) + "\n")
+    from .output_files import write_output_text
+
+    # R19-6 (round 19): --false-positive-out / --false-negative-out written whole (was an open("w") stream).
+    write_output_text(path, "".join(json_dumps(row, ensure_ascii=False) + "\n" for row in rows))
 
 
 def write_json_report(path: Path | str, payload: dict[str, object]) -> None:

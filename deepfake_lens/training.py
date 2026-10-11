@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .output_files import write_output_text
 from .datasets import discover_dataset
 from .json_text import json_dumps
 
@@ -69,6 +70,5 @@ def build_neural_training_plan(
 def write_neural_training_plan(root: Path | str, output_path: Path | str, *, output_dir: Path | str, architecture: str = "convnext_tiny", image_size: int = 224, epochs: int = 10) -> dict[str, object]:
     payload = build_neural_training_plan(root, output_dir=output_dir, architecture=architecture, image_size=image_size, epochs=epochs)
     output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(output, json_dumps(payload, ensure_ascii=False, indent=2) + "\n")  # R19-6
     return payload

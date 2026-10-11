@@ -56,7 +56,9 @@ def json_bytes(obj: Any, **kwargs: Any) -> bytes:
 
 def write_json(path: Path | str, obj: Any, **kwargs: Any) -> None:
     """Write :func:`json_dumps` of ``obj`` plus a newline to ``path`` as UTF-8."""
-    Path(path).write_text(json_dumps(obj, **kwargs) + "\n", encoding="utf-8")
+    from .output_files import write_output_text
+
+    write_output_text(path, json_dumps(obj, **kwargs) + "\n")  # R19-6
 
 
 # R11-6 (round 11): JSON embedded in an HTML ``<script>`` element. Escaping

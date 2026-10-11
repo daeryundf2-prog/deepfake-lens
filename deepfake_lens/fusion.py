@@ -4,6 +4,7 @@ import json
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
+from .output_files import write_output_text
 from .calibration import calibrate_threshold
 from .core import ClassificationResult, EvidenceSignal, ScanItem, SourceConfidence, analyze_file
 from .datasets import discover_dataset, is_positive_label
@@ -47,8 +48,7 @@ def load_fusion_profile(path: Path | str | None) -> FusionProfile | None:
 
 def write_fusion_profile(path: Path | str, profile: FusionProfile) -> None:
     output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json_dumps(profile.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(output, json_dumps(profile.to_json(), ensure_ascii=False, indent=2) + "\n")  # R19-6
 
 
 def calibrate_fusion_profile(

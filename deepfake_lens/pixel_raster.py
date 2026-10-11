@@ -383,7 +383,9 @@ def _write_png_heatmap(path: Path, grid: list[list[int]]) -> Path:
         + _png_chunk(b"IDAT", zlib.compress(raw))
         + _png_chunk(b"IEND", b"")
     )
-    path.write_bytes(png)
+    from .output_files import write_output_bytes
+
+    write_output_bytes(path, png)  # R19-6: a heatmap is written whole (an OSError subclass on failure, as before)
     return path
 
 

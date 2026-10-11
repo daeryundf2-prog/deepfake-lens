@@ -58,6 +58,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
+from .output_files import write_output_text
 from .json_text import json_dumps
 from .result_text import display_name
 
@@ -228,8 +229,7 @@ def write_manifest(path: Path | str, manifest: dict[str, Any], *, root_hint: str
     if root_hint is not None:
         payload["root_hint"] = root_hint
     output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(output, json_dumps(payload, ensure_ascii=False, indent=2) + "\n")  # R19-6
 
 
 def load_manifest(path: Path | str) -> dict[str, Any]:

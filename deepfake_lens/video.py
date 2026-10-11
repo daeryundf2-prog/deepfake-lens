@@ -5,6 +5,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
+from .output_files import write_output_text
 from .native_path import NativePathError, native_safe_path
 from .native_stderr import FFMPEG_QUIET_ARGS
 from .shutdown import run_child
@@ -75,8 +76,7 @@ def build_video_frame_plan(
 def write_video_frame_plan(root: Path | str, output_path: Path | str, *, frame_root: Path | str, recursive: bool = True, sample_every_seconds: float = 2.0) -> dict[str, object]:
     plan = build_video_frame_plan(root, output_root=frame_root, recursive=recursive, sample_every_seconds=sample_every_seconds)
     output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json_dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(output, json_dumps(plan, ensure_ascii=False, indent=2) + "\n")  # R19-6
     return plan
 
 

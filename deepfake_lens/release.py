@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from .output_files import write_output_text
 from .json_text import json_dumps
 
 
@@ -51,6 +52,5 @@ def build_release_checklist(root: Path | str) -> dict[str, object]:
 def write_release_checklist(root: Path | str, output_path: Path | str) -> dict[str, object]:
     payload = build_release_checklist(root)
     output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(output, json_dumps(payload, ensure_ascii=False, indent=2) + "\n")  # R19-6
     return payload

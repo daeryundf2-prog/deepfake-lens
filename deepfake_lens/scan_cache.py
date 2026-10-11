@@ -14,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
+from .output_files import write_output_text
 from .profile_pins import ModelPathArg, model_path_digest, pin_tokens, profile_pins
 from .model_assets import asset_file_tokens, asset_pin_tokens
 from .result_types import ScanItem
@@ -658,12 +659,11 @@ def _write_scan_cache(cache_path: Path | None, cache: dict[str, object]) -> None
         # R15-1: the process is ending — rows made now may carry checks
         # refused "종료 중"; such a row must never be replayed by a later scan.
         return
+    body = {"format": SCAN_CACHE_FORMAT, **{key: value for key, value in cache.items() if key != "format"}}
     try:
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
-        body = {"format": SCAN_CACHE_FORMAT, **{key: value for key, value in cache.items() if key != "format"}}
-        tmp.write_text(json_dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        tmp.replace(cache_path)
+        # R19-6 (round 19): the shared writer — a unique temp name removed on any exception, Ctrl-C included
+        # (the fixed "<cache>.tmp" was left behind by an interrupted flush).
+        write_output_text(cache_path, json_dumps(body, ensure_ascii=False, indent=2) + "\n")
     except OSError:
         pass  # cache flush failure must never mask real scan results
 
@@ -685,8 +685,7 @@ def _load_hash_db(hash_db_path: Path | None) -> dict[str, object] | None:
 def _write_hash_db(hash_db_path: Path | None, hash_db: dict[str, object]) -> None:
     if hash_db_path is None:
         return
-    hash_db_path.parent.mkdir(parents=True, exist_ok=True)
-    hash_db_path.write_text(json_dumps(hash_db, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(hash_db_path, json_dumps(hash_db, ensure_ascii=False, indent=2) + "\n")  # R19-6
 
 
 def _cache_key(

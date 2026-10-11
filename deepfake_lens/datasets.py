@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from .output_files import write_output_text
 from .json_text import json_dumps
 
 
@@ -89,8 +90,7 @@ def write_manifest(
     payload_records = [_record_payload(record, include_fingerprints=include_fingerprints) for record in records]
     payload = {"summary": summary.to_json(), "records": payload_records}
     output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(output, json_dumps(payload, ensure_ascii=False, indent=2) + "\n")  # R19-6
     return summary, records
 
 
@@ -133,8 +133,7 @@ def audit_dataset(root: Path | str, *, recursive: bool = True) -> DatasetAudit:
 def write_audit(root: Path | str, output_path: Path | str, *, recursive: bool = True) -> DatasetAudit:
     audit = audit_dataset(root, recursive=recursive)
     output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json_dumps(audit.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(output, json_dumps(audit.to_json(), ensure_ascii=False, indent=2) + "\n")  # R19-6
     return audit
 
 
@@ -174,8 +173,7 @@ def plan_dataset_splits(
 def write_split_plan(root: Path | str, output_path: Path | str, **kwargs) -> dict[str, object]:
     plan = plan_dataset_splits(root, **kwargs)
     output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json_dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(output, json_dumps(plan, ensure_ascii=False, indent=2) + "\n")  # R19-6
     return plan
 
 
@@ -209,8 +207,7 @@ def build_robustness_plan(root: Path | str, *, recursive: bool = True) -> dict[s
 def write_robustness_plan(root: Path | str, output_path: Path | str, *, recursive: bool = True) -> dict[str, object]:
     plan = build_robustness_plan(root, recursive=recursive)
     output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json_dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(output, json_dumps(plan, ensure_ascii=False, indent=2) + "\n")  # R19-6
     return plan
 
 

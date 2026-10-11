@@ -45,20 +45,13 @@ class ReviewStore:
     def _persist(self) -> None:
         if self._cache is None:
             return
-        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = self.storage_path.with_suffix(".tmp")
+        from .output_files import write_output_text
+
         try:
-            temp_path.write_text(
-                json_dumps(self._cache, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            temp_path.replace(self.storage_path)
+            # R19-6 (round 19): the shared writer — a unique temp name, removed on any exception.
+            write_output_text(self.storage_path, json_dumps(self._cache, ensure_ascii=False, indent=2))
         except OSError:
-            if temp_path.exists():
-                try:
-                    temp_path.unlink()
-                except OSError:
-                    pass
+            pass
 
     def get_review(self, artifact_id: str) -> dict[str, Any] | None:
         """Fetch review entry for artifact_id (or None if unreviewed)."""
