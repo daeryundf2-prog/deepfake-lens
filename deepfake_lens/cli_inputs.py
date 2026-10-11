@@ -34,7 +34,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from .archives import SUPPORTED_ARCHIVE_EXTENSIONS, is_archive
 from .audio import SUPPORTED_AUDIO_EXTENSIONS
@@ -614,6 +614,8 @@ def require_writable_output(path: Path | str) -> None:
 def check_output_targets(args: argparse.Namespace, key: str, common: tuple[InputSpec, ...]) -> None:
     """P11: no output inside an examined folder or on an input file; P10: outputs writable."""
     folders, files = _input_paths(args, INPUT_SPECS.get(key, ()))
+    # R20-7: the files the command analyzes (not a scan-result JSON, a label list or a profile).
+    evidence_files = [path for path in files if path.suffix.lower() not in JSON_SUFFIXES | FEEDBACK_SUFFIXES]
     _, config_files = _input_paths(args, common)
     files += config_files
     output_folders = (*OUTPUT_FOLDER_ATTRS, *COMMAND_OUTPUT_FOLDER_ATTRS.get(key, ()))
@@ -629,7 +631,7 @@ def check_output_targets(args: argparse.Namespace, key: str, common: tuple[Input
             raise UsageError(OUTPUT_IS_INPUT.format(path=value))
         if attr not in output_folders:
             require_writable_output(value)
-    check_tool_folders(args, folders)
+    check_tool_folders(args, folders, evidence_files)
 
 
 # R19-4 (round 19): a tool folder named by a variable inside a scanned folder.
@@ -639,7 +641,23 @@ TOOL_FOLDER_INSIDE_INPUT = (
 )
 
 
-def check_tool_folders(args: argparse.Namespace, folders: list[Path]) -> None:
+# R20-7 (round 20): the tool folders HOME decides (~/.cache/deepfake-lens/{logs,heatmaps,numba}).
+HOME_NOT_ABSOLUTE = (
+    "환경 변수 HOME이 절대 경로가 아닙니다: {home} — 도구 폴더({kind})가 작업 폴더 안에 만들어집니다. "
+    "HOME을 절대 경로로 지정하거나 {env}에 검사 대상 밖의 절대 경로를 지정하십시오"
+)
+HOME_TOOL_FOLDER_INSIDE_INPUT = (
+    "HOME에서 정해지는 도구 폴더({kind})가 검사 대상 폴더 안에 있습니다: {path} — {env}에 검사 대상 폴더({folder}) 밖의 "
+    "절대 경로를 지정하십시오(증거 폴더에는 아무것도 쓰지 않습니다)"
+)
+# R20-7: every temp-folder candidate (DEEPFAKE_LENS_TMPDIR, DEEPFAKE_LENS_NATIVE_TMPDIR, TMPDIR, /tmp) is inside a scanned folder.
+TEMP_FOLDERS_INSIDE_INPUT = (
+    "임시 폴더 후보가 모두 검사 대상 폴더 안에 있습니다 — 환경 변수 DEEPFAKE_LENS_TMPDIR에 검사 대상 밖의 ASCII 경로 폴더를 "
+    "지정하십시오(증거 폴더에는 아무것도 쓰지 않습니다)"
+)
+
+
+def check_tool_folders(args: argparse.Namespace, folders: list[Path], files: list[Path] | None = None) -> None:
     """R19-4 (round 19): DEEPFAKE_LENS_LOG_DIR and (with --heatmaps, no --heatmap-dir) DEEPFAKE_LENS_HEATMAP_DIR.
 
     They were not checked like the output arguments (P11): a relative value
@@ -647,14 +665,39 @@ def check_tool_folders(args: argparse.Namespace, folders: list[Path]) -> None:
     heatmap folders into the working folder, an absolute one could name a
     folder inside the evidence. A ``~user`` that names no account is exit 2;
     a folder inside a folder the command reads is exit 2.
-    """
-    from .cli_logging import LOG_DIR_ENV
-    from .core import HEATMAP_DIR_ENV
-    from .native_path import ToolFolderError, tool_folder_from_env
 
+    R20-7 (round 20): the same rule for every tool folder the command may
+    write, before any work:
+
+    - the folder of each analyzed input *file* (not a JSON report, a label
+      list or a profile) counts as examined for these two variables (``cd case; DEEPFAKE_LENS_LOG_DIR=logs classify case/a.jpg``
+      made ``case/logs``);
+    - the built-in folders under ``~/.cache/deepfake-lens`` used when a
+      variable is unset (logs, heatmaps, and the published numba cache when
+      librosa is installed): a relative HOME is exit 2
+      (``HOME=rel scan …`` wrote ``rel/.cache/…`` into the working folder),
+      and one inside a scanned folder is exit 2 — scanning the home folder
+      itself is refused instead of writing ``.cache`` into it;
+    - the session temp folder: a candidate inside a scanned folder is
+      skipped like an unusable one, with the R15-6 notice
+      (``native_path.set_examined_folders``); exit 2 when none is left.
+    """
+    import importlib.util
+
+    from .audio_worker import shared_cache_root
+    from .cli_logging import LOG_DIR_ENV, builtin_log_dir
+    from .core import HEATMAP_DIR_ENV, builtin_heatmap_root
+    from .native_path import ToolFolderError, set_examined_folders, tool_folder_from_env, usable_temp_base
+
+    examined = [*folders, *{path.parent for path in files or []}]
+    builtin: list[tuple[str, str, Callable[[], Path | None]]] = []
     checks = [LOG_DIR_ENV]
+    if os.environ.get(LOG_DIR_ENV, "").strip() == "":
+        builtin.append(("로그", LOG_DIR_ENV, builtin_log_dir))
     if getattr(args, "heatmaps", False) and not getattr(args, "heatmap_dir", None):
         checks.append(HEATMAP_DIR_ENV)
+        if os.environ.get(HEATMAP_DIR_ENV, "").strip() == "":
+            builtin.append(("히트맵", HEATMAP_DIR_ENV, builtin_heatmap_root))
     for env in checks:
         if not os.environ.get(env, "").strip():
             continue
@@ -663,9 +706,29 @@ def check_tool_folders(args: argparse.Namespace, folders: list[Path]) -> None:
         except ToolFolderError as exc:
             raise UsageError(str(exc)) from None
         resolved = _resolved(target)
-        for folder in folders:
+        for folder in examined:
             if _inside(resolved, folder):
                 raise UsageError(TOOL_FOLDER_INSIDE_INPUT.format(env=env, path=target, folder=folder))
+    try:
+        home: Path | None = Path.home()
+    except (RuntimeError, KeyError, OSError):
+        home = None
+    if home is not None and not home.is_absolute():
+        for kind, env, _ in builtin:
+            raise UsageError(HOME_NOT_ABSOLUTE.format(home=home, kind=kind, env=env))
+    if importlib.util.find_spec("librosa") is not None:
+        builtin.append(("오디오 numba 캐시", "HOME", shared_cache_root))
+    for kind, env, where in builtin:
+        path = where() if home is not None else None
+        if path is None:
+            continue
+        resolved = _resolved(path)
+        for folder in folders:
+            if _inside(resolved, folder):
+                raise UsageError(HOME_TOOL_FOLDER_INSIDE_INPUT.format(kind=kind, path=path, env=env, folder=folder))
+    set_examined_folders([str(folder) for folder in folders])
+    if folders and usable_temp_base() is None:
+        raise UsageError(TEMP_FOLDERS_INSIDE_INPUT)
 
 
 def command_key(args: argparse.Namespace) -> str:

@@ -36,7 +36,8 @@ NO_SUCH_USER = "~dfl-r19-no-such-user"
 
 def _run(args: list[str], cwd: Path, **env: str) -> subprocess.CompletedProcess[str]:
     base = {key: value for key, value in os.environ.items() if not key.startswith("DEEPFAKE_LENS_")}
-    base.update(PYTHONPATH=str(PACKAGE.parent), HOME=str(cwd.parent / "home"), **env)
+    base.update(PYTHONPATH=str(PACKAGE.parent), HOME=str(cwd.parent / "home"))
+    base.update(env)  # R20-7: a test may name its own HOME
     return subprocess.run([sys.executable, "-m", "deepfake_lens", *args], cwd=cwd, env=base, capture_output=True, text=True, timeout=300)
 
 
@@ -96,6 +97,73 @@ class ToolFolderVariableTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {core.HEATMAP_DIR_ENV: str(self.case.parent / "hm")}):
             target = core._heatmap_path_for(self.case / "a.png", root=self.case, heatmap_dir=None)
             self.assertTrue(str(target).startswith(str(self.case.parent / "hm")), target)
+
+
+class HomeAndTempToolFoldersTest(unittest.TestCase):
+    """R20-7 (round 20): the tool folders HOME and TMPDIR decide were not checked like the variables of R19-4.
+    ``cd case; HOME=rel scan case`` wrote ``case/rel/.cache/deepfake-lens/logs/…`` (rc 0), ``TMPDIR=case/tmpd``
+    made and removed the session folder inside the evidence (its mtime changed), and ``cd case;
+    DEEPFAKE_LENS_LOG_DIR=logs evidence case/a.txt`` made ``case/logs`` (only scanned folders were checked)."""
+
+    setUp = ToolFolderVariableTest.setUp
+    assert_untouched = ToolFolderVariableTest.assert_untouched
+
+    def _mtimes(self) -> dict[str, int]:
+        return {str(path): path.stat().st_mtime_ns for path in [self.case, *self.case.rglob("*")]}
+
+    def test_a_relative_home_is_exit_2(self) -> None:
+        done = _run(["scan", str(self.case)], self.case, HOME="rel")
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertIn("환경 변수 HOME이 절대 경로가 아닙니다: rel", done.stderr)
+        self.assert_untouched()
+        # The log folder named by its variable needs no HOME.
+        named = _run(["scan", str(self.case)], self.case, HOME="rel", DEEPFAKE_LENS_LOG_DIR=str(self.case.parent / "logs"))
+        self.assertEqual(named.returncode, 0, named.stderr)
+        self.assert_untouched()
+
+    def test_a_home_inside_the_scanned_folder_is_exit_2(self) -> None:
+        home = self.case / "home"
+        home.mkdir()
+        self.listing = sorted(os.listdir(self.case))
+        done = _run(["scan", str(self.case), "--recursive"], self.case.parent, HOME=str(home))
+        self.assertEqual(done.returncode, 2, done.stderr)
+        self.assertIn("HOME에서 정해지는 도구 폴더(로그)가 검사 대상 폴더 안에 있습니다", done.stderr)
+        self.assertEqual(os.listdir(home), [])
+        self.assert_untouched()
+
+    def test_a_temp_folder_inside_the_scanned_folder_is_skipped_with_a_notice(self) -> None:
+        import zipfile
+
+        tmpd = self.case / "tmpd"
+        tmpd.mkdir()
+        with zipfile.ZipFile(self.case / "a.zip", "w") as archive:  # extracted into the session folder
+            archive.writestr("m.txt", "메모입니다.")
+        self.listing = sorted(os.listdir(self.case))
+        for env in ("TMPDIR", "DEEPFAKE_LENS_TMPDIR"):
+            with self.subTest(env=env):
+                before = self._mtimes()
+                done = _run(["scan", str(self.case), "--recursive"], self.case.parent, **{env: str(tmpd)})
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertIn("검사 대상 폴더 안", done.stderr)  # the R15-6 notice names the reason
+                self.assertEqual(os.listdir(tmpd), [])
+                self.assertEqual(self._mtimes(), before)
+                self.assert_untouched()
+
+    def test_a_single_file_commands_log_folder_inside_its_files_folder_is_exit_2(self) -> None:
+        for argv in (["evidence", "memo.txt"], ["classify", "memo.txt"]):
+            with self.subTest(argv=argv):
+                done = _run(argv, self.case, DEEPFAKE_LENS_LOG_DIR="logs")
+                self.assertEqual(done.returncode, 2, done.stderr)
+                self.assertIn("환경 변수 DEEPFAKE_LENS_LOG_DIR의 폴더가 검사 대상 폴더 안에 있습니다", done.stderr)
+                self.assert_untouched()
+
+    def test_a_file_in_the_home_folder_is_still_analyzed(self) -> None:
+        """Only scanned folders are checked against HOME's tool folders: a single file in HOME is fine."""
+        home = Path(self._tmp.name) / "home"
+        home.mkdir()
+        (home / "note.txt").write_text("메모입니다.", encoding="utf-8")
+        done = _run(["classify", str(home / "note.txt")], self.case.parent, HOME=str(home))
+        self.assertEqual(done.returncode, 0, done.stderr)
 
 
 class UnknownHomeInArgumentsTest(unittest.TestCase):

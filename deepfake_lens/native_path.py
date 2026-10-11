@@ -297,9 +297,23 @@ def _base_candidates() -> list[str]:
         override = os.environ.get(name)
         if override:
             candidates.append(override)
-    candidates.append(tempfile.gettempdir())
+    candidates.append(_system_temp_dir())
     candidates.append("C:\\Windows\\Temp" if os.name == "nt" else "/tmp")
     return candidates
+
+
+def _system_temp_dir() -> str:
+    """The system temp folder (``TMPDIR``/``TEMP``/``TMP``, else tempfile's choice).
+
+    R20-7 (round 20): read from the variables first — ``tempfile.gettempdir()``
+    proves a folder by writing and removing a file in it, which changed the
+    mtime of an evidence folder named by ``TMPDIR`` before it could be skipped.
+    """
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        value = os.environ.get(name)
+        if value:
+            return value
+    return tempfile.gettempdir()
 
 
 def _is_windows() -> bool:
@@ -625,13 +639,54 @@ def _register_session_folder(created: str) -> None:
         _ATEXIT_REGISTERED = True
 
 
+# R20-7 (round 20): the folders the running command examines (set by the CLI before any work).
+_EXAMINED_FOLDERS: list[str] = []
+TEMP_BASE_INSIDE_EXAMINED = "검사 대상 폴더 안"
+
+
+def set_examined_folders(folders: list[str]) -> None:
+    """R20-7: the folders the command reads — a temp-folder candidate inside one is skipped (with the R15-6 notice).
+
+    When the system temp folder itself is inside one, Python's own default
+    (``tempfile.tempdir``, used by any library that makes a temp file without
+    a folder) becomes the session folder's base, so nothing probes or writes
+    the evidence folder.
+    """
+    _EXAMINED_FOLDERS[:] = [os.path.realpath(folder) for folder in folders]
+    if tempfile.tempdir is None and _inside_examined(_system_temp_dir()):
+        base = usable_temp_base()
+        if base is not None:
+            tempfile.tempdir = base
+
+
+def _inside_examined(base: str) -> bool:
+    real = os.path.realpath(base)
+    return any(real == folder or real.startswith(folder.rstrip(os.sep) + os.sep) for folder in _EXAMINED_FOLDERS)
+
+
+def usable_temp_base() -> str | None:
+    """R20-7: the candidate the session folder would be made in now, or None when none is usable."""
+    for base in _base_candidates():
+        if not _unusable_base(base) and os.access(base, os.W_OK):
+            return base
+    return None
+
+
 def _unusable_base(base: str) -> str:
-    """R15-6: why ``base`` cannot hold the session folder ("" when it can)."""
+    """R15-6: why ``base`` cannot hold the session folder ("" when it can).
+
+    R20-7 (round 20): a candidate inside a folder the command examines
+    (``TMPDIR=<evidence>/tmpd``) — the session folder (staged copies, the
+    numba copies, extractions) was made and removed inside the evidence
+    folder, changing its mtime.
+    """
     if not base.isascii():
         return "경로에 ASCII가 아닌 문자가 있음"
     if not os.path.isdir(base):
         # R17-11 (round 17): a file there said "폴더가 없음".
         return "폴더가 아니라 파일임" if os.path.exists(base) else "폴더가 없음"
+    if _EXAMINED_FOLDERS and _inside_examined(base):
+        return TEMP_BASE_INSIDE_EXAMINED
     return ""
 
 
