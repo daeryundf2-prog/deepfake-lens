@@ -106,6 +106,11 @@ class LedgerReasonTest(unittest.TestCase):
             # G-3: a decisive check that did not run leads ahead of the scope reason.
             "c2pa_missing": _row(coverage=[{"check": "c2pa", "status": "skipped", "reason": "의존성 부재: c2pa"},
                                            {"check": "pixel", "status": "skipped", "reason": "측정 범위 밖: 해상도 32x32"}]),
+            "cue_failed": _row(evidence=[{"kind": "deterministic", "direction": "synthetic", "strength": "moderate",
+                                          "title": "생성 도구 메타데이터 단서", "detail": ""}],
+                               coverage=[{"check": "metadata", "status": "failed", "reason": "잘림"}]),
+            "reference_cue": _row(grade="reference", evidence=[{"kind": "deterministic", "direction": "synthetic", "strength": "moderate",
+                                                                "title": "문서 메타데이터의 AI 도구명", "detail": ""}]),
             "c2pa_unverified": _row(evidence=[{"kind": "deterministic", "direction": "neutral", "strength": "weak", "layer": "c2pa",
                                                "title": "C2PA 매니페스트 존재(검증 미완료)", "detail": ""}],
                                     coverage=[{"check": "pixel", "status": "skipped", "reason": "측정 범위 밖: 해상도 32x32"}]),
@@ -115,7 +120,7 @@ class LedgerReasonTest(unittest.TestCase):
         rows["text"]["result"]["grade"] = "reference"  # type: ignore[index]
         out = _run(
             f"var rows = {json.dumps(rows, ensure_ascii=False)};\n"
-            "var out = {}; for (var k in rows) out[k] = [rowReason(rows[k]), shortVerdict(rows[k]), verdictLine(rows[k])];\n"
+            "var out = {}; for (var k in rows) out[k] = [rowReason(rows[k]), shortVerdict(rows[k]), verdictLine(rows[k]), limitAdvice(rows[k])];\n"
             "console.log(JSON.stringify(out));"
         )
         assert isinstance(out, dict)
@@ -127,12 +132,21 @@ class LedgerReasonTest(unittest.TestCase):
         self.assertEqual(out["scope"][0], "근거 없음 · 사진 아님: pattern")
         self.assertEqual(out["plain"][0], "근거 없음 — 원본이라는 뜻 아님")
         self.assertIn("원본", out["plain"][0])
-        self.assertEqual(out["cue"][:3], ["결론에 못 미친 근거 1건 — 생성 도구 메타데이터 단서", "판단 불가 — 단서만 있음",
+        # GUI-REV2 H-6: the short verdict counts the cues ("단서 1건", was "단서만 있음").
+        self.assertEqual(out["cue"][:3], ["결론에 못 미친 근거 1건 — 생성 도구 메타데이터 단서", "판단 불가 — 단서 1건",
                                           "기록에 단서가 있지만 결론을 낼 만큼은 아닙니다."])
         self.assertNotIn("근거 없음", out["cue"][0] + out["cue"][1])
         self.assertEqual(out["c2pa_missing"][0], "결정 검사 미실행 — C2PA 출처 검증: 의존성 부재: c2pa")
         self.assertEqual(out["c2pa_missing"][2], "결정 검사를 실행하지 못해 결론을 내리지 않았습니다.")
-        self.assertEqual(out["c2pa_unverified"][0], "근거 없음 · C2PA 매니페스트 존재(검증 미완료)")
+        # GUI-REV2 H-6 (G-3 residual): an unverified C2PA record is its own kind, never "근거 없음".
+        self.assertEqual(out["c2pa_unverified"][:3], ["확인 안 된 기록 — C2PA 매니페스트 존재(검증 미완료)", "판단 불가 — 확인 안 된 기록",
+                                                      "서명을 확인하지 못한 출처 기록이 있습니다 — 결론을 내리지 않았습니다."])
+        # H-6: a cue is never hidden behind a failure or the reference grade.
+        self.assertEqual(out["cue_failed"][:3], ["검사 실패 — 메타데이터 · 결론에 못 미친 근거 1건 — 생성 도구 메타데이터 단서",
+                                                 "판단 불가 — 단서 1건 · 검사 실패", "단서가 있지만 검사가 실패해 결론을 내리지 않았습니다."])
+        self.assertEqual(out["reference_cue"][:2], ["결론에 못 미친 근거 1건 — 문서 메타데이터의 AI 도구명", "판단 불가 — 단서 1건 · 참고 전용"])
+        self.assertIn("조작·생성되었다는 뜻도", out["cue"][3])
+        self.assertNotIn("근거가 없다", out["cue"][3])
         # U-9: not analyzed rows say why, and 미지원 is not 처리 실패.
         self.assertEqual(out["unsupported"][:2], ["지원 형식이 아닙니다.", "분석 못 함 — 미지원 형식"])
         self.assertEqual(out["failed_row"][1], "분석 못 함 — 처리 실패")
@@ -153,7 +167,7 @@ class LedgerReasonTest(unittest.TestCase):
             "console.log(JSON.stringify([undeterminedCounts(), order]));"
         )
         assert isinstance(out, list)
-        self.assertEqual(out[0], {"cue": 1, "none": 1, "failed": 1, "reference": 1})
+        self.assertEqual(out[0], {"cue": 1, "c2pa": 0, "none": 1, "failed": 1, "reference": 1})
         self.assertEqual(out[1], ["z-cue.png", "b-failed.png", "a-plain.png", "c.txt"])
 
     def test_report_limits_come_from_the_scan(self) -> None:

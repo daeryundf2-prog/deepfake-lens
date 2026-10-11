@@ -561,16 +561,36 @@
         // reference (text, 참고 전용), failed (a check failed), cue (it carries
         // record evidence that does not reach a conclusion — never "근거 없음"),
         // none (no record evidence).
-        const UNDET_KINDS = { cue: '단서만 있음', none: '근거 없음', failed: '검사 실패', reference: '참고 전용' };
+        // GUI-REV2 H-6: one primary kind per row for counting and ordering —
+        // cue first (a cue is never hidden behind a failure or the reference
+        // grade), then an unverified record (a C2PA manifest whose signature was
+        // not confirmed), failed, reference, none. The row label shows every
+        // aspect that applies ("단서 1건 · 검사 실패").
+        const UNDET_KINDS = { cue: '단서 있음', c2pa: '확인 안 된 기록', none: '근거 없음', failed: '검사 실패', reference: '참고 전용' };
+        const UNDET_SPLIT = ['cue', 'c2pa', 'none', 'failed', 'reference'];
         function cueEvidence(r) {
             return ((r && r.evidence) || []).filter(e => e.kind === 'deterministic' && e.direction !== 'neutral');
         }
+        function unverifiedRecords(r) {
+            return ((r && r.evidence) || []).filter(e => e.kind === 'deterministic' && e.direction === 'neutral' && e.layer === 'c2pa');
+        }
         function undeterminedKind(item) {
             const r = item.result || {};
-            if (r.grade === 'reference') return 'reference';
-            if (failedChecks(item).length) return 'failed';
             if (cueEvidence(r).length) return 'cue';
+            if (unverifiedRecords(r).length) return 'c2pa';
+            if (failedChecks(item).length) return 'failed';
+            if (r.grade === 'reference') return 'reference';
             return 'none';
+        }
+        function undeterminedAspects(item) {
+            const r = item.result || {};
+            const parts = [];
+            const cues = cueEvidence(r).length;
+            if (cues) parts.push(`단서 ${cues}건`);
+            if (!cues && unverifiedRecords(r).length) parts.push('확인 안 된 기록');
+            if (failedChecks(item).length) parts.push('검사 실패');
+            if (r.grade === 'reference') parts.push('참고 전용');
+            return parts.length ? parts : ['근거 없음'];
         }
         // A decisive check (metadata, C2PA, image type) that did not run for a
         // reason other than the file's scope — e.g. a missing dependency.
@@ -580,7 +600,7 @@
         function shortVerdict(item) {
             const v = verdictOf(item);
             if (v === 'other') return '분석 못 함 — ' + (STATUS_LABELS[item.status] || '기타');
-            if (v === 'undetermined') return '판단 불가 — ' + UNDET_KINDS[undeterminedKind(item)];
+            if (v === 'undetermined') return '판단 불가 — ' + undeterminedAspects(item).join(' · ');
             return VERDICT_SHORT[v];
         }
         function decisiveEvidence(r, v) {
@@ -604,22 +624,19 @@
                 if (top) return top.detail ? top.title + ' — ' + top.detail : top.title;
                 return VERDICT_SHORT[v];
             }
-            const kind = undeterminedKind(item);
-            if (kind === 'reference') return '참고 전용 — 텍스트 생성 판별은 결론을 내지 않음';
+            // H-6: every aspect that applies, failure first, then the cue, then the rest.
+            const parts = [];
             const failed = failedChecks(item);
-            if (kind === 'failed') return '검사 실패 — ' + failed.map(c => checkLabel(c.check)).join(', ');
+            if (failed.length) parts.push('검사 실패 — ' + failed.map(c => checkLabel(c.check)).join(', '));
             // G-3: a decisive check that did not run leads, ahead of the file's scope.
             const notRun = decisiveNotRun(r);
-            const notRunText = notRun.length ? '결정 검사 미실행 — ' + notRun.map(c => checkLabel(c.check) + ': ' + (c.reason || '사유 기록 없음')).join('; ') : '';
-            if (kind === 'cue') {
-                const cues = cueEvidence(r);
-                const head = `결론에 못 미친 근거 ${cues.length}건 — ` + cues[0].title;
-                return notRunText ? notRunText + ' · ' + head : head;
-            }
-            if (notRunText) return notRunText;
-            // A C2PA record that could not be verified is named before the scope.
-            const c2pa = ((r.evidence || []).find(e => e.kind === 'deterministic' && e.layer === 'c2pa'));
-            if (c2pa) return '근거 없음 · ' + c2pa.title;
+            if (notRun.length) parts.push('결정 검사 미실행 — ' + notRun.map(c => checkLabel(c.check) + ': ' + (c.reason || '사유 기록 없음')).join('; '));
+            const cues = cueEvidence(r);
+            if (cues.length) parts.push(`결론에 못 미친 근거 ${cues.length}건 — ` + cues[0].title);
+            const unverified = unverifiedRecords(r);
+            if (!cues.length && unverified.length) parts.push('확인 안 된 기록 — ' + unverified[0].title);
+            if (r.grade === 'reference' && !parts.length) return '참고 전용 — 텍스트 생성 판별은 결론을 내지 않음';
+            if (parts.length) return parts.join(' · ');
             const scope = scopeReason(r);
             if (scope) return '근거 없음 · ' + scope;
             return '근거 없음 — 원본이라는 뜻 아님';
@@ -634,9 +651,11 @@
                          duplicate: '같은 내용의 파일을 이미 검사했습니다.', skipped: '검사를 건너뛰었습니다.' }[item.status] || '분석하지 못했습니다.';
             }
             const kind = undeterminedKind(item);
-            if (kind === 'reference') return '텍스트는 참고 정보만 제공합니다 — 결론을 내지 않습니다.';
+            const failed = failedChecks(item).length > 0;
+            if (kind === 'cue') return failed ? '단서가 있지만 검사가 실패해 결론을 내리지 않았습니다.' : '기록에 단서가 있지만 결론을 낼 만큼은 아닙니다.';
+            if (kind === 'c2pa') return '서명을 확인하지 못한 출처 기록이 있습니다 — 결론을 내리지 않았습니다.';
             if (kind === 'failed') return '검사가 실패해 결론을 내리지 않았습니다.';
-            if (kind === 'cue') return '기록에 단서가 있지만 결론을 낼 만큼은 아닙니다.';
+            if (kind === 'reference') return '텍스트는 참고 정보만 제공합니다 — 결론을 내지 않습니다.';
             if (decisiveNotRun(r).length) return '결정 검사를 실행하지 못해 결론을 내리지 않았습니다.';
             return '판단할 근거를 찾지 못했습니다.';
         }
@@ -655,6 +674,11 @@
             if (v === 'manipulation_evidence') return '기록이 있다는 사실을 보여 줍니다. 누가 언제 만들었는지는 이 기록만으로 알 수 없습니다.';
             if (v === 'authenticity_evidence') return '기록된 서명 이후 내용이 바뀌지 않았다는 뜻입니다. 촬영 장면 자체가 연출되었는지는 알 수 없습니다.';
             if (v === 'other') return '이 파일의 내용에 대해서는 아무것도 말하지 않습니다.';
+            // H-6: the wording follows the kind — a cue row is not "근거가 없다".
+            const kind = undeterminedKind(item);
+            if (kind === 'cue') return '단서는 결론에 못 미치는 기록입니다 — 조작·생성되었다는 뜻도, 원본이라는 뜻도 아닙니다.';
+            if (kind === 'c2pa') return '서명을 확인하지 못한 기록은 원본성의 근거가 아닙니다 — 원본이라는 뜻도, 조작이라는 뜻도 아닙니다.';
+            if (kind === 'failed') return '검사가 실패해 확인하지 못한 것이 있습니다 — 원본이라는 뜻이 아닙니다.';
             return '근거가 없다는 것은 원본이라는 뜻이 아닙니다.';
         }
         function fmtSize(bytes) {
@@ -1289,7 +1313,7 @@
         }
 
         function undeterminedCounts() {
-            const kinds = { cue: 0, none: 0, failed: 0, reference: 0 };
+            const kinds = { cue: 0, c2pa: 0, none: 0, failed: 0, reference: 0 };
             results.forEach(e => { if (itemBand(e) === 'undetermined') kinds[undeterminedKind(e.item)]++; });
             return kinds;
         }
@@ -1304,7 +1328,7 @@
             const sub = [];
             // G-3: 판단 불가 is split by why — never all called "근거가 없어".
             const kinds = undeterminedCounts();
-            const split = ['cue', 'none', 'failed', 'reference'].filter(k => kinds[k]).map(k => `${UNDET_KINDS[k]} ${kinds[k]}`).join(' · ');
+            const split = UNDET_SPLIT.filter(k => kinds[k]).map(k => `${UNDET_KINDS[k]} ${kinds[k]}`).join(' · ');
             if (b.undetermined) sub.push(`${found ? '나머지 ' : ''}${b.undetermined}개는 판단 불가(${split})입니다 — <strong>원본이라는 뜻이 아닙니다.</strong>`);
             if (b.other) sub.push(`${b.other}개는 분석하지 못했습니다.`);
             $('sum-sub').innerHTML = sub.join(' ');
@@ -1352,7 +1376,7 @@
         // Rows are told apart by their path in the scanned folder (two subfolders may hold 00.png).
         const byName = (a, b) => String(a.item.path || a.item.name || '').localeCompare(String(b.item.path || b.item.name || ''), 'ko');
         // G-2: inside 판단 불가, rows with cues come before rows without evidence.
-        const UNDET_ORDER = { cue: 0, failed: 1, none: 2, reference: 3 };
+        const UNDET_ORDER = { cue: 0, c2pa: 1, failed: 2, none: 3, reference: 4 };
         const rank = e => BAND_ORDER[itemBand(e)] * 10 + (itemBand(e) === 'undetermined' ? UNDET_ORDER[undeterminedKind(e.item)] : 0);
         const byVerdict = (a, b) => (rank(a) - rank(b)) || byName(a, b);
         function filteredResults() {
