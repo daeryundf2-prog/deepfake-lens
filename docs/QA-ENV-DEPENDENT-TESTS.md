@@ -97,6 +97,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `onnxruntime not installed` | onnxruntime(선택 런타임 — 모델 프로필의 ONNX 실행; 텔레메트리 차단 확인, R15-2) | test_telemetry.py |
 | `opencv not installed` | `pixel`/`video`/`face` extra(opencv-python) | test_face.py, test_model_zoo.py, test_native_path.py |
 | `opencv required` | `pixel`/`video`/`face` extra(opencv-python) | test_faceswap_seam.py, test_fail_closed.py |
+| `opencv with CascadeClassifier not installed` | `pixel`/`video` extra(opencv-python 4.x — `cv2.CascadeClassifier`가 있는 빌드; OpenCV 5 기본 빌드에는 없음) | test_rppg_decode.py |
 | `opencv/numpy not installed` | `pixel` extra(opencv-python, numpy) | test_consolidation.py |
 | `opencv/numpy required` | `pixel` extra(opencv-python, numpy) | test_standalone_contract.py |
 | `photo fixture unavailable: {exc}` | `dev` extra(numpy, Pillow) + `ml` extra(scikit-learn — 실사진 샘플) | test_decision.py |

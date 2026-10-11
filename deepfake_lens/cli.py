@@ -859,7 +859,12 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             raw["limitations"] = ["--scores가 없어 처리한 프레임 점수가 없습니다."]
         return emit_layer(args, "realtime", "실시간 프레임 점수 계층", raw)
     if args.command == "rppg":
-        analysis = analyze_rppg(args.file, max_frames=args.max_frames)
+        from .rppg import VideoDecodeError, error_analysis
+
+        try:
+            analysis = analyze_rppg(args.file, max_frames=args.max_frames)
+        except VideoDecodeError as exc:  # R18-7: the layer says why, as for any other unavailable input
+            analysis = error_analysis(str(exc))
         return emit_layer(args, "rppg", "rPPG 맥박 계층", analysis.to_json(), subject=str(args.file))
     if args.command == "prnu":
         analysis = analyze_prnu(args.file, args.reference)

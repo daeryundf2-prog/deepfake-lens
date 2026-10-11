@@ -67,9 +67,29 @@ class RppgAnalysis:
         return asdict(self)
 
 
+class VideoDecodeError(RuntimeError):
+    """R18-7 (round 18): the video could not be opened or no frame of it decoded (``str()`` is Korean).
+
+    It used to come back as "no face tracked" (0 frames) — rPPG was skipped
+    "얼굴 영역을 충분히 추적하지 못했습니다 (획득 프레임 0, 최소 30)" for a
+    0-byte, damaged, moov-less or truncated mp4 that face_track recorded as
+    failed "영상을 디코딩할 수 없습니다". The scan's rppg check is failed
+    with it (``run_check``).
+    """
+
+
+# R18-7: the reasons of a video rPPG could not read.
+VIDEO_OPEN_FAILED = "영상을 디코딩할 수 없습니다(열기 실패)"
+VIDEO_NO_FRAME = "영상을 디코딩할 수 없습니다(디코딩된 프레임 0개)"
+
+
 @quiet_native_stderr  # Y5: OpenCV decoder chatter (fd 2, e.g. grfmt_png) goes to the log, not the console
 def analyze_rppg(path: Path | str, *, max_frames: int = 600) -> RppgAnalysis:
-    """Run the full video -> face ROI grid -> CHROM + coherence pipeline."""
+    """Run the full video -> face ROI grid -> CHROM + coherence pipeline.
+
+    R18-7: raises :class:`VideoDecodeError` when the video cannot be opened
+    or no frame decodes.
+    """
     video_path = Path(path)
     if not video_path.is_file():
         return _error_analysis(f"파일이 존재하지 않습니다: {video_path}")
@@ -233,6 +253,11 @@ def _analyze_rppg(
     )
 
 
+def error_analysis(message: str) -> RppgAnalysis:
+    """An unavailable rPPG result whose note and limitation are ``message``."""
+    return _error_analysis(message)
+
+
 def _error_analysis(message: str) -> RppgAnalysis:
     return RppgAnalysis(
         score=0,
@@ -362,7 +387,8 @@ def _face_roi_samples(
     with native_safe_path(video_path) as native_video:  # R12-1: never a non-ASCII name to cv2
         capture = cv2.VideoCapture(native_video)
         if not capture.isOpened():
-            return [], [], 0.0, 0.0
+            capture.release()
+            raise VideoDecodeError(VIDEO_OPEN_FAILED)  # R18-7: was ([], [], 0, 0) — "no face"
         try:
             fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
             total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
@@ -371,11 +397,16 @@ def _face_roi_samples(
             roi_frames: list[list[tuple[float, float, float]]] = []
             frame_index = 0
             stride = max(1, int(fps * 0.2)) if fps > 0 else 1  # ~5 samples/second
-            while frame_index < total and len(aggregate) < max_frames:
+            decoded = 0
+            # R18-7: a container without a frame count (0) is read until the
+            # decoder stops; it used to be "0 frames, no face" without a read.
+            limit = total if total > 0 else max_frames * stride
+            while frame_index < limit and len(aggregate) < max_frames:
                 capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
                 ok, frame = capture.read()
                 if not ok:
                     break
+                decoded += 1
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 faces = cascade.detectMultiScale(gray, 1.1, 4)
                 if len(faces):
@@ -386,6 +417,8 @@ def _face_roi_samples(
                         aggregate.append((mean_r, mean_g, mean_b))
                         roi_frames.append(_grid_cell_means(roi, grid=ROI_GRID))
                 frame_index += stride
+            if decoded == 0:
+                raise VideoDecodeError(VIDEO_NO_FRAME)
             # Transpose per-frame cell lists into per-cell series.
             roi_series = [list(series) for series in zip(*roi_frames)] if roi_frames else []
             duration = total / fps if fps > 0 else 0.0
