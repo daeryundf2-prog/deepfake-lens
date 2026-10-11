@@ -2475,6 +2475,14 @@
                 return '원본(' + String((item && item.duplicate_of) || '원본 파일') + ') 바뀜';
             }
             const server = verdictText(row.server_verdict, row.server_status);
+            // GUI-REV5 Info (a): the same verdict with another status (e.g. 분석됨 → 부분 분석) is
+            // named as a status change — never "판단 불가 → 판단 불가".
+            if (posted === server && row.posted_status !== row.server_status) {
+                const rowStatus = { analyzed: '분석됨', expanded: '압축 파일(구성 파일 검사)', unknown: '압축 파일(검사한 구성 파일 없음)', ...STATUS_LABELS };
+                const statusText = status => rowStatus[status] || (status ? String(status) : '상태 기록 없음');
+                return '상태 바뀜: ' + statusText(row.posted_status) + ' → ' + statusText(row.server_status) + ' · 결론은 그대로 ' + posted +
+                    (row.posted_sha256 !== row.server_sha256 ? ' · 내용(SHA-256)도 바뀜' : '');
+            }
             if (posted === server && row.posted_sha256 !== row.server_sha256) return '내용(SHA-256) 바뀜 · 결론은 그대로 ' + posted;
             return posted + ' → ' + server;
         }

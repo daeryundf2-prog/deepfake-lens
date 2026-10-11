@@ -386,6 +386,9 @@ class ChangeTextTest(unittest.TestCase):
              "server_status": "analyzed", "posted_sha256": "d" * 64, "server_sha256": "e" * 64},
             {"path": "gone.png", "posted_verdict": "undetermined", "server_verdict": None, "posted_status": "analyzed", "server_status": None,
              "posted_sha256": "f" * 64, "server_sha256": None, "reason": "파일을 찾을 수 없음"},
+            # GUI-REV5 Info (a): same SHA-256 and verdict, another status.
+            {"path": "a.zip", "posted_verdict": "undetermined", "server_verdict": "undetermined", "posted_status": "expanded",
+             "server_status": "unknown", "posted_sha256": "9" * 64, "server_sha256": "9" * 64},
         ]
         script = ("const VERDICT_LABELS = {manipulation_evidence: '조작·생성 근거 있음', undetermined: '판단 불가'};\n"
                   "const STATUS_LABELS = {duplicate: '중복'};\n") + _function(source, "changeText") + (
@@ -404,6 +407,7 @@ class ChangeTextTest(unittest.TestCase):
             "원본(a1111.png) 바뀜",
             "조작·생성 근거 있음 → 판단 불가",
             "판단 불가 → 다시 분석 못 함: 파일을 찾을 수 없음",
+            "상태 바뀜: 압축 파일(구성 파일 검사) → 압축 파일(검사한 구성 파일 없음) · 결론은 그대로 판단 불가",
         ])
 
 
