@@ -393,6 +393,24 @@ class ChangeTextTest(unittest.TestCase):
         ])
 
 
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class StaleExportTest(unittest.TestCase):
+    def test_a_response_for_replaced_results_is_ignored(self) -> None:
+        """GUI-REV4 K-1: an export response after other results arrived marks, shows and downloads nothing."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        script = _function(source, "exportResponseAction") + (
+            "console.log(JSON.stringify([exportResponseAction(3, 4, 409, 2, false), exportResponseAction(3, 4, 200, 0, true),"
+            " exportResponseAction(3, 3, 409, 2, false), exportResponseAction(3, 3, 200, 0, true), exportResponseAction(3, 3, 400, 0, false)]));")
+        node = shutil.which("node")
+        assert node is not None
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "stale.js"
+            path.write_text(script, encoding="utf-8")
+            done = subprocess.run([node, str(path)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout), ["무시", "무시", "바뀜", "받기", "오류"])
+
+
 class GuiAccessibilitySourceTest(unittest.TestCase):
     source: str
     html: str

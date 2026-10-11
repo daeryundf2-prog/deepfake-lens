@@ -113,7 +113,7 @@
 
         // A11Y-6: an error stays on the page (the error region under the top
         // bar) until the examiner closes it — never only a toast that fades.
-        function showError(msg, label, fromScan, action) {
+        function showError(msg, label, fromScan, action, exportGen) {
             const region = $('error-region');
             const box = document.createElement('div');
             box.className = 'err-item';
@@ -147,6 +147,12 @@
             // GUI-REV2 H-10: only a scan's own errors carry its generation; a quick
             // check or export error is never later marked "이전 검사".
             if (fromScan) box.dataset.scan = String(scanGeneration);
+            // GUI-REV4 K-1: an export refusal belongs to the results it refused; it replaces an
+            // earlier refusal and is removed when other results arrive.
+            if (exportGen != null) {
+                document.querySelectorAll('#error-region .err-item[data-export-gen]').forEach(old => old.remove());
+                box.dataset.exportGen = String(exportGen);
+            }
             region.appendChild(box);
             while (region.children.length > 4) region.firstElementChild.remove();
         }
@@ -1401,6 +1407,8 @@
             groupsTouched = false;
             changedPaths = new Set();
             changedInfo = new Map();
+            resultsGeneration += 1;  // K-1: earlier export responses no longer apply
+            clearExportRefusals();
             // H-8: case fields typed before the first scan belong to it.
             if (!caseFolder && caseHasValues()) confirmCaseFolder();
             renderResults();
@@ -2226,6 +2234,8 @@
             // G-9(d): clearing is not undoable — ask first.
             if (!results.length || !window.confirm(`화면의 검사 결과 ${results.length}개를 지웁니다. 검토 기록은 남습니다. 지울까요?`)) return;
             results = [];
+            resultsGeneration += 1;
+            clearExportRefusals();
             lastProvenance = { coverage: null, thresholds: null, summary: null };
             selectedEntry = null;
             renderResults();
@@ -2492,6 +2502,17 @@
             if (lastScanRoot) $('folder-path').value = lastScanRoot;
             $('analyze-btn').focus();
         }
+        // GUI-REV4 K-1: the results an export was asked for. A response that arrives after
+        // other results replaced them is ignored — no marks, no error, no download.
+        let resultsGeneration = 0;
+        function exportResponseAction(startGen, nowGen, status, changedCount, ok) {
+            if (startGen !== nowGen) return '무시';
+            if (status === 409 && changedCount > 0) return '바뀜';
+            return ok ? '받기' : '오류';
+        }
+        function clearExportRefusals() {
+            document.querySelectorAll('#error-region .err-item[data-export-gen]').forEach(box => box.remove());
+        }
         async function exportReport(kind) {
             if (exportBlocked()) return;
             const btn = $(EXPORT_BUTTONS[kind]);
@@ -2501,7 +2522,12 @@
             if (btn.dataset.busy) return;
             btn.dataset.busy = '1';
             const spec = EXPORT_SPECS[kind];
+            const startGen = resultsGeneration;
             $('export-note').textContent = spec[3] + '를 만드는 중입니다 — 서버가 파일을 다시 분석합니다.';
+            const ignored = () => {
+                toast(spec[3] + ': 이전 검사에 대한 응답이라 무시했습니다.');
+                $('export-note').textContent = spec[3] + ' 요청은 이전 검사의 것이라 무시했습니다. 지금 결과로 다시 내보내십시오.';
+            };
             try {
                 const res = await apiFetch('/api/report?format=' + spec[0], {
                     method: 'POST',
@@ -2512,6 +2538,7 @@
                 if (!res.ok || !type.includes(spec[1])) {
                     let message;
                     let changedRows = [];
+                    if (exportResponseAction(startGen, resultsGeneration, res.status, 0, false) === '무시') { ignored(); return; }
                     if (type.includes('application/json')) {
                         try {
                             const errorBody = await res.json();
@@ -2521,16 +2548,21 @@
                     } else {
                         message = await apiError(res);
                     }
-                    if (changedRows.length) {
+                    const action = exportResponseAction(startGen, resultsGeneration, res.status, changedRows.length, false);
+                    if (action === '무시') { ignored(); return; }
+                    if (action === '바뀜') {
                         markChangedRows(changedRows);
-                        showError(spec[3] + ' 생성 거부: ' + message, '검사 뒤 바뀜', false, ['다시 검사', rescanFolder]);
+                        showError(spec[3] + ' 생성 거부: ' + message, '검사 뒤 바뀜', false, ['다시 검사', rescanFolder], startGen);
                     } else {
                         toast(spec[3] + ' 생성 실패: ' + message, true);
                     }
                     $('export-note').textContent = spec[3] + '를 만들지 못했습니다.';
                     return;
                 }
-                download(await res.blob(), spec[2]);
+                const blob = await res.blob();
+                if (exportResponseAction(startGen, resultsGeneration, res.status, 0, true) === '무시') { ignored(); return; }
+                clearExportRefusals();
+                download(blob, spec[2]);
                 $('export-note').textContent = spec[3] + '를 내려받았습니다.';
             } catch (e) {
                 toast(spec[3] + ' 오류: ' + e.message, true);

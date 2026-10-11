@@ -188,14 +188,14 @@ def main() -> int:
                 "detail order must be verdict -> evidence -> coverage"
             assert detail.locator("details.disc", has_text="실행하지 않은 검사").count() == 1, "skipped-check disclosure missing"
             # Text results lead with the fixed legal limitation.
-            for index in range(rows.count()):
-                if ".txt" in rows.nth(index).inner_text():
-                    rows.nth(index).click()
-                    text_tech = page.locator("#detail details.disc", has_text="기술 세부")
-                    text_tech.locator("summary").click()
-                    text_tech.locator(".legal-note").wait_for(timeout=10_000)
-                    assert "증거능력이 없으며" in text_tech.locator(".legal-note").inner_text()
-                    break
+            # GUI-REV4 K-7: the text row is found by its kind, not by ".txt" in its name
+            # (an image named "rtl\u202egnp.txt.png" is not a text result).
+            if page.evaluate("results.some(e => e.row && e.item.kind === 'text' && e.item.result)"):
+                page.evaluate("results.find(e => e.row && e.item.kind === 'text' && e.item.result).row.click()")
+                text_tech = page.locator("#detail details.disc", has_text="기술 세부")
+                text_tech.locator("summary").click()
+                text_tech.locator(".legal-note").wait_for(timeout=10_000)
+                assert "증거능력이 없으며" in text_tech.locator(".legal-note").inner_text()
 
             # 4c. A11Y-5: list keys only inside the ledger (roving tabindex), J/K switchable.
             assert page.locator("#res-list .row[tabindex='0']").count() == 1, "roving tabindex must leave one tab stop"
@@ -558,6 +558,33 @@ def main() -> int:
             with page.expect_download() as signed_again:
                 page.click("#exp-signed")
             assert _json.loads(Path(signed_again.value.path()).read_text(encoding="utf-8"))["summary"]["total"] == page.evaluate("results.length")
+            # GUI-REV4 K-1: after 다시 검사 and a successful export no refusal is left standing.
+            assert page.locator("#error-region .err-item[data-export-gen]").count() == 0, "a 409 box outlived the rescan"
+            # K-1: a 409 that arrives after other results replaced the ones it refused marks
+            # nothing and shows no refusal (the server's slow re-analysis is simulated).
+            page.evaluate("""() => {
+                window.__realFetch = window.fetch;
+                window.fetch = async (url, options) => {
+                    if (String(url).includes('/api/report?format=json')) {
+                        const path = results[0].item.path;
+                        await new Promise(resolve => setTimeout(resolve, 4000));
+                        return new Response(JSON.stringify({error: '검사 뒤 바뀐 파일이 있습니다', changed_rows: [{path, posted_verdict: 'undetermined',
+                            server_verdict: 'manipulation_evidence', posted_status: 'analyzed', server_status: 'analyzed', posted_sha256: 'a', server_sha256: 'b'}]}),
+                            {status: 409, headers: {'Content-Type': 'application/json'}});
+                    }
+                    return window.__realFetch(url, options);
+                };
+            }""")
+            page.click("#exp-signed")
+            page.evaluate("location.hash = '#/scan'")
+            page.wait_for_function("() => currentView === 'scan'")
+            page.click("#analyze-btn")
+            page.wait_for_function("() => scanBusy === false && currentView === 'ledger' && results.length > 0", timeout=180_000)
+            page.wait_for_timeout(5000)
+            page.evaluate("() => { window.fetch = window.__realFetch; }")
+            assert page.evaluate("changedPaths.size") == 0, "a late 409 marked rows of the new results"
+            assert page.locator("#error-region .err-item[data-export-gen]").count() == 0, "a late 409 showed a refusal"
+            assert "이전 검사에 대한 응답이라 무시했습니다" in page.locator("#toasts").inner_text() + page.locator("#export-note").inner_text()
 
             # 7. CSP/console errors: none tolerated. No request leaves the local server
             #    (fonts are local stacks; nothing is fetched from the network).
