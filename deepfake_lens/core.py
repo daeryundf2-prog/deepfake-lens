@@ -2313,8 +2313,8 @@ def is_default_heatmap_output(path: Path | str) -> bool:
     the web server may serve these without a read root (they are tool
     output, not caller-chosen files)."""
     try:
-        resolved = Path(path).expanduser().resolve()
-        resolved.relative_to(default_heatmap_root().expanduser().resolve())
+        resolved = expand_user(path).resolve()  # R19-5
+        resolved.relative_to(default_heatmap_root().resolve())
     except (OSError, RuntimeError, ValueError):
         return False
     return resolved.name.endswith(HEATMAP_SUFFIX)
@@ -2324,7 +2324,7 @@ def _heatmap_path_for(path: Path, *, root: Path | None, heatmap_dir: Path | None
     if heatmap_dir is not None:
         output_root = heatmap_dir
     else:
-        folder = str(Path(root or path.parent).expanduser().resolve())
+        folder = str(expand_user(root or path.parent).resolve())  # R19-5
         key = hashlib.sha256(folder.encode("utf-8", "surrogateescape")).hexdigest()  # R11-1[:HEATMAP_FOLDER_KEY_CHARS]
         output_root = default_heatmap_root() / key
     try:

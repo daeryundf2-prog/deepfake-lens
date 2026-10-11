@@ -51,6 +51,7 @@ from .core import (
     summarize,
 )
 from .image_metadata import DEFAULT_METADATA_BYTES
+from .native_path import expand_user
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, SUPPORTED_PIXEL_MODES
 from .vendor_weights import default_models_dir
 
@@ -178,7 +179,7 @@ class AnalysisOptions:
             pixel_max_side=int(opt("pixel_max_side", defaults.pixel_max_side)),
             deep_signals=bool(getattr(args, "deep_signals", False)),
             thresholds_path=_opt_path(getattr(args, "thresholds", None)),
-            models_dir=Path(models_dir).expanduser() if models_dir else None,
+            models_dir=expand_user(models_dir) if models_dir else None,
             model_path=model_path,
             no_default_engine=bool(getattr(args, "no_default_engine", False)),
             fusion_profile=_opt_path(getattr(args, "fusion_profile", None)),
@@ -227,7 +228,7 @@ class AnalysisOptions:
             if max_file_bytes < 1:
                 raise InvalidOption(MAX_FILE_BYTES_TOO_SMALL)  # Y8
             max_file_bytes = min(max_file_bytes, WEB_MAX_FILE_BYTES_CEILING)
-        resolved_dir = Path(models_dir).expanduser().resolve() if models_dir else default_models_dir()
+        resolved_dir = expand_user(models_dir).resolve() if models_dir else default_models_dir()
         model_name = _param(params, "model_path", "").strip()
         fusion_name = _param(params, "fusion_profile", "").strip()
         return cls(
@@ -247,7 +248,7 @@ class AnalysisOptions:
     # -- derived values -----------------------------------------------------
 
     def resolved_models_dir(self) -> Path:
-        return Path(self.models_dir).expanduser().resolve() if self.models_dir else default_models_dir()
+        return expand_user(self.models_dir).resolve() if self.models_dir else default_models_dir()
 
     def engine_profiles(self) -> ModelPath:
         """The model_path handed to core: explicit override, else every profile in models_dir."""
@@ -581,7 +582,7 @@ def _fusion_profile(options: AnalysisOptions) -> Any:
 def _opt_path(value: object) -> Path | None:
     if value is None or value == "":
         return None
-    return Path(str(value)).expanduser()
+    return expand_user(str(value))
 
 
 def _param(params: Mapping[str, Any], key: str, default: str) -> str:

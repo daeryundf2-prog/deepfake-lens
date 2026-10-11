@@ -26,7 +26,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qs
 
 from .checks import failure_reason
-from .native_path import scratch_dir
+from .native_path import expand_user, scratch_dir
 from .error_text import exception_text
 from .result_text import display_name
 from .vendor_weights import default_models_dir
@@ -72,7 +72,7 @@ _MODELS_DIR: Path | None = None
 
 def set_models_dir(path: Path | None) -> None:
     global _MODELS_DIR
-    _MODELS_DIR = Path(path).expanduser().resolve() if path else None
+    _MODELS_DIR = expand_user(path).resolve() if path else None
 
 
 def _models_dir() -> Path | None:
@@ -160,9 +160,9 @@ def _load_gui() -> str:
 def scan_root_text(folder: Path) -> str:
     """The scanned folder as the absolute, resolved path a report request names (P1)."""
     try:
-        return str(Path(folder).expanduser().resolve())
+        return str(expand_user(folder).resolve())
     except (OSError, RuntimeError):
-        return str(Path(os.path.abspath(Path(folder).expanduser())))
+        return str(Path(os.path.abspath(expand_user(folder))))
 
 
 # P8 (round 8): a multipart body cut off before its closing boundary was
@@ -411,7 +411,7 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
     from .analysis_api import SingleFileError, check_single_file, is_symlink_path
     from .cli_standalone import symlink_layer
 
-    requested = Path(file_path).expanduser()
+    requested = expand_user(file_path)
     link = is_symlink_path(requested)
     # G31: confined to the operator roots even when none are registered
     # (then only the server's default folder) — raises ReadRootDenied (403).
@@ -594,7 +594,7 @@ def read_root_denied_body() -> dict[str, object]:
 
 def _register_read_root(folder: Path) -> None:
     """Register an operator read root. Call only from server setup."""
-    resolved = folder.expanduser().resolve()
+    resolved = expand_user(folder).resolve()
     with _READ_ROOTS_LOCK:
         if resolved in _READ_ROOTS:
             _READ_ROOTS.move_to_end(resolved)
@@ -618,13 +618,13 @@ def _effective_roots(default_folder: Path | None = None) -> list[Path]:
         roots = list(_READ_ROOTS)
     if roots:
         return roots
-    return [Path(default_folder or ".").expanduser().resolve()]
+    return [expand_user(default_folder or ".").resolve()]
 
 
 def _require_read_root(path: Path, default_folder: Path | None = None) -> Path:
     """Resolve ``path`` and raise ReadRootDenied unless it is inside a root."""
     try:
-        resolved = Path(path).expanduser().resolve()
+        resolved = expand_user(path).resolve()
     except (OSError, RuntimeError) as exc:
         raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE) from exc
     if not any(_is_within(resolved, root) for root in _effective_roots(default_folder)):
@@ -653,8 +653,8 @@ def _b64_or_text(params: dict[str, list[str]], name: str) -> str:
 def _requested_folder(query: str, default_folder: Path | None) -> Path:
     params = parse_qs(query)
     if params.get("folder_b64", [""])[0]:
-        return Path(_b64_or_text(params, "folder")).expanduser()  # R13-3
-    return Path(params.get("folder", [str(default_folder or ".")])[0]).expanduser()
+        return expand_user(_b64_or_text(params, "folder"))  # R13-3
+    return expand_user(params.get("folder", [str(default_folder or ".")])[0])
 
 
 def _read_root_allows(path: Path, root_value: str = "", default_folder: Path | None = None) -> bool:
@@ -667,7 +667,7 @@ def _read_root_allows(path: Path, root_value: str = "", default_folder: Path | N
     roots = _effective_roots(default_folder)
     if root_value:
         try:
-            root = Path(root_value).expanduser().resolve()
+            root = expand_user(root_value).resolve()
         except OSError:
             return False
         if not _is_within(path, root):
@@ -703,7 +703,7 @@ def _heatmap_payload(query: str) -> tuple[int, bytes, str]:
         return 400, str(exc).encode("utf-8"), "bad-path"
     if not path_value:
         return 400, "경로가 없습니다".encode("utf-8"), "missing"
-    path = Path(path_value).expanduser().resolve()
+    path = expand_user(path_value).resolve()
     # Heatmaps live in the tool-owned output root (never in the evidence
     # folder, R-IN-1); those are served without a read root.
     if path.suffix.lower() != ".png" or not (_read_root_allows(path, root_value) or is_default_heatmap_output(path)):
@@ -753,7 +753,7 @@ def _preview_payload(query: str) -> tuple[int, bytes, str, str]:
         return 400, str(exc).encode("utf-8"), "bad-path", ""
     if not path_value:
         return 400, "경로가 없습니다".encode("utf-8"), "missing", ""
-    path = Path(path_value).expanduser().resolve()
+    path = expand_user(path_value).resolve()
     mime = _PREVIEW_MIME.get(path.suffix.lower())
     if not _read_root_allows(path, root_value):
         return 403, READ_ROOT_DENIED_MESSAGE.encode("utf-8"), "forbidden", ""  # G9: Korean body, ASCII header code
@@ -1408,7 +1408,7 @@ class _ReportHasher:
         """
         from .result_text import unescape_row_path
 
-        p = Path(os.path.normpath(Path(unescape_row_path(path_text)).expanduser()))
+        p = Path(os.path.normpath(expand_user(unescape_row_path(path_text))))
         if self.scan_root is not None:
             cand = p if p.is_absolute() else Path(os.path.normpath(self.scan_root / p))
             return [(cand, self.scan_root)] if _is_within(cand, self.scan_root) else []
@@ -1649,7 +1649,7 @@ def _posted_heatmaps_allowed(row: dict[str, Any], roots: list[Path]) -> bool:
         if not isinstance(value, str):
             return False
         try:
-            resolved = Path(value).expanduser().resolve()
+            resolved = expand_user(value).resolve()
         except (OSError, RuntimeError):
             return False
         if not (any(_is_within(resolved, root) for root in roots) or is_default_heatmap_output(resolved)):
@@ -1687,7 +1687,7 @@ def _report_scan_root(value: object, roots: list[Path], *, required: bool) -> Pa
         return {"error": REPORT_SCAN_ROOT_REQUIRED} if required else None
     if not isinstance(value, str):
         return {"error": REPORT_SCAN_ROOT_NOT_STRING}
-    candidate = Path(value).expanduser()
+    candidate = expand_user(value)
     if not candidate.is_absolute():
         return {"error": REPORT_SCAN_ROOT_NOT_ABSOLUTE.format(value=value[:200])}
     try:
@@ -1813,7 +1813,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
 
     def _heatmap_allowed(path_text: str) -> bool:
         try:
-            resolved = Path(path_text).expanduser().resolve()
+            resolved = expand_user(path_text).resolve()
         except OSError:
             return False
         return any(_is_within(resolved, r) for r in roots) or is_default_heatmap_output(resolved)

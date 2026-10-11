@@ -548,10 +548,13 @@ def unclassified_path_arguments(parser: argparse.ArgumentParser) -> dict[str, st
 
 
 def _resolved(value: Path | str) -> Path:
+    from .native_path import expand_user
+
+    # R19-5 (round 19): expand_user — "~nouser/c.json" raised RuntimeError (an English traceback, rc 1).
     try:
-        return Path(value).expanduser().resolve()
+        return expand_user(value).resolve()
     except (OSError, RuntimeError):
-        return Path(os.path.abspath(Path(value).expanduser()))
+        return Path(os.path.abspath(expand_user(value)))
 
 
 def _input_paths(args: argparse.Namespace, specs: tuple[InputSpec, ...]) -> tuple[list[Path], list[Path]]:
@@ -586,7 +589,9 @@ def require_writable_output(path: Path | str) -> None:
 
     from .error_text import read_error_ko
 
-    target = Path(path).expanduser()
+    from .native_path import expand_user
+
+    target = expand_user(path)  # R19-5: never RuntimeError for an unknown "~user"
     if target.exists():
         if not os.access(target, os.W_OK):
             raise UsageError(OUTPUT_FILE_NOT_WRITABLE.format(path=path, reason=NO_WRITE_PERMISSION))
