@@ -773,7 +773,8 @@ class GuiResultStringsTest(unittest.TestCase):
     @unittest.skipUnless(shutil.which("node"), "node required to run gui.js helpers")
     def test_shown_escapes_like_display_name(self) -> None:
         source = self.GUI.read_text(encoding="utf-8")
-        start, end = source.index("function displayName(value)"), source.index("/* ── onboarding guide")
+        # GUI redesign: the helpers now end at the "verdict vocabulary" section (the onboarding guide was removed).
+        start, end = source.index("function displayName(value)"), source.index("/* ── verdict vocabulary")
         samples = ["t\u202eitle", "zw\u200bdetail <b>&</b>", "a|b\\c", "\udcc1"]
         script = (
             source[start:end]

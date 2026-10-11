@@ -1,3 +1,7 @@
+        /* Deepfake Lens GUI — three screens on one page (#/scan, #/ledger,
+           #/report) plus the single-file tools (#/tools). The ledger leads
+           with the conclusion; detail (coverage reasons, reference signals,
+           technical fields) stays reachable behind disclosures. */
         let results = [];
         let lastProvenance = { coverage: null, thresholds: null, summary: null };
         // X2: the options of the last folder scan — /api/report re-analyzes
@@ -9,17 +13,21 @@
         // previews and heatmaps are requested by bytes — a lone surrogate (a
         // non-UTF-8 file name) cannot go into a URL.
         let lastScanRootB64 = '';
+        let lastScanAt = null;
         const RENDER_WINDOW = 200;
         let renderedRows = 0;
-        let progressTimer = null;
         let scanBusy = false;
         let currentJobId = null;
         let bandFilter = null;
         let textFilter = '';
-        // D16: default 결론순 — manipulation → undetermined → authenticity → other.
+        // D16: default 결론순 (now evidence first: manipulation → authenticity → undetermined → other).
         let sortMode = 'verdict';
         let revFilter = false;
-        let kbIndex = -1;
+        let selectedEntry = null;
+        // U-8: the server's --folder (from /api/stats) and whether PDFs can be made.
+        let defaultFolder = '';
+        let defaultFolderB64 = '';
+        let pdfAvailable = null;
 
         /* Review marks stored locally and synchronized with backend API */
         const REVIEW_KEY = 'dflens-review-v1';
@@ -86,7 +94,7 @@
             } catch (e) { /* ignore */ }
         }
 
-        function toggleReview(item, card) {
+        function toggleReview(item) {
             const key = itemKey(item);
             const entry = reviewStore[key] || {};
             entry.star = !entry.star;
@@ -94,53 +102,79 @@
             if (!entry.star && !entry.note && !entry.verdict) delete reviewStore[key];
             else reviewStore[key] = entry;
             saveReviewStore(key);
-            card.classList.toggle('reviewed', !!entry.star);
-            card.querySelector('.rev-star').setAttribute('aria-pressed', entry.star ? 'true' : 'false');
-            const sub = card.querySelector('.res-sub');
-            if (entry.star && !sub.querySelector('.rev-badge')) {
-                const b = document.createElement('span');
-                b.className = 'rev-badge'; b.textContent = '검토됨';
-                sub.appendChild(b);
-            } else if (!entry.star) {
-                const b = sub.querySelector('.rev-badge');
-                if (b) b.remove();
-            }
+            return Boolean(entry.star);
         }
 
         /* ── infra ─────────────────────────────────── */
         const $ = id => document.getElementById(id);
+        const sleep = ms => new Promise(res => setTimeout(res, ms));
 
-        function toast(msg, isErr) {
-            const el = document.createElement('div');
-            el.className = 'toast' + (isErr ? ' err' : '');
-            el.textContent = displayName(msg);  // R11-10: server messages may echo a name
-            $('toasts').appendChild(el);
-            setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, isErr ? 5000 : 2800);
+        // A11Y-6: an error stays on the page (the error region under the top
+        // bar) until the examiner closes it — never only a toast that fades.
+        function showError(msg, label) {
+            const region = $('error-region');
+            const box = document.createElement('div');
+            box.className = 'err-item';
+            const text = document.createElement('p');
+            text.className = 'err-text';
+            const head = document.createElement('b');
+            head.textContent = (label || '오류') + ' ';
+            const body = document.createElement('span');
+            body.textContent = displayName(msg);
+            text.append(head, body);
+            const close = document.createElement('button');
+            close.type = 'button';
+            close.className = 'btn btn-sm';
+            close.textContent = '닫기';
+            close.addEventListener('click', () => {
+                const next = box.nextElementSibling || box.previousElementSibling;
+                box.remove();
+                (next ? next.querySelector('button') : $('main')).focus();
+            });
+            box.append(text, close);
+            region.appendChild(box);
+            while (region.children.length > 4) region.firstElementChild.remove();
         }
 
-        /* ── token modal (async replacement for window.prompt) ── */
+        function toast(msg, isErr, label) {
+            if (isErr) { showError(msg, label); return; }
+            const el = document.createElement('div');
+            el.className = 'toast';
+            el.textContent = displayName(msg);  // R11-10: server messages may echo a name
+            $('toasts').appendChild(el);
+            setTimeout(() => el.remove(), 4000);
+        }
+
+        // A button that is busy keeps its focus: aria-disabled, not disabled (A11Y-4).
+        function setBusyButton(el, busy) {
+            if (busy) el.setAttribute('aria-disabled', 'true');
+            else el.removeAttribute('aria-disabled');
+        }
+        function isBusyButton(el) { return el.getAttribute('aria-disabled') === 'true'; }
+
+        /* ── token dialog (A11Y-4: modal <dialog> — focus kept inside, returned on close) ── */
         let tokenPromptPending = null;
         function requestToken() {
             if (tokenPromptPending) return tokenPromptPending;
             tokenPromptPending = new Promise(resolve => {
-                const modal = $('token-modal'), input = $('token-modal-input');
-                const done = value => {
-                    modal.hidden = true;
+                const modal = $('token-modal'), input = $('token-modal-input'), form = $('token-form');
+                const back = document.activeElement;
+                let value = null;
+                const onSubmit = e => { e.preventDefault(); value = input.value.trim() || null; modal.close(); };
+                const onCancel = () => { value = null; modal.close(); };
+                const onClose = () => {
+                    form.removeEventListener('submit', onSubmit);
+                    $('token-modal-cancel').removeEventListener('click', onCancel);
+                    modal.removeEventListener('close', onClose);
                     input.value = '';
-                    input.removeEventListener('keydown', onKey);
-                    $('token-modal-ok').onclick = null;
-                    $('token-modal-cancel').onclick = null;
                     tokenPromptPending = null;
+                    if (back && typeof back.focus === 'function') back.focus();
                     resolve(value);
                 };
-                const onKey = e => {
-                    if (e.key === 'Enter') done(input.value.trim() || null);
-                    if (e.key === 'Escape') done(null);
-                };
-                $('token-modal-ok').onclick = () => done(input.value.trim() || null);
-                $('token-modal-cancel').onclick = () => done(null);
-                input.addEventListener('keydown', onKey);
-                modal.hidden = false;
+                form.addEventListener('submit', onSubmit);
+                $('token-modal-cancel').addEventListener('click', onCancel);
+                modal.addEventListener('close', onClose);
+                modal.showModal();
                 input.focus();
             });
             return tokenPromptPending;
@@ -228,6 +262,9 @@
                 if ((wa || 0) === 0) parts.push('<b>신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영</b> — 탑재된 신경망 가중치가 없어 통계적 근거는 결론에 참여하지 않습니다.');
                 else if (wa < wt) parts.push(`신경망 가중치 일부 탑재 (${wa}/${wt}) — 미탑재 엔진의 판단이 빠져 있습니다.`);
             }
+            const env = envFacts();
+            if (env.gated.length) parts.push(`측정 게이트 때문에 꺼진 신경망 탐지기 ${env.gated.length}종: ${env.gated.map(shown).join(', ')}`);
+            env.missing.forEach(([check, n]) => parts.push(`<b>결정 검사 미설치</b> — ${escapeHtml(checkLabel(check))}: 의존성이 없어 ${n}개 파일에서 실행하지 못했습니다. 이 검사가 내는 결론(원본성 근거 등)은 나올 수 없습니다.`));
             if (thr.provisional || thr.source === 'builtin_defaults') {
                 parts.push('판정 임계값: <b>미측정 잠정값</b> — 라벨 코퍼스로 보정되기 전에는 임계값을 근거로 쓰지 마십시오.');
             }
@@ -236,12 +273,12 @@
             const skippedDirs = (lastProvenance.summary || {}).subfolders_skipped || 0;
             // P5: and the files inside them (recursive count, symlinks excluded).
             const skippedDirFiles = (lastProvenance.summary || {}).subfolder_files_skipped || 0;
-            if (skippedDirs) parts.push(`하위 폴더 <b>${skippedDirs}개(안의 파일 ${skippedDirFiles}개)는 검사하지 않았습니다</b> — 포함하려면 '하위 폴더' 옵션을 켜고 다시 검사하십시오.`);
+            if (skippedDirs) parts.push(`하위 폴더 <b>${skippedDirs}개(안의 파일 ${skippedDirFiles}개)는 검사하지 않았습니다</b> — 포함하려면 '하위 폴더 포함' 옵션을 켜고 다시 검사하십시오.`);
             // X1: files beyond the file-count cap are never silently omitted.
             const overCap = (lastProvenance.summary || {}).files_over_cap || 0;
             if (overCap) parts.push(`파일 수 상한에 도달해 <b>${overCap}개 파일은 검사·기록하지 않았습니다</b> — '최대 파일 수'를 늘려 다시 검사하십시오.`);
             if (!parts.length) return '';
-            return `<div class="prov-banner" role="status">${parts.map(p => `<p>${p}</p>`).join('')}<p class="note">이 결과는 결론과 근거로 읽으십시오; 점수는 보정된 경우에만 표시됩니다. 유죄·불법성의 확정 판정이 아닙니다.</p></div>`;
+            return `${parts.map(p => `<p>${p}</p>`).join('')}<p class="note">이 결과는 결론과 근거로 읽으십시오; 점수는 보정된 경우에만 표시됩니다. 유죄·불법성의 확정 판정이 아닙니다.</p>`;
         }
 
         // P7: inverse of result_text.escape_row_path ("\\:" -> ":", "\\\\" -> "\\").
@@ -344,28 +381,7 @@
             return escapeHtml(displayName(value));
         }
 
-        /* ── onboarding guide ────────────────────── */
-        const guideCard = $('guide-card');
-        function setGuide(open) {
-            guideCard.style.display = open ? '' : 'none';
-            localStorage.setItem('dfl.guide', open ? 'open' : 'closed');
-        }
-        $('guide-close').addEventListener('click', () => setGuide(false));
-        $('guide-btn').addEventListener('click', () => setGuide(guideCard.style.display === 'none'));
-        if (localStorage.getItem('dfl.guide') === 'closed') guideCard.style.display = 'none';
-        guideCard.querySelectorAll('.tile').forEach(tile => {
-            const go = () => {
-                const target = $(tile.dataset.target);
-                if (!target) return;
-                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                target.classList.remove('flash');
-                void target.offsetWidth;
-                target.classList.add('flash');
-            };
-            tile.addEventListener('click', go);
-            tile.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
-        });
-
+        /* ── verdict vocabulary ──────────────────── */
         /* Result contract v2: three verdicts, evidence by kind, coverage.
            Statistical (model) and lexical (keyword) evidence never decide;
            a failed check leaves the file undetermined. */
@@ -462,50 +478,418 @@
         }
         function verdictHeadHtml(r) {
             const v = r.verdict_code || 'undetermined';
-            const grade = r.grade === 'reference' ? '참고' : '감정 근거로 사용 가능';
-            const parts = [`<div class="verdict-head v-${escapeHtml(v)}" data-verdict="${escapeHtml(v)}"><span class="band-pill band-${bandCls(v)}">${escapeHtml(VERDICT_LABELS[v] || v)}</span> <span class="grade-pill">${escapeHtml(grade)}</span></div>`];
+            // U-2: the grade belongs to the modality — "참고" for text; "감정 근거로
+            // 사용 가능" only beside a conclusion, never beside 판단 불가.
+            const grade = r.grade === 'reference' ? '참고' : (v === 'undetermined' ? '' : '감정 근거로 사용 가능');
+            const parts = [`<div class="verdict-head v-${escapeHtml(v)}" data-verdict="${escapeHtml(v)}"><span class="band-pill band-${bandCls(v)}">${escapeHtml(VERDICT_LABELS[v] || v)}</span>${grade ? ` <span class="grade-pill">${escapeHtml(grade)}</span>` : ''}</div>`];
             if (r.grade === 'reference') parts.push(`<div class="legal-note">${escapeHtml(TEXT_LEGAL_LIMITATION)}</div>`);
             if (r.verdict) parts.push(`<div class="verdict">${shown(r.verdict)}</div>`);
             return parts.join('');
         }
 
-        function startElapsed(el, text) {
-            if (progressTimer) clearInterval(progressTimer);
-            const t0 = Date.now();
-            el.textContent = text;
-            progressTimer = setInterval(() => {
-                el.textContent = `${text} (${Math.floor((Date.now() - t0) / 1000)}초)`;
-            }, 1000);
+        function riskLabel(verdict) {
+            return VERDICT_LABELS[verdict] || '미지원·실패';
         }
-        function stopElapsed(el) {
-            if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
-            if (el) el.textContent = '';
+        // Verdict -> colour class: red = manipulation evidence, blue =
+        // authenticity, neutral grey = undetermined (A11Y-1: never orange).
+        const VERDICT_CLS = { manipulation_evidence: 'high', undetermined: 'medium', authenticity_evidence: 'low' };
+        function bandCls(verdictOrBand) {
+            if (VERDICT_CLS[verdictOrBand]) return VERDICT_CLS[verdictOrBand];
+            return verdictOrBand === 'high' || verdictOrBand === 'medium' || verdictOrBand === 'low' ? verdictOrBand : 'other';
         }
 
-        /* ── scan controls ─────────────────────────── */
-        let pixelMode = 'off';
-        $('pixel-seg').querySelectorAll('button').forEach(b => {
-            b.addEventListener('click', () => {
-                if (scanBusy) return;
-                pixelMode = b.dataset.v;
-                $('pixel-seg').querySelectorAll('button').forEach(x => {
-                    x.classList.toggle('on', x === b);
-                    x.setAttribute('aria-checked', x === b ? 'true' : 'false');
+        function listItems(title, values, cls) {
+            if (!values || !values.length) return '';
+            const rows = values.map(v => {
+                const text = typeof v === 'string' ? v : (v.title ? `${v.title}: ${v.detail || ''}` : JSON.stringify(v));
+                return `<li>${shown(text)}</li>`;
+            }).join('');
+            return `<div class="dgroup ${cls || ''}"><div class="dt">${title}</div><ul>${rows}</ul></div>`;
+        }
+
+        // U-10: the measurement-gate reason was repeated once per model; members
+        // that share one score text are listed once with their names.
+        function modelMembersHtml(ma) {
+            const members = ma.models || [];
+            const texts = members.map(m => modelScoreText(m));
+            // A member's reason repeats its own name ("<이름>: 0단계: 측정 게이트 …") — compared without it.
+            const keys = members.map((m, i) => texts[i].split(shown(m.display_name || m.model || '') + ': ').join(''));
+            if (members.length > 1 && keys.every(k => k === keys[0])) {
+                return `<div class="note">${members.length}종 모두 원점수 ${keys[0]}</div><div class="names">${members.map(m => shown(m.display_name || m.model || '모델')).join(', ')}</div>`;
+            }
+            return `<ul>${members.map(m => `<li>${shown(m.display_name || m.model || '모델')} — 원점수 ${modelScoreText(m)}</li>`).join('')}</ul>`;
+        }
+
+        /* ── ledger vocabulary ───────────────────── */
+        const VERDICT_MARK = { manipulation_evidence: 'm', authenticity_evidence: 'a', undetermined: 'u', other: 'x' };
+        const VERDICT_SHORT = { manipulation_evidence: '조작·생성 근거 있음', authenticity_evidence: '원본성 근거 있음', undetermined: '판단 불가', other: '분석 못 함' };
+        // U-9: a row that was not analyzed says why — 미지원 is not 분석 실패.
+        const STATUS_LABELS = { unsupported: '미지원 형식', failed: '처리 실패', duplicate: '중복', skipped: '건너뜀' };
+        const MEDIA_KIND_LABELS = { image: '이미지', video: '영상', audio: '음성', text: '텍스트', document: '문서', archive: '압축 파일', unsupported: '알 수 없는 형식' };
+        const SCOPE_REASON = /^(측정 범위 밖|사진 아님)/;
+
+        function itemBand(entry) {
+            return verdictOf(entry.item);
+        }
+        function failedChecks(item) {
+            return (((item || {}).result || {}).coverage || []).filter(c => c.status === 'failed');
+        }
+        function coverageCounts(r) {
+            const cov = (r && r.coverage) || [];
+            return { ran: cov.filter(c => c.status === 'ran').length, failed: cov.filter(c => c.status === 'failed').length, total: cov.length };
+        }
+        function scopeReason(r) {
+            const hit = ((r && r.coverage) || []).find(c => c.status === 'skipped' && SCOPE_REASON.test(String(c.reason || '')));
+            return hit ? String(hit.reason) : '';
+        }
+        function shortVerdict(item) {
+            const v = verdictOf(item);
+            const r = item.result || {};
+            if (v === 'other') return '분석 못 함 — ' + (STATUS_LABELS[item.status] || '기타');
+            if (v === 'undetermined') {
+                if (r.grade === 'reference') return '판단 불가 — 참고 전용';
+                if (failedChecks(item).length) return '판단 불가 — 검사 실패';
+                return '판단 불가 — 근거 없음';
+            }
+            return VERDICT_SHORT[v];
+        }
+        function decisiveEvidence(r, v) {
+            // The direction that carries this verdict, by its label (조작·생성 방향 / 원본성 방향).
+            const dir = v === 'manipulation_evidence' ? '조작·생성 방향' : v === 'authenticity_evidence' ? '원본성 방향' : '';
+            const order = { strong: 0, moderate: 1, weak: 2 };
+            return ((r && r.evidence) || [])
+                .filter(e => e.kind === 'deterministic' && (dir ? DIRECTION_LABELS[e.direction] === dir : e.direction !== 'neutral'))
+                .sort((a, b) => (order[a.strength] ?? 3) - (order[b.strength] ?? 3));
+        }
+        // One line per row: why this row has its conclusion.
+        function rowReason(item) {
+            const r = item.result;
+            const v = verdictOf(item);
+            if (v === 'other' || !r) {
+                if (item.status === 'duplicate' && item.duplicate_of) return '같은 내용의 파일: ' + item.duplicate_of;
+                return item.error || STATUS_LABELS[item.status] || '분석하지 않음';
+            }
+            if (v === 'manipulation_evidence' || v === 'authenticity_evidence') {
+                const top = decisiveEvidence(r, v)[0];
+                if (top) return top.detail ? top.title + ' — ' + top.detail : top.title;
+                return VERDICT_SHORT[v];
+            }
+            const failed = failedChecks(item);
+            if (failed.length) return '검사 실패 — ' + failed.map(c => checkLabel(c.check)).join(', ');
+            if (r.grade === 'reference') return '참고 전용 — 텍스트 생성 판별은 결론을 내지 않음';
+            const scope = scopeReason(r);
+            if (scope) return '근거 없음 · ' + scope;
+            return '근거 없음 — 원본이라는 뜻 아님';
+        }
+        function verdictLine(item) {
+            const v = verdictOf(item);
+            const r = item.result || {};
+            if (v === 'manipulation_evidence') return '이 파일의 기록에 조작·생성을 가리키는 근거가 있습니다.';
+            if (v === 'authenticity_evidence') return '이 파일의 기록에 원본성을 가리키는 근거가 있습니다.';
+            if (v === 'other') {
+                return { unsupported: '지원하지 않는 형식이라 분석하지 않았습니다.', failed: '파일을 처리하지 못했습니다.',
+                         duplicate: '같은 내용의 파일을 이미 검사했습니다.', skipped: '검사를 건너뛰었습니다.' }[item.status] || '분석하지 못했습니다.';
+            }
+            if (r.grade === 'reference') return '텍스트는 참고 정보만 제공합니다 — 결론을 내지 않습니다.';
+            if (failedChecks(item).length) return '검사가 실패해 결론을 내리지 않았습니다.';
+            return '판단할 근거를 찾지 못했습니다.';
+        }
+        function noEvidenceText(item) {
+            const v = verdictOf(item);
+            const r = item.result || {};
+            if (v === 'other') return item.error || STATUS_LABELS[item.status] || '분석하지 않았습니다.';
+            if (failedChecks(item).length) return '검사가 실패해 근거를 확인하지 못했습니다. 아래 실패한 검사를 보십시오.';
+            if (r.grade === 'reference') return TEXT_LEGAL_LIMITATION;
+            const scope = scopeReason(r);
+            if (scope) return scope + ' — 생성 탐지를 적용하지 않았고, 결론을 낼 기록도 없었습니다.';
+            return '결론을 낼 기록(메타데이터·C2PA 서명 등)을 찾지 못했습니다.';
+        }
+        function limitAdvice(item) {
+            const v = verdictOf(item);
+            if (v === 'manipulation_evidence') return '기록이 있다는 사실을 보여 줍니다. 누가 언제 만들었는지는 이 기록만으로 알 수 없습니다.';
+            if (v === 'authenticity_evidence') return '기록된 서명 이후 내용이 바뀌지 않았다는 뜻입니다. 촬영 장면 자체가 연출되었는지는 알 수 없습니다.';
+            if (v === 'other') return '이 파일의 내용에 대해서는 아무것도 말하지 않습니다.';
+            return '근거가 없다는 것은 원본이라는 뜻이 아닙니다.';
+        }
+        function fmtSize(bytes) {
+            const n = Number(bytes);
+            if (!Number.isFinite(n) || n < 0) return '';
+            if (n < 1024) return n + ' B';
+            if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+            if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+            return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+        }
+        function metaLine(item) {
+            const sha = typeof item.sha256 === 'string' && /^[0-9a-f]{64}$/.test(item.sha256) ? item.sha256 : '';
+            const parts = [sha ? 'sha256 ' + sha.slice(0, 4) + '…' + sha.slice(-4) : '해시 없음'];
+            const size = fmtSize(item.size_bytes);
+            if (size) parts.push(size);
+            parts.push(MEDIA_KIND_LABELS[item.kind] || String(item.kind || ''));
+            if (item.member) parts.push('압축 구성 파일');
+            if (item.source === 'upload') parts.push('올린 파일');
+            return parts.filter(Boolean).join(' · ');
+        }
+
+        /* ── environment notice (derived from the scan itself) ── */
+        const DECISIVE_CHECKS = ['metadata', 'c2pa', 'image_class'];
+        function envFacts() {
+            const gated = new Set();
+            const missing = {};
+            results.forEach(entry => {
+                const r = entry.item.result;
+                if (!r) return;
+                (r.coverage || []).forEach(c => {
+                    const reason = String(c.reason || '');
+                    const isModel = String(c.check).startsWith('model:') || c.check === 'external_model';
+                    if (isModel && c.status === 'skipped' && reason.includes('측정 게이트')) {
+                        const m = /^모델 실행 불가: (.+?): /.exec(reason);
+                        gated.add(m ? m[1] : checkLabel(c.check));
+                    }
+                    // U-6: a decisive check that could not run for a missing dependency.
+                    if (c.status !== 'ran' && DECISIVE_CHECKS.includes(c.check) && /의존성|설치/.test(reason)) {
+                        missing[c.check] = (missing[c.check] || 0) + 1;
+                    }
                 });
             });
+            const cov = lastProvenance.coverage || {};
+            const thr = lastProvenance.thresholds || {};
+            const summary = lastProvenance.summary || {};
+            const short = [];
+            const neuralOff = gated.size > 0 || (cov.weights_total !== undefined && !(cov.weights_available > 0));
+            if (gated.size) short.push(`신경망 탐지기 ${gated.size}종은 측정 기준에 못 미쳐 꺼져 있습니다`);
+            else if (neuralOff) short.push('신경망 탐지기는 꺼져 있습니다(측정 게이트 미충족)');
+            Object.keys(missing).forEach(check => short.push(`${checkLabel(check)} 미설치 — ${missing[check]}개 파일에서 실행 못 함`));
+            const notScanned = (summary.subfolder_files_skipped || 0) + (summary.files_over_cap || 0);
+            if (notScanned || summary.subfolders_skipped) short.push(`검사하지 않은 파일 ${notScanned}개(하위 폴더·파일 상한)`);
+            if (!short.length && (thr.in_sample || thr.provisional)) short.push('판정 임계값은 참고용입니다');
+            if (neuralOff) short.push('결론은 파일에 남은 기록만으로 냈습니다');
+            return { short, gated: [...gated], missing: Object.entries(missing) };
+        }
+
+        /* ── views ───────────────────────────────── */
+        const VIEWS = ['scan', 'ledger', 'report', 'tools'];
+        const VIEW_TITLES = { scan: '검사', ledger: '사건 대장', report: '감정서 만들기', tools: '빠른 검사·비교' };
+        const VIEW_HEADINGS = { scan: 'scan-h', report: 'rep-h', tools: 'tools-h' };
+        let currentView = null;
+        let pendingFocus = null;
+        function viewFromHash() {
+            const m = /^#\/(\w+)/.exec(location.hash);
+            return m && VIEWS.includes(m[1]) ? m[1] : null;
+        }
+        function viewHeading(view) {
+            if (view === 'ledger') return results.length ? $('sum-h') : $('ledger-empty-h');
+            return $(VIEW_HEADINGS[view]);
+        }
+        function navigate(view, focusTarget) {
+            if (viewFromHash() !== view) {
+                pendingFocus = focusTarget || null;
+                location.hash = '#/' + view;  // hashchange shows the view
+                return;
+            }
+            showView(view, focusTarget);
+        }
+        function showView(view, focusTarget, initial) {
+            currentView = view;
+            VIEWS.forEach(v => { $('view-' + v).hidden = v !== view; });
+            document.querySelectorAll('[data-view-link]').forEach(a => {
+                if (a.dataset.viewLink === view) a.setAttribute('aria-current', 'page');
+                else a.removeAttribute('aria-current');
+            });
+            // The one set of case fields lives in the screen that shows it.
+            const slot = view === 'report' ? $('case-slot-report') : $('case-slot-scan');
+            if ($('case-fields').parentElement !== slot) slot.appendChild($('case-fields'));
+            if (view === 'report') renderReport();
+            document.title = VIEW_TITLES[view] + ' — ' + document.querySelector('.brand-name').textContent;
+            if (!initial) {
+                const target = focusTarget || viewHeading(view);
+                if (target) target.focus();
+            }
+        }
+        window.addEventListener('hashchange', () => {
+            showView(viewFromHash() || (results.length ? 'ledger' : 'scan'), pendingFocus);
+            pendingFocus = null;
         });
 
+        /* ── case information (one set of fields; kept for this tab) ── */
+        const CASE_FIELDS = { 'case-no': 'case_no', 'case-name': 'case_name',
+                              'case-plaintiff': 'plaintiff', 'case-defendant': 'defendant',
+                              'case-court': 'court', 'case-firm': 'law_firm',
+                              'case-center': 'center', 'case-contact': 'contact' };
+        const CASE_STORE = 'dfl.case';
+        function caseValue(id) { return $(id).value.trim(); }
+        function updateCaseLine() {
+            const no = caseValue('case-no'), name = caseValue('case-name');
+            $('case-line-title').textContent = no || name ? [no, name].filter(Boolean).join(' · ') : '사건 정보 없음';
+            const meta = [];
+            if (results.length) {
+                // The folder's last name only; the full path is in the report preview and exports.
+                if (lastScanRoot) meta.push(displayName(lastScanRoot.split(/[\\/]/).filter(Boolean).pop() || lastScanRoot));
+                else meta.push('올린 파일');
+                meta.push(results.length + '개 파일');
+                if (lastScanAt) meta.push(fmtStamp(lastScanAt) + ' 검사');
+            }
+            $('case-line-meta').textContent = meta.join(' · ');
+        }
+        function fmtStamp(d) {
+            const p = n => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+        }
+        try {
+            const saved = JSON.parse(sessionStorage.getItem(CASE_STORE) || '{}');
+            Object.keys(CASE_FIELDS).forEach(id => { if (typeof saved[id] === 'string') $(id).value = saved[id]; });
+        } catch (e) { /* no saved case */ }
+        Object.keys(CASE_FIELDS).forEach(id => $(id).addEventListener('input', () => {
+            const out = {};
+            Object.keys(CASE_FIELDS).forEach(k => { out[k] = $(k).value; });
+            try { sessionStorage.setItem(CASE_STORE, JSON.stringify(out)); } catch (e) { /* storage full — non-fatal */ }
+            updateCaseLine();
+            if (currentView === 'report') renderReport();
+        }));
+
+        /* ── scan: progress panel ────────────────── */
+        const prog = { serverElapsed: 0, at: 0, done: 0, total: null, timer: null, quarter: 0, running: false };
+        function fmtClock(sec) {
+            const s = Math.max(0, Math.floor(sec));
+            const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+            const p = n => String(n).padStart(2, '0');
+            return h ? `${h}:${p(m)}:${p(r)}` : `${p(m)}:${p(r)}`;
+        }
+        function fmtRemaining(sec) {
+            if (sec < 60) return '1분 미만';
+            if (sec < 3600) return Math.round(sec / 60) + '분';
+            return Math.floor(sec / 3600) + '시간 ' + Math.round((sec % 3600) / 60) + '분';
+        }
+        function elapsedNow() { return prog.serverElapsed + (prog.at && prog.running ? (Date.now() - prog.at) / 1000 : 0); }
+        function paintTime() {
+            const el = elapsedNow();
+            let text = '경과 ' + fmtClock(el);
+            if (prog.running && prog.total && prog.done >= 2 && prog.done < prog.total) {
+                text += ' · 남은 시간 약 ' + fmtRemaining(el / prog.done * (prog.total - prog.done));
+            }
+            $('prog-time').textContent = text;
+        }
+        function setStatusText(text) { $('progress-text').textContent = text; }
+        function announce(text) { $('scan-live').textContent = text; }
+        function paintCounts() {
+            const bar = $('progress');
+            $('prog-done').textContent = String(prog.done);
+            $('prog-total').textContent = prog.total == null ? '–' : String(prog.total);
+            if (prog.total) {
+                bar.classList.remove('indeterminate');
+                bar.ariaValueMax = String(prog.total);
+                bar.ariaValueNow = String(Math.min(prog.done, prog.total));
+                bar.ariaValueText = null;
+                $('progress-fill').style.width = Math.min(100, prog.done / prog.total * 100) + '%';
+            } else {
+                bar.ariaValueMax = '0';
+                bar.ariaValueNow = '0';
+                bar.ariaValueText = '파일 목록을 만드는 중';
+            }
+        }
+        function progressStart(title, canCancel) {
+            prog.serverElapsed = 0; prog.at = Date.now(); prog.done = 0; prog.total = null; prog.quarter = 0; prog.running = true;
+            $('prog-h').textContent = title;
+            $('progress').classList.remove('cancelled');
+            $('progress').classList.add('indeterminate');
+            $('progress-fill').style.width = '';
+            $('cancel-banner').hidden = true;
+            $('view-results-btn').hidden = true;
+            $('scan-cancel').hidden = !canCancel;
+            $('cancel-note').hidden = !canCancel;
+            setBusyButton($('scan-cancel'), false);
+            $('recent-list').innerHTML = '';
+            setStatusText('파일 목록을 만드는 중입니다.');
+            paintCounts();
+            paintTime();
+            clearInterval(prog.timer);
+            prog.timer = setInterval(paintTime, 1000);
+            announce(title + ' 시작');
+        }
+        function progressUpdate(state) {
+            if (typeof state.elapsed_seconds === 'number') { prog.serverElapsed = state.elapsed_seconds; prog.at = Date.now(); }
+            if (Number.isInteger(state.done)) prog.done = state.done;
+            if (Number.isInteger(state.total)) prog.total = state.total;
+            paintCounts();
+            paintTime();
+            // The row name comes from the server already escaped by display_name (R11-14).
+            const lastName = typeof state.current === 'string' ? state.current : '';
+            if (lastName) setStatusText('마지막으로 끝난 파일: ' + lastName);
+            if (Array.isArray(state.recent)) renderRecent(state.recent);
+            if (prog.total) {
+                const quarter = Math.floor(prog.done / prog.total * 4);
+                if (quarter > prog.quarter && quarter < 4) { prog.quarter = quarter; announce(`${prog.done} / ${prog.total} 파일 검사함`); }
+            }
+        }
+        function renderRecent(rows) {
+            const list = $('recent-list');
+            list.innerHTML = '';
+            rows.forEach(row => {
+                const v = row.verdict_code && row.status === 'analyzed' ? row.verdict_code : 'other';
+                const li = document.createElement('li');
+                li.innerHTML = `<span class="mk mk-${VERDICT_MARK[v] || 'x'}" aria-hidden="true"></span><span class="nm"></span><span class="v"></span>`;
+                // Already display_name-escaped by the server (status payload).
+                const escapedName = String(row.name || '');
+                li.querySelector('.nm').textContent = escapedName;
+                li.querySelector('.v').textContent = VERDICT_SHORT[v] || '';
+                list.appendChild(li);
+            });
+        }
+        function progressFinish(kind, data) {
+            clearInterval(prog.timer);
+            prog.timer = null;
+            if (prog.at) prog.serverElapsed = elapsedNow();
+            prog.running = false;
+            paintTime();
+            if (document.activeElement === $('scan-cancel')) $('prog-h').focus();
+            $('scan-cancel').hidden = true;
+            $('cancel-note').hidden = true;
+            $('progress').classList.remove('indeterminate');
+            const rows = data && Array.isArray(data.items) ? data.items.length : 0;
+            if (kind === 'done') {
+                $('prog-h').textContent = '검사 완료';
+                if (prog.total == null) { prog.total = rows; prog.done = rows; paintCounts(); }
+                setStatusText(`${rows}개 행을 사건 대장에 실었습니다.`);
+                $('view-results-btn').hidden = false;
+                announce(`검사 완료 — ${rows}개 파일`);
+            } else if (kind === 'cancelled') {
+                const summary = (data && data.summary) || {};
+                $('prog-h').textContent = '검사 중단됨';
+                $('progress').classList.add('cancelled');
+                $('cancel-banner').hidden = false;
+                $('cancel-banner-text').textContent = partialResultNote(summary);
+                setStatusText(`${rows}개 행은 결과가 있고, ${summary.files_cancelled || 0}개 파일은 검사하지 않았습니다.`);
+                $('view-results-btn').hidden = false;
+                $('view-results-btn').textContent = '부분 결과 보기';
+                announce('검사를 중단했습니다 — 부분 결과');
+            } else {
+                $('prog-h').textContent = '검사 실패';
+                setStatusText('검사를 마치지 못했습니다. 위의 오류를 확인하십시오.');
+                announce('검사 실패');
+            }
+        }
+        $('view-results-btn').addEventListener('click', () => navigate('ledger'));
+
+        /* ── scan: controls ──────────────────────── */
         const SCAN_INPUTS = ['folder-path', 'analyze-btn', 'max-files',
             'opt-recursive', 'opt-dedupe', 'opt-heatmaps', 'opt-model',
-            'opt-deep', 'dir-picker-btn', 'upload-btn', 'upload-clear'];
+            'opt-deep', 'file-picker-btn', 'dir-picker-btn', 'upload-btn', 'upload-clear'];
 
-        function setBusy(busy, text) {
+        function setBusy(busy) {
             scanBusy = busy;
-            $('progress').classList.toggle('on', busy);
             $('progress').setAttribute('aria-busy', busy ? 'true' : 'false');
+            // A11Y-4: the control that has focus is about to be disabled —
+            // focus moves to the next action (cancel) or the progress heading,
+            // never to <body>.
+            const active = document.activeElement;
+            if (busy && active && (SCAN_INPUTS.includes(active.id) || active.name === 'pixel-mode' || active.closest('.file-chips'))) {
+                ($('scan-cancel').hidden ? $('prog-h') : $('scan-cancel')).focus();
+            }
             SCAN_INPUTS.forEach(id => { const el = $(id); if (el) el.disabled = busy; });
-            if (busy) startElapsed($('progress-text'), text);
-            else stopElapsed($('progress-text'));
+            document.querySelectorAll('input[name="pixel-mode"]').forEach(el => { el.disabled = busy; });
+        }
+        function pixelMode() {
+            const on = document.querySelector('input[name="pixel-mode"]:checked');
+            return on ? on.value : 'off';
         }
 
         async function traverseEntry(entry, out) {
@@ -549,27 +933,31 @@
             input.onchange = e => addFiles(Array.from(e.target.files));
             input.click();
         }
-        dropZone.addEventListener('click', openFilePicker);
-        dropZone.addEventListener('keydown', e => {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFilePicker(); }
-        });
+        $('file-picker-btn').addEventListener('click', openFilePicker);
         $('dir-picker-btn').addEventListener('click', () => { if (!scanBusy) $('dir-picker').click(); });
         $('dir-picker').addEventListener('change', e => { addFiles(Array.from(e.target.files)); e.target.value = ''; });
-        $('upload-clear').addEventListener('click', () => { selectedFiles = []; renderFileChips(); });
+        $('upload-clear').addEventListener('click', () => { selectedFiles = []; renderFileChips(); $('file-picker-btn').focus(); });
 
         function renderFileChips() {
             const list = $('file-list');
             list.innerHTML = '';
             selectedFiles.forEach((file, i) => {
-                const name = file.webkitRelativePath || file.name;
-                const chip = document.createElement('span');
-                chip.className = 'chipfile';
-                chip.innerHTML = `<span class="nm">${shown(name)}</span><span>${(file.size/1024).toFixed(0)}K</span>`;
+                const relName = file.webkitRelativePath || file.name;
+                const li = document.createElement('li');
+                li.innerHTML = `<span class="nm">${shown(relName)}</span><span class="mono small">${(file.size / 1024).toFixed(0)}K</span>`;
                 const x = document.createElement('button');
-                x.className = 'x'; x.textContent = '✕'; x.setAttribute('aria-label', '제거');
-                x.addEventListener('click', ev => { ev.stopPropagation(); selectedFiles.splice(i, 1); renderFileChips(); });
-                chip.appendChild(x);
-                list.appendChild(chip);
+                x.type = 'button';
+                x.className = 'btn btn-sm';
+                x.textContent = '빼기';
+                x.setAttribute('aria-label', displayName(relName) + ' 빼기');
+                x.addEventListener('click', () => {
+                    selectedFiles.splice(i, 1);
+                    renderFileChips();
+                    const rest = $('file-list').querySelectorAll('button');
+                    (rest[Math.min(i, rest.length - 1)] || $('file-picker-btn')).focus();
+                });
+                li.appendChild(x);
+                list.appendChild(li);
             });
             $('upload-row').hidden = selectedFiles.length === 0;
             $('upload-n').textContent = selectedFiles.length;
@@ -577,21 +965,83 @@
 
         function addFiles(files) {
             files.forEach(file => {
-                const name = file.webkitRelativePath || file.name;
-                if (!selectedFiles.find(f => (f.webkitRelativePath || f.name) === name && f.size === file.size)) {
+                const relName = file.webkitRelativePath || file.name;
+                if (!selectedFiles.find(f => (f.webkitRelativePath || f.name) === relName && f.size === file.size)) {
                     selectedFiles.push(file);
                 }
             });
             renderFileChips();
         }
 
-        /* ── folder scan (async job + poll) ────────── */
-        $('analyze-btn').addEventListener('click', async () => {
-            const folderPath = $('folder-path').value;
-            if (!folderPath) { toast('폴더 경로를 입력하세요', true); return; }
+        /* ── folder scan (async job + poll; U-7: no deadline, reconnects) ── */
+        const JOB_STORE = 'dfl.scan-job';
+        function rememberJob(job) { try { sessionStorage.setItem(JOB_STORE, JSON.stringify(job)); } catch (e) { /* non-fatal */ } }
+        function forgetJob() { try { sessionStorage.removeItem(JOB_STORE); } catch (e) { /* non-fatal */ } }
+
+        async function runScanJob(jobId, folderPath) {
+            currentJobId = jobId;
+            progressStart('검사 중', true);
+            setBusy(true);
+            let state = null;
+            try {
+                while (true) {
+                    let res;
+                    try {
+                        res = await apiFetch('/api/scan-status?job=' + encodeURIComponent(jobId));
+                    } catch (e) {
+                        // The server may be restarting or the network briefly gone:
+                        // the job keeps running there, so keep asking.
+                        setStatusText('서버에 연결할 수 없습니다 — 잠시 뒤 다시 확인합니다.');
+                        await sleep(3000);
+                        continue;
+                    }
+                    if (!res.ok) throw new Error(await apiError(res));
+                    state = await res.json();
+                    progressUpdate(state);
+                    if (state.status !== 'running') break;
+                    await sleep(1200);
+                }
+                const data = state.result;
+                if (state.status === 'error' || !data || data.error) {
+                    toast('검사 실패: ' + ((data && (data.detail || data.error)) || '검사 결과 없음'), true);
+                    progressFinish('error');
+                    return;
+                }
+                // P1: the server's resolved scan folder — /api/report resolves
+                // every row against it (not against the read root).
+                lastScanRoot = data.scan_root || folderPath;
+                lastScanRootB64 = data.scan_root_b64 || '';
+                processResults(data);
+                // R18-3: "분석 완료" was shown for a cancelled scan too.
+                if (partialResultNote(data.summary)) toast(`검사 취소 — 부분 결과 ${(data.items || []).length}개 행, 분석하지 않은 파일 ${data.summary.files_cancelled || 0}개`, true, '주의');
+                else toast(`분석 완료 — ${(data.items || []).length}개 파일`);
+                if (state.status === 'cancelled' || partialResultNote(data.summary)) {
+                    progressFinish('cancelled', data);
+                    setBusy(false);
+                    $('view-results-btn').focus();
+                } else {
+                    progressFinish('done', data);
+                    setBusy(false);
+                    navigate('ledger', $('sum-h'));
+                }
+            } catch (error) {
+                toast('검사 중 오류: ' + error.message, true);
+                progressFinish('error');
+            } finally {
+                currentJobId = null;
+                forgetJob();
+                if (scanBusy) setBusy(false);
+            }
+        }
+
+        $('scan-form').addEventListener('submit', async e => {
+            e.preventDefault();
+            if (scanBusy) return;
+            const folderPath = $('folder-path').value.trim();
+            if (!folderPath) { toast('폴더 경로를 입력하세요', true); $('folder-path').focus(); return; }
             const params = new URLSearchParams({
                 folder: folderPath,
-                pixel: pixelMode,
+                pixel: pixelMode(),
                 max_files: $('max-files').value,
                 recursive: $('opt-recursive').checked,
                 dedupe: $('opt-dedupe').checked,
@@ -599,122 +1049,118 @@
                 deep_signals: $('opt-deep').checked,
                 async: '1',
             });
+            // R12-4/R13-3: the server's own folder is named by its bytes while
+            // the box still holds it (a non-UTF-8 path survives).
+            if (defaultFolderB64 && folderPath === defaultFolder) {
+                params.delete('folder');
+                params.set('folder_b64', defaultFolderB64);
+            }
             if (!$('opt-model').checked) params.set('no_default_engine', 'true');
             lastScanOptions = {
-                pixel: pixelMode,
+                pixel: pixelMode(),
                 heatmaps: String($('opt-heatmaps').checked),
                 deep_signals: String($('opt-deep').checked),
                 no_default_engine: String(!$('opt-model').checked),
             };
-            setBusy(true, '폴더 분석 중… 모델 로딩 시 수 분 걸릴 수 있습니다');
+            setBusyButton($('analyze-btn'), true);
             try {
                 const job = await apiJson('/api/scan?' + params.toString());
                 if (job.error) { toast('오류: ' + job.error, true); return; }
-                currentJobId = job.job_id;
-                $('scan-cancel').hidden = false;
-                let data = null;
-                // Polling is bounded — a dead backend must not spin forever.
-                const deadline = Date.now() + 30 * 60 * 1000;
-                while (true) {
-                    if (Date.now() > deadline) {
-                        toast('분석 시간 초과 (30분) — 파일 수를 줄이거나 서버 로그를 확인하세요', true);
-                        return;
-                    }
-                    const state = await apiJson('/api/scan-status?job=' + encodeURIComponent(job.job_id));
-                    if (state.error) { toast('오류: ' + state.error, true); return; }
-                    if (state.status !== 'running') { data = state.result; break; }
-                    await new Promise(res => setTimeout(res, 1500));
-                }
-                if (!data || data.error) { toast('오류: ' + (data && data.error ? data.error : '스캔 결과 없음'), true); return; }
-                // P1: the server's resolved scan folder — /api/report resolves
-                // every row against it (not against the read root).
-                lastScanRoot = data.scan_root || folderPath;
-                lastScanRootB64 = data.scan_root_b64 || '';
-                processResults(data);
-                // R18-3: "분석 완료" was shown for a cancelled scan too.
-                if (partialResultNote(data.summary)) toast(`검사 취소 — 부분 결과 ${(data.items || []).length}개 행, 분석하지 않은 파일 ${data.summary.files_cancelled || 0}개`, true);
-                else toast(`분석 완료 — ${(data.items || []).length}개 파일`);
+                rememberJob({ job: job.job_id, folder: folderPath, options: lastScanOptions });
+                await runScanJob(job.job_id, folderPath);
             } catch (error) {
-                toast('분석 중 오류: ' + error.message, true);
+                // U-8: an out-of-root folder says which folders can be scanned.
+                const hint = /허용되지 않은 경로/.test(error.message) ? ' — 서버를 시작할 때 --folder 또는 --allow-root로 등록한 폴더 안만 검사할 수 있습니다.' : '';
+                toast('검사를 시작하지 못했습니다: ' + error.message + hint, true);
             } finally {
-                currentJobId = null;
-                $('scan-cancel').hidden = true;
-                setBusy(false);
+                setBusyButton($('analyze-btn'), false);
             }
         });
 
         $('scan-cancel').addEventListener('click', async () => {
-            if (!currentJobId) return;
-            $('scan-cancel').disabled = true;
+            if (!currentJobId || isBusyButton($('scan-cancel'))) return;
+            setBusyButton($('scan-cancel'), true);
             try {
-                const res = await apiFetch('/api/scan-cancel?job=' + encodeURIComponent(currentJobId));
-                const data = await res.json();
-                if (data.error) toast('취소 실패: ' + data.error, true);
-                else toast('취소 요청됨 — 분석된 항목까지만 표시됩니다');
+                const data = await apiJson('/api/scan-cancel?job=' + encodeURIComponent(currentJobId));
+                if (data.cancelled) setStatusText('중단 요청을 보냈습니다 — 지금 검사 중인 파일까지 끝내고 멈춥니다.');
             } catch (e) {
-                toast('취소 실패: ' + e.message, true);
-            } finally {
-                $('scan-cancel').disabled = false;
+                toast('중단 요청 실패: ' + e.message, true);
+                setBusyButton($('scan-cancel'), false);
             }
         });
 
+        function resumeJob() {
+            let saved = null;
+            try { saved = JSON.parse(sessionStorage.getItem(JOB_STORE) || 'null'); } catch (e) { saved = null; }
+            if (!saved || typeof saved.job !== 'string') return false;
+            lastScanOptions = saved.options && typeof saved.options === 'object' ? saved.options : {};
+            if (typeof saved.folder === 'string') $('folder-path').value = saved.folder;
+            toast('진행 중이던 검사에 다시 연결합니다');
+            runScanJob(saved.job, typeof saved.folder === 'string' ? saved.folder : '');
+            return true;
+        }
+
         /* ── upload scan (batched) ─────────────────── */
         $('upload-btn').addEventListener('click', async () => {
-            if (!selectedFiles.length) return;
+            if (!selectedFiles.length || scanBusy) return;
             const BATCH = 20;
-            setBusy(true, '업로드 파일 분석 중…');
+            progressStart('올린 파일 검사 중', false);
+            setBusy(true);
             try {
                 const allItems = [];
                 const total = selectedFiles.length;
+                progressUpdate({ done: 0, total });
                 for (let i = 0; i < total; i += BATCH) {
                     const batch = selectedFiles.slice(i, i + BATCH);
                     const form = new FormData();
                     batch.forEach(f => form.append('files', f, f.webkitRelativePath || f.name));
                     const data = await apiJson('/api/analyze-upload', { method: 'POST', body: form });
-                    if (data.error) { toast('오류: ' + data.error, true); return; }
+                    if (data.error) { toast('오류: ' + data.error, true); progressFinish('error'); return; }
                     allItems.push(...(data.items || []));
                     if (data.coverage) lastProvenance.coverage = data.coverage;
                     if (data.thresholds) lastProvenance.thresholds = data.thresholds;
-                    if (total > BATCH) startElapsed($('progress-text'), `업로드 분석 중… (${Math.min(i + BATCH, total)}/${total})`);
+                    progressUpdate({ done: Math.min(i + BATCH, total), total });
                 }
                 lastScanRoot = '';  // uploads are temp files; heatmaps unavailable
                 lastScanRootB64 = '';
-                processResults({ items: allItems });
+                const coverage = lastProvenance.coverage, thresholds = lastProvenance.thresholds;
+                processResults({ items: allItems, coverage, thresholds });
                 toast(`분석 완료 — ${allItems.length}개 파일`);
                 selectedFiles = [];
                 renderFileChips();
+                progressFinish('done', { items: allItems });
+                setBusy(false);
+                navigate('ledger', $('sum-h'));
             } catch (error) {
                 toast('분석 중 오류: ' + error.message, true);
+                progressFinish('error');
             } finally {
-                setBusy(false);
+                if (scanBusy) setBusy(false);
             }
         });
 
-        /* ── results rendering ─────────────────────── */
+        /* ── results ─────────────────────────────── */
         function processResults(data) {
             results = (data.items || []).map(item => ({ item }));
             if (data.coverage) lastProvenance.coverage = data.coverage;
             if (data.thresholds) lastProvenance.thresholds = data.thresholds;
             lastProvenance.summary = data.summary || null;
-            const label = $('stat-model-label');
-            if (label) {
-                const cov = lastProvenance.coverage || {};
-                const wa = cov.weights_available, wt = cov.weights_total;
-                label.textContent = wt !== undefined
-                    ? (wa ? `뉴럴 ${wa}/${wt}` : '신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영')
-                    : `뉴럴 ${data.summary && data.summary.external_model_active ? data.summary.external_model_active : 0}`;
-            }
-            const banner = $('prov-banner');
-            if (banner) {
-                banner.innerHTML = provenanceBannerHtml();
-                banner.hidden = !banner.innerHTML;
-            }
-            renderResults(data.summary || {});
+            lastScanAt = new Date();
+            results.forEach(entry => learnModelNames(entry.item.result));
+            bandFilter = null;
+            textFilter = '';
+            revFilter = false;
+            $('res-filter').value = '';
+            $('rev-filter').setAttribute('aria-pressed', 'false');
+            selectedEntry = null;
+            groupsTouched = false;
+            renderResults();
+            updateCaseLine();
         }
 
-        function reportPayload(extra) {
+        function reportPayload(extra, items) {
             const out = {
-                items: results.map(r => r.item),
+                items: items || results.map(r => r.item),
                 summary: lastProvenance.summary || {},
                 coverage: lastProvenance.coverage || {},
                 thresholds: lastProvenance.thresholds || {},
@@ -723,52 +1169,354 @@
             // P1: rows are relative to the scanned folder; uploads carry
             // source: "upload" and are never re-analyzed (P6).
             if (lastScanRoot) out.scan_root = lastScanRoot;
-            const map = { 'case-no': 'case_no', 'case-name': 'case_name',
-                          'case-plaintiff': 'plaintiff', 'case-defendant': 'defendant',
-                          'case-court': 'court', 'case-firm': 'law_firm',
-                          'case-center': 'center', 'case-contact': 'contact' };
-            for (const [id, key] of Object.entries(map)) {
+            for (const [id, key] of Object.entries(CASE_FIELDS)) {
                 const el = $(id);
                 if (el && el.value.trim()) out[key] = el.value.trim();
             }
             return Object.assign(out, extra || {});
         }
 
-        function riskLabel(verdict) {
-            return VERDICT_LABELS[verdict] || '미지원·실패';
-        }
-        // Verdict -> existing colour classes: red = manipulation evidence,
-        // orange = undetermined (needs the examiner), green = authenticity.
-        const VERDICT_CLS = { manipulation_evidence: 'high', undetermined: 'medium', authenticity_evidence: 'low' };
-        function bandColor(verdict) {
-            const cls = VERDICT_CLS[verdict];
-            return cls === 'high' ? 'var(--red)' : cls === 'medium' ? 'var(--orange)' : cls === 'low' ? 'var(--green)' : 'var(--muted)';
-        }
-        // Class-name variant — bandColor() is only used in markup templates
-        // where a CSP-safe class is required instead of an inline style.
-        function bandCls(verdictOrBand) {
-            if (VERDICT_CLS[verdictOrBand]) return VERDICT_CLS[verdictOrBand];
-            return verdictOrBand === 'high' || verdictOrBand === 'medium' || verdictOrBand === 'low' ? verdictOrBand : 'other';
+        function bandCounts() {
+            const bands = { manipulation_evidence: 0, undetermined: 0, authenticity_evidence: 0, other: 0 };
+            results.forEach(entry => { bands[itemBand(entry)]++; });
+            return bands;
         }
 
-        function listItems(title, values, cls) {
-            if (!values || !values.length) return '';
-            const rows = values.map(v => {
-                const text = typeof v === 'string' ? v : (v.title ? `${v.title}: ${v.detail || ''}` : JSON.stringify(v));
-                return `<li>${shown(text)}</li>`;
+        function renderSummary() {
+            const b = bandCounts();
+            const n = results.length;
+            const found = b.manipulation_evidence + b.authenticity_evidence;
+            $('sum-h').textContent = found
+                ? `${n}개 중 ${found}개에서 결론 근거를 찾았습니다.`
+                : `${n}개 중 결론 근거를 찾은 파일은 없습니다.`;
+            const sub = [];
+            if (b.undetermined) sub.push(`${found ? '나머지 ' : ''}${b.undetermined}개는 근거가 없어 판단하지 않았습니다 — <strong>원본이라는 뜻이 아닙니다.</strong>`);
+            if (b.other) sub.push(`${b.other}개는 분석하지 못했습니다.`);
+            $('sum-sub').innerHTML = sub.join(' ');
+            $('sum-sub').hidden = !sub.length;
+            $('stat-manip').textContent = b.manipulation_evidence;
+            $('stat-auth').textContent = b.authenticity_evidence;
+            $('stat-undet').textContent = b.undetermined;
+            $('stat-other').textContent = b.other;
+            const failedUndet = results.filter(e => itemBand(e) === 'undetermined' && failedChecks(e.item).length).length;
+            $('sub-undet').textContent = '근거 없음 — 원본이라는 뜻 아님' + (failedUndet ? ` · 검사 실패 ${failedUndet}` : '');
+            const statuses = {};
+            results.filter(e => itemBand(e) === 'other').forEach(e => {
+                const label = STATUS_LABELS[e.item.status] || '기타';
+                statuses[label] = (statuses[label] || 0) + 1;
+            });
+            const breakdown = Object.entries(statuses).map(([k, v]) => `${k} ${v}`).join(' · ');
+            $('sub-other').textContent = breakdown || '미지원·실패·중복·건너뜀';
+        }
+
+        function renderEnv() {
+            const env = envFacts();
+            const details = provenanceBannerHtml();
+            $('env-text').textContent = env.short.join(' · ');
+            $('env-note').hidden = !env.short.length && !details;
+            $('env-more').hidden = !details;
+            $('prov-banner').innerHTML = details;
+            if (!details) { $('prov-banner').hidden = true; $('env-more').setAttribute('aria-expanded', 'false'); }
+            if (!env.short.length && details) $('env-text').textContent = '검사 조건에 관한 알림이 있습니다';
+        }
+        $('env-more').addEventListener('click', () => {
+            const open = $('env-more').getAttribute('aria-expanded') !== 'true';
+            $('env-more').setAttribute('aria-expanded', open ? 'true' : 'false');
+            $('env-more').textContent = open ? '접기' : '자세히';
+            $('prov-banner').hidden = !open;
+        });
+
+        function renderPartial() {
+            const note = partialResultNote(lastProvenance.summary);
+            const box = $('partial-banner');
+            box.hidden = !note;
+            box.innerHTML = note ? `<span class="t">부분 결과 — 검사를 중단했습니다</span>${shown(note)}` : '';
+        }
+
+        // Evidence-bearing rows first: manipulation → authenticity → undetermined → other.
+        const BAND_ORDER = { manipulation_evidence: 0, authenticity_evidence: 1, undetermined: 2, other: 3 };
+        // Rows are told apart by their path in the scanned folder (two subfolders may hold 00.png).
+        const byName = (a, b) => String(a.item.path || a.item.name || '').localeCompare(String(b.item.path || b.item.name || ''), 'ko');
+        const byVerdict = (a, b) => (BAND_ORDER[itemBand(a)] - BAND_ORDER[itemBand(b)]) || byName(a, b);
+        function filteredResults() {
+            const needle = textFilter.trim().toLowerCase();
+            const filtered = results.filter(entry => {
+                if (bandFilter && itemBand(entry) !== bandFilter) return false;
+                if (revFilter && !(reviewStore[itemKey(entry.item)] || {}).star) return false;
+                if (!needle) return true;
+                const item = entry.item;
+                return ((item.name || '') + ' ' + (item.path || '')).toLowerCase().includes(needle);
+            });
+            // 결론순 (D16): verdict order, then name. The uncalibrated score is
+            // always 0 in phase 0 and never orders results.
+            filtered.sort(sortMode === 'name' ? byName : byVerdict);
+            return filtered;
+        }
+
+        function renderResults() {
+            const has = results.length > 0;
+            $('ledger-empty').hidden = has;
+            $('results-section').hidden = !has;
+            if (!has) { $('detail').innerHTML = ''; return; }
+            renderPartial();
+            renderSummary();
+            renderEnv();
+            renderList();
+            if (currentView === 'report') renderReport();
+        }
+
+        function renderRow(list, entry) {
+            const item = entry.item;
+            const v = verdictOf(item);
+            const r = item.result;
+            const cc = coverageCounts(r);
+            const rev = reviewStore[itemKey(item)] || {};
+            const li = document.createElement('li');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'row';
+            btn.dataset.verdict = v;
+            btn.tabIndex = -1;
+            const cov = cc.total
+                ? `<span class="sr-only">검사 범위 </span><span class="${cc.failed ? 'fail' : ''}">${cc.ran}/${cc.total}</span>${cc.failed ? `<span class="sr-only">, 실패 ${cc.failed}</span>` : ''}`
+                : '<span class="sr-only">검사 범위 </span>–';
+            btn.innerHTML =
+                `<span class="mk mk-${VERDICT_MARK[v]}" aria-hidden="true"></span>` +
+                `<span class="row-name"><span class="nm">${shown(item.path || item.name || '파일')}</span><span class="vs">${shown(shortVerdict(item))}</span></span>` +
+                `<span class="row-reason">${shown(rowReason(item))}</span>` +
+                `<span class="row-cov">${cov}</span>` +
+                `<span class="row-rev">${rev.star ? '검토함' : ''}</span>`;
+            btn.addEventListener('click', () => selectEntry(entry, window.innerWidth <= 1180));
+            entry.row = btn;
+            li.appendChild(btn);
+            list.appendChild(li);
+        }
+
+        function markRows() {
+            const rows = [...$('res-list').querySelectorAll('.row')];
+            const current = selectedEntry && selectedEntry.row && rows.includes(selectedEntry.row) ? selectedEntry.row : rows[0];
+            rows.forEach(b => {
+                b.setAttribute('aria-current', selectedEntry && b === selectedEntry.row ? 'true' : 'false');
+                b.tabIndex = b === current ? 0 : -1;
+            });
+        }
+
+        function renderList() {
+            const list = $('res-list');
+            list.innerHTML = '';
+            results.forEach(entry => { entry.row = null; });
+            document.querySelectorAll('#stat-pills .seg').forEach(p => {
+                p.setAttribute('aria-pressed', p.dataset.band === bandFilter ? 'true' : 'false');
+            });
+            const filtered = filteredResults();
+            if (!filtered.length) {
+                list.innerHTML = `<li class="empty-row"><p class="note">${results.length ? '거르기 조건과 맞는 파일이 없습니다.' : '분석 결과가 없습니다.'}</p></li>`;
+            }
+            renderedRows = Math.min(RENDER_WINDOW, filtered.length);
+            filtered.slice(0, renderedRows).forEach(e => renderRow(list, e));
+            updateMore(filtered.length);
+            const containers = (lastProvenance.summary || {}).container_rows != null
+                ? lastProvenance.summary.container_rows
+                : results.filter(entry => entry.item.kind === 'archive' && entry.item.result).length;
+            // N5: archive container rows are counted by verdict; say how many.
+            const scope = bandFilter
+                ? `${VERDICT_SHORT[bandFilter]} ${filtered.length}개 · 같은 칸을 다시 누르면 전체`
+                : (filtered.length === results.length ? `전체 ${results.length}개` : `${filtered.length} / ${results.length}개`);
+            $('ledger-count').textContent = scope + (containers ? ` · 압축 파일 ${containers}건 포함` : '');
+            if (!selectedEntry || !filtered.includes(selectedEntry)) selectedEntry = filtered[0] || null;
+            renderDetail(selectedEntry);
+            markRows();
+        }
+
+        function updateMore(filteredLen) {
+            const row = $('more-row');
+            if (renderedRows >= filteredLen) { row.hidden = true; return; }
+            row.hidden = false;
+            $('more-btn').textContent = `나머지 ${filteredLen - renderedRows}개 더 보기`;
+        }
+        $('more-btn').addEventListener('click', () => {
+            const list = $('res-list');
+            const filtered = filteredResults();
+            const prev = renderedRows;
+            renderedRows = Math.min(renderedRows + RENDER_WINDOW, filtered.length);
+            filtered.slice(prev, renderedRows).forEach(e => renderRow(list, e));
+            updateMore(filtered.length);
+            markRows();
+            const first = filtered[prev];
+            if (first && first.row) focusRow(first.row);
+        });
+
+        function selectEntry(entry, focusPanel) {
+            selectedEntry = entry;
+            renderDetail(entry);
+            markRows();
+            if (focusPanel && $('detail-h')) $('detail-h').focus();
+        }
+        function focusRow(btn) {
+            $('res-list').querySelectorAll('.row').forEach(b => { b.tabIndex = b === btn ? 0 : -1; });
+            btn.focus();
+        }
+
+        /* A11Y-5: list keys only inside the ledger (roving tabindex) — no
+           page-wide single-key shortcut. ↑↓ Home End move; J/K too unless
+           switched off in the 내보내기 menu. Enter/Space open (native button). */
+        const KB_STORE = 'dfl.kb';
+        try { $('kb-toggle').checked = localStorage.getItem(KB_STORE) !== 'off'; } catch (e) { /* default on */ }
+        $('kb-toggle').addEventListener('change', () => {
+            try { localStorage.setItem(KB_STORE, $('kb-toggle').checked ? 'on' : 'off'); } catch (e) { /* non-fatal */ }
+        });
+        $('res-list').addEventListener('keydown', e => {
+            const rows = [...$('res-list').querySelectorAll('.row')];
+            const at = rows.indexOf(document.activeElement);
+            if (at < 0 || e.altKey || e.ctrlKey || e.metaKey) return;
+            let step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+            if (step == null && $('kb-toggle').checked) step = { j: 1, J: 1, k: -1, K: -1 }[e.key];
+            let to = null;
+            if (step != null) to = Math.max(0, Math.min(rows.length - 1, at + step));
+            else if (e.key === 'Home') to = 0;
+            else if (e.key === 'End') to = rows.length - 1;
+            if (to == null) return;
+            e.preventDefault();
+            focusRow(rows[to]);
+        });
+
+        /* Verdict strip and the text box are the filter surface — pressing
+           the active segment again clears the filter. */
+        document.querySelectorAll('#stat-pills .seg').forEach(p => {
+            p.addEventListener('click', () => {
+                bandFilter = p.dataset.band === bandFilter ? null : p.dataset.band;
+                renderList();
+            });
+        });
+        $('res-filter').addEventListener('input', e => { textFilter = e.target.value; renderList(); });
+        $('res-sort').addEventListener('change', e => { sortMode = e.target.value; renderList(); });
+        $('rev-filter').addEventListener('click', () => {
+            revFilter = !revFilter;
+            $('rev-filter').setAttribute('aria-pressed', revFilter ? 'true' : 'false');
+            renderList();
+        });
+        // The 내보내기 menu closes on Escape and on a click outside it.
+        $('export-menu').addEventListener('keydown', e => {
+            if (e.key === 'Escape' && $('export-menu').open) {
+                $('export-menu').open = false;
+                $('export-menu').querySelector('summary').focus();
+            }
+        });
+        document.addEventListener('click', e => {
+            if ($('export-menu').open && !$('export-menu').contains(e.target)) $('export-menu').open = false;
+        });
+
+        /* ── evidence panel ──────────────────────── */
+        function evItemHtml(e) {
+            const neutral = e.direction === 'neutral';
+            const tag = neutral ? '중립' : (STRENGTH_LABELS[e.strength] || e.strength);
+            const prob = (e.probability != null && e.calibration_id)
+                ? ` · p=${Number(e.probability).toFixed(2)}${e.probability_ci ? ` (95% CI ${Number(e.probability_ci[0]).toFixed(2)}–${Number(e.probability_ci[1]).toFixed(2)})` : ''} · 보정 ${shown(e.calibration_id)}`
+                : '';
+            return `<li><span class="str${neutral ? ' str-neutral' : ''}">${escapeHtml(tag)}</span><span>${shown(e.title)}` +
+                `${e.detail ? `<span class="ev-src">${shown(e.detail || '')}</span>` : ''}` +
+                `<span class="ev-src">${escapeHtml(KIND_LABELS[e.kind] || e.kind)} · ${escapeHtml(DIRECTION_LABELS[e.direction] || e.direction)}${prob}</span></span></li>`;
+        }
+
+        function skippedHtml(r) {
+            const cov = (r && r.coverage) || [];
+            const groups = [];
+            const byKey = new Map();
+            cov.filter(c => c.status === 'skipped').forEach(c => {
+                const reason = String(c.reason || '사유 기록 없음');
+                const m = /^모델 실행 불가: (.+?): (.+)$/.exec(reason);
+                const key = (m ? 'm|' + m[2] : 'c|' + reason);
+                let g = byKey.get(key);
+                if (!g) {
+                    g = { why: m ? m[2] : reason, isModel: Boolean(m), names: [] };
+                    byKey.set(key, g);
+                    groups.push(g);
+                }
+                g.names.push(m ? m[1] : checkLabel(c.check));
+            });
+            const lis = groups.map(g => {
+                const head = g.isModel ? `신경망 탐지기 ${g.names.length}종` : `검사 ${g.names.length}개`;
+                return `<li><b>${escapeHtml(head)}</b> — ${shown(g.why)}<div class="names">${g.names.map(shown).join(', ')}</div></li>`;
             }).join('');
-            return `<div class="dgroup ${cls || ''}"><div class="dt">${title}</div><ul>${rows}</ul></div>`;
+            const ran = cov.filter(c => c.status === 'ran');
+            return (lis ? `<ul>${lis}</ul>` : '<p>실행하지 않은 검사가 없습니다.</p>') +
+                (ran.length ? `<p class="names">실행한 검사: ${ran.map(c => shown(checkLabel(c.check))).join(', ')}</p>` : '');
         }
 
-        function detailHtml(item) {
-            const r = item.result || {};
+        function referenceHtml(r) {
             const parts = [];
-            if (item.error) parts.push(`<div class="verdict">분석 실패: ${shown(item.error)}</div>`);
-            // Order: verdict, then evidence grouped by kind, then coverage.
-            if (item.result) {
-                parts.push(verdictHeadHtml(r));
-                parts.push(evidenceHtml(r));
-                parts.push(coverageHtml(r));
+            const soft = ((r && r.evidence) || []).filter(e => e.kind !== 'deterministic');
+            if (soft.length) parts.push(`<div class="dgroup"><div class="dt">통계적·어휘적 근거 (보정 전 — 결론 불참여)</div><ol class="ev-list">${soft.map(evItemHtml).join('')}</ol></div>`);
+            const ma = r && r.model_analysis;
+            if (ma) {
+                parts.push(`<div class="dgroup"><div class="dt">외부 모델 원점수(미보정, 결론 불참여) — ${modelScoreText(ma)}</div>${(ma.models || []).length ? modelMembersHtml(ma) : `<div class="note">${shown(ma.detail || '')}</div>`}</div>`);
+            }
+            // Unmeasured heuristics (pixel ensemble, fusion, legacy audio/
+            // video heuristics) — displayed for reference, never decide.
+            parts.push(listItems('참고 신호(미측정 휴리스틱 — 결론 불참여)', ((r && r.reference_signals) || []).map(s => ({ title: `${s.title} (${s.weight})`, detail: s.detail }))));
+            const sg = r && r.source_guess;
+            if (sg && sg.label) {
+                const reasons = (sg.reasons || []).map(shown).join(' ');
+                parts.push(`<div class="dgroup"><div class="dt">출처 추정 (${escapeHtml(sourceConfidenceLabel(r, sg))})</div><div class="note">${shown(sg.label)} — ${reasons}</div></div>`);
+            }
+            parts.push(listItems('다음 확인', r && r.next_checks));
+            const html = parts.filter(Boolean).join('');
+            const count = soft.length + (ma ? 1 : 0) + (((r && r.reference_signals) || []).length) + (sg && sg.label ? 1 : 0);
+            return { html, count };
+        }
+
+        function techText(item) {
+            const r = item.result || {};
+            const lines = [
+                '파일: ' + displayName(item.path || item.name || ''),
+                'sha256: ' + (item.sha256 || '없음'),
+                '크기: ' + (item.size_bytes != null ? item.size_bytes + ' B' : '없음'),
+                '종류: ' + String(item.kind || '') + ' · 상태: ' + String(item.status || ''),
+                'verdict_code: ' + String(r.verdict_code || '없음'),
+                'grade: ' + String(r.grade || '없음'),
+                'score_is_calibrated: ' + String(Boolean(r.score_is_calibrated)),
+                'probability: ' + (r.probability == null ? 'null' : String(r.probability)),
+            ];
+            if (item.member) lines.push('압축 구성 파일: ' + displayName(item.member));
+            return lines.join('\n');
+        }
+
+        function renderDetail(entry) {
+            const box = $('detail');
+            if (!entry) { box.innerHTML = ''; return; }
+            const item = entry.item;
+            const r = item.result || null;
+            const v = verdictOf(item);
+            const mk = VERDICT_MARK[v];
+            const rev = reviewStore[itemKey(item)] || {};
+            const parts = [];
+            parts.push(`<div class="d-head"><div class="d-verdict vt-${mk}"><span class="mk mk-lg mk-${mk}" aria-hidden="true"></span><span>${shown(shortVerdict(item))}</span>${r && r.grade === 'reference' ? '<span class="grade-pill">참고 등급</span>' : ''}</div>` +
+                `<h2 id="detail-h" tabindex="-1">${shown(verdictLine(item))}</h2>` +
+                `<div class="d-name">${shown(item.path || item.name || '파일')}</div>` +
+                `<div class="d-meta">${shown(metaLine(item))}</div>` +
+                `<button type="button" class="linkbtn d-back">목록으로 돌아가기</button></div>`);
+            const body = [];
+            // 근거: the records that carry the conclusion, then neutral records.
+            const decisive = decisiveEvidence(r, v);
+            const neutral = ((r && r.evidence) || []).filter(e => e.kind === 'deterministic' && e.direction === 'neutral');
+            let ev = decisive.length ? `<ol class="ev-list">${decisive.map(evItemHtml).join('')}</ol>` : `<p>${shown(noEvidenceText(item))}</p>`;
+            if (neutral.length) ev += `<p class="hint">확인한 기록 (결론과 무관한 중립 기록)</p><ol class="ev-list">${neutral.map(evItemHtml).join('')}</ol>`;
+            if (item.error && v !== 'other') ev += `<p class="c-red">분석 실패: ${shown(item.error)}</p>`;
+            body.push(`<section class="d-sec"><h3>근거</h3>${ev}</section>`);
+            // A failed check is never behind a disclosure.
+            const failed = failedChecks(item);
+            if (failed.length) body.push(`<section class="d-sec d-fail"><h3>실패한 검사 ${failed.length}</h3><ul>${failed.map(c => `<li>${shown(coverageText(c))}</li>`).join('')}</ul></section>`);
+            // Limitations that repeat a failed check word for word are shown once, in 실패한 검사.
+            const failedTexts = new Set(failed.map(c => '검사 실패 — ' + coverageText(c)));
+            const lims = [...new Set((r && r.limitations) || [])].filter(l => !failedTexts.has(l));
+            body.push(`<section class="d-sec d-limit"><h3>이 결론의 한계</h3><p>${escapeHtml(limitAdvice(item))}</p>${lims.length ? `<ul>${lims.map(l => `<li>${shown(l)}</li>`).join('')}</ul>` : ''}</section>`);
+            const discs = [];
+            if (r) {
+                const skipped = (r.coverage || []).filter(c => c.status === 'skipped').length;
+                const cc = coverageCounts(r);
+                discs.push(`<details class="disc"><summary>실행하지 않은 검사 <span class="cnt">${skipped}</span><span class="sub">실행 ${cc.ran} / 해당 ${cc.total}</span></summary><div class="disc-body">${skippedHtml(r)}</div></details>`);
+                const ref = referenceHtml(r);
+                discs.push(`<details class="disc"><summary>참고 신호 <span class="cnt">${ref.count}</span><span class="sub">결론에 쓰지 않음</span></summary><div class="disc-body">${ref.html || '<p>없음</p>'}</div></details>`);
             }
             // P7/R9-1: a member row has item.member (its "::" is display only);
             // any other row is a real file whose escaped path is unescaped for
@@ -779,38 +1527,116 @@
             const hasPreview = Boolean(lastScanRoot && lastScanRootB64 && item.path_b64 && !item.member &&
                 (item.kind === 'image' || item.kind === 'video' || item.kind === 'audio'));
             const pvB64 = hasPreview ? item.path_b64 : '';
-            const hmB64 = item.heatmap_path_b64 || ((r.pixel_analysis || {}).heatmap_path_b64) || '';
+            const hmB64 = item.heatmap_path_b64 || (((r || {}).pixel_analysis || {}).heatmap_path_b64) || '';
             const hasHeatmap = Boolean(hmB64 && lastScanRoot && lastScanRootB64);
-
-            if (item.kind === 'image' && hasPreview && hasHeatmap) {
-                parts.push(`<div class="forensic-studio-slot" data-pv="${escapeHtml(pvB64)}" data-hm="${escapeHtml(hmB64)}"><span class="note">포렌식 비교 스튜디오 준비 중…</span></div>`);
+            if (hasPreview || hasHeatmap) {
+                let media = '';
+                if (item.kind === 'image' && hasPreview && hasHeatmap) {
+                    media = `<div class="forensic-studio-slot" data-pv="${escapeHtml(pvB64)}" data-hm="${escapeHtml(hmB64)}"><span class="note">포렌식 비교 스튜디오 준비 중…</span></div>`;
+                } else {
+                    if (hasPreview) media += `<div class="dgroup"><div class="dt">미리보기</div><div class="pv-slot" data-pv="${escapeHtml(pvB64)}" data-kind="${escapeHtml(item.kind)}"><span class="note">로딩 중…</span></div></div>`;
+                    if (hasHeatmap) media += `<div class="dgroup"><div class="dt">픽셀 히트맵</div><div class="hm-slot" data-hm="${escapeHtml(hmB64)}"><span class="note">히트맵 로딩 중…</span></div></div>`;
+                }
+                discs.push(`<details class="disc disc-media"><summary>${hasHeatmap ? '미리보기·히트맵' : '미리보기'}</summary><div class="disc-body">${media}</div></details>`);
+            }
+            if (r) {
+                discs.push(`<details class="disc"><summary>기술 세부</summary><div class="disc-body">${verdictHeadHtml(r)}${evidenceHtml(r)}${coverageHtml(r)}` +
+                    `<div class="band-advice">${escapeHtml(verdictAdvice(r.verdict_code || 'undetermined', r.grade))}</div>` +
+                    `<div class="caveat">결론은 결정적 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>` +
+                    `<pre class="tech">${escapeHtml(techText(item))}</pre></div></details>`);
             } else {
-                if (hasPreview) {
-                    parts.push(`<div class="dgroup"><div class="dt">미리보기</div><div class="pv-slot" data-pv="${escapeHtml(pvB64)}" data-kind="${escapeHtml(item.kind)}"><span class="note">로딩 중…</span></div></div>`);
-                }
-                if (hasHeatmap) {
-                    parts.push(`<div class="dgroup"><div class="dt">픽셀 히트맵</div><div class="hm-slot" data-hm="${escapeHtml(hmB64)}"><span class="note">히트맵 로딩 중…</span></div></div>`);
-                }
+                discs.push(`<details class="disc"><summary>기술 세부</summary><div class="disc-body"><pre class="tech">${escapeHtml(techText(item))}</pre></div></details>`);
             }
-            const ma = r.model_analysis;
-            if (ma) {
-                const members = (ma.models || []).map(m =>
-                    `<li>${shown(m.display_name || m.model || '모델')} — 원점수 ${modelScoreText(m)}</li>`).join('');
-                parts.push(`<div class="dgroup"><div class="dt">외부 모델 원점수(미보정, 결론 불참여) — ${modelScoreText(ma)}</div>${members ? `<ul>${members}</ul>` : `<div class="note">${shown(ma.detail || '')}</div>`}</div>`);
+            body.push(`<div class="discs">${discs.join('')}</div>`);
+            body.push(`<section class="d-review" aria-labelledby="rev-h"><h3 id="rev-h">검토</h3>
+                <div class="rev-actions">
+                    <button type="button" class="btn rev-star" aria-pressed="${rev.star ? 'true' : 'false'}">${rev.star ? '검토함' : '검토 완료로 표시'}</button>
+                    <label class="lbl">검토 판정
+                        <select class="field rev-verdict-sel">
+                            <option value="unreviewed">미검토</option>
+                            <option value="synthetic">인공합성 의심</option>
+                            <option value="authentic">원본 정상</option>
+                            <option value="inconclusive">판단 보류</option>
+                        </select>
+                    </label>
+                </div>
+                <label class="lbl" for="rev-note">검토 메모</label>
+                <textarea class="field rev-note" id="rev-note"></textarea>
+                <p class="rev-sync-status" aria-live="polite"></p>
+                <details class="disc"><summary>학습용 라벨 보내기</summary><div class="disc-body"><div class="fb-row"><span class="note">검토자 라벨:</span>
+                    <button type="button" class="btn btn-sm" data-label="synthetic">실제 합성/AI</button>
+                    <button type="button" class="btn btn-sm" data-label="real">실제 실물</button>
+                    <span class="fb-status"></span></div></div></details>
+                <p class="hint">검토 기록은 이 사건(검사한 폴더)과 파일 내용(sha256)에만 붙습니다.</p>
+            </section>`);
+            box.innerHTML = parts.join('') + `<div class="d-body">${body.join('')}</div>`;
+            bindDetail(box, entry);
+        }
+
+        function bindDetail(box, entry) {
+            const item = entry.item;
+            const rev = reviewStore[itemKey(item)] || {};
+            box.querySelector('.d-back').addEventListener('click', () => {
+                if (entry.row) focusRow(entry.row);
+            });
+            box.querySelectorAll('.disc-media').forEach(d => d.addEventListener('toggle', () => {
+                if (!d.open || d.dataset.loaded) return;
+                d.dataset.loaded = '1';
+                d.querySelectorAll('.forensic-studio-slot').forEach(loadForensicStudio);
+                d.querySelectorAll('.hm-slot').forEach(loadHeatmap);
+                d.querySelectorAll('.pv-slot').forEach(loadPreview);
+            }));
+            const star = box.querySelector('.rev-star');
+            star.addEventListener('click', () => {
+                const on = toggleReview(item);
+                star.setAttribute('aria-pressed', on ? 'true' : 'false');
+                star.textContent = on ? '검토함' : '검토 완료로 표시';
+                if (entry.row) entry.row.querySelector('.row-rev').textContent = on ? '검토함' : '';
+            });
+            box.querySelectorAll('button[data-label]').forEach(b => b.addEventListener('click', () => {
+                submitFeedback(item, b.dataset.label, box.querySelector('.fb-status'));
+            }));
+            const note = box.querySelector('.rev-note');
+            note.value = rev.note || '';
+            const verdictSel = box.querySelector('.rev-verdict-sel');
+            verdictSel.value = rev.verdict || 'unreviewed';
+            const syncStatus = box.querySelector('.rev-sync-status');
+            let syncTimeout = null;
+            function saveAndSync() {
+                const k = itemKey(item);
+                const cur = reviewStore[k] || {};
+                cur.note = note.value;
+                cur.verdict = verdictSel.value;
+                cur.ts = Date.now();
+                reviewStore[k] = cur;
+                saveReviewStore(k);
+                clearTimeout(syncTimeout);
+                syncTimeout = setTimeout(async () => {
+                    await pushReviewToServer(k, cur);
+                    syncStatus.textContent = '서버에 저장됨';
+                }, 500);
             }
-            // Unmeasured heuristics (pixel ensemble, fusion, legacy audio/
-            // video heuristics) — displayed for reference, never decide.
-            parts.push(listItems('참고 신호(미측정 휴리스틱 — 결론 불참여)', (r.reference_signals || []).map(s => ({ title: `${s.title} (${s.weight})`, detail: s.detail }))));
-            parts.push(listItems('한계', r.limitations, 'lim'));
-            parts.push(listItems('다음 확인', r.next_checks));
-            const sg = r.source_guess;
-            if (sg && sg.label) {
-                const reasons = (sg.reasons || []).map(shown).join(' ');
-                parts.push(`<div class="dgroup"><div class="dt">출처 추정 (${escapeHtml(sourceConfidenceLabel(r, sg))})</div><div class="note">${shown(sg.label)} — ${reasons}</div></div>`);
+            note.addEventListener('input', saveAndSync);
+            verdictSel.addEventListener('change', saveAndSync);
+        }
+
+        async function submitFeedback(item, label, statusEl) {
+            statusEl.textContent = '기록 중…';
+            try {
+                const data = await apiJson('/api/feedback', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        path: item.path || item.name,
+                        name: item.name,
+                        expected_label: label,
+                        result: item.result,
+                    }),
+                });
+                statusEl.textContent = data.ok ? '기록됨 ✓' : ('실패: ' + displayName(data.error || ''));  // R12-6
+            } catch (e) {
+                statusEl.textContent = '실패: ' + displayName(e.message);  // R12-6: a server message may echo a name
             }
-            parts.push(`<div class="band-advice">${escapeHtml(verdictAdvice(r.verdict_code || 'undetermined', r.grade))}</div>`);
-            parts.push(`<div class="caveat">결론은 결정적 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>`);
-            return parts.join('');
         }
 
         // R12-4: /api/preview and /api/heatmap by URL-safe base64 bytes only.
@@ -897,7 +1723,6 @@
                 studio.innerHTML = `
                     <div class="studio-header">
                         <div class="studio-title">
-                            <span>🔬</span>
                             <span>포렌식 비교 분석 스튜디오</span>
                         </div>
                         <div class="studio-modes" role="group" aria-label="비교 모드">
@@ -1066,318 +1891,16 @@
             }
         }
 
-        function renderCard(list, entry) {
-            const item = entry.item;
-            const r = item.result || {};
-            const verdict = verdictOf(item);
-            const band = bandCls(verdict);
-            // The ring shows a number only for a calibrated probability;
-            // otherwise a verdict glyph (no uncalibrated number on display).
-            const calibrated = Boolean(r.score_is_calibrated);
-            const ringText = calibrated ? String(Number(r.score) || 0) : ({ high: '!', low: '✓', medium: '?' }[band] || '–');
-            const ringFill = calibrated ? (Number(r.score) || 0) : (band === 'other' ? 0 : 100);
-            const evCounts = ['deterministic', 'statistical', 'lexical'].map(k => (r.evidence || []).filter(e => e.kind === k).length);
-            const failedChecks = (r.coverage || []).filter(c => c.status === 'failed').length;
-            const tool = (r.source_guess && r.source_guess.label) || '알 수 없음';
-            const rev = reviewStore[itemKey(item)] || {};
-
-            const card = document.createElement('div');
-            card.className = 'res' + (rev.star ? ' reviewed' : '');
-            card.style.setProperty('--res-accent', bandColor(verdict));
-            card.dataset.verdict = verdict;
-            card.innerHTML = `
-                <div class="res-main">
-                    <div class="ring">
-                        <svg viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15.9"></circle>
-                        <circle class="val" cx="18" cy="18" r="15.9" pathLength="100"
-                            stroke-dasharray="${Math.max(0, Math.min(100, ringFill))} 100"
-                            class="bs-${band}"></circle></svg>
-                        <span class="num bc-${band}">${escapeHtml(ringText)}</span>
-                    </div>
-                    <div class="res-info">
-                        <div class="res-name">${shown(item.name || item.path || '파일')}</div>
-                        <div class="res-sub">
-                            <span class="band-pill band-${band}">${escapeHtml(riskLabel(verdict))}</span>
-                            ${r.grade === 'reference' ? '<span class="grade-pill">참고</span>' : ''}
-                            <span class="ev-counts" title="결정적·통계적·어휘적 근거 수">결정 ${evCounts[0]} · 통계 ${evCounts[1]} · 어휘 ${evCounts[2]}</span>
-                            ${failedChecks ? `<span class="c-red">검사 실패 ${failedChecks}</span>` : ''}
-                            <span>${shown(tool)}</span>
-                            ${r.model_analysis && r.model_analysis.available !== false ? '<span class="nn-badge">NN</span>' : ''}
-                            ${rev.star ? '<span class="rev-badge">검토됨</span>' : ''}
-                            ${item.error ? '<span class="c-red">분석 실패</span>' : ''}
-                        </div>
-                    </div>
-                    <button class="rev-star" title="검토 표시 토글" aria-pressed="${rev.star ? 'true' : 'false'}">★</button>
-                    <span class="chev">›</span>
-                </div>
-                <div class="res-detail"></div>`;
-
-            card.querySelector('.rev-star').addEventListener('click', e => {
-                e.stopPropagation();
-                toggleReview(item, card);
-            });
-
-            const detail = card.querySelector('.res-detail');
-            let built = false;
-            const toggle = () => {
-                card.classList.toggle('open');
-                if (card.classList.contains('open') && !built) {
-                    built = true;
-                    detail.innerHTML = detailHtml(item);
-                    const fb = document.createElement('div');
-                    fb.className = 'fb-row';
-                    fb.innerHTML = `<span class="note">검토자 라벨:</span>
-                        <button class="btn btn-sm" data-label="synthetic">실제 합성/AI</button>
-                        <button class="btn btn-sm" data-label="real">실제 실물</button>
-                        <span class="fb-status"></span>`;
-                    fb.querySelectorAll('button[data-label]').forEach(b => b.addEventListener('click', e => {
-                        e.stopPropagation();
-                        submitFeedback(item, b.dataset.label, fb.querySelector('.fb-status'));
-                    }));
-                    detail.appendChild(fb);
-                    const revBox = document.createElement('div');
-                    revBox.className = 'rev-box';
-                    const note = document.createElement('textarea');
-                    note.className = 'rev-note';
-                    note.placeholder = '검토 메모 — 분석관 의견 및 특이사항 입력 (서버 자동 동기화)';
-                    note.value = rev.note || '';
-                    note.addEventListener('click', e => e.stopPropagation());
-
-                    const revBar = document.createElement('div');
-                    revBar.className = 'rev-toolbar';
-                    revBar.innerHTML = `
-                        <div class="rev-row">
-                            <label class="rev-lbl">검토 판정:</label>
-                            <select class="rev-verdict-sel">
-                                <option value="unreviewed">미검토</option>
-                                <option value="synthetic">인공합성 의심</option>
-                                <option value="authentic">원본 정상</option>
-                                <option value="inconclusive">판단 보류</option>
-                            </select>
-                        </div>
-                        <span class="rev-sync-status"></span>
-                    `;
-                    const verdictSel = revBar.querySelector('.rev-verdict-sel');
-                    verdictSel.value = rev.verdict || 'unreviewed';
-                    verdictSel.addEventListener('click', e => e.stopPropagation());
-
-                    const syncStatus = revBar.querySelector('.rev-sync-status');
-                    let syncTimeout = null;
-                    function saveAndSync() {
-                        const k = itemKey(item);
-                        const cur = reviewStore[k] || {};
-                        cur.note = note.value;
-                        cur.verdict = verdictSel.value;
-                        cur.ts = Date.now();
-                        reviewStore[k] = cur;
-                        saveReviewStore(k);
-                        syncStatus.className = 'rev-sync-status saving';
-                        syncStatus.textContent = '● 동기화 중…';
-                        clearTimeout(syncTimeout);
-                        syncTimeout = setTimeout(async () => {
-                            await pushReviewToServer(k, cur);
-                            syncStatus.className = 'rev-sync-status saved';
-                            syncStatus.textContent = '● 서버 동기화됨';
-                        }, 500);
-                    }
-
-                    note.addEventListener('input', saveAndSync);
-                    verdictSel.addEventListener('change', saveAndSync);
-
-                    revBox.appendChild(note);
-                    revBox.appendChild(revBar);
-                    detail.appendChild(revBox);
-
-                    detail.querySelectorAll('.forensic-studio-slot').forEach(loadForensicStudio);
-                    detail.querySelectorAll('.hm-slot').forEach(loadHeatmap);
-                    detail.querySelectorAll('.pv-slot').forEach(loadPreview);
-                }
-            };
-            card.querySelector('.res-main').addEventListener('click', toggle);
-            card.querySelector('.res-main').setAttribute('tabindex', '0');
-            card.querySelector('.res-main').addEventListener('keydown', e => {
-                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
-            });
-            list.appendChild(card);
-        }
-
-        function itemBand(entry) {
-            return verdictOf(entry.item);
-        }
-
-        const BAND_ORDER = { manipulation_evidence: 0, undetermined: 1, authenticity_evidence: 2, other: 3 };
-        function filteredResults() {
-            const needle = textFilter.trim().toLowerCase();
-            const filtered = results.filter(entry => {
-                if (bandFilter && itemBand(entry) !== bandFilter) return false;
-                if (revFilter && !(reviewStore[itemKey(entry.item)] || {}).star) return false;
-                if (!needle) return true;
-                const item = entry.item;
-                return ((item.name || '') + ' ' + (item.path || '')).toLowerCase().includes(needle);
-            });
-            const byName = (a, b) => String(a.item.name || a.item.path || '').localeCompare(String(b.item.name || b.item.path || ''), 'ko');
-            if (sortMode === 'name') {
-                filtered.sort(byName);
-            } else {
-                // 결론순 (D16): verdict order, then name. The uncalibrated
-                // score is always 0 in phase 0 and never orders results.
-                filtered.sort((a, b) => (BAND_ORDER[itemBand(a)] - BAND_ORDER[itemBand(b)]) || byName(a, b));
-            }
-            return filtered;
-        }
-
-        function renderResults(summary, scroll = true) {
-            const list = $('res-list');
-            list.innerHTML = '';
-
-            // Canonical band counts — every pill plus the total must agree.
-            const bands = { manipulation_evidence: 0, undetermined: 0, authenticity_evidence: 0, other: 0 };
-            let modelCount = 0;
-            results.forEach(entry => {
-                bands[itemBand(entry)]++;
-                if ((entry.item.result || {}).model_analysis) modelCount++;
-            });
-            const modelActive = summary.external_model_active != null ? summary.external_model_active : modelCount;
-            $('stat-manip').textContent = bands.manipulation_evidence;
-            $('stat-undet').textContent = bands.undetermined;
-            $('stat-auth').textContent = bands.authenticity_evidence;
-            $('stat-other').textContent = bands.other;
-            $('stat-total').textContent = results.length;
-            // N5: archive container rows are counted by verdict; say how many.
-            const containers = summary.container_rows != null
-                ? summary.container_rows
-                : results.filter(entry => entry.item.kind === 'archive' && entry.item.result).length;
-            $('stat-model-label').textContent = (containers ? `압축 파일 ${containers}건 포함 · ` : '') + `뉴럴 ${modelActive}`;
-            const total = Math.max(1, results.length);
-            $('distbar').innerHTML =
-                `<div class="bg-red"></div>` +
-                `<div class="bg-orange"></div>` +
-                `<div class="bg-green"></div>` +
-                `<div class="bg-line"></div>`;
-            // el.style.width is a JS property assignment — not an inline
-            // style attribute, so it is allowed under style-src 'self'.
-            const segs = $('distbar').children;
-            [bands.manipulation_evidence, bands.undetermined, bands.authenticity_evidence, bands.other].forEach((n, i) => {
-                if (segs[i]) segs[i].style.width = (n / total * 100) + '%';
-            });
-
-            document.querySelectorAll('#stat-pills .pill-stat').forEach(p => {
-                const active = (p.dataset.band || null) === bandFilter;
-                p.classList.toggle('active', active);
-                p.setAttribute('aria-pressed', active ? 'true' : 'false');
-            });
-
-            kbIndex = -1;
-            const filtered = filteredResults();
-            if (!filtered.length) {
-                list.innerHTML = results.length
-                    ? '<div class="empty"><div class="e-icon">🔍</div>필터와 일치하는 결과가 없습니다</div>'
-                    : '<div class="empty"><div class="e-icon">📭</div>분석 결과가 없습니다</div>';
-            }
-            renderedRows = Math.min(RENDER_WINDOW, filtered.length);
-            filtered.slice(0, renderedRows).forEach(e => renderCard(list, e));
-            updateMore(list, filtered.length);
-
-            $('results-section').hidden = false;
-            if (scroll) $('results-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-
-        function updateMore(list, filteredLen) {
-            const row = $('more-row');
-            if (renderedRows >= filteredLen) { row.hidden = true; return; }
-            row.hidden = false;
-            $('more-btn').textContent = `나머지 ${filteredLen - renderedRows}개 더 보기`;
-        }
-        $('more-btn').addEventListener('click', () => {
-            const list = $('res-list');
-            const filtered = filteredResults();
-            const prev = renderedRows;
-            renderedRows = Math.min(renderedRows + RENDER_WINDOW, filtered.length);
-            filtered.slice(prev, renderedRows).forEach(e => renderCard(list, e));
-            updateMore(list, filtered.length);
-        });
-
-        /* Band pills and the text box are the single filter surface —
-           clicking the active pill again clears the filter. */
-        document.querySelectorAll('#stat-pills .pill-stat').forEach(p => {
-            const apply = () => {
-                bandFilter = (p.dataset.band || null) === bandFilter ? null : (p.dataset.band || null);
-                renderResults({}, false);
-            };
-            p.addEventListener('click', apply);
-            p.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); apply(); } });
-        });
-        $('res-filter').addEventListener('input', e => { textFilter = e.target.value; renderResults({}, false); });
-        $('res-sort').addEventListener('change', e => { sortMode = e.target.value; renderResults({}, false); });
-        $('rev-filter').addEventListener('click', () => {
-            revFilter = !revFilter;
-            $('rev-filter').setAttribute('aria-pressed', revFilter ? 'true' : 'false');
-            $('rev-filter').classList.toggle('btn-primary', revFilter);
-            renderResults({}, false);
-        });
-
-        /* Keyboard review: arrows/j/k walk the rendered cards, Enter opens,
-           Esc closes open cards or clears filters. Skipped while typing. */
-        document.addEventListener('keydown', e => {
-            const tag = (e.target.tagName || '').toLowerCase();
-            const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable;
-            if ($('results-section').hidden) return;
-            if (e.key === 'Escape') {
-                const open = document.querySelector('.res.open');
-                if (open) { open.classList.remove('open'); return; }
-                if (bandFilter || revFilter || textFilter) {
-                    bandFilter = null; revFilter = false; textFilter = '';
-                    $('res-filter').value = '';
-                    $('rev-filter').setAttribute('aria-pressed', 'false');
-                    $('rev-filter').classList.remove('btn-primary');
-                    renderResults({}, false);
-                }
-                return;
-            }
-            if (typing) return;
-            const cards = [...document.querySelectorAll('#res-list .res')];
-            if (!cards.length) return;
-            const move = { ArrowDown: 1, j: 1, J: 1, ArrowUp: -1, k: -1, K: -1 }[e.key];
-            if (move == null) {
-                if (e.key === 'Enter' && kbIndex >= 0 && cards[kbIndex]) {
-                    e.preventDefault();
-                    cards[kbIndex].querySelector('.res-main').click();
-                }
-                return;
-            }
-            e.preventDefault();
-            kbIndex = Math.max(0, Math.min(cards.length - 1, kbIndex + move));
-            cards.forEach((c, i) => c.classList.toggle('kb-focus', i === kbIndex));
-            cards[kbIndex].scrollIntoView({ block: 'nearest' });
-        });
-
-        async function submitFeedback(item, label, statusEl) {
-            statusEl.textContent = '기록 중…';
-            try {
-                const data = await apiJson('/api/feedback', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        path: item.path || item.name,
-                        name: item.name,
-                        expected_label: label,
-                        result: item.result,
-                    }),
-                });
-                statusEl.textContent = data.ok ? '기록됨 ✓' : ('실패: ' + displayName(data.error || ''));  // R12-6
-            } catch (e) {
-                statusEl.textContent = '실패: ' + displayName(e.message);  // R12-6: a server message may echo a name
-            }
-        }
-
-        /* ── export ────────────────────────────────── */
+        /* ── exports ─────────────────────────────── */
         function download(blob, name) {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url; a.download = name; a.click();
-            URL.revokeObjectURL(url);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
         }
+        function closeMenu() { $('export-menu').open = false; }
         $('exp-json').addEventListener('click', () => {
+            closeMenu();
             if (!results.length) { toast('분석 결과가 없습니다', true); return; }
             const enriched = results.map(e => {
                 const rev = reviewStore[itemKey(e.item)];
@@ -1389,6 +1912,7 @@
             download(new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' }), 'deepfake-lens-results.json');
         });
         $('exp-csv').addEventListener('click', () => {
+            closeMenu();
             if (!results.length) { toast('분석 결과가 없습니다', true); return; }
             const f = csvCell;
             // BOM prefix keeps Korean intact when the CSV is opened in Excel.
@@ -1404,67 +1928,172 @@
             });
             download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'deepfake-lens-results.csv');
         });
-        $('exp-report').addEventListener('click', async () => {
-            if (!results.length) { toast('분석 결과가 없습니다', true); return; }
-            try {
-                const res = await apiFetch('/api/report', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(reportPayload()),
-                });
-                const type = res.headers.get('Content-Type') || '';
-                if (!type.includes('text/html')) {
-                    toast('리포트 생성 실패: ' + await apiError(res), true);
-                    return;
-                }
-                download(await res.blob(), 'deepfake-lens-report.html');
-            } catch (e) { toast('리포트 오류: ' + e.message, true); }
-        });
-        $('exp-pdf').addEventListener('click', async () => {
-            if (!results.length) { toast('분석 결과가 없습니다', true); return; }
-            try {
-                toast('포렌식 감정 PDF 생성 중…');
-                const res = await apiFetch('/api/report?format=pdf', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(reportPayload({ format: 'pdf', exhibit_no: '갑 제        호증' })),
-                });
-                const type = res.headers.get('Content-Type') || '';
-                if (!type.includes('application/pdf')) {
-                    toast('PDF 생성 실패: ' + await apiError(res), true);
-                    return;
-                }
-                download(await res.blob(), 'deepfake-lens-forensic-report.pdf');
-                toast('포렌식 감정서(PDF)가 다운로드되었습니다.');
-            } catch (e) { toast('PDF 생성 오류: ' + e.message, true); }
-        });
-        $('exp-evidence').addEventListener('click', async () => {
-            if (!results.length) { toast('분석 결과가 없습니다', true); return; }
-            try {
-                toast('전자소송 증거설명서(PDF) 생성 중…');
-                const res = await apiFetch('/api/report?format=evidence', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(reportPayload({ format: 'evidence' })),
-                });
-                const type = res.headers.get('Content-Type') || '';
-                if (!type.includes('application/pdf')) {
-                    toast('증거설명서 생성 실패: ' + await apiError(res), true);
-                    return;
-                }
-                download(await res.blob(), 'deepfake-lens-evidence-statement.pdf');
-                toast('전자소송 증거설명서(PDF)가 다운로드되었습니다.');
-            } catch (e) { toast('증거설명서 오류: ' + e.message, true); }
-        });
         $('exp-clear').addEventListener('click', () => {
+            closeMenu();
             results = [];
-            $('results-section').hidden = true;
+            lastProvenance = { coverage: null, thresholds: null, summary: null };
+            selectedEntry = null;
+            renderResults();
+            updateCaseLine();
+            $('ledger-empty-h').focus();
         });
 
+        /* ── report screen ───────────────────────── */
+        const GROUPS = [['manipulation_evidence', 'inc-manip'], ['authenticity_evidence', 'inc-auth'], ['undetermined', 'inc-undet'], ['other', 'inc-other']];
+        let groupsTouched = false;
+        GROUPS.forEach(([, id]) => $(id).addEventListener('change', () => { groupsTouched = true; renderReport(); }));
+        function selectedEntries() {
+            if (!groupsTouched) {
+                // Default exhibits: the evidence-bearing groups only.
+                GROUPS.forEach(([band, id]) => { $(id).checked = band === 'manipulation_evidence' || band === 'authenticity_evidence'; });
+            }
+            const on = new Set(GROUPS.filter(([, id]) => $(id).checked).map(([band]) => band));
+            return results.filter(e => on.has(itemBand(e))).sort(byVerdict);
+        }
+        const TAGS = { req: ['필수', 'tag-req'], ok: ['확인됨', 'tag-ok'], info: ['알림', 'tag-info'], warn: ['주의', 'tag-warn'] };
+        function reportChecks(sel) {
+            const out = [];
+            if (!results.length) out.push({ tag: 'req', text: '검사 결과가 없습니다. 먼저 폴더를 검사하십시오.', act: ['검사 화면으로', () => navigate('scan')] });
+            const no = caseValue('case-no'), nm = caseValue('case-name');
+            out.push(no && nm
+                ? { tag: 'ok', text: '사건: ' + no + ' · ' + nm }
+                : { tag: 'req', text: '사건번호와 사건명이 비어 있습니다 — 증거설명서에 필요합니다.', act: ['입력', () => $(no ? 'case-name' : 'case-no').focus()] });
+            const pl = caseValue('case-plaintiff'), df = caseValue('case-defendant');
+            if (!pl || !df) out.push({ tag: 'info', text: '의뢰인 또는 피고·피의자가 비어 있습니다 — 증거설명서에는 "(… 입력)" 자리표시로 남습니다.', act: ['입력', () => $(pl ? 'case-defendant' : 'case-plaintiff').focus()] });
+            out.push({ tag: 'info', text: '증거설명서는 원고(고소인) 측 제출 양식(갑호증)입니다.' });
+            if (results.length) {
+                const partial = partialResultNote(lastProvenance.summary);
+                out.push(partial ? { tag: 'warn', text: partial } : { tag: 'ok', text: '전체 검사 결과입니다(중단 없음).' });
+                const env = envFacts();
+                if (env.short.length) out.push({ tag: 'info', text: '검사 환경: ' + env.short.join(' · ') });
+                const uploads = results.filter(e => e.item.source === 'upload').length;
+                if (uploads) out.push({ tag: 'info', text: `올린 파일 ${uploads}개는 다시 분석할 수 없어 서명 제외(클라이언트 제공 결과)로 실립니다.` });
+                if (!sel.length) out.push({ tag: 'req', text: '서증으로 넣을 파일을 고르십시오. 근거 있는 파일이 없으면 판단 불가 칸을 고를 수 있습니다.', act: ['고르기', () => $('inc-manip').focus()] });
+            }
+            if (pdfAvailable === false) out.push({ tag: 'warn', text: 'PDF 엔진(pymupdf)이 설치되어 있지 않아 PDF는 만들 수 없습니다 — HTML 보고서와 서명된 JSON은 만들 수 있습니다.' });
+            return out;
+        }
+        function exportBlockReason(kind, sel) {
+            if (!results.length) return '검사 결과가 없습니다.';
+            if (!sel.length) return '서증으로 넣을 파일을 고르십시오.';
+            if ((kind === 'evidence' || kind === 'pdf') && pdfAvailable === false) return 'PDF 엔진(pymupdf)이 설치되어 있지 않습니다.';
+            if (kind === 'evidence' && !(caseValue('case-no') && caseValue('case-name'))) return '사건번호와 사건명을 채우면 증거설명서를 내보낼 수 있습니다.';
+            return '';
+        }
+        const EXPORT_BUTTONS = { evidence: 'exp-evidence', pdf: 'exp-pdf', html: 'exp-report', json: 'exp-signed' };
+        function renderReport() {
+            const b = bandCounts();
+            const sel = selectedEntries();
+            GROUPS.forEach(([band, id]) => { $(id + '-n').textContent = b[band] + '개'; });
+            $('inc-label').textContent = `${sel.length}개 선택`;
+            const list = $('report-checks');
+            list.innerHTML = '';
+            reportChecks(sel).forEach(c => {
+                const li = document.createElement('li');
+                const tag = document.createElement('span');
+                tag.className = 'tag ' + TAGS[c.tag][1];
+                tag.textContent = TAGS[c.tag][0];
+                const text = document.createElement('span');
+                text.textContent = c.text;
+                li.append(tag, text);
+                if (c.act) {
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn btn-sm';
+                    btn.textContent = c.act[0];
+                    btn.addEventListener('click', c.act[1]);
+                    li.appendChild(btn);
+                }
+                list.appendChild(li);
+            });
+            Object.entries(EXPORT_BUTTONS).forEach(([kind, id]) => setBusyButton($(id), Boolean(exportBlockReason(kind, sel))));
+            const why = exportBlockReason('evidence', sel);
+            $('export-note').textContent = why || '증거설명서를 내보낼 수 있습니다. 서명 키가 설정된 서버는 문서에 서명합니다.';
+            renderA4(sel);
+        }
+        function summarySentence() {
+            const b = bandCounts();
+            const parts = [`${results.length}개 파일 중 ${b.manipulation_evidence}개에서 조작·생성 근거를, ${b.authenticity_evidence}개에서 원본성 근거를 확인하였다.`];
+            if (b.undetermined) parts.push(`${b.undetermined}개는 판단할 근거가 없었으며 이는 원본임을 뜻하지 아니한다.`);
+            if (b.other) parts.push(`${b.other}개는 분석하지 못하였다.`);
+            return parts.join(' ');
+        }
+        function renderA4(sel) {
+            const miss = '<span class="miss">미기재</span>';
+            const val = id => caseValue(id) ? shown(caseValue(id)) : miss;
+            const shownRows = sel.slice(0, 10);
+            const rows = shownRows.map((e, i) => `<tr><td>갑 제${i + 1}호증</td><td>${shown(e.item.path || e.item.name || '파일')}</td><td>${escapeHtml(shortVerdict(e.item))}</td></tr>`).join('') +
+                (sel.length > shownRows.length ? `<tr><td colspan="3">외 ${sel.length - shownRows.length}건</td></tr>` : '') +
+                (sel.length ? '' : `<tr><td colspan="3">${miss}</td></tr>`);
+            const env = envFacts();
+            const partial = partialResultNote(lastProvenance.summary);
+            $('a4').innerHTML =
+                `<div class="a4-top"><span>${val('case-no')}</span><span>미리보기</span></div>` +
+                '<div class="a4-title">증 거 설 명 서</div>' +
+                `<table><caption>사건 정보</caption><tbody>` +
+                `<tr><th scope="row">사건</th><td>${val('case-no')} ${val('case-name')}</td></tr>` +
+                `<tr><th scope="row">원고(고소인)</th><td>${val('case-plaintiff')}</td></tr>` +
+                `<tr><th scope="row">피고(피의자)</th><td>${val('case-defendant')}</td></tr>` +
+                `<tr><th scope="row">대상</th><td>${lastScanRoot ? shown(lastScanRoot) : (results.length ? '올린 파일' : miss)} · ${results.length}개 파일</td></tr>` +
+                `</tbody></table>` +
+                `<div class="a4-h">1. 결론 요약</div><p>${escapeHtml(results.length ? summarySentence() : '검사 결과 없음')}</p>` +
+                (partial ? `<p><b>${shown(partial)}</b></p>` : '') +
+                `<table><caption>서증 목록</caption><thead><tr><th scope="col">호증</th><th scope="col">파일</th><th scope="col">결론</th></tr></thead><tbody>${rows}</tbody></table>` +
+                `<div class="a4-h">2. 검사의 한계</div><p>${escapeHtml(env.short.length ? env.short.join('. ') + '.' : '특이 사항 없음')}</p>`;
+        }
+
+        async function exportReport(kind) {
+            const btn = $(EXPORT_BUTTONS[kind]);
+            const sel = selectedEntries();
+            const why = exportBlockReason(kind, sel);
+            if (why) { $('export-note').textContent = why; return; }
+            if (btn.dataset.busy) return;
+            btn.dataset.busy = '1';
+            const items = sel.map(e => e.item);
+            const spec = {
+                evidence: ['evidence', 'application/pdf', 'deepfake-lens-evidence-statement.pdf', '증거설명서(PDF)'],
+                pdf: ['pdf', 'application/pdf', 'deepfake-lens-forensic-report.pdf', '감정 보고서(PDF)'],
+                html: ['html', 'text/html', 'deepfake-lens-report.html', 'HTML 보고서'],
+                json: ['json', 'application/json', 'deepfake-lens-signed-report.json', '서명된 JSON'],
+            }[kind];
+            $('export-note').textContent = spec[3] + '를 만드는 중입니다 — 서버가 파일을 다시 분석합니다.';
+            try {
+                const extra = { format: spec[0] };
+                if (kind === 'pdf') extra.exhibit_no = '갑 제        호증';
+                const res = await apiFetch('/api/report?format=' + spec[0], {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(reportPayload(extra, items)),
+                });
+                const type = res.headers.get('Content-Type') || '';
+                if (!res.ok || !type.includes(spec[1])) {
+                    toast(spec[3] + ' 생성 실패: ' + await apiError(res), true);
+                    $('export-note').textContent = spec[3] + '를 만들지 못했습니다.';
+                    return;
+                }
+                download(await res.blob(), spec[2]);
+                $('export-note').textContent = spec[3] + '를 내려받았습니다.';
+            } catch (e) {
+                toast(spec[3] + ' 오류: ' + e.message, true);
+            } finally {
+                delete btn.dataset.busy;
+            }
+        }
+        Object.entries(EXPORT_BUTTONS).forEach(([kind, id]) => $(id).addEventListener('click', () => exportReport(kind)));
+
         /* ── quick check ───────────────────────────── */
+        function startElapsed(el, text) {
+            const t0 = Date.now();
+            el.textContent = text;
+            const timer = setInterval(() => {
+                el.textContent = `${text} (${Math.floor((Date.now() - t0) / 1000)}초)`;
+            }, 1000);
+            return () => { clearInterval(timer); el.textContent = ''; };
+        }
         $('qc-text-btn').addEventListener('click', () => {
+            if (isBusyButton($('qc-text-btn'))) return;
             const text = $('qc-text').value;
-            if (!text.trim()) { toast('검사할 텍스트를 입력하세요', true); return; }
+            if (!text.trim()) { toast('검사할 텍스트를 입력하세요', true); $('qc-text').focus(); return; }
             const body = { text };
             const wm = $('qc-wm').value.trim();
             if (wm) body.watermark_secret = wm;
@@ -1484,7 +2113,7 @@
             return el;
         }
 
-        $('qc-file-btn').addEventListener('click', () => $('qc-file').click());
+        $('qc-file-btn').addEventListener('click', () => { if (!isBusyButton($('qc-file-btn'))) $('qc-file').click(); });
         $('qc-file').addEventListener('change', e => {
             const file = e.target.files[0];
             e.target.value = '';
@@ -1501,31 +2130,33 @@
         });
 
         async function runQuickCheck(options) {
-            const status = $('qc-status'), box = $('qc-out');
-            startElapsed(status, '전체 검사 실행 중… 뉴럴 모델 로딩 시 수십 초');
-            ['qc-text-btn', 'qc-file-btn'].forEach(id => $(id).disabled = true);
+            const box = $('qc-out');
+            const stop = startElapsed($('qc-status'), '전체 검사 실행 중… 뉴럴 모델 로딩 시 수십 초');
+            ['qc-text-btn', 'qc-file-btn'].forEach(id => setBusyButton($(id), true));
             try {
                 const data = await apiJson('/api/check', options);
                 if (data.error) {
-                    box.className = 'qc-out on';
                     box.innerHTML = `<div class="verdict c-red">오류: ${shown(data.error)}</div>`;
+                    $('qc-live').textContent = '빠른 검사 오류';
                     return;
                 }
                 if (data.mode === 'files') {
                     // Archive upload: members are analyzed as their own rows.
-                    box.className = 'qc-out';
                     box.innerHTML = '';
+                    lastScanRoot = '';
+                    lastScanRootB64 = '';
                     processResults(data);
                     toast(`압축 해제 — ${(data.items || []).length}개 파일 분석됨`);
+                    navigate('ledger', $('sum-h'));
                     return;
                 }
                 renderQuickCheck(data);
             } catch (e) {
-                box.className = 'qc-out on';
                 box.innerHTML = `<div class="verdict c-red">검사 실패: ${shown(e.message)}</div>`;
+                $('qc-live').textContent = '빠른 검사 실패';
             } finally {
-                stopElapsed(status);
-                ['qc-text-btn', 'qc-file-btn'].forEach(id => $(id).disabled = false);
+                stop();
+                ['qc-text-btn', 'qc-file-btn'].forEach(id => setBusyButton($(id), false));
             }
         }
 
@@ -1551,12 +2182,20 @@
             const item = data.item || {};
             const r = item.result || {};
             const verdict = verdictOf(item);
-            const band = bandCls(verdict);
+            const mk = VERDICT_MARK[verdict];
+            // Conclusion first; the per-layer detail is one disclosure below (a
+            // failed check stays visible).
+            const top = [];
+            top.push(`<div class="qc-head"><span class="mk mk-lg mk-${mk}" aria-hidden="true"></span>
+                <div><div class="d-verdict vt-${mk}">${shown(shortVerdict(item))}</div>
+                <h3 class="qc-line">${shown(verdictLine(item))}</h3>
+                <div class="note">${shown(item.name || '')}</div></div></div>`);
+            const decisive = decisiveEvidence(r, verdict);
+            if (decisive.length) top.push(`<ol class="ev-list">${decisive.map(evItemHtml).join('')}</ol>`);
+            const failed = failedChecks(item);
+            if (failed.length) top.push(`<section class="d-fail"><h3>실패한 검사 ${failed.length}</h3><ul>${failed.map(c => `<li>${shown(coverageText(c))}</li>`).join('')}</ul></section>`);
+            top.push(`<p class="band-advice">${escapeHtml(limitAdvice(item))}</p>`);
             const parts = [];
-            parts.push(`<div class="qc-head">
-                <span class="big bc-${band}">${escapeHtml(r.score_is_calibrated ? String(Number(r.score) || 0) : ({ high: '!', low: '✓', medium: '?' }[band] || '–'))}</span>
-                <div><span class="band-pill band-${band}">${escapeHtml(riskLabel(verdict))}</span>
-                <div class="note mt-4">${shown(item.name || '')}</div></div></div>`);
             if (item.error) parts.push(`<div class="verdict">분석 실패: ${shown(item.error)}</div>`);
             if (item.result) {
                 parts.push(verdictHeadHtml(r));
@@ -1567,10 +2206,8 @@
 
             const ma = r.model_analysis;
             if (ma) {
-                const members = (ma.models || []).map(m =>
-                    `<li>${shown(m.display_name || m.model || '모델')} — ${modelScoreText(m)}</li>`).join('');
-                parts.push(layer(`외부 모델 원점수(미보정, 결론 불참여) — ${modelScoreText(ma)}`,
-                    members ? `<ul>${members}</ul>` : `<div class="note">${shown(ma.detail || '')}</div>`));
+                parts.push(layer('외부 모델', `<div class="dt">외부 모델 원점수(미보정, 결론 불참여) — ${modelScoreText(ma)}</div>` +
+                    ((ma.models || []).length ? modelMembersHtml(ma) : `<div class="note">${shown(ma.detail || '')}</div>`)));
             }
             if (data.advanced) {
                 // D1: layer diagnostic — raw numbers with the fixed notice,
@@ -1599,18 +2236,16 @@
             parts.push(listItems('다음 확인', r.next_checks));
             parts.push(`<div class="band-advice">${escapeHtml(verdictAdvice(r.verdict_code || 'undetermined', r.grade))}</div>`);
             parts.push(`<div class="caveat">결론은 결정적 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>`);
-            box.innerHTML = parts.join('');
-            box.className = 'qc-out on';
-            box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            box.innerHTML = top.join('') + `<details class="disc"><summary>세부 — 근거 종류별·검사 범위·참고 신호·계층 진단</summary><div class="disc-body">${parts.join('')}</div></details>`;
+            // A11Y-6: only the one-line result is announced, not the whole block.
+            $('qc-live').textContent = '빠른 검사 결과: ' + riskLabel(verdict);
         }
 
         /* ── compare ───────────────────────────────── */
         const cmpFiles = { a: null, b: null };
         function bindSlot(slotId, inputId, key) {
             const slot = $(slotId), input = $(inputId);
-            const pick = () => { if (!scanBusy) input.click(); };
-            slot.addEventListener('click', pick);
-            slot.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+            slot.addEventListener('click', () => { if (!scanBusy) input.click(); });
             input.addEventListener('change', e => {
                 const f = e.target.files[0];
                 e.target.value = '';
@@ -1621,35 +2256,36 @@
                 const old = slot.querySelector('.pv');
                 if (old) old.remove();
                 const pv = mediaTagFor(f, 'pv');
-                if (pv) { pv.controls = false; slot.appendChild(pv); }
-                $('cmp-btn').disabled = !(cmpFiles.a && cmpFiles.b);
+                if (pv) { pv.controls = false; if (pv.tagName === 'IMG') pv.alt = ''; slot.appendChild(pv); }
+                setBusyButton($('cmp-btn'), !(cmpFiles.a && cmpFiles.b));
             });
         }
         bindSlot('slot-a', 'cmp-a', 'a');
         bindSlot('slot-b', 'cmp-b', 'b');
 
         $('cmp-btn').addEventListener('click', async () => {
-            if (!(cmpFiles.a && cmpFiles.b)) return;
-            const status = $('cmp-status'), box = $('cmp-result');
+            if (!(cmpFiles.a && cmpFiles.b)) { $('cmp-status').textContent = '파일 A와 B를 모두 고르십시오.'; return; }
+            if ($('cmp-btn').dataset.busy) return;
+            const box = $('cmp-result');
             const form = new FormData();
             form.append('file_a', cmpFiles.a, cmpFiles.a.name);
             form.append('file_b', cmpFiles.b, cmpFiles.b.name);
-            startElapsed(status, '비교 실행 중… (화자 모델 로딩 시 수십 초)');
-            $('cmp-btn').disabled = true;
+            const stop = startElapsed($('cmp-status'), '비교 실행 중… (화자 모델 로딩 시 수십 초)');
+            $('cmp-btn').dataset.busy = '1';
+            setBusyButton($('cmp-btn'), true);
             try {
                 const data = await apiJson('/api/compare', { method: 'POST', body: form });
-                box.classList.add('on');
                 if (data.error) {
                     box.innerHTML = `<div class="verdict c-red">오류: ${shown(data.error)}</div>`;
                     return;
                 }
                 renderCompare(data);
             } catch (e) {
-                box.classList.add('on');
                 box.innerHTML = `<div class="verdict c-red">비교 실패: ${shown(e.message)}</div>`;
             } finally {
-                stopElapsed(status);
-                $('cmp-btn').disabled = false;
+                stop();
+                delete $('cmp-btn').dataset.busy;
+                setBusyButton($('cmp-btn'), false);
             }
         });
 
@@ -1662,9 +2298,9 @@
             const score = data.raw_score != null ? data.raw_score : 0;
             const parts = [];
             parts.push(`<div class="qc-head">
-                <span class="big bc-other">${Number(score) || 0}</span>
+                <span class="big">${Number(score) || 0}</span>
                 <div><span class="band-pill band-unknown">계층 진단(참고 신호 · 미측정)</span>
-                <div class="note mt-4">${shown(kind)}${body.method ? ' · ' + shown(body.method) : ''}</div></div></div>`);
+                <div class="note">${shown(kind)}${body.method ? ' · ' + shown(body.method) : ''}</div></div></div>`);
             if (data.notice) parts.push(`<div class="note">${shown(data.notice)}</div>`);
             if (data.reference_note) parts.push(`<div class="verdict">${shown(data.reference_note)}</div>`);
             parts.push(provenanceNoteHtml(data));
@@ -1677,9 +2313,19 @@
         }
 
         /* ── initialization ───────────────────────── */
-        fetchReviewsFromServer();
-
-        /* ── version chip ──────────────────────────── */
+        updateCaseLine();
+        showView(viewFromHash() || 'scan', null, true);
+        renderResults();
+        fetchReviewsFromServer().then(() => { if (results.length) renderList(); });
         apiFetch('/api/stats').then(r => r.json()).then(d => {
             if (d.version) $('ver-chip').textContent = 'v' + d.version;
+            // U-8: the folder the server was started with is the scan default.
+            if (typeof d.default_folder === 'string' && d.default_folder) {
+                defaultFolder = d.default_folder;
+                defaultFolderB64 = typeof d.default_folder_b64 === 'string' ? d.default_folder_b64 : '';
+                if (!$('folder-path').value) $('folder-path').value = d.default_folder;
+            }
+            if (typeof d.pdf_available === 'boolean') pdfAvailable = d.pdf_available;
+            if (currentView === 'report') renderReport();
         }).catch(() => {});
+        resumeJob();

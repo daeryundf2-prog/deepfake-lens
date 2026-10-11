@@ -32,7 +32,12 @@ class ModelScoreSourceTest(unittest.TestCase):
         self.assertIn("entry.available === false", helper)
         self.assertIn("없음 — 미실행(", helper)
         self.assertEqual(source.count("외부 모델 원점수(미보정, 결론 불참여) — ${modelScoreText(ma)}"), 2)
-        self.assertEqual(len(re.findall(r"\$\{modelScoreText\(m\)\}", source)), 2)
+        # GUI redesign (U-10): members are rendered by one helper, modelMembersHtml, used by
+        # both views (evidence panel and quick check); members that share one score text are
+        # listed once — the text still comes from modelScoreText(m) for every member.
+        self.assertEqual(len(re.findall(r"\$\{modelScoreText\(m\)\}", source)), 1)
+        self.assertIn("const texts = members.map(m => modelScoreText(m));", source)
+        self.assertEqual(source.count("? modelMembersHtml(ma) :"), 2)
         self.assertNotIn("${ma.score != null ? ma.score : '없음'}", source)
         self.assertNotIn("(사용 불가)", source)
 
