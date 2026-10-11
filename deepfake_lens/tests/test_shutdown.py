@@ -501,9 +501,8 @@ WRAPPED_PARENT_SCRIPT = textwrap.dedent(
 )
 
 
-@unittest.skipUnless(sys.platform.startswith("linux"), "PR_SET_PDEATHSIG is Linux")
-class WrapperGrandchildTest(unittest.TestCase):
-    """R16-7 (round 16): a wrapper script's grandchild ends with the scan — SIGKILL, shutdown, timeout."""
+class _WrapperFixture(unittest.TestCase):
+    """R16-7 / R17-1 / R17-3: a wrapper "ffmpeg" on PATH and the marked grandchildren it runs (no tests of its own)."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -528,7 +527,7 @@ class WrapperGrandchildTest(unittest.TestCase):
         time.sleep(STAYS_GONE_SECONDS)
         self.assertEqual(self.out.stat().st_mtime_ns if self.out.exists() else None, before)  # nobody rewrites it
 
-    def test_sigkill_of_the_parent_ends_the_grandchild(self) -> None:
+    def _sigkill_of_the_parent_ends_the_grandchild(self) -> None:
         for repeat in range(REPEATS):
             with self.subTest(repeat=repeat):
                 self.out.unlink(missing_ok=True)
@@ -571,6 +570,19 @@ class WrapperGrandchildTest(unittest.TestCase):
                 time.sleep(0.01)
         return worker, outcome
 
+    def _in_thread(self, call: Any) -> tuple[threading.Thread, list[Any]]:
+        outcome: list[Any] = []
+
+        def run() -> None:
+            try:
+                outcome.append(call())
+            except BaseException as exc:  # noqa: BLE001 - recorded for the assertion
+                outcome.append(exc)
+
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+        return worker, outcome
+
     def _grandchildren(self) -> list[int]:
         found: list[int] = []
         for pid in os.listdir("/proc"):
@@ -581,6 +593,14 @@ class WrapperGrandchildTest(unittest.TestCase):
                 except OSError:
                     continue
         return [pid for pid in found if process_alive(pid)]
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "PR_SET_PDEATHSIG is Linux")
+class WrapperGrandchildTest(_WrapperFixture):
+    """R16-7 (round 16): a wrapper script's grandchild ends with the scan — SIGKILL, shutdown, timeout."""
+
+    def test_sigkill_of_the_parent_ends_the_grandchild(self) -> None:
+        self._sigkill_of_the_parent_ends_the_grandchild()
 
     def test_shutdown_stops_the_whole_group(self) -> None:
         with _IsolatedSession(self.root):
@@ -609,6 +629,144 @@ class WrapperGrandchildTest(unittest.TestCase):
         self.assertEqual((done.returncode, done.stdout), (5, "started\n"))
         killed = shutdown.run_child(["sh", "-c", "kill -TERM $$"], capture_output=True)
         self.assertEqual(killed.returncode, -signal.SIGTERM)  # a signal death is reported as one
+
+    def test_a_program_killed_with_sigkill_is_reported_as_one(self) -> None:
+        # R17-2 (round 17): the supervisor crashed with OSError EINVAL in
+        # signal.signal(SIGKILL, SIG_DFL) — run_child returned 1 and an English traceback.
+        killed = shutdown.run_child(["sh", "-c", "kill -KILL $$"], capture_output=True)
+        self.assertEqual((killed.returncode, killed.stderr), (-signal.SIGKILL, b""))
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "PR_SET_PDEATHSIG is Linux")
+class SupervisorSecondSignalTest(_WrapperFixture):
+    """R17-1 (round 17): a second stop signal right after the first never ends the supervisor before it stopped the program.
+
+    A child made by a worker thread gets PR_SET_PDEATHSIG twice when the scan
+    is SIGKILLed (the creating thread exits, then the process) about 1 ms
+    apart; a second SIGTERM after ``except Stop`` and before ``SIG_IGN`` ended
+    the supervisor with an uncaught ``Stop`` and the program was adopted by
+    init (7 of 40 runs). The supervisor's test hook sends itself SIGTERM and
+    SIGHUP at exactly that point, so the case is deterministic.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.env[shutdown.SUPERVISOR_TEST_HOOK_ENV] = "resignal"
+
+    def test_a_second_signal_to_the_supervisor_still_stops_the_program(self) -> None:
+        for repeat in range(REPEATS):
+            with self.subTest(repeat=repeat):
+                self.out.unlink(missing_ok=True)
+                with _IsolatedSession(self.root), mock.patch.dict(os.environ, self.env):
+                    worker, outcome = self._in_thread(lambda: shutdown.run_child(["ffmpeg", str(self.out)], capture_output=True))
+                    deadline = time.monotonic() + CHILD_TIMEOUT_SECONDS
+                    while not (self.out.exists() and self.out.stat().st_size) and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    grandchildren = self._grandchildren()
+                    self.assertTrue(grandchildren)
+                    (supervisor,) = shutdown.running_children()
+                    os.kill(supervisor, signal.SIGTERM)  # what PDEATHSIG delivers
+                    worker.join(timeout=CHILD_TIMEOUT_SECONDS)
+                    self.assertFalse(worker.is_alive())
+                self.assertEqual(wait_gone(grandchildren), [])
+                done = outcome[0]
+                assert isinstance(done, subprocess.CompletedProcess)
+                self.assertEqual(done.returncode, -signal.SIGTERM, done.stderr[-800:])  # not 1 (an uncaught Stop)
+                self.assertNotIn(b"Traceback", done.stderr)
+                self._assert_stays_unwritten()
+
+    def test_sigkill_of_the_parent_with_a_second_signal_ends_the_grandchild(self) -> None:
+        self._sigkill_of_the_parent_ends_the_grandchild()
+
+
+# R17-3 (round 17): a program that leaves a descendant two levels down in a
+# session of its own (wrapper → setsid sh → worker) and exits — the worker is
+# re-parented to the supervisor only when its own parent dies.
+ESCAPER = textwrap.dedent(
+    """
+    import os, sys, time
+    worker, out, mode = sys.argv[1], sys.argv[2], sys.argv[3]
+    if os.fork() == 0:
+        os.setsid()
+        if os.fork() == 0:
+            os.execv(sys.executable, [sys.executable, "-c", worker, out])
+        os.wait()
+        os._exit(0)
+    while not (os.path.exists(out) and os.path.getsize(out)):
+        time.sleep(0.005)
+    print("started", flush=True)
+    if mode == "wait":
+        time.sleep(600)
+    """
+)
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "PR_SET_PDEATHSIG is Linux")  # the supervisor (PDEATHSIG + subreaper) is Linux
+class SessionEscapeTest(_WrapperFixture):
+    """R17-3 (round 17): a descendant in another session, two levels down, ends with its program — normal end, timeout, stop, SIGKILL."""
+
+    def _argv(self, mode: str) -> list[str]:
+        return [sys.executable, "-c", ESCAPER, self.env["DFL_REWRITER"], str(self.out), mode]
+
+    def test_a_normal_end_does_not_wait_for_the_escaped_descendant(self) -> None:
+        worker, outcome = self._in_thread(lambda: shutdown.run_child(self._argv("exit"), capture_output=True, text=True, timeout=60))
+        worker.join(timeout=30)
+        self.assertFalse(worker.is_alive(), "run_child still waits: the escaped descendant holds the output pipe")
+        self.assertIsInstance(outcome[0], subprocess.CompletedProcess, outcome)
+        self.assertEqual((outcome[0].returncode, outcome[0].stdout), (0, "started\n"))
+        self.assertEqual(self._grandchildren(), [])
+        self._assert_stays_unwritten()
+
+    def test_a_timeout_and_a_stop_end_the_escaped_descendant(self) -> None:
+        worker, outcome = self._in_thread(lambda: shutdown.run_child(self._argv("wait"), capture_output=True, timeout=2.0))
+        worker.join(timeout=30)
+        self.assertFalse(worker.is_alive(), "run_child still waits after the timeout")
+        self.assertIsInstance(outcome[0], subprocess.TimeoutExpired, outcome)
+        self.assertEqual(self._grandchildren(), [])
+        self._assert_stays_unwritten()
+        self.out.unlink()
+        with _IsolatedSession(self.root):
+            worker, outcome = self._in_thread(lambda: shutdown.run_child(self._argv("wait"), capture_output=True))
+            deadline = time.monotonic() + CHILD_TIMEOUT_SECONDS
+            while not (self.out.exists() and self.out.stat().st_size) and time.monotonic() < deadline:
+                time.sleep(0.01)  # the worker two levels down is running
+            grandchildren = self._grandchildren()
+            self.assertTrue(grandchildren)
+            shutdown.begin()
+            worker.join(timeout=30)
+            self.assertFalse(worker.is_alive())
+            self.assertIsInstance(outcome[0], shutdown.ShuttingDown)
+        self.assertEqual(wait_gone(grandchildren), [])
+        self._assert_stays_unwritten()
+
+    def test_sigkill_of_the_parent_ends_the_escaped_descendant(self) -> None:
+        script = (
+            "import json, sys, threading, time\nfrom deepfake_lens import shutdown\n"
+            "threading.Thread(target=shutdown.run_child, args=(sys.argv[1:],), kwargs={'capture_output': True}, daemon=True).start()\n"
+            "while not shutdown.running_children():\n    time.sleep(0.005)\n"
+            "print(json.dumps(shutdown.running_children()), flush=True)\ntime.sleep(600)\n"
+        )
+        proc = subprocess.Popen([sys.executable, "-c", script, *self._argv("wait")], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.env)
+        try:
+            assert proc.stdout is not None
+            children = json.loads(proc.stdout.readline().decode("utf-8") or "null")
+            self.assertTrue(children)
+            deadline = time.monotonic() + CHILD_TIMEOUT_SECONDS
+            while not (self.out.exists() and self.out.stat().st_size) and time.monotonic() < deadline:
+                time.sleep(0.01)  # the worker two levels down is running
+            grandchildren = self._grandchildren()
+            self.assertTrue(grandchildren)
+            proc.kill()
+            proc.wait(timeout=CHILD_TIMEOUT_SECONDS)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            for stream in (proc.stdout, proc.stderr):
+                if stream is not None:
+                    stream.close()
+        self.assertEqual(wait_gone(children + grandchildren), [])
+        self._assert_stays_unwritten()
 
 
 @unittest.skipUnless(sys.platform.startswith("linux"), "PR_SET_PDEATHSIG is Linux")

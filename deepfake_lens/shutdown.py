@@ -47,6 +47,16 @@ This module holds what the cleanup needs to make that impossible:
   ``preexec_fn`` is not fork-safe in a threaded process (R15-5), hence the
   separate interpreter; it also checks that its parent is still this
   process (a parent killed before ``prctl`` ran is not seen by the flag).
+  R17-1 (round 17): the supervisor blocks SIGTERM/SIGHUP/SIGINT/SIGCHLD and
+  takes them with ``sigwaitinfo`` — no Python handler, so a second stop
+  signal (PDEATHSIG fires once per exiting thread of the parent: a child
+  started from a worker thread gets it twice) cannot end it before it has
+  stopped the program. R17-2: a program killed with SIGKILL is reported as
+  one (-9), the supervisor no longer crashes setting SIGKILL's disposition.
+  R17-3: it signals and reaps until no child is left — a descendant in a
+  session of its own, several levels down, is adopted only when its own
+  parent dies, so each round signals what was adopted since the last; and
+  after a timeout the child's output is read with a time limit.
   Elsewhere (macOS, Windows, a frozen build without a Python interpreter)
   the tracked children (and, on POSIX, their process groups) are stopped by
   the handler and the atexit hook; a hard kill of the parent leaves them to
@@ -97,6 +107,11 @@ _PR_SET_CHILD_SUBREAPER = 36
 # CHILD_TERM_GRACE_SECONDS, so the supervisor is done before this process
 # would escalate to SIGKILL of the supervisor itself.
 SUPERVISOR_TERM_GRACE_SECONDS = 1.0
+# R17-1 (round 17): a test hook — with this environment variable set to
+# "resignal" the supervisor sends itself SIGTERM and SIGHUP right after it took
+# the first stop signal (the window in which a second PDEATHSIG used to kill
+# it), so the double-signal case is tested deterministically.
+SUPERVISOR_TEST_HOOK_ENV = "DEEPFAKE_LENS_SUPERVISOR_TEST_HOOK"
 # R16-7 (round 16): the child supervisor (Linux), replacing the R15-1 exec
 # trampoline. argv: <parent pid> <grace seconds> <program> <args…>. See the
 # module docstring. Python itself ignores SIGPIPE (and SIGXFSZ) at start-up
@@ -106,36 +121,43 @@ SUPERVISOR_TERM_GRACE_SECONDS = 1.0
 CHILD_SUPERVISOR = f"""
 import ctypes, os, signal, sys, time
 PARENT, GRACE, ARGV = int(sys.argv[1]), float(sys.argv[2]), sys.argv[3:]
-STOPS = ("SIGTERM", "SIGHUP", "SIGINT")
-class Stop(Exception):
-    pass
-received = []
-def on_stop(signum, frame):
-    received.append(signum)
-    raise Stop()
-for name in STOPS:
-    signal.signal(getattr(signal, name), on_stop)
+STOPS = {{signal.SIGTERM, signal.SIGHUP, signal.SIGINT}}
+# R17-1: the stop signals (and SIGCHLD) are blocked for the supervisor's whole
+# life and taken with sigwaitinfo — no handler runs, so a second stop signal
+# (PR_SET_PDEATHSIG fires once per exiting parent thread) can never end it.
+signal.pthread_sigmask(signal.SIG_BLOCK, STOPS | {{signal.SIGCHLD}})
+HOOK = os.environ.get("{SUPERVISOR_TEST_HOOK_ENV}", "")
 libc = ctypes.CDLL(None, use_errno=True)
 def prctl(option, value):
     try:
         libc.prctl(option, value, 0, 0, 0)
     except (OSError, AttributeError):
         pass
+def die(signum):
+    # R17-2: SIGKILL/SIGSTOP cannot be given a disposition (signal() is EINVAL).
+    if signum not in (signal.SIGKILL, signal.SIGSTOP):
+        signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, {{signum}})
+    os._exit(128 + signum)
 pid = -1
 statuses = {{}}
-try:
-    prctl({_PR_SET_CHILD_SUBREAPER}, 1)
-    prctl({_PR_SET_PDEATHSIG}, int(signal.SIGTERM))
-    if os.getppid() != PARENT:
-        raise Stop()
+received = []
+prctl({_PR_SET_CHILD_SUBREAPER}, 1)
+prctl({_PR_SET_PDEATHSIG}, int(signal.SIGTERM))
+received += sorted(STOPS & signal.sigpending())
+if os.getppid() != PARENT:
+    received.append(signal.SIGKILL)
+if not received:
     pid = os.fork()
     if pid == 0:
         try:
             os.setpgid(0, 0)
             prctl({_PR_SET_PDEATHSIG}, int(signal.SIGKILL))
-            for name in (*STOPS, "SIGPIPE", "SIGXFSZ"):
+            for name in ("SIGTERM", "SIGHUP", "SIGINT", "SIGPIPE", "SIGXFSZ"):
                 if hasattr(signal, name):
                     signal.signal(getattr(signal, name), signal.SIG_DFL)
+            signal.pthread_sigmask(signal.SIG_SETMASK, set())
             os.execv(ARGV[0], ARGV)
         finally:
             os._exit(127)
@@ -143,11 +165,14 @@ try:
         os.setpgid(pid, pid)
     except OSError:
         pass
-    os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT)
-except Stop:
-    pass
-for name in STOPS:
-    signal.signal(getattr(signal, name), signal.SIG_IGN)
+    while os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT | os.WNOHANG) is None:
+        info = signal.sigwaitinfo(STOPS | {{signal.SIGCHLD}})
+        if info.si_signo in STOPS:
+            received.append(info.si_signo)
+            if HOOK == "resignal":  # R17-1 test hook: a second stop signal right now
+                os.kill(os.getpid(), signal.SIGTERM)
+                os.kill(os.getpid(), signal.SIGHUP)
+            break
 def adopted():
     out = []
     for task in os.listdir("/proc/self/task"):
@@ -157,20 +182,28 @@ def adopted():
         except OSError:
             pass
     return out
-def send(signum):
-    if pid > 0:
+def send(signum, done):
+    if pid > 0 and -pid not in done:
+        done.add(-pid)
         try:
             os.killpg(pid, signum)
         except OSError:
             pass
     for child in adopted():
-        try:
-            os.kill(child, signum)
-        except OSError:
-            pass
-def reap(seconds):
+        if child not in done:
+            done.add(child)
+            try:
+                os.kill(child, signum)
+            except OSError:
+                pass
+def sweep(signum, seconds):
+    # R17-3: signal and reap until no child is left. A descendant in a session
+    # of its own is re-parented to this subreaper only when its own parent
+    # dies — so each round signals what was adopted since the last one.
+    done = set()
     deadline = time.monotonic() + seconds
     while True:
+        send(signum, done)
         try:
             got, status = os.waitpid(-1, os.WNOHANG)
         except ChildProcessError:
@@ -182,20 +215,13 @@ def reap(seconds):
         else:
             time.sleep(0.005)
 if received:
-    send(signal.SIGTERM)
-    reap(GRACE)
-send(signal.SIGKILL)
-reap(GRACE)
+    sweep(signal.SIGTERM, GRACE)
+sweep(signal.SIGKILL, GRACE)
 if received or pid not in statuses:
-    signum = received[0] if received else signal.SIGKILL
-    signal.signal(signum, signal.SIG_DFL)
-    os.kill(os.getpid(), signum)
-    os._exit(128 + signum)
+    die(received[0] if received else signal.SIGKILL)
 code = os.waitstatus_to_exitcode(statuses[pid])
 if code < 0:
-    signal.signal(-code, signal.SIG_DFL)
-    os.kill(os.getpid(), -code)
-    os._exit(128 - code)
+    die(-code)
 os._exit(code)
 """
 
@@ -392,6 +418,21 @@ def _stop_one(proc: subprocess.Popen[Any]) -> None:
         logger.warning("child process %s did not end", proc.pid)
 
 
+def _drain(proc: subprocess.Popen[Any]) -> tuple[Any, Any]:
+    """R17-3: what a stopped child wrote — bounded: a descendant that escaped the stop may hold the pipes open."""
+    try:
+        return proc.communicate(timeout=CHILD_KILL_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        logger.warning("child process %s: output pipes still held open after the stop; output dropped", proc.pid)
+        for stream in (proc.stdout, proc.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+        return None, None
+
+
 def run_child(
     args: Sequence[str | os.PathLike[str]],
     *,
@@ -429,7 +470,7 @@ def run_child(
             out, err = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             _stop_one(proc)  # R16-7: the whole group, through the supervisor
-            exc.output, exc.stderr = proc.communicate()
+            exc.output, exc.stderr = _drain(proc)
             raise
         except BaseException:
             _stop_one(proc)
