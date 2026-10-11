@@ -25,6 +25,7 @@ EXIF error is a failed metadata read — the caller records the
 
 from __future__ import annotations
 
+import os
 import re
 import struct
 import xml.etree.ElementTree as ElementTree
@@ -96,6 +97,10 @@ class ImageMetadataRead:
     error: str | None = None
     notes: list[str] = field(default_factory=list)
     exif_read: bool = False
+    # R18-4 (round 18): why only part of the file's metadata was checked
+    # (the ``metadata`` coverage entry stays ``ran`` with this reason, and it
+    # is a limitation) — None when every metadata structure was read.
+    partial: str | None = None
 
 
 def read_image_metadata(path: Path, *, metadata_bytes: int = DEFAULT_METADATA_BYTES) -> tuple[dict[str, str], tuple[int, int] | None]:
@@ -121,22 +126,32 @@ def read_image_metadata_full(path: Path, *, metadata_bytes: int = DEFAULT_METADA
         read.error = "빈 파일 — 메타데이터를 읽을 수 없습니다"
     elif data.startswith(b"\x89PNG\r\n\x1a\n"):
         read.image_format = "png"
-        metadata.update(read_png_metadata(data))
-        read.dimensions = read_png_dimensions(data)
+        # R18-4 (round 18): the chunks are walked through the whole file
+        # (IDAT skipped by seeking) — a tEXt chunk after a 4 MB prefix (or
+        # after an IDAT chunk over MAX_CHUNK_BYTES) was never read, and the
+        # check still said "ran".
+        walk = _walk_png(path, budget=metadata_bytes)
+        metadata.update(read_png_metadata(walk.data))
+        read.dimensions = read_png_dimensions(walk.data)
         packet = metadata.get(PNG_XMP_KEY)
         xmp_packet = packet.encode("utf-8", errors="replace") if packet else None
-        if whole_file and not _png_reaches_iend(data):
+        if not walk.complete:
             read.error = "PNG 구조 불완전(IEND 청크 없음) — 잘린 파일로 메타데이터를 끝까지 읽지 못했습니다"
+        read.partial = walk.partial
     elif data.startswith(b"\xff\xd8"):
         read.image_format = "jpeg"
         read.dimensions = _read_jpeg_dimensions(data)
         xmp_packet, reached_scan = _scan_jpeg_segments(data)
         if whole_file and not reached_scan:
             read.error = "JPEG 구조 불완전(SOS 마커 전에 파일 끝) — 잘린 파일로 메타데이터를 끝까지 읽지 못했습니다"
+        elif not reached_scan:
+            # R18-4: every JPEG metadata segment precedes SOS — not reached inside the prefix.
+            read.partial = metadata_prefix_reason(metadata_bytes, "SOS 마커 전 세그먼트를 끝까지 읽지 못함")
     elif data.startswith(b"RIFF") and data[8:12] == b"WEBP":
         read.image_format = "webp"
         read.dimensions = _read_webp_dimensions(data)
-        xmp_packet = _webp_xmp_chunk(data)
+        # R18-4: the XMP chunk of an extended WebP follows the image data — walked through the file.
+        xmp_packet, read.partial = _walk_webp_xmp(path, budget=metadata_bytes)
     elif data.startswith(b"BM") and len(data) >= 26:
         read.image_format = "bmp"
         width, height = struct.unpack_from("<ii", data, 18)
@@ -150,6 +165,11 @@ def read_image_metadata_full(path: Path, *, metadata_bytes: int = DEFAULT_METADA
         read.dimensions = _read_tiff_dimensions(data)
     else:
         read.error = "이미지 형식 식별 불가(파일 헤더가 이미지 형식이 아님 — 확장자 위장 가능성)"
+    if read.image_format in ("bmp", "gif", "tiff") and not whole_file:
+        # R18-4: these are searched for metadata text in the prefix only.
+        read.partial = metadata_prefix_reason(metadata_bytes, "이후 부분의 문자열 메타데이터는 검사하지 않음")
+    if read.partial:
+        read.notes.append(read.partial)
 
     if read.image_format in EXIF_CAPABLE_FORMATS and read.error is None:
         pillow_xmp, exif_error = _read_exif_into(path, metadata, read)
@@ -237,14 +257,94 @@ def _gps_decimal(value: object, ref: object) -> float | None:
     return decimal
 
 
-def _png_reaches_iend(data: bytes) -> bool:
-    offset = 8
-    while offset + 12 <= len(data):
-        length = int.from_bytes(data[offset : offset + 4], "big")
-        if data[offset + 4 : offset + 8] == b"IEND":
-            return True
-        offset += 12 + length
-    return False
+# R18-4 (round 18): bounds of the PNG / WebP chunk walk — chunk headers
+# visited (a 1 GB PNG in libpng's default 8 KiB IDAT chunks has ~131,000) and,
+# per format, the metadata bytes read (``--metadata-bytes``, default 4 MiB).
+MAX_WALKED_CHUNKS = 262_144
+
+
+def _size_text(count: int) -> str:
+    return f"{count / (1024 * 1024):g} MB" if count >= 1024 * 1024 else f"{count}바이트"
+
+
+def metadata_prefix_reason(metadata_bytes: int, what: str) -> str:
+    """R18-4: "메타데이터 앞 N바이트만 확인(--metadata-bytes) — <what>" (N in MB when ≥ 1 MiB)."""
+    return f"메타데이터 앞 {_size_text(metadata_bytes)}만 확인(--metadata-bytes) — {what}"
+
+
+@dataclass
+class _PngWalk:
+    data: bytes  # signature + every chunk read (IDAT and oversized chunks left out)
+    complete: bool  # IEND reached
+    partial: str | None  # why some metadata chunk was not read
+
+
+def _walk_png(path: Path, *, budget: int) -> _PngWalk:
+    """R18-4: the PNG's chunks through the whole file — IDAT skipped by seeking, other chunks read.
+
+    ``budget`` bounds the bytes of non-IDAT chunks read; a chunk over
+    ``png.MAX_CHUNK_BYTES``, a chunk past the budget or more than
+    :data:`MAX_WALKED_CHUNKS` chunks leave ``partial`` set (the rest of the
+    walk still looks for IEND only when the chunk count allows it).
+    """
+    from .png import MAX_CHUNK_BYTES, PNG_SIGNATURE
+
+    parts = [PNG_SIGNATURE]
+    used = 0
+    partial: str | None = None
+    with path.open("rb") as handle:
+        size = os.fstat(handle.fileno()).st_size
+        offset = len(PNG_SIGNATURE)
+        for _ in range(MAX_WALKED_CHUNKS):
+            handle.seek(offset)
+            header = handle.read(8)
+            if len(header) < 8:
+                return _PngWalk(b"".join(parts), False, partial)
+            length = int.from_bytes(header[:4], "big")
+            kind = header[4:8]
+            end = offset + 12 + length
+            if end > size:
+                return _PngWalk(b"".join(parts), False, partial)
+            if kind == b"IEND":
+                parts.append(header + handle.read(length + 4))
+                return _PngWalk(b"".join(parts), True, partial)
+            if kind == b"IHDR" and length <= 64:
+                parts.append(header + handle.read(length + 4))  # the dimensions, outside the budget
+            elif kind != b"IDAT":
+                name = kind.decode("latin-1")
+                if length > MAX_CHUNK_BYTES:
+                    partial = partial or f"메타데이터 청크 {name}({length}바이트)가 청크 상한({MAX_CHUNK_BYTES}바이트)을 넘어 읽지 않음"
+                elif used + length > budget:
+                    partial = partial or (
+                        f"메타데이터 청크를 {_size_text(budget)}까지만 읽음(--metadata-bytes) — 이후 {name} 청크({length}바이트)를 읽지 않음"
+                    )
+                else:
+                    parts.append(header + handle.read(length + 4))
+                    used += length
+            offset = end
+    return _PngWalk(b"".join(parts), True, f"PNG 청크가 {MAX_WALKED_CHUNKS}개를 넘어 이후 청크의 메타데이터는 검사하지 않음")
+
+
+def _walk_webp_xmp(path: Path, *, budget: int) -> tuple[bytes | None, str | None]:
+    """R18-4: (XMP chunk body, partial reason) of a WebP — its RIFF chunks walked through the file."""
+    with path.open("rb") as handle:
+        size = os.fstat(handle.fileno()).st_size
+        offset = 12
+        for _ in range(MAX_WALKED_CHUNKS):
+            handle.seek(offset)
+            header = handle.read(8)
+            if len(header) < 8:
+                return None, None
+            kind = header[:4]
+            length = int.from_bytes(header[4:8], "little")
+            if offset + 8 + length > size:
+                return None, None
+            if kind == b"XMP ":
+                if length > min(MAX_XMP_BYTES, budget):
+                    return None, f"XMP 청크({length}바이트)가 상한을 넘어 읽지 않음"
+                return handle.read(length), None
+            offset += 8 + length + (length % 2)
+    return None, f"WebP 청크가 {MAX_WALKED_CHUNKS}개를 넘어 이후 청크의 메타데이터는 검사하지 않음"
 
 
 def _scan_jpeg_segments(data: bytes) -> tuple[bytes | None, bool]:
@@ -271,20 +371,6 @@ def _scan_jpeg_segments(data: bytes) -> tuple[bytes | None, bool]:
             xmp = body[len(JPEG_XMP_IDENTIFIER):]
         offset += 2 + length
     return xmp, False
-
-
-def _webp_xmp_chunk(data: bytes) -> bytes | None:
-    offset = 12
-    while offset + 8 <= len(data):
-        kind = data[offset : offset + 4]
-        size = int.from_bytes(data[offset + 4 : offset + 8], "little")
-        start = offset + 8
-        if start + size > len(data):
-            return None
-        if kind == b"XMP ":
-            return data[start : start + size]
-        offset = start + size + (size % 2)
-    return None
 
 
 _XMP_DECLARATION = re.compile(rb"<!\s*(?:DOCTYPE|ENTITY)", re.I)

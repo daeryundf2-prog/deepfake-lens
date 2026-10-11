@@ -43,7 +43,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `PR_SET_PDEATHSIG is Linux` | Linux(`prctl(PR_SET_PDEATHSIG)` — 부모가 SIGKILL로 죽으면 ffmpeg 등 자식 프로세스도 함께 종료, R15-1) | test_shutdown.py |
 | `Pillow + numpy needed for the fixture` | `dev` extra(Pillow, numpy) | test_report_labels_ko.py |
 | `Pillow + numpy required to write EXIF/XMP fixtures` | `dev` extra(Pillow, numpy) | test_image_metadata_exif.py |
-| `Pillow not installed` | `dev` extra(Pillow) | test_cli_operations.py, test_error_text.py, test_json_contract.py, test_model_zoo.py |
+| `Pillow not installed` | `dev` extra(Pillow) | test_cli_operations.py, test_error_text.py, test_json_contract.py, test_metadata_extent.py, test_model_zoo.py |
 | `Pillow writes the GIF` | `dev` extra(Pillow — GIF 픽스처 작성) | test_qa_out.py |
 | `Qwen2.5-0.5B tokenizer not cached` | `text_lm` extra(torch, transformers) + Qwen2.5-0.5B 토크나이저 HF 캐시 | test_v6_probes.py |
 | `TZ needs time.tzset (POSIX)` | POSIX(`time.tzset` — 자식 프로세스의 `TZ` 환경 변수로 시간대 전환) | test_report_time.py |

@@ -1477,7 +1477,9 @@ def _analyze_image_file(
     # absence of metadata.
     read_error = metadata_read.error if metadata_read is not None else None
     coverage: list[CoverageEntry] = [
-        failed_entry("metadata", AnalyzerError(read_error)) if read_error else CoverageEntry("metadata", CoverageStatus.RAN)
+        failed_entry("metadata", AnalyzerError(read_error)) if read_error
+        # R18-4 (round 18): a read that covered only part of the file says so (it said "ran" with no reason).
+        else CoverageEntry("metadata", CoverageStatus.RAN, (metadata_read.partial or "") if metadata_read is not None else "")
     ]
     c2pa_validation, entry = run_check("c2pa", lambda: _validate_c2pa(file_path))
     coverage.append(entry)

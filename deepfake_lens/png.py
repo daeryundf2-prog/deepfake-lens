@@ -20,7 +20,13 @@ def read_png_metadata(data: bytes) -> dict[str, str]:
         chunk_start = offset + 8
         chunk_end = chunk_start + length
         next_offset = chunk_end + 4
-        if length > MAX_CHUNK_BYTES or chunk_end > len(data) or next_offset > len(data):
+        if chunk_end > len(data) or next_offset > len(data):
+            break
+        if length > MAX_CHUNK_BYTES:
+            if chunk_type == "IDAT":
+                # R18-4 (round 18): image data is skipped, not the end of the metadata walk.
+                offset = next_offset
+                continue
             break
 
         chunk = data[chunk_start:chunk_end]
