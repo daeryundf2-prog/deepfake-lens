@@ -117,6 +117,8 @@ INPUT_ENCODING_ERROR = "{what} 읽을 수 없습니다(인코딩): {path} ({reas
 INPUT_JSON_ERROR = "{what} 해석할 수 없습니다: {path} ({reason})"
 INPUT_READ_ERROR = "{what} 읽을 수 없습니다: {path} ({reason})"
 INPUT_NOT_OBJECT = "{what} 해석할 수 없습니다: {path} (JSON 객체가 아니라 {kind}입니다)"
+# R18-19 (c): the office config path names a folder (or another non-file).
+CONFIG_NOT_A_FILE = "설정 파일을 읽을 수 없습니다: {path} (파일이 아니라 폴더입니다 — DEEPFAKE_LENS_CONFIG 또는 ~/.deepfake-lens/config.json)"
 _JSON_KIND_KO = {list: "배열", str: "문자열", int: "숫자", float: "숫자", bool: "참/거짓 값", type(None): "null"}
 
 
@@ -151,18 +153,21 @@ def read_text_input(path: Path | str, what: str) -> str:
 
 
 def read_json_input(
-    path: Path | str, what: str, *, require_object: bool = True, object_pairs_hook: Any = None,
+    path: Path | str, what: str, *, require_object: bool = True, object_pairs_hook: Any = None, allow_bom: bool = False,
 ) -> object:
     """``path`` parsed as JSON (an object unless ``require_object`` is False), or :class:`UsageError` (P4/P9).
 
     ``object_pairs_hook`` (R18-5) is handed to :func:`json.loads` — verify-report
-    uses it to see keys that occur twice in one object.
+    uses it to see keys that occur twice in one object. ``allow_bom`` (R18-19
+    (c)): a leading UTF-8 BOM (Windows Notepad) is dropped first.
     """
     import json
 
     from .error_text import read_error_ko
 
     text = read_text_input(path, what)
+    if allow_bom and text.startswith("\ufeff"):
+        text = text[1:]
     try:
         payload = json.loads(text, object_pairs_hook=object_pairs_hook)
     except (json.JSONDecodeError, RecursionError) as exc:  # R10-5: too-deep nesting is unreadable input
@@ -442,7 +447,11 @@ def check_json_inputs(args: argparse.Namespace) -> None:
 
         config = config_path()
         if config.is_file():
-            read_json_input(config, "설정 파일")
+            # R18-19 (c) (round 18): a BOM is accepted, as for assets.json (it was a usage error, exit 2).
+            read_json_input(config, "설정 파일", allow_bom=True)
+        elif config.exists():
+            # R18-19 (c): a folder at the config path was ignored without a word.
+            raise UsageError(CONFIG_NOT_A_FILE.format(path=config))
 
 
 # Output folders (not files) that must not land in the examined folder (P11).

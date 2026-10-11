@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import json
 import os
 import subprocess
 import sys
@@ -651,6 +652,22 @@ class RoundEightUsageErrorsTest(_UsageErrorCase):
         self.assertEqual(code, 2, stderr)
         self.assertIn(f"검사 JSON을 해석할 수 없습니다: {bad_rows} — 1번째 행의 형식이 맞지 않습니다", stderr)
         self._assert_korean_only(stderr, bad_rows)
+
+    def test_r18_19c_a_bom_config_is_read_and_a_folder_config_is_an_error(self) -> None:
+        """R18-19 (c) (round 18): a config.json with a UTF-8 BOM was a usage error (exit 2) while assets.json
+        with one is accepted; a folder at the config path was ignored without a word."""
+        from deepfake_lens.office_config import load_office_config
+
+        config = self.root / "config.json"
+        config.write_bytes(b"\xef\xbb\xbf" + json.dumps({"law_firm": "법무법인 시험"}, ensure_ascii=False).encode("utf-8"))
+        with mock.patch.dict(os.environ, {"DEEPFAKE_LENS_CONFIG": str(config)}):
+            code, _, stderr = self._run(["scan", str(self.folder)])
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(load_office_config(), {"law_firm": "법무법인 시험"})
+        folder = self.root / "config-folder"
+        folder.mkdir()
+        with mock.patch.dict(os.environ, {"DEEPFAKE_LENS_CONFIG": str(folder)}):
+            self._assert_usage(["scan", str(self.folder)], f"설정 파일을 읽을 수 없습니다: {folder} (파일이 아니라 폴더입니다")
 
     def test_p9_key_file_reason_is_korean_only(self) -> None:
         """P9 (round 8): "([Errno 2] 파일 또는 폴더가 없습니다: nokey)" → Korean reason with the number."""

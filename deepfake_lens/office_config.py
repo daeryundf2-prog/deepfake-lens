@@ -46,7 +46,7 @@ def load_office_config(path: Path | None = None) -> dict[str, str]:
     """``law_firm`` / ``contact`` from the config file; missing or unreadable → {}."""
     source = path or config_path()
     try:
-        payload = json.loads(source.read_text(encoding="utf-8"))
+        payload = json.loads(source.read_text(encoding="utf-8-sig"))  # R18-19 (c): a BOM is accepted, as for assets.json
     except FileNotFoundError:
         return {}
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
