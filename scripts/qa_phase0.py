@@ -524,9 +524,20 @@ def verify_record(out: Path) -> int:
     if not head:
         print("[qa] git 없음 — 기록을 확인할 수 없습니다.", file=sys.stderr)
         return 1
-    if commit != head and _git("rev-parse", "HEAD^") != commit:
-        print(f"[qa] 기록 커밋 {commit[:12]}이 HEAD({head[:12]})나 그 부모가 아닙니다 — 다시 생성하세요.", file=sys.stderr)
-        return 1
+    if commit != head:
+        parent = _git("rev-parse", "HEAD^")
+        if not parent and _git("rev-parse", "--is-shallow-repository") == "true":
+            # R18-19 (e) (round 18): a `--depth 1` clone said "다시 생성하세요" — HEAD's parent is
+            # just not fetched (build_traceability_commits --check names the shallow clone).
+            print(
+                f"[qa] 얕은 복제(shallow clone)라 HEAD의 부모가 없어 기록 커밋 {commit[:12]}을(를) 확인할 수 없습니다 — "
+                "`git fetch --deepen=1`(또는 `git fetch --unshallow`) 후 다시 실행하십시오.",
+                file=sys.stderr,
+            )
+            return 1
+        if parent != commit:
+            print(f"[qa] 기록 커밋 {commit[:12]}이 HEAD({head[:12]})나 그 부모가 아닙니다 — 다시 생성하세요.", file=sys.stderr)
+            return 1
     changed = [name for name in _git("diff", "--name-only", commit).splitlines() if name]
     relative = _rel(out)
     # The commit-traceability table (R9-10) is another generated record that is
