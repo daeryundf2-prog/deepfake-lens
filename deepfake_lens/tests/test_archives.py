@@ -1099,3 +1099,24 @@ class ArchiveContainerRollupEvidenceTests(unittest.TestCase):
 
         self.assertEqual(archive_rollup_detail(0, 3), "조작·생성 근거 있음 0건 / 판단 불가 3건")
         self.assertEqual(archive_rollup_detail(1, 0, 2), "조작·생성 근거 있음 1건 / 판단 불가 0건 / 원본성 근거 있음 2건")
+
+
+class Cp949MemberNameTest(unittest.TestCase):
+    """R18-19 (d) (round 18): zip member names without the UTF-8 flag were decoded as euc-kr, so cp949
+    extension syllables ("똠방각하") became cp437 mojibake."""
+
+    def test_cp949_names_are_decoded(self) -> None:
+        import tempfile
+
+        from deepfake_lens.archives import _zip_member_name
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "kor.zip"
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr("QQQQ.txt", "a")
+                archive.writestr("WWWWWWWW.txt", "b")
+            data = path.read_bytes().replace(b"QQQQ", "증거".encode("cp949")).replace(b"WWWWWWWW", "똠방각하".encode("cp949"))
+            path.write_bytes(data)
+            with zipfile.ZipFile(path) as archive:
+                names = [_zip_member_name(info) for info in archive.infolist()]
+        self.assertEqual(names, ["증거.txt", "똠방각하.txt"])

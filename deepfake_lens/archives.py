@@ -287,12 +287,18 @@ def _safe_member_name(name: str) -> str | None:
 
 
 def _zip_member_name(info: zipfile.ZipInfo) -> str:
-    """Decode a zip member name, trying euc-kr for Korean archives whose
-    names were stored without the UTF-8 flag bit."""
+    """Decode a zip member name, trying cp949 for Korean archives whose
+    names were stored without the UTF-8 flag bit.
+
+    R18-19 (d) (round 18): it tried euc-kr, which lacks the cp949 extension
+    syllables (똠, 쌰 … — the 2-byte cp949 region outside KS X 1001) that Windows' Korean zip tools write — such a
+    name failed to decode and stayed cp437 mojibake ("똠방각하" became
+    "îc╣µ░ó╟╧"). cp949 is a superset of euc-kr.
+    """
     if info.flag_bits & 0x800:
         return info.filename
     try:
-        return info.filename.encode("cp437").decode("euc-kr")
+        return info.filename.encode("cp437").decode("cp949")
     except (UnicodeDecodeError, UnicodeEncodeError):
         return info.filename
 
