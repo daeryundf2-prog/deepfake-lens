@@ -834,7 +834,149 @@ def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | No
     # variables included, with each file's sha256) — a failure caused by a
     # wrong override was replayed after the override was fixed.
     tokens += asset_file_tokens()
+    # R19-1 (round 19): and the runtime the checks ran in — which optional
+    # dependencies can be found, at which version, and ffmpeg.
+    tokens += dependency_tokens()
     return f"tool:{TOOL_VERSION}|pins:{_short_digest(chr(10).join(tokens))}"
+
+
+# R19-1 (round 19): the import names whose presence or version decides what a
+# check does — "skipped: 의존성 부재", "failed", or which library computed the
+# value — each with the distributions that can provide it. R18-1 removed the
+# venv path from the key (rightly: no paths), and with it the only thing that
+# told one runtime from another, so a row made in a venv with c2pa / librosa
+# was replayed in one without them (and the reverse: a "의존성 부재" row
+# replayed after the dependency was installed).
+DEPENDENCY_MODULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("numpy", ("numpy",)),
+    ("scipy", ("scipy",)),
+    ("PIL", ("pillow",)),
+    ("cv2", ("opencv-python", "opencv-python-headless", "opencv-contrib-python", "opencv-contrib-python-headless")),
+    ("c2pa", ("c2pa-python",)),
+    ("librosa", ("librosa",)),
+    ("soundfile", ("soundfile",)),
+    ("numba", ("numba",)),
+    ("mediapipe", ("mediapipe",)),
+    ("pymupdf", ("pymupdf",)),
+    ("fitz", ("pymupdf",)),
+    ("syhwp", ("syhwp",)),
+    ("olefile", ("olefile",)),
+    ("py7zr", ("py7zr",)),
+    ("rarfile", ("rarfile",)),
+    ("sklearn", ("scikit-learn",)),
+    ("torch", ("torch",)),
+    ("torchvision", ("torchvision",)),
+    ("torchaudio", ("torchaudio",)),
+    ("transformers", ("transformers",)),
+    ("onnxruntime", ("onnxruntime", "onnxruntime-gpu")),
+    ("speechbrain", ("speechbrain",)),
+    ("syncnet_python", ("syncnet-python",)),
+    ("scenedetect", ("scenedetect",)),
+)
+# R19-1: the external programs a check runs.
+DEPENDENCY_PROGRAMS = ("ffmpeg",)
+
+
+def dependency_tokens() -> list[str]:
+    """R19-1 (round 19): the runtime fingerprint in the scan-cache key — never a path.
+
+    Per :data:`DEPENDENCY_MODULES` entry: ``absent`` when the import system
+    finds no module (also a ``sys.modules`` entry of None), else the
+    installed distribution version and the sha256 of the module's own
+    source file (a stub ``c2pa.py`` that raises ImportError on the path
+    differs from the SDK's ``__init__.py``). OpenCV: whether ``cv2`` imports
+    and has ``CascadeClassifier`` (the loaders import it for the key
+    anyway). Per program: ``absent`` or the first line of ``-version``.
+    The same packages in two install folders or venvs give the same tokens;
+    nothing here raises.
+    """
+    import importlib.metadata
+    import importlib.util
+    import sys
+
+    tokens = [f"python:{sys.implementation.name}-{sys.version_info[0]}.{sys.version_info[1]}"]
+    for name, dists in DEPENDENCY_MODULES:
+        try:
+            spec = importlib.util.find_spec(name)
+        except (ImportError, ValueError, AttributeError) as exc:
+            tokens.append(f"dep:{name}:error:{type(exc).__name__}")
+            continue
+        if spec is None:
+            tokens.append(f"dep:{name}:absent")
+            continue
+        version = "none"
+        for dist in dists:
+            try:
+                version = f"{dist}={importlib.metadata.version(dist)}"
+                break
+            except Exception:  # noqa: BLE001 — PackageNotFoundError or a broken METADATA: try the next
+                continue
+        origin = spec.origin if spec.has_location and spec.origin else ""
+        source = _source_digest(origin) if origin else "no-file"
+        tokens.append(f"dep:{name}:{version}:{source}")
+    tokens.append(_cv2_token())
+    for program in DEPENDENCY_PROGRAMS:
+        tokens.append(f"prog:{program}:{_program_version(program)}")
+    return tokens
+
+
+# R19-1: a module file larger than this (a single compiled extension) is
+# fingerprinted by its size — its distribution version is in the token too.
+_SOURCE_DIGEST_LIMIT = 4 * 1024 * 1024
+
+
+def _source_digest(origin: str) -> str:
+    import os
+
+    try:
+        size = os.stat(origin).st_size
+        if size > _SOURCE_DIGEST_LIMIT:
+            return f"size:{size}"
+        with open(origin, "rb") as handle:
+            return hashlib.sha256(handle.read()).hexdigest()[:16]
+    except (OSError, ValueError):
+        return "unreadable"
+
+
+def _cv2_token() -> str:
+    """R19-1: does ``cv2`` import, and does it have CascadeClassifier (opencv 5 without contrib does not)."""
+    try:
+        import cv2
+    except Exception as exc:  # noqa: BLE001 — any import failure is a state of the runtime
+        return f"cv2-import:{type(exc).__name__}"
+    return f"cv2-import:ok:cascade={hasattr(cv2, 'CascadeClassifier')}"
+
+
+def _program_version(program: str) -> str:
+    """R19-1: ``absent``, or the first line of ``<program> -version`` with its install path removed."""
+    import shutil as _shutil
+
+    import os
+
+    found = _shutil.which(program)
+    if found is None:
+        return "absent"
+    try:
+        info = os.stat(found)
+        memo_key = (found, info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino)
+    except OSError:
+        memo_key = None
+    if memo_key is not None and memo_key in _PROGRAM_VERSIONS:
+        return _PROGRAM_VERSIONS[memo_key]
+    try:
+        done = shutdown.run_child([found, "-version"], capture_output=True, timeout=20)
+    except Exception as exc:  # noqa: BLE001 — never the reason a scan stops
+        return f"error:{type(exc).__name__}"
+    first = (done.stdout or b"").splitlines()[:1]
+    line = first[0].decode("utf-8", "replace").strip() if first else ""
+    token = f"rc{done.returncode}:{_short_digest(line.replace(found, '<prog>'))}"
+    if memo_key is not None:
+        _PROGRAM_VERSIONS[memo_key] = token
+    return token
+
+
+# R19-1: ``-version`` per program file (path, size, mtime, ctime, inode) — run once per process.
+_PROGRAM_VERSIONS: dict[tuple[str, int, int, int, int], str] = {}
 
 
 def _cached_scan_item(cached: object, path: Path, *, root: Path) -> ScanItem | None:

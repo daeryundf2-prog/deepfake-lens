@@ -1284,7 +1284,11 @@ NATIVE_CALLS = {
 }
 # R15-1: the runner itself — its Popen gets an argv its callers staged (their
 # run_child calls are the checked sites).
-NATIVE_CALL_EXEMPT = {("shutdown.py", "subprocess.Popen")}
+NATIVE_CALL_EXEMPT = {
+    ("shutdown.py", "subprocess.Popen"),
+    # R19-1 (round 19): `ffmpeg -version` for the scan-cache key — no file argument.
+    ("scan_cache.py", "shutdown.run_child"),
+}
 
 
 # R13-7 (round 13): OpenCV writers take a narrow file name too — a non-ASCII

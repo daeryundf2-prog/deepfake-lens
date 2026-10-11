@@ -756,5 +756,75 @@ class UnknownUserOverrideTest(unittest.TestCase):
         self.assertIn(HAAR_FRONTALFACE, doctor.stdout)
 
 
+class CacheKeyFollowsRuntimeTest(unittest.TestCase):
+    """R19-1 (round 19): R18-1 took the venv path out of the scan-cache key and nothing told one runtime from
+    another — a cache made in a venv with c2pa / librosa replayed "c2pa ran" in a venv without them, and a
+    "skipped: 의존성 부재" row made while c2pa could not be imported was replayed after it could."""
+
+    def _scan(self, folder: Path, cache: Path, *extra_path: str) -> dict[str, Any]:
+        import subprocess
+
+        env = {key: value for key, value in os.environ.items() if not key.startswith("DEEPFAKE_LENS_")}
+        env.update(PYTHONPATH=os.pathsep.join([*extra_path, str(PACKAGE.parent)]), PYTHONDONTWRITEBYTECODE="1", HOME=str(cache.parent))
+        done = subprocess.run(
+            [sys.executable, "-m", "deepfake_lens", "scan", str(folder), "--format", "json", "--cache", str(cache)],
+            cwd=cache.parent, env=env, capture_output=True, text=True, timeout=300,
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        payload: dict[str, Any] = json.loads(done.stdout)
+        return payload
+
+    def test_a_cache_made_with_a_blocked_import_is_not_replayed_without_it(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp, "evidence")
+            folder.mkdir()
+            (folder / "note.txt").write_text("평범한 메모입니다.", encoding="utf-8")
+            (folder / "photo.jpg").write_bytes(b"\xff\xd8\xff\xe0" + b"\0" * 64 + b"\xff\xd9")
+            blocker = Path(tmp, "block")
+            blocker.mkdir()
+            (blocker / "c2pa.py").write_text("raise ImportError('blocked for the test')\n", encoding="utf-8")
+            cache = Path(tmp, "cache.json")
+            blocked = self._scan(folder, cache, str(blocker))
+            self.assertEqual(blocked["summary"]["cached"], 0)
+            unblocked = self._scan(folder, cache)
+            self.assertEqual(unblocked["summary"]["cached"], 0)  # another runtime: nothing replayed
+            again = self._scan(folder, cache)
+            self.assertEqual(again["summary"]["cached"], 2)  # the same runtime still hits
+            self.assertEqual(self._scan(folder, cache, str(blocker))["summary"]["cached"], 2)  # and so does the first
+
+    def test_the_tokens_follow_a_module_removed_from_the_import_system(self) -> None:
+        from deepfake_lens.scan_cache import dependency_tokens
+
+        present = dependency_tokens()
+        with mock.patch.dict(sys.modules, {"numpy": None, "c2pa": None}):
+            blocked = dependency_tokens()
+        self.assertIn("dep:numpy:absent", blocked)
+        self.assertIn("dep:c2pa:absent", blocked)
+        if importlib.util.find_spec("numpy") is not None:
+            self.assertNotEqual(present, blocked)
+        self.assertEqual(present, dependency_tokens())  # deterministic
+
+    def test_no_dependency_token_names_a_folder(self) -> None:
+        from deepfake_lens.scan_cache import dependency_tokens
+
+        for token in dependency_tokens():
+            self.assertNotIn(os.sep, token.replace("/", "") if os.sep != "/" else token)
+            self.assertNotIn(sys.prefix, token)
+
+    def test_ffmpeg_presence_is_in_the_key(self) -> None:
+        from deepfake_lens import scan_cache
+
+        with mock.patch("shutil.which", return_value=None):
+            without = scan_cache.dependency_tokens()
+        self.assertIn("prog:ffmpeg:absent", without)
+        # A program that answers "-version" differently from no program at all: this interpreter
+        # (it rejects the option — exit 2 — which is still a state of the runtime, not "absent").
+        with mock.patch("shutil.which", return_value=sys.executable):
+            with_fake = scan_cache.dependency_tokens()
+        self.assertNotEqual(without, with_fake)
+        (token,) = [entry for entry in with_fake if entry.startswith("prog:ffmpeg:")]
+        self.assertRegex(token, r"^prog:ffmpeg:rc\d+:[0-9a-f]{32}$")
+
+
 if __name__ == "__main__":
     unittest.main()
