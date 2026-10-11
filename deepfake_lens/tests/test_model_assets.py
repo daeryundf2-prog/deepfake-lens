@@ -662,5 +662,72 @@ class CacheKeyHasNoInstallPathTest(unittest.TestCase):
             self.assertNotIn(str(PACKAGE), token)
 
 
+# R18-2: a "~user" that names no account (Path.expanduser raises RuntimeError for it).
+_NO_SUCH_USER = "~dfl-r18-no-such-user"
+
+
+class UnknownUserOverrideTest(unittest.TestCase):
+    """R18-2 (round 18): DEEPFAKE_LENS_HAAR_CASCADE='~nouser/h.xml' made ``Path.expanduser`` raise RuntimeError —
+    ``scan --cache`` ended rc 1 with no output (also scans without a face check), doctor "예기치 않은 오류", and a
+    scan without the cache recorded the face check as "RuntimeError: 라이브러리 오류(RuntimeError)"."""
+
+    def test_the_override_is_read_as_the_literal_path(self) -> None:
+        for asset, env in model_assets.ASSET_OVERRIDE_ENV.items():
+            with self.subTest(asset=asset), mock.patch.dict(os.environ, {env: f"{_NO_SUCH_USER}/h.xml"}):
+                self.assertEqual(model_assets.asset_override(asset), Path(f"{_NO_SUCH_USER}/h.xml"))
+                tokens = model_assets.asset_file_tokens()
+                self.assertIn(f"asset-file:{asset}:override:absent:h.xml", tokens)
+
+    def test_the_other_folder_variables_do_not_raise(self) -> None:
+        from deepfake_lens.cli_logging import default_log_dir
+        from deepfake_lens.core import default_heatmap_root
+        from deepfake_lens.office_config import config_path
+
+        cases = (
+            ("DEEPFAKE_LENS_LOG_DIR", default_log_dir), ("DEEPFAKE_LENS_HEATMAP_DIR", default_heatmap_root),
+            ("DEEPFAKE_LENS_CONFIG", config_path),
+        )
+        for env, reader in cases:
+            with self.subTest(env=env), mock.patch.dict(os.environ, {env: f"{_NO_SUCH_USER}/x"}):
+                self.assertEqual(reader(), Path(f"{_NO_SUCH_USER}/x"))
+
+    def test_a_failing_file_state_is_a_token(self) -> None:
+        with mock.patch.object(model_assets, "_file_token", side_effect=RuntimeError("boom")):
+            tokens = model_assets.asset_file_tokens()
+        self.assertEqual(tokens, [f"asset-file:{asset}:error:RuntimeError" for asset in model_assets.KNOWN_ASSETS])
+
+    @unittest.skipUnless(HAVE_CV2, "opencv/numpy not installed")
+    def test_the_face_check_says_the_override_file_is_missing(self) -> None:
+        from deepfake_lens import face
+
+        with mock.patch.dict(os.environ, {"DEEPFAKE_LENS_HAAR_CASCADE": f"{_NO_SUCH_USER}/h.xml"}):
+            with self.assertRaises(face.CascadeLoadError) as caught:
+                face.load_face_cascade()
+        self.assertIn("재정의 cascade 파일이 없습니다", str(caught.exception))
+
+    def test_scan_with_cache_and_doctor_finish(self) -> None:
+        import subprocess
+
+        env = {key: value for key, value in os.environ.items() if not key.startswith("DEEPFAKE_LENS_")}
+        env.update(
+            PYTHONPATH=str(PACKAGE.parent), DEEPFAKE_LENS_HAAR_CASCADE=f"{_NO_SUCH_USER}/h.xml",
+            DEEPFAKE_LENS_FACE_LANDMARKER=f"{_NO_SUCH_USER}/f.task",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp, "evidence")
+            folder.mkdir()
+            (folder / "note.txt").write_text("평범한 메모입니다.", encoding="utf-8")
+            env["HOME"] = tmp
+            scan = subprocess.run(
+                [sys.executable, "-m", "deepfake_lens", "scan", str(folder), "--format", "json", "--cache", str(Path(tmp, "cache.json"))],
+                cwd=tmp, env=env, capture_output=True, text=True, timeout=300,
+            )
+            self.assertEqual(scan.returncode, 0, scan.stderr)
+            self.assertEqual(json.loads(scan.stdout)["summary"]["total"], 1)
+            doctor = subprocess.run([sys.executable, "-m", "deepfake_lens", "doctor"], cwd=tmp, env=env, capture_output=True, text=True, timeout=300)
+        self.assertNotIn("예기치 않은 오류", doctor.stdout + doctor.stderr)
+        self.assertIn(HAAR_FRONTALFACE, doctor.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

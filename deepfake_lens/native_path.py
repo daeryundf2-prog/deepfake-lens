@@ -110,6 +110,7 @@ import time
 import uuid
 from collections import OrderedDict
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Callable, Iterator
 
 from . import shutdown
@@ -207,6 +208,22 @@ STAGED_NAME_PLACEHOLDER = "<네이티브 디코더용 임시 이름>"
 
 class NativePathError(RuntimeError):
     """A non-ASCII path could not be given an ASCII name for a native decoder."""
+
+
+def expand_user(value: str | os.PathLike[str]) -> Path:
+    """R18-2 (round 18): ``Path(value).expanduser()`` that never raises — an unknown ``~user`` stays literal.
+
+    ``Path.expanduser`` raises RuntimeError for ``~nouser/x`` ("Could not
+    determine home directory"); an override variable written that way
+    stopped the whole scan (rc 1, no output). The shell leaves such a word
+    unexpanded too: the value is then used as the (relative) path it spells,
+    and the reader reports it like any other missing file.
+    """
+    path = Path(value)
+    try:
+        return path.expanduser()
+    except RuntimeError:
+        return path
 
 
 def is_native_safe(path: str | os.PathLike[str]) -> bool:

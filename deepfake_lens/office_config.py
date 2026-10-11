@@ -30,8 +30,10 @@ MAX_FIELD_CHARS = 200
 
 def config_path() -> Path:
     """``$DEEPFAKE_LENS_CONFIG`` or ``~/.deepfake-lens/config.json``."""
+    from .native_path import expand_user
+
     env = os.environ.get(CONFIG_ENV)
-    return Path(env).expanduser() if env else Path.home() / CONFIG_DIR_NAME / CONFIG_FILE_NAME
+    return expand_user(env) if env else Path.home() / CONFIG_DIR_NAME / CONFIG_FILE_NAME  # R18-2: ~nouser
 
 
 def load_office_config(path: Path | None = None) -> dict[str, str]:

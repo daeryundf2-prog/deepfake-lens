@@ -42,7 +42,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .native_path import scratch_dir
+from .native_path import expand_user, scratch_dir
 
 ASSET_MANIFEST_NAME = "assets.json"
 ASSET_MANIFEST_SCHEMA = "model-assets-v1"
@@ -307,17 +307,24 @@ def asset_file_tokens() -> list[str]:
     and the file state — so the key is the same for the same bytes in any
     install folder or venv. An override naming no file adds its file *name*
     (the coverage reason quotes it: "재정의 … 파일이 없습니다: 'x.xml'").
+
+    R18-2 (round 18): nothing here raises — a file state that cannot be
+    read becomes an ``error:<class>`` token; the cache key is never the
+    reason a scan stops.
     """
     tokens: list[str] = []
     for asset in KNOWN_ASSETS:
-        override = asset_override(asset)
-        if override is not None:
-            state = _file_token(override)
-            if state in ("absent", "not-a-file"):
-                state += f":{override.name}"
-            tokens.append(f"asset-file:{asset}:override:{state}")
-        else:
-            tokens.append(f"asset-file:{asset}:" + "|".join(f"{role}:{_file_token(path)}" for role, path in _loader_files(asset)))
+        try:
+            override = asset_override(asset)
+            if override is not None:
+                state = _file_token(override)
+                if state in ("absent", "not-a-file"):
+                    state += f":{override.name}"
+                tokens.append(f"asset-file:{asset}:override:{state}")
+            else:
+                tokens.append(f"asset-file:{asset}:" + "|".join(f"{role}:{_file_token(path)}" for role, path in _loader_files(asset)))
+        except Exception as exc:  # noqa: BLE001 — R18-2: any failure is a token, never an aborted scan
+            tokens.append(f"asset-file:{asset}:error:{type(exc).__name__}")
     return tokens
 
 
@@ -345,7 +352,8 @@ def asset_override(asset: str) -> Path | None:
     if env is None:
         return None
     value = os.environ.get(env, "").strip()
-    return Path(value).expanduser() if value else None
+    # R18-2 (round 18): "~nouser/h.xml" raised RuntimeError here and stopped the scan / doctor.
+    return expand_user(value) if value else None
 
 
 def asset_status(models_dir: Path | str | None = None) -> list[dict[str, object]]:

@@ -28,8 +28,10 @@ PACKAGE_LOGGER = "deepfake_lens"
 
 
 def default_log_dir() -> Path:
+    from .native_path import expand_user
+
     env = os.environ.get(LOG_DIR_ENV)
-    return Path(env).expanduser() if env else Path.home() / ".cache" / "deepfake-lens" / "logs"
+    return expand_user(env) if env else Path.home() / ".cache" / "deepfake-lens" / "logs"  # R18-2: ~nouser
 
 
 class _ErrorCounter(logging.Handler):

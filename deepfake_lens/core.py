@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, NamedTuple
 
 from .archives import archive_format, extract_archive, is_archive
-from .native_path import scratch_dir, temp_location
+from .native_path import expand_user, scratch_dir, temp_location
 from .audio import SUPPORTED_AUDIO_EXTENSIONS, AudioAnalysis, analyze_audio
 from .video_analysis import (
     AV_AUDIO_CHECK,
@@ -2264,7 +2264,7 @@ def default_heatmap_root() -> Path:
     """Tool-owned heatmap output root: ``$DEEPFAKE_LENS_HEATMAP_DIR`` or
     ``~/.cache/deepfake-lens/heatmaps``. Never inside the evidence."""
     env = os.environ.get(HEATMAP_DIR_ENV)
-    return Path(env).expanduser() if env else Path.home() / ".cache" / "deepfake-lens" / "heatmaps"
+    return expand_user(env) if env else Path.home() / ".cache" / "deepfake-lens" / "heatmaps"  # R18-2: ~nouser
 
 
 def is_default_heatmap_output(path: Path | str) -> bool:
