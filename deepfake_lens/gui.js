@@ -2299,6 +2299,13 @@
                 <div><div class="d-verdict vt-${mk}">${shown(shortVerdict(item))}</div>
                 <h3 class="qc-line">${shown(verdictLine(item))}</h3>
                 <div class="note">${shown(item.name || '')}</div></div></div>`);
+            // GUI-REV G-7: a text result leads with the fixed legal limitation, and
+            // its reference signals are shown with it — not inside the disclosure.
+            if (r.grade === 'reference') {
+                top.push(`<p class="legal-note qc-legal">${escapeHtml(TEXT_LEGAL_LIMITATION)}</p>`);
+                const soft = (r.evidence || []).filter(e => e.kind !== 'deterministic' && e.direction !== 'neutral');
+                if (soft.length) top.push(`<p class="hint">참고 신호 (결론에 쓰지 않음)</p><ol class="ev-list qc-soft">${soft.map(evItemHtml).join('')}</ol>`);
+            }
             const decisive = decisiveEvidence(r, verdict);
             if (decisive.length) top.push(`<ol class="ev-list">${decisive.map(evItemHtml).join('')}</ol>`);
             const failed = failedChecks(item);
@@ -2328,7 +2335,11 @@
                     (a.notice ? `<div class="note">${shown(a.notice)}</div>` : '') +
                     (sig ? `<ul>${sig}</ul>` : '<div class="note">발동 신호 없음</div>') + (lim ? `<ul class="c-amber">${lim}</ul>` : '')));
             }
-            if (data.forensic) {
+            if (data.forensic && data.mode === 'text') {
+                // G-7/U-10: pasted text is not a file — C2PA and file metadata do not apply,
+                // so the provenance layer's "C2PA 판독 불가" is not shown for it.
+                parts.push(layer('메타데이터 / C2PA', '<div class="note">붙여넣은 텍스트는 파일이 아니어서 C2PA·메타데이터 같은 출처 기록이 없습니다 — 이 계층은 해당하지 않습니다.</div>'));
+            } else if (data.forensic) {
                 const fr = data.forensic, body = fr.diagnostic || fr;
                 const sig = (body.signals || []).map(s => `<li>${shown(s.title)} — ${shown(s.detail)}</li>`).join('');
                 const prov = (body.provenance_records || []).map(p => `<li>${shown(p.kind || p.source || p.standard || 'record')}: ${shown(p.summary || p.detail || p.provider || '')}</li>`).join('');

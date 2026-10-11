@@ -262,6 +262,18 @@ def main() -> int:
             page.evaluate("location.hash = '#/ledger'")
             assert page.locator("#partial-banner").is_visible(), "the partial-result banner (R18-3) must show"
 
+            # 5d. GUI-REV G-7: a pasted-text quick check leads with the legal limitation
+            #     and its reference signals (outside the disclosure), and shows no
+            #     "C2PA 판독 불가" — C2PA does not apply to pasted text.
+            page.evaluate("location.hash = '#/tools'")
+            page.fill("#qc-text", "As an AI language model, I cannot help with that. 오늘 회의는 세 시에 시작합니다.")
+            page.click("#qc-text-btn")
+            page.wait_for_selector("#qc-out .qc-head", timeout=120_000)
+            legal = page.locator("#qc-out > .qc-legal")
+            assert legal.is_visible() and "증거능력이 없으며" in legal.inner_text(), "the legal limitation must lead the text result"
+            assert page.locator("#qc-out > .qc-soft").is_visible(), "the lexical reference signal must be visible"
+            assert "C2PA 판독 불가" not in (page.locator("#qc-out").text_content() or ""), "pasted text must not show a C2PA failure"
+
             # 6. Reflow (WCAG 1.4.10): no horizontal page scroll at 375px on any screen.
             page.set_viewport_size({"width": 375, "height": 812})
             for view in ("scan", "ledger", "report", "tools"):
