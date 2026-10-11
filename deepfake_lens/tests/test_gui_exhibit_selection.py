@@ -102,9 +102,15 @@ class StatementSelectionTest(unittest.TestCase):
         self.assertEqual(statement.entries[0].exhibit_no, "을 제1호증")
         self.assertEqual(statement.to_json()["submitter_side"], "defendant")
         markdown = statement.to_markdown()
-        self.assertIn("피고(피의자)의 대리인", markdown)
+        # GUI-REV2 H-3: this pinned "피고(피의자)의 대리인" (Markdown) while the PDF said
+        # "변호인"; the defendant side now says 변호인 in every rendering, lists no statute
+        # and puts the client placeholder in the defendant box.
+        self.assertIn("피고(피의자)의 변호인", markdown)
         self.assertIn("**피고(피의자) 변호인**", markdown)
-        self.assertNotIn("원고(고소인)의 대리인", markdown)
+        self.assertNotIn("대리인", markdown)
+        self.assertNotIn("검토 참고", markdown)
+        self.assertNotIn("정보통신망", markdown)
+        self.assertTrue(all(entry.statutes == [] for entry in statement.entries))
         verdicts = [entry.verdict_label for entry in statement.entries]
         with tempfile.TemporaryDirectory() as tmp:
             summary, items, _ = _scan(_folder(tmp))
@@ -201,6 +207,34 @@ class WebReportSelectionTest(unittest.TestCase):
         assert isinstance(signed, dict)
         self.assertEqual(signed["summary"]["total"], self.summary["total"])
         self.assertEqual(len(signed["items"]), len(self.rows))
+
+    def test_defendant_side_placeholders_and_statutes_on_the_web(self) -> None:
+        """GUI-REV2 H-3: the empty-box placeholders follow the side; plaintiff is unchanged."""
+        bodies = {}
+        for side in ("plaintiff", "defendant"):
+            out = webapp_api._report_payload(self._body(submitter_side=side), "evidence-json", default_folder=self.folder)
+            assert isinstance(out, dict), out
+            bodies[side] = out
+        self.assertEqual((bodies["plaintiff"]["plaintiff"], bodies["plaintiff"]["defendant"]), ("(의뢰사 상호명 입력) 귀하", "(피고/피의자 성명 입력)"))
+        self.assertEqual((bodies["defendant"]["plaintiff"], bodies["defendant"]["defendant"]), ("(원고/고소인 성명 입력)", "(의뢰인 성명 입력) 귀하"))
+        self.assertTrue(all("피고·피의자 측 제출" in entry["purpose_of_proof"] for entry in bodies["defendant"]["entries"]))
+
+    def test_rendered_defendant_pdf_says_byeonhoin(self) -> None:
+        from deepfake_lens.evidence_statement import write_evidence_statement_pdf
+        from deepfake_lens.pdf_backend import import_pymupdf, pymupdf_available
+
+        if not pymupdf_available():
+            self.skipTest("pymupdf not installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            summary, items, _ = _scan(_folder(tmp))
+            statement = build_evidence_statement(items, summary=summary, submitter_side="defendant")
+            pdf = Path(tmp) / "s.pdf"
+            write_evidence_statement_pdf(pdf, statement, key=KEY)
+            with import_pymupdf().open(str(pdf)) as doc:
+                text = "".join(page.get_text() for page in doc).replace("\n", "")
+        self.assertIn("피고(피의자)의 변호인은", text)
+        self.assertNotIn("대리인", text)
+        self.assertNotIn("검토 참고", text)
 
     def test_an_empty_unknown_or_repeated_choice_is_refused(self) -> None:
         """GUI-REV2 H-7: no statement is signed with 0 exhibits or with paths that are not its rows."""

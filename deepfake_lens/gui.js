@@ -2101,7 +2101,13 @@
                 ? { tag: 'ok', text: '사건: ' + no + ' · ' + nm }
                 : { tag: 'req', text: '사건번호와 사건명이 비어 있습니다 — 증거설명서에 필요합니다.', act: ['입력', () => $(no ? 'case-name' : 'case-no').focus()] });
             const pl = caseValue('case-plaintiff'), df = caseValue('case-defendant');
-            if (!pl || !df) out.push({ tag: 'info', text: '의뢰인 또는 피고·피의자가 비어 있습니다 — 증거설명서에는 "(… 입력)" 자리표시로 남습니다.', act: ['입력', () => $(pl ? 'case-defendant' : 'case-plaintiff').focus()] });
+            if (!pl || !df) {
+                // H-3: the empty box is named as the form names it; the client is on the chosen side.
+                const empty = [!pl ? '원고·고소인' : '', !df ? '피고·피의자' : ''].filter(Boolean).join('·');
+                const client = submitterSide() === 'defendant' ? '피고·피의자(의뢰인)' : submitterSide() === 'plaintiff' ? '원고·고소인(의뢰인)' : '';
+                out.push({ tag: 'info', text: `${empty} 칸이 비어 있습니다 — 증거설명서에는 "(… 입력)" 자리표시로 남습니다.` + (client ? ` 의뢰인 자리: ${client}.` : ''),
+                    act: ['입력', () => $(pl ? 'case-defendant' : 'case-plaintiff').focus()] });
+            }
             const side = submitterSide();
             out.push(side
                 ? { tag: 'ok', text: `의뢰 측: ${SIDES[side][0]} — 서증은 ${SIDES[side][1]}호증으로 번호를 붙입니다.` }
@@ -2210,7 +2216,8 @@
         // statement's exhibits; the other rows go to its signed appendix.
         function exportPayload(kind) {
             const extra = { format: EXPORT_SPECS[kind][0] };
-            if (kind === 'pdf') extra.exhibit_no = '갑 제        호증';
+            // GUI-REV2 H-3: the forensic PDF's exhibit box follows the chosen side (갑/을).
+            if (kind === 'pdf') extra.exhibit_no = (submitterSide() === 'defendant' ? '을' : '갑') + ' 제        호증';
             if (kind === 'evidence') extra.exhibit_paths = selectedEntries().map(e => e.item.path);
             return reportPayload(extra);
         }

@@ -1878,15 +1878,16 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
             return {"error": REPORT_EXHIBIT_PATHS_DUPLICATE}
 
     def _statement() -> Any:
-        from .evidence_statement import build_evidence_statement
+        from .evidence_statement import build_evidence_statement, side_placeholders
         from .office_config import DEFAULT_CASE_NAME
 
         return build_evidence_statement(
             items,
             case_no=str(data.get("case_no") or "(사건번호 입력)"),
             case_name=str(data.get("case_name") or DEFAULT_CASE_NAME),  # R18-16
-            plaintiff=str(data.get("plaintiff") or "(의뢰사 상호명 입력) 귀하"),
-            defendant=str(data.get("defendant") or "(피고/피의자 성명 입력)"),
+            # GUI-REV2 H-3: the client placeholder sits in the submitting side's box.
+            plaintiff=str(data.get("plaintiff") or side_placeholders(str(submitter_side))[0]),
+            defendant=str(data.get("defendant") or side_placeholders(str(submitter_side))[1]),
             court=str(data.get("court") or "○○지방법원 귀중"),
             # N17: the request's value, else the operator config, else blank.
             law_firm=str(data.get("law_firm") or "") or None,

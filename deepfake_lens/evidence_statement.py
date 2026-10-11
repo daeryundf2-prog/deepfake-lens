@@ -61,6 +61,23 @@ EVIDENCE_STATEMENT_REPORT_TYPE = "evidence-statement"
 # GUI-REV G-9: the submitting side and its exhibit prefix (갑호증 / 을호증).
 SUBMITTER_PARTIES = {"plaintiff": "원고(고소인)", "defendant": "피고(피의자)"}
 SUBMITTER_EXHIBIT_PREFIX = {"plaintiff": "갑 제", "defendant": "을 제"}
+# GUI-REV2 H-3: every side-dependent word of the form, in one place. The
+# plaintiff row is the long-standing form, word for word (its Markdown says
+# "대리인", its PDF "소송대리인"); the defendant side says "변호인" everywhere,
+# lists no statute (the candidate offences are the accusing side's framing) and
+# puts the client placeholder in the defendant box.
+SIDE_WORDING: dict[str, dict[str, Any]] = {
+    "plaintiff": {"md_agent": "대리인", "pdf_agent": "소송대리인", "signoff_agent": "소송대리인", "statutes": True,
+                  "placeholders": ("(의뢰사 상호명 입력) 귀하", "(피고/피의자 성명 입력)")},
+    "defendant": {"md_agent": "변호인", "pdf_agent": "변호인", "signoff_agent": "변호인", "statutes": False,
+                  "placeholders": ("(원고/고소인 성명 입력)", "(의뢰인 성명 입력) 귀하")},
+}
+NO_STATUTE_DEFENDANT = "• 관련 법조: 기재하지 않음(피고·피의자 측 제출)"
+
+
+def side_placeholders(side: str) -> tuple[str, str]:
+    """(plaintiff, defendant) placeholders of an empty case box for ``side`` (H-3)."""
+    return SIDE_WORDING.get(side, SIDE_WORDING["plaintiff"])["placeholders"]
 # GUI-REV G-1: the appendix of rows not chosen as exhibits.
 SELECTION_APPENDIX_TITLE = "부록: 서증으로 넣지 않은 파일"
 SIGNATURE_SECTION_TITLE = "### [보고서 서명]"
@@ -136,8 +153,12 @@ class EvidenceStatement:
         return SUBMITTER_PARTIES.get(self.submitter_side, SUBMITTER_PARTIES["plaintiff"])
 
     @property
+    def wording(self) -> dict[str, Any]:
+        return SIDE_WORDING.get(self.submitter_side, SIDE_WORDING["plaintiff"])
+
+    @property
     def party_agent(self) -> str:
-        return "소송대리인" if self.submitter_side == "plaintiff" else "변호인"
+        return str(self.wording["signoff_agent"])
 
     def selection_lines(self) -> list[str]:
         """The appendix of rows not chosen as exhibits (G-1): verdict and hash of each."""
@@ -170,7 +191,7 @@ class EvidenceStatement:
             f"**원    고 (고소인)**: {one_line(self.plaintiff)}",
             f"**피    고 (피의자)**: {one_line(self.defendant)}",
             "",
-            f"위 사건에 관하여 {self.party}의 대리인은 그 주장사실을 입증하기 위하여 다음과 같이 증거방법을 제출합니다.",
+            f"위 사건에 관하여 {self.party}의 {self.wording['md_agent']}은 그 주장사실을 입증하기 위하여 다음과 같이 증거방법을 제출합니다.",
             "",
             "## 다        음",
             "",
@@ -483,7 +504,7 @@ def build_evidence_statement(
         doc_name = f"디지털 증거 파일 ({row_label(item.path)}) 및 AI 스크리닝 데이터"
         author_date = f"{law_firm}\n{now_date}" if law_firm else now_date
 
-        statutes = _determine_statutes(score, signals, item.kind, band_value)
+        statutes = _determine_statutes(score, signals, item.kind, band_value) if SIDE_WORDING[submitter_side]["statutes"] else []
 
         # The tool screens; it does not prove crimes. Purpose language
         # follows the verdict and names the evidence kind behind it.
@@ -498,7 +519,10 @@ def build_evidence_statement(
                 evidence_lines.append("• 검사 범위: " + "; ".join(display_name(entry.describe()) for entry in gaps[:3]) + (f" 외 {len(gaps) - 3}건" if len(gaps) > 3 else ""))
         sig_text = "\n".join(evidence_lines) if evidence_lines else "• 근거 항목 없음"
 
-        statute_text = "\n".join([f"• {st}" for st in statutes]) if statutes else "• 관련 법조: 해당 없음 (결정적 근거에 의한 조작·생성 결론이 없음)"
+        if not SIDE_WORDING[submitter_side]["statutes"]:
+            statute_text = NO_STATUTE_DEFENDANT  # H-3
+        else:
+            statute_text = "\n".join([f"• {st}" for st in statutes]) if statutes else "• 관련 법조: 해당 없음 (결정적 근거에 의한 조작·생성 결론이 없음)"
 
         hash_text = f"• 원본 SHA-256: {file_sha256}" if file_sha256 else f"• 원본 SHA-256: {hash_unavailable or HASH_UNAVAILABLE_ACCESS}"
 
@@ -746,7 +770,7 @@ def _render_statement_pdf(
         (f"사        건    {statement.case_no}  {statement.case_name}", 9.5, (0.1, 0.1, 0.1)),
         (f"원고(고소인)    {statement.plaintiff}", 9.5, (0.1, 0.1, 0.1)),
         (f"피고(피의자)    {statement.defendant}", 9.5, (0.1, 0.1, 0.1)),
-        (f"위 사건에 관하여 {statement.party}의 {statement.party_agent}은 주장사실을 입증하기 위해 아래와 같이 증거방법을 제출합니다.", 8.2, (0.3, 0.3, 0.3)),
+        (f"위 사건에 관하여 {statement.party}의 {statement.wording['pdf_agent']}은 주장사실을 입증하기 위해 아래와 같이 증거방법을 제출합니다.", 8.2, (0.3, 0.3, 0.3)),
         *([(root_line, 8.2, (0.3, 0.3, 0.3))] if (root_line := scan_root_line(body)) else []),  # R9-9
     ], border=(0.82, 0.86, 0.92), fill=(0.97, 0.98, 0.99))
     layout.text(layout.left, layout.right, "다        음", 11.0, (0.1, 0.1, 0.1), align=1, gap=4.0)

@@ -205,6 +205,8 @@ def main() -> int:
             page.check("input[name='submitter-side'][value='defendant']")
             assert "을 제1호증" in page.locator("#a4").inner_text() or page.evaluate("selectedEntries().length") == 0
             assert page.evaluate("exportPayload('evidence').submitter_side") == "defendant"
+            # GUI-REV2 H-3: the forensic PDF's exhibit box follows the side.
+            assert page.evaluate("exportPayload('pdf').exhibit_no").startswith("을 제"), "forensic PDF exhibit box must follow the side"
             assert "의뢰 측" not in page.evaluate("exportBlockReason('evidence', selectedEntries())")
             note = page.locator("#export-note").inner_text()
             assert "지금 내보낼 수 있는 형식" in note and "HTML 보고서" in note, note
