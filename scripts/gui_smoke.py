@@ -471,6 +471,11 @@ def main() -> int:
                 page.evaluate("location.hash = '#/report'")
                 page.wait_for_function("() => currentView === 'report'")
                 assert "다른 검사" in page.locator("#report-checks").inner_text(), f"upload {index}: the case fields of another scope must be confirmed"
+                # GUI-REV3 J-8: uploads only — they cannot be exhibits, and the groups count none.
+                checks = page.locator("#report-checks").inner_text()
+                assert "서증이 될 수 없습니다" in checks and "올린 파일만 있어 증거설명서를 만들 수 없습니다" in checks, checks
+                assert "판단 불가 칸을 고를 수 있습니다" not in checks
+                assert all(page.inner_text(f"#{group}-n") == "0개" for group in ("inc-manip", "inc-auth", "inc-undet", "inc-other"))
                 page.get_by_role("button", name="이 폴더의 사건이 맞음").click()
 
             # 6d. GUI-REV3 J-2: with "같은 내용의 파일은 한 번만 검사", a duplicate row shows its

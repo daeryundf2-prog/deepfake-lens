@@ -2222,10 +2222,14 @@
                 out.push(partial ? { tag: 'warn', text: partial } : { tag: 'ok', text: '전체 검사 결과입니다(중단 없음).' });
                 // The scan's own limits (G-9c); the statement prints them in its 무결성/해석 고지.
                 out.push({ tag: 'info', text: '검사의 한계: ' + reportLimitLines().join(' · ') });
+                // GUI-REV3 J-8: uploaded files are never exhibits — said plainly, and left
+                // out of the appendix count (they go to the 서명 제외 box).
                 const uploads = results.filter(e => e.item.source === 'upload').length;
-                if (uploads) out.push({ tag: 'info', text: `올린 파일 ${uploads}개는 다시 분석할 수 없어 서명 제외(클라이언트 제공 결과)로 실립니다.` });
-                if (!sel.length) out.push({ tag: 'req', text: '증거설명서의 서증으로 넣을 파일을 고르십시오. 근거 있는 파일이 없으면 판단 불가 칸을 고를 수 있습니다.', act: ['고르기', () => $('inc-manip').focus()] });
-                else if (sel.length < results.length) out.push({ tag: 'info', text: `서증 ${sel.length}개 · 나머지 ${results.length - sel.length}개는 증거설명서 부록에 결론·해시와 함께 남습니다. 다른 형식에는 ${results.length}개가 모두 실립니다.` });
+                const scanned = results.length - uploads;
+                if (uploads) out.push({ tag: 'info', text: `올린 파일 ${uploads}개는 증거설명서의 서증이 될 수 없습니다 — 다시 분석할 수 없어 서명 제외(클라이언트 제공 결과)로 실립니다.` });
+                if (!scanned) out.push({ tag: 'req', text: '올린 파일만 있어 증거설명서를 만들 수 없습니다 — 폴더를 검사하십시오. 감정 보고서·HTML·서명된 JSON은 만들 수 있습니다.', act: ['검사 화면으로', () => navigate('scan')] });
+                else if (!sel.length) out.push({ tag: 'req', text: '증거설명서의 서증으로 넣을 파일을 고르십시오. 근거 있는 파일이 없으면 판단 불가 칸을 고를 수 있습니다.', act: ['고르기', () => $('inc-manip').focus()] });
+                else if (sel.length < scanned) out.push({ tag: 'info', text: `서증 ${sel.length}개 · 나머지 ${scanned - sel.length}개는 증거설명서 부록에 결론·해시와 함께 남습니다. 다른 형식에는 ${results.length}개가 모두 실립니다.` });
                 // GUI-REV2 H-4: say which appendix rows carry more than a verdict.
                 const appendix = results.filter(e => !sel.includes(e) && e.item.source !== 'upload' && itemBand(e) === 'undetermined');
                 const cueRows = appendix.filter(e => cueEvidence(e.item.result).length).length;
@@ -2263,7 +2267,9 @@
         function renderReport() {
             const b = bandCounts();
             const sel = selectedEntries();
-            GROUPS.forEach(([band, id]) => { $(id + '-n').textContent = b[band] + '개'; });
+            // J-8: the group counts are the rows that can become exhibits (no uploads).
+            const exhibitable = results.filter(e => e.item.source !== 'upload');
+            GROUPS.forEach(([band, id]) => { $(id + '-n').textContent = exhibitable.filter(e => itemBand(e) === band).length + '개'; });
             $('inc-label').textContent = `${sel.length}개 선택`;
             const list = $('report-checks');
             list.innerHTML = '';
