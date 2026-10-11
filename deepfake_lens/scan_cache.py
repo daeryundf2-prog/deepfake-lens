@@ -801,7 +801,10 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 6: R18-3 — unrecorded_files gains the reason "cancelled" (사용자 취소) and
 #    the summary cancelled / files_cancelled; the "other_skipped" text no
 #    longer names cancels (a cancelled file has no row).
-OUTPUT_FORMAT_GENERATION = 6
+# 7: R19-7 — an APNG's frame data (fdAT) is skipped like IDAT: its metadata
+#    entry no longer says "메타데이터 청크를 … 읽음 — 이후 fdAT 청크…", and a
+#    metadata chunk after the frames is read.
+OUTPUT_FORMAT_GENERATION = 7
 
 
 def cache_extension(path: Path) -> str:

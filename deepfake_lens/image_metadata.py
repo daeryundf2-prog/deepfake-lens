@@ -361,8 +361,14 @@ class _PngWalk:
     partial: str | None  # why some metadata chunk was not read
 
 
+# R19-7 (round 19): the chunks holding image data, skipped by seeking — IDAT and an APNG's frame data
+# fdAT (it was read as metadata against --metadata-bytes: a 4-frame APNG without metadata was
+# "메타데이터 청크를 4 MB까지만 읽음 … fdAT", and a tEXt after the frames was missed).
+PNG_IMAGE_DATA_CHUNKS = (b"IDAT", b"fdAT")
+
+
 def _walk_png(path: Path, *, budget: int) -> _PngWalk:
-    """R18-4: the PNG's chunks through the whole file — IDAT skipped by seeking, other chunks read.
+    """R18-4: the PNG's chunks through the whole file — image data (IDAT, R19-7: APNG fdAT) skipped by seeking, other chunks read.
 
     ``budget`` bounds the bytes of non-IDAT chunks read; a chunk over
     ``png.MAX_CHUNK_BYTES``, a chunk past the budget or more than
@@ -392,7 +398,7 @@ def _walk_png(path: Path, *, budget: int) -> _PngWalk:
                 return _PngWalk(b"".join(parts), True, partial)
             if kind == b"IHDR" and length <= 64:
                 parts.append(header + handle.read(length + 4))  # the dimensions, outside the budget
-            elif kind != b"IDAT":
+            elif kind not in PNG_IMAGE_DATA_CHUNKS:
                 name = kind.decode("latin-1")
                 if length > MAX_CHUNK_BYTES:
                     partial = partial or f"메타데이터 청크 {name}({length}바이트)가 청크 상한({MAX_CHUNK_BYTES}바이트)을 넘어 읽지 않음"

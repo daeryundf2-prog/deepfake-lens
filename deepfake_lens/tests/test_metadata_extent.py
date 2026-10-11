@@ -70,6 +70,30 @@ class PngChunksAreWalkedTest(unittest.TestCase):
         self.assertEqual(read.dimensions, (1024, 1024))
         self.assertEqual(read.partial, f"메타데이터 청크를 10바이트까지만 읽음(--metadata-bytes) — 이후 tEXt 청크({len(A1111)}바이트)를 읽지 않음")
 
+    def test_apng_frame_data_is_skipped_like_idat(self) -> None:
+        """R19-7 (round 19): fdAT (APNG frame data) was read as a metadata chunk against --metadata-bytes."""
+        width = height = 512
+        rng = random.Random(19)
+        frame = zlib.compress(b"".join(b"\x00" + rng.randbytes(width * 3) for _ in range(height)), 1)
+        ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+        actl = struct.pack(">II", 3, 0)
+
+        def fctl(sequence: int) -> bytes:
+            return _chunk(b"fcTL", struct.pack(">IIIIIHHBB", sequence, width, height, 0, 0, 1, 10, 0, 0))
+
+        body = _chunk(b"IHDR", ihdr) + _chunk(b"acTL", actl) + fctl(0) + _chunk(b"IDAT", frame)
+        sequence = 1
+        for _ in range(2):
+            body += fctl(sequence) + _chunk(b"fdAT", struct.pack(">I", sequence + 1) + frame)
+            sequence += 2
+        path = self.root / "anim.png"
+        path.write_bytes(b"\x89PNG\r\n\x1a\n" + body + _chunk(b"tEXt", A1111) + _chunk(b"IEND", b""))
+        self.assertGreater(len(frame), MIB // 2)
+        read = read_image_metadata_full(path, metadata_bytes=MIB // 4)  # far below one frame
+        self.assertIsNone(read.partial)
+        self.assertIn("Steps: 20", read.metadata.get("png.parameters", ""))
+        self.assertEqual(read.dimensions, (width, height))
+
     @unittest.skipUnless(HAVE_PIL, "Pillow not installed")  # the EXIF read
     def test_the_generator_evidence_decides(self) -> None:
         path = self.root / "a1111.png"
