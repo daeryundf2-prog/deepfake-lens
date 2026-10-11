@@ -111,7 +111,7 @@
 
         // A11Y-6: an error stays on the page (the error region under the top
         // bar) until the examiner closes it — never only a toast that fades.
-        function showError(msg, label) {
+        function showError(msg, label, fromScan) {
             const region = $('error-region');
             const box = document.createElement('div');
             box.className = 'err-item';
@@ -132,7 +132,9 @@
                 (next ? next.querySelector('button') : $('main')).focus();
             });
             box.append(text, close);
-            box.dataset.scan = String(scanGeneration);
+            // GUI-REV2 H-10: only a scan's own errors carry its generation; a quick
+            // check or export error is never later marked "이전 검사".
+            if (fromScan) box.dataset.scan = String(scanGeneration);
             region.appendChild(box);
             while (region.children.length > 4) region.firstElementChild.remove();
         }
@@ -143,7 +145,7 @@
         let scanGeneration = 0;
         function retireErrors() {
             scanGeneration += 1;
-            document.querySelectorAll('#error-region .err-item').forEach(box => {
+            document.querySelectorAll('#error-region .err-item[data-scan]').forEach(box => {
                 if (box.classList.contains('err-old')) return;
                 box.classList.add('err-old');
                 const head = box.querySelector('.err-text b');
@@ -151,8 +153,8 @@
             });
         }
 
-        function toast(msg, isErr, label) {
-            if (isErr) { showError(msg, label); return; }
+        function toast(msg, isErr, label, scope) {
+            if (isErr) { showError(msg, label, scope === 'scan'); return; }
             const el = document.createElement('div');
             el.className = 'toast';
             el.textContent = displayName(msg);  // R11-10: server messages may echo a name
@@ -1159,7 +1161,7 @@
                 }
                 const data = state.result;
                 if (state.status === 'error' || !data || data.error) {
-                    toast('검사 실패: ' + ((data && (data.detail || data.error)) || '검사 결과 없음'), true);
+                    toast('검사 실패: ' + ((data && (data.detail || data.error)) || '검사 결과 없음'), true, '', 'scan');
                     progressFinish('error');
                     return;
                 }
@@ -1170,7 +1172,7 @@
                 lastScanOptions = options || {};
                 processResults(data);
                 // R18-3: "분석 완료" was shown for a cancelled scan too.
-                if (partialResultNote(data.summary)) toast(`검사 취소 — 부분 결과 ${(data.items || []).length}개 행, 분석하지 않은 파일 ${data.summary.files_cancelled || 0}개`, true, '주의');
+                if (partialResultNote(data.summary)) toast(`검사 취소 — 부분 결과 ${(data.items || []).length}개 행, 분석하지 않은 파일 ${data.summary.files_cancelled || 0}개`, true, '주의', 'scan');
                 else toast(`분석 완료 — ${(data.items || []).length}개 파일`);
                 if (state.status === 'cancelled' || partialResultNote(data.summary)) {
                     progressFinish('cancelled', data);
@@ -1184,7 +1186,7 @@
                     showResultsWhenDone();
                 }
             } catch (error) {
-                toast('검사 중 오류: ' + error.message, true);
+                toast('검사 중 오류: ' + error.message, true, '', 'scan');
                 progressFinish('error');
             } finally {
                 currentJobId = null;
@@ -1197,7 +1199,7 @@
             e.preventDefault();
             if (scanBusy) return;
             const folderPath = $('folder-path').value.trim();
-            if (!folderPath) { toast('폴더 경로를 입력하세요', true); $('folder-path').focus(); return; }
+            if (!folderPath) { toast('폴더 경로를 입력하세요', true, '', 'scan'); $('folder-path').focus(); return; }
             const params = new URLSearchParams({
                 folder: folderPath,
                 pixel: pixelMode(),
@@ -1227,13 +1229,13 @@
             setBusyButton($('analyze-btn'), true);
             try {
                 const job = await apiJson('/api/scan?' + params.toString());
-                if (job.error) { toast('오류: ' + job.error, true); return; }
+                if (job.error) { toast('오류: ' + job.error, true, '', 'scan'); return; }
                 rememberJob({ job: job.job_id, folder: folderPath, options: scanOptions });
                 await runScanJob(job.job_id, folderPath, scanOptions);
             } catch (error) {
                 // U-8: an out-of-root folder says which folders can be scanned.
                 const hint = /허용되지 않은 경로/.test(error.message) ? ' — 서버를 시작할 때 --folder 또는 --allow-root로 등록한 폴더 안만 검사할 수 있습니다.' : '';
-                toast('검사를 시작하지 못했습니다: ' + error.message + hint, true);
+                toast('검사를 시작하지 못했습니다: ' + error.message + hint, true, '', 'scan');
             } finally {
                 setBusyButton($('analyze-btn'), false);
             }
@@ -1246,7 +1248,7 @@
                 const data = await apiJson('/api/scan-cancel?job=' + encodeURIComponent(currentJobId));
                 if (data.cancelled) setStatusText('중단 요청을 보냈습니다 — 지금 검사 중인 파일까지 끝내고 멈춥니다.');
             } catch (e) {
-                toast('중단 요청 실패: ' + e.message, true);
+                toast('중단 요청 실패: ' + e.message, true, '', 'scan');
                 setBusyButton($('scan-cancel'), false);
             }
         });
@@ -1287,7 +1289,7 @@
                     const form = new FormData();
                     batch.forEach(f => form.append('files', f, f.webkitRelativePath || f.name));
                     const data = await apiJson('/api/analyze-upload', { method: 'POST', body: form });
-                    if (data.error) { toast('오류: ' + data.error, true); progressFinish('error'); return; }
+                    if (data.error) { toast('오류: ' + data.error, true, '', 'scan'); progressFinish('error'); return; }
                     allItems.push(...(data.items || []));
                     // GUI-REV2 H-9: staged — the provenance on screen is the shown results'
                     // until these results arrive (processResults commits it).
@@ -1305,7 +1307,7 @@
                 setBusy(false);
                 showResultsWhenDone();
             } catch (error) {
-                toast('분석 중 오류: ' + error.message, true);
+                toast('분석 중 오류: ' + error.message, true, '', 'scan');
                 progressFinish('error');
             } finally {
                 if (scanBusy) setBusy(false);
