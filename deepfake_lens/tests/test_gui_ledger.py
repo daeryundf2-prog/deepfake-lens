@@ -315,7 +315,7 @@ class ExportErrorTextTest(unittest.TestCase):
                 "not_rederived_exhibit_paths": [{"path": "dalle.jpg", "reason": "파일을 찾을 수 없습니다"}],
                 "unknown_exhibit_paths": ["dalle.jpg", *(f"x{i}.png" for i in range(7))]}
         script = ("const EXPORT_ERROR_PATHS = 5;\nconst VERDICT_LABELS = {manipulation_evidence: '조작·생성 근거 있음', undetermined: '판단 불가'};\n"
-                  "const STATUS_LABELS = {duplicate: '중복'};\n") + _function(source, "exportErrorText") + f"console.log(JSON.stringify(exportErrorText({json.dumps(body, ensure_ascii=False)}, 400)));"
+                  "const STATUS_LABELS = {duplicate: '중복'};\n") + _function(source, "changeText") + _function(source, "exportErrorText") + f"console.log(JSON.stringify(exportErrorText({json.dumps(body, ensure_ascii=False)}, 400)));"
         node = shutil.which("node")
         assert node is not None
         with tempfile.TemporaryDirectory() as tmp:
@@ -339,7 +339,7 @@ class ChangedRowsTest(unittest.TestCase):
             *({"path": f"x{i}.png", "posted_verdict": "undetermined", "server_verdict": "undetermined"} for i in range(5)),
         ]}
         script = ("const EXPORT_ERROR_PATHS = 5;\nconst VERDICT_LABELS = {manipulation_evidence: '조작·생성 근거 있음', undetermined: '판단 불가'};\n"
-                  "const STATUS_LABELS = {};\n") + _function(source, "exportErrorText") + f"console.log(JSON.stringify(exportErrorText({json.dumps(body, ensure_ascii=False)}, 409)));"
+                  "const STATUS_LABELS = {};\n") + _function(source, "changeText") + _function(source, "exportErrorText") + f"console.log(JSON.stringify(exportErrorText({json.dumps(body, ensure_ascii=False)}, 409)));"
         node = shutil.which("node")
         assert node is not None
         with tempfile.TemporaryDirectory() as tmp:
@@ -356,6 +356,41 @@ class ChangedRowsTest(unittest.TestCase):
             "console.log(JSON.stringify(rowReason(results[0].item)));"
         )
         self.assertTrue(str(out).startswith("검사 뒤 바뀜 — 다시 검사 · "), out)
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class ChangeTextTest(unittest.TestCase):
+    def test_what_changed_is_named(self) -> None:
+        """GUI-REV4 K-4: content-only changes and a duplicate whose original changed are told apart."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        rows = [
+            {"path": "plain.png", "posted_verdict": "undetermined", "server_verdict": "undetermined", "posted_status": "analyzed",
+             "server_status": "analyzed", "posted_sha256": "a" * 64, "server_sha256": "b" * 64},
+            {"path": "copy.png", "posted_verdict": None, "server_verdict": "manipulation_evidence", "posted_status": "duplicate",
+             "server_status": "analyzed", "posted_sha256": "c" * 64, "server_sha256": "c" * 64},
+            {"path": "dalle.jpg", "posted_verdict": "manipulation_evidence", "server_verdict": "undetermined", "posted_status": "analyzed",
+             "server_status": "analyzed", "posted_sha256": "d" * 64, "server_sha256": "e" * 64},
+            {"path": "gone.png", "posted_verdict": "undetermined", "server_verdict": None, "posted_status": "analyzed", "server_status": None,
+             "posted_sha256": "f" * 64, "server_sha256": None, "reason": "파일을 찾을 수 없음"},
+        ]
+        script = ("const VERDICT_LABELS = {manipulation_evidence: '조작·생성 근거 있음', undetermined: '판단 불가'};\n"
+                  "const STATUS_LABELS = {duplicate: '중복'};\n") + _function(source, "changeText") + (
+            f"const rows = {json.dumps(rows)};\n"
+            "const items = {'copy.png': {duplicate_of: 'a1111.png'}};\n"
+            "console.log(JSON.stringify(rows.map(r => changeText(r, items[r.path] || null))));")
+        node = shutil.which("node")
+        assert node is not None
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "change.js"
+            path.write_text(script, encoding="utf-8")
+            done = subprocess.run([node, str(path)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout), [
+            "내용(SHA-256) 바뀜 · 결론은 그대로 판단 불가",
+            "원본(a1111.png) 바뀜",
+            "조작·생성 근거 있음 → 판단 불가",
+            "판단 불가 → 다시 분석 못 함: 파일을 찾을 수 없음",
+        ])
 
 
 class GuiAccessibilitySourceTest(unittest.TestCase):

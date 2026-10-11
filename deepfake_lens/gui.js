@@ -1400,6 +1400,7 @@
             selectedEntry = null;
             groupsTouched = false;
             changedPaths = new Set();
+            changedInfo = new Map();
             // H-8: case fields typed before the first scan belong to it.
             if (!caseFolder && caseHasValues()) confirmCaseFolder();
             renderResults();
@@ -1775,7 +1776,7 @@
                 `<button type="button" class="linkbtn d-back">목록으로 돌아가기</button></div>`);
             const body = [];
             // R19-13: the server found this file changed since the scan.
-            if (changedPaths.has(String(item.path))) body.push('<section class="d-sec d-fail"><h3>검사 뒤 바뀜</h3><p>서버가 다시 분석해 보니 검사 때와 다릅니다(파일이 바뀌었거나 지워짐). 이 결과로는 내보낼 수 없습니다 — 폴더를 다시 검사하십시오.</p></section>');
+            if (changedPaths.has(String(item.path))) body.push(`<section class="d-sec d-fail"><h3>검사 뒤 바뀜</h3><p>서버가 다시 분석해 보니 검사 때와 다릅니다: ${shown(changedInfo.get(String(item.path)) || '바뀜')}. 이 결과로는 내보낼 수 없습니다 — 폴더를 다시 검사하십시오.</p></section>`);
             // 근거: the records that carry the conclusion, then neutral records.
             const decisive = decisiveEvidence(r, v);
             const neutral = ((r && r.evidence) || []).filter(e => e.kind === 'deterministic' && e.direction === 'neutral');
@@ -2443,7 +2444,23 @@
         // GUI-REV3 J-7: a refused export names the rows behind it — the chosen rows the
         // server could not re-analyze (with its reason) and the paths it did not know.
         const EXPORT_ERROR_PATHS = 5;
-        function exportErrorText(body, status) {
+        // GUI-REV4 K-4: what changed, said as the 409 row shows it — the verdict, or only
+        // the content (same verdict, other SHA-256), or the original of an unchanged
+        // duplicate, or a file the server could not re-analyze. ``item`` is the ledger
+        // row (for duplicate_of), when there is one.
+        function changeText(row, item) {
+            const verdictText = (code, status) => code ? (VERDICT_LABELS[code] || String(code)) : (STATUS_LABELS[status] || (status ? String(status) : '다시 분석 못 함'));
+            const posted = verdictText(row.posted_verdict, row.posted_status);
+            if (!row.server_verdict && !row.server_status) return posted + ' → 다시 분석 못 함' + (row.reason ? ': ' + String(row.reason) : '');
+            const ownBytesSame = row.posted_sha256 && row.server_sha256 && row.posted_sha256 === row.server_sha256;
+            if (row.posted_status === 'duplicate' && ownBytesSame) {
+                return '원본(' + String((item && item.duplicate_of) || '원본 파일') + ') 바뀜';
+            }
+            const server = verdictText(row.server_verdict, row.server_status);
+            if (posted === server && row.posted_sha256 !== row.server_sha256) return '내용(SHA-256) 바뀜 · 결론은 그대로 ' + posted;
+            return posted + ' → ' + server;
+        }
+        function exportErrorText(body, status, lookup) {
             const parts = [String((body && (body.error || body.detail)) || ('서버 오류 (HTTP ' + status + ')'))];
             const listed = (rows, render) => {
                 const shownRows = rows.slice(0, EXPORT_ERROR_PATHS).map(render).join(', ');
@@ -2457,16 +2474,17 @@
             // R19-13 (409): files changed after the scan — each with what the ledger shows and
             // what the server's re-analysis found.
             const changed = Array.isArray(body && body.changed_rows) ? body.changed_rows : [];
-            const verdictText = (code, status) => code ? (VERDICT_LABELS[code] || String(code)) : (STATUS_LABELS[status] || (status ? String(status) : '다시 분석 못 함'));
-            if (changed.length) parts.push('검사 뒤 바뀐 파일: ' + listed(changed, row => String(row.path) + '(' + verdictText(row.posted_verdict, row.posted_status) + ' → ' +
-                (row.server_verdict || row.server_status ? verdictText(row.server_verdict, row.server_status) : '다시 분석 못 함' + (row.reason ? ': ' + String(row.reason) : '')) + ')'));
+            if (changed.length) parts.push('검사 뒤 바뀐 파일: ' + listed(changed, row => String(row.path) + '(' + changeText(row, lookup ? lookup(String(row.path)) : null) + ')'));
             return parts.join(' — ');
         }
         // R19-13: the rows the server found changed after the scan — marked in the ledger
         // until the folder is scanned again.
         let changedPaths = new Set();
+        let changedInfo = new Map();  // K-4: path -> what changed, for the evidence panel
+        function itemByPath(path) { return (results.find(e => String(e.item.path) === path) || {}).item || null; }
         function markChangedRows(rows) {
             changedPaths = new Set(rows.map(row => String(row.path)));
+            changedInfo = new Map(rows.map(row => [String(row.path), changeText(row, itemByPath(String(row.path)))]));
             if (results.length) renderList();
         }
         function rescanFolder() {
@@ -2497,7 +2515,7 @@
                     if (type.includes('application/json')) {
                         try {
                             const errorBody = await res.json();
-                            message = exportErrorText(errorBody, res.status);
+                            message = exportErrorText(errorBody, res.status, itemByPath);
                             if (res.status === 409 && Array.isArray(errorBody.changed_rows)) changedRows = errorBody.changed_rows;
                         } catch (e) { message = '서버 오류 (HTTP ' + res.status + ')'; }
                     } else {
