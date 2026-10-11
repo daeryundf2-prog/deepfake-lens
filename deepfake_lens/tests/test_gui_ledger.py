@@ -425,6 +425,15 @@ class StaleExportTest(unittest.TestCase):
         self.assertEqual(json.loads(done.stdout), ["무시", "무시", "바뀜", "받기", "오류"])
 
 
+class ExportNoteParticleTest(unittest.TestCase):
+    def test_no_particle_is_glued_to_a_format_name(self) -> None:
+        """GUI-REV4 K-7: "서명된 JSON를" — the export note never glues 을/를 to the format name."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        self.assertNotIn("spec[3] + '를", source)
+        self.assertNotIn("spec[3] + '을", source)
+        self.assertIn("spec[3] + ' — 내려받았습니다.'", source)
+
+
 class GuiAccessibilitySourceTest(unittest.TestCase):
     source: str
     html: str

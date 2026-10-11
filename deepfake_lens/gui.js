@@ -2569,7 +2569,8 @@
             btn.dataset.busy = '1';
             const spec = EXPORT_SPECS[kind];
             const startGen = resultsGeneration;
-            $('export-note').textContent = spec[3] + '를 만드는 중입니다 — 서버가 파일을 다시 분석합니다.';
+            // GUI-REV4 K-7: the format name is followed by " — …" (no particle after it: "JSON를").
+            $('export-note').textContent = spec[3] + ' — 만드는 중입니다. 서버가 파일을 다시 분석합니다.';
             const ignored = () => {
                 toast(spec[3] + ': 이전 검사에 대한 응답이라 무시했습니다.');
                 $('export-note').textContent = spec[3] + ' 요청은 이전 검사의 것이라 무시했습니다. 지금 결과로 다시 내보내십시오.';
@@ -2602,7 +2603,7 @@
                     } else {
                         toast(spec[3] + ' 생성 실패: ' + message, true);
                     }
-                    $('export-note').textContent = spec[3] + '를 만들지 못했습니다.';
+                    $('export-note').textContent = spec[3] + ' — 만들지 못했습니다.';
                     return;
                 }
                 const blob = await res.blob();
@@ -2621,7 +2622,7 @@
                         }
                     } catch (e) { /* not a signed body */ }
                 }
-                $('export-note').textContent = spec[3] + '를 내려받았습니다.';
+                $('export-note').textContent = spec[3] + ' — 내려받았습니다.';
             } catch (e) {
                 toast(spec[3] + ' 오류: ' + e.message, true);
             } finally {
