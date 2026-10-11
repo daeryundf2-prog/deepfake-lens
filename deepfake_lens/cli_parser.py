@@ -634,7 +634,12 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
 
     # N8: every command logs per-file failures (with tracebacks) to the log
     # file only; --verbose also prints them on stderr.
-    for sub in subparsers.choices.values():
+    # R20-9 (round 20): and every nested command (corpus build|split|verify) — the docs say "any command".
+    nested = [
+        choice for sub in subparsers.choices.values() for action in sub._actions
+        if isinstance(action, argparse._SubParsersAction) for choice in action.choices.values()
+    ]
+    for sub in [*subparsers.choices.values(), *nested]:
         sub.add_argument("--verbose", action="store_true", help="처리 오류의 상세 로그(트레이스백)를 표준 오류에도 출력(기본: 로그 파일에만 기록)")
 
     _refuse_empty_paths(parser)

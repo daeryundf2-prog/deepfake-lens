@@ -13,6 +13,8 @@ It is intentionally CLI-first:
 
 Every subcommand, briefly. Detail for the core workflow lives in the sections below.
 
+Without a command name the arguments are a `scan` (`deepfake-lens <폴더> --recursive`). R20-9 (round 20): options scan knows given before a command name go after it (`--verbose scan X` is `scan X --verbose`; `--verbose doctor` is `doctor --verbose`), so the command's own parser reads them or reports one it does not take (`--recursive doctor` → `deepfake-lens doctor: 오류: 알 수 없는 인수: --recursive`); they were read as a scan of the folder named like the command. An unknown option before a command is the top-level parser's error (R19-9). `help <명령>` is `<명령> --help` (unless a folder named `help` exists). `--verbose` is accepted by every command, `corpus build|split|verify` included.
+
 **Two output shapes only (phase-0 fix D1).** A conclusion ("is it fake") always comes from
 `analysis_api.analyze_path`, the same path as `scan`: three verdicts (`verdict_code`
 `manipulation_evidence` / `authenticity_evidence` / `undetermined`), `grade`, `evidence`,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import threading
 from pathlib import Path
@@ -434,6 +435,46 @@ def _misplaced_option(argv: list[str], scan_parser: argparse.ArgumentParser) -> 
     return not any(known == option or (option.startswith("--") and known.startswith(option)) for known in scan_parser._option_string_actions)
 
 
+def _options_before_command(argv: list[str], scan_parser: argparse.ArgumentParser) -> int | None:
+    """R20-9 (round 20): the index of the command named after leading *known* options (``--verbose scan X``), or None.
+
+    The tokens before it must all be options scan knows (``--verbose``,
+    ``--workers 4``, ``--format=json``) — so they are not a folder: the old
+    rule read ``--verbose scan /tmp/T1`` as ``scan --verbose scan /tmp/T1``
+    (folder "scan", "알 수 없는 인수: /tmp/T1") and ``--verbose doctor`` as a
+    scan of the folder "doctor".
+    """
+    actions = scan_parser._option_string_actions
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token in COMMANDS and not token.startswith("-"):
+            return index if index else None
+        if not token.startswith("-") or token in ("-", "--"):
+            return None
+        option, has_value = token.split("=", 1)[0], "=" in token
+        matches = [known for known in actions if known == option] or [known for known in actions if option.startswith("--") and known.startswith(option)]
+        if len(matches) != 1:
+            return None
+        nargs = actions[matches[0]].nargs
+        if nargs == 0 or has_value:
+            index += 1
+        elif nargs is None or nargs == 1:
+            index += 2
+        else:
+            return None  # "?", "*", "+": where its values end is not known here
+    return None
+
+
+def _moved_after_command(argv: list[str], at: int) -> list[str]:
+    """R20-9: ``--verbose scan X`` → ``scan X --verbose`` (before a ``--`` when there is one), so the command's parser reads them."""
+    options, rest = argv[:at], argv[at:]
+    if "--" in rest:
+        cut = rest.index("--")
+        return [*rest[:cut], *options, *rest[cut:]]
+    return [*rest, *options]
+
+
 def main(argv: list[str] | None = None) -> int:
     """The ``deepfake-lens`` command (R16-13: an interrupt is a Korean line and exit 130, never a traceback)."""
     from .output_files import BROKEN_PIPE_EXIT, OUTPUT_ERRNOS, STDOUT_WRITE_FAILED, silence_stdout
@@ -500,12 +541,21 @@ def _main(argv: list[str] | None = None) -> int:
             reconfigure(encoding="utf-8", errors="replace")
     argv = list(sys.argv[1:] if argv is None else argv)
     parser, cmd_parsers = build_parser()
+    if argv and argv[0] == "help" and not os.path.lexists("help"):
+        # R20-9 (round 20): `help scan` was a scan of the folder "help" ("알 수 없는 인수: scan").
+        argv = [argv[1], "--help"] if len(argv) > 1 and argv[1] in COMMANDS else ["--help"]
     if argv and argv[0] not in COMMANDS:
         # R19-9 (round 19): an unknown option before a command (`--bogus scan X`) is the top-level
         # parser's error — it was read as `scan --bogus scan X` and blamed on scan.
         if _misplaced_option(argv, cmd_parsers["scan"]):
             parser.error(f"unrecognized arguments: {argv[0]}")
-        argv.insert(0, "scan")
+        # R20-9 (round 20): known options before a command (`--verbose doctor`) go after it — the
+        # command's own parser reads them (or reports one it does not take).
+        at = _options_before_command(argv, cmd_parsers["scan"])
+        if at is not None:
+            argv = _moved_after_command(argv, at)
+        else:
+            argv.insert(0, "scan")
 
     # R18-19 (f) (round 18): an argument the subcommand does not take (`api-serve --folder X`) was
     # reported by the top-level parser with the top-level usage; the subcommand's parser reports it now.
