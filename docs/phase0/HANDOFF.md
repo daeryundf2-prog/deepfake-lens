@@ -1,24 +1,24 @@
 # 0단계 작업 인계서 (다른 세션에서 이어 하기)
 
-작성: 2026-10-11 · 브랜치 `phase0` · 기준 커밋 `main`(dad9730)
+작성: 2026-10-11, 갱신: 2026-10-12(19차 수정 반영) · 브랜치 `phase0` · 기준 커밋 `main`(dad9730)
 
 ## 1. 한 줄 요약
 
-0단계(기반 고정)의 10개 작업 패키지(WP-A~J)는 전부 구현되어 있고, 계획서 7장의 "독립 검증 → 불일치 전부 수정 → 재검증" 루프를 17회 돌렸다. **17차 검증에서 나온 11건(R17-1~R17-11)이 아직 수정되지 않은 상태**에서 인계한다. 게이트 0(불일치 0건)은 아직 선언되지 않았다.
+0단계(기반 고정)의 10개 작업 패키지(WP-A~J)는 전부 구현되어 있고, 계획서 7장의 "독립 검증 → 불일치 전부 수정 → 재검증" 루프를 19회 돌렸다. 17차(R17-1~R17-12)·18차(R18-1~R18-19) 지적은 수정되어 18·19차 검증에서 종료가 확인되었다. **19차 지적 13건(R19-1~R19-12, 조정자 추가 R19-13)은 이 브랜치에서 수정되었고, 기록 재생성(CONFORMANCE·추적표)과 20차 독립 검증이 남아 있다.** 게이트 0(불일치 0건)은 아직 선언되지 않았다.
 
 ## 2. 지금까지의 진행 위치
 
 | 항목 | 상태 |
 | --- | --- |
 | 2차 계획서(사용자·이상적 상태·갭·QA·완료 판정) | claude.ai 문서 "Deepfake Lens 2차 계획서"(탭 2개: 본문, 0단계 구현 명세). 같은 내용이 이 폴더의 `SPEC.md`에 있음 |
-| 0단계 구현 | WP-A~J 완료, `phase0` 브랜치 223커밋(main 대비) |
-| 독립 검증 | 17회. 라운드별 지적사항은 `verify_round*.md` (라운드 2·3은 문서 파일 없이 커밋 메시지·추적표에만 남음) |
-| 테스트 | 633 → 1,555개, 커버리지 80% |
-| 적합성 기록 | `docs/CONFORMANCE.md`: 19 통과 / 0 실패 / 4 수동 / 12 1단계 / 1 건너뜀(환경) |
-| 추적성 | `docs/TRACEABILITY-COMMITS.md`, `docs/traceability-commits.json` (검증 ID → 스펙 갭 G1–G34) |
-| 다음 할 일 | `verify_round17.md`의 R17-1~R17-11 수정 → 기록 재생성 → 18차 독립 검증 |
+| 0단계 구현 | WP-A~J 완료, `phase0` 브랜치 277커밋(기준 커밋 dad9730 이후, 이 인계서 갱신 커밋 포함) |
+| 독립 검증 | 19회. 라운드별 지적사항은 `verify_round*.md` (라운드 2·3은 문서 파일 없이 커밋 메시지·추적표에만 남음). 18차는 `verify_round18.md`(R17 종료 확인 + R18-1~19), 19차는 `verify_round19.md`(R18 종료 확인 + R19-1~12, 끝에 조정자 추가 R19-13) |
+| 테스트 | 633 → 1,684개(19차 수정 후, 게이트 이미지 기준), 커버리지 80% |
+| 적합성 기록 | `docs/CONFORMANCE.md`: 19 통과 / 0 실패 / 4 수동 / 12 1단계 / 1 건너뜀(환경) — bc99d8a(18차 수정 끝)에서 생성한 것이며 19차 수정 뒤에는 아직 재생성하지 않았다 |
+| 추적성 | `docs/TRACEABILITY-COMMITS.md`, `docs/traceability-commits.json` (검증 ID → 스펙 갭 G1–G34; `--check`는 ids[]의 gaps가 커밋 제목 Gaps에 포함되는지 확인). R18까지 매핑됨, R19-1~13은 아직 ids[]에 없음 |
+| 다음 할 일 | R19-1~R19-13의 ID를 추적표 `ids[]`에 추가하고 기록 재생성(5장) → 20차 독립 검증 |
 
-라운드별 추세: 초반(1~5차)은 판정을 틀리게 만드는 치명 결함(검사 실패가 '낮음'으로, 학습 안 된 모델이 한국어 판정, 다른 파일 해시 기록 등), 중반(6~11차)은 경로·인코딩·서명 범위·보고서 렌더링, 후반(12~17차)은 비UTF-8 파일명, 신호 처리, 자식 프로세스 정리 같은 운영 엣지 케이스. 14차 이후 매 회차 회귀 0건, 결론(판정)에 영향 주는 결함 0건, 성능 영향 ±6% 이내.
+라운드별 추세: 초반(1~5차)은 판정을 틀리게 만드는 치명 결함(검사 실패가 '낮음'으로, 학습 안 된 모델이 한국어 판정, 다른 파일 해시 기록 등), 중반(6~11차)은 경로·인코딩·서명 범위·보고서 렌더링, 후반(12~17차)은 비UTF-8 파일명, 신호 처리, 자식 프로세스 정리 같은 운영 엣지 케이스. 14~18차는 회차마다 회귀 0건이었고, 19차에서 R18-1 수정이 드러낸 회귀 1건(R19-1: 다른 venv의 캐시 재생)과 기존 결함 1건(R19-2: numba 디스크 캐시 경합 뒤 SIGSEGV)이 차단 항목으로 나왔다. 조정자가 GUI 적대적 리뷰에서 R19-13(검사 뒤 바뀐 파일을 재분석해 다른 결론에 서명)을 추가했다.
 
 ## 3. 레포를 받는 방법
 
@@ -47,6 +47,22 @@ python3 -m venv .venv-api && .venv-api/bin/pip install fastapi httpx uvicorn pym
 ```
 
 torch/transformers/mediapipe는 설치하지 않은 상태가 기준이다(신경망 가중치 없이 모든 테스트가 돌아야 함). 이 때문에 QA-SYS-10은 "건너뜀(환경)"으로 기록되며 목록은 `docs/QA-ENV-DEPENDENT-TESTS.md`에 있다.
+
+### 기준 게이트 이미지 (Docker `deepfake-lens-gate`)
+
+18·19차 검증과 수정은 로컬 Docker 이미지 `deepfake-lens-gate`를 기준 환경으로 썼다.
+
+- Linux aarch64, Python 3.13, ffmpeg 7.1, Node.js 20.
+- `/venv`(메인): numpy, scipy, Pillow, opencv-python 5, scikit-learn, librosa + numba + soundfile, c2pa-python, jsonschema, coverage, ruff, mypy.
+- `/venv-api`(API): fastapi, httpx, uvicorn, pymupdf, markdown-it-py + linkify-it-py, mediapipe, opencv-python/opencv-contrib-python 5, numpy, scipy, Pillow, scikit-learn(librosa·c2pa 없음).
+- 실행기 `gate.sh`(호스트에서 읽기 전용으로 마운트)는 `/repo`의 작업 트리를 컨테이너의 `/work`로 복사한 뒤(`.venv*` 제외, `.git`은 복사) 단계를 `bash -o pipefail`로 실행한다. 사용법: `gate.sh tests`(두 venv 단위 테스트), `gate.sh lint`(ruff, mypy), `gate.sh full`(5장의 게이트 전부), `gate.sh cmd "<명령>"`.
+
+```bash
+docker run --rm --init --name <고유이름> --cpus 4 \
+  -v <작업 트리>:/repo:ro -v <gate.sh>:/gate.sh:ro deepfake-lens-gate /gate.sh full
+```
+
+- git 이력이 필요한 검사(`--verify-record`, `build_traceability_commits.py --check`, 삭제 이유·역사 문서 테스트)는 git worktree(`.git`이 파일)로는 안 된다. `git clone --no-hardlinks`한 사본을 `/repo`로 마운트하고, 그 사본의 로컬 `main`을 `dad9730`으로 맞춘다(`git branch -f main dad9730`). 소유자가 달라 git이 거부하면 `-e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*'`를 준다.
 
 ## 5. 게이트 (커밋마다 전부 통과해야 함)
 
@@ -79,7 +95,8 @@ python scripts/build_traceability_commits.py --check
 ## 6. 작업 규칙 (지금까지 지켜 온 것)
 
 - 커밋 제목에 검증 ID와 스펙 갭 ID: `fix(...): R17-1 ... (R17-1; Gaps: G34)`. 스펙 밖 항목은 `Gaps: 신규`.
-- 커밋 메시지 끝 두 줄: `Co-Authored-By: Claude …` + `Claude-Session: …`.
+- 커밋 메시지 끝 한 줄: `Co-Authored-By: Claude …`(17차까지는 `Claude-Session: …` 줄도 있었다).
+- 추적표 `ids[]`의 `gaps`는 그 ID를 고친 커밋 제목의 `Gaps:`에 들어 있어야 한다(`build_traceability_commits.py --check`가 확인; 다르면 `gaps_note`가 필요).
 - 면제 없음: 검증자가 "노트/잔여 리스크"로 분류한 것도 수정 대상으로 다음 라운드 문서에 넣었다. 단, 아래 "합의된 결정"은 재지적하지 않는다.
 - 테스트 약화 금지. 결함을 고정하던 테스트만 고치고 ID 주석을 남긴다. 테스트 삭제는 `docs/TEST-DELETIONS.md`에 커밋 제목으로 기록.
 - 커밋 메시지는 실제 동작을 정확히 적는다(과장 금지 — 16차에서 지적됨).
@@ -90,7 +107,7 @@ python scripts/build_traceability_commits.py --check
 
 ## 8. 루프를 이어 가는 방법
 
-1. `verify_round17.md`의 R17-1~R17-11을 수정한다(Opus 에이전트에게 SPEC.md + 라운드 문서 + 위 게이트·규칙을 주고 위임했었다).
+1. 가장 최근 `verify_roundN.md`의 지적을 전부 수정한다(Opus 에이전트에게 SPEC.md + 라운드 문서 + 위 게이트·규칙을 주고 위임해 왔다). 지금은 19차(R19-1~R19-13)까지 수정된 상태다.
 2. 새 ID를 추적표 `ids[]`에 추가하고 기록을 재생성한다(5장).
 3. **구현에 참여하지 않은** 새 에이전트에게 독립 검증을 맡긴다. 지금까지 쓴 검증 지시의 골격:
    - 게이트 전부(두 환경, 플레이크 확인을 위해 반복 실행), 얕은 클론 동작, 커밋별 게이트
@@ -105,5 +122,8 @@ python scripts/build_traceability_commits.py --check
 | 파일 | 내용 |
 | --- | --- |
 | `SPEC.md` | 0단계 구현 명세(목표·공통 규칙·갭 목록·WP-A~J·QA 시나리오 원문) |
-| `verify_round1.md`, `verify_round4.md`~`verify_round17.md` | 라운드별 검증 지적사항(17차는 미수정) |
+| `verify_round1.md`, `verify_round4.md`~`verify_round17.md` | 라운드별 검증 지적사항(모두 수정됨) |
+| `verify_round18.md` | 18차 검증: R17 종료 확인, R18-1~R18-19(수정됨) |
+| `verify_round19.md` | 19차 검증: R18 종료 확인, R19-1~R19-12와 조정자 추가 R19-13(이 브랜치에서 수정됨, 기록 재생성·20차 검증 전) |
+| `ux_audit_ec0d057.md` | 18차와 함께 한 UI/UX/AX 감사(ec0d057 기준) |
 | `HANDOFF.md` | 이 문서 |
