@@ -31,6 +31,7 @@ import struct
 import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .png import read_png_dimensions, read_png_metadata
 from .result_types import SourceConfidence, SourceGuess
@@ -200,28 +201,27 @@ def _read_exif_into(path: Path, metadata: dict[str, str], read: ImageMetadataRea
     values: dict[str, str] = {}
     packet: bytes | None = None
     try:
-        with Image.open(path) as image:
-            exif = image.getexif()
-            for tag, key in EXIF_IFD0_TAGS.items():
-                _put_exif(values, key, exif.get(tag))
-            sub = exif.get_ifd(EXIF_SUB_IFD)
-            for tag, key in EXIF_SUB_TAGS.items():
-                _put_exif(values, key, sub.get(tag))
-            gps = exif.get_ifd(EXIF_GPS_IFD)
-            if gps:
-                values["exif.GPSInfo"] = "present"
-                latitude = _gps_decimal(gps.get(GPS_LATITUDE), gps.get(GPS_LATITUDE_REF))
-                longitude = _gps_decimal(gps.get(GPS_LONGITUDE), gps.get(GPS_LONGITUDE_REF))
-                if latitude is not None:
-                    values["exif.GPSLatitude"] = f"{latitude:.6f}"
-                if longitude is not None:
-                    values["exif.GPSLongitude"] = f"{longitude:.6f}"
-                _put_exif(values, "exif.GPSDateStamp", gps.get(GPS_DATESTAMP))
-            raw_xmp = image.info.get("xmp")
-            if isinstance(raw_xmp, str):
-                packet = raw_xmp.encode("utf-8", errors="replace")
-            elif isinstance(raw_xmp, bytes):
-                packet = raw_xmp
+        try:
+            with Image.open(path) as image:
+                _exif_values(image.getexif(), values)
+                raw_xmp = image.info.get("xmp")
+                if isinstance(raw_xmp, str):
+                    packet = raw_xmp.encode("utf-8", errors="replace")
+                elif isinstance(raw_xmp, bytes):
+                    packet = raw_xmp
+        except Image.DecompressionBombError:
+            # R18-6 (round 18): Pillow's pixel-count limit (a decompression-bomb
+            # guard) is raised by Image.open itself, so a 200 MP camera photo
+            # (16320×12240, Galaxy S23/S24 Ultra) lost its EXIF: "EXIF 판독 실패:
+            # DecompressionBombError". Reading tags decodes no pixel — the EXIF
+            # block is taken from the file's own structure and parsed alone.
+            values.clear()
+            block = _raw_exif_block(path, read.image_format)
+            if block:
+                exif = Image.Exif()
+                exif.load(block)
+                _exif_values(exif, values)
+            read.notes.append(PIXEL_LIMIT_EXIF_NOTE)
     except Exception as exc:  # noqa: BLE001 - Pillow raises many decoder-specific types; recorded as a failed read
         from .error_text import exception_text
 
@@ -229,6 +229,88 @@ def _read_exif_into(path: Path, metadata: dict[str, str], read: ImageMetadataRea
     metadata.update(values)
     read.exif_read = True
     return packet, None
+
+
+# R18-6: the limitation of an image over Pillow's pixel-count limit (its EXIF was read without opening it).
+PIXEL_LIMIT_EXIF_NOTE = "픽셀 수 상한 초과 이미지 — EXIF는 디코드 없이 파일 구조에서 읽었습니다(픽셀 디코드가 필요한 검사는 생략)"
+
+
+def _exif_values(exif: Any, values: dict[str, str]) -> None:
+    """The ``exif.*`` keys of a Pillow ``Exif`` (IFD0, Exif sub-IFD, GPS IFD) into ``values``."""
+    for tag, key in EXIF_IFD0_TAGS.items():
+        _put_exif(values, key, exif.get(tag))
+    sub = exif.get_ifd(EXIF_SUB_IFD)
+    for tag, key in EXIF_SUB_TAGS.items():
+        _put_exif(values, key, sub.get(tag))
+    gps = exif.get_ifd(EXIF_GPS_IFD)
+    if gps:
+        values["exif.GPSInfo"] = "present"
+        latitude = _gps_decimal(gps.get(GPS_LATITUDE), gps.get(GPS_LATITUDE_REF))
+        longitude = _gps_decimal(gps.get(GPS_LONGITUDE), gps.get(GPS_LONGITUDE_REF))
+        if latitude is not None:
+            values["exif.GPSLatitude"] = f"{latitude:.6f}"
+        if longitude is not None:
+            values["exif.GPSLongitude"] = f"{longitude:.6f}"
+        _put_exif(values, "exif.GPSDateStamp", gps.get(GPS_DATESTAMP))
+
+
+# R18-6: the largest EXIF block read without Pillow (a JPEG APP1 segment holds at most 65,533 bytes).
+MAX_RAW_EXIF_BYTES = 1024 * 1024
+
+
+def _raw_exif_block(path: Path, image_format: str | None) -> bytes | None:
+    """R18-6: the file's EXIF block (TIFF-structured, "Exif\\0\\0" allowed) found without decoding — None when there is none.
+
+    JPEG: the APP1 "Exif" segment before SOS; PNG: the eXIf chunk; WebP:
+    the EXIF chunk; TIFF: the file's own header and IFDs (its first MiB).
+    """
+    with path.open("rb") as handle:
+        size = os.fstat(handle.fileno()).st_size
+        if image_format == "tiff":
+            return handle.read(MAX_RAW_EXIF_BYTES)
+        if image_format == "jpeg":
+            offset = 2
+            for _ in range(MAX_WALKED_CHUNKS):
+                handle.seek(offset)
+                head = handle.read(4)
+                if len(head) < 4 or head[0] != 0xFF:
+                    return None
+                marker = head[1]
+                if marker == 0xFF:
+                    offset += 1
+                    continue
+                if marker == 0xDA or marker == 0xD9:
+                    return None
+                if marker in {0xD8, 0x01} or 0xD0 <= marker <= 0xD7:
+                    offset += 2
+                    continue
+                length = int.from_bytes(head[2:4], "big")
+                if marker == 0xE1 and length > 8:
+                    body = handle.read(length - 2)
+                    if body.startswith(b"Exif\x00\x00"):
+                        return body
+                offset += 2 + length
+            return None
+        if image_format in ("png", "webp"):
+            offset, wanted = (8, b"eXIf") if image_format == "png" else (12, b"EXIF")
+            for _ in range(MAX_WALKED_CHUNKS):
+                handle.seek(offset)
+                header = handle.read(8)
+                if len(header) < 8:
+                    return None
+                if image_format == "png":
+                    length, kind, step = int.from_bytes(header[:4], "big"), header[4:8], 4
+                else:
+                    kind, length = header[:4], int.from_bytes(header[4:8], "little")
+                    step = length % 2
+                if offset + 8 + length > size:
+                    return None
+                if kind == wanted:
+                    return handle.read(length) if length <= MAX_RAW_EXIF_BYTES else None
+                if kind == b"IEND":
+                    return None
+                offset += 8 + length + step
+    return None
 
 
 def _put_exif(values: dict[str, str], key: str, raw: object) -> None:

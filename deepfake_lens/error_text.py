@@ -158,6 +158,11 @@ _MESSAGE_KO: tuple[tuple[re.Pattern[str], str], ...] = tuple(
         (r"^image file is truncated$", "이미지 파일이 잘려 있습니다"),
         (r"^broken data stream when reading image file$", "이미지 데이터 스트림이 손상되었습니다"),
         (r"^Truncated File Read$", "파일이 잘려 끝까지 읽지 못했습니다"),
+        # R18-6 (round 18): Pillow's DecompressionBombError was "라이브러리 오류(DecompressionBombError)".
+        (
+            r"^Image size \((\d+) pixels\) exceeds limit of (\d+) pixels, could be decompression bomb DOS attack\.?$",
+            r"픽셀 수 상한 초과 — 디코드 생략(\1화소, 상한 \2화소)",
+        ),
         (r"^unrecognized data stream contents when reading image file$", "이미지 데이터 스트림을 해석할 수 없습니다"),
         (r"^(?:File is not a zip file|Bad magic number for central directory)$", "ZIP 형식이 아닙니다"),
         (r"^Error opening (.+): Format not recogni[sz]ed\.?$", r"오디오 파일을 열 수 없습니다(형식 인식 불가): \1"),

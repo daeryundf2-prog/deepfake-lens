@@ -152,5 +152,70 @@ class WebpXmpIsWalkedTest(unittest.TestCase):
         self.assertEqual(read.metadata.get("xmp.CreatorTool"), "Midjourney")
 
 
+def _exif_bytes() -> bytes:
+    from PIL import Image
+
+    exif = Image.Exif()
+    exif[271] = "samsung"
+    exif[272] = "SM-S928N"
+    return exif.tobytes()
+
+
+@unittest.skipUnless(HAVE_PIL, "Pillow not installed")
+class OverPixelLimitExifTest(unittest.TestCase):
+    """R18-6 (round 18): a 200 MP photo (16320×12240) lost its EXIF — Pillow's pixel-count limit is raised by
+    Image.open — "EXIF 판독 실패: DecompressionBombError: 라이브러리 오류(DecompressionBombError)", and the
+    image_class failure was not translated either."""
+
+    WIDTH, HEIGHT = 16320, 12240
+
+    def _jpeg(self) -> bytes:
+        import io
+
+        from PIL import Image
+
+        buffer = io.BytesIO()
+        Image.new("RGB", (16, 16), (100, 110, 120)).save(buffer, "JPEG", exif=_exif_bytes())
+        data = bytearray(buffer.getvalue())
+        sof = data.index(b"\xff\xc0")
+        data[sof + 5 : sof + 9] = struct.pack(">HH", self.HEIGHT, self.WIDTH)  # the SOF0 size of a 200 MP sensor
+        return bytes(data)
+
+    def test_the_exif_of_a_200_mp_jpeg_is_read(self) -> None:
+        from deepfake_lens.image_metadata import PIXEL_LIMIT_EXIF_NOTE
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "s24.jpg"
+            path.write_bytes(self._jpeg())
+            read = read_image_metadata_full(path)
+            self.assertIsNone(read.error)
+            self.assertEqual((read.metadata.get("exif.Make"), read.metadata.get("exif.Model")), ("samsung", "SM-S928N"))
+            self.assertEqual(read.dimensions, (self.WIDTH, self.HEIGHT))
+            self.assertIn(PIXEL_LIMIT_EXIF_NOTE, read.notes)
+            item = analyze_file(path, root=root)
+        assert item.result is not None
+        coverage = {entry.check: entry for entry in item.result.coverage}
+        self.assertEqual(coverage["metadata"].status, CoverageStatus.RAN)
+        reason = coverage["image_class"].reason
+        self.assertIn("픽셀 수 상한 초과 — 디코드 생략(199756800화소, 상한 ", reason)
+        self.assertNotIn("라이브러리 오류", reason)
+        titles = [entry.title for entry in item.result.evidence]
+        self.assertIn("EXIF 존재(디코드 검사 미실행으로 일관성 미평가)", titles)  # not "파일 손상"
+
+    def test_the_exif_chunk_of_an_oversized_png_is_read(self) -> None:
+        ihdr = struct.pack(">IIBBBBB", self.WIDTH, self.HEIGHT, 8, 2, 0, 0, 0)
+        png = (
+            b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", ihdr) + _chunk(b"eXIf", _exif_bytes())
+            + _chunk(b"IDAT", zlib.compress(b"\x00" * 64)) + _chunk(b"IEND", b"")
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "big.png"
+            path.write_bytes(png)
+            read = read_image_metadata_full(path)
+        self.assertIsNone(read.error)
+        self.assertEqual(read.metadata.get("exif.Make"), "samsung")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2054,9 +2054,14 @@ def _decode_problem(coverage: list[CoverageEntry] | None) -> str | None:
     entry = next((e for e in coverage or [] if e.check == "image_class"), None)
     if entry is None or entry.status == CoverageStatus.RAN:
         return None
-    if entry.status == CoverageStatus.FAILED:
+    if entry.status == CoverageStatus.FAILED and not entry.reason.startswith(PIXEL_LIMIT_REASON_PREFIX):
         return f"{EXIF_DECODE_FAILED_PREFIX}({entry.reason})"
+    # R18-6: an image over the pixel-count limit was not decoded — not damaged.
     return f"이미지 디코드 검사 미실행({entry.reason})"
+
+
+# R18-6 (round 18): the failure reason of a decode refused for Pillow's pixel-count limit.
+PIXEL_LIMIT_REASON_PREFIX = "DecompressionBombError: "
 
 
 def analyze_image_metadata(
