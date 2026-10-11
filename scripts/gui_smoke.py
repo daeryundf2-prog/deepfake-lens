@@ -9,8 +9,9 @@ verdict -> evidence -> coverage, the ledger keys stay inside the list, the
 evidence statement waits for the case number and name, the page reflows at
 375px and nothing is requested outside the local server.
 
-Requires: pip install playwright, and a Chrome/Chromium install
-(channel="chrome" — no browser download needed).
+Requires: pip install playwright, and either Google Chrome (channel="chrome" —
+no browser download needed) or Playwright's Chromium (`playwright install
+chromium`), which is used when Chrome is not installed (e.g. Linux arm64).
 
 Usage:
     python scripts/gui_smoke.py --scan-dir /path/to/fixtures [--port 8899]
@@ -73,7 +74,10 @@ def main() -> int:
     try:
         console_errors: list[str] = []
         with sync_playwright() as p:
-            browser = p.chromium.launch(channel="chrome", headless=True)
+            try:
+                browser = p.chromium.launch(channel="chrome", headless=True)
+            except Exception:  # no Google Chrome (e.g. Linux arm64): Playwright's own Chromium
+                browser = p.chromium.launch(headless=True)
             page = browser.new_page()
             # The browser's own /favicon.ico probe is a 404 by design (R11-12: only the
             # GUI paths are served) — not an error of the page.
