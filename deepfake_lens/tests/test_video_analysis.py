@@ -155,9 +155,6 @@ class VideoTemporalAnalysisTest(unittest.TestCase):
         self.assertIsNone(signal)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class AnalyzeFileVideoDispatchTest(unittest.TestCase):
     """analyze_file must route video extensions to the temporal analyzer
@@ -342,6 +339,95 @@ class AvAudioCoverageTest(unittest.TestCase):
             _, entry = self._av_entry()
         self.assertEqual((entry.status, entry.reason), (CoverageStatus.SKIPPED, "의존성 부재: ffmpeg"))
         # R15-1: ffmpeg runs through shutdown.run_child (a tracked child), not subprocess.run.
-        with mock.patch("deepfake_lens.video_analysis.run_child", return_value=subprocess.CompletedProcess([], 1, b"", b"no audio")):
+        # R17-4 (round 17): only ffmpeg's "no stream" error means no track (this
+        # used to be any non-zero exit with stderr "no audio" — an ffmpeg that
+        # could not run read as "오디오 트랙 없음").
+        no_stream = b"[out#0/wav @ 0x1] Output file does not contain any stream\n"
+        with mock.patch("deepfake_lens.video_analysis.run_child", return_value=subprocess.CompletedProcess([], 234, b"", no_stream)):
             _, entry = self._av_entry()
         self.assertEqual((entry.status, entry.reason), (CoverageStatus.SKIPPED, AV_AUDIO_NO_TRACK_REASON))
+        with mock.patch("deepfake_lens.video_analysis.run_child", return_value=subprocess.CompletedProcess([], 1, b"", b"no audio")):
+            _, entry = self._av_entry()
+        self.assertEqual((entry.status, entry.reason), (CoverageStatus.FAILED, "FfmpegError: ffmpeg 실패(종료 코드 1) — 상세는 로그 참조"))
+
+
+# R17-4 (round 17): fake ffmpeg programs on PATH — one that cannot run, one
+# missing a shared library, one SIGKILLed, and one that finds no audio stream.
+BROKEN_FFMPEGS = {
+    # exec fails (no such interpreter): the Linux supervisor exits 127; elsewhere Popen raises OSError.
+    "exec_failure": ("#!/nonexistent/deepfake-lens-interpreter\n", "FfmpegError: ffmpeg를 실행하지 못함(종료 코드 127)"),
+    "missing_library": (
+        "#!/bin/sh\necho 'ffmpeg: error while loading shared libraries: libavdevice.so.61: cannot open shared object file' >&2\nexit 127\n",
+        "FfmpegError: ffmpeg를 실행하지 못함(종료 코드 127) — 상세는 로그 참조",
+    ),
+    "sigkill": ("#!/bin/sh\nkill -KILL $$\n", "FfmpegError: ffmpeg가 신호 SIGKILL로 종료됨"),
+}
+NO_STREAM_FFMPEG = "#!/bin/sh\necho '[out#0/wav @ 0x1] Output file does not contain any stream' >&2\nexit 234\n"
+
+
+@unittest.skipIf(__import__("os").name == "nt", "POSIX signals")  # shell-script ffmpeg stand-ins, one SIGKILLs itself
+class FfmpegFailureIsNotNoTrackTest(unittest.TestCase):
+    """R17-4 (round 17): an ffmpeg that cannot run or dies is a failed av_audio / lipsync check, not "no audio track"."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name).resolve()
+        self.video = self.root / "clip.mp4"
+        self.video.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+
+    def _with_ffmpeg(self, script: str):
+        import os
+        from unittest import mock
+
+        bindir = self.root / f"bin{len(list(self.root.iterdir()))}"
+        bindir.mkdir()
+        fake = bindir / "ffmpeg"
+        fake.write_text(script, encoding="utf-8")
+        fake.chmod(0o755)
+        return mock.patch.dict(os.environ, {"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")})
+
+    def _av_audio(self):
+        from deepfake_lens.video_analysis import audio_track_check
+
+        return audio_track_check(self.video, None)[1]
+
+    def _lipsync(self):
+        from deepfake_lens import lipsync
+        from deepfake_lens.checks import run_check
+
+        return run_check("lipsync", lambda: lipsync._audio_envelope(self.video, max_seconds=5.0))
+
+    def test_broken_ffmpeg_fails_both_checks_with_the_cause(self) -> None:
+        from deepfake_lens.result_types import CoverageStatus
+
+        for name, (script, reason) in BROKEN_FFMPEGS.items():
+            with self.subTest(ffmpeg=name), self._with_ffmpeg(script):
+                from deepfake_lens import shutdown
+
+                exact = name != "exec_failure" or shutdown._SUPERVISED
+                entry = self._av_audio()
+                self.assertEqual(entry.status, CoverageStatus.FAILED, entry.reason)
+                if exact:
+                    self.assertEqual(entry.reason, reason)
+                value, entry = self._lipsync()
+                self.assertIsNone(value)
+                self.assertEqual(entry.status, CoverageStatus.FAILED, entry.reason)
+                if exact:
+                    self.assertEqual(entry.reason, reason)
+
+    def test_no_audio_stream_is_still_no_track(self) -> None:
+        from deepfake_lens.lipsync import LIPSYNC_NO_AUDIO_NOTE
+        from deepfake_lens.result_types import CoverageStatus
+        from deepfake_lens.video_analysis import AV_AUDIO_NO_TRACK_REASON
+
+        with self._with_ffmpeg(NO_STREAM_FFMPEG):
+            entry = self._av_audio()
+            self.assertEqual((entry.status, entry.reason), (CoverageStatus.SKIPPED, AV_AUDIO_NO_TRACK_REASON))
+            value, entry = self._lipsync()
+            self.assertEqual((value, entry.status), (([], 0.04), CoverageStatus.RAN))
+        self.assertEqual(LIPSYNC_NO_AUDIO_NOTE, "오디오 트랙이 없습니다.")
+
+
+if __name__ == "__main__":
+    unittest.main()

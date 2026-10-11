@@ -40,6 +40,49 @@ NATIVE_STDERR_LOG = "native-stderr.log"
 # terminal with echo off. shutdown.run_child also gives children /dev/null
 # as stdin.
 FFMPEG_QUIET_ARGS = ("-nostdin", "-hide_banner", "-loglevel", "error", "-nostats")
+# R17-4 (round 17): what ffmpeg prints (at -loglevel error) when the input
+# has no stream of the kind asked for — the only failure that means "no audio
+# track". ffmpeg ≤ 6 says "Output file #0 does not contain any stream" (exit 1),
+# 7.x "Output file does not contain any stream" (exit 234); "-map 0:a" says
+# "Stream map '0:a' matches no streams".
+FFMPEG_NO_STREAM_MARKERS = ("does not contain any stream", "matches no streams")
+# R17-4: how much of ffmpeg's last stderr line a failure reason quotes.
+FFMPEG_ERROR_LINE_MAX_CHARS = 160
+
+
+class FfmpegError(RuntimeError):
+    """R17-4: ffmpeg could not run or failed — never read as "no audio track"."""
+
+
+def ffmpeg_found_no_stream(stderr: bytes | str | None) -> bool:
+    """R17-4: True when ffmpeg's stderr says the input has no stream of the requested kind."""
+    if not stderr:
+        return False
+    text = stderr.decode("utf-8", "replace") if isinstance(stderr, bytes) else stderr
+    return any(marker in text for marker in FFMPEG_NO_STREAM_MARKERS)
+
+
+def ffmpeg_error(returncode: int, stderr: bytes | str | None) -> FfmpegError:
+    """R17-4: the failure of an ffmpeg run that is not "no stream" — exit code or signal, and its last error line."""
+    import signal
+
+    if returncode < 0:
+        try:
+            name = signal.Signals(-returncode).name
+        except ValueError:
+            name = str(-returncode)
+        cause = f"ffmpeg가 신호 {name}로 종료됨"
+    elif returncode in (126, 127):
+        cause = f"ffmpeg를 실행하지 못함(종료 코드 {returncode})"
+    else:
+        cause = f"ffmpeg 실패(종료 코드 {returncode})"
+    text = stderr.decode("utf-8", "replace") if isinstance(stderr, bytes) else (stderr or "")
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if lines:
+        # ffmpeg's own (English) words go to the log; the reason stays Korean (B6).
+        logger.warning("%s: %s", cause, lines[-1][:FFMPEG_ERROR_LINE_MAX_CHARS])
+        cause += " — 상세는 로그 참조"
+    return FfmpegError(cause)
 
 logger = logging.getLogger(__name__)
 

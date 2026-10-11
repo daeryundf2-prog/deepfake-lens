@@ -18,7 +18,7 @@ from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
 from .result_types import CoverageEntry, CoverageStatus
 from .native_path import NativePathError, native_safe_path, scratch_dir
-from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
+from .native_stderr import FFMPEG_QUIET_ARGS, FfmpegError, ffmpeg_error, ffmpeg_found_no_stream, quiet_native_stderr
 from .shutdown import run_child
 
 logger = logging.getLogger(__name__)
@@ -241,8 +241,13 @@ def audio_track_check(
                     [ffmpeg, *FFMPEG_QUIET_ARGS, "-y", "-i", native_video, "-vn", "-ac", "1", "-ar", "16000", tmp_name],
                     capture_output=True, timeout=120,
                 )
+            if proc.returncode != 0 and not ffmpeg_found_no_stream(proc.stderr):
+                # R17-4 (round 17): ffmpeg that cannot run (exec failure 127, a
+                # missing shared library) or dies (SIGKILL) is a failed check,
+                # not "오디오 트랙 없음".
+                raise ffmpeg_error(proc.returncode, proc.stderr)
             extracted = proc.returncode == 0 and Path(tmp_name).stat().st_size > 0
-        except (subprocess.TimeoutExpired, OSError, NativePathError) as exc:
+        except (subprocess.TimeoutExpired, OSError, NativePathError, FfmpegError) as exc:
             logger.exception("audio-track extraction failed: %s", video_path)
             return None, failed_entry(AV_AUDIO_CHECK, exc)
         if not extracted:

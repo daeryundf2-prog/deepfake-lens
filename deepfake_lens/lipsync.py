@@ -28,7 +28,7 @@ from typing import Any
 from .native_path import CascadeLoadError, native_safe_path, scratch_dir
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 from .vendor_weights import default_models_dir
-from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
+from .native_stderr import FFMPEG_QUIET_ARGS, FfmpegError, ffmpeg_error, ffmpeg_found_no_stream, quiet_native_stderr
 from .checkpoint_integrity import force_weights_only
 from .model_assets import S3FD_WEIGHTS, SYNCNET_WEIGHTS, AssetPinError, expected_sha256, manifest_state, verified_copy
 from .shutdown import run_child
@@ -38,6 +38,9 @@ _WEAK_CORRELATION = 0.12
 # Offsets beyond ~0.5 s are implausible for a genuine in-camera recording.
 _LARGE_OFFSET_SECONDS = 0.5
 _FFMPEG_TIMEOUT_SECONDS = 60
+# R17-4 (round 17): an empty envelope means only "no audio track" now — an
+# ffmpeg that cannot run or fails raises FfmpegError (a failed check).
+LIPSYNC_NO_AUDIO_NOTE = "오디오 트랙이 없습니다."
 
 
 @dataclass(frozen=True)
@@ -88,10 +91,13 @@ def analyze_lipsync(path: Path | str, *, max_seconds: float = 20.0) -> LipsyncAn
         return _unavailable(limitations, "cv2/numpy가 없어 립싱크 분석을 건너뜁니다.")
     if shutil.which("ffmpeg") is None:
         return _unavailable(limitations, "ffmpeg가 없어 오디오 트랙을 추출할 수 없습니다.")
+    if not video_path.is_file():
+        # R17-4: checked here — ffmpeg's "No such file" is no longer read as "no audio track".
+        return _unavailable(limitations, "영상 파일이 없습니다.")
 
     envelope, env_dt = _audio_envelope(video_path, max_seconds=max_seconds)
     if not envelope:
-        return _unavailable(limitations, "오디오 트랙이 없거나 추출에 실패했습니다.")
+        return _unavailable(limitations, LIPSYNC_NO_AUDIO_NOTE)
     mouth, mouth_dt = _mouth_openness_series(video_path, max_seconds=max_seconds)
     if len(mouth) < 20:
         return _unavailable(limitations, "얼굴/입 영역을 충분히 샘플링하지 못했습니다.")
@@ -162,7 +168,7 @@ def _audio_envelope(video_path: Path, *, max_seconds: float) -> tuple[list[float
         tmp_path = Path(tmp.name)
     try:
         with native_safe_path(video_path) as native_video:  # R12-1
-            run_child(  # R15-1: a tracked child, stopped by the shutdown cleanup
+            proc = run_child(  # R15-1: a tracked child, stopped by the shutdown cleanup
                 [
                     "ffmpeg", *FFMPEG_QUIET_ARGS, "-y", "-i", native_video,
                     "-t", f"{max_seconds:.1f}",
@@ -170,8 +176,12 @@ def _audio_envelope(video_path: Path, *, max_seconds: float) -> tuple[list[float
                 ],
                 capture_output=True,
                 timeout=_FFMPEG_TIMEOUT_SECONDS,
-                check=True,
             )
+        if proc.returncode != 0:
+            if ffmpeg_found_no_stream(proc.stderr):
+                return [], window_seconds  # no audio track
+            # R17-4 (round 17): not "no audio track" — ffmpeg could not run or failed.
+            raise ffmpeg_error(proc.returncode, proc.stderr)
         with wave.open(str(tmp_path), "rb") as handle:
             frames = handle.readframes(handle.getnframes())
             width = handle.getsampwidth()
@@ -181,8 +191,11 @@ def _audio_envelope(video_path: Path, *, max_seconds: float) -> tuple[list[float
         hop = max(1, int(rate * window_seconds))
         envelope = [float(np.sqrt(np.mean(samples[i : i + hop] ** 2))) for i in range(0, len(samples) - hop, hop)]
         return envelope, window_seconds
-    except (subprocess.SubprocessError, wave.Error, OSError):
-        return [], window_seconds
+    except subprocess.TimeoutExpired as exc:
+        raise FfmpegError(f"ffmpeg가 {_FFMPEG_TIMEOUT_SECONDS}초 안에 끝나지 않음") from exc
+    except wave.Error as exc:
+        # R17-4: ffmpeg ended 0 but its WAV cannot be read — a failure, not "no track".
+        raise FfmpegError(f"ffmpeg 출력 WAV를 읽지 못함: {exc}") from exc
     finally:
         tmp_path.unlink(missing_ok=True)
 
