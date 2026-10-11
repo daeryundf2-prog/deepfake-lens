@@ -1838,7 +1838,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
         # GUI-REV2 H-2: the preview is built from the posted rows as they are —
         # no re-analysis, nothing signed; the export re-analyzes and signs.
         hasher.close()
-        excluded = []
+        excluded: list[tuple[Any, str]] = []
     else:
         try:
             items, excluded = _rederive_report_items(items, hasher, options, server_thresholds)
