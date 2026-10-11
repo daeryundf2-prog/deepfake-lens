@@ -2360,6 +2360,22 @@
             if (kind === 'evidence') extra.exhibit_paths = selectedEntries().map(e => e.item.path);
             return reportPayload(extra);
         }
+        // GUI-REV3 J-7: a refused export names the rows behind it — the chosen rows the
+        // server could not re-analyze (with its reason) and the paths it did not know.
+        const EXPORT_ERROR_PATHS = 5;
+        function exportErrorText(body, status) {
+            const parts = [String((body && (body.error || body.detail)) || ('서버 오류 (HTTP ' + status + ')'))];
+            const listed = (rows, render) => {
+                const shownRows = rows.slice(0, EXPORT_ERROR_PATHS).map(render).join(', ');
+                return shownRows + (rows.length > EXPORT_ERROR_PATHS ? ` 외 ${rows.length - EXPORT_ERROR_PATHS}개` : '');
+            };
+            const lost = Array.isArray(body && body.not_rederived_exhibit_paths) ? body.not_rederived_exhibit_paths : [];
+            if (lost.length) parts.push('다시 분석할 수 없는 서증: ' + listed(lost, row => String(row.path) + '(' + String(row.reason || '사유 기록 없음') + ')'));
+            const lostPaths = new Set(lost.map(row => String(row.path)));
+            const unknown = (Array.isArray(body && body.unknown_exhibit_paths) ? body.unknown_exhibit_paths : []).filter(path => !lostPaths.has(String(path)));
+            if (unknown.length) parts.push('이 보고서의 행이 아닌 경로: ' + listed(unknown, String));
+            return parts.join(' — ');
+        }
         async function exportReport(kind) {
             const btn = $(EXPORT_BUTTONS[kind]);
             const sel = selectedEntries();
@@ -2377,7 +2393,13 @@
                 });
                 const type = res.headers.get('Content-Type') || '';
                 if (!res.ok || !type.includes(spec[1])) {
-                    toast(spec[3] + ' 생성 실패: ' + await apiError(res), true);
+                    let message;
+                    if (type.includes('application/json')) {
+                        try { message = exportErrorText(await res.json(), res.status); } catch (e) { message = '서버 오류 (HTTP ' + res.status + ')'; }
+                    } else {
+                        message = await apiError(res);
+                    }
+                    toast(spec[3] + ' 생성 실패: ' + message, true);
                     $('export-note').textContent = spec[3] + '를 만들지 못했습니다.';
                     return;
                 }

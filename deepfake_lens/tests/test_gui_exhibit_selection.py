@@ -321,6 +321,20 @@ class WebReportSelectionTest(unittest.TestCase):
                     if unknown is not None:
                         self.assertEqual(out["unknown_exhibit_paths"], unknown)
 
+    def test_a_chosen_file_gone_since_the_scan_is_said_so(self) -> None:
+        """GUI-REV3 J-7: a chosen row the server cannot re-analyze is not called "not a signed row"."""
+        chosen = next(row["path"] for row in self.rows if row["path"].endswith(".txt") and "::" not in row["path"])
+        (self.folder / chosen).unlink()
+        out = webapp_api._report_payload(self._body(exhibit_paths=[chosen]), "evidence-json", default_folder=self.folder)
+        assert isinstance(out, dict), out
+        self.assertEqual(webapp_api.report_error_status(out), 400)
+        self.assertEqual(out["code"], "exhibit_not_rederived")
+        self.assertEqual([row["path"] for row in out["not_rederived_exhibit_paths"]], [chosen])
+        self.assertTrue(out["not_rederived_exhibit_paths"][0]["reason"])
+        unknown = webapp_api._report_payload(self._body(exhibit_paths=["nope.png"]), "evidence-json", default_folder=self.folder)
+        assert isinstance(unknown, dict)
+        self.assertEqual(unknown["code"], "exhibit_unknown")
+
     def test_malformed_choice_is_refused(self) -> None:
         for extra in ({"exhibit_paths": "a.txt"}, {"exhibit_paths": [1]}, {"submitter_side": "court"}):
             with self.subTest(extra=extra):

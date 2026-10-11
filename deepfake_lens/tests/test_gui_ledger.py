@@ -278,6 +278,27 @@ class CaseFolderTest(unittest.TestCase):
         self.assertEqual(json.loads(done.stdout), [True, False, False, False, True])
 
 
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class ExportErrorTextTest(unittest.TestCase):
+    def test_refused_export_names_its_rows(self) -> None:
+        """GUI-REV3 J-7: the unknown / not re-analyzable paths are shown (up to five), with reasons."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        body = {"error": "서증으로 고른 파일 1개를 서버가 다시 분석할 수 없습니다", "code": "exhibit_not_rederived",
+                "not_rederived_exhibit_paths": [{"path": "dalle.jpg", "reason": "파일을 찾을 수 없습니다"}],
+                "unknown_exhibit_paths": ["dalle.jpg", *(f"x{i}.png" for i in range(7))]}
+        script = "const EXPORT_ERROR_PATHS = 5;\n" + _function(source, "exportErrorText") + f"console.log(JSON.stringify(exportErrorText({json.dumps(body, ensure_ascii=False)}, 400)));"
+        node = shutil.which("node")
+        assert node is not None
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "err.js"
+            path.write_text(script, encoding="utf-8")
+            done = subprocess.run([node, str(path)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        text = json.loads(done.stdout)
+        self.assertIn("다시 분석할 수 없는 서증: dalle.jpg(파일을 찾을 수 없습니다)", text)
+        self.assertIn("이 보고서의 행이 아닌 경로: x0.png, x1.png, x2.png, x3.png, x4.png 외 2개", text)
+
+
 class GuiAccessibilitySourceTest(unittest.TestCase):
     source: str
     html: str

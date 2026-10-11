@@ -1294,6 +1294,7 @@ REPORT_FORMAT_NOT_STRING = "`format` 값은 문자열이어야 합니다"
 REPORT_EXHIBIT_PATHS_INVALID = "exhibit_paths는 행 경로(문자열)의 배열이어야 합니다"
 REPORT_EXHIBIT_PATHS_EMPTY = "증거설명서에 넣을 서증(exhibit_paths)이 비어 있습니다 — 한 개 이상 고르십시오"
 REPORT_EXHIBIT_PATHS_UNKNOWN = "exhibit_paths 중 {count}개는 이 보고서의 서명된 행이 아닙니다(unknown_exhibit_paths 참조)"
+REPORT_EXHIBIT_PATHS_NOT_REDERIVED = "서증으로 고른 파일 {count}개를 서버가 다시 분석할 수 없습니다(검사 뒤 지워졌거나 옮겨졌을 수 있음) — 다시 검사하십시오"
 REPORT_EXHIBIT_PATHS_DUPLICATE = "exhibit_paths에 같은 행이 두 번 있습니다"
 EVIDENCE_REPORT_FORMATS = ("evidence", "evidence-statement", "evidence-json")
 REPORT_SUBMITTER_SIDE_INVALID = "submitter_side는 plaintiff(원고·고소인 측) 또는 defendant(피고·피의자 측)여야 합니다"
@@ -1871,7 +1872,17 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
         known = {item.path for item in items}
         unknown = [path for path in dict.fromkeys(exhibit_paths) if path not in known]
         if unknown:
-            return {"error": REPORT_EXHIBIT_PATHS_UNKNOWN.format(count=len(unknown)), "unknown_exhibit_paths": unknown[:100]}
+            # GUI-REV3 J-7: a chosen row the server could not re-analyze (file gone,
+            # outside the roots, …) is said so, with its reason — not "not a signed row".
+            not_derived = {str(getattr(item, "path", "")): reason for item, reason in excluded}
+            lost = [path for path in unknown if path in not_derived]
+            if lost:
+                return {
+                    "error": REPORT_EXHIBIT_PATHS_NOT_REDERIVED.format(count=len(lost)), "code": "exhibit_not_rederived",
+                    "not_rederived_exhibit_paths": [{"path": path, "reason": not_derived[path]} for path in lost[:100]],
+                    "unknown_exhibit_paths": unknown[:100],
+                }
+            return {"error": REPORT_EXHIBIT_PATHS_UNKNOWN.format(count=len(unknown)), "code": "exhibit_unknown", "unknown_exhibit_paths": unknown[:100]}
         if len(set(exhibit_paths)) != len(exhibit_paths):
             return {"error": REPORT_EXHIBIT_PATHS_DUPLICATE}
 
