@@ -252,8 +252,10 @@ class FaceAnalysisTest(unittest.TestCase):
         self.assertEqual(landmarks, _estimate_landmarks(10, 10, 40, 40))
 
     def test_facelandmarker_model_path_env_override(self) -> None:
-        """DEEPFAKE_LENS_FACE_LANDMARKER points at a .task asset; a missing
-        file or unset env resolves to None so the fallback stays active."""
+        """DEEPFAKE_LENS_FACE_LANDMARKER points at a .task asset; an unset env
+        resolves to the bundled asset (None when absent) so the fallback stays
+        active. R17-5 (round 17): an override naming no file raises — it used
+        to resolve to None (ignored silently)."""
         import os
         import deepfake_lens.face as face_module
 
@@ -265,7 +267,8 @@ class FaceAnalysisTest(unittest.TestCase):
                 os.environ["DEEPFAKE_LENS_FACE_LANDMARKER"] = str(asset)
                 self.assertEqual(face_module._facelandmarker_model_path(), asset)
                 os.environ["DEEPFAKE_LENS_FACE_LANDMARKER"] = str(Path(tmp) / "absent.task")
-                self.assertIsNone(face_module._facelandmarker_model_path())
+                with self.assertRaises(face_module.FaceLandmarkerOverrideMissing):  # R17-5
+                    face_module._facelandmarker_model_path()
             finally:
                 if original is None:
                     os.environ.pop("DEEPFAKE_LENS_FACE_LANDMARKER")
@@ -409,7 +412,13 @@ class WeightFreeDetectorTest(unittest.TestCase):
 
         reason = face_module.face_detector_unavailable_reason(require_landmarks=True)
         if _has_mediapipe():
-            self.assertIsNone(reason)
+            # R17-5 (round 17): mediapipe importing is not enough — a tasks-only
+            # mediapipe (≥ 0.10.30, no FaceMesh) needs a face_landmarker.task asset.
+            mp = face_module.import_mediapipe()
+            if hasattr(mp, "solutions") or face_module._FACE_LANDMARKER_ASSET.is_file():
+                self.assertIsNone(reason)
+            else:
+                self.assertTrue(str(reason).startswith(f"{face_module.MEASURED_LANDMARKS_MISSING}: "), reason)
         else:
             self.assertEqual(reason, "실측 랜드마크 검출기 없음: mediapipe")
 

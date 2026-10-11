@@ -97,8 +97,9 @@ class _Capture:
         pass
 
 
-@unittest.skipUnless(HAVE_CV2, "opencv not installed")
-class StrictFaceDetectionTest(unittest.TestCase):
+class _FaceFixture(unittest.TestCase):
+    """A fake Haar classifier, an image and a video stand-in (no tests of its own)."""
+
     def setUp(self) -> None:
         import cv2
         import numpy as np
@@ -123,6 +124,9 @@ class StrictFaceDetectionTest(unittest.TestCase):
         self.video = self.root / "영상.mp4"
         self.video.write_bytes(b"\x00" * 64)
 
+
+@unittest.skipUnless(HAVE_CV2, "opencv not installed")
+class StrictFaceDetectionTest(_FaceFixture):
     # -- injections -----------------------------------------------------------------
 
     @contextlib.contextmanager
@@ -286,6 +290,77 @@ class StrictFaceDetectionTest(unittest.TestCase):
                 face.load_face_cascade()
         self.assertEqual(str(caught.exception), f"미고정 모델: {HAAR_FRONTALFACE}")
         self.assertNotIsInstance(caught.exception, face.OverrideCascadePinError)
+
+
+def _mediapipe_without_facemesh(name: str = "mediapipe") -> Any:
+    """R17-5: a mediapipe ≥ 0.10.30 — no ``solutions`` (FaceMesh), the Tasks API present."""
+    import types
+
+    return types.SimpleNamespace(__version__="0.10.30", __name__=name)
+
+
+@unittest.skipUnless(HAVE_CV2, "opencv not installed")
+class MeasuredLandmarksMissingTest(_FaceFixture):
+    """R17-5 (round 17): with mediapipe ≥ 0.10.30 (no FaceMesh) and no face_landmarker.task, Haar found a face
+    in every frame yet face_track said "얼굴이 검출된 프레임이 0개" (every landmark a box-ratio estimate);
+    doctor showed mediapipe OK; a DEEPFAKE_LENS_FACE_LANDMARKER naming no file was ignored."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        from deepfake_lens import face
+
+        _Cascade.faces = [(20, 20, 80, 80)]  # Haar "finds" a face in every frame
+        for patcher in (
+            mock.patch.object(face, "import_mediapipe", side_effect=_mediapipe_without_facemesh),
+            mock.patch.object(face, "_FACE_LANDMARKER_ASSET", self.root / "models" / "face_landmarker.task"),
+            mock.patch.dict(os.environ, {"DEEPFAKE_LENS_FACE_LANDMARKER": "", "DEEPFAKE_LENS_HAAR_CASCADE": str(BUNDLED_HAAR)}),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_face_track_is_skipped_for_the_missing_detector(self) -> None:
+        import cv2
+
+        from deepfake_lens import core, face
+
+        reason = face.face_detector_unavailable_reason(require_landmarks=True)
+        self.assertEqual(reason, f"{face.MEASURED_LANDMARKS_MISSING}: mediapipe에 FaceMesh(solutions)가 없고 face_landmarker.task 자산도 없습니다")
+        with mock.patch.object(cv2, "VideoCapture", _Capture):
+            layers = core._deep_video_layers(self.video)
+        entry = {item.check: item for item in layers.coverage}["face_track"]
+        self.assertEqual((entry.status.value, entry.reason), ("skipped", f"의존성 부재: {reason}"))
+        self.assertIsNone(face.face_detector_unavailable_reason())  # Haar / the heuristic still detect faces
+
+    def test_an_override_naming_no_file_fails_the_checks(self) -> None:
+        import cv2
+
+        from deepfake_lens import core, face
+
+        missing = self.root / "없는.task"
+        with mock.patch.dict(os.environ, {"DEEPFAKE_LENS_FACE_LANDMARKER": str(missing)}):
+            self.assertIsNone(face.face_detector_unavailable_reason(require_landmarks=True))  # the loader decides
+            with mock.patch.object(cv2, "VideoCapture", _Capture):
+                video = {item.check: item for item in core._deep_video_layers(self.video).coverage}
+            image = {item.check: item for item in core._deep_image_layers(self.image).coverage}
+        cause = "재정의 FaceLandmarker 파일이 없습니다(DEEPFAKE_LENS_FACE_LANDMARKER): '없는.task'"
+        for entry in (video["face_track"], image["face_manipulation"], image["faceswap_seam"]):
+            self.assertEqual(entry.status.value, "failed", entry)
+            self.assertIn(cause, entry.reason)
+
+    def test_doctor_warns_on_the_mediapipe_row(self) -> None:
+        from deepfake_lens import doctor
+
+        real = doctor._import_dependency
+
+        def fake(name: str) -> Any:
+            return _mediapipe_without_facemesh() if name == "mediapipe" else real(name)
+
+        with mock.patch.object(doctor, "_import_dependency", side_effect=fake):
+            report = doctor._run_diagnostics(None)
+        row = next(check for check in report.dependencies if check.name == "mediapipe")
+        self.assertEqual(row.status, "warn")
+        self.assertIn("실측 랜드마크 검출기 없음", row.detail)
+        self.assertNotIn("대체 경로", row.detail)
 
 
 class PackagedManifestTest(unittest.TestCase):

@@ -427,6 +427,43 @@ class FaceDetectionError(RuntimeError):
     """Every available face detector raised; "no face" would be a lie."""
 
 
+class FaceLandmarkerOverrideMissing(FaceDetectionError):
+    """R17-5 (round 17): ``DEEPFAKE_LENS_FACE_LANDMARKER`` names no file — the check that needed it fails.
+
+    It used to be ignored silently (the landmarks fell back to box-ratio
+    estimates, the face track found "0 frames with a face").
+    """
+
+
+# R17-5: the reason a measured-landmark detector cannot run (face_track is
+# then skipped "의존성 부재: 실측 랜드마크 검출기 없음: …").
+MEASURED_LANDMARKS_MISSING = "실측 랜드마크 검출기 없음"
+
+
+def measured_landmarks_unavailable_reason() -> str | None:
+    """R17-5: None when a measured-landmark path can run, else why not (cheap probe, no inference).
+
+    The paths: MediaPipe FaceMesh (``mp.solutions``, gone in mediapipe ≥
+    0.10.30) or the Tasks-API FaceLandmarker with a ``face_landmarker.task``
+    asset (the bundled one or ``DEEPFAKE_LENS_FACE_LANDMARKER`` — an override
+    is left to the loader, which fails the check when it names no file and
+    refuses an unpinned one).
+    """
+    try:
+        mp = import_mediapipe()
+    except ImportError:
+        return f"{MEASURED_LANDMARKS_MISSING}: mediapipe"
+    if hasattr(mp, "solutions"):
+        return None
+    try:
+        import_mediapipe("mediapipe.tasks.python.vision")
+    except (ImportError, AttributeError):
+        return f"{MEASURED_LANDMARKS_MISSING}: mediapipe에 FaceMesh(solutions)도 Tasks API도 없습니다"
+    if os.environ.get(_FACE_LANDMARKER_ENV, "").strip() or _FACE_LANDMARKER_ASSET.is_file():
+        return None
+    return f"{MEASURED_LANDMARKS_MISSING}: mediapipe에 FaceMesh(solutions)가 없고 {FACE_LANDMARKER} 자산도 없습니다"
+
+
 def face_detector_unavailable_reason(*, require_landmarks: bool = False) -> str | None:
     """None when at least one face detector can run, else why not.
 
@@ -442,11 +479,10 @@ def face_detector_unavailable_reason(*, require_landmarks: bool = False) -> str 
     except ImportError:
         return "opencv 없음"
     if require_landmarks:
-        try:
-            import_mediapipe()
-        except ImportError:
-            return "실측 랜드마크 검출기 없음: mediapipe"
-        return None
+        # R17-5 (round 17): mediapipe importing is not enough — without
+        # FaceMesh (mediapipe ≥ 0.10.30) and without a FaceLandmarker asset
+        # every landmark is a box-ratio estimate the face track discards.
+        return measured_landmarks_unavailable_reason()
     return None
 
 
@@ -844,7 +880,10 @@ def _facelandmarker_model_path() -> Path | None:
     override = os.environ.get(_FACE_LANDMARKER_ENV, "").strip()
     if override:
         path = Path(override).expanduser()
-        return path if path.is_file() else None
+        if not path.is_file():
+            # R17-5 (round 17): was ignored silently (None → box-ratio estimates).
+            raise FaceLandmarkerOverrideMissing(f"재정의 FaceLandmarker 파일이 없습니다({_FACE_LANDMARKER_ENV}): {path.name!r}")
+        return path
     return _FACE_LANDMARKER_ASSET if _FACE_LANDMARKER_ASSET.is_file() else None
 
 

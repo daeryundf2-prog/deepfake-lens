@@ -63,7 +63,9 @@ OPTIONAL_DEPS = [
     ("librosa", "librosa", "오디오 파형 디코딩 + 휴리스틱"),
     ("soundfile", "soundfile", "무손실 오디오 디코딩"),
     ("speechbrain", "speechbrain", "ECAPA-TDNN 화자 검증"),
-    ("mediapipe", "mediapipe", "FaceMesh 얼굴 검출(대체 경로)"),
+    # R17-5 (round 17): was "FaceMesh 얼굴 검출(대체 경로)" — shown OK on a
+    # mediapipe without FaceMesh; the row now says whether measured landmarks can run.
+    ("mediapipe", "mediapipe", "실측 얼굴 랜드마크(FaceMesh 또는 FaceLandmarker) — 얼굴 트랙·랜드마크 기하"),
     ("c2pa", "c2pa-python", "C2PA 매니페스트 검증"),
     ("syhwp", "syhwp", "HWP/HWPX 문서 해석"),
     # B7: imported through pdf_backend.import_pymupdf (pymupdf first, the
@@ -437,6 +439,9 @@ def _run_diagnostics(models_dir: Path | None) -> DoctorReport:
         try:
             module = _import_dependency(import_name)
             version = getattr(module, "__version__", "?")
+            if import_name == "mediapipe":
+                report.dependencies.append(_mediapipe_check(package, version, purpose))
+                continue
             report.dependencies.append(Check(package, "ok", f"v{version} — {purpose}"))
         except ImportError:
             report.dependencies.append(Check(package, "missing", f"미설치 — {purpose}"))
@@ -444,6 +449,18 @@ def _run_diagnostics(models_dir: Path | None) -> DoctorReport:
         found = shutil.which(tool)
         report.tools.append(Check(tool, "ok" if found else "missing", found or "PATH에 없음"))
     return report
+
+
+def _mediapipe_check(package: str, version: str, purpose: str) -> Check:
+    """R17-5 (round 17): the mediapipe row — warn when no measured-landmark path can run (what face_track checks)."""
+    try:
+        from .face import measured_landmarks_unavailable_reason
+    except ImportError:
+        return Check(package, "ok", f"v{version} — {purpose}")
+    reason = measured_landmarks_unavailable_reason()
+    if reason:
+        return Check(package, "warn", f"v{version} — {reason} (얼굴 트랙은 의존성 부재로 건너뜀)")
+    return Check(package, "ok", f"v{version} — {purpose}")
 
 
 _COLUMN_MARK = {OK: "OK", NOT_APPLICABLE: "해당 없음", MISSING: "MISS", MISMATCH: "불일치"}
