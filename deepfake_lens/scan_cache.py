@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
 from .profile_pins import ModelPathArg, model_path_digest, pin_tokens, profile_pins
-from .model_assets import asset_pin_tokens
+from .model_assets import asset_file_tokens, asset_pin_tokens
 from .result_types import ScanItem
 from .json_text import json_dumps
 from . import shutdown
@@ -785,7 +785,9 @@ def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | No
     Computed once per scan (reading every profile per file would be
     wasteful) and passed to ``_cache_key`` as ``scan_context``. Unpinned
     profiles contribute ``unpinned:<name>``, so pinning or re-pinning a
-    profile invalidates the verdicts cached under the old weights.
+    profile invalidates the verdicts cached under the old weights. R17-7:
+    the model-asset files the loaders would read (override variables
+    included) and their sha256 are part of it too.
     """
     from .core import TOOL_VERSION
 
@@ -793,6 +795,10 @@ def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | No
     # R15-3: the non-profile model assets' pins too — pinning a FaceLandmarker
     # / SyncNet file turns a refused ("미고정 모델") check into one that ran.
     tokens += asset_pin_tokens(models_dir)
+    # R17-7 (round 17): and the asset files the loaders would read (override
+    # variables included, with each file's sha256) — a failure caused by a
+    # wrong override was replayed after the override was fixed.
+    tokens += asset_file_tokens()
     return f"tool:{TOOL_VERSION}|pins:{_short_digest(chr(10).join(tokens))}"
 
 

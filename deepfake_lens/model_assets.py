@@ -241,6 +241,69 @@ def asset_pin_tokens(models_dir: Path | str | None = None) -> list[str]:
     return tokens
 
 
+# R17-7: sha256 of asset files keyed on their stat — each file hashed once per change, not per scan.
+_FILE_DIGESTS: dict[tuple[str, int, int, int, int], str] = {}
+
+
+def _loader_files(asset: str) -> list[Path]:
+    """R17-7: the files a loader may read for ``asset`` without an override, in its order.
+
+    Haar: OpenCV's own copy, then the bundled one (``face.haar_cascade_candidates``);
+    the others: ``<effective models dir>/<asset>`` (FaceLandmarker, SyncNet).
+    """
+    if asset == HAAR_FRONTALFACE:
+        files: list[Path] = []
+        try:
+            import cv2
+
+            data_dir = getattr(getattr(cv2, "data", None), "haarcascades", "") or ""
+            if data_dir:
+                files.append(Path(data_dir + HAAR_FRONTALFACE))
+        except ImportError:
+            pass
+        files.append(PACKAGED_MANIFEST.parent / HAAR_FRONTALFACE)
+        return files
+    return [_models_dir() / asset]
+
+
+def _file_token(path: Path) -> str:
+    try:
+        info = path.stat()
+    except OSError:
+        return f"{path}:absent"
+    if not path.is_file():
+        return f"{path}:not-a-file"
+    key = (str(path), info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino)
+    digest = _FILE_DIGESTS.get(key)
+    if digest is None:
+        try:
+            digest = _file_sha256(path)
+        except OSError:
+            return f"{path}:unreadable"
+        _FILE_DIGESTS[key] = digest
+    return f"{path}:{digest}"
+
+
+def asset_file_tokens() -> list[str]:
+    """R17-7 (round 17): what the loaders would read for every known asset — part of the scan-cache key.
+
+    The key held the pins only, so a failed check caused by the files
+    themselves (a ``DEEPFAKE_LENS_HAAR_CASCADE`` with other bytes: "미고정
+    모델: 재정의 cascade sha256 불일치") was replayed after the override was
+    fixed, and the reverse. Each token names the override variable's value
+    (as :func:`asset_override` reads it) or the loader's default files, with
+    each file's sha256 (``absent`` when there is none).
+    """
+    tokens: list[str] = []
+    for asset in KNOWN_ASSETS:
+        override = asset_override(asset)
+        if override is not None:
+            tokens.append(f"asset-file:{asset}:override:{_file_token(override)}")
+        else:
+            tokens.append(f"asset-file:{asset}:" + "|".join(_file_token(path) for path in _loader_files(asset)))
+    return tokens
+
+
 # R16-9: the environment variable that replaces an asset's file (what the loaders read).
 ASSET_OVERRIDE_ENV = {HAAR_FRONTALFACE: "DEEPFAKE_LENS_HAAR_CASCADE", FACE_LANDMARKER: "DEEPFAKE_LENS_FACE_LANDMARKER"}
 # R16-9: asset_status "state" values (R17-9: and the manifest row's).
@@ -392,6 +455,7 @@ __all__ = [
     "ASSET_MANIFEST_SCHEMA",
     "ASSET_MANIFEST_ERROR",
     "KNOWN_ASSETS",
+    "asset_file_tokens",
     "asset_override",
     "manifest_error",
     "AssetPinError",

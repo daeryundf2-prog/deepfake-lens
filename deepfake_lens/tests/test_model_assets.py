@@ -542,5 +542,41 @@ class PinAssetCommandTest(unittest.TestCase):
         self.assertNotEqual(before, after)  # a row cached under the refusal is not replayed once pinned
 
 
+class CacheKeyFollowsAssetFilesTest(unittest.TestCase):
+    """R17-7 (round 17): the scan-cache key held the asset pins only — a "failed … 불일치" cached under a wrong
+    DEEPFAKE_LENS_HAAR_CASCADE was replayed after the override was fixed (and the reverse)."""
+
+    def _context(self) -> str:
+        from deepfake_lens.scan_cache import _cache_scan_context
+
+        return _cache_scan_context(None)
+
+    def test_the_override_and_the_file_bytes_are_in_the_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp).resolve()
+            wrong = folder / "my_cascade.xml"
+            wrong.write_bytes(BUNDLED_HAAR.read_bytes() + b" ")
+            with mock.patch.dict(os.environ, {"DEEPFAKE_LENS_HAAR_CASCADE": ""}):
+                unset = self._context()
+                self.assertEqual(self._context(), unset)  # deterministic
+            with mock.patch.dict(os.environ, {"DEEPFAKE_LENS_HAAR_CASCADE": str(wrong)}):
+                with_wrong = self._context()
+                wrong.write_bytes(BUNDLED_HAAR.read_bytes())  # the operator fixes the file in place
+                os.utime(wrong, ns=(1, 1))  # even with an old mtime: the bytes are hashed
+                fixed = self._context()
+            with mock.patch.dict(os.environ, {"DEEPFAKE_LENS_HAAR_CASCADE": str(BUNDLED_HAAR)}):
+                bundled = self._context()
+        self.assertEqual(len({unset, with_wrong, fixed, bundled}), 4)
+
+    def test_a_swapped_models_folder_asset_changes_the_key(self) -> None:
+        with _models_dir({}) as folder, mock.patch.dict(os.environ, {"DEEPFAKE_LENS_FACE_LANDMARKER": ""}):
+            absent = self._context()
+            (folder / FACE_LANDMARKER).write_bytes(b"task one")
+            one = self._context()
+            _rewrite_in_place(folder / FACE_LANDMARKER, b"task two")  # same size: the stat must still move (R17-12)
+            two = self._context()
+        self.assertEqual(len({absent, one, two}), 3)
+
+
 if __name__ == "__main__":
     unittest.main()
