@@ -25,7 +25,22 @@
         const REVIEW_KEY = 'dflens-review-v1';
         let reviewStore = {};
         try { reviewStore = JSON.parse(localStorage.getItem(REVIEW_KEY) || '{}'); } catch (e) { reviewStore = {}; }
-        function itemKey(item) { return item.path || item.name || ''; }
+        // R18-8 (round 18): a review mark (★, memo, examiner verdict) belongs to one
+        // file content in one scanned folder. The key was item.path || item.name
+        // in one global store, so another case's IMG_0001.jpg showed this case's
+        // memo and "검토됨" — also in the JSON/CSV exports. Keys are now
+        // "v2|<scope>|sha256:<content hash>" (G11: content, not path), scope = the
+        // scanned folder ("root:<scan_root>") or this page's uploads; a row without
+        // a hash falls back to its path inside that scope. Pre-v2 keys (bare paths)
+        // stay in the stores untouched and are never attached to a row.
+        const REVIEW_KEY_VERSION = 'v2';
+        const uploadReviewScope = 'upload:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        function reviewScope() { return lastScanRoot ? 'root:' + lastScanRoot : uploadReviewScope; }
+        function itemKey(item) {
+            const sha = typeof item.sha256 === 'string' && /^[0-9a-f]{64}$/.test(item.sha256) ? item.sha256 : '';
+            const what = sha ? 'sha256:' + sha : 'path:' + (item.path || item.name || '');
+            return `${REVIEW_KEY_VERSION}|${reviewScope()}|${what}`;
+        }
         let reviewPushTimer = null;
         function saveReviewStore(changedKey) {
             try { localStorage.setItem(REVIEW_KEY, JSON.stringify(reviewStore)); } catch (e) { /* quota — non-fatal */ }

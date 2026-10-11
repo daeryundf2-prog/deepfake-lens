@@ -188,7 +188,13 @@ table above is a route of its server, and every route is in its table
 (`test_servers.DocumentedEndpointsExistTest`).
 The GUI saves its examiner marks through `POST /api/review` (browser
 `localStorage` only as an offline fallback) — there is no `/api/review-marks`
-(it was documented here but never existed).
+(it was documented here but never existed). R18-8 (round 18): its `artifact_id`
+is `v2|root:<scan_root>|sha256:<content hash>` (a row without a hash:
+`v2|root:<scan_root>|path:<row path>`; uploads: a per-page `upload:…` scope
+instead of the root), so a mark belongs to one file content in one scanned
+folder — it used to be the bare row path, and a same-named file of another case
+showed the earlier case's memo and "검토됨". Older bare-path entries stay in the
+stores and are never attached to a row.
 
 | Path | Params | Response |
 |---|---|---|

@@ -77,6 +77,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `mediapipe installed` | mediapipe가 없는 환경에서만 실행(대체 경로 검사) | test_face.py |
 | `mediapipe installed — fallback path not exercised` | mediapipe가 없는 환경에서만 실행(대체 경로 검사) | test_face.py |
 | `mediapipe not installed` | `face_mediapipe` 또는 `face_tasks` extra(mediapipe) | test_face.py |
+| `no JavaScript engine (node or osascript)` | Node.js 또는 macOS `osascript`(JavaScriptCore) — gui.js의 검토 표시 키 함수를 실제로 실행(R18-8; 기준 환경에서는 소스 검사만) | test_gui_review_keys.py |
 | `node + playwright + Chromium not installed (headless GUI check)` | Node.js + `playwright` npm 패키지 + Chromium(`npx playwright install chromium`) — 헤드리스 GUI 확인 | test_path_b64.py |
 | `node is not installed` | Node.js(`node`) — GUI 스크립트 검사 | test_archives.py, test_path_b64.py |
 | `node required to run gui.js helpers` | Node.js(`node`) — GUI 스크립트 검사 | test_display_names.py |
