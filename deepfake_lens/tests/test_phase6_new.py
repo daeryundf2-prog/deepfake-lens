@@ -40,9 +40,14 @@ class AIAgentTest(unittest.TestCase):
         self.assertGreater(result.score, 0)
 
     def test_agent_type_classification(self) -> None:
-        """Agent type should be classified correctly."""
+        """Agent type should be classified correctly.
+
+        R18-18 (round 18): this asserted an ``agent_type`` classification — the layer diagnostic now has
+        none (raw signals only, like every other layer); the marker is still a raw signal.
+        """
         result = analyze_agent_content(text="Created using LangChain framework")
-        self.assertIn(result.agent_type, ["openai_agent", "anthropic_agent", "google_agent", "microsoft_agent", "framework_agent", "agentic_workflow", "unknown"])
+        self.assertFalse(hasattr(result, "agent_type"))
+        self.assertIn("langchain 마커 발견", [signal.title for signal in result.signals])
 
     def test_agent_analysis_to_json(self) -> None:
         """AgentAnalysis to_json should return a dictionary."""
@@ -50,7 +55,48 @@ class AIAgentTest(unittest.TestCase):
         data = result.to_json()
         self.assertIsInstance(data, dict)
         self.assertIn("score", data)
-        self.assertIn("agent_type", data)
+        # R18-18 (round 18): asserted "agent_type" in the JSON — the classification (and "confidence") is gone.
+        self.assertNotIn("agent_type", data)
+        self.assertNotIn("confidence", data)
+
+
+class AgentDiagnosticIsRawTest(unittest.TestCase):
+    """R18-18 (round 18): the `agent` layer diagnostic gave an ordinary text with "operator" and " done"
+    ``confidence: "high"``, raw score 90 and ``agent_type: "openai_agent"`` — a grade and a class no other layer
+    diagnostic gives ("no band, no verdict"); markers matched inside other words."""
+
+    def test_ordinary_text_gets_no_marker_grade_or_class(self) -> None:
+        text = "The crane operator said the abandoned job was done; the doner kebab was finished by noon."
+        result = analyze_agent_content(text=text)
+        titles = [signal.title for signal in result.signals]
+        self.assertNotIn("openai_agent 마커 발견", titles)  # "operator" alone is an ordinary word
+        self.assertEqual(titles.count("에이전트 워크플로우 패턴"), 2)  # "done" and "finished" as words, not "abandoned"/"doner"
+        self.assertEqual(set(result.to_json()), {"score", "reference_band", "reference_note", "signals", "limitations"})
+
+    def test_markers_match_whole_words_only(self) -> None:
+        self.assertEqual(analyze_agent_content(text="the openai operator ran it").signals[0].title, "openai_agent 마커 발견")
+        self.assertEqual(analyze_agent_content(text="haystacks of paper").score, 0)
+        self.assertEqual(analyze_agent_content(metadata={"note": "toolbox"}).score, 0)
+        self.assertGreater(analyze_agent_content(metadata={"tool": "x"}).score, 0)
+
+    def test_the_cli_diagnostic_has_no_confidence(self) -> None:
+        import contextlib
+        import io
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from deepfake_lens.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp, "memo.txt")
+            path.write_text("The operator said it was done.", encoding="utf-8")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                code = main(["agent", "--file", str(path), "--format", "json"])
+        self.assertEqual(code, 0)
+        diagnostic = json.loads(out.getvalue())["layer_diagnostics"]["agent_markers"]["diagnostic"]
+        self.assertEqual(set(diagnostic), {"signals", "limitations"})  # no "confidence", no "agent_type"
 
 
 class ThreeDTest(unittest.TestCase):
