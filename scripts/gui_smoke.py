@@ -378,6 +378,30 @@ def main() -> int:
             page.evaluate("document.getElementById('exp-clear').click()")
             assert page.evaluate("results.length") == rows_now, "results cleared without confirmation"
 
+            # 6b2. GUI-REV2 H-9: an upload whose second batch fails leaves the shown results'
+            #      provenance alone (batches are staged until the results arrive).
+            page.evaluate("location.hash = '#/scan'")
+            before_coverage = page.evaluate("JSON.stringify(lastProvenance.coverage)")
+            batches = {"n": 0}
+
+            def upload(route: object) -> None:
+                batches["n"] += 1
+                if batches["n"] == 1:
+                    body = _json.dumps({"items": [], "coverage": {"weights_total": 99, "weights_available": 0}, "thresholds": {"source": "staged"}})
+                    route.fulfill(status=200, content_type="application/json", body=body)  # type: ignore[attr-defined]
+                else:
+                    route.fulfill(status=500, content_type="application/json", body=_json.dumps({"error": "시험용 실패"}))  # type: ignore[attr-defined]
+
+            page.route("**/api/analyze-upload", upload)
+            page.evaluate("addFiles(Array.from({length: 21}, (_, i) => new File(['글 ' + i], 'up' + i + '.txt', {type: 'text/plain'})))")
+            page.click("#upload-btn")
+            page.wait_for_function("() => scanBusy === false && document.getElementById('prog-h').textContent === '검사 실패'", timeout=60_000)
+            page.unroute("**/api/analyze-upload", upload)
+            assert batches["n"] == 2, batches
+            assert page.evaluate("JSON.stringify(lastProvenance.coverage)") == before_coverage, "a failed upload changed the shown results' provenance"
+            page.evaluate("document.getElementById('upload-clear').click()")
+            console_errors[:] = [e for e in console_errors if "status of 500" not in e]
+
             # 6c. GUI-REV2 H-8: case fields entered for one folder are not silently reused
             #     for another — scanning a subfolder asks for a confirmation first.
             subfolders = sorted(path for path in Path(args.scan_dir).iterdir() if path.is_dir())

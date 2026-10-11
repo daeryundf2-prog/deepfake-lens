@@ -1279,6 +1279,7 @@
             setBusy(true);
             try {
                 const allItems = [];
+                let stagedCoverage = null, stagedThresholds = null;
                 const total = selectedFiles.length;
                 progressUpdate({ done: 0, total });
                 for (let i = 0; i < total; i += BATCH) {
@@ -1288,14 +1289,15 @@
                     const data = await apiJson('/api/analyze-upload', { method: 'POST', body: form });
                     if (data.error) { toast('오류: ' + data.error, true); progressFinish('error'); return; }
                     allItems.push(...(data.items || []));
-                    if (data.coverage) lastProvenance.coverage = data.coverage;
-                    if (data.thresholds) lastProvenance.thresholds = data.thresholds;
+                    // GUI-REV2 H-9: staged — the provenance on screen is the shown results'
+                    // until these results arrive (processResults commits it).
+                    if (data.coverage) stagedCoverage = data.coverage;
+                    if (data.thresholds) stagedThresholds = data.thresholds;
                     progressUpdate({ done: Math.min(i + BATCH, total), total });
                 }
                 lastScanRoot = '';  // uploads are temp files; heatmaps unavailable
                 lastScanRootB64 = '';
-                const coverage = lastProvenance.coverage, thresholds = lastProvenance.thresholds;
-                processResults({ items: allItems, coverage, thresholds });
+                processResults({ items: allItems, coverage: stagedCoverage, thresholds: stagedThresholds });
                 toast(`분석 완료 — ${allItems.length}개 파일`);
                 selectedFiles = [];
                 renderFileChips();
