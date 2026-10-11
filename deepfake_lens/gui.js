@@ -1271,6 +1271,7 @@
             const r = item.result;
             const cc = coverageCounts(r);
             const rev = reviewStore[itemKey(item)] || {};
+            const rowPath = item.path || item.name || '파일';
             const li = document.createElement('li');
             const btn = document.createElement('button');
             btn.type = 'button';
@@ -1282,7 +1283,7 @@
                 : '<span class="sr-only">검사 범위 </span>–';
             btn.innerHTML =
                 `<span class="mk mk-${VERDICT_MARK[v]}" aria-hidden="true"></span>` +
-                `<span class="row-name"><span class="nm">${shown(item.path || item.name || '파일')}</span><span class="vs">${shown(shortVerdict(item))}</span></span>` +
+                `<span class="row-name"><span class="nm">${pathHtml(rowPath)}</span><span class="vs">${shown(shortVerdict(item))}</span></span>` +
                 `<span class="row-reason">${shown(rowReason(item))}</span>` +
                 `<span class="row-cov">${cov}</span>` +
                 `<span class="row-rev">${rev.star ? '검토함' : ''}</span>`;
@@ -1290,6 +1291,15 @@
             entry.row = btn;
             li.appendChild(btn);
             list.appendChild(li);
+        }
+
+        // A long path keeps its file name whole: the folder part is what is cut short.
+        // The path is escaped whole (displayName), then split for display.
+        function pathHtml(path) {
+            const text = displayName(path);
+            const cut = Math.max(text.lastIndexOf('/'), text.lastIndexOf('::') >= 0 ? text.lastIndexOf('::') + 1 : -1);
+            if (cut <= 0) return `<span class="base">${escapeHtml(text)}</span>`;
+            return `<span class="dir">${escapeHtml(text.slice(0, cut + 1))}</span><span class="base">${escapeHtml(text.slice(cut + 1))}</span>`;
         }
 
         function markRows() {

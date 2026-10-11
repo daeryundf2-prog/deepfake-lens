@@ -318,7 +318,9 @@ select.field { padding-right: 8px; }
 .row:hover { background: var(--hover); }
 .row[aria-current="true"] { background: var(--panel); box-shadow: inset 4px 0 0 var(--ink); }
 .row-name { display: flex; flex-direction: column; min-width: 0; }
-.row-name .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-name .nm { font-weight: 600; display: flex; min-width: 0; white-space: nowrap; }
+.row-name .nm .dir { font-weight: 400; color: var(--muted); overflow: hidden; text-overflow: ellipsis; min-width: 1.5em; flex: 0 1 auto; }
+.row-name .nm .base { overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
 .row-name .vs { font-size: 13px; color: var(--muted); }
 .row-reason { color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .row-cov { font-family: var(--mono); font-size: 13px; color: var(--ink-2); text-align: right; }
