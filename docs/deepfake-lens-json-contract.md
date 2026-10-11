@@ -484,7 +484,7 @@ A row the server cannot re-analyze is **not** in `items` and not counted in
 `읽기 루트 안에서 파일을 찾을 수 없어 서버가 재분석하지 못했습니다`,
 `경로 중간의 폴더가 심볼릭 링크라 따라가지 않았습니다 — …`,
 `서버 재분석 결과에 이 항목이 없습니다(압축 파일 구성이 다름)` or
-`서버 재분석 실패: <사유>` — and never the client's result. The HTML report
+`서버 재분석 실패: <사유>` — and never the client's result. R19-13 (round 19): a row of the first, third or fourth kind — its file gone from the scan folder since the scan, its archive member no longer produced, its re-analysis failed — or any row whose server `sha256`, `status` or `verdict_code` differs from the posted row gives no report at all: every format is refused with HTTP 409 and `changed_rows` (docs/deepfake-lens-service.md, E47); a posted dedupe duplicate stays a duplicate row when its bytes still equal those of `duplicate_of`. Only rows outside the scan folder or behind a linked folder (and uploads, below) are still excluded. The HTML report
 (`<section id="unsigned-client-rows">`), the forensic PDF and the evidence
 statement PDF render those rows in a separate box titled
 `서명 제외(클라이언트 제공 결과)`: one line per row with the path, the

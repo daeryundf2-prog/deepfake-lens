@@ -1235,6 +1235,8 @@ def report_error_status(body: dict[str, object]) -> int:
     PDF renderer (B8); 500 when the evidence-statement PDF could not be
     built; 400 for every request error (N11 — was 200 + ``{"error": ...}``).
     """
+    if isinstance(body, ApiError):
+        return body.status  # R19-13: 409 for rows that changed after the scan
     error = body.get("error")
     if error is None:
         return 200
@@ -1275,6 +1277,14 @@ REPORT_ROW_OUTSIDE_SCAN_ROOT = "스캔 폴더 밖의 경로라 서버가 재분�
 REPORT_ROW_IDENTITY_MISMATCH = "path가 container::member와 일치하지 않습니다"
 # P6 (round 8): an upload row is never re-analyzed from the read root.
 REPORT_ROW_UPLOAD = "업로드 파일 — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다"
+# R19-13 (round 19): the server's re-analysis of a posted row differs from the
+# row (sha256, status or verdict) or the row's file can no longer be
+# re-analyzed (deleted, an archive member gone, the analysis failed) — the
+# file changed after the scan. No report is signed: 409 with ``changed_rows``.
+REPORT_ROWS_CHANGED = "검사 뒤 바뀐 파일이 있습니다 — 다시 검사하십시오(보고서를 만들지 않았습니다)"
+REPORT_ROWS_CHANGED_STATUS = 409
+# R19-13: the excluded reasons that mean "the file changed after the scan" (not "never re-analyzable").
+_CHANGED_AFTER_SCAN_REASONS = (REPORT_ROW_NOT_FOUND, REPORT_ROW_NOT_DERIVED)
 
 
 def report_format(body: bytes, query_format: str | None) -> str | dict[str, object]:
@@ -1467,7 +1477,7 @@ class _ReportHasher:
 
 def _rederive_report_items(
     posted: list[Any], hasher: "_ReportHasher", options: Any, thresholds: Any,
-) -> tuple[list[Any], list[tuple[Any, str]]]:
+) -> tuple[list[Any], list[tuple[Any, str]], list[dict[str, object]]]:
     """Re-analyze every posted row on the server (X2).
 
     Rows are grouped by their top-level file ("a.zip::x" -> "a.zip"); each
@@ -1477,7 +1487,16 @@ def _rederive_report_items(
     symbolic link the same skipped row. Each posted row is replaced by the
     server row of the same path (path naming kept: the posted folder-relative
     path). Returns ``(server rows in posted order, [(posted row, reason)]
-    for rows that could not be re-derived)``.
+    for rows that could not be re-derived, changed rows)``.
+
+    R19-13 (round 19): each server row is compared with the posted row —
+    sha256 (an archive member's own digest), status and verdict_code. A
+    difference, or a row whose file is gone / whose member the server's
+    extraction no longer yields / whose re-analysis failed, is a *changed*
+    row (:func:`_changed_row`); the caller refuses the report. A posted
+    dedupe duplicate (status "duplicate", ``duplicate_of``) stays a
+    duplicate row when the server finds the file's bytes equal to those of
+    ``duplicate_of`` (it is not signed as a full analysis of the copy).
     """
     from .analysis_api import scan_file_run
     from .result_text import escape_row_path, member_row_path, row_identity
@@ -1510,18 +1529,74 @@ def _rederive_report_items(
         derived_by_top[top] = rows
     derived: list[Any] = []
     excluded: list[tuple[Any, str]] = []
+    changed: list[dict[str, object]] = []
     seen: set[tuple[str, str | None]] = set()
     for item in posted:
         top, member = row_identity(item)
         found = derived_by_top[top]
         if isinstance(found, str):
+            if found in _CHANGED_AFTER_SCAN_REASONS or found.startswith(REPORT_ROW_FAILED.split("{", 1)[0]):
+                changed.append(_changed_row(item, None, found))
             excluded.append((item, found))
         elif member not in found:
+            changed.append(_changed_row(item, None, REPORT_ROW_NOT_DERIVED))
             excluded.append((item, REPORT_ROW_NOT_DERIVED))
         elif (top, member) not in seen:
             seen.add((top, member))
-            derived.append(found[member])
-    return derived, excluded
+            server = found[member]
+            if item.status == "duplicate" and item.duplicate_of:
+                server = _as_duplicate(item, server, hasher)
+            if _row_signature(item) != _row_signature(server):
+                changed.append(_changed_row(item, server, None))
+            derived.append(server)
+    return derived, excluded, changed
+
+
+def _row_signature(item: Any) -> tuple[object, object, object]:
+    """R19-13: what must agree between a posted row and the server's — sha256, status, verdict_code."""
+    verdict = item.result.verdict_code.value if item.result is not None else None
+    return item.sha256, item.status, verdict
+
+
+def _changed_row(posted: Any, server: Any | None, reason: str | None) -> dict[str, object]:
+    """R19-13: one ``changed_rows`` entry of a 409 body."""
+    posted_sha, posted_status, posted_verdict = _row_signature(posted)
+    server_sha, server_status, server_verdict = _row_signature(server) if server is not None else (None, None, None)
+    entry: dict[str, object] = {
+        "path": posted.path,
+        "posted_sha256": posted_sha, "server_sha256": server_sha,
+        "posted_status": posted_status, "server_status": server_status,
+        "posted_verdict": posted_verdict, "server_verdict": server_verdict,
+    }
+    if reason is not None:
+        entry["reason"] = reason
+    return entry
+
+
+def _as_duplicate(posted: Any, server: Any, hasher: "_ReportHasher") -> Any:
+    """R19-13 (J-2): the server row of a posted dedupe duplicate — a duplicate row when the bytes still match ``duplicate_of``.
+
+    The scan wrote no analysis for a duplicate (status "duplicate",
+    "중복 내용(동일 해시)"); re-analyzing the copy signed a full analysis in
+    its place. The server hashes the file named by ``duplicate_of`` (an
+    archive member "a.zip::m" from the re-extracted archive): equal to the
+    copy's server sha256 → the scan's duplicate row with the server's
+    sha256; otherwise the full server row (which then differs from the
+    posted row).
+    """
+    from .result_types import ScanItem
+
+    target = str(posted.duplicate_of)
+    container, sep, member = target.partition("::")
+    probe = ScanItem(target, Path(member or container).name, "file", "ok", 0, container=container if sep else None, member=member if sep else None)
+    target_sha = hasher.sha256(probe)
+    if not server.sha256 or target_sha != server.sha256:
+        return server
+    return ScanItem(
+        server.path, server.name, "duplicate", "duplicate", server.size_bytes, error=posted.error,
+        duplicate_of=target, sha256=server.sha256, container=server.container, member=server.member,
+        member_index=server.member_index,
+    )
 
 
 def _posted_heatmaps_allowed(row: dict[str, Any], roots: list[Path]) -> bool:
@@ -1623,6 +1698,11 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     the signed body — the body lists its path under ``excluded_items`` — and
     the HTML/PDF renderings show it in a separate "서명 제외(클라이언트
     제공 결과)" section. Case metadata is taken from the request.
+
+    R19-13 (round 19): a server row that differs from its posted row
+    (sha256, status, verdict_code), or a row whose file is gone / whose
+    archive member is no longer produced / whose re-analysis failed, refuses
+    the report in every format: :class:`ApiError` 409 with ``changed_rows``.
     """
     from .report_items import ItemContractError, check_report_item
 
@@ -1751,9 +1831,12 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
         return {"error": str(exc)}
     server_thresholds = load_thresholds(options)
     try:
-        items, excluded = _rederive_report_items(items, hasher, options, server_thresholds)
+        items, excluded, changed = _rederive_report_items(items, hasher, options, server_thresholds)
     finally:
         hasher.close()
+    if changed:
+        # R19-13 (round 19): never sign a re-analysis that differs from what the examiner saw.
+        return ApiError(REPORT_ROWS_CHANGED, REPORT_ROWS_CHANGED_STATUS, changed_rows=changed)
     excluded = uploads + excluded  # P6: upload rows first, in posted order
     thresholds = server_thresholds
     coverage = dict(weights_coverage(options.resolved_models_dir()))

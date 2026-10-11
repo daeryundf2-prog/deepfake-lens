@@ -1279,8 +1279,10 @@ class _ReportLegsFixture(unittest.TestCase):
         self.assertEqual(self.rows["target.png"]["sha256"], self.target_sha)
         self.assertEqual(self.rows["bundle.zip::inner/member.png"]["sha256"], self.member_sha)
         self.assertTrue(self.rows["bundle.zip::notes.txt"]["sha256"])
-        # A client-posted digest is never trusted: post junk for every row.
-        self.posted = [dict(row, sha256="0" * 64) if row.get("sha256") else dict(row) for row in self.scan["items"]]
+        # R19-13 (round 19): the rows are posted as the scan wrote them. This fixture posted junk digests
+        # ("0" * 64) to show they are never trusted — the server signed its own digests silently; a posted
+        # row that differs from the server's re-analysis is now refused (409, ReportRefusesChangedRowsTest).
+        self.posted = [dict(row) for row in self.scan["items"]]
 
     # -- legs ---------------------------------------------------------------
 
@@ -1494,19 +1496,33 @@ class ReportSignsOnlyServerResultsTest(_ReportLegsFixture):
         return row
 
     def test_forged_row_is_replaced_by_the_server_result(self) -> None:
+        """R19-13 (round 19): this test expected the forged row to be signed silently with the server's verdict
+        (200). A posted row whose verdict differs from the server's re-analysis is now refused — 409 with the
+        difference — and nothing the client said is signed either way; the scan's own row is signed as the
+        server's result."""
         from deepfake_lens.signing import REPORT_KEY_ENV, verify_report
 
         key = "x2-server-key-0123456789abcdef"
-        body = self._json({"items": [self._forged()], "format": "json"})
+        forged = self._json({"items": [self._forged()], "format": "json"})
+        genuine = self._json({"items": [self.rows["target.png"]], "format": "json"})
         for name, make in self._legs():
             with self.subTest(leg=name), patch.dict(os.environ, {REPORT_KEY_ENV: key}):
-                status, _, raw = make()("/api/report", body)
+                status, _, raw = make()("/api/report", forged)
+                self.assertEqual(status, 409, raw[:300])
+                refused = json.loads(raw)
+                self.assertEqual(refused["error"], webapp_api.REPORT_ROWS_CHANGED)
+                [changed] = refused["changed_rows"]
+                self.assertEqual(changed["path"], "target.png")
+                self.assertEqual(changed["posted_verdict"], "manipulation_evidence")
+                self.assertEqual(changed["server_verdict"], self.rows["target.png"]["result"]["verdict_code"])
+                self.assertNotIn("signature", refused)
+                status, _, raw = make()("/api/report", genuine)
                 self.assertEqual(status, 200, raw[:300])
                 signed = json.loads(raw)
                 [row] = signed["items"]
                 self.assertEqual(row["path"], "target.png")
                 self.assertEqual(row["sha256"], self.target_sha)
-                # The server's own verdict and evidence for target.png — never the pasted ones.
+                # The server's own verdict and evidence for target.png.
                 self.assertEqual(row["result"]["verdict_code"], self.rows["target.png"]["result"]["verdict_code"])
                 self.assertEqual(
                     [item["title"] for item in row["result"]["evidence"]],
@@ -1516,44 +1532,27 @@ class ReportSignsOnlyServerResultsTest(_ReportLegsFixture):
                 self.assertTrue(verify_report(signed, key.encode()).verified)
 
     def test_rows_the_server_cannot_reanalyze_are_excluded_and_marked(self) -> None:
+        """R19-13 (round 19): a row whose file is gone ("gone.png", not found under the scan folder) was moved to
+        excluded_items and the rest signed (200). A file missing since the scan is a changed row: every format
+        is refused with 409 and the row's reason. (A row the server never re-analyzes — a linked folder on the
+        path, an upload — is still excluded and marked: test_symlink_component_on_the_path_is_not_followed,
+        the upload tests.)"""
         import copy
 
         ghost = copy.deepcopy(self.rows["generated.png"])
         ghost.update(path="gone.png", name="gone.png")
-        rows = [self._forged(), ghost]
+        rows = [self.rows["target.png"], ghost]
         for name, make in self._legs():
             post = make()
-            with self.subTest(leg=name, format="json"):
-                status, _, raw = post("/api/report", self._json({"items": rows, "format": "json"}))
-                self.assertEqual(status, 200, raw[:300])
-                signed = json.loads(raw)
-                self.assertEqual([row["path"] for row in signed["items"]], ["target.png"])
-                self.assertEqual(signed["excluded_items"], [{
-                    "path": "gone.png", "marker": webapp_api.UNSIGNED_CLIENT_ROW_MARKER,
-                    "reason": webapp_api.REPORT_ROW_NOT_FOUND,
-                }])
-                self.assertEqual(signed["summary"]["manipulation_evidence"], 0)
-            with self.subTest(leg=name, format="html"):
-                from deepfake_lens.reports import extract_signed_report
-
-                status, _, raw = post("/api/report", self._json({"items": rows}))
-                self.assertEqual(status, 200, raw[:300])
-                html = raw.decode("utf-8")
-                self.assertIn('id="unsigned-client-rows"', html)
-                self.assertIn(f"[{webapp_api.UNSIGNED_CLIENT_ROW_MARKER}] gone.png — 클라이언트가 보낸 결론: 조작·생성 근거 있음", html)
-                embedded = extract_signed_report(html)
-                assert embedded is not None
-                self.assertEqual([row["path"] for row in embedded["items"]], ["target.png"])
-            if HAVE_PYMUPDF:
-                import pymupdf
-
-                for fmt in ("pdf", "evidence"):
-                    with self.subTest(leg=name, format=fmt):
-                        status, _, raw = post("/api/report", self._json({"items": rows, "format": fmt}))
-                        self.assertEqual(status, 200, raw[:300])
-                        with pymupdf.open(stream=raw, filetype="pdf") as doc:
-                            flat = "".join("".join(page.get_text() for page in doc).split())
-                        self.assertIn("".join(f"[{webapp_api.UNSIGNED_CLIENT_ROW_MARKER}]gone.png".split()), flat)
+            for fmt in ("json", "html", "evidence", *(("pdf",) if HAVE_PYMUPDF else ())):  # pdf without pymupdf: 501 first (B8)
+                with self.subTest(leg=name, format=fmt):
+                    status, content_type, raw = post("/api/report", self._json({"items": rows, "format": fmt}))
+                    self.assertEqual(status, 409, raw[:300])
+                    self.assertIn("application/json", content_type)
+                    [changed] = json.loads(raw)["changed_rows"]
+                    self.assertEqual(changed["path"], "gone.png")
+                    self.assertEqual(changed["reason"], webapp_api.REPORT_ROW_NOT_FOUND)
+                    self.assertEqual((changed["posted_verdict"], changed["server_verdict"]), ("manipulation_evidence", None))
 
     def test_report_options_are_validated(self) -> None:
         for name, make in self._legs():
@@ -1563,6 +1562,124 @@ class ReportSignsOnlyServerResultsTest(_ReportLegsFixture):
                     status, _, raw = post("/api/report", self._json({"items": [self._forged()], "options": options}))
                     self.assertEqual(status, 400, raw[:300])
                     self.assertIn(expected, json.loads(raw)["error"])
+
+
+class ReportRefusesChangedRowsTest(_ReportLegsFixture):
+    """R19-13 (round 19): /api/report re-analyzed every posted row and signed the re-analysis without comparing
+    it with the row. A file replaced after the scan (generator metadata gone), an archive member replaced, a
+    file deleted, or a dedupe duplicate re-analyzed as a full row was signed with another verdict — 200, and
+    verify-report said 검증됨. Now any difference in sha256, status or verdict_code, or a row whose file can no
+    longer be re-analyzed, refuses every signed format with 409 and ``changed_rows``."""
+
+    FORMATS = ("json", "html", "evidence", *(("pdf",) if HAVE_PYMUPDF else ()))
+
+    def _scan(self, *extra: str) -> dict[str, dict[str, Any]]:
+        import contextlib
+        import io
+
+        from deepfake_lens.cli import main as cli_main
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli_main(["scan", str(self.folder), "--format", "json", *extra]), 0)
+        return {row["path"]: row for row in json.loads(out.getvalue())["items"]}
+
+    def _assert_refused(self, rows: list[dict[str, Any]], path: str) -> list[dict[str, Any]]:
+        changed_rows: list[dict[str, Any]] = []
+        for name, make in self._legs():
+            post = make()
+            for fmt in self.FORMATS:
+                with self.subTest(leg=name, format=fmt):
+                    status, content_type, raw = post("/api/report", self._json({"items": rows, "format": fmt}))
+                    self.assertEqual(status, 409, raw[:300])
+                    self.assertIn("application/json", content_type)
+                    refused = json.loads(raw)
+                    self.assertEqual(refused["error"], webapp_api.REPORT_ROWS_CHANGED)
+                    self.assertIn(path, [entry["path"] for entry in refused["changed_rows"]])
+                    for entry in refused["changed_rows"]:
+                        self.assertEqual(
+                            set(entry) - {"reason"},
+                            {"path", "posted_sha256", "server_sha256", "posted_status", "server_status", "posted_verdict", "server_verdict"},
+                        )
+                    changed_rows = refused["changed_rows"]
+        return changed_rows
+
+    def test_a_file_replaced_after_the_scan_is_409_in_every_format(self) -> None:
+        from deepfake_lens.tests.qa.test_qa_sys import _write_generator_png
+
+        generated = self.folder / "generated.png"
+        _write_generator_png(generated)
+        rows = self._scan()
+        self.assertEqual(rows["generated.png"]["result"]["verdict_code"], "manipulation_evidence")
+        _write_png(generated, seed=7)  # a plain image now: no generator metadata
+        changed = self._assert_refused([rows["target.png"], rows["generated.png"]], "generated.png")
+        [entry] = changed
+        self.assertEqual(entry["posted_sha256"], rows["generated.png"]["sha256"])
+        self.assertNotEqual(entry["server_sha256"], entry["posted_sha256"])
+        self.assertEqual(entry["posted_verdict"], "manipulation_evidence")
+        self.assertNotEqual(entry["server_verdict"], "manipulation_evidence")
+
+    def test_an_archive_member_replaced_after_the_scan_is_409(self) -> None:
+        import zipfile
+
+        rows = self._scan()
+        with zipfile.ZipFile(self.folder / "bundle.zip", "w") as archive:
+            archive.writestr("inner/member.png", _write_png(Path(self._tmp.name) / "other.png", seed=9).read_bytes())
+            archive.writestr("notes.txt", "메모입니다.")
+        changed = self._assert_refused(list(rows.values()), "bundle.zip::inner/member.png")
+        member = next(entry for entry in changed if entry["path"] == "bundle.zip::inner/member.png")
+        self.assertEqual(member["posted_sha256"], self.member_sha)
+        self.assertNotEqual(member["server_sha256"], self.member_sha)
+
+    def test_a_file_deleted_after_the_scan_is_409(self) -> None:
+        rows = self._scan()
+        (self.folder / "target.png").unlink()
+        changed = self._assert_refused([rows["target.png"], rows["bundle.zip::notes.txt"]], "target.png")
+        [entry] = changed
+        self.assertEqual(entry["reason"], webapp_api.REPORT_ROW_NOT_FOUND)
+        self.assertIsNone(entry["server_status"])
+
+    def test_a_dedupe_duplicate_stays_a_duplicate_and_its_change_is_409(self) -> None:
+        (self.folder / "zcopy.png").write_bytes((self.folder / "target.png").read_bytes())
+        rows = self._scan("--dedupe")
+        duplicate = rows["zcopy.png"]
+        self.assertEqual((duplicate["status"], duplicate["duplicate_of"]), ("duplicate", "target.png"))
+        posted = [rows["target.png"], duplicate]
+        for name, make in self._legs():
+            with self.subTest(leg=name):
+                status, _, raw = make()("/api/report", self._json({"items": posted, "format": "json"}))
+                self.assertEqual(status, 200, raw[:300])
+                signed = {row["path"]: row for row in json.loads(raw)["items"]}
+                self.assertEqual(signed["zcopy.png"]["status"], "duplicate")  # J-2: not a full analysis of the copy
+                self.assertEqual(signed["zcopy.png"]["duplicate_of"], "target.png")
+                self.assertIsNone(signed["zcopy.png"]["result"])
+                self.assertEqual(signed["zcopy.png"]["sha256"], self.target_sha)
+        _write_png(self.folder / "zcopy.png", seed=5)  # the copy is no longer a duplicate
+        [entry] = self._assert_refused(posted, "zcopy.png")
+        self.assertEqual((entry["posted_status"], entry["server_status"]), ("duplicate", "analyzed"))
+
+    def test_junk_posted_digests_are_409(self) -> None:
+        rows = self._scan()
+        junk = [dict(row, sha256="0" * 64) if row.get("sha256") else dict(row) for row in rows.values()]
+        changed = self._assert_refused(junk, "target.png")
+        self.assertEqual({entry["posted_sha256"] for entry in changed}, {"0" * 64})
+
+    def test_unchanged_rows_are_signed_as_before(self) -> None:
+        from deepfake_lens.signing import REPORT_KEY_ENV, verify_report
+
+        rows = self._scan()
+        key = "r19-13-key-0123456789abcdef"
+        for name, make in self._legs():
+            post = make()
+            with self.subTest(leg=name), patch.dict(os.environ, {REPORT_KEY_ENV: key}):
+                status, _, first = post("/api/report", self._json({"items": list(rows.values()), "format": "json"}))
+                self.assertEqual(status, 200, first[:300])
+                status, _, second = post("/api/report", self._json({"items": list(rows.values()), "format": "json"}))
+                self.assertEqual(first, second)
+                signed = json.loads(first)
+                self.assertNotIn("changed_rows", signed)
+                self.assertTrue(verify_report(signed, key.encode()).verified)
+                self.assertEqual({row["path"]: row["sha256"] for row in signed["items"]}, {path: row.get("sha256") for path, row in rows.items()})
 
 
 class _ScanRootFixture(unittest.TestCase):
@@ -2520,6 +2637,10 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                 "/api/analyze-file?file_b64=%40%40", "/api/scan?folder_b64=%40%40", "/api/scan?async=1&folder_b64=AA%3D%3D",
                 f"/api/preview?path_b64=%40%40&root={q(f)}", "/api/heatmap?path_b64=x.png&root_b64=%40%40",
             )],
+            # R19-13 (round 19): a posted row the server's re-analysis contradicts (here its digest) — every format.
+            "E47": [case(s, "POST", f"/api/report?format={fmt}", 409, webapp_api.REPORT_ROWS_CHANGED,
+                         report({"items": [dict(memo_row, sha256="0" * 64)], "scan_root": scan_root, "options": {"no_default_engine": "true"}}),
+                         "application/json") for s in both for fmt in ("json", "html", "evidence")],
         }
 
     # -- the servers ---------------------------------------------------------------

@@ -180,6 +180,11 @@
                 if (ct.includes('application/json')) {
                     const j = await res.json();
                     detail = j.error || j.detail || '';
+                    // R19-13: a report refused because files changed after the scan (409) names them.
+                    if (Array.isArray(j.changed_rows) && j.changed_rows.length) {
+                        const paths = j.changed_rows.map(r => String(r.path));
+                        detail += ` — 바뀐 파일: ${paths.slice(0, 5).join(', ')}${paths.length > 5 ? ` 외 ${paths.length - 5}개` : ''}`;
+                    }
                 } else {
                     detail = `서버 오류 (HTTP ${res.status})`;
                 }
