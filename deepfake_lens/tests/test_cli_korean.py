@@ -214,3 +214,24 @@ class UnknownArgumentUsageTest(unittest.TestCase):
                 self.assertIn(prog, usage)
                 self.assertNotIn("{doctor,scan", err)  # not the top-level command list
                 self.assertIn(f"{prog}: 오류: 알 수 없는 인수: {' '.join(argv[1:])}", err)
+
+    def test_a_nested_subcommand_reports_its_unknown_argument(self) -> None:
+        """R19-9 (round 19): `corpus build … --bogus` was reported with the `corpus` usage ({build,split,verify})."""
+        with tempfile.TemporaryDirectory() as tmp:
+            code, err = self._run(["corpus", "build", tmp, "--out", str(Path(tmp, "m.json")), "--bogus"])
+        self.assertEqual(code, 2, err)
+        self.assertTrue(err.splitlines()[0].startswith("사용법: deepfake-lens corpus build"), err)
+        self.assertNotIn("{build,split,verify}", err)
+        self.assertIn("deepfake-lens corpus build: 오류: 알 수 없는 인수: --bogus", err)
+
+    def test_an_unknown_option_before_a_command_is_the_top_level_error(self) -> None:
+        """R19-9 (round 19): `--bogus scan X` was "deepfake-lens scan: 오류" (read as `scan --bogus scan X`)."""
+        code, err = self._run(["--bogus", "scan", "/tmp"])
+        self.assertEqual(code, 2, err)
+        self.assertTrue(err.splitlines()[0].startswith("사용법: deepfake-lens [-h] <명령>"), err)
+        self.assertIn("deepfake-lens: 오류: 알 수 없는 인수: --bogus", err)
+        self.assertNotIn("deepfake-lens scan: 오류", err)
+        # A scan option before the folder (no command named) is still the default scan.
+        code, err = self._run(["--pixel", "deep", "/nonexistent-r19-9"])
+        self.assertEqual(code, 2, err)
+        self.assertIn("폴더를 찾을 수 없습니다", err)
