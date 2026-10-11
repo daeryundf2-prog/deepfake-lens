@@ -153,6 +153,22 @@ IMPORT_INTERRUPTED = textwrap.dedent(
     """
 )
 
+# R18-12 (round 18): the same, but the Ctrl-C comes when the package's first
+# module after the guard (telemetry_opt_out) is looked up — the guard used to
+# be installed only after it, so this was an English traceback.
+IMPORT_INTERRUPTED_EARLY = IMPORT_INTERRUPTED.replace('name == "deepfake_lens.core"', 'name == "deepfake_lens.telemetry_opt_out"')
+# R18-12: what loading interrupt_guard on its own pulls in (no package __init__, no site).
+GUARD_IMPORTS = textwrap.dedent(
+    """
+    import importlib.util, json, sys
+    before = set(sys.modules)
+    spec = importlib.util.spec_from_file_location("guard_alone", sys.argv[1])
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    print(json.dumps(sorted(set(sys.modules) - before)))
+    """
+)
+
 # R17-8 (a): a command interrupted while another thread (a web request) is
 # analysing — that thread fails because of the cleanup and logs it.
 INTERRUPTED_WITH_A_REQUEST = textwrap.dedent(
@@ -216,6 +232,25 @@ class InterruptOrderTest(unittest.TestCase):
         self.assertEqual(done.returncode, 130, done.stderr[-800:])
         self.assertEqual(done.stderr.strip(), cli.INTERRUPTED_MESSAGE)
         self.assertNotIn("Traceback", done.stderr)
+
+    def test_ctrl_c_at_the_first_package_import(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            program = root / "deepfake-lens"
+            program.write_text(IMPORT_INTERRUPTED_EARLY, encoding="utf-8")
+            done = subprocess.run(
+                with_default_signals([sys.executable, str(program), "doctor"]),
+                capture_output=True, text=True, env=self._env(root), timeout=CHILD_TIMEOUT_SECONDS,
+            )
+        self.assertEqual(done.returncode, 130, done.stderr[-800:])
+        self.assertEqual(done.stderr.strip(), cli.INTERRUPTED_MESSAGE)
+
+    def test_the_guard_imports_only_os_signal_and_sys(self) -> None:
+        guard = Path(cli.__file__).resolve().parent / "interrupt_guard.py"
+        done = subprocess.run([sys.executable, "-I", "-S", "-c", GUARD_IMPORTS, str(guard)], capture_output=True, text=True, timeout=CHILD_TIMEOUT_SECONDS)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        added = set(json.loads(done.stdout))
+        self.assertFalse(added & {"threading", "typing"}, added)  # R18-12: it imported both
 
     def test_the_guard_is_only_for_the_cli_and_is_released_by_main(self) -> None:
         from deepfake_lens import interrupt_guard

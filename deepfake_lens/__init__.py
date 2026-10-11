@@ -1,16 +1,20 @@
 """Local AI-generated material screening CLI."""
 
+# R17-8 (round 17): a Ctrl-C while the CLI is still importing is a Korean line and exit 130.
+# R18-12 (round 18): installed first — it came after the telemetry import and
+# imported threading itself, and a Ctrl-C in that window was an English
+# traceback. interrupt_guard imports only os, signal and sys (and no package
+# module), so the telemetry rule below still holds for everything else.
+from . import interrupt_guard as _interrupt_guard  # R18-12: the first statement of the package
+
+_interrupt_guard.install()
+
 # R15-2 (round 15): third-party telemetry off before anything else is imported
 # — onnxruntime's import wrote a device id and tried
 # mobile.events.data.microsoft.com (see telemetry_opt_out).
-from . import telemetry_opt_out as _telemetry_opt_out  # R15-2: before every other import
+from . import telemetry_opt_out as _telemetry_opt_out  # noqa: E402 — R15-2: before every other package import
 
 _telemetry_opt_out.apply()
-
-# R17-8 (round 17): a Ctrl-C while the CLI is still importing is a Korean line and exit 130.
-from . import interrupt_guard as _interrupt_guard  # noqa: E402
-
-_interrupt_guard.install()
 
 from .core import (  # noqa: E402
     BatchScanSummary,

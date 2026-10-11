@@ -87,8 +87,13 @@ class TelemetryOptOutTest(unittest.TestCase):
 
     def test_the_opt_outs_are_set_before_any_other_package_module_is_imported(self) -> None:
         source = (REPO / "deepfake_lens" / "__init__.py").read_text(encoding="utf-8")
-        first_import = next(line for line in source.splitlines() if line.startswith(("from ", "import ")))
-        self.assertEqual(first_import, "from . import telemetry_opt_out as _telemetry_opt_out  # R15-2: before every other import")
+        # R18-12 (round 18): this test pinned telemetry_opt_out as the very first import; the Ctrl-C guard
+        # (interrupt_guard — os/signal/sys only, no package module, no third party) now comes before it.
+        imports = [line for line in source.splitlines() if line.startswith(("from ", "import "))]
+        self.assertEqual(imports[0], "from . import interrupt_guard as _interrupt_guard  # R18-12: the first statement of the package")
+        self.assertEqual(imports[1], "from . import telemetry_opt_out as _telemetry_opt_out  # noqa: E402 — R15-2: before every other package import")
+        guard = (REPO / "deepfake_lens" / "interrupt_guard.py").read_text(encoding="utf-8")
+        self.assertEqual(re.findall(r"^(?:from|import) (\S+)", guard, re.M), ["__future__", "os", "signal", "sys"])
         self.assertLess(source.index("_telemetry_opt_out.apply()"), source.index("from .core import"))
         leaf = (REPO / "deepfake_lens" / "telemetry_opt_out.py").read_text(encoding="utf-8")
         self.assertEqual(re.findall(r"^(?:from|import) (\S+)", leaf, re.M), ["__future__", "os"])  # imports nothing else
