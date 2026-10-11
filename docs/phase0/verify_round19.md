@@ -190,3 +190,13 @@ R19-12 (Cosmetic, 문서). docs/phase0/HANDOFF.md가 현재 상태와 다르다.
 - HANDOFF 상태 문서.
 
 **정리**: 직접 띄운 컨테이너(r19-full, r19-probe, r19-pc, r19-pc2)는 모두 종료·삭제했다. 다른 검증자의 guirev2-gate는 건드리지 않았다. 클론의 작업 트리는 변경하지 않았다(탐침 사본은 컨테이너 /work, /base에서만 만들었고 /tmp/F2000·/tmp/H 등은 컨테이너와 함께 삭제됨). 탐침 스크립트는 /private/tmp/claude-501/r19/out/p/, 로그는 /private/tmp/claude-501/r19/out/*.log에 있다.
+
+---
+## 조정자 추가 — GUI 적대적 리뷰 J-1/J-2에서 확인
+
+R19-13 (Med-High, 차단; G30/G11 — 기존 결함, phase0 기준 커밋에도 있음). `/api/report`(stdlib 웹 서버 `webapp_api._report_payload`와 FastAPI `api_server` 경로 모두)는 게시된 행을 `_rederive_report_items`로 다시 분석해 **다시 분석한 결과**에 서명하지만, 그 결과를 게시된 행과 비교하지 않는다.
+- 검사 뒤 파일이 바뀌면(내용 교체, 압축 파일 구성 파일 교체, 파일 삭제) 서명된 JSON/HTML/포렌식 PDF/증거설명서가 화면과 다른 결론을 담는다. 예: 화면 "manipulation_evidence" → 서명 본문 "undetermined". 응답은 200이고 `verify-report`는 검증됨이다.
+- 재현: 생성 메타데이터(PNG tEXt parameters, DALL-E EXIF 등)가 있는 파일을 검사한 뒤 그 파일을 평범한 이미지로 덮어쓰고, 같은 행을 `/api/report?format=json`으로 보낸다 → 200, 다른 결론.
+- 전시물이 아닌 파일을 검사 뒤 지우면 그 행이 조용히 `excluded_items`로 옮겨진다.
+- J-2: dedupe 검사에서 `status: "duplicate"`로 게시된 행이 전체 분석으로 다시 만들어진다(상태·결론이 다름) — `duplicate_of`가 유지되지 않는다.
+- → 다시 만든 행을 게시된 행과 sha256(압축 구성 파일은 구성 파일 해시)·status·verdict_code로 비교한다. 하나라도 다르거나 다시 만들 수 없는 행이 있으면 모든 서명 형식을 409로 거부하고 `changed_rows`([{path, posted_sha256, server_sha256, posted_status, server_status, posted_verdict, server_verdict}])와 한국어 메시지("검사 뒤 바뀐 파일이 있습니다 — 다시 검사하십시오")를 돌려준다. 중복 행의 의미를 유지한다. 두 서버가 같게 동작하고, GUI는 409 메시지와 바뀐 경로를 보여 준다.
