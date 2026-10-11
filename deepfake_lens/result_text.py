@@ -275,8 +275,68 @@ def escape_controls(text: object) -> str:
     return "".join(out)
 
 
+# R18-11 (round 18): code points that render as nothing or as a plain space but
+# are not U+0020 — Unicode's Default_Ignorable_Code_Point (DerivedCoreProperties)
+# ranges; most are Cf already, these include U+115F/U+1160/U+3164/U+FFA0
+# (Hangul fillers), U+034F, U+17B4..5 and the variation selectors U+FE00..F.
+DEFAULT_IGNORABLE_RANGES: tuple[tuple[int, int], ...] = (
+    (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160), (0x17B4, 0x17B5),
+    (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E), (0x2060, 0x206F), (0x3164, 0x3164),
+    (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF), (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3),
+    (0x1D173, 0x1D17A), (0xE0000, 0xE0FFF),
+)
+
+
+def _escape_code(code: int) -> str:
+    return f"\\x{code:02x}" if code < 0x100 else f"\\u{code:04x}" if code < 0x10000 else f"\\U{code:08x}"
+
+
+def _invisible_or_space(char: str) -> bool:
+    """R18-11: a space other than U+0020 (category Zs) or a default-ignorable code point."""
+    code = ord(char)
+    return (unicodedata.category(char) == "Zs" and char != " ") or any(low <= code <= high for low, high in DEFAULT_IGNORABLE_RANGES)
+
+
+def _composes_with_previous(char: str) -> bool:
+    """R18-11: a mark, or a Hangul medial/final jamo — joins the character before it under NFC."""
+    code = ord(char)
+    return unicodedata.category(char).startswith("M") or 0x1160 <= code <= 0x11FF or 0xD7B0 <= code <= 0xD7FF
+
+
+def _escaped_alone(char: str) -> bool:
+    """A character display_name writes as an escape by itself ("\\", "|", controls, invisible ones, other spaces)."""
+    return char in ("\\", "|") or escape_controls(char) != char or _invisible_or_space(char)
+
+
+def _lookalike_positions(text: str) -> set[int]:
+    """R18-11: indexes of characters written as escapes because of the run they are in.
+
+    A run is a character and the marks / Hangul medial-final jamo after it.
+    A run that NFC would change (an NFD "한", "e" + U+0301) is escaped whole;
+    otherwise every mark after a character shown as an escape (or a mark that
+    starts the text) is escaped too — it would combine with the escape's
+    last character.
+    """
+    positions: set[int] = set()
+    start = 0
+    for index in range(1, len(text) + 1):
+        if index == len(text) or not _composes_with_previous(text[index]):
+            run = text[start:index]
+            if unicodedata.normalize("NFC", run) != run:
+                positions.update(range(start, index))
+            else:
+                # From the first character shown as an escape on, the rest of the run is escaped too.
+                escaped = _composes_with_previous(run[0])
+                for offset, char in enumerate(run):
+                    escaped = escaped or _escaped_alone(char)
+                    if escaped:
+                        positions.add(start + offset)
+            start = index
+    return positions
+
+
 def display_name(text: object) -> str:
-    """A file name, path or echoed string as every text report shows it (R10-1, R11-4).
+    """A file name, path or echoed string as every text report shows it (R10-1, R11-4, R18-11).
 
     Controls and invisible characters become escapes (:func:`escape_controls`),
     a Markdown table separator "|" becomes "\\|" and — R11-4 (round 11) —
@@ -286,13 +346,23 @@ def display_name(text: object) -> str:
     different names never look the same (before R11-4 ``bs\\|p`` and
     ``bs\\\\|p`` were both shown ``bs\\\\\\|p``, and a literal "\\n" looked
     like a real LF). The result is one line and contains no unescaped "|".
+
+    R18-11 (round 18): two names that *render* alike are told apart too — a
+    run of characters that is not in NFC (an NFD "한" next to the NFC one), a
+    space other than U+0020 (NBSP, U+3000 …), a default-ignorable code point
+    (U+3164 HANGUL FILLER, U+115F, U+FE0F …) and a mark that would combine
+    with an escape are written as escapes (:func:`_lookalike_positions`).
     """
+    raw = str(text)
+    non_nfc = _lookalike_positions(raw)
     out: list[str] = []
-    for char in str(text):
+    for index, char in enumerate(raw):
         if char == "\\":
             out.append("\\\\")
         elif char == "|":
             out.append("\\|")
+        elif char not in _CONTROL_ESCAPES and (index in non_nfc or _invisible_or_space(char)):
+            out.append(_escape_code(ord(char)))
         else:
             out.append(escape_controls(char))
     return "".join(out)

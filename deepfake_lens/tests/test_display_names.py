@@ -18,6 +18,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -221,6 +222,53 @@ class DisplayNameInjectiveTest(unittest.TestCase):
                 other = seen.setdefault(display_name(name), name)
                 self.assertEqual(other, name)
         self.assertEqual(len(seen), sum(len(alphabet) ** n for n in range(5)))
+
+
+# R18-11: characters that render like others — NFD jamo and a combining accent, spaces other than
+# U+0020, Hangul fillers, a variation selector — plus their look-alikes.
+LOOKALIKE_ALPHABET = ("\u1112", "\u1161", "\u11ab", "\ud55c", "e", "\u0301", "\u00e9", " ", "\u00a0", "\u3000", "\u3164", "\u115f", "\ufe0f", "a", "\\")
+
+
+class DisplayNameLookalikeTest(unittest.TestCase):
+    """R18-11 (round 18): display_name was injective as a string but two names could still *look* the same — NFC
+    "한.jpg" and NFD "한.jpg", "a\u00a0b.jpg" and "a b.jpg", a name with U+3164/U+115F/U+FE0F and one without."""
+
+    def test_reported_lookalikes_are_shown_differently(self) -> None:
+        import unicodedata
+
+        nfd = unicodedata.normalize("NFD", "한.jpg")
+        self.assertEqual(display_name("한.jpg"), "한.jpg")
+        self.assertEqual(display_name(nfd), "\\u1112\\u1161\\u11ab.jpg")
+        self.assertEqual(display_name("a\u00a0b.jpg"), "a\\xa0b.jpg")
+        self.assertEqual(display_name("a\u3000b.jpg"), "a\\u3000b.jpg")
+        self.assertEqual(display_name("ab\u3164.jpg"), "ab\\u3164.jpg")
+        self.assertEqual(display_name("\u115fab.jpg"), "\\u115fab.jpg")
+        self.assertEqual(display_name("ab\ufe0f.jpg"), "ab\\ufe0f.jpg")
+        self.assertEqual(display_name("a b.jpg"), "a b.jpg")
+        self.assertEqual(display_name("e\u0301"), "\\x65\\u0301")
+        self.assertEqual(display_name("\u00e9"), "\u00e9")
+
+    def test_what_is_shown_unescaped_is_nfc_and_visible(self) -> None:
+        import unicodedata
+
+        seen: dict[str, str] = {}
+        escape = re.compile(r"\\(?:\\|\||[nrt]|x[0-9a-f]{2}|u[0-9a-f]{4}|U[0-9a-f]{8})")
+        for name in ("".join(chars) for chars in _lookalike_names(20000, seed=1811)):
+            shown = display_name(name)
+            self.assertEqual(undisplay_name(shown), name, repr(name))
+            # Every stretch shown as itself is NFC, starts with no mark and holds no space but U+0020.
+            for stretch in escape.split(shown):
+                self.assertEqual(unicodedata.normalize("NFC", stretch), stretch, repr(name))
+                self.assertFalse(bool(stretch) and unicodedata.category(stretch[0]).startswith("M"), repr(name))
+                self.assertFalse(any(unicodedata.category(char) == "Zs" and char != " " for char in stretch), repr(name))
+            self.assertEqual(seen.setdefault(shown, name), name)
+
+
+def _lookalike_names(count: int, seed: int) -> list[list[str]]:
+    import random
+
+    rng = random.Random(seed)
+    return [[rng.choice(LOOKALIKE_ALPHABET) for _ in range(rng.randint(0, 8))] for _ in range(count)]
 
 
 HAVE_MARKDOWN_IT = importlib.util.find_spec("markdown_it") is not None

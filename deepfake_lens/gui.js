@@ -254,21 +254,60 @@
         // bidi overrides) as escapes, "|" as "\|" and every literal "\" as
         // "\\" — injective, so two different names never look the same.
         function displayName(value) {
+            const chars = Array.from(String(value));
+            const nonNfc = new Array(chars.length).fill(false);
+            let start = 0;
+            for (let i = 1; i <= chars.length; i++) {
+                if (i === chars.length || !composesWithPrevious(chars[i])) {
+                    const run = chars.slice(start, i).join('');
+                    // R18-11: result_text._lookalike_positions — a run NFC would change is escaped
+                    // whole; otherwise the marks after an escape (or a leading mark) are escaped.
+                    if (run.normalize('NFC') !== run) {
+                        for (let j = start; j < i; j++) nonNfc[j] = true;
+                    } else {
+                        let escaped = composesWithPrevious(chars[start]);
+                        for (let j = start; j < i; j++) {
+                            escaped = escaped || escapedAlone(chars[j]);
+                            if (escaped) nonNfc[j] = true;
+                        }
+                    }
+                    start = i;
+                }
+            }
             let out = '';
-            for (const ch of String(value)) {
+            chars.forEach((ch, i) => {
                 const code = ch.codePointAt(0);
+                const hex = () => code < 0x100 ? '\\x' + code.toString(16).padStart(2, '0')
+                    : code < 0x10000 ? '\\u' + code.toString(16).padStart(4, '0')
+                    : '\\U' + code.toString(16).padStart(8, '0');
                 if (ch === '\\') out += '\\\\';
                 else if (ch === '|') out += '\\|';
                 else if (ch === '\n') out += '\\n';
                 else if (ch === '\r') out += '\\r';
                 else if (ch === '\t') out += '\\t';
-                else if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/u.test(ch)) {
-                    out += code < 0x100 ? '\\x' + code.toString(16).padStart(2, '0')
-                        : code < 0x10000 ? '\\u' + code.toString(16).padStart(4, '0')
-                        : '\\U' + code.toString(16).padStart(8, '0');
-                } else out += ch;
-            }
+                else if (nonNfc[i] || invisibleOrSpace(ch) || controlLike(ch)) out += hex();
+                else out += ch;
+            });
             return out;
+        }
+        // R18-11 (round 18): result_text.DEFAULT_IGNORABLE_RANGES — escaped like
+        // a space other than U+0020 and a run that is not in NFC, so names that
+        // render alike ("한" NFC/NFD, NBSP, U+3164) are shown differently.
+        const DEFAULT_IGNORABLE_RANGES = [
+            [0x00AD, 0x00AD], [0x034F, 0x034F], [0x061C, 0x061C], [0x115F, 0x1160], [0x17B4, 0x17B5],
+            [0x180B, 0x180F], [0x200B, 0x200F], [0x202A, 0x202E], [0x2060, 0x206F], [0x3164, 0x3164],
+            [0xFE00, 0xFE0F], [0xFEFF, 0xFEFF], [0xFFA0, 0xFFA0], [0xFFF0, 0xFFF8], [0x1BCA0, 0x1BCA3],
+            [0x1D173, 0x1D17A], [0xE0000, 0xE0FFF],
+        ];
+        function composesWithPrevious(ch) {
+            const code = ch.codePointAt(0);
+            return /\p{M}/u.test(ch) || (code >= 0x1160 && code <= 0x11FF) || (code >= 0xD7B0 && code <= 0xD7FF);
+        }
+        function controlLike(ch) { return /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/u.test(ch); }
+        function escapedAlone(ch) { return ch === '\\' || ch === '|' || controlLike(ch) || invisibleOrSpace(ch); }
+        function invisibleOrSpace(ch) {
+            const code = ch.codePointAt(0);
+            return (/\p{Zs}/u.test(ch) && ch !== ' ') || DEFAULT_IGNORABLE_RANGES.some(([low, high]) => code >= low && code <= high);
         }
 
         // R10-2: a CSV cell that starts with =, +, -, @, TAB or CR is read
