@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..76955b9`(병합 커밋 제외, 커밋 215개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..3fe35fb`(병합 커밋 제외, 커밋 226개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 208개 — 스펙 갭에 매핑 140개(그중 신규 사유 병기 48개), 신규(스펙 외)만 68개.
+요약: ID 220개 — 스펙 갭에 매핑 151개(그중 신규 사유 병기 49개), 신규(스펙 외)만 69개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -232,9 +232,21 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R16-10 | 16 | 임시 폴더 문구가 원인 무관·증거설명서 누락 → 원인별 문구, 증거설명서 기록 | G30 | 신규(스펙 외): 임시 폴더 — 갭 목록 밖 | ee091ac |
 | R16-11 | 16 | ptrace 거부 환경에서 텔레메트리 테스트 실패 → 분리·skip | — | 신규(스펙 외): 테스트 환경 — 갭 목록 밖 | 1653be9 |
 | R16-12 | 16 | git 이력 규칙 문서 불일치 → 공유 규칙·문서 갱신 | G27 |  | 1653be9 |
-| R16-13 | 16 | Ctrl-C 영어 traceback → 정리 후 '중단됨' exit 130 | G13 |  | 0ce6d1b |
+| R16-13 | 16 | Ctrl-C 영어 traceback → 정리 후 '중단됨' exit 130 | G34 |  | 0ce6d1b |
 | R16-14 | 16 | vendor-weights --verify 없는 폴더에 통과 rc 0 → exit 2 | G29 |  | 42f0344 |
 | R16-15 | 16 | with_default_signals.py 영어 traceback → 한국어 exit 127/126 | — | 신규(스펙 외): 테스트 도구 — 갭 목록 밖 | 0ce6d1b |
+| R17-1 | 17 | 감독 프로세스 두 번째 PDEATHSIG 경쟁 → 프로그램 자식 고아화 | G34 |  | 27bc793 |
+| R17-2 | 17 | SIGKILL된 프로그램 처리 중 감독자 EINVAL 크래시 → -9 보고 | G34 |  | 27bc793 |
+| R17-3 | 17 | setsid로 다른 세션에 간 자손 생존·캡처 파이프 정체 → 반복 신호·회수, 제한 시간 읽기 | G34 |  | 27bc793 |
+| R17-4 | 17 | 실행 불가 ffmpeg를 '오디오 트랙 없음'으로 기록 → failed + 종료 코드/신호 | G1, G12 |  | 8cd1a33 |
+| R17-5 | 17 | 실측 랜드마크 검출기 부재 시 face_track 사유·doctor 행·없는 재정의 파일 | G12, G29, G1 |  | c1dee0a |
+| R17-6 | 17 | video-frames 멤버 오류의 coverage 사유가 일반 문구 → 내부 원인·예외 클래스 | G1, G12 |  | 498558d |
+| R17-7 | 17 | 스캔 캐시 키가 핀만 포함 → 실효 자산 파일·재정의·sha256 포함 | G11, G9 |  | cbf9752 |
+| R17-8 | 17 | Ctrl-C: 로깅 복원 순서, import 중 인터럽트, batch 즉시 중단 | G34 |  | ee2818f |
+| R17-9 | 17 | doctor와 로더의 재정의·매니페스트 해석 불일치(~ 확장, 깨진/BOM assets.json) | G29, G9 |  | 111b302 |
+| R17-10 | 17 | vendor-weights --verify 프로필 0개 폴더 통과 rc 0 → exit 2 | G29 |  | 98672a1 |
+| R17-11 | 17 | 0ce6d1b 추적표 매핑 G13→G34 정정, TMPDIR가 파일일 때 문구 | G34 | 신규(스펙 외): 추적표 매핑 정정 — 갭 목록 밖 | 3fe35fb |
+| R17-12 | 17 | 매니페스트 제자리 재작성 테스트가 파일 시각 해상도에 의존(1 ms 커널에서 실패) | — | 신규(스펙 외): 테스트 견고성 — 갭 목록 밖 | 8f205bd |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -255,6 +267,8 @@ Z3 → G7 근거: R-OUT-6(진입점이 같은 입력을 같게 다룸) — CLI �
 P12: 라운드 8 검증 때 이 표의 해시 115개가 전부 히스토리 리라이트 이전 값이었다 — 이제 표는 현재 히스토리에서 제목으로 매칭해 재생성되고(`pre_rewrite_subject`에 리라이트 전 제목), CI가 `--check`로 최신 여부를 확인한다.
 
 P14: Gaps를 제목 괄호에만 적은 커밋(예: `(Z1-Z5; Gaps: G7, 신규)`)은 규칙상 허용 — 스크립트가 본문의 `Gaps:` 줄을 먼저, 없으면 제목을 읽는다.
+
+R17-11: 0ce6d1b의 제목은 R16-13(Ctrl-C → 정리 후 '중단됨' exit 130)에 G13(사진/비사진 게이트)을 인용했다 — 잘못된 인용이다. R16-13의 매핑은 G34(R-SYS-3: 종료·자원 정리)로 정정했다. commits[]의 `gaps`/`gaps_line`은 커밋 제목을 그대로 옮긴 값이라(히스토리는 고치지 않음) 0ce6d1b 행에는 G13이 남는다 — 기준은 ids[]의 매핑.
 
 ## 커밋별 `Gaps:` 줄
 
@@ -477,3 +491,14 @@ P14: Gaps를 제목 괄호에만 적은 커밋(예: `(Z1-Z5; Gaps: G7, 신규)`)
 | 0ce6d1b | 16 | R16-13, R16-15 | Gaps: G13, G34 | subject | fix(cli): R16-13 Ctrl-C ends the CLI with "중단됨(사용자 요청)" and exit 130 after the cleanup; R16-15 with_default_signals.py reports a command that cannot start in Korean, exit 127/126 (R16-13, R16-15; Gaps: G13, G34) |
 | ad02d2b | 16 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 0ce6d1b, round-16 IDs mapped (WP-J; Gaps: G26, G27, G28) |
 | 76955b9 | 16 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): handoff — spec, round 1-17 verification findings and resume guide (WP-J; Gaps: 신규) |
+| ed30923 | 16 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 76955b9 (WP-J; Gaps: G26, G27, G28) |
+| 8f205bd | 17 | R17-12 | Gaps: 신규(스펙 외) | subject | test(assets): R17-12 the re-pin tests move the manifest's mtime forward when the file-system clock did not — no dependence on timestamp granularity (R17-12; Gaps: 신규) |
+| 27bc793 | 17 | R17-1, R17-2, R17-3 | Gaps: G34 | subject | fix(native): R17-1/R17-2/R17-3 the child supervisor blocks its stop signals, reports a SIGKILLed program as -9 and signals and reaps until no descendant is left (R17-1, R17-2, R17-3; Gaps: G34) |
+| 8cd1a33 | 17 | R17-4 | Gaps: G1, G12 | subject | fix(video): R17-4 an ffmpeg that cannot run or dies fails av_audio and lipsync with the exit code or signal — only ffmpeg's "no stream" error is "no audio track" (R17-4; Gaps: G1, G12) |
+| c1dee0a | 17 | R17-5 | Gaps: G12, G29, G1 | subject | fix(face): R17-5 face_track is skipped "의존성 부재: 실측 랜드마크 검출기 없음" when neither FaceMesh nor a FaceLandmarker asset exists; doctor warns on the mediapipe row; a FACE_LANDMARKER override naming no file fails the check (R17-5; Gaps: G12, G29, G1) |
+| 498558d | 17 | R17-6 | Gaps: G1, G12 | subject | fix(models): R17-6 a video-frames member that scored no frame carries the inner runtime's cause (exception class included) in its detail and so in its coverage reason (R17-6; Gaps: G1, G12) |
+| 111b302 | 17 | R17-9 | Gaps: G29, G9 | subject | fix(assets): R17-9 doctor and the loaders read an asset override and the manifest the same way — "~" expanded everywhere, a broken assets.json shown in doctor, a UTF-8 BOM accepted (R17-9; Gaps: G29, G9) |
+| cbf9752 | 17 | R17-7 | Gaps: G11, G9 | subject | fix(cache): R17-7 the scan-cache key holds the model-asset files the loaders would read — override variables and each file's sha256 — not only the pins (R17-7; Gaps: G11, G9) |
+| ee2818f | 17 | R17-8 | Gaps: G34 | subject | fix(cli): R17-8 an interrupt cleans up before the log handlers are removed, a Ctrl-C during the package import is a Korean line and exit 130, an interrupted batch starts no further file (R17-8; Gaps: G34) |
+| 98672a1 | 17 | R17-10 | Gaps: G29 | subject | fix(cli): R17-10 vendor-weights --verify of a folder without runtime profiles is an error, exit 2 — not "통과 … 프로필 0개" (R17-10; Gaps: G29) |
+| 3fe35fb | 17 | R17-11 | Gaps: G34; 신규(스펙 외) | subject | fix(native): R17-11 a DEEPFAKE_LENS_TMPDIR that names a file is reported "(폴더가 아니라 파일임)"; the traceability mapping of R16-13 is corrected from G13 to G34 (R17-11; Gaps: G34, 신규) |

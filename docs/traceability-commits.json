@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "76955b91ca1261f0d88eb970b84161465c3cc083",
+    "head": "3fe35fb3b711667c69440747bbf5775e9c7f4bdf",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -2912,6 +2912,178 @@
       "new": "테스트 도구 — 갭 목록 밖",
       "commits": [
         "0ce6d1b"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R17-1",
+      "round": 17,
+      "source": "verify_round17.md",
+      "summary": "감독 프로세스 두 번째 PDEATHSIG 경쟁 → 프로그램 자식 고아화",
+      "gaps": [
+        "G34"
+      ],
+      "new": null,
+      "commits": [
+        "27bc793"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R17-2",
+      "round": 17,
+      "source": "verify_round17.md",
+      "summary": "SIGKILL된 프로그램 처리 중 감독자 EINVAL 크래시 → -9 보고",
+      "gaps": [
+        "G34"
+      ],
+      "new": null,
+      "commits": [
+        "27bc793"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R17-3",
+      "round": 17,
+      "source": "verify_round17.md",
+      "summary": "setsid로 다른 세션에 간 자손 생존·캡처 파이프 정체 → 반복 신호·회수, 제한 시간 읽기",
+      "gaps": [
+        "G34"
+      ],
+      "new": null,
+      "commits": [
+        "27bc793"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R17-4",
+      "round": 17,
+      "source": "verify_round17.md",
+      "summary": "실행 불가 ffmpeg를 '오디오 트랙 없음'으로 기록 → failed + 종료 코드/신호",
+      "gaps": [
+        "G1",
+        "G12"
+      ],
+      "new": null,
+      "commits": [
+        "8cd1a33"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R17-5",
+      "round": 17,
+      "source": "verify_round17.md",
+      "summary": "실측 랜드마크 검출기 부재 시 face_track 사유·doctor 행·없는 재정의 파일",
+      "gaps": [
+        "G12",
+        "G29",
+        "G1"
+      ],
+      "new": null,
+      "commits": [
+        "c1dee0a"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R17-6",
+      "round": 17,
+      "source": "verify_round17.md",
+      "summary": "video-frames 멤버 오류의 coverage 사유가 일반 문구 → 내부 원인·예외 클래스",
+      "gaps": [
+        "G1",
+        "G12"
+      ],
+      "new": null,
+      "commits": [
+        "498558d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R17-7",
+      "round": 17,
+      "source": "verify_round17.md",
+      "summary": "스캔 캐시 키가 핀만 포함 → 실효 자산 파일·재정의·sha256 포함",
+      "gaps": [
+        "G11",
+        "G9"
+      ],
+      "new": null,
+      "commits": [
+        "cbf9752"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R17-8",
+      "round": 17,
+      "source": "verify_round17.md",
+      "summary": "Ctrl-C: 로깅 복원 순서, import 중 인터럽트, batch 즉시 중단",
+      "gaps": [
+        "G34"
+      ],
+      "new": null,
+      "commits": [
+        "ee2818f"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R17-9",
+      "round": 17,
+      "source": "verify_round17.md",
+      "summary": "doctor와 로더의 재정의·매니페스트 해석 불일치(~ 확장, 깨진/BOM assets.json)",
+      "gaps": [
+        "G29",
+        "G9"
+      ],
+      "new": null,
+      "commits": [
+        "111b302"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R17-10",
+      "round": 17,
+      "source": "verify_round17.md",
+      "summary": "vendor-weights --verify 프로필 0개 폴더 통과 rc 0 → exit 2",
+      "gaps": [
+        "G29"
+      ],
+      "new": null,
+      "commits": [
+        "98672a1"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R17-11",
+      "round": 17,
+      "source": "verify_round17.md",
+      "summary": "0ce6d1b 추적표 매핑 G13→G34 정정, TMPDIR가 파일일 때 문구",
+      "gaps": [
+        "G34"
+      ],
+      "new": "추적표 매핑 정정 — 갭 목록 밖",
+      "commits": [
+        "3fe35fb"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R17-12",
+      "round": 17,
+      "source": "기준선 재현(Linux aarch64, Python 3.13) — 조정자 발견",
+      "summary": "매니페스트 제자리 재작성 테스트가 파일 시각 해상도에 의존(1 ms 커널에서 실패)",
+      "gaps": [],
+      "new": "테스트 견고성 — 갭 목록 밖",
+      "commits": [
+        "8f205bd"
       ],
       "used_in_commit_subjects": true
     }
@@ -7400,6 +7572,245 @@
       "new": true,
       "new_reasons": [],
       "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "ed3092315dc3fc1231ad41120ee6d393499ed2a9",
+      "short": "ed30923",
+      "round": "16",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on 76955b9 (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "8f205bda77f3ca29f9458c816b39a7448ccce646",
+      "short": "8f205bd",
+      "round": "17",
+      "subject": "test(assets): R17-12 the re-pin tests move the manifest's mtime forward when the file-system clock did not — no dependence on timestamp granularity (R17-12; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R17-12"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R17-12: 테스트 견고성 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "27bc79326f107a87e83ad9880cdc184b29b0bf53",
+      "short": "27bc793",
+      "round": "17",
+      "subject": "fix(native): R17-1/R17-2/R17-3 the child supervisor blocks its stop signals, reports a SIGKILLed program as -9 and signals and reaps until no descendant is left (R17-1, R17-2, R17-3; Gaps: G34)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R17-1",
+        "R17-2",
+        "R17-3"
+      ],
+      "gaps_named_in_subject": [
+        "G34"
+      ],
+      "gaps": [
+        "G34"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G34",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "8cd1a3373556ed6d4f954c96aba841075558df02",
+      "short": "8cd1a33",
+      "round": "17",
+      "subject": "fix(video): R17-4 an ffmpeg that cannot run or dies fails av_audio and lipsync with the exit code or signal — only ffmpeg's \"no stream\" error is \"no audio track\" (R17-4; Gaps: G1, G12)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R17-4"
+      ],
+      "gaps_named_in_subject": [
+        "G1",
+        "G12"
+      ],
+      "gaps": [
+        "G1",
+        "G12"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G1, G12",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "c1dee0ad1c902fe71863fab87e0d0f9b758a423d",
+      "short": "c1dee0a",
+      "round": "17",
+      "subject": "fix(face): R17-5 face_track is skipped \"의존성 부재: 실측 랜드마크 검출기 없음\" when neither FaceMesh nor a FaceLandmarker asset exists; doctor warns on the mediapipe row; a FACE_LANDMARKER override naming no file fails the check (R17-5; Gaps: G12, G29, G1)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R17-5"
+      ],
+      "gaps_named_in_subject": [
+        "G12",
+        "G29",
+        "G1"
+      ],
+      "gaps": [
+        "G12",
+        "G29",
+        "G1"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G12, G29, G1",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "498558d7dcae2d1c3e3cf7239d07a5b49442bc26",
+      "short": "498558d",
+      "round": "17",
+      "subject": "fix(models): R17-6 a video-frames member that scored no frame carries the inner runtime's cause (exception class included) in its detail and so in its coverage reason (R17-6; Gaps: G1, G12)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R17-6"
+      ],
+      "gaps_named_in_subject": [
+        "G1",
+        "G12"
+      ],
+      "gaps": [
+        "G1",
+        "G12"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G1, G12",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "111b30251f4f48292df9acce998bbd311fd2801f",
+      "short": "111b302",
+      "round": "17",
+      "subject": "fix(assets): R17-9 doctor and the loaders read an asset override and the manifest the same way — \"~\" expanded everywhere, a broken assets.json shown in doctor, a UTF-8 BOM accepted (R17-9; Gaps: G29, G9)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R17-9"
+      ],
+      "gaps_named_in_subject": [
+        "G29",
+        "G9"
+      ],
+      "gaps": [
+        "G29",
+        "G9"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G29, G9",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "cbf9752d524e0df2a98c892fa55381b9f6729c61",
+      "short": "cbf9752",
+      "round": "17",
+      "subject": "fix(cache): R17-7 the scan-cache key holds the model-asset files the loaders would read — override variables and each file's sha256 — not only the pins (R17-7; Gaps: G11, G9)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R17-7"
+      ],
+      "gaps_named_in_subject": [
+        "G11",
+        "G9"
+      ],
+      "gaps": [
+        "G11",
+        "G9"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G11, G9",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "ee2818fc1ab8e83798d6f417e9ebd82d7f43919a",
+      "short": "ee2818f",
+      "round": "17",
+      "subject": "fix(cli): R17-8 an interrupt cleans up before the log handlers are removed, a Ctrl-C during the package import is a Korean line and exit 130, an interrupted batch starts no further file (R17-8; Gaps: G34)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R17-8"
+      ],
+      "gaps_named_in_subject": [
+        "G34"
+      ],
+      "gaps": [
+        "G34"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G34",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "98672a154bc978522ed4cc97693786de8d9b97b5",
+      "short": "98672a1",
+      "round": "17",
+      "subject": "fix(cli): R17-10 vendor-weights --verify of a folder without runtime profiles is an error, exit 2 — not \"통과 … 프로필 0개\" (R17-10; Gaps: G29)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R17-10"
+      ],
+      "gaps_named_in_subject": [
+        "G29"
+      ],
+      "gaps": [
+        "G29"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G29",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "3fe35fb3b711667c69440747bbf5775e9c7f4bdf",
+      "short": "3fe35fb",
+      "round": "17",
+      "subject": "fix(native): R17-11 a DEEPFAKE_LENS_TMPDIR that names a file is reported \"(폴더가 아니라 파일임)\"; the traceability mapping of R16-13 is corrected from G13 to G34 (R17-11; Gaps: G34, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R17-11"
+      ],
+      "gaps_named_in_subject": [
+        "G13",
+        "G34"
+      ],
+      "gaps": [
+        "G34"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R17-11: 추적표 매핑 정정 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G34; 신규(스펙 외)",
       "gaps_source": "subject"
     }
   ]
