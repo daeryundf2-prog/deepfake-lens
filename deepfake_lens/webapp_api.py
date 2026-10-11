@@ -1292,6 +1292,10 @@ REPORT_FORMAT_NOT_STRING = "`format` 값은 문자열이어야 합니다"
 
 # GUI-REV G-1/G-9: malformed exhibit choice / submitting side (HTTP 400).
 REPORT_EXHIBIT_PATHS_INVALID = "exhibit_paths는 행 경로(문자열)의 배열이어야 합니다"
+REPORT_EXHIBIT_PATHS_EMPTY = "증거설명서에 넣을 서증(exhibit_paths)이 비어 있습니다 — 한 개 이상 고르십시오"
+REPORT_EXHIBIT_PATHS_UNKNOWN = "exhibit_paths 중 {count}개는 이 보고서의 서명된 행이 아닙니다(unknown_exhibit_paths 참조)"
+REPORT_EXHIBIT_PATHS_DUPLICATE = "exhibit_paths에 같은 행이 두 번 있습니다"
+EVIDENCE_REPORT_FORMATS = ("evidence", "evidence-statement", "evidence-json")
 REPORT_SUBMITTER_SIDE_INVALID = "submitter_side는 plaintiff(원고·고소인 측) 또는 defendant(피고·피의자 측)여야 합니다"
 
 
@@ -1859,6 +1863,19 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     )
     if req_format == "json":
         return signed
+
+    # GUI-REV2 H-7: an evidence statement with no exhibit, or naming a row that is
+    # not one of the signed (re-analyzed) rows, is refused — never signed with the
+    # unknown rows silently moved to the appendix.
+    if exhibit_paths is not None and req_format in EVIDENCE_REPORT_FORMATS:
+        if not exhibit_paths:
+            return {"error": REPORT_EXHIBIT_PATHS_EMPTY}
+        known = {item.path for item in items}
+        unknown = [path for path in dict.fromkeys(exhibit_paths) if path not in known]
+        if unknown:
+            return {"error": REPORT_EXHIBIT_PATHS_UNKNOWN.format(count=len(unknown)), "unknown_exhibit_paths": unknown[:100]}
+        if len(set(exhibit_paths)) != len(exhibit_paths):
+            return {"error": REPORT_EXHIBIT_PATHS_DUPLICATE}
 
     def _statement() -> Any:
         from .evidence_statement import build_evidence_statement

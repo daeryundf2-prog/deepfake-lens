@@ -202,6 +202,23 @@ class WebReportSelectionTest(unittest.TestCase):
         self.assertEqual(signed["summary"]["total"], self.summary["total"])
         self.assertEqual(len(signed["items"]), len(self.rows))
 
+    def test_an_empty_unknown_or_repeated_choice_is_refused(self) -> None:
+        """GUI-REV2 H-7: no statement is signed with 0 exhibits or with paths that are not its rows."""
+        first = self.rows[0]["path"]
+        cases = {
+            "empty": ([], None),
+            "unknown": (["nope.png", first, "../../etc/passwd"], ["nope.png", "../../etc/passwd"]),
+            "repeated": ([first, first], None),
+        }
+        for name, (paths, unknown) in cases.items():
+            for fmt in ("evidence", "evidence-json"):
+                with self.subTest(case=name, format=fmt):
+                    out = webapp_api._report_payload(self._body(exhibit_paths=paths), fmt, default_folder=self.folder)
+                    assert isinstance(out, dict), out
+                    self.assertEqual(webapp_api.report_error_status(out), 400, out)
+                    if unknown is not None:
+                        self.assertEqual(out["unknown_exhibit_paths"], unknown)
+
     def test_malformed_choice_is_refused(self) -> None:
         for extra in ({"exhibit_paths": "a.txt"}, {"exhibit_paths": [1]}, {"submitter_side": "court"}):
             with self.subTest(extra=extra):
