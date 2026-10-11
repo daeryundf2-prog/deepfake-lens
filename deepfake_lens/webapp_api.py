@@ -26,7 +26,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qs
 
 from .checks import failure_reason
-from .native_path import scratch_dir
+from .native_path import expand_user, scratch_dir
 from .error_text import exception_text
 from .result_text import display_name
 from .vendor_weights import default_models_dir
@@ -72,7 +72,7 @@ _MODELS_DIR: Path | None = None
 
 def set_models_dir(path: Path | None) -> None:
     global _MODELS_DIR
-    _MODELS_DIR = Path(path).expanduser().resolve() if path else None
+    _MODELS_DIR = expand_user(path).resolve() if path else None
 
 
 def _models_dir() -> Path | None:
@@ -160,9 +160,9 @@ def _load_gui() -> str:
 def scan_root_text(folder: Path) -> str:
     """The scanned folder as the absolute, resolved path a report request names (P1)."""
     try:
-        return str(Path(folder).expanduser().resolve())
+        return str(expand_user(folder).resolve())
     except (OSError, RuntimeError):
-        return str(Path(os.path.abspath(Path(folder).expanduser())))
+        return str(Path(os.path.abspath(expand_user(folder))))
 
 
 # P8 (round 8): a multipart body cut off before its closing boundary was
@@ -368,14 +368,53 @@ def _scan_status_payload(query: str) -> dict[str, object]:
         return payload
 
 
-def _with_posted_cancel(summary: Any, posted: object) -> Any:
-    """R18-3: ``summary`` marked cancelled with the posted ``files_cancelled`` when the posted summary says so."""
-    if not isinstance(posted, dict) or posted.get("cancelled") is not True:
-        return summary
-    count = posted.get("files_cancelled")
+def _with_posted_cancel(summary: Any, posted: object, job_id: object = None, scan_root: Path | None = None) -> tuple[Any, str | None]:
+    """R18-3: ``summary`` marked cancelled when the posted summary says so; R19-3: with a count the server checked.
+
+    The caveat ("부분 결과") is taken from the client — it can only add a
+    warning. R19-3 (round 19): the posted ``files_cancelled`` went into the
+    signed body unchecked (10**18 was signed). The count is now the
+    server's: from its own scan job named by ``scan_job`` (finished
+    "cancelled", same scan folder) — source ``"server"``; otherwise the count
+    is 0 and the summary is marked unverified (the renderings say the
+    number could not be checked) — source ``"unverified"``. Returns
+    ``(summary, source)``; source None when the post did not say cancelled.
+    """
     from dataclasses import replace
 
-    return replace(summary, cancelled=True, files_cancelled=count if isinstance(count, int) and not isinstance(count, bool) and count > 0 else 0)
+    if not isinstance(posted, dict) or posted.get("cancelled") is not True:
+        return summary, None
+    count: object = None
+    if isinstance(job_id, str) and job_id and scan_root is not None:
+        with _SCAN_JOBS_LOCK:
+            entry = _SCAN_JOBS.get(job_id)
+            result = entry.get("result") if entry is not None and entry.get("status") == "cancelled" else None
+        job_summary = result.get("summary") if isinstance(result, dict) else None
+        if isinstance(job_summary, dict) and isinstance(result, dict) and result.get("scan_root") == scan_root_text(scan_root):
+            count = job_summary.get("files_cancelled")
+    if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+        return replace(summary, cancelled=True, files_cancelled=count), "server"
+    return replace(summary, cancelled=True, files_cancelled=0, files_cancelled_unverified=True), "unverified"
+
+
+def report_analysis_options(options: AnalysisOptions) -> dict[str, object]:
+    """R19-3 (round 19): the analysis options a web report re-analyzed every row with — names, never paths.
+
+    The GUI posted the options of the scan it was *running*, not of the rows
+    on screen, and the server re-analyzed with them; the report did not say
+    which options it used. The signed body now carries them
+    (``analysis_options``) and every rendering prints them.
+    """
+    model_path = options.model_path
+    models = [Path(path).name for path in (model_path if isinstance(model_path, tuple) else (model_path,)) if path is not None]
+    return {
+        "pixel": options.pixel_mode,
+        "heatmaps": bool(options.heatmaps),
+        "deep_signals": bool(options.deep_signals),
+        "default_engine": not options.no_default_engine,
+        "model_path": models,
+        "fusion_profile": Path(options.fusion_profile).name if options.fusion_profile is not None else None,
+    }
 
 
 def _scan_cancel_payload(query: str) -> dict[str, object]:
@@ -421,7 +460,7 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
     from .analysis_api import SingleFileError, check_single_file, is_symlink_path
     from .cli_standalone import symlink_layer
 
-    requested = Path(file_path).expanduser()
+    requested = expand_user(file_path)
     link = is_symlink_path(requested)
     # G31: confined to the operator roots even when none are registered
     # (then only the server's default folder) — raises ReadRootDenied (403).
@@ -617,7 +656,7 @@ def read_root_denied_body() -> dict[str, object]:
 
 def _register_read_root(folder: Path) -> None:
     """Register an operator read root. Call only from server setup."""
-    resolved = folder.expanduser().resolve()
+    resolved = expand_user(folder).resolve()
     with _READ_ROOTS_LOCK:
         if resolved in _READ_ROOTS:
             _READ_ROOTS.move_to_end(resolved)
@@ -641,13 +680,13 @@ def _effective_roots(default_folder: Path | None = None) -> list[Path]:
         roots = list(_READ_ROOTS)
     if roots:
         return roots
-    return [Path(default_folder or ".").expanduser().resolve()]
+    return [expand_user(default_folder or ".").resolve()]
 
 
 def _require_read_root(path: Path, default_folder: Path | None = None) -> Path:
     """Resolve ``path`` and raise ReadRootDenied unless it is inside a root."""
     try:
-        resolved = Path(path).expanduser().resolve()
+        resolved = expand_user(path).resolve()
     except (OSError, RuntimeError) as exc:
         raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE) from exc
     if not any(_is_within(resolved, root) for root in _effective_roots(default_folder)):
@@ -676,8 +715,8 @@ def _b64_or_text(params: dict[str, list[str]], name: str) -> str:
 def _requested_folder(query: str, default_folder: Path | None) -> Path:
     params = parse_qs(query)
     if params.get("folder_b64", [""])[0]:
-        return Path(_b64_or_text(params, "folder")).expanduser()  # R13-3
-    return Path(params.get("folder", [str(default_folder or ".")])[0]).expanduser()
+        return expand_user(_b64_or_text(params, "folder"))  # R13-3
+    return expand_user(params.get("folder", [str(default_folder or ".")])[0])
 
 
 def _read_root_allows(path: Path, root_value: str = "", default_folder: Path | None = None) -> bool:
@@ -690,7 +729,7 @@ def _read_root_allows(path: Path, root_value: str = "", default_folder: Path | N
     roots = _effective_roots(default_folder)
     if root_value:
         try:
-            root = Path(root_value).expanduser().resolve()
+            root = expand_user(root_value).resolve()
         except OSError:
             return False
         if not _is_within(path, root):
@@ -726,7 +765,7 @@ def _heatmap_payload(query: str) -> tuple[int, bytes, str]:
         return 400, str(exc).encode("utf-8"), "bad-path"
     if not path_value:
         return 400, "경로가 없습니다".encode("utf-8"), "missing"
-    path = Path(path_value).expanduser().resolve()
+    path = expand_user(path_value).resolve()
     # Heatmaps live in the tool-owned output root (never in the evidence
     # folder, R-IN-1); those are served without a read root.
     if path.suffix.lower() != ".png" or not (_read_root_allows(path, root_value) or is_default_heatmap_output(path)):
@@ -776,7 +815,7 @@ def _preview_payload(query: str) -> tuple[int, bytes, str, str]:
         return 400, str(exc).encode("utf-8"), "bad-path", ""
     if not path_value:
         return 400, "경로가 없습니다".encode("utf-8"), "missing", ""
-    path = Path(path_value).expanduser().resolve()
+    path = expand_user(path_value).resolve()
     mime = _PREVIEW_MIME.get(path.suffix.lower())
     if not _read_root_allows(path, root_value):
         return 403, READ_ROOT_DENIED_MESSAGE.encode("utf-8"), "forbidden", ""  # G9: Korean body, ASCII header code
@@ -1308,6 +1347,8 @@ def report_error_status(body: dict[str, object]) -> int:
     PDF renderer (B8); 500 when the evidence-statement PDF could not be
     built; 400 for every request error (N11 — was 200 + ``{"error": ...}``).
     """
+    if isinstance(body, ApiError):
+        return body.status  # R19-13: 409 for rows that changed after the scan
     error = body.get("error")
     if error is None:
         return 200
@@ -1348,6 +1389,14 @@ REPORT_ROW_OUTSIDE_SCAN_ROOT = "스캔 폴더 밖의 경로라 서버가 재분�
 REPORT_ROW_IDENTITY_MISMATCH = "path가 container::member와 일치하지 않습니다"
 # P6 (round 8): an upload row is never re-analyzed from the read root.
 REPORT_ROW_UPLOAD = "업로드 파일 — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다"
+# R19-13 (round 19): the server's re-analysis of a posted row differs from the
+# row (sha256, status or verdict) or the row's file can no longer be
+# re-analyzed (deleted, an archive member gone, the analysis failed) — the
+# file changed after the scan. No report is signed: 409 with ``changed_rows``.
+REPORT_ROWS_CHANGED = "검사 뒤 바뀐 파일이 있습니다 — 다시 검사하십시오(보고서를 만들지 않았습니다)"
+REPORT_ROWS_CHANGED_STATUS = 409
+# R19-13: the excluded reasons that mean "the file changed after the scan" (not "never re-analyzable").
+_CHANGED_AFTER_SCAN_REASONS = (REPORT_ROW_NOT_FOUND, REPORT_ROW_NOT_DERIVED)
 
 
 def report_format(body: bytes, query_format: str | None) -> str | dict[str, object]:
@@ -1432,7 +1481,7 @@ class _ReportHasher:
         """
         from .result_text import unescape_row_path
 
-        p = Path(os.path.normpath(Path(unescape_row_path(path_text)).expanduser()))
+        p = Path(os.path.normpath(expand_user(unescape_row_path(path_text))))
         if self.scan_root is not None:
             cand = p if p.is_absolute() else Path(os.path.normpath(self.scan_root / p))
             return [(cand, self.scan_root)] if _is_within(cand, self.scan_root) else []
@@ -1540,7 +1589,7 @@ class _ReportHasher:
 
 def _rederive_report_items(
     posted: list[Any], hasher: "_ReportHasher", options: Any, thresholds: Any,
-) -> tuple[list[Any], list[tuple[Any, str]]]:
+) -> tuple[list[Any], list[tuple[Any, str]], list[dict[str, object]]]:
     """Re-analyze every posted row on the server (X2).
 
     Rows are grouped by their top-level file ("a.zip::x" -> "a.zip"); each
@@ -1550,7 +1599,16 @@ def _rederive_report_items(
     symbolic link the same skipped row. Each posted row is replaced by the
     server row of the same path (path naming kept: the posted folder-relative
     path). Returns ``(server rows in posted order, [(posted row, reason)]
-    for rows that could not be re-derived)``.
+    for rows that could not be re-derived, changed rows)``.
+
+    R19-13 (round 19): each server row is compared with the posted row —
+    sha256 (an archive member's own digest), status and verdict_code. A
+    difference, or a row whose file is gone / whose member the server's
+    extraction no longer yields / whose re-analysis failed, is a *changed*
+    row (:func:`_changed_row`); the caller refuses the report. A posted
+    dedupe duplicate (status "duplicate", ``duplicate_of``) stays a
+    duplicate row when the server finds the file's bytes equal to those of
+    ``duplicate_of`` (it is not signed as a full analysis of the copy).
     """
     from .analysis_api import scan_file_run
     from .result_text import escape_row_path, member_row_path, row_identity
@@ -1583,18 +1641,74 @@ def _rederive_report_items(
         derived_by_top[top] = rows
     derived: list[Any] = []
     excluded: list[tuple[Any, str]] = []
+    changed: list[dict[str, object]] = []
     seen: set[tuple[str, str | None]] = set()
     for item in posted:
         top, member = row_identity(item)
         found = derived_by_top[top]
         if isinstance(found, str):
+            if found in _CHANGED_AFTER_SCAN_REASONS or found.startswith(REPORT_ROW_FAILED.split("{", 1)[0]):
+                changed.append(_changed_row(item, None, found))
             excluded.append((item, found))
         elif member not in found:
+            changed.append(_changed_row(item, None, REPORT_ROW_NOT_DERIVED))
             excluded.append((item, REPORT_ROW_NOT_DERIVED))
         elif (top, member) not in seen:
             seen.add((top, member))
-            derived.append(found[member])
-    return derived, excluded
+            server = found[member]
+            if item.status == "duplicate" and item.duplicate_of:
+                server = _as_duplicate(item, server, hasher)
+            if _row_signature(item) != _row_signature(server):
+                changed.append(_changed_row(item, server, None))
+            derived.append(server)
+    return derived, excluded, changed
+
+
+def _row_signature(item: Any) -> tuple[object, object, object]:
+    """R19-13: what must agree between a posted row and the server's — sha256, status, verdict_code."""
+    verdict = item.result.verdict_code.value if item.result is not None else None
+    return item.sha256, item.status, verdict
+
+
+def _changed_row(posted: Any, server: Any | None, reason: str | None) -> dict[str, object]:
+    """R19-13: one ``changed_rows`` entry of a 409 body."""
+    posted_sha, posted_status, posted_verdict = _row_signature(posted)
+    server_sha, server_status, server_verdict = _row_signature(server) if server is not None else (None, None, None)
+    entry: dict[str, object] = {
+        "path": posted.path,
+        "posted_sha256": posted_sha, "server_sha256": server_sha,
+        "posted_status": posted_status, "server_status": server_status,
+        "posted_verdict": posted_verdict, "server_verdict": server_verdict,
+    }
+    if reason is not None:
+        entry["reason"] = reason
+    return entry
+
+
+def _as_duplicate(posted: Any, server: Any, hasher: "_ReportHasher") -> Any:
+    """R19-13 (J-2): the server row of a posted dedupe duplicate — a duplicate row when the bytes still match ``duplicate_of``.
+
+    The scan wrote no analysis for a duplicate (status "duplicate",
+    "중복 내용(동일 해시)"); re-analyzing the copy signed a full analysis in
+    its place. The server hashes the file named by ``duplicate_of`` (an
+    archive member "a.zip::m" from the re-extracted archive): equal to the
+    copy's server sha256 → the scan's duplicate row with the server's
+    sha256; otherwise the full server row (which then differs from the
+    posted row).
+    """
+    from .result_types import ScanItem
+
+    target = str(posted.duplicate_of)
+    container, sep, member = target.partition("::")
+    probe = ScanItem(target, Path(member or container).name, "file", "ok", 0, container=container if sep else None, member=member if sep else None)
+    target_sha = hasher.sha256(probe)
+    if not server.sha256 or target_sha != server.sha256:
+        return server
+    return ScanItem(
+        server.path, server.name, "duplicate", "duplicate", server.size_bytes, error=posted.error,
+        duplicate_of=target, sha256=server.sha256, container=server.container, member=server.member,
+        member_index=server.member_index,
+    )
 
 
 def _posted_heatmaps_allowed(row: dict[str, Any], roots: list[Path]) -> bool:
@@ -1608,7 +1722,7 @@ def _posted_heatmaps_allowed(row: dict[str, Any], roots: list[Path]) -> bool:
         if not isinstance(value, str):
             return False
         try:
-            resolved = Path(value).expanduser().resolve()
+            resolved = expand_user(value).resolve()
         except (OSError, RuntimeError):
             return False
         if not (any(_is_within(resolved, root) for root in roots) or is_default_heatmap_output(resolved)):
@@ -1646,7 +1760,7 @@ def _report_scan_root(value: object, roots: list[Path], *, required: bool) -> Pa
         return {"error": REPORT_SCAN_ROOT_REQUIRED} if required else None
     if not isinstance(value, str):
         return {"error": REPORT_SCAN_ROOT_NOT_STRING}
-    candidate = Path(value).expanduser()
+    candidate = expand_user(value)
     if not candidate.is_absolute():
         return {"error": REPORT_SCAN_ROOT_NOT_ABSOLUTE.format(value=value[:200])}
     try:
@@ -1696,6 +1810,11 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     the signed body — the body lists its path under ``excluded_items`` — and
     the HTML/PDF renderings show it in a separate "서명 제외(클라이언트
     제공 결과)" section. Case metadata is taken from the request.
+
+    R19-13 (round 19): a server row that differs from its posted row
+    (sha256, status, verdict_code), or a row whose file is gone / whose
+    archive member is no longer produced / whose re-analysis failed, refuses
+    the report in every format: :class:`ApiError` 409 with ``changed_rows``.
     """
     from .report_items import ItemContractError, check_report_item
 
@@ -1767,7 +1886,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
 
     def _heatmap_allowed(path_text: str) -> bool:
         try:
-            resolved = Path(path_text).expanduser().resolve()
+            resolved = expand_user(path_text).resolve()
         except OSError:
             return False
         return any(_is_within(resolved, r) for r in roots) or is_default_heatmap_output(resolved)
@@ -1838,14 +1957,18 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     req_format = format_override.lower()
     if req_format == "evidence-preview":
         # GUI-REV2 H-2: the preview is built from the posted rows as they are —
-        # no re-analysis, nothing signed; the export re-analyzes and signs.
+        # no re-analysis, nothing signed; the export re-analyzes, compares (R19-13) and signs.
         hasher.close()
         excluded: list[tuple[Any, str]] = []
     else:
         try:
-            items, excluded = _rederive_report_items(items, hasher, options, server_thresholds)
+            items, excluded, changed = _rederive_report_items(items, hasher, options, server_thresholds)
         finally:
             hasher.close()
+        if changed:
+            # R19-13 (round 19): never sign a re-analysis that differs from what the examiner saw.
+            # Comes before the evidence statement's exhibit checks (GUI-REV2 H-7, GUI-REV3 J-7).
+            return ApiError(REPORT_ROWS_CHANGED, REPORT_ROWS_CHANGED_STATUS, changed_rows=changed)
     excluded = uploads + excluded  # P6: upload rows first, in posted order
     thresholds = server_thresholds
     coverage = dict(weights_coverage(options.resolved_models_dir()))
@@ -1857,13 +1980,15 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     # R18-3 (round 18): a cancelled scan's report says it is a partial result.
     # The client's claim is taken as given — it can only add the caveat and
     # the "사용자 취소" count, never remove a row or change a verdict.
-    summary = _with_posted_cancel(summary, data.get("summary"))
+    summary, cancel_source = _with_posted_cancel(summary, data.get("summary"), data.get("scan_job"), scan_root)
     # G30: web reports are signed when DEEPFAKE_LENS_REPORT_KEY is set and
     # say "서명 없음" otherwise; the pins are those of the server's models dir.
     from .profile_pins import profile_pins
 
     # R9-9: the scanned folder (relative to its read root) is signed and shown.
     root_label = _scan_root_label(scan_root, roots)
+    # R19-3 (round 19): the options the server re-analyzed with are signed and printed.
+    analysis_options = report_analysis_options(options)
     # GUI-REV2 H-7: an evidence statement with no exhibit, or naming a row that is
     # not one of the signed (re-analyzed) rows, is refused — never signed with the
     # unknown rows silently moved to the appendix.
@@ -1913,15 +2038,18 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
 
     if req_format == "evidence-preview":
         from .evidence_statement import statement_preview
-        from .reports import scan_root_line
+        from .reports import analysis_options_line, scan_root_line
 
         preview = statement_preview(_statement(), uploads)
         preview["scan_root_line"] = (scan_root_line({"scan_root": root_label}) or "") if root_label else ""
+        # R19-3: the PDF's case box also prints the re-analysis options line.
+        preview["analysis_options_line"] = analysis_options_line({"analysis_options": analysis_options}) or ""
         return preview
     signed = signed_report_body(
         summary, items, thresholds=thresholds, coverage=coverage,
         report_format=req_format, model_pins=profile_pins(_models_dir()),
         excluded_items=excluded_rows, scan_root=root_label,
+        analysis_options=analysis_options, files_cancelled_source=cancel_source,
     )
     if req_format == "json":
         return signed
@@ -1931,7 +2059,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
         # the PDF renders (exhibit numbers, appendix), without the PDF renderer.
         from .evidence_statement import signed_statement_body
 
-        return signed_statement_body(_statement(), model_pins=profile_pins(_models_dir()), scan_root=root_label)
+        return signed_statement_body(_statement(), model_pins=profile_pins(_models_dir()), scan_root=root_label, analysis_options=analysis_options)
     suffix = ".pdf" if req_format in ("pdf", "evidence", "evidence-statement") else ".html"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=scratch_dir()) as tmp:
         tmp_path = Path(tmp.name)
@@ -1942,7 +2070,9 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
                 stmt = _statement()
                 # G30: signed like the other web reports (server key + pins).
                 write_evidence_statement_pdf(
-                    tmp_path, stmt, signed=signed_statement_body(stmt, model_pins=profile_pins(_models_dir()), scan_root=root_label),
+                    tmp_path, stmt, signed=signed_statement_body(
+                        stmt, model_pins=profile_pins(_models_dir()), scan_root=root_label, analysis_options=analysis_options,
+                    ),
                     unsigned_rows=excluded,
                 )
             except RuntimeError as exc:

@@ -504,6 +504,55 @@ def run_child(
     return subprocess.CompletedProcess(argv, code, out, err)
 
 
+def start_tracked(
+    args: Sequence[str | os.PathLike[str]],
+    *,
+    stdin: int | IO[Any],
+    stdout: int | IO[Any],
+    stderr: int | IO[Any] | None = None,
+    env: dict[str, str] | None = None,
+    cwd: str | None = None,
+) -> subprocess.Popen[bytes]:
+    """R19-2 (round 19): start a long-lived tracked child (a worker that serves several requests).
+
+    Started exactly like :func:`run_child` starts its program — under the
+    Linux supervisor, in a new session and process group, refused while the
+    process is ending, stopped by :func:`begin` — but returned running. The
+    caller ends it with :func:`stop_tracked` (or lets it exit and calls
+    :func:`release_tracked`).
+    """
+    argv = [os.fspath(part) for part in args]
+    if not argv:
+        raise ValueError("start_tracked: empty command")
+    launch = _bind_to_parent([_resolve_program(argv[0]), *argv[1:]])
+    with guarded():
+        proc = subprocess.Popen(launch, stdin=stdin, stdout=stdout, stderr=stderr, env=env, cwd=cwd, start_new_session=os.name == "posix")
+        with _CHILDREN_LOCK:
+            _CHILDREN[proc.pid] = proc
+    if _SHUTTING_DOWN:  # begin() ran while Popen did: it may not have seen this child
+        stop_tracked(proc)
+        raise ShuttingDown()
+    return proc
+
+
+def release_tracked(proc: subprocess.Popen[Any]) -> None:
+    """R19-2: forget a child of :func:`start_tracked` that has ended (reaping it)."""
+    try:
+        proc.wait(timeout=CHILD_KILL_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        _stop_one(proc)
+    with _CHILDREN_LOCK:
+        _CHILDREN.pop(proc.pid, None)
+
+
+def stop_tracked(proc: subprocess.Popen[Any]) -> None:
+    """R19-2: stop a child of :func:`start_tracked` like :func:`stop_children` stops one (its group, through the supervisor), then forget it."""
+    if proc.poll() is None:
+        _stop_one(proc)
+    with _CHILDREN_LOCK:
+        _CHILDREN.pop(proc.pid, None)
+
+
 # R15-4 / R15-5 (round 15): the signals a harness (tests, qa_phase0, the
 # stress script, CI) resets to their default action in every child it starts —
 # an inherited SIG_IGN (a background job's SIGINT, nohup's SIGHUP) survives

@@ -17,7 +17,7 @@ from .error_text import exception_text, failure_reason
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
 from .native_path import native_safe_path, scratch_dir
 from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
-from .shutdown import run_child
+from .shutdown import ShuttingDown, run_child
 
 
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wma", ".opus"}
@@ -274,11 +274,40 @@ def _model_evidence_signal(model_analysis: ExternalModelAnalysis | None) -> Audi
 
 
 def _extract_features_with_reason(path: Path, *, segment_seconds: int) -> tuple[AudioFeatures | None, str]:
-    """Features plus, when there are none, the reason (dependency vs decode)."""
+    """Features plus, when there are none, the reason (dependency vs decode).
+
+    R19-2 (round 19): the extraction runs in a supervised worker process
+    (:mod:`deepfake_lens.audio_worker`) — a native crash in librosa / numba /
+    a decoder fails this check ("NativeCrashError: …") instead of killing
+    the scan — and every process compiles numba code into its own cache
+    folder (concurrent scans corrupted the shared one in site-packages and
+    every later scan of the file died with SIGSEGV).
+    """
+    from . import audio_worker
+
+    audio_worker.prepare_process_numba_cache()
     try:
         import librosa  # noqa: F401
     except ImportError as exc:
         return None, f"의존성 부재: {exc.name or 'librosa'}"
+    if not audio_worker.worker_available():
+        return _extract_features_in_process(path, segment_seconds=segment_seconds)
+    try:
+        with native_safe_path(path) as native_audio:  # R12-2: the worker gets the ASCII name
+            reply = audio_worker.extract_features(native_audio, segment_seconds=segment_seconds)
+    except ShuttingDown:
+        raise
+    except Exception as exc:
+        return None, failure_reason(exc)  # N1: soundfile/librosa messages carry the full path
+    if "missing" in reply:
+        return None, f"의존성 부재: {reply['missing']}"
+    if reply.get("features") is None:
+        return None, "AnalyzerError: 디코딩된 오디오 샘플이 없습니다"
+    return AudioFeatures(**reply["features"]), ""
+
+
+def _extract_features_in_process(path: Path, *, segment_seconds: int) -> tuple[AudioFeatures | None, str]:
+    """The extraction in this process — a build without an interpreter to start a worker."""
     try:
         features = _extract_features(path, segment_seconds=segment_seconds, raise_on_decode=True)
     except Exception as exc:
@@ -291,7 +320,10 @@ def _extract_features_with_reason(path: Path, *, segment_seconds: int) -> tuple[
 
 @quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
 def _extract_features(path: Path, *, segment_seconds: int, raise_on_decode: bool = False) -> AudioFeatures | None:
-    """Extract acoustic features from audio file using librosa."""
+    """Extract acoustic features from audio file using librosa (in the R19-2 worker, or in-process for compare_speakers)."""
+    from .audio_worker import prepare_process_numba_cache
+
+    prepare_process_numba_cache()  # R19-2: never numba's shared cache in site-packages
     try:
         import librosa
         import numpy as np

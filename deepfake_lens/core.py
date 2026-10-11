@@ -15,6 +15,7 @@ from typing import Callable, NamedTuple
 from .archives import archive_format, extract_archive, is_archive
 from .native_path import expand_user, scratch_dir, temp_location
 from .audio import SUPPORTED_AUDIO_EXTENSIONS, AudioAnalysis, analyze_audio
+from .audio_worker import worker_scope as audio_worker_scope
 from .video_analysis import (
     AV_AUDIO_CHECK,
     SUPPORTED_VIDEO_EXTENSIONS,
@@ -856,28 +857,30 @@ def _scan_specs(
     # used to ``break`` and the rest vanished — no row, no count (300 files,
     # cancel after 5: summary.total 3, the other 297 nowhere).
     cancelled: list[_ScanSpec] = []
-    if workers > 1 and len(specs) > 1:
-        # Each worker still checks should_stop so a cancel short-circuits
-        # remaining items instead of running every analysis to completion.
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            outcomes = list(executor.map(analyze_and_report, specs))
-        for spec, outcome in zip(specs, outcomes):
-            if outcome is None:
-                cancelled.append(spec)
-            else:
-                analyzed.append(outcome)
-    else:
-        try:
-            for position, spec in enumerate(specs):
-                outcome = analyze_and_report(spec)
+    # R19-2 (round 19): the scan's audio-feature workers (one per scanning thread) end with the scan.
+    with audio_worker_scope() as scope:
+        if workers > 1 and len(specs) > 1:
+            # Each worker still checks should_stop so a cancel short-circuits
+            # remaining items instead of running every analysis to completion.
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                outcomes = list(executor.map(scope.bind(analyze_and_report), specs))
+            for spec, outcome in zip(specs, outcomes):
                 if outcome is None:
-                    cancelled.extend(specs[position:])
-                    break
-                analyzed.append(outcome)
-                if len(analyzed) % _CACHE_FLUSH_EVERY == 0:
-                    flush_cache(analyzed[-_CACHE_FLUSH_EVERY:])
-        finally:
-            flush_cache(analyzed)
+                    cancelled.append(spec)
+                else:
+                    analyzed.append(outcome)
+        else:
+            try:
+                for position, spec in enumerate(specs):
+                    outcome = analyze_and_report(spec)
+                    if outcome is None:
+                        cancelled.extend(specs[position:])
+                        break
+                    analyzed.append(outcome)
+                    if len(analyzed) % _CACHE_FLUSH_EVERY == 0:
+                        flush_cache(analyzed[-_CACHE_FLUSH_EVERY:])
+            finally:
+                flush_cache(analyzed)
     cancelled_members: dict[str, int] = {}
     for _, _, identity in cancelled:
         if identity is not None:
@@ -2301,8 +2304,17 @@ HEATMAP_FOLDER_KEY_CHARS = 16
 def default_heatmap_root() -> Path:
     """Tool-owned heatmap output root: ``$DEEPFAKE_LENS_HEATMAP_DIR`` or
     ``~/.cache/deepfake-lens/heatmaps``. Never inside the evidence."""
-    env = os.environ.get(HEATMAP_DIR_ENV)
-    return expand_user(env) if env else Path.home() / ".cache" / "deepfake-lens" / "heatmaps"  # R18-2: ~nouser
+    from .native_path import ToolFolderError, tool_folder_from_env
+
+    try:
+        return tool_folder_from_env(HEATMAP_DIR_ENV, builtin_heatmap_root())  # R19-4: absolute
+    except ToolFolderError:
+        return builtin_heatmap_root()  # the CLI refuses it before any work (R19-4)
+
+
+def builtin_heatmap_root() -> Path:
+    """The heatmap folder without the override: ``~/.cache/deepfake-lens/heatmaps``."""
+    return Path.home() / ".cache" / "deepfake-lens" / "heatmaps"
 
 
 def is_default_heatmap_output(path: Path | str) -> bool:
@@ -2310,9 +2322,11 @@ def is_default_heatmap_output(path: Path | str) -> bool:
     the web server may serve these without a read root (they are tool
     output, not caller-chosen files)."""
     try:
-        resolved = Path(path).expanduser().resolve()
-        resolved.relative_to(default_heatmap_root().expanduser().resolve())
+        resolved = expand_user(path).resolve()  # R19-5
+        roots = {default_heatmap_root().resolve(), builtin_heatmap_root().resolve()}  # R19-4: the fallback too
     except (OSError, RuntimeError, ValueError):
+        return False
+    if not any(resolved.is_relative_to(root) for root in roots):
         return False
     return resolved.name.endswith(HEATMAP_SUFFIX)
 
@@ -2321,9 +2335,15 @@ def _heatmap_path_for(path: Path, *, root: Path | None, heatmap_dir: Path | None
     if heatmap_dir is not None:
         output_root = heatmap_dir
     else:
-        folder = str(Path(root or path.parent).expanduser().resolve())
+        folder = str(expand_user(root or path.parent).resolve())  # R19-5
         key = hashlib.sha256(folder.encode("utf-8", "surrogateescape")).hexdigest()  # R11-1[:HEATMAP_FOLDER_KEY_CHARS]
-        output_root = default_heatmap_root() / key
+        base = default_heatmap_root()
+        if _inside_folder(base, Path(folder)):
+            # R19-4 (round 19): DEEPFAKE_LENS_HEATMAP_DIR inside the scanned folder (the CLI refuses it
+            # with exit 2; the web server's scans land here) — the built-in folder instead, never the evidence.
+            logger.warning("heatmap folder %s is inside the scanned folder — using %s", base, builtin_heatmap_root())
+            base = builtin_heatmap_root()
+        output_root = base / key
     try:
         relative = path.relative_to(root) if root else Path(path.name)
     except ValueError:
@@ -2331,6 +2351,16 @@ def _heatmap_path_for(path: Path, *, root: Path | None, heatmap_dir: Path | None
     safe_parts = [part.replace("/", "_").replace("\\", "_") for part in relative.parts]
     output_name = "__".join(safe_parts) + HEATMAP_SUFFIX
     return output_root / output_name
+
+
+def _inside_folder(path: Path, folder: Path) -> bool:
+    """R19-4: True when ``path`` (resolved) is ``folder`` or under it."""
+    try:
+        resolved = Path(os.path.realpath(path))
+        resolved.relative_to(Path(os.path.realpath(folder)))
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def sort_items(items: list[ScanItem]) -> list[ScanItem]:

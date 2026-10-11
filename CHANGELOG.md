@@ -20,6 +20,19 @@ grouped by work pass rather than release.
   evidence statement takes `exhibit_paths` (the rest in a signed appendix)
   and `submitter_side` (갑/을호증, chosen in the GUI, no default).
 
+## 2026-10 — phase 0, round 19
+
+### Changed
+- `POST /api/report` (both servers, R19-13): the server's re-analysis of
+  every posted row is compared with the row (`sha256`, `status`,
+  `verdict_code`). A file changed, replaced or deleted after the scan, an
+  archive member replaced, or a re-analysis that failed refuses every
+  format with **409** and `changed_rows` (path, posted/server sha256,
+  status and verdict) — it used to sign the re-analysis with the new
+  verdict (200). A dedupe duplicate row stays a duplicate when its bytes
+  still equal those of `duplicate_of`. The GUI shows the message and the
+  changed paths.
+
 ## 2026-09 — web GUI report download + examiner feedback + model licenses
 
 ### Added

@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
+from .output_files import write_output_text
 from .core import scan_directory
 from .json_text import json_dumps
 
@@ -46,5 +47,4 @@ def run_performance_check(
 
 def write_performance_check(path: Path | str, payload: dict[str, object]) -> None:
     output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(output, json_dumps(payload, ensure_ascii=False, indent=2) + "\n")  # R19-6

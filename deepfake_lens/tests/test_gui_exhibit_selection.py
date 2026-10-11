@@ -262,7 +262,12 @@ class WebReportSelectionTest(unittest.TestCase):
         self.assertEqual((bodies["plaintiff"]["plaintiff"], bodies["plaintiff"]["defendant"]), ("(의뢰사 상호명 입력) 귀하", "(피고/피의자 성명 입력)"))
         # GUI-REV3 J-10: no "귀하" in the defendant box (it pinned "(의뢰인 성명 입력) 귀하").
         self.assertEqual((bodies["defendant"]["plaintiff"], bodies["defendant"]["defendant"]), ("(원고/고소인 성명 입력)", "(의뢰인 성명 입력)"))
-        self.assertTrue(all("피고·피의자 측 제출" in entry["purpose_of_proof"] for entry in bodies["defendant"]["entries"]))
+        # Merge of R19-11: no side lists a statute — the defendant line "기재하지 않음(피고·피의자 측
+        # 제출)" became R19-11's side-neutral "관련 법조:" lines, the same for both sides.
+        for side in ("plaintiff", "defendant"):
+            for entry in bodies[side]["entries"]:
+                self.assertIn("관련 법조:", entry["purpose_of_proof"])
+                self.assertNotIn("검토 참고", entry["purpose_of_proof"])
 
     def test_rendered_defendant_pdf_says_byeonhoin(self) -> None:
         from deepfake_lens.evidence_statement import write_evidence_statement_pdf
@@ -323,18 +328,26 @@ class WebReportSelectionTest(unittest.TestCase):
                         self.assertEqual(out["unknown_exhibit_paths"], unknown)
 
     def test_a_chosen_file_gone_since_the_scan_is_said_so(self) -> None:
-        """GUI-REV3 J-7: a chosen row the server cannot re-analyze is not called "not a signed row"."""
+        """GUI-REV3 J-7 + R19-13: a chosen file deleted after the scan is a changed row (409, it
+        names the file); a chosen row the server never re-analyzes (an upload) is
+        exhibit_not_rederived with its reason, apart from a path it does not know."""
         chosen = next(row["path"] for row in self.rows if row["path"].endswith(".txt") and "::" not in row["path"])
-        (self.folder / chosen).unlink()
-        out = webapp_api._report_payload(self._body(exhibit_paths=[chosen]), "evidence-json", default_folder=self.folder)
+        upload = dict(next(row for row in self.rows if row["path"] == chosen), path="uploaded.txt", name="uploaded.txt", source="upload")
+        upload.pop("path_b64", None)
+        out = webapp_api._report_payload(self._body(exhibit_paths=["uploaded.txt"], items=[*self.rows, upload]), "evidence-json", default_folder=self.folder)
         assert isinstance(out, dict), out
         self.assertEqual(webapp_api.report_error_status(out), 400)
         self.assertEqual(out["code"], "exhibit_not_rederived")
-        self.assertEqual([row["path"] for row in out["not_rederived_exhibit_paths"]], [chosen])
+        self.assertEqual([row["path"] for row in out["not_rederived_exhibit_paths"]], ["uploaded.txt"])
         self.assertTrue(out["not_rederived_exhibit_paths"][0]["reason"])
         unknown = webapp_api._report_payload(self._body(exhibit_paths=["nope.png"]), "evidence-json", default_folder=self.folder)
         assert isinstance(unknown, dict)
         self.assertEqual(unknown["code"], "exhibit_unknown")
+        (self.folder / chosen).unlink()
+        gone = webapp_api._report_payload(self._body(exhibit_paths=[chosen]), "evidence-json", default_folder=self.folder)
+        assert isinstance(gone, dict), gone
+        self.assertEqual(webapp_api.api_status(gone), 409)
+        self.assertIn(chosen, [row["path"] for row in gone["changed_rows"]])
 
     def test_unsupported_format_lists_every_format(self) -> None:
         """GUI-REV3 J-10: the refusal names evidence-json and evidence-preview too (both servers share it)."""

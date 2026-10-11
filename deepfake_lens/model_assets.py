@@ -478,6 +478,10 @@ def pin_asset(asset: str, file: Path | str | None = None, models_dir: Path | str
         from .error_text import read_error_ko
 
         raise ValueError(f"자산 매니페스트를 쓸 수 없습니다: {target} — {read_error_ko(exc)}") from exc
+    except BaseException:
+        if tmp:  # R19-6 (round 19): Ctrl-C / SIGTERM — no ".assets-*.json" left in the models folder
+            Path(tmp).unlink(missing_ok=True)
+        raise
     return {"asset": asset, "sha256": digest, "file": str(source), "manifest": str(target)}
 
 

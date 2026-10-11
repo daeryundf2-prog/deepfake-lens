@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from .output_files import write_output_text
 from .error_text import failure_reason
 from .json_text import json_dumps
 from .report_time import report_timestamp  # R12-9: ISO 8601 with the UTC offset
@@ -178,8 +179,7 @@ class BatchProcessor:
 
 def save_batch_results(job: BatchJob, path: Path) -> None:
     """Save batch results to a JSON file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json_dumps(job.to_json(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(path, json_dumps(job.to_json(), ensure_ascii=False, indent=2) + "\n")  # R19-6
 
 
 def load_batch_results(path: Path) -> BatchJob | None:

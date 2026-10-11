@@ -226,6 +226,34 @@ def expand_user(value: str | os.PathLike[str]) -> Path:
         return path
 
 
+class ToolFolderError(ValueError):
+    """R19-4 (round 19): a tool-folder variable (DEEPFAKE_LENS_LOG_DIR, DEEPFAKE_LENS_HEATMAP_DIR) that names no usable folder."""
+
+
+# R19-4: the Korean reason of a tool-folder variable whose "~user" names no account.
+TOOL_FOLDER_UNRESOLVED = "환경 변수 {env}의 경로를 해석할 수 없습니다(알 수 없는 사용자 홈 '~…'): {value} — 절대 경로로 지정하십시오"
+
+
+def tool_folder_from_env(env: str, default: Path) -> Path:
+    """R19-4 (round 19): the absolute folder an override variable names, or ``default`` when it is unset or blank.
+
+    R18-2 made ``~nouser/l`` a literal *relative* path, so the log and
+    heatmap folders were made in the working folder — possibly the evidence
+    folder. A relative value is now made absolute against the working folder
+    here (so callers can check it against the scanned folders, P11), and a
+    ``~user`` that names no account raises :class:`ToolFolderError` (the CLI
+    refuses it with exit 2; library callers fall back to the default).
+    """
+    value = os.environ.get(env, "").strip()
+    if not value:
+        return default
+    try:
+        expanded = Path(value).expanduser()
+    except RuntimeError:
+        raise ToolFolderError(TOOL_FOLDER_UNRESOLVED.format(env=env, value=value)) from None
+    return Path(os.path.abspath(expanded))
+
+
 def is_native_safe(path: str | os.PathLike[str]) -> bool:
     """True when ``path`` can be handed to a native decoder as it is."""
     text = os.fspath(path)
@@ -1014,8 +1042,9 @@ def imwrite_any(path: str | os.PathLike[str], image: Any, params: list[int] | tu
     ok, encoded = cv2.imencode(suffix, image, list(params))
     if not ok:
         return False
-    with open(path, "wb") as handle:
-        handle.write(encoded.tobytes())
+    from .output_files import write_output_bytes
+
+    write_output_bytes(path, encoded.tobytes())  # R19-6: written whole (an OSError subclass on failure, as before)
     return True
 
 

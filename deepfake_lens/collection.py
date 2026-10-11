@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from .output_files import write_output_text
 from .json_text import json_dumps
 
 
@@ -88,6 +89,5 @@ def build_collection_plan(root: Path | str, *, minimum_per_source: int | None = 
 def write_collection_plan(root: Path | str, output_path: Path | str, *, minimum_per_source: int | None = None) -> dict[str, object]:
     payload = build_collection_plan(root, minimum_per_source=minimum_per_source)
     output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(output, json_dumps(payload, ensure_ascii=False, indent=2) + "\n")  # R19-6
     return payload

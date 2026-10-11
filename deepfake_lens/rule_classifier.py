@@ -14,6 +14,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from .output_files import write_output_text
+
 
 @dataclass(frozen=True)
 class ClassificationResult:
@@ -122,8 +124,7 @@ def save_classifier(classifier: RuleClassifier, path: Path) -> None:
         "feature_means": classifier.feature_means,
         "feature_stds": classifier.feature_stds,
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    write_output_text(path, json.dumps(data, indent=2) + "\n")  # R19-6
 
 
 def load_classifier(path: Path) -> RuleClassifier:

@@ -18,6 +18,7 @@ import traceback
 import unittest
 from pathlib import Path
 from typing import Any, Callable
+from .output_files import write_output_text
 from .json_text import json_dumps
 from .native_path import scratch_dir
 
@@ -234,6 +235,5 @@ def build_security_check(root: Path | str) -> dict[str, object]:
 def write_security_check(root: Path | str, output_path: Path | str) -> dict[str, object]:
     payload = build_security_check(root)
     output = Path(output_path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(output, json_dumps(payload, ensure_ascii=False, indent=2) + "\n")  # R19-6
     return payload

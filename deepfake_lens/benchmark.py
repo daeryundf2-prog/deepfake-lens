@@ -97,7 +97,9 @@ def write_benchmark_markdown(path: Path | str, payload: dict[str, object]) -> No
                 auroc=format_ci(row.get("auroc"), row.get("auroc_ci"), 4),
             )
         )
-    output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    from .output_files import write_output_text
+
+    write_output_text(output, "\n".join(lines) + "\n")  # R19-6
 
 
 def _benchmark_name(pixel_mode: str, model_path: Path | None) -> str:

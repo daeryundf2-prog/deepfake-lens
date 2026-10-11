@@ -414,6 +414,26 @@ def _verify_report_command(args: argparse.Namespace) -> int:
 from .interrupt_guard import INTERRUPTED_EXIT, INTERRUPTED_MESSAGE  # noqa: E402
 
 
+def _selected_parser(parser: argparse.ArgumentParser, args: argparse.Namespace) -> argparse.ArgumentParser:
+    """R19-9: the innermost parser the parsed command line selected (``corpus`` → ``corpus build``)."""
+    current = parser
+    while True:
+        sub = next((action for action in current._actions if isinstance(action, argparse._SubParsersAction)), None)
+        name = getattr(args, sub.dest, None) if sub is not None else None
+        if sub is None or not isinstance(name, str) or name not in sub.choices:
+            return current
+        current = sub.choices[name]
+
+
+def _misplaced_option(argv: list[str], scan_parser: argparse.ArgumentParser) -> bool:
+    """R19-9: ``argv`` starts with an option scan does not know and names a command later."""
+    first = argv[0]
+    if not first.startswith("-") or first in ("-", "--") or not any(token in COMMANDS and not token.startswith("-") for token in argv[1:]):
+        return False
+    option = first.split("=", 1)[0]
+    return not any(known == option or (option.startswith("--") and known.startswith(option)) for known in scan_parser._option_string_actions)
+
+
 def main(argv: list[str] | None = None) -> int:
     """The ``deepfake-lens`` command (R16-13: an interrupt is a Korean line and exit 130, never a traceback)."""
     from .output_files import BROKEN_PIPE_EXIT, OUTPUT_ERRNOS, STDOUT_WRITE_FAILED, silence_stdout
@@ -479,16 +499,20 @@ def _main(argv: list[str] | None = None) -> int:
         if reconfigure is not None:
             reconfigure(encoding="utf-8", errors="replace")
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] not in COMMANDS:
-        argv.insert(0, "scan")
-
     parser, cmd_parsers = build_parser()
+    if argv and argv[0] not in COMMANDS:
+        # R19-9 (round 19): an unknown option before a command (`--bogus scan X`) is the top-level
+        # parser's error — it was read as `scan --bogus scan X` and blamed on scan.
+        if _misplaced_option(argv, cmd_parsers["scan"]):
+            parser.error(f"unrecognized arguments: {argv[0]}")
+        argv.insert(0, "scan")
 
     # R18-19 (f) (round 18): an argument the subcommand does not take (`api-serve --folder X`) was
     # reported by the top-level parser with the top-level usage; the subcommand's parser reports it now.
+    # R19-9 (round 19): the innermost selected parser (`corpus build`, not `corpus`) reports it.
     args, extras = parser.parse_known_args(argv)
     if extras:
-        (cmd_parsers.get(str(args.command)) or parser).error(f"unrecognized arguments: {' '.join(extras)}")
+        _selected_parser(parser, args).error(f"unrecognized arguments: {' '.join(extras)}")
     if args.command is None:
         parser.print_help()
         return 0

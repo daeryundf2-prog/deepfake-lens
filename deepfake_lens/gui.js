@@ -7,6 +7,8 @@
         // X2: the options of the last folder scan — /api/report re-analyzes
         // every row on the server with them (the report signs only server results).
         let lastScanOptions = {};
+        // R19-3: the server job whose result is on screen (its cancel count is verified by the server).
+        let lastScanJob = '';
         let selectedFiles = [];
         let lastScanRoot = '';
         // R12-4: the scan folder as URL-safe base64 file-system bytes (scan_root_b64);
@@ -231,6 +233,11 @@
                 if (ct.includes('application/json')) {
                     const j = await res.json();
                     detail = j.error || j.detail || '';
+                    // R19-13: a report refused because files changed after the scan (409) names them.
+                    if (Array.isArray(j.changed_rows) && j.changed_rows.length) {
+                        const paths = j.changed_rows.map(r => String(r.path));
+                        detail += ` — 바뀐 파일: ${paths.slice(0, 5).join(', ')}${paths.length > 5 ? ` 외 ${paths.length - 5}개` : ''}`;
+                    }
                 } else {
                     detail = `서버 오류 (HTTP ${res.status})`;
                 }
@@ -259,6 +266,8 @@
 
         // R18-17 (round 18): a model that did not run (available === false) has no score —
         // its 0 was shown as "외부 모델 원점수(미보정, 결론 불참여) — 0", like a measurement.
+        // R19-10 (round 19): a layer diagnostic without a score says "없음" — "원점수 0" read as a measured 0.
+        function rawScoreText(value) { return value != null ? String(value) : '없음'; }
         function modelScoreText(entry) {
             if (!entry || entry.available === false) {
                 const why = entry && (entry.detail || entry.reason || entry.error);
@@ -371,7 +380,9 @@
         function escapedAlone(ch) { return ch === '\\' || ch === '|' || controlLike(ch) || invisibleOrSpace(ch); }
         function invisibleOrSpace(ch) {
             const code = ch.codePointAt(0);
-            return (/\p{Zs}/u.test(ch) && ch !== ' ') || DEFAULT_IGNORABLE_RANGES.some(([low, high]) => code >= low && code <= high);
+            // R19-8: U+2800 (renders blank) and private-use characters (\p{Co}) too — as result_text.
+            return (/\p{Zs}/u.test(ch) && ch !== ' ') || code === 0x2800 || /\p{Co}/u.test(ch)
+                || DEFAULT_IGNORABLE_RANGES.some(([low, high]) => code >= low && code <= high);
         }
 
         // R10-2: a CSV cell that starts with =, +, -, @, TAB or CR is read
@@ -1014,9 +1025,19 @@
         $('view-results-btn').addEventListener('click', () => navigate('ledger'));
 
         /* ── scan: controls ──────────────────────── */
+        // R19-3: the export buttons too — a report made while a scan runs would
+        // mix the rows on screen with the options of the scan in progress.
         const SCAN_INPUTS = ['folder-path', 'analyze-btn', 'max-files',
             'opt-recursive', 'opt-dedupe', 'opt-heatmaps', 'opt-model',
-            'opt-deep', 'file-picker-btn', 'dir-picker-btn', 'upload-btn', 'upload-clear'];
+            'opt-deep', 'file-picker-btn', 'dir-picker-btn', 'upload-btn', 'upload-clear',
+            'exp-json', 'exp-csv', 'exp-report', 'exp-pdf', 'exp-evidence', 'exp-signed', 'exp-clear'];
+
+        // R19-3: every export handler refuses while a scan runs (a click that beat the disabled state).
+        function exportBlocked() {
+            if (!scanBusy) return false;
+            toast('검사 중에는 내보낼 수 없습니다 — 검사가 끝난 뒤 다시 시도하십시오', true);
+            return true;
+        }
 
         function setBusy(busy) {
             scanBusy = busy;
@@ -1198,7 +1219,8 @@
                 // every row against it (not against the read root).
                 lastScanRoot = data.scan_root || folderPath;
                 lastScanRootB64 = data.scan_root_b64 || '';
-                lastScanOptions = options || {};
+                lastScanOptions = options || {};  // R19-3: with the rows they produced
+                lastScanJob = jobId;
                 processResults(data);
                 // R18-3: "분석 완료" was shown for a cancelled scan too.
                 if (partialResultNote(data.summary)) toast(`검사 취소 — 부분 결과 ${(data.items || []).length}개 행, 분석하지 않은 파일 ${data.summary.files_cancelled || 0}개`, true, '주의', 'scan');
@@ -1329,6 +1351,8 @@
                 }
                 lastScanRoot = '';  // uploads are temp files; heatmaps unavailable
                 lastScanRootB64 = '';
+                lastScanOptions = {};  // R19-3: upload rows are never re-analyzed (P6)
+                lastScanJob = '';
                 lastUploadScope = 'upload:' + Date.now().toString(36) + ':' + (selectedFiles[0] ? (selectedFiles[0].webkitRelativePath || selectedFiles[0].name) : '');
                 processResults({ items: allItems, coverage: stagedCoverage, thresholds: stagedThresholds });
                 toast(`분석 완료 — ${allItems.length}개 파일`);
@@ -1377,6 +1401,7 @@
             // P1: rows are relative to the scanned folder; uploads carry
             // source: "upload" and are never re-analyzed (P6).
             if (lastScanRoot) out.scan_root = lastScanRoot;
+            if (lastScanJob) out.scan_job = lastScanJob;  // R19-3: the server checks a cancel count against its job
             if (submitterSide()) out.submitter_side = submitterSide();
             for (const [id, key] of Object.entries(CASE_FIELDS)) {
                 const el = $(id);
@@ -2146,8 +2171,8 @@
         }
         function closeMenu() { $('export-menu').open = false; }
         $('exp-json').addEventListener('click', () => {
+            if (exportBlocked()) return;
             closeMenu();
-            if (scanBusy) { toast('새 검사가 진행 중입니다 — 끝난 뒤 내보내십시오', true); return; }
             if (!results.length) { toast('분석 결과가 없습니다', true); return; }
             const enriched = results.map(e => {
                 const rev = reviewStore[itemKey(e.item)];
@@ -2159,8 +2184,8 @@
             download(new Blob([JSON.stringify(exported, null, 2)], { type: 'application/json' }), 'deepfake-lens-results.json');
         });
         $('exp-csv').addEventListener('click', () => {
+            if (exportBlocked()) return;
             closeMenu();
-            if (scanBusy) { toast('새 검사가 진행 중입니다 — 끝난 뒤 내보내십시오', true); return; }
             if (!results.length) { toast('분석 결과가 없습니다', true); return; }
             const f = csvCell;
             // BOM prefix keeps Korean intact when the CSV is opened in Excel.
@@ -2177,6 +2202,7 @@
             download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'deepfake-lens-results.csv');
         });
         $('exp-clear').addEventListener('click', () => {
+            if (exportBlocked()) return;
             closeMenu();
             // G-9(d): clearing is not undoable — ask first.
             if (!results.length || !window.confirm(`화면의 검사 결과 ${results.length}개를 지웁니다. 검토 기록은 남습니다. 지울까요?`)) return;
@@ -2370,7 +2396,7 @@
             const boxes = (body.boxes || []).map(([heading, boxLines]) => `<section class="a4-box"><div class="a4-h">${docHtml(heading)}</div>${lines(boxLines)}</section>`).join('');
             return `<div class="a4-top"><span>미리보기 — 서명 전</span><span>${submitterSide() ? '서버의 증거설명서 서식' : NO_SIDE + ' — 의뢰 측을 고르면 갑/을과 제출 문구가 정해집니다'}</span></div>` +
                 `<div class="a4-title">${shown(body.title)}</div>` +
-                `<section class="a4-box">${lines(body.case_lines || [])}${body.scan_root_line ? lines([body.scan_root_line]) : ''}</section>` +
+                `<section class="a4-box">${lines(body.case_lines || [])}${body.scan_root_line ? lines([body.scan_root_line]) : ''}${body.analysis_options_line ? lines([body.analysis_options_line]) : ''}</section>` +
                 '<div class="a4-h a4-center">다        음</div>' +
                 `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>` +
                 boxes +
@@ -2413,6 +2439,7 @@
             return parts.join(' — ');
         }
         async function exportReport(kind) {
+            if (exportBlocked()) return;
             const btn = $(EXPORT_BUTTONS[kind]);
             const sel = selectedEntries();
             const why = exportBlockReason(kind, sel);
@@ -2514,6 +2541,8 @@
                     lastScanRoot = '';
                     lastScanRootB64 = '';
                     lastUploadScope = 'check:' + Date.now().toString(36);
+                    lastScanOptions = {};
+                    lastScanJob = '';
                     retireErrors();
                     processResults(data);
                     toast(`압축 해제 — ${(data.items || []).length}개 파일 분석됨`);
@@ -2592,7 +2621,7 @@
                 const a = data.advanced, body = a.diagnostic || a;
                 const sig = (body.signals || []).map(s => `<li>${shown(s.title)} — ${shown(s.detail)}</li>`).join('');
                 const lim = (body.limitations || []).map(l => `<li>${shown(l)}</li>`).join('');
-                parts.push(layer(`스타일/지문 분석 · 계층 진단(참고 신호 · 미측정) — 원점수 ${a.raw_score != null ? a.raw_score : 0}`,
+                parts.push(layer(`스타일/지문 분석 · 계층 진단(참고 신호 · 미측정) — 원점수 ${rawScoreText(a.raw_score)}`,
                     (a.notice ? `<div class="note">${shown(a.notice)}</div>` : '') +
                     (sig ? `<ul>${sig}</ul>` : '<div class="note">발동 신호 없음</div>') + (lim ? `<ul class="c-amber">${lim}</ul>` : '')));
             }
@@ -2604,7 +2633,7 @@
                 const fr = data.forensic, body = fr.diagnostic || fr;
                 const sig = (body.signals || []).map(s => `<li>${shown(s.title)} — ${shown(s.detail)}</li>`).join('');
                 const prov = (body.provenance_records || []).map(p => `<li>${shown(p.kind || p.source || p.standard || 'record')}: ${shown(p.summary || p.detail || p.provider || '')}</li>`).join('');
-                parts.push(layer(`메타데이터 / C2PA · 계층 진단(참고 신호 · 미측정) — 원점수 ${fr.raw_score != null ? fr.raw_score : 0}`,
+                parts.push(layer(`메타데이터 / C2PA · 계층 진단(참고 신호 · 미측정) — 원점수 ${rawScoreText(fr.raw_score)}`,
                     (fr.notice ? `<div class="note">${shown(fr.notice)}</div>` : '') +
                     ((sig ? `<ul>${sig}</ul>` : '') + (prov ? `<ul>${prov}</ul>` : '') || '<div class="note">단서 없음</div>')));
             }
@@ -2676,10 +2705,11 @@
             const box = $('cmp-result');
             const body = data.diagnostic || data;
             const kind = body.kind === 'speaker' ? '화자 유사도 (음성)' : body.kind === 'stylometry' ? '필자 유사도 (텍스트)' : (body.kind || '비교');
-            const score = data.raw_score != null ? data.raw_score : 0;
+            // R19-10: no score is "없음", never a measured-looking 0.
+            const score = data.raw_score != null ? String(Number(data.raw_score) || 0) : rawScoreText(null);
             const parts = [];
             parts.push(`<div class="qc-head">
-                <span class="big">${Number(score) || 0}</span>
+                <span class="big">${escapeHtml(score)}</span>
                 <div><span class="band-pill band-unknown">계층 진단(참고 신호 · 미측정)</span>
                 <div class="note">${shown(kind)}${body.method ? ' · ' + shown(body.method) : ''}</div></div></div>`);
             if (data.notice) parts.push(`<div class="note">${shown(data.notice)}</div>`);

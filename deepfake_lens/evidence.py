@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass, replace
+from .output_files import write_output_text
 from .report_time import report_timestamp  # R12-9: ISO 8601 with the UTC offset
 from pathlib import Path
 from .json_text import json_dumps
@@ -144,9 +145,8 @@ def generate_forensic_report(
 
 def save_evidence_chains(chains: list[EvidenceChain], path: Path) -> None:
     """Save evidence chains to a JSON file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
     data = [chain.to_json() for chain in chains]
-    path.write_text(json_dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(path, json_dumps(data, ensure_ascii=False, indent=2) + "\n")  # R19-6
 
 
 def load_evidence_chains(path: Path | str) -> tuple[list[EvidenceChain], list[str]]:

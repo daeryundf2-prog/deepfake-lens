@@ -16,6 +16,7 @@ import hashlib
 import json
 import shutil
 from dataclasses import asdict, dataclass
+from .output_files import write_output_text
 from .report_time import report_timestamp  # R12-9: ISO 8601 with the UTC offset
 from pathlib import Path
 from typing import Any, Callable
@@ -528,6 +529,13 @@ def fetch_weights(
             entry = {"name": name, "status": "failed", "error": f"다운로드 실패: {exc}"}
             results.append(entry); failed.append(entry)
             continue
+        except BaseException:
+            # R19-6 (round 19): Ctrl-C / SIGTERM during a download — the ".fetch-*.part" file is removed too.
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
     status = "failed" if failed else ("unverified" if unverified else "ok")
     return {"status": status, "fetched": fetched, "unverified": unverified, "failed": failed, "results": results}
@@ -644,7 +652,7 @@ def pin_profile(
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(json_dumps(data, ensure_ascii=False, indent=2) + "\n")
         os.replace(tmp_name, path)
-    except OSError:
+    except BaseException:  # R19-6: Ctrl-C / SIGTERM included — no ".pin-*.json" left in the models folder
         try:
             os.unlink(tmp_name)
         except OSError:
@@ -688,7 +696,7 @@ def bundle_offline_weights(
     manifest_data["copy_weights"] = bool(copy_weights)
 
     manifest_file = dest / "offline_manifest.json"
-    manifest_file.write_text(json_dumps(manifest_data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(manifest_file, json_dumps(manifest_data, ensure_ascii=False, indent=2) + "\n")  # R19-6
 
     # Copy runtime profiles + provenance docs
     for e in manifest.entries:

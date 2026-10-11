@@ -529,6 +529,12 @@ class BatchScanSummary:
     # the last file leaves both at their defaults.
     cancelled: bool = False
     files_cancelled: int = 0
+    # R19-3 (round 19): a web report of a cancelled scan whose count the
+    # server could not check against its own scan job (the posted summary
+    # said "cancelled"): files_cancelled is 0 and the renderings say the
+    # count is unverified. Not serialized (the signed body says it as
+    # ``files_cancelled_source``).
+    files_cancelled_unverified: bool = False
 
     def to_json(self) -> dict[str, object]:
         # D16: the summary JSON counts verdicts only. The legacy band counts
@@ -538,8 +544,13 @@ class BatchScanSummary:
         return {key: value for key, value in asdict(self).items() if key not in LEGACY_SUMMARY_KEYS}
 
 
-# Band-count fields of BatchScanSummary that are not serialized (D16).
-LEGACY_SUMMARY_KEYS = frozenset({"high", "medium", "unknown", "low"})
+# R19-3 (round 19): a web report whose "cancelled" came from the client and
+# whose scan job the server no longer knows — the client's count is not signed.
+CANCELLED_COUNT_UNVERIFIED = "분석하지 않은 파일 수는 서버가 확인하지 못했습니다(검사 작업 기록 없음 — 다시 검사하면 확인됩니다)"
+
+# Band-count fields of BatchScanSummary that are not serialized (D16) —
+# R19-3: and the rendering-only files_cancelled_unverified flag.
+LEGACY_SUMMARY_KEYS = frozenset({"high", "medium", "unknown", "low", "files_cancelled_unverified"})
 
 # R5: row statuses that never carry a verdict. Every other row with a result
 # — analyzed files, archive members, archive container rows ("expanded", or

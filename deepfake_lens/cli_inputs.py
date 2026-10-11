@@ -548,10 +548,13 @@ def unclassified_path_arguments(parser: argparse.ArgumentParser) -> dict[str, st
 
 
 def _resolved(value: Path | str) -> Path:
+    from .native_path import expand_user
+
+    # R19-5 (round 19): expand_user — "~nouser/c.json" raised RuntimeError (an English traceback, rc 1).
     try:
-        return Path(value).expanduser().resolve()
+        return expand_user(value).resolve()
     except (OSError, RuntimeError):
-        return Path(os.path.abspath(Path(value).expanduser()))
+        return Path(os.path.abspath(expand_user(value)))
 
 
 def _input_paths(args: argparse.Namespace, specs: tuple[InputSpec, ...]) -> tuple[list[Path], list[Path]]:
@@ -586,7 +589,9 @@ def require_writable_output(path: Path | str) -> None:
 
     from .error_text import read_error_ko
 
-    target = Path(path).expanduser()
+    from .native_path import expand_user
+
+    target = expand_user(path)  # R19-5: never RuntimeError for an unknown "~user"
     if target.exists():
         if not os.access(target, os.W_OK):
             raise UsageError(OUTPUT_FILE_NOT_WRITABLE.format(path=path, reason=NO_WRITE_PERMISSION))
@@ -624,6 +629,43 @@ def check_output_targets(args: argparse.Namespace, key: str, common: tuple[Input
             raise UsageError(OUTPUT_IS_INPUT.format(path=value))
         if attr not in output_folders:
             require_writable_output(value)
+    check_tool_folders(args, folders)
+
+
+# R19-4 (round 19): a tool folder named by a variable inside a scanned folder.
+TOOL_FOLDER_INSIDE_INPUT = (
+    "환경 변수 {env}의 폴더가 검사 대상 폴더 안에 있습니다: {path} — 검사 대상 폴더({folder}) 밖의 절대 경로로 지정하십시오"
+    "(증거 폴더에는 아무것도 쓰지 않습니다)"
+)
+
+
+def check_tool_folders(args: argparse.Namespace, folders: list[Path]) -> None:
+    """R19-4 (round 19): DEEPFAKE_LENS_LOG_DIR and (with --heatmaps, no --heatmap-dir) DEEPFAKE_LENS_HEATMAP_DIR.
+
+    They were not checked like the output arguments (P11): a relative value
+    (``logs``, or ``~nouser/l`` read literally since R18-2) put the log and
+    heatmap folders into the working folder, an absolute one could name a
+    folder inside the evidence. A ``~user`` that names no account is exit 2;
+    a folder inside a folder the command reads is exit 2.
+    """
+    from .cli_logging import LOG_DIR_ENV
+    from .core import HEATMAP_DIR_ENV
+    from .native_path import ToolFolderError, tool_folder_from_env
+
+    checks = [LOG_DIR_ENV]
+    if getattr(args, "heatmaps", False) and not getattr(args, "heatmap_dir", None):
+        checks.append(HEATMAP_DIR_ENV)
+    for env in checks:
+        if not os.environ.get(env, "").strip():
+            continue
+        try:
+            target = tool_folder_from_env(env, Path("."))
+        except ToolFolderError as exc:
+            raise UsageError(str(exc)) from None
+        resolved = _resolved(target)
+        for folder in folders:
+            if _inside(resolved, folder):
+                raise UsageError(TOOL_FOLDER_INSIDE_INPUT.format(env=env, path=target, folder=folder))
 
 
 def command_key(args: argparse.Namespace) -> str:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .output_files import write_output_text
 from .model_pins import empty_pin_for
 from .json_text import json_dumps
 
@@ -435,8 +436,7 @@ def list_detector_candidates(*, focus: str | None = None) -> dict[str, object]:
 def write_detector_registry(path: Path | str, *, focus: str | None = None) -> dict[str, object]:
     payload = list_detector_candidates(focus=focus)
     output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(output, json_dumps(payload, ensure_ascii=False, indent=2) + "\n")  # R19-6
     return payload
 
 
@@ -480,8 +480,7 @@ def build_runtime_profile(
 def write_runtime_profile(path: Path | str, candidate_key: str, checkpoint: Path | str, *, runtime: str | None = None, input_size: int = 224, score_index: int = 1) -> dict[str, object]:
     payload = build_runtime_profile(candidate_key, checkpoint, runtime=runtime, input_size=input_size, score_index=score_index)
     output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json_dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_output_text(output, json_dumps(payload, ensure_ascii=False, indent=2) + "\n")  # R19-6
     return payload
 
 

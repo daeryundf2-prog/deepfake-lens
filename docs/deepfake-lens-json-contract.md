@@ -484,7 +484,7 @@ A row the server cannot re-analyze is **not** in `items` and not counted in
 `읽기 루트 안에서 파일을 찾을 수 없어 서버가 재분석하지 못했습니다`,
 `경로 중간의 폴더가 심볼릭 링크라 따라가지 않았습니다 — …`,
 `서버 재분석 결과에 이 항목이 없습니다(압축 파일 구성이 다름)` or
-`서버 재분석 실패: <사유>` — and never the client's result. The HTML report
+`서버 재분석 실패: <사유>` — and never the client's result. R19-13 (round 19): a row of the first, third or fourth kind — its file gone from the scan folder since the scan, its archive member no longer produced, its re-analysis failed — or any row whose server `sha256`, `status` or `verdict_code` differs from the posted row gives no report at all: every format is refused with HTTP 409 and `changed_rows` (docs/deepfake-lens-service.md, E47); a posted dedupe duplicate stays a duplicate row when its bytes still equal those of `duplicate_of`. Only rows outside the scan folder or behind a linked folder (and uploads, below) are still excluded. The HTML report
 (`<section id="unsigned-client-rows">`), the forensic PDF and the evidence
 statement PDF render those rows in a separate box titled
 `서명 제외(클라이언트 제공 결과)`: one line per row with the path, the
@@ -495,7 +495,18 @@ CLI's reports have no such field). Upload results (`/api/analyze-upload`,
 "upload"` (P6) and a report lists every such row under `excluded_items` with
 `업로드 파일 — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다` —
 never re-analyzed from a same-named file of the read root. Make signed
-reports from folder scans. R9-9 (round 9): the signed body carries
+reports from folder scans. R19-3 (round 19): the signed body carries
+`analysis_options` — `{pixel, heatmaps, deep_signals, default_engine,
+model_path, fusion_profile}`, the options the server re-analyzed every row
+with (file names only) — printed in the HTML header, the forensic PDF and the
+evidence statement as `재분석 옵션(서버가 이 옵션으로 모든 행을 다시 분석): …`;
+and, when the posted `summary` says the scan was cancelled,
+`files_cancelled_source`: `server` when `summary.files_cancelled` is the
+count of the server's own scan job named by the request's `scan_job` (a
+finished `cancelled` job of the same scan folder, kept 15 minutes),
+`unverified` otherwise — then `files_cancelled` is 0 and the summary line
+says `분석하지 않은 파일 수는 서버가 확인하지 못했습니다(…)` (the posted
+number is never signed). R9-9 (round 9): the signed body carries
 `scan_root` — the posted `scan_root` folder relative to the read root that
 holds it (`caseA`, `caseA/deeper`, `.` for the root itself; never the
 absolute path) — inside the signature, and the HTML report
@@ -510,7 +521,7 @@ a report of upload rows only has no `scan_root`.
 (`--md-out`, `--pdf-out`, `POST /api/report?format=evidence`) are backed by
 one signed body: every field of `EvidenceStatement.to_json()` (`case_no`,
 `case_name`, `plaintiff`, `defendant`, `court`, `entries[]` with
-`purpose_of_proof`/`sha256`/`statutes`/`verdict_label`, `created_at`, `law_firm`, `contact` (empty unless set by flag, request or `~/.deepfake-lens/config.json` — N17),
+`purpose_of_proof`/`sha256`/`statutes` (R19-11: always `[]` — the tool names no charge or statute; a manipulation row's purpose says `관련 법조: (검토자 기재 — 도구는 죄명·법조를 정하지 않습니다)`)/`verdict_label`, `created_at`, `law_firm`, `contact` (empty unless set by flag, request or `~/.deepfake-lens/config.json` — N17),
 `center`, `provenance_note`, `reference_note`, `excluded_items` (X2 — web
 statements only: rows the server could not re-analyze, path/marker/reason;
 `[]` otherwise), `temp_folder` (R16-10 — the scan object's `temp_folder`; a fallback is also a `provenance_note` line), `unrecorded_files` — X1, the

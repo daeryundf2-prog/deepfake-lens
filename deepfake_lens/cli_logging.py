@@ -15,7 +15,6 @@ every record with its traceback on stderr.
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,11 +26,23 @@ LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 PACKAGE_LOGGER = "deepfake_lens"
 
 
-def default_log_dir() -> Path:
-    from .native_path import expand_user
+def builtin_log_dir() -> Path:
+    """The log folder without the override: ``~/.cache/deepfake-lens/logs``."""
+    return Path.home() / ".cache" / "deepfake-lens" / "logs"
 
-    env = os.environ.get(LOG_DIR_ENV)
-    return expand_user(env) if env else Path.home() / ".cache" / "deepfake-lens" / "logs"  # R18-2: ~nouser
+
+def default_log_dir() -> Path:
+    """``$DEEPFAKE_LENS_LOG_DIR`` (absolute; R19-4) or the built-in folder — never raises.
+
+    A variable the CLI would refuse (an unknown ``~user``, R19-4) falls back
+    to the built-in folder here; the CLI checks it before any work.
+    """
+    from .native_path import ToolFolderError, tool_folder_from_env
+
+    try:
+        return tool_folder_from_env(LOG_DIR_ENV, builtin_log_dir())
+    except ToolFolderError:
+        return builtin_log_dir()
 
 
 class _ErrorCounter(logging.Handler):

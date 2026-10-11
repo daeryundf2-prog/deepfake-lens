@@ -162,7 +162,16 @@ class ForensicPdfApiEndpointTest(unittest.TestCase):
     # B8: pymupdf is the only PDF backend (no Latin-1 fallback) — this case runs in the venv_api / extras job.
     @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf not installed — the venv_api / extras run covers this")
     def test_api_report_pdf_format_query(self) -> None:
-        payload = self._payload()
+        # R19-13 (round 19): the hand-made row names no file under scan_root; it used to be listed as unsigned
+        # and the PDF rendered (200). A row whose file is not there is now refused (409, changed_rows), so the
+        # request posts the scan's own row of a real file.
+        from urllib.parse import quote
+
+        from deepfake_lens import webapp_api
+
+        (Path(self.scan_root) / "memo.txt").write_text("사람이 쓴 짧은 메모입니다.", encoding="utf-8")
+        scanned = webapp_api._scan_payload(f"folder={quote(self.scan_root)}&no_default_engine=true", default_folder=Path(self.scan_root))
+        payload = dict(self._payload(), items=scanned["items"], options={"no_default_engine": "true"})
         res = self.client.post(
             "/api/report?format=pdf",
             headers={"host": "localhost", "X-Deepfake-Lens-Client": "gui"},

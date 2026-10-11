@@ -5,10 +5,12 @@ Litigation standards. Formulates a structured 4-column exhibit schedule:
 1. 호증 (Exhibit Number, e.g. 갑 제1호증)
 2. 서증명 (Evidence Name & Media Metadata)
 3. 작성자 및 일자 (Forensic Center Signer & Date)
-4. 입증취지 및 위법성 구성요건 (Purpose of Proof & Statutory Article Mapping)
-   - 성폭력범죄의 처벌 등에 관한 특례법 제14조의2 (허위영상물 등의 반포등)
-   - 정보통신망 이용촉진 및 정보보호 등에 관한 법률 제70조 (명예훼손)
-   - 형법 제347조 (사기 - 신원 사칭)
+4. 입증취지 (Purpose of Proof)
+   - the automatic conclusion, its evidence and the checks that did not run
+   - R19-11 (round 19): no charge or statute is written by the tool — a
+     manipulation row carries the line "관련 법조: (검토자 기재 …)" for the
+     examiner (it used to list 정보통신망법 제70조 for every manipulation row,
+     and 성폭력처벌법 제14조의2 / 형법 제347조 for videos and "얼굴" titles)
    - Cryptographic SHA-256 evidence integrity verification
 
 Signing (G30): like the scan reports, the statement is signed as a whole —
@@ -63,17 +65,16 @@ SUBMITTER_PARTIES = {"plaintiff": "원고(고소인)", "defendant": "피고(피�
 SUBMITTER_EXHIBIT_PREFIX = {"plaintiff": "갑 제", "defendant": "을 제"}
 # GUI-REV2 H-3: every side-dependent word of the form, in one place. The
 # plaintiff row is the long-standing form, word for word (its Markdown says
-# "대리인", its PDF "소송대리인"); the defendant side says "변호인" everywhere,
-# lists no statute (the candidate offences are the accusing side's framing) and
-# puts the client placeholder in the defendant box.
+# "대리인", its PDF "소송대리인"); the defendant side says "변호인" everywhere
+# and puts the client placeholder in the defendant box. Statutes are not a side
+# matter: since R19-11 the tool names none for either side.
 SIDE_WORDING: dict[str, dict[str, Any]] = {
-    "plaintiff": {"md_agent": "대리인", "pdf_agent": "소송대리인", "signoff_agent": "소송대리인", "statutes": True,
+    "plaintiff": {"md_agent": "대리인", "pdf_agent": "소송대리인", "signoff_agent": "소송대리인",
                   "placeholders": ("(의뢰사 상호명 입력) 귀하", "(피고/피의자 성명 입력)")},
-    "defendant": {"md_agent": "변호인", "pdf_agent": "변호인", "signoff_agent": "변호인", "statutes": False,
+    "defendant": {"md_agent": "변호인", "pdf_agent": "변호인", "signoff_agent": "변호인",
                   # J-10: a party box takes a name, not the "귀하" of the plaintiff form's client line.
                   "placeholders": ("(원고/고소인 성명 입력)", "(의뢰인 성명 입력)")},
 }
-NO_STATUTE_DEFENDANT = "• 관련 법조: 기재하지 않음(피고·피의자 측 제출)"
 
 
 def side_placeholders(side: str) -> tuple[str, str]:
@@ -354,27 +355,13 @@ def _clip(text: str, limit: int) -> str:
     return clipped
 
 
-def _determine_statutes(score: int, signals: list[Any], item_kind: str, band: str) -> list[str]:
-    """Statutes a legal reviewer may consider — only for a manipulation verdict.
-
-    ``band`` here is the verdict-derived band ("high" == manipulation
-    evidence on an evidence-grade result). A screening number is not proof
-    of a crime, so statutes are listed as '검토 참고' candidates only, and
-    never for undetermined, authenticity, reference-grade or failed items.
-    """
-    if band != "high":
-        return []
-    statutes = []
-    sig_titles = [s.title for s in signals] if signals else []
-
-    is_faceswap = any("얼굴" in t or "안면" in t or "스왑" in t or "턱선" in t for t in sig_titles)
-    is_video = item_kind == "video"
-
-    if is_faceswap or is_video:
-        statutes.append("성폭력범죄의 처벌 등에 관한 특례법 제14조의2 (허위영상물 등의 반포등) — 검토 참고")
-        statutes.append("형법 제347조 (사기 - 신원도용 및 기망) — 검토 참고")
-    statutes.append("정보통신망 이용촉진 및 정보보호 등에 관한 법률 제70조 (벌칙 - 명예훼손) — 검토 참고")
-    return statutes
+# R19-11 (round 19): the statute line of a manipulation row — the tool names no charge or statute.
+# _determine_statutes picked them from the file kind and title words alone (정보통신망법 제70조 on
+# every manipulation row, a cat picture with A1111 metadata included; 성폭력처벌법 제14조의2 and
+# 형법 제347조 for any video or a title with "얼굴") — the same unfounded entry R18-16 removed from
+# the case name. The examiner writes the statutes.
+STATUTE_PLACEHOLDER = "• 관련 법조: (검토자 기재 — 도구는 죄명·법조를 정하지 않습니다)"
+STATUTE_NONE = "• 관련 법조: 해당 없음 (결정적 근거에 의한 조작·생성 결론이 없음)"
 
 
 def _member_references(item: ScanItem, exhibits: dict[str, str], items: list[ScanItem]) -> str:
@@ -509,7 +496,7 @@ def build_evidence_statement(
         doc_name = f"디지털 증거 파일 ({row_label(item.path)}) 및 AI 스크리닝 데이터"
         author_date = f"{law_firm}\n{now_date}" if law_firm else now_date
 
-        statutes = _determine_statutes(score, signals, item.kind, band_value) if SIDE_WORDING[submitter_side]["statutes"] else []
+        statutes: list[str] = []  # R19-11: never chosen by the tool
 
         # The tool screens; it does not prove crimes. Purpose language
         # follows the verdict and names the evidence kind behind it.
@@ -524,10 +511,9 @@ def build_evidence_statement(
                 evidence_lines.append("• 검사 범위: " + "; ".join(display_name(entry.describe()) for entry in gaps[:3]) + (f" 외 {len(gaps) - 3}건" if len(gaps) > 3 else ""))
         sig_text = "\n".join(evidence_lines) if evidence_lines else "• 근거 항목 없음"
 
-        if not SIDE_WORDING[submitter_side]["statutes"]:
-            statute_text = NO_STATUTE_DEFENDANT  # H-3
-        else:
-            statute_text = "\n".join([f"• {st}" for st in statutes]) if statutes else "• 관련 법조: 해당 없음 (결정적 근거에 의한 조작·생성 결론이 없음)"
+        # R19-11 (both sides, GUI-REV3 merge): the tool names no statute for anyone — a
+        # manipulation row leaves 관련 법조 to the examiner whichever side submits.
+        statute_text = STATUTE_PLACEHOLDER if band_value == "high" else STATUTE_NONE
 
         hash_text = f"• 원본 SHA-256: {file_sha256}" if file_sha256 else f"• 원본 SHA-256: {hash_unavailable or HASH_UNAVAILABLE_ACCESS}"
 
@@ -654,6 +640,7 @@ def signed_statement_body(
     *,
     model_pins: list[dict[str, object]] | None = None,
     scan_root: str | None = None,
+    analysis_options: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """The statement as a signed report body (G30).
 
@@ -666,6 +653,8 @@ def signed_statement_body(
     body: dict[str, object] = {"report_type": EVIDENCE_STATEMENT_REPORT_TYPE, **statement.to_json()}
     if scan_root is not None:
         body["scan_root"] = scan_root
+    if analysis_options is not None:
+        body["analysis_options"] = dict(analysis_options)  # R19-3: the options the server re-analyzed with
     return sign_report(body, key if key is not None else resolve_report_key(), model_pins=model_pins)
 
 
@@ -862,7 +851,7 @@ def _render_statement_pdf(
     (the old fixed box was left empty when the text overflowed it).
     """
     from .pdf_layout import Cell, PdfLayout
-    from .reports import scan_root_line
+    from .reports import analysis_options_line, scan_root_line
 
     def page_header(layout: PdfLayout) -> None:
         firm_header = f"{statement.law_firm} {statement.center}".strip()
@@ -880,6 +869,7 @@ def _render_statement_pdf(
         *((line, 9.5, (0.1, 0.1, 0.1)) for line in case_lines[:3]),
         (case_lines[3], 8.2, (0.3, 0.3, 0.3)),
         *([(root_line, 8.2, (0.3, 0.3, 0.3))] if (root_line := scan_root_line(body)) else []),  # R9-9
+        *([(options_line, 8.2, (0.3, 0.3, 0.3))] if (options_line := analysis_options_line(body)) else []),  # R19-3
     ], border=(0.82, 0.86, 0.92), fill=(0.97, 0.98, 0.99))
     layout.text(layout.left, layout.right, "다        음", 11.0, (0.1, 0.1, 0.1), align=1, gap=4.0)
 
