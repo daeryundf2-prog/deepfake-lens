@@ -2,9 +2,12 @@
 """Headless-Chrome smoke test for the Deepfake Lens GUI.
 
 Drives the real browser against a live `deepfake-lens web` instance and
-asserts the examiner-visible contract: no CSP/console errors, the degraded
-heuristic-only provenance banner renders after a scan, stat pills update,
-and API failures surface as Korean messages — never "Unexpected token".
+asserts the examiner-visible contract: no CSP/console errors, the folder
+box is prefilled and Enter starts the scan, focus lands on the conclusion
+headline, the verdict strip and ledger rows agree, the evidence panel keeps
+verdict -> evidence -> coverage, the ledger keys stay inside the list, the
+evidence statement waits for the case number and name, the page reflows at
+375px and nothing is requested outside the local server.
 
 Requires: pip install playwright, and a Chrome/Chromium install
 (channel="chrome" — no browser download needed).
@@ -63,22 +66,40 @@ def main() -> int:
             page.on("console", lambda m: console_errors.append(m.text) if m.type == "error" else None)
             page.on("pageerror", lambda e: console_errors.append(str(e)))
 
+            requests: list[str] = []
+            page.on("request", lambda r: requests.append(r.url))
+
             page.goto(f"http://127.0.0.1:{args.port}/gui", wait_until="networkidle")
 
             # 1. Page loads, CSP respected (script-src 'self' — any injected
             #    inline script would raise a console error before here).
-            assert page.title() or True
+            #    GUI redesign: the scan screen is first; the folder box is
+            #    prefilled from /api/stats default_folder (U-8).
             assert page.locator("#analyze-btn").count() == 1, "scan button missing"
             assert page.locator("#prov-banner").is_hidden(), "banner must start hidden"
+            page.wait_for_function("document.getElementById('folder-path').value !== ''", timeout=10_000)
+            assert Path(page.input_value("#folder-path")).resolve() == Path(args.scan_dir).resolve(), "folder not prefilled from --folder"
+            assert page.locator("a.skip-link[href='#main']").count() == 1, "skip link missing"
 
-            # 2. Run a real folder scan through the UI.
-            page.fill("#folder-path", args.scan_dir)
-            page.click("#analyze-btn")
-            page.wait_for_selector("#results-section:not([hidden])", timeout=120_000)
+            # 2. Run a real folder scan through the UI — Enter in the folder box submits (U-8).
+            page.locator("#scan-options summary").click()
+            page.check("#opt-recursive")
+            page.focus("#folder-path")
+            page.keyboard.press("Enter")
+            page.wait_for_selector("#results-section:not([hidden])", timeout=180_000)
+            # A11Y-4: focus lands on the conclusion headline, never on <body>.
+            page.wait_for_function("document.activeElement && document.activeElement.id === 'sum-h'", timeout=10_000)
+            headline = page.locator("#sum-h").inner_text()
+            assert "개 중 " in headline and headline.endswith("."), headline
+            bar = page.locator("#progress")
+            assert bar.get_attribute("role") == "progressbar" and bar.get_attribute("aria-valuemin") == "0"
+            assert int(bar.get_attribute("aria-valuemax") or 0) > 0, "progressbar has no value range"
 
-            # 3. Provenance banner must be visible on a heuristic-only box.
+            # 3. Environment notice (one line) and the full provenance text behind 자세히.
+            assert page.locator("#env-note").is_visible(), "environment notice not shown after a degraded scan"
+            page.click("#env-more")
             banner = page.locator("#prov-banner")
-            assert banner.is_visible(), "provenance banner not shown after degraded scan"
+            assert banner.is_visible(), "provenance details not shown"
             banner_text = banner.inner_text()
             assert "신경망 미탑재(측정 게이트 미충족)" in banner_text, f"unexpected banner: {banner_text}"  # D16
             # R16: the disclaimer reads in the three-verdict language, never "우선순위".
@@ -88,50 +109,91 @@ def main() -> int:
             assert page.locator("#res-sort").input_value() == "verdict", "default sort must be 결론순"
             assert page.locator("#res-sort option[value='score']").count() == 0, "점수순 sort must be gone"
 
-            # 4. Result cards rendered, stat total matches card count.
-            cards = page.locator(".res-card, .res-item, [data-band]").count()
-            assert cards > 0, "no result cards rendered"
-            total_txt = page.locator("#stat-total").inner_text()
-            assert total_txt.strip().isdigit() and int(total_txt) > 0
-
-            # 4b. Contract v2: verdict pills, then verdict -> evidence (by
-            #     kind) -> coverage inside an opened card (QA-OUT-1/3/6).
-            for pill in ("#stat-manip", "#stat-undet", "#stat-auth", "#stat-other"):
-                assert page.locator(pill).count() == 1, f"verdict pill {pill} missing"
+            # 4. Ledger rows rendered; the strip counts add up to the row count.
+            rows = page.locator("#res-list .row")
+            assert rows.count() > 0, "no ledger rows rendered"
+            counts = [int(page.locator(sel).inner_text()) for sel in ("#stat-manip", "#stat-auth", "#stat-undet", "#stat-other")]
+            if sum(counts) <= 200:
+                assert sum(counts) == rows.count(), (counts, rows.count())
+            verdicts = [rows.nth(i).get_attribute("data-verdict") for i in range(rows.count())]
+            assert set(verdicts) <= {"manipulation_evidence", "authenticity_evidence", "undetermined", "other"}, verdicts
+            order = {"manipulation_evidence": 0, "authenticity_evidence": 1, "undetermined": 2, "other": 3}
+            assert [order[v] for v in verdicts] == sorted(order[v] for v in verdicts), "evidence-bearing rows must come first"
             assert page.locator("#stat-pills [data-band='medium']").count() == 0, "legacy 'medium' pill must be gone"
-            first = page.locator("#res-list .res").first
-            assert first.get_attribute("data-verdict") in {
-                "manipulation_evidence", "authenticity_evidence", "undetermined", "other",
-            }, "card lacks a contract-v2 verdict"
-            first.locator(".res-main").click()
-            detail = first.locator(".res-detail")
-            detail.locator(".verdict-head").wait_for(timeout=10_000)
-            head_text = detail.locator(".verdict-head").inner_text()
+            seg = page.locator("#stat-pills .seg[data-band='undetermined']")
+            seg.click()
+            assert seg.get_attribute("aria-pressed") == "true"
+            assert all(rows.nth(i).get_attribute("data-verdict") == "undetermined" for i in range(rows.count()))
+            seg.click()
+            assert seg.get_attribute("aria-pressed") == "false"
+
+            # 4b. Contract v2 in the evidence panel: verdict line, then 기술 세부 holds
+            #     verdict -> evidence (by kind) -> coverage (QA-OUT-1/3/6).
+            rows.first.click()
+            detail = page.locator("#detail")
+            detail.locator("#detail-h").wait_for(timeout=10_000)
+            tech = detail.locator("details.disc", has_text="기술 세부")
+            tech.locator("summary").click()
+            head_text = tech.locator(".verdict-head").inner_text()
             assert any(label in head_text for label in ("조작·생성 근거 있음", "원본성 근거 있음", "판단 불가")), head_text
-            assert detail.locator(".ev-group").count() >= 1, "evidence block missing"
-            for kind in detail.locator(".ev-group[data-kind]").all():
+            assert tech.locator(".ev-group").count() >= 1, "evidence block missing"
+            for kind in tech.locator(".ev-group[data-kind]").all():
                 assert kind.get_attribute("data-kind") in {"deterministic", "statistical", "lexical"}
-            assert detail.locator(".cov-group").count() == 1, "coverage block missing"
-            html = detail.inner_html()
+            assert tech.locator(".cov-group").count() == 1, "coverage block missing"
+            html = tech.inner_html()
             assert html.index("verdict-head") < html.index("ev-group") < html.index("cov-group"), \
                 "detail order must be verdict -> evidence -> coverage"
+            assert detail.locator("details.disc", has_text="실행하지 않은 검사").count() == 1, "skipped-check disclosure missing"
             # Text results lead with the fixed legal limitation.
-            for card in page.locator("#res-list .res").all():
-                card_text = card.inner_text()
-                if "참고" in card_text and ".txt" in card_text:
-                    card.locator(".res-main").click()
-                    card.locator(".legal-note").wait_for(timeout=10_000)
-                    assert "증거능력이 없으며" in card.locator(".legal-note").inner_text()
+            for index in range(rows.count()):
+                if ".txt" in rows.nth(index).inner_text():
+                    rows.nth(index).click()
+                    text_tech = page.locator("#detail details.disc", has_text="기술 세부")
+                    text_tech.locator("summary").click()
+                    text_tech.locator(".legal-note").wait_for(timeout=10_000)
+                    assert "증거능력이 없으며" in text_tech.locator(".legal-note").inner_text()
                     break
 
-            # 5. Case metadata fields exist and feed exports.
-            page.locator("#case-meta summary").click()
-            page.fill("#case-no", "2024가단0000")
+            # 4c. A11Y-5: list keys only inside the ledger (roving tabindex), J/K switchable.
+            assert page.locator("#res-list .row[tabindex='0']").count() == 1, "roving tabindex must leave one tab stop"
+            if rows.count() > 2:
+                rows.first.focus()
+                page.keyboard.press("ArrowDown")
+                assert page.evaluate("document.activeElement === document.querySelectorAll('#res-list .row')[1]")
+                page.keyboard.press("j")
+                assert page.evaluate("document.activeElement === document.querySelectorAll('#res-list .row')[2]")
+                page.evaluate("document.getElementById('kb-toggle').checked = false")
+                page.keyboard.press("k")
+                assert page.evaluate("document.activeElement === document.querySelectorAll('#res-list .row')[2]"), "J/K must stop when switched off"
+                page.evaluate("document.getElementById('kb-toggle').checked = true")
 
-            # 6. CSP/console errors: none tolerated.
+            # 5. Report screen: case fields have no defaults and block the evidence statement.
+            page.click("a[data-view-link='report']")
+            page.wait_for_function("document.activeElement && document.activeElement.id === 'rep-h'")
+            assert page.input_value("#case-no") == "" and page.input_value("#case-name") == "", "case fields must start empty"
+            assert "필수" in page.locator("#report-checks").inner_text()
+            assert page.get_attribute("#exp-evidence", "aria-disabled") == "true", "evidence statement must wait for 사건번호·사건명"
+            page.fill("#case-no", "2024가단0000")
+            page.fill("#case-name", "시험 사건")
+            assert "2024가단0000" in page.locator("#a4").inner_text()
+
+            # 6. Reflow (WCAG 1.4.10): no horizontal page scroll at 375px on any screen.
+            page.set_viewport_size({"width": 375, "height": 812})
+            for view in ("scan", "ledger", "report", "tools"):
+                page.evaluate(f"location.hash = '#/{view}'")
+                page.wait_for_timeout(200)
+                width = page.evaluate("document.documentElement.scrollWidth")
+                assert width <= 375, f"{view}: page scrolls sideways at 375px ({width}px)"
+            page.set_viewport_size({"width": 1440, "height": 900})
+            page.evaluate("location.hash = '#/ledger'")
+
+            # 7. CSP/console errors: none tolerated. No request leaves the local server
+            #    (fonts are local stacks; nothing is fetched from the network).
             csp = [e for e in console_errors if "Content Security Policy" in e or "Refused" in e]
             assert not csp, f"CSP violations: {csp}"
             assert not console_errors, f"console errors: {console_errors[:5]}"
+            outside = [url for url in requests if not url.startswith((f"http://127.0.0.1:{args.port}/", "blob:", "data:"))]
+            assert not outside, f"requests outside the local server: {outside[:5]}"
 
             page.screenshot(path=str(args.shot), full_page=True)
             browser.close()

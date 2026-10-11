@@ -196,6 +196,18 @@ folder — it used to be the bare row path, and a same-named file of another cas
 showed the earlier case's memo and "검토됨". Older bare-path entries stay in the
 stores and are never attached to a row.
 
+The bundled GUI (`gui.html`, `gui.js`, `gui.css`; no network request outside
+the server — fonts are local stacks) has four screens on one page:
+`#/scan` (case fields without defaults, the folder box prefilled from
+`/api/stats` `default_folder`, options, uploads, progress from
+`/api/scan-status`, cancel), `#/ledger` (the conclusion headline, the
+verdict strip, the file ledger and the evidence panel — skipped checks,
+reference signals, previews and technical fields behind disclosures, failed
+checks always visible), `#/report` (export checklist — 사건번호 and 사건명 are
+required for the evidence statement —, the verdict groups to include, PDF /
+HTML / signed JSON through `POST /api/report`, a preview) and `#/tools`
+(`/api/check`, `/api/compare`).
+
 | Path | Params | Response |
 |---|---|---|
 | `/` | — | the GUI HTML (CSP header, no inline script/style) |
