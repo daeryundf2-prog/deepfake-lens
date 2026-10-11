@@ -569,16 +569,39 @@ def main() -> int:
             page.wait_for_function("() => scanBusy === false && currentView === 'ledger' && results.length > 0", timeout=180_000)
             page.evaluate("location.hash = '#/report'")
             page.wait_for_function("() => currentView === 'report'")
+            # GUI-REV5 L-3: an HTML export asked for before the file changed is answered by the
+            # server at once, but its download is held until the JSON export's 409 has landed.
+            page.evaluate("""() => {
+                window.__realFetch = window.fetch;
+                window.__htmlGate = new Promise(resolve => { window.__releaseHtml = resolve; });
+                window.__htmlAnswered = false;
+                window.fetch = async (url, options) => {
+                    const res = await window.__realFetch(url, options);
+                    if (String(url).includes('/api/report?format=html')) { window.__htmlAnswered = true; await window.__htmlGate; }
+                    return res;
+                };
+            }""")
+            page.click("#exp-report")
+            page.wait_for_function("() => window.__htmlAnswered === true", timeout=180_000)
             victim.write_bytes(victim.read_bytes() + b"\nand once more")
             page.click("#exp-signed")
             page.wait_for_selector("#export-alert:not([hidden])", timeout=120_000)
-            page.wait_for_selector("#error-region .err-item:has-text('검사 뒤 바뀐 파일')", timeout=120_000)
-            refused = page.locator("#error-region .err-item", has_text="검사 뒤 바뀐 파일").last
-            assert victim.name in refused.inner_text(), refused.inner_text()
-            assert refused.get_by_role("button", name="다시 검사").count() == 1
+            alert = page.locator("#export-alert")
+            assert victim.name in alert.inner_text(), alert.inner_text()
+            assert page.locator("#export-alert-rescan").is_visible()
+            # GUI-REV5 Info (c): the 409 is said once — next to the buttons, not again in the error region.
+            assert page.locator("#error-region .err-item", has_text="검사 뒤 바뀐 파일").count() == 0, "the 409 was announced twice"
+            with page.expect_download():
+                page.evaluate("() => window.__releaseHtml()")
+            page.evaluate("() => { window.fetch = window.__realFetch; }")
+            page.wait_for_function("() => document.getElementById('export-note').textContent.includes('내려받았습니다')")
+            assert page.evaluate("changedPaths.size") == 1, "an earlier-started download cleared the 409 state"
+            assert alert.is_visible() and victim.name in alert.inner_text(), "the alert lost its changed files"
+            note = page.locator("#export-note").inner_text()
+            assert "검사 뒤 바뀐 파일이 확인되기 전에 요청한 파일" in note and "다시 검사" in note, note
             assert page.evaluate(f"changedPaths.has({_json.dumps(victim.name)})"), "the changed row is not marked"
             console_errors[:] = [e for e in console_errors if "status of 409" not in e]
-            refused.get_by_role("button", name="다시 검사").click()
+            page.click("#export-alert-rescan")
             page.wait_for_function("() => currentView === 'scan'")
             # GUI-REV4 K-3: 다시 검사 leaves the focus on 검사 시작.
             page.wait_for_function("() => document.activeElement && document.activeElement.id === 'analyze-btn'", timeout=5_000)
@@ -592,7 +615,7 @@ def main() -> int:
                 page.click("#exp-signed")
             assert _json.loads(Path(signed_again.value.path()).read_text(encoding="utf-8"))["summary"]["total"] == page.evaluate("results.length")
             # GUI-REV4 K-1: after 다시 검사 and a successful export no refusal is left standing.
-            assert page.locator("#error-region .err-item[data-export-gen]").count() == 0, "a 409 box outlived the rescan"
+            assert page.locator("#export-alert").is_hidden(), "a 409 alert outlived the rescan"
             # K-1: a 409 that arrives after other results replaced the ones it refused marks
             # nothing and shows no refusal (the server's slow re-analysis is simulated).
             page.evaluate("""() => {
@@ -616,8 +639,13 @@ def main() -> int:
             page.wait_for_timeout(5000)
             page.evaluate("() => { window.fetch = window.__realFetch; }")
             assert page.evaluate("changedPaths.size") == 0, "a late 409 marked rows of the new results"
-            assert page.locator("#error-region .err-item[data-export-gen]").count() == 0, "a late 409 showed a refusal"
-            assert "이전 검사에 대한 응답이라 무시했습니다" in page.locator("#toasts").inner_text() + page.locator("#export-note").inner_text()
+            assert page.locator("#export-alert").is_hidden(), "a late 409 showed a refusal"
+            # GUI-REV5 Info (b): the notice stays in the export note (after the toast is gone)
+            # until the next export action.
+            page.wait_for_timeout(4500)
+            page.evaluate("location.hash = '#/report'")
+            page.wait_for_function("() => currentView === 'report'")
+            assert "이전 검사의 것이라 무시했습니다" in page.locator("#export-note").inner_text(), page.locator("#export-note").inner_text()
 
             # 6e. GUI-REV4 K-5: a folder on a row's path replaced by a link after the scan is not
             #     refused (phase-0 choice: the row is only excluded) — the GUI names the scan rows
@@ -638,10 +666,39 @@ def main() -> int:
             page.wait_for_function("() => currentView === 'report'")
             if page.evaluate("caseUnconfirmed()"):
                 page.get_by_role("button", name="이 폴더의 사건이 맞음").click()
+            # GUI-REV5 L-2: a refusal other than 409 (here a 400 exhibit_not_rederived for the row
+            # behind the link, answered by a stand-in) is said next to the buttons with 다시 검사.
+            page.evaluate("""() => {
+                window.__realFetch = window.fetch;
+                window.fetch = async (url, options) => {
+                    if (String(url).includes('/api/report?format=html')) {
+                        return new Response(JSON.stringify({error: '서증으로 고른 파일 1개를 서버가 다시 분석할 수 없습니다', code: 'exhibit_not_rederived',
+                            not_rederived_exhibit_paths: [{path: 'sub/k.txt', reason: '경로 중간의 폴더가 링크입니다'}]}),
+                            {status: 400, headers: {'Content-Type': 'application/json'}});
+                    }
+                    return window.__realFetch(url, options);
+                };
+            }""")
+            page.click("#exp-report")
+            page.wait_for_selector("#export-alert:not([hidden])", timeout=60_000)
+            assert "sub/k.txt" in page.locator("#export-alert").inner_text()
+            assert page.locator("#export-alert-rescan").is_visible()
+            assert page.locator("#error-region .err-item", has_text="다시 분석할 수 없는").count() == 0, "the refusal went to the error region"
+            page.evaluate("() => { window.fetch = window.__realFetch; }")
+            console_errors[:] = [e for e in console_errors if "status of 400" not in e]
+            # L-2: the HTML report (no JSON body to read) names the excluded scan row too, under
+            # its own 주의 marker; the success clears the earlier failure, not the warning.
+            with page.expect_download():
+                page.click("#exp-report")
+            page.wait_for_selector("#export-warn:not([hidden])", timeout=60_000)
+            assert "sub/k.txt" in page.locator("#export-warn").inner_text()
+            assert page.locator("#export-alert").is_hidden(), "a later success left the earlier failure standing"
             with page.expect_download():
                 page.click("#exp-signed")
-            page.wait_for_selector("#error-region .err-item:has-text('서명 제외로 옮겨졌습니다')", timeout=60_000)
-            assert "sub/k.txt" in page.locator("#error-region .err-item", has_text="서명 제외로 옮겨졌습니다").inner_text()
+            page.wait_for_function("() => document.getElementById('export-note').textContent.includes('서명된 JSON — 내려받았습니다')")
+            assert page.locator("#export-warn").is_visible(), "a later successful export cleared the warning"
+            assert "서명된 JSON" in page.locator("#export-warn").inner_text()
+            assert page.locator("#error-region .err-item", has_text="서명 제외로").count() == 0
 
             # 7. CSP/console errors: none tolerated. No request leaves the local server
             #    (fonts are local stacks; nothing is fetched from the network).

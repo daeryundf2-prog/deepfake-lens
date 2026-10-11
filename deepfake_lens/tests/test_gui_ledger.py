@@ -429,13 +429,98 @@ class StaleExportTest(unittest.TestCase):
         self.assertEqual(json.loads(done.stdout), ["무시", "무시", "바뀜", "받기", "오류"])
 
 
+def _node(script: str) -> object:
+    node = shutil.which("node")
+    assert node is not None
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "t.js"
+        path.write_text(script, encoding="utf-8")
+        done = subprocess.run([node, str(path)], capture_output=True, text=True, timeout=60)
+    if done.returncode != 0:
+        raise AssertionError(done.stderr)
+    return json.loads(done.stdout)
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class ConcurrentExportTest(unittest.TestCase):
+    def test_an_earlier_success_landing_after_a_refusal_keeps_it(self) -> None:
+        """GUI-REV5 L-3: exports A (HTML) and B (JSON) start in that order; B's 409 lands, then A's
+        download. A must not clear the changed-file state, and its note says the file was asked
+        for before the refusal; a failure of a later-started export also outlives an earlier
+        success, while a later success clears an earlier failure."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        out = _node(_function(source, "exportSuccessOutcome") + (
+            "const a = exportSuccessOutcome('HTML 보고서', 1, 2, null);\n"
+            "const b = exportSuccessOutcome('HTML 보고서', 1, 0, {seq: 2, text: 'x'});\n"
+            "const c = exportSuccessOutcome('HTML 보고서', 3, 0, {seq: 2, text: 'x'});\n"
+            "console.log(JSON.stringify([a, b, c]));"))
+        assert isinstance(out, list)
+        self.assertFalse(out[0]["clearFailure"])
+        self.assertIn("검사 뒤 바뀐 파일이 확인되기 전에 요청한 파일", out[0]["note"])
+        self.assertIn("바뀐 파일 2개가 남아 있으니 다시 검사", out[0]["note"])
+        self.assertFalse(out[1]["clearFailure"])
+        self.assertIn("뒤에 요청한 내보내기는 실패", out[1]["note"])
+        self.assertEqual(out[2], {"clearFailure": True, "note": "HTML 보고서 — 내려받았습니다."})
+
+    def test_the_success_path_does_not_clear_the_changed_files(self) -> None:
+        """L-3 (source): the download path neither empties changedPaths nor hides the alert by itself."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        body = source[source.index("        async function exportReport(kind) {"):]
+        success = body[body.index("const blob = await res.blob();"):body.index("            } catch (e) {\n                failed(")]
+        self.assertNotIn("changedPaths = new Set", success)
+        self.assertNotIn("resetExportState", success)
+        self.assertIn("exportSuccessOutcome(spec[3], seq, changedPaths.size, exportFailure)", success)
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class ExcludedHeaderTest(unittest.TestCase):
+    def test_the_header_rows_are_decoded(self) -> None:
+        """GUI-REV5 L-2: X-Deepfake-Lens-Excluded-Rows (URL-safe base64 of ASCII JSON) is read back,
+        non-ASCII paths included; a missing or broken header is no rows."""
+        import base64
+
+        rows = [{"path": "sub/사진?.png", "reason": "링크 폴더 — 다시 분석 안 함"}]
+        value = base64.urlsafe_b64encode(json.dumps(rows, ensure_ascii=True).encode("ascii")).decode("ascii")
+        source = GUI_JS.read_text(encoding="utf-8")
+        out = _node(_function(source, "decodeExcludedHeader") + (
+            f"console.log(JSON.stringify([decodeExcludedHeader({json.dumps(value)}), decodeExcludedHeader(null), decodeExcludedHeader('%%')]));"))
+        self.assertEqual(out, [rows, [], []])
+
+
+class ExportFeedbackSourceTest(unittest.TestCase):
+    def test_export_problems_are_said_next_to_the_buttons_once(self) -> None:
+        """GUI-REV5 L-2 / Info (c): no export outcome goes to the error region (it is off screen
+        on the report view, and a 409 was announced there a second time); failures go to the
+        role=alert box, warnings to their own 주의 box that only new results clear."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        body = source[source.index("        async function exportReport(kind) {"):source.index("        Object.entries(EXPORT_BUTTONS).forEach(([kind, id]) => $(id).addEventListener('click', () => exportReport(kind)));")]
+        self.assertNotIn("showError(", body)
+        self.assertNotIn("toast(spec[3] + ' 생성", body)
+        self.assertNotIn("exportWarnings = new Map()", body)
+        html = (PACKAGE / "gui.html").read_text(encoding="utf-8")
+        self.assertIn('id="export-warn" role="status"', html)
+        self.assertIn('id="export-alert" role="alert"', html)
+        reset = _function(source, "resetExportState")
+        self.assertIn("exportWarnings = new Map()", reset)
+        self.assertIn("exportFailure = null", reset)
+
+    def test_an_ignored_response_stays_in_the_note(self) -> None:
+        """GUI-REV5 Info (b): the 'ignored' notice is kept in the export note (renderReport) until
+        the next export action clears it — not only a 4-second toast."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        self.assertIn("[exportNote(sel), exportStickyNote].filter(Boolean).join(' ')", _function(source, "renderReport"))
+        body = source[source.index("        async function exportReport(kind) {"):]
+        self.assertLess(body.index("exportStickyNote = '';"), body.index("const why = exportBlockReason(kind, sel);"))
+
+
 class ExportNoteParticleTest(unittest.TestCase):
     def test_no_particle_is_glued_to_a_format_name(self) -> None:
         """GUI-REV4 K-7: "서명된 JSON를" — the export note never glues 을/를 to the format name."""
         source = GUI_JS.read_text(encoding="utf-8")
         self.assertNotIn("spec[3] + '를", source)
         self.assertNotIn("spec[3] + '을", source)
-        self.assertIn("spec[3] + ' — 내려받았습니다.'", source)
+        # GUI-REV5 L-3: the success note is built by exportSuccessOutcome(label, …).
+        self.assertIn("label + ' — 내려받았습니다.'", source)
 
 
 class GuiAccessibilitySourceTest(unittest.TestCase):

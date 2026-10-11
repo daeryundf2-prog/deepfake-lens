@@ -19,6 +19,11 @@ grouped by work pass rather than release.
 - GUI-REV (adversarial review of 39e11d9): exports carry every row; the
   evidence statement takes `exhibit_paths` (the rest in a signed appendix)
   and `submitter_side` (갑/을호증, chosen in the GUI, no default).
+- GUI-REV5: a successful `/api/report` (any format) sends
+  `X-Deepfake-Lens-Excluded-Count` / `X-Deepfake-Lens-Excluded-Rows` (the
+  rows it lists as `서명 제외`); the GUI says every export failure next to
+  the export buttons, once, and keeps the 서명 제외 warning under its own
+  주의 marker for the same results.
 
 ## 2026-10 — phase 0, round 19
 

@@ -113,7 +113,7 @@
 
         // A11Y-6: an error stays on the page (the error region under the top
         // bar) until the examiner closes it — never only a toast that fades.
-        function showError(msg, label, fromScan, action, exportGen) {
+        function showError(msg, label, fromScan) {
             const region = $('error-region');
             const box = document.createElement('div');
             box.className = 'err-item';
@@ -133,26 +133,12 @@
                 box.remove();
                 (next ? next.querySelector('button') : $('main')).focus();
             });
-            box.append(text);
-            if (action) {
-                // GUI-REV3 merge (R19-13): an error can offer its remedy (e.g. 다시 검사).
-                const act = document.createElement('button');
-                act.type = 'button';
-                act.className = 'btn btn-sm btn-primary';
-                act.textContent = action[0];
-                act.addEventListener('click', action[1]);
-                box.append(act);
-            }
-            box.append(close);
+            // GUI-REV5 L-2: export failures and warnings are said next to the export buttons
+            // (#export-alert / #export-warn), not here.
+            box.append(text, close);
             // GUI-REV2 H-10: only a scan's own errors carry its generation; a quick
             // check or export error is never later marked "이전 검사".
             if (fromScan) box.dataset.scan = String(scanGeneration);
-            // GUI-REV4 K-1: an export refusal belongs to the results it refused; it replaces an
-            // earlier refusal and is removed when other results arrive.
-            if (exportGen != null) {
-                document.querySelectorAll('#error-region .err-item[data-export-gen]').forEach(old => old.remove());
-                box.dataset.exportGen = String(exportGen);
-            }
             region.appendChild(box);
             while (region.children.length > 4) region.firstElementChild.remove();
         }
@@ -2364,7 +2350,7 @@
                 list.appendChild(li);
             });
             Object.entries(EXPORT_BUTTONS).forEach(([kind, id]) => setBusyButton($(id), Boolean(exportBlockReason(kind, sel))));
-            $('export-note').textContent = exportNote(sel);
+            $('export-note').textContent = [exportNote(sel), exportStickyNote].filter(Boolean).join(' ');
             renderA4(sel);
         }
         // GUI-REV2 H-2: the preview is drawn from the server's own statement template
@@ -2516,12 +2502,20 @@
             renderExportAlert();
         }
         // GUI-REV4 K-2: the refusal is said next to the export buttons (role=alert), where
-        // the examiner pressed — the top error region is off screen there.
+        // the examiner pressed — the top error region is off screen there. GUI-REV5 L-2: every
+        // export failure is said here (not only a 409), once (Info c: no second, assertive
+        // copy in the error region), with 다시 검사 where scanning again is the remedy.
+        let exportFailure = null;  // {seq, text, rescan} — the latest failed export of these results
         function renderExportAlert() {
             const box = $('export-alert');
-            box.hidden = changedPaths.size === 0;
+            box.hidden = changedPaths.size === 0 && !exportFailure;
             if (box.hidden) return;
-            $('export-alert-text').textContent = `검사 뒤 바뀐 파일 ${changedPaths.size}개 — 내보내지 않았습니다. 폴더를 다시 검사하십시오.`;
+            const changedHead = `검사 뒤 바뀐 파일 ${changedPaths.size}개 — 내보내지 않았습니다. 폴더를 다시 검사하십시오.`;
+            $('export-alert-text').textContent = changedPaths.size ? changedHead : exportFailure.text;
+            const fail = $('export-alert-fail');
+            fail.hidden = !(changedPaths.size && exportFailure);
+            fail.textContent = fail.hidden ? '' : exportFailure.text;
+            $('export-alert-rescan').hidden = !(changedPaths.size || exportFailure.rescan);
             const list = $('export-alert-list');
             list.innerHTML = '';
             const paths = [...changedPaths];
@@ -2535,8 +2529,57 @@
                 li.textContent = `외 ${paths.length - 5}개`;
                 list.appendChild(li);
             }
+            list.hidden = paths.length === 0;
             // Brought into view where the export button was pressed (no focus move).
             if (currentView === 'report' && box.getClientRects().length) box.scrollIntoView({ block: 'nearest' });
+        }
+        // GUI-REV5 L-2: a warning has its own marker (주의, not the refusal box) and stays for
+        // these results — a later successful export does not clear it. It names the rows of
+        // this scan that a successful export (any format) listed as 서명 제외.
+        let exportWarnings = new Map();  // path -> reason
+        let exportWarnFormats = new Set();
+        function renderExportWarning() {
+            const box = $('export-warn');
+            box.hidden = exportWarnings.size === 0;
+            if (box.hidden) return;
+            $('export-warn-text').textContent = `이 검사의 행 ${exportWarnings.size}개가 서명 제외로 옮겨졌습니다(${[...exportWarnFormats].join(', ')}). ` +
+                '검사 뒤 경로의 폴더가 링크로 바뀌었을 수 있습니다 — 다시 검사하십시오.';
+            const list = $('export-warn-list');
+            list.innerHTML = '';
+            const rows = [...exportWarnings];
+            rows.slice(0, 5).forEach(([path, reason]) => {
+                const li = document.createElement('li');
+                li.textContent = displayName(path) + ' — ' + displayName(reason);
+                list.appendChild(li);
+            });
+            if (rows.length > 5) {
+                const li = document.createElement('li');
+                li.textContent = `외 ${rows.length - 5}개`;
+                list.appendChild(li);
+            }
+        }
+        $('export-warn-rescan').addEventListener('click', () => rescanFolder());
+        // L-2: the server names the rows a report lists as 서명 제외 in a response header
+        // (URL-safe base64 of an ASCII JSON list) — PDF and HTML bodies cannot be read for it.
+        function decodeExcludedHeader(value) {
+            if (!value) return [];
+            try {
+                const rows = JSON.parse(atob(String(value).replace(/-/g, '+').replace(/_/g, '/')));
+                return Array.isArray(rows) ? rows : [];
+            } catch (e) { return []; }
+        }
+        // GUI-REV5 L-3: what a successful download does to the export feedback. Exports run
+        // concurrently; one requested before a refusal can land after it. It never clears the
+        // changed-file state (those files still differ) and the note says the file was made
+        // before the refusal; a failure of a later-started export is kept too.
+        function exportSuccessOutcome(label, seq, changedCount, failure) {
+            if (changedCount > 0) {
+                return { clearFailure: false, note: label + ` — 내려받았습니다. 다만 검사 뒤 바뀐 파일이 확인되기 전에 요청한 파일입니다 — 바뀐 파일 ${changedCount}개가 남아 있으니 다시 검사하십시오.` };
+            }
+            if (failure && failure.seq > seq) {
+                return { clearFailure: false, note: label + ' — 내려받았습니다. 뒤에 요청한 내보내기는 실패했습니다(아래 알림).' };
+            }
+            return { clearFailure: true, note: label + ' — 내려받았습니다.' };
         }
         $('export-alert-rescan').addEventListener('click', () => rescanFolder());
         function rescanFolder() {
@@ -2560,34 +2603,45 @@
             changedPaths = new Set();
             changedInfo = new Map();
             resultsGeneration += 1;  // K-1: earlier export responses no longer apply
-            clearExportRefusals();
+            exportFailure = null;
+            exportWarnings = new Map();
+            exportWarnFormats = new Set();
             renderExportAlert();
+            renderExportWarning();
             if (currentView === 'report') renderReport();
         }
-        function clearExportRefusals() {
-            document.querySelectorAll('#error-region .err-item[data-export-gen]').forEach(box => box.remove());
-        }
-        // K-5: the signed body's excluded rows that were rows of this scan (not uploads).
-        function scanRowsExcluded(body) {
-            const rows = Array.isArray(body && body.excluded_items) ? body.excluded_items : [];
+        // K-5: the rows a report listed as excluded that were rows of this scan (not uploads)
+        // — L-2: from the response header, for every format.
+        function scanRowsExcluded(rows) {
             const scanned = new Set(results.filter(e => e.item.source !== 'upload').map(e => String(e.item.path)));
             return rows.filter(row => row && scanned.has(String(row.path))).map(row => ({ path: String(row.path), reason: String(row.reason || row.marker || '사유 기록 없음') }));
         }
+        // GUI-REV5 Info (b): a note that stays in the export note until the next export action.
+        let exportStickyNote = '';
+        let exportSeq = 0;
         async function exportReport(kind) {
             if (exportBlocked()) return;
             const btn = $(EXPORT_BUTTONS[kind]);
             const sel = selectedEntries();
+            exportStickyNote = '';
             const why = exportBlockReason(kind, sel);
             if (why) { $('export-note').textContent = why; return; }
             if (btn.dataset.busy) return;
             btn.dataset.busy = '1';
             const spec = EXPORT_SPECS[kind];
             const startGen = resultsGeneration;
+            const seq = ++exportSeq;
             // GUI-REV4 K-7: the format name is followed by " — …" (no particle after it: "JSON를").
             $('export-note').textContent = spec[3] + ' — 만드는 중입니다. 서버가 파일을 다시 분석합니다.';
             const ignored = () => {
+                exportStickyNote = spec[3] + ' 요청은 이전 검사의 것이라 무시했습니다. 지금 결과로 다시 내보내십시오.';
                 toast(spec[3] + ': 이전 검사에 대한 응답이라 무시했습니다.');
-                $('export-note').textContent = spec[3] + ' 요청은 이전 검사의 것이라 무시했습니다. 지금 결과로 다시 내보내십시오.';
+                $('export-note').textContent = exportStickyNote;
+            };
+            const failed = (text, rescan) => {
+                exportFailure = { seq, text: spec[3] + ' — 만들지 못했습니다: ' + text, rescan };
+                renderExportAlert();
+                $('export-note').textContent = spec[3] + ' — 만들지 못했습니다.';
             };
             try {
                 const res = await apiFetch('/api/report?format=' + spec[0], {
@@ -2599,12 +2653,17 @@
                 if (!res.ok || !type.includes(spec[1])) {
                     let message;
                     let changedRows = [];
+                    let rescan = false;
                     if (exportResponseAction(startGen, resultsGeneration, res.status, 0, false) === '무시') { ignored(); return; }
                     if (type.includes('application/json')) {
                         try {
                             const errorBody = await res.json();
                             message = exportErrorText(errorBody, res.status, itemByPath);
                             if (res.status === 409 && Array.isArray(errorBody.changed_rows)) changedRows = errorBody.changed_rows;
+                            // L-2: a chosen row that was never re-analyzed — scanning again helps
+                            // when it is a row of the scan (a folder became a link), not an upload.
+                            const lost = Array.isArray(errorBody.not_rederived_exhibit_paths) ? errorBody.not_rederived_exhibit_paths : [];
+                            rescan = lost.some(row => { const item = itemByPath(String(row && row.path)); return Boolean(item && item.source !== 'upload'); });
                         } catch (e) { message = '서버 오류 (HTTP ' + res.status + ')'; }
                     } else {
                         message = await apiError(res);
@@ -2612,33 +2671,32 @@
                     const action = exportResponseAction(startGen, resultsGeneration, res.status, changedRows.length, false);
                     if (action === '무시') { ignored(); return; }
                     if (action === '바뀜') {
+                        // Info (c): said once — in the alert next to the buttons (markChangedRows).
                         markChangedRows(changedRows);
-                        showError(spec[3] + ' 생성 거부: ' + message, '검사 뒤 바뀜', false, ['다시 검사', rescanFolder], startGen);
+                        $('export-note').textContent = spec[3] + ' — 만들지 못했습니다.';
                     } else {
-                        toast(spec[3] + ' 생성 실패: ' + message, true);
+                        failed(message, rescan);
                     }
-                    $('export-note').textContent = spec[3] + ' — 만들지 못했습니다.';
                     return;
                 }
                 const blob = await res.blob();
                 if (exportResponseAction(startGen, resultsGeneration, res.status, 0, true) === '무시') { ignored(); return; }
-                clearExportRefusals();
                 download(blob, spec[2]);
-                // GUI-REV4 K-5: rows of this scan the server signed as excluded (e.g. a folder on
-                // the path became a link since the scan — not refused by R19-13) are named.
-                if (spec[1] === 'application/json') {
-                    try {
-                        const excluded = scanRowsExcluded(JSON.parse(await blob.text()));
-                        if (excluded.length) {
-                            showError(`${spec[3]}: 이 검사의 행 ${excluded.length}개가 서명 제외로 옮겨졌습니다 — ` +
-                                excluded.slice(0, 5).map(row => row.path + '(' + row.reason + ')').join(', ') + (excluded.length > 5 ? ` 외 ${excluded.length - 5}개` : '') +
-                                '. 검사 뒤 경로의 폴더가 링크로 바뀌었을 수 있습니다 — 다시 검사하십시오.', '주의', false, ['다시 검사', rescanFolder], startGen);
-                        }
-                    } catch (e) { /* not a signed body */ }
+                const outcome = exportSuccessOutcome(spec[3], seq, changedPaths.size, exportFailure);
+                if (outcome.clearFailure) exportFailure = null;
+                renderExportAlert();
+                // GUI-REV4 K-5 / GUI-REV5 L-2: rows of this scan the server listed as excluded (e.g. a
+                // folder on the path became a link since the scan — not refused by R19-13) are
+                // named after every format, and the warning stays for these results.
+                const excluded = scanRowsExcluded(decodeExcludedHeader(res.headers.get('X-Deepfake-Lens-Excluded-Rows')));
+                if (excluded.length) {
+                    excluded.forEach(row => exportWarnings.set(row.path, row.reason));
+                    exportWarnFormats.add(spec[3]);
+                    renderExportWarning();
                 }
-                $('export-note').textContent = spec[3] + ' — 내려받았습니다.';
+                $('export-note').textContent = outcome.note;
             } catch (e) {
-                toast(spec[3] + ' 오류: ' + e.message, true);
+                failed(e.message, false);
             } finally {
                 delete btn.dataset.busy;
             }

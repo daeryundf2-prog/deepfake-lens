@@ -274,14 +274,20 @@
                             <div class="export-alert" id="export-alert" role="alert" hidden>
                                 <p class="t" id="export-alert-text"></p>
                                 <ul id="export-alert-list"></ul>
+                                <p id="export-alert-fail" hidden></p>
                                 <button class="btn btn-primary" id="export-alert-rescan" type="button">다시 검사</button>
+                            </div>
+                            <div class="export-warn" id="export-warn" role="status" hidden>
+                                <p class="t"><span class="tag tag-warn">주의</span> <span id="export-warn-text"></span></p>
+                                <ul id="export-warn-list"></ul>
+                                <button class="btn" id="export-warn-rescan" type="button">다시 검사</button>
                             </div>
                         </section>
                     </div>
                     <section class="report-preview" aria-labelledby="pv-h">
                         <h2 class="sr-only" id="pv-h">증거설명서 미리보기</h2>
                         <div class="a4" id="a4"></div>
-                        <p class="hint">미리보기입니다. 실제 문서는 서버가 파일을 다시 분석해 만들고, 서명 키가 있으면 서명합니다. 검사 뒤 바뀌었거나 지워진 파일이 있으면 서버가 내보내기를 거부합니다(다시 검사 필요). 경로 중간의 폴더가 링크로 바뀐 파일은 거부 대신 서명 제외로 옮겨지며, 서명된 JSON을 내보내면 그 행을 알려 줍니다.</p>
+                        <p class="hint">미리보기입니다. 실제 문서는 서버가 파일을 다시 분석해 만들고, 서명 키가 있으면 서명합니다. 검사 뒤 바뀌었거나 지워진 파일이 있으면 서버가 내보내기를 거부합니다(다시 검사 필요). 경로 중간의 폴더가 링크로 바뀐 파일은 거부 대신 서명 제외로 옮겨지며, 어느 형식을 내보내든 그 행을 알려 줍니다.</p>
                     </section>
                 </div>
             </section>
