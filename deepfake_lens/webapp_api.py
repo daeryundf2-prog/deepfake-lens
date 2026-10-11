@@ -1786,11 +1786,12 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     try:
         if req_format in ("evidence", "evidence-statement"):
             from .evidence_statement import build_evidence_statement, signed_statement_body, write_evidence_statement_pdf
+            from .office_config import DEFAULT_CASE_NAME
             try:
                 stmt = build_evidence_statement(
                     items,
                     case_no=str(data.get("case_no") or "(사건번호 입력)"),
-                    case_name=str(data.get("case_name") or "성폭력처벌법위반(허위영상물편집등) 및 정보통신망법위반"),
+                    case_name=str(data.get("case_name") or DEFAULT_CASE_NAME),  # R18-16
                     plaintiff=str(data.get("plaintiff") or "(의뢰사 상호명 입력) 귀하"),
                     defendant=str(data.get("defendant") or "(피고/피의자 성명 입력)"),
                     court=str(data.get("court") or "○○지방법원 귀중"),

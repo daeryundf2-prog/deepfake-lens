@@ -702,3 +702,30 @@ class PdfDependencyMissingTest(unittest.TestCase):
             write_evidence_statement_pdf(self.out / "s.pdf", statement)
         self.assertEqual(str(ctx.exception), PDF_DEPENDENCY_MESSAGE)
         self.assertIsInstance(ctx.exception, RuntimeError)  # web /api/report catches RuntimeError
+
+
+class DefaultCaseNameTest(unittest.TestCase):
+    """R18-16 (round 18): an evidence statement without a case name said "성폭력처벌법위반(허위영상물편집등) 및
+    정보통신망법위반" — a specific offence nobody entered — while the case number and the parties were "(… 입력)"
+    placeholders (CLI scan / evidence-statement --case-name, build_evidence_statement, the web report)."""
+
+    OFFENCE = "성폭력처벌법위반"
+
+    def test_the_default_is_a_placeholder_everywhere(self) -> None:
+        from pathlib import Path
+
+        from deepfake_lens.cli_parser import build_parser
+        from deepfake_lens.evidence_statement import build_evidence_statement
+        from deepfake_lens.office_config import DEFAULT_CASE_NAME
+
+        self.assertEqual(DEFAULT_CASE_NAME, "(사건명 입력)")
+        statement = build_evidence_statement([])
+        self.assertEqual(statement.case_name, DEFAULT_CASE_NAME)
+        self.assertNotIn(self.OFFENCE, statement.to_markdown())
+        parser, _ = build_parser()
+        self.assertEqual(parser.parse_args(["scan", "."]).case_name, DEFAULT_CASE_NAME)
+        self.assertEqual(parser.parse_args(["evidence-statement", "scan.json"]).case_name, DEFAULT_CASE_NAME)
+        package = Path(__file__).resolve().parents[1]
+        for name in ("cli.py", "cli_parser.py", "webapp_api.py", "evidence_statement.py", "gui.html", "gui.js"):
+            with self.subTest(source=name):
+                self.assertNotIn(self.OFFENCE, (package / name).read_text(encoding="utf-8"))

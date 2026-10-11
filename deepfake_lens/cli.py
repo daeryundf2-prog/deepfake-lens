@@ -13,6 +13,7 @@ from .core import ARCHIVE_ROLLUP_RULE, check_scan_folder, ScanItem, _thresholds_
 from .analysis_api import AnalysisOptions, analyze_path, analyze_rows, is_symlink_path, load_thresholds, primary_row, scan_folder_run, thresholds_warning_printer
 from .analysis_api import scan_payload as analysis_scan_payload
 from .cli_inputs import UsageError
+from .office_config import DEFAULT_CASE_NAME
 from .output_files import OutputWriteError, StdoutGuard, StdoutWriteError, write_output_text
 from .cli_parser import build_parser, escape_echo
 from .serialization import redact_install_paths
@@ -1357,7 +1358,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         stmt = build_evidence_statement(
             items,
             case_no=getattr(args, "case_no", "(사건번호 입력)"),
-            case_name=getattr(args, "case_name", "성폭력처벌법위반(허위영상물편집등) 및 정보통신망법위반"),
+            case_name=getattr(args, "case_name", DEFAULT_CASE_NAME),  # R18-16
             plaintiff=getattr(args, "plaintiff", "(의뢰사 상호명 입력) 귀하"),
             defendant=getattr(args, "defendant", "(피고/피의자 성명 입력)"),
             court=getattr(args, "court", "○○지방법원 귀중"),

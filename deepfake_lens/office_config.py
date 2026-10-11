@@ -24,6 +24,12 @@ CONFIG_DIR_NAME = ".deepfake-lens"
 CONFIG_FILE_NAME = "config.json"
 # A generic unit name (not an identity) shown with the office name.
 DEFAULT_CENTER = "디지털포렌식 감정센터"
+# R18-16 (round 18): the evidence statement's case name when none is given — a
+# placeholder like the case number and the parties ("(… 입력)"). It was the
+# offence "성폭력처벌법위반(허위영상물편집등) 및 정보통신망법위반", printed into
+# every statement whose examiner did not type a case name (N17: nothing is
+# asserted that the examiner did not supply).
+DEFAULT_CASE_NAME = "(사건명 입력)"
 # Longest value kept from the config file (a header line, not a document).
 MAX_FIELD_CHARS = 200
 

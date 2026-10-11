@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from .core import DEFAULT_MAX_FILES
+from .office_config import DEFAULT_CASE_NAME  # R18-16
 from .corpus_manifest import add_corpus_parser
 from .pixel import DEFAULT_PIXEL_MAX_SIDE, SUPPORTED_PIXEL_MODES
 
@@ -282,7 +283,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     scan_parser.add_argument("--evidence-statement-out", type=Path, help="ECFS 증거설명서 저장(.pdf → PDF, .json → 서명된 JSON, 그 외 → Markdown; --key-file 또는 DEEPFAKE_LENS_REPORT_KEY로 서명)")
     scan_parser.add_argument("--evidence-statement-pdf-out", type=Path, help="ECFS 증거설명서를 PDF로 저장")
     scan_parser.add_argument("--case-no", type=str, default="(사건번호 입력)", help="증거설명서의 사건번호")
-    scan_parser.add_argument("--case-name", type=str, default="성폭력처벌법위반(허위영상물편집등) 및 정보통신망법위반", help="증거설명서의 사건명")
+    scan_parser.add_argument("--case-name", type=str, default=DEFAULT_CASE_NAME, help="증거설명서의 사건명(기본: 자리표시 '(사건명 입력)')")
     scan_parser.add_argument("--plaintiff", type=str, default="(의뢰사 상호명 입력) 귀하", help="증거설명서의 원고(고소인)")
     scan_parser.add_argument("--defendant", type=str, default="(피고/피의자 성명 입력)", help="증거설명서의 피고(피의자)")
     scan_parser.add_argument("--court", type=str, default="○○지방법원 귀중", help="증거설명서의 제출처(법원/수사기관)")
@@ -594,7 +595,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     evidence_stmt_parser = subparsers.add_parser("evidence-statement", help="ECFS 전자소송 증거설명서 작성")
     evidence_stmt_parser.add_argument("target", type=Path, help="검사할 폴더, 검사 결과 JSON 또는 파일 하나")
     evidence_stmt_parser.add_argument("--case-no", type=str, default="(사건번호 입력)", help="사건번호")
-    evidence_stmt_parser.add_argument("--case-name", type=str, default="성폭력처벌법위반(허위영상물편집등) 및 정보통신망법위반", help="사건명")
+    evidence_stmt_parser.add_argument("--case-name", type=str, default=DEFAULT_CASE_NAME, help="사건명(기본: 자리표시 '(사건명 입력)')")
     evidence_stmt_parser.add_argument("--plaintiff", type=str, default="(의뢰사 상호명 입력) 귀하", help="원고(고소인)")
     evidence_stmt_parser.add_argument("--defendant", type=str, default="(피고/피의자 성명 입력)", help="피고(피고소인)")
     evidence_stmt_parser.add_argument("--court", type=str, default="○○지방법원 귀중", help="제출처(관할법원/수사관서)")

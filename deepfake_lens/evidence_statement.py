@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from .core import ScanItem
-from .office_config import DEFAULT_CENTER, office_identity
+from .office_config import DEFAULT_CASE_NAME, DEFAULT_CENTER, office_identity
 from .result_text import (
     ARCHIVE_MEMBER_SEPARATOR,
     HASH_UNAVAILABLE_ACCESS,
@@ -363,7 +363,7 @@ def build_evidence_statement(
     items: list[ScanItem],
     *,
     case_no: str = "(사건번호 입력)",
-    case_name: str = "성폭력처벌법위반(허위영상물편집등) 및 정보통신망법위반",
+    case_name: str = DEFAULT_CASE_NAME,  # R18-16
     plaintiff: str = "(의뢰사 상호명 입력) 귀하",
     defendant: str = "(피고/피의자 성명 입력)",
     court: str = "○○지방법원 귀중",
