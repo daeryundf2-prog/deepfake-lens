@@ -198,6 +198,32 @@ def main() -> int:
             page.fill("#case-name", "시험 사건")
             assert "2024가단0000" in page.locator("#a4").inner_text()
 
+            # 5b. GUI-REV G-5: while a new scan runs the other screens say the rows are
+            #     the previous scan's, exports wait, and the new options are not
+            #     attached to the old rows. The status poll is held at "running".
+            import json as _json
+
+            held = _json.dumps({"job_id": "held", "status": "running", "done": 1, "total": 9, "current": "a", "recent": [], "elapsed_seconds": 1})
+            page.route("**/api/scan-status*", lambda route: route.fulfill(status=200, content_type="application/json", body=held))
+            before_options = page.evaluate("JSON.stringify(lastScanOptions)")
+            page.evaluate("location.hash = '#/scan'")
+            if not page.locator("#scan-options").evaluate("d => d.open"):
+                page.locator("#scan-options summary").click()
+            page.check("input[name='pixel-mode'][value='fast']")
+            page.click("#analyze-btn")
+            page.wait_for_function("() => scanBusy === true", timeout=10_000)
+            page.evaluate("location.hash = '#/ledger'")
+            assert page.locator("#busy-band").is_visible(), "no 'new scan running' band over the previous results"
+            assert "이전 결과" in page.locator("#busy-band").inner_text()
+            page.evaluate("location.hash = '#/report'")
+            for button in ("#exp-evidence", "#exp-pdf", "#exp-report", "#exp-signed"):
+                assert page.get_attribute(button, "aria-disabled") == "true", f"{button} must wait for the running scan"
+            assert page.evaluate("JSON.stringify(lastScanOptions)") == before_options, "options changed before the new results arrived"
+            page.unroute("**/api/scan-status*")
+            page.wait_for_function("() => scanBusy === false", timeout=180_000)
+            assert page.evaluate("lastScanOptions.pixel") == "fast", "the new scan's options were not attached to its results"
+            assert page.locator("#busy-band").is_hidden()
+
             # 6. Reflow (WCAG 1.4.10): no horizontal page scroll at 375px on any screen.
             page.set_viewport_size({"width": 375, "height": 812})
             for view in ("scan", "ledger", "report", "tools"):

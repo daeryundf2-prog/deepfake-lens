@@ -745,6 +745,7 @@
             const slot = view === 'report' ? $('case-slot-report') : $('case-slot-scan');
             if ($('case-fields').parentElement !== slot) slot.appendChild($('case-fields'));
             if (view === 'report') renderReport();
+            updateBusyBand();
             document.title = VIEW_TITLES[view] + ' — ' + document.querySelector('.brand-name').textContent;
             if (!initial) {
                 const target = focusTarget || viewHeading(view);
@@ -932,6 +933,17 @@
             }
             SCAN_INPUTS.forEach(id => { const el = $(id); if (el) el.disabled = busy; });
             document.querySelectorAll('input[name="pixel-mode"]').forEach(el => { el.disabled = busy; });
+            updateBusyBand();
+            if (currentView === 'report') renderReport();
+        }
+        // GUI-REV G-5/G-6: while a scan runs, every other screen says so — the
+        // ledger and report still hold the previous results (or none yet).
+        function updateBusyBand() {
+            const band = $('busy-band');
+            band.hidden = !(scanBusy && currentView !== 'scan');
+            $('busy-band-text').textContent = results.length
+                ? '새 검사 진행 중 — 아래는 이전 결과입니다. 끝나기 전에는 내보낼 수 없습니다.'
+                : '새 검사 진행 중입니다.';
         }
         function pixelMode() {
             const on = document.querySelector('input[name="pixel-mode"]:checked');
@@ -1024,7 +1036,7 @@
         function rememberJob(job) { try { sessionStorage.setItem(JOB_STORE, JSON.stringify(job)); } catch (e) { /* non-fatal */ } }
         function forgetJob() { try { sessionStorage.removeItem(JOB_STORE); } catch (e) { /* non-fatal */ } }
 
-        async function runScanJob(jobId, folderPath) {
+        async function runScanJob(jobId, folderPath, options) {
             currentJobId = jobId;
             retireErrors();
             progressStart('검사 중', true);
@@ -1058,6 +1070,7 @@
                 // every row against it (not against the read root).
                 lastScanRoot = data.scan_root || folderPath;
                 lastScanRootB64 = data.scan_root_b64 || '';
+                lastScanOptions = options || {};
                 processResults(data);
                 // R18-3: "분석 완료" was shown for a cancelled scan too.
                 if (partialResultNote(data.summary)) toast(`검사 취소 — 부분 결과 ${(data.items || []).length}개 행, 분석하지 않은 파일 ${data.summary.files_cancelled || 0}개`, true, '주의');
@@ -1103,7 +1116,10 @@
                 params.set('folder_b64', defaultFolderB64);
             }
             if (!$('opt-model').checked) params.set('no_default_engine', 'true');
-            lastScanOptions = {
+            // GUI-REV G-5: the options become the report's options only when this
+            // scan's results arrive — until then the ledger still shows the
+            // previous scan, exported with the previous scan's options.
+            const scanOptions = {
                 pixel: pixelMode(),
                 heatmaps: String($('opt-heatmaps').checked),
                 deep_signals: String($('opt-deep').checked),
@@ -1113,8 +1129,8 @@
             try {
                 const job = await apiJson('/api/scan?' + params.toString());
                 if (job.error) { toast('오류: ' + job.error, true); return; }
-                rememberJob({ job: job.job_id, folder: folderPath, options: lastScanOptions });
-                await runScanJob(job.job_id, folderPath);
+                rememberJob({ job: job.job_id, folder: folderPath, options: scanOptions });
+                await runScanJob(job.job_id, folderPath, scanOptions);
             } catch (error) {
                 // U-8: an out-of-root folder says which folders can be scanned.
                 const hint = /허용되지 않은 경로/.test(error.message) ? ' — 서버를 시작할 때 --folder 또는 --allow-root로 등록한 폴더 안만 검사할 수 있습니다.' : '';
@@ -1140,10 +1156,10 @@
             let saved = null;
             try { saved = JSON.parse(sessionStorage.getItem(JOB_STORE) || 'null'); } catch (e) { saved = null; }
             if (!saved || typeof saved.job !== 'string') return false;
-            lastScanOptions = saved.options && typeof saved.options === 'object' ? saved.options : {};
+            const options = saved.options && typeof saved.options === 'object' ? saved.options : {};
             if (typeof saved.folder === 'string') $('folder-path').value = saved.folder;
             toast('진행 중이던 검사에 다시 연결합니다');
-            runScanJob(saved.job, typeof saved.folder === 'string' ? saved.folder : '');
+            runScanJob(saved.job, typeof saved.folder === 'string' ? saved.folder : '', options);
             return true;
         }
 
@@ -1970,6 +1986,7 @@
         function closeMenu() { $('export-menu').open = false; }
         $('exp-json').addEventListener('click', () => {
             closeMenu();
+            if (scanBusy) { toast('새 검사가 진행 중입니다 — 끝난 뒤 내보내십시오', true); return; }
             if (!results.length) { toast('분석 결과가 없습니다', true); return; }
             const enriched = results.map(e => {
                 const rev = reviewStore[itemKey(e.item)];
@@ -1982,6 +1999,7 @@
         });
         $('exp-csv').addEventListener('click', () => {
             closeMenu();
+            if (scanBusy) { toast('새 검사가 진행 중입니다 — 끝난 뒤 내보내십시오', true); return; }
             if (!results.length) { toast('분석 결과가 없습니다', true); return; }
             const f = csvCell;
             // BOM prefix keeps Korean intact when the CSV is opened in Excel.
@@ -2044,6 +2062,7 @@
             return out;
         }
         function exportBlockReason(kind, sel) {
+            if (scanBusy) return '새 검사가 진행 중입니다 — 끝난 뒤 내보내십시오. 지금 화면의 결과는 이전 검사입니다.';
             if (!results.length) return '검사 결과가 없습니다.';
             if (kind === 'evidence' && !sel.length) return '증거설명서의 서증으로 넣을 파일을 고르십시오.';
             if ((kind === 'evidence' || kind === 'pdf') && pdfAvailable === false) return 'PDF 엔진(pymupdf)이 설치되어 있지 않습니다.';

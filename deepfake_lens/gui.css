@@ -534,3 +534,4 @@ select.field { padding-right: 8px; }
 .a4 .a4-appendix { margin-top: 8px; color: #3A3D44; }
 .err-item.err-old { border-color: var(--line); border-width: 1px; }
 .err-item.err-old .err-text b { color: var(--muted); }
+.busy-band { margin: 0 0 16px; padding: 10px 14px; border: 2px dashed var(--ink); border-radius: 4px; background: var(--panel); font-weight: 600; }
