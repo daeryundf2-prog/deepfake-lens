@@ -2498,9 +2498,10 @@
             if (results.length) renderList();
         }
         function rescanFolder() {
-            navigate('scan');
             if (lastScanRoot) $('folder-path').value = lastScanRoot;
-            $('analyze-btn').focus();
+            // GUI-REV4 K-3: the focus target goes with the navigation — focusing after it lost
+            // to the hashchange, which focused the screen heading.
+            navigate('scan', $('analyze-btn'));
         }
         // GUI-REV4 K-1: the results an export was asked for. A response that arrives after
         // other results replaced them is ignored — no marks, no error, no download.

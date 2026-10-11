@@ -549,6 +549,8 @@ def main() -> int:
             console_errors[:] = [e for e in console_errors if "status of 409" not in e]
             refused.get_by_role("button", name="다시 검사").click()
             page.wait_for_function("() => currentView === 'scan'")
+            # GUI-REV4 K-3: 다시 검사 leaves the focus on 검사 시작.
+            page.wait_for_function("() => document.activeElement && document.activeElement.id === 'analyze-btn'", timeout=5_000)
             assert Path(page.input_value("#folder-path")).resolve() == mutable.resolve()
             page.click("#analyze-btn")
             page.wait_for_function("() => scanBusy === false && currentView === 'ledger' && results.length > 0", timeout=180_000)
