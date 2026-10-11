@@ -208,6 +208,27 @@ class GitRoundTripTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("히스토리에 없습니다", text)
 
+    def test_r18_14_a_mapping_unlike_the_commit_gaps_fails_unless_noted(self) -> None:
+        """R18-14 (round 18): ids[] said R16-8 → G13 while its commit said G29, and --check passed."""
+        seed = json.loads(self.json_path.read_text(encoding="utf-8"))
+        seed["ids"][0]["gaps"] = ["G13"]  # P1's commit says "Gaps: G30"
+        self.json_path.write_text(json.dumps(seed), encoding="utf-8")
+        self.assertEqual(self.run_main()[0], 0)
+        self.commit("docs: regenerate table (P12)")
+        code, text = self.run_main("--check")
+        self.assertEqual(code, 1, text)
+        self.assertIn("ids[] P1의 갭 매핑(G13)이 커밋(", text)
+        self.assertIn("커밋에 없는 갭 G13; 커밋이 인용한 갭 G30 누락", text)
+        table = json.loads(self.json_path.read_text(encoding="utf-8"))
+        table["ids"][0]["gaps_note"] = "시험: 커밋 제목이 잘못된 갭을 인용"
+        self.json_path.write_text(json.dumps(table), encoding="utf-8")
+        self.git("reset", "-q", "HEAD~1")
+        self.assertEqual(self.run_main()[0], 0)
+        self.commit("docs: regenerate table (P12)")
+        code, text = self.run_main("--check")
+        self.assertEqual(code, 0, text)
+        self.assertEqual(json.loads(self.json_path.read_text(encoding="utf-8"))["ids"][0]["gaps_note"], "시험: 커밋 제목이 잘못된 갭을 인용")
+
     def test_check_fails_when_table_lags_its_commit(self) -> None:
         self.run_main()
         self.commit("fix: sneaked in before committing the table", "z", only="f.txt")
@@ -215,6 +236,15 @@ class GitRoundTripTest(unittest.TestCase):
         code, text = self.run_main("--check")
         self.assertEqual(code, 1)
         self.assertIn("부모", text)
+
+
+
+class CommittedMappingTest(unittest.TestCase):
+    def test_r18_14_the_committed_ids_match_their_commits_gaps(self) -> None:
+        """R18-14 (round 18): R16-8 (G13 vs G29), R16-12, R15-6, R16-10, R13-6 and G10 on R15-3/R16-2/R16-3
+        disagreed with their commits. Checked on the committed table (no git history needed)."""
+        table = json.loads((REPO_ROOT / "docs" / "traceability-commits.json").read_text(encoding="utf-8"))
+        self.assertEqual(btc.mapping_problems(table), [])
 
 
 if __name__ == "__main__":

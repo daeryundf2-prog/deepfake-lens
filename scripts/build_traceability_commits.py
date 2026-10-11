@@ -30,6 +30,10 @@ that range and fails when the committed JSON/Markdown differ, when
 (or HEAD itself, for an uncommitted regeneration), or when the history the
 table was built from is gone (rewritten without regenerating).
 
+R18-14 (round 18): it also fails when an ``ids[]`` gap mapping differs
+from the ``Gaps:`` of the commits that cite the ID (:func:`mapping_problems`)
+unless the entry has a ``gaps_note``.
+
 R9-10 (round 9): it also fails when more than one commit follows
 ``range.head`` — the only commit allowed after the table's range is the
 one regenerating it — or when that commit changes anything besides the
@@ -248,7 +252,8 @@ def build(data: dict[str, Any], base: str, head: str) -> dict[str, Any]:
             by_id.setdefault(id_, []).append(commit["short"])
     ids = []
     for entry in data["ids"]:
-        entry = {key: entry.get(key) for key in ("id", "round", "source", "summary", "gaps", "new")}
+        # R18-14: gaps_note (curated, optional) explains an ids[] mapping that differs from the commit subjects.
+        entry = {key: entry.get(key) for key in ("id", "round", "source", "summary", "gaps", "new", *(("gaps_note",) if entry.get("gaps_note") else ()))}
         entry["commits"] = by_id.get(entry["id"], [])
         entry["used_in_commit_subjects"] = bool(entry["commits"])
         ids.append(entry)
@@ -390,6 +395,40 @@ def _later_commit_problems(head: str) -> list[str]:
     return []
 
 
+def mapping_problems(table: dict[str, Any]) -> list[str]:
+    """R18-14 (round 18): ids[] gap mappings that disagree with the ``Gaps:`` of their commits.
+
+    For every ID used in commit subjects: a gap in ``ids[].gaps`` that none
+    of its commits names, and — for a commit about this ID alone — a gap
+    the commit names that ``ids[].gaps`` lacks, is a problem unless the
+    entry carries a ``gaps_note`` saying why (e.g. a commit subject that
+    cited the wrong gap, R17-11). The verifier found R16-8 mapped to G13
+    while its commit said G29, and five more such pairs, all passing
+    ``--check``.
+    """
+    by_short = {commit["short"]: commit for commit in table["commits"]}
+    problems: list[str] = []
+    for entry in table["ids"]:
+        if entry.get("gaps_note") or not entry.get("commits"):
+            continue
+        commits = [by_short[short] for short in entry["commits"] if short in by_short]
+        named = {gap for commit in commits for gap in commit["gaps"]}
+        mapped = list(entry.get("gaps") or [])
+        extra = [gap for gap in mapped if gap not in named]
+        missing = sorted(
+            {gap for commit in commits if commit["ids"] == [entry["id"]] for gap in commit["gaps"] if gap not in mapped},
+            key=lambda gap: int(gap[1:]),
+        )
+        if extra or missing:
+            shorts = ", ".join(entry["commits"])
+            parts = ([f"커밋에 없는 갭 {', '.join(extra)}"] if extra else []) + ([f"커밋이 인용한 갭 {', '.join(missing)} 누락"] if missing else [])
+            problems.append(
+                f"ids[] {entry['id']}의 갭 매핑({', '.join(mapped) or '없음'})이 커밋({shorts})의 Gaps와 다릅니다 — "
+                + "; ".join(parts) + " (매핑을 고치거나 gaps_note로 이유를 적으십시오)"
+            )
+    return problems
+
+
 def check(committed_json: str, committed_md: str) -> list[str]:
     """Problems with the committed table (empty list = current)."""
     try:
@@ -420,6 +459,7 @@ def check(committed_json: str, committed_md: str) -> list[str]:
         )
     problems += _later_commit_problems(head)
     expected = build(data, base, head)
+    problems += mapping_problems(expected)  # R18-14
     if dump_json(expected) != committed_json:
         problems.append(f"{JSON_REL}이(가) 히스토리에서 다시 만든 표와 다릅니다 — python scripts/build_traceability_commits.py 를 실행하십시오")
     if render_markdown(expected) != committed_md:

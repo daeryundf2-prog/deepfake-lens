@@ -13,7 +13,8 @@
     "Z3 → G7 근거: R-OUT-6(진입점이 같은 입력을 같게 다룸) — CLI 진입점이 `Path()`로 끝 구분자를 지워, OS가 ENOTDIR로 거부하는 경로(`photo.png/`)를 다른 파일 경로처럼 분석했다.",
     "P12: 라운드 8 검증 때 이 표의 해시 115개가 전부 히스토리 리라이트 이전 값이었다 — 이제 표는 현재 히스토리에서 제목으로 매칭해 재생성되고(`pre_rewrite_subject`에 리라이트 전 제목), CI가 `--check`로 최신 여부를 확인한다.",
     "P14: Gaps를 제목 괄호에만 적은 커밋(예: `(Z1-Z5; Gaps: G7, 신규)`)은 규칙상 허용 — 스크립트가 본문의 `Gaps:` 줄을 먼저, 없으면 제목을 읽는다.",
-    "R17-11: 0ce6d1b의 제목은 R16-13(Ctrl-C → 정리 후 '중단됨' exit 130)에 G13(사진/비사진 게이트)을 인용했다 — 잘못된 인용이다. R16-13의 매핑은 G34(R-SYS-3: 종료·자원 정리)로 정정했다. commits[]의 `gaps`/`gaps_line`은 커밋 제목을 그대로 옮긴 값이라(히스토리는 고치지 않음) 0ce6d1b 행에는 G13이 남는다 — 기준은 ids[]의 매핑."
+    "R17-11: 0ce6d1b의 제목은 R16-13(Ctrl-C → 정리 후 '중단됨' exit 130)에 G13(사진/비사진 게이트)을 인용했다 — 잘못된 인용이다. R16-13의 매핑은 G34(R-SYS-3: 종료·자원 정리)로 정정했다. commits[]의 `gaps`/`gaps_line`은 커밋 제목을 그대로 옮긴 값이라(히스토리는 고치지 않음) 0ce6d1b 행에는 G13이 남는다 — 기준은 ids[]의 매핑.",
+    "R18-14: ids[]의 갭 매핑을 커밋 제목·본문의 `Gaps:`에 맞췄다 — R13-2(+G34), R13-6(G12→G30), R15-2(G9 제거, 신규만), R15-3(G10→G1), R15-4(+G34), R15-6(G12→G34), R16-2(G10→G1), R16-3(G10 제거 — 프로필 revision 핀과 무관), R16-8(G13→G29), R16-9(+G9), R16-10(G30→G34), R16-12(G27→G26). `--check`는 이제 ids[]의 갭이 그 ID를 인용한 커밋의 Gaps에 없거나, 그 ID만 다룬 커밋이 인용한 갭이 ids[]에 없으면 실패한다(`gaps_note`로 이유를 적은 항목은 제외)."
   ],
   "wp_gaps": {
     "WP-A": [
@@ -2377,7 +2378,8 @@
       "summary": "압축 파일이 추출 중 재작성되면 컨테이너 sha256이 추출 바이트와 다름 → 전후 비교, 판단 불가·해시 없음",
       "gaps": [
         "G11",
-        "G30"
+        "G30",
+        "G34"
       ],
       "new": null,
       "commits": [
@@ -2432,8 +2434,8 @@
       "source": "verify_round13.md",
       "summary": "중첩 중복 멤버 행에 중복 사유 없음 → 멤버 행 coverage에 기록",
       "gaps": [
-        "G12",
-        "G34"
+        "G34",
+        "G30"
       ],
       "new": null,
       "commits": [
@@ -2618,9 +2620,7 @@
       "round": 15,
       "source": "verify_round15.md",
       "summary": "onnxruntime import 시 텔레메트리 연결 시도·deviceid 생성 → 패키지 최상위에서 텔레메트리 차단 변수",
-      "gaps": [
-        "G9"
-      ],
+      "gaps": [],
       "new": "오프라인 보장(R-IN-4)",
       "commits": [
         "c5115ae"
@@ -2634,7 +2634,7 @@
       "summary": "FaceLandmarker·SyncNet·Haar 재정의가 핀 없이 로드 → models/assets.json 자산 핀, 미고정은 거부",
       "gaps": [
         "G9",
-        "G10"
+        "G1"
       ],
       "new": null,
       "commits": [
@@ -2647,7 +2647,9 @@
       "round": 15,
       "source": "verify_round15.md",
       "summary": "과거 커밋이 SIGINT 무시 상속 환경에서 자체 테스트 실패 → 이력 문서화, 테스트 자식 신호 기본값",
-      "gaps": [],
+      "gaps": [
+        "G34"
+      ],
       "new": "테스트 환경 — 갭 목록 밖",
       "commits": [
         "0b44e2d"
@@ -2672,7 +2674,7 @@
       "source": "verify_round15.md",
       "summary": "비ASCII TMPDIR 시 조용한 대체 → 한국어 안내·temp_folder 기록·DEEPFAKE_LENS_TMPDIR",
       "gaps": [
-        "G12"
+        "G34"
       ],
       "new": "임시 폴더 — 갭 목록 밖",
       "commits": [
@@ -2730,7 +2732,7 @@
       "summary": "Haar 재정의 cascade가 다른 바이트면 조용히 무시 → 재정의만 사용, 불일치는 failed",
       "gaps": [
         "G9",
-        "G10"
+        "G1"
       ],
       "new": null,
       "commits": [
@@ -2744,8 +2746,7 @@
       "source": "verify_round16.md",
       "summary": "장기 실행 서버에서 재핀·핀 제거 후 옛 자산 바이트 사용 → 핀 키 캐시",
       "gaps": [
-        "G9",
-        "G10"
+        "G9"
       ],
       "new": null,
       "commits": [
@@ -2813,7 +2814,7 @@
       "source": "verify_round16.md",
       "summary": "pin-asset 오류에 영어 errno·내부 tmp 이름 → 한국어",
       "gaps": [
-        "G13"
+        "G29"
       ],
       "new": null,
       "commits": [
@@ -2827,7 +2828,8 @@
       "source": "verify_round16.md",
       "summary": "doctor가 자산 핀 상태 미표시 → 표·JSON에 자산 핀 상태",
       "gaps": [
-        "G29"
+        "G29",
+        "G9"
       ],
       "new": null,
       "commits": [
@@ -2841,7 +2843,7 @@
       "source": "verify_round16.md",
       "summary": "임시 폴더 문구가 원인 무관·증거설명서 누락 → 원인별 문구, 증거설명서 기록",
       "gaps": [
-        "G30"
+        "G34"
       ],
       "new": "임시 폴더 — 갭 목록 밖",
       "commits": [
@@ -2867,7 +2869,7 @@
       "source": "verify_round16.md",
       "summary": "git 이력 규칙 문서 불일치 → 공유 규칙·문서 갱신",
       "gaps": [
-        "G27"
+        "G26"
       ],
       "new": null,
       "commits": [
