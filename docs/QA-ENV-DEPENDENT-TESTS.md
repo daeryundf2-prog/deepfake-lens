@@ -58,7 +58,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `checkpoint is present; auto-discovery would run real inference` | 체크포인트가 없는 환경에서만 실행(가중치를 받은 환경에서는 해당 없음) | test_aide_engine.py |
 | `checkpoint is present; unavailable-path assertion does not apply` | 체크포인트가 없는 환경에서만 실행(가중치를 받은 환경에서는 해당 없음) | test_aasist_engine.py, test_aide_engine.py |
 | `ctime is the creation time on Windows` | Windows가 아닌 OS(POSIX — `st_ctime_ns`가 inode 변경 시각이라 `touch -r`로 되돌릴 수 없음) | test_file_changed.py |
-| `fastapi + httpx not installed` | fastapi, httpx(QA 사이드 venv: `pip install fastapi httpx uvicorn`) | test_cli_operations.py, test_d16_ui_api.py, test_forensic_pdf.py, test_korean_output.py, test_native_path.py, test_non_utf8_names.py, test_path_b64.py, test_reviews.py, test_servers.py, test_standalone_contract.py |
+| `fastapi + httpx not installed` | fastapi, httpx(QA 사이드 venv: `pip install fastapi httpx uvicorn`) | test_cli_operations.py, test_d16_ui_api.py, test_forensic_pdf.py, test_korean_output.py, test_native_path.py, test_non_utf8_names.py, test_path_b64.py, test_gui_server_fields.py, test_reviews.py, test_servers.py, test_standalone_contract.py |
 | `fastapi + httpx not installed — API-server leg of QA-OUT-4` | fastapi, httpx(QA 사이드 venv) | test_qa_out.py |
 | `fastapi + httpx not installed — stream payload` | fastapi, httpx(QA 사이드 venv) + Pillow | test_json_contract.py |
 | `fastapi + httpx not installed — streaming API` | fastapi, httpx(QA 사이드 venv) | test_cli_operations.py |
@@ -82,7 +82,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `mediapipe not installed` | `face_mediapipe` 또는 `face_tasks` extra(mediapipe) | test_face.py |
 | `no JavaScript engine (node or osascript)` | Node.js 또는 macOS `osascript`(JavaScriptCore) — gui.js의 검토 표시 키 함수(R18-8)·모델 점수 표시 함수(R18-17)를 실제로 실행(기준 환경에서는 소스 검사만) | test_gui_model_score.py, test_gui_review_keys.py |
 | `node + playwright + Chromium not installed (headless GUI check)` | Node.js + `playwright` npm 패키지 + Chromium(`npx playwright install chromium`) — 헤드리스 GUI 확인 | test_path_b64.py |
-| `node is not installed` | Node.js(`node`) — GUI 스크립트 검사 | test_archives.py, test_path_b64.py |
+| `node is not installed` | Node.js(`node`) — GUI 스크립트 검사 | test_archives.py, test_gui_ledger.py, test_path_b64.py |
 | `node required to run gui.js helpers` | Node.js(`node`) — GUI 스크립트 검사 | test_display_names.py |
 | `not a git work tree` | git 작업 트리(압축본·내보낸 사본 아님). R16-12: 얕은 복제(shallow clone)는 건너뛰지 않는다 — 인용된 커밋이 잘린 이력에 없으면 test_qa_sys.py·test_shutdown.py가 같은 규칙·같은 메시지(`HEAD 이력에 제목이 …인 커밋이 없습니다 — 얕은 복제(shallow clone)라 이력이 잘려 있습니다 …`)로 **실패**한다(아래 "얕은 복제" 참조) | test_output_generation.py, test_qa_sys.py, test_shutdown.py |
 | `numpy + Pillow needed for the mixed fixture` | `dev` extra(numpy, Pillow) | test_korean_output.py |
@@ -106,7 +106,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `opencv/numpy required` | `pixel` extra(opencv-python, numpy) | test_standalone_contract.py |
 | `photo fixture unavailable: {exc}` | `dev` extra(numpy, Pillow) + `ml` extra(scikit-learn — 실사진 샘플) | test_decision.py |
 | `pymupdf (and numpy for the fixture) — the venv_api / extras run covers this` | pymupdf + numpy(QA 사이드 venv) | test_pdf_layout.py |
-| `pymupdf not installed` | pymupdf(QA 사이드 venv: `pip install pymupdf`) | test_cli_korean.py, test_evidence_statement.py, test_korean_output.py, test_report_labels_ko.py |
+| `pymupdf not installed` | pymupdf(QA 사이드 venv: `pip install pymupdf`) | test_cli_korean.py, test_evidence_statement.py, test_gui_exhibit_selection.py, test_korean_output.py, test_report_labels_ko.py |
 | `pymupdf not installed — the venv_api / extras run covers this` | pymupdf(QA 사이드 venv) | test_forensic_pdf.py, test_pdf_backend.py |
 | `pymupdf required for PDF generation` | pymupdf(QA 사이드 venv) | test_display_names.py, test_evidence_statement.py, test_non_utf8_names.py, test_report_time.py |
 | `pymupdf required for PDF text` | pymupdf(QA 사이드 venv) | test_office_config.py, test_servers.py |

@@ -139,7 +139,7 @@ class WebReportSelectionTest(unittest.TestCase):
         from deepfake_lens.pdf_backend import import_pymupdf, pymupdf_available
 
         if not pymupdf_available():
-            self.skipTest("pymupdf is not installed")
+            self.skipTest("pymupdf not installed")
         chosen = [self.rows[0]["path"]]
         pdf = webapp_api._report_payload(self._body(exhibit_paths=chosen, submitter_side="plaintiff"), "evidence", default_folder=self.folder)
         assert isinstance(pdf, bytes), pdf
