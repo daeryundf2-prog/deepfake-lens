@@ -341,3 +341,57 @@ class DoctorCliTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DoctorRowsMatchTheChecksTest(unittest.TestCase):
+    """R18-13 (round 18): doctor said what the checks would not do.
+
+    (a) DEEPFAKE_LENS_HAAR_CASCADE naming a missing file or a folder was "[파일없음] … 이 자산을 쓰는 경로는
+    실행되지 않음" while face, seam, rPPG and lip-sync failed; (b) DEEPFAKE_LENS_FACE_LANDMARKER naming no file
+    left the mediapipe row OK while a check that found a face failed; (c) OpenCV without CascadeClassifier
+    (OpenCV 5) was "OK — 얼굴 검출…" while rPPG and lip-sync were "의존성 부재: cv2.CascadeClassifier".
+    """
+
+    def test_a_missing_haar_override_is_override_missing(self) -> None:
+        import os
+
+        from deepfake_lens import face
+        from deepfake_lens.model_assets import ASSET_OVERRIDE_MISSING, HAAR_FRONTALFACE
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for target in (Path(tmp, "missing.xml"), Path(tmp)):
+                with self.subTest(target=target.name or "folder"), mock.patch.dict(os.environ, {"DEEPFAKE_LENS_HAAR_CASCADE": str(target)}):
+                    report = run_diagnostics()
+                    row = {r["asset"]: r for r in report.model_assets}[HAAR_FRONTALFACE]
+                    self.assertEqual(row["state"], ASSET_OVERRIDE_MISSING)
+                    self.assertIn("검사는 failed", str(row["detail"]))
+                    self.assertIn("[재정의없음]", format_report(report))
+                    with self.assertRaises(face.CascadeLoadError):  # what the checks meet
+                        face.load_face_cascade()
+
+    def test_a_missing_landmarker_override_warns_on_the_mediapipe_row(self) -> None:
+        import os
+
+        from deepfake_lens import doctor, face
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(face, "measured_landmarks_unavailable_reason", return_value=None):
+            with mock.patch.dict(os.environ, {"DEEPFAKE_LENS_FACE_LANDMARKER": str(Path(tmp, "none.task"))}):
+                check = doctor._mediapipe_check("mediapipe", "1.1.0", "실측 얼굴 랜드마크")
+            self.assertEqual((check.status, check.detail), ("warn", f"v1.1.0 — {doctor.LANDMARKER_OVERRIDE_MISSING_NOTE}"))
+            with mock.patch.dict(os.environ, {"DEEPFAKE_LENS_FACE_LANDMARKER": ""}):
+                self.assertEqual(doctor._mediapipe_check("mediapipe", "1.1.0", "실측 얼굴 랜드마크").status, "ok")
+
+    def test_opencv_without_cascade_classifier_warns(self) -> None:
+        import types
+
+        from deepfake_lens import doctor
+
+        real = doctor._import_dependency
+
+        def fake(name: str) -> object:
+            return types.SimpleNamespace(__version__="5.0.0") if name == "cv2" else real(name)
+
+        with mock.patch.object(doctor, "_import_dependency", side_effect=fake):
+            row = next(check for check in run_diagnostics().dependencies if check.name == "opencv-python")
+        self.assertEqual(row.status, "warn")
+        self.assertIn(doctor.CV2_NO_CASCADE_NOTE, row.detail)

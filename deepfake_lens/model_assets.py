@@ -336,6 +336,8 @@ ASSET_UNPINNED = "unpinned"
 ASSET_MISMATCH = "mismatch"
 ASSET_ABSENT = "absent"
 ASSET_MANIFEST_ERROR = "manifest_error"
+# R18-13 (round 18): the override variable names no file — the loader fails every check that needs the asset.
+ASSET_OVERRIDE_MISSING = "override_missing"
 # R17-9: the assets the loaders know — listed by doctor even when the manifest cannot be read.
 KNOWN_ASSETS = (HAAR_FRONTALFACE, FACE_LANDMARKER, SYNCNET_WEIGHTS, S3FD_WEIGHTS)
 
@@ -364,8 +366,9 @@ def asset_status(models_dir: Path | str | None = None) -> list[dict[str, object]
     ``DEEPFAKE_LENS_FACE_LANDMARKER``), else ``<models dir>/<asset>`` (the
     bundled cascade for the Haar XML). ``state``: ``ok`` (pinned, present,
     digest matches), ``mismatch`` (pinned, other bytes — refused),
-    ``unpinned`` (no pin — refused if present), ``absent`` (pinned, no file);
-    ``detail`` says it in Korean.
+    ``unpinned`` (no pin — refused if present), ``absent`` (pinned, no file),
+    R18-13: ``override_missing`` (the override variable names no file — the
+    checks that need the asset fail); ``detail`` says it in Korean.
     """
     folder = Path(models_dir) if models_dir is not None else _models_dir()
     governing = manifest_path(folder)
@@ -392,7 +395,15 @@ def asset_status(models_dir: Path | str | None = None) -> list[dict[str, object]
         matches: bool | None = None
         if present and expected:
             matches = _file_sha256(candidate) == expected
-        if expected is None:
+        if override_path is not None and not present:
+            # R18-13: doctor said "[파일없음] … 이 자산을 쓰는 경로는 실행되지 않음" while the loaders
+            # fail ("재정의 cascade 파일이 없습니다" / "재정의 FaceLandmarker 파일이 없습니다").
+            state = ASSET_OVERRIDE_MISSING
+            detail = (
+                f"재정의 파일 없음({ASSET_OVERRIDE_ENV[name]}가 가리키는 파일이 없거나 파일이 아님) — "
+                "이 자산을 쓰는 검사는 failed(재정의 파일이 없습니다)"
+            )
+        elif expected is None:
             state = ASSET_UNPINNED
             detail = (
                 "핀 없음 — 파일이 있지만 로드 거부(쓰는 검사는 failed: 미고정 모델); `vendor-weights pin-asset`으로 고정"

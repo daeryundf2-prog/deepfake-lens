@@ -442,6 +442,11 @@ def _run_diagnostics(models_dir: Path | None) -> DoctorReport:
             if import_name == "mediapipe":
                 report.dependencies.append(_mediapipe_check(package, version, purpose))
                 continue
+            if import_name == "cv2" and not hasattr(module, "CascadeClassifier"):
+                # R18-13 (round 18): was "OK — 얼굴 검출…" while rPPG and lip-sync were
+                # skipped "의존성 부재: cv2.CascadeClassifier" (OpenCV 5 without contrib).
+                report.dependencies.append(Check(package, "warn", f"v{version} — {purpose}; {CV2_NO_CASCADE_NOTE}"))
+                continue
             report.dependencies.append(Check(package, "ok", f"v{version} — {purpose}"))
         except ImportError:
             report.dependencies.append(Check(package, "missing", f"미설치 — {purpose}"))
@@ -460,12 +465,28 @@ def _mediapipe_check(package: str, version: str, purpose: str) -> Check:
     reason = measured_landmarks_unavailable_reason()
     if reason:
         return Check(package, "warn", f"v{version} — {reason} (얼굴 트랙은 의존성 부재로 건너뜀)")
+    from .model_assets import FACE_LANDMARKER, asset_override
+
+    override = asset_override(FACE_LANDMARKER)
+    if override is not None and not override.is_file():
+        # R18-13 (round 18): was OK while every check that found a face failed on the missing override.
+        return Check(package, "warn", f"v{version} — {LANDMARKER_OVERRIDE_MISSING_NOTE}")
     return Check(package, "ok", f"v{version} — {purpose}")
+
+
+# R18-13: the warnings of the opencv and mediapipe rows when the checks that need them cannot run as the row implied.
+CV2_NO_CASCADE_NOTE = "cv2.CascadeClassifier 없음(OpenCV 5 기본 빌드) — rPPG·립싱크 검사는 의존성 부재로 건너뜀"
+LANDMARKER_OVERRIDE_MISSING_NOTE = (
+    "DEEPFAKE_LENS_FACE_LANDMARKER가 가리키는 파일이 없음 — 얼굴이 검출되면 랜드마크를 쓰는 검사는 failed"
+)
 
 
 _COLUMN_MARK = {OK: "OK", NOT_APPLICABLE: "해당 없음", MISSING: "MISS", MISMATCH: "불일치"}
 # R16-9: the 5-character mark of each model_assets.asset_status state.
-_ASSET_MARK = {"ok": " OK  ", "mismatch": "불일치", "unpinned": "핀없음", "absent": "파일없음", "manifest_error": "매니페스트오류"}
+_ASSET_MARK = {
+    "ok": " OK  ", "mismatch": "불일치", "unpinned": "핀없음", "absent": "파일없음", "manifest_error": "매니페스트오류",
+    "override_missing": "재정의없음",  # R18-13
+}
 # B7: Korean section headers of the doctor table.
 SECTION_TITLES = {
     "model_profiles": "모델 프로필",
@@ -507,7 +528,7 @@ def format_report(report: DoctorReport) -> str:
             lines.append(f"[{icon.get(check.status, '????')}] {check.name}: {check.detail}")
     # R16-9: the pin state of every model asset (Haar cascade, FaceLandmarker, SyncNet weights).
     lines.append(f"\n== {SECTION_TITLES['model_assets']} ==")
-    lines.append("(자산마다 핀 상태 — OK: 고정·일치, 불일치/핀 없음: 로드 거부, 파일 없음: 그 경로 미실행)")
+    lines.append("(자산마다 핀 상태 — OK: 고정·일치, 불일치/핀 없음: 로드 거부, 파일 없음: 그 경로 미실행, 재정의 없음: 그 자산을 쓰는 검사 failed)")
     for row in report.model_assets:
         mark = _ASSET_MARK.get(str(row.get("state")), "????")
         override = f", {row['override']}" if row.get("override") else ""
