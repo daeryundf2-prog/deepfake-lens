@@ -259,6 +259,9 @@ def analyze_av_sync(
         import cv2  # noqa: F401
     except ImportError:
         return _av_sync_error("opencv가 설치되어 있지 않습니다. `pip install opencv-python`으로 설치하세요.")
+    from .audio_worker import prepare_process_numba_cache
+
+    prepare_process_numba_cache()  # R19-2: never numba's shared cache in site-packages
     try:
         import librosa  # noqa: F401
     except ImportError:
@@ -496,6 +499,9 @@ def _audio_envelope(video_path: Path):
 
     Returns (envelope, rate_hz, audio_seconds) or (None, 0, 0) on failure.
     """
+    from .audio_worker import prepare_process_numba_cache
+
+    prepare_process_numba_cache()  # R19-2: never numba's shared cache in site-packages
     try:
         import librosa
     except ImportError:

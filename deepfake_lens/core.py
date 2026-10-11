@@ -15,6 +15,7 @@ from typing import Callable, NamedTuple
 from .archives import archive_format, extract_archive, is_archive
 from .native_path import expand_user, scratch_dir, temp_location
 from .audio import SUPPORTED_AUDIO_EXTENSIONS, AudioAnalysis, analyze_audio
+from .audio_worker import worker_scope as audio_worker_scope
 from .video_analysis import (
     AV_AUDIO_CHECK,
     SUPPORTED_VIDEO_EXTENSIONS,
@@ -856,28 +857,30 @@ def _scan_specs(
     # used to ``break`` and the rest vanished — no row, no count (300 files,
     # cancel after 5: summary.total 3, the other 297 nowhere).
     cancelled: list[_ScanSpec] = []
-    if workers > 1 and len(specs) > 1:
-        # Each worker still checks should_stop so a cancel short-circuits
-        # remaining items instead of running every analysis to completion.
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            outcomes = list(executor.map(analyze_and_report, specs))
-        for spec, outcome in zip(specs, outcomes):
-            if outcome is None:
-                cancelled.append(spec)
-            else:
-                analyzed.append(outcome)
-    else:
-        try:
-            for position, spec in enumerate(specs):
-                outcome = analyze_and_report(spec)
+    # R19-2 (round 19): the scan's audio-feature workers (one per scanning thread) end with the scan.
+    with audio_worker_scope() as scope:
+        if workers > 1 and len(specs) > 1:
+            # Each worker still checks should_stop so a cancel short-circuits
+            # remaining items instead of running every analysis to completion.
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                outcomes = list(executor.map(scope.bind(analyze_and_report), specs))
+            for spec, outcome in zip(specs, outcomes):
                 if outcome is None:
-                    cancelled.extend(specs[position:])
-                    break
-                analyzed.append(outcome)
-                if len(analyzed) % _CACHE_FLUSH_EVERY == 0:
-                    flush_cache(analyzed[-_CACHE_FLUSH_EVERY:])
-        finally:
-            flush_cache(analyzed)
+                    cancelled.append(spec)
+                else:
+                    analyzed.append(outcome)
+        else:
+            try:
+                for position, spec in enumerate(specs):
+                    outcome = analyze_and_report(spec)
+                    if outcome is None:
+                        cancelled.extend(specs[position:])
+                        break
+                    analyzed.append(outcome)
+                    if len(analyzed) % _CACHE_FLUSH_EVERY == 0:
+                        flush_cache(analyzed[-_CACHE_FLUSH_EVERY:])
+            finally:
+                flush_cache(analyzed)
     cancelled_members: dict[str, int] = {}
     for _, _, identity in cancelled:
         if identity is not None:

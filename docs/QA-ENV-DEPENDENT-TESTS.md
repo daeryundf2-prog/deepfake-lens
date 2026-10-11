@@ -42,7 +42,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `core_pattern is a pipe or a path — no core file in the working directory to look for` | Linux에서 `/proc/sys/kernel/core_pattern`이 `core`처럼 파이프·경로가 아닌 이름(코어 파일이 작업 폴더에 생기는 설정 — 게이트 이미지가 그렇다; R18-9) | test_shutdown.py |
 | `':' is not allowed in Windows file names` | Windows가 아닌 OS(POSIX) | test_archives.py, test_servers.py |
 | `OpenCV mp4v 인코더 없음` | `pixel`/`video` extra(opencv-python — mp4v 인코더 포함 빌드) | test_native_path.py |
-| `POSIX signals` | Windows가 아닌 OS(POSIX — 자식 프로세스에 SIGTERM/SIGINT/SIGHUP을 보내 기본 동작과 스테이징 폴더 정리 확인) | test_native_path.py, test_shutdown.py |
+| `POSIX signals` | Windows가 아닌 OS(POSIX — 자식 프로세스에 SIGTERM/SIGINT/SIGHUP을 보내 기본 동작과 스테이징 폴더 정리 확인) | test_audio_worker.py, test_native_path.py, test_shutdown.py |
 | `PR_SET_PDEATHSIG is Linux` | Linux(`prctl(PR_SET_PDEATHSIG)` — 부모가 SIGKILL로 죽으면 ffmpeg 등 자식 프로세스도 함께 종료, R15-1) | test_shutdown.py |
 | `Pillow + numpy needed for the fixture` | `dev` extra(Pillow, numpy) | test_report_labels_ko.py |
 | `Pillow + numpy required to write EXIF/XMP fixtures` | `dev` extra(Pillow, numpy) | test_image_metadata_exif.py |
@@ -74,7 +74,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `git not available` | git 실행 파일 | test_output_generation.py, test_qa_sys.py, test_qa_verify_record.py, test_shutdown.py |
 | `golden output recorded on POSIX (path and OS error wording)` | Windows가 아닌 OS(POSIX — 골든 스캔 출력은 POSIX 경로·OS 오류 문구 기준으로 기록, R15-7/R16-5) | test_output_generation.py |
 | `jsonschema not installed (dev extra) — _check_object covers the stdlib job` | `dev` extra(jsonschema) | test_json_contract.py |
-| `librosa not installed` | `audio`/`full` extra(librosa) | test_audio.py, test_v6_probes.py, test_video_analysis.py |
+| `librosa not installed` | `audio`/`full` extra(librosa) | test_audio.py, test_audio_worker.py, test_v6_probes.py, test_video_analysis.py |
 | `markdown-it-py + linkify-it-py not installed (QA side venv)` | markdown-it-py + linkify-it-py(QA 사이드 venv: `pip install markdown-it-py linkify-it-py`) — GFM식 자동 링크(linkify) 렌더 확인 | test_display_names.py |
 | `markdown-it-py not installed (QA side venv)` | markdown-it-py(QA 사이드 venv: `pip install markdown-it-py`) | test_display_names.py |
 | `mediapipe installed` | mediapipe가 없는 환경에서만 실행(대체 경로 검사) | test_face.py |
