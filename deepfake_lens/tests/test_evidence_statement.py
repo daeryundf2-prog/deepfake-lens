@@ -32,6 +32,8 @@ from deepfake_lens.result_types import (
 from deepfake_lens.evidence_statement import (
     EVIDENCE_STATEMENT_REPORT_TYPE,
     SIGNATURE_SECTION_TITLE,
+    STATUTE_NONE,
+    STATUTE_PLACEHOLDER,
     build_evidence_statement,
     signed_statement_body,
     write_evidence_statement_json,
@@ -133,10 +135,15 @@ class EvidenceStatementTest(_StatementFixture):
         self.assertEqual(statement.law_firm, "")
         self.assertEqual(statement.contact, "")
 
-        # Verify statutory mapping
-        statutes = statement.entries[0].statutes
-        self.assertTrue(any("성폭력범죄의 처벌 등에 관한 특례법 제14조의2" in st for st in statutes))
-        self.assertTrue(any("정보통신망" in st for st in statutes))
+        # R19-11 (round 19): this test expected the tool to list 성폭력처벌법 제14조의2 and 정보통신망법 for the
+        # manipulation row (chosen from the file kind and title words). No statute is chosen by the tool now:
+        # the row says the examiner writes them.
+        self.assertEqual(statement.entries[0].statutes, [])
+        self.assertIn(STATUTE_PLACEHOLDER, statement.entries[0].purpose_of_proof)
+        self.assertIn(STATUTE_NONE, statement.entries[1].purpose_of_proof)
+        for entry in statement.entries:
+            for word in ("제14조의2", "제70조", "제347조", "정보통신망", "성폭력"):
+                self.assertNotIn(word, entry.purpose_of_proof)
 
         # Verify SHA-256 hash was calculated
         self.assertEqual(len(statement.entries[0].sha256), 64)
@@ -187,7 +194,9 @@ class EvidenceStatementTest(_StatementFixture):
         # evidence "proves" an illegal synthetic production.
         self.assertIn("소명함", full_text)
         self.assertNotIn("불법 합성물임을 입증함", full_text)
-        self.assertIn("제14조의2", full_text)
+        # R19-11 (round 19): was assertIn("제14조의2") — the statute the tool chose; now the examiner's line.
+        self.assertIn("검토자 기재", full_text)
+        self.assertNotIn("제14조의2", full_text)
         self.assertIn("갑 제1호증", full_text)
 
     @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf required for PDF generation")

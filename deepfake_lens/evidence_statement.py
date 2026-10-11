@@ -5,10 +5,12 @@ Litigation standards. Formulates a structured 4-column exhibit schedule:
 1. 호증 (Exhibit Number, e.g. 갑 제1호증)
 2. 서증명 (Evidence Name & Media Metadata)
 3. 작성자 및 일자 (Forensic Center Signer & Date)
-4. 입증취지 및 위법성 구성요건 (Purpose of Proof & Statutory Article Mapping)
-   - 성폭력범죄의 처벌 등에 관한 특례법 제14조의2 (허위영상물 등의 반포등)
-   - 정보통신망 이용촉진 및 정보보호 등에 관한 법률 제70조 (명예훼손)
-   - 형법 제347조 (사기 - 신원 사칭)
+4. 입증취지 (Purpose of Proof)
+   - the automatic conclusion, its evidence and the checks that did not run
+   - R19-11 (round 19): no charge or statute is written by the tool — a
+     manipulation row carries the line "관련 법조: (검토자 기재 …)" for the
+     examiner (it used to list 정보통신망법 제70조 for every manipulation row,
+     and 성폭력처벌법 제14조의2 / 형법 제347조 for videos and "얼굴" titles)
    - Cryptographic SHA-256 evidence integrity verification
 
 Signing (G30): like the scan reports, the statement is signed as a whole —
@@ -287,27 +289,13 @@ def _clip(text: str, limit: int) -> str:
     return clipped
 
 
-def _determine_statutes(score: int, signals: list[Any], item_kind: str, band: str) -> list[str]:
-    """Statutes a legal reviewer may consider — only for a manipulation verdict.
-
-    ``band`` here is the verdict-derived band ("high" == manipulation
-    evidence on an evidence-grade result). A screening number is not proof
-    of a crime, so statutes are listed as '검토 참고' candidates only, and
-    never for undetermined, authenticity, reference-grade or failed items.
-    """
-    if band != "high":
-        return []
-    statutes = []
-    sig_titles = [s.title for s in signals] if signals else []
-
-    is_faceswap = any("얼굴" in t or "안면" in t or "스왑" in t or "턱선" in t for t in sig_titles)
-    is_video = item_kind == "video"
-
-    if is_faceswap or is_video:
-        statutes.append("성폭력범죄의 처벌 등에 관한 특례법 제14조의2 (허위영상물 등의 반포등) — 검토 참고")
-        statutes.append("형법 제347조 (사기 - 신원도용 및 기망) — 검토 참고")
-    statutes.append("정보통신망 이용촉진 및 정보보호 등에 관한 법률 제70조 (벌칙 - 명예훼손) — 검토 참고")
-    return statutes
+# R19-11 (round 19): the statute line of a manipulation row — the tool names no charge or statute.
+# _determine_statutes picked them from the file kind and title words alone (정보통신망법 제70조 on
+# every manipulation row, a cat picture with A1111 metadata included; 성폭력처벌법 제14조의2 and
+# 형법 제347조 for any video or a title with "얼굴") — the same unfounded entry R18-16 removed from
+# the case name. The examiner writes the statutes.
+STATUTE_PLACEHOLDER = "• 관련 법조: (검토자 기재 — 도구는 죄명·법조를 정하지 않습니다)"
+STATUTE_NONE = "• 관련 법조: 해당 없음 (결정적 근거에 의한 조작·생성 결론이 없음)"
 
 
 def _member_references(item: ScanItem, exhibits: dict[str, str], items: list[ScanItem]) -> str:
@@ -418,7 +406,7 @@ def build_evidence_statement(
         doc_name = f"디지털 증거 파일 ({row_label(item.path)}) 및 AI 스크리닝 데이터"
         author_date = f"{law_firm}\n{now_date}" if law_firm else now_date
 
-        statutes = _determine_statutes(score, signals, item.kind, band_value)
+        statutes: list[str] = []  # R19-11: never chosen by the tool
 
         # The tool screens; it does not prove crimes. Purpose language
         # follows the verdict and names the evidence kind behind it.
@@ -433,7 +421,7 @@ def build_evidence_statement(
                 evidence_lines.append("• 검사 범위: " + "; ".join(display_name(entry.describe()) for entry in gaps[:3]) + (f" 외 {len(gaps) - 3}건" if len(gaps) > 3 else ""))
         sig_text = "\n".join(evidence_lines) if evidence_lines else "• 근거 항목 없음"
 
-        statute_text = "\n".join([f"• {st}" for st in statutes]) if statutes else "• 관련 법조: 해당 없음 (결정적 근거에 의한 조작·생성 결론이 없음)"
+        statute_text = STATUTE_PLACEHOLDER if band_value == "high" else STATUTE_NONE
 
         hash_text = f"• 원본 SHA-256: {file_sha256}" if file_sha256 else f"• 원본 SHA-256: {hash_unavailable or HASH_UNAVAILABLE_ACCESS}"
 

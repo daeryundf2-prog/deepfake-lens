@@ -521,7 +521,7 @@ a report of upload rows only has no `scan_root`.
 (`--md-out`, `--pdf-out`, `POST /api/report?format=evidence`) are backed by
 one signed body: every field of `EvidenceStatement.to_json()` (`case_no`,
 `case_name`, `plaintiff`, `defendant`, `court`, `entries[]` with
-`purpose_of_proof`/`sha256`/`statutes`/`verdict_label`, `created_at`, `law_firm`, `contact` (empty unless set by flag, request or `~/.deepfake-lens/config.json` — N17),
+`purpose_of_proof`/`sha256`/`statutes` (R19-11: always `[]` — the tool names no charge or statute; a manipulation row's purpose says `관련 법조: (검토자 기재 — 도구는 죄명·법조를 정하지 않습니다)`)/`verdict_label`, `created_at`, `law_firm`, `contact` (empty unless set by flag, request or `~/.deepfake-lens/config.json` — N17),
 `center`, `provenance_note`, `reference_note`, `excluded_items` (X2 — web
 statements only: rows the server could not re-analyze, path/marker/reason;
 `[]` otherwise), `temp_folder` (R16-10 — the scan object's `temp_folder`; a fallback is also a `provenance_note` line), `unrecorded_files` — X1, the
