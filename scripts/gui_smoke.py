@@ -553,6 +553,25 @@ def main() -> int:
             assert "검사 뒤 바뀐 파일 1개(다시 검사 필요)" in page.locator("#report-checks").inner_text()
             assert page.get_attribute("#exp-signed", "aria-disabled") == "true", "the signed formats wait for the rescan"
             page.set_viewport_size({"width": 1440, "height": 900})
+            # GUI-REV5 L-1: clearing the results takes the changed-file alert and checklist item
+            # with them (a copy of the rows is scanned again right below).
+            page.once("dialog", lambda dialog: dialog.accept())
+            page.evaluate("document.getElementById('exp-clear').click()")
+            page.evaluate("location.hash = '#/report'")
+            page.wait_for_function("() => currentView === 'report'")
+            assert page.locator("#export-alert").is_hidden(), "the changed-file alert outlived 지우기"
+            assert "검사 뒤 바뀐 파일" not in page.locator("#report-checks").inner_text()
+            assert page.evaluate("changedPaths.size") == 0
+            page.evaluate("location.hash = '#/scan'")
+            page.fill("#folder-path", str(mutable))
+            victim.write_bytes(victim.read_bytes() + b"\nchanged again")
+            page.click("#analyze-btn")
+            page.wait_for_function("() => scanBusy === false && currentView === 'ledger' && results.length > 0", timeout=180_000)
+            page.evaluate("location.hash = '#/report'")
+            page.wait_for_function("() => currentView === 'report'")
+            victim.write_bytes(victim.read_bytes() + b"\nand once more")
+            page.click("#exp-signed")
+            page.wait_for_selector("#export-alert:not([hidden])", timeout=120_000)
             page.wait_for_selector("#error-region .err-item:has-text('검사 뒤 바뀐 파일')", timeout=120_000)
             refused = page.locator("#error-region .err-item", has_text="검사 뒤 바뀐 파일").last
             assert victim.name in refused.inner_text(), refused.inner_text()

@@ -1413,11 +1413,7 @@
             $('rev-filter').setAttribute('aria-pressed', 'false');
             selectedEntry = null;
             groupsTouched = false;
-            changedPaths = new Set();
-            changedInfo = new Map();
-            resultsGeneration += 1;  // K-1: earlier export responses no longer apply
-            clearExportRefusals();
-            renderExportAlert();
+            resetExportState();
             // H-8: case fields typed before the first scan belong to it.
             if (!caseFolder && caseHasValues()) confirmCaseFolder();
             renderResults();
@@ -2243,8 +2239,7 @@
             // G-9(d): clearing is not undoable — ask first.
             if (!results.length || !window.confirm(`화면의 검사 결과 ${results.length}개를 지웁니다. 검토 기록은 남습니다. 지울까요?`)) return;
             results = [];
-            resultsGeneration += 1;
-            clearExportRefusals();
+            resetExportState();  // L-1: the changed-file state goes with the results
             lastProvenance = { coverage: null, thresholds: null, summary: null };
             selectedEntry = null;
             renderResults();
@@ -2549,6 +2544,17 @@
             if (startGen !== nowGen) return '무시';
             if (status === 409 && changedCount > 0) return '바뀜';
             return ok ? '받기' : '오류';
+        }
+        // GUI-REV5 L-1: every path that replaces the results on screen (new results, an
+        // upload, clearing) resets the export state in one place — the changed-file marks,
+        // the alert next to the export buttons and the checklist item went stale on 지우기.
+        function resetExportState() {
+            changedPaths = new Set();
+            changedInfo = new Map();
+            resultsGeneration += 1;  // K-1: earlier export responses no longer apply
+            clearExportRefusals();
+            renderExportAlert();
+            if (currentView === 'report') renderReport();
         }
         function clearExportRefusals() {
             document.querySelectorAll('#error-region .err-item[data-export-gen]').forEach(box => box.remove());
