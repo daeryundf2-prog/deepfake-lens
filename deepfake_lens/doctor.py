@@ -465,7 +465,7 @@ def _mediapipe_check(package: str, version: str, purpose: str) -> Check:
 
 _COLUMN_MARK = {OK: "OK", NOT_APPLICABLE: "해당 없음", MISSING: "MISS", MISMATCH: "불일치"}
 # R16-9: the 5-character mark of each model_assets.asset_status state.
-_ASSET_MARK = {"ok": " OK  ", "mismatch": "불일치", "unpinned": "핀없음", "absent": "파일없음"}
+_ASSET_MARK = {"ok": " OK  ", "mismatch": "불일치", "unpinned": "핀없음", "absent": "파일없음", "manifest_error": "매니페스트오류"}
 # B7: Korean section headers of the doctor table.
 SECTION_TITLES = {
     "model_profiles": "모델 프로필",

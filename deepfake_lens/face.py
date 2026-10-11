@@ -28,7 +28,6 @@ With neither available the labelled box-ratio estimate stays active.
 from __future__ import annotations
 
 import importlib
-import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -41,6 +40,7 @@ from .model_assets import (
     HAAR_FRONTALFACE,
     UNPINNED_ASSET_PREFIX,
     AssetPinError,
+    asset_override,
     expected_sha256,
     manifest_state,
     sha256_mismatch_detail,
@@ -319,9 +319,14 @@ class OverrideCascadePinError(AssetPinError):
 
 
 def haar_cascade_override() -> str | None:
-    """R16-2: the cascade ``DEEPFAKE_LENS_HAAR_CASCADE`` names, or None when it is not set."""
-    value = os.environ.get(HAAR_CASCADE_ENV, "").strip()
-    return value or None
+    """R16-2: the cascade ``DEEPFAKE_LENS_HAAR_CASCADE`` names, or None when it is not set.
+
+    R17-9 (round 17): read through :func:`model_assets.asset_override` like
+    doctor — ``~`` expanded (the scan said "재정의 cascade 파일이 없습니다"
+    for ``~/x.xml`` while doctor said ok).
+    """
+    override = asset_override(HAAR_FRONTALFACE)
+    return str(override) if override is not None else None
 
 
 def haar_cascade_candidates() -> list[str]:
@@ -459,7 +464,7 @@ def measured_landmarks_unavailable_reason() -> str | None:
         import_mediapipe("mediapipe.tasks.python.vision")
     except (ImportError, AttributeError):
         return f"{MEASURED_LANDMARKS_MISSING}: mediapipe에 FaceMesh(solutions)도 Tasks API도 없습니다"
-    if os.environ.get(_FACE_LANDMARKER_ENV, "").strip() or _FACE_LANDMARKER_ASSET.is_file():
+    if asset_override(FACE_LANDMARKER) is not None or _FACE_LANDMARKER_ASSET.is_file():
         return None
     return f"{MEASURED_LANDMARKS_MISSING}: mediapipe에 FaceMesh(solutions)가 없고 {FACE_LANDMARKER} 자산도 없습니다"
 
@@ -877,9 +882,8 @@ def _verified_facelandmarker(path: Path) -> bytes:
 
 def _facelandmarker_model_path() -> Path | None:
     """Resolve the FaceLandmarker .task asset, if one is provisioned."""
-    override = os.environ.get(_FACE_LANDMARKER_ENV, "").strip()
-    if override:
-        path = Path(override).expanduser()
+    path = asset_override(FACE_LANDMARKER)  # R17-9: the reading doctor and the scan cache use
+    if path is not None:
         if not path.is_file():
             # R17-5 (round 17): was ignored silently (None → box-ratio estimates).
             raise FaceLandmarkerOverrideMissing(f"재정의 FaceLandmarker 파일이 없습니다({_FACE_LANDMARKER_ENV}): {path.name!r}")

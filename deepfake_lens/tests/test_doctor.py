@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import importlib.util
 import io
 import json
 import tempfile
@@ -190,6 +191,68 @@ class DoctorAssetPinTest(unittest.TestCase):
                 self.assertIn(asset, table)
             self.assertIn("sha256 불일치", table)
             report = run_diagnostics(folder)  # no override: the bundled cascade, pinned and matching
+        self.assertEqual({row["asset"]: row["state"] for row in report.model_assets}[HAAR_FRONTALFACE], "ok")
+
+
+class DoctorMatchesTheLoaderTest(unittest.TestCase):
+    """R17-9 (round 17): doctor and the loaders read the override and the manifest the same way.
+
+    ``DEEPFAKE_LENS_HAAR_CASCADE=~/x.xml`` was ok in doctor (``~`` expanded)
+    and "재정의 cascade 파일이 없습니다" in a scan; a broken or BOM-prefixed
+    assets.json left doctor's asset section empty while every face check
+    said "미고정 모델".
+    """
+
+    def test_a_tilde_override_is_the_same_file_for_doctor_and_the_scan(self) -> None:
+        import os
+
+        from deepfake_lens import face
+        from deepfake_lens.model_assets import HAAR_FRONTALFACE, PACKAGED_MANIFEST
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp).resolve()
+            (home / "x.xml").write_bytes((PACKAGED_MANIFEST.parent / HAAR_FRONTALFACE).read_bytes())
+            with mock.patch.dict(os.environ, {"HOME": str(home), "DEEPFAKE_LENS_HAAR_CASCADE": "~/x.xml"}):
+                self.assertEqual(face.haar_cascade_override(), str(home / "x.xml"))
+                self.assertEqual(face.haar_cascade_candidates(), [str(home / "x.xml")])
+                row = {r["asset"]: r for r in run_diagnostics().model_assets}[HAAR_FRONTALFACE]
+                self.assertEqual((row["state"], row["path"]), ("ok", str(home / "x.xml")))
+                if importlib.util.find_spec("cv2") is not None:
+                    import cv2
+
+                    if hasattr(cv2, "CascadeClassifier"):
+                        self.assertFalse(face.load_face_cascade().empty())  # was CascadeLoadError
+
+    def test_a_broken_manifest_is_shown(self) -> None:
+        import os
+
+        from deepfake_lens.model_assets import ASSET_MANIFEST_ERROR, HAAR_FRONTALFACE, KNOWN_ASSETS, expected_sha256
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp).resolve()
+            (folder / "assets.json").write_text("{broken", encoding="utf-8")
+            with mock.patch.dict(os.environ, {"DEEPFAKE_LENS_MODELS_DIR": str(folder), "DEEPFAKE_LENS_HAAR_CASCADE": ""}):
+                report = run_diagnostics(folder)
+                self.assertIsNone(expected_sha256(HAAR_FRONTALFACE))  # the loaders refuse every asset …
+            rows = report.model_assets
+            self.assertEqual(rows[0]["state"], ASSET_MANIFEST_ERROR)  # … and doctor says why
+            self.assertIn("올바른 JSON이 아닙니다", str(rows[0]["detail"]))
+            self.assertEqual(sorted(str(row["asset"]) for row in rows[1:]), sorted(KNOWN_ASSETS))
+            self.assertTrue(all(row["state"] == "unpinned" for row in rows[1:]))
+            self.assertIn("매니페스트", format_report(report))
+
+    def test_a_bom_manifest_pins_for_the_scan_and_doctor_alike(self) -> None:
+        import os
+
+        from deepfake_lens.model_assets import HAAR_FRONTALFACE, PACKAGED_MANIFEST, expected_sha256, manifest_error
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp).resolve()
+            (folder / "assets.json").write_bytes(b"\xef\xbb\xbf" + PACKAGED_MANIFEST.read_bytes())
+            with mock.patch.dict(os.environ, {"DEEPFAKE_LENS_MODELS_DIR": str(folder), "DEEPFAKE_LENS_HAAR_CASCADE": ""}):
+                self.assertIsNone(manifest_error())
+                self.assertIsNotNone(expected_sha256(HAAR_FRONTALFACE))
+                report = run_diagnostics(folder)
         self.assertEqual({row["asset"]: row["state"] for row in report.model_assets}[HAAR_FRONTALFACE], "ok")
 
 

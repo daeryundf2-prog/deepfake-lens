@@ -112,8 +112,9 @@ def manifest_state(path: Path | str | None = None) -> tuple[str, int, int, int, 
     return (str(target), info.st_mtime_ns, info.st_ctime_ns, info.st_size, info.st_ino)
 
 
-# R16-3: the parsed manifest per path, with the file state it was parsed from.
-_MANIFESTS: dict[str, tuple[tuple[str, int, int, int, int], dict[str, dict[str, Any]]]] = {}
+# R16-3: the parsed manifest per path, with the file state it was parsed from
+# (R17-9: and why it pins nothing, None when it parsed).
+_MANIFESTS: dict[str, tuple[tuple[str, int, int, int, int], dict[str, dict[str, Any]], str | None]] = {}
 
 
 def load_manifest(path: Path | str | None = None) -> dict[str, dict[str, Any]]:
@@ -125,31 +126,51 @@ def load_manifest(path: Path | str | None = None) -> dict[str, dict[str, Any]]:
     file's state (:func:`manifest_state`) changed — a re-pin or a removed
     pin takes effect in a running process.
     """
+    return _loaded(path)[0]
+
+
+def manifest_error(path: Path | str | None = None) -> str | None:
+    """R17-9 (round 17): why the governing manifest pins nothing (Korean), None when it parsed.
+
+    doctor shows it — a broken manifest used to leave doctor's asset section
+    empty while every face check said "미고정 모델".
+    """
+    return _loaded(path)[1]
+
+
+def _loaded(path: Path | str | None) -> tuple[dict[str, dict[str, Any]], str | None]:
     target = Path(path) if path is not None else manifest_path()
     state = manifest_state(target)
     cached = _MANIFESTS.get(str(target))
     if cached is not None and cached[0] == state and state[1] != -1:
-        return cached[1]
-    entries = _parse_manifest(target)
-    _MANIFESTS[str(target)] = (state, entries)
-    return entries
+        return cached[1], cached[2]
+    entries, error = _parse_manifest(target)
+    _MANIFESTS[str(target)] = (state, entries, error)
+    return entries, error
 
 
-def _parse_manifest(target: Path) -> dict[str, dict[str, Any]]:
+def _parse_manifest(target: Path) -> tuple[dict[str, dict[str, Any]], str | None]:
     try:
-        payload = json.loads(target.read_text(encoding="utf-8"))
-    except (OSError, ValueError, UnicodeError):
-        return {}
+        # R17-9: a UTF-8 BOM (Windows Notepad) is accepted — scan, doctor and pin-asset read alike.
+        payload = json.loads(target.read_text(encoding="utf-8-sig"))
+    except OSError as exc:
+        from .error_text import read_error_ko
+
+        return {}, f"자산 매니페스트를 읽을 수 없습니다: {read_error_ko(exc)}"
+    except (ValueError, UnicodeError) as exc:
+        from .error_text import read_error_ko
+
+        return {}, f"자산 매니페스트가 올바른 JSON이 아닙니다: {read_error_ko(exc)}"
     if not isinstance(payload, dict) or payload.get("schema") != ASSET_MANIFEST_SCHEMA:
-        return {}
+        return {}, f"자산 매니페스트 형식이 {ASSET_MANIFEST_SCHEMA}가 아닙니다"
     assets = payload.get("assets")
     if not isinstance(assets, list):
-        return {}
+        return {}, "자산 매니페스트에 assets 목록이 없습니다"
     out: dict[str, dict[str, Any]] = {}
     for entry in assets:
         if isinstance(entry, dict) and isinstance(entry.get("name"), str):
             out[entry["name"]] = entry
-    return out
+    return out, None
 
 
 def expected_sha256(asset: str, manifest: dict[str, dict[str, Any]] | None = None) -> str | None:
@@ -222,11 +243,29 @@ def asset_pin_tokens(models_dir: Path | str | None = None) -> list[str]:
 
 # R16-9: the environment variable that replaces an asset's file (what the loaders read).
 ASSET_OVERRIDE_ENV = {HAAR_FRONTALFACE: "DEEPFAKE_LENS_HAAR_CASCADE", FACE_LANDMARKER: "DEEPFAKE_LENS_FACE_LANDMARKER"}
-# R16-9: asset_status "state" values.
+# R16-9: asset_status "state" values (R17-9: and the manifest row's).
 ASSET_OK = "ok"
 ASSET_UNPINNED = "unpinned"
 ASSET_MISMATCH = "mismatch"
 ASSET_ABSENT = "absent"
+ASSET_MANIFEST_ERROR = "manifest_error"
+# R17-9: the assets the loaders know — listed by doctor even when the manifest cannot be read.
+KNOWN_ASSETS = (HAAR_FRONTALFACE, FACE_LANDMARKER, SYNCNET_WEIGHTS, S3FD_WEIGHTS)
+
+
+def asset_override(asset: str) -> Path | None:
+    """R17-9 (round 17): the file an override variable names for ``asset`` — None when unset.
+
+    The one reading of ``DEEPFAKE_LENS_HAAR_CASCADE`` /
+    ``DEEPFAKE_LENS_FACE_LANDMARKER`` for the loaders, doctor and the scan
+    cache: surrounding blanks stripped, ``~`` expanded (doctor expanded it
+    and said ok while the scan said "재정의 cascade 파일이 없습니다").
+    """
+    env = ASSET_OVERRIDE_ENV.get(asset)
+    if env is None:
+        return None
+    value = os.environ.get(env, "").strip()
+    return Path(value).expanduser() if value else None
 
 
 def asset_status(models_dir: Path | str | None = None) -> list[dict[str, object]]:
@@ -241,12 +280,24 @@ def asset_status(models_dir: Path | str | None = None) -> list[dict[str, object]
     ``detail`` says it in Korean.
     """
     folder = Path(models_dir) if models_dir is not None else _models_dir()
-    entries = load_manifest(manifest_path(folder))
+    governing = manifest_path(folder)
+    entries = load_manifest(governing)
     rows: list[dict[str, object]] = []
-    for name in sorted(entries):
+    error = manifest_error(governing)
+    names = sorted(entries)
+    if error is not None:
+        # R17-9 (round 17): the section was empty for a broken manifest.
+        rows.append({
+            "asset": ASSET_MANIFEST_NAME, "pinned": False, "present": governing.is_file(), "sha256_ok": None, "path": str(governing),
+            "override": None, "state": ASSET_MANIFEST_ERROR,
+            "detail": f"{error} — 모든 자산이 핀 없음으로 로드 거부됨(쓰는 검사는 failed: 미고정 모델)", "used_by": "",
+        })
+        names = sorted(KNOWN_ASSETS)
+    for name in names:
         expected = expected_sha256(name, entries)
-        override = os.environ.get(ASSET_OVERRIDE_ENV.get(name, ""), "").strip() if name in ASSET_OVERRIDE_ENV else ""
-        candidate = Path(override).expanduser() if override else folder / name
+        override_path = asset_override(name)
+        override = str(override_path) if override_path is not None else ""
+        candidate = override_path if override_path is not None else folder / name
         if not override and not candidate.is_file() and name == HAAR_FRONTALFACE:
             candidate = PACKAGED_MANIFEST.parent / name
         present = candidate.is_file()
@@ -298,7 +349,7 @@ def pin_asset(asset: str, file: Path | str | None = None, models_dir: Path | str
         raise ValueError(f"모델 폴더가 없습니다: {folder}" if not folder.exists() else f"모델 폴더가 아니라 파일입니다: {folder}")
     governing = manifest_path(folder)
     try:
-        payload = json.loads(governing.read_text(encoding="utf-8"))
+        payload = json.loads(governing.read_text(encoding="utf-8-sig"))  # R17-9: BOM accepted as by the loaders
     except (OSError, ValueError, UnicodeError) as exc:
         raise ValueError(f"자산 매니페스트를 읽을 수 없습니다: {governing}") from exc
     entries = payload.get("assets") if isinstance(payload, dict) else None
@@ -339,6 +390,10 @@ __all__ = [
     "ASSET_OVERRIDE_ENV",
     "ASSET_UNPINNED",
     "ASSET_MANIFEST_SCHEMA",
+    "ASSET_MANIFEST_ERROR",
+    "KNOWN_ASSETS",
+    "asset_override",
+    "manifest_error",
     "AssetPinError",
     "FACE_LANDMARKER",
     "HAAR_FRONTALFACE",
