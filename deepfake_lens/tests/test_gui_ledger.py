@@ -259,6 +259,25 @@ class ReviewMarkRowsTest(unittest.TestCase):
         self.assertEqual(json.loads(done.stdout), [["검토함", "검토함", ""], ["", "", ""]])
 
 
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class CaseFolderTest(unittest.TestCase):
+    def test_case_fields_of_another_folder_need_a_confirmation(self) -> None:
+        """GUI-REV2 H-8: kept case fields belong to the folder they were entered for."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        script = _function(source, "caseNeedsConfirm") + (
+            "console.log(JSON.stringify([caseNeedsConfirm('root:/a', 'root:/b', true), caseNeedsConfirm('root:/a', 'root:/a', true),"
+            " caseNeedsConfirm('', 'root:/b', true), caseNeedsConfirm('root:/a', 'root:/b', false), caseNeedsConfirm('root:/a', 'upload', true)]));"
+        )
+        node = shutil.which("node")
+        assert node is not None
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "case.js"
+            path.write_text(script, encoding="utf-8")
+            done = subprocess.run([node, str(path)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout), [True, False, False, False, True])
+
+
 class GuiAccessibilitySourceTest(unittest.TestCase):
     source: str
     html: str

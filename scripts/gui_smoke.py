@@ -378,6 +378,22 @@ def main() -> int:
             page.evaluate("document.getElementById('exp-clear').click()")
             assert page.evaluate("results.length") == rows_now, "results cleared without confirmation"
 
+            # 6c. GUI-REV2 H-8: case fields entered for one folder are not silently reused
+            #     for another — scanning a subfolder asks for a confirmation first.
+            subfolders = sorted(path for path in Path(args.scan_dir).iterdir() if path.is_dir())
+            if subfolders:
+                page.evaluate("location.hash = '#/scan'")
+                page.fill("#folder-path", str(subfolders[0]))
+                page.evaluate("document.getElementById('opt-recursive').checked = true")  # the reload above reset the options
+                page.click("#analyze-btn")
+                page.wait_for_function("() => scanBusy === false && currentView === 'ledger'", timeout=180_000)
+                page.evaluate("location.hash = '#/report'")
+                page.wait_for_function("() => currentView === 'report'")
+                assert "다른 검사" in page.locator("#report-checks").inner_text(), "the case fields of another folder must be confirmed"
+                assert "확인" in page.evaluate("exportBlockReason('evidence', selectedEntries())")
+                page.get_by_role("button", name="이 폴더의 사건이 맞음").click()
+                assert "다른 검사" not in page.locator("#report-checks").inner_text()
+
             # 7. CSP/console errors: none tolerated. No request leaves the local server
             #    (fonts are local stacks; nothing is fetched from the network).
             csp = [e for e in console_errors if "Content Security Policy" in e or "Refused" in e]

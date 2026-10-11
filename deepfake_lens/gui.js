@@ -811,10 +811,25 @@
             const on = document.querySelector('input[name="submitter-side"]:checked');
             return on ? on.value : '';
         }
-        function saveCase() {
+        // GUI-REV2 H-8: the case fields are kept for the tab, so they are tied to the
+        // folder they were entered (or confirmed) for; another folder asks again.
+        let caseFolder = '';
+        function caseScope() { return lastScanRoot ? 'root:' + lastScanRoot : (results.length ? 'upload' : ''); }
+        function caseHasValues() { return Object.keys(CASE_FIELDS).some(id => caseValue(id)) || Boolean(submitterSide()); }
+        function caseNeedsConfirm(folder, scope, hasValues) {
+            return Boolean(hasValues && folder && scope && folder !== scope);
+        }
+        function caseUnconfirmed() { return caseNeedsConfirm(caseFolder, caseScope(), caseHasValues()); }
+        function confirmCaseFolder() {
+            caseFolder = caseScope();
+            saveCase(true);
+        }
+        function saveCase(keepFolder) {
+            if (!keepFolder && caseScope()) caseFolder = caseScope();
             const out = {};
             Object.keys(CASE_FIELDS).forEach(k => { out[k] = $(k).value; });
             out.side = submitterSide();
+            out.folder = caseFolder;
             try { sessionStorage.setItem(CASE_STORE, JSON.stringify(out)); } catch (e) { /* storage full — non-fatal */ }
         }
         function updateCaseLine() {
@@ -839,6 +854,7 @@
             Object.keys(CASE_FIELDS).forEach(id => { if (typeof saved[id] === 'string') $(id).value = saved[id]; });
             const side = document.querySelector(`input[name="submitter-side"][value="${saved.side === 'defendant' ? 'defendant' : saved.side === 'plaintiff' ? 'plaintiff' : 'none'}"]`);
             if (side) side.checked = true;
+            if (typeof saved.folder === 'string') caseFolder = saved.folder;
         } catch (e) { /* no saved case */ }
         const onCaseChange = () => {
             saveCase();
@@ -1309,6 +1325,8 @@
             $('rev-filter').setAttribute('aria-pressed', 'false');
             selectedEntry = null;
             groupsTouched = false;
+            // H-8: case fields typed before the first scan belong to it.
+            if (!caseFolder && caseHasValues()) confirmCaseFolder();
             renderResults();
             updateCaseLine();
         }
@@ -2146,6 +2164,10 @@
         function reportChecks(sel) {
             const out = [];
             if (!results.length) out.push({ tag: 'req', text: '검사 결과가 없습니다. 먼저 폴더를 검사하십시오.', act: ['검사 화면으로', () => navigate('scan')] });
+            if (results.length && caseUnconfirmed()) {
+                const earlier = caseFolder.startsWith('root:') ? displayName(caseFolder.slice(5).split(/[\\/]/).filter(Boolean).pop() || caseFolder.slice(5)) : '올린 파일';
+                out.push({ tag: 'req', text: `사건 정보는 다른 검사(${earlier})에서 입력되었습니다 — 이 폴더의 사건이 맞는지 확인하십시오.`, act: ['이 폴더의 사건이 맞음', () => { confirmCaseFolder(); renderReport(); }] });
+            }
             const no = caseValue('case-no'), nm = caseValue('case-name');
             out.push(no && nm
                 ? { tag: 'ok', text: '사건: ' + no + ' · ' + nm }
@@ -2183,6 +2205,7 @@
         function exportBlockReason(kind, sel) {
             if (scanBusy) return '새 검사가 진행 중입니다 — 끝난 뒤 내보내십시오. 지금 화면의 결과는 이전 검사입니다.';
             if (!results.length) return '검사 결과가 없습니다.';
+            if ((kind === 'evidence' || kind === 'pdf') && caseUnconfirmed()) return '사건 정보가 이 폴더의 것인지 먼저 확인하십시오(확인 목록).';
             if (kind === 'evidence' && !sel.length) return '증거설명서의 서증으로 넣을 파일을 고르십시오.';
             if ((kind === 'evidence' || kind === 'pdf') && pdfAvailable === false) return 'PDF(증거설명서·감정 보고서)는 PDF 엔진(pymupdf)이 설치되어 있지 않아 만들 수 없습니다.';
             if (kind === 'evidence' && !(caseValue('case-no') && caseValue('case-name'))) return '사건번호와 사건명을 채우면 증거설명서를 내보낼 수 있습니다.';
