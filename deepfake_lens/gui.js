@@ -2139,8 +2139,8 @@
             if (results.length) {
                 const partial = partialResultNote(lastProvenance.summary);
                 out.push(partial ? { tag: 'warn', text: partial } : { tag: 'ok', text: '전체 검사 결과입니다(중단 없음).' });
-                const env = envFacts();
-                if (env.short.length) out.push({ tag: 'info', text: '검사 환경: ' + env.short.join(' · ') });
+                // The scan's own limits (G-9c); the statement prints them in its 무결성/해석 고지.
+                out.push({ tag: 'info', text: '검사의 한계: ' + reportLimitLines().join(' · ') });
                 const uploads = results.filter(e => e.item.source === 'upload').length;
                 if (uploads) out.push({ tag: 'info', text: `올린 파일 ${uploads}개는 다시 분석할 수 없어 서명 제외(클라이언트 제공 결과)로 실립니다.` });
                 if (!sel.length) out.push({ tag: 'req', text: '증거설명서의 서증으로 넣을 파일을 고르십시오. 근거 있는 파일이 없으면 판단 불가 칸을 고를 수 있습니다.', act: ['고르기', () => $('inc-manip').focus()] });
@@ -2202,36 +2202,55 @@
             $('export-note').textContent = exportNote(sel);
             renderA4(sel);
         }
-        function summarySentence() {
-            const b = bandCounts();
-            const parts = [`${results.length}개 파일 중 ${b.manipulation_evidence}개에서 조작·생성 근거를, ${b.authenticity_evidence}개에서 원본성 근거를 확인하였다.`];
-            if (b.undetermined) parts.push(`${b.undetermined}개는 판단할 근거가 없었으며 이는 원본임을 뜻하지 아니한다.`);
-            if (b.other) parts.push(`${b.other}개는 분석하지 못하였다.`);
-            return parts.join(' ');
-        }
+        // GUI-REV2 H-2: the preview is drawn from the server's own statement template
+        // (format=evidence-preview: the same build and the same case box, boxes and
+        // signoff helpers the PDF renderer uses) — it cannot show a section the PDF
+        // lacks or miss one it has. Built from the rows on screen without
+        // re-analysis and unsigned; the export re-analyzes and signs.
+        let a4Timer = null;
+        let a4Seq = 0;
         function renderA4(sel) {
-            const miss = '<span class="miss">미기재</span>';
-            const val = id => caseValue(id) ? shown(caseValue(id)) : miss;
-            const prefix = (SIDES[submitterSide()] || ['', '갑'])[1];
-            // H-1: every exhibit is listed, in the order the statement numbers them.
-            const rows = sel.map((e, i) => `<tr data-exhibit="${prefix} 제${i + 1}호증" data-path="${shown(e.item.path || '')}"><td>${prefix} 제${i + 1}호증</td><td>${shown(e.item.path || e.item.name || '파일')}</td><td>${escapeHtml(shortVerdict(e.item))}</td></tr>`).join('') +
-                (sel.length ? '' : `<tr><td colspan="3">${miss}</td></tr>`);
-            const rest = results.length - sel.length;
-            const partial = partialResultNote(lastProvenance.summary);
-            $('a4').innerHTML =
-                `<div class="a4-top"><span>${val('case-no')}</span><span>미리보기</span></div>` +
-                '<div class="a4-title">증 거 설 명 서</div>' +
-                `<table><caption>사건 정보</caption><tbody>` +
-                `<tr><th scope="row">사건</th><td>${val('case-no')} ${val('case-name')}</td></tr>` +
-                `<tr><th scope="row">원고(고소인)</th><td>${val('case-plaintiff')}</td></tr>` +
-                `<tr><th scope="row">피고(피의자)</th><td>${val('case-defendant')}</td></tr>` +
-                `<tr><th scope="row">대상</th><td>${lastScanRoot ? shown(lastScanRoot) : (results.length ? '올린 파일' : miss)} · ${results.length}개 파일</td></tr>` +
-                `</tbody></table>` +
-                `<div class="a4-h">1. 결론 요약</div><p>${escapeHtml(results.length ? summarySentence() : '검사 결과 없음')}</p>` +
-                (partial ? `<p><b>${shown(partial)}</b></p>` : '') +
-                `<table><caption>서증 목록</caption><thead><tr><th scope="col">호증</th><th scope="col">파일</th><th scope="col">결론</th></tr></thead><tbody>${rows}</tbody></table>` +
-                (rest > 0 ? `<p class="a4-appendix">부록: 서증으로 넣지 않은 파일 ${rest}개 (결론·SHA-256 기재)</p>` : '') +
-                `<div class="a4-h">2. 검사의 한계</div><ul class="a4-limits">${reportLimitLines().map(line => `<li>${shown(line)}</li>`).join('')}</ul>`;
+            clearTimeout(a4Timer);
+            a4Seq += 1;
+            const box = $('a4');
+            box.dataset.ready = '';
+            if (!results.length) { box.innerHTML = '<p class="miss">검사 결과가 없습니다.</p>'; return; }
+            if (!sel.length) { box.innerHTML = '<p class="miss">서증으로 넣을 파일을 고르면 증거설명서 서식 그대로 미리 봅니다.</p>'; return; }
+            const seq = a4Seq;
+            a4Timer = setTimeout(() => loadA4(seq), 250);
+        }
+        async function loadA4(seq) {
+            const box = $('a4');
+            const payload = exportPayload('evidence');
+            payload.format = 'evidence-preview';
+            try {
+                const res = await apiFetch('/api/report?format=evidence-preview', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+                });
+                const body = await res.json();
+                if (seq !== a4Seq) return;
+                box.innerHTML = res.ok ? a4Html(body) : `<p class="miss">미리보기를 만들지 못했습니다: ${shown(body.error || res.status)}</p>`;
+            } catch (e) {
+                if (seq !== a4Seq) return;
+                box.innerHTML = `<p class="miss">미리보기를 만들지 못했습니다: ${shown(e.message)}</p>`;
+            }
+            box.dataset.ready = String(seq);
+        }
+        function a4Html(body) {
+            const lines = list => list.map(line => `<p>${shown(line)}</p>`).join('');
+            const head = (body.table_headers || []).map(h => `<th scope="col">${shown(h)}</th>`).join('');
+            const rows = (body.entries || []).map(e => `<tr data-exhibit="${shown(e.exhibit_no)}" data-path="${shown(e.file_path)}">` +
+                `<td>${shown(e.exhibit_no)}</td><td>${shown(e.document_name)}</td><td>${shown(e.author_date)}</td><td class="a4-purpose">${shown(e.purpose_of_proof)}</td></tr>`).join('');
+            const boxes = (body.boxes || []).map(([title, boxLines]) => `<section class="a4-box"><div class="a4-h">${shown(title)}</div>${lines(boxLines)}</section>`).join('');
+            return `<div class="a4-top"><span>미리보기 — 서명 전</span><span>서버의 증거설명서 서식</span></div>` +
+                `<div class="a4-title">${shown(body.title)}</div>` +
+                `<section class="a4-box">${lines(body.case_lines || [])}${body.scan_root_line ? lines([body.scan_root_line]) : ''}</section>` +
+                '<div class="a4-h a4-center">다        음</div>' +
+                `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>` +
+                boxes +
+                ((body.unsigned || []).length ? `<section class="a4-box">${lines(body.unsigned)}</section>` : '') +
+                `<div class="a4-signoff">${lines(body.signoff || [])}<p class="a4-court">${shown(body.court)}</p></div>` +
+                '<p class="a4-sign">서명은 내보낼 때 서버가 서명 키로 붙입니다(키가 없으면 "서명 없음").</p>';
         }
 
         const EXPORT_SPECS = {

@@ -280,6 +280,30 @@ class WebReportSelectionTest(unittest.TestCase):
         self.assertNotIn("대리인", text)
         self.assertNotIn("검토 참고", text)
 
+    def test_preview_is_the_pdf_template(self) -> None:
+        """GUI-REV2 H-2: format=evidence-preview gives the PDF's own sections; every line is in the PDF."""
+        chosen = [self.rows[0]["path"]]
+        preview = webapp_api._report_payload(self._body(exhibit_paths=chosen, submitter_side="defendant"), "evidence-preview", default_folder=self.folder)
+        assert isinstance(preview, dict), preview
+        titles = [title for title, _ in preview["boxes"]]
+        self.assertEqual(titles[:2], ["무결성/해석 고지", "기록되지 않은 파일"])
+        self.assertEqual(titles[2], SELECTION_APPENDIX_TITLE)
+        self.assertEqual([entry["exhibit_no"] for entry in preview["entries"]], ["을 제1호증"])
+        self.assertIn("피고(피의자)의 변호인은", preview["case_lines"][3])
+        flat = json.dumps(preview, ensure_ascii=False)
+        for absent in ("결론 요약", "검사의 한계"):
+            self.assertNotIn(absent, flat)
+        from deepfake_lens.pdf_backend import import_pymupdf, pymupdf_available
+
+        if not pymupdf_available():
+            self.skipTest("pymupdf not installed")
+        pdf = webapp_api._report_payload(self._body(exhibit_paths=chosen, submitter_side="defendant"), "evidence", default_folder=self.folder)
+        assert isinstance(pdf, bytes), pdf
+        with import_pymupdf().open(stream=pdf, filetype="pdf") as doc:
+            text = "".join("".join(page.get_text().split()) for page in doc)
+        for line in [*preview["case_lines"], *(line for _, lines in preview["boxes"] for line in lines), *preview["signoff"]]:
+            self.assertIn("".join(line.split()), text, line)
+
     def test_an_empty_unknown_or_repeated_choice_is_refused(self) -> None:
         """GUI-REV2 H-7: no statement is signed with 0 exhibits or with paths that are not its rows."""
         first = self.rows[0]["path"]

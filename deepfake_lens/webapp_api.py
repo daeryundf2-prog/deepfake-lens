@@ -1284,7 +1284,7 @@ REPORT_RENDER_FAILED_STATUS = 500
 EVIDENCE_PDF_FAILED_PREFIX = "증거설명서 PDF 생성 실패: "
 # N9: the report format comes from ?format= or, failing that, the JSON body's
 # "format" — both servers decide the content type from the same value.
-REPORT_FORMATS = ("html", "pdf", "evidence", "evidence-statement", "json", "evidence-json")
+REPORT_FORMATS = ("html", "pdf", "evidence", "evidence-statement", "json", "evidence-json", "evidence-preview")
 PDF_REPORT_FORMATS = ("pdf", "evidence", "evidence-statement")
 REPORT_FORMAT_UNSUPPORTED = "지원되지 않는 보고서 형식입니다: 「{value}」 (`html`, `pdf`, `evidence`, `json` 중 하나)"
 REPORT_FORMAT_NOT_STRING = "`format` 값은 문자열이어야 합니다"
@@ -1833,10 +1833,17 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     except InvalidOption as exc:
         return {"error": str(exc)}
     server_thresholds = load_thresholds(options)
-    try:
-        items, excluded = _rederive_report_items(items, hasher, options, server_thresholds)
-    finally:
+    req_format = format_override.lower()
+    if req_format == "evidence-preview":
+        # GUI-REV2 H-2: the preview is built from the posted rows as they are —
+        # no re-analysis, nothing signed; the export re-analyzes and signs.
         hasher.close()
+        excluded = []
+    else:
+        try:
+            items, excluded = _rederive_report_items(items, hasher, options, server_thresholds)
+        finally:
+            hasher.close()
     excluded = uploads + excluded  # P6: upload rows first, in posted order
     thresholds = server_thresholds
     coverage = dict(weights_coverage(options.resolved_models_dir()))
@@ -1849,25 +1856,16 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     # The client's claim is taken as given — it can only add the caveat and
     # the "사용자 취소" count, never remove a row or change a verdict.
     summary = _with_posted_cancel(summary, data.get("summary"))
-    req_format = format_override.lower()
     # G30: web reports are signed when DEEPFAKE_LENS_REPORT_KEY is set and
     # say "서명 없음" otherwise; the pins are those of the server's models dir.
     from .profile_pins import profile_pins
 
     # R9-9: the scanned folder (relative to its read root) is signed and shown.
     root_label = _scan_root_label(scan_root, roots)
-    signed = signed_report_body(
-        summary, items, thresholds=thresholds, coverage=coverage,
-        report_format=req_format, model_pins=profile_pins(_models_dir()),
-        excluded_items=excluded_rows, scan_root=root_label,
-    )
-    if req_format == "json":
-        return signed
-
     # GUI-REV2 H-7: an evidence statement with no exhibit, or naming a row that is
     # not one of the signed (re-analyzed) rows, is refused — never signed with the
     # unknown rows silently moved to the appendix.
-    if exhibit_paths is not None and req_format in EVIDENCE_REPORT_FORMATS:
+    if exhibit_paths is not None and req_format in (*EVIDENCE_REPORT_FORMATS, "evidence-preview"):
         if not exhibit_paths:
             return {"error": REPORT_EXHIBIT_PATHS_EMPTY}
         known = {item.path for item in items}
@@ -1900,6 +1898,21 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
             exhibit_paths=exhibit_paths,  # GUI-REV G-1
             submitter_side=str(submitter_side),  # GUI-REV G-9
         )
+
+    if req_format == "evidence-preview":
+        from .evidence_statement import statement_preview
+        from .reports import scan_root_line
+
+        preview = statement_preview(_statement(), uploads)
+        preview["scan_root_line"] = (scan_root_line({"scan_root": root_label}) or "") if root_label else ""
+        return preview
+    signed = signed_report_body(
+        summary, items, thresholds=thresholds, coverage=coverage,
+        report_format=req_format, model_pins=profile_pins(_models_dir()),
+        excluded_items=excluded_rows, scan_root=root_label,
+    )
+    if req_format == "json":
+        return signed
 
     if req_format == "evidence-json":
         # GUI-REV2 H-1: the evidence statement's signed body — the same statement

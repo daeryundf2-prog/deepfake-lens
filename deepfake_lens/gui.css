@@ -539,3 +539,11 @@ select.field { padding-right: 8px; }
 .side-choice legend { font-weight: 600; padding: 0; }
 .side-choice .req { font-weight: 400; font-size: 13px; color: var(--muted); }
 .a4 .a4-limits { margin: 4px 0 0; padding-left: 16px; }
+.a4 { overflow: auto; }
+.a4 .a4-box { margin-top: 10px; padding: 6px 8px; border: 1px solid #D6D6CE; }
+.a4 .a4-box p { margin: 0 0 2px; }
+.a4 .a4-center { text-align: center; }
+.a4 .a4-purpose { white-space: pre-line; font-size: 9.5px; }
+.a4 .a4-signoff { margin-top: 12px; text-align: center; }
+.a4 .a4-court { font-weight: 700; margin-top: 6px; }
+.a4 .a4-sign { margin-top: 8px; color: #5C6067; font-size: 10px; }

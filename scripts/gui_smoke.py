@@ -196,14 +196,22 @@ def main() -> int:
             assert page.get_attribute("#exp-evidence", "aria-disabled") == "true", "evidence statement must wait for 사건번호·사건명"
             page.fill("#case-no", "2024가단0000")
             page.fill("#case-name", "시험 사건")
-            assert "2024가단0000" in page.locator("#a4").inner_text()
+
+            def a4_ready() -> str:
+                # H-2: the preview comes from the server (debounced); wait for this render.
+                page.wait_for_function("() => document.getElementById('a4').dataset.ready !== ''", timeout=60_000)
+                return page.locator("#a4").inner_text()
+
+            if page.evaluate("selectedEntries().length") == 0:
+                page.check("#inc-undet")  # a folder without evidence-bearing rows: preview the 판단 불가 rows
+            assert "2024가단0000" in a4_ready()
             # GUI-REV G-9: the submitting side has no default and is required for the
             # evidence statement; the choice numbers the exhibits (갑/을) and is posted.
             assert page.locator("input[name='submitter-side']:checked").count() == 0, "의뢰 측 must have no default"
             assert "의뢰 측을 고르지 않았습니다" in page.locator("#report-checks").inner_text()
             assert "의뢰 측" in page.evaluate("exportBlockReason('evidence', selectedEntries())")
             page.check("input[name='submitter-side'][value='defendant']")
-            assert "을 제1호증" in page.locator("#a4").inner_text() or page.evaluate("selectedEntries().length") == 0
+            assert "을 제1호증" in a4_ready()
             assert page.evaluate("exportPayload('evidence').submitter_side") == "defendant"
             # GUI-REV2 H-3: the forensic PDF's exhibit box follows the side.
             assert page.evaluate("exportPayload('pdf').exhibit_no").startswith("을 제"), "forensic PDF exhibit box must follow the side"
@@ -220,6 +228,7 @@ def main() -> int:
             #     archive members). The statement comes from format=evidence-json, the
             #     body the evidence PDF is rendered from.
             page.check("#inc-undet")
+            a4_ready()
             compared = page.evaluate("""async () => {
                 const preview = [...document.querySelectorAll('#a4 tr[data-exhibit]')].map(r => [r.dataset.exhibit, r.dataset.path]);
                 const res = await apiFetch('/api/report?format=evidence-json', {method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -230,17 +239,35 @@ def main() -> int:
             assert compared[2] == 200, compared
             assert compared[0] and compared[0] == compared[1], (compared[0][:6], compared[1][:6])
             assert compared[0][0][0] == "을 제1호증"
+            # GUI-REV2 H-2: the preview shows exactly the PDF's sections — every case-box,
+            #     box and signoff line of the preview is in the downloaded PDF, the box
+            #     titles in the same order, and no section the PDF lacks.
+            preview_text = a4_ready()
+            for absent in ("결론 요약", "검사의 한계", "판단할 근거가 없었으며", "특이 사항 없음"):
+                assert absent not in preview_text, f"preview shows {absent!r}, which the PDF does not have"
+            if page.evaluate("pdfAvailable") is True:
+                preview_lines = page.evaluate("[...document.querySelectorAll('#a4 .a4-box p, #a4 .a4-signoff p')].map(p => p.textContent)")
+                box_titles = page.evaluate("[...document.querySelectorAll('#a4 .a4-box .a4-h')].map(h => h.textContent)")
+                with page.expect_download() as statement_download:
+                    page.click("#exp-evidence")
+                import pymupdf  # type: ignore[import-not-found]
+
+                with pymupdf.open(statement_download.value.path()) as document:
+                    pdf_flat = "".join("".join(page_.get_text().split()) for page_ in document)
+                for line in preview_lines:
+                    assert "".join(line.split()) in pdf_flat, f"preview line not in the PDF: {line[:80]!r}"
+                positions = [pdf_flat.find("".join(title.split())) for title in box_titles]
+                assert all(position >= 0 for position in positions) and positions == sorted(positions), (box_titles, positions)
             page.uncheck("#inc-undet")
-            # G-9(c): the preview's limits come from the scan, not "특이 사항 없음".
-            assert "특이 사항 없음" not in page.locator("#a4").inner_text()
+            a4_ready()
             # GUI-REV G-1: every row is posted for every format; the choice only names exhibits.
             total_rows = page.evaluate("results.length")
             for kind in ("evidence", "pdf", "html", "json"):
                 assert page.evaluate(f"exportPayload('{kind}').items.length") == total_rows, f"{kind} export dropped rows"
             chosen = page.evaluate("exportPayload('evidence').exhibit_paths.length")
             assert chosen == page.evaluate("selectedEntries().length") and chosen <= total_rows
-            if chosen < total_rows:
-                assert f"서증으로 넣지 않은 파일 {total_rows - chosen}개" in page.locator("#a4").inner_text()
+            if 0 < chosen < total_rows:
+                assert f"서증으로 넣지 않은 파일 {total_rows - chosen}개" in a4_ready()
 
             # 5b. GUI-REV G-5: while a new scan runs the other screens say the rows are
             #     the previous scan's, exports wait, and the new options are not
