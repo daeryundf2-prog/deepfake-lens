@@ -1978,14 +1978,15 @@
                 if (env.short.length) out.push({ tag: 'info', text: '검사 환경: ' + env.short.join(' · ') });
                 const uploads = results.filter(e => e.item.source === 'upload').length;
                 if (uploads) out.push({ tag: 'info', text: `올린 파일 ${uploads}개는 다시 분석할 수 없어 서명 제외(클라이언트 제공 결과)로 실립니다.` });
-                if (!sel.length) out.push({ tag: 'req', text: '서증으로 넣을 파일을 고르십시오. 근거 있는 파일이 없으면 판단 불가 칸을 고를 수 있습니다.', act: ['고르기', () => $('inc-manip').focus()] });
+                if (!sel.length) out.push({ tag: 'req', text: '증거설명서의 서증으로 넣을 파일을 고르십시오. 근거 있는 파일이 없으면 판단 불가 칸을 고를 수 있습니다.', act: ['고르기', () => $('inc-manip').focus()] });
+                else if (sel.length < results.length) out.push({ tag: 'info', text: `서증 ${sel.length}개 · 나머지 ${results.length - sel.length}개는 증거설명서 부록에 결론·해시와 함께 남습니다. 다른 형식에는 ${results.length}개가 모두 실립니다.` });
             }
             if (pdfAvailable === false) out.push({ tag: 'warn', text: 'PDF 엔진(pymupdf)이 설치되어 있지 않아 PDF는 만들 수 없습니다 — HTML 보고서와 서명된 JSON은 만들 수 있습니다.' });
             return out;
         }
         function exportBlockReason(kind, sel) {
             if (!results.length) return '검사 결과가 없습니다.';
-            if (!sel.length) return '서증으로 넣을 파일을 고르십시오.';
+            if (kind === 'evidence' && !sel.length) return '증거설명서의 서증으로 넣을 파일을 고르십시오.';
             if ((kind === 'evidence' || kind === 'pdf') && pdfAvailable === false) return 'PDF 엔진(pymupdf)이 설치되어 있지 않습니다.';
             if (kind === 'evidence' && !(caseValue('case-no') && caseValue('case-name'))) return '사건번호와 사건명을 채우면 증거설명서를 내보낼 수 있습니다.';
             return '';
@@ -2035,6 +2036,7 @@
             const rows = shownRows.map((e, i) => `<tr><td>갑 제${i + 1}호증</td><td>${shown(e.item.path || e.item.name || '파일')}</td><td>${escapeHtml(shortVerdict(e.item))}</td></tr>`).join('') +
                 (sel.length > shownRows.length ? `<tr><td colspan="3">외 ${sel.length - shownRows.length}건</td></tr>` : '') +
                 (sel.length ? '' : `<tr><td colspan="3">${miss}</td></tr>`);
+            const rest = results.length - sel.length;
             const env = envFacts();
             const partial = partialResultNote(lastProvenance.summary);
             $('a4').innerHTML =
@@ -2049,9 +2051,25 @@
                 `<div class="a4-h">1. 결론 요약</div><p>${escapeHtml(results.length ? summarySentence() : '검사 결과 없음')}</p>` +
                 (partial ? `<p><b>${shown(partial)}</b></p>` : '') +
                 `<table><caption>서증 목록</caption><thead><tr><th scope="col">호증</th><th scope="col">파일</th><th scope="col">결론</th></tr></thead><tbody>${rows}</tbody></table>` +
+                (rest > 0 ? `<p class="a4-appendix">부록: 서증으로 넣지 않은 파일 ${rest}개 (결론·SHA-256 기재)</p>` : '') +
                 `<div class="a4-h">2. 검사의 한계</div><p>${escapeHtml(env.short.length ? env.short.join('. ') + '.' : '특이 사항 없음')}</p>`;
         }
 
+        const EXPORT_SPECS = {
+            evidence: ['evidence', 'application/pdf', 'deepfake-lens-evidence-statement.pdf', '증거설명서(PDF)'],
+            pdf: ['pdf', 'application/pdf', 'deepfake-lens-forensic-report.pdf', '감정 보고서(PDF)'],
+            html: ['html', 'text/html', 'deepfake-lens-report.html', 'HTML 보고서'],
+            json: ['json', 'application/json', 'deepfake-lens-signed-report.json', '서명된 JSON'],
+        };
+        // GUI-REV G-1: every artifact carries every row of the scan (the summary
+        // is the whole scan's). The group choice only names the evidence
+        // statement's exhibits; the other rows go to its signed appendix.
+        function exportPayload(kind) {
+            const extra = { format: EXPORT_SPECS[kind][0] };
+            if (kind === 'pdf') extra.exhibit_no = '갑 제        호증';
+            if (kind === 'evidence') extra.exhibit_paths = selectedEntries().map(e => e.item.path);
+            return reportPayload(extra);
+        }
         async function exportReport(kind) {
             const btn = $(EXPORT_BUTTONS[kind]);
             const sel = selectedEntries();
@@ -2059,21 +2077,13 @@
             if (why) { $('export-note').textContent = why; return; }
             if (btn.dataset.busy) return;
             btn.dataset.busy = '1';
-            const items = sel.map(e => e.item);
-            const spec = {
-                evidence: ['evidence', 'application/pdf', 'deepfake-lens-evidence-statement.pdf', '증거설명서(PDF)'],
-                pdf: ['pdf', 'application/pdf', 'deepfake-lens-forensic-report.pdf', '감정 보고서(PDF)'],
-                html: ['html', 'text/html', 'deepfake-lens-report.html', 'HTML 보고서'],
-                json: ['json', 'application/json', 'deepfake-lens-signed-report.json', '서명된 JSON'],
-            }[kind];
+            const spec = EXPORT_SPECS[kind];
             $('export-note').textContent = spec[3] + '를 만드는 중입니다 — 서버가 파일을 다시 분석합니다.';
             try {
-                const extra = { format: spec[0] };
-                if (kind === 'pdf') extra.exhibit_no = '갑 제        호증';
                 const res = await apiFetch('/api/report?format=' + spec[0], {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(reportPayload(extra, items)),
+                    body: JSON.stringify(exportPayload(kind)),
                 });
                 const type = res.headers.get('Content-Type') || '';
                 if (!res.ok || !type.includes(spec[1])) {

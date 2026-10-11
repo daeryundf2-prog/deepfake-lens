@@ -58,6 +58,11 @@ from .json_text import json_dumps
 # Marks a signed body as a 증거설명서 so it can never be mistaken for (or
 # verified as) a scan report body.
 EVIDENCE_STATEMENT_REPORT_TYPE = "evidence-statement"
+# GUI-REV G-9: the submitting side and its exhibit prefix (갑호증 / 을호증).
+SUBMITTER_PARTIES = {"plaintiff": "원고(고소인)", "defendant": "피고(피의자)"}
+SUBMITTER_EXHIBIT_PREFIX = {"plaintiff": "갑 제", "defendant": "을 제"}
+# GUI-REV G-1: the appendix of rows not chosen as exhibits.
+SELECTION_APPENDIX_TITLE = "부록: 서증으로 넣지 않은 파일"
 SIGNATURE_SECTION_TITLE = "### [보고서 서명]"
 
 
@@ -107,9 +112,42 @@ class EvidenceStatement:
     # (native_path.temp_location(), the scan result's ``temp_folder``); a
     # fallback is also a line of provenance_note ("임시 폴더: …").
     temp_folder: dict[str, Any] = field(default_factory=lambda: {"fallback": False})
+    # GUI-REV G-9: the side that submits the statement — "plaintiff" (원고·고소인
+    # 측, 갑호증, the long-standing form) or "defendant" (피고·피의자 측, 을호증).
+    submitter_side: str = "plaintiff"
+    # GUI-REV G-1: rows of the scan the examiner did not choose as exhibits —
+    # never dropped: listed with their verdict and SHA-256 in an appendix and
+    # signed with the rest of the statement. Empty when every row is an exhibit.
+    excluded_by_selection: list[dict[str, Any]] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        # The two GUI-REV fields appear only when used, so a statement made
+        # the long-standing way (every row an exhibit, 원고 측) is unchanged.
+        if not self.excluded_by_selection:
+            data.pop("excluded_by_selection")
+        if self.submitter_side == "plaintiff":
+            data.pop("submitter_side")
+        return data
+
+    @property
+    def party(self) -> str:
+        """The submitting party as the form names it (원고(고소인) / 피고(피의자))."""
+        return SUBMITTER_PARTIES.get(self.submitter_side, SUBMITTER_PARTIES["plaintiff"])
+
+    @property
+    def party_agent(self) -> str:
+        return "소송대리인" if self.submitter_side == "plaintiff" else "변호인"
+
+    def selection_lines(self) -> list[str]:
+        """The appendix of rows not chosen as exhibits (G-1): verdict and hash of each."""
+        if not self.excluded_by_selection:
+            return []
+        lines = [f"서증으로 넣지 않은 파일 {len(self.excluded_by_selection)}개 — 이 검사의 결과이며, 해시와 함께 기록합니다."]
+        for row in self.excluded_by_selection:
+            digest = row.get("sha256") or row.get("hash_unavailable") or HASH_UNAVAILABLE_ACCESS
+            lines.append(f"{row.get('file_path', '')} — {row.get('verdict_label', '')} — SHA-256: {digest}")
+        return lines
 
     def unrecorded_lines(self) -> list[str]:
         """The "기록되지 않은 파일" section body (headline + reasons)."""
@@ -132,7 +170,7 @@ class EvidenceStatement:
             f"**원    고 (고소인)**: {one_line(self.plaintiff)}",
             f"**피    고 (피의자)**: {one_line(self.defendant)}",
             "",
-            "위 사건에 관하여 원고(고소인)의 대리인은 그 주장사실을 입증하기 위하여 다음과 같이 증거방법을 제출합니다.",
+            f"위 사건에 관하여 {self.party}의 대리인은 그 주장사실을 입증하기 위하여 다음과 같이 증거방법을 제출합니다.",
             "",
             "## 다        음",
             "",
@@ -161,13 +199,16 @@ class EvidenceStatement:
         ])
         unrecorded = self.unrecorded_lines()
         lines.extend([f"### [{UNRECORDED_SECTION_TITLE}]", one_line(unrecorded[0]), *(f"- {one_line(line)}" for line in unrecorded[1:]), ""])
+        selection = self.selection_lines()
+        if selection:
+            lines.extend([f"### [{SELECTION_APPENDIX_TITLE}]", one_line(selection[0]), *(f"- {one_line(line)}" for line in selection[1:]), ""])
         if self.reference_note:
             lines.extend(["### [텍스트 분석 한계]", self.reference_note, ""])
         if self.provenance_note:
             lines.extend(["### [분석 프로비넌스]", *(one_line(line) for line in self.provenance_note.split("\n")), ""])
         lines.extend([
             f"**제출일자**: {one_line(self.created_at)}",
-            f"**원고(고소인) 소송대리인**: {one_line(f'{self.law_firm} {self.center}'.strip())}",
+            f"**{self.party} {self.party_agent}**: {one_line(f'{self.law_firm} {self.center}'.strip())}",
             f"**대표전화**: {one_line(self.contact)}",
             f"**제출처**: **{one_line(self.court)}**",
         ])
@@ -376,6 +417,8 @@ def build_evidence_statement(
     scan_root: Path | str | None = None,
     summary: object | None = None,
     excluded_items: list[dict[str, object]] | None = None,
+    exhibit_paths: set[str] | frozenset[str] | None = None,
+    submitter_side: str = "plaintiff",
 ) -> EvidenceStatement:
     """Build an EvidenceStatement from analyzed scan items.
 
@@ -388,7 +431,21 @@ def build_evidence_statement(
     used to locate a file whose row carries no ``sha256`` (see
     :func:`_item_sha256`). ``law_firm`` / ``contact`` left as None come from
     the operator config (``office_config``) and are blank without one (N17).
+
+    GUI-REV G-1: ``exhibit_paths`` (row paths) chooses which rows become
+    exhibits; every other row is kept in ``excluded_by_selection`` (verdict,
+    SHA-256) and the "기록되지 않은 파일" count is still taken over every
+    row. None means every row is an exhibit. G-9: ``submitter_side``
+    ("plaintiff"/"defendant") names the submitting party; with the default
+    exhibit prefix it also picks 갑호증 / 을호증. Neither changes a verdict.
     """
+    if submitter_side not in SUBMITTER_PARTIES:
+        raise ValueError(f"알 수 없는 제출 측입니다: {submitter_side}")
+    if exhibit_prefix == "갑 제":
+        exhibit_prefix = SUBMITTER_EXHIBIT_PREFIX[submitter_side]
+    all_items = list(items)
+    not_chosen = [item for item in all_items if exhibit_paths is not None and item.path not in exhibit_paths]
+    items = [item for item in all_items if exhibit_paths is None or item.path in exhibit_paths]
     office = office_identity(law_firm, contact, center=center)
     law_firm, contact, center = office.law_firm, office.contact, office.center
     entries: list[EvidenceStatementEntry] = []
@@ -499,10 +556,21 @@ def build_evidence_statement(
         center=center,
         provenance_note=provenance_note,
         reference_note=TEXT_LEGAL_LIMITATION if any(i.result is not None and i.result.grade == Grade.REFERENCE for i in items) else "",
-        unrecorded_files=unrecorded_files(list(items), summary).to_json(),
+        unrecorded_files=unrecorded_files(all_items, summary).to_json(),
+        submitter_side=submitter_side,
+        excluded_by_selection=[_selection_row(item, scan_root) for item in not_chosen],
         excluded_items=[dict(entry) for entry in excluded_items or []],
         temp_folder=temp_folder,
     )
+
+
+def _selection_row(item: ScanItem, scan_root: Path | str | None) -> dict[str, Any]:
+    """One appendix row (G-1): the row label, its verdict (or status) and its hash."""
+    res = item.result
+    verdict_row = res is not None and is_verdict_row(item.status, True)
+    label = VERDICT_LABELS[res.verdict_code] if res is not None and verdict_row else status_label(item.status or "failed")
+    digest, unavailable = _item_hash(item, scan_root)
+    return {"file_path": row_label(item.path), "verdict_label": label, "sha256": digest or "", "hash_unavailable": "" if digest else (unavailable or HASH_UNAVAILABLE_ACCESS)}
 
 
 def signed_statement_body(
@@ -670,7 +738,7 @@ def _render_statement_pdf(
         (f"사        건    {statement.case_no}  {statement.case_name}", 9.5, (0.1, 0.1, 0.1)),
         (f"원고(고소인)    {statement.plaintiff}", 9.5, (0.1, 0.1, 0.1)),
         (f"피고(피의자)    {statement.defendant}", 9.5, (0.1, 0.1, 0.1)),
-        ("위 사건에 관하여 원고(고소인)의 소송대리인은 주장사실을 입증하기 위해 아래와 같이 증거방법을 제출합니다.", 8.2, (0.3, 0.3, 0.3)),
+        (f"위 사건에 관하여 {statement.party}의 {statement.party_agent}은 주장사실을 입증하기 위해 아래와 같이 증거방법을 제출합니다.", 8.2, (0.3, 0.3, 0.3)),
         *([(root_line, 8.2, (0.3, 0.3, 0.3))] if (root_line := scan_root_line(body)) else []),  # R9-9
     ], border=(0.82, 0.86, 0.92), fill=(0.97, 0.98, 0.99))
     layout.text(layout.left, layout.right, "다        음", 11.0, (0.1, 0.1, 0.1), align=1, gap=4.0)
@@ -720,6 +788,12 @@ def _render_statement_pdf(
         (line, 7.5 if index == 0 else 6.8, (0.1, 0.2, 0.4) if index == 0 else (0.35, 0.35, 0.35))
         for index, line in enumerate(statement.unrecorded_lines())
     ])
+    selection = statement.selection_lines()
+    if selection:
+        layout.boxed_text(SELECTION_APPENDIX_TITLE, [
+            (line, 7.5 if index == 0 else 6.8, (0.1, 0.2, 0.4) if index == 0 else (0.35, 0.35, 0.35))
+            for index, line in enumerate(selection)
+        ])
     if unsigned_rows:
         from .reports import UNSIGNED_ROWS_NOTE, UNSIGNED_ROWS_TITLE, unsigned_row_lines
 
@@ -731,7 +805,7 @@ def _render_statement_pdf(
     # Signoff block, kept together on one page.
     signoff = [
         (statement.created_at, 10.0, (0.1, 0.1, 0.1)),
-        (f"원고(고소인) 소송대리인  {statement.law_firm}".rstrip(), 10.5, (0.08, 0.15, 0.32)),
+        (f"{statement.party} {statement.party_agent}  {statement.law_firm}".rstrip(), 10.5, (0.08, 0.15, 0.32)),
         ("담당변호사 : ○ ○ ○,  ○ ○ ○", 9.5, (0.2, 0.2, 0.2)),
         ("디지털포렌식센터 수석감정관 : ○ ○ ○  (인)", 9.5, (0.2, 0.2, 0.2)),
     ]

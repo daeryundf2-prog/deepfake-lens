@@ -1290,6 +1290,11 @@ REPORT_FORMAT_UNSUPPORTED = "지원되지 않는 보고서 형식입니다: 「{
 REPORT_FORMAT_NOT_STRING = "`format` 값은 문자열이어야 합니다"
 
 
+# GUI-REV G-1/G-9: malformed exhibit choice / submitting side (HTTP 400).
+REPORT_EXHIBIT_PATHS_INVALID = "exhibit_paths는 행 경로(문자열)의 배열이어야 합니다"
+REPORT_SUBMITTER_SIDE_INVALID = "submitter_side는 plaintiff(원고·고소인 측) 또는 defendant(피고·피의자 측)여야 합니다"
+
+
 def report_error_status(body: dict[str, object]) -> int:
     """HTTP status for a JSON body returned by ``_report_payload``.
 
@@ -1802,6 +1807,17 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     # no_default_engine, model_path/fusion_profile as bare names inside the
     # models dir); they are validated like a scan request and only choose
     # what the server runs.
+    # GUI-REV G-1/G-9: the evidence statement's exhibit choice and submitting
+    # side. ``exhibit_paths`` only picks which rows get exhibit numbers — every
+    # posted row is still re-analyzed, counted and signed (the rest go to the
+    # statement's appendix); other formats always carry every row.
+    raw_exhibits = data.get("exhibit_paths")
+    if raw_exhibits is not None and not (isinstance(raw_exhibits, list) and all(isinstance(path, str) for path in raw_exhibits)):
+        return {"error": REPORT_EXHIBIT_PATHS_INVALID}
+    exhibit_paths = frozenset(raw_exhibits) if raw_exhibits is not None else None
+    submitter_side = data.get("submitter_side", "plaintiff")
+    if submitter_side not in ("plaintiff", "defendant"):
+        return {"error": REPORT_SUBMITTER_SIDE_INVALID}
     raw_options = data.get("options")
     if raw_options is not None and not isinstance(raw_options, dict):
         return {"error": REPORT_FIELD_NOT_OBJECT.format(field="options")}
@@ -1865,6 +1881,8 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
                     coverage=coverage,
                     excluded_items=excluded_rows,
                     summary=summary,  # R18-3: the "사용자 취소" count of a cancelled scan
+                    exhibit_paths=exhibit_paths,  # GUI-REV G-1
+                    submitter_side=str(submitter_side),  # GUI-REV G-9
                 )
                 # G30: signed like the other web reports (server key + pins).
                 write_evidence_statement_pdf(
