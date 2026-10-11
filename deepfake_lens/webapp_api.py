@@ -1432,22 +1432,46 @@ def report_http_response(
     (N11) and the content type of a PDF can no longer differ between them.
     """
     fmt = report_format(body, query_format)
+    meta: dict[str, object] = {}
     if isinstance(fmt, dict):
         rendered: bytes | dict[str, object] = fmt
     else:
         try:
-            rendered = _report_payload(body, fmt, default_folder=default_folder)
+            rendered = _report_payload(body, fmt, default_folder=default_folder, report_meta=meta)
         except ReadRootDenied:
             rendered = read_root_denied_body()
             return 403, "application/json; charset=utf-8", _json_bytes(rendered), {}
     if isinstance(rendered, dict):
-        return report_error_status(rendered), "application/json; charset=utf-8", _json_bytes(rendered), {}
+        status = report_error_status(rendered)
+        return status, "application/json; charset=utf-8", _json_bytes(rendered), excluded_rows_headers(meta) if status == 200 else {}
     assert isinstance(fmt, str)
+    headers = excluded_rows_headers(meta)
     if fmt in ("evidence", "evidence-statement"):
-        return 200, "application/pdf", rendered, {"Content-Disposition": 'attachment; filename="deepfake-lens-evidence-statement.pdf"'}
+        return 200, "application/pdf", rendered, {"Content-Disposition": 'attachment; filename="deepfake-lens-evidence-statement.pdf"', **headers}
     if fmt == "pdf":
-        return 200, "application/pdf", rendered, {"Content-Disposition": 'attachment; filename="deepfake-lens-forensic-report.pdf"'}
-    return 200, "text/html; charset=utf-8", rendered, {"Content-Disposition": 'attachment; filename="deepfake-lens-report.html"'}
+        return 200, "application/pdf", rendered, {"Content-Disposition": 'attachment; filename="deepfake-lens-forensic-report.pdf"', **headers}
+    return 200, "text/html; charset=utf-8", rendered, {"Content-Disposition": 'attachment; filename="deepfake-lens-report.html"', **headers}
+
+
+# GUI-REV5 L-2: a successful /api/report says which posted rows it lists as 서명 제외
+# (not re-analyzed: uploads, rows behind a folder that became a link …) in headers, so
+# the GUI can name them after a PDF or HTML export too (the JSON body has excluded_items).
+# X-Deepfake-Lens-Excluded-Count: n; X-Deepfake-Lens-Excluded-Rows: URL-safe base64 of
+# the ASCII JSON list [{"path", "reason"}], at most EXCLUDED_ROWS_HEADER_MAX rows.
+EXCLUDED_COUNT_HEADER = "X-Deepfake-Lens-Excluded-Count"
+EXCLUDED_ROWS_HEADER = "X-Deepfake-Lens-Excluded-Rows"
+EXCLUDED_ROWS_HEADER_MAX = 50
+
+
+def excluded_rows_headers(meta: dict[str, object]) -> dict[str, str]:
+    import base64
+
+    rows = meta.get("excluded_rows")
+    if not isinstance(rows, list):
+        return {}
+    listed = [{"path": str(row.get("path", "")), "reason": str(row.get("reason", ""))} for row in rows[:EXCLUDED_ROWS_HEADER_MAX] if isinstance(row, dict)]
+    encoded = base64.urlsafe_b64encode(json.dumps(listed, ensure_ascii=True).encode("ascii")).decode("ascii")
+    return {EXCLUDED_COUNT_HEADER: str(len(rows)), EXCLUDED_ROWS_HEADER: encoded}
 
 
 def _json_bytes(payload: dict[str, object]) -> bytes:
@@ -1792,7 +1816,10 @@ def _excluded_rows_json(excluded: list[tuple[Any, str]]) -> list[dict[str, objec
     return [{"path": item.path, "marker": UNSIGNED_CLIENT_ROW_MARKER, "reason": reason} for item, reason in excluded]
 
 
-def _report_payload(body: bytes, format_override: str | None = None, *, default_folder: Path | None = None) -> bytes | dict[str, object]:
+def _report_payload(
+    body: bytes, format_override: str | None = None, *, default_folder: Path | None = None,
+    report_meta: dict[str, object] | None = None,
+) -> bytes | dict[str, object]:
     """Render the HTML or court-admissible forensic PDF report for web-scan results.
 
     ``format=json`` returns the signed report body itself. Raises
@@ -1973,6 +2000,9 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     thresholds = server_thresholds
     coverage = dict(weights_coverage(options.resolved_models_dir()))
     excluded_rows = _excluded_rows_json(excluded)
+    if report_meta is not None:
+        # GUI-REV5 L-2: the rows this report lists as 서명 제외, for the response headers.
+        report_meta["excluded_rows"] = excluded_rows
 
     # Same counting rule as the CLI (core.summarize) so web and CLI report
     # headers agree on every verdict count.

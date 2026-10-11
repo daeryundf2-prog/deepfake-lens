@@ -349,6 +349,29 @@ class WebReportSelectionTest(unittest.TestCase):
         self.assertEqual(webapp_api.api_status(gone), 409)
         self.assertIn(chosen, [row["path"] for row in gone["changed_rows"]])
 
+    def test_excluded_rows_are_named_in_response_headers(self) -> None:
+        """GUI-REV5 L-2: a successful report of any format names the rows it lists as 서명 제외
+        (here an upload the server never re-analyzes) in X-Deepfake-Lens-Excluded-* headers, so
+        the GUI can say so after a PDF or HTML export too; a report without such rows says 0."""
+        import base64
+
+        source = next(row for row in self.rows if row.get("result"))
+        upload = dict(source, path="uploaded.png", name="uploaded.png", source="upload")
+        upload.pop("path_b64", None)
+        for fmt in ("html", "json"):
+            with self.subTest(fmt=fmt):
+                status, _, _, headers = webapp_api.report_http_response(self._body(items=[*self.rows, upload]), fmt, default_folder=self.folder)
+                self.assertEqual(status, 200)
+                self.assertEqual(headers[webapp_api.EXCLUDED_COUNT_HEADER], "1")
+                listed = json.loads(base64.urlsafe_b64decode(headers[webapp_api.EXCLUDED_ROWS_HEADER]))
+                self.assertEqual([row["path"] for row in listed], ["uploaded.png"])
+                self.assertTrue(listed[0]["reason"])
+        status, _, _, headers = webapp_api.report_http_response(self._body(), "html", default_folder=self.folder)
+        self.assertEqual((status, headers[webapp_api.EXCLUDED_COUNT_HEADER]), (200, "0"))
+        refused, _, _, headers = webapp_api.report_http_response(self._body(exhibit_paths=["nope.png"]), "evidence-json", default_folder=self.folder)
+        self.assertEqual(refused, 400)
+        self.assertNotIn(webapp_api.EXCLUDED_COUNT_HEADER, headers)
+
     def test_unsupported_format_lists_every_format(self) -> None:
         """GUI-REV3 J-10: the refusal names evidence-json and evidence-preview too (both servers share it)."""
         out = webapp_api.report_format(b"", "docx")
