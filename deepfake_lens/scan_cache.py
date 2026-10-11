@@ -51,6 +51,35 @@ SYMLINK_UNREADABLE_REASON = "건너뜀: 심볼릭 링크 대상을 읽을 수 �
 # X3: a FIFO, socket or device node in the evidence folder is listed, never
 # opened (reading a FIFO blocks) and never dropped silently.
 NOT_REGULAR_FILE_REASON = "건너뜀: 일반 파일이 아닙니다(파이프·소켓·장치 파일) — 열지 않았습니다"
+# R18-10 (round 18): --allow-symlinks followed a link to /proc/self/environ and
+# analyzed the scanner's own environment (DEEPFAKE_LENS_REPORT_KEY may be in
+# it); the row had size_bytes 0 and the sha256 of content. A file on a kernel
+# pseudo file system (/proc, /sys), or one whose size is 0 but which has
+# content, is a row with this reason — its bytes are never analyzed.
+SPECIAL_FILESYSTEM_REASON = "건너뜀: 특수 파일 시스템(/proc·/sys 등 — 크기 0으로 보고되는 가상 파일) — 분석하지 않았습니다"
+# R18-10: the kernel pseudo file systems refused by path (Linux mount points).
+PSEUDO_FILESYSTEM_ROOTS = ("/proc", "/sys")
+
+
+def special_filesystem_file(path: Path) -> bool:
+    """R18-10: True for a file on a kernel pseudo file system — reached through a link or reporting size 0 with content.
+
+    The resolved path under /proc or /sys decides first; otherwise a file
+    whose ``stat`` size is 0 is read for one byte (a real empty file has
+    none). Errors answer False (the file is then handled as before).
+    """
+    import os
+
+    try:
+        real = os.path.realpath(path)
+        if any(real == top or real.startswith(top + "/") for top in PSEUDO_FILESYSTEM_ROOTS):
+            return True
+        if os.stat(path).st_size != 0:
+            return False
+        with open(path, "rb") as handle:
+            return bool(handle.read(1))
+    except (OSError, ValueError):
+        return False
 
 
 def symlink_problem(path: Path) -> str | None:
@@ -236,6 +265,9 @@ def _iter_files(
                 skipped.append((path, NOT_REGULAR_FILE_REASON))
                 return
         except OSError:
+            return
+        if special_filesystem_file(path):  # R18-10
+            skipped.append((path, SPECIAL_FILESYSTEM_REASON))
             return
         if path.name.endswith((".ivy.json", ".model.json")):
             return
