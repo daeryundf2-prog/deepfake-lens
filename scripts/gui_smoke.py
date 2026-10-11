@@ -210,6 +210,11 @@ def main() -> int:
             assert "의뢰 측" not in page.evaluate("exportBlockReason('evidence', selectedEntries())")
             note = page.locator("#export-note").inner_text()
             assert "지금 내보낼 수 있는 형식" in note and "HTML 보고서" in note, note
+            # GUI-REV2 H-4: with the default choice, the checklist says which appendix rows
+            #     carry a cue or a failed check (the hostile folder has both).
+            appendix_cues = page.evaluate("results.filter(e => itemBand(e) === 'undetermined' && e.item.source !== 'upload' && cueEvidence(e.item.result).length).length")
+            if appendix_cues:
+                assert "부록으로 가는 판단 불가 행 중 단서" in page.locator("#report-checks").inner_text()
             # GUI-REV2 H-1: the preview's (호증, 파일) list is the signed statement's, in
             #     the same order — with 판단 불가 chosen too (cue/failed/reference rows,
             #     archive members). The statement comes from format=evidence-json, the

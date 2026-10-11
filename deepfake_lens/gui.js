@@ -2145,6 +2145,11 @@
                 if (uploads) out.push({ tag: 'info', text: `올린 파일 ${uploads}개는 다시 분석할 수 없어 서명 제외(클라이언트 제공 결과)로 실립니다.` });
                 if (!sel.length) out.push({ tag: 'req', text: '증거설명서의 서증으로 넣을 파일을 고르십시오. 근거 있는 파일이 없으면 판단 불가 칸을 고를 수 있습니다.', act: ['고르기', () => $('inc-manip').focus()] });
                 else if (sel.length < results.length) out.push({ tag: 'info', text: `서증 ${sel.length}개 · 나머지 ${results.length - sel.length}개는 증거설명서 부록에 결론·해시와 함께 남습니다. 다른 형식에는 ${results.length}개가 모두 실립니다.` });
+                // GUI-REV2 H-4: say which appendix rows carry more than a verdict.
+                const appendix = results.filter(e => !sel.includes(e) && e.item.source !== 'upload' && itemBand(e) === 'undetermined');
+                const cueRows = appendix.filter(e => cueEvidence(e.item.result).length).length;
+                const failedRows = appendix.filter(e => failedChecks(e.item).length).length;
+                if (cueRows || failedRows) out.push({ tag: 'warn', text: `부록으로 가는 판단 불가 행 중 단서 ${cueRows}개 · 검사 실패 ${failedRows}개 — 부록에는 판단 불가의 종류와 한 줄 요약만 실립니다. 서증으로 넣으려면 판단 불가 칸을 고르십시오.`, act: ['판단 불가 넣기', () => { $('inc-undet').checked = true; groupsTouched = true; renderReport(); $('inc-undet').focus(); }] });
             }
             if (pdfAvailable === false) out.push({ tag: 'warn', text: 'PDF 엔진(pymupdf)이 설치되어 있지 않아 PDF는 만들 수 없습니다 — HTML 보고서와 서명된 JSON은 만들 수 있습니다.' });
             return out;

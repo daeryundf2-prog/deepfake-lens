@@ -119,6 +119,50 @@ class StatementSelectionTest(unittest.TestCase):
             build_evidence_statement(items, submitter_side="court")
 
 
+def _manual_row(path: str, *, evidence: list[Any] = (), coverage: list[Any] = (), reference: bool = False) -> Any:
+    from deepfake_lens.result_types import (
+        ClassificationResult, Grade, RiskBand, ScanItem, SourceConfidence, SourceGuess, Verdict,
+    )
+
+    result = ClassificationResult(
+        score=0, band=RiskBand.UNKNOWN, band_label="판단 불가", verdict="판단 불가", signals=[], limitations=[],
+        source_guess=SourceGuess("출처 단서 없음", SourceConfidence.UNKNOWN, []), next_checks=[],
+        evidence=list(evidence), coverage=list(coverage), verdict_code=Verdict.UNDETERMINED,
+        grade=Grade.REFERENCE if reference else Grade.EVIDENCE,
+    )
+    return ScanItem(path, path, "image", "analyzed", 1, result, sha256="c" * 64)
+
+
+class AppendixAspectsTest(unittest.TestCase):
+    def test_appendix_rows_keep_why_they_are_undetermined(self) -> None:
+        """GUI-REV2 H-4: an unchosen 판단 불가 row keeps its cue / failure / grade in the appendix."""
+        from deepfake_lens.result_types import CoverageEntry, CoverageStatus, EvidenceDirection, EvidenceItem, EvidenceKind, EvidenceStrength
+
+        cue = EvidenceItem("생성 도구 메타데이터 단서", "Midjourney v6", EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, "metadata")
+        c2pa = EvidenceItem("C2PA 매니페스트 존재(검증 미완료)", "", EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "c2pa")
+        failed = CoverageEntry("metadata", CoverageStatus.FAILED, "AnalyzerError: 잘림")
+        rows = [
+            _manual_row("chosen.png"),
+            _manual_row("cue.png", evidence=[cue]),
+            _manual_row("cue_failed.png", evidence=[cue], coverage=[failed]),
+            _manual_row("signed.png", evidence=[c2pa]),
+            _manual_row("meta.pdf", evidence=[cue], reference=True),
+            _manual_row("plain.png"),
+        ]
+        statement = build_evidence_statement(rows, exhibit_paths=["chosen.png"])
+        appendix = {row["file_path"]: row for row in statement.excluded_by_selection}
+        self.assertEqual(appendix["cue.png"]["undetermined"], ["단서 1건"])
+        self.assertIn("생성 도구 메타데이터 단서", appendix["cue.png"]["note"])
+        self.assertEqual(appendix["cue_failed.png"]["undetermined"], ["단서 1건", "검사 실패"])
+        self.assertIn("검사 실패: 메타데이터", appendix["cue_failed.png"]["note"])
+        self.assertEqual(appendix["signed.png"]["undetermined"], ["확인 안 된 기록"])
+        self.assertEqual(appendix["meta.pdf"]["undetermined"], ["단서 1건", "참고 전용"])
+        self.assertEqual(appendix["plain.png"]["undetermined"], ["근거 없음"])
+        lines = "\n".join(statement.selection_lines())
+        self.assertIn("cue_failed.png — 판단 불가(단서 1건 · 검사 실패) — 단서: 생성 도구 메타데이터 단서 / 검사 실패: 메타데이터 — SHA-256: " + "c" * 64, lines)
+        self.assertIn("plain.png — 판단 불가(근거 없음) — SHA-256:", lines)
+
+
 class WebReportSelectionTest(unittest.TestCase):
     def setUp(self) -> None:
         roots = mock.patch.object(webapp_api, "_READ_ROOTS", OrderedDict())

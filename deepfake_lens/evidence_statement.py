@@ -167,7 +167,11 @@ class EvidenceStatement:
         lines = [f"서증으로 넣지 않은 파일 {len(self.excluded_by_selection)}개 — 이 검사의 결과이며, 해시와 함께 기록합니다."]
         for row in self.excluded_by_selection:
             digest = row.get("sha256") or row.get("hash_unavailable") or HASH_UNAVAILABLE_ACCESS
-            lines.append(f"{row.get('file_path', '')} — {row.get('verdict_label', '')} — SHA-256: {digest}")
+            verdict = str(row.get("verdict_label", ""))
+            if row.get("undetermined"):
+                verdict += "(" + " · ".join(str(aspect) for aspect in row["undetermined"]) + ")"  # H-4
+            note = f" — {row['note']}" if row.get("note") else ""
+            lines.append(f"{row.get('file_path', '')} — {verdict}{note} — SHA-256: {digest}")
         return lines
 
     def unrecorded_lines(self) -> list[str]:
@@ -596,13 +600,51 @@ def build_evidence_statement(
     )
 
 
+def undetermined_aspects(item: ScanItem) -> tuple[list[str], str]:
+    """GUI-REV2 H-4/H-6: why a 판단 불가 row is undetermined, as the GUI ledger says it.
+
+    Returns the aspect labels ("단서 1건", "확인 안 된 기록", "검사 실패", "참고
+    전용", else "근거 없음") and a one-line note naming the cue, the unverified
+    record or the failed checks — so a row moved to the appendix keeps what the
+    statement used to say about it. Nothing here changes a verdict.
+    """
+    res = item.result
+    if res is None or not is_verdict_row(item.status, True) or res.verdict_code != Verdict.UNDETERMINED:
+        return [], ""
+    from .result_types import CHECK_LABELS
+
+    cues = [e for e in res.evidence if e.kind == EvidenceKind.DETERMINISTIC and e.direction != EvidenceDirection.NEUTRAL]
+    unverified = [e for e in res.evidence if e.kind == EvidenceKind.DETERMINISTIC and e.direction == EvidenceDirection.NEUTRAL and e.layer == "c2pa"]
+    failed = [entry for entry in res.coverage if entry.status == CoverageStatus.FAILED]
+    aspects: list[str] = []
+    notes: list[str] = []
+    if cues:
+        aspects.append(f"단서 {len(cues)}건")
+        notes.append("단서: " + "; ".join(display_name(e.title) for e in cues[:2]) + (" 외" if len(cues) > 2 else ""))
+    elif unverified:
+        aspects.append("확인 안 된 기록")
+        notes.append("확인 안 된 기록: " + display_name(unverified[0].title))
+    if failed:
+        aspects.append("검사 실패")
+        notes.append("검사 실패: " + ", ".join(CHECK_LABELS.get(entry.check, entry.check) for entry in failed))
+    if res.grade == Grade.REFERENCE:
+        aspects.append("참고 전용")
+    return aspects or ["근거 없음"], " / ".join(notes)
+
+
 def _selection_row(item: ScanItem, scan_root: Path | str | None) -> dict[str, Any]:
-    """One appendix row (G-1): the row label, its verdict (or status) and its hash."""
+    """One appendix row (G-1): the row label, its verdict (or status) and its hash;
+    H-4: a 판단 불가 row also carries its aspects and a one-line note."""
     res = item.result
     verdict_row = res is not None and is_verdict_row(item.status, True)
     label = VERDICT_LABELS[res.verdict_code] if res is not None and verdict_row else status_label(item.status or "failed")
     digest, unavailable = _item_hash(item, scan_root)
-    return {"file_path": row_label(item.path), "verdict_label": label, "sha256": digest or "", "hash_unavailable": "" if digest else (unavailable or HASH_UNAVAILABLE_ACCESS)}
+    aspects, note = undetermined_aspects(item)
+    row: dict[str, Any] = {"file_path": row_label(item.path), "verdict_label": label, "sha256": digest or "", "hash_unavailable": "" if digest else (unavailable or HASH_UNAVAILABLE_ACCESS)}
+    if aspects:
+        row["undetermined"] = aspects
+        row["note"] = note
+    return row
 
 
 def signed_statement_body(
