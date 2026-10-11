@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
 import wave
 from concurrent.futures import ThreadPoolExecutor
@@ -301,6 +302,101 @@ class OneWorkerPerScopeTest(unittest.TestCase):
         self.assertIn("SIGSEGV", outcomes[1])
         self.assertEqual(outcomes[2], "ValueError: stub decode b.wav")  # its own answer, from a new worker
         self.assertEqual(len(started), 2)
+
+
+class FramedProtocolTest(unittest.TestCase):
+    """R20-3 (round 20): one line written to the worker's fd 1 before it moved fd 1 to the log (a sitecustomize,
+    a .pth file, a native initializer) made the parent's ``json.loads`` fail for the first file — and the worker
+    was kept: every later file got the reply meant for the file before it (s1 carried s0's harmonic stability,
+    s2 "high mean pitch (900Hz)" of s1 …), with no warning. Replies are now framed: a ready line after the
+    redirect, the worker's token and the request id in every reply; anything else stops the worker and fails
+    that one file's check."""
+
+    def _fake(self, output: bytes, *, ready: bool = True) -> audio_worker._Worker:
+        import io
+        from types import SimpleNamespace
+
+        worker = audio_worker._Worker.__new__(audio_worker._Worker)
+        worker.token, worker.next_id, worker.ready, worker.expired = "t0k", 0, ready, False
+        worker.proc = SimpleNamespace(stdin=io.BytesIO(), stdout=io.BytesIO(output))  # type: ignore[assignment]
+        return worker
+
+    def test_a_framed_reply_to_this_request_is_accepted(self) -> None:
+        worker = self._fake(b'{"missing": "librosa", "token": "t0k", "id": 1}\n')
+        self.assertEqual(worker.ask({"path": "a"}, 5), {"missing": "librosa"})
+        self.assertEqual(json.loads(worker.proc.stdin.getvalue())["id"], 1)
+
+    def test_start_up_output_before_the_ready_line_is_skipped(self) -> None:
+        worker = self._fake(b'hello from a native init\n{"ready": "t0k"}\n{"missing": "x", "token": "t0k", "id": 1}\n', ready=False)
+        self.assertEqual(worker.ask({"path": "a"}, 5), {"missing": "x"})
+        self.assertTrue(worker.ready)
+
+    def test_endless_start_up_output_is_a_protocol_error(self) -> None:
+        worker = self._fake(b"noise\n" * (audio_worker._MAX_STARTUP_LINES + 1), ready=False)
+        with self.assertRaises(audio_worker.WorkerProtocolError):
+            worker.ask({"path": "a"}, 5)
+
+    def test_every_other_reply_is_a_protocol_error(self) -> None:
+        replies = {
+            "not json": b"hello\n",
+            "a list": b"[1]\n",
+            "another id": b'{"features": null, "token": "t0k", "id": 7}\n',
+            "no id": b'{"features": null, "token": "t0k"}\n',
+            "another token": b'{"features": null, "token": "zzz", "id": 1}\n',
+            "no newline": b'{"features": null, "token": "t0k", "id": 1}',
+        }
+        for name, output in replies.items():
+            with self.subTest(name), self.assertRaises(audio_worker.WorkerProtocolError) as caught:
+                self._fake(output).ask({"path": "a"}, 5)
+            self.assertIn("이 검사만 실패로 기록했습니다", str(caught.exception))
+
+    def test_a_desynchronized_worker_is_stopped_and_the_next_file_gets_a_new_one(self) -> None:
+        bad = self._fake(b'{"features": null, "token": "t0k", "id": 99}\n')
+        bad.owner = threading.current_thread()
+        good = self._fake(b'{"missing": "librosa", "token": "t0k", "id": 1}\n')
+        good.owner = threading.current_thread()
+        pending = [bad, good]
+        stopped: list[object] = []
+        with mock.patch.object(audio_worker, "_start", lambda: pending.pop(0)), \
+                mock.patch.object(shutdown, "stop_tracked", stopped.append), \
+                mock.patch.object(audio_worker._Worker, "close", lambda self: None), \
+                mock.patch.object(audio_worker._Worker, "alive", lambda self: True), \
+                audio_worker.worker_scope() as scope:
+            with self.assertRaises(audio_worker.WorkerProtocolError):
+                audio_worker.extract_features("/a.wav", segment_seconds=5)
+            self.assertEqual(stopped, [bad.proc])
+            self.assertEqual(audio_worker.extract_features("/b.wav", segment_seconds=5), {"missing": "librosa"})
+            self.assertEqual(scope.size(), 1)
+        self.assertEqual(pending, [])
+
+    @unittest.skipIf(os.name != "posix", "POSIX signals")
+    def test_start_up_output_of_a_real_worker_does_not_shift_the_replies(self) -> None:
+        """The verifier's case end to end: each file gets its own reply (the stub's decode error names the file)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = _crash_stub(tmp)
+            marker = Path(tmp, "printed")
+            (stub / "sitecustomize.py").write_text(
+                "import os, sys\n"
+                "if 'audio_worker' in ''.join(getattr(sys, 'orig_argv', [])):\n"
+                "    os.write(1, b'hello from a native init\\n')\n"
+                f"    open({str(marker)!r}, 'a').close()\n",
+                encoding="utf-8",
+            )
+            pythonpath = os.pathsep.join([str(stub), *filter(None, [os.environ.get("PYTHONPATH")])])
+            names = ["s0.wav", "s1.wav", "s2.wav", "s3.wav"]
+            for name in names:
+                Path(tmp, name).write_bytes(b"RIFF")
+            reasons: list[str] = []
+            with mock.patch.dict(os.environ, {"PYTHONPATH": pythonpath}), audio_worker.worker_scope() as scope:
+                for name in names:
+                    try:
+                        audio_worker.extract_features(str(Path(tmp, name)), segment_seconds=5)
+                    except Exception as exc:  # noqa: BLE001
+                        reasons.append(f"{type(exc).__name__}: {exc}")
+                self.assertEqual(scope.size(), 1)
+            self.assertEqual(shutdown.running_children(), [])
+            self.assertTrue(marker.exists())  # the worker did write to its fd 1 before the ready line
+        self.assertEqual(reasons, [f"ValueError: stub decode {name}" for name in names])
 
 
 class MultiFileCommandsRunInOneScopeTest(unittest.TestCase):

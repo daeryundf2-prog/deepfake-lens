@@ -44,6 +44,18 @@ an upload of 30 WAV files 3.2 s → 30 s. A scope opened while another is
 active on the same thread is that scope (a scan inside a report keeps
 the report's worker); the outermost one ends the workers.
 
+R20-3 (round 20): the protocol is framed and checked. Each worker gets a
+random token (argv); after moving fd 1 to fd 2 it writes one ready line
+``{"ready": <token>}`` — anything a ``sitecustomize``, a ``.pth`` file or a
+native initializer wrote to fd 1 before that is start-up output, logged and
+skipped (at most :data:`_MAX_STARTUP_LINES` lines). Every request carries an
+``id`` and every reply must be one JSON object with the worker's token and
+that id. Any other reply — unparseable, another id, no newline, over
+:data:`_MAX_REPLY_BYTES` — is a :class:`WorkerProtocolError`: that file's
+check fails and the worker is stopped and never asked again. (One line of
+start-up output used to shift every later reply by one file: each file got
+the audio features of the file before it, with no warning.)
+
 A decode error raised in the worker is rebuilt in this process as an
 exception of the same class name, message, errno and file name, so
 ``failure_reason`` gives the reason an in-process extraction gave.
@@ -95,8 +107,13 @@ WORKER_BOOT = (
     "import sys\n"
     "sys.path.insert(0, sys.argv[1])\n"
     "from deepfake_lens.audio_worker import serve\n"
-    "serve()\n"
+    "serve(sys.argv[2])\n"
 )
+# R20-3: the reason of a reply that is not the answer to the request sent.
+PROTOCOL_ERROR_MESSAGE = "오디오 특징 추출 작업자의 응답이 요청과 맞지 않아 작업자를 중단했습니다({detail}) — 이 검사만 실패로 기록했습니다"
+# R20-3: start-up output tolerated before the ready line, and the longest reply line.
+_MAX_STARTUP_LINES = 64
+_MAX_REPLY_BYTES = 4 * 1024 * 1024
 
 
 class NativeCrashError(RuntimeError):
@@ -105,6 +122,10 @@ class NativeCrashError(RuntimeError):
 
 class WorkerTimeoutError(RuntimeError):
     """R19-2: the worker did not answer within :data:`WORKER_REQUEST_TIMEOUT_SECONDS`."""
+
+
+class WorkerProtocolError(RuntimeError):
+    """R20-3: the worker's reply is not a framed answer to the request sent (the worker is stopped)."""
 
 
 # --- numba cache ------------------------------------------------------------
@@ -232,8 +253,12 @@ def _serve_one(request: dict[str, Any]) -> dict[str, Any]:
     return {"features": asdict(features) if features is not None else None}
 
 
-def serve() -> None:
-    """The worker loop: one JSON request per line on stdin, one JSON reply per line on fd 1."""
+def serve(token: str = "") -> None:
+    """The worker loop: one JSON request per line on stdin, one JSON reply per line on fd 1.
+
+    R20-3: first the ready line ``{"ready": token}``; every reply carries
+    ``token`` and the request's ``id``.
+    """
     import select
 
     global _PROCESS_CACHE_DIR
@@ -242,6 +267,8 @@ def serve() -> None:
     # log), so a library that prints cannot corrupt the protocol.
     replies = os.fdopen(os.dup(1), "wb")
     os.dup2(2, 1)
+    replies.write(json.dumps({"ready": token}).encode("ascii") + b"\n")
+    replies.flush()
     incoming = sys.stdin.buffer
     while True:
         if os.name == "posix":
@@ -251,15 +278,27 @@ def serve() -> None:
         line = incoming.readline()
         if not line:
             return
+        request_id: object = None
         try:
-            reply = _serve_one(json.loads(line))
+            request = json.loads(line)
+            request_id = request.get("id")
+            reply = _serve_one(request)
         except Exception as exc:  # noqa: BLE001 — a malformed request still gets an answer
             reply = _error_reply(exc)
+        reply.update(token=token, id=request_id)
         replies.write(json.dumps(reply, ensure_ascii=True).encode("ascii") + b"\n")
         replies.flush()
 
 
 # --- parent side ------------------------------------------------------------
+
+
+def _parsed(line: bytes) -> object:
+    """R20-3: one reply line as JSON, or None when it is not JSON."""
+    try:
+        return json.loads(line)
+    except ValueError:
+        return None
 
 
 def _rebuilt_exception(error: dict[str, Any]) -> Exception:
@@ -296,6 +335,9 @@ class _Worker:
         # The thread that started it: its supervisor dies with that thread
         # (PR_SET_PDEATHSIG), so only that thread may use it.
         self.owner = threading.current_thread()
+        self.token = os.urandom(8).hex()  # R20-3
+        self.next_id = 0
+        self.ready = False
         self.cache_dir, self.seeded = private_cache_dir()
         self.published = self.seeded
         self.expired = False
@@ -313,7 +355,7 @@ class _Worker:
         log = _native_log()
         try:
             self.proc = shutdown.start_tracked(
-                [sys.executable, "-P", "-c", WORKER_BOOT, _package_parent()],
+                [sys.executable, "-P", "-c", WORKER_BOOT, _package_parent(), self.token],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log if log is not None else subprocess.DEVNULL, env=env,
                 cwd=self.cache_dir,  # never the scan's working folder (possibly the evidence folder)
             )
@@ -328,16 +370,38 @@ class _Worker:
         self.expired = True
         shutdown.stop_tracked(self.proc)
 
+    def _line(self) -> bytes:
+        assert self.proc.stdout is not None
+        return self.proc.stdout.readline(_MAX_REPLY_BYTES)
+
+    def _wait_ready(self) -> bool:
+        """R20-3: skip start-up output up to the ready line; False when the worker ended first."""
+        for _ in range(_MAX_STARTUP_LINES):
+            line = self._line()
+            if not line:
+                return False
+            if _parsed(line) == {"ready": self.token}:
+                self.ready = True
+                return True
+            logger.warning("audio feature worker: start-up output before the ready line skipped: %r", line[:200])
+        raise WorkerProtocolError(PROTOCOL_ERROR_MESSAGE.format(detail=f"준비 신호 전 출력 {_MAX_STARTUP_LINES}줄 초과"))
+
     def ask(self, request: dict[str, Any], timeout: float) -> dict[str, Any] | None:
-        """The reply, or None when the worker ended without one."""
+        """The reply, or None when the worker ended without one.
+
+        R20-3: raises :class:`WorkerProtocolError` for a reply that is not
+        this request's framed answer — the caller stops the worker.
+        """
         assert self.proc.stdin is not None and self.proc.stdout is not None
+        self.next_id += 1
+        request_id = self.next_id
         timer = threading.Timer(timeout, self._expire)
         timer.daemon = True
         timer.start()
         try:
-            self.proc.stdin.write(json.dumps(request, ensure_ascii=True).encode("ascii") + b"\n")
+            self.proc.stdin.write(json.dumps({**request, "id": request_id}, ensure_ascii=True).encode("ascii") + b"\n")
             self.proc.stdin.flush()
-            line = self.proc.stdout.readline()
+            line = self._line() if self.ready or self._wait_ready() else b""
         except (OSError, ValueError):
             line = b""
         finally:
@@ -345,7 +409,11 @@ class _Worker:
         self.last_used = time.monotonic()
         if not line:
             return None
-        reply: dict[str, Any] = json.loads(line)
+        reply = _parsed(line)
+        if not line.endswith(b"\n") or not isinstance(reply, dict):
+            raise WorkerProtocolError(PROTOCOL_ERROR_MESSAGE.format(detail="해석할 수 없는 응답"))
+        if reply.pop("token", None) != self.token or reply.pop("id", None) != request_id:
+            raise WorkerProtocolError(PROTOCOL_ERROR_MESSAGE.format(detail="다른 요청의 응답"))
         return reply
 
     def close(self) -> None:
@@ -417,6 +485,13 @@ class WorkerScope:
         with self._lock:
             self._workers[ident] = worker
         return worker
+
+    def drop(self, worker: _Worker) -> None:
+        """R20-3: forget a stopped worker (its thread starts a new one for the next file)."""
+        with self._lock:
+            for key, held in list(self._workers.items()):
+                if held is worker:
+                    del self._workers[key]
 
     def size(self) -> int:
         """How many workers the scope holds (tests)."""
@@ -516,6 +591,14 @@ def extract_features(native_path: str, *, segment_seconds: int) -> dict[str, Any
         worker = scope.worker() if scope is not None else _start()
         try:
             reply = worker.ask(request, WORKER_REQUEST_TIMEOUT_SECONDS)
+        except WorkerProtocolError as exc:
+            # R20-3: a desynchronized worker is stopped and never asked again; this file's check fails.
+            logger.error("audio feature worker reply for %s refused: %s", native_path, exc)
+            shutdown.stop_tracked(worker.proc)
+            _forget(worker)
+            if scope is not None:
+                scope.drop(worker)
+            raise
         finally:
             if scope is None:
                 _forget(worker)  # outside a scope: one request per worker
