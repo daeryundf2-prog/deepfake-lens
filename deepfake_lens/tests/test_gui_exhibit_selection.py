@@ -32,6 +32,10 @@ def _folder(tmp: str) -> Path:
     for index in range(4):
         (folder / f"note{index}.txt").write_text(f"사람이 쓴 글 {index}번입니다.", encoding="utf-8")
     (folder / "odd.xyz").write_bytes(b"?")
+    import zipfile
+
+    with zipfile.ZipFile(folder / "evid.zip", "w") as archive:
+        archive.writestr("inner/memo.txt", "압축 안의 글입니다.")
     return folder
 
 
@@ -67,6 +71,18 @@ class StatementSelectionTest(unittest.TestCase):
         forged = json.loads(json.dumps(signed))
         forged["excluded_by_selection"] = forged["excluded_by_selection"][1:]
         self.assertFalse(verify_report(forged, KEY).verified, "dropping an appendix row must break the signature")
+
+    def test_an_ordered_choice_numbers_exhibits_in_its_order(self) -> None:
+        """GUI-REV2 H-1: the exhibits are numbered in the posted order (the preview's), not the scan's."""
+        with tempfile.TemporaryDirectory() as tmp:
+            summary, items, _ = _scan(_folder(tmp))
+            paths = [item.path for item in items]
+            member = next(path for path in paths if "::" in path)
+            container = member.split("::", 1)[0]
+            order = [paths[-1], member, container, paths[0]]
+            statement = build_evidence_statement(items, summary=summary, exhibit_paths=order, submitter_side="defendant")
+        self.assertEqual([(entry.exhibit_no, entry.file_path) for entry in statement.entries],
+                         [(f"을 제{index}호증", path) for index, path in enumerate(dict.fromkeys(order), start=1)])
 
     def test_the_long_standing_statement_is_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -153,6 +169,32 @@ class WebReportSelectionTest(unittest.TestCase):
                 self.assertIn(row["sha256"], text)
         self.assertIn("갑 제1호증", text)
         self.assertNotIn("갑 제2호증", text)
+
+    def test_web_statement_follows_the_posted_order(self) -> None:
+        captured: dict[str, Any] = {}
+
+        def fake_pdf(path: Any, statement: Any, *, signed: Any = None, unsigned_rows: Any = None, **_: Any) -> dict[str, Any]:
+            captured["statement"] = statement
+            Path(path).write_bytes(b"%PDF-fake")
+            return signed
+
+        order = [row["path"] for row in reversed(self.rows) if row.get("result")]
+        with mock.patch("deepfake_lens.evidence_statement.write_evidence_statement_pdf", fake_pdf):
+            webapp_api._report_payload(self._body(exhibit_paths=order, submitter_side="plaintiff"), "evidence", default_folder=self.folder)
+        self.assertEqual([entry.file_path for entry in captured["statement"].entries], order)
+        self.assertEqual(captured["statement"].entries[0].exhibit_no, "갑 제1호증")
+
+    def test_evidence_json_is_the_signed_statement_in_the_posted_order(self) -> None:
+        """GUI-REV2 H-1: format=evidence-json is the body the evidence PDF is rendered from."""
+        order = [row["path"] for row in reversed(self.rows) if row.get("result")][:3]
+        with mock.patch.dict("os.environ", {"DEEPFAKE_LENS_REPORT_KEY": KEY.decode()}):
+            body = webapp_api._report_payload(self._body(exhibit_paths=order, submitter_side="defendant"), "evidence-json", default_folder=self.folder)
+        assert isinstance(body, dict), body
+        self.assertEqual(body["report_type"], "evidence-statement")
+        self.assertEqual([(entry["exhibit_no"], entry["file_path"]) for entry in body["entries"]],
+                         [(f"을 제{index}호증", path) for index, path in enumerate(order, start=1)])
+        self.assertEqual(len(body["excluded_by_selection"]), len(self.rows) - len(order))
+        self.assertTrue(verify_report(body, KEY).verified)
 
     def test_other_formats_carry_every_row_whatever_the_choice(self) -> None:
         signed = webapp_api._report_payload(self._body(exhibit_paths=[self.rows[0]["path"]]), "json", default_folder=self.folder)

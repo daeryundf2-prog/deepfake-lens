@@ -1284,7 +1284,7 @@ REPORT_RENDER_FAILED_STATUS = 500
 EVIDENCE_PDF_FAILED_PREFIX = "증거설명서 PDF 생성 실패: "
 # N9: the report format comes from ?format= or, failing that, the JSON body's
 # "format" — both servers decide the content type from the same value.
-REPORT_FORMATS = ("html", "pdf", "evidence", "evidence-statement", "json")
+REPORT_FORMATS = ("html", "pdf", "evidence", "evidence-statement", "json", "evidence-json")
 PDF_REPORT_FORMATS = ("pdf", "evidence", "evidence-statement")
 REPORT_FORMAT_UNSUPPORTED = "지원되지 않는 보고서 형식입니다: 「{value}」 (`html`, `pdf`, `evidence`, `json` 중 하나)"
 REPORT_FORMAT_NOT_STRING = "`format` 값은 문자열이어야 합니다"
@@ -1814,7 +1814,8 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     raw_exhibits = data.get("exhibit_paths")
     if raw_exhibits is not None and not (isinstance(raw_exhibits, list) and all(isinstance(path, str) for path in raw_exhibits)):
         return {"error": REPORT_EXHIBIT_PATHS_INVALID}
-    exhibit_paths = frozenset(raw_exhibits) if raw_exhibits is not None else None
+    # GUI-REV2 H-1: an ordered list — the statement numbers exhibits in this order.
+    exhibit_paths = list(raw_exhibits) if raw_exhibits is not None else None
     submitter_side = data.get("submitter_side", "plaintiff")
     if submitter_side not in ("plaintiff", "defendant"):
         return {"error": REPORT_SUBMITTER_SIDE_INVALID}
@@ -1858,32 +1859,44 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     )
     if req_format == "json":
         return signed
+
+    def _statement() -> Any:
+        from .evidence_statement import build_evidence_statement
+        from .office_config import DEFAULT_CASE_NAME
+
+        return build_evidence_statement(
+            items,
+            case_no=str(data.get("case_no") or "(사건번호 입력)"),
+            case_name=str(data.get("case_name") or DEFAULT_CASE_NAME),  # R18-16
+            plaintiff=str(data.get("plaintiff") or "(의뢰사 상호명 입력) 귀하"),
+            defendant=str(data.get("defendant") or "(피고/피의자 성명 입력)"),
+            court=str(data.get("court") or "○○지방법원 귀중"),
+            # N17: the request's value, else the operator config, else blank.
+            law_firm=str(data.get("law_firm") or "") or None,
+            contact=str(data.get("contact") or "") or None,
+            center=str(data.get("center") or "디지털포렌식 감정센터"),
+            thresholds=thresholds,
+            coverage=coverage,
+            excluded_items=excluded_rows,
+            summary=summary,  # R18-3: the "사용자 취소" count of a cancelled scan
+            exhibit_paths=exhibit_paths,  # GUI-REV G-1
+            submitter_side=str(submitter_side),  # GUI-REV G-9
+        )
+
+    if req_format == "evidence-json":
+        # GUI-REV2 H-1: the evidence statement's signed body — the same statement
+        # the PDF renders (exhibit numbers, appendix), without the PDF renderer.
+        from .evidence_statement import signed_statement_body
+
+        return signed_statement_body(_statement(), model_pins=profile_pins(_models_dir()), scan_root=root_label)
     suffix = ".pdf" if req_format in ("pdf", "evidence", "evidence-statement") else ".html"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=scratch_dir()) as tmp:
         tmp_path = Path(tmp.name)
     try:
         if req_format in ("evidence", "evidence-statement"):
-            from .evidence_statement import build_evidence_statement, signed_statement_body, write_evidence_statement_pdf
-            from .office_config import DEFAULT_CASE_NAME
+            from .evidence_statement import signed_statement_body, write_evidence_statement_pdf
             try:
-                stmt = build_evidence_statement(
-                    items,
-                    case_no=str(data.get("case_no") or "(사건번호 입력)"),
-                    case_name=str(data.get("case_name") or DEFAULT_CASE_NAME),  # R18-16
-                    plaintiff=str(data.get("plaintiff") or "(의뢰사 상호명 입력) 귀하"),
-                    defendant=str(data.get("defendant") or "(피고/피의자 성명 입력)"),
-                    court=str(data.get("court") or "○○지방법원 귀중"),
-                    # N17: the request's value, else the operator config, else blank.
-                    law_firm=str(data.get("law_firm") or "") or None,
-                    contact=str(data.get("contact") or "") or None,
-                    center=str(data.get("center") or "디지털포렌식 감정센터"),
-                    thresholds=thresholds,
-                    coverage=coverage,
-                    excluded_items=excluded_rows,
-                    summary=summary,  # R18-3: the "사용자 취소" count of a cancelled scan
-                    exhibit_paths=exhibit_paths,  # GUI-REV G-1
-                    submitter_side=str(submitter_side),  # GUI-REV G-9
-                )
+                stmt = _statement()
                 # G30: signed like the other web reports (server key + pins).
                 write_evidence_statement_pdf(
                     tmp_path, stmt, signed=signed_statement_body(stmt, model_pins=profile_pins(_models_dir()), scan_root=root_label),

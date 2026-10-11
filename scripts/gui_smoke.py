@@ -208,6 +208,22 @@ def main() -> int:
             assert "의뢰 측" not in page.evaluate("exportBlockReason('evidence', selectedEntries())")
             note = page.locator("#export-note").inner_text()
             assert "지금 내보낼 수 있는 형식" in note and "HTML 보고서" in note, note
+            # GUI-REV2 H-1: the preview's (호증, 파일) list is the signed statement's, in
+            #     the same order — with 판단 불가 chosen too (cue/failed/reference rows,
+            #     archive members). The statement comes from format=evidence-json, the
+            #     body the evidence PDF is rendered from.
+            page.check("#inc-undet")
+            compared = page.evaluate("""async () => {
+                const preview = [...document.querySelectorAll('#a4 tr[data-exhibit]')].map(r => [r.dataset.exhibit, r.dataset.path]);
+                const res = await apiFetch('/api/report?format=evidence-json', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(exportPayload('evidence'))});
+                const body = await res.json();
+                return [preview, (body.entries || []).map(e => [e.exhibit_no, displayName(e.file_path)]), res.status];
+            }""")
+            assert compared[2] == 200, compared
+            assert compared[0] and compared[0] == compared[1], (compared[0][:6], compared[1][:6])
+            assert compared[0][0][0] == "을 제1호증"
+            page.uncheck("#inc-undet")
             # G-9(c): the preview's limits come from the scan, not "특이 사항 없음".
             assert "특이 사항 없음" not in page.locator("#a4").inner_text()
             # GUI-REV G-1: every row is posted for every format; the choice only names exhibits.

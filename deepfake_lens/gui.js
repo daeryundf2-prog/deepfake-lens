@@ -2088,7 +2088,9 @@
                 GROUPS.forEach(([band, id]) => { $(id).checked = band === 'manipulation_evidence' || band === 'authenticity_evidence'; });
             }
             const on = new Set(GROUPS.filter(([, id]) => $(id).checked).map(([band]) => band));
-            return results.filter(e => on.has(itemBand(e))).sort(byVerdict);
+            // GUI-REV2 H-1: uploaded files are never exhibits (the server lists them as
+            // 서명 제외); the order here is the order the statement numbers them in.
+            return results.filter(e => on.has(itemBand(e)) && e.item.source !== 'upload').sort(byVerdict);
         }
         const TAGS = { req: ['필수', 'tag-req'], ok: ['확인됨', 'tag-ok'], info: ['알림', 'tag-info'], warn: ['주의', 'tag-warn'] };
         function reportChecks(sel) {
@@ -2175,10 +2177,9 @@
         function renderA4(sel) {
             const miss = '<span class="miss">미기재</span>';
             const val = id => caseValue(id) ? shown(caseValue(id)) : miss;
-            const shownRows = sel.slice(0, 10);
             const prefix = (SIDES[submitterSide()] || ['', '갑'])[1];
-            const rows = shownRows.map((e, i) => `<tr><td>${prefix} 제${i + 1}호증</td><td>${shown(e.item.path || e.item.name || '파일')}</td><td>${escapeHtml(shortVerdict(e.item))}</td></tr>`).join('') +
-                (sel.length > shownRows.length ? `<tr><td colspan="3">외 ${sel.length - shownRows.length}건</td></tr>` : '') +
+            // H-1: every exhibit is listed, in the order the statement numbers them.
+            const rows = sel.map((e, i) => `<tr data-exhibit="${prefix} 제${i + 1}호증" data-path="${shown(e.item.path || '')}"><td>${prefix} 제${i + 1}호증</td><td>${shown(e.item.path || e.item.name || '파일')}</td><td>${escapeHtml(shortVerdict(e.item))}</td></tr>`).join('') +
                 (sel.length ? '' : `<tr><td colspan="3">${miss}</td></tr>`);
             const rest = results.length - sel.length;
             const partial = partialResultNote(lastProvenance.summary);

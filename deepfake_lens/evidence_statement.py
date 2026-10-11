@@ -29,7 +29,7 @@ import stat
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from .core import ScanItem
 from .office_config import DEFAULT_CASE_NAME, DEFAULT_CENTER, office_identity
@@ -417,7 +417,7 @@ def build_evidence_statement(
     scan_root: Path | str | None = None,
     summary: object | None = None,
     excluded_items: list[dict[str, object]] | None = None,
-    exhibit_paths: set[str] | frozenset[str] | None = None,
+    exhibit_paths: Sequence[str] | set[str] | frozenset[str] | None = None,
     submitter_side: str = "plaintiff",
 ) -> EvidenceStatement:
     """Build an EvidenceStatement from analyzed scan items.
@@ -445,7 +445,15 @@ def build_evidence_statement(
         exhibit_prefix = SUBMITTER_EXHIBIT_PREFIX[submitter_side]
     all_items = list(items)
     not_chosen = [item for item in all_items if exhibit_paths is not None and item.path not in exhibit_paths]
-    items = [item for item in all_items if exhibit_paths is None or item.path in exhibit_paths]
+    if exhibit_paths is None:
+        items = all_items
+    elif isinstance(exhibit_paths, (set, frozenset)):
+        items = [item for item in all_items if item.path in exhibit_paths]
+    else:
+        # GUI-REV2 H-1: an ordered list numbers the exhibits in its own order —
+        # the order the examiner saw in the preview, not the scan's row order.
+        by_path = {item.path: item for item in all_items}
+        items = [by_path[path] for path in dict.fromkeys(exhibit_paths) if path in by_path]
     office = office_identity(law_firm, contact, center=center)
     law_firm, contact, center = office.law_firm, office.contact, office.center
     entries: list[EvidenceStatementEntry] = []
