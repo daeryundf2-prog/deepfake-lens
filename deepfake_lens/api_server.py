@@ -1115,7 +1115,7 @@ def create_app(
     @app.get("/api/stats")
     async def api_stats():
         from .webapp_api import _stats_payload
-        return _stats_payload()
+        return _stats_payload(default_folder)
 
     @app.post("/api/analyze-upload")
     async def api_analyze_upload(request: Request):

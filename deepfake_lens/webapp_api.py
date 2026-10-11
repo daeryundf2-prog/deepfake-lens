@@ -213,11 +213,16 @@ def _set_row_name(record: dict[str, object], name: str) -> None:
     record["display_name"] = display_name(name)
 
 
-def _scan_payload(query: str, *, default_folder: Path | None, should_stop: Callable[[], bool] | None = None) -> dict[str, object]:
+def _scan_payload(
+    query: str, *, default_folder: Path | None, should_stop: Callable[[], bool] | None = None,
+    progress: Callable[[Any, int, int], None] | None = None, on_plan: Callable[[int], None] | None = None,
+) -> dict[str, object]:
     """Handle scan request.
 
     Raises ReadRootDenied (-> HTTP 403) when the folder is outside the
     operator-registered roots; the caller's folder is never registered (G31).
+    ``progress``/``on_plan`` are the scanner's per-row callbacks
+    (``analysis_api.scan_folder_run``) — the async job reports n/N from them.
     """
     folder = _requested_folder(query, default_folder)
     _require_read_root(folder, default_folder)
@@ -226,7 +231,7 @@ def _scan_payload(query: str, *, default_folder: Path | None, should_stop: Calla
     # InvalidOption (a ValueError) -> HTTP 400 before any file is read.
     options = _web_options(parse_qs(query))
     try:
-        run = scan_folder_run(folder, options, should_stop=should_stop)
+        run = scan_folder_run(folder, options, should_stop=should_stop, progress=progress, on_plan=on_plan)
         payload = scan_payload(run.summary, run.items, run.thresholds, options)
         # P1: the folder the row paths are relative to — the GUI sends it
         # back with POST /api/report, which resolves rows against it only.
@@ -253,9 +258,18 @@ _SCAN_JOB_TTL_SECONDS = 15 * 60
 _SCAN_JOB_MAX = 32
 
 
+# GUI redesign: the most recent finished rows a running job reports.
+_SCAN_JOB_RECENT = 5
+
+
 def _scan_job_evict(now: float) -> None:
-    """Drop finished jobs past the TTL (called with the lock held)."""
-    for key in [key for key, entry in _SCAN_JOBS.items() if now - entry.get("finished", entry["created"]) > _SCAN_JOB_TTL_SECONDS]:
+    """Drop finished jobs past the TTL (called with the lock held).
+
+    A running job is never dropped: it was dropped 15 minutes after it
+    started (``finished`` defaulted to ``created``), so a long scan's status
+    became 404 and its result unreachable while the scan was still running.
+    """
+    for key in [key for key, entry in _SCAN_JOBS.items() if "finished" in entry and now - entry["finished"] > _SCAN_JOB_TTL_SECONDS]:
         _SCAN_JOBS.pop(key, None)
 
 
@@ -271,11 +285,36 @@ def _scan_job_start(query: str, *, default_folder: Path | None) -> dict[str, obj
             raise ValueError("실행 중인 검사 작업이 너무 많습니다 — 진행 중인 작업이 끝난 뒤 다시 시도하십시오")
         job_id = secrets.token_hex(8)
         cancel = threading.Event()
-        _SCAN_JOBS[job_id] = {"status": "running", "created": time.time(), "cancel": cancel}
+        _SCAN_JOBS[job_id] = {
+            "status": "running", "created": time.time(), "cancel": cancel,
+            "done": 0, "total": None, "current": None, "recent": [],
+        }
+
+    def on_plan(planned: int) -> None:
+        with _SCAN_JOBS_LOCK:
+            entry = _SCAN_JOBS.get(job_id)
+            if entry is not None:
+                entry["total"] = planned
+
+    def on_row(item: Any, done: int, planned: int) -> None:
+        # The row as the scanner finished it (pre-fusion): its escaped name
+        # and verdict code, for the GUI's "방금 끝난 파일" list only — the
+        # final rows are the job's result.
+        name = display_name(str(getattr(item, "name", "") or getattr(item, "path", "") or ""))
+        result = getattr(item, "result", None)
+        verdict = getattr(getattr(result, "verdict_code", None), "value", None) if result is not None else None
+        status = str(getattr(item, "status", "") or "")
+        with _SCAN_JOBS_LOCK:
+            entry = _SCAN_JOBS.get(job_id)
+            if entry is not None:
+                entry["done"] = done
+                entry["total"] = max(planned, entry.get("total") or 0)
+                entry["current"] = name
+                entry["recent"] = ([{"name": name, "status": status, "verdict_code": verdict}] + entry["recent"])[:_SCAN_JOB_RECENT]
 
     def work() -> None:
         try:
-            result = _scan_payload(query, default_folder=default_folder, should_stop=cancel.is_set)
+            result = _scan_payload(query, default_folder=default_folder, should_stop=cancel.is_set, progress=on_row, on_plan=on_plan)
             # R18-3 (round 18): a scan the cancel cut short is "cancelled" (its
             # partial result kept, summary.cancelled) — it was "done", like a
             # complete scan.
@@ -314,6 +353,16 @@ def _scan_status_payload(query: str) -> dict[str, object]:
         if entry is None:
             return ApiError(JOB_UNKNOWN, 404)  # X4
         payload: dict[str, object] = {"job_id": job_id, "status": entry["status"]}
+        # GUI redesign (U-7): progress of the job — rows finished (``done``),
+        # rows the scan will report (``total``; null until the folder is
+        # enumerated), the escaped name of the row finished last
+        # (``current``), the last few finished rows (``recent``) and the
+        # seconds since the job started (``elapsed_seconds``).
+        payload["done"] = entry.get("done", 0)
+        payload["total"] = entry.get("total")
+        payload["current"] = entry.get("current")
+        payload["recent"] = list(entry.get("recent") or [])
+        payload["elapsed_seconds"] = round(entry.get("finished", time.time()) - entry["created"], 1)
         if entry["status"] != "running":
             payload["result"] = entry.get("result")
         return payload
@@ -430,8 +479,17 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
     return response
 
 
-def _stats_payload() -> dict[str, object]:
-    """Handle stats request with real package facts."""
+def _stats_payload(default_folder: Path | None = None) -> dict[str, object]:
+    """Handle stats request with real package facts.
+
+    GUI redesign (U-8): ``default_folder`` — the server's ``--folder`` as an
+    absolute path (``default_folder_b64``: its file-system bytes, R12-4), or
+    null — so the GUI can prefill the scan folder; ``pdf_available`` — whether
+    the PDF renderer (pymupdf) is installed, so PDF exports can be offered
+    only when they can be produced.
+    """
+    from .pdf_backend import pymupdf_available
+
     import importlib.metadata
 
     try:
@@ -440,10 +498,14 @@ def _stats_payload() -> dict[str, object]:
         version = "dev"
     package_dir = Path(__file__).parent
     module_count = sum(1 for entry in package_dir.glob("*.py") if not entry.name.startswith("_"))
+    folder = scan_root_text(default_folder) if default_folder is not None else None
     return {
         "status": "ok",
         "version": version,
         "modules": module_count,
+        "default_folder": folder,
+        "default_folder_b64": fs_b64encode(folder) if folder is not None else None,
+        "pdf_available": bool(pymupdf_available()),
     }
 
 

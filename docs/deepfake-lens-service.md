@@ -203,12 +203,12 @@ stores and are never attached to a row.
 | `/gui.css` | — | GUI stylesheet (`text/css`) |
 | `/gui.js` | — | GUI script (`text/javascript`) |
 | `/api/scan` | `folder` (or `folder_b64` — R13-3: URL-safe base64 of the folder's file-system bytes, for a non-UTF-8 path; takes precedence), `pixel` (`off`/`fast`/`deep`), `recursive`, `max_files`, `max_file_bytes`, `dedupe`, `heatmaps`, `deep_signals`, `no_default_engine`, `model_path` / `fusion_profile` (bare file name in the models dir), `async` | the same `scan_to_json` payload the CLI prints (`{"schema_version", "summary", "coverage", "thresholds", "items"}`) or `{"error": "..."}`; with `async=1` returns `{"job_id", "status": "running"}`. **400** `{"error": ...}` for an invalid option (non-integer limit, unknown pixel mode, `model_path`/`fusion_profile` not a file name inside the models dir). **403** `{"error": "허용되지 않은 경로"}` when `folder` is outside the read roots (see below) |
-| `/api/scan-status` | `job` | `{"job_id", "status": "running"\|"done"\|"cancelled"\|"error"}` plus `result` once finished (R18-3: `cancelled` when a cancel left files unanalyzed — `result` is the partial scan, `summary.cancelled` true); jobs live in memory only and expire after 15 min (max 32 concurrent) |
-| `/api/scan-cancel` | `job` | Sets the job's cancel flag; the scan stops between items and returns partial results as `done`. `{"cancelled": true}` while running, `false` once finished |
+| `/api/scan-status` | `job` | `{"job_id", "status": "running"\|"done"\|"cancelled"\|"error", "done", "total", "current", "recent", "elapsed_seconds"}` plus `result` once finished (R18-3: `cancelled` when a cancel left files unanalyzed — `result` is the partial scan, `summary.cancelled` true). Progress (GUI redesign, U-7): `done` rows finished so far, `total` rows the scan will report (`null` until the folder is enumerated), `current` the escaped display name of the row finished last (`null` before the first), `recent` the last five finished rows `{"name", "status", "verdict_code"}` (pre-fusion; the final rows are `result`), `elapsed_seconds` since the job started (to its end once finished). Jobs live in memory only; a finished job expires 15 min after it finished (a running job is never evicted), max 32 concurrent |
+| `/api/scan-cancel` | `job` | Sets the job's cancel flag; the scan stops between items and the job ends `cancelled` with the partial result (R18-3). `{"cancelled": true}` while running, `false` once finished |
 | `/api/analyze-file` | `file` (or `file_b64` — R13-3: URL-safe base64 of the file-system bytes, for a non-UTF-8 name; takes precedence; the response carries `file_b64` beside `file`) | analysis_result (D3: the scan result — verdict_code, evidence, coverage; the scan's own photo-gated pixel layer only) + `layer_diagnostics.provenance_metadata` / `.tool_candidates`, or `{"error"}` (+`detail` for unexpected failures). No ungated pixel pre-screen and no band. **403** `{"error": "허용되지 않은 경로"}` when `file` is outside the read roots |
 | `/api/heatmap` | `path`, `root` | PNG bytes; 403 unless `path` is a `.png` under a **server-registered** read root (see below), 404 if missing |
 | `/api/preview` | `path`, `root` | media bytes with `nosniff`; same registered-root rule, media extensions only, ≤128 MiB |
-| `/api/stats` | — | `{"status", "version", "modules"}` |
+| `/api/stats` | — | `{"status", "version", "modules", "default_folder", "default_folder_b64", "pdf_available"}` — `default_folder` is the server's `--folder` as an absolute path (`default_folder_b64` its file-system bytes, R12-4; both `null` when the server has none — `api-serve`), which the GUI prefills as the scan folder; `pdf_available` says whether the PDF renderer (pymupdf) is installed (`?format=pdf`/`evidence` answer 501 without it) |
 | `/api/reviews` | — | `{"status", "reviews"}` — every stored examiner review (`~/.deepfake-lens/reviews.json`, override `DEEPFAKE_LENS_REVIEWS`) |
 | `/api/review` | `path` or `artifact_id` | `{"status", "artifact_id", "review"}`; 400 without either (E33) |
 | POST `/api/review` | JSON object `{"artifact_id" (or "path"), …review fields}` | saves the review; `{"status", "artifact_id", "review"}`; 400 for invalid JSON, a non-object body, a missing or non-string `artifact_id` (E33) |
@@ -237,8 +237,11 @@ Limits (clamped, not optional): `max_files ≤ 2000`,
 below 1 is refused with 400 (Y8), never raised to 1.
 The bundled GUI uses `async=1` + `/api/scan-status` polling so a long scan
 never holds one request open; the synchronous form still works for tools.
+It shows `done`/`total` with the elapsed time (and an estimate once rows
+are finishing), polls without a deadline, and keeps the job id for the
+browser tab so a reloaded page reconnects to the running job.
 The GUI's cancel button calls `/api/scan-cancel`, which sets a flag the
-scanner checks between files — partial results still come back as `done`.
+scanner checks between files — the partial result comes back with status `cancelled` (R18-3).
 
 ## Error status codes — every `/api/*` endpoint (X4)
 

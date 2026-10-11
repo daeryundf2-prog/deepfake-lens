@@ -276,7 +276,7 @@ def build_server(
                 self._send_json(_analyze_file_payload(parsed.query))
                 return
             if parsed.path == "/api/stats":
-                self._send_json(_stats_payload())
+                self._send_json(_stats_payload(default_folder))
                 return
             if parsed.path == "/api/reviews":
                 from .reviews import get_default_review_store
