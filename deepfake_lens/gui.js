@@ -1020,14 +1020,19 @@
         // GUI-REV2 H-5: a finished scan opens the ledger only from the 검사 screen.
         // Elsewhere (the examiner may be typing) the band says it finished and
         // links to the results — no screen change, no focus move (WCAG 3.2.2).
-        let scanDoneNotice = false;
-        function showResultsWhenDone() {
-            if (currentView === 'scan') {
+        let scanDoneNotice = '';
+        function showResultsWhenDone(kind) {
+            if (currentView === 'scan' && kind !== 'cancelled') {
                 navigate('ledger', $('sum-h'));
                 return;
             }
-            scanDoneNotice = true;
+            scanDoneNotice = kind === 'cancelled' ? 'cancelled' : 'done';
             updateBusyBand();
+            // GUI-REV3 J-5: focus stays where the examiner put it; only if the results
+            // replaced the focused element (e.g. the empty ledger's heading) does it
+            // move to this screen's heading — never to <body>.
+            const active = document.activeElement;
+            if (!active || active === document.body || !active.getClientRects().length) focusSafely(viewHeading(currentView));
         }
         function updateBusyBand() {
             const band = $('busy-band');
@@ -1043,9 +1048,9 @@
                 link.textContent = '진행 상황 보기';
             } else if (scanDoneNotice) {
                 band.hidden = false;
-                $('busy-band-text').textContent = '검사가 끝났습니다.';
+                $('busy-band-text').textContent = scanDoneNotice === 'cancelled' ? '검사가 취소되었습니다.' : '검사가 끝났습니다.';
                 link.href = '#/ledger';
-                link.textContent = '결과 보기';
+                link.textContent = scanDoneNotice === 'cancelled' ? '부분 결과 보기' : '결과 보기';
             } else {
                 band.hidden = true;
             }
@@ -1183,9 +1188,10 @@
                 if (state.status === 'cancelled' || partialResultNote(data.summary)) {
                     progressFinish('cancelled', data);
                     setBusy(false);
-                    // G-6: focus a control the examiner can see — on another screen
-                    // the button is hidden and focus fell to <body>.
-                    focusSafely($('view-results-btn'));
+                    // G-6/J-5: on the 검사 screen focus goes to "부분 결과 보기"; elsewhere the
+                    // examiner keeps the focus and the band says the scan was cancelled.
+                    if (currentView === 'scan') focusSafely($('view-results-btn'));
+                    else showResultsWhenDone('cancelled');
                 } else {
                     progressFinish('done', data);
                     setBusy(false);

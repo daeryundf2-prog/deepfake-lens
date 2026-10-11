@@ -352,6 +352,22 @@ def main() -> int:
             page.unroute("**/api/scan-status*", hold)
             page.wait_for_function("() => scanBusy === false", timeout=30_000)
             assert page.evaluate("document.activeElement !== document.body"), "focus fell to <body> after a cancelled scan"
+            # GUI-REV3 J-5: a cancelled scan finishing while the examiner types on the
+            #     report screen keeps the focus there; the band says it was cancelled.
+            page.unroute("**/api/scan-status*")
+            page.route("**/api/scan-status*", hold)
+            page.evaluate("location.hash = '#/scan'")
+            page.click("#analyze-btn")
+            page.wait_for_function("() => scanBusy === true", timeout=10_000)
+            page.evaluate("location.hash = '#/report'")
+            page.wait_for_function("() => currentView === 'report'")
+            page.focus("#case-plaintiff")
+            page.route("**/api/scan-status*", lambda route: route.fulfill(status=200, content_type="application/json", body=_json.dumps(final)))
+            page.unroute("**/api/scan-status*", hold)
+            page.wait_for_function("() => scanBusy === false", timeout=30_000)
+            assert page.evaluate("location.hash") == "#/report"
+            assert page.evaluate("document.activeElement.id") == "case-plaintiff", "a cancelled scan took the focus"
+            assert "검사가 취소되었습니다" in page.locator("#busy-band").inner_text()
             page.unroute("**/api/scan-status*")
             page.evaluate("location.hash = '#/ledger'")
             assert page.locator("#partial-banner").is_visible(), "the partial-result banner (R18-3) must show"
