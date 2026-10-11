@@ -358,21 +358,23 @@ def _legal_report_command(args: argparse.Namespace) -> int:
 
 
 # verify-report exit codes (D14): documented in docs/deepfake-lens-cli.md.
-VERIFY_EXIT_CODES = {"verified": 0, "tampered": 1, "key-mismatch": 2, "unsigned": 3}
+VERIFY_EXIT_CODES = {"verified": 0, "tampered": 1, "duplicate-key": 1, "key-mismatch": 2, "unsigned": 3}  # R18-5: duplicate-key is 변조됨
 VERIFY_EXIT_OTHER = 4
 
 
-def _load_report_json(path: Path) -> dict[str, object]:
-    """The report to verify as a JSON object, or a usage error (Z4: exit 4, stderr only).
+def _load_report_json(path: Path) -> tuple[dict[str, object], list[str]]:
+    """The report to verify as a JSON object and its repeated keys (R18-5), or a usage error (Z4: exit 4, stderr only).
 
     A corrupt or non-object file used to print ``읽을 수 없음: …`` on stdout.
     """
     from .cli_inputs import read_json_input
+    from .signing import DuplicateKeyCollector
 
     # P9: the reason is Korean (no json/codec English, no Python type names).
-    loaded = read_json_input(path, "보고서 JSON")
+    collector = DuplicateKeyCollector()
+    loaded = read_json_input(path, "보고서 JSON", object_pairs_hook=collector)
     assert isinstance(loaded, dict)
-    return loaded
+    return loaded, collector.duplicates
 
 
 def _verify_report_command(args: argparse.Namespace) -> int:
@@ -384,8 +386,11 @@ def _verify_report_command(args: argparse.Namespace) -> int:
     from .signing import REPORT_KEY_ENV, verify_report
 
     key = resolve_report_key(args.key_file)
-    result = verify_report(_load_report_json(args.report), key)
+    report, duplicates = _load_report_json(args.report)
+    result = verify_report(report, key, duplicate_keys=duplicates)
     payload = {"report": str(args.report), **result.to_json()}
+    if duplicates:
+        payload["duplicate_keys"] = duplicates  # R18-5
     if result.status == "no-key":
         payload["hint"] = f"검증 키가 없습니다 — --key-file 또는 {REPORT_KEY_ENV} 환경 변수를 지정하십시오."
     if args.format == "json":

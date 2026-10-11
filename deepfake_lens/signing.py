@@ -48,7 +48,32 @@ STATUS_REASONS = {
     "unsigned": "서명 없음",
     "unreadable": "읽을 수 없음",
     "no-key": "검증 키 없음",
+    # R18-5 (round 18): a key that occurs twice in one object — JSON keeps the
+    # last value (the one the MAC covers), a reader or parser that keeps the
+    # first sees another conclusion.
+    "duplicate-key": "변조됨(같은 키가 한 객체에 두 번 나옴)",
 }
+
+
+class DuplicateKeyCollector:
+    """R18-5: an ``object_pairs_hook`` that builds dicts as :func:`json.loads` does and remembers repeated keys."""
+
+    def __init__(self) -> None:
+        self.duplicates: list[str] = []
+
+    def __call__(self, pairs: list[tuple[str, object]]) -> dict[str, object]:
+        seen: dict[str, object] = {}
+        for key, value in pairs:
+            if key in seen and key not in self.duplicates:
+                self.duplicates.append(key)
+            seen[key] = value
+        return seen
+
+
+def load_report_text(text: str) -> tuple[object, list[str]]:
+    """R18-5: (parsed JSON, keys repeated inside one object) of a report's text."""
+    collector = DuplicateKeyCollector()
+    return json.loads(text, object_pairs_hook=collector), collector.duplicates
 
 
 @dataclass(frozen=True)
@@ -161,6 +186,7 @@ def verify_report(
     key: bytes | str | None,
     *,
     key_id: str | None = None,
+    duplicate_keys: list[str] | tuple[str, ...] = (),
 ) -> VerificationResult:
     """Verify a signed report dict or JSON file.
 
@@ -169,22 +195,31 @@ def verify_report(
     everything but ``signature``/``signature_key_id`` matches
     (``hmac.compare_digest``). A report signed under a different key id is
     "key-mismatch" (키 ID 불일치), not "tampered" (변조됨).
+
+    R18-5 (round 18): a report whose text repeats a key inside one object
+    is "duplicate-key" (변조됨 — the tool never writes one) before any MAC
+    check of a signed report: the MAC covers the last value, a reader that keeps the first saw
+    a forged conclusion and the report still said 검증됨. A file is checked
+    here; a caller that parsed the text itself passes ``duplicate_keys``.
     """
+    duplicates = list(duplicate_keys)
     if isinstance(report_or_path, dict):
         payload: dict[str, object] | None = report_or_path
     else:
         try:
-            loaded = json.loads(Path(report_or_path).read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            loaded, duplicates = load_report_text(Path(report_or_path).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError):
             loaded = None
         payload = loaded if isinstance(loaded, dict) else None
     if payload is None:
         return VerificationResult(False, "unreadable")
+    raw_key_id = payload.get(SIGNATURE_KEY_ID_FIELD)
+    report_key_id = raw_key_id if isinstance(raw_key_id, str) else None
     signature = payload.get(SIGNATURE_FIELD)
     if signature is None:
         return VerificationResult(False, "unsigned")
-    raw_key_id = payload.get(SIGNATURE_KEY_ID_FIELD)
-    report_key_id = raw_key_id if isinstance(raw_key_id, str) else None
+    if duplicates:
+        return VerificationResult(False, "duplicate-key", report_key_id)
     if not isinstance(signature, str):
         return VerificationResult(False, "tampered", report_key_id)
     key_bytes = key.encode("utf-8") if isinstance(key, str) else key

@@ -1005,6 +1005,33 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
             out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
             self.assertEqual(verify_report(out, KEY).reason, "변조됨")
 
+    def test_a_repeated_key_is_tampered(self) -> None:
+        """QA-SYS-6: 보고서 JSON의 임의 필드(결론, 근거, note, 모델 해시) 한 글자 변경 후 검증 → 모든 경우 "변조됨".
+        R18-5 (round 18): a forged "verdict_code" inserted before the real one (JSON keeps the last value,
+        so the MAC still matched) was 검증됨; a key repeated in one object is now 변조됨 (exit 1)."""
+        from deepfake_lens.cli import main
+
+        text = json.dumps(self.signed, ensure_ascii=False, indent=2)
+        generated = next(item for item in self.signed["items"] if item["name"] == "generated.png")
+        self.assertEqual(generated["result"]["verdict_code"], "manipulation_evidence")
+        anchor = '"result": {\n'
+        start = text.index('"name": "generated.png"')
+        at = text.index(anchor, start) + len(anchor)
+        forged = text[:at] + '      "verdict_code": "authenticity_evidence",\n' + text[at:]
+        self.assertTrue(verify_report(json.loads(forged), KEY).verified)  # what a last-value parser sees
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "forged.json"
+            path.write_text(forged, encoding="utf-8")
+            result = verify_report(path, KEY)
+            self.assertEqual((result.status, result.reason), ("duplicate-key", "변조됨(같은 키가 한 객체에 두 번 나옴)"))
+            out = io.StringIO()
+            with patch.dict(os.environ, {REPORT_KEY_ENV: KEY.decode()}), patch("sys.stdout", out):
+                code = main(["verify-report", str(path), "--format", "json"])
+        self.assertEqual(code, 1)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["duplicate_keys"], ["verdict_code"])
+        self.assertTrue(payload["reason"].startswith("변조됨"))
+
     def test_web_report_signed_with_env_key_and_tamper_detected(self) -> None:
         """QA-SYS-6: 보고서 JSON의 임의 필드(결론, 근거, note, 모델 해시) 한 글자 변경 후 검증 → 모든 경우 "변조됨".
         /api/report HTML and JSON are signed with DEEPFAKE_LENS_REPORT_KEY."""

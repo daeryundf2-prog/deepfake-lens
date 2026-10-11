@@ -34,7 +34,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from .archives import SUPPORTED_ARCHIVE_EXTENSIONS, is_archive
 from .audio import SUPPORTED_AUDIO_EXTENSIONS
@@ -150,15 +150,21 @@ def read_text_input(path: Path | str, what: str) -> str:
         raise UsageError(INPUT_READ_ERROR.format(what=object_particle(what), path=path, reason=read_error_ko(exc))) from exc
 
 
-def read_json_input(path: Path | str, what: str, *, require_object: bool = True) -> object:
-    """``path`` parsed as JSON (an object unless ``require_object`` is False), or :class:`UsageError` (P4/P9)."""
+def read_json_input(
+    path: Path | str, what: str, *, require_object: bool = True, object_pairs_hook: Any = None,
+) -> object:
+    """``path`` parsed as JSON (an object unless ``require_object`` is False), or :class:`UsageError` (P4/P9).
+
+    ``object_pairs_hook`` (R18-5) is handed to :func:`json.loads` — verify-report
+    uses it to see keys that occur twice in one object.
+    """
     import json
 
     from .error_text import read_error_ko
 
     text = read_text_input(path, what)
     try:
-        payload = json.loads(text)
+        payload = json.loads(text, object_pairs_hook=object_pairs_hook)
     except (json.JSONDecodeError, RecursionError) as exc:  # R10-5: too-deep nesting is unreadable input
         raise UsageError(INPUT_JSON_ERROR.format(what=object_particle(what), path=path, reason=read_error_ko(exc))) from exc
     if require_object and not isinstance(payload, dict):
