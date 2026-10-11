@@ -602,6 +602,34 @@ class VideoFramesRuntimeTest(unittest.TestCase):
         self.assertTrue(all(not frame["available"] for frame in analysis.models))
         self.assertIn("점수를 내지 못했습니다", analysis.detail)  # R4
 
+    @unittest.skipUnless(importlib.util.find_spec("cv2") is not None, "opencv not installed")
+    def test_the_inner_cause_is_the_coverage_reason(self) -> None:
+        """R17-6 (round 17): the member's coverage reason was the generic "내부 런타임이 점수를 내지 못했습니다";
+        the inner runtime's cause (exception class included) was only in models[].detail."""
+        from deepfake_lens.core import model_coverage
+        from deepfake_lens.result_types import CoverageStatus
+
+        with tempfile.TemporaryDirectory() as tmp:
+            video = Path(tmp) / "clip.mp4"
+            self._write_video(video)
+            (Path(tmp) / "inner.onnx").write_bytes(b"not an onnx graph")
+            profile_path = Path(tmp) / "vf-runtime.json"
+            profile_path.write_text(json.dumps(self._profile({"runtime": "onnx", "checkpoint": "inner.onnx", "name": "inner-net"})), encoding="utf-8")
+            crash = RuntimeError("주입된 추론 실패")
+            with patch("deepfake_lens.model_adapter._pin_failure", return_value=None), patch(
+                "deepfake_lens.model_adapter._run_onnx", side_effect=crash
+            ):
+                analysis = analyze_external_model(video, profile_path, modality="video")
+        assert analysis is not None
+        self.assertEqual(analysis.confidence, "failed")
+        frame_detail = str(analysis.models[0]["detail"])
+        self.assertIn("RuntimeError", frame_detail)
+        self.assertTrue(analysis.detail.startswith(frame_detail.rstrip(".")), analysis.detail)
+        (entry,) = model_coverage(analysis, "model:test")
+        self.assertEqual(entry.status, CoverageStatus.FAILED)
+        self.assertIn("RuntimeError", entry.reason)
+        self.assertIn("주입된 추론 실패", entry.reason)
+
     def test_missing_inner_profile_is_graceful_error(self) -> None:
         """A video-frames profile without 'inner' must degrade, not crash."""
         with tempfile.TemporaryDirectory() as tmp:

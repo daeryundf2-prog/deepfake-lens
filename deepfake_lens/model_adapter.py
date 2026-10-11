@@ -926,12 +926,19 @@ def _run_video_frames(
     available = [entry["score"] for entry in scored_frames if entry["available"]]
     if not available:
         crashed = any(entry["failed"] for entry in scored_frames)
+        # R17-6 (round 17): the inner runtime's own cause (with its exception
+        # class) leads the detail — the coverage reason of the member is this
+        # detail, and it said only "내부 런타임이 점수를 내지 못했습니다".
+        # A failed frame's cause is preferred; "의존성 부재: …" stays first so
+        # the member is skipped as a missing dependency.
+        causes = [str(entry["detail"]) for entry in scored_frames if entry["failed"]] or [str(entry["detail"]) for entry in scored_frames]
+        cause = causes[0].strip().rstrip(".") if causes else "결과 없음"
         return ExternalModelAnalysis(
             available=False,
             score=0,
             confidence=FAILED_CONFIDENCE if crashed else "unavailable",
             model=model_name,
-            detail=f"video-frames: 프레임 {len(frame_paths)}개를 디코딩했지만 내부 런타임이 점수를 내지 못했습니다.",
+            detail=f"{cause} — video-frames: 프레임 {len(frame_paths)}개를 디코딩했지만 내부 런타임이 점수를 내지 못했습니다.",
             limitations=_profile_limitations(profile),
             models=scored_frames,
         )
