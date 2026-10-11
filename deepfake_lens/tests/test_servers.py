@@ -1371,7 +1371,10 @@ class ReportEvidenceHashesBothServersTest(_ReportLegsFixture):
         X2: nor re-analyzed — the row is left out of the signed body and listed
         under ``excluded_items`` with the reason."""
         os.symlink(self.folder, self.folder / "linked")
-        row = dict(self.rows["target.png"], path="linked/target.png", name="target.png")
+        # R20-5 (round 20): this row carried the scan's sha256 of target.png — a row the scan hashed that is now
+        # behind a linked folder is a changed row (409, ReportRefusesAFolderLinkedAfterTheScanTest). A row the scan
+        # did not hash keeps N2's rule checked here: excluded, the link never followed or hashed.
+        row = dict(self.rows["target.png"], path="linked/target.png", name="target.png", sha256=None)
         for name, make in self._legs():
             with self.subTest(leg=name):
                 status, _, raw = make()("/api/report?format=json", self._json({"items": [row]}))
@@ -1383,6 +1386,13 @@ class ReportEvidenceHashesBothServersTest(_ReportLegsFixture):
                     "reason": webapp_api.REPORT_ROW_LINK_ON_PATH,
                 }])
                 self.assertNotIn(self.target_sha, raw.decode("utf-8"))
+        hashed = dict(row, sha256=self.target_sha)
+        for name, make in self._legs():
+            with self.subTest(leg=name, posted="hashed"):
+                status, _, raw = make()("/api/report?format=json", self._json({"items": [hashed]}))
+                self.assertEqual(status, 409, raw[:300])
+                [entry] = json.loads(raw)["changed_rows"]
+                self.assertIsNone(entry["server_sha256"])  # still never hashed through the link
 
     # -- N2/N10/N9: both PDFs ----------------------------------------------
 
@@ -1830,6 +1840,49 @@ class ReportVerifiesPostedDuplicatesTest(_ReportLegsFixture):
         _write_png(self.folder / "gen.png", seed=8)  # the original changed: its own row differs (409)
         changed = self._assert_refused(posted, "gen.png")
         self.assertIn("gen.png", [entry["path"] for entry in changed])
+
+
+class ReportRefusesAFolderLinkedAfterTheScanTest(_ReportLegsFixture):
+    """R20-5 (round 20): a recursive scan hashed sub/inner.png (sha256, manipulation_evidence); ``sub`` was then
+    replaced by a link to a folder with the same content. The report moved the row to excluded_items ("경로 중간의
+    폴더가 심볼릭 링크라 …") and signed the rest — 200 in every format on both servers. The web scan never follows
+    a linked folder, so a hashed row behind one changed after the scan: 409. A row with no sha256 there (one the
+    scan did not read) is still only excluded."""
+
+    FORMATS = ReportRefusesChangedRowsTest.FORMATS
+    _scan = ReportRefusesChangedRowsTest._scan
+    _assert_refused = ReportRefusesChangedRowsTest._assert_refused
+
+    def setUp(self) -> None:
+        super().setUp()
+        from deepfake_lens.tests.qa.test_qa_sys import _write_generator_png
+
+        sub = self.folder / "sub"
+        sub.mkdir()
+        _write_generator_png(sub / "inner.png")
+        os.symlink("inner.png", sub / "inner_link.png")
+        self.rows = self._scan("--recursive")
+        self.assertTrue(self.rows["sub/inner.png"]["sha256"])
+        self.assertIsNone(self.rows["sub/inner_link.png"].get("sha256"))
+        moved = Path(self._tmp.name) / "moved-sub"
+        os.rename(sub, moved)
+        os.symlink(moved, sub)  # same bytes, now behind a linked folder
+
+    def test_a_hashed_row_behind_a_folder_linked_after_the_scan_is_409(self) -> None:
+        changed = self._assert_refused([self.rows["target.png"], self.rows["sub/inner.png"]], "sub/inner.png")
+        [entry] = changed
+        self.assertEqual(entry["reason"], webapp_api.REPORT_ROW_LINK_ON_PATH)
+        self.assertEqual(entry["posted_sha256"], self.rows["sub/inner.png"]["sha256"])
+        self.assertIsNone(entry["server_sha256"])
+
+    def test_a_row_the_scan_did_not_hash_is_still_only_excluded(self) -> None:
+        for leg, make in self._legs():
+            with self.subTest(leg=leg):
+                status, _, raw = make()("/api/report", self._json({"items": [self.rows["target.png"], self.rows["sub/inner_link.png"]], "format": "json"}))
+                self.assertEqual(status, 200, raw[:300])
+                signed = json.loads(raw)
+                self.assertEqual([row["path"] for row in signed["items"]], ["target.png"])
+                self.assertEqual([(row["path"], row["reason"]) for row in signed["excluded_items"]], [("sub/inner_link.png", webapp_api.REPORT_ROW_LINK_ON_PATH)])
 
 
 class ReportRecordsAnalysisOptionsTest(_ReportLegsFixture):

@@ -1594,7 +1594,11 @@ def _rederive_report_items(
         top, member = row_identity(item)
         found = derived_by_top[top]
         if isinstance(found, str):
-            if found in _CHANGED_AFTER_SCAN_REASONS or found.startswith(REPORT_ROW_FAILED.split("{", 1)[0]):
+            # R20-5 (round 20): a row the scan hashed (sha256 set — it read the file) that now sits behind
+            # a linked folder was moved to excluded_items and the rest signed (200): the web scan never
+            # follows a linked folder, so the folder was replaced by a link after the scan.
+            linked_since = found == REPORT_ROW_LINK_ON_PATH and bool(item.sha256)
+            if linked_since or found in _CHANGED_AFTER_SCAN_REASONS or found.startswith(REPORT_ROW_FAILED.split("{", 1)[0]):
                 changed.append(_changed_row(item, None, found))
             excluded.append((item, found))
         elif member not in found:
