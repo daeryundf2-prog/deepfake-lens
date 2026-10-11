@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..3fe35fb`(병합 커밋 제외, 커밋 226개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..bc99d8a`(병합 커밋 제외, 커밋 252개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 220개 — 스펙 갭에 매핑 151개(그중 신규 사유 병기 49개), 신규(스펙 외)만 69개.
+요약: ID 239개 — 스펙 갭에 매핑 169개(그중 신규 사유 병기 53개), 신규(스펙 외)만 70개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -196,11 +196,11 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R12-11 | 12 | 후행 슬래시 /gui/ 동작이 두 서버에서 다름 → 둘 다 404 | G31 | 신규(스펙 외): 라우트 일관성 — 갭 목록 밖 | db73702 |
 | R12-12 | 12 | 영어 탐지기가 TAG 문자 뒤 단어 미탐 → Cf 문자 제거 | — | 신규(스펙 외): 테스트 도구(영어 탐지기) — 갭 목록 밖 | 68035c3 |
 | R13-1 | 13 | 스테이징 임시 이름이 오디오 디코드 실패 사유에 누출 → 실행 간 JSON 차이·ASCII 사본과 불일치·캐시 오염 → staged→원래 경로 역매핑 | G11, G32 | 신규(스펙 외): 비 ASCII 파일명 스테이징 — 갭 목록 밖 | 9ee4bf8, 130dddd |
-| R13-2 | 13 | 압축 파일이 추출 중 재작성되면 컨테이너 sha256이 추출 바이트와 다름 → 전후 비교, 판단 불가·해시 없음 | G11, G30 |  | 476e412 |
+| R13-2 | 13 | 압축 파일이 추출 중 재작성되면 컨테이너 sha256이 추출 바이트와 다름 → 전후 비교, 판단 불가·해시 없음 | G11, G30, G34 |  | 476e412 |
 | R13-3 | 13 | non-UTF-8 경로를 /api/analyze-file·/api/scan으로 지정 불가 → file_b64·folder_b64 | G8, G31 | 신규(스펙 외): 비 UTF-8 경로 주소 지정 — 갭 목록 밖 | 6a4aded |
 | R13-4 | 13 | SIGTERM·강제 종료 시 스테이징 폴더 잔류 → 신호 처리 정리 + 오래된 폴더 청소 | — | 신규(스펙 외): 임시 파일 정리 — 갭 목록 밖 | faf6b5d |
 | R13-5 | 13 | corpus verify가 non-UTF-8 relpath를 r?.jpg로 출력 → display_name | G27 | 신규(스펙 외): 표시 단사성 — 갭 목록 밖 | a9721b2 |
-| R13-6 | 13 | 중첩 중복 멤버 행에 중복 사유 없음 → 멤버 행 coverage에 기록 | G12, G34 |  | a4f9b08 |
+| R13-6 | 13 | 중첩 중복 멤버 행에 중복 사유 없음 → 멤버 행 coverage에 기록 | G34, G30 |  | a4f9b08 |
 | R13-7 | 13 | cv2.imwrite가 한글 임시 경로에서 실패(Windows 위험) → imencode + Python 쓰기, 메타테스트 확장 | G1 | 신규(스펙 외): Windows 한글 사용자 경로 — 갭 목록 밖 | 0f22403 |
 | R13-8 | 13 | Windows에서 한글 이름 파일 전량 복사 → 하드링크 → 8.3 짧은 이름 → 복사(상한) | — | 신규(스펙 외): Windows 스테이징 성능 — 갭 목록 밖 | faf6b5d |
 | R13-9 | 13 | 렌더된 Markdown에서 GFM 자동 링크 → . : @ / 이스케이프 | G30 | 신규(스펙 외): Markdown 자동 링크 — 갭 목록 밖 | ec8e4da |
@@ -213,25 +213,25 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R14-7 | 14 | SIGKILL 시 스테이징 외 임시 파일 잔류 → 모든 임시 파일을 세션 폴더에 | G34, G1 | 신규(스펙 외): 임시 파일 정리 — 갭 목록 밖 | b0f5f81 |
 | R14-8 | 14 | Windows ctypes 분기가 실행된 적 없음 → 가짜 WinDLL로 시그니처·반환 처리 검증 | G1 | 신규(스펙 외): Windows 경로 — 갭 목록 밖 | 0a9f42b |
 | R15-1 | 15 | SIGTERM/SIGHUP 정리 경쟁(워커가 정리 중 생성, 새 세션 폴더, ffmpeg 자식 미종료) → 종료 플래그, 자식 종료·PDEATHSIG, 재시도 | G1, G34 | 신규(스펙 외): 신호 처리 — 갭 목록 밖 | 15c88af |
-| R15-2 | 15 | onnxruntime import 시 텔레메트리 연결 시도·deviceid 생성 → 패키지 최상위에서 텔레메트리 차단 변수 | G9 | 신규(스펙 외): 오프라인 보장(R-IN-4) | c5115ae |
-| R15-3 | 15 | FaceLandmarker·SyncNet·Haar 재정의가 핀 없이 로드 → models/assets.json 자산 핀, 미고정은 거부 | G9, G10 |  | 8f06324 |
-| R15-4 | 15 | 과거 커밋이 SIGINT 무시 상속 환경에서 자체 테스트 실패 → 이력 문서화, 테스트 자식 신호 기본값 | — | 신규(스펙 외): 테스트 환경 — 갭 목록 밖 | 0b44e2d |
+| R15-2 | 15 | onnxruntime import 시 텔레메트리 연결 시도·deviceid 생성 → 패키지 최상위에서 텔레메트리 차단 변수 | — | 신규(스펙 외): 오프라인 보장(R-IN-4) | c5115ae |
+| R15-3 | 15 | FaceLandmarker·SyncNet·Haar 재정의가 핀 없이 로드 → models/assets.json 자산 핀, 미고정은 거부 | G9, G1 |  | 8f06324 |
+| R15-4 | 15 | 과거 커밋이 SIGINT 무시 상속 환경에서 자체 테스트 실패 → 이력 문서화, 테스트 자식 신호 기본값 | G34 | 신규(스펙 외): 테스트 환경 — 갭 목록 밖 | 0b44e2d |
 | R15-5 | 15 | 스레드 테스트 프로세스의 fork-unsafe preexec_fn → exec 트램펄린, PLW1509 | — | 신규(스펙 외): 테스트 안전성 — 갭 목록 밖 | a1b44d1 |
-| R15-6 | 15 | 비ASCII TMPDIR 시 조용한 대체 → 한국어 안내·temp_folder 기록·DEEPFAKE_LENS_TMPDIR | G12 | 신규(스펙 외): 임시 폴더 — 갭 목록 밖 | 56c817d |
+| R15-6 | 15 | 비ASCII TMPDIR 시 조용한 대체 → 한국어 안내·temp_folder 기록·DEEPFAKE_LENS_TMPDIR | G34 | 신규(스펙 외): 임시 폴더 — 갭 목록 밖 | 56c817d |
 | R15-7 | 15 | OUTPUT_FORMAT_GENERATION 수동 관리 → 골든 출력 해시 메타테스트 | G11 |  | 64f4dac |
 | R15-8 | 15 | mediapipe→sounddevice가 gcc/ld를 띄워 TMPDIR에 임시 파일 → sounddevice 차단 | G34 | 신규(스펙 외): 임시 파일 — 갭 목록 밖 | f13fda6 |
 | R16-1 | 16 | faceswap_seam·face_track이 검출기 오류를 '얼굴 미검출'로 기록 → strict 검출, 오류는 failed | G12, G1 |  | 9d7f118 |
-| R16-2 | 16 | Haar 재정의 cascade가 다른 바이트면 조용히 무시 → 재정의만 사용, 불일치는 failed | G9, G10 |  | 9d7f118 |
-| R16-3 | 16 | 장기 실행 서버에서 재핀·핀 제거 후 옛 자산 바이트 사용 → 핀 키 캐시 | G9, G10 |  | 11cf522 |
+| R16-2 | 16 | Haar 재정의 cascade가 다른 바이트면 조용히 무시 → 재정의만 사용, 불일치는 failed | G9, G1 |  | 9d7f118 |
+| R16-3 | 16 | 장기 실행 서버에서 재핀·핀 제거 후 옛 자산 바이트 사용 → 핀 키 캐시 | G9 |  | 11cf522 |
 | R16-4 | 16 | mediapipe import가 matplotlib으로 fc-list 자식·세션 밖 파일 생성 → matplotlib 스텁 | G34 | 신규(스펙 외): 임시 파일·자식 프로세스 — 갭 목록 밖 | b0c0285 |
 | R16-5 | 16 | 골든 출력이 의존성 기반 출력 변경을 못 잡고 정당한 세대 증가를 막음 → stdlib/full 두 세트, 한국어 상수 해시, 사유 기록 증가 허용 | G11 |  | ce487f2 |
 | R16-6 | 16 | ffmpeg가 운영자 터미널 상속 → -nostdin, stdin=DEVNULL | — | 신규(스펙 외): 터미널 상태 — 갭 목록 밖 | d9e178b |
 | R16-7 | 16 | 직계 자식만 추적해 래퍼 손자 고아 → 프로세스 그룹·서브리퍼 감독 프로세스 | G34 | 신규(스펙 외): 자식 프로세스 정리 — 갭 목록 밖 | d9e178b |
-| R16-8 | 16 | pin-asset 오류에 영어 errno·내부 tmp 이름 → 한국어 | G13 |  | 42f0344 |
-| R16-9 | 16 | doctor가 자산 핀 상태 미표시 → 표·JSON에 자산 핀 상태 | G29 |  | fcde16a |
-| R16-10 | 16 | 임시 폴더 문구가 원인 무관·증거설명서 누락 → 원인별 문구, 증거설명서 기록 | G30 | 신규(스펙 외): 임시 폴더 — 갭 목록 밖 | ee091ac |
+| R16-8 | 16 | pin-asset 오류에 영어 errno·내부 tmp 이름 → 한국어 | G29 |  | 42f0344 |
+| R16-9 | 16 | doctor가 자산 핀 상태 미표시 → 표·JSON에 자산 핀 상태 | G29, G9 |  | fcde16a |
+| R16-10 | 16 | 임시 폴더 문구가 원인 무관·증거설명서 누락 → 원인별 문구, 증거설명서 기록 | G34 | 신규(스펙 외): 임시 폴더 — 갭 목록 밖 | ee091ac |
 | R16-11 | 16 | ptrace 거부 환경에서 텔레메트리 테스트 실패 → 분리·skip | — | 신규(스펙 외): 테스트 환경 — 갭 목록 밖 | 1653be9 |
-| R16-12 | 16 | git 이력 규칙 문서 불일치 → 공유 규칙·문서 갱신 | G27 |  | 1653be9 |
+| R16-12 | 16 | git 이력 규칙 문서 불일치 → 공유 규칙·문서 갱신 | G26 |  | 1653be9 |
 | R16-13 | 16 | Ctrl-C 영어 traceback → 정리 후 '중단됨' exit 130 | G34 |  | 0ce6d1b |
 | R16-14 | 16 | vendor-weights --verify 없는 폴더에 통과 rc 0 → exit 2 | G29 |  | 42f0344 |
 | R16-15 | 16 | with_default_signals.py 영어 traceback → 한국어 exit 127/126 | — | 신규(스펙 외): 테스트 도구 — 갭 목록 밖 | 0ce6d1b |
@@ -247,6 +247,25 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R17-10 | 17 | vendor-weights --verify 프로필 0개 폴더 통과 rc 0 → exit 2 | G29 |  | 98672a1 |
 | R17-11 | 17 | 0ce6d1b 추적표 매핑 G13→G34 정정, TMPDIR가 파일일 때 문구 | G34 | 신규(스펙 외): 추적표 매핑 정정 — 갭 목록 밖 | 3fe35fb |
 | R17-12 | 17 | 매니페스트 제자리 재작성 테스트가 파일 시각 해상도에 의존(1 ms 커널에서 실패) | — | 신규(스펙 외): 테스트 견고성 — 갭 목록 밖 | 8f205bd |
+| R18-1 | 18 | R17-7 캐시 키에 설치·venv 절대 경로 포함(회귀) → 이름·역할·sha256만 | G11, G9 |  | b42f5c1 |
+| R18-2 | 18 | ~알수없는사용자 재정의 변수가 스캔 전체를 죽임(회귀) | G9, G29, G11 |  | 41c3aef |
+| R18-3 | 18 | 취소된 검사의 남은 파일이 기록 없이 사라짐 → 사용자 취소 집계·부분 결과 표시 | G12, G7 |  | a3ac2aa |
+| R18-4 | 18 | 메타데이터 앞 4 MB만 읽고 coverage ran 표시 | G12, G1 |  | 2b2c112 |
+| R18-5 | 18 | 서명된 보고서의 중복 키가 검증 통과 | G30 |  | 1c124aa |
+| R18-6 | 18 | 2억 화소 사진 EXIF 판독 실패(픽셀 폭탄 상한) | G12, G1 |  | 46e06da |
+| R18-7 | 18 | 열 수 없는 영상을 rPPG가 얼굴 추적 부족으로 기록 | G1, G12 |  | e498775 |
+| R18-8 | 18 | GUI 검토 표시가 상대 경로 키·전역 저장소로 사건 간 섞임 | G11 |  | 259f7e3 |
+| R18-9 | 18 | 감독 프로세스가 코어 덤프를 cwd에 남김 | G34 |  | 80875cc |
+| R18-10 | 18 | --allow-symlinks가 /proc 의사 파일을 분석 | G31 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 3d46a51 |
+| R18-11 | 18 | 표시 이름 비단사(NFC/NFD, 비ASCII 공백, 보이지 않는 문자) | G30 | 신규(스펙 외): 표시 이름 단사성 — 갭 목록 밖 | 15d789a |
+| R18-12 | 18 | R17-8 잔여: import 가드 설치 전 Ctrl-C 영어 traceback | G34 |  | fe963eb |
+| R18-13 | 18 | doctor와 실제 검사 결과 불일치(재정의 없음, CascadeClassifier 없음) | G29 |  | 12348ef |
+| R18-14 | 18 | 추적표 ids[] 매핑이 커밋 제목과 다름 + --check 검사 추가 | G26, G27 |  | 1b5dbdd |
+| R18-15 | 18 | 출력 쓰기 오류가 예기치 않은 오류로 보고, 비원자적 쓰기 | G34 | 신규(스펙 외): 출력 견고성 — 갭 목록 밖 | 9067673 |
+| R18-16 | 18 | 증거설명서 사건명 기본값이 특정 죄명 | — | 신규(스펙 외): 증거설명서 기본값 — 갭 목록 밖 | 91ee0d1 |
+| R18-17 | 18 | GUI가 실행 안 된 모델에 원점수 0 표시 | G1 |  | 9ecd4ed |
+| R18-18 | 18 | agent 계층 진단이 confidence·agent_type 등급 출력 | G4, G24 |  | 48a07ce |
+| R18-19 | 18 | 잡다한 표시 불일치 (a)~(f) | G26, G29, G1 | 신규(스펙 외): 사용자 표시 — 갭 목록 밖 | a155537, 804ce5c, afd7036, 3df21ce, c9e1f81, bc99d8a |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -269,6 +288,8 @@ P12: 라운드 8 검증 때 이 표의 해시 115개가 전부 히스토리 리�
 P14: Gaps를 제목 괄호에만 적은 커밋(예: `(Z1-Z5; Gaps: G7, 신규)`)은 규칙상 허용 — 스크립트가 본문의 `Gaps:` 줄을 먼저, 없으면 제목을 읽는다.
 
 R17-11: 0ce6d1b의 제목은 R16-13(Ctrl-C → 정리 후 '중단됨' exit 130)에 G13(사진/비사진 게이트)을 인용했다 — 잘못된 인용이다. R16-13의 매핑은 G34(R-SYS-3: 종료·자원 정리)로 정정했다. commits[]의 `gaps`/`gaps_line`은 커밋 제목을 그대로 옮긴 값이라(히스토리는 고치지 않음) 0ce6d1b 행에는 G13이 남는다 — 기준은 ids[]의 매핑.
+
+R18-14: ids[]의 갭 매핑을 커밋 제목·본문의 `Gaps:`에 맞췄다 — R13-2(+G34), R13-6(G12→G30), R15-2(G9 제거, 신규만), R15-3(G10→G1), R15-4(+G34), R15-6(G12→G34), R16-2(G10→G1), R16-3(G10 제거 — 프로필 revision 핀과 무관), R16-8(G13→G29), R16-9(+G9), R16-10(G30→G34), R16-12(G27→G26). `--check`는 이제 ids[]의 갭이 그 ID를 인용한 커밋의 Gaps에 없거나, 그 ID만 다룬 커밋이 인용한 갭이 ids[]에 없으면 실패한다(`gaps_note`로 이유를 적은 항목은 제외).
 
 ## 커밋별 `Gaps:` 줄
 
@@ -502,3 +523,29 @@ R17-11: 0ce6d1b의 제목은 R16-13(Ctrl-C → 정리 후 '중단됨' exit 130)�
 | ee2818f | 17 | R17-8 | Gaps: G34 | subject | fix(cli): R17-8 an interrupt cleans up before the log handlers are removed, a Ctrl-C during the package import is a Korean line and exit 130, an interrupted batch starts no further file (R17-8; Gaps: G34) |
 | 98672a1 | 17 | R17-10 | Gaps: G29 | subject | fix(cli): R17-10 vendor-weights --verify of a folder without runtime profiles is an error, exit 2 — not "통과 … 프로필 0개" (R17-10; Gaps: G29) |
 | 3fe35fb | 17 | R17-11 | Gaps: G34; 신규(스펙 외) | subject | fix(native): R17-11 a DEEPFAKE_LENS_TMPDIR that names a file is reported "(폴더가 아니라 파일임)"; the traceability mapping of R16-13 is corrected from G13 to G34 (R17-11; Gaps: G34, 신규) |
+| ec0d057 | 17 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 3fe35fb, round-17 IDs mapped (WP-J; Gaps: G26, G27, G28) |
+| 16d1df8 | 17 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): round-18 verification findings and UI/UX/AX audit (WP-J; Gaps: 신규) |
+| b42f5c1 | 18 | R18-1 | Gaps: G11, G9 | subject | fix(cache): R18-1 the asset tokens of the scan-cache key hold the asset name, the file's role and its sha256 — no install, venv or models-folder path (R18-1; Gaps: G11, G9) |
+| 41c3aef | 18 | R18-2 | Gaps: G9, G29, G11 | subject | fix(assets): R18-2 an override variable "~nouser/…" is read as the literal path — no RuntimeError stops scan --cache or doctor; the cache key never raises (R18-2; Gaps: G9, G29, G11) |
+| a3ac2aa | 18 | R18-3 | Gaps: G12, G7 | subject | fix(scan): R18-3 a cancelled scan counts the files it never started — summary.cancelled / files_cancelled, unrecorded reason "사용자 취소", job status "cancelled", a partial-result note in the summary line, the unrecorded section and the GUI (R18-3; Gaps: G12, G7) |
+| 2b2c112 | 18 | R18-4 | Gaps: G12, G1 | subject | fix(metadata): R18-4 a PNG's chunks and a WebP's XMP chunk are read through the whole file; a metadata read limited to a prefix is "ran" with the reason "메타데이터 앞 N … 만 확인" (R18-4; Gaps: G12, G1) |
+| 1c124aa | 18 | R18-5 | Gaps: G30 | subject | fix(signing): R18-5 a signed report whose text repeats a key inside one JSON object is 변조됨 — verify-report exit 1 (R18-5; Gaps: G30) |
+| 46e06da | 18 | R18-6 | Gaps: G12, G1 | subject | fix(metadata): R18-6 the EXIF of an image over Pillow's pixel-count limit (200 MP camera photos) is read from the file structure; the refused decode says "픽셀 수 상한 초과 — 디코드 생략" (R18-6; Gaps: G12, G1) |
+| e498775 | 18 | R18-7 | Gaps: G1, G12 | subject | fix(rppg): R18-7 a video rPPG cannot open or decode fails the rppg check with "영상을 디코딩할 수 없습니다" — not skipped "획득 프레임 0" (R18-7; Gaps: G1, G12) |
+| 259f7e3 | 18 | R18-8 | Gaps: G11 | subject | fix(gui): R18-8 a review mark is keyed by the file's sha256 inside its scanned folder ("v2\|root:<scan_root>\|sha256:<hash>") — not by the row path in one global store (R18-8; Gaps: G11) |
+| 80875cc | 18 | R18-9 | Gaps: G34 | subject | fix(native): R18-9 the child supervisor sets RLIMIT_CORE 0 (inherited by the program) and clears its dumpable flag before it re-raises the program's signal — no core file in the working directory (R18-9; Gaps: G34) |
+| 3d46a51 | 18 | R18-10 | Gaps: G31; 신규(스펙 외) | subject | fix(scan): R18-10 a file on /proc or /sys, or one with stat size 0 but content, is a skipped row "건너뜀: 특수 파일 시스템" — --allow-symlinks no longer analyzes /proc/self/environ (R18-10; Gaps: G31, 신규) |
+| 15d789a | 18 | R18-11 | Gaps: G30; 신규(스펙 외) | subject | fix(report): R18-11 display_name escapes a run that is not NFC, a space other than U+0020, a default-ignorable code point and a mark after an escape — names that render alike are shown differently (R18-11; Gaps: G30, 신규) |
+| fe963eb | 18 | R18-12 | Gaps: G34 | subject | fix(cli): R18-12 the import guard is the first statement of the package and imports only os, signal and sys; the Python start-up, the console-script stub's own imports and finalization stay uncovered (R18-12; Gaps: G34) |
+| 12348ef | 18 | R18-13 | Gaps: G29 | subject | fix(doctor): R18-13 a missing asset override is "재정의없음 — 검사는 failed", and the mediapipe / opencv rows warn when the checks that need them cannot run as the row said (R18-13; Gaps: G29) |
+| 1b5dbdd | 18 | R18-14 | Gaps: G26, G27 | subject | fix(qa): R18-14 the ids[] gap mappings follow their commits' Gaps (R16-8 G13→G29 and eleven more) and --check fails on a mapping that differs unless it has a gaps_note (R18-14; Gaps: G26, G27) |
+| 9067673 | 18 | R18-15 | Gaps: G34; 신규(스펙 외) | subject | fix(cli): R18-15 output files are written whole (temp file + rename) and output failures are Korean lines — a closed pipe is a quiet 141, a full disk "출력 파일을 쓸 수 없습니다", a closed stdout exit 2 (R18-15; Gaps: G34, 신규) |
+| 91ee0d1 | 18 | R18-16 | Gaps: 신규(스펙 외) | subject | fix(report): R18-16 the evidence statement's default case name is the placeholder "(사건명 입력)" — not the offence "성폭력처벌법위반(허위영상물편집등) 및 정보통신망법위반" (R18-16; Gaps: 신규) |
+| 9ecd4ed | 18 | R18-17 | Gaps: G1 | subject | fix(gui): R18-17 a model that did not run shows "없음 — 미실행(<사유>)" in the GUI — not "외부 모델 원점수(미보정, 결론 불참여) — 0" (R18-17; Gaps: G1) |
+| 48a07ce | 18 | R18-18 | Gaps: G4, G24 | subject | fix(layers): R18-18 the agent layer diagnostic carries raw signals only — no confidence, no agent_type — and its markers match whole words (R18-18; Gaps: G4, G24) |
+| a155537 | 18 | R18-19 | Gaps: G1; 신규(스펙 외) | subject | fix(cli): R18-19a `video --extract` reports failed frame extractions on stderr and exits 1 — it exited 0 without a word when every ffmpeg run failed (R18-19; Gaps: G1, 신규) |
+| 804ce5c | 18 | R18-19 | Gaps: G29 | subject | fix(cli): R18-19b vendor-weights names where its models folder came from (--models-dir, DEEPFAKE_LENS_MODELS_DIR) and refuses a missing folder or a file named by the variable like one named by --models-dir (R18-19; Gaps: G29) |
+| afd7036 | 18 | R18-19 | Gaps: 신규(스펙 외) | subject | fix(cli): R18-19c the office config file may start with a UTF-8 BOM like assets.json, and a folder at the config path is a usage error instead of being ignored (R18-19; Gaps: 신규) |
+| 3df21ce | 18 | R18-19 | Gaps: 신규(스펙 외) | subject | fix(archives): R18-19d zip member names without the UTF-8 flag are decoded as cp949 — euc-kr left the cp949 extension syllables ("똠방각하") as cp437 mojibake (R18-19; Gaps: 신규) |
+| c9e1f81 | 18 | R18-19 | Gaps: G26 | subject | fix(qa): R18-19e `qa_phase0.py --verify-record` in a shallow clone says the parent commit is not fetched — not "다시 생성하세요" (R18-19; Gaps: G26) |
+| bc99d8a | 18 | R18-19 | Gaps: 신규(스펙 외) | subject | fix(cli): R18-19f an argument a subcommand does not take is reported by that subcommand's parser with its own usage — not the top-level usage (R18-19; Gaps: 신규) |

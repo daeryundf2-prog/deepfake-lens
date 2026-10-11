@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "3fe35fb3b711667c69440747bbf5775e9c7f4bdf",
+    "head": "bc99d8a74ee8f015e6cdbc57c9e007a3dd70e9f0",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -3086,6 +3086,286 @@
       "new": "테스트 견고성 — 갭 목록 밖",
       "commits": [
         "8f205bd"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-1",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "R17-7 캐시 키에 설치·venv 절대 경로 포함(회귀) → 이름·역할·sha256만",
+      "gaps": [
+        "G11",
+        "G9"
+      ],
+      "new": null,
+      "commits": [
+        "b42f5c1"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-2",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "~알수없는사용자 재정의 변수가 스캔 전체를 죽임(회귀)",
+      "gaps": [
+        "G9",
+        "G29",
+        "G11"
+      ],
+      "new": null,
+      "commits": [
+        "41c3aef"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-3",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "취소된 검사의 남은 파일이 기록 없이 사라짐 → 사용자 취소 집계·부분 결과 표시",
+      "gaps": [
+        "G12",
+        "G7"
+      ],
+      "new": null,
+      "commits": [
+        "a3ac2aa"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-4",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "메타데이터 앞 4 MB만 읽고 coverage ran 표시",
+      "gaps": [
+        "G12",
+        "G1"
+      ],
+      "new": null,
+      "commits": [
+        "2b2c112"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-5",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "서명된 보고서의 중복 키가 검증 통과",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "1c124aa"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-6",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "2억 화소 사진 EXIF 판독 실패(픽셀 폭탄 상한)",
+      "gaps": [
+        "G12",
+        "G1"
+      ],
+      "new": null,
+      "commits": [
+        "46e06da"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-7",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "열 수 없는 영상을 rPPG가 얼굴 추적 부족으로 기록",
+      "gaps": [
+        "G1",
+        "G12"
+      ],
+      "new": null,
+      "commits": [
+        "e498775"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-8",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "GUI 검토 표시가 상대 경로 키·전역 저장소로 사건 간 섞임",
+      "gaps": [
+        "G11"
+      ],
+      "new": null,
+      "commits": [
+        "259f7e3"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-9",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "감독 프로세스가 코어 덤프를 cwd에 남김",
+      "gaps": [
+        "G34"
+      ],
+      "new": null,
+      "commits": [
+        "80875cc"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-10",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "--allow-symlinks가 /proc 의사 파일을 분석",
+      "gaps": [
+        "G31"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "3d46a51"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-11",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "표시 이름 비단사(NFC/NFD, 비ASCII 공백, 보이지 않는 문자)",
+      "gaps": [
+        "G30"
+      ],
+      "new": "표시 이름 단사성 — 갭 목록 밖",
+      "commits": [
+        "15d789a"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-12",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "R17-8 잔여: import 가드 설치 전 Ctrl-C 영어 traceback",
+      "gaps": [
+        "G34"
+      ],
+      "new": null,
+      "commits": [
+        "fe963eb"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-13",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "doctor와 실제 검사 결과 불일치(재정의 없음, CascadeClassifier 없음)",
+      "gaps": [
+        "G29"
+      ],
+      "new": null,
+      "commits": [
+        "12348ef"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-14",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "추적표 ids[] 매핑이 커밋 제목과 다름 + --check 검사 추가",
+      "gaps": [
+        "G26",
+        "G27"
+      ],
+      "new": null,
+      "commits": [
+        "1b5dbdd"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-15",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "출력 쓰기 오류가 예기치 않은 오류로 보고, 비원자적 쓰기",
+      "gaps": [
+        "G34"
+      ],
+      "new": "출력 견고성 — 갭 목록 밖",
+      "commits": [
+        "9067673"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-16",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "증거설명서 사건명 기본값이 특정 죄명",
+      "gaps": [],
+      "new": "증거설명서 기본값 — 갭 목록 밖",
+      "commits": [
+        "91ee0d1"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-17",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "GUI가 실행 안 된 모델에 원점수 0 표시",
+      "gaps": [
+        "G1"
+      ],
+      "new": null,
+      "commits": [
+        "9ecd4ed"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-18",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "agent 계층 진단이 confidence·agent_type 등급 출력",
+      "gaps": [
+        "G4",
+        "G24"
+      ],
+      "new": null,
+      "commits": [
+        "48a07ce"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R18-19",
+      "round": 18,
+      "source": "verify_round18.md",
+      "summary": "잡다한 표시 불일치 (a)~(f)",
+      "gaps": [
+        "G26",
+        "G29",
+        "G1"
+      ],
+      "new": "사용자 표시 — 갭 목록 밖",
+      "commits": [
+        "a155537",
+        "804ce5c",
+        "afd7036",
+        "3df21ce",
+        "c9e1f81",
+        "bc99d8a"
       ],
       "used_in_commit_subjects": true
     }
@@ -7813,6 +8093,550 @@
         "R17-11: 추적표 매핑 정정 — 갭 목록 밖"
       ],
       "gaps_line": "Gaps: G34; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "ec0d057da45f81da325e21b62c38a81a24a8aa0e",
+      "short": "ec0d057",
+      "round": "17",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on 3fe35fb, round-17 IDs mapped (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "16d1df82dab493f8cffbca0ca601bf1fa840c61d",
+      "short": "16d1df8",
+      "round": "17",
+      "subject": "docs(phase0): round-18 verification findings and UI/UX/AX audit (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "b42f5c161946739b73e82112be0d5924a6406ee3",
+      "short": "b42f5c1",
+      "round": "18",
+      "subject": "fix(cache): R18-1 the asset tokens of the scan-cache key hold the asset name, the file's role and its sha256 — no install, venv or models-folder path (R18-1; Gaps: G11, G9)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-1"
+      ],
+      "gaps_named_in_subject": [
+        "G11",
+        "G9"
+      ],
+      "gaps": [
+        "G11",
+        "G9"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G11, G9",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "41c3aefaac5219c72b6724526933d62f0205c4f8",
+      "short": "41c3aef",
+      "round": "18",
+      "subject": "fix(assets): R18-2 an override variable \"~nouser/…\" is read as the literal path — no RuntimeError stops scan --cache or doctor; the cache key never raises (R18-2; Gaps: G9, G29, G11)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-2"
+      ],
+      "gaps_named_in_subject": [
+        "G9",
+        "G29",
+        "G11"
+      ],
+      "gaps": [
+        "G9",
+        "G29",
+        "G11"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G9, G29, G11",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "a3ac2aa5b28167cadde4ef990f6ed509e7541b40",
+      "short": "a3ac2aa",
+      "round": "18",
+      "subject": "fix(scan): R18-3 a cancelled scan counts the files it never started — summary.cancelled / files_cancelled, unrecorded reason \"사용자 취소\", job status \"cancelled\", a partial-result note in the summary line, the unrecorded section and the GUI (R18-3; Gaps: G12, G7)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-3"
+      ],
+      "gaps_named_in_subject": [
+        "G12",
+        "G7"
+      ],
+      "gaps": [
+        "G12",
+        "G7"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G12, G7",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "2b2c1120f11f6aa61faf600e94affda9a5d1292a",
+      "short": "2b2c112",
+      "round": "18",
+      "subject": "fix(metadata): R18-4 a PNG's chunks and a WebP's XMP chunk are read through the whole file; a metadata read limited to a prefix is \"ran\" with the reason \"메타데이터 앞 N … 만 확인\" (R18-4; Gaps: G12, G1)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-4"
+      ],
+      "gaps_named_in_subject": [
+        "G12",
+        "G1"
+      ],
+      "gaps": [
+        "G12",
+        "G1"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G12, G1",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "1c124aa3ba88aafd730ba00a15ae8c185b90c65d",
+      "short": "1c124aa",
+      "round": "18",
+      "subject": "fix(signing): R18-5 a signed report whose text repeats a key inside one JSON object is 변조됨 — verify-report exit 1 (R18-5; Gaps: G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-5"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "46e06da13e32483effdcce01c2bf453cf8644dea",
+      "short": "46e06da",
+      "round": "18",
+      "subject": "fix(metadata): R18-6 the EXIF of an image over Pillow's pixel-count limit (200 MP camera photos) is read from the file structure; the refused decode says \"픽셀 수 상한 초과 — 디코드 생략\" (R18-6; Gaps: G12, G1)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-6"
+      ],
+      "gaps_named_in_subject": [
+        "G12",
+        "G1"
+      ],
+      "gaps": [
+        "G12",
+        "G1"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G12, G1",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "e498775a923d60ea6ce1c145d5716e27b32376cd",
+      "short": "e498775",
+      "round": "18",
+      "subject": "fix(rppg): R18-7 a video rPPG cannot open or decode fails the rppg check with \"영상을 디코딩할 수 없습니다\" — not skipped \"획득 프레임 0\" (R18-7; Gaps: G1, G12)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-7"
+      ],
+      "gaps_named_in_subject": [
+        "G1",
+        "G12"
+      ],
+      "gaps": [
+        "G1",
+        "G12"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G1, G12",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "259f7e37151dd3f8acb79a232b368d0291d6ad06",
+      "short": "259f7e3",
+      "round": "18",
+      "subject": "fix(gui): R18-8 a review mark is keyed by the file's sha256 inside its scanned folder (\"v2|root:<scan_root>|sha256:<hash>\") — not by the row path in one global store (R18-8; Gaps: G11)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-8"
+      ],
+      "gaps_named_in_subject": [
+        "G11"
+      ],
+      "gaps": [
+        "G11"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G11",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "80875cc25f7f1d81481c17ba9b3821159445db26",
+      "short": "80875cc",
+      "round": "18",
+      "subject": "fix(native): R18-9 the child supervisor sets RLIMIT_CORE 0 (inherited by the program) and clears its dumpable flag before it re-raises the program's signal — no core file in the working directory (R18-9; Gaps: G34)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-9"
+      ],
+      "gaps_named_in_subject": [
+        "G34"
+      ],
+      "gaps": [
+        "G34"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G34",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "3d46a516f92c7d39cc4b1f9203cb90834bc1d2a5",
+      "short": "3d46a51",
+      "round": "18",
+      "subject": "fix(scan): R18-10 a file on /proc or /sys, or one with stat size 0 but content, is a skipped row \"건너뜀: 특수 파일 시스템\" — --allow-symlinks no longer analyzes /proc/self/environ (R18-10; Gaps: G31, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-10"
+      ],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R18-10: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G31; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "15d789a02d248e378be472b2818ac2f143aa00e0",
+      "short": "15d789a",
+      "round": "18",
+      "subject": "fix(report): R18-11 display_name escapes a run that is not NFC, a space other than U+0020, a default-ignorable code point and a mark after an escape — names that render alike are shown differently (R18-11; Gaps: G30, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-11"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R18-11: 표시 이름 단사성 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G30; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "fe963eb134785c44b5f67f47024a0c182117e7d0",
+      "short": "fe963eb",
+      "round": "18",
+      "subject": "fix(cli): R18-12 the import guard is the first statement of the package and imports only os, signal and sys; the Python start-up, the console-script stub's own imports and finalization stay uncovered (R18-12; Gaps: G34)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-12"
+      ],
+      "gaps_named_in_subject": [
+        "G34"
+      ],
+      "gaps": [
+        "G34"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G34",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "12348ef430cafbb0309001e93535b536d3ec28cb",
+      "short": "12348ef",
+      "round": "18",
+      "subject": "fix(doctor): R18-13 a missing asset override is \"재정의없음 — 검사는 failed\", and the mediapipe / opencv rows warn when the checks that need them cannot run as the row said (R18-13; Gaps: G29)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-13"
+      ],
+      "gaps_named_in_subject": [
+        "G29"
+      ],
+      "gaps": [
+        "G29"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G29",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "1b5dbddbfb19174536ffbdda60fe8df31e5f7f39",
+      "short": "1b5dbdd",
+      "round": "18",
+      "subject": "fix(qa): R18-14 the ids[] gap mappings follow their commits' Gaps (R16-8 G13→G29 and eleven more) and --check fails on a mapping that differs unless it has a gaps_note (R18-14; Gaps: G26, G27)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-14"
+      ],
+      "gaps_named_in_subject": [
+        "G13",
+        "G29",
+        "G26",
+        "G27"
+      ],
+      "gaps": [
+        "G26",
+        "G27"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "90676730a6ae5c322db4b1d2f2a7f329be68193b",
+      "short": "9067673",
+      "round": "18",
+      "subject": "fix(cli): R18-15 output files are written whole (temp file + rename) and output failures are Korean lines — a closed pipe is a quiet 141, a full disk \"출력 파일을 쓸 수 없습니다\", a closed stdout exit 2 (R18-15; Gaps: G34, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-15"
+      ],
+      "gaps_named_in_subject": [
+        "G34"
+      ],
+      "gaps": [
+        "G34"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R18-15: 출력 견고성 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G34; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "91ee0d1f10ca5d3a6b0b92e6a914d8cb73026a1e",
+      "short": "91ee0d1",
+      "round": "18",
+      "subject": "fix(report): R18-16 the evidence statement's default case name is the placeholder \"(사건명 입력)\" — not the offence \"성폭력처벌법위반(허위영상물편집등) 및 정보통신망법위반\" (R18-16; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-16"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R18-16: 증거설명서 기본값 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "9ecd4ed065b9a70c3c23d8b8446054cdafd53e75",
+      "short": "9ecd4ed",
+      "round": "18",
+      "subject": "fix(gui): R18-17 a model that did not run shows \"없음 — 미실행(<사유>)\" in the GUI — not \"외부 모델 원점수(미보정, 결론 불참여) — 0\" (R18-17; Gaps: G1)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-17"
+      ],
+      "gaps_named_in_subject": [
+        "G1"
+      ],
+      "gaps": [
+        "G1"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G1",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "48a07ceffdd39e7c688ca3baf2aee19850eb8284",
+      "short": "48a07ce",
+      "round": "18",
+      "subject": "fix(layers): R18-18 the agent layer diagnostic carries raw signals only — no confidence, no agent_type — and its markers match whole words (R18-18; Gaps: G4, G24)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-18"
+      ],
+      "gaps_named_in_subject": [
+        "G4",
+        "G24"
+      ],
+      "gaps": [
+        "G4",
+        "G24"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G4, G24",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "a1555378172a4306651da0f727634f9fc776c686",
+      "short": "a155537",
+      "round": "18",
+      "subject": "fix(cli): R18-19a `video --extract` reports failed frame extractions on stderr and exits 1 — it exited 0 without a word when every ffmpeg run failed (R18-19; Gaps: G1, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-19"
+      ],
+      "gaps_named_in_subject": [
+        "G1"
+      ],
+      "gaps": [
+        "G1"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R18-19: 사용자 표시 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G1; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "804ce5c2aba66f4e628f57c7909bbbbfe3af2954",
+      "short": "804ce5c",
+      "round": "18",
+      "subject": "fix(cli): R18-19b vendor-weights names where its models folder came from (--models-dir, DEEPFAKE_LENS_MODELS_DIR) and refuses a missing folder or a file named by the variable like one named by --models-dir (R18-19; Gaps: G29)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-19"
+      ],
+      "gaps_named_in_subject": [
+        "G29"
+      ],
+      "gaps": [
+        "G29"
+      ],
+      "new": false,
+      "new_reasons": [
+        "R18-19: 사용자 표시 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G29",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "afd7036714942a424810b7b054debaa72f306452",
+      "short": "afd7036",
+      "round": "18",
+      "subject": "fix(cli): R18-19c the office config file may start with a UTF-8 BOM like assets.json, and a folder at the config path is a usage error instead of being ignored (R18-19; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-19"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R18-19: 사용자 표시 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "3df21cebf78bb883ce7da3c6c9300ce0c3da0f03",
+      "short": "3df21ce",
+      "round": "18",
+      "subject": "fix(archives): R18-19d zip member names without the UTF-8 flag are decoded as cp949 — euc-kr left the cp949 extension syllables (\"똠방각하\") as cp437 mojibake (R18-19; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-19"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R18-19: 사용자 표시 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "c9e1f81f034ff373371cc50aee0d84da1c5b6bf4",
+      "short": "c9e1f81",
+      "round": "18",
+      "subject": "fix(qa): R18-19e `qa_phase0.py --verify-record` in a shallow clone says the parent commit is not fetched — not \"다시 생성하세요\" (R18-19; Gaps: G26)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-19"
+      ],
+      "gaps_named_in_subject": [
+        "G26"
+      ],
+      "gaps": [
+        "G26"
+      ],
+      "new": false,
+      "new_reasons": [
+        "R18-19: 사용자 표시 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: G26",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "bc99d8a74ee8f015e6cdbc57c9e007a3dd70e9f0",
+      "short": "bc99d8a",
+      "round": "18",
+      "subject": "fix(cli): R18-19f an argument a subcommand does not take is reported by that subcommand's parser with its own usage — not the top-level usage (R18-19; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R18-19"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R18-19: 사용자 표시 — 갭 목록 밖"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
       "gaps_source": "subject"
     }
   ]
