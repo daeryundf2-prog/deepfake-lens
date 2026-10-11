@@ -134,6 +134,131 @@ class InterruptedCliTest(unittest.TestCase):
             self.assertEqual(os.listdir(base), [])
 
 
+# R17-8 (b): the console script, interrupted while the package is importing —
+# a meta-path hook presses Ctrl-C (SIGINT) as deepfake_lens.core is looked up.
+IMPORT_INTERRUPTED = textwrap.dedent(
+    """
+    import importlib.abc, os, signal, sys, time
+
+    class PressCtrlC(importlib.abc.MetaPathFinder):
+        def find_spec(self, name, path, target=None):
+            if name == "deepfake_lens.core":
+                os.kill(os.getpid(), signal.SIGINT)
+                time.sleep(30)
+            return None
+
+    sys.meta_path.insert(0, PressCtrlC())
+    from deepfake_lens.cli import main
+    sys.exit(main())
+    """
+)
+
+# R17-8 (a): a command interrupted while another thread (a web request) is
+# analysing — that thread fails because of the cleanup and logs it.
+INTERRUPTED_WITH_A_REQUEST = textwrap.dedent(
+    """
+    import logging, sys, threading, time
+    from deepfake_lens import cli, shutdown
+
+    def request():
+        while not shutdown.active():
+            time.sleep(0.005)
+        try:
+            raise shutdown.ShuttingDown()
+        except shutdown.ShuttingDown:
+            logging.getLogger("deepfake_lens.core").exception("analysis failed: %s", "영상.mp4")
+
+    def command(*args, **kwargs):
+        threading.Thread(target=request).start()
+        raise KeyboardInterrupt
+
+    cli._run_command = command
+    sys.exit(cli.main(["doctor"]))
+    """
+)
+
+
+@unittest.skipIf(os.name == "nt", "POSIX signals")
+class InterruptOrderTest(unittest.TestCase):
+    """R17-8 (round 17): R16-13 left three gaps — an English log line and traceback before the Korean line
+    (logging restored before the cleanup), a traceback for a Ctrl-C during the package import, and a
+    ``batch`` that ran on through its queue after the Korean line."""
+
+    def _env(self, root: Path) -> dict[str, str]:
+        env = {
+            **os.environ, "HOME": str(root / "home"), "DEEPFAKE_LENS_LOG_DIR": str(root / "logs"),
+            "PYTHONPATH": str(REPO) + os.pathsep + os.environ.get("PYTHONPATH", ""),
+        }
+        return env
+
+    def test_the_cleanup_runs_before_the_log_handlers_are_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            done = subprocess.run(
+                with_default_signals([sys.executable, "-c", INTERRUPTED_WITH_A_REQUEST]),
+                capture_output=True, text=True, env=self._env(root), timeout=CHILD_TIMEOUT_SECONDS,
+            )
+            log = (root / "logs").rglob("*.log")
+            logged = "".join(path.read_text(encoding="utf-8", errors="replace") for path in log)
+        self.assertEqual(done.returncode, 130, done.stderr[-800:])
+        self.assertEqual(done.stderr.strip(), f"{cli.INTERRUPTED_MESSAGE} — 임시 파일과 자식 프로세스를 정리하고 종료합니다.")
+        self.assertIn("analysis failed", logged)  # it went to the log file
+
+    def test_ctrl_c_while_the_package_imports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            program = root / "deepfake-lens"  # the console script's name
+            program.write_text(IMPORT_INTERRUPTED, encoding="utf-8")
+            done = subprocess.run(
+                with_default_signals([sys.executable, str(program), "doctor"]),
+                capture_output=True, text=True, env=self._env(root), timeout=CHILD_TIMEOUT_SECONDS,
+            )
+        self.assertEqual(done.returncode, 130, done.stderr[-800:])
+        self.assertEqual(done.stderr.strip(), cli.INTERRUPTED_MESSAGE)
+        self.assertNotIn("Traceback", done.stderr)
+
+    def test_the_guard_is_only_for_the_cli_and_is_released_by_main(self) -> None:
+        from deepfake_lens import interrupt_guard
+
+        with mock.patch.object(sys, "argv", ["python -m unittest"]):
+            self.assertFalse(interrupt_guard.install())
+        previous = signal.getsignal(signal.SIGINT)
+        self.addCleanup(signal.signal, signal.SIGINT, previous)
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+        with mock.patch.object(sys, "argv", ["/usr/bin/deepfake-lens"]):
+            self.assertTrue(interrupt_guard.install())
+        interrupt_guard.release()
+        self.assertIs(signal.getsignal(signal.SIGINT), signal.default_int_handler)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        with mock.patch.object(sys, "argv", ["deepfake-lens"]):
+            self.assertFalse(interrupt_guard.install())  # R14-1: an inherited SIG_IGN stays
+
+    def test_an_interrupted_batch_starts_no_further_file(self) -> None:
+        import threading
+
+        from deepfake_lens.batch import BatchProcessor
+
+        started: list[str] = []
+        gate = threading.Event()
+
+        def process(path: Path) -> dict[str, object]:
+            started.append(path.name)
+            if path.name == "0":
+                raise KeyboardInterrupt  # Ctrl-C reaches the batch
+            gate.wait(0.5)
+            return {}
+
+        files = [Path(str(index)) for index in range(10)]
+        began = time.monotonic()
+        with self.assertRaises(KeyboardInterrupt):
+            BatchProcessor(max_workers=1).process_batch(files, process)
+        elapsed = time.monotonic() - began
+        gate.set()
+        time.sleep(0.1)
+        self.assertLess(elapsed, 0.45)  # it used to wait for the whole queue (≈ 4.5 s here)
+        self.assertLessEqual(len(started), 2)  # file 0 and at most the one already picked up
+
+
 class WithDefaultSignalsScriptTest(unittest.TestCase):
     def _run(self, *command: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(

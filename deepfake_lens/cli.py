@@ -403,13 +403,16 @@ def _verify_report_command(args: argparse.Namespace) -> int:
 # R16-13 (round 16): Ctrl-C (KeyboardInterrupt) ends the CLI with this Korean
 # line on stderr — after the cleanup — and the shell's 128 + SIGINT code; it
 # used to end with an English KeyboardInterrupt traceback.
-INTERRUPTED_MESSAGE = "중단됨(사용자 요청)"
-INTERRUPTED_EXIT = 130
+# R17-8: one definition, shared with the import guard.
+from .interrupt_guard import INTERRUPTED_EXIT, INTERRUPTED_MESSAGE  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
     """The ``deepfake-lens`` command (R16-13: an interrupt is a Korean line and exit 130, never a traceback)."""
     try:
+        from .interrupt_guard import release
+
+        release()  # R17-8: the import is over — a Ctrl-C from here runs the cleanup below
         return _main(argv)
     except KeyboardInterrupt:
         return interrupted_exit()
@@ -483,8 +486,18 @@ def _main(argv: list[str] | None = None) -> int:
     # N8: tracebacks of routine per-file failures go to the log file; stderr
     # gets one Korean summary line (--verbose shows them).
     logs = configure_cli_logging(bool(getattr(args, "verbose", False)))
+    interrupted = False
     try:
         return _run_command(args, parser, cmd_parsers)
+    except KeyboardInterrupt:
+        # R17-8 (round 17): the cleanup runs while the log handlers are still
+        # installed — they used to be removed first (logs.finish in `finally`),
+        # so a request thread failing because of the cleanup ("analysis
+        # failed: …", a ShuttingDown traceback) printed English on stderr
+        # before the Korean line. The handlers stay installed (the process
+        # is ending): what the other threads log after it goes to the log file.
+        interrupted = True
+        return interrupted_exit()
     except UsageError as exc:
         print(f"오류: {escape_echo(exc)}", file=sys.stderr)
         return VERIFY_EXIT_OTHER if args.command == "verify-report" else USAGE_EXIT
@@ -503,7 +516,8 @@ def _main(argv: list[str] | None = None) -> int:
         print(f"오류: 처리 중 예기치 않은 오류가 발생했습니다({type(exc).__name__}) — 상세는 {logs.log_hint()}", file=sys.stderr)
         return UNEXPECTED_ERROR_EXIT
     finally:
-        logs.finish()
+        if not interrupted:
+            logs.finish()
 
 
 # Exit codes (docs/deepfake-lens-cli.md "종료 코드"): 2 = usage error (bad

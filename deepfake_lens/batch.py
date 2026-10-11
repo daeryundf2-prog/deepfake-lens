@@ -72,7 +72,8 @@ class BatchProcessor:
         processed = 0
         failed = 0
         
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+        executor = ThreadPoolExecutor(max_workers=self.max_workers)
+        try:
             future_to_file = {
                 executor.submit(self._process_single, file, processor): file
                 for file in files
@@ -96,6 +97,13 @@ class BatchProcessor:
                         error=failure_reason(exc),
                         processing_time=0.0,
                     ))
+        except BaseException:
+            # R17-8 (round 17): Ctrl-C (or any abort) drops the files not yet
+            # started — `with ThreadPoolExecutor` waited for every queued file
+            # (the batch ran on for ~36 s after "중단됨(사용자 요청)").
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        executor.shutdown(wait=True)
         
         end_time = time.time()
         

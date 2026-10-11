@@ -7,6 +7,11 @@ from . import telemetry_opt_out as _telemetry_opt_out  # R15-2: before every oth
 
 _telemetry_opt_out.apply()
 
+# R17-8 (round 17): a Ctrl-C while the CLI is still importing is a Korean line and exit 130.
+from . import interrupt_guard as _interrupt_guard  # noqa: E402
+
+_interrupt_guard.install()
+
 from .core import (  # noqa: E402
     BatchScanSummary,
     ClassificationResult,
