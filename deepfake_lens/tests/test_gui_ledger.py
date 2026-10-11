@@ -202,6 +202,33 @@ class LedgerReasonTest(unittest.TestCase):
         self.assertIn("결론은 파일에 남은 기록만으로 냈습니다", out["short"])
 
 
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class ReviewMarkRowsTest(unittest.TestCase):
+    def test_a_mark_shows_on_every_row_with_the_same_content(self) -> None:
+        """GUI-REV G-8: two rows with one sha256 in one folder share the mark."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        key_block = source[source.index("        const REVIEW_KEY_VERSION"):source.index("        let reviewPushTimer")]
+        script = (
+            "var lastScanRoot = '/case'; var reviewStore = {};\n" + key_block + _function(source, "refreshReviewMarks")
+            + "function row() { var cell = {textContent: ''}; return {cell: cell, querySelector: function () { return cell; }}; }\n"
+            + "var sha = 'a'.repeat(64), other = 'b'.repeat(64);\n"
+            + "var results = [{item: {path: 'x/1.png', sha256: sha}, row: row()}, {item: {path: 'y/1.png', sha256: sha}, row: row()},"
+            + " {item: {path: 'z.png', sha256: other}, row: row()}];\n"
+            + "reviewStore[itemKey(results[0].item)] = {star: true}; refreshReviewMarks(itemKey(results[0].item));\n"
+            + "var on = results.map(function (e) { return e.row.cell.textContent; });\n"
+            + "reviewStore[itemKey(results[0].item)] = {star: false}; refreshReviewMarks(itemKey(results[0].item));\n"
+            + "console.log(JSON.stringify([on, results.map(function (e) { return e.row.cell.textContent; })]));"
+        )
+        node = shutil.which("node")
+        assert node is not None
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "marks.js"
+            path.write_text(script, encoding="utf-8")
+            done = subprocess.run([node, str(path)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout), [["검토함", "검토함", ""], ["", "", ""]])
+
+
 class GuiAccessibilitySourceTest(unittest.TestCase):
     source: str
     html: str

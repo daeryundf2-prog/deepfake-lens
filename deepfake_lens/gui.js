@@ -1668,6 +1668,15 @@
             bindDetail(box, entry);
         }
 
+        // GUI-REV G-8: a mark belongs to a content (sha256) in a folder — every
+        // row with that key shows it, not only the row it was set on.
+        function refreshReviewMarks(key) {
+            const on = Boolean((reviewStore[key] || {}).star);
+            results.forEach(e => {
+                if (e.row && itemKey(e.item) === key) e.row.querySelector('.row-rev').textContent = on ? '검토함' : '';
+            });
+        }
+
         function bindDetail(box, entry) {
             const item = entry.item;
             const rev = reviewStore[itemKey(item)] || {};
@@ -1686,7 +1695,7 @@
                 const on = toggleReview(item);
                 star.setAttribute('aria-pressed', on ? 'true' : 'false');
                 star.textContent = on ? '검토함' : '검토 완료로 표시';
-                if (entry.row) entry.row.querySelector('.row-rev').textContent = on ? '검토함' : '';
+                refreshReviewMarks(itemKey(item));
             });
             box.querySelectorAll('button[data-label]').forEach(b => b.addEventListener('click', () => {
                 submitFeedback(item, b.dataset.label, box.querySelector('.fb-status'));
