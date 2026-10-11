@@ -600,6 +600,30 @@ def main() -> int:
             assert page.locator("#error-region .err-item[data-export-gen]").count() == 0, "a late 409 showed a refusal"
             assert "이전 검사에 대한 응답이라 무시했습니다" in page.locator("#toasts").inner_text() + page.locator("#export-note").inner_text()
 
+            # 6e. GUI-REV4 K-5: a folder on a row's path replaced by a link after the scan is not
+            #     refused (phase-0 choice: the row is only excluded) — the GUI names the scan rows
+            #     the signed JSON excluded and offers 다시 검사.
+            linked = mutable / "lnk"
+            (linked / "sub").mkdir(parents=True)
+            (linked / "sub" / "k.txt").write_text("링크 시험 글", encoding="utf-8")
+            (mutable / "target").mkdir()
+            (mutable / "target" / "k.txt").write_text("링크 시험 글", encoding="utf-8")
+            page.evaluate("location.hash = '#/scan'")
+            page.fill("#folder-path", str(linked))
+            page.evaluate("document.getElementById('opt-recursive').checked = true; document.getElementById('opt-dedupe').checked = false")
+            page.click("#analyze-btn")
+            page.wait_for_function("() => scanBusy === false && currentView === 'ledger' && results.length > 0", timeout=180_000)
+            _shutil.rmtree(linked / "sub")
+            (linked / "sub").symlink_to(mutable / "target", target_is_directory=True)
+            page.evaluate("location.hash = '#/report'")
+            page.wait_for_function("() => currentView === 'report'")
+            if page.evaluate("caseUnconfirmed()"):
+                page.get_by_role("button", name="이 폴더의 사건이 맞음").click()
+            with page.expect_download():
+                page.click("#exp-signed")
+            page.wait_for_selector("#error-region .err-item:has-text('서명 제외로 옮겨졌습니다')", timeout=60_000)
+            assert "sub/k.txt" in page.locator("#error-region .err-item", has_text="서명 제외로 옮겨졌습니다").inner_text()
+
             # 7. CSP/console errors: none tolerated. No request leaves the local server
             #    (fonts are local stacks; nothing is fetched from the network).
             csp = [e for e in console_errors if "Content Security Policy" in e or "Refused" in e]

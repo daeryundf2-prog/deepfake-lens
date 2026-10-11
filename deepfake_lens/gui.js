@@ -2436,7 +2436,7 @@
                 boxes +
                 ((body.unsigned || []).length ? `<section class="a4-box">${lines(body.unsigned)}</section>` : '') +
                 `<div class="a4-signoff">${lines(body.signoff || [])}<p class="a4-court">${docHtml(body.court)}</p></div>` +
-                '<p class="a4-sign">서명은 내보낼 때 서버가 서명 키로 붙입니다(키가 없으면 "서명 없음"). 내보낼 때 서버가 파일을 다시 분석해, 검사 뒤 바뀌었거나 지워진 파일이 있으면 내보내기를 거부합니다.</p>';
+                '<p class="a4-sign">서명은 내보낼 때 서버가 서명 키로 붙입니다(키가 없으면 "서명 없음"). 내보낼 때 서버가 파일을 다시 분석해, 검사 뒤 바뀌었거나 지워진 파일이 있으면 내보내기를 거부합니다. 다만 경로 중간의 폴더가 링크로 바뀐 파일은 거부되지 않고 서명 제외로 옮겨집니다.</p>';
         }
 
         const EXPORT_SPECS = {
@@ -2545,6 +2545,12 @@
         function clearExportRefusals() {
             document.querySelectorAll('#error-region .err-item[data-export-gen]').forEach(box => box.remove());
         }
+        // K-5: the signed body's excluded rows that were rows of this scan (not uploads).
+        function scanRowsExcluded(body) {
+            const rows = Array.isArray(body && body.excluded_items) ? body.excluded_items : [];
+            const scanned = new Set(results.filter(e => e.item.source !== 'upload').map(e => String(e.item.path)));
+            return rows.filter(row => row && scanned.has(String(row.path))).map(row => ({ path: String(row.path), reason: String(row.reason || row.marker || '사유 기록 없음') }));
+        }
         async function exportReport(kind) {
             if (exportBlocked()) return;
             const btn = $(EXPORT_BUTTONS[kind]);
@@ -2595,6 +2601,18 @@
                 if (exportResponseAction(startGen, resultsGeneration, res.status, 0, true) === '무시') { ignored(); return; }
                 clearExportRefusals();
                 download(blob, spec[2]);
+                // GUI-REV4 K-5: rows of this scan the server signed as excluded (e.g. a folder on
+                // the path became a link since the scan — not refused by R19-13) are named.
+                if (spec[1] === 'application/json') {
+                    try {
+                        const excluded = scanRowsExcluded(JSON.parse(await blob.text()));
+                        if (excluded.length) {
+                            showError(`${spec[3]}: 이 검사의 행 ${excluded.length}개가 서명 제외로 옮겨졌습니다 — ` +
+                                excluded.slice(0, 5).map(row => row.path + '(' + row.reason + ')').join(', ') + (excluded.length > 5 ? ` 외 ${excluded.length - 5}개` : '') +
+                                '. 검사 뒤 경로의 폴더가 링크로 바뀌었을 수 있습니다 — 다시 검사하십시오.', '주의', false, ['다시 검사', rescanFolder], startGen);
+                        }
+                    } catch (e) { /* not a signed body */ }
+                }
                 $('export-note').textContent = spec[3] + '를 내려받았습니다.';
             } catch (e) {
                 toast(spec[3] + ' 오류: ' + e.message, true);
