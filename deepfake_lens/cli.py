@@ -562,6 +562,31 @@ def _main(argv: list[str] | None = None) -> int:
             logs.finish()
 
 
+# R18-19 (a): failed extractions listed on stderr (the rest are in the --out JSON).
+VIDEO_FAILURES_LISTED = 10
+
+
+def video_extraction_failures(extraction: dict[str, object]) -> list[str]:
+    """R18-19 (a) (round 18): one Korean line per failed frame extraction of ``video --extract`` (ffmpeg missing included)."""
+    if extraction.get("error"):
+        return [str(extraction["error"])]
+    lines = []
+    for row in extraction.get("results") or []:  # type: ignore[union-attr]
+        if not isinstance(row, dict) or row.get("returncode") == 0:
+            continue
+        code = row.get("returncode")
+        if code == -1 and row.get("stderr"):
+            why = str(row["stderr"])  # our own Korean reason (refused command, timeout, staging)
+        elif isinstance(code, int) and code < 0:
+            why = f"ffmpeg가 신호 {-code}로 종료됨"
+        elif code == 127:
+            why = "ffmpeg를 실행할 수 없음(종료 코드 127)"
+        else:
+            why = f"ffmpeg 실패(종료 코드 {code}) — ffmpeg 메시지는 --out JSON의 extraction 항목"
+        lines.append(f"{row.get('path', '')}: {why}")
+    return lines
+
+
 # Exit codes (docs/deepfake-lens-cli.md "종료 코드"): 2 = usage error (bad
 # input path, bad option value), 1 = the command ran and failed.
 USAGE_EXIT = 2
@@ -784,10 +809,22 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
             recursive=not args.no_recursive,
             sample_every_seconds=args.sample_every,
         )
+        summary = {"count": payload["count"], "ffmpeg_available": payload["ffmpeg_available"], "out": str(args.out)}
+        failures: list[str] = []
         if args.extract:
-            payload["extraction"] = extract_video_frames(payload, limit=args.extract_limit)
+            extraction = extract_video_frames(payload, limit=args.extract_limit)
+            payload["extraction"] = extraction
             write_output_text(args.out, json_dumps(payload, ensure_ascii=False, indent=2) + "\n")  # R18-15
-        print(json_dumps({"count": payload["count"], "ffmpeg_available": payload["ffmpeg_available"], "out": str(args.out)}, ensure_ascii=False, indent=2))
+            failures = video_extraction_failures(extraction)
+            results = extraction.get("results") if isinstance(extraction.get("results"), list) else []
+            summary.update(extracted=sum(1 for row in results if isinstance(row, dict) and row.get("returncode") == 0), failed=len(failures))
+        print(json_dumps(summary, ensure_ascii=False, indent=2))
+        if failures:
+            # R18-19 (a) (round 18): every extraction could fail (-9, 127) with exit 0 and no word.
+            print(f"오류: 프레임 추출 실패 {len(failures)}건 — 결과는 {escape_echo(args.out)}의 extraction 항목", file=sys.stderr)
+            for line in failures[:VIDEO_FAILURES_LISTED]:
+                print(f"  - {escape_echo(line)}", file=sys.stderr)
+            return UNEXPECTED_ERROR_EXIT
         return 0
     if args.command == "audio":
         # D1: layer diagnostic only — the verdict for an audio file is `scan`.
