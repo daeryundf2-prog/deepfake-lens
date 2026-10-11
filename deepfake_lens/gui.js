@@ -327,7 +327,8 @@
         function invisibleOrSpace(ch) {
             const code = ch.codePointAt(0);
             // R19-8: U+2800 (renders blank) and private-use characters (\p{Co}) too — as result_text.
-            return (/\p{Zs}/u.test(ch) && ch !== ' ') || code === 0x2800 || /\p{Co}/u.test(ch)
+            // R20-8: and unassigned code points / noncharacters (\p{Cn}).
+            return (/\p{Zs}/u.test(ch) && ch !== ' ') || code === 0x2800 || /\p{Co}|\p{Cn}/u.test(ch)
                 || DEFAULT_IGNORABLE_RANGES.some(([low, high]) => code >= low && code <= high);
         }
 

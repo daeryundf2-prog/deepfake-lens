@@ -302,13 +302,20 @@ def _invisible_or_space(char: str) -> bool:
     R19-8 (round 19): also U+2800 BRAILLE PATTERN BLANK (category So, renders as
     a blank: "a\u2800b.jpg" looked like "a b.jpg") and private-use characters
     (category Co — no standard glyph; U+E000…, U+F0000…).
+
+    R20-8 (round 20): and unassigned code points and noncharacters
+    (category Cn — no glyph either: names with U+0378, U+FDD0 or U+FFFE
+    were shown as they are). Which code points are unassigned depends on the
+    Unicode version of the runtime (Python's ``unicodedata``, the browser's
+    Cn property in gui.js); a code point assigned in one and not the other is
+    escaped by one only.
     """
     code = ord(char)
     category = unicodedata.category(char)
     return (
         (category == "Zs" and char != " ")
         or code == BRAILLE_PATTERN_BLANK
-        or category == "Co"
+        or category in ("Co", "Cn")
         or any(low <= code <= high for low, high in DEFAULT_IGNORABLE_RANGES)
     )
 
