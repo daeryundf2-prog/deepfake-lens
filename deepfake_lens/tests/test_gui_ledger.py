@@ -54,6 +54,7 @@ def _helpers() -> str:
         _section(source, "        /* ── verdict vocabulary", "        /* ── views"),
         _function(source, "evItemHtml"),
         _function(source, "undeterminedCounts"),
+        _function(source, "undeterminedSplitText"),
         _section(source, "        // Evidence-bearing rows first", "        function filteredResults("),
         _function(source, "skippedHtml"),
     ])
@@ -169,6 +170,21 @@ class LedgerReasonTest(unittest.TestCase):
         assert isinstance(out, list)
         self.assertEqual(out[0], {"cue": 1, "c2pa": 0, "none": 1, "failed": 1, "reference": 1})
         self.assertEqual(out[1], ["z-cue.png", "b-failed.png", "a-plain.png", "c.txt"])
+
+    def test_split_order_and_overlap_match_the_limit_line(self) -> None:
+        """GUI-REV3 J-9: the headline split is in the ledger's order and says the cue/failed overlap."""
+        cue_failed = _row(evidence=[{"kind": "deterministic", "direction": "synthetic", "strength": "moderate", "title": "단서", "detail": ""}],
+                          coverage=[{"check": "metadata", "status": "failed", "reason": "잘림"}])
+        failed = _row(coverage=[{"check": "metadata", "status": "failed", "reason": "잘림"}])
+        plain = _row()
+        out = _run(
+            f"results = {json.dumps([plain, failed, cue_failed], ensure_ascii=False)}.map(function (item) {{ return {{item: item}}; }});\n"
+            "console.log(JSON.stringify([undeterminedSplitText(), reportLimitLines(), results.slice().sort(byVerdict).map(function (e) { return undeterminedKind(e.item); })]));"
+        )
+        assert isinstance(out, list)
+        self.assertEqual(out[0], "단서 있음 1(검사 실패가 겹친 1개 포함) · 검사 실패 1 · 근거 없음 1")
+        self.assertIn("검사가 실패한 파일 2개(그중 단서가 있는 1개) — 해당 파일은 판단 불가", out[1])
+        self.assertEqual(out[2], ["cue", "failed", "none"])
 
     def test_report_limits_come_from_the_scan(self) -> None:
         """GUI-REV G-9(c): the preview never says "특이 사항 없음" while thresholds are in-sample."""

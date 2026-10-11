@@ -569,7 +569,8 @@
         // not confirmed), failed, reference, none. The row label shows every
         // aspect that applies ("단서 1건 · 검사 실패").
         const UNDET_KINDS = { cue: '단서 있음', c2pa: '확인 안 된 기록', none: '근거 없음', failed: '검사 실패', reference: '참고 전용' };
-        const UNDET_SPLIT = ['cue', 'c2pa', 'none', 'failed', 'reference'];
+        // GUI-REV3 J-9: one order everywhere — headline, strip and ledger sort.
+        const UNDET_SPLIT = ['cue', 'c2pa', 'failed', 'none', 'reference'];
         function cueEvidence(r) {
             return ((r && r.evidence) || []).filter(e => e.kind === 'deterministic' && e.direction !== 'neutral');
         }
@@ -763,7 +764,8 @@
             if (thr.in_sample) lines.push('판정 임계값은 적합에 쓴 같은 표본에서 평가된 값(in-sample)이라 감정 근거가 아님');
             if (thr.provisional || thr.source === 'builtin_defaults') lines.push('판정 임계값은 미측정 잠정값');
             const failed = results.filter(e => failedChecks(e.item).length).length;
-            if (failed) lines.push(`검사가 실패한 파일 ${failed}개 — 해당 파일은 판단 불가`);
+            const failedCue = results.filter(e => failedChecks(e.item).length && cueEvidence(e.item.result).length).length;
+            if (failed) lines.push(`검사가 실패한 파일 ${failed}개` + (failedCue ? `(그중 단서가 있는 ${failedCue}개)` : '') + ' — 해당 파일은 판단 불가');
             if (results.some(e => (e.item.result || {}).grade === 'reference')) lines.push(TEXT_LEGAL_LIMITATION);
             const partial = partialResultNote(lastProvenance.summary);
             if (partial) lines.push(partial);
@@ -1394,6 +1396,14 @@
             results.forEach(e => { if (itemBand(e) === 'undetermined') kinds[undeterminedKind(e.item)]++; });
             return kinds;
         }
+        // J-9: a cue row whose check also failed is counted once (as 단서 있음) and the
+        // overlap is said, so the split adds up to the "검사가 실패한 파일 n개" limit line.
+        function undeterminedSplitText() {
+            const kinds = undeterminedCounts();
+            const overlap = results.filter(e => itemBand(e) === 'undetermined' && undeterminedKind(e.item) === 'cue' && failedChecks(e.item).length).length;
+            return UNDET_SPLIT.filter(k => kinds[k]).map(k => `${UNDET_KINDS[k]} ${kinds[k]}` +
+                (k === 'cue' && overlap ? `(검사 실패가 겹친 ${overlap}개 포함)` : '')).join(' · ');
+        }
 
         function renderSummary() {
             const b = bandCounts();
@@ -1404,8 +1414,7 @@
                 : `${n}개 중 결론 근거를 찾은 파일은 없습니다.`;
             const sub = [];
             // G-3: 판단 불가 is split by why — never all called "근거가 없어".
-            const kinds = undeterminedCounts();
-            const split = UNDET_SPLIT.filter(k => kinds[k]).map(k => `${UNDET_KINDS[k]} ${kinds[k]}`).join(' · ');
+            const split = undeterminedSplitText();
             if (b.undetermined) sub.push(`${found ? '나머지 ' : ''}${b.undetermined}개는 판단 불가(${split})입니다 — <strong>원본이라는 뜻이 아닙니다.</strong>`);
             if (b.other) sub.push(`${b.other}개는 분석하지 못했습니다.`);
             $('sum-sub').innerHTML = sub.join(' ');
@@ -1453,7 +1462,7 @@
         // Rows are told apart by their path in the scanned folder (two subfolders may hold 00.png).
         const byName = (a, b) => String(a.item.path || a.item.name || '').localeCompare(String(b.item.path || b.item.name || ''), 'ko');
         // G-2: inside 판단 불가, rows with cues come before rows without evidence.
-        const UNDET_ORDER = { cue: 0, c2pa: 1, failed: 2, none: 3, reference: 4 };
+        const UNDET_ORDER = Object.fromEntries(UNDET_SPLIT.map((kind, index) => [kind, index]));
         const rank = e => BAND_ORDER[itemBand(e)] * 10 + (itemBand(e) === 'undetermined' ? UNDET_ORDER[undeterminedKind(e.item)] : 0);
         const byVerdict = (a, b) => (rank(a) - rank(b)) || byName(a, b);
         function filteredResults() {
