@@ -1409,6 +1409,7 @@
             changedInfo = new Map();
             resultsGeneration += 1;  // K-1: earlier export responses no longer apply
             clearExportRefusals();
+            renderExportAlert();
             // H-8: case fields typed before the first scan belong to it.
             if (!caseFolder && caseHasValues()) confirmCaseFolder();
             renderResults();
@@ -2261,6 +2262,8 @@
         function reportChecks(sel) {
             const out = [];
             if (!results.length) out.push({ tag: 'req', text: '검사 결과가 없습니다. 먼저 폴더를 검사하십시오.', act: ['검사 화면으로', () => navigate('scan')] });
+            // K-2: files changed since the scan block the signed formats until a rescan.
+            if (changedPaths.size) out.push({ tag: 'req', text: `검사 뒤 바뀐 파일 ${changedPaths.size}개(다시 검사 필요) — 서버가 내보내기를 거부했습니다.`, act: ['다시 검사', rescanFolder] });
             if (results.length && caseUnconfirmed()) {
                 const earlier = caseFolder.startsWith('root:') ? displayName(caseFolder.slice(5).split(/[\\/]/).filter(Boolean).pop() || caseFolder.slice(5)) : '올린 파일';
                 out.push({ tag: 'req', text: `사건 정보는 다른 검사(${earlier})에서 입력되었습니다 — 이 폴더의 사건이 맞는지 확인하십시오.`, act: ['이 폴더의 사건이 맞음', () => { confirmCaseFolder(); renderReport(); }] });
@@ -2311,6 +2314,7 @@
         function exportBlockReason(kind, sel) {
             if (scanBusy) return '새 검사가 진행 중입니다 — 끝난 뒤 내보내십시오. 지금 화면의 결과는 이전 검사입니다.';
             if (!results.length) return '검사 결과가 없습니다.';
+            if (changedPaths.size) return `검사 뒤 바뀐 파일 ${changedPaths.size}개 — 다시 검사하기 전에는 서명 형식을 내보낼 수 없습니다.`;
             if ((kind === 'evidence' || kind === 'pdf') && caseUnconfirmed()) return '사건 정보가 이 폴더의 것인지 먼저 확인하십시오(확인 목록).';
             if (kind === 'evidence' && !sel.length) return '증거설명서의 서증으로 넣을 파일을 고르십시오.';
             if ((kind === 'evidence' || kind === 'pdf') && pdfAvailable === false) return 'PDF(증거설명서·감정 보고서)는 PDF 엔진(pymupdf)이 설치되어 있지 않아 만들 수 없습니다.';
@@ -2420,8 +2424,9 @@
             }
             const lines = list => list.map(line => `<p>${docHtml(line)}</p>`).join('');
             const head = (body.table_headers || []).map(h => `<th scope="col">${docHtml(h)}</th>`).join('');
-            const rows = (body.entries || []).map(e => `<tr data-exhibit="${docHtml(e.exhibit_no)}" data-path="${shown(e.file_path)}">` +
-                `<td>${docHtml(e.exhibit_no)}</td><td>${docHtml(e.document_name)}</td><td>${docHtml(e.author_date)}</td><td class="a4-purpose">${docHtml(e.purpose_of_proof)}</td></tr>`).join('');
+            const flag = e => changedPaths.has(String(e.file_path)) ? '<br><span class="a4-flag">(검사 뒤 바뀜 — 내보낼 수 없음)</span>' : '';
+            const rows = (body.entries || []).map(e => `<tr data-exhibit="${docHtml(e.exhibit_no)}" data-path="${shown(e.file_path)}"${changedPaths.has(String(e.file_path)) ? ' class="a4-changed"' : ''}>` +
+                `<td>${docHtml(e.exhibit_no)}${flag(e)}</td><td>${docHtml(e.document_name)}</td><td>${docHtml(e.author_date)}</td><td class="a4-purpose">${docHtml(e.purpose_of_proof)}</td></tr>`).join('');
             const boxes = (body.boxes || []).map(([heading, boxLines]) => `<section class="a4-box"><div class="a4-h">${docHtml(heading)}</div>${lines(boxLines)}</section>`).join('');
             return `<div class="a4-top"><span>미리보기 — 서명 전</span><span>${submitterSide() ? '서버의 증거설명서 서식' : NO_SIDE + ' — 의뢰 측을 고르면 갑/을과 제출 문구가 정해집니다'}</span></div>` +
                 `<div class="a4-title">${shown(body.title)}</div>` +
@@ -2496,7 +2501,33 @@
             changedPaths = new Set(rows.map(row => String(row.path)));
             changedInfo = new Map(rows.map(row => [String(row.path), changeText(row, itemByPath(String(row.path)))]));
             if (results.length) renderList();
+            if (currentView === 'report') renderReport();  // the checklist above the box first
+            renderExportAlert();
         }
+        // GUI-REV4 K-2: the refusal is said next to the export buttons (role=alert), where
+        // the examiner pressed — the top error region is off screen there.
+        function renderExportAlert() {
+            const box = $('export-alert');
+            box.hidden = changedPaths.size === 0;
+            if (box.hidden) return;
+            $('export-alert-text').textContent = `검사 뒤 바뀐 파일 ${changedPaths.size}개 — 내보내지 않았습니다. 폴더를 다시 검사하십시오.`;
+            const list = $('export-alert-list');
+            list.innerHTML = '';
+            const paths = [...changedPaths];
+            paths.slice(0, 5).forEach(path => {
+                const li = document.createElement('li');
+                li.textContent = displayName(path) + ' — ' + (changedInfo.get(path) || '바뀜');
+                list.appendChild(li);
+            });
+            if (paths.length > 5) {
+                const li = document.createElement('li');
+                li.textContent = `외 ${paths.length - 5}개`;
+                list.appendChild(li);
+            }
+            // Brought into view where the export button was pressed (no focus move).
+            if (currentView === 'report' && box.getClientRects().length) box.scrollIntoView({ block: 'nearest' });
+        }
+        $('export-alert-rescan').addEventListener('click', () => rescanFolder());
         function rescanFolder() {
             if (lastScanRoot) $('folder-path').value = lastScanRoot;
             // GUI-REV4 K-3: the focus target goes with the navigation — focusing after it lost

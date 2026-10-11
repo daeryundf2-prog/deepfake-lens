@@ -540,7 +540,19 @@ def main() -> int:
                 page.get_by_role("button", name="이 폴더의 사건이 맞음").click()
             victim = sorted(mutable.iterdir())[0]
             victim.write_bytes(victim.read_bytes() + b"\nchanged after the scan")
+            # GUI-REV4 K-2: at 1366×768, with the export buttons scrolled into view, the
+            # refusal shows next to them (role=alert) — not only in the top error region.
+            page.set_viewport_size({"width": 1366, "height": 768})
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             page.click("#exp-signed")
+            page.wait_for_selector("#export-alert:not([hidden])", timeout=120_000)
+            in_view = page.evaluate("(() => { const r = document.getElementById('export-alert').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; })()")
+            assert in_view, "the refusal next to the export buttons is not in view"
+            assert page.get_attribute("#export-alert", "role") == "alert"
+            assert victim.name in page.locator("#export-alert").inner_text()
+            assert "검사 뒤 바뀐 파일 1개(다시 검사 필요)" in page.locator("#report-checks").inner_text()
+            assert page.get_attribute("#exp-signed", "aria-disabled") == "true", "the signed formats wait for the rescan"
+            page.set_viewport_size({"width": 1440, "height": 900})
             page.wait_for_selector("#error-region .err-item:has-text('검사 뒤 바뀐 파일')", timeout=120_000)
             refused = page.locator("#error-region .err-item", has_text="검사 뒤 바뀐 파일").last
             assert victim.name in refused.inner_text(), refused.inner_text()

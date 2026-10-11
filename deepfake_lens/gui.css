@@ -549,3 +549,8 @@ select.field { padding-right: 8px; }
 .a4 .a4-sign { margin-top: 8px; color: #5C6067; font-size: 10px; }
 .row.row-changed { box-shadow: inset 4px 0 0 var(--manip); }
 .row.row-changed .row-reason { color: var(--manip); font-weight: 600; }
+.export-alert { margin-top: 10px; padding: 12px 14px; border: 2px solid var(--manip); border-radius: 4px; background: var(--panel); display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.export-alert .t { font-weight: 700; color: var(--manip); }
+.export-alert ul { padding-left: 18px; font-size: 14px; }
+.a4 .a4-changed td { background: #FBE9E7; }
+.a4 .a4-flag { color: #B3261E; font-weight: 700; }
