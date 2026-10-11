@@ -599,8 +599,21 @@
         function decisiveNotRun(r) {
             return ((r && r.coverage) || []).filter(c => c.status === 'skipped' && DECISIVE_CHECKS.includes(c.check) && !SCOPE_REASON.test(String(c.reason || '')));
         }
+        // GUI-REV3 J-2: a duplicate row (dedupe) is not analyzed itself — it shows the
+        // conclusion of the row it duplicates, so a copy of a manipulated file is never
+        // just "중복". (Its strip group stays 분석 못 함, as the scan summary counts it.)
+        let originIndex = { list: null, map: new Map() };
+        function originOf(item) {
+            if (!item || !item.duplicate_of) return null;
+            if (originIndex.list !== results) {
+                originIndex = { list: results, map: new Map(results.map(e => [e.item.path, e.item])) };
+            }
+            return originIndex.map.get(item.duplicate_of) || null;
+        }
         function shortVerdict(item) {
             const v = verdictOf(item);
+            const origin = item.status === 'duplicate' ? originOf(item) : null;
+            if (origin) return '분석 못 함 — 중복 · 원본: ' + VERDICT_SHORT[verdictOf(origin)];
             if (v === 'other') return '분석 못 함 — ' + (STATUS_LABELS[item.status] || '기타');
             if (v === 'undetermined') return '판단 불가 — ' + undeterminedAspects(item).join(' · ');
             return VERDICT_SHORT[v];
@@ -618,7 +631,10 @@
             const r = item.result;
             const v = verdictOf(item);
             if (v === 'other' || !r) {
-                if (item.status === 'duplicate' && item.duplicate_of) return '같은 내용의 파일: ' + item.duplicate_of;
+                if (item.status === 'duplicate' && item.duplicate_of) {
+                    const origin = originOf(item);
+                    return '같은 내용의 파일: ' + item.duplicate_of + (origin ? ' — 원본 결론: ' + shortVerdict(origin) : '');
+                }
                 return item.error || STATUS_LABELS[item.status] || '분석하지 않음';
             }
             if (v === 'manipulation_evidence' || v === 'authenticity_evidence') {
@@ -2213,6 +2229,10 @@
                 // GUI-REV2 H-4: say which appendix rows carry more than a verdict.
                 const appendix = results.filter(e => !sel.includes(e) && e.item.source !== 'upload' && itemBand(e) === 'undetermined');
                 const cueRows = appendix.filter(e => cueEvidence(e.item.result).length).length;
+                // J-2: duplicates of a manipulated file that go to the appendix.
+                const dupManip = results.filter(e => !sel.includes(e) && e.item.source !== 'upload' && e.item.status === 'duplicate' &&
+                    originOf(e.item) && verdictOf(originOf(e.item)) === 'manipulation_evidence').length;
+                if (dupManip) out.push({ tag: 'warn', text: `부록으로 가는 중복 행 중 조작·생성 근거 있음 ${dupManip}개 — 원본과 내용이 같은 사본입니다. 서증으로 넣으려면 분석 못 함 칸을 고르십시오.` });
                 const failedRows = appendix.filter(e => failedChecks(e.item).length).length;
                 if (cueRows || failedRows) out.push({ tag: 'warn', text: `부록으로 가는 판단 불가 행 중 단서 ${cueRows}개 · 검사 실패 ${failedRows}개 — 부록에는 판단 불가의 종류와 한 줄 요약만 실립니다. 서증으로 넣으려면 판단 불가 칸을 고르십시오.`, act: ['판단 불가 넣기', () => { $('inc-undet').checked = true; groupsTouched = true; renderReport(); $('inc-undet').focus(); }] });
             }

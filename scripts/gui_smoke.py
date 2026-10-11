@@ -473,6 +473,25 @@ def main() -> int:
                 assert "다른 검사" in page.locator("#report-checks").inner_text(), f"upload {index}: the case fields of another scope must be confirmed"
                 page.get_by_role("button", name="이 폴더의 사건이 맞음").click()
 
+            # 6d. GUI-REV3 J-2: with "같은 내용의 파일은 한 번만 검사", a duplicate row shows its
+            #     original's conclusion, and duplicates of a manipulated file going to the
+            #     appendix are named in the checklist. (The signed export re-derives the
+            #     rows; its duplicate handling is the phase-0 R19-13 fix, not compared here.)
+            page.evaluate("location.hash = '#/scan'")
+            page.fill("#folder-path", prefilled)
+            page.evaluate("document.getElementById('opt-recursive').checked = true; document.getElementById('opt-dedupe').checked = true")
+            page.click("#analyze-btn")
+            page.wait_for_function("() => scanBusy === false && currentView === 'ledger'", timeout=180_000)
+            page.evaluate("document.getElementById('opt-dedupe').checked = false")
+            duplicates = page.evaluate("results.filter(e => e.item.status === 'duplicate' && originOf(e.item)).map(e => [shortVerdict(e.item), verdictOf(originOf(e.item))])")
+            for short, origin in duplicates:
+                assert "원본:" in short, short
+            dup_manip = sum(1 for _, origin in duplicates if origin == "manipulation_evidence")
+            page.evaluate("location.hash = '#/report'")
+            page.wait_for_function("() => currentView === 'report'")
+            if dup_manip:
+                assert f"부록으로 가는 중복 행 중 조작·생성 근거 있음 {dup_manip}개" in page.locator("#report-checks").inner_text()
+
             # 7. CSP/console errors: none tolerated. No request leaves the local server
             #    (fonts are local stacks; nothing is fetched from the network).
             csp = [e for e in console_errors if "Content Security Policy" in e or "Refused" in e]

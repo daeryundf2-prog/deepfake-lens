@@ -185,6 +185,18 @@ class LedgerReasonTest(unittest.TestCase):
         self.assertEqual(out[1], ["기록된 검사 한계 없음 — 결론은 파일에 남은 기록에만 근거함"])
         self.assertNotIn("특이 사항 없음", json.dumps(out, ensure_ascii=False))
 
+    def test_a_duplicate_shows_its_originals_conclusion(self) -> None:
+        """GUI-REV3 J-2: a dedupe duplicate of a manipulated file is never just "중복"."""
+        original = _row("manipulation_evidence", evidence=[{"kind": "deterministic", "direction": "synthetic", "strength": "strong", "title": "생성 도구 메타데이터", "detail": ""}])
+        original["path"] = "a_dalle.jpg"
+        duplicate = {"path": "b_dalle_copy.jpg", "name": "b_dalle_copy.jpg", "kind": "image", "status": "duplicate", "duplicate_of": "a_dalle.jpg", "result": None}
+        out = _run(
+            f"results = {json.dumps([original, duplicate], ensure_ascii=False)}.map(function (item) {{ return {{item: item}}; }});\n"
+            "console.log(JSON.stringify([shortVerdict(results[1].item), rowReason(results[1].item), verdictOf(results[1].item)]));"
+        )
+        self.assertEqual(out, ["분석 못 함 — 중복 · 원본: 조작·생성 근거 있음",
+                               "같은 내용의 파일: a_dalle.jpg — 원본 결론: 조작·생성 근거 있음", "other"])
+
     def test_skipped_checks_are_grouped_by_reason_and_every_name_stays(self) -> None:
         coverage = [{"check": f"model:{name}", "status": "skipped", "reason": f"모델 실행 불가: {name}: {GATE}"} for name in MODELS]
         coverage += [{"check": check, "status": "skipped", "reason": "비활성화(심층 신호 검사를 켜지 않음)"} for check in ("face_manipulation", "inpaint")]
