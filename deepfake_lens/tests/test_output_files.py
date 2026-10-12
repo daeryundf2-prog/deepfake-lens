@@ -173,6 +173,20 @@ class SignalDuringWriteTest(unittest.TestCase):
                     self.assertEqual(self._interrupt(signum, argv, out, tmp), -signum)
                     self.assertEqual(sorted(os.listdir(out)), [])  # no report, no temp file
 
+    def test_the_docs_say_which_signals_are_covered(self) -> None:
+        """R21-8 (round 21): R20-6's docs and commit listed exactly what leaves the temp file — "SIGKILL, … ignored,
+        … another Python handler" — and left out every other terminating signal: SIGQUIT (Ctrl-\\) and SIGUSR1
+        during a write left ``.<name>.<pid>.<id>.tmp`` and the session folder in all 7 commands the verifier tried."""
+        from deepfake_lens.native_path import CLEANUP_SIGNALS
+
+        text = (REPO / "docs" / "deepfake-lens-cli.md").read_text(encoding="utf-8")
+        [line] = [line for line in text.splitlines() if "Only SIGTERM, SIGHUP and SIGINT (Windows: SIGBREAK) are covered" in line]
+        self.assertEqual(set(CLEANUP_SIGNALS), {"SIGTERM", "SIGHUP", "SIGINT", "SIGBREAK"})
+        sentence = line[line.index("Only SIGTERM"):]
+        for name in ("SIGKILL", "SIGQUIT", "SIGUSR1", "SIGUSR2", "SIGALRM"):
+            self.assertIn(name, sentence.split("leaves the temp file")[0])
+            self.assertNotIn(name, CLEANUP_SIGNALS)
+
     def test_the_tracked_temp_is_removed_by_the_shutdown_cleanup(self) -> None:
         from deepfake_lens import native_path
 

@@ -275,3 +275,18 @@ class UnknownArgumentUsageTest(unittest.TestCase):
         # Options before a folder (no command) are still the default scan; the R19-9 rule for unknown options holds.
         code, err = self._run(["--recursive", "/nonexistent-r20-9"])
         self.assertIn("폴더를 찾을 수 없습니다", err)
+
+    def test_help_names_a_command_or_is_an_error(self) -> None:
+        """R21-9 (round 21): `help bogus` printed the top-level help with exit 0 (a typo ended as a success), and
+        `--verbose help` was a scan of the folder "help" ("폴더를 찾을 수 없습니다: help")."""
+        code, err = self._run(["help", "bogus"])
+        self.assertEqual(code, 2, err)
+        self.assertIn("deepfake-lens: 오류: 인수 <명령>: 허용되지 않은 값 'bogus'", err)
+        for argv, usage in ((["--verbose", "help"], "사용법: deepfake-lens [-h] <명령>"), (["--verbose", "help", "scan"], "사용법: deepfake-lens scan"),
+                            (["help"], "사용법: deepfake-lens [-h] <명령>"), (["help", "doctor"], "사용법: deepfake-lens doctor")):
+            out = io.StringIO()
+            with self.subTest(argv=argv), contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    main(argv)
+            self.assertEqual(caught.exception.code, 0)
+            self.assertTrue(out.getvalue().startswith(usage), out.getvalue()[:200])

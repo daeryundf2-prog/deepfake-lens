@@ -251,8 +251,27 @@ class OneWorkerPerScopeTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {**variables, "OMP_NUM_THREADS": "3"}, clear=True), \
                 mock.patch.object(shutdown, "start_tracked", start), self.assertRaises(OSError):
             audio_worker._Worker()
+        # R21-2 (round 21): the operator's value was kept ("3" here) and no cache key recorded it — a worker's
+        # features then depended on it (the last float32 digits of an MP4's MFCC standard deviations, 1 thread vs
+        # 4). A worker now always runs its numeric libraries on one thread.
         self.assertEqual({name: seen[name] for name in audio_worker.WORKER_THREAD_ENV},
-                         {"OMP_NUM_THREADS": "3", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "NUMBA_NUM_THREADS": "1"})
+                         {"OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "NUMBA_NUM_THREADS": "1"})
+
+    @unittest.skipUnless(HAVE_LIBROSA, "librosa not installed")
+    def test_an_operators_thread_count_does_not_change_a_workers_features(self) -> None:
+        """R21-2 (round 21): the same file's features with OMP_NUM_THREADS=4 set by the operator and without it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = Path(tmp, "tone.wav")
+            _write_tone(wav, seconds=3, hz=211.0)
+            replies = []
+            for value in ("4", None):
+                variables = {name: value for name, value in os.environ.items() if name not in audio_worker.WORKER_THREAD_ENV}
+                if value is not None:
+                    variables.update({name: value for name in audio_worker.WORKER_THREAD_ENV})
+                with mock.patch.dict(os.environ, variables, clear=True):
+                    replies.append(audio_worker.extract_features(str(wav), segment_seconds=5))
+        self.assertIsNotNone(replies[0].get("features"))
+        self.assertEqual(json.dumps(replies[0], sort_keys=True), json.dumps(replies[1], sort_keys=True))
 
     def test_outside_a_scope_a_worker_serves_one_request(self) -> None:
         started, counting = self._counting()
@@ -397,6 +416,96 @@ class FramedProtocolTest(unittest.TestCase):
             self.assertEqual(shutdown.running_children(), [])
             self.assertTrue(marker.exists())  # the worker did write to its fd 1 before the ready line
         self.assertEqual(reasons, [f"ValueError: stub decode {name}" for name in names])
+
+
+class StartUpFramingTest(unittest.TestCase):
+    """R21-3 (round 21): start-up output on the worker's fd 1 *without a newline* ("partial line without newline",
+    then the ready line on the same line) made the ready line unreadable. The request had already been sent, so the
+    worker's reply was skipped as start-up output as well and the parent waited 600 s per file for another line —
+    one WAV file took 603 s and its check was "NativeCrashError: … 비정상 종료했습니다(종료 코드 0)". The ready marker
+    is now found in the byte stream, before any request is sent, within its own short time limit; a worker that never
+    sends it is a start-up error (:class:`audio_worker.WorkerStartError`), never a native crash."""
+
+    _fake = FramedProtocolTest._fake
+
+    def test_a_ready_marker_after_output_without_a_newline_is_found(self) -> None:
+        worker = self._fake(b'partial line without newline{"ready": "t0k"}\n{"missing": "x", "token": "t0k", "id": 1}\n', ready=False)
+        self.assertEqual(worker.ask({"path": "a"}, 5), {"missing": "x"})
+
+    def test_no_request_is_sent_before_the_ready_marker(self) -> None:
+        worker = self._fake(b"partial line without newline", ready=False)
+        with self.assertRaises(audio_worker.WorkerStartError) as caught:
+            worker.ask({"path": "a"}, 5)
+        self.assertEqual(worker.proc.stdin.getvalue(), b"")
+        self.assertIn("준비 신호", str(caught.exception))
+        self.assertIsInstance(caught.exception, audio_worker.WorkerProtocolError)  # stopped and dropped like one
+
+    def test_a_worker_ended_by_the_shutdown_before_it_is_ready_is_the_shutdown(self) -> None:
+        worker = self._fake(b"partial", ready=False)
+        with mock.patch.object(shutdown, "active", return_value=True), self.assertRaises(shutdown.ShuttingDown):
+            worker.ask({"path": "a"}, 5)
+
+    def test_endless_output_without_a_newline_is_a_start_up_error(self) -> None:
+        worker = self._fake(b"x" * (audio_worker._MAX_STARTUP_BYTES + 10), ready=False)
+        with self.assertRaises(audio_worker.WorkerStartError):
+            worker.ask({"path": "a"}, 5)
+
+    def _stub_with_sitecustomize(self, tmp: str, body: str) -> str:
+        stub = _crash_stub(tmp)
+        (stub / "sitecustomize.py").write_text(
+            "import os, sys, time\n"
+            "if 'audio_worker' in ''.join(getattr(sys, 'orig_argv', [])):\n" + textwrap.indent(body, "    "),
+            encoding="utf-8",
+        )
+        return os.pathsep.join([str(stub), *filter(None, [os.environ.get("PYTHONPATH")])])
+
+    def _outcomes(self, pythonpath: str, names: list[str], tmp: str) -> list[str]:
+        outcomes: list[str] = []
+        for name in names:
+            Path(tmp, name).write_bytes(b"RIFF")
+        with mock.patch.dict(os.environ, {"PYTHONPATH": pythonpath}), audio_worker.worker_scope():
+            for name in names:
+                try:
+                    audio_worker.extract_features(str(Path(tmp, name)), segment_seconds=5)
+                except Exception as exc:  # noqa: BLE001
+                    outcomes.append(f"{type(exc).__name__}: {exc}")
+        self.assertEqual(shutdown.running_children(), [])
+        return outcomes
+
+    @unittest.skipIf(os.name != "posix", "POSIX signals")
+    def test_a_real_worker_with_output_without_a_newline_answers_each_file(self) -> None:
+        """The verifier's case (proto.sh): 4 WAV files did not finish in 150 s; each now gets its own reply at once."""
+        import time
+
+        names = ["s0.wav", "s1.wav", "s2.wav", "s3.wav"]
+        with tempfile.TemporaryDirectory() as tmp:
+            pythonpath = self._stub_with_sitecustomize(tmp, "os.write(1, b'partial line without newline')\n")
+            started = time.monotonic()
+            outcomes = self._outcomes(pythonpath, names, tmp)
+        self.assertEqual(outcomes, [f"ValueError: stub decode {name}" for name in names])
+        self.assertLess(time.monotonic() - started, 60)
+
+    @unittest.skipIf(os.name != "posix", "POSIX signals")
+    def test_a_worker_that_never_gets_ready_is_a_start_up_error_within_its_limit(self) -> None:
+        import time
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pythonpath = self._stub_with_sitecustomize(tmp, "os.write(1, b'partial line without newline')\ntime.sleep(120)\n")
+            started = time.monotonic()
+            with mock.patch.object(audio_worker, "WORKER_READY_TIMEOUT_SECONDS", 2.0):
+                [outcome] = self._outcomes(pythonpath, ["a.wav"], tmp)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertTrue(outcome.startswith("WorkerStartError: "), outcome)
+        self.assertIn("2초 안에 준비 신호가 오지 않음", outcome)
+
+    @unittest.skipIf(os.name != "posix", "POSIX signals")
+    def test_a_worker_that_ends_before_it_is_ready_is_not_a_native_crash(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pythonpath = self._stub_with_sitecustomize(tmp, "os.write(1, b'partial')\nos._exit(0)\n")
+            outcomes = self._outcomes(pythonpath, ["a.wav", "b.wav"], tmp)
+        for outcome in outcomes:
+            self.assertTrue(outcome.startswith("WorkerStartError: "), outcome)
+            self.assertIn("준비 신호 전에 끝남 — 종료 코드 0", outcome)
 
 
 class MultiFileCommandsRunInOneScopeTest(unittest.TestCase):

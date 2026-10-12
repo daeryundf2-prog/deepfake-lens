@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "2b798253e0a4a955c6156f6dd8f13147c3305018",
+    "head": "c43bc1180b0550f7e682046b5ab50baa54b002d8",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -3682,6 +3682,143 @@
       "new": "갭 목록 밖 항목 포함",
       "commits": [
         "2b79825"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R21-1",
+      "round": 21,
+      "source": "verify_round21.md",
+      "summary": "no text of a posted row is signed — a walk-limit folder row is excluded, a loop row is sig",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "4eaecc8"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R21-2",
+      "round": 21,
+      "source": "verify_round21.md",
+      "summary": "the audio worker always runs its numeric libraries on one thread, the scan process's threa",
+      "gaps": [
+        "G1",
+        "G11"
+      ],
+      "new": null,
+      "commits": [
+        "00318fb"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R21-3",
+      "round": 21,
+      "source": "verify_round21.md",
+      "summary": "a new audio worker's ready marker is found in its byte stream before any request is sent, ",
+      "gaps": [
+        "G1"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "e427a87"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R21-4",
+      "round": 21,
+      "source": "verify_round21.md",
+      "summary": "web and api-serve without --folder / --allow-root check their working folder like a named ",
+      "gaps": [
+        "G31"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "b4decf3"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R21-5",
+      "round": 21,
+      "source": "verify_round21.md",
+      "summary": "a posted row path must be the scan's own relative form and each row is posted once — \"./a.",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "fd8c3be"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R21-6",
+      "round": 21,
+      "source": "verify_round21.md",
+      "summary": "a single-file command's file folder is examined for the built-in tool folders too — HOME=/",
+      "gaps": [
+        "G31"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "27bd4c5"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R21-7",
+      "round": 21,
+      "source": "verify_round21.md",
+      "summary": "HANDOFF.md states no test or skip counts — it says where to read them and why the skip cou",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "3831b93"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R21-8",
+      "round": 21,
+      "source": "verify_round21.md",
+      "summary": "the docs and comments say that only SIGTERM, SIGHUP and SIGINT (SIGBREAK) clean up an outp",
+      "gaps": [
+        "G34"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "517f163"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R21-9",
+      "round": 21,
+      "source": "verify_round21.md",
+      "summary": "`help <not a command>` is the top-level error with exit 2 and `--verbose help` is help — a",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "8285bb0"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R21-10",
+      "round": 21,
+      "source": "사용자 결정(2026-10-12) — R21-4/R21-6 거부 대신 이동",
+      "summary": "HOME-derived tool folders that would be inside an examined folder are relocated outside ev",
+      "gaps": [
+        "G31"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "c43bc11"
       ],
       "used_in_commit_subjects": true
     }
@@ -9527,6 +9664,254 @@
         "R20-10: 갭 목록 밖 항목 포함"
       ],
       "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "2d053dd2bf907e33eab1bf571905ea11cebdcf32",
+      "short": "2d053dd",
+      "round": "20",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on 2b79825, round-20 IDs mapped (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "232c8d281f185b14f36e34a41af7bd19c10d6dbb",
+      "short": "232c8d2",
+      "round": "20",
+      "subject": "docs(phase0): round-21 verification findings (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "4eaecc868710499a57e7f21a236025b87386301b",
+      "short": "4eaecc8",
+      "round": "21",
+      "subject": "fix(report): R21-1 no text of a posted row is signed — a walk-limit folder row is excluded, a loop row is signed only when the server finds the loop, a duplicate row carries the scan's own reason (R21-1; Gaps: G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R21-1"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "fd8c3be4a5a480225751c6023989997f5f1f6bc3",
+      "short": "fd8c3be",
+      "round": "21",
+      "subject": "fix(report): R21-5 a posted row path must be the scan's own relative form and each row is posted once — \"./a.png\", \"sub/../a.png\", \"../<folder>/a.png\" and absolute aliases are 400, not signed as more rows of the same file (R21-5; Gaps: G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R21-5"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "e427a87b28d80d8472c21eee6ea67236c0ad794b",
+      "short": "e427a87",
+      "round": "21",
+      "subject": "fix(audio): R21-3 a new audio worker's ready marker is found in its byte stream before any request is sent, within 60 s — output without a newline no longer hangs each file for 600 s, and a worker that never gets ready is a WorkerStartError, not a NativeCrashError (R21-3; Gaps: G1, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R21-3"
+      ],
+      "gaps_named_in_subject": [
+        "G1"
+      ],
+      "gaps": [
+        "G1"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R21-3: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G1; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "00318fb05ce8f179626b54922c6b02794ee6a1f4",
+      "short": "00318fb",
+      "round": "21",
+      "subject": "fix(audio): R21-2 the audio worker always runs its numeric libraries on one thread, the scan process's thread variables are in the cache key, and the output-format generation is 9 — cold and warm scans give the same features (R21-2; Gaps: G1, G11)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R21-2"
+      ],
+      "gaps_named_in_subject": [
+        "G1",
+        "G11"
+      ],
+      "gaps": [
+        "G1",
+        "G11"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G1, G11",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "27bd4c5551624c6ccb554218bc997ad05f962fa2",
+      "short": "27bd4c5",
+      "round": "21",
+      "subject": "fix(cli): R21-6 a single-file command's file folder is examined for the built-in tool folders too — HOME=/E1 classify /E1/a.png is exit 2 instead of writing /E1/.cache/deepfake-lens/logs (R21-6; Gaps: G31, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R21-6"
+      ],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R21-6: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G31; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "b4decf337ce81f5edaa15526c63b0054c4d2b828",
+      "short": "b4decf3",
+      "round": "21",
+      "subject": "fix(cli): R21-4 web and api-serve without --folder / --allow-root check their working folder like a named read root — started in the home folder they are exit 2 instead of writing .cache/deepfake-lens into the folder they serve (R21-4; Gaps: G31, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R21-4"
+      ],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R21-4: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G31; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "8285bb08a1aa10af079d830a54bdeface7a0befd",
+      "short": "8285bb0",
+      "round": "21",
+      "subject": "fix(cli): R21-9 `help <not a command>` is the top-level error with exit 2 and `--verbose help` is help — a typo no longer ends as a success, and help is no longer a scan of a folder named \"help\" (R21-9; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R21-9"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R21-9: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "517f163654f40d4818065a686c592ee9a10a2896",
+      "short": "517f163",
+      "round": "21",
+      "subject": "fix(output): R21-8 the docs and comments say that only SIGTERM, SIGHUP and SIGINT (SIGBREAK) clean up an output write — SIGQUIT, SIGUSR1 and every other terminating signal leave the temp file and the session folder (R21-8; Gaps: G34, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R21-8"
+      ],
+      "gaps_named_in_subject": [
+        "G34"
+      ],
+      "gaps": [
+        "G34"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R21-8: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G34; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "3831b93259b6ff22f1331fcd7f38a51d357910f8",
+      "short": "3831b93",
+      "round": "21",
+      "subject": "docs(phase0): R21-7 HANDOFF.md states no test or skip counts — it says where to read them and why the skip count depends on whether the tree has git history; round 21 recorded (R21-7; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R21-7"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R21-7: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "c43bc1180b0550f7e682046b5ab50baa54b002d8",
+      "short": "c43bc11",
+      "round": "21",
+      "subject": "fix(cli): R21-10 HOME-derived tool folders that would be inside an examined folder are relocated outside every evidence path with one notice — classify ~/x.jpg, cd ~; deepfake-lens web, a HOME inside or a relative HOME run instead of exit 2 (R21-10; Gaps: G31, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R21-10"
+      ],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R21-10: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G31; 신규(스펙 외)",
       "gaps_source": "subject"
     }
   ]

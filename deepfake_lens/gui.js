@@ -2433,7 +2433,7 @@
                 boxes +
                 ((body.unsigned || []).length ? `<section class="a4-box">${lines(body.unsigned)}</section>` : '') +
                 `<div class="a4-signoff">${lines(body.signoff || [])}<p class="a4-court">${docHtml(body.court)}</p></div>` +
-                '<p class="a4-sign">서명은 내보낼 때 서버가 서명 키로 붙입니다(키가 없으면 "서명 없음"). 내보낼 때 서버가 파일을 다시 분석해, 검사 뒤 바뀌었거나 지워진 파일이 있으면 내보내기를 거부합니다(경로 중간의 폴더가 링크로 바뀐 파일도). 서버가 다시 분석할 수 없는 행(올린 파일, 검사 때 해시가 없던 행 등)은 서명 제외로 실립니다.</p>';
+                '<p class="a4-sign">서명은 내보낼 때 서버가 서명 키로 붙입니다(키가 없으면 "서명 없음"). 내보낼 때 서버가 파일을 다시 분석해, 검사 뒤 바뀌었거나 지워진 파일이 있으면 내보내기를 거부합니다(경로 중간의 폴더가 링크로 바뀐 파일도). 서버가 다시 분석할 수 없는 행(올린 파일, 검사 때 해시가 없던 행, 폴더 탐색 상한 행 등)은 서명 제외로 실립니다.</p>';
         }
 
         const EXPORT_SPECS = {
@@ -2551,7 +2551,7 @@
             box.hidden = exportWarnings.size === 0;
             if (box.hidden) return;
             $('export-warn-text').textContent = `이 검사의 행 ${exportWarnings.size}개가 서명 제외로 옮겨졌습니다(${[...exportWarnFormats].join(', ')}). ` +
-                '서버가 다시 분석할 수 없는 행입니다(예: 검사 때 해시가 없던, 링크로 바뀐 폴더 뒤의 행) — 다시 검사하면 지금의 폴더대로 다시 셉니다.';
+                '서버가 다시 분석·서명하지 않는 행입니다(사유는 행마다). 링크로 바뀐 폴더 뒤의 행이면 다시 검사하십시오. 폴더 탐색 상한 행은 다시 검사해도 같은 상한에 걸릴 수 있습니다.';
             const list = $('export-warn-list');
             list.innerHTML = '';
             const rows = [...exportWarnings];

@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..2b79825`(병합 커밋 제외, 커밋 280개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..c43bc11`(병합 커밋 제외, 커밋 292개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 262개 — 스펙 갭에 매핑 187개(그중 신규 사유 병기 63개), 신규(스펙 외)만 75개.
+요약: ID 272개 — 스펙 갭에 매핑 195개(그중 신규 사유 병기 68개), 신규(스펙 외)만 77개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -289,6 +289,16 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R20-8 | 20 | display_name escapes unassigned code points and noncharacters (category Cn) in Python and  | G30 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 5ab8d28 |
 | R20-9 | 20 | known options before a command name go after it — `--verbose scan X`, `--verbose doctor`,  | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 7543812 |
 | R20-10 | 20 | HANDOFF.md describes the round loop and where to read the record state instead of stating  | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 2b79825 |
+| R21-1 | 21 | no text of a posted row is signed — a walk-limit folder row is excluded, a loop row is sig | G30 |  | 4eaecc8 |
+| R21-2 | 21 | the audio worker always runs its numeric libraries on one thread, the scan process's threa | G1, G11 |  | 00318fb |
+| R21-3 | 21 | a new audio worker's ready marker is found in its byte stream before any request is sent,  | G1 | 신규(스펙 외): 갭 목록 밖 항목 포함 | e427a87 |
+| R21-4 | 21 | web and api-serve without --folder / --allow-root check their working folder like a named  | G31 | 신규(스펙 외): 갭 목록 밖 항목 포함 | b4decf3 |
+| R21-5 | 21 | a posted row path must be the scan's own relative form and each row is posted once — "./a. | G30 |  | fd8c3be |
+| R21-6 | 21 | a single-file command's file folder is examined for the built-in tool folders too — HOME=/ | G31 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 27bd4c5 |
+| R21-7 | 21 | HANDOFF.md states no test or skip counts — it says where to read them and why the skip cou | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 3831b93 |
+| R21-8 | 21 | the docs and comments say that only SIGTERM, SIGHUP and SIGINT (SIGBREAK) clean up an outp | G34 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 517f163 |
+| R21-9 | 21 | `help <not a command>` is the top-level error with exit 2 and `--verbose help` is help — a | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 8285bb0 |
+| R21-10 | 21 | HOME-derived tool folders that would be inside an examined folder are relocated outside ev | G31 | 신규(스펙 외): 갭 목록 밖 항목 포함 | c43bc11 |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -600,3 +610,15 @@ R18-14: ids[]의 갭 매핑을 커밋 제목·본문의 `Gaps:`에 맞췄다 —
 | 5ab8d28 | 20 | R20-8 | Gaps: G30; 신규(스펙 외) | subject | fix(report): R20-8 display_name escapes unassigned code points and noncharacters (category Cn) in Python and in gui.js — names with U+0378, U+FDD0 or U+FFFE are no longer shown as they are (R20-8; Gaps: G30, 신규) |
 | 7543812 | 20 | R20-9 | Gaps: 신규(스펙 외) | subject | fix(cli): R20-9 known options before a command name go after it — `--verbose scan X`, `--verbose doctor`, `--verbose corpus build …` and `help scan` are read by that command, not as a scan of a folder named like the command (R20-9; Gaps: 신규) |
 | 2b79825 | 20 | R20-10 | Gaps: 신규(스펙 외) | subject | docs(phase0): R20-10 HANDOFF.md describes the round loop and where to read the record state instead of stating it — nothing in it is made false by the round's records-only commit (R20-10; Gaps: 신규) |
+| 2d053dd | 20 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 2b79825, round-20 IDs mapped (WP-J; Gaps: G26, G27, G28) |
+| 232c8d2 | 20 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): round-21 verification findings (WP-J; Gaps: 신규) |
+| 4eaecc8 | 21 | R21-1 | Gaps: G30 | subject | fix(report): R21-1 no text of a posted row is signed — a walk-limit folder row is excluded, a loop row is signed only when the server finds the loop, a duplicate row carries the scan's own reason (R21-1; Gaps: G30) |
+| fd8c3be | 21 | R21-5 | Gaps: G30 | subject | fix(report): R21-5 a posted row path must be the scan's own relative form and each row is posted once — "./a.png", "sub/../a.png", "../<folder>/a.png" and absolute aliases are 400, not signed as more rows of the same file (R21-5; Gaps: G30) |
+| e427a87 | 21 | R21-3 | Gaps: G1; 신규(스펙 외) | subject | fix(audio): R21-3 a new audio worker's ready marker is found in its byte stream before any request is sent, within 60 s — output without a newline no longer hangs each file for 600 s, and a worker that never gets ready is a WorkerStartError, not a NativeCrashError (R21-3; Gaps: G1, 신규) |
+| 00318fb | 21 | R21-2 | Gaps: G1, G11 | subject | fix(audio): R21-2 the audio worker always runs its numeric libraries on one thread, the scan process's thread variables are in the cache key, and the output-format generation is 9 — cold and warm scans give the same features (R21-2; Gaps: G1, G11) |
+| 27bd4c5 | 21 | R21-6 | Gaps: G31; 신규(스펙 외) | subject | fix(cli): R21-6 a single-file command's file folder is examined for the built-in tool folders too — HOME=/E1 classify /E1/a.png is exit 2 instead of writing /E1/.cache/deepfake-lens/logs (R21-6; Gaps: G31, 신규) |
+| b4decf3 | 21 | R21-4 | Gaps: G31; 신규(스펙 외) | subject | fix(cli): R21-4 web and api-serve without --folder / --allow-root check their working folder like a named read root — started in the home folder they are exit 2 instead of writing .cache/deepfake-lens into the folder they serve (R21-4; Gaps: G31, 신규) |
+| 8285bb0 | 21 | R21-9 | Gaps: 신규(스펙 외) | subject | fix(cli): R21-9 `help <not a command>` is the top-level error with exit 2 and `--verbose help` is help — a typo no longer ends as a success, and help is no longer a scan of a folder named "help" (R21-9; Gaps: 신규) |
+| 517f163 | 21 | R21-8 | Gaps: G34; 신규(스펙 외) | subject | fix(output): R21-8 the docs and comments say that only SIGTERM, SIGHUP and SIGINT (SIGBREAK) clean up an output write — SIGQUIT, SIGUSR1 and every other terminating signal leave the temp file and the session folder (R21-8; Gaps: G34, 신규) |
+| 3831b93 | 21 | R21-7 | Gaps: 신규(스펙 외) | subject | docs(phase0): R21-7 HANDOFF.md states no test or skip counts — it says where to read them and why the skip count depends on whether the tree has git history; round 21 recorded (R21-7; Gaps: 신규) |
+| c43bc11 | 21 | R21-10 | Gaps: G31; 신규(스펙 외) | subject | fix(cli): R21-10 HOME-derived tool folders that would be inside an examined folder are relocated outside every evidence path with one notice — classify ~/x.jpg, cd ~; deepfake-lens web, a HOME inside or a relative HOME run instead of exit 2 (R21-10; Gaps: G31, 신규) |

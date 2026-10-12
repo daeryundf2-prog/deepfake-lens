@@ -147,6 +147,9 @@ WALK_LIMIT_REASON = "건너뜀: 탐색 상한 도달({limit}) — 이 폴더 이
 # The row of a folder the walk could not list (``on_error``); R20-1: also the
 # report re-analysis's row of a posted unreadable-folder row.
 UNREADABLE_FOLDER_ROW_REASON = "폴더를 읽을 수 없습니다: {reason}"
+# The error of a dedupe duplicate row (core); R21-1: also the report's server
+# row of a posted duplicate — never the posted ``error`` text.
+DUPLICATE_ROW_REASON = "중복 내용(동일 해시)"
 
 
 def _dir_identity(path: Path | str) -> tuple[int, int] | None:
@@ -827,7 +830,12 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 8: R19-8 — display_name escapes U+2800 (BRAILLE PATTERN BLANK) and
 #    private-use characters (category Co): a row named with them is shown
 #    "\\u2800" / "\\ue000" in every text rendering.
-OUTPUT_FORMAT_GENERATION = 8
+# 9: R21-2 — the audio worker's numeric libraries run on one thread (R20-2,
+#    always since R21-2): the last float32 digits of some MFCC standard
+#    deviations of a video's audio track differ from generation 8's
+#    multi-threaded extraction (verdicts unchanged); generation 8 rows
+#    replayed from a cache said what a cold scan no longer says.
+OUTPUT_FORMAT_GENERATION = 9
 
 
 def cache_extension(path: Path) -> str:
@@ -942,7 +950,25 @@ def dependency_tokens() -> list[str]:
     tokens.append(_cv2_token())
     for program in DEPENDENCY_PROGRAMS:
         tokens.append(f"prog:{program}:{_program_version(program)}")
+    tokens.append(thread_token())
     return tokens
+
+
+def thread_token() -> str:
+    """R21-2 (round 21): the scan process's numeric-library thread variables, in the cache key.
+
+    A float computed by OpenMP / OpenBLAS / MKL / numba code can differ in
+    its last digits with the thread count (the verifier: MFCC standard
+    deviations of an MP4's audio track, 1 thread vs 4). The audio worker
+    always runs with 1 (``audio_worker.WORKER_THREAD_ENV``); numeric code in
+    the scan process runs with what these variables say, so a row cached
+    under one setting is not replayed under another. Unset is ``-``.
+    """
+    import os
+
+    from .audio_worker import WORKER_THREAD_ENV
+
+    return "threads:" + ",".join(f"{name}={os.environ.get(name, '-')}" for name in WORKER_THREAD_ENV)
 
 
 # R19-1: a module file larger than this (a single compiled extension) is

@@ -56,6 +56,16 @@ check fails and the worker is stopped and never asked again. (One line of
 start-up output used to shift every later reply by one file: each file got
 the audio features of the file before it, with no warning.)
 
+R21-3 (round 21): the parent finds the ready marker in the byte stream —
+start-up output without a newline before it no longer hides it — and sends
+the first request only after it, within :data:`WORKER_READY_TIMEOUT_SECONDS`
+and :data:`_MAX_STARTUP_BYTES` / :data:`_MAX_STARTUP_LINES` of start-up
+output; a worker that does not send it is a :class:`WorkerStartError` (that
+file's check fails, the worker is stopped). The request used to be sent
+first, so the reply was skipped as start-up output too and each file waited
+:data:`WORKER_REQUEST_TIMEOUT_SECONDS` (600 s), then was reported as a native
+crash "(종료 코드 0)".
+
 A decode error raised in the worker is rebuilt in this process as an
 exception of the same class name, message, errno and file name, so
 ``failure_reason`` gives the reason an in-process extraction gave.
@@ -114,6 +124,12 @@ PROTOCOL_ERROR_MESSAGE = "오디오 특징 추출 작업자의 응답이 요청�
 # R20-3: start-up output tolerated before the ready line, and the longest reply line.
 _MAX_STARTUP_LINES = 64
 _MAX_REPLY_BYTES = 4 * 1024 * 1024
+# R21-3 (round 21): and at most this many bytes of it (output without a newline included).
+_MAX_STARTUP_BYTES = 64 * 1024
+# R21-3: how long a new worker may take to write its ready marker (it imports only this module before it).
+WORKER_READY_TIMEOUT_SECONDS = 60.0
+# R21-3: the reason of a worker that never wrote its ready marker (timed out, ended, too much output first).
+STARTUP_ERROR_MESSAGE = "오디오 특징 추출 작업자가 준비 신호를 보내지 않아 중단했습니다({detail}) — 이 검사만 실패로 기록했습니다"
 
 
 class NativeCrashError(RuntimeError):
@@ -126,6 +142,10 @@ class WorkerTimeoutError(RuntimeError):
 
 class WorkerProtocolError(RuntimeError):
     """R20-3: the worker's reply is not a framed answer to the request sent (the worker is stopped)."""
+
+
+class WorkerStartError(WorkerProtocolError):
+    """R21-3: the worker did not write its ready marker — timed out, ended first or wrote too much before it (stopped)."""
 
 
 # --- numba cache ------------------------------------------------------------
@@ -152,14 +172,15 @@ def _runtime_key() -> str:
 
 
 def shared_cache_root() -> Path | None:
-    """``~/.cache/deepfake-lens/numba/<runtime>`` — None when there is no absolute home folder."""
-    try:
-        home = Path.home()
-    except (RuntimeError, KeyError, OSError):
-        return None
-    if not home.is_absolute():
-        return None  # a relative HOME would put the cache into the working (evidence) folder
-    return home / ".cache" / "deepfake-lens" / "numba" / _runtime_key()
+    """``~/.cache/deepfake-lens/numba/<runtime>`` — None when there is no absolute home folder.
+
+    R21-10 (round 21): under the relocated tool base when the CLI moved it
+    (``native_path.tool_cache_base``).
+    """
+    from .native_path import tool_cache_base
+
+    base = tool_cache_base()  # None for a relative HOME: it would put the cache into the working (evidence) folder
+    return base / "numba" / _runtime_key() if base is not None else None
 
 
 def private_cache_dir() -> tuple[str, bool]:
@@ -331,6 +352,9 @@ def _native_log() -> IO[bytes] | None:
 
 
 class _Worker:
+    # R21-3: bytes read past the ready marker, served before the next read of the pipe.
+    _pending = b""
+
     def __init__(self) -> None:
         # The thread that started it: its supervisor dies with that thread
         # (PR_SET_PDEATHSIG), so only that thread may use it.
@@ -345,13 +369,19 @@ class _Worker:
         env = dict(os.environ)
         env[NUMBA_CACHE_ENV] = self.cache_dir
         # R20-2 (round 20): one worker extracts one file at a time (a scan gets its parallelism from
-        # one worker per thread), so its numeric libraries run one thread each unless the operator
-        # chose otherwise. With the default (a thread per core) every worker's OpenMP / OpenBLAS pool
-        # spun on all cores: a scan of 300 audio/video files used 190-220 s of CPU for 50 s of wall
-        # time (2130892, in-process: the same), and 4 workers made a scan 16-22 % slower than
-        # 2130892. The features are byte-identical (the 300-row comparison).
+        # one worker per thread), so its numeric libraries run one thread each. With the default (a
+        # thread per core) every worker's OpenMP / OpenBLAS pool spun on all cores: a scan of 300
+        # audio/video files used 190-220 s of CPU for 50 s of wall time (2130892, in-process: the
+        # same), and 4 workers made a scan 16-22 % slower than 2130892.
+        # R21-2 (round 21) correction: R20-2 said "the features are byte-identical (the 300-row
+        # comparison)". That is not true for every input: with one thread the last float32 digits
+        # of some MFCC standard deviations of an MP4's audio track differ from a multi-threaded run
+        # (the verifier: 8 of 300 rows, all MP4, verdicts equal). So the count is now always 1 — an
+        # operator's OMP_NUM_THREADS (which R20-2 kept, and which no cache key recorded) no longer
+        # changes a worker's features — and scan_cache.OUTPUT_FORMAT_GENERATION is 9, so no row
+        # cached before this change is replayed.
         for name in WORKER_THREAD_ENV:
-            env.setdefault(name, "1")
+            env[name] = "1"
         log = _native_log()
         try:
             self.proc = shutdown.start_tracked(
@@ -372,27 +402,82 @@ class _Worker:
 
     def _line(self) -> bytes:
         assert self.proc.stdout is not None
+        if self._pending:
+            pending = self._pending
+            end = pending.find(b"\n")
+            if end >= 0:
+                self._pending = pending[end + 1:]
+                return pending[:end + 1]
+            self._pending = b""
+            return pending + self.proc.stdout.readline(max(1, _MAX_REPLY_BYTES - len(pending)))
         return self.proc.stdout.readline(_MAX_REPLY_BYTES)
 
-    def _wait_ready(self) -> bool:
-        """R20-3: skip start-up output up to the ready line; False when the worker ended first."""
-        for _ in range(_MAX_STARTUP_LINES):
-            line = self._line()
-            if not line:
-                return False
-            if _parsed(line) == {"ready": self.token}:
-                self.ready = True
-                return True
-            logger.warning("audio feature worker: start-up output before the ready line skipped: %r", line[:200])
-        raise WorkerProtocolError(PROTOCOL_ERROR_MESSAGE.format(detail=f"준비 신호 전 출력 {_MAX_STARTUP_LINES}줄 초과"))
+    def _wait_ready(self, timeout: float) -> None:
+        """R20-3/R21-3: skip start-up output up to the ready marker, before any request is sent.
+
+        R21-3 (round 21): start-up output without a newline (``partial`` and
+        then the marker on the same line) made the ready line unreadable; the
+        request had already been sent, so the worker's reply was skipped as
+        start-up output too and the parent waited
+        :data:`WORKER_REQUEST_TIMEOUT_SECONDS` (600 s) per file for a line
+        that never came — then reported "NativeCrashError … (종료 코드 0)".
+        The marker ``{"ready": <token>}`` is now found anywhere in the byte
+        stream (no newline needed), at most :data:`_MAX_STARTUP_BYTES` bytes /
+        :data:`_MAX_STARTUP_LINES` lines after the start, within ``timeout``
+        seconds (the worker is stopped when it expires); the request is sent
+        only after it. Raises :class:`WorkerStartError` otherwise.
+        """
+        assert self.proc.stdout is not None
+        marker = json.dumps({"ready": self.token}).encode("ascii")
+        timer = threading.Timer(timeout, self._expire)
+        timer.daemon = True
+        timer.start()
+        buffer = b""
+        try:
+            while True:
+                at = buffer.find(marker)
+                if at >= 0:
+                    break
+                if len(buffer) > _MAX_STARTUP_BYTES or buffer.count(b"\n") > _MAX_STARTUP_LINES:
+                    raise WorkerStartError(STARTUP_ERROR_MESSAGE.format(
+                        detail=f"준비 신호 전 출력 {_MAX_STARTUP_LINES}줄 또는 {_MAX_STARTUP_BYTES // 1024} KiB 초과"))
+                try:
+                    stream: Any = self.proc.stdout  # a BufferedReader: read1 returns what has arrived (no newline needed)
+                    chunk = stream.read1(_MAX_STARTUP_BYTES)
+                except (OSError, ValueError):
+                    chunk = b""
+                if not chunk:
+                    if shutdown.active():
+                        raise shutdown.ShuttingDown()  # the process is ending: not this worker's fault
+                    if self.expired:
+                        detail = f"{timeout:.0f}초 안에 준비 신호가 오지 않음"
+                    else:
+                        try:
+                            code = self.proc.wait(timeout=5)
+                        except (subprocess.TimeoutExpired, AttributeError):
+                            code = None
+                        detail = f"준비 신호 전에 끝남 — {_crash_cause(code)}" if code is not None else "준비 신호 전에 출력이 닫힘"
+                    raise WorkerStartError(STARTUP_ERROR_MESSAGE.format(detail=detail))
+                buffer += chunk
+        finally:
+            timer.cancel()
+        startup, rest = buffer[:at], buffer[at + len(marker):]
+        self._pending = rest[1:] if rest.startswith(b"\n") else rest
+        if startup.strip():
+            logger.warning("audio feature worker: start-up output before the ready marker skipped: %r", startup[:200])
+        self.ready = True
 
     def ask(self, request: dict[str, Any], timeout: float) -> dict[str, Any] | None:
         """The reply, or None when the worker ended without one.
 
         R20-3: raises :class:`WorkerProtocolError` for a reply that is not
-        this request's framed answer — the caller stops the worker.
+        this request's framed answer — the caller stops the worker. R21-3: a
+        new worker's ready marker is awaited first (:meth:`_wait_ready`,
+        :class:`WorkerStartError`).
         """
         assert self.proc.stdin is not None and self.proc.stdout is not None
+        if not self.ready:
+            self._wait_ready(WORKER_READY_TIMEOUT_SECONDS)  # R21-3: before the request (raises WorkerStartError)
         self.next_id += 1
         request_id = self.next_id
         timer = threading.Timer(timeout, self._expire)
@@ -401,7 +486,7 @@ class _Worker:
         try:
             self.proc.stdin.write(json.dumps({**request, "id": request_id}, ensure_ascii=True).encode("ascii") + b"\n")
             self.proc.stdin.flush()
-            line = self._line() if self.ready or self._wait_ready() else b""
+            line = self._line()
         except (OSError, ValueError):
             line = b""
         finally:

@@ -1406,6 +1406,22 @@ REPORT_DUPLICATE_OF_INVALID = (
     "검사 결과 항목 「{path}」의 duplicate_of 「{target}」가 이 보고서에 게시된 원본 행이 아닙니다"
     "(자기 자신·게시되지 않은 행·다른 중복 행은 원본이 될 수 없습니다) — 폴더 검사 결과를 그대로 보내십시오"
 )
+# R21-1 (round 21): a posted folder row of the walk's limit ("건너뜀: 탐색 상한 도달(…)"). The server does not
+# repeat the scan's walk (20 000 folders, 300 s, --max-files + 100 000 files — a limit of the whole walk, the
+# clock included), so it cannot produce that row itself: the row is excluded (never signed), with this reason.
+# The posted reason text was signed as the server's row ("… 이 폴더에는 조작 파일이 없음을 서버가 확인했습니다").
+REPORT_ROW_WALK_LIMIT = (
+    "폴더 탐색 상한 행 — 서버는 검사 때의 폴더 탐색(폴더 수·시간·파일 수 상한)을 다시 하지 않으므로 재분석·서명하지 않습니다"
+)
+# R21-5 (round 21): a posted row path that is not the scan's own form of it — relative to the scan folder, no
+# empty, "." or ".." component, escaped exactly as the scan escapes it. "./gen.png", "sub/../gen.png",
+# "../RM/gen.png" and "/tmp/RM/gen.png" named the same file and were signed as five rows. HTTP 400.
+REPORT_ROW_PATH_NOT_CANONICAL = (
+    "검사 결과 항목 「{path}」의 경로가 폴더 검사 결과의 경로 형식이 아닙니다(스캔 폴더 기준 상대 경로 — 절대 경로·빈 구성 요소·"
+    "`.`·`..` 불가) — 폴더 검사 결과를 그대로 보내십시오"
+)
+# R21-5: the same row (path, or container and member) posted twice. HTTP 400.
+REPORT_ROW_POSTED_TWICE = "검사 결과 항목 「{path}」가 두 번 게시되었습니다 — 행마다 한 번만 보내십시오"
 # R19-13: the excluded reasons that mean "the file changed after the scan" (not "never re-analyzable").
 _CHANGED_AFTER_SCAN_REASONS = (REPORT_ROW_NOT_FOUND, REPORT_ROW_NOT_DERIVED, REPORT_ROW_KIND_CHANGED)
 
@@ -1516,10 +1532,13 @@ class _ReportHasher:
         """
         from .result_text import unescape_row_path
 
-        p = Path(os.path.normpath(expand_user(unescape_row_path(path_text))))
         if self.scan_root is not None:
+            # R21-5 (round 21): a row path is relative to the scan folder, taken literally (a "~" is a name
+            # there); only the scan's own form reaches here (:func:`_posted_path_error`).
+            p = Path(os.path.normpath(unescape_row_path(path_text)))
             cand = p if p.is_absolute() else Path(os.path.normpath(self.scan_root / p))
             return [(cand, self.scan_root)] if _is_within(cand, self.scan_root) else []
+        p = Path(os.path.normpath(expand_user(unescape_row_path(path_text))))
         return [(p, root) for root in self.roots] if p.is_absolute() else [(root / p, root) for root in self.roots]
 
     def resolve(self, path_text: str) -> Path | None:
@@ -1662,7 +1681,7 @@ def _rederive_report_items(
         if isinstance(located, str):
             derived_by_top[top] = located
             continue
-        unanalyzed = _unanalyzed_entry_row(located, top, item)
+        unanalyzed = _unanalyzed_entry_row(located, top, item, hasher.scan_root)
         if unanalyzed is not None:
             derived_by_top[top] = unanalyzed
             continue
@@ -1712,7 +1731,9 @@ def _rederive_report_items(
     return derived, excluded, changed
 
 
-def _unanalyzed_entry_row(located: Path, top: str, posted: Any) -> dict[str | None, Any] | str | None:
+def _unanalyzed_entry_row(
+    located: Path, top: str, posted: Any, scan_root: Path | None = None,
+) -> dict[str | None, Any] | str | None:
     """R20-1 (round 20): the scan's own row of an entry it lists without analyzing, or None for a file it analyzes.
 
     The walk (``scan_cache._iter_files``) never analyzes a FIFO, socket,
@@ -1722,11 +1743,25 @@ def _unanalyzed_entry_row(located: Path, top: str, posted: Any) -> dict[str | No
     The re-analysis classifies the entry the same way, so the server row
     is compared like with like: an unchanged FIFO is the same skipped row
     (signed as listed, as the scan listed it), a file replaced by a FIFO
-    after the scan differs (analyzed → skipped: 409). A folder that can be
-    listed now is the scan's skipped row only when the posted row is one of
-    the walk's own folder rows (a walk limit or a bind-mount loop); any
-    other row of a readable folder is :data:`REPORT_ROW_KIND_CHANGED`.
-    Returns ``{None: row}``, a changed-reason string, or None.
+    after the scan differs (analyzed → skipped: 409).
+
+    R21-1 (round 21): every row returned here is made by the server from
+    what is on disk, with the walk's own reason constant — never the posted
+    ``error`` text (a posted readable folder "skipped: 탐색 상한 도달(서버
+    확인) — 이 폴더에는 조작 파일이 없음을 …" was signed word for word).
+    A folder that can be listed now is:
+
+    - the walk's bind-mount loop row (:data:`scan_cache.SYMLINK_LOOP_REASON`)
+      when the posted row says so and the server finds the folder is the
+      scan folder or a folder between it and the entry (same
+      ``(st_dev, st_ino)``, the walk's own test); a posted loop row of any
+      other folder is :data:`REPORT_ROW_KIND_CHANGED` (409);
+    - :data:`REPORT_ROW_WALK_LIMIT` (excluded, never signed) when the posted
+      row is a walk-limit row: that limit belongs to the whole walk and the
+      clock, which the server does not repeat;
+    - otherwise :data:`REPORT_ROW_KIND_CHANGED`.
+
+    Returns ``{None: row}``, a reason string, or None.
     """
     from .result_types import ScanItem
     from .scan_cache import SYMLINK_LOOP_REASON, UNREADABLE_FOLDER_ROW_REASON, WALK_LIMIT_REASON, unscannable_file_reason
@@ -1744,9 +1779,12 @@ def _unanalyzed_entry_row(located: Path, top: str, posted: Any) -> dict[str | No
         except OSError as exc:
             return {None: ScanItem(top, located.name, "unknown", "failed", 0, error=UNREADABLE_FOLDER_ROW_REASON.format(reason=failure_reason(exc)))}
         posted_error = posted.error if isinstance(posted.error, str) else ""
-        walk_limit = WALK_LIMIT_REASON.split("(", 1)[0]
-        if posted.status == "skipped" and (posted_error.startswith(walk_limit) or posted_error == SYMLINK_LOOP_REASON):
-            return {None: ScanItem(top, located.name, "unknown", "skipped", 0, error=posted_error)}
+        if posted.status == "skipped" and posted_error == SYMLINK_LOOP_REASON:
+            if scan_root is not None and _is_bind_mount_loop(located, scan_root):
+                return {None: ScanItem(top, located.name, "unknown", "skipped", 0, error=SYMLINK_LOOP_REASON)}
+            return REPORT_ROW_KIND_CHANGED
+        if posted.status == "skipped" and posted_error.startswith(WALK_LIMIT_REASON.split("(", 1)[0]):
+            return REPORT_ROW_WALK_LIMIT
         return REPORT_ROW_KIND_CHANGED
     try:
         reason = unscannable_file_reason(located)
@@ -1755,6 +1793,58 @@ def _unanalyzed_entry_row(located: Path, top: str, posted: Any) -> dict[str | No
     if reason is None:
         return None
     return {None: ScanItem(top, located.name, "unknown", "skipped", 0, error=reason)}
+
+
+def _posted_walk_limit_row(posted: Any) -> bool:
+    """Merge of R21-1 (GUI preview): the posted row is the walk's limit row — the test _unanalyzed_entry_row uses."""
+    from .scan_cache import WALK_LIMIT_REASON
+
+    posted_error = posted.error if isinstance(posted.error, str) else ""
+    return bool(posted.status == "skipped" and posted_error.startswith(WALK_LIMIT_REASON.split("(", 1)[0]))
+
+
+def _is_bind_mount_loop(folder: Path, scan_root: Path) -> bool:
+    """R21-1: the walk's loop test — ``folder`` is the scan folder or a folder between it and ``folder`` (same device and inode)."""
+    from .scan_cache import _dir_identity
+
+    ident = _dir_identity(folder)
+    if ident is None or not _is_within(folder, scan_root) or folder == scan_root:
+        return False
+    current = folder.parent
+    while True:
+        if _dir_identity(current) == ident:
+            return True
+        if current == scan_root or not _is_within(current, scan_root):
+            return False
+        current = current.parent
+
+
+def _posted_path_error(posted: list[Any]) -> str | None:
+    """R21-5 (round 21): why the posted rows are not a list of distinct rows in the scan's own path form, or None.
+
+    A top-level row path (a member row's container) must be what the scan
+    writes for a file of the scan folder: relative, no empty, "." or ".."
+    component, and escaped as :func:`result_text.escape_row_path` escapes
+    it. A row (path, or container and member) may be posted once. Both are
+    a malformed request (400), before any re-analysis.
+    """
+    from .result_text import escape_row_path, row_identity, unescape_row_path
+
+    seen: set[tuple[str, str | None]] = set()
+    for item in posted:
+        top, member = row_identity(item)
+        real = unescape_row_path(top)
+        parts = real.replace(os.sep, "/").split("/")  # Windows rows use "\\" (str of a relative path)
+        if (
+            not real or os.path.isabs(real) or real.startswith("/")
+            or any(part in ("", ".", "..") for part in parts)
+            or escape_row_path(real) != top
+        ):
+            return REPORT_ROW_PATH_NOT_CANONICAL.format(path=str(item.path)[:200])
+        if (top, member) in seen:
+            return REPORT_ROW_POSTED_TWICE.format(path=str(item.path)[:200])
+        seen.add((top, member))
+    return None
 
 
 def _derived_row(derived_by_top: dict[str, dict[str | None, Any] | str], path: str) -> Any | None:
@@ -1822,12 +1912,14 @@ def _as_duplicate(posted: Any, server: Any, original: Any | None) -> Any:
     from the posted row: 409).
     """
     from .result_types import ScanItem
+    from .scan_cache import DUPLICATE_ROW_REASON
 
     target = str(posted.duplicate_of)
     if original is None or original.status == "duplicate" or not server.sha256 or original.sha256 != server.sha256:
         return server
+    # R21-1 (round 21): the scan's own duplicate reason — the posted ``error`` text was signed as it was.
     return ScanItem(
-        server.path, server.name, "duplicate", "duplicate", server.size_bytes, error=posted.error,
+        server.path, server.name, "duplicate", "duplicate", server.size_bytes, error=DUPLICATE_ROW_REASON,
         duplicate_of=target, sha256=server.sha256, container=server.container, member=server.member,
         member_index=server.member_index,
     )
@@ -2079,18 +2171,21 @@ def _report_payload(
     except InvalidOption as exc:
         return {"error": str(exc)}
     server_thresholds = load_thresholds(options)
-    # R20-4 (merge): a malformed duplicate_of is a malformed request (400) for every
-    # format, the preview included.
-    duplicate_error = _posted_duplicate_error(items)
+    # R20-4 / R21-5 (merge): a malformed duplicate_of or a non-canonical / repeated row path
+    # is a malformed request (400) for every format, the preview included.
+    duplicate_error = _posted_path_error(items) or _posted_duplicate_error(items)
     if duplicate_error is not None:
         hasher.close()
-        return {"error": duplicate_error}  # R20-4: 400
+        return {"error": duplicate_error}  # R21-5 / R20-4: 400
     req_format = format_override.lower()
     if req_format == "evidence-preview":
         # GUI-REV2 H-2: the preview is built from the posted rows as they are —
         # no re-analysis, nothing signed; the export re-analyzes, compares (R19-13) and signs.
         hasher.close()
-        excluded: list[tuple[Any, str]] = []
+        # Merge of R21-1: the export never signs a walk-limit folder row (excluded with
+        # REPORT_ROW_WALK_LIMIT), so the preview lists it the same way — preview equals output.
+        excluded: list[tuple[Any, str]] = [(item, REPORT_ROW_WALK_LIMIT) for item in items if _posted_walk_limit_row(item)]
+        items = [item for item in items if not _posted_walk_limit_row(item)]
     else:
         try:
             items, excluded, changed = _rederive_report_items(items, hasher, options, server_thresholds)
@@ -2174,7 +2269,9 @@ def _report_payload(
         from .evidence_statement import statement_preview
         from .reports import analysis_options_line, scan_root_line
 
-        preview = statement_preview(_statement(), uploads)
+        # Merge of R21-1: the PDF prints every excluded row (unsigned_rows=excluded — uploads first,
+        # then the walk-limit rows the preview excludes like the export), so the preview does too.
+        preview = statement_preview(_statement(), excluded)
         preview["scan_root_line"] = (scan_root_line({"scan_root": root_label}) or "") if root_label else ""
         # R19-3: the PDF's case box also prints the re-analysis options line.
         preview["analysis_options_line"] = analysis_options_line({"analysis_options": analysis_options}) or ""

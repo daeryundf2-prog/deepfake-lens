@@ -362,6 +362,55 @@ class WebReportSelectionTest(unittest.TestCase):
                 self.assertEqual(webapp_api.report_error_status(out), 400, out)
                 self.assertIn("duplicate_of", out["error"])
 
+    def test_preview_lists_a_walk_limit_row_as_the_export_does(self) -> None:
+        """Merge of phase0 R21-1: the export never signs a walk-limit folder row (excluded with
+        REPORT_ROW_WALK_LIMIT); the preview, built from the posted rows, lists it the same way
+        and never as an exhibit or appendix row — preview equals output."""
+        from deepfake_lens.scan_cache import WALK_LIMIT_REASON
+
+        (self.folder / "sub").mkdir()
+        template = next(row for row in self.rows if row["path"] == "odd.xyz")
+        limit_row = dict(template, path="sub", name="sub", kind="unknown", status="skipped", size_bytes=0,
+                         error=WALK_LIMIT_REASON.format(limit="폴더 20000개"), sha256=None, result=None)
+        limit_row.pop("path_b64", None)
+        body = self._body(items=[*self.rows, limit_row])
+        signed = webapp_api._report_payload(body, "evidence-json", default_folder=self.folder)
+        preview = webapp_api._report_payload(body, "evidence-preview", default_folder=self.folder)
+        assert isinstance(signed, dict) and isinstance(preview, dict), (signed, preview)
+        self.assertIn(("sub", webapp_api.REPORT_ROW_WALK_LIMIT), [(row["path"], row["reason"]) for row in signed["excluded_items"]])
+        self.assertNotIn("sub", [row["file_path"] for row in signed.get("excluded_by_selection", [])])
+        unsigned = "\n".join(preview["unsigned"])
+        self.assertIn("sub", unsigned)
+        self.assertIn(webapp_api.REPORT_ROW_WALK_LIMIT, unsigned)
+        self.assertNotIn(WALK_LIMIT_REASON.split("(", 1)[0], json.dumps(preview["boxes"], ensure_ascii=False))
+
+    def test_rows_posted_as_the_scan_returned_them_are_never_a_path_400(self) -> None:
+        """Merge of phase0 R21-5: the GUI posts each row exactly as /api/scan returned it (JSON
+        round trip). Names that are escaped, decomposed (NFD), carry "::" or a backslash, sit in a
+        subfolder or inside an archive are the scan's own canonical paths — every format is 200."""
+        import unicodedata
+        import zipfile
+
+        odd = self.folder / "odd"
+        (odd / "깊은 곳").mkdir(parents=True)
+        (odd / unicodedata.normalize("NFD", "한글 이름.txt")).write_text("분해된 이름입니다.", encoding="utf-8")
+        (odd / "a::b.txt").write_text("두 쌍점 이름입니다.", encoding="utf-8")
+        (odd / "back\\slash.txt").write_text("역슬래시 이름입니다.", encoding="utf-8")
+        (odd / "깊은 곳" / "~tilde.txt").write_text("물결 이름입니다.", encoding="utf-8")
+        with zipfile.ZipFile(odd / "묶음.zip", "w") as archive:
+            archive.writestr("안/글.txt", "압축 안 글입니다.")
+        options = webapp_api._web_options({"no_default_engine": ["true"], "recursive": ["true"]})
+        run = scan_folder_run(odd, options)
+        rows = json.loads(json.dumps(scan_payload(run.summary, run.items, run.thresholds, options)["items"]))
+        self.assertGreaterEqual(len(rows), 6)
+        body = json.dumps({"items": rows, "summary": {}, "scan_root": str(odd.resolve()),
+                           "options": {"no_default_engine": "true", "recursive": "true"}}, ensure_ascii=False).encode("utf-8")
+        for fmt in ("json", "html", "evidence-json", "evidence-preview"):
+            with self.subTest(fmt=fmt):
+                out = webapp_api._report_payload(body, fmt, default_folder=odd)
+                if isinstance(out, dict):
+                    self.assertNotIn("error", out, out.get("error"))
+
     def test_excluded_rows_are_named_in_response_headers(self) -> None:
         """GUI-REV5 L-2: a successful report of any format names the rows it lists as 서명 제외
         (here an upload the server never re-analyzes) in X-Deepfake-Lens-Excluded-* headers, so

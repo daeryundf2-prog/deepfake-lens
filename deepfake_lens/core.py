@@ -738,7 +738,9 @@ def _scan_specs(
                 size = path.stat().st_size
             except OSError:
                 size = 0
-            return ScanItem(display_path, path.name, "duplicate", "duplicate", size, error="중복 내용(동일 해시)", duplicate_of=duplicates[path], sha256=fingerprints.get(path)), None, False
+            from .scan_cache import DUPLICATE_ROW_REASON  # R21-1: shared with the report's server row
+
+            return ScanItem(display_path, path.name, "duplicate", "duplicate", size, error=DUPLICATE_ROW_REASON, duplicate_of=duplicates[path], sha256=fingerprints.get(path)), None, False
         if max_file_bytes is not None:
             try:
                 size = path.stat().st_size
@@ -2315,8 +2317,11 @@ def default_heatmap_root() -> Path:
 
 
 def builtin_heatmap_root() -> Path:
-    """The heatmap folder without the override: ``~/.cache/deepfake-lens/heatmaps``."""
-    return Path.home() / ".cache" / "deepfake-lens" / "heatmaps"
+    """The heatmap folder without the override: ``~/.cache/deepfake-lens/heatmaps`` (R21-10: or under the relocated tool base)."""
+    from .native_path import tool_cache_base
+
+    base = tool_cache_base()
+    return (base if base is not None else Path.home() / ".cache" / "deepfake-lens") / "heatmaps"
 
 
 def is_default_heatmap_output(path: Path | str) -> bool:

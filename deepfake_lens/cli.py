@@ -435,7 +435,9 @@ def _misplaced_option(argv: list[str], scan_parser: argparse.ArgumentParser) -> 
     return not any(known == option or (option.startswith("--") and known.startswith(option)) for known in scan_parser._option_string_actions)
 
 
-def _options_before_command(argv: list[str], scan_parser: argparse.ArgumentParser) -> int | None:
+def _options_before_command(
+    argv: list[str], scan_parser: argparse.ArgumentParser, names: frozenset[str] | set[str] = frozenset(),
+) -> int | None:
     """R20-9 (round 20): the index of the command named after leading *known* options (``--verbose scan X``), or None.
 
     The tokens before it must all be options scan knows (``--verbose``,
@@ -448,7 +450,7 @@ def _options_before_command(argv: list[str], scan_parser: argparse.ArgumentParse
     index = 0
     while index < len(argv):
         token = argv[index]
-        if token in COMMANDS and not token.startswith("-"):
+        if (token in COMMANDS or token in names) and not token.startswith("-"):
             return index if index else None
         if not token.startswith("-") or token in ("-", "--"):
             return None
@@ -541,9 +543,23 @@ def _main(argv: list[str] | None = None) -> int:
             reconfigure(encoding="utf-8", errors="replace")
     argv = list(sys.argv[1:] if argv is None else argv)
     parser, cmd_parsers = build_parser()
+    if argv and argv[0] not in COMMANDS and not os.path.lexists("help"):
+        # R21-9 (round 21): `--verbose help` was a scan of the folder "help" ("폴더를 찾을 수 없습니다: help") —
+        # `help` was read only as the first word. Known options before it say nothing to help.
+        at = _options_before_command(argv, cmd_parsers["scan"], {"help"})
+        if at is not None and argv[at] == "help":
+            argv = argv[at:]
     if argv and argv[0] == "help" and not os.path.lexists("help"):
         # R20-9 (round 20): `help scan` was a scan of the folder "help" ("알 수 없는 인수: scan").
-        argv = [argv[1], "--help"] if len(argv) > 1 and argv[1] in COMMANDS else ["--help"]
+        # R21-9 (round 21): `help bogus` printed the top-level help with exit 0 — a typo ended as a success;
+        # a word after `help` that names no command is the top-level parser's error (exit 2).
+        topic = argv[1] if len(argv) > 1 else None
+        if topic is None or topic in ("-h", "--help"):
+            argv = ["--help"]
+        elif topic in COMMANDS and not topic.startswith("-"):
+            argv = [topic, "--help"]
+        else:
+            parser.error(f"argument <명령>: invalid choice: {topic!r} (choose from {', '.join(sorted(c for c in COMMANDS if not c.startswith('-')))})")
     if argv and argv[0] not in COMMANDS:
         # R19-9 (round 19): an unknown option before a command (`--bogus scan X`) is the top-level
         # parser's error — it was read as `scan --bogus scan X` and blamed on scan.

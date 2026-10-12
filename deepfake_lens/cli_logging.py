@@ -27,8 +27,11 @@ PACKAGE_LOGGER = "deepfake_lens"
 
 
 def builtin_log_dir() -> Path:
-    """The log folder without the override: ``~/.cache/deepfake-lens/logs``."""
-    return Path.home() / ".cache" / "deepfake-lens" / "logs"
+    """The log folder without the override: ``~/.cache/deepfake-lens/logs`` (R21-10: or under the relocated tool base)."""
+    from .native_path import tool_cache_base
+
+    base = tool_cache_base()
+    return (base if base is not None else Path.home() / ".cache" / "deepfake-lens") / "logs"
 
 
 def default_log_dir() -> Path:
