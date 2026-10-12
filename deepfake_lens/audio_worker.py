@@ -172,14 +172,15 @@ def _runtime_key() -> str:
 
 
 def shared_cache_root() -> Path | None:
-    """``~/.cache/deepfake-lens/numba/<runtime>`` — None when there is no absolute home folder."""
-    try:
-        home = Path.home()
-    except (RuntimeError, KeyError, OSError):
-        return None
-    if not home.is_absolute():
-        return None  # a relative HOME would put the cache into the working (evidence) folder
-    return home / ".cache" / "deepfake-lens" / "numba" / _runtime_key()
+    """``~/.cache/deepfake-lens/numba/<runtime>`` — None when there is no absolute home folder.
+
+    R21-10 (round 21): under the relocated tool base when the CLI moved it
+    (``native_path.tool_cache_base``).
+    """
+    from .native_path import tool_cache_base
+
+    base = tool_cache_base()  # None for a relative HOME: it would put the cache into the working (evidence) folder
+    return base / "numba" / _runtime_key() if base is not None else None
 
 
 def private_cache_dir() -> tuple[str, bool]:

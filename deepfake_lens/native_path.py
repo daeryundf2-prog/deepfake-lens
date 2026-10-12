@@ -641,6 +641,94 @@ def _register_session_folder(created: str) -> None:
         _ATEXIT_REGISTERED = True
 
 
+# R21-10 (round 21, user decision 2026-10-12: relocate instead of refuse): the base of the
+# tool's own folders (logs, heatmaps, the published numba cache, the speaker-model cache) is
+# ``~/.cache/deepfake-lens`` unless the CLI moved it, before any work, because that folder
+# would be inside a folder the command examines (or HOME is not absolute).
+_TOOL_BASE: Path | None = None
+TOOL_BASE_NAME = "deepfake-lens"
+# R21-10: the relocated base handed to child processes (the audio worker writes its native-stderr log
+# under it). Internal: the CLI clears any inherited value before it decides (set_tool_cache_base(None)).
+TOOL_BASE_ENV = "DEEPFAKE_LENS_RELOCATED_TOOL_BASE"
+
+
+def default_tool_base() -> Path | None:
+    """``~/.cache/deepfake-lens`` — None when there is no absolute home folder."""
+    try:
+        home = Path.home()
+    except (RuntimeError, KeyError, OSError):
+        return None
+    return home / ".cache" / TOOL_BASE_NAME if home.is_absolute() else None
+
+
+def tool_cache_base() -> Path | None:
+    """R21-10: where the tool's own folders are made — the relocated base (this process's, or the one its parent
+    handed down in :data:`TOOL_BASE_ENV`), else :func:`default_tool_base`."""
+    if _TOOL_BASE is not None:
+        return _TOOL_BASE
+    inherited = os.environ.get(TOOL_BASE_ENV, "")
+    if inherited and os.path.isabs(inherited):
+        return Path(inherited)
+    return default_tool_base()
+
+
+def set_tool_cache_base(base: Path | None) -> None:
+    """R21-10: use ``base`` for the tool's own folders in this process and its children (None: the default)."""
+    global _TOOL_BASE
+    _TOOL_BASE = base
+    if base is None:
+        os.environ.pop(TOOL_BASE_ENV, None)
+    else:
+        os.environ[TOOL_BASE_ENV] = str(base)
+
+
+def relocated_tool_base_candidates() -> list[Path]:
+    """R21-10: where the tool's folders go when the default is unusable, in order.
+
+    The OS cache location (``~/Library/Caches/deepfake-lens`` on macOS,
+    ``%LOCALAPPDATA%\\deepfake-lens`` on Windows), ``$XDG_CACHE_HOME/deepfake-lens``
+    when that variable is absolute, then a per-user folder in the system temp
+    folder and in ``/tmp``. Only absolute paths; the caller keeps the first one
+    outside every examined folder that it can own (:func:`claim_tool_base`).
+    """
+    candidates: list[Path] = []
+    try:
+        home: Path | None = Path.home()
+    except (RuntimeError, KeyError, OSError):
+        home = None
+    if home is not None and home.is_absolute() and sys.platform == "darwin":
+        candidates.append(home / "Library" / "Caches" / TOOL_BASE_NAME)
+    local = os.environ.get("LOCALAPPDATA", "")
+    if os.name == "nt" and local and os.path.isabs(local):
+        candidates.append(Path(local) / TOOL_BASE_NAME)
+    xdg = os.environ.get("XDG_CACHE_HOME", "")
+    if xdg and os.path.isabs(xdg):
+        candidates.append(Path(xdg) / TOOL_BASE_NAME)
+    user = str(os.getuid()) if hasattr(os, "getuid") else (os.environ.get("USERNAME", "") or "user")
+    for temp in (_system_temp_dir(), "/tmp" if os.name == "posix" else ""):
+        if temp and os.path.isabs(temp):
+            candidates.append(Path(temp) / f"{TOOL_BASE_NAME}-{user}")
+    unique: list[Path] = []
+    for candidate in candidates:
+        if candidate not in unique:
+            unique.append(candidate)
+    return unique
+
+
+def claim_tool_base(base: Path) -> bool:
+    """R21-10: ``base`` exists (made 0700 when missing) as this user's own real folder that others cannot write."""
+    try:
+        base.mkdir(mode=0o700, parents=True, exist_ok=True)
+        info = os.lstat(base)
+    except OSError:
+        return False
+    if not stat.S_ISDIR(info.st_mode):
+        return False  # a link or a file planted there
+    if hasattr(os, "getuid") and (info.st_uid != os.getuid() or info.st_mode & 0o022):
+        return False
+    return os.access(base, os.W_OK | os.X_OK)
+
+
 # R20-7 (round 20): the folders the running command examines (set by the CLI before any work).
 _EXAMINED_FOLDERS: list[str] = []
 TEMP_BASE_INSIDE_EXAMINED = "검사 대상 폴더 안"

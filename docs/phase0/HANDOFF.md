@@ -108,7 +108,7 @@ python scripts/build_traceability_commits.py --check
 
 ## 7. 합의된 결정 (검증자에게 재지적하지 말라고 알려 줄 것)
 
-텍스트 보고서는 모든 백슬래시를 두 배로 표시(단사 표시) · QA-SYS-10은 선택 extras 부재 시 "건너뜀(환경)" · `corpus verify`는 라벨 없는 파일에 exit 1 · `corpus split` 비율 정규화 · FastAPI 자동 문서 비활성 · `--port 0` 거부 · Windows/macOS 경로는 가짜 객체·mock으로만 검증 · python-markdown의 리터럴 백슬래시는 단사·무링크면 허용 · 비프로필 자산(face_landmarker.task, syncnet_v2.model, sfd_face.pth)은 운영자가 핀을 넣기 전까지 거부 · Linux 외 SIGKILL 자손 정리는 최선 노력 · 과거 커밋 b914bce…7fefde4의 SIG_IGN 문제는 `docs/KNOWN-HISTORICAL-ISSUES.md`에 문서화 · 같은 mtime/ctime/size/inode의 매니페스트 제자리 수정은 프로세스 내 미감지(문서화된 잔여) · 골든 출력은 mediapipe/torch/deep-signals 출력 미포함(문서화된 잔여) · api-serve의 Ctrl-C는 uvicorn이 처리.
+텍스트 보고서는 모든 백슬래시를 두 배로 표시(단사 표시) · QA-SYS-10은 선택 extras 부재 시 "건너뜀(환경)" · `corpus verify`는 라벨 없는 파일에 exit 1 · `corpus split` 비율 정규화 · FastAPI 자동 문서 비활성 · `--port 0` 거부 · Windows/macOS 경로는 가짜 객체·mock으로만 검증 · python-markdown의 리터럴 백슬래시는 단사·무링크면 허용 · 비프로필 자산(face_landmarker.task, syncnet_v2.model, sfd_face.pth)은 운영자가 핀을 넣기 전까지 거부 · Linux 외 SIGKILL 자손 정리는 최선 노력 · 과거 커밋 b914bce…7fefde4의 SIG_IGN 문제는 `docs/KNOWN-HISTORICAL-ISSUES.md`에 문서화 · 같은 mtime/ctime/size/inode의 매니페스트 제자리 수정은 프로세스 내 미감지(문서화된 잔여) · 골든 출력은 mediapipe/torch/deep-signals 출력 미포함(문서화된 잔여) · api-serve의 Ctrl-C는 uvicorn이 처리 · 도구 폴더 위치(사용자 결정 2026-10-12, R21-10): HOME에서 정해지는 도구 폴더(`~/.cache/deepfake-lens`의 로그·히트맵·numba 캐시)가 검사 대상 폴더·분석 파일의 폴더·서버 기본 루트와 겹치거나 HOME이 상대 경로이면 거부하지 않고 증거 밖의 첫 후보(OS 캐시 폴더, `$XDG_CACHE_HOME`, 시스템 임시 폴더의 사용자 폴더)로 옮기고 알림 한 줄을 낸다 — 후보가 없을 때만 종료 코드 2. 운영자가 환경 변수로 지정한 폴더(`DEEPFAKE_LENS_LOG_DIR`·`DEEPFAKE_LENS_HEATMAP_DIR`)가 증거 안이면 계속 종료 코드 2.
 
 ## 8. 루프를 이어 가는 방법
 

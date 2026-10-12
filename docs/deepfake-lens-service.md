@@ -228,9 +228,12 @@ request can add one; `/api/scan?folder=` no longer registers anything.
 With no root registered, the server's own default folder (`--folder`, or
 the directory it was started in) is the only root — never the whole disk.
 R21-4 (round 21): that directory is checked at start like a named root
-(R20-7): when it holds a tool folder HOME decides (`~/.cache/deepfake-lens`
-logs / numba cache) or every temp-folder candidate, the server is not
-started (exit 2, `docs/deepfake-lens-cli.md`, "Logs").
+(R20-7). R21-10 (user decision 2026-10-12: relocate instead of refuse): when
+it holds the tool folders HOME decides (`~/.cache/deepfake-lens` logs,
+heatmaps, numba cache) they are moved for that run outside it, with one
+notice; the server is not started (exit 2) only when no place outside is
+left or every temp-folder candidate is inside (`docs/deepfake-lens-cli.md`,
+"Logs").
 A path outside every root gets **403** `{"error": "허용되지 않은 경로"}`
 (heatmap/preview keep their plain-text `forbidden` body) and no file bytes.
 When a `root` argument is supplied it must also contain the file, so a

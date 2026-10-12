@@ -32,9 +32,10 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 from .archives import SUPPORTED_ARCHIVE_EXTENSIONS, is_archive
 from .audio import SUPPORTED_AUDIO_EXTENSIONS
@@ -670,14 +671,20 @@ TOOL_FOLDER_INSIDE_INPUT = (
 )
 
 
-# R20-7 (round 20): the tool folders HOME decides (~/.cache/deepfake-lens/{logs,heatmaps,numba}).
-HOME_NOT_ABSOLUTE = (
-    "환경 변수 HOME이 절대 경로가 아닙니다: {home} — 도구 폴더({kind})가 작업 폴더 안에 만들어집니다. "
-    "HOME을 절대 경로로 지정하거나 {env}에 검사 대상 밖의 절대 경로를 지정하십시오"
+# R20-7 (round 20): the tool folders HOME decides (~/.cache/deepfake-lens/{logs,heatmaps,numba}) were refused
+# (exit 2) inside an examined folder or under a relative HOME. R21-10 (round 21, user decision 2026-10-12:
+# relocate instead of refuse): the tool base moves to the first candidate outside every examined folder
+# (native_path.relocated_tool_base_candidates) with one notice; exit 2 only when there is none.
+TOOL_BASE_RELOCATED_NOTICE = (
+    "알림: 도구 폴더(로그·히트맵·오디오 numba 캐시)의 기본 위치 {default}{why} 이번 실행은 {base}에 만듭니다"
+    "(증거 폴더에는 아무것도 쓰지 않습니다)."
 )
-HOME_TOOL_FOLDER_INSIDE_INPUT = (
-    "HOME에서 정해지는 도구 폴더({kind})가 검사 대상 폴더 안에 있습니다: {path} — {env}에 검사 대상 폴더({folder}) 밖의 "
-    "절대 경로를 지정하십시오(증거 폴더에는 아무것도 쓰지 않습니다)"
+TOOL_BASE_INSIDE_INPUT = "가 검사 대상 폴더({folder})와 겹쳐"
+TOOL_BASE_NO_HOME = "(HOME 「{home}」이 절대 경로가 아님)를 쓸 수 없어"
+TOOL_BASE_NOWHERE = (
+    "도구 폴더(로그·히트맵·오디오 numba 캐시)를 검사 대상 폴더 밖에 둘 곳이 없습니다 — 기본 위치 {default}와 대체 위치 "
+    "{candidates}가 모두 검사 대상 폴더와 겹치거나 쓸 수 없습니다. HOME 또는 XDG_CACHE_HOME을 검사 대상 밖의 절대 경로로 "
+    "지정하십시오(증거 폴더에는 아무것도 쓰지 않습니다)"
 )
 # R20-7: every temp-folder candidate (DEEPFAKE_LENS_TMPDIR, DEEPFAKE_LENS_NATIVE_TMPDIR, TMPDIR, /tmp) is inside a scanned folder.
 TEMP_FOLDERS_INSIDE_INPUT = (
@@ -702,34 +709,24 @@ def check_tool_folders(args: argparse.Namespace, folders: list[Path], files: lis
       list or a profile) counts as examined for these two variables (``cd case; DEEPFAKE_LENS_LOG_DIR=logs classify case/a.jpg``
       made ``case/logs``);
     - the built-in folders under ``~/.cache/deepfake-lens`` used when a
-      variable is unset (logs, heatmaps, and the published numba cache when
-      librosa is installed): a relative HOME is exit 2
-      (``HOME=rel scan …`` wrote ``rel/.cache/…`` into the working folder),
-      and one inside a scanned folder is exit 2 — scanning the home folder
-      itself is refused instead of writing ``.cache`` into it. R21-6
-      (round 21): inside the folder of an analyzed input file as well (the
-      same examined folders as the two variables): ``HOME=/case classify
-      /case/a.png`` wrote ``/case/.cache/deepfake-lens/logs``;
+      variable is unset (logs, heatmaps, the published numba cache): under a
+      relative HOME (``HOME=rel scan …`` wrote ``rel/.cache/…`` into the
+      working folder) or inside an examined folder — R21-6: the folder of an
+      analyzed file too (``HOME=/case classify /case/a.png`` wrote
+      ``/case/.cache/deepfake-lens/logs``) — they were exit 2. R21-10 (user
+      decision 2026-10-12): they are relocated instead (:func:`relocate_tool_base`);
     - the session temp folder: a candidate inside a scanned folder is
       skipped like an unusable one, with the R15-6 notice
       (``native_path.set_examined_folders``); exit 2 when none is left.
     """
-    import importlib.util
-
-    from .audio_worker import shared_cache_root
-    from .cli_logging import LOG_DIR_ENV, builtin_log_dir
-    from .core import HEATMAP_DIR_ENV, builtin_heatmap_root
+    from .cli_logging import LOG_DIR_ENV
+    from .core import HEATMAP_DIR_ENV
     from .native_path import ToolFolderError, set_examined_folders, tool_folder_from_env, usable_temp_base
 
     examined = [*folders, *{path.parent for path in files or []}]
-    builtin: list[tuple[str, str, Callable[[], Path | None]]] = []
     checks = [LOG_DIR_ENV]
-    if os.environ.get(LOG_DIR_ENV, "").strip() == "":
-        builtin.append(("로그", LOG_DIR_ENV, builtin_log_dir))
     if getattr(args, "heatmaps", False) and not getattr(args, "heatmap_dir", None):
         checks.append(HEATMAP_DIR_ENV)
-        if os.environ.get(HEATMAP_DIR_ENV, "").strip() == "":
-            builtin.append(("히트맵", HEATMAP_DIR_ENV, builtin_heatmap_root))
     for env in checks:
         if not os.environ.get(env, "").strip():
             continue
@@ -741,26 +738,55 @@ def check_tool_folders(args: argparse.Namespace, folders: list[Path], files: lis
         for folder in examined:
             if _inside(resolved, folder):
                 raise UsageError(TOOL_FOLDER_INSIDE_INPUT.format(env=env, path=target, folder=folder))
-    try:
-        home: Path | None = Path.home()
-    except (RuntimeError, KeyError, OSError):
-        home = None
-    if home is not None and not home.is_absolute():
-        for kind, env, _ in builtin:
-            raise UsageError(HOME_NOT_ABSOLUTE.format(home=home, kind=kind, env=env))
-    if importlib.util.find_spec("librosa") is not None:
-        builtin.append(("오디오 numba 캐시", "HOME", shared_cache_root))
-    for kind, env, where in builtin:
-        path = where() if home is not None else None
-        if path is None:
-            continue
-        resolved = _resolved(path)
-        for folder in examined:  # R21-6: an analyzed file's folder too (was: the folder arguments only)
-            if _inside(resolved, folder):
-                raise UsageError(HOME_TOOL_FOLDER_INSIDE_INPUT.format(kind=kind, path=path, env=env, folder=folder))
+    relocate_tool_base(examined)
     set_examined_folders([str(folder) for folder in folders])
     if folders and usable_temp_base() is None:
         raise UsageError(TEMP_FOLDERS_INSIDE_INPUT)
+
+
+def relocate_tool_base(examined: list[Path]) -> None:
+    """R21-10 (round 21, user decision 2026-10-12: relocate instead of refuse): the tool base outside the evidence.
+
+    The tool's own folders (logs, heatmaps, the published numba cache, the
+    speaker-model cache) are made under ``~/.cache/deepfake-lens``. When that
+    folder and an examined folder overlap (one inside the other) or HOME is
+    not absolute, the base moves for this process to the first of
+    :func:`native_path.relocated_tool_base_candidates` that overlaps no
+    examined folder and that this user owns (made 0700 when missing), with
+    one Korean notice on stderr. None left: exit 2 (:data:`TOOL_BASE_NOWHERE`).
+    A folder named by DEEPFAKE_LENS_LOG_DIR / DEEPFAKE_LENS_HEATMAP_DIR is the
+    operator's choice and is never moved (refused when inside, above).
+    """
+    from .native_path import claim_tool_base, default_tool_base, relocated_tool_base_candidates, set_tool_cache_base
+
+    set_tool_cache_base(None)
+    default = default_tool_base()
+
+    def overlap(base: Path) -> Path | None:
+        resolved = _resolved(base)
+        return next((folder for folder in examined if _inside(resolved, folder) or _inside(folder, resolved)), None)
+
+    if default is not None:
+        folder = overlap(default)
+        if folder is None:
+            return
+        why = TOOL_BASE_INSIDE_INPUT.format(folder=folder)
+    else:
+        try:
+            home: object = Path.home()
+        except (RuntimeError, KeyError, OSError):
+            home = os.environ.get("HOME", "")
+        why = TOOL_BASE_NO_HOME.format(home=home)
+    candidates = relocated_tool_base_candidates()
+    for candidate in candidates:
+        if overlap(candidate) is None and claim_tool_base(candidate):
+            set_tool_cache_base(candidate)
+            shown = default if default is not None else Path("~/.cache/deepfake-lens")
+            print(TOOL_BASE_RELOCATED_NOTICE.format(default=shown, why=why, base=candidate), file=sys.stderr, flush=True)
+            return
+    raise UsageError(TOOL_BASE_NOWHERE.format(
+        default=default if default is not None else "~/.cache/deepfake-lens", candidates=", ".join(str(c) for c in candidates),
+    ))
 
 
 def command_key(args: argparse.Namespace) -> str:

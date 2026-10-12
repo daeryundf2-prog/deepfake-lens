@@ -929,11 +929,14 @@ def _ecapa_speaker_similarity(path_a: Path, path_b: Path, revision: str) -> tupl
                 from speechbrain.pretrained import SpeakerRecognition  # speechbrain <1.0
             from speechbrain.utils.fetching import LocalStrategy
 
+            from .native_path import tool_cache_base
+
             # Windows non-admin cannot create symlinks — copy the fetched
             # weights into the local dir instead of linking the HF cache.
             model = SpeakerRecognition.from_hparams(
                 source=ECAPA_HUB_MODEL,
-                savedir=str(Path.home() / ".cache" / "deepfake-lens" / "spkrec-ecapa-voxceleb" / revision),
+                # R21-10: under the relocated tool base when the CLI moved it
+                savedir=str((tool_cache_base() or Path.home() / ".cache" / "deepfake-lens") / "spkrec-ecapa-voxceleb" / revision),
                 revision=revision,
                 local_strategy=LocalStrategy.COPY,
             )
