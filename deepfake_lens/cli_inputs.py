@@ -677,7 +677,10 @@ def check_tool_folders(args: argparse.Namespace, folders: list[Path], files: lis
       librosa is installed): a relative HOME is exit 2
       (``HOME=rel scan …`` wrote ``rel/.cache/…`` into the working folder),
       and one inside a scanned folder is exit 2 — scanning the home folder
-      itself is refused instead of writing ``.cache`` into it;
+      itself is refused instead of writing ``.cache`` into it. R21-6
+      (round 21): inside the folder of an analyzed input file as well (the
+      same examined folders as the two variables): ``HOME=/case classify
+      /case/a.png`` wrote ``/case/.cache/deepfake-lens/logs``;
     - the session temp folder: a candidate inside a scanned folder is
       skipped like an unusable one, with the R15-6 notice
       (``native_path.set_examined_folders``); exit 2 when none is left.
@@ -723,7 +726,7 @@ def check_tool_folders(args: argparse.Namespace, folders: list[Path], files: lis
         if path is None:
             continue
         resolved = _resolved(path)
-        for folder in folders:
+        for folder in examined:  # R21-6: an analyzed file's folder too (was: the folder arguments only)
             if _inside(resolved, folder):
                 raise UsageError(HOME_TOOL_FOLDER_INSIDE_INPUT.format(kind=kind, path=path, env=env, folder=folder))
     set_examined_folders([str(folder) for folder in folders])

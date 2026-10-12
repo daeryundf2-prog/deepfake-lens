@@ -157,12 +157,23 @@ class HomeAndTempToolFoldersTest(unittest.TestCase):
                 self.assertIn("환경 변수 DEEPFAKE_LENS_LOG_DIR의 폴더가 검사 대상 폴더 안에 있습니다", done.stderr)
                 self.assert_untouched()
 
-    def test_a_file_in_the_home_folder_is_still_analyzed(self) -> None:
-        """Only scanned folders are checked against HOME's tool folders: a single file in HOME is fine."""
+    def test_a_file_in_the_home_folder_is_exit_2_like_a_scan_of_it(self) -> None:
+        """R21-6 (round 21): this test pinned R20-7's documented exception — only scanned folders were checked against
+        HOME's tool folders, so ``HOME=/E1 classify /E1/a.png`` wrote ``/E1/.cache/deepfake-lens/logs`` next to the
+        evidence (rc 0). The folder of an analyzed file is now examined for the built-in folders as it already was
+        for the variables: exit 2 before any work, nothing written; a file in a subfolder of HOME is analyzed."""
         home = Path(self._tmp.name) / "home"
         home.mkdir()
         (home / "note.txt").write_text("메모입니다.", encoding="utf-8")
-        done = _run(["classify", str(home / "note.txt")], self.case.parent, HOME=str(home))
+        for argv in (["classify", str(home / "note.txt")], ["evidence", str(home / "note.txt")]):
+            with self.subTest(argv=argv[0]):
+                done = _run(argv, self.case.parent, HOME=str(home))
+                self.assertEqual(done.returncode, 2, done.stderr)
+                self.assertIn("HOME에서 정해지는 도구 폴더(로그)가 검사 대상 폴더 안에 있습니다", done.stderr)
+                self.assertEqual(os.listdir(home), ["note.txt"])
+        (home / "docs").mkdir()
+        (home / "docs" / "note.txt").write_text("메모입니다.", encoding="utf-8")
+        done = _run(["classify", str(home / "docs" / "note.txt")], self.case.parent, HOME=str(home))
         self.assertEqual(done.returncode, 0, done.stderr)
 
 
