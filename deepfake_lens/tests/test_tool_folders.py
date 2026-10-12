@@ -177,6 +177,54 @@ class HomeAndTempToolFoldersTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
 
 
+class ServerDefaultRootToolFoldersTest(unittest.TestCase):
+    """R21-4 (round 21): ``web`` and ``api-serve`` without ``--folder`` / ``--allow-root`` read the working folder.
+    Started in the home folder (``HOME=/tmp/HM``, cwd ``/tmp/HM``), a scan request of it wrote
+    ``.cache/deepfake-lens/logs`` and ``.cache/deepfake-lens/numba`` into the folder being served, and api-serve
+    wrote its log there at start-up — while ``web --folder /tmp/HM`` was refused (R20-7). The working folder is now
+    the examined folder of that check: exit 2 before the server starts, nothing written."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.home = Path(self._tmp.name).resolve() / "HM"
+        self.home.mkdir()
+        (self.home / "a.txt").write_text("메모입니다.", encoding="utf-8")
+
+    def test_a_server_started_in_its_home_folder_without_a_root_is_exit_2(self) -> None:
+        for argv in (["web"], ["api-serve"]):
+            with self.subTest(argv=argv[0]):
+                done = _run(argv, self.home, HOME=str(self.home))
+                self.assertEqual(done.returncode, 2, done.stderr)
+                self.assertIn("HOME에서 정해지는 도구 폴더(로그)가 검사 대상 폴더 안에 있습니다", done.stderr)
+                self.assertIn(f"작업 폴더 {self.home}가 읽기 루트입니다", done.stderr)
+                self.assertEqual(os.listdir(self.home), ["a.txt"])
+
+    def test_the_working_folder_is_checked_only_when_no_root_is_named(self) -> None:
+        from deepfake_lens.cli import build_parser
+        from deepfake_lens.cli_inputs import UsageError, check_command_inputs
+        from deepfake_lens.native_path import set_examined_folders
+
+        parser, _ = build_parser()
+        elsewhere = Path(self._tmp.name).resolve() / "case"
+        elsewhere.mkdir()
+        previous = os.getcwd()
+        self.addCleanup(set_examined_folders, [])
+        try:
+            os.chdir(self.home)
+            with mock.patch.dict(os.environ, {"HOME": str(self.home)}):
+                for argv in (["web"], ["api-serve"]):
+                    with self.subTest(argv=argv), self.assertRaises(UsageError):
+                        check_command_inputs(parser.parse_args(argv))
+                # a named root outside HOME: the working folder is not a read root
+                check_command_inputs(parser.parse_args(["web", "--folder", str(elsewhere)]))
+                check_command_inputs(parser.parse_args(["api-serve", "--allow-root", str(elsewhere)]))
+            with mock.patch.dict(os.environ, {"HOME": str(elsewhere.parent / "other-home")}):
+                check_command_inputs(parser.parse_args(["web"]))  # the working folder holds no tool folder
+        finally:
+            os.chdir(previous)
+
+
 class UnknownHomeInArgumentsTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()

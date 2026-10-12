@@ -611,9 +611,33 @@ def require_writable_output(path: Path | str) -> None:
         pass
 
 
+# R21-4 (round 21): the servers whose read root is the working folder when no root is named.
+SERVER_COMMANDS = ("web", "api-serve")
+SERVER_DEFAULT_ROOT_HINT = (
+    "(읽기 폴더를 지정하지 않아 작업 폴더 {folder}가 읽기 루트입니다 — --folder 또는 --allow-root로 증거 폴더를 지정하거나 "
+    "다른 폴더에서 실행하십시오)"
+)
+
+
 def check_output_targets(args: argparse.Namespace, key: str, common: tuple[InputSpec, ...]) -> None:
-    """P11: no output inside an examined folder or on an input file; P10: outputs writable."""
+    """P11: no output inside an examined folder or on an input file; P10: outputs writable.
+
+    R21-4 (round 21): ``web`` / ``api-serve`` without ``--folder`` /
+    ``--allow-root`` read the working folder (``webapp_api._effective_roots``),
+    so the working folder is the examined folder of :func:`check_tool_folders`
+    — started in the home folder, the servers wrote
+    ``.cache/deepfake-lens/{logs,numba}`` into the folder they serve (api-serve
+    at start-up), while ``--folder <home>`` was refused (R20-7).
+    """
     folders, files = _input_paths(args, INPUT_SPECS.get(key, ()))
+    default_root: Path | None = None
+    if key in SERVER_COMMANDS and not folders:
+        try:
+            default_root = _resolved(Path.cwd())
+        except OSError:
+            default_root = None
+        if default_root is not None:
+            folders = [default_root]
     # R20-7: the files the command analyzes (not a scan-result JSON, a label list or a profile).
     evidence_files = [path for path in files if path.suffix.lower() not in JSON_SUFFIXES | FEEDBACK_SUFFIXES]
     _, config_files = _input_paths(args, common)
@@ -631,7 +655,12 @@ def check_output_targets(args: argparse.Namespace, key: str, common: tuple[Input
             raise UsageError(OUTPUT_IS_INPUT.format(path=value))
         if attr not in output_folders:
             require_writable_output(value)
-    check_tool_folders(args, folders, evidence_files)
+    try:
+        check_tool_folders(args, folders, evidence_files)
+    except UsageError as exc:
+        if default_root is None:
+            raise
+        raise UsageError(f"{exc} {SERVER_DEFAULT_ROOT_HINT.format(folder=default_root)}") from None
 
 
 # R19-4 (round 19): a tool folder named by a variable inside a scanned folder.
