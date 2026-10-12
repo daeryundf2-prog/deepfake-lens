@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 from .output_files import write_output_text
+from .audio_worker import in_worker_scope
 from .calibration import calibrate_threshold
 from .core import ClassificationResult, EvidenceSignal, ScanItem, SourceConfidence, analyze_file
 from .datasets import discover_dataset, is_positive_label
@@ -51,6 +52,7 @@ def write_fusion_profile(path: Path | str, profile: FusionProfile) -> None:
     write_output_text(output, json_dumps(profile.to_json(), ensure_ascii=False, indent=2) + "\n")  # R19-6
 
 
+@in_worker_scope  # R20-2: one audio worker for all files (was one per file)
 def calibrate_fusion_profile(
     root: Path | str,
     *,

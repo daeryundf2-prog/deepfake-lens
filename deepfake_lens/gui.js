@@ -383,7 +383,8 @@
         function invisibleOrSpace(ch) {
             const code = ch.codePointAt(0);
             // R19-8: U+2800 (renders blank) and private-use characters (\p{Co}) too — as result_text.
-            return (/\p{Zs}/u.test(ch) && ch !== ' ') || code === 0x2800 || /\p{Co}/u.test(ch)
+            // R20-8: and unassigned code points / noncharacters (\p{Cn}).
+            return (/\p{Zs}/u.test(ch) && ch !== ' ') || code === 0x2800 || /\p{Co}|\p{Cn}/u.test(ch)
                 || DEFAULT_IGNORABLE_RANGES.some(([low, high]) => code >= low && code <= high);
         }
 
@@ -2432,7 +2433,7 @@
                 boxes +
                 ((body.unsigned || []).length ? `<section class="a4-box">${lines(body.unsigned)}</section>` : '') +
                 `<div class="a4-signoff">${lines(body.signoff || [])}<p class="a4-court">${docHtml(body.court)}</p></div>` +
-                '<p class="a4-sign">서명은 내보낼 때 서버가 서명 키로 붙입니다(키가 없으면 "서명 없음"). 내보낼 때 서버가 파일을 다시 분석해, 검사 뒤 바뀌었거나 지워진 파일이 있으면 내보내기를 거부합니다. 다만 경로 중간의 폴더가 링크로 바뀐 파일은 거부되지 않고 서명 제외로 옮겨집니다.</p>';
+                '<p class="a4-sign">서명은 내보낼 때 서버가 서명 키로 붙입니다(키가 없으면 "서명 없음"). 내보낼 때 서버가 파일을 다시 분석해, 검사 뒤 바뀌었거나 지워진 파일이 있으면 내보내기를 거부합니다(경로 중간의 폴더가 링크로 바뀐 파일도). 서버가 다시 분석할 수 없는 행(올린 파일, 검사 때 해시가 없던 행 등)은 서명 제외로 실립니다.</p>';
         }
 
         const EXPORT_SPECS = {
@@ -2550,7 +2551,7 @@
             box.hidden = exportWarnings.size === 0;
             if (box.hidden) return;
             $('export-warn-text').textContent = `이 검사의 행 ${exportWarnings.size}개가 서명 제외로 옮겨졌습니다(${[...exportWarnFormats].join(', ')}). ` +
-                '검사 뒤 경로의 폴더가 링크로 바뀌었을 수 있습니다 — 다시 검사하십시오.';
+                '서버가 다시 분석할 수 없는 행입니다(예: 검사 때 해시가 없던, 링크로 바뀐 폴더 뒤의 행) — 다시 검사하면 지금의 폴더대로 다시 셉니다.';
             const list = $('export-warn-list');
             list.innerHTML = '';
             const rows = [...exportWarnings];
@@ -2668,7 +2669,8 @@
                             message = exportErrorText(errorBody, res.status, itemByPath);
                             if (res.status === 409 && Array.isArray(errorBody.changed_rows)) changedRows = errorBody.changed_rows;
                             // L-2: a chosen row that was never re-analyzed — scanning again helps
-                            // when it is a row of the scan (a folder became a link), not an upload.
+                            // when it is a row of the scan (one the scan did not hash, behind a folder
+                            // that became a link — a hashed one is the R20-5 409), not an upload.
                             const lost = Array.isArray(errorBody.not_rederived_exhibit_paths) ? errorBody.not_rederived_exhibit_paths : [];
                             rescan = lost.some(row => { const item = itemByPath(String(row && row.path)); return Boolean(item && item.source !== 'upload'); });
                         } catch (e) { message = '서버 오류 (HTTP ' + res.status + ')'; }
@@ -2692,8 +2694,9 @@
                 const outcome = exportSuccessOutcome(spec[3], seq, changedPaths.size, exportFailure);
                 if (outcome.clearFailure) exportFailure = null;
                 renderExportAlert();
-                // GUI-REV4 K-5 / GUI-REV5 L-2: rows of this scan the server listed as excluded (e.g. a
-                // folder on the path became a link since the scan — not refused by R19-13) are
+                // GUI-REV4 K-5 / GUI-REV5 L-2: rows of this scan the server listed as excluded (merge of
+                // R20-5: a hashed row behind a folder that became a link is a 409 now; a row the scan did
+                // not hash, e.g. a link row or a skipped row, is still excluded) are
                 // named after every format, and the warning stays for these results.
                 const excluded = scanRowsExcluded(decodeExcludedHeader(res.headers.get('X-Deepfake-Lens-Excluded-Rows')));
                 if (excluded.length) {

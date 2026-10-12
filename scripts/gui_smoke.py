@@ -657,14 +657,20 @@ def main() -> int:
             page.wait_for_function("() => currentView === 'report'")
             assert "이전 검사의 것이라 무시했습니다" in page.locator("#export-note").inner_text(), page.locator("#export-note").inner_text()
 
-            # 6e. GUI-REV4 K-5: a folder on a row's path replaced by a link after the scan is not
-            #     refused (phase-0 choice: the row is only excluded) — the GUI names the scan rows
-            #     the signed JSON excluded and offers 다시 검사.
+            # 6e. GUI-REV4 K-5, adapted at the merge of phase0 R20-5: a folder on a hashed row's
+            #     path replaced by a link after the scan is now a changed row (409, it was only
+            #     excluded before). A row the scan did not hash (a file link, sub2/l.txt) behind a
+            #     folder that became a link is still only excluded — the GUI names it under 주의
+            #     after any format.
             linked = mutable / "lnk"
             (linked / "sub").mkdir(parents=True)
             (linked / "sub" / "k.txt").write_text("링크 시험 글", encoding="utf-8")
             (mutable / "target").mkdir()
             (mutable / "target" / "k.txt").write_text("링크 시험 글", encoding="utf-8")
+            (linked / "sub2").mkdir()
+            (linked / "sub2" / "l.txt").symlink_to(mutable / "target" / "k.txt")
+            (mutable / "target2").mkdir()
+            (mutable / "target2" / "l.txt").symlink_to(mutable / "target" / "k.txt")
             page.evaluate("location.hash = '#/scan'")
             page.fill("#folder-path", str(linked))
             page.evaluate("document.getElementById('opt-recursive').checked = true; document.getElementById('opt-dedupe').checked = false")
@@ -696,13 +702,32 @@ def main() -> int:
             assert page.locator("#error-region .err-item", has_text="다시 분석할 수 없는").count() == 0, "the refusal went to the error region"
             page.evaluate("() => { window.fetch = window.__realFetch; }")
             console_errors[:] = [e for e in console_errors if "status of 400" not in e]
+            # R20-5: the real export of the hashed row behind the new link is refused (409), said
+            # once next to the buttons with the server's reason.
+            page.click("#exp-report")
+            page.wait_for_function("() => changedPaths.has('sub/k.txt')", timeout=120_000)
+            assert "sub/k.txt" in page.locator("#export-alert").inner_text()
+            assert "링크" in page.locator("#export-alert").inner_text(), page.locator("#export-alert").inner_text()
+            console_errors[:] = [e for e in console_errors if "status of 409" not in e]
+            page.click("#export-alert-rescan")
+            page.wait_for_function("() => currentView === 'scan' && document.activeElement && document.activeElement.id === 'analyze-btn'", timeout=10_000)
+            page.click("#analyze-btn")
+            page.wait_for_function("() => scanBusy === false && currentView === 'ledger' && results.length > 0", timeout=180_000)
+            row = page.evaluate("(results.find(e => e.item.path === 'sub2/l.txt') || {}).item || null")
+            assert row is not None and not row.get("sha256"), page.evaluate("results.map(e => [e.item.path, e.item.status, Boolean(e.item.sha256)])")
+            _shutil.rmtree(linked / "sub2")
+            (linked / "sub2").symlink_to(mutable / "target2", target_is_directory=True)
+            page.evaluate("location.hash = '#/report'")
+            page.wait_for_function("() => currentView === 'report'")
+            if page.evaluate("caseUnconfirmed()"):
+                page.get_by_role("button", name="이 폴더의 사건이 맞음").click()
             # L-2: the HTML report (no JSON body to read) names the excluded scan row too, under
-            # its own 주의 marker; the success clears the earlier failure, not the warning.
+            # its own 주의 marker.
             with page.expect_download():
                 page.click("#exp-report")
             page.wait_for_selector("#export-warn:not([hidden])", timeout=60_000)
-            assert "sub/k.txt" in page.locator("#export-warn").inner_text()
-            assert page.locator("#export-alert").is_hidden(), "a later success left the earlier failure standing"
+            assert "sub2/l.txt" in page.locator("#export-warn").inner_text()
+            assert page.locator("#export-alert").is_hidden(), "the alert outlived the rescan"
             with page.expect_download():
                 page.click("#exp-signed")
             page.wait_for_function("() => document.getElementById('export-note').textContent.includes('서명된 JSON — 내려받았습니다')")

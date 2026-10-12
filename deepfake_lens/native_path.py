@@ -194,6 +194,30 @@ NATIVE_ALIAS_MAX = 65536
 _ALIASES: OrderedDict[str, str] = OrderedDict()
 # Every session folder this process created (normally one).
 _SESSION_DIRS: list[str] = []
+# R20-6 (round 20): output temp files being written now (output_files.write_output_bytes), removed by
+# shutdown_session — a SIGTERM / SIGHUP during the write ends the process through _cleanup_then_default,
+# where no ``except`` of the writer runs. A dict (insertion order, atomic add/pop under the GIL), no lock.
+_OUTPUT_TEMPS: dict[str, None] = {}
+
+
+def track_output_temp(path: str) -> None:
+    """R20-6: ``path`` is an output temp file being written; :func:`shutdown_session` removes it."""
+    _OUTPUT_TEMPS[path] = None
+
+
+def untrack_output_temp(path: str) -> None:
+    """R20-6: the write of ``path`` is over (renamed over its target or removed)."""
+    _OUTPUT_TEMPS.pop(path, None)
+
+
+def _remove_output_temps() -> None:
+    """R20-6: remove the output temp files still being written (signal-handler safe: no lock, no import)."""
+    for path in list(_OUTPUT_TEMPS):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        _OUTPUT_TEMPS.pop(path, None)
 # A staged base name: "<6-digit counter>-<12 hex><.ext>" (see _stage).
 _STAGED_BASE = r"\d{6}-[0-9a-f]{12}(?:\.[0-9a-z]{1,%d})?" % (MAX_SUFFIX_CHARS - 1)
 _STAGED_NAME = re.compile(rf"(?<![\w.-])({_STAGED_BASE})(?![\w.-])")
@@ -273,9 +297,23 @@ def _base_candidates() -> list[str]:
         override = os.environ.get(name)
         if override:
             candidates.append(override)
-    candidates.append(tempfile.gettempdir())
+    candidates.append(_system_temp_dir())
     candidates.append("C:\\Windows\\Temp" if os.name == "nt" else "/tmp")
     return candidates
+
+
+def _system_temp_dir() -> str:
+    """The system temp folder (``TMPDIR``/``TEMP``/``TMP``, else tempfile's choice).
+
+    R20-7 (round 20): read from the variables first — ``tempfile.gettempdir()``
+    proves a folder by writing and removing a file in it, which changed the
+    mtime of an evidence folder named by ``TMPDIR`` before it could be skipped.
+    """
+    for name in ("TMPDIR", "TEMP", "TMP"):
+        value = os.environ.get(name)
+        if value:
+            return value
+    return tempfile.gettempdir()
 
 
 def _is_windows() -> bool:
@@ -515,8 +553,11 @@ def shutdown_session() -> bool:
     """R15-1: the process is ending — "종료 중" flag, children stopped, folders removed until gone.
 
     Signal-handler safe (no lock). True when no session folder is left.
+    R20-6: also removes the output temp files being written
+    (:func:`track_output_temp`).
     """
     shutdown.begin()
+    _remove_output_temps()
     return cleanup_session()
 
 
@@ -598,13 +639,54 @@ def _register_session_folder(created: str) -> None:
         _ATEXIT_REGISTERED = True
 
 
+# R20-7 (round 20): the folders the running command examines (set by the CLI before any work).
+_EXAMINED_FOLDERS: list[str] = []
+TEMP_BASE_INSIDE_EXAMINED = "검사 대상 폴더 안"
+
+
+def set_examined_folders(folders: list[str]) -> None:
+    """R20-7: the folders the command reads — a temp-folder candidate inside one is skipped (with the R15-6 notice).
+
+    When the system temp folder itself is inside one, Python's own default
+    (``tempfile.tempdir``, used by any library that makes a temp file without
+    a folder) becomes the session folder's base, so nothing probes or writes
+    the evidence folder.
+    """
+    _EXAMINED_FOLDERS[:] = [os.path.realpath(folder) for folder in folders]
+    if tempfile.tempdir is None and _inside_examined(_system_temp_dir()):
+        base = usable_temp_base()
+        if base is not None:
+            tempfile.tempdir = base
+
+
+def _inside_examined(base: str) -> bool:
+    real = os.path.realpath(base)
+    return any(real == folder or real.startswith(folder.rstrip(os.sep) + os.sep) for folder in _EXAMINED_FOLDERS)
+
+
+def usable_temp_base() -> str | None:
+    """R20-7: the candidate the session folder would be made in now, or None when none is usable."""
+    for base in _base_candidates():
+        if not _unusable_base(base) and os.access(base, os.W_OK):
+            return base
+    return None
+
+
 def _unusable_base(base: str) -> str:
-    """R15-6: why ``base`` cannot hold the session folder ("" when it can)."""
+    """R15-6: why ``base`` cannot hold the session folder ("" when it can).
+
+    R20-7 (round 20): a candidate inside a folder the command examines
+    (``TMPDIR=<evidence>/tmpd``) — the session folder (staged copies, the
+    numba copies, extractions) was made and removed inside the evidence
+    folder, changing its mtime.
+    """
     if not base.isascii():
         return "경로에 ASCII가 아닌 문자가 있음"
     if not os.path.isdir(base):
         # R17-11 (round 17): a file there said "폴더가 없음".
         return "폴더가 아니라 파일임" if os.path.exists(base) else "폴더가 없음"
+    if _EXAMINED_FOLDERS and _inside_examined(base):
+        return TEMP_BASE_INSIDE_EXAMINED
     return ""
 
 

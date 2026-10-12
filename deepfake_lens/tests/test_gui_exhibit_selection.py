@@ -349,6 +349,19 @@ class WebReportSelectionTest(unittest.TestCase):
         self.assertEqual(webapp_api.api_status(gone), 409)
         self.assertIn(chosen, [row["path"] for row in gone["changed_rows"]])
 
+    def test_preview_refuses_a_malformed_duplicate_too(self) -> None:
+        """Merge of phase0 R20-4: a posted duplicate naming itself is a malformed request (400)
+        for the GUI's evidence-preview as well as for the signed formats."""
+        dup = dict(next(row for row in self.rows if row.get("result")))
+        dup.update(status="duplicate", duplicate_of=dup["path"])
+        rows = [dup if row["path"] == dup["path"] else row for row in self.rows]
+        for fmt in ("evidence-preview", "json"):
+            with self.subTest(fmt=fmt):
+                out = webapp_api._report_payload(self._body(items=rows), fmt, default_folder=self.folder)
+                assert isinstance(out, dict), out
+                self.assertEqual(webapp_api.report_error_status(out), 400, out)
+                self.assertIn("duplicate_of", out["error"])
+
     def test_excluded_rows_are_named_in_response_headers(self) -> None:
         """GUI-REV5 L-2: a successful report of any format names the rows it lists as 서명 제외
         (here an upload the server never re-analyzes) in X-Deepfake-Lens-Excluded-* headers, so

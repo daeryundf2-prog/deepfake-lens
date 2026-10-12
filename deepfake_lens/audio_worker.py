@@ -28,10 +28,33 @@ Two changes close it:
    :func:`shutdown.start_tracked` — supervised, tracked, stopped on
    shutdown like every child). A native crash ends the worker, not the
    scan: the check is ``failed`` "NativeCrashError: … (신호 SIGSEGV)".
-   Inside a scan (:func:`worker_scope`) each scanning thread keeps one
-   worker (its supervisor is bound to that thread) and the scan ends them
-   all; outside a scan a worker serves one request. A worker also exits
-   after :data:`WORKER_IDLE_SECONDS` without a request.
+   Inside a :func:`worker_scope` each thread keeps one worker (its
+   supervisor is bound to that thread) and the scope ends them all; a
+   call outside any scope starts a worker for that one request. A worker
+   also exits after :data:`WORKER_IDLE_SECONDS` without a request.
+
+R20-2 (round 20): every command and request that analyzes more than one
+file opens a scope — a folder scan (core), ``batch`` (its thread pool's
+tasks bound with :meth:`WorkerScope.bind`), ``eval`` / ``benchmark`` /
+calibration (evaluate), ``feedback``, ``fusion``, a web upload (both
+servers) and the report's re-analysis — so one worker serves all of its
+files. They used to start one worker per file (about 2 s each, 7 s
+without a published numba cache): batch of 100 WAV files 11.8 s → 87 s,
+an upload of 30 WAV files 3.2 s → 30 s. A scope opened while another is
+active on the same thread is that scope (a scan inside a report keeps
+the report's worker); the outermost one ends the workers.
+
+R20-3 (round 20): the protocol is framed and checked. Each worker gets a
+random token (argv); after moving fd 1 to fd 2 it writes one ready line
+``{"ready": <token>}`` — anything a ``sitecustomize``, a ``.pth`` file or a
+native initializer wrote to fd 1 before that is start-up output, logged and
+skipped (at most :data:`_MAX_STARTUP_LINES` lines). Every request carries an
+``id`` and every reply must be one JSON object with the worker's token and
+that id. Any other reply — unparseable, another id, no newline, over
+:data:`_MAX_REPLY_BYTES` — is a :class:`WorkerProtocolError`: that file's
+check fails and the worker is stopped and never asked again. (One line of
+start-up output used to shift every later reply by one file: each file got
+the audio features of the file before it, with no warning.)
 
 A decode error raised in the worker is rebuilt in this process as an
 exception of the same class name, message, errno and file name, so
@@ -66,6 +89,8 @@ NUMBA_CACHE_ENV = "NUMBA_CACHE_DIR"
 # an idle worker a little earlier, so it never sends to one that is exiting.
 WORKER_IDLE_SECONDS = 300.0
 _POOL_RETIRE_SECONDS = 240.0
+# R20-2: the thread-count variables of the numeric libraries a worker loads (numpy's BLAS, OpenMP, numba).
+WORKER_THREAD_ENV = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS")
 # R19-2: one extraction (decode of at most --segment seconds + features).
 WORKER_REQUEST_TIMEOUT_SECONDS = 600.0
 # R19-2: the reason of a worker that died during a request.
@@ -82,8 +107,13 @@ WORKER_BOOT = (
     "import sys\n"
     "sys.path.insert(0, sys.argv[1])\n"
     "from deepfake_lens.audio_worker import serve\n"
-    "serve()\n"
+    "serve(sys.argv[2])\n"
 )
+# R20-3: the reason of a reply that is not the answer to the request sent.
+PROTOCOL_ERROR_MESSAGE = "오디오 특징 추출 작업자의 응답이 요청과 맞지 않아 작업자를 중단했습니다({detail}) — 이 검사만 실패로 기록했습니다"
+# R20-3: start-up output tolerated before the ready line, and the longest reply line.
+_MAX_STARTUP_LINES = 64
+_MAX_REPLY_BYTES = 4 * 1024 * 1024
 
 
 class NativeCrashError(RuntimeError):
@@ -92,6 +122,10 @@ class NativeCrashError(RuntimeError):
 
 class WorkerTimeoutError(RuntimeError):
     """R19-2: the worker did not answer within :data:`WORKER_REQUEST_TIMEOUT_SECONDS`."""
+
+
+class WorkerProtocolError(RuntimeError):
+    """R20-3: the worker's reply is not a framed answer to the request sent (the worker is stopped)."""
 
 
 # --- numba cache ------------------------------------------------------------
@@ -219,8 +253,12 @@ def _serve_one(request: dict[str, Any]) -> dict[str, Any]:
     return {"features": asdict(features) if features is not None else None}
 
 
-def serve() -> None:
-    """The worker loop: one JSON request per line on stdin, one JSON reply per line on fd 1."""
+def serve(token: str = "") -> None:
+    """The worker loop: one JSON request per line on stdin, one JSON reply per line on fd 1.
+
+    R20-3: first the ready line ``{"ready": token}``; every reply carries
+    ``token`` and the request's ``id``.
+    """
     import select
 
     global _PROCESS_CACHE_DIR
@@ -229,6 +267,8 @@ def serve() -> None:
     # log), so a library that prints cannot corrupt the protocol.
     replies = os.fdopen(os.dup(1), "wb")
     os.dup2(2, 1)
+    replies.write(json.dumps({"ready": token}).encode("ascii") + b"\n")
+    replies.flush()
     incoming = sys.stdin.buffer
     while True:
         if os.name == "posix":
@@ -238,15 +278,27 @@ def serve() -> None:
         line = incoming.readline()
         if not line:
             return
+        request_id: object = None
         try:
-            reply = _serve_one(json.loads(line))
+            request = json.loads(line)
+            request_id = request.get("id")
+            reply = _serve_one(request)
         except Exception as exc:  # noqa: BLE001 — a malformed request still gets an answer
             reply = _error_reply(exc)
+        reply.update(token=token, id=request_id)
         replies.write(json.dumps(reply, ensure_ascii=True).encode("ascii") + b"\n")
         replies.flush()
 
 
 # --- parent side ------------------------------------------------------------
+
+
+def _parsed(line: bytes) -> object:
+    """R20-3: one reply line as JSON, or None when it is not JSON."""
+    try:
+        return json.loads(line)
+    except ValueError:
+        return None
 
 
 def _rebuilt_exception(error: dict[str, Any]) -> Exception:
@@ -280,16 +332,30 @@ def _native_log() -> IO[bytes] | None:
 
 class _Worker:
     def __init__(self) -> None:
+        # The thread that started it: its supervisor dies with that thread
+        # (PR_SET_PDEATHSIG), so only that thread may use it.
+        self.owner = threading.current_thread()
+        self.token = os.urandom(8).hex()  # R20-3
+        self.next_id = 0
+        self.ready = False
         self.cache_dir, self.seeded = private_cache_dir()
         self.published = self.seeded
         self.expired = False
         self.last_used = time.monotonic()
         env = dict(os.environ)
         env[NUMBA_CACHE_ENV] = self.cache_dir
+        # R20-2 (round 20): one worker extracts one file at a time (a scan gets its parallelism from
+        # one worker per thread), so its numeric libraries run one thread each unless the operator
+        # chose otherwise. With the default (a thread per core) every worker's OpenMP / OpenBLAS pool
+        # spun on all cores: a scan of 300 audio/video files used 190-220 s of CPU for 50 s of wall
+        # time (2130892, in-process: the same), and 4 workers made a scan 16-22 % slower than
+        # 2130892. The features are byte-identical (the 300-row comparison).
+        for name in WORKER_THREAD_ENV:
+            env.setdefault(name, "1")
         log = _native_log()
         try:
             self.proc = shutdown.start_tracked(
-                [sys.executable, "-P", "-c", WORKER_BOOT, _package_parent()],
+                [sys.executable, "-P", "-c", WORKER_BOOT, _package_parent(), self.token],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log if log is not None else subprocess.DEVNULL, env=env,
                 cwd=self.cache_dir,  # never the scan's working folder (possibly the evidence folder)
             )
@@ -304,16 +370,38 @@ class _Worker:
         self.expired = True
         shutdown.stop_tracked(self.proc)
 
+    def _line(self) -> bytes:
+        assert self.proc.stdout is not None
+        return self.proc.stdout.readline(_MAX_REPLY_BYTES)
+
+    def _wait_ready(self) -> bool:
+        """R20-3: skip start-up output up to the ready line; False when the worker ended first."""
+        for _ in range(_MAX_STARTUP_LINES):
+            line = self._line()
+            if not line:
+                return False
+            if _parsed(line) == {"ready": self.token}:
+                self.ready = True
+                return True
+            logger.warning("audio feature worker: start-up output before the ready line skipped: %r", line[:200])
+        raise WorkerProtocolError(PROTOCOL_ERROR_MESSAGE.format(detail=f"준비 신호 전 출력 {_MAX_STARTUP_LINES}줄 초과"))
+
     def ask(self, request: dict[str, Any], timeout: float) -> dict[str, Any] | None:
-        """The reply, or None when the worker ended without one."""
+        """The reply, or None when the worker ended without one.
+
+        R20-3: raises :class:`WorkerProtocolError` for a reply that is not
+        this request's framed answer — the caller stops the worker.
+        """
         assert self.proc.stdin is not None and self.proc.stdout is not None
+        self.next_id += 1
+        request_id = self.next_id
         timer = threading.Timer(timeout, self._expire)
         timer.daemon = True
         timer.start()
         try:
-            self.proc.stdin.write(json.dumps(request, ensure_ascii=True).encode("ascii") + b"\n")
+            self.proc.stdin.write(json.dumps({**request, "id": request_id}, ensure_ascii=True).encode("ascii") + b"\n")
             self.proc.stdin.flush()
-            line = self.proc.stdout.readline()
+            line = self._line() if self.ready or self._wait_ready() else b""
         except (OSError, ValueError):
             line = b""
         finally:
@@ -321,7 +409,11 @@ class _Worker:
         self.last_used = time.monotonic()
         if not line:
             return None
-        reply: dict[str, Any] = json.loads(line)
+        reply = _parsed(line)
+        if not line.endswith(b"\n") or not isinstance(reply, dict):
+            raise WorkerProtocolError(PROTOCOL_ERROR_MESSAGE.format(detail="해석할 수 없는 응답"))
+        if reply.pop("token", None) != self.token or reply.pop("id", None) != request_id:
+            raise WorkerProtocolError(PROTOCOL_ERROR_MESSAGE.format(detail="다른 요청의 응답"))
         return reply
 
     def close(self) -> None:
@@ -339,13 +431,15 @@ class _Worker:
                 pass
 
 
-# R19-2: where workers live. Inside a scan (:func:`worker_scope`, entered by
-# core._scan_specs) each thread of the scan keeps one worker for the scan's
-# files and the scope ends them when the scan ends. The Linux supervisor of a
-# child is bound to the thread that started it (PR_SET_PDEATHSIG fires when
-# that thread ends), so a worker is only ever used by the thread that started
-# it. Outside a scan (one file: classify, the web server's analyze-file) a
-# worker serves one request and is ended. No worker outlives its scan.
+# R19-2: where workers live. Inside a scope (:func:`worker_scope`, entered by
+# core._scan_specs and, R20-2, by every multi-file command and request) each
+# thread keeps one worker for the scope's files and the scope ends them when
+# it ends. The Linux supervisor of a child is bound to the thread that started
+# it (PR_SET_PDEATHSIG fires when that thread ends), so a worker is only ever
+# used by the thread that started it (R20-2: checked by thread object, not
+# only by ident — a finished pool thread's ident can be reused). Outside any
+# scope (one file: classify, the web server's analyze-file) a worker serves
+# one request and is ended. No worker outlives its scope.
 _LOCAL = threading.local()
 _ALL: list[_Worker] = []
 _ALL_LOCK = threading.Lock()
@@ -372,17 +466,37 @@ class WorkerScope:
         return run
 
     def worker(self) -> _Worker:
+        me = threading.current_thread()
         ident = threading.get_ident()
         with self._lock:
             worker = self._workers.get(ident)
-        if worker is not None and worker.alive() and time.monotonic() - worker.last_used < _POOL_RETIRE_SECONDS:
+            # R20-2: the workers of threads that have ended (a finished thread
+            # pool of a scan inside this scope) — their supervisors are gone.
+            ended = [(key, held) for key, held in self._workers.items() if not held.owner.is_alive()]
+            for key, _ in ended:
+                del self._workers[key]
+        for _, held in ended:
+            _forget(held)
+        if worker is not None and worker.owner is me and worker.alive() and time.monotonic() - worker.last_used < _POOL_RETIRE_SECONDS:
             return worker
-        if worker is not None:
+        if worker is not None and all(worker is not held for _, held in ended):
             _forget(worker)
         worker = _start()
         with self._lock:
             self._workers[ident] = worker
         return worker
+
+    def drop(self, worker: _Worker) -> None:
+        """R20-3: forget a stopped worker (its thread starts a new one for the next file)."""
+        with self._lock:
+            for key, held in list(self._workers.items()):
+                if held is worker:
+                    del self._workers[key]
+
+    def size(self) -> int:
+        """How many workers the scope holds (tests)."""
+        with self._lock:
+            return len(self._workers)
 
     def close(self) -> None:
         with self._lock:
@@ -394,15 +508,35 @@ class WorkerScope:
 
 @contextmanager
 def worker_scope() -> Iterator[WorkerScope]:
-    """R19-2: the audio workers of one scan — this thread's scope until the end, then every worker ended."""
-    scope = WorkerScope()
+    """R19-2: the audio workers of one scan — this thread's scope until the end, then every worker ended.
+
+    R20-2: inside an active scope of this thread, the same scope (the
+    outermost one ends the workers) — a scan run by a multi-file command
+    keeps the command's worker instead of starting another.
+    """
     previous = getattr(_LOCAL, "scope", None)
+    if previous is not None:
+        yield previous
+        return
+    scope = WorkerScope()
     _LOCAL.scope = scope
     try:
         yield scope
     finally:
         _LOCAL.scope = previous
         scope.close()
+
+
+def in_worker_scope(func: Callable[..., T]) -> Callable[..., T]:
+    """R20-2: ``func`` run inside :func:`worker_scope` — for a function that analyzes many files on this thread."""
+    import functools
+
+    @functools.wraps(func)
+    def run(*args: Any, **kwargs: Any) -> T:
+        with worker_scope():
+            return func(*args, **kwargs)
+
+    return run
 
 
 def _start() -> _Worker:
@@ -457,9 +591,17 @@ def extract_features(native_path: str, *, segment_seconds: int) -> dict[str, Any
         worker = scope.worker() if scope is not None else _start()
         try:
             reply = worker.ask(request, WORKER_REQUEST_TIMEOUT_SECONDS)
+        except WorkerProtocolError as exc:
+            # R20-3: a desynchronized worker is stopped and never asked again; this file's check fails.
+            logger.error("audio feature worker reply for %s refused: %s", native_path, exc)
+            shutdown.stop_tracked(worker.proc)
+            _forget(worker)
+            if scope is not None:
+                scope.drop(worker)
+            raise
         finally:
             if scope is None:
-                _forget(worker)  # outside a scan: one request per worker
+                _forget(worker)  # outside a scope: one request per worker
         if reply is not None:
             if "features" in reply and reply["features"] is not None and not worker.published:
                 worker.published = True

@@ -17,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
 import wave
 from concurrent.futures import ThreadPoolExecutor
@@ -87,7 +88,7 @@ class NativeCrashIsAFailedCheckTest(unittest.TestCase):
             with mock.patch.object(sys, "path", [str(shadow), *sys.path]):
                 reply = audio_worker.extract_features(str(wav), segment_seconds=5)
         self.assertTrue("features" in reply or "missing" in reply, reply)
-        self.assertEqual(shutdown.running_children(), [])
+        self.assertEqual(shutdown.running_children(), [])  # outside a scope: one request, then ended
 
     def test_a_decode_error_in_the_worker_keeps_its_class_and_message(self) -> None:
         error = {"class": "LibsndfileError", "message": "Error opening '<x>': Format not recognised.", "traceback": ""}
@@ -188,6 +189,337 @@ class ConcurrentScansTest(unittest.TestCase):
             self.assertEqual(shutdown.running_children(), [])  # the scope ended its workers
         self.assertEqual(len({json.dumps(reply, sort_keys=True) for reply in replies}), 1)
         self.assertIsNotNone(replies[0]["features"])
+
+
+def _crash_stub(tmp: str) -> Path:
+    """A ``librosa`` whose ``load`` crashes the process (SIGSEGV) for a "crash*" file and raises ValueError otherwise."""
+    stub = Path(tmp, "stub", "librosa")
+    stub.mkdir(parents=True)
+    (stub / "__init__.py").write_text(
+        "import ctypes, os\n"
+        "def load(path, **kw):\n"
+        "    if os.path.basename(str(path)).startswith('crash'):\n"
+        "        ctypes.string_at(0)\n"
+        "    raise ValueError('stub decode ' + os.path.basename(str(path)))\n",
+        encoding="utf-8",
+    )
+    return stub.parent
+
+
+class OneWorkerPerScopeTest(unittest.TestCase):
+    """R20-2 (round 20): outside a scan the worker was started per file (about 2 s each, 7 s without a published
+    numba cache) — batch of 100 WAV files 11.8 s → 87 s, a web upload of 30 WAV files 3.2 s → 30 s, eval /
+    benchmark / calibration the same. Every multi-file command and request now runs in one scope: one worker
+    per thread for all of its files."""
+
+    def _counting(self):
+        started: list[audio_worker._Worker] = []
+        real = audio_worker._start
+
+        def start() -> audio_worker._Worker:
+            worker = real()
+            started.append(worker)
+            return worker
+
+        return started, mock.patch.object(audio_worker, "_start", start)
+
+    def test_a_scope_asks_one_worker_for_many_files_and_ends_it(self) -> None:
+        started, counting = self._counting()
+        with tempfile.TemporaryDirectory() as tmp, counting:
+            wav = Path(tmp, "tone.wav")
+            _write_tone(wav, seconds=1)
+            with audio_worker.worker_scope() as scope:
+                replies = [audio_worker.extract_features(str(wav), segment_seconds=5) for _ in range(4)]
+                with audio_worker.worker_scope() as inner:  # a scan inside the command: the same scope
+                    self.assertIs(inner, scope)
+                    audio_worker.extract_features(str(wav), segment_seconds=5)
+                self.assertEqual(scope.size(), 1)
+                self.assertEqual(len(shutdown.running_children()), 1)  # the inner scope did not end it
+            self.assertEqual(shutdown.running_children(), [])  # the outermost scope ended it
+        self.assertEqual(len(started), 1)
+        self.assertEqual(len({json.dumps(reply, sort_keys=True) for reply in replies}), 1)
+
+    def test_a_worker_runs_its_numeric_libraries_on_one_thread(self) -> None:
+        """Each worker's OpenMP / OpenBLAS pool spun on every core (a scan of 300 audio files: 200 s CPU for 50 s)."""
+        seen: dict[str, str] = {}
+
+        def start(argv, **kwargs):
+            seen.update(kwargs["env"])
+            raise OSError("not started")
+
+        variables = {name: value for name, value in os.environ.items() if name not in audio_worker.WORKER_THREAD_ENV}
+        with mock.patch.dict(os.environ, {**variables, "OMP_NUM_THREADS": "3"}, clear=True), \
+                mock.patch.object(shutdown, "start_tracked", start), self.assertRaises(OSError):
+            audio_worker._Worker()
+        self.assertEqual({name: seen[name] for name in audio_worker.WORKER_THREAD_ENV},
+                         {"OMP_NUM_THREADS": "3", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "NUMBA_NUM_THREADS": "1"})
+
+    def test_outside_a_scope_a_worker_serves_one_request(self) -> None:
+        started, counting = self._counting()
+        with tempfile.TemporaryDirectory() as tmp, counting:
+            wav = Path(tmp, "tone.wav")
+            _write_tone(wav, seconds=1)
+            for _ in range(2):
+                audio_worker.extract_features(str(wav), segment_seconds=5)
+                self.assertEqual(shutdown.running_children(), [])
+        self.assertEqual(len(started), 2)
+
+    def test_a_worker_of_an_ended_thread_is_never_reused(self) -> None:
+        """A finished pool thread's ident may be reused; its worker's supervisor died with the thread (Linux)."""
+        started, counting = self._counting()
+        with tempfile.TemporaryDirectory() as tmp, counting:
+            wav = Path(tmp, "tone.wav")
+            _write_tone(wav, seconds=1)
+            with audio_worker.worker_scope() as scope:
+                for _ in range(2):
+                    with ThreadPoolExecutor(max_workers=1) as pool:
+                        pool.submit(scope.bind(audio_worker.extract_features), str(wav), segment_seconds=5).result()
+                self.assertLessEqual(scope.size(), 1)  # the first thread's worker was ended when the second started
+            self.assertEqual(shutdown.running_children(), [])
+        self.assertEqual(len(started), 2)
+        self.assertFalse(started[0].alive())
+
+    @unittest.skipIf(os.name != "posix", "POSIX signals")
+    def test_a_crash_in_a_scope_fails_that_file_and_the_next_file_gets_a_new_worker(self) -> None:
+        """R19-2's crash isolation holds inside a long-lived scope: the crash fails one file, nothing else."""
+        started, counting = self._counting()
+        with tempfile.TemporaryDirectory() as tmp, counting:
+            stub = _crash_stub(tmp)
+            pythonpath = os.pathsep.join([str(stub), *filter(None, [os.environ.get("PYTHONPATH")])])
+            names = ["a.wav", "crash.wav", "b.wav"]
+            for name in names:
+                Path(tmp, name).write_bytes(b"RIFF")
+            outcomes: list[str] = []
+            with mock.patch.dict(os.environ, {"PYTHONPATH": pythonpath}), audio_worker.worker_scope():
+                for name in names:
+                    try:
+                        audio_worker.extract_features(str(Path(tmp, name)), segment_seconds=5)
+                    except Exception as exc:  # noqa: BLE001
+                        outcomes.append(f"{type(exc).__name__}: {exc}")
+            self.assertEqual(shutdown.running_children(), [])
+        self.assertEqual(outcomes[0], "ValueError: stub decode a.wav")
+        self.assertTrue(outcomes[1].startswith("NativeCrashError: "), outcomes[1])
+        self.assertIn("SIGSEGV", outcomes[1])
+        self.assertEqual(outcomes[2], "ValueError: stub decode b.wav")  # its own answer, from a new worker
+        self.assertEqual(len(started), 2)
+
+
+class FramedProtocolTest(unittest.TestCase):
+    """R20-3 (round 20): one line written to the worker's fd 1 before it moved fd 1 to the log (a sitecustomize,
+    a .pth file, a native initializer) made the parent's ``json.loads`` fail for the first file — and the worker
+    was kept: every later file got the reply meant for the file before it (s1 carried s0's harmonic stability,
+    s2 "high mean pitch (900Hz)" of s1 …), with no warning. Replies are now framed: a ready line after the
+    redirect, the worker's token and the request id in every reply; anything else stops the worker and fails
+    that one file's check."""
+
+    def _fake(self, output: bytes, *, ready: bool = True) -> audio_worker._Worker:
+        import io
+        from types import SimpleNamespace
+
+        worker = audio_worker._Worker.__new__(audio_worker._Worker)
+        worker.token, worker.next_id, worker.ready, worker.expired = "t0k", 0, ready, False
+        worker.proc = SimpleNamespace(stdin=io.BytesIO(), stdout=io.BytesIO(output))  # type: ignore[assignment]
+        return worker
+
+    def test_a_framed_reply_to_this_request_is_accepted(self) -> None:
+        worker = self._fake(b'{"missing": "librosa", "token": "t0k", "id": 1}\n')
+        self.assertEqual(worker.ask({"path": "a"}, 5), {"missing": "librosa"})
+        self.assertEqual(json.loads(worker.proc.stdin.getvalue())["id"], 1)
+
+    def test_start_up_output_before_the_ready_line_is_skipped(self) -> None:
+        worker = self._fake(b'hello from a native init\n{"ready": "t0k"}\n{"missing": "x", "token": "t0k", "id": 1}\n', ready=False)
+        self.assertEqual(worker.ask({"path": "a"}, 5), {"missing": "x"})
+        self.assertTrue(worker.ready)
+
+    def test_endless_start_up_output_is_a_protocol_error(self) -> None:
+        worker = self._fake(b"noise\n" * (audio_worker._MAX_STARTUP_LINES + 1), ready=False)
+        with self.assertRaises(audio_worker.WorkerProtocolError):
+            worker.ask({"path": "a"}, 5)
+
+    def test_every_other_reply_is_a_protocol_error(self) -> None:
+        replies = {
+            "not json": b"hello\n",
+            "a list": b"[1]\n",
+            "another id": b'{"features": null, "token": "t0k", "id": 7}\n',
+            "no id": b'{"features": null, "token": "t0k"}\n',
+            "another token": b'{"features": null, "token": "zzz", "id": 1}\n',
+            "no newline": b'{"features": null, "token": "t0k", "id": 1}',
+        }
+        for name, output in replies.items():
+            with self.subTest(name), self.assertRaises(audio_worker.WorkerProtocolError) as caught:
+                self._fake(output).ask({"path": "a"}, 5)
+            self.assertIn("이 검사만 실패로 기록했습니다", str(caught.exception))
+
+    def test_a_desynchronized_worker_is_stopped_and_the_next_file_gets_a_new_one(self) -> None:
+        bad = self._fake(b'{"features": null, "token": "t0k", "id": 99}\n')
+        bad.owner = threading.current_thread()
+        good = self._fake(b'{"missing": "librosa", "token": "t0k", "id": 1}\n')
+        good.owner = threading.current_thread()
+        pending = [bad, good]
+        stopped: list[object] = []
+        with mock.patch.object(audio_worker, "_start", lambda: pending.pop(0)), \
+                mock.patch.object(shutdown, "stop_tracked", stopped.append), \
+                mock.patch.object(audio_worker._Worker, "close", lambda self: None), \
+                mock.patch.object(audio_worker._Worker, "alive", lambda self: True), \
+                audio_worker.worker_scope() as scope:
+            with self.assertRaises(audio_worker.WorkerProtocolError):
+                audio_worker.extract_features("/a.wav", segment_seconds=5)
+            self.assertEqual(stopped, [bad.proc])
+            self.assertEqual(audio_worker.extract_features("/b.wav", segment_seconds=5), {"missing": "librosa"})
+            self.assertEqual(scope.size(), 1)
+        self.assertEqual(pending, [])
+
+    @unittest.skipIf(os.name != "posix", "POSIX signals")
+    def test_start_up_output_of_a_real_worker_does_not_shift_the_replies(self) -> None:
+        """The verifier's case end to end: each file gets its own reply (the stub's decode error names the file)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = _crash_stub(tmp)
+            marker = Path(tmp, "printed")
+            (stub / "sitecustomize.py").write_text(
+                "import os, sys\n"
+                "if 'audio_worker' in ''.join(getattr(sys, 'orig_argv', [])):\n"
+                "    os.write(1, b'hello from a native init\\n')\n"
+                f"    open({str(marker)!r}, 'a').close()\n",
+                encoding="utf-8",
+            )
+            pythonpath = os.pathsep.join([str(stub), *filter(None, [os.environ.get("PYTHONPATH")])])
+            names = ["s0.wav", "s1.wav", "s2.wav", "s3.wav"]
+            for name in names:
+                Path(tmp, name).write_bytes(b"RIFF")
+            reasons: list[str] = []
+            with mock.patch.dict(os.environ, {"PYTHONPATH": pythonpath}), audio_worker.worker_scope() as scope:
+                for name in names:
+                    try:
+                        audio_worker.extract_features(str(Path(tmp, name)), segment_seconds=5)
+                    except Exception as exc:  # noqa: BLE001
+                        reasons.append(f"{type(exc).__name__}: {exc}")
+                self.assertEqual(scope.size(), 1)
+            self.assertEqual(shutdown.running_children(), [])
+            self.assertTrue(marker.exists())  # the worker did write to its fd 1 before the ready line
+        self.assertEqual(reasons, [f"ValueError: stub decode {name}" for name in names])
+
+
+class MultiFileCommandsRunInOneScopeTest(unittest.TestCase):
+    """R20-2: each function that analyzes many files runs inside a worker scope (the analysis sees an active scope)."""
+
+    def _scope_seen(self, target: str, call) -> list[object]:
+        seen: list[object] = []
+
+        def record(*args, **kwargs):
+            seen.append(getattr(audio_worker._LOCAL, "scope", None))
+            raise OSError("stop")
+
+        with mock.patch(target, record):
+            try:
+                call()
+            except Exception:  # noqa: BLE001 — the recorder stops the analysis
+                pass
+        return seen
+
+    def test_eval_calibration_feedback_fusion_upload_and_report_are_scoped(self) -> None:
+        from deepfake_lens import evaluate, feedback, fusion, webapp_api
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for label in ("real", "fake"):
+                Path(tmp, label).mkdir()
+                _write_tone(Path(tmp, label, "x.wav"), seconds=1)
+                Path(tmp, label, "x.png").write_bytes(b"not decoded: the analysis is replaced")  # datasets list images and text only
+            entry = feedback.FeedbackEntry(path=str(Path(tmp, "real", "x.wav")), expected_label="real")
+            boundary = "b0"
+            body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"x.wav\"\r\n\r\n").encode() + Path(tmp, "real", "x.wav").read_bytes() + f"\r\n--{boundary}--\r\n".encode()
+            cases = {
+                "evaluate_dataset": ("deepfake_lens.evaluate.analyze_file", lambda: evaluate.evaluate_dataset(tmp)),
+                "_score_dataset": ("deepfake_lens.evaluate.analyze_file", lambda: evaluate.calibrate_dataset(tmp)),
+                "observations_live": ("deepfake_lens.feedback.analyze_file", lambda: feedback.observations_live([entry])),
+                "calibrate_fusion_profile": ("deepfake_lens.fusion.analyze_file", lambda: fusion.calibrate_fusion_profile(tmp)),
+                "_analyze_upload_payload": ("deepfake_lens.webapp_api.analyze_path", lambda: webapp_api._analyze_upload_payload(f"multipart/form-data; boundary={boundary}", body)),
+            }
+            for name, (target, call) in cases.items():
+                with self.subTest(name):
+                    seen = self._scope_seen(target, call)
+                    self.assertTrue(seen, "the analysis was not reached")
+                    self.assertIsInstance(seen[0], audio_worker.WorkerScope)
+            self.assertIsNone(getattr(audio_worker._LOCAL, "scope", None))  # every scope ended
+        self.assertTrue(getattr(webapp_api._rederive_report_items, "__wrapped__", None))  # in_worker_scope
+
+    def test_batch_binds_its_thread_pool_to_one_scope(self) -> None:
+        import contextlib
+        import io
+
+        from deepfake_lens.cli import main as cli_main
+
+        seen: list[object] = []
+
+        def record(path, *args, **kwargs):
+            seen.append(getattr(audio_worker._LOCAL, "scope", None))
+            raise OSError("stop")
+
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as out, mock.patch("deepfake_lens.cli.analyze_path", record):
+            for name in ("a.wav", "b.wav", "c.wav"):
+                _write_tone(Path(tmp, name), seconds=1)
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(cli_main(["batch", tmp, "--workers", "2", "--output", str(Path(out, "b.json"))]), 0)
+        self.assertEqual(len(seen), 3)
+        self.assertEqual(len({id(scope) for scope in seen}), 1)
+        self.assertIsInstance(seen[0], audio_worker.WorkerScope)
+
+
+@unittest.skipUnless(HAVE_LIBROSA, "librosa not installed")
+class MultiFileCommandsStartOneWorkerTest(unittest.TestCase):
+    """R20-2 end to end (librosa installed): batch and upload of three WAV files start one worker, not three."""
+
+    def _count_starts(self, call) -> int:
+        started = 0
+        real = audio_worker._start
+
+        def start() -> audio_worker._Worker:
+            nonlocal started
+            started += 1
+            return real()
+
+        with mock.patch.object(audio_worker, "_start", start):
+            call()
+        self.assertEqual(shutdown.running_children(), [])
+        return started
+
+    def test_batch_upload_and_eval(self) -> None:
+        import contextlib
+        import io
+
+        from deepfake_lens import evaluate, webapp_api
+        from deepfake_lens.cli import main as cli_main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp, "wav")
+            for label in ("real", "fake"):
+                Path(folder, label).mkdir(parents=True)
+            names = [Path(folder, "real", "a.wav"), Path(folder, "real", "b.wav"), Path(folder, "fake", "c.wav")]
+            for index, path in enumerate(names):
+                _write_tone(path, seconds=1, hz=220.0 + 110 * index)
+            flat = Path(tmp, "flat")
+            flat.mkdir()
+            for path in names:
+                (flat / path.name).write_bytes(path.read_bytes())
+            boundary = "b0"
+            body = b"".join(
+                (f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"{path.name}\"\r\n\r\n").encode() + path.read_bytes() + b"\r\n"
+                for path in names
+            ) + f"--{boundary}--\r\n".encode()
+
+            def batch() -> None:
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(cli_main(["batch", str(flat), "--workers", "1", "--output", str(Path(tmp, "b.json"))]), 0)
+
+            def upload() -> None:
+                payload = webapp_api._analyze_upload_payload(f"multipart/form-data; boundary={boundary}", body)
+                coverage = [{entry["check"]: entry["status"] for entry in row["result"]["coverage"]} for row in payload["items"]]
+                self.assertEqual([entry["audio_features"] for entry in coverage], ["ran"] * 3)
+
+            self.assertEqual(self._count_starts(batch), 1)
+            self.assertEqual(self._count_starts(upload), 1)
+            # eval / benchmark / calibration datasets list images and text only (datasets.SUPPORTED_DATASET_EXTENSIONS):
+            # no worker at all — the scope starts one lazily, on the first audio file.
+            self.assertEqual(self._count_starts(lambda: evaluate.evaluate_dataset(folder)), 0)
 
 
 if __name__ == "__main__":

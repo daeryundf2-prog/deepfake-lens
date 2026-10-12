@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import json
 import sys
 import tempfile
 import unittest
@@ -234,4 +235,43 @@ class UnknownArgumentUsageTest(unittest.TestCase):
         # A scan option before the folder (no command named) is still the default scan.
         code, err = self._run(["--pixel", "deep", "/nonexistent-r19-9"])
         self.assertEqual(code, 2, err)
+        self.assertIn("폴더를 찾을 수 없습니다", err)
+
+    def test_a_known_option_before_a_command_is_read_by_that_command(self) -> None:
+        """R20-9 (round 20): `--verbose scan X` was "deepfake-lens scan: 오류: 알 수 없는 인수: X" (read as
+        `scan --verbose scan X`, folder "scan"), `--verbose doctor` "폴더를 찾을 수 없습니다: doctor", `help scan`
+        "알 수 없는 인수: scan". Known options before the command now go after it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "note.txt").write_text("메모입니다.", encoding="utf-8")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                code = main(["--verbose", "--format", "json", "scan", tmp])
+            self.assertEqual(code, 0)
+            self.assertEqual([item["path"] for item in json.loads(out.getvalue())["items"]], ["note.txt"])
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main(["--format=json", "scan", tmp]), 0)
+        code, err = self._run(["--verbose", "doctor", "--format", "json"])  # every command takes --verbose
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("폴더를 찾을 수 없습니다", err)
+        code, err = self._run(["--recursive", "doctor"])  # doctor takes no --recursive: doctor's own parser says so
+        self.assertEqual(code, 2, err)
+        self.assertIn("deepfake-lens doctor: 오류: 알 수 없는 인수: --recursive", err)
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outdir:
+            Path(tmp, "a.txt").write_text("메모입니다.", encoding="utf-8")
+            code, err = self._run(["--verbose", "corpus", "build", tmp, "--out", str(Path(outdir, "m.json"))])
+            self.assertEqual(code, 0, err)  # corpus build takes --verbose too (cli.md: "any command")
+            self.assertTrue(Path(outdir, "m.json").is_file())
+        code, err = self._run(["--recursive", "corpus", "build", "/nonexistent-r20-9", "--out", "/tmp/r20-9.json"])
+        self.assertEqual(code, 2, err)
+        self.assertIn("deepfake-lens corpus build: 오류: 알 수 없는 인수: --recursive", err)  # corpus build's parser, not scan's
+        self.assertNotIn("deepfake-lens scan", err)
+        for argv in (["help", "scan"], ["scan", "--help"]):
+            out = io.StringIO()
+            with self.subTest(argv=argv), contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    main(argv)
+            self.assertEqual(caught.exception.code, 0)
+            self.assertTrue(out.getvalue().startswith("사용법: deepfake-lens scan"), out.getvalue()[:200])
+        # Options before a folder (no command) are still the default scan; the R19-9 rule for unknown options holds.
+        code, err = self._run(["--recursive", "/nonexistent-r20-9"])
         self.assertIn("폴더를 찾을 수 없습니다", err)

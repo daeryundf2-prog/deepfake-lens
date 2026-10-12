@@ -48,7 +48,10 @@ class WholeFileTest(unittest.TestCase):
         self.assertEqual(str(caught.exception), f"출력 파일을 쓸 수 없습니다: {target} (디스크 공간이 부족합니다(오류 번호 28))")
 
     def test_an_interrupted_write_leaves_the_old_report_and_no_temp_file(self) -> None:
-        """R19-6: KeyboardInterrupt (Ctrl-C) and SystemExit (SIGTERM's handler) during the write."""
+        """R19-6: KeyboardInterrupt (Ctrl-C) and SystemExit raised in the writing thread during the write.
+
+        R20-6 (round 20): a SIGTERM / SIGHUP raises neither (the CLI's handler ends the process) —
+        SignalDuringWriteTest covers it."""
         for raised in (KeyboardInterrupt(), SystemExit(143)):
             with self.subTest(raised=type(raised).__name__), tempfile.TemporaryDirectory() as tmp:
                 target = Path(tmp, "r.json")
@@ -106,6 +109,80 @@ def write_sites(tree: ast.AST) -> int:
         if isinstance(mode, ast.Constant) and isinstance(mode.value, str) and any(flag in mode.value for flag in WRITE_MODES):
             count += 1
     return count
+
+
+@unittest.skipIf(os.name != "posix", "POSIX signals")
+class SignalDuringWriteTest(unittest.TestCase):
+    """R20-6 (round 20): a SIGTERM or SIGHUP while ``scan --json-out`` / ``evidence --output`` was in its fsync
+    left ``.<name>.<pid>.<id>.tmp`` in the output folder (rc -15 / -1; SIGINT left none). R19-6's message and
+    comment said SIGTERM's SystemExit removed it, but the CLI's handler re-raises the default action — no
+    ``except`` runs. The handler now removes the temp files being written."""
+
+    SLOW_FSYNC = (
+        "import os, time\n"
+        "_fsync = os.fsync\n"
+        "def _slow(fd):\n"
+        "    open(os.environ['R20_6_MARK'], 'w').close()\n"
+        "    time.sleep(30)\n"
+        "    _fsync(fd)\n"
+        "os.fsync = _slow\n"
+    )
+
+    def _interrupt(self, signum: int, argv: list[str], out: Path, tmp: str) -> int:
+        import time
+
+        from deepfake_lens import shutdown
+
+        mark = Path(tmp, "in_fsync")
+        mark.unlink(missing_ok=True)
+        slow = Path(tmp, "slow")
+        slow.mkdir(exist_ok=True)
+        (slow / "sitecustomize.py").write_text(self.SLOW_FSYNC, encoding="utf-8")
+        env = dict(os.environ, PYTHONPATH=os.pathsep.join([str(slow), str(REPO)]), R20_6_MARK=str(mark), HOME=tmp)
+        proc = subprocess.Popen(
+            shutdown.with_default_signals([sys.executable, "-m", "deepfake_lens", *argv]),
+            env=env, cwd=tmp, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+        )
+        try:
+            deadline = time.monotonic() + TIMEOUT
+            while not mark.exists() and proc.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertTrue(mark.exists(), "the write never reached its fsync")
+            proc.send_signal(signum)
+            proc.communicate(timeout=TIMEOUT)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+        self.assertEqual(sorted(name for name in os.listdir(out) if name.endswith(".tmp")), [])
+        return proc.returncode
+
+    def test_sigterm_and_sighup_during_an_output_write_leave_no_temp_file(self) -> None:
+        import signal
+
+        for signum in (signal.SIGTERM, signal.SIGHUP):
+            for command in ("scan", "evidence"):
+                with self.subTest(signal=signum.name, command=command), tempfile.TemporaryDirectory() as tmp:
+                    evidence = Path(tmp, "case")
+                    evidence.mkdir()
+                    (evidence / "note.txt").write_text("메모입니다.", encoding="utf-8")
+                    out = Path(tmp, "out")
+                    out.mkdir()
+                    argv = (["scan", str(evidence), "--json-out", str(out / "r.json")] if command == "scan"
+                            else ["evidence", str(evidence / "note.txt"), "--output", str(out / "e.json")])
+                    self.assertEqual(self._interrupt(signum, argv, out, tmp), -signum)
+                    self.assertEqual(sorted(os.listdir(out)), [])  # no report, no temp file
+
+    def test_the_tracked_temp_is_removed_by_the_shutdown_cleanup(self) -> None:
+        from deepfake_lens import native_path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            temp = Path(tmp, ".r.json.1.ab.tmp")
+            temp.write_bytes(b"half")
+            native_path.track_output_temp(str(temp))
+            native_path._remove_output_temps()
+            self.assertFalse(temp.exists())
+            self.assertEqual(native_path._OUTPUT_TEMPS, {})
 
 
 class EveryWriterIsWholeMetaTest(unittest.TestCase):

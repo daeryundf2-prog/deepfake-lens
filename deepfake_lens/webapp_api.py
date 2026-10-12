@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import parse_qs
 
+from .audio_worker import in_worker_scope
 from .checks import failure_reason
 from .native_path import expand_user, scratch_dir
 from .error_text import exception_text
@@ -1002,6 +1003,7 @@ def _archive_upload_items(
         shutil.rmtree(folder, ignore_errors=True)
 
 
+@in_worker_scope  # R20-2: one audio worker for all files (was one per file)
 def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]:
     """Analyze files uploaded via multipart/form-data.
 
@@ -1375,6 +1377,8 @@ UNSIGNED_CLIENT_ROW_MARKER = "서명 제외(클라이언트 제공 결과)"
 REPORT_ROW_NOT_FOUND = "읽기 루트 안에서 파일을 찾을 수 없어 서버가 재분석하지 못했습니다"
 REPORT_ROW_LINK_ON_PATH = "경로 중간의 폴더가 심볼릭 링크라 따라가지 않았습니다 — 서버가 재분석하지 못했습니다"
 REPORT_ROW_NOT_DERIVED = "서버 재분석 결과에 이 항목이 없습니다(압축 파일 구성이 다름)"
+# R20-1 (round 20): the posted row's entry is now a folder the scan would not have listed this way.
+REPORT_ROW_KIND_CHANGED = "검사 때와 항목 종류가 다릅니다(지금은 읽을 수 있는 폴더) — 서버가 재분석하지 못했습니다"
 REPORT_ROW_FAILED = "서버 재분석 실패: {reason}"
 # P1 (round 8): rows are relative to the folder that was scanned, not to the
 # read root — a report of <root>/caseA signed <root>/target.png (a same-named
@@ -1395,8 +1399,15 @@ REPORT_ROW_UPLOAD = "업로드 파일 — 서버 읽기 폴더의 파일이 아�
 # file changed after the scan. No report is signed: 409 with ``changed_rows``.
 REPORT_ROWS_CHANGED = "검사 뒤 바뀐 파일이 있습니다 — 다시 검사하십시오(보고서를 만들지 않았습니다)"
 REPORT_ROWS_CHANGED_STATUS = 409
+# R20-4 (round 20): a posted dedupe duplicate names, as ``duplicate_of``, a row it is not a copy of in this
+# report — itself, a row not posted, or another duplicate. Signed as a duplicate it carried no analysis at all
+# (a manipulated file posted as "a duplicate of itself" was signed with manipulation_evidence 0). HTTP 400.
+REPORT_DUPLICATE_OF_INVALID = (
+    "검사 결과 항목 「{path}」의 duplicate_of 「{target}」가 이 보고서에 게시된 원본 행이 아닙니다"
+    "(자기 자신·게시되지 않은 행·다른 중복 행은 원본이 될 수 없습니다) — 폴더 검사 결과를 그대로 보내십시오"
+)
 # R19-13: the excluded reasons that mean "the file changed after the scan" (not "never re-analyzable").
-_CHANGED_AFTER_SCAN_REASONS = (REPORT_ROW_NOT_FOUND, REPORT_ROW_NOT_DERIVED)
+_CHANGED_AFTER_SCAN_REASONS = (REPORT_ROW_NOT_FOUND, REPORT_ROW_NOT_DERIVED, REPORT_ROW_KIND_CHANGED)
 
 
 def report_format(body: bytes, query_format: str | None) -> str | dict[str, object]:
@@ -1529,13 +1540,18 @@ class _ReportHasher:
         return None
 
     def locate(self, path_text: str) -> Path | str:
-        """The file a posted top-level row names, for server re-analysis (X2).
+        """The entry a posted top-level row names, for server re-analysis (X2).
 
-        Returns the path inside a read root of a regular file or of a
-        symbolic link itself (never followed — its re-analysis is the
-        scan's skipped link row), or the Korean reason it cannot be
-        re-analyzed. A folder between the root and the file that is a link
-        refuses the row (N2).
+        Returns the path inside a read root of any entry that exists — a
+        regular file, a symbolic link itself (never followed — its
+        re-analysis is the scan's skipped link row) and, R20-1 (round 20),
+        a FIFO, socket, device node or folder (the scan's skipped or
+        failed row, :func:`_unanalyzed_entry_row`) — or the Korean reason
+        it cannot be re-analyzed. :data:`REPORT_ROW_NOT_FOUND` only when
+        nothing is there (``lstat`` fails): a FIFO the scan listed as
+        skipped was "not found", and every report of its folder was 409.
+        A folder between the root and the entry that is a link refuses the
+        row (N2).
         """
         from .evidence_statement import _no_symlink_on_path, _SymlinkRefused
 
@@ -1547,13 +1563,12 @@ class _ReportHasher:
                 continue
             try:
                 _no_symlink_on_path(cand.parent, root)
-                mode = os.lstat(cand).st_mode
+                os.lstat(cand)  # R20-1: any entry that exists is located; its kind decides its row
             except _SymlinkRefused:
                 return REPORT_ROW_LINK_ON_PATH
             except OSError:
                 continue
-            if stat.S_ISREG(mode) or stat.S_ISLNK(mode):
-                return cand
+            return cand
         return REPORT_ROW_NOT_FOUND
 
     def sha256(self, item: Any) -> str | None:
@@ -1611,6 +1626,7 @@ class _ReportHasher:
         self._temp_dirs.clear()
 
 
+@in_worker_scope  # R20-2: one audio worker for all files (was one per file)
 def _rederive_report_items(
     posted: list[Any], hasher: "_ReportHasher", options: Any, thresholds: Any,
 ) -> tuple[list[Any], list[tuple[Any, str]], list[dict[str, object]]]:
@@ -1646,6 +1662,10 @@ def _rederive_report_items(
         if isinstance(located, str):
             derived_by_top[top] = located
             continue
+        unanalyzed = _unanalyzed_entry_row(located, top, item)
+        if unanalyzed is not None:
+            derived_by_top[top] = unanalyzed
+            continue
         try:
             run = scan_file_run(located, options, thresholds=thresholds)
         except Exception as exc:  # noqa: BLE001 - one unreadable row must not fail the report
@@ -1671,7 +1691,11 @@ def _rederive_report_items(
         top, member = row_identity(item)
         found = derived_by_top[top]
         if isinstance(found, str):
-            if found in _CHANGED_AFTER_SCAN_REASONS or found.startswith(REPORT_ROW_FAILED.split("{", 1)[0]):
+            # R20-5 (round 20): a row the scan hashed (sha256 set — it read the file) that now sits behind
+            # a linked folder was moved to excluded_items and the rest signed (200): the web scan never
+            # follows a linked folder, so the folder was replaced by a link after the scan.
+            linked_since = found == REPORT_ROW_LINK_ON_PATH and bool(item.sha256)
+            if linked_since or found in _CHANGED_AFTER_SCAN_REASONS or found.startswith(REPORT_ROW_FAILED.split("{", 1)[0]):
                 changed.append(_changed_row(item, None, found))
             excluded.append((item, found))
         elif member not in found:
@@ -1681,11 +1705,67 @@ def _rederive_report_items(
             seen.add((top, member))
             server = found[member]
             if item.status == "duplicate" and item.duplicate_of:
-                server = _as_duplicate(item, server, hasher)
+                server = _as_duplicate(item, server, _derived_row(derived_by_top, str(item.duplicate_of)))
             if _row_signature(item) != _row_signature(server):
                 changed.append(_changed_row(item, server, None))
             derived.append(server)
     return derived, excluded, changed
+
+
+def _unanalyzed_entry_row(located: Path, top: str, posted: Any) -> dict[str | None, Any] | str | None:
+    """R20-1 (round 20): the scan's own row of an entry it lists without analyzing, or None for a file it analyzes.
+
+    The walk (``scan_cache._iter_files``) never analyzes a FIFO, socket,
+    device node or pseudo-file-system file (a skipped row with
+    :func:`scan_cache.unscannable_file_reason`) and gives a folder it could
+    not list a failed row (:data:`scan_cache.UNREADABLE_FOLDER_ROW_REASON`).
+    The re-analysis classifies the entry the same way, so the server row
+    is compared like with like: an unchanged FIFO is the same skipped row
+    (signed as listed, as the scan listed it), a file replaced by a FIFO
+    after the scan differs (analyzed → skipped: 409). A folder that can be
+    listed now is the scan's skipped row only when the posted row is one of
+    the walk's own folder rows (a walk limit or a bind-mount loop); any
+    other row of a readable folder is :data:`REPORT_ROW_KIND_CHANGED`.
+    Returns ``{None: row}``, a changed-reason string, or None.
+    """
+    from .result_types import ScanItem
+    from .scan_cache import SYMLINK_LOOP_REASON, UNREADABLE_FOLDER_ROW_REASON, WALK_LIMIT_REASON, unscannable_file_reason
+
+    try:
+        mode = os.lstat(located).st_mode
+    except OSError:
+        return REPORT_ROW_NOT_FOUND
+    if stat.S_ISLNK(mode):
+        return None  # scan_file_run gives a link the scan's skipped link row (G6)
+    if stat.S_ISDIR(mode):
+        try:
+            with os.scandir(located) as handle:
+                next(handle, None)
+        except OSError as exc:
+            return {None: ScanItem(top, located.name, "unknown", "failed", 0, error=UNREADABLE_FOLDER_ROW_REASON.format(reason=failure_reason(exc)))}
+        posted_error = posted.error if isinstance(posted.error, str) else ""
+        walk_limit = WALK_LIMIT_REASON.split("(", 1)[0]
+        if posted.status == "skipped" and (posted_error.startswith(walk_limit) or posted_error == SYMLINK_LOOP_REASON):
+            return {None: ScanItem(top, located.name, "unknown", "skipped", 0, error=posted_error)}
+        return REPORT_ROW_KIND_CHANGED
+    try:
+        reason = unscannable_file_reason(located)
+    except OSError as exc:
+        return REPORT_ROW_FAILED.format(reason=failure_reason(exc))
+    if reason is None:
+        return None
+    return {None: ScanItem(top, located.name, "unknown", "skipped", 0, error=reason)}
+
+
+def _derived_row(derived_by_top: dict[str, dict[str | None, Any] | str], path: str) -> Any | None:
+    """R20-4: the server row re-derived for a posted row path ("a.png", or an archive member "a.zip::m"), or None."""
+    for top, rows in derived_by_top.items():
+        if isinstance(rows, str):
+            continue
+        for member, row in rows.items():
+            if row.path == path or (member is None and top == path):
+                return row
+    return None
 
 
 def _row_signature(item: Any) -> tuple[object, object, object]:
@@ -1709,24 +1789,42 @@ def _changed_row(posted: Any, server: Any | None, reason: str | None) -> dict[st
     return entry
 
 
-def _as_duplicate(posted: Any, server: Any, hasher: "_ReportHasher") -> Any:
+def _posted_duplicate_error(posted: list[Any]) -> str | None:
+    """R20-4 (round 20): why a posted dedupe duplicate row is not a duplicate of a row of this report, or None.
+
+    ``duplicate_of`` must name another posted row (its ``path``) that is not
+    itself a duplicate — the scan's original, whose analysis the report
+    signs. A self-duplicate, an original that is not posted or a chain of
+    duplicates is refused (400) before any re-analysis.
+    """
+    originals = {item.path for item in posted if item.status != "duplicate"}
+    for item in posted:
+        if item.status != "duplicate":
+            continue
+        target = item.duplicate_of
+        if not isinstance(target, str) or not target or target == item.path or target not in originals:
+            return REPORT_DUPLICATE_OF_INVALID.format(path=str(item.path)[:200], target=str(target)[:200])
+    return None
+
+
+def _as_duplicate(posted: Any, server: Any, original: Any | None) -> Any:
     """R19-13 (J-2): the server row of a posted dedupe duplicate — a duplicate row when the bytes still match ``duplicate_of``.
 
     The scan wrote no analysis for a duplicate (status "duplicate",
     "중복 내용(동일 해시)"); re-analyzing the copy signed a full analysis in
-    its place. The server hashes the file named by ``duplicate_of`` (an
-    archive member "a.zip::m" from the re-extracted archive): equal to the
-    copy's server sha256 → the scan's duplicate row with the server's
-    sha256; otherwise the full server row (which then differs from the
-    posted row).
+    its place. R20-4 (round 20): ``original`` is the server's re-derived row
+    of ``duplicate_of`` — a posted, non-duplicate row of this report
+    (:func:`_posted_duplicate_error`), signed with its own analysis; the
+    file named by ``duplicate_of`` used to be hashed from disk even when it
+    was not posted (its analysis then appeared nowhere in the report).
+    Its server sha256 equal to the copy's → the scan's duplicate row with
+    the server's sha256; otherwise the full server row (which then differs
+    from the posted row: 409).
     """
     from .result_types import ScanItem
 
     target = str(posted.duplicate_of)
-    container, sep, member = target.partition("::")
-    probe = ScanItem(target, Path(member or container).name, "file", "ok", 0, container=container if sep else None, member=member if sep else None)
-    target_sha = hasher.sha256(probe)
-    if not server.sha256 or target_sha != server.sha256:
+    if original is None or original.status == "duplicate" or not server.sha256 or original.sha256 != server.sha256:
         return server
     return ScanItem(
         server.path, server.name, "duplicate", "duplicate", server.size_bytes, error=posted.error,
@@ -1981,6 +2079,12 @@ def _report_payload(
     except InvalidOption as exc:
         return {"error": str(exc)}
     server_thresholds = load_thresholds(options)
+    # R20-4 (merge): a malformed duplicate_of is a malformed request (400) for every
+    # format, the preview included.
+    duplicate_error = _posted_duplicate_error(items)
+    if duplicate_error is not None:
+        hasher.close()
+        return {"error": duplicate_error}  # R20-4: 400
     req_format = format_override.lower()
     if req_format == "evidence-preview":
         # GUI-REV2 H-2: the preview is built from the posted rows as they are —

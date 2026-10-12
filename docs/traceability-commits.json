@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "91426844c63f600c332e1f738d14f5427df2d9d4",
+    "head": "2b798253e0a4a955c6156f6dd8f13147c3305018",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -3546,6 +3546,142 @@
       "new": null,
       "commits": [
         "15185a0"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R20-1",
+      "round": 20,
+      "source": "verify_round20.md",
+      "summary": "a FIFO, socket or unreadable subfolder in the scanned folder is re-derived as the scan's o",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "7eef07e"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R20-2",
+      "round": 20,
+      "source": "verify_round20.md",
+      "summary": "every multi-file command and request runs its audio files through one worker per thread, a",
+      "gaps": [
+        "G1"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "bf79e20"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R20-3",
+      "round": 20,
+      "source": "verify_round20.md",
+      "summary": "the audio worker protocol is framed — a ready line, the worker's token and the request id ",
+      "gaps": [
+        "G1"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "ff4c703"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R20-4",
+      "round": 20,
+      "source": "verify_round20.md",
+      "summary": "a posted duplicate row must name another posted, non-duplicate row as duplicate_of, and it",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "b516bea"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R20-5",
+      "round": 20,
+      "source": "verify_round20.md",
+      "summary": "a row the scan hashed that is now behind a linked folder is a changed row — 409, not moved",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "c48f766"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R20-6",
+      "round": 20,
+      "source": "verify_round20.md",
+      "summary": "a SIGTERM or SIGHUP during an output write removes the temp file — the CLI's cleanup handl",
+      "gaps": [
+        "G34"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "e348c38"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R20-7",
+      "round": 20,
+      "source": "verify_round20.md",
+      "summary": "tool folders decided by HOME or TMPDIR are never inside a scanned folder, and a single-fil",
+      "gaps": [
+        "G31"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "1ec725c"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R20-8",
+      "round": 20,
+      "source": "verify_round20.md",
+      "summary": "display_name escapes unassigned code points and noncharacters (category Cn) in Python and ",
+      "gaps": [
+        "G30"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "5ab8d28"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R20-9",
+      "round": 20,
+      "source": "verify_round20.md",
+      "summary": "known options before a command name go after it — `--verbose scan X`, `--verbose doctor`, ",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "7543812"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R20-10",
+      "round": 20,
+      "source": "verify_round20.md",
+      "summary": "HANDOFF.md describes the round loop and where to read the record state instead of stating ",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "2b79825"
       ],
       "used_in_commit_subjects": true
     }
@@ -9143,6 +9279,252 @@
       "new": true,
       "new_reasons": [
         "R19-12: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "05091f943428227f42a0e4f4290d512a0e7efcf9",
+      "short": "05091f9",
+      "round": "19",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on 9142684, round-19 IDs mapped (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "cb96e6d1e6f8c5d946cf2bc2ce5a21adfc7a1bb3",
+      "short": "cb96e6d",
+      "round": "19",
+      "subject": "docs(phase0): round-20 verification findings (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "7eef07eea474858a35695d3e4c36f8f7ad8b0cf3",
+      "short": "7eef07e",
+      "round": "20",
+      "subject": "fix(report): R20-1 a FIFO, socket or unreadable subfolder in the scanned folder is re-derived as the scan's own skipped / failed row — not \"not found\", so its report is no longer 409 (R20-1; Gaps: G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R20-1"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "bf79e20de5dc83b80419bc014d7c472ebdfcedfa",
+      "short": "bf79e20",
+      "round": "20",
+      "subject": "fix(audio): R20-2 every multi-file command and request runs its audio files through one worker per thread, and a worker's numeric libraries use one thread — batch, upload and report re-analysis no longer start a worker per file (R20-2; Gaps: G1, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R20-2"
+      ],
+      "gaps_named_in_subject": [
+        "G1"
+      ],
+      "gaps": [
+        "G1"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R20-2: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G1; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "ff4c7030a9a191b5cbf6cf232264e26ea23c84cd",
+      "short": "ff4c703",
+      "round": "20",
+      "subject": "fix(audio): R20-3 the audio worker protocol is framed — a ready line, the worker's token and the request id in every reply; any other reply stops the worker and fails that file's check, never shifting features to the next file (R20-3; Gaps: G1, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R20-3"
+      ],
+      "gaps_named_in_subject": [
+        "G1"
+      ],
+      "gaps": [
+        "G1"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R20-3: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G1; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "b516bead279298fde388caf37177b8711a7d62af",
+      "short": "b516bea",
+      "round": "20",
+      "subject": "fix(report): R20-4 a posted duplicate row must name another posted, non-duplicate row as duplicate_of, and its bytes are compared with that row's server re-derivation — a self-duplicate or an unposted original is 400 (R20-4; Gaps: G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R20-4"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "c48f7664d33f14e3c4f2982e47a856f8a1d94dd3",
+      "short": "c48f766",
+      "round": "20",
+      "subject": "fix(report): R20-5 a row the scan hashed that is now behind a linked folder is a changed row — 409, not moved to excluded_items while the rest is signed (R20-5; Gaps: G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R20-5"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "e348c383ea46ada3ef6c0b3de4047aeb4a42fb58",
+      "short": "e348c38",
+      "round": "20",
+      "subject": "fix(output): R20-6 a SIGTERM or SIGHUP during an output write removes the temp file — the CLI's cleanup handler removes the output temp files being written, and the comments and docs say exactly what is covered (R20-6; Gaps: G34, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R20-6"
+      ],
+      "gaps_named_in_subject": [
+        "G34"
+      ],
+      "gaps": [
+        "G34"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R20-6: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G34; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "1ec725c7bf7c3aba21d82b18897820eee30bab2a",
+      "short": "1ec725c",
+      "round": "20",
+      "subject": "fix(cli): R20-7 tool folders decided by HOME or TMPDIR are never inside a scanned folder, and a single-file command checks its file's folder for the log and heatmap variables — exit 2, or the next temp folder with the notice (R20-7; Gaps: G31, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R20-7"
+      ],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R20-7: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G31; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "5ab8d28942290fb77dddfa08d52dfd2f4c3cd832",
+      "short": "5ab8d28",
+      "round": "20",
+      "subject": "fix(report): R20-8 display_name escapes unassigned code points and noncharacters (category Cn) in Python and in gui.js — names with U+0378, U+FDD0 or U+FFFE are no longer shown as they are (R20-8; Gaps: G30, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R20-8"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R20-8: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G30; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "7543812aa2f371586eb59257db219898cbcb26bf",
+      "short": "7543812",
+      "round": "20",
+      "subject": "fix(cli): R20-9 known options before a command name go after it — `--verbose scan X`, `--verbose doctor`, `--verbose corpus build …` and `help scan` are read by that command, not as a scan of a folder named like the command (R20-9; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R20-9"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R20-9: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "2b798253e0a4a955c6156f6dd8f13147c3305018",
+      "short": "2b79825",
+      "round": "20",
+      "subject": "docs(phase0): R20-10 HANDOFF.md describes the round loop and where to read the record state instead of stating it — nothing in it is made false by the round's records-only commit (R20-10; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R20-10"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R20-10: 갭 목록 밖 항목 포함"
       ],
       "gaps_line": "Gaps: 신규(스펙 외)",
       "gaps_source": "subject"
