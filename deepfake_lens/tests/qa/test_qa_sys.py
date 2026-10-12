@@ -1330,11 +1330,11 @@ class QaSys7ReadRootConfinementTest(_ServerFixture):
         # failed row) — /api/report refuses rows outside the item contract.
         rows = [{"path": str(self.outside / "secret.txt"), "name": "secret.txt", "kind": "text", "status": "failed", "size_bytes": 0, "result": None, "sha256": "f" * 64}]
         status, body = self.request("/api/report?format=json", {"items": rows, "scan_root": str(self.root)})  # P1
-        self.assertEqual(status, 200)
-        payload = json.loads(body)
-        self.assertEqual(payload["items"], [])
-        self.assertEqual([entry["path"] for entry in payload["excluded_items"]], [str(self.outside / "secret.txt")])
-        self.assertEqual(payload["excluded_items"][0]["marker"], webapp_api.UNSIGNED_CLIENT_ROW_MARKER)
+        # R21-5 (round 21): a row path that is not the scan's relative form (here absolute, outside the roots) is a
+        # malformed request — 400 before anything is read (it was 200 with the row under excluded_items; an absolute
+        # or "./" alias of a file inside the scan folder was signed as another row). Nothing is read or echoed.
+        self.assertEqual(status, 400)
+        self.assertIn("의 경로가 폴더 검사 결과의 경로 형식이 아닙니다", json.loads(body)["error"])
         self.assertNotIn("f" * 64, body.decode("utf-8"))
         self.assertNoSecret(body)
 

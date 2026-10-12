@@ -1340,6 +1340,15 @@ REPORT_DUPLICATE_OF_INVALID = (
 REPORT_ROW_WALK_LIMIT = (
     "폴더 탐색 상한 행 — 서버는 검사 때의 폴더 탐색(폴더 수·시간·파일 수 상한)을 다시 하지 않으므로 재분석·서명하지 않습니다"
 )
+# R21-5 (round 21): a posted row path that is not the scan's own form of it — relative to the scan folder, no
+# empty, "." or ".." component, escaped exactly as the scan escapes it. "./gen.png", "sub/../gen.png",
+# "../RM/gen.png" and "/tmp/RM/gen.png" named the same file and were signed as five rows. HTTP 400.
+REPORT_ROW_PATH_NOT_CANONICAL = (
+    "검사 결과 항목 「{path}」의 경로가 폴더 검사 결과의 경로 형식이 아닙니다(스캔 폴더 기준 상대 경로 — 절대 경로·빈 구성 요소·"
+    "`.`·`..` 불가) — 폴더 검사 결과를 그대로 보내십시오"
+)
+# R21-5: the same row (path, or container and member) posted twice. HTTP 400.
+REPORT_ROW_POSTED_TWICE = "검사 결과 항목 「{path}」가 두 번 게시되었습니다 — 행마다 한 번만 보내십시오"
 # R19-13: the excluded reasons that mean "the file changed after the scan" (not "never re-analyzable").
 _CHANGED_AFTER_SCAN_REASONS = (REPORT_ROW_NOT_FOUND, REPORT_ROW_NOT_DERIVED, REPORT_ROW_KIND_CHANGED)
 
@@ -1426,10 +1435,13 @@ class _ReportHasher:
         """
         from .result_text import unescape_row_path
 
-        p = Path(os.path.normpath(expand_user(unescape_row_path(path_text))))
         if self.scan_root is not None:
+            # R21-5 (round 21): a row path is relative to the scan folder, taken literally (a "~" is a name
+            # there); only the scan's own form reaches here (:func:`_posted_path_error`).
+            p = Path(os.path.normpath(unescape_row_path(path_text)))
             cand = p if p.is_absolute() else Path(os.path.normpath(self.scan_root / p))
             return [(cand, self.scan_root)] if _is_within(cand, self.scan_root) else []
+        p = Path(os.path.normpath(expand_user(unescape_row_path(path_text))))
         return [(p, root) for root in self.roots] if p.is_absolute() else [(root / p, root) for root in self.roots]
 
     def resolve(self, path_text: str) -> Path | None:
@@ -1700,6 +1712,34 @@ def _is_bind_mount_loop(folder: Path, scan_root: Path) -> bool:
         if current == scan_root or not _is_within(current, scan_root):
             return False
         current = current.parent
+
+
+def _posted_path_error(posted: list[Any]) -> str | None:
+    """R21-5 (round 21): why the posted rows are not a list of distinct rows in the scan's own path form, or None.
+
+    A top-level row path (a member row's container) must be what the scan
+    writes for a file of the scan folder: relative, no empty, "." or ".."
+    component, and escaped as :func:`result_text.escape_row_path` escapes
+    it. A row (path, or container and member) may be posted once. Both are
+    a malformed request (400), before any re-analysis.
+    """
+    from .result_text import escape_row_path, row_identity, unescape_row_path
+
+    seen: set[tuple[str, str | None]] = set()
+    for item in posted:
+        top, member = row_identity(item)
+        real = unescape_row_path(top)
+        parts = real.replace(os.sep, "/").split("/")  # Windows rows use "\\" (str of a relative path)
+        if (
+            not real or os.path.isabs(real) or real.startswith("/")
+            or any(part in ("", ".", "..") for part in parts)
+            or escape_row_path(real) != top
+        ):
+            return REPORT_ROW_PATH_NOT_CANONICAL.format(path=str(item.path)[:200])
+        if (top, member) in seen:
+            return REPORT_ROW_POSTED_TWICE.format(path=str(item.path)[:200])
+        seen.add((top, member))
+    return None
 
 
 def _derived_row(derived_by_top: dict[str, dict[str | None, Any] | str], path: str) -> Any | None:
@@ -2011,10 +2051,10 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     except InvalidOption as exc:
         return {"error": str(exc)}
     server_thresholds = load_thresholds(options)
-    duplicate_error = _posted_duplicate_error(items)
+    duplicate_error = _posted_path_error(items) or _posted_duplicate_error(items)
     if duplicate_error is not None:
         hasher.close()
-        return {"error": duplicate_error}  # R20-4: 400
+        return {"error": duplicate_error}  # R21-5 / R20-4: 400
     try:
         items, excluded, changed = _rederive_report_items(items, hasher, options, server_thresholds)
     finally:

@@ -2095,6 +2095,73 @@ class ReportSignsNoPostedTextInvariantTest(_ReportLegsFixture):
                                          sorted(row["path"] for row in fuzzed))
 
 
+class ReportRowPathsAreTheScansOwnTest(_ReportLegsFixture):
+    """R21-5 (round 21): /api/report used the posted path text as the row's identity. gen.png posted as "gen.png",
+    "./gen.png", "sub/../gen.png", "../RM/gen.png" and "/tmp/RM/gen.png" was signed as five rows (summary total
+    5, manipulation_evidence 5, verify-report 검증됨), with the absolute and "../" paths in the signed body. A row
+    path must now be the scan's own form — relative to the scan folder, no empty, "." or ".." component, escaped
+    as the scan escapes it — and each row is posted once; anything else is 400 before any re-analysis."""
+
+    FORMATS = ReportRefusesChangedRowsTest.FORMATS
+
+    def _assert_bad_request(self, rows: list[dict[str, Any]], message: str) -> None:
+        for leg, make in self._legs():
+            post = make()
+            for fmt in self.FORMATS:
+                with self.subTest(leg=leg, format=fmt, path=rows[-1]["path"]):
+                    status, _, raw = post("/api/report", self._json({"items": rows, "format": fmt}))
+                    self.assertEqual(status, 400, raw[:300])
+                    self.assertIn(message, json.loads(raw)["error"])
+                    self.assertNotIn(self.target_sha, raw.decode("utf-8"))
+
+    def test_an_alias_of_a_scan_row_path_is_400(self) -> None:
+        target = self.rows["target.png"]
+        aliases = ["./target.png", "sub/../target.png", f"../{self.folder.name}/target.png", str(self.folder / "target.png"),
+                   "target.png/", ".//target.png", "target.png/."]
+        for alias in aliases:
+            self._assert_bad_request([target, dict(target, path=alias)], f"「{alias}」의 경로가 폴더 검사 결과의 경로 형식이 아닙니다")
+        member = self.rows["bundle.zip::inner/member.png"]
+        self._assert_bad_request([dict(member, container="./bundle.zip", path="./bundle.zip::inner/member.png")], "의 경로가 폴더 검사 결과의 경로 형식이 아닙니다")
+
+    def test_an_escaped_alias_is_400(self) -> None:
+        _write_png(self.folder / "a:b.png", seed=5)
+        row = dict(self.rows["target.png"], path="a\\:b.png", name="a:b.png")  # the scan writes "a:b.png" (no "::")
+        self._assert_bad_request([row], "의 경로가 폴더 검사 결과의 경로 형식이 아닙니다")
+
+    def test_a_row_posted_twice_is_400(self) -> None:
+        self._assert_bad_request([self.rows["target.png"], self.rows["target.png"]], "「target.png」가 두 번 게시되었습니다")
+        member = self.rows["bundle.zip::inner/member.png"]
+        self._assert_bad_request([member, dict(member)], "두 번 게시되었습니다")
+
+    def test_a_tilde_in_a_row_path_is_a_name_in_the_scan_folder(self) -> None:
+        """The row path was passed through "~" expansion: "~/x.png" named a file of the server's home folder."""
+        import contextlib
+        import io
+
+        from deepfake_lens.cli import main as cli_main
+
+        (self.folder / "~").mkdir()
+        _write_png(self.folder / "~" / "x.png", seed=6)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(cli_main(["scan", str(self.folder), "--recursive", "--format", "json"]), 0)
+        rows = {row["path"]: row for row in json.loads(out.getvalue())["items"]}
+        for leg, make in self._legs():
+            with self.subTest(leg=leg):
+                status, _, raw = make()("/api/report", self._json({"items": [rows["~/x.png"]], "format": "json"}))
+                self.assertEqual(status, 200, raw[:300])
+                self.assertEqual([row["path"] for row in json.loads(raw)["items"]], ["~/x.png"])
+
+    def test_the_scans_own_rows_are_still_signed(self) -> None:
+        for leg, make in self._legs():
+            with self.subTest(leg=leg):
+                status, _, raw = make()("/api/report", self._json({"items": self.posted, "format": "json"}))
+                self.assertEqual(status, 200, raw[:300])
+                signed = json.loads(raw)
+                self.assertEqual(sorted([row["path"] for row in signed["items"]] + [row["path"] for row in signed["excluded_items"]]),
+                                 sorted(row["path"] for row in self.posted))
+
+
 class ReportRecordsAnalysisOptionsTest(_ReportLegsFixture):
     """R19-3 (round 19): /api/report re-analyzed the posted rows with the posted ``options`` and the report did not
     say which — a GUI that sent the options of another scan got a signed report with other coverage (pixel and
@@ -2306,10 +2373,11 @@ class ReportScanRootAndUploadsTest(_ScanRootFixture):
             with self.subTest(leg=name, escape="../target.png"):
                 escaping = dict(row, path="../target.png", name="target.png")
                 status, raw = call("POST", "/api/report", json.dumps({"items": [escaping], "scan_root": str(self.case), "format": "json"}).encode("utf-8"))
-                self.assertEqual(status, 200, raw[:300])
-                signed = json.loads(raw)
-                self.assertEqual(signed["items"], [])
-                self.assertEqual(signed["excluded_items"][0]["reason"], webapp_api.REPORT_ROW_OUTSIDE_SCAN_ROOT)
+                # R21-5 (round 21): a row path outside the scan's own form ("..", ".", absolute) is now a malformed
+                # request (400) before anything is read — it was excluded (200) here, and aliases of a file inside
+                # the folder ("./a", "sub/../a") were signed once per alias. P1 holds: the root file is never read.
+                self.assertEqual(status, 400, raw[:300])
+                self.assertIn("「../target.png」의 경로가 폴더 검사 결과의 경로 형식이 아닙니다", json.loads(raw)["error"])
                 self.assertNotIn(self.root_sha, raw.decode("utf-8"))
 
     def test_upload_named_like_a_root_file_is_never_signed(self) -> None:

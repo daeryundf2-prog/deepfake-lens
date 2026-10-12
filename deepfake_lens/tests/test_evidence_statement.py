@@ -278,8 +278,11 @@ class EvidenceStatementTest(_StatementFixture):
 
         assert self.item2.result is not None
         item2 = dc_replace(self.item2, result=dc_replace(self.item2.result, band=RiskBand.UNKNOWN))
+        # R21-5 (round 21): these rows' absolute paths outside the scan folder were listed as unsigned rows; a row
+        # path that is not the scan's relative form is now a malformed request (400). Rows the server never
+        # re-analyzes are posted as what they are here — upload rows (P6), listed as unsigned.
         payload = {
-            "items": [self.item1.to_json(), item2.to_json()],
+            "items": [dict(self.item1.to_json(), source="upload"), dict(item2.to_json(), source="upload")],
             "format": "evidence",
             "case_no": "2026가합55555",
             "scan_root": str(Path(tmp.name).resolve()),
