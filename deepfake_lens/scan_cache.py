@@ -147,6 +147,9 @@ WALK_LIMIT_REASON = "건너뜀: 탐색 상한 도달({limit}) — 이 폴더 이
 # The row of a folder the walk could not list (``on_error``); R20-1: also the
 # report re-analysis's row of a posted unreadable-folder row.
 UNREADABLE_FOLDER_ROW_REASON = "폴더를 읽을 수 없습니다: {reason}"
+# The error of a dedupe duplicate row (core); R21-1: also the report's server
+# row of a posted duplicate — never the posted ``error`` text.
+DUPLICATE_ROW_REASON = "중복 내용(동일 해시)"
 
 
 def _dir_identity(path: Path | str) -> tuple[int, int] | None:

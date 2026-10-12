@@ -738,7 +738,9 @@ def _scan_specs(
                 size = path.stat().st_size
             except OSError:
                 size = 0
-            return ScanItem(display_path, path.name, "duplicate", "duplicate", size, error="중복 내용(동일 해시)", duplicate_of=duplicates[path], sha256=fingerprints.get(path)), None, False
+            from .scan_cache import DUPLICATE_ROW_REASON  # R21-1: shared with the report's server row
+
+            return ScanItem(display_path, path.name, "duplicate", "duplicate", size, error=DUPLICATE_ROW_REASON, duplicate_of=duplicates[path], sha256=fingerprints.get(path)), None, False
         if max_file_bytes is not None:
             try:
                 size = path.stat().st_size

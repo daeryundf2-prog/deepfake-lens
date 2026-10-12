@@ -1885,6 +1885,216 @@ class ReportRefusesAFolderLinkedAfterTheScanTest(_ReportLegsFixture):
                 self.assertEqual([(row["path"], row["reason"]) for row in signed["excluded_items"]], [("sub/inner_link.png", webapp_api.REPORT_ROW_LINK_ON_PATH)])
 
 
+class ReportSignsNoPostedFolderReasonTest(_ReportLegsFixture):
+    """R21-1 (round 21): R20-1 signed a posted folder row of a readable folder with the posted ``error`` text when it
+    began like the walk's limit reason ("건너뜀: 탐색 상한 도달") or equalled the loop reason. An examiner left out the
+    row of sub/inner.png (manipulation_evidence) and posted ``sub`` as "건너뜀: 탐색 상한 도달(서버 확인) — 이
+    폴더에는 조작 파일이 없음을 서버가 확인했습니다": 200 on both servers, that sentence signed as the server's row,
+    verify-report 검증됨. A row the server cannot produce from disk is now never signed: a walk-limit row is excluded
+    (the server's own reason), a loop row is signed only when the server finds the loop (with the walk's constant),
+    and a dedupe duplicate carries the scan's own reason, never the posted one."""
+
+    FORMATS = ("json", "html", *(("evidence", "pdf") if HAVE_PYMUPDF else ()))
+    _scan = ReportRefusesChangedRowsTest._scan
+    _assert_refused = ReportRefusesChangedRowsTest._assert_refused
+    FORGED = "건너뜀: 탐색 상한 도달(서버 확인) — 이 폴더에는 조작 파일이 없음을 서버가 확인했습니다"
+
+    def setUp(self) -> None:
+        super().setUp()
+        from deepfake_lens.tests.qa.test_qa_sys import _write_generator_png
+
+        (self.folder / "sub").mkdir()
+        _write_generator_png(self.folder / "sub" / "inner.png")
+        self.rows = self._scan("--recursive")
+        self.assertEqual(self.rows["sub/inner.png"]["result"]["verdict_code"], "manipulation_evidence")
+
+    def _folder_row(self, error: str) -> dict[str, Any]:
+        template = self.rows["in_link.png"]  # a skipped row of the scan (result null)
+        return dict(template, path="sub", name="sub", kind="unknown", status="skipped", size_bytes=0, error=error, sha256=None)
+
+    def _posted_without_inner(self, folder_row: dict[str, Any]) -> list[dict[str, Any]]:
+        return [row for path, row in self.rows.items() if path != "sub/inner.png"] + [folder_row]
+
+    def test_a_forged_walk_limit_row_is_excluded_and_its_text_is_in_no_artifact(self) -> None:
+        posted = self._posted_without_inner(self._folder_row(self.FORGED))
+        for leg, make in self._legs():
+            post = make()
+            for fmt in self.FORMATS:
+                with self.subTest(leg=leg, format=fmt):
+                    status, _, raw = post("/api/report", self._json({"items": posted, "format": fmt}))
+                    self.assertEqual(status, 200, raw[:300])
+                    self.assertNotIn("이 폴더에는 조작 파일이 없음", _artifact_text(raw, fmt))
+                    if fmt == "json":
+                        signed = json.loads(raw)
+                        self.assertNotIn("sub", [row["path"] for row in signed["items"]])
+                        self.assertIn(("sub", webapp_api.REPORT_ROW_WALK_LIMIT), [(row["path"], row["reason"]) for row in signed["excluded_items"]])
+
+    def test_a_forged_loop_row_of_a_folder_that_is_no_loop_is_409(self) -> None:
+        from deepfake_lens.scan_cache import SYMLINK_LOOP_REASON
+
+        [entry] = self._assert_refused(self._posted_without_inner(self._folder_row(SYMLINK_LOOP_REASON)), "sub")
+        self.assertEqual(entry["reason"], webapp_api.REPORT_ROW_KIND_CHANGED)
+
+    def test_a_loop_the_server_finds_is_its_own_row(self) -> None:
+        """A bind-mount loop (no mount in a test: the walk's identity function says ``sub`` is the scan folder)."""
+        from types import SimpleNamespace
+
+        from deepfake_lens import scan_cache
+        from deepfake_lens.scan_cache import SYMLINK_LOOP_REASON
+
+        real = scan_cache._dir_identity
+        root_identity = real(self.folder)
+
+        def identity(path: Any) -> Any:
+            return root_identity if Path(path) == self.folder / "sub" else real(path)
+
+        posted = SimpleNamespace(status="skipped", error=SYMLINK_LOOP_REASON + " ")  # any posted text: the server's own
+        with patch.object(scan_cache, "_dir_identity", identity):
+            self.assertEqual(webapp_api._unanalyzed_entry_row(self.folder / "sub", "sub", posted, self.folder), webapp_api.REPORT_ROW_KIND_CHANGED)
+            posted.error = SYMLINK_LOOP_REASON
+            [row] = webapp_api._unanalyzed_entry_row(self.folder / "sub", "sub", posted, self.folder).values()
+            self.assertEqual((row.path, row.status, row.error), ("sub", "skipped", SYMLINK_LOOP_REASON))
+        self.assertEqual(webapp_api._unanalyzed_entry_row(self.folder / "sub", "sub", posted, self.folder), webapp_api.REPORT_ROW_KIND_CHANGED)
+
+    def test_an_unreadable_folder_row_still_signs_the_servers_failed_row(self) -> None:
+        """R20-1 stays closed (the root-run gate cannot chmod a folder away: the classification is called directly)."""
+        from types import SimpleNamespace
+
+        posted = SimpleNamespace(status="failed", error="폴더를 읽을 수 없습니다: 위조된 사유")
+        with patch("os.scandir", side_effect=PermissionError(13, "Permission denied")):
+            [row] = webapp_api._unanalyzed_entry_row(self.folder / "sub", "sub", posted, self.folder).values()
+        self.assertEqual(row.status, "failed")
+        self.assertNotIn("위조된 사유", row.error)
+
+    def test_a_duplicate_row_carries_the_scans_reason(self) -> None:
+        from deepfake_lens.scan_cache import DUPLICATE_ROW_REASON
+
+        (self.folder / "zcopy.png").write_bytes((self.folder / "target.png").read_bytes())
+        rows = self._scan("--dedupe")
+        target = next(path for path, row in rows.items() if row["status"] == "duplicate")
+        self.assertEqual(rows[target]["error"], DUPLICATE_ROW_REASON)
+        rows[target] = dict(rows[target], error="중복 내용(동일 해시) — 서버가 원본과 같음을 확인했고 조작 없음")
+        for leg, make in self._legs():
+            with self.subTest(leg=leg):
+                status, _, raw = make()("/api/report", self._json({"items": list(rows.values()), "format": "json"}))
+                self.assertEqual(status, 200, raw[:300])
+                signed = {row["path"]: row for row in json.loads(raw)["items"]}
+                self.assertEqual((signed[target]["status"], signed[target]["error"]), ("duplicate", DUPLICATE_ROW_REASON))
+                self.assertNotIn("조작 없음", raw.decode("utf-8"))
+
+
+def _artifact_text(raw: bytes, fmt: str) -> str:
+    """R21-1: the text of a report artifact as a reader sees it — JSON / HTML as decoded, a PDF's extracted text and its bytes."""
+    if fmt in ("json", "html"):
+        return raw.decode("utf-8")
+    from deepfake_lens.pdf_backend import import_pymupdf
+
+    pymupdf = import_pymupdf()
+    text = "".join(page.get_text() for page in pymupdf.open(stream=raw, filetype="pdf"))
+    return " ".join(text.split()) + text + raw.decode("latin-1")
+
+
+class ReportSignsNoPostedTextInvariantTest(_ReportLegsFixture):
+    """R21-1 (round 21) invariant: no text a client posts in a row reaches a signed artifact unless it equals the
+    server's own value. Six findings in a row (R19-13, R20-1, R20-4, R20-5, R21-1, R21-5) came from the report
+    reconciling posted rows with the server's; the posted rows are now an identity list (path, container/member)
+    plus the fields compared for change detection (sha256, status, verdict_code) and the duplicate relation
+    (duplicate_of, checked against the server's digests). Every other string a posted row carries — the row's
+    name, kind, error, every text of its result (reasons, labels, evidence, coverage, signals, limitations …) —
+    is replaced, one leaf at a time where the row contract allows it, by a unique marker; the report must be 200
+    in every format on both servers and no marker may appear in the signed JSON, the HTML, or the PDFs' text.
+    Upload rows (P6: the uploaded file's name is listed as a client row under 서명 제외) and the case fields of the
+    evidence statement (사건번호, 원고 … — the examiner's input by design) are outside this invariant."""
+
+    FORMATS = ("json", "html", *(("evidence", "pdf") if HAVE_PYMUPDF else ()))
+    _scan = ReportRefusesChangedRowsTest._scan
+    # identity and change-detection fields: compared with the server's values, never signed from the post
+    IDENTITY = frozenset({"path", "container", "member", "duplicate_of", "status", "sha256"})
+
+    def setUp(self) -> None:
+        super().setUp()
+        from deepfake_lens.tests.qa.test_qa_sys import _write_generator_png
+
+        _write_generator_png(self.folder / "gen.png")
+        (self.folder / "zcopy.png").write_bytes((self.folder / "gen.png").read_bytes())
+        (self.folder / "sub").mkdir()
+        _write_png(self.folder / "sub" / "inner.png", seed=4)
+        (self.folder / "note.txt").write_text("이 문서는 검사용 텍스트입니다. " * 20, encoding="utf-8")
+        if hasattr(os, "mkfifo"):
+            os.mkfifo(self.folder / "pipe.jpg")
+        self.rows = self._scan("--recursive", "--dedupe")
+
+    def _fuzzed(self) -> tuple[list[dict[str, Any]], list[str]]:
+        import copy
+
+        from deepfake_lens.report_items import ItemContractError, check_report_item
+
+        markers: list[str] = []
+
+        def leaves(node: Any, trail: tuple[Any, ...]) -> list[tuple[Any, ...]]:
+            if isinstance(node, dict):
+                return [leaf for key, value in node.items() for leaf in leaves(value, (*trail, key))]
+            if isinstance(node, list):
+                return [leaf for index, value in enumerate(node) for leaf in leaves(value, (*trail, index))]
+            return [trail] if isinstance(node, str) else []
+
+        def put(row: dict[str, Any], trail: tuple[Any, ...], value: str) -> None:
+            node: Any = row
+            for key in trail[:-1]:
+                node = node[key]
+            node[trail[-1]] = value
+
+        fuzzed: list[dict[str, Any]] = []
+        for row in self.rows.values():
+            current = copy.deepcopy(row)
+            for trail in leaves(row, ()):
+                if len(trail) == 1 and trail[0] in self.IDENTITY:
+                    continue
+                if trail[-1] == "verdict_code":
+                    continue
+                marker = f"ZQ{len(markers):04d}위조문구"
+                candidate = copy.deepcopy(current)
+                put(candidate, trail, marker)
+                try:
+                    check_report_item(candidate)
+                    webapp_api._scan_item_from_json(candidate)
+                except (ItemContractError, TypeError, ValueError, KeyError, AttributeError):
+                    continue  # the contract refuses this field's free text (an enum): nothing to sign
+                current = candidate
+                markers.append(marker)
+            fuzzed.append(current)
+        # a folder row of the walk's limit, with a marker reason
+        marker = f"ZQ{len(markers):04d}위조문구"
+        markers.append(marker)
+        fuzzed.append(dict(self.rows["in_link.png"], path="sub", name="sub", kind="unknown", size_bytes=0,
+                           error=f"건너뜀: 탐색 상한 도달({marker})", sha256=None))
+        return fuzzed, markers
+
+    def test_no_posted_row_text_reaches_a_signed_artifact(self) -> None:
+        fuzzed, markers = self._fuzzed()
+        self.assertGreater(len(markers), 60, "the fuzz must reach the result texts, not only a few fields")
+        extra = {
+            "summary": {"cancelled": False, "note": "ZQsummary위조문구"},
+            "thresholds": {"profile": "ZQthresholds위조문구"},
+            "coverage": {"weights": "ZQcoverage위조문구"},
+        }
+        markers += ["ZQsummary위조문구", "ZQthresholds위조문구", "ZQcoverage위조문구"]
+        for leg, make in self._legs():
+            post = make()
+            for fmt in self.FORMATS:
+                with self.subTest(leg=leg, format=fmt):
+                    status, _, raw = post("/api/report", self._json({"items": fuzzed, "format": fmt, **extra}))
+                    self.assertEqual(status, 200, raw[:400])
+                    text = _artifact_text(raw, fmt)
+                    leaked = [marker for marker in markers if marker in text or marker[:6] in text]
+                    self.assertEqual(leaked, [], f"{len(leaked)} posted strings in the {fmt} artifact")
+                    if fmt == "json":
+                        signed = json.loads(raw)
+                        # every row of the post is either signed (the server's row) or listed as excluded by its path
+                        self.assertEqual(sorted([row["path"] for row in signed["items"]] + [row["path"] for row in signed["excluded_items"]]),
+                                         sorted(row["path"] for row in fuzzed))
+
+
 class ReportRecordsAnalysisOptionsTest(_ReportLegsFixture):
     """R19-3 (round 19): /api/report re-analyzed the posted rows with the posted ``options`` and the report did not
     say which — a GUI that sent the options of another scan got a signed report with other coverage (pixel and
