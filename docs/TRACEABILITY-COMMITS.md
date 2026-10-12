@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..9142684`(병합 커밋 제외, 커밋 268개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..2b79825`(병합 커밋 제외, 커밋 280개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 252개 — 스펙 갭에 매핑 179개(그중 신규 사유 병기 58개), 신규(스펙 외)만 73개.
+요약: ID 262개 — 스펙 갭에 매핑 187개(그중 신규 사유 병기 63개), 신규(스펙 외)만 75개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -279,6 +279,16 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R19-11 | 19 | the evidence statement names no charge or statute — a manipulation row leaves "관련 법조" to t | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | f6726cd |
 | R19-12 | 19 | HANDOFF.md describes the current state — R17/R18 fixed, R19-1…R19-13 fixed on this branch, | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 9142684 |
 | R19-13 | 19 | /api/report refuses with 409 and changed_rows when its re-analysis of a posted row differs | G30, G7 |  | 15185a0 |
+| R20-1 | 20 | a FIFO, socket or unreadable subfolder in the scanned folder is re-derived as the scan's o | G30 |  | 7eef07e |
+| R20-2 | 20 | every multi-file command and request runs its audio files through one worker per thread, a | G1 | 신규(스펙 외): 갭 목록 밖 항목 포함 | bf79e20 |
+| R20-3 | 20 | the audio worker protocol is framed — a ready line, the worker's token and the request id  | G1 | 신규(스펙 외): 갭 목록 밖 항목 포함 | ff4c703 |
+| R20-4 | 20 | a posted duplicate row must name another posted, non-duplicate row as duplicate_of, and it | G30 |  | b516bea |
+| R20-5 | 20 | a row the scan hashed that is now behind a linked folder is a changed row — 409, not moved | G30 |  | c48f766 |
+| R20-6 | 20 | a SIGTERM or SIGHUP during an output write removes the temp file — the CLI's cleanup handl | G34 | 신규(스펙 외): 갭 목록 밖 항목 포함 | e348c38 |
+| R20-7 | 20 | tool folders decided by HOME or TMPDIR are never inside a scanned folder, and a single-fil | G31 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 1ec725c |
+| R20-8 | 20 | display_name escapes unassigned code points and noncharacters (category Cn) in Python and  | G30 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 5ab8d28 |
+| R20-9 | 20 | known options before a command name go after it — `--verbose scan X`, `--verbose doctor`,  | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 7543812 |
+| R20-10 | 20 | HANDOFF.md describes the round loop and where to read the record state instead of stating  | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 2b79825 |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -578,3 +588,15 @@ R18-14: ids[]의 갭 매핑을 커밋 제목·본문의 `Gaps:`에 맞췄다 —
 | c3f9594 | 19 | R19-7 | Gaps: G12, G1 | subject | fix(metadata): R19-7 an APNG's frame data (fdAT) is skipped by seeking like IDAT — not read as a metadata chunk against --metadata-bytes (R19-7; Gaps: G12, G1) |
 | 8ffd1cf | 19 | R19-8 | Gaps: G30; 신규(스펙 외) | subject | fix(report): R19-8 display_name escapes U+2800 BRAILLE PATTERN BLANK and private-use characters — "a⠀b.jpg" no longer looks like "a b.jpg" (R19-8; Gaps: G30, 신규) |
 | 9142684 | 19 | R19-12 | Gaps: 신규(스펙 외) | subject | docs(phase0): R19-12 HANDOFF.md describes the current state — R17/R18 fixed, R19-1…R19-13 fixed on this branch, 1,684 tests, the round-18/19 documents and the Docker gate image (R19-12; Gaps: 신규) |
+| 05091f9 | 19 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 9142684, round-19 IDs mapped (WP-J; Gaps: G26, G27, G28) |
+| cb96e6d | 19 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): round-20 verification findings (WP-J; Gaps: 신규) |
+| 7eef07e | 20 | R20-1 | Gaps: G30 | subject | fix(report): R20-1 a FIFO, socket or unreadable subfolder in the scanned folder is re-derived as the scan's own skipped / failed row — not "not found", so its report is no longer 409 (R20-1; Gaps: G30) |
+| bf79e20 | 20 | R20-2 | Gaps: G1; 신규(스펙 외) | subject | fix(audio): R20-2 every multi-file command and request runs its audio files through one worker per thread, and a worker's numeric libraries use one thread — batch, upload and report re-analysis no longer start a worker per file (R20-2; Gaps: G1, 신규) |
+| ff4c703 | 20 | R20-3 | Gaps: G1; 신규(스펙 외) | subject | fix(audio): R20-3 the audio worker protocol is framed — a ready line, the worker's token and the request id in every reply; any other reply stops the worker and fails that file's check, never shifting features to the next file (R20-3; Gaps: G1, 신규) |
+| b516bea | 20 | R20-4 | Gaps: G30 | subject | fix(report): R20-4 a posted duplicate row must name another posted, non-duplicate row as duplicate_of, and its bytes are compared with that row's server re-derivation — a self-duplicate or an unposted original is 400 (R20-4; Gaps: G30) |
+| c48f766 | 20 | R20-5 | Gaps: G30 | subject | fix(report): R20-5 a row the scan hashed that is now behind a linked folder is a changed row — 409, not moved to excluded_items while the rest is signed (R20-5; Gaps: G30) |
+| e348c38 | 20 | R20-6 | Gaps: G34; 신규(스펙 외) | subject | fix(output): R20-6 a SIGTERM or SIGHUP during an output write removes the temp file — the CLI's cleanup handler removes the output temp files being written, and the comments and docs say exactly what is covered (R20-6; Gaps: G34, 신규) |
+| 1ec725c | 20 | R20-7 | Gaps: G31; 신규(스펙 외) | subject | fix(cli): R20-7 tool folders decided by HOME or TMPDIR are never inside a scanned folder, and a single-file command checks its file's folder for the log and heatmap variables — exit 2, or the next temp folder with the notice (R20-7; Gaps: G31, 신규) |
+| 5ab8d28 | 20 | R20-8 | Gaps: G30; 신규(스펙 외) | subject | fix(report): R20-8 display_name escapes unassigned code points and noncharacters (category Cn) in Python and in gui.js — names with U+0378, U+FDD0 or U+FFFE are no longer shown as they are (R20-8; Gaps: G30, 신규) |
+| 7543812 | 20 | R20-9 | Gaps: 신규(스펙 외) | subject | fix(cli): R20-9 known options before a command name go after it — `--verbose scan X`, `--verbose doctor`, `--verbose corpus build …` and `help scan` are read by that command, not as a scan of a folder named like the command (R20-9; Gaps: 신규) |
+| 2b79825 | 20 | R20-10 | Gaps: 신규(스펙 외) | subject | docs(phase0): R20-10 HANDOFF.md describes the round loop and where to read the record state instead of stating it — nothing in it is made false by the round's records-only commit (R20-10; Gaps: 신규) |
