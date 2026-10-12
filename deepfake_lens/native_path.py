@@ -144,7 +144,9 @@ STALE_LEGACY_SECONDS = 24 * 60 * 60
 # touches the folder, so an hour of no change is not a scan in progress.
 STALE_MIN_AGE_SECONDS = 60 * 60
 # R13-4: the signals whose default action ends the process without running
-# atexit; the folder is removed first.
+# atexit; the folder is removed first. R21-8 (round 21): only these — any other
+# terminating signal (SIGQUIT, SIGUSR1, SIGUSR2, SIGALRM, …) leaves the session
+# folder and the output temp files (docs/deepfake-lens-cli.md, "Exit codes").
 CLEANUP_SIGNALS = ("SIGTERM", "SIGINT", "SIGHUP", "SIGBREAK")
 # R13-8: Windows API constants (winnt.h / winerror.h).
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000

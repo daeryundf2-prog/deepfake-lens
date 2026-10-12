@@ -91,8 +91,10 @@ def write_output_bytes(path: Path | str, data: bytes) -> None:
     except BaseException as exc:
         # R19-6 (round 19): an exception raised in this thread during the write — an OSError, a
         # Ctrl-C's KeyboardInterrupt, a SystemExit — removes the temp file here. R20-6: a SIGTERM /
-        # SIGHUP does not raise here (see above); SIGKILL, or a signal the process ignores or handles
-        # with a Python handler of its own, leaves the file.
+        # SIGHUP does not raise here (see above); SIGKILL, any other signal whose default action ends
+        # the process (SIGQUIT, SIGUSR1, SIGUSR2, SIGALRM … — no cleanup handler is installed for
+        # them; R21-8: R20-6's list left them out), or a signal the process ignores or handles with a
+        # Python handler of its own, leaves the file (and the session folder).
         try:
             temp.unlink(missing_ok=True)
         except OSError:
