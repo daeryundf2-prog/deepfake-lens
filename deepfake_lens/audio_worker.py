@@ -368,13 +368,19 @@ class _Worker:
         env = dict(os.environ)
         env[NUMBA_CACHE_ENV] = self.cache_dir
         # R20-2 (round 20): one worker extracts one file at a time (a scan gets its parallelism from
-        # one worker per thread), so its numeric libraries run one thread each unless the operator
-        # chose otherwise. With the default (a thread per core) every worker's OpenMP / OpenBLAS pool
-        # spun on all cores: a scan of 300 audio/video files used 190-220 s of CPU for 50 s of wall
-        # time (2130892, in-process: the same), and 4 workers made a scan 16-22 % slower than
-        # 2130892. The features are byte-identical (the 300-row comparison).
+        # one worker per thread), so its numeric libraries run one thread each. With the default (a
+        # thread per core) every worker's OpenMP / OpenBLAS pool spun on all cores: a scan of 300
+        # audio/video files used 190-220 s of CPU for 50 s of wall time (2130892, in-process: the
+        # same), and 4 workers made a scan 16-22 % slower than 2130892.
+        # R21-2 (round 21) correction: R20-2 said "the features are byte-identical (the 300-row
+        # comparison)". That is not true for every input: with one thread the last float32 digits
+        # of some MFCC standard deviations of an MP4's audio track differ from a multi-threaded run
+        # (the verifier: 8 of 300 rows, all MP4, verdicts equal). So the count is now always 1 — an
+        # operator's OMP_NUM_THREADS (which R20-2 kept, and which no cache key recorded) no longer
+        # changes a worker's features — and scan_cache.OUTPUT_FORMAT_GENERATION is 9, so no row
+        # cached before this change is replayed.
         for name in WORKER_THREAD_ENV:
-            env.setdefault(name, "1")
+            env[name] = "1"
         log = _native_log()
         try:
             self.proc = shutdown.start_tracked(

@@ -819,6 +819,18 @@ class CacheKeyFollowsRuntimeTest(unittest.TestCase):
             self.assertNotIn(os.sep, token.replace("/", "") if os.sep != "/" else token)
             self.assertNotIn(sys.prefix, token)
 
+    def test_the_scan_process_thread_variables_are_in_the_key(self) -> None:
+        """R21-2 (round 21): a row cached with OMP_NUM_THREADS=4 was replayed by a scan without it (nothing in the key)."""
+        from deepfake_lens import audio_worker, scan_cache
+
+        base = {name: value for name, value in os.environ.items() if name not in audio_worker.WORKER_THREAD_ENV}
+        with mock.patch.dict(os.environ, base, clear=True):
+            unset = scan_cache.dependency_tokens()
+        with mock.patch.dict(os.environ, {**base, "OMP_NUM_THREADS": "4"}, clear=True):
+            four = scan_cache.dependency_tokens()
+        self.assertIn("threads:OMP_NUM_THREADS=-,OPENBLAS_NUM_THREADS=-,MKL_NUM_THREADS=-,NUMBA_NUM_THREADS=-", unset)
+        self.assertIn("threads:OMP_NUM_THREADS=4,OPENBLAS_NUM_THREADS=-,MKL_NUM_THREADS=-,NUMBA_NUM_THREADS=-", four)
+
     def test_ffmpeg_presence_is_in_the_key(self) -> None:
         from deepfake_lens import scan_cache
 

@@ -251,8 +251,27 @@ class OneWorkerPerScopeTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {**variables, "OMP_NUM_THREADS": "3"}, clear=True), \
                 mock.patch.object(shutdown, "start_tracked", start), self.assertRaises(OSError):
             audio_worker._Worker()
+        # R21-2 (round 21): the operator's value was kept ("3" here) and no cache key recorded it — a worker's
+        # features then depended on it (the last float32 digits of an MP4's MFCC standard deviations, 1 thread vs
+        # 4). A worker now always runs its numeric libraries on one thread.
         self.assertEqual({name: seen[name] for name in audio_worker.WORKER_THREAD_ENV},
-                         {"OMP_NUM_THREADS": "3", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "NUMBA_NUM_THREADS": "1"})
+                         {"OMP_NUM_THREADS": "1", "OPENBLAS_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "NUMBA_NUM_THREADS": "1"})
+
+    @unittest.skipUnless(HAVE_LIBROSA, "librosa not installed")
+    def test_an_operators_thread_count_does_not_change_a_workers_features(self) -> None:
+        """R21-2 (round 21): the same file's features with OMP_NUM_THREADS=4 set by the operator and without it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = Path(tmp, "tone.wav")
+            _write_tone(wav, seconds=3, hz=211.0)
+            replies = []
+            for value in ("4", None):
+                variables = {name: value for name, value in os.environ.items() if name not in audio_worker.WORKER_THREAD_ENV}
+                if value is not None:
+                    variables.update({name: value for name in audio_worker.WORKER_THREAD_ENV})
+                with mock.patch.dict(os.environ, variables, clear=True):
+                    replies.append(audio_worker.extract_features(str(wav), segment_seconds=5))
+        self.assertIsNotNone(replies[0].get("features"))
+        self.assertEqual(json.dumps(replies[0], sort_keys=True), json.dumps(replies[1], sort_keys=True))
 
     def test_outside_a_scope_a_worker_serves_one_request(self) -> None:
         started, counting = self._counting()
