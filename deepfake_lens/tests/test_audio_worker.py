@@ -122,7 +122,9 @@ class PrivateNumbaCacheTest(unittest.TestCase):
         self.assertTrue(seen["dir"].startswith(seen["scratch"] + os.sep), seen)
 
     def test_publish_is_one_rename_and_never_overwrites(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(audio_worker, "shared_cache_root", return_value=Path(tmp, "shared")):
+        # R22-9: the environment's cache root is left out here (this test's content must never be published there)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(audio_worker, "shared_cache_root", return_value=Path(tmp, "shared")), \
+                mock.patch.object(audio_worker, "environment_cache_root", return_value=None):
             one, two = Path(tmp, "one"), Path(tmp, "two")
             for folder, text in ((one, "first"), (two, "second")):
                 (folder / "sub").mkdir(parents=True)
@@ -135,6 +137,38 @@ class PrivateNumbaCacheTest(unittest.TestCase):
                 seeded, was_seeded = audio_worker.private_cache_dir()
             self.assertTrue(was_seeded)
             self.assertEqual(Path(seeded, "sub", "f.nbi").read_text(encoding="utf-8"), "first")
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "POSIX uid")
+    def test_a_new_home_is_seeded_from_the_environments_cache_and_publishes_its_own(self) -> None:
+        """R22-9 (round 22): a published cache only under HOME made every new HOME compile librosa's numba functions
+        again in its first worker (web upload of 20 WAV files 7.4 s against 4.8 s at 2130892, whose cache sat in
+        site-packages). The environment's root seeds it; HOME's root still gets its own published copy."""
+        from deepfake_lens import native_path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = Path(tmp, "venv")
+            source = Path(tmp, "compiled")
+            (source / "sub").mkdir(parents=True)
+            (source / "sub" / "f.nbi").write_text("compiled", encoding="utf-8")
+            native_path.set_tool_cache_base(None)
+            with mock.patch.object(sys, "prefix", str(prefix)), mock.patch.dict(os.environ, {"HOME": str(Path(tmp, "home1"))}):
+                self.assertTrue(audio_worker.publish_cache(str(source)))
+            base = prefix / "var" / "deepfake-lens"
+            self.assertEqual(oct(base.stat().st_mode & 0o777), oct(0o700))
+            with mock.patch.object(sys, "prefix", str(prefix)), mock.patch.dict(os.environ, {"HOME": str(Path(tmp, "home2"))}), \
+                    mock.patch("deepfake_lens.native_path.scratch_dir", return_value=tmp):
+                seeded, all_published = audio_worker.private_cache_dir()
+                self.assertFalse(all_published)  # home2 has none yet: the worker publishes there after its first file
+                self.assertEqual(Path(seeded, "sub", "f.nbi").read_text(encoding="utf-8"), "compiled")
+                self.assertTrue(audio_worker.publish_cache(seeded))
+                self.assertTrue(Path(tmp, "home2", ".cache", "deepfake-lens", "numba").is_dir())
+            # a folder others can write, or one inside an examined folder, is never used
+            base.chmod(0o777)
+            with mock.patch.object(sys, "prefix", str(prefix)):
+                self.assertIsNone(audio_worker.environment_cache_root())
+            base.chmod(0o700)
+            with mock.patch.object(sys, "prefix", str(prefix)), mock.patch.object(native_path, "_EXAMINED_FOLDERS", [os.path.realpath(tmp)]):
+                self.assertIsNone(audio_worker.environment_cache_root())
 
     def test_no_shared_cache_under_a_relative_home(self) -> None:
         with mock.patch.object(Path, "home", return_value=Path("relative-home")):

@@ -193,41 +193,82 @@ def shared_cache_root() -> Path | None:
     return base / "numba" / _runtime_key() if base is not None else None
 
 
+def environment_cache_root() -> Path | None:
+    """R22-9 (round 22): ``<sys.prefix>/var/deepfake-lens/numba/<runtime>`` — a published cache of this Python environment.
+
+    The published cache lived only under the tool base, which HOME decides. A server or scan run with a HOME
+    that had none (a new HOME, a relocated tool base) compiled librosa's numba functions again in its first
+    worker (about 2.5 s): web upload of 20 WAV files 7.4 s against 4.8 s at 2130892 — whose cache stayed in
+    site-packages, shared by every HOME (the cache R19-2 removed: concurrent scans corrupted it in place). This
+    root is per environment like that one, but it is used like the HOME root — only a complete ``published``
+    tree made by one rename, copied by readers and never written after — so no two processes share a writable
+    cache file. It is used only on POSIX, when the folder is this user's own and nobody else can write it
+    (``native_path.claim_tool_base``: a root-owned system Python or a shared install is skipped), and never
+    inside an examined folder.
+    """
+    if not hasattr(os, "getuid"):
+        return None
+    from .native_path import _inside_examined, claim_tool_base
+
+    base = Path(sys.prefix) / "var" / "deepfake-lens"
+    if not base.is_absolute() or _inside_examined(str(base)) or not claim_tool_base(base):
+        return None
+    return base / "numba" / _runtime_key()
+
+
+def _cache_roots() -> list[Path]:
+    """R22-9: the published-cache roots — HOME's (the tool base) first, then this environment's (deduplicated)."""
+    roots: list[Path] = []
+    for root in (shared_cache_root(), environment_cache_root()):
+        if root is not None and root not in roots:
+            roots.append(root)
+    return roots
+
+
 def private_cache_dir() -> tuple[str, bool]:
-    """A new private numba cache folder in the session folder, seeded from the published cache; (folder, seeded)."""
+    """A new private numba cache folder in the session folder, seeded from a published cache; (folder, seeded).
+
+    R22-9: ``seeded`` is True only when every cache root already has a published cache — a worker seeded
+    from the environment's root still publishes into HOME's after its first extraction.
+    """
     import tempfile
 
     from .native_path import scratch_dir
 
     folder = tempfile.mkdtemp(prefix="numba-", dir=scratch_dir())
-    root = shared_cache_root()
-    published = root / "published" if root is not None else None
-    if published is not None and published.is_dir():
+    roots = _cache_roots()
+    for root in roots:
+        published = root / "published"
+        if not published.is_dir():
+            continue
         try:
             shutil.copytree(published, folder, dirs_exist_ok=True)
-            return folder, True
+            return folder, all((other / "published").is_dir() for other in roots)
         except (OSError, shutil.Error) as exc:
             logger.info("numba cache: published cache not copied (%s)", type(exc).__name__)
     return folder, False
 
 
 def publish_cache(folder: str) -> bool:
-    """Copy a private cache to a new folder and rename it to ``published`` — False when one exists or on any error."""
-    root = shared_cache_root()
-    if root is None:
-        return False
-    published = root / "published"
-    if published.exists():
-        return False
-    staging = root / f".publish-{os.getpid()}-{os.urandom(6).hex()}"
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(folder, staging)
-        os.rename(staging, published)  # fails (EEXIST/ENOTEMPTY) when another process published first
-        return True
-    except (OSError, shutil.Error):
-        shutil.rmtree(staging, ignore_errors=True)
-        return False
+    """Copy a private cache to a new folder and rename it to ``published`` in every cache root that has none.
+
+    False when nothing was published (each root has one, or every attempt failed). R22-9: the environment's
+    root too (:func:`environment_cache_root`).
+    """
+    done = False
+    for root in _cache_roots():
+        published = root / "published"
+        if published.exists():
+            continue
+        staging = root / f".publish-{os.getpid()}-{os.urandom(6).hex()}"
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(folder, staging)
+            os.rename(staging, published)  # fails (EEXIST/ENOTEMPTY) when another process published first
+            done = True
+        except (OSError, shutil.Error):
+            shutil.rmtree(staging, ignore_errors=True)
+    return done
 
 
 _PROCESS_CACHE_LOCK = threading.Lock()
