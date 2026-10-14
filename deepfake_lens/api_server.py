@@ -324,6 +324,14 @@ def create_app(
             headers=getattr(exc, "headers", None),
         )
 
+    from .webapp_api import PathTextInvalid
+
+    @app.exception_handler(PathTextInvalid)
+    async def path_text_invalid(_request: Any, exc: Any) -> Any:
+        # R22-6 (round 22): a NUL in a path value (file_path, directory, a webapp_api query path) reached the
+        # file system and was a 500 — a request error.
+        return JSONResponse({"detail": str(exc)}, status_code=400)
+
     @app.exception_handler(Exception)
     async def korean_server_error(request: Any, exc: Exception) -> Any:
         # N5: an unhandled exception is a Korean 500 (Starlette's default is
@@ -609,8 +617,8 @@ def create_app(
                         _layer_error(data, "advanced", exc)
                 return {"status": "success", "data": data}
             raise HTTPException(status_code=400, detail=TEXT_OR_FILE_REQUIRED)
-        except HTTPException:
-            raise
+        except (HTTPException, PathTextInvalid):
+            raise  # R22-6: a NUL in file_path is the 400 of path_text_invalid, not a 500
         except Exception as exc:
             logger.exception("request failed")
             raise HTTPException(status_code=500, detail=failure_reason(exc)) from exc

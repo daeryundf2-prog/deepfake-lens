@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 from .webapp_api import (
     MAX_UPLOAD_BYTES,
+    PathTextInvalid,
     _analyze_file_payload,
     _analyze_upload_payload,
     _check_file_payload,
@@ -235,6 +236,8 @@ def build_server(
                 self._route_get(parsed)
             except ReadRootDenied:
                 self._send_json(read_root_denied_body(), status=403)
+            except PathTextInvalid as exc:
+                self._send_json({"error": str(exc)}, status=400)  # R22-6: a NUL in a path value (was a 500)
             except Exception:  # noqa: BLE001 - N5: a crash is a Korean 500, not a dropped connection
                 logger.exception("GET %s failed", parsed.path)
                 self.send_error(500)
@@ -306,6 +309,8 @@ def build_server(
                 self._route_post(parsed)
             except ReadRootDenied:
                 self._send_json(read_root_denied_body(), status=403)
+            except PathTextInvalid as exc:
+                self._send_json({"error": str(exc)}, status=400)  # R22-6: a NUL in a path value (was a 500)
             except Exception:  # noqa: BLE001 - N5: a crash is a Korean 500, not a dropped connection
                 logger.exception("POST %s failed", parsed.path)
                 self.send_error(500)

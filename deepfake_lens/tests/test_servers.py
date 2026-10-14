@@ -3172,6 +3172,10 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                 "/api/analyze-file?file_b64=%40%40", "/api/scan?folder_b64=%40%40", "/api/scan?async=1&folder_b64=AA%3D%3D",
                 f"/api/preview?path_b64=%40%40&root={q(f)}", "/api/heatmap?path_b64=x.png&root_b64=%40%40",
             )],
+            # R22-6 (round 22): a NUL in a path value was a 500 (PathValuesWithNulAre400Test sends every endpoint).
+            "E48": [case(s, "GET", f"/api/analyze-file?file={q(f / 'a')}%00", 400, "NUL 문자") for s in both]
+            + [case(s, "POST", "/api/report", 400, "NUL 문자", report({"items": [memo_row], "scan_root": scan_root + "\x00"}), "application/json") for s in both]
+            + [case("api", "POST", f"/api/classify?file_path={q(f / 'a')}%00", 400, "NUL 문자")],
             # R19-13 (round 19): a posted row the server's re-analysis contradicts (here its digest) — every format.
             "E47": [case(s, "POST", f"/api/report?format={fmt}", 409, webapp_api.REPORT_ROWS_CHANGED,
                          report({"items": [dict(memo_row, sha256="0" * 64)], "scan_root": scan_root, "options": {"no_default_engine": "true"}}),
@@ -3421,3 +3425,95 @@ class ReportUnrecordedFilesAreTheServersTest(_ReportLegsFixture):
         for (leg, fmt), (status, text, _) in self._report(list(rows.values())).items():
             with self.subTest(leg=leg, format=fmt, case="changed"):
                 self.assertEqual(status, 409, text[:300])
+
+
+class PathValuesWithNulAre400Test(unittest.TestCase):
+    """R22-6 (round 22): a path value holding a NUL character reached the file system — ValueError("embedded null
+    byte") — and both servers answered HTTP 500: report rows / scan_root / heatmap_path, analyze-file, heatmap,
+    preview, scan, and api-serve's check, compare, classify, analyze/*, the streams. A NUL can never be part of a
+    file-system path: every such value is a request error (400). Control characters other than NUL are legal in
+    POSIX names (R11-9 hostile names) and keep working."""
+
+    setUp = ErrorTableEveryRowTest.setUp
+    _web = ErrorTableEveryRowTest._web
+    _api = ErrorTableEveryRowTest._api
+    _multipart = ErrorTableEveryRowTest._multipart
+
+    def _nul_requests(self) -> list[tuple[str, str, str, bytes | None, str]]:
+        import base64
+        from urllib.parse import quote
+
+        f = self.folder
+        nul = quote(str(f / "a\x00b.png"))
+        b64 = base64.urlsafe_b64encode(os.fsencode(str(f / "a\x00b.png"))).decode()
+        memo = webapp_api._scan_payload(f"folder={quote(str(f))}&no_default_engine=true", default_folder=f)
+        row = next(item for item in memo["items"] if item["path"] == "memo.txt")
+
+        def report(**changes: object) -> bytes:
+            body: dict[str, Any] = {"items": [dict(row, **changes.pop("row", {}))], "scan_root": str(f), "format": "json"}
+            body.update(changes)
+            return json.dumps(body).encode("utf-8")
+
+        both = ("web", "api")
+        requests = [(s, "GET", path, None, "") for s in both for path in (
+            f"/api/scan?folder={nul}", f"/api/scan?async=1&folder={nul}", f"/api/scan?folder_b64={b64}",
+            f"/api/analyze-file?file={nul}", f"/api/analyze-file?file_b64={b64}",
+            f"/api/heatmap?path={nul}", f"/api/heatmap?path=x.png&root={nul}", f"/api/heatmap?path_b64={b64}",
+            f"/api/preview?path={nul}", f"/api/preview?path={quote(str(f / 'photo.png'))}&root={nul}", f"/api/preview?path_b64={b64}",
+        )]
+        requests += [(s, "POST", "/api/report", body, "application/json") for s in both for body in (
+            report(scan_root=str(f) + "\x00"),
+            report(row={"path": "memo\x00.txt", "name": "memo\x00.txt"}),
+            report(row={"heatmap_path": str(f / "h\x00.png")}),
+            report(row={"duplicate_of": "a\x00", "status": "duplicate"}),
+            json.dumps({"items": [{"source": "upload", "path": "a\x00.png", "name": "a\x00.png", "status": "failed"}], "format": "json"}).encode(),
+        )]
+        requests += [("api", "POST", path.format(nul), None, "") for path in (
+            "/api/analyze/image?file_path={}", "/api/analyze/audio?file_path={}", "/api/analyze/face?file_path={}",
+            "/api/analyze/forensic?file_path={}", "/api/classify?file_path={}", "/api/check?file_path={}",
+            "/api/check/stream?file_path={}", "/api/scan/stream?directory={}",
+            "/api/compare?file_path_a={}&file_path_b=" + quote(str(f / "memo.txt")),
+            "/api/compare?file_path_b={}&file_path_a=" + quote(str(f / "memo.txt")),
+        )]
+        return requests
+
+    def test_every_nul_path_value_is_400(self) -> None:
+        senders = {"web": self._web()}
+        if HAVE_FASTAPI:
+            senders["api"] = self._api()
+        for server, method, path, body, ctype in self._nul_requests():
+            send = senders.get(server)
+            if send is None:
+                continue
+            with self.subTest(server=server, method=method, path=path[:90], body=(body or b"")[-60:]):
+                status, raw = send(method, path, body, ctype, None)
+                self.assertEqual(status, 400, raw[:300])
+                text = raw.decode("utf-8", "replace")
+                # a *_b64 value's NUL is already refused by the decoder (R12-4: PATH_B64_INVALID)
+                self.assertTrue("NUL" in text or ("_b64=" in path and PATH_B64_INVALID in text), text[:300])
+
+    def test_an_upload_name_with_nul_is_not_a_500(self) -> None:
+        senders = {"web": self._web()}
+        if HAVE_FASTAPI:
+            senders["api"] = self._api()
+        png = (self.folder / "photo.png").read_bytes()
+        for server, send in senders.items():
+            for name in ("a\x00.png", "b\x00.zip"):
+                body, ctype = self._multipart(("files", name, png))
+                with self.subTest(server=server, name=name):
+                    status, raw = send("POST", "/api/analyze-upload", body, ctype, None)
+                    self.assertIn(status, (200, 400), raw[:300])
+
+    def test_control_characters_other_than_nul_still_work(self) -> None:
+        """R11-9 names (\\r, \\n, \\t, ESC) are file names a scan writes: analyze-file and preview still read them."""
+        from urllib.parse import quote
+
+        name = self.folder / "c\r\n\t\x1bd.png"
+        _write_png(name, seed=6)
+        senders = {"web": self._web()}
+        if HAVE_FASTAPI:
+            senders["api"] = self._api()
+        for server, send in senders.items():
+            with self.subTest(server=server):
+                self.assertEqual(send("GET", f"/api/analyze-file?file={quote(str(name))}", None, "", None)[0], 200)
+                self.assertEqual(send("GET", f"/api/preview?path={quote(str(name))}", None, "", None)[0], 200)

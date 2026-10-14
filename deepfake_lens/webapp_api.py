@@ -586,6 +586,27 @@ class ReadRootDenied(PermissionError):
     """
 
 
+# R22-6 (round 22): a path value with a NUL character (a query parameter, its base64 form, a report row's
+# path / container / member / duplicate_of / heatmap_path, scan_root, an api-serve file_path or directory) reached
+# the file system and ValueError("embedded null byte") was an HTTP 500 on both servers. NUL can never be part of a
+# file-system path, so it is refused as a request error (400) before any file is touched. Other control
+# characters are legal in POSIX file names (the hostile-name fixtures of R11-9 carry \r, \n, \t, ESC) and
+# a scan of such a folder writes them in its rows — they are kept.
+PATH_TEXT_NUL = "경로 값에 NUL 문자(\\x00)가 있습니다 — 파일 시스템 경로가 될 수 없습니다: {field}"
+
+
+class PathTextInvalid(ValueError):
+    """R22-6: a path value the request names cannot be a file-system path (NUL) — HTTP 400 on both servers."""
+
+
+def reject_nul_path(value: object, field: str) -> None:
+    """R22-6: raise :class:`PathTextInvalid` when a path value of the request holds a NUL character."""
+    if isinstance(value, str) and "\x00" in value:
+        raise PathTextInvalid(PATH_TEXT_NUL.format(field=field))
+    if isinstance(value, (bytes, bytearray)) and b"\x00" in value:
+        raise PathTextInvalid(PATH_TEXT_NUL.format(field=field))
+
+
 def read_root_denied_body() -> dict[str, object]:
     return {"error": READ_ROOT_DENIED_MESSAGE}
 
@@ -620,7 +641,8 @@ def _effective_roots(default_folder: Path | None = None) -> list[Path]:
 
 
 def _require_read_root(path: Path, default_folder: Path | None = None) -> Path:
-    """Resolve ``path`` and raise ReadRootDenied unless it is inside a root."""
+    """Resolve ``path`` and raise ReadRootDenied unless it is inside a root (PathTextInvalid for a NUL — R22-6)."""
+    reject_nul_path(str(path), "경로")
     try:
         resolved = expand_user(path).resolve()
     except (OSError, RuntimeError) as exc:
@@ -643,16 +665,18 @@ def _b64_or_text(params: dict[str, list[str]], name: str) -> str:
     from .json_text import fs_b64decode
 
     encoded = params.get(f"{name}_b64", [""])[0]
-    if encoded:
-        return fs_b64decode(encoded)
-    return params.get(name, [""])[0]
+    value = fs_b64decode(encoded) if encoded else params.get(name, [""])[0]
+    reject_nul_path(value, f"{name}_b64" if encoded else name)  # R22-6
+    return value
 
 
 def _requested_folder(query: str, default_folder: Path | None) -> Path:
     params = parse_qs(query)
     if params.get("folder_b64", [""])[0]:
         return expand_user(_b64_or_text(params, "folder"))  # R13-3
-    return expand_user(params.get("folder", [str(default_folder or ".")])[0])
+    folder = params.get("folder", [str(default_folder or ".")])[0]
+    reject_nul_path(folder, "folder")  # R22-6
+    return expand_user(folder)
 
 
 def _read_root_allows(path: Path, root_value: str = "", default_folder: Path | None = None) -> bool:
@@ -689,6 +713,8 @@ def _media_query_paths(query: str) -> tuple[str, str]:
     root_b64 = params.get("root_b64", [""])[0]
     root_value = fs_b64decode(root_b64) if root_b64 else params.get("root", [""])[0]
     path_value = fs_b64decode(path_b64) if path_b64 else params.get("path", [""])[0]
+    reject_nul_path(root_value, "root_b64" if root_b64 else "root")  # R22-6: a ValueError — 400 bad-path
+    reject_nul_path(path_value, "path_b64" if path_b64 else "path")
     if path_b64 and root_value and not os.path.isabs(path_value):
         path_value = os.path.join(root_value, path_value)
     return path_value, root_value
@@ -1826,6 +1852,20 @@ def _as_duplicate(posted: Any, server: Any, original: Any | None) -> Any:
     )
 
 
+def _row_nul_field(row: object) -> str | None:
+    """R22-6: the name of a posted row's path-like field holding a NUL character, or None."""
+    if not isinstance(row, dict):
+        return None
+    result = row.get("result")
+    pixel = result.get("pixel_analysis") if isinstance(result, dict) else None
+    fields = {name: row.get(name) for name in ("path", "name", "container", "member", "duplicate_of", "heatmap_path")}
+    fields["result.pixel_analysis.heatmap_path"] = pixel.get("heatmap_path") if isinstance(pixel, dict) else None
+    for name, value in fields.items():
+        if isinstance(value, str) and "\x00" in value:
+            return name
+    return None
+
+
 def _posted_heatmaps_allowed(row: dict[str, Any], roots: list[Path]) -> bool:
     """Every heatmap path a posted row names (top level or result.pixel_analysis) is under the roots."""
     result = row.get("result")
@@ -1875,6 +1915,8 @@ def _report_scan_root(value: object, roots: list[Path], *, required: bool) -> Pa
         return {"error": REPORT_SCAN_ROOT_REQUIRED} if required else None
     if not isinstance(value, str):
         return {"error": REPORT_SCAN_ROOT_NOT_STRING}
+    if "\x00" in value:
+        return {"error": PATH_TEXT_NUL.format(field="scan_root")}  # R22-6: was a 500
     candidate = expand_user(value)
     if not candidate.is_absolute():
         return {"error": REPORT_SCAN_ROOT_NOT_ABSOLUTE.format(value=value[:200])}
@@ -2055,6 +2097,11 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     # — 403 whatever else is wrong with the row (a top-level heatmap_path
     # included, which the GUI also reads).
     roots_for_probe = _effective_roots(default_folder)
+    for index, row in enumerate(raw_items):
+        nul_field = _row_nul_field(row)
+        if nul_field is not None:
+            # R22-6 (round 22): a NUL in a row's path-like value was a 500 (resolve / lstat ValueError).
+            return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason=PATH_TEXT_NUL.format(field=nul_field))}
     for row in raw_items:
         if isinstance(row, dict) and not _posted_heatmaps_allowed(row, roots_for_probe):
             raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE)
