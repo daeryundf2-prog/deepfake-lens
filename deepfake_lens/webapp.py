@@ -392,7 +392,7 @@ def build_server(
                     saved = get_default_review_store().save_review(art_id, raw, evidence_folders(default_folder))
                 except UserDataRefused as exc:
                     # R22-3: never written into the evidence (or the working folder) — the examiner is told why
-                    self._send_json({"error": str(exc)}, status=USER_DATA_REFUSED_STATUS)
+                    self._send_json({"error": str(exc)}, status=getattr(exc, "status", USER_DATA_REFUSED_STATUS))  # R23-7: 409/507
                     return
                 self._send_json({"status": "success", "artifact_id": art_id, "review": saved})
                 return

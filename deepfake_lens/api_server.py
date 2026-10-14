@@ -1168,7 +1168,7 @@ def create_app(
             return store.save_review(artifact_id, data, _evidence())
         except UserDataRefused as exc:
             # R22-3: refused, never written into the evidence (or the working folder)
-            raise HTTPException(status_code=USER_DATA_REFUSED_STATUS, detail=str(exc)) from exc
+            raise HTTPException(status_code=getattr(exc, "status", USER_DATA_REFUSED_STATUS), detail=str(exc)) from exc  # R23-7: 409/507
 
     @app.get("/api/artifacts/{artifact_id:path}/review")
     async def get_artifact_review(artifact_id: str):

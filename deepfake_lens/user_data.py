@@ -63,8 +63,53 @@ USER_DATA_INSIDE_EVIDENCE = (
 )
 
 
+# R23-7 (round 23): the record could not be written (or the existing file read) — nothing changed.
+USER_DATA_WRITE_FAILED = (
+    "검토·피드백 기록 파일 {path}에 저장하지 못했습니다({reason}) — 기록은 바뀌지 않았습니다. "
+    "폴더의 쓰기 권한과 디스크 공간을 확인하거나 {env} 환경 변수로 쓸 수 있는 절대 경로를 지정하십시오"
+)
+USER_DATA_READ_FAILED = (
+    "기존 검토 기록 파일 {path}을(를) 읽지 못해({reason}) 저장하지 않았습니다 — 덮어쓰면 기존 기록이 사라집니다. "
+    "파일을 확인하거나 {env} 환경 변수로 다른 절대 경로를 지정하십시오"
+)
+# HTTP status of a write that failed for lack of space (ENOSPC, EDQUOT); every other failure is 409.
+USER_DATA_NO_SPACE_STATUS = 507
+USER_DATA_REFUSED_STATUS = 409
+
+
 class UserDataRefused(RuntimeError):
-    """R22-3: the examiner-record file has no place outside the evidence (saving refused, HTTP 409)."""
+    """R22-3: the examiner-record file has no place outside the evidence (saving refused, HTTP 409).
+
+    R23-7 (round 23): also the base of :class:`UserDataWriteFailed`; ``status`` is the HTTP status.
+    """
+
+    status = USER_DATA_REFUSED_STATUS
+
+
+class UserDataWriteFailed(UserDataRefused):
+    """R23-7: the record file could not be written (or its existing content read) — the store is unchanged.
+
+    ``/api/review`` answered 200 "success" while nothing reached the disk (``ReviewStore._persist`` passed
+    over every OSError and the in-memory cache kept the entry until a restart), and ``/api/feedback`` was
+    a 500 (``PermissionError``).
+    """
+
+    def __init__(self, message: str, status: int = USER_DATA_REFUSED_STATUS) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+def write_failed(path: Path, exc: OSError, env: str) -> UserDataWriteFailed:
+    """R23-7: the Korean refusal of a failed write of ``path`` (507 when the disk or quota is full, else 409)."""
+    import errno
+
+    from .error_text import read_error_ko
+
+    full = exc.errno in {errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC)}
+    return UserDataWriteFailed(
+        USER_DATA_WRITE_FAILED.format(path=path, reason=read_error_ko(exc), env=env),
+        USER_DATA_NO_SPACE_STATUS if full else USER_DATA_REFUSED_STATUS,
+    )
 
 
 def _home() -> Path | None:

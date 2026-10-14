@@ -7,6 +7,7 @@ read-root guard so each file stays a single readable layer.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -1287,7 +1288,7 @@ def _feedback_payload(body: bytes, evidence: list[Path] | tuple[Path, ...] = ())
     if isinstance(result, dict):
         # load_feedback reads the embedded scan result from the "result" key.
         entry["result"] = result
-    from .user_data import FEEDBACK_ENV, FEEDBACK_FILE, UserDataRefused, check_outside, migrate_default
+    from .user_data import FEEDBACK_ENV, FEEDBACK_FILE, UserDataRefused, check_outside, migrate_default, write_failed
 
     try:
         feedback_file = _feedback_path()
@@ -1295,9 +1296,21 @@ def _feedback_payload(body: bytes, evidence: list[Path] | tuple[Path, ...] = ())
     except UserDataRefused as exc:
         return ApiError(str(exc), USER_DATA_REFUSED_STATUS)
     migrate_default(FEEDBACK_FILE, FEEDBACK_ENV, feedback_file)  # R23-8: the reviews' rule
-    feedback_file.parent.mkdir(parents=True, exist_ok=True)
-    with feedback_file.open("a", encoding="utf-8") as handle:
-        handle.write(json_dumps(entry, ensure_ascii=False) + "\n")
+    line = (json_dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
+    size: int | None = None
+    try:
+        feedback_file.parent.mkdir(parents=True, exist_ok=True)
+        size = feedback_file.stat().st_size if feedback_file.is_file() else 0
+        with feedback_file.open("ab") as handle:
+            handle.write(line)
+    except OSError as exc:
+        # R23-7 (round 23): a folder or file that cannot be written was a 500 (PermissionError); a line
+        # half-written when the disk filled is cut off again, so the file holds whole entries only.
+        if size is not None:
+            with contextlib.suppress(OSError):
+                os.truncate(feedback_file, size)
+        failed = write_failed(feedback_file, exc, FEEDBACK_ENV)
+        return ApiError(str(failed), failed.status)
     return {"ok": True, "feedback_file": str(feedback_file)}
 
 

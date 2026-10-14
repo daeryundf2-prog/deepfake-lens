@@ -208,6 +208,105 @@ class ExaminerRecordsMigrateOnceTest(_Servers):
         self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"a": {"note": "new"}, "b": {"note": "old b"}})
 
 
+class ExaminerRecordWriteFailuresTest(_Servers):
+    """R23-7 (round 23): with the record folder not writable (uid 1000, ~/.local/share/deepfake-lens 0500) POST /api/review
+    answered 200 "success" and GET /api/reviews showed the entry from the memory cache — nothing on disk, gone after a
+    restart (ReviewStore._persist passed over every OSError); POST /api/feedback was a 500 (PermissionError). A write that
+    fails is now a Korean error — 409, or 507 when the disk is full — and the cache is put back as it was. (The gate runs
+    as root, where mode bits do not stop a write: the folder is made unwritable by a regular file in its place.)"""
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.base / "case").mkdir()
+        self.data = self.base / "data"
+        env = mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(self.data)})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def _block(self) -> None:
+        self.data.write_text("not a folder", encoding="utf-8")  # mkdir data/deepfake-lens fails, also for root
+
+    def test_an_unwritable_record_folder_is_a_korean_409_on_both_servers(self) -> None:
+        self._block()
+        for leg, send in self._legs(self.base / "case"):
+            with self.subTest(leg=leg):
+                status, body = self._save(send, leg)
+                self.assertEqual(status, 409, body)
+                text = body.get("error") or body.get("detail")
+                self.assertIn("저장하지 못했습니다", text)
+                self.assertIn("기록은 바뀌지 않았습니다", text)
+                status, body = send("GET", "/api/reviews")
+                self.assertEqual((status, body["reviews"]), (200, {}))  # not kept in memory
+                status, body = send("POST", "/api/feedback", {"path": "photo.png", "expected_label": "synthetic"})
+                self.assertEqual(status, 409, body)
+                self.assertIn("저장하지 못했습니다", body.get("error") or body.get("detail"))
+
+    def test_a_full_disk_is_507_and_the_previous_records_stay(self) -> None:
+        import errno
+
+        from deepfake_lens import output_files
+
+        legs = self._legs(self.base / "case")
+        send = legs[0][1]
+        self.assertEqual(self._save(send, "web")[0], 200)
+        status, _ = send("POST", "/api/feedback", {"path": "photo.png", "expected_label": "synthetic"})
+        self.assertEqual(status, 200)
+        stored = (self.data / "deepfake-lens" / "reviews.json").read_bytes()
+        feedback = self.data / "deepfake-lens" / "feedback.jsonl"
+        feedback_before = feedback.read_bytes()
+
+        def full(*_: Any, **__: Any) -> None:
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        real_open = Path.open
+
+        def half_written(path: Path, mode: str = "r", *args: Any, **kwargs: Any) -> Any:
+            handle = real_open(path, mode, *args, **kwargs)
+            if path != feedback or "a" not in mode:
+                return handle
+
+            class Partial:
+                def __enter__(self) -> "Partial":
+                    return self
+
+                def __exit__(self, *exc: object) -> None:
+                    handle.close()
+
+                def write(self, data: bytes) -> int:
+                    handle.write(data[:7])
+                    handle.flush()
+                    raise OSError(errno.ENOSPC, "No space left on device")
+
+            return Partial()
+
+        for leg, send in legs:
+            with self.subTest(leg=leg), mock.patch.object(output_files, "write_output_text", full), \
+                    mock.patch.object(Path, "open", half_written):
+                status, body = send("POST" if leg == "web" else "PUT", "/api/review" if leg == "web" else "/api/artifacts/photo.png/review",
+                                    {"artifact_id": "photo.png", "star": False, "note": "바뀐 검토"})
+                self.assertEqual(status, 507, body)
+                self.assertIn("디스크 공간이 부족합니다", body.get("error") or body.get("detail"))
+                status, body = send("GET", "/api/reviews")
+                self.assertEqual(body["reviews"]["photo.png"]["note"], "검토")  # the cache was put back
+                status, body = send("POST", "/api/feedback", {"path": "new.png", "expected_label": "real"})
+                self.assertEqual(status, 507, body)
+        self.assertEqual((self.data / "deepfake-lens" / "reviews.json").read_bytes(), stored)
+        self.assertEqual(feedback.read_bytes(), feedback_before)  # the half-written line was cut off again
+
+    def test_an_unreadable_record_file_is_never_overwritten(self) -> None:
+        target = self.data / "deepfake-lens" / "reviews.json"
+        target.parent.mkdir(parents=True)
+        for content in (b"[1, 2]", b"{not json", "검토".encode("utf-16")):
+            target.write_bytes(content)
+            reviews._DEFAULT_STORE = None
+            for leg, send in self._legs(self.base / "case"):
+                with self.subTest(leg=leg, content=content[:8]):
+                    status, body = self._save(send, leg)
+                    self.assertEqual(status, 409, body)
+                    self.assertIn("읽지 못해", body.get("error") or body.get("detail"))
+            self.assertEqual(target.read_bytes(), content)
+
+
 class ExaminerRecordOverridesTest(_Servers):
     """R23-8 (round 23): with DEEPFAKE_LENS_REVIEWS set, ~/.deepfake-lens/reviews.json was merged into the operator's
     file and a marker left in its folder; with DEEPFAKE_LENS_FEEDBACK set nothing was migrated — and the service
