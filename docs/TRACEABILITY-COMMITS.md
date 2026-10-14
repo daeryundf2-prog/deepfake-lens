@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..7756d40`(병합 커밋 제외, 커밋 307개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..bbe3532`(병합 커밋 제외, 커밋 324개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 283개 — 스펙 갭에 매핑 204개(그중 신규 사유 병기 72개), 신규(스펙 외)만 79개.
+요약: ID 296개 — 스펙 갭에 매핑 215개(그중 신규 사유 병기 77개), 신규(스펙 외)만 81개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -310,6 +310,19 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R22-9 | 22 | the published numba cache is also kept per Python environment — a new HOME is seeded from  | G1 | 신규(스펙 외): 갭 목록 밖 항목 포함 | b161bb2 |
 | R22-10 | 22 | words after `help <command>` must name its subcommands — `help corpus build` is that subco | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | cb40945 |
 | R22-11 | 22 | HANDOFF.md §1/§2/§9 state round 21 with R21-10 and round 22 — 22 rounds, R22-1…R22-11 fixe | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 7756d40 |
+| R23-1 | 23 | a relative audio path is made absolute before it crosses into a child process — scan case, | G1 |  | 5f3990f, 6ec2974 |
+| R23-2 | 23 | the per-environment numba cache is never made inside the folder of a file a single-file co | G1, G31 |  | 38911f0 |
+| R23-3 | 23 | a scan job the server finished "cancelled" marks the web report cancelled with the job's o | G7, G12, G30 |  | c89cb3a |
+| R23-4 | 23 | every PDF prints a character its font has no glyph for as its \uNNNN escape — Hebrew, Arab | G2, G30 |  | a30a455 |
+| R23-5 | 23 | archive members the server's own re-analysis of a signed container yields without a signed | G7, G12, G30 |  | 494c18d |
+| R23-6 | 23 | inherit-only ACL entries no longer make the default %ProgramData% parent unsafe, and a par | G31 | 신규(스펙 외): 갭 목록 밖 항목 포함 | ec4b17a |
+| R23-7 | 23 | an examiner record that cannot be written is a Korean 409 (507 when the disk is full) with | G31 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 190694d |
+| R23-8 | 23 | neither examiner record is migrated into a file an operator named — DEEPFAKE_LENS_REVIEWS  | G31 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 899c104 |
+| R23-9 | 23 | a model_path / fusion_profile name the file system cannot look up is a 400 — a 5000-charac | G31 |  | ec1229a |
+| R23-10 | 23 | the gate image is reproducible from the repository — base image pinned by digest, Debian p | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 3a2e1c4 |
+| R23-11 | 23 | `help vendor-weights pin` shows the vendor-weights help with a note — pin is a value of it | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 5b51712 |
+| R23-12 | 23 | the per-environment numba cache is never made inside the folder of a file a single-file co | G1, G31, G7, G12, G30 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 38911f0, c89cb3a, 494c18d, ec4b17a |
+| R23-13 | 23 | a true/false option with an unknown value is a 400 on both servers — recursive=maybe was r | G7 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 617130d |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -648,3 +661,20 @@ R18-14: ids[]의 갭 매핑을 커밋 제목·본문의 `Gaps:`에 맞췄다 —
 | 022feb1 | 22 | WP-J | Gaps: 신규(스펙 외) | subject | build(gate): gate.sh reads the unittest log as text even when a test's log output holds a NUL byte (WP-J; Gaps: 신규) |
 | b161bb2 | 22 | R22-9 | Gaps: G1; 신규(스펙 외) | subject | fix(audio): R22-9 the published numba cache is also kept per Python environment — a new HOME is seeded from it instead of compiling librosa's functions in its first worker; web upload of 20 WAV files 3.15 s against 4.85 s at 2130892 (R22-9; Gaps: G1, 신규) |
 | 7756d40 | 22 | R22-11 | Gaps: 신규(스펙 외) | subject | docs(phase0): R22-11 HANDOFF.md §1/§2/§9 state round 21 with R21-10 and round 22 — 22 rounds, R22-1…R22-11 fixed on this branch, the next steps — without anything the records-only commit changes (R22-11; Gaps: 신규) |
+| 85ad114 | 22 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 7756d40, round-22 IDs mapped (WP-J; Gaps: G26, G27, G28) |
+| 0fa5ac8 | 22 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): round-23 verification findings (WP-J; Gaps: 신규) |
+| 5f3990f | 23 | R23-1 | Gaps: G1 | subject | fix(audio): R23-1 a relative audio path is made absolute before it crosses into a child process — scan case, cd case; scan ., classify case/a.wav, batch case and web --folder case run audio_features again, equal to the absolute run (R23-1; Gaps: G1) |
+| 6ec2974 | 23 | R23-1 | Gaps: G1 | subject | docs(cli): R23-1 the audio worker is sent the file's absolute path and ffmpeg children absolute input names (R23-1; Gaps: G1) |
+| 38911f0 | 23 | R23-2, R23-12 | Gaps: G1, G31 | subject | fix(audio): R23-2 the per-environment numba cache is never made inside the folder of a file a single-file command analyzes — classify / evidence / audio a.wav with the project's .venv next to it wrote .venv/var/deepfake-lens (R23-2, R23-12; Gaps: G1, G31) |
+| 3a2e1c4 | 23 | R23-10 | Gaps: 신규(스펙 외) | subject | build(gate): R23-10 the gate image is reproducible from the repository — base image pinned by digest, Debian packages from a snapshot.debian.org state, every pip package at the reference image's exact version from committed lock files (R23-10; Gaps: 신규) |
+| c89cb3a | 23 | R23-3, R23-12 | Gaps: G7, G12, G30 | subject | fix(report): R23-3 a scan job the server finished "cancelled" marks the web report cancelled with the job's own count whatever the posted summary says — omitting summary.cancelled no longer signs "없음" (R23-3, R23-12; Gaps: G7, G12, G30) |
+| a30a455 | 23 | R23-4 | Gaps: G2, G30 | subject | fix(report): R23-4 every PDF prints a character its font has no glyph for as its \uNNNN escape — Hebrew, Arabic, Thai, Devanagari and emoji names were empty glyphs and different evidence files printed identically (R23-4; Gaps: G2, G30) |
+| 494c18d | 23 | R23-5, R23-12 | Gaps: G7, G12, G30 | subject | fix(report): R23-5 archive members the server's own re-analysis of a signed container yields without a signed row are counted as "보고서에 행 없음" — a post that left out bundle.zip::gen.png no longer signs "없음" (R23-5, R23-12; Gaps: G7, G12, G30) |
+| ec4b17a | 23 | R23-6, R23-12 | Gaps: G31; 신규(스펙 외) | subject | fix(cli): R23-6 inherit-only ACL entries no longer make the default %ProgramData% parent unsafe, and a parent this tool makes gets a protected ACL — the Windows relocation of R22-2 can happen on a real default install (R23-6, R23-12; Gaps: G31, 신규) |
+| 899c104 | 23 | R23-8 | Gaps: G31; 신규(스펙 외) | subject | fix(server): R23-8 neither examiner record is migrated into a file an operator named — DEEPFAKE_LENS_REVIEWS got ~/.deepfake-lens/reviews.json merged in while DEEPFAKE_LENS_FEEDBACK got nothing; the service document said both are copied once (R23-8; Gaps: G31, 신규) |
+| 190694d | 23 | R23-7 | Gaps: G31; 신규(스펙 외) | subject | fix(server): R23-7 an examiner record that cannot be written is a Korean 409 (507 when the disk is full) with nothing changed — a review answered 200 "success" from memory with nothing on disk, feedback was a 500 (R23-7; Gaps: G31, 신규) |
+| ec1229a | 23 | R23-9 | Gaps: G31 | subject | fix(server): R23-9 a model_path / fusion_profile name the file system cannot look up is a 400 — a 5000-character name was a 500 (ENAMETOOLONG) on both servers, in /api/scan and a report's options (R23-9; Gaps: G31) |
+| 617130d | 23 | R23-13 | Gaps: G7; 신규(스펙 외) | subject | fix(server): R23-13 a true/false option with an unknown value is a 400 on both servers — recursive=maybe was read as false and a report signed "아니오" (R23-13; Gaps: G7, 신규) |
+| 5b51712 | 23 | R23-11 | Gaps: 신규(스펙 외) | subject | fix(cli): R23-11 `help vendor-weights pin` shows the vendor-weights help with a note — pin is a value of its positional argument, not a subcommand — and `help help` is the top-level help (R23-11; Gaps: 신규) |
+| 494daf0 | 23 | WP-J | Gaps: G26; 신규(스펙 외) | subject | test(qa): the QA harness also runs with the audio stack — gate.sh full ends with a --qa-only run in a side venv that sees /venv then /venv-api, and QA-IN-1 / QA-OUT-4 gain relative-path audio cases (WP-J; Gaps: G26, 신규) |
+| bbe3532 | 23 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): HANDOFF.md §1/§2/§9 state round 23 — 23 rounds, R23-1…R23-13 fixed on this branch, the round-23 trend and the next steps — without anything the records-only commit changes (WP-J; Gaps: 신규) |
