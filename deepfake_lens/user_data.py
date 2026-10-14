@@ -126,6 +126,16 @@ def check_outside(path: Path, evidence: list[Path] | tuple[Path, ...], env: str)
             raise UserDataRefused(USER_DATA_INSIDE_EVIDENCE.format(path=path, folder=folder, env=env))
 
 
+def migrate_default(name: str, env: str, target: Path) -> None:
+    """R23-8 (round 23): :func:`migrate_once` into the default location only — never into a file an operator named.
+
+    ``DEEPFAKE_LENS_REVIEWS`` merged ``~/.deepfake-lens/reviews.json`` into the operator's file (and left a
+    marker in its folder) while ``DEEPFAKE_LENS_FEEDBACK`` migrated nothing; both records now follow this rule.
+    """
+    if not os.environ.get(env, ""):
+        migrate_once(name, target)
+
+
 def legacy_path(name: str) -> Path | None:
     """``~/.deepfake-lens/<name>`` (where the records used to be), when HOME is absolute."""
     home = _home()

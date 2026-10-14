@@ -1287,15 +1287,14 @@ def _feedback_payload(body: bytes, evidence: list[Path] | tuple[Path, ...] = ())
     if isinstance(result, dict):
         # load_feedback reads the embedded scan result from the "result" key.
         entry["result"] = result
-    from .user_data import FEEDBACK_ENV, FEEDBACK_FILE, UserDataRefused, check_outside, migrate_once
+    from .user_data import FEEDBACK_ENV, FEEDBACK_FILE, UserDataRefused, check_outside, migrate_default
 
     try:
         feedback_file = _feedback_path()
         check_outside(feedback_file, evidence, FEEDBACK_ENV)  # R22-3: never into the evidence
     except UserDataRefused as exc:
         return ApiError(str(exc), USER_DATA_REFUSED_STATUS)
-    if not os.environ.get(FEEDBACK_ENV):
-        migrate_once(FEEDBACK_FILE, feedback_file)
+    migrate_default(FEEDBACK_FILE, FEEDBACK_ENV, feedback_file)  # R23-8: the reviews' rule
     feedback_file.parent.mkdir(parents=True, exist_ok=True)
     with feedback_file.open("a", encoding="utf-8") as handle:
         handle.write(json_dumps(entry, ensure_ascii=False) + "\n")

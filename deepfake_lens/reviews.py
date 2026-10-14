@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from .json_text import json_dumps
-from .user_data import REVIEWS_ENV, REVIEWS_FILE, UserDataRefused, check_outside, migrate_once, record_path
+from .user_data import REVIEWS_ENV, REVIEWS_FILE, UserDataRefused, check_outside, migrate_default, record_path
 
 
 class ReviewStore:
@@ -26,6 +26,9 @@ class ReviewStore:
     folder with a relative HOME. ``evidence`` (the folders the server
     examines): a file inside one is never written (:class:`user_data.UserDataRefused`)
     nor read. Records in ``~/.deepfake-lens/reviews.json`` are migrated once.
+
+    R23-8 (round 23): migration only into the default location (not into
+    ``DEEPFAKE_LENS_REVIEWS``' file), like the feedback record.
     """
 
     def __init__(self, storage_path: Path | str | None = None) -> None:
@@ -43,7 +46,7 @@ class ReviewStore:
         path = self.storage_path
         check_outside(path, evidence, REVIEWS_ENV)
         if self._explicit is None:
-            migrate_once(REVIEWS_FILE, path)
+            migrate_default(REVIEWS_FILE, REVIEWS_ENV, path)  # R23-8: never into an operator's file
         if path != self._cache_path:
             self._cache, self._cache_path = None, path
         return path

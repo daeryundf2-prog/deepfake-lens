@@ -206,3 +206,31 @@ class ExaminerRecordsMigrateOnceTest(_Servers):
         user_data.migrate_once("reviews.json", target)
         user_data.migrate_once("reviews.json", target)
         self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"a": {"note": "new"}, "b": {"note": "old b"}})
+
+
+class ExaminerRecordOverridesTest(_Servers):
+    """R23-8 (round 23): with DEEPFAKE_LENS_REVIEWS set, ~/.deepfake-lens/reviews.json was merged into the operator's
+    file and a marker left in its folder; with DEEPFAKE_LENS_FEEDBACK set nothing was migrated — and the service
+    document said both are copied once. Now neither record is migrated into a file an operator named (the default
+    location still gets them once: ExaminerRecordsMigrateOnceTest)."""
+
+    def test_no_migration_into_an_operators_file(self) -> None:
+        legacy = self.home / ".deepfake-lens"
+        legacy.mkdir()
+        (legacy / "reviews.json").write_text(json.dumps({"old.png": {"artifact_id": "old.png", "note": "예전 검토"}}), encoding="utf-8")
+        (legacy / "feedback.jsonl").write_text('{"path": "old.png", "expected_label": "real"}\n', encoding="utf-8")
+        operator = self.base / "operator"
+        operator.mkdir()
+        (self.base / "case").mkdir()
+        overrides = {user_data.REVIEWS_ENV: str(operator / "r.json"), user_data.FEEDBACK_ENV: str(operator / "f.jsonl")}
+        with mock.patch.dict(os.environ, overrides):
+            for leg, send in self._legs(self.base / "case"):
+                with self.subTest(leg=leg):
+                    self.assertEqual(self._save(send, leg)[0], 200)
+                    self.assertEqual(send("POST", "/api/feedback", {"path": "new.png", "expected_label": "synthetic"})[0], 200)
+                    status, body = send("GET", "/api/reviews")
+                    self.assertNotIn("old.png", body["reviews"])
+        self.assertEqual(sorted(os.listdir(operator)), ["f.jsonl", "r.json"])  # no migration marker
+        self.assertEqual(sorted(json.loads((operator / "r.json").read_text(encoding="utf-8"))), ["photo.png"])
+        self.assertNotIn("old.png", (operator / "f.jsonl").read_text(encoding="utf-8"))
+        self.assertFalse((self.home / ".local").exists())
