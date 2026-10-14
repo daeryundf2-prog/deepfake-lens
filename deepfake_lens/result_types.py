@@ -581,8 +581,9 @@ UNRECORDED_LISTING_UNKNOWN = (
 )
 
 # R5: row statuses that never carry a verdict. Every other row with a result
-# — analyzed files, archive members, archive container rows ("expanded", or
-# "unknown" when no member could be analyzed) — is counted by its
+# — analyzed files, archive members, archive container rows ("expanded",
+# "unknown" when no member could be analyzed, or — R24-1 — "cancelled" when a
+# cancel left members unanalyzed) — is counted by its
 # verdict_code in the summary, exactly as the CLI table and the GUI pills
 # show it. Rows without a result (or with one of these statuses) are
 # unsupported/failed, duplicate or skipped.
@@ -600,6 +601,8 @@ STATUS_LABELS = {
     "unsupported": "미지원",
     "failed": "실패",
     "duplicate": "중복",
+    # R24-1: an archive container a cancel left (partly) unanalyzed (a verdict row; the label is for result-less posts).
+    "cancelled": "검사 취소",
 }
 
 

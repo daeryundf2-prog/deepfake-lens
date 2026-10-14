@@ -116,6 +116,65 @@ class CancelledFilesAreCountedTest(unittest.TestCase):
         self.assertIn(core.CANCELLED_MEMBERS_WARNING.format(n=3), container.result.limitations)
 
 
+class CancelledContainerRowTest(unittest.TestCase):
+    """R24-1 (round 24): a container whose members a cancel never started was ``unknown`` with "아카이브에서 분석 가능한
+    구성 파일이 없습니다" — false (the members are there; the scan was cancelled) — and the web report of the scan was
+    refused 409 as "검사 뒤 바뀐 파일" (the server's re-analysis is a complete ``expanded`` roll-up). Such a container
+    (members partly or wholly unanalyzed) is now ``cancelled`` and its conclusion names the cancel."""
+
+    def _scan(self, checks: int, workers: int = 1) -> tuple[Any, Any]:
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "case"
+            folder.mkdir()
+            with zipfile.ZipFile(folder / "bundle.zip", "w") as archive:
+                for index in range(4):
+                    archive.writestr(f"m{index}.txt", f"구성 {index}")
+            summary, items = core.scan_directory(folder, should_stop=_stop_after(checks), workers=workers)
+        return summary, next(item for item in items if item.kind == "archive")
+
+    def test_no_member_analyzed(self) -> None:
+        for workers in (1, 4):
+            with self.subTest(workers=workers):
+                summary, container = self._scan(0, workers)
+                self.assertEqual((summary.cancelled, summary.files_cancelled), (True, 4))
+                self.assertEqual(container.status, core.CANCELLED_CONTAINER_STATUS)
+                assert container.result is not None
+                self.assertEqual(container.result.verdict_code, Verdict.UNDETERMINED)
+                self.assertEqual(container.result.verdict, "압축 파일: 판단 불가 — " + core.CANCELLED_CONTAINER_VERDICT.format(n=4))
+                self.assertNotIn("분석 가능한 구성 파일이 없습니다", container.result.verdict)
+                self.assertIsNotNone(container.sha256)  # the container digest is still recorded (D9)
+                # still a verdict row (R5): counted by its verdict like the other container rows
+                self.assertEqual((summary.analyzed, summary.undetermined, summary.container_rows), (1, 1, 1))
+
+    def test_some_members_analyzed(self) -> None:
+        summary, container = self._scan(1)
+        self.assertEqual(summary.files_cancelled, 3)
+        self.assertEqual(container.status, core.CANCELLED_CONTAINER_STATUS)
+        assert container.result is not None
+        self.assertIn("구성 파일 1개 분석", container.result.verdict)
+        self.assertTrue(container.result.verdict.endswith(core.CANCELLED_CONTAINER_VERDICT.format(n=3)))
+
+    def test_a_scan_that_finished_keeps_expanded(self) -> None:
+        summary, container = self._scan(10**6)
+        self.assertFalse(summary.cancelled)
+        self.assertEqual(container.status, "expanded")
+
+    def test_the_json_row_meets_the_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "case"
+            folder.mkdir()
+            with zipfile.ZipFile(folder / "bundle.zip", "w") as archive:
+                archive.writestr("m.txt", "구성")
+            options = AnalysisOptions(no_default_engine=True)
+            run = scan_folder_run(folder, options, should_stop=_stop_after(0))
+            payload = scan_payload(run.summary, run.items, run.thresholds, options)
+        self.assertEqual([row["status"] for row in payload["items"]], ["cancelled"])
+        if HAVE_JSONSCHEMA:
+            from deepfake_lens.tests.test_json_contract import _errors
+
+            self.assertEqual(_errors(payload), [])
+
+
 class WebJobIsCancelledTest(unittest.TestCase):
     def test_the_async_job_ends_cancelled_with_the_partial_result(self) -> None:
         gate = threading.Event()

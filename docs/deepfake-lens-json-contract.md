@@ -77,7 +77,8 @@ per-file coverage record:
 A *verdict row* is any item with a `result` whose `status` is not `failed`,
 `unsupported`, `duplicate` or `skipped` (`result_types.is_verdict_row`) —
 analyzed files, archive members **and archive container rows**
-(`expanded`, or `unknown` when no member could be analyzed). R5: container
+(`expanded`, `unknown` when no member could be analyzed, or — R24-1 —
+`cancelled` when a cancel left members unanalyzed). R5: container
 rows are counted by their verdict like every other row (they used to land
 in `unsupported_or_failed`), so the header counts equal the CLI table and
 the GUI pills. `analyzed` is the number of verdict rows;
@@ -96,7 +97,7 @@ always `0` invited old-contract readings. They remain readable as
 
 - `path`, `name`, `display_name` (R11-14, see below), `kind` (`image`, `audio`, `video`, `text`, `archive`,
   `unsupported`, `duplicate`, `unknown`), `status` (`analyzed`, `failed`,
-  `skipped`, `unsupported`, `duplicate`, `expanded`, `unknown`),
+  `skipped`, `unsupported`, `duplicate`, `expanded`, `unknown`, `cancelled`),
   `size_bytes`, `error`, `duplicate_of`.
 - `sha256`: SHA-256 (hex) of the file's bytes as analyzed — set by folder
   scans for every readable file (duplicates included), `null` when the file
@@ -108,7 +109,14 @@ always `0` invited old-contract readings. They remain readable as
   digest (D9), so a signed report binds the container as well as its members.
 - `result`: `null` unless the item was analyzed (archive container rows
   carry a roll-up result with `status: "expanded"`, or `"unknown"` when no
-  member could be analyzed). The container's `archive` coverage entry is
+  member could be analyzed — R24-1 (round 24): `"cancelled"` when a cancel
+  (`summary.cancelled`) left some or all of its members unanalyzed; its
+  verdict is the roll-up of the members that were analyzed (`판단 불가` when
+  none was) and ends with `검사 취소 — 구성 파일 N개 미분석(부분 결과).`,
+  N being the members never started (they are in `files_cancelled`). Such a
+  row used to be `unknown` with "아카이브에서 분석 가능한 구성 파일이
+  없습니다" (or `expanded` when some members ran). A web report excludes it
+  as cancelled (service doc, `/api/report`)). The container's `archive` coverage entry is
   `ran`, `skipped` `의존성 부재: py7zr` / `의존성 부재: rarfile` when the
   optional extractor is missing, or `failed` `AnalyzerError: <Exception>: …`
   when the container itself could not be parsed. Every member the extractor refused is a

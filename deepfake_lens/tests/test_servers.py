@@ -3394,6 +3394,7 @@ class ReportUnrecordedFilesAreTheServersTest(_ReportLegsFixture):
     def test_a_capped_scan_signs_the_files_over_the_cap(self) -> None:
         rows = self._scan("--max-files", "2")  # bundle.zip, target.png analyzed; zlast.png over the cap
         self.assertNotIn("zlast.png", rows)
+        self.assertEqual(rows["bundle.zip"]["status"], "expanded")  # R24-1: a cap is no cancel — the container is complete
         results = self._report(list(rows.values()), options={"max_files": "2"})
         self._assert_section(results, "파일 상한: 파일 수 상한(--max-files)에 도달해 검사하지 않은 파일 1개")
         for body in self._signed(results):
@@ -3464,21 +3465,122 @@ class ReportUnrecordedFilesAreTheServersTest(_ReportLegsFixture):
         for body in self._signed(self._report(job_rows, scan_job=started["job_id"], options={"no_default_engine": "true"})):
             self.assertEqual(body["unrecorded_files"]["listing"], {"source": "scan_job", "not_in_report": 1})
 
-    def _cancelled_job(self) -> tuple[str, dict[str, Any]]:
-        """A scan job of the folder that the server finished "cancelled" after its first file (as /api/scan-cancel does)."""
+    def _cancelled_job(self, checks: int = 1, query: str = "", job_id: str = "job-cancelled") -> tuple[str, dict[str, Any]]:
+        """A scan job of the folder that the server finished "cancelled" after ``checks`` files (as /api/scan-cancel does)."""
         calls = {"n": 0}
 
         def stop() -> bool:
             calls["n"] += 1
-            return calls["n"] > 1
+            return calls["n"] > checks
 
-        result = webapp_api._scan_payload(f"folder={self.folder}&no_default_engine=true", default_folder=self.folder, should_stop=stop)
+        result = webapp_api._scan_payload(f"folder={self.folder}&no_default_engine=true{query}", default_folder=self.folder, should_stop=stop)
         summary = result["summary"]
         assert isinstance(summary, dict)
         self.assertTrue(summary["cancelled"])
         self.assertGreater(summary["files_cancelled"], 0)
-        webapp_api._SCAN_JOBS["job-cancelled"] = {"status": "cancelled", "created": time.time(), "finished": time.time(), "result": result}
-        return "job-cancelled", result
+        webapp_api._SCAN_JOBS[job_id] = {"status": "cancelled", "created": time.time(), "finished": time.time(), "result": result}
+        return job_id, result
+
+    def _assert_cancelled_container_report(self, job_id: str, result: dict[str, Any], containers: list[str], **extra: Any) -> None:
+        rows = list(result["items"])
+        for path in containers:
+            row = next(item for item in rows if item["path"] == path)
+            self.assertEqual(row["status"], "cancelled", row)
+            self.assertIn("검사 취소 — 구성 파일", row["result"]["verdict"])
+            self.assertNotIn("분석 가능한 구성 파일이 없습니다", row["result"]["verdict"])
+        expected = int(result["summary"]["files_cancelled"])
+        results = self._report(rows, scan_job=job_id, **extra)
+        self._assert_section(results, f"사용자 취소: 검사가 취소되어 분석하지 않은 파일 {expected}개")
+        for (leg, fmt), (_, text, _) in results.items():
+            with self.subTest(leg=leg, format=fmt):
+                self.assertNotIn(webapp_api.REPORT_ROWS_CHANGED, text)
+        for body in self._signed(results):
+            self.assertEqual(body["files_cancelled_source"], "server")
+            self.assertEqual(body["summary"]["files_cancelled"], expected)
+            self.assertEqual(body["unrecorded_files"]["listing"], {"source": "scan_job", "not_in_report": 0})
+            excluded = {row["path"]: row["reason"] for row in body["excluded_items"]}
+            for path in containers:
+                self.assertEqual(excluded.get(path), webapp_api.REPORT_ROW_CANCELLED)
+                self.assertNotIn(path, [row["path"] for row in body["items"]])  # the partial roll-up is never signed
+
+    def test_a_cancelled_scan_with_an_archive_is_reported(self) -> None:
+        """R24-1 (round 24): a cancelled scan whose archive's members were never started gave the container the status
+        ``unknown`` and "아카이브에서 분석 가능한 구성 파일이 없습니다"; the server's re-analysis of the container is a
+        complete roll-up (``expanded``), so every report of the scan was refused 409 "검사 뒤 바뀐 파일이 있습니다"
+        although no file had changed. The container is now ``cancelled`` with its own wording and the report excludes
+        it as cancelled (200 in every format on both servers)."""
+        job_id, result = self._cancelled_job(checks=0)
+        self._assert_cancelled_container_report(job_id, result, ["bundle.zip"], options={"no_default_engine": "true"})
+        # a cancel after the first member (one member analyzed, one not) is the same — the analyzed member row is signed
+        job_id, result = self._cancelled_job(checks=1, job_id="job-cancelled-1")
+        self._assert_cancelled_container_report(job_id, result, ["bundle.zip"], options={"no_default_engine": "true"})
+        signed = self._signed(self._report(list(result["items"]), scan_job=job_id, options={"no_default_engine": "true"}))
+        for body in signed:
+            self.assertEqual([row["path"] for row in body["items"] if row["path"].startswith("bundle.zip::")], ["bundle.zip::inner/member.png"])
+
+    def test_a_cancelled_recursive_scan_with_an_archive_in_a_subfolder_is_reported(self) -> None:
+        """R24-1: the same with the archive in a subfolder of a recursive scan."""
+        import zipfile
+
+        with zipfile.ZipFile(self.folder / "sub" / "deep.zip", "w") as archive:
+            archive.writestr("a.txt", "하나")
+            archive.writestr("b.txt", "둘")
+        job_id, result = self._cancelled_job(checks=0, query="&recursive=true")
+        self._assert_cancelled_container_report(
+            job_id, result, ["bundle.zip", "sub/deep.zip"], options={"no_default_engine": "true", "recursive": "true"},
+        )
+
+    def test_a_cancelled_container_that_really_changed_is_still_refused(self) -> None:
+        """R24-1 keeps R19-13: the cancelled container's own sha256 is compared — an archive rewritten after the
+        scan is 409 with the container in ``changed_rows``."""
+        import zipfile
+
+        job_id, result = self._cancelled_job(checks=0)
+        with zipfile.ZipFile(self.folder / "bundle.zip", "w") as archive:
+            archive.writestr("notes.txt", "바뀐 메모입니다.")
+        for leg, make in self._legs():
+            status, _, raw = make()("/api/report", self._json({"items": list(result["items"]), "format": "json", "scan_job": job_id,
+                                                               "options": {"no_default_engine": "true"}}))
+            with self.subTest(leg=leg):
+                self.assertEqual(status, 409, raw[:300])
+                body = json.loads(raw)
+                self.assertEqual(body["error"], webapp_api.REPORT_ROWS_CHANGED)
+                self.assertIn("bundle.zip", [row["path"] for row in body["changed_rows"]])
+
+    def test_a_cancelled_container_row_needs_a_cancelled_report(self) -> None:
+        """R24-1: a ``cancelled`` row is only taken as cancelled in a report of a cancelled scan — the server's cancelled
+        job (whose row must say ``cancelled`` too) or a posted ``summary.cancelled`` (unverified); anything else is 400.
+        A ``cancelled`` status on a row that is not a container is 400."""
+        job_id, result = self._cancelled_job(checks=0)
+        rows = list(result["items"])
+        options = {"no_default_engine": "true"}
+        cases = [
+            ({}, 400, webapp_api.REPORT_ROW_CANCELLED_NOT_CANCELLED_SCAN.split("「")[0]),
+            ({"summary": {"cancelled": True}}, 200, None),
+        ]
+        finished = dict(webapp_api._SCAN_JOBS[job_id], status="done")
+        webapp_api._SCAN_JOBS["job-done"] = finished
+        cases.append(({"scan_job": "job-done", "summary": {"cancelled": True}}, 200, None))
+        expanded = [dict(row, status="expanded") if row["path"] == "bundle.zip" else row for row in rows]
+        webapp_api._SCAN_JOBS["job-expanded"] = dict(finished, status="cancelled", result=dict(result, items=expanded))
+        cases.append(({"scan_job": "job-expanded"}, 400, webapp_api.REPORT_ROW_CANCELLED_NOT_IN_JOB.split("「")[0]))
+        for extra, expected, text in cases:
+            for leg, make in self._legs():
+                status, _, raw = make()("/api/report", self._json({"items": rows, "format": "json", "options": options, **extra}))
+                with self.subTest(leg=leg, extra=extra):
+                    self.assertEqual(status, expected, raw[:300])
+                    if text is not None:
+                        self.assertIn(text, json.loads(raw)["error"])
+                    else:
+                        body = json.loads(raw)
+                        self.assertIn({"path": "bundle.zip", "marker": webapp_api.UNSIGNED_CLIENT_ROW_MARKER,
+                                       "reason": webapp_api.REPORT_ROW_CANCELLED}, body["excluded_items"])
+        target = [dict(self.rows["target.png"], status="cancelled")]
+        for leg, make in self._legs():
+            status, _, raw = make()("/api/report", self._json({"items": target, "format": "json", "options": options, "scan_job": job_id}))
+            with self.subTest(leg=leg, case="not a container"):
+                self.assertEqual(status, 400, raw[:300])
+                self.assertIn(webapp_api.REPORT_ROW_CANCELLED_NOT_CONTAINER.split("「")[0], json.loads(raw)["error"])
 
     def test_a_cancelled_scan_job_is_cancelled_without_the_posted_summary(self) -> None:
         """R23-3 (round 23): a cancelled job posted as ``scan_job`` without ``summary.cancelled`` signed its rows as the
