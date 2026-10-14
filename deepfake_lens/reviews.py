@@ -44,6 +44,13 @@ class ReviewStore:
     be read (permissions, not a JSON object) is never overwritten by a save:
     the save is refused too. R23-8: migration only into the default location
     (not into ``DEEPFAKE_LENS_REVIEWS``' file), like the feedback record.
+
+    R24-4 (round 24): the file is read again on the next request when the
+    last read failed, and whenever its state on disk (mtime, ctime, size,
+    inode) is not the one the cache was read from or written as. The cache
+    used to be kept until the server restarted: after the examiner repaired
+    an unreadable ``reviews.json`` (as the 409 message asks) every save was
+    still refused with the old reason and GET /api/reviews stayed empty.
     """
 
     def __init__(self, storage_path: Path | str | None = None) -> None:
@@ -52,6 +59,7 @@ class ReviewStore:
         self._cache: dict[str, dict[str, Any]] | None = None
         self._cache_path: Path | None = None
         self._unreadable: str | None = None  # R23-7: why the existing file could not be read
+        self._cache_state: tuple[int, int, int, int] | None = None  # R24-4: the file's state the cache matches
 
     @property
     def storage_path(self) -> Path:
@@ -64,19 +72,31 @@ class ReviewStore:
         if self._explicit is None:
             migrate_default(REVIEWS_FILE, REVIEWS_ENV, path)  # R23-8: never into an operator's file
         if path != self._cache_path:
-            self._cache, self._cache_path, self._unreadable = None, path, None
+            self._cache, self._cache_path, self._unreadable, self._cache_state = None, path, None, None
         return path
 
-    def _load(self) -> dict[str, dict[str, Any]]:
-        if self._cache is not None:
-            return self._cache
+    def _disk_state(self) -> tuple[int, int, int, int] | None:
+        """R24-4: (mtime_ns, ctime_ns, size, inode) of the file, or None when there is none to stat."""
         assert self._cache_path is not None
+        try:
+            state = self._cache_path.stat()
+        except OSError:
+            return None
+        return state.st_mtime_ns, state.st_ctime_ns, state.st_size, state.st_ino
+
+    def _load(self) -> dict[str, dict[str, Any]]:
+        assert self._cache_path is not None
+        state = self._disk_state()
+        if self._cache is not None and self._unreadable is None and state == self._cache_state:
+            return self._cache
+        # R24-4: first read, the last read failed, or the file changed on disk since — read it (again).
+        self._cache_state = state
+        self._unreadable = None
         if not self._cache_path.is_file():
             self._cache = {}
             return self._cache
         from .error_text import read_error_ko
 
-        self._unreadable = None
         try:
             content = self._cache_path.read_text(encoding="utf-8")
             data = json.loads(content)
@@ -107,6 +127,7 @@ class ReviewStore:
         except OSError as exc:
             # R23-7: was `pass` — "success" with nothing on disk
             raise write_failed(self._cache_path, exc, REVIEWS_ENV) from exc
+        self._cache_state = self._disk_state()  # R24-4: the cache is what was just written
 
     def _apply(self, store: dict[str, dict[str, Any]], key: str, entry: dict[str, Any] | None) -> None:
         """Set (or, with None, remove) ``store[key]`` and persist; on a failed write put the entry back as it was."""

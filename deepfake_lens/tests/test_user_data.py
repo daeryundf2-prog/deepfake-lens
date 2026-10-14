@@ -307,6 +307,69 @@ class ExaminerRecordWriteFailuresTest(_Servers):
             self.assertEqual(target.read_bytes(), content)
 
 
+class ExaminerRecordRepairedFileTest(_Servers):
+    """R24-4 (round 24): after a refusal for an unreadable ``reviews.json`` (R23-7) the examiner repaired the file as the
+    409 message asks — and every save was still refused with the old reason, GET /api/reviews still empty, until the
+    server restarted (``ReviewStore._load`` kept its cache; the unreadable flag was cleared only when the path changed).
+    The file is read again on the next request after a failed read, and whenever it changed on disk."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.base / "case").mkdir()
+        self.data = self.base / "data"
+        env = mock.patch.dict(os.environ, {"XDG_DATA_HOME": str(self.data)})
+        env.start()
+        self.addCleanup(env.stop)
+        self.target = self.data / "deepfake-lens" / "reviews.json"
+        self.target.parent.mkdir(parents=True)
+        reviews._DEFAULT_STORE = None
+        self.addCleanup(setattr, reviews, "_DEFAULT_STORE", None)
+
+    def _kept(self) -> dict[str, Any]:
+        return {"b.png": {"artifact_id": "b.png", "star": True, "note": "기존 검토", "analyst_id": "examiner",
+                          "verdict": "unreviewed", "marks": [], "created_at": "2026-10-01T00:00:00+00:00",
+                          "updated_at": "2026-10-01T00:00:00+00:00"}}
+
+    def _refuse_repair_save(self, send: Any, leg: str, break_file: Any, repair: Any) -> None:
+        break_file()
+        status, body = self._save(send, leg)
+        self.assertEqual(status, 409, body)
+        self.assertIn("읽지 못해", body.get("error") or body.get("detail"))
+        repair()
+        status, body = send("GET", "/api/reviews")
+        self.assertEqual((status, sorted(body["reviews"])), (200, ["b.png"]))  # was {} until a restart
+        status, body = self._save(send, leg)
+        self.assertEqual(status, 200, body)  # was 409 with the old reason until a restart
+        stored = json.loads(self.target.read_text(encoding="utf-8"))
+        self.assertEqual(sorted(stored), ["b.png", "photo.png"])
+        self.assertEqual(stored["b.png"], self._kept()["b.png"])  # the repaired file's entries are kept
+
+    def test_a_repaired_file_is_read_again_on_the_same_server(self) -> None:
+        def write_kept() -> None:
+            self.target.write_text(json.dumps(self._kept(), ensure_ascii=False), encoding="utf-8")
+
+        for leg, send in self._legs(self.base / "case"):
+            for content in (b"[1, 2]", b"{not json"):
+                with self.subTest(leg=leg, content=content):
+                    self._refuse_repair_save(send, leg, lambda: self.target.write_bytes(content), write_kept)
+            if os.geteuid() != 0:  # mode bits do not stop root (the gate image)
+                write_kept()
+                with self.subTest(leg=leg, content="chmod 000"):
+                    self._refuse_repair_save(send, leg, lambda: self.target.chmod(0), lambda: self.target.chmod(0o644))
+
+    def test_a_file_changed_on_disk_is_read_again(self) -> None:
+        legs = self._legs(self.base / "case")
+        for leg, send in legs:
+            with self.subTest(leg=leg):
+                self.target.write_text(json.dumps(self._kept(), ensure_ascii=False), encoding="utf-8")
+                self.assertEqual(sorted(send("GET", "/api/reviews")[1]["reviews"]), ["b.png"])
+                self.assertEqual(self._save(send, leg)[0], 200)
+                edited = json.loads(self.target.read_text(encoding="utf-8"))
+                edited["c.png"] = dict(self._kept()["b.png"], artifact_id="c.png")
+                self.target.write_text(json.dumps(edited, ensure_ascii=False), encoding="utf-8")
+                self.assertEqual(sorted(send("GET", "/api/reviews")[1]["reviews"]), ["b.png", "c.png", "photo.png"])
+
+
 class ExaminerRecordOverridesTest(_Servers):
     """R23-8 (round 23): with DEEPFAKE_LENS_REVIEWS set, ~/.deepfake-lens/reviews.json was merged into the operator's
     file and a marker left in its folder; with DEEPFAKE_LENS_FEEDBACK set nothing was migrated — and the service
