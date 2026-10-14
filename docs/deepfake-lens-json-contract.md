@@ -514,13 +514,16 @@ reports from folder scans. R19-3 (round 19): the signed body carries
 model_path, fusion_profile}`, the options the server re-analyzed every row
 with (file names only) — printed in the HTML header, the forensic PDF and the
 evidence statement as `재분석 옵션(서버가 이 옵션으로 모든 행을 다시 분석): …`;
-and, when the posted `summary` says the scan was cancelled,
+and, when the scan was cancelled,
 `files_cancelled_source`: `server` when `summary.files_cancelled` is the
 count of the server's own scan job named by the request's `scan_job` (a
-finished `cancelled` job of the same scan folder, kept 15 minutes),
-`unverified` otherwise — then `files_cancelled` is 0 and the summary line
-says `분석하지 않은 파일 수는 서버가 확인하지 못했습니다(…)` (the posted
-number is never signed). R9-9 (round 9): the signed body carries
+finished `cancelled` job of the same scan folder, kept 15 minutes) — R23-3
+(round 23): such a job marks the report cancelled with its count whatever the
+posted `summary` says (omitted, or `cancelled: false`, used to sign the job's
+rows as the whole folder, "없음"); `unverified` when the posted `summary` says
+`cancelled: true` without such a job — then `files_cancelled` is 0 and the
+summary line says `분석하지 않은 파일 수는 서버가 확인하지 못했습니다(…)`
+(the posted number is never signed). R9-9 (round 9): the signed body carries
 `scan_root` — the posted `scan_root` folder relative to the read root that
 holds it (`caseA`, `caseA/deeper`, `.` for the root itself; never the
 absolute path) — inside the signature, and the HTML report

@@ -40,7 +40,7 @@
     },
     "files_cancelled_source": {
       "enum": ["server", "unverified"],
-      "description": "R19-3: POST /api/report signed bodies of a cancelled scan only — server: summary.files_cancelled is the count of the server's own scan job (the request's scan_job, same scan folder); unverified: the client said the scan was cancelled but the server could not check the count, so summary.files_cancelled is 0 and the renderings say the count is unverified."
+      "description": "R19-3: POST /api/report signed bodies of a cancelled scan only — server: summary.files_cancelled is the count of the server's own scan job (the request's scan_job, same scan folder; R23-3: that job finished cancelled marks the report cancelled whatever the posted summary says); unverified: the client said the scan was cancelled but the server could not check the count, so summary.files_cancelled is 0 and the renderings say the count is unverified."
     },
     "excluded_items": {
       "type": "array",

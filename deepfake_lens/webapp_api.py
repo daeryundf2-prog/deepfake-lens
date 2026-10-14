@@ -332,18 +332,25 @@ def _with_posted_cancel(summary: Any, posted: object, job_id: object = None, sca
     is 0 and the summary is marked unverified (the renderings say the
     number could not be checked) — source ``"unverified"``. Returns
     ``(summary, source)``; source None when the post did not say cancelled.
+
+    R23-3 (round 23): the server's own job decides first. A ``scan_job`` that the server finished
+    "cancelled" (same scan folder) marks the report cancelled with that job's count whatever the post's
+    ``summary`` says — posted without ``summary.cancelled`` (or with ``false``), the job's rows were signed
+    as the complete listing (R22-1 ``scan_job``) and every rendering said "없음 — 분석 대상의 모든 파일에
+    분석 결과가 있습니다" although the server knew ``files_cancelled`` files were never analyzed. The post
+    can still only add the caveat (``summary.cancelled`` without such a job: "unverified").
     """
     from dataclasses import replace
 
-    if not isinstance(posted, dict) or posted.get("cancelled") is not True:
-        return summary, None
-    count: object = None
     job = _finished_scan_job(job_id, scan_root)
     job_summary = job.get("summary") if job is not None and job.get("status") == "cancelled" else None
     if isinstance(job_summary, dict):
         count = job_summary.get("files_cancelled")
-    if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
-        return replace(summary, cancelled=True, files_cancelled=count), "server"
+        if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+            return replace(summary, cancelled=True, files_cancelled=count), "server"
+        return replace(summary, cancelled=True, files_cancelled=0, files_cancelled_unverified=True), "unverified"
+    if not isinstance(posted, dict) or posted.get("cancelled") is not True:
+        return summary, None
     return replace(summary, cancelled=True, files_cancelled=0, files_cancelled_unverified=True), "unverified"
 
 
@@ -2386,6 +2393,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     # R18-3 (round 18): a cancelled scan's report says it is a partial result.
     # The client's claim is taken as given — it can only add the caveat and
     # the "사용자 취소" count, never remove a row or change a verdict.
+    # R23-3 (round 23): the server's own cancelled scan_job sets it whatever the post says.
     summary, cancel_source = _with_posted_cancel(summary, data.get("summary"), data.get("scan_job"), scan_root)
     # R22-1 (round 22): the cap / flat-scan / missing-row counts are the server's own, or "확인 불가".
     summary = _report_listing(summary, items, scan_root if items else None, options, data.get("scan_job"))

@@ -3384,6 +3384,62 @@ class ReportUnrecordedFilesAreTheServersTest(_ReportLegsFixture):
             self.assertEqual(body["unrecorded_files"]["listing"], {"source": "scan_job", "not_in_report": 0})
             self.assertEqual(body["summary"]["subfolders_skipped"], 1)
 
+    def _cancelled_job(self) -> tuple[str, dict[str, Any]]:
+        """A scan job of the folder that the server finished "cancelled" after its first file (as /api/scan-cancel does)."""
+        calls = {"n": 0}
+
+        def stop() -> bool:
+            calls["n"] += 1
+            return calls["n"] > 1
+
+        result = webapp_api._scan_payload(f"folder={self.folder}&no_default_engine=true", default_folder=self.folder, should_stop=stop)
+        summary = result["summary"]
+        assert isinstance(summary, dict)
+        self.assertTrue(summary["cancelled"])
+        self.assertGreater(summary["files_cancelled"], 0)
+        webapp_api._SCAN_JOBS["job-cancelled"] = {"status": "cancelled", "created": time.time(), "finished": time.time(), "result": result}
+        return "job-cancelled", result
+
+    def test_a_cancelled_scan_job_is_cancelled_without_the_posted_summary(self) -> None:
+        """R23-3 (round 23): a cancelled job posted as ``scan_job`` without ``summary.cancelled`` signed its rows as the
+        whole folder — listing ``{"source": "scan_job", "not_in_report": 0}``, ``summary.cancelled false`` and "없음 —
+        분석 대상의 모든 파일에 분석 결과가 있습니다" in every format, although the server knew the files it never analyzed.
+        The job's own state decides: cancelled, its count, source "server" — whatever the post's summary says."""
+        job_id, result = self._cancelled_job()
+        expected = int(result["summary"]["files_cancelled"])  # type: ignore[index]
+        rows = list(result["items"])  # type: ignore[arg-type]
+        for posted in ({}, {"summary": {"cancelled": False}}, {"summary": {}}):
+            results = self._report(rows, scan_job=job_id, options={"no_default_engine": "true"}, **posted)
+            with self.subTest(posted=posted):
+                self._assert_section(results, f"사용자 취소: 검사가 취소되어 분석하지 않은 파일 {expected}개")
+                for body in self._signed(results):
+                    self.assertTrue(body["summary"]["cancelled"])
+                    self.assertEqual(body["summary"]["files_cancelled"], expected)
+                    self.assertEqual(body["files_cancelled_source"], "server")
+                    self.assertIn({"code": "cancelled", "label": "사용자 취소", "count": expected}, body["unrecorded_files"]["reasons"])
+                    self.assertEqual(body["unrecorded_files"]["listing"], {"source": "scan_job", "not_in_report": 0})
+        # the post that said "cancelled" (R18-3/R19-3) signs the same body
+        said = self._signed(self._report(rows, scan_job=job_id, options={"no_default_engine": "true"}, summary={"cancelled": True}))
+        omitted = self._signed(self._report(rows, scan_job=job_id, options={"no_default_engine": "true"}))
+        strip = {"generated_at", "signature", "signed_at", "report_id"}
+        self.assertEqual([{k: v for k, v in body.items() if k not in strip} for body in said],
+                         [{k: v for k, v in body.items() if k not in strip} for body in omitted])
+
+    def test_a_cancelled_job_of_another_folder_or_a_finished_job_changes_nothing(self) -> None:
+        """R19-3/R22-1 kept: only the server's own cancelled job of the same scan folder marks a report cancelled."""
+        job_id, result = self._cancelled_job()
+        rows = list(result["items"])  # type: ignore[arg-type]
+        other = dict(webapp_api._SCAN_JOBS[job_id], result=dict(result, scan_root=str(self.folder / "sub")))
+        webapp_api._SCAN_JOBS["job-other-folder"] = other
+        for body in self._signed(self._report(rows, scan_job="job-other-folder", options={"no_default_engine": "true"})):
+            self.assertFalse(body["summary"]["cancelled"])
+            self.assertNotIn("files_cancelled_source", body)
+            self.assertEqual(body["unrecorded_files"]["listing"]["source"], "walk")
+            self.assertGreater(body["unrecorded_files"]["listing"]["not_in_report"], 0)  # the walk finds the files never analyzed
+        # a posted "cancelled" without such a job: the caveat, count unverified (R19-3)
+        for body in self._signed(self._report(rows, scan_job="nope", summary={"cancelled": True}, options={"no_default_engine": "true"})):
+            self.assertEqual((body["summary"]["cancelled"], body["files_cancelled_source"]), (True, "unverified"))
+
     def test_signed_rows_outside_the_servers_listing_are_unknown(self) -> None:
         rows = self._scan("--recursive")  # sub/inner.png posted; the report's walk is flat (no options)
         results = self._report(list(rows.values()))
