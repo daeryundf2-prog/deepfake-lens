@@ -675,6 +675,10 @@ TOOL_FOLDER_INSIDE_INPUT = (
 # (exit 2) inside an examined folder or under a relative HOME. R21-10 (round 21, user decision 2026-10-12:
 # relocate instead of refuse): the tool base moves to the first candidate outside every examined folder
 # (native_path.relocated_tool_base_candidates) with one notice; exit 2 only when there is none.
+# R22-3 (round 22) correction: until the web GUI's reviews / feedback moved to the per-user application-data
+# folder (user_data.py), "증거 폴더에는 아무것도 쓰지 않습니다" was not true for `cd ~; web` (they went to
+# ~/.deepfake-lens/, inside the served HOME); R22-2: on Windows the notice was never reached for a profile
+# (no candidate outside it until %ProgramData%\deepfake-lens\<user>).
 TOOL_BASE_RELOCATED_NOTICE = (
     "알림: 도구 폴더(로그·히트맵·오디오 numba 캐시)의 기본 위치 {default}{why} 이번 실행은 {base}에 만듭니다"
     "(증거 폴더에는 아무것도 쓰지 않습니다)."
