@@ -70,6 +70,9 @@ WEB_MAX_SCAN_FILES = 2000
 WEB_MAX_FILE_BYTES_CEILING = 1024 * 1024 * 1024
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
+# R23-13 (round 23): every other value of a true/false option is refused (HTTP 400); "" is the unset default.
+_FALSE_VALUES = {"0", "false", "no", "off", ""}
+FLAG_INVALID = "{key}은(는) 참·거짓 값이어야 합니다(`true`/`false`, `1`/`0`, `yes`/`no`, `on`/`off`): 「{value}」"
 # "thresholds not supplied" marker for analyze_path (None means builtin defaults).
 _UNSET: Any = object()
 
@@ -594,8 +597,22 @@ def _param(params: Mapping[str, Any], key: str, default: str) -> str:
     return str(value)
 
 
+def parse_flag(value: str, key: str) -> bool:
+    """R23-13 (round 23): a true/false request value — anything not in the two lists is :class:`InvalidOption`.
+
+    ``recursive=maybe`` used to be read as false and signed "아니오" in a report's options, while
+    ``max_files=abc`` in the same request was a 400.
+    """
+    text = str(value).strip().lower()
+    if text in _TRUE_VALUES:
+        return True
+    if text in _FALSE_VALUES:
+        return False
+    raise InvalidOption(FLAG_INVALID.format(key=key, value=str(value)[:80]))
+
+
 def _flag(params: Mapping[str, Any], key: str) -> bool:
-    return _param(params, key, "false").strip().lower() in _TRUE_VALUES
+    return parse_flag(_param(params, key, "false"), key)
 
 
 def _models_dir_file(name: str, models_dir: Path, field_name: str) -> Path:
@@ -645,6 +662,7 @@ def thresholds_warning_printer(stream: Any) -> WarnFn:
 
 
 __all__ = [
+    "FLAG_INVALID",
     "AnalysisOptions",
     "InvalidOption",
     "SINGLE_FILE_IS_FOLDER",
@@ -658,6 +676,7 @@ __all__ = [
     "analyze_rows",
     "default_engine_profiles",
     "load_thresholds",
+    "parse_flag",
     "primary_row",
     "provenance",
     "scan_file",

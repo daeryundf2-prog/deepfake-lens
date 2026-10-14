@@ -138,6 +138,23 @@ class ScanPayloadValidationTest(unittest.TestCase):
                 _scan_payload(query, default_folder=None)
             self.assertEqual(str(ctx.exception), message)
 
+    def test_true_false_options_take_known_values_only(self) -> None:
+        """R23-13 (round 23): `recursive=maybe` was read as false (and a report signed "아니오"); every true/false option
+        now takes true/false, 1/0, yes/no, on/off (any case, surrounding spaces) or empty — anything else is InvalidOption."""
+        from deepfake_lens.analysis_api import AnalysisOptions, InvalidOption, parse_flag
+
+        for value, expected in (("1", True), ("TRUE", True), (" yes ", True), ("On", True),
+                                ("0", False), ("false", False), ("No", False), ("off", False), ("", False)):
+            with self.subTest(value=value):
+                self.assertIs(parse_flag(value, "recursive"), expected)
+                self.assertIs(AnalysisOptions.from_query({"recursive": [value]}, models_dir=None).recursive, expected)
+        for key in ("recursive", "dedupe", "heatmaps", "deep_signals", "no_default_engine"):
+            for value in ("maybe", "2", "-1", "truee", "None"):
+                with self.subTest(key=key, value=value), self.assertRaises(InvalidOption) as ctx:
+                    AnalysisOptions.from_query({key: [value]}, models_dir=None)
+                self.assertIn(f"{key}은(는) 참·거짓 값이어야 합니다", str(ctx.exception))
+        self.assertFalse(AnalysisOptions.from_query({}, models_dir=None).recursive)  # absent: the default
+
     def test_a_model_name_the_file_system_cannot_look_up_is_invalid(self) -> None:
         """R23-9 (round 23): a 5000-character model_path / fusion_profile raised OSError(ENAMETOOLONG) — HTTP 500."""
         import tempfile
@@ -3051,6 +3068,9 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                    case("api", "GET", "/api/stats", 500, "서버 내부 오류가 발생했습니다", patches=(patch.object(webapp_api, "_stats_payload", raise_),))],
             "E5": [case(s, "GET", "/api/scan?max_files=abc", 400, "max_files는 정수여야 합니다") for s in both]
             + [case(s, "GET", f"/api/scan?folder={q(f)}&pixel=bogus", 400, "pixel") for s in both]
+            # R23-13 (round 23): an unknown true/false value was read as false (signed "아니오" in a report).
+            + [case(s, "GET", f"/api/scan?folder={q(f)}&{key}=maybe", 400, f"{key}은(는) 참·거짓 값이어야 합니다")
+               for s in both for key in ("recursive", "dedupe", "heatmaps", "deep_signals", "no_default_engine", "async")]
             # R23-9 (round 23): a name longer than the file system allows was a 500 (ENAMETOOLONG from is_file()).
             + [case(s, "GET", f"/api/scan?folder={q(f)}&{key}={'m' * 5000}", 400, f"{key}을(를) 모델 디렉터리에서 찾을 수 없습니다")
                for s in both for key in ("model_path", "fusion_profile")],
@@ -3111,6 +3131,8 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                 (deep, "JSON 중첩이 너무 깊습니다"),
                 (b'{"items": [{"path": "a", "x": ' + b"[" * DEEP + b"]" * DEEP + b"}]}", "JSON 중첩이 너무 깊습니다"),
                 (b"[1]", "보고서 요청 본문은 JSON 객체여야 합니다"),
+                # R23-13 (round 23): report options take the same true/false values (recursive=maybe was signed "아니오").
+                (report({"items": [memo_row], "scan_root": scan_root, "options": {"recursive": "maybe"}}), "recursive은(는) 참·거짓 값이어야 합니다"),
                 # R23-9 (round 23): a too-long model name in the report's options was a 500.
                 (report({"items": [memo_row], "scan_root": scan_root, "options": {"model_path": "m" * 5000}}), "model_path을(를) 모델 디렉터리에서 찾을 수 없습니다"),
                 (report({"items": [dict(memo_row, path="x.zip::y", container="x.zip", member="z")], "scan_root": scan_root}), "path가 container::member와 일치하지 않습니다"),

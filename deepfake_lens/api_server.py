@@ -1059,10 +1059,13 @@ def create_app(
     # CLI return the same verdicts and threshold provenance (G7).
     @app.get("/api/scan")
     def api_scan(request: Request):
-        from urllib.parse import parse_qs
-        from .webapp_api import ReadRootDenied, _scan_job_start, _scan_payload, read_root_denied_body
+        from .webapp_api import ReadRootDenied, _scan_job_start, _scan_payload, async_requested, read_root_denied_body
         qs = str(request.url.query)
-        if parse_qs(qs).get("async", ["false"])[0].lower() in {"1", "true", "yes"}:
+        try:
+            run_async = async_requested(qs)
+        except ValueError as exc:  # R23-13: an unknown true/false value
+            raise HTTPException(status_code=400, detail=str(exc))
+        if run_async:
             try:
                 return _scan_job_start(qs, default_folder=default_folder)
             except ReadRootDenied:

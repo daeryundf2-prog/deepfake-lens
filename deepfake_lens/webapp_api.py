@@ -145,6 +145,17 @@ JOB_UNKNOWN = "알 수 없거나 만료된 작업입니다"
 FILE_PARAM_REQUIRED = "file 매개변수(파일 경로)가 필요합니다"
 
 
+def async_requested(query: str) -> bool:
+    """R23-13 (round 23): ``/api/scan``'s ``async`` value (both servers) — an unknown value is InvalidOption (400).
+
+    It was "1" / "true" / "yes" or else a synchronous scan; it now takes the true/false values of every
+    other option (:func:`analysis_api.parse_flag`).
+    """
+    from .analysis_api import parse_flag
+
+    return parse_flag(parse_qs(query).get("async", ["false"])[0], "async")
+
+
 def _web_options(params: dict[str, list[str]] | None = None) -> AnalysisOptions:
     """AnalysisOptions for a web request (InvalidOption -> HTTP 400)."""
     return AnalysisOptions.from_query(params or {}, models_dir=_models_dir())
@@ -2397,7 +2408,8 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
         return {"error": REPORT_FIELD_NOT_OBJECT.format(field="options")}
     try:
         options = _web_options(
-            {str(key): [str(value).lower() if isinstance(value, bool) else str(value)] for key, value in (raw_options or {}).items()},
+            # R23-13: a JSON null is an unset option (its default), never the text "None" (now a 400 for a flag)
+            {str(key): [str(value).lower() if isinstance(value, bool) else str(value)] for key, value in (raw_options or {}).items() if value is not None},
         )
     except InvalidOption as exc:
         return {"error": str(exc)}
