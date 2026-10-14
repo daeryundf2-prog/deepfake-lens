@@ -52,21 +52,31 @@ torch/transformers/mediapipe는 설치하지 않은 상태가 기준이다(신�
 
 ### 기준 게이트 이미지 (Docker `deepfake-lens-gate`)
 
-18·19차 검증과 수정은 로컬 Docker 이미지 `deepfake-lens-gate`를 기준 환경으로 썼다.
+18차부터의 검증과 수정은 로컬 Docker 이미지 `deepfake-lens-gate`를 기준 환경으로 썼다. 이미지 정의와 실행기는 레포 안에 있다(22차부터 — 그 전에는 레포 밖 임시 폴더에 있어 호스트 재시작으로 사라졌다).
+
+- `scripts/gate/Dockerfile` — 기준 이미지: `docker build -t deepfake-lens-gate -f scripts/gate/Dockerfile scripts/gate`
+- `scripts/gate/Dockerfile.gui` — GUI 스모크 이미지(기준 이미지 + `/venv-gui`의 pymupdf·Playwright Chromium): `docker build -t deepfake-lens-gate:gui -f scripts/gate/Dockerfile.gui scripts/gate`
+- `scripts/gate/gate.sh` — 실행기(bash, 단계마다 `pipefail`). Python 파일이 아니므로 ruff·mypy·`scripts/*.py` 도움말 테스트의 대상이 아니다.
 
 - Linux aarch64, Python 3.13, ffmpeg 7.1, Node.js 20.
 - `/venv`(메인): numpy, scipy, Pillow, opencv-python 5, scikit-learn, librosa + numba + soundfile, c2pa-python, jsonschema, coverage, ruff, mypy.
 - `/venv-api`(API): fastapi, httpx, uvicorn, pymupdf, markdown-it-py + linkify-it-py, mediapipe, opencv-python/opencv-contrib-python 5, numpy, scipy, Pillow, scikit-learn(librosa·c2pa 없음).
-- 실행기 `gate.sh`(호스트에서 읽기 전용으로 마운트)는 `/repo`의 작업 트리를 컨테이너의 `/work`로 복사한 뒤(`.venv*` 제외, `.git`은 복사) 단계를 `bash -o pipefail`로 실행한다. 사용법: `gate.sh tests`(두 venv 단위 테스트), `gate.sh lint`(ruff, mypy), `gate.sh full`(5장의 게이트 전부), `gate.sh cmd "<명령>"`.
+- 실행기 `scripts/gate/gate.sh`(호스트에서 `/gate.sh`로 읽기 전용 마운트)는 `/repo`의 작업 트리를 컨테이너의 `/work`로 복사한 뒤(`.venv*` 제외, `.git`은 복사) 단계를 `bash -o pipefail`로 실행한다. 사용법: `gate.sh tests`(두 venv 단위 테스트), `gate.sh lint`(ruff, mypy), `gate.sh full`(5장의 게이트 전부), `gate.sh cmd "<명령>"`.
 
 ```bash
+# 레포 루트에서
 docker run --rm --init --name <고유이름> --cpus 4 \
-  -v <작업 트리>:/repo:ro -v <gate.sh>:/gate.sh:ro deepfake-lens-gate /gate.sh full
+  -v "$PWD":/repo:ro -v "$PWD/scripts/gate/gate.sh":/gate.sh:ro deepfake-lens-gate /gate.sh full
+# GUI 스모크(Playwright): gui 이미지, 공유 메모리 1 GB
+docker run --rm --init --name <고유이름> --cpus 3 --shm-size=1g \
+  -v "$PWD":/repo:ro -v "$PWD/scripts/gate/gate.sh":/gate.sh:ro deepfake-lens-gate:gui /gate.sh gui
 ```
 
 - git 이력이 필요한 검사(`--verify-record`, `build_traceability_commits.py --check`, 삭제 이유·역사 문서 테스트)는 git worktree(`.git`이 파일)로는 안 된다. `git clone --no-hardlinks`한 사본을 `/repo`로 마운트하고, 그 사본의 로컬 `main`을 `dad9730`으로 맞춘다(`git branch -f main dad9730`). 소유자가 달라 git이 거부하면 `-e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*'`를 준다.
 
 ## 5. 게이트 (커밋마다 전부 통과해야 함)
+
+기준 환경에서는 `scripts/gate/gate.sh full`(4장의 `docker run`)이 아래 단계를 그대로 실행한다. 단계별 출력(`Ran …`, `OK`, `!!! FAILED`)을 읽고, 마지막 `GATE rc=`만 보지 않는다.
 
 ```bash
 python -m unittest discover deepfake_lens/tests          # 두 환경 모두
