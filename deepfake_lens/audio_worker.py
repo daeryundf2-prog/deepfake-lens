@@ -127,7 +127,17 @@ _MAX_REPLY_BYTES = 4 * 1024 * 1024
 # R21-3 (round 21): and at most this many bytes of it (output without a newline included).
 _MAX_STARTUP_BYTES = 64 * 1024
 # R21-3: how long a new worker may take to write its ready marker (it imports only this module before it).
+# R22-5 (round 22) correction: e427a87 said the marker is found "within 60 s" as if that bounded a scan. It is
+# per new worker, and a worker that failed to start is dropped, so each later file started another one and
+# waited again: 60 s per file (4 WAVs 240 s, 300 audio files about 5 hours). WORKER_START_BREAKER_FAILURES bounds it.
 WORKER_READY_TIMEOUT_SECONDS = 60.0
+# R22-5: after this many start failures in a row within one worker scope (one scan / multi-file request),
+# the scope starts no more workers — every later file's audio check fails at once with the reason below.
+WORKER_START_BREAKER_FAILURES = 2
+WORKER_START_BREAKER_MESSAGE = (
+    "오디오 특징 추출 작업자가 이 검사에서 연속 {count}번 준비 신호를 보내지 않아 작업자를 더 띄우지 않았습니다"
+    "(처음 사유: {reason}) — 이 파일의 오디오 검사만 실패로 기록했습니다"
+)
 # R21-3: the reason of a worker that never wrote its ready marker (timed out, ended, too much output first).
 STARTUP_ERROR_MESSAGE = "오디오 특징 추출 작업자가 준비 신호를 보내지 않아 중단했습니다({detail}) — 이 검사만 실패로 기록했습니다"
 
@@ -183,41 +193,82 @@ def shared_cache_root() -> Path | None:
     return base / "numba" / _runtime_key() if base is not None else None
 
 
+def environment_cache_root() -> Path | None:
+    """R22-9 (round 22): ``<sys.prefix>/var/deepfake-lens/numba/<runtime>`` — a published cache of this Python environment.
+
+    The published cache lived only under the tool base, which HOME decides. A server or scan run with a HOME
+    that had none (a new HOME, a relocated tool base) compiled librosa's numba functions again in its first
+    worker (about 2.5 s): web upload of 20 WAV files 7.4 s against 4.8 s at 2130892 — whose cache stayed in
+    site-packages, shared by every HOME (the cache R19-2 removed: concurrent scans corrupted it in place). This
+    root is per environment like that one, but it is used like the HOME root — only a complete ``published``
+    tree made by one rename, copied by readers and never written after — so no two processes share a writable
+    cache file. It is used only on POSIX, when the folder is this user's own and nobody else can write it
+    (``native_path.claim_tool_base``: a root-owned system Python or a shared install is skipped), and never
+    inside an examined folder.
+    """
+    if not hasattr(os, "getuid"):
+        return None
+    from .native_path import _inside_examined, claim_tool_base
+
+    base = Path(sys.prefix) / "var" / "deepfake-lens"
+    if not base.is_absolute() or _inside_examined(str(base)) or not claim_tool_base(base):
+        return None
+    return base / "numba" / _runtime_key()
+
+
+def _cache_roots() -> list[Path]:
+    """R22-9: the published-cache roots — HOME's (the tool base) first, then this environment's (deduplicated)."""
+    roots: list[Path] = []
+    for root in (shared_cache_root(), environment_cache_root()):
+        if root is not None and root not in roots:
+            roots.append(root)
+    return roots
+
+
 def private_cache_dir() -> tuple[str, bool]:
-    """A new private numba cache folder in the session folder, seeded from the published cache; (folder, seeded)."""
+    """A new private numba cache folder in the session folder, seeded from a published cache; (folder, seeded).
+
+    R22-9: ``seeded`` is True only when every cache root already has a published cache — a worker seeded
+    from the environment's root still publishes into HOME's after its first extraction.
+    """
     import tempfile
 
     from .native_path import scratch_dir
 
     folder = tempfile.mkdtemp(prefix="numba-", dir=scratch_dir())
-    root = shared_cache_root()
-    published = root / "published" if root is not None else None
-    if published is not None and published.is_dir():
+    roots = _cache_roots()
+    for root in roots:
+        published = root / "published"
+        if not published.is_dir():
+            continue
         try:
             shutil.copytree(published, folder, dirs_exist_ok=True)
-            return folder, True
+            return folder, all((other / "published").is_dir() for other in roots)
         except (OSError, shutil.Error) as exc:
             logger.info("numba cache: published cache not copied (%s)", type(exc).__name__)
     return folder, False
 
 
 def publish_cache(folder: str) -> bool:
-    """Copy a private cache to a new folder and rename it to ``published`` — False when one exists or on any error."""
-    root = shared_cache_root()
-    if root is None:
-        return False
-    published = root / "published"
-    if published.exists():
-        return False
-    staging = root / f".publish-{os.getpid()}-{os.urandom(6).hex()}"
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(folder, staging)
-        os.rename(staging, published)  # fails (EEXIST/ENOTEMPTY) when another process published first
-        return True
-    except (OSError, shutil.Error):
-        shutil.rmtree(staging, ignore_errors=True)
-        return False
+    """Copy a private cache to a new folder and rename it to ``published`` in every cache root that has none.
+
+    False when nothing was published (each root has one, or every attempt failed). R22-9: the environment's
+    root too (:func:`environment_cache_root`).
+    """
+    done = False
+    for root in _cache_roots():
+        published = root / "published"
+        if published.exists():
+            continue
+        staging = root / f".publish-{os.getpid()}-{os.urandom(6).hex()}"
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(folder, staging)
+            os.rename(staging, published)  # fails (EEXIST/ENOTEMPTY) when another process published first
+            done = True
+        except (OSError, shutil.Error):
+            shutil.rmtree(staging, ignore_errors=True)
+    return done
 
 
 _PROCESS_CACHE_LOCK = threading.Lock()
@@ -536,6 +587,26 @@ class WorkerScope:
     def __init__(self) -> None:
         self._workers: dict[int, _Worker] = {}
         self._lock = threading.Lock()
+        # R22-5: start failures in a row (any thread of the scope) and, once tripped, the error every later file gets.
+        self._start_failures = 0
+        self._first_start_error = ""
+        self.tripped: WorkerStartError | None = None
+
+    def start_failed(self, exc: WorkerStartError) -> None:
+        """R22-5: count a worker that never got ready; trip the breaker after :data:`WORKER_START_BREAKER_FAILURES` in a row."""
+        with self._lock:
+            self._start_failures += 1
+            if self._start_failures == 1:
+                self._first_start_error = str(exc)
+            if self._start_failures >= WORKER_START_BREAKER_FAILURES and self.tripped is None:
+                self.tripped = WorkerStartError(WORKER_START_BREAKER_MESSAGE.format(
+                    count=self._start_failures, reason=self._first_start_error))
+                logger.error("audio feature worker: %d start failures in a row — no more workers in this scan", self._start_failures)
+
+    def start_succeeded(self) -> None:
+        """R22-5: a worker got ready — the run of failures is over (a tripped scope stays tripped)."""
+        with self._lock:
+            self._start_failures = 0
 
     def bind(self, func: Callable[..., T]) -> Callable[..., T]:
         """``func`` run with this scope as the calling thread's scope (for a thread pool's tasks)."""
@@ -673,10 +744,19 @@ def extract_features(native_path: str, *, segment_seconds: int) -> dict[str, Any
     request = {"path": native_path, "segment_seconds": int(segment_seconds)}
     for attempt in range(2):
         scope: WorkerScope | None = getattr(_LOCAL, "scope", None)
+        if scope is not None and scope.tripped is not None:
+            # R22-5 (round 22): this scope's workers failed to start WORKER_START_BREAKER_FAILURES times in a
+            # row — no new worker (each would wait WORKER_READY_TIMEOUT_SECONDS again); the file fails now.
+            raise WorkerStartError(str(scope.tripped))
         worker = scope.worker() if scope is not None else _start()
+        was_ready = worker.ready
         try:
             reply = worker.ask(request, WORKER_REQUEST_TIMEOUT_SECONDS)
+            if scope is not None and not was_ready and worker.ready:
+                scope.start_succeeded()
         except WorkerProtocolError as exc:
+            if scope is not None and isinstance(exc, WorkerStartError):
+                scope.start_failed(exc)
             # R20-3: a desynchronized worker is stopped and never asked again; this file's check fails.
             logger.error("audio feature worker reply for %s refused: %s", native_path, exc)
             shutdown.stop_tracked(worker.proc)

@@ -282,7 +282,10 @@ class EvidenceStatementTest(_StatementFixture):
         # path that is not the scan's relative form is now a malformed request (400). Rows the server never
         # re-analyzes are posted as what they are here — upload rows (P6), listed as unsigned.
         payload = {
-            "items": [dict(self.item1.to_json(), source="upload"), dict(item2.to_json(), source="upload")],
+            # R22-8 (round 22): an upload row's name is relative (an upload endpoint names it after the client's
+            # file name); these rows' absolute paths are now a malformed upload name (400) — posted by file name.
+            "items": [dict(self.item1.to_json(), source="upload", path=Path(self.item1.path).name),
+                      dict(item2.to_json(), source="upload", path=Path(item2.path).name)],
             "format": "evidence",
             "case_no": "2026가합55555",
             "scan_root": str(Path(tmp.name).resolve()),

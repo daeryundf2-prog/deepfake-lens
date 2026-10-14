@@ -196,6 +196,7 @@ def _mark_uploads(records: list[dict[str, object]]) -> list[dict[str, object]]:
         # to_json) — its display_name follows it.
         record["display_name"] = display_name(str(record.get("name") or ""))
         _sync_path_b64(record)
+    _record_upload_rows(records)  # R22-8: the names this server received, for /api/report
     return records
 
 
@@ -386,13 +387,10 @@ def _with_posted_cancel(summary: Any, posted: object, job_id: object = None, sca
     if not isinstance(posted, dict) or posted.get("cancelled") is not True:
         return summary, None
     count: object = None
-    if isinstance(job_id, str) and job_id and scan_root is not None:
-        with _SCAN_JOBS_LOCK:
-            entry = _SCAN_JOBS.get(job_id)
-            result = entry.get("result") if entry is not None and entry.get("status") == "cancelled" else None
-        job_summary = result.get("summary") if isinstance(result, dict) else None
-        if isinstance(job_summary, dict) and isinstance(result, dict) and result.get("scan_root") == scan_root_text(scan_root):
-            count = job_summary.get("files_cancelled")
+    job = _finished_scan_job(job_id, scan_root)
+    job_summary = job.get("summary") if job is not None and job.get("status") == "cancelled" else None
+    if isinstance(job_summary, dict):
+        count = job_summary.get("files_cancelled")
     if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
         return replace(summary, cancelled=True, files_cancelled=count), "server"
     return replace(summary, cancelled=True, files_cancelled=0, files_cancelled_unverified=True), "unverified"
@@ -651,6 +649,27 @@ class ReadRootDenied(PermissionError):
     """
 
 
+# R22-6 (round 22): a path value with a NUL character (a query parameter, its base64 form, a report row's
+# path / container / member / duplicate_of / heatmap_path, scan_root, an api-serve file_path or directory) reached
+# the file system and ValueError("embedded null byte") was an HTTP 500 on both servers. NUL can never be part of a
+# file-system path, so it is refused as a request error (400) before any file is touched. Other control
+# characters are legal in POSIX file names (the hostile-name fixtures of R11-9 carry \r, \n, \t, ESC) and
+# a scan of such a folder writes them in its rows — they are kept.
+PATH_TEXT_NUL = "경로 값에 NUL 문자(\\x00)가 있습니다 — 파일 시스템 경로가 될 수 없습니다: {field}"
+
+
+class PathTextInvalid(ValueError):
+    """R22-6: a path value the request names cannot be a file-system path (NUL) — HTTP 400 on both servers."""
+
+
+def reject_nul_path(value: object, field: str) -> None:
+    """R22-6: raise :class:`PathTextInvalid` when a path value of the request holds a NUL character."""
+    if isinstance(value, str) and "\x00" in value:
+        raise PathTextInvalid(PATH_TEXT_NUL.format(field=field))
+    if isinstance(value, (bytes, bytearray)) and b"\x00" in value:
+        raise PathTextInvalid(PATH_TEXT_NUL.format(field=field))
+
+
 def read_root_denied_body() -> dict[str, object]:
     return {"error": READ_ROOT_DENIED_MESSAGE}
 
@@ -685,7 +704,8 @@ def _effective_roots(default_folder: Path | None = None) -> list[Path]:
 
 
 def _require_read_root(path: Path, default_folder: Path | None = None) -> Path:
-    """Resolve ``path`` and raise ReadRootDenied unless it is inside a root."""
+    """Resolve ``path`` and raise ReadRootDenied unless it is inside a root (PathTextInvalid for a NUL — R22-6)."""
+    reject_nul_path(str(path), "경로")
     try:
         resolved = expand_user(path).resolve()
     except (OSError, RuntimeError) as exc:
@@ -708,16 +728,18 @@ def _b64_or_text(params: dict[str, list[str]], name: str) -> str:
     from .json_text import fs_b64decode
 
     encoded = params.get(f"{name}_b64", [""])[0]
-    if encoded:
-        return fs_b64decode(encoded)
-    return params.get(name, [""])[0]
+    value = fs_b64decode(encoded) if encoded else params.get(name, [""])[0]
+    reject_nul_path(value, f"{name}_b64" if encoded else name)  # R22-6
+    return value
 
 
 def _requested_folder(query: str, default_folder: Path | None) -> Path:
     params = parse_qs(query)
     if params.get("folder_b64", [""])[0]:
         return expand_user(_b64_or_text(params, "folder"))  # R13-3
-    return expand_user(params.get("folder", [str(default_folder or ".")])[0])
+    folder = params.get("folder", [str(default_folder or ".")])[0]
+    reject_nul_path(folder, "folder")  # R22-6
+    return expand_user(folder)
 
 
 def _read_root_allows(path: Path, root_value: str = "", default_folder: Path | None = None) -> bool:
@@ -754,6 +776,8 @@ def _media_query_paths(query: str) -> tuple[str, str]:
     root_b64 = params.get("root_b64", [""])[0]
     root_value = fs_b64decode(root_b64) if root_b64 else params.get("root", [""])[0]
     path_value = fs_b64decode(path_b64) if path_b64 else params.get("path", [""])[0]
+    reject_nul_path(root_value, "root_b64" if root_b64 else "root")  # R22-6: a ValueError — 400 bad-path
+    reject_nul_path(path_value, "path_b64" if path_b64 else "path")
     if path_b64 and root_value and not os.path.isabs(path_value):
         path_value = os.path.join(root_value, path_value)
     return path_value, root_value
@@ -1142,6 +1166,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
     record["path"] = "pasted-text"
     record["source"] = UPLOAD_SOURCE  # P6: pasted text is no file of a read root
     _sync_path_b64(record)
+    _record_upload_rows([record])  # R22-8
     return {
         "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "mode": "text",
@@ -1216,6 +1241,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     record["path"] = escape_row_path(filename)  # R10-6: as /api/analyze-upload
     record["source"] = UPLOAD_SOURCE  # P6
     _sync_path_b64(record)
+    _record_upload_rows([record])  # R22-8
     return {
         "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "mode": "file",
@@ -1267,14 +1293,28 @@ def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
 
 
 def _feedback_path() -> Path:
-    """Where web-UI examiner labels accumulate; overridable for tests."""
-    override = os.environ.get("DEEPFAKE_LENS_FEEDBACK")
-    if override:
-        return Path(override)
-    return Path.home() / ".deepfake-lens" / "feedback.jsonl"
+    """Where web-UI examiner labels accumulate (``DEEPFAKE_LENS_FEEDBACK`` overrides it).
+
+    R22-3 (round 22): the fixed per-user ``feedback.jsonl`` of :mod:`user_data`
+    (was ``~/.deepfake-lens/feedback.jsonl`` — inside the served HOME, or the
+    working folder with a relative HOME). Raises :class:`user_data.UserDataRefused`
+    when there is no place for it.
+    """
+    from .user_data import FEEDBACK_ENV, FEEDBACK_FILE, record_path
+
+    return record_path(FEEDBACK_FILE, FEEDBACK_ENV)
 
 
-def _feedback_payload(body: bytes) -> dict[str, object]:
+def evidence_folders(default_folder: Path | None = None) -> list[Path]:
+    """R22-3: the folders a server examines — its read roots (or its default folder) — where it never writes."""
+    return _effective_roots(default_folder)
+
+
+# R22-3: an examiner record that would be written inside the evidence (or nowhere) is refused with this status.
+USER_DATA_REFUSED_STATUS = 409
+
+
+def _feedback_payload(body: bytes, evidence: list[Path] | tuple[Path, ...] = ()) -> dict[str, object]:
     """Record one examiner verdict from the web UI.
 
     Appends a ``{path, expected_label, notes, embedded_result}`` JSONL row the
@@ -1302,7 +1342,15 @@ def _feedback_payload(body: bytes) -> dict[str, object]:
     if isinstance(result, dict):
         # load_feedback reads the embedded scan result from the "result" key.
         entry["result"] = result
-    feedback_file = _feedback_path()
+    from .user_data import FEEDBACK_ENV, FEEDBACK_FILE, UserDataRefused, check_outside, migrate_once
+
+    try:
+        feedback_file = _feedback_path()
+        check_outside(feedback_file, evidence, FEEDBACK_ENV)  # R22-3: never into the evidence
+    except UserDataRefused as exc:
+        return ApiError(str(exc), USER_DATA_REFUSED_STATUS)
+    if not os.environ.get(FEEDBACK_ENV):
+        migrate_once(FEEDBACK_FILE, feedback_file)
     feedback_file.parent.mkdir(parents=True, exist_ok=True)
     with feedback_file.open("a", encoding="utf-8") as handle:
         handle.write(json_dumps(entry, ensure_ascii=False) + "\n")
@@ -1393,6 +1441,51 @@ REPORT_ROW_OUTSIDE_SCAN_ROOT = "스캔 폴더 밖의 경로라 서버가 재분�
 REPORT_ROW_IDENTITY_MISMATCH = "path가 container::member와 일치하지 않습니다"
 # P6 (round 8): an upload row is never re-analyzed from the read root.
 REPORT_ROW_UPLOAD = "업로드 파일 — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다"
+# R22-8 (round 22): an upload row's path went into the signed body's excluded_items unchecked — any sentence,
+# "../", NUL. The name is still the client's (an upload has no file of the read roots), but it is now limited
+# (UPLOAD_ROW_NAME_MAX characters, relative, no "." / ".." / empty component; NUL is R22-6) and marked: a
+# name this server process received with that sha256 in /api/analyze-upload is "server_upload"; any other
+# is "client" and its reason says so.
+REPORT_ROW_UPLOAD_CLIENT_NAME = (
+    "업로드 파일(클라이언트 제공 이름 — 이 서버가 받은 업로드 기록에 없음) — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다"
+)
+UPLOAD_ROW_NAME_MAX = 255
+REPORT_UPLOAD_NAME_INVALID = (
+    "업로드 항목 {index}번의 이름이 업로드 파일 이름 형식이 아닙니다(상대 경로, {limit}자 이하, 빈·`.`·`..` 구성 요소 불가)"
+)
+_UPLOAD_NAMES: OrderedDict[tuple[str, str | None], None] = OrderedDict()
+_UPLOAD_NAMES_LOCK = threading.Lock()
+_UPLOAD_NAMES_MAX = 4096
+
+
+def _record_upload_rows(items: list[dict[str, object]]) -> None:
+    """R22-8: remember (row path, sha256) of every row this process produced for an upload (bounded, oldest dropped)."""
+    with _UPLOAD_NAMES_LOCK:
+        for item in items:
+            path, digest = item.get("path"), item.get("sha256")
+            if isinstance(path, str):
+                key = (path, digest if isinstance(digest, str) else None)
+                _UPLOAD_NAMES[key] = None
+                _UPLOAD_NAMES.move_to_end(key)
+        while len(_UPLOAD_NAMES) > _UPLOAD_NAMES_MAX:
+            _UPLOAD_NAMES.popitem(last=False)
+
+
+def _upload_name_source(row: dict[str, Any]) -> str:
+    """R22-8: "server_upload" when this process produced an upload row of that path and sha256, else "client"."""
+    digest = row.get("sha256")
+    key = (str(row.get("path")), digest if isinstance(digest, str) else None)
+    with _UPLOAD_NAMES_LOCK:
+        return "server_upload" if key in _UPLOAD_NAMES else "client"
+
+
+def _upload_name_valid(path: str) -> bool:
+    """R22-8: an upload row name — relative, at most UPLOAD_ROW_NAME_MAX characters, no empty / "." / ".." component."""
+    parts = path.replace("\\", "/").split("/")
+    return (
+        0 < len(path) <= UPLOAD_ROW_NAME_MAX and not os.path.isabs(path) and not path.startswith(("/", "\\"))
+        and not any(part in ("", ".", "..") for part in parts) and "\x00" not in path
+    )
 # R19-13 (round 19): the server's re-analysis of a posted row differs from the
 # row (sha256, status or verdict) or the row's file can no longer be
 # re-analyzed (deleted, an archive member gone, the analysis failed) — the
@@ -1420,8 +1513,30 @@ REPORT_ROW_PATH_NOT_CANONICAL = (
     "검사 결과 항목 「{path}」의 경로가 폴더 검사 결과의 경로 형식이 아닙니다(스캔 폴더 기준 상대 경로 — 절대 경로·빈 구성 요소·"
     "`.`·`..` 불가) — 폴더 검사 결과를 그대로 보내십시오"
 )
+# R22-4 (round 22): a posted row path that names an existing entry under another spelling than the scan's own
+# listing — a different letter case or Unicode form on a case-insensitive / normalizing file system
+# ("GEN.png" for "gen.png") — or a path through a folder the walk never enters because it is the scan folder or
+# a folder between it and the entry again (a bind-mount loop: "sub/loop/gen.png"). The scan lists neither, and
+# each was signed as one more row of the same file (R21-5's string check passed them). HTTP 400.
+REPORT_ROW_NOT_LISTED_NAME = (
+    "검사 결과 항목 「{path}」의 경로가 폴더 목록의 이름과 다릅니다(대소문자·유니코드 형태가 다른 같은 파일) — "
+    "폴더 검사 결과를 그대로 보내십시오"
+)
+REPORT_ROW_UNDER_LOOP = (
+    "검사 결과 항목 「{path}」는 순환 폴더(검사 폴더나 그 상위 폴더와 같은 폴더) 아래의 경로라 폴더 검사가 만들지 않는 행입니다 — "
+    "폴더 검사 결과를 그대로 보내십시오"
+)
 # R21-5: the same row (path, or container and member) posted twice. HTTP 400.
 REPORT_ROW_POSTED_TWICE = "검사 결과 항목 「{path}」가 두 번 게시되었습니다 — 행마다 한 번만 보내십시오"
+# R22-1 (round 22): why the server could not list the scan folder for the "기록되지 않은 파일" section — the
+# section then says "확인 불가" (result_types.UNRECORDED_LISTING_UNKNOWN), never "없음".
+REPORT_LISTING_NO_SCAN_ROOT = "검사 폴더가 없는 보고서 — 업로드 결과만 있음"
+REPORT_LISTING_WALK_LIMIT = "폴더 탐색 상한에 도달"
+REPORT_LISTING_WALK_FAILED = "폴더를 다시 읽지 못함"
+REPORT_LISTING_ROWS_OUTSIDE = (
+    "서명된 행 {n}개가 서버의 폴더 목록(하위 폴더 포함: {recursive}, 최대 파일 수: {max_files})에 없음 — "
+    "검사 때의 옵션(하위 폴더 포함 여부·최대 파일 수)을 함께 보내야 확인됩니다"
+)
 # R19-13: the excluded reasons that mean "the file changed after the scan" (not "never re-analyzable").
 _CHANGED_AFTER_SCAN_REASONS = (REPORT_ROW_NOT_FOUND, REPORT_ROW_NOT_DERIVED, REPORT_ROW_KIND_CHANGED)
 
@@ -1847,6 +1962,71 @@ def _posted_path_error(posted: list[Any]) -> str | None:
     return None
 
 
+def _posted_alias_error(posted: list[Any], scan_root: Path | None) -> str | None:
+    """R22-4 (round 22): why a posted row path names a file the scan would list under another path, or None.
+
+    R21-5 compared the path *text* only. Two spellings still named one file and were signed as two rows:
+
+    - a path through a bind-mount loop folder ("sub/loop/gen.png" with sub/loop the scan folder or "sub"
+      again) — the walk never enters such a folder (same ``(st_dev, st_ino)`` as the scan folder or a folder
+      between it and the entry: :func:`scan_cache._iter_files`), so no scan writes that row;
+    - a path whose components are not the names the folder listing holds — another letter case or Unicode
+      form ("GEN.png", NFD "한") resolves to the same file on a case-insensitive or normalizing file system
+      (macOS, Windows), but the scan writes the listed name.
+
+    Each top-level row path (a member row's container) is checked component by component against the
+    listing of its folder (exact name) and the loop identities; both are 400. An entry that is not there at
+    all is left to the re-analysis (gone since the scan: 409). Distinct listed names of one inode (hard
+    links) are distinct rows, as the scan lists them.
+    """
+    from .result_text import row_identity, unescape_row_path
+    from .scan_cache import _dir_identity
+
+    if scan_root is None:
+        return None
+    listings: dict[Path, set[str] | None] = {}
+
+    def listed(folder: Path) -> set[str] | None:
+        if folder not in listings:
+            try:
+                with os.scandir(folder) as handle:
+                    listings[folder] = {entry.name for entry in handle}
+            except OSError:
+                listings[folder] = None
+        return listings[folder]
+
+    root_ident = _dir_identity(scan_root)
+    checked: set[str] = set()
+    for item in posted:
+        top = row_identity(item)[0]
+        if top in checked:
+            continue
+        checked.add(top)
+        parts = unescape_row_path(top).replace(os.sep, "/").split("/")
+        folder = scan_root
+        ancestors = {root_ident} if root_ident else set()
+        for index, part in enumerate(parts):
+            names = listed(folder)
+            if names is None:
+                break  # an unlistable folder: the re-analysis gives its row (R20-1)
+            if part not in names:
+                try:
+                    os.lstat(folder / part)
+                except OSError:
+                    break  # nothing there under any spelling: gone since the scan (409 later)
+                return REPORT_ROW_NOT_LISTED_NAME.format(path=str(item.path)[:200])
+            entry = folder / part
+            if index == len(parts) - 1 or os.path.islink(entry):
+                break  # a linked folder on the path is the hasher's (never followed: N2 / R20-5)
+            ident = _dir_identity(entry)
+            if ident is not None and ident in ancestors:
+                return REPORT_ROW_UNDER_LOOP.format(path=str(item.path)[:200])
+            if ident is not None:
+                ancestors.add(ident)
+            folder = entry
+    return None
+
+
 def _derived_row(derived_by_top: dict[str, dict[str | None, Any] | str], path: str) -> Any | None:
     """R20-4: the server row re-derived for a posted row path ("a.png", or an archive member "a.zip::m"), or None."""
     for top, rows in derived_by_top.items():
@@ -1925,6 +2105,20 @@ def _as_duplicate(posted: Any, server: Any, original: Any | None) -> Any:
     )
 
 
+def _row_nul_field(row: object) -> str | None:
+    """R22-6: the name of a posted row's path-like field holding a NUL character, or None."""
+    if not isinstance(row, dict):
+        return None
+    result = row.get("result")
+    pixel = result.get("pixel_analysis") if isinstance(result, dict) else None
+    fields = {name: row.get(name) for name in ("path", "name", "container", "member", "duplicate_of", "heatmap_path")}
+    fields["result.pixel_analysis.heatmap_path"] = pixel.get("heatmap_path") if isinstance(pixel, dict) else None
+    for name, value in fields.items():
+        if isinstance(value, str) and "\x00" in value:
+            return name
+    return None
+
+
 def _posted_heatmaps_allowed(row: dict[str, Any], roots: list[Path]) -> bool:
     """Every heatmap path a posted row names (top level or result.pixel_analysis) is under the roots."""
     result = row.get("result")
@@ -1974,6 +2168,8 @@ def _report_scan_root(value: object, roots: list[Path], *, required: bool) -> Pa
         return {"error": REPORT_SCAN_ROOT_REQUIRED} if required else None
     if not isinstance(value, str):
         return {"error": REPORT_SCAN_ROOT_NOT_STRING}
+    if "\x00" in value:
+        return {"error": PATH_TEXT_NUL.format(field="scan_root")}  # R22-6: was a 500
     candidate = expand_user(value)
     if not candidate.is_absolute():
         return {"error": REPORT_SCAN_ROOT_NOT_ABSOLUTE.format(value=value[:200])}
@@ -1989,6 +2185,102 @@ def _report_scan_root(value: object, roots: list[Path], *, required: bool) -> Pa
     return resolved
 
 
+def _finished_scan_job(job_id: object, scan_root: Path | None) -> dict[str, Any] | None:
+    """R19-3/R22-1: the result of the server's own finished scan job ``job_id`` of the folder ``scan_root``, or None."""
+    if not isinstance(job_id, str) or not job_id or scan_root is None:
+        return None
+    with _SCAN_JOBS_LOCK:
+        entry = _SCAN_JOBS.get(job_id)
+        status = entry.get("status") if entry is not None else None
+        result = entry.get("result") if entry is not None else None
+    if status not in ("done", "cancelled") or not isinstance(result, dict) or result.get("scan_root") != scan_root_text(scan_root):
+        return None
+    return {"status": status, **result}
+
+
+def _report_listing(
+    summary: Any, signed_items: list[Any], scan_root: Path | None, options: AnalysisOptions, job_id: object,
+) -> Any:
+    """R22-1 (round 22): ``summary`` with the server's own "기록되지 않은 파일" counts of the scan folder.
+
+    The report counted the section from the posted rows only (``summarize(items, capped=False)``): a scan
+    capped at --max-files, a flat scan with files in subfolders, or a post that left rows out signed
+    ``total_files 0`` / "없음 — 분석 대상의 모든 파일에 분석 결과가 있습니다" in every format. Nothing here is
+    read from the posted rows except their identity. The listing is, in this order:
+
+    - ``scan_job`` — the server's own finished scan job named by ``scan_job`` for the same folder: its
+      summary's cap / flat-scan counts, and its rows (top-level paths) as the files of the folder;
+    - ``walk`` — the server walks the scan folder itself with the scan walk
+      (:func:`core.enumerate_scan_folder`) and the report's ``options`` ``recursive`` / ``max_files``;
+    - ``unknown`` — no scan folder (upload rows only), the walk stopped at a walk limit or could not
+      list the folder, or a signed row is not in that listing (other options than the scan's): the
+      section says "확인 불가" with the reason, and no enumeration count is signed.
+
+    A file of the listing without a signed row is counted (``not_in_report``).
+    """
+    from .core import enumerate_scan_folder
+    from .result_text import row_identity
+    from .scan_cache import WALK_LIMIT_REASON, _display_path
+
+    def unknown(reason: str) -> Any:
+        return replace(
+            summary, capped=False, files_over_cap=0, subfolders_skipped=0, subfolder_files_skipped=0,
+            subfolders_skipped_detail=[], unrecorded_listing={"source": "unknown", "not_in_report": 0, "reason": reason},
+        )
+
+    if scan_root is None:
+        return unknown(REPORT_LISTING_NO_SCAN_ROOT)
+    signed_tops = {row_identity(item)[0] for item in signed_items}
+    job = _finished_scan_job(job_id, scan_root)
+    job_summary = job.get("summary") if job is not None else None
+    job_items = job.get("items") if job is not None else None
+    if isinstance(job_summary, dict) and isinstance(job_items, list):
+        source = "scan_job"
+        listed = {row_identity(row)[0] for row in job_items if isinstance(row, dict)}
+
+        def count(name: str) -> int:
+            value = job_summary.get(name)
+            return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+        detail = job_summary.get("subfolders_skipped_detail")
+        enumeration: dict[str, Any] = {
+            "capped": job_summary.get("capped") is True, "files_over_cap": count("files_over_cap"),
+            "subfolders_skipped": count("subfolders_skipped"), "subfolder_files_skipped": count("subfolder_files_skipped"),
+            "subfolders_skipped_detail": [dict(entry) for entry in detail if isinstance(entry, dict)] if isinstance(detail, list) else [],
+        }
+        recursive: object = "검사 작업"
+        max_files: object = "검사 작업"
+    else:
+        source = "walk"
+        try:
+            walk = enumerate_scan_folder(scan_root, recursive=options.recursive, max_files=options.max_files)
+        except OSError:
+            logger.info("report: the scan folder could not be listed", exc_info=True)
+            return unknown(REPORT_LISTING_WALK_FAILED)
+        limit_prefix = WALK_LIMIT_REASON.split("(", 1)[0]
+        if any(isinstance(entry, tuple) and entry[1].startswith(limit_prefix) for entry in walk.symlinks):
+            return unknown(REPORT_LISTING_WALK_LIMIT)
+        if any(path == scan_root for path, _ in walk.iter_errors):
+            return unknown(REPORT_LISTING_WALK_FAILED)
+        entries = [*walk.paths, *(path for path, _ in walk.iter_errors),
+                   *(entry[0] if isinstance(entry, tuple) else entry for entry in walk.symlinks)]
+        listed = {_display_path(path, root=scan_root) for path in entries}
+        enumeration = {
+            "capped": walk.capped, "files_over_cap": walk.files_over_cap,
+            "subfolders_skipped": len(walk.subfolder_detail),
+            "subfolder_files_skipped": sum(entry["files"] for entry in walk.subfolder_detail if isinstance(entry.get("files"), int)),
+            "subfolders_skipped_detail": list(walk.subfolder_detail),
+        }
+        recursive, max_files = "예" if options.recursive else "아니오", options.max_files
+    outside = signed_tops - listed
+    if outside:
+        return unknown(REPORT_LISTING_ROWS_OUTSIDE.format(n=len(outside), recursive=recursive, max_files=max_files))
+    return replace(
+        summary, **enumeration,
+        unrecorded_listing={"source": source, "not_in_report": len(listed - signed_tops)},
+    )
+
+
 def _scan_root_label(scan_root: Path | None, roots: list[Path]) -> str | None:
     """R9-9: the scanned folder relative to the (innermost) read root holding it ("." for the root itself)."""
     if scan_root is None:
@@ -2002,8 +2294,18 @@ def _scan_root_label(scan_root: Path | None, roots: list[Path]) -> str | None:
 
 
 def _excluded_rows_json(excluded: list[tuple[Any, str]]) -> list[dict[str, object]]:
-    """The signed body's record of rows it does not vouch for (X2): path, marker, reason — no client verdict."""
-    return [{"path": item.path, "marker": UNSIGNED_CLIENT_ROW_MARKER, "reason": reason} for item, reason in excluded]
+    """The signed body's record of rows it does not vouch for (X2): path, marker, reason — no client verdict.
+
+    R22-8 (round 22): an upload row also carries ``name_source`` — "server_upload" (this server produced an
+    upload row of that name and sha256) or "client" (the name is only the client's text).
+    """
+    rows: list[dict[str, object]] = []
+    for item, reason in excluded:
+        row: dict[str, object] = {"path": item.path, "marker": UNSIGNED_CLIENT_ROW_MARKER, "reason": reason}
+        if reason in (REPORT_ROW_UPLOAD, REPORT_ROW_UPLOAD_CLIENT_NAME):
+            row["name_source"] = "server_upload" if reason == REPORT_ROW_UPLOAD else "client"
+        rows.append(row)
+    return rows
 
 
 def _report_payload(
@@ -2061,6 +2363,11 @@ def _report_payload(
     # — 403 whatever else is wrong with the row (a top-level heatmap_path
     # included, which the GUI also reads).
     roots_for_probe = _effective_roots(default_folder)
+    for index, row in enumerate(raw_items):
+        nul_field = _row_nul_field(row)
+        if nul_field is not None:
+            # R22-6 (round 22): a NUL in a row's path-like value was a 500 (resolve / lstat ValueError).
+            return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason=PATH_TEXT_NUL.format(field=nul_field))}
     for row in raw_items:
         if isinstance(row, dict) and not _posted_heatmaps_allowed(row, roots_for_probe):
             raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE)
@@ -2074,7 +2381,11 @@ def _report_payload(
             upload = _upload_row_item(row)
             if upload is None:
                 return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason="path 값이 없습니다")}
-            uploads.append((upload, REPORT_ROW_UPLOAD))
+            if not _upload_name_valid(str(upload.path)):
+                return {"error": REPORT_UPLOAD_NAME_INVALID.format(index=index + 1, limit=UPLOAD_ROW_NAME_MAX)}  # R22-8
+            # R22-8: the name's source decides the reason every rendering prints
+            source = _upload_name_source({"path": upload.path, "sha256": row.get("sha256")})
+            uploads.append((upload, REPORT_ROW_UPLOAD if source == "server_upload" else REPORT_ROW_UPLOAD_CLIENT_NAME))
             continue
         try:
             # N11: a row that is not a scan-result item is refused (was
@@ -2116,11 +2427,13 @@ def _report_payload(
         if heatmap_path and not _heatmap_allowed(str(heatmap_path)):
             raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE)
 
-    if format_override.lower() == "pdf":
+    if format_override.lower() in PDF_REPORT_FORMATS:
         from .pdf_backend import pymupdf_available
 
         if not pymupdf_available():
-            # B8: the Korean 501 before any re-analysis work (nothing to render with).
+            # B8: the Korean 501 before any re-analysis work (nothing to render with). R22-7 (round 22): the
+            # evidence statement too — it re-analyzed every row and then failed with 500 (증거설명서 PDF 생성
+            # 실패), not the documented 501 (service.md E31).
             return dict(PDF_REPORT_UNAVAILABLE_BODY)
 
     # P1: rows are resolved against the scanned folder only (inside a read
@@ -2171,9 +2484,9 @@ def _report_payload(
     except InvalidOption as exc:
         return {"error": str(exc)}
     server_thresholds = load_thresholds(options)
-    # R20-4 / R21-5 (merge): a malformed duplicate_of or a non-canonical / repeated row path
-    # is a malformed request (400) for every format, the preview included.
-    duplicate_error = _posted_path_error(items) or _posted_duplicate_error(items)
+    # R20-4 / R21-5 / R22-4 (merge): a malformed duplicate_of, a non-canonical, repeated or
+    # aliased row path is a malformed request (400) for every format, the preview included.
+    duplicate_error = _posted_path_error(items) or _posted_alias_error(items, scan_root) or _posted_duplicate_error(items)
     if duplicate_error is not None:
         hasher.close()
         return {"error": duplicate_error}  # R21-5 / R20-4: 400
@@ -2210,6 +2523,10 @@ def _report_payload(
     # The client's claim is taken as given — it can only add the caveat and
     # the "사용자 취소" count, never remove a row or change a verdict.
     summary, cancel_source = _with_posted_cancel(summary, data.get("summary"), data.get("scan_job"), scan_root)
+    # R22-1 (round 22): the cap / flat-scan / missing-row counts are the server's own, or "확인 불가".
+    # Merge: the preview takes the same listing (its job, else its own walk of scan_root) — the
+    # preview's 기록되지 않은 파일 box equals the export's.
+    summary = _report_listing(summary, items, scan_root if items else None, options, data.get("scan_job"))
     # G30: web reports are signed when DEEPFAKE_LENS_REPORT_KEY is set and
     # say "서명 없음" otherwise; the pins are those of the server's models dir.
     from .profile_pins import profile_pins
@@ -2275,6 +2592,9 @@ def _report_payload(
         preview["scan_root_line"] = (scan_root_line({"scan_root": root_label}) or "") if root_label else ""
         # R19-3: the PDF's case box also prints the re-analysis options line.
         preview["analysis_options_line"] = analysis_options_line({"analysis_options": analysis_options}) or ""
+        # Merge of R22-1: the listing behind the 기록되지 않은 파일 box (source scan_job / walk /
+        # unknown, not_in_report, reason) — the GUI's checklist says "확인 불가" from it.
+        preview["unrecorded_listing"] = dict(getattr(summary, "unrecorded_listing", None) or {})
         return preview
     signed = signed_report_body(
         summary, items, thresholds=thresholds, coverage=coverage,
@@ -2296,7 +2616,11 @@ def _report_payload(
         tmp_path = Path(tmp.name)
     try:
         if req_format in ("evidence", "evidence-statement"):
-            from .evidence_statement import signed_statement_body, write_evidence_statement_pdf
+            from .evidence_statement import (
+                PdfDependencyMissing as StatementPdfMissing,
+                signed_statement_body,
+                write_evidence_statement_pdf,
+            )
             try:
                 stmt = _statement()
                 # G30: signed like the other web reports (server key + pins).
@@ -2306,6 +2630,8 @@ def _report_payload(
                     ),
                     unsigned_rows=excluded,
                 )
+            except StatementPdfMissing:
+                return dict(PDF_REPORT_UNAVAILABLE_BODY)  # R22-7: 501 as documented (E31), never a 500
             except RuntimeError as exc:
                 return {"error": f"{EVIDENCE_PDF_FAILED_PREFIX}{exc}", "hint": "`pip install 'deepfake-lens[forensic]'` 후 재시도하거나 Markdown 출력을 사용하세요."}
         elif req_format == "pdf":

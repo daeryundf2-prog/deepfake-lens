@@ -276,6 +276,28 @@ class UnknownArgumentUsageTest(unittest.TestCase):
         code, err = self._run(["--recursive", "/nonexistent-r20-9"])
         self.assertIn("폴더를 찾을 수 없습니다", err)
 
+    def test_words_after_help_command_are_a_subcommand_or_an_error(self) -> None:
+        """R22-10 (round 22): `help scan extra` and `help corpus build` ignored the words after the command (exit 0)."""
+        from deepfake_lens.cli import COMMANDS
+
+        for argv, fragment in ((["help", "scan", "extra"], "알 수 없는 인수: extra"),
+                               (["help", "corpus", "nope"], "알 수 없는 인수: nope"),
+                               (["help", "corpus", "build", "x"], "알 수 없는 인수: x")):
+            with self.subTest(argv=argv):
+                code, err = self._run(argv)
+                self.assertEqual(code, 2, err)
+                self.assertIn(fragment, err)
+                self.assertTrue(err.startswith(f"사용법: deepfake-lens {' '.join(argv[1:3] if len(argv) > 3 else argv[1:2])}"), err[:200])
+        cases = [(["help", "corpus", "build"], "사용법: deepfake-lens corpus build")]
+        cases += [(["help", command], f"사용법: deepfake-lens {command}") for command in sorted(COMMANDS) if not command.startswith("-")]
+        for argv, usage in cases:
+            out = io.StringIO()
+            with self.subTest(argv=argv), contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    main(argv)
+            self.assertEqual(caught.exception.code, 0)
+            self.assertTrue(out.getvalue().startswith(usage), out.getvalue()[:200])
+
     def test_help_names_a_command_or_is_an_error(self) -> None:
         """R21-9 (round 21): `help bogus` printed the top-level help with exit 0 (a typo ended as a success), and
         `--verbose help` was a scan of the folder "help" ("폴더를 찾을 수 없습니다: help")."""

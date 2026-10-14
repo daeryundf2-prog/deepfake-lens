@@ -411,6 +411,25 @@ class WebReportSelectionTest(unittest.TestCase):
                 if isinstance(out, dict):
                     self.assertNotIn("error", out, out.get("error"))
 
+    def test_preview_takes_the_servers_listing_like_the_export(self) -> None:
+        """Merge of phase0 R22-1: the 기록되지 않은 파일 box is the server's own listing of the folder;
+        the preview (built from the posted rows, no re-analysis) uses the same listing, so a row
+        left out of the post is "보고서에 행 없음" in both, and the GUI gets the listing to say so."""
+        posted = [row for row in self.rows if row["path"] != "note0.txt"]
+        body = self._body(items=posted, exhibit_paths=[posted[0]["path"]], submitter_side="plaintiff")
+        preview = webapp_api._report_payload(body, "evidence-preview", default_folder=self.folder)
+        signed = webapp_api._report_payload(body, "evidence-json", default_folder=self.folder)
+        assert isinstance(preview, dict) and isinstance(signed, dict), (preview, signed)
+        self.assertEqual(preview["unrecorded_listing"], {"source": "walk", "not_in_report": 1})
+        box = dict((title, lines) for title, lines in preview["boxes"])["기록되지 않은 파일"]
+        self.assertEqual(box, signed["unrecorded_files"]["lines"])
+        self.assertEqual(signed["unrecorded_files"]["listing"], preview["unrecorded_listing"])
+        self.assertTrue(any(line.startswith("보고서에 행 없음") for line in box), box)
+        uploads_only = webapp_api._report_payload(
+            json.dumps({"items": [], "summary": {}, "options": {"no_default_engine": "true"}}).encode(), "evidence-preview", default_folder=self.folder)
+        if isinstance(uploads_only, dict) and "unrecorded_listing" in uploads_only:
+            self.assertEqual(uploads_only["unrecorded_listing"]["source"], "unknown")
+
     def test_excluded_rows_are_named_in_response_headers(self) -> None:
         """GUI-REV5 L-2: a successful report of any format names the rows it lists as 서명 제외
         (here an upload the server never re-analyzes) in X-Deepfake-Lens-Excluded-* headers, so

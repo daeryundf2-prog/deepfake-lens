@@ -122,7 +122,9 @@ class PrivateNumbaCacheTest(unittest.TestCase):
         self.assertTrue(seen["dir"].startswith(seen["scratch"] + os.sep), seen)
 
     def test_publish_is_one_rename_and_never_overwrites(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(audio_worker, "shared_cache_root", return_value=Path(tmp, "shared")):
+        # R22-9: the environment's cache root is left out here (this test's content must never be published there)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(audio_worker, "shared_cache_root", return_value=Path(tmp, "shared")), \
+                mock.patch.object(audio_worker, "environment_cache_root", return_value=None):
             one, two = Path(tmp, "one"), Path(tmp, "two")
             for folder, text in ((one, "first"), (two, "second")):
                 (folder / "sub").mkdir(parents=True)
@@ -135,6 +137,38 @@ class PrivateNumbaCacheTest(unittest.TestCase):
                 seeded, was_seeded = audio_worker.private_cache_dir()
             self.assertTrue(was_seeded)
             self.assertEqual(Path(seeded, "sub", "f.nbi").read_text(encoding="utf-8"), "first")
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "POSIX uid")
+    def test_a_new_home_is_seeded_from_the_environments_cache_and_publishes_its_own(self) -> None:
+        """R22-9 (round 22): a published cache only under HOME made every new HOME compile librosa's numba functions
+        again in its first worker (web upload of 20 WAV files 7.4 s against 4.8 s at 2130892, whose cache sat in
+        site-packages). The environment's root seeds it; HOME's root still gets its own published copy."""
+        from deepfake_lens import native_path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            prefix = Path(tmp, "venv")
+            source = Path(tmp, "compiled")
+            (source / "sub").mkdir(parents=True)
+            (source / "sub" / "f.nbi").write_text("compiled", encoding="utf-8")
+            native_path.set_tool_cache_base(None)
+            with mock.patch.object(sys, "prefix", str(prefix)), mock.patch.dict(os.environ, {"HOME": str(Path(tmp, "home1"))}):
+                self.assertTrue(audio_worker.publish_cache(str(source)))
+            base = prefix / "var" / "deepfake-lens"
+            self.assertEqual(oct(base.stat().st_mode & 0o777), oct(0o700))
+            with mock.patch.object(sys, "prefix", str(prefix)), mock.patch.dict(os.environ, {"HOME": str(Path(tmp, "home2"))}), \
+                    mock.patch("deepfake_lens.native_path.scratch_dir", return_value=tmp):
+                seeded, all_published = audio_worker.private_cache_dir()
+                self.assertFalse(all_published)  # home2 has none yet: the worker publishes there after its first file
+                self.assertEqual(Path(seeded, "sub", "f.nbi").read_text(encoding="utf-8"), "compiled")
+                self.assertTrue(audio_worker.publish_cache(seeded))
+                self.assertTrue(Path(tmp, "home2", ".cache", "deepfake-lens", "numba").is_dir())
+            # a folder others can write, or one inside an examined folder, is never used
+            base.chmod(0o777)
+            with mock.patch.object(sys, "prefix", str(prefix)):
+                self.assertIsNone(audio_worker.environment_cache_root())
+            base.chmod(0o700)
+            with mock.patch.object(sys, "prefix", str(prefix)), mock.patch.object(native_path, "_EXAMINED_FOLDERS", [os.path.realpath(tmp)]):
+                self.assertIsNone(audio_worker.environment_cache_root())
 
     def test_no_shared_cache_under_a_relative_home(self) -> None:
         with mock.patch.object(Path, "home", return_value=Path("relative-home")):
@@ -506,6 +540,69 @@ class StartUpFramingTest(unittest.TestCase):
         for outcome in outcomes:
             self.assertTrue(outcome.startswith("WorkerStartError: "), outcome)
             self.assertIn("준비 신호 전에 끝남 — 종료 코드 0", outcome)
+
+
+class StartFailureBreakerTest(unittest.TestCase):
+    """R22-5 (round 22): a worker that never sends its ready marker cost WORKER_READY_TIMEOUT_SECONDS (60 s) per
+    file — the failed worker is dropped and the next file starts another (4 WAVs: 240 s; 300 audio files: about
+    5 hours), with nothing to stop it. After WORKER_START_BREAKER_FAILURES start failures in a row, a scope starts
+    no more workers and every later file's audio check fails at once with the breaker's reason."""
+
+    _stub_with_sitecustomize = StartUpFramingTest._stub_with_sitecustomize
+    _outcomes = StartUpFramingTest._outcomes
+
+    @unittest.skipIf(os.name != "posix", "POSIX signals")
+    def test_a_scope_stops_starting_workers_that_never_get_ready(self) -> None:
+        import time
+
+        started_workers: list[object] = []
+        real_start = audio_worker._start
+
+        def counting_start() -> object:
+            worker = real_start()
+            started_workers.append(worker)
+            return worker
+
+        names = [f"s{index}.wav" for index in range(6)]
+        with tempfile.TemporaryDirectory() as tmp:
+            pythonpath = self._stub_with_sitecustomize(tmp, "os.write(1, b'partial line without newline')\ntime.sleep(120)\n")
+            started = time.monotonic()
+            with mock.patch.object(audio_worker, "WORKER_READY_TIMEOUT_SECONDS", 2.0), \
+                    mock.patch.object(audio_worker, "_start", counting_start):
+                outcomes = self._outcomes(pythonpath, names, tmp)
+            elapsed = time.monotonic() - started
+        self.assertEqual(len(started_workers), audio_worker.WORKER_START_BREAKER_FAILURES)
+        self.assertLess(elapsed, 2.0 * audio_worker.WORKER_START_BREAKER_FAILURES + 20)
+        for outcome in outcomes[:2]:
+            self.assertIn("2초 안에 준비 신호가 오지 않음", outcome)
+        for outcome in outcomes[2:]:
+            self.assertTrue(outcome.startswith("WorkerStartError: 오디오 특징 추출 작업자가 이 검사에서 연속 2번 준비 신호를 보내지 않아"), outcome)
+            self.assertIn("처음 사유: 오디오 특징 추출 작업자가 준비 신호를 보내지 않아 중단했습니다(2초 안에 준비 신호가 오지 않음)", outcome)
+
+    def test_a_worker_that_gets_ready_ends_the_run_of_failures(self) -> None:
+        scope = audio_worker.WorkerScope()
+        failure = audio_worker.WorkerStartError("x")
+        scope.start_failed(failure)
+        scope.start_succeeded()
+        scope.start_failed(failure)
+        self.assertIsNone(scope.tripped)
+        scope.start_failed(failure)
+        self.assertIsNotNone(scope.tripped)
+        scope.start_succeeded()
+        self.assertIsNotNone(scope.tripped)  # a tripped scope stays tripped until it ends
+
+    @unittest.skipIf(os.name != "posix", "POSIX signals")
+    def test_outside_a_scope_each_file_gets_its_own_worker(self) -> None:
+        """One file (classify, analyze-file) has no breaker: the next request starts a worker again."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pythonpath = self._stub_with_sitecustomize(tmp, "os.write(1, b'partial')\nos._exit(0)\n")
+            Path(tmp, "a.wav").write_bytes(b"RIFF")
+            with mock.patch.dict(os.environ, {"PYTHONPATH": pythonpath}):
+                for _ in range(3):
+                    with self.assertRaises(audio_worker.WorkerStartError) as caught:
+                        audio_worker.extract_features(str(Path(tmp, "a.wav")), segment_seconds=5)
+                    self.assertIn("준비 신호 전에 끝남", str(caught.exception))
+            self.assertEqual(shutdown.running_children(), [])
 
 
 class MultiFileCommandsRunInOneScopeTest(unittest.TestCase):

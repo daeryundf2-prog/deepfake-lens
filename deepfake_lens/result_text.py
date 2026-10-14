@@ -612,23 +612,41 @@ class UnrecordedFiles:
         cap_reached: bool = False,
         archive_categories: dict[str, int] | None = None,
         subfolder_detail: list[dict[str, object]] | None = None,
+        listing: dict[str, object] | None = None,
     ) -> None:
         self.counts = {code: int(counts.get(code, 0) or 0) for code, _, _ in UNRECORDED_REASONS}
         self.cap_reached = bool(cap_reached or self.counts["file_cap"])
+        # R22-1 (round 22): a web report's listing of the scan folder (result_types.UNRECORDED_LISTING_SOURCES).
+        self.listing = _listing(listing)
         # P5: refused archive members by category; files per skipped subfolder.
         self.archive_categories = {key: int(value) for key, value in (archive_categories or {}).items() if int(value)}
         self.subfolder_detail = [dict(entry) for entry in (subfolder_detail or []) if isinstance(entry, dict)]
 
     @property
+    def not_in_report(self) -> int:
+        """R22-1: files of the server's listing with no signed row (web reports; 0 otherwise)."""
+        value = self.listing.get("not_in_report") if self.listing else 0
+        return value if isinstance(value, int) and value > 0 else 0
+
+    @property
+    def listing_unknown(self) -> bool:
+        """R22-1: a web report whose scan-folder listing the server could not make — never "없음"."""
+        return self.listing is not None and self.listing.get("source") == "unknown"
+
+    @property
     def total_files(self) -> int:
         """Files without an analysis result (subfolders are counted separately)."""
-        return sum(count for code, count in self.counts.items() if code != "subfolders")
+        return sum(count for code, count in self.counts.items() if code != "subfolders") + self.not_in_report
 
     @property
     def empty(self) -> bool:
-        return not self.cap_reached and not any(self.counts.values())
+        return not self.cap_reached and not any(self.counts.values()) and not self.not_in_report and not self.listing_unknown
 
     def headline(self) -> str:
+        if self.listing_unknown:
+            from .result_types import UNRECORDED_LISTING_UNKNOWN
+
+            return UNRECORDED_LISTING_UNKNOWN.format(reason=str(self.listing.get("reason") or "")) if self.listing else ""
         if self.empty:
             return f"{UNRECORDED_SECTION_TITLE}: 없음 — 분석 대상의 모든 파일에 분석 결과가 있습니다"
         text = f"{UNRECORDED_SECTION_TITLE}: {self.total_files}개"
@@ -649,6 +667,10 @@ class UnrecordedFiles:
                 lines.append(f"{label}: {UNRECORDED_CAP_COUNT_UNKNOWN}")
             elif count:
                 lines.append(f"{label}: {detail.format(n=count)}{self._breakdown(code)}")
+        if self.not_in_report:
+            from .result_types import UNRECORDED_NOT_IN_REPORT_DETAIL, UNRECORDED_NOT_IN_REPORT_LABEL
+
+            lines.append(f"{UNRECORDED_NOT_IN_REPORT_LABEL}: {UNRECORDED_NOT_IN_REPORT_DETAIL.format(n=self.not_in_report)}")
         return lines
 
     def _breakdown(self, code: str) -> str:
@@ -677,17 +699,26 @@ class UnrecordedFiles:
         return f"{self.headline()} — " + ", ".join(parts)
 
     def to_json(self) -> dict[str, object]:
-        return {
+        reasons: list[dict[str, object]] = [
+            {"code": code, "label": label, "count": self.counts[code]}
+            for code, label, _ in UNRECORDED_REASONS
+        ]
+        body: dict[str, object] = {
             "total_files": self.total_files,
             "cap_reached": self.cap_reached,
-            "reasons": [
-                {"code": code, "label": label, "count": self.counts[code]}
-                for code, label, _ in UNRECORDED_REASONS
-            ],
+            "reasons": reasons,
             "archive_rejected_by_category": dict(self.archive_categories),
             "subfolders": [dict(entry) for entry in self.subfolder_detail],
             "lines": self.lines(),
         }
+        if self.listing:
+            # R22-1 (round 22): web reports only — where the counts come from, and the files of that listing
+            # without a signed row. A scan's own JSON has neither (the scan is its own listing).
+            from .result_types import UNRECORDED_NOT_IN_REPORT_CODE, UNRECORDED_NOT_IN_REPORT_LABEL
+
+            reasons.append({"code": UNRECORDED_NOT_IN_REPORT_CODE, "label": UNRECORDED_NOT_IN_REPORT_LABEL, "count": self.not_in_report})
+            body["listing"] = dict(self.listing)
+        return body
 
     @classmethod
     def from_json(cls, data: object) -> "UnrecordedFiles | None":
@@ -701,12 +732,32 @@ class UnrecordedFiles:
                     counts[str(entry.get("code"))] = entry["count"]
         categories = data.get("archive_rejected_by_category")
         subfolders = data.get("subfolders")
+        listing = data.get("listing")
         return cls(
             counts,
             cap_reached=bool(data.get("cap_reached")),
             archive_categories={str(k): v for k, v in categories.items() if isinstance(v, int)} if isinstance(categories, dict) else None,
             subfolder_detail=[entry for entry in subfolders if isinstance(entry, dict)] if isinstance(subfolders, list) else None,
+            listing=listing if isinstance(listing, dict) else None,
         )
+
+
+def _listing(value: object) -> dict[str, object] | None:
+    """R22-1: a web report's listing dict ({source, not_in_report, reason}), an unknown source read as "unknown"."""
+    if not isinstance(value, dict):
+        return None
+    from .result_types import UNRECORDED_LISTING_SOURCES
+
+    source = value.get("source")
+    count = value.get("not_in_report")
+    out: dict[str, object] = {
+        "source": source if source in UNRECORDED_LISTING_SOURCES else "unknown",
+        "not_in_report": count if isinstance(count, int) and not isinstance(count, bool) and count > 0 else 0,
+    }
+    reason = value.get("reason")
+    if isinstance(reason, str) and reason:
+        out["reason"] = reason
+    return out
 
 
 def _already_counted_note(entry: dict[str, object]) -> str:
@@ -765,11 +816,13 @@ def unrecorded_files(items: "list[object]", summary: object | None = None) -> Un
     detail = field("subfolders_skipped_detail")
     cancelled = field("files_cancelled")  # R18-3
     counts["cancelled"] = cancelled if isinstance(cancelled, int) and cancelled > 0 else 0
+    listing = field("unrecorded_listing")  # R22-1: a web report's server listing
     return UnrecordedFiles(
         counts,
         cap_reached=bool(field("capped")),
         archive_categories=categories,
         subfolder_detail=[entry for entry in detail if isinstance(entry, dict)] if isinstance(detail, list) else None,
+        listing=listing if isinstance(listing, dict) else None,
     )
 
 

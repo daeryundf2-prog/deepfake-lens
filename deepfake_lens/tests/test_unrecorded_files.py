@@ -341,3 +341,40 @@ class UnrecordedFilesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnrecordedListingTest(unittest.TestCase):
+    """R22-1 (round 22): a web report's server listing — "확인 불가" is never "없음", missing rows are counted."""
+
+    def test_unknown_listing_is_never_none(self) -> None:
+        unrecorded = UnrecordedFiles({}, listing={"source": "unknown", "not_in_report": 0, "reason": "폴더를 다시 읽지 못함"})
+        self.assertFalse(unrecorded.empty)
+        self.assertIn("확인 불가", unrecorded.headline())
+        self.assertIn("폴더를 다시 읽지 못함", unrecorded.headline())
+        self.assertNotIn("없음", unrecorded.headline())
+
+    def test_not_in_report_is_counted_and_round_trips(self) -> None:
+        unrecorded = UnrecordedFiles({"symlink": 1}, listing={"source": "walk", "not_in_report": 2})
+        self.assertEqual(unrecorded.total_files, 3)
+        body = unrecorded.to_json()
+        self.assertEqual(body["listing"], {"source": "walk", "not_in_report": 2})
+        self.assertIn({"code": "not_in_report", "label": "보고서에 행 없음", "count": 2}, body["reasons"])
+        again = UnrecordedFiles.from_json(body)
+        assert again is not None
+        self.assertEqual(again.lines(), unrecorded.lines())
+        try:
+            import jsonschema
+        except ImportError:
+            return
+        schema = json.loads((Path(__file__).resolve().parents[2] / "contracts" / "deepfake-lens-scan-result-v2.schema.json").read_text(encoding="utf-8"))
+        jsonschema.validate(body, {**schema["$defs"]["unrecorded_files"], "$defs": schema["$defs"]})
+
+    def test_a_scan_has_no_listing(self) -> None:
+        body = unrecorded_files([], None).to_json()
+        self.assertNotIn("listing", body)
+        self.assertNotIn("not_in_report", [reason["code"] for reason in body["reasons"]])
+
+    def test_an_unknown_source_is_read_as_unknown(self) -> None:
+        unrecorded = UnrecordedFiles({}, listing={"source": "client", "not_in_report": -3})
+        self.assertTrue(unrecorded.listing_unknown)
+        self.assertEqual(unrecorded.not_in_report, 0)

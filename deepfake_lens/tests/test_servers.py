@@ -1554,7 +1554,8 @@ class ReportSignsOnlyServerResultsTest(_ReportLegsFixture):
         rows = [self.rows["target.png"], ghost]
         for name, make in self._legs():
             post = make()
-            for fmt in ("json", "html", "evidence", *(("pdf",) if HAVE_PYMUPDF else ())):  # pdf without pymupdf: 501 first (B8)
+            # pdf without pymupdf: 501 first (B8); R22-7: the evidence statement too (it re-analyzed, then 500)
+            for fmt in ("json", "html", *(("evidence", "pdf") if HAVE_PYMUPDF else ())):
                 with self.subTest(leg=name, format=fmt):
                     status, content_type, raw = post("/api/report", self._json({"items": rows, "format": fmt}))
                     self.assertEqual(status, 409, raw[:300])
@@ -1581,7 +1582,8 @@ class ReportRefusesChangedRowsTest(_ReportLegsFixture):
     verify-report said 검증됨. Now any difference in sha256, status or verdict_code, or a row whose file can no
     longer be re-analyzed, refuses every signed format with 409 and ``changed_rows``."""
 
-    FORMATS = ("json", "html", "evidence", *(("pdf",) if HAVE_PYMUPDF else ()))
+    # R22-7 (round 22): without pymupdf the evidence statement is 501 before any re-analysis, like pdf (B8).
+    FORMATS = ("json", "html", *(("evidence", "pdf") if HAVE_PYMUPDF else ()))
 
     def _scan(self, *extra: str) -> dict[str, dict[str, Any]]:
         import contextlib
@@ -2404,6 +2406,7 @@ class ReportScanRootAndUploadsTest(_ScanRootFixture):
                     self.assertEqual(signed["items"], [], "the read root's target.png is never re-analyzed for an upload")
                     self.assertEqual(signed["excluded_items"], [{
                         "path": "target.png", "marker": webapp_api.UNSIGNED_CLIENT_ROW_MARKER, "reason": webapp_api.REPORT_ROW_UPLOAD,
+                        "name_source": "server_upload",  # R22-8: this server received that upload (name and sha256)
                     }])
                     self.assertNotIn(self.root_sha, raw.decode("utf-8"))
                 status, raw = call("POST", "/api/report?format=html", json.dumps({"items": upload["items"]}).encode("utf-8"))
@@ -3107,8 +3110,14 @@ class ErrorTableEveryRowTest(unittest.TestCase):
             "E30": [case(s, "POST", "/api/report", 403, "허용되지 않은 경로", report({"items": [memo_row], "scan_root": str(self.outside)}), "application/json") for s in both],
             "E31": [case(s, "POST", "/api/report?format=pdf", 501, "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다", report({"items": [memo_row], "scan_root": scan_root}), "application/json",
                          patches=(patch("deepfake_lens.pdf_backend.import_pymupdf", no_pymupdf),)) for s in both]
+            # R22-7 (round 22): the evidence statement without pymupdf is the same 501, before any re-analysis (was a 500 after it)
+            + [case(s, "POST", f"/api/report?format={fmt}", 501, "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다", report({"items": [memo_row], "scan_root": scan_root}), "application/json",
+                    patches=(patch("deepfake_lens.pdf_backend.import_pymupdf", no_pymupdf), patch("deepfake_lens.analysis_api.scan_file_run", raise_)))
+               for s in both for fmt in ("evidence", "evidence-statement")]
             + [case(s, "POST", "/api/report?format=evidence", 500, "증거설명서 PDF 생성 실패", report({"items": [memo_row], "scan_root": scan_root}), "application/json",
-                    patches=(patch("deepfake_lens.evidence_statement.write_evidence_statement_pdf", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("렌더러 없음"))),)) for s in both],
+                    # R22-7: a renderer is present (the engine check passes) and the statement PDF fails — 500
+                    patches=(patch("deepfake_lens.pdf_backend.pymupdf_available", lambda: True),
+                             patch("deepfake_lens.evidence_statement.write_evidence_statement_pdf", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("렌더러 없음"))))) for s in both],
             "E32": [case(s, "POST", "/api/feedback", 400, text, body, "application/json") for s in both for body, text in (
                 (b"{oops", "JSON 본문을 해석할 수 없습니다"), (b"[1]", "피드백 요청 본문은 JSON 객체여야 합니다"),
                 (deep, "JSON 중첩이 너무 깊습니다"),  # R11-3: was a 500
@@ -3164,10 +3173,23 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                 "/api/analyze-file?file_b64=%40%40", "/api/scan?folder_b64=%40%40", "/api/scan?async=1&folder_b64=AA%3D%3D",
                 f"/api/preview?path_b64=%40%40&root={q(f)}", "/api/heatmap?path_b64=x.png&root_b64=%40%40",
             )],
+            # R22-3 (round 22): an examiner record inside the evidence (here: the overrides named inside the root) is refused.
+            "E49": [case(s, "POST", "/api/feedback", 409, "저장하지 않았습니다", json.dumps({"path": "memo.txt", "expected_label": "real"}).encode(),
+                         "application/json", patches=(patch.dict(os.environ, {"DEEPFAKE_LENS_FEEDBACK": str(f / "fb.jsonl")}),)) for s in both]
+            + [case(s, "POST", "/api/review", 409, "저장하지 않았습니다", json.dumps({"artifact_id": "memo.txt", "star": True}).encode(),
+                    "application/json", patches=(patch.dict(os.environ, {"DEEPFAKE_LENS_REVIEWS": str(f / "reviews.json")}),
+                                                 patch("deepfake_lens.reviews._DEFAULT_STORE", None))) for s in both]
+            + [case("api", "PUT", "/api/artifacts/memo.txt/review", 409, "저장하지 않았습니다", json.dumps({"star": True}).encode(),
+                    "application/json", patches=(patch.dict(os.environ, {"DEEPFAKE_LENS_REVIEWS": str(f / "reviews.json")}),
+                                                 patch("deepfake_lens.reviews._DEFAULT_STORE", None)))],
+            # R22-6 (round 22): a NUL in a path value was a 500 (PathValuesWithNulAre400Test sends every endpoint).
+            "E48": [case(s, "GET", f"/api/analyze-file?file={q(f / 'a')}%00", 400, "NUL 문자") for s in both]
+            + [case(s, "POST", "/api/report", 400, "NUL 문자", report({"items": [memo_row], "scan_root": scan_root + "\x00"}), "application/json") for s in both]
+            + [case("api", "POST", f"/api/classify?file_path={q(f / 'a')}%00", 400, "NUL 문자")],
             # R19-13 (round 19): a posted row the server's re-analysis contradicts (here its digest) — every format.
             "E47": [case(s, "POST", f"/api/report?format={fmt}", 409, webapp_api.REPORT_ROWS_CHANGED,
                          report({"items": [dict(memo_row, sha256="0" * 64)], "scan_root": scan_root, "options": {"no_default_engine": "true"}}),
-                         "application/json") for s in both for fmt in ("json", "html", "evidence")],
+                         "application/json") for s in both for fmt in ("json", "html", *(("evidence",) if HAVE_PYMUPDF else ()))],  # R22-7
         }
 
     # -- the servers ---------------------------------------------------------------
@@ -3274,3 +3296,361 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                     self.assertEqual(status, c["status"], raw[:300])
                     self.assertIn(c["text"], text, raw[:300])
                     self.assertIsNone(english_prose(text.replace(str(self.folder), "").replace(str(self.outside), "")), text)
+
+
+class ReportUnrecordedFilesAreTheServersTest(_ReportLegsFixture):
+    """R22-1 (round 22): the "기록되지 않은 파일" section of a web report was counted from the posted rows only
+    (``summarize(items, capped=False)``). A scan capped at max_files, a flat scan with files in a subfolder, or a
+    post that left rows out was signed ``total_files 0`` / ``cap_reached false`` and every rendering (HTML, forensic
+    PDF, evidence statement) said "없음 — 분석 대상의 모든 파일에 분석 결과가 있습니다" — the normal GUI flow, no
+    attacker. The counts are now the server's own (its scan job of the folder, else its own walk of the scan folder
+    with the report's options) and, when it cannot know, "확인 불가" — never "없음"."""
+
+    FORMATS = ("json", "html", *(("evidence", "pdf") if HAVE_PYMUPDF else ()))
+    NONE = "없음 — 분석 대상의 모든 파일에 분석 결과가 있습니다"
+    _scan = ReportRefusesChangedRowsTest._scan
+
+    def setUp(self) -> None:
+        super().setUp()
+        registry = patch.object(webapp_api, "_SCAN_JOBS", {})
+        registry.start()
+        self.addCleanup(registry.stop)
+        (self.folder / "sub").mkdir()
+        _write_png(self.folder / "sub" / "inner.png", seed=4)
+        _write_png(self.folder / "zlast.png", seed=5)
+
+    def _report(self, rows: list[dict[str, Any]], **extra: object) -> dict[tuple[str, str], tuple[int, str, dict[str, Any] | None]]:
+        out: dict[tuple[str, str], tuple[int, str, dict[str, Any] | None]] = {}
+        for leg, make in self._legs():
+            post = make()
+            for fmt in self.FORMATS:
+                status, _, raw = post("/api/report", self._json({"items": rows, "format": fmt, **extra}))
+                text = _artifact_text(raw, fmt) if status == 200 else raw.decode("utf-8", "replace")
+                out[(leg, fmt)] = (status, text, json.loads(raw) if fmt == "json" and status == 200 else None)
+        return out
+
+    def _assert_section(self, results: dict[tuple[str, str], tuple[int, str, dict[str, Any] | None]], expected: str) -> None:
+        for (leg, fmt), (status, text, _) in results.items():
+            with self.subTest(leg=leg, format=fmt):
+                self.assertEqual(status, 200, text[:400])
+                self.assertNotIn(self.NONE, text)
+                self.assertIn(expected, " ".join(text.split()))
+
+    def _signed(self, results: dict[tuple[str, str], tuple[int, str, dict[str, Any] | None]]) -> list[dict[str, Any]]:
+        return [body for (_, fmt), (_, _, body) in results.items() if fmt == "json" and body is not None]
+
+    def test_a_capped_scan_signs_the_files_over_the_cap(self) -> None:
+        rows = self._scan("--max-files", "2")  # bundle.zip, target.png analyzed; zlast.png over the cap
+        self.assertNotIn("zlast.png", rows)
+        results = self._report(list(rows.values()), options={"max_files": "2"})
+        self._assert_section(results, "파일 상한: 파일 수 상한(--max-files)에 도달해 검사하지 않은 파일 1개")
+        for body in self._signed(results):
+            unrecorded = body["unrecorded_files"]
+            self.assertTrue(unrecorded["cap_reached"])
+            self.assertEqual(body["summary"]["files_over_cap"], 1)
+            self.assertEqual(unrecorded["listing"], {"source": "walk", "not_in_report": 0})
+
+    def test_a_flat_scan_signs_the_subfolder_files(self) -> None:
+        rows = self._scan()
+        results = self._report(list(rows.values()))
+        self._assert_section(results, "검사하지 않은 하위 폴더 안의 파일 1개")
+        for body in self._signed(results):
+            self.assertEqual(body["summary"]["subfolders_skipped"], 1)
+            self.assertEqual(body["unrecorded_files"]["subfolders"], [{"path": "sub", "files": 1, "complete": True}])
+
+    def test_rows_left_out_of_the_post_are_counted(self) -> None:
+        rows = self._scan()
+        posted = [row for path, row in rows.items() if path != "zlast.png"]
+        results = self._report(posted)
+        self._assert_section(results, "보고서에 행 없음: 서버가 검사 폴더에서 찾은 파일 중 이 보고서에 서명된 행이 없는 파일 1개")
+        for body in self._signed(results):
+            self.assertEqual(body["unrecorded_files"]["listing"]["not_in_report"], 1)
+            self.assertIn({"code": "not_in_report", "label": "보고서에 행 없음", "count": 1}, body["unrecorded_files"]["reasons"])
+
+    def test_the_servers_scan_job_is_the_listing(self) -> None:
+        started = webapp_api._scan_job_start(f"folder={self.folder}&no_default_engine=true&max_files=2", default_folder=self.folder)
+        state: dict[str, Any] = {}
+        for _ in range(600):
+            state = webapp_api._scan_status_payload(f"job={started['job_id']}")
+            if state["status"] != "running":
+                break
+            time.sleep(0.05)
+        self.assertEqual(state["status"], "done", state)
+        result = state["result"]
+        # posted without options: the job (max_files 2, flat) — not the default walk — gives the counts
+        results = self._report(list(result["items"]), scan_job=started["job_id"], options={"no_default_engine": "true"})
+        self._assert_section(results, "파일 상한: 파일 수 상한(--max-files)에 도달해 검사하지 않은 파일 1개")
+        for body in self._signed(results):
+            self.assertEqual(body["unrecorded_files"]["listing"], {"source": "scan_job", "not_in_report": 0})
+            self.assertEqual(body["summary"]["subfolders_skipped"], 1)
+
+    def test_signed_rows_outside_the_servers_listing_are_unknown(self) -> None:
+        rows = self._scan("--recursive")  # sub/inner.png posted; the report's walk is flat (no options)
+        results = self._report(list(rows.values()))
+        self._assert_section(results, "기록되지 않은 파일: 확인 불가 — 서버가 검사 폴더의 파일 목록을 확인하지 못했습니다(서명된 행 1개가")
+        for body in self._signed(results):
+            self.assertEqual(body["unrecorded_files"]["listing"]["source"], "unknown")
+            self.assertFalse(body["unrecorded_files"]["cap_reached"])
+            self.assertEqual(body["summary"]["subfolders_skipped"], 0)
+        # the same scan posted with its options: the walk agrees and nothing is unrecorded
+        for body in self._signed(self._report(list(rows.values()), options={"recursive": "true"})):
+            self.assertEqual(body["unrecorded_files"]["listing"], {"source": "walk", "not_in_report": 0})
+            self.assertEqual(body["unrecorded_files"]["total_files"], 1)  # the link row in_link.png only
+
+    def test_a_walk_limit_is_unknown(self) -> None:
+        from deepfake_lens import scan_cache
+
+        rows = self._scan("--recursive")
+        with patch.object(scan_cache, "MAX_WALK_DIRS", 1):
+            results = self._report([row for path, row in rows.items() if not path.startswith("sub")], options={"recursive": "true"})
+        self._assert_section(results, "확인 불가 — 서버가 검사 폴더의 파일 목록을 확인하지 못했습니다(폴더 탐색 상한에 도달)")
+
+    def test_upload_rows_only_are_unknown(self) -> None:
+        upload = {"source": "upload", "path": "a.png", "name": "a.png", "status": "failed", "error": "x"}
+        for leg, make in self._legs():
+            status, _, raw = make()("/api/report", json.dumps({"items": [upload], "format": "json"}).encode("utf-8"))
+            with self.subTest(leg=leg):
+                self.assertEqual(status, 200, raw[:300])
+                unrecorded = json.loads(raw)["unrecorded_files"]
+                self.assertEqual(unrecorded["listing"]["source"], "unknown")
+                self.assertNotIn(self.NONE, unrecorded["lines"][0])
+
+    def test_regressions_of_the_report_rules_stay_closed(self) -> None:
+        """R19-13 (a changed row: 409), R20-1 (a FIFO row re-derived as the scan's own row: 200) and R21-1 (a posted
+        walk-limit folder row is excluded, never signed) keep their behaviour with the server listing."""
+        if hasattr(os, "mkfifo"):
+            os.mkfifo(self.folder / "pipe.jpg")
+        rows = self._scan()
+        results = self._report(list(rows.values()))
+        for (leg, fmt), (status, text, _) in results.items():
+            with self.subTest(leg=leg, format=fmt, case="unchanged"):
+                self.assertEqual(status, 200, text[:300])
+        for body in self._signed(results):
+            self.assertEqual(body["unrecorded_files"]["listing"], {"source": "walk", "not_in_report": 0})
+        walk_row = dict(rows["in_link.png"], path="sub", name="sub", kind="unknown", size_bytes=0,
+                        error="건너뜀: 탐색 상한 도달(폴더 1개) — 이 폴더 이하는 열지 않았습니다", sha256=None)
+        for body in self._signed(self._report([*rows.values(), walk_row])):
+            self.assertIn("sub", [row["path"] for row in body["excluded_items"]])
+        _write_png(self.folder / "target.png", seed=9)
+        for (leg, fmt), (status, text, _) in self._report(list(rows.values())).items():
+            with self.subTest(leg=leg, format=fmt, case="changed"):
+                self.assertEqual(status, 409, text[:300])
+
+
+class PathValuesWithNulAre400Test(unittest.TestCase):
+    """R22-6 (round 22): a path value holding a NUL character reached the file system — ValueError("embedded null
+    byte") — and both servers answered HTTP 500: report rows / scan_root / heatmap_path, analyze-file, heatmap,
+    preview, scan, and api-serve's check, compare, classify, analyze/*, the streams. A NUL can never be part of a
+    file-system path: every such value is a request error (400). Control characters other than NUL are legal in
+    POSIX names (R11-9 hostile names) and keep working."""
+
+    setUp = ErrorTableEveryRowTest.setUp
+    _web = ErrorTableEveryRowTest._web
+    _api = ErrorTableEveryRowTest._api
+    _multipart = ErrorTableEveryRowTest._multipart
+
+    def _nul_requests(self) -> list[tuple[str, str, str, bytes | None, str]]:
+        import base64
+        from urllib.parse import quote
+
+        f = self.folder
+        nul = quote(str(f / "a\x00b.png"))
+        b64 = base64.urlsafe_b64encode(os.fsencode(str(f / "a\x00b.png"))).decode()
+        memo = webapp_api._scan_payload(f"folder={quote(str(f))}&no_default_engine=true", default_folder=f)
+        row = next(item for item in memo["items"] if item["path"] == "memo.txt")
+
+        def report(**changes: object) -> bytes:
+            body: dict[str, Any] = {"items": [dict(row, **changes.pop("row", {}))], "scan_root": str(f), "format": "json"}
+            body.update(changes)
+            return json.dumps(body).encode("utf-8")
+
+        both = ("web", "api")
+        requests = [(s, "GET", path, None, "") for s in both for path in (
+            f"/api/scan?folder={nul}", f"/api/scan?async=1&folder={nul}", f"/api/scan?folder_b64={b64}",
+            f"/api/analyze-file?file={nul}", f"/api/analyze-file?file_b64={b64}",
+            f"/api/heatmap?path={nul}", f"/api/heatmap?path=x.png&root={nul}", f"/api/heatmap?path_b64={b64}",
+            f"/api/preview?path={nul}", f"/api/preview?path={quote(str(f / 'photo.png'))}&root={nul}", f"/api/preview?path_b64={b64}",
+        )]
+        requests += [(s, "POST", "/api/report", body, "application/json") for s in both for body in (
+            report(scan_root=str(f) + "\x00"),
+            report(row={"path": "memo\x00.txt", "name": "memo\x00.txt"}),
+            report(row={"heatmap_path": str(f / "h\x00.png")}),
+            report(row={"duplicate_of": "a\x00", "status": "duplicate"}),
+            json.dumps({"items": [{"source": "upload", "path": "a\x00.png", "name": "a\x00.png", "status": "failed"}], "format": "json"}).encode(),
+        )]
+        requests += [("api", "POST", path.format(nul), None, "") for path in (
+            "/api/analyze/image?file_path={}", "/api/analyze/audio?file_path={}", "/api/analyze/face?file_path={}",
+            "/api/analyze/forensic?file_path={}", "/api/classify?file_path={}", "/api/check?file_path={}",
+            "/api/check/stream?file_path={}", "/api/scan/stream?directory={}",
+            "/api/compare?file_path_a={}&file_path_b=" + quote(str(f / "memo.txt")),
+            "/api/compare?file_path_b={}&file_path_a=" + quote(str(f / "memo.txt")),
+        )]
+        return requests
+
+    def test_every_nul_path_value_is_400(self) -> None:
+        senders = {"web": self._web()}
+        if HAVE_FASTAPI:
+            senders["api"] = self._api()
+        for server, method, path, body, ctype in self._nul_requests():
+            send = senders.get(server)
+            if send is None:
+                continue
+            with self.subTest(server=server, method=method, path=path[:90], body=(body or b"")[-60:]):
+                status, raw = send(method, path, body, ctype, None)
+                self.assertEqual(status, 400, raw[:300])
+                text = raw.decode("utf-8", "replace")
+                # a *_b64 value's NUL is already refused by the decoder (R12-4: PATH_B64_INVALID)
+                self.assertTrue("NUL" in text or ("_b64=" in path and PATH_B64_INVALID in text), text[:300])
+
+    def test_an_upload_name_with_nul_is_not_a_500(self) -> None:
+        senders = {"web": self._web()}
+        if HAVE_FASTAPI:
+            senders["api"] = self._api()
+        png = (self.folder / "photo.png").read_bytes()
+        for server, send in senders.items():
+            for name in ("a\x00.png", "b\x00.zip"):
+                body, ctype = self._multipart(("files", name, png))
+                with self.subTest(server=server, name=name):
+                    status, raw = send("POST", "/api/analyze-upload", body, ctype, None)
+                    self.assertIn(status, (200, 400), raw[:300])
+
+    def test_control_characters_other_than_nul_still_work(self) -> None:
+        """R11-9 names (\\r, \\n, \\t, ESC) are file names a scan writes: analyze-file and preview still read them."""
+        from urllib.parse import quote
+
+        name = self.folder / "c\r\n\t\x1bd.png"
+        _write_png(name, seed=6)
+        senders = {"web": self._web()}
+        if HAVE_FASTAPI:
+            senders["api"] = self._api()
+        for server, send in senders.items():
+            with self.subTest(server=server):
+                self.assertEqual(send("GET", f"/api/analyze-file?file={quote(str(name))}", None, "", None)[0], 200)
+                self.assertEqual(send("GET", f"/api/preview?path={quote(str(name))}", None, "", None)[0], 200)
+
+
+class ReportRowAliasesByFileIdentityTest(_ReportLegsFixture):
+    """R22-4 (round 22): R21-5 refused aliases by the path *text* only. "sub/loop/gen.png" through a bind-mount loop
+    folder (sub/loop = the scan folder again) named gen.png a second time and was signed as one more row (total 4,
+    manipulation_evidence 2, verify-report rc 0), and on a case-insensitive file system "GEN.png" does the same.
+    A path through a folder with the identity (st_dev, st_ino) of the scan folder or a folder between it and the
+    entry — which the walk never enters — and a path whose components are not the listed names are now 400."""
+
+    FORMATS = ReportRefusesChangedRowsTest.FORMATS
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.folder / "sub" / "loop").mkdir(parents=True)
+        (self.folder / "sub" / "loop" / "target.png").write_bytes((self.folder / "target.png").read_bytes())
+
+    def _post_all(self, rows: list[dict[str, Any]]) -> list[tuple[str, str, int, dict[str, Any]]]:
+        out = []
+        for leg, make in self._legs():
+            post = make()
+            for fmt in self.FORMATS:
+                status, _, raw = post("/api/report", self._json({"items": rows, "format": fmt}))
+                out.append((leg, fmt, status, json.loads(raw) if "json" in fmt or status != 200 else {}))
+        return out
+
+    def test_a_path_under_a_bind_mount_loop_is_400(self) -> None:
+        from deepfake_lens import scan_cache
+
+        real = scan_cache._dir_identity
+        loop = self.folder / "sub" / "loop"
+
+        def identity(path: Any) -> Any:
+            return real(self.folder) if Path(path) == loop else real(path)
+
+        target = self.rows["target.png"]
+        with patch.object(scan_cache, "_dir_identity", identity):
+            for leg, fmt, status, body in self._post_all([target, dict(target, path="sub/loop/target.png", name="target.png")]):
+                with self.subTest(leg=leg, format=fmt):
+                    self.assertEqual(status, 400, body)
+                    self.assertIn("「sub/loop/target.png」는 순환 폴더", body["error"])
+        # without the loop the same path is an ordinary subfolder row of a recursive scan: signed
+        for leg, fmt, status, body in self._post_all([target, dict(target, path="sub/loop/target.png", name="target.png")]):
+            if fmt == "json":
+                with self.subTest(leg=leg, case="no loop"):
+                    self.assertEqual(status, 200, body)
+
+    def test_a_path_spelled_unlike_the_listing_is_400(self) -> None:
+        import unicodedata
+
+        real_lstat = os.lstat
+        (self.folder / unicodedata.normalize("NFC", "한.png")).write_bytes((self.folder / "target.png").read_bytes())
+        aliases = {"TARGET.png": "target.png", unicodedata.normalize("NFD", "한.png"): unicodedata.normalize("NFC", "한.png")}
+
+        def lstat(path: Any, *args: Any, **kwargs: Any) -> Any:
+            # a case-insensitive, normalizing file system (macOS, Windows): another spelling names the same file
+            text = os.fspath(path)
+            for alias, name in aliases.items():
+                text = text.replace(alias, name) if isinstance(text, str) else text
+            return real_lstat(text, *args, **kwargs)
+
+        target = self.rows["target.png"]
+        for alias in aliases:
+            with patch.object(webapp_api.os, "lstat", lstat):
+                results = self._post_all([target, dict(target, path=alias, name=alias)])
+            for leg, fmt, status, body in results:
+                with self.subTest(leg=leg, format=fmt, alias=alias):
+                    self.assertEqual(status, 400, body)
+                    self.assertIn("의 경로가 폴더 목록의 이름과 다릅니다", body["error"])
+
+    def test_a_gone_file_is_still_409_and_hard_links_are_rows(self) -> None:
+        """R19-13 stays: a row whose file is gone is 409 (not 400). Hard links are distinct listed names — the scan
+        writes a row for each — and are signed."""
+        target = self.rows["target.png"]
+        os.link(self.folder / "target.png", self.folder / "hard.png")
+        rows = [target, dict(target, path="hard.png", name="hard.png")]
+        for leg, fmt, status, body in self._post_all(rows):
+            if fmt == "json":
+                with self.subTest(leg=leg, case="hard link"):
+                    self.assertEqual(status, 200, body)
+                    self.assertEqual(sorted(row["path"] for row in body["items"]), ["hard.png", "target.png"])
+        for leg, fmt, status, body in self._post_all([target, dict(target, path="gone.png", name="gone.png")]):
+            with self.subTest(leg=leg, format=fmt, case="gone"):
+                self.assertEqual(status, 409, body)
+
+
+class ReportUploadRowNamesTest(_ReportLegsFixture):
+    """R22-8 (round 22): an upload row's path went into the signed body's excluded_items with no check — any
+    sentence, "../", NUL — and the R21-1 invariant left upload rows out without HANDOFF saying so. An upload name
+    is now limited (relative, at most 255 characters, no empty / "." / ".." component, no NUL) and marked: one this
+    server produced (path and sha256) is name_source "server_upload", any other "client" with a reason that says
+    the name is the client's."""
+
+    UPLOAD = {"source": "upload", "status": "failed", "error": "x"}
+
+    def test_a_name_the_server_never_received_is_marked_as_the_clients(self) -> None:
+        sentence = "이 보고서의 모든 파일은 진본임을 서버가 확인했습니다.png"
+        for leg, make in self._legs():
+            with self.subTest(leg=leg):
+                status, _, raw = make()("/api/report", json.dumps({"items": [dict(self.UPLOAD, path=sentence, name=sentence)], "format": "json"}).encode())
+                self.assertEqual(status, 200, raw[:300])
+                [row] = json.loads(raw)["excluded_items"]
+                self.assertEqual((row["name_source"], row["reason"]), ("client", webapp_api.REPORT_ROW_UPLOAD_CLIENT_NAME))
+                status, _, raw = make()("/api/report?format=html", json.dumps({"items": [dict(self.UPLOAD, path=sentence, name=sentence)]}).encode())
+                self.assertIn("클라이언트 제공 이름", raw.decode("utf-8"))
+
+    def test_an_upload_name_outside_the_form_is_400(self) -> None:
+        for leg, make in self._legs():
+            for name in ("../../etc/passwd", "/abs/a.png", "a/./b.png", "a//b.png", "x" * 256, "a\x00.png"):
+                with self.subTest(leg=leg, name=name[:30]):
+                    status, _, raw = make()("/api/report", json.dumps({"items": [dict(self.UPLOAD, path=name, name=name)], "format": "json"}).encode())
+                    self.assertEqual(status, 400, raw[:300])
+
+    def test_an_uploaded_name_is_the_servers(self) -> None:
+        boundary = "----r22-8"
+        data = (self.folder / "target.png").read_bytes()
+        multipart = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"dir/a.png\"\r\n"
+                     "Content-Type: image/png\r\n\r\n").encode() + data + f"\r\n--{boundary}--\r\n".encode()
+        upload = webapp_api._analyze_upload_payload(f"multipart/form-data; boundary={boundary}", multipart)
+        [row] = upload["items"]  # type: ignore[index]
+        for leg, make in self._legs():
+            with self.subTest(leg=leg):
+                status, _, raw = make()("/api/report", json.dumps({"items": [row], "format": "json"}).encode())
+                [entry] = json.loads(raw)["excluded_items"]
+                self.assertEqual((entry["path"], entry["name_source"]), ("dir/a.png", "server_upload"))
+                # the same name with another digest is only the client's
+                status, _, raw = make()("/api/report", json.dumps({"items": [dict(row, sha256="0" * 64)], "format": "json"}).encode())
+                self.assertEqual(json.loads(raw)["excluded_items"][0]["name_source"], "client")

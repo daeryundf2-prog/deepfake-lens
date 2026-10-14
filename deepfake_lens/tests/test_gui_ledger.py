@@ -44,6 +44,12 @@ def _function(source: str, name: str) -> str:
     return source[start:end]
 
 
+def _async_function(source: str, name: str) -> str:
+    start = source.index(f"        async function {name}(")
+    end = source.index("\n        }\n", start) + len("\n        }\n")
+    return source[start:end]
+
+
 def _helpers() -> str:
     source = GUI_JS.read_text(encoding="utf-8")
     return "\n".join([
@@ -532,6 +538,58 @@ class A4EmptyChoiceTest(unittest.TestCase):
         self.assertIn("검사 결과가 없습니다", html_none)
         self.assertNotEqual(ready_empty, "")
         self.assertIn("고른 서증이 없습니다", html_empty)
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class ReviewSaveRefusedTest(unittest.TestCase):
+    def test_a_refused_review_save_is_said_with_the_servers_reason(self) -> None:
+        """Merge of phase0 R22-3: POST /api/review may be 409 (E49 — the record would be inside an
+        examined folder). pushReviewToServer returns the server's Korean message (it ignored the
+        answer and the panel said "서버에 저장됨" whatever happened); a saved review returns ''."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        reason = "검토 기록 파일이 검사 대상 폴더 안에 있어 저장하지 않았습니다"
+        out = _node(
+            _async_function(source, "apiError") + _async_function(source, "pushReviewToServer") + _function(source, "reviewSyncText") + (
+                "const answer = (status, body) => ({ ok: status < 400, status, headers: { get: () => 'application/json' }, json: async () => body });\n"
+                f"let next = answer(409, {{error: {json.dumps(reason, ensure_ascii=False)}}});\n"
+                "const apiFetch = async () => next;\n"
+                "(async () => {\n"
+                "  const refused = await pushReviewToServer('k', {note: 'x'});\n"
+                "  next = answer(200, {status: 'success'});\n"
+                "  const saved = await pushReviewToServer('k', {note: 'x'});\n"
+                "  console.log(JSON.stringify([refused, saved, reviewSyncText(refused), reviewSyncText(saved)]));\n"
+                "})();"))
+        assert isinstance(out, list)
+        self.assertEqual(out[0], reason)
+        self.assertEqual(out[1], "")
+        self.assertIn("서버에 저장하지 못했습니다: " + reason, out[2])
+        self.assertIn("이 브라우저에만", out[2])
+        self.assertEqual(out[3], "서버에 저장됨")
+
+    def test_the_panel_shows_the_saves_answer(self) -> None:
+        """R22-3 (source): the note/verdict and the 검토 button both show the debounced save's answer."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        self.assertIn("saveReviewStore(k, showSync)", source)
+        self.assertIn("toggleReview(item, showSync)", source)
+        self.assertNotIn("syncStatus.textContent = '서버에 저장됨'", source)
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class ListingCheckTest(unittest.TestCase):
+    def test_the_servers_listing_is_said_in_the_checklist(self) -> None:
+        """Merge of phase0 R22-1: "확인 불가" and "보고서에 행 없음" from the preview's listing are said."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        out = _node("const rescanFolder = () => {};\n" + _function(source, "listingCheck") + (
+            "console.log(JSON.stringify([listingCheck(null), listingCheck({source: 'unknown', not_in_report: 0, reason: '폴더 탐색 상한에 도달'}),"
+            " listingCheck({source: 'walk', not_in_report: 3}), listingCheck({source: 'scan_job', not_in_report: 0})].map(c => c && [c.tag, c.text])));"))
+        assert isinstance(out, list)
+        self.assertIsNone(out[0])
+        self.assertEqual(out[1][0], "warn")
+        self.assertIn("확인 불가 — 폴더 탐색 상한에 도달", out[1][1])
+        self.assertIn("없음이 아닙니다", out[1][1])
+        self.assertEqual(out[2][0], "warn")
+        self.assertIn("이 보고서에 행이 없는 파일 3개", out[2][1])
+        self.assertEqual(out[3][0], "ok")
 
 
 class ExportNoteParticleTest(unittest.TestCase):

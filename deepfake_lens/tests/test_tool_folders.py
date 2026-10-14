@@ -365,3 +365,164 @@ class UnknownHomeInArgumentsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WindowsProgramDataToolBaseTest(unittest.TestCase):
+    """R22-2 (round 22, user decision 2026-10-14): R21-10 relocated the tool base on macOS/Linux, but on Windows both
+    candidates (%LOCALAPPDATA%, %TEMP%) are inside the user profile — `classify %USERPROFILE%\\x.jpg` and
+    `cd ~; deepfake-lens web` were still exit 2 (the verifier's mock). %ProgramData%\\deepfake-lens\\<user> is now a
+    candidate outside the profile, made with an owner-only ACL and verified like the POSIX candidates (this user's
+    own folder nobody else can write; its shared parent lets nobody else replace it). Windows is mocked
+    (HANDOFF §7: Windows paths are verified with fakes and mocks)."""
+
+    def setUp(self) -> None:
+        from deepfake_lens import native_path
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        base = Path(self._tmp.name).resolve()
+        self.profile = base / "Users" / "alice"
+        (self.profile / "AppData" / "Local" / "Temp").mkdir(parents=True)
+        self.program_data = base / "ProgramData"
+        self.program_data.mkdir()
+        self.addCleanup(native_path.set_tool_cache_base, None)
+        self.env = {
+            "HOME": str(self.profile), "USERPROFILE": str(self.profile), "USERNAME": "alice",
+            "LOCALAPPDATA": str(self.profile / "AppData" / "Local"), "TEMP": str(self.profile / "AppData" / "Local" / "Temp"),
+            "TMPDIR": str(self.profile / "AppData" / "Local" / "Temp"), "ProgramData": str(self.program_data),
+        }
+        self.calls: list[tuple[str, str]] = []
+
+    def _windows(self, *, owner_only: bool = True, parent_safe: bool = True, made: bool = True) -> contextlib.ExitStack:
+        from deepfake_lens import native_path, windows_acl
+
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.dict(os.environ, self.env))
+        stack.enter_context(mock.patch.object(native_path, "_is_windows", return_value=True))
+        stack.enter_context(mock.patch.object(windows_acl, "make_owner_only", lambda path: self.calls.append(("make", path)) or made))
+        stack.enter_context(mock.patch.object(windows_acl, "owner_only", lambda path: self.calls.append(("owner", path)) or owner_only))
+        stack.enter_context(mock.patch.object(windows_acl, "parent_safe", lambda path: self.calls.append(("parent", path)) or parent_safe))
+        return stack
+
+    def test_the_candidates_include_program_data_after_the_profile_cache(self) -> None:
+        from deepfake_lens import native_path
+
+        with self._windows():
+            candidates = native_path.relocated_tool_base_candidates()
+        target = self.program_data / "deepfake-lens" / "alice"
+        self.assertIn(target, candidates)
+        self.assertLess(candidates.index(self.profile / "AppData" / "Local" / "deepfake-lens"), candidates.index(target))
+
+    def test_a_file_in_the_profile_relocates_to_program_data(self) -> None:
+        """classify %USERPROFILE%\\x.jpg: the examined folder is the profile — every profile candidate overlaps."""
+        from deepfake_lens import native_path
+        from deepfake_lens.cli_inputs import relocate_tool_base
+
+        err = io.StringIO()
+        with self._windows(), contextlib.redirect_stderr(err):
+            relocate_tool_base([self.profile])
+            chosen = native_path.tool_cache_base()
+        target = self.program_data / "deepfake-lens" / "alice"
+        self.assertEqual(chosen, target)
+        self.assertTrue(target.is_dir())
+        self.assertIn(("make", str(target)), self.calls)  # a folder made here gets the owner-only ACL
+        self.assertIn(("owner", str(target)), self.calls)
+        self.assertIn(("parent", str(target.parent)), self.calls)
+        self.assertEqual(err.getvalue().count(RELOCATED), 1)
+        self.assertEqual(sorted(p.name for p in self.profile.rglob("*")), ["AppData", "Local", "Temp"])  # nothing in the profile
+
+    def test_an_existing_folder_is_verified_not_re_permissioned(self) -> None:
+        from deepfake_lens.cli_inputs import relocate_tool_base
+
+        target = self.program_data / "deepfake-lens" / "alice"
+        target.mkdir(parents=True)
+        with self._windows(), contextlib.redirect_stderr(io.StringIO()):
+            relocate_tool_base([self.profile])
+        self.assertNotIn(("make", str(target)), self.calls)
+        self.assertIn(("owner", str(target)), self.calls)
+
+    def test_a_folder_of_another_account_or_a_replaceable_one_is_skipped(self) -> None:
+        import shutil
+
+        from deepfake_lens import native_path
+        from deepfake_lens.cli_inputs import UsageError, relocate_tool_base
+
+        target = self.program_data / "deepfake-lens" / "alice"
+        real_candidates = native_path.relocated_tool_base_candidates
+        for flags in ({"owner_only": False}, {"parent_safe": False}, {"made": False}):
+            shutil.rmtree(self.program_data / "deepfake-lens", ignore_errors=True)
+            native_path.set_tool_cache_base(None)
+            # only the profile candidates and ProgramData (no POSIX /tmp candidate on a real Windows)
+            with self.subTest(**flags), self._windows(**flags), contextlib.redirect_stderr(io.StringIO()), \
+                    mock.patch.object(native_path, "_system_temp_dir", lambda: self.env["TEMP"]), \
+                    mock.patch.object(native_path, "relocated_tool_base_candidates",
+                                      lambda: [c for c in real_candidates() if c.parent != Path("/tmp")]):
+                with self.assertRaises(UsageError) as caught:
+                    relocate_tool_base([self.profile])
+                self.assertIn("둘 곳이 없습니다", str(caught.exception))
+                self.assertNotEqual(native_path.tool_cache_base(), target)
+
+    def test_a_server_started_in_the_profile_relocates(self) -> None:
+        """cd ~; deepfake-lens web: the default read root is the profile itself."""
+        from deepfake_lens import native_path
+        from deepfake_lens.cli_inputs import relocate_tool_base
+
+        with self._windows(), contextlib.redirect_stderr(io.StringIO()):
+            relocate_tool_base([self.profile])
+            self.assertEqual(native_path.tool_cache_base(), self.program_data / "deepfake-lens" / "alice")
+
+    def test_the_user_folder_name_is_never_a_path(self) -> None:
+        from deepfake_lens.windows_acl import user_folder_name
+
+        for name, expected in (("alice", "alice"), ("..\\..\\x", "_.._x"), ("a/b", "a_b"), ("", "user"), ("홍길동", "홍길동")):
+            with self.subTest(name=name), mock.patch.dict(os.environ, {"USERNAME": name}):
+                self.assertEqual(user_folder_name(), expected)
+
+
+class WindowsAclDecisionTest(unittest.TestCase):
+    """R22-2: the ACL decisions (pure functions over the owner SID and the DACL entries)."""
+
+    USER = "S-1-5-21-1-2-3-1001"
+    OTHER = "S-1-5-21-1-2-3-1002"
+    USERS = "S-1-5-32-545"
+
+    def _security(self, owner: str, *aces: tuple[int, int, str]) -> object:
+        from deepfake_lens.windows_acl import Ace, Security
+
+        return Security(owner, [Ace(kind, 0, mask, sid) for kind, mask, sid in aces])
+
+    def test_owner_only(self) -> None:
+        from deepfake_lens import windows_acl as w
+
+        full = 0x1F01FF
+        ok = self._security(self.USER, (0, full, self.USER), (0, full, w.SID_SYSTEM), (0, full, w.SID_ADMINISTRATORS), (0, full, w.SID_OWNER_RIGHTS))
+        self.assertTrue(w.dacl_owner_only(ok, self.USER))  # type: ignore[arg-type]
+        cases = {
+            "owned by another account": self._security(self.OTHER, (0, full, self.USER)),
+            "another account may write": self._security(self.USER, (0, full, self.USER), (0, w.FILE_WRITE_DATA, self.OTHER)),
+            "Users may add a folder": self._security(self.USER, (0, w.FILE_APPEND_DATA, self.USERS)),
+            "an unknown allow entry": self._security(self.USER, (5, 0x1, self.USER)),
+        }
+        for name, security in cases.items():
+            with self.subTest(name):
+                self.assertFalse(w.dacl_owner_only(security, self.USER))  # type: ignore[arg-type]
+        self.assertFalse(w.dacl_owner_only(w.Security(self.USER, None), self.USER))  # NULL DACL: everyone
+        readers = self._security(self.USER, (0, full, self.USER), (0, 0x1200A9, self.USERS), (1, full, self.OTHER))
+        self.assertTrue(w.dacl_owner_only(readers, self.USER))  # type: ignore[arg-type]  # read-only others, a deny entry
+
+    def test_parent_safe(self) -> None:
+        from deepfake_lens import windows_acl as w
+
+        full = 0x1F01FF
+        # the default ProgramData inheritance: Users may add files and folders, not delete or replace them
+        default = self._security(self.USER, (0, full, w.SID_SYSTEM), (0, full, w.SID_ADMINISTRATORS), (0, full, self.USER),
+                                 (0, 0x1200A9 | w.FILE_WRITE_DATA | w.FILE_APPEND_DATA, self.USERS))
+        self.assertTrue(w.dacl_parent_safe(default, self.USER))  # type: ignore[arg-type]
+        self.assertTrue(w.dacl_parent_safe(self._security(w.SID_ADMINISTRATORS, (0, full, w.SID_ADMINISTRATORS)), self.USER))  # type: ignore[arg-type]
+        for name, security in {
+            "made by another account": self._security(self.OTHER, (0, full, self.OTHER)),
+            "others may delete entries": self._security(self.USER, (0, w.FILE_DELETE_CHILD, self.USERS)),
+            "others may change permissions": self._security(self.USER, (0, w.WRITE_DAC, self.OTHER)),
+        }.items():
+            with self.subTest(name):
+                self.assertFalse(w.dacl_parent_safe(security, self.USER))  # type: ignore[arg-type]

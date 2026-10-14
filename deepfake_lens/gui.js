@@ -52,31 +52,40 @@
             return `${REVIEW_KEY_VERSION}|${reviewScope()}|${what}`;
         }
         let reviewPushTimer = null;
-        function saveReviewStore(changedKey) {
+        function saveReviewStore(changedKey, onSynced) {
             try { localStorage.setItem(REVIEW_KEY, JSON.stringify(reviewStore)); } catch (e) { /* quota — non-fatal */ }
             // Server-side store keeps examiner marks across browsers/devices
             // (chain of custody); localStorage stays as offline fallback.
             // Debounced so per-keystroke note edits send one update.
             if (!changedKey) return;
             clearTimeout(reviewPushTimer);
-            reviewPushTimer = setTimeout(() => {
-                pushReviewToServer(changedKey, reviewStore[changedKey] || {});
+            reviewPushTimer = setTimeout(async () => {
+                const refused = await pushReviewToServer(changedKey, reviewStore[changedKey] || {});
+                if (onSynced) onSynced(refused);
             }, 400);
         }
+        // Merge of phase0 R22-3: the server refuses to save a review it would write inside an
+        // examined folder (409, E49, with a Korean reason). The answer is returned — '' when
+        // saved, else the server's message — and said next to the review controls; it was
+        // ignored and "서버에 저장됨" was shown whatever the server answered.
         async function pushReviewToServer(key, entry) {
-            if (!key) return;
+            if (!key) return '';
             try {
                 // POST /api/review exists on both the builtin web server and the
                 // FastAPI api_server; explicit blank fields let the store prune
                 // the entry when the examiner clears every mark.
-                await apiFetch('/api/review', {
+                const res = await apiFetch('/api/review', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(Object.assign({artifact_id: key, star: false, note: '', verdict: 'unreviewed'}, entry)),
                 });
+                return res.ok ? '' : await apiError(res);
             } catch (e) {
-                // Background sync failure is non-fatal; localStorage retains
+                return '서버에 연결하지 못했습니다(' + String(e.message || e) + ')';
             }
+        }
+        function reviewSyncText(refused) {
+            return refused ? '서버에 저장하지 못했습니다: ' + refused + ' — 이 검토 기록은 이 브라우저에만 남아 있습니다.' : '서버에 저장됨';
         }
 
         async function fetchReviewsFromServer() {
@@ -96,14 +105,14 @@
             } catch (e) { /* ignore */ }
         }
 
-        function toggleReview(item) {
+        function toggleReview(item, onSynced) {
             const key = itemKey(item);
             const entry = reviewStore[key] || {};
             entry.star = !entry.star;
             entry.ts = Date.now();
             if (!entry.star && !entry.note && !entry.verdict) delete reviewStore[key];
             else reviewStore[key] = entry;
-            saveReviewStore(key);
+            saveReviewStore(key, onSynced);
             return Boolean(entry.star);
         }
 
@@ -1293,6 +1302,9 @@
                 heatmaps: String($('opt-heatmaps').checked),
                 deep_signals: String($('opt-deep').checked),
                 no_default_engine: String(!$('opt-model').checked),
+                // R22-1: the walk options too — without the job (expired) the server lists the folder with them
+                recursive: String($('opt-recursive').checked),
+                max_files: $('max-files').value,
             };
             setBusyButton($('analyze-btn'), true);
             try {
@@ -1843,7 +1855,7 @@
                 </div>
                 <label class="lbl" for="rev-note">검토 메모</label>
                 <textarea class="field rev-note" id="rev-note"></textarea>
-                <p class="rev-sync-status" aria-live="polite"></p>
+                <p class="rev-sync-status" role="status" aria-live="polite"></p>
                 <details class="disc"><summary>학습용 라벨 보내기</summary><div class="disc-body"><div class="fb-row"><span class="note">검토자 라벨:</span>
                     <button type="button" class="btn btn-sm" data-label="synthetic">실제 합성/AI</button>
                     <button type="button" class="btn btn-sm" data-label="real">실제 실물</button>
@@ -1877,8 +1889,13 @@
                 d.querySelectorAll('.pv-slot').forEach(loadPreview);
             }));
             const star = box.querySelector('.rev-star');
+            const syncStatus = box.querySelector('.rev-sync-status');
+            const showSync = refused => {
+                syncStatus.textContent = displayName(reviewSyncText(refused));
+                syncStatus.classList.toggle('sync-err', Boolean(refused));
+            };
             star.addEventListener('click', () => {
-                const on = toggleReview(item);
+                const on = toggleReview(item, showSync);
                 star.setAttribute('aria-pressed', on ? 'true' : 'false');
                 star.textContent = on ? '검토함' : '검토 완료로 표시';
                 refreshReviewMarks(itemKey(item));
@@ -1890,8 +1907,6 @@
             note.value = rev.note || '';
             const verdictSel = box.querySelector('.rev-verdict-sel');
             verdictSel.value = rev.verdict || 'unreviewed';
-            const syncStatus = box.querySelector('.rev-sync-status');
-            let syncTimeout = null;
             function saveAndSync() {
                 const k = itemKey(item);
                 const cur = reviewStore[k] || {};
@@ -1899,12 +1914,7 @@
                 cur.verdict = verdictSel.value;
                 cur.ts = Date.now();
                 reviewStore[k] = cur;
-                saveReviewStore(k);
-                clearTimeout(syncTimeout);
-                syncTimeout = setTimeout(async () => {
-                    await pushReviewToServer(k, cur);
-                    syncStatus.textContent = '서버에 저장됨';
-                }, 500);
+                saveReviewStore(k, showSync);  // one debounced save; its answer is shown
             }
             note.addEventListener('input', saveAndSync);
             verdictSel.addEventListener('change', saveAndSync);
@@ -1924,8 +1934,12 @@
                     }),
                 });
                 statusEl.textContent = data.ok ? '기록됨 ✓' : ('실패: ' + displayName(data.error || ''));  // R12-6
+                statusEl.classList.toggle('sync-err', !data.ok);
             } catch (e) {
-                statusEl.textContent = '실패: ' + displayName(e.message);  // R12-6: a server message may echo a name
+                // Merge of R22-3: a 409 (E49 — the feedback file would be inside an examined folder)
+                // arrives here with the server's Korean reason, next to the label buttons.
+                statusEl.textContent = '기록하지 못했습니다: ' + displayName(e.message);  // R12-6: a server message may echo a name
+                statusEl.classList.add('sync-err');
             }
         }
 
@@ -2280,6 +2294,8 @@
                 out.push(partial ? { tag: 'warn', text: partial } : { tag: 'ok', text: '전체 검사 결과입니다(중단 없음).' });
                 // The scan's own limits (G-9c); the statement prints them in its 무결성/해석 고지.
                 out.push({ tag: 'info', text: '검사의 한계: ' + reportLimitLines().join(' · ') });
+                const listed = listingCheck(a4Listing);
+                if (listed) out.push(listed);
                 // GUI-REV3 J-8: uploaded files are never exhibits — said plainly, and left
                 // out of the appendix count (they go to the 서명 제외 box).
                 const uploads = results.filter(e => e.item.source === 'upload').length;
@@ -2300,6 +2316,21 @@
             }
             if (pdfAvailable === false) out.push({ tag: 'warn', text: 'PDF 엔진(pymupdf)이 설치되어 있지 않아 PDF는 만들 수 없습니다 — HTML 보고서와 서명된 JSON은 만들 수 있습니다.' });
             return out;
+        }
+        // Merge of phase0 R22-1: the 기록되지 않은 파일 counts are the server's own listing of the
+        // folder (its scan job, else its own walk), or "확인 불가" — said in the checklist as the
+        // preview (the same server build) shows it. null until a preview has been drawn.
+        function listingCheck(listing) {
+            if (!listing || typeof listing !== 'object') return null;
+            if (listing.source === 'unknown') {
+                return { tag: 'warn', text: '기록되지 않은 파일: 확인 불가 — ' + String(listing.reason || '사유 기록 없음') +
+                    '. 서버가 이 폴더의 파일 목록을 다시 확인하지 못해 문서에 "확인 불가"로 실립니다(없음이 아닙니다).' };
+            }
+            const missing = Number.isInteger(listing.not_in_report) ? listing.not_in_report : 0;
+            if (missing > 0) {
+                return { tag: 'warn', text: `폴더에 있으나 이 보고서에 행이 없는 파일 ${missing}개 — 문서의 기록되지 않은 파일에 "보고서에 행 없음"으로 실립니다.`, act: ['다시 검사', rescanFolder] };
+            }
+            return { tag: 'ok', text: '기록되지 않은 파일: 서버가 ' + (listing.source === 'scan_job' ? '이 검사 작업으로' : '폴더를 다시 읽어') + ' 확인했습니다.' };
         }
         function exportBlockReason(kind, sel) {
             if (scanBusy) return '새 검사가 진행 중입니다 — 끝난 뒤 내보내십시오. 지금 화면의 결과는 이전 검사입니다.';
@@ -2330,6 +2361,12 @@
             const exhibitable = results.filter(e => e.item.source !== 'upload');
             GROUPS.forEach(([band, id]) => { $(id + '-n').textContent = exhibitable.filter(e => itemBand(e) === band).length + '개'; });
             $('inc-label').textContent = `${sel.length}개 선택`;
+            renderChecks(sel);
+            Object.entries(EXPORT_BUTTONS).forEach(([kind, id]) => setBusyButton($(id), Boolean(exportBlockReason(kind, sel))));
+            $('export-note').textContent = [exportNote(sel), exportStickyNote].filter(Boolean).join(' ');
+            renderA4(sel);
+        }
+        function renderChecks(sel) {
             const list = $('report-checks');
             list.innerHTML = '';
             reportChecks(sel).forEach(c => {
@@ -2350,9 +2387,6 @@
                 }
                 list.appendChild(li);
             });
-            Object.entries(EXPORT_BUTTONS).forEach(([kind, id]) => setBusyButton($(id), Boolean(exportBlockReason(kind, sel))));
-            $('export-note').textContent = [exportNote(sel), exportStickyNote].filter(Boolean).join(' ');
-            renderA4(sel);
         }
         // GUI-REV2 H-2: the preview is drawn from the server's own statement template
         // (format=evidence-preview: the same build and the same case box, boxes and
@@ -2361,6 +2395,7 @@
         // re-analysis and unsigned; the export re-analyzes and signs.
         let a4Timer = null;
         let a4Seq = 0;
+        let a4Listing = null;  // R22-1 merge: {source, not_in_report, reason} of the last preview
         function renderA4(sel) {
             clearTimeout(a4Timer);
             a4Seq += 1;
@@ -2369,7 +2404,7 @@
             // GUI-GATE (Linux reference run): a preview with nothing to draw is settled at once —
             // it said so but stayed "not ready" for good (e.g. a folder whose rows are all
             // 판단 불가 with that group unticked: 0 exhibits).
-            if (!results.length) { box.innerHTML = '<p class="miss">검사 결과가 없습니다.</p>'; box.dataset.ready = String(a4Seq); return; }
+            if (!results.length) { a4Listing = null; box.innerHTML = '<p class="miss">검사 결과가 없습니다.</p>'; box.dataset.ready = String(a4Seq); return; }
             if (!sel.length) {
                 box.innerHTML = '<p class="miss">고른 서증이 없습니다 — 서증으로 넣을 파일을 고르면 증거설명서 서식 그대로 미리 봅니다.</p>';
                 box.dataset.ready = String(a4Seq);
@@ -2389,6 +2424,9 @@
                 const body = await res.json();
                 if (seq !== a4Seq) return;
                 box.innerHTML = res.ok ? a4Html(body) : `<p class="miss">미리보기를 만들지 못했습니다: ${shown(body.error || res.status)}</p>`;
+                // Merge of R22-1: the server's listing of the folder (the 기록되지 않은 파일 box) feeds the checklist.
+                a4Listing = res.ok && body.unrecorded_listing && typeof body.unrecorded_listing === 'object' ? body.unrecorded_listing : null;
+                if (currentView === 'report') renderChecks(selectedEntries());
             } catch (e) {
                 if (seq !== a4Seq) return;
                 box.innerHTML = `<p class="miss">미리보기를 만들지 못했습니다: ${shown(e.message)}</p>`;

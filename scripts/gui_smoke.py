@@ -19,6 +19,7 @@ Usage:
 
 from __future__ import annotations
 
+import json as _json_mod
 import subprocess
 import sys
 import time
@@ -200,6 +201,29 @@ def main() -> int:
                 text_tech.locator("summary").click()
                 text_tech.locator(".legal-note").wait_for(timeout=10_000)
                 assert "증거능력이 없으며" in text_tech.locator(".legal-note").inner_text()
+
+            # 4b'. Merge of phase0 R22-3: a review / feedback save the server refuses (409, E49 — the
+            #      record would be inside an examined folder) is said next to the review controls
+            #      with the server's reason; it was "서버에 저장됨" whatever the server answered.
+            refusal = "검토 기록 파일이 검사 대상 폴더 안에 있어 저장하지 않았습니다(시험)"
+            refused_body = _json_mod.dumps({"error": refusal}, ensure_ascii=False)
+            page.route("**/api/review", lambda route: route.fulfill(status=409, content_type="application/json; charset=utf-8", body=refused_body)
+                       if route.request.method == "POST" else route.continue_())
+            page.route("**/api/feedback", lambda route: route.fulfill(status=409, content_type="application/json; charset=utf-8", body=refused_body))
+            page.evaluate("() => { const n = document.querySelector('#detail .rev-note'); n.value = '스모크 메모'; n.dispatchEvent(new Event('input')); }")
+            page.wait_for_function("() => (document.querySelector('#detail .rev-sync-status') || {}).textContent.includes('서버에 저장하지 못했습니다')", timeout=10_000)
+            sync_text = page.evaluate("document.querySelector('#detail .rev-sync-status').textContent")
+            assert refusal in sync_text and "이 브라우저에만" in sync_text, sync_text
+            assert page.get_attribute("#detail .rev-sync-status", "role") == "status"
+            page.evaluate("() => document.querySelector('#detail button[data-label=\"real\"]').click()")
+            page.wait_for_function("() => (document.querySelector('#detail .fb-status') || {}).textContent.includes('기록하지 못했습니다')", timeout=10_000)
+            fb_text = page.evaluate("document.querySelector('#detail .fb-status').textContent")  # inside a closed disclosure
+            assert refusal in fb_text, fb_text
+            page.unroute("**/api/review")
+            page.unroute("**/api/feedback")
+            page.evaluate("() => { const n = document.querySelector('#detail .rev-note'); n.value = ''; n.dispatchEvent(new Event('input')); }")
+            page.wait_for_function("() => document.querySelector('#detail .rev-sync-status').textContent === '서버에 저장됨'", timeout=10_000)
+            console_errors[:] = [e for e in console_errors if "status of 409" not in e]
 
             # 4c. A11Y-5: list keys only inside the ledger (roving tabindex), J/K switchable.
             assert page.locator("#res-list .row[tabindex='0']").count() == 1, "roving tabindex must leave one tab stop"

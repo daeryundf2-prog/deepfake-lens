@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "c43bc1180b0550f7e682046b5ab50baa54b002d8",
+    "head": "7756d4013712431f0537fc5a2eb2a8d2ec56f79e",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -3819,6 +3819,158 @@
       "new": "갭 목록 밖 항목 포함",
       "commits": [
         "c43bc11"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R22-1",
+      "round": 22,
+      "source": "verify_round22.md",
+      "summary": "a web report's \"기록되지 않은 파일\" counts are the server's own — its scan job of the folder, else",
+      "gaps": [
+        "G7",
+        "G12",
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "d9bf1b2"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R22-2",
+      "round": 22,
+      "source": "verify_round22.md",
+      "summary": "on Windows the tool folders move to %ProgramData%\\deepfake-lens\\<user>, made owner-only an",
+      "gaps": [
+        "G31"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "8746ecf"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R22-3",
+      "round": 22,
+      "source": "verify_round22.md",
+      "summary": "the web GUI's reviews and feedback live in one fixed per-user application-data folder, nev",
+      "gaps": [
+        "G31"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "e52ac97"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R22-4",
+      "round": 22,
+      "source": "verify_round22.md",
+      "summary": "a posted row path is the scan's own listing — a path through a bind-mount loop folder or s",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "958fedf"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R22-5",
+      "round": 22,
+      "source": "verify_round22.md",
+      "summary": "a scan stops starting audio workers after two start failures in a row — later files fail a",
+      "gaps": [
+        "G1"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "dbf9095"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R22-6",
+      "round": 22,
+      "source": "verify_round22.md",
+      "summary": "a NUL in any path value is a 400 on both servers — report rows / scan_root / heatmap_path,",
+      "gaps": [
+        "G31"
+      ],
+      "new": null,
+      "commits": [
+        "ac0f00d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R22-7",
+      "round": 22,
+      "source": "verify_round22.md",
+      "summary": "the evidence statement without pymupdf is the documented 501 before any re-analysis — it r",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "a1778a5"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R22-8",
+      "round": 22,
+      "source": "verify_round22.md",
+      "summary": "an upload row's name in the signed body is limited and marked — relative, ≤ 255 characters",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "d021d3c"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R22-9",
+      "round": 22,
+      "source": "verify_round22.md",
+      "summary": "the published numba cache is also kept per Python environment — a new HOME is seeded from ",
+      "gaps": [
+        "G1"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "b161bb2"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R22-10",
+      "round": 22,
+      "source": "verify_round22.md",
+      "summary": "words after `help <command>` must name its subcommands — `help corpus build` is that subco",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "cb40945"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R22-11",
+      "round": 22,
+      "source": "verify_round22.md",
+      "summary": "HANDOFF.md §1/§2/§9 state round 21 with R21-10 and round 22 — 22 rounds, R22-1…R22-11 fixe",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "7756d40"
       ],
       "used_in_commit_subjects": true
     }
@@ -9912,6 +10064,306 @@
         "R21-10: 갭 목록 밖 항목 포함"
       ],
       "gaps_line": "Gaps: G31; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "20f73bfc83928657b8afb94dc51c47d4c2f86218",
+      "short": "20f73bf",
+      "round": "21",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on c43bc11, round-21 IDs mapped (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "94871f4ed441d202d8cc79690f7e52547ff4e428",
+      "short": "94871f4",
+      "round": "21",
+      "subject": "build(gate): reference gate image and runner live in the repo — scripts/gate/{Dockerfile,Dockerfile.gui,gate.sh} (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "18a471bc80ba3fe67e5dfb8f892b421372c845b1",
+      "short": "18a471b",
+      "round": "21",
+      "subject": "docs(phase0): round-22 verification findings (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "d9bf1b20fabf2b5ac5d5e0766bedec9b5da81b55",
+      "short": "d9bf1b2",
+      "round": "22",
+      "subject": "fix(report): R22-1 a web report's \"기록되지 않은 파일\" counts are the server's own — its scan job of the folder, else its own walk of scan_root, else \"확인 불가\"; a capped, flat or partly posted scan no longer signs \"없음\" (R22-1; Gaps: G7, G12, G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R22-1"
+      ],
+      "gaps_named_in_subject": [
+        "G7",
+        "G12",
+        "G30"
+      ],
+      "gaps": [
+        "G7",
+        "G12",
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G7, G12, G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "a1778a52cf53bf850f38d3ed10f8a4a08560bf41",
+      "short": "a1778a5",
+      "round": "22",
+      "subject": "fix(report): R22-7 the evidence statement without pymupdf is the documented 501 before any re-analysis — it re-analyzed every row and then answered 500 (R22-7; Gaps: G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R22-7"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "ac0f00d6b36e66ef635e6759d9a87faa39b03644",
+      "short": "ac0f00d",
+      "round": "22",
+      "subject": "fix(server): R22-6 a NUL in any path value is a 400 on both servers — report rows / scan_root / heatmap_path, scan, analyze-file, heatmap, preview and api-serve's file endpoints were a 500 (R22-6; Gaps: G31)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R22-6"
+      ],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G31",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "cb40945120bf057e661edc44fcd88b8509464d77",
+      "short": "cb40945",
+      "round": "22",
+      "subject": "fix(cli): R22-10 words after `help <command>` must name its subcommands — `help corpus build` is that subcommand's help and `help scan extra` is exit 2, not the scan help with exit 0 (R22-10; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R22-10"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R22-10: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "958fedf4665ef2b110c5a4407147799999e3b67f",
+      "short": "958fedf",
+      "round": "22",
+      "subject": "fix(report): R22-4 a posted row path is the scan's own listing — a path through a bind-mount loop folder or spelled unlike the listing (letter case, Unicode form) is 400, not one more signed row of the same file (R22-4; Gaps: G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R22-4"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "dbf909561ff17bc29b041698b52240cf68eda1b7",
+      "short": "dbf9095",
+      "round": "22",
+      "subject": "fix(audio): R22-5 a scan stops starting audio workers after two start failures in a row — later files fail at once with the breaker's reason instead of waiting 60 s each (R22-5; Gaps: G1, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R22-5"
+      ],
+      "gaps_named_in_subject": [
+        "G1"
+      ],
+      "gaps": [
+        "G1"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R22-5: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G1; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "8746ecf4aef509f1ae2ab243140d788f84463367",
+      "short": "8746ecf",
+      "round": "22",
+      "subject": "fix(cli): R22-2 on Windows the tool folders move to %ProgramData%\\deepfake-lens\\<user>, made owner-only and verified like the other candidates — classify %USERPROFILE%\\x.jpg and cd ~; web relocate instead of exit 2 (R22-2; Gaps: G31, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R22-2"
+      ],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R22-2: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G31; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "e52ac9794fa74ba898427016e5f807f68bc380f4",
+      "short": "e52ac97",
+      "round": "22",
+      "subject": "fix(server): R22-3 the web GUI's reviews and feedback live in one fixed per-user application-data folder, never in the evidence — saving inside an examined folder or with no absolute home is refused (409), ~/.deepfake-lens records migrate once (R22-3; Gaps: G31, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R22-3"
+      ],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R22-3: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G31; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "d021d3cfc63c5aaac5ca9f4004f7227551151a48",
+      "short": "d021d3c",
+      "round": "22",
+      "subject": "fix(report): R22-8 an upload row's name in the signed body is limited and marked — relative, ≤ 255 characters, no \".\" / \"..\" / empty component (else 400), name_source \"server_upload\" only for a name and sha256 this server produced, \"client\" otherwise (R22-8; Gaps: G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R22-8"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "022feb174cb41679a07d62c2b90e601b6d7000f9",
+      "short": "022feb1",
+      "round": "22",
+      "subject": "build(gate): gate.sh reads the unittest log as text even when a test's log output holds a NUL byte (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "b161bb2de384e07d8d4cdbf43634a64484371335",
+      "short": "b161bb2",
+      "round": "22",
+      "subject": "fix(audio): R22-9 the published numba cache is also kept per Python environment — a new HOME is seeded from it instead of compiling librosa's functions in its first worker; web upload of 20 WAV files 3.15 s against 4.85 s at 2130892 (R22-9; Gaps: G1, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R22-9"
+      ],
+      "gaps_named_in_subject": [
+        "G1"
+      ],
+      "gaps": [
+        "G1"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R22-9: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G1; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "7756d4013712431f0537fc5a2eb2a8d2ec56f79e",
+      "short": "7756d40",
+      "round": "22",
+      "subject": "docs(phase0): R22-11 HANDOFF.md §1/§2/§9 state round 21 with R21-10 and round 22 — 22 rounds, R22-1…R22-11 fixed on this branch, the next steps — without anything the records-only commit changes (R22-11; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R22-11"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R22-11: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
       "gaps_source": "subject"
     }
   ]

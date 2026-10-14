@@ -558,5 +558,8 @@ select.field { padding-right: 8px; }
 .export-warn .t { font-weight: 600; }
 .export-warn .tag { padding: 2px 6px; }
 .export-warn ul { padding-left: 18px; font-size: 14px; }
+/* Merge of R22-3: a review the server refused to save (409) is said in the manipulation colour. */
+.rev-sync-status.sync-err { color: var(--manip); font-weight: 600; }
+.fb-status.sync-err { color: var(--manip); font-weight: 600; }
 .a4 .a4-changed td { background: #FBE9E7; }
 .a4 .a4-flag { color: #B3261E; font-weight: 700; }
