@@ -386,6 +386,13 @@ def _rebuilt_exception(error: dict[str, Any]) -> Exception:
     return exc
 
 
+def _caller_form(error: dict[str, Any], sent: str, given: str) -> dict[str, Any]:
+    """R23-1: the worker's error with the absolute path it was sent written as the caller gave it."""
+    if sent == given or not isinstance(error, dict):
+        return error
+    return {key: value.replace(sent, given) if isinstance(value, str) else value for key, value in error.items()}
+
+
 def _package_parent() -> str:
     """The folder that holds the ``deepfake_lens`` package this process imported."""
     return str(Path(__file__).resolve().parent.parent)
@@ -741,7 +748,14 @@ def extract_features(native_path: str, *, segment_seconds: int) -> dict[str, Any
     :class:`WorkerTimeoutError`, and the process ending
     :class:`shutdown.ShuttingDown`.
     """
-    request = {"path": native_path, "segment_seconds": int(segment_seconds)}
+    from .native_path import child_path
+
+    # R23-1 (round 23): the worker runs in its cache folder (cwd), so a relative path was resolved there and
+    # every audio check of ``scan case`` / ``cd case; scan .`` / ``classify case/a.wav`` / a relative
+    # ``web --folder`` failed ("LibsndfileError … System error") since R19-2 (de59997). The worker gets the
+    # absolute path; its error text is given back in the caller's form, as the in-process extraction wrote it.
+    absolute = child_path(native_path)
+    request = {"path": absolute, "segment_seconds": int(segment_seconds)}
     for attempt in range(2):
         scope: WorkerScope | None = getattr(_LOCAL, "scope", None)
         if scope is not None and scope.tripped is not None:
@@ -772,7 +786,7 @@ def extract_features(native_path: str, *, segment_seconds: int) -> dict[str, Any
                 worker.published = True
                 publish_cache(worker.cache_dir)
             if "error" in reply:
-                error = reply["error"]
+                error = _caller_form(reply["error"], absolute, native_path)
                 logger.error("audio decode failed: %s\n%s", native_path, error.get("traceback", ""))
                 raise _rebuilt_exception(error)
             return reply

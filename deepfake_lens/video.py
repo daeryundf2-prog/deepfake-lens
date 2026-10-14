@@ -107,7 +107,8 @@ def extract_video_frames(plan: dict[str, object], *, limit: int | None = None) -
         # R12-1: the input after "-i" reaches ffmpeg under an ASCII staged name.
         source_index = command.index("-i") + 1 if "-i" in command[:-1] else -1
         try:
-            with native_safe_path(command[source_index] if source_index > 0 else "") as native_source:
+            # R23-1: absolute for the child (a relative name with ":" is an ffmpeg protocol).
+            with native_safe_path(command[source_index] if source_index > 0 else "", for_child=True) as native_source:
                 staged = [native_source if index == source_index else part for index, part in enumerate(command)]
                 completed = run_child(staged, check=False,  # R15-1: tracked child
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=FFMPEG_TIMEOUT_SECONDS)

@@ -236,7 +236,7 @@ def audio_track_check(
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=scratch_dir()) as tmp:
             tmp_name = tmp.name
         try:
-            with native_safe_path(video_path) as native_video:  # R12-1
+            with native_safe_path(video_path, for_child=True) as native_video:  # R12-1; R23-1: absolute for the child
                 proc = run_child(  # R15-1: a tracked child, stopped by the shutdown cleanup
                     [ffmpeg, *FFMPEG_QUIET_ARGS, "-y", "-i", native_video, "-vn", "-ac", "1", "-ar", "16000", tmp_name],
                     capture_output=True, timeout=120,

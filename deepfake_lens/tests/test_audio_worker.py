@@ -728,5 +728,129 @@ class MultiFileCommandsStartOneWorkerTest(unittest.TestCase):
             self.assertEqual(self._count_starts(lambda: evaluate.evaluate_dataset(folder)), 0)
 
 
+@unittest.skipUnless(HAVE_LIBROSA, "librosa not installed")
+class RelativePathAudioParityTest(unittest.TestCase):
+    """R23-1 (round 23): a relative audio path reached the worker unchanged and the worker (cwd = its cache folder)
+    resolved it there — every audio check of ``scan case``, ``cd case; scan .``, ``classify case/a.wav``,
+    ``batch case`` and ``web --folder case`` failed ("LibsndfileError … System error") since R19-2 (de59997),
+    while the absolute path ran (QA-OUT-4: one file, one result). 2130892 (in-process extraction) ran in every case.
+    Each relative form now gives exactly the absolute run's rows, with ``audio_features`` ``ran``."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.project = Path(cls._tmp.name, "proj")
+        cls.case = cls.project / "case"
+        cls.case.mkdir(parents=True)
+        _write_tone(cls.case / "a.wav", seconds=1)
+        _write_tone(cls.case / "b.wav", seconds=1, hz=440.0)
+        cls.env = _clean_env(cls._tmp.name)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._tmp.cleanup()
+
+    def _cli(self, *args: str, cwd: Path) -> str:
+        done = subprocess.run([sys.executable, "-m", "deepfake_lens", *args], env=self.env, cwd=cwd,
+                              capture_output=True, text=True, timeout=600)
+        self.assertEqual(done.returncode, 0, done.stderr[-2000:])
+        return done.stdout
+
+    @staticmethod
+    def _without(value: object, keys: set[str]) -> object:
+        """``value`` without the given keys at any depth (the path as typed; a batch job's id and clock times)."""
+        if isinstance(value, dict):
+            return {key: RelativePathAudioParityTest._without(item, keys) for key, item in value.items() if key not in keys}
+        if isinstance(value, list):
+            return [RelativePathAudioParityTest._without(item, keys) for item in value]
+        return value
+
+    @staticmethod
+    def _audio(items: list[dict]) -> list[str]:
+        return [{entry["check"]: entry["status"] for entry in item["result"]["coverage"]}["audio_features"] for item in items]
+
+    def test_scan_relative_and_from_inside_the_folder_equal_the_absolute_scan(self) -> None:
+        absolute = json.loads(self._cli("scan", str(self.case), "--format", "json", cwd=self.project))["items"]
+        relative = json.loads(self._cli("scan", "case", "--format", "json", cwd=self.project))["items"]
+        inside = json.loads(self._cli("scan", ".", "--format", "json", cwd=self.case))["items"]
+        self.assertEqual(self._audio(absolute), ["ran", "ran"])
+        self.assertEqual(relative, absolute)
+        self.assertEqual(inside, absolute)
+
+    def test_classify_relative_equals_classify_absolute(self) -> None:
+        absolute = json.loads(self._cli("classify", str(self.case / "a.wav"), "--format", "json", cwd=self.project))
+        relative = json.loads(self._cli("classify", "case/a.wav", "--format", "json", cwd=self.project))
+        inside = json.loads(self._cli("classify", "a.wav", "--format", "json", cwd=self.case))
+        coverage = {entry["check"]: entry["status"] for entry in absolute["coverage"]}
+        self.assertEqual(coverage["audio_features"], "ran")
+        self.assertEqual((relative["path"], inside["path"]), ("case/a.wav", "a.wav"))  # the path as typed
+        self.assertEqual(self._without(relative, {"path"}), self._without(absolute, {"path"}))
+        self.assertEqual(self._without(inside, {"path"}), self._without(absolute, {"path"}))
+
+    def test_batch_relative_equals_batch_absolute(self) -> None:
+        out = Path(self._tmp.name, "out")
+        out.mkdir(exist_ok=True)
+        self._cli("batch", str(self.case), "--workers", "1", "--output", str(out / "abs.json"), cwd=self.project)
+        self._cli("batch", "case", "--workers", "1", "--output", str(out / "rel.json"), cwd=self.project)
+        absolute = json.loads((out / "abs.json").read_text(encoding="utf-8"))
+        relative = json.loads((out / "rel.json").read_text(encoding="utf-8"))
+        self.assertEqual(sorted(self._audio([row["result"] for row in absolute["results"]])), ["ran", "ran"])
+        self.assertEqual(sorted(row["file_path"] for row in relative["results"]), ["case/a.wav", "case/b.wav"])
+        # the path as typed (and its base64), the job's id and clock times differ; every other byte is the same
+        volatile = {"path", "path_b64", "file_path", "job_id", "start_time", "end_time", "processing_time"}
+        self.assertEqual(self._without(relative, volatile), self._without(absolute, volatile))
+
+    def test_web_with_a_relative_folder_equals_an_absolute_folder(self) -> None:
+        import socket
+        import time
+        import urllib.request
+
+        from deepfake_lens.webapp import CLIENT_HEADER
+
+        def scan(folder: str) -> list[dict]:
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 0))
+                port = probe.getsockname()[1]
+            proc = subprocess.Popen([sys.executable, "-m", "deepfake_lens", "web", "--folder", folder, "--port", str(port)],
+                                    env=self.env, cwd=self.project, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+            try:
+                request = urllib.request.Request(f"http://127.0.0.1:{port}/api/scan", headers={CLIENT_HEADER: "gui"})
+                deadline = time.monotonic() + 60
+                while True:
+                    try:
+                        with urllib.request.urlopen(request, timeout=300) as response:
+                            return json.loads(response.read())["items"]
+                    except OSError:
+                        if time.monotonic() > deadline or proc.poll() is not None:
+                            raise
+                        time.sleep(0.1)
+            finally:
+                proc.terminate()
+                proc.communicate(timeout=60)
+
+        absolute = scan(str(self.case))
+        relative = scan("case")
+        self.assertEqual(self._audio(absolute), ["ran", "ran"])
+        self.assertEqual(relative, absolute)
+        self.assertEqual(sorted(os.listdir(self.case)), ["a.wav", "b.wav"])  # QA-IN-1
+
+    def test_the_worker_is_sent_an_absolute_path_and_answers_in_the_callers_form(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _write_tone(Path(tmp, "c.wav"), seconds=1)
+            previous = os.getcwd()
+            os.chdir(tmp)
+            try:
+                reply = audio_worker.extract_features("c.wav", segment_seconds=5)
+                with self.assertRaises(Exception) as missing:
+                    audio_worker.extract_features("absent.wav", segment_seconds=5)
+            finally:
+                os.chdir(previous)
+        self.assertIsNotNone(reply["features"])
+        # the error text names the file as the caller gave it (as the in-process extraction did), not the absolute path
+        self.assertIn("absent.wav", str(missing.exception))
+        self.assertNotIn(os.path.realpath(tmp), str(missing.exception))
+        self.assertNotIn(tmp, str(missing.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

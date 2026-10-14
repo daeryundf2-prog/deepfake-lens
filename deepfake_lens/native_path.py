@@ -1159,22 +1159,50 @@ def _stage(source: str) -> tuple[str, bool]:
         return _copy_staged(absolute, target), True
 
 
+def child_path(text: str) -> str:
+    """R23-1 (round 23): ``text`` as a path a child process resolves to the same file, whatever its cwd.
+
+    A relative path is joined to this process's working folder — lexically
+    (POSIX: ``..`` and symbolic links are left for the kernel to resolve, as
+    they would have been here); Windows: ``os.path.abspath`` (drive-relative
+    forms). An empty or already absolute path, or one whose working folder is
+    gone, is returned unchanged. An absolute path also keeps ``ffmpeg`` from
+    reading a relative name with a ``:`` (``a:b.mp4``, ``concat:…``) as a
+    protocol.
+    """
+    if not text or os.path.isabs(text):
+        return text
+    try:
+        if _is_windows():
+            return os.path.abspath(text)
+        return os.path.join(os.getcwd(), text)
+    except OSError:  # the working folder was removed: the child fails as it would have
+        return text
+
+
 @contextmanager
-def native_safe_path(path: str | os.PathLike[str]) -> Iterator[str]:
+def native_safe_path(path: str | os.PathLike[str], *, for_child: bool = False) -> Iterator[str]:
     """Yield an ASCII-only path naming the same file as ``path``.
 
     Use the yielded name for the native call and nothing else (rows,
     messages and hashes keep the original path).
+
+    R23-1 (round 23): ``for_child=True`` — the name goes to another process
+    (an ``ffmpeg`` child, the audio worker, which runs in its own folder):
+    a relative path is made absolute (:func:`child_path`), so the child opens
+    the file this process means. Without it a relative ASCII path reached
+    the audio worker unchanged and was resolved against the worker's cache
+    folder: every audio check of ``scan case`` / ``cd case; scan .`` failed.
     """
     text = os.fspath(path)
     if isinstance(text, bytes):
         text = os.fsdecode(text)
     if text.isascii():
-        yield text
+        yield child_path(text) if for_child else text
         return
     staged, owned = _stage(text)
     try:
-        yield staged
+        yield child_path(staged) if for_child else staged
     finally:
         if owned:
             _unlink_staged(staged, os.path.abspath(text))
@@ -1269,6 +1297,7 @@ __all__ = [
     "NATIVE_COPY_MAX_BYTES",
     "NativePathError",
     "ShuttingDown",
+    "child_path",
     "cleanup_session",
     "imwrite_any",
     "install_cleanup_handlers",
