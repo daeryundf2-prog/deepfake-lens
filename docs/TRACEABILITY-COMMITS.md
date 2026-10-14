@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..c43bc11`(병합 커밋 제외, 커밋 292개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..7756d40`(병합 커밋 제외, 커밋 307개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 272개 — 스펙 갭에 매핑 195개(그중 신규 사유 병기 68개), 신규(스펙 외)만 77개.
+요약: ID 283개 — 스펙 갭에 매핑 204개(그중 신규 사유 병기 72개), 신규(스펙 외)만 79개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -299,6 +299,17 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R21-8 | 21 | the docs and comments say that only SIGTERM, SIGHUP and SIGINT (SIGBREAK) clean up an outp | G34 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 517f163 |
 | R21-9 | 21 | `help <not a command>` is the top-level error with exit 2 and `--verbose help` is help — a | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 8285bb0 |
 | R21-10 | 21 | HOME-derived tool folders that would be inside an examined folder are relocated outside ev | G31 | 신규(스펙 외): 갭 목록 밖 항목 포함 | c43bc11 |
+| R22-1 | 22 | a web report's "기록되지 않은 파일" counts are the server's own — its scan job of the folder, else | G7, G12, G30 |  | d9bf1b2 |
+| R22-2 | 22 | on Windows the tool folders move to %ProgramData%\deepfake-lens\<user>, made owner-only an | G31 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 8746ecf |
+| R22-3 | 22 | the web GUI's reviews and feedback live in one fixed per-user application-data folder, nev | G31 | 신규(스펙 외): 갭 목록 밖 항목 포함 | e52ac97 |
+| R22-4 | 22 | a posted row path is the scan's own listing — a path through a bind-mount loop folder or s | G30 |  | 958fedf |
+| R22-5 | 22 | a scan stops starting audio workers after two start failures in a row — later files fail a | G1 | 신규(스펙 외): 갭 목록 밖 항목 포함 | dbf9095 |
+| R22-6 | 22 | a NUL in any path value is a 400 on both servers — report rows / scan_root / heatmap_path, | G31 |  | ac0f00d |
+| R22-7 | 22 | the evidence statement without pymupdf is the documented 501 before any re-analysis — it r | G30 |  | a1778a5 |
+| R22-8 | 22 | an upload row's name in the signed body is limited and marked — relative, ≤ 255 characters | G30 |  | d021d3c |
+| R22-9 | 22 | the published numba cache is also kept per Python environment — a new HOME is seeded from  | G1 | 신규(스펙 외): 갭 목록 밖 항목 포함 | b161bb2 |
+| R22-10 | 22 | words after `help <command>` must name its subcommands — `help corpus build` is that subco | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | cb40945 |
+| R22-11 | 22 | HANDOFF.md §1/§2/§9 state round 21 with R21-10 and round 22 — 22 rounds, R22-1…R22-11 fixe | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 7756d40 |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -622,3 +633,18 @@ R18-14: ids[]의 갭 매핑을 커밋 제목·본문의 `Gaps:`에 맞췄다 —
 | 517f163 | 21 | R21-8 | Gaps: G34; 신규(스펙 외) | subject | fix(output): R21-8 the docs and comments say that only SIGTERM, SIGHUP and SIGINT (SIGBREAK) clean up an output write — SIGQUIT, SIGUSR1 and every other terminating signal leave the temp file and the session folder (R21-8; Gaps: G34, 신규) |
 | 3831b93 | 21 | R21-7 | Gaps: 신규(스펙 외) | subject | docs(phase0): R21-7 HANDOFF.md states no test or skip counts — it says where to read them and why the skip count depends on whether the tree has git history; round 21 recorded (R21-7; Gaps: 신규) |
 | c43bc11 | 21 | R21-10 | Gaps: G31; 신규(스펙 외) | subject | fix(cli): R21-10 HOME-derived tool folders that would be inside an examined folder are relocated outside every evidence path with one notice — classify ~/x.jpg, cd ~; deepfake-lens web, a HOME inside or a relative HOME run instead of exit 2 (R21-10; Gaps: G31, 신규) |
+| 20f73bf | 21 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on c43bc11, round-21 IDs mapped (WP-J; Gaps: G26, G27, G28) |
+| 94871f4 | 21 | WP-J | Gaps: 신규(스펙 외) | subject | build(gate): reference gate image and runner live in the repo — scripts/gate/{Dockerfile,Dockerfile.gui,gate.sh} (WP-J; Gaps: 신규) |
+| 18a471b | 21 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): round-22 verification findings (WP-J; Gaps: 신규) |
+| d9bf1b2 | 22 | R22-1 | Gaps: G7, G12, G30 | subject | fix(report): R22-1 a web report's "기록되지 않은 파일" counts are the server's own — its scan job of the folder, else its own walk of scan_root, else "확인 불가"; a capped, flat or partly posted scan no longer signs "없음" (R22-1; Gaps: G7, G12, G30) |
+| a1778a5 | 22 | R22-7 | Gaps: G30 | subject | fix(report): R22-7 the evidence statement without pymupdf is the documented 501 before any re-analysis — it re-analyzed every row and then answered 500 (R22-7; Gaps: G30) |
+| ac0f00d | 22 | R22-6 | Gaps: G31 | subject | fix(server): R22-6 a NUL in any path value is a 400 on both servers — report rows / scan_root / heatmap_path, scan, analyze-file, heatmap, preview and api-serve's file endpoints were a 500 (R22-6; Gaps: G31) |
+| cb40945 | 22 | R22-10 | Gaps: 신규(스펙 외) | subject | fix(cli): R22-10 words after `help <command>` must name its subcommands — `help corpus build` is that subcommand's help and `help scan extra` is exit 2, not the scan help with exit 0 (R22-10; Gaps: 신규) |
+| 958fedf | 22 | R22-4 | Gaps: G30 | subject | fix(report): R22-4 a posted row path is the scan's own listing — a path through a bind-mount loop folder or spelled unlike the listing (letter case, Unicode form) is 400, not one more signed row of the same file (R22-4; Gaps: G30) |
+| dbf9095 | 22 | R22-5 | Gaps: G1; 신규(스펙 외) | subject | fix(audio): R22-5 a scan stops starting audio workers after two start failures in a row — later files fail at once with the breaker's reason instead of waiting 60 s each (R22-5; Gaps: G1, 신규) |
+| 8746ecf | 22 | R22-2 | Gaps: G31; 신규(스펙 외) | subject | fix(cli): R22-2 on Windows the tool folders move to %ProgramData%\deepfake-lens\<user>, made owner-only and verified like the other candidates — classify %USERPROFILE%\x.jpg and cd ~; web relocate instead of exit 2 (R22-2; Gaps: G31, 신규) |
+| e52ac97 | 22 | R22-3 | Gaps: G31; 신규(스펙 외) | subject | fix(server): R22-3 the web GUI's reviews and feedback live in one fixed per-user application-data folder, never in the evidence — saving inside an examined folder or with no absolute home is refused (409), ~/.deepfake-lens records migrate once (R22-3; Gaps: G31, 신규) |
+| d021d3c | 22 | R22-8 | Gaps: G30 | subject | fix(report): R22-8 an upload row's name in the signed body is limited and marked — relative, ≤ 255 characters, no "." / ".." / empty component (else 400), name_source "server_upload" only for a name and sha256 this server produced, "client" otherwise (R22-8; Gaps: G30) |
+| 022feb1 | 22 | WP-J | Gaps: 신규(스펙 외) | subject | build(gate): gate.sh reads the unittest log as text even when a test's log output holds a NUL byte (WP-J; Gaps: 신규) |
+| b161bb2 | 22 | R22-9 | Gaps: G1; 신규(스펙 외) | subject | fix(audio): R22-9 the published numba cache is also kept per Python environment — a new HOME is seeded from it instead of compiling librosa's functions in its first worker; web upload of 20 WAV files 3.15 s against 4.85 s at 2130892 (R22-9; Gaps: G1, 신규) |
+| 7756d40 | 22 | R22-11 | Gaps: 신규(스펙 외) | subject | docs(phase0): R22-11 HANDOFF.md §1/§2/§9 state round 21 with R21-10 and round 22 — 22 rounds, R22-1…R22-11 fixed on this branch, the next steps — without anything the records-only commit changes (R22-11; Gaps: 신규) |
