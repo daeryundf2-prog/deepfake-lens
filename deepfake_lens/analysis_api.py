@@ -617,13 +617,21 @@ def _models_dir_file(name: str, models_dir: Path, field_name: str) -> Path:
     ):
         raise InvalidOption(f"{field_name}은(는) 모델 디렉터리 안의 파일 이름이어야 합니다")
     base = models_dir.resolve()
-    candidate = (base / name).resolve()
     try:
+        candidate = (base / name).resolve()
         candidate.relative_to(base)
+        found = candidate.is_file()
     except ValueError as exc:
         raise InvalidOption(f"{field_name}은(는) 모델 디렉터리 안의 파일 이름이어야 합니다") from exc
-    if not candidate.is_file():
-        raise InvalidOption(f"{field_name}을(를) 모델 디렉터리에서 찾을 수 없습니다: {name}")
+    except (OSError, RuntimeError) as exc:
+        # R23-9 (round 23): a 5000-character name raised ENAMETOOLONG from is_file() — HTTP 500 on both
+        # servers; any OSError of the lookup (too long, a loop, an unreadable models folder) is a request error.
+        from .error_text import read_error_ko
+
+        reason = read_error_ko(exc) if isinstance(exc, OSError) else "심볼릭 링크가 순환합니다"
+        raise InvalidOption(f"{field_name}을(를) 모델 디렉터리에서 찾을 수 없습니다({reason}): {name[:80]}") from exc
+    if not found:
+        raise InvalidOption(f"{field_name}을(를) 모델 디렉터리에서 찾을 수 없습니다: {name[:200]}")
     return candidate
 
 

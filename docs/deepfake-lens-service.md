@@ -265,7 +265,7 @@ endpoints (`/api/analyze/*`, `/api/classify`, `/api/check`, `/api/compare`,
 | E2 | any `/api/*` (both) | unknown route | 404 | `찾을 수 없는 경로입니다` |
 | E3 | any `/api/*` (web / api) | method not supported / not allowed | 501 / 405 | `지원하지 않는 요청 메서드입니다: …` / `이 경로에서 허용되지 않는 요청 메서드입니다: …` |
 | E4 | any `/api/*` (both) | unhandled exception | 500 | `서버 내부 오류가 발생했습니다 — 상세는 서버 로그를 확인하십시오` |
-| E5 | GET `/api/scan` (both) | invalid option (`pixel`, non-integer limit, `model_path`/`fusion_profile` not a name in the models dir) | 400 | e.g. `max_files는 정수여야 합니다` |
+| E5 | GET `/api/scan` (both) | invalid option (`pixel`, non-integer limit, `model_path`/`fusion_profile` not a name in the models dir — R23-9: also one the file system cannot look up, e.g. longer than a name may be (was a 500); the same in POST `/api/report` `options` is E27) | 400 | e.g. `max_files는 정수여야 합니다` / `model_path을(를) 모델 디렉터리에서 찾을 수 없습니다(경로가 너무 깁니다…` |
 | E6 | GET `/api/scan` (both), POST `/api/scan/stream` (api) | `max_files` or `max_file_bytes` below 1 (Y8 — was clamped to 1) | 400 | `max_files는 1 이상이어야 합니다` / `max_file_bytes는 1 이상이어야 합니다` |
 | E7 | GET `/api/scan` (both) | folder missing / a file / unreadable | 400 | `폴더를 찾을 수 없습니다: …` (scan's S4 texts) |
 | E8 | GET `/api/scan` (both) | folder (`folder` or `folder_b64`) outside the read roots | 403 | `허용되지 않은 경로` |

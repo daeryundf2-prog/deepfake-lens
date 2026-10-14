@@ -138,6 +138,20 @@ class ScanPayloadValidationTest(unittest.TestCase):
                 _scan_payload(query, default_folder=None)
             self.assertEqual(str(ctx.exception), message)
 
+    def test_a_model_name_the_file_system_cannot_look_up_is_invalid(self) -> None:
+        """R23-9 (round 23): a 5000-character model_path / fusion_profile raised OSError(ENAMETOOLONG) — HTTP 500."""
+        import tempfile
+
+        from deepfake_lens.analysis_api import AnalysisOptions, InvalidOption
+
+        with tempfile.TemporaryDirectory() as models:
+            for key in ("model_path", "fusion_profile"):
+                for name in ("m" * 5000, "m" * 256 + ".json"):
+                    with self.subTest(key=key, length=len(name)), self.assertRaises(InvalidOption) as ctx:
+                        AnalysisOptions.from_query({key: [name]}, models_dir=Path(models))
+                    self.assertIn(f"{key}을(를) 모델 디렉터리에서 찾을 수 없습니다", str(ctx.exception))
+                    self.assertLess(len(str(ctx.exception)), 400)  # the name is not echoed in full
+
     def test_max_file_bytes_is_clamped_to_ceiling(self) -> None:
         captured = self._capture_scan_kwargs("max_file_bytes=99999999999999&folder=.")
         self.assertEqual(captured["max_file_bytes"], MAX_FILE_BYTES_CEILING)
@@ -3036,7 +3050,10 @@ class ErrorTableEveryRowTest(unittest.TestCase):
             "E4": [case("web", "GET", "/api/stats", 500, "서버 내부 오류가 발생했습니다", patches=(patch.object(webapp_module, "_stats_payload", raise_),)),
                    case("api", "GET", "/api/stats", 500, "서버 내부 오류가 발생했습니다", patches=(patch.object(webapp_api, "_stats_payload", raise_),))],
             "E5": [case(s, "GET", "/api/scan?max_files=abc", 400, "max_files는 정수여야 합니다") for s in both]
-            + [case(s, "GET", f"/api/scan?folder={q(f)}&pixel=bogus", 400, "pixel") for s in both],
+            + [case(s, "GET", f"/api/scan?folder={q(f)}&pixel=bogus", 400, "pixel") for s in both]
+            # R23-9 (round 23): a name longer than the file system allows was a 500 (ENAMETOOLONG from is_file()).
+            + [case(s, "GET", f"/api/scan?folder={q(f)}&{key}={'m' * 5000}", 400, f"{key}을(를) 모델 디렉터리에서 찾을 수 없습니다")
+               for s in both for key in ("model_path", "fusion_profile")],
             "E6": [case(s, "GET", "/api/scan?max_files=-3", 400, "max_files는 1 이상이어야 합니다") for s in both]
             + [case(s, "GET", "/api/scan?max_file_bytes=0", 400, "max_file_bytes는 1 이상이어야 합니다") for s in both]
             + [case("api", "POST", f"/api/scan/stream?directory={q(f)}&max_files=0", 400, "max_files는 1 이상이어야 합니다")],
@@ -3094,6 +3111,8 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                 (deep, "JSON 중첩이 너무 깊습니다"),
                 (b'{"items": [{"path": "a", "x": ' + b"[" * DEEP + b"]" * DEEP + b"}]}", "JSON 중첩이 너무 깊습니다"),
                 (b"[1]", "보고서 요청 본문은 JSON 객체여야 합니다"),
+                # R23-9 (round 23): a too-long model name in the report's options was a 500.
+                (report({"items": [memo_row], "scan_root": scan_root, "options": {"model_path": "m" * 5000}}), "model_path을(를) 모델 디렉터리에서 찾을 수 없습니다"),
                 (report({"items": [dict(memo_row, path="x.zip::y", container="x.zip", member="z")], "scan_root": scan_root}), "path가 container::member와 일치하지 않습니다"),
                 # R20-4 (round 20): a duplicate of itself was signed with no analysis.
                 (report({"items": [dict(memo_row, status="duplicate", duplicate_of="memo.txt", result=None)], "scan_root": scan_root}), "검사 결과 항목 「memo.txt」의 duplicate_of"),
