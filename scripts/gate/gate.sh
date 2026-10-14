@@ -16,7 +16,7 @@ export PYTHONPATH=/work
 P=/venv/bin/python
 A=/venv-api/bin/python
 rc=0
-ut() { echo "=== unittest ($1)"; $1 -m unittest discover deepfake_lens/tests > /tmp/ut.log 2>&1; r=$?; grep -E '^(FAIL|ERROR):|^Ran|^OK|^FAILED' /tmp/ut.log; [ $r -eq 0 ] || { echo "!!! FAILED rc=$r: unittest ($1)"; rc=1; }; }
+ut() { echo "=== unittest ($1)"; $1 -m unittest discover deepfake_lens/tests > /tmp/ut.log 2>&1; r=$?; grep -aE '^(FAIL|ERROR):|^Ran|^OK|^FAILED' /tmp/ut.log; [ $r -eq 0 ] || { echo "!!! FAILED rc=$r: unittest ($1)"; rc=1; }; }
 run() { echo "=== $*"; bash -o pipefail -c "$*" || { echo "!!! FAILED rc=$?: $*"; rc=1; }; }
 case $mode in
   tests) ut "$P"; ut "$A";;
