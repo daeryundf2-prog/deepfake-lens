@@ -127,7 +127,17 @@ _MAX_REPLY_BYTES = 4 * 1024 * 1024
 # R21-3 (round 21): and at most this many bytes of it (output without a newline included).
 _MAX_STARTUP_BYTES = 64 * 1024
 # R21-3: how long a new worker may take to write its ready marker (it imports only this module before it).
+# R22-5 (round 22) correction: e427a87 said the marker is found "within 60 s" as if that bounded a scan. It is
+# per new worker, and a worker that failed to start is dropped, so each later file started another one and
+# waited again: 60 s per file (4 WAVs 240 s, 300 audio files about 5 hours). WORKER_START_BREAKER_FAILURES bounds it.
 WORKER_READY_TIMEOUT_SECONDS = 60.0
+# R22-5: after this many start failures in a row within one worker scope (one scan / multi-file request),
+# the scope starts no more workers — every later file's audio check fails at once with the reason below.
+WORKER_START_BREAKER_FAILURES = 2
+WORKER_START_BREAKER_MESSAGE = (
+    "오디오 특징 추출 작업자가 이 검사에서 연속 {count}번 준비 신호를 보내지 않아 작업자를 더 띄우지 않았습니다"
+    "(처음 사유: {reason}) — 이 파일의 오디오 검사만 실패로 기록했습니다"
+)
 # R21-3: the reason of a worker that never wrote its ready marker (timed out, ended, too much output first).
 STARTUP_ERROR_MESSAGE = "오디오 특징 추출 작업자가 준비 신호를 보내지 않아 중단했습니다({detail}) — 이 검사만 실패로 기록했습니다"
 
@@ -536,6 +546,26 @@ class WorkerScope:
     def __init__(self) -> None:
         self._workers: dict[int, _Worker] = {}
         self._lock = threading.Lock()
+        # R22-5: start failures in a row (any thread of the scope) and, once tripped, the error every later file gets.
+        self._start_failures = 0
+        self._first_start_error = ""
+        self.tripped: WorkerStartError | None = None
+
+    def start_failed(self, exc: WorkerStartError) -> None:
+        """R22-5: count a worker that never got ready; trip the breaker after :data:`WORKER_START_BREAKER_FAILURES` in a row."""
+        with self._lock:
+            self._start_failures += 1
+            if self._start_failures == 1:
+                self._first_start_error = str(exc)
+            if self._start_failures >= WORKER_START_BREAKER_FAILURES and self.tripped is None:
+                self.tripped = WorkerStartError(WORKER_START_BREAKER_MESSAGE.format(
+                    count=self._start_failures, reason=self._first_start_error))
+                logger.error("audio feature worker: %d start failures in a row — no more workers in this scan", self._start_failures)
+
+    def start_succeeded(self) -> None:
+        """R22-5: a worker got ready — the run of failures is over (a tripped scope stays tripped)."""
+        with self._lock:
+            self._start_failures = 0
 
     def bind(self, func: Callable[..., T]) -> Callable[..., T]:
         """``func`` run with this scope as the calling thread's scope (for a thread pool's tasks)."""
@@ -673,10 +703,19 @@ def extract_features(native_path: str, *, segment_seconds: int) -> dict[str, Any
     request = {"path": native_path, "segment_seconds": int(segment_seconds)}
     for attempt in range(2):
         scope: WorkerScope | None = getattr(_LOCAL, "scope", None)
+        if scope is not None and scope.tripped is not None:
+            # R22-5 (round 22): this scope's workers failed to start WORKER_START_BREAKER_FAILURES times in a
+            # row — no new worker (each would wait WORKER_READY_TIMEOUT_SECONDS again); the file fails now.
+            raise WorkerStartError(str(scope.tripped))
         worker = scope.worker() if scope is not None else _start()
+        was_ready = worker.ready
         try:
             reply = worker.ask(request, WORKER_REQUEST_TIMEOUT_SECONDS)
+            if scope is not None and not was_ready and worker.ready:
+                scope.start_succeeded()
         except WorkerProtocolError as exc:
+            if scope is not None and isinstance(exc, WorkerStartError):
+                scope.start_failed(exc)
             # R20-3: a desynchronized worker is stopped and never asked again; this file's check fails.
             logger.error("audio feature worker reply for %s refused: %s", native_path, exc)
             shutdown.stop_tracked(worker.proc)

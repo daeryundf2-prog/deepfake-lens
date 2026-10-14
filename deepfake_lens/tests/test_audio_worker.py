@@ -508,6 +508,69 @@ class StartUpFramingTest(unittest.TestCase):
             self.assertIn("준비 신호 전에 끝남 — 종료 코드 0", outcome)
 
 
+class StartFailureBreakerTest(unittest.TestCase):
+    """R22-5 (round 22): a worker that never sends its ready marker cost WORKER_READY_TIMEOUT_SECONDS (60 s) per
+    file — the failed worker is dropped and the next file starts another (4 WAVs: 240 s; 300 audio files: about
+    5 hours), with nothing to stop it. After WORKER_START_BREAKER_FAILURES start failures in a row, a scope starts
+    no more workers and every later file's audio check fails at once with the breaker's reason."""
+
+    _stub_with_sitecustomize = StartUpFramingTest._stub_with_sitecustomize
+    _outcomes = StartUpFramingTest._outcomes
+
+    @unittest.skipIf(os.name != "posix", "POSIX signals")
+    def test_a_scope_stops_starting_workers_that_never_get_ready(self) -> None:
+        import time
+
+        started_workers: list[object] = []
+        real_start = audio_worker._start
+
+        def counting_start() -> object:
+            worker = real_start()
+            started_workers.append(worker)
+            return worker
+
+        names = [f"s{index}.wav" for index in range(6)]
+        with tempfile.TemporaryDirectory() as tmp:
+            pythonpath = self._stub_with_sitecustomize(tmp, "os.write(1, b'partial line without newline')\ntime.sleep(120)\n")
+            started = time.monotonic()
+            with mock.patch.object(audio_worker, "WORKER_READY_TIMEOUT_SECONDS", 2.0), \
+                    mock.patch.object(audio_worker, "_start", counting_start):
+                outcomes = self._outcomes(pythonpath, names, tmp)
+            elapsed = time.monotonic() - started
+        self.assertEqual(len(started_workers), audio_worker.WORKER_START_BREAKER_FAILURES)
+        self.assertLess(elapsed, 2.0 * audio_worker.WORKER_START_BREAKER_FAILURES + 20)
+        for outcome in outcomes[:2]:
+            self.assertIn("2초 안에 준비 신호가 오지 않음", outcome)
+        for outcome in outcomes[2:]:
+            self.assertTrue(outcome.startswith("WorkerStartError: 오디오 특징 추출 작업자가 이 검사에서 연속 2번 준비 신호를 보내지 않아"), outcome)
+            self.assertIn("처음 사유: 오디오 특징 추출 작업자가 준비 신호를 보내지 않아 중단했습니다(2초 안에 준비 신호가 오지 않음)", outcome)
+
+    def test_a_worker_that_gets_ready_ends_the_run_of_failures(self) -> None:
+        scope = audio_worker.WorkerScope()
+        failure = audio_worker.WorkerStartError("x")
+        scope.start_failed(failure)
+        scope.start_succeeded()
+        scope.start_failed(failure)
+        self.assertIsNone(scope.tripped)
+        scope.start_failed(failure)
+        self.assertIsNotNone(scope.tripped)
+        scope.start_succeeded()
+        self.assertIsNotNone(scope.tripped)  # a tripped scope stays tripped until it ends
+
+    @unittest.skipIf(os.name != "posix", "POSIX signals")
+    def test_outside_a_scope_each_file_gets_its_own_worker(self) -> None:
+        """One file (classify, analyze-file) has no breaker: the next request starts a worker again."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pythonpath = self._stub_with_sitecustomize(tmp, "os.write(1, b'partial')\nos._exit(0)\n")
+            Path(tmp, "a.wav").write_bytes(b"RIFF")
+            with mock.patch.dict(os.environ, {"PYTHONPATH": pythonpath}):
+                for _ in range(3):
+                    with self.assertRaises(audio_worker.WorkerStartError) as caught:
+                        audio_worker.extract_features(str(Path(tmp, "a.wav")), segment_seconds=5)
+                    self.assertIn("준비 신호 전에 끝남", str(caught.exception))
+            self.assertEqual(shutdown.running_children(), [])
+
+
 class MultiFileCommandsRunInOneScopeTest(unittest.TestCase):
     """R20-2: each function that analyzes many files runs inside a worker scope (the analysis sees an active scope)."""
 
