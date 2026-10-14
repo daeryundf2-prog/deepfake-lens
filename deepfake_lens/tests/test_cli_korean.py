@@ -298,6 +298,34 @@ class UnknownArgumentUsageTest(unittest.TestCase):
             self.assertEqual(caught.exception.code, 0)
             self.assertTrue(out.getvalue().startswith(usage), out.getvalue()[:200])
 
+    def test_help_with_a_value_of_a_positional_argument_and_help_help(self) -> None:
+        """R23-11 (round 23): `help vendor-weights pin` was "알 수 없는 인수: pin" — pin is a value of vendor-weights' positional
+        argument (choices), not a subcommand; `help help` was "허용되지 않은 값 'help'". Now the command's help with a note,
+        and the top-level help. A word that is no such value (and a free-form positional: R22-10 `help scan extra`) is still exit 2."""
+        for argv, values in ((["help", "vendor-weights", "pin"], "pin"), (["help", "vendor-weights", "pin-asset", "aasist"], "pin-asset aasist")):
+            out, err = io.StringIO(), io.StringIO()
+            with self.subTest(argv=argv), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                with self.assertRaises(SystemExit) as caught:
+                    main(argv)
+            self.assertEqual(caught.exception.code, 0)
+            self.assertTrue(out.getvalue().startswith("사용법: deepfake-lens vendor-weights"), out.getvalue()[:200])
+            self.assertIn(f"알림: 「{values}」은(는) vendor-weights 명령의 위치 인수 값입니다(하위 명령이 아님)", err.getvalue())
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as caught:
+                main(["help", "help"])
+        self.assertEqual(caught.exception.code, 0)
+        self.assertTrue(out.getvalue().startswith("사용법: deepfake-lens [-h] <명령>"), out.getvalue()[:200])
+        for argv, fragment in ((["help", "vendor-weights", "bogus"], "알 수 없는 인수: bogus"),
+                               (["help", "vendor-weights", "pin", "a", "b"], "알 수 없는 인수: pin a b"),
+                               (["help", "vendor-weights", "--verify"], "알 수 없는 인수: --verify"),
+                               (["help", "scan", "extra"], "알 수 없는 인수: extra"),
+                               (["help", "help", "scan"], "허용되지 않은 값 'help'")):
+            with self.subTest(argv=argv):
+                code, err_text = self._run(argv)
+                self.assertEqual(code, 2, err_text)
+                self.assertIn(fragment, err_text)
+
     def test_help_names_a_command_or_is_an_error(self) -> None:
         """R21-9 (round 21): `help bogus` printed the top-level help with exit 0 (a typo ended as a success), and
         `--verbose help` was a scan of the folder "help" ("폴더를 찾을 수 없습니다: help")."""
