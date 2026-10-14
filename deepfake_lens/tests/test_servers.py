@@ -3384,6 +3384,34 @@ class ReportUnrecordedFilesAreTheServersTest(_ReportLegsFixture):
             self.assertEqual(body["unrecorded_files"]["listing"], {"source": "scan_job", "not_in_report": 0})
             self.assertEqual(body["summary"]["subfolders_skipped"], 1)
 
+    def test_archive_member_rows_left_out_of_the_post_are_counted(self) -> None:
+        """R23-5 (round 23): the listing compared top-level paths only — a post without ``bundle.zip::inner/member.png``
+        (a container row and its other member posted) signed "없음", with or without a scan job. The members the server's
+        own re-analysis of the container yields are now counted like a left-out file."""
+        rows = self._scan()
+        members = sorted(path for path in rows if path.startswith("bundle.zip::"))
+        self.assertEqual(members, ["bundle.zip::inner/member.png", "bundle.zip::notes.txt"])
+        for left_out in (members[:1], members):
+            posted = [row for path, row in rows.items() if path not in left_out]
+            results = self._report(posted)
+            with self.subTest(left_out=left_out):
+                self._assert_section(results, f"보고서에 행 없음: 서버가 검사 폴더에서 찾은 파일 중 이 보고서에 서명된 행이 없는 파일 {len(left_out)}개")
+                for body in self._signed(results):
+                    self.assertEqual(body["unrecorded_files"]["listing"], {"source": "walk", "not_in_report": len(left_out)})
+                    self.assertEqual(sorted(row["path"] for row in body["items"] if row["path"].startswith("bundle.zip::")),
+                                     sorted(set(members) - set(left_out)))
+        # with the server's scan job as the listing too
+        started = webapp_api._scan_job_start(f"folder={self.folder}&no_default_engine=true", default_folder=self.folder)
+        state: dict[str, Any] = {}
+        for _ in range(600):
+            state = webapp_api._scan_status_payload(f"job={started['job_id']}")
+            if state["status"] != "running":
+                break
+            time.sleep(0.05)
+        job_rows = [row for row in state["result"]["items"] if row["path"] != "bundle.zip::inner/member.png"]
+        for body in self._signed(self._report(job_rows, scan_job=started["job_id"], options={"no_default_engine": "true"})):
+            self.assertEqual(body["unrecorded_files"]["listing"], {"source": "scan_job", "not_in_report": 1})
+
     def _cancelled_job(self) -> tuple[str, dict[str, Any]]:
         """A scan job of the folder that the server finished "cancelled" after its first file (as /api/scan-cancel does)."""
         calls = {"n": 0}

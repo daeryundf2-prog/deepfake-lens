@@ -1673,7 +1673,7 @@ class _ReportHasher:
 @in_worker_scope  # R20-2: one audio worker for all files (was one per file)
 def _rederive_report_items(
     posted: list[Any], hasher: "_ReportHasher", options: Any, thresholds: Any,
-) -> tuple[list[Any], list[tuple[Any, str]], list[dict[str, object]]]:
+) -> tuple[list[Any], list[tuple[Any, str]], list[dict[str, object]], set[tuple[str, str]]]:
     """Re-analyze every posted row on the server (X2).
 
     Rows are grouped by their top-level file ("a.zip::x" -> "a.zip"); each
@@ -1693,6 +1693,11 @@ def _rederive_report_items(
     dedupe duplicate (status "duplicate", ``duplicate_of``) stays a
     duplicate row when the server finds the file's bytes equal to those of
     ``duplicate_of`` (it is not signed as a full analysis of the copy).
+
+    R23-5 (round 23): the fourth value is the ``(container, member)`` identities of the archive member rows
+    the server's own re-analysis of a posted container yields that the post left out — the report counts
+    them as files without a signed row (``not_in_report``); they used to be invisible (the listing compared
+    top-level paths only).
     """
     from .analysis_api import scan_file_run
     from .result_text import escape_row_path, member_row_path, row_identity
@@ -1753,7 +1758,11 @@ def _rederive_report_items(
             if _row_signature(item) != _row_signature(server):
                 changed.append(_changed_row(item, server, None))
             derived.append(server)
-    return derived, excluded, changed
+    unsigned_members = {
+        (top, member) for top, rows in derived_by_top.items() if isinstance(rows, dict)
+        for member in rows if member is not None and (top, member) not in seen
+    }
+    return derived, excluded, changed, unsigned_members
 
 
 def _unanalyzed_entry_row(
@@ -2102,6 +2111,7 @@ def _finished_scan_job(job_id: object, scan_root: Path | None) -> dict[str, Any]
 
 def _report_listing(
     summary: Any, signed_items: list[Any], scan_root: Path | None, options: AnalysisOptions, job_id: object,
+    unsigned_members: set[tuple[str, str]] | None = None,
 ) -> Any:
     """R22-1 (round 22): ``summary`` with the server's own "기록되지 않은 파일" counts of the scan folder.
 
@@ -2119,6 +2129,12 @@ def _report_listing(
       section says "확인 불가" with the reason, and no enumeration count is signed.
 
     A file of the listing without a signed row is counted (``not_in_report``).
+
+    R23-5 (round 23): so is an archive member the server's own re-analysis of a signed container yields
+    without a signed row (``unsigned_members``, from :func:`_rederive_report_items`). The listings hold
+    top-level paths only, so a post that left out ``bundle.zip::gen.png`` (the member with the generator
+    metadata) signed "없음". With a scan job as the listing only the members that job analyzed count: a
+    member a cancel left unanalyzed is already in the job's ``files_cancelled``.
     """
     from .core import enumerate_scan_folder
     from .result_text import row_identity
@@ -2150,6 +2166,8 @@ def _report_listing(
             "subfolders_skipped": count("subfolders_skipped"), "subfolder_files_skipped": count("subfolder_files_skipped"),
             "subfolders_skipped_detail": [dict(entry) for entry in detail if isinstance(entry, dict)] if isinstance(detail, list) else [],
         }
+        job_members = {identity for identity in (row_identity(row) for row in job_items if isinstance(row, dict)) if identity[1] is not None}
+        missing_members = len((unsigned_members or set()) & job_members)
         recursive: object = "검사 작업"
         max_files: object = "검사 작업"
     else:
@@ -2174,12 +2192,13 @@ def _report_listing(
             "subfolders_skipped_detail": list(walk.subfolder_detail),
         }
         recursive, max_files = "예" if options.recursive else "아니오", options.max_files
+        missing_members = len(unsigned_members or ())
     outside = signed_tops - listed
     if outside:
         return unknown(REPORT_LISTING_ROWS_OUTSIDE.format(n=len(outside), recursive=recursive, max_files=max_files))
     return replace(
         summary, **enumeration,
-        unrecorded_listing={"source": source, "not_in_report": len(listed - signed_tops)},
+        unrecorded_listing={"source": source, "not_in_report": len(listed - signed_tops) + missing_members},
     )
 
 
@@ -2376,7 +2395,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
         hasher.close()
         return {"error": duplicate_error}  # R21-5 / R20-4: 400
     try:
-        items, excluded, changed = _rederive_report_items(items, hasher, options, server_thresholds)
+        items, excluded, changed, unsigned_members = _rederive_report_items(items, hasher, options, server_thresholds)
     finally:
         hasher.close()
     if changed:
@@ -2396,7 +2415,8 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     # R23-3 (round 23): the server's own cancelled scan_job sets it whatever the post says.
     summary, cancel_source = _with_posted_cancel(summary, data.get("summary"), data.get("scan_job"), scan_root)
     # R22-1 (round 22): the cap / flat-scan / missing-row counts are the server's own, or "확인 불가".
-    summary = _report_listing(summary, items, scan_root if items else None, options, data.get("scan_job"))
+    # R23-5: and the archive members the server's re-analysis yields that the post left out.
+    summary = _report_listing(summary, items, scan_root if items else None, options, data.get("scan_job"), unsigned_members)
     req_format = format_override.lower()
     # G30: web reports are signed when DEEPFAKE_LENS_REPORT_KEY is set and
     # say "서명 없음" otherwise; the pins are those of the server's models dir.
