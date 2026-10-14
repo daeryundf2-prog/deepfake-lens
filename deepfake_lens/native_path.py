@@ -712,11 +712,11 @@ def relocated_tool_base_candidates() -> list[Path]:
     xdg = os.environ.get("XDG_CACHE_HOME", "")
     if xdg and os.path.isabs(xdg):
         candidates.append(Path(xdg) / TOOL_BASE_NAME)
-    program_data = os.environ.get("ProgramData", "") or os.environ.get("PROGRAMDATA", "")
-    if _is_windows() and program_data and os.path.isabs(program_data):
+    shared = _program_data_parent()
+    if shared is not None:
         from .windows_acl import user_folder_name
 
-        candidates.append(Path(program_data) / TOOL_BASE_NAME / user_folder_name())  # R22-2: outside the profile
+        candidates.append(shared / user_folder_name())  # R22-2: outside the profile
     user = str(os.getuid()) if hasattr(os, "getuid") else (os.environ.get("USERNAME", "") or "user")
     for temp in (_system_temp_dir(), "/tmp" if os.name == "posix" else ""):
         if temp and os.path.isabs(temp):
@@ -726,6 +726,14 @@ def relocated_tool_base_candidates() -> list[Path]:
         if candidate not in unique:
             unique.append(candidate)
     return unique
+
+
+def _program_data_parent() -> Path | None:
+    """R22-2/R23-6: ``%ProgramData%\\deepfake-lens`` on Windows (the shared parent of the per-user tool bases), else None."""
+    program_data = os.environ.get("ProgramData", "") or os.environ.get("PROGRAMDATA", "")
+    if _is_windows() and program_data and os.path.isabs(program_data):
+        return Path(program_data) / TOOL_BASE_NAME
+    return None
 
 
 def claim_tool_base(base: Path) -> bool:
@@ -740,6 +748,19 @@ def claim_tool_base(base: Path) -> bool:
     windows = _is_windows()
     try:
         existed = os.path.lexists(base)
+        if windows and not existed and base.parent == _program_data_parent() and not os.path.lexists(base.parent):
+            # R23-6 (round 23): a parent this tool makes (%ProgramData%\deepfake-lens) gets a protected DACL —
+            # every account may add its own folder, none may delete, rename or re-permission another's. Made by
+            # plain mkdir it inherited ProgramData's entries (a failure here is decided by parent_safe below).
+            from . import windows_acl
+
+            base.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                protected = windows_acl.make_shared_parent(str(base.parent))
+            except (OSError, AttributeError, ValueError):
+                protected = False
+            if not protected:
+                logger.info("tool base: protected DACL not set on %s", base.parent)
         base.mkdir(mode=0o700, parents=True, exist_ok=True)
         info = os.lstat(base)
     except OSError:

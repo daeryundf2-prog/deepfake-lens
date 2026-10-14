@@ -400,6 +400,7 @@ class WindowsProgramDataToolBaseTest(unittest.TestCase):
         stack.enter_context(mock.patch.dict(os.environ, self.env))
         stack.enter_context(mock.patch.object(native_path, "_is_windows", return_value=True))
         stack.enter_context(mock.patch.object(windows_acl, "make_owner_only", lambda path: self.calls.append(("make", path)) or made))
+        stack.enter_context(mock.patch.object(windows_acl, "make_shared_parent", lambda path: self.calls.append(("shared", path)) or True))
         stack.enter_context(mock.patch.object(windows_acl, "owner_only", lambda path: self.calls.append(("owner", path)) or owner_only))
         stack.enter_context(mock.patch.object(windows_acl, "parent_safe", lambda path: self.calls.append(("parent", path)) or parent_safe))
         return stack
@@ -462,6 +463,35 @@ class WindowsProgramDataToolBaseTest(unittest.TestCase):
                 self.assertIn("둘 곳이 없습니다", str(caught.exception))
                 self.assertNotEqual(native_path.tool_cache_base(), target)
 
+    def test_a_parent_this_tool_makes_gets_the_shared_parent_acl(self) -> None:
+        """R23-6 (round 23): %ProgramData%\\deepfake-lens made by mkdir inherited ProgramData's entries; when this tool
+        makes it, it gets the protected SHARED_PARENT_SDDL. An existing parent and every other candidate's parent
+        (the profile's .cache, %LOCALAPPDATA%) are never re-permissioned."""
+        from deepfake_lens import native_path
+        from deepfake_lens.cli_inputs import relocate_tool_base
+
+        parent = self.program_data / "deepfake-lens"
+        with self._windows(), contextlib.redirect_stderr(io.StringIO()):
+            relocate_tool_base([self.profile])
+        self.assertEqual([call for call in self.calls if call[0] == "shared"], [("shared", str(parent))])
+        self.assertLess(self.calls.index(("shared", str(parent))), self.calls.index(("make", str(parent / "alice"))))
+        # the parent exists now (another account's run, or this one's): verified, never re-permissioned
+        import shutil
+
+        shutil.rmtree(parent / "alice")
+        self.calls.clear()
+        native_path.set_tool_cache_base(None)
+        with self._windows(), contextlib.redirect_stderr(io.StringIO()):
+            relocate_tool_base([self.profile])
+        self.assertNotIn("shared", [kind for kind, _ in self.calls])
+        self.assertIn(("parent", str(parent)), self.calls)
+        # a candidate in the profile (no overlap with this examined folder) never gets it either
+        self.calls.clear()
+        native_path.set_tool_cache_base(None)
+        with self._windows(), contextlib.redirect_stderr(io.StringIO()):
+            relocate_tool_base([self.program_data / "elsewhere"])
+        self.assertNotIn("shared", [kind for kind, _ in self.calls])
+
     def test_a_server_started_in_the_profile_relocates(self) -> None:
         """cd ~; deepfake-lens web: the default read root is the profile itself."""
         from deepfake_lens import native_path
@@ -490,6 +520,67 @@ class WindowsAclDecisionTest(unittest.TestCase):
         from deepfake_lens.windows_acl import Ace, Security
 
         return Security(owner, [Ace(kind, 0, mask, sid) for kind, mask, sid in aces])
+
+    def _flagged(self, owner: str, *aces: tuple[int, int, int, str]) -> object:
+        from deepfake_lens.windows_acl import Ace, Security
+
+        return Security(owner, [Ace(*ace) for ace in aces])
+
+    # R23-6 (round 23): `icacls C:\ProgramData` on Windows 10/11 —
+    #   NT AUTHORITY\SYSTEM:(OI)(CI)(F)  BUILTIN\Administrators:(OI)(CI)(F)  CREATOR OWNER:(OI)(CI)(IO)(F)
+    #   BUILTIN\Users:(OI)(CI)(RX)  BUILTIN\Users:(CI)(WD,AD,WEA,WA)
+    # and what a folder made under it by plain mkdir inherits (flags | INHERITED_ACE; the CREATOR OWNER entry stays
+    # inherit-only with its generic mask and an effective full-control entry for the creator is added).
+    def _program_data_child(self, creator: str) -> object:
+        from deepfake_lens import windows_acl as w
+
+        full, inherited = 0x1F01FF, w.INHERITED_ACE
+        oi_ci = w.OBJECT_INHERIT_ACE | w.CONTAINER_INHERIT_ACE
+        return self._flagged(
+            creator,
+            (0, oi_ci | inherited, full, w.SID_SYSTEM),
+            (0, oi_ci | inherited, full, w.SID_ADMINISTRATORS),
+            (0, inherited, full, creator),
+            (0, oi_ci | w.INHERIT_ONLY_ACE | inherited, w.GENERIC_ALL, w.SID_CREATOR_OWNER),
+            (0, oi_ci | inherited, 0x1200A9, self.USERS),
+            (0, w.CONTAINER_INHERIT_ACE | inherited, w.FILE_WRITE_DATA | w.FILE_APPEND_DATA | w.FILE_WRITE_EA | w.FILE_WRITE_ATTRIBUTES, self.USERS),
+        )
+
+    def test_the_default_program_data_inheritance_is_a_safe_parent(self) -> None:
+        """R23-6: the CREATOR OWNER (IO) entry applies to children only — the R22-2 check refused every default
+        parent for it (the verifier's p8_winacl probe), so the relocation never happened on a real Windows."""
+        from deepfake_lens import windows_acl as w
+
+        self.assertTrue(w.dacl_parent_safe(self._program_data_child(self.USER), self.USER))  # type: ignore[arg-type]
+        # an administrator's elevated token makes Administrators the owner
+        self.assertTrue(w.dacl_parent_safe(self._program_data_child(w.SID_ADMINISTRATORS), self.USER))  # type: ignore[arg-type]
+        # residual (documented): a parent another account made first is not this user's
+        self.assertFalse(w.dacl_parent_safe(self._program_data_child(self.OTHER), self.USER))  # type: ignore[arg-type]
+        # an entry that applies to the folder itself still counts: Users may delete entries
+        unsafe = self._flagged(self.USER, (0, w.CONTAINER_INHERIT_ACE, w.FILE_DELETE_CHILD, self.USERS))
+        self.assertFalse(w.dacl_parent_safe(unsafe, self.USER))  # type: ignore[arg-type]
+
+    def test_the_shared_parent_acl_this_tool_sets_is_a_safe_parent(self) -> None:
+        from deepfake_lens import windows_acl as w
+
+        self.assertEqual(w.SHARED_PARENT_SDDL, "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FA;;;OW)(A;OICIIO;FA;;;CO)(A;;0x1200ad;;;BU)")
+        oi_ci, full = w.OBJECT_INHERIT_ACE | w.CONTAINER_INHERIT_ACE, 0x1F01FF
+        sddl = self._flagged(
+            self.USER, (0, oi_ci, full, w.SID_SYSTEM), (0, oi_ci, full, w.SID_ADMINISTRATORS), (0, 0, full, w.SID_OWNER_RIGHTS),
+            (0, oi_ci | w.INHERIT_ONLY_ACE, full, w.SID_CREATOR_OWNER), (0, 0, 0x1200AD, self.USERS),
+        )
+        self.assertTrue(w.dacl_parent_safe(sddl, self.USER))  # type: ignore[arg-type]
+        self.assertEqual(0x1200AD & w.REPLACE_RIGHTS, 0)  # Users: read, traverse, add a folder — never delete or replace
+
+    def test_inherit_only_entries_of_the_users_own_folder(self) -> None:
+        """R23-6: in this user's own folder an inherit-only entry decides who controls what this user writes inside —
+        CREATOR OWNER (this user) is fine, another account is not."""
+        from deepfake_lens import windows_acl as w
+
+        oi_ci_io, full = w.OBJECT_INHERIT_ACE | w.CONTAINER_INHERIT_ACE | w.INHERIT_ONLY_ACE, 0x1F01FF
+        base = ((0, 0, full, self.USER), (0, 0, full, w.SID_SYSTEM))
+        self.assertTrue(w.dacl_owner_only(self._flagged(self.USER, *base, (0, oi_ci_io, w.GENERIC_ALL, w.SID_CREATOR_OWNER)), self.USER))  # type: ignore[arg-type]
+        self.assertFalse(w.dacl_owner_only(self._flagged(self.USER, *base, (0, oi_ci_io, full, self.OTHER)), self.USER))  # type: ignore[arg-type]
 
     def test_owner_only(self) -> None:
         from deepfake_lens import windows_acl as w
