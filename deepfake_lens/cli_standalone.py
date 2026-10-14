@@ -355,6 +355,38 @@ def tool_attribution(path: Path) -> Any:
     return classify_metadata({})
 
 
+TOOL_ATTRIBUTION_LAYER = "tool_attribution"
+TOOL_ATTRIBUTION_LABEL = "생성 도구 표지 대조"
+# R24-5 (round 24): the tool-attribution layer of a file it could not read.
+TOOL_ATTRIBUTION_READ_FAILED = "생성 도구 표지 대조 실패 — 파일을 읽지 못했습니다({reason}). 이 계층은 실행되지 않았습니다"
+
+
+def tool_attribution_layer(path: Path | str) -> dict[str, Any]:
+    """The ``tool_candidates`` layer diagnostic of ``classify`` / api-serve ``/api/classify``.
+
+    R24-5 (round 24): a file this process cannot read (permissions, removed,
+    an I/O error) is the layer ``failed`` — ``reference_band`` unavailable,
+    ``diagnostic.status`` "failed" and the reason — and the command still
+    prints the conclusion (the scan row's: the check failed, 판단 불가), as
+    forensic / explain / evidence / legal-report do. ``tool_attribution``'s
+    OSError used to end ``classify`` with 「처리 중 예기치 않은
+    오류(PermissionError)」 (exit 1, no result) and api-serve's
+    ``/api/classify`` with a 500.
+    """
+    from .error_text import failure_reason
+    from .layer_diagnostic import to_layer_diagnostic
+
+    try:
+        raw = tool_attribution(Path(path)).to_json()
+    except OSError as exc:
+        note = TOOL_ATTRIBUTION_READ_FAILED.format(reason=failure_reason(exc))
+        raw = {
+            "reference_band": UNAVAILABLE_BAND, "reference_note": note, "status": "failed",
+            "reason": failure_reason(exc), "signals": [], "limitations": [note],
+        }
+    return to_layer_diagnostic(TOOL_ATTRIBUTION_LAYER, raw, layer_label=TOOL_ATTRIBUTION_LABEL)
+
+
 def combined_verdict(payloads: Iterable[Mapping[str, Any]]) -> tuple[str, str]:
     """Combine per-file analysis results with the same rule order as ``decide``.
 
@@ -388,4 +420,5 @@ __all__ = [
     "gated_pixel_layer",
     "member_rows_text",
     "symlink_layer",
+    "tool_attribution_layer",
 ]

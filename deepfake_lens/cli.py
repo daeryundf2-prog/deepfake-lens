@@ -72,7 +72,7 @@ from .cli_standalone import (
     gated_pixel_layer,
     member_rows_text,
     symlink_layer,
-    tool_attribution,
+    tool_attribution_layer,
 )
 from .result_types import VERDICT_LABELS, Verdict
 from .webapp import run_server
@@ -1066,7 +1066,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         payload["tool_candidates"] = (
             symlink_layer("tool_attribution", "생성 도구 표지 대조")
             if is_symlink_path(args.file)  # G6
-            else to_layer_diagnostic("tool_attribution", tool_attribution(args.file).to_json(), layer_label="생성 도구 표지 대조")
+            else tool_attribution_layer(args.file)  # R24-5: an unreadable file is a failed layer, not an exit 1
         )
         emit(payload, fmt=args.format, json_out=args.json_out)
         return 0

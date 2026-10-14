@@ -44,7 +44,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `OpenCV mp4v 인코더 없음` | `pixel`/`video` extra(opencv-python — mp4v 인코더 포함 빌드) | test_native_path.py |
 | `POSIX FIFO` | Windows가 아닌 OS(POSIX `os.mkfifo` — 검사 폴더의 FIFO·소켓이 보고서 재분석에서 스캔과 같은 건너뜀 행이 되는지 확인, R20-1) | test_servers.py |
 | `POSIX signals` | Windows가 아닌 OS(POSIX — 자식 프로세스에 SIGTERM/SIGINT/SIGHUP을 보내 기본 동작과 스테이징 폴더 정리 확인) | test_audio_worker.py, test_native_path.py, test_shutdown.py |
-| `POSIX uid` | Windows가 아닌 OS(POSIX — `os.getuid`로 폴더 소유자를 확인하는 환경별 numba 캐시 폴더, R22-9) | test_audio_worker.py |
+| `POSIX uid` | Windows가 아닌 OS(POSIX — `os.getuid`로 폴더 소유자를 확인하는 환경별 numba 캐시 폴더, R22-9; 모드 0 파일을 root가 아닌 사용자(root면 nobody)로 `classify`, R24-5) | test_audio_worker.py, test_standalone_contract.py |
 | `PR_SET_PDEATHSIG is Linux` | Linux(`prctl(PR_SET_PDEATHSIG)` — 부모가 SIGKILL로 죽으면 ffmpeg 등 자식 프로세스도 함께 종료, R15-1) | test_shutdown.py |
 | `Pillow + numpy needed for the fixture` | `dev` extra(Pillow, numpy) | test_report_labels_ko.py |
 | `Pillow + numpy required to write EXIF/XMP fixtures` | `dev` extra(Pillow, numpy) | test_image_metadata_exif.py |

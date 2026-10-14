@@ -519,8 +519,7 @@ def create_app(
 
     @app.post("/api/classify")
     def classify(file_path: str):
-        from .cli_standalone import tool_attribution
-        from .layer_diagnostic import to_layer_diagnostic
+        from .cli_standalone import tool_attribution_layer
         try:
             path = confine_request_path(file_path, default_folder)
         except ReadRootDenied:
@@ -528,9 +527,7 @@ def create_app(
         require_request_file(path)  # P8: missing 404, folder 400
         try:
             data = _verdict_payload(path, "classify")
-            data["tool_candidates"] = to_layer_diagnostic(
-                "tool_attribution", tool_attribution(path).to_json(), layer_label="생성 도구 표지 대조"
-            )
+            data["tool_candidates"] = tool_attribution_layer(path)  # R24-5: an unreadable file is a failed layer, not a 500
             return {"status": "success", "data": data}
         except Exception as exc:
             logger.exception("request failed")
