@@ -205,13 +205,18 @@ def environment_cache_root() -> Path | None:
     cache file. It is used only on POSIX, when the folder is this user's own and nobody else can write it
     (``native_path.claim_tool_base``: a root-owned system Python or a shared install is skipped), and never
     inside an examined folder.
+
+    R23-2 (round 23): nor inside the folder of an analyzed file — ``cd proj; .venv/bin/python -m deepfake_lens
+    classify a.wav`` (a project folder holding its ``.venv`` and the sample) made
+    ``proj/.venv/var/deepfake-lens/numba/<key>/published``, because only a scan's folders were examined. The
+    check runs before :func:`native_path.claim_tool_base`, which would make the folder.
     """
     if not hasattr(os, "getuid"):
         return None
-    from .native_path import _inside_examined, claim_tool_base
+    from .native_path import claim_tool_base, inside_examined_or_file_folder
 
     base = Path(sys.prefix) / "var" / "deepfake-lens"
-    if not base.is_absolute() or _inside_examined(str(base)) or not claim_tool_base(base):
+    if not base.is_absolute() or inside_examined_or_file_folder(str(base)) or not claim_tool_base(base):
         return None
     return base / "numba" / _runtime_key()
 

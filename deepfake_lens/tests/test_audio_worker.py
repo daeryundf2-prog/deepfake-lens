@@ -12,6 +12,7 @@ import importlib.util
 import json
 import math
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -173,6 +174,92 @@ class PrivateNumbaCacheTest(unittest.TestCase):
     def test_no_shared_cache_under_a_relative_home(self) -> None:
         with mock.patch.object(Path, "home", return_value=Path("relative-home")):
             self.assertIsNone(audio_worker.shared_cache_root())
+
+
+@unittest.skipUnless(hasattr(os, "getuid"), "POSIX uid")
+class EnvironmentCacheOutsideAnalyzedFileFoldersTest(unittest.TestCase):
+    """R23-2 (round 23): the per-environment numba cache (R22-9, ``<sys.prefix>/var/deepfake-lens``) was skipped only
+    inside a scanned folder. ``cd proj; .venv/bin/python -m deepfake_lens classify a.wav`` — a project folder holding
+    its ``.venv`` and the sample — made ``proj/.venv/var/deepfake-lens/numba/<key>/published`` next to the evidence
+    (QA-IN-1). The folders of the analyzed files are examined for it too, for every single-file command."""
+
+    COMMANDS = (
+        ["classify", "{a}"], ["forensic", "{a}"], ["explain", "{a}"], ["legal-report", "{a}"], ["audio", "{a}"],
+        ["evidence", "{a}"], ["evidence-statement", "{a}"], ["compare", "{a}", "{b}"], ["multimodal", "{a}", "{b}"],
+        ["scan", "{case}"], ["batch", "{case}"],
+    )
+
+    def setUp(self) -> None:
+        from deepfake_lens import native_path
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.addCleanup(native_path.set_examined_folders, [])
+        self.addCleanup(native_path.set_tool_cache_base, None)
+        self.root = Path(self._tmp.name).resolve()
+        self.case = self.root / "proj"
+        self.case.mkdir()
+        _write_tone(self.case / "a.wav", seconds=1)
+        _write_tone(self.case / "b.wav", seconds=1, hz=440.0)
+
+    def test_no_single_file_command_uses_an_environment_inside_the_files_folder(self) -> None:
+        import contextlib
+        import io
+
+        from deepfake_lens import native_path
+        from deepfake_lens.cli import build_parser
+        from deepfake_lens.cli_inputs import check_command_inputs
+
+        parser, _ = build_parser()
+        inside = self.case / ".venv"
+        elsewhere = self.root / "venv-elsewhere"
+        names = {"a": str(self.case / "a.wav"), "b": str(self.case / "b.wav"), "case": str(self.case)}
+        with mock.patch.dict(os.environ, {"HOME": str(self.root / "home")}):
+            for template in self.COMMANDS:
+                argv = [part.format(**names) for part in template]
+                with self.subTest(argv=argv[0]):
+                    shutil.rmtree(inside, ignore_errors=True)  # each command on its own
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        check_command_inputs(parser.parse_args(argv))
+                    with mock.patch.object(sys, "prefix", str(inside)):
+                        self.assertIsNone(audio_worker.environment_cache_root())
+                        self.assertNotIn(inside / "var" / "deepfake-lens" / "numba" / audio_worker._runtime_key(), audio_worker._cache_roots())
+                    self.assertFalse(inside.exists())  # not even the folder (claim_tool_base would have made it)
+                    # an environment outside the files' folders is still used (R22-9)
+                    with mock.patch.object(sys, "prefix", str(elsewhere)):
+                        self.assertEqual(audio_worker.environment_cache_root(), elsewhere / "var" / "deepfake-lens" / "numba" / audio_worker._runtime_key())
+                    native_path.set_examined_folders([])
+
+    @unittest.skipUnless(HAVE_LIBROSA, "librosa not installed")
+    def test_a_project_venv_next_to_the_sample_gets_nothing(self) -> None:
+        """The verifier's layout, end to end: a real venv in the sample's folder runs classify / evidence / audio."""
+        import sysconfig
+
+        venv = self.case / ".venv"
+        subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True, timeout=120)
+        purelib = Path(subprocess.run([str(venv / "bin" / "python"), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+                                      capture_output=True, text=True, check=True, timeout=60).stdout.strip())
+        paths = {sysconfig.get_paths()["purelib"], sysconfig.get_paths()["platlib"], str(PACKAGE.parent)}
+        (purelib / "deepfake-lens-test.pth").write_text("\n".join(sorted(paths)) + "\n", encoding="utf-8")
+        env = _clean_env(str(self.root / "home"))
+        env.pop("PYTHONPATH")
+
+        def snapshot() -> list[tuple[str, int, int]]:
+            return sorted((str(p.relative_to(self.case)), p.lstat().st_size, p.lstat().st_mtime_ns) for p in self.case.rglob("*"))
+
+        before = snapshot()
+        for argv in (["classify", "a.wav", "--format", "json"], ["evidence", "a.wav"], ["audio", "b.wav"]):
+            with self.subTest(argv=argv[0]):
+                done = subprocess.run([str(venv / "bin" / "python"), "-m", "deepfake_lens", *argv], env=env, cwd=self.case,
+                                      capture_output=True, text=True, timeout=600)
+                self.assertEqual(done.returncode, 0, done.stderr[-2000:])
+                if argv[0] == "classify":
+                    coverage = {entry["check"]: entry["status"] for entry in json.loads(done.stdout)["coverage"]}
+                    self.assertEqual(coverage["audio_features"], "ran")
+        self.assertEqual(snapshot(), before)
+        self.assertFalse((venv / "var").exists())
+        # the worker still published its cache — under HOME's tool folder
+        self.assertEqual(len(list(Path(self.root, "home", ".cache", "deepfake-lens", "numba").glob("*/published"))), 1)
 
 
 @unittest.skipUnless(HAVE_LIBROSA, "librosa not installed")

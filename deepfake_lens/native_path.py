@@ -760,18 +760,29 @@ def claim_tool_base(base: Path) -> bool:
 
 # R20-7 (round 20): the folders the running command examines (set by the CLI before any work).
 _EXAMINED_FOLDERS: list[str] = []
+# R23-2 (round 23): the folders of the files a single-file command analyzes (classify a.wav → its folder).
+_EXAMINED_FILE_FOLDERS: list[str] = []
 TEMP_BASE_INSIDE_EXAMINED = "검사 대상 폴더 안"
 
 
-def set_examined_folders(folders: list[str]) -> None:
+def set_examined_folders(folders: list[str], file_folders: list[str] | tuple[str, ...] = ()) -> None:
     """R20-7: the folders the command reads — a temp-folder candidate inside one is skipped (with the R15-6 notice).
 
     When the system temp folder itself is inside one, Python's own default
     (``tempfile.tempdir``, used by any library that makes a temp file without
     a folder) becomes the session folder's base, so nothing probes or writes
     the evidence folder.
+
+    R23-2 (round 23): ``file_folders`` — the folders of the analyzed files
+    (``check_tool_folders``' examined list). No persistent tool folder is
+    made inside one (:func:`inside_examined_or_file_folder`: the per-environment
+    numba cache of R22-9 wrote ``.venv/var/deepfake-lens`` next to
+    ``a.wav`` for ``cd proj; .venv/bin/python -m deepfake_lens classify
+    a.wav``). The session temp folder still ignores them (documented
+    residual: it is removed when the command ends).
     """
     _EXAMINED_FOLDERS[:] = [os.path.realpath(folder) for folder in folders]
+    _EXAMINED_FILE_FOLDERS[:] = [os.path.realpath(folder) for folder in file_folders]
     if tempfile.tempdir is None and _inside_examined(_system_temp_dir()):
         base = usable_temp_base()
         if base is not None:
@@ -786,6 +797,14 @@ def examined_folders() -> list[str]:
 def _inside_examined(base: str) -> bool:
     real = os.path.realpath(base)
     return any(real == folder or real.startswith(folder.rstrip(os.sep) + os.sep) for folder in _EXAMINED_FOLDERS)
+
+
+def inside_examined_or_file_folder(base: str) -> bool:
+    """R23-2: ``base`` is an examined folder, inside one, or inside the folder of an analyzed file."""
+    real = os.path.realpath(base)
+    return _inside_examined(base) or any(
+        real == folder or real.startswith(folder.rstrip(os.sep) + os.sep) for folder in _EXAMINED_FILE_FOLDERS
+    )
 
 
 def usable_temp_base() -> str | None:
