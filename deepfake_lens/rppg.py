@@ -384,7 +384,7 @@ def _face_roi_samples(
     """
     import cv2
 
-    with native_safe_path(video_path) as native_video:  # R12-1: never a non-ASCII name to cv2
+    with native_safe_path(video_path, for_child=True) as native_video:  # R12-1: never a non-ASCII name to cv2; R24-2: nor a protocol name
         capture = cv2.VideoCapture(native_video)
         if not capture.isOpened():
             capture.release()

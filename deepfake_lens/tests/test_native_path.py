@@ -1394,7 +1394,9 @@ class _NativeCallVisitor(ast.NodeVisitor):
 
 # R23-1 (round 23): calls that hand the yielded name to another process (its own working folder, or a program that
 # reads a relative "a:b.mp4" as a protocol). audio_worker.extract_features makes its path absolute itself.
-CHILD_CALLS = {("shutdown", "run_child"), ("_SYNCNET_PIPELINE", "inference")}
+# R24-2 (round 24): and the FFmpeg readers inside this process — cv2.VideoCapture (FFmpeg backend) and librosa.load
+# (audioread runs ffmpeg) read a relative "c:v.mp4" as the protocol "c" just the same.
+CHILD_CALLS = {("shutdown", "run_child"), ("_SYNCNET_PIPELINE", "inference"), ("cv2", "VideoCapture"), ("librosa", "load")}
 
 
 class ChildPathTest(unittest.TestCase):
@@ -1458,6 +1460,11 @@ class ChildPathTest(unittest.TestCase):
                         offenders.append(label)
         self.assertEqual(offenders, [])
         self.assertGreaterEqual(len(found), 5, found)  # audio, lipsync ×2, video_analysis, video
+        # R24-2: the in-process FFmpeg readers are among them
+        per_module = {name: sum(1 for label in found if label.startswith(name + ":"))
+                      for name in ("video_analysis.py", "face_track.py", "rppg.py", "lipsync.py", "model_adapter.py", "multimodal.py", "audio.py")}
+        self.assertEqual(per_module, {"video_analysis.py": 3, "face_track.py": 1, "rppg.py": 1, "lipsync.py": 3,
+                                      "model_adapter.py": 1, "multimodal.py": 2, "audio.py": 2}, found)
 
     @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg 없음")
     def test_ffmpeg_gets_a_relative_name_with_a_colon_as_a_file(self) -> None:

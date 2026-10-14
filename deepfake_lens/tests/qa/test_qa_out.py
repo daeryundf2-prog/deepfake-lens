@@ -49,6 +49,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import shutil
 import struct
 import tempfile
 import threading
@@ -721,6 +722,57 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
             expected = "ran" if importlib.util.find_spec("librosa") is not None else "skipped"
             self.assertEqual(audio, {"a.wav": [expected], "b.wav": [expected]})
             self.assertEqual(sorted(os.listdir(folder)), ["a.wav", "b.wav"])
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg 없음")
+    def test_relative_names_with_a_colon_match_the_servers(self) -> None:
+        """QA-OUT-4: 같은 폴더를 CLI, GUI(/api/scan), API 서버로 각각 검사 → 세 결과의 결론·근거·확률·임계값 출처가 동일.
+        R24-2 (round 24): a relative name whose first component holds a ":" (`c:v.mp4`, a folder `ev:2026` — a macOS
+        Finder name "2026/10/15" is `2026:10:15` in POSIX) reached cv2.VideoCapture (FFmpeg backend) unchanged inside
+        the process, and FFmpeg read it as the protocol `c` / `ev`: `cd case; classify c:v.mp4` and `scan ev:2026` had
+        video_analysis failed 「비디오를 열 수 없습니다」 while the servers (absolute names) ran it. The CLI as typed —
+        `scan ev:2026`, `cd ev:2026; scan .`, `cd ev:2026; classify c:v.mp4` and `./c:v.mp4` — now equals /api/scan
+        (and the absolute classify), with video_analysis ran."""
+        import os
+        import subprocess
+        import sys
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp).resolve()
+            folder = project / "ev:2026"
+            folder.mkdir()
+            made = subprocess.run(
+                ["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-f", "lavfi",
+                 "-i", "testsrc=size=64x64:rate=10:duration=1", "-shortest", "-y", str(folder / "c:v.mp4")],
+                capture_output=True, timeout=120, check=False,
+            )
+            self.assertEqual(made.returncode, 0, made.stderr[-500:])
+            env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, (str(REPO_ROOT), os.environ.get("PYTHONPATH"))))}
+
+            def run(args: list[str], cwd: Path) -> dict[str, Any]:
+                done = subprocess.run([sys.executable, "-m", "deepfake_lens", *args, "--format", "json"],
+                                      capture_output=True, env=env, cwd=cwd, timeout=600, check=False)
+                self.assertEqual(done.returncode, 0, done.stderr.decode("utf-8", "replace")[-2000:])
+                payload: dict[str, Any] = json.loads(done.stdout.decode("utf-8"))
+                return payload
+
+            web = _norm_payload(self._web_payload(folder), folder)
+            self.assertEqual(web["order"], ["c:v.mp4"])
+            self.assertIn(("video_analysis", "ran", ""), [(c, st, r or "") for c, st, r in _core(web["items"]["c:v.mp4"])["coverage"]])
+            self._assert_same(web, _norm_payload(run(["scan", "ev:2026"], project), folder), "CLI `scan ev:2026`")
+            self._assert_same(web, _norm_payload(run(["scan", "."], folder), folder), "CLI `cd ev:2026; scan .`")
+            if HAVE_FASTAPI:
+                self._assert_same(web, _norm_payload(self._api_payload(folder), folder), "/api/scan (FastAPI)")
+
+            def without_path(payload: dict[str, Any]) -> dict[str, Any]:
+                return {key: value for key, value in payload.items() if key not in ("path", "path_b64")}
+
+            absolute = run(["classify", str(folder / "c:v.mp4")], project)
+            coverage = {entry["check"]: entry["status"] for entry in absolute["coverage"]}
+            self.assertEqual(coverage["video_analysis"], "ran")
+            for arg in ("c:v.mp4", "./c:v.mp4"):
+                with self.subTest(classify=arg):
+                    self.assertEqual(without_path(run(["classify", arg], folder)), without_path(absolute))
+            self.assertEqual(sorted(os.listdir(folder)), ["c:v.mp4"])
 
     def _assert_hostile_rows(self, cli: dict[str, Any]) -> None:
         """What the CLI itself must report for the R1 hostile folder."""

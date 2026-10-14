@@ -332,7 +332,8 @@ def _extract_features(path: Path, *, segment_seconds: int, raise_on_decode: bool
 
     try:
         # R12-2: libsndfile/audioread raise UnicodeEncodeError on a non-UTF-8 name.
-        with native_safe_path(path) as native_audio:
+        # R24-2: for_child — librosa's audioread fallback runs ffmpeg, which reads a relative "c:v.m4a" as a protocol.
+        with native_safe_path(path, for_child=True) as native_audio:
             y, sr = librosa.load(native_audio, sr=DEFAULT_SAMPLE_RATE, duration=segment_seconds)
     except Exception:
         if raise_on_decode:

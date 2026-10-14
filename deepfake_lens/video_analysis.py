@@ -110,7 +110,8 @@ def analyze_video_temporal(
 
     try:
         # R12-1: a non-UTF-8 name crashed cv2 (SIGSEGV) — ASCII staged name only.
-        with native_safe_path(video_path) as native_video:
+        # R24-2: for_child — FFmpeg (cv2's backend) reads a relative "c:v.mp4" as the protocol "c".
+        with native_safe_path(video_path, for_child=True) as native_video:
             cap = cv2.VideoCapture(native_video)
             opened = cap.isOpened()
             if opened:
@@ -320,7 +321,7 @@ def _sample_frames(
     except ImportError:
         return []
 
-    with native_safe_path(path) as native_video:  # R12-1
+    with native_safe_path(path, for_child=True) as native_video:  # R12-1; R24-2: never an FFmpeg protocol name
         return _sample_open_frames(cv2.VideoCapture(native_video), sample_rate, max_frames)
 
 

@@ -967,7 +967,7 @@ def _run_video_frames(
 @quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
 def _extract_sampled_frames(cv2, media_path: Path, out_dir: Path, count: int) -> list[Path]:
     """Decode ``count`` evenly spaced frames to PNG files in ``out_dir``."""
-    with native_safe_path(media_path) as native_video:  # R12-1: never a non-ASCII name to cv2
+    with native_safe_path(media_path, for_child=True) as native_video:  # R12-1: never a non-ASCII name to cv2; R24-2: nor a protocol name
         capture = cv2.VideoCapture(native_video)
         if not capture.isOpened():
             raise RuntimeError(f"영상을 열 수 없습니다: {media_path}")

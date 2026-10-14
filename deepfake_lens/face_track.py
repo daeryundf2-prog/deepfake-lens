@@ -120,7 +120,7 @@ def analyze_face_track(
     except ImportError:
         return _unavailable(limitations, "cv2/numpy가 없어 얼굴 트랙 분석을 건너뜁니다.")
 
-    with native_safe_path(video_path) as native_video:  # R12-1: never a non-ASCII name to cv2
+    with native_safe_path(video_path, for_child=True) as native_video:  # R12-1: never a non-ASCII name to cv2; R24-2: nor a protocol name
         cap = cv2.VideoCapture(native_video)
         if not cap.isOpened():
             return _unavailable(limitations, "영상을 디코딩할 수 없습니다.")

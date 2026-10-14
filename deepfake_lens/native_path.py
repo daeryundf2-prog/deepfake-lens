@@ -1233,6 +1233,13 @@ def native_safe_path(path: str | os.PathLike[str], *, for_child: bool = False) -
     the file this process means. Without it a relative ASCII path reached
     the audio worker unchanged and was resolved against the worker's cache
     folder: every audio check of ``scan case`` / ``cd case; scan .`` failed.
+
+    R24-2 (round 24): also for a name read by FFmpeg inside this process —
+    ``cv2.VideoCapture`` (FFmpeg backend) and ``librosa.load`` (whose
+    audioread fallback runs ``ffmpeg``): a relative ``c:v.mp4`` (a macOS
+    folder named "2026/10/15" is ``2026:10:15`` in POSIX) was opened as the
+    protocol ``c`` and every video check of ``cd case; classify c:v.mp4``
+    failed while the absolute name worked.
     """
     text = os.fspath(path)
     if isinstance(text, bytes):
