@@ -51,7 +51,8 @@
         "properties": {
           "path": { "type": "string" },
           "marker": { "const": "서명 제외(클라이언트 제공 결과)" },
-          "reason": { "type": "string" }
+          "reason": { "type": "string" },
+          "name_source": { "enum": ["server_upload", "client"], "description": "R22-8: upload rows only — server_upload when this server process produced an upload row of that path and sha256 (/api/analyze-upload, /api/check), client when the name is only the client's text (its reason says 클라이언트 제공 이름). Upload names are limited to 255 characters, relative, with no empty, . or .. component (400 otherwise)." }
         }
       }
     },

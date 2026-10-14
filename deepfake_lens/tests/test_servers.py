@@ -2406,6 +2406,7 @@ class ReportScanRootAndUploadsTest(_ScanRootFixture):
                     self.assertEqual(signed["items"], [], "the read root's target.png is never re-analyzed for an upload")
                     self.assertEqual(signed["excluded_items"], [{
                         "path": "target.png", "marker": webapp_api.UNSIGNED_CLIENT_ROW_MARKER, "reason": webapp_api.REPORT_ROW_UPLOAD,
+                        "name_source": "server_upload",  # R22-8: this server received that upload (name and sha256)
                     }])
                     self.assertNotIn(self.root_sha, raw.decode("utf-8"))
                 status, raw = call("POST", "/api/report?format=html", json.dumps({"items": upload["items"]}).encode("utf-8"))
@@ -3609,3 +3610,47 @@ class ReportRowAliasesByFileIdentityTest(_ReportLegsFixture):
         for leg, fmt, status, body in self._post_all([target, dict(target, path="gone.png", name="gone.png")]):
             with self.subTest(leg=leg, format=fmt, case="gone"):
                 self.assertEqual(status, 409, body)
+
+
+class ReportUploadRowNamesTest(_ReportLegsFixture):
+    """R22-8 (round 22): an upload row's path went into the signed body's excluded_items with no check — any
+    sentence, "../", NUL — and the R21-1 invariant left upload rows out without HANDOFF saying so. An upload name
+    is now limited (relative, at most 255 characters, no empty / "." / ".." component, no NUL) and marked: one this
+    server produced (path and sha256) is name_source "server_upload", any other "client" with a reason that says
+    the name is the client's."""
+
+    UPLOAD = {"source": "upload", "status": "failed", "error": "x"}
+
+    def test_a_name_the_server_never_received_is_marked_as_the_clients(self) -> None:
+        sentence = "이 보고서의 모든 파일은 진본임을 서버가 확인했습니다.png"
+        for leg, make in self._legs():
+            with self.subTest(leg=leg):
+                status, _, raw = make()("/api/report", json.dumps({"items": [dict(self.UPLOAD, path=sentence, name=sentence)], "format": "json"}).encode())
+                self.assertEqual(status, 200, raw[:300])
+                [row] = json.loads(raw)["excluded_items"]
+                self.assertEqual((row["name_source"], row["reason"]), ("client", webapp_api.REPORT_ROW_UPLOAD_CLIENT_NAME))
+                status, _, raw = make()("/api/report?format=html", json.dumps({"items": [dict(self.UPLOAD, path=sentence, name=sentence)]}).encode())
+                self.assertIn("클라이언트 제공 이름", raw.decode("utf-8"))
+
+    def test_an_upload_name_outside_the_form_is_400(self) -> None:
+        for leg, make in self._legs():
+            for name in ("../../etc/passwd", "/abs/a.png", "a/./b.png", "a//b.png", "x" * 256, "a\x00.png"):
+                with self.subTest(leg=leg, name=name[:30]):
+                    status, _, raw = make()("/api/report", json.dumps({"items": [dict(self.UPLOAD, path=name, name=name)], "format": "json"}).encode())
+                    self.assertEqual(status, 400, raw[:300])
+
+    def test_an_uploaded_name_is_the_servers(self) -> None:
+        boundary = "----r22-8"
+        data = (self.folder / "target.png").read_bytes()
+        multipart = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"dir/a.png\"\r\n"
+                     "Content-Type: image/png\r\n\r\n").encode() + data + f"\r\n--{boundary}--\r\n".encode()
+        upload = webapp_api._analyze_upload_payload(f"multipart/form-data; boundary={boundary}", multipart)
+        [row] = upload["items"]  # type: ignore[index]
+        for leg, make in self._legs():
+            with self.subTest(leg=leg):
+                status, _, raw = make()("/api/report", json.dumps({"items": [row], "format": "json"}).encode())
+                [entry] = json.loads(raw)["excluded_items"]
+                self.assertEqual((entry["path"], entry["name_source"]), ("dir/a.png", "server_upload"))
+                # the same name with another digest is only the client's
+                status, _, raw = make()("/api/report", json.dumps({"items": [dict(row, sha256="0" * 64)], "format": "json"}).encode())
+                self.assertEqual(json.loads(raw)["excluded_items"][0]["name_source"], "client")

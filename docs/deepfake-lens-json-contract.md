@@ -499,7 +499,16 @@ CLI's reports have no such field). Upload results (`/api/analyze-upload`,
 `/api/check`) are not kept on the server: their rows carry `"source":
 "upload"` (P6) and a report lists every such row under `excluded_items` with
 `업로드 파일 — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다` —
-never re-analyzed from a same-named file of the read root. Make signed
+never re-analyzed from a same-named file of the read root. R22-8 (round 22):
+an upload row's `path` is client text inside the signed body, so it is
+limited — relative, at most 255 characters, no empty, `.` or `..`
+component, no NUL (else HTTP 400 `업로드 항목 N번의 이름이 업로드 파일 이름
+형식이 아닙니다(…)`) — and marked: `name_source: "server_upload"` when this
+server process produced an upload row of that path and `sha256`
+(`/api/analyze-upload`, `/api/check`), otherwise `name_source: "client"`
+with the reason `업로드 파일(클라이언트 제공 이름 — 이 서버가 받은 업로드
+기록에 없음) — …`, which every rendering prints. This is the one exception to
+"no posted text is signed" (R21-1). Make signed
 reports from folder scans. R19-3 (round 19): the signed body carries
 `analysis_options` — `{pixel, heatmaps, deep_signals, default_engine,
 model_path, fusion_profile}`, the options the server re-analyzed every row

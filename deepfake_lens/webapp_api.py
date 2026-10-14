@@ -196,6 +196,7 @@ def _mark_uploads(records: list[dict[str, object]]) -> list[dict[str, object]]:
         # to_json) — its display_name follows it.
         record["display_name"] = display_name(str(record.get("name") or ""))
         _sync_path_b64(record)
+    _record_upload_rows(records)  # R22-8: the names this server received, for /api/report
     return records
 
 
@@ -1103,6 +1104,7 @@ def _check_text_payload(text: str, *, watermark_secret: str | None = None, water
     record["path"] = "pasted-text"
     record["source"] = UPLOAD_SOURCE  # P6: pasted text is no file of a read root
     _sync_path_b64(record)
+    _record_upload_rows([record])  # R22-8
     return {
         "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "mode": "text",
@@ -1177,6 +1179,7 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
     record["path"] = escape_row_path(filename)  # R10-6: as /api/analyze-upload
     record["source"] = UPLOAD_SOURCE  # P6
     _sync_path_b64(record)
+    _record_upload_rows([record])  # R22-8
     return {
         "schema_version": SCAN_JSON_SCHEMA_VERSION,
         "mode": "file",
@@ -1365,6 +1368,51 @@ REPORT_ROW_OUTSIDE_SCAN_ROOT = "스캔 폴더 밖의 경로라 서버가 재분�
 REPORT_ROW_IDENTITY_MISMATCH = "path가 container::member와 일치하지 않습니다"
 # P6 (round 8): an upload row is never re-analyzed from the read root.
 REPORT_ROW_UPLOAD = "업로드 파일 — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다"
+# R22-8 (round 22): an upload row's path went into the signed body's excluded_items unchecked — any sentence,
+# "../", NUL. The name is still the client's (an upload has no file of the read roots), but it is now limited
+# (UPLOAD_ROW_NAME_MAX characters, relative, no "." / ".." / empty component; NUL is R22-6) and marked: a
+# name this server process received with that sha256 in /api/analyze-upload is "server_upload"; any other
+# is "client" and its reason says so.
+REPORT_ROW_UPLOAD_CLIENT_NAME = (
+    "업로드 파일(클라이언트 제공 이름 — 이 서버가 받은 업로드 기록에 없음) — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다"
+)
+UPLOAD_ROW_NAME_MAX = 255
+REPORT_UPLOAD_NAME_INVALID = (
+    "업로드 항목 {index}번의 이름이 업로드 파일 이름 형식이 아닙니다(상대 경로, {limit}자 이하, 빈·`.`·`..` 구성 요소 불가)"
+)
+_UPLOAD_NAMES: OrderedDict[tuple[str, str | None], None] = OrderedDict()
+_UPLOAD_NAMES_LOCK = threading.Lock()
+_UPLOAD_NAMES_MAX = 4096
+
+
+def _record_upload_rows(items: list[dict[str, object]]) -> None:
+    """R22-8: remember (row path, sha256) of every row this process produced for an upload (bounded, oldest dropped)."""
+    with _UPLOAD_NAMES_LOCK:
+        for item in items:
+            path, digest = item.get("path"), item.get("sha256")
+            if isinstance(path, str):
+                key = (path, digest if isinstance(digest, str) else None)
+                _UPLOAD_NAMES[key] = None
+                _UPLOAD_NAMES.move_to_end(key)
+        while len(_UPLOAD_NAMES) > _UPLOAD_NAMES_MAX:
+            _UPLOAD_NAMES.popitem(last=False)
+
+
+def _upload_name_source(row: dict[str, Any]) -> str:
+    """R22-8: "server_upload" when this process produced an upload row of that path and sha256, else "client"."""
+    digest = row.get("sha256")
+    key = (str(row.get("path")), digest if isinstance(digest, str) else None)
+    with _UPLOAD_NAMES_LOCK:
+        return "server_upload" if key in _UPLOAD_NAMES else "client"
+
+
+def _upload_name_valid(path: str) -> bool:
+    """R22-8: an upload row name — relative, at most UPLOAD_ROW_NAME_MAX characters, no empty / "." / ".." component."""
+    parts = path.replace("\\", "/").split("/")
+    return (
+        0 < len(path) <= UPLOAD_ROW_NAME_MAX and not os.path.isabs(path) and not path.startswith(("/", "\\"))
+        and not any(part in ("", ".", "..") for part in parts) and "\x00" not in path
+    )
 # R19-13 (round 19): the server's re-analysis of a posted row differs from the
 # row (sha256, status or verdict) or the row's file can no longer be
 # re-analyzed (deleted, an archive member gone, the analysis failed) — the
@@ -2141,8 +2189,18 @@ def _scan_root_label(scan_root: Path | None, roots: list[Path]) -> str | None:
 
 
 def _excluded_rows_json(excluded: list[tuple[Any, str]]) -> list[dict[str, object]]:
-    """The signed body's record of rows it does not vouch for (X2): path, marker, reason — no client verdict."""
-    return [{"path": item.path, "marker": UNSIGNED_CLIENT_ROW_MARKER, "reason": reason} for item, reason in excluded]
+    """The signed body's record of rows it does not vouch for (X2): path, marker, reason — no client verdict.
+
+    R22-8 (round 22): an upload row also carries ``name_source`` — "server_upload" (this server produced an
+    upload row of that name and sha256) or "client" (the name is only the client's text).
+    """
+    rows: list[dict[str, object]] = []
+    for item, reason in excluded:
+        row: dict[str, object] = {"path": item.path, "marker": UNSIGNED_CLIENT_ROW_MARKER, "reason": reason}
+        if reason in (REPORT_ROW_UPLOAD, REPORT_ROW_UPLOAD_CLIENT_NAME):
+            row["name_source"] = "server_upload" if reason == REPORT_ROW_UPLOAD else "client"
+        rows.append(row)
+    return rows
 
 
 def _report_payload(body: bytes, format_override: str | None = None, *, default_folder: Path | None = None) -> bytes | dict[str, object]:
@@ -2215,7 +2273,11 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
             upload = _upload_row_item(row)
             if upload is None:
                 return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason="path 값이 없습니다")}
-            uploads.append((upload, REPORT_ROW_UPLOAD))
+            if not _upload_name_valid(str(upload.path)):
+                return {"error": REPORT_UPLOAD_NAME_INVALID.format(index=index + 1, limit=UPLOAD_ROW_NAME_MAX)}  # R22-8
+            # R22-8: the name's source decides the reason every rendering prints
+            source = _upload_name_source({"path": upload.path, "sha256": row.get("sha256")})
+            uploads.append((upload, REPORT_ROW_UPLOAD if source == "server_upload" else REPORT_ROW_UPLOAD_CLIENT_NAME))
             continue
         try:
             # N11: a row that is not a scan-result item is refused (was
