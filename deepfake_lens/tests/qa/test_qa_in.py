@@ -241,6 +241,56 @@ class QaIn1ReadOnlyEvidenceTest(unittest.TestCase):
             if digest != "dir" and hashed.get(name):
                 self.assertEqual(hashed[name], digest, f"reported sha256 of {name} differs from the file")
 
+    def test_relative_audio_commands_from_a_project_folder_leave_it_untouched(self) -> None:
+        """QA-IN-1: 지원 형식 전부의 샘플 1개씩을 읽기 전용 폴더에 두고 전체 검사 → 모든 파일의 검사 전후 SHA-256 동일, mtime 불변, 폴더에 새 파일 0개.
+        R23-1/R23-2 (round 23): the commands as typed in a project folder that holds its own `.venv` next to the
+        samples — `scan .`, `classify a.wav`, `evidence a.wav` with the project's interpreter and relative paths. The
+        per-environment numba cache of R22-9 was written into `.venv/var` (the analyzed file's folder) and a relative
+        audio path failed every audio check. Nothing in the folder changes; with librosa (the main venv) the WAV's
+        audio_features ran, as for an absolute path."""
+        import math
+        import sysconfig
+        import wave
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp).resolve() / "proj"
+            project.mkdir()
+            with wave.open(str(project / "a.wav"), "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(16000)
+                handle.writeframes(b"".join(struct.pack("<h", int(0.4 * math.sin(2 * math.pi * 330 * n / 16000) * 32767)) for n in range(16000)))
+            (project / "memo.txt").write_text("사람이 쓴 짧은 메모입니다.", encoding="utf-8")
+            venv = project / ".venv"
+            subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True, timeout=120)
+            python = venv / ("Scripts" if os.name == "nt" else "bin") / ("python.exe" if os.name == "nt" else "python")
+            purelib = subprocess.run([str(python), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+                                     capture_output=True, text=True, check=True, timeout=60).stdout.strip()
+            # the packages this interpreter sees (its site folders and what their .pth files add), then the repository
+            seen = [entry for entry in sys.path if entry and os.path.isdir(entry) and Path(entry).name in ("site-packages", "dist-packages")]
+            paths = list(dict.fromkeys([*seen, sysconfig.get_paths()["purelib"], sysconfig.get_paths()["platlib"], str(REPO_ROOT)]))
+            Path(purelib, "qa-in-1.pth").write_text("\n".join(paths) + "\n", encoding="utf-8")
+            env = {key: value for key, value in os.environ.items() if not key.startswith(("DEEPFAKE_LENS_", "NUMBA_", "PYTHON"))}
+            env["HOME"] = str(Path(tmp).resolve() / "home")
+            child_has_librosa = subprocess.run(
+                [str(python), "-c", "import importlib.util, sys; sys.exit(importlib.util.find_spec('librosa') is None)"],
+                env=env, cwd=Path(tmp), timeout=60, check=False,
+            ).returncode == 0
+            self.assertEqual(child_has_librosa, importlib.util.find_spec("librosa") is not None)
+            before = _snapshot(project)
+            outputs = []
+            for argv in (["scan", ".", "--format", "json"], ["classify", "a.wav", "--format", "json"], ["evidence", "a.wav"]):
+                done = subprocess.run([str(python), "-m", "deepfake_lens", *argv], cwd=project, env=env,
+                                      capture_output=True, timeout=600, check=False)
+                self.assertEqual(done.returncode, 0, done.stderr.decode("utf-8", "replace")[-2000:])
+                outputs.append(done.stdout.decode("utf-8"))
+            after = _snapshot(project)
+        self.assertEqual(after, before, "a relative command from the project folder changed the evidence folder")
+        scan_rows = {item["path"]: item for item in json.loads(outputs[0])["items"]}
+        expected = "ran" if child_has_librosa else "skipped"
+        for coverage in (scan_rows["a.wav"]["result"]["coverage"], json.loads(outputs[1])["coverage"]):
+            self.assertEqual([entry["status"] for entry in coverage if entry["check"] == "audio_features"], [expected])
+
     def _full_scan(self, evidence: Path, out: Path) -> tuple[int, dict[str, Any]]:
         from deepfake_lens.cli import main
 

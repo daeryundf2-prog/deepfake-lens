@@ -64,7 +64,7 @@ torch/transformers/mediapipe는 설치하지 않은 상태가 기준이다(신�
 - Linux aarch64, Python 3.13, ffmpeg 7.1, Node.js 20.
 - `/venv`(메인): numpy, scipy, Pillow, opencv-python 5, scikit-learn, librosa + numba + soundfile, c2pa-python, jsonschema, coverage, ruff, mypy.
 - `/venv-api`(API): fastapi, httpx, uvicorn, pymupdf, markdown-it-py + linkify-it-py, mediapipe, opencv-python/opencv-contrib-python 5, numpy, scipy, Pillow, scikit-learn(librosa·c2pa 없음).
-- 실행기 `scripts/gate/gate.sh`(호스트에서 `/gate.sh`로 읽기 전용 마운트)는 `/repo`의 작업 트리를 컨테이너의 `/work`로 복사한 뒤(`.venv*` 제외, `.git`은 복사) 단계를 `bash -o pipefail`로 실행한다. 사용법: `gate.sh tests`(두 venv 단위 테스트), `gate.sh lint`(ruff, mypy), `gate.sh full`(5장의 게이트 전부), `gate.sh cmd "<명령>"`.
+- 실행기 `scripts/gate/gate.sh`(호스트에서 `/gate.sh`로 읽기 전용 마운트)는 `/repo`의 작업 트리를 컨테이너의 `/work`로 복사한 뒤(`.venv*` 제외, `.git`은 복사) 단계를 `bash -o pipefail`로 실행한다. 사용법: `gate.sh tests`(두 venv 단위 테스트), `gate.sh lint`(ruff, mypy), `gate.sh full`(5장의 게이트 전부), `gate.sh qa-main`(메인 venv 패키지로 QA 하네스, 23차), `gate.sh cmd "<명령>"`.
 
 ```bash
 # 레포 루트에서
@@ -91,7 +91,11 @@ python scripts/check_measurement_gate.py
 python scripts/sync_model_docs.py --check
 python scripts/verify_contracts.py                       # 스키마 바뀌면 contracts/PIN.json 재핀
 python scripts/stress_shutdown.py --runs 30              # 신호·자식 프로세스 관련 변경 시
+# QA 하네스의 오디오 경로(23차 잔여 리스크): /venv(librosa) + /venv-api(fastapi·pymupdf)를 함께 보는 임시 venv에서 --qa-only
+gate.sh qa-main                                          # full에 포함, 결과는 /tmp/qa-main(기록 아님)
 ```
+
+`qa-main` 단계(23차): 적합성 기록(`docs/CONFORMANCE.md`)은 지금처럼 API 환경(librosa 없음)에서 만든다. 그래서 QA-IN-1·QA-OUT-4의 오디오 경로는 기록 실행에서 한 번도 돌지 않았고, 상대 경로 오디오 회귀(R23-1)가 4라운드 동안 드러나지 않았다. `gate.sh full`은 이제 마지막 단계로 하네스를 `--qa-only`로 한 번 더 돌린다 — `/venv`의 패키지를 먼저, `/venv-api`의 패키지를 뒤에 보는 임시 venv(`.pth`)라 librosa와 fastapi가 모두 있다. 출력은 `/tmp/qa-main`에만 쓰고 기록은 바꾸지 않는다. QA 테스트 중 `QaOut4SameResultEverywhereTest.test_audio_folder_relative_cli_paths_match_the_servers`와 `QaIn1ReadOnlyEvidenceTest.test_relative_audio_commands_from_a_project_folder_leave_it_untouched`는 환경과 무관하게 돌며(librosa가 없으면 양쪽 모두 `skipped`, 있으면 `ran`을 요구), 상대 경로·프로젝트 `.venv` 배치를 시험한다.
 
 기록 재생성(라운드 끝마다, 마지막 커밋으로):
 

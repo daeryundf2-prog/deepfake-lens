@@ -2,7 +2,7 @@
 # Phase-0 gate runner (HANDOFF §5). Copies /repo (minus venvs) to /work so file-system semantics are native Linux,
 # then runs the gates. Every step runs with pipefail, so a failing step fails the gate even when piped to tail.
 # Usage (from the repo root):
-#   docker run --rm --init --cpus 4 -v "$PWD":/repo:ro -v "$PWD/scripts/gate/gate.sh":/gate.sh:ro deepfake-lens-gate /gate.sh full|tests|lint|cmd "<shell>"
+#   docker run --rm --init --cpus 4 -v "$PWD":/repo:ro -v "$PWD/scripts/gate/gate.sh":/gate.sh:ro deepfake-lens-gate /gate.sh full|tests|lint|qa-main|cmd "<shell>"
 #   docker run --rm --init --cpus 3 --shm-size=1g -v "$PWD":/repo:ro -v "$PWD/scripts/gate/gate.sh":/gate.sh:ro deepfake-lens-gate:gui /gate.sh gui
 # Read each step's output, not only "GATE rc=". Records checks need git history: mount a --no-hardlinks clone whose
 # local `main` points at the phase-0 start (dad9730).
@@ -16,12 +16,22 @@ export PYTHONPATH=/work
 P=/venv/bin/python
 A=/venv-api/bin/python
 rc=0
+# R23 residual (round 23): the QA harness in a side venv that sees /venv first (librosa, numba, soundfile, c2pa) and
+# /venv-api after it (fastapi/httpx — the harness's QA-OUT-4 precondition — and pymupdf), so QA-IN-1 / QA-OUT-4 run
+# their audio cases with the audio stack. docs/CONFORMANCE.md is still generated from /venv-api (HANDOFF §5); this
+# run writes to /tmp/qa-main only.
+QA_MAIN="python3 -m venv --without-pip /tmp/qa-main-venv && \
+  { /venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()[\"purelib\"])'; /venv-api/bin/python -c 'import sysconfig; print(sysconfig.get_paths()[\"purelib\"])'; } \
+  > \$(/tmp/qa-main-venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()[\"purelib\"])')/gate-qa-main.pth && \
+  /tmp/qa-main-venv/bin/python -c 'import librosa, fastapi, httpx' && \
+  /tmp/qa-main-venv/bin/python scripts/qa_phase0.py --qa-only --allow-dirty --out /tmp/qa-main/CONFORMANCE.md --log-dir /tmp/qa-main/logs 2>&1 | tail -4"
 ut() { echo "=== unittest ($1)"; $1 -m unittest discover deepfake_lens/tests > /tmp/ut.log 2>&1; r=$?; grep -aE '^(FAIL|ERROR):|^Ran|^OK|^FAILED' /tmp/ut.log; [ $r -eq 0 ] || { echo "!!! FAILED rc=$r: unittest ($1)"; rc=1; }; }
 run() { echo "=== $*"; bash -o pipefail -c "$*" || { echo "!!! FAILED rc=$?: $*"; rc=1; }; }
 case $mode in
   tests) ut "$P"; ut "$A";;
   lint) run "/venv/bin/ruff check deepfake_lens scripts experiments"; run "/venv/bin/mypy";;
   cmd) shift; run "$*";;
+  qa-main) run "$QA_MAIN";;
   gui)
     run "/venv-gui/bin/python scripts/gui_smoke.py --scan-dir fixtures --port 8899 --shot /tmp/gui-smoke.png 2>&1 | tail -5"
     run "/venv-gui/bin/python scripts/make_adversarial_fixtures.py --out /tmp/adv >/dev/null 2>&1; /venv-gui/bin/python scripts/gui_smoke.py --scan-dir /tmp/adv --port 8898 --shot /tmp/gui-smoke-adv.png 2>&1 | tail -5"
@@ -36,6 +46,7 @@ case $mode in
     run "$P scripts/sync_model_docs.py --check | tail -2"
     run "$P scripts/verify_contracts.py | tail -2"
     run "$P scripts/stress_shutdown.py --runs 30 | tail -3"
+    run "$QA_MAIN"
     ;;
 esac
 echo "GATE rc=$rc"; exit $rc
