@@ -435,6 +435,23 @@ def _misplaced_option(argv: list[str], scan_parser: argparse.ArgumentParser) -> 
     return not any(known == option or (option.startswith("--") and known.startswith(option)) for known in scan_parser._option_string_actions)
 
 
+def _help_topic(command_parser: argparse.ArgumentParser, words: list[str]) -> list[str]:
+    """R22-10: ``words`` (a command and the words after it in ``help …``) when each names a subcommand of the one before.
+
+    Otherwise the parser of the last command named reports the first other word as an argument it does not
+    take (``parser.error``: exit 2).
+    """
+    current = command_parser
+    for index, word in enumerate(words[1:], start=1):
+        choices = next(
+            (action.choices for action in current._actions if isinstance(action, argparse._SubParsersAction)), None,
+        )
+        if not isinstance(choices, dict) or word not in choices or word.startswith("-"):
+            current.error(f"unrecognized arguments: {' '.join(words[index:])}")
+        current = choices[word]
+    return list(words)
+
+
 def _options_before_command(
     argv: list[str], scan_parser: argparse.ArgumentParser, names: frozenset[str] | set[str] = frozenset(),
 ) -> int | None:
@@ -554,10 +571,13 @@ def _main(argv: list[str] | None = None) -> int:
         # R21-9 (round 21): `help bogus` printed the top-level help with exit 0 — a typo ended as a success;
         # a word after `help` that names no command is the top-level parser's error (exit 2).
         topic = argv[1] if len(argv) > 1 else None
-        if topic is None or topic in ("-h", "--help"):
+        if topic is None or (topic in ("-h", "--help") and len(argv) == 2):
             argv = ["--help"]
         elif topic in COMMANDS and not topic.startswith("-"):
-            argv = [topic, "--help"]
+            # R22-10 (round 22): `help scan extra` and `help corpus build` ignored every word after the command
+            # (exit 0). A word that names a subcommand of it is that subcommand's help; any other is the
+            # command parser's error (exit 2).
+            argv = [*_help_topic(cmd_parsers[topic], argv[1:]), "--help"]
         else:
             parser.error(f"argument <명령>: invalid choice: {topic!r} (choose from {', '.join(sorted(c for c in COMMANDS if not c.startswith('-')))})")
     if argv and argv[0] not in COMMANDS:
