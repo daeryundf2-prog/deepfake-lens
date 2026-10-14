@@ -167,6 +167,7 @@ files = [
     "deepfake_lens/json_text.py",
     "deepfake_lens/tests/test_non_utf8_names.py",
     "deepfake_lens/native_path.py",
+    "deepfake_lens/windows_acl.py",
     "deepfake_lens/tests/test_native_path.py",
     "deepfake_lens/check_skipped.py",
     "deepfake_lens/shutdown.py",

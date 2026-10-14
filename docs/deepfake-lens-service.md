@@ -231,7 +231,8 @@ R21-4 (round 21): that directory is checked at start like a named root
 (R20-7). R21-10 (user decision 2026-10-12: relocate instead of refuse): when
 it holds the tool folders HOME decides (`~/.cache/deepfake-lens` logs,
 heatmaps, numba cache) they are moved for that run outside it, with one
-notice; the server is not started (exit 2) only when no place outside is
+notice (R22-2: on Windows to `%ProgramData%\deepfake-lens\<user>` when the
+profile is the root — `%LOCALAPPDATA%` and `%TEMP%` are inside it); the server is not started (exit 2) only when no place outside is
 left or every temp-folder candidate is inside (`docs/deepfake-lens-cli.md`,
 "Logs").
 A path outside every root gets **403** `{"error": "허용되지 않은 경로"}`

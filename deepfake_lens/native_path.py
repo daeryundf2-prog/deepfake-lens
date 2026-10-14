@@ -687,9 +687,17 @@ def relocated_tool_base_candidates() -> list[Path]:
 
     The OS cache location (``~/Library/Caches/deepfake-lens`` on macOS,
     ``%LOCALAPPDATA%\\deepfake-lens`` on Windows), ``$XDG_CACHE_HOME/deepfake-lens``
-    when that variable is absolute, then a per-user folder in the system temp
-    folder and in ``/tmp``. Only absolute paths; the caller keeps the first one
-    outside every examined folder that it can own (:func:`claim_tool_base`).
+    when that variable is absolute, on Windows ``%ProgramData%\\deepfake-lens\\<user>``
+    (R22-2), then a per-user folder in the system temp folder and in ``/tmp``.
+    Only absolute paths; the caller keeps the first one outside every examined
+    folder that it can own (:func:`claim_tool_base`).
+
+    R22-2 (round 22, user decision 2026-10-14): on Windows ``%LOCALAPPDATA%`` and
+    ``%TEMP%`` are both inside the user profile, so ``classify
+    %USERPROFILE%\\x.jpg`` and ``cd ~; deepfake-lens web`` had no candidate left
+    and still ended with exit 2 — c43bc11 said these run on every OS. The
+    ProgramData candidate is outside the profile; it is made with an
+    owner-only ACL and verified (:mod:`windows_acl`).
     """
     candidates: list[Path] = []
     try:
@@ -699,11 +707,16 @@ def relocated_tool_base_candidates() -> list[Path]:
     if home is not None and home.is_absolute() and sys.platform == "darwin":
         candidates.append(home / "Library" / "Caches" / TOOL_BASE_NAME)
     local = os.environ.get("LOCALAPPDATA", "")
-    if os.name == "nt" and local and os.path.isabs(local):
+    if _is_windows() and local and os.path.isabs(local):
         candidates.append(Path(local) / TOOL_BASE_NAME)
     xdg = os.environ.get("XDG_CACHE_HOME", "")
     if xdg and os.path.isabs(xdg):
         candidates.append(Path(xdg) / TOOL_BASE_NAME)
+    program_data = os.environ.get("ProgramData", "") or os.environ.get("PROGRAMDATA", "")
+    if _is_windows() and program_data and os.path.isabs(program_data):
+        from .windows_acl import user_folder_name
+
+        candidates.append(Path(program_data) / TOOL_BASE_NAME / user_folder_name())  # R22-2: outside the profile
     user = str(os.getuid()) if hasattr(os, "getuid") else (os.environ.get("USERNAME", "") or "user")
     for temp in (_system_temp_dir(), "/tmp" if os.name == "posix" else ""):
         if temp and os.path.isabs(temp):
@@ -716,15 +729,31 @@ def relocated_tool_base_candidates() -> list[Path]:
 
 
 def claim_tool_base(base: Path) -> bool:
-    """R21-10: ``base`` exists (made 0700 when missing) as this user's own real folder that others cannot write."""
+    """R21-10: ``base`` exists (made 0700 when missing) as this user's own real folder that others cannot write.
+
+    R22-2 (round 22): on Windows the mode bits say nothing about other accounts — a folder made here gets the
+    owner-only ACL of :func:`windows_acl.make_owner_only`, and an existing or new one must pass
+    :func:`windows_acl.owner_only` (owned by this user, nobody else may write, delete or re-permission it), its
+    parent :func:`windows_acl.parent_safe` (no other account may delete or replace it), and not be a link /
+    junction (reparse point).
+    """
+    windows = _is_windows()
     try:
+        existed = os.path.lexists(base)
         base.mkdir(mode=0o700, parents=True, exist_ok=True)
         info = os.lstat(base)
     except OSError:
         return False
-    if not stat.S_ISDIR(info.st_mode):
-        return False  # a link or a file planted there
-    if hasattr(os, "getuid") and (info.st_uid != os.getuid() or info.st_mode & 0o022):
+    if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:  # FILE_ATTRIBUTE_REPARSE_POINT
+        return False  # a link, a junction or a file planted there
+    if windows:
+        from . import windows_acl
+
+        if not existed and not windows_acl.make_owner_only(str(base)):
+            return False
+        if not windows_acl.owner_only(str(base)) or not windows_acl.parent_safe(str(base.parent)):
+            return False
+    elif hasattr(os, "getuid") and (info.st_uid != os.getuid() or info.st_mode & 0o022):
         return False
     return os.access(base, os.W_OK | os.X_OK)
 
