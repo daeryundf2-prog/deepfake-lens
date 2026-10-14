@@ -743,7 +743,9 @@ def check_tool_folders(args: argparse.Namespace, folders: list[Path], files: lis
             if _inside(resolved, folder):
                 raise UsageError(TOOL_FOLDER_INSIDE_INPUT.format(env=env, path=target, folder=folder))
     relocate_tool_base(examined)
-    set_examined_folders([str(folder) for folder in folders])
+    # R23-2 (round 23): the analyzed files' folders too — no persistent tool folder (the per-environment numba
+    # cache under sys.prefix) is made in them; the session temp folder still looks at ``folders`` only.
+    set_examined_folders([str(folder) for folder in folders], [str(path.parent) for path in files or []])
     if folders and usable_temp_base() is None:
         raise UsageError(TEMP_FOLDERS_INSIDE_INPUT)
 

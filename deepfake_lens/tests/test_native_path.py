@@ -25,6 +25,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -1389,6 +1390,92 @@ class _NativeCallVisitor(ast.NodeVisitor):
             ok = any(used & derived for _, derived in self.scopes)
             self.sites.append((node.lineno, shown, ok))
         self.generic_visit(node)
+
+
+# R23-1 (round 23): calls that hand the yielded name to another process (its own working folder, or a program that
+# reads a relative "a:b.mp4" as a protocol). audio_worker.extract_features makes its path absolute itself.
+CHILD_CALLS = {("shutdown", "run_child"), ("_SYNCNET_PIPELINE", "inference")}
+
+
+class ChildPathTest(unittest.TestCase):
+    """R23-1 (round 23): a relative path crossing into a child process is made absolute first."""
+
+    def test_child_path(self) -> None:
+        cwd = os.getcwd()
+        self.assertEqual(native_path.child_path(""), "")
+        self.assertEqual(native_path.child_path("/x/y.wav"), "/x/y.wav")
+        self.assertEqual(native_path.child_path("case/a.wav"), os.path.join(cwd, "case/a.wav"))
+        # lexical: ".." and links are left for the kernel, as when this process opened the name itself
+        self.assertEqual(native_path.child_path("../a:b.mp4"), os.path.join(cwd, "../a:b.mp4"))
+        with mock.patch.object(native_path, "_is_windows", return_value=True):
+            self.assertEqual(native_path.child_path("case/a.wav"), os.path.abspath("case/a.wav"))
+        with mock.patch("os.getcwd", side_effect=FileNotFoundError(2, "gone")):
+            self.assertEqual(native_path.child_path("a.wav"), "a.wav")
+
+    def test_for_child_yields_an_absolute_name_and_the_default_is_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "a.wav").write_bytes(b"x")
+            Path(tmp, "한글.wav").write_bytes(b"x")
+            previous = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with native_safe_path("a.wav") as plain, native_safe_path("a.wav", for_child=True) as child:
+                    self.assertEqual(plain, "a.wav")
+                    self.assertEqual(child, os.path.join(os.getcwd(), "a.wav"))
+                with native_safe_path("한글.wav", for_child=True) as staged:
+                    self.assertTrue(os.path.isabs(staged) and staged.isascii(), staged)
+                    self.assertEqual(Path(staged).read_bytes(), b"x")
+            finally:
+                os.chdir(previous)
+
+    def test_every_name_handed_to_a_child_is_made_absolute(self) -> None:
+        offenders: list[str] = []
+        found: list[str] = []
+        for source in sorted(PACKAGE.rglob("*.py")):
+            if "tests" in source.relative_to(PACKAGE).parts:
+                continue
+            tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.With):
+                    continue
+                for item in node.items:
+                    call = item.context_expr
+                    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "native_safe_path"):
+                        continue
+                    children = [
+                        sub for statement in node.body for sub in ast.walk(statement)
+                        if isinstance(sub, ast.Call) and (
+                            (isinstance(sub.func, ast.Attribute) and isinstance(sub.func.value, ast.Name)
+                             and (sub.func.value.id, sub.func.attr) in CHILD_CALLS)
+                            or (isinstance(sub.func, ast.Name) and sub.func.id == "run_child")
+                        )
+                    ]
+                    if not children:
+                        continue
+                    label = f"{source.relative_to(PACKAGE).as_posix()}:{node.lineno}"
+                    found.append(label)
+                    if not any(kw.arg == "for_child" and isinstance(kw.value, ast.Constant) and kw.value.value is True for kw in call.keywords):
+                        offenders.append(label)
+        self.assertEqual(offenders, [])
+        self.assertGreaterEqual(len(found), 5, found)  # audio, lipsync ×2, video_analysis, video
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg 없음")
+    def test_ffmpeg_gets_a_relative_name_with_a_colon_as_a_file(self) -> None:
+        """ffmpeg reads a relative "a:b.mp4" as protocol "a" ("Protocol not found"); the absolute name is a file."""
+        from deepfake_lens import lipsync
+
+        with tempfile.TemporaryDirectory() as tmp:
+            done = subprocess.run(
+                ["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=1", "-f", "lavfi", "-i", "color=size=32x32:duration=1",
+                 "-shortest", "-y", str(Path(tmp, "a:b.mp4"))], capture_output=True, timeout=120)
+            self.assertEqual(done.returncode, 0, done.stderr[-500:])
+            previous = os.getcwd()
+            os.chdir(tmp)
+            try:
+                envelope, _ = lipsync._audio_envelope(Path("a:b.mp4"), max_seconds=1.0)
+            finally:
+                os.chdir(previous)
+        self.assertGreater(len(envelope), 0)
 
 
 class NativeCallMetaTest(unittest.TestCase):

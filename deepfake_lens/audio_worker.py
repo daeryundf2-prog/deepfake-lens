@@ -205,13 +205,18 @@ def environment_cache_root() -> Path | None:
     cache file. It is used only on POSIX, when the folder is this user's own and nobody else can write it
     (``native_path.claim_tool_base``: a root-owned system Python or a shared install is skipped), and never
     inside an examined folder.
+
+    R23-2 (round 23): nor inside the folder of an analyzed file — ``cd proj; .venv/bin/python -m deepfake_lens
+    classify a.wav`` (a project folder holding its ``.venv`` and the sample) made
+    ``proj/.venv/var/deepfake-lens/numba/<key>/published``, because only a scan's folders were examined. The
+    check runs before :func:`native_path.claim_tool_base`, which would make the folder.
     """
     if not hasattr(os, "getuid"):
         return None
-    from .native_path import _inside_examined, claim_tool_base
+    from .native_path import claim_tool_base, inside_examined_or_file_folder
 
     base = Path(sys.prefix) / "var" / "deepfake-lens"
-    if not base.is_absolute() or _inside_examined(str(base)) or not claim_tool_base(base):
+    if not base.is_absolute() or inside_examined_or_file_folder(str(base)) or not claim_tool_base(base):
         return None
     return base / "numba" / _runtime_key()
 
@@ -384,6 +389,13 @@ def _rebuilt_exception(error: dict[str, Any]) -> Exception:
     if base is OSError and isinstance(error.get("filename"), str):
         exc.filename = error["filename"]
     return exc
+
+
+def _caller_form(error: dict[str, Any], sent: str, given: str) -> dict[str, Any]:
+    """R23-1: the worker's error with the absolute path it was sent written as the caller gave it."""
+    if sent == given or not isinstance(error, dict):
+        return error
+    return {key: value.replace(sent, given) if isinstance(value, str) else value for key, value in error.items()}
 
 
 def _package_parent() -> str:
@@ -741,7 +753,14 @@ def extract_features(native_path: str, *, segment_seconds: int) -> dict[str, Any
     :class:`WorkerTimeoutError`, and the process ending
     :class:`shutdown.ShuttingDown`.
     """
-    request = {"path": native_path, "segment_seconds": int(segment_seconds)}
+    from .native_path import child_path
+
+    # R23-1 (round 23): the worker runs in its cache folder (cwd), so a relative path was resolved there and
+    # every audio check of ``scan case`` / ``cd case; scan .`` / ``classify case/a.wav`` / a relative
+    # ``web --folder`` failed ("LibsndfileError … System error") since R19-2 (de59997). The worker gets the
+    # absolute path; its error text is given back in the caller's form, as the in-process extraction wrote it.
+    absolute = child_path(native_path)
+    request = {"path": absolute, "segment_seconds": int(segment_seconds)}
     for attempt in range(2):
         scope: WorkerScope | None = getattr(_LOCAL, "scope", None)
         if scope is not None and scope.tripped is not None:
@@ -772,7 +791,7 @@ def extract_features(native_path: str, *, segment_seconds: int) -> dict[str, Any
                 worker.published = True
                 publish_cache(worker.cache_dir)
             if "error" in reply:
-                error = reply["error"]
+                error = _caller_form(reply["error"], absolute, native_path)
                 logger.error("audio decode failed: %s\n%s", native_path, error.get("traceback", ""))
                 raise _rebuilt_exception(error)
             return reply

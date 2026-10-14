@@ -994,7 +994,7 @@ def _ecapa_load_waveform(path: Path):
 
         fd, tmp = tempfile.mkstemp(suffix=".wav", dir=scratch_dir())
         os.close(fd)
-        with native_safe_path(path) as native_audio:  # R12-1
+        with native_safe_path(path, for_child=True) as native_audio:  # R12-1; R23-1: absolute for the child
             run_child(  # R15-1: a tracked child, stopped by the shutdown cleanup
                 ["ffmpeg", *FFMPEG_QUIET_ARGS, "-y", "-i", native_audio, "-ac", "1", "-ar", "16000", tmp],
                 capture_output=True, check=True, timeout=120,

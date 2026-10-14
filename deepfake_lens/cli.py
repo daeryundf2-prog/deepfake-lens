@@ -447,9 +447,35 @@ def _help_topic(command_parser: argparse.ArgumentParser, words: list[str]) -> li
             (action.choices for action in current._actions if isinstance(action, argparse._SubParsersAction)), None,
         )
         if not isinstance(choices, dict) or word not in choices or word.startswith("-"):
+            if _positional_values(current, words[index:]):
+                # R23-11 (round 23): `help vendor-weights pin` — "pin" is a value of the command's positional
+                # argument (choices), not a subcommand: that command's help, with a note (was "알 수 없는 인수: pin").
+                shown = " ".join(words[:index])
+                print(HELP_POSITIONAL_VALUE_NOTE.format(values=" ".join(words[index:]), command=shown), file=sys.stderr)
+                return list(words[:index])
             current.error(f"unrecognized arguments: {' '.join(words[index:])}")
         current = choices[word]
     return list(words)
+
+
+# R23-11 (round 23): `help <command> <a value of its positional argument>`.
+HELP_POSITIONAL_VALUE_NOTE = "알림: 「{values}」은(는) {command} 명령의 위치 인수 값입니다(하위 명령이 아님) — {command} 명령의 도움말을 보여 줍니다."
+
+
+def _positional_values(parser: argparse.ArgumentParser, words: list[str]) -> bool:
+    """R23-11: ``words`` fill ``parser``'s positional arguments in order, the first a value from a fixed list (choices).
+
+    ``vendor-weights pin`` / ``pin-asset aasist`` qualify; a free-form first positional (``scan extra``) does not —
+    that stays the R22-10 error, so a typo after ``help scan`` is not a success.
+    """
+    positionals = [action for action in parser._actions
+                   if not action.option_strings and not isinstance(action, argparse._SubParsersAction)]
+    if not words or len(words) > len(positionals) or any(word.startswith("-") for word in words):
+        return False
+    first = positionals[0]
+    if not first.choices or words[0] not in first.choices:
+        return False
+    return all(not action.choices or word in action.choices for action, word in zip(positionals[1:], words[1:]))
 
 
 def _options_before_command(
@@ -571,8 +597,8 @@ def _main(argv: list[str] | None = None) -> int:
         # R21-9 (round 21): `help bogus` printed the top-level help with exit 0 — a typo ended as a success;
         # a word after `help` that names no command is the top-level parser's error (exit 2).
         topic = argv[1] if len(argv) > 1 else None
-        if topic is None or (topic in ("-h", "--help") and len(argv) == 2):
-            argv = ["--help"]
+        if topic is None or (topic in ("-h", "--help", "help") and len(argv) == 2):
+            argv = ["--help"]  # R23-11 (round 23): `help help` is the top-level help (was "허용되지 않은 값 'help'")
         elif topic in COMMANDS and not topic.startswith("-"):
             # R22-10 (round 22): `help scan extra` and `help corpus build` ignored every word after the command
             # (exit 0). A word that names a subcommand of it is that subcommand's help; any other is the

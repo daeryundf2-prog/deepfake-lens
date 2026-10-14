@@ -143,6 +143,11 @@ _ERRNO_KO = {
     errno.ENAMETOOLONG: "경로가 너무 깁니다",
     errno.EINVAL: "잘못된 인수",
     errno.ENOSPC: "디스크 공간이 부족합니다",
+    # R23-7 (round 23): failures of an examiner-record write (a regular file where its folder should be, a
+    # read-only mount, a full quota) — they were "라이브러리 오류(…)".
+    errno.EEXIST: "같은 이름의 파일이 이미 있습니다",
+    errno.EROFS: "읽기 전용 파일 시스템입니다",
+    **({errno.EDQUOT: "디스크 할당량을 넘었습니다"} if hasattr(errno, "EDQUOT") else {}),
 }
 
 # (pattern, Korean replacement) for library messages seen on unreadable or

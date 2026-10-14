@@ -33,6 +33,7 @@ from .webapp_api import (
     read_root_denied_body,
     _scan_cancel_payload,
     _scan_job_start,
+    async_requested,
     _scan_payload,
     _scan_status_payload,
     _stats_payload,
@@ -250,7 +251,12 @@ def build_server(
                 # Invalid options (analysis_api.InvalidOption) and a full job
                 # registry are JSON 400s — send_error's status line is
                 # latin-1 only and the message may echo a non-ASCII name.
-                if parse_qs(parsed.query).get("async", ["false"])[0].lower() in {"1", "true", "yes"}:
+                try:
+                    run_async = async_requested(parsed.query)
+                except ValueError as exc:  # R23-13: an unknown true/false value
+                    self._send_json({"error": str(exc)}, status=400)
+                    return
+                if run_async:
                     try:
                         self._send_json(_scan_job_start(parsed.query, default_folder=default_folder))
                     except UnicodeError:
@@ -392,7 +398,7 @@ def build_server(
                     saved = get_default_review_store().save_review(art_id, raw, evidence_folders(default_folder))
                 except UserDataRefused as exc:
                     # R22-3: never written into the evidence (or the working folder) — the examiner is told why
-                    self._send_json({"error": str(exc)}, status=USER_DATA_REFUSED_STATUS)
+                    self._send_json({"error": str(exc)}, status=getattr(exc, "status", USER_DATA_REFUSED_STATUS))  # R23-7: 409/507
                     return
                 self._send_json({"status": "success", "artifact_id": art_id, "review": saved})
                 return

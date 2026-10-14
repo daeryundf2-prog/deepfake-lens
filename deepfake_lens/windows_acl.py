@@ -27,6 +27,22 @@ A folder this process creates gets the protected DACL
 inherited) — what ``os.mkdir(mode=0o700)`` applies on Python 3.13+, applied
 explicitly so 3.11/3.12 get it too.
 
+R23-6 (round 23): an inherit-only entry (``INHERIT_ONLY_ACE``, icacls
+``(IO)``) applies to the folder's future children, not to the folder. The
+default ``C:\\ProgramData`` DACL has ``CREATOR OWNER:(OI)(CI)(IO)(F)`` and a
+folder made under it inherits that entry; :func:`dacl_parent_safe` read it as
+"another account may replace entries" and refused every default parent, so
+on a real Windows the relocation never happened (the R22-2 fixture had no
+such entry). The parent check now ignores inherit-only entries (this user's
+own folder below it is checked on its own DACL, which is protected), and
+:func:`dacl_owner_only` accepts CREATOR OWNER (what this user creates inside
+its own folder is this user's). When this tool creates
+``%ProgramData%\\deepfake-lens`` itself it gets the protected
+:data:`SHARED_PARENT_SDDL` (:func:`make_shared_parent`). Residual
+(documented): a parent another account created first is owned by that
+account, so this user's ProgramData candidate is refused (the other
+candidates, or exit 2, as before).
+
 The decisions are pure functions over ``(owner SID, [(ACE type, flags, mask,
 SID)])`` (:func:`dacl_owner_only`, :func:`dacl_parent_safe`) so they are
 tested on every OS; only :func:`_read_security` / :func:`make_owner_only`
@@ -44,12 +60,24 @@ logger = logging.getLogger(__name__)
 
 # SYSTEM, Administrators, OWNER RIGHTS full access; protected (nothing inherited).
 OWNER_ONLY_SDDL = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;OW)"
+# R23-6: %ProgramData%\deepfake-lens when this tool makes it — protected; SYSTEM / Administrators full, the owner
+# full on the folder itself, CREATOR OWNER full on what each account creates inside, Users read, traverse and
+# add a subfolder (0x1200a9 | FILE_ADD_SUBDIRECTORY) on the folder only — nobody else may delete, rename or
+# re-permission an entry.
+SHARED_PARENT_SDDL = "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;;FA;;;OW)(A;OICIIO;FA;;;CO)(A;;0x1200ad;;;BU)"
 SID_SYSTEM = "S-1-5-18"
 SID_ADMINISTRATORS = "S-1-5-32-544"
 SID_OWNER_RIGHTS = "S-1-3-4"
+SID_CREATOR_OWNER = "S-1-3-0"
 TRUSTED_SIDS = frozenset({SID_SYSTEM, SID_ADMINISTRATORS})
 ACCESS_ALLOWED_ACE_TYPE = 0
 ACCESS_DENIED_ACE_TYPE = 1
+# ACE flags (icacls (OI) (CI) (NP) (IO) (I)).
+OBJECT_INHERIT_ACE = 0x1
+CONTAINER_INHERIT_ACE = 0x2
+NO_PROPAGATE_INHERIT_ACE = 0x4
+INHERIT_ONLY_ACE = 0x8
+INHERITED_ACE = 0x10
 # Rights that change the folder's content, names or permissions.
 FILE_WRITE_DATA = 0x2  # add a file
 FILE_APPEND_DATA = 0x4  # add a subfolder
@@ -87,7 +115,9 @@ def dacl_owner_only(security: Security, user_sid: str) -> bool:
     """R22-2: the folder is this user's own and nobody else can write, delete or re-permission it."""
     if security.owner not in {user_sid, *TRUSTED_SIDS} or security.dacl is None:
         return False
-    allowed = {user_sid, SID_OWNER_RIGHTS, *TRUSTED_SIDS}
+    # R23-6: CREATOR OWNER names whoever creates a child — inside this folder only this user can (or an admin).
+    # Any other account's entry counts, inherit-only included: it would apply to what this user writes inside.
+    allowed = {user_sid, SID_OWNER_RIGHTS, SID_CREATOR_OWNER, *TRUSTED_SIDS}
     for ace in security.dacl:
         if ace.type == ACCESS_DENIED_ACE_TYPE:
             continue
@@ -104,6 +134,8 @@ def dacl_parent_safe(security: Security, user_sid: str) -> bool:
         return False
     allowed = {user_sid, SID_OWNER_RIGHTS, *TRUSTED_SIDS}
     for ace in security.dacl:
+        if ace.flags & INHERIT_ONLY_ACE:
+            continue  # R23-6: applies to the folder's children only (CREATOR OWNER:(OI)(CI)(IO)(F) of ProgramData)
         if ace.type == ACCESS_DENIED_ACE_TYPE:
             continue
         if ace.type != ACCESS_ALLOWED_ACE_TYPE:
@@ -200,12 +232,21 @@ def _read_security(path: str) -> Security:
 
 def make_owner_only(path: str) -> bool:
     """Give ``path`` the protected DACL :data:`OWNER_ONLY_SDDL` (SetFileSecurityW); False when that failed."""
+    return _set_protected_dacl(path, OWNER_ONLY_SDDL)
+
+
+def make_shared_parent(path: str) -> bool:
+    """R23-6: give ``path`` (``%ProgramData%\\deepfake-lens``, just made) the protected :data:`SHARED_PARENT_SDDL`."""
+    return _set_protected_dacl(path, SHARED_PARENT_SDDL)
+
+
+def _set_protected_dacl(path: str, sddl: str) -> bool:
     import ctypes
 
     advapi = _advapi()
     descriptor = ctypes.c_void_p()
     if not advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
-        ctypes.c_wchar_p(OWNER_ONLY_SDDL), 1, ctypes.byref(descriptor), None,
+        ctypes.c_wchar_p(sddl), 1, ctypes.byref(descriptor), None,
     ):
         return False
     try:

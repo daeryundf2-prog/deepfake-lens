@@ -557,7 +557,9 @@ class ReviewSaveRefusedTest(unittest.TestCase):
                 "  const refused = await pushReviewToServer('k', {note: 'x'});\n"
                 "  next = answer(200, {status: 'success'});\n"
                 "  const saved = await pushReviewToServer('k', {note: 'x'});\n"
-                "  console.log(JSON.stringify([refused, saved, reviewSyncText(refused), reviewSyncText(saved)]));\n"
+                "  next = answer(507, {error: '디스크 공간이 부족해 검토 기록을 쓰지 못했습니다'});\n"
+                "  const full = await pushReviewToServer('k', {note: 'x'});\n"
+                "  console.log(JSON.stringify([refused, saved, reviewSyncText(refused), reviewSyncText(saved), full]));\n"
                 "})();"))
         assert isinstance(out, list)
         self.assertEqual(out[0], reason)
@@ -565,6 +567,8 @@ class ReviewSaveRefusedTest(unittest.TestCase):
         self.assertIn("서버에 저장하지 못했습니다: " + reason, out[2])
         self.assertIn("이 브라우저에만", out[2])
         self.assertEqual(out[3], "서버에 저장됨")
+        # Merge of phase0 R23-7 (E50): a record that cannot be written is 409 or 507 — said the same way.
+        self.assertEqual(out[4], "디스크 공간이 부족해 검토 기록을 쓰지 못했습니다")
 
     def test_the_panel_shows_the_saves_answer(self) -> None:
         """R22-3 (source): the note/verdict and the 검토 button both show the debounced save's answer."""
@@ -590,6 +594,23 @@ class ListingCheckTest(unittest.TestCase):
         self.assertEqual(out[2][0], "warn")
         self.assertIn("이 보고서에 행이 없는 파일 3개", out[2][1])
         self.assertEqual(out[3][0], "ok")
+
+
+class ScanBooleanValuesTest(unittest.TestCase):
+    def test_true_false_options_are_sent_as_accepted_values(self) -> None:
+        """Merge of phase0 R23-13: an unknown true/false value is a 400. The scan request and the report
+        options send a checkbox's checked state (URLSearchParams / String() give "true"/"false"),
+        "true" or "1" — nothing else."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        handler = source[source.index("$('scan-form').addEventListener('submit'"):source.index("setBusyButton($('analyze-btn'), true);")]
+        booleans = ("recursive", "dedupe", "heatmaps", "deep_signals", "no_default_engine", "async")
+        found = re.findall(r"\b(" + "|".join(booleans) + r")\b['\"]?\s*[:,]\s*([^,\n]+)", handler)
+        self.assertGreaterEqual(len(found), 10, found)
+        for key, value in found:
+            value = value.strip().rstrip(";")
+            if value.count(")") > value.count("("):
+                value = value[:-1]
+            self.assertTrue(re.fullmatch(r"(String\()?!?\$\('[\w-]+'\)\.checked\)?|'true'|'1'", value), (key, value))
 
 
 class ExportNoteParticleTest(unittest.TestCase):

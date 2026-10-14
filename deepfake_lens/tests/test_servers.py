@@ -138,6 +138,37 @@ class ScanPayloadValidationTest(unittest.TestCase):
                 _scan_payload(query, default_folder=None)
             self.assertEqual(str(ctx.exception), message)
 
+    def test_true_false_options_take_known_values_only(self) -> None:
+        """R23-13 (round 23): `recursive=maybe` was read as false (and a report signed "아니오"); every true/false option
+        now takes true/false, 1/0, yes/no, on/off (any case, surrounding spaces) or empty — anything else is InvalidOption."""
+        from deepfake_lens.analysis_api import AnalysisOptions, InvalidOption, parse_flag
+
+        for value, expected in (("1", True), ("TRUE", True), (" yes ", True), ("On", True),
+                                ("0", False), ("false", False), ("No", False), ("off", False), ("", False)):
+            with self.subTest(value=value):
+                self.assertIs(parse_flag(value, "recursive"), expected)
+                self.assertIs(AnalysisOptions.from_query({"recursive": [value]}, models_dir=None).recursive, expected)
+        for key in ("recursive", "dedupe", "heatmaps", "deep_signals", "no_default_engine"):
+            for value in ("maybe", "2", "-1", "truee", "None"):
+                with self.subTest(key=key, value=value), self.assertRaises(InvalidOption) as ctx:
+                    AnalysisOptions.from_query({key: [value]}, models_dir=None)
+                self.assertIn(f"{key}은(는) 참·거짓 값이어야 합니다", str(ctx.exception))
+        self.assertFalse(AnalysisOptions.from_query({}, models_dir=None).recursive)  # absent: the default
+
+    def test_a_model_name_the_file_system_cannot_look_up_is_invalid(self) -> None:
+        """R23-9 (round 23): a 5000-character model_path / fusion_profile raised OSError(ENAMETOOLONG) — HTTP 500."""
+        import tempfile
+
+        from deepfake_lens.analysis_api import AnalysisOptions, InvalidOption
+
+        with tempfile.TemporaryDirectory() as models:
+            for key in ("model_path", "fusion_profile"):
+                for name in ("m" * 5000, "m" * 256 + ".json"):
+                    with self.subTest(key=key, length=len(name)), self.assertRaises(InvalidOption) as ctx:
+                        AnalysisOptions.from_query({key: [name]}, models_dir=Path(models))
+                    self.assertIn(f"{key}을(를) 모델 디렉터리에서 찾을 수 없습니다", str(ctx.exception))
+                    self.assertLess(len(str(ctx.exception)), 400)  # the name is not echoed in full
+
     def test_max_file_bytes_is_clamped_to_ceiling(self) -> None:
         captured = self._capture_scan_kwargs("max_file_bytes=99999999999999&folder=.")
         self.assertEqual(captured["max_file_bytes"], MAX_FILE_BYTES_CEILING)
@@ -3036,7 +3067,13 @@ class ErrorTableEveryRowTest(unittest.TestCase):
             "E4": [case("web", "GET", "/api/stats", 500, "서버 내부 오류가 발생했습니다", patches=(patch.object(webapp_module, "_stats_payload", raise_),)),
                    case("api", "GET", "/api/stats", 500, "서버 내부 오류가 발생했습니다", patches=(patch.object(webapp_api, "_stats_payload", raise_),))],
             "E5": [case(s, "GET", "/api/scan?max_files=abc", 400, "max_files는 정수여야 합니다") for s in both]
-            + [case(s, "GET", f"/api/scan?folder={q(f)}&pixel=bogus", 400, "pixel") for s in both],
+            + [case(s, "GET", f"/api/scan?folder={q(f)}&pixel=bogus", 400, "pixel") for s in both]
+            # R23-13 (round 23): an unknown true/false value was read as false (signed "아니오" in a report).
+            + [case(s, "GET", f"/api/scan?folder={q(f)}&{key}=maybe", 400, f"{key}은(는) 참·거짓 값이어야 합니다")
+               for s in both for key in ("recursive", "dedupe", "heatmaps", "deep_signals", "no_default_engine", "async")]
+            # R23-9 (round 23): a name longer than the file system allows was a 500 (ENAMETOOLONG from is_file()).
+            + [case(s, "GET", f"/api/scan?folder={q(f)}&{key}={'m' * 5000}", 400, f"{key}을(를) 모델 디렉터리에서 찾을 수 없습니다")
+               for s in both for key in ("model_path", "fusion_profile")],
             "E6": [case(s, "GET", "/api/scan?max_files=-3", 400, "max_files는 1 이상이어야 합니다") for s in both]
             + [case(s, "GET", "/api/scan?max_file_bytes=0", 400, "max_file_bytes는 1 이상이어야 합니다") for s in both]
             + [case("api", "POST", f"/api/scan/stream?directory={q(f)}&max_files=0", 400, "max_files는 1 이상이어야 합니다")],
@@ -3094,6 +3131,10 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                 (deep, "JSON 중첩이 너무 깊습니다"),
                 (b'{"items": [{"path": "a", "x": ' + b"[" * DEEP + b"]" * DEEP + b"}]}", "JSON 중첩이 너무 깊습니다"),
                 (b"[1]", "보고서 요청 본문은 JSON 객체여야 합니다"),
+                # R23-13 (round 23): report options take the same true/false values (recursive=maybe was signed "아니오").
+                (report({"items": [memo_row], "scan_root": scan_root, "options": {"recursive": "maybe"}}), "recursive은(는) 참·거짓 값이어야 합니다"),
+                # R23-9 (round 23): a too-long model name in the report's options was a 500.
+                (report({"items": [memo_row], "scan_root": scan_root, "options": {"model_path": "m" * 5000}}), "model_path을(를) 모델 디렉터리에서 찾을 수 없습니다"),
                 (report({"items": [dict(memo_row, path="x.zip::y", container="x.zip", member="z")], "scan_root": scan_root}), "path가 container::member와 일치하지 않습니다"),
                 # R20-4 (round 20): a duplicate of itself was signed with no analysis.
                 (report({"items": [dict(memo_row, status="duplicate", duplicate_of="memo.txt", result=None)], "scan_root": scan_root}), "검사 결과 항목 「memo.txt」의 duplicate_of"),
@@ -3181,6 +3222,17 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                                                  patch("deepfake_lens.reviews._DEFAULT_STORE", None))) for s in both]
             + [case("api", "PUT", "/api/artifacts/memo.txt/review", 409, "저장하지 않았습니다", json.dumps({"star": True}).encode(),
                     "application/json", patches=(patch.dict(os.environ, {"DEEPFAKE_LENS_REVIEWS": str(f / "reviews.json")}),
+                                                 patch("deepfake_lens.reviews._DEFAULT_STORE", None)))],
+            # R23-7 (round 23): an examiner record that cannot be written (here: its folder would be under a regular file) —
+            # a review answered 200 "success" with nothing on disk, feedback was a 500.
+            "E50": [case(s, "POST", "/api/feedback", 409, "저장하지 못했습니다", json.dumps({"path": "memo.txt", "expected_label": "real"}).encode(),
+                         "application/json", patches=(patch.dict(os.environ, {"DEEPFAKE_LENS_FEEDBACK": str(self.outside / "secret.png" / "d" / "fb.jsonl")}),))
+                    for s in both]
+            + [case(s, "POST", "/api/review", 409, "저장하지 못했습니다", json.dumps({"artifact_id": "memo.txt", "star": True}).encode(),
+                    "application/json", patches=(patch.dict(os.environ, {"DEEPFAKE_LENS_REVIEWS": str(self.outside / "secret.png" / "d" / "r.json")}),
+                                                 patch("deepfake_lens.reviews._DEFAULT_STORE", None))) for s in both]
+            + [case("api", "PUT", "/api/artifacts/memo.txt/review", 409, "저장하지 못했습니다", json.dumps({"star": True}).encode(),
+                    "application/json", patches=(patch.dict(os.environ, {"DEEPFAKE_LENS_REVIEWS": str(self.outside / "secret.png" / "d" / "r.json")}),
                                                  patch("deepfake_lens.reviews._DEFAULT_STORE", None)))],
             # R22-6 (round 22): a NUL in a path value was a 500 (PathValuesWithNulAre400Test sends every endpoint).
             "E48": [case(s, "GET", f"/api/analyze-file?file={q(f / 'a')}%00", 400, "NUL 문자") for s in both]
@@ -3383,6 +3435,90 @@ class ReportUnrecordedFilesAreTheServersTest(_ReportLegsFixture):
         for body in self._signed(results):
             self.assertEqual(body["unrecorded_files"]["listing"], {"source": "scan_job", "not_in_report": 0})
             self.assertEqual(body["summary"]["subfolders_skipped"], 1)
+
+    def test_archive_member_rows_left_out_of_the_post_are_counted(self) -> None:
+        """R23-5 (round 23): the listing compared top-level paths only — a post without ``bundle.zip::inner/member.png``
+        (a container row and its other member posted) signed "없음", with or without a scan job. The members the server's
+        own re-analysis of the container yields are now counted like a left-out file."""
+        rows = self._scan()
+        members = sorted(path for path in rows if path.startswith("bundle.zip::"))
+        self.assertEqual(members, ["bundle.zip::inner/member.png", "bundle.zip::notes.txt"])
+        for left_out in (members[:1], members):
+            posted = [row for path, row in rows.items() if path not in left_out]
+            results = self._report(posted)
+            with self.subTest(left_out=left_out):
+                self._assert_section(results, f"보고서에 행 없음: 서버가 검사 폴더에서 찾은 파일 중 이 보고서에 서명된 행이 없는 파일 {len(left_out)}개")
+                for body in self._signed(results):
+                    self.assertEqual(body["unrecorded_files"]["listing"], {"source": "walk", "not_in_report": len(left_out)})
+                    self.assertEqual(sorted(row["path"] for row in body["items"] if row["path"].startswith("bundle.zip::")),
+                                     sorted(set(members) - set(left_out)))
+        # with the server's scan job as the listing too
+        started = webapp_api._scan_job_start(f"folder={self.folder}&no_default_engine=true", default_folder=self.folder)
+        state: dict[str, Any] = {}
+        for _ in range(600):
+            state = webapp_api._scan_status_payload(f"job={started['job_id']}")
+            if state["status"] != "running":
+                break
+            time.sleep(0.05)
+        job_rows = [row for row in state["result"]["items"] if row["path"] != "bundle.zip::inner/member.png"]
+        for body in self._signed(self._report(job_rows, scan_job=started["job_id"], options={"no_default_engine": "true"})):
+            self.assertEqual(body["unrecorded_files"]["listing"], {"source": "scan_job", "not_in_report": 1})
+
+    def _cancelled_job(self) -> tuple[str, dict[str, Any]]:
+        """A scan job of the folder that the server finished "cancelled" after its first file (as /api/scan-cancel does)."""
+        calls = {"n": 0}
+
+        def stop() -> bool:
+            calls["n"] += 1
+            return calls["n"] > 1
+
+        result = webapp_api._scan_payload(f"folder={self.folder}&no_default_engine=true", default_folder=self.folder, should_stop=stop)
+        summary = result["summary"]
+        assert isinstance(summary, dict)
+        self.assertTrue(summary["cancelled"])
+        self.assertGreater(summary["files_cancelled"], 0)
+        webapp_api._SCAN_JOBS["job-cancelled"] = {"status": "cancelled", "created": time.time(), "finished": time.time(), "result": result}
+        return "job-cancelled", result
+
+    def test_a_cancelled_scan_job_is_cancelled_without_the_posted_summary(self) -> None:
+        """R23-3 (round 23): a cancelled job posted as ``scan_job`` without ``summary.cancelled`` signed its rows as the
+        whole folder — listing ``{"source": "scan_job", "not_in_report": 0}``, ``summary.cancelled false`` and "없음 —
+        분석 대상의 모든 파일에 분석 결과가 있습니다" in every format, although the server knew the files it never analyzed.
+        The job's own state decides: cancelled, its count, source "server" — whatever the post's summary says."""
+        job_id, result = self._cancelled_job()
+        expected = int(result["summary"]["files_cancelled"])  # type: ignore[index]
+        rows = list(result["items"])  # type: ignore[arg-type]
+        for posted in ({}, {"summary": {"cancelled": False}}, {"summary": {}}):
+            results = self._report(rows, scan_job=job_id, options={"no_default_engine": "true"}, **posted)
+            with self.subTest(posted=posted):
+                self._assert_section(results, f"사용자 취소: 검사가 취소되어 분석하지 않은 파일 {expected}개")
+                for body in self._signed(results):
+                    self.assertTrue(body["summary"]["cancelled"])
+                    self.assertEqual(body["summary"]["files_cancelled"], expected)
+                    self.assertEqual(body["files_cancelled_source"], "server")
+                    self.assertIn({"code": "cancelled", "label": "사용자 취소", "count": expected}, body["unrecorded_files"]["reasons"])
+                    self.assertEqual(body["unrecorded_files"]["listing"], {"source": "scan_job", "not_in_report": 0})
+        # the post that said "cancelled" (R18-3/R19-3) signs the same body
+        said = self._signed(self._report(rows, scan_job=job_id, options={"no_default_engine": "true"}, summary={"cancelled": True}))
+        omitted = self._signed(self._report(rows, scan_job=job_id, options={"no_default_engine": "true"}))
+        strip = {"generated_at", "signature", "signed_at", "report_id"}
+        self.assertEqual([{k: v for k, v in body.items() if k not in strip} for body in said],
+                         [{k: v for k, v in body.items() if k not in strip} for body in omitted])
+
+    def test_a_cancelled_job_of_another_folder_or_a_finished_job_changes_nothing(self) -> None:
+        """R19-3/R22-1 kept: only the server's own cancelled job of the same scan folder marks a report cancelled."""
+        job_id, result = self._cancelled_job()
+        rows = list(result["items"])  # type: ignore[arg-type]
+        other = dict(webapp_api._SCAN_JOBS[job_id], result=dict(result, scan_root=str(self.folder / "sub")))
+        webapp_api._SCAN_JOBS["job-other-folder"] = other
+        for body in self._signed(self._report(rows, scan_job="job-other-folder", options={"no_default_engine": "true"})):
+            self.assertFalse(body["summary"]["cancelled"])
+            self.assertNotIn("files_cancelled_source", body)
+            self.assertEqual(body["unrecorded_files"]["listing"]["source"], "walk")
+            self.assertGreater(body["unrecorded_files"]["listing"]["not_in_report"], 0)  # the walk finds the files never analyzed
+        # a posted "cancelled" without such a job: the caveat, count unverified (R19-3)
+        for body in self._signed(self._report(rows, scan_job="nope", summary={"cancelled": True}, options={"no_default_engine": "true"})):
+            self.assertEqual((body["summary"]["cancelled"], body["files_cancelled_source"]), (True, "unverified"))
 
     def test_signed_rows_outside_the_servers_listing_are_unknown(self) -> None:
         rows = self._scan("--recursive")  # sub/inner.png posted; the report's walk is flat (no options)

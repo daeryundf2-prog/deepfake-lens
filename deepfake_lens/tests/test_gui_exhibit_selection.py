@@ -442,6 +442,33 @@ class WebReportSelectionTest(unittest.TestCase):
         if isinstance(uploads_only, dict) and "unrecorded_listing" in uploads_only:
             self.assertEqual(uploads_only["unrecorded_listing"]["source"], "unknown")
 
+    def test_preview_draws_glyphless_names_as_the_pdf_does(self) -> None:
+        """Merge of phase0 R23-4: the evidence PDF prints a character its font cannot draw (Hebrew …)
+        as its \\uNNNN escape; the preview gives the same text and says it did (pdf_glyph_escapes),
+        while the row identity (file_path) stays the real name."""
+        from deepfake_lens.pdf_backend import import_pymupdf, pymupdf_available
+
+        if not pymupdf_available():
+            self.skipTest("pymupdf not installed")
+        name = "note \u05e2\u05d1\u05e8\u05d9\u05ea.txt"
+        (self.folder / name).write_text("히브리 이름 파일입니다.", encoding="utf-8")
+        _, _, payload = _scan(self.folder)
+        rows = payload["items"]
+        body = json.dumps({"items": rows, "summary": payload["summary"], "scan_root": str(self.folder.resolve()),
+                           "options": {"no_default_engine": "true"}, "exhibit_paths": [name], "submitter_side": "plaintiff",
+                           "case_no": "1", "case_name": "x"}, ensure_ascii=False).encode("utf-8")
+        preview = webapp_api._report_payload(body, "evidence-preview", default_folder=self.folder)
+        assert isinstance(preview, dict), preview
+        self.assertTrue(preview["pdf_glyph_escapes"])
+        [entry] = preview["entries"]
+        self.assertEqual(entry["file_path"], name)
+        self.assertIn("note \\u05e2\\u05d1\\u05e8\\u05d9\\u05ea.txt", entry["document_name"])
+        pdf = webapp_api._report_payload(body, "evidence", default_folder=self.folder)
+        assert isinstance(pdf, bytes), pdf
+        with import_pymupdf().open(stream=pdf, filetype="pdf") as doc:
+            text = "".join("".join(page.get_text().split()) for page in doc)
+        self.assertIn("".join(entry["document_name"].split()), text)
+
     def test_excluded_rows_are_named_in_response_headers(self) -> None:
         """GUI-REV5 L-2: a successful report of any format names the rows it lists as 서명 제외
         (here an upload the server never re-analyzes) in X-Deepfake-Lens-Excluded-* headers, so

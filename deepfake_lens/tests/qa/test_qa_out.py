@@ -681,6 +681,47 @@ class QaOut4SameResultEverywhereTest(unittest.TestCase):
         stream, _ = self._api_stream_payload(folder)
         self._assert_same(cli, _norm_payload(_strip_stream_extras(self, stream), folder), "/api/scan/stream")
 
+    def test_audio_folder_relative_cli_paths_match_the_servers(self) -> None:
+        """QA-OUT-4: 같은 폴더를 CLI, GUI(/api/scan), API 서버로 각각 검사 → 세 결과의 결론·근거·확률·임계값 출처가 동일.
+        R23-1 (round 23): every other leg here names the folder by its absolute path; a relative one (`scan case`,
+        `cd case; scan .`) failed every audio check since R19-2 (the audio worker resolved it against its own folder),
+        so the CLI and the GUI disagreed on the same WAV files. The CLI as a user types it — relative, and from inside
+        the folder — equals /api/scan (stdlib, and FastAPI when installed), raw row for row. With librosa (the main
+        venv; the harness's audio leg, HANDOFF §5) the WAV rows' audio_features must have run."""
+        import math
+        import os
+        import subprocess
+        import sys
+        import wave
+
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp).resolve()
+            folder = project / "case"
+            folder.mkdir()
+            for name, hz in (("a.wav", 330), ("b.wav", 440)):
+                with wave.open(str(folder / name), "wb") as handle:
+                    handle.setnchannels(1)
+                    handle.setsampwidth(2)
+                    handle.setframerate(16000)
+                    handle.writeframes(b"".join(struct.pack("<h", int(0.4 * math.sin(2 * math.pi * hz * n / 16000) * 32767)) for n in range(16000)))
+            env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, (str(REPO_ROOT), os.environ.get("PYTHONPATH"))))}
+
+            def cli(arg: str, cwd: Path) -> dict[str, Any]:
+                done = subprocess.run([sys.executable, "-m", "deepfake_lens", "scan", arg, "--format", "json"],
+                                      capture_output=True, env=env, cwd=cwd, timeout=600, check=False)
+                self.assertEqual(done.returncode, 0, done.stderr.decode("utf-8", "replace")[-2000:])
+                return _norm_payload(json.loads(done.stdout.decode("utf-8")), folder)
+
+            web = _norm_payload(self._web_payload(folder), folder)
+            self._assert_same(web, cli("case", project), "CLI `scan case`")
+            self._assert_same(web, cli(".", folder), "CLI `cd case; scan .`")
+            if HAVE_FASTAPI:
+                self._assert_same(web, _norm_payload(self._api_payload(folder), folder), "/api/scan (FastAPI)")
+            audio = {path: [status for check, status, _ in _core(row)["coverage"] if check == "audio_features"] for path, row in web["items"].items()}
+            expected = "ran" if importlib.util.find_spec("librosa") is not None else "skipped"
+            self.assertEqual(audio, {"a.wav": [expected], "b.wav": [expected]})
+            self.assertEqual(sorted(os.listdir(folder)), ["a.wav", "b.wav"])
+
     def _assert_hostile_rows(self, cli: dict[str, Any]) -> None:
         """What the CLI itself must report for the R1 hostile folder."""
         items = {path: _core(row) for path, row in cli["items"].items()}

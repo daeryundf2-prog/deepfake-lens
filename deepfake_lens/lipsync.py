@@ -167,7 +167,7 @@ def _audio_envelope(video_path: Path, *, max_seconds: float) -> tuple[list[float
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=scratch_dir()) as tmp:
         tmp_path = Path(tmp.name)
     try:
-        with native_safe_path(video_path) as native_video:  # R12-1
+        with native_safe_path(video_path, for_child=True) as native_video:  # R12-1; R23-1: absolute for the child
             proc = run_child(  # R15-1: a tracked child, stopped by the shutdown cleanup
                 [
                     "ffmpeg", *FFMPEG_QUIET_ARGS, "-y", "-i", native_video,
@@ -358,7 +358,7 @@ def _syncnet_analysis(video_path: Path) -> LipsyncAnalysis | None:
 
         # syncnet-python prints ffmpeg progress and framewise confidence to
         # stdout — redirect to stderr so JSON consumers get a clean channel.
-        with contextlib.redirect_stdout(sys.stderr), native_safe_path(video_path) as native_video:  # R12-1
+        with contextlib.redirect_stdout(sys.stderr), native_safe_path(video_path, for_child=True) as native_video:  # R12-1; R23-1: syncnet runs ffmpeg
             offsets, confs, dists, max_conf, min_dist, _json, has_face = (
                 _SYNCNET_PIPELINE.inference(native_video)
             )

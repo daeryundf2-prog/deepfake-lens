@@ -1,10 +1,10 @@
 # 0단계 작업 인계서 (다른 세션에서 이어 하기)
 
-작성: 2026-10-11, 갱신: 2026-10-14(22차 수정 반영) · 브랜치 `phase0` · 기준 커밋 `main`(dad9730)
+작성: 2026-10-11, 갱신: 2026-10-15(23차 수정 반영) · 브랜치 `phase0` · 기준 커밋 `main`(dad9730)
 
 ## 1. 한 줄 요약
 
-0단계(기반 고정)의 10개 작업 패키지(WP-A~J)는 전부 구현되어 있고, 계획서 7장의 "독립 검증 → 불일치 전부 수정 → 재검증" 루프를 22회 돌렸다. 21차 지적 9건(R21-1~R21-9)과 사용자 결정으로 더한 R21-10(HOME에서 정해지는 도구 폴더를 증거 밖으로 옮김, 7장)은 21차 수정에서 닫혔고(22차 검증이 확인), **22차 지적 11건(R22-1~R22-11)은 이 브랜치에서 수정되었다**(각 수정 커밋 제목에 ID가 있다: `git log --oneline --grep 'R22-'`; R22-2·R22-3은 2026-10-14 사용자 결정, 7장). 다음 단계는 기록 재생성(5장, 라운드 끝의 기록 전용 커밋)이 아직 없다면 그것, 그다음 23차 독립 검증이다. 게이트 0(불일치 0건)은 아직 선언되지 않았다.
+0단계(기반 고정)의 10개 작업 패키지(WP-A~J)는 전부 구현되어 있고, 계획서 7장의 "독립 검증 → 불일치 전부 수정 → 재검증" 루프를 23회 돌렸다. 22차 지적 11건(R22-1~R22-11; R22-2·R22-3은 2026-10-14 사용자 결정, 7장)은 22차 수정에서 닫혔고(23차 검증이 확인 — R22-2는 23차의 R23-6으로 보완), **23차 지적 13건(R23-1~R23-13)은 이 브랜치에서 수정되었다**(각 수정 커밋 제목에 ID가 있다: `git log --oneline --grep 'R23-'`). 다음 단계는 기록 재생성(5장, 라운드 끝의 기록 전용 커밋)이 아직 없다면 그것, 그다음 24차 독립 검증이다. 게이트 0(불일치 0건)은 아직 선언되지 않았다.
 
 이 인계서는 기록 전용 커밋(CONFORMANCE·추적표 재생성) **앞에서** 쓰고, 그 커밋으로 바뀌는 상태(기록이 어느 커밋에서 만들어졌는지, 추적표에 어느 라운드 ID까지 있는지, 커밋 수)는 적지 않는다. 그 상태는 아래 2장의 명령으로 직접 확인한다.
 
@@ -14,13 +14,13 @@
 | --- | --- |
 | 2차 계획서(사용자·이상적 상태·갭·QA·완료 판정) | claude.ai 문서 "Deepfake Lens 2차 계획서"(탭 2개: 본문, 0단계 구현 명세). 같은 내용이 이 폴더의 `SPEC.md`에 있음 |
 | 0단계 구현 | WP-A~J 완료, `phase0` 브랜치(기준 커밋 dad9730 이후). 커밋 수는 `git rev-list --count dad9730..HEAD` |
-| 독립 검증 | 22회. 라운드별 지적사항은 `verify_round*.md` (라운드 2·3은 문서 파일 없이 커밋 메시지·추적표에만 남음). 마지막 문서는 `verify_round22.md`(R21 종료 확인 + R22-1~R22-11; 검증자 원문이 `/private/tmp`와 함께 사라져 최종 보고를 옮긴 것 — 머리말 참고). R21-10은 21차 문서에 없고 사용자 결정으로 더한 항목이다(커밋 c43bc11) |
+| 독립 검증 | 23회. 라운드별 지적사항은 `verify_round*.md` (라운드 2·3은 문서 파일 없이 커밋 메시지·추적표에만 남음). 마지막 문서는 `verify_round23.md`(R22 종료 확인 + R23-1~R23-13; 검증자 원문). `verify_round22.md`는 검증자 원문이 `/private/tmp`와 함께 사라져 최종 보고를 옮긴 것이다(머리말 참고). R21-10은 21차 문서에 없고 사용자 결정으로 더한 항목이다(커밋 c43bc11) |
 | 테스트 | 테스트 수와 건너뜀 수는 숫자로 적지 않는다 — `gate.sh tests`/`full` 출력의 `Ran …`·`OK (skipped=…)` 줄이 기준이다. 건너뜀 수는 측정 조건에 따라 다르다: `/repo`에 git 이력이 있으면(`git clone --no-hardlinks` 사본 — `gate.sh`가 `.git` 디렉터리를 복사) git 이력이 필요한 테스트가 돌고, 없으면(`git archive`로 푼 트리, `.git`이 파일인 worktree) 그 테스트가 건너뛰어져 두 venv 모두 건너뜀이 그만큼 많다(R21-7: 20차 인계서·커밋 본문의 "건너뜀 100/50"은 이력 없는 사본의 값이었고 조건을 적지 않았다). 커버리지는 `gate.sh full`의 coverage 단계(fail_under 63) |
 | 적합성 기록 | `docs/CONFORMANCE.md` — 머리말에 생성한 커밋이 적혀 있다. 그 커밋이 마지막 수정 커밋보다 앞이면 아직 재생성 전이다. 확인: `PYTHONPATH=$PWD .venv-api/bin/python scripts/qa_phase0.py --verify-record` |
 | 추적성 | `docs/TRACEABILITY-COMMITS.md`, `docs/traceability-commits.json`(검증 ID → 스펙 갭 G1–G34; `ids[]`의 gaps는 그 ID를 고친 커밋 제목의 Gaps에 포함되어야 함). 어느 라운드까지 매핑됐는지는 `ids[]`를 보고, 일관성은 `python scripts/build_traceability_commits.py --check`로 확인 |
-| 다음 할 일 | (1) CONFORMANCE 머리말의 생성 커밋이 R22 수정 커밋들보다 앞이면: R22-1~R22-11을 `ids[]`에 추가하고 5장 절차로 기록 재생성(기록 전용 커밋 하나) (2) 23차 독립 검증 — 성능 비교의 기준 커밋은 2130892·2d053dd에 더해 20f73bf, 측정 조건(HOME이 새것인지, 단독 실행인지)을 함께 적는다(R22-9) |
+| 다음 할 일 | (1) CONFORMANCE 머리말의 생성 커밋이 R23 수정 커밋들보다 앞이면: R23-1~R23-13을 `ids[]`에 추가하고 5장 절차로 기록 재생성(기록 전용 커밋 하나) (2) 24차 독립 검증 — 성능 비교의 기준 커밋은 2130892에 더해 직전 검증 커밋, 측정 조건(HOME이 새것인지, 단독 실행인지)을 함께 적는다. 상대 경로 입력과 메인 환경(librosa 있음) 경로를 반드시 포함한다(R23-1) |
 
-라운드별 추세: 초반(1~5차)은 판정을 틀리게 만드는 치명 결함(검사 실패가 '낮음'으로, 학습 안 된 모델이 한국어 판정, 다른 파일 해시 기록 등), 중반(6~11차)은 경로·인코딩·서명 범위·보고서 렌더링, 후반(12~17차)은 비UTF-8 파일명, 신호 처리, 자식 프로세스 정리 같은 운영 엣지 케이스. 14~18차는 회차마다 회귀 0건이었고, 19차에서 R18-1 수정이 드러낸 회귀 1건(R19-1)과 기존 결함 1건(R19-2: numba 디스크 캐시 경합 뒤 SIGSEGV)이 차단 항목으로 나왔다. 20차의 차단 항목 둘도 직전 수정의 회귀였다: R20-1(R19-13의 보고서 재분석이 FIFO·소켓·읽기 불가 폴더를 "찾을 수 없음"으로 세어 그런 폴더의 보고서가 전부 409)과 R20-2(R19-2의 오디오 작업자가 스캔 밖에서는 파일마다 새로 떠서 batch·업로드가 7~9배 느려짐). 그래서 6장에 "회귀 방지" 규칙을 더했다. 21차에서도 직전 수정이 결함을 만들었다: R21-1(차단 — R20-1이 게시된 폴더 행의 사유 문자열을 서버 행으로 서명), R21-2(R20-2가 작업자 스레드 수를 바꾸고도 출력 세대를 올리지 않음), R21-3(R20-3 프로토콜이 개행 없는 시작 출력에서 파일마다 600초 멈춤). `/api/report`의 결함 여섯(R19-13, R20-1, R20-4, R20-5, R21-1, R21-5)은 모두 게시 행과 서버 결과를 맞추는 규칙에서 나왔으므로, 21차 수정은 "게시 행은 식별 목록일 뿐 서명되는 글자는 전부 서버 것"을 불변식으로 두고 시험한다(6장). 22차의 차단 항목 R22-1은 회귀가 아닌 기존 결함이었다: 웹 보고서의 "기록되지 않은 파일"이 게시 행에서만 세어져 상한·평면 스캔도 "없음"으로 서명되었다 — 이제 서버의 검사 작업 기록이나 서버 자신의 폴더 탐색으로 세고, 알 수 없으면 "확인 불가"로 서명한다. R22-3(검토·피드백 기록이 증거 폴더에 생김)은 R21-10이 `cd ~; web`을 허용하면서 생긴 회귀였다.
+라운드별 추세: 초반(1~5차)은 판정을 틀리게 만드는 치명 결함(검사 실패가 '낮음'으로, 학습 안 된 모델이 한국어 판정, 다른 파일 해시 기록 등), 중반(6~11차)은 경로·인코딩·서명 범위·보고서 렌더링, 후반(12~17차)은 비UTF-8 파일명, 신호 처리, 자식 프로세스 정리 같은 운영 엣지 케이스. 14~18차는 회차마다 회귀 0건이었고, 19차에서 R18-1 수정이 드러낸 회귀 1건(R19-1)과 기존 결함 1건(R19-2: numba 디스크 캐시 경합 뒤 SIGSEGV)이 차단 항목으로 나왔다. 20차의 차단 항목 둘도 직전 수정의 회귀였다: R20-1(R19-13의 보고서 재분석이 FIFO·소켓·읽기 불가 폴더를 "찾을 수 없음"으로 세어 그런 폴더의 보고서가 전부 409)과 R20-2(R19-2의 오디오 작업자가 스캔 밖에서는 파일마다 새로 떠서 batch·업로드가 7~9배 느려짐). 그래서 6장에 "회귀 방지" 규칙을 더했다. 21차에서도 직전 수정이 결함을 만들었다: R21-1(차단 — R20-1이 게시된 폴더 행의 사유 문자열을 서버 행으로 서명), R21-2(R20-2가 작업자 스레드 수를 바꾸고도 출력 세대를 올리지 않음), R21-3(R20-3 프로토콜이 개행 없는 시작 출력에서 파일마다 600초 멈춤). `/api/report`의 결함 여섯(R19-13, R20-1, R20-4, R20-5, R21-1, R21-5)은 모두 게시 행과 서버 결과를 맞추는 규칙에서 나왔으므로, 21차 수정은 "게시 행은 식별 목록일 뿐 서명되는 글자는 전부 서버 것"을 불변식으로 두고 시험한다(6장). 22차의 차단 항목 R22-1은 회귀가 아닌 기존 결함이었다: 웹 보고서의 "기록되지 않은 파일"이 게시 행에서만 세어져 상한·평면 스캔도 "없음"으로 서명되었다 — 이제 서버의 검사 작업 기록이나 서버 자신의 폴더 탐색으로 세고, 알 수 없으면 "확인 불가"로 서명한다. R22-3(검토·피드백 기록이 증거 폴더에 생김)은 R21-10이 `cd ~; web`을 허용하면서 생긴 회귀였다. 23차의 차단 항목 넷 중 둘은 회귀였다: R23-1(R19-2부터 상대 경로 오디오가 작업자의 작업 폴더 기준으로 풀려 항상 실패 — 지금까지의 검증이 모두 절대 경로를 써서 4라운드 동안 숨었다)과 R23-2(R22-9의 환경별 numba 캐시가 분석 파일 옆 `.venv`에 씀). 나머지 둘은 기존 결함이었다: R23-3(취소된 검사 작업 + 요약 생략으로 "없음" 서명)과 R23-4(PDF 글꼴에 없는 문자가 빈 글리프가 되어 서로 다른 이름이 같게 찍힘). 23차 수정은 게이트 이미지를 레포만으로 재현되게 고정했고(R23-10), 오디오 경로를 메인 환경에서도 도는 `qa-main` 단계를 게이트에 더했다(5장).
 
 ## 3. 레포를 받는 방법
 
@@ -57,11 +57,14 @@ torch/transformers/mediapipe는 설치하지 않은 상태가 기준이다(신�
 - `scripts/gate/Dockerfile` — 기준 이미지: `docker build -t deepfake-lens-gate -f scripts/gate/Dockerfile scripts/gate`
 - `scripts/gate/Dockerfile.gui` — GUI 스모크 이미지(기준 이미지 + `/venv-gui`의 pymupdf·Playwright Chromium): `docker build -t deepfake-lens-gate:gui -f scripts/gate/Dockerfile.gui scripts/gate`
 - `scripts/gate/gate.sh` — 실행기(bash, 단계마다 `pipefail`). Python 파일이 아니므로 ruff·mypy·`scripts/*.py` 도움말 테스트의 대상이 아니다.
+- `scripts/gate/requirements-main.lock`, `requirements-api.lock`, `requirements-gui.lock` — 각 venv의 `pip freeze`(의존성 포함 전부, 정확한 버전). Dockerfile이 `pip install --no-deps -r`로 설치하므로 빌드 시점에 아무것도 새로 해석하지 않는다.
+
+**재현성(23차 R23-10).** 기준 이미지는 이 폴더의 파일만으로 다시 만들어진다. 기반 이미지는 digest로 고정했다(`python:3.13.16-slim-trixie@sha256:70729b46…` — 그 arm64 층 4개가 2026-10-11 기준 이미지의 처음 4개 층과 같다). Debian 패키지는 `snapshot.debian.org`의 `DEBIAN_SNAPSHOT`(기본 20261011T000000Z) 상태에서 받고, 명시한 패키지(ffmpeg 7.1.5, git, procps, util-linux, nodejs 20.19.2)는 버전도 고정했다. pip 패키지는 위 잠금 파일의 버전 그대로다(pip 26.2.1). 22차까지의 Dockerfile은 아무것도 고정하지 않아 다시 빌드하면 그날의 `python:3.13-slim`과 PyPI 최신판이 들어왔다. 기준 이미지 이력의 `COPY pyproject.toml /tmp/pp/` 층은 레포 밖 임시 Dockerfile의 흔적이고 이미지 내용에는 영향이 없다(재빌드 이미지에는 없다). 확인 방법: 새 태그로 빌드(`docker build -t deepfake-lens-gate:rebuild -f scripts/gate/Dockerfile scripts/gate`)한 뒤 두 이미지에서 `/venv/bin/pip freeze`, `/venv-api/bin/pip freeze`, `python -V`, `dpkg-query -W`를 비교한다 — 23차 수정에서 모두 같았다. 잠금 파일은 이미지를 의도적으로 바꿀 때만 다시 만들고(`pip freeze`), 그 이유를 커밋에 적는다. 같은 태그를 덮어쓰기 전에 새 태그로 빌드해 비교한다.
 
 - Linux aarch64, Python 3.13, ffmpeg 7.1, Node.js 20.
 - `/venv`(메인): numpy, scipy, Pillow, opencv-python 5, scikit-learn, librosa + numba + soundfile, c2pa-python, jsonschema, coverage, ruff, mypy.
 - `/venv-api`(API): fastapi, httpx, uvicorn, pymupdf, markdown-it-py + linkify-it-py, mediapipe, opencv-python/opencv-contrib-python 5, numpy, scipy, Pillow, scikit-learn(librosa·c2pa 없음).
-- 실행기 `scripts/gate/gate.sh`(호스트에서 `/gate.sh`로 읽기 전용 마운트)는 `/repo`의 작업 트리를 컨테이너의 `/work`로 복사한 뒤(`.venv*` 제외, `.git`은 복사) 단계를 `bash -o pipefail`로 실행한다. 사용법: `gate.sh tests`(두 venv 단위 테스트), `gate.sh lint`(ruff, mypy), `gate.sh full`(5장의 게이트 전부), `gate.sh cmd "<명령>"`.
+- 실행기 `scripts/gate/gate.sh`(호스트에서 `/gate.sh`로 읽기 전용 마운트)는 `/repo`의 작업 트리를 컨테이너의 `/work`로 복사한 뒤(`.venv*` 제외, `.git`은 복사) 단계를 `bash -o pipefail`로 실행한다. 사용법: `gate.sh tests`(두 venv 단위 테스트), `gate.sh lint`(ruff, mypy), `gate.sh full`(5장의 게이트 전부), `gate.sh qa-main`(메인 venv 패키지로 QA 하네스, 23차), `gate.sh cmd "<명령>"`.
 
 ```bash
 # 레포 루트에서
@@ -88,7 +91,11 @@ python scripts/check_measurement_gate.py
 python scripts/sync_model_docs.py --check
 python scripts/verify_contracts.py                       # 스키마 바뀌면 contracts/PIN.json 재핀
 python scripts/stress_shutdown.py --runs 30              # 신호·자식 프로세스 관련 변경 시
+# QA 하네스의 오디오 경로(23차 잔여 리스크): /venv(librosa) + /venv-api(fastapi·pymupdf)를 함께 보는 임시 venv에서 --qa-only
+gate.sh qa-main                                          # full에 포함, 결과는 /tmp/qa-main(기록 아님)
 ```
+
+`qa-main` 단계(23차): 적합성 기록(`docs/CONFORMANCE.md`)은 지금처럼 API 환경(librosa 없음)에서 만든다. 그래서 QA-IN-1·QA-OUT-4의 오디오 경로는 기록 실행에서 한 번도 돌지 않았고, 상대 경로 오디오 회귀(R23-1)가 4라운드 동안 드러나지 않았다. `gate.sh full`은 이제 마지막 단계로 하네스를 `--qa-only`로 한 번 더 돌린다 — `/venv`의 패키지를 먼저, `/venv-api`의 패키지를 뒤에 보는 임시 venv(`.pth`)라 librosa와 fastapi가 모두 있다. 출력은 `/tmp/qa-main`에만 쓰고 기록은 바꾸지 않는다. QA 테스트 중 `QaOut4SameResultEverywhereTest.test_audio_folder_relative_cli_paths_match_the_servers`와 `QaIn1ReadOnlyEvidenceTest.test_relative_audio_commands_from_a_project_folder_leave_it_untouched`는 환경과 무관하게 돌며(librosa가 없으면 양쪽 모두 `skipped`, 있으면 `ran`을 요구), 상대 경로·프로젝트 `.venv` 배치를 시험한다.
 
 기록 재생성(라운드 끝마다, 마지막 커밋으로):
 
@@ -118,7 +125,7 @@ python scripts/build_traceability_commits.py --check
 
 ## 7. 합의된 결정 (검증자에게 재지적하지 말라고 알려 줄 것)
 
-텍스트 보고서는 모든 백슬래시를 두 배로 표시(단사 표시) · QA-SYS-10은 선택 extras 부재 시 "건너뜀(환경)" · `corpus verify`는 라벨 없는 파일에 exit 1 · `corpus split` 비율 정규화 · FastAPI 자동 문서 비활성 · `--port 0` 거부 · Windows/macOS 경로는 가짜 객체·mock으로만 검증 · python-markdown의 리터럴 백슬래시는 단사·무링크면 허용 · 비프로필 자산(face_landmarker.task, syncnet_v2.model, sfd_face.pth)은 운영자가 핀을 넣기 전까지 거부 · Linux 외 SIGKILL 자손 정리는 최선 노력 · 과거 커밋 b914bce…7fefde4의 SIG_IGN 문제는 `docs/KNOWN-HISTORICAL-ISSUES.md`에 문서화 · 같은 mtime/ctime/size/inode의 매니페스트 제자리 수정은 프로세스 내 미감지(문서화된 잔여) · 골든 출력은 mediapipe/torch/deep-signals 출력 미포함(문서화된 잔여) · api-serve의 Ctrl-C는 uvicorn이 처리 · 도구 폴더 위치(사용자 결정 2026-10-12, R21-10): HOME에서 정해지는 도구 폴더(`~/.cache/deepfake-lens`의 로그·히트맵·numba 캐시)가 검사 대상 폴더·분석 파일의 폴더·서버 기본 루트와 겹치거나 HOME이 상대 경로이면 거부하지 않고 증거 밖의 첫 후보(OS 캐시 폴더, `$XDG_CACHE_HOME`, Windows의 `%ProgramData%\deepfake-lens\<사용자>`, 시스템 임시 폴더의 사용자 폴더)로 옮기고 알림 한 줄을 낸다 — 후보가 없을 때만 종료 코드 2. Windows 후보(사용자 결정 2026-10-14, R22-2): `%LOCALAPPDATA%`·`%TEMP%`가 모두 프로필 안이라 프로필 밖 `%ProgramData%\deepfake-lens\<사용자>`를 소유자 전용 ACL(SYSTEM·Administrators·소유자)로 만들어 Mac/Linux처럼 옮긴다 — 다른 후보와 같은 규칙(이 사용자 소유, 다른 계정이 쓰기·삭제·권한 변경 불가, 링크·정션 아님, 상위 폴더에서 다른 계정이 지우거나 바꿀 수 없음)으로 확인하며 검증은 mock으로만 한다. 운영자가 환경 변수로 지정한 폴더(`DEEPFAKE_LENS_LOG_DIR`·`DEEPFAKE_LENS_HEATMAP_DIR`)가 증거 안이면 계속 종료 코드 2. · 검토·피드백 기록 위치(사용자 결정 2026-10-14, R22-3): 웹 GUI의 `reviews.json`·`feedback.jsonl`은 증거와 무관한 사용자별 고정 위치(macOS `~/Library/Application Support/deepfake-lens`, Linux `$XDG_DATA_HOME/deepfake-lens`(절대 경로일 때) 또는 `~/.local/share/deepfake-lens`, Windows `%APPDATA%\deepfake-lens`)에 둔다 — 그 위치가 서버의 검사 대상 폴더와 겹치거나 정할 수 없으면(상대 HOME 등) 저장을 거부(HTTP 409, 한국어 사유)하고 증거에 쓰지 않는다. 기존 `~/.deepfake-lens`의 기록은 한 번 복사한 뒤 새 폴더에 표시를 남기며 원본은 그대로 둔다.
+텍스트 보고서는 모든 백슬래시를 두 배로 표시(단사 표시) · QA-SYS-10은 선택 extras 부재 시 "건너뜀(환경)" · `corpus verify`는 라벨 없는 파일에 exit 1 · `corpus split` 비율 정규화 · FastAPI 자동 문서 비활성 · `--port 0` 거부 · Windows/macOS 경로는 가짜 객체·mock으로만 검증 · python-markdown의 리터럴 백슬래시는 단사·무링크면 허용 · 비프로필 자산(face_landmarker.task, syncnet_v2.model, sfd_face.pth)은 운영자가 핀을 넣기 전까지 거부 · Linux 외 SIGKILL 자손 정리는 최선 노력 · 과거 커밋 b914bce…7fefde4의 SIG_IGN 문제는 `docs/KNOWN-HISTORICAL-ISSUES.md`에 문서화 · 같은 mtime/ctime/size/inode의 매니페스트 제자리 수정은 프로세스 내 미감지(문서화된 잔여) · 골든 출력은 mediapipe/torch/deep-signals 출력 미포함(문서화된 잔여) · api-serve의 Ctrl-C는 uvicorn이 처리 · 도구 폴더 위치(사용자 결정 2026-10-12, R21-10): HOME에서 정해지는 도구 폴더(`~/.cache/deepfake-lens`의 로그·히트맵·numba 캐시)가 검사 대상 폴더·분석 파일의 폴더·서버 기본 루트와 겹치거나 HOME이 상대 경로이면 거부하지 않고 증거 밖의 첫 후보(OS 캐시 폴더, `$XDG_CACHE_HOME`, Windows의 `%ProgramData%\deepfake-lens\<사용자>`, 시스템 임시 폴더의 사용자 폴더)로 옮기고 알림 한 줄을 낸다 — 후보가 없을 때만 종료 코드 2. Windows 후보(사용자 결정 2026-10-14, R22-2): `%LOCALAPPDATA%`·`%TEMP%`가 모두 프로필 안이라 프로필 밖 `%ProgramData%\deepfake-lens\<사용자>`를 소유자 전용 ACL(SYSTEM·Administrators·소유자)로 만들어 Mac/Linux처럼 옮긴다 — 다른 후보와 같은 규칙(이 사용자 소유, 다른 계정이 쓰기·삭제·권한 변경 불가, 링크·정션 아님, 상위 폴더에서 다른 계정이 지우거나 바꿀 수 없음)으로 확인하며 검증은 mock으로만 한다(23차 R23-6: 상속 전용 `(IO)` 항목은 상위 폴더 판단에서 빼고, 이 도구가 만드는 상위 폴더에는 보호된 ACL을 준다 — 잔여: 다른 계정이 상위 폴더를 먼저 만들었으면 그 계정 소유라 이 사용자에게는 이 후보를 쓰지 않는다). 운영자가 환경 변수로 지정한 폴더(`DEEPFAKE_LENS_LOG_DIR`·`DEEPFAKE_LENS_HEATMAP_DIR`)가 증거 안이면 계속 종료 코드 2. · 검토·피드백 기록 위치(사용자 결정 2026-10-14, R22-3): 웹 GUI의 `reviews.json`·`feedback.jsonl`은 증거와 무관한 사용자별 고정 위치(macOS `~/Library/Application Support/deepfake-lens`, Linux `$XDG_DATA_HOME/deepfake-lens`(절대 경로일 때) 또는 `~/.local/share/deepfake-lens`, Windows `%APPDATA%\deepfake-lens`)에 둔다 — 그 위치가 서버의 검사 대상 폴더와 겹치거나 정할 수 없으면(상대 HOME 등) 저장을 거부(HTTP 409, 한국어 사유)하고 증거에 쓰지 않는다. 기존 `~/.deepfake-lens`의 기록은 한 번 복사한 뒤 새 폴더에 표시를 남기며 원본은 그대로 둔다.
 
 ## 8. 루프를 이어 가는 방법
 
@@ -146,6 +153,7 @@ python scripts/build_traceability_commits.py --check
 | `verify_round19.md` | 19차 검증: R18 종료 확인, R19-1~R19-12와 조정자 추가 R19-13(수정됨) |
 | `verify_round20.md` | 20차 검증: R19 종료 확인, R20-1~R20-10(수정됨) |
 | `verify_round21.md` | 21차 검증: R20 종료 확인, R21-1~R21-9(수정됨; 사용자 결정 R21-10도 21차 수정에서 함께 닫힘) |
-| `verify_round22.md` | 22차 검증: R21 종료 확인, R22-1~R22-11(이 브랜치에서 수정됨). 원문 소실 — 검증자 최종 보고를 옮긴 것 |
+| `verify_round22.md` | 22차 검증: R21 종료 확인, R22-1~R22-11(수정됨). 원문 소실 — 검증자 최종 보고를 옮긴 것 |
+| `verify_round23.md` | 23차 검증: R22 종료 확인, R23-1~R23-13(이 브랜치에서 수정됨) |
 | `ux_audit_ec0d057.md` | 18차와 함께 한 UI/UX/AX 감사(ec0d057 기준) |
 | `HANDOFF.md` | 이 문서 |

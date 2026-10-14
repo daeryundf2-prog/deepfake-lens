@@ -33,6 +33,22 @@ embedded and subset, so Latin letters, Hangul, digits and hex all have real
 metrics (the base-14 ``korea`` CID font drew every Latin character a full em
 wide and gave no width information). When a PyMuPDF build lacks the CJK
 font, the ``korea`` font is used and measured with ``get_text_length``.
+
+R23-4 (round 23): that font has no glyph for Hebrew, Arabic, Thai,
+Devanagari, emoji and many other scripts; PyMuPDF drew such a character as
+an empty glyph (text extraction: U+0000), so ``note עברית.txt`` and
+``note עבריה.txt`` — two evidence files — were printed identically in the
+forensic PDF, the evidence statement and the legal report, while HTML and
+JSON were right. Every string is now made drawable before it is measured or
+drawn (:meth:`PdfLayout.drawable`): a code point the font has no glyph for
+(``Font.has_glyph``) is written as ``\\xNN`` / ``\\uNNNN`` /
+``\\UNNNNNNNN`` — the escapes ``result_text.display_name`` uses. File
+names reach the PDF through ``display_name`` (every literal backslash
+doubled, every escape a single backslash followed by its code), so the
+printed text still decodes to exactly one name: two different names never
+print alike (R10-1/R11-4/R18-11). No broader font is bundled (none ships
+with the pinned PyMuPDF; adding one would need an offline copy with a
+compatible license) — the escape is the rule.
 """
 
 from __future__ import annotations
@@ -40,6 +56,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Sequence
+
+from .result_text import _escape_code
 
 logger = logging.getLogger(__name__)
 
@@ -106,13 +124,48 @@ class PdfLayout:
         self.y = self.top
         self._font: Any = None
         self._font_buffer: bytes | None = None
+        # R23-4: the font whose glyphs are checked (the embedded one; the korea fallback is checked with
+        # PyMuPDF's own copy of it when it has one) and the per-character answers.
+        self._glyph_font: Any = None
+        self._glyph_cache: dict[str, bool] = {}
         try:
             font = pymupdf.Font("cjk")
             self._font, self._font_buffer = font, font.buffer
+            self._glyph_font = font
             self.fontname = EMBEDDED_FONT_NAME
         except Exception:  # noqa: BLE001 - a PyMuPDF build without the CJK font: measured fallback
             logger.info("PyMuPDF CJK font unavailable; using the korea CID font", exc_info=True)
             self.fontname = FALLBACK_FONT_NAME
+            try:
+                self._glyph_font = pymupdf.Font(FALLBACK_FONT_NAME)
+            except Exception:  # noqa: BLE001 - no glyph table: ASCII and Hangul syllables only (below)
+                self._glyph_font = None
+
+    # -- glyphs (R23-4) ---------------------------------------------------
+
+    def _has_glyph(self, char: str) -> bool:
+        known = self._glyph_cache.get(char)
+        if known is None:
+            code = ord(char)
+            if self._glyph_font is not None:
+                try:
+                    known = bool(self._glyph_font.has_glyph(code))
+                except Exception:  # noqa: BLE001 - treat as missing: the escape is always drawable
+                    known = False
+            else:
+                known = 0x20 <= code < 0x7F or 0xAC00 <= code <= 0xD7A3
+            self._glyph_cache[char] = known
+        return known
+
+    def drawable(self, text: str) -> str:
+        """R23-4: ``text`` with every code point the font cannot draw written as its escape (``\\uNNNN`` …).
+
+        Line breaks and spaces stay; the escapes are printable ASCII.
+        """
+        text = str(text)
+        if text.isascii() and all(char in "\n " or 0x20 <= ord(char) < 0x7F for char in text):
+            return text
+        return "".join(char if char in "\n " or self._has_glyph(char) else _escape_code(ord(char)) for char in text)
 
     # -- geometry ---------------------------------------------------------
 
@@ -154,9 +207,12 @@ class PdfLayout:
         return size * FALLBACK_DESCENT_FACTOR
 
     def wrap(self, text: str, width: float, size: float) -> list[str]:
-        """``text`` broken into lines no wider than ``width`` (measured), keeping every character."""
+        """``text`` broken into lines no wider than ``width`` (measured), keeping every character.
+
+        R23-4: measured and returned in its drawable form (:meth:`drawable`).
+        """
         lines: list[str] = []
-        for paragraph in str(text).split("\n"):
+        for paragraph in self.drawable(str(text)).split("\n"):
             lines.extend(self._wrap_paragraph(paragraph, width, size))
         return lines or [""]
 
@@ -232,6 +288,7 @@ class PdfLayout:
         """
         if not lines or not any(line.strip() for line in lines):
             return 0.0
+        lines = [self.drawable(line) for line in lines]  # R23-4: lines not made by wrap() too
         text = "\n".join(lines)
         height = self.block_height(lines, size) + 0.5
         for _ in range(TEXTBOX_RETRIES):

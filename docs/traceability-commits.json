@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "7756d4013712431f0537fc5a2eb2a8d2ec56f79e",
+    "head": "bbe3532219656c3c25df6425eb512f3e5d93f929",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -3971,6 +3971,198 @@
       "new": "갭 목록 밖 항목 포함",
       "commits": [
         "7756d40"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R23-1",
+      "round": 23,
+      "source": "verify_round23.md",
+      "summary": "a relative audio path is made absolute before it crosses into a child process — scan case,",
+      "gaps": [
+        "G1"
+      ],
+      "new": null,
+      "commits": [
+        "5f3990f",
+        "6ec2974"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R23-2",
+      "round": 23,
+      "source": "verify_round23.md",
+      "summary": "the per-environment numba cache is never made inside the folder of a file a single-file co",
+      "gaps": [
+        "G1",
+        "G31"
+      ],
+      "new": null,
+      "commits": [
+        "38911f0"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R23-3",
+      "round": 23,
+      "source": "verify_round23.md",
+      "summary": "a scan job the server finished \"cancelled\" marks the web report cancelled with the job's o",
+      "gaps": [
+        "G7",
+        "G12",
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "c89cb3a"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R23-4",
+      "round": 23,
+      "source": "verify_round23.md",
+      "summary": "every PDF prints a character its font has no glyph for as its \\uNNNN escape — Hebrew, Arab",
+      "gaps": [
+        "G2",
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "a30a455"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R23-5",
+      "round": 23,
+      "source": "verify_round23.md",
+      "summary": "archive members the server's own re-analysis of a signed container yields without a signed",
+      "gaps": [
+        "G7",
+        "G12",
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "494c18d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R23-6",
+      "round": 23,
+      "source": "verify_round23.md",
+      "summary": "inherit-only ACL entries no longer make the default %ProgramData% parent unsafe, and a par",
+      "gaps": [
+        "G31"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "ec4b17a"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R23-7",
+      "round": 23,
+      "source": "verify_round23.md",
+      "summary": "an examiner record that cannot be written is a Korean 409 (507 when the disk is full) with",
+      "gaps": [
+        "G31"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "190694d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R23-8",
+      "round": 23,
+      "source": "verify_round23.md",
+      "summary": "neither examiner record is migrated into a file an operator named — DEEPFAKE_LENS_REVIEWS ",
+      "gaps": [
+        "G31"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "899c104"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R23-9",
+      "round": 23,
+      "source": "verify_round23.md",
+      "summary": "a model_path / fusion_profile name the file system cannot look up is a 400 — a 5000-charac",
+      "gaps": [
+        "G31"
+      ],
+      "new": null,
+      "commits": [
+        "ec1229a"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R23-10",
+      "round": 23,
+      "source": "verify_round23.md",
+      "summary": "the gate image is reproducible from the repository — base image pinned by digest, Debian p",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "3a2e1c4"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R23-11",
+      "round": 23,
+      "source": "verify_round23.md",
+      "summary": "`help vendor-weights pin` shows the vendor-weights help with a note — pin is a value of it",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "5b51712"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R23-12",
+      "round": 23,
+      "source": "verify_round23.md",
+      "summary": "the per-environment numba cache is never made inside the folder of a file a single-file co",
+      "gaps": [
+        "G1",
+        "G31",
+        "G7",
+        "G12",
+        "G30"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "38911f0",
+        "c89cb3a",
+        "494c18d",
+        "ec4b17a"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R23-13",
+      "round": 23,
+      "source": "verify_round23.md",
+      "summary": "a true/false option with an unknown value is a 400 on both servers — recursive=maybe was r",
+      "gaps": [
+        "G7"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "617130d"
       ],
       "used_in_commit_subjects": true
     }
@@ -10363,6 +10555,369 @@
       "new_reasons": [
         "R22-11: 갭 목록 밖 항목 포함"
       ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "85ad114c17d80b37c29279d698999240368369af",
+      "short": "85ad114",
+      "round": "22",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on 7756d40, round-22 IDs mapped (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "0fa5ac8b35526b03bee730ec892ce2b224ef5745",
+      "short": "0fa5ac8",
+      "round": "22",
+      "subject": "docs(phase0): round-23 verification findings (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "5f3990f49c02f316b750afef417358a61eed215a",
+      "short": "5f3990f",
+      "round": "23",
+      "subject": "fix(audio): R23-1 a relative audio path is made absolute before it crosses into a child process — scan case, cd case; scan ., classify case/a.wav, batch case and web --folder case run audio_features again, equal to the absolute run (R23-1; Gaps: G1)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R23-1"
+      ],
+      "gaps_named_in_subject": [
+        "G1"
+      ],
+      "gaps": [
+        "G1"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G1",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "6ec2974dc7e8ae7da645d14e38036419b698a0ea",
+      "short": "6ec2974",
+      "round": "23",
+      "subject": "docs(cli): R23-1 the audio worker is sent the file's absolute path and ffmpeg children absolute input names (R23-1; Gaps: G1)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R23-1"
+      ],
+      "gaps_named_in_subject": [
+        "G1"
+      ],
+      "gaps": [
+        "G1"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G1",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "38911f083ee6e8f5f623134edd0604a2bb7f70ed",
+      "short": "38911f0",
+      "round": "23",
+      "subject": "fix(audio): R23-2 the per-environment numba cache is never made inside the folder of a file a single-file command analyzes — classify / evidence / audio a.wav with the project's .venv next to it wrote .venv/var/deepfake-lens (R23-2, R23-12; Gaps: G1, G31)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R23-2",
+        "R23-12"
+      ],
+      "gaps_named_in_subject": [
+        "G1",
+        "G31"
+      ],
+      "gaps": [
+        "G1",
+        "G31"
+      ],
+      "new": false,
+      "new_reasons": [
+        "R23-12: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G1, G31",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "3a2e1c4d9ee7addf8c8f0ba7efa252a858eeec81",
+      "short": "3a2e1c4",
+      "round": "23",
+      "subject": "build(gate): R23-10 the gate image is reproducible from the repository — base image pinned by digest, Debian packages from a snapshot.debian.org state, every pip package at the reference image's exact version from committed lock files (R23-10; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R23-10"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R23-10: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "c89cb3a8a8ce6f26b75bd5906b6682b2e3be6958",
+      "short": "c89cb3a",
+      "round": "23",
+      "subject": "fix(report): R23-3 a scan job the server finished \"cancelled\" marks the web report cancelled with the job's own count whatever the posted summary says — omitting summary.cancelled no longer signs \"없음\" (R23-3, R23-12; Gaps: G7, G12, G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R23-3",
+        "R23-12"
+      ],
+      "gaps_named_in_subject": [
+        "G7",
+        "G12",
+        "G30"
+      ],
+      "gaps": [
+        "G7",
+        "G12",
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [
+        "R23-12: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G7, G12, G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "a30a45504055b784ead48e66ffa66d15f2778553",
+      "short": "a30a455",
+      "round": "23",
+      "subject": "fix(report): R23-4 every PDF prints a character its font has no glyph for as its \\uNNNN escape — Hebrew, Arabic, Thai, Devanagari and emoji names were empty glyphs and different evidence files printed identically (R23-4; Gaps: G2, G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R23-4"
+      ],
+      "gaps_named_in_subject": [
+        "G2",
+        "G30"
+      ],
+      "gaps": [
+        "G2",
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G2, G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "494c18dcb01b68ee1013b737770106eda6b3db16",
+      "short": "494c18d",
+      "round": "23",
+      "subject": "fix(report): R23-5 archive members the server's own re-analysis of a signed container yields without a signed row are counted as \"보고서에 행 없음\" — a post that left out bundle.zip::gen.png no longer signs \"없음\" (R23-5, R23-12; Gaps: G7, G12, G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R23-5",
+        "R23-12"
+      ],
+      "gaps_named_in_subject": [
+        "G7",
+        "G12",
+        "G30"
+      ],
+      "gaps": [
+        "G7",
+        "G12",
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [
+        "R23-12: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G7, G12, G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "ec4b17ae9419d9522ac616b1667c7a1fded20ca1",
+      "short": "ec4b17a",
+      "round": "23",
+      "subject": "fix(cli): R23-6 inherit-only ACL entries no longer make the default %ProgramData% parent unsafe, and a parent this tool makes gets a protected ACL — the Windows relocation of R22-2 can happen on a real default install (R23-6, R23-12; Gaps: G31, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R23-6",
+        "R23-12"
+      ],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R23-6: 갭 목록 밖 항목 포함",
+        "R23-12: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G31; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "899c104fdcbb0898578e0e76127e4401fec73dda",
+      "short": "899c104",
+      "round": "23",
+      "subject": "fix(server): R23-8 neither examiner record is migrated into a file an operator named — DEEPFAKE_LENS_REVIEWS got ~/.deepfake-lens/reviews.json merged in while DEEPFAKE_LENS_FEEDBACK got nothing; the service document said both are copied once (R23-8; Gaps: G31, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R23-8"
+      ],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R23-8: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G31; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "190694d4ea1995202a95a1b10582ed9f2daf4b27",
+      "short": "190694d",
+      "round": "23",
+      "subject": "fix(server): R23-7 an examiner record that cannot be written is a Korean 409 (507 when the disk is full) with nothing changed — a review answered 200 \"success\" from memory with nothing on disk, feedback was a 500 (R23-7; Gaps: G31, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R23-7"
+      ],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R23-7: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G31; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "ec1229a3a930fdfb863d6198f7a71e1c9ac8d03f",
+      "short": "ec1229a",
+      "round": "23",
+      "subject": "fix(server): R23-9 a model_path / fusion_profile name the file system cannot look up is a 400 — a 5000-character name was a 500 (ENAMETOOLONG) on both servers, in /api/scan and a report's options (R23-9; Gaps: G31)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R23-9"
+      ],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G31",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "617130d158ca2d065583a0183a581cdffcde2eb4",
+      "short": "617130d",
+      "round": "23",
+      "subject": "fix(server): R23-13 a true/false option with an unknown value is a 400 on both servers — recursive=maybe was read as false and a report signed \"아니오\" (R23-13; Gaps: G7, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R23-13"
+      ],
+      "gaps_named_in_subject": [
+        "G7"
+      ],
+      "gaps": [
+        "G7"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R23-13: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G7; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "5b51712bf37147eb984b55b926ebdfc023c15b6e",
+      "short": "5b51712",
+      "round": "23",
+      "subject": "fix(cli): R23-11 `help vendor-weights pin` shows the vendor-weights help with a note — pin is a value of its positional argument, not a subcommand — and `help help` is the top-level help (R23-11; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R23-11"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R23-11: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "494daf0ae033af24354674033564c50b4bb3e32c",
+      "short": "494daf0",
+      "round": "23",
+      "subject": "test(qa): the QA harness also runs with the audio stack — gate.sh full ends with a --qa-only run in a side venv that sees /venv then /venv-api, and QA-IN-1 / QA-OUT-4 gain relative-path audio cases (WP-J; Gaps: G26, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26"
+      ],
+      "gaps": [
+        "G26"
+      ],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "bbe3532219656c3c25df6425eb512f3e5d93f929",
+      "short": "bbe3532",
+      "round": "23",
+      "subject": "docs(phase0): HANDOFF.md §1/§2/§9 state round 23 — 23 rounds, R23-1…R23-13 fixed on this branch, the round-23 trend and the next steps — without anything the records-only commit changes (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
       "gaps_line": "Gaps: 신규(스펙 외)",
       "gaps_source": "subject"
     }

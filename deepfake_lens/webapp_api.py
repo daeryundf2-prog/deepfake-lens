@@ -7,6 +7,7 @@ read-root guard so each file stays a single readable layer.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -142,6 +143,17 @@ def api_status(payload: object) -> int:
 JOB_PARAM_REQUIRED = "job 매개변수가 필요합니다"
 JOB_UNKNOWN = "알 수 없거나 만료된 작업입니다"
 FILE_PARAM_REQUIRED = "file 매개변수(파일 경로)가 필요합니다"
+
+
+def async_requested(query: str) -> bool:
+    """R23-13 (round 23): ``/api/scan``'s ``async`` value (both servers) — an unknown value is InvalidOption (400).
+
+    It was "1" / "true" / "yes" or else a synchronous scan; it now takes the true/false values of every
+    other option (:func:`analysis_api.parse_flag`).
+    """
+    from .analysis_api import parse_flag
+
+    return parse_flag(parse_qs(query).get("async", ["false"])[0], "async")
 
 
 def _web_options(params: dict[str, list[str]] | None = None) -> AnalysisOptions:
@@ -381,18 +393,25 @@ def _with_posted_cancel(summary: Any, posted: object, job_id: object = None, sca
     is 0 and the summary is marked unverified (the renderings say the
     number could not be checked) — source ``"unverified"``. Returns
     ``(summary, source)``; source None when the post did not say cancelled.
+
+    R23-3 (round 23): the server's own job decides first. A ``scan_job`` that the server finished
+    "cancelled" (same scan folder) marks the report cancelled with that job's count whatever the post's
+    ``summary`` says — posted without ``summary.cancelled`` (or with ``false``), the job's rows were signed
+    as the complete listing (R22-1 ``scan_job``) and every rendering said "없음 — 분석 대상의 모든 파일에
+    분석 결과가 있습니다" although the server knew ``files_cancelled`` files were never analyzed. The post
+    can still only add the caveat (``summary.cancelled`` without such a job: "unverified").
     """
     from dataclasses import replace
 
-    if not isinstance(posted, dict) or posted.get("cancelled") is not True:
-        return summary, None
-    count: object = None
     job = _finished_scan_job(job_id, scan_root)
     job_summary = job.get("summary") if job is not None and job.get("status") == "cancelled" else None
     if isinstance(job_summary, dict):
         count = job_summary.get("files_cancelled")
-    if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
-        return replace(summary, cancelled=True, files_cancelled=count), "server"
+        if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+            return replace(summary, cancelled=True, files_cancelled=count), "server"
+        return replace(summary, cancelled=True, files_cancelled=0, files_cancelled_unverified=True), "unverified"
+    if not isinstance(posted, dict) or posted.get("cancelled") is not True:
+        return summary, None
     return replace(summary, cancelled=True, files_cancelled=0, files_cancelled_unverified=True), "unverified"
 
 
@@ -1342,18 +1361,29 @@ def _feedback_payload(body: bytes, evidence: list[Path] | tuple[Path, ...] = ())
     if isinstance(result, dict):
         # load_feedback reads the embedded scan result from the "result" key.
         entry["result"] = result
-    from .user_data import FEEDBACK_ENV, FEEDBACK_FILE, UserDataRefused, check_outside, migrate_once
+    from .user_data import FEEDBACK_ENV, FEEDBACK_FILE, UserDataRefused, check_outside, migrate_default, write_failed
 
     try:
         feedback_file = _feedback_path()
         check_outside(feedback_file, evidence, FEEDBACK_ENV)  # R22-3: never into the evidence
     except UserDataRefused as exc:
         return ApiError(str(exc), USER_DATA_REFUSED_STATUS)
-    if not os.environ.get(FEEDBACK_ENV):
-        migrate_once(FEEDBACK_FILE, feedback_file)
-    feedback_file.parent.mkdir(parents=True, exist_ok=True)
-    with feedback_file.open("a", encoding="utf-8") as handle:
-        handle.write(json_dumps(entry, ensure_ascii=False) + "\n")
+    migrate_default(FEEDBACK_FILE, FEEDBACK_ENV, feedback_file)  # R23-8: the reviews' rule
+    line = (json_dumps(entry, ensure_ascii=False) + "\n").encode("utf-8")
+    size: int | None = None
+    try:
+        feedback_file.parent.mkdir(parents=True, exist_ok=True)
+        size = feedback_file.stat().st_size if feedback_file.is_file() else 0
+        with feedback_file.open("ab") as handle:
+            handle.write(line)
+    except OSError as exc:
+        # R23-7 (round 23): a folder or file that cannot be written was a 500 (PermissionError); a line
+        # half-written when the disk filled is cut off again, so the file holds whole entries only.
+        if size is not None:
+            with contextlib.suppress(OSError):
+                os.truncate(feedback_file, size)
+        failed = write_failed(feedback_file, exc, FEEDBACK_ENV)
+        return ApiError(str(failed), failed.status)
     return {"ok": True, "feedback_file": str(feedback_file)}
 
 
@@ -1763,7 +1793,7 @@ class _ReportHasher:
 @in_worker_scope  # R20-2: one audio worker for all files (was one per file)
 def _rederive_report_items(
     posted: list[Any], hasher: "_ReportHasher", options: Any, thresholds: Any,
-) -> tuple[list[Any], list[tuple[Any, str]], list[dict[str, object]]]:
+) -> tuple[list[Any], list[tuple[Any, str]], list[dict[str, object]], set[tuple[str, str]]]:
     """Re-analyze every posted row on the server (X2).
 
     Rows are grouped by their top-level file ("a.zip::x" -> "a.zip"); each
@@ -1783,6 +1813,11 @@ def _rederive_report_items(
     dedupe duplicate (status "duplicate", ``duplicate_of``) stays a
     duplicate row when the server finds the file's bytes equal to those of
     ``duplicate_of`` (it is not signed as a full analysis of the copy).
+
+    R23-5 (round 23): the fourth value is the ``(container, member)`` identities of the archive member rows
+    the server's own re-analysis of a posted container yields that the post left out — the report counts
+    them as files without a signed row (``not_in_report``); they used to be invisible (the listing compared
+    top-level paths only).
     """
     from .analysis_api import scan_file_run
     from .result_text import escape_row_path, member_row_path, row_identity
@@ -1843,7 +1878,11 @@ def _rederive_report_items(
             if _row_signature(item) != _row_signature(server):
                 changed.append(_changed_row(item, server, None))
             derived.append(server)
-    return derived, excluded, changed
+    unsigned_members = {
+        (top, member) for top, rows in derived_by_top.items() if isinstance(rows, dict)
+        for member in rows if member is not None and (top, member) not in seen
+    }
+    return derived, excluded, changed, unsigned_members
 
 
 def _unanalyzed_entry_row(
@@ -1908,6 +1947,49 @@ def _unanalyzed_entry_row(
     if reason is None:
         return None
     return {None: ScanItem(top, located.name, "unknown", "skipped", 0, error=reason)}
+
+
+def _preview_as_pdf_draws(preview: dict[str, Any]) -> dict[str, Any]:
+    """Merge of phase0 R23-4 (GUI preview equals the PDF): every text the evidence PDF would draw is given
+    as the PDF draws it — a character its font has no glyph for (Hebrew, Arabic, emoji …) as its
+    ``\\uNNNN`` escape (:meth:`pdf_layout.PdfLayout.drawable`, the renderer's own rule).
+    ``pdf_glyph_escapes`` says whether any text was escaped, so the GUI can say why. Without pymupdf no
+    PDF can be made (501) and the texts are left as they are (``pdf_glyph_escapes`` false).
+    """
+    from .pdf_backend import import_pymupdf, pymupdf_available
+
+    preview["pdf_glyph_escapes"] = False
+    if not pymupdf_available():
+        return preview
+    from .pdf_layout import PdfLayout
+
+    layout = PdfLayout(import_pymupdf())
+    escaped = False
+
+    def draw(value: Any) -> Any:
+        nonlocal escaped
+        if isinstance(value, str):
+            out = layout.drawable(value)
+            escaped = escaped or out != value
+            return out
+        if isinstance(value, list):
+            return [draw(entry) for entry in value]
+        if isinstance(value, tuple):
+            return tuple(draw(entry) for entry in value)
+        if isinstance(value, dict):
+            # an entry's file_path is the row's identity (the GUI matches changed rows by it), not drawn text
+            return {key: entry if key == "file_path" else draw(entry) for key, entry in value.items()}
+        return value
+
+    try:
+        listing = preview.pop("unrecorded_listing", None)  # GUI data, never drawn
+        drawn = {key: draw(value) for key, value in preview.items()}
+    finally:
+        layout.doc.close()
+    if listing is not None:
+        drawn["unrecorded_listing"] = listing
+    drawn["pdf_glyph_escapes"] = escaped
+    return drawn
 
 
 def _posted_walk_limit_row(posted: Any) -> bool:
@@ -2200,6 +2282,7 @@ def _finished_scan_job(job_id: object, scan_root: Path | None) -> dict[str, Any]
 
 def _report_listing(
     summary: Any, signed_items: list[Any], scan_root: Path | None, options: AnalysisOptions, job_id: object,
+    unsigned_members: set[tuple[str, str]] | None = None,
 ) -> Any:
     """R22-1 (round 22): ``summary`` with the server's own "기록되지 않은 파일" counts of the scan folder.
 
@@ -2217,6 +2300,12 @@ def _report_listing(
       section says "확인 불가" with the reason, and no enumeration count is signed.
 
     A file of the listing without a signed row is counted (``not_in_report``).
+
+    R23-5 (round 23): so is an archive member the server's own re-analysis of a signed container yields
+    without a signed row (``unsigned_members``, from :func:`_rederive_report_items`). The listings hold
+    top-level paths only, so a post that left out ``bundle.zip::gen.png`` (the member with the generator
+    metadata) signed "없음". With a scan job as the listing only the members that job analyzed count: a
+    member a cancel left unanalyzed is already in the job's ``files_cancelled``.
     """
     from .core import enumerate_scan_folder
     from .result_text import row_identity
@@ -2248,6 +2337,8 @@ def _report_listing(
             "subfolders_skipped": count("subfolders_skipped"), "subfolder_files_skipped": count("subfolder_files_skipped"),
             "subfolders_skipped_detail": [dict(entry) for entry in detail if isinstance(entry, dict)] if isinstance(detail, list) else [],
         }
+        job_members = {identity for identity in (row_identity(row) for row in job_items if isinstance(row, dict)) if identity[1] is not None}
+        missing_members = len((unsigned_members or set()) & job_members)
         recursive: object = "검사 작업"
         max_files: object = "검사 작업"
     else:
@@ -2272,12 +2363,13 @@ def _report_listing(
             "subfolders_skipped_detail": list(walk.subfolder_detail),
         }
         recursive, max_files = "예" if options.recursive else "아니오", options.max_files
+        missing_members = len(unsigned_members or ())
     outside = signed_tops - listed
     if outside:
         return unknown(REPORT_LISTING_ROWS_OUTSIDE.format(n=len(outside), recursive=recursive, max_files=max_files))
     return replace(
         summary, **enumeration,
-        unrecorded_listing={"source": source, "not_in_report": len(listed - signed_tops)},
+        unrecorded_listing={"source": source, "not_in_report": len(listed - signed_tops) + missing_members},
     )
 
 
@@ -2479,7 +2571,8 @@ def _report_payload(
         return {"error": REPORT_FIELD_NOT_OBJECT.format(field="options")}
     try:
         options = _web_options(
-            {str(key): [str(value).lower() if isinstance(value, bool) else str(value)] for key, value in (raw_options or {}).items()},
+            # R23-13: a JSON null is an unset option (its default), never the text "None" (now a 400 for a flag)
+            {str(key): [str(value).lower() if isinstance(value, bool) else str(value)] for key, value in (raw_options or {}).items() if value is not None},
         )
     except InvalidOption as exc:
         return {"error": str(exc)}
@@ -2491,9 +2584,12 @@ def _report_payload(
         hasher.close()
         return {"error": duplicate_error}  # R21-5 / R20-4: 400
     req_format = format_override.lower()
+    unsigned_members: set[tuple[str, str]] = set()
     if req_format == "evidence-preview":
         # GUI-REV2 H-2: the preview is built from the posted rows as they are —
         # no re-analysis, nothing signed; the export re-analyzes, compares (R19-13) and signs.
+        # Merge of R23-5: without the re-analysis the preview knows no archive member the post
+        # left out (unsigned_members stays empty) — the GUI posts every member row of its scan.
         hasher.close()
         # Merge of R21-1: the export never signs a walk-limit folder row (excluded with
         # REPORT_ROW_WALK_LIMIT), so the preview lists it the same way — preview equals output.
@@ -2501,7 +2597,7 @@ def _report_payload(
         items = [item for item in items if not _posted_walk_limit_row(item)]
     else:
         try:
-            items, excluded, changed = _rederive_report_items(items, hasher, options, server_thresholds)
+            items, excluded, changed, unsigned_members = _rederive_report_items(items, hasher, options, server_thresholds)
         finally:
             hasher.close()
         if changed:
@@ -2522,11 +2618,13 @@ def _report_payload(
     # R18-3 (round 18): a cancelled scan's report says it is a partial result.
     # The client's claim is taken as given — it can only add the caveat and
     # the "사용자 취소" count, never remove a row or change a verdict.
+    # R23-3 (round 23): the server's own cancelled scan_job sets it whatever the post says.
     summary, cancel_source = _with_posted_cancel(summary, data.get("summary"), data.get("scan_job"), scan_root)
     # R22-1 (round 22): the cap / flat-scan / missing-row counts are the server's own, or "확인 불가".
+    # R23-5: and the archive members the server's re-analysis yields that the post left out.
     # Merge: the preview takes the same listing (its job, else its own walk of scan_root) — the
     # preview's 기록되지 않은 파일 box equals the export's.
-    summary = _report_listing(summary, items, scan_root if items else None, options, data.get("scan_job"))
+    summary = _report_listing(summary, items, scan_root if items else None, options, data.get("scan_job"), unsigned_members)
     # G30: web reports are signed when DEEPFAKE_LENS_REPORT_KEY is set and
     # say "서명 없음" otherwise; the pins are those of the server's models dir.
     from .profile_pins import profile_pins
@@ -2595,7 +2693,7 @@ def _report_payload(
         # Merge of R22-1: the listing behind the 기록되지 않은 파일 box (source scan_job / walk /
         # unknown, not_in_report, reason) — the GUI's checklist says "확인 불가" from it.
         preview["unrecorded_listing"] = dict(getattr(summary, "unrecorded_listing", None) or {})
-        return preview
+        return _preview_as_pdf_draws(preview)
     signed = signed_report_body(
         summary, items, thresholds=thresholds, coverage=coverage,
         report_format=req_format, model_pins=profile_pins(_models_dir()),

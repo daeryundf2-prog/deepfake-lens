@@ -2464,6 +2464,9 @@
                 `<td>${docHtml(e.exhibit_no)}${flag(e)}</td><td>${docHtml(e.document_name)}</td><td>${docHtml(e.author_date)}</td><td class="a4-purpose">${docHtml(e.purpose_of_proof)}</td></tr>`).join('');
             const boxes = (body.boxes || []).map(([heading, boxLines]) => `<section class="a4-box"><div class="a4-h">${docHtml(heading)}</div>${lines(boxLines)}</section>`).join('');
             return `<div class="a4-top"><span>미리보기 — 서명 전</span><span>${submitterSide() ? '서버의 증거설명서 서식' : NO_SIDE + ' — 의뢰 측을 고르면 갑/을과 제출 문구가 정해집니다'}</span></div>` +
+                // Merge of phase0 R23-4: the server gives the texts as the PDF draws them — a character
+                // the PDF font has no glyph for is its \uNNNN code; said, so the codes are not a fault.
+                (body.pdf_glyph_escapes ? '<p class="a4-glyph">PDF 글꼴에 없는 문자(히브리·아랍 문자, 이모지 등)는 PDF에서처럼 \\uXXXX 코드로 표시했습니다. 원래 이름은 장부와 서명된 JSON에 그대로 있습니다.</p>' : '') +
                 `<div class="a4-title">${shown(body.title)}</div>` +
                 `<section class="a4-box">${lines(body.case_lines || [])}${body.scan_root_line ? lines([body.scan_root_line]) : ''}${body.analysis_options_line ? lines([body.analysis_options_line]) : ''}</section>` +
                 '<div class="a4-h a4-center">다        음</div>' +

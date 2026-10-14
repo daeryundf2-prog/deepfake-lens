@@ -316,6 +316,12 @@ def main() -> int:
                     pdf_flat = "".join("".join(page_.get_text().split()) for page_ in document)
                 for line in preview_lines:
                     assert "".join(line.split()) in pdf_flat, f"preview line not in the PDF: {line[:80]!r}"
+                # Merge of phase0 R23-4: a name with characters the PDF font cannot draw (e.g. Hebrew)
+                # is \uNNNN in the PDF and in the preview, and the preview says why.
+                glyphless = page.evaluate("results.some(e => /[\\u0590-\\u08ff]|[\\u{1F000}-\\u{1FFFF}]/u.test(String(e.item.path)))")
+                drawn = page.locator("#a4").inner_text()
+                if glyphless and "\\u" in drawn:
+                    assert page.locator("#a4 .a4-glyph").count() == 1, "escaped preview text without its note"
                 # GUI-REV3 J-3: the table cells too — no literal "\n", every cell's text in the PDF.
                 cells = page.evaluate("[...document.querySelectorAll('#a4 tr[data-exhibit] td')].map(td => td.innerText)")
                 assert cells, "no preview table cells"

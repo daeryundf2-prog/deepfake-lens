@@ -712,11 +712,11 @@ def relocated_tool_base_candidates() -> list[Path]:
     xdg = os.environ.get("XDG_CACHE_HOME", "")
     if xdg and os.path.isabs(xdg):
         candidates.append(Path(xdg) / TOOL_BASE_NAME)
-    program_data = os.environ.get("ProgramData", "") or os.environ.get("PROGRAMDATA", "")
-    if _is_windows() and program_data and os.path.isabs(program_data):
+    shared = _program_data_parent()
+    if shared is not None:
         from .windows_acl import user_folder_name
 
-        candidates.append(Path(program_data) / TOOL_BASE_NAME / user_folder_name())  # R22-2: outside the profile
+        candidates.append(shared / user_folder_name())  # R22-2: outside the profile
     user = str(os.getuid()) if hasattr(os, "getuid") else (os.environ.get("USERNAME", "") or "user")
     for temp in (_system_temp_dir(), "/tmp" if os.name == "posix" else ""):
         if temp and os.path.isabs(temp):
@@ -726,6 +726,14 @@ def relocated_tool_base_candidates() -> list[Path]:
         if candidate not in unique:
             unique.append(candidate)
     return unique
+
+
+def _program_data_parent() -> Path | None:
+    """R22-2/R23-6: ``%ProgramData%\\deepfake-lens`` on Windows (the shared parent of the per-user tool bases), else None."""
+    program_data = os.environ.get("ProgramData", "") or os.environ.get("PROGRAMDATA", "")
+    if _is_windows() and program_data and os.path.isabs(program_data):
+        return Path(program_data) / TOOL_BASE_NAME
+    return None
 
 
 def claim_tool_base(base: Path) -> bool:
@@ -740,6 +748,19 @@ def claim_tool_base(base: Path) -> bool:
     windows = _is_windows()
     try:
         existed = os.path.lexists(base)
+        if windows and not existed and base.parent == _program_data_parent() and not os.path.lexists(base.parent):
+            # R23-6 (round 23): a parent this tool makes (%ProgramData%\deepfake-lens) gets a protected DACL —
+            # every account may add its own folder, none may delete, rename or re-permission another's. Made by
+            # plain mkdir it inherited ProgramData's entries (a failure here is decided by parent_safe below).
+            from . import windows_acl
+
+            base.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                protected = windows_acl.make_shared_parent(str(base.parent))
+            except (OSError, AttributeError, ValueError):
+                protected = False
+            if not protected:
+                logger.info("tool base: protected DACL not set on %s", base.parent)
         base.mkdir(mode=0o700, parents=True, exist_ok=True)
         info = os.lstat(base)
     except OSError:
@@ -760,18 +781,29 @@ def claim_tool_base(base: Path) -> bool:
 
 # R20-7 (round 20): the folders the running command examines (set by the CLI before any work).
 _EXAMINED_FOLDERS: list[str] = []
+# R23-2 (round 23): the folders of the files a single-file command analyzes (classify a.wav → its folder).
+_EXAMINED_FILE_FOLDERS: list[str] = []
 TEMP_BASE_INSIDE_EXAMINED = "검사 대상 폴더 안"
 
 
-def set_examined_folders(folders: list[str]) -> None:
+def set_examined_folders(folders: list[str], file_folders: list[str] | tuple[str, ...] = ()) -> None:
     """R20-7: the folders the command reads — a temp-folder candidate inside one is skipped (with the R15-6 notice).
 
     When the system temp folder itself is inside one, Python's own default
     (``tempfile.tempdir``, used by any library that makes a temp file without
     a folder) becomes the session folder's base, so nothing probes or writes
     the evidence folder.
+
+    R23-2 (round 23): ``file_folders`` — the folders of the analyzed files
+    (``check_tool_folders``' examined list). No persistent tool folder is
+    made inside one (:func:`inside_examined_or_file_folder`: the per-environment
+    numba cache of R22-9 wrote ``.venv/var/deepfake-lens`` next to
+    ``a.wav`` for ``cd proj; .venv/bin/python -m deepfake_lens classify
+    a.wav``). The session temp folder still ignores them (documented
+    residual: it is removed when the command ends).
     """
     _EXAMINED_FOLDERS[:] = [os.path.realpath(folder) for folder in folders]
+    _EXAMINED_FILE_FOLDERS[:] = [os.path.realpath(folder) for folder in file_folders]
     if tempfile.tempdir is None and _inside_examined(_system_temp_dir()):
         base = usable_temp_base()
         if base is not None:
@@ -786,6 +818,14 @@ def examined_folders() -> list[str]:
 def _inside_examined(base: str) -> bool:
     real = os.path.realpath(base)
     return any(real == folder or real.startswith(folder.rstrip(os.sep) + os.sep) for folder in _EXAMINED_FOLDERS)
+
+
+def inside_examined_or_file_folder(base: str) -> bool:
+    """R23-2: ``base`` is an examined folder, inside one, or inside the folder of an analyzed file."""
+    real = os.path.realpath(base)
+    return _inside_examined(base) or any(
+        real == folder or real.startswith(folder.rstrip(os.sep) + os.sep) for folder in _EXAMINED_FILE_FOLDERS
+    )
 
 
 def usable_temp_base() -> str | None:
@@ -1159,22 +1199,50 @@ def _stage(source: str) -> tuple[str, bool]:
         return _copy_staged(absolute, target), True
 
 
+def child_path(text: str) -> str:
+    """R23-1 (round 23): ``text`` as a path a child process resolves to the same file, whatever its cwd.
+
+    A relative path is joined to this process's working folder — lexically
+    (POSIX: ``..`` and symbolic links are left for the kernel to resolve, as
+    they would have been here); Windows: ``os.path.abspath`` (drive-relative
+    forms). An empty or already absolute path, or one whose working folder is
+    gone, is returned unchanged. An absolute path also keeps ``ffmpeg`` from
+    reading a relative name with a ``:`` (``a:b.mp4``, ``concat:…``) as a
+    protocol.
+    """
+    if not text or os.path.isabs(text):
+        return text
+    try:
+        if _is_windows():
+            return os.path.abspath(text)
+        return os.path.join(os.getcwd(), text)
+    except OSError:  # the working folder was removed: the child fails as it would have
+        return text
+
+
 @contextmanager
-def native_safe_path(path: str | os.PathLike[str]) -> Iterator[str]:
+def native_safe_path(path: str | os.PathLike[str], *, for_child: bool = False) -> Iterator[str]:
     """Yield an ASCII-only path naming the same file as ``path``.
 
     Use the yielded name for the native call and nothing else (rows,
     messages and hashes keep the original path).
+
+    R23-1 (round 23): ``for_child=True`` — the name goes to another process
+    (an ``ffmpeg`` child, the audio worker, which runs in its own folder):
+    a relative path is made absolute (:func:`child_path`), so the child opens
+    the file this process means. Without it a relative ASCII path reached
+    the audio worker unchanged and was resolved against the worker's cache
+    folder: every audio check of ``scan case`` / ``cd case; scan .`` failed.
     """
     text = os.fspath(path)
     if isinstance(text, bytes):
         text = os.fsdecode(text)
     if text.isascii():
-        yield text
+        yield child_path(text) if for_child else text
         return
     staged, owned = _stage(text)
     try:
-        yield staged
+        yield child_path(staged) if for_child else staged
     finally:
         if owned:
             _unlink_staged(staged, os.path.abspath(text))
@@ -1269,6 +1337,7 @@ __all__ = [
     "NATIVE_COPY_MAX_BYTES",
     "NativePathError",
     "ShuttingDown",
+    "child_path",
     "cleanup_session",
     "imwrite_any",
     "install_cleanup_handlers",

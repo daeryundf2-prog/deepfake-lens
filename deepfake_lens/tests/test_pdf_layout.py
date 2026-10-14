@@ -283,3 +283,116 @@ class PdfLayoutUnitTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# R23-4 (round 23): names in scripts the embedded font has no glyph for, in pairs that differ in one character.
+GLYPHLESS_NAMES = (
+    "note עברית.txt", "note עבריה.txt",  # Hebrew
+    "سجل.txt", "سجن.txt",  # Arabic
+    "ไทย.txt", "ไทม.txt",  # Thai
+    "हिन्दी.txt", "हिन्दु.txt",  # Devanagari
+    "emoji😀.txt", "emoji😁.txt",  # emoji (outside the BMP)
+)
+DRAWN_NAMES = ("한글.txt", "日本語.txt", "ascii.txt")
+
+
+@unittest.skipUnless(HAVE_PYMUPDF, "pymupdf — the venv_api / extras run covers this")
+class PdfGlyphlessCharactersTest(unittest.TestCase):
+    """R23-4 (round 23): the embedded CJK font (Droid Sans Fallback) has no glyph for Hebrew, Arabic, Thai, Devanagari or
+    emoji; PyMuPDF drew an empty glyph, so the two Hebrew names both printed (text extraction) as ``note \\x00\\x00\\x00\\x00\\x00.txt``,
+    the two emoji names as ``emoji\\x00.txt`` and the Arabic and Thai names alike, in the forensic PDF and the evidence
+    statement of the CLI and the web — the same evidence-file names were right in HTML and JSON. A character without a glyph
+    is now printed as its escape (``\\u05e2``, ``\\U0001f600``), the escapes display_name uses, so every name stays distinct
+    and readable."""
+
+    def _layout(self) -> Any:
+        from deepfake_lens.pdf_backend import import_pymupdf
+        from deepfake_lens.pdf_layout import PdfLayout
+
+        return PdfLayout(import_pymupdf())
+
+    @staticmethod
+    def _expected(layout: Any, name: str) -> str:
+        from deepfake_lens.result_text import display_name
+
+        return layout.drawable(display_name(name))
+
+    def test_drawable_escapes_only_what_the_font_cannot_draw(self) -> None:
+        layout = self._layout()
+        self.assertEqual(layout.drawable("note עברית.txt"), "note \\u05e2\\u05d1\\u05e8\\u05d9\\u05ea.txt")
+        self.assertEqual(layout.drawable("emoji😀.txt"), "emoji\\U0001f600.txt")
+        for name in DRAWN_NAMES:
+            self.assertEqual(layout.drawable(name), name)
+        self.assertEqual(layout.drawable("줄 하나\n줄 둘"), "줄 하나\n줄 둘")
+        shown = [self._expected(layout, name) for name in GLYPHLESS_NAMES]
+        self.assertEqual(len(set(shown)), len(GLYPHLESS_NAMES))
+        for text in shown:
+            self.assertTrue(all(char == " " or layout._has_glyph(char) for char in text), text)
+        # injective with display_name: a literal "\u05e2" in a name is shown with its backslash doubled
+        self.assertNotEqual(self._expected(layout, "\\u05e2.txt"), self._expected(layout, "ע.txt"))
+        # wrap measures and returns the drawable form (every character kept)
+        lines = layout.wrap("note עברית.txt " * 6, 80.0, 7.5)
+        self.assertEqual("".join(lines).replace(" ", ""), layout.drawable("note עברית.txt " * 6).replace(" ", ""))
+
+    def _pdf_text(self, path_or_bytes: Path | bytes) -> str:
+        from deepfake_lens.pdf_backend import import_pymupdf
+
+        pymupdf = import_pymupdf()
+        doc = pymupdf.open(stream=path_or_bytes, filetype="pdf") if isinstance(path_or_bytes, bytes) else pymupdf.open(str(path_or_bytes))
+        try:
+            return "".join(page.get_text() for page in doc)
+        finally:
+            doc.close()
+
+    def _assert_names(self, label: str, text: str, names: tuple[str, ...]) -> None:
+        layout = self._layout()
+        flat = "".join(text.split())  # a wrapped name may break at its space
+        with self.subTest(pdf=label):
+            self.assertNotIn("\x00", text)
+            self.assertNotIn("\ufffd", text)
+            for name in names:
+                self.assertIn("".join(self._expected(layout, name).split()), flat, name)
+
+    def test_every_pdf_path_prints_distinct_readable_names(self) -> None:
+        import contextlib
+        import json
+        import os
+        from unittest import mock
+
+        from deepfake_lens import webapp_api
+        from deepfake_lens.cli import main as cli_main
+
+        names = (*GLYPHLESS_NAMES, *DRAWN_NAMES)
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            folder = base / "case"
+            folder.mkdir()
+            for index, name in enumerate(names):
+                (folder / name).write_text(f"사람이 쓴 짧은 메모 {index}입니다. " * 4, encoding="utf-8")
+            out = base / "out"
+            out.mkdir()
+            texts: dict[str, str] = {}
+            stdout = io.StringIO()
+            with mock.patch.dict(os.environ, {"HOME": str(base / "home")}), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(cli_main([
+                    "scan", str(folder), "--json-out", str(out / "scan.json"), "--pdf-out", str(out / "scan.pdf"),
+                    "--forensic-pdf-out", str(out / "forensic.pdf"), "--evidence-statement-pdf-out", str(out / "statement.pdf"),
+                ]), 0)
+                for index, name in enumerate(GLYPHLESS_NAMES[:2]):
+                    self.assertEqual(cli_main(["evidence-statement", str(folder / name), "--pdf-out", str(out / f"single{index}.pdf")]), 0)
+            for label in ("scan", "forensic", "statement"):
+                texts[f"cli {label}"] = self._pdf_text(out / f"{label}.pdf")
+            for index, name in enumerate(GLYPHLESS_NAMES[:2]):
+                self._assert_names(f"cli evidence-statement {index}", self._pdf_text(out / f"single{index}.pdf"), (name,))
+            rows = json.loads((out / "scan.json").read_text(encoding="utf-8"))["items"]
+            roots = mock.patch.object(webapp_api, "_READ_ROOTS", type(webapp_api._READ_ROOTS)())
+            with roots:
+                webapp_api.configure_read_roots(folder)
+                for fmt in ("pdf", "evidence"):
+                    body = json.dumps({"items": rows, "scan_root": str(folder), "format": fmt}).encode("utf-8")
+                    raw = webapp_api._report_payload(body, default_folder=folder)
+                    self.assertIsInstance(raw, bytes, raw)
+                    assert isinstance(raw, bytes)
+                    texts[f"web {fmt}"] = self._pdf_text(raw)
+        for label, text in texts.items():
+            self._assert_names(label, text, names)
