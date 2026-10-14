@@ -629,6 +629,9 @@
                 heatmaps: String($('opt-heatmaps').checked),
                 deep_signals: String($('opt-deep').checked),
                 no_default_engine: String(!$('opt-model').checked),
+                // R22-1: the walk options too — without the job (expired) the server lists the folder with them
+                recursive: String($('opt-recursive').checked),
+                max_files: $('max-files').value,
             };
             setBusy(true, '폴더 분석 중… 모델 로딩 시 수 분 걸릴 수 있습니다');
             try {

@@ -535,6 +535,13 @@ class BatchScanSummary:
     # count is unverified. Not serialized (the signed body says it as
     # ``files_cancelled_source``).
     files_cancelled_unverified: bool = False
+    # R22-1 (round 22): a web report's own listing of the scan folder — how
+    # the server knows which files of the folder have no signed row
+    # (``{"source": "scan_job" | "walk" | "unknown", "not_in_report": n,
+    # "reason": text}``; see :data:`UNRECORDED_LISTING_SOURCES`). None for a
+    # scan (the scan is its own listing). Not serialized here — the signed
+    # body carries it inside ``unrecorded_files.listing``.
+    unrecorded_listing: dict[str, object] | None = None
 
     def to_json(self) -> dict[str, object]:
         # D16: the summary JSON counts verdicts only. The legacy band counts
@@ -550,7 +557,28 @@ CANCELLED_COUNT_UNVERIFIED = "분석하지 않은 파일 수는 서버가 확인
 
 # Band-count fields of BatchScanSummary that are not serialized (D16) —
 # R19-3: and the rendering-only files_cancelled_unverified flag.
-LEGACY_SUMMARY_KEYS = frozenset({"high", "medium", "unknown", "low", "files_cancelled_unverified"})
+LEGACY_SUMMARY_KEYS = frozenset({"high", "medium", "unknown", "low", "files_cancelled_unverified", "unrecorded_listing"})
+
+# R22-1 (round 22): where a web report's "기록되지 않은 파일" counts come
+# from. The section was counted from the posted rows only, so a capped or a
+# flat scan's report signed "없음 — 분석 대상의 모든 파일에 분석 결과가
+# 있습니다". The counts are now the server's: its own scan job of the same
+# folder ("scan_job"), else its own walk of the scan folder with the
+# report's options ("walk"); when it can know neither, the section says
+# "확인 불가" ("unknown") instead of "없음".
+UNRECORDED_LISTING_SOURCES = ("scan_job", "walk", "unknown")
+# R22-1: the reason code, label and line of the files the server's listing
+# has and the report signs no row for (web reports only).
+UNRECORDED_NOT_IN_REPORT_CODE = "not_in_report"
+UNRECORDED_NOT_IN_REPORT_LABEL = "보고서에 행 없음"
+UNRECORDED_NOT_IN_REPORT_DETAIL = (
+    "서버가 검사 폴더에서 찾은 파일 중 이 보고서에 서명된 행이 없는 파일 {n}개 — 요청에 없었거나 검사 뒤에 생긴 파일입니다"
+)
+# R22-1: the headline of a web report whose folder listing the server could not make.
+UNRECORDED_LISTING_UNKNOWN = (
+    "기록되지 않은 파일: 확인 불가 — 서버가 검사 폴더의 파일 목록을 확인하지 못했습니다({reason}). "
+    "아래 사유는 보고서 행에서만 센 것이며, 폴더의 모든 파일에 분석 결과가 있다는 뜻이 아닙니다"
+)
 
 # R5: row statuses that never carry a verdict. Every other row with a result
 # — analyzed files, archive members, archive container rows ("expanded", or

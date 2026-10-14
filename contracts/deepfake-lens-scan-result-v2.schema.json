@@ -83,7 +83,7 @@
             "type": "object",
             "required": ["code", "label", "count"],
             "properties": {
-              "code": { "enum": ["file_cap", "subfolders", "subfolder_files", "archive_rejected", "symlink", "duplicate", "unsupported", "other_skipped", "failed", "cancelled"] },
+              "code": { "enum": ["file_cap", "subfolders", "subfolder_files", "archive_rejected", "symlink", "duplicate", "unsupported", "other_skipped", "failed", "cancelled", "not_in_report"], "description": "R22-1: not_in_report appears only in web reports (with listing)." },
               "label": { "type": "string" },
               "count": { "type": "integer", "minimum": 0 }
             }
@@ -95,7 +95,17 @@
           "description": "P5: refused archive members per Korean category (압축 폭탄·예산 초과, 경로 이탈, 링크·특수 파일, 중첩 깊이 초과, 기타)."
         },
         "subfolders": { "$ref": "#/$defs/subfolder_detail" },
-        "lines": { "type": "array", "items": { "type": "string" }, "description": "Korean headline followed by one line per non-zero reason." }
+        "lines": { "type": "array", "items": { "type": "string" }, "description": "Korean headline followed by one line per non-zero reason." },
+        "listing": {
+          "type": "object",
+          "description": "R22-1: web reports (POST /api/report) only — where the counts come from. scan_job: the server's own finished scan job of the same folder; walk: the server's own walk of the scan folder with the report's options recursive/max_files; unknown: the server could not list the folder (no scan folder, a walk limit, an unreadable folder, or a signed row outside its listing) — the headline says 확인 불가 with reason and no cap/subfolder count is signed. not_in_report: files of the listing without a signed row (also the reasons entry not_in_report).",
+          "required": ["source", "not_in_report"],
+          "properties": {
+            "source": { "enum": ["scan_job", "walk", "unknown"] },
+            "not_in_report": { "type": "integer", "minimum": 0 },
+            "reason": { "type": "string" }
+          }
+        }
       }
     },
     "subfolder_detail": {

@@ -337,13 +337,10 @@ def _with_posted_cancel(summary: Any, posted: object, job_id: object = None, sca
     if not isinstance(posted, dict) or posted.get("cancelled") is not True:
         return summary, None
     count: object = None
-    if isinstance(job_id, str) and job_id and scan_root is not None:
-        with _SCAN_JOBS_LOCK:
-            entry = _SCAN_JOBS.get(job_id)
-            result = entry.get("result") if entry is not None and entry.get("status") == "cancelled" else None
-        job_summary = result.get("summary") if isinstance(result, dict) else None
-        if isinstance(job_summary, dict) and isinstance(result, dict) and result.get("scan_root") == scan_root_text(scan_root):
-            count = job_summary.get("files_cancelled")
+    job = _finished_scan_job(job_id, scan_root)
+    job_summary = job.get("summary") if job is not None and job.get("status") == "cancelled" else None
+    if isinstance(job_summary, dict):
+        count = job_summary.get("files_cancelled")
     if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
         return replace(summary, cancelled=True, files_cancelled=count), "server"
     return replace(summary, cancelled=True, files_cancelled=0, files_cancelled_unverified=True), "unverified"
@@ -1349,6 +1346,15 @@ REPORT_ROW_PATH_NOT_CANONICAL = (
 )
 # R21-5: the same row (path, or container and member) posted twice. HTTP 400.
 REPORT_ROW_POSTED_TWICE = "검사 결과 항목 「{path}」가 두 번 게시되었습니다 — 행마다 한 번만 보내십시오"
+# R22-1 (round 22): why the server could not list the scan folder for the "기록되지 않은 파일" section — the
+# section then says "확인 불가" (result_types.UNRECORDED_LISTING_UNKNOWN), never "없음".
+REPORT_LISTING_NO_SCAN_ROOT = "검사 폴더가 없는 보고서 — 업로드 결과만 있음"
+REPORT_LISTING_WALK_LIMIT = "폴더 탐색 상한에 도달"
+REPORT_LISTING_WALK_FAILED = "폴더를 다시 읽지 못함"
+REPORT_LISTING_ROWS_OUTSIDE = (
+    "서명된 행 {n}개가 서버의 폴더 목록(하위 폴더 포함: {recursive}, 최대 파일 수: {max_files})에 없음 — "
+    "검사 때의 옵션(하위 폴더 포함 여부·최대 파일 수)을 함께 보내야 확인됩니다"
+)
 # R19-13: the excluded reasons that mean "the file changed after the scan" (not "never re-analyzable").
 _CHANGED_AFTER_SCAN_REASONS = (REPORT_ROW_NOT_FOUND, REPORT_ROW_NOT_DERIVED, REPORT_ROW_KIND_CHANGED)
 
@@ -1884,6 +1890,102 @@ def _report_scan_root(value: object, roots: list[Path], *, required: bool) -> Pa
     return resolved
 
 
+def _finished_scan_job(job_id: object, scan_root: Path | None) -> dict[str, Any] | None:
+    """R19-3/R22-1: the result of the server's own finished scan job ``job_id`` of the folder ``scan_root``, or None."""
+    if not isinstance(job_id, str) or not job_id or scan_root is None:
+        return None
+    with _SCAN_JOBS_LOCK:
+        entry = _SCAN_JOBS.get(job_id)
+        status = entry.get("status") if entry is not None else None
+        result = entry.get("result") if entry is not None else None
+    if status not in ("done", "cancelled") or not isinstance(result, dict) or result.get("scan_root") != scan_root_text(scan_root):
+        return None
+    return {"status": status, **result}
+
+
+def _report_listing(
+    summary: Any, signed_items: list[Any], scan_root: Path | None, options: AnalysisOptions, job_id: object,
+) -> Any:
+    """R22-1 (round 22): ``summary`` with the server's own "기록되지 않은 파일" counts of the scan folder.
+
+    The report counted the section from the posted rows only (``summarize(items, capped=False)``): a scan
+    capped at --max-files, a flat scan with files in subfolders, or a post that left rows out signed
+    ``total_files 0`` / "없음 — 분석 대상의 모든 파일에 분석 결과가 있습니다" in every format. Nothing here is
+    read from the posted rows except their identity. The listing is, in this order:
+
+    - ``scan_job`` — the server's own finished scan job named by ``scan_job`` for the same folder: its
+      summary's cap / flat-scan counts, and its rows (top-level paths) as the files of the folder;
+    - ``walk`` — the server walks the scan folder itself with the scan walk
+      (:func:`core.enumerate_scan_folder`) and the report's ``options`` ``recursive`` / ``max_files``;
+    - ``unknown`` — no scan folder (upload rows only), the walk stopped at a walk limit or could not
+      list the folder, or a signed row is not in that listing (other options than the scan's): the
+      section says "확인 불가" with the reason, and no enumeration count is signed.
+
+    A file of the listing without a signed row is counted (``not_in_report``).
+    """
+    from .core import enumerate_scan_folder
+    from .result_text import row_identity
+    from .scan_cache import WALK_LIMIT_REASON, _display_path
+
+    def unknown(reason: str) -> Any:
+        return replace(
+            summary, capped=False, files_over_cap=0, subfolders_skipped=0, subfolder_files_skipped=0,
+            subfolders_skipped_detail=[], unrecorded_listing={"source": "unknown", "not_in_report": 0, "reason": reason},
+        )
+
+    if scan_root is None:
+        return unknown(REPORT_LISTING_NO_SCAN_ROOT)
+    signed_tops = {row_identity(item)[0] for item in signed_items}
+    job = _finished_scan_job(job_id, scan_root)
+    job_summary = job.get("summary") if job is not None else None
+    job_items = job.get("items") if job is not None else None
+    if isinstance(job_summary, dict) and isinstance(job_items, list):
+        source = "scan_job"
+        listed = {row_identity(row)[0] for row in job_items if isinstance(row, dict)}
+
+        def count(name: str) -> int:
+            value = job_summary.get(name)
+            return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+        detail = job_summary.get("subfolders_skipped_detail")
+        enumeration: dict[str, Any] = {
+            "capped": job_summary.get("capped") is True, "files_over_cap": count("files_over_cap"),
+            "subfolders_skipped": count("subfolders_skipped"), "subfolder_files_skipped": count("subfolder_files_skipped"),
+            "subfolders_skipped_detail": [dict(entry) for entry in detail if isinstance(entry, dict)] if isinstance(detail, list) else [],
+        }
+        recursive: object = "검사 작업"
+        max_files: object = "검사 작업"
+    else:
+        source = "walk"
+        try:
+            walk = enumerate_scan_folder(scan_root, recursive=options.recursive, max_files=options.max_files)
+        except OSError:
+            logger.info("report: the scan folder could not be listed", exc_info=True)
+            return unknown(REPORT_LISTING_WALK_FAILED)
+        limit_prefix = WALK_LIMIT_REASON.split("(", 1)[0]
+        if any(isinstance(entry, tuple) and entry[1].startswith(limit_prefix) for entry in walk.symlinks):
+            return unknown(REPORT_LISTING_WALK_LIMIT)
+        if any(path == scan_root for path, _ in walk.iter_errors):
+            return unknown(REPORT_LISTING_WALK_FAILED)
+        entries = [*walk.paths, *(path for path, _ in walk.iter_errors),
+                   *(entry[0] if isinstance(entry, tuple) else entry for entry in walk.symlinks)]
+        listed = {_display_path(path, root=scan_root) for path in entries}
+        enumeration = {
+            "capped": walk.capped, "files_over_cap": walk.files_over_cap,
+            "subfolders_skipped": len(walk.subfolder_detail),
+            "subfolder_files_skipped": sum(entry["files"] for entry in walk.subfolder_detail if isinstance(entry.get("files"), int)),
+            "subfolders_skipped_detail": list(walk.subfolder_detail),
+        }
+        recursive, max_files = "예" if options.recursive else "아니오", options.max_files
+    outside = signed_tops - listed
+    if outside:
+        return unknown(REPORT_LISTING_ROWS_OUTSIDE.format(n=len(outside), recursive=recursive, max_files=max_files))
+    return replace(
+        summary, **enumeration,
+        unrecorded_listing={"source": source, "not_in_report": len(listed - signed_tops)},
+    )
+
+
 def _scan_root_label(scan_root: Path | None, roots: list[Path]) -> str | None:
     """R9-9: the scanned folder relative to the (innermost) read root holding it ("." for the root itself)."""
     if scan_root is None:
@@ -2074,6 +2176,8 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     # The client's claim is taken as given — it can only add the caveat and
     # the "사용자 취소" count, never remove a row or change a verdict.
     summary, cancel_source = _with_posted_cancel(summary, data.get("summary"), data.get("scan_job"), scan_root)
+    # R22-1 (round 22): the cap / flat-scan / missing-row counts are the server's own, or "확인 불가".
+    summary = _report_listing(summary, items, scan_root if items else None, options, data.get("scan_job"))
     req_format = format_override.lower()
     # G30: web reports are signed when DEEPFAKE_LENS_REPORT_KEY is set and
     # say "서명 없음" otherwise; the pins are those of the server's models dir.

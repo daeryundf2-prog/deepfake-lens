@@ -221,7 +221,49 @@ def scan_directory(
     """
     root = Path(directory)
     check_scan_folder(root)
+    listing = enumerate_scan_folder(root, recursive=recursive, max_files=max_files, allow_symlinks=allow_symlinks)
+    return scan_paths(
+        listing.paths, root=root, capped=listing.capped, iter_errors=listing.iter_errors, symlinks=listing.symlinks,
+        files_over_cap=listing.files_over_cap,
+        subfolders_skipped=len(listing.subfolder_detail), on_plan=on_plan,
+        subfolder_files=None if recursive else listing.subfolder_detail,
+        text_bytes=text_bytes, metadata_bytes=metadata_bytes,
+        pixel_mode=pixel_mode, pixel_max_side=pixel_max_side,
+        heatmaps=heatmaps, heatmap_dir=heatmap_dir, model_path=model_path,
+        cache_path=cache_path, workers=workers, max_file_bytes=max_file_bytes,
+        dedupe=dedupe, hash_db_path=hash_db_path, deep_signals=deep_signals,
+        thresholds=thresholds, should_stop=should_stop, progress=progress,
+    )
 
+
+class ScanListing(NamedTuple):
+    """What a folder scan's walk lists, before any file is analyzed (R22-1: shared with the web report).
+
+    ``paths`` — the files the scan analyzes (at most ``max_files``, in scan
+    order); ``files_over_cap`` — files found beyond that cap (X1);
+    ``iter_errors`` — folders that could not be listed; ``symlinks`` — the
+    link and skipped-entry rows (``(path, reason)`` for a skipped entry,
+    a walk-limit folder included); ``subfolder_detail`` — a flat scan's
+    survey of the subfolders it does not enter (empty when recursive).
+    """
+
+    paths: list[Path]
+    capped: bool
+    files_over_cap: int
+    iter_errors: list[tuple[Path, OSError]]
+    symlinks: list[Path | tuple[Path, str]]
+    subfolder_detail: list[dict[str, object]]
+
+
+def enumerate_scan_folder(root: Path, *, recursive: bool, max_files: int, allow_symlinks: bool = False) -> ScanListing:
+    """The walk of :func:`scan_directory` without the analysis (R22-1).
+
+    R22-1 (round 22): the web report's "기록되지 않은 파일" section was
+    counted from the posted rows only — a capped or flat scan's report
+    signed "없음". ``webapp_api`` now lists the scan folder with this same
+    walk (same order, cap, flat-scan survey) when it has no scan job of its
+    own to read the counts from.
+    """
     paths: list[Path] = []
     capped = False
     over_cap = 0
@@ -247,18 +289,7 @@ def scan_directory(
     survey = None if recursive else flat_subfolder_survey(root, follow_links=allow_symlinks)
     if survey is not None:
         symlinks.extend(survey.refused)
-    return scan_paths(
-        paths, root=root, capped=capped, iter_errors=iter_errors, symlinks=symlinks,
-        files_over_cap=over_cap,
-        subfolders_skipped=0 if survey is None else len(survey.detail), on_plan=on_plan,
-        subfolder_files=None if survey is None else survey.detail,
-        text_bytes=text_bytes, metadata_bytes=metadata_bytes,
-        pixel_mode=pixel_mode, pixel_max_side=pixel_max_side,
-        heatmaps=heatmaps, heatmap_dir=heatmap_dir, model_path=model_path,
-        cache_path=cache_path, workers=workers, max_file_bytes=max_file_bytes,
-        dedupe=dedupe, hash_db_path=hash_db_path, deep_signals=deep_signals,
-        thresholds=thresholds, should_stop=should_stop, progress=progress,
-    )
+    return ScanListing(paths, capped, over_cap, iter_errors, symlinks, [] if survey is None else list(survey.detail))
 
 
 # progress(item, done, planned) — see scan_directory.

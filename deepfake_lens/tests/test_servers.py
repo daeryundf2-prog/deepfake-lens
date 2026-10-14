@@ -3274,3 +3274,142 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                     self.assertEqual(status, c["status"], raw[:300])
                     self.assertIn(c["text"], text, raw[:300])
                     self.assertIsNone(english_prose(text.replace(str(self.folder), "").replace(str(self.outside), "")), text)
+
+
+class ReportUnrecordedFilesAreTheServersTest(_ReportLegsFixture):
+    """R22-1 (round 22): the "기록되지 않은 파일" section of a web report was counted from the posted rows only
+    (``summarize(items, capped=False)``). A scan capped at max_files, a flat scan with files in a subfolder, or a
+    post that left rows out was signed ``total_files 0`` / ``cap_reached false`` and every rendering (HTML, forensic
+    PDF, evidence statement) said "없음 — 분석 대상의 모든 파일에 분석 결과가 있습니다" — the normal GUI flow, no
+    attacker. The counts are now the server's own (its scan job of the folder, else its own walk of the scan folder
+    with the report's options) and, when it cannot know, "확인 불가" — never "없음"."""
+
+    FORMATS = ("json", "html", *(("evidence", "pdf") if HAVE_PYMUPDF else ()))
+    NONE = "없음 — 분석 대상의 모든 파일에 분석 결과가 있습니다"
+    _scan = ReportRefusesChangedRowsTest._scan
+
+    def setUp(self) -> None:
+        super().setUp()
+        registry = patch.object(webapp_api, "_SCAN_JOBS", {})
+        registry.start()
+        self.addCleanup(registry.stop)
+        (self.folder / "sub").mkdir()
+        _write_png(self.folder / "sub" / "inner.png", seed=4)
+        _write_png(self.folder / "zlast.png", seed=5)
+
+    def _report(self, rows: list[dict[str, Any]], **extra: object) -> dict[tuple[str, str], tuple[int, str, dict[str, Any] | None]]:
+        out: dict[tuple[str, str], tuple[int, str, dict[str, Any] | None]] = {}
+        for leg, make in self._legs():
+            post = make()
+            for fmt in self.FORMATS:
+                status, _, raw = post("/api/report", self._json({"items": rows, "format": fmt, **extra}))
+                text = _artifact_text(raw, fmt) if status == 200 else raw.decode("utf-8", "replace")
+                out[(leg, fmt)] = (status, text, json.loads(raw) if fmt == "json" and status == 200 else None)
+        return out
+
+    def _assert_section(self, results: dict[tuple[str, str], tuple[int, str, dict[str, Any] | None]], expected: str) -> None:
+        for (leg, fmt), (status, text, _) in results.items():
+            with self.subTest(leg=leg, format=fmt):
+                self.assertEqual(status, 200, text[:400])
+                self.assertNotIn(self.NONE, text)
+                self.assertIn(expected, " ".join(text.split()))
+
+    def _signed(self, results: dict[tuple[str, str], tuple[int, str, dict[str, Any] | None]]) -> list[dict[str, Any]]:
+        return [body for (_, fmt), (_, _, body) in results.items() if fmt == "json" and body is not None]
+
+    def test_a_capped_scan_signs_the_files_over_the_cap(self) -> None:
+        rows = self._scan("--max-files", "2")  # bundle.zip, target.png analyzed; zlast.png over the cap
+        self.assertNotIn("zlast.png", rows)
+        results = self._report(list(rows.values()), options={"max_files": "2"})
+        self._assert_section(results, "파일 상한: 파일 수 상한(--max-files)에 도달해 검사하지 않은 파일 1개")
+        for body in self._signed(results):
+            unrecorded = body["unrecorded_files"]
+            self.assertTrue(unrecorded["cap_reached"])
+            self.assertEqual(body["summary"]["files_over_cap"], 1)
+            self.assertEqual(unrecorded["listing"], {"source": "walk", "not_in_report": 0})
+
+    def test_a_flat_scan_signs_the_subfolder_files(self) -> None:
+        rows = self._scan()
+        results = self._report(list(rows.values()))
+        self._assert_section(results, "검사하지 않은 하위 폴더 안의 파일 1개")
+        for body in self._signed(results):
+            self.assertEqual(body["summary"]["subfolders_skipped"], 1)
+            self.assertEqual(body["unrecorded_files"]["subfolders"], [{"path": "sub", "files": 1, "complete": True}])
+
+    def test_rows_left_out_of_the_post_are_counted(self) -> None:
+        rows = self._scan()
+        posted = [row for path, row in rows.items() if path != "zlast.png"]
+        results = self._report(posted)
+        self._assert_section(results, "보고서에 행 없음: 서버가 검사 폴더에서 찾은 파일 중 이 보고서에 서명된 행이 없는 파일 1개")
+        for body in self._signed(results):
+            self.assertEqual(body["unrecorded_files"]["listing"]["not_in_report"], 1)
+            self.assertIn({"code": "not_in_report", "label": "보고서에 행 없음", "count": 1}, body["unrecorded_files"]["reasons"])
+
+    def test_the_servers_scan_job_is_the_listing(self) -> None:
+        started = webapp_api._scan_job_start(f"folder={self.folder}&no_default_engine=true&max_files=2", default_folder=self.folder)
+        state: dict[str, Any] = {}
+        for _ in range(600):
+            state = webapp_api._scan_status_payload(f"job={started['job_id']}")
+            if state["status"] != "running":
+                break
+            time.sleep(0.05)
+        self.assertEqual(state["status"], "done", state)
+        result = state["result"]
+        # posted without options: the job (max_files 2, flat) — not the default walk — gives the counts
+        results = self._report(list(result["items"]), scan_job=started["job_id"], options={"no_default_engine": "true"})
+        self._assert_section(results, "파일 상한: 파일 수 상한(--max-files)에 도달해 검사하지 않은 파일 1개")
+        for body in self._signed(results):
+            self.assertEqual(body["unrecorded_files"]["listing"], {"source": "scan_job", "not_in_report": 0})
+            self.assertEqual(body["summary"]["subfolders_skipped"], 1)
+
+    def test_signed_rows_outside_the_servers_listing_are_unknown(self) -> None:
+        rows = self._scan("--recursive")  # sub/inner.png posted; the report's walk is flat (no options)
+        results = self._report(list(rows.values()))
+        self._assert_section(results, "기록되지 않은 파일: 확인 불가 — 서버가 검사 폴더의 파일 목록을 확인하지 못했습니다(서명된 행 1개가")
+        for body in self._signed(results):
+            self.assertEqual(body["unrecorded_files"]["listing"]["source"], "unknown")
+            self.assertFalse(body["unrecorded_files"]["cap_reached"])
+            self.assertEqual(body["summary"]["subfolders_skipped"], 0)
+        # the same scan posted with its options: the walk agrees and nothing is unrecorded
+        for body in self._signed(self._report(list(rows.values()), options={"recursive": "true"})):
+            self.assertEqual(body["unrecorded_files"]["listing"], {"source": "walk", "not_in_report": 0})
+            self.assertEqual(body["unrecorded_files"]["total_files"], 1)  # the link row in_link.png only
+
+    def test_a_walk_limit_is_unknown(self) -> None:
+        from deepfake_lens import scan_cache
+
+        rows = self._scan("--recursive")
+        with patch.object(scan_cache, "MAX_WALK_DIRS", 1):
+            results = self._report([row for path, row in rows.items() if not path.startswith("sub")], options={"recursive": "true"})
+        self._assert_section(results, "확인 불가 — 서버가 검사 폴더의 파일 목록을 확인하지 못했습니다(폴더 탐색 상한에 도달)")
+
+    def test_upload_rows_only_are_unknown(self) -> None:
+        upload = {"source": "upload", "path": "a.png", "name": "a.png", "status": "failed", "error": "x"}
+        for leg, make in self._legs():
+            status, _, raw = make()("/api/report", json.dumps({"items": [upload], "format": "json"}).encode("utf-8"))
+            with self.subTest(leg=leg):
+                self.assertEqual(status, 200, raw[:300])
+                unrecorded = json.loads(raw)["unrecorded_files"]
+                self.assertEqual(unrecorded["listing"]["source"], "unknown")
+                self.assertNotIn(self.NONE, unrecorded["lines"][0])
+
+    def test_regressions_of_the_report_rules_stay_closed(self) -> None:
+        """R19-13 (a changed row: 409), R20-1 (a FIFO row re-derived as the scan's own row: 200) and R21-1 (a posted
+        walk-limit folder row is excluded, never signed) keep their behaviour with the server listing."""
+        if hasattr(os, "mkfifo"):
+            os.mkfifo(self.folder / "pipe.jpg")
+        rows = self._scan()
+        results = self._report(list(rows.values()))
+        for (leg, fmt), (status, text, _) in results.items():
+            with self.subTest(leg=leg, format=fmt, case="unchanged"):
+                self.assertEqual(status, 200, text[:300])
+        for body in self._signed(results):
+            self.assertEqual(body["unrecorded_files"]["listing"], {"source": "walk", "not_in_report": 0})
+        walk_row = dict(rows["in_link.png"], path="sub", name="sub", kind="unknown", size_bytes=0,
+                        error="건너뜀: 탐색 상한 도달(폴더 1개) — 이 폴더 이하는 열지 않았습니다", sha256=None)
+        for body in self._signed(self._report([*rows.values(), walk_row])):
+            self.assertIn("sub", [row["path"] for row in body["excluded_items"]])
+        _write_png(self.folder / "target.png", seed=9)
+        for (leg, fmt), (status, text, _) in self._report(list(rows.values())).items():
+            with self.subTest(leg=leg, format=fmt, case="changed"):
+                self.assertEqual(status, 409, text[:300])
