@@ -1554,7 +1554,8 @@ class ReportSignsOnlyServerResultsTest(_ReportLegsFixture):
         rows = [self.rows["target.png"], ghost]
         for name, make in self._legs():
             post = make()
-            for fmt in ("json", "html", "evidence", *(("pdf",) if HAVE_PYMUPDF else ())):  # pdf without pymupdf: 501 first (B8)
+            # pdf without pymupdf: 501 first (B8); R22-7: the evidence statement too (it re-analyzed, then 500)
+            for fmt in ("json", "html", *(("evidence", "pdf") if HAVE_PYMUPDF else ())):
                 with self.subTest(leg=name, format=fmt):
                     status, content_type, raw = post("/api/report", self._json({"items": rows, "format": fmt}))
                     self.assertEqual(status, 409, raw[:300])
@@ -1581,7 +1582,8 @@ class ReportRefusesChangedRowsTest(_ReportLegsFixture):
     verify-report said 검증됨. Now any difference in sha256, status or verdict_code, or a row whose file can no
     longer be re-analyzed, refuses every signed format with 409 and ``changed_rows``."""
 
-    FORMATS = ("json", "html", "evidence", *(("pdf",) if HAVE_PYMUPDF else ()))
+    # R22-7 (round 22): without pymupdf the evidence statement is 501 before any re-analysis, like pdf (B8).
+    FORMATS = ("json", "html", *(("evidence", "pdf") if HAVE_PYMUPDF else ()))
 
     def _scan(self, *extra: str) -> dict[str, dict[str, Any]]:
         import contextlib
@@ -3107,8 +3109,14 @@ class ErrorTableEveryRowTest(unittest.TestCase):
             "E30": [case(s, "POST", "/api/report", 403, "허용되지 않은 경로", report({"items": [memo_row], "scan_root": str(self.outside)}), "application/json") for s in both],
             "E31": [case(s, "POST", "/api/report?format=pdf", 501, "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다", report({"items": [memo_row], "scan_root": scan_root}), "application/json",
                          patches=(patch("deepfake_lens.pdf_backend.import_pymupdf", no_pymupdf),)) for s in both]
+            # R22-7 (round 22): the evidence statement without pymupdf is the same 501, before any re-analysis (was a 500 after it)
+            + [case(s, "POST", f"/api/report?format={fmt}", 501, "PDF 보고서를 만들려면 pymupdf 패키지가 필요합니다", report({"items": [memo_row], "scan_root": scan_root}), "application/json",
+                    patches=(patch("deepfake_lens.pdf_backend.import_pymupdf", no_pymupdf), patch("deepfake_lens.analysis_api.scan_file_run", raise_)))
+               for s in both for fmt in ("evidence", "evidence-statement")]
             + [case(s, "POST", "/api/report?format=evidence", 500, "증거설명서 PDF 생성 실패", report({"items": [memo_row], "scan_root": scan_root}), "application/json",
-                    patches=(patch("deepfake_lens.evidence_statement.write_evidence_statement_pdf", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("렌더러 없음"))),)) for s in both],
+                    # R22-7: a renderer is present (the engine check passes) and the statement PDF fails — 500
+                    patches=(patch("deepfake_lens.pdf_backend.pymupdf_available", lambda: True),
+                             patch("deepfake_lens.evidence_statement.write_evidence_statement_pdf", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("렌더러 없음"))))) for s in both],
             "E32": [case(s, "POST", "/api/feedback", 400, text, body, "application/json") for s in both for body, text in (
                 (b"{oops", "JSON 본문을 해석할 수 없습니다"), (b"[1]", "피드백 요청 본문은 JSON 객체여야 합니다"),
                 (deep, "JSON 중첩이 너무 깊습니다"),  # R11-3: was a 500
@@ -3167,7 +3175,7 @@ class ErrorTableEveryRowTest(unittest.TestCase):
             # R19-13 (round 19): a posted row the server's re-analysis contradicts (here its digest) — every format.
             "E47": [case(s, "POST", f"/api/report?format={fmt}", 409, webapp_api.REPORT_ROWS_CHANGED,
                          report({"items": [dict(memo_row, sha256="0" * 64)], "scan_root": scan_root, "options": {"no_default_engine": "true"}}),
-                         "application/json") for s in both for fmt in ("json", "html", "evidence")],
+                         "application/json") for s in both for fmt in ("json", "html", *(("evidence",) if HAVE_PYMUPDF else ()))],  # R22-7
         }
 
     # -- the servers ---------------------------------------------------------------

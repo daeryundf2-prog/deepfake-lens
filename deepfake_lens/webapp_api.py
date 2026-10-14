@@ -2110,11 +2110,13 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
         if heatmap_path and not _heatmap_allowed(str(heatmap_path)):
             raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE)
 
-    if format_override.lower() == "pdf":
+    if format_override.lower() in PDF_REPORT_FORMATS:
         from .pdf_backend import pymupdf_available
 
         if not pymupdf_available():
-            # B8: the Korean 501 before any re-analysis work (nothing to render with).
+            # B8: the Korean 501 before any re-analysis work (nothing to render with). R22-7 (round 22): the
+            # evidence statement too — it re-analyzed every row and then failed with 500 (증거설명서 PDF 생성
+            # 실패), not the documented 501 (service.md E31).
             return dict(PDF_REPORT_UNAVAILABLE_BODY)
 
     # P1: rows are resolved against the scanned folder only (inside a read
@@ -2200,7 +2202,12 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
         tmp_path = Path(tmp.name)
     try:
         if req_format in ("evidence", "evidence-statement"):
-            from .evidence_statement import build_evidence_statement, signed_statement_body, write_evidence_statement_pdf
+            from .evidence_statement import (
+                PdfDependencyMissing as StatementPdfMissing,
+                build_evidence_statement,
+                signed_statement_body,
+                write_evidence_statement_pdf,
+            )
             from .office_config import DEFAULT_CASE_NAME
             try:
                 stmt = build_evidence_statement(
@@ -2226,6 +2233,8 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
                     ),
                     unsigned_rows=excluded,
                 )
+            except StatementPdfMissing:
+                return dict(PDF_REPORT_UNAVAILABLE_BODY)  # R22-7: 501 as documented (E31), never a 500
             except RuntimeError as exc:
                 return {"error": f"{EVIDENCE_PDF_FAILED_PREFIX}{exc}", "hint": "`pip install 'deepfake-lens[forensic]'` 후 재시도하거나 Markdown 출력을 사용하세요."}
         elif req_format == "pdf":
