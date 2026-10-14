@@ -1412,7 +1412,27 @@ class ChildPathTest(unittest.TestCase):
         with mock.patch.object(native_path, "_is_windows", return_value=True):
             self.assertEqual(native_path.child_path("case/a.wav"), os.path.abspath("case/a.wav"))
         with mock.patch("os.getcwd", side_effect=FileNotFoundError(2, "gone")):
-            self.assertEqual(native_path.child_path("a.wav"), "a.wav")
+            # R24-3 (round 24): "./"-prefixed (was "a.wav" unchanged) — never an ffmpeg protocol name either
+            self.assertEqual(native_path.child_path("a.wav"), "./a.wav")
+            self.assertEqual(native_path.child_path("c:v.mp4"), "./c:v.mp4")
+
+    def test_a_name_too_long_to_make_absolute_stays_relative(self) -> None:
+        """R24-3 (round 24): R23-1 joined the working folder to every relative name; in a folder deeper than PATH_MAX
+        the absolute name was refused (ENAMETOOLONG) and the audio and audio-track checks failed where 2130892 ran.
+        Such a name stays relative to this process's working folder, "./"-prefixed (no ffmpeg protocol)."""
+        cwd = os.getcwd()
+        limit = len(os.fsencode(os.path.join(cwd, "case/a.wav")))
+        with mock.patch.object(native_path, "_PATH_MAX", limit + 1):
+            self.assertEqual(native_path.child_path("case/a.wav"), os.path.join(cwd, "case/a.wav"))
+        with mock.patch.object(native_path, "_PATH_MAX", limit):
+            self.assertEqual(native_path.child_path("case/a.wav"), "./case/a.wav")
+        with mock.patch.object(native_path, "_PATH_MAX", len(os.fsencode(cwd)) + 2):
+            self.assertEqual(native_path.child_path("c:v.mp4"), "./c:v.mp4")
+            self.assertEqual(native_path.child_path("../x.wav"), "../x.wav")
+            self.assertEqual(native_path.child_path("/abs/x.wav"), "/abs/x.wav")
+        self.assertTrue(native_path.is_cwd_relative("./a.wav"))
+        self.assertFalse(native_path.is_cwd_relative("/a.wav"))
+        self.assertFalse(native_path.is_cwd_relative(""))
 
     def test_for_child_yields_an_absolute_name_and_the_default_is_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
