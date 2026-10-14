@@ -1,0 +1,51 @@
+# Exact versions of the reference gate image (deepfake-lens-gate, built 2026-10-11, `pip freeze` of the venv) — R23-10.
+# Installed with `pip install --no-deps -r <this file>`: every package (dependencies included) is listed, nothing else is resolved.
+# Regenerate only together with a deliberate image change (HANDOFF §4) and record the reason in the commit.
+# /venv-api (API env)
+pip==26.2.1
+absl-py==2.5.1
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+certifi==2026.7.22
+cffi==2.1.1
+click==8.5.0
+cloudpickle==3.1.2
+contourpy==1.4.0
+cycler==0.12.1
+fastapi==0.143.0
+flatbuffers==25.12.19
+fonttools==4.66.1
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.20
+joblib==1.6.0
+kiwisolver==1.5.1
+linkify-it-py==2.2.0
+markdown-it-py==4.2.0
+matplotlib==3.11.2
+mdurl==0.1.2
+mediapipe==1.1.0
+narwhals==2.27.1
+numpy==2.5.4
+opencv-contrib-python==5.0.0.93
+opencv-python==5.0.0.93
+opentelemetry-api==1.45.1
+packaging==26.3
+pillow==12.3.0
+pycparser==3.11
+pydantic==2.14.0
+pydantic_core==2.50.0
+pymupdf==1.28.2
+pyparsing==3.3.3
+python-dateutil==2.9.0.post0
+scikit-learn==1.9.1
+scipy==1.18.1
+six==1.17.0
+sounddevice==0.5.6
+starlette==1.7.0
+threadpoolctl==3.7.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+uvicorn==0.54.0

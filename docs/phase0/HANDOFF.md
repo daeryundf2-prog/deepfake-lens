@@ -57,6 +57,9 @@ torch/transformers/mediapipe는 설치하지 않은 상태가 기준이다(신�
 - `scripts/gate/Dockerfile` — 기준 이미지: `docker build -t deepfake-lens-gate -f scripts/gate/Dockerfile scripts/gate`
 - `scripts/gate/Dockerfile.gui` — GUI 스모크 이미지(기준 이미지 + `/venv-gui`의 pymupdf·Playwright Chromium): `docker build -t deepfake-lens-gate:gui -f scripts/gate/Dockerfile.gui scripts/gate`
 - `scripts/gate/gate.sh` — 실행기(bash, 단계마다 `pipefail`). Python 파일이 아니므로 ruff·mypy·`scripts/*.py` 도움말 테스트의 대상이 아니다.
+- `scripts/gate/requirements-main.lock`, `requirements-api.lock`, `requirements-gui.lock` — 각 venv의 `pip freeze`(의존성 포함 전부, 정확한 버전). Dockerfile이 `pip install --no-deps -r`로 설치하므로 빌드 시점에 아무것도 새로 해석하지 않는다.
+
+**재현성(23차 R23-10).** 기준 이미지는 이 폴더의 파일만으로 다시 만들어진다. 기반 이미지는 digest로 고정했다(`python:3.13.16-slim-trixie@sha256:70729b46…` — 그 arm64 층 4개가 2026-10-11 기준 이미지의 처음 4개 층과 같다). Debian 패키지는 `snapshot.debian.org`의 `DEBIAN_SNAPSHOT`(기본 20261011T000000Z) 상태에서 받고, 명시한 패키지(ffmpeg 7.1.5, git, procps, util-linux, nodejs 20.19.2)는 버전도 고정했다. pip 패키지는 위 잠금 파일의 버전 그대로다(pip 26.2.1). 22차까지의 Dockerfile은 아무것도 고정하지 않아 다시 빌드하면 그날의 `python:3.13-slim`과 PyPI 최신판이 들어왔다. 기준 이미지 이력의 `COPY pyproject.toml /tmp/pp/` 층은 레포 밖 임시 Dockerfile의 흔적이고 이미지 내용에는 영향이 없다(재빌드 이미지에는 없다). 확인 방법: 새 태그로 빌드(`docker build -t deepfake-lens-gate:rebuild -f scripts/gate/Dockerfile scripts/gate`)한 뒤 두 이미지에서 `/venv/bin/pip freeze`, `/venv-api/bin/pip freeze`, `python -V`, `dpkg-query -W`를 비교한다 — 23차 수정에서 모두 같았다. 잠금 파일은 이미지를 의도적으로 바꿀 때만 다시 만들고(`pip freeze`), 그 이유를 커밋에 적는다. 같은 태그를 덮어쓰기 전에 새 태그로 빌드해 비교한다.
 
 - Linux aarch64, Python 3.13, ffmpeg 7.1, Node.js 20.
 - `/venv`(메인): numpy, scipy, Pillow, opencv-python 5, scikit-learn, librosa + numba + soundfile, c2pa-python, jsonschema, coverage, ruff, mypy.

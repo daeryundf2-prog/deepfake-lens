@@ -1,7 +1,10 @@
 # GUI end-to-end smoke image: the reference image plus /venv-gui (main-env packages, pymupdf, Playwright Chromium).
 # Build:  docker build -t deepfake-lens-gate:gui -f scripts/gate/Dockerfile.gui scripts/gate
+# R23-10 (round 23): /venv-gui at the exact versions of the reference GUI image (requirements-gui.lock, --no-deps);
+# Playwright 1.63.0 installs its own pinned Chromium build (chromium-1243).
 FROM deepfake-lens-gate
-RUN python -m venv /venv-gui && /venv-gui/bin/pip install -q "opencv-python>=4.8" "numpy>=1.24" "librosa>=0.10" "scipy>=1.10" "scikit-learn>=1.3" \
-      "Pillow>=10.0" "c2pa-python>=0.6" "jsonschema>=4.18" pymupdf playwright && \
+COPY requirements-gui.lock /tmp/locks/
+RUN python -m venv /venv-gui && /venv-gui/bin/pip install -q pip==26.2.1 && \
+    /venv-gui/bin/pip install -q --no-deps -r /tmp/locks/requirements-gui.lock && /venv-gui/bin/pip check && \
     /venv-gui/bin/playwright install --with-deps chromium
 WORKDIR /repo
