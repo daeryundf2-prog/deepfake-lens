@@ -1370,6 +1370,19 @@ REPORT_ROW_PATH_NOT_CANONICAL = (
     "검사 결과 항목 「{path}」의 경로가 폴더 검사 결과의 경로 형식이 아닙니다(스캔 폴더 기준 상대 경로 — 절대 경로·빈 구성 요소·"
     "`.`·`..` 불가) — 폴더 검사 결과를 그대로 보내십시오"
 )
+# R22-4 (round 22): a posted row path that names an existing entry under another spelling than the scan's own
+# listing — a different letter case or Unicode form on a case-insensitive / normalizing file system
+# ("GEN.png" for "gen.png") — or a path through a folder the walk never enters because it is the scan folder or
+# a folder between it and the entry again (a bind-mount loop: "sub/loop/gen.png"). The scan lists neither, and
+# each was signed as one more row of the same file (R21-5's string check passed them). HTTP 400.
+REPORT_ROW_NOT_LISTED_NAME = (
+    "검사 결과 항목 「{path}」의 경로가 폴더 목록의 이름과 다릅니다(대소문자·유니코드 형태가 다른 같은 파일) — "
+    "폴더 검사 결과를 그대로 보내십시오"
+)
+REPORT_ROW_UNDER_LOOP = (
+    "검사 결과 항목 「{path}」는 순환 폴더(검사 폴더나 그 상위 폴더와 같은 폴더) 아래의 경로라 폴더 검사가 만들지 않는 행입니다 — "
+    "폴더 검사 결과를 그대로 보내십시오"
+)
 # R21-5: the same row (path, or container and member) posted twice. HTTP 400.
 REPORT_ROW_POSTED_TWICE = "검사 결과 항목 「{path}」가 두 번 게시되었습니다 — 행마다 한 번만 보내십시오"
 # R22-1 (round 22): why the server could not list the scan folder for the "기록되지 않은 파일" section — the
@@ -1771,6 +1784,71 @@ def _posted_path_error(posted: list[Any]) -> str | None:
         if (top, member) in seen:
             return REPORT_ROW_POSTED_TWICE.format(path=str(item.path)[:200])
         seen.add((top, member))
+    return None
+
+
+def _posted_alias_error(posted: list[Any], scan_root: Path | None) -> str | None:
+    """R22-4 (round 22): why a posted row path names a file the scan would list under another path, or None.
+
+    R21-5 compared the path *text* only. Two spellings still named one file and were signed as two rows:
+
+    - a path through a bind-mount loop folder ("sub/loop/gen.png" with sub/loop the scan folder or "sub"
+      again) — the walk never enters such a folder (same ``(st_dev, st_ino)`` as the scan folder or a folder
+      between it and the entry: :func:`scan_cache._iter_files`), so no scan writes that row;
+    - a path whose components are not the names the folder listing holds — another letter case or Unicode
+      form ("GEN.png", NFD "한") resolves to the same file on a case-insensitive or normalizing file system
+      (macOS, Windows), but the scan writes the listed name.
+
+    Each top-level row path (a member row's container) is checked component by component against the
+    listing of its folder (exact name) and the loop identities; both are 400. An entry that is not there at
+    all is left to the re-analysis (gone since the scan: 409). Distinct listed names of one inode (hard
+    links) are distinct rows, as the scan lists them.
+    """
+    from .result_text import row_identity, unescape_row_path
+    from .scan_cache import _dir_identity
+
+    if scan_root is None:
+        return None
+    listings: dict[Path, set[str] | None] = {}
+
+    def listed(folder: Path) -> set[str] | None:
+        if folder not in listings:
+            try:
+                with os.scandir(folder) as handle:
+                    listings[folder] = {entry.name for entry in handle}
+            except OSError:
+                listings[folder] = None
+        return listings[folder]
+
+    root_ident = _dir_identity(scan_root)
+    checked: set[str] = set()
+    for item in posted:
+        top = row_identity(item)[0]
+        if top in checked:
+            continue
+        checked.add(top)
+        parts = unescape_row_path(top).replace(os.sep, "/").split("/")
+        folder = scan_root
+        ancestors = {root_ident} if root_ident else set()
+        for index, part in enumerate(parts):
+            names = listed(folder)
+            if names is None:
+                break  # an unlistable folder: the re-analysis gives its row (R20-1)
+            if part not in names:
+                try:
+                    os.lstat(folder / part)
+                except OSError:
+                    break  # nothing there under any spelling: gone since the scan (409 later)
+                return REPORT_ROW_NOT_LISTED_NAME.format(path=str(item.path)[:200])
+            entry = folder / part
+            if index == len(parts) - 1 or os.path.islink(entry):
+                break  # a linked folder on the path is the hasher's (never followed: N2 / R20-5)
+            ident = _dir_identity(entry)
+            if ident is not None and ident in ancestors:
+                return REPORT_ROW_UNDER_LOOP.format(path=str(item.path)[:200])
+            if ident is not None:
+                ancestors.add(ident)
+            folder = entry
     return None
 
 
@@ -2202,7 +2280,7 @@ def _report_payload(body: bytes, format_override: str | None = None, *, default_
     except InvalidOption as exc:
         return {"error": str(exc)}
     server_thresholds = load_thresholds(options)
-    duplicate_error = _posted_path_error(items) or _posted_duplicate_error(items)
+    duplicate_error = _posted_path_error(items) or _posted_alias_error(items, scan_root) or _posted_duplicate_error(items)
     if duplicate_error is not None:
         hasher.close()
         return {"error": duplicate_error}  # R21-5 / R20-4: 400

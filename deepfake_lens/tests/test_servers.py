@@ -3517,3 +3517,86 @@ class PathValuesWithNulAre400Test(unittest.TestCase):
             with self.subTest(server=server):
                 self.assertEqual(send("GET", f"/api/analyze-file?file={quote(str(name))}", None, "", None)[0], 200)
                 self.assertEqual(send("GET", f"/api/preview?path={quote(str(name))}", None, "", None)[0], 200)
+
+
+class ReportRowAliasesByFileIdentityTest(_ReportLegsFixture):
+    """R22-4 (round 22): R21-5 refused aliases by the path *text* only. "sub/loop/gen.png" through a bind-mount loop
+    folder (sub/loop = the scan folder again) named gen.png a second time and was signed as one more row (total 4,
+    manipulation_evidence 2, verify-report rc 0), and on a case-insensitive file system "GEN.png" does the same.
+    A path through a folder with the identity (st_dev, st_ino) of the scan folder or a folder between it and the
+    entry — which the walk never enters — and a path whose components are not the listed names are now 400."""
+
+    FORMATS = ReportRefusesChangedRowsTest.FORMATS
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.folder / "sub" / "loop").mkdir(parents=True)
+        (self.folder / "sub" / "loop" / "target.png").write_bytes((self.folder / "target.png").read_bytes())
+
+    def _post_all(self, rows: list[dict[str, Any]]) -> list[tuple[str, str, int, dict[str, Any]]]:
+        out = []
+        for leg, make in self._legs():
+            post = make()
+            for fmt in self.FORMATS:
+                status, _, raw = post("/api/report", self._json({"items": rows, "format": fmt}))
+                out.append((leg, fmt, status, json.loads(raw) if "json" in fmt or status != 200 else {}))
+        return out
+
+    def test_a_path_under_a_bind_mount_loop_is_400(self) -> None:
+        from deepfake_lens import scan_cache
+
+        real = scan_cache._dir_identity
+        loop = self.folder / "sub" / "loop"
+
+        def identity(path: Any) -> Any:
+            return real(self.folder) if Path(path) == loop else real(path)
+
+        target = self.rows["target.png"]
+        with patch.object(scan_cache, "_dir_identity", identity):
+            for leg, fmt, status, body in self._post_all([target, dict(target, path="sub/loop/target.png", name="target.png")]):
+                with self.subTest(leg=leg, format=fmt):
+                    self.assertEqual(status, 400, body)
+                    self.assertIn("「sub/loop/target.png」는 순환 폴더", body["error"])
+        # without the loop the same path is an ordinary subfolder row of a recursive scan: signed
+        for leg, fmt, status, body in self._post_all([target, dict(target, path="sub/loop/target.png", name="target.png")]):
+            if fmt == "json":
+                with self.subTest(leg=leg, case="no loop"):
+                    self.assertEqual(status, 200, body)
+
+    def test_a_path_spelled_unlike_the_listing_is_400(self) -> None:
+        import unicodedata
+
+        real_lstat = os.lstat
+        (self.folder / unicodedata.normalize("NFC", "한.png")).write_bytes((self.folder / "target.png").read_bytes())
+        aliases = {"TARGET.png": "target.png", unicodedata.normalize("NFD", "한.png"): unicodedata.normalize("NFC", "한.png")}
+
+        def lstat(path: Any, *args: Any, **kwargs: Any) -> Any:
+            # a case-insensitive, normalizing file system (macOS, Windows): another spelling names the same file
+            text = os.fspath(path)
+            for alias, name in aliases.items():
+                text = text.replace(alias, name) if isinstance(text, str) else text
+            return real_lstat(text, *args, **kwargs)
+
+        target = self.rows["target.png"]
+        for alias in aliases:
+            with patch.object(webapp_api.os, "lstat", lstat):
+                results = self._post_all([target, dict(target, path=alias, name=alias)])
+            for leg, fmt, status, body in results:
+                with self.subTest(leg=leg, format=fmt, alias=alias):
+                    self.assertEqual(status, 400, body)
+                    self.assertIn("의 경로가 폴더 목록의 이름과 다릅니다", body["error"])
+
+    def test_a_gone_file_is_still_409_and_hard_links_are_rows(self) -> None:
+        """R19-13 stays: a row whose file is gone is 409 (not 400). Hard links are distinct listed names — the scan
+        writes a row for each — and are signed."""
+        target = self.rows["target.png"]
+        os.link(self.folder / "target.png", self.folder / "hard.png")
+        rows = [target, dict(target, path="hard.png", name="hard.png")]
+        for leg, fmt, status, body in self._post_all(rows):
+            if fmt == "json":
+                with self.subTest(leg=leg, case="hard link"):
+                    self.assertEqual(status, 200, body)
+                    self.assertEqual(sorted(row["path"] for row in body["items"]), ["hard.png", "target.png"])
+        for leg, fmt, status, body in self._post_all([target, dict(target, path="gone.png", name="gone.png")]):
+            with self.subTest(leg=leg, format=fmt, case="gone"):
+                self.assertEqual(status, 409, body)
