@@ -181,7 +181,11 @@ class WebReportSelectionTest(unittest.TestCase):
                 "options": {"no_default_engine": "true"}, **extra}
         return json.dumps(body, ensure_ascii=False).encode("utf-8")
 
-    def test_evidence_statement_keeps_every_row(self) -> None:
+    # Merge of phase0 R22-7: without pymupdf the evidence format is the 501 before any re-analysis or
+    # check; these tests mock the PDF writer or check what comes before rendering, so the engine is
+    # reported present (they failed in the main venv, which has no pymupdf).
+    @mock.patch("deepfake_lens.pdf_backend.pymupdf_available", return_value=True)
+    def test_evidence_statement_keeps_every_row(self, _pdf: Any) -> None:
         captured: dict[str, Any] = {}
 
         def fake_pdf(path: Any, statement: Any, *, signed: Any = None, unsigned_rows: Any = None, **_: Any) -> dict[str, Any]:
@@ -220,7 +224,11 @@ class WebReportSelectionTest(unittest.TestCase):
         self.assertIn("갑 제1호증", text)
         self.assertNotIn("갑 제2호증", text)
 
-    def test_web_statement_follows_the_posted_order(self) -> None:
+    # Merge of phase0 R22-7: without pymupdf the evidence format is the 501 before any re-analysis or
+    # check; these tests mock the PDF writer or check what comes before rendering, so the engine is
+    # reported present (they failed in the main venv, which has no pymupdf).
+    @mock.patch("deepfake_lens.pdf_backend.pymupdf_available", return_value=True)
+    def test_web_statement_follows_the_posted_order(self, _pdf: Any) -> None:
         captured: dict[str, Any] = {}
 
         def fake_pdf(path: Any, statement: Any, *, signed: Any = None, unsigned_rows: Any = None, **_: Any) -> dict[str, Any]:
@@ -310,7 +318,11 @@ class WebReportSelectionTest(unittest.TestCase):
         for line in [*preview["case_lines"], *(line for _, lines in preview["boxes"] for line in lines), *preview["signoff"]]:
             self.assertIn("".join(line.split()), text, line)
 
-    def test_an_empty_unknown_or_repeated_choice_is_refused(self) -> None:
+    # Merge of phase0 R22-7: without pymupdf the evidence format is the 501 before any re-analysis or
+    # check; these tests mock the PDF writer or check what comes before rendering, so the engine is
+    # reported present (they failed in the main venv, which has no pymupdf).
+    @mock.patch("deepfake_lens.pdf_backend.pymupdf_available", return_value=True)
+    def test_an_empty_unknown_or_repeated_choice_is_refused(self, _pdf: Any) -> None:
         """GUI-REV2 H-7: no statement is signed with 0 exhibits or with paths that are not its rows."""
         first = self.rows[0]["path"]
         cases = {
@@ -462,7 +474,11 @@ class WebReportSelectionTest(unittest.TestCase):
         self.assertIn("`evidence-json`", out["error"])
         self.assertIn("`evidence-preview`", out["error"])
 
-    def test_malformed_choice_is_refused(self) -> None:
+    # Merge of phase0 R22-7: without pymupdf the evidence format is the 501 before any re-analysis or
+    # check; these tests mock the PDF writer or check what comes before rendering, so the engine is
+    # reported present (they failed in the main venv, which has no pymupdf).
+    @mock.patch("deepfake_lens.pdf_backend.pymupdf_available", return_value=True)
+    def test_malformed_choice_is_refused(self, _pdf: Any) -> None:
         for extra in ({"exhibit_paths": "a.txt"}, {"exhibit_paths": [1]}, {"submitter_side": "court"}):
             with self.subTest(extra=extra):
                 out = webapp_api._report_payload(self._body(**extra), "evidence", default_folder=self.folder)
