@@ -12,6 +12,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 from .webapp_api import (
     MAX_UPLOAD_BYTES,
+    USER_DATA_REFUSED_STATUS,
+    evidence_folders,
     PathTextInvalid,
     _analyze_file_payload,
     _analyze_upload_payload,
@@ -283,7 +285,7 @@ def build_server(
                 return
             if parsed.path == "/api/reviews":
                 from .reviews import get_default_review_store
-                self._send_json({"status": "success", "reviews": get_default_review_store().list_reviews()})
+                self._send_json({"status": "success", "reviews": get_default_review_store().list_reviews(evidence_folders(default_folder))})
                 return
             if parsed.path == "/api/review":
                 from .reviews import get_default_review_store
@@ -292,7 +294,7 @@ def build_server(
                 if not art_id:
                     self.send_error(400, "path 또는 artifact_id가 필요합니다")
                     return
-                self._send_json({"status": "success", "artifact_id": art_id, "review": get_default_review_store().get_review(art_id)})
+                self._send_json({"status": "success", "artifact_id": art_id, "review": get_default_review_store().get_review(art_id, evidence_folders(default_folder))})
                 return
             self.send_error(404, "찾을 수 없는 경로입니다")
 
@@ -357,7 +359,7 @@ def build_server(
                 if length <= 0 or length > 1024 * 1024:
                     self.send_error(400, "피드백 요청 본문 크기가 올바르지 않습니다")
                     return
-                self._send_json(_feedback_payload(self.rfile.read(length)))
+                self._send_json(_feedback_payload(self.rfile.read(length), evidence_folders(default_folder)))  # R22-3
                 return
             if parsed.path == "/api/review":
                 try:
@@ -384,7 +386,14 @@ def build_server(
                     self.send_error(400, "artifact_id 값은 문자열이어야 합니다")
                     return
                 from .reviews import get_default_review_store
-                saved = get_default_review_store().save_review(art_id, raw)
+                from .user_data import UserDataRefused
+
+                try:
+                    saved = get_default_review_store().save_review(art_id, raw, evidence_folders(default_folder))
+                except UserDataRefused as exc:
+                    # R22-3: never written into the evidence (or the working folder) — the examiner is told why
+                    self._send_json({"error": str(exc)}, status=USER_DATA_REFUSED_STATUS)
+                    return
                 self._send_json({"status": "success", "artifact_id": art_id, "review": saved})
                 return
             self.send_error(404, "찾을 수 없는 경로입니다")

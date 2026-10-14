@@ -3172,6 +3172,15 @@ class ErrorTableEveryRowTest(unittest.TestCase):
                 "/api/analyze-file?file_b64=%40%40", "/api/scan?folder_b64=%40%40", "/api/scan?async=1&folder_b64=AA%3D%3D",
                 f"/api/preview?path_b64=%40%40&root={q(f)}", "/api/heatmap?path_b64=x.png&root_b64=%40%40",
             )],
+            # R22-3 (round 22): an examiner record inside the evidence (here: the overrides named inside the root) is refused.
+            "E49": [case(s, "POST", "/api/feedback", 409, "저장하지 않았습니다", json.dumps({"path": "memo.txt", "expected_label": "real"}).encode(),
+                         "application/json", patches=(patch.dict(os.environ, {"DEEPFAKE_LENS_FEEDBACK": str(f / "fb.jsonl")}),)) for s in both]
+            + [case(s, "POST", "/api/review", 409, "저장하지 않았습니다", json.dumps({"artifact_id": "memo.txt", "star": True}).encode(),
+                    "application/json", patches=(patch.dict(os.environ, {"DEEPFAKE_LENS_REVIEWS": str(f / "reviews.json")}),
+                                                 patch("deepfake_lens.reviews._DEFAULT_STORE", None))) for s in both]
+            + [case("api", "PUT", "/api/artifacts/memo.txt/review", 409, "저장하지 않았습니다", json.dumps({"star": True}).encode(),
+                    "application/json", patches=(patch.dict(os.environ, {"DEEPFAKE_LENS_REVIEWS": str(f / "reviews.json")}),
+                                                 patch("deepfake_lens.reviews._DEFAULT_STORE", None)))],
             # R22-6 (round 22): a NUL in a path value was a 500 (PathValuesWithNulAre400Test sends every endpoint).
             "E48": [case(s, "GET", f"/api/analyze-file?file={q(f / 'a')}%00", 400, "NUL 문자") for s in both]
             + [case(s, "POST", "/api/report", 400, "NUL 문자", report({"items": [memo_row], "scan_root": scan_root + "\x00"}), "application/json") for s in both]

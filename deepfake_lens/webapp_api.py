@@ -1228,14 +1228,28 @@ def _compare_payload(content_type: str, body: bytes) -> dict[str, object]:
 
 
 def _feedback_path() -> Path:
-    """Where web-UI examiner labels accumulate; overridable for tests."""
-    override = os.environ.get("DEEPFAKE_LENS_FEEDBACK")
-    if override:
-        return Path(override)
-    return Path.home() / ".deepfake-lens" / "feedback.jsonl"
+    """Where web-UI examiner labels accumulate (``DEEPFAKE_LENS_FEEDBACK`` overrides it).
+
+    R22-3 (round 22): the fixed per-user ``feedback.jsonl`` of :mod:`user_data`
+    (was ``~/.deepfake-lens/feedback.jsonl`` — inside the served HOME, or the
+    working folder with a relative HOME). Raises :class:`user_data.UserDataRefused`
+    when there is no place for it.
+    """
+    from .user_data import FEEDBACK_ENV, FEEDBACK_FILE, record_path
+
+    return record_path(FEEDBACK_FILE, FEEDBACK_ENV)
 
 
-def _feedback_payload(body: bytes) -> dict[str, object]:
+def evidence_folders(default_folder: Path | None = None) -> list[Path]:
+    """R22-3: the folders a server examines — its read roots (or its default folder) — where it never writes."""
+    return _effective_roots(default_folder)
+
+
+# R22-3: an examiner record that would be written inside the evidence (or nowhere) is refused with this status.
+USER_DATA_REFUSED_STATUS = 409
+
+
+def _feedback_payload(body: bytes, evidence: list[Path] | tuple[Path, ...] = ()) -> dict[str, object]:
     """Record one examiner verdict from the web UI.
 
     Appends a ``{path, expected_label, notes, embedded_result}`` JSONL row the
@@ -1263,7 +1277,15 @@ def _feedback_payload(body: bytes) -> dict[str, object]:
     if isinstance(result, dict):
         # load_feedback reads the embedded scan result from the "result" key.
         entry["result"] = result
-    feedback_file = _feedback_path()
+    from .user_data import FEEDBACK_ENV, FEEDBACK_FILE, UserDataRefused, check_outside, migrate_once
+
+    try:
+        feedback_file = _feedback_path()
+        check_outside(feedback_file, evidence, FEEDBACK_ENV)  # R22-3: never into the evidence
+    except UserDataRefused as exc:
+        return ApiError(str(exc), USER_DATA_REFUSED_STATUS)
+    if not os.environ.get(FEEDBACK_ENV):
+        migrate_once(FEEDBACK_FILE, feedback_file)
     feedback_file.parent.mkdir(parents=True, exist_ok=True)
     with feedback_file.open("a", encoding="utf-8") as handle:
         handle.write(json_dumps(entry, ensure_ascii=False) + "\n")

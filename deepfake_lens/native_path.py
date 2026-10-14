@@ -778,6 +778,11 @@ def set_examined_folders(folders: list[str]) -> None:
             tempfile.tempdir = base
 
 
+def examined_folders() -> list[str]:
+    """R20-7/R22-3: the real paths of the folders the running command examines (empty in a library caller)."""
+    return list(_EXAMINED_FOLDERS)
+
+
 def _inside_examined(base: str) -> bool:
     real = os.path.realpath(base)
     return any(real == folder or real.startswith(folder.rstrip(os.sep) + os.sep) for folder in _EXAMINED_FOLDERS)

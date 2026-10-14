@@ -1150,15 +1150,31 @@ def create_app(
 
     @app.post("/api/feedback")
     async def api_feedback(request: Request):
-        from .webapp_api import _feedback_payload
+        from .webapp_api import _feedback_payload, evidence_folders
         body = await request.body()
-        return _api_json(await run_in_threadpool(_feedback_payload, body))
+        return _api_json(await run_in_threadpool(_feedback_payload, body, evidence_folders(default_folder)))  # R22-3
+
+    def _evidence() -> list[Path]:
+        """R22-3: the folders this server examines — an examiner record is never written inside one."""
+        from .webapp_api import evidence_folders
+
+        return evidence_folders(default_folder)
+
+    def _save_review(store: Any, artifact_id: str, data: dict[str, Any]) -> Any:
+        from .user_data import UserDataRefused
+        from .webapp_api import USER_DATA_REFUSED_STATUS
+
+        try:
+            return store.save_review(artifact_id, data, _evidence())
+        except UserDataRefused as exc:
+            # R22-3: refused, never written into the evidence (or the working folder)
+            raise HTTPException(status_code=USER_DATA_REFUSED_STATUS, detail=str(exc)) from exc
 
     @app.get("/api/artifacts/{artifact_id:path}/review")
     async def get_artifact_review(artifact_id: str):
         from .reviews import get_default_review_store
         store = get_default_review_store()
-        review = store.get_review(artifact_id)
+        review = store.get_review(artifact_id, _evidence())
         return {"status": "success", "artifact_id": artifact_id, "review": review}
 
     @app.put("/api/artifacts/{artifact_id:path}/review")
@@ -1172,7 +1188,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc))
         if not isinstance(data, dict):
             raise HTTPException(status_code=400, detail=REVIEW_BODY_NOT_OBJECT)  # P8: was a 500
-        saved = store.save_review(artifact_id, data)
+        saved = _save_review(store, artifact_id, data)
         return {"status": "success", "artifact_id": artifact_id, "review": saved}
 
     @app.get("/api/review")
@@ -1184,7 +1200,7 @@ def create_app(
         if not artifact_id:
             raise HTTPException(status_code=400, detail="path 또는 artifact_id 쿼리 매개변수가 필요합니다")
         store = get_default_review_store()
-        review = store.get_review(artifact_id)
+        review = store.get_review(artifact_id, _evidence())
         return {"status": "success", "artifact_id": artifact_id, "review": review}
 
     @app.post("/api/review")
@@ -1203,14 +1219,14 @@ def create_app(
         if not isinstance(artifact_id, str):
             raise HTTPException(status_code=400, detail=REVIEW_ID_NOT_STRING)
         store = get_default_review_store()
-        saved = store.save_review(artifact_id, data)
+        saved = _save_review(store, artifact_id, data)
         return {"status": "success", "artifact_id": artifact_id, "review": saved}
 
     @app.get("/api/reviews")
     async def api_list_reviews():
         from .reviews import get_default_review_store
         store = get_default_review_store()
-        return {"status": "success", "reviews": store.list_reviews()}
+        return {"status": "success", "reviews": store.list_reviews(_evidence())}
 
     return app
 
