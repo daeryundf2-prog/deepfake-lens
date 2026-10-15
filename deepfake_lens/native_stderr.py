@@ -54,6 +54,21 @@ class FfmpegError(RuntimeError):
     """R17-4: ffmpeg could not run or failed — never read as "no audio track"."""
 
 
+class FfmpegTimeout(FfmpegError):
+    """R26-10 (round 26): ffmpeg did not finish within its limit — the reason names what, which file and when."""
+
+
+def ffmpeg_timeout(operation: str, path: object, limit: float, elapsed: float) -> FfmpegTimeout:
+    """R26-10 (round 26): the failure of an ffmpeg run stopped at its time limit.
+
+    "ffmpeg 시간 초과 — <작업>: '<파일>' — 상한 <N>초에 중단(경과 <M>초)". The file is quoted as a decoder quotes it
+    (``repr``), so error_text.scrub_paths writes it "<root>/…" like every other reason (R25-7). It was
+    "TimeoutExpired: 라이브러리 오류(TimeoutExpired)" — nothing said what was cut, or after how long.
+    """
+    shown = os.fspath(path) if isinstance(path, (str, os.PathLike)) else str(path)
+    return FfmpegTimeout(f"ffmpeg 시간 초과 — {operation}: {shown!r} — 상한 {limit:g}초에 중단(경과 {elapsed:.0f}초)")
+
+
 def ffmpeg_found_no_stream(stderr: bytes | str | None) -> bool:
     """R17-4: True when ffmpeg's stderr says the input has no stream of the requested kind."""
     if not stderr:

@@ -307,6 +307,8 @@ def analyze_av_sync(
 AV_SYNC_MOTION_CHECK = "av_sync_motion"
 AV_SYNC_AUDIO_CHECK = "av_sync_audio"
 AV_SYNC_NO_AUDIO_TRACK = "오디오 트랙 없음(ffmpeg로 추출된 음성 스트림이 없습니다)"
+# R26-10 (round 26): the step an ffmpeg timeout reason names.
+FFMPEG_STEP_AV_SYNC_AUDIO = "A/V 싱크 음성 트랙 디코딩"
 
 
 def _entry(check: str, status: str, reason: str) -> dict[str, str]:
@@ -549,7 +551,7 @@ def _audio_envelope(video_path: Path):
     sample_rate = 22050
     hop = 512
     try:
-        with ffmpeg_audio_wav(video_path, mono_rate=sample_rate, timeout=600) as wav:
+        with ffmpeg_audio_wav(video_path, mono_rate=sample_rate, timeout=600, operation=FFMPEG_STEP_AV_SYNC_AUDIO) as wav:
             with native_safe_path(wav, for_child=True) as native_wav:  # R12-2: a temp folder with a non-ASCII name
                 y, sr = librosa.load(native_wav, sr=sample_rate, mono=True)
     except ShuttingDown:

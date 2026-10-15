@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 # Coverage check name of a video's audio-track analysis (R2).
 AV_AUDIO_CHECK = "av_audio"
 AV_AUDIO_NO_TRACK_REASON = "오디오 트랙 없음(ffmpeg로 추출된 음성 스트림이 없습니다)"
+# R26-10 (round 26): the audio-track extraction's ffmpeg limit and the step its timeout reason names.
+AV_AUDIO_EXTRACT_TIMEOUT_SECONDS = 120
+FFMPEG_STEP_AV_AUDIO = "영상 음성 트랙 추출"
 
 
 SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".flv"}
@@ -238,10 +241,20 @@ def audio_track_check(
             tmp_name = tmp.name
         try:
             with native_safe_path(video_path, for_child=True) as native_video:  # R12-1; R23-1: absolute for the child
-                proc = run_child(  # R15-1: a tracked child, stopped by the shutdown cleanup
-                    [ffmpeg, *FFMPEG_QUIET_ARGS, "-y", "-i", native_video, "-vn", "-ac", "1", "-ar", "16000", tmp_name],
-                    capture_output=True, timeout=120,
-                )
+                import time
+
+                from .native_stderr import ffmpeg_timeout
+
+                started = time.monotonic()
+                try:
+                    proc = run_child(  # R15-1: a tracked child, stopped by the shutdown cleanup
+                        [ffmpeg, *FFMPEG_QUIET_ARGS, "-y", "-i", native_video, "-vn", "-ac", "1", "-ar", "16000", tmp_name],
+                        capture_output=True, timeout=AV_AUDIO_EXTRACT_TIMEOUT_SECONDS,
+                    )
+                except subprocess.TimeoutExpired as exc:
+                    # R26-10 (round 26): the step, the file, the limit — it was 「TimeoutExpired: 라이브러리 오류(…)」
+                    raise ffmpeg_timeout(FFMPEG_STEP_AV_AUDIO, video_path, AV_AUDIO_EXTRACT_TIMEOUT_SECONDS,
+                                         time.monotonic() - started) from exc
             if proc.returncode != 0 and not ffmpeg_found_no_stream(proc.stderr):
                 # R17-4 (round 17): ffmpeg that cannot run (exec failure 127, a
                 # missing shared library) or dies (SIGKILL) is a failed check,

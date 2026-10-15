@@ -473,3 +473,54 @@ class JsonErrorTranslationTest(unittest.TestCase):
         with self.assertRaises(OSError) as missing:
             open(Path(tempfile.gettempdir()) / "deepfake-lens-p9-missing" / "x.json", encoding="utf-8")
         self.assertEqual(read_error_ko(missing.exception), "파일 또는 폴더가 없습니다(오류 번호 2)")
+
+
+class FfmpegTimeoutReasonTest(unittest.TestCase):
+    """R26-10 (round 26): an ffmpeg run stopped at its limit was 「TimeoutExpired: 라이브러리 오류(TimeoutExpired)」 — nothing
+    said what was cut, which file, or after how long. Every ffmpeg step now names its step, the file (as "<root>/…" like
+    every reason) and the limit; any other timed-out command is at least said in Korean with its limit."""
+
+    def _timeout(self, *args: Any, **kwargs: Any) -> Any:
+        import subprocess
+
+        raise subprocess.TimeoutExpired(args[0] if args else "ffmpeg", kwargs.get("timeout") or 1)
+
+    def test_a_generic_timeout_is_said_in_korean_without_the_command_line(self) -> None:
+        import subprocess
+
+        from deepfake_lens.error_text import failure_reason
+
+        reason = failure_reason(subprocess.TimeoutExpired(["ffmpeg", "-i", "/home/u/secret/a.m4a"], 120))
+        self.assertEqual(reason, "TimeoutExpired: 외부 명령이 상한 120초 안에 끝나지 않아 중단했습니다")
+
+    def test_every_ffmpeg_step_names_the_step_the_file_and_the_limit(self) -> None:
+        import shutil
+        from unittest import mock
+
+        from deepfake_lens import audio, lipsync, video_analysis
+        from deepfake_lens.error_text import path_scrub_root
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            m4a, mp4 = root / "녹음 1.m4a", root / "v.mp4"
+            m4a.write_bytes(b"\x00" * 64)
+            mp4.write_bytes(b"\x00" * 64)
+            which = mock.patch("shutil.which", side_effect=lambda name, *a, **k: "/usr/bin/ffmpeg" if name == "ffmpeg" else shutil.which(name, *a, **k))
+            with path_scrub_root(root), which:
+                with mock.patch.object(audio, "run_child", side_effect=self._timeout):
+                    _, decode = audio._extract_features_through_ffmpeg(m4a, segment_seconds=30)
+                with mock.patch.object(video_analysis, "run_child", side_effect=self._timeout):
+                    _, track = video_analysis.audio_track_check(mp4, None)
+                with mock.patch.object(lipsync, "run_child", side_effect=self._timeout):
+                    with self.assertRaises(lipsync.FfmpegError) as caught:
+                        lipsync._audio_envelope(mp4, max_seconds=10)
+                from deepfake_lens.error_text import failure_reason
+
+                envelope = failure_reason(caught.exception)
+        self.assertRegex(decode, r"^FfmpegTimeout: ffmpeg 시간 초과 — 오디오 디코딩\(\.m4a·\.aac·\.wma\): '<root>/녹음 1\.m4a' — 상한 120초에 중단\(경과 \d+초\)$")
+        self.assertEqual(track.status.value, "failed")
+        self.assertRegex(track.reason or "", r"ffmpeg 시간 초과 — 영상 음성 트랙 추출: '<root>/v\.mp4' — 상한 120초에 중단\(경과 \d+초\)")
+        self.assertRegex(envelope, r"ffmpeg 시간 초과 — 립싱크 음성 포락선 추출: '<root>/v\.mp4' — 상한 60초에 중단\(경과 \d+초\)")
+        for reason in (decode, track.reason or "", envelope):
+            self.assertNotIn("라이브러리 오류", reason)
+            self.assertNotIn(str(root), reason)

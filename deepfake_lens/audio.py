@@ -18,7 +18,7 @@ from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .error_text import exception_text, failure_reason
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
 from .native_path import NativePathError, native_safe_path, scratch_dir
-from .native_stderr import FFMPEG_QUIET_ARGS, FfmpegError, ffmpeg_error, ffmpeg_found_no_stream, quiet_native_stderr
+from .native_stderr import FFMPEG_QUIET_ARGS, FfmpegError, FfmpegTimeout, ffmpeg_error, ffmpeg_found_no_stream, ffmpeg_timeout, quiet_native_stderr
 from .shutdown import ShuttingDown, run_child
 
 
@@ -325,9 +325,14 @@ class NoAudioStream(RuntimeError):
     """R25-9: ffmpeg found no audio stream in the file."""
 
 
+# R26-10 (round 26): the step an ffmpeg timeout reason names (native_stderr.ffmpeg_timeout).
+FFMPEG_STEP_AUDIO_DECODE = "오디오 디코딩(.m4a·.aac·.wma)"
+
+
 @contextmanager
 def ffmpeg_audio_wav(
     path: Path, *, seconds: float | None = None, mono_rate: int | None = None, timeout: float = 120,
+    operation: str = FFMPEG_STEP_AUDIO_DECODE,
 ) -> Iterator[Path]:
     """R25-5 / R25-9 (round 25): the first audio stream of ``path`` decoded by ffmpeg into a temporary WAV.
 
@@ -336,11 +341,17 @@ def ffmpeg_audio_wav(
     R24-3 / R25-4 — reachable in a working folder deeper than PATH_MAX). ``seconds`` limits the decoded span;
     ``mono_rate`` writes 16-bit mono at that rate (else 32-bit float with the stream's channels and rate).
     The WAV is removed when the block ends. Raises :class:`AudioDecoderMissing` (no ffmpeg),
-    :class:`NoAudioStream`, :class:`native_stderr.FfmpegError`, ``subprocess.TimeoutExpired``, ``OSError``
-    or :class:`native_path.NativePathError`.
+    :class:`NoAudioStream`, :class:`native_stderr.FfmpegError`, ``OSError`` or
+    :class:`native_path.NativePathError`.
+
+    R26-10 (round 26): a run stopped at ``timeout`` raises :class:`native_stderr.FfmpegTimeout`
+    naming ``operation``, the file, the limit and the time it ran (it was ``subprocess.TimeoutExpired`` —
+    "TimeoutExpired: 라이브러리 오류(TimeoutExpired)" in the row).
     """
     import shutil
+    import subprocess
     import tempfile
+    import time
 
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
@@ -351,10 +362,14 @@ def ffmpeg_audio_wav(
         tmp_path = Path(tmp.name)
     try:
         with native_safe_path(path, for_child=True) as native_media:  # R12-1 / R23-1 / R25-4: a name ffmpeg opens
-            proc = run_child(  # R15-1: a tracked child, stopped by the shutdown cleanup
-                [ffmpeg, *FFMPEG_QUIET_ARGS, "-y", "-i", native_media, "-vn", "-map", "0:a:0", *span, *codec, str(tmp_path)],
-                capture_output=True, timeout=timeout,
-            )
+            started = time.monotonic()
+            try:
+                proc = run_child(  # R15-1: a tracked child, stopped by the shutdown cleanup
+                    [ffmpeg, *FFMPEG_QUIET_ARGS, "-y", "-i", native_media, "-vn", "-map", "0:a:0", *span, *codec, str(tmp_path)],
+                    capture_output=True, timeout=timeout,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise ffmpeg_timeout(operation, path, timeout, time.monotonic() - started) from exc
         if proc.returncode != 0:
             if ffmpeg_found_no_stream(proc.stderr):
                 raise NoAudioStream("오디오 스트림 없음")
@@ -381,6 +396,9 @@ def _extract_features_through_ffmpeg(path: Path, *, segment_seconds: int) -> tup
         raise
     except AudioDecoderMissing as exc:
         return None, str(exc)
+    except FfmpegTimeout as exc:
+        logger.info("audio decode by ffmpeg timed out: %s", path, exc_info=True)
+        return None, failure_reason(exc)  # R26-10: names the step, the file and the limit itself
     except (FfmpegError, NoAudioStream) as exc:
         logger.info("audio decode by ffmpeg failed: %s", path, exc_info=True)
         # the file is named like every decoder names it (R13-1: '<root>/녹음 1.m4a' in the reason)

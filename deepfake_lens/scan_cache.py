@@ -858,7 +858,10 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 16: R26-4 — archive members named "~$보고서.docx", "~WRL0001.tmp" or (on POSIX) "con.png" are extracted and
 #    analyzed like the same files in a folder (they were refused). Archive rows are not cached; raised because
 #    the scan JSON of the same input changed.
-OUTPUT_FORMAT_GENERATION = 16
+# 17: R26-10 — an ffmpeg step stopped at its time limit names the step, the file and the limit ("FfmpegTimeout:
+#    ffmpeg 시간 초과 — 영상 음성 트랙 추출: '<root>/v.mp4' — 상한 120초에 중단(경과 120초)"); a generation-16 row
+#    said "TimeoutExpired: 라이브러리 오류(TimeoutExpired) — 상세는 로그 참조".
+OUTPUT_FORMAT_GENERATION = 17
 
 
 def cache_extension(path: Path) -> str:

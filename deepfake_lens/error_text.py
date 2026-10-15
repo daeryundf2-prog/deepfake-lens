@@ -246,6 +246,9 @@ _MESSAGE_KO: tuple[tuple[re.Pattern[str], str], ...] = tuple(
               ("Illegal trailing comma before end of array", "배열 끝 앞에 쉼표가 있습니다"),
               ("Unexpected UTF-8 BOM (decode using utf-8-sig)", "파일 앞에 UTF-8 BOM이 있습니다"),
           )),
+        # R26-10 (round 26): any external command stopped at its limit (the ffmpeg runs name their file and step
+        # themselves — native_stderr.ffmpeg_timeout); the command line is not quoted (it may hold paths).
+        (r"^Command .+ timed out after ([\d.]+) seconds$", r"외부 명령이 상한 \1초 안에 끝나지 않아 중단했습니다"),
         (r"^No data left in file$", "파일에 더 읽을 데이터가 없습니다"),
         (r"^Unexpected end of data$", "데이터가 예상보다 일찍 끝났습니다"),
         (r"^Input signal length=(\d+) is too small to resample.*$", r"오디오 신호가 너무 짧습니다(길이 \1)"),
