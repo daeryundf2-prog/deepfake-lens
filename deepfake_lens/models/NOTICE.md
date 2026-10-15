@@ -42,3 +42,20 @@ the pin.
   (OpenCV, BSD 3-Clause). Vendored because OpenCV 5.x no longer ships the
   cascade XML with `cv2.data`; used by `face._detect_faces` before the
   MediaPipe fallback.
+
+## C2PA trust list (techniques-2026)
+
+- `c2pa-trust-list.pem` — the C2PA conformance trust list (30 trust anchors,
+  list issue date 2026-08-05, next update 2027-08-05), copied byte for byte
+  from https://raw.githubusercontent.com/c2pa-org/conformance-public/main/trust-list/C2PA-TRUST-LIST.pem
+  (upstream commit `70ec46e16962b81e70795fcb50a05e0128329a20`, retrieved
+  2026-10-15), sha256
+  `75cacc98b79ecac33713c7ecfb58d4a0ef383f3c1f886e7409f9e37e8664aea5`.
+  License: **CC BY 4.0** — © Coalition for Content Provenance and
+  Authenticity (c2pa-org/conformance-public `LICENSE`); unmodified.
+  `c2pa-trust.json` records the same facts; `deepfake_lens/c2pa.py` checks
+  the file's sha256 against it before every use and fails the `c2pa` check
+  when they differ. An operator adds their own anchors with
+  `DEEPFAKE_LENS_C2PA_TRUST_ANCHORS=<PEM 파일>` (recorded in every C2PA
+  item and coverage reason). To update: replace both files in one commit,
+  raise `scan_cache.OUTPUT_FORMAT_GENERATION` and record the golden output.

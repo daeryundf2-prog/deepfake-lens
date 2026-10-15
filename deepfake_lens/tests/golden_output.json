@@ -193,6 +193,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 13,
+      "reason": "techniques-2026 item 1–2: C2PA 판독기가 동봉된 C2PA 공식 신뢰 목록으로 오프라인 검증(c2pa 검사 사유에 검증기 spec 버전·신뢰 목록), C2PA 2.x 사실 항목(AI 공개·소프트 바인딩·워터마크 액션·embedded data·화면 캡처·구성요소 출처 유형), 오디오·영상·문서 행에 c2pa 검사(.txt·.md는 건너뜀), XMP 디지털 출처 유형을 IPTC 전체 어휘로(자기 신고)",
+      "sha256": "b6dd21ad392b4756a2c62e5ab3f2a353a95a6e2266248979f6a431a74e66866a",
+      "sets": {
+        "stdlib": "b6dd21ad392b4756a2c62e5ab3f2a353a95a6e2266248979f6a431a74e66866a",
+        "full-extras": "fca2881a7be80a563eb85ff1188d70b584001d208432e7982b8dbc95aedfcff2"
+      },
+      "constants_sha256": "9e61db393feef304b21dcf41d6df10146cee2242f30aa26151c3f02a73fadc73",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

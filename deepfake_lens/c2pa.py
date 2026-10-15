@@ -278,6 +278,102 @@ def _error_analysis(message: str) -> MetadataForensicAnalysis:
     )
 
 
+# --- Offline reader settings and the bundled trust list (techniques-2026 item 1) ---
+
+# The trust anchors the validator checks a signer against. Before this the
+# reader ran with c2pa-rs defaults — no trust anchors — so no signer was ever
+# "signingCredential.trusted" and both strong C2PA rules (evidence_rules) were
+# unreachable. The bundle is the C2PA conformance trust list snapshot
+# described by models/c2pa-trust.json (source URL, upstream commit, list
+# issue date, retrieval date, sha256); its bytes are checked against that
+# sha256 before every use — a changed file fails the check (fail closed).
+TRUST_BUNDLE_MANIFEST = Path(__file__).resolve().parent / "models" / "c2pa-trust.json"
+# Operator-added anchors (PEM file): a deployment's own CA, or a test CA.
+TRUST_ANCHORS_ENV = "DEEPFAKE_LENS_C2PA_TRUST_ANCHORS"
+# No network at analysis time: c2pa-rs would otherwise fetch a remote
+# manifest named by the asset and OCSP responses for the signer.
+OFFLINE_VERIFY_SETTINGS = {"remote_manifest_fetch": False, "ocsp_fetch": False, "verify_trust": True}
+
+
+class C2paTrustError(RuntimeError):
+    """The trust bundle or the operator's anchors cannot be used (Korean message) — the check fails."""
+
+
+def _trust_bundle() -> tuple[dict[str, object], str]:
+    import hashlib
+    import json
+
+    try:
+        meta = json.loads(TRUST_BUNDLE_MANIFEST.read_text(encoding="utf-8"))
+        pem_path = TRUST_BUNDLE_MANIFEST.parent / str(meta["file"])
+        data = pem_path.read_bytes()
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise C2paTrustError(f"C2PA 신뢰 목록을 읽을 수 없습니다: {exception_text(exc)}") from exc
+    if hashlib.sha256(data).hexdigest() != str(meta.get("sha256", "")):
+        raise C2paTrustError("C2PA 신뢰 목록 무결성 불일치(models/c2pa-trust.json의 sha256과 다름)")
+    return meta, data.decode("ascii", errors="strict")
+
+
+def _operator_anchors() -> tuple[str, str] | None:
+    """``(pem text, sha256)`` of the operator's anchors file, None when the variable is unset."""
+    import hashlib
+    import os
+
+    value = os.environ.get(TRUST_ANCHORS_ENV, "").strip()
+    if not value:
+        return None
+    try:
+        data = Path(value).expanduser().read_bytes()
+        text = data.decode("ascii")
+    except (OSError, UnicodeError) as exc:
+        raise C2paTrustError(f"{TRUST_ANCHORS_ENV}의 인증서 파일을 읽을 수 없습니다: {exception_text(exc)}") from exc
+    if "-----BEGIN CERTIFICATE-----" not in text:
+        raise C2paTrustError(f"{TRUST_ANCHORS_ENV}의 파일에 PEM 인증서가 없습니다")
+    return text, hashlib.sha256(data).hexdigest()
+
+
+def trust_basis() -> dict[str, object]:
+    """What the signer is checked against — recorded with every validation (and in the cache key)."""
+    meta, _ = _trust_bundle()
+    operator = _operator_anchors()
+    return {
+        "id": meta.get("id"),
+        "list_issue_date": meta.get("list_issue_date"),
+        "retrieved": meta.get("retrieved"),
+        "sha256": meta.get("sha256"),
+        "operator_anchors_sha256": operator[1] if operator else None,
+    }
+
+
+def trust_basis_text(basis: object) -> str:
+    """"C2PA 공식 신뢰 목록 2026-08-05판(sha256 75cacc98b79e…)[ + 운영자 지정 앵커(sha256 …)]"."""
+    if not isinstance(basis, dict) or not basis.get("id"):
+        return "신뢰 목록 정보 없음"
+    text = f"{basis.get('id')} {basis.get('list_issue_date')}판(sha256 {str(basis.get('sha256'))[:12]}…)"
+    if basis.get("operator_anchors_sha256"):
+        text += f" + 운영자 지정 앵커({TRUST_ANCHORS_ENV}, sha256 {str(basis['operator_anchors_sha256'])[:12]}…)"
+    return text
+
+
+def trust_cache_tokens() -> list[str]:
+    """The trust basis as scan-cache tokens (a changed list or operator anchor file re-analyzes); never raises."""
+    try:
+        basis = trust_basis()
+    except C2paTrustError as exc:
+        return [f"c2pa-trust:error:{str(exc)[:60]}"]
+    return [f"c2pa-trust:{basis.get('id')}:{basis.get('sha256')}:operator:{basis.get('operator_anchors_sha256')}"]
+
+
+def reader_settings() -> dict[str, object]:
+    """The c2pa-python Settings dict: offline verification + bundled (and operator) trust anchors."""
+    _, pem = _trust_bundle()
+    trust: dict[str, object] = {"trust_anchors": pem}
+    operator = _operator_anchors()
+    if operator is not None:
+        trust["user_anchors"] = operator[0]
+    return {"verify": dict(OFFLINE_VERIFY_SETTINGS), "trust": trust}
+
+
 def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
     """Validate a C2PA manifest with the official c2pa-python SDK.
 
@@ -296,21 +392,38 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
       into "absent": whether a manifest exists is unknown, and a
       corrupt-but-present manifest is forensically meaningful. ``error``
       carries ``<ExceptionClass>: <message>``; ``error_kind`` is
-      ``"not_supported"`` when the SDK does not handle the container.
+      ``"not_supported"`` when the SDK does not handle the container,
+      ``"sdk_too_old"`` when the SDK has no Context/Settings API (offline
+      settings and trust anchors cannot be applied) and ``"trust"`` when
+      the trust bundle cannot be used.
 
     ``present`` remains as the boolean shorthand for "a manifest was read".
+
+    techniques-2026: the reader runs offline (no remote manifest, no OCSP)
+    against the bundled C2PA trust list (+ ``DEEPFAKE_LENS_C2PA_TRUST_ANCHORS``);
+    the result also carries the validator's ``spec_version``, the
+    ``trust_basis``, and the C2PA 2.x facts of :func:`manifest_facts`.
     """
     try:
         import c2pa
     except ImportError:
         return None
+    if not hasattr(c2pa, "Context") or not hasattr(c2pa, "Settings"):
+        return {"present": False, "status": "unavailable", "error_kind": "sdk_too_old",
+                "error": "c2pa-python 0.38 미만 — 오프라인 검증 설정과 신뢰 목록을 적용할 수 없음"}
+    try:
+        settings = reader_settings()
+        basis = trust_basis()
+    except C2paTrustError as exc:
+        return {"present": False, "status": "unavailable", "error_kind": "trust", "error": str(exc)}
     # R12-1: the SDK is native — it only ever sees an ASCII staged name.
     with native_safe_path(path) as native_media:
         try:
-            reader = c2pa.Reader(native_media)
+            context = c2pa.Context(c2pa.Settings.from_dict(settings))
+            reader = c2pa.Reader(native_media, context=context)
         except Exception as exc:  # noqa: BLE001 - SDK error classes vary by release; classified below
             if _is_c2pa_error(c2pa, exc, "ManifestNotFound"):
-                return {"present": False, "status": "absent", "error": exception_text(exc)}
+                return {"present": False, "status": "absent", "error": exception_text(exc), "trust_basis": basis}
             return {
                 "present": False,
                 "status": "unavailable",
@@ -345,6 +458,7 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
     # case-insensitively — "Trusted" is a valid manifest with a trusted
     # signer in newer SDK releases.
     valid_state = state.lower() in {"valid", "trusted"}
+    facts = manifest_facts(manifest if isinstance(manifest, dict) else {})
     return {
         "present": True,
         "status": "valid" if valid_state else "invalid",
@@ -358,8 +472,130 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
         "claim_generator": manifest.get("claim_generator") if isinstance(manifest, dict) else None,
         # IPTC digitalSourceType values declared by the manifest's actions
         # (e.g. trainedAlgorithmicMedia, digitalCapture) — the field that
-        # distinguishes a generator's manifest from a camera's.
-        "digital_source_types": sorted(_digital_source_types(manifest)),
+        # distinguishes a generator's manifest from a camera's. Short codes
+        # (last path segment) of the active manifest's own actions; the
+        # full IRIs with where they were declared are in "source_type_declarations".
+        "digital_source_types": sorted({str(item["value"]).rsplit("/", 1)[-1] for item in facts["source_type_declarations"] if item["where"] == "action"}),
+        # techniques-2026: the validator's C2PA specification version (C2PA 2.3+
+        # validation-results "specVersion") and what the signer was checked against.
+        "spec_version": str(results.get("specVersion") or "") if isinstance(results, dict) else "",
+        "trust_list_uri": str(results.get("trustListUri") or "") if isinstance(results, dict) else "",
+        "trust_basis": basis,
+        "sdk_version": _sdk_version(c2pa),
+        **facts,
+    }
+
+
+# Bounds on what a manifest may contribute to a result row (it is untrusted input).
+FACT_MAX_ITEMS = 16
+FACT_MAX_TEXT = 200
+WATERMARK_ACTIONS = ("c2pa.watermarked", "c2pa.watermarked.bound", "c2pa.watermarked.unbound")
+
+
+def _sdk_version(sdk: object) -> str:
+    try:
+        # snake_case identifiers: the rendered reports keep identifiers, not English word runs.
+        return f"c2pa_python {getattr(sdk, 'version')('c2pa-python')}, c2pa_rs {getattr(sdk, 'sdk_version')()}"
+    except Exception:  # noqa: BLE001 - informational only
+        return ""
+
+
+def _text(value: object) -> str:
+    return str(value)[:FACT_MAX_TEXT] if value is not None else ""
+
+
+def _binding_value(value: object) -> str:
+    """A soft-binding block value as text: a string verbatim, bytes / an int list as hex."""
+    if isinstance(value, str):
+        return value[:FACT_MAX_TEXT]
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value).hex()[:FACT_MAX_TEXT]
+    if isinstance(value, list) and all(isinstance(item, int) and 0 <= item < 256 for item in value):
+        return bytes(value).hex()[:FACT_MAX_TEXT]
+    return _text(value)
+
+
+def _actions(manifest: dict[str, object]) -> list[dict[str, object]]:
+    out: list[dict[str, object]] = []
+    for assertion in manifest.get("assertions") or []:
+        if isinstance(assertion, dict) and str(assertion.get("label", "")).startswith("c2pa.actions"):
+            data = assertion.get("data")
+            for action in (data.get("actions") if isinstance(data, dict) else None) or []:
+                if isinstance(action, dict):
+                    out.append(action)
+    return out
+
+
+def manifest_facts(manifest: dict[str, object]) -> dict[str, object]:
+    """The C2PA 2.2–2.4 facts of an active manifest (techniques-2026 item 1).
+
+    - ``source_type_declarations``: every ``digitalSourceType`` with where it
+      was declared — ``action`` (the active manifest's own actions — the one
+      that describes this asset) or ``ingredient`` (C2PA 2.4 allows it on an
+      ingredient without a manifest — describes an input, not this asset);
+    - ``ai_disclosures``: ``c2pa.ai-disclosure`` assertions (2.4) — modelType,
+      modelName, modelIdentifier, contentProfile.humanOversightLevel;
+    - ``soft_bindings``: ``c2pa.soft-binding`` assertions — ``alg`` and the
+      block values (text; bytes as hex);
+    - ``watermark_actions``: ``c2pa.watermarked`` / ``.bound`` / ``.unbound``;
+    - ``embedded_data``: ``c2pa.embedded-data*`` assertions (2.2) — label and format;
+    - ``claim_spec_version`` (2.4: ``claim_generator_info[].specVersion``;
+      older: the claim-level ``specVersion``) and ``claim_version``.
+
+    Everything is bounded (:data:`FACT_MAX_ITEMS`, :data:`FACT_MAX_TEXT`).
+    """
+    declarations: list[dict[str, str]] = []
+    watermark_actions: list[str] = []
+    for action in _actions(manifest):
+        name = _text(action.get("action"))
+        if name in WATERMARK_ACTIONS and name not in watermark_actions:
+            watermark_actions.append(name)
+        if isinstance(action.get("digitalSourceType"), str):
+            declarations.append({"value": _text(action["digitalSourceType"]), "where": "action", "action": name})
+    for ingredient in manifest.get("ingredients") or []:
+        if isinstance(ingredient, dict) and isinstance(ingredient.get("digitalSourceType"), str):
+            declarations.append({
+                "value": _text(ingredient["digitalSourceType"]), "where": "ingredient",
+                "action": _text(ingredient.get("relationship")), "title": _text(ingredient.get("title")),
+            })
+    disclosures: list[dict[str, str]] = []
+    bindings: list[dict[str, object]] = []
+    embedded: list[dict[str, str]] = []
+    labels: list[str] = []
+    for assertion in manifest.get("assertions") or []:
+        if not isinstance(assertion, dict):
+            continue
+        label = _text(assertion.get("label"))
+        labels.append(label)
+        data = assertion.get("data") if isinstance(assertion.get("data"), dict) else {}
+        assert isinstance(data, dict)
+        if label.startswith("c2pa.ai-disclosure"):
+            profile = data.get("contentProfile") if isinstance(data.get("contentProfile"), dict) else {}
+            assert isinstance(profile, dict)
+            disclosures.append({
+                "modelType": _text(data.get("modelType")), "modelName": _text(data.get("modelName")),
+                "modelIdentifier": _text(data.get("modelIdentifier")),
+                "humanOversightLevel": _text(profile.get("humanOversightLevel")),
+            })
+        elif label.startswith("c2pa.soft-binding"):
+            values = [_binding_value(block.get("value")) for block in (data.get("blocks") or []) if isinstance(block, dict)]
+            bindings.append({"alg": _text(data.get("alg")), "values": values[:FACT_MAX_ITEMS]})
+        elif label.startswith("c2pa.embedded-data"):
+            embedded.append({"label": label, "format": _text(data.get("dc:format") or data.get("format") or assertion.get("format"))})
+    claim_spec = ""
+    for info in manifest.get("claim_generator_info") or []:
+        if isinstance(info, dict) and info.get("specVersion"):
+            claim_spec = _text(info["specVersion"])
+            break
+    return {
+        "source_type_declarations": declarations[:FACT_MAX_ITEMS],
+        "ai_disclosures": disclosures[:FACT_MAX_ITEMS],
+        "soft_bindings": bindings[:FACT_MAX_ITEMS],
+        "watermark_actions": watermark_actions,
+        "embedded_data": embedded[:FACT_MAX_ITEMS],
+        "assertion_labels": sorted(set(labels))[: FACT_MAX_ITEMS * 2],
+        "claim_spec_version": claim_spec or _text(manifest.get("specVersion") or ""),
+        "claim_version": _text(manifest.get("claim_version") or ""),
     }
 
 

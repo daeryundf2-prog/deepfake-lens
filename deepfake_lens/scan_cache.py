@@ -846,7 +846,13 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 12: R25-7 — a reason naming the analyzed file by a relative name (a decoder's
 #    'a.wav' in `cd case; scan .`) is written "<root>/a.wav" like the absolute and
 #    root-relative invocations; a generation-11 row from such a scan said 'a.wav'.
-OUTPUT_FORMAT_GENERATION = 12
+# 13: techniques-2026 item 1–2 — the C2PA reader runs offline against the bundled
+#    C2PA trust list (+ DEEPFAKE_LENS_C2PA_TRUST_ANCHORS): a ran c2pa entry names the
+#    validator's spec version and the trust list; C2PA 2.x facts (AI disclosure, soft
+#    binding, watermark actions, embedded data, screen capture, ingredient source types)
+#    are items; audio, video and document rows gain a c2pa check (.txt/.md skipped);
+#    XMP DigitalSourceType uses the full IPTC vocabulary ("자기 신고").
+OUTPUT_FORMAT_GENERATION = 13
 
 
 def cache_extension(path: Path) -> str:
@@ -881,6 +887,11 @@ def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | No
     # R19-1 (round 19): and the runtime the checks ran in — which optional
     # dependencies can be found, at which version, and ffmpeg.
     tokens += dependency_tokens()
+    # techniques-2026: the C2PA trust basis (bundled list + DEEPFAKE_LENS_C2PA_TRUST_ANCHORS) decides
+    # whether a signer is trusted — a row cached under another trust basis is not replayed.
+    from .c2pa import trust_cache_tokens
+
+    tokens += trust_cache_tokens()
     return f"tool:{TOOL_VERSION}|pins:{_short_digest(chr(10).join(tokens))}"
 
 

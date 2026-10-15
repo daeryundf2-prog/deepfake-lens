@@ -1,0 +1,62 @@
+# 기계판독 표식 검사 (techniques-2026)
+
+근거 자료: `new_techniques_2026-10.md`(2026-10 최신 기법 조사)의 "(A) 지금 추가 가능" 항목. 0단계 규칙(분석 중 네트워크 금지,
+fail closed, 모든 검사의 coverage 기록, 결정적 근거만 결론에 참여, 부재는 원본성 근거가 아님)은 그대로다.
+
+## 1. C2PA 2.2–2.4 판독 (`c2pa` 검사)
+
+- SDK: `c2pa-python>=0.38`(c2pa-rs 0.91 — 검증 결과에 `specVersion` 2.4.0을 기록). 2026-10-15 PyPI 최신이 0.38.0이며
+  linux-aarch64·macOS 휠이 있다(조사 문서의 "0.32.x"는 당시 집계값).
+- **오프라인 검증**: 판독기는 `verify.remote_manifest_fetch=false`, `verify.ocsp_fetch=false`로 실행된다(원격 매니페스트·OCSP 조회 없음).
+  그래서 인증서 폐기(revocation)는 확인하지 않는다.
+- **신뢰 목록**: 이전에는 신뢰 앵커를 넣지 않아 어떤 서명자도 `signingCredential.trusted`가 될 수 없었다(강한 C2PA 규칙 두 개가 도달 불가).
+  이제 C2PA 공식 신뢰 목록 스냅샷(`deepfake_lens/models/c2pa-trust-list.pem`, 2026-08-05판, 앵커 30개,
+  `models/c2pa-trust.json`에 출처 URL·업스트림 커밋·조회일·sha256)을 쓰며, 매 사용 전에 sha256을 확인한다(다르면 `c2pa` 검사 failed
+  「C2PA 검증 불가: C2PA 신뢰 목록 무결성 불일치…」). 운영자는 `DEEPFAKE_LENS_C2PA_TRUST_ANCHORS=<PEM>`으로 앵커를 더한다(읽을 수 없으면 failed).
+  신뢰 기준(목록 id·발행일·sha256, 운영자 앵커 sha256)과 검증기 spec 버전은 C2PA 근거의 `detail`, `c2pa` coverage의 `reason`
+  (「매니페스트 있음 · 검증기 C2PA 2.4.0 · 신뢰 목록 C2PA-TRUST-LIST 2026-08-05판(sha256 …)」)에 적혀 서명되는 보고서 본문에 들어가고,
+  스캔 캐시 키에도 들어간다.
+- **판독 사실**(`validate_c2pa_manifest`의 새 필드): `spec_version`, `trust_list_uri`, `trust_basis`, `sdk_version`,
+  `source_type_declarations`(값과 위치 — `action`=활성 매니페스트 자신의 액션, `ingredient`=C2PA 2.4의 구성요소 수준 값),
+  `ai_disclosures`(`c2pa.ai-disclosure`: modelType·modelName·modelIdentifier·humanOversightLevel), `soft_bindings`(alg와 블록 값),
+  `watermark_actions`(`c2pa.watermarked`/`.bound`/`.unbound`), `embedded_data`(`c2pa.embedded-data*`), `claim_spec_version`, `claim_version`.
+  매니페스트는 신뢰할 수 없는 입력이므로 항목 수(16)·문자열 길이(200)를 제한한다.
+- **판정 의미**:
+
+| 매니페스트 | 근거 |
+| --- | --- |
+| 유효 서명 + 신뢰 서명자 + 콘텐츠 해시 일치 + 생성형 출처 유형(아래 표) **또는** `c2pa.ai-disclosure` | 결정적·생성·강 「C2PA 서명: 생성형 AI 출처 선언」 → 조작·생성 근거 있음 |
+| 같은 조건 + `digitalCapture`(생성형 선언 없음) | 결정적·원본·강 「C2PA 서명: 카메라 촬영 출처」 → (다른 생성 근거가 없으면) 원본성 근거 있음 |
+| 같은 조건 + 그 밖의 유형(예: `screenCapture`) | 중립·중 「C2PA 매니페스트 검증됨(촬영·생성 외 출처 유형 선언)」 + 「C2PA: 화면 캡처 출처 선언」 |
+| 신뢰되지 않음·만료·검증 미완료 + 생성형 선언 | 생성·중 「…(검증 미완료)」(실패 코드 `signingCredential.untrusted`/`expired` 표기) — 결론 불참여 |
+| 해시 불일치(서명 후 변경) | 중립·강 「C2PA 무결성 불일치」 + 선언은 생성·중 |
+| 구성요소(ingredient)의 생성형 유형 | 생성·중 — 입력 자료의 출처라 단독 결론 불가 |
+| 소프트 바인딩·워터마크 액션, embedded data | 중립·약 사실 항목 |
+
+  콘텐츠 해시 일치는 `assertion.dataHash|bmffHash|boxesHash|collectionHash.match` 중 하나다.
+- **근거 충돌**(조정자 추가): 강한 원본 근거(신뢰 서명된 촬영 매니페스트)와 강한 생성 근거(예: 서명 없는 XMP 자기 신고)가 함께 있으면
+  둘 다 근거 목록에 남고, 중립 항목 「근거 충돌: 서명된 원본성 근거와 생성 근거가 함께 있음」이 더해진다. 결정 규칙(규칙 2가 생성 근거를
+  우선)은 바꾸지 않았다 — 규칙 변경은 phase0 브랜치에서 결정한다.
+- **모달리티**: 이미지(기존)에 더해 오디오(wav·mp3·flac·m4a)·영상(mp4·mov·avi)·문서(pdf·docx·xlsx·pptx)도 `c2pa` 검사를 한다.
+  문서 결과는 텍스트 규칙상 등급이 늘 "참고"라서 서명된 매니페스트도 결론을 바꾸지 않는다(등급 상향은 사용자 결정 사항).
+  `.txt`·`.md`는 `skipped` 「C2PA 텍스트·HTML 임베딩(C2PA 2.3/2.4)은 현재 SDK…가 판독하지 않음…」 — c2pa-rs 0.91은 텍스트/HTML
+  임베딩을 읽지 못한다.
+- **알려진 SDK 한계**: c2pa-rs 0.91은 2.4 위치(`claim_generator_info[].specVersion`)에 spec 버전을 쓴 매니페스트를 스스로 다시 읽지
+  못한다(`claim_cbor: unexpected trailing data`). 그런 파일은 `c2pa` failed로 기록된다(fail closed). 빌더가 구성요소의 `digitalSourceType`을
+  기록하지 않아 구성요소 수준 값은 기록된 판독 결과로만 시험했다.
+- 픽스처: `fixtures/c2pa-2.4/`(재현 스크립트 `scripts/build_c2pa24_fixtures.py`, 설명 `fixtures/c2pa-2.4/README.md`), 테스트 `test_c2pa24.py`.
+
+## 2. 디지털 출처 유형 어휘 (`digital_source_type.py`)
+
+IPTC NewsCodes digitalsourcetype 2024-10-23판의 20개 값 전부(퇴역 `minorHumanEdits`·`digitalArt`·`softwareImage` 포함)와 C2PA 이름공간
+(`http://c2pa.org/digitalsourcetype/trainedAlgorithmicData`, `…/empty`, 구 `c2pa.trainedAlgorithmicData`). 범주:
+
+- 생성형: `trainedAlgorithmicMedia`, `compositeWithTrainedAlgorithmicMedia`(생성형 AI로 편집), `compositeSynthetic`(생성형 AI 요소 포함 합성),
+  `algorithmicMedia`(기존 규칙 유지), `trainedAlgorithmicData`;
+- 촬영: `digitalCapture`(서명·신뢰·해시 일치일 때만 원본성 근거);
+- 화면 캡처: `screenCapture` — 사실로만 기록(카메라 촬영 근거도, 생성 근거도 아님);
+- 그 밖(연산 촬영, 필름·인화 디지털화, 사람 편집, 알고리즘 보정, 디지털 창작, 데이터 기반, 가상 녹화, `composite`, `compositeCapture`, `empty`) — 중립.
+
+IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "알 수 없는 값"으로 그대로 표시한다. 서명 없는 XMP
+`Iptc4xmpExt:DigitalSourceType`은 "자기 신고"로 표시한다(생성형이면 기존처럼 결정적·생성·강 — WP-A 표의 생성 도구 메타데이터 급,
+`screenCapture`는 중립·중).
