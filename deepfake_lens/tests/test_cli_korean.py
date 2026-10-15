@@ -352,6 +352,30 @@ class UnknownArgumentUsageTest(unittest.TestCase):
                 self.assertEqual(code, 2, err_text)
                 self.assertIn(fragment, err_text)
 
+    def test_help_help_or_help_with_help_options_is_the_top_level_help(self) -> None:
+        """R25-8 (round 25): `help help -h` and `help -h -h` were 「deepfake-lens: 오류: 인수 <명령>: 허용되지 않은 값 'help'」 /
+        「… '-h'」 (exit 2) while `help help` and `help -h` were the top-level help — R24-11 dropped a trailing -h only after
+        the topic was chosen. Now before it: all of them are the top-level help, exit 0; other words stay errors."""
+        def top_help(argv: list[str]) -> str:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    main(argv)
+            self.assertEqual(caught.exception.code, 0, argv)
+            return out.getvalue()
+
+        expected = top_help(["--help"])
+        for argv in (["help", "help", "-h"], ["help", "-h", "-h"], ["help", "help", "--help", "-h"], ["help", "--help", "--help"],
+                     ["help", "help"], ["help", "-h"]):
+            with self.subTest(argv=argv):
+                self.assertEqual(top_help(argv), expected)
+        for argv, fragment in ((["help", "-h", "extra"], "허용되지 않은 값 '-h'"), (["help", "bogus", "-h"], "허용되지 않은 값 'bogus'"),
+                               (["help", "help", "scan", "-h"], "허용되지 않은 값 'help'")):
+            with self.subTest(argv=argv):
+                code, err_text = self._run(argv)
+                self.assertEqual(code, 2, err_text)
+                self.assertIn(fragment, err_text)
+
     def test_help_names_a_command_or_is_an_error(self) -> None:
         """R21-9 (round 21): `help bogus` printed the top-level help with exit 0 (a typo ended as a success), and
         `--verbose help` was a scan of the folder "help" ("폴더를 찾을 수 없습니다: help")."""

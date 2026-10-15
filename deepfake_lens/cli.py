@@ -596,18 +596,19 @@ def _main(argv: list[str] | None = None) -> int:
         # R20-9 (round 20): `help scan` was a scan of the folder "help" ("알 수 없는 인수: scan").
         # R21-9 (round 21): `help bogus` printed the top-level help with exit 0 — a typo ended as a success;
         # a word after `help` that names no command is the top-level parser's error (exit 2).
-        topic = argv[1] if len(argv) > 1 else None
-        if topic is None or (topic in ("-h", "--help", "help") and len(argv) == 2):
+        # R24-11 (round 24): `help scan -h` / `help vendor-weights --help` — a help option after the topic asks for the
+        # same help (was "알 수 없는 인수: -h", exit 2). R25-8 (round 25): stripped before the topic is chosen, so
+        # `help help -h` and `help -h -h` are the top-level help too (they were "허용되지 않은 값 'help'" / "'-h'", exit 2).
+        words = argv[1:]
+        while len(words) > 1 and words[-1] in ("-h", "--help"):
+            words = words[:-1]
+        topic = words[0] if words else None
+        if topic is None or (topic in ("-h", "--help", "help") and len(words) == 1):
             argv = ["--help"]  # R23-11 (round 23): `help help` is the top-level help (was "허용되지 않은 값 'help'")
         elif topic in COMMANDS and not topic.startswith("-"):
             # R22-10 (round 22): `help scan extra` and `help corpus build` ignored every word after the command
             # (exit 0). A word that names a subcommand of it is that subcommand's help; any other is the
             # command parser's error (exit 2).
-            # R24-11 (round 24): `help scan -h` / `help vendor-weights --help` — a help option after the topic asks for the
-            # same help (was "알 수 없는 인수: -h", exit 2); the topic's help, exit 0.
-            words = argv[1:]
-            while len(words) > 1 and words[-1] in ("-h", "--help"):
-                words = words[:-1]
             argv = [*_help_topic(cmd_parsers[topic], words), "--help"]
         else:
             parser.error(f"argument <명령>: invalid choice: {topic!r} (choose from {', '.join(sorted(c for c in COMMANDS if not c.startswith('-')))})")
