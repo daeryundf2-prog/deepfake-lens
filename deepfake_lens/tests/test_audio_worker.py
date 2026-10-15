@@ -239,8 +239,13 @@ class EnvironmentCacheOutsideAnalyzedFileFoldersTest(unittest.TestCase):
         subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True, timeout=120)
         purelib = Path(subprocess.run([str(venv / "bin" / "python"), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
                                       capture_output=True, text=True, check=True, timeout=60).stdout.strip())
-        paths = {sysconfig.get_paths()["purelib"], sysconfig.get_paths()["platlib"], str(PACKAGE.parent)}
-        (purelib / "deepfake-lens-test.pth").write_text("\n".join(sorted(paths)) + "\n", encoding="utf-8")
+        # R24-10 (round 24): every site folder this interpreter imports from, in its order — not only its own purelib /
+        # platlib. In HANDOFF §5's qa-main side venv the purelib holds a .pth naming /venv's and /venv-api's
+        # site-packages (a .pth inside a folder named by a .pth is not processed), so the project venv found no
+        # librosa: audio_features skipped, 3/3 failures there (it passed in /venv and /venv-api).
+        site_dirs = [entry for entry in sys.path if entry and os.path.isdir(entry) and Path(entry).name in ("site-packages", "dist-packages")]
+        paths = list(dict.fromkeys([*site_dirs, sysconfig.get_paths()["purelib"], sysconfig.get_paths()["platlib"], str(PACKAGE.parent)]))
+        (purelib / "deepfake-lens-test.pth").write_text("\n".join(paths) + "\n", encoding="utf-8")
         env = _clean_env(str(self.root / "home"))
         env.pop("PYTHONPATH")
 
