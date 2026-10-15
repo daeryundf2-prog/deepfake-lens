@@ -4,8 +4,9 @@ Archives are screening containers, not media: the module safely extracts
 members to a temp directory so the existing per-file pipeline can analyze
 each payload. Guards against the classic archive attack surface:
 
-- zip-slip / path traversal (``..``, absolute paths, drive letters, ADS
-  ``:`` names) — members are name-checked AND resolve-checked under dest
+- zip-slip / path traversal (``..``, absolute paths, drive letters, UNC
+  shares; on Windows also ``:`` names and device names) — members are
+  name-checked AND resolve-checked under dest
 - zip bombs — per-archive and aggregate uncompressed-byte caps counted on
   the bytes actually written (declared sizes can lie), a per-member cap,
   and a compression-ratio cap for deflate members
@@ -169,9 +170,19 @@ def budget_reason(declared: int, limit: int, detail: str = "") -> str:
 _DRIVE_ABSOLUTE = re.compile(r"^[A-Za-z]:(?:/|$)")
 
 
+def _windows_names_unsafe() -> bool:
+    """R26-4 (round 26): whether this host is Windows, where some names that are ordinary on POSIX cannot be files."""
+    return os.name == "nt"
+
+
 def _colon_names_unsafe() -> bool:
     """R25-6: whether a ":" in a member name cannot be written here (Windows: a drive letter or an NTFS data stream)."""
-    return os.name == "nt"
+    return _windows_names_unsafe()
+
+
+def _reserved_names_unsafe() -> bool:
+    """R26-4 (round 26): whether a Windows device name (``con.png``, ``nul``) cannot be a file here — Windows only."""
+    return _windows_names_unsafe()
 
 
 def _unsafe_name_reason(name: str) -> str:
@@ -190,13 +201,12 @@ def _unsafe_name_reason(name: str) -> str:
         return "절대 경로 멤버(대상 폴더 밖 쓰기 시도)"
     if _DRIVE_ABSOLUTE.match(normalized):
         return "드라이브 절대 경로 멤버(C:\\ 형식 — 대상 폴더 밖 쓰기 시도)"
-    if normalized[0] == "~":
-        return "홈 폴더 표기('~')로 시작하는 멤버(대상 폴더 밖 쓰기 시도로 취급)"
     if any(part == ".." for part in PurePosixPath(normalized).parts):
         return "경로 이탈 멤버('..' — 대상 폴더 밖 쓰기 시도)"
     if ":" in normalized:
         return "Windows에서 쓸 수 없는 이름(':' — 드라이브 문자·NTFS 대체 데이터 스트림)"
-    return "허용되지 않는 이름(Windows 예약 장치명)"
+    # R26-4 (round 26): Windows only, and not a write outside the extraction folder (it was 「허용되지 않는 이름」 on every OS)
+    return "Windows에서 쓸 수 없는 이름(예약 장치명 — CON·PRN·AUX·NUL·COM1~9·LPT1~9)"
 
 
 def _claim_key(rel: str) -> str:
@@ -299,14 +309,19 @@ def is_archive(path: Path | str) -> bool:
 def _safe_member_name(name: str) -> str | None:
     """Normalize an archive member name; None when it escapes dest.
 
-    Rejects absolute paths (POSIX, drive ``C:/``, UNC), ``..`` components, a
-    leading ``~``, Windows device names, empty/traversal tricks and — R25-6
-    (round 25), on Windows only — any other ``:`` (drive-relative names, NTFS
-    data streams); on POSIX ``c:v.png`` is an ordinary name. Returns a relative
-    POSIX-style path safe to join under the extraction root.
+    Rejects absolute paths (POSIX, drive ``C:/``, UNC), ``..`` components,
+    empty/traversal tricks and — R25-6 (round 25), on Windows only — any other
+    ``:`` (drive-relative names, NTFS data streams); on POSIX ``c:v.png`` is an
+    ordinary name. R26-4 (round 26): a Windows device name (``con.png``) is
+    refused on Windows only, and a leading ``~`` nowhere — ``open()`` never
+    expands it and the member is written as ``<dest>/<index>/<base name>``
+    (:func:`_member_target`), so ``~$보고서.docx`` (an Office owner file) and
+    ``~WRL0001.tmp`` were refused as "대상 폴더 밖 쓰기 시도" although the same
+    files in a folder are analyzed. Returns a relative POSIX-style path safe
+    to join under the extraction root.
     """
     name = name.replace("\\", "/").strip()
-    if not name or name.startswith("/") or _DRIVE_ABSOLUTE.match(name) or name[0] == "~":
+    if not name or name.startswith("/") or _DRIVE_ABSOLUTE.match(name):
         return None
     parts = [p for p in PurePosixPath(name).parts if p not in ("", ".")]
     if not parts or any(p == ".." for p in parts):
@@ -314,8 +329,8 @@ def _safe_member_name(name: str) -> str | None:
     if _colon_names_unsafe() and any(":" in p for p in parts):
         return None  # R25-6: only where ":" cannot be part of a file name
     stem = parts[-1].split(".")[0].strip().lower()
-    if stem in _WINDOWS_RESERVED:
-        return None
+    if _reserved_names_unsafe() and stem in _WINDOWS_RESERVED:
+        return None  # R26-4: only where the name is a device
     return "/".join(parts)
 
 

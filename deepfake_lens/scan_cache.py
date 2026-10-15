@@ -855,7 +855,10 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 15: R26-2 — a reason naming the file as repr() escapes it ('<root>/한글\xa0x.wav' — a NBSP, a TAB) or by a
 #    name the audio worker staged reads "<root>/…" from `cd case; scan .` and with --workers 4 too; a
 #    generation-14 row of such a scan said '한글\xa0x.wav' or '000001-….wav'.
-OUTPUT_FORMAT_GENERATION = 15
+# 16: R26-4 — archive members named "~$보고서.docx", "~WRL0001.tmp" or (on POSIX) "con.png" are extracted and
+#    analyzed like the same files in a folder (they were refused). Archive rows are not cached; raised because
+#    the scan JSON of the same input changed.
+OUTPUT_FORMAT_GENERATION = 16
 
 
 def cache_extension(path: Path) -> str:

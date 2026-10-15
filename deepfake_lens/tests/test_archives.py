@@ -46,8 +46,14 @@ class ArchiveFormatTests(unittest.TestCase):
             self.assertIsNone(_safe_member_name("file.txt:ads"))
         with patch("deepfake_lens.archives._colon_names_unsafe", return_value=False):
             self.assertEqual(_safe_member_name("file.txt:ads"), "file.txt:ads")
-        self.assertIsNone(_safe_member_name("CON"))
-        self.assertIsNone(_safe_member_name("aux.png"))
+        # R26-4 (round 26): these pinned the defect on POSIX — a Windows device name was refused on every OS; it is
+        # refused only where it is a device (Windows).
+        with patch("deepfake_lens.archives._reserved_names_unsafe", return_value=True):
+            self.assertIsNone(_safe_member_name("CON"))
+            self.assertIsNone(_safe_member_name("aux.png"))
+        with patch("deepfake_lens.archives._reserved_names_unsafe", return_value=False):
+            self.assertEqual(_safe_member_name("CON"), "CON")
+            self.assertEqual(_safe_member_name("aux.png"), "aux.png")
 
     def test_colon_names_are_classified_precisely(self):
         """R25-6 (round 25): every member name with ":" as its second character was refused as 「절대 경로 멤버(대상 폴더 밖
@@ -76,6 +82,70 @@ class ArchiveFormatTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIsNone(_safe_member_name(name))
                 self.assertEqual(_unsafe_name_reason(name), reason)
+
+
+class HostLegalMemberNamesTest(unittest.TestCase):
+    """R26-4 (round 26): "~$보고서.docx" (an Office owner file), "~WRL0001.tmp" (a Word temp file) and "con.png" were
+    refused inside an archive on POSIX — 「홈 폴더 표기('~')로 시작하는 멤버(대상 폴더 밖 쓰기 시도로 취급)」, 「허용되지 않는
+    이름(Windows 예약 장치명)」 — while the same files in a folder were analyzed. ``open()`` never expands "~" and a member
+    is written under its own index folder, so neither is a write outside it; a device name is refused on Windows only.
+    Zip-slip, absolute, UNC, drive and ".." members stay refused."""
+
+    NAMES = ("~$보고서.docx", "~WRL0001.tmp", "~x.png", "con.png", "nul", "AUX.txt", "~")
+
+    def setUp(self) -> None:
+        import shutil
+        import tempfile
+
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def test_names_are_refused_only_where_they_cannot_be_files(self) -> None:
+        from deepfake_lens.archives import _unsafe_name_reason
+
+        with patch("deepfake_lens.archives._windows_names_unsafe", return_value=False):
+            for name in self.NAMES:
+                self.assertEqual(_safe_member_name(name), name, name)
+        with patch("deepfake_lens.archives._windows_names_unsafe", return_value=True):
+            for name in ("~$보고서.docx", "~WRL0001.tmp", "~x.png", "~"):
+                self.assertEqual(_safe_member_name(name), name, name)  # a "~" is a name on Windows too
+            for name in ("con.png", "nul", "AUX.txt"):
+                self.assertIsNone(_safe_member_name(name), name)
+                reason = _unsafe_name_reason(name)
+                self.assertEqual(reason, "Windows에서 쓸 수 없는 이름(예약 장치명 — CON·PRN·AUX·NUL·COM1~9·LPT1~9)")
+                self.assertNotIn("대상 폴더 밖", reason)
+        for name in ("/abs.png", "//srv/share/a.png", "\\\\srv\\share\\b.png", "C:/x.png", "C:\\y.png", "c:", "../e.png", "a/../../e2.png"):
+            with self.subTest(name=name):
+                self.assertIsNone(_safe_member_name(name))
+                self.assertIn("대상 폴더 밖", _unsafe_name_reason(name))
+
+    @unittest.skipIf(__import__("os").name == "nt", "POSIX file names")
+    def test_an_archive_member_is_analyzed_like_the_same_file_in_a_folder(self) -> None:
+        payloads = {name: b"\x89PNG\r\n\x1a\n" + bytes(64) + name.encode("utf-8") for name in self.NAMES}
+        payloads["~$보고서.docx"] = b"PK\x03\x04" + bytes(40)
+        folder = self.tmp / "folder"
+        folder.mkdir()
+        for name, data in payloads.items():
+            (folder / name).write_bytes(data)
+        arc = self.tmp / "arc"
+        arc.mkdir()
+        make_zip(arc / "office.zip", payloads)
+        _, folder_items = scan_directory(folder)
+        _, archive_items = scan_directory(arc)
+        by_name = {item.path: item for item in folder_items}
+        members = {item.member: item for item in archive_items if item.member is not None}
+        container = next(item for item in archive_items if item.path == "office.zip")
+        assert container.result is not None
+        self.assertEqual([entry.reason for entry in container.result.coverage if entry.check == "archive_member"], [])
+        self.assertEqual(sorted(members), sorted(self.NAMES))
+        for name in self.NAMES:
+            with self.subTest(name=name):
+                mine, theirs = members[name], by_name[name]
+                self.assertEqual((mine.sha256, mine.status, mine.kind), (theirs.sha256, theirs.status, theirs.kind))
+                self.assertEqual(
+                    mine.result.verdict_code if mine.result else None, theirs.result.verdict_code if theirs.result else None,
+                )
+        self.assertEqual(sorted(p.name for p in self.tmp.iterdir()), ["arc", "folder"])  # nothing written outside
 
 
 class ColonMemberNamesScanTest(unittest.TestCase):

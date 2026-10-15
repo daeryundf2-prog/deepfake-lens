@@ -256,6 +256,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 16,
+      "reason": "R26-4: ~$보고서.docx·~WRL0001.tmp·(POSIX의) con.png 같은 압축 구성원을 폴더의 같은 파일처럼 해제·분석함(거부되었음) — 같은 입력의 scan JSON이 바뀜(압축 행은 캐시되지 않음)",
+      "sha256": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+      "sets": {
+        "stdlib": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+        "full-extras": "ece030016587b55c035311a0502994d510f0fc02294553470a0fe35cdb844a59"
+      },
+      "constants_sha256": "6f131e070869e61776f999e33ba630130f9d308458ac162ad7682114858676cc",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }
