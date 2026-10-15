@@ -77,6 +77,13 @@ had it been given the original name. A staging folder or name that is
 not (or no longer) registered is replaced by a fixed placeholder, so no
 staging name can appear in any output.
 
+R26-3 (round 26): where no staged name can reach the file — a relative name in a
+working folder deeper than PATH_MAX on an OS without ``/proc`` (macOS, BSD) — a
+UTF-8 name is handed to the decoders as it is, like an ASCII name there (R24-3:
+the relative name, ``./``-prefixed for a child); it was copied, and above 2 GiB
+refused with the false reason "심볼릭 링크를 만들 수 없어". Only a non-UTF-8 name
+is still copied there, with the real reason (:data:`COPY_WHY_NO_ROUTE`).
+
 When no route works (copy over the cap, no ASCII temp folder)
 :class:`NativePathError` is raised with a Korean message, so the check that
 needed the decoder is recorded as ``failed`` — never silently skipped,
@@ -1142,7 +1149,17 @@ def _short_path_name(path: str) -> str | None:
     return short if short.isascii() and short != path else None
 
 
-def _copy_staged(absolute: str, target: str) -> str:
+# R26-3 (round 26): why a staged copy was needed, for the copy-cap reason — it said 「심볼릭 링크를 만들 수 없어」 also
+# when no link was attempted (a working folder deeper than PATH_MAX without /proc: the link was never made).
+COPY_WHY_SHORT_NAME = " ASCII 짧은 이름(8.3)이 없어"
+COPY_WHY_SYMLINK = " 심볼릭 링크를 만들 수 없어"
+COPY_WHY_NO_ROUTE = (
+    " 작업 폴더가 경로 길이 상한(PATH_MAX {limit}바이트)보다 깊고 /proc 경로로도 닿을 수 없어 원본을 가리키는 링크를 만들 수 없으며,"
+    " 이름이 UTF-8이 아니라 원래 이름으로도 넘길 수 없어"
+)
+
+
+def _copy_staged(absolute: str, target: str, why: str | None = None) -> str:
     try:
         size = os.stat(absolute).st_size
     except OSError as exc:
@@ -1150,7 +1167,7 @@ def _copy_staged(absolute: str, target: str) -> str:
     if size > NATIVE_COPY_MAX_BYTES:
         raise NativePathError(
             f"{COPY_CAP_EXCEEDED} — 비ASCII 이름의 파일에"
-            + (" ASCII 짧은 이름(8.3)이 없어" if _is_windows() else " 심볼릭 링크를 만들 수 없어")
+            + (why if why is not None else COPY_WHY_SHORT_NAME if _is_windows() else COPY_WHY_SYMLINK)
             + f" 사본이 필요하지만 크기({size}바이트)가 사본 상한({NATIVE_COPY_MAX_BYTES}바이트)을 넘어"
             " 네이티브 디코더로 열지 않았습니다"
         )
@@ -1194,6 +1211,8 @@ def _stage(source: str) -> tuple[str, bool]:
                 except OSError:
                     shutdown.refuse_if_active()  # the folder went away under a final cleanup
                     logger.debug("native_safe_path: symlink refused for staged name %s", target)
+            else:
+                return _copy_staged(absolute, target, COPY_WHY_NO_ROUTE.format(limit=_path_max())), True
         else:
             short = _short_path_name(absolute)
             if short is not None:
@@ -1216,13 +1235,42 @@ def _reachable_name(source: str) -> str:
     absolute = os.path.abspath(source)
     if _is_windows() or os.path.isabs(source) or len(os.fsencode(absolute)) < _path_max():
         return absolute
-    through_proc = os.path.join(f"/proc/{os.getpid()}/cwd", source)
+    prefix = _proc_cwd_prefix()
+    if prefix is None:
+        return source
+    through_proc = os.path.join(prefix, source)
     try:
         if os.path.samestat(os.stat(through_proc), os.stat(source)):
             return through_proc
     except OSError:
         pass
     return source
+
+
+def _proc_cwd_prefix() -> str | None:
+    """R26-3 (round 26): ``/proc/<pid>/cwd`` where the OS has it (Linux), else None (macOS, BSD)."""
+    return f"/proc/{os.getpid()}/cwd" if sys.platform.startswith("linux") else None
+
+
+def _passes_as_is(text: str) -> bool:
+    """R26-3 (round 26): whether a non-ASCII name is handed to the native decoders as it is, like an ASCII one.
+
+    Only where no staged name can reach the file — POSIX, a relative name in a working folder deeper than
+    PATH_MAX, no ``/proc`` route (macOS, BSD; :func:`_reachable_name` gives back the relative name) — and only a
+    name that is valid UTF-8 (no lone surrogate: R12-1's crash). There a staged link cannot be made (its target
+    would be relative to the staging folder) and a copy was refused above 2 GiB with the false reason
+    "심볼릭 링크를 만들 수 없어"; the relative name itself opens the file in this process and in a child that
+    inherits the working folder (ffmpeg, :func:`child_path`) or is told it (the audio worker) — R24-3's route
+    for ASCII names. On POSIX the decoders take a UTF-8 name; staging is for undecodable bytes (R12-1) and
+    Windows' narrow APIs.
+    """
+    if _is_windows() or os.path.isabs(text):
+        return False
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return not os.path.isabs(_reachable_name(text))
 
 
 _PATH_MAX: int | None = None
@@ -1338,7 +1386,7 @@ def native_safe_path(path: str | os.PathLike[str], *, for_child: bool = False) -
     text = os.fspath(path)
     if isinstance(text, bytes):
         text = os.fsdecode(text)
-    if text.isascii():
+    if text.isascii() or _passes_as_is(text):  # R26-3: a UTF-8 name no staged name can reach, like an ASCII one
         yield child_path(text) if for_child else text
         return
     staged, owned = _stage(text)
