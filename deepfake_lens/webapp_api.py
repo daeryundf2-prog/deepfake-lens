@@ -1466,6 +1466,11 @@ REPORT_ROW_WALK_LIMIT = (
 # R21-5 (round 21): a posted row path that is not the scan's own form of it — relative to the scan folder, no
 # empty, "." or ".." component, escaped exactly as the scan escapes it. "./gen.png", "sub/../gen.png",
 # "../RM/gen.png" and "/tmp/RM/gen.png" named the same file and were signed as five rows. HTTP 400.
+# R26-1 (round 26): a member row's ``member`` that is not a chain the scan writes (result_text.member_chain).
+REPORT_ROW_MEMBER_NOT_CANONICAL = (
+    "검사 결과 항목 「{path}」의 구성원 경로가 폴더 검사 결과의 형식이 아닙니다(압축 파일 단계마다 경로를 이스케이프해 '::'로 "
+    "잇는 형식 — 경로에 '::'·'\\'가 있거나 ':'로 시작·끝나면 '\\'는 '\\\\', ':'는 '\\:'로 씀) — 폴더 검사 결과를 그대로 보내십시오"
+)
 REPORT_ROW_PATH_NOT_CANONICAL = (
     "검사 결과 항목 「{path}」의 경로가 폴더 검사 결과의 경로 형식이 아닙니다(스캔 폴더 기준 상대 경로 — 절대 경로·빈 구성 요소·"
     "`.`·`..` 불가) — 폴더 검사 결과를 그대로 보내십시오"
@@ -2005,9 +2010,11 @@ def _posted_path_error(posted: list[Any]) -> str | None:
     writes for a file of the scan folder: relative, no empty, "." or ".."
     component, and escaped as :func:`result_text.escape_row_path` escapes
     it. A row (path, or container and member) may be posted once. Both are
-    a malformed request (400), before any re-analysis.
+    a malformed request (400), before any re-analysis. R26-1 (round 26): a
+    member row's ``member`` must be a chain the scan writes
+    (:func:`result_text.is_canonical_member_chain`).
     """
-    from .result_text import escape_row_path, row_identity, unescape_row_path
+    from .result_text import escape_row_path, is_canonical_member_chain, row_identity, unescape_row_path
 
     seen: set[tuple[str, str | None]] = set()
     for item in posted:
@@ -2020,6 +2027,9 @@ def _posted_path_error(posted: list[Any]) -> str | None:
             or escape_row_path(real) != top
         ):
             return REPORT_ROW_PATH_NOT_CANONICAL.format(path=str(item.path)[:200])
+        if member is not None and not is_canonical_member_chain(member):
+            # R26-1 (round 26): a member chain in the scan's own (escaped, injective) form only
+            return REPORT_ROW_MEMBER_NOT_CANONICAL.format(path=str(item.path)[:200])
         if (top, member) in seen:
             return REPORT_ROW_POSTED_TWICE.format(path=str(item.path)[:200])
         seen.add((top, member))

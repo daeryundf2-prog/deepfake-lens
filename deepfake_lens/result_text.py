@@ -222,6 +222,81 @@ def unescape_row_path(path: str) -> str:
     return "".join(out)
 
 
+# R26-1 (round 26): an archive member's ``member`` is a chain of segments — its path inside the archive, then
+# (for a member of a nested archive) its path inside that archive, … — joined by "::". R25-6 made ":" an
+# ordinary character of a member name on POSIX, so a member literally named "inner.zip::b.png" and the
+# member "b.png" of the nested archive "inner.zip" were both the chain "inner.zip::b.png": two rows with one
+# identity, the server's re-analysis kept one of them, and an honest report was refused while a report
+# without the generator member signed 「없음」. Each segment is now escaped so the join is injective by
+# construction: a segment that holds "::" or "\" or starts or ends with ":" (the forms that could make a
+# separator ambiguous) is written character by character — every "\" as "\\", every ":" as "\:" (the
+# top-level row escape of R9-1, :func:`escape_row_path`); any other segment ("c:v.png", "dir/x.png") is
+# unchanged. :func:`split_member_chain` is the exact inverse: scanning left to right, "\\" and "\:" are
+# escapes, an unescaped "::" is the separator, and everything else is literal. An unescaped segment has no
+# "\", no "::" and no ":" at either end, and an escaped one has no unescaped ":" at all, so no separator can
+# be read inside a segment or across a boundary.
+
+
+def _member_segment_needs_escape(segment: str) -> bool:
+    return (
+        ARCHIVE_MEMBER_SEPARATOR in segment or "\\" in segment
+        or segment.startswith(":") or segment.endswith(":")
+    )
+
+
+def escape_member_segment(segment: str) -> str:
+    """R26-1: one segment of a member chain (a path inside one archive level) in its injective form."""
+    if not _member_segment_needs_escape(segment):
+        return segment
+    return segment.replace("\\", "\\\\").replace(":", "\\:")
+
+
+def member_chain(segments: list[str] | tuple[str, ...]) -> str:
+    """R26-1: the ``member`` of an archive member row from its raw segments (outermost archive first)."""
+    if not segments:
+        raise ValueError("빈 구성원 경로")
+    return ARCHIVE_MEMBER_SEPARATOR.join(escape_member_segment(segment) for segment in segments)
+
+
+def split_member_chain(member: str) -> list[str]:
+    """R26-1: the raw segments of a member chain (inverse of :func:`member_chain`).
+
+    Raises ``ValueError`` for a text :func:`member_chain` never writes — an empty segment, a "\\" that
+    escapes nothing, or a segment written in another form than its canonical one.
+    """
+    segments: list[str] = []
+    current: list[str] = []
+    index = 0
+    while index < len(member):
+        char = member[index]
+        if char == "\\":
+            if index + 1 >= len(member) or member[index + 1] not in "\\:":
+                raise ValueError(f"구성원 경로의 이스케이프가 올바르지 않습니다: {member!r}")
+            current.append(member[index + 1])
+            index += 2
+            continue
+        if member.startswith(ARCHIVE_MEMBER_SEPARATOR, index):
+            segments.append("".join(current))
+            current = []
+            index += len(ARCHIVE_MEMBER_SEPARATOR)
+            continue
+        current.append(char)
+        index += 1
+    segments.append("".join(current))
+    if any(not segment for segment in segments) or member_chain(segments) != member:
+        raise ValueError(f"구성원 경로가 정규 형식이 아닙니다: {member!r}")
+    return segments
+
+
+def is_canonical_member_chain(member: str) -> bool:
+    """R26-1: whether ``member`` is a chain :func:`member_chain` writes (it round-trips)."""
+    try:
+        split_member_chain(member)
+    except ValueError:
+        return False
+    return True
+
+
 def member_row_path(container: str, member: str) -> str:
     """The display path of an archive member row: "<container row path>::<member>" (display only)."""
     return f"{container}{ARCHIVE_MEMBER_SEPARATOR}{member}"

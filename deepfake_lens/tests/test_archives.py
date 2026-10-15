@@ -125,6 +125,54 @@ class ColonMemberNamesScanTest(unittest.TestCase):
         self._check("m.tar")
 
 
+class MemberChainInjectiveTest(unittest.TestCase):
+    """R26-1 (round 26): R25-6 made ":" an ordinary member-name character on POSIX, so the literal member
+    "inner.zip::b.png" and "b.png" of the nested archive "inner.zip" were one row identity ("z.zip", "inner.zip::b.png")
+    — two rows the server's re-analysis collapsed. Each archive level's path is now escaped in the chain."""
+
+    def setUp(self) -> None:
+        import shutil
+        import tempfile
+
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    @staticmethod
+    def _zip_bytes(members: dict[str, bytes]) -> bytes:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for name, data in members.items():
+                archive.writestr(name, data)
+        return buffer.getvalue()
+
+    @unittest.skipIf(__import__("os").name == "nt", "POSIX file names")
+    def test_the_verifiers_archive_gives_distinct_round_tripping_identities(self) -> None:
+        from deepfake_lens.result_text import member_chain, split_member_chain
+
+        png = b"\x89PNG\r\n\x1a\n" + bytes(64)
+        inner = self._zip_bytes({"b.png": png + b"1", "c.zip": self._zip_bytes({"d.png": png + b"2"})})
+        make_zip(self.tmp / "z.zip", {
+            "inner.zip": inner, "inner.zip::b.png": png + b"3", "inner.zip::c.zip::d.png": png + b"4",
+            "fake.zip::x.png": png + b"5", ":lead.png": png + b"6", "trail:": png + b"7", "c:v.png": png + b"8",
+            "a\\:b.png": png + b"9",
+        })
+        _, items = scan_directory(self.tmp)
+        members = [item.member for item in items if item.container == "z.zip"]
+        self.assertEqual(len(members), len(set(members)), members)
+        expected = [["inner.zip", "b.png"], ["inner.zip", "c.zip", "d.png"], ["inner.zip::b.png"], ["inner.zip::c.zip::d.png"],
+                    ["fake.zip::x.png"], [":lead.png"], ["trail:"], ["c:v.png"], ["a/:b.png"]]
+        self.assertEqual(sorted(m for m in members if m), sorted(member_chain(segments) for segments in expected))
+        self.assertIn("inner.zip\\:\\:b.png", members)
+        self.assertIn("inner.zip::b.png", members)
+        self.assertIn("c:v.png", members)  # R25-6: an inner ":" is unchanged
+        for item in items:
+            if item.member is not None:
+                self.assertEqual(member_chain(split_member_chain(item.member)), item.member)
+                self.assertEqual(item.path, f"z.zip::{item.member}")
+        paths = [item.path for item in items]
+        self.assertEqual(len(paths), len(set(paths)), paths)
+
+
 class ExtractionTests(unittest.TestCase):
     def setUp(self):
         import tempfile

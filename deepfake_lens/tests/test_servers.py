@@ -1287,6 +1287,46 @@ def _write_png(path: Path, seed: int) -> Path:
     return path
 
 
+# R26-1 (round 26): an archive whose member names look like the "::" chains of nested archive members. R25-6 made
+# ":" an ordinary member name character on POSIX, so the literal member "inner.zip::b.png" and the member "b.png" of
+# the nested "inner.zip" had one identity (container, member). Every member must be its own row (injective chain).
+COLLIDING_MEMBER_NAMES = (
+    "inner.zip::b.png", "inner.zip::c.zip::d.png", "a.zip::b.zip::c.png", "fake.zip::x.png", ":lead.png",
+    "t:.png", "q\\:z.png", "\uD55C.png", "\u1112\u1161\u11AB.png",
+)
+
+
+def _write_colliding_names_zip(path: Path, scratch: Path, generator_png: bytes | None = None) -> Path:
+    """R26-1: ``path`` — a zip whose literal member names collide with the chains of its nested members.
+
+    ``inner.zip`` holds ``b.png`` (``generator_png`` when given: the member with manipulation evidence) and
+    ``c.zip`` (``d.png``); ``a.zip`` holds the literal ``b.zip::c.png`` and ``b.zip`` (``c.png``); the top level
+    holds every name of :data:`COLLIDING_MEMBER_NAMES` — the same chains written literally, a leading / trailing
+    ":", a "\\" (stored as a folder separator), the NFC and the NFD "한".
+    """
+    import io
+    import zipfile
+
+    def png(seed: int) -> bytes:
+        return _write_png(scratch / f"collide-{seed}.png", seed=seed).read_bytes()
+
+    def zipped(entries: dict[str, bytes]) -> bytes:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for name, data in entries.items():
+                archive.writestr(name, data)
+        return buffer.getvalue()
+
+    inner = zipped({"b.png": generator_png or png(60), "c.zip": zipped({"d.png": png(61)})})
+    outer_a = zipped({"b.zip::c.png": png(62), "b.zip": zipped({"c.png": png(63)})})
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("inner.zip", inner)
+        archive.writestr("a.zip", outer_a)
+        for seed, name in enumerate(COLLIDING_MEMBER_NAMES, start=70):
+            archive.writestr(name, png(seed))
+    return path
+
+
 class _ReportLegsFixture(unittest.TestCase):
     """Scan fixture and the two server legs (stdlib web, api-serve) for /api/report tests."""
 
@@ -2071,7 +2111,11 @@ class ReportSignsNoPostedTextInvariantTest(_ReportLegsFixture):
         (self.folder / "note.txt").write_text("이 문서는 검사용 텍스트입니다. " * 20, encoding="utf-8")
         if hasattr(os, "mkfifo"):
             os.mkfifo(self.folder / "pipe.jpg")
+        # R26-1 (round 26): member names that look like nested chains (the fixture had none, so a non-injective
+        # server identity passed this invariant)
+        _write_colliding_names_zip(self.folder / "col.zip", Path(self._tmp.name), (self.folder / "gen.png").read_bytes())
         self.rows = self._scan("--recursive", "--dedupe")
+        self.assertEqual(sum(1 for row in self.rows.values() if row.get("container") == "col.zip"), len(COLLIDING_MEMBER_NAMES) + 4)
 
     def _fuzzed(self) -> tuple[list[dict[str, Any]], list[str]]:
         import copy
@@ -3743,15 +3787,21 @@ class ReportSignedSetIsTheServersInvariantTest(_ReportLegsFixture):
             archive.writestr("a_gen.png", (Path(self._tmp.name) / "g.png").read_bytes())
             for index in range(3):
                 archive.writestr(f"p{index}.png", _write_png(Path(self._tmp.name) / f"p{index}.png", seed=20 + index).read_bytes())
+        # R26-1 (round 26): an archive whose literal member names collide with its nested members' chains (with
+        # this fixture's names the server's identity was not injective and 12 sub-checks failed)
+        _write_colliding_names_zip(self.folder / "col.zip", Path(self._tmp.name), (Path(self._tmp.name) / "g.png").read_bytes())
         self.full = self._scan()  # the server's never-cancelled view (flat walk, default options)
         self.assertEqual(self.full["evidence_gen.png"]["result"]["verdict_code"], self.MANIPULATED)
         self.assertEqual(self.full["gen.zip::a_gen.png"]["result"]["verdict_code"], self.MANIPULATED)
+        self.assertEqual(self.full["col.zip::inner.zip::b.png"]["result"]["verdict_code"], self.MANIPULATED)
+        identities = [self._identity(row) for row in self.full.values()]
+        self.assertEqual(len(set(identities)), len(identities))  # R26-1: one row per identity
 
     # -- the server's views ---------------------------------------------------
 
     def _job_with_partial_archive(self) -> tuple[str, dict[str, Any]]:
         """A cancelled job in which gen.zip's generator member was analyzed and some of its members never started."""
-        for checks in range(1, 12):
+        for checks in range(1, 40):  # R26-1: col.zip's members come before gen.zip's (was range(1, 12))
             job_id, result = self._cancelled_job(checks=checks, job_id=f"job-cancelled-{checks}")
             rows = {row["path"]: row for row in result["items"]}
             container = rows.get("gen.zip")
@@ -4016,6 +4066,89 @@ class ReportSignedSetIsTheServersInvariantTest(_ReportLegsFixture):
             with self.subTest(leg=leg, case="R19-13"):
                 self.assertEqual(status, 409, raw[:300])
                 self.assertIn("gen.zip", [row["path"] for row in json.loads(raw)["changed_rows"]])
+
+
+class ReportArchiveMemberChainIsInjectiveTest(_ReportLegsFixture):
+    """R26-1 (round 26): R25-6 accepted ":" in member names on POSIX, so an archive holding the nested ``inner.zip``
+    (with the generator PNG ``b.png``) and a member literally named ``inner.zip::b.png`` gave two rows with one
+    identity ``(z.zip, inner.zip::b.png)``. The server's re-analysis kept one of them: the honest report was 400
+    (「두 번 게시」) and a report leaving out the generator member signed 「기록되지 않은 파일: 없음」 with one manipulated
+    file fewer. Each archive level's path is now escaped in the chain (``inner.zip\\:\\:b.png``), so every member is
+    its own row and every row left out is counted."""
+
+    NONE = ReportUnrecordedFilesAreTheServersTest.NONE
+    _scan = ReportRefusesChangedRowsTest._scan
+    MANIPULATED = "manipulation_evidence"
+
+    def setUp(self) -> None:
+        import unicodedata
+
+        from deepfake_lens.tests.qa.test_qa_sys import _write_generator_png
+
+        super().setUp()
+        _write_generator_png(Path(self._tmp.name) / "gen.png")
+        _write_colliding_names_zip(self.folder / "col.zip", Path(self._tmp.name), (Path(self._tmp.name) / "gen.png").read_bytes())
+        self.rows = self._scan("--no-default-engine")
+        literal = [[name.replace("\\", "/")] for name in COLLIDING_MEMBER_NAMES]
+        nfd = unicodedata.normalize("NFD", "\uD55C.png")
+        literal = [[f"{nfd}#2"] if segments == [nfd] else segments for segments in literal]  # R12-3: NFC then NFD
+        self.expected = [["inner.zip", "b.png"], ["inner.zip", "c.zip", "d.png"], ["a.zip", "b.zip::c.png"],
+                         ["a.zip", "b.zip", "c.png"], *literal]
+
+    def _members(self) -> dict[str, dict[str, Any]]:
+        return {row["member"]: row for row in self.rows.values() if row.get("container") == "col.zip"}
+
+    def test_every_member_is_its_own_row_and_its_chain_round_trips(self) -> None:
+        from deepfake_lens.result_text import member_chain, member_row_path, split_member_chain
+
+        items = list(self.rows.values())
+        self.assertEqual(len({(row.get("container"), row.get("member"), row["path"]) for row in items}), len(items))
+        members = self._members()
+        self.assertEqual(sorted(members), sorted(member_chain(segments) for segments in self.expected))
+        for member, row in members.items():
+            self.assertEqual(member_chain(split_member_chain(member)), member)
+            self.assertEqual(row["path"], member_row_path("col.zip", member))
+        self.assertEqual(members["inner.zip::b.png"]["result"]["verdict_code"], self.MANIPULATED)
+        self.assertNotEqual(members["inner.zip\\:\\:b.png"]["result"]["verdict_code"], self.MANIPULATED)
+        self.assertIn("\\:lead.png", members)  # a leading ":" could join a separator
+        self.assertIn("t:.png", members)  # an inner ":" stays as it is (R25-6)
+
+    def test_the_honest_report_is_signed_and_a_left_out_member_is_counted(self) -> None:
+        options = {"no_default_engine": "true"}
+        rows = list(self.rows.values())
+        manipulated = sum(1 for row in rows if (row.get("result") or {}).get("verdict_code") == self.MANIPULATED)
+        for leg, make in self._legs():
+            post = make()
+            with self.subTest(leg=leg, case="honest"):
+                status, _, raw = post("/api/report", self._json({"items": rows, "format": "json", "options": options}))
+                self.assertEqual(status, 200, raw[:400])
+                body = json.loads(raw)
+                self.assertEqual(sorted(row["path"] for row in body["items"]), sorted(row["path"] for row in rows))
+                self.assertEqual(body["summary"]["manipulation_evidence"], manipulated)
+                self.assertEqual(body["unrecorded_files"]["listing"], {"source": "walk", "not_in_report": 0})
+            for left_out in ("col.zip::inner.zip::b.png", "col.zip::inner.zip\\:\\:b.png", "col.zip::a.zip::b.zip::c.png"):
+                with self.subTest(leg=leg, left_out=left_out):
+                    items = [row for row in rows if row["path"] != left_out]
+                    self.assertEqual(len(items), len(rows) - 1)
+                    status, _, raw = post("/api/report", self._json({"items": items, "format": "json", "options": options}))
+                    self.assertEqual(status, 200, raw[:400])
+                    body = json.loads(raw)
+                    self.assertEqual(body["unrecorded_files"]["listing"], {"source": "walk", "not_in_report": 1})
+                    self.assertNotIn(self.NONE, " ".join(body["unrecorded_files"]["lines"]))
+                    lost = 1 if self.rows[left_out]["result"]["verdict_code"] == self.MANIPULATED else 0
+                    self.assertEqual(body["summary"]["manipulation_evidence"], manipulated - lost)
+
+    def test_a_member_chain_in_another_form_is_400(self) -> None:
+        """A posted member must be the chain the scan writes: "inner.zip\\:\\:b.png" written unescaped, or with an
+        escape the scan never writes, is not a row of this scan."""
+        row = self.rows["col.zip::\\:lead.png"]
+        for member in (":lead.png", "\\x:lead.png", "\\:lead.png::", "\\:lead.png\\"):
+            forged = dict(row, member=member, path=f"col.zip::{member}")
+            for leg, make in self._legs():
+                with self.subTest(leg=leg, member=member):
+                    status, _, raw = make()("/api/report", self._json({"items": [forged], "format": "json"}))
+                    self.assertEqual(status, 400, raw[:300])
+                    self.assertIn("의 구성원 경로가 폴더 검사 결과의 형식이 아닙니다", json.loads(raw)["error"])
 
 
 class PathValuesWithNulAre400Test(unittest.TestCase):

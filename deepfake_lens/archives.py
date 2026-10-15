@@ -45,6 +45,7 @@ from pathlib import Path, PurePosixPath
 from typing import IO, Any
 
 from .error_text import exception_text, failure_reason
+from .result_text import ARCHIVE_MEMBER_SEPARATOR, escape_member_segment
 
 SUPPORTED_ARCHIVE_EXTENSIONS = {
     ".zip", ".tar", ".tgz", ".tar.gz", ".tar.bz2", ".tbz2",
@@ -117,8 +118,14 @@ class ArchiveExtraction:
     claimed: dict[str, str] = field(default_factory=dict)
 
     def member_name(self, member: Path, root: Path) -> str:
-        """``member``'s name inside the archive: ``dir/x.png`` or ``dir/inner.zip::x.png`` (Y9)."""
-        return self.names.get(member) or _member_rel(member, root)
+        """``member``'s name inside the archive: ``dir/x.png`` or ``dir/inner.zip::x.png`` (Y9).
+
+        R26-1 (round 26): the chain form of :func:`result_text.member_chain` — each archive level's path
+        escaped (:func:`result_text.escape_member_segment`), so a member literally named
+        ``inner.zip::b.png`` is ``inner.zip\\:\\:b.png`` and never the chain of ``b.png`` inside the
+        nested archive ``inner.zip``.
+        """
+        return self.names.get(member) or escape_member_segment(_member_rel(member, root))
 
     def claim(self, rel: str, raw: str) -> tuple[str, str | None]:
         """R12-3: the row name for member path ``rel`` and, for a duplicate, the reason.
@@ -204,7 +211,7 @@ def _member_target(dest: Path, index: int, rel: str) -> Path | None:
 def _place(out: ArchiveExtraction, target: Path, rel: str, raw: str) -> None:
     """Record the extracted ``target``'s row name (and duplicate reason)."""
     name, note = out.claim(rel, raw)
-    out.names[target] = name
+    out.names[target] = escape_member_segment(name)  # R26-1: one chain segment, injectively
     if note:
         out.notes[target] = note
 
@@ -770,14 +777,15 @@ def extract_archive(
                     # duplicate entry name) is not a row itself; its reason goes
                     # to every member row it yields, before the member's own.
                     inner_note = out.notes.pop(m, None)
-                    # Y9: "<inner archive>::<member>" — the rejection chain's form.
+                    # Y9: "<inner archive>::<member>" — the rejection chain's form. R26-1: both sides are escaped
+                    # chains already, so the join is the member_chain of their segments.
                     for member in sub.members:
-                        out.names[member] = f"{inner_rel}::{sub.member_name(member, sub_root)}"
+                        out.names[member] = f"{inner_rel}{ARCHIVE_MEMBER_SEPARATOR}{sub.member_name(member, sub_root)}"
                         notes = [note for note in (inner_note, sub.notes.get(member)) if note]
                         if notes:
                             out.notes[member] = MEMBER_NOTE_SEPARATOR.join(notes)
                 out.skipped += sub.skipped
-                out.rejected.extend((f"{inner_rel}::{name}", reason) for name, reason in sub.rejected)
+                out.rejected.extend((f"{inner_rel}{ARCHIVE_MEMBER_SEPARATOR}{name}", reason) for name, reason in sub.rejected)
                 out.warnings.extend(sub.warnings)
     return out
 

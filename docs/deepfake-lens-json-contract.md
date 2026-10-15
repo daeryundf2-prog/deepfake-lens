@@ -150,9 +150,19 @@ always `0` invited old-contract readings. They remain readable as
   a folder named `evil.zip::inner` gives the row `evil.zip\:\:inner/a.png`,
   distinct from the member row `evil.zip::inner/a.png`, a file named
   `tri:::c.png` the row `tri\:\:\:c.png`, and a file named
-  `fake.zip::member.png` is reported as itself. `POST /api/report` identifies
+  `fake.zip::member.png` is reported as itself. R26-1 (round 26): `member`
+  is injective too — each archive level's path in the chain (a *segment*) that
+  contains `::` or `\`, or starts or ends with `:`, is escaped the same way
+  (every `\` as `\\`, every `:` as `\:`); any other segment (`c:v.png`,
+  `dir/x.png`) is unchanged. Since R25-6 a POSIX member name may contain `:`,
+  and the literal member `inner.zip::b.png` had the chain of `b.png` inside the
+  nested `inner.zip` (two rows, one identity): it is now
+  `inner.zip\:\:b.png`, a leading-colon `:lead.png` is `\:lead.png`. Reading
+  the chain left to right, `\\` and `\:` are escapes and an unescaped `::`
+  separates segments, so it splits back exactly (`result_text.member_chain` /
+  `split_member_chain`). `POST /api/report` identifies
   rows by these fields and refuses (400) a member row whose `path` is not
-  `container::member`. R12-3 (round 12): a member row also carries
+  `container::member`, or (R26-1) whose `member` is not a chain in this form. R12-3 (round 12): a member row also carries
   `member_index` — its 1-based position among the container's extracted
   members (archive order; a nested archive's members follow it) — and
   (`container`, `member`, `member_index`) is unique. Every archive entry is

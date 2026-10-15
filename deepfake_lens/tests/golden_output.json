@@ -193,6 +193,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 13,
+      "reason": "R26-1: 압축 구성원 경로의 각 단계 경로에 ::·\\가 있거나 :로 시작·끝나면 이스케이프(inner.zip::b.png 구성원은 inner.zip\\:\\:b.png) — 같은 입력의 scan JSON이 바뀜(압축 행은 캐시되지 않음)",
+      "sha256": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+      "sets": {
+        "stdlib": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+        "full-extras": "ece030016587b55c035311a0502994d510f0fc02294553470a0fe35cdb844a59"
+      },
+      "constants_sha256": "379d6f9f707a3c0e87807041bd6fadfdd2d6999f41caa42a58eaf09a2907100e",
+      "constants_count": 56,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

@@ -846,7 +846,11 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 12: R25-7 — a reason naming the analyzed file by a relative name (a decoder's
 #    'a.wav' in `cd case; scan .`) is written "<root>/a.wav" like the absolute and
 #    root-relative invocations; a generation-11 row from such a scan said 'a.wav'.
-OUTPUT_FORMAT_GENERATION = 12
+# 13: R26-1 — an archive member's chain escapes each level's path that holds "::" or "\" or starts or ends
+#    with ":" (the literal member "inner.zip::b.png" is "inner.zip\:\:b.png", ":lead.png" is "\:lead.png"),
+#    so it is never the chain of a nested archive's member. Archive rows are not cached; raised because the
+#    scan JSON of the same input changed.
+OUTPUT_FORMAT_GENERATION = 13
 
 
 def cache_extension(path: Path) -> str:
