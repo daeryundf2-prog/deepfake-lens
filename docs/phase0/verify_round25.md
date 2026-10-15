@@ -319,3 +319,11 @@ scan case / classify case/locked.wav / 웹 /api/scan
 - 사용한 컨테이너: r25-full, r25-p, r25-gui, r25-qa, r25-pc. 동시에 최대 2개였고, 성능 측정 때는 r25-p 하나만 실행했다. 모두 `--rm`이다.
 - 탐침 스크립트와 로그는 `scratchpad/r25/out/`에 있다(q/*.py·*.sh, gate_full.log, gate_gui.log, percommit.log, perf.log, flakes.log, shallow.log, qa_main_scope.log, c*_*.log, r6_hostile.log, r10_originals.log, r25norm-*.json). 같은 내용을 `~/Desktop/deepfake-lens-verify-archive/r25-out/`에 복사했다.
 - 원본 저장소 세 곳은 변경하지 않았다.
+
+## 조정자 추가 — R25-5 수정 중 발견
+
+### R25-9 (Low, 기존 결함) `multimodal --av-sync`가 영상의 오디오를 읽지 못하고 거짓 사유를 낸다
+
+- `multimodal.analyze_av_sync`의 `_audio_envelope`는 영상 파일을 `librosa.load`로 직접 연다. 잠금 파일의 librosa 1.0.0은 audioread 대체 경로가 없고 soundfile(libsndfile)만 쓰므로 mp4 같은 영상 컨테이너는 항상 `LibsndfileError: Format not recognised`다.
+- 예외는 삼켜지고 결과는 「오디오 스트림을 읽을 수 없어 A/V 싱크를 측정할 수 없습니다.」다. 음성 트랙이 있는 mp4와 음성 트랙이 없는 mp4가 같은 문구를 낸다(게이트 이미지에서 확인). 측정은 한 번도 실행되지 않고, 원인(디코더 없음)은 어디에도 기록되지 않는다.
+- → R25-5의 ffmpeg → 임시 WAV 경로(for_child, PATH_MAX 처리 포함)로 영상의 오디오 트랙을 디코딩한다. 디코딩할 수 없으면 실제 사유(의존성 부재: ffmpeg / 오디오 트랙 없음 / ffmpeg 실패)를 검사 범위와 한계에 적는다. 다른 `librosa.load` 호출도 같은 문제가 있는지 감사한다. 회귀 테스트: 음성 트랙이 있는 mp4와 없는 mp4.
