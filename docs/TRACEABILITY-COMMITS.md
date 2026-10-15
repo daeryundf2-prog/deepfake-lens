@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..7b99aa7`(병합 커밋 제외, 커밋 338개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..e98b10b`(병합 커밋 제외, 커밋 352개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 307개 — 스펙 갭에 매핑 221개(그중 신규 사유 병기 80개), 신규(스펙 외)만 86개.
+요약: ID 316개 — 스펙 갭에 매핑 225개(그중 신규 사유 병기 80개), 신규(스펙 외)만 91개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -334,6 +334,15 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R24-9 | 24 | qa-main runs with a HOME and XDG folders under /tmp/qa-main and without writing bytecode — | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 07df093 |
 | R24-10 | 24 | the R23-2 end-to-end test gives its project venv every site folder this interpreter import | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 4c2dfc0 |
 | R24-11 | 24 | `help <command> -h` / `--help` is that command's help with exit 0 | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | a73da37 |
+| R25-1 | 25 | whether a report row was left unanalyzed by a cancel is the server's scan job's knowledge  | G12, G7, G30 |  | c464ac3 |
+| R25-2 | 25 | an unreadable WAV, MP4, PDF or archive is the failed row with its real read error — it was | G12 |  | 50ef8e8 |
+| R25-3 | 25 | the evidence statement's 「작성자 및 일자」 column, the scan folder name and every case field prin | G2, G30 |  | c700e85 |
+| R25-4 | 25 | a non-ASCII name in a working folder deeper than PATH_MAX is staged through a name the ker | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 2d10ee0 |
+| R25-5 | 25 | .m4a, .aac and .wma are decoded by ffmpeg before the audio features — librosa 1.0 has no a | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | dfc5889 |
+| R25-6 | 25 | a member name with ":" is refused only in a real absolute, drive, UNC or traversal form —  | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | f2fc514 |
+| R25-7 | 25 | a reason that names the analyzed file is written "<root>/…" however the scan was started — | G7 |  | 209ceb2 |
+| R25-8 | 25 | `help help -h` and `help -h -h` are the top-level help with exit 0 | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | fcf56fe |
+| R25-9 | 25 | multimodal --av-sync decodes the video's audio track with ffmpeg and records why the measu | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 8483bf4 |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -703,3 +712,17 @@ R18-14: ids[]의 갭 매핑을 커밋 제목·본문의 `Gaps:`에 맞췄다 —
 | 07df093 | 24 | R24-9 | Gaps: 신규(스펙 외) | subject | fix(gate): R24-9 qa-main runs with a HOME and XDG folders under /tmp/qa-main and without writing bytecode — it wrote the caller's ~/.cache/deepfake-lens and __pycache__ outside /tmp (R24-9; Gaps: 신규) |
 | 4c2dfc0 | 24 | R24-10 | Gaps: 신규(스펙 외) | subject | test(audio): R24-10 the R23-2 end-to-end test gives its project venv every site folder this interpreter imports from — it failed in HANDOFF §5's qa-main side venv (R24-10; Gaps: 신규) |
 | 7b99aa7 | 24 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): HANDOFF.md §1/§2/§9 state round 24 — 24 rounds, R24-1…R24-11 fixed on this branch, the round-24 trend and the next steps — without anything the records-only commit changes (WP-J; Gaps: 신규) |
+| d2239fe | 24 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on 7b99aa7, round-24 IDs mapped (WP-J; Gaps: G26, G27, G28) |
+| bf484c4 | 24 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): round-25 verification findings (WP-J; Gaps: 신규) |
+| c464ac3 | 25 | R25-1 | Gaps: G12, G7, G30 | subject | fix(report): R25-1 whether a report row was left unanalyzed by a cancel is the server's scan job's knowledge only — never the posted kind, summary.cancelled or missing member rows (R25-1; Gaps: G12, G7, G30) |
+| 50ef8e8 | 25 | R25-2 | Gaps: G12 | subject | fix(core): R25-2 an unreadable WAV, MP4, PDF or archive is the failed row with its real read error — it was 「분석 중 파일 변경」 (R25-2; Gaps: G12) |
+| c700e85 | 25 | R25-3 | Gaps: G2, G30 | subject | fix(report): R25-3 the evidence statement's 「작성자 및 일자」 column, the scan folder name and every case field print through one injective PDF form; "\|" prints as typed (R25-3; Gaps: G2, G30) |
+| 2d10ee0 | 25 | R25-4 | Gaps: 신규(스펙 외) | subject | fix(native): R25-4 a non-ASCII name in a working folder deeper than PATH_MAX is staged through a name the kernel accepts — its video check failed (R25-4; Gaps: 신규) |
+| dfc5889 | 25 | R25-5 | Gaps: 신규(스펙 외) | subject | fix(audio): R25-5 .m4a, .aac and .wma are decoded by ffmpeg before the audio features — librosa 1.0 has no audioread fallback, so they always failed (R25-5; Gaps: 신규) |
+| 209ceb2 | 25 | R25-7 | Gaps: G7 | subject | fix(core): R25-7 a reason that names the analyzed file is written "<root>/…" however the scan was started — `cd case; scan .` wrote 'a.wav' (R25-7; Gaps: G7) |
+| f2fc514 | 25 | R25-6 | Gaps: 신규(스펙 외) | subject | fix(archive): R25-6 a member name with ":" is refused only in a real absolute, drive, UNC or traversal form — "c:v.png" was called a zip-slip absolute-path member (R25-6; Gaps: 신규) |
+| fcf56fe | 25 | R25-8 | Gaps: 신규(스펙 외) | subject | fix(cli): R25-8 `help help -h` and `help -h -h` are the top-level help with exit 0 (R25-8; Gaps: 신규) |
+| e359405 | 25 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): HANDOFF.md §1/§2/§9 state round 25 — 25 rounds, R25-1…R25-8 fixed on this branch, the round-25 trend and the next steps; §6 adds the server-held-state rule for row statuses and kinds — without anything the records-only commit changes (WP-J; Gaps: 신규) |
+| c5b155c | 25 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): round-25 coordinator-added finding R25-9 — multimodal --av-sync cannot decode a video's audio with librosa 1.0 (WP-J; Gaps: 신규) |
+| 8483bf4 | 25 | R25-9 | Gaps: 신규(스펙 외) | subject | fix(audio): R25-9 multimodal --av-sync decodes the video's audio track with ffmpeg and records why the measurement did not run — librosa 1.0 cannot open a video, so it never ran (R25-9; Gaps: 신규) |
+| e98b10b | 25 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): HANDOFF.md §1/§2/§9 add the coordinator-added R25-9 to round 25 — fixed on this branch, in the records' ids[] list to add, a round-26 probe — without anything the records-only commit changes (WP-J; Gaps: 신규) |

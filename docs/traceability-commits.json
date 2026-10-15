@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "7b99aa7fa8da5e811d45dd09f8540e7523f5c5a7",
+    "head": "e98b10b5fe2dcf1d0f7d6e51cf1272b5d93fb57b",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -4311,6 +4311,125 @@
       "new": "갭 목록 밖 항목 포함",
       "commits": [
         "a73da37"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R25-1",
+      "round": 25,
+      "source": "verify_round25.md",
+      "summary": "whether a report row was left unanalyzed by a cancel is the server's scan job's knowledge ",
+      "gaps": [
+        "G12",
+        "G7",
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "c464ac3"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R25-2",
+      "round": 25,
+      "source": "verify_round25.md",
+      "summary": "an unreadable WAV, MP4, PDF or archive is the failed row with its real read error — it was",
+      "gaps": [
+        "G12"
+      ],
+      "new": null,
+      "commits": [
+        "50ef8e8"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R25-3",
+      "round": 25,
+      "source": "verify_round25.md",
+      "summary": "the evidence statement's 「작성자 및 일자」 column, the scan folder name and every case field prin",
+      "gaps": [
+        "G2",
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "c700e85"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R25-4",
+      "round": 25,
+      "source": "verify_round25.md",
+      "summary": "a non-ASCII name in a working folder deeper than PATH_MAX is staged through a name the ker",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "2d10ee0"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R25-5",
+      "round": 25,
+      "source": "verify_round25.md",
+      "summary": ".m4a, .aac and .wma are decoded by ffmpeg before the audio features — librosa 1.0 has no a",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "dfc5889"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R25-6",
+      "round": 25,
+      "source": "verify_round25.md",
+      "summary": "a member name with \":\" is refused only in a real absolute, drive, UNC or traversal form — ",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "f2fc514"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R25-7",
+      "round": 25,
+      "source": "verify_round25.md",
+      "summary": "a reason that names the analyzed file is written \"<root>/…\" however the scan was started —",
+      "gaps": [
+        "G7"
+      ],
+      "new": null,
+      "commits": [
+        "209ceb2"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R25-8",
+      "round": 25,
+      "source": "verify_round25.md",
+      "summary": "`help help -h` and `help -h -h` are the top-level help with exit 0",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "fcf56fe"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R25-9",
+      "round": 25,
+      "source": "verify_round25.md",
+      "summary": "multimodal --av-sync decodes the video's audio track with ffmpeg and records why the measu",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "8483bf4"
       ],
       "used_in_commit_subjects": true
     }
@@ -11338,6 +11457,270 @@
       "short": "7b99aa7",
       "round": "24",
       "subject": "docs(phase0): HANDOFF.md §1/§2/§9 state round 24 — 24 rounds, R24-1…R24-11 fixed on this branch, the round-24 trend and the next steps — without anything the records-only commit changes (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "d2239fe4ed585587e3b78049108e9c4291697ef9",
+      "short": "d2239fe",
+      "round": "24",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on 7b99aa7, round-24 IDs mapped (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "bf484c423e6d507fd174d24c295fb58fcf55ea4c",
+      "short": "bf484c4",
+      "round": "24",
+      "subject": "docs(phase0): round-25 verification findings (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "c464ac39e5a4847bb6b8b3f685ae5e1079aa9589",
+      "short": "c464ac3",
+      "round": "25",
+      "subject": "fix(report): R25-1 whether a report row was left unanalyzed by a cancel is the server's scan job's knowledge only — never the posted kind, summary.cancelled or missing member rows (R25-1; Gaps: G12, G7, G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R25-1"
+      ],
+      "gaps_named_in_subject": [
+        "G12",
+        "G7",
+        "G30"
+      ],
+      "gaps": [
+        "G12",
+        "G7",
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G12, G7, G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "50ef8e8599d9cb2e55289f826d2778e32111c06c",
+      "short": "50ef8e8",
+      "round": "25",
+      "subject": "fix(core): R25-2 an unreadable WAV, MP4, PDF or archive is the failed row with its real read error — it was 「분석 중 파일 변경」 (R25-2; Gaps: G12)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R25-2"
+      ],
+      "gaps_named_in_subject": [
+        "G12"
+      ],
+      "gaps": [
+        "G12"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G12",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "c700e85367d14cc74ef1c9f3b0c072a70b63d92f",
+      "short": "c700e85",
+      "round": "25",
+      "subject": "fix(report): R25-3 the evidence statement's 「작성자 및 일자」 column, the scan folder name and every case field print through one injective PDF form; \"|\" prints as typed (R25-3; Gaps: G2, G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R25-3"
+      ],
+      "gaps_named_in_subject": [
+        "G2",
+        "G30"
+      ],
+      "gaps": [
+        "G2",
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G2, G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "2d10ee0c8d840ec2f1ab2d2b395db05152715864",
+      "short": "2d10ee0",
+      "round": "25",
+      "subject": "fix(native): R25-4 a non-ASCII name in a working folder deeper than PATH_MAX is staged through a name the kernel accepts — its video check failed (R25-4; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R25-4"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R25-4: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "dfc5889f0ab7a533f75a7bb804fa5b8058e4926a",
+      "short": "dfc5889",
+      "round": "25",
+      "subject": "fix(audio): R25-5 .m4a, .aac and .wma are decoded by ffmpeg before the audio features — librosa 1.0 has no audioread fallback, so they always failed (R25-5; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R25-5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R25-5: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "209ceb25c93496a0c2b63b0d438f8e48485ba143",
+      "short": "209ceb2",
+      "round": "25",
+      "subject": "fix(core): R25-7 a reason that names the analyzed file is written \"<root>/…\" however the scan was started — `cd case; scan .` wrote 'a.wav' (R25-7; Gaps: G7)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R25-7"
+      ],
+      "gaps_named_in_subject": [
+        "G7"
+      ],
+      "gaps": [
+        "G7"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G7",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "f2fc5144699f8f7900b2d2c9139665052c351264",
+      "short": "f2fc514",
+      "round": "25",
+      "subject": "fix(archive): R25-6 a member name with \":\" is refused only in a real absolute, drive, UNC or traversal form — \"c:v.png\" was called a zip-slip absolute-path member (R25-6; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R25-6"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R25-6: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "fcf56fed9eb1d63a53548cf5ec8e451e650c31b4",
+      "short": "fcf56fe",
+      "round": "25",
+      "subject": "fix(cli): R25-8 `help help -h` and `help -h -h` are the top-level help with exit 0 (R25-8; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R25-8"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R25-8: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "e35940544bdb38cb8f38d9da68e6d25400ae231f",
+      "short": "e359405",
+      "round": "25",
+      "subject": "docs(phase0): HANDOFF.md §1/§2/§9 state round 25 — 25 rounds, R25-1…R25-8 fixed on this branch, the round-25 trend and the next steps; §6 adds the server-held-state rule for row statuses and kinds — without anything the records-only commit changes (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "c5b155cf02a9ea5875ad287bdeec913c7539e2ee",
+      "short": "c5b155c",
+      "round": "25",
+      "subject": "docs(phase0): round-25 coordinator-added finding R25-9 — multimodal --av-sync cannot decode a video's audio with librosa 1.0 (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "8483bf4affa0c35aead43fc9b556317030e6e699",
+      "short": "8483bf4",
+      "round": "25",
+      "subject": "fix(audio): R25-9 multimodal --av-sync decodes the video's audio track with ffmpeg and records why the measurement did not run — librosa 1.0 cannot open a video, so it never ran (R25-9; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R25-9"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R25-9: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "e98b10b5fe2dcf1d0f7d6e51cf1272b5d93fb57b",
+      "short": "e98b10b",
+      "round": "25",
+      "subject": "docs(phase0): HANDOFF.md §1/§2/§9 add the coordinator-added R25-9 to round 25 — fixed on this branch, in the records' ids[] list to add, a round-26 probe — without anything the records-only commit changes (WP-J; Gaps: 신규)",
       "pre_rewrite_subject": null,
       "ids": [
         "WP-J"
