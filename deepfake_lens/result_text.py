@@ -545,7 +545,34 @@ def pdf_field_text(text: object) -> str:
     same text (an LV+T "한" and an L+V+T "한"), so the PDF could no longer name the exact value the signed body
     holds. The Markdown and JSON keep the value as typed.
     """
-    return display_name(text, escape_pipe=False)
+    return pdf_text_from_markdown(display_name(text))
+
+
+def pdf_text_from_markdown(text: object) -> str:
+    """R26-6 (round 26): text in :func:`display_name`'s form as a PDF prints it — every "\\|" escape as "|".
+
+    c700e85 printed the case fields' "|" as typed (:func:`pdf_field_text`) but file and folder names went through
+    :func:`display_name` (a Markdown table form), so one PDF printed "x|y" for a case field and "fx\\|y.png" for a
+    file name. :class:`pdf_layout.PdfLayout` applies this to every string it lays out, so a PDF has one form. The
+    mapping is injective on display_name's output — read left to right every "\\" starts a two-character escape, so
+    "\\|" is the escaped pipe and "\\\\|" a literal backslash then a pipe ("\\\\" stays) — and it leaves text already
+    in this form unchanged (it has no "\\|" escape), so it can be applied again.
+    """
+    raw = str(text)
+    if "\\|" not in raw:
+        return raw
+    out: list[str] = []
+    index = 0
+    while index < len(raw):
+        char = raw[index]
+        if char == "\\" and index + 1 < len(raw):
+            following = raw[index + 1]
+            out.append("|" if following == "|" else char + following)
+            index += 2
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
 
 
 # R11-7 (round 11): a name such as "![t](https://evil/t.png)" or
