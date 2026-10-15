@@ -470,7 +470,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     multimodal_parser.add_argument("--text-source", type=str, help="텍스트 출처 추정")
     multimodal_parser.add_argument("--audio-source", type=str, help="오디오 출처 추정")
     multimodal_parser.add_argument("--video-source", type=str, help="영상 출처 추정")
-    multimodal_parser.add_argument("--av-sync", type=Path, help="음성/영상 동기 검사용 영상 파일(opencv+librosa+ffmpeg 필요)")
+    multimodal_parser.add_argument("--av-sync", type=Path, help="음성/영상 동기 검사용 영상 파일(opencv+librosa+ffmpeg 필요; 처음 600초, 음성 트랙 최대 4개)")
     multimodal_parser.add_argument("--format", choices=["table", "json"], default="json", help=OUTPUT_FORMAT_HELP)
     multimodal_parser.add_argument("--json-out", type=Path, help=JSON_OUT_HELP)
 

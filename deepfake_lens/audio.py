@@ -332,7 +332,7 @@ FFMPEG_STEP_AUDIO_DECODE = "오디오 디코딩(.m4a·.aac·.wma)"
 @contextmanager
 def ffmpeg_audio_wav(
     path: Path, *, seconds: float | None = None, mono_rate: int | None = None, timeout: float = 120,
-    operation: str = FFMPEG_STEP_AUDIO_DECODE,
+    operation: str = FFMPEG_STEP_AUDIO_DECODE, stream: int = 0,
 ) -> Iterator[Path]:
     """R25-5 / R25-9 (round 25): the first audio stream of ``path`` decoded by ffmpeg into a temporary WAV.
 
@@ -344,7 +344,8 @@ def ffmpeg_audio_wav(
     :class:`NoAudioStream`, :class:`native_stderr.FfmpegError`, ``OSError`` or
     :class:`native_path.NativePathError`.
 
-    R26-10 (round 26): a run stopped at ``timeout`` raises :class:`native_stderr.FfmpegTimeout`
+    R26-9 (round 26): ``stream`` picks the audio stream (``0:a:<stream>``; :class:`NoAudioStream` when the file
+    has no such stream). R26-10 (round 26): a run stopped at ``timeout`` raises :class:`native_stderr.FfmpegTimeout`
     naming ``operation``, the file, the limit and the time it ran (it was ``subprocess.TimeoutExpired`` —
     "TimeoutExpired: 라이브러리 오류(TimeoutExpired)" in the row).
     """
@@ -365,7 +366,7 @@ def ffmpeg_audio_wav(
             started = time.monotonic()
             try:
                 proc = run_child(  # R15-1: a tracked child, stopped by the shutdown cleanup
-                    [ffmpeg, *FFMPEG_QUIET_ARGS, "-y", "-i", native_media, "-vn", "-map", "0:a:0", *span, *codec, str(tmp_path)],
+                    [ffmpeg, *FFMPEG_QUIET_ARGS, "-y", "-i", native_media, "-vn", "-map", f"0:a:{int(stream)}", *span, *codec, str(tmp_path)],
                     capture_output=True, timeout=timeout,
                 )
             except subprocess.TimeoutExpired as exc:

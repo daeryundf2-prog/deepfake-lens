@@ -59,6 +59,18 @@ AV_SYNC_MIN_CORRELATION = 0.15
 AV_SYNC_DESYNC_WEIGHT = 18
 AV_SYNC_MIN_SECONDS = 3.0
 AV_SYNC_MIN_SAMPLES = 16
+# R26-9 (round 26): the audio is decoded only as far as the energy envelope needs it — 16-bit mono at 8 kHz (an
+# RMS hop of 256 samples is a 31.25 Hz envelope, finer than any video frame rate the envelopes are resampled to)
+# and at most the first AV_SYNC_MAX_SECONDS of the video (the motion envelope reads the same span). The whole
+# track was decoded at 22 050 Hz: a two-hour video wrote a ~317 MB temporary WAV and held ~635 MB in memory.
+# Now at most ~9.6 MB of WAV and ~19 MB of samples per track.
+AV_SYNC_AUDIO_RATE = 8000
+AV_SYNC_AUDIO_HOP = 256
+AV_SYNC_MAX_SECONDS = 600
+# R26-9: every audio track up to this many is measured and the best-correlated one reported (each listed in the
+# limitations); the first track alone was read, so a silent first track hid the speech track.
+AV_SYNC_MAX_AUDIO_TRACKS = 4
+AV_SYNC_DECODE_TIMEOUT_SECONDS = 600
 
 
 @dataclass(frozen=True)
@@ -277,30 +289,49 @@ def analyze_av_sync(
         return _av_sync_error("librosa가 설치되어 있지 않습니다. `pip install librosa`로 설치하세요.",
                               coverage=[_entry(AV_SYNC_AUDIO_CHECK, "skipped", "의존성 부재: librosa")])
 
-    motion_env, motion_rate, video_seconds = _motion_envelope(video_path)
+    motion_env, motion_rate, video_seconds = _motion_envelope(video_path, max_seconds=AV_SYNC_MAX_SECONDS)
     if motion_env is None:
         reason = "비디오 프레임을 읽을 수 없어 모션 신호를 추출하지 못했습니다."
         return _av_sync_error(reason, coverage=[_entry(AV_SYNC_MOTION_CHECK, "failed", reason)])
     motion = _entry(AV_SYNC_MOTION_CHECK, "ran", "")
+    capped = video_seconds > AV_SYNC_MAX_SECONDS
+    span_note = [AV_SYNC_SPAN_NOTE.format(seconds=AV_SYNC_MAX_SECONDS, rate=AV_SYNC_AUDIO_RATE)] if capped else []
 
-    audio_env, audio_rate, audio_seconds, audio_entry = _audio_envelope(video_path)
-    if audio_env is None:
+    tracks, more_tracks = _audio_tracks(video_path)
+    usable = [track for track in tracks if track.envelope is not None]
+    track_lines = _track_lines(tracks, more_tracks) if len(tracks) > 1 or more_tracks else []
+    if not usable:
         # R25-9: the real reason — no ffmpeg, no audio track, or the decode failure — never one fixed sentence
-        return _av_sync_error(
-            f"A/V 싱크를 측정할 수 없습니다 — 오디오 트랙: {audio_entry['reason']}",
-            video_seconds=video_seconds, coverage=[motion, audio_entry],
+        entry = tracks[0].entry if len(tracks) == 1 else _entry(
+            AV_SYNC_AUDIO_CHECK, "failed", f"음성 트랙 {len(tracks)}개 모두 측정 불가 — " + "; ".join(track_lines))
+        error = _av_sync_error(
+            f"A/V 싱크를 측정할 수 없습니다 — 오디오 트랙: {entry['reason']}",
+            video_seconds=video_seconds, coverage=[motion, entry],
         )
+        return replace(error, limitations=[*error.limitations, *span_note])
 
-    result = av_sync_from_envelopes(
-        audio_env,
-        motion_env,
-        audio_rate=audio_rate,
-        motion_rate=motion_rate,
-        max_lag_seconds=max_lag_seconds,
-        audio_seconds=audio_seconds,
-        video_seconds=video_seconds,
-    )
-    return replace(result, coverage=[motion, audio_entry])
+    measured = []
+    for track in usable:
+        assert track.envelope is not None
+        measured.append((track, av_sync_from_envelopes(
+            track.envelope,
+            motion_env,
+            audio_rate=track.rate,
+            motion_rate=motion_rate,
+            max_lag_seconds=max_lag_seconds,
+            audio_seconds=track.seconds,
+            video_seconds=video_seconds,
+        )))
+    for track, result in measured:
+        track.result = result
+    chosen, result = max(measured, key=lambda pair: (pair[1].peak_correlation is not None, pair[1].peak_correlation or 0.0, -pair[0].index))
+    if len(tracks) > 1 or more_tracks:
+        track_lines = _track_lines(tracks, more_tracks)
+        audio_entry = _entry(AV_SYNC_AUDIO_CHECK, "ran", AV_SYNC_TRACK_CHOICE.format(n=len(tracks), track=chosen.index + 1))
+        result = replace(result, limitations=[*result.limitations, AV_SYNC_TRACK_CHOICE.format(n=len(tracks), track=chosen.index + 1), *track_lines])
+    else:
+        audio_entry = chosen.entry
+    return replace(result, coverage=[motion, audio_entry], limitations=[*result.limitations, *span_note])
 
 
 # R25-9 (round 25): the coverage checks of analyze_av_sync.
@@ -309,6 +340,12 @@ AV_SYNC_AUDIO_CHECK = "av_sync_audio"
 AV_SYNC_NO_AUDIO_TRACK = "오디오 트랙 없음(ffmpeg로 추출된 음성 스트림이 없습니다)"
 # R26-10 (round 26): the step an ffmpeg timeout reason names.
 FFMPEG_STEP_AV_SYNC_AUDIO = "A/V 싱크 음성 트랙 디코딩"
+# R26-9 (round 26): the bounded span and the track choice, said in the limitations.
+AV_SYNC_SPAN_NOTE = (
+    "A/V 싱크는 영상의 처음 {seconds}초만 측정했습니다(음성은 {rate} Hz 모노로 그 구간만 디코딩 — 임시 파일·메모리 상한)"
+)
+AV_SYNC_TRACK_CHOICE = "음성 트랙 {n}개를 각각 측정해 상관이 가장 높은 트랙 {track}의 결과를 씁니다"
+AV_SYNC_MORE_TRACKS = "음성 트랙이 {n}개를 넘어 나머지 트랙은 측정하지 않았습니다"
 
 
 def _entry(check: str, status: str, reason: str) -> dict[str, str]:
@@ -487,10 +524,11 @@ def _resample_linear(series, from_rate: float, to_rate: float):
 
 
 @quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
-def _motion_envelope(video_path: Path):
+def _motion_envelope(video_path: Path, *, max_seconds: float | None = None):
     """Per-frame mean absolute frame-difference energy via opencv.
 
-    Returns (envelope, rate_hz, video_seconds) or (None, 0, 0) on failure.
+    Returns (envelope, rate_hz, video_seconds) or (None, 0, 0) on failure. R26-9 (round 26): with ``max_seconds``
+    only the frames of that first span are read (``video_seconds`` is still the whole video's duration).
     """
     try:
         import cv2
@@ -507,7 +545,10 @@ def _motion_envelope(video_path: Path):
             total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
             envelope: list[float] = []
             previous = None
-            while True:
+            frames_left = int(fps * max_seconds) + 1 if max_seconds is not None and fps > 0 else None
+            while frames_left is None or frames_left > 0:
+                if frames_left is not None:
+                    frames_left -= 1
                 ok, frame = capture.read()
                 if not ok:
                     break
@@ -523,8 +564,72 @@ def _motion_envelope(video_path: Path):
             capture.release()
 
 
+@dataclass
+class _AudioTrack:
+    """R26-9 (round 26): one audio track's envelope (None when it could not be measured) and its coverage entry."""
+
+    index: int
+    envelope: list[float] | None
+    rate: float
+    seconds: float
+    entry: dict[str, str]
+    result: AvSyncAnalysis | None = None
+
+
+def _audio_tracks(video_path: Path) -> tuple[list[_AudioTrack], bool]:
+    """R26-9 (round 26): the envelopes of the video's audio tracks (up to AV_SYNC_MAX_AUDIO_TRACKS) and whether it has more.
+
+    Track 0's own outcome is returned as it is when it is the only one (no track, a missing dependency, a decode
+    failure); the next track is looked for only after a track was decoded or failed on its own.
+    """
+    tracks: list[_AudioTrack] = []
+    for index in range(AV_SYNC_MAX_AUDIO_TRACKS):
+        envelope, rate, seconds, entry = _audio_envelope(video_path, stream=index)
+        if index > 0 and entry.get("reason") == AV_SYNC_NO_AUDIO_TRACK:
+            return tracks, False
+        tracks.append(_AudioTrack(index, envelope, rate, seconds, entry))
+        if entry["status"] == "skipped":
+            return tracks, False  # no track at all, or a missing dependency: no other track can be read either
+    return tracks, _has_audio_stream(video_path, AV_SYNC_MAX_AUDIO_TRACKS)
+
+
+def _has_audio_stream(video_path: Path, index: int) -> bool:
+    """R26-9: whether ``video_path`` has an audio stream number ``index`` (a 0.05 s decode)."""
+    from .audio import NoAudioStream, ffmpeg_audio_wav
+    from .shutdown import ShuttingDown
+
+    try:
+        with ffmpeg_audio_wav(video_path, seconds=0.05, mono_rate=AV_SYNC_AUDIO_RATE, timeout=60,
+                              operation=FFMPEG_STEP_AV_SYNC_AUDIO, stream=index):
+            return True
+    except ShuttingDown:
+        raise
+    except NoAudioStream:
+        return False
+    except Exception:  # noqa: BLE001 - the stream exists but did not decode: it is "more", unmeasured
+        logger.info("A/V sync: probing audio stream %d of %s failed", index, video_path, exc_info=True)
+        return True
+
+
+def _track_lines(tracks: list[_AudioTrack], more: bool) -> list[str]:
+    """R26-9: one limitation line per audio track — its correlation and offset, or why it was not measured."""
+    lines = []
+    for track in tracks:
+        result = track.result
+        if track.envelope is None:
+            lines.append(f"음성 트랙 {track.index + 1}: 측정 불가({track.entry['reason']})")
+        elif result is None or result.peak_correlation is None:
+            lines.append(f"음성 트랙 {track.index + 1}: 측정 불가({result.reference_note if result else '엔벨로프 없음'})")
+        else:
+            offset = f", 오프셋 {result.offset_seconds:+.2f}초" if result.offset_seconds is not None else ""
+            lines.append(f"음성 트랙 {track.index + 1}: 상관 {result.peak_correlation:.2f}{offset}")
+    if more:
+        lines.append(AV_SYNC_MORE_TRACKS.format(n=AV_SYNC_MAX_AUDIO_TRACKS))
+    return lines
+
+
 @quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
-def _audio_envelope(video_path: Path):
+def _audio_envelope(video_path: Path, *, stream: int = 0):
     """RMS amplitude envelope of the video's audio track.
 
     Returns ``(envelope, rate_hz, audio_seconds, coverage entry)``; the envelope is None when the track could
@@ -548,10 +653,11 @@ def _audio_envelope(video_path: Path):
     except ImportError as exc:
         return None, 0.0, 0.0, _entry(AV_SYNC_AUDIO_CHECK, "skipped", f"의존성 부재: {exc.name or 'librosa'}")
 
-    sample_rate = 22050
-    hop = 512
+    sample_rate = AV_SYNC_AUDIO_RATE  # R26-9: was 22050 Hz of the whole track
+    hop = AV_SYNC_AUDIO_HOP
     try:
-        with ffmpeg_audio_wav(video_path, mono_rate=sample_rate, timeout=600, operation=FFMPEG_STEP_AV_SYNC_AUDIO) as wav:
+        with ffmpeg_audio_wav(video_path, seconds=AV_SYNC_MAX_SECONDS, mono_rate=sample_rate, timeout=AV_SYNC_DECODE_TIMEOUT_SECONDS,
+                              operation=FFMPEG_STEP_AV_SYNC_AUDIO, stream=stream) as wav:
             with native_safe_path(wav, for_child=True) as native_wav:  # R12-2: a temp folder with a non-ASCII name
                 y, sr = librosa.load(native_wav, sr=sample_rate, mono=True)
     except ShuttingDown:
