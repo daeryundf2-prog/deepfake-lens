@@ -151,6 +151,37 @@ def _trustmark_recall(photos, variant, encoder_path, decoder, size, square) -> d
     return {"recall_lossless": ok / len(photos) if photos else None, "recall_n": len(photos)}
 
 
+def measure_videoseal(photos: list[Path]) -> dict[str, object]:
+    from deepfake_lens import wm_meta
+
+    rng = random.Random(11)
+    messages = ["".join(rng.choice("01") for _ in range(256)) for _ in range(1000)]
+    best: list[int] = []
+    for photo in photos:
+        reading = wm_meta.videoseal_read_image(photo)
+        bits = reading.bits
+        best.append(max(sum(a == b for a, b in zip(bits, message)) for message in messages))
+    threshold = wm_meta.VIDEOSEAL_MATCH_BITS
+    return {"n": len(photos), "max_agreement_with_1000_random_messages": max(best) if best else None,
+            "mean_best_agreement": sum(best) / len(best) if best else None, "attribution_threshold_bits": threshold,
+            "photos_at_or_above_threshold": sum(b >= threshold for b in best)}
+
+
+def measure_audioseal(folder: Path) -> dict[str, object]:
+    from deepfake_lens import wm_meta
+
+    clips = sorted(p for p in folder.rglob("*") if p.suffix.lower() in {".wav", ".flac", ".mp3", ".ogg"})
+    detected = 0
+    probabilities = []
+    for clip in clips:
+        reading = wm_meta.audioseal_read(clip)
+        probabilities.append(reading.probability)
+        detected += reading.probability >= wm_meta.AUDIOSEAL_PRESENCE_THRESHOLD
+    n = len(clips)
+    return {"n": n, "false_detections": detected, "fpr": detected / n if n else None, "fpr_upper95": clopper_pearson_upper(detected, n),
+            "max_probability": max(probabilities) if probabilities else None, "threshold": wm_meta.AUDIOSEAL_PRESENCE_THRESHOLD}
+
+
 def main(argv: list[str] | None = None) -> int:
     repo = Path(__file__).resolve().parents[1]
     if str(repo) not in sys.path:
@@ -159,13 +190,14 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = KoreanArgumentParser(description="실사 사진·음성에서 워터마크 디코더의 오탐률(및 무손실 재검출률)을 측정합니다.")
     parser.add_argument("--photos", type=Path, help="실사 사진 폴더(fetch_real_photos.py 결과)")
+    parser.add_argument("--audio", type=Path, help="실제 음성 파일 폴더")
     parser.add_argument("--trustmark-encoders", type=Path, help="TrustMark encoder_<V>.onnx 폴더(재검출률 측정용, 선택)")
-    parser.add_argument("--only", nargs="*", default=None, help="일부 검사만(sdxl/trustmark)")
+    parser.add_argument("--only", nargs="*", default=None, help="일부 검사만(sdxl/trustmark/videoseal/audioseal)")
     parser.add_argument("--out", type=Path, required=True, help="결과 JSON")
     args = parser.parse_args(argv)
     import tempfile
 
-    wanted = set(args.only or ["sdxl", "trustmark"])
+    wanted = set(args.only or ["sdxl", "trustmark", "videoseal", "audioseal"])
     report: dict[str, object] = {"schema": "watermark-measurement-v1", "measured_at": time.strftime("%Y-%m-%d")}
     if args.photos:
         photos = _photos(args.photos)
@@ -176,6 +208,10 @@ def main(argv: list[str] | None = None) -> int:
                 report["sdxl"] = measure_sdxl(photos, Path(tmp))
             if "trustmark" in wanted:
                 report["trustmark"] = measure_trustmark(photos, args.trustmark_encoders)
+            if "videoseal" in wanted:
+                report["videoseal"] = measure_videoseal(photos)
+    if args.audio and "audioseal" in wanted:
+        report["audioseal"] = measure_audioseal(args.audio)
     args.out.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=1))
     return 0

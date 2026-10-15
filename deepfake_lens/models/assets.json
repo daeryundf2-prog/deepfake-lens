@@ -50,6 +50,20 @@
       "source": "https://cai-watermark.adobe.net/watermarking/trustmark-models/decoder_C.onnx (variant C; scripts/fetch_watermark_models.py, retrieved 2026-10-15)",
       "license": "MIT (adobe/trustmark)",
       "used_by": "wm_trustmark.py (TrustMark C watermark decoding)"
+    },
+    {
+      "name": "videoseal-y_256b_img.jit",
+      "sha256": "5c7a4581c36fc6090aafdcfb3999123bae5172a4847f22e2da4e7fd1a39d1e1b",
+      "source": "https://dl.fbaipublicfiles.com/videoseal/y_256b_img.jit (Meta Video Seal 1.0, 256-bit, TorchScript; scripts/fetch_watermark_models.py, retrieved 2026-10-15)",
+      "license": "MIT (facebookresearch/videoseal LICENSE — models included)",
+      "used_by": "wm_meta.py (VideoSeal image/video watermark decoding)"
+    },
+    {
+      "name": "audioseal-detector_base.pth",
+      "sha256": "8a78e8a83584113523e161fc599fcab10fd0e94c04d2eb9d2fa1e9ec91ab69d9",
+      "source": "https://huggingface.co/facebook/audioseal/resolve/3c19eba53390776cf2cc9ed5f6c9ac67ce72ecba/detector_base.pth (Meta AudioSeal 16-bit detector; scripts/fetch_watermark_models.py, retrieved 2026-10-15)",
+      "license": "MIT (facebook/audioseal model card)",
+      "used_by": "wm_meta.py (AudioSeal watermark detection)"
     }
   ]
 }

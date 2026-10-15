@@ -1364,14 +1364,19 @@ def _c2pa_check(file_path: Path) -> tuple[dict[str, object] | None, CoverageEntr
 
 
 def _mark_layers(file_path: Path, modality: str) -> DeepLayers:
-    """techniques-2026: the machine-readable-mark checks of a non-image file (C2PA, then watermark decoders).
+    """techniques-2026: the machine-readable-mark checks of a non-image file — C2PA, then the watermark decoders.
 
     Returned in the :class:`DeepLayers` shape (evidence, coverage, limitations)
     so each modality's builder merges it like the deep layers. Images run
     their C2PA check inline (its result also feeds the metadata rules).
     """
+    from .media_marks import MarkLayers, audio_mark_layers, video_mark_layers
+
     validation, entry = _c2pa_check(file_path)
-    return DeepLayers(evidence=c2pa_evidence(validation), coverage=[entry])
+    marks = audio_mark_layers(file_path) if modality == "audio" else video_mark_layers(file_path) if modality == "video" else MarkLayers()
+    return DeepLayers(
+        evidence=[*c2pa_evidence(validation), *marks.evidence], coverage=[entry, *marks.coverage], limitations=list(marks.limitations),
+    )
 
 
 # Words in a legacy analyzer's "unavailable" verdict that mean the input

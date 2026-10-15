@@ -331,6 +331,8 @@ CHECK_LABELS = {
     # techniques-2026: machine-readable mark checks.
     "watermark_sdxl": "SDXL 워터마크(imwatermark) 검사",
     "watermark_trustmark": "TrustMark 워터마크 검사",
+    "watermark_videoseal": "VideoSeal 워터마크 검사",
+    "watermark_audioseal": "AudioSeal 워터마크 검사",
 }
 
 

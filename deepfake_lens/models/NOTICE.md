@@ -85,3 +85,16 @@ the pin.
 - `deepfake_lens/vendor_trustmark_bch.py` is `trustmark/bchecc.py` from the
   trustmark 0.9.2 sdist, unchanged — Copyright 2023 Adobe, **MIT**.
 
+## Meta VideoSeal / AudioSeal weights (techniques-2026)
+
+- `videoseal-y_256b_img.jit` — VideoSeal 1.0 (256-bit) TorchScript export,
+  https://dl.fbaipublicfiles.com/videoseal/y_256b_img.jit (retrieved
+  2026-10-15), **MIT** (facebookresearch/videoseal LICENSE, which covers the
+  released models).
+- `audioseal-detector_base.pth` — AudioSeal 16-bit detector,
+  https://huggingface.co/facebook/audioseal (revision
+  `3c19eba53390776cf2cc9ed5f6c9ac67ce72ecba`, `detector_base.pth`), **MIT**
+  (model card). Loaded with the `audioseal` 0.2.0 package's model code (MIT).
+- Neither is committed; `scripts/fetch_watermark_models.py` fetches them and
+  `assets.json` pins their sha256. The optional `watermark_meta` extra
+  (torch) is needed to run them.

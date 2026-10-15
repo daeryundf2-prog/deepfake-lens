@@ -323,11 +323,133 @@ def _trustmark_layer(path: Path, validation: dict[str, object] | None, layers: M
     layers.evidence.extend(trustmark_evidence(readings, validation))
 
 
+# --- Meta Video Seal / AudioSeal (item 5) ---------------------------------------
+
+VIDEOSEAL_ALGORITHM_LABEL = "VideoSeal 1.0(메타, 256비트)"
+AUDIOSEAL_ALGORITHM_LABEL = "AudioSeal(메타, 16비트)"
+AUDIOSEAL_FOUND_TITLE = "AudioSeal 워터마크 검출"
+# Measured on real speech (scripts/measure_watermark_fpr.py --audio; docs/WATERMARK-MEASUREMENTS.md).
+AUDIOSEAL_FPR_NOTE = "워터마크가 없는 실제 음성 240개(LibriSpeech dev-clean)에서 검출 0건(95% 상한 1.5%, 측정 2026-10-15, docs/WATERMARK-MEASUREMENTS.md)"
+REGISTERED_MATCH_TITLE = "등록된 생성기 워터마크 메시지 일치"
+
+
+def _registered_match(algorithm: str, bits: str, registry: Registry, *, min_agreement: int | None = None) -> tuple[dict[str, Any], int] | None:
+    """The registry entry ``bits`` matches: exact, or (neural decoders) at least ``min_agreement`` equal bits."""
+    for entry in registry.for_algorithm(algorithm):
+        message = str(entry.get("message_bits", ""))
+        if len(message) != len(bits):
+            continue
+        agreement = sum(a == b for a, b in zip(message, bits))
+        required = int(entry.get("min_agreement_bits") or min_agreement or len(message))
+        if agreement >= required:
+            return entry, agreement
+    return None
+
+
+def _registered_item(label: str, entry: dict[str, Any], agreement: int, total: int, registry: Registry) -> EvidenceItem:
+    return EvidenceItem(
+        REGISTERED_MATCH_TITLE,
+        f"{label}로 읽은 메시지가 등록된 생성기 메시지({entry.get('id')}: {entry.get('generator')})와 {agreement}/{total}비트 일치합니다. "
+        f"기준: {registry.label}.",
+        EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, WATERMARK_LAYER,
+    )
+
+
+def _videoseal_layer(path: Path, layers: MarkLayers, *, video: bool) -> None:
+    from .checks import run_check
+    from . import wm_meta
+
+    def check() -> Any:
+        import torch  # noqa: F401 — dependency probe: without torch the check is "의존성 부재: torch"
+
+        registry = load_registry()
+        reading = wm_meta.videoseal_read_video(path) if video else wm_meta.videoseal_read_image(path)
+        return reading, registry
+
+    outcome, entry = run_check(VIDEOSEAL_CHECK, check)
+    if outcome is None:
+        layers.findings.append(MarkFinding(VIDEOSEAL_CHECK, VIDEOSEAL_ALGORITHM_LABEL, entry.status.value, entry.reason))
+        layers.coverage.append(entry)
+        return
+    reading, registry = outcome
+    message = wm_meta.bits_hex(reading.bits)
+    match = _registered_match("videoseal-1.0", reading.bits, registry, min_agreement=wm_meta.VIDEOSEAL_MATCH_BITS)
+    frames = f"프레임 {reading.frames}개 평균" if video else "정지 영상"
+    if match is not None:
+        entry = CoverageEntry(VIDEOSEAL_CHECK, CoverageStatus.RAN, f"{frames} — 등록 메시지 일치({registry.label})")
+        layers.evidence.append(_registered_item(VIDEOSEAL_ALGORITHM_LABEL, match[0], match[1], wm_meta.VIDEOSEAL_BITS, registry))
+        layers.findings.append(MarkFinding(VIDEOSEAL_CHECK, VIDEOSEAL_ALGORITHM_LABEL, "found", f"등록 메시지 {match[1]}/256비트 일치"))
+    else:
+        known = len(registry.for_algorithm("videoseal-1.0"))
+        entry = CoverageEntry(
+            VIDEOSEAL_CHECK, CoverageStatus.RAN,
+            f"{frames} — 등록 메시지(현재 {known}건)와 일치 없음 — VideoSeal은 존재 확률을 내지 않아 디코드 메시지만으로는 {NO_INFORMATION}",
+        )
+        layers.findings.append(MarkFinding(
+            VIDEOSEAL_CHECK, VIDEOSEAL_ALGORITHM_LABEL, "not_found",
+            f"디코드 메시지 {message}(평균 |logit| {reading.mean_abs_logit:.2f}) — 등록 메시지 없음, 존재 판단 불가",
+        ))
+    layers.coverage.append(entry)
+
+
+def _audioseal_layer(path: Path, layers: MarkLayers) -> None:
+    from .checks import run_check
+    from . import wm_meta
+
+    def check() -> Any:
+        import torch  # noqa: F401 — dependency probes
+        import audioseal  # noqa: F401
+
+        return wm_meta.audioseal_read(path), load_registry()
+
+    outcome, entry = run_check(AUDIOSEAL_CHECK, check)
+    if outcome is None:
+        layers.findings.append(MarkFinding(AUDIOSEAL_CHECK, AUDIOSEAL_ALGORITHM_LABEL, entry.status.value, entry.reason))
+        layers.coverage.append(entry)
+        return
+    reading, registry = outcome
+    present = reading.probability >= wm_meta.AUDIOSEAL_PRESENCE_THRESHOLD
+    span = f"처음 {reading.seconds:.1f}초 분석"
+    if present:
+        layers.evidence.append(EvidenceItem(
+            AUDIOSEAL_FOUND_TITLE,
+            f"AudioSeal 검출기가 워터마크 확률 {reading.probability:.2f}(기준 {wm_meta.AUDIOSEAL_PRESENCE_THRESHOLD:.2f} 이상, {span})로 "
+            f"워터마크를 검출했습니다. 16비트 메시지 {reading.bits}. 워터마크가 들어 있다는 사실이며 삽입 주체(Meta 제품인지 제3자인지)나 "
+            f"AI 생성 여부를 뜻하지 않습니다. {AUDIOSEAL_FPR_NOTE}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, WATERMARK_LAYER,
+        ))
+        match = _registered_match("audioseal-16", reading.bits, registry)
+        if match is not None:
+            layers.evidence.append(_registered_item(AUDIOSEAL_ALGORITHM_LABEL, match[0], match[1], wm_meta.AUDIOSEAL_BITS, registry))
+        entry = CoverageEntry(AUDIOSEAL_CHECK, CoverageStatus.RAN, f"{span} — 검출됨(확률 {reading.probability:.2f})")
+        layers.findings.append(MarkFinding(AUDIOSEAL_CHECK, AUDIOSEAL_ALGORITHM_LABEL, "found", f"확률 {reading.probability:.2f}, 메시지 {reading.bits}"))
+    else:
+        entry = CoverageEntry(AUDIOSEAL_CHECK, CoverageStatus.RAN, f"{span} — 검출 안 됨(확률 {reading.probability:.2f}) — {NO_INFORMATION}")
+        layers.findings.append(MarkFinding(AUDIOSEAL_CHECK, AUDIOSEAL_ALGORITHM_LABEL, "not_found", NO_INFORMATION))
+    layers.coverage.append(entry)
+
+
+def audio_mark_layers(path: Path) -> MarkLayers:
+    layers = MarkLayers()
+    _audioseal_layer(path, layers)
+    layers.limitations.append(ABSENCE_LIMITATION)
+    return layers
+
+
+def video_mark_layers(path: Path) -> MarkLayers:
+    layers = MarkLayers()
+    _videoseal_layer(path, layers, video=True)
+    _audioseal_layer(path, layers)  # the video's audio track (skipped "오디오 트랙 없음" without one)
+    layers.limitations.append(ABSENCE_LIMITATION)
+    return layers
+
+
 def image_mark_layers(path: Path, c2pa_validation: dict[str, object] | None = None) -> MarkLayers:
     """The watermark checks of an image file (after its C2PA check)."""
     layers = MarkLayers()
     _sdxl_layer(path, layers)
     _trustmark_layer(path, c2pa_validation, layers)
+    _videoseal_layer(path, layers, video=False)
     if layers.findings:
         layers.limitations.append(ABSENCE_LIMITATION)
     return layers
@@ -349,7 +471,9 @@ __all__ = [
     "TRUSTMARK_FOUND_TITLE",
     "trustmark_evidence",
     "VIDEOSEAL_CHECK",
+    "audio_mark_layers",
     "image_mark_layers",
+    "video_mark_layers",
     "load_registry",
     "registry_cache_tokens",
     "sdxl_check",

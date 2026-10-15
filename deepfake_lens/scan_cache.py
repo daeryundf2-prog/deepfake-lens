@@ -858,7 +858,9 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 15: techniques-2026 item 4 — every image gains the watermark_trustmark check (TrustMark Q/P/C ONNX
 #    decoders; skipped "의존성 부재: onnxruntime" / "가중치 없음: …" without them); a decoded packet is a
 #    neutral fact, the C2PA soft-binding cross-check its only link to a conclusion.
-OUTPUT_FORMAT_GENERATION = 15
+# 16: techniques-2026 item 5 — images and videos gain watermark_videoseal, audio and videos
+#    watermark_audioseal (optional torch extra; skipped "의존성 부재: torch" without it).
+OUTPUT_FORMAT_GENERATION = 16
 
 
 def cache_extension(path: Path) -> str:

@@ -1,0 +1,30 @@
+# techniques-2026 gate image: the reference image (deepfake-lens-gate:latest, unchanged) + the optional watermark
+# decoder stack in /venv and the pinned decoder weights.
+# Build:  docker build -t deepfake-lens-gate:tech -f scripts/gate/Dockerfile.tech scripts/gate
+#   /venv gains torch 2.14.1+cpu (requirements-tech-torch.lock, from the PyTorch CPU index) and onnxruntime, audioseal,
+#   invisible-watermark (+ PyWavelets, used only by the comparison test) … (requirements-tech.lock, PyPI) — every
+#   package at an exact version, --no-deps, then `pip check`.
+#   /opt/deepfake-lens-weights holds the decoder weights pinned in deepfake_lens/models/assets.json (each download
+#   checked against that sha256 here); gate.sh copies them into the work tree's deepfake_lens/models when present.
+# The reference tag `deepfake-lens-gate:latest` is never rebuilt or retagged by this file.
+FROM deepfake-lens-gate:latest
+COPY requirements-tech-torch.lock requirements-tech.lock /tmp/locks/
+RUN /venv/bin/pip install -q --no-deps --index-url https://download.pytorch.org/whl/cpu -r /tmp/locks/requirements-tech-torch.lock && \
+    /venv/bin/pip install -q --no-deps -r /tmp/locks/requirements-tech.lock && /venv/bin/pip check
+RUN mkdir -p /opt/deepfake-lens-weights && cd /opt/deepfake-lens-weights && \
+    python - <<'PY'
+import hashlib, urllib.request
+FILES = {
+    "trustmark-decoder_Q.onnx": ("https://cai-watermark.adobe.net/watermarking/trustmark-models/decoder_Q.onnx", "ee3268f057c9dabef680e169302f5973d0589feea86189ed229a896cc3aa88df"),
+    "trustmark-decoder_P.onnx": ("https://cai-watermark.adobe.net/watermarking/trustmark-models/decoder_P.onnx", "be6d7c33f8a7b376f179e75f3f7c58ff816a9ac7bb6d37fd0a729a635f624c35"),
+    "trustmark-decoder_C.onnx": ("https://cai-watermark.adobe.net/watermarking/trustmark-models/decoder_C.onnx", "3d92f4a278bcf87ac7dc40248c36ae664fe5fdedfd19ca265f7ca730b271100a"),
+    "videoseal-y_256b_img.jit": ("https://dl.fbaipublicfiles.com/videoseal/y_256b_img.jit", "5c7a4581c36fc6090aafdcfb3999123bae5172a4847f22e2da4e7fd1a39d1e1b"),
+    "audioseal-detector_base.pth": ("https://huggingface.co/facebook/audioseal/resolve/3c19eba53390776cf2cc9ed5f6c9ac67ce72ecba/detector_base.pth", "8a78e8a83584113523e161fc599fcab10fd0e94c04d2eb9d2fa1e9ec91ab69d9"),
+}
+for name, (url, digest) in FILES.items():
+    data = urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "deepfake-lens-gate-tech"}), timeout=900).read()
+    assert hashlib.sha256(data).hexdigest() == digest, name
+    open(name, "wb").write(data)
+    print(name, len(data))
+PY
+WORKDIR /repo

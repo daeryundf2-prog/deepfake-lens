@@ -146,6 +146,9 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `invisible-watermark + PyWavelets required (tech image)` | invisible-watermark·PyWavelets(`deepfake-lens-gate:tech` 이미지, `requirements-tech.lock`) — 디코더가 라이브러리와 비트 단위로 같은지 확인 | test_wm_sdxl.py |
 | `onnxruntime, numpy and Pillow required` | `watermark` extra(onnxruntime) + numpy, Pillow — TrustMark 가중치 없음·핀 불일치 처리 | test_wm_trustmark.py |
 | `onnxruntime + pinned TrustMark decoders + fixtures/trustmark required (tech image)` | `watermark` extra + `scripts/fetch_watermark_models.py`로 받은 고정 TrustMark 디코더(`deepfake-lens-gate:tech`는 이미지에 포함) + `fixtures/trustmark` | test_wm_trustmark.py |
+| `torch required (tech image)` | `watermark_meta` extra(torch) — VideoSeal 가중치 없음·핀 불일치 처리 | test_wm_meta.py |
+| `torch + pinned VideoSeal weights required (tech image)` | `watermark_meta` extra + 고정 VideoSeal 가중치(`deepfake-lens-gate:tech`) | test_wm_meta.py |
+| `torch + audioseal + pinned detector + ffmpeg required (tech image)` | `watermark_meta` extra(torch, audioseal) + 고정 AudioSeal 검출기 + `ffmpeg` 실행 파일(`deepfake-lens-gate:tech`) | test_wm_meta.py |
 
 ## 환경 의존 기준선 테스트
 

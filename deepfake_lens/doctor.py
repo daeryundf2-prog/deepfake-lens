@@ -438,7 +438,12 @@ def _run_diagnostics(models_dir: Path | None) -> DoctorReport:
     for import_name, package, purpose in OPTIONAL_DEPS:
         try:
             module = _import_dependency(import_name)
-            version = getattr(module, "__version__", "?")
+            version = str(getattr(module, "__version__", "?"))
+            # techniques-2026 (seen with torch 2.14.1+cpu in the tech gate image): a PEP 440 local label
+            # ("+cpu") was printed as an English word next to the purpose; it is written as 빌드 「cpu」.
+            if "+" in version:
+                base, local = version.split("+", 1)
+                version = f"{base}(빌드 「{local}」)"
             if import_name == "mediapipe":
                 report.dependencies.append(_mediapipe_check(package, version, purpose))
                 continue

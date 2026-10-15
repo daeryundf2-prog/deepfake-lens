@@ -91,3 +91,18 @@ IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "�
 - 픽스처: `fixtures/trustmark/`(재현 `scripts/build_trustmark_fixture.py --encoder <encoder_Q.onnx 폴더>`): 워터마크만, 서명+일치, 서명+다른 ID,
   서명 후 픽셀 변경(하드 바인딩 불일치·소프트 바인딩 일치).
 
+## 5. Meta VideoSeal·AudioSeal (`watermark_videoseal`, `watermark_audioseal`)
+
+- 선택 의존성 `watermark_meta`(torch, audioseal 0.2.0 등). 없으면 `skipped` 「의존성 부재: torch」/「의존성 부재: audioseal」.
+  가중치: `videoseal-y_256b_img.jit`(VideoSeal 1.0, TorchScript, MIT), `audioseal-detector_base.pth`(HF `facebook/audioseal` 리비전 `3c19eba5…`, MIT) — sha256 고정.
+- **VideoSeal**(이미지·영상): 256비트 메시지를 읽지만 존재 확률을 내지 않는다(첫 채널은 검출 점수가 아님) — 어떤 이미지든 256비트가 나오므로
+  디코드 메시지만으로는 무정보다. 등록표(`watermark-registry.json`, 규칙 `min_agreement_bits` 기본 243/256)와 일치할 때만 결정적·생성·강.
+  2026-10 현재 공개·검증된 생성기 메시지가 없어 등록 0건 — 디코드 메시지는 표식 문맥(`marking_context`)의 사실로만 남는다.
+  영상은 프레임을 순서대로 읽어(스트리밍) 처음 600초 중 최대 32프레임을 고르게 골라 로짓을 평균한다. 1024px 초과 이미지·프레임은 줄여서 읽는다(모델 내부 처리 256px; 1280·1024·512px에서 재검출 비트 같음).
+- **AudioSeal**(오디오, 영상의 음성 트랙): ffmpeg로 16 kHz 모노(처음 600초)를 만들어 60초 단위로 검출한다. 워터마크 프레임 비율 ≥ 0.5(라이브러리 기본값)이면
+  중립·약 사실 「AudioSeal 워터마크 검출」(확률·16비트 메시지). 삽입 주체나 AI 생성 여부는 뜻하지 않는다. 생성기 연결은 등록 16비트 메시지와
+  정확 일치일 때만(등록 0건). 오디오 트랙이 없거나 1초 미만이면 `skipped`.
+- 결정성: 추론 중 torch 스레드 1개(잠금으로 직렬화), 끝나면 원래 값으로 되돌린다.
+- WavMark는 보류: `wavmark` 패키지가 실행 시 Hugging Face에서 가중치를 받는 구조(huggingface-hub·resampy·torchaudio 의존)라 오프라인 핀 로딩을
+  따로 만들어야 한다. PixelSeal(1.2 GB 체크포인트, videoseal 패키지 필요)·ChunkySeal(13 GB)도 보류 — `docs/WATERMARK-MEASUREMENTS.md` 끝 참조.
+

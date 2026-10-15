@@ -256,6 +256,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 16,
+      "reason": "techniques-2026 item 5: 이미지·영상 행에 watermark_videoseal, 오디오·영상 행에 watermark_audioseal(선택 torch extra; 기준 환경에는 torch가 없어 「의존성 부재: torch」로 건너뜀) — 등록 메시지 일치만 생성기 귀속, 부재는 원본 아님",
+      "sha256": "75da09072aa69ed621f23e2ef52bd95743ea4c5504bef3f4a376958f0fc9128c",
+      "sets": {
+        "stdlib": "75da09072aa69ed621f23e2ef52bd95743ea4c5504bef3f4a376958f0fc9128c",
+        "full-extras": "2da3a5ebf2e962f9b2baec1d1db66b2fbcc6f28f0cc422f24461c01564e2f156"
+      },
+      "constants_sha256": "9e61db393feef304b21dcf41d6df10146cee2242f30aa26151c3f02a73fadc73",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

@@ -46,6 +46,11 @@ text_lm = ["torch>=2.0", "transformers>=4.40"]
 # (numpy + opencv) and Pillow. Item 4: Adobe TrustMark ONNX decoders (weights:
 # scripts/fetch_watermark_models.py, pinned in models/assets.json).
 watermark = ["onnxruntime>=1.20", "numpy>=1.24", "Pillow>=10.0", "opencv-python>=4.8"]
+# Item 5: Meta VideoSeal (TorchScript) + AudioSeal — heavy (torch); optional.
+# Without it the checks are skipped "의존성 부재: torch". AudioSeal's model code
+# is the audioseal package (pinned: its private loader helpers are used);
+# audio is decoded by ffmpeg. Gate versions: scripts/gate/requirements-tech*.lock.
+watermark_meta = ["torch>=2.3", "audioseal==0.2.0", "omegaconf>=2.3", "einops>=0.7", "numpy>=1.24", "Pillow>=10.0", "opencv-python>=4.8"]
 # Pure-Python HWP/HWPX reader (MIT; sole dep olefile) for .hwp extraction.
 # Without it .hwp files degrade to extractor=unavailable:syhwp.
 hwp = ["syhwp>=0.0.7", "olefile>=0.46"]
@@ -277,9 +282,11 @@ files = [
     "deepfake_lens/media_marks.py",
     "deepfake_lens/wm_imwatermark.py",
     "deepfake_lens/wm_trustmark.py",
+    "deepfake_lens/wm_meta.py",
     "deepfake_lens/tests/test_c2pa24.py",
     "deepfake_lens/tests/test_wm_sdxl.py",
     "deepfake_lens/tests/test_wm_trustmark.py",
+    "deepfake_lens/tests/test_wm_meta.py",
 ]
 follow_imports = "skip"
 ignore_missing_imports = true

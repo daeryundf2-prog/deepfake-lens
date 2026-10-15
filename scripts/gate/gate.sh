@@ -4,12 +4,16 @@
 # Usage (from the repo root):
 #   docker run --rm --init --cpus 4 -v "$PWD":/repo:ro -v "$PWD/scripts/gate/gate.sh":/gate.sh:ro deepfake-lens-gate /gate.sh full|tests|lint|qa-main|cmd "<shell>"
 #   docker run --rm --init --cpus 3 --shm-size=1g -v "$PWD":/repo:ro -v "$PWD/scripts/gate/gate.sh":/gate.sh:ro deepfake-lens-gate:gui /gate.sh gui
+#   techniques-2026: the same with deepfake-lens-gate:tech runs the watermark decoders (torch/onnxruntime + weights).
 # Read each step's output, not only "GATE rc=". Records checks need git history: mount a --no-hardlinks clone whose
 # local `main` points at the phase-0 start (dad9730).
 set -u
 mode=${1:-full}
 rm -rf /work && mkdir /work && cd /repo && tar --exclude=./.venv --exclude=./.venv-api --exclude=./.git -cf - . | (cd /work && tar xf -)
 cp -a /repo/.git /work/.git 2>/dev/null || true
+# techniques-2026: the deepfake-lens-gate:tech image carries the pinned watermark decoder weights
+# (scripts/gate/Dockerfile.tech); they go where the loaders read them. Absent in the reference image.
+[ -d /opt/deepfake-lens-weights ] && cp -a /opt/deepfake-lens-weights/. /work/deepfake_lens/models/
 cd /work
 git config --global --add safe.directory /work 2>/dev/null || true
 export PYTHONPATH=/work

@@ -31,6 +31,8 @@ DOWNLOADS = {
     "trustmark-decoder_Q.onnx": "https://cai-watermark.adobe.net/watermarking/trustmark-models/decoder_Q.onnx",
     "trustmark-decoder_P.onnx": "https://cai-watermark.adobe.net/watermarking/trustmark-models/decoder_P.onnx",
     "trustmark-decoder_C.onnx": "https://cai-watermark.adobe.net/watermarking/trustmark-models/decoder_C.onnx",
+    "videoseal-y_256b_img.jit": "https://dl.fbaipublicfiles.com/videoseal/y_256b_img.jit",
+    "audioseal-detector_base.pth": "https://huggingface.co/facebook/audioseal/resolve/3c19eba53390776cf2cc9ed5f6c9ac67ce72ecba/detector_base.pth",
 }
 GROUPS = {"trustmark": [name for name in DOWNLOADS if name.startswith("trustmark-")],
           "meta": [name for name in DOWNLOADS if not name.startswith("trustmark-")]}
