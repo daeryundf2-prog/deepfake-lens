@@ -30,7 +30,7 @@ from .audio_worker import in_worker_scope
 from .checks import failure_reason
 from .native_path import expand_user, scratch_dir
 from .error_text import exception_text
-from .result_text import display_name
+from .result_text import ROW_IDENTITY_INVARIANT_BROKEN, display_name
 from .vendor_weights import default_models_dir
 
 logger = logging.getLogger(__name__)
@@ -1723,13 +1723,21 @@ class _ReportHasher:
         except (OSError, ValueError, RuntimeError):
             logger.info("report: archive %s could not be re-extracted", container, exc_info=True)
             return digests
+        names: set[str] = set()
         for member in extraction.members:
+            name = extraction.member_name(member, dest)
             try:
                 digest = _compute_sha256(member, dest)
             except _SymlinkRefused:
-                continue
+                digest = None
+            if name in names:
+                # R26-8 (round 26): two members of one name — neither digest is the member's (fail closed)
+                logger.warning("report: archive %s yields two members named %r", container, name)
+                digests.clear()
+                return digests
+            names.add(name)
             if digest:
-                digests[extraction.member_name(member, dest)] = digest  # Y9: the scan's member name
+                digests[name] = digest  # Y9: the scan's member name
         return digests
 
     def close(self) -> None:
@@ -1808,12 +1816,20 @@ def _rederive_report_items(
         # P7: server rows keyed by member path (None = the file's own row);
         # the scan of the single file names its rows from the file name.
         rows: dict[str | None, Any] = {}
+        collided = False
         for row in run.items:
             row_top, row_member = row_identity(row)
             if row_top != name:
                 continue
+            if row_member in rows:
+                collided = True  # R26-8 (round 26): never keep one of two server rows of one identity
+                break
             path = top if row_member is None else member_row_path(top, row_member)
             rows[row_member] = replace(row, path=path, container=None if row_member is None else top, member=row_member)
+        if collided:
+            logger.warning("report: the re-analysis of %s gave two rows of one identity", top)
+            derived_by_top[top] = REPORT_ROW_FAILED.format(reason=ROW_IDENTITY_INVARIANT_BROKEN.format(detail="서버 재분석의 행 식별자 중복"))
+            continue
         derived_by_top[top] = rows
     derived: list[Any] = []
     excluded: list[tuple[Any, str]] = []

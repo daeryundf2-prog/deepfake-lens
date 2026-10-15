@@ -160,7 +160,12 @@ always `0` invited old-contract readings. They remain readable as
   `inner.zip\:\:b.png`, a leading-colon `:lead.png` is `\:lead.png`. Reading
   the chain left to right, `\\` and `\:` are escapes and an unescaped `::`
   separates segments, so it splits back exactly (`result_text.member_chain` /
-  `split_member_chain`). `POST /api/report` identifies
+  `split_member_chain`). R26-8 (round 26): every scan result is checked
+  before it is returned — every row identity unique, a top-level `path` its
+  own escape, a member's chain canonical with `path` = `container::member`,
+  and every member's container a row of the result; otherwise the scan gives
+  no result (CLI exit 1 with `오류: 행 식별자 불변식 위반 — …`, a failed web
+  scan job, and a report whose re-analysis breaks it is 409). `POST /api/report` identifies
   rows by these fields and refuses (400) a member row whose `path` is not
   `container::member`, or (R26-1) whose `member` is not a chain in this form. R12-3 (round 12): a member row also carries
   `member_index` — its 1-based position among the container's extracted

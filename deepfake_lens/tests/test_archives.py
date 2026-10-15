@@ -173,6 +173,61 @@ class MemberChainInjectiveTest(unittest.TestCase):
         self.assertEqual(len(paths), len(set(paths)), paths)
 
 
+class RowIdentityInvariantTest(unittest.TestCase):
+    """R26-8 (round 26): a scan result's row identities must be unique and round-trip (identifier -> (path, member
+    chain) -> identifier); the scan fails closed otherwise. Nothing checked it, so R26-1's collision reached the
+    signed report."""
+
+    def setUp(self) -> None:
+        import shutil
+        import tempfile
+
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def test_the_problems_are_named(self) -> None:
+        from deepfake_lens.result_text import row_identity_problem
+
+        top = {"path": "a.zip"}
+        member = {"path": "a.zip::x.png", "container": "a.zip", "member": "x.png"}
+        self.assertIsNone(row_identity_problem([top, member, {"path": "tri\\:\\:\\:c.png"}]))
+        cases = {
+            "행이 둘 이상": [top, member, dict(member)],
+            "사슬이 정규 형식이 아님": [top, dict(member, member=":x.png", path="a.zip:::x.png")],
+            "path가 container::member와 다름": [top, dict(member, path="a.zip::y.png")],
+            "컨테이너 행이 없음": [member],
+            "정규 행 경로가 아님": [{"path": "a\\:b.png"}],
+        }
+        for expected, rows in cases.items():
+            with self.subTest(expected=expected):
+                self.assertIn(expected, row_identity_problem(rows) or "")
+
+    @unittest.skipIf(__import__("os").name == "nt", "POSIX file names")
+    def test_a_scan_whose_identities_collide_fails_closed(self) -> None:
+        import contextlib
+
+        from deepfake_lens.cli import main as cli_main
+        from deepfake_lens.result_text import RowIdentityError
+
+        png = b"\x89PNG\r\n\x1a\n" + bytes(64)
+        inner = io.BytesIO()
+        with zipfile.ZipFile(inner, "w") as archive:
+            archive.writestr("b.png", png + b"1")
+        make_zip(self.tmp / "z.zip", {"inner.zip": inner.getvalue(), "inner.zip::b.png": png + b"2"})
+        scan_directory(self.tmp)  # R26-1: distinct identities
+        # the R26-1 defect brought back (no segment escape): two rows with one identity
+        with patch("deepfake_lens.archives.escape_member_segment", side_effect=lambda segment: segment):
+            with self.assertRaises(RowIdentityError) as caught:
+                scan_directory(self.tmp)
+            self.assertIn("행 식별자 불변식 위반", str(caught.exception))
+            self.assertIn("'z.zip::inner.zip::b.png'의 행이 둘 이상", str(caught.exception))
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                code = cli_main(["scan", str(self.tmp), "--format", "json", "--no-default-engine"])
+        self.assertNotEqual(code, 0)
+        self.assertIn("행 식별자 불변식 위반", err.getvalue())
+
+
 class ExtractionTests(unittest.TestCase):
     def setUp(self):
         import tempfile

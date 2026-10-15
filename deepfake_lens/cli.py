@@ -40,6 +40,7 @@ from .security import write_security_check
 from .signing import ReportKeyError, load_key_file, resolve_report_key
 from .cli_logging import configure_cli_logging
 from .error_text import LIBRARY_ERROR_FALLBACK, read_error_ko
+from .result_text import RowIdentityError
 from .training import write_neural_training_plan
 from .audio import analyze_audio
 from .face import analyze_faces
@@ -696,6 +697,12 @@ def _main(argv: list[str] | None = None) -> int:
         logging.getLogger(__name__).exception("command %s: input error", args.command)
         print(f"오류: {INPUT_ERROR_MESSAGE.format(reason=escape_echo(input_error_reason(exc)), log=logs.log_hint())}", file=sys.stderr)
         return VERIFY_EXIT_OTHER if args.command == "verify-report" else USAGE_EXIT
+    except RowIdentityError as exc:
+        # R26-8 (round 26): a scan whose row identities are not injective gives no result — said as such
+        logs.command_errors += 1
+        logging.getLogger(__name__).exception("command %s: row identity invariant", args.command)
+        print(f"오류: {exc} — 상세는 {logs.log_hint()}", file=sys.stderr)
+        return UNEXPECTED_ERROR_EXIT
     except Exception as exc:  # noqa: BLE001 - N4: never an English traceback on the console
         logs.command_errors += 1
         logging.getLogger(__name__).exception("command %s failed", args.command)

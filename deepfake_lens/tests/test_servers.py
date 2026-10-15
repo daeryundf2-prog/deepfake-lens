@@ -4138,6 +4138,17 @@ class ReportArchiveMemberChainIsInjectiveTest(_ReportLegsFixture):
                     lost = 1 if self.rows[left_out]["result"]["verdict_code"] == self.MANIPULATED else 0
                     self.assertEqual(body["summary"]["manipulation_evidence"], manipulated - lost)
 
+    def test_a_server_whose_identities_collide_refuses_the_report(self) -> None:
+        """R26-8 (round 26): when the server's own re-analysis gives two rows of one identity (the R26-1 defect brought
+        back by turning the segment escape off), the report is refused (409) — the server never keeps one of them."""
+        rows = list(self.rows.values())
+        with patch("deepfake_lens.archives.escape_member_segment", side_effect=lambda segment: segment):
+            for leg, make in self._legs():
+                with self.subTest(leg=leg):
+                    status, _, raw = make()("/api/report", self._json({"items": rows, "format": "json", "options": {"no_default_engine": "true"}}))
+                    self.assertEqual(status, 409, raw[:400])
+                    self.assertIn("행 식별자 불변식 위반", raw.decode("utf-8"))
+
     def test_a_member_chain_in_another_form_is_400(self) -> None:
         """A posted member must be the chain the scan writes: "inner.zip\\:\\:b.png" written unescaped, or with an
         escape the scan never writes, is not a row of this scan."""

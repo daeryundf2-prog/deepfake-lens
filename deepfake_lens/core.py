@@ -42,7 +42,7 @@ from .error_text import path_scrub_file, path_scrub_root
 from .checks import skipped as skipped_entry
 from .decision import decide
 from .layer_diagnostic import UNAVAILABLE_BAND
-from .result_text import TEXT_LEGAL_LIMITATION, member_row_path, unrecorded_files
+from .result_text import TEXT_LEGAL_LIMITATION, check_row_identities, member_row_path, unrecorded_files
 from .evidence_rules import (
     c2pa_evidence,
     deep_layer_reference,
@@ -573,6 +573,9 @@ def _scan_paths(
                 subfolder_files_skipped=sum(entry["files"] for entry in detail if isinstance(entry.get("files"), int)),
                 subfolders_skipped_detail=detail,
             )
+        # R26-8 (round 26): every row identity unique and round-tripping, or no result at all (fail closed) — a
+        # signed web report rests on the server's own rows being told apart (R26-1).
+        check_row_identities(items)
         return summary, items
     finally:
         for temp_dir in temp_dirs:

@@ -323,6 +323,62 @@ def is_member_row(item: object) -> bool:
     return row_identity(item)[1] is not None
 
 
+# R26-8 (round 26): the scan-stage invariant of row identities. A signed web report is "the server's own rows =
+# the signed rows"; R26-1 showed that this rests on the server's identities being injective, which nothing checked.
+ROW_IDENTITY_INVARIANT_BROKEN = (
+    "행 식별자 불변식 위반 — {detail}. 같은 식별자의 행이 둘 이상이거나 식별자가 경로와 구성원 사슬로 되돌아가지 않으면 "
+    "어느 행이 어느 파일인지 확정할 수 없으므로 이 검사 결과를 내지 않습니다(판단 불가)"
+)
+
+
+class RowIdentityError(RuntimeError):
+    """R26-8: a scan result whose row identities are not unique or do not round-trip (the scan fails closed)."""
+
+
+def row_identity_problem(items: object) -> str | None:
+    """R26-8 (round 26): why the rows of one scan result do not have injective, round-tripping identities, or None.
+
+    Every row's identity (:func:`row_identity`) must be unique; a top-level row path must be the escape of its
+    own unescaped form (:func:`escape_row_path` ∘ :func:`unescape_row_path`); a member row's ``member`` must be
+    a canonical chain (:func:`split_member_chain` → :func:`member_chain` gives it back), its ``path`` the display
+    join :func:`member_row_path`, and its container a top-level row of the same result.
+    """
+    def get(item: object, name: str) -> object:
+        return item.get(name) if isinstance(item, dict) else getattr(item, name, None)
+
+    rows = list(items) if isinstance(items, (list, tuple)) else []
+    seen: set[tuple[str, str | None]] = set()
+    tops: set[str] = set()
+    containers: set[str] = set()
+    for item in rows:
+        top, member = row_identity(item)
+        shown = repr(top if member is None else member_row_path(top, member))[:200]
+        if escape_row_path(unescape_row_path(top)) != top:
+            return f"경로 {shown}가 정규 행 경로가 아님"
+        if member is not None:
+            if not is_canonical_member_chain(member):
+                return f"구성원 {shown}의 사슬이 정규 형식이 아님"
+            if get(item, "path") != member_row_path(top, member):
+                return f"구성원 {shown}의 path가 container::member와 다름"
+            containers.add(top)
+        else:
+            tops.add(top)
+        if (top, member) in seen:
+            return f"식별자 {shown}의 행이 둘 이상"
+        seen.add((top, member))
+    orphans = sorted(containers - tops)
+    if orphans:
+        return f"구성원 행의 압축 파일 {repr(orphans[0])[:200]}에 컨테이너 행이 없음"
+    return None
+
+
+def check_row_identities(items: object) -> None:
+    """R26-8: raise :class:`RowIdentityError` unless :func:`row_identity_problem` finds nothing."""
+    problem = row_identity_problem(items)
+    if problem is not None:
+        raise RowIdentityError(ROW_IDENTITY_INVARIANT_BROKEN.format(detail=problem))
+
+
 # R10-1 (round 10): a file name is attacker-controlled text. Printed raw, a
 # name with a CR overwrote the CLI table row ("x<CR>원본성 근거 있음 …
 # family_photo.png" over an A1111 image whose JSON verdict is 조작·생성 근거

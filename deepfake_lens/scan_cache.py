@@ -850,7 +850,9 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    with ":" (the literal member "inner.zip::b.png" is "inner.zip\:\:b.png", ":lead.png" is "\:lead.png"),
 #    so it is never the chain of a nested archive's member. Archive rows are not cached; raised because the
 #    scan JSON of the same input changed.
-OUTPUT_FORMAT_GENERATION = 13
+# 14: R26-8 — a new user-facing constant (result_text.ROW_IDENTITY_INVARIANT_BROKEN): a scan whose row identities
+#    are not unique or do not round-trip gives no result. No row of a valid scan changes.
+OUTPUT_FORMAT_GENERATION = 14
 
 
 def cache_extension(path: Path) -> str:
