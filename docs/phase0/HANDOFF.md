@@ -93,10 +93,10 @@ python scripts/sync_model_docs.py --check
 python scripts/verify_contracts.py                       # 스키마 바뀌면 contracts/PIN.json 재핀
 python scripts/stress_shutdown.py --runs 30              # 신호·자식 프로세스 관련 변경 시
 # QA 하네스의 오디오 경로(23차 잔여 리스크): /venv(librosa) + /venv-api(fastapi·pymupdf)를 함께 보는 임시 venv에서 --qa-only
-gate.sh qa-main                                          # full에 포함, 결과는 /tmp/qa-main(기록 아님)
+gate.sh qa-main                                          # full에 포함, /tmp 아래에만 씀(기록 아님, R24-9)
 ```
 
-`qa-main` 단계(23차): 적합성 기록(`docs/CONFORMANCE.md`)은 지금처럼 API 환경(librosa 없음)에서 만든다. 그래서 QA-IN-1·QA-OUT-4의 오디오 경로는 기록 실행에서 한 번도 돌지 않았고, 상대 경로 오디오 회귀(R23-1)가 4라운드 동안 드러나지 않았다. `gate.sh full`은 이제 마지막 단계로 하네스를 `--qa-only`로 한 번 더 돌린다 — `/venv`의 패키지를 먼저, `/venv-api`의 패키지를 뒤에 보는 임시 venv(`.pth`)라 librosa와 fastapi가 모두 있다. 출력은 `/tmp/qa-main`에만 쓰고 기록은 바꾸지 않는다. QA 테스트 중 `QaOut4SameResultEverywhereTest.test_audio_folder_relative_cli_paths_match_the_servers`와 `QaIn1ReadOnlyEvidenceTest.test_relative_audio_commands_from_a_project_folder_leave_it_untouched`는 환경과 무관하게 돌며(librosa가 없으면 양쪽 모두 `skipped`, 있으면 `ran`을 요구), 상대 경로·프로젝트 `.venv` 배치를 시험한다.
+`qa-main` 단계(23차): 적합성 기록(`docs/CONFORMANCE.md`)은 지금처럼 API 환경(librosa 없음)에서 만든다. 그래서 QA-IN-1·QA-OUT-4의 오디오 경로는 기록 실행에서 한 번도 돌지 않았고, 상대 경로 오디오 회귀(R23-1)가 4라운드 동안 드러나지 않았다. `gate.sh full`은 이제 마지막 단계로 하네스를 `--qa-only`로 한 번 더 돌린다 — `/venv`의 패키지를 먼저, `/venv-api`의 패키지를 뒤에 보는 임시 venv(`.pth`)라 librosa와 fastapi가 모두 있다. 기록은 바꾸지 않는다. 쓰는 곳(24차 R24-9 — 23차 문서는 "`/tmp/qa-main`에만 쓴다"고 했으나 실제로는 실행하는 사용자의 `~/.cache/deepfake-lens`(로그, numba published 캐시)와 표준 라이브러리·저장소의 `__pycache__`도 썼다): 하네스는 `HOME`·`XDG_CACHE_HOME`·`XDG_DATA_HOME`·`XDG_CONFIG_HOME`을 `/tmp/qa-main/home` 아래로 두고 `PYTHONDONTWRITEBYTECODE=1`로 돈다. 그래서 `/tmp/qa-main`(표, 로그, 그 HOME의 도구 폴더 `.cache/deepfake-lens`), `/tmp/qa-main-venv`(임시 venv와 그 환경의 numba 캐시, R22-9), 테스트의 임시 폴더(`/tmp/tmp*`, `/tmp/deepfake-lens-<uid>`)에만 쓴다. 24차 수정에서 컨테이너의 `/tmp`·`/proc`·`/sys`·`/dev`·`/work` 밖에 새로 생긴 파일이 0개임을 `find -newer`로 확인했다. 개발 머신에서 같은 명령을 돌려도 사용자의 도구 캐시는 바뀌지 않는다. QA 테스트 중 `QaOut4SameResultEverywhereTest.test_audio_folder_relative_cli_paths_match_the_servers`와 `QaIn1ReadOnlyEvidenceTest.test_relative_audio_commands_from_a_project_folder_leave_it_untouched`는 환경과 무관하게 돌며(librosa가 없으면 양쪽 모두 `skipped`, 있으면 `ran`을 요구), 상대 경로·프로젝트 `.venv` 배치를 시험한다.
 
 기록 재생성(라운드 끝마다, 마지막 커밋으로):
 
