@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import contextvars
 import logging
 import os
 import re
@@ -488,15 +489,20 @@ def _scan_paths(
             # ``touch -r`` of an archive over REHASH_MAX_BYTES was missed).
             before, pre_digest = _container_state_and_digest(path)
             try:
-                extraction = extract_archive(path, dest)
+                # R26-2 (round 26): the archive registered like an analyzed file, so an extraction failure names it
+                # "<root>/l.zip" whatever the invocation (`cd case; scan .` wrote "l.zip")
+                with path_scrub_file(path):
+                    extraction = extract_archive(path, dest)
             except Exception as exc:
                 # A corrupt/unreadable archive becomes a failed container
                 # row — one bad file must not kill the whole scan.
                 logger.exception("archive extraction failed: %s", path)
+                with path_scrub_file(path):
+                    reason = failure_reason(exc)
                 archive_meta[rel] = {
                     "path": path, "fmt": archive_format(path),
-                    "skipped": 0, "warnings": [f"압축 해제 실패: {failure_reason(exc)}"],
-                    "error": failure_reason(exc),
+                    "skipped": 0, "warnings": [f"압축 해제 실패: {reason}"],
+                    "error": reason,
                     **_container_integrity(path, before, pre_digest),
                 }
                 archive_members[rel] = []
@@ -541,10 +547,12 @@ def _scan_paths(
 
             extra: list[ScanItem] = []
             for err_path, exc in iter_errors:
+                with path_scrub_file(err_path):  # R26-2: "<root>/sub" from `cd case; scan .` too
+                    reason = failure_reason(exc)
                 extra.append(ScanItem(
                     _display_path(err_path, root=root), err_path.name,
                     "unknown", "failed", 0,
-                    error=UNREADABLE_FOLDER_ROW_REASON.format(reason=failure_reason(exc)),
+                    error=UNREADABLE_FOLDER_ROW_REASON.format(reason=reason),
                 ))
             # D10: a symlink in the evidence folder is listed (never followed)
             # so the report accounts for every directory entry it was given.
@@ -783,6 +791,14 @@ def _scan_specs(
     scan_context = _cache_scan_context(model_path) if cache is not None else ""
 
     def analyze_one(spec: _ScanSpec) -> tuple[ScanItem, str | None, bool]:
+        # R26-2 (round 26): every reason of the row — the read failure (R25-2), a size-check or analysis error, not
+        # only the analyzers' — is made with the scan root and the file registered, in this thread: the read-failure
+        # row was made outside analyze_file's registration, and a worker thread does not inherit the scan's, so
+        # `cd case; scan .` and `--workers 4` wrote "lock.wav" where `scan /abs/case` wrote "<root>/lock.wav".
+        with path_scrub_root(root), path_scrub_file(spec[0]):
+            return _analyze_one(spec)
+
+    def _analyze_one(spec: _ScanSpec) -> tuple[ScanItem, str | None, bool]:
         path, display, identity = spec
         if path in duplicates:
             display_path = display or _display_path(path, root=root)
@@ -927,8 +943,16 @@ def _scan_specs(
         if workers > 1 and len(specs) > 1:
             # Each worker still checks should_stop so a cancel short-circuits
             # remaining items instead of running every analysis to completion.
+            # R26-2 (round 26): each task runs in a copy of the scanning thread's context (path scrubbing and the
+            # other context variables of the scan), as the sequential loop does — worker threads start empty.
+            context = contextvars.copy_context()
+            bound = scope.bind(analyze_and_report)
+
+            def in_scan_context(spec: _ScanSpec) -> tuple[ScanItem, str | None, bool] | None:
+                return context.copy().run(bound, spec)
+
             with ThreadPoolExecutor(max_workers=workers) as executor:
-                outcomes = list(executor.map(scope.bind(analyze_and_report), specs))
+                outcomes = list(executor.map(in_scan_context, specs))
             for spec, outcome in zip(specs, outcomes):
                 if outcome is None:
                     cancelled.append(spec)

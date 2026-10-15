@@ -852,7 +852,10 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    scan JSON of the same input changed.
 # 14: R26-8 — a new user-facing constant (result_text.ROW_IDENTITY_INVARIANT_BROKEN): a scan whose row identities
 #    are not unique or do not round-trip gives no result. No row of a valid scan changes.
-OUTPUT_FORMAT_GENERATION = 14
+# 15: R26-2 — a reason naming the file as repr() escapes it ('<root>/한글\xa0x.wav' — a NBSP, a TAB) or by a
+#    name the audio worker staged reads "<root>/…" from `cd case; scan .` and with --workers 4 too; a
+#    generation-14 row of such a scan said '한글\xa0x.wav' or '000001-….wav'.
+OUTPUT_FORMAT_GENERATION = 15
 
 
 def cache_extension(path: Path) -> str:

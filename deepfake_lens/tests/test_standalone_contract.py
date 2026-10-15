@@ -558,6 +558,84 @@ class UnreadableMediaRowTest(unittest.TestCase):
         self.assertIn(self.CHANGED, result.verdict)
 
 
+class ReasonPathFormIsTheSameEverywhereTest(unittest.TestCase):
+    """R26-2 (round 26): the reasons of R25-2's read-failure rows (and an archive's extraction failure, an unreadable
+    folder) were made outside the path-scrub registration, and a worker thread did not inherit the scan's: `scan
+    /abs/case` wrote 「…: <root>/lock.wav」, but `cd case; scan .` and `--workers 4` wrote 「…: lock.wav」 (workers 1 and 4
+    gave different bytes). A name repr() escapes (NBSP, TAB) was not found either: 「'한글\\xa0x.wav'」 from `.`. Every
+    reason must read the same, ``<root>/…``, from the absolute folder, the relative folder and ".", with 1 or 4 workers;
+    a name the audio worker staged must never reach a row."""
+
+    @unittest.skipUnless(os.name == "posix", "POSIX uid")
+    def test_every_invocation_writes_the_same_reasons(self) -> None:
+        import subprocess
+        import sys
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chmod(tmp, 0o777)
+            case = Path(tmp) / "case"
+            case.mkdir()
+            case.chmod(0o777)
+            write_wav(case / "lock.wav")
+            (case / "lock.png").write_bytes(A1111.read_bytes())
+            (case / "lock.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42" + bytes(64))
+            with zipfile.ZipFile(case / "l.zip", "w") as archive:
+                archive.writestr("a.txt", "메모입니다.")
+            (case / "sub").mkdir()
+            for name in ("lock.wav", "lock.png", "lock.mp4", "l.zip", "sub"):
+                (case / name).chmod(0)
+            for name in ("한글\u00a0x.wav", "t\tab.wav", "c:x.wav"):
+                (case / name).write_bytes(b"RIFF\x04\x00\x00\x00WAVE")  # a broken WAV: a decoder reason naming the file
+            nbsp_folder = case / "f\u00a0d"
+            nbsp_folder.mkdir()
+            (nbsp_folder / "n.wav").write_bytes(b"RIFF\x04\x00\x00\x00WAVE")
+            home = Path(tmp) / "home"
+            home.mkdir()
+            home.chmod(0o777)
+            env = {**os.environ, "HOME": str(home), "PYTHONPATH": str(REPO_ROOT), "PYTHONDONTWRITEBYTECODE": "1"}
+            env.pop("XDG_CACHE_HOME", None)
+            as_nobody = os.geteuid() == 0
+
+            def drop() -> None:  # pragma: no cover - runs in the child
+                os.setgid(65534)
+                os.setuid(65534)
+
+            def reasons(cwd: Path, folder: str, *extra: str) -> list[str]:
+                done = subprocess.run([sys.executable, "-m", "deepfake_lens", "scan", folder, "--recursive", "--format", "json", *extra],
+                                      cwd=cwd, env=env, capture_output=True, text=True, timeout=900,
+                                      preexec_fn=drop if as_nobody else None)
+                self.assertEqual(done.returncode, 0, done.stderr[-1500:])
+                lines = []
+                for row in sorted(json.loads(done.stdout)["items"], key=lambda row: row["path"]):
+                    result = row.get("result") or {}
+                    texts = [row.get("error"), result.get("verdict"), *(entry.get("reason") for entry in result.get("coverage", []))]
+                    lines.append(f"{row['path']} | {row['status']} | " + " | ".join(text for text in texts if text))
+                return lines
+
+            runs = {
+                "abs": reasons(Path(tmp), str(case)),
+                "relative": reasons(Path(tmp), "case"),
+                "dot": reasons(case, "."),
+                "abs-workers4": reasons(Path(tmp), str(case), "--workers", "4"),
+                "dot-workers4": reasons(case, ".", "--workers", "4"),
+            }
+            # a folder whose own name repr() escapes, scanned by its absolute name and as "." (the audio worker gets a
+            # non-ASCII absolute name there and stages it itself)
+            nbsp = {"abs": reasons(Path(tmp), str(nbsp_folder)), "dot": reasons(nbsp_folder, ".")}
+        expected = runs["abs"]
+        text = "\n".join(expected)
+        for name in ("lock.wav", "lock.png", "lock.mp4", "l.zip", "sub"):
+            self.assertIn(f"<root>/{name}", text, name)
+        self.assertNotIn(str(Path(tmp)), text)
+        self.assertNotRegex(text, r"\d{6}-[0-9a-f]{12}")  # no staged name
+        for name, lines in runs.items():
+            with self.subTest(invocation=name):
+                self.assertEqual(lines, expected)
+        self.assertEqual(nbsp["dot"], nbsp["abs"])
+        self.assertNotRegex("\n".join(nbsp["dot"]), r"\d{6}-[0-9a-f]{12}")
+
+
 @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed")
 class ApiEndpointContractTest(unittest.TestCase):
     """D2/D16: api-serve analysis endpoints and the /api/stats header rule."""

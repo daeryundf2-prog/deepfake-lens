@@ -65,6 +65,11 @@ _WINDOWS_ABSOLUTE = re.compile(rf"(?<![\w])(?:[A-Za-z]:|\\\\[^\\/{_PATH_STOP}]+)
 _QUOTED_ABSOLUTE = re.compile(r"(['\"])((?:/|[A-Za-z]:[\\/]|\\\\)[^'\"\n]*)\1")
 
 
+def _repr_inner(text: str) -> str:
+    """R26-2 (round 26): ``text`` as ``repr()`` writes it between its quotes ("한글\\xa0x.wav" for a NBSP name)."""
+    return repr(text)[1:-1]
+
+
 def _root_variants(root: Path | str) -> set[str]:
     raw = str(root)
     variants = {raw}
@@ -72,6 +77,8 @@ def _root_variants(root: Path | str) -> set[str]:
         variants.add(os.path.abspath(raw))
     with contextlib.suppress(OSError, RuntimeError, ValueError):
         variants.add(str(Path(raw).resolve()))
+    # R26-2 (round 26): a decoder quotes the path with repr(), which escapes a NBSP, a TAB … in a folder name
+    variants |= {_repr_inner(variant) for variant in variants}
     return {variant.rstrip("/\\") for variant in variants if variant.rstrip("/\\") not in ("", ".")}
 
 
@@ -105,6 +112,9 @@ def path_scrub_file(path: Path | str) -> Iterator[None]:
         with contextlib.suppress(OSError, RuntimeError, ValueError):
             absolute = os.path.abspath(raw)
             pairs = [(form, absolute) for form in {raw, os.path.normpath(raw)} if form not in ("", ".")]
+            # R26-2 (round 26): and as repr() quotes it — "'한글\\xa0x.wav'" for a name with a NBSP (or a TAB, a
+            # control) was left as it was, so `cd case; scan .` wrote it without "<root>/"
+            pairs += [(_repr_inner(form), _repr_inner(absolute)) for form, absolute in pairs if _repr_inner(form) != form]
     token = _SCRUB_FILES.set(_SCRUB_FILES.get() + tuple(sorted(pairs, key=lambda pair: len(pair[0]), reverse=True)))
     try:
         yield
@@ -131,6 +141,20 @@ def unescape_surrogates(text: str) -> str:
 def _basename(match: re.Match[str]) -> str:
     text = match.group(0)
     return re.split(r"[\\/]", text)[-1] or text
+
+
+def _registered_absolute(name: str) -> str:
+    """R26-2 (round 26): ``name`` — a whole path value such as ``OSError.filename`` — as its absolute name when it is
+    the analyzed file's registered relative name (:func:`path_scrub_file`), else unchanged.
+
+    The errno message names the file without quotes ("[Errno 13] 접근 권한이 없습니다: lock.wav"), so the quoted-name
+    rule of :func:`scrub_paths` never saw it: `cd case; scan .` wrote "lock.wav" where `scan /abs/case` wrote
+    "<root>/lock.wav".
+    """
+    for given, absolute in _SCRUB_FILES.get():
+        if name == given:
+            return absolute
+    return name
 
 
 def scrub_paths(text: str) -> str:
@@ -945,7 +969,7 @@ def korean_exception_message(exc: BaseException) -> str:
     (path-scrubbed) text is logged at INFO — the CLI log file — only.
     """
     if isinstance(exc, OSError) and exc.errno in _ERRNO_KO:
-        target = f": {scrub_paths(exc.filename)}" if isinstance(exc.filename, str) and exc.filename else ""
+        target = f": {scrub_paths(_registered_absolute(exc.filename))}" if isinstance(exc.filename, str) and exc.filename else ""
         return f"[Errno {exc.errno}] {_ERRNO_KO[exc.errno]}{target}"
     message = scrub_paths(str(exc)).strip()
     c2pa = _C2PA_CLASS.match(type(exc).__name__)
