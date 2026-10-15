@@ -843,7 +843,10 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    (audio_features was always failed "LibsndfileError: … (형식 인식 불가)"; now ran,
 #    or skipped "의존성 부재: ffmpeg"), and a missing dependency's message names it
 #    ("… librosa을(를) 설치하세요" — was "librosa를 설치하세요" for every one).
-OUTPUT_FORMAT_GENERATION = 11
+# 12: R25-7 — a reason naming the analyzed file by a relative name (a decoder's
+#    'a.wav' in `cd case; scan .`) is written "<root>/a.wav" like the absolute and
+#    root-relative invocations; a generation-11 row from such a scan said 'a.wav'.
+OUTPUT_FORMAT_GENERATION = 12
 
 
 def cache_extension(path: Path) -> str:

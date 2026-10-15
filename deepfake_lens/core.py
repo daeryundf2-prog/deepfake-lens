@@ -38,7 +38,7 @@ from .checks import AnalyzerError, CheckSkipped, run_check, skipped
 from .image_class import MEASURABLE_MIN_SIDE_PX, ImageClass, classify_image, resolution_out_of_range
 from .checks import failed as failed_entry
 from .checks import failure_reason
-from .error_text import path_scrub_root
+from .error_text import path_scrub_file, path_scrub_root
 from .checks import skipped as skipped_entry
 from .decision import decide
 from .layer_diagnostic import UNAVAILABLE_BAND
@@ -1128,7 +1128,8 @@ def analyze_file(
     path scrubbing while the file is analyzed — this also covers worker
     threads, which do not inherit the scan's context.
     """
-    with path_scrub_root(root if root is not None else Path(path).parent):
+    # R25-7 (round 25): and the file itself, so its reasons name it the same way however it was given
+    with path_scrub_root(root if root is not None else Path(path).parent), path_scrub_file(path):
         return _analyze_file(
             path, root=root, display=display, text_bytes=text_bytes, metadata_bytes=metadata_bytes,
             pixel_mode=pixel_mode, pixel_max_side=pixel_max_side, heatmaps=heatmaps,
