@@ -200,7 +200,9 @@ def analysis_options_line(signed: dict[str, object]) -> str | None:
 def scan_root_line(signed: dict[str, object]) -> str | None:
     """"검사 폴더(…): caseA" for a signed body with ``scan_root`` (R9-9), else None."""
     value = signed.get("scan_root")
-    return f"{SCAN_ROOT_LABEL}: {value}" if isinstance(value, str) and value else None
+    # R25-3 (round 25): the folder's name through display_name like every file name the reports print (it was the
+    # one name printed as it is — a literal "\u05e2" folder printed like the PDF's escape of a glyphless "ע").
+    return f"{SCAN_ROOT_LABEL}: {display_name(value)}" if isinstance(value, str) and value else None
 
 
 def signature_lines_ko(signed: dict[str, object]) -> list[str]:
@@ -540,14 +542,15 @@ def _render_forensic_pdf(
 ) -> bytes:
     """Lay out the forensic PDF with :class:`pdf_layout.PdfLayout` (G2) and return its bytes."""
     from .pdf_layout import Cell, PdfLayout
-    from .result_text import display_name
+    from .result_text import display_name, pdf_field_text
 
     header_blue = (0.15, 0.25, 0.45)
     # R24-7 (round 24): the examiner's fields (office, contact, exhibit number) through display_name, like the file
     # names (R23-4) — a literal "\u05e2" typed into one never prints like the escape of a glyphless "ע".
-    firm_name = display_name(office.header)
-    contact_line = f"대표전화: {display_name(office.contact)}" if office.contact else ""
-    exhibit_no = display_name(exhibit_no)
+    # R25-3 (round 25): pdf_field_text — the same without the Markdown "|" escape (a PDF has no table syntax).
+    firm_name = pdf_field_text(office.header)
+    contact_line = f"대표전화: {pdf_field_text(office.contact)}" if office.contact else ""
+    exhibit_no = pdf_field_text(exhibit_no)
 
     def page_header(layout: PdfLayout) -> None:
         layout.text(layout.left, layout.right, firm_name, 9.0, header_blue, gap=0.5)

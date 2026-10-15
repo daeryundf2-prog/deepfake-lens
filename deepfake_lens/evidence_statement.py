@@ -645,16 +645,25 @@ def _render_statement_pdf(
     """
     from .pdf_layout import Cell, PdfLayout
     from .reports import analysis_options_line, scan_root_line
-    from .result_text import display_name
+    from .result_text import pdf_field_text
 
     # R24-7 (round 24): the case fields (the examiner's input — case number and name, parties, court, office,
     # contact) are drawn through display_name like the file names (R23-4): every literal backslash doubled, so
     # the \uNNNN escape PdfLayout.drawable writes for a character the font lacks never equals a literal
     # "\uNNNN" typed into the field ("ע corp" and "\u05e2 corp" printed alike).
-    case_no, case_name = display_name(statement.case_no), display_name(statement.case_name)
-    plaintiff, defendant = display_name(statement.plaintiff), display_name(statement.defendant)
-    law_firm, center, contact = display_name(statement.law_firm), display_name(statement.center), display_name(statement.contact)
-    court_name = display_name(statement.court)
+    # R25-3 (round 25): through pdf_field_text (display_name without the Markdown "|" escape — "x|y" prints as
+    # typed), and the law firm of the table's 「작성자 및 일자」 cell too: it was drawn as typed
+    # (entry.author_date), so that cell still printed both values above as "\u05e2 corp".
+    case_no, case_name = pdf_field_text(statement.case_no), pdf_field_text(statement.case_name)
+    plaintiff, defendant = pdf_field_text(statement.plaintiff), pdf_field_text(statement.defendant)
+    law_firm, center, contact = pdf_field_text(statement.law_firm), pdf_field_text(statement.center), pdf_field_text(statement.contact)
+    court_name = pdf_field_text(statement.court)
+
+    def author_cell(entry: EvidenceStatementEntry) -> str:
+        """The "작성자 및 일자" cell: the shown law firm over the date (``author_date`` is "<law firm>\n<date>")."""
+        if not statement.law_firm:
+            return entry.author_date
+        return f"{law_firm}\n{entry.author_date.rsplit(chr(10), 1)[-1]}"
 
     def page_header(layout: PdfLayout) -> None:
         firm_header = f"{law_firm} {center}".strip()
@@ -695,7 +704,7 @@ def _render_statement_pdf(
             [
                 Cell(0, entry.exhibit_no, 8.5, (0.1, 0.15, 0.3)),
                 Cell(1, entry.document_name or " ", 7.5, (0.2, 0.2, 0.2)),
-                Cell(2, entry.author_date or " ", 7.5, (0.3, 0.3, 0.3)),
+                Cell(2, author_cell(entry) or " ", 7.5, (0.3, 0.3, 0.3)),
                 Cell(3, entry.purpose_of_proof or " ", 6.8, (0.15, 0.15, 0.15)),
             ],
             fill=(0.97, 0.98, 0.99) if idx % 2 == 1 else None,
