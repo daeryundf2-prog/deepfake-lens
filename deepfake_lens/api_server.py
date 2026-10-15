@@ -972,6 +972,14 @@ def create_app(
             root_text = scan_root_text(root)
             payload["scan_root"] = root_text
             payload["scan_root_b64"] = fs_b64encode(root_text)  # R12-4
+            # R26-5 (round 26): the finished scan is this server's job record (scan_job = the stream's job_id), so a
+            # report of a cancelled stream's partial result with its cancelled archive containers is accepted — it
+            # was always 400 (only /api/scan?async=1 jobs were held).
+            import copy
+
+            from .webapp_api import record_stream_scan_job
+
+            record_stream_scan_job(job_id, "cancelled" if summary.cancelled else "done", copy.deepcopy(payload))
             if cancel.is_set():
                 # N8: total = rows the scan planned, done = rows processed
                 # before the cancel (processed kept as the old name of done).

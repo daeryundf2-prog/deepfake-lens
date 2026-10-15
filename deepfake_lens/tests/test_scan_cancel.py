@@ -296,5 +296,99 @@ class StreamCancelCarriesThePartialResultTest(unittest.TestCase):
         self.assertEqual(_cancelled_reason(partial), 5)
 
 
+
+@unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed")
+class StreamCancelledPartialIsAReportableJobTest(unittest.TestCase):
+    """R26-5 (round 26): a cancelled /api/scan/stream's ``partial`` with an archive the cancel left ``cancelled`` could
+    never be reported: the stream's job lived only in api-serve's cancel registry, so ``scan_job`` = the stream's job_id
+    was 「…scan_job이 이 서버가 이 폴더의 검사를 취소로 끝낸 검사 작업이 아닙니다(없음·만료·다른 폴더·완료된 작업)…」 — 400 with a
+    reason that did not fit (it was such a job). The finished stream is now a server-held job record: the report is
+    200 with the server's own cancel count, and without ``scan_job`` the 400 names both kinds of job id."""
+
+    HEADERS = {"host": "localhost", "X-Deepfake-Lens-Client": "r26"}
+
+    def _stream(self, app: Any, folder: Path, cancel_after: int | None, number: int) -> tuple[str, dict[str, Any]]:
+        import uuid
+
+        from fastapi.testclient import TestClient
+
+        real = core.analyze_file
+        calls: list[int] = []
+        fixed = uuid.UUID(int=(0x0123456789A0 + number) << 80)  # the stream's job id, known before it starts
+        state: dict[str, str] = {"job": fixed.hex[:12]}
+
+        def maybe_cancel(*args: Any, **kwargs: Any) -> Any:
+            calls.append(1)
+            if cancel_after is not None and len(calls) == cancel_after:
+                response = TestClient(app).post(f"/api/jobs/{state['job']}/cancel", headers=self.HEADERS)
+                assert response.status_code == 200, response.text
+            return real(*args, **kwargs)
+
+        events: list[tuple[str, dict[str, Any]]] = []
+        with mock.patch.object(core, "analyze_file", side_effect=maybe_cancel), mock.patch("uuid.uuid4", return_value=fixed):
+            with TestClient(app).stream("POST", "/api/scan/stream", params={"directory": str(folder)}, headers=self.HEADERS) as response:
+                buffer = ""
+                for chunk in response.iter_text():
+                    buffer += chunk
+                    while "\n\n" in buffer:
+                        block, buffer = buffer.split("\n\n", 1)
+                        lines = block.strip().splitlines()
+                        if lines and lines[0].startswith("event: "):
+                            data = json.loads("".join(line[len("data: "):] for line in lines[1:] if line.startswith("data: ")))
+                            events.append((lines[0][len("event: "):], data))
+        self.assertEqual(events[0], ("job", {"job_id": state["job"]}))
+        return state["job"], dict(events[-1][1], event=events[-1][0])
+
+    def test_a_cancelled_streams_partial_is_reported_with_its_job(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from deepfake_lens.api_server import create_app
+
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(webapp_api, "_READ_ROOTS", OrderedDict()), \
+                mock.patch.object(webapp_api, "_SCAN_JOBS", {}):
+            folder = Path(tmp).resolve() / "case"
+            folder.mkdir()
+            with zipfile.ZipFile(folder / "a0.zip", "w") as archive:
+                for index in range(6):
+                    archive.writestr(f"m{index}.txt", f"구성 파일 메모 {index}입니다.")
+            for index in range(4):
+                (folder / f"b{index}.txt").write_text(f"메모 {index}", encoding="utf-8")
+            webapp_api.configure_read_roots(folder)
+            app = create_app(default_folder=folder)
+            job_id, final = self._stream(app, folder, cancel_after=3, number=1)
+            self.assertEqual(final["event"], "cancelled")
+            partial = final["partial"]
+            rows = {row["path"]: row for row in partial["items"]}
+            self.assertEqual(rows["a0.zip"]["status"], "cancelled")
+            client = TestClient(app)
+
+            def report(**extra: Any) -> Any:
+                body = {"items": partial["items"], "scan_root": partial["scan_root"], "format": "json", **extra}
+                return client.post("/api/report", content=json.dumps(body).encode("utf-8"),
+                                   headers={**self.HEADERS, "Content-Type": "application/json"})
+
+            response = report(scan_job=job_id)
+            self.assertEqual(response.status_code, 200, response.text[:400])
+            body = response.json()
+            self.assertTrue(body["summary"]["cancelled"])
+            self.assertEqual((body["summary"]["files_cancelled"], body["files_cancelled_source"]), (final["files_cancelled"], "server"))
+            self.assertEqual(body["unrecorded_files"]["listing"], {"source": "scan_job", "not_in_report": 0})
+            self.assertIn("a0.zip", [row["path"] for row in body["excluded_items"]])
+            refused = report()
+            self.assertEqual(refused.status_code, 400, refused.text[:400])
+            self.assertIn("/api/scan/stream의 작업 id", refused.json()["error"])
+            # a stream that finished is held too: its rows are the report's listing
+            done_id, done = self._stream(app, folder, cancel_after=None, number=2)
+            self.assertEqual(done["event"], "result")
+            response = client.post("/api/report", content=json.dumps({
+                "items": [{key: value for key, value in row.items() if key not in ("verdict_code", "grade", "probability")} for row in done["items"]],
+                "scan_root": done["scan_root"], "format": "json", "scan_job": done_id,
+            }).encode("utf-8"), headers={**self.HEADERS, "Content-Type": "application/json"})
+            self.assertEqual(response.status_code, 200, response.text[:400])
+            self.assertEqual(response.json()["unrecorded_files"]["listing"], {"source": "scan_job", "not_in_report": 0})
+            # held stream records never block an async scan (they do not count against _SCAN_JOB_MAX)
+            with mock.patch.object(webapp_api, "_SCAN_JOB_MAX", 1):
+                self.assertIn("job_id", webapp_api._scan_job_start(f"folder={folder}&no_default_engine=true", default_folder=folder))
+
 if __name__ == "__main__":
     unittest.main()

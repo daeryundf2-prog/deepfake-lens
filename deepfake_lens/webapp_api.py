@@ -267,10 +267,39 @@ _SCAN_JOB_TTL_SECONDS = 15 * 60
 _SCAN_JOB_MAX = 32
 
 
+# R26-5 (round 26): finished /api/scan/stream scans of api-serve held as server records (source "stream"), so a
+# report of a cancelled stream's partial result can name it by ``scan_job`` like an async job. They do not count
+# against _SCAN_JOB_MAX (a stream never blocks an async scan); at most this many are kept, the oldest dropped first.
+_STREAM_JOB_RECORDS_MAX = 32
+STREAM_JOB_SOURCE = "stream"
+
+
 def _scan_job_evict(now: float) -> None:
     """Drop finished jobs past the TTL (called with the lock held)."""
     for key in [key for key, entry in _SCAN_JOBS.items() if now - entry.get("finished", entry["created"]) > _SCAN_JOB_TTL_SECONDS]:
         _SCAN_JOBS.pop(key, None)
+
+
+def record_stream_scan_job(job_id: str, status: str, result: dict[str, Any]) -> None:
+    """R26-5 (round 26): keep a finished ``/api/scan/stream`` scan (``done`` or ``cancelled``) as this server's job record.
+
+    The stream's job lived only in api-serve's cancel registry, so a report of its ``partial`` result — whose
+    archive containers a cancel left ``cancelled`` — could never name a job the server held (R25-1's rule:
+    "cancelled" rows only from the server's own job) and was 400 with a reason that did not fit. The record is the
+    payload the stream sent (rows, summary, ``scan_root``), held like an async job's result (same TTL).
+    """
+    if status not in ("done", "cancelled") or not isinstance(result, dict):
+        return
+    now = time.time()
+    with _SCAN_JOBS_LOCK:
+        _scan_job_evict(now)
+        if job_id in _SCAN_JOBS:
+            return  # never replace another job's record
+        streams = sorted((entry.get("finished", entry["created"]), key) for key, entry in _SCAN_JOBS.items()
+                         if entry.get("source") == STREAM_JOB_SOURCE)
+        for _, key in streams[: max(0, len(streams) - _STREAM_JOB_RECORDS_MAX + 1)]:
+            _SCAN_JOBS.pop(key, None)
+        _SCAN_JOBS[job_id] = {"status": status, "created": now, "finished": now, "result": result, "source": STREAM_JOB_SOURCE}
 
 
 def _scan_job_start(query: str, *, default_folder: Path | None) -> dict[str, object]:
@@ -281,7 +310,7 @@ def _scan_job_start(query: str, *, default_folder: Path | None) -> dict[str, obj
     _web_options(parse_qs(query))
     with _SCAN_JOBS_LOCK:
         _scan_job_evict(time.time())
-        if len(_SCAN_JOBS) >= _SCAN_JOB_MAX:
+        if sum(1 for entry in _SCAN_JOBS.values() if entry.get("source") != STREAM_JOB_SOURCE) >= _SCAN_JOB_MAX:
             raise ValueError("실행 중인 검사 작업이 너무 많습니다 — 진행 중인 작업이 끝난 뒤 다시 시도하십시오")
         job_id = secrets.token_hex(8)
         cancel = threading.Event()
@@ -1531,8 +1560,8 @@ REPORT_ROW_CANCELLED_NOT_CONTAINER = (
 )
 REPORT_ROW_CANCELLED_NOT_CANCELLED_SCAN = (
     "검사 결과 항목 「{path}」의 상태가 cancelled인데 scan_job이 이 서버가 이 폴더의 검사를 취소로 끝낸 검사 작업이 아닙니다"
-    "(없음·만료·다른 폴더·완료된 작업) — 검사 취소로 미분석인 압축 파일은 서버의 검사 작업 기록으로만 확인합니다. "
-    "폴더를 다시 검사하거나 그 검사 작업의 결과를 scan_job과 함께 그대로 보내십시오"
+    "(없음·만료·다른 폴더·완료된 작업 — scan_job은 /api/scan?async=1 또는 /api/scan/stream의 작업 id) — 검사 취소로 미분석인 "
+    "압축 파일은 서버의 검사 작업 기록으로만 확인합니다. 폴더를 다시 검사하거나 그 검사 작업의 결과를 scan_job과 함께 그대로 보내십시오"
 )
 REPORT_ROW_CANCELLED_NOT_IN_JOB = (
     "검사 결과 항목 「{path}」의 상태가 서버의 검사 작업(scan_job)의 같은 행과 다릅니다"
