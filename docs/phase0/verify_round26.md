@@ -324,3 +324,23 @@ POST /api/report {취소 컨테이너 행을 뺀 partial}   → 200, cancelled f
 - 사용한 컨테이너: r26-full, r26-p, r26-gui, r26-sh, r26-fl, r26-qa, r26-perf, r26-v. 동시에 최대 2개였고, 성능 측정 때는 r26-perf 하나만 실행했다. r26-p는 직접 멈췄고 나머지는 `--rm`이다.
 - 탐침 스크립트와 로그는 `scratchpad/r26/out/`에 있다(q/n*.py·m*.py, gate_full.log, gate_gui.log, percommit.log, perf.log, flakes.log, shallow.log, qa_main_scope.log, n*.log, m*.log, r6_hostile.log, r9_invariant.log, r10_originals.log, c1_cancel_abuse.log, r26norm-*.json). 같은 내용을 `~/Desktop/deepfake-lens-verify-archive/r26-out/`에 복사했다.
 - 원본 저장소 세 곳은 변경하지 않았다.
+
+## 조정자 추가 — 잔여 리스크에서 승격
+
+인계서 6장의 "면제 없음" 규칙에 따라 위 「잔여 1단계 리스크」 중 이 브랜치에서 고칠 수 있는 세 항목을 수정 대상으로 올린다.
+
+### R26-8 (Low, 잔여 리스크 승격 — R26-1 인접) 행 식별자의 단사성을 스캔 단계에서 검사하지 않는다
+
+- 웹 보고서의 무결성은 "서버가 다시 만든 행 집합 = 서명 집합"에 기댄다. 그런데 서버 자신의 행 식별자(`(container, member)`와 `::` 연결 이름)가 겹치는지는 어디에서도 검사하지 않았고, R26-1은 그 틈에서 나왔다.
+- → 스캔 결과의 모든 행 식별자가 서로 다르고, 식별자 → (경로, 구성원 사슬) → 식별자로 되돌아오는지를 코어에서 확인한다. 어기면 결과를 내지 않고 실패한다(fail closed). 단위 테스트와 보고서 불변식 테스트(`ReportSignedSetIsTheServersInvariantTest`, `ReportSignsNoPostedTextInvariantTest`) 픽스처에 겹쳐 보이는 이름(`inner.zip::b.png`, 중첩 `a.zip` 안의 `b.zip::c.png`, NFC/NFD 변형, 이스케이프 문자 자체가 든 이름)을 넣는다.
+
+### R26-9 (Low, 잔여 리스크 승격 — R25-9 인접) `--av-sync`가 음성 트랙 전체를 풀고 첫 트랙만 본다
+
+- 영상 전체 음성 트랙을 22 050 Hz 16비트 모노 임시 WAV로 풀고 librosa가 float32로 읽는다. 2시간 영상이면 임시 파일 약 317 MB, 메모리 약 635 MB이고 상한·분할이 없다.
+- 음성 트랙이 여럿이면 첫 트랙만 본다. 첫 트랙이 무음이면 「엔벨로프가 너무 짧거나 분산이 없어」로 끝나고 다른 트랙은 보지 않으며, 그 사실을 적지 않는다.
+- → 엔벨로프가 필요로 하는 만큼만(낮은 표본율 모노, 상한 길이) 디코딩하고 상한을 한계에 적는다. 음성 트랙이 여럿이면 어느 트랙을 왜 골랐는지(또는 각 트랙을 본 결과)를 적는다.
+
+### R26-10 (Cosmetic, 잔여 리스크 승격) ffmpeg 시간 초과 사유가 무엇이 몇 초에 끊겼는지 말하지 않는다
+
+- 사유가 「TimeoutExpired: 라이브러리 오류(TimeoutExpired)」뿐이다.
+- → 시간 초과 사유에 작업(오디오 디코딩·영상 음성 트랙 추출 등), 파일(`<root>/…` 표기), 경과 시간과 상한을 적는다.
