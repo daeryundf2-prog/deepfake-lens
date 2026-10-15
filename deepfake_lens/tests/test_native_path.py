@@ -1519,7 +1519,8 @@ class ChildPathTest(unittest.TestCase):
         per_module = {name: sum(1 for label in found if label.startswith(name + ":"))
                       for name in ("video_analysis.py", "face_track.py", "rppg.py", "lipsync.py", "model_adapter.py", "multimodal.py", "audio.py")}
         self.assertEqual(per_module, {"video_analysis.py": 3, "face_track.py": 1, "rppg.py": 1, "lipsync.py": 3,
-                                      "model_adapter.py": 1, "multimodal.py": 2, "audio.py": 2}, found)
+                                      # R25-5 (round 25): audio.py 2 → 3 — the ffmpeg decode of m4a/aac/wma (a run_child, for_child)
+                                      "model_adapter.py": 1, "multimodal.py": 2, "audio.py": 3}, found)
 
     @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg 없음")
     def test_ffmpeg_gets_a_relative_name_with_a_colon_as_a_file(self) -> None:

@@ -88,7 +88,7 @@ command prints a band (높음/주의/낮음) or a "의심 신호가 강합니다
   | `scan`, `collect`, `dataset`, `eval`, `benchmark`, `fusion`, `calibrate`, `train`, `train-neural-plan`, `video`, `batch`, `perf`, `corpus build` | `folder` | 폴더 |
   | `forensic`, `classify`, `explain`, `legal-report`, `multimodal FILE…` | 파일 | 파일 · scan 지원 형식(이미지·오디오·영상·텍스트·문서·압축); 심볼릭 링크는 건너뜀 행(G6) |
   | `agent --file` | 파일 | 파일 · 텍스트/문서 |
-  | `audio` | 파일 | 파일 · 오디오(.wav .mp3 .flac .ogg .m4a .aac .wma .opus) |
+  | `audio` | 파일 | 파일 · 오디오(.wav .mp3 .flac .ogg .m4a .aac .wma .opus — R25-5: `.m4a`·`.aac`·`.wma`는 libsndfile이 읽지 못해 ffmpeg로 임시 WAV를 만든 뒤 분석; ffmpeg가 없으면 `audio_features` 건너뜀 「의존성 부재: ffmpeg」) |
   | `face`, `inpaint`, `pixel-analysis`, `ml-classify`, `faceswap-seam`, `prnu` (+ `--reference`) | 파일 | 파일 · 이미지(.jpg .jpeg .png .webp .bmp .gif .tif .tiff) |
   | `video-analysis`, `rppg`, `multimodal --av-sync` | 파일 | 파일 · 영상(.mp4 .mov .m4v .avi .mkv .webm .flv) |
   | `avatar --file` | 파일 | 파일 · 영상·이미지 |

@@ -1011,3 +1011,52 @@ class WorkingFolderDeeperThanPathMaxTest(unittest.TestCase):
             self.assertEqual(statuses(rows["한글 소리.wav"]["result"], "audio_features"), ["ran"], rows["한글 소리.wav"]["result"]["coverage"])
             classified = cli("classify", "case/a.wav")
             self.assertEqual(statuses(classified, "audio_features"), ["ran"], classified["coverage"])
+
+
+@unittest.skipUnless(HAVE_LIBROSA, "librosa not installed")
+class FfmpegDecodedAudioFormatsTest(unittest.TestCase):
+    """R25-5 (round 25): ``.m4a``, ``.aac`` and ``.wma`` are documented as supported audio, but libsndfile (soundfile —
+    librosa's only decoder since librosa 1.0 dropped the audioread fallback) cannot read them: audio_features was
+    always failed 「LibsndfileError: 오디오 파일을 열 수 없습니다(형식 인식 불가)」 in the reference environment. They are
+    now decoded by ffmpeg into a temporary WAV (the dependency the video audio track already needs); without ffmpeg the
+    check is skipped 「의존성 부재: ffmpeg」, never a generic failure."""
+
+    FORMATS = ("m4a", "aac", "wma")
+
+    def _make(self, folder: Path) -> list[Path]:
+        made = []
+        for fmt in self.FORMATS:
+            target = folder / f"a.{fmt}"
+            proc = subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=330:duration=3", str(target)],
+                                  capture_output=True, timeout=120, check=False)
+            self.assertEqual(proc.returncode, 0, proc.stderr[-500:])
+            made.append(target)
+        return made
+
+    @staticmethod
+    def _audio_features(item) -> list[tuple[str, str]]:
+        return [(entry.status.value, entry.reason) for entry in item.result.coverage if entry.check == "audio_features"]
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg 없음")
+    def test_the_formats_are_decoded_by_ffmpeg(self) -> None:
+        from deepfake_lens.core import analyze_file
+
+        with tempfile.TemporaryDirectory() as tmp:
+            for path in self._make(Path(tmp)):
+                with self.subTest(fmt=path.suffix):
+                    item = analyze_file(path)
+                    self.assertEqual(self._audio_features(item), [("ran", "")], item.result.coverage)
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), ["a.aac", "a.m4a", "a.wma"])  # no temp WAV left
+
+    def test_without_ffmpeg_the_check_is_skipped_as_a_missing_dependency(self) -> None:
+        from deepfake_lens.core import analyze_file
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "a.m4a"
+            path.write_bytes(b"\x00\x00\x00\x18ftypM4A " + bytes(64))  # never decoded here
+            real_which = shutil.which
+            with mock.patch("shutil.which", side_effect=lambda name, *a, **k: None if name == "ffmpeg" else real_which(name, *a, **k)):
+                item = analyze_file(path)
+        self.assertEqual(self._audio_features(item), [("skipped", "의존성 부재: ffmpeg")])
+        self.assertIn("ffmpeg을(를) 설치하세요", " ".join(item.result.limitations))
+        self.assertNotIn("librosa", " ".join(item.result.limitations))
