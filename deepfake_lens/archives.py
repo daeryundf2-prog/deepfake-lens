@@ -33,6 +33,8 @@ each payload. Guards against the classic archive attack surface:
 
 from __future__ import annotations
 
+import os
+import re
 import shutil
 import tarfile
 import unicodedata
@@ -154,17 +156,39 @@ def budget_reason(declared: int, limit: int, detail: str = "") -> str:
     return f"압축 예산 초과(선언 크기 {declared}, 한도 {max(0, limit)})" + (f" — {detail}" if detail else "")
 
 
+# R25-6 (round 25): the forms of a member name that are an absolute path on some system — POSIX "/x", a drive
+# "C:/x" or "C:" alone (Windows; a backslash is already "/"), a UNC share "//server/share". A ":" elsewhere is an
+# ordinary character on POSIX ("2026:10:15.png", a macOS name whose "/" Finder shows is ":" in POSIX, "c:v.png").
+_DRIVE_ABSOLUTE = re.compile(r"^[A-Za-z]:(?:/|$)")
+
+
+def _colon_names_unsafe() -> bool:
+    """R25-6: whether a ":" in a member name cannot be written here (Windows: a drive letter or an NTFS data stream)."""
+    return os.name == "nt"
+
+
 def _unsafe_name_reason(name: str) -> str:
-    """Why ``_safe_member_name`` refused ``name``."""
+    """Why ``_safe_member_name`` refused ``name``.
+
+    R25-6 (round 25): each refusal names its real form. Every name with a ":" was called 「절대 경로 멤버(대상
+    폴더 밖 쓰기 시도)」 — a zip-slip attack — when its second character was ":" ("c:v.png"), although on POSIX
+    it is an ordinary name (and the member is written under its own index folder, ``_member_target``).
+    """
     normalized = name.replace("\\", "/").strip()
     if not normalized:
         return "빈 멤버 이름"
-    if normalized.startswith("/") or (len(normalized) > 1 and normalized[1] == ":") or normalized[0] == "~":
+    if normalized.startswith("//"):
+        return "UNC 경로 멤버(\\\\서버\\공유 — 대상 폴더 밖 쓰기 시도)"
+    if normalized.startswith("/"):
         return "절대 경로 멤버(대상 폴더 밖 쓰기 시도)"
+    if _DRIVE_ABSOLUTE.match(normalized):
+        return "드라이브 절대 경로 멤버(C:\\ 형식 — 대상 폴더 밖 쓰기 시도)"
+    if normalized[0] == "~":
+        return "홈 폴더 표기('~')로 시작하는 멤버(대상 폴더 밖 쓰기 시도로 취급)"
     if any(part == ".." for part in PurePosixPath(normalized).parts):
         return "경로 이탈 멤버('..' — 대상 폴더 밖 쓰기 시도)"
     if ":" in normalized:
-        return "허용되지 않는 이름(드라이브 문자·ADS ':' 포함)"
+        return "Windows에서 쓸 수 없는 이름(':' — 드라이브 문자·NTFS 대체 데이터 스트림)"
     return "허용되지 않는 이름(Windows 예약 장치명)"
 
 
@@ -268,18 +292,20 @@ def is_archive(path: Path | str) -> bool:
 def _safe_member_name(name: str) -> str | None:
     """Normalize an archive member name; None when it escapes dest.
 
-    Rejects absolute paths, ``..`` components, drive-letter/ADS colons,
-    Windows device names, and empty/traversal tricks. Returns a relative
+    Rejects absolute paths (POSIX, drive ``C:/``, UNC), ``..`` components, a
+    leading ``~``, Windows device names, empty/traversal tricks and — R25-6
+    (round 25), on Windows only — any other ``:`` (drive-relative names, NTFS
+    data streams); on POSIX ``c:v.png`` is an ordinary name. Returns a relative
     POSIX-style path safe to join under the extraction root.
     """
     name = name.replace("\\", "/").strip()
-    if not name or name.startswith("/"):
-        return None
-    if ":" in name.split("/")[0] or name[0] == "~":
+    if not name or name.startswith("/") or _DRIVE_ABSOLUTE.match(name) or name[0] == "~":
         return None
     parts = [p for p in PurePosixPath(name).parts if p not in ("", ".")]
-    if not parts or any(p == ".." or ":" in p for p in parts):
+    if not parts or any(p == ".." for p in parts):
         return None
+    if _colon_names_unsafe() and any(":" in p for p in parts):
+        return None  # R25-6: only where ":" cannot be part of a file name
     stem = parts[-1].split(".")[0].strip().lower()
     if stem in _WINDOWS_RESERVED:
         return None
