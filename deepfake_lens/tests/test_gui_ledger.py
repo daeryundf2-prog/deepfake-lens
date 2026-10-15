@@ -613,6 +613,29 @@ class ScanBooleanValuesTest(unittest.TestCase):
             self.assertTrue(re.fullmatch(r"(String\()?!?\$\('[\w-]+'\)\.checked\)?|'true'|'1'", value), (key, value))
 
 
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class CancelledContainerRowTest(unittest.TestCase):
+    def test_a_cancelled_archive_is_shown_as_a_partial_conclusion(self) -> None:
+        """Merge of phase0 R24-1: an archive a cancel left partly unanalyzed is the status "cancelled" with the
+        roll-up of the members analyzed. The ledger keeps its band (a manipulated member still counts), labels
+        the status 검사 취소 and says the cancel first in the row reason, the short verdict and the verdict line."""
+        row = _row("manipulation_evidence", status="cancelled")
+        row["kind"] = "archive"
+        row["result"]["verdict"] = "압축 파일: 조작·생성 근거 있음 — 검사 취소 — 구성 파일 3개 미분석(부분 결과)."
+        out = _run(
+            f"const item = {json.dumps(row, ensure_ascii=False)};\n"
+            "results = [{item}];\n"
+            "console.log(JSON.stringify([itemBand({item}), STATUS_LABELS.cancelled, shortVerdict(item), rowReason(item), verdictLine(item)]));"
+        )
+        assert isinstance(out, list)
+        band, label, short, reason, line = out
+        self.assertEqual(band, "manipulation_evidence")
+        self.assertEqual(label, "검사 취소")
+        self.assertIn("검사 취소(부분 결과)", short)
+        self.assertTrue(reason.startswith("검사 취소 — 구성 파일 3개 미분석(부분 결과). · "), reason)
+        self.assertTrue(line.startswith("검사 취소 — 구성 파일 3개 미분석(부분 결과)."), line)
+
+
 class ExportNoteParticleTest(unittest.TestCase):
     def test_no_particle_is_glued_to_a_format_name(self) -> None:
         """GUI-REV4 K-7: "서명된 JSON를" — the export note never glues 을/를 to the format name."""

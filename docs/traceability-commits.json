@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "bbe3532219656c3c25df6425eb512f3e5d93f929",
+    "head": "7b99aa7fa8da5e811d45dd09f8540e7523f5c5a7",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -4163,6 +4163,154 @@
       "new": "갭 목록 밖 항목 포함",
       "commits": [
         "617130d"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R24-1",
+      "round": 24,
+      "source": "verify_round24.md",
+      "summary": "a container a cancel left unanalyzed is the status \"cancelled\" with its own conclusion, an",
+      "gaps": [
+        "G12",
+        "G7",
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "3d48593"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R24-2",
+      "round": 24,
+      "source": "verify_round24.md",
+      "summary": "the FFmpeg readers inside the process get an absolute name too — cv2.VideoCapture and libr",
+      "gaps": [
+        "G7"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "77b1345"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R24-3",
+      "round": 24,
+      "source": "verify_round24.md",
+      "summary": "a name too long to make absolute stays \"./\"-relative and the audio worker is told the work",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "a9d7eaa"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R24-4",
+      "round": 24,
+      "source": "verify_round24.md",
+      "summary": "reviews.json is read again after a failed read or a change on disk — a repaired file kept ",
+      "gaps": [
+        "G31"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "33f8d8c"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R24-5",
+      "round": 24,
+      "source": "verify_round24.md",
+      "summary": "classify of an unreadable file prints its conclusion with the tool-attribution layer faile",
+      "gaps": [
+        "G12",
+        "G1"
+      ],
+      "new": null,
+      "commits": [
+        "7abbfaa"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R24-6",
+      "round": 24,
+      "source": "verify_round24.md",
+      "summary": "the old GUI's smoke passes in the repo's gui image — Playwright's Chromium when Google Chr",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "d3333df"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R24-7",
+      "round": 24,
+      "source": "verify_round24.md",
+      "summary": "the PDFs draw the case fields through display_name — a literal \"\\u05e2 corp\" printed exact",
+      "gaps": [
+        "G2",
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "799ee6a"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R24-8",
+      "round": 24,
+      "source": "verify_round24.md",
+      "summary": "/api/scan/stream reads recursive with parse_flag — the R23-13 true/false values, 400 for a",
+      "gaps": [
+        "G7"
+      ],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "97227a0"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R24-9",
+      "round": 24,
+      "source": "verify_round24.md",
+      "summary": "qa-main runs with a HOME and XDG folders under /tmp/qa-main and without writing bytecode —",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "07df093"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R24-10",
+      "round": 24,
+      "source": "verify_round24.md",
+      "summary": "the R23-2 end-to-end test gives its project venv every site folder this interpreter import",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "4c2dfc0"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R24-11",
+      "round": 24,
+      "source": "verify_round24.md",
+      "summary": "`help <command> -h` / `--help` is that command's help with exit 0",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "a73da37"
       ],
       "used_in_commit_subjects": true
     }
@@ -10910,6 +11058,286 @@
       "short": "bbe3532",
       "round": "23",
       "subject": "docs(phase0): HANDOFF.md §1/§2/§9 state round 23 — 23 rounds, R23-1…R23-13 fixed on this branch, the round-23 trend and the next steps — without anything the records-only commit changes (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "fbcb53c4b0924bc423cafc3a2b6be1611ca0d6df",
+      "short": "fbcb53c",
+      "round": "23",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on bbe3532, round-23 IDs mapped (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "6e3bd1e44bb9f690c60ce0126496cd6ca06db654",
+      "short": "6e3bd1e",
+      "round": "23",
+      "subject": "docs(phase0): round-24 verification findings (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "3d48593e4317603f6632d759c5cc0361d9531f35",
+      "short": "3d48593",
+      "round": "24",
+      "subject": "fix(report): R24-1 a container a cancel left unanalyzed is the status \"cancelled\" with its own conclusion, and /api/report excludes it as cancelled instead of refusing the report as changed (R24-1; Gaps: G12, G7, G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R24-1"
+      ],
+      "gaps_named_in_subject": [
+        "G12",
+        "G7",
+        "G30"
+      ],
+      "gaps": [
+        "G12",
+        "G7",
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G12, G7, G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "77b13459ca2e3b5450cc44a3560ba6e1c1841f6a",
+      "short": "77b1345",
+      "round": "24",
+      "subject": "fix(native): R24-2 the FFmpeg readers inside the process get an absolute name too — cv2.VideoCapture and librosa.load read a relative \"c:v.mp4\" as the protocol \"c\" (R24-2; Gaps: G7, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R24-2"
+      ],
+      "gaps_named_in_subject": [
+        "G7"
+      ],
+      "gaps": [
+        "G7"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R24-2: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G7; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "a9d7eaa0aad4c93690f90fb5d207bb969a617787",
+      "short": "a9d7eaa",
+      "round": "24",
+      "subject": "fix(native): R24-3 a name too long to make absolute stays \"./\"-relative and the audio worker is told the working folder — R23-1's absolute names failed in a working folder deeper than PATH_MAX (R24-3; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R24-3"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R24-3: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "33f8d8ca1c81f3b39422f493dd70f6f6d36ca489",
+      "short": "33f8d8c",
+      "round": "24",
+      "subject": "fix(server): R24-4 reviews.json is read again after a failed read or a change on disk — a repaired file kept being refused until the server restarted (R24-4; Gaps: G31, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R24-4"
+      ],
+      "gaps_named_in_subject": [
+        "G31"
+      ],
+      "gaps": [
+        "G31"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R24-4: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G31; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "7abbfaa8e44ff45757818e47adfb72601d2b5ab0",
+      "short": "7abbfaa",
+      "round": "24",
+      "subject": "fix(cli): R24-5 classify of an unreadable file prints its conclusion with the tool-attribution layer failed — it ended with 「처리 중 예기치 않은 오류(PermissionError)」 and exit 1 (R24-5; Gaps: G12, G1)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R24-5"
+      ],
+      "gaps_named_in_subject": [
+        "G12",
+        "G1"
+      ],
+      "gaps": [
+        "G12",
+        "G1"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G12, G1",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "d3333df9d9ca60339eb58e76b522a7126486dda3",
+      "short": "d3333df",
+      "round": "24",
+      "subject": "fix(gate): R24-6 the old GUI's smoke passes in the repo's gui image — Playwright's Chromium when Google Chrome is absent, and the scan includes subfolders (R24-6; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R24-6"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R24-6: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "799ee6ab867521d567140989359716ff18e3fb6d",
+      "short": "799ee6a",
+      "round": "24",
+      "subject": "fix(report): R24-7 the PDFs draw the case fields through display_name — a literal \"\\u05e2 corp\" printed exactly like \"ע corp\" (R24-7; Gaps: G2, G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R24-7"
+      ],
+      "gaps_named_in_subject": [
+        "G2",
+        "G30"
+      ],
+      "gaps": [
+        "G2",
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G2, G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "97227a0e464bd868e930db0bebafbcbc55490acc",
+      "short": "97227a0",
+      "round": "24",
+      "subject": "fix(server): R24-8 /api/scan/stream reads recursive with parse_flag — the R23-13 true/false values, 400 for any other (R24-8; Gaps: G7, 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R24-8"
+      ],
+      "gaps_named_in_subject": [
+        "G7"
+      ],
+      "gaps": [
+        "G7"
+      ],
+      "new": true,
+      "new_reasons": [
+        "R24-8: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: G7; 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "a73da376d9f0327c08a02ae95721e66acbf97381",
+      "short": "a73da37",
+      "round": "24",
+      "subject": "fix(cli): R24-11 `help <command> -h` / `--help` is that command's help with exit 0 (R24-11; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R24-11"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R24-11: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "07df09344961dba637687d9047312cb1d11877d4",
+      "short": "07df093",
+      "round": "24",
+      "subject": "fix(gate): R24-9 qa-main runs with a HOME and XDG folders under /tmp/qa-main and without writing bytecode — it wrote the caller's ~/.cache/deepfake-lens and __pycache__ outside /tmp (R24-9; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R24-9"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R24-9: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "4c2dfc0bfbf3481876688938b14f912ca7d931a3",
+      "short": "4c2dfc0",
+      "round": "24",
+      "subject": "test(audio): R24-10 the R23-2 end-to-end test gives its project venv every site folder this interpreter imports from — it failed in HANDOFF §5's qa-main side venv (R24-10; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R24-10"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R24-10: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "7b99aa7fa8da5e811d45dd09f8540e7523f5c5a7",
+      "short": "7b99aa7",
+      "round": "24",
+      "subject": "docs(phase0): HANDOFF.md §1/§2/§9 state round 24 — 24 rounds, R24-1…R24-11 fixed on this branch, the round-24 trend and the next steps — without anything the records-only commit changes (WP-J; Gaps: 신규)",
       "pre_rewrite_subject": null,
       "ids": [
         "WP-J"

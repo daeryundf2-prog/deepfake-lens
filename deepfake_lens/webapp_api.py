@@ -1567,6 +1567,29 @@ REPORT_LISTING_ROWS_OUTSIDE = (
     "서명된 행 {n}개가 서버의 폴더 목록(하위 폴더 포함: {recursive}, 최대 파일 수: {max_files})에 없음 — "
     "검사 때의 옵션(하위 폴더 포함 여부·최대 파일 수)을 함께 보내야 확인됩니다"
 )
+# R24-1 (round 24): a posted archive container row of status "cancelled" — a cancel left some or all of its
+# members unanalyzed. The server's re-analysis runs every member, so the row was compared with a complete
+# roll-up ("expanded") and the report refused as "검사 뒤 바뀐 파일" (409) although nothing had changed. Such a
+# row is now excluded (its partial roll-up is never signed) with this reason; the members the cancel left
+# unanalyzed are the scan job's files_cancelled, and each member row that was analyzed is re-derived and signed
+# as usual. The container's own sha256 is still compared (a really changed archive is 409).
+REPORT_ROW_CANCELLED = (
+    "사용자 취소 — 검사가 취소되어 이 압축 파일의 구성 파일을 모두 분석하지 않았으므로 컨테이너 행(구성 파일 결론 집계)은 "
+    "서명하지 않습니다(분석된 구성 파일은 각 행으로 서명)"
+)
+REPORT_ROW_CANCELLED_NO_DIGEST = "서버가 압축 파일의 SHA-256을 다시 계산하지 못했습니다 — 검사 뒤 바뀌었거나 읽을 수 없습니다"
+# R24-1: when a posted "cancelled" row cannot be a cancelled container row of this report. HTTP 400.
+REPORT_ROW_CANCELLED_NOT_CONTAINER = (
+    "검사 결과 항목 「{path}」의 상태 cancelled는 검사 취소로 구성 파일이 분석되지 않은 압축 파일(컨테이너 행)에만 쓰입니다 — "
+    "폴더 검사 결과를 그대로 보내십시오"
+)
+REPORT_ROW_CANCELLED_NOT_CANCELLED_SCAN = (
+    "검사 결과 항목 「{path}」는 취소된 검사의 행(cancelled)인데 이 보고서는 취소된 검사의 보고서가 아닙니다"
+    "(scan_job이 취소된 검사 작업이 아니고 summary.cancelled도 true가 아님) — 폴더 검사 결과를 그대로 보내십시오"
+)
+REPORT_ROW_CANCELLED_NOT_IN_JOB = (
+    "검사 결과 항목 「{path}」의 상태 cancelled가 서버의 검사 작업(scan_job)의 같은 행과 다릅니다 — 폴더 검사 결과를 그대로 보내십시오"
+)
 # R19-13: the excluded reasons that mean "the file changed after the scan" (not "never re-analyzable").
 _CHANGED_AFTER_SCAN_REASONS = (REPORT_ROW_NOT_FOUND, REPORT_ROW_NOT_DERIVED, REPORT_ROW_KIND_CHANGED)
 
@@ -1822,10 +1845,24 @@ def _rederive_report_items(
     from .analysis_api import scan_file_run
     from .result_text import escape_row_path, member_row_path, row_identity
 
+    # R24-1 (round 24): a posted container row a cancel left (partly) unanalyzed is never compared with the
+    # server's complete roll-up — only its own sha256 is (:data:`REPORT_ROW_CANCELLED`). A container posted
+    # with no member row is not re-analyzed at all: its digest is all the server needs.
+    cancelled_tops = {row_identity(item)[0] for item in posted if _is_cancelled_container_row(item)}
+    rerun_tops = {top for top, member in (row_identity(item) for item in posted) if member is not None or top not in cancelled_tops}
+    cancelled_digests: dict[str, str | None] = {}
     derived_by_top: dict[str, dict[str | None, Any] | str] = {}
     for item in posted:
         top = row_identity(item)[0]
         if top in derived_by_top:
+            continue
+        if top in cancelled_tops and top not in rerun_tops:
+            located = hasher.locate(top)
+            if isinstance(located, str):
+                derived_by_top[top] = located
+            else:
+                cancelled_digests[top] = hasher.sha256(item)
+                derived_by_top[top] = {}
             continue
         located = hasher.locate(top)
         if isinstance(located, str):
@@ -1867,6 +1904,15 @@ def _rederive_report_items(
             if linked_since or found in _CHANGED_AFTER_SCAN_REASONS or found.startswith(REPORT_ROW_FAILED.split("{", 1)[0]):
                 changed.append(_changed_row(item, None, found))
             excluded.append((item, found))
+        elif member is None and top in cancelled_tops:
+            # R24-1: excluded as cancelled unless the archive itself changed since the scan.
+            server_sha = found[None].sha256 if None in found else cancelled_digests.get(top)
+            if not server_sha or server_sha != item.sha256:
+                entry = _changed_row(item, None, None if server_sha else REPORT_ROW_CANCELLED_NO_DIGEST)
+                entry["server_sha256"] = server_sha
+                changed.append(entry)
+            excluded.append((item, REPORT_ROW_CANCELLED))
+            seen.add((top, member))
         elif member not in found:
             changed.append(_changed_row(item, None, REPORT_ROW_NOT_DERIVED))
             excluded.append((item, REPORT_ROW_NOT_DERIVED))
@@ -1883,6 +1929,48 @@ def _rederive_report_items(
         for member in rows if member is not None and (top, member) not in seen
     }
     return derived, excluded, changed, unsigned_members
+
+
+def _is_cancelled_container_row(item: Any) -> bool:
+    """R24-1: a posted top-level row of status ``cancelled`` (checked by :func:`_posted_cancelled_row_error`)."""
+    from .core import CANCELLED_CONTAINER_STATUS
+    from .result_text import row_identity
+
+    return item.status == CANCELLED_CONTAINER_STATUS and row_identity(item)[1] is None
+
+
+def _posted_cancelled_row_error(posted: list[Any], posted_summary: object, job_id: object, scan_root: Path | None) -> str | None:
+    """R24-1 (round 24): why a posted ``cancelled`` row is not a cancelled container row of this report, or None.
+
+    A row of status ``cancelled`` must be a top-level archive container row (the scan gives no other row that
+    status), the report must be one of a cancelled scan (the server's cancelled ``scan_job``, or a posted
+    ``summary.cancelled`` — then "unverified"), and when ``scan_job`` names a finished job of this server for
+    the folder, that job's row of the same path must be ``cancelled`` too. Otherwise HTTP 400.
+    """
+    from .core import CANCELLED_CONTAINER_STATUS
+    from .result_text import row_identity
+
+    rows = [item for item in posted if item.status == CANCELLED_CONTAINER_STATUS]
+    if not rows:
+        return None
+    job = _finished_scan_job(job_id, scan_root)
+    job_status: dict[str, object] = {}
+    if job is not None and isinstance(job.get("items"), list):
+        for row in job["items"]:
+            if isinstance(row, dict) and row.get("member") is None and isinstance(row.get("path"), str):
+                job_status[row["path"]] = row.get("status")
+    cancelled_report = (job is not None and job.get("status") == "cancelled") or (
+        isinstance(posted_summary, dict) and posted_summary.get("cancelled") is True
+    )
+    for item in rows:
+        top, member = row_identity(item)
+        if member is not None or item.kind != "archive":
+            return REPORT_ROW_CANCELLED_NOT_CONTAINER.format(path=str(item.path)[:200])
+        if not cancelled_report:
+            return REPORT_ROW_CANCELLED_NOT_CANCELLED_SCAN.format(path=str(item.path)[:200])
+        if job is not None and job_status.get(top) != CANCELLED_CONTAINER_STATUS:
+            return REPORT_ROW_CANCELLED_NOT_IN_JOB.format(path=str(item.path)[:200])
+    return None
 
 
 def _unanalyzed_entry_row(
@@ -2282,7 +2370,7 @@ def _finished_scan_job(job_id: object, scan_root: Path | None) -> dict[str, Any]
 
 def _report_listing(
     summary: Any, signed_items: list[Any], scan_root: Path | None, options: AnalysisOptions, job_id: object,
-    unsigned_members: set[tuple[str, str]] | None = None,
+    unsigned_members: set[tuple[str, str]] | None = None, cancelled_tops: set[str] | None = None,
 ) -> Any:
     """R22-1 (round 22): ``summary`` with the server's own "기록되지 않은 파일" counts of the scan folder.
 
@@ -2306,6 +2394,9 @@ def _report_listing(
     top-level paths only, so a post that left out ``bundle.zip::gen.png`` (the member with the generator
     metadata) signed "없음". With a scan job as the listing only the members that job analyzed count: a
     member a cancel left unanalyzed is already in the job's ``files_cancelled``.
+
+    R24-1 (round 24): ``cancelled_tops`` — container rows excluded as cancelled (:data:`REPORT_ROW_CANCELLED`)
+    — are not counted as files without a signed row: they are listed unsigned with that reason.
     """
     from .core import enumerate_scan_folder
     from .result_text import row_identity
@@ -2369,7 +2460,7 @@ def _report_listing(
         return unknown(REPORT_LISTING_ROWS_OUTSIDE.format(n=len(outside), recursive=recursive, max_files=max_files))
     return replace(
         summary, **enumeration,
-        unrecorded_listing={"source": source, "not_in_report": len(listed - signed_tops) + missing_members},
+        unrecorded_listing={"source": source, "not_in_report": len(listed - signed_tops - (cancelled_tops or set())) + missing_members},
     )
 
 
@@ -2577,9 +2668,14 @@ def _report_payload(
     except InvalidOption as exc:
         return {"error": str(exc)}
     server_thresholds = load_thresholds(options)
-    # R20-4 / R21-5 / R22-4 (merge): a malformed duplicate_of, a non-canonical, repeated or
-    # aliased row path is a malformed request (400) for every format, the preview included.
-    duplicate_error = _posted_path_error(items) or _posted_alias_error(items, scan_root) or _posted_duplicate_error(items)
+    # R20-4 / R21-5 / R22-4 / R24-1 (merge): a malformed duplicate_of, a non-canonical, repeated or
+    # aliased row path, a "cancelled" container row outside a cancelled scan is a malformed request
+    # (400) for every format, the preview included.
+    duplicate_error = (
+        _posted_path_error(items) or _posted_alias_error(items, scan_root) or _posted_duplicate_error(items)
+        # R24-1: a "cancelled" container row only in a report of a cancelled scan
+        or _posted_cancelled_row_error(items, data.get("summary"), data.get("scan_job"), scan_root)
+    )
     if duplicate_error is not None:
         hasher.close()
         return {"error": duplicate_error}  # R21-5 / R20-4: 400
@@ -2595,6 +2691,10 @@ def _report_payload(
         # REPORT_ROW_WALK_LIMIT), so the preview lists it the same way — preview equals output.
         excluded: list[tuple[Any, str]] = [(item, REPORT_ROW_WALK_LIMIT) for item in items if _posted_walk_limit_row(item)]
         items = [item for item in items if not _posted_walk_limit_row(item)]
+        # Merge of R24-1: the export excludes a container a cancel left unanalyzed ("cancelled") with
+        # REPORT_ROW_CANCELLED (when it is unchanged; changed is the 409); the preview does the same.
+        excluded += [(item, REPORT_ROW_CANCELLED) for item in items if _is_cancelled_container_row(item)]
+        items = [item for item in items if not _is_cancelled_container_row(item)]
     else:
         try:
             items, excluded, changed, unsigned_members = _rederive_report_items(items, hasher, options, server_thresholds)
@@ -2622,9 +2722,16 @@ def _report_payload(
     summary, cancel_source = _with_posted_cancel(summary, data.get("summary"), data.get("scan_job"), scan_root)
     # R22-1 (round 22): the cap / flat-scan / missing-row counts are the server's own, or "확인 불가".
     # R23-5: and the archive members the server's re-analysis yields that the post left out.
+    # R24-1: a container excluded as cancelled is accounted for (its row is listed unsigned with the reason
+    # "사용자 취소", its unanalyzed members are files_cancelled) — not also a file "without a signed row".
     # Merge: the preview takes the same listing (its job, else its own walk of scan_root) — the
     # preview's 기록되지 않은 파일 box equals the export's.
-    summary = _report_listing(summary, items, scan_root if items else None, options, data.get("scan_job"), unsigned_members)
+    from .result_text import row_identity
+
+    cancelled_tops = {row_identity(item)[0] for item, reason in excluded if reason == REPORT_ROW_CANCELLED}
+    summary = _report_listing(
+        summary, items, scan_root if items else None, options, data.get("scan_job"), unsigned_members, cancelled_tops,
+    )
     # G30: web reports are signed when DEEPFAKE_LENS_REPORT_KEY is set and
     # say "서명 없음" otherwise; the pins are those of the server's models dir.
     from .profile_pins import profile_pins

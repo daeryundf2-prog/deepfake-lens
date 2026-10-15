@@ -322,11 +322,21 @@ def _serve_one(request: dict[str, Any]) -> dict[str, Any]:
     except ImportError as exc:
         return {"missing": exc.name or "librosa"}
     from .audio import _extract_features
+    from .native_path import chdir_any
 
+    # R24-3 (round 24): a relative name comes with the caller's working folder (its absolute name was too long
+    # to send); the worker enters that folder for this request only and returns to its own cache folder.
+    cwd = request.get("cwd")
+    home = os.getcwd() if isinstance(cwd, str) and cwd else None
     try:
+        if home is not None:
+            chdir_any(str(cwd))
         features = _extract_features(Path(request["path"]), segment_seconds=int(request["segment_seconds"]), raise_on_decode=True)
     except Exception as exc:  # noqa: BLE001 — every decode failure goes back as a failed check
         return _error_reply(exc)
+    finally:
+        if home is not None:
+            os.chdir(home)
     return {"features": asdict(features) if features is not None else None}
 
 
@@ -753,14 +763,22 @@ def extract_features(native_path: str, *, segment_seconds: int) -> dict[str, Any
     :class:`WorkerTimeoutError`, and the process ending
     :class:`shutdown.ShuttingDown`.
     """
-    from .native_path import child_path
+    from .native_path import child_path, is_cwd_relative
 
     # R23-1 (round 23): the worker runs in its cache folder (cwd), so a relative path was resolved there and
     # every audio check of ``scan case`` / ``cd case; scan .`` / ``classify case/a.wav`` / a relative
     # ``web --folder`` failed ("LibsndfileError … System error") since R19-2 (de59997). The worker gets the
     # absolute path; its error text is given back in the caller's form, as the in-process extraction wrote it.
     absolute = child_path(native_path)
-    request = {"path": absolute, "segment_seconds": int(segment_seconds)}
+    request: dict[str, Any] = {"path": absolute, "segment_seconds": int(segment_seconds)}
+    if is_cwd_relative(absolute):
+        # R24-3 (round 24): the absolute name would pass PATH_MAX (a working folder deeper than that) or this
+        # process's working folder is gone — the worker is told the folder and opens the relative name from it
+        # (_serve_one, native_path.chdir_any). R23-1 sent the too-long absolute name: ENAMETOOLONG, failed.
+        try:
+            request["cwd"] = os.getcwd()
+        except OSError:
+            pass  # gone: the worker fails to open the name, as this process would have
     for attempt in range(2):
         scope: WorkerScope | None = getattr(_LOCAL, "scope", None)
         if scope is not None and scope.tripped is not None:

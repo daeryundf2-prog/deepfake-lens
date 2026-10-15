@@ -765,6 +765,45 @@ def main() -> int:
             assert "서명된 JSON" in page.locator("#export-warn").inner_text()
             assert page.locator("#error-region .err-item", has_text="서명 제외로").count() == 0
 
+            # 6f. Merge of phase0 R24-1: a real scan cancelled from the GUI while an archive's members are
+            #     still queued — the archive row is "cancelled" with the roll-up of what was analyzed; the
+            #     ledger says 검사 취소 (부분 결과), and an export is not refused as changed: the server
+            #     excludes the container row as 사용자 취소, said under 주의 next to the buttons.
+            import zipfile as _zipfile
+
+            czip = mutable / "czip"
+            czip.mkdir()
+            with _zipfile.ZipFile(czip / "bundle.zip", "w") as archive:
+                for index in range(600):
+                    archive.writestr(f"m{index:03d}.txt", f"구성 파일 {index}번의 글입니다. " * 20)
+            page.evaluate("location.hash = '#/scan'")
+            page.fill("#folder-path", str(czip))
+            page.click("#analyze-btn")
+            page.wait_for_selector("#scan-cancel:not([hidden])", timeout=30_000)
+            page.click("#scan-cancel")
+            page.wait_for_function("() => scanBusy === false", timeout=180_000)
+            container = page.evaluate("(results.find(e => e.item.path === 'bundle.zip') || {}).item || null")
+            if not container or container.get("status") != "cancelled":
+                # The cancel landed after every member ran (a fast machine): said, never silently passed.
+                print(f"gui_smoke: the cancel came after the archive finished (status {container and container.get('status')!r}) — cancelled-archive step not exercised")
+            else:
+                page.evaluate("location.hash = '#/ledger'")
+                page.wait_for_function("() => currentView === 'ledger'")
+                row_text = page.evaluate("results.find(e => e.item.path === 'bundle.zip').row.textContent")
+                assert "검사 취소" in row_text, row_text
+                assert page.locator("#partial-banner").is_visible(), "a cancelled scan's partial banner"
+                page.evaluate("location.hash = '#/report'")
+                page.wait_for_function("() => currentView === 'report'")
+                if page.evaluate("caseUnconfirmed()"):
+                    page.get_by_role("button", name="이 폴더의 사건이 맞음").click()
+                with page.expect_download():
+                    page.click("#exp-report")
+                page.wait_for_selector("#export-warn:not([hidden])", timeout=60_000)
+                warned = page.locator("#export-warn").inner_text()
+                assert "bundle.zip" in warned and "사용자 취소" in warned, warned
+                assert page.locator("#export-alert").is_hidden(), "a cancelled scan's export was refused"
+                print("gui_smoke: cancelled archive — ledger, banner and the 사용자 취소 exclusion checked")
+
             # 7. CSP/console errors: none tolerated. No request leaves the local server
             #    (fonts are local stacks; nothing is fetched from the network).
             csp = [e for e in console_errors if "Content Security Policy" in e or "Refused" in e]

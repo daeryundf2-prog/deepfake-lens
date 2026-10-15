@@ -271,6 +271,9 @@ class QaIn1ReadOnlyEvidenceTest(unittest.TestCase):
             paths = list(dict.fromkeys([*seen, sysconfig.get_paths()["purelib"], sysconfig.get_paths()["platlib"], str(REPO_ROOT)]))
             Path(purelib, "qa-in-1.pth").write_text("\n".join(paths) + "\n", encoding="utf-8")
             env = {key: value for key, value in os.environ.items() if not key.startswith(("DEEPFAKE_LENS_", "NUMBA_", "PYTHON"))}
+            # R24-9 (round 24): a harness run that writes no bytecode (gate.sh qa-main) keeps that for these children too —
+            # they used to write the interpreter's and the repository's __pycache__ outside /tmp.
+            env.update({key: value for key, value in os.environ.items() if key == "PYTHONDONTWRITEBYTECODE"})
             env["HOME"] = str(Path(tmp).resolve() / "home")
             child_has_librosa = subprocess.run(
                 [str(python), "-c", "import importlib.util, sys; sys.exit(importlib.util.find_spec('librosa') is None)"],

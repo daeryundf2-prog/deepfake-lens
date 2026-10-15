@@ -402,6 +402,79 @@ class WebAnalyzeFileTest(unittest.TestCase):
 
 
 
+class UnreadableFileClassifyTest(unittest.TestCase):
+    """R24-5 (round 24): ``classify <unreadable file>`` ended with 「오류: 처리 중 예기치 않은 오류가 발생했습니다
+    (PermissionError)」, exit 1 and no result — ``tool_attribution`` opened the file without a handler — while
+    forensic / explain / evidence / legal-report print their result (the failed check, 판단 불가) with exit 0 and
+    scan writes the row. The tool-attribution layer is now ``failed`` with the reason and the conclusion is printed."""
+
+    def _run(self, *args: str) -> tuple[int, str, str]:
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = main(list(args))
+        return code, out.getvalue(), err.getvalue()
+
+    def _assert_failed_layer(self, layer: dict[str, Any]) -> None:
+        self.assertEqual(layer["kind"], "layer_diagnostic")
+        self.assertEqual(layer["reference_band"], "unavailable")
+        self.assertEqual(layer["diagnostic"]["status"], "failed")
+        self.assertIn("PermissionError", layer["diagnostic"]["reason"])
+        self.assertIn("생성 도구 표지 대조 실패 — 파일을 읽지 못했습니다(PermissionError", layer["reference_note"])
+
+    def test_a_read_error_of_the_layer_is_a_failed_layer_with_the_conclusion(self) -> None:
+        from deepfake_lens import cli_standalone
+
+        with tempfile.TemporaryDirectory() as tmp:
+            png = Path(tmp) / A1111.name
+            png.write_bytes(A1111.read_bytes())
+            with patch.object(cli_standalone, "tool_attribution", side_effect=PermissionError(13, "Permission denied", str(png))):
+                code, out, err = self._run("classify", str(png), "--format", "json")
+                text_code, text_out, _ = self._run("classify", str(png))
+        self.assertEqual(code, 0, err)
+        payload = json.loads(out)
+        self.assertEqual(payload["verdict_code"], "manipulation_evidence")  # the scan's conclusion is still printed
+        self._assert_failed_layer(payload["tool_candidates"])
+        self.assertNotIn(str(Path(tmp)), json.dumps(payload["tool_candidates"], ensure_ascii=False))  # N1: no full path
+        self.assertEqual(text_code, 0)
+        self.assertIn("생성 도구 표지 대조 실패", text_out)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX uid")
+    def test_an_unreadable_file_end_to_end(self) -> None:
+        """A file whose mode refuses the reader (the gate runs as root, where modes do not refuse: the child then runs
+        as nobody)."""
+        import subprocess
+        import sys
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chmod(tmp, 0o777)
+            case = Path(tmp) / "case"
+            case.mkdir()
+            case.chmod(0o777)
+            locked = case / "locked.png"
+            locked.write_bytes(A1111.read_bytes())
+            locked.chmod(0)
+            home = Path(tmp) / "home"
+            home.mkdir()
+            home.chmod(0o777)
+            env = {**os.environ, "HOME": str(home), "PYTHONPATH": str(REPO_ROOT), "PYTHONDONTWRITEBYTECODE": "1"}
+            env.pop("XDG_CACHE_HOME", None)
+            as_nobody = os.geteuid() == 0
+
+            def drop() -> None:  # pragma: no cover - runs in the child
+                os.setgid(65534)
+                os.setuid(65534)
+
+            done = subprocess.run([sys.executable, "-m", "deepfake_lens", "classify", "locked.png", "--format", "json"],
+                                  cwd=case, env=env, capture_output=True, text=True, timeout=300,
+                                  preexec_fn=drop if as_nobody else None)
+        self.assertEqual(done.returncode, 0, done.stderr[-1500:])
+        self.assertNotIn("예기치 않은 오류", done.stderr)
+        self.assertNotIn("도구 폴더", done.stderr)  # HOME is outside the analyzed folder
+        payload = json.loads(done.stdout)
+        self.assertEqual(payload["verdict_code"], "undetermined")
+        self._assert_failed_layer(payload["tool_candidates"])
+
+
 @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed")
 class ApiEndpointContractTest(unittest.TestCase):
     """D2/D16: api-serve analysis endpoints and the /api/stats header rule."""
@@ -451,6 +524,15 @@ class ApiEndpointContractTest(unittest.TestCase):
     def test_forensic_endpoint_matches_scan(self) -> None:
         data = self._post("/api/analyze/forensic", {"file_path": str(self.png)})
         self.assertEqual(data["verdict_code"], "manipulation_evidence")
+
+    def test_classify_of_an_unreadable_file_is_a_failed_layer_not_a_500(self) -> None:
+        """R24-5 (round 24): api-serve's /api/classify answered 500 when the tool-attribution layer could not read the file."""
+        from deepfake_lens import cli_standalone
+
+        with patch.object(cli_standalone, "tool_attribution", side_effect=PermissionError(13, "Permission denied")):
+            data = self._post("/api/classify", {"file_path": str(self.png)})
+        self.assertEqual(data["verdict_code"], "manipulation_evidence")
+        self.assertEqual((data["tool_candidates"]["reference_band"], data["tool_candidates"]["diagnostic"]["status"]), ("unavailable", "failed"))
 
     def test_check_layers_are_diagnostics(self) -> None:
         response = self.client.post("/api/check", params={"file_path": str(self.png)}, headers=self.HEADERS)

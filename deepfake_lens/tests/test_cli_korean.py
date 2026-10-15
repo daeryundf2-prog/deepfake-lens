@@ -326,6 +326,32 @@ class UnknownArgumentUsageTest(unittest.TestCase):
                 self.assertEqual(code, 2, err_text)
                 self.assertIn(fragment, err_text)
 
+    def test_help_with_a_help_option_after_the_topic(self) -> None:
+        """R24-11 (round 24): `help scan -h` and `help vendor-weights -h` were 「deepfake-lens scan: 오류: 알 수 없는 인수: -h」
+        (exit 2) — -h is that command's own help option and the user plainly asked for help. A trailing -h / --help after the
+        topic is now that topic's help (exit 0); words that are not a topic stay the R22-10 / R23-11 errors."""
+        from deepfake_lens.cli import COMMANDS
+
+        cases = [(["help", "scan", "-h"], "사용법: deepfake-lens scan"), (["help", "scan", "--help"], "사용법: deepfake-lens scan"),
+                 (["help", "vendor-weights", "-h"], "사용법: deepfake-lens vendor-weights"),
+                 (["help", "corpus", "build", "-h"], "사용법: deepfake-lens corpus build"),
+                 (["help", "vendor-weights", "pin", "--help"], "사용법: deepfake-lens vendor-weights"),
+                 (["help", "doctor", "-h", "--help"], "사용법: deepfake-lens doctor")]
+        cases += [(["help", command, "-h"], f"사용법: deepfake-lens {command}") for command in sorted(COMMANDS) if not command.startswith("-")]
+        for argv, usage in cases:
+            out = io.StringIO()
+            with self.subTest(argv=argv), contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    main(argv)
+            self.assertEqual(caught.exception.code, 0)
+            self.assertTrue(out.getvalue().startswith(usage), out.getvalue()[:200])
+        for argv, fragment in ((["help", "scan", "extra", "-h"], "알 수 없는 인수: extra"), (["help", "scan", "-x"], "알 수 없는 인수: -x"),
+                               (["help", "scan", "-h", "extra"], "알 수 없는 인수: -h extra")):
+            with self.subTest(argv=argv):
+                code, err_text = self._run(argv)
+                self.assertEqual(code, 2, err_text)
+                self.assertIn(fragment, err_text)
+
     def test_help_names_a_command_or_is_an_error(self) -> None:
         """R21-9 (round 21): `help bogus` printed the top-level help with exit 0 (a typo ended as a success), and
         `--verbose help` was a scan of the folder "help" ("폴더를 찾을 수 없습니다: help")."""

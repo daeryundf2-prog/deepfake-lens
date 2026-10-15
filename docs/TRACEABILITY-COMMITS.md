@@ -4,9 +4,9 @@
 
 Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34) 또는 신규(스펙 외) 사유에 매핑하고, 현재 phase0 히스토리의 커밋마다 제목의 ID와 'Gaps:' 줄을 적는다. 라운드 3과 라운드 6의 N은 서로 다른 집합이므로 N3-x / N6-x로, 라운드 5의 G1–G16은 스펙의 G1–G34와 충돌하므로 V5-G1…V5-G16으로 표기한다. 매핑(ids[], wp_gaps, unused_ids, notes)은 손으로 관리하는 데이터이고, commits[]와 ids[].commits는 scripts/build_traceability_commits.py가 git 히스토리에서 다시 만든다(제목으로 이전 항목과 매칭).
 
-범위: `dad9730..bbe3532`(병합 커밋 제외, 커밋 324개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
+범위: `dad9730..7b99aa7`(병합 커밋 제외, 커밋 338개). 이 표는 **표를 재생성한 커밋의 부모까지**를 덮는다 — 재생성 커밋 자신의 해시는 표에 없다(자기 해시를 담을 수 없음). CI(`python scripts/build_traceability_commits.py --check`)가 같은 범위를 히스토리에서 다시 만들어 커밋된 표와 비교한다.
 
-요약: ID 296개 — 스펙 갭에 매핑 215개(그중 신규 사유 병기 77개), 신규(스펙 외)만 81개.
+요약: ID 307개 — 스펙 갭에 매핑 221개(그중 신규 사유 병기 80개), 신규(스펙 외)만 86개.
 
 ## WP → 갭 (스펙 머리글)
 
@@ -323,6 +323,17 @@ Y13/P12: 검증 결함 ID(라운드 1–11)를 0단계 스펙의 갭 ID(G1–G34
 | R23-11 | 23 | `help vendor-weights pin` shows the vendor-weights help with a note — pin is a value of it | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 5b51712 |
 | R23-12 | 23 | the per-environment numba cache is never made inside the folder of a file a single-file co | G1, G31, G7, G12, G30 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 38911f0, c89cb3a, 494c18d, ec4b17a |
 | R23-13 | 23 | a true/false option with an unknown value is a 400 on both servers — recursive=maybe was r | G7 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 617130d |
+| R24-1 | 24 | a container a cancel left unanalyzed is the status "cancelled" with its own conclusion, an | G12, G7, G30 |  | 3d48593 |
+| R24-2 | 24 | the FFmpeg readers inside the process get an absolute name too — cv2.VideoCapture and libr | G7 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 77b1345 |
+| R24-3 | 24 | a name too long to make absolute stays "./"-relative and the audio worker is told the work | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | a9d7eaa |
+| R24-4 | 24 | reviews.json is read again after a failed read or a change on disk — a repaired file kept  | G31 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 33f8d8c |
+| R24-5 | 24 | classify of an unreadable file prints its conclusion with the tool-attribution layer faile | G12, G1 |  | 7abbfaa |
+| R24-6 | 24 | the old GUI's smoke passes in the repo's gui image — Playwright's Chromium when Google Chr | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | d3333df |
+| R24-7 | 24 | the PDFs draw the case fields through display_name — a literal "\u05e2 corp" printed exact | G2, G30 |  | 799ee6a |
+| R24-8 | 24 | /api/scan/stream reads recursive with parse_flag — the R23-13 true/false values, 400 for a | G7 | 신규(스펙 외): 갭 목록 밖 항목 포함 | 97227a0 |
+| R24-9 | 24 | qa-main runs with a HOME and XDG folders under /tmp/qa-main and without writing bytecode — | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 07df093 |
+| R24-10 | 24 | the R23-2 end-to-end test gives its project venv every site folder this interpreter import | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | 4c2dfc0 |
+| R24-11 | 24 | `help <command> -h` / `--help` is that command's help with exit 0 | — | 신규(스펙 외): 갭 목록 밖 항목 포함 | a73da37 |
 
 커밋 제목에 쓰이지 않은 ID:
 
@@ -678,3 +689,17 @@ R18-14: ids[]의 갭 매핑을 커밋 제목·본문의 `Gaps:`에 맞췄다 —
 | 5b51712 | 23 | R23-11 | Gaps: 신규(스펙 외) | subject | fix(cli): R23-11 `help vendor-weights pin` shows the vendor-weights help with a note — pin is a value of its positional argument, not a subcommand — and `help help` is the top-level help (R23-11; Gaps: 신규) |
 | 494daf0 | 23 | WP-J | Gaps: G26; 신규(스펙 외) | subject | test(qa): the QA harness also runs with the audio stack — gate.sh full ends with a --qa-only run in a side venv that sees /venv then /venv-api, and QA-IN-1 / QA-OUT-4 gain relative-path audio cases (WP-J; Gaps: G26, 신규) |
 | bbe3532 | 23 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): HANDOFF.md §1/§2/§9 state round 23 — 23 rounds, R23-1…R23-13 fixed on this branch, the round-23 trend and the next steps — without anything the records-only commit changes (WP-J; Gaps: 신규) |
+| fbcb53c | 23 | WP-J | Gaps: G26, G27, G28 | subject | docs(qa): CONFORMANCE.md and commit traceability regenerated on bbe3532, round-23 IDs mapped (WP-J; Gaps: G26, G27, G28) |
+| 6e3bd1e | 23 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): round-24 verification findings (WP-J; Gaps: 신규) |
+| 3d48593 | 24 | R24-1 | Gaps: G12, G7, G30 | subject | fix(report): R24-1 a container a cancel left unanalyzed is the status "cancelled" with its own conclusion, and /api/report excludes it as cancelled instead of refusing the report as changed (R24-1; Gaps: G12, G7, G30) |
+| 77b1345 | 24 | R24-2 | Gaps: G7; 신규(스펙 외) | subject | fix(native): R24-2 the FFmpeg readers inside the process get an absolute name too — cv2.VideoCapture and librosa.load read a relative "c:v.mp4" as the protocol "c" (R24-2; Gaps: G7, 신규) |
+| a9d7eaa | 24 | R24-3 | Gaps: 신규(스펙 외) | subject | fix(native): R24-3 a name too long to make absolute stays "./"-relative and the audio worker is told the working folder — R23-1's absolute names failed in a working folder deeper than PATH_MAX (R24-3; Gaps: 신규) |
+| 33f8d8c | 24 | R24-4 | Gaps: G31; 신규(스펙 외) | subject | fix(server): R24-4 reviews.json is read again after a failed read or a change on disk — a repaired file kept being refused until the server restarted (R24-4; Gaps: G31, 신규) |
+| 7abbfaa | 24 | R24-5 | Gaps: G12, G1 | subject | fix(cli): R24-5 classify of an unreadable file prints its conclusion with the tool-attribution layer failed — it ended with 「처리 중 예기치 않은 오류(PermissionError)」 and exit 1 (R24-5; Gaps: G12, G1) |
+| d3333df | 24 | R24-6 | Gaps: 신규(스펙 외) | subject | fix(gate): R24-6 the old GUI's smoke passes in the repo's gui image — Playwright's Chromium when Google Chrome is absent, and the scan includes subfolders (R24-6; Gaps: 신규) |
+| 799ee6a | 24 | R24-7 | Gaps: G2, G30 | subject | fix(report): R24-7 the PDFs draw the case fields through display_name — a literal "\u05e2 corp" printed exactly like "ע corp" (R24-7; Gaps: G2, G30) |
+| 97227a0 | 24 | R24-8 | Gaps: G7; 신규(스펙 외) | subject | fix(server): R24-8 /api/scan/stream reads recursive with parse_flag — the R23-13 true/false values, 400 for any other (R24-8; Gaps: G7, 신규) |
+| a73da37 | 24 | R24-11 | Gaps: 신규(스펙 외) | subject | fix(cli): R24-11 `help <command> -h` / `--help` is that command's help with exit 0 (R24-11; Gaps: 신규) |
+| 07df093 | 24 | R24-9 | Gaps: 신규(스펙 외) | subject | fix(gate): R24-9 qa-main runs with a HOME and XDG folders under /tmp/qa-main and without writing bytecode — it wrote the caller's ~/.cache/deepfake-lens and __pycache__ outside /tmp (R24-9; Gaps: 신규) |
+| 4c2dfc0 | 24 | R24-10 | Gaps: 신규(스펙 외) | subject | test(audio): R24-10 the R23-2 end-to-end test gives its project venv every site folder this interpreter imports from — it failed in HANDOFF §5's qa-main side venv (R24-10; Gaps: 신규) |
+| 7b99aa7 | 24 | WP-J | Gaps: 신규(스펙 외) | subject | docs(phase0): HANDOFF.md §1/§2/§9 state round 24 — 24 rounds, R24-1…R24-11 fixed on this branch, the round-24 trend and the next steps — without anything the records-only commit changes (WP-J; Gaps: 신규) |

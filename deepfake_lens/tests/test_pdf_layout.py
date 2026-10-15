@@ -353,6 +353,67 @@ class PdfGlyphlessCharactersTest(unittest.TestCase):
             for name in names:
                 self.assertIn("".join(self._expected(layout, name).split()), flat, name)
 
+    def test_case_fields_stay_distinct_in_every_pdf(self) -> None:
+        """R24-7 (round 24): the evidence statement's case fields (and the forensic PDF's office, contact and exhibit
+        number) reached PdfLayout as typed — ``--plaintiff "ע corp"`` and ``--plaintiff "\\u05e2 corp"`` (a literal
+        backslash) both printed 「원고(고소인)    \\u05e2 corp」: R23-4's injectivity held for file names (display_name)
+        only. The fields now go through display_name too (a literal backslash doubled)."""
+        import contextlib
+        import json
+        import os
+        from unittest import mock
+
+        from deepfake_lens import webapp_api
+        from deepfake_lens.cli import main as cli_main
+
+        layout = self._layout()
+        pairs = ("ע corp", "\\u05e2 corp")
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            folder = base / "case"
+            folder.mkdir()
+            sample = folder / "a.txt"
+            sample.write_text("사람이 쓴 짧은 메모입니다. " * 4, encoding="utf-8")
+            texts: dict[str, list[str]] = {}
+            env = mock.patch.dict(os.environ, {"HOME": str(base / "home")})
+            with env, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                for index, value in enumerate(pairs):
+                    statement = base / f"statement{index}.pdf"
+                    self.assertEqual(cli_main([
+                        "evidence-statement", str(sample), "--pdf-out", str(statement), "--plaintiff", value, "--defendant", value,
+                        "--case-no", value, "--case-name", value, "--court", value, "--law-firm", value, "--contact", value,
+                        "--center", value,
+                    ]), 0)
+                    texts.setdefault("cli evidence-statement", []).append(self._pdf_text(statement))
+                    forensic = base / f"forensic{index}.pdf"
+                    self.assertEqual(cli_main([
+                        "scan", str(folder), "--forensic-pdf-out", str(forensic), "--exhibit-no", value, "--law-firm", value, "--contact", value,
+                    ]), 0)
+                    texts.setdefault("cli forensic", []).append(self._pdf_text(forensic))
+            out = io.StringIO()
+            with env, contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(cli_main(["scan", str(folder), "--format", "json"]), 0)
+            rows = json.loads(out.getvalue())["items"]
+            with mock.patch.object(webapp_api, "_READ_ROOTS", type(webapp_api._READ_ROOTS)()):
+                webapp_api.configure_read_roots(folder)
+                for value in pairs:
+                    for fmt, fields in (("evidence", ("plaintiff", "defendant", "case_no", "case_name", "court", "law_firm", "contact", "center")),
+                                        ("pdf", ("exhibit_no", "law_firm", "contact"))):
+                        body = json.dumps({"items": rows, "scan_root": str(folder), "format": fmt, **{field: value for field in fields}}).encode("utf-8")
+                        raw = webapp_api._report_payload(body, default_folder=folder)
+                        assert isinstance(raw, bytes), raw
+                        texts.setdefault(f"web {fmt}", []).append(self._pdf_text(raw))
+        hebrew, literal = (layout.drawable(display) for display in (self._expected(layout, value) for value in pairs))
+        self.assertEqual(hebrew, "\\u05e2 corp")
+        self.assertEqual(literal, "\\\\u05e2 corp")
+        for label, (first, second) in texts.items():
+            with self.subTest(pdf=label):
+                flat_first, flat_second = "".join(first.split()), "".join(second.split())
+                self.assertIn("\\u05e2corp", flat_first)
+                self.assertNotIn("\\\\u05e2corp", flat_first)
+                self.assertIn("\\\\u05e2corp", flat_second)  # the literal backslash doubled: the two PDFs differ
+                self.assertNotEqual(flat_first.count("\\\\u05e2"), flat_second.count("\\\\u05e2"))
+
     def test_every_pdf_path_prints_distinct_readable_names(self) -> None:
         import contextlib
         import json

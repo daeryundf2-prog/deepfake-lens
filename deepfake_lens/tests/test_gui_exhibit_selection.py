@@ -469,6 +469,35 @@ class WebReportSelectionTest(unittest.TestCase):
             text = "".join("".join(page.get_text().split()) for page in doc)
         self.assertIn("".join(entry["document_name"].split()), text)
 
+    def test_preview_excludes_a_cancelled_archive_like_the_export(self) -> None:
+        """Merge of phase0 R24-1: in a report of a cancelled scan an archive row of status "cancelled" is
+        excluded with REPORT_ROW_CANCELLED (its analyzed members are signed as rows); the preview, built
+        without re-analysis, excludes it the same way — preview equals output."""
+        rows = [dict(row, status="cancelled") if row["path"] == "evid.zip" else row for row in self.rows]
+        summary = dict(self.summary, cancelled=True, files_cancelled=1)
+        body = self._body(items=rows, summary=summary, exhibit_paths=[self.rows[0]["path"]], submitter_side="plaintiff")
+        signed = webapp_api._report_payload(body, "evidence-json", default_folder=self.folder)
+        preview = webapp_api._report_payload(body, "evidence-preview", default_folder=self.folder)
+        assert isinstance(signed, dict) and isinstance(preview, dict), (signed, preview)
+        self.assertIn(("evid.zip", webapp_api.REPORT_ROW_CANCELLED), [(row["path"], row["reason"]) for row in signed["excluded_items"]])
+        unsigned = "\n".join(preview["unsigned"])
+        self.assertIn("evid.zip", unsigned)
+        self.assertIn(webapp_api.REPORT_ROW_CANCELLED.split("(", 1)[0], unsigned)
+        self.assertEqual(dict(preview["boxes"])["기록되지 않은 파일"], signed["unrecorded_files"]["lines"])
+
+    def test_preview_case_fields_are_drawn_as_the_pdf_draws_them(self) -> None:
+        """Merge of phase0 R24-7: the case fields go through display_name in the PDF (a literal backslash
+        doubled); the preview shows the same lines, so "ע corp" and a typed "\\u05e2 corp" differ."""
+        def case_lines(plaintiff: str) -> list[str]:
+            out = webapp_api._report_payload(self._body(exhibit_paths=[self.rows[0]["path"]], submitter_side="plaintiff", plaintiff=plaintiff),
+                                             "evidence-preview", default_folder=self.folder)
+            assert isinstance(out, dict), out
+            return list(out["case_lines"])
+
+        hebrew, typed = case_lines("\u05e2 corp"), case_lines("\\u05e2 corp")
+        self.assertNotEqual(hebrew[1], typed[1])
+        self.assertIn("\\\\u05e2 corp", typed[1])
+
     def test_excluded_rows_are_named_in_response_headers(self) -> None:
         """GUI-REV5 L-2: a successful report of any format names the rows it lists as 서명 제외
         (here an upload the server never re-analyzes) in X-Deepfake-Lens-Excluded-* headers, so

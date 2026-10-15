@@ -835,7 +835,11 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    deviations of a video's audio track differ from generation 8's
 #    multi-threaded extraction (verdicts unchanged); generation 8 rows
 #    replayed from a cache said what a cold scan no longer says.
-OUTPUT_FORMAT_GENERATION = 9
+# 10: R24-1 — an archive container a cancel left (partly) unanalyzed is the
+#    status "cancelled" and its verdict ends "검사 취소 — 구성 파일 N개
+#    미분석(부분 결과)." (was "unknown" / "아카이브에서 분석 가능한 구성 파일이
+#    없습니다", or "expanded"); a new Korean constant of core.
+OUTPUT_FORMAT_GENERATION = 10
 
 
 def cache_extension(path: Path) -> str:

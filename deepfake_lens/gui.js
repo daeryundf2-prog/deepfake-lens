@@ -564,7 +564,15 @@
         const VERDICT_MARK = { manipulation_evidence: 'm', authenticity_evidence: 'a', undetermined: 'u', other: 'x' };
         const VERDICT_SHORT = { manipulation_evidence: '조작·생성 근거 있음', authenticity_evidence: '원본성 근거 있음', undetermined: '판단 불가', other: '분석 못 함' };
         // U-9: a row that was not analyzed says why — 미지원 is not 분석 실패.
-        const STATUS_LABELS = { unsupported: '미지원 형식', failed: '처리 실패', duplicate: '중복', skipped: '건너뜀' };
+        // Merge of phase0 R24-1: "cancelled" — an archive a cancel left (partly) unanalyzed; still a verdict row
+        // (the roll-up of the members that were analyzed), labelled as result_types.STATUS_LABELS does.
+        const STATUS_LABELS = { unsupported: '미지원 형식', failed: '처리 실패', duplicate: '중복', skipped: '건너뜀', cancelled: '검사 취소' };
+        // R24-1: the container's own words for the cancel ("검사 취소 — 구성 파일 N개 미분석(부분 결과).").
+        function cancelledContainerText(item) {
+            if (!item || item.status !== 'cancelled') return '';
+            const said = String(((item.result || {}).verdict) || '').match(/검사 취소 — 구성 파일 \d+개 미분석\(부분 결과\)\./);
+            return said ? said[0] : '검사 취소 — 구성 파일 일부 미분석(부분 결과).';
+        }
         const MEDIA_KIND_LABELS = { image: '이미지', video: '영상', audio: '음성', text: '텍스트', document: '문서', archive: '압축 파일', unsupported: '알 수 없는 형식' };
         const SCOPE_REASON = /^(측정 범위 밖|사진 아님)/;
 
@@ -642,8 +650,9 @@
             const origin = item.status === 'duplicate' ? originOf(item) : null;
             if (origin) return '분석 못 함 — 중복 · 원본: ' + VERDICT_SHORT[verdictOf(origin)];
             if (v === 'other') return '분석 못 함 — ' + (STATUS_LABELS[item.status] || '기타');
-            if (v === 'undetermined') return '판단 불가 — ' + undeterminedAspects(item).join(' · ');
-            return VERDICT_SHORT[v];
+            const cancelled = item.status === 'cancelled' ? ' · 검사 취소(부분 결과)' : '';
+            if (v === 'undetermined') return '판단 불가 — ' + undeterminedAspects(item).join(' · ') + cancelled;
+            return VERDICT_SHORT[v] + cancelled;
         }
         function decisiveEvidence(r, v) {
             // The direction that carries this verdict, by its label (조작·생성 방향 / 원본성 방향).
@@ -657,7 +666,9 @@
         function rowReason(item) {
             // R19-13: a row the server found changed since the scan says so first.
             if (changedPaths.has(String(item.path))) return '검사 뒤 바뀜 — 다시 검사 · ' + rowReasonOf(item);
-            return rowReasonOf(item);
+            // R24-1 merge: a cancelled archive says so first — its conclusion covers only the members analyzed.
+            const cancelled = cancelledContainerText(item);
+            return cancelled ? cancelled + ' · ' + rowReasonOf(item) : rowReasonOf(item);
         }
         function rowReasonOf(item) {
             const r = item.result;
@@ -692,6 +703,11 @@
             return '근거 없음 — 원본이라는 뜻 아님';
         }
         function verdictLine(item) {
+            // R24-1 merge: the partial roll-up of a cancelled archive is said before its conclusion.
+            const cancelled = cancelledContainerText(item);
+            return cancelled ? cancelled + ' ' + verdictLineOf(item) : verdictLineOf(item);
+        }
+        function verdictLineOf(item) {
             const v = verdictOf(item);
             const r = item.result || {};
             if (v === 'manipulation_evidence') return '이 파일의 기록에 조작·생성을 가리키는 근거가 있습니다.';
@@ -2592,7 +2608,7 @@
             box.hidden = exportWarnings.size === 0;
             if (box.hidden) return;
             $('export-warn-text').textContent = `이 검사의 행 ${exportWarnings.size}개가 서명 제외로 옮겨졌습니다(${[...exportWarnFormats].join(', ')}). ` +
-                '서버가 다시 분석·서명하지 않는 행입니다(사유는 행마다). 링크로 바뀐 폴더 뒤의 행이면 다시 검사하십시오. 폴더 탐색 상한 행은 다시 검사해도 같은 상한에 걸릴 수 있습니다.';
+                '서버가 다시 분석·서명하지 않는 행입니다(사유는 행마다). 링크로 바뀐 폴더 뒤의 행이면 다시 검사하십시오. 폴더 탐색 상한 행은 다시 검사해도 같은 상한에 걸릴 수 있습니다. 검사 취소된 압축 파일의 컨테이너 행은 서명하지 않고, 분석된 구성 파일은 각 행으로 서명됩니다.';
             const list = $('export-warn-list');
             list.innerHTML = '';
             const rows = [...exportWarnings];

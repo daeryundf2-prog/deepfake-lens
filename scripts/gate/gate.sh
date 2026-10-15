@@ -18,9 +18,14 @@ A=/venv-api/bin/python
 rc=0
 # R23 residual (round 23): the QA harness in a side venv that sees /venv first (librosa, numba, soundfile, c2pa) and
 # /venv-api after it (fastapi/httpx — the harness's QA-OUT-4 precondition — and pymupdf), so QA-IN-1 / QA-OUT-4 run
-# their audio cases with the audio stack. docs/CONFORMANCE.md is still generated from /venv-api (HANDOFF §5); this
-# run writes to /tmp/qa-main only.
-QA_MAIN="python3 -m venv --without-pip /tmp/qa-main-venv && \
+# their audio cases with the audio stack. docs/CONFORMANCE.md is still generated from /venv-api (HANDOFF §5).
+# R24-9 (round 24): it runs with HOME (and the XDG folders) in /tmp/qa-main/home and without writing bytecode, so it
+# writes under /tmp only — /tmp/qa-main (records, logs, the HOME's tool folder ~/.cache/deepfake-lens with its logs
+# and numba cache) and /tmp/qa-main-venv (with its environment's numba cache, R22-9); the tests' own temp folders are
+# under /tmp too. It used to write the caller's ~/.cache/deepfake-lens and stdlib __pycache__ files.
+QA_MAIN="mkdir -p /tmp/qa-main/home && export HOME=/tmp/qa-main/home XDG_CACHE_HOME=/tmp/qa-main/home/.cache \
+  XDG_DATA_HOME=/tmp/qa-main/home/.local/share XDG_CONFIG_HOME=/tmp/qa-main/home/.config PYTHONDONTWRITEBYTECODE=1 && \
+  python3 -m venv --without-pip /tmp/qa-main-venv && \
   { /venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()[\"purelib\"])'; /venv-api/bin/python -c 'import sysconfig; print(sysconfig.get_paths()[\"purelib\"])'; } \
   > \$(/tmp/qa-main-venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()[\"purelib\"])')/gate-qa-main.pth && \
   /tmp/qa-main-venv/bin/python -c 'import librosa, fastapi, httpx' && \
@@ -33,6 +38,8 @@ case $mode in
   cmd) shift; run "$*";;
   qa-main) run "$QA_MAIN";;
   gui)
+    # R24-6 (round 24): gui_smoke.py uses Playwright's Chromium when Google Chrome is absent (this image) and scans
+    # with subfolders (neither folder below has files at its top level).
     run "/venv-gui/bin/python scripts/gui_smoke.py --scan-dir fixtures --port 8899 --shot /tmp/gui-smoke.png 2>&1 | tail -5"
     run "/venv-gui/bin/python scripts/make_adversarial_fixtures.py --out /tmp/adv >/dev/null 2>&1; /venv-gui/bin/python scripts/gui_smoke.py --scan-dir /tmp/adv --port 8898 --shot /tmp/gui-smoke-adv.png 2>&1 | tail -5"
     ;;

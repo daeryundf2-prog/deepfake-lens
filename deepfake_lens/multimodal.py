@@ -468,7 +468,7 @@ def _motion_envelope(video_path: Path):
     except ImportError:
         return None, 0.0, 0.0
 
-    with native_safe_path(video_path) as native_video:  # R12-1: never a non-ASCII name to cv2
+    with native_safe_path(video_path, for_child=True) as native_video:  # R12-1: never a non-ASCII name to cv2; R24-2: nor a protocol name
         capture = cv2.VideoCapture(native_video)
         if not capture.isOpened():
             return None, 0.0, 0.0
@@ -510,7 +510,7 @@ def _audio_envelope(video_path: Path):
     sample_rate = 22050
     hop = 512
     try:
-        with native_safe_path(video_path) as native_media:  # R12-2: libsndfile/audioread need an ASCII name
+        with native_safe_path(video_path, for_child=True) as native_media:  # R12-2: libsndfile/audioread need an ASCII name; R24-2: audioread runs ffmpeg
             y, sr = librosa.load(native_media, sr=sample_rate, mono=True)
     except Exception:
         return None, 0.0, 0.0

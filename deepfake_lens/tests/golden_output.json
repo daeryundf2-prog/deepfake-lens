@@ -130,6 +130,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 10,
+      "reason": "R24-1: 취소로 구성 파일이 분석되지 않은 압축 파일 컨테이너 행의 상태 cancelled와 결론 꼬리 「검사 취소 — 구성 파일 N개 미분석(부분 결과).」(core 한국어 상수 추가)",
+      "sha256": "4da8bdb4d47d680805b4ac4d49fa62fb638144f6101f34def554b32029d2cf39",
+      "sets": {
+        "stdlib": "4da8bdb4d47d680805b4ac4d49fa62fb638144f6101f34def554b32029d2cf39",
+        "full-extras": "ece030016587b55c035311a0502994d510f0fc02294553470a0fe35cdb844a59"
+      },
+      "constants_sha256": "379d6f9f707a3c0e87807041bd6fadfdd2d6999f41caa42a58eaf09a2907100e",
+      "constants_count": 56,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

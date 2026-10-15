@@ -1199,25 +1199,91 @@ def _stage(source: str) -> tuple[str, bool]:
         return _copy_staged(absolute, target), True
 
 
+_PATH_MAX: int | None = None
+
+
+def _path_max() -> int:
+    """The length (bytes, NUL included) a path given to ``open`` must stay under — PATH_MAX (Linux 4096, macOS 1024)."""
+    global _PATH_MAX
+    if _PATH_MAX is None:
+        try:
+            _PATH_MAX = int(os.pathconf("/", "PC_PATH_MAX"))
+        except (OSError, ValueError, AttributeError):
+            _PATH_MAX = 4096
+        if _PATH_MAX <= 0:
+            _PATH_MAX = 4096
+    return _PATH_MAX
+
+
+def dot_relative(text: str) -> str:
+    """R24-3: a relative name that FFmpeg never reads as a protocol — ``./`` in front unless it starts with ``.``.
+
+    FFmpeg takes the letters before the first ``:`` as a protocol name only
+    when they are all URL-scheme characters; ``./`` (and ``../``) put a
+    ``/`` first, so ``./c:v.mp4`` is always the file ``c:v.mp4``.
+    """
+    if not text or text in (".", "..") or text.startswith(("./", "../")):
+        return text
+    return "./" + text
+
+
 def child_path(text: str) -> str:
-    """R23-1 (round 23): ``text`` as a path a child process resolves to the same file, whatever its cwd.
+    """R23-1 (round 23): ``text`` as a name FFmpeg and a child process resolve to the same file.
 
     A relative path is joined to this process's working folder — lexically
     (POSIX: ``..`` and symbolic links are left for the kernel to resolve, as
     they would have been here); Windows: ``os.path.abspath`` (drive-relative
-    forms). An empty or already absolute path, or one whose working folder is
-    gone, is returned unchanged. An absolute path also keeps ``ffmpeg`` from
-    reading a relative name with a ``:`` (``a:b.mp4``, ``concat:…``) as a
-    protocol.
+    forms). An empty or already absolute path is returned unchanged. An
+    absolute path also keeps ``ffmpeg`` from reading a relative name with a
+    ``:`` (``a:b.mp4``, ``concat:…``) as a protocol.
+
+    R24-3 (round 24): when the joined name would be PATH_MAX bytes or longer
+    (a working folder deeper than that limit — the kernel refuses such a name
+    with ENAMETOOLONG; since R23-1 the audio checks of ``scan case`` and the
+    ffmpeg audio-track extraction failed there, while 2130892, which passed
+    the relative name, worked), and when the working folder is gone, the
+    relative name is returned with ``./`` in front (:func:`dot_relative`):
+    it is valid for this process and for a child that inherits its working
+    folder (``ffmpeg`` started by :func:`shutdown.run_child` does), and is
+    still never a protocol. A child that runs elsewhere (the audio worker)
+    must be told this process's working folder: :func:`is_cwd_relative`.
     """
     if not text or os.path.isabs(text):
         return text
     try:
         if _is_windows():
             return os.path.abspath(text)
-        return os.path.join(os.getcwd(), text)
+        joined = os.path.join(os.getcwd(), text)
     except OSError:  # the working folder was removed: the child fails as it would have
-        return text
+        return dot_relative(text)
+    if len(os.fsencode(joined)) >= _path_max():
+        return dot_relative(text)
+    return joined
+
+
+def is_cwd_relative(name: str) -> bool:
+    """R24-3: whether a :func:`child_path` result still depends on this process's working folder."""
+    return bool(name) and not os.path.isabs(name)
+
+
+def chdir_any(path: str) -> None:
+    """R24-3: ``os.chdir(path)`` that also reaches a folder whose absolute name is PATH_MAX bytes or longer.
+
+    The kernel refuses such a name (ENAMETOOLONG); the folder is then
+    entered one component at a time from ``/``.
+    """
+    try:
+        os.chdir(path)
+        return
+    except OSError as exc:
+        import errno
+
+        if exc.errno != errno.ENAMETOOLONG or not os.path.isabs(path):
+            raise
+    os.chdir(os.sep)
+    for part in path.split(os.sep):
+        if part:
+            os.chdir(part)
 
 
 @contextmanager
@@ -1233,6 +1299,14 @@ def native_safe_path(path: str | os.PathLike[str], *, for_child: bool = False) -
     the file this process means. Without it a relative ASCII path reached
     the audio worker unchanged and was resolved against the worker's cache
     folder: every audio check of ``scan case`` / ``cd case; scan .`` failed.
+
+    R24-2 (round 24): also for a name read by FFmpeg inside this process —
+    ``cv2.VideoCapture`` (FFmpeg backend) and ``librosa.load`` (whose
+    audioread fallback runs ``ffmpeg``): a relative ``c:v.mp4`` (a macOS
+    folder named "2026/10/15" is ``2026:10:15`` in POSIX) was opened as the
+    protocol ``c`` and every video check of ``cd case; classify c:v.mp4``
+    failed while the absolute name worked. R24-3: a name too long to make
+    absolute is ``./``-prefixed instead (:func:`child_path`).
     """
     text = os.fspath(path)
     if isinstance(text, bytes):

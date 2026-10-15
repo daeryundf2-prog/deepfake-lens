@@ -619,6 +619,7 @@ def _archive_container_item(
     rejected: list[tuple[str, str]] | None = None,
     sha256: str | None = None,
     missing_dependency: str | None = None,
+    cancelled_members: int = 0,
 ) -> ScanItem:
     """Container row for an expanded archive; rolls member verdicts up.
 
@@ -632,6 +633,16 @@ def _archive_container_item(
     ``skipped`` ``archive_member`` coverage entry and a limitation naming
     the member and the reason (D9); ``sha256`` is the archive file's
     digest so a signed report binds the container too.
+
+    R24-1 (round 24): ``cancelled_members`` — members a cancel left
+    unanalyzed. Such a container is the status ``cancelled`` (never
+    ``expanded`` / ``unknown``) and its conclusion says so
+    (:data:`CANCELLED_CONTAINER_VERDICT`): a cancelled scan's container
+    whose members were never started said "아카이브에서 분석 가능한 구성
+    파일이 없습니다" (``unknown``), and a web report of that scan was refused
+    as "검사 뒤 바뀐 파일" — the server's full re-analysis is ``expanded``.
+    The roll-up of the members that were analyzed is kept (a manipulated
+    member still makes the row "조작·생성 근거 있음").
     """
     rejected = list(rejected or [])
     try:
@@ -692,14 +703,21 @@ def _archive_container_item(
         verdict = f"압축 파일: 판단 불가 — 압축 해제 실패({extraction_error})."
     elif missing_dependency:
         verdict = f"압축 파일: 판단 불가 — 의존성 부재: {missing_dependency}(압축을 풀 수 없어 구성 파일을 분석하지 않았습니다)."
+    elif cancelled_members:
+        verdict = f"압축 파일: {VERDICT_LABELS[verdict_code]} —"
     else:
         verdict = "압축 파일: 판단 불가 — 아카이브에서 분석 가능한 구성 파일이 없습니다." + first_rejection
+    if cancelled_members:
+        # R24-1: the cancel is named in the conclusion itself, not only in a limitation.
+        verdict = f"{verdict} {CANCELLED_CONTAINER_VERDICT.format(n=cancelled_members)}" + ("" if analyzed_members else first_rejection)
     band = band_for_verdict(verdict_code)
     return ScanItem(
         # "expanded" marks the roll-up row; it is counted by its verdict
         # like any other row (R5) — the CLI table and GUI show it with
-        # that verdict, and the header must agree with them.
-        rel, name, "archive", "expanded" if analyzed_members else "unknown", size,
+        # that verdict, and the header must agree with them. R24-1:
+        # "cancelled" when a cancel left members unanalyzed (also a verdict row).
+        rel, name, "archive",
+        CANCELLED_CONTAINER_STATUS if cancelled_members else ("expanded" if analyzed_members else "unknown"), size,
         ClassificationResult(
             score=max((i.result.score for i in analyzed_members if i.result is not None), default=0),
             band=band,
@@ -939,6 +957,7 @@ def _scan_specs(
             extraction_error=meta.get("error"),
             rejected=meta.get("rejected", []),
             missing_dependency=meta.get("missing_dependency"),
+            cancelled_members=not_started,  # R24-1: its own status and conclusion
             # D9: the container's own digest binds the archive into a signed report.
             # R13-2: the digest taken right after extraction (the bytes the
             # members came from), never one taken later.
@@ -960,6 +979,10 @@ def _scan_specs(
 # R18-3 (round 18): the container-row warning (a limitation) of an archive
 # whose members were not all analyzed before a cancel.
 CANCELLED_MEMBERS_WARNING = "검사 취소 — 구성 파일 {n}개를 분석하지 않았습니다(부분 결과)"
+# R24-1 (round 24): the status and the conclusion tail of a container row whose
+# members a cancel left (partly or wholly) unanalyzed.
+CANCELLED_CONTAINER_STATUS = "cancelled"
+CANCELLED_CONTAINER_VERDICT = "검사 취소 — 구성 파일 {n}개 미분석(부분 결과)."
 
 # R12-7 (round 12): a file rewritten while it was analyzed got the hash of
 # other bytes than the ones its verdict came from. Its state (size, mtime_ns,

@@ -774,11 +774,17 @@ STATEMENT_ROW_MIN_HEIGHT = 30.0
 
 
 def statement_case_lines(statement: EvidenceStatement) -> list[str]:
-    """GUI-REV2 H-2: the PDF's case box, line for line (the preview shows these)."""
+    """GUI-REV2 H-2: the PDF's case box, line for line (the preview shows these).
+
+    Merge of phase0 R24-7: the examiner's fields go through display_name (a literal backslash doubled) —
+    in the PDF and so in the preview, which draws these same lines.
+    """
+    from .result_text import display_name
+
     return [
-        f"사        건    {statement.case_no}  {statement.case_name}",
-        f"원고(고소인)    {statement.plaintiff}",
-        f"피고(피의자)    {statement.defendant}",
+        f"사        건    {display_name(statement.case_no)}  {display_name(statement.case_name)}",
+        f"원고(고소인)    {display_name(statement.plaintiff)}",
+        f"피고(피의자)    {display_name(statement.defendant)}",
         f"위 사건에 관하여 {statement.party}의 {statement.wording['pdf_agent']}은 주장사실을 입증하기 위해 아래와 같이 증거방법을 제출합니다.",
     ]
 
@@ -801,13 +807,21 @@ def statement_boxes(statement: EvidenceStatement) -> list[tuple[str, list[str]]]
 
 
 def statement_signoff_lines(statement: EvidenceStatement) -> list[str]:
-    """GUI-REV2 H-2: the PDF's signoff block (the court line follows it)."""
+    """GUI-REV2 H-2: the PDF's signoff block (the court line follows it); R24-7: the law firm through display_name."""
+    from .result_text import display_name
+
     return [
         statement.created_at,
-        f"{statement.party} {statement.party_agent}  {statement.law_firm}".rstrip(),
+        f"{statement.party} {statement.party_agent}  {display_name(statement.law_firm)}".rstrip(),
         "담당변호사 : ○ ○ ○,  ○ ○ ○",
         "디지털포렌식센터 수석감정관 : ○ ○ ○  (인)",
     ]
+
+
+def _display_court(court: str) -> str:
+    from .result_text import display_name
+
+    return display_name(court)
 
 
 def statement_preview(statement: EvidenceStatement, unsigned_rows: list[tuple[ScanItem, str]] | None = None) -> dict[str, Any]:
@@ -835,7 +849,7 @@ def statement_preview(statement: EvidenceStatement, unsigned_rows: list[tuple[Sc
         "boxes": [[title, lines] for title, lines in statement_boxes(statement)],
         "unsigned": unsigned,
         "signoff": statement_signoff_lines(statement),
-        "court": statement.court,
+        "court": _display_court(statement.court),  # R24-7: as the PDF draws it
     }
 
 
@@ -852,11 +866,21 @@ def _render_statement_pdf(
     """
     from .pdf_layout import Cell, PdfLayout
     from .reports import analysis_options_line, scan_root_line
+    from .result_text import display_name
+
+    # R24-7 (round 24): the case fields (the examiner's input — case number and name, parties, court, office,
+    # contact) are drawn through display_name like the file names (R23-4): every literal backslash doubled, so
+    # the \uNNNN escape PdfLayout.drawable writes for a character the font lacks never equals a literal
+    # "\uNNNN" typed into the field ("ע corp" and "\u05e2 corp" printed alike).
+    # (Merge: the case box and signoff lines come from statement_case_lines / statement_signoff_lines,
+    # which apply display_name — shared with the GUI preview.)
+    law_firm, center, contact = display_name(statement.law_firm), display_name(statement.center), display_name(statement.contact)
+    court_name = display_name(statement.court)
 
     def page_header(layout: PdfLayout) -> None:
-        firm_header = f"{statement.law_firm} {statement.center}".strip()
+        firm_header = f"{law_firm} {center}".strip()
         layout.text(layout.left, layout.right, firm_header, 9.0, (0.15, 0.25, 0.45), gap=0.5)
-        contact_line = f"대한민국 법원 전자소송(ECFS) 표준 서식  |  대표전화: {statement.contact}" if statement.contact else "대한민국 법원 전자소송(ECFS) 표준 서식"
+        contact_line = f"대한민국 법원 전자소송(ECFS) 표준 서식  |  대표전화: {contact}" if statement.contact else "대한민국 법원 전자소송(ECFS) 표준 서식"
         layout.text(layout.left, layout.right, contact_line, 7.5, (0.5, 0.5, 0.5), gap=2.0)
         layout.page.draw_line(pymupdf.Point(layout.left, layout.y), pymupdf.Point(layout.right, layout.y), color=(0.85, 0.88, 0.92), width=0.8)
         layout.y += 6.0
@@ -931,7 +955,7 @@ def _render_statement_pdf(
     # The signoff, the court line and the G30 signature lines (or the
     # explicit "서명 없음" lines) stay together on one page.
     signature = [(line, 6.5, (0.35, 0.35, 0.35)) for line in statement_signature_lines(body)]
-    court = [(statement.court, 12.0, (0.05, 0.05, 0.05))]
+    court = [(court_name, 12.0, (0.05, 0.05, 0.05))]
     needed = sum(
         layout.block_height(layout.wrap(text, layout.content_width, size), size) + 3.0
         for text, size, _ in (*signoff, *court, *signature)

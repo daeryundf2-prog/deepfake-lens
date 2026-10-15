@@ -239,8 +239,13 @@ class EnvironmentCacheOutsideAnalyzedFileFoldersTest(unittest.TestCase):
         subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(venv)], check=True, timeout=120)
         purelib = Path(subprocess.run([str(venv / "bin" / "python"), "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
                                       capture_output=True, text=True, check=True, timeout=60).stdout.strip())
-        paths = {sysconfig.get_paths()["purelib"], sysconfig.get_paths()["platlib"], str(PACKAGE.parent)}
-        (purelib / "deepfake-lens-test.pth").write_text("\n".join(sorted(paths)) + "\n", encoding="utf-8")
+        # R24-10 (round 24): every site folder this interpreter imports from, in its order — not only its own purelib /
+        # platlib. In HANDOFF §5's qa-main side venv the purelib holds a .pth naming /venv's and /venv-api's
+        # site-packages (a .pth inside a folder named by a .pth is not processed), so the project venv found no
+        # librosa: audio_features skipped, 3/3 failures there (it passed in /venv and /venv-api).
+        site_dirs = [entry for entry in sys.path if entry and os.path.isdir(entry) and Path(entry).name in ("site-packages", "dist-packages")]
+        paths = list(dict.fromkeys([*site_dirs, sysconfig.get_paths()["purelib"], sysconfig.get_paths()["platlib"], str(PACKAGE.parent)]))
+        (purelib / "deepfake-lens-test.pth").write_text("\n".join(paths) + "\n", encoding="utf-8")
         env = _clean_env(str(self.root / "home"))
         env.pop("PYTHONPATH")
 
@@ -941,3 +946,61 @@ class RelativePathAudioParityTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAVE_LIBROSA, "librosa not installed")
+@unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg 없음")
+@unittest.skipUnless(os.name == "posix", "a working folder deeper than PATH_MAX is entered one folder at a time (POSIX)")
+class WorkingFolderDeeperThanPathMaxTest(unittest.TestCase):
+    """R24-3 (round 24): R23-1 joined the working folder to every relative name handed to the audio worker and to
+    ffmpeg; in a working folder deeper than PATH_MAX (22 folders of 200 characters: 4436 bytes) that absolute name is
+    refused (ENAMETOOLONG), so `scan case` there had audio_features failed (LibsndfileError) for a.wav and av_audio
+    failed (`FfmpegError: … 종료 코드 220`) for clip.mp4 — 2130892 (relative name, inherited working folder) ran both.
+    The relative name is now kept ("./"-prefixed) and the worker is told the working folder."""
+
+    LEVELS = 22
+
+    def test_scan_and_classify_in_a_folder_deeper_than_path_max(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            parts = [f"{index:02d}" + "d" * 198 for index in range(self.LEVELS)]
+            previous = os.getcwd()
+            os.chdir(tmp)
+            try:
+                for part in parts:
+                    os.mkdir(part)
+                    os.chdir(part)
+                self.assertGreater(len(os.fsencode(os.getcwd())), 4096)
+                os.mkdir("case")
+                _write_tone(Path("case/a.wav"), seconds=1)
+                made = subprocess.run(
+                    ["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-f", "lavfi",
+                     "-i", "testsrc=size=64x64:rate=10:duration=1", "-shortest", "-y", "case/clip.mp4"],
+                    capture_output=True, timeout=120, check=False,
+                )
+                self.assertEqual(made.returncode, 0, made.stderr[-500:])
+            finally:
+                os.chdir(previous)
+            env = _clean_env(tmp)
+
+            def cli(*args: str) -> dict:
+                # a child cannot be started in such a folder by name (chdir: ENAMETOOLONG); a launcher enters it step by step
+                launcher = (
+                    "import os, sys\n"
+                    "for part in sys.argv[1].split('/'):\n    os.chdir(part)\n"
+                    "os.execv(sys.executable, [sys.executable, '-m', 'deepfake_lens', *sys.argv[2:]])\n"
+                )
+                done = subprocess.run([sys.executable, "-c", launcher, "/".join(parts), *args, "--format", "json"], cwd=tmp, env=env,
+                                      capture_output=True, text=True, timeout=600)
+                self.assertEqual(done.returncode, 0, done.stderr[-2000:])
+                payload: dict = json.loads(done.stdout)
+                return payload
+
+            def statuses(result: dict, check: str) -> list[str]:
+                return [entry["status"] for entry in result["coverage"] if entry["check"] == check]
+
+            rows = {row["path"]: row for row in cli("scan", "case")["items"]}
+            self.assertEqual(statuses(rows["a.wav"]["result"], "audio_features"), ["ran"], rows["a.wav"]["result"]["coverage"])
+            self.assertEqual(statuses(rows["clip.mp4"]["result"], "av_audio"), ["ran"], rows["clip.mp4"]["result"]["coverage"])
+            self.assertEqual(statuses(rows["clip.mp4"]["result"], "video_analysis"), ["ran"])
+            classified = cli("classify", "case/a.wav")
+            self.assertEqual(statuses(classified, "audio_features"), ["ran"], classified["coverage"])

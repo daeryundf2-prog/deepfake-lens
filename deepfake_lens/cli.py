@@ -72,7 +72,7 @@ from .cli_standalone import (
     gated_pixel_layer,
     member_rows_text,
     symlink_layer,
-    tool_attribution,
+    tool_attribution_layer,
 )
 from .result_types import VERDICT_LABELS, Verdict
 from .webapp import run_server
@@ -603,7 +603,12 @@ def _main(argv: list[str] | None = None) -> int:
             # R22-10 (round 22): `help scan extra` and `help corpus build` ignored every word after the command
             # (exit 0). A word that names a subcommand of it is that subcommand's help; any other is the
             # command parser's error (exit 2).
-            argv = [*_help_topic(cmd_parsers[topic], argv[1:]), "--help"]
+            # R24-11 (round 24): `help scan -h` / `help vendor-weights --help` — a help option after the topic asks for the
+            # same help (was "알 수 없는 인수: -h", exit 2); the topic's help, exit 0.
+            words = argv[1:]
+            while len(words) > 1 and words[-1] in ("-h", "--help"):
+                words = words[:-1]
+            argv = [*_help_topic(cmd_parsers[topic], words), "--help"]
         else:
             parser.error(f"argument <명령>: invalid choice: {topic!r} (choose from {', '.join(sorted(c for c in COMMANDS if not c.startswith('-')))})")
     if argv and argv[0] not in COMMANDS:
@@ -1066,7 +1071,7 @@ def _run_command(args: argparse.Namespace, parser: argparse.ArgumentParser, cmd_
         payload["tool_candidates"] = (
             symlink_layer("tool_attribution", "생성 도구 표지 대조")
             if is_symlink_path(args.file)  # G6
-            else to_layer_diagnostic("tool_attribution", tool_attribution(args.file).to_json(), layer_label="생성 도구 표지 대조")
+            else tool_attribution_layer(args.file)  # R24-5: an unreadable file is a failed layer, not an exit 1
         )
         emit(payload, fmt=args.format, json_out=args.json_out)
         return 0

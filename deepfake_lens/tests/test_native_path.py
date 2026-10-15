@@ -1394,7 +1394,9 @@ class _NativeCallVisitor(ast.NodeVisitor):
 
 # R23-1 (round 23): calls that hand the yielded name to another process (its own working folder, or a program that
 # reads a relative "a:b.mp4" as a protocol). audio_worker.extract_features makes its path absolute itself.
-CHILD_CALLS = {("shutdown", "run_child"), ("_SYNCNET_PIPELINE", "inference")}
+# R24-2 (round 24): and the FFmpeg readers inside this process — cv2.VideoCapture (FFmpeg backend) and librosa.load
+# (audioread runs ffmpeg) read a relative "c:v.mp4" as the protocol "c" just the same.
+CHILD_CALLS = {("shutdown", "run_child"), ("_SYNCNET_PIPELINE", "inference"), ("cv2", "VideoCapture"), ("librosa", "load")}
 
 
 class ChildPathTest(unittest.TestCase):
@@ -1410,7 +1412,27 @@ class ChildPathTest(unittest.TestCase):
         with mock.patch.object(native_path, "_is_windows", return_value=True):
             self.assertEqual(native_path.child_path("case/a.wav"), os.path.abspath("case/a.wav"))
         with mock.patch("os.getcwd", side_effect=FileNotFoundError(2, "gone")):
-            self.assertEqual(native_path.child_path("a.wav"), "a.wav")
+            # R24-3 (round 24): "./"-prefixed (was "a.wav" unchanged) — never an ffmpeg protocol name either
+            self.assertEqual(native_path.child_path("a.wav"), "./a.wav")
+            self.assertEqual(native_path.child_path("c:v.mp4"), "./c:v.mp4")
+
+    def test_a_name_too_long_to_make_absolute_stays_relative(self) -> None:
+        """R24-3 (round 24): R23-1 joined the working folder to every relative name; in a folder deeper than PATH_MAX
+        the absolute name was refused (ENAMETOOLONG) and the audio and audio-track checks failed where 2130892 ran.
+        Such a name stays relative to this process's working folder, "./"-prefixed (no ffmpeg protocol)."""
+        cwd = os.getcwd()
+        limit = len(os.fsencode(os.path.join(cwd, "case/a.wav")))
+        with mock.patch.object(native_path, "_PATH_MAX", limit + 1):
+            self.assertEqual(native_path.child_path("case/a.wav"), os.path.join(cwd, "case/a.wav"))
+        with mock.patch.object(native_path, "_PATH_MAX", limit):
+            self.assertEqual(native_path.child_path("case/a.wav"), "./case/a.wav")
+        with mock.patch.object(native_path, "_PATH_MAX", len(os.fsencode(cwd)) + 2):
+            self.assertEqual(native_path.child_path("c:v.mp4"), "./c:v.mp4")
+            self.assertEqual(native_path.child_path("../x.wav"), "../x.wav")
+            self.assertEqual(native_path.child_path("/abs/x.wav"), "/abs/x.wav")
+        self.assertTrue(native_path.is_cwd_relative("./a.wav"))
+        self.assertFalse(native_path.is_cwd_relative("/a.wav"))
+        self.assertFalse(native_path.is_cwd_relative(""))
 
     def test_for_child_yields_an_absolute_name_and_the_default_is_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1458,6 +1480,11 @@ class ChildPathTest(unittest.TestCase):
                         offenders.append(label)
         self.assertEqual(offenders, [])
         self.assertGreaterEqual(len(found), 5, found)  # audio, lipsync ×2, video_analysis, video
+        # R24-2: the in-process FFmpeg readers are among them
+        per_module = {name: sum(1 for label in found if label.startswith(name + ":"))
+                      for name in ("video_analysis.py", "face_track.py", "rppg.py", "lipsync.py", "model_adapter.py", "multimodal.py", "audio.py")}
+        self.assertEqual(per_module, {"video_analysis.py": 3, "face_track.py": 1, "rppg.py": 1, "lipsync.py": 3,
+                                      "model_adapter.py": 1, "multimodal.py": 2, "audio.py": 2}, found)
 
     @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg 없음")
     def test_ffmpeg_gets_a_relative_name_with_a_colon_as_a_file(self) -> None:
