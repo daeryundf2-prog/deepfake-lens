@@ -853,7 +853,16 @@ def _scan_specs(
             )
             return item, key, False
         post_digest = _file_fingerprint(path)
-        if before is None or _file_state(path) != before or not post_digest or (pre_digest is not None and pre_digest != post_digest):
+        after = _file_state(path)
+        # R25-2 (round 25): a file that cannot be read (no read permission, an I/O error) with the same state
+        # before and after is a read failure with its real cause — it was 「분석 중 파일 변경」 (a false claim that
+        # the evidence changed) whenever an analyzer (audio, video, PDF) did not raise the OSError itself.
+        unreadable = _read_failure(path) if before is not None and after == before and not post_digest else None
+        if unreadable is not None:
+            logger.info("file could not be read: %s", path, exc_info=unreadable)
+            fingerprints.pop(path, None)
+            item, key = _unreadable_row(item, unreadable), None  # never cached
+        elif before is None or after != before or not post_digest or (pre_digest is not None and pre_digest != post_digest):
             logger.warning("file changed during analysis: %s", path)
             fingerprints.pop(path, None)
             item, key = _changed_during_analysis(item), None  # never cached
@@ -1032,8 +1041,32 @@ def _container_integrity(path: Path, before: FileState | None, pre_digest: str |
     any size); then no hash is recorded.
     """
     post_digest = _file_fingerprint(path)
-    changed = before is None or _file_state(path) != before or not post_digest or (pre_digest is not None and pre_digest != post_digest)
+    after = _file_state(path)
+    if before is not None and after == before and not post_digest and not pre_digest and _read_failure(path) is not None:
+        # R25-2 (round 25): an archive that cannot be read (its extraction failed with the real cause) is not one
+        # that changed during the analysis — its rows said 「분석 중 파일 변경」.
+        return {"changed": False, "sha256": None}
+    changed = before is None or after != before or not post_digest or (pre_digest is not None and pre_digest != post_digest)
     return {"changed": changed, "sha256": None if changed else post_digest}
+
+
+def _read_failure(path: Path) -> OSError | None:
+    """R25-2 (round 25): the error opening ``path`` and reading from it, or None when it can be read."""
+    try:
+        with open(path, "rb") as handle:
+            handle.read(1)
+    except OSError as exc:
+        return exc
+    return None
+
+
+def _unreadable_row(item: ScanItem, exc: OSError) -> ScanItem:
+    """R25-2: the failed row of a file that could not be read — its real cause, no result, no hash.
+
+    The same row an image or text file gets when its analyzer raises the OSError itself
+    (``status`` failed, ``error`` :func:`failure_reason`), whatever the analyzer that ran.
+    """
+    return replace(item, status="failed", result=None, sha256=None, error=failure_reason(exc))
 
 
 def _file_state(path: Path) -> FileState | None:

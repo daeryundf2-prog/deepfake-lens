@@ -475,6 +475,89 @@ class UnreadableFileClassifyTest(unittest.TestCase):
         self._assert_failed_layer(payload["tool_candidates"])
 
 
+class UnreadableMediaRowTest(unittest.TestCase):
+    """R25-2 (round 25): an unreadable WAV, MP4 or PDF (no read permission) was the row 「분석 중 파일 변경 — 판단 불가: 분석
+    전후로 크기·수정 시각·inode 또는 내용 해시가 다릅니다」 in scan, classify and the web scan — a false claim that the evidence
+    changed — while a PNG or TXT was the failed row with its PermissionError. The audio, video and document analyzers do
+    not raise the OSError themselves, and the integrity check read the empty after-hash as a change. A file whose state is
+    the same before and after and that cannot be read is now the failed row with its real cause (an unreadable archive:
+    its extraction failure), whatever the analyzer."""
+
+    CHANGED = "분석 중 파일 변경"
+
+    @unittest.skipUnless(os.name == "posix", "POSIX uid")
+    def test_unreadable_media_rows_name_the_read_error(self) -> None:
+        import subprocess
+        import sys
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chmod(tmp, 0o777)
+            case = Path(tmp) / "case"
+            case.mkdir()
+            case.chmod(0o777)
+            write_wav(case / "l.wav")
+            (case / "l.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42" + bytes(64))
+            (case / "l.pdf").write_bytes(b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n")
+            with zipfile.ZipFile(case / "l.zip", "w") as archive:
+                archive.writestr("a.txt", "메모입니다.")
+            (case / "l.png").write_bytes(A1111.read_bytes())
+            for path in case.iterdir():
+                path.chmod(0)
+            home = Path(tmp) / "home"
+            home.mkdir()
+            home.chmod(0o777)
+            env = {**os.environ, "HOME": str(home), "PYTHONPATH": str(REPO_ROOT), "PYTHONDONTWRITEBYTECODE": "1"}
+            env.pop("XDG_CACHE_HOME", None)
+            as_nobody = os.geteuid() == 0
+
+            def drop() -> None:  # pragma: no cover - runs in the child
+                os.setgid(65534)
+                os.setuid(65534)
+
+            def run(*args: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run([sys.executable, "-m", "deepfake_lens", *args], cwd=Path(tmp), env=env, capture_output=True,
+                                      text=True, timeout=600, preexec_fn=drop if as_nobody else None)
+
+            scan = run("scan", "case", "--format", "json")
+            classify = {name: run("classify", f"case/{name}", "--format", "json") for name in ("l.wav", "l.mp4", "l.pdf")}
+        self.assertEqual(scan.returncode, 0, scan.stderr[-1500:])
+        self.assertNotIn(self.CHANGED, scan.stdout)
+        rows = {row["path"]: row for row in json.loads(scan.stdout)["items"]}
+        for name in ("l.wav", "l.mp4", "l.pdf", "l.png"):
+            with self.subTest(row=name):
+                self.assertEqual(rows[name]["status"], "failed", rows[name])
+                self.assertIn("PermissionError", rows[name]["error"])
+                self.assertIsNone(rows[name].get("sha256"))
+        self.assertIn("PermissionError", rows["l.zip"]["result"]["verdict"])
+        self.assertNotIn(self.CHANGED, json.dumps(rows["l.zip"], ensure_ascii=False))
+        for name, done in classify.items():
+            with self.subTest(classify=name):
+                self.assertEqual(done.returncode, 0, done.stderr[-1500:])
+                self.assertNotIn(self.CHANGED, done.stdout)
+                self.assertIn("PermissionError", json.loads(done.stdout)["verdict"])
+
+    def test_a_file_changed_during_the_analysis_is_still_changed(self) -> None:
+        """R12-7 kept: a readable file whose state changes while it is analyzed is still 「분석 중 파일 변경」."""
+        from deepfake_lens import core
+
+        with tempfile.TemporaryDirectory() as tmp:
+            png = Path(tmp) / A1111.name
+            png.write_bytes(A1111.read_bytes())
+            real = core.analyze_file
+
+            def rewrite(path: Any, **kwargs: Any) -> Any:
+                item = real(path, **kwargs)
+                Path(path).write_bytes(Path(path).read_bytes() + b"x")
+                return item
+
+            with patch.object(core, "analyze_file", side_effect=rewrite):
+                _, items = core.scan_directory(Path(tmp))
+        result = items[0].result
+        assert result is not None
+        self.assertIn(self.CHANGED, result.verdict)
+
+
 @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed")
 class ApiEndpointContractTest(unittest.TestCase):
     """D2/D16: api-serve analysis endpoints and the /api/stats header rule."""

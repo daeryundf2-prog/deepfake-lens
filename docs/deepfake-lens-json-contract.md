@@ -220,6 +220,14 @@ always `0` invited old-contract readings. They remain readable as
   and every member row of it is `판단 불가` with `sha256: null` and
   `{"check": "file_integrity", "status": "failed", "reason": "분석 중 파일
   변경 — 판단 불가: 이 구성 파일을 꺼낸 압축 파일이 추출 전후로 …"}`.
+- R25-2 (round 25): a file that cannot be read (no read permission, an I/O
+  error) whose state is the same before and after the analysis did not
+  change: it is the `failed` row with its real cause (`result: null`,
+  `sha256: null`, `error` e.g. `PermissionError: [Errno 13] 접근 권한이
+  없습니다: …`) whatever the analyzer — an unreadable WAV, MP4 or PDF was
+  `판단 불가` with the `file_integrity` reason above (its empty after-hash
+  read as a change); an unreadable archive's container row names its
+  extraction failure (`압축 해제 실패(PermissionError: …)`), not a change.
 - R12-4 (round 12): every row except an archive member carries `path_b64`
   — its real relative path (`path` with the R9-1 escape undone) as URL-safe
   base64 of the file-system bytes (`os.fsencode`; a non-UTF-8 name's
