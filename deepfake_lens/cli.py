@@ -603,7 +603,12 @@ def _main(argv: list[str] | None = None) -> int:
             # R22-10 (round 22): `help scan extra` and `help corpus build` ignored every word after the command
             # (exit 0). A word that names a subcommand of it is that subcommand's help; any other is the
             # command parser's error (exit 2).
-            argv = [*_help_topic(cmd_parsers[topic], argv[1:]), "--help"]
+            # R24-11 (round 24): `help scan -h` / `help vendor-weights --help` — a help option after the topic asks for the
+            # same help (was "알 수 없는 인수: -h", exit 2); the topic's help, exit 0.
+            words = argv[1:]
+            while len(words) > 1 and words[-1] in ("-h", "--help"):
+                words = words[:-1]
+            argv = [*_help_topic(cmd_parsers[topic], words), "--help"]
         else:
             parser.error(f"argument <명령>: invalid choice: {topic!r} (choose from {', '.join(sorted(c for c in COMMANDS if not c.startswith('-')))})")
     if argv and argv[0] not in COMMANDS:
