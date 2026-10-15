@@ -2114,6 +2114,7 @@ class ReportSignsNoPostedTextInvariantTest(_ReportLegsFixture):
         # R26-1 (round 26): member names that look like nested chains (the fixture had none, so a non-injective
         # server identity passed this invariant)
         _write_colliding_names_zip(self.folder / "col.zip", Path(self._tmp.name), (self.folder / "gen.png").read_bytes())
+        _write_png(self.folder / "col\\::x.png", seed=80)  # the escape character itself in a top-level name (its row: col\\\:\:x.png)
         self.rows = self._scan("--recursive", "--dedupe")
         self.assertEqual(sum(1 for row in self.rows.values() if row.get("container") == "col.zip"), len(COLLIDING_MEMBER_NAMES) + 4)
 
@@ -3790,12 +3791,14 @@ class ReportSignedSetIsTheServersInvariantTest(_ReportLegsFixture):
         # R26-1 (round 26): an archive whose literal member names collide with its nested members' chains (with
         # this fixture's names the server's identity was not injective and 12 sub-checks failed)
         _write_colliding_names_zip(self.folder / "col.zip", Path(self._tmp.name), (Path(self._tmp.name) / "g.png").read_bytes())
+        _write_png(self.folder / "col\\::x.png", seed=80)  # the escape character itself in a top-level name
         self.full = self._scan()  # the server's never-cancelled view (flat walk, default options)
         self.assertEqual(self.full["evidence_gen.png"]["result"]["verdict_code"], self.MANIPULATED)
         self.assertEqual(self.full["gen.zip::a_gen.png"]["result"]["verdict_code"], self.MANIPULATED)
         self.assertEqual(self.full["col.zip::inner.zip::b.png"]["result"]["verdict_code"], self.MANIPULATED)
         identities = [self._identity(row) for row in self.full.values()]
         self.assertEqual(len(set(identities)), len(identities))  # R26-1: one row per identity
+        self.assertIn("col\\\\\\:\\:x.png", self.full)  # its row path is the R9-1 escape, distinct from every member chain
 
     # -- the server's views ---------------------------------------------------
 
