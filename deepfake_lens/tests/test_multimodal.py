@@ -229,3 +229,83 @@ class AvSyncTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _have(*modules: str) -> bool:
+    import importlib.util
+
+    return all(importlib.util.find_spec(name) is not None for name in modules)
+
+
+@unittest.skipUnless(_have("cv2", "librosa", "numpy"), "opencv + librosa required")
+class AvSyncAudioTrackTest(unittest.TestCase):
+    """R25-9 (round 25): analyze_av_sync opened the video with ``librosa.load``; librosa 1.0 decodes with soundfile only,
+    which cannot open a video container, so a video with an audio track and one without both ended with 「오디오 스트림을
+    읽을 수 없어 A/V 싱크를 측정할 수 없습니다.」 and the measurement never ran. The audio track is now decoded by ffmpeg
+    into a temporary WAV, and the coverage (``av_sync_motion`` / ``av_sync_audio``) and limitations name what happened."""
+
+    def _make(self, folder, name: str, *, audio: bool):
+        import shutil
+        import subprocess
+
+        if not shutil.which("ffmpeg"):
+            self.skipTest("ffmpeg 없음")
+        target = folder / name
+        inputs = ["-f", "lavfi", "-i", "testsrc=size=96x96:rate=15:duration=3"]
+        if audio:
+            inputs = ["-f", "lavfi", "-i", "sine=frequency=440:duration=3", *inputs, "-shortest"]
+        proc = subprocess.run(["ffmpeg", "-loglevel", "error", *inputs, "-y", str(target)], capture_output=True, timeout=120)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-500:])
+        return target
+
+    @staticmethod
+    def _coverage(result) -> dict[str, tuple[str, str]]:
+        return {entry["check"]: (entry["status"], entry["reason"]) for entry in result.coverage}
+
+    def test_a_video_with_an_audio_track_is_measured(self) -> None:
+        import os
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            video = self._make(Path(tmp), "c:with audio 한글.mp4", audio=True)
+            result = analyze_av_sync(video)
+            previous = os.getcwd()
+            os.chdir(tmp)
+            try:
+                relative = analyze_av_sync(video.name)  # R24-2 / R25-4: a relative name with ":" reaches ffmpeg as a file
+            finally:
+                os.chdir(previous)
+            self.assertEqual(sorted(Path(tmp).iterdir()), [video])  # no temporary WAV left next to it
+        self.assertEqual(self._coverage(result), {"av_sync_motion": ("ran", ""), "av_sync_audio": ("ran", "")})
+        self.assertGreater(result.audio_seconds, 2.5)
+        self.assertNotIn("오디오 스트림을 읽을 수 없어", result.reference_note)
+        self.assertEqual(self._coverage(relative), self._coverage(result))
+        self.assertEqual(relative.to_json()["coverage"], result.to_json()["coverage"])
+
+    def test_a_video_without_an_audio_track_says_so(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = analyze_av_sync(self._make(Path(tmp), "silent.mp4", audio=False))
+        from deepfake_lens.multimodal import AV_SYNC_NO_AUDIO_TRACK
+
+        self.assertEqual(self._coverage(result), {"av_sync_motion": ("ran", ""), "av_sync_audio": ("skipped", AV_SYNC_NO_AUDIO_TRACK)})
+        self.assertIsNone(result.offset_seconds)
+        self.assertIn(AV_SYNC_NO_AUDIO_TRACK, result.reference_note)
+        self.assertIn(AV_SYNC_NO_AUDIO_TRACK, " ".join(result.limitations))
+
+    def test_without_ffmpeg_the_audio_check_is_a_missing_dependency(self) -> None:
+        import shutil
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            video = self._make(Path(tmp), "a.mp4", audio=True)
+            real_which = shutil.which
+            with mock.patch("shutil.which", side_effect=lambda name, *a, **k: None if name == "ffmpeg" else real_which(name, *a, **k)):
+                result = analyze_av_sync(video)
+        self.assertEqual(self._coverage(result)["av_sync_audio"], ("skipped", "의존성 부재: ffmpeg"))
+        self.assertIn("의존성 부재: ffmpeg", result.reference_note)

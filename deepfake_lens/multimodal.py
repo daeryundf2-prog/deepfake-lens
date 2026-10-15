@@ -12,13 +12,16 @@ re-timed audio artifact. All heavy deps stay optional extras.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+import logging
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Sequence
 
 from .native_path import native_safe_path
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .native_stderr import quiet_native_stderr
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -74,6 +77,11 @@ class AvSyncAnalysis:
     audio_seconds: float
     video_seconds: float
     method: str = "envelope-xcorr-v1"
+    # R25-9 (round 25): what ran — ``[{check, status, reason}]`` for ``av_sync_motion`` (the video frames) and
+    # ``av_sync_audio`` (the audio track, decoded by ffmpeg): ``ran``, ``skipped`` (a missing dependency, no
+    # audio track) or ``failed`` with the real reason. The audio track was never read (librosa 1.0 cannot
+    # open a video container) and the result said only 「오디오 스트림을 읽을 수 없어 …」 for every video.
+    coverage: list[dict[str, str]] = field(default_factory=list)
 
     def to_json(self) -> dict[str, object]:
         return asdict(self)
@@ -258,24 +266,32 @@ def analyze_av_sync(
     try:
         import cv2  # noqa: F401
     except ImportError:
-        return _av_sync_error("opencv가 설치되어 있지 않습니다. `pip install opencv-python`으로 설치하세요.")
+        return _av_sync_error("opencv가 설치되어 있지 않습니다. `pip install opencv-python`으로 설치하세요.",
+                              coverage=[_entry(AV_SYNC_MOTION_CHECK, "skipped", "의존성 부재: opencv")])
     from .audio_worker import prepare_process_numba_cache
 
     prepare_process_numba_cache()  # R19-2: never numba's shared cache in site-packages
     try:
         import librosa  # noqa: F401
     except ImportError:
-        return _av_sync_error("librosa가 설치되어 있지 않습니다. `pip install librosa`로 설치하세요.")
+        return _av_sync_error("librosa가 설치되어 있지 않습니다. `pip install librosa`로 설치하세요.",
+                              coverage=[_entry(AV_SYNC_AUDIO_CHECK, "skipped", "의존성 부재: librosa")])
 
     motion_env, motion_rate, video_seconds = _motion_envelope(video_path)
     if motion_env is None:
-        return _av_sync_error("비디오 프레임을 읽을 수 없어 모션 신호를 추출하지 못했습니다.")
+        reason = "비디오 프레임을 읽을 수 없어 모션 신호를 추출하지 못했습니다."
+        return _av_sync_error(reason, coverage=[_entry(AV_SYNC_MOTION_CHECK, "failed", reason)])
+    motion = _entry(AV_SYNC_MOTION_CHECK, "ran", "")
 
-    audio_env, audio_rate, audio_seconds = _audio_envelope(video_path)
+    audio_env, audio_rate, audio_seconds, audio_entry = _audio_envelope(video_path)
     if audio_env is None:
-        return _av_sync_error("오디오 스트림을 읽을 수 없어 A/V 싱크를 측정할 수 없습니다.")
+        # R25-9: the real reason — no ffmpeg, no audio track, or the decode failure — never one fixed sentence
+        return _av_sync_error(
+            f"A/V 싱크를 측정할 수 없습니다 — 오디오 트랙: {audio_entry['reason']}",
+            video_seconds=video_seconds, coverage=[motion, audio_entry],
+        )
 
-    return av_sync_from_envelopes(
+    result = av_sync_from_envelopes(
         audio_env,
         motion_env,
         audio_rate=audio_rate,
@@ -284,6 +300,17 @@ def analyze_av_sync(
         audio_seconds=audio_seconds,
         video_seconds=video_seconds,
     )
+    return replace(result, coverage=[motion, audio_entry])
+
+
+# R25-9 (round 25): the coverage checks of analyze_av_sync.
+AV_SYNC_MOTION_CHECK = "av_sync_motion"
+AV_SYNC_AUDIO_CHECK = "av_sync_audio"
+AV_SYNC_NO_AUDIO_TRACK = "오디오 트랙 없음(ffmpeg로 추출된 음성 스트림이 없습니다)"
+
+
+def _entry(check: str, status: str, reason: str) -> dict[str, str]:
+    return {"check": check, "status": status, "reason": reason}
 
 
 def av_sync_from_envelopes(
@@ -363,9 +390,10 @@ def av_sync_from_envelopes(
 
 
 def _av_sync_error(
-    message: str, *, audio_seconds: float = 0.0, video_seconds: float = 0.0
+    message: str, *, audio_seconds: float = 0.0, video_seconds: float = 0.0, coverage: list[dict[str, str]] | None = None,
 ) -> AvSyncAnalysis:
     return AvSyncAnalysis(
+        coverage=list(coverage or []),
         score=0,
         reference_band=UNAVAILABLE_BAND,
         reference_note=message,
@@ -495,29 +523,48 @@ def _motion_envelope(video_path: Path):
 
 @quiet_native_stderr  # G14: decoder chatter (fd 2) goes to the log, not the console
 def _audio_envelope(video_path: Path):
-    """RMS amplitude envelope of the video's audio track via librosa.
+    """RMS amplitude envelope of the video's audio track.
 
-    Returns (envelope, rate_hz, audio_seconds) or (None, 0, 0) on failure.
+    Returns ``(envelope, rate_hz, audio_seconds, coverage entry)``; the envelope is None when the track could
+    not be read, and the entry (``av_sync_audio``) then says why. R25-9 (round 25): the track is decoded by
+    ffmpeg into a temporary 16-bit mono WAV (:func:`audio.ffmpeg_audio_wav` — the R25-5 path, with its
+    for_child / PATH_MAX naming) and read by librosa from there; ``librosa.load`` of the video itself never
+    worked with librosa 1.0 (soundfile cannot open a video container) and every failure was swallowed.
     """
+    import subprocess
+
+    from .audio import AudioDecoderMissing, NoAudioStream, ffmpeg_audio_wav
     from .audio_worker import prepare_process_numba_cache
+    from .error_text import failure_reason
+    from .native_path import NativePathError
+    from .native_stderr import FfmpegError
+    from .shutdown import ShuttingDown
 
     prepare_process_numba_cache()  # R19-2: never numba's shared cache in site-packages
     try:
         import librosa
-    except ImportError:
-        return None, 0.0, 0.0
+    except ImportError as exc:
+        return None, 0.0, 0.0, _entry(AV_SYNC_AUDIO_CHECK, "skipped", f"의존성 부재: {exc.name or 'librosa'}")
 
     sample_rate = 22050
     hop = 512
     try:
-        with native_safe_path(video_path, for_child=True) as native_media:  # R12-2: libsndfile needs an ASCII name; R24-2 (R25-5: librosa 1.0 has no audioread/ffmpeg fallback)
-            y, sr = librosa.load(native_media, sr=sample_rate, mono=True)
-    except Exception:
-        return None, 0.0, 0.0
+        with ffmpeg_audio_wav(video_path, mono_rate=sample_rate, timeout=600) as wav:
+            with native_safe_path(wav, for_child=True) as native_wav:  # R12-2: a temp folder with a non-ASCII name
+                y, sr = librosa.load(native_wav, sr=sample_rate, mono=True)
+    except ShuttingDown:
+        raise
+    except AudioDecoderMissing as exc:
+        return None, 0.0, 0.0, _entry(AV_SYNC_AUDIO_CHECK, "skipped", str(exc))
+    except NoAudioStream:
+        return None, 0.0, 0.0, _entry(AV_SYNC_AUDIO_CHECK, "skipped", AV_SYNC_NO_AUDIO_TRACK)
+    except (FfmpegError, subprocess.TimeoutExpired, OSError, NativePathError, ValueError, RuntimeError) as exc:
+        logger.info("A/V sync audio decode failed: %s", video_path, exc_info=True)
+        return None, 0.0, 0.0, _entry(AV_SYNC_AUDIO_CHECK, "failed", failure_reason(exc))
     if y is None or len(y) < hop:
-        return None, 0.0, 0.0
+        return None, 0.0, 0.0, _entry(AV_SYNC_AUDIO_CHECK, "failed", f"오디오 트랙이 너무 짧습니다({0 if y is None else len(y)}샘플)")
     envelope = librosa.feature.rms(y=y, hop_length=hop)[0]
     audio_seconds = len(y) / sr
     if len(envelope) == 0:
-        return None, 0.0, audio_seconds
-    return [float(v) for v in envelope], sr / hop, audio_seconds
+        return None, 0.0, audio_seconds, _entry(AV_SYNC_AUDIO_CHECK, "failed", "오디오 에너지 포락선이 비어 있습니다")
+    return [float(v) for v in envelope], sr / hop, audio_seconds, _entry(AV_SYNC_AUDIO_CHECK, "ran", "")
