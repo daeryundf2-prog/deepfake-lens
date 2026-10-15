@@ -33,6 +33,8 @@ case $mode in
   cmd) shift; run "$*";;
   qa-main) run "$QA_MAIN";;
   gui)
+    # R24-6 (round 24): gui_smoke.py uses Playwright's Chromium when Google Chrome is absent (this image) and scans
+    # with subfolders (neither folder below has files at its top level).
     run "/venv-gui/bin/python scripts/gui_smoke.py --scan-dir fixtures --port 8899 --shot /tmp/gui-smoke.png 2>&1 | tail -5"
     run "/venv-gui/bin/python scripts/make_adversarial_fixtures.py --out /tmp/adv >/dev/null 2>&1; /venv-gui/bin/python scripts/gui_smoke.py --scan-dir /tmp/adv --port 8898 --shot /tmp/gui-smoke-adv.png 2>&1 | tail -5"
     ;;

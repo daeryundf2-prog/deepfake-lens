@@ -75,6 +75,7 @@ docker run --rm --init --name <고유이름> --cpus 3 --shm-size=1g \
   -v "$PWD":/repo:ro -v "$PWD/scripts/gate/gate.sh":/gate.sh:ro deepfake-lens-gate:gui /gate.sh gui
 ```
 
+- GUI 스모크(`gate.sh gui`, 24차 R24-6): `scripts/gui_smoke.py`(구 GUI `deepfake_lens/gui.*`의 스모크)는 Google Chrome(`channel="chrome"`)을 먼저 찾고, 없으면 Playwright 자체 Chromium(gui 이미지의 chromium-1243 — Linux arm64에는 Chrome이 없다)을 쓴다. 게이트가 검사하는 두 폴더(`fixtures`, `make_adversarial_fixtures.py`의 `/tmp/adv`)는 최상위에 파일이 없으므로 스모크는 '하위 폴더' 옵션을 켜고 검사한다(끄면 0행이라 `#stat-total > 0`에서 실패). 23차까지는 두 이유로 이 게이트가 레포의 gui 이미지에서 통과할 수 없었다. 통과 기준은 두 단계 모두 `GUI smoke PASS`와 `GATE rc=0`이다.
 - git 이력이 필요한 검사(`--verify-record`, `build_traceability_commits.py --check`, 삭제 이유·역사 문서 테스트)는 git worktree(`.git`이 파일)로는 안 된다. `git clone --no-hardlinks`한 사본을 `/repo`로 마운트하고, 그 사본의 로컬 `main`을 `dad9730`으로 맞춘다(`git branch -f main dad9730`). 소유자가 달라 git이 거부하면 `-e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*'`를 준다.
 
 ## 5. 게이트 (커밋마다 전부 통과해야 함)

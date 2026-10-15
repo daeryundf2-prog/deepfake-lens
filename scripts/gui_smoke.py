@@ -6,8 +6,9 @@ asserts the examiner-visible contract: no CSP/console errors, the degraded
 heuristic-only provenance banner renders after a scan, stat pills update,
 and API failures surface as Korean messages — never "Unexpected token".
 
-Requires: pip install playwright, and a Chrome/Chromium install
-(channel="chrome" — no browser download needed).
+Requires: pip install playwright, and either Google Chrome (channel="chrome" —
+no browser download needed) or Playwright's Chromium (`playwright install
+chromium`), which is used when Chrome is not installed (e.g. Linux arm64).
 
 Usage:
     python scripts/gui_smoke.py --scan-dir /path/to/fixtures [--port 8899]
@@ -58,7 +59,10 @@ def main() -> int:
     try:
         console_errors: list[str] = []
         with sync_playwright() as p:
-            browser = p.chromium.launch(channel="chrome", headless=True)
+            try:
+                browser = p.chromium.launch(channel="chrome", headless=True)
+            except Exception:  # no Google Chrome (e.g. Linux arm64): Playwright's own Chromium
+                browser = p.chromium.launch(headless=True)
             page = browser.new_page()
             page.on("console", lambda m: console_errors.append(m.text) if m.type == "error" else None)
             page.on("pageerror", lambda e: console_errors.append(str(e)))
@@ -72,6 +76,9 @@ def main() -> int:
             assert page.locator("#prov-banner").is_hidden(), "banner must start hidden"
 
             # 2. Run a real folder scan through the UI.
+            # R24-6 (round 24): with subfolders — the gate's folders (fixtures, the adversarial set) keep their files
+            # in subfolders, so a flat scan had 0 rows and step 4 failed.
+            page.evaluate("document.getElementById('opt-recursive').checked = true")
             page.fill("#folder-path", args.scan_dir)
             page.click("#analyze-btn")
             page.wait_for_selector("#results-section:not([hidden])", timeout=120_000)
