@@ -47,6 +47,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `POSIX uid` | Windows가 아닌 OS(POSIX — `os.getuid`로 폴더 소유자를 확인하는 환경별 numba 캐시 폴더, R22-9; 모드 0 파일을 root가 아닌 사용자(root면 nobody)로 `classify`, R24-5) | test_audio_worker.py, test_standalone_contract.py |
 | `PR_SET_PDEATHSIG is Linux` | Linux(`prctl(PR_SET_PDEATHSIG)` — 부모가 SIGKILL로 죽으면 ffmpeg 등 자식 프로세스도 함께 종료, R15-1) | test_shutdown.py |
 | `Pillow + numpy needed for the fixture` | `dev` extra(Pillow, numpy) | test_report_labels_ko.py |
+| `POSIX working folder deeper than PATH_MAX` | Windows가 아닌 OS(POSIX — PATH_MAX보다 깊은 작업 폴더에서 비ASCII 이름을 네이티브 디코더용 이름으로 스테이징, R25-4) | test_native_path.py |
 | `Pillow + numpy required to write EXIF/XMP fixtures` | `dev` extra(Pillow, numpy) | test_image_metadata_exif.py |
 | `Pillow not installed` | `dev` extra(Pillow) | test_cli_operations.py, test_error_text.py, test_json_contract.py, test_metadata_extent.py, test_model_zoo.py |
 | `Pillow writes the GIF` | `dev` extra(Pillow — GIF 픽스처 작성) | test_qa_out.py |

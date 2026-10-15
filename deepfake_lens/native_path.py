@@ -1177,7 +1177,7 @@ def _stage(source: str) -> tuple[str, bool]:
     name (the evidence file itself; nothing to remove), copy. Never a hard
     link (R14-2: it modifies the evidence file's metadata).
     """
-    absolute = os.path.abspath(source)
+    absolute = _reachable_name(source)
     folder = session_dir()
     target = os.path.join(folder, f"{next(_COUNTER):06d}-{uuid.uuid4().hex[:12]}{_ascii_suffix(source)}")
     _register_alias(target, source)
@@ -1185,18 +1185,44 @@ def _stage(source: str) -> tuple[str, bool]:
     # process is ending, and waited for by the cleanup when it started before.
     with shutdown.guarded():
         if not _is_windows():
-            try:
-                os.symlink(absolute, target)
-                return target, True
-            except OSError:
-                shutdown.refuse_if_active()  # the folder went away under a final cleanup
-                logger.debug("native_safe_path: symlink refused for staged name %s", target)
+            # R25-4: a relative name (no /proc route, :func:`_reachable_name`) would make a link relative to the
+            # session folder — dangling; the copy is made from it instead.
+            if os.path.isabs(absolute):
+                try:
+                    os.symlink(absolute, target)
+                    return target, True
+                except OSError:
+                    shutdown.refuse_if_active()  # the folder went away under a final cleanup
+                    logger.debug("native_safe_path: symlink refused for staged name %s", target)
         else:
             short = _short_path_name(absolute)
             if short is not None:
                 _register_short_alias(short, source)
                 return short, False
         return _copy_staged(absolute, target), True
+
+
+def _reachable_name(source: str) -> str:
+    """R25-4 (round 25): a name of ``source`` that opens the same file from any folder, for a staged link or copy.
+
+    Normally ``os.path.abspath``. When that name is PATH_MAX bytes or longer — a relative name in a working
+    folder deeper than the limit (R24-3) — the kernel refuses it (ENAMETOOLONG): the staged symbolic link
+    pointed nowhere and the copy fallback could not even ``stat`` it, so a non-ASCII video name in such a
+    folder (``한글:v.mp4``) was "비디오 열기 오류: 비ASCII 이름의 파일을 열 수 없습니다" while the ASCII names
+    used R24-3's ``./`` route. Then, on Linux, ``/proc/<pid>/cwd/<name>``: short, and resolved by the kernel
+    through this process's working folder for this process and for its children (the same user may read it);
+    elsewhere the relative name itself, which this process can open (the staged copy is made from it).
+    """
+    absolute = os.path.abspath(source)
+    if _is_windows() or os.path.isabs(source) or len(os.fsencode(absolute)) < _path_max():
+        return absolute
+    through_proc = os.path.join(f"/proc/{os.getpid()}/cwd", source)
+    try:
+        if os.path.samestat(os.stat(through_proc), os.stat(source)):
+            return through_proc
+    except OSError:
+        pass
+    return source
 
 
 _PATH_MAX: int | None = None
@@ -1319,7 +1345,7 @@ def native_safe_path(path: str | os.PathLike[str], *, for_child: bool = False) -
         yield child_path(staged) if for_child else staged
     finally:
         if owned:
-            _unlink_staged(staged, os.path.abspath(text))
+            _unlink_staged(staged, _reachable_name(text))
 
 
 def _try_unlink(path: str) -> bool:

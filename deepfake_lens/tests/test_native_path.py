@@ -1434,6 +1434,41 @@ class ChildPathTest(unittest.TestCase):
         self.assertFalse(native_path.is_cwd_relative("/a.wav"))
         self.assertFalse(native_path.is_cwd_relative(""))
 
+    @unittest.skipIf(os.name == "nt", "POSIX working folder deeper than PATH_MAX")
+    def test_a_non_ascii_name_in_a_folder_deeper_than_path_max_is_staged(self) -> None:
+        """R25-4 (round 25): the staged link (and the copy fallback) of a non-ASCII name used ``os.path.abspath``; in a
+        working folder deeper than PATH_MAX that name is refused (ENAMETOOLONG), so 한글:v.mp4 there could not be
+        opened by the native decoders ("비ASCII 이름의 파일을 열 수 없습니다") while ASCII names took R24-3's "./" route.
+        The staged name now reaches the file through /proc/<pid>/cwd (Linux) or is a copy made from the relative name —
+        for this process and for a child that runs in another folder."""
+        import subprocess
+        import sys
+
+        with tempfile.TemporaryDirectory() as tmp:
+            previous = os.getcwd()
+            os.chdir(tmp)
+            try:
+                index = 0
+                while len(os.fsencode(os.getcwd())) <= native_path._path_max():
+                    part = f"{index:02d}" + "d" * 198
+                    os.mkdir(part)
+                    os.chdir(part)
+                    index += 1
+                Path("한글:v.bin").write_bytes(b"evidence bytes")
+                with mock.patch.object(native_path, "_PATH_MAX", None):
+                    with native_safe_path("한글:v.bin") as staged:
+                        self.assertTrue(staged.isascii(), staged)
+                        self.assertEqual(Path(staged).read_bytes(), b"evidence bytes")
+                    with native_safe_path("한글:v.bin", for_child=True) as staged:
+                        self.assertTrue(os.path.isabs(staged) and staged.isascii(), staged)
+                        child = subprocess.run([sys.executable, "-c", "import sys; sys.stdout.write(open(sys.argv[1], 'rb').read().decode())", staged],
+                                               cwd=tmp, capture_output=True, text=True, timeout=60)
+                        self.assertEqual(child.stdout, "evidence bytes", child.stderr[-500:])
+                    self.assertFalse(os.path.lexists(staged))  # removed afterwards
+                    self.assertEqual(Path("한글:v.bin").read_bytes(), b"evidence bytes")  # the evidence file untouched
+            finally:
+                os.chdir(previous)
+
     def test_for_child_yields_an_absolute_name_and_the_default_is_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             Path(tmp, "a.wav").write_bytes(b"x")

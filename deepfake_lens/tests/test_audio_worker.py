@@ -978,6 +978,10 @@ class WorkingFolderDeeperThanPathMaxTest(unittest.TestCase):
                     capture_output=True, timeout=120, check=False,
                 )
                 self.assertEqual(made.returncode, 0, made.stderr[-500:])
+                # R25-4 (round 25): non-ASCII names there too — staged for the native decoders from a name that is
+                # not too long (it was 「비디오 열기 오류: 비ASCII 이름의 파일을 열 수 없습니다」 for 한글:v.mp4)
+                shutil.copyfile("case/clip.mp4", "case/한글:v.mp4")
+                shutil.copyfile("case/a.wav", "case/한글 소리.wav")
             finally:
                 os.chdir(previous)
             env = _clean_env(tmp)
@@ -1002,5 +1006,8 @@ class WorkingFolderDeeperThanPathMaxTest(unittest.TestCase):
             self.assertEqual(statuses(rows["a.wav"]["result"], "audio_features"), ["ran"], rows["a.wav"]["result"]["coverage"])
             self.assertEqual(statuses(rows["clip.mp4"]["result"], "av_audio"), ["ran"], rows["clip.mp4"]["result"]["coverage"])
             self.assertEqual(statuses(rows["clip.mp4"]["result"], "video_analysis"), ["ran"])
+            self.assertEqual(statuses(rows["한글:v.mp4"]["result"], "video_analysis"), ["ran"], rows["한글:v.mp4"]["result"]["coverage"])
+            self.assertEqual(statuses(rows["한글:v.mp4"]["result"], "av_audio"), ["ran"], rows["한글:v.mp4"]["result"]["coverage"])
+            self.assertEqual(statuses(rows["한글 소리.wav"]["result"], "audio_features"), ["ran"], rows["한글 소리.wav"]["result"]["coverage"])
             classified = cli("classify", "case/a.wav")
             self.assertEqual(statuses(classified, "audio_features"), ["ran"], classified["coverage"])
