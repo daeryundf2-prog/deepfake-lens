@@ -1625,9 +1625,9 @@ def _analyze_image_file(
         # R18-4 (round 18): a read that covered only part of the file says so (it said "ran" with no reason).
         else CoverageEntry("metadata", CoverageStatus.RAN, (metadata_read.partial or "") if metadata_read is not None else "")
     ]
-    c2pa_validation, entry = _c2pa_check(file_path)
-    coverage.append(entry)
-    c2pa_unknown = entry.status == CoverageStatus.FAILED
+    c2pa_validation, c2pa_entry = _c2pa_check(file_path)
+    coverage.append(c2pa_entry)
+    c2pa_unknown = c2pa_entry.status == CoverageStatus.FAILED
 
     # Photo/non-photo gate (WP-D, G13): detectors are only applied to
     # photographs. A non-photo (or too small) image keeps metadata + C2PA;
@@ -1671,6 +1671,11 @@ def _analyze_image_file(
     else:
         deep = _deep_image_layers(file_path, thresholds) if deep_signals else _deep_disabled(DEEP_IMAGE_CHECKS)
     coverage.extend(deep.coverage)
+    # techniques-2026: watermark decoders (run on every image — a mark is a fact whatever the image class).
+    from .media_marks import image_mark_layers
+
+    marks = image_mark_layers(file_path, c2pa_validation)
+    coverage.extend(marks.coverage)
 
     image_format = metadata_read.image_format if metadata_read is not None else None
     jpeg_quality = None
@@ -1685,8 +1690,8 @@ def _analyze_image_file(
         model_analysis=model_analysis,
         c2pa_validation=c2pa_validation,
         coverage=coverage,
-        extra_evidence=deep.evidence,
-        extra_limitations=[*(metadata_read.notes if metadata_read is not None else []), *deep.limitations],
+        extra_evidence=[*deep.evidence, *marks.evidence],
+        extra_limitations=[*(metadata_read.notes if metadata_read is not None else []), *deep.limitations, *marks.limitations],
         image_class=image_class,
         metadata_read_error=read_error,
         c2pa_unknown=c2pa_unknown,

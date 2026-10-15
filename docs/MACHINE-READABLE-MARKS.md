@@ -60,3 +60,15 @@ IPTC NewsCodes digitalsourcetype 2024-10-23판의 20개 값 전부(퇴역 `minor
 IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "알 수 없는 값"으로 그대로 표시한다. 서명 없는 XMP
 `Iptc4xmpExt:DigitalSourceType`은 "자기 신고"로 표시한다(생성형이면 기존처럼 결정적·생성·강 — WP-A 표의 생성 도구 메타데이터 급,
 `screenCapture`는 중립·중).
+
+## 3. SDXL 고정 메시지 워터마크 (`watermark_sdxl`)
+
+- 대상: 모든 이미지(사진/비사진 게이트와 무관 — 표식은 이미지 유형과 관계없는 사실). 의존성: numpy·opencv·Pillow(라이선스 MIT인
+  invisible-watermark의 디코더를 `wm_imwatermark.py`에 numpy+OpenCV로 다시 구현 — PyWavelets·torch 불필요, 라이브러리와 비트 단위로 같음).
+- 메시지: `0b101100111110110010010000011110111011000110011110`(48비트, diffusers `StableDiffusionXLWatermarker`와 Stability 참조 구현이 같은 값 —
+  출처·조회일은 `models/watermark-registry.json`). 문서화된 BGR 순서와 R·B를 바꾼 순서를 모두 시험한다.
+- **근거**: 48/48 정확 일치일 때만 결정적·생성·강 「SDXL 공식 파이프라인 워터마크 존재」. 메시지가 공개라 흉내 낼 수 있으므로 생성 도구
+  메타데이터와 같은 급이다. 불일치는 무정보(coverage `ran` 「48비트 정확 일치 없음 — 무정보(워터마크 부재를 뜻하지 않음)」).
+- 범위 밖: 짧은 변 256px 미만(SDXL 워터마커가 표식을 넣지 않음) → `skipped`; 8천만 화소 초과 → `skipped`.
+- 측정: 실사 240장 우연 일치 0건(95% 상한 1.5%), 무손실 재검출률 29.6% — `docs/WATERMARK-MEASUREMENTS.md`.
+

@@ -196,6 +196,18 @@ class EvidenceConflictTest(unittest.TestCase):
         self.assertIn(synthetic.title, titles)
         self.assertIn(EVIDENCE_CONFLICT_TITLE, titles)
 
+    def test_a_rebuilt_result_names_the_conflict_once(self) -> None:
+        """A document result is rebuilt from its own evidence (_apply_document_metadata) — one conflict item, not two."""
+        authentic = c2pa_evidence(_trusted(digital_source_types=["digitalCapture"]))[0]
+        [synthetic] = xmp_evidence({"xmp.DigitalSourceType": IPTC + "trainedAlgorithmicMedia"})
+        first = build_classification_result(
+            subject="글", evidence=[authentic, synthetic], coverage=[], source_guess=SourceGuess.unknown(), limitations=[], next_checks=[],
+        )
+        rebuilt = build_classification_result(
+            subject="글", evidence=list(first.evidence), coverage=[], source_guess=SourceGuess.unknown(), limitations=[], next_checks=[],
+        )
+        self.assertEqual([item.title for item in rebuilt.evidence].count(EVIDENCE_CONFLICT_TITLE), 1)
+
     def test_no_conflict_item_without_both_sides(self) -> None:
         authentic = c2pa_evidence(_trusted(digital_source_types=["digitalCapture"]))[0]
         self.assertEqual(evidence_conflicts([authentic]), [])

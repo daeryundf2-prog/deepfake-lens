@@ -142,6 +142,8 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `대조군: 이 환경의 mediapipe 가져오기는 자식 프로세스도 파일도 만들지 않음` | 그냥 `import mediapipe`가 자식 프로세스(sounddevice→ctypes.util.find_library의 ldconfig/gcc/ld, matplotlib 글꼴 캐시의 fc-list)나 파일(`~/.cache/matplotlib` 등)을 만드는 환경(Linux, R15-8/R16-4) — 그렇지 않은 환경에서는 대조군이 성립하지 않아 건너뜀 | test_mediapipe_import.py |
 | `파일 시스템이 UTF-8이 아닌 파일 이름을 허용하지 않음(Windows·macOS)` | UTF-8이 아닌 바이트 파일 이름을 허용하는 파일 시스템(리눅스 ext4·tmpfs 등) | test_corpus_manifest.py, test_native_path.py, test_non_utf8_names.py, test_path_b64.py |
 | `c2pa-python and fixtures/c2pa-2.4 required` | `provenance`/`dev` extra(c2pa-python>=0.38) + `scripts/build_c2pa24_fixtures.py` 픽스처(techniques-2026) | test_c2pa24.py |
+| `numpy, opencv and Pillow required` | `pixel`+`dev` extra(numpy, opencv-python, Pillow) — SDXL dwtDct 워터마크 검사(techniques-2026) | test_wm_sdxl.py |
+| `invisible-watermark + PyWavelets required (tech image)` | invisible-watermark·PyWavelets(`deepfake-lens-gate:tech` 이미지, `requirements-tech.lock`) — 디코더가 라이브러리와 비트 단위로 같은지 확인 | test_wm_sdxl.py |
 
 ## 환경 의존 기준선 테스트
 

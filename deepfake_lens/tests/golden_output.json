@@ -214,6 +214,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 14,
+      "reason": "techniques-2026 item 3: 모든 이미지 행에 watermark_sdxl 검사(imwatermark dwtDct) — 등록된 SDXL 48비트 메시지와 정확히 일치할 때만 「SDXL 공식 파이프라인 워터마크 존재」, 그 밖에는 ran 「… 무정보」 또는 256px 미만 skipped; 워터마크 등록표가 캐시 키에 들어감",
+      "sha256": "bd472adc291d80ab2ed521d9621e531ae34ddab490c228289316bc1ffb73087f",
+      "sets": {
+        "stdlib": "bd472adc291d80ab2ed521d9621e531ae34ddab490c228289316bc1ffb73087f",
+        "full-extras": "148b254949f33c2f4e217bdb08facf19f4e03e39044a21cf505adbcf7f7c9c48"
+      },
+      "constants_sha256": "9e61db393feef304b21dcf41d6df10146cee2242f30aa26151c3f02a73fadc73",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

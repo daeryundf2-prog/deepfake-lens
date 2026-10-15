@@ -59,3 +59,17 @@ the pin.
   `DEEPFAKE_LENS_C2PA_TRUST_ANCHORS=<PEM 파일>` (recorded in every C2PA
   item and coverage reason). To update: replace both files in one commit,
   raise `scan_cache.OUTPUT_FORMAT_GENERATION` and record the golden output.
+
+## Digital source type vocabulary and SDXL watermark message (techniques-2026)
+
+- `deepfake_lens/digital_source_type.py` restates the IPTC NewsCodes
+  "Digital Source Type" vocabulary (release 2024-10-23, 20 concepts,
+  https://cv.iptc.org/newscodes/digitalsourcetype/) — © IPTC, **CC BY 4.0**;
+  codes and English labels are IPTC's, the Korean labels are ours.
+- `deepfake_lens/wm_imwatermark.py` reimplements the `dwtDct` *decoder* of
+  ShieldMnt/invisible-watermark 0.2.0 (`imwatermark/maxDct.py`, **MIT**) with
+  numpy + OpenCV; no code is copied. `watermark-registry.json` records the
+  SDXL 48-bit message published in huggingface/diffusers
+  (`pipelines/stable_diffusion_xl/watermark.py`, Apache-2.0) and
+  Stability-AI/generative-models (`sgm/inference/helpers.py`, MIT).
+

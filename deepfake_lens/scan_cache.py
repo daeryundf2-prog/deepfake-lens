@@ -852,7 +852,10 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    binding, watermark actions, embedded data, screen capture, ingredient source types)
 #    are items; audio, video and document rows gain a c2pa check (.txt/.md skipped);
 #    XMP DigitalSourceType uses the full IPTC vocabulary ("자기 신고").
-OUTPUT_FORMAT_GENERATION = 13
+# 14: techniques-2026 item 3 — every image gains the watermark_sdxl check (imwatermark dwtDct):
+#    an exact 48/48 match with the registered SDXL message is the item "SDXL 공식 파이프라인 워터마크 존재";
+#    otherwise ran "… 무정보" / skipped (under 256 px); the registry is part of the cache key.
+OUTPUT_FORMAT_GENERATION = 14
 
 
 def cache_extension(path: Path) -> str:
@@ -892,6 +895,10 @@ def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | No
     from .c2pa import trust_cache_tokens
 
     tokens += trust_cache_tokens()
+    # techniques-2026 items 3–5: the watermark registry (generator messages) decides what a decoded mark says.
+    from .media_marks import registry_cache_tokens
+
+    tokens += registry_cache_tokens()
     return f"tool:{TOOL_VERSION}|pins:{_short_digest(chr(10).join(tokens))}"
 
 

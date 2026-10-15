@@ -620,6 +620,8 @@ def evidence_conflicts(items: Iterable[EvidenceItem]) -> list[EvidenceItem]:
     so the examiner sees the contradiction; it does not change the rule.
     """
     listed = list(items)
+    if any(item.title == EVIDENCE_CONFLICT_TITLE for item in listed):
+        return []  # already named (a result rebuilt from its own evidence)
     strong = [i for i in listed if i.kind == EvidenceKind.DETERMINISTIC and i.strength == EvidenceStrength.STRONG]
     authentic = [i.title for i in strong if i.direction == EvidenceDirection.AUTHENTIC]
     synthetic = [i.title for i in strong if i.direction == EvidenceDirection.SYNTHETIC]
