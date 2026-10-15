@@ -106,3 +106,12 @@ IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "�
 - WavMark는 보류: `wavmark` 패키지가 실행 시 Hugging Face에서 가중치를 받는 구조(huggingface-hub·resampy·torchaudio 의존)라 오프라인 핀 로딩을
   따로 만들어야 한다. PixelSeal(1.2 GB 체크포인트, videoseal 패키지 필요)·ChunkySeal(13 GB)도 보류 — `docs/WATERMARK-MEASUREMENTS.md` 끝 참조.
 
+## 6. 법정 표식 문맥 (`marking_context`, 근거 「기계판독 표식 확인 결과…」)
+
+- 이미지·오디오·영상·문서·텍스트 행마다 실제로 실행한 표식 검사를 사실로 정리한다: C2PA 매니페스트(있음/없음/미실행), SDXL·TrustMark·VideoSeal
+  (이미지), VideoSeal·AudioSeal(영상), AudioSeal(오디오) — 각각 확인됨/확인 안 됨/미실행(사유)/실패.
+- 온라인 전용 검출(구글 SynthID 검출 서비스, OpenAI 콘텐츠 출처 확인, Kling 콘텐츠 검출)은 coverage `online_detection` `skipped`
+  「…: 온라인 전용 검출 서비스(검출기·키 비공개) — 분석 중 네트워크를 쓰지 않으므로 실행하지 않음」.
+- 결과 JSON의 `result.marking_context`(`legal_basis`, `checked[]`, `online_only[]`, `marks_found`, `absence_statement`)와 결정적·중립·약 근거 항목
+  「기계판독 표식 확인 결과(EU 인공지능법 제50조·인공지능기본법 관련)」(근거 목록 맨 뒤 — 모든 보고서에 그대로 출력·서명). 추론은 하지 않는다:
+  「표식이 확인되지 않은 것은 원본성 근거가 아닙니다 …」가 늘 함께 적힌다.

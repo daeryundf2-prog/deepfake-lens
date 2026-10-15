@@ -277,6 +277,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 17,
+      "reason": "techniques-2026 item 6: 매체·문서 행마다 result.marking_context와 마지막 근거 항목 「기계판독 표식 확인 결과(EU 인공지능법 제50조·인공지능기본법 관련)」, coverage online_detection(온라인 전용 검출, 늘 건너뜀) — 표식 부재는 원본성 근거가 아님",
+      "sha256": "659837dc6f4a0393b00acd271724cec8bda9c8d349b6baef20d50c08066e7927",
+      "sets": {
+        "stdlib": "659837dc6f4a0393b00acd271724cec8bda9c8d349b6baef20d50c08066e7927",
+        "full-extras": "7cbcf118a39298d7424bc404d5c6d5abb63ca9ef6a0eb9e5421587da30392746"
+      },
+      "constants_sha256": "9e61db393feef304b21dcf41d6df10146cee2242f30aa26151c3f02a73fadc73",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

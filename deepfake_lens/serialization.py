@@ -158,6 +158,7 @@ def _classification_result_from_json(data: dict[str, object]) -> ClassificationR
         probability_ci=_ci(data.get("probability_ci")),
         score_is_calibrated=bool(data.get("score_is_calibrated", False)),
         reference_signals=[_signal_from_json(item) for item in _items(data.get("reference_signals")) if isinstance(item, dict)],
+        marking_context=_dict(data.get("marking_context")) or None,
     )
 
 

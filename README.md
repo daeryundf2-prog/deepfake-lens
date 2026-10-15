@@ -49,6 +49,27 @@ Source/omit rules and the `fail_under` floor live in `[tool.coverage.*]` in
 c2pa, mediapipe) are exercised only when those extras are installed, so the
 floor is intentionally a floor — coverage with all extras is higher.
 
+## Machine-readable marks (techniques-2026)
+
+C2PA 2.2–2.4 manifests are verified offline against the bundled C2PA trust list
+(`DEEPFAKE_LENS_C2PA_TRUST_ANCHORS` adds a deployment's own anchors), and images,
+audio and video are checked for invisible watermarks — SDXL's fixed imwatermark
+message (numpy + opencv), Adobe TrustMark Q/P/C (`pip install -e ".[watermark]"`),
+Meta VideoSeal / AudioSeal (`pip install -e ".[watermark_meta]"`, torch). The
+decoder weights are pinned in `deepfake_lens/models/assets.json` and fetched once
+with `python scripts/fetch_watermark_models.py`; without a runtime or weights the
+checks are recorded as skipped. A watermark is a fact, never by itself a verdict,
+and the absence of a mark never means "original" — see
+[docs/MACHINE-READABLE-MARKS.md](docs/MACHINE-READABLE-MARKS.md) and the measured
+false-positive rates in [docs/WATERMARK-MEASUREMENTS.md](docs/WATERMARK-MEASUREMENTS.md).
+
+```bash
+python scripts/build_c2pa24_fixtures.py --force          # C2PA 2.x fixtures (openssl 3.4+, c2pa-python>=0.38)
+python scripts/fetch_watermark_models.py                  # decoder weights, sha256-checked
+python scripts/fetch_real_photos.py --out /tmp/real240    # measurement photo set (network, preparation only)
+python scripts/measure_watermark_fpr.py --photos /tmp/real240 --out /tmp/fpr.json
+```
+
 ## Scope
 
 This repository is independent from YH Mobile Trace. It does not contain mobile forensic acquisition code, evidence-chain schemas, or Android/iOS device collection routes.

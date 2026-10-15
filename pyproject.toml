@@ -280,6 +280,7 @@ files = [
     # techniques-2026
     "deepfake_lens/digital_source_type.py",
     "deepfake_lens/media_marks.py",
+    "deepfake_lens/marking_context.py",
     "deepfake_lens/wm_imwatermark.py",
     "deepfake_lens/wm_trustmark.py",
     "deepfake_lens/wm_meta.py",
@@ -287,6 +288,7 @@ files = [
     "deepfake_lens/tests/test_wm_sdxl.py",
     "deepfake_lens/tests/test_wm_trustmark.py",
     "deepfake_lens/tests/test_wm_meta.py",
+    "deepfake_lens/tests/test_marking_context.py",
 ]
 follow_imports = "skip"
 ignore_missing_imports = true

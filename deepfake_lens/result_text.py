@@ -12,6 +12,7 @@ import re
 import unicodedata
 from pathlib import PurePath
 
+from .marking_context import MARKING_LAYER
 from .result_types import (
     COVERAGE_STATUS_LABELS,
     GRADE_LABELS,
@@ -60,7 +61,9 @@ def evidence_groups(result: ClassificationResult) -> list[tuple[str, list[str]]]
 
 
 def evidence_counts(result: ClassificationResult) -> dict[EvidenceKind, int]:
-    return {kind: sum(1 for item in result.evidence if item.kind == kind) for kind in KIND_ORDER}
+    # techniques-2026 item 6: the marking-context statement is listed with the evidence but is not counted as
+    # a piece of evidence (it says which marks were checked — like coverage).
+    return {kind: sum(1 for item in result.evidence if item.kind == kind and item.layer != MARKING_LAYER) for kind in KIND_ORDER}
 
 
 def evidence_counts_text(result: ClassificationResult) -> str:
@@ -69,8 +72,8 @@ def evidence_counts_text(result: ClassificationResult) -> str:
 
 
 def deciding_evidence(result: ClassificationResult) -> EvidenceItem | None:
-    """The first evidence item worth naming next to the verdict."""
-    return result.evidence[0] if result.evidence else None
+    """The first evidence item worth naming next to the verdict (never the marking-context statement)."""
+    return next((item for item in result.evidence if item.layer != MARKING_LAYER), None)
 
 
 def coverage_gaps(result: ClassificationResult) -> list[CoverageEntry]:

@@ -333,6 +333,7 @@ CHECK_LABELS = {
     "watermark_trustmark": "TrustMark 워터마크 검사",
     "watermark_videoseal": "VideoSeal 워터마크 검사",
     "watermark_audioseal": "AudioSeal 워터마크 검사",
+    "online_detection": "온라인 전용 검출(미실행)",
 }
 
 
@@ -412,6 +413,10 @@ class ClassificationResult:
     # Unmeasured heuristics (pixel ensemble, frequency, legacy audio/video
     # heuristics, fusion score). Shown for reference; never decide.
     reference_signals: list[EvidenceSignal] = field(default_factory=list)
+    # techniques-2026 item 6: the machine-readable marks checked for this file
+    # (marking_context.build) — facts for the legal-marking section; None for
+    # rows that were not analyzed as media/documents. Never decides.
+    marking_context: dict | None = None
 
     @property
     def verdict_label(self) -> str:

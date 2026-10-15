@@ -860,7 +860,9 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    neutral fact, the C2PA soft-binding cross-check its only link to a conclusion.
 # 16: techniques-2026 item 5 — images and videos gain watermark_videoseal, audio and videos
 #    watermark_audioseal (optional torch extra; skipped "의존성 부재: torch" without it).
-OUTPUT_FORMAT_GENERATION = 16
+# 17: techniques-2026 item 6 — every media/document row gains result.marking_context, the closing
+#    item "기계판독 표식 확인 결과(…)" and the skipped coverage entry online_detection.
+OUTPUT_FORMAT_GENERATION = 17
 
 
 def cache_extension(path: Path) -> str:
