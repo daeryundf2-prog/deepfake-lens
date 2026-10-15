@@ -603,6 +603,10 @@ def _main(argv: list[str] | None = None) -> int:
         words = argv[1:]
         while len(words) > 1 and words[-1] in ("-h", "--help"):
             words = words[:-1]
+        # R26-7 (round 26): `help help <topic>` is the help of <topic> — "help" about help names the same topic. It was
+        # the top-level parser's 「허용되지 않은 값 'help'」 (exit 2) although its choice list does not hold "help".
+        while len(words) > 1 and words[0] == "help":
+            words = words[1:]
         topic = words[0] if words else None
         if topic is None or (topic in ("-h", "--help", "help") and len(words) == 1):
             argv = ["--help"]  # R23-11 (round 23): `help help` is the top-level help (was "허용되지 않은 값 'help'")

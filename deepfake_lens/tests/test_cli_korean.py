@@ -319,8 +319,9 @@ class UnknownArgumentUsageTest(unittest.TestCase):
         for argv, fragment in ((["help", "vendor-weights", "bogus"], "알 수 없는 인수: bogus"),
                                (["help", "vendor-weights", "pin", "a", "b"], "알 수 없는 인수: pin a b"),
                                (["help", "vendor-weights", "--verify"], "알 수 없는 인수: --verify"),
-                               (["help", "scan", "extra"], "알 수 없는 인수: extra"),
-                               (["help", "help", "scan"], "허용되지 않은 값 'help'")):
+                               (["help", "scan", "extra"], "알 수 없는 인수: extra")):
+            # R26-7 (round 26): ["help", "help", "scan"] → 「허용되지 않은 값 'help'」 pinned the defect (no "help" in that
+            # choice list); it is the scan help now (test_help_help_topic_is_the_topics_help).
             with self.subTest(argv=argv):
                 code, err_text = self._run(argv)
                 self.assertEqual(code, 2, err_text)
@@ -369,12 +370,41 @@ class UnknownArgumentUsageTest(unittest.TestCase):
                      ["help", "help"], ["help", "-h"]):
             with self.subTest(argv=argv):
                 self.assertEqual(top_help(argv), expected)
-        for argv, fragment in ((["help", "-h", "extra"], "허용되지 않은 값 '-h'"), (["help", "bogus", "-h"], "허용되지 않은 값 'bogus'"),
-                               (["help", "help", "scan", "-h"], "허용되지 않은 값 'help'")):
+        # R26-7 (round 26): ["help", "help", "scan", "-h"] → 「허용되지 않은 값 'help'」 pinned the defect — "help" is not in
+        # that choice list; it is the scan help now (test_help_help_topic_is_the_topics_help).
+        for argv, fragment in ((["help", "-h", "extra"], "허용되지 않은 값 '-h'"), (["help", "bogus", "-h"], "허용되지 않은 값 'bogus'")):
             with self.subTest(argv=argv):
                 code, err_text = self._run(argv)
                 self.assertEqual(code, 2, err_text)
                 self.assertIn(fragment, err_text)
+
+    def test_help_help_topic_is_the_topics_help(self) -> None:
+        """R26-7 (round 26): `help help scan` and `help help help` were 「인수 <명령>: 허용되지 않은 값 'help' (선택 가능: 3d, …)」,
+        exit 2 — a list without "help" in it. "help" about help names the same topic: `help help scan` is the scan help,
+        `help help help` the top-level help (exit 0); a word that names no command is still the error naming that word."""
+        def help_text(argv: list[str]) -> str:
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    main(argv)
+            self.assertEqual(caught.exception.code, 0, argv)
+            return out.getvalue()
+
+        for argv, same_as in (
+            (["help", "help", "scan"], ["scan", "--help"]),
+            (["help", "help", "scan", "-h"], ["scan", "--help"]),
+            (["help", "help", "help", "scan"], ["scan", "--help"]),
+            (["help", "help", "corpus", "build"], ["corpus", "build", "--help"]),
+            (["help", "help", "help"], ["--help"]),
+        ):
+            with self.subTest(argv=argv):
+                self.assertEqual(help_text(argv), help_text(same_as))
+        for argv, fragment in ((["help", "help", "bogus"], "허용되지 않은 값 'bogus'"), (["help", "help", "scan", "extra"], "알 수 없는 인수: extra")):
+            with self.subTest(argv=argv):
+                code, err_text = self._run(argv)
+                self.assertEqual(code, 2, err_text)
+                self.assertIn(fragment, err_text)
+                self.assertNotIn("'help'", err_text)
 
     def test_help_names_a_command_or_is_an_error(self) -> None:
         """R21-9 (round 21): `help bogus` printed the top-level help with exit 0 (a typo ended as a success), and
