@@ -776,15 +776,15 @@ STATEMENT_ROW_MIN_HEIGHT = 30.0
 def statement_case_lines(statement: EvidenceStatement) -> list[str]:
     """GUI-REV2 H-2: the PDF's case box, line for line (the preview shows these).
 
-    Merge of phase0 R24-7: the examiner's fields go through display_name (a literal backslash doubled) —
-    in the PDF and so in the preview, which draws these same lines.
+    Merge of phase0 R24-7 / R25-3: the examiner's fields go through pdf_field_text (a literal backslash
+    doubled, "|" as typed) — in the PDF and so in the preview, which draws these same lines.
     """
-    from .result_text import display_name
+    from .result_text import pdf_field_text
 
     return [
-        f"사        건    {display_name(statement.case_no)}  {display_name(statement.case_name)}",
-        f"원고(고소인)    {display_name(statement.plaintiff)}",
-        f"피고(피의자)    {display_name(statement.defendant)}",
+        f"사        건    {pdf_field_text(statement.case_no)}  {pdf_field_text(statement.case_name)}",
+        f"원고(고소인)    {pdf_field_text(statement.plaintiff)}",
+        f"피고(피의자)    {pdf_field_text(statement.defendant)}",
         f"위 사건에 관하여 {statement.party}의 {statement.wording['pdf_agent']}은 주장사실을 입증하기 위해 아래와 같이 증거방법을 제출합니다.",
     ]
 
@@ -807,21 +807,31 @@ def statement_boxes(statement: EvidenceStatement) -> list[tuple[str, list[str]]]
 
 
 def statement_signoff_lines(statement: EvidenceStatement) -> list[str]:
-    """GUI-REV2 H-2: the PDF's signoff block (the court line follows it); R24-7: the law firm through display_name."""
-    from .result_text import display_name
+    """GUI-REV2 H-2: the PDF's signoff block (the court line follows it); R24-7/R25-3: the law firm through pdf_field_text."""
+    from .result_text import pdf_field_text
 
     return [
         statement.created_at,
-        f"{statement.party} {statement.party_agent}  {display_name(statement.law_firm)}".rstrip(),
+        f"{statement.party} {statement.party_agent}  {pdf_field_text(statement.law_firm)}".rstrip(),
         "담당변호사 : ○ ○ ○,  ○ ○ ○",
         "디지털포렌식센터 수석감정관 : ○ ○ ○  (인)",
     ]
 
 
 def _display_court(court: str) -> str:
-    from .result_text import display_name
+    from .result_text import pdf_field_text
 
-    return display_name(court)
+    return pdf_field_text(court)
+
+
+def statement_author_cell(statement: EvidenceStatement, entry: EvidenceStatementEntry) -> str:
+    """R25-3: the "작성자 및 일자" cell as the PDF prints it — the law firm through pdf_field_text over the date
+    (``author_date`` is "<law firm>\n<date>"); merge: the GUI preview shows the same cell."""
+    from .result_text import pdf_field_text
+
+    if not statement.law_firm:
+        return entry.author_date
+    return f"{pdf_field_text(statement.law_firm)}\n{entry.author_date.rsplit(chr(10), 1)[-1]}"
 
 
 def statement_preview(statement: EvidenceStatement, unsigned_rows: list[tuple[ScanItem, str]] | None = None) -> dict[str, Any]:
@@ -842,7 +852,7 @@ def statement_preview(statement: EvidenceStatement, unsigned_rows: list[tuple[Sc
         "case_lines": statement_case_lines(statement),
         "table_headers": list(STATEMENT_TABLE_HEADERS),
         "entries": [
-            {"exhibit_no": e.exhibit_no, "document_name": e.document_name, "author_date": e.author_date,
+            {"exhibit_no": e.exhibit_no, "document_name": e.document_name, "author_date": statement_author_cell(statement, e),
              "purpose_of_proof": e.purpose_of_proof, "verdict_label": e.verdict_label, "file_path": e.file_path}
             for e in statement.entries
         ],
@@ -866,16 +876,21 @@ def _render_statement_pdf(
     """
     from .pdf_layout import Cell, PdfLayout
     from .reports import analysis_options_line, scan_root_line
-    from .result_text import display_name
+    from .result_text import pdf_field_text
 
     # R24-7 (round 24): the case fields (the examiner's input — case number and name, parties, court, office,
     # contact) are drawn through display_name like the file names (R23-4): every literal backslash doubled, so
     # the \uNNNN escape PdfLayout.drawable writes for a character the font lacks never equals a literal
     # "\uNNNN" typed into the field ("ע corp" and "\u05e2 corp" printed alike).
-    # (Merge: the case box and signoff lines come from statement_case_lines / statement_signoff_lines,
-    # which apply display_name — shared with the GUI preview.)
-    law_firm, center, contact = display_name(statement.law_firm), display_name(statement.center), display_name(statement.contact)
-    court_name = display_name(statement.court)
+    # R25-3 (round 25): through pdf_field_text (display_name without the Markdown "|" escape — "x|y" prints as
+    # typed), and the law firm of the table's 「작성자 및 일자」 cell too (statement_author_cell).
+    # Merge: the case box and signoff lines come from statement_case_lines / statement_signoff_lines, which
+    # apply pdf_field_text — shared with the GUI preview, as is statement_author_cell.
+    law_firm, center, contact = pdf_field_text(statement.law_firm), pdf_field_text(statement.center), pdf_field_text(statement.contact)
+    court_name = pdf_field_text(statement.court)
+
+    def author_cell(entry: EvidenceStatementEntry) -> str:
+        return statement_author_cell(statement, entry)
 
     def page_header(layout: PdfLayout) -> None:
         firm_header = f"{law_firm} {center}".strip()
@@ -915,7 +930,7 @@ def _render_statement_pdf(
             [
                 Cell(0, entry.exhibit_no, 8.5, (0.1, 0.15, 0.3)),
                 Cell(1, entry.document_name or " ", 7.5, (0.2, 0.2, 0.2)),
-                Cell(2, entry.author_date or " ", 7.5, (0.3, 0.3, 0.3)),
+                Cell(2, author_cell(entry) or " ", 7.5, (0.3, 0.3, 0.3)),
                 Cell(3, entry.purpose_of_proof or " ", 6.8, (0.15, 0.15, 0.15)),
             ],
             fill=(0.97, 0.98, 0.99) if idx % 2 == 1 else None,

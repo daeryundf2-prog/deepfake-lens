@@ -555,7 +555,12 @@ def _load_wav(path: Path, *, sample_rate: int, max_seconds: float) -> "np.ndarra
 
 
 def _load_optional(path: Path, *, sample_rate: int, max_seconds: float) -> "np.ndarray":
-    """Fallback decoders for non-PCM-WAV containers (flac/mp3/ogg/m4a)."""
+    """Fallback decoders for non-PCM-WAV files (flac/mp3/ogg/opus).
+
+    R25-9 (round 25) audit: both decoders are libsndfile (librosa 1.0 has no audioread fallback), so m4a / aac /
+    wma and video containers raise their decode error here (a failed model check, never a silent score). The
+    profile is behind the measurement gate (inactive in phase 0).
+    """
     try:
         import soundfile as sf
 

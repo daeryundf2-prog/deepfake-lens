@@ -3568,18 +3568,26 @@ class ReportUnrecordedFilesAreTheServersTest(_ReportLegsFixture):
 
     def test_a_cancelled_container_row_needs_a_cancelled_report(self) -> None:
         """R24-1: a ``cancelled`` row is only taken as cancelled in a report of a cancelled scan — the server's cancelled
-        job (whose row must say ``cancelled`` too) or a posted ``summary.cancelled`` (unverified); anything else is 400.
-        A ``cancelled`` status on a row that is not a container is 400."""
+        job, whose row must say ``cancelled`` too; anything else is 400. A ``cancelled`` status on a row that is not a
+        container is 400.
+
+        R25-1 (round 25): this test pinned the R24-1 defect — a posted ``summary.cancelled`` without the server's
+        cancelled job (no job, or a finished "done" job) was 200 with the row excluded as "사용자 취소" (any file posted
+        as kind "archive" could be dropped that way). Only the server's cancelled job decides now: those two cases are
+        400 like the rest, and a non-container row posted ``cancelled`` with the cancelled job is refused because the
+        job holds no such cancelled container (was: refused because of the posted ``kind``)."""
         job_id, result = self._cancelled_job(checks=0)
         rows = list(result["items"])
         options = {"no_default_engine": "true"}
+        not_cancelled_scan = webapp_api.REPORT_ROW_CANCELLED_NOT_CANCELLED_SCAN.split("「")[0]
         cases = [
-            ({}, 400, webapp_api.REPORT_ROW_CANCELLED_NOT_CANCELLED_SCAN.split("「")[0]),
-            ({"summary": {"cancelled": True}}, 200, None),
+            ({}, 400, not_cancelled_scan),
+            ({"summary": {"cancelled": True}}, 400, not_cancelled_scan),  # R25-1: was 200
         ]
         finished = dict(webapp_api._SCAN_JOBS[job_id], status="done")
         webapp_api._SCAN_JOBS["job-done"] = finished
-        cases.append(({"scan_job": "job-done", "summary": {"cancelled": True}}, 200, None))
+        cases.append(({"scan_job": "job-done", "summary": {"cancelled": True}}, 400, not_cancelled_scan))  # R25-1: was 200
+        cases.append(({"scan_job": job_id}, 200, None))
         expanded = [dict(row, status="expanded") if row["path"] == "bundle.zip" else row for row in rows]
         webapp_api._SCAN_JOBS["job-expanded"] = dict(finished, status="cancelled", result=dict(result, items=expanded))
         cases.append(({"scan_job": "job-expanded"}, 400, webapp_api.REPORT_ROW_CANCELLED_NOT_IN_JOB.split("「")[0]))
@@ -3595,11 +3603,13 @@ class ReportUnrecordedFilesAreTheServersTest(_ReportLegsFixture):
                         self.assertIn({"path": "bundle.zip", "marker": webapp_api.UNSIGNED_CLIENT_ROW_MARKER,
                                        "reason": webapp_api.REPORT_ROW_CANCELLED}, body["excluded_items"])
         target = [dict(self.rows["target.png"], status="cancelled")]
-        for leg, make in self._legs():
-            status, _, raw = make()("/api/report", self._json({"items": target, "format": "json", "options": options, "scan_job": job_id}))
-            with self.subTest(leg=leg, case="not a container"):
-                self.assertEqual(status, 400, raw[:300])
-                self.assertIn(webapp_api.REPORT_ROW_CANCELLED_NOT_CONTAINER.split("「")[0], json.loads(raw)["error"])
+        member = [dict(self.rows["bundle.zip::notes.txt"], status="cancelled")]
+        for items, text in ((target, webapp_api.REPORT_ROW_CANCELLED_NOT_IN_JOB), (member, webapp_api.REPORT_ROW_CANCELLED_NOT_CONTAINER)):
+            for leg, make in self._legs():
+                status, _, raw = make()("/api/report", self._json({"items": items, "format": "json", "options": options, "scan_job": job_id}))
+                with self.subTest(leg=leg, case="not a container", path=items[0]["path"]):
+                    self.assertEqual(status, 400, raw[:300])
+                    self.assertIn(text.split("「")[0], json.loads(raw)["error"])
 
     def test_a_cancelled_scan_job_is_cancelled_without_the_posted_summary(self) -> None:
         """R23-3 (round 23): a cancelled job posted as ``scan_job`` without ``summary.cancelled`` signed its rows as the
@@ -3692,6 +3702,320 @@ class ReportUnrecordedFilesAreTheServersTest(_ReportLegsFixture):
         for (leg, fmt), (status, text, _) in self._report(list(rows.values())).items():
             with self.subTest(leg=leg, format=fmt, case="changed"):
                 self.assertEqual(status, 409, text[:300])
+
+
+class ReportSignedSetIsTheServersInvariantTest(_ReportLegsFixture):
+    """R25-1 (round 25) invariant, the sibling of :class:`ReportSignsNoPostedTextInvariantTest` for the structure of a post.
+
+    R24-1 let the post's own ``kind``, ``status: "cancelled"``, ``summary.cancelled`` and the absence of member rows
+    decide that a row was excluded as "사용자 취소" and not counted: a PNG with generator metadata posted as kind
+    "archive" / status "cancelled" with ``summary.cancelled`` (no scan job at all), an archive posted as "cancelled"
+    without its member rows, and the analyzed members of a really cancelled job left out were all signed with
+    "기록되지 않은 파일: 없음". Every structural field a client posts — ``kind``, ``status``, ``duplicate_of``,
+    ``result``, which rows (and which archive members) are present, ``summary.*`` and ``scan_job`` — is now fuzzed
+    against three server-held views of the folder: a never-cancelled scan (the server's walk), the server's cancelled
+    scan job with an archive whose generator member was analyzed and members the cancel never started, and the
+    server's finished job. Whenever a report is signed (200), the signed rows must be the server's own rows of that
+    view (sha256, status, verdict), a row may be excluded as cancelled only when the server's cancelled job holds it
+    as a cancelled container, ``files_cancelled`` is the job's own number, and ``not_in_report`` must equal the
+    files and archive members of the server's view that have no signed row (a container left out as a whole counts
+    once; members a cancel never started are the job's ``files_cancelled``). Anything else must be refused (400/409).
+    """
+
+    NONE = ReportUnrecordedFilesAreTheServersTest.NONE
+    _scan = ReportRefusesChangedRowsTest._scan
+    _cancelled_job = ReportUnrecordedFilesAreTheServersTest._cancelled_job
+    MANIPULATED = "manipulation_evidence"
+
+    def setUp(self) -> None:
+        import zipfile
+
+        from deepfake_lens.tests.qa.test_qa_sys import _write_generator_png
+
+        super().setUp()
+        registry = patch.object(webapp_api, "_SCAN_JOBS", {})
+        registry.start()
+        self.addCleanup(registry.stop)
+        _write_generator_png(self.folder / "evidence_gen.png")
+        _write_png(self.folder / "ok2.png", seed=7)
+        _write_generator_png(Path(self._tmp.name) / "g.png")
+        with zipfile.ZipFile(self.folder / "gen.zip", "w") as archive:
+            archive.writestr("a_gen.png", (Path(self._tmp.name) / "g.png").read_bytes())
+            for index in range(3):
+                archive.writestr(f"p{index}.png", _write_png(Path(self._tmp.name) / f"p{index}.png", seed=20 + index).read_bytes())
+        self.full = self._scan()  # the server's never-cancelled view (flat walk, default options)
+        self.assertEqual(self.full["evidence_gen.png"]["result"]["verdict_code"], self.MANIPULATED)
+        self.assertEqual(self.full["gen.zip::a_gen.png"]["result"]["verdict_code"], self.MANIPULATED)
+
+    # -- the server's views ---------------------------------------------------
+
+    def _job_with_partial_archive(self) -> tuple[str, dict[str, Any]]:
+        """A cancelled job in which gen.zip's generator member was analyzed and some of its members never started."""
+        for checks in range(1, 12):
+            job_id, result = self._cancelled_job(checks=checks, job_id=f"job-cancelled-{checks}")
+            rows = {row["path"]: row for row in result["items"]}
+            container = rows.get("gen.zip")
+            if container is not None and container["status"] == "cancelled" and "gen.zip::a_gen.png" in rows:
+                return job_id, result
+        self.fail("no cancel point leaves gen.zip partly analyzed")
+
+    @staticmethod
+    def _identity(row: dict[str, Any]) -> tuple[str, str | None]:
+        member, container = row.get("member"), row.get("container")
+        return (container, member) if isinstance(member, str) and isinstance(container, str) else (row["path"], None)
+
+    def _check_signed(self, post: dict[str, Any], body: dict[str, Any], view: dict[str, dict[str, Any]],
+                      job: dict[str, Any] | None) -> None:
+        """The oracle: the signed body against the server's own view (``view`` = its rows by path, ``job`` its job result)."""
+        signed = body["items"]
+        listing = body["unrecorded_files"]["listing"]
+        excluded = {row["path"]: row["reason"] for row in body["excluded_items"]}
+        posted_paths = sorted(row["path"] for row in post["items"])
+        self.assertEqual(sorted([row["path"] for row in signed] + list(excluded)), posted_paths)
+        # 1. every signed row is the server's own row of that file: of its view, or (listing unknown) of the disk
+        for row in signed:
+            truth = view.get(row["path"]) if listing["source"] != "unknown" else self.full.get(row["path"])
+            self.assertIsNotNone(truth, f"signed row {row['path']} is not in the server's view")
+            assert truth is not None
+            verdict = (row.get("result") or {}).get("verdict_code")
+            self.assertEqual((row.get("sha256"), row["status"], verdict),
+                             (truth.get("sha256"), truth["status"], (truth.get("result") or {}).get("verdict_code")), row["path"])
+        # 2. only a container the server's cancelled job holds as cancelled is excluded as cancelled
+        job_cancelled = {row["path"] for row in (job or {}).get("items", []) if row.get("member") is None and row["status"] == "cancelled"}
+        job_is_cancelled = job is not None and bool(job["summary"].get("cancelled"))
+        cancelled_excluded = {path for path, reason in excluded.items() if reason == webapp_api.REPORT_ROW_CANCELLED}
+        self.assertLessEqual(cancelled_excluded, job_cancelled if job_is_cancelled else set())
+        # 3. the cancel count is the job's own (or 0 and unverified for a posted claim)
+        summary = body["summary"]
+        if job_is_cancelled:
+            assert job is not None
+            self.assertEqual((summary["files_cancelled"], body["files_cancelled_source"]), (job["summary"]["files_cancelled"], "server"))
+        else:
+            self.assertEqual(summary.get("files_cancelled", 0), 0)
+        # 4. the signed counts are those of the signed rows
+        manipulated = sum(1 for row in signed if (row.get("result") or {}).get("verdict_code") == self.MANIPULATED
+                          and row["status"] not in ("duplicate", "skipped"))
+        self.assertEqual(summary["manipulation_evidence"], manipulated)
+        # 5. accounting: every file / member of the view without a signed row is counted — exactly
+        if listing["source"] == "unknown":
+            return
+        signed_ids = {self._identity(row) for row in signed}
+        signed_tops = {top for top, _ in signed_ids}
+        tops = {self._identity(row)[0] for row in view.values()}
+        members = {self._identity(row) for row in view.values() if self._identity(row)[1] is not None}
+        unaccounted_tops = tops - signed_tops - cancelled_excluded
+        unaccounted_members = {ident for ident in members - signed_ids if ident[0] in signed_tops | cancelled_excluded}
+        expected = len(unaccounted_tops) + len(unaccounted_members)
+        self.assertEqual(listing["not_in_report"], expected,
+                         f"unaccounted {sorted(unaccounted_tops)} {sorted(unaccounted_members)} (source {listing['source']})")
+        if expected:
+            self.assertNotIn(self.NONE, " ".join(body["unrecorded_files"]["lines"]))
+
+    # -- the fuzz ---------------------------------------------------------------
+
+    def _fuzz_posts(self, rows: list[dict[str, Any]], seed: int, count: int, jobs: list[object]) -> list[dict[str, Any]]:
+        import copy
+        import random
+
+        rng = random.Random(seed)
+        paths = [row["path"] for row in rows]
+        posts: list[dict[str, Any]] = []
+        for _ in range(count):
+            items: list[dict[str, Any]] = []
+            for row in rows:
+                if rng.random() < 0.2:
+                    continue  # the row (a file, a container or a member) left out
+                current = copy.deepcopy(row)
+                if rng.random() < 0.35:
+                    current["kind"] = rng.choice(["archive", "image", "unknown", "video", "audio", "document"])
+                items.append(current)
+            if not items:
+                items = [copy.deepcopy(rows[0])]
+            # one change-detection field of one row, in about half of the posts
+            roll = rng.random()
+            victim = rng.choice(items)
+            if roll < 0.25:
+                victim["status"] = "cancelled"
+                if rng.random() < 0.5:
+                    victim["kind"] = "archive"
+            elif roll < 0.35:
+                victim["status"] = rng.choice(["expanded", "analyzed", "skipped", "unknown"])
+            elif roll < 0.45:
+                victim["status"] = "duplicate"
+                victim["duplicate_of"] = rng.choice(paths)
+            elif roll < 0.5:
+                victim["result"] = None
+            post: dict[str, Any] = {"items": items, "format": "json", "options": {"no_default_engine": "true"}}
+            summary = rng.choice([None, {"cancelled": True}, {"cancelled": False}, {"cancelled": True, "files_cancelled": 10**6},
+                                  {"cancelled": False, "files_cancelled": 0, "total": 0}])
+            if summary is not None:
+                post["summary"] = summary
+            job = rng.choice(jobs)
+            if job is not None:
+                post["scan_job"] = job
+            posts.append(post)
+        return posts
+
+    def _run(self, posts: list[dict[str, Any]], view_for: Any) -> dict[int, int]:
+        statuses: dict[int, int] = {}
+        for index, post in enumerate(posts):
+            for leg, make in self._legs():
+                if leg == "api" and index % 3:
+                    continue  # every post on the stdlib server, every third also on api-serve
+                status, _, raw = make()("/api/report", self._json(post))
+                statuses[status] = statuses.get(status, 0) + 1
+                with self.subTest(leg=leg, post=index):
+                    self.assertIn(status, (200, 400, 409), raw[:300])
+                    if status == 200:
+                        view, job = view_for(post)
+                        self._check_signed(post, json.loads(raw), view, job)
+        return statuses
+
+    def _view_for(self, post: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], dict[str, Any] | None]:
+        """The server's view a post is reported against: the job it names (one this server holds), else its walk."""
+        entry = webapp_api._SCAN_JOBS.get(post.get("scan_job"))  # type: ignore[arg-type]
+        if entry is None:
+            return self.full, None
+        job = dict(entry["result"])
+        job["summary"] = dict(job["summary"])
+        if entry["status"] != "cancelled":
+            job["summary"]["cancelled"] = False
+        return {row["path"]: row for row in job["items"]}, job
+
+    def test_fuzzed_structure_of_a_never_cancelled_scan(self) -> None:
+        posts = self._fuzz_posts(list(self.full.values()), seed=2501, count=36, jobs=[None, "nonexistent-job"])
+        statuses = self._run(posts, self._view_for)
+        self.assertGreaterEqual(statuses.get(200, 0), 10, statuses)
+
+    def test_fuzzed_structure_of_a_cancelled_job(self) -> None:
+        job_id, result = self._job_with_partial_archive()
+        posts = self._fuzz_posts(list(result["items"]), seed=2502, count=36, jobs=[job_id, job_id, job_id, None, "nonexistent-job"])
+        statuses = self._run(posts, self._view_for)
+        self.assertGreaterEqual(statuses.get(200, 0), 10, statuses)
+
+    def test_fuzzed_structure_of_a_finished_job(self) -> None:
+        job_id, result = self._job_with_partial_archive()
+        done = self._scan_job_done()
+        posts = self._fuzz_posts(list(done[1]["items"]), seed=2503, count=24, jobs=[done[0], job_id])
+        statuses = self._run(posts, self._view_for)
+        self.assertGreaterEqual(statuses.get(200, 0), 6, statuses)
+
+    def _scan_job_done(self) -> tuple[str, dict[str, Any]]:
+        result = webapp_api._scan_payload(f"folder={self.folder}&no_default_engine=true", default_folder=self.folder)
+        webapp_api._SCAN_JOBS["job-done"] = {"status": "done", "created": time.time(), "finished": time.time(), "result": result}
+        return "job-done", result
+
+    # -- the round-25 reproductions and the original cases ---------------------------
+
+    def _post_each(self, post: dict[str, Any]) -> list[tuple[str, int, bytes]]:
+        return [(leg, *self._status_raw(make(), post)) for leg, make in self._legs()]
+
+    def _status_raw(self, post_fn: Any, post: dict[str, Any]) -> tuple[int, bytes]:
+        status, _, raw = post_fn("/api/report", self._json(post))
+        return status, raw
+
+    def test_r25_1_a_file_posted_as_a_cancelled_archive_is_refused(self) -> None:
+        """Reproduction A: evidence_gen.png posted kind "archive", status "cancelled", with summary.cancelled (no job,
+        a job id the server never had, result null) — 200 and "없음" with one manipulated file fewer. Now 400."""
+        for job in (None, "nonexistent-job"):
+            for result in ("keep", None):
+                items = [dict(row) for row in self.full.values()]
+                for row in items:
+                    if row["path"] == "evidence_gen.png":
+                        row.update(kind="archive", status="cancelled")
+                        if result is None:
+                            row["result"] = None
+                post: dict[str, Any] = {"items": items, "format": "json", "summary": {"cancelled": True},
+                                        "options": {"no_default_engine": "true"}}
+                if job is not None:
+                    post["scan_job"] = job
+                for leg, status, raw in self._post_each(post):
+                    with self.subTest(leg=leg, job=job, result=result):
+                        self.assertEqual(status, 400, raw[:300])
+                        self.assertIn(webapp_api.REPORT_ROW_CANCELLED_NOT_CANCELLED_SCAN.split("「")[0], json.loads(raw)["error"])
+
+    def test_r25_1_an_archive_posted_cancelled_without_its_members_is_refused_or_counted(self) -> None:
+        """Reproduction B: bundle.zip posted "cancelled" with both member rows left out (summary.cancelled, no job) —
+        200, three rows signed, listing 0. Now 400; and posted without the "cancelled" status but still without its
+        members, the server re-analyzes the archive and counts both members (R23-5)."""
+        items = [dict(row, status="cancelled") if row["path"] == "bundle.zip" else dict(row)
+                 for row in self.full.values() if not row["path"].startswith("bundle.zip::")]
+        post = {"items": items, "format": "json", "summary": {"cancelled": True}, "options": {"no_default_engine": "true"}}
+        for leg, status, raw in self._post_each(post):
+            with self.subTest(leg=leg):
+                self.assertEqual(status, 400, raw[:300])
+        honest = [dict(row) for row in self.full.values() if not row["path"].startswith("bundle.zip::")]
+        for leg, status, raw in self._post_each({"items": honest, "format": "json", "options": {"no_default_engine": "true"}}):
+            with self.subTest(leg=leg, case="members left out"):
+                self.assertEqual(status, 200, raw[:300])
+                self.assertEqual(json.loads(raw)["unrecorded_files"]["listing"], {"source": "walk", "not_in_report": 2})
+
+    def test_r25_1_a_real_cancelled_job_with_its_analyzed_members_left_out(self) -> None:
+        """Reproduction C: a really cancelled job; gen.zip posted "cancelled" with every analyzed member row (the
+        generator member among them) left out. Signed with 0 rows and "확인 불가 — 업로드 결과만 있음" when nothing else
+        was posted, with "not_in_report 0" when other files were. Now the analyzed members are counted and the reason
+        names the scan job."""
+        job_id, result = self._job_with_partial_archive()
+        rows = list(result["items"])
+        analyzed_members = [row for row in rows if row.get("container") == "gen.zip"]
+        self.assertTrue(analyzed_members)
+        container = [row for row in rows if row["path"] == "gen.zip"]
+        others = [row for row in rows if row.get("container") != "gen.zip" and row["path"] != "gen.zip"]
+        for items, case in ((container, "container only"), (container + others, "with other files")):
+            post = {"items": items, "format": "json", "scan_job": job_id, "options": {"no_default_engine": "true"}}
+            for leg, status, raw in self._post_each(post):
+                with self.subTest(leg=leg, case=case):
+                    self.assertEqual(status, 200, raw[:300])
+                    body = json.loads(raw)
+                    listing = body["unrecorded_files"]["listing"]
+                    self.assertEqual(listing["source"], "scan_job")
+                    self.assertGreaterEqual(listing["not_in_report"], len(analyzed_members))
+                    self.assertNotIn(webapp_api.REPORT_LISTING_NO_SCAN_ROOT, raw.decode("utf-8"))
+                    self.assertNotIn(self.NONE, raw.decode("utf-8"))
+                    self._check_signed(post, body, {row["path"]: row for row in rows}, result)
+        # the job's cancelled container posted with another status is not the job's row (400)
+        expanded = [dict(row, status="expanded") if row["path"] == "gen.zip" else row for row in rows]
+        for leg, status, raw in self._post_each({"items": expanded, "format": "json", "scan_job": job_id, "options": {"no_default_engine": "true"}}):
+            with self.subTest(leg=leg, case="posted expanded"):
+                self.assertEqual(status, 400, raw[:300])
+                self.assertIn(webapp_api.REPORT_ROW_CANCELLED_NOT_IN_JOB.split("「")[0], json.loads(raw)["error"])
+
+    def test_original_cases_stay_closed(self) -> None:
+        """R18-3 / R23-3 (a cancelled job's report is a partial result with the server's count, whatever the posted
+        summary), R19-13 (a changed file is 409), R23-5 (a left-out member is counted) and R24-1 (a cancelled job's
+        report with its cancelled container is 200 — the container excluded as cancelled, the count the job's)."""
+        job_id, result = self._job_with_partial_archive()
+        rows = list(result["items"])
+        for summary in (None, {"cancelled": False}, {"cancelled": True, "files_cancelled": 10**6}):
+            post: dict[str, Any] = {"items": rows, "format": "json", "scan_job": job_id, "options": {"no_default_engine": "true"}}
+            if summary is not None:
+                post["summary"] = summary
+            for leg, status, raw in self._post_each(post):
+                with self.subTest(leg=leg, summary=summary):
+                    self.assertEqual(status, 200, raw[:300])
+                    body = json.loads(raw)
+                    self.assertTrue(body["summary"]["cancelled"])
+                    self.assertEqual(body["summary"]["files_cancelled"], result["summary"]["files_cancelled"])
+                    self.assertEqual(body["unrecorded_files"]["listing"], {"source": "scan_job", "not_in_report": 0})
+                    self.assertIn({"path": "gen.zip", "marker": webapp_api.UNSIGNED_CLIENT_ROW_MARKER,
+                                   "reason": webapp_api.REPORT_ROW_CANCELLED}, body["excluded_items"])
+                    self.assertIn("gen.zip::a_gen.png", [row["path"] for row in body["items"]])
+                    self._check_signed(post, body, {row["path"]: row for row in rows}, result)
+        # R23-5: one member left out of a never-cancelled post is counted
+        posted = [row for path, row in self.full.items() if path != "gen.zip::a_gen.png"]
+        for leg, status, raw in self._post_each({"items": posted, "format": "json", "options": {"no_default_engine": "true"}}):
+            with self.subTest(leg=leg, case="R23-5"):
+                self.assertEqual(status, 200, raw[:300])
+                self.assertEqual(json.loads(raw)["unrecorded_files"]["listing"], {"source": "walk", "not_in_report": 1})
+        # R19-13: the archive rewritten after the scan — 409 for the cancelled job's report too
+        import zipfile
+
+        with zipfile.ZipFile(self.folder / "gen.zip", "a") as archive:
+            archive.writestr("late.png", b"x")
+        for leg, status, raw in self._post_each({"items": rows, "format": "json", "scan_job": job_id, "options": {"no_default_engine": "true"}}):
+            with self.subTest(leg=leg, case="R19-13"):
+                self.assertEqual(status, 409, raw[:300])
+                self.assertIn("gen.zip", [row["path"] for row in json.loads(raw)["changed_rows"]])
 
 
 class PathValuesWithNulAre400Test(unittest.TestCase):

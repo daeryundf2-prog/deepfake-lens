@@ -473,9 +473,20 @@ class WebReportSelectionTest(unittest.TestCase):
         """Merge of phase0 R24-1: in a report of a cancelled scan an archive row of status "cancelled" is
         excluded with REPORT_ROW_CANCELLED (its analyzed members are signed as rows); the preview, built
         without re-analysis, excludes it the same way — preview equals output."""
+        # Merge of phase0 R25-1 (adapted): a "cancelled" row is excluded only when the server's own cancelled scan
+        # job holds it as a cancelled container — the job is registered here; posted without it, it is a 400 for
+        # the preview as for every other format.
+        import time
+
         rows = [dict(row, status="cancelled") if row["path"] == "evid.zip" else row for row in self.rows]
         summary = dict(self.summary, cancelled=True, files_cancelled=1)
-        body = self._body(items=rows, summary=summary, exhibit_paths=[self.rows[0]["path"]], submitter_side="plaintiff")
+        no_job = webapp_api._report_payload(self._body(items=rows, summary=summary), "evidence-preview", default_folder=self.folder)
+        assert isinstance(no_job, dict)
+        self.assertEqual(webapp_api.report_error_status(no_job), 400, no_job)
+        result = {"scan_root": webapp_api.scan_root_text(self.folder.resolve()), "items": rows, "summary": summary}
+        webapp_api._SCAN_JOBS["gui-cancelled"] = {"status": "cancelled", "created": time.time(), "finished": time.time(), "result": result}
+        self.addCleanup(webapp_api._SCAN_JOBS.pop, "gui-cancelled", None)
+        body = self._body(items=rows, summary=summary, scan_job="gui-cancelled", exhibit_paths=[self.rows[0]["path"]], submitter_side="plaintiff")
         signed = webapp_api._report_payload(body, "evidence-json", default_folder=self.folder)
         preview = webapp_api._report_payload(body, "evidence-preview", default_folder=self.folder)
         assert isinstance(signed, dict) and isinstance(preview, dict), (signed, preview)
@@ -497,6 +508,13 @@ class WebReportSelectionTest(unittest.TestCase):
         hebrew, typed = case_lines("\u05e2 corp"), case_lines("\\u05e2 corp")
         self.assertNotEqual(hebrew[1], typed[1])
         self.assertIn("\\\\u05e2 corp", typed[1])
+        # Merge of phase0 R25-3: "|" prints as typed, and the table's 「작성자 및 일자」 cell shows the law firm in
+        # the same PDF form (it was drawn as typed).
+        self.assertIn("x|y", case_lines("x|y")[1])
+        out = webapp_api._report_payload(self._body(exhibit_paths=[self.rows[0]["path"]], submitter_side="plaintiff", law_firm="법무법인 \\u05e2"),
+                                         "evidence-preview", default_folder=self.folder)
+        assert isinstance(out, dict), out
+        self.assertTrue(out["entries"][0]["author_date"].startswith("법무법인 \\\\u05e2\n"), out["entries"][0]["author_date"])
 
     def test_excluded_rows_are_named_in_response_headers(self) -> None:
         """GUI-REV5 L-2: a successful report of any format names the rows it lists as 서명 제외

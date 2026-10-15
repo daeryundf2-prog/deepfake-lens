@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -15,12 +17,17 @@ from pathlib import Path
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND, raw_score_note
 from .error_text import exception_text, failure_reason
 from .model_adapter import ExternalModelAnalysis, analyze_external_model
-from .native_path import native_safe_path, scratch_dir
-from .native_stderr import FFMPEG_QUIET_ARGS, quiet_native_stderr
+from .native_path import NativePathError, native_safe_path, scratch_dir
+from .native_stderr import FFMPEG_QUIET_ARGS, FfmpegError, ffmpeg_error, ffmpeg_found_no_stream, quiet_native_stderr
 from .shutdown import ShuttingDown, run_child
 
 
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aac", ".wma", ".opus"}
+# R25-5 (round 25): formats libsndfile (soundfile, librosa's only decoder since librosa 1.0 dropped its
+# audioread fallback) cannot read. They are decoded by ffmpeg into a temporary WAV first — ffmpeg is the
+# dependency the video audio track (av_audio) already needs; without it the check is skipped "의존성 부재: ffmpeg".
+# They failed with "LibsndfileError: … (형식 인식 불가)" while the docs listed them as supported.
+FFMPEG_DECODED_AUDIO_EXTENSIONS = frozenset({".m4a", ".aac", ".wma"})
 DEFAULT_SAMPLE_RATE = 16000
 DEFAULT_SEGMENT_SECONDS = 30
 MAX_AUDIO_BYTES = 100 * 1024 * 1024  # 100 MB
@@ -218,7 +225,9 @@ def _error_analysis(message: str, *, model_analysis: ExternalModelAnalysis | Non
 def _features_failed_analysis(model_analysis: ExternalModelAnalysis | None, reason: str = "") -> AudioAnalysis:
     """Feature extraction failed; an available model score still counts."""
     if reason.startswith("의존성 부재"):
-        message = f"오디오 특징을 추출할 수 없습니다 ({reason}). librosa를 설치하세요."
+        # R25-5: name what is missing (ffmpeg for m4a/aac/wma) — the message said "librosa" whatever it was
+        missing = reason.split(":", 1)[1].strip() if ":" in reason else "librosa"
+        message = f"오디오 특징을 추출할 수 없습니다 ({reason}). {missing}을(를) 설치하세요."
     else:
         message = f"오디오 특징을 추출할 수 없습니다 ({reason or '원인 미상'})."
     model_signal = _model_evidence_signal(model_analysis)
@@ -290,6 +299,8 @@ def _extract_features_with_reason(path: Path, *, segment_seconds: int) -> tuple[
         import librosa  # noqa: F401
     except ImportError as exc:
         return None, f"의존성 부재: {exc.name or 'librosa'}"
+    if path.suffix.lower() in FFMPEG_DECODED_AUDIO_EXTENSIONS:
+        return _extract_features_through_ffmpeg(path, segment_seconds=segment_seconds)  # R25-5
     if not audio_worker.worker_available():
         return _extract_features_in_process(path, segment_seconds=segment_seconds)
     try:
@@ -304,6 +315,79 @@ def _extract_features_with_reason(path: Path, *, segment_seconds: int) -> tuple[
     if reply.get("features") is None:
         return None, "AnalyzerError: 디코딩된 오디오 샘플이 없습니다"
     return AudioFeatures(**reply["features"]), ""
+
+
+class AudioDecoderMissing(RuntimeError):
+    """R25-9: ffmpeg is not on PATH (``str()`` is the coverage reason "의존성 부재: ffmpeg")."""
+
+
+class NoAudioStream(RuntimeError):
+    """R25-9: ffmpeg found no audio stream in the file."""
+
+
+@contextmanager
+def ffmpeg_audio_wav(
+    path: Path, *, seconds: float | None = None, mono_rate: int | None = None, timeout: float = 120,
+) -> Iterator[Path]:
+    """R25-5 / R25-9 (round 25): the first audio stream of ``path`` decoded by ffmpeg into a temporary WAV.
+
+    librosa 1.0 decodes with soundfile (libsndfile) only — no m4a / aac / wma and no video container. The
+    file is handed to ffmpeg through :func:`native_safe_path` (``for_child``: an ASCII name, absolute or —
+    R24-3 / R25-4 — reachable in a working folder deeper than PATH_MAX). ``seconds`` limits the decoded span;
+    ``mono_rate`` writes 16-bit mono at that rate (else 32-bit float with the stream's channels and rate).
+    The WAV is removed when the block ends. Raises :class:`AudioDecoderMissing` (no ffmpeg),
+    :class:`NoAudioStream`, :class:`native_stderr.FfmpegError`, ``subprocess.TimeoutExpired``, ``OSError``
+    or :class:`native_path.NativePathError`.
+    """
+    import shutil
+    import tempfile
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise AudioDecoderMissing("의존성 부재: ffmpeg")
+    span = ["-t", str(seconds)] if seconds is not None else []
+    codec = ["-ac", "1", "-ar", str(mono_rate), "-c:a", "pcm_s16le"] if mono_rate else ["-c:a", "pcm_f32le"]
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=scratch_dir()) as tmp:
+        tmp_path = Path(tmp.name)
+    try:
+        with native_safe_path(path, for_child=True) as native_media:  # R12-1 / R23-1 / R25-4: a name ffmpeg opens
+            proc = run_child(  # R15-1: a tracked child, stopped by the shutdown cleanup
+                [ffmpeg, *FFMPEG_QUIET_ARGS, "-y", "-i", native_media, "-vn", "-map", "0:a:0", *span, *codec, str(tmp_path)],
+                capture_output=True, timeout=timeout,
+            )
+        if proc.returncode != 0:
+            if ffmpeg_found_no_stream(proc.stderr):
+                raise NoAudioStream("오디오 스트림 없음")
+            raise ffmpeg_error(proc.returncode, proc.stderr)
+        yield tmp_path
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+def _extract_features_through_ffmpeg(path: Path, *, segment_seconds: int) -> tuple[AudioFeatures | None, str]:
+    """R25-5 (round 25): an m4a / aac / wma file decoded by ffmpeg into a temporary 32-bit float WAV, then analyzed.
+
+    Only the first ``segment_seconds`` of the first audio stream are decoded (librosa.load reads the same span
+    of the other formats); channels and sample rate are kept, so librosa down-mixes and resamples it as it
+    does every other file (:func:`ffmpeg_audio_wav`). Without ffmpeg the check is skipped (``의존성 부재:
+    ffmpeg``); an ffmpeg failure is the failed check with its cause, naming the file.
+    """
+    import subprocess
+
+    try:
+        with ffmpeg_audio_wav(path, seconds=segment_seconds) as wav:
+            return _extract_features_with_reason(wav, segment_seconds=segment_seconds)
+    except ShuttingDown:
+        raise
+    except AudioDecoderMissing as exc:
+        return None, str(exc)
+    except (FfmpegError, NoAudioStream) as exc:
+        logger.info("audio decode by ffmpeg failed: %s", path, exc_info=True)
+        # the file is named like every decoder names it (R13-1: '<root>/녹음 1.m4a' in the reason)
+        return None, failure_reason(FfmpegError(f"오디오 파일을 디코딩할 수 없습니다: {os.fspath(path)!r} — {exc}"))
+    except (subprocess.TimeoutExpired, OSError, NativePathError) as exc:
+        logger.info("audio decode by ffmpeg failed: %s", path, exc_info=True)
+        return None, failure_reason(exc)
 
 
 def _extract_features_in_process(path: Path, *, segment_seconds: int) -> tuple[AudioFeatures | None, str]:
@@ -331,8 +415,9 @@ def _extract_features(path: Path, *, segment_seconds: int, raise_on_decode: bool
         return None
 
     try:
-        # R12-2: libsndfile/audioread raise UnicodeEncodeError on a non-UTF-8 name.
-        # R24-2: for_child — librosa's audioread fallback runs ffmpeg, which reads a relative "c:v.m4a" as a protocol.
+        # R12-2: libsndfile raises UnicodeEncodeError on a non-UTF-8 name.
+        # R24-2: for_child. R25-5 (round 25): correction — librosa 1.0 has no audioread fallback (it decodes with
+        # soundfile only); the formats libsndfile cannot read are decoded by ffmpeg first (_extract_features_through_ffmpeg).
         with native_safe_path(path, for_child=True) as native_audio:
             y, sr = librosa.load(native_audio, sr=DEFAULT_SAMPLE_RATE, duration=segment_seconds)
     except Exception:

@@ -330,12 +330,15 @@ def _composes_with_previous(char: str) -> bool:
     return unicodedata.category(char).startswith("M") or 0x1160 <= code <= 0x11FF or 0xD7B0 <= code <= 0xD7FF
 
 
-def _escaped_alone(char: str) -> bool:
-    """A character display_name writes as an escape by itself ("\\", "|", controls, invisible ones, other spaces)."""
-    return char in ("\\", "|") or escape_controls(char) != char or _invisible_or_space(char)
+def _escaped_alone(char: str, escape_pipe: bool = True) -> bool:
+    """A character display_name writes as an escape by itself ("\\", "|", controls, invisible ones, other spaces).
+
+    R25-3: "|" only with ``escape_pipe`` (:func:`pdf_field_text` prints it as it is).
+    """
+    return char == "\\" or (escape_pipe and char == "|") or escape_controls(char) != char or _invisible_or_space(char)
 
 
-def _lookalike_positions(text: str) -> set[int]:
+def _lookalike_positions(text: str, escape_pipe: bool = True) -> set[int]:
     """R18-11: indexes of characters written as escapes because of the run they are in.
 
     A run is a character and the marks / Hangul medial-final jamo after it.
@@ -355,14 +358,14 @@ def _lookalike_positions(text: str) -> set[int]:
                 # From the first character shown as an escape on, the rest of the run is escaped too.
                 escaped = _composes_with_previous(run[0])
                 for offset, char in enumerate(run):
-                    escaped = escaped or _escaped_alone(char)
+                    escaped = escaped or _escaped_alone(char, escape_pipe)
                     if escaped:
                         positions.add(start + offset)
             start = index
     return positions
 
 
-def display_name(text: object) -> str:
+def display_name(text: object, *, escape_pipe: bool = True) -> str:
     """A file name, path or echoed string as every text report shows it (R10-1, R11-4, R18-11).
 
     Controls and invisible characters become escapes (:func:`escape_controls`),
@@ -379,20 +382,39 @@ def display_name(text: object) -> str:
     space other than U+0020 (NBSP, U+3000 …), a default-ignorable code point
     (U+3164 HANGUL FILLER, U+115F, U+FE0F …) and a mark that would combine
     with an escape are written as escapes (:func:`_lookalike_positions`).
+
+    R25-3 (round 25): ``escape_pipe=False`` keeps "|" as it is — for text that is never a Markdown table cell
+    (:func:`pdf_field_text`). Still injective: every escape begins with a backslash and a literal backslash is
+    doubled, so "|" is an ordinary character there.
     """
     raw = str(text)
-    non_nfc = _lookalike_positions(raw)
+    non_nfc = _lookalike_positions(raw, escape_pipe)
     out: list[str] = []
     for index, char in enumerate(raw):
         if char == "\\":
             out.append("\\\\")
-        elif char == "|":
+        elif char == "|" and escape_pipe:
             out.append("\\|")
         elif char not in _CONTROL_ESCAPES and (index in non_nfc or _invisible_or_space(char)):
             out.append(_escape_code(ord(char)))
         else:
             out.append(escape_controls(char))
     return "".join(out)
+
+
+def pdf_field_text(text: object) -> str:
+    """R25-3 (round 25): an examiner-typed field (case number and name, parties, court, office, contact, exhibit
+    number) as the PDFs print it — :func:`display_name` without the Markdown "|" escape.
+
+    A PDF has no table syntax, so "x|y" prints as typed (it was "x\\|y"); every literal backslash is still
+    doubled and controls, invisible characters and lookalike spaces are still escapes, so a literal "\\u05e2"
+    never prints like the escape PdfLayout writes for a glyphless "ע" (R24-7) and two different values never
+    print alike. A run of characters not in NFC (an NFD "한국" copied from macOS) stays a run of ``\\uNNNN``
+    escapes: printing its NFC form would merge it with the NFC value and with other non-NFC spellings of the
+    same text (an LV+T "한" and an L+V+T "한"), so the PDF could no longer name the exact value the signed body
+    holds. The Markdown and JSON keep the value as typed.
+    """
+    return display_name(text, escape_pipe=False)
 
 
 # R11-7 (round 11): a name such as "![t](https://evil/t.png)" or

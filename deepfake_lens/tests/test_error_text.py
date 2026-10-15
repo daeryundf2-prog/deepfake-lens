@@ -163,6 +163,72 @@ class ScrubPathsTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_PIL, "Pillow not installed")
+class ReasonPathFormIsTheSameForEveryInvocationTest(unittest.TestCase):
+    """R25-7 (round 25): a decoder names the file as it was given, and only a root-relative or absolute name became
+    ``<root>/…`` — `scan /abs/case` and `scan case` wrote 「LibsndfileError: 오디오 파일을 열 수 없습니다(형식 인식 불가):
+    '<root>/a.m4a'」, `cd case; scan .` wrote 「…: 'a.m4a'」 for the same file (QA-OUT-4). The analyzed file's relative name
+    is now written like its absolute name before the root is scrubbed."""
+
+    def test_unit_relative_names_of_the_analyzed_file(self) -> None:
+        import os
+
+        from deepfake_lens.error_text import path_scrub_file
+
+        with tempfile.TemporaryDirectory() as tmp:
+            previous = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with path_scrub_root("."), path_scrub_file("a.wav"):
+                    self.assertEqual(scrub_paths("Error opening 'a.wav': Format not recognised."),
+                                     "Error opening '<root>/a.wav': Format not recognised.")
+                    self.assertEqual(scrub_paths("a.wav: bare name"), "a.wav: bare name")  # unquoted bare name: the name itself
+                    self.assertEqual(scrub_paths("'xa.wav' 'sub/a.wav'"), "'xa.wav' 'sub/a.wav'")  # other files untouched
+                with path_scrub_root("case"), path_scrub_file("case/a.wav"):
+                    self.assertEqual(scrub_paths("cannot open case/a.wav now"), "cannot open <root>/a.wav now")
+                with path_scrub_root("."), path_scrub_file("./c:a.wav"):
+                    self.assertEqual(scrub_paths("'./c:a.wav' and 'c:a.wav'"), "'<root>/c:a.wav' and '<root>/c:a.wav'")
+            finally:
+                os.chdir(previous)
+
+    def test_scan_reasons_are_the_same_from_every_working_folder(self) -> None:
+        import contextlib
+        import os
+
+        from deepfake_lens.cli import main as cli_main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            case = base / "case"
+            case.mkdir()
+            garbage = bytes(range(256)) * 12
+            for name in ("a.wav", "c:a.wav", "b.png", "d.jpg"):
+                (case / name).write_bytes(garbage)
+
+            def reasons(folder: str, cwd: Path) -> dict[str, list[str]]:
+                out = io.StringIO()
+                previous = os.getcwd()
+                os.chdir(cwd)
+                try:
+                    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                        self.assertEqual(cli_main(["scan", folder, "--format", "json"]), 0)
+                finally:
+                    os.chdir(previous)
+                rows = json.loads(out.getvalue())["items"]
+                return {
+                    row["path"]: [row.get("error") or "", *(entry.get("reason", "") for entry in (row.get("result") or {}).get("coverage", []))]
+                    for row in rows
+                }
+
+            absolute = reasons(str(case), base)
+            self.assertEqual(reasons("case", base), absolute)
+            self.assertEqual(reasons(".", case), absolute)
+            self.assertEqual(reasons("./", case), absolute)
+            text = json.dumps(absolute, ensure_ascii=False)
+            self.assertNotIn(str(base), text)
+            if HAVE_PIL:
+                self.assertIn("'<root>/b.png'", text)
+
+
 class UnreadableFolderScanTest(unittest.TestCase):
     """N1: a scan of unreadable files reports causes without any absolute path."""
 

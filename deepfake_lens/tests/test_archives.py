@@ -40,9 +40,89 @@ class ArchiveFormatTests(unittest.TestCase):
         self.assertIsNone(_safe_member_name("a/../../evil.png"))
         self.assertIsNone(_safe_member_name("/abs/path.png"))
         self.assertIsNone(_safe_member_name("C:/win/evil.png"))
-        self.assertIsNone(_safe_member_name("file.txt:ads"))
+        # R25-6 (round 25): this pinned the defect — "file.txt:ads" was refused everywhere; on POSIX ":" is an ordinary
+        # character, so it is refused only where it cannot be part of a file name (Windows: an NTFS data stream).
+        with patch("deepfake_lens.archives._colon_names_unsafe", return_value=True):
+            self.assertIsNone(_safe_member_name("file.txt:ads"))
+        with patch("deepfake_lens.archives._colon_names_unsafe", return_value=False):
+            self.assertEqual(_safe_member_name("file.txt:ads"), "file.txt:ads")
         self.assertIsNone(_safe_member_name("CON"))
         self.assertIsNone(_safe_member_name("aux.png"))
+
+    def test_colon_names_are_classified_precisely(self):
+        """R25-6 (round 25): every member name with ":" as its second character was refused as 「절대 경로 멤버(대상 폴더 밖
+        쓰기 시도)」 (zip-slip) — "c:v.png", "2026:10:15.png" (a macOS date name), "ab:c.png", "dir:x/y.png" alike. Only a real
+        absolute (POSIX, drive "C:/" or "C:\\", UNC) or traversal form is refused now, each with its own reason; on POSIX
+        the others are ordinary names, on Windows they are refused as names Windows cannot write."""
+        from deepfake_lens.archives import _unsafe_name_reason
+
+        ordinary = ["c:v.png", "2026:10:15.png", "ab:c.png", "dir:x/y.png", "x:y/z.png"]
+        with patch("deepfake_lens.archives._colon_names_unsafe", return_value=False):
+            for name in ordinary:
+                self.assertEqual(_safe_member_name(name), name, name)
+        with patch("deepfake_lens.archives._colon_names_unsafe", return_value=True):
+            for name in ordinary:
+                self.assertIsNone(_safe_member_name(name), name)
+                self.assertEqual(_unsafe_name_reason(name), "Windows에서 쓸 수 없는 이름(':' — 드라이브 문자·NTFS 대체 데이터 스트림)")
+        refused = {
+            "/abs.png": "절대 경로 멤버(대상 폴더 밖 쓰기 시도)",
+            "c:/abs.png": "드라이브 절대 경로 멤버(C:\\ 형식 — 대상 폴더 밖 쓰기 시도)",
+            "C:\\win.png": "드라이브 절대 경로 멤버(C:\\ 형식 — 대상 폴더 밖 쓰기 시도)",
+            "\\\\srv\\share\\x.png": "UNC 경로 멤버(\\\\서버\\공유 — 대상 폴더 밖 쓰기 시도)",
+            "../e.png": "경로 이탈 멤버('..' — 대상 폴더 밖 쓰기 시도)",
+            "a/../../e.png": "경로 이탈 멤버('..' — 대상 폴더 밖 쓰기 시도)",
+        }
+        for name, reason in refused.items():
+            with self.subTest(name=name):
+                self.assertIsNone(_safe_member_name(name))
+                self.assertEqual(_unsafe_name_reason(name), reason)
+
+
+class ColonMemberNamesScanTest(unittest.TestCase):
+    """R25-6 (round 25), end to end: the verifier's zip and tar — 'c:v.png', '2026:10:15.png', 'ab:c.png', 'dir:x/y.png',
+    'c:/abs.png', 'C:\\win.png', 'ok.png' — analyzed only ok.png and refused six with 「c:v.png — 절대 경로 멤버(대상 폴더
+    밖 쓰기 시도)」. On POSIX the four ordinary names are member rows now; the drive forms, an absolute and a '..' member
+    are still refused with their own reasons, and nothing is written outside the extraction folder."""
+
+    NAMES = ["c:v.png", "2026:10:15.png", "ab:c.png", "dir:x/y.png", "c:/abs.png", "C:\\win.png", "ok.png", "/abs/evil.png", "../escape.png"]
+
+    def setUp(self) -> None:
+        import shutil
+        import tempfile
+
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def _check(self, archive_name: str) -> None:
+        _, items = scan_directory(self.tmp)
+        members = sorted(item.member for item in items if item.container == archive_name and item.member is not None)
+        container = next(item for item in items if item.path == archive_name)
+        assert container.result is not None
+        reasons = sorted(entry.reason for entry in container.result.coverage if entry.check == "archive_member")
+        self.assertEqual(members, ["2026:10:15.png", "ab:c.png", "c:v.png", "dir:x/y.png", "ok.png"])
+        self.assertEqual(reasons, sorted([
+            "../escape.png: 경로 이탈 멤버('..' — 대상 폴더 밖 쓰기 시도)",
+            "/abs/evil.png: 절대 경로 멤버(대상 폴더 밖 쓰기 시도)",
+            "C:\\win.png: 드라이브 절대 경로 멤버(C:\\ 형식 — 대상 폴더 밖 쓰기 시도)",
+            "c:/abs.png: 드라이브 절대 경로 멤버(C:\\ 형식 — 대상 폴더 밖 쓰기 시도)",
+        ]))
+        self.assertFalse((self.tmp.parent / "escape.png").exists())
+        self.assertEqual(sorted(p.name for p in self.tmp.iterdir()), [archive_name])  # nothing extracted next to it
+
+    @unittest.skipIf(__import__("os").name == "nt", "POSIX file names")
+    def test_zip(self) -> None:
+        make_zip(self.tmp / "m.zip", {name: b"\x89PNG\r\n\x1a\n" + bytes(64) for name in self.NAMES})
+        self._check("m.zip")
+
+    @unittest.skipIf(__import__("os").name == "nt", "POSIX file names")
+    def test_tar(self) -> None:
+        with tarfile.open(self.tmp / "m.tar", "w") as archive:
+            for name in self.NAMES:
+                data = b"\x89PNG\r\n\x1a\n" + bytes(64)
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
+        self._check("m.tar")
 
 
 class ExtractionTests(unittest.TestCase):

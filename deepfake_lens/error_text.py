@@ -89,6 +89,29 @@ def path_scrub_root(*roots: Path | str | None) -> Iterator[None]:
         _SCRUB_ROOTS.reset(token)
 
 
+# R25-7 (round 25): the file being analyzed, as (the name it was opened by, its absolute name) pairs. A decoder
+# names the file as it was given — "a.wav" for `cd case; scan .`, "case/a.wav" for `scan case` — and only a
+# root-relative or absolute name became "<root>/a.wav": the same file's reason read 'a.wav' or '<root>/a.wav'
+# by invocation. scrub_paths writes a registered relative name as its absolute name first.
+_SCRUB_FILES: contextvars.ContextVar[tuple[tuple[str, str], ...]] = contextvars.ContextVar("deepfake_lens_scrub_files", default=())
+
+
+@contextlib.contextmanager
+def path_scrub_file(path: Path | str) -> Iterator[None]:
+    """R25-7: register the analyzed file so a reason naming it by a relative name names it like an absolute one."""
+    raw = os.fspath(path)
+    pairs: list[tuple[str, str]] = []
+    if raw and not os.path.isabs(raw):
+        with contextlib.suppress(OSError, RuntimeError, ValueError):
+            absolute = os.path.abspath(raw)
+            pairs = [(form, absolute) for form in {raw, os.path.normpath(raw)} if form not in ("", ".")]
+    token = _SCRUB_FILES.set(_SCRUB_FILES.get() + tuple(sorted(pairs, key=lambda pair: len(pair[0]), reverse=True)))
+    try:
+        yield
+    finally:
+        _SCRUB_FILES.reset(token)
+
+
 # R13-1 (round 13): repr() — how soundfile, Pillow and the staged-name
 # restore quote a path — writes an undecodable byte of a POSIX name (a lone
 # surrogate, PEP 383) as the six characters "\\udcc1"; the row's path holds
@@ -118,6 +141,15 @@ def scrub_paths(text: str) -> str:
     # and a quoted non-UTF-8 name reads as in its row (before the root is
     # matched, so a non-UTF-8 scan root is recognised too).
     text = unescape_surrogates(restore_original_names(text))
+    for given, absolute in _SCRUB_FILES.get():
+        # R25-7: the analyzed file's relative name, as a whole path (not the tail of a longer one). A bare file name
+        # ("a.wav") only when quoted as decoders quote the name they were given (repr) — unquoted it may be the
+        # name itself, which a reason of an absolute invocation also prints bare.
+        if "/" in given or os.sep in given:
+            pattern = rf"(?<![\w.~/\\-]){re.escape(given)}(?=$|[{_PATH_STOP}])"
+            text = re.sub(pattern, lambda _: absolute, text)
+        else:
+            text = re.sub(rf"(['\"]){re.escape(given)}\1", lambda match: match.group(1) + absolute + match.group(1), text)
     for root in _SCRUB_ROOTS.get():
         # A root is replaced only as a whole path component: "/x/case" must
         # not turn "/x/case2/a.jpg" into "<root>2/a.jpg".

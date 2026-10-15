@@ -151,6 +151,48 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 11,
+      "reason": "R25-5: m4a·aac·wma를 ffmpeg로 임시 WAV로 디코딩한 뒤 오디오 특징 검사(이전에는 항상 LibsndfileError 실패), 의존성 부재 메시지가 빠진 의존성 이름을 씀(「librosa을(를) 설치하세요」)",
+      "sha256": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+      "sets": {
+        "stdlib": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+        "full-extras": "ece030016587b55c035311a0502994d510f0fc02294553470a0fe35cdb844a59"
+      },
+      "constants_sha256": "379d6f9f707a3c0e87807041bd6fadfdd2d6999f41caa42a58eaf09a2907100e",
+      "constants_count": 56,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
+    },
+    {
+      "generation": 12,
+      "reason": "R25-7: 분석한 파일을 상대 이름으로 적은 사유(cd case; scan .의 'a.wav')를 절대·루트 기준 실행과 같은 <root>/a.wav로 씀 — 그 실행에서 캐시된 세대 11 행은 'a.wav'였음",
+      "sha256": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+      "sets": {
+        "stdlib": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+        "full-extras": "ece030016587b55c035311a0502994d510f0fc02294553470a0fe35cdb844a59"
+      },
+      "constants_sha256": "379d6f9f707a3c0e87807041bd6fadfdd2d6999f41caa42a58eaf09a2907100e",
+      "constants_count": 56,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

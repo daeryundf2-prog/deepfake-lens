@@ -390,6 +390,11 @@ class PdfGlyphlessCharactersTest(unittest.TestCase):
                         "scan", str(folder), "--forensic-pdf-out", str(forensic), "--exhibit-no", value, "--law-firm", value, "--contact", value,
                     ]), 0)
                     texts.setdefault("cli forensic", []).append(self._pdf_text(forensic))
+                    scan_statement = base / f"scan-statement{index}.pdf"  # R25-3: scan's evidence statement too
+                    self.assertEqual(cli_main([
+                        "scan", str(folder), "--evidence-statement-pdf-out", str(scan_statement), "--law-firm", value, "--contact", value,
+                    ]), 0)
+                    texts.setdefault("cli scan evidence-statement", []).append(self._pdf_text(scan_statement))
             out = io.StringIO()
             with env, contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(cli_main(["scan", str(folder), "--format", "json"]), 0)
@@ -413,6 +418,49 @@ class PdfGlyphlessCharactersTest(unittest.TestCase):
                 self.assertNotIn("\\\\u05e2corp", flat_first)
                 self.assertIn("\\\\u05e2corp", flat_second)  # the literal backslash doubled: the two PDFs differ
                 self.assertNotEqual(flat_first.count("\\\\u05e2"), flat_second.count("\\\\u05e2"))
+                # R25-3 (round 25): every print of the literal value has its backslash doubled — the evidence statement's
+                # 「작성자 및 일자」 cell drew the law firm as typed, so it printed both values as "\u05e2 corp"
+                self.assertEqual(re.findall(r"(?<!\\)\\u05e2corp", flat_second), [], "a literal value printed with one backslash")
+
+    def test_pipes_print_as_typed_and_nfd_stays_distinct_in_the_case_fields(self) -> None:
+        """R25-3 (round 25): the PDFs printed a case field's "|" as the Markdown escape "\\|" (a PDF has no table) — it now
+        prints as typed, and a literal "\\|" still prints with its backslash doubled. An NFD value (macOS) stays escapes,
+        distinct from the NFC value (normalizing would print both alike — documented in result_text.pdf_field_text)."""
+        import contextlib
+        import os
+        import unicodedata
+        from unittest import mock
+
+        from deepfake_lens.cli import main as cli_main
+        from deepfake_lens.result_text import pdf_field_text
+
+        nfc = "한국 법무법인"
+        nfd = unicodedata.normalize("NFD", nfc)
+        self.assertEqual(pdf_field_text("x|y"), "x|y")
+        self.assertEqual(pdf_field_text("x\\|y"), "x\\\\|y")
+        self.assertNotEqual(pdf_field_text(nfd), pdf_field_text(nfc))
+        self.assertEqual(pdf_field_text(nfc), nfc)
+        from deepfake_lens.reports import SCAN_ROOT_LABEL, scan_root_line
+
+        self.assertEqual(scan_root_line({"scan_root": "case\\u05e2"}), f"{SCAN_ROOT_LABEL}: case\\\\u05e2")  # the folder name too
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            sample = base / "a.txt"
+            sample.write_text("사람이 쓴 짧은 메모입니다. " * 4, encoding="utf-8")
+            texts = []
+            with mock.patch.dict(os.environ, {"HOME": str(base / "home")}), contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                for index, firm in enumerate(("x|y 법인", nfd, nfc)):
+                    out = base / f"s{index}.pdf"
+                    self.assertEqual(cli_main(["evidence-statement", str(sample), "--pdf-out", str(out), "--law-firm", firm,
+                                               "--plaintiff", firm]), 0)
+                    texts.append("".join(self._pdf_text(out).split()))
+        self.assertIn("x|y법인", texts[0])
+        self.assertNotIn("x\\|y", texts[0])
+        self.assertEqual(texts[0].count("x|y법인"), 4)  # plaintiff, header, the 작성자 cell, signoff
+        self.assertNotIn("한국법무법인", texts[1])
+        self.assertIn("\\u1112\\u1161\\u11ab", texts[1])
+        self.assertEqual(texts[2].count("한국법무법인"), 4)
 
     def test_every_pdf_path_prints_distinct_readable_names(self) -> None:
         import contextlib
