@@ -1251,6 +1251,22 @@ class ApiServerFilePathConfinementTest(ApiServerConfinementUnitTest):
         self.assertIn("event: result", res.text)
         self.assertIn("memo.txt", res.text)
 
+    def test_stream_recursive_takes_the_true_false_values_of_every_option(self) -> None:
+        """R24-8 (round 24): ``recursive`` of /api/scan/stream was a pydantic bool — ``t``/``y``/``n`` were 200 and an unknown
+        value 422, while every other true/false option (R23-13) is 400 outside true/false, 1/0, yes/no, on/off, empty."""
+        (self.root / "deeper").mkdir(exist_ok=True)
+        (self.root / "deeper" / "inner-note.txt").write_text("하위 폴더의 메모입니다.", encoding="utf-8")
+        for value, recursive in (("TRUE", True), (" yes ", True), ("1", True), ("on", True), ("", False), ("off", False), ("No", False)):
+            with self.subTest(value=value):
+                res = self._post("/api/scan/stream", {"directory": str(self.root), "recursive": value})
+                self.assertEqual(res.status_code, 200, res.text[:300])
+                self.assertEqual("inner-note.txt" in res.text, recursive)
+        for value in ("t", "f", "y", "n", "maybe", "2", "None"):
+            with self.subTest(value=value):
+                res = self._post("/api/scan/stream", {"directory": str(self.root), "recursive": value})
+                self.assertEqual(res.status_code, 400, res.text[:300])
+                self.assertIn("recursive은(는) 참·거짓 값이어야 합니다", res.json()["detail"])
+
 
 HAVE_PYMUPDF = importlib.util.find_spec("pymupdf") is not None
 
@@ -3071,6 +3087,9 @@ class ErrorTableEveryRowTest(unittest.TestCase):
             # R23-13 (round 23): an unknown true/false value was read as false (signed "아니오" in a report).
             + [case(s, "GET", f"/api/scan?folder={q(f)}&{key}=maybe", 400, f"{key}은(는) 참·거짓 값이어야 합니다")
                for s in both for key in ("recursive", "dedupe", "heatmaps", "deep_signals", "no_default_engine", "async")]
+            # R24-8 (round 24): /api/scan/stream's recursive was a pydantic bool — "t" was 200 and "maybe" a 422.
+            + [case("api", "POST", f"/api/scan/stream?directory={q(f)}&recursive={value}", 400, "recursive은(는) 참·거짓 값이어야 합니다")
+               for value in ("maybe", "t", "y", "n", "2")]
             # R23-9 (round 23): a name longer than the file system allows was a 500 (ENAMETOOLONG from is_file()).
             + [case(s, "GET", f"/api/scan?folder={q(f)}&{key}={'m' * 5000}", 400, f"{key}을(를) 모델 디렉터리에서 찾을 수 없습니다")
                for s in both for key in ("model_path", "fusion_profile")],

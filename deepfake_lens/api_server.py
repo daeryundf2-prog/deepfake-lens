@@ -874,9 +874,17 @@ def create_app(
     async def scan_stream(
         request: Request,
         directory: str,
-        recursive: bool = False,
+        recursive: str = "false",
         max_files: int = 200,
     ):
+        # R24-8 (round 24): the same true/false values as every other option (R23-13, analysis_api.parse_flag) — 400
+        # for any other value. As a pydantic bool it took "t"/"y"/"n"/… (200) and answered an unknown value 422.
+        from .analysis_api import InvalidOption, parse_flag
+
+        try:
+            recursive_flag = parse_flag(recursive, "recursive")
+        except InvalidOption as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         if max_files < 1:
             # Y8: a zero/negative limit is refused (400), not clamped to 1.
             from .analysis_api import MAX_FILES_TOO_SMALL
@@ -913,7 +921,7 @@ def create_app(
 
             yield ("job", {"job_id": job_id})
             options = dataclasses.replace(
-                _api_options(), recursive=recursive, max_files=max(1, min(max_files, MAX_STREAM_SCAN_FILES)),
+                _api_options(), recursive=recursive_flag, max_files=max(1, min(max_files, MAX_STREAM_SCAN_FILES)),
             )
             events: queue.Queue[Any] = queue.Queue()
             outcome: dict[str, Any] = {}
