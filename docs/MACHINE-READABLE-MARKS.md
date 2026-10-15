@@ -72,3 +72,22 @@ IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "�
 - 범위 밖: 짧은 변 256px 미만(SDXL 워터마커가 표식을 넣지 않음) → `skipped`; 8천만 화소 초과 → `skipped`.
 - 측정: 실사 240장 우연 일치 0건(95% 상한 1.5%), 무손실 재검출률 29.6% — `docs/WATERMARK-MEASUREMENTS.md`.
 
+## 4. Adobe TrustMark (`watermark_trustmark`)
+
+- 디코더: TrustMark JS 디코더가 쓰는 ONNX(`trustmark-decoder_Q/P/C.onnx`, MIT, `cai-watermark.adobe.net`), sha256은 `models/assets.json`.
+  `scripts/fetch_watermark_models.py`가 받아 sha256을 확인한다. 로드는 검증한 바이트로만(`model_assets.verified_bytes`), onnxruntime 1스레드.
+  BCH 오류 정정은 패키지 원본(`vendor_trustmark_bch.py`, MIT, 수정 없음).
+- coverage: onnxruntime 없음 → `skipped` 「의존성 부재: onnxruntime」; 가중치 없음 → `skipped` 「가중치 없음: … — scripts/fetch_watermark_models.py…」;
+  핀과 다른 파일 → `failed` 「AssetPinError: 미고정 모델: …」; 짧은 변 128px 미만 → `skipped`.
+- **근거**:
+  - BCH 통과 패킷 = 중립·약 사실 「TrustMark 워터마크 판독(변형 V)」(스키마·페이로드·소프트 바인딩 표기 `"<스키마>*<비트>"`, 측정 오탐률 문구 포함).
+    TrustMark는 사진 출처 표시에도 쓰이므로 AI 생성 사실이 아니다. 실사 오탐률이 변형별 1.3–2.5%라 이 판독만으로는 표식 존재도 확정하지 않는다.
+  - 판독값이 같은 변형(`com.adobe.trustmark.V`)의 C2PA 소프트 바인딩 값과 같고 매니페스트가 신뢰 서명자로 검증(하드 바인딩 불일치만 허용)되면
+    중립·중 「TrustMark–C2PA 소프트 바인딩 교차검증 일치」.
+  - 그 상태에서 **파일 바이트가 서명 후 바뀌어(하드 바인딩 불일치) 매니페스트 자체의 C2PA 항목이 결론을 낼 수 없을 때** 매니페스트가 생성형
+    출처(또는 AI 공개)를 선언하면 결정적·생성·강 「C2PA 소프트 바인딩으로 확인된 생성형 AI 출처 선언」 — 판정과 연결되는 유일한 경로.
+  - 매니페스트의 TrustMark 소프트 바인딩과 판독값이 다르면 중립 사실 「…불일치」. 서명이 신뢰되지 않거나 assertion이 변조(hashedURI 불일치)되면 연결하지 않는다.
+  - 페이로드로 매니페스트를 찾는 온라인 조회(소프트 바인딩 resolver)는 하지 않는다.
+- 픽스처: `fixtures/trustmark/`(재현 `scripts/build_trustmark_fixture.py --encoder <encoder_Q.onnx 폴더>`): 워터마크만, 서명+일치, 서명+다른 ID,
+  서명 후 픽셀 변경(하드 바인딩 불일치·소프트 바인딩 일치).
+

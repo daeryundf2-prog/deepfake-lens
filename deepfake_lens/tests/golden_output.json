@@ -235,6 +235,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 15,
+      "reason": "techniques-2026 item 4: 모든 이미지 행에 watermark_trustmark 검사(TrustMark Q·P·C ONNX 디코더; 기준 환경에는 onnxruntime이 없어 「의존성 부재: onnxruntime」로 건너뜀) — BCH 통과 패킷은 중립 사실, C2PA 소프트 바인딩 교차검증만 결론과 연결",
+      "sha256": "069039b7325745145cebb71f8e6cdab9755de56890bf19328781e9d7da846f06",
+      "sets": {
+        "stdlib": "069039b7325745145cebb71f8e6cdab9755de56890bf19328781e9d7da846f06",
+        "full-extras": "8c7d61f2d4e0cb5a84cff2ef74c985d46a424a015e8fb87a9930bf1c49625ce0"
+      },
+      "constants_sha256": "9e61db393feef304b21dcf41d6df10146cee2242f30aa26151c3f02a73fadc73",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

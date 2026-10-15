@@ -73,3 +73,15 @@ the pin.
   (`pipelines/stable_diffusion_xl/watermark.py`, Apache-2.0) and
   Stability-AI/generative-models (`sgm/inference/helpers.py`, MIT).
 
+## TrustMark watermark decoders (techniques-2026)
+
+- `trustmark-decoder_Q.onnx`, `trustmark-decoder_P.onnx`,
+  `trustmark-decoder_C.onnx` — Adobe TrustMark ONNX decoders from
+  https://cai-watermark.adobe.net/watermarking/trustmark-models/decoder_{Q,P,C}.onnx
+  (retrieved 2026-10-15), **MIT** (adobe/trustmark: "The MIT license covers
+  both the code in this repo and the model files"). Not committed; fetched
+  by `scripts/fetch_watermark_models.py` and pinned by sha256 in
+  `assets.json`.
+- `deepfake_lens/vendor_trustmark_bch.py` is `trustmark/bchecc.py` from the
+  trustmark 0.9.2 sdist, unchanged — Copyright 2023 Adobe, **MIT**.
+

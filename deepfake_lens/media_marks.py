@@ -190,10 +190,144 @@ def _sdxl_layer(path: Path, layers: MarkLayers) -> None:
     layers.coverage.append(entry)
 
 
+# --- Adobe TrustMark (item 4) ----------------------------------------------------
+
+TRUSTMARK_ALGORITHM_LABEL = "TrustMark(어도비, 변형 Q/P/C)"
+TRUSTMARK_FOUND_TITLE = "TrustMark 워터마크 판독"
+TRUSTMARK_CROSS_MATCH_TITLE = "TrustMark–C2PA 소프트 바인딩 교차검증 일치"
+TRUSTMARK_CROSS_LINKED_TITLE = "C2PA 소프트 바인딩으로 확인된 생성형 AI 출처 선언"
+# Measured on 240 Wikimedia Commons camera photos (scripts/measure_watermark_fpr.py,
+# docs/WATERMARK-MEASUREMENTS.md). Quoted in every TrustMark finding.
+TRUSTMARK_FPR_NOTE = (
+    "워터마크가 없는 실사 사진 240장에서 BCH 검사를 통과한 오탐: Q 5장(2.1%), P 3장(1.3%), C 6장(2.5%) — 대부분 BCH_3 스키마"
+    "(측정 2026-10-15, docs/WATERMARK-MEASUREMENTS.md); 이 판독만으로는 표식 존재도 확정되지 않으며 매니페스트 교차검증 일치가 있을 때만 결합 근거입니다"
+)
+# Failure codes that only say the asset bytes changed (hard binding) — the claim
+# signature and the assertions (the soft-binding value among them) are intact.
+HARD_BINDING_MISMATCH_CODES = (
+    "assertion.dataHash.mismatch", "assertion.bmffHash.mismatch", "assertion.boxesHash.mismatch", "assertion.collectionHash.mismatch",
+)
+
+
+def _signature_ok(validation: dict[str, object] | None) -> bool:
+    """The manifest's claim and assertions validated under a trusted signer (asset hash may differ)."""
+    if not validation or not validation.get("present") or not validation.get("trusted"):
+        return False
+    return all(code in HARD_BINDING_MISMATCH_CODES for code in _failure_codes(validation))
+
+
+def _failure_codes(validation: dict[str, object]) -> list[str]:
+    raw = validation.get("failure_codes")
+    return [code for code in raw if isinstance(code, str)] if isinstance(raw, (list, tuple)) else []
+
+
+def _hard_binding_changed(validation: dict[str, object]) -> bool:
+    return any(code in HARD_BINDING_MISMATCH_CODES for code in _failure_codes(validation))
+
+
+def _trustmark_bindings(validation: dict[str, object] | None) -> list[tuple[str, list[str]]]:
+    raw = (validation or {}).get("soft_bindings")
+    out: list[tuple[str, list[str]]] = []
+    for item in raw if isinstance(raw, list) else []:
+        if isinstance(item, dict) and str(item.get("alg", "")).startswith("com.adobe.trustmark."):
+            out.append((str(item["alg"]), [str(value) for value in item.get("values") or []]))
+    return out
+
+
+def trustmark_evidence(readings: list[Any], validation: dict[str, object] | None) -> list[EvidenceItem]:
+    """Facts for decoded TrustMark packets and the C2PA soft-binding cross-check (item 4).
+
+    - every BCH-valid packet: a neutral, weak fact (presence + payload);
+    - payload == the ``c2pa.soft-binding`` value of the same variant in a manifest
+      whose signature validated under a trusted signer: a neutral, moderate
+      "교차검증 일치" — and, when the asset bytes changed after signing (hard
+      binding mismatch, so the manifest's own C2PA item cannot decide) while the
+      manifest declares generative AI, a deterministic synthetic strong item:
+      the watermark binds this content to that signed declaration;
+    - a TrustMark soft binding whose value no packet matches: a neutral fact.
+    """
+    from .evidence_rules import CATEGORY_GENERATIVE, _c2pa_declarations, _disclosure_text
+
+    items: list[EvidenceItem] = []
+    for reading in readings:
+        items.append(EvidenceItem(
+            f"{TRUSTMARK_FOUND_TITLE}(변형 {reading.variant})",
+            f"TrustMark {reading.variant} 디코더가 BCH 검사를 통과한 패킷을 읽었습니다: 스키마 {reading.schema_name}, "
+            f"페이로드 {reading.payload}(소프트 바인딩 표기 「{reading.soft_binding_value}」). 워터마크가 들어 있다는 사실이며 "
+            "AI 생성 사실이 아닙니다(TrustMark는 사진 출처 표시에도 쓰임). 페이로드가 가리키는 매니페스트를 찾는 온라인 조회는 하지 않습니다. "
+            f"{TRUSTMARK_FPR_NOTE}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, WATERMARK_LAYER,
+        ))
+    bindings = _trustmark_bindings(validation)
+    if not bindings or validation is None:
+        return items
+    matched = False
+    for reading in readings:
+        alg = f"com.adobe.trustmark.{reading.variant}"
+        if not any(binding_alg == alg and reading.soft_binding_value in values for binding_alg, values in bindings):
+            continue
+        matched = True
+        signed = _signature_ok(validation)
+        items.append(EvidenceItem(
+            TRUSTMARK_CROSS_MATCH_TITLE if signed else f"{TRUSTMARK_CROSS_MATCH_TITLE}(서명 검증 미완료)",
+            f"디코드한 TrustMark {reading.variant} 값 「{reading.soft_binding_value}」이(가) C2PA 매니페스트의 소프트 바인딩"
+            f"(alg {alg}) 값과 같습니다. "
+            + ("신뢰 서명자의 서명이 유효한 매니페스트이므로 워터마크가 이 콘텐츠를 그 매니페스트에 결합합니다."
+               if signed else "매니페스트 서명이 신뢰·검증되지 않아 결합 근거로 쓰지 않습니다."),
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.MODERATE if signed else EvidenceStrength.WEAK,
+            WATERMARK_LAYER,
+        ))
+        generative = [d.code for d in _c2pa_declarations(validation, "action") if d.category == CATEGORY_GENERATIVE]
+        disclosure = _disclosure_text(validation)
+        if signed and _hard_binding_changed(validation) and (generative or disclosure):
+            declared = ", ".join(generative) + ("; " if generative and disclosure else "") + (f"AI 공개 assertion({disclosure})" if disclosure else "")
+            items.append(EvidenceItem(
+                TRUSTMARK_CROSS_LINKED_TITLE,
+                f"파일 바이트는 서명 이후 바뀌었으나(하드 바인딩 불일치), 신뢰 서명자의 유효한 매니페스트가 선언한 소프트 바인딩 값과 "
+                f"이 이미지에서 디코드한 TrustMark {reading.variant} 값이 정확히 같습니다. 그 매니페스트는 {declared}를 선언합니다 — "
+                "워터마크로 결합된 서명된 생성형 AI 선언입니다(C2PA 2.x 소프트 바인딩 검증).",
+                EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, WATERMARK_LAYER,
+            ))
+    if not matched:
+        listed = "; ".join(f"{alg}: " + ", ".join(f"「{v}」" for v in values[:3]) for alg, values in bindings)
+        decoded = ", ".join(f"{r.variant} 「{r.soft_binding_value}」" for r in readings) or "판독된 TrustMark 없음"
+        items.append(EvidenceItem(
+            "TrustMark–C2PA 소프트 바인딩 불일치",
+            f"매니페스트가 TrustMark 소프트 바인딩({listed})을 선언하나 이 이미지에서 같은 값을 읽지 못했습니다({decoded}). "
+            "재압축·크기 조정으로 워터마크가 손상되었거나, 매니페스트가 다른 콘텐츠의 것일 수 있습니다 — 사실로만 기록합니다.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, WATERMARK_LAYER,
+        ))
+    return items
+
+
+def _trustmark_layer(path: Path, validation: dict[str, object] | None, layers: MarkLayers) -> None:
+    from .checks import run_check
+    from .wm_trustmark import decode_image
+
+    outcome, entry = run_check(TRUSTMARK_CHECK, lambda: decode_image(path))
+    if outcome is None:
+        layers.findings.append(MarkFinding(TRUSTMARK_CHECK, TRUSTMARK_ALGORITHM_LABEL, entry.status.value, entry.reason))
+        # A manifest that declares a TrustMark binding is still listed (as a fact) when the decoder could not run.
+        layers.coverage.append(entry)
+        return
+    readings, ran, missing = outcome
+    note = f"변형 {'/'.join(ran)} 실행" + (f"(가중치 없음: {', '.join(missing)})" if missing else "")
+    if readings:
+        found = ", ".join(f"{r.variant} {r.schema_name}" for r in readings)
+        entry = CoverageEntry(TRUSTMARK_CHECK, CoverageStatus.RAN, f"{note} — 판독됨: {found}")
+        layers.findings.append(MarkFinding(TRUSTMARK_CHECK, TRUSTMARK_ALGORITHM_LABEL, "found", found))
+    else:
+        entry = CoverageEntry(TRUSTMARK_CHECK, CoverageStatus.RAN, f"{note} — BCH 통과 패킷 없음 — {NO_INFORMATION}")
+        layers.findings.append(MarkFinding(TRUSTMARK_CHECK, TRUSTMARK_ALGORITHM_LABEL, "not_found", NO_INFORMATION))
+    layers.coverage.append(entry)
+    layers.evidence.extend(trustmark_evidence(readings, validation))
+
+
 def image_mark_layers(path: Path, c2pa_validation: dict[str, object] | None = None) -> MarkLayers:
     """The watermark checks of an image file (after its C2PA check)."""
     layers = MarkLayers()
     _sdxl_layer(path, layers)
+    _trustmark_layer(path, c2pa_validation, layers)
     if layers.findings:
         layers.limitations.append(ABSENCE_LIMITATION)
     return layers
@@ -210,6 +344,10 @@ __all__ = [
     "SDXL_CHECK",
     "SDXL_FOUND_TITLE",
     "TRUSTMARK_CHECK",
+    "TRUSTMARK_CROSS_LINKED_TITLE",
+    "TRUSTMARK_CROSS_MATCH_TITLE",
+    "TRUSTMARK_FOUND_TITLE",
+    "trustmark_evidence",
     "VIDEOSEAL_CHECK",
     "image_mark_layers",
     "load_registry",

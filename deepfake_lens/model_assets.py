@@ -57,6 +57,8 @@ HAAR_FRONTALFACE = "haarcascade_frontalface_default.xml"
 FACE_LANDMARKER = "face_landmarker.task"
 SYNCNET_WEIGHTS = "syncnet_v2.model"
 S3FD_WEIGHTS = "sfd_face.pth"
+# techniques-2026: watermark decoder weights (wm_trustmark.py; scripts/fetch_watermark_models.py).
+TRUSTMARK_DECODERS = ("trustmark-decoder_Q.onnx", "trustmark-decoder_P.onnx", "trustmark-decoder_C.onnx")
 
 
 class AssetPinError(RuntimeError):
@@ -339,7 +341,7 @@ ASSET_MANIFEST_ERROR = "manifest_error"
 # R18-13 (round 18): the override variable names no file — the loader fails every check that needs the asset.
 ASSET_OVERRIDE_MISSING = "override_missing"
 # R17-9: the assets the loaders know — listed by doctor even when the manifest cannot be read.
-KNOWN_ASSETS = (HAAR_FRONTALFACE, FACE_LANDMARKER, SYNCNET_WEIGHTS, S3FD_WEIGHTS)
+KNOWN_ASSETS = (HAAR_FRONTALFACE, FACE_LANDMARKER, SYNCNET_WEIGHTS, S3FD_WEIGHTS, *TRUSTMARK_DECODERS)
 
 
 def asset_override(asset: str) -> Path | None:
@@ -503,6 +505,7 @@ __all__ = [
     "HAAR_FRONTALFACE",
     "PACKAGED_MANIFEST",
     "S3FD_WEIGHTS",
+    "TRUSTMARK_DECODERS",
     "SYNCNET_WEIGHTS",
     "UNPINNED_ASSET_PREFIX",
     "asset_pin_tokens",

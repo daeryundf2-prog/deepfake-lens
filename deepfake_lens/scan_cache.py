@@ -855,7 +855,10 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 14: techniques-2026 item 3 — every image gains the watermark_sdxl check (imwatermark dwtDct):
 #    an exact 48/48 match with the registered SDXL message is the item "SDXL 공식 파이프라인 워터마크 존재";
 #    otherwise ran "… 무정보" / skipped (under 256 px); the registry is part of the cache key.
-OUTPUT_FORMAT_GENERATION = 14
+# 15: techniques-2026 item 4 — every image gains the watermark_trustmark check (TrustMark Q/P/C ONNX
+#    decoders; skipped "의존성 부재: onnxruntime" / "가중치 없음: …" without them); a decoded packet is a
+#    neutral fact, the C2PA soft-binding cross-check its only link to a conclusion.
+OUTPUT_FORMAT_GENERATION = 15
 
 
 def cache_extension(path: Path) -> str:

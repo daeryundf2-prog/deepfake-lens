@@ -32,6 +32,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import random
 import sys
 import time
 from pathlib import Path
@@ -95,6 +96,61 @@ def measure_sdxl(photos: list[Path], scratch: Path) -> dict[str, object]:
             "recall_n": embedded}
 
 
+def measure_trustmark(photos: list[Path], encoders: Path | None) -> dict[str, object]:
+    from PIL import Image
+
+    from deepfake_lens import wm_trustmark as tm
+
+    present, missing = tm.available_variants()
+    result: dict[str, object] = {"variants": sorted(present), "missing": missing}
+    for variant in sorted(present):
+        asset, size, square = tm.VARIANTS[variant]
+        session = tm._session(asset, present[variant])
+        hits: dict[str, int] = {}
+        n = 0
+        for photo in photos:
+            with Image.open(photo) as opened:
+                image = opened.convert("RGB")
+            logits = session.run(None, {session.get_inputs()[0].name: tm.preprocess(image, size, square)})[0]
+            bits = "".join("1" if v >= 0 else "0" for v in logits.reshape(-1)[:100])
+            decoded = tm.decode_packet(bits)
+            n += 1
+            if decoded is not None:
+                hits[tm.SCHEMAS[decoded[0]][0]] = hits.get(tm.SCHEMAS[decoded[0]][0], 0) + 1
+        k = sum(hits.values())
+        entry: dict[str, object] = {"n": n, "false_detections": k, "by_schema": hits, "fpr": k / n if n else None,
+                                    "fpr_upper95": clopper_pearson_upper(k, n)}
+        encoder_path = encoders / f"encoder_{variant}.onnx" if encoders else None
+        if encoder_path is not None and encoder_path.is_file():
+            entry.update(_trustmark_recall(photos, variant, encoder_path, session, size, square))
+        result[variant] = entry
+    return result
+
+
+def _trustmark_recall(photos, variant, encoder_path, decoder, size, square) -> dict[str, object]:
+    """Embed a random BCH_4 payload with the ONNX encoder (residual method of trustmark.encode) and decode it back."""
+    import onnxruntime as ort
+    from PIL import Image
+
+    from deepfake_lens import wm_trustmark as tm
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from build_trustmark_fixture import encode_packet, embed
+
+    encoder = ort.InferenceSession(str(encoder_path), providers=["CPUExecutionProvider"])
+    rng = random.Random(7)
+    ok = 0
+    for photo in photos:
+        payload = "".join(rng.choice("01") for _ in range(68))
+        with Image.open(photo) as opened:
+            cover = opened.convert("RGB")
+        stego = embed(encoder, cover, encode_packet(payload, schema=2), variant)
+        logits = decoder.run(None, {decoder.get_inputs()[0].name: tm.preprocess(stego, size, square)})[0]
+        decoded = tm.decode_packet("".join("1" if v >= 0 else "0" for v in logits.reshape(-1)[:100]))
+        ok += decoded == (2, payload)
+    return {"recall_lossless": ok / len(photos) if photos else None, "recall_n": len(photos)}
+
+
 def main(argv: list[str] | None = None) -> int:
     repo = Path(__file__).resolve().parents[1]
     if str(repo) not in sys.path:
@@ -103,12 +159,13 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = KoreanArgumentParser(description="실사 사진·음성에서 워터마크 디코더의 오탐률(및 무손실 재검출률)을 측정합니다.")
     parser.add_argument("--photos", type=Path, help="실사 사진 폴더(fetch_real_photos.py 결과)")
-    parser.add_argument("--only", nargs="*", default=None, help="일부 검사만(sdxl)")
+    parser.add_argument("--trustmark-encoders", type=Path, help="TrustMark encoder_<V>.onnx 폴더(재검출률 측정용, 선택)")
+    parser.add_argument("--only", nargs="*", default=None, help="일부 검사만(sdxl/trustmark)")
     parser.add_argument("--out", type=Path, required=True, help="결과 JSON")
     args = parser.parse_args(argv)
     import tempfile
 
-    wanted = set(args.only or ["sdxl"])
+    wanted = set(args.only or ["sdxl", "trustmark"])
     report: dict[str, object] = {"schema": "watermark-measurement-v1", "measured_at": time.strftime("%Y-%m-%d")}
     if args.photos:
         photos = _photos(args.photos)
@@ -117,6 +174,8 @@ def main(argv: list[str] | None = None) -> int:
         with tempfile.TemporaryDirectory() as tmp:
             if "sdxl" in wanted:
                 report["sdxl"] = measure_sdxl(photos, Path(tmp))
+            if "trustmark" in wanted:
+                report["trustmark"] = measure_trustmark(photos, args.trustmark_encoders)
     args.out.write_text(json.dumps(report, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=1))
     return 0

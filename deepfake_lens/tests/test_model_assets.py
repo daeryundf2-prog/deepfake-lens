@@ -66,7 +66,11 @@ class ManifestTest(unittest.TestCase):
         payload = json.loads(PACKAGED_MANIFEST.read_text(encoding="utf-8"))
         self.assertEqual(payload["schema"], model_assets.ASSET_MANIFEST_SCHEMA)
         names = [entry["name"] for entry in payload["assets"]]
-        self.assertEqual(sorted(names), sorted([HAAR_FRONTALFACE, FACE_LANDMARKER, SYNCNET_WEIGHTS, S3FD_WEIGHTS]))
+        # techniques-2026: + the watermark decoder weights (pinned with the official upstream bytes' sha256).
+        watermark = list(model_assets.TRUSTMARK_DECODERS)
+        self.assertEqual(sorted(names), sorted([HAAR_FRONTALFACE, FACE_LANDMARKER, SYNCNET_WEIGHTS, S3FD_WEIGHTS, *watermark]))
+        pinned = {entry["name"]: entry["sha256"] for entry in payload["assets"]}
+        self.assertTrue(all(len(pinned[name]) == 64 for name in watermark))
         for entry in payload["assets"]:
             with self.subTest(asset=entry["name"]):
                 self.assertTrue(entry["source"] and entry["license"] and entry["used_by"])
