@@ -540,10 +540,14 @@ def _render_forensic_pdf(
 ) -> bytes:
     """Lay out the forensic PDF with :class:`pdf_layout.PdfLayout` (G2) and return its bytes."""
     from .pdf_layout import Cell, PdfLayout
+    from .result_text import display_name
 
     header_blue = (0.15, 0.25, 0.45)
-    firm_name = office.header
-    contact_line = f"대표전화: {office.contact}" if office.contact else ""
+    # R24-7 (round 24): the examiner's fields (office, contact, exhibit number) through display_name, like the file
+    # names (R23-4) — a literal "\u05e2" typed into one never prints like the escape of a glyphless "ע".
+    firm_name = display_name(office.header)
+    contact_line = f"대표전화: {display_name(office.contact)}" if office.contact else ""
+    exhibit_no = display_name(exhibit_no)
 
     def page_header(layout: PdfLayout) -> None:
         layout.text(layout.left, layout.right, firm_name, 9.0, header_blue, gap=0.5)

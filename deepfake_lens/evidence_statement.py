@@ -645,11 +645,21 @@ def _render_statement_pdf(
     """
     from .pdf_layout import Cell, PdfLayout
     from .reports import analysis_options_line, scan_root_line
+    from .result_text import display_name
+
+    # R24-7 (round 24): the case fields (the examiner's input — case number and name, parties, court, office,
+    # contact) are drawn through display_name like the file names (R23-4): every literal backslash doubled, so
+    # the \uNNNN escape PdfLayout.drawable writes for a character the font lacks never equals a literal
+    # "\uNNNN" typed into the field ("ע corp" and "\u05e2 corp" printed alike).
+    case_no, case_name = display_name(statement.case_no), display_name(statement.case_name)
+    plaintiff, defendant = display_name(statement.plaintiff), display_name(statement.defendant)
+    law_firm, center, contact = display_name(statement.law_firm), display_name(statement.center), display_name(statement.contact)
+    court_name = display_name(statement.court)
 
     def page_header(layout: PdfLayout) -> None:
-        firm_header = f"{statement.law_firm} {statement.center}".strip()
+        firm_header = f"{law_firm} {center}".strip()
         layout.text(layout.left, layout.right, firm_header, 9.0, (0.15, 0.25, 0.45), gap=0.5)
-        contact_line = f"대한민국 법원 전자소송(ECFS) 표준 서식  |  대표전화: {statement.contact}" if statement.contact else "대한민국 법원 전자소송(ECFS) 표준 서식"
+        contact_line = f"대한민국 법원 전자소송(ECFS) 표준 서식  |  대표전화: {contact}" if statement.contact else "대한민국 법원 전자소송(ECFS) 표준 서식"
         layout.text(layout.left, layout.right, contact_line, 7.5, (0.5, 0.5, 0.5), gap=2.0)
         layout.page.draw_line(pymupdf.Point(layout.left, layout.y), pymupdf.Point(layout.right, layout.y), color=(0.85, 0.88, 0.92), width=0.8)
         layout.y += 6.0
@@ -658,9 +668,9 @@ def _render_statement_pdf(
     layout.new_page()
     layout.text(layout.left, layout.right, "증  거  설  명  서", 18.0, (0.08, 0.15, 0.32), align=1, gap=6.0)
     layout.boxed_text("", [
-        (f"사        건    {statement.case_no}  {statement.case_name}", 9.5, (0.1, 0.1, 0.1)),
-        (f"원고(고소인)    {statement.plaintiff}", 9.5, (0.1, 0.1, 0.1)),
-        (f"피고(피의자)    {statement.defendant}", 9.5, (0.1, 0.1, 0.1)),
+        (f"사        건    {case_no}  {case_name}", 9.5, (0.1, 0.1, 0.1)),
+        (f"원고(고소인)    {plaintiff}", 9.5, (0.1, 0.1, 0.1)),
+        (f"피고(피의자)    {defendant}", 9.5, (0.1, 0.1, 0.1)),
         ("위 사건에 관하여 원고(고소인)의 소송대리인은 주장사실을 입증하기 위해 아래와 같이 증거방법을 제출합니다.", 8.2, (0.3, 0.3, 0.3)),
         *([(root_line, 8.2, (0.3, 0.3, 0.3))] if (root_line := scan_root_line(body)) else []),  # R9-9
         *([(options_line, 8.2, (0.3, 0.3, 0.3))] if (options_line := analysis_options_line(body)) else []),  # R19-3
@@ -723,14 +733,14 @@ def _render_statement_pdf(
     # Signoff block, kept together on one page.
     signoff = [
         (statement.created_at, 10.0, (0.1, 0.1, 0.1)),
-        (f"원고(고소인) 소송대리인  {statement.law_firm}".rstrip(), 10.5, (0.08, 0.15, 0.32)),
+        (f"원고(고소인) 소송대리인  {law_firm}".rstrip(), 10.5, (0.08, 0.15, 0.32)),
         ("담당변호사 : ○ ○ ○,  ○ ○ ○", 9.5, (0.2, 0.2, 0.2)),
         ("디지털포렌식센터 수석감정관 : ○ ○ ○  (인)", 9.5, (0.2, 0.2, 0.2)),
     ]
     # The signoff, the court line and the G30 signature lines (or the
     # explicit "서명 없음" lines) stay together on one page.
     signature = [(line, 6.5, (0.35, 0.35, 0.35)) for line in statement_signature_lines(body)]
-    court = [(statement.court, 12.0, (0.05, 0.05, 0.05))]
+    court = [(court_name, 12.0, (0.05, 0.05, 0.05))]
     needed = sum(
         layout.block_height(layout.wrap(text, layout.content_width, size), size) + 3.0
         for text, size, _ in (*signoff, *court, *signature)
