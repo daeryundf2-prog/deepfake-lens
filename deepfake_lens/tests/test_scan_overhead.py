@@ -300,5 +300,129 @@ class DisplayNameFastPathTest(unittest.TestCase):
                 self.assertEqual(display_name(text, escape_pipe=escape_pipe), _display_name_walk(text, escape_pipe), repr(text))
 
 
+class VersionedCacheTest(unittest.TestCase):
+    """R27-5 patterns on the techniques-2026b layers: tables once per file version, hand-offs only for the same file."""
+
+    def test_a_table_is_loaded_once_per_version_and_a_change_is_seen(self) -> None:
+        from deepfake_lens import device_labels, screen_capture, versioned_cache
+
+        for module, attr, loader in ((device_labels, "TABLE_PATH", device_labels.load_table), (screen_capture, "TRAITS_PATH", screen_capture.load_traits)):
+            with self.subTest(module=module.__name__), tempfile.TemporaryDirectory() as tmp:
+                table = Path(tmp) / "table.json"
+                shutil.copyfile(getattr(module, attr), table)
+                with mock.patch.object(module, attr, table):
+                    before = versioned_cache.LOADS["tables"]
+                    first = loader()
+                    for _ in range(3):
+                        self.assertIs(loader(), first)
+                    self.assertEqual(versioned_cache.LOADS["tables"] - before, 1)
+                    data = json.loads(table.read_text(encoding="utf-8"))
+                    table.write_text(json.dumps(dict(data, version="changed")), encoding="utf-8")
+                    self.assertEqual(loader().version, "changed")
+                    table.write_text(json.dumps(dict(data, schema="other")), encoding="utf-8")
+                    with self.assertRaises(ValueError):
+                        loader()
+                    with self.assertRaises(ValueError):  # a failure is not cached either
+                        loader()
+
+    def test_a_hand_off_is_taken_once_and_only_for_the_same_unchanged_file(self) -> None:
+        from deepfake_lens import versioned_cache as vc
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_png(Path(tmp) / "a.png")
+            other = write_png(Path(tmp) / "b.png", seed=1)
+            vc.offer("k", path, vc.file_version(path), "value")
+            self.assertIs(vc.take("k", other), vc.MISSING)  # another file: the slot is dropped
+            self.assertIs(vc.take("k", path), vc.MISSING)
+            vc.offer("k", path, vc.file_version(path), "value")
+            self.assertEqual(vc.take("k", path), "value")
+            self.assertIs(vc.take("k", path), vc.MISSING)  # taken once
+            vc.offer("k", path, vc.file_version(path), "value")
+            write_png(path, seed=2)  # changed after the offer
+            self.assertIs(vc.take("k", path), vc.MISSING)
+
+    def test_a_shared_prefix_reads_like_the_file(self) -> None:
+        from deepfake_lens import versioned_cache as vc
+        from deepfake_lens.scan_cache import _read_prefix
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "f.bin"
+            path.write_bytes(bytes(range(256)) * 40)
+            vc.offer_prefix(path, vc.file_version(path), 4096, _read_prefix(path, 4096))
+            for limit in (0, 10, 4096, 5000, 20000):
+                self.assertEqual(vc.read_prefix(path, limit), _read_prefix(path, limit), limit)
+            small = Path(tmp) / "s.bin"
+            small.write_bytes(b"abc")
+            vc.offer_prefix(small, vc.file_version(small), 4096, _read_prefix(small, 4096))
+            self.assertEqual(vc.read_prefix(small, 1 << 20), b"abc")  # the offered read reached the end
+            small.write_bytes(b"abcdef")  # changed: read again
+            self.assertEqual(vc.read_prefix(small, 4096), b"abcdef")
+
+    def test_shared_pixels_and_user_comment_equal_a_fresh_read(self) -> None:
+        try:
+            import numpy  # noqa: F401
+            from PIL import Image  # noqa: F401
+        except ImportError:
+            self.skipTest("Pillow + numpy needed for the fixture")
+        from deepfake_lens import screen_capture, versioned_cache, wm_imwatermark
+        from deepfake_lens.image_metadata import read_image_metadata_full
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write_png(Path(tmp) / "a.png", {"Comment": "x"}, size=(300, 260), seed=3)
+            read_image_metadata_full(path)
+            shared_rgb = wm_imwatermark.load_rgb(path)
+            shared_comment = screen_capture.exif_user_comment(path)
+            fresh_rgb = wm_imwatermark.load_rgb(path)  # nothing offered any more: decoded here
+            self.assertIs(versioned_cache.take(screen_capture.USER_COMMENT_HANDOFF, path), versioned_cache.MISSING)
+            self.assertEqual(screen_capture.exif_user_comment(path), shared_comment)
+            self.assertEqual((shared_rgb.shape, shared_rgb.dtype, shared_rgb.tobytes()), (fresh_rgb.shape, fresh_rgb.dtype, fresh_rgb.tobytes()))
+
+
+class PlainValueTest(unittest.TestCase):
+    """R27-5: result_types.plain_value is dataclasses.asdict's conversion, value for value and type for type."""
+
+    def _same(self, a: object, b: object) -> None:
+        self.assertIs(type(a), type(b))
+        if isinstance(a, dict):
+            self.assertEqual(list(a), list(b))  # key order too
+            for key in a:
+                self._same(a[key], b[key])  # type: ignore[index]
+        elif isinstance(a, (list, tuple)):
+            self.assertEqual(len(a), len(b))  # type: ignore[arg-type]
+            for x, y in zip(a, b):  # type: ignore[call-overload]
+                self._same(x, y)
+        else:
+            self.assertEqual(a, b)
+
+    def test_rows_convert_exactly_like_asdict(self) -> None:
+        from collections import OrderedDict, defaultdict, namedtuple
+        from dataclasses import asdict, dataclass, field
+
+        from deepfake_lens.analysis_api import AnalysisOptions, scan_folder_run
+        from deepfake_lens.result_types import _fields_except
+
+        pair = namedtuple("pair", "a b")
+
+        @dataclass
+        class Odd:
+            t: tuple = (1, [2, {"x": (3,)}])
+            n: object = pair(1, [2])
+            d: dict = field(default_factory=lambda: defaultdict(list, {"k": [1]}))
+            o: dict = field(default_factory=lambda: OrderedDict(z=1, a=2))
+            s: set = field(default_factory=lambda: {1, 2})
+
+        self._same(_fields_except(Odd(), frozenset()), asdict(Odd()))
+        with tempfile.TemporaryDirectory() as tmp:
+            write_png(Path(tmp) / "a.png", {"parameters": "a cat, Steps: 20, Sampler: Euler a, CFG scale: 7, Seed: 1"})
+            write_png(Path(tmp) / "b.png", seed=4)
+            (Path(tmp) / "c.txt").write_text("사람이 쓴 글입니다. " * 20, encoding="utf-8")
+            items = scan_folder_run(tmp, AnalysisOptions(pixel_mode="off", no_default_engine=True)).items
+        self.assertEqual(len(items), 3)
+        for item in items:
+            self._same(_fields_except(item, frozenset()), asdict(item))
+            assert item.result is not None
+            self._same(_fields_except(item.result, frozenset()), asdict(item.result))
+
+
 if __name__ == "__main__":
     unittest.main()

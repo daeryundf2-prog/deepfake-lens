@@ -458,8 +458,9 @@ def _perth_layer(path: Path, layers: MarkLayers) -> None:
     from . import wm_perth
 
     def check() -> Any:
-        import torch  # noqa: F401 — dependency probe: without torch the check is "의존성 부재: torch"
+        from .import_probe import require
 
+        require("torch")  # dependency probe: without torch the check is "의존성 부재: torch" (R27-5: absence remembered)
         return wm_perth.perth_read(path), load_registry()
 
     outcome, entry = run_check(PERTH_CHECK, check)

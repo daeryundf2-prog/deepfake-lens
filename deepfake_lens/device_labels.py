@@ -124,6 +124,13 @@ class LabelTable:
 
 
 def load_table() -> LabelTable:
+    """The device-label table — parsed and hashed once per file version (R27-5 pattern, versioned_cache)."""
+    from .versioned_cache import load_versioned
+
+    return load_versioned(TABLE_PATH, _load_table_file)
+
+
+def _load_table_file() -> LabelTable:
     raw = TABLE_PATH.read_bytes()
     data = json.loads(raw.decode("utf-8"))
     if not isinstance(data, dict) or data.get("schema") != TABLE_SCHEMA:

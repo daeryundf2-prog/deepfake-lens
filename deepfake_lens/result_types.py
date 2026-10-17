@@ -8,8 +8,10 @@ import them without a cycle. Public names are re-exported from ``core``.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+import copy
+from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from enum import Enum
+from typing import Any
 
 from .pixel import PixelAnalysis
 
@@ -449,7 +451,7 @@ class ClassificationResult:
         return GRADE_LABELS[self.grade]
 
     def to_json(self) -> dict[str, object]:
-        data = asdict(self)
+        data = _fields_except(self, _RESULT_REPLACED)  # evidence / coverage are set below (R27-5)
         pixel = data.get("pixel_analysis")
         if isinstance(pixel, dict) and pixel.get("heatmap_path"):
             from .json_text import fs_b64encode
@@ -466,6 +468,43 @@ class ClassificationResult:
         data["coverage"] = [entry.to_json() for entry in self.coverage]
         data["probability_ci"] = list(self.probability_ci) if self.probability_ci is not None else None
         return data
+
+
+_ATOMIC = (type(None), bool, int, float, complex, str, bytes)
+
+
+def plain_value(obj: object) -> object:
+    """``dataclasses.asdict``'s conversion of one value (R27-5): dataclasses to dicts in field order, lists /
+    tuples / namedtuples / dicts rebuilt with their own type, anything else ``copy.deepcopy``'d — so
+    ``{f.name: plain_value(getattr(x, f.name)) for f in fields(x)} == asdict(x)`` for every dataclass ``x``.
+    Used to skip converting the fields a ``to_json`` replaces anyway (a row's result, a result's evidence and
+    coverage were each converted two or three times).
+    """
+    if type(obj) in _ATOMIC:
+        return obj
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return {f.name: plain_value(getattr(obj, f.name)) for f in fields(obj)}
+    if isinstance(obj, tuple) and hasattr(obj, "_fields"):
+        return type(obj)(*[plain_value(v) for v in obj])  # type: ignore[arg-type]
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(plain_value(v) for v in obj)
+    if isinstance(obj, dict):
+        if hasattr(type(obj), "default_factory"):
+            out = type(obj)(getattr(obj, "default_factory"))
+            for key, value in obj.items():
+                out[plain_value(key)] = plain_value(value)
+            return out
+        return type(obj)((plain_value(key), plain_value(value)) for key, value in obj.items())
+    return copy.deepcopy(obj)
+
+
+def _fields_except(obj: object, replaced: frozenset[str]) -> dict[str, Any]:
+    """``asdict(obj)`` with the ``replaced`` fields left as None (the caller sets them; dict order unchanged)."""
+    return {f.name: None if f.name in replaced else plain_value(getattr(obj, f.name)) for f in fields(obj)}  # type: ignore[arg-type]
+
+
+_RESULT_REPLACED = frozenset({"evidence", "coverage"})
+_ITEM_REPLACED = frozenset({"result"})
 
 
 @dataclass(frozen=True)
@@ -503,7 +542,7 @@ class ScanItem:
         from .result_text import display_name, unescape_row_path
 
         data: dict[str, object] = {}
-        for key, value in asdict(self).items():
+        for key, value in _fields_except(self, _ITEM_REPLACED).items():  # result is set below (R27-5)
             data[key] = value
             if key == "path" and self.member is None:
                 # R12-4: the row's real relative path as file-system bytes

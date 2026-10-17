@@ -36,6 +36,7 @@ TRAITS_SCHEMA = "screen-traits-v1"
 EXIF_NS = "http://ns.adobe.com/exif/1.0/"
 USER_COMMENT_TAG = 0x9286
 EXIF_IFD = 0x8769
+USER_COMMENT_HANDOFF = "exif.UserComment"  # versioned_cache kind (R27-5)
 MAX_XMP = 1024 * 1024
 CAMERA_C2PA_LIMITATION = (
     "카메라 C2PA 서명은 이 기기가 이 장면을 찍었다는 것만 증명하며, 장면이 실제였다는 것(화면·인쇄물을 다시 찍은 것이 아님)은 증명하지 않습니다."
@@ -55,6 +56,13 @@ class Traits:
 
 
 def load_traits() -> Traits:
+    """The screen-traits table — parsed and hashed once per file version (R27-5 pattern, versioned_cache)."""
+    from .versioned_cache import load_versioned
+
+    return load_versioned(TRAITS_PATH, _load_traits_file)
+
+
+def _load_traits_file() -> Traits:
     raw = TRAITS_PATH.read_bytes()
     data = json.loads(raw.decode("utf-8"))
     if not isinstance(data, dict) or data.get("schema") != TRAITS_SCHEMA:
@@ -72,11 +80,11 @@ def traits_cache_tokens() -> list[str]:
 
 def _xmp_packet(path: Path, metadata: Mapping[str, str]) -> bytes | None:
     from .image_metadata import PNG_XMP_KEY, _scan_jpeg_segments, _walk_webp_xmp
-    from .scan_cache import _read_prefix
+    from .versioned_cache import read_prefix
 
     if metadata.get(PNG_XMP_KEY):
         return metadata[PNG_XMP_KEY].encode("utf-8", errors="replace")
-    data = _read_prefix(path, 4 * 1024 * 1024)
+    data = read_prefix(path, 4 * 1024 * 1024)  # R27-5: the metadata layer's prefix of this file version
     if data.startswith(b"\xff\xd8"):
         return _scan_jpeg_segments(data)[0]
     if data.startswith(b"RIFF") and data[8:12] == b"WEBP":
@@ -105,16 +113,25 @@ def xmp_user_comments(packet: bytes | None) -> list[str]:
 
 
 def exif_user_comment(path: Path) -> str | None:
-    """EXIF UserComment (8-byte character-code prefix removed); None without Pillow or the tag."""
-    try:
-        from PIL import Image
-    except ImportError:
-        return None
-    try:
-        with Image.open(path) as image:
-            raw = image.getexif().get_ifd(EXIF_IFD).get(USER_COMMENT_TAG)
-    except Exception:  # noqa: BLE001 - a damaged file is the metadata check's failure, not this fact's
-        return None
+    """EXIF UserComment (8-byte character-code prefix removed); None without Pillow or the tag.
+
+    R27-5: the image metadata layer reads the same tag from the same Pillow ``getexif()`` it already made
+    (image_metadata._read_exif_into) and hands it over (versioned_cache); for a PNG that call decodes the whole
+    image. Without a hand-off for this path and file version the file is opened here as before.
+    """
+    from .versioned_cache import MISSING, take
+
+    raw = take(USER_COMMENT_HANDOFF, path)
+    if raw is MISSING:
+        try:
+            from PIL import Image
+        except ImportError:
+            return None
+        try:
+            with Image.open(path) as image:
+                raw = image.getexif().get_ifd(EXIF_IFD).get(USER_COMMENT_TAG)
+        except Exception:  # noqa: BLE001 - a damaged file is the metadata check's failure, not this fact's
+            return None
     if isinstance(raw, bytes):
         code, body = raw[:8], raw[8:]
         text = body.decode("utf-16" if code.startswith(b"UNICODE") else "latin-1", errors="replace")

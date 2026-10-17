@@ -210,12 +210,13 @@ def parse_jpeg(data: bytes) -> JpegStructure:
 
 def recompression_layers(path: Path) -> TraceLayers:
     from .checks import run_check
-    from .scan_cache import _read_prefix
 
     layers = TraceLayers()
 
     def check() -> tuple[JpegStructure, Library]:
-        return parse_jpeg(_read_prefix(path, JPEG_SCAN_BYTES)), load_library()
+        from .versioned_cache import read_prefix
+
+        return parse_jpeg(read_prefix(path, JPEG_SCAN_BYTES)), load_library()  # R27-5: the metadata layer's prefix
 
     outcome, entry = run_check(RECOMPRESSION_CHECK, check)
     if outcome is None:
@@ -378,6 +379,9 @@ def _soundfile_mono(path: Path) -> tuple[Any, int] | None:
     if path.suffix.lower() not in SOUNDFILE_EXTENSIONS:
         return None
     try:
+        from .import_probe import require
+
+        require("soundfile")  # R27-5: an absent soundfile is remembered, not searched for again per file
         import soundfile
     except ImportError:
         return None

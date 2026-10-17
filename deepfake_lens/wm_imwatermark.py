@@ -88,13 +88,54 @@ def decode_array(rgb: Any, n_bits: int = 48) -> DwtDctReading:
 
 
 def load_rgb(path: Path) -> Any:
-    """The image's pixels as an RGB uint8 array (first frame; no EXIF rotation — the mark is in stored pixels)."""
+    """The image's pixels as an RGB uint8 array (first frame; no EXIF rotation — the mark is in stored pixels).
+
+    R27-5: when the image metadata layer already decoded this file version (a PNG's ``getexif()`` loads the
+    whole image), it handed over the same array (:func:`offer_loaded`); otherwise the file is decoded here.
+    """
+    from .versioned_cache import MISSING, take
+
+    shared = take(RGB_HANDOFF, path)
+    if shared is not MISSING:
+        return shared
     import numpy as np
     from PIL import Image
 
     with Image.open(path) as image:
         image.load()
         return np.asarray(image.convert("RGB"), dtype=np.uint8)
+
+
+RGB_HANDOFF = "imwatermark.rgb"  # versioned_cache kind (R27-5)
+
+
+def offer_loaded(path: Path, version: tuple[int, ...] | None, image: Any) -> None:
+    """R27-5: hand :func:`load_rgb`'s array to the SDXL check when ``image`` (``Image.open(path)``) is already loaded.
+
+    Only an image whose pixels Pillow has already decoded (``tile`` emptied by ``load()``), with numpy imported,
+    OpenCV installed (else the SDXL check is skipped before decoding) and at most MAX_PIXELS pixels; the array is
+    made by the same calls as :func:`load_rgb` (``load()`` again is a no-op). Any failure offers nothing — the
+    SDXL check then decodes the file itself, as before.
+    """
+    import sys
+
+    if version is None or getattr(image, "tile", None) != [] or sys.modules.get("numpy") is None:
+        return
+    try:
+        from .import_probe import require_available
+
+        require_available("cv2")
+        width, height = image.size
+        if int(width) * int(height) > MAX_PIXELS:
+            return
+        import numpy as np
+
+        from .versioned_cache import offer
+
+        image.load()
+        offer(RGB_HANDOFF, path, version, np.asarray(image.convert("RGB"), dtype=np.uint8))
+    except Exception:  # noqa: BLE001 - not offered; the SDXL check decodes the file itself
+        return
 
 
 def encode_array_for_tests(rgb: Any, bits: str) -> Any:
