@@ -78,6 +78,8 @@ dev = [
   # N3: test_json_contract validates real scan/stream payloads against
   # contracts/deepfake-lens-scan-result-v2.schema.json (draft 2020-12).
   "jsonschema>=4.18",
+  # P0R-2: the verdict-invariant property tests (deepfake_lens/tests/test_invariants_verdict.py).
+  "hypothesis>=6.100",
 ]
 
 [project.scripts]

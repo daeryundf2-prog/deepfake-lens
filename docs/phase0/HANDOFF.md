@@ -44,7 +44,7 @@ python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev,pixel,audio,ml]" ruff mypy
 
 # (B) API 환경: 서버·PDF 경로 검증용
-python3 -m venv .venv-api && .venv-api/bin/pip install fastapi httpx uvicorn pymupdf linkify-it-py markdown-it-py
+python3 -m venv .venv-api && .venv-api/bin/pip install fastapi httpx uvicorn pymupdf linkify-it-py markdown-it-py hypothesis
 # 실행 시: PYTHONPATH=$PWD .venv-api/bin/python ...
 ```
 
@@ -62,8 +62,9 @@ torch/transformers/mediapipe는 설치하지 않은 상태가 기준이다(신�
 **재현성(23차 R23-10).** 기준 이미지는 이 폴더의 파일만으로 다시 만들어진다. 기반 이미지는 digest로 고정했다(`python:3.13.16-slim-trixie@sha256:70729b46…` — 그 arm64 층 4개가 2026-10-11 기준 이미지의 처음 4개 층과 같다). Debian 패키지는 `snapshot.debian.org`의 `DEBIAN_SNAPSHOT`(기본 20261011T000000Z) 상태에서 받고, 명시한 패키지(ffmpeg 7.1.5, git, procps, util-linux, nodejs 20.19.2)는 버전도 고정했다. pip 패키지는 위 잠금 파일의 버전 그대로다(pip 26.2.1). 22차까지의 Dockerfile은 아무것도 고정하지 않아 다시 빌드하면 그날의 `python:3.13-slim`과 PyPI 최신판이 들어왔다. 기준 이미지 이력의 `COPY pyproject.toml /tmp/pp/` 층은 레포 밖 임시 Dockerfile의 흔적이고 이미지 내용에는 영향이 없다(재빌드 이미지에는 없다). 확인 방법: 새 태그로 빌드(`docker build -t deepfake-lens-gate:rebuild -f scripts/gate/Dockerfile scripts/gate`)한 뒤 두 이미지에서 `/venv/bin/pip freeze`, `/venv-api/bin/pip freeze`, `python -V`, `dpkg-query -W`를 비교한다 — 23차 수정에서 모두 같았다. 잠금 파일은 이미지를 의도적으로 바꿀 때만 다시 만들고(`pip freeze`), 그 이유를 커밋에 적는다. 같은 태그를 덮어쓰기 전에 새 태그로 빌드해 비교한다.
 
 - Linux aarch64, Python 3.13, ffmpeg 7.1, Node.js 20.
-- `/venv`(메인): numpy, scipy, Pillow, opencv-python 5, scikit-learn, librosa + numba + soundfile, c2pa-python, jsonschema, coverage, ruff, mypy.
-- `/venv-api`(API): fastapi, httpx, uvicorn, pymupdf, markdown-it-py + linkify-it-py, mediapipe, opencv-python/opencv-contrib-python 5, numpy, scipy, Pillow, scikit-learn(librosa·c2pa 없음).
+- `/venv`(메인): numpy, scipy, Pillow, opencv-python 5, scikit-learn, librosa + numba + soundfile, c2pa-python, jsonschema, coverage, ruff, mypy, hypothesis(P0R-2).
+- `/venv-api`(API): fastapi, httpx, uvicorn, pymupdf, markdown-it-py + linkify-it-py, mediapipe, opencv-python/opencv-contrib-python 5, numpy, scipy, Pillow, scikit-learn, hypothesis(P0R-2)(librosa·c2pa 없음).
+- **이미지 변경 이력(P0R-2, 2026-10-17)**: 판정 불변식 속성 테스트를 위해 두 잠금 파일에 `hypothesis==6.170.1`과 그 의존성 `sortedcontainers==2.4.0`을 더했다. 절차는 위와 같다 — 새 태그 `deepfake-lens-gate:p0r-hyp`로 빌드해 기존 `:latest`와 `/venv`·`/venv-api`의 `pip freeze`(차이: 그 두 줄뿐), `dpkg-query -W`(같음), `python -V`(3.13.16)를 비교한 뒤 `:latest`를 그 이미지로 옮겼다. 이전 기준 이미지는 `:base` 태그로 남아 있다(2026-10-11 빌드). `:tech`(`Dockerfile.tech`, `FROM deepfake-lens-gate:latest`)는 새 `:latest` 위에서 다시 빌드했고(`:tech-p0r`로 빌드·비교 후 `:tech`로), `:gui`는 다시 빌드하지 않았다 — GUI 스모크(`gate.sh gui`)는 `/venv-gui`만 쓰고 단위 테스트를 돌리지 않는다.
 - 실행기 `scripts/gate/gate.sh`(호스트에서 `/gate.sh`로 읽기 전용 마운트)는 `/repo`의 작업 트리를 컨테이너의 `/work`로 복사한 뒤(`.venv*` 제외, `.git`은 복사) 단계를 `bash -o pipefail`로 실행한다. 사용법: `gate.sh tests`(두 venv 단위 테스트), `gate.sh lint`(ruff, mypy), `gate.sh full`(5장의 게이트 전부), `gate.sh qa-main`(메인 venv 패키지로 QA 하네스, 23차), `gate.sh cmd "<명령>"`.
 
 ```bash
