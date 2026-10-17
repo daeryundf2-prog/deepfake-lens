@@ -13,6 +13,7 @@ cloudpickle==3.1.2
 coverage==7.16.2
 cryptography==50.0.2
 decorator==5.3.1
+hypothesis==6.170.1
 idna==3.20
 joblib==1.6.0
 jsonschema==4.26.0
@@ -40,6 +41,7 @@ rpds-py==2026.9.1
 ruff==0.17.0
 scikit-learn==1.9.1
 scipy==1.18.1
+sortedcontainers==2.4.0
 soundfile==0.14.0
 soxr==1.1.0
 threadpoolctl==3.7.0

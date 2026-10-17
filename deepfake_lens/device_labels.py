@@ -165,7 +165,7 @@ def _evaluate(path: Path, metadata: Mapping[str, str]) -> tuple[list[EvidenceIte
             + (f" 외 {len(names) - MAX_NAMES}개" if len(names) > MAX_NAMES else "") + "입니다. "
             "삼성 기기(또는 그 형식을 흉내 낸 프로그램)가 저장했다는 구조 사실이며, 항목의 존재가 AI 편집을 뜻하지는 않습니다"
             "(갤럭시 AI 생성형 편집 전용 항목 이름은 공개 자료에 없음). " + str(table.data.get("self_declared_note", "")) + f" 기준: {table.label}.",
-            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, DEVICE_LAYER,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, DEVICE_LAYER, self_declared=True,
         ))
         for entry in entries:
             candidate = candidates.get(entry.name)
@@ -181,7 +181,7 @@ def _evaluate(path: Path, metadata: Mapping[str, str]) -> tuple[list[EvidenceIte
                 "삼성 편집 기록의 AI 관련 후보 필드(의미 미확인)",
                 f"SEFT 항목 「{entry.name}」에 {listed}이(가) 있습니다. 이름이 AI 처리를 시사하지만 의미를 확인한 공개 자료가 없어 "
                 "AI 편집 근거로 쓰지 않고 사실로만 적습니다.",
-                EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, DEVICE_LAYER,
+                EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, DEVICE_LAYER, self_declared=True,
             ))
     credit = metadata.get("xmp.Credit", "").strip()
     labels = {str(c["value"]).casefold(): c for c in table.data.get("credit_labels", []) if isinstance(c, dict) and "value" in c}
@@ -192,7 +192,7 @@ def _evaluate(path: Path, metadata: Mapping[str, str]) -> tuple[list[EvidenceIte
             str(found.get("title")),
             f"XMP photoshop:Credit=「{credit}」 — {found.get('meaning')}(신뢰 수준: {found.get('confidence')}). 서명 없는 기기·앱의 자기 신고이므로 "
             "원본성 결론만 막고 조작·생성 결론은 내리지 않습니다(같은 파일의 디지털 출처 유형 필드는 따로 기록).",
-            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, DEVICE_LAYER,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, DEVICE_LAYER, self_declared=True,
         ))
     else:
         parts.append("Google AI 라벨 없음")

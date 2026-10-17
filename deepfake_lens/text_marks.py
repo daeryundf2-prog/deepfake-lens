@@ -61,7 +61,7 @@ ZERO_WIDTH = frozenset({0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF, 0x180E, 0x2061, 
 ZWJ = 0x200D
 ZERO_WIDTH_RUN_MIN = 4
 # C2PA 2.3 §A.7 "Embedding manifests into unstructured text": the wrapper bytes
-# start with this magic (see docs/MACHINE-READABLE-MARKS.md §7 for the source).
+# start with this magic (see docs/MACHINE-READABLE-MARKS.md §8 for the source).
 C2PA_TEXT_MAGIC = b"C2PATXT\x00"
 C2PA_TEXT_MAGIC_SHOWN = "C2PATXT\\0"
 C2PA_STRUCTURED_BEGIN = "-----BEGIN C2PA MANIFEST-----"

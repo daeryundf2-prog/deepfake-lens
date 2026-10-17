@@ -88,10 +88,8 @@ def unscannable_file_reason(path: Path) -> str | None:
 
     X3: a FIFO, socket or device node (:data:`NOT_REGULAR_FILE_REASON`);
     R18-10: a file on a kernel pseudo file system
-    (:data:`SPECIAL_FILESYSTEM_REASON`). R20-1 (round 20): the report's
-    re-analysis of a posted row (``webapp_api._rederive_report_items``)
-    classifies the entry with this same function, so a FIFO the scan
-    skipped is the same skipped row there — not "file not found".
+    (:data:`SPECIAL_FILESYSTEM_REASON`). (P0R-6: a web report no longer
+    re-analyzes rows — it signs the server-held scan job's rows as they were.)
     ``path.is_file()`` follows a link (an allowed one). Raises OSError
     only when the entry cannot be examined at all.
     """
@@ -861,50 +859,59 @@ CACHE_KEY_VERSION = "content-v5"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 12: R25-7 — a reason naming the analyzed file by a relative name (a decoder's
 #    'a.wav' in `cd case; scan .`) is written "<root>/a.wav" like the absolute and
 #    root-relative invocations; a generation-11 row from such a scan said 'a.wav'.
-# 13: techniques-2026 item 1–2 — the C2PA reader runs offline against the bundled
-#    C2PA trust list (+ DEEPFAKE_LENS_C2PA_TRUST_ANCHORS): a ran c2pa entry names the
-#    validator's spec version and the trust list; C2PA 2.x facts (AI disclosure, soft
-#    binding, watermark actions, embedded data, screen capture, ingredient source types)
-#    are items; audio, video and document rows gain a c2pa check (.txt/.md skipped);
-#    XMP DigitalSourceType uses the full IPTC vocabulary ("자기 신고").
-# 14: techniques-2026 item 3 — every image gains the watermark_sdxl check (imwatermark dwtDct):
-#    an exact 48/48 match with the registered SDXL message is the item "SDXL 공식 파이프라인 워터마크 존재";
-#    otherwise ran "… 무정보" / skipped (under 256 px); the registry is part of the cache key.
-# 15: techniques-2026 item 4 — every image gains the watermark_trustmark check (TrustMark Q/P/C ONNX
-#    decoders; skipped "의존성 부재: onnxruntime" / "가중치 없음: …" without them); a decoded packet is a
-#    neutral fact, the C2PA soft-binding cross-check its only link to a conclusion.
-# 16: techniques-2026 item 5 — images and videos gain watermark_videoseal, audio and videos
-#    watermark_audioseal (optional torch extra; skipped "의존성 부재: torch" without it).
-# 17: techniques-2026 item 6 — every media/document row gains result.marking_context, the closing
-#    item "기계판독 표식 확인 결과(…)" and the skipped coverage entry online_detection.
-# 18: TB-1 (techniques-2026b) — text and document rows gain text_invisible_marks (Unicode tags, variation-selector
-#    data, zero-width characters, C2PA 2.3 text wrapper / 2.4 structured-text block presence) as neutral facts; the
-#    c2pa skip reason of .txt/.md says the signature is not validated (the wrapper's presence is the new check's).
-# 19: TB-6 — document rows (pdf/docx/xlsx/pptx; hwp/doc/xls/ppt skipped) gain document_structure: PDF revisions,
-#    bytes after a signature's /ByteRange, tool history, application/c2pa embedding; OOXML edit metadata — facts.
-# 20: TB-4 — images gain platform_recompression and file_name_pattern, videos file_name_pattern, audio
-#    file_name_pattern and audio_channel_trace (facts + the path limitation); the cache key gains the file name
-#    (content-v5) and the platform-trace library.
-# 21: TB-2 — audio rows and a video's audio track gain watermark_perth (Resemble AI PerTh implicit mark, torch
-#    optional: skipped "의존성 부재: torch" without it); the registry gains perth-implicit-chatterbox (2026-10-17.1).
-# 22: TB-3 — images gain device_ai_label: the Samsung SEFT trailer's entry names (neutral fact; AI-related
-#    candidates "의미 미확인") and Google AI credit labels in XMP photoshop:Credit (synthetic / moderate, self-declared).
-# 23: TB-5 — images gain screen_capture (iOS/macOS "Screenshot" user comment in XMP/EXIF, native screen size of a
-#    phone/tablet) as neutral facts, and a trusted camera C2PA manifest adds the recapture limitation.
-# 24: TB-7 — generator strings move to models/generator-strings.json (phase-0 rules unchanged + sourced additions:
-#    FLUX.2 "AI generated;flux2", Dreamina/Seedream/Seedance, Luma, Amazon Nova, Azure OpenAI/Designer, Apple Image
-#    Playground); a C2PA manifest's signer / claim generator is named as the neutral item "C2PA 서명자·생성기 이름".
-# 25: TB-8 — watermark_sdxl also matches the registered fixed messages of the FLUX.1 reference code (46 bits) and the
-#    SD 1 / SD 2 official scripts (136 / 32 bits); each match is titled by its pipeline; the no-match reason and the
-#    check label name the registered set (registry 2026-10-17.2).
-# 26: TB-2 fix — watermark_perth skips tone-dominated signals (3 strongest peaks >= 90% of the energy: a 440 Hz sine
-#    scored 0.99) "측정 범위 밖: … 순음 위주 신호 …", and its wording avoids English runs (registry 2026-10-17.3).
-# 27: TB-3/4/5/7 wording — table texts shown in rows (platform meanings, device-label meanings, generator rule labels
-#    and reasons, C2PA service names, screen-size model lists — the latter now quoted) carry no English runs
-#    (tables 2026-10-17.2).
-# 28: TB-4 perf — audio_channel_trace reads WAV/FLAC/OGG in-process with soundfile (ffmpeg only for other formats);
-#    the measured bandwidth may differ in its last bin from the ffmpeg float32 decode.
-OUTPUT_FORMAT_GENERATION = 28
+# 13: R26-1 — an archive member's chain escapes each level's path that holds "::" or "\" or starts or ends
+#    with ":" (the literal member "inner.zip::b.png" is "inner.zip\:\:b.png", ":lead.png" is "\:lead.png"),
+#    so it is never the chain of a nested archive's member. Archive rows are not cached; raised because the
+#    scan JSON of the same input changed.
+# 14: R26-8 — a new user-facing constant (result_text.ROW_IDENTITY_INVARIANT_BROKEN): a scan whose row identities
+#    are not unique or do not round-trip gives no result. No row of a valid scan changes.
+# 15: R26-2 — a reason naming the file as repr() escapes it ('<root>/한글\xa0x.wav' — a NBSP, a TAB) or by a
+#    name the audio worker staged reads "<root>/…" from `cd case; scan .` and with --workers 4 too; a
+#    generation-14 row of such a scan said '한글\xa0x.wav' or '000001-….wav'.
+# 16: R26-4 — archive members named "~$보고서.docx", "~WRL0001.tmp" or (on POSIX) "con.png" are extracted and
+#    analyzed like the same files in a folder (they were refused). Archive rows are not cached; raised because
+#    the scan JSON of the same input changed.
+# 17: R26-10 — an ffmpeg step stopped at its time limit names the step, the file and the limit ("FfmpegTimeout:
+#    ffmpeg 시간 초과 — 영상 음성 트랙 추출: '<root>/v.mp4' — 상한 120초에 중단(경과 120초)"); a generation-16 row
+#    said "TimeoutExpired: 라이브러리 오류(TimeoutExpired) — 상세는 로그 참조".
+# 18: merge of techniques-2026 (developed in parallel as its generations 13–17 on top of generation 12) onto
+#    R26 generation 17 — a row now carries all of: the C2PA reader run offline against the bundled C2PA
+#    trust list (+ DEEPFAKE_LENS_C2PA_TRUST_ANCHORS), a ran c2pa entry naming the validator's spec version
+#    and the trust list, C2PA 2.x facts as items, a c2pa check on audio, video and document rows (.txt/.md
+#    skipped), XMP DigitalSourceType over the full IPTC vocabulary ("자기 신고"); the image checks
+#    watermark_sdxl (exact 48/48 SDXL message), watermark_trustmark (a decoded packet is a neutral fact,
+#    the C2PA soft-binding cross-check its only link to a conclusion), watermark_videoseal (images, video)
+#    and watermark_audioseal (audio, video) behind the optional torch extra; result.marking_context, the
+#    closing item "기계판독 표식 확인 결과(…)" and the skipped coverage entry online_detection. A row of either
+#    side's generation 13–17 lacks the other side's changes, so neither may be served from the cache.
+# 19: P0R-22/P0R-23 — video and audio rows (and image rows, for the GB 45438 AIGC label) gain the check
+#    container_metadata (MP4/MOV boxes, SEI user data, ID3v2, RIFF INFO, FLAC Vorbis comments: facts; a
+#    registered generator declaration is a self-declared synthetic item); evidence items may carry
+#    "self_declared": true; a video row's source guess no longer claims a container-metadata check that did not
+#    exist ("영상 출처는 추정하지 않습니다 — …").
+# 20: P0R-20/P0R-21 — a C2PA hard binding whose exclusions drop content fails the c2pa check ("C2PA 해시 제외범위
+#    이상 …") whatever the SDK's state; every C2PA basis text names the frozen Interim Trust List and says revocation
+#    is not checked; an ITL-only signer's declaration is a moderate "C2PA 서명(동결된 임시 신뢰 목록 ITL): …" item.
+# 21: P0R-10 — rule 2 does not fire when strong deterministic authentic evidence is present too: such a row (a trusted
+#    C2PA camera signature + a planted generator field) is undetermined, and the conflict item says so.
+# 22: P0R-11 — a generator brand word is moderate and counts only in generator-specific fields (Software, parameters,
+#    prompt/workflow, xmp:CreatorTool); exif.Model / LensModel / Credit / dc:creator / header strings give a neutral fact;
+#    the image metadata generator items carry self_declared and 「자기 선언 메타데이터 — 심거나 지울 수 있음」; a brand
+#    source guess is LOW (was HIGH).
+# 23: P0R-12 — result.conclusion_caveats (why a manipulation / authenticity conclusion could be wrong); a manipulation
+#    verdict resting on a self-declared item says 「(자기 선언 메타데이터 — 심거나 지울 수 있음)」.
+# 24: P0R-13 — the deterministic kind label is 「재현 가능한 기록 근거」 in every rendering (the [기록/…] qualifiers, the CSV
+#    top_evidence_label, the evidence statement), and an evidence-grade 판단 불가 row shows no grade label (CSV
+#    grade_label blank). The JSON fields are unchanged.
+# 29: merge of techniques-2026b (TB, developed as its generations 18–28 on top of techniques-2026 generation 17)
+#    onto phase0 generation 24 — numbered past both sides (TB used 18–28, phase0 18–24, so 25–28 are taken) — a row now carries both sides: TB's text_invisible_marks (text/documents),
+#    document_structure (documents), platform_recompression / file_name_pattern / audio_channel_trace (images, video,
+#    audio; the cache key's "name:" token = matched file-name formats, layout content-v5), watermark_perth (audio, a
+#    video's audio track; tone-dominated signals skipped), device_ai_label and screen_capture (images), the
+#    generator-strings table and the C2PA signer naming item, the registry's FLUX.1 / SD 1 / SD 2 imwatermark
+#    messages — and phase0's container_metadata, ITL / exclusion C2PA rules, conclusion caveats and self_declared
+#    items; unsigned TB device / service labels carry self_declared. Neither side's earlier rows may be served.
+OUTPUT_FORMAT_GENERATION = 29
 
 
 def cache_extension(path: Path) -> str:
@@ -948,6 +955,10 @@ def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | No
     from .media_marks import registry_cache_tokens
 
     tokens += registry_cache_tokens()
+    # P0R-22: the container generator registry (AIGC producers, SEI vendor strings, tool-field brands).
+    from .container_metadata import registry_cache_tokens as container_registry_tokens
+
+    tokens += container_registry_tokens()
     # TB-4: the platform-trace library (JPEG tables, file-name formats, codec strings).
     from .platform_traces import library_cache_tokens
 

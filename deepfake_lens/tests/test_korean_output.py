@@ -890,20 +890,18 @@ class RenderedOutputsAreKoreanTest(unittest.TestCase):
     def test_web_report_html_pdf_and_signed_body(self) -> None:
         """G9: /api/report (stdlib web server and api-serve share it): HTML text, PDF text, the signed JSON body."""
         from deepfake_lens import webapp_api
-        from deepfake_lens.core import _thresholds_json
         from deepfake_lens.pdf_backend import import_pymupdf, pymupdf_available
 
-        body = json.dumps({
-            "items": [item.to_json() for item in self.items],
-            "thresholds": _thresholds_json(self.thresholds),
-            "coverage": {"weights_available": 0, "weights_total": 10},
-            "scan_root": str(self.folder),  # P1 (round 8): rows are relative to the scanned folder
-        }, ensure_ascii=False).encode("utf-8")
         from unittest import mock
 
         offenders: list[str] = []
         with mock.patch.object(webapp_api, "_READ_ROOTS", __import__("collections").OrderedDict()):
             webapp_api.configure_read_roots(self.folder)
+            # P0R-6: a report is built from a server-held scan job of the folder (its rows and provenance)
+            from urllib.parse import quote
+
+            job = webapp_api._scan_payload(f"folder={quote(str(self.folder))}", default_folder=self.folder)["scan_job"]
+            body = json.dumps({"scan_job": job}).encode("utf-8")
             html = webapp_api._report_payload(body, "html", default_folder=self.folder)
             self.assertIsInstance(html, bytes)
             assert isinstance(html, bytes)
@@ -997,7 +995,7 @@ class ApiErrorBodiesAreKoreanTest(unittest.TestCase):
             ("GET", "/api/preview", {"path": "/etc/passwd"}, None),
             ("POST", "/api/report", {}, b"{not json"),
             ("POST", "/api/report", {}, b"{}"),
-            ("POST", "/api/report", {}, b'{"items": [{"path": "a"}], "thresholds": 3}'),
+            ("POST", "/api/report", {}, b'{"items": [{"path": "a"}]}'),  # P0R-6: rows are no request field
             ("POST", "/api/feedback", {}, b"{}"),
             # N5: unknown routes and wrong methods — the frameworks' own
             # bodies were English ("Not Found", "Method Not Allowed",

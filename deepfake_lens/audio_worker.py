@@ -308,9 +308,16 @@ def prepare_process_numba_cache() -> None:
 def _error_reply(exc: BaseException) -> dict[str, Any]:
     import traceback
 
-    reply: dict[str, Any] = {"class": type(exc).__name__, "message": str(exc), "traceback": traceback.format_exc()}
+    from .native_path import restore_original_names
+
+    # R26-2 (round 26): a name this worker staged (the caller sent a non-ASCII absolute name — a relative ASCII name
+    # in a working folder with a non-ASCII name, `cd "f d"; scan .`) is put back here, where it is registered; the
+    # caller only knows its own staged names, so "'000001-….wav'" reached the row.
+    message = restore_original_names(str(exc))
+    reply: dict[str, Any] = {"class": type(exc).__name__, "message": message, "traceback": traceback.format_exc()}
     if isinstance(exc, OSError):
-        reply.update(errno=exc.errno, strerror=exc.strerror, filename=exc.filename if isinstance(exc.filename, str) else None)
+        filename = restore_original_names(exc.filename) if isinstance(exc.filename, str) else None
+        reply.update(errno=exc.errno, strerror=exc.strerror, filename=filename)
     return {"error": reply}
 
 

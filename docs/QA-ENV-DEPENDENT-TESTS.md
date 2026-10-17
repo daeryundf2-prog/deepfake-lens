@@ -38,7 +38,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | 사유(소스 원문) | 테스트가 실행되는 환경(필요 extras·도구) | 파일 |
 | --- | --- | --- |
 | `Linux /dev/full needed` | Linux(`/dev/full` — 디스크 가득 참(ENOSPC)을 흉내 내는 장치; R18-15) | test_output_files.py |
-| `Linux /proc needed` | Linux(`/proc` — `--allow-symlinks`가 `/proc`·`/sys` 가상 파일을 따라가지 않음을 확인, R18-10) | test_special_filesystem.py |
+| `Linux /proc needed` | Linux(`/proc` — `--allow-symlinks`가 `/proc`·`/sys` 가상 파일을 따라가지 않음을 확인, R18-10; PATH_MAX보다 깊은 작업 폴더의 비ASCII 이름을 `/proc/<pid>/cwd` 링크로 스테이징, R25-4 — `/proc`이 없는 OS의 경로는 R26-3 테스트가 확인) | test_native_path.py, test_special_filesystem.py |
 | `core_pattern is a pipe or a path — no core file in the working directory to look for` | Linux에서 `/proc/sys/kernel/core_pattern`이 `core`처럼 파이프·경로가 아닌 이름(코어 파일이 작업 폴더에 생기는 설정 — 게이트 이미지가 그렇다; R18-9) | test_shutdown.py |
 | `':' is not allowed in Windows file names` | Windows가 아닌 OS(POSIX) | test_archives.py, test_servers.py |
 | `OpenCV mp4v 인코더 없음` | `pixel`/`video` extra(opencv-python — mp4v 인코더 포함 빌드) | test_native_path.py |
@@ -59,6 +59,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `backslash is a path separator on Windows` | Windows가 아닌 OS(POSIX) | test_qa_in.py |
 | `c2pa-python and fixture required` | `provenance`/`dev` extra(c2pa-python) + `scripts/build_c2pa_fixture.py` 픽스처 | test_result_contract.py |
 | `c2pa-python not installed` | `provenance`/`dev` extra(c2pa-python) | test_c2pa.py |
+| `c2pa-python 없음` | `provenance`/`dev` extra(c2pa-python>=0.38) — C2PA 하드 바인딩 제외범위 공격 픽스처와 ITL 판독(P0R-20/21) | test_c2pa_exclusions.py |
 | `c2pa-python required for the SDK path` | `provenance`/`dev` extra(c2pa-python) | test_fail_closed.py |
 | `cannot create symlinks: {exc}` | 심볼릭 링크를 만들 수 있는 OS·권한(POSIX, Windows 개발자 모드) | test_cli_inputs.py, test_evidence_statement.py |
 | `checkpoint is present; auto-discovery would run real inference` | 체크포인트가 없는 환경에서만 실행(가중치를 받은 환경에서는 해당 없음) | test_aide_engine.py |
@@ -72,7 +73,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `fastapi installed; the missing-dep branch does not apply` | fastapi가 없는 환경에서만 실행(CI 기본 venv) | test_servers.py |
 | `fastapi/httpx not installed` | fastapi, httpx(QA 사이드 venv) | test_servers.py |
 | `fastapi/httpx required` | fastapi, httpx(QA 사이드 venv) | test_servers.py |
-| `ffmpeg 없음` | `ffmpeg` 실행 파일(PATH) — 음성 트랙이 있는 시험 영상을 만들고 추출 임시 파일을 관찰; 실제 ffmpeg 자식이 실행 중일 때 종료 신호(R15-1); 이름에 `:`가 있는 상대 경로 영상(R24-2); PATH_MAX보다 깊은 작업 폴더의 영상 음성 트랙(R24-3) | test_audio_worker.py, test_native_path.py, test_qa_out.py, test_shutdown.py |
+| `ffmpeg 없음` | `ffmpeg` 실행 파일(PATH) — 음성 트랙이 있는 시험 영상을 만들고 추출 임시 파일을 관찰; 실제 ffmpeg 자식이 실행 중일 때 종료 신호(R15-1); 이름에 `:`가 있는 상대 경로 영상(R24-2); PATH_MAX보다 깊은 작업 폴더의 영상 음성 트랙(R24-3); ffmpeg로 만든 MP4의 컨테이너 메타데이터(P0R-22) | test_audio_worker.py, test_container_metadata.py, test_native_path.py, test_qa_out.py, test_shutdown.py |
 | `ffmpeg가 시험 영상을 만들지 못함` | `ffmpeg`(lavfi 입력, mpeg4·aac 인코더 포함 빌드) | test_native_path.py |
 | `full-extras 골든은 다른 환경에서 기록됨: {difference}` | 골든 기록(`deepfake_lens/tests/golden_output.json`)의 `full_extras_environment`와 같은 선택 모듈·버전 구성(R16-5 — 0단계 기록 환경은 주 venv: `dev`+`full` extras). 다른 구성에서는 full-extras 골든 비교만 건너뛰고 stdlib 골든·문구 상수 해시는 항상 비교 | test_output_generation.py |
 | `full-extras 모듈 없음: {missing}` | `dev`+`full` extras(numpy, opencv, Pillow, scipy, librosa, scikit-learn, c2pa — R16-5 full-extras 골든이 비사진 안내 문구를 포함하는지 확인) | test_output_generation.py |

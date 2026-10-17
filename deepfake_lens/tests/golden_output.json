@@ -196,14 +196,14 @@
     },
     {
       "generation": 13,
-      "reason": "techniques-2026 item 1–2: C2PA 판독기가 동봉된 C2PA 공식 신뢰 목록으로 오프라인 검증(c2pa 검사 사유에 검증기 spec 버전·신뢰 목록), C2PA 2.x 사실 항목(AI 공개·소프트 바인딩·워터마크 액션·embedded data·화면 캡처·구성요소 출처 유형), 오디오·영상·문서 행에 c2pa 검사(.txt·.md는 건너뜀), XMP 디지털 출처 유형을 IPTC 전체 어휘로(자기 신고)",
-      "sha256": "b6dd21ad392b4756a2c62e5ab3f2a353a95a6e2266248979f6a431a74e66866a",
+      "reason": "R26-1: 압축 구성원 경로의 각 단계 경로에 ::·\\가 있거나 :로 시작·끝나면 이스케이프(inner.zip::b.png 구성원은 inner.zip\\:\\:b.png) — 같은 입력의 scan JSON이 바뀜(압축 행은 캐시되지 않음)",
+      "sha256": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
       "sets": {
-        "stdlib": "b6dd21ad392b4756a2c62e5ab3f2a353a95a6e2266248979f6a431a74e66866a",
-        "full-extras": "fca2881a7be80a563eb85ff1188d70b584001d208432e7982b8dbc95aedfcff2"
+        "stdlib": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+        "full-extras": "ece030016587b55c035311a0502994d510f0fc02294553470a0fe35cdb844a59"
       },
-      "constants_sha256": "9e61db393feef304b21dcf41d6df10146cee2242f30aa26151c3f02a73fadc73",
-      "constants_count": 57,
+      "constants_sha256": "379d6f9f707a3c0e87807041bd6fadfdd2d6999f41caa42a58eaf09a2907100e",
+      "constants_count": 56,
       "full_extras_environment": {
         "PIL": "pillow==12.3.0",
         "c2pa": "c2pa-python==0.38.0",
@@ -217,13 +217,13 @@
     },
     {
       "generation": 14,
-      "reason": "techniques-2026 item 3: 모든 이미지 행에 watermark_sdxl 검사(imwatermark dwtDct) — 등록된 SDXL 48비트 메시지와 정확히 일치할 때만 「SDXL 공식 파이프라인 워터마크 존재」, 그 밖에는 ran 「… 무정보」 또는 256px 미만 skipped; 워터마크 등록표가 캐시 키에 들어감",
-      "sha256": "bd472adc291d80ab2ed521d9621e531ae34ddab490c228289316bc1ffb73087f",
+      "reason": "R26-8: 새 사용자 문구 상수(result_text.ROW_IDENTITY_INVARIANT_BROKEN) — 행 식별자가 중복되거나 되돌아가지 않는 검사는 결과를 내지 않음; 정상 검사의 행은 바뀌지 않음",
+      "sha256": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
       "sets": {
-        "stdlib": "bd472adc291d80ab2ed521d9621e531ae34ddab490c228289316bc1ffb73087f",
-        "full-extras": "148b254949f33c2f4e217bdb08facf19f4e03e39044a21cf505adbcf7f7c9c48"
+        "stdlib": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+        "full-extras": "ece030016587b55c035311a0502994d510f0fc02294553470a0fe35cdb844a59"
       },
-      "constants_sha256": "9e61db393feef304b21dcf41d6df10146cee2242f30aa26151c3f02a73fadc73",
+      "constants_sha256": "6f131e070869e61776f999e33ba630130f9d308458ac162ad7682114858676cc",
       "constants_count": 57,
       "full_extras_environment": {
         "PIL": "pillow==12.3.0",
@@ -238,13 +238,13 @@
     },
     {
       "generation": 15,
-      "reason": "techniques-2026 item 4: 모든 이미지 행에 watermark_trustmark 검사(TrustMark Q·P·C ONNX 디코더; 기준 환경에는 onnxruntime이 없어 「의존성 부재: onnxruntime」로 건너뜀) — BCH 통과 패킷은 중립 사실, C2PA 소프트 바인딩 교차검증만 결론과 연결",
-      "sha256": "069039b7325745145cebb71f8e6cdab9755de56890bf19328781e9d7da846f06",
+      "reason": "R26-2: repr()가 이스케이프하는 이름(NBSP·TAB)이나 오디오 작업자가 스테이징한 이름을 적은 사유가 cd case; scan .·--workers 4에서도 <root>/…로 씀 — 그 실행에서 캐시된 세대 14 행은 '한글\\xa0x.wav'·'000001-….wav'였음",
+      "sha256": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
       "sets": {
-        "stdlib": "069039b7325745145cebb71f8e6cdab9755de56890bf19328781e9d7da846f06",
-        "full-extras": "8c7d61f2d4e0cb5a84cff2ef74c985d46a424a015e8fb87a9930bf1c49625ce0"
+        "stdlib": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+        "full-extras": "ece030016587b55c035311a0502994d510f0fc02294553470a0fe35cdb844a59"
       },
-      "constants_sha256": "9e61db393feef304b21dcf41d6df10146cee2242f30aa26151c3f02a73fadc73",
+      "constants_sha256": "6f131e070869e61776f999e33ba630130f9d308458ac162ad7682114858676cc",
       "constants_count": 57,
       "full_extras_environment": {
         "PIL": "pillow==12.3.0",
@@ -259,13 +259,13 @@
     },
     {
       "generation": 16,
-      "reason": "techniques-2026 item 5: 이미지·영상 행에 watermark_videoseal, 오디오·영상 행에 watermark_audioseal(선택 torch extra; 기준 환경에는 torch가 없어 「의존성 부재: torch」로 건너뜀) — 등록 메시지 일치만 생성기 귀속, 부재는 원본 아님",
-      "sha256": "75da09072aa69ed621f23e2ef52bd95743ea4c5504bef3f4a376958f0fc9128c",
+      "reason": "R26-4: ~$보고서.docx·~WRL0001.tmp·(POSIX의) con.png 같은 압축 구성원을 폴더의 같은 파일처럼 해제·분석함(거부되었음) — 같은 입력의 scan JSON이 바뀜(압축 행은 캐시되지 않음)",
+      "sha256": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
       "sets": {
-        "stdlib": "75da09072aa69ed621f23e2ef52bd95743ea4c5504bef3f4a376958f0fc9128c",
-        "full-extras": "2da3a5ebf2e962f9b2baec1d1db66b2fbcc6f28f0cc422f24461c01564e2f156"
+        "stdlib": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+        "full-extras": "ece030016587b55c035311a0502994d510f0fc02294553470a0fe35cdb844a59"
       },
-      "constants_sha256": "9e61db393feef304b21dcf41d6df10146cee2242f30aa26151c3f02a73fadc73",
+      "constants_sha256": "6f131e070869e61776f999e33ba630130f9d308458ac162ad7682114858676cc",
       "constants_count": 57,
       "full_extras_environment": {
         "PIL": "pillow==12.3.0",
@@ -280,13 +280,13 @@
     },
     {
       "generation": 17,
-      "reason": "techniques-2026 item 6: 매체·문서 행마다 result.marking_context와 마지막 근거 항목 「기계판독 표식 확인 결과(EU 인공지능법 제50조·인공지능기본법 관련)」, coverage online_detection(온라인 전용 검출, 늘 건너뜀) — 표식 부재는 원본성 근거가 아님",
-      "sha256": "659837dc6f4a0393b00acd271724cec8bda9c8d349b6baef20d50c08066e7927",
+      "reason": "R26-10: 시간 상한에 걸린 ffmpeg 단계가 단계·파일·상한을 적음(FfmpegTimeout: ffmpeg 시간 초과 — …); 세대 16 행은 TimeoutExpired: 라이브러리 오류(TimeoutExpired)였음",
+      "sha256": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
       "sets": {
-        "stdlib": "659837dc6f4a0393b00acd271724cec8bda9c8d349b6baef20d50c08066e7927",
-        "full-extras": "7cbcf118a39298d7424bc404d5c6d5abb63ca9ef6a0eb9e5421587da30392746"
+        "stdlib": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+        "full-extras": "ece030016587b55c035311a0502994d510f0fc02294553470a0fe35cdb844a59"
       },
-      "constants_sha256": "9e61db393feef304b21dcf41d6df10146cee2242f30aa26151c3f02a73fadc73",
+      "constants_sha256": "6f131e070869e61776f999e33ba630130f9d308458ac162ad7682114858676cc",
       "constants_count": 57,
       "full_extras_environment": {
         "PIL": "pillow==12.3.0",
@@ -301,14 +301,14 @@
     },
     {
       "generation": 18,
-      "reason": "TB-1: text_invisible_marks on text/document rows; c2pa text skip reason",
-      "sha256": "d0d660aef268a6d41804e4842a039b0c99d0b3b7f5e5eebe2101ec5f6416080b",
+      "reason": "techniques-2026 병합(R26 세대 17 위): C2PA 오프라인 신뢰 목록 검증·C2PA 2.x 사실 항목·오디오·영상·문서 c2pa 검사, watermark_sdxl·watermark_trustmark·watermark_videoseal·watermark_audioseal 검사, marking_context·기계판독 표식 항목·online_detection — 두 갈래의 세대 13~17 행은 서로의 변경이 없어 캐시에서 쓰지 않음",
+      "sha256": "659837dc6f4a0393b00acd271724cec8bda9c8d349b6baef20d50c08066e7927",
       "sets": {
-        "stdlib": "d0d660aef268a6d41804e4842a039b0c99d0b3b7f5e5eebe2101ec5f6416080b",
-        "full-extras": "a62926e22458a2d8246a21dfd79cf730ed6ccf6aced75d0e1d591b94528a6c94"
+        "stdlib": "659837dc6f4a0393b00acd271724cec8bda9c8d349b6baef20d50c08066e7927",
+        "full-extras": "7cbcf118a39298d7424bc404d5c6d5abb63ca9ef6a0eb9e5421587da30392746"
       },
-      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
-      "constants_count": 57,
+      "constants_sha256": "d97b9702326ff1347338dfc4c97494b8c090189499adb9c95c7fd940f8b682bd",
+      "constants_count": 58,
       "full_extras_environment": {
         "PIL": "pillow==12.3.0",
         "c2pa": "c2pa-python==0.38.0",
@@ -322,14 +322,14 @@
     },
     {
       "generation": 19,
-      "reason": "TB-6: document_structure on document rows",
-      "sha256": "d0d660aef268a6d41804e4842a039b0c99d0b3b7f5e5eebe2101ec5f6416080b",
+      "reason": "P0R-22/P0R-23: 영상·음성 행(이미지는 GB 45438 AIGC 라벨)에 container_metadata 검사(MP4·SEI·ID3·RIFF INFO·FLAC 사실, 등록된 생성기 선언만 자기 선언 생성 근거), 근거 항목의 self_declared, 영상 출처 추정 문구가 없던 검사를 주장하지 않음",
+      "sha256": "d1a8f678b2f57d7c8f4b3a7fff0c694fcb34cdc37b925c8e1945aedf5be47e46",
       "sets": {
-        "stdlib": "d0d660aef268a6d41804e4842a039b0c99d0b3b7f5e5eebe2101ec5f6416080b",
-        "full-extras": "a62926e22458a2d8246a21dfd79cf730ed6ccf6aced75d0e1d591b94528a6c94"
+        "stdlib": "d1a8f678b2f57d7c8f4b3a7fff0c694fcb34cdc37b925c8e1945aedf5be47e46",
+        "full-extras": "9e9660655a597aba8ebd726039ccb5bf854686626dbda1bd04267935237eb798"
       },
-      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
-      "constants_count": 57,
+      "constants_sha256": "eb43be685aa21565adbe6e836d313be230b222deed5ab25b2ab393d8a81abcea",
+      "constants_count": 59,
       "full_extras_environment": {
         "PIL": "pillow==12.3.0",
         "c2pa": "c2pa-python==0.38.0",
@@ -343,14 +343,14 @@
     },
     {
       "generation": 20,
-      "reason": "TB-4: platform_recompression, file_name_pattern, audio_channel_trace; cache key content-v5 (+ file name)",
-      "sha256": "83bc325c3e0896001ca7ace2cf3674161c763718105d596223d6a30d4936dc63",
+      "reason": "P0R-20/P0R-21: C2PA 하드 바인딩 제외범위가 콘텐츠를 빼면 c2pa 검사 실패(C2PA 해시 제외범위 이상), C2PA 검증 기준 문구에 동결된 임시 신뢰 목록(ITL)과 폐기 미확인, ITL에만 연결된 서명은 보통 근거",
+      "sha256": "d1a8f678b2f57d7c8f4b3a7fff0c694fcb34cdc37b925c8e1945aedf5be47e46",
       "sets": {
-        "stdlib": "83bc325c3e0896001ca7ace2cf3674161c763718105d596223d6a30d4936dc63",
-        "full-extras": "199076421f526ad15ab0644ded40f4e325214a8dc6b34dc1fb9b6074def26d92"
+        "stdlib": "d1a8f678b2f57d7c8f4b3a7fff0c694fcb34cdc37b925c8e1945aedf5be47e46",
+        "full-extras": "8f3901f19cce1b55774ac44605465356717443bd09c11e2578b0a9e3003db0a0"
       },
-      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
-      "constants_count": 57,
+      "constants_sha256": "eb43be685aa21565adbe6e836d313be230b222deed5ab25b2ab393d8a81abcea",
+      "constants_count": 59,
       "full_extras_environment": {
         "PIL": "pillow==12.3.0",
         "c2pa": "c2pa-python==0.38.0",
@@ -364,14 +364,14 @@
     },
     {
       "generation": 21,
-      "reason": "TB-2: watermark_perth on audio rows and video audio tracks; registry 2026-10-17.1",
-      "sha256": "4aba9a4a40581f81c759b105d8c7bed515e36f1e24a8621dd66f1a09e3917aad",
+      "reason": "P0R-10: 강한 원본성 근거와 강한 생성 근거가 함께 있으면 규칙 2가 발동하지 않음(근거 충돌 — 판단 불가)",
+      "sha256": "d1a8f678b2f57d7c8f4b3a7fff0c694fcb34cdc37b925c8e1945aedf5be47e46",
       "sets": {
-        "stdlib": "4aba9a4a40581f81c759b105d8c7bed515e36f1e24a8621dd66f1a09e3917aad",
-        "full-extras": "7c9edc5bf4fcfbf7cf04ef9f78f4382a8da52769450f09ead5926fa29fd692d8"
+        "stdlib": "d1a8f678b2f57d7c8f4b3a7fff0c694fcb34cdc37b925c8e1945aedf5be47e46",
+        "full-extras": "8f3901f19cce1b55774ac44605465356717443bd09c11e2578b0a9e3003db0a0"
       },
-      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
-      "constants_count": 57,
+      "constants_sha256": "eb43be685aa21565adbe6e836d313be230b222deed5ab25b2ab393d8a81abcea",
+      "constants_count": 59,
       "full_extras_environment": {
         "PIL": "pillow==12.3.0",
         "c2pa": "c2pa-python==0.38.0",
@@ -385,14 +385,14 @@
     },
     {
       "generation": 22,
-      "reason": "TB-3: device_ai_label on image rows",
-      "sha256": "c407f6161110f65d16101b0922de3af7e588ee344c2c713ddbad737fb8fc268c",
+      "reason": "P0R-11: 생성기 이름(브랜드 단어)은 생성 도구 필드(Software·parameters·prompt·workflow·CreatorTool)에서만 보통 근거, exif.Model·LensModel·Credit·dc:creator·헤더 문자열은 중립 사실, 이미지 생성 도구 항목에 self_declared와 자기 선언 문구",
+      "sha256": "7e5c184f734d085dc97a75b4568c74234ba365fc299fef0298fd9f50bcfda0e7",
       "sets": {
-        "stdlib": "c407f6161110f65d16101b0922de3af7e588ee344c2c713ddbad737fb8fc268c",
-        "full-extras": "c74157a8096e93585227325576c018328c55c0df38b2e42c62cab2bb98527b42"
+        "stdlib": "7e5c184f734d085dc97a75b4568c74234ba365fc299fef0298fd9f50bcfda0e7",
+        "full-extras": "472948ac07e7395f4ad58059ba49f2e2432cd99722d95837a3f167c96245828a"
       },
-      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
-      "constants_count": 57,
+      "constants_sha256": "eb43be685aa21565adbe6e836d313be230b222deed5ab25b2ab393d8a81abcea",
+      "constants_count": 59,
       "full_extras_environment": {
         "PIL": "pillow==12.3.0",
         "c2pa": "c2pa-python==0.38.0",
@@ -406,14 +406,14 @@
     },
     {
       "generation": 23,
-      "reason": "TB-5: screen_capture on image rows",
-      "sha256": "895a0f00070f1877a662fe84d5d734efb8a3056bc8511a5983a952275a0a80f6",
+      "reason": "P0R-12: result.conclusion_caveats(이 결론이 틀릴 수 있는 이유), 자기 선언 근거의 조작 결론 문장에 「(자기 선언 메타데이터 — 심거나 지울 수 있음)」",
+      "sha256": "5f350026c555dc7410d916223b0211fa55129e5cec5836787dd0e3f325a62eb3",
       "sets": {
-        "stdlib": "895a0f00070f1877a662fe84d5d734efb8a3056bc8511a5983a952275a0a80f6",
-        "full-extras": "388323af9e48617880ea5b601639ede3175ec4a04672e27b7b75822db9ea5c3a"
+        "stdlib": "5f350026c555dc7410d916223b0211fa55129e5cec5836787dd0e3f325a62eb3",
+        "full-extras": "cf44c69dd0cf1cdac066344ae197e3bea4f8782b441f93942af6db7e8326197b"
       },
-      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
-      "constants_count": 57,
+      "constants_sha256": "0fe55dfdc7d8916124b9fec00cd87687e99e90373c1ecf1c43f2d5b3dc5ced41",
+      "constants_count": 60,
       "full_extras_environment": {
         "PIL": "pillow==12.3.0",
         "c2pa": "c2pa-python==0.38.0",
@@ -427,14 +427,14 @@
     },
     {
       "generation": 24,
-      "reason": "TB-7: generator-strings table; C2PA signer naming item",
-      "sha256": "895a0f00070f1877a662fe84d5d734efb8a3056bc8511a5983a952275a0a80f6",
+      "reason": "P0R-13: 결정적 근거 표시를 「재현 가능한 기록 근거」로, 판단 불가 행의 등급 라벨 표시 안 함",
+      "sha256": "f675dfb6a4bae3ef03a56eea1cddb49974f7893575d9ab775bbd9701d9e99189",
       "sets": {
-        "stdlib": "895a0f00070f1877a662fe84d5d734efb8a3056bc8511a5983a952275a0a80f6",
-        "full-extras": "388323af9e48617880ea5b601639ede3175ec4a04672e27b7b75822db9ea5c3a"
+        "stdlib": "f675dfb6a4bae3ef03a56eea1cddb49974f7893575d9ab775bbd9701d9e99189",
+        "full-extras": "818b003103b052ece69dc22d4218f2f1e3172f1ffae6394a1e30a37d277d0c7e"
       },
-      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
-      "constants_count": 57,
+      "constants_sha256": "04149d08d78eb64c812ba095e748397a1151899430f48fbdd1ead27ab8f0417d",
+      "constants_count": 60,
       "full_extras_environment": {
         "PIL": "pillow==12.3.0",
         "c2pa": "c2pa-python==0.38.0",
@@ -447,78 +447,15 @@
       }
     },
     {
-      "generation": 25,
-      "reason": "TB-8: imwatermark registry adds FLUX.1 reference and SD 1/2 script messages; titles per pipeline",
-      "sha256": "dcad8b85eb815bfe3fa8a9086d984a0de645a1456ffab007528062db9fa9f755",
+      "generation": 29,
+      "reason": "merge of techniques-2026b (TB generations 18-28) onto phase0 generation 24: checks of both sides; self_declared on unsigned TB labels",
+      "sha256": "eec4be3ff4a28f63e39507291e29c97e3d7ad7ef54e2f082ced26243b1509edc",
       "sets": {
-        "stdlib": "dcad8b85eb815bfe3fa8a9086d984a0de645a1456ffab007528062db9fa9f755",
-        "full-extras": "9ef7afb0f14f4007c6d8afd16901d9aa0ba713a2aa879fbf2cf41862020e3e0d"
+        "stdlib": "eec4be3ff4a28f63e39507291e29c97e3d7ad7ef54e2f082ced26243b1509edc",
+        "full-extras": "c3f480d9e9a137b32d5c723b48b0b5ef84f0c53c456b722f22e9d394735abe0c"
       },
-      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
-      "constants_count": 57,
-      "full_extras_environment": {
-        "PIL": "pillow==12.3.0",
-        "c2pa": "c2pa-python==0.38.0",
-        "cv2": "opencv-python==5.0.0.93",
-        "librosa": "librosa==1.0.0",
-        "numpy": "numpy==2.5.4",
-        "scipy": "scipy==1.18.1",
-        "sklearn": "scikit-learn==1.9.1",
-        "soundfile": "soundfile==0.14.0"
-      }
-    },
-    {
-      "generation": 26,
-      "reason": "TB-2 fix: PerTh skips tone-dominated signals; wording without English runs",
-      "sha256": "cd55084ce585258d14ff50cd14eb2ff34126e6593d523fba34c5cb737aebeebb",
-      "sets": {
-        "stdlib": "cd55084ce585258d14ff50cd14eb2ff34126e6593d523fba34c5cb737aebeebb",
-        "full-extras": "4bfb03c62174d345348e67ae4982b2df26a5d06d1bde0e989f9a475ce8a967ee"
-      },
-      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
-      "constants_count": 57,
-      "full_extras_environment": {
-        "PIL": "pillow==12.3.0",
-        "c2pa": "c2pa-python==0.38.0",
-        "cv2": "opencv-python==5.0.0.93",
-        "librosa": "librosa==1.0.0",
-        "numpy": "numpy==2.5.4",
-        "scipy": "scipy==1.18.1",
-        "sklearn": "scikit-learn==1.9.1",
-        "soundfile": "soundfile==0.14.0"
-      }
-    },
-    {
-      "generation": 27,
-      "reason": "TB-3/4/5/7 wording: table texts without English runs; screen-size model lists quoted",
-      "sha256": "281807a0b385142f1af40269a6c398bb2d74ae7b33853a76f34c226bb07a9657",
-      "sets": {
-        "stdlib": "281807a0b385142f1af40269a6c398bb2d74ae7b33853a76f34c226bb07a9657",
-        "full-extras": "dff81a0030b4dee47e996d18951058a00a588095c17a9d8e63a63d170b9f6e45"
-      },
-      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
-      "constants_count": 57,
-      "full_extras_environment": {
-        "PIL": "pillow==12.3.0",
-        "c2pa": "c2pa-python==0.38.0",
-        "cv2": "opencv-python==5.0.0.93",
-        "librosa": "librosa==1.0.0",
-        "numpy": "numpy==2.5.4",
-        "scipy": "scipy==1.18.1",
-        "sklearn": "scikit-learn==1.9.1",
-        "soundfile": "soundfile==0.14.0"
-      }
-    },
-    {
-      "generation": 28,
-      "reason": "TB-4 perf: soundfile decode for the bandwidth measurement",
-      "sha256": "281807a0b385142f1af40269a6c398bb2d74ae7b33853a76f34c226bb07a9657",
-      "sets": {
-        "stdlib": "281807a0b385142f1af40269a6c398bb2d74ae7b33853a76f34c226bb07a9657",
-        "full-extras": "dff81a0030b4dee47e996d18951058a00a588095c17a9d8e63a63d170b9f6e45"
-      },
-      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
-      "constants_count": 57,
+      "constants_sha256": "ce950cc854c40bac6e026feac4250e0ad93d8ddd05499e53aceb7d87bb60aa76",
+      "constants_count": 60,
       "full_extras_environment": {
         "PIL": "pillow==12.3.0",
         "c2pa": "c2pa-python==0.38.0",

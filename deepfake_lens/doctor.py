@@ -513,7 +513,7 @@ def format_report(report: DoctorReport) -> str:
     )
     if not runnable:
         lines.append(
-            "!! 실행 가능한 모델 프로필 없음 — 검사 결과는 결정적 근거(메타데이터·C2PA)와 참고 신호뿐이며 "
+            "!! 실행 가능한 모델 프로필 없음 — 검사 결과는 재현 가능한 기록 근거(메타데이터·C2PA)와 참고 신호뿐이며 "
             "모델 검사는 검사 범위(coverage)에 미실행/실패로 기록됩니다 !!"
         )
     lines.append(f"\n== {SECTION_TITLES['model_profiles']} ==")

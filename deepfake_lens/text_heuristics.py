@@ -178,7 +178,8 @@ def _direct_tool_guess(normalized: str) -> SourceGuess | None:
     rules = tool_guess_rules()
     for label, markers, reason in rules:
         if any(re.search(rf"(?:^|\s){re.escape(marker)}(?:\s|$)", normalized) for marker in markers):
-            return SourceGuess(label, SourceConfidence.HIGH, [reason])
+            # P0R-11: a brand word is a weak attribution ("Firefly Studio" is also a photo studio) — LOW, never HIGH.
+            return SourceGuess(label, SourceConfidence.LOW, [reason])
     return None
 
 

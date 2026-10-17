@@ -113,15 +113,14 @@ class NoBuiltInLawFirmTest(_Isolated):
             self.assertNotIn(needle, text)
 
     def test_web_reports_have_no_built_in_identity(self) -> None:
-        from deepfake_lens.analysis_api import AnalysisOptions, scan_folder_run, scan_payload
+        from deepfake_lens.tests.report_jobs import scan_job_for
         from deepfake_lens.webapp import build_server
 
-        run = scan_folder_run(self.case, AnalysisOptions())
-        rows = scan_payload(run.summary, run.items, run.thresholds, AnalysisOptions())["items"]
         roots: Any = mock.patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
         roots.start()
         self.addCleanup(roots.stop)
         server = build_server("127.0.0.1", 0, default_folder=self.case)
+        job = scan_job_for(self.case)  # P0R-6: the report is built from a server-held scan job
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
@@ -130,7 +129,7 @@ class NoBuiltInLawFirmTest(_Isolated):
             with self.subTest(format=fmt):
                 request = urllib.request.Request(
                     f"http://127.0.0.1:{server.server_address[1]}/api/report?format={fmt}",
-                    data=json.dumps({"items": rows, "scan_root": str(self.case)}).encode("utf-8"),  # P1: the scanned folder
+                    data=json.dumps({"scan_job": job}).encode("utf-8"),
                     headers={"X-Deepfake-Lens-Client": "gui", "Content-Type": "application/json"},
                     method="POST",
                 )

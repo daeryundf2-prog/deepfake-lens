@@ -209,10 +209,14 @@ class PdfLayout:
     def wrap(self, text: str, width: float, size: float) -> list[str]:
         """``text`` broken into lines no wider than ``width`` (measured), keeping every character.
 
-        R23-4: measured and returned in its drawable form (:meth:`drawable`).
+        R23-4: measured and returned in its drawable form (:meth:`drawable`). R26-6 (round 26): names and reasons in
+        :func:`result_text.display_name`'s (Markdown) form print their "|" as it is, like the examiner's fields
+        (:func:`result_text.pdf_text_from_markdown`) — every string a PDF lays out passes here.
         """
+        from .result_text import pdf_text_from_markdown
+
         lines: list[str] = []
-        for paragraph in self.drawable(str(text)).split("\n"):
+        for paragraph in self.drawable(pdf_text_from_markdown(str(text))).split("\n"):
             lines.extend(self._wrap_paragraph(paragraph, width, size))
         return lines or [""]
 

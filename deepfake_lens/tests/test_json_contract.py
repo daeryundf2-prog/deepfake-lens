@@ -311,7 +311,7 @@ class ScanJsonSchemaValidationTest(unittest.TestCase):
             for item in payload["items"] if item["result"] for entry in item["result"]["coverage"]
         ))
         self.assertEqual(_errors(payload), [])
-        self.assertEqual(_errors(sign_report(payload, b"contract-test-key")), [])
+        self.assertEqual(_errors(sign_report(payload, b"contract-test-key-0123456789abcdef")), [])
         self.assertEqual(_errors(sign_report(payload, None)), [])
 
     @unittest.skipUnless(HAVE_FASTAPI and HAVE_PIL, "fastapi + httpx not installed — stream payload")

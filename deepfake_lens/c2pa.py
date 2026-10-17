@@ -13,6 +13,10 @@ from __future__ import annotations
 import struct
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .c2pa_binding import HardBindingVerdict
 from .layer_diagnostic import REFERENCE_BAND, UNAVAILABLE_BAND
 from .native_path import native_safe_path
 from .error_text import exception_text, failure_reason
@@ -149,6 +153,14 @@ def analyze_metadata_forensic(path: Path | str) -> MetadataForensicAnalysis:
             0,
         ))
         limitations.append(f"{unreadable} — 출처 표준 메타데이터(C2PA)의 존재 여부를 확인하지 못했습니다.")
+    elif sdk_validation is not None and sdk_validation.get("error_kind") == "hash_exclusion":
+        # P0R-20: a hard-binding whose exclusions empty the asset. Reference-only
+        # here (no verdict), but never shown as a mild "검증 미완료".
+        has_c2pa = True
+        binding = sdk_validation.get("hard_binding") or {}
+        reason = str(binding.get("reason") if isinstance(binding, dict) else "") or "C2PA 해시 제외범위 이상"
+        signals.append(ForensicEvidenceSignal("C2PA 하드 바인딩 제외범위 이상", reason, 0))
+        limitations.append(reason)
     elif sdk_validation is not None and sdk_validation.get("present"):
         has_c2pa = True
         signature = sdk_validation.get("signature") or {}
@@ -288,6 +300,12 @@ def _error_analysis(message: str) -> MetadataForensicAnalysis:
 # issue date, retrieval date, sha256); its bytes are checked against that
 # sha256 before every use — a changed file fails the check (fail closed).
 TRUST_BUNDLE_MANIFEST = Path(__file__).resolve().parent / "models" / "c2pa-trust.json"
+# P0R-21: the frozen Interim Trust List (ITL) — a second, separate bundle. A signer is checked against the official
+# list (+ operator anchors) first; only an untrusted signer is checked again against the ITL alone, and an ITL-only
+# chain is recorded as such (trust_list "itl"), never as the current list.
+ITL_BUNDLE_MANIFEST = Path(__file__).resolve().parent / "models" / "c2pa-itl.json"
+# No revocation data is bundled: CRL/OCSP are not checked offline (OCSP fetching is off below).
+C2PA_REVOCATION_NOTE = "인증서 폐기 여부는 확인하지 않음(오프라인 폐기 목록 미적용·OCSP 조회 안 함 — 폐기된 서명 인증서도 신뢰로 보일 수 있음)"
 # Operator-added anchors (PEM file): a deployment's own CA, or a test CA.
 TRUST_ANCHORS_ENV = "DEEPFAKE_LENS_C2PA_TRUST_ANCHORS"
 # No network at analysis time: c2pa-rs would otherwise fetch a remote
@@ -299,18 +317,20 @@ class C2paTrustError(RuntimeError):
     """The trust bundle or the operator's anchors cannot be used (Korean message) — the check fails."""
 
 
-def _trust_bundle() -> tuple[dict[str, object], str]:
+def _trust_bundle(manifest: Path | None = None) -> tuple[dict[str, object], str]:
     import hashlib
     import json
 
+    manifest = manifest or TRUST_BUNDLE_MANIFEST  # looked up at call time (tests patch the module attribute)
+
     try:
-        meta = json.loads(TRUST_BUNDLE_MANIFEST.read_text(encoding="utf-8"))
-        pem_path = TRUST_BUNDLE_MANIFEST.parent / str(meta["file"])
+        meta = json.loads(manifest.read_text(encoding="utf-8"))
+        pem_path = manifest.parent / str(meta["file"])
         data = pem_path.read_bytes()
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise C2paTrustError(f"C2PA 신뢰 목록을 읽을 수 없습니다: {exception_text(exc)}") from exc
     if hashlib.sha256(data).hexdigest() != str(meta.get("sha256", "")):
-        raise C2paTrustError("C2PA 신뢰 목록 무결성 불일치(models/c2pa-trust.json의 sha256과 다름)")
+        raise C2paTrustError(f"C2PA 신뢰 목록 무결성 불일치(models/{manifest.name}의 sha256과 다름)")
     return meta, data.decode("ascii", errors="strict")
 
 
@@ -335,6 +355,7 @@ def _operator_anchors() -> tuple[str, str] | None:
 def trust_basis() -> dict[str, object]:
     """What the signer is checked against — recorded with every validation (and in the cache key)."""
     meta, _ = _trust_bundle()
+    itl, _ = _trust_bundle(ITL_BUNDLE_MANIFEST)
     operator = _operator_anchors()
     return {
         "id": meta.get("id"),
@@ -342,6 +363,9 @@ def trust_basis() -> dict[str, object]:
         "retrieved": meta.get("retrieved"),
         "sha256": meta.get("sha256"),
         "operator_anchors_sha256": operator[1] if operator else None,
+        "itl_id": itl.get("id"),
+        "itl_sha256": itl.get("sha256"),
+        "revocation": "not_checked",
     }
 
 
@@ -352,6 +376,10 @@ def trust_basis_text(basis: object) -> str:
     text = f"{basis.get('id')} {basis.get('list_issue_date')}판(sha256 {str(basis.get('sha256'))[:12]}…)"
     if basis.get("operator_anchors_sha256"):
         text += f" + 운영자 지정 앵커({TRUST_ANCHORS_ENV}, sha256 {str(basis['operator_anchors_sha256'])[:12]}…)"
+    if basis.get("itl_sha256"):
+        text += f"; 동결된 임시 신뢰 목록 ITL(sha256 {str(basis['itl_sha256'])[:12]}…)은 별도 확인"
+    if basis.get("revocation") == "not_checked":
+        text += f"; {C2PA_REVOCATION_NOTE}"
     return text
 
 
@@ -361,11 +389,17 @@ def trust_cache_tokens() -> list[str]:
         basis = trust_basis()
     except C2paTrustError as exc:
         return [f"c2pa-trust:error:{str(exc)[:60]}"]
-    return [f"c2pa-trust:{basis.get('id')}:{basis.get('sha256')}:operator:{basis.get('operator_anchors_sha256')}"]
+    return [f"c2pa-trust:{basis.get('id')}:{basis.get('sha256')}:operator:{basis.get('operator_anchors_sha256')}:itl:{basis.get('itl_sha256')}"]
 
 
-def reader_settings() -> dict[str, object]:
-    """The c2pa-python Settings dict: offline verification + bundled (and operator) trust anchors."""
+def reader_settings(*, itl: bool = False) -> dict[str, object]:
+    """The c2pa-python Settings dict: offline verification + bundled (and operator) trust anchors.
+
+    ``itl`` (P0R-21): the frozen Interim Trust List's anchors alone, for the second check of an untrusted signer.
+    """
+    if itl:
+        _, itl_pem = _trust_bundle(ITL_BUNDLE_MANIFEST)
+        return {"verify": dict(OFFLINE_VERIFY_SETTINGS), "trust": {"trust_anchors": itl_pem}}
     _, pem = _trust_bundle()
     trust: dict[str, object] = {"trust_anchors": pem}
     operator = _operator_anchors()
@@ -431,9 +465,17 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
                 "error_kind": "not_supported" if _is_c2pa_error(c2pa, exc, "NotSupported") else "reader_error",
             }
         try:
+            import json
+
             state = str(reader.get_validation_state())
             manifest = reader.get_active_manifest() or {}
             results = reader.get_validation_results() or {}
+            # P0R-20: the public json() omits the hard-binding assertion; its
+            # exclusion ranges are only in detailed_json()'s assertion_store.
+            try:
+                detailed = json.loads(reader.detailed_json())
+            except Exception:  # noqa: BLE001 - detailed_json is best-effort; absence is audited as a parse anomaly below
+                detailed = {}
         except Exception as exc:
             return {"present": True, "status": "unavailable", "error": failure_reason(exc), "error_kind": "validation_error"}
         finally:
@@ -441,6 +483,10 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
                 reader.close()
             except Exception:
                 pass
+        # P0R-20: audit the hard-binding exclusions while the (possibly staged) file still exists — by chunk /
+        # segment headers, never reading the whole file.
+        binding = _audit_hard_binding(detailed, str(native_media))
+        itl_trusted = binding.ok and _untrusted(results) and _itl_trusted(c2pa, native_media)
 
     success_codes: list[str] = []
     failure_codes: list[str] = []
@@ -459,12 +505,26 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
     # signer in newer SDK releases.
     valid_state = state.lower() in {"valid", "trusted"}
     facts = manifest_facts(manifest if isinstance(manifest, dict) else {})
+    # P0R-20: audit the active manifest's hard-binding (content hash) exclusions.
+    # A valid signature whose exclusions empty the asset is still untrustworthy
+    # — fail closed: force status "invalid" / error_kind "hash_exclusion" and
+    # add a failure code so no "hash match" success remains.
+    if not binding.ok:
+        valid_state = False
+        if "c2pa.hash.exclusion.invalid" not in failure_codes:
+            failure_codes.append("c2pa.hash.exclusion.invalid")
     return {
         "present": True,
         "status": "valid" if valid_state else "invalid",
         "state": state,
-        "trusted": "signingCredential.trusted" in success_codes
+        "hard_binding": binding.to_json(),
+        "error_kind": "hash_exclusion" if not binding.ok else None,
+        "trusted": binding.ok and "signingCredential.trusted" in success_codes
         and "signingCredential.trusted" not in failure_codes,
+        # P0R-21: which list the signer chained to — the official C2PA Trust List (or an operator anchor), the
+        # frozen Interim Trust List only, or neither.
+        "trust_list": _trust_list_label(binding.ok and "signingCredential.trusted" in success_codes
+                                        and "signingCredential.trusted" not in failure_codes, itl_trusted),
         "signature": dict(signature) if isinstance(signature, dict) else {},
         "success_codes": success_codes,
         "failure_codes": failure_codes,
@@ -597,6 +657,66 @@ def manifest_facts(manifest: dict[str, object]) -> dict[str, object]:
         "claim_spec_version": claim_spec or _text(manifest.get("specVersion") or ""),
         "claim_version": _text(manifest.get("claim_version") or ""),
     }
+
+
+def _untrusted(results: object) -> bool:
+    """No ``signingCredential.trusted`` success code in the SDK's validation results."""
+    if not isinstance(results, dict):
+        return True
+    for section in results.values():
+        if isinstance(section, dict):
+            for item in section.get("success", []) or []:
+                if isinstance(item, dict) and item.get("code") == "signingCredential.trusted":
+                    return False
+    return True
+
+
+def _itl_trusted(sdk: object, native_media: object) -> bool:
+    """P0R-21: the signer chains to the frozen Interim Trust List (checked against its anchors alone)."""
+    try:
+        context = sdk.Context(sdk.Settings.from_dict(reader_settings(itl=True)))  # type: ignore[attr-defined]
+        reader = sdk.Reader(native_media, context=context)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - the first validation already recorded the manifest; this only labels its trust
+        return False
+    try:
+        return not _untrusted(reader.get_validation_results() or {})
+    except Exception:  # noqa: BLE001 - as above
+        return False
+    finally:
+        try:
+            reader.close()
+        except Exception:  # noqa: BLE001, S110 - closing a reader that failed is best effort
+            pass
+
+
+def _trust_list_label(trusted: bool, itl_trusted: bool) -> str | None:
+    import os
+
+    if trusted:
+        return "c2pa_or_operator" if os.environ.get(TRUST_ANCHORS_ENV, "").strip() else "c2pa"
+    return "itl" if itl_trusted else None
+
+
+def _active_assertion_store(detailed: object) -> dict[str, object]:
+    """The active manifest's ``assertion_store`` (label -> data) from ``detailed_json`` output."""
+    if not isinstance(detailed, dict):
+        return {}
+    manifests = detailed.get("manifests")
+    active = detailed.get("active_manifest")
+    if not isinstance(manifests, dict):
+        return {}
+    manifest = manifests.get(active) if active in manifests else None
+    if manifest is None and manifests:
+        manifest = next(iter(manifests.values()))
+    store = manifest.get("assertion_store") if isinstance(manifest, dict) else None
+    return store if isinstance(store, dict) else {}
+
+
+def _audit_hard_binding(detailed: object, media_path: str) -> "HardBindingVerdict":
+    """P0R-20: audit the active manifest's hard-binding (content hash) exclusions."""
+    from .c2pa_binding import audit_assertion_store
+
+    return audit_assertion_store(_active_assertion_store(detailed), media_path)
 
 
 def _is_c2pa_error(sdk: object, exc: BaseException, kind: str) -> bool:

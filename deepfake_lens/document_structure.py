@@ -215,7 +215,7 @@ def pdf_evidence(facts: PdfFacts) -> list[EvidenceItem]:
             "PDF 작성 도구 기록 이력",
             f"같은 항목({', '.join(facts.changed_tool_fields)})에 서로 다른 작성·생성 도구 값이 기록되어 있습니다(파일 순서): {shown}"
             + (f" 외 {len(facts.tools) - MAX_VALUES}개" if len(facts.tools) > MAX_VALUES else "") + f". {SELF_DECLARED}",
-            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, DOCUMENT_STRUCTURE_LAYER,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, DOCUMENT_STRUCTURE_LAYER, self_declared=True,
         ))
     if facts.c2pa_embedded:
         items.append(EvidenceItem(
@@ -312,14 +312,14 @@ def ooxml_evidence(facts: OoxmlFacts) -> list[EvidenceItem]:
         items.append(EvidenceItem(
             "문서 수정 메타데이터(자기 신고)",
             f"문서 패키지가 기록한 편집 이력: {'; '.join(parts)}. {SELF_DECLARED}",
-            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, DOCUMENT_STRUCTURE_LAYER,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, DOCUMENT_STRUCTURE_LAYER, self_declared=True,
         ))
     if facts.created and facts.modified and facts.created[:19] > facts.modified[:19] and len(facts.created) >= 19 and len(facts.modified) >= 19:
         items.append(EvidenceItem(
             "문서 생성 시각이 수정 시각보다 늦음",
             f"docProps/core.xml의 생성 시각 「{facts.created}」이(가) 수정 시각 「{facts.modified}」보다 늦습니다 — 기록이 서로 맞지 않는다는 사실이며, "
             "복사·변환 도구가 흔히 만드는 상태라 위조 근거가 아닙니다.",
-            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, DOCUMENT_STRUCTURE_LAYER,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, DOCUMENT_STRUCTURE_LAYER, self_declared=True,
         ))
     return items
 

@@ -195,6 +195,10 @@ class EvidenceConflictTest(unittest.TestCase):
         self.assertIn(authentic.title, titles)
         self.assertIn(synthetic.title, titles)
         self.assertIn(EVIDENCE_CONFLICT_TITLE, titles)
+        # P0R-10: the decision honours the conflict — undetermined, not "manipulation" by rule 2
+        from deepfake_lens.result_types import Verdict
+
+        self.assertEqual(result.verdict_code, Verdict.UNDETERMINED)
 
     def test_a_rebuilt_result_names_the_conflict_once(self) -> None:
         """A document result is rebuilt from its own evidence (_apply_document_metadata) — one conflict item, not two."""

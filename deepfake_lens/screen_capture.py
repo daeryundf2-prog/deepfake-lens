@@ -159,7 +159,7 @@ def _evaluate(path: Path, metadata: Mapping[str, str], dimensions: tuple[int, in
             f"{' · '.join(where)} 값이 「{comments[0] if comments else exif_comment}」입니다 — iOS·macOS가 스크린샷에 쓰는 주석과 같습니다"
             f"(신뢰 수준: {traits.data.get('user_comment', {}).get('confidence')}). 화면에 표시된 내용을 캡처한 파일이라는 서명 없는 자기 신고이며 "
             "카메라 촬영 근거도, 조작 근거도 아닙니다.",
-            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, SCREEN_LAYER,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, SCREEN_LAYER, self_declared=True,
         ))
     else:
         parts.append("화면 캡처 주석 없음")

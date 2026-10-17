@@ -101,3 +101,12 @@
   출처·생성 여부는 C2PA 검증 항목이 서명·해시·출처 유형으로 따로 판단하며, 신뢰되지 않은 서명이면 그렇게 적는다.
 - **찾지 못한 것**(2026-10-17): Midjourney V8 전용 필드(Description 안의 `--v N`뿐), Firefly 파트너 모델 표기, Stability·ElevenLabs claim generator,
   Seedream 4.x 문자열, gpt-image-1.5·ChatGPT Images 2.5(소비자용) 문자열, Bing/Copilot claim generator — 실제 파일(`c2patool`, `exiftool -a -G1`)이 있어야 고정할 수 있다.
+
+## 6. phase0 병합 후 (P0R 규칙과의 관계)
+
+- 서명 없는 기기·앱·문서 소프트웨어 기록에서 나온 TB 항목은 `self_declared: true`를 단다(P0R-11의 `EvidenceItem.self_declared`): Google AI 라벨·삼성 SEFT
+  트레일러 항목(TB-3), 운영체제의 「Screenshot」 주석(TB-5), PDF 작성 도구 이력·문서 수정 메타데이터·생성/수정 시각 불일치(TB-6).
+  워터마크 판독·구조 측정(증분 저장 수, 서명 범위, 양자화표, 대역폭)·비가시 문자 존재는 기록 측정값이라 달지 않는다.
+- 생성기 상표 단어의 세기는 phase0(P0R-11: 생성기 전용 필드에서만 중, 출처 추정은 LOW)가 정한다 — TB-7의 표는 그 규칙에 단어만 공급한다.
+- 컨테이너·비트스트림 메타데이터(`container_metadata`, P0R-22)와 TB-4 `audio_channel_trace`는 겹치지 않는다: 전자는 MP4/RIFF/ID3/FLAC 필드, 후자는 AMR 원시 머리·Ogg Opus
+  머리·측정 대역폭.

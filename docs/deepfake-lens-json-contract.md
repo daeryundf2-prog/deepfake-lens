@@ -124,7 +124,7 @@ always `0` invited old-contract readings. They remain readable as
   optional extractor is missing, or `failed` `AnalyzerError: <Exception>: …`
   when the container itself could not be parsed. Every member the extractor refused is a
   `skipped` coverage entry with check `archive_member` and reason
-  `<member>: <why>` — `경로 이탈 멤버('..' …)`, `절대 경로 멤버(…)` (R25-6 (round 25): also `드라이브 절대 경로 멤버(C:\ 형식 — …)`, `UNC 경로 멤버(…)`, `홈 폴더 표기('~')로 시작하는 멤버(…)`, and on Windows only `Windows에서 쓸 수 없는 이름(':' — …)`; on POSIX a `:` elsewhere in a name — `c:v.png`, `2026:10:15.png`, `dir:x/y.png` — is an ordinary name and the member is extracted and analyzed: every name with `:` as its second character was refused as `절대 경로 멤버`),
+  `<member>: <why>` — `경로 이탈 멤버('..' …)`, `절대 경로 멤버(…)` (R25-6 (round 25): also `드라이브 절대 경로 멤버(C:\ 형식 — …)`, `UNC 경로 멤버(…)`, and on Windows only `Windows에서 쓸 수 없는 이름(':' — …)` and — R26-4 (round 26) — `Windows에서 쓸 수 없는 이름(예약 장치명 — CON·PRN·AUX·NUL·COM1~9·LPT1~9)` (`con.png`, `nul`; refused on every OS as `허용되지 않는 이름(Windows 예약 장치명)` before); a leading `~` is an ordinary name everywhere (`~$보고서.docx`, `~WRL0001.tmp` were refused as `홈 폴더 표기('~')로 시작하는 멤버(대상 폴더 밖 쓰기 시도로 취급)` — `open()` never expands `~` and a member is written under its own index folder); on POSIX a `:` elsewhere in a name — `c:v.png`, `2026:10:15.png`, `dir:x/y.png` — is an ordinary name and the member is extracted and analyzed: every name with `:` as its second character was refused as `절대 경로 멤버`),
   `심볼릭 링크 멤버`, `하드 링크 멤버`, `압축 예산 초과(선언 크기 N, 한도 M) — <cap>`
   (per-member cap, compression-ratio bomb, per-archive or tree byte budget),
   `앞선 멤버에서 해제 예산 소진으로 미해제`, `중첩 압축 최대 깊이(N) 초과로 미해제` (N = `archives.MAX_NESTED_DEPTH` = 8 levels, the top-level archive included; N14 — was 2),
@@ -150,9 +150,24 @@ always `0` invited old-contract readings. They remain readable as
   a folder named `evil.zip::inner` gives the row `evil.zip\:\:inner/a.png`,
   distinct from the member row `evil.zip::inner/a.png`, a file named
   `tri:::c.png` the row `tri\:\:\:c.png`, and a file named
-  `fake.zip::member.png` is reported as itself. `POST /api/report` identifies
+  `fake.zip::member.png` is reported as itself. R26-1 (round 26): `member`
+  is injective too — each archive level's path in the chain (a *segment*) that
+  contains `::` or `\`, or starts or ends with `:`, is escaped the same way
+  (every `\` as `\\`, every `:` as `\:`); any other segment (`c:v.png`,
+  `dir/x.png`) is unchanged. Since R25-6 a POSIX member name may contain `:`,
+  and the literal member `inner.zip::b.png` had the chain of `b.png` inside the
+  nested `inner.zip` (two rows, one identity): it is now
+  `inner.zip\:\:b.png`, a leading-colon `:lead.png` is `\:lead.png`. Reading
+  the chain left to right, `\\` and `\:` are escapes and an unescaped `::`
+  separates segments, so it splits back exactly (`result_text.member_chain` /
+  `split_member_chain`). R26-8 (round 26): every scan result is checked
+  before it is returned — every row identity unique, a top-level `path` its
+  own escape, a member's chain canonical with `path` = `container::member`,
+  and every member's container a row of the result; otherwise the scan gives
+  no result (CLI exit 1 with `오류: 행 식별자 불변식 위반 — …`, a failed web
+  scan job, and a report whose re-analysis breaks it is 409). `POST /api/report` identifies
   rows by these fields and refuses (400) a member row whose `path` is not
-  `container::member`. R12-3 (round 12): a member row also carries
+  `container::member`, or (R26-1) whose `member` is not a chain in this form. R12-3 (round 12): a member row also carries
   `member_index` — its 1-based position among the container's extracted
   members (archive order; a nested archive's members follow it) — and
   (`container`, `member`, `member_index`) is unique. Every archive entry is
@@ -356,16 +371,19 @@ always `0` invited old-contract readings. They remain readable as
 | `calibration_id` | string \| null | Calibration mapping that produced `probability`. |
 | `measured_on` | string \| null | Corpus/split the calibration was measured on. |
 | `raw_score` | int \| null | Uncalibrated 0–100 model or deep-layer output. Not a probability; displayed as "원점수(미보정)". |
+| `self_declared` | `true`, present only when set | P0R-22: the item rests on metadata the file states about itself — an unsigned generator declaration (PNG/XMP/MP4 generator fields, the GB 45438 `AIGC` label, a ComfyUI workflow, a registered SEI string) that anyone can plant or strip; its `detail` says `자기 선언 메타데이터 — 심거나 지울 수 있음`. Absent in records written before it existed. |
 
 Phase-0 classification of existing signals:
 
 | Source | kind | direction | strength |
 | --- | --- | --- | --- |
 | C2PA manifest valid + trusted signer + AI `digitalSourceType` | deterministic | synthetic | strong |
-| Generator metadata in a tool-identifying field (A1111 parameters, ComfyUI workflow, PNG generator tag, software/creator field) | deterministic | synthetic | strong |
-| Same generator markers found only in header byte strings or free-text fields | deterministic | synthetic | moderate |
-| XMP `Iptc4xmpExt:DigitalSourceType` = `trainedAlgorithmicMedia` / `compositeWithTrainedAlgorithmicMedia` / `algorithmicMedia` / `compositeSynthetic` (`XMP 디지털 출처 유형: 생성형 AI`) | deterministic | synthetic | strong |
-| A generator name (`evidence_rules.GENERATOR_NAMES`: Flux, Midjourney, DALL-E, DALL·E, Imagen, Stable Diffusion, Firefly, Gemini, Nano Banana, "AI Generated", "Generated by AI") in `xmp:CreatorTool`, `dc:creator` or `photoshop:Credit` (`XMP 생성 도구 필드`) | deterministic | synthetic | strong |
+| Structural generator record in a tool-identifying field (A1111 parameters, ComfyUI prompt/workflow graph) (`생성 도구 메타데이터`) — P0R-11/12: `self_declared` | deterministic | synthetic | strong |
+| P0R-11: a generator brand word (Midjourney, Flux, Firefly, Runway, …) in a generator-specific field only — `Software`, `parameters`, `prompt`, `workflow`, `generator`, `CreatorTool` (`생성 도구 이름 메타데이터`), `self_declared` | deterministic | synthetic | moderate |
+| Generation-parameter fields (prompt/seed/CFG …) found only in header byte strings or other fields (`생성 도구 메타데이터 단서`), `self_declared` | deterministic | synthetic | moderate |
+| P0R-11: a generator brand word anywhere else — `exif.Model`, `exif.LensModel`, `photoshop:Credit`, `dc:creator`, descriptions, header byte strings (`일반 필드의 생성 도구 이름(근거 아님)`) | deterministic | neutral | weak |
+| XMP `Iptc4xmpExt:DigitalSourceType` = `trainedAlgorithmicMedia` / `compositeWithTrainedAlgorithmicMedia` / `algorithmicMedia` / `compositeSynthetic` (`XMP 디지털 출처 유형: 생성형 AI`), `self_declared` | deterministic | synthetic | strong |
+| A generator name (`evidence_rules.GENERATOR_NAMES`: Flux, Midjourney, DALL-E, DALL·E, Imagen, Stable Diffusion, Firefly, Gemini, Nano Banana, "AI Generated", "Generated by AI") in `xmp:CreatorTool` (`XMP 생성 도구 필드`) — P0R-11: moderate (was strong) and only that field (`dc:creator`, `photoshop:Credit` name people and studios), `self_declared` | deterministic | synthetic | moderate |
 | C2PA manifest valid + trusted signer + `digitalCapture`, data hash match | deterministic | authentic | strong |
 | Camera EXIF consistent (`카메라 EXIF 일관`): Make + Model, parseable DateTimeOriginal (≥ 1995, not in the future), Software absent or the camera's own (vendor/model/firmware, never an editor or generator), GPS in range and dated within a day of capture, no generator name in XMP, JPEG quality estimate ≥ 90 (recompression proxy until phase 1) | deterministic | authentic | moderate |
 | Camera EXIF present but a condition above fails (`카메라 EXIF 있음(일관성 조건 미충족)`, detail names the failed conditions) | deterministic | neutral | weak |
@@ -385,9 +403,9 @@ Phase-0 classification of existing signals:
 
 | Field | Values |
 | --- | --- |
-| `check` | `metadata`, `c2pa`, `image_class`, `pixel`, `external_model`, `model:<member>`, `face_manipulation`, `inpaint`, `faceswap_seam`, `rppg`, `avatar`, `lipsync`, `face_track`, `audio_analysis`, `audio_features`, `video_analysis`, `av_audio`, `document_text`, `text_lexical`, `archive`, `archive_member`, `archive_member_name` (R13-6), `file_integrity` (R12-7, R13-2); techniques-2026: `watermark_sdxl`, `watermark_trustmark`, `watermark_videoseal` (images), `watermark_videoseal` + `watermark_audioseal` (video), `watermark_audioseal` (audio), `online_detection` (always `skipped` — online-only detectors) — see docs/MACHINE-READABLE-MARKS.md; techniques-2026b: `text_invisible_marks` (text and document rows, TB-1), `document_structure` (documents, TB-6), `platform_recompression` (JPEG), `file_name_pattern` (images, video, audio), `audio_channel_trace` (audio) (TB-4) — see docs/FACT-LAYERS.md; `watermark_perth` (audio, video — TB-2, docs/MACHINE-READABLE-MARKS.md §8), `device_ai_label` (images, TB-3), `screen_capture` (images, TB-5) |
+| `check` | `metadata`, `c2pa`, `image_class`, `pixel`, `external_model`, `model:<member>`, `face_manipulation`, `inpaint`, `faceswap_seam`, `rppg`, `avatar`, `lipsync`, `face_track`, `audio_analysis`, `audio_features`, `video_analysis`, `av_audio`, `document_text`, `text_lexical`, `archive`, `archive_member`, `archive_member_name` (R13-6), `file_integrity` (R12-7, R13-2); techniques-2026: `watermark_sdxl`, `watermark_trustmark`, `watermark_videoseal` (images), `watermark_videoseal` + `watermark_audioseal` (video), `watermark_audioseal` (audio), `online_detection` (always `skipped` — online-only detectors); P0R-22: `container_metadata` (video and audio rows; image rows for the GB 45438 `AIGC` label) — see docs/MACHINE-READABLE-MARKS.md; techniques-2026b: `text_invisible_marks` (text and document rows, TB-1), `document_structure` (documents, TB-6), `platform_recompression` (JPEG), `file_name_pattern` (images, video, audio), `audio_channel_trace` (audio) (TB-4) — see docs/FACT-LAYERS.md; `watermark_perth` (audio, video — TB-2, docs/MACHINE-READABLE-MARKS.md §9), `device_ai_label` (images, TB-3), `screen_capture` (images, TB-5) |
 | `status` | `ran` \| `skipped` \| `failed` |
-| `reason` | Required for `skipped`/`failed`. `metadata` fails with `AnalyzerError: …` when the image's metadata could not be read completely: `JPEG 구조 불완전(SOS 마커 전에 파일 끝) …`, `PNG 구조 불완전(IEND 청크 없음) …`, `빈 파일 …`, `이미지 형식 식별 불가(… 확장자 위장 가능성)`, `EXIF 판독 실패: <Exception>: …`. `c2pa` (techniques-2026: images, audio, video and documents; `.txt`/`.md` are skipped `C2PA 텍스트·HTML 임베딩(C2PA 2.3/2.4)은 현재 SDK…가 판독하지 않음…`) is read offline (no remote manifest, no OCSP) against the bundled C2PA trust list `models/c2pa-trust-list.pem` (+ `DEEPFAKE_LENS_C2PA_TRUST_ANCHORS`); a ran entry's reason names the outcome, the validator's spec version and the trust list (`매니페스트 있음 · 검증기 C2PA 2.4.0 · 신뢰 목록 C2PA-TRUST-LIST 2026-08-05판(sha256 …)`), a trust list whose sha256 differs from `models/c2pa-trust.json` or unreadable operator anchors fail it `AnalyzerError: C2PA 검증 불가: …`, and an SDK without the Context API (<0.38) skips it `의존성 부재: c2pa-python>=0.38 (…)` — see docs/MACHINE-READABLE-MARKS.md. It runs when the SDK read a manifest or reported none (`ManifestNotFound` → status `absent`); any other reader/validation exception (status `unavailable`, CHARTER 4-value rule, D8) fails it with `AnalyzerError: C2PA 판독 실패: <Exception>: …` / `C2PA 검증 실패: …`, and a container the SDK does not handle is skipped `C2PA SDK가 지원하지 않는 형식: …`. The provenance layer diagnostic (`layer_diagnostics.provenance_metadata.diagnostic`) carries the same outcome as `c2pa_status` (`valid`/`invalid`/`absent`/`unavailable`, or `sdk_missing`) and `c2pa_error`; when the SDK failed its note, signal and limitation say `C2PA 판독 불가(<Exception>: …)` — never `C2PA 없음` or `출처 표준 메타데이터가 발견되지 않았습니다` (R8). `face_manipulation` is skipped `얼굴 미검출` only after a detector actually ran: OpenCV Haar, MediaPipe, or — always available with opencv + numpy, since OpenCV 5 wheels lack `CascadeClassifier` — the weight-free skin/eye heuristic `face._skin_eye_heuristic_faces` (D15: Chai-Ngan YCrCb skin box, two enclosed dark eye holes at eye geometry, face box from the inter-eye distance; unmeasured, frontal faces only, its limitation line is added when it found the face); a GIF is skipped `지원하지 않는 이미지 형식: .gif`; `face_track` needs measured landmarks and is skipped `의존성 부재: 실측 랜드마크 검출기 없음: mediapipe` without MediaPipe. `av_audio` (a video's audio track run through the audio pipeline, R2) is `ran` when the track's features were extracted, `skipped` `의존성 부재: ffmpeg` / `의존성 부재: librosa` / `오디오 트랙 없음(…)`, or `failed` `<Exception>: …` when extraction or the audio analysis raised or could not decode the track (`영상 분석이 실행되지 않아 음성 트랙 검사도 수행되지 않음` when `video_analysis` itself did not run); the outcome is also a limitation `영상 음성 트랙 분석 미실행|실패: <reason>`, and `result.av_audio` is set only when it ran. Skips: `의존성 부재: <module>`, `얼굴 미검출`, `측정 범위 밖: 해상도 …`, `사진 아님: <kind>` (see below), `비활성화(…)`, `모델 프로필 미지정`, `모델 실행 불가: …`. Failures: `<ExceptionClass>: <message ≤200 chars>` — the message never carries a file-system path (N1): the scanned folder is written `<root>` (`UnidentifiedImageError: 이미지 형식을 인식할 수 없습니다: '<root>/sub/a.jpg'`) — R25-7 (round 25): whatever form the scan was started with (`scan /abs/case`, `scan case`, `cd case; scan .`): a decoder's quoted relative name of the analyzed file (`'a.wav'`) is written like its absolute name, so the row reads `'<root>/a.wav'` in all three (it read `'a.wav'` from `.`; output-format generation 12), any other absolute path (an archive's temp extraction dir, a model file) is reduced to its base name, and well-known library messages are given in Korean (`[Errno 2] 파일 또는 폴더가 없습니다`, `이미지 파일이 잘려 있습니다(…)`, `ZIP 형식이 아닙니다`, `오디오 파일을 열 수 없습니다…`); the same holds for an item's `error`, archive warnings/limitations and API error details, so `--redact-paths` has nothing to redact in them; a model weight refused by the pin policy (G9) fails with `미고정 프로필: …` (no/empty/malformed `pin`) or `무결성 불일치: …` (checkpoint sha256 differs from `pin.sha256`); R15-3: a non-profile model asset (`face_landmarker.task`, `syncnet_v2.model`, `sfd_face.pth`, a Haar cascade) that is not pinned in `models/assets.json` or whose bytes differ fails the check that needed it with `AssetPinError: 미고정 모델: <자산>` (`… — sha256 불일치(기대 …, 실제 …)`), e.g. `face_manipulation`, `lipsync`. A language-gated zoo member is `skipped` with `모델 실행 불가: 언어 게이트 제외: …`. |
+| `reason` | Required for `skipped`/`failed`. `metadata` fails with `AnalyzerError: …` when the image's metadata could not be read completely: `JPEG 구조 불완전(SOS 마커 전에 파일 끝) …`, `PNG 구조 불완전(IEND 청크 없음) …`, `빈 파일 …`, `이미지 형식 식별 불가(… 확장자 위장 가능성)`, `EXIF 판독 실패: <Exception>: …`. `c2pa` (techniques-2026: images, audio, video and documents; `.txt`/`.md` are skipped `C2PA 텍스트·HTML 임베딩(C2PA 2.3/2.4)은 현재 SDK…가 판독하지 않음…`) is read offline (no remote manifest, no OCSP) against the bundled C2PA trust list `models/c2pa-trust-list.pem` (+ `DEEPFAKE_LENS_C2PA_TRUST_ANCHORS`); a ran entry's reason names the outcome, the validator's spec version and the trust list (`매니페스트 있음 · 검증기 C2PA 2.4.0 · 신뢰 목록 C2PA-TRUST-LIST 2026-08-05판(sha256 …)`), a trust list whose sha256 differs from `models/c2pa-trust.json` or unreadable operator anchors fail it `AnalyzerError: C2PA 검증 불가: …`, and an SDK without the Context API (<0.38) skips it `의존성 부재: c2pa-python>=0.38 (…)` — see docs/MACHINE-READABLE-MARKS.md. P0R-20: a hard-binding whose exclusions drop content (or more than the manifest store) fails it `AnalyzerError: C2PA 해시 제외범위 이상 — 서명 대상에서 파일 내용 N바이트 중 M바이트가 제외됨(매니페스트 저장소 밖 제외 K바이트) — 서명 유효 여부와 무관하게 출처 근거로 쓰지 않습니다`, whatever the SDK's state; P0R-21: the basis text names the frozen Interim Trust List and says revocation is not checked (`인증서 폐기 여부는 확인하지 않음(…)`). It runs when the SDK read a manifest or reported none (`ManifestNotFound` → status `absent`); any other reader/validation exception (status `unavailable`, CHARTER 4-value rule, D8) fails it with `AnalyzerError: C2PA 판독 실패: <Exception>: …` / `C2PA 검증 실패: …`, and a container the SDK does not handle is skipped `C2PA SDK가 지원하지 않는 형식: …`. The provenance layer diagnostic (`layer_diagnostics.provenance_metadata.diagnostic`) carries the same outcome as `c2pa_status` (`valid`/`invalid`/`absent`/`unavailable`, or `sdk_missing`) and `c2pa_error`; when the SDK failed its note, signal and limitation say `C2PA 판독 불가(<Exception>: …)` — never `C2PA 없음` or `출처 표준 메타데이터가 발견되지 않았습니다` (R8). `face_manipulation` is skipped `얼굴 미검출` only after a detector actually ran: OpenCV Haar, MediaPipe, or — always available with opencv + numpy, since OpenCV 5 wheels lack `CascadeClassifier` — the weight-free skin/eye heuristic `face._skin_eye_heuristic_faces` (D15: Chai-Ngan YCrCb skin box, two enclosed dark eye holes at eye geometry, face box from the inter-eye distance; unmeasured, frontal faces only, its limitation line is added when it found the face); a GIF is skipped `지원하지 않는 이미지 형식: .gif`; `face_track` needs measured landmarks and is skipped `의존성 부재: 실측 랜드마크 검출기 없음: mediapipe` without MediaPipe. R26-10 (round 26): an ffmpeg step stopped at its time limit fails with `FfmpegTimeout: ffmpeg 시간 초과 — <step>: '<root>/<file>' — 상한 N초에 중단(경과 M초)` (steps: `오디오 디코딩(.m4a·.aac·.wma)` 120 s, `영상 음성 트랙 추출` 120 s, `립싱크 음성 포락선 추출` 60 s, `A/V 싱크 음성 트랙 디코딩`); any other timed-out command is `TimeoutExpired: 외부 명령이 상한 N초 안에 끝나지 않아 중단했습니다` (it was `TimeoutExpired: 라이브러리 오류(TimeoutExpired) — 상세는 로그 참조`). `av_audio` (a video's audio track run through the audio pipeline, R2) is `ran` when the track's features were extracted, `skipped` `의존성 부재: ffmpeg` / `의존성 부재: librosa` / `오디오 트랙 없음(…)`, or `failed` `<Exception>: …` when extraction or the audio analysis raised or could not decode the track (`영상 분석이 실행되지 않아 음성 트랙 검사도 수행되지 않음` when `video_analysis` itself did not run); the outcome is also a limitation `영상 음성 트랙 분석 미실행|실패: <reason>`, and `result.av_audio` is set only when it ran. Skips: `의존성 부재: <module>`, `얼굴 미검출`, `측정 범위 밖: 해상도 …`, `사진 아님: <kind>` (see below), `비활성화(…)`, `모델 프로필 미지정`, `모델 실행 불가: …`. Failures: `<ExceptionClass>: <message ≤200 chars>` — the message never carries a file-system path (N1): the scanned folder is written `<root>` (`UnidentifiedImageError: 이미지 형식을 인식할 수 없습니다: '<root>/sub/a.jpg'`) — R25-7 (round 25): whatever form the scan was started with (`scan /abs/case`, `scan case`, `cd case; scan .`): a decoder's quoted relative name of the analyzed file (`'a.wav'`) is written like its absolute name, so the row reads `'<root>/a.wav'` in all three (it read `'a.wav'` from `.`; output-format generation 12) — R26-2 (round 26): so does every other reason of a row with any number of `--workers` — a read failure (`PermissionError: [Errno 13] 접근 권한이 없습니다: <root>/lock.wav`, R25-2), an archive's extraction failure, an unreadable folder, a name `repr()` escapes (`'<root>/한글\xa0x.wav'` for a NBSP) and a name the audio worker had to stage itself (a non-ASCII working folder) — they read `lock.wav`, `'한글\xa0x.wav'` or `'000001-….wav'` from `.` or with 4 workers (generation 15), any other absolute path (an archive's temp extraction dir, a model file) is reduced to its base name, and well-known library messages are given in Korean (`[Errno 2] 파일 또는 폴더가 없습니다`, `이미지 파일이 잘려 있습니다(…)`, `ZIP 형식이 아닙니다`, `오디오 파일을 열 수 없습니다…`); the same holds for an item's `error`, archive warnings/limitations and API error details, so `--redact-paths` has nothing to redact in them; a model weight refused by the pin policy (G9) fails with `미고정 프로필: …` (no/empty/malformed `pin`) or `무결성 불일치: …` (checkpoint sha256 differs from `pin.sha256`); R15-3: a non-profile model asset (`face_landmarker.task`, `syncnet_v2.model`, `sfd_face.pth`, a Haar cascade) that is not pinned in `models/assets.json` or whose bytes differ fails the check that needed it with `AssetPinError: 미고정 모델: <자산>` (`… — sha256 불일치(기대 …, 실제 …)`), e.g. `face_manipulation`, `lipsync`. A language-gated zoo member is `skipped` with `모델 실행 불가: 언어 게이트 제외: …`. |
 
 ### Image class — photo/non-photo gate (phase 0, WP-D: G3/G13/G17)
 
@@ -436,7 +454,11 @@ Evaluated in order; the first that applies wins.
 
 1. `grade == reference` → `undetermined`.
 2. Any deterministic + synthetic + strong evidence → `manipulation_evidence`
-   (kept even if a check failed; the failure stays in `coverage`).
+   (kept even if a check failed; the failure stays in `coverage`) — P0R-10
+   (user decision 2026-10-17): unless deterministic + authentic + strong
+   evidence is present too → `undetermined` (근거 충돌; `explain` reports it as
+   rule 7, "규칙 2의 예외(근거 충돌)"), with the neutral item
+   `근거 충돌: 서명된 원본성 근거와 생성 근거가 함께 있음`.
 3. Any `failed` coverage entry → `undetermined`.
 4. Any calibrated statistical synthetic item with `probability ≥` its
    threshold → `manipulation_evidence`. (No profile is calibrated in phase 0.)
@@ -454,7 +476,8 @@ Evaluated in order; the first that applies wins.
 | `verdict` | Korean sentence naming the verdict and its basis (text: starts with `참고:`). When a model check failed because the pin policy refused the weights (`미고정 프로필` / `무결성 불일치`), it reads `<subject>: 판단 불가: 모델 무결성 실패(<check>) — …` (QA-SYS-1/2). |
 | `signals` | Derived from `evidence`: `{title, detail, weight}` with `weight` 60/25/5 for strong/moderate/weak **synthetic** items and 0 for authentic/neutral ones, sorted by weight. |
 | `limitations` | Known limits; for text the legal sentence is first. A failed check is also listed here as `검사 실패 — …`. |
-| `marking_context` | techniques-2026 item 6 (output-format generation 14): object `{legal_basis, checked: [{check, algorithm, outcome: found/not_found/skipped/failed, detail}], online_only: [{name, status: "skipped", reason}], marks_found, absence_statement}` — the machine-readable marks checked for the file (EU AI Act Art. 50 / 인공지능기본법 context), facts only; `null` for rows not analyzed as media/documents. The same facts are the last evidence item `기계판독 표식 확인 결과(…)` (deterministic/neutral/weak, layer `marking`). |
+| `conclusion_caveats` | P0R-12 (user decision 2026-10-17): list of Korean strings — for a manipulation or authenticity conclusion, why it could be wrong, from the evidence that decided it (`evidence_rules.conclusion_caveats`: a self-declared basis 「근거가 파일이 스스로 적은 메타데이터입니다(자기 선언 메타데이터 — 심거나 지울 수 있음) — …」, a C2PA signature, a watermark, a measured detector, else a generic sentence); `[]` for 판단 불가. Rendered as 「이 결론이 틀릴 수 있는 이유」 in the GUI detail, the HTML report row, the forensic PDF (a box after the table) and the evidence statement purpose. A manipulation conclusion whose deciding item is `self_declared` also says `(자기 선언 메타데이터 — 심거나 지울 수 있음)` in `verdict` and in the evidence statement. |
+| `marking_context` | techniques-2026 item 6 (output-format generation 18 — the merge onto R26): object `{legal_basis, checked: [{check, algorithm, outcome: found/not_found/skipped/failed, detail}], online_only: [{name, status: "skipped", reason}], marks_found, absence_statement}` — the machine-readable marks checked for the file (EU AI Act Art. 50 / 인공지능기본법 context), facts only; `null` for rows not analyzed as media/documents. The same facts are the last evidence item `기계판독 표식 확인 결과(…)` (deterministic/neutral/weak, layer `marking`). |
 | `source_guess`, `next_checks`, `model_analysis`, `pixel_analysis`, `av_audio`, `document_metadata`, `source_attribution_label` | Unchanged meaning, except: for text, a `source_guess` drawn from the text's own words (a ChatGPT/Claude/Gemini mention, an AI-identity phrase) is labeled `참고: …` (e.g. `참고: AI 어시스턴트 문체 유사`) with `confidence: "unknown"` — lexical, never a medium/high attribution (D11). A document's creator/producer/application metadata is reference-only too (R3): the guess is labeled `참고: 문서 메타데이터에 AI 도구명 기록` (AI tool named) or `참고: 문서 메타데이터의 작성 도구 단서`, `confidence` stays `"unknown"`, each field is listed as a reason with the file's value verbatim inside 「…」 (`작성 애플리케이션: 「ChatGPT」`, R4), and the default reason `출처를 판단할 메타데이터나 명시적 단서가 없습니다.` is removed once such a reason exists. `model_analysis.score` is the uncalibrated raw score. `model_analysis.display_name` and `model_analysis.models[].display_name` carry the profile's Korean `display_name` (R4; every runtime profile has one, `scripts/sync_model_docs.py` refuses a profile without it); every examiner-facing string (`detail`, coverage `reason`, the `외부 모델(…)` check label, evidence `detail`) uses it, while `model`, `profile` and the `model:<name>` coverage check id keep the raw profile `name` as an identifier. `pixel_analysis` (reference only, D12) carries `raw_score` (uncalibrated 0–100 weighted mean of the pixel experts) and `reference_confidence` (`"참고"` when the ensemble ran, else `"off"`/`"unavailable"`) instead of the former `score`/`confidence`; older records with `score`/`confidence` still load (as `raw_score` / `"참고"`). The scan CSV names these columns `참고_픽셀_원점수` and `참고_픽셀_신뢰도`. The CSV's former `score`/`risk` columns (same positions) are `보정점수(미보정시 공란)` — `score` only when `score_is_calibrated`, else blank — and `결론` (the verdict label) (R16). Every code column has a Korean label column appended after `score_is_calibrated` (G16): `kind_label`, `status_label`, `grade_label`, `source_confidence_label`, `top_evidence_label` (`verdict_code` is paired with `verdict_label`); column positions before them are unchanged. In a model zoo, `model_analysis.models[]` lists every member; a member excluded by the language gate has `available: false`, `confidence: "skipped"` and takes no part in the aggregate score or the spread/agreement (G33). |
 
 Reading a v1 record: missing v2 fields load as `verdict_code:
@@ -471,85 +494,64 @@ top-level fields. The HMAC-SHA256 covers the canonical JSON
 | Field | Meaning |
 | --- | --- |
 | `tool_version` | Deepfake Lens version that produced the report. |
-| `model_pins` | `[{"profile": "<profile file stem>", "pin": {"sha256"\|"revision": …} \| null}]` for every runtime profile in the effective models dir (plus explicit `--model-path` profiles), sorted by name. `null` = unpinned. |
+| `model_pins` | `[{"profile": "<profile file stem>", "pin": {"sha256"\|"revision": …} \| null}]` for every runtime profile in the effective models dir (plus explicit `--model-path` profiles), sorted by name. `null` = unpinned. P0R-14: no longer added by default — only an explicit list is recorded (older reports carry it). |
+| `executed_models` | P0R-14 (review §4-4): `[{"profile", "model", "pin", "threshold", "calibration_id"}]` — the model profiles that actually ran on the body's rows (an available member of a row's `model_analysis.models[]`), with the pin, threshold and calibration id read from the profile file (`pin: null` when the file is gone or unpinned); `[]` when no model ran (phase 0: every profile is gated). Inside the MAC. |
+| `generated_at` | P0R-14 (review §4-2): ISO 8601 local time with its UTC offset when the body was signed — the signer's own clock (no timestamp authority; RFC 3161 is BACKLOG BL-2). Inside the MAC. A signed body never carries `temp_folder` (a host path, review §4-5). |
 | `signature_note` | Korean note: what the HMAC proves, or `서명 없음: …` when no key was configured. Inside the MAC. |
 | `signature_key_id` | `hmac-sha256-v1:<first 12 hex of SHA-256(key)>`. Outside the MAC; a mismatch with the verifying key is reported as `키 ID 불일치`. |
 | `signature` | Hex HMAC, or `null` when unsigned. |
 
+P0R-15 (review §4-1): signing refuses a key shorter than 32 bytes (`signing.MIN_REPORT_KEY_BYTES`) — `오류: 보고서 서명 키가 너무 짧습니다(N바이트) — 서명에는 32바이트 이상의 무작위 키가 필요합니다(예: \`openssl rand -hex 32\`의 출력). …`, exit 2 from the CLI (an explicit `--key-file` is checked before any work; `web` / `api-serve` refuse to start with a short `DEEPFAKE_LENS_REPORT_KEY`); verifying an existing report with a short key still works. **HMAC limits**: the signature is symmetric — whoever can verify a report holds the key and can also sign one, so it shows integrity to the key holder, not authorship to a third party (no non-repudiation); the key is used as given (no KDF), so a guessable key can be found offline from one signed report (`signature_key_id` is a SHA-256 prefix of the key). Asymmetric signatures (Ed25519 with a public-key id in the body) are deferred to the start of phase 1 (docs/phase0/BACKLOG.md BL-1).
+
 Rendered reports (`POST /api/report`, `--html-out`) additionally carry
 `report_format`, `thresholds`/`coverage` provenance and `unrecorded_files`
-(X1) in the signed body. R22-1 (round 22): in a web report the
-`unrecorded_files` counts and the summary's `capped`, `files_over_cap`,
-`subfolders_skipped`, `subfolder_files_skipped` and
-`subfolders_skipped_detail` are the server's own (`unrecorded_files.listing`,
-above) — never inferred from the posted rows; when the server cannot list
-the scan folder the section says `확인 불가`, never `없음`.
+(X1) in the signed body.
 
-`POST /api/report` signs **server-derived results only** (X2). The posted
-rows are a request, not evidence: every row's file is located inside the
-folder the request names as `scan_root` (P1 — required whenever a row is to
-be re-analyzed: the `scan_root` of the `/api/scan` / `/api/scan/stream`
-response, sent back unchanged; absolute, existing, inside the read roots —
-400 when missing, not a string, relative or not a folder, 403 outside the
-roots; row paths are resolved against it only, never against the read root,
-and a path that leaves it is excluded with `스캔 폴더 밖의 경로라 서버가
-재분석하지 않았습니다`), never through a symbolic link, and re-analyzed on the server
-with `analysis_api.scan_file_run` — the scan's own body, so an archive
-yields the same member/container rows and a link the same skipped row —
-using the request's optional `options` object (the `/api/scan` query keys:
-`pixel`, `heatmaps`, `deep_signals`, `no_default_engine`, `model_path` /
-`fusion_profile` as bare names inside the server's models dir; validated
-like a scan request, 400 otherwise), the server's models dir and its
-threshold profile. Each signed row (verdict, evidence, coverage,
-`sha256`) is the server's row of the same path; `thresholds`/`coverage`
-are the server's provenance (posted values are only type-checked).
-A row the server cannot re-analyze is **not** in `items` and not counted in
-`summary`; the signed body lists it under `excluded_items` — `[{"path",
-"marker": "서명 제외(클라이언트 제공 결과)", "reason"}]` with reason
-`읽기 루트 안에서 파일을 찾을 수 없어 서버가 재분석하지 못했습니다`,
-`경로 중간의 폴더가 심볼릭 링크라 따라가지 않았습니다 — …`,
-`서버 재분석 결과에 이 항목이 없습니다(압축 파일 구성이 다름)` or
-`서버 재분석 실패: <사유>` — and never the client's result. R19-13 (round 19): a row of the first, third or fourth kind — its file gone from the scan folder since the scan, its archive member no longer produced, its re-analysis failed — or any row whose server `sha256`, `status` or `verdict_code` differs from the posted row gives no report at all: every format is refused with HTTP 409 and `changed_rows` (docs/deepfake-lens-service.md, E47); a posted dedupe duplicate stays a duplicate row when its bytes still equal those of `duplicate_of` — R20-4 (round 20): the server re-derivation of `duplicate_of`, which must be another posted row that is not a duplicate (else HTTP 400). Only rows behind a linked folder (and uploads, below) are still excluded (a row path outside the scan folder is HTTP 400 since R21-5, below) — R20-5 (round 20): except a row behind a linked folder that carries a `sha256` (the scan read it, so the folder became a link after the scan): 409 with reason `경로 중간의 폴더가 심볼릭 링크라 …`. R20-1 (round 20): the server classifies a posted row's entry the way the scan's walk does — a FIFO, socket, device node or pseudo-file-system file is the scan's skipped row, a folder it cannot list the scan's failed row `폴더를 읽을 수 없습니다: …` — so such rows of an unchanged folder are signed as the scan listed them (they were "not found" and every report of the folder was 409); "not found" means only that nothing is at the path, and a file replaced by a FIFO after the scan still differs (`analyzed` → `skipped`, 409). A posted folder row whose folder can be listed now is changed (`검사 때와 항목 종류가 다릅니다(지금은 읽을 수 있는 폴더) — …`, 409), except — R21-1 (round 21) — a walk-limit row (`건너뜀: 탐색 상한 도달(…)`), which is excluded (`폴더 탐색 상한 행 — …`: the server does not repeat the walk, so it cannot produce that row), and a loop row (`건너뜀: 순환 링크 — …`) of a folder the server finds to be the scan folder or one between it and the folder (signed with that constant). R21-1: no text of a posted row is signed — the server row's every field, reason and label is the server's; a posted row only names the entry (`path`, `container`/`member`), is compared (`sha256`, `status`, `verdict_code`) and, for a duplicate, names its original (`duplicate_of`, checked by digest; the duplicate row carries the scan's own `중복 내용(동일 해시)`). R21-5 (round 21): a row path is the scan's own form — relative to `scan_root`, no empty, `.` or `..` component, escaped as the scan escapes it — and each row is posted once, else HTTP 400 before any re-analysis. The HTML report
-(`<section id="unsigned-client-rows">`), the forensic PDF and the evidence
-statement PDF render those rows in a separate box titled
-`서명 제외(클라이언트 제공 결과)`: one line per row with the path, the
-conclusion the client sent and the reason, outside the table and outside
-the signature. `excluded_items` is `[]` when every row was re-derived (the
-CLI's reports have no such field). Upload results (`/api/analyze-upload`,
-`/api/check`) are not kept on the server: their rows carry `"source":
-"upload"` (P6) and a report lists every such row under `excluded_items` with
-`업로드 파일 — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다` —
-never re-analyzed from a same-named file of the read root. R22-8 (round 22):
-an upload row's `path` is client text inside the signed body, so it is
-limited — relative, at most 255 characters, no empty, `.` or `..`
-component, no NUL (else HTTP 400 `업로드 항목 N번의 이름이 업로드 파일 이름
-형식이 아닙니다(…)`) — and marked: `name_source: "server_upload"` when this
-server process produced an upload row of that path and `sha256`
-(`/api/analyze-upload`, `/api/check`), otherwise `name_source: "client"`
-with the reason `업로드 파일(클라이언트 제공 이름 — 이 서버가 받은 업로드
-기록에 없음) — …`, which every rendering prints. This is the one exception to
-"no posted text is signed" (R21-1). Make signed
-reports from folder scans. R19-3 (round 19): the signed body carries
-`analysis_options` — `{pixel, heatmaps, deep_signals, default_engine,
-model_path, fusion_profile}`, the options the server re-analyzed every row
-with (file names only) — printed in the HTML header, the forensic PDF and the
-evidence statement as `재분석 옵션(서버가 이 옵션으로 모든 행을 다시 분석): …`;
-and, when the scan was cancelled,
-`files_cancelled_source`: `server` when `summary.files_cancelled` is the
-count of the server's own scan job named by the request's `scan_job` (a
-finished `cancelled` job of the same scan folder, kept 15 minutes) — R23-3
-(round 23): such a job marks the report cancelled with its count whatever the
-posted `summary` says (omitted, or `cancelled: false`, used to sign the job's
-rows as the whole folder, "없음"); `unverified` when the posted `summary` says
-`cancelled: true` without such a job — then `files_cancelled` is 0 and the
-summary line says `분석하지 않은 파일 수는 서버가 확인하지 못했습니다(…)`
-(the posted number is never signed). R9-9 (round 9): the signed body carries
-`scan_root` — the posted `scan_root` folder relative to the read root that
-holds it (`caseA`, `caseA/deeper`, `.` for the root itself; never the
-absolute path) — inside the signature, and the HTML report
-(`<p id="scan-root">`), the forensic PDF and the evidence-statement PDF
-print it in their header as `검사 폴더(읽기 루트 기준, 행 경로의 기준 폴더): …`;
-a report of upload rows only has no `scan_root`.
+`POST /api/report` signs **a scan job the server ran and holds** (P0R-6, user
+decision 2026-10-17 — it used to take the rows the client posted and
+reconcile them with a server re-analysis, X2 … R26-1). The request names
+`scan_job` (docs/deepfake-lens-service.md, "POST /api/report"); nothing it
+says about a file is read. The signed body's `items` are the job's rows
+exactly as the scan produced them (verdict, evidence, coverage, `sha256`), in
+scan order; `thresholds`, `coverage`, `model_pins` and `analysis_options`
+(`{pixel, heatmaps, deep_signals, default_engine, model_path,
+fusion_profile}`, file names only — printed as `재분석 옵션(…)`; the label is
+kept from R19-3) are the values captured when the job's scan ran; the
+summary's verdict counts are counted from the job's rows and its `capped`,
+`files_over_cap`, `subfolders_skipped`, `subfolder_files_skipped`,
+`subfolders_skipped_detail`, `cancelled` and `files_cancelled` are the job's
+own (`unrecorded_files.listing` `{"source": "scan_job", "not_in_report": 0}` —
+every row of the job is signed, so none is "보고서에 행 없음";
+`files_cancelled_source: "server"` when the job was cancelled). The optional
+`exhibit_paths` (ordered job row paths) is signed as `exhibit_paths` and only
+chooses which rows the evidence statement numbers as exhibits, in that order —
+the others follow unnumbered (`서증 외(검사 행)`), so no row is left out of any
+artifact. Before signing, every file the scan hashed is re-hashed on disk under
+the job's folder (no link followed; archive members through the container's
+digest) and any change refuses every format with 409 and `changed_rows`
+`[{"path", "reason"}]` (E47). Upload rows (`/api/analyze-upload`, `/api/check`)
+are not kept on the server: a request may list them as `uploads` and the
+signed body lists each under `excluded_items` — `[{"path", "marker":
+"서명 제외(클라이언트 제공 결과)", "reason", "name_source"}]` with
+`업로드 파일 — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다`; the HTML
+report (`<section id="unsigned-client-rows">`), the forensic PDF and the
+evidence statement PDF render those rows in a separate box titled
+`서명 제외(클라이언트 제공 결과)`, outside the table and the signature. R22-8
+(round 22): an upload row's `path` is client text inside the signed body, so
+it is limited — relative, at most 255 characters, no empty, `.` or `..`
+component, no NUL (else HTTP 400 `업로드 항목 N번의 이름이 업로드 파일 이름 형식이
+아닙니다(…)`) — and marked `name_source: "server_upload"` when this server
+process produced an upload row of that path and `sha256`, otherwise
+`name_source: "client"` with the reason `업로드 파일(클라이언트 제공 이름 — 이
+서버가 받은 업로드 기록에 없음) — …`. With the case fields this is the only
+client text in a signed web report. `excluded_items` is `[]` without uploads
+(the CLI's reports have no such field). A report of uploads only has no
+`scan_root` and its `unrecorded_files.listing` is `{"source": "unknown",
+"reason": "검사 폴더가 없는 보고서 — 업로드 결과만 있음"}`. R9-9 (round 9): the
+signed body carries `scan_root` — the job's scan folder relative to the read
+root that holds it (`caseA`, `.` for the root itself; never the absolute
+path) — printed in every header as `검사 폴더(읽기 루트 기준, 행 경로의 기준
+폴더): …`.
 
 ### Signed evidence statement (증거설명서)
 

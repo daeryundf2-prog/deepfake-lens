@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "e98b10b5fe2dcf1d0f7d6e51cf1272b5d93fb57b",
+    "head": "b83ddd87433a0844fd6c5df975d1782a31c42045",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -4430,6 +4430,139 @@
       "new": "갭 목록 밖 항목 포함",
       "commits": [
         "8483bf4"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R26-1",
+      "round": 26,
+      "source": "verify_round26.md",
+      "summary": "R26-1 an archive member's chain escapes each level's path, so a literal member \"inner.zip:",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "e48262b",
+        "28db773"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R26-10",
+      "round": 26,
+      "source": "verify_round26.md",
+      "summary": "R26-10 an ffmpeg step stopped at its time limit names the step, the file and the limit — i",
+      "gaps": [
+        "G12"
+      ],
+      "new": null,
+      "commits": [
+        "2594bb9"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R26-2",
+      "round": 26,
+      "source": "verify_round26.md",
+      "summary": "R26-2 every reason of a row names a file \"<root>/…\" from the absolute folder, the relative",
+      "gaps": [
+        "G7"
+      ],
+      "new": null,
+      "commits": [
+        "7c74bd7"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R26-3",
+      "round": 26,
+      "source": "verify_round26.md",
+      "summary": "R26-3 on macOS / BSD a UTF-8 non-ASCII name in a working folder deeper than PATH_MAX is ha",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "21a84a5"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R26-4",
+      "round": 26,
+      "source": "verify_round26.md",
+      "summary": "R26-4 archive members named \"~$보고서.docx\", \"~WRL0001.tmp\" or — on POSIX — \"con.png\" are ana",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "d2306f5"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R26-5",
+      "round": 26,
+      "source": "verify_round26.md",
+      "summary": "R26-5 a finished /api/scan/stream is a server-held scan job — a report of a cancelled stre",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "61c036a"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R26-6",
+      "round": 26,
+      "source": "verify_round26.md",
+      "summary": "R26-6 one PDF prints \"|\" one way — file names, member paths, the scan folder name and reas",
+      "gaps": [
+        "G2"
+      ],
+      "new": null,
+      "commits": [
+        "89cc44e"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R26-7",
+      "round": 26,
+      "source": "verify_round26.md",
+      "summary": "R26-7 `help help <topic>` is the help of <topic> and `help help help` the top-level help, ",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "a95ba10"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R26-8",
+      "round": 26,
+      "source": "verify_round26.md",
+      "summary": "R26-8 every scan result's row identities must be unique and round-trip, or the scan gives ",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "36f0436"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R26-9",
+      "round": 26,
+      "source": "verify_round26.md",
+      "summary": "R26-9 multimodal --av-sync decodes only what the energy envelope needs — 8 kHz mono of the",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "ffb347f"
       ],
       "used_in_commit_subjects": true
     }
@@ -11721,6 +11854,626 @@
       "short": "e98b10b",
       "round": "25",
       "subject": "docs(phase0): HANDOFF.md §1/§2/§9 add the coordinator-added R25-9 to round 25 — fixed on this branch, in the records' ids[] list to add, a round-26 probe — without anything the records-only commit changes (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "037ade752bc640957e43807b60df2fd2759b97bf",
+      "short": "037ade7",
+      "round": "25",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on e98b10b, round-25 IDs mapped (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "da79ae368d083def53f67bf39003de448c3dca7c",
+      "short": "da79ae3",
+      "round": "25",
+      "subject": "docs(phase0): round-26 verification findings (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "3fdb743bf96b0a0429c6556ff05cd3fe56d704ba",
+      "short": "3fdb743",
+      "round": "25",
+      "subject": "docs(phase0): round-26 coordinator-promoted residual risks R26-8, R26-9, R26-10 — row-identifier injectivity at scan stage, bounded multi-track av-sync decoding, ffmpeg timeout reasons (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "e48262bb127574fb96f36654ffedd8cfbfd81426",
+      "short": "e48262b",
+      "round": "26",
+      "subject": "fix(archive): R26-1 an archive member's chain escapes each level's path, so a literal member \"inner.zip::b.png\" is never the chain of b.png inside the nested inner.zip — row identity is injective by construction (R26-1; Gaps: G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R26-1"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "36f0436c14a44086cdf2a73ad1e997f1c3426338",
+      "short": "36f0436",
+      "round": "26",
+      "subject": "fix(core): R26-8 every scan result's row identities must be unique and round-trip, or the scan gives no result — checked in core, the CLI, both servers' scans and the report re-analysis (R26-8; Gaps: G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R26-8"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "7c74bd75fb324c8049de5c2a95c05b0ee014bf35",
+      "short": "7c74bd7",
+      "round": "26",
+      "subject": "fix(scan): R26-2 every reason of a row names a file \"<root>/…\" from the absolute folder, the relative folder and \".\", with 1 or 4 workers — read failures, archive extraction failures, unreadable folders, repr()-escaped names and names the audio worker staged (R26-2; Gaps: G7)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R26-2"
+      ],
+      "gaps_named_in_subject": [
+        "G7"
+      ],
+      "gaps": [
+        "G7"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G7",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "d2306f51a1b0539eac8c55fe7ca51aaff509ff20",
+      "short": "d2306f5",
+      "round": "26",
+      "subject": "fix(archive): R26-4 archive members named \"~$보고서.docx\", \"~WRL0001.tmp\" or — on POSIX — \"con.png\" are analyzed like the same files in a folder; a device name is refused on Windows only, a leading \"~\" nowhere (R26-4; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R26-4"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R26-4: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "a95ba108b26b5e5f096df75aa498b47075495653",
+      "short": "a95ba10",
+      "round": "26",
+      "subject": "fix(cli): R26-7 `help help <topic>` is the help of <topic> and `help help help` the top-level help, exit 0 — they were 「허용되지 않은 값 'help'」 with a choice list that has no \"help\" (R26-7; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R26-7"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R26-7: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "89cc44ebfa46481789ead9a102b9f4acdb73c5bb",
+      "short": "89cc44e",
+      "round": "26",
+      "subject": "fix(report): R26-6 one PDF prints \"|\" one way — file names, member paths, the scan folder name and reasons print it as typed like the case fields; a literal \"\\|\" still prints with its backslash doubled (R26-6; Gaps: G2)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R26-6"
+      ],
+      "gaps_named_in_subject": [
+        "G2"
+      ],
+      "gaps": [
+        "G2"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G2",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "61c036a2a065537c441baf123bbaad1838f30e56",
+      "short": "61c036a",
+      "round": "26",
+      "subject": "fix(api): R26-5 a finished /api/scan/stream is a server-held scan job — a report of a cancelled stream's partial result names it by scan_job and is signed with the server's cancel count; the 400 names both job kinds, and the service doc's stale \"partial results as done\" lines are corrected (R26-5; Gaps: G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R26-5"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "41bf3f32d7d30f081ece8614ea57cad7570d233d",
+      "short": "41bf3f3",
+      "round": "26",
+      "subject": "feat(c2pa): techniques-2026 items 1–2 — the C2PA reader verifies offline against the bundled C2PA trust list and reads the 2.2–2.4 facts; digital source types use the full IPTC vocabulary (techniques-2026 #1–#2; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "21a84a5fa718e08fcd0b18925213be02365d1b87",
+      "short": "21a84a5",
+      "round": "26",
+      "subject": "fix(native): R26-3 on macOS / BSD a UTF-8 non-ASCII name in a working folder deeper than PATH_MAX is handed to the decoders as it is, like an ASCII name — a video over 2 GiB failed with the false reason 「심볼릭 링크를 만들 수 없어」 (R26-3; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R26-3"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R26-3: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "2594bb9c44152bf6f96830aa9347ad7b121777de",
+      "short": "2594bb9",
+      "round": "26",
+      "subject": "fix(native): R26-10 an ffmpeg step stopped at its time limit names the step, the file and the limit — it was 「TimeoutExpired: 라이브러리 오류(TimeoutExpired)」 (R26-10; Gaps: G12)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R26-10"
+      ],
+      "gaps_named_in_subject": [
+        "G12"
+      ],
+      "gaps": [
+        "G12"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G12",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "783874ece0031e0fc730eb6388ec5a52941384e3",
+      "short": "783874e",
+      "round": "26",
+      "subject": "feat(watermark): techniques-2026 item 3 — every image is checked for the SDXL pipelines' fixed 48-bit imwatermark message; only an exact match is evidence (techniques-2026 #3; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "f90a999d937d89f850cdcab3551adabe9659997c",
+      "short": "f90a999",
+      "round": "26",
+      "subject": "feat(watermark): techniques-2026 item 4 — Adobe TrustMark Q/P/C decoding; a packet is a fact, and it reaches a conclusion only through a validated C2PA soft binding (techniques-2026 #4; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "4ed9ced04164662cb01ba350b11a5208b906c2c7",
+      "short": "4ed9ced",
+      "round": "26",
+      "subject": "feat(watermark): techniques-2026 item 5 — Meta VideoSeal (images, video) and AudioSeal (audio, a video's audio track) behind the optional torch extra; a generator is named only by a registered message (techniques-2026 #5; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "0298c978fe824c94830102a705743badf1969d6b",
+      "short": "0298c97",
+      "round": "26",
+      "subject": "feat(report): techniques-2026 item 6 — every media and document row states which machine-readable marks were checked (EU AI Act Art. 50 / 인공지능기본법 context), never inferring originality from their absence (techniques-2026 #6; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "ffb347f8e25502f85fc7f41bc22257f30fbec7a3",
+      "short": "ffb347f",
+      "round": "26",
+      "subject": "fix(audio): R26-9 multimodal --av-sync decodes only what the energy envelope needs — 8 kHz mono of the first 600 s, the span said when the video is longer — and measures every audio track up to 4, reporting the best-correlated one and naming each (R26-9; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R26-9"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R26-9: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "ba7214550315b0503be5b4a1e17aba974131b907",
+      "short": "ba72145",
+      "round": "26",
+      "subject": "docs(phase0): HANDOFF.md §1/§2/§9 state round 26 — 26 rounds, R26-1…R26-7 and the coordinator-promoted R26-8…R26-10 fixed on this branch, the round-26 trend and the next steps; §6 adds that row identifiers must be injective by construction and that a name-acceptance change brings collision fixtures into the report invariant tests — without anything the records-only commit changes (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "28db773453d04e1fe816c02c099d05077e1a1ece",
+      "short": "28db773",
+      "round": "26",
+      "subject": "test(report): R26-1 the report invariant fixtures also hold a top-level name with the escape character itself — \"col\\::x.png\", whose row is the R9-1 escape \"col\\\\\\:\\:x.png\" (R26-1; Gaps: G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R26-1"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "d5aea332097df8dd573fff9f57c2581c90262f40",
+      "short": "d5aea33",
+      "round": "26",
+      "subject": "docs(phase0): P0R-1 gate 0 is declared on a risk basis — invariant tests on three axes plus two clean independent rounds; Low/Cosmetic go to BACKLOG.md, a user-visible false statement still blocks; new verification-round format (P0R-1; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "e31fd55380f8afd804baac0db39a5a0b0438bc37",
+      "short": "e31fd55",
+      "round": "26",
+      "subject": "feat(cli): P0R-4 gate-0 scope freeze — every command outside scan/classify/verify-report/evidence-statement/doctor/web/api-serve/corpus/vendor-weights pin is marked 「실험·비게이트」 in its help line and --help description (P0R-4; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "af5cac5e30d56043860d0619309770b266bc15e1",
+      "short": "af5cac5",
+      "round": "26",
+      "subject": "chore(android): P0R-5 the Android module deepfakeclassifier and its Gradle wrapper move unchanged to extras/android — outside the Python package and the phase-0 gate (P0R-5; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "aa8d1a497d56cc2d5a3f87f27a62d073256bce44",
+      "short": "aa8d1a4",
+      "round": "26",
+      "subject": "test(invariants): P0R-2 hypothesis property tests of the verdict invariants — conclusions always have their supporting item, lexical never changes a verdict, uncalibrated statistics only withhold, a failed check never concludes outside rule 2, and an injected exception in any check never escapes the scan (P0R-2; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "313e70122cc8fe96d8bc257f0266f29c172c91a3",
+      "short": "313e701",
+      "round": "26",
+      "subject": "test(paths): P0R-3 one axis-product table — absolute / relative / \".\" × shallow / deeper-than-PATH_MAX working folder × ASCII / non-ASCII case folder × --workers 1 / 4 × folder / zip — every combination must give the same rows (P0R-3; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "66389ae4623ecf424286f986ac517ac737543f27",
+      "short": "66389ae",
+      "round": "26",
+      "subject": "feat(report): P0R-6 /api/report signs a server-held scan job only — the request names scan_job (+ case fields, format, side, an ordered exhibit_paths selection, unsigned uploads); jobs are bound to the server token, persisted outside the evidence, never evicted while running (P0R-6; Gaps: G30, G31)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [
+        "G30",
+        "G31"
+      ],
+      "gaps": [
+        "G30",
+        "G31"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30, G31",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "020917e77efb503c90922c7e09899d65d152516f",
+      "short": "020917e",
+      "round": "26",
+      "subject": "feat(metadata): P0R-22 container/bitstream metadata layer (threat G2) — MP4/MOV boxes, H.264/HEVC SEI user data, ID3v2, RIFF INFO, FLAC comments and the GB 45438 AIGC label as facts, a registered generator declaration as a self-declared item; P0R-23 the video row no longer claims a container check that did not exist (P0R-22, P0R-23; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [
+        "G2"
+      ],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "f1b3b548fd62a6af25acd2ca1364747748514660",
+      "short": "f1b3b54",
+      "round": "26",
+      "subject": "fix(c2pa): P0R-20 a C2PA hard binding whose hash exclusions drop asset content fails the c2pa check whatever the SDK says (the 2026-10-02 two-range attack the SDK reports Trusted); P0R-21 the frozen Interim Trust List is a separate bundle, an ITL-only signer is labelled and moderate, revocation is stated as unchecked (P0R-20, P0R-21; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "c5358a1ebd4d7e7c93cecc4b77d73223c584fddc",
+      "short": "c5358a1",
+      "round": "26",
+      "subject": "fix(decision): P0R-10 rule 2 no longer outvotes strong authenticity — strong reproducible-record evidence in both directions is a conflict, undetermined (P0R-10; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "28f8fc369d07b41ad3a7a997d3f9c990c1ee8d76",
+      "short": "28f8fc3",
+      "round": "26",
+      "subject": "fix(metadata): P0R-11 a generator brand word is moderate and counts only in generator-specific fields (Software, parameters, prompt/workflow, xmp:CreatorTool) — never exif.Model, LensModel, Credit or dc:creator (P0R-11; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "6f1bf13247d4258a1fe3d82d04eefd4afe44b4c1",
+      "short": "6f1bf13",
+      "round": "26",
+      "subject": "feat(result): P0R-12 every manipulation or authenticity conclusion says why it could be wrong (result.conclusion_caveats, 「이 결론이 틀릴 수 있는 이유」), and one resting on self-declared metadata says 「자기 선언 메타데이터 — 심거나 지울 수 있음」 in the verdict and the evidence statement (P0R-12; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "8334b4767a593b9a886c6a826fba1fdb6f1e73fe",
+      "short": "8334b47",
+      "round": "26",
+      "subject": "fix(wording): P0R-13 「결정적 근거」 is 「재현 가능한 기록 근거」 in the UI, CLI, reports and the GUI CSV header, and no 「감정 근거로 사용 가능」 label is shown next to 판단 불가 (P0R-13; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "63151880ad18739bc152f868d5ef7f12d8c68795",
+      "short": "6315188",
+      "round": "26",
+      "subject": "fix(signing): P0R-14 every signed body carries its generation time and the model profiles that ran (executed_models: profile, pin, threshold, calibration id) and never the host temp folder; P0R-15 signing refuses a key shorter than 32 bytes (verifying does not) (P0R-14, P0R-15; Gaps: G30)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "3852f124e938fe3a484f23291c618e76b248e0d4",
+      "short": "3852f12",
+      "round": "26",
+      "subject": "test(output): P0R-0 the \"no recorded generation was rewritten\" check reads the first-parent history — the merged techniques-2026 branch recorded its own generations 13–17 (P0R-0; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "fdf6e5440d39af7e782193f10d14eae31cc4b515",
+      "short": "fdf6e54",
+      "round": "26",
+      "subject": "docs(phase0): P0R-24 HANDOFF.md §1/§2/§4/§7/§9 describe the restructured phase 0 — the five P0R parts, the next steps (records, a round-27 verification in the new format and what it must probe), the :tech gate image, the 2026-10-17 user decisions as agreed decisions, BACKLOG.md in the file list (P0R-24; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "6663a59fe83fccfef985629f9c610ffec590f86b",
+      "short": "6663a59",
+      "round": "26",
+      "subject": "docs(phase0): P0R-25 BACKLOG.md lists what the restructure left open — exclusion-attack fixtures beyond PNG, the ITL allow list, an offline CRL, the report's side, job-store fallbacks, the axis table's cost, host-only test differences (P0R-25; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "94a7858246a0a108a52e0ed712cbd97315581c56",
+      "short": "94a7858",
+      "round": "26",
+      "subject": "test(fixtures): P0R-26 the new invariant, axis-table and caveat tests write their PNGs without Pillow (tests/png_fixture.write_png) — they ran only where Pillow is installed (P0R-26; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "b83ddd87433a0844fd6c5df975d1782a31c42045",
+      "short": "b83ddd8",
+      "round": "26",
+      "subject": "docs(phase1): legal-review bundle C0 — every legal question for phase-1 corpora, licences, service terms and report wording in one document, to be reviewed once (user decision 2026-10-17) (WP-J; Gaps: 신규)",
       "pre_rewrite_subject": null,
       "ids": [
         "WP-J"

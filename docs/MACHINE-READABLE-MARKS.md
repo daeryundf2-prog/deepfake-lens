@@ -1,7 +1,7 @@
 # 기계판독 표식 검사 (techniques-2026)
 
 근거 자료: `new_techniques_2026-10.md`(2026-10 최신 기법 조사)의 "(A) 지금 추가 가능" 항목. 0단계 규칙(분석 중 네트워크 금지,
-fail closed, 모든 검사의 coverage 기록, 결정적 근거만 결론에 참여, 부재는 원본성 근거가 아님)은 그대로다.
+fail closed, 모든 검사의 coverage 기록, 재현 가능한 기록 근거(결정적 근거)만 결론에 참여, 부재는 원본성 근거가 아님)은 그대로다.
 
 ## 1. C2PA 2.2–2.4 판독 (`c2pa` 검사)
 
@@ -35,8 +35,9 @@ fail closed, 모든 검사의 coverage 기록, 결정적 근거만 결론에 참
 
   콘텐츠 해시 일치는 `assertion.dataHash|bmffHash|boxesHash|collectionHash.match` 중 하나다.
 - **근거 충돌**(조정자 추가): 강한 원본 근거(신뢰 서명된 촬영 매니페스트)와 강한 생성 근거(예: 서명 없는 XMP 자기 신고)가 함께 있으면
-  둘 다 근거 목록에 남고, 중립 항목 「근거 충돌: 서명된 원본성 근거와 생성 근거가 함께 있음」이 더해진다. 결정 규칙(규칙 2가 생성 근거를
-  우선)은 바꾸지 않았다 — 규칙 변경은 phase0 브랜치에서 결정한다.
+  둘 다 근거 목록에 남고, 중립 항목 「근거 충돌: 서명된 원본성 근거와 생성 근거가 함께 있음」이 더해진다. P0R-10(사용자 결정 2026-10-17):
+  결정 규칙도 이 충돌을 따른다 — 강한 생성 근거와 강한 원본성 근거가 함께 있으면 규칙 2가 발동하지 않고 판단 불가(규칙 2의 예외,
+  `decision.CONFLICT_RULE` = 7)다.
 - **모달리티**: 이미지(기존)에 더해 오디오(wav·mp3·flac·m4a)·영상(mp4·mov·avi)·문서(pdf·docx·xlsx·pptx)도 `c2pa` 검사를 한다.
   문서 결과는 텍스트 규칙상 등급이 늘 "참고"라서 서명된 매니페스트도 결론을 바꾸지 않는다(등급 상향은 사용자 결정 사항).
   `.txt`·`.md`는 `skipped` 「C2PA 텍스트·HTML 임베딩(C2PA 2.3/2.4)은 현재 SDK…가 판독하지 않음…」 — c2pa-rs 0.91은 텍스트/HTML
@@ -45,6 +46,27 @@ fail closed, 모든 검사의 coverage 기록, 결정적 근거만 결론에 참
   못한다(`claim_cbor: unexpected trailing data`). 그런 파일은 `c2pa` failed로 기록된다(fail closed). 빌더가 구성요소의 `digitalSourceType`을
   기록하지 않아 구성요소 수준 값은 기록된 판독 결과로만 시험했다.
 - 픽스처: `fixtures/c2pa-2.4/`(재현 스크립트 `scripts/build_c2pa24_fixtures.py`, 설명 `fixtures/c2pa-2.4/README.md`), 테스트 `test_c2pa24.py`.
+- **하드 바인딩 제외범위 검사(P0R-20, 위협 G3 — 2026-10-02 공개)**: `c2pa.hash.data` assertion의 제외 구간(exclusions)은 서명된 콘텐츠 해시에서 빠지는
+  바이트 범위다. c2pa-rs(0.91.3까지, 게이트의 c2pa-python 0.38)는 제외 구간 하나가 매니페스트 위치와 같은지만 보고 나머지 구간은 보지 않아,
+  매니페스트 구간 + 콘텐츠를 덮는 두 번째 구간(또는 나머지 전부)을 넣은 파일을 **Trusted**로 보고한다. `deepfake_lens/c2pa_binding.py`가
+  판독기의 `detailed_json()` assertion 저장소에서 활성 매니페스트의 하드 바인딩을 읽어(파일은 청크·세그먼트 헤더만 읽음 — 전체를 읽지 않음)
+  다음이면 신뢰 불가로 본다: 제외 구간이 파일 전체를 덮거나 해시되는 콘텐츠가 64바이트 미만, 매니페스트 저장소(PNG `caBX` 청크, JPEG APP11
+  세그먼트) 밖을 64바이트(세그먼트 틀 여유)보다 많이 덮음, 겹치거나 파일 밖·음수·형식이 잘못된 구간, BMFF 제외 경로가 `/uuid`·`/ftyp`·`/mfra`
+  밖, PNG·JPEG·BMFF인데 하드 바인딩이 없음. 그러면 판독 기록은 `status: "invalid"`, `error_kind: "hash_exclusion"`, `trusted: false`,
+  실패 코드에 `c2pa.hash.exclusion.invalid`가 더해지고 `hard_binding`(ok·kind·reason·file_size·excluded_bytes·excluded_outside_store·
+  hashed_bytes·store_located)이 남으며, `c2pa` 검사는 `failed` 「AnalyzerError: C2PA 해시 제외범위 이상 — 서명 대상에서 파일 내용 N바이트 중
+  M바이트가 제외됨(매니페스트 저장소 밖 제외 K바이트) — 서명 유효 여부와 무관하게 출처 근거로 쓰지 않습니다」이다(규칙 3: 판단 불가). 픽스처
+  `exclusion-twozone.png`·`exclusion-allcontent.png`(SDK가 Trusted로 보고), `exclusion-twozone.jpg`·`exclusion-wholefile.png`·
+  `exclusion-paststore.png`(SDK가 이미 Invalid — 회귀용), 재현 스크립트 `scripts/build_c2pa_exclusion_fixtures.py`, 테스트 `test_c2pa_exclusions.py`.
+- **신뢰 목록 분리(P0R-21)**: 2026-01-01에 동결된 임시 신뢰 목록(ITL)의 루트 앵커(`deepfake_lens/models/c2pa-itl-anchors.pem`, 27개,
+  `models/c2pa-itl.json` — contentauth/verify-site `static/trust/anchors.pem`, 커밋 c2bf16d, Apache-2.0, sha256 확인)를 공식 목록과 따로 둔다.
+  서명자는 먼저 공식 목록(+ 운영자 앵커)으로 확인하고, 신뢰되지 않을 때만 ITL 앵커만으로 다시 확인한다. 판독 기록의 `trust_list`는
+  `c2pa`(공식 목록) / `c2pa_or_operator`(운영자 앵커가 지정된 경우) / `itl`(동결된 ITL에만 연결) / 없음이다. ITL에만 연결된 유효 서명의 생성형·촬영
+  선언은 **보통**(「C2PA 서명(동결된 임시 신뢰 목록 ITL): …」 — ITL 제품은 C2PA 적합성 프로그램의 평가를 받지 않음)이며 결론 근거가 아니다.
+  ITL의 최종 개체 허용 목록(`allowed.pem`)은 넣지 않았다.
+- **폐기 확인(P0R-21)**: 공식 C2PA 오프라인 폐기 목록(CRL 스냅숏)은 2026-10-17 현재 공개된 것이 없어 동봉하지 않았다. 모든 C2PA 근거의 검증 기준
+  문구와 `c2pa` 사유에 「인증서 폐기 여부는 확인하지 않음(오프라인 폐기 목록 미적용·OCSP 조회 안 함 — 폐기된 서명 인증서도 신뢰로 보일 수 있음)」이
+  붙고 `trust_basis.revocation`은 `not_checked`다.
 
 ## 2. 디지털 출처 유형 어휘 (`digital_source_type.py`)
 
@@ -68,7 +90,7 @@ IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "�
 - 메시지: `0b101100111110110010010000011110111011000110011110`(48비트, diffusers `StableDiffusionXLWatermarker`와 Stability 참조 구현이 같은 값 —
   출처·조회일은 `models/watermark-registry.json`). 문서화된 BGR 순서와 R·B를 바꾼 순서를 모두 시험한다.
 - **근거**: 48/48 정확 일치일 때만 결정적·생성·강 「SDXL 공식 파이프라인 워터마크 존재」. 메시지가 공개라 흉내 낼 수 있으므로 생성 도구
-  메타데이터와 같은 급이다. 불일치는 무정보(coverage `ran` 「등록 고정 메시지 N개와 정확 일치 없음 — 무정보(워터마크 부재를 뜻하지 않음)」 — TB-8에서 문구 변경, §9).
+  메타데이터와 같은 급이다. 불일치는 무정보(coverage `ran` 「등록 고정 메시지 N개와 정확 일치 없음 — 무정보(워터마크 부재를 뜻하지 않음)」 — TB-8에서 문구 변경, §10).
 - 범위 밖: 짧은 변 256px 미만(SDXL 워터마커가 표식을 넣지 않음) → `skipped`; 8천만 화소 초과 → `skipped`.
 - 측정: 실사 240장 우연 일치 0건(95% 상한 1.5%), 무손실 재검출률 29.6% — `docs/WATERMARK-MEASUREMENTS.md`.
 
@@ -116,7 +138,19 @@ IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "�
   「기계판독 표식 확인 결과(EU 인공지능법 제50조·인공지능기본법 관련)」(근거 목록 맨 뒤 — 모든 보고서에 그대로 출력·서명). 추론은 하지 않는다:
   「표식이 확인되지 않은 것은 원본성 근거가 아닙니다 …」가 늘 함께 적힌다.
 
-## 7. 비가시 유니코드 표식 (`text_invisible_marks`, techniques-2026b TB-1)
+## 7. 컨테이너·비트스트림 메타데이터 (`container_metadata`, P0R-22 — 위협 G2)
+
+`deepfake_lens/container_metadata.py`는 ffprobe 없이 순수 파이썬으로 미디어 컨테이너가 스스로 적은 메타데이터를 **사실**로 읽는다. 영상·음성 행마다, 이미지 행에서는 GB 45438 `AIGC` 라벨에 한해 검사 범위에 `container_metadata`가 남는다.
+
+- 읽는 것: ISO-BMFF(mp4·mov·m4v·m4a·3gp)의 `moov/udta/meta/keys/ilst`(QuickTime `mdta` 키 — `AIGC`, `prompt`, `workflow`, `comment`, `com.apple.quicktime.*`; `©too`/`©swr`/`©enc`), `udta` 텍스트 원자, `hdlr` 이름, `mvhd` 생성 시각, 영상 샘플 항목의 compressor 이름, XMP `uuid`/`XMP_` 패킷, C2PA `uuid` 박스의 존재(검증은 `c2pa` 검사); H.264/HEVC SEI `user_data_unregistered` 문자열(첫 영상 청크의 앞 4 MiB); 오디오 ID3v2 프레임(TXXX·TSSE·TENC·COMM·TIT2 …), RIFF `LIST/INFO`(ISFT·ICMT …)와 WAV/AVI의 `id3` 청크, FLAC Vorbis 주석; 이미지의 PNG 텍스트 청크·XMP의 `AIGC`.
+- 상한: 메타데이터 박스 내용 합계 64 MiB, 값 하나 8 MiB, 박스 100 000개, 중첩 16단계. 상한에 닿으면 사유에 부분 판독을 적는다.
+- 커버리지: `ran`(사유에 읽은 부분 — 예: `MP4/MOV 메타데이터 판독(udta·meta·keys·ilst·hdlr·mvhd·stsd·uuid·XMP)`), `skipped`(판독하지 않는 형식 — `… 이 형식의 컨테이너 메타데이터는 판독하지 않음(지원: MP4/MOV·RIFF(WAV/AVI)·ID3v2(MP3)·FLAC)`), `failed`(`AnalyzerError: MP4 박스 …의 크기가 0입니다 …`, `… 헤더가 잘렸습니다 …`, `MP4 박스 중첩이 16단계를 넘습니다 …` 등 구조를 걸을 수 없을 때 — 조용히 통과하지 않는다).
+- 근거 규칙(`evidence_rules.container_metadata_evidence`): 읽은 필드는 결정적·중립·약함 사실 항목 하나(「컨테이너 메타데이터 판독 사실」)로 적는다 — `Lavf`·`Lavc`·`x264`·`VideoHandler` 같은 인코더·핸들러 이름은 ffmpeg로 변환·편집한 모든 파일에 있으므로 아무것도 뜻하지 않는다고 함께 적는다. 생성 방향 항목은 **등록된 생성기 선언**(`models/container-generators.json`, 버전이 캐시 키에 들어감)에서만 나온다: GB 45438-2025 `AIGC` 라벨 JSON의 `Label`이 AI 생성 값이면 결정적·생성·강함, ComfyUI 노드 그래프(JSON)가 `prompt`/`workflow` 필드에 있으면 결정적·생성·강함, 등록된 생성 서비스 SEI 문자열(`kling-ai`)이면 결정적·생성·강함, 생성 도구 필드(encoder·software·`©too`·TSSE·ISFT)의 생성기 이름 하나는 결정적·생성·**보통**(단독 결론 불가). 자유 텍스트 필드(comment·title·artist …)의 내용은 사실 항목일 뿐이다. 생성 방향 항목은 모두 `self_declared: true`이고 설명에 「자기 선언 메타데이터 — 심거나 지울 수 있음」이 들어간다. 이 계층은 원본성 항목을 만들지 않는다. `ContentProducer`가 등록표에 없으면 서비스를 귀속하지 않는다.
+- 한계: 재인코딩·다시 저장하면 메타데이터·SEI가 사라지거나 바뀐다 — 부재는 원본성 근거가 아니다.
+
+P0R-23: 영상 행의 출처 추정 문구가 존재하지 않던 영상 메타데이터 검사를 「…컨테이너 메타데이터에서 출처 단서를 찾지 못했습니다」로 적던 것을 없앴다. 지금 문구는 「영상 출처는 추정하지 않습니다 — 확인한 표식(컨테이너 메타데이터·C2PA·워터마크)의 결과는 근거 항목과 검사 범위에 있습니다.」이다.
+
+## 8. 비가시 유니코드 표식 (`text_invisible_marks`, techniques-2026b TB-1)
 
 위협 카탈로그 M-TXT-03·M-TXT-01. 대상: `.txt`·`.md`가 분석한 본문(앞 `text_bytes`), 문서(pdf·docx·xlsx·pptx·hwp)는 추출한 본문
 (추출이 실행되지 않으면 `skipped` 「문서 텍스트 추출이 실행되지 않아 검사하지 않음」). 의존성 없음(표준 라이브러리).
@@ -145,7 +179,7 @@ IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "�
   github.com/encypherai/c2pa-text@7e81875(MIT), github.com/encypherai/encypher-ai@15f5878(AGPL-3.0), https://www.unicode.org/reports/tr51/ ,
   https://www.unicode.org/reports/tr37/ , https://paulbutler.org/2025/smuggling-arbitrary-data-through-an-emoji/ . 테스트 `test_text_marks.py`.
 
-## 8. Resemble AI PerTh 암묵 워터마크 (`watermark_perth`, techniques-2026b TB-2)
+## 9. Resemble AI PerTh 암묵 워터마크 (`watermark_perth`, techniques-2026b TB-2)
 
 - 위협 카탈로그 O-CHATTERBOX·M-AUD-01. Chatterbox(resemble-ai/chatterbox, MIT)는 모든 출력에 `perth.PerthImplicitWatermarker().apply_watermark`를
   적용한다(`src/chatterbox/tts.py` L126·L271, `vc.py` L29·L103, 커밋 `5de7a54aa4e5`, README 「Built-in PerTh Watermarking」).
@@ -170,7 +204,7 @@ IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "�
   같은 240개에 패키지로 표식을 넣고 16비트로 저장하면 최소 0.922(240/240).
 - 게이트 이미지 `deepfake-lens-gate:tech2`(`scripts/gate/Dockerfile.tech2`, `:tech` 위에 가중치만 추가 — 휠·파일 sha256 확인).
 
-## 9. 공개 파이프라인의 고정 워터마크 확인 (techniques-2026b TB-8 — O-FLUX2, O-SDXL-FAMILY)
+## 10. 공개 파이프라인의 고정 워터마크 확인 (techniques-2026b TB-8 — O-FLUX2, O-SDXL-FAMILY)
 
 2026-10-17, 소스 코드에서 직접 확인(커밋 고정). `watermark-registry.json` 판 `2026-10-17.2`에 들어간 것만 판정에 쓰인다(정확 일치 → 결정적·생성·강, 제목은 항목별).
 

@@ -30,7 +30,8 @@ class TableTest(unittest.TestCase):
 
     def test_additions_are_recognised(self) -> None:
         self.assertEqual(guess_image_source({"exif.Software": "AI generated;flux2"}).label, "Flux / Black Forest Labs 추정")
-        self.assertEqual(guess_image_source({"exif.Software": "Dreamina"}).confidence, SourceConfidence.HIGH)
+        # P0R-11 (phase0 merge): a brand word is a LOW source guess, never HIGH — the added markers follow that rule.
+        self.assertEqual(guess_image_source({"exif.Software": "Dreamina"}).confidence, SourceConfidence.LOW)
         self.assertEqual(guess_image_source({"exif.Software": "GIMP 2.10"}).confidence, SourceConfidence.UNKNOWN)
         self.assertEqual(generator_name_in("Adobe Firefly"), "Firefly")
 

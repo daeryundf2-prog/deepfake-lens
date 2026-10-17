@@ -116,9 +116,22 @@ class MetadataEvidenceMappingTest(unittest.TestCase):
         self.assertEqual(items[0].strength, EvidenceStrength.STRONG)
         self.assertTrue(any(i.title == "생성 모델에 흔한 정사각 해상도" and i.direction == EvidenceDirection.NEUTRAL for i in items))
 
-    def test_header_byte_string_is_only_moderate(self) -> None:
+    def test_header_byte_string_is_only_a_fact(self) -> None:
+        # P0R-11 (user decision 2026-10-17): renamed from test_header_byte_string_is_only_moderate — a brand word
+        # outside the generator-specific fields was moderate synthetic (it blocked authenticity); it is a neutral fact.
         [item] = image_metadata_evidence({"header.text": "Generated with FLUX.1 by Black Forest Labs"}, None)
-        self.assertEqual((item.direction, item.strength), (EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE))
+        self.assertEqual((item.direction, item.strength), (EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK))
+        for key in ("exif.Model", "exif.LensModel", "png.Description"):
+            with self.subTest(key=key):
+                self.assertFalse([i for i in image_metadata_evidence({key: "Adobe Firefly"}, None) if i.direction == EvidenceDirection.SYNTHETIC])
+
+    def test_a_brand_in_a_generator_field_is_moderate_and_self_declared(self) -> None:
+        """P0R-11/P0R-12: Software=Midjourney is a moderate self-declaration; the A1111 structure stays strong."""
+        [item] = [i for i in image_metadata_evidence({"exif.Software": "Midjourney"}, None) if i.direction == EvidenceDirection.SYNTHETIC]
+        self.assertEqual((item.strength, item.self_declared), (EvidenceStrength.MODERATE, True))
+        self.assertIn("자기 선언 메타데이터 — 심거나 지울 수 있음", item.detail)
+        strong = image_metadata_evidence({"png.parameters": "x\nNegative prompt: y\nSteps: 20, Sampler: Euler, CFG scale: 7, Seed: 1"}, None)[0]
+        self.assertEqual((strong.strength, strong.self_declared), (EvidenceStrength.STRONG, True))
 
     def test_tool_word_in_free_text_field_is_not_strong(self) -> None:
         items = image_metadata_evidence({"png.Description": "fashion runway show backstage"}, (800, 600))
@@ -179,7 +192,7 @@ class DerivedLegacyFieldsTest(unittest.TestCase):
         weights = {signal.title: signal.weight for signal in result.signals}
         self.assertGreater(weights["syn"], 0)
         self.assertEqual(weights["auth"], 0)
-        self.assertEqual(result.band_label, "조작·생성 근거 있음")
+        self.assertEqual(result.band_label, "판단 불가")  # P0R-10: strong authentic + strong synthetic is a conflict
 
     def test_failed_check_appears_in_limitations_and_verdict(self) -> None:
         result = self._result([], [CoverageEntry("c2pa", CoverageStatus.FAILED, "ValueError: bad box")])
@@ -291,7 +304,7 @@ class RendererTest(unittest.TestCase):
         text = out.getvalue()
         self.assertIn("조작·생성 근거 있음", text)
         self.assertIn("판단 불가", text)
-        self.assertIn("[결정적 근거]", text)
+        self.assertIn("[재현 가능한 기록 근거]", text)
         self.assertIn("결정 0·통계 0·어휘", text)
         self.assertIn(TEXT_LEGAL_LIMITATION, text)
         self.assertNotIn("medium=", text)
@@ -325,7 +338,7 @@ class RendererTest(unittest.TestCase):
         self.assertEqual((a1111["status"], a1111["status_label"]), ("analyzed", "분석됨"))
         self.assertEqual((a1111["grade"], a1111["grade_label"]), ("evidence", "감정 근거로 사용 가능"))
         self.assertTrue(a1111["top_evidence"].startswith("deterministic:"))
-        self.assertTrue(a1111["top_evidence_label"].startswith("[결정적 근거] "))
+        self.assertTrue(a1111["top_evidence_label"].startswith("[재현 가능한 기록 근거] "))
         note = by_path["note.txt"]
         self.assertEqual((note["grade"], note["grade_label"]), ("reference", "참고"))
         self.assertEqual(note["source_confidence_label"], "알 수 없음")
@@ -413,7 +426,7 @@ class RendererTest(unittest.TestCase):
         path = self.root / "r.html"
         write_html_report(path, self.summary, self.items)
         html = path.read_text(encoding="utf-8")
-        for needle in ("조작·생성 근거 있음", "판단 불가", "결정적 근거", "어휘적 근거", "미실행", TEXT_LEGAL_LIMITATION):
+        for needle in ("조작·생성 근거 있음", "판단 불가", "재현 가능한 기록 근거", "어휘적 근거", "미실행", TEXT_LEGAL_LIMITATION):
             self.assertIn(needle, html)
 
     def test_minimal_pdf_states_verdict_codes(self) -> None:
@@ -444,7 +457,7 @@ class RendererTest(unittest.TestCase):
         md = statement.to_markdown()
         self.assertIn(TEXT_LEGAL_LIMITATION, md)
         by_name = {Path(entry.file_path).name: entry for entry in statement.entries}
-        self.assertIn("결정적 근거", by_name["a1111.png"].purpose_of_proof)
+        self.assertIn("재현 가능한 기록 근거", by_name["a1111.png"].purpose_of_proof)
         self.assertEqual(by_name["note.txt"].statutes, [])
         self.assertIn("참고", by_name["note.txt"].purpose_of_proof)
 

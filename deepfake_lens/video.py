@@ -120,7 +120,8 @@ def extract_video_frames(plan: dict[str, object], *, limit: int | None = None) -
                 {
                     "path": item.get("path", ""),
                     "returncode": -1,
-                    "stderr": f"{FFMPEG_TIMEOUT_SECONDS}초 후 시간 초과",
+                    # R26-10 (round 26): the step and the limit (the row's "path" names the file)
+                    "stderr": f"ffmpeg 시간 초과 — 프레임 추출 — 상한 {FFMPEG_TIMEOUT_SECONDS}초에 중단",
                 }
             )
             continue

@@ -26,6 +26,7 @@ The ``layout`` unit tests check :class:`pdf_layout.PdfLayout` itself.
 
 from __future__ import annotations
 
+from deepfake_lens.tests.report_jobs import scan_job_for
 import importlib.util
 import io
 import re
@@ -401,10 +402,11 @@ class PdfGlyphlessCharactersTest(unittest.TestCase):
             rows = json.loads(out.getvalue())["items"]
             with mock.patch.object(webapp_api, "_READ_ROOTS", type(webapp_api._READ_ROOTS)()):
                 webapp_api.configure_read_roots(folder)
+                job = scan_job_for(folder)  # P0R-6: the report is built from a server-held scan job
                 for value in pairs:
                     for fmt, fields in (("evidence", ("plaintiff", "defendant", "case_no", "case_name", "court", "law_firm", "contact", "center")),
                                         ("pdf", ("exhibit_no", "law_firm", "contact"))):
-                        body = json.dumps({"items": rows, "scan_root": str(folder), "format": fmt, **{field: value for field in fields}}).encode("utf-8")
+                        body = json.dumps({"scan_job": job, "format": fmt, **{field: value for field in fields}}).encode("utf-8")
                         raw = webapp_api._report_payload(body, default_folder=folder)
                         assert isinstance(raw, bytes), raw
                         texts.setdefault(f"web {fmt}", []).append(self._pdf_text(raw))
@@ -462,6 +464,60 @@ class PdfGlyphlessCharactersTest(unittest.TestCase):
         self.assertIn("\\u1112\\u1161\\u11ab", texts[1])
         self.assertEqual(texts[2].count("한국법무법인"), 4)
 
+    def test_one_pipe_form_in_every_pdf(self) -> None:
+        """R26-6 (round 26): c700e85 printed a case field's "|" as typed, but file and folder names reached the PDFs in
+        display_name's Markdown form — one PDF printed the law firm "x|y" and the file "fx\\|y.png", the scan folder line
+        「검사 폴더(…): case_x\\|y」. Every string a PDF lays out now prints "|" as it is, and a literal "\\|" still prints with
+        its backslash doubled (the two names stay distinct)."""
+        import contextlib
+        import json
+        import os
+        from unittest import mock
+
+        from deepfake_lens import webapp_api
+        from deepfake_lens.cli import main as cli_main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            folder = base / "case_x|y"
+            folder.mkdir()
+            for name in ("fx|y.txt", "fb\\|s.txt"):
+                (folder / name).write_text("사람이 쓴 짧은 메모입니다. " * 4, encoding="utf-8")
+            out = base / "out"
+            out.mkdir()
+            texts: dict[str, str] = {}
+            stdout = io.StringIO()
+            env = mock.patch.dict(os.environ, {"HOME": str(base / "home")})
+            with env, contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(cli_main([
+                    "scan", str(folder), "--json-out", str(out / "scan.json"), "--pdf-out", str(out / "scan.pdf"),
+                    "--forensic-pdf-out", str(out / "forensic.pdf"), "--evidence-statement-pdf-out", str(out / "statement.pdf"),
+                    "--law-firm", "x|y", "--contact", "x|y",
+                ]), 0)
+                self.assertEqual(cli_main(["evidence-statement", str(folder / "fx|y.txt"), "--pdf-out", str(out / "single.pdf"),
+                                           "--law-firm", "x|y", "--case-no", "x|y"]), 0)
+            for label in ("scan", "forensic", "statement", "single"):
+                texts[f"cli {label}"] = self._pdf_text(out / f"{label}.pdf")
+            rows = json.loads((out / "scan.json").read_text(encoding="utf-8"))["items"]
+            with mock.patch.object(webapp_api, "_READ_ROOTS", type(webapp_api._READ_ROOTS)()):
+                webapp_api.configure_read_roots(base)  # the scan folder line names case_x|y relative to this root
+                job = scan_job_for(folder, base)  # P0R-6
+                for fmt in ("pdf", "evidence"):
+                    body = json.dumps({"scan_job": job, "format": fmt, "law_firm": "x|y"}).encode("utf-8")
+                    raw = webapp_api._report_payload(body, default_folder=base)
+                    assert isinstance(raw, bytes), raw
+                    texts[f"web {fmt}"] = self._pdf_text(raw)
+        for label, text in texts.items():
+            flat = "".join(text.split())
+            with self.subTest(pdf=label):
+                self.assertNotIn("\\|", flat.replace("\\\\|", ""))  # no Markdown pipe escape left
+                self.assertIn("fx|y.txt", flat)
+                self.assertIn("x|y", flat)
+                if label != "cli single":
+                    self.assertIn("fb\\\\|s.txt", flat)  # the literal backslash doubled: distinct from a "|" name
+                if label.startswith("web "):
+                    self.assertIn("):case_x|y", flat)  # the scan folder line 「검사 폴더(…): case_x|y」
+
     def test_every_pdf_path_prints_distinct_readable_names(self) -> None:
         import contextlib
         import json
@@ -497,8 +553,9 @@ class PdfGlyphlessCharactersTest(unittest.TestCase):
             roots = mock.patch.object(webapp_api, "_READ_ROOTS", type(webapp_api._READ_ROOTS)())
             with roots:
                 webapp_api.configure_read_roots(folder)
+                job = scan_job_for(folder)  # P0R-6
                 for fmt in ("pdf", "evidence"):
-                    body = json.dumps({"items": rows, "scan_root": str(folder), "format": fmt}).encode("utf-8")
+                    body = json.dumps({"scan_job": job, "format": fmt}).encode("utf-8")
                     raw = webapp_api._report_payload(body, default_folder=folder)
                     self.assertIsInstance(raw, bytes, raw)
                     assert isinstance(raw, bytes)

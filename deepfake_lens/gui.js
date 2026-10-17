@@ -234,7 +234,7 @@
             if (cancelledNote) parts.push(`<b>${shown(cancelledNote)}</b>`);
             const wa = cov.weights_available, wt = cov.weights_total;
             if (wt !== undefined) {
-                if ((wa || 0) === 0) parts.push('<b>신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영</b> — 탑재된 신경망 가중치가 없어 통계적 근거는 결론에 참여하지 않습니다.');
+                if ((wa || 0) === 0) parts.push('<b>신경망 미탑재(측정 게이트 미충족) — 재현 가능한 기록 근거만 반영</b> — 탑재된 신경망 가중치가 없어 통계적 근거는 결론에 참여하지 않습니다.');
                 else if (wa < wt) parts.push(`신경망 가중치 일부 탑재 (${wa}/${wt}) — 미탑재 엔진의 판단이 빠져 있습니다.`);
             }
             if (thr.provisional || thr.source === 'builtin_defaults') {
@@ -386,7 +386,7 @@
             authenticity_evidence: '원본성 근거 있음',
             undetermined: '판단 불가',
         };
-        const KIND_LABELS = { deterministic: '결정적 근거', statistical: '통계적 근거', lexical: '어휘적 근거' };
+        const KIND_LABELS = { deterministic: '재현 가능한 기록 근거', statistical: '통계적 근거', lexical: '어휘적 근거' };
         const KIND_NOTES = {
             deterministic: '메타데이터·C2PA 등 파일이 스스로 기록한 사실 — 결론을 낼 수 있습니다.',
             statistical: '모델 출력 — 보정(측정 코퍼스·신뢰구간)이 없으면 결론에 참여하지 않습니다.',
@@ -406,6 +406,7 @@
             watermark_videoseal: 'VideoSeal 워터마크 검사', watermark_audioseal: 'AudioSeal 워터마크 검사', online_detection: '온라인 전용 검출(미실행)', watermark_perth: 'PerTh 워터마크 검사',
             text_invisible_marks: '비가시 유니코드 표식 검사', document_structure: '문서 구조 사실(증분 저장·편집 메타데이터)',
             platform_recompression: '플랫폼 재압축 양자화표 대조', file_name_pattern: '파일 이름 형식(메신저·스크린샷·녹음)', audio_channel_trace: '통화·메신저 코덱·대역폭 흔적', device_ai_label: '기기 AI 편집 라벨(삼성·Google)', screen_capture: '스크린샷 사실(캡처 주석·화면 해상도)',
+            container_metadata: '컨테이너·비트스트림 메타데이터 판독',
         };
         const COVERAGE_STATUS_LABELS = { ran: '실행', skipped: '미실행', failed: '실패' };
         // B5: same table as result_types.SOURCE_CONFIDENCE_LABELS; a text or
@@ -443,9 +444,9 @@
         }
         function verdictAdvice(verdict, grade) {
             if (grade === 'reference') return '텍스트 결과는 참고 등급입니다 — 어휘·문체 신호는 사람이 쓴 글에도 나타나므로 결론으로 쓰지 마세요.';
-            if (verdict === 'manipulation_evidence') return '결정적 근거(메타데이터·C2PA 등)가 조작·생성을 가리킵니다 — 근거 항목과 원본 파일을 대조해 감정서에 인용하세요.';
-            if (verdict === 'authenticity_evidence') return '결정적 근거가 원본성을 가리킵니다 — 서명자·해시 검증 내역을 감정서에 함께 기재하세요.';
-            return '결론을 낼 결정적 근거가 없거나 검사가 실패했습니다 — "원본"이라는 뜻이 아닙니다. 아래 검사 범위의 미실행·실패 사유를 확인하세요.';
+            if (verdict === 'manipulation_evidence') return '재현 가능한 기록 근거(메타데이터·C2PA 등)가 조작·생성을 가리킵니다 — 근거 항목과 원본 파일을 대조해 감정서에 인용하세요.';
+            if (verdict === 'authenticity_evidence') return '재현 가능한 기록 근거가 원본성을 가리킵니다 — 서명자·해시 검증 내역을 감정서에 함께 기재하세요.';
+            return '결론을 낼 재현 가능한 기록 근거가 없거나 검사가 실패했습니다 — "원본"이라는 뜻이 아닙니다. 아래 검사 범위의 미실행·실패 사유를 확인하세요.';
         }
         function evidenceHtml(r) {
             const ev = r.evidence || [];
@@ -478,8 +479,10 @@
         }
         function verdictHeadHtml(r) {
             const v = r.verdict_code || 'undetermined';
-            const grade = r.grade === 'reference' ? '참고' : '감정 근거로 사용 가능';
-            const parts = [`<div class="verdict-head v-${escapeHtml(v)}" data-verdict="${escapeHtml(v)}"><span class="band-pill band-${bandCls(v)}">${escapeHtml(VERDICT_LABELS[v] || v)}</span> <span class="grade-pill">${escapeHtml(grade)}</span></div>`];
+            // P0R-13: no "감정 근거로 사용 가능" pill next to 판단 불가 (it read as "usable as evidence")
+            const grade = r.grade === 'reference' ? '참고' : (v === 'undetermined' ? '' : '감정 근거로 사용 가능');
+            const pill = grade ? ` <span class="grade-pill">${escapeHtml(grade)}</span>` : '';
+            const parts = [`<div class="verdict-head v-${escapeHtml(v)}" data-verdict="${escapeHtml(v)}"><span class="band-pill band-${bandCls(v)}">${escapeHtml(VERDICT_LABELS[v] || v)}</span>${pill}</div>`];
             if (r.grade === 'reference') parts.push(`<div class="legal-note">${escapeHtml(TEXT_LEGAL_LIMITATION)}</div>`);
             if (r.verdict) parts.push(`<div class="verdict">${shown(r.verdict)}</div>`);
             return parts.join('');
@@ -662,7 +665,7 @@
                 lastScanRoot = data.scan_root || folderPath;
                 lastScanRootB64 = data.scan_root_b64 || '';
                 lastScanOptions = scanOptions;  // R19-3: with the rows they produced
-                lastScanJob = job.job_id;
+                lastScanJob = data.scan_job || job.job_id;  // P0R-6: the server-held job the report is built from
                 processResults(data);
                 // R18-3: "분석 완료" was shown for a cancelled scan too.
                 if (partialResultNote(data.summary)) toast(`검사 취소 — 부분 결과 ${(data.items || []).length}개 행, 분석하지 않은 파일 ${data.summary.files_cancelled || 0}개`, true);
@@ -736,7 +739,7 @@
                 const cov = lastProvenance.coverage || {};
                 const wa = cov.weights_available, wt = cov.weights_total;
                 label.textContent = wt !== undefined
-                    ? (wa ? `뉴럴 ${wa}/${wt}` : '신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영')
+                    ? (wa ? `뉴럴 ${wa}/${wt}` : '신경망 미탑재(측정 게이트 미충족) — 재현 가능한 기록 근거만 반영')
                     : `뉴럴 ${data.summary && data.summary.external_model_active ? data.summary.external_model_active : 0}`;
             }
             const banner = $('prov-banner');
@@ -748,17 +751,12 @@
         }
 
         function reportPayload(extra) {
-            const out = {
-                items: results.map(r => r.item),
-                summary: lastProvenance.summary || {},
-                coverage: lastProvenance.coverage || {},
-                thresholds: lastProvenance.thresholds || {},
-                options: lastScanOptions,
-            };
-            // P1: rows are relative to the scanned folder; uploads carry
-            // source: "upload" and are never re-analyzed (P6).
-            if (lastScanRoot) out.scan_root = lastScanRoot;
-            if (lastScanJob) out.scan_job = lastScanJob;  // R19-3: the server checks a cancel count against its job
+            // P0R-6: a report is built from the server's own scan job (its rows, options and accounting) —
+            // the client sends the job id and the case fields, never rows. Upload rows (P6) go as `uploads`
+            // and are listed unsigned.
+            const out = {};
+            if (lastScanJob) out.scan_job = lastScanJob;
+            else out.uploads = results.map(r => r.item);
             const map = { 'case-no': 'case_no', 'case-name': 'case_name',
                           'case-plaintiff': 'plaintiff', 'case-defendant': 'defendant',
                           'case-court': 'court', 'case-firm': 'law_firm',
@@ -837,6 +835,8 @@
             // Unmeasured heuristics (pixel ensemble, fusion, legacy audio/
             // video heuristics) — displayed for reference, never decide.
             parts.push(listItems('참고 신호(미측정 휴리스틱 — 결론 불참여)', (r.reference_signals || []).map(s => ({ title: `${s.title} (${s.weight})`, detail: s.detail }))));
+            // P0R-12: a conclusion says why it could be wrong (self-declared metadata, signatures, measured detectors)
+            parts.push(listItems('이 결론이 틀릴 수 있는 이유', r.conclusion_caveats || [], 'lim'));
             parts.push(listItems('한계', r.limitations, 'lim'));
             parts.push(listItems('다음 확인', r.next_checks));
             const sg = r.source_guess;
@@ -845,7 +845,7 @@
                 parts.push(`<div class="dgroup"><div class="dt">출처 추정 (${escapeHtml(sourceConfidenceLabel(r, sg))})</div><div class="note">${shown(sg.label)} — ${reasons}</div></div>`);
             }
             parts.push(`<div class="band-advice">${escapeHtml(verdictAdvice(r.verdict_code || 'undetermined', r.grade))}</div>`);
-            parts.push(`<div class="caveat">결론은 결정적 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>`);
+            parts.push(`<div class="caveat">결론은 재현 가능한 기록 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>`);
             return parts.join('');
         }
 
@@ -1135,7 +1135,7 @@
                         <div class="res-sub">
                             <span class="band-pill band-${band}">${escapeHtml(riskLabel(verdict))}</span>
                             ${r.grade === 'reference' ? '<span class="grade-pill">참고</span>' : ''}
-                            <span class="ev-counts" title="결정적·통계적·어휘적 근거 수">결정 ${evCounts[0]} · 통계 ${evCounts[1]} · 어휘 ${evCounts[2]}</span>
+                            <span class="ev-counts" title="재현 가능한 기록·통계적·어휘적 근거 수">기록 ${evCounts[0]} · 통계 ${evCounts[1]} · 어휘 ${evCounts[2]}</span>
                             ${failedChecks ? `<span class="c-red">검사 실패 ${failedChecks}</span>` : ''}
                             <span>${shown(tool)}</span>
                             ${r.model_analysis && r.model_analysis.available !== false ? '<span class="nn-badge">NN</span>' : ''}
@@ -1431,14 +1431,14 @@
             const f = csvCell;
             // BOM prefix keeps Korean intact when the CSV is opened in Excel.
             const partial = partialResultNote(lastProvenance.summary);  // R18-3: a cancelled scan's CSV starts with the note
-            let csv = '﻿' + (partial ? `# ${partial}\n` : '') + '결론,등급,결정적 근거,통계적 근거,어휘적 근거,검사 실패,출처 추정,모델,파일명,검토,메모,판정 문장\n';
+            let csv = '﻿' + (partial ? `# ${partial}\n` : '') + '결론,등급,재현 가능한 기록 근거,통계적 근거,어휘적 근거,검사 실패,출처 추정,모델,파일명,검토,메모,판정 문장\n';
             results.forEach(e => {
                 const item = e.item, r = item.result || {};
                 const rev = reviewStore[itemKey(item)] || {};
                 const ev = r.evidence || [];
                 const titles = kind => ev.filter(x => x.kind === kind).map(x => x.title).join(' / ');
                 const failedCov = (r.coverage || []).filter(c => c.status === 'failed').map(coverageText).join(' / ');
-                csv += [f(riskLabel(verdictOf(item))), f(r.grade === 'reference' ? '참고' : (r.grade ? '근거' : '')), f(titles('deterministic')), f(titles('statistical')), f(titles('lexical')), f(failedCov), f((r.source_guess && r.source_guess.label) || ''), f((r.model_analysis && (r.model_analysis.display_name || r.model_analysis.model)) || ''), f(item.name || item.path), f(rev.star ? '검토됨' : ''), f(rev.note || ''), f(r.verdict || '')].join(',') + '\n';
+                csv += [f(riskLabel(verdictOf(item))), f(r.grade === 'reference' ? '참고' : (r.grade && verdictOf(item) !== 'undetermined' ? '근거' : '')), f(titles('deterministic')), f(titles('statistical')), f(titles('lexical')), f(failedCov), f((r.source_guess && r.source_guess.label) || ''), f((r.model_analysis && (r.model_analysis.display_name || r.model_analysis.model)) || ''), f(item.name || item.path), f(rev.star ? '검토됨' : ''), f(rev.note || ''), f(r.verdict || '')].join(',') + '\n';
             });
             download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'deepfake-lens-results.csv');
         });
@@ -1580,7 +1580,7 @@
             const thr = data.thresholds || {};
             const parts = [];
             const wa = cov.weights_available, wt = cov.weights_total;
-            if (wt !== undefined && (wa || 0) === 0) parts.push('신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영');
+            if (wt !== undefined && (wa || 0) === 0) parts.push('신경망 미탑재(측정 게이트 미충족) — 재현 가능한 기록 근거만 반영');
             else if (wt !== undefined && wa < wt) parts.push(`신경망 가중치 일부 탑재(${wa}/${wt})`);
             if (thr.provisional || thr.source === 'builtin_defaults') parts.push('잠정 임계값(미측정)');
             if (thr.in_sample) parts.push('임계값 in-sample(참고)');
@@ -1640,7 +1640,7 @@
             parts.push(listItems('참고 신호(미측정 휴리스틱 — 결론 불참여)', (r.reference_signals || []).map(s => ({ title: `${s.title} (${s.weight})`, detail: s.detail }))));
             parts.push(listItems('다음 확인', r.next_checks));
             parts.push(`<div class="band-advice">${escapeHtml(verdictAdvice(r.verdict_code || 'undetermined', r.grade))}</div>`);
-            parts.push(`<div class="caveat">결론은 결정적 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>`);
+            parts.push(`<div class="caveat">결론은 재현 가능한 기록 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>`);
             box.innerHTML = parts.join('');
             box.className = 'qc-out on';
             box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

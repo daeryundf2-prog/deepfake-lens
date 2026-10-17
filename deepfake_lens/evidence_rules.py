@@ -24,10 +24,12 @@ Classification (phase-0 spec, WP-A):
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 from .digital_source_type import (
     CATEGORY_CAPTURE,
@@ -53,6 +55,14 @@ from .result_types import (
     ExternalModelAnalysis,
     SourceConfidence,
 )
+
+if TYPE_CHECKING:  # P0R-22: container_metadata imports checks/result_types only — no cycle at run time either
+    from .container_metadata import ContainerFacts, Registry as ContainerRegistry
+
+# P0R-22: the phrase every self-declared synthetic item carries in its detail
+# (EvidenceItem.self_declared) — an unsigned statement the file makes about
+# its own origin, which anyone can write into a file or strip from it.
+SELF_DECLARED_NOTE = "자기 선언 메타데이터 — 심거나 지울 수 있음"
 
 # Metadata keys whose values name the producing tool. A generator name in
 # one of these is a deterministic statement by the file; the same word in a
@@ -111,6 +121,13 @@ XMP_GENERATOR_FIELDS = (
     ("xmp.creator", "dc:creator"),
     ("xmp.Credit", "photoshop:Credit"),
 )
+# P0R-11 (review §1.3): a generator name is evidence only in a field that names the producing tool — never in an
+# author / credit / camera field (dc:creator, photoshop:Credit, exif.Model, exif.LensModel: a "Firefly Studio" credit,
+# a "Runway" camera name). XMP_GENERATOR_FIELDS still blocks the camera-EXIF consistency rule (camera_exif_evidence).
+XMP_TOOL_FIELDS = (("xmp.CreatorTool", "xmp:CreatorTool"),)
+# Non-XMP metadata keys (lower-case, matched on the part after the last ".") that name the producing tool or hold a
+# generator's own record: PNG/EXIF Software, A1111 parameters, ComfyUI prompt/workflow, a "generator" field.
+GENERATOR_SPECIFIC_KEYS = frozenset({"software", "parameters", "prompt", "workflow", "generator", "creatortool"})
 XMP_DIGITAL_SOURCE_TYPE_KEY = "xmp.DigitalSourceType"
 
 # Camera EXIF consistency (WP-A table: deterministic/authentic/moderate).
@@ -168,8 +185,8 @@ def xmp_evidence(metadata: Mapping[str, str]) -> list[EvidenceItem]:
         items.append(EvidenceItem(
             "XMP 디지털 출처 유형: 생성형 AI",
             f"Iptc4xmpExt:DigitalSourceType={', '.join(synthetic_types)} — 파일이 스스로 생성형/알고리즘 미디어임을 선언합니다(서명 없는 자기 신고). "
-            "XMP는 편집으로 지우거나 바꿀 수 있어 부재는 아무것도 증명하지 않습니다.",
-            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "metadata",
+            f"XMP는 편집으로 지우거나 바꿀 수 있어 부재는 아무것도 증명하지 않습니다 — {SELF_DECLARED_NOTE}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "metadata", self_declared=True,
         ))
     screen = sorted({d.display for d in declared if d.category == CATEGORY_SCREEN})
     if screen:
@@ -179,15 +196,16 @@ def xmp_evidence(metadata: Mapping[str, str]) -> list[EvidenceItem]:
             "카메라 실사 촬영 근거가 아니며, 생성 근거도 아닙니다.",
             EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.MODERATE, "metadata",
         ))
-    for key, label in XMP_GENERATOR_FIELDS:
+    for key, label in XMP_TOOL_FIELDS:
         value = metadata.get(key, "")
         name = generator_name_in(value)
         if name:
+            # P0R-11: a brand word in the tool field is moderate (it was strong — a conclusion by itself)
             items.append(EvidenceItem(
                 "XMP 생성 도구 필드",
-                f"{label}={value[:120]} — 생성 도구명 '{name}'이(가) 도구/작성자 필드에 기록되어 있습니다. "
-                "XMP는 편집으로 바꿀 수 있습니다.",
-                EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "metadata",
+                f"{label}={value[:120]} — 생성 도구명 '{name}'이(가) 도구 필드에 기록되어 있습니다. 이름 하나는 구조적 생성 기록이 아니어서 "
+                f"단독 결론 근거로 쓰지 않습니다 — {SELF_DECLARED_NOTE}.",
+                EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, "metadata", self_declared=True,
             ))
     return items
 
@@ -352,21 +370,44 @@ def image_metadata_evidence(
     # XMP fields have their own rules (xmp_evidence) — keep them out of the
     # generic guess so one field never yields two items.
     generic = {key: value for key, value in metadata.items() if not key.startswith("xmp.")}
-    tool_guess = guess_image_source(_tool_field_metadata(generic))
-    any_guess = guess_image_source(generic)
+    # P0R-11: only a structural generator record (ComfyUI graph, A1111 parameters) in a tool field is strong; a brand
+    # word counts only in a generator-specific field and is moderate; neither ever comes from exif.Model, LensModel,
+    # Credit or creator. Every such item is a self-declaration (P0R-12): unsigned metadata the file states about itself.
+    tool_guess = guess_image_source(_tool_field_metadata(generic), brands=False)
+    specific = {key: value for key, value in generic.items() if key.rsplit(".", 1)[-1].lower() in GENERATOR_SPECIFIC_KEYS}
+    brand_guess = guess_image_source(specific)
+    any_guess = guess_image_source(generic, brands=False)
     if tool_guess.confidence == SourceConfidence.HIGH:
         reason = tool_guess.reasons[0] if tool_guess.reasons else "생성 도구 단서가 발견되었습니다."
         items.append(EvidenceItem(
             "생성 도구 메타데이터",
-            f"{tool_guess.label}: {reason}",
-            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "metadata",
+            f"{tool_guess.label}: {reason} 생성 도구가 파일에 남긴 생성 기록입니다 — {SELF_DECLARED_NOTE}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "metadata", self_declared=True,
+        ))
+    elif brand_guess.confidence == SourceConfidence.LOW:  # only the brand rule answers LOW
+        reason = brand_guess.reasons[0] if brand_guess.reasons else "생성 도구 이름이 발견되었습니다."
+        items.append(EvidenceItem(
+            "생성 도구 이름 메타데이터",
+            f"{brand_guess.label}: {reason} 생성 도구 필드(소프트웨어·생성 파라미터 등)의 이름 하나는 구조적 생성 기록이 아니어서 "
+            f"단독 결론 근거로 쓰지 않습니다 — {SELF_DECLARED_NOTE}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, "metadata", self_declared=True,
         ))
     elif any_guess.confidence in {SourceConfidence.HIGH, SourceConfidence.MEDIUM}:
         reason = any_guess.reasons[0] if any_guess.reasons else "생성 도구 단서가 발견되었습니다."
         items.append(EvidenceItem(
             "생성 도구 메타데이터 단서",
-            f"{any_guess.label}: {reason} 도구 식별 필드가 아닌 위치(헤더 문자열·일반 필드)에서 발견되어 단독 결론 근거로 쓰지 않습니다.",
-            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, "metadata",
+            f"{any_guess.label}: {reason} 도구 식별 필드가 아닌 위치(헤더 문자열·일반 필드)에서 발견되어 단독 결론 근거로 쓰지 않습니다 — "
+            f"{SELF_DECLARED_NOTE}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, "metadata", self_declared=True,
+        ))
+    elif (free := guess_image_source(generic)).confidence == SourceConfidence.LOW:
+        # P0R-11: a brand word outside the generator-specific fields (camera model, credit, a header byte string) is a
+        # fact only — never a synthetic direction ("Firefly Studio" credit, "Runway" in a description).
+        items.append(EvidenceItem(
+            "일반 필드의 생성 도구 이름(근거 아님)",
+            f"{free.label.replace(' 추정', '')} 이름이 생성 도구 필드가 아닌 곳(카메라 기종·크레딧·설명·헤더 문자열 등)에 있습니다. "
+            "같은 단어를 쓰는 사람·업체·장비가 있어 생성 근거로 쓰지 않습니다.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "metadata",
         ))
     items.extend(xmp_evidence(metadata))
     items.extend(camera_exif_evidence(metadata, image_format=image_format, jpeg_quality=jpeg_quality, decode_problem=decode_problem))
@@ -535,6 +576,18 @@ def c2pa_evidence(validation: Mapping[str, object] | None) -> list[EvidenceItem]
     if not validation or not validation.get("present"):
         return []
     basis = c2pa_basis_text(validation)
+    binding = validation.get("hard_binding")
+    if isinstance(binding, Mapping) and binding.get("ok") is False:
+        # P0R-20: the hard-binding exclusions empty the asset (or reach outside
+        # the manifest store). The manifest's provenance claims are not usable —
+        # emit only a neutral weak fact naming the anomaly (never a strong/
+        # moderate authentic or synthetic item), then the other neutral facts.
+        anomaly = EvidenceItem(
+            "C2PA 하드 바인딩(콘텐츠 해시) 제외범위 이상",
+            f"{binding.get('reason') or 'C2PA 해시 제외범위 이상'}" + basis,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "c2pa",
+        )
+        return [anomaly, *_c2pa_fact_items(validation, usable=False)]
     disclosure = _disclosure_text(validation)
     generative = [d for d in _c2pa_declarations(validation, "action") if d.category == CATEGORY_GENERATIVE]
     parts = [f"digitalSourceType={', '.join(d.code for d in generative)}"] if generative else []
@@ -561,6 +614,7 @@ def c2pa_evidence(validation: Mapping[str, object] | None) -> list[EvidenceItem]
     failure = _codes(validation.get("failure_codes"))
     hash_ok = any(code in success for code in C2PA_HARD_BINDING_MATCH) and not any(code.endswith("Hash.mismatch") for code in failure)
     verified = validation.get("status") == "valid" and bool(validation.get("trusted")) and hash_ok
+    itl_verified = validation.get("status") == "valid" and validation.get("trust_list") == "itl" and hash_ok
     signature = validation.get("signature")
     signer = str(signature.get("common_name", "알 수 없음")) if isinstance(signature, dict) else "알 수 없음"
     from .c2pa import c2pa_failure_codes_text, c2pa_state_label
@@ -592,6 +646,17 @@ def c2pa_evidence(validation: Mapping[str, object] | None) -> list[EvidenceItem]
             f"신뢰 서명자 {signer}의 유효한 매니페스트이나 촬영/생성 출처 유형을 선언하지 않았습니다." + basis,
             EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.MODERATE, "c2pa",
         )
+    elif itl_verified and (declared_text or capture):
+        # P0R-21: a valid manifest whose signer chains only to the frozen Interim Trust List — "legacy trust": the
+        # product was never evaluated by the C2PA conformance program, so the declaration is moderate, never strong.
+        direction = EvidenceDirection.SYNTHETIC if declared_text else EvidenceDirection.AUTHENTIC
+        what = f"{declared_text}를 선언합니다" if declared_text else "digitalCapture(카메라 촬영)를 선언합니다"
+        main = EvidenceItem(
+            "C2PA 서명(동결된 임시 신뢰 목록 ITL): " + ("생성형 AI 출처 선언" if declared_text else "카메라 촬영 출처"),
+            f"서명자 {signer}의 유효한 매니페스트가 {what}(해시 일치). 서명 인증서는 현재 C2PA 공식 신뢰 목록이 아니라 2026-01-01에 동결된 "
+            "임시 신뢰 목록(ITL)에만 연결됩니다 — ITL 제품은 C2PA 적합성 프로그램의 평가를 받지 않았으므로 단독 결론 근거로 쓰지 않습니다." + basis,
+            EvidenceKind.DETERMINISTIC, direction, EvidenceStrength.MODERATE, "c2pa",
+        )
     elif declared_text:
         main = EvidenceItem(
             "C2PA 매니페스트의 생성형 AI 출처 선언(검증 미완료)",
@@ -617,7 +682,8 @@ def evidence_conflicts(items: Iterable[EvidenceItem]) -> list[EvidenceItem]:
     signature) and a strong deterministic synthetic item (e.g. a
     self-declared XMP generator field) are both present, decision rule 2
     lets the synthetic one decide. This adds a neutral item that names both
-    so the examiner sees the contradiction; it does not change the rule.
+    so the examiner sees the contradiction. P0R-10: the decision honours it —
+    rule 2 does not fire when both are present (``decision.CONFLICT_RULE``).
     """
     listed = list(items)
     if any(item.title == EVIDENCE_CONFLICT_TITLE for item in listed):
@@ -630,10 +696,63 @@ def evidence_conflicts(items: Iterable[EvidenceItem]) -> list[EvidenceItem]:
     return [EvidenceItem(
         EVIDENCE_CONFLICT_TITLE,
         f"원본성 근거({', '.join(authentic)})와 생성·조작 근거({', '.join(synthetic)})가 같은 파일에 함께 있습니다. "
-        "현재 결정 규칙은 생성·조작 근거를 우선하므로 결론은 그쪽으로 정해지지만, 두 근거가 모순되므로 "
+        "두 근거가 모순되므로 결론을 내리지 않습니다(판단 불가 — 결정 규칙 2의 예외). "
         "어느 쪽이 위조·편집되었는지(서명 이후 메타데이터 추가 등) 별도로 확인해야 합니다.",
         EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "metadata",
     )]
+
+
+# --- Why a conclusion could be wrong (P0R-12, user decision 2026-10-17) ------------------------------------------
+
+CAVEATS_TITLE = "이 결론이 틀릴 수 있는 이유"
+CAVEAT_SELF_DECLARED = (
+    "근거가 파일이 스스로 적은 메타데이터입니다({note}) — 다른 파일의 생성 기록을 복사해 넣으면 촬영 원본도 같은 결론이 나고, "
+    "생성물에서 지우거나 다시 저장하면 판단 불가가 됩니다."
+)
+CAVEAT_C2PA_SYNTHETIC = (
+    "C2PA 서명은 서명자가 선언한 출처를 보증할 뿐입니다 — 서명 인증서가 유출·오남용되었으면 틀릴 수 있고, "
+    "인증서 폐기 여부는 오프라인으로 확인하지 않았습니다."
+)
+CAVEAT_C2PA_AUTHENTIC = (
+    "C2PA 서명은 서명한 기기·소프트웨어가 이 내용을 서명했다는 기록입니다 — 루팅·변조된 기기나 유출된 인증서로 만든 정상 서명, "
+    "화면 재촬영·연출된 장면은 이 검사로 가려지지 않으며, 인증서 폐기 여부는 오프라인으로 확인하지 않았습니다."
+)
+CAVEAT_WATERMARK = "워터마크 검출은 공개 인코더로 실사에도 같은 표식을 넣을 수 있고, 검출기 자체의 오탐도 있습니다."
+CAVEAT_MEASURED = (
+    "측정된 탐지기의 결론입니다 — 측정 코퍼스와 다른 입력(새 생성기·재압축·편집)에서는 측정한 오류율이 성립하지 않을 수 있습니다."
+)
+CAVEAT_GENERIC = "근거가 된 기록이 위조·편집되었는지는 이 도구가 확인할 수 없습니다 — 원본 확보 경위를 함께 확인하십시오."
+
+
+def conclusion_caveats(verdict: object, evidence: Iterable[EvidenceItem]) -> list[str]:
+    """P0R-12: why a manipulation / authenticity conclusion could be wrong, from the evidence that decided it."""
+    from .result_types import Verdict
+
+    items = list(evidence)
+    if verdict == Verdict.MANIPULATION_EVIDENCE:
+        deciding = [i for i in items if i.direction == EvidenceDirection.SYNTHETIC and (
+            (i.kind == EvidenceKind.DETERMINISTIC and i.strength == EvidenceStrength.STRONG)
+            or (i.kind == EvidenceKind.STATISTICAL and i.is_calibrated))]
+    elif verdict == Verdict.AUTHENTICITY_EVIDENCE:
+        deciding = [i for i in items if i.direction == EvidenceDirection.AUTHENTIC and i.kind == EvidenceKind.DETERMINISTIC
+                    and i.strength == EvidenceStrength.STRONG]
+    else:
+        return []
+    caveats: list[str] = []
+    for item in deciding:
+        if item.self_declared:
+            text = CAVEAT_SELF_DECLARED.format(note=SELF_DECLARED_NOTE)
+        elif item.layer == "c2pa":
+            text = CAVEAT_C2PA_AUTHENTIC if item.direction == EvidenceDirection.AUTHENTIC else CAVEAT_C2PA_SYNTHETIC
+        elif item.layer.startswith("watermark"):
+            text = CAVEAT_WATERMARK
+        elif item.kind == EvidenceKind.STATISTICAL:
+            text = CAVEAT_MEASURED
+        else:
+            text = CAVEAT_GENERIC
+        if text not in caveats:
+            caveats.append(text)
+    return caveats or [CAVEAT_GENERIC]
 
 
 def calibrated_direction(
@@ -778,3 +897,193 @@ def image_class_evidence(image_class: ImageClass | None) -> list[EvidenceItem]:
         detail,
         EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "image_class",
     )]
+
+
+# --- Container / bitstream metadata (P0R-22, threat G2) ------------------------------
+#
+# | source                                                    | kind          | direction | strength |
+# | any field read (encoder, handler, times, SEI strings …)   | deterministic | neutral   | weak     |
+# | GB 45438 AIGC label with an AI-generated Label value       | deterministic | synthetic | strong   | self-declared
+# | ComfyUI prompt/workflow JSON in a prompt/workflow field    | deterministic | synthetic | strong   | self-declared
+# | registered vendor SEI string (models/container-generators) | deterministic | synthetic | strong   | self-declared
+# | generator brand word in an encoder/software/©too field     | deterministic | synthetic | moderate | self-declared
+# | anything in a free-text field (comment/title/artist …)     | never more than a neutral fact item       |
+# The layer never produces an authentic item: metadata that names a camera
+# or an editor can be written by anyone, and its absence proves nothing.
+
+CONTAINER_FACTS_TITLE = "컨테이너 메타데이터 판독 사실"
+CONTAINER_SEI_TITLE = "비트스트림 SEI 사용자 데이터 문자열"
+CONTAINER_AIGC_TITLE = "GB 45438 AIGC 암묵 라벨: AI 생성 표시(자기 선언)"
+CONTAINER_AIGC_FACT_TITLE = "GB 45438 AIGC 라벨(AI 생성 표시 값이 아님)"
+CONTAINER_AIGC_UNPARSED_TITLE = "AIGC 필드(GB 45438 라벨 구조 아님)"
+CONTAINER_COMFYUI_TITLE = "ComfyUI 워크플로·프롬프트 메타데이터(자기 선언)"
+CONTAINER_COMFYUI_FREE_TITLE = "자유 텍스트 필드의 ComfyUI 형식 JSON"
+CONTAINER_SEI_VENDOR_TITLE = "등록된 생성 서비스의 SEI 문자열(자기 선언)"
+CONTAINER_BRAND_TITLE = "생성 도구 필드의 생성기 이름(자기 선언)"
+CONTAINER_ENCODER_NOTE = (
+    "인코더·핸들러 이름(예: Lavf·Lavc·x264·VideoHandler)은 ffmpeg 등으로 변환·편집한 모든 파일에 남는 흔적이라 "
+    "그 자체로는 생성·원본 어느 쪽도 뜻하지 않습니다. 컨테이너 메타데이터는 다시 저장하면 바뀌거나 사라지므로 부재도 무정보입니다."
+)
+CONTAINER_LIMITATION = (
+    "컨테이너 메타데이터·SEI 표식은 재인코딩·다시 저장하면 사라지거나 바뀌므로, 표식이 없다는 것은 원본성 근거가 아닙니다."
+)
+# GB 45438-2025 implicit-label JSON keys.
+AIGC_LABEL_KEYS = ("Label", "ContentProducer", "ProduceID", "ReservedCode1", "ContentPropagator", "PropagateID", "ReservedCode2")
+STRUCTURED_JSON_MAX_CHARS = 8 * 1024 * 1024
+CONTAINER_SHOWN_FIELDS = 24
+CONTAINER_VALUE_CHARS = 120
+
+
+def _shown(value: str, limit: int = CONTAINER_VALUE_CHARS) -> str:
+    value = " ".join(value.split())
+    return value if len(value) <= limit else value[:limit] + "…"
+
+
+def _json_object(value: str) -> dict[str, object] | None:
+    if len(value) > STRUCTURED_JSON_MAX_CHARS or not value.lstrip().startswith("{"):
+        return None
+    try:
+        parsed = json.loads(value)
+    except (ValueError, RecursionError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def comfyui_structure(key: str, value: str) -> bool:
+    """A ComfyUI node graph (prompt API JSON or workflow JSON) stored under ``key`` (P0R-22).
+
+    Reuses the image-side rule (``text_heuristics._looks_like_comfyui``) on the
+    value as the PNG reader keys it ("png.<key>: <value>"); the value must also
+    parse as a JSON object, so a sentence that mentions KSampler is not a graph.
+    """
+    from .text_heuristics import _looks_like_comfyui
+
+    if _json_object(value) is None:
+        return False
+    return _looks_like_comfyui(f"png.{key.lower()}: {value}".lower())
+
+
+def _aigc_label(value: str) -> dict[str, str] | None:
+    """The GB 45438 label fields of an ``AIGC`` value (case-insensitive keys), or None when it is not that structure."""
+    parsed = _json_object(value)
+    if parsed is None:
+        return None
+    lowered = {str(key).lower(): text for key, text in parsed.items()}
+    if "label" not in lowered:
+        return None
+    return {name: _shown(str(lowered[name.lower()]), 80) for name in AIGC_LABEL_KEYS if name.lower() in lowered}
+
+
+def aigc_label_evidence(where: str, value: str, registry: "ContainerRegistry") -> list[EvidenceItem]:
+    """Items for one ``AIGC`` field (MP4 metadata, ID3 TXXX, PNG text chunk, XMP) — P0R-22."""
+    from .container_metadata import LAYER
+
+    label = _aigc_label(value)
+    if label is None:
+        return [EvidenceItem(
+            CONTAINER_AIGC_UNPARSED_TITLE,
+            f"{where}에 AIGC 필드가 있으나 GB 45438-2025 라벨 JSON(Label 등 키)이 아닙니다: 「{_shown(value)}」. 사실로만 기록합니다.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+        )]
+    listed = ", ".join(f"{key}=「{text}」" for key, text in label.items())
+    producer = label.get("ContentProducer", "")
+    entry = registry.producer(producer) if producer else None
+    if entry is not None:
+        producer_text = f"ContentProducer는 등록표의 {entry.get('service')}에 해당합니다"
+    elif producer:
+        producer_text = f"ContentProducer 「{producer}」는 등록표에 없어 서비스를 귀속하지 않습니다"
+    else:
+        producer_text = "ContentProducer가 없어 서비스를 귀속하지 않습니다"
+    if label.get("Label", "") in registry.generated_labels:
+        return [EvidenceItem(
+            CONTAINER_AIGC_TITLE,
+            f"{where}의 AIGC 필드가 중국 GB 45438-2025 암묵 라벨 구조이며 AI 생성·합성 표시 값을 담고 있습니다: {listed}. {producer_text}. "
+            f"라벨은 서명이 없어 누구나 쓰거나 지울 수 있습니다 — {SELF_DECLARED_NOTE}. 기준: {registry.label}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, LAYER, self_declared=True,
+        )]
+    return [EvidenceItem(
+        CONTAINER_AIGC_FACT_TITLE,
+        f"{where}의 AIGC 필드가 GB 45438-2025 라벨 구조입니다: {listed}. Label 값이 등록표가 AI 생성 표시로 정한 값"
+        f"({', '.join(registry.generated_labels) or '없음'})이 아니어서 사실로만 기록합니다. {producer_text}. 기준: {registry.label}.",
+        EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+    )]
+
+
+def _brand_in(value: str, brands: tuple[str, ...]) -> str | None:
+    name = generator_name_in(value)
+    if name:
+        return name
+    lowered = value.lower()
+    for brand in brands:
+        pattern = re.escape(brand.lower()).replace(r"\ ", r"[\s_-]+")
+        match = re.search(rf"(?<![0-9a-z]){pattern}(?![0-9a-z])", lowered)
+        if match:
+            return value[match.start() : match.end()]
+    return None
+
+
+def container_metadata_evidence(facts: "ContainerFacts", registry: "ContainerRegistry") -> list[EvidenceItem]:
+    """Items for the facts of one ``container_metadata`` check (P0R-22). Never an authentic item."""
+    from .container_metadata import KIND_TOOL, LAYER
+
+    items: list[EvidenceItem] = []
+    shown = [f"{f.source} {f.key}=「{_shown(f.value)}」" for f in facts.fields[:CONTAINER_SHOWN_FIELDS]]
+    if facts.c2pa_uuid:
+        shown.append("C2PA uuid 박스 있음(서명 검증은 c2pa 검사)")
+    if shown:
+        more = len(facts.fields) - CONTAINER_SHOWN_FIELDS
+        items.append(EvidenceItem(
+            CONTAINER_FACTS_TITLE,
+            f"{facts.format_label}에서 읽은 필드: " + "; ".join(shown) + (f" 외 {more}개" if more > 0 else "") + ". " + CONTAINER_ENCODER_NOTE,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+        ))
+    if facts.sei:
+        listed = "; ".join(f"{s.codec} UUID {s.uuid}: 「{_shown(s.text, 200)}」" for s in facts.sei[:8])
+        items.append(EvidenceItem(
+            CONTAINER_SEI_TITLE,
+            f"SEI user_data_unregistered 문자열: {listed}. x264·x265 옵션 문자열은 그 인코더로 만든 모든 영상(ffmpeg 편집본 포함)에 남아 "
+            "단독으로는 아무것도 뜻하지 않습니다.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+        ))
+    for sei in facts.sei:
+        vendor = registry.sei_vendor(sei.text)
+        if vendor is not None:
+            items.append(EvidenceItem(
+                CONTAINER_SEI_VENDOR_TITLE,
+                f"{sei.codec} SEI 사용자 데이터에 등록 문자열 「{vendor.get('contains')}」({vendor.get('generator')})이(가) 있습니다: "
+                f"「{_shown(sei.text, 200)}」. 생성 서비스가 비트스트림에 스스로 남기는 표식이며 서명이 없습니다 — {SELF_DECLARED_NOTE}. "
+                f"재인코딩 한 번으로 사라지므로 부재는 무정보입니다. 기준: {registry.label}.",
+                EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, LAYER, self_declared=True,
+            ))
+            break
+    comfy_done = False
+    for item in facts.fields:
+        where = f"{item.source} {item.key}"
+        if item.name == "aigc":
+            items.extend(aigc_label_evidence(where, item.value, registry))
+        elif item.name in ("prompt", "workflow"):
+            if not comfy_done and comfyui_structure(item.name, item.value):
+                comfy_done = True
+                items.append(EvidenceItem(
+                    CONTAINER_COMFYUI_TITLE,
+                    f"{where} 필드에 ComfyUI 노드 그래프(JSON — class_type·inputs 등) 구조가 있습니다. ComfyUI 저장 노드가 기록하는 생성 "
+                    f"워크플로이며 서명이 없습니다 — {SELF_DECLARED_NOTE}.",
+                    EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, LAYER, self_declared=True,
+                ))
+        elif item.kind == KIND_TOOL:
+            brand = _brand_in(item.value, registry.brands)
+            if brand:
+                items.append(EvidenceItem(
+                    CONTAINER_BRAND_TITLE,
+                    f"{where}=「{_shown(item.value)}」 — 생성 도구 필드에 생성기 이름 '{brand}'이(가) 기록되어 있습니다. 이름 하나는 구조적 선언이 "
+                    f"아니므로 단독 결론 근거로 쓰지 않습니다 — {SELF_DECLARED_NOTE}.",
+                    EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, LAYER, self_declared=True,
+                ))
+        elif comfyui_structure("comment", item.value):
+            items.append(EvidenceItem(
+                CONTAINER_COMFYUI_FREE_TITLE,
+                f"{where}(자유 텍스트 필드)에 ComfyUI 노드 그래프 형식의 JSON이 있습니다. 설명·주석 같은 자유 텍스트 필드는 누구나 쓰는 칸이라 "
+                "근거로 쓰지 않고 사실로만 기록합니다.",
+                EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+            ))
+    return items

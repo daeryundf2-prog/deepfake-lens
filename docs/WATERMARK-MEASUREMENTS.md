@@ -65,7 +65,7 @@
 | 패키지와의 일치 | 같은 480개 + 합성 픽스처 2개, 패키지 `get_watermark(round=False)`(torch 2.11 + torchaudio 2.11) | 최대 차이 3.0×10⁻⁷ |
 
 | PerTh 재압축 음성 | 같은 세트의 40개를 mp3 64k·aac 64k·opus 24k로 재압축(120개) | 0.5 이상 0건, 최대 0.118 |
-| PerTh 합성 순음 | ffmpeg `sine` 220/440 Hz, 1·3·10초, wav·flac·mp3·aac·opus·vorbis | 440 Hz는 모든 형식에서 0.99 이상(오탐), 220 Hz는 0.02 이하(vorbis 3·10초만 0.89·0.92) → 순음 위주 신호는 측정 범위 밖으로 건너뜀(MACHINE-READABLE-MARKS §8) |
+| PerTh 합성 순음 | ffmpeg `sine` 220/440 Hz, 1·3·10초, wav·flac·mp3·aac·opus·vorbis | 440 Hz는 모든 형식에서 0.99 이상(오탐), 220 Hz는 0.02 이하(vorbis 3·10초만 0.89·0.92) → 순음 위주 신호는 측정 범위 밖으로 건너뜀(MACHINE-READABLE-MARKS §9) |
 
 해석: 0.5 기준(패키지 기본값)은 실제 음성에서도 1% 남짓 표식을 주장하므로 존재 사실은 중립·약으로만 적는다. 등록표 일치 기준 0.9는 실사 최대(0.780)와
 재검출 최소(0.922) 사이 값이다. 재현: `scripts/measure_watermark_fpr.py --audio <폴더> --only perth`. 통화 재압축·잡음·음악은 측정하지 않았다.

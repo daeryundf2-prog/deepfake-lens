@@ -53,6 +53,9 @@ from .result_text import (
     UnrecordedFiles,
     unrecorded_files,
 )
+from .evidence_rules import CAVEATS_TITLE, SELF_DECLARED_NOTE  # P0R-12
+from .result_text import shown_grade_label  # P0R-13
+from .profile_pins import executed_profiles  # P0R-14
 from .result_types import VERDICT_LABELS, CoverageStatus, EvidenceDirection, EvidenceKind, EvidenceStrength, Grade, Verdict, is_verdict_row, status_label
 from .signing import resolve_report_key, sign_report
 from .json_text import json_dumps
@@ -61,6 +64,10 @@ from .json_text import json_dumps
 # verified as) a scan report body.
 EVIDENCE_STATEMENT_REPORT_TYPE = "evidence-statement"
 SIGNATURE_SECTION_TITLE = "### [보고서 서명]"
+
+
+# P0R-6: a row of the scan the examiner did not choose as an exhibit (still in the statement and its signature).
+NOT_AN_EXHIBIT = "서증 외(검사 행)"
 
 
 @dataclass(frozen=True)
@@ -109,6 +116,8 @@ class EvidenceStatement:
     # (native_path.temp_location(), the scan result's ``temp_folder``); a
     # fallback is also a line of provenance_note ("임시 폴더: …").
     temp_folder: dict[str, Any] = field(default_factory=lambda: {"fallback": False})
+    # P0R-14: the model profiles that ran on the statement's rows (profile_pins.executed_profiles) — signed.
+    executed_models: list[dict[str, Any]] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
@@ -283,7 +292,13 @@ def _clip(text: str, limit: int) -> str:
     """``text`` cut to ``limit`` chars without leaving a quoted metadata value open."""
     if len(text) <= limit:
         return text
-    clipped = text[:limit] + "…"
+    end = limit
+    # P0R-11: never cut a Latin word (a product name — "Adobe Firefly" — read as "Adobe Firefl…")
+    while end < len(text) and end < limit + 20 and text[end].isascii() and text[end].isalnum() and text[end - 1].isascii() and text[end - 1].isalnum():
+        end += 1
+    if end >= len(text):
+        return text
+    clipped = text[:end] + "…"
     if clipped.count(_QUOTE_OPEN) > clipped.count(_QUOTE_CLOSE):
         clipped += _QUOTE_CLOSE
     return clipped
@@ -295,7 +310,7 @@ def _clip(text: str, limit: int) -> str:
 # 형법 제347조 for any video or a title with "얼굴") — the same unfounded entry R18-16 removed from
 # the case name. The examiner writes the statutes.
 STATUTE_PLACEHOLDER = "• 관련 법조: (검토자 기재 — 도구는 죄명·법조를 정하지 않습니다)"
-STATUTE_NONE = "• 관련 법조: 해당 없음 (결정적 근거에 의한 조작·생성 결론이 없음)"
+STATUTE_NONE = "• 관련 법조: 해당 없음 (재현 가능한 기록 근거에 의한 조작·생성 결론이 없음)"
 
 
 def _member_references(item: ScanItem, exhibits: dict[str, str], items: list[ScanItem]) -> str:
@@ -326,25 +341,28 @@ def _purpose_head(item: ScanItem, member_refs: str = "") -> str:
         # N5: a container row concludes from its members, not from its own bytes.
         rollup = display_name(next((e.detail for e in res.evidence if e.layer == "archive"), ""))
         return (
-            f"압축 파일 구성원 중 결정적 근거에 의해 조작·생성 근거가 확인된 파일이 있는 증거물임을 소명함"
+            f"압축 파일 구성원 중 재현 가능한 기록 근거에 의해 조작·생성 근거가 확인된 파일이 있는 증거물임을 소명함"
             f"(구성원 결론 집계: {rollup}; {member_refs or '구성원 행 참조'})."
         )
     if res.verdict_code == Verdict.MANIPULATION_EVIDENCE:
-        basis = next(
-            (e.title for e in res.evidence if e.kind == EvidenceKind.DETERMINISTIC and e.direction == EvidenceDirection.SYNTHETIC and e.strength == EvidenceStrength.STRONG),
-            "결정적 근거",
+        deciding = next(
+            (e for e in res.evidence if e.kind == EvidenceKind.DETERMINISTIC and e.direction == EvidenceDirection.SYNTHETIC and e.strength == EvidenceStrength.STRONG),
+            None,
         )
-        return f"결정적 근거({display_name(basis)})에 의해 조작·생성 근거가 확인된 증거물임을 소명함."
+        basis = deciding.title if deciding is not None else "재현 가능한 기록 근거"
+        # P0R-12: a conclusion resting on self-declared metadata says so in the purpose itself
+        declared = f" — {SELF_DECLARED_NOTE}" if deciding is not None and deciding.self_declared else ""
+        return f"재현 가능한 기록 근거({display_name(basis)}{declared})에 의해 조작·생성 근거가 확인된 증거물임을 소명함."
     if res.verdict_code == Verdict.AUTHENTICITY_EVIDENCE:
         basis = next(
             (e.title for e in res.evidence if e.direction == EvidenceDirection.AUTHENTIC and e.strength == EvidenceStrength.STRONG),
-            "결정적 근거",
+            "재현 가능한 기록 근거",
         )
-        return f"결정적 근거({display_name(basis)})에 의해 원본성 근거가 확인된 증거물임을 소명함."
+        return f"재현 가능한 기록 근거({display_name(basis)})에 의해 원본성 근거가 확인된 증거물임을 소명함."
     failed = [entry for entry in res.coverage if entry.status == CoverageStatus.FAILED]
     if failed:
         return f"검사 실패({', '.join(display_name(entry.describe()) for entry in failed)})로 판단 불가 상태이며, 별도 검증이 필요함을 소명함."
-    return "결론을 뒷받침할 결정적 근거가 없어 판단 불가 상태이며(원본이라는 뜻이 아님), 별도 검증이 필요함을 소명함."
+    return "결론을 뒷받침할 재현 가능한 기록 근거가 없어 판단 불가 상태이며(원본이라는 뜻이 아님), 별도 검증이 필요함을 소명함."
 
 
 def build_evidence_statement(
@@ -364,8 +382,13 @@ def build_evidence_statement(
     scan_root: Path | str | None = None,
     summary: object | None = None,
     excluded_items: list[dict[str, object]] | None = None,
+    exhibit_paths: list[str] | None = None,
 ) -> EvidenceStatement:
     """Build an EvidenceStatement from analyzed scan items.
+
+    ``exhibit_paths`` (P0R-6, web reports): the examiner's ordered selection of row paths — those rows are the
+    numbered exhibits, in that order; every other row follows unnumbered (:data:`NOT_AN_EXHIBIT`), so no row of the
+    scan is left out of the signed statement. None: every row is an exhibit, in scan order.
 
     ``summary`` (a BatchScanSummary or the scan JSON's summary dict) adds
     the enumeration-level "기록되지 않은 파일" reasons — files over the
@@ -381,8 +404,16 @@ def build_evidence_statement(
     law_firm, contact, center = office.law_firm, office.contact, office.center
     entries: list[EvidenceStatementEntry] = []
     now_date = datetime.now().strftime("%Y. %m. %d.")
+    if exhibit_paths is not None:
+        by_path = {item.path: item for item in items}
+        chosen = [by_path[path] for path in exhibit_paths if path in by_path]
+        chosen_ids = {id(item) for item in chosen}
+        items = [*chosen, *(item for item in items if id(item) not in chosen_ids)]
+        numbered = len(chosen)
+    else:
+        numbered = len(items)
     # S1: exhibit number of every row, so a container can cite its members.
-    exhibits = {item.path: f"{exhibit_prefix}{idx}호증" for idx, item in enumerate(items, start=1)}
+    exhibits = {item.path: (f"{exhibit_prefix}{idx}호증" if idx <= numbered else NOT_AN_EXHIBIT) for idx, item in enumerate(items, start=1)}
 
     for idx, item in enumerate(items, start=1):
         res = item.result
@@ -401,7 +432,7 @@ def build_evidence_statement(
         signals = res.signals if res else []
         file_sha256, hash_unavailable = _item_hash(item, scan_root)
 
-        exhibit_no = f"{exhibit_prefix}{idx}호증"
+        exhibit_no = exhibits[item.path]
         # S1: an archive member is named "<container>::<member>", never its bare file name.
         doc_name = f"디지털 증거 파일 ({row_label(item.path)}) 및 AI 스크리닝 데이터"
         author_date = f"{law_firm}\n{now_date}" if law_firm else now_date
@@ -419,6 +450,9 @@ def build_evidence_statement(
             gaps = coverage_gaps(res)
             if gaps:
                 evidence_lines.append("• 검사 범위: " + "; ".join(display_name(entry.describe()) for entry in gaps[:3]) + (f" 외 {len(gaps) - 3}건" if len(gaps) > 3 else ""))
+        if res is not None and res.conclusion_caveats:
+            # P0R-12: every conclusion says why it could be wrong
+            evidence_lines.append(f"• {CAVEATS_TITLE}: " + " ".join(display_name(text) for text in res.conclusion_caveats))
         sig_text = "\n".join(evidence_lines) if evidence_lines else "• 근거 항목 없음"
 
         statute_text = STATUTE_PLACEHOLDER if band_value == "high" else STATUTE_NONE
@@ -426,7 +460,8 @@ def build_evidence_statement(
         hash_text = f"• 원본 SHA-256: {file_sha256}" if file_sha256 else f"• 원본 SHA-256: {hash_unavailable or HASH_UNAVAILABLE_ACCESS}"
 
         if verdict_row and res is not None:
-            head_line = f"[자동 분석 결론: {band} / 등급: {res.grade_label} — 유죄·불법성의 직접 증거가 아님]"
+            grade_text = shown_grade_label(res)  # P0R-13: no "감정 근거로 사용 가능" next to 판단 불가
+            head_line = f"[자동 분석 결론: {band}{f' / 등급: {grade_text}' if grade_text else ''} — 유죄·불법성의 직접 증거가 아님]"
         else:
             reason = display_name((item.error or "").strip()) or "사유 기록 없음"
             head_line = f"상태: {band} — {reason}"
@@ -458,7 +493,7 @@ def build_evidence_statement(
         wa = _wa_raw if isinstance(_wa_raw, int) else 0
         wc = _wc_raw if isinstance(_wc_raw, int) else 0
         prov_lines.append(
-            f"모델 가중치: {wa}/{wc} 탑재" + (" — 신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영" if wa == 0 else "")
+            f"모델 가중치: {wa}/{wc} 탑재" + (" — 신경망 미탑재(측정 게이트 미충족) — 재현 가능한 기록 근거만 반영" if wa == 0 else "")
         )
     if thresholds is not None:
         # S6: the same line as the CLI header / HTML / forensic PDF,
@@ -490,6 +525,7 @@ def build_evidence_statement(
         unrecorded_files=unrecorded_files(list(items), summary).to_json(),
         excluded_items=[dict(entry) for entry in excluded_items or []],
         temp_folder=temp_folder,
+        executed_models=executed_profiles([item.to_json() for item in items]),
     )
 
 
@@ -514,7 +550,9 @@ def signed_statement_body(
         body["scan_root"] = scan_root
     if analysis_options is not None:
         body["analysis_options"] = dict(analysis_options)  # R19-3: the options the server re-analyzed with
-    return sign_report(body, key if key is not None else resolve_report_key(), model_pins=model_pins)
+    return sign_report(
+        body, key if key is not None else resolve_report_key(), model_pins=model_pins, executed_models=list(statement.executed_models),
+    )
 
 
 def statement_signature_lines(signed: dict[str, object]) -> list[str]:

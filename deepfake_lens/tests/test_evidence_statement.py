@@ -284,11 +284,11 @@ class EvidenceStatementTest(_StatementFixture):
         payload = {
             # R22-8 (round 22): an upload row's name is relative (an upload endpoint names it after the client's
             # file name); these rows' absolute paths are now a malformed upload name (400) — posted by file name.
-            "items": [dict(self.item1.to_json(), source="upload", path=Path(self.item1.path).name),
-                      dict(item2.to_json(), source="upload", path=Path(item2.path).name)],
+            # P0R-6: upload rows travel as ``uploads`` (rows are no request field; folder rows come from a scan job)
+            "uploads": [dict(self.item1.to_json(), source="upload", path=Path(self.item1.path).name),
+                        dict(item2.to_json(), source="upload", path=Path(item2.path).name)],
             "format": "evidence",
             "case_no": "2026가합55555",
-            "scan_root": str(Path(tmp.name).resolve()),
         }
         resp = client.post(
             "/api/report?format=evidence",
@@ -352,7 +352,7 @@ class EvidenceStatementTest(_StatementFixture):
             doc.close()
 
 
-KEY = b"evidence-statement-test-key"
+KEY = b"evidence-statement-test-key-0123456789abcdef"  # P0R-15: ≥ 32 bytes
 
 
 class EvidenceStatementSigningTest(_StatementFixture):
@@ -420,10 +420,10 @@ class EvidenceStatementSigningTest(_StatementFixture):
         self.assertEqual(json.loads(json_out.read_text(encoding="utf-8")), printed)
         self.assertIn(signed_body_sha256(printed), md_out.read_text(encoding="utf-8"))
         key_file = self.root / "key.txt"
-        key_file.write_bytes(b"another-key")
+        key_file.write_bytes(b"another-key-0123456789abcdef0123456789")  # P0R-15
         with self._env(None), redirect_stdout(io.StringIO()):
             self.assertEqual(main(["evidence-statement", str(scan_json), "--json-out", str(json_out), "--key-file", str(key_file)]), 0)
-        self.assertTrue(verify_report(json_out, b"another-key").verified)
+        self.assertTrue(verify_report(json_out, b"another-key-0123456789abcdef0123456789").verified)
 
     def test_cli_scan_writes_signed_statement_json(self) -> None:
         folder = self.root / "case"

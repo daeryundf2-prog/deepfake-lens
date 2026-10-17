@@ -1,0 +1,15 @@
+{
+  "schema": "c2pa-trust-bundle-v1",
+  "id": "C2PA-INTERIM-TRUST-LIST",
+  "name": "C2PA 임시 신뢰 목록(Interim Trust List, 2026-01-01 동결)",
+  "file": "c2pa-itl-anchors.pem",
+  "sha256": "db57e50b9bd4e4c786cbb91f38fd85e2af6a9d5412438a8cddcc42688df07ae5",
+  "anchors": 27,
+  "frozen": true,
+  "list_issue_date": "2026-01-08",
+  "source": "https://raw.githubusercontent.com/contentauth/verify-site/c2bf16d559ea4a70cb20d44cd1caee6c3bac9ec0/static/trust/anchors.pem",
+  "upstream_commit": "c2bf16d559ea4a70cb20d44cd1caee6c3bac9ec0",
+  "retrieved": "2026-10-17",
+  "license": "Apache-2.0 (contentauth/verify-site LICENSE)",
+  "note": "P0R-21: the root anchors of the frozen Interim Trust List used by verify.contentauthenticity.org (its header: Content Credentials signed with certificates chaining to these stay valid, but validators should distinguish them from those chaining to the official C2PA Trust List). The ITL's end-entity allow list (allowed.pem) is not bundled. list_issue_date is the date of the file's last upstream change."
+}

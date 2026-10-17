@@ -34,7 +34,7 @@
       "title": "FLUX.1 참조 구현 워터마크 존재",
       "source": "https://github.com/black-forest-labs/flux/blob/802fb4713906133fcbd0d8dc5351620ca4773036/src/flux/util.py (L733-774: WATERMARK_MESSAGE = 0b001010101111111010000111100111001111010100101110, WATERMARK_BITS = [int(bit) for bit in bin(WATERMARK_MESSAGE)[2:]], set_watermark('bits', ...), encode(..., 'dwtDct'); save_image() L258 always calls embed_watermark — cli.py, cli_control.py, cli_fill.py, cli_kontext.py, cli_redux.py, demo_gr.py, demo_st.py)",
       "checked": "2026-10-17",
-      "limitations": "bin() drops the two leading zeros of the 48-bit constant, so the reference code embeds 46 bits — the registered message. Only the reference repository's scripts apply it; diffusers' Flux pipelines and FLUX.2 / FLUX.3 do not (확인: 기본 워터마크 없음 — docs/MACHINE-READABLE-MARKS.md §9). The message is public and can be imitated."
+      "limitations": "bin() drops the two leading zeros of the 48-bit constant, so the reference code embeds 46 bits — the registered message. Only the reference repository's scripts apply it; diffusers' Flux pipelines and FLUX.2 / FLUX.3 do not (확인: 기본 워터마크 없음 — docs/MACHINE-READABLE-MARKS.md §10). The message is public and can be imitated."
     },
     {
       "id": "sd1-txt2img-imwatermark-dwtdct-bytes",

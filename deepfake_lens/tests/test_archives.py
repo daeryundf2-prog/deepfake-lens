@@ -46,8 +46,14 @@ class ArchiveFormatTests(unittest.TestCase):
             self.assertIsNone(_safe_member_name("file.txt:ads"))
         with patch("deepfake_lens.archives._colon_names_unsafe", return_value=False):
             self.assertEqual(_safe_member_name("file.txt:ads"), "file.txt:ads")
-        self.assertIsNone(_safe_member_name("CON"))
-        self.assertIsNone(_safe_member_name("aux.png"))
+        # R26-4 (round 26): these pinned the defect on POSIX — a Windows device name was refused on every OS; it is
+        # refused only where it is a device (Windows).
+        with patch("deepfake_lens.archives._reserved_names_unsafe", return_value=True):
+            self.assertIsNone(_safe_member_name("CON"))
+            self.assertIsNone(_safe_member_name("aux.png"))
+        with patch("deepfake_lens.archives._reserved_names_unsafe", return_value=False):
+            self.assertEqual(_safe_member_name("CON"), "CON")
+            self.assertEqual(_safe_member_name("aux.png"), "aux.png")
 
     def test_colon_names_are_classified_precisely(self):
         """R25-6 (round 25): every member name with ":" as its second character was refused as 「절대 경로 멤버(대상 폴더 밖
@@ -76,6 +82,70 @@ class ArchiveFormatTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertIsNone(_safe_member_name(name))
                 self.assertEqual(_unsafe_name_reason(name), reason)
+
+
+class HostLegalMemberNamesTest(unittest.TestCase):
+    """R26-4 (round 26): "~$보고서.docx" (an Office owner file), "~WRL0001.tmp" (a Word temp file) and "con.png" were
+    refused inside an archive on POSIX — 「홈 폴더 표기('~')로 시작하는 멤버(대상 폴더 밖 쓰기 시도로 취급)」, 「허용되지 않는
+    이름(Windows 예약 장치명)」 — while the same files in a folder were analyzed. ``open()`` never expands "~" and a member
+    is written under its own index folder, so neither is a write outside it; a device name is refused on Windows only.
+    Zip-slip, absolute, UNC, drive and ".." members stay refused."""
+
+    NAMES = ("~$보고서.docx", "~WRL0001.tmp", "~x.png", "con.png", "nul", "AUX.txt", "~")
+
+    def setUp(self) -> None:
+        import shutil
+        import tempfile
+
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def test_names_are_refused_only_where_they_cannot_be_files(self) -> None:
+        from deepfake_lens.archives import _unsafe_name_reason
+
+        with patch("deepfake_lens.archives._windows_names_unsafe", return_value=False):
+            for name in self.NAMES:
+                self.assertEqual(_safe_member_name(name), name, name)
+        with patch("deepfake_lens.archives._windows_names_unsafe", return_value=True):
+            for name in ("~$보고서.docx", "~WRL0001.tmp", "~x.png", "~"):
+                self.assertEqual(_safe_member_name(name), name, name)  # a "~" is a name on Windows too
+            for name in ("con.png", "nul", "AUX.txt"):
+                self.assertIsNone(_safe_member_name(name), name)
+                reason = _unsafe_name_reason(name)
+                self.assertEqual(reason, "Windows에서 쓸 수 없는 이름(예약 장치명 — CON·PRN·AUX·NUL·COM1~9·LPT1~9)")
+                self.assertNotIn("대상 폴더 밖", reason)
+        for name in ("/abs.png", "//srv/share/a.png", "\\\\srv\\share\\b.png", "C:/x.png", "C:\\y.png", "c:", "../e.png", "a/../../e2.png"):
+            with self.subTest(name=name):
+                self.assertIsNone(_safe_member_name(name))
+                self.assertIn("대상 폴더 밖", _unsafe_name_reason(name))
+
+    @unittest.skipIf(__import__("os").name == "nt", "POSIX file names")
+    def test_an_archive_member_is_analyzed_like_the_same_file_in_a_folder(self) -> None:
+        payloads = {name: b"\x89PNG\r\n\x1a\n" + bytes(64) + name.encode("utf-8") for name in self.NAMES}
+        payloads["~$보고서.docx"] = b"PK\x03\x04" + bytes(40)
+        folder = self.tmp / "folder"
+        folder.mkdir()
+        for name, data in payloads.items():
+            (folder / name).write_bytes(data)
+        arc = self.tmp / "arc"
+        arc.mkdir()
+        make_zip(arc / "office.zip", payloads)
+        _, folder_items = scan_directory(folder)
+        _, archive_items = scan_directory(arc)
+        by_name = {item.path: item for item in folder_items}
+        members = {item.member: item for item in archive_items if item.member is not None}
+        container = next(item for item in archive_items if item.path == "office.zip")
+        assert container.result is not None
+        self.assertEqual([entry.reason for entry in container.result.coverage if entry.check == "archive_member"], [])
+        self.assertEqual(sorted(members), sorted(self.NAMES))
+        for name in self.NAMES:
+            with self.subTest(name=name):
+                mine, theirs = members[name], by_name[name]
+                self.assertEqual((mine.sha256, mine.status, mine.kind), (theirs.sha256, theirs.status, theirs.kind))
+                self.assertEqual(
+                    mine.result.verdict_code if mine.result else None, theirs.result.verdict_code if theirs.result else None,
+                )
+        self.assertEqual(sorted(p.name for p in self.tmp.iterdir()), ["arc", "folder"])  # nothing written outside
 
 
 class ColonMemberNamesScanTest(unittest.TestCase):
@@ -123,6 +193,109 @@ class ColonMemberNamesScanTest(unittest.TestCase):
                 info.size = len(data)
                 archive.addfile(info, io.BytesIO(data))
         self._check("m.tar")
+
+
+class MemberChainInjectiveTest(unittest.TestCase):
+    """R26-1 (round 26): R25-6 made ":" an ordinary member-name character on POSIX, so the literal member
+    "inner.zip::b.png" and "b.png" of the nested archive "inner.zip" were one row identity ("z.zip", "inner.zip::b.png")
+    — two rows the server's re-analysis collapsed. Each archive level's path is now escaped in the chain."""
+
+    def setUp(self) -> None:
+        import shutil
+        import tempfile
+
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    @staticmethod
+    def _zip_bytes(members: dict[str, bytes]) -> bytes:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            for name, data in members.items():
+                archive.writestr(name, data)
+        return buffer.getvalue()
+
+    @unittest.skipIf(__import__("os").name == "nt", "POSIX file names")
+    def test_the_verifiers_archive_gives_distinct_round_tripping_identities(self) -> None:
+        from deepfake_lens.result_text import member_chain, split_member_chain
+
+        png = b"\x89PNG\r\n\x1a\n" + bytes(64)
+        inner = self._zip_bytes({"b.png": png + b"1", "c.zip": self._zip_bytes({"d.png": png + b"2"})})
+        make_zip(self.tmp / "z.zip", {
+            "inner.zip": inner, "inner.zip::b.png": png + b"3", "inner.zip::c.zip::d.png": png + b"4",
+            "fake.zip::x.png": png + b"5", ":lead.png": png + b"6", "trail:": png + b"7", "c:v.png": png + b"8",
+            "a\\:b.png": png + b"9",
+        })
+        _, items = scan_directory(self.tmp)
+        members = [item.member for item in items if item.container == "z.zip"]
+        self.assertEqual(len(members), len(set(members)), members)
+        expected = [["inner.zip", "b.png"], ["inner.zip", "c.zip", "d.png"], ["inner.zip::b.png"], ["inner.zip::c.zip::d.png"],
+                    ["fake.zip::x.png"], [":lead.png"], ["trail:"], ["c:v.png"], ["a/:b.png"]]
+        self.assertEqual(sorted(m for m in members if m), sorted(member_chain(segments) for segments in expected))
+        self.assertIn("inner.zip\\:\\:b.png", members)
+        self.assertIn("inner.zip::b.png", members)
+        self.assertIn("c:v.png", members)  # R25-6: an inner ":" is unchanged
+        for item in items:
+            if item.member is not None:
+                self.assertEqual(member_chain(split_member_chain(item.member)), item.member)
+                self.assertEqual(item.path, f"z.zip::{item.member}")
+        paths = [item.path for item in items]
+        self.assertEqual(len(paths), len(set(paths)), paths)
+
+
+class RowIdentityInvariantTest(unittest.TestCase):
+    """R26-8 (round 26): a scan result's row identities must be unique and round-trip (identifier -> (path, member
+    chain) -> identifier); the scan fails closed otherwise. Nothing checked it, so R26-1's collision reached the
+    signed report."""
+
+    def setUp(self) -> None:
+        import shutil
+        import tempfile
+
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def test_the_problems_are_named(self) -> None:
+        from deepfake_lens.result_text import row_identity_problem
+
+        top = {"path": "a.zip"}
+        member = {"path": "a.zip::x.png", "container": "a.zip", "member": "x.png"}
+        self.assertIsNone(row_identity_problem([top, member, {"path": "tri\\:\\:\\:c.png"}]))
+        cases = {
+            "행이 둘 이상": [top, member, dict(member)],
+            "사슬이 정규 형식이 아님": [top, dict(member, member=":x.png", path="a.zip:::x.png")],
+            "path가 container::member와 다름": [top, dict(member, path="a.zip::y.png")],
+            "컨테이너 행이 없음": [member],
+            "정규 행 경로가 아님": [{"path": "a\\:b.png"}],
+        }
+        for expected, rows in cases.items():
+            with self.subTest(expected=expected):
+                self.assertIn(expected, row_identity_problem(rows) or "")
+
+    @unittest.skipIf(__import__("os").name == "nt", "POSIX file names")
+    def test_a_scan_whose_identities_collide_fails_closed(self) -> None:
+        import contextlib
+
+        from deepfake_lens.cli import main as cli_main
+        from deepfake_lens.result_text import RowIdentityError
+
+        png = b"\x89PNG\r\n\x1a\n" + bytes(64)
+        inner = io.BytesIO()
+        with zipfile.ZipFile(inner, "w") as archive:
+            archive.writestr("b.png", png + b"1")
+        make_zip(self.tmp / "z.zip", {"inner.zip": inner.getvalue(), "inner.zip::b.png": png + b"2"})
+        scan_directory(self.tmp)  # R26-1: distinct identities
+        # the R26-1 defect brought back (no segment escape): two rows with one identity
+        with patch("deepfake_lens.archives.escape_member_segment", side_effect=lambda segment: segment):
+            with self.assertRaises(RowIdentityError) as caught:
+                scan_directory(self.tmp)
+            self.assertIn("행 식별자 불변식 위반", str(caught.exception))
+            self.assertIn("'z.zip::inner.zip::b.png'의 행이 둘 이상", str(caught.exception))
+            err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+                code = cli_main(["scan", str(self.tmp), "--format", "json", "--no-default-engine"])
+        self.assertNotEqual(code, 0)
+        self.assertIn("행 식별자 불변식 위반", err.getvalue())
 
 
 class ExtractionTests(unittest.TestCase):
@@ -1170,8 +1343,8 @@ class ArchiveContainerRollupEvidenceTests(unittest.TestCase):
         statement = build_evidence_statement(items, scan_root=self.root)
         entry = next(e for e in statement.entries if e.file_path == "case.zip")
         self.assertNotIn("근거 항목 없음", entry.purpose_of_proof)
-        self.assertNotIn("결정적 근거(결정적 근거)", entry.purpose_of_proof)
-        self.assertIn("압축 파일 구성원 중 결정적 근거에 의해 조작·생성 근거가 확인된 파일이 있는 증거물임을 소명함", entry.purpose_of_proof)
+        self.assertNotIn("재현 가능한 기록 근거(재현 가능한 기록 근거)", entry.purpose_of_proof)
+        self.assertIn("압축 파일 구성원 중 재현 가능한 기록 근거에 의해 조작·생성 근거가 확인된 파일이 있는 증거물임을 소명함", entry.purpose_of_proof)
         self.assertIn("조작·생성 근거 있음 1건 / 판단 불가 1건", entry.purpose_of_proof)
 
     def test_rollup_detail_lists_authenticity_only_when_present(self) -> None:

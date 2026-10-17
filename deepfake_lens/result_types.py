@@ -202,7 +202,7 @@ class EvidenceKind(str, Enum):
 
 
 EVIDENCE_KIND_LABELS = {
-    EvidenceKind.DETERMINISTIC: "결정적 근거",
+    EvidenceKind.DETERMINISTIC: "재현 가능한 기록 근거",
     EvidenceKind.STATISTICAL: "통계적 근거",
     EvidenceKind.LEXICAL: "어휘적 근거",
 }
@@ -266,6 +266,11 @@ class EvidenceItem:
     calibration_id: str | None = None
     measured_on: str | None = None
     raw_score: int | None = None
+    # P0R-22: the item rests on metadata the file states about itself (an
+    # unsigned generator declaration — anyone can plant or strip it). Written
+    # to JSON as ``"self_declared": true`` only when set, so older records and
+    # every other item keep their exact shape.
+    self_declared: bool = False
 
     @property
     def is_calibrated(self) -> bool:
@@ -276,7 +281,7 @@ class EvidenceItem:
         return EvidenceSignal(self.title, self.detail, weight)
 
     def to_json(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "title": self.title,
             "detail": self.detail,
             "kind": self.kind.value,
@@ -289,6 +294,9 @@ class EvidenceItem:
             "measured_on": self.measured_on,
             "raw_score": self.raw_score,
         }
+        if self.self_declared:
+            payload["self_declared"] = True
+        return payload
 
 
 class CoverageStatus(str, Enum):
@@ -334,6 +342,8 @@ CHECK_LABELS = {
     "watermark_videoseal": "VideoSeal 워터마크 검사",
     "watermark_audioseal": "AudioSeal 워터마크 검사",
     "online_detection": "온라인 전용 검출(미실행)",
+    # P0R-22 (threat G2): container/bitstream metadata facts (MP4·RIFF·ID3·FLAC, SEI; images: the AIGC label).
+    "container_metadata": "컨테이너·비트스트림 메타데이터 판독",
     "watermark_perth": "PerTh 워터마크 검사",
     # techniques-2026b (TB): further deterministic fact layers.
     "text_invisible_marks": "비가시 유니코드 표식 검사",
@@ -426,6 +436,9 @@ class ClassificationResult:
     # (marking_context.build) — facts for the legal-marking section; None for
     # rows that were not analyzed as media/documents. Never decides.
     marking_context: dict | None = None
+    # P0R-12 (user decision 2026-10-17): for a manipulation or authenticity conclusion, why it could be wrong —
+    # Korean sentences derived from the evidence that decided it (evidence_rules.conclusion_caveats); [] otherwise.
+    conclusion_caveats: list[str] = field(default_factory=list)
 
     @property
     def verdict_label(self) -> str:

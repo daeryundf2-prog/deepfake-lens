@@ -28,6 +28,10 @@ SIGNATURE_KEY_ID_FIELD = "signature_key_id"
 SIGNATURE_NOTE_FIELD = "signature_note"
 TOOL_VERSION_FIELD = "tool_version"
 MODEL_PINS_FIELD = "model_pins"
+# P0R-14: the generation time inside every signed body, the executed model profiles, and the host field never signed.
+GENERATED_AT_FIELD = "generated_at"
+EXECUTED_MODELS_FIELD = "executed_models"
+TEMP_FOLDER_FIELD = "temp_folder"
 SIGNATURE_VERSION = "hmac-sha256-v1"
 SIGNED_NOTE = (
     "HMAC-SHA256 서명: 서명 키 보유자에 대한 무결성 증명이며 법적 부인방지(전자서명)가 아닙니다. "
@@ -99,6 +103,23 @@ class ReportKeyError(ValueError):
 
 # N8: Korean errors for an explicit --key-file that cannot sign.
 EMPTY_KEY_MESSAGE = "서명 키가 비어 있습니다"
+# P0R-15 (review §4-1): the key is used as given (no KDF); a short passphrase can be guessed offline from one signed
+# report (its key id is a SHA-256 prefix of the key) and then anyone can sign. Signing refuses a key shorter than
+# this many bytes; verifying an existing report does not. 32 bytes = the HMAC-SHA256 block of entropy that
+# `openssl rand -hex 32` (64 hex characters) gives.
+MIN_REPORT_KEY_BYTES = 32
+REPORT_KEY_TOO_SHORT = (
+    "보고서 서명 키가 너무 짧습니다({length}바이트) — 서명에는 {minimum}바이트 이상의 무작위 키가 필요합니다"
+    "(예: `openssl rand -hex 32`의 출력). HMAC 키는 그대로 쓰이므로 짧은 암호구는 서명된 보고서 하나로 추측될 수 있고, "
+    "추측한 사람은 누구나 서명을 만들 수 있습니다. 서명하지 않았습니다"
+)
+
+
+def check_signing_key(key: bytes | str | None) -> None:
+    """P0R-15: raise :class:`ReportKeyError` (:data:`REPORT_KEY_TOO_SHORT`) for a key shorter than the minimum."""
+    data = key.encode("utf-8") if isinstance(key, str) else key
+    if data and len(data) < MIN_REPORT_KEY_BYTES:
+        raise ReportKeyError(REPORT_KEY_TOO_SHORT.format(length=len(data), minimum=MIN_REPORT_KEY_BYTES))
 UNREADABLE_KEY_MESSAGE = "서명 키 파일을 읽을 수 없습니다"
 
 
@@ -152,6 +173,7 @@ def sign_report(
     key_id: str | None = None,
     model_pins: list[dict[str, object]] | None = None,
     tool_version: str | None = None,
+    executed_models: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """Return a copy of ``report`` carrying an HMAC-SHA256 ``signature``.
 
@@ -165,11 +187,20 @@ def sign_report(
     ``signature_note`` that says "서명 없음" and how to configure a key.
     """
     key_bytes = key.encode("utf-8") if isinstance(key, str) else key
-    body = {field: value for field, value in report.items() if field not in _EXCLUDED_FIELDS}
+    check_signing_key(key_bytes)  # P0R-15: never sign with a guessable key
+    # P0R-14 (review §4-2, §4-4, §4-5): a signed body never carries the host's temp folder (a path), always carries
+    # its generation time, and records the model profiles that ran on its rows (executed_models: profile, pin,
+    # threshold, calibration id) instead of the pins of every profile in the models folder. ``model_pins`` is
+    # still accepted (an explicit list is recorded as given — older callers), never filled in by default.
+    body = {field: value for field, value in report.items() if field not in _EXCLUDED_FIELDS and field != TEMP_FOLDER_FIELD}
     if tool_version is not None or TOOL_VERSION_FIELD not in body:
         body[TOOL_VERSION_FIELD] = tool_version or _tool_version()
-    if model_pins is not None or MODEL_PINS_FIELD not in body:
-        body[MODEL_PINS_FIELD] = model_pins if model_pins is not None else _default_model_pins()
+    if GENERATED_AT_FIELD not in body:
+        body[GENERATED_AT_FIELD] = _generated_at()
+    if model_pins is not None:
+        body[MODEL_PINS_FIELD] = model_pins
+    if executed_models is not None or EXECUTED_MODELS_FIELD not in body:
+        body[EXECUTED_MODELS_FIELD] = executed_models if executed_models is not None else _executed_models(body)
     if not key_bytes:
         body[SIGNATURE_NOTE_FIELD] = UNSIGNED_NOTE
         body[SIGNATURE_FIELD] = None
@@ -255,10 +286,18 @@ def _tool_version() -> str:
     return TOOL_VERSION
 
 
-def _default_model_pins() -> list[dict[str, object]]:
-    from .profile_pins import profile_pins
+def _executed_models(body: dict[str, object]) -> list[dict[str, object]]:
+    from .profile_pins import executed_profiles
 
-    return profile_pins()
+    items = body.get("items")
+    return executed_profiles(items if isinstance(items, list) else [])
+
+
+def _generated_at() -> str:
+    """ISO 8601 local time with its UTC offset (report_time.report_timestamp) — the signer's own clock, not a TSA."""
+    from .report_time import report_timestamp
+
+    return report_timestamp()
 
 
 def _canonical(report: dict[str, object]) -> bytes:

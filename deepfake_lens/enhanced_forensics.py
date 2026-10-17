@@ -343,7 +343,7 @@ def package_version() -> str:
 LEGAL_REPORT_TYPE = "legal-report"
 LEGAL_REPORT_FORMAT_VERSION = "2.0"
 LEGAL_REPORT_NOTES = (
-    "결론은 scan과 같은 결정 규칙(decision.decide)으로 산출되었습니다: 결정적 근거(메타데이터·C2PA)만 결론을 바꿀 수 있고, "
+    "결론은 scan과 같은 결정 규칙(decision.decide)으로 산출되었습니다: 재현 가능한 기록 근거(메타데이터·C2PA)만 결론을 바꿀 수 있고, "
     "측정되지 않은 통계·휴리스틱 신호는 참고 신호로만 기록됩니다.",
     "'판단 불가'는 원본이라는 뜻이 아닙니다. 검사 범위(coverage)에 실행·건너뜀·실패한 검사가 모두 기록되어 있습니다.",
     "법적 효력을 위해서는 공인된 검증 기관의 확인이 필요합니다.",

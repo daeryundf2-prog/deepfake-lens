@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import contextvars
 import logging
 import os
 import re
@@ -42,9 +43,11 @@ from .error_text import path_scrub_file, path_scrub_root
 from .checks import skipped as skipped_entry
 from .decision import decide
 from .layer_diagnostic import UNAVAILABLE_BAND
-from .result_text import TEXT_LEGAL_LIMITATION, member_row_path, unrecorded_files
+from .result_text import TEXT_LEGAL_LIMITATION, check_row_identities, member_row_path, unrecorded_files
 from .evidence_rules import (
     c2pa_evidence,
+    SELF_DECLARED_NOTE,
+    conclusion_caveats,
     evidence_conflicts,
     deep_layer_reference,
     document_metadata_evidence,
@@ -493,15 +496,20 @@ def _scan_paths(
             # ``touch -r`` of an archive over REHASH_MAX_BYTES was missed).
             before, pre_digest = _container_state_and_digest(path)
             try:
-                extraction = extract_archive(path, dest)
+                # R26-2 (round 26): the archive registered like an analyzed file, so an extraction failure names it
+                # "<root>/l.zip" whatever the invocation (`cd case; scan .` wrote "l.zip")
+                with path_scrub_file(path):
+                    extraction = extract_archive(path, dest)
             except Exception as exc:
                 # A corrupt/unreadable archive becomes a failed container
                 # row — one bad file must not kill the whole scan.
                 logger.exception("archive extraction failed: %s", path)
+                with path_scrub_file(path):
+                    reason = failure_reason(exc)
                 archive_meta[rel] = {
                     "path": path, "fmt": archive_format(path),
-                    "skipped": 0, "warnings": [f"압축 해제 실패: {failure_reason(exc)}"],
-                    "error": failure_reason(exc),
+                    "skipped": 0, "warnings": [f"압축 해제 실패: {reason}"],
+                    "error": reason,
                     **_container_integrity(path, before, pre_digest),
                 }
                 archive_members[rel] = []
@@ -546,10 +554,12 @@ def _scan_paths(
 
             extra: list[ScanItem] = []
             for err_path, exc in iter_errors:
+                with path_scrub_file(err_path):  # R26-2: "<root>/sub" from `cd case; scan .` too
+                    reason = failure_reason(exc)
                 extra.append(ScanItem(
                     _display_path(err_path, root=root), err_path.name,
                     "unknown", "failed", 0,
-                    error=UNREADABLE_FOLDER_ROW_REASON.format(reason=failure_reason(exc)),
+                    error=UNREADABLE_FOLDER_ROW_REASON.format(reason=reason),
                 ))
             # D10: a symlink in the evidence folder is listed (never followed)
             # so the report accounts for every directory entry it was given.
@@ -578,6 +588,9 @@ def _scan_paths(
                 subfolder_files_skipped=sum(entry["files"] for entry in detail if isinstance(entry.get("files"), int)),
                 subfolders_skipped_detail=detail,
             )
+        # R26-8 (round 26): every row identity unique and round-tripping, or no result at all (fail closed) — a
+        # signed web report rests on the server's own rows being told apart (R26-1).
+        check_row_identities(items)
         return summary, items
     finally:
         for temp_dir in temp_dirs:
@@ -785,6 +798,14 @@ def _scan_specs(
     scan_context = _cache_scan_context(model_path) if cache is not None else ""
 
     def analyze_one(spec: _ScanSpec) -> tuple[ScanItem, str | None, bool]:
+        # R26-2 (round 26): every reason of the row — the read failure (R25-2), a size-check or analysis error, not
+        # only the analyzers' — is made with the scan root and the file registered, in this thread: the read-failure
+        # row was made outside analyze_file's registration, and a worker thread does not inherit the scan's, so
+        # `cd case; scan .` and `--workers 4` wrote "lock.wav" where `scan /abs/case` wrote "<root>/lock.wav".
+        with path_scrub_root(root), path_scrub_file(spec[0]):
+            return _analyze_one(spec)
+
+    def _analyze_one(spec: _ScanSpec) -> tuple[ScanItem, str | None, bool]:
         path, display, identity = spec
         if path in duplicates:
             display_path = display or _display_path(path, root=root)
@@ -929,8 +950,16 @@ def _scan_specs(
         if workers > 1 and len(specs) > 1:
             # Each worker still checks should_stop so a cancel short-circuits
             # remaining items instead of running every analysis to completion.
+            # R26-2 (round 26): each task runs in a copy of the scanning thread's context (path scrubbing and the
+            # other context variables of the scan), as the sequential loop does — worker threads start empty.
+            context = contextvars.copy_context()
+            bound = scope.bind(analyze_and_report)
+
+            def in_scan_context(spec: _ScanSpec) -> tuple[ScanItem, str | None, bool] | None:
+                return context.copy().run(bound, spec)
+
             with ThreadPoolExecutor(max_workers=workers) as executor:
-                outcomes = list(executor.map(scope.bind(analyze_and_report), specs))
+                outcomes = list(executor.map(in_scan_context, specs))
             for spec, outcome in zip(specs, outcomes):
                 if outcome is None:
                     cancelled.append(spec)
@@ -1332,6 +1361,13 @@ def _validate_c2pa(path: Path) -> dict[str, object]:
             raise AnalyzerError(f"C2PA 검증 불가: {validation.get('error', '')}")
         stage = "검증" if validation.get("present") else "판독"
         raise AnalyzerError(f"C2PA {stage} 실패: {validation.get('error', '')}")
+    if validation.get("error_kind") == "hash_exclusion":
+        # P0R-20: the signature's hard-binding exclusions empty the asset (or
+        # reach outside the manifest store). The check fails closed whatever
+        # the signature's validity — the manifest is not usable provenance.
+        binding = validation.get("hard_binding")
+        reason = binding.get("reason") if isinstance(binding, dict) else ""
+        raise AnalyzerError(reason or "C2PA 해시 제외범위 이상")
     return validation
 
 
@@ -1386,6 +1422,18 @@ def _marking(modality: str, validation: dict[str, object] | None, c2pa_entry: Co
     )
 
 
+def _with_container(marks: "MarkLayers", container: "MarkLayers") -> "MarkLayers":
+    """P0R-22: the ``container_metadata`` check joined to the watermark checks (coverage first, finding last)."""
+    from .media_marks import MarkLayers
+
+    return MarkLayers(
+        evidence=[*container.evidence, *marks.evidence],
+        coverage=[*container.coverage, *marks.coverage],
+        limitations=[*marks.limitations, *container.limitations],
+        findings=[*marks.findings, *container.findings],
+    )
+
+
 def _mark_layers(file_path: Path, modality: str, extra: "MarkLayers | None" = None) -> DeepLayers:
     """techniques-2026: the machine-readable-mark checks of a non-image file — C2PA, then the watermark decoders.
 
@@ -1404,6 +1452,11 @@ def _mark_layers(file_path: Path, modality: str, extra: "MarkLayers | None" = No
             evidence=[*marks.evidence, *extra.evidence], coverage=[*marks.coverage, *extra.coverage],
             limitations=list(dict.fromkeys([*marks.limitations, *extra.limitations])), findings=[*marks.findings, *extra.findings],
         )
+    if modality in ("audio", "video"):
+        # P0R-22 (threat G2): the container/bitstream metadata check of audio and video files.
+        from .container_metadata import media_layers
+
+        marks = _with_container(marks, media_layers(file_path))
     layers = _marking(modality, validation, entry, marks)
     return DeepLayers(
         evidence=[*c2pa_evidence(validation), *layers.evidence], coverage=[entry, *layers.coverage],
@@ -1724,9 +1777,15 @@ def _analyze_image_file(
     coverage.extend(deep.coverage)
     # techniques-2026 items 3–6: watermark decoders (run on every image — a mark is a fact whatever the
     # image class) and the marking context.
+    from .container_metadata import image_aigc_layers
     from .media_marks import image_mark_layers
 
-    marks = _marking("image", c2pa_validation, c2pa_entry, image_mark_layers(file_path, c2pa_validation))
+    # P0R-22: the GB 45438 AIGC label in the image's PNG text chunks / XMP (container_metadata check).
+    aigc = image_aigc_layers(
+        metadata, metadata_read.image_format if metadata_read is not None else None, read_error,
+        metadata_read.partial if metadata_read is not None else None,
+    )
+    marks = _marking("image", c2pa_validation, c2pa_entry, _with_container(image_mark_layers(file_path, c2pa_validation), aigc))
     coverage.extend(marks.coverage)
     # TB-4: platform / messenger traces (JPEG recompression tables, file-name formats) — facts only.
     from .platform_traces import image_trace_layers
@@ -1923,6 +1982,11 @@ def _analyze_video_file(
     return _video_result(analysis, coverage=coverage, deep=deep, probability_thresholds=profile_probability_thresholds(model_path))  # G8
 
 
+# P0R-23: the video row's source guess names no check it did not run; the checks that look for provenance marks
+# (container_metadata, c2pa, watermark_*) report themselves in coverage and evidence.
+VIDEO_SOURCE_NOT_GUESSED = "영상 출처는 추정하지 않습니다 — 확인한 표식(컨테이너 메타데이터·C2PA·워터마크)의 결과는 근거 항목과 검사 범위에 있습니다."
+
+
 def _video_result(
     analysis: VideoTemporalAnalysis,
     *,
@@ -1951,8 +2015,11 @@ def _video_result(
     ]
     reference.extend(deep.reference)
     has_detail = analysis.frame_count > 0 and analysis.duration_seconds > 0
+    # P0R-23: this said container metadata held "no source clue" ("출처 단서를 찾지 못함") although no container check
+    # existed (a check never run, stated as "not found"). The container_metadata check (P0R-22) records what it read
+    # as coverage and evidence; the source guess only points there.
     source_guess = SourceGuess.unknown(
-        "영상 파일의 컨테이너 메타데이터에서 출처 단서를 찾지 못했습니다."
+        VIDEO_SOURCE_NOT_GUESSED
         if has_detail
         else "영상 분석이 불완전해 출처를 판단할 단서가 없습니다."
     )
@@ -2399,7 +2466,7 @@ def analyze_image_metadata(
             coverage.append(CoverageEntry("pixel", CoverageStatus.RAN) if pixel_analysis.available else skipped("pixel", "픽셀 분석 불가"))
         coverage.extend(_default_model_coverage(model_analysis))
 
-    limitations = ["결론은 메타데이터·출처 기록 같은 결정적 근거로만 내립니다. 통계·휴리스틱 신호는 보정 전까지 결론에 참여하지 않습니다."]
+    limitations = ["결론은 메타데이터·출처 기록 같은 재현 가능한 기록 근거로만 내립니다. 통계·휴리스틱 신호는 보정 전까지 결론에 참여하지 않습니다."]
     subject = "이미지"
     if image_class is not None and not image_class.is_photo:
         notice = NON_PHOTO_NOTICE if image_class.kind != "too_small" else OUT_OF_RANGE_NOTICE
@@ -2481,7 +2548,9 @@ def _verdict_text(
             ),
             None,
         )
-        return f"{subject}: {VERDICT_LABELS[verdict]} — {basis.title if basis else '근거 목록 참조'}."
+        # P0R-12: a conclusion resting on self-declared metadata says so in the verdict sentence itself
+        declared = f"({SELF_DECLARED_NOTE})" if basis is not None and basis.self_declared else ""
+        return f"{subject}: {VERDICT_LABELS[verdict]} — {basis.title if basis else '근거 목록 참조'}{declared}."
     if verdict == Verdict.AUTHENTICITY_EVIDENCE:
         basis = next((item for item in evidence if item.direction == EvidenceDirection.AUTHENTIC and item.strength == EvidenceStrength.STRONG), None)
         return f"{subject}: {VERDICT_LABELS[verdict]} — {basis.title if basis else '근거 목록 참조'}."
@@ -2496,7 +2565,7 @@ def _verdict_text(
     if failed_entries:
         names = ", ".join(check_label(entry.check) for entry in failed_entries)
         return f"{subject}: 판단 불가 — 검사 실패({names})로 결론을 내리지 않습니다."
-    return f"{subject}: 판단 불가 — 결론을 뒷받침할 결정적 근거나 보정된 모델 근거가 없습니다. 원본이라는 뜻이 아닙니다."
+    return f"{subject}: 판단 불가 — 결론을 뒷받침할 재현 가능한 기록 근거나 보정된 모델 근거가 없습니다. 원본이라는 뜻이 아닙니다."
 
 
 def build_classification_result(
@@ -2565,6 +2634,7 @@ def build_classification_result(
         score_is_calibrated=probability is not None,
         reference_signals=list(reference_signals or []),
         marking_context=marking_context,
+        conclusion_caveats=conclusion_caveats(verdict_code, ordered),  # P0R-12
     )
 
 

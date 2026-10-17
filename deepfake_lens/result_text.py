@@ -38,8 +38,22 @@ KIND_ORDER = (EvidenceKind.DETERMINISTIC, EvidenceKind.STATISTICAL, EvidenceKind
 
 
 def verdict_heading(result: ClassificationResult) -> str:
-    """e.g. "조작·생성 근거 있음 [감정 근거로 사용 가능]"."""
-    return f"{VERDICT_LABELS[result.verdict_code]} [{result.grade_label}]"
+    """e.g. "조작·생성 근거 있음 [감정 근거로 사용 가능]"; "판단 불가" alone (P0R-13), "판단 불가 [참고]" for text."""
+    label = shown_grade_label(result)
+    return f"{VERDICT_LABELS[result.verdict_code]} [{label}]" if label else VERDICT_LABELS[result.verdict_code]
+
+
+def shown_grade_label(result: ClassificationResult) -> str:
+    """P0R-13 (review §1.3, U-2): the grade label a rendering shows — none for an evidence-grade 판단 불가 row.
+
+    "감정 근거로 사용 가능" next to "판단 불가" read as "an undetermined row is usable as evidence"; the JSON keeps
+    ``grade`` / ``grade_label`` unchanged.
+    """
+    from .result_types import Grade, Verdict
+
+    if result.grade == Grade.EVIDENCE and result.verdict_code == Verdict.UNDETERMINED:
+        return ""
+    return result.grade_label
 
 
 def evidence_line(item: EvidenceItem) -> str:
@@ -139,7 +153,7 @@ def summary_line(summary: BatchScanSummary) -> str:
 # report): "[결정적/합성/강]". Keyed by the JSON values so rows read back
 # from a report body render the same as live results.
 EVIDENCE_KIND_SHORT = {
-    EvidenceKind.DETERMINISTIC.value: "결정적",
+    EvidenceKind.DETERMINISTIC.value: "기록",  # P0R-13: was "결정적" (reproducible record, not "unforgeable")
     EvidenceKind.STATISTICAL.value: "통계적",
     EvidenceKind.LEXICAL.value: "어휘적",
 }
@@ -225,6 +239,81 @@ def unescape_row_path(path: str) -> str:
     return "".join(out)
 
 
+# R26-1 (round 26): an archive member's ``member`` is a chain of segments — its path inside the archive, then
+# (for a member of a nested archive) its path inside that archive, … — joined by "::". R25-6 made ":" an
+# ordinary character of a member name on POSIX, so a member literally named "inner.zip::b.png" and the
+# member "b.png" of the nested archive "inner.zip" were both the chain "inner.zip::b.png": two rows with one
+# identity, the server's re-analysis kept one of them, and an honest report was refused while a report
+# without the generator member signed 「없음」. Each segment is now escaped so the join is injective by
+# construction: a segment that holds "::" or "\" or starts or ends with ":" (the forms that could make a
+# separator ambiguous) is written character by character — every "\" as "\\", every ":" as "\:" (the
+# top-level row escape of R9-1, :func:`escape_row_path`); any other segment ("c:v.png", "dir/x.png") is
+# unchanged. :func:`split_member_chain` is the exact inverse: scanning left to right, "\\" and "\:" are
+# escapes, an unescaped "::" is the separator, and everything else is literal. An unescaped segment has no
+# "\", no "::" and no ":" at either end, and an escaped one has no unescaped ":" at all, so no separator can
+# be read inside a segment or across a boundary.
+
+
+def _member_segment_needs_escape(segment: str) -> bool:
+    return (
+        ARCHIVE_MEMBER_SEPARATOR in segment or "\\" in segment
+        or segment.startswith(":") or segment.endswith(":")
+    )
+
+
+def escape_member_segment(segment: str) -> str:
+    """R26-1: one segment of a member chain (a path inside one archive level) in its injective form."""
+    if not _member_segment_needs_escape(segment):
+        return segment
+    return segment.replace("\\", "\\\\").replace(":", "\\:")
+
+
+def member_chain(segments: list[str] | tuple[str, ...]) -> str:
+    """R26-1: the ``member`` of an archive member row from its raw segments (outermost archive first)."""
+    if not segments:
+        raise ValueError("빈 구성원 경로")
+    return ARCHIVE_MEMBER_SEPARATOR.join(escape_member_segment(segment) for segment in segments)
+
+
+def split_member_chain(member: str) -> list[str]:
+    """R26-1: the raw segments of a member chain (inverse of :func:`member_chain`).
+
+    Raises ``ValueError`` for a text :func:`member_chain` never writes — an empty segment, a "\\" that
+    escapes nothing, or a segment written in another form than its canonical one.
+    """
+    segments: list[str] = []
+    current: list[str] = []
+    index = 0
+    while index < len(member):
+        char = member[index]
+        if char == "\\":
+            if index + 1 >= len(member) or member[index + 1] not in "\\:":
+                raise ValueError(f"구성원 경로의 이스케이프가 올바르지 않습니다: {member!r}")
+            current.append(member[index + 1])
+            index += 2
+            continue
+        if member.startswith(ARCHIVE_MEMBER_SEPARATOR, index):
+            segments.append("".join(current))
+            current = []
+            index += len(ARCHIVE_MEMBER_SEPARATOR)
+            continue
+        current.append(char)
+        index += 1
+    segments.append("".join(current))
+    if any(not segment for segment in segments) or member_chain(segments) != member:
+        raise ValueError(f"구성원 경로가 정규 형식이 아닙니다: {member!r}")
+    return segments
+
+
+def is_canonical_member_chain(member: str) -> bool:
+    """R26-1: whether ``member`` is a chain :func:`member_chain` writes (it round-trips)."""
+    try:
+        split_member_chain(member)
+    except ValueError:
+        return False
+    return True
+
+
 def member_row_path(container: str, member: str) -> str:
     """The display path of an archive member row: "<container row path>::<member>" (display only)."""
     return f"{container}{ARCHIVE_MEMBER_SEPARATOR}{member}"
@@ -249,6 +338,62 @@ def row_identity(item: object) -> tuple[str, str | None]:
 def is_member_row(item: object) -> bool:
     """P7/R9-1: an archive member row — by its ``member`` field, never by a "::" in the path."""
     return row_identity(item)[1] is not None
+
+
+# R26-8 (round 26): the scan-stage invariant of row identities. A signed web report is "the server's own rows =
+# the signed rows"; R26-1 showed that this rests on the server's identities being injective, which nothing checked.
+ROW_IDENTITY_INVARIANT_BROKEN = (
+    "행 식별자 불변식 위반 — {detail}. 같은 식별자의 행이 둘 이상이거나 식별자가 경로와 구성원 사슬로 되돌아가지 않으면 "
+    "어느 행이 어느 파일인지 확정할 수 없으므로 이 검사 결과를 내지 않습니다(판단 불가)"
+)
+
+
+class RowIdentityError(RuntimeError):
+    """R26-8: a scan result whose row identities are not unique or do not round-trip (the scan fails closed)."""
+
+
+def row_identity_problem(items: object) -> str | None:
+    """R26-8 (round 26): why the rows of one scan result do not have injective, round-tripping identities, or None.
+
+    Every row's identity (:func:`row_identity`) must be unique; a top-level row path must be the escape of its
+    own unescaped form (:func:`escape_row_path` ∘ :func:`unescape_row_path`); a member row's ``member`` must be
+    a canonical chain (:func:`split_member_chain` → :func:`member_chain` gives it back), its ``path`` the display
+    join :func:`member_row_path`, and its container a top-level row of the same result.
+    """
+    def get(item: object, name: str) -> object:
+        return item.get(name) if isinstance(item, dict) else getattr(item, name, None)
+
+    rows = list(items) if isinstance(items, (list, tuple)) else []
+    seen: set[tuple[str, str | None]] = set()
+    tops: set[str] = set()
+    containers: set[str] = set()
+    for item in rows:
+        top, member = row_identity(item)
+        shown = repr(top if member is None else member_row_path(top, member))[:200]
+        if escape_row_path(unescape_row_path(top)) != top:
+            return f"경로 {shown}가 정규 행 경로가 아님"
+        if member is not None:
+            if not is_canonical_member_chain(member):
+                return f"구성원 {shown}의 사슬이 정규 형식이 아님"
+            if get(item, "path") != member_row_path(top, member):
+                return f"구성원 {shown}의 path가 container::member와 다름"
+            containers.add(top)
+        else:
+            tops.add(top)
+        if (top, member) in seen:
+            return f"식별자 {shown}의 행이 둘 이상"
+        seen.add((top, member))
+    orphans = sorted(containers - tops)
+    if orphans:
+        return f"구성원 행의 압축 파일 {repr(orphans[0])[:200]}에 컨테이너 행이 없음"
+    return None
+
+
+def check_row_identities(items: object) -> None:
+    """R26-8: raise :class:`RowIdentityError` unless :func:`row_identity_problem` finds nothing."""
+    problem = row_identity_problem(items)
+    if problem is not None:
+        raise RowIdentityError(ROW_IDENTITY_INVARIANT_BROKEN.format(detail=problem))
 
 
 # R10-1 (round 10): a file name is attacker-controlled text. Printed raw, a
@@ -417,7 +562,34 @@ def pdf_field_text(text: object) -> str:
     same text (an LV+T "한" and an L+V+T "한"), so the PDF could no longer name the exact value the signed body
     holds. The Markdown and JSON keep the value as typed.
     """
-    return display_name(text, escape_pipe=False)
+    return pdf_text_from_markdown(display_name(text))
+
+
+def pdf_text_from_markdown(text: object) -> str:
+    """R26-6 (round 26): text in :func:`display_name`'s form as a PDF prints it — every "\\|" escape as "|".
+
+    c700e85 printed the case fields' "|" as typed (:func:`pdf_field_text`) but file and folder names went through
+    :func:`display_name` (a Markdown table form), so one PDF printed "x|y" for a case field and "fx\\|y.png" for a
+    file name. :class:`pdf_layout.PdfLayout` applies this to every string it lays out, so a PDF has one form. The
+    mapping is injective on display_name's output — read left to right every "\\" starts a two-character escape, so
+    "\\|" is the escaped pipe and "\\\\|" a literal backslash then a pipe ("\\\\" stays) — and it leaves text already
+    in this form unchanged (it has no "\\|" escape), so it can be applied again.
+    """
+    raw = str(text)
+    if "\\|" not in raw:
+        return raw
+    out: list[str] = []
+    index = 0
+    while index < len(raw):
+        char = raw[index]
+        if char == "\\" and index + 1 < len(raw):
+            following = raw[index + 1]
+            out.append("|" if following == "|" else char + following)
+            index += 2
+            continue
+        out.append(char)
+        index += 1
+    return "".join(out)
 
 
 # R11-7 (round 11): a name such as "![t](https://evil/t.png)" or
