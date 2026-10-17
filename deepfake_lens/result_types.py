@@ -329,7 +329,7 @@ CHECK_LABELS = {
     "archive_member_name": "압축 구성 파일 이름 구분",  # R13-6
     "file_integrity": "분석 전후 파일 동일성",
     # techniques-2026: machine-readable mark checks.
-    "watermark_sdxl": "SDXL 워터마크(imwatermark) 검사",
+    "watermark_sdxl": "imwatermark 고정 메시지 워터마크 검사(SDXL·FLUX.1·SD 1/2)",
     "watermark_trustmark": "TrustMark 워터마크 검사",
     "watermark_videoseal": "VideoSeal 워터마크 검사",
     "watermark_audioseal": "AudioSeal 워터마크 검사",

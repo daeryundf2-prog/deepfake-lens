@@ -8,9 +8,10 @@ false-positive rate the findings quote), with a 95% Clopper–Pearson upper
 bound, and — where an embedder is available — how often a mark embedded into
 the same files is read back exactly (recall on lossless copies):
 
-- ``sdxl``: exact 48/48 match with the registered SDXL message (FPR); recall
-  after embedding the message with the dwtDct encoder (wm_imwatermark) and a
-  lossless PNG round trip;
+- ``sdxl``: exact match with any registered imwatermark message (FPR; TB-8:
+  SDXL, FLUX.1 reference, SD 1 / SD 2 scripts); recall per message after
+  embedding it with the dwtDct encoder (wm_imwatermark) and a lossless PNG
+  round trip;
 - ``trustmark``: BCH-valid packet per variant Q/P/C (FPR), per schema;
   ``--trustmark-encoders DIR`` (encoder_<V>.onnx from the same host) adds
   recall for a random BCH_4 payload;
@@ -74,14 +75,17 @@ def _photos(folder: Path) -> list[Path]:
 
 
 def measure_sdxl(photos: list[Path], scratch: Path) -> dict[str, object]:
+    """FPR: an exact match with ANY registered imwatermark message; recall per registered message (TB-8: all entries)."""
     from PIL import Image
 
     from deepfake_lens.media_marks import load_registry, sdxl_check
     from deepfake_lens.checks import CheckSkipped
     from deepfake_lens.wm_imwatermark import encode_array_for_tests, load_rgb
 
-    bits = load_registry().for_algorithm("imwatermark-dwtDct")[0]["message_bits"]
-    false_matches = skipped = recalled = embedded = 0
+    entries = load_registry().for_algorithm("imwatermark-dwtDct")
+    false_matches = skipped = 0
+    recalled = {str(e["id"]): 0 for e in entries}
+    embedded = 0
     for photo in photos:
         try:
             outcome = sdxl_check(photo)
@@ -89,15 +93,17 @@ def measure_sdxl(photos: list[Path], scratch: Path) -> dict[str, object]:
             skipped += 1
             continue
         false_matches += bool(outcome.matched)
-        marked = scratch / (photo.stem + "-sdxl.png")
-        Image.fromarray(encode_array_for_tests(load_rgb(photo), bits)).save(marked)
         embedded += 1
-        recalled += bool(sdxl_check(marked).matched)
-        marked.unlink()
+        for entry in entries:
+            marked = scratch / (photo.stem + "-imwm.png")
+            Image.fromarray(encode_array_for_tests(load_rgb(photo), str(entry["message_bits"]))).save(marked)
+            result = sdxl_check(marked)
+            recalled[str(entry["id"])] += bool(result.matched and result.entry is not None and result.entry.get("id") == entry["id"])
+            marked.unlink()
     n = len(photos) - skipped
-    return {"n": n, "skipped": skipped, "false_matches": false_matches, "fpr": false_matches / n if n else None,
-            "fpr_upper95": clopper_pearson_upper(false_matches, n), "recall_lossless": recalled / embedded if embedded else None,
-            "recall_n": embedded}
+    return {"n": n, "skipped": skipped, "registered_messages": len(entries), "false_matches": false_matches,
+            "fpr": false_matches / n if n else None, "fpr_upper95": clopper_pearson_upper(false_matches, n),
+            "recall_lossless": {key: (value / embedded if embedded else None) for key, value in recalled.items()}, "recall_n": embedded}
 
 
 def measure_trustmark(photos: list[Path], encoders: Path | None) -> dict[str, object]:

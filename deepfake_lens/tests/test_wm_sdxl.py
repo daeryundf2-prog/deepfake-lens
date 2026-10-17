@@ -50,7 +50,8 @@ class SdxlWatermarkTest(unittest.TestCase):
     def test_registry_holds_the_sdxl_message(self) -> None:
         from deepfake_lens.media_marks import load_registry
 
-        [entry] = load_registry().for_algorithm("imwatermark-dwtDct")
+        # TB-8: the algorithm now has more registered messages (FLUX.1, SD 1/2); the SDXL entry is unchanged.
+        [entry] = [e for e in load_registry().for_algorithm("imwatermark-dwtDct") if e["id"] == "sdxl-imwatermark-dwtdct-48"]
         self.assertEqual(entry["message_bits"], SDXL_BITS)
         self.assertEqual(int(SDXL_BITS, 2), 0b101100111110110010010000011110111011000110011110)
 

@@ -894,7 +894,10 @@ CACHE_KEY_VERSION = "content-v5"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 24: TB-7 — generator strings move to models/generator-strings.json (phase-0 rules unchanged + sourced additions:
 #    FLUX.2 "AI generated;flux2", Dreamina/Seedream/Seedance, Luma, Amazon Nova, Azure OpenAI/Designer, Apple Image
 #    Playground); a C2PA manifest's signer / claim generator is named as the neutral item "C2PA 서명자·생성기 이름".
-OUTPUT_FORMAT_GENERATION = 24
+# 25: TB-8 — watermark_sdxl also matches the registered fixed messages of the FLUX.1 reference code (46 bits) and the
+#    SD 1 / SD 2 official scripts (136 / 32 bits); each match is titled by its pipeline; the no-match reason and the
+#    check label name the registered set (registry 2026-10-17.2).
+OUTPUT_FORMAT_GENERATION = 25
 
 
 def cache_extension(path: Path) -> str:

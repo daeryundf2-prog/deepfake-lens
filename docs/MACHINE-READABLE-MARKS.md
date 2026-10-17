@@ -68,7 +68,7 @@ IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "�
 - 메시지: `0b101100111110110010010000011110111011000110011110`(48비트, diffusers `StableDiffusionXLWatermarker`와 Stability 참조 구현이 같은 값 —
   출처·조회일은 `models/watermark-registry.json`). 문서화된 BGR 순서와 R·B를 바꾼 순서를 모두 시험한다.
 - **근거**: 48/48 정확 일치일 때만 결정적·생성·강 「SDXL 공식 파이프라인 워터마크 존재」. 메시지가 공개라 흉내 낼 수 있으므로 생성 도구
-  메타데이터와 같은 급이다. 불일치는 무정보(coverage `ran` 「48비트 정확 일치 없음 — 무정보(워터마크 부재를 뜻하지 않음)」).
+  메타데이터와 같은 급이다. 불일치는 무정보(coverage `ran` 「등록 고정 메시지 N개와 정확 일치 없음 — 무정보(워터마크 부재를 뜻하지 않음)」 — TB-8에서 문구 변경, §9).
 - 범위 밖: 짧은 변 256px 미만(SDXL 워터마커가 표식을 넣지 않음) → `skipped`; 8천만 화소 초과 → `skipped`.
 - 측정: 실사 240장 우연 일치 0건(95% 상한 1.5%), 무손실 재검출률 29.6% — `docs/WATERMARK-MEASUREMENTS.md`.
 
@@ -165,3 +165,21 @@ IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "�
 - 측정(2026-10-17, `docs/WATERMARK-MEASUREMENTS.md`): LibriSpeech dev-clean 240개에서 0.5 이상 3건(1.25%, 95% 상한 3.6%, 최대 0.780), 0.9 이상 0건;
   같은 240개에 패키지로 표식을 넣고 16비트로 저장하면 최소 0.922(240/240).
 - 게이트 이미지 `deepfake-lens-gate:tech2`(`scripts/gate/Dockerfile.tech2`, `:tech` 위에 가중치만 추가 — 휠·파일 sha256 확인).
+
+## 9. 공개 파이프라인의 고정 워터마크 확인 (techniques-2026b TB-8 — O-FLUX2, O-SDXL-FAMILY)
+
+2026-10-17, 소스 코드에서 직접 확인(커밋 고정). `watermark-registry.json` 판 `2026-10-17.2`에 들어간 것만 판정에 쓰인다(정확 일치 → 결정적·생성·강, 제목은 항목별).
+
+| 파이프라인 | 저장소@커밋 · 파일 | 메시지 | 기본 적용 | 등록 |
+| --- | --- | --- | --- | --- |
+| SDXL 계열 | Stability-AI/generative-models@e8cd6576 `sgm/inference/helpers.py` L54-58; diffusers@b800f828 SDXL 파이프라인 18개 | 48비트 `0xB3EC907BB19E` | 저장 경로 전부 / diffusers는 invisible-watermark 설치 시 | 기존 |
+| FLUX.1 참조 구현 | black-forest-labs/flux@802fb471 `src/flux/util.py` L733-774, `save_image()` L258 | `0b0010…101110` — `bin()[2:]`가 앞의 0 두 개를 버려 **46비트** | 예(끌 수 없음, 모든 CLI·데모) | 추가 |
+| SD 1.x txt2img | CompVis/stable-diffusion@21f890f9 `scripts/txt2img.py` L69-73 | 바이트 「StableDiffusionV1」(136비트, MSB 먼저 — imwatermark `bytes`=`numpy.unpackbits`, tech 이미지에서 확인) | 예(txt2img만) | 추가 |
+| SD 2.x 스크립트 | Stability-AI/stablediffusion@f16630a9(GitHub 404, Software Heritage 보관본) `scripts/txt2img.py` L206-209 등 4개 | 바이트 「SDV2」(32비트) | 예 | 추가 |
+| **FLUX.2** | black-forest-labs/flux2@50fe5162 `src/flux2/watermark.py`에 FLUX.1과 같은 상수가 있으나 `scripts/cli.py` L27 가져오기·L618 호출이 주석 처리 | — | **확인: 기본 워터마크 없음**(대신 EXIF `Software`=「AI generated;flux2」, TB-7) | 없음 |
+| FLUX.3 klein | black-forest-labs/flux-3-image-klein@e53f4ea6 — EXIF만(`src/flux3/safety.py` L121-124) | — | 확인: 기본 워터마크 없음 | 없음 |
+| SD 3.5 / Stable Cascade / diffusers의 flux·flux2·flux3·sd3·cascade·kandinsky·wuerstchen·pixart·aura_flow·hunyuandit·qwenimage·z_image·kolors·sana, Kandinsky-2/3, Qwen-Image, Z-Image, PixArt-sigma, HunyuanDiT 원 저장소 | 커밋은 등록표 `no_default_watermark` | — | 확인: 기본 워터마크 없음 | 없음 |
+
+- DeepFloyd IF는 보이는 로고를 붙인다(비가시 메시지 아님 — 범위 밖).
+- 32비트(SD 2) 메시지는 균일 비트 모형에서 우연 일치 확률이 이미지당 2×2⁻³²로 48비트보다 높다. 측정값은 `docs/WATERMARK-MEASUREMENTS.md`.
+- 테스트 `test_imwatermark_registry.py`(상수 재현·항목별 제목·n/n 일치).

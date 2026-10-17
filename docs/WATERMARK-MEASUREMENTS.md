@@ -50,6 +50,12 @@
 - 재현: `scripts/measure_watermark_fpr.py --photos … --only videoseal`, `--audio <폴더> --only audioseal`(오탐). 재검출 측정은 공개 임베더가
   필요해 이 저장소의 분석 경로 밖에서 했다(VideoSeal TorchScript의 `embed`, AudioSeal 생성기 — 같은 MIT 체크포인트).
 
+## imwatermark 고정 메시지 4개 (TB-8, 2026-10-17, deepfake-lens-gate:latest)
+
+같은 실사 사진 240장(세트 sha256 `79078a09…`, 위와 같음)에서 등록 메시지 4개(SDXL 48비트, FLUX.1 참조 구현 46비트, SD 1 136비트, SD 2 32비트) 중 **어느 것과도**
+정확 일치한 사진 0장(95% 상한 1.5%). 메시지별 무손실 재검출률(메시지를 넣고 PNG로 저장): SDXL 29.6%, FLUX.1 33.8%, SD 1 22.5%, SD 2 27.5% —
+불일치는 무정보라는 규칙 그대로다. 재현: `scripts/measure_watermark_fpr.py --photos … --only sdxl`(이제 등록 메시지 전부를 잰다).
+
 ## Resemble AI PerTh (TB-2, 2026-10-17, deepfake-lens-gate:tech2 — linux aarch64, torch 2.14.1)
 
 | 디코더 | 세트 | 결과 |

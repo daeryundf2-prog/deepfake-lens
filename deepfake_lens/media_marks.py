@@ -118,7 +118,7 @@ class MarkLayers:
 
 # --- SDXL imwatermark (item 3) --------------------------------------------------
 
-SDXL_ALGORITHM_LABEL = "imwatermark dwtDct(SDXL 고정 48비트 메시지)"
+SDXL_ALGORITHM_LABEL = "imwatermark dwtDct(등록된 고정 메시지: SDXL·FLUX.1 참조 구현·SD 1/2 공식 스크립트)"
 SDXL_FOUND_TITLE = "SDXL 공식 파이프라인 워터마크 존재"
 
 
@@ -144,7 +144,7 @@ def sdxl_check(path: Path) -> SdxlOutcome:
     rgb = load_rgb(path)
     height, width = int(rgb.shape[0]), int(rgb.shape[1])
     if min(width, height) < MIN_SIDE:
-        raise CheckSkipped(f"측정 범위 밖: 해상도 {width}x{height} — SDXL 워터마커는 {MIN_SIDE}px 미만 이미지에 표식을 넣지 않음")
+        raise CheckSkipped(f"측정 범위 밖: 해상도 {width}x{height} — SDXL 워터마커는 {MIN_SIDE}px 미만 이미지에 표식을 넣지 않음(다른 등록 파이프라인의 기본 출력도 그 이상)")
     if width * height > MAX_PIXELS:
         raise CheckSkipped(f"측정 범위 밖: 해상도 {width}x{height}(화소 {MAX_PIXELS:,}개 초과)")
     lengths = sorted({len(str(entry.get("message_bits", ""))) for entry in entries})
@@ -165,10 +165,12 @@ def sdxl_evidence(outcome: SdxlOutcome) -> list[EvidenceItem]:
     if not outcome.matched or outcome.entry is None:
         return []
     order = "문서화된 BGR 순서" if outcome.matched == "BGR" else "R·B 채널을 바꾼 순서(RGB 배열을 그대로 넘긴 파이프라인)"
+    n = len(str(outcome.entry.get("message_bits", "")))
+    # TB-8: every registered fixed message names its own pipeline (the SDXL entry keeps its phase title).
     return [EvidenceItem(
-        SDXL_FOUND_TITLE,
-        f"imwatermark dwtDct로 읽은 48비트가 등록된 메시지({outcome.entry.get('id')}: {outcome.entry.get('generator')})와 "
-        f"48/48 정확히 일치합니다({order}, {outcome.width}x{outcome.height}). 메시지는 공개되어 있어 같은 라이브러리로 흉내 낼 수 있으므로 "
+        str(outcome.entry.get("title") or SDXL_FOUND_TITLE),
+        f"imwatermark dwtDct로 읽은 {n}비트가 등록된 메시지({outcome.entry.get('id')}: {outcome.entry.get('generator')})와 "
+        f"{n}/{n} 정확히 일치합니다({order}, {outcome.width}x{outcome.height}). 메시지는 공개되어 있어 같은 라이브러리로 흉내 낼 수 있으므로 "
         f"생성 도구 메타데이터와 같은 수준의 근거입니다. 기준: {outcome.registry.label}.",
         EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, WATERMARK_LAYER,
     )]
@@ -181,9 +183,11 @@ def _sdxl_layer(path: Path, layers: MarkLayers) -> None:
     if outcome is not None:
         if outcome.matched:
             entry = CoverageEntry(SDXL_CHECK, CoverageStatus.RAN, f"등록 메시지 정확 일치({outcome.registry.label})")
-            layers.findings.append(MarkFinding(SDXL_CHECK, SDXL_ALGORITHM_LABEL, "found", "SDXL 고정 메시지 48/48 일치"))
+            bits_n = len(str((outcome.entry or {}).get("message_bits", "")))
+            layers.findings.append(MarkFinding(SDXL_CHECK, SDXL_ALGORITHM_LABEL, "found", f"{(outcome.entry or {}).get('generator')} 고정 메시지 {bits_n}/{bits_n} 일치"))
         else:
-            entry = CoverageEntry(SDXL_CHECK, CoverageStatus.RAN, f"48비트 정확 일치 없음 — {NO_INFORMATION}")
+            known = len(outcome.registry.for_algorithm("imwatermark-dwtDct"))
+            entry = CoverageEntry(SDXL_CHECK, CoverageStatus.RAN, f"등록 고정 메시지 {known}개와 정확 일치 없음 — {NO_INFORMATION}")
             layers.findings.append(MarkFinding(SDXL_CHECK, SDXL_ALGORITHM_LABEL, "not_found", NO_INFORMATION))
         layers.evidence.extend(sdxl_evidence(outcome))
     else:

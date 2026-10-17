@@ -26,6 +26,9 @@ grouped by work pass rather than release.
   Luma, Amazon Nova, Azure OpenAI/Designer, Apple Image Playground) and C2PA signer / claim-generator names (OpenAI,
   Adobe Firefly, Google, BFL, Stability, ElevenLabs, Runway, Luma, Amazon, Microsoft, ByteDance/BytePlus) shown as
   the neutral item 「C2PA 서명자·생성기 이름(등록표 대조)」. Strength rules unchanged.
+- TB-8: `watermark_sdxl` also recognises the fixed imwatermark messages the FLUX.1 reference code (46 bits) and the
+  SD 1 / SD 2 official scripts (`StableDiffusionV1`, `SDV2`) embed by default (verified in source at pinned commits);
+  FLUX.2, FLUX.3 klein, SD 3.5, Stable Cascade and the diffusers non-SDXL pipelines: 확인: 기본 워터마크 없음.
 - TB-6: `document_structure` — PDF revisions / incremental saves, bytes after a signature's `/ByteRange`, producer and
   creator history, `application/c2pa` embedding; DOCX/XLSX/PPTX revision, application, editing time, `w:rsid` count,
   tracked changes (self-declared facts). See `docs/FACT-LAYERS.md`.

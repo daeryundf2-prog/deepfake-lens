@@ -445,6 +445,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 25,
+      "reason": "TB-8: imwatermark registry adds FLUX.1 reference and SD 1/2 script messages; titles per pipeline",
+      "sha256": "dcad8b85eb815bfe3fa8a9086d984a0de645a1456ffab007528062db9fa9f755",
+      "sets": {
+        "stdlib": "dcad8b85eb815bfe3fa8a9086d984a0de645a1456ffab007528062db9fa9f755",
+        "full-extras": "9ef7afb0f14f4007c6d8afd16901d9aa0ba713a2aa879fbf2cf41862020e3e0d"
+      },
+      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }
