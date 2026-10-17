@@ -8,7 +8,10 @@ probability at or above the profile threshold.
 
 1. grade == reference                                   -> undetermined
 2. any deterministic + synthetic + strong item          -> manipulation_evidence
-   (kept even when some check failed; the failure stays in coverage)
+   (kept even when some check failed; the failure stays in coverage) —
+   P0R-10 (user decision 2026-10-17): unless a deterministic + authentic +
+   strong item is present too: the evidence conflicts                    -> undetermined
+   (reported as rule CONFLICT_RULE, "근거 충돌")
 3. any coverage entry with status failed                -> undetermined
 4. any calibrated statistical synthetic item whose
    probability >= its profile threshold (a calibration
@@ -46,6 +49,11 @@ def _threshold_for(item: EvidenceItem, thresholds: Mapping[str, float] | None) -
     return None
 
 
+# P0R-10: the number decide_with_rule reports for rule 2's exception — strong reproducible-record evidence in both
+# directions (e.g. a trusted C2PA camera signature and a planted generator field). Kept apart from 1-6 so the
+# numbers of the existing rules do not change.
+CONFLICT_RULE = 7
+
 # Korean description of each rule, for ``deepfake-lens explain`` (D1).
 RULE_DESCRIPTIONS = {
     1: "규칙 1 — 참고 등급 결과(텍스트 등)는 결론을 내리지 않습니다 → 판단 불가",
@@ -54,6 +62,7 @@ RULE_DESCRIPTIONS = {
     4: "규칙 4 — 보정·측정된 통계 근거가 임계값 이상입니다 → 조작·생성 근거 있음",
     5: "규칙 5 — 결정적·원본 방향·강함 근거가 있고 반대 방향 근거가 없습니다 → 원본성 근거 있음",
     6: "규칙 6 — 결론을 뒷받침할 근거가 없습니다 → 판단 불가",
+    CONFLICT_RULE: "규칙 2의 예외(근거 충돌) — 강한 생성·조작 근거와 강한 원본성 근거가 함께 있어 어느 쪽인지 정할 수 없습니다 → 판단 불가",
 }
 
 
@@ -81,13 +90,23 @@ def decide_with_rule(
     if grade == Grade.REFERENCE:
         return Verdict.UNDETERMINED, 1
 
-    # Rule 2 — strong deterministic synthetic evidence stands on its own.
-    if any(
+    # Rule 2 — strong deterministic synthetic evidence stands on its own, unless strong deterministic authentic
+    # evidence contradicts it (P0R-10: the conflict is undetermined — a planted field must not outvote a signature).
+    strong_synthetic = any(
         item.kind == EvidenceKind.DETERMINISTIC
         and item.direction == EvidenceDirection.SYNTHETIC
         and item.strength == EvidenceStrength.STRONG
         for item in items
-    ):
+    )
+    strong_authentic = any(
+        item.kind == EvidenceKind.DETERMINISTIC
+        and item.direction == EvidenceDirection.AUTHENTIC
+        and item.strength == EvidenceStrength.STRONG
+        for item in items
+    )
+    if strong_synthetic and strong_authentic:
+        return Verdict.UNDETERMINED, CONFLICT_RULE
+    if strong_synthetic:
         return Verdict.MANIPULATION_EVIDENCE, 2
 
     # Rule 3 — fail closed: a crashed check means we do not know.

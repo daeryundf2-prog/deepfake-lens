@@ -75,6 +75,8 @@
 5. deterministic+authentic+strong 근거가 있고, synthetic 방향 근거가 lexical을 제외하고 하나도 없으면 → authenticity_evidence.
 6. 그 외 → undetermined.
 
+(사용자 결정 2026-10-17, P0R-10: 규칙 2는 deterministic+authentic+strong 근거가 함께 있으면 발동하지 않는다 — 근거 충돌로 undetermined. `explain`은 이것을 "규칙 2의 예외(근거 충돌)"로 보고한다.)
+
 기존 신호의 분류 (core.py에서 EvidenceItem으로 변환):
 | 기존 신호 | kind | direction | strength |
 | C2PA 매니페스트 유효 + AI 도구 서명 | deterministic | synthetic | strong |

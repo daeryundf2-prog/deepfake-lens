@@ -179,7 +179,7 @@ class DerivedLegacyFieldsTest(unittest.TestCase):
         weights = {signal.title: signal.weight for signal in result.signals}
         self.assertGreater(weights["syn"], 0)
         self.assertEqual(weights["auth"], 0)
-        self.assertEqual(result.band_label, "조작·생성 근거 있음")
+        self.assertEqual(result.band_label, "판단 불가")  # P0R-10: strong authentic + strong synthetic is a conflict
 
     def test_failed_check_appears_in_limitations_and_verdict(self) -> None:
         result = self._result([], [CoverageEntry("c2pa", CoverageStatus.FAILED, "ValueError: bad box")])

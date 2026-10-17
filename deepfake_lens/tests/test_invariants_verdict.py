@@ -124,12 +124,27 @@ class DecisionRuleInvariantTest(unittest.TestCase):
         self.assertIn(with_them, {decide_with_rule(without, coverage, grade, profile)[0], Verdict.UNDETERMINED})
 
     @PROPERTY_SETTINGS
+    @given(st.lists(evidence_items(), max_size=8), st.lists(coverage_entries, max_size=5), grades, thresholds)
+    def test_strong_record_evidence_in_both_directions_never_concludes(self, items, coverage, grade, profile) -> None:
+        """P0R-10: a strong deterministic synthetic and a strong deterministic authentic item together are a conflict."""
+        both = [*items,
+                EvidenceItem("생성", "d", EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "metadata"),
+                EvidenceItem("서명", "d", EvidenceKind.DETERMINISTIC, EvidenceDirection.AUTHENTIC, EvidenceStrength.STRONG, "c2pa")]
+        verdict, _rule = decide_with_rule(both, coverage, grade, profile)
+        self.assertNotEqual(verdict, Verdict.AUTHENTICITY_EVIDENCE)
+        if verdict == Verdict.MANIPULATION_EVIDENCE:  # only a measured statistical item can still decide (rule 4)
+            self.assertEqual(_rule, 4)
+
+    @PROPERTY_SETTINGS
     @given(st.lists(evidence_items(), max_size=8), st.lists(coverage_entries, min_size=1, max_size=5), grades, thresholds)
     def test_a_failed_check_leaves_the_file_undetermined_unless_rule_2_decides(self, items, coverage, grade, profile) -> None:
         coverage = [*coverage, CoverageEntry("pixel", CoverageStatus.FAILED, "ValueError: x")]
         verdict, rule = decide_with_rule(items, coverage, grade, profile)
         if verdict != Verdict.UNDETERMINED:
             self.assertEqual((verdict, rule), (Verdict.MANIPULATION_EVIDENCE, 2))
+            self.assertFalse(any(  # P0R-10: rule 2 never fires against strong authenticity
+                i.kind == EvidenceKind.DETERMINISTIC and i.direction == EvidenceDirection.AUTHENTIC and i.strength == EvidenceStrength.STRONG
+                for i in items))
 
 
 # --- the scan path --------------------------------------------------------------------------------------------------

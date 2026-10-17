@@ -651,7 +651,8 @@ def evidence_conflicts(items: Iterable[EvidenceItem]) -> list[EvidenceItem]:
     signature) and a strong deterministic synthetic item (e.g. a
     self-declared XMP generator field) are both present, decision rule 2
     lets the synthetic one decide. This adds a neutral item that names both
-    so the examiner sees the contradiction; it does not change the rule.
+    so the examiner sees the contradiction. P0R-10: the decision honours it —
+    rule 2 does not fire when both are present (``decision.CONFLICT_RULE``).
     """
     listed = list(items)
     if any(item.title == EVIDENCE_CONFLICT_TITLE for item in listed):
@@ -664,7 +665,7 @@ def evidence_conflicts(items: Iterable[EvidenceItem]) -> list[EvidenceItem]:
     return [EvidenceItem(
         EVIDENCE_CONFLICT_TITLE,
         f"원본성 근거({', '.join(authentic)})와 생성·조작 근거({', '.join(synthetic)})가 같은 파일에 함께 있습니다. "
-        "현재 결정 규칙은 생성·조작 근거를 우선하므로 결론은 그쪽으로 정해지지만, 두 근거가 모순되므로 "
+        "두 근거가 모순되므로 결론을 내리지 않습니다(판단 불가 — 결정 규칙 2의 예외). "
         "어느 쪽이 위조·편집되었는지(서명 이후 메타데이터 추가 등) 별도로 확인해야 합니다.",
         EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "metadata",
     )]

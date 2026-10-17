@@ -452,7 +452,11 @@ Evaluated in order; the first that applies wins.
 
 1. `grade == reference` → `undetermined`.
 2. Any deterministic + synthetic + strong evidence → `manipulation_evidence`
-   (kept even if a check failed; the failure stays in `coverage`).
+   (kept even if a check failed; the failure stays in `coverage`) — P0R-10
+   (user decision 2026-10-17): unless deterministic + authentic + strong
+   evidence is present too → `undetermined` (근거 충돌; `explain` reports it as
+   rule 7, "규칙 2의 예외(근거 충돌)"), with the neutral item
+   `근거 충돌: 서명된 원본성 근거와 생성 근거가 함께 있음`.
 3. Any `failed` coverage entry → `undetermined`.
 4. Any calibrated statistical synthetic item with `probability ≥` its
    threshold → `manipulation_evidence`. (No profile is calibrated in phase 0.)

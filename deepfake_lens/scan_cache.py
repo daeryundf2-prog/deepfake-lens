@@ -877,7 +877,9 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 20: P0R-20/P0R-21 — a C2PA hard binding whose exclusions drop content fails the c2pa check ("C2PA 해시 제외범위
 #    이상 …") whatever the SDK's state; every C2PA basis text names the frozen Interim Trust List and says revocation
 #    is not checked; an ITL-only signer's declaration is a moderate "C2PA 서명(동결된 임시 신뢰 목록 ITL): …" item.
-OUTPUT_FORMAT_GENERATION = 20
+# 21: P0R-10 — rule 2 does not fire when strong deterministic authentic evidence is present too: such a row (a trusted
+#    C2PA camera signature + a planted generator field) is undetermined, and the conflict item says so.
+OUTPUT_FORMAT_GENERATION = 21
 
 
 def cache_extension(path: Path) -> str:
