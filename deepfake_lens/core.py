@@ -2005,10 +2005,20 @@ def _analyze_text_file(
         text_marks = text_mark_layers(text, source="분석한 본문")
     marks = _mark_layers(file_path, "text", text_marks)
     coverage.extend(marks.coverage)
+    structure_evidence: list[EvidenceItem] = []
+    structure_limitations: list[str] = []
+    if extension in SUPPORTED_DOCUMENT_EXTENSIONS:
+        # TB-6: document structure facts (PDF revisions / signature ranges / tool history, OOXML edit metadata).
+        from .document_structure import document_structure_layers
+
+        structure = document_structure_layers(file_path)
+        coverage.extend(structure.coverage)
+        structure_evidence, structure_limitations = structure.evidence, structure.limitations
     thresholds = profile_probability_thresholds(model_path)  # N1
     result = analyze_text(
         text, model_analysis=model_analysis, coverage=coverage, probability_thresholds=thresholds,
-        extra_evidence=marks.evidence, extra_limitations=marks.limitations, marking_context=marks.marking_context,
+        extra_evidence=[*marks.evidence, *structure_evidence], extra_limitations=[*marks.limitations, *structure_limitations],
+        marking_context=marks.marking_context,
     )
     return _apply_document_metadata(result, doc_metadata, probability_thresholds=thresholds)
 

@@ -10,6 +10,9 @@ grouped by work pass rather than release.
 - TB-1: `text_invisible_marks` — Unicode tag strings (decoded), variation selectors used as data (bytes), zero-width
   characters, C2PA 2.3 text-manifest wrappers and 2.4 structured-text blocks (presence only — the bundled SDK does
   not validate them) in text and document rows, as neutral facts. See `docs/MACHINE-READABLE-MARKS.md` §7.
+- TB-6: `document_structure` — PDF revisions / incremental saves, bytes after a signature's `/ByteRange`, producer and
+  creator history, `application/c2pa` embedding; DOCX/XLSX/PPTX revision, application, editing time, `w:rsid` count,
+  tracked changes (self-declared facts). See `docs/FACT-LAYERS.md`.
 
 ## 2026-10 — techniques-2026 (machine-readable marks)
 

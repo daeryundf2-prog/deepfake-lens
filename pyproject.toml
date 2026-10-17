@@ -292,6 +292,8 @@ files = [
     # techniques-2026b (TB)
     "deepfake_lens/text_marks.py",
     "deepfake_lens/tests/test_text_marks.py",
+    "deepfake_lens/document_structure.py",
+    "deepfake_lens/tests/test_document_structure.py",
 ]
 follow_imports = "skip"
 ignore_missing_imports = true

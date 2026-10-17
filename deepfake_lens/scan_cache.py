@@ -865,7 +865,9 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 18: TB-1 (techniques-2026b) — text and document rows gain text_invisible_marks (Unicode tags, variation-selector
 #    data, zero-width characters, C2PA 2.3 text wrapper / 2.4 structured-text block presence) as neutral facts; the
 #    c2pa skip reason of .txt/.md says the signature is not validated (the wrapper's presence is the new check's).
-OUTPUT_FORMAT_GENERATION = 18
+# 19: TB-6 — document rows (pdf/docx/xlsx/pptx; hwp/doc/xls/ppt skipped) gain document_structure: PDF revisions,
+#    bytes after a signature's /ByteRange, tool history, application/c2pa embedding; OOXML edit metadata — facts.
+OUTPUT_FORMAT_GENERATION = 19
 
 
 def cache_extension(path: Path) -> str:

@@ -319,6 +319,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 19,
+      "reason": "TB-6: document_structure on document rows",
+      "sha256": "d0d660aef268a6d41804e4842a039b0c99d0b3b7f5e5eebe2101ec5f6416080b",
+      "sets": {
+        "stdlib": "d0d660aef268a6d41804e4842a039b0c99d0b3b7f5e5eebe2101ec5f6416080b",
+        "full-extras": "a62926e22458a2d8246a21dfd79cf730ed6ccf6aced75d0e1d591b94528a6c94"
+      },
+      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }
