@@ -222,7 +222,8 @@
         "probability_ci": { "type": ["array", "null"] },
         "calibration_id": { "type": ["string", "null"] },
         "measured_on": { "type": ["string", "null"] },
-        "raw_score": { "type": ["integer", "null"], "description": "Uncalibrated model/heuristic output (0-100); never a probability." }
+        "raw_score": { "type": ["integer", "null"], "description": "Uncalibrated model/heuristic output (0-100); never a probability." },
+        "self_declared": { "const": true, "description": "P0R-22: present (true) only when the item rests on metadata the file states about itself — an unsigned generator declaration anyone can plant or strip (its detail carries 자기 선언 메타데이터 — 심거나 지울 수 있음)." }
       }
     },
     "coverage_entry": {

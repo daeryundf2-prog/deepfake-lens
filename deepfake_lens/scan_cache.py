@@ -869,7 +869,12 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    and watermark_audioseal (audio, video) behind the optional torch extra; result.marking_context, the
 #    closing item "기계판독 표식 확인 결과(…)" and the skipped coverage entry online_detection. A row of either
 #    side's generation 13–17 lacks the other side's changes, so neither may be served from the cache.
-OUTPUT_FORMAT_GENERATION = 18
+# 19: P0R-22/P0R-23 — video and audio rows (and image rows, for the GB 45438 AIGC label) gain the check
+#    container_metadata (MP4/MOV boxes, SEI user data, ID3v2, RIFF INFO, FLAC Vorbis comments: facts; a
+#    registered generator declaration is a self-declared synthetic item); evidence items may carry
+#    "self_declared": true; a video row's source guess no longer claims a container-metadata check that did not
+#    exist ("영상 출처는 추정하지 않습니다 — …").
+OUTPUT_FORMAT_GENERATION = 19
 
 
 def cache_extension(path: Path) -> str:
@@ -913,6 +918,10 @@ def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | No
     from .media_marks import registry_cache_tokens
 
     tokens += registry_cache_tokens()
+    # P0R-22: the container generator registry (AIGC producers, SEI vendor strings, tool-field brands).
+    from .container_metadata import registry_cache_tokens as container_registry_tokens
+
+    tokens += container_registry_tokens()
     return f"tool:{TOOL_VERSION}|pins:{_short_digest(chr(10).join(tokens))}"
 
 

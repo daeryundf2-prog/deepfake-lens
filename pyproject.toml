@@ -251,6 +251,7 @@ files = [
     "deepfake_lens/security.py",
     "deepfake_lens/webapp_api.py",
     "deepfake_lens/scan_jobs.py",
+    "deepfake_lens/container_metadata.py",
     "deepfake_lens/analysis_api.py",
     "deepfake_lens/tests/qa/test_qa_out.py",
     "deepfake_lens/reports.py",

@@ -84,6 +84,8 @@ def _evidence_item_from_json(data: dict[str, Any]) -> EvidenceItem:
         calibration_id=_opt_str(data.get("calibration_id")),
         measured_on=_opt_str(data.get("measured_on")),
         raw_score=int(_num(raw_score)) if raw_score is not None else None,
+        # P0R-22: absent in records written before the field existed.
+        self_declared=data.get("self_declared") is True,
     )
 
 

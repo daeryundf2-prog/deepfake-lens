@@ -325,6 +325,7 @@ KNOWN_ACRONYMS = frozenset("""
     MLM MOV MP3 MP4 MPS OK ONNX OCR PDF PNG PRNU RAM REST RGB ROC SBI SDK SDXL SHA SSIM TB TIFF TPR TSV UI URL USB USM
     UTC UTF UUID VIT WAV WARN WEBP XMP XLSR ZIP EOS EF IS RF SD TTS LR DFL NA
     TXT MD DOCX XLSX PPTX DOC XLS PPT MKV AVI WEBM FLAC OGG AAC WMA TAR GZ RAR
+    RIFF INFO SEI BMFF HEVC AIGC ITL OCSP CRL TSA COSE CBOR TXXX TSSE TENC COMM ISFT ICMT IART INAM
 """.split())
 # R11-5: the file-format names above (TXT … RAR) — "PNG·JPG·TXT·MD·MKV·TAR 등"
 # is read word by word now that "·" is a token boundary.
@@ -340,6 +341,12 @@ KNOWN_PROPER_NOUNS = (
 KNOWN_MODULE_NAMES = frozenset("""
     torch torchvision transformers onnxruntime numpy librosa soundfile speechbrain mediapipe timm cv2 PIL Pillow
     c2pa pymupdf fitz fastapi uvicorn syhwp ffmpeg ffprobe opencv scipy sklearn
+""".split())
+# P0R-22: ISO-BMFF box types, codec / muxer names and container formats the container_metadata layer names in its
+# facts (identifiers, never prose).
+CONTAINER_IDENTIFIERS = frozenset("""
+    moov udta meta keys ilst hdlr mvhd stsd uuid mdat ftyp trak mdia minf stbl mdta vide soun data
+    Lavf Lavc Vorbis Opus Ogg Matroska QuickTime
 """.split())
 _IDENTIFIER_TOKENS: tuple[re.Pattern[str], ...] = (
     re.compile("\u300c[^\u300d]*\u300d"),  # metadata values copied verbatim from the evidence file (corner brackets)
@@ -368,6 +375,7 @@ _IDENTIFIER_TOKENS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b(?:assertion|signingCredential|claimSignature|claim|manifest|timeStamp|general|algorithm|ingredient)(?:\.[A-Za-z]\w*)+"),
     re.compile(r"\b(?:pin|sha256)\b"),
     re.compile(r"\b(?:" + "|".join(sorted(KNOWN_MODULE_NAMES)) + r")\b"),
+    re.compile(r"\b(?:" + "|".join(sorted(CONTAINER_IDENTIFIERS)) + r")\b"),
 )
 _ACRONYM = re.compile(r"\b[A-Z]{2,}s?\b")
 

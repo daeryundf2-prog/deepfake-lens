@@ -1410,6 +1410,18 @@ def _marking(modality: str, validation: dict[str, object] | None, c2pa_entry: Co
     )
 
 
+def _with_container(marks: "MarkLayers", container: "MarkLayers") -> "MarkLayers":
+    """P0R-22: the ``container_metadata`` check joined to the watermark checks (coverage first, finding last)."""
+    from .media_marks import MarkLayers
+
+    return MarkLayers(
+        evidence=[*container.evidence, *marks.evidence],
+        coverage=[*container.coverage, *marks.coverage],
+        limitations=[*marks.limitations, *container.limitations],
+        findings=[*marks.findings, *container.findings],
+    )
+
+
 def _mark_layers(file_path: Path, modality: str) -> DeepLayers:
     """techniques-2026: the machine-readable-mark checks of a non-image file — C2PA, then the watermark decoders.
 
@@ -1422,6 +1434,11 @@ def _mark_layers(file_path: Path, modality: str) -> DeepLayers:
 
     validation, entry = _c2pa_check(file_path)
     marks = audio_mark_layers(file_path) if modality == "audio" else video_mark_layers(file_path) if modality == "video" else MarkLayers()
+    if modality in ("audio", "video"):
+        # P0R-22 (threat G2): the container/bitstream metadata check of audio and video files.
+        from .container_metadata import media_layers
+
+        marks = _with_container(marks, media_layers(file_path))
     layers = _marking(modality, validation, entry, marks)
     return DeepLayers(
         evidence=[*c2pa_evidence(validation), *layers.evidence], coverage=[entry, *layers.coverage],
@@ -1730,9 +1747,15 @@ def _analyze_image_file(
     coverage.extend(deep.coverage)
     # techniques-2026 items 3–6: watermark decoders (run on every image — a mark is a fact whatever the
     # image class) and the marking context.
+    from .container_metadata import image_aigc_layers
     from .media_marks import image_mark_layers
 
-    marks = _marking("image", c2pa_validation, c2pa_entry, image_mark_layers(file_path, c2pa_validation))
+    # P0R-22: the GB 45438 AIGC label in the image's PNG text chunks / XMP (container_metadata check).
+    aigc = image_aigc_layers(
+        metadata, metadata_read.image_format if metadata_read is not None else None, read_error,
+        metadata_read.partial if metadata_read is not None else None,
+    )
+    marks = _marking("image", c2pa_validation, c2pa_entry, _with_container(image_mark_layers(file_path, c2pa_validation), aigc))
     coverage.extend(marks.coverage)
 
     image_format = metadata_read.image_format if metadata_read is not None else None
@@ -1911,6 +1934,11 @@ def _analyze_video_file(
     return _video_result(analysis, coverage=coverage, deep=deep, probability_thresholds=profile_probability_thresholds(model_path))  # G8
 
 
+# P0R-23: the video row's source guess names no check it did not run; the checks that look for provenance marks
+# (container_metadata, c2pa, watermark_*) report themselves in coverage and evidence.
+VIDEO_SOURCE_NOT_GUESSED = "영상 출처는 추정하지 않습니다 — 확인한 표식(컨테이너 메타데이터·C2PA·워터마크)의 결과는 근거 항목과 검사 범위에 있습니다."
+
+
 def _video_result(
     analysis: VideoTemporalAnalysis,
     *,
@@ -1939,8 +1967,11 @@ def _video_result(
     ]
     reference.extend(deep.reference)
     has_detail = analysis.frame_count > 0 and analysis.duration_seconds > 0
+    # P0R-23: this said container metadata held "no source clue" ("출처 단서를 찾지 못함") although no container check
+    # existed (a check never run, stated as "not found"). The container_metadata check (P0R-22) records what it read
+    # as coverage and evidence; the source guess only points there.
     source_guess = SourceGuess.unknown(
-        "영상 파일의 컨테이너 메타데이터에서 출처 단서를 찾지 못했습니다."
+        VIDEO_SOURCE_NOT_GUESSED
         if has_detail
         else "영상 분석이 불완전해 출처를 판단할 단서가 없습니다."
     )

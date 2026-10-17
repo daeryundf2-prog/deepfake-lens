@@ -72,7 +72,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `fastapi installed; the missing-dep branch does not apply` | fastapi가 없는 환경에서만 실행(CI 기본 venv) | test_servers.py |
 | `fastapi/httpx not installed` | fastapi, httpx(QA 사이드 venv) | test_servers.py |
 | `fastapi/httpx required` | fastapi, httpx(QA 사이드 venv) | test_servers.py |
-| `ffmpeg 없음` | `ffmpeg` 실행 파일(PATH) — 음성 트랙이 있는 시험 영상을 만들고 추출 임시 파일을 관찰; 실제 ffmpeg 자식이 실행 중일 때 종료 신호(R15-1); 이름에 `:`가 있는 상대 경로 영상(R24-2); PATH_MAX보다 깊은 작업 폴더의 영상 음성 트랙(R24-3) | test_audio_worker.py, test_native_path.py, test_qa_out.py, test_shutdown.py |
+| `ffmpeg 없음` | `ffmpeg` 실행 파일(PATH) — 음성 트랙이 있는 시험 영상을 만들고 추출 임시 파일을 관찰; 실제 ffmpeg 자식이 실행 중일 때 종료 신호(R15-1); 이름에 `:`가 있는 상대 경로 영상(R24-2); PATH_MAX보다 깊은 작업 폴더의 영상 음성 트랙(R24-3); ffmpeg로 만든 MP4의 컨테이너 메타데이터(P0R-22) | test_audio_worker.py, test_container_metadata.py, test_native_path.py, test_qa_out.py, test_shutdown.py |
 | `ffmpeg가 시험 영상을 만들지 못함` | `ffmpeg`(lavfi 입력, mpeg4·aac 인코더 포함 빌드) | test_native_path.py |
 | `full-extras 골든은 다른 환경에서 기록됨: {difference}` | 골든 기록(`deepfake_lens/tests/golden_output.json`)의 `full_extras_environment`와 같은 선택 모듈·버전 구성(R16-5 — 0단계 기록 환경은 주 venv: `dev`+`full` extras). 다른 구성에서는 full-extras 골든 비교만 건너뛰고 stdlib 골든·문구 상수 해시는 항상 비교 | test_output_generation.py |
 | `full-extras 모듈 없음: {missing}` | `dev`+`full` extras(numpy, opencv, Pillow, scipy, librosa, scikit-learn, c2pa — R16-5 full-extras 골든이 비사진 안내 문구를 포함하는지 확인) | test_output_generation.py |

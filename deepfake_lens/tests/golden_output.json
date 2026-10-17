@@ -319,6 +319,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 19,
+      "reason": "P0R-22/P0R-23: 영상·음성 행(이미지는 GB 45438 AIGC 라벨)에 container_metadata 검사(MP4·SEI·ID3·RIFF INFO·FLAC 사실, 등록된 생성기 선언만 자기 선언 생성 근거), 근거 항목의 self_declared, 영상 출처 추정 문구가 없던 검사를 주장하지 않음",
+      "sha256": "d1a8f678b2f57d7c8f4b3a7fff0c694fcb34cdc37b925c8e1945aedf5be47e46",
+      "sets": {
+        "stdlib": "d1a8f678b2f57d7c8f4b3a7fff0c694fcb34cdc37b925c8e1945aedf5be47e46",
+        "full-extras": "9e9660655a597aba8ebd726039ccb5bf854686626dbda1bd04267935237eb798"
+      },
+      "constants_sha256": "eb43be685aa21565adbe6e836d313be230b222deed5ab25b2ab393d8a81abcea",
+      "constants_count": 59,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

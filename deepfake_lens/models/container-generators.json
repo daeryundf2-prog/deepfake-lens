@@ -1,0 +1,33 @@
+{
+  "schema": "container-generator-registry-v1",
+  "version": "2026-10-17.1",
+  "note": "P0R-22: generator declarations the container_metadata check may attribute. Everything here is a self-declaration — unsigned metadata a file states about itself, which anyone can plant or strip. aigc_producers maps a GB 45438-2025 implicit label's ContentProducer (exact name, or a code containing the producer's unified social credit code) to a service name; an unlisted producer is reported as a fact without attribution. sei_vendor_strings are substrings of an H.264/HEVC SEI user_data_unregistered payload that a generation service writes. tool_field_brands are generator names that, in a generator-specific field (encoder/software/©too/TSSE/ISFT), are a moderate self-declaration only. aigc_generated_labels lists the Label values read as 'AI-generated'; any other value is a fact only. The table is versioned: a change bumps 'version' (part of the scan cache key).",
+  "aigc_generated_labels": ["1"],
+  "aigc_producers": [
+    {
+      "id": "kuaishou-kling",
+      "names": ["kling"],
+      "codes_containing": ["91110108335469089C"],
+      "service": "Kling AI(쿠아이쇼우 Kuaishou)",
+      "source": "threat_catalog_2026-10-17 §4.1 (Kling 3.0/IMAGE 3.0 outputs: AIGC JSON Label \"1\", ContentProducer \"kling\" or \"0011\"+\"91110108335469089C\"(Kuaishou unified social credit code)+\"10100\"); github.com/Aariyan007/kling-label-detector (tested 2026-10-09/12)",
+      "checked": "2026-10-17"
+    }
+  ],
+  "sei_vendor_strings": [
+    {
+      "id": "kling-ai-sei",
+      "contains": "kling-ai",
+      "generator": "Kling AI(쿠아이쇼우 Kuaishou)",
+      "source": "threat_catalog_2026-10-17 §4.1 (Kling outputs: H.264 SEI user data contains \"kling-ai\"); github.com/Aariyan007/kling-label-detector (tested 2026-10-09/12)",
+      "checked": "2026-10-17"
+    }
+  ],
+  "tool_field_brands": [
+    "Kling", "Sora", "Veo", "Runway", "Pika", "Hailuo", "Seedance", "Vidu", "Dream Machine", "HunyuanVideo", "Jimeng",
+    "ComfyUI", "ElevenLabs", "Suno", "Udio"
+  ],
+  "unregistered": {
+    "aigc_producers": "Tongyi (Alibaba), Jimeng (ByteDance), Hunyuan (Tencent) also write GB 45438 labels (threat catalog §7 row 3) but no producer code verified from a sample file is recorded here (2026-10-17) — their labels are read and reported without attribution.",
+    "sei_vendor_strings": "x264/x265 option strings are encoder facts (every ffmpeg edit has them), never generator strings."
+  }
+}

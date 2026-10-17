@@ -67,6 +67,13 @@ XMP_FIELDS = {
     (DC_NS, "creator"): "xmp.creator",
     (PHOTOSHOP_NS, "Credit"): "xmp.Credit",
 }
+# P0R-22: the China GB 45438-2025 implicit label in XMP — a property named
+# ``AIGC`` (TC260 namespace; any namespace is accepted) whose value is the
+# label JSON. Kept up to XMP_AIGC_MAX_CHARS (the 7-key JSON is longer than
+# MAX_EXIF_VALUE_CHARS); read by container_metadata.image_aigc_layers.
+XMP_AIGC_KEY = "xmp.AIGC"
+XMP_AIGC_LOCAL_NAME = "AIGC"
+XMP_AIGC_MAX_CHARS = 4096
 
 # EXIF tag ids (EXIF 2.32 / CIPA DC-008): IFD0, the Exif sub-IFD, the GPS IFD.
 EXIF_IFD0_TAGS = {271: "exif.Make", 272: "exif.Model", 305: "exif.Software", 306: "exif.DateTime"}
@@ -486,18 +493,23 @@ def parse_xmp_fields(packet: bytes) -> dict[str, str]:
     found: dict[str, list[str]] = {}
     for element in root.iter():
         for attribute, value in element.attrib.items():
-            key = XMP_FIELDS.get(_split_qname(attribute))
+            key = _xmp_key(attribute)
             if key and value.strip():
                 found.setdefault(key, []).append(value.strip())
-        key = XMP_FIELDS.get(_split_qname(element.tag))
+        key = _xmp_key(element.tag)
         if key:
             texts = [text.strip() for text in element.itertext() if text and text.strip()]
             found.setdefault(key, []).extend(texts)
     return {
-        key: "; ".join(dict.fromkeys(values))[:MAX_EXIF_VALUE_CHARS]
+        key: "; ".join(dict.fromkeys(values))[: XMP_AIGC_MAX_CHARS if key == XMP_AIGC_KEY else MAX_EXIF_VALUE_CHARS]
         for key, values in found.items()
         if values
     }
+
+
+def _xmp_key(name: str) -> str | None:
+    qname = _split_qname(name)
+    return XMP_FIELDS.get(qname) or (XMP_AIGC_KEY if qname[1] == XMP_AIGC_LOCAL_NAME else None)
 
 
 def _split_qname(name: str) -> tuple[str, str]:

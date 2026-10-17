@@ -115,3 +115,15 @@ IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "�
 - 결과 JSON의 `result.marking_context`(`legal_basis`, `checked[]`, `online_only[]`, `marks_found`, `absence_statement`)와 결정적·중립·약 근거 항목
   「기계판독 표식 확인 결과(EU 인공지능법 제50조·인공지능기본법 관련)」(근거 목록 맨 뒤 — 모든 보고서에 그대로 출력·서명). 추론은 하지 않는다:
   「표식이 확인되지 않은 것은 원본성 근거가 아닙니다 …」가 늘 함께 적힌다.
+
+## 7. 컨테이너·비트스트림 메타데이터 (`container_metadata`, P0R-22 — 위협 G2)
+
+`deepfake_lens/container_metadata.py`는 ffprobe 없이 순수 파이썬으로 미디어 컨테이너가 스스로 적은 메타데이터를 **사실**로 읽는다. 영상·음성 행마다, 이미지 행에서는 GB 45438 `AIGC` 라벨에 한해 검사 범위에 `container_metadata`가 남는다.
+
+- 읽는 것: ISO-BMFF(mp4·mov·m4v·m4a·3gp)의 `moov/udta/meta/keys/ilst`(QuickTime `mdta` 키 — `AIGC`, `prompt`, `workflow`, `comment`, `com.apple.quicktime.*`; `©too`/`©swr`/`©enc`), `udta` 텍스트 원자, `hdlr` 이름, `mvhd` 생성 시각, 영상 샘플 항목의 compressor 이름, XMP `uuid`/`XMP_` 패킷, C2PA `uuid` 박스의 존재(검증은 `c2pa` 검사); H.264/HEVC SEI `user_data_unregistered` 문자열(첫 영상 청크의 앞 4 MiB); 오디오 ID3v2 프레임(TXXX·TSSE·TENC·COMM·TIT2 …), RIFF `LIST/INFO`(ISFT·ICMT …)와 WAV/AVI의 `id3` 청크, FLAC Vorbis 주석; 이미지의 PNG 텍스트 청크·XMP의 `AIGC`.
+- 상한: 메타데이터 박스 내용 합계 64 MiB, 값 하나 8 MiB, 박스 100 000개, 중첩 16단계. 상한에 닿으면 사유에 부분 판독을 적는다.
+- 커버리지: `ran`(사유에 읽은 부분 — 예: `MP4/MOV 메타데이터 판독(udta·meta·keys·ilst·hdlr·mvhd·stsd·uuid·XMP)`), `skipped`(판독하지 않는 형식 — `… 이 형식의 컨테이너 메타데이터는 판독하지 않음(지원: MP4/MOV·RIFF(WAV/AVI)·ID3v2(MP3)·FLAC)`), `failed`(`AnalyzerError: MP4 박스 …의 크기가 0입니다 …`, `… 헤더가 잘렸습니다 …`, `MP4 박스 중첩이 16단계를 넘습니다 …` 등 구조를 걸을 수 없을 때 — 조용히 통과하지 않는다).
+- 근거 규칙(`evidence_rules.container_metadata_evidence`): 읽은 필드는 결정적·중립·약함 사실 항목 하나(「컨테이너 메타데이터 판독 사실」)로 적는다 — `Lavf`·`Lavc`·`x264`·`VideoHandler` 같은 인코더·핸들러 이름은 ffmpeg로 변환·편집한 모든 파일에 있으므로 아무것도 뜻하지 않는다고 함께 적는다. 생성 방향 항목은 **등록된 생성기 선언**(`models/container-generators.json`, 버전이 캐시 키에 들어감)에서만 나온다: GB 45438-2025 `AIGC` 라벨 JSON의 `Label`이 AI 생성 값이면 결정적·생성·강함, ComfyUI 노드 그래프(JSON)가 `prompt`/`workflow` 필드에 있으면 결정적·생성·강함, 등록된 생성 서비스 SEI 문자열(`kling-ai`)이면 결정적·생성·강함, 생성 도구 필드(encoder·software·`©too`·TSSE·ISFT)의 생성기 이름 하나는 결정적·생성·**보통**(단독 결론 불가). 자유 텍스트 필드(comment·title·artist …)의 내용은 사실 항목일 뿐이다. 생성 방향 항목은 모두 `self_declared: true`이고 설명에 「자기 선언 메타데이터 — 심거나 지울 수 있음」이 들어간다. 이 계층은 원본성 항목을 만들지 않는다. `ContentProducer`가 등록표에 없으면 서비스를 귀속하지 않는다.
+- 한계: 재인코딩·다시 저장하면 메타데이터·SEI가 사라지거나 바뀐다 — 부재는 원본성 근거가 아니다.
+
+P0R-23: 영상 행의 출처 추정 문구가 존재하지 않던 영상 메타데이터 검사를 「…컨테이너 메타데이터에서 출처 단서를 찾지 못했습니다」로 적던 것을 없앴다. 지금 문구는 「영상 출처는 추정하지 않습니다 — 확인한 표식(컨테이너 메타데이터·C2PA·워터마크)의 결과는 근거 항목과 검사 범위에 있습니다.」이다.

@@ -24,10 +24,12 @@ Classification (phase-0 spec, WP-A):
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 from .digital_source_type import (
     CATEGORY_CAPTURE,
@@ -53,6 +55,14 @@ from .result_types import (
     ExternalModelAnalysis,
     SourceConfidence,
 )
+
+if TYPE_CHECKING:  # P0R-22: container_metadata imports checks/result_types only — no cycle at run time either
+    from .container_metadata import ContainerFacts, Registry as ContainerRegistry
+
+# P0R-22: the phrase every self-declared synthetic item carries in its detail
+# (EvidenceItem.self_declared) — an unsigned statement the file makes about
+# its own origin, which anyone can write into a file or strip from it.
+SELF_DECLARED_NOTE = "자기 선언 메타데이터 — 심거나 지울 수 있음"
 
 # Metadata keys whose values name the producing tool. A generator name in
 # one of these is a deterministic statement by the file; the same word in a
@@ -778,3 +788,193 @@ def image_class_evidence(image_class: ImageClass | None) -> list[EvidenceItem]:
         detail,
         EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "image_class",
     )]
+
+
+# --- Container / bitstream metadata (P0R-22, threat G2) ------------------------------
+#
+# | source                                                    | kind          | direction | strength |
+# | any field read (encoder, handler, times, SEI strings …)   | deterministic | neutral   | weak     |
+# | GB 45438 AIGC label with an AI-generated Label value       | deterministic | synthetic | strong   | self-declared
+# | ComfyUI prompt/workflow JSON in a prompt/workflow field    | deterministic | synthetic | strong   | self-declared
+# | registered vendor SEI string (models/container-generators) | deterministic | synthetic | strong   | self-declared
+# | generator brand word in an encoder/software/©too field     | deterministic | synthetic | moderate | self-declared
+# | anything in a free-text field (comment/title/artist …)     | never more than a neutral fact item       |
+# The layer never produces an authentic item: metadata that names a camera
+# or an editor can be written by anyone, and its absence proves nothing.
+
+CONTAINER_FACTS_TITLE = "컨테이너 메타데이터 판독 사실"
+CONTAINER_SEI_TITLE = "비트스트림 SEI 사용자 데이터 문자열"
+CONTAINER_AIGC_TITLE = "GB 45438 AIGC 암묵 라벨: AI 생성 표시(자기 선언)"
+CONTAINER_AIGC_FACT_TITLE = "GB 45438 AIGC 라벨(AI 생성 표시 값이 아님)"
+CONTAINER_AIGC_UNPARSED_TITLE = "AIGC 필드(GB 45438 라벨 구조 아님)"
+CONTAINER_COMFYUI_TITLE = "ComfyUI 워크플로·프롬프트 메타데이터(자기 선언)"
+CONTAINER_COMFYUI_FREE_TITLE = "자유 텍스트 필드의 ComfyUI 형식 JSON"
+CONTAINER_SEI_VENDOR_TITLE = "등록된 생성 서비스의 SEI 문자열(자기 선언)"
+CONTAINER_BRAND_TITLE = "생성 도구 필드의 생성기 이름(자기 선언)"
+CONTAINER_ENCODER_NOTE = (
+    "인코더·핸들러 이름(예: Lavf·Lavc·x264·VideoHandler)은 ffmpeg 등으로 변환·편집한 모든 파일에 남는 흔적이라 "
+    "그 자체로는 생성·원본 어느 쪽도 뜻하지 않습니다. 컨테이너 메타데이터는 다시 저장하면 바뀌거나 사라지므로 부재도 무정보입니다."
+)
+CONTAINER_LIMITATION = (
+    "컨테이너 메타데이터·SEI 표식은 재인코딩·다시 저장하면 사라지거나 바뀌므로, 표식이 없다는 것은 원본성 근거가 아닙니다."
+)
+# GB 45438-2025 implicit-label JSON keys.
+AIGC_LABEL_KEYS = ("Label", "ContentProducer", "ProduceID", "ReservedCode1", "ContentPropagator", "PropagateID", "ReservedCode2")
+STRUCTURED_JSON_MAX_CHARS = 8 * 1024 * 1024
+CONTAINER_SHOWN_FIELDS = 24
+CONTAINER_VALUE_CHARS = 120
+
+
+def _shown(value: str, limit: int = CONTAINER_VALUE_CHARS) -> str:
+    value = " ".join(value.split())
+    return value if len(value) <= limit else value[:limit] + "…"
+
+
+def _json_object(value: str) -> dict[str, object] | None:
+    if len(value) > STRUCTURED_JSON_MAX_CHARS or not value.lstrip().startswith("{"):
+        return None
+    try:
+        parsed = json.loads(value)
+    except (ValueError, RecursionError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def comfyui_structure(key: str, value: str) -> bool:
+    """A ComfyUI node graph (prompt API JSON or workflow JSON) stored under ``key`` (P0R-22).
+
+    Reuses the image-side rule (``text_heuristics._looks_like_comfyui``) on the
+    value as the PNG reader keys it ("png.<key>: <value>"); the value must also
+    parse as a JSON object, so a sentence that mentions KSampler is not a graph.
+    """
+    from .text_heuristics import _looks_like_comfyui
+
+    if _json_object(value) is None:
+        return False
+    return _looks_like_comfyui(f"png.{key.lower()}: {value}".lower())
+
+
+def _aigc_label(value: str) -> dict[str, str] | None:
+    """The GB 45438 label fields of an ``AIGC`` value (case-insensitive keys), or None when it is not that structure."""
+    parsed = _json_object(value)
+    if parsed is None:
+        return None
+    lowered = {str(key).lower(): text for key, text in parsed.items()}
+    if "label" not in lowered:
+        return None
+    return {name: _shown(str(lowered[name.lower()]), 80) for name in AIGC_LABEL_KEYS if name.lower() in lowered}
+
+
+def aigc_label_evidence(where: str, value: str, registry: "ContainerRegistry") -> list[EvidenceItem]:
+    """Items for one ``AIGC`` field (MP4 metadata, ID3 TXXX, PNG text chunk, XMP) — P0R-22."""
+    from .container_metadata import LAYER
+
+    label = _aigc_label(value)
+    if label is None:
+        return [EvidenceItem(
+            CONTAINER_AIGC_UNPARSED_TITLE,
+            f"{where}에 AIGC 필드가 있으나 GB 45438-2025 라벨 JSON(Label 등 키)이 아닙니다: 「{_shown(value)}」. 사실로만 기록합니다.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+        )]
+    listed = ", ".join(f"{key}=「{text}」" for key, text in label.items())
+    producer = label.get("ContentProducer", "")
+    entry = registry.producer(producer) if producer else None
+    if entry is not None:
+        producer_text = f"ContentProducer는 등록표의 {entry.get('service')}에 해당합니다"
+    elif producer:
+        producer_text = f"ContentProducer 「{producer}」는 등록표에 없어 서비스를 귀속하지 않습니다"
+    else:
+        producer_text = "ContentProducer가 없어 서비스를 귀속하지 않습니다"
+    if label.get("Label", "") in registry.generated_labels:
+        return [EvidenceItem(
+            CONTAINER_AIGC_TITLE,
+            f"{where}의 AIGC 필드가 중국 GB 45438-2025 암묵 라벨 구조이며 AI 생성·합성 표시 값을 담고 있습니다: {listed}. {producer_text}. "
+            f"라벨은 서명이 없어 누구나 쓰거나 지울 수 있습니다 — {SELF_DECLARED_NOTE}. 기준: {registry.label}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, LAYER, self_declared=True,
+        )]
+    return [EvidenceItem(
+        CONTAINER_AIGC_FACT_TITLE,
+        f"{where}의 AIGC 필드가 GB 45438-2025 라벨 구조입니다: {listed}. Label 값이 등록표가 AI 생성 표시로 정한 값"
+        f"({', '.join(registry.generated_labels) or '없음'})이 아니어서 사실로만 기록합니다. {producer_text}. 기준: {registry.label}.",
+        EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+    )]
+
+
+def _brand_in(value: str, brands: tuple[str, ...]) -> str | None:
+    name = generator_name_in(value)
+    if name:
+        return name
+    lowered = value.lower()
+    for brand in brands:
+        pattern = re.escape(brand.lower()).replace(r"\ ", r"[\s_-]+")
+        match = re.search(rf"(?<![0-9a-z]){pattern}(?![0-9a-z])", lowered)
+        if match:
+            return value[match.start() : match.end()]
+    return None
+
+
+def container_metadata_evidence(facts: "ContainerFacts", registry: "ContainerRegistry") -> list[EvidenceItem]:
+    """Items for the facts of one ``container_metadata`` check (P0R-22). Never an authentic item."""
+    from .container_metadata import KIND_TOOL, LAYER
+
+    items: list[EvidenceItem] = []
+    shown = [f"{f.source} {f.key}=「{_shown(f.value)}」" for f in facts.fields[:CONTAINER_SHOWN_FIELDS]]
+    if facts.c2pa_uuid:
+        shown.append("C2PA uuid 박스 있음(서명 검증은 c2pa 검사)")
+    if shown:
+        more = len(facts.fields) - CONTAINER_SHOWN_FIELDS
+        items.append(EvidenceItem(
+            CONTAINER_FACTS_TITLE,
+            f"{facts.format_label}에서 읽은 필드: " + "; ".join(shown) + (f" 외 {more}개" if more > 0 else "") + ". " + CONTAINER_ENCODER_NOTE,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+        ))
+    if facts.sei:
+        listed = "; ".join(f"{s.codec} UUID {s.uuid}: 「{_shown(s.text, 200)}」" for s in facts.sei[:8])
+        items.append(EvidenceItem(
+            CONTAINER_SEI_TITLE,
+            f"SEI user_data_unregistered 문자열: {listed}. x264·x265 옵션 문자열은 그 인코더로 만든 모든 영상(ffmpeg 편집본 포함)에 남아 "
+            "단독으로는 아무것도 뜻하지 않습니다.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+        ))
+    for sei in facts.sei:
+        vendor = registry.sei_vendor(sei.text)
+        if vendor is not None:
+            items.append(EvidenceItem(
+                CONTAINER_SEI_VENDOR_TITLE,
+                f"{sei.codec} SEI 사용자 데이터에 등록 문자열 「{vendor.get('contains')}」({vendor.get('generator')})이(가) 있습니다: "
+                f"「{_shown(sei.text, 200)}」. 생성 서비스가 비트스트림에 스스로 남기는 표식이며 서명이 없습니다 — {SELF_DECLARED_NOTE}. "
+                f"재인코딩 한 번으로 사라지므로 부재는 무정보입니다. 기준: {registry.label}.",
+                EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, LAYER, self_declared=True,
+            ))
+            break
+    comfy_done = False
+    for item in facts.fields:
+        where = f"{item.source} {item.key}"
+        if item.name == "aigc":
+            items.extend(aigc_label_evidence(where, item.value, registry))
+        elif item.name in ("prompt", "workflow"):
+            if not comfy_done and comfyui_structure(item.name, item.value):
+                comfy_done = True
+                items.append(EvidenceItem(
+                    CONTAINER_COMFYUI_TITLE,
+                    f"{where} 필드에 ComfyUI 노드 그래프(JSON — class_type·inputs 등) 구조가 있습니다. ComfyUI 저장 노드가 기록하는 생성 "
+                    f"워크플로이며 서명이 없습니다 — {SELF_DECLARED_NOTE}.",
+                    EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, LAYER, self_declared=True,
+                ))
+        elif item.kind == KIND_TOOL:
+            brand = _brand_in(item.value, registry.brands)
+            if brand:
+                items.append(EvidenceItem(
+                    CONTAINER_BRAND_TITLE,
+                    f"{where}=「{_shown(item.value)}」 — 생성 도구 필드에 생성기 이름 '{brand}'이(가) 기록되어 있습니다. 이름 하나는 구조적 선언이 "
+                    f"아니므로 단독 결론 근거로 쓰지 않습니다 — {SELF_DECLARED_NOTE}.",
+                    EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, LAYER, self_declared=True,
+                ))
+        elif comfyui_structure("comment", item.value):
+            items.append(EvidenceItem(
+                CONTAINER_COMFYUI_FREE_TITLE,
+                f"{where}(자유 텍스트 필드)에 ComfyUI 노드 그래프 형식의 JSON이 있습니다. 설명·주석 같은 자유 텍스트 필드는 누구나 쓰는 칸이라 "
+                "근거로 쓰지 않고 사실로만 기록합니다.",
+                EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, LAYER,
+            ))
+    return items
