@@ -2261,11 +2261,11 @@ class OldCacheRowsTest(unittest.TestCase):
         _, cold = self._scan()
         payload = json.loads(self.cache.read_text(encoding="utf-8"))
         items = payload["items"]
-        prefix = f"{scan_cache.CACHE_KEY_VERSION}|fmt:{scan_cache.OUTPUT_FORMAT_GENERATION}|"  # TB-4: content-v5 (+ file name)
+        prefix = f"{scan_cache.CACHE_KEY_VERSION}|fmt:{scan_cache.OUTPUT_FORMAT_GENERATION}|"  # TB-4: content-v5 (+ matched file-name formats)
         self.assertTrue(items and all(key.startswith(prefix) for key in items), list(items)[:2])
         poisoned = {}
         for key, row in items.items():
-            # TB-4: the file name is part of the key (content-v5), so each file and its Korean copy have their own row.
+            # One row per content key: the stored row may be the Korean copy's.
             if row["path"].endswith("tone.m4a"):
                 # What 9085e5e wrote: the staged name in the reasons instead of the file.
                 own = f"'<root>/{row['path']}'"
@@ -2283,7 +2283,7 @@ class OldCacheRowsTest(unittest.TestCase):
                 row = json.loads(json.dumps(row))
                 row["result"]["limitations"].append(f"/tmp/{native_path.SESSION_PREFIX}4242-ab12cd/000003-28031c5572eb.wav")
                 poisoned[key] = row
-        self.assertEqual(len(poisoned), 6)  # TB-4: tone.m4a x2 (each with its pre-R14-3 key) + garbage.wav x2
+        self.assertEqual(len(poisoned), 3)
         self.assertTrue(all(scan_cache.row_mentions_staging(row) for row in poisoned.values()))
         items.update(poisoned)
         self.cache.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")

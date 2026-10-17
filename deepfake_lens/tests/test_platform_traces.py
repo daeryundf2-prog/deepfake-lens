@@ -128,15 +128,17 @@ class FileNameTest(unittest.TestCase):
         for name in ("IMG_1234.JPG", "holiday.jpg", "KakaoTalk.jpg", "Screenshot.png"):
             self.assertEqual(self.check(name), [], name)
 
-    def test_name_is_part_of_the_cache_key(self) -> None:
+    def test_matched_name_formats_are_part_of_the_cache_key(self) -> None:
         from deepfake_lens.scan_cache import _cache_key
 
         with tempfile.TemporaryDirectory() as tmp:
-            a, b = Path(tmp) / "a.jpg", Path(tmp) / "KakaoTalk_20220313_104118161.jpg"
-            a.write_bytes(b"same")
-            b.write_bytes(b"same")
-            keys = [_cache_key(p, text_bytes=1, metadata_bytes=1, pixel_mode="off", pixel_max_side=1, heatmaps=False, model_path=None, scan_context="") for p in (a, b)]
-        self.assertNotEqual(keys[0], keys[1])
+            paths = [Path(tmp) / name for name in ("a.jpg", "b.jpg", "KakaoTalk_20220313_104118161.jpg", "KakaoTalk_20230101_000000000.jpg")]
+            for path in paths:
+                path.write_bytes(b"same")
+            keys = [_cache_key(p, text_bytes=1, metadata_bytes=1, pixel_mode="off", pixel_max_side=1, heatmaps=False, model_path=None, scan_context="") for p in paths]
+        self.assertEqual(keys[0], keys[1])  # neither name matches a format: the row (which never quotes the name) is shared
+        self.assertEqual(keys[2], keys[3])
+        self.assertNotEqual(keys[0], keys[2])
 
 
 class AudioChannelTest(unittest.TestCase):

@@ -8,7 +8,6 @@ compatibility with existing call sites and tests.
 from __future__ import annotations
 
 import hashlib
-import unicodedata
 import re
 import json
 from dataclasses import replace
@@ -737,8 +736,9 @@ def _cache_key(
     the analysis — the kind (image/audio/…) and the reader (the C2PA SDK
     decides the format from it: an empty ``.png`` is an I/O failure, an
     empty ``.jpg`` an unsupported format) — so ``zero.png`` no longer
-    replays ``empty.jpg``'s row. TB-4 (content-v5): the base name (NFC) too —
-    the file-name format check reads it; a renamed folder still hits. ``root`` is accepted for call-site
+    replays ``empty.jpg``'s row. TB-4 (content-v5): the ids of the file-name formats the
+    base name matches (the file-name format check reads the name, its row never quotes it) —
+    a renamed file still hits unless the formats it matches differ. ``root`` is accepted for call-site
     compatibility and ignored. Returns "" (never cacheable) when the file
     cannot be read.
     """
@@ -765,8 +765,9 @@ def _cache_key(
             f"fmt:{OUTPUT_FORMAT_GENERATION}",
             f"sha256:{digest}",
             f"ext:{cache_extension(path)}",
-            # TB-4: the file's own name is an analysis input (file_name_pattern) — a renamed file re-analyzes.
-            f"name:{_short_digest(unicodedata.normalize('NFC', path.name))}",
+            # TB-4: the file-name formats the name matches (file_name_pattern reads the name; the row never quotes it),
+            # so a renamed file hits only when its name matches the same formats.
+            f"name:{_name_signature(path)}",
             f"opts:{_short_digest(options)}",
             context,
             # Threshold/weights provenance — a cached verdict computed under
@@ -774,6 +775,16 @@ def _cache_key(
             f"prov:{_short_digest(provenance)}",
         ]
     )
+
+
+def _name_signature(path: Path) -> str:
+    """TB-4: the ids of the platform-trace file-name formats ``path``'s name matches ("-" for none); never raises."""
+    try:
+        from .platform_traces import name_pattern_ids
+
+        return ",".join(name_pattern_ids(path)) or "-"
+    except Exception as exc:  # noqa: BLE001 — a key token, never an aborted scan (the check itself fails in coverage)
+        return f"error:{type(exc).__name__}"
 
 
 def _short_digest(text: str) -> str:
@@ -799,7 +810,7 @@ def _content_sha256(path: Path, fingerprints: dict[Path, str] | None = None) -> 
 
 # Bumped whenever the key layout changes so entries written under an older
 # layout (the path+size+mtime keys before G11) can never match.
-CACHE_KEY_VERSION = "content-v5"  # v3 (N6): + extension; v4 (R14-3): + output format generation; v5 (TB-4): + file name
+CACHE_KEY_VERSION = "content-v5"  # v3 (N6): + extension; v4 (R14-3): + output format generation; v5 (TB-4): + matched file-name formats
 # R14-3 (round 14): the generation of the rules that turn an analysis into a
 # row's text — reasons, limitations, verdict wording, path scrubbing, name
 # restoring. A cached row is the text an older commit wrote; the tool

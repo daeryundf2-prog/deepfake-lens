@@ -18,7 +18,8 @@ Checks (each in coverage, ``ran`` / ``skipped`` with a Korean reason):
 - ``file_name_pattern`` (images, video, audio): the analyzed file's own name
   against the library's name formats (messenger saves, screenshots, screen
   and call recordings). The name is an analysis input, so it is part of the
-  scan-cache key (scan_cache.CACHE_KEY_VERSION content-v5).
+  scan-cache key as the ids of the formats it matches (scan_cache.CACHE_KEY_VERSION
+  content-v5; the row never quotes the name, so same-format names share a row).
 - ``audio_channel_trace`` (audio): raw AMR / AMR-WB storage magic (RFC 4867
   §5), the Ogg Opus identification and comment headers (RFC 7845: input
   sample rate, channels, vendor string — e.g. WhatsApp's), and the measured
@@ -260,6 +261,16 @@ def recompression_layers(path: Path) -> TraceLayers:
 # --- file names ----------------------------------------------------------------
 
 
+def _matching_patterns(path: Path, library: Library) -> list[dict[str, Any]]:
+    name = unicodedata.normalize("NFC", path.name)
+    return [p for p in library.data.get("filename_patterns", []) if isinstance(p, dict) and re.match(str(p.get("regex", "$^")), name, re.IGNORECASE)]
+
+
+def name_pattern_ids(path: Path) -> list[str]:
+    """The ids of the formats ``path``'s name matches — the scan-cache key token (raises LibraryError)."""
+    return sorted(str(p.get("id")) for p in _matching_patterns(path, load_library()))
+
+
 def file_name_layers(path: Path) -> TraceLayers:
     from .checks import run_check
 
@@ -267,12 +278,7 @@ def file_name_layers(path: Path) -> TraceLayers:
 
     def check() -> tuple[list[dict[str, Any]], Library]:
         library = load_library()
-        name = unicodedata.normalize("NFC", path.name)
-        found = []
-        for pattern in library.data.get("filename_patterns", []):
-            if isinstance(pattern, dict) and re.match(str(pattern.get("regex", "$^")), name, re.IGNORECASE):
-                found.append(pattern)
-        return found, library
+        return _matching_patterns(path, library), library
 
     outcome, entry = run_check(FILE_NAME_CHECK, check)
     if outcome is None:

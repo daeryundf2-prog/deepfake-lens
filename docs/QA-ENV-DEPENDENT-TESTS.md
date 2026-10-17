@@ -144,6 +144,9 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `c2pa-python and fixtures/c2pa-2.4 required` | `provenance`/`dev` extra(c2pa-python>=0.38) + `scripts/build_c2pa24_fixtures.py` 픽스처(techniques-2026) | test_c2pa24.py, test_marking_context.py |
 | `numpy, opencv and Pillow required` | `pixel`+`dev` extra(numpy, opencv-python, Pillow) — SDXL dwtDct 워터마크 검사(techniques-2026) | test_wm_sdxl.py |
 | `invisible-watermark + PyWavelets required (tech image)` | invisible-watermark·PyWavelets(`deepfake-lens-gate:tech` 이미지, `requirements-tech.lock`) — 디코더가 라이브러리와 비트 단위로 같은지 확인 | test_wm_sdxl.py |
+| `Pillow required` | `pixel`/`dev` extra(Pillow) — JPEG 양자화표 자연 순서를 Pillow의 IJG 품질 75 표와 대조(TB-4) | test_platform_traces.py |
+| `numpy required` | `dev` extra(numpy) — 유효 대역폭 측정(TB-4) | test_platform_traces.py |
+| `numpy and ffmpeg required` | numpy + `ffmpeg` 실행 파일 — 오디오 행의 통화·코덱·대역폭 흔적(TB-4) | test_platform_traces.py |
 | `onnxruntime, numpy and Pillow required` | `watermark` extra(onnxruntime) + numpy, Pillow — TrustMark 가중치 없음·핀 불일치 처리 | test_wm_trustmark.py |
 | `onnxruntime + pinned TrustMark decoders + fixtures/trustmark required (tech image)` | `watermark` extra + `scripts/fetch_watermark_models.py`로 받은 고정 TrustMark 디코더(`deepfake-lens-gate:tech`는 이미지에 포함) + `fixtures/trustmark` | test_wm_trustmark.py |
 | `torch required (tech image)` | `watermark_meta` extra(torch) — VideoSeal 가중치 없음·핀 불일치 처리 | test_wm_meta.py |
