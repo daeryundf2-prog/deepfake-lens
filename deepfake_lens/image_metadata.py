@@ -122,7 +122,11 @@ def read_image_metadata_full(path: Path, *, metadata_bytes: int = DEFAULT_METADA
     Raises ``OSError`` only when the file cannot be opened; a damaged
     structure is reported through ``error``.
     """
+    from .versioned_cache import file_version, offer_prefix
+
+    version = file_version(path)  # R27-5: before the read — the prefix is handed to later layers for this version only
     data = _read_prefix(path, metadata_bytes)
+    offer_prefix(path, version, metadata_bytes, data)
     # The structural completeness checks only apply when the prefix holds
     # the whole file — a prefix cut by ``metadata_bytes`` is not truncation.
     whole_file = len(data) < max(1, metadata_bytes)
@@ -205,12 +209,18 @@ def _read_exif_into(path: Path, metadata: dict[str, str], read: ImageMetadataRea
     except ImportError:
         read.notes.append("EXIF 미판독: 의존성 부재: PIL(Pillow) — 카메라 EXIF 일관성 검사를 하지 않았습니다.")
         return None, None
+    from .versioned_cache import file_version
+
     values: dict[str, str] = {}
     packet: bytes | None = None
+    version = file_version(path)  # R27-5: taken before the read (the hand-off below is valid for this version only)
     try:
         try:
             with Image.open(path) as image:
-                _exif_values(image.getexif(), values)
+                exif = image.getexif()
+                _exif_values(exif, values)
+                _offer_user_comment(path, version, exif)
+                _offer_pixels(path, version, image)
                 raw_xmp = image.info.get("xmp")
                 if isinstance(raw_xmp, str):
                     packet = raw_xmp.encode("utf-8", errors="replace")
@@ -236,6 +246,29 @@ def _read_exif_into(path: Path, metadata: dict[str, str], read: ImageMetadataRea
     metadata.update(values)
     read.exif_read = True
     return packet, None
+
+
+def _offer_user_comment(path: Path, version: tuple[int, ...] | None, exif: Any) -> None:
+    """R27-5: hand the EXIF UserComment of this ``getexif()`` to screen_capture.exif_user_comment (same Pillow call).
+
+    The screen-capture layer read the tag by opening the file again — for a PNG, ``getexif()`` decodes the whole
+    image. A failure here offers nothing, and that layer reads the file itself, as before.
+    """
+    from .screen_capture import EXIF_IFD, USER_COMMENT_HANDOFF, USER_COMMENT_TAG
+    from .versioned_cache import offer
+
+    try:
+        raw = exif.get_ifd(EXIF_IFD).get(USER_COMMENT_TAG)
+    except Exception:  # noqa: BLE001 - not offered; the screen-capture layer reads the file itself
+        return
+    offer(USER_COMMENT_HANDOFF, path, version, raw)
+
+
+def _offer_pixels(path: Path, version: tuple[int, ...] | None, image: Any) -> None:
+    """R27-5: a PNG's ``getexif()`` decoded the whole image — hand the pixels to the SDXL check (wm_imwatermark)."""
+    from .wm_imwatermark import offer_loaded
+
+    offer_loaded(path, version, image)
 
 
 # R18-6: the limitation of an image over Pillow's pixel-count limit (its EXIF was read without opening it).
@@ -574,10 +607,18 @@ def guess_image_source(metadata: dict[str, str], *, brands: bool = True) -> Sour
     return SourceGuess.unknown()
 
 
+HEADER_TEXT_MARKERS = ("prompt", "seed", "sampler", "stable", "comfy", "midjourney", "openai", "firefly", "runway", "novelai", "leonardo")
+_PRINTABLE_RUN = re.compile(r"[ -~]{4,}")
+# R27-5: one ASCII case-insensitive search instead of ``marker in item.lower()`` for each of 11 markers on every
+# printable run (a Python-level loop over ~1600 runs per file). The runs are printable ASCII ([ -~]), and with
+# re.ASCII, IGNORECASE folds exactly A-Z/a-z — the same as str.lower() on ASCII — so the selection is identical.
+_HEADER_MARKER = re.compile("|".join(re.escape(marker) for marker in HEADER_TEXT_MARKERS), re.IGNORECASE | re.ASCII)
+
+
 def _extract_header_text(data: bytes) -> str:
     text = data.decode("latin-1", errors="ignore")
-    strings = re.findall(r"[ -~]{4,}", text)
-    useful = [item for item in strings if any(marker in item.lower() for marker in ["prompt", "seed", "sampler", "stable", "comfy", "midjourney", "openai", "firefly", "runway", "novelai", "leonardo"])]
+    strings = _PRINTABLE_RUN.findall(text)
+    useful = [item for item in strings if _HEADER_MARKER.search(item)]
     return "\n".join(useful[:80])
 
 

@@ -59,8 +59,11 @@ class MarkingContextTest(unittest.TestCase):
             note.write_text("사람이 직접 쓴 메모입니다. " * 8, encoding="utf-8")
             text = self._result(note)
         assert audio.marking_context is not None and text.marking_context is not None
-        self.assertEqual([e["check"] for e in audio.marking_context["checked"]], ["c2pa", "watermark_audioseal", "container_metadata"])  # P0R-22: + container_metadata (AIGC labels, ID3)
-        self.assertEqual([e["check"] for e in text.marking_context["checked"]], ["c2pa"])
+        # P0R-22: + container_metadata (AIGC labels, ID3); TB-2: + watermark_perth (merge order: marks, then the container check).
+        self.assertEqual([e["check"] for e in audio.marking_context["checked"]], ["c2pa", "watermark_audioseal", "watermark_perth", "container_metadata"])
+        # TB-1: a text row also lists its invisible-Unicode-mark check (found / not_found / skipped).
+        self.assertEqual([e["check"] for e in text.marking_context["checked"]], ["c2pa", "text_invisible_marks"])
+        self.assertEqual(text.marking_context["checked"][1]["outcome"], "not_found")
         self.assertEqual(text.marking_context["checked"][0]["outcome"], "skipped")
 
     def test_context_is_in_the_scan_json(self) -> None:

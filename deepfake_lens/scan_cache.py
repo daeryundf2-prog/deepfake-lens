@@ -734,7 +734,9 @@ def _cache_key(
     the analysis — the kind (image/audio/…) and the reader (the C2PA SDK
     decides the format from it: an empty ``.png`` is an I/O failure, an
     empty ``.jpg`` an unsupported format) — so ``zero.png`` no longer
-    replays ``empty.jpg``'s row. ``root`` is accepted for call-site
+    replays ``empty.jpg``'s row. TB-4 (content-v5): the ids of the file-name formats the
+    base name matches (the file-name format check reads the name, its row never quotes it) —
+    a renamed file still hits unless the formats it matches differ. ``root`` is accepted for call-site
     compatibility and ignored. Returns "" (never cacheable) when the file
     cannot be read.
     """
@@ -761,6 +763,9 @@ def _cache_key(
             f"fmt:{OUTPUT_FORMAT_GENERATION}",
             f"sha256:{digest}",
             f"ext:{cache_extension(path)}",
+            # TB-4: the file-name formats the name matches (file_name_pattern reads the name; the row never quotes it),
+            # so a renamed file hits only when its name matches the same formats.
+            f"name:{_name_signature(path)}",
             f"opts:{_short_digest(options)}",
             context,
             # Threshold/weights provenance — a cached verdict computed under
@@ -768,6 +773,16 @@ def _cache_key(
             f"prov:{_short_digest(provenance)}",
         ]
     )
+
+
+def _name_signature(path: Path) -> str:
+    """TB-4: the ids of the platform-trace file-name formats ``path``'s name matches ("-" for none); never raises."""
+    try:
+        from .platform_traces import name_pattern_ids
+
+        return ",".join(name_pattern_ids(path)) or "-"
+    except Exception as exc:  # noqa: BLE001 — a key token, never an aborted scan (the check itself fails in coverage)
+        return f"error:{type(exc).__name__}"
 
 
 def _short_digest(text: str) -> str:
@@ -793,7 +808,7 @@ def _content_sha256(path: Path, fingerprints: dict[Path, str] | None = None) -> 
 
 # Bumped whenever the key layout changes so entries written under an older
 # layout (the path+size+mtime keys before G11) can never match.
-CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output format generation
+CACHE_KEY_VERSION = "content-v5"  # v3 (N6): + extension; v4 (R14-3): + output format generation; v5 (TB-4): + matched file-name formats
 # R14-3 (round 14): the generation of the rules that turn an analysis into a
 # row's text — reasons, limitations, verdict wording, path scrubbing, name
 # restoring. A cached row is the text an older commit wrote; the tool
@@ -888,7 +903,17 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 24: P0R-13 — the deterministic kind label is 「재현 가능한 기록 근거」 in every rendering (the [기록/…] qualifiers, the CSV
 #    top_evidence_label, the evidence statement), and an evidence-grade 판단 불가 row shows no grade label (CSV
 #    grade_label blank). The JSON fields are unchanged.
-OUTPUT_FORMAT_GENERATION = 24
+# 29: merge of techniques-2026b (TB, developed as its generations 18–28 on top of techniques-2026 generation 17)
+#    onto phase0 generation 24 — numbered past both sides (TB used 18–28, phase0 18–24, so 25–28 are taken) — a row now carries both sides: TB's text_invisible_marks (text/documents),
+#    document_structure (documents), platform_recompression / file_name_pattern / audio_channel_trace (images, video,
+#    audio; the cache key's "name:" token = matched file-name formats, layout content-v5), watermark_perth (audio, a
+#    video's audio track; tone-dominated signals skipped), device_ai_label and screen_capture (images), the
+#    generator-strings table and the C2PA signer naming item, the registry's FLUX.1 / SD 1 / SD 2 imwatermark
+#    messages — and phase0's container_metadata, ITL / exclusion C2PA rules, conclusion caveats and self_declared
+#    items; unsigned TB device / service labels carry self_declared. Neither side's earlier rows may be served.
+# 30: merge of techniques-2026b (its generation 29, the TB layers above) into phase0 after R27-2 / R27-5 (phase0
+#    generation 24; R27-5 changed no output) — numbered past both sides so that neither side's rows are served.
+OUTPUT_FORMAT_GENERATION = 30
 
 
 def cache_extension(path: Path) -> str:
@@ -936,6 +961,22 @@ def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | No
     from .container_metadata import registry_cache_tokens as container_registry_tokens
 
     tokens += container_registry_tokens()
+    # TB-4: the platform-trace library (JPEG tables, file-name formats, codec strings).
+    from .platform_traces import library_cache_tokens
+
+    tokens += library_cache_tokens()
+    # TB-3: the device-label table (Samsung SEFT names, Google AI credit labels).
+    from .device_labels import table_cache_tokens
+
+    tokens += table_cache_tokens()
+    # TB-5: the screen-traits table (native screen sizes, the "Screenshot" comment).
+    from .screen_capture import traits_cache_tokens
+
+    tokens += traits_cache_tokens()
+    # TB-7: the generator / service string table (tool-guess markers, XMP generator names, C2PA signer names).
+    from .generator_strings import table_cache_tokens as generator_cache_tokens
+
+    tokens += generator_cache_tokens()
     return f"tool:{TOOL_VERSION}|pins:{_short_digest(chr(10).join(tokens))}"
 
 

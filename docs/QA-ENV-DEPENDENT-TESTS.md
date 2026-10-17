@@ -46,7 +46,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `POSIX signals` | Windows가 아닌 OS(POSIX — 자식 프로세스에 SIGTERM/SIGINT/SIGHUP을 보내 기본 동작과 스테이징 폴더 정리 확인) | test_audio_worker.py, test_native_path.py, test_shutdown.py |
 | `POSIX uid` | Windows가 아닌 OS(POSIX — `os.getuid`로 폴더 소유자를 확인하는 환경별 numba 캐시 폴더, R22-9; 모드 0 파일을 root가 아닌 사용자(root면 nobody)로 `classify`, R24-5) | test_audio_worker.py, test_standalone_contract.py |
 | `PR_SET_PDEATHSIG is Linux` | Linux(`prctl(PR_SET_PDEATHSIG)` — 부모가 SIGKILL로 죽으면 ffmpeg 등 자식 프로세스도 함께 종료, R15-1) | test_shutdown.py |
-| `Pillow + numpy needed for the fixture` | `dev` extra(Pillow, numpy) | test_report_labels_ko.py |
+| `Pillow + numpy needed for the fixture` | `dev` extra(Pillow, numpy) | test_report_labels_ko.py, test_scan_overhead.py |
 | `opencv + librosa required` | `full` extra(opencv-python, librosa) + `ffmpeg` 실행 파일 — 음성 트랙이 있는·없는 mp4로 A/V 싱크 검사(R25-9) | test_multimodal.py |
 | `POSIX file names` | Windows가 아닌 OS(POSIX — 압축 구성원 이름의 `:`가 보통 문자, R25-6) | test_archives.py |
 | `POSIX working folder deeper than PATH_MAX` | Windows가 아닌 OS(POSIX — PATH_MAX보다 깊은 작업 폴더에서 비ASCII 이름을 네이티브 디코더용 이름으로 스테이징, R25-4) | test_native_path.py |
@@ -145,11 +145,18 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `c2pa-python and fixtures/c2pa-2.4 required` | `provenance`/`dev` extra(c2pa-python>=0.38) + `scripts/build_c2pa24_fixtures.py` 픽스처(techniques-2026) | test_c2pa24.py, test_marking_context.py |
 | `numpy, opencv and Pillow required` | `pixel`+`dev` extra(numpy, opencv-python, Pillow) — SDXL dwtDct 워터마크 검사(techniques-2026) | test_wm_sdxl.py |
 | `invisible-watermark + PyWavelets required (tech image)` | invisible-watermark·PyWavelets(`deepfake-lens-gate:tech` 이미지, `requirements-tech.lock`) — 디코더가 라이브러리와 비트 단위로 같은지 확인 | test_wm_sdxl.py |
+| `Pillow required` | `pixel`/`dev` extra(Pillow) — JPEG 양자화표 자연 순서를 Pillow의 IJG 품질 75 표와 대조(TB-4) | test_platform_traces.py |
+| `numpy required` | `dev` extra(numpy) — 유효 대역폭 측정(TB-4), PerTh 순음 판별(TB-2) | test_platform_traces.py, test_wm_perth.py |
+| `numpy and ffmpeg required` | numpy + `ffmpeg` 실행 파일 — 오디오 행의 통화·코덱·대역폭 흔적(TB-4) | test_platform_traces.py |
 | `onnxruntime, numpy and Pillow required` | `watermark` extra(onnxruntime) + numpy, Pillow — TrustMark 가중치 없음·핀 불일치 처리 | test_wm_trustmark.py |
 | `onnxruntime + pinned TrustMark decoders + fixtures/trustmark required (tech image)` | `watermark` extra + `scripts/fetch_watermark_models.py`로 받은 고정 TrustMark 디코더(`deepfake-lens-gate:tech`는 이미지에 포함) + `fixtures/trustmark` | test_wm_trustmark.py |
 | `torch required (tech image)` | `watermark_meta` extra(torch) — VideoSeal 가중치 없음·핀 불일치 처리 | test_wm_meta.py |
 | `torch + pinned VideoSeal weights required (tech image)` | `watermark_meta` extra + 고정 VideoSeal 가중치(`deepfake-lens-gate:tech`) | test_wm_meta.py |
 | `torch + audioseal + pinned detector + ffmpeg required (tech image)` | `watermark_meta` extra(torch, audioseal) + 고정 AudioSeal 검출기 + `ffmpeg` 실행 파일(`deepfake-lens-gate:tech`) | test_wm_meta.py |
+| `torch is installed` | torch가 **없는** 환경(`deepfake-lens-gate:latest`) — PerTh 검사가 「의존성 부재: torch」로 건너뛰어지는지 확인(TB-2) | test_wm_perth.py |
+| `torch required` | `watermark_perth` extra(torch) — PerTh 가중치 없음·핀 불일치 처리 | test_wm_perth.py |
+| `perth-implicit-250000.pth.tar not in the models folder (tech2 image)` | 고정 PerTh 가중치(`deepfake-lens-gate:tech2`, `scripts/fetch_watermark_models.py --only perth`) | test_wm_perth.py |
+| `torch, librosa and ffmpeg required (tech2 image)` | `watermark_perth` extra + `ffmpeg` + 고정 PerTh 가중치(`deepfake-lens-gate:tech2`) — 패키지 기준값과의 일치 | test_wm_perth.py |
 
 ## 환경 의존 기준선 테스트
 

@@ -64,6 +64,13 @@
       "source": "https://huggingface.co/facebook/audioseal/resolve/3c19eba53390776cf2cc9ed5f6c9ac67ce72ecba/detector_base.pth (Meta AudioSeal 16-bit detector; scripts/fetch_watermark_models.py, retrieved 2026-10-15)",
       "license": "MIT (facebook/audioseal model card)",
       "used_by": "wm_meta.py (AudioSeal watermark detection)"
+    },
+    {
+      "name": "perth-implicit-250000.pth.tar",
+      "sha256": "a15bce457ebc53ce5e6c9c3f11df78cf7ee2bf9cdab0a798902135b4c4027670",
+      "source": "perth/perth_net/pretrained/implicit/perth_net_250000.pth.tar inside the PyPI wheel resemble_perth-1.0.1-py3-none-any.whl (wheel sha256 65e9c37531b1a128a4a56226b75dece4521683cf3611b0b2a5ffe234f00c9342; Resemble AI PerTh implicit watermarker, the one Chatterbox applies by default); scripts/fetch_watermark_models.py --only perth, retrieved 2026-10-17",
+      "license": "MIT (resemble-perth 1.0.1 LICENSE, Copyright (c) 2025 Resemble AI)",
+      "used_by": "wm_perth.py (PerTh implicit watermark presence)"
     }
   ]
 }

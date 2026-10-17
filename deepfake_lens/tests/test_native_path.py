@@ -2316,7 +2316,8 @@ class OldCacheRowsTest(unittest.TestCase):
         _, cold = self._scan()
         payload = json.loads(self.cache.read_text(encoding="utf-8"))
         items = payload["items"]
-        self.assertTrue(items and all(key.startswith(f"content-v4|fmt:{scan_cache.OUTPUT_FORMAT_GENERATION}|") for key in items), list(items)[:2])
+        prefix = f"{scan_cache.CACHE_KEY_VERSION}|fmt:{scan_cache.OUTPUT_FORMAT_GENERATION}|"  # TB-4: content-v5 (+ matched file-name formats)
+        self.assertTrue(items and all(key.startswith(prefix) for key in items), list(items)[:2])
         poisoned = {}
         for key, row in items.items():
             # One row per content key: the stored row may be the Korean copy's.
@@ -2331,7 +2332,7 @@ class OldCacheRowsTest(unittest.TestCase):
                 row["result"]["limitations"].append("검사 실패 — audio_features: LibsndfileError: Error opening '000002-e92739787767.m4a'")
                 poisoned[key] = row
                 # The same row under the pre-R14-3 key layout (no fmt:).
-                old_key = key.replace(f"content-v4|fmt:{scan_cache.OUTPUT_FORMAT_GENERATION}|", "content-v3|")
+                old_key = key.replace(prefix, "content-v3|")
                 poisoned[old_key] = row
             if row["path"].endswith("garbage.wav"):
                 row = json.loads(json.dumps(row))

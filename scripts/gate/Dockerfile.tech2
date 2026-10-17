@@ -1,0 +1,22 @@
+# techniques-2026b gate image: deepfake-lens-gate:tech (unchanged) + the PerTh implicit decoder weight (TB-2).
+# Build:  docker build -t deepfake-lens-gate:tech2 -f scripts/gate/Dockerfile.tech2 scripts/gate
+#   No Python package is added: wm_perth.py re-implements the decoder with torch (already in :tech). The weight is
+#   perth_net_250000.pth.tar from the MIT wheel resemble-perth 1.0.1 (PyPI); the wheel and the extracted file are
+#   both checked against their sha256 here (the file's is pinned in deepfake_lens/models/assets.json as
+#   perth-implicit-250000.pth.tar). gate.sh copies /opt/deepfake-lens-weights into the work tree's models folder.
+# The tags deepfake-lens-gate:latest and :tech are never rebuilt or retagged by this file.
+FROM deepfake-lens-gate:tech
+RUN cd /opt/deepfake-lens-weights && python - <<'PY'
+import hashlib, io, urllib.request, zipfile
+URL = "https://files.pythonhosted.org/packages/77/cc/73226dd776f8e9c2975f64f4efc22988fb37e5b185ba5cccd6f2e7196954/resemble_perth-1.0.1-py3-none-any.whl"
+WHEEL = "65e9c37531b1a128a4a56226b75dece4521683cf3611b0b2a5ffe234f00c9342"
+MEMBER = "perth/perth_net/pretrained/implicit/perth_net_250000.pth.tar"
+FILE = "a15bce457ebc53ce5e6c9c3f11df78cf7ee2bf9cdab0a798902135b4c4027670"
+data = urllib.request.urlopen(urllib.request.Request(URL, headers={"User-Agent": "deepfake-lens-gate-tech2"}), timeout=900).read()
+assert hashlib.sha256(data).hexdigest() == WHEEL, "wheel"
+weight = zipfile.ZipFile(io.BytesIO(data)).read(MEMBER)
+assert hashlib.sha256(weight).hexdigest() == FILE, "weight"
+open("perth-implicit-250000.pth.tar", "wb").write(weight)
+print("perth-implicit-250000.pth.tar", len(weight))
+PY
+WORKDIR /repo

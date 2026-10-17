@@ -1,6 +1,6 @@
 {
   "schema": "watermark-registry-v1",
-  "version": "2026-10-15.1",
+  "version": "2026-10-17.3",
   "note": "techniques-2026: known generator watermark messages. A decoded mark is linked to a generator ONLY on an exact match with an entry here (bit-for-bit for imwatermark; the bit-accuracy rule of the entry for neural decoders). The table is versioned: a change bumps 'version' and the output generation. An empty algorithm list means no public, verified generator message is known — a decoded message is then recorded as a fact only.",
   "entries": [
     {
@@ -10,17 +10,66 @@
       "generator": "Stable Diffusion XL 공식 파이프라인",
       "source": "https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/stable_diffusion_xl/watermark.py (WATERMARK_MESSAGE = 0b101100111110110010010000011110111011000110011110); https://github.com/Stability-AI/generative-models/blob/main/sgm/inference/helpers.py (same 48-bit message)",
       "checked": "2026-10-15",
-      "limitations": "The message is public and the invisible-watermark library (MIT) can embed it into any image, so a match shows that the SDXL watermarker (or someone imitating it) marked the pixels — like a generator metadata field. Pipelines run with add_watermarker=False, images under 256 px wide and SD3/FLUX diffusers pipelines carry no such mark."
+      "limitations": "The message is public and the invisible-watermark library (MIT) can embed it into any image, so a match shows that the SDXL watermarker (or someone imitating it) marked the pixels — like a generator metadata field. Pipelines run with add_watermarker=False, images under 256 px wide and SD3/FLUX diffusers pipelines carry no such mark.",
+      "title": "SDXL 공식 파이프라인 워터마크 존재",
+      "checked_again": "2026-10-17: Stability-AI/generative-models@e8cd657656fa5d61688191730d0e03242bf4ed44 sgm/inference/helpers.py L54-58 (every save path); huggingface/diffusers@b800f828f3951c4d206e154411bcbfa693cd322e — 18 SDXL-family pipelines, on by default when invisible-watermark is installed"
+    },
+    {
+      "id": "perth-implicit-chatterbox",
+      "algorithm": "perth-implicit",
+      "expected_payload": "1",
+      "generator": "Resemble의 PerTh 암묵 워터마커(Chatterbox가 모든 출력에 기본 삽입)",
+      "source": "https://github.com/resemble-ai/chatterbox/blob/5de7a54aa4e5e2baadb0182dde554908b48b85c2/src/chatterbox/tts.py (L126 self.watermarker = perth.PerthImplicitWatermarker(); L271 apply_watermark) and src/chatterbox/vc.py (L29, L103); README 'Built-in PerTh Watermarking for Responsible AI'; decoder weights: resemble-perth 1.0.1 wheel (MIT)",
+      "checked": "2026-10-17",
+      "limitations": "The implicit PerTh mark has no message: a detection is one bit. Resemble AI's own services and anyone using the MIT library embed the same mark, so a match is a moderate synthetic-direction item that only blocks an authenticity conclusion; it never names Chatterbox as the generator by itself.",
+      "min_confidence": 0.9,
+      "min_confidence_basis": "Measured 2026-10-17 on 240 LibriSpeech dev-clean utterances: unmarked max 0.780 (3 of 240 >= 0.5), marked (apply_watermark, 16-bit) min 0.922; 0 unmarked >= 0.9.",
+      "tonal_guard": "wm_perth.MAX_TONAL_RATIO 0.9: a signal whose 3 strongest spectral peaks hold >= 90% of the energy is skipped (ffmpeg 440 Hz sine scored 0.99; LibriSpeech max share 0.622)"
+    },
+    {
+      "id": "flux1-reference-imwatermark-dwtdct-46",
+      "algorithm": "imwatermark-dwtDct",
+      "message_bits": "1010101111111010000111100111001111010100101110",
+      "generator": "FLUX.1 공식 참조 구현(black-forest-labs/flux)",
+      "title": "FLUX.1 참조 구현 워터마크 존재",
+      "source": "https://github.com/black-forest-labs/flux/blob/802fb4713906133fcbd0d8dc5351620ca4773036/src/flux/util.py (L733-774: WATERMARK_MESSAGE = 0b001010101111111010000111100111001111010100101110, WATERMARK_BITS = [int(bit) for bit in bin(WATERMARK_MESSAGE)[2:]], set_watermark('bits', ...), encode(..., 'dwtDct'); save_image() L258 always calls embed_watermark — cli.py, cli_control.py, cli_fill.py, cli_kontext.py, cli_redux.py, demo_gr.py, demo_st.py)",
+      "checked": "2026-10-17",
+      "limitations": "bin() drops the two leading zeros of the 48-bit constant, so the reference code embeds 46 bits — the registered message. Only the reference repository's scripts apply it; diffusers' Flux pipelines and FLUX.2 / FLUX.3 do not (확인: 기본 워터마크 없음 — docs/MACHINE-READABLE-MARKS.md §10). The message is public and can be imitated."
+    },
+    {
+      "id": "sd1-txt2img-imwatermark-dwtdct-bytes",
+      "algorithm": "imwatermark-dwtDct",
+      "message_bits": "0101001101110100011000010110001001101100011001010100010001101001011001100110011001110101011100110110100101101111011011100101011000110001",
+      "generator": "Stable Diffusion 1.x 공식 txt2img 스크립트(CompVis/stable-diffusion)",
+      "title": "Stable Diffusion 1 공식 스크립트 워터마크 존재",
+      "source": "https://github.com/CompVis/stable-diffusion/blob/21f890f9da3cfbeaba8e2ac3c425ee9e998d5229/scripts/txt2img.py (L69-73, L261-264: wm = \"StableDiffusionV1\", set_watermark('bytes', wm.encode('utf-8')), encode(img, 'dwtDct'), applied to every saved sample and grid); scripts/tests/test_watermark.py decodes WatermarkDecoder('bytes', 136)",
+      "checked": "2026-10-17",
+      "limitations": "136 bits = the 17 UTF-8 bytes, MSB first (numpy.unpackbits, as imwatermark's 'bytes' type). Only txt2img applies it; img2img and third-party UIs do not."
+    },
+    {
+      "id": "sd2-scripts-imwatermark-dwtdct-bytes",
+      "algorithm": "imwatermark-dwtDct",
+      "message_bits": "01010011010001000101011000110010",
+      "generator": "Stable Diffusion 2.x 공식 스크립트(Stability-AI/stablediffusion)",
+      "title": "Stable Diffusion 2 공식 스크립트 워터마크 존재",
+      "source": "Stability-AI/stablediffusion@f16630a927e00098b524d687640719e4eb469b76 (read from the Software Heritage archive, snapshot 2025-12-09 — the GitHub repository returns 404): scripts/txt2img.py L206-209/L231-234 (wm = \"SDV2\", 'bytes', 'dwtDct'), also scripts/img2img.py, scripts/gradio/depth2img.py, scripts/streamlit/superresolution.py",
+      "checked": "2026-10-17",
+      "limitations": "32 bits = the 4 bytes 'SDV2', MSB first. A shorter message: the chance of an exact match in a random image is 2 x 2^-32 per image under a uniform-bit model."
     }
   ],
   "algorithms": {
     "imwatermark-dwtDct": "invisible-watermark dwtDct; match = all bits equal (exact)",
     "videoseal-1.0": "Meta Video Seal 1.0, 256 bits; match = at least min_agreement_bits (default 243) equal bits — no entry registered",
-    "audioseal-16": "Meta AudioSeal, 16 bits; match = all 16 bits equal after a detection — no entry registered"
+    "audioseal-16": "Meta AudioSeal, 16 bits; match = all 16 bits equal after a detection — no entry registered",
+    "perth-implicit": "Resemble AI PerTh implicit watermark (resemble-perth 1.0.1, perth_net_250000); presence fact = confidence >= 0.5 (the package's rounding); registry match = confidence >= the entry's min_confidence and expected_payload \"1\" — moderate, never a conclusion (1 bit)"
   },
   "unregistered_algorithms": {
     "trustmark": "TrustMark payloads are IDs (e.g. a soft-binding key), not generator names; a payload is linked to a manifest only by matching a valid manifest's c2pa.soft-binding value — never to a generator by this table.",
     "videoseal": "No public, verified generator message for VideoSeal/PixelSeal (2026-10). Meta does not document which messages its products embed.",
     "audioseal": "No public, verified generator message for AudioSeal 16-bit messages (2026-10)."
+  },
+  "no_default_watermark": {
+    "checked": "2026-10-17",
+    "note": "확인: 기본 워터마크 없음 — read in source: black-forest-labs/flux2@50fe5162777813d869182b139e83b10743caef15 (src/flux2/watermark.py has the FLUX.1 constant but scripts/cli.py L27 import and L618 call are commented out; the CLI writes EXIF Software 'AI generated;flux2' instead), black-forest-labs/flux-3-image-klein@e53f4ea697fe45db8f38fca91a90f5623f7f8f37 (EXIF only: src/flux3/safety.py L121-124), Stability-AI/sd3.5@8565799a, Stability-AI/StableCascade@7a7d341f, diffusers@b800f828 flux/flux2/flux3/stable_diffusion_3/stable_cascade/kandinsky*/wuerstchen/pixart/aura_flow/hunyuandit/qwenimage/z_image/kolors/sana pipelines, Kandinsky-2@aeefc1ce, Kandinsky-3@a4c9e92e, Qwen-Image@6b5e1f5c, Z-Image@26f23eda, PixArt-sigma@1ce521af, HunyuanDiT@bf376934. DeepFloyd IF pastes a visible logo (not an invisible message)."
   }
 }

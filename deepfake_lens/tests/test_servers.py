@@ -2799,7 +2799,11 @@ class ReportRecordsAnalysisOptionsTest(_ReportLegsFixture):
         for leg, make in self._legs():
             with self.subTest(leg=leg):
                 status, _, raw = make()("/api/report?format=html", self._json({"scan_job": job}))
-                self.assertIn("재분석 옵션", raw.decode("utf-8"))
+                # R27-2 (round 27): the report signs the job's rows without re-analysing them, so the label names
+                # the options the job ran with — the old "재분석 옵션(…모든 행을 다시 분석)" was a false statement.
+                page = raw.decode("utf-8")
+                self.assertIn("검사 옵션(서버가 이 검사 작업을 실행한 옵션)", page)
+                self.assertNotIn("재분석", page)
 
 
 class ReportUnrecordedFilesAreTheServersTest(_ReportLegsFixture):

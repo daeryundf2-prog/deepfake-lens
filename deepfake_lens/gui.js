@@ -447,9 +447,11 @@
             audio_analysis: '오디오 분석', audio_features: '오디오 특징 추출', video_analysis: '영상 분석', av_audio: '영상 음성 트랙 분석',
             document_text: '문서 텍스트 추출', text_lexical: '어휘·문체 신호', archive: '압축 해제',
             archive_member: '압축 구성 파일', archive_member_name: '압축 구성 파일 이름 구분', file_integrity: '분석 전후 파일 동일성',
-            // Merge of phase0 (techniques-2026, P0R-22): the watermark, online-only and container metadata checks.
-            watermark_sdxl: 'SDXL 워터마크(imwatermark) 검사', watermark_trustmark: 'TrustMark 워터마크 검사',
-            watermark_videoseal: 'VideoSeal 워터마크 검사', watermark_audioseal: 'AudioSeal 워터마크 검사', online_detection: '온라인 전용 검출(미실행)',
+            // Merges of phase0 (techniques-2026 P0R-22, techniques-2026b TB): watermark, online-only, container and TB fact checks.
+            watermark_sdxl: 'imwatermark 고정 메시지 워터마크 검사(SDXL·FLUX.1·SD 1/2)', watermark_trustmark: 'TrustMark 워터마크 검사',
+            watermark_videoseal: 'VideoSeal 워터마크 검사', watermark_audioseal: 'AudioSeal 워터마크 검사', online_detection: '온라인 전용 검출(미실행)', watermark_perth: 'PerTh 워터마크 검사',
+            text_invisible_marks: '비가시 유니코드 표식 검사', document_structure: '문서 구조 사실(증분 저장·편집 메타데이터)',
+            platform_recompression: '플랫폼 재압축 양자화표 대조', file_name_pattern: '파일 이름 형식(메신저·스크린샷·녹음)', audio_channel_trace: '통화·메신저 코덱·대역폭 흔적', device_ai_label: '기기 AI 편집 라벨(삼성·Google)', screen_capture: '스크린샷 사실(캡처 주석·화면 해상도)',
             container_metadata: '컨테이너·비트스트림 메타데이터 판독',
         };
         const COVERAGE_STATUS_LABELS = { ran: '실행', skipped: '미실행', failed: '실패' };

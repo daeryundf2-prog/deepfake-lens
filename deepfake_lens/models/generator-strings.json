@@ -1,0 +1,303 @@
+{
+  "schema": "generator-strings-v1",
+  "version": "2026-10-17.2",
+  "note": "techniques-2026b TB-7: the generator / service strings the self-declaration rules look for (tool_guess_rules, xmp_generator_names — strengths unchanged: evidence_rules decides them) and the C2PA signer / claim-generator display table (c2pa_signers — a neutral naming fact only; the C2PA rules decide). Every addition names its source. Not found (2026-10-17): Midjourney V8-specific fields (only '--v N' inside Description), Firefly partner-model naming, Stability / ElevenLabs claim generators, Seedream 4.x strings, gpt-image-1.5 / ChatGPT Images 2.5 consumer strings — see docs/FACT-LAYERS.md.",
+  "tool_guess_rules": [
+    {
+      "label": "Midjourney/Niji 추정",
+      "markers": [
+        "midjourney",
+        "niji"
+      ],
+      "reason": "Midjourney/Niji 단서가 메타데이터에 있습니다.",
+      "since": "phase 0 (moved to this table unchanged, TB-7)"
+    },
+    {
+      "label": "Flux / Black Forest Labs 추정",
+      "markers": [
+        "flux",
+        "black forest labs",
+        "bfl",
+        "ai generated;flux2"
+      ],
+      "reason": "Flux 또는 Black Forest Labs 단서가 메타데이터에 있습니다.",
+      "since": "phase 0 (moved to this table unchanged, TB-7)",
+      "added": {
+        "marker": "ai generated;flux2",
+        "source": "black-forest-labs/flux2@50fe5162777813d869182b139e83b10743caef15 scripts/cli.py L636-637 (EXIF Software = \"AI generated;flux2\")",
+        "confidence": "공식 소스 코드",
+        "checked": "2026-10-17"
+      }
+    },
+    {
+      "label": "Stable Diffusion 추정",
+      "markers": [
+        "stable diffusion",
+        "stablediffusion",
+        "automatic1111",
+        "a1111",
+        "sd-webui"
+      ],
+      "reason": "Stable Diffusion 계열 단서가 메타데이터에 있습니다.",
+      "since": "phase 0 (moved to this table unchanged, TB-7)"
+    },
+    {
+      "label": "DALL-E/OpenAI 추정",
+      "markers": [
+        "dall-e",
+        "dalle",
+        "openai",
+        "chatgpt"
+      ],
+      "reason": "DALL-E/OpenAI 단서가 메타데이터에 있습니다.",
+      "since": "phase 0 (moved to this table unchanged, TB-7)"
+    },
+    {
+      "label": "Google Imagen/Gemini 추정",
+      "markers": [
+        "imagen",
+        "gemini",
+        "google ai studio",
+        "nano banana"
+      ],
+      "reason": "Google Imagen/Gemini 계열 단서가 메타데이터에 있습니다.",
+      "since": "phase 0 (moved to this table unchanged, TB-7)"
+    },
+    {
+      "label": "Adobe Firefly 추정",
+      "markers": [
+        "adobe firefly",
+        "firefly"
+      ],
+      "reason": "Adobe Firefly 단서가 메타데이터에 있습니다.",
+      "since": "phase 0 (moved to this table unchanged, TB-7)"
+    },
+    {
+      "label": "Ideogram 추정",
+      "markers": [
+        "ideogram"
+      ],
+      "reason": "Ideogram 단서가 메타데이터에 있습니다.",
+      "since": "phase 0 (moved to this table unchanged, TB-7)"
+    },
+    {
+      "label": "Runway 추정",
+      "markers": [
+        "runway"
+      ],
+      "reason": "Runway 단서가 메타데이터에 있습니다.",
+      "since": "phase 0 (moved to this table unchanged, TB-7)"
+    },
+    {
+      "label": "Leonardo.ai 추정",
+      "markers": [
+        "leonardo.ai",
+        "leonardo ai"
+      ],
+      "reason": "Leonardo.ai 단서가 메타데이터에 있습니다.",
+      "since": "phase 0 (moved to this table unchanged, TB-7)"
+    },
+    {
+      "label": "NovelAI 추정",
+      "markers": [
+        "novelai",
+        "novel ai"
+      ],
+      "reason": "NovelAI 단서가 메타데이터에 있습니다.",
+      "since": "phase 0 (moved to this table unchanged, TB-7)"
+    },
+    {
+      "label": "Recraft 추정",
+      "markers": [
+        "recraft"
+      ],
+      "reason": "Recraft 단서가 메타데이터에 있습니다.",
+      "since": "phase 0 (moved to this table unchanged, TB-7)"
+    },
+    {
+      "label": "Canva AI 추정",
+      "markers": [
+        "canva ai",
+        "magic media"
+      ],
+      "reason": "Canva AI/Magic Media 단서가 메타데이터에 있습니다.",
+      "since": "phase 0 (moved to this table unchanged, TB-7)"
+    },
+    {
+      "label": "Grok/xAI 추정",
+      "markers": [
+        "grok",
+        "xai"
+      ],
+      "reason": "Grok/xAI 단서가 메타데이터에 있습니다.",
+      "since": "phase 0 (moved to this table unchanged, TB-7)"
+    },
+    {
+      "label": "ByteDance Seedream/Seedance(Dreamina) 추정",
+      "markers": [
+        "dreamina",
+        "seedream",
+        "seedance",
+        "byteplus_modelark",
+        "volcengine_ark_cn"
+      ],
+      "reason": "ByteDance의 시드림·시댄스(드리미나·바이트플러스·볼케이노엔진) 단서가 메타데이터에 있습니다.",
+      "source": "wiltodelta/remove-ai-watermarks docs/watermarking-landscape.md + data/fixtures/README.md (2026-09/10, Dreamina/7.5.0 ingredient, BytePlus_ModelArk / Volcengine_Ark_CN softwareAgent); storytold/artcraft-services crates/lib/video_info/src/seedance_info.rs (2026-06-19)",
+      "confidence": "제3자 실제 파일 관찰",
+      "checked": "2026-10-17"
+    },
+    {
+      "label": "Luma AI 추정",
+      "markers": [
+        "luma ai"
+      ],
+      "reason": "Luma AI 단서가 메타데이터에 있습니다.",
+      "source": "wiltodelta/remove-ai-watermarks constants (PNG tEXt Source=Luma AI, 2026-10-01); C2PA conforming products list (Luma AI, Inc., 2026-10-08)",
+      "confidence": "제3자 관찰 + C2PA 적합 제품 목록",
+      "checked": "2026-10-17"
+    },
+    {
+      "label": "아마존 Nova 추정",
+      "markers": [
+        "nova canvas",
+        "nova reel",
+        "amazon bedrock"
+      ],
+      "reason": "아마존 Bedrock의 Nova 이미지·영상 단서가 메타데이터에 있습니다.",
+      "source": "c2pa-org/conformance-public conforming-products-list.json (Amazon Bedrock, 2026-10-16); wiltodelta/remove-ai-watermarks (Nova Canvas, Nova Reel 1.1)",
+      "confidence": "C2PA 적합 제품 목록 + 제3자 관찰",
+      "checked": "2026-10-17"
+    },
+    {
+      "label": "마이크로소프트 애저·디자이너 추정",
+      "markers": [
+        "azure openai",
+        "microsoft designer",
+        "bing image creator"
+      ],
+      "reason": "마이크로소프트(애저 OpenAI 서비스, 디자이너, 빙 이미지 생성기) 단서가 메타데이터에 있습니다.",
+      "source": "https://learn.microsoft.com/en-us/azure/foundry-classic/openai/concepts/content-credentials (softwareAgent 'Azure OpenAI DALL-E' / 'Azure OpenAI ImageGen', updated 2026-06-05)",
+      "confidence": "공식 문서",
+      "checked": "2026-10-17"
+    },
+    {
+      "label": "애플 이미지 플레이그라운드 추정",
+      "markers": [
+        "apple image playground",
+        "image playground"
+      ],
+      "reason": "애플 이미지 플레이그라운드 단서가 메타데이터에 있습니다.",
+      "source": "wiltodelta/remove-ai-watermarks (photoshop:Credit = Apple Image Playground, 2026-09-23)",
+      "confidence": "제3자 실제 파일 관찰",
+      "checked": "2026-10-17"
+    }
+  ],
+  "xmp_generator_names": {
+    "names": [
+      "Flux",
+      "Midjourney",
+      "DALL-E",
+      "DALL·E",
+      "Imagen",
+      "Stable Diffusion",
+      "Firefly",
+      "Gemini",
+      "Nano Banana",
+      "AI Generated",
+      "Generated by AI"
+    ],
+    "since": "phase 0 D7 (moved unchanged, TB-7)"
+  },
+  "c2pa_signers": [
+    {
+      "match": "OpenAI Media Service",
+      "service": "OpenAI(gpt-image·Sora 등 2026 서명 인증서)",
+      "source": "C2PA conforming products list (O=OpenAI OpCo, LLC, CN=OpenAI Media Service, conformant 2026-01-28); gpt-image-2 manifest dump (claim generator 'OpenAI Media Service API', 2026-07-17)",
+      "confidence": "C2PA 적합 제품 목록(공식) + 실제 파일"
+    },
+    {
+      "match": "Truepic Lens CLI in ChatGPT",
+      "service": "OpenAI ChatGPT(이전 서명 인증서)",
+      "source": "contentauth/c2pa-conformance-tool-cli output/ChatGPT_Image.json (2026-03-18)",
+      "confidence": "CAI 공식 예제 덤프"
+    },
+    {
+      "match": "Truepic Lens CLI in Sora",
+      "service": "OpenAI Sora/ChatGPT(이전 서명 인증서)",
+      "source": "contentauth/example-assets videos/manifests/sora.json (2025-12-11)",
+      "confidence": "CAI 공식 예제 덤프"
+    },
+    {
+      "match": "Adobe Firefly C2PA",
+      "service": "Adobe Firefly",
+      "source": "contentauth/example-assets images/manifests/Firefly_tabby_cat.json (2025-10-23)",
+      "confidence": "CAI 공식 예제 덤프"
+    },
+    {
+      "match": "Google Media Processing Services",
+      "service": "Google 생성형 AI 서비스(제미나이, 버텍스, 비오)",
+      "source": "https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/content-credentials (2026-10-15); C2PA conforming products list",
+      "confidence": "공식 문서"
+    },
+    {
+      "match": "Google C2PA SDK for Android",
+      "service": "Google의 Pixel 카메라(촬영 기기 — 생성 서비스 아님)",
+      "source": "contentauth/c2pa-conformance-tool-cli output/PXL_20260208_202351558.json; hackerfactor.com Pixel 10 C2PA (2025-09-05)",
+      "confidence": "실제 파일 덤프"
+    },
+    {
+      "match": "Black Forest Labs",
+      "service": "블랙 포레스트 랩스의 FLUX API",
+      "source": "https://help.bfl.ai/articles/3705384267-c2pa-in-flux-generated-images ; contentauth/verify-site interim trust list (O=Black Forest Labs Inc.)",
+      "confidence": "공식 문서(문자열은 신뢰 목록 인증서)"
+    },
+    {
+      "match": "Stability AI",
+      "service": "스태빌리티 AI(브랜드 스튜디오, 스테이블 오디오, API)",
+      "source": "C2PA conforming products list (Stability AI US Services Corporation, 2026-08-26); interim trust list (Stability AI Ltd)",
+      "confidence": "C2PA 적합 제품 목록(공식)"
+    },
+    {
+      "match": "Eleven Labs",
+      "service": "ElevenLabs(음성)",
+      "source": "contentauth/verify-site static/trust/allowed.pem (O=CN=Eleven Labs Inc., 2026-04-21)",
+      "confidence": "CAI 임시 신뢰 목록 인증서(공식)"
+    },
+    {
+      "match": "Runway",
+      "service": "Runway",
+      "source": "C2PA conforming products list (Runway AI, Inc, CN=Runway)",
+      "confidence": "C2PA 적합 제품 목록(공식)"
+    },
+    {
+      "match": "Luma AI",
+      "service": "Luma AI",
+      "source": "C2PA conforming products list (Luma AI, Inc., 2026-10-08)",
+      "confidence": "C2PA 적합 제품 목록(공식)"
+    },
+    {
+      "match": "Amazon Bedrock",
+      "service": "아마존 베드록(노바)",
+      "source": "C2PA conforming products list (CN Amazon Bedrock)",
+      "confidence": "C2PA 적합 제품 목록(공식)"
+    },
+    {
+      "match": "Microsoft Corporation",
+      "service": "마이크로소프트(애저 OpenAI 서비스, 디자이너, 빙)",
+      "source": "https://learn.microsoft.com/en-us/azure/foundry-classic/openai/concepts/content-credentials (issuer shown as Microsoft Corporation)",
+      "confidence": "공식 문서"
+    },
+    {
+      "match": "Bytedance Pte. Ltd.",
+      "service": "ByteDance(드리미나·시드림·시댄스)",
+      "source": "wiltodelta/remove-ai-watermarks data/fixtures/README.md (2026-09-24)",
+      "confidence": "제3자 실제 파일 관찰"
+    },
+    {
+      "match": "Byteplus Pte. Ltd.",
+      "service": "BytePlus ModelArk(Seedance)",
+      "source": "storytold/artcraft-services seedance_info.rs (2026-06-19)",
+      "confidence": "제3자 실제 파일 관찰"
+    }
+  ]
+}

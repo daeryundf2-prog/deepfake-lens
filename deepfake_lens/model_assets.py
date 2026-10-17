@@ -61,6 +61,8 @@ S3FD_WEIGHTS = "sfd_face.pth"
 TRUSTMARK_DECODERS = ("trustmark-decoder_Q.onnx", "trustmark-decoder_P.onnx", "trustmark-decoder_C.onnx")
 VIDEOSEAL_WEIGHTS = "videoseal-y_256b_img.jit"
 AUDIOSEAL_WEIGHTS = "audioseal-detector_base.pth"
+# techniques-2026b TB-2: Resemble AI PerTh implicit decoder (wm_perth.py; from the resemble-perth 1.0.1 wheel).
+PERTH_WEIGHTS = "perth-implicit-250000.pth.tar"
 
 
 class AssetPinError(RuntimeError):
@@ -343,7 +345,7 @@ ASSET_MANIFEST_ERROR = "manifest_error"
 # R18-13 (round 18): the override variable names no file — the loader fails every check that needs the asset.
 ASSET_OVERRIDE_MISSING = "override_missing"
 # R17-9: the assets the loaders know — listed by doctor even when the manifest cannot be read.
-KNOWN_ASSETS = (HAAR_FRONTALFACE, FACE_LANDMARKER, SYNCNET_WEIGHTS, S3FD_WEIGHTS, *TRUSTMARK_DECODERS, VIDEOSEAL_WEIGHTS, AUDIOSEAL_WEIGHTS)
+KNOWN_ASSETS = (HAAR_FRONTALFACE, FACE_LANDMARKER, SYNCNET_WEIGHTS, S3FD_WEIGHTS, *TRUSTMARK_DECODERS, VIDEOSEAL_WEIGHTS, AUDIOSEAL_WEIGHTS, PERTH_WEIGHTS)
 
 
 def asset_override(asset: str) -> Path | None:
@@ -508,6 +510,7 @@ __all__ = [
     "PACKAGED_MANIFEST",
     "S3FD_WEIGHTS",
     "AUDIOSEAL_WEIGHTS",
+    "PERTH_WEIGHTS",
     "TRUSTMARK_DECODERS",
     "VIDEOSEAL_WEIGHTS",
     "SYNCNET_WEIGHTS",

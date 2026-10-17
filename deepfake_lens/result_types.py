@@ -8,8 +8,10 @@ import them without a cycle. Public names are re-exported from ``core``.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+import copy
+from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from enum import Enum
+from typing import Any
 
 from .pixel import PixelAnalysis
 
@@ -337,13 +339,22 @@ CHECK_LABELS = {
     "archive_member_name": "압축 구성 파일 이름 구분",  # R13-6
     "file_integrity": "분석 전후 파일 동일성",
     # techniques-2026: machine-readable mark checks.
-    "watermark_sdxl": "SDXL 워터마크(imwatermark) 검사",
+    "watermark_sdxl": "imwatermark 고정 메시지 워터마크 검사(SDXL·FLUX.1·SD 1/2)",
     "watermark_trustmark": "TrustMark 워터마크 검사",
     "watermark_videoseal": "VideoSeal 워터마크 검사",
     "watermark_audioseal": "AudioSeal 워터마크 검사",
     "online_detection": "온라인 전용 검출(미실행)",
     # P0R-22 (threat G2): container/bitstream metadata facts (MP4·RIFF·ID3·FLAC, SEI; images: the AIGC label).
     "container_metadata": "컨테이너·비트스트림 메타데이터 판독",
+    "watermark_perth": "PerTh 워터마크 검사",
+    # techniques-2026b (TB): further deterministic fact layers.
+    "text_invisible_marks": "비가시 유니코드 표식 검사",
+    "document_structure": "문서 구조 사실(증분 저장·편집 메타데이터)",
+    "platform_recompression": "플랫폼 재압축 양자화표 대조",
+    "file_name_pattern": "파일 이름 형식(메신저·스크린샷·녹음)",
+    "audio_channel_trace": "통화·메신저 코덱·대역폭 흔적",
+    "device_ai_label": "기기 AI 편집 라벨(삼성·Google)",
+    "screen_capture": "스크린샷 사실(캡처 주석·화면 해상도)",
 }
 
 
@@ -440,7 +451,7 @@ class ClassificationResult:
         return GRADE_LABELS[self.grade]
 
     def to_json(self) -> dict[str, object]:
-        data = asdict(self)
+        data = _fields_except(self, _RESULT_REPLACED)  # evidence / coverage are set below (R27-5)
         pixel = data.get("pixel_analysis")
         if isinstance(pixel, dict) and pixel.get("heatmap_path"):
             from .json_text import fs_b64encode
@@ -457,6 +468,43 @@ class ClassificationResult:
         data["coverage"] = [entry.to_json() for entry in self.coverage]
         data["probability_ci"] = list(self.probability_ci) if self.probability_ci is not None else None
         return data
+
+
+_ATOMIC = (type(None), bool, int, float, complex, str, bytes)
+
+
+def plain_value(obj: object) -> object:
+    """``dataclasses.asdict``'s conversion of one value (R27-5): dataclasses to dicts in field order, lists /
+    tuples / namedtuples / dicts rebuilt with their own type, anything else ``copy.deepcopy``'d — so
+    ``{f.name: plain_value(getattr(x, f.name)) for f in fields(x)} == asdict(x)`` for every dataclass ``x``.
+    Used to skip converting the fields a ``to_json`` replaces anyway (a row's result, a result's evidence and
+    coverage were each converted two or three times).
+    """
+    if type(obj) in _ATOMIC:
+        return obj
+    if is_dataclass(obj) and not isinstance(obj, type):
+        return {f.name: plain_value(getattr(obj, f.name)) for f in fields(obj)}
+    if isinstance(obj, tuple) and hasattr(obj, "_fields"):
+        return type(obj)(*[plain_value(v) for v in obj])  # type: ignore[arg-type]
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(plain_value(v) for v in obj)
+    if isinstance(obj, dict):
+        if hasattr(type(obj), "default_factory"):
+            out = type(obj)(getattr(obj, "default_factory"))
+            for key, value in obj.items():
+                out[plain_value(key)] = plain_value(value)
+            return out
+        return type(obj)((plain_value(key), plain_value(value)) for key, value in obj.items())
+    return copy.deepcopy(obj)
+
+
+def _fields_except(obj: object, replaced: frozenset[str]) -> dict[str, Any]:
+    """``asdict(obj)`` with the ``replaced`` fields left as None (the caller sets them; dict order unchanged)."""
+    return {f.name: None if f.name in replaced else plain_value(getattr(obj, f.name)) for f in fields(obj)}  # type: ignore[arg-type]
+
+
+_RESULT_REPLACED = frozenset({"evidence", "coverage"})
+_ITEM_REPLACED = frozenset({"result"})
 
 
 @dataclass(frozen=True)
@@ -494,7 +542,7 @@ class ScanItem:
         from .result_text import display_name, unescape_row_path
 
         data: dict[str, object] = {}
-        for key, value in asdict(self).items():
+        for key, value in _fields_except(self, _ITEM_REPLACED).items():  # result is set below (R27-5)
             data[key] = value
             if key == "path" and self.member is None:
                 # R12-4: the row's real relative path as file-system bytes

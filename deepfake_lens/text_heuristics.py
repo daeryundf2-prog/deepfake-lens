@@ -171,21 +171,11 @@ def _generic_text_signal(normalized: str, words: list[str]) -> EvidenceSignal | 
 
 
 def _direct_tool_guess(normalized: str) -> SourceGuess | None:
-    rules = [
-        ("Midjourney/Niji 추정", ["midjourney", "niji"], "Midjourney/Niji 단서가 메타데이터에 있습니다."),
-        ("Flux / Black Forest Labs 추정", ["flux", "black forest labs", "bfl"], "Flux 또는 Black Forest Labs 단서가 메타데이터에 있습니다."),
-        ("Stable Diffusion 추정", ["stable diffusion", "stablediffusion", "automatic1111", "a1111", "sd-webui"], "Stable Diffusion 계열 단서가 메타데이터에 있습니다."),
-        ("DALL-E/OpenAI 추정", ["dall-e", "dalle", "openai", "chatgpt"], "DALL-E/OpenAI 단서가 메타데이터에 있습니다."),
-        ("Google Imagen/Gemini 추정", ["imagen", "gemini", "google ai studio", "nano banana"], "Google Imagen/Gemini 계열 단서가 메타데이터에 있습니다."),
-        ("Adobe Firefly 추정", ["adobe firefly", "firefly"], "Adobe Firefly 단서가 메타데이터에 있습니다."),
-        ("Ideogram 추정", ["ideogram"], "Ideogram 단서가 메타데이터에 있습니다."),
-        ("Runway 추정", ["runway"], "Runway 단서가 메타데이터에 있습니다."),
-        ("Leonardo.ai 추정", ["leonardo.ai", "leonardo ai"], "Leonardo.ai 단서가 메타데이터에 있습니다."),
-        ("NovelAI 추정", ["novelai", "novel ai"], "NovelAI 단서가 메타데이터에 있습니다."),
-        ("Recraft 추정", ["recraft"], "Recraft 단서가 메타데이터에 있습니다."),
-        ("Canva AI 추정", ["canva ai", "magic media"], "Canva AI/Magic Media 단서가 메타데이터에 있습니다."),
-        ("Grok/xAI 추정", ["grok", "xai"], "Grok/xAI 단서가 메타데이터에 있습니다."),
-    ]
+    # TB-7: the rules (label, markers, reason) are the versioned table models/generator-strings.json —
+    # the phase-0 rules unchanged in order, plus additions with their sources.
+    from .generator_strings import tool_guess_rules
+
+    rules = tool_guess_rules()
     for label, markers, reason in rules:
         if any(re.search(rf"(?:^|\s){re.escape(marker)}(?:\s|$)", normalized) for marker in markers):
             # P0R-11: a brand word is a weak attribution ("Firefly Studio" is also a photo studio) — LOW, never HIGH.

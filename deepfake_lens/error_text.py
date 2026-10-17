@@ -972,6 +972,15 @@ def _untranslated_fallback(message: str, cls: str) -> str:
     return fallback
 
 
+# R27-5: the translation of a (path-scrubbed) message depends only on the exception class name and the message —
+# the tables, the class pattern and english_prose are fixed per process. Every image without a C2PA manifest
+# translated the SDK's same "ManifestNotFound" message again (~60 µs: english_prose normalizes and runs every
+# rule). A fully translated result is remembered (bounded); an untranslated one is not, so its INFO log line is
+# still written every time. Path scrubbing runs on every call (its roots change per scan).
+_TRANSLATED: dict[tuple[str, str], str] = {}
+_TRANSLATED_MAX = 1024
+
+
 def korean_exception_message(exc: BaseException) -> str:
     """The exception's message, path-scrubbed and in Korean where known (N1, B6).
 
@@ -982,7 +991,12 @@ def korean_exception_message(exc: BaseException) -> str:
     if isinstance(exc, OSError) and exc.errno in _ERRNO_KO:
         target = f": {scrub_paths(_registered_absolute(exc.filename))}" if isinstance(exc.filename, str) and exc.filename else ""
         return f"[Errno {exc.errno}] {_ERRNO_KO[exc.errno]}{target}"
-    message = scrub_paths(str(exc)).strip()
+    scrubbed = scrub_paths(str(exc)).strip()
+    key = (type(exc).__name__, scrubbed)
+    translated = _TRANSLATED.get(key)
+    if translated is not None:
+        return translated
+    message = scrubbed
     c2pa = _C2PA_CLASS.match(type(exc).__name__)
     if c2pa:
         # "_C2paOther('Other: …')": the kind is already in the class label.
@@ -995,7 +1009,10 @@ def korean_exception_message(exc: BaseException) -> str:
         message = pattern.sub(replacement, message)
     if english_prose(message):
         logger.info("번역되지 않은 라이브러리 오류 메시지(%s): %s", type(exc).__name__, message)
-        message = _untranslated_fallback(message, type(exc).__name__)
+        return _untranslated_fallback(message, type(exc).__name__)
+    if len(_TRANSLATED) >= _TRANSLATED_MAX:
+        _TRANSLATED.clear()
+    _TRANSLATED[key] = message
     return message
 
 

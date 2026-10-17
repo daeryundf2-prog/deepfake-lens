@@ -166,7 +166,7 @@ class DoctorAssetPinTest(unittest.TestCase):
         import os
 
         from deepfake_lens.model_assets import (
-            AUDIOSEAL_WEIGHTS, FACE_LANDMARKER, HAAR_FRONTALFACE, PACKAGED_MANIFEST, SYNCNET_WEIGHTS, TRUSTMARK_DECODERS, VIDEOSEAL_WEIGHTS,
+            AUDIOSEAL_WEIGHTS, FACE_LANDMARKER, HAAR_FRONTALFACE, PACKAGED_MANIFEST, PERTH_WEIGHTS, SYNCNET_WEIGHTS, TRUSTMARK_DECODERS, VIDEOSEAL_WEIGHTS,
         )
 
         bundled = PACKAGED_MANIFEST.parent / HAAR_FRONTALFACE
@@ -184,7 +184,8 @@ class DoctorAssetPinTest(unittest.TestCase):
                 report = run_diagnostics(folder)
             states = {row["asset"]: row["state"] for row in report.model_assets}
             # techniques-2026: the watermark decoder weights are pinned and absent here.
-            watermark = {name: "absent" for name in (*TRUSTMARK_DECODERS, VIDEOSEAL_WEIGHTS, AUDIOSEAL_WEIGHTS)}
+            # TB-2: and the PerTh decoder weight.
+            watermark = {name: "absent" for name in (*TRUSTMARK_DECODERS, VIDEOSEAL_WEIGHTS, AUDIOSEAL_WEIGHTS, PERTH_WEIGHTS)}
             self.assertEqual(states, {HAAR_FRONTALFACE: "mismatch", FACE_LANDMARKER: "unpinned", SYNCNET_WEIGHTS: "absent", "sfd_face.pth": "unpinned", **watermark})
             rows = {row["asset"]: row for row in json.loads(json.dumps(report.to_json()))["model_assets"]}
             self.assertEqual(rows[HAAR_FRONTALFACE]["override"], "DEEPFAKE_LENS_HAAR_CASCADE")

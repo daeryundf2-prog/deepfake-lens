@@ -182,11 +182,11 @@ SCAN_ROOT_LABEL = "검사 폴더(읽기 루트 기준, 행 경로의 기준 폴�
 
 
 # R19-3 (round 19): the options a web report re-analyzed every row with.
-ANALYSIS_OPTIONS_LABEL = "재분석 옵션(서버가 이 옵션으로 모든 행을 다시 분석)"
+ANALYSIS_OPTIONS_LABEL = "검사 옵션(서버가 이 검사 작업을 실행한 옵션)"
 
 
 def analysis_options_line(signed: dict[str, object]) -> str | None:
-    """"재분석 옵션(…): 픽셀 off · 히트맵 끔 · …" for a signed body with ``analysis_options`` (R19-3), else None."""
+    """"검사 옵션(…): 픽셀 off · 히트맵 끔 · …" for a signed body with ``analysis_options`` (R19-3), else None."""
     options = signed.get("analysis_options")
     if not isinstance(options, dict):
         return None
