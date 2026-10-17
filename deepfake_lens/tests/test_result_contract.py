@@ -116,9 +116,22 @@ class MetadataEvidenceMappingTest(unittest.TestCase):
         self.assertEqual(items[0].strength, EvidenceStrength.STRONG)
         self.assertTrue(any(i.title == "생성 모델에 흔한 정사각 해상도" and i.direction == EvidenceDirection.NEUTRAL for i in items))
 
-    def test_header_byte_string_is_only_moderate(self) -> None:
+    def test_header_byte_string_is_only_a_fact(self) -> None:
+        # P0R-11 (user decision 2026-10-17): renamed from test_header_byte_string_is_only_moderate — a brand word
+        # outside the generator-specific fields was moderate synthetic (it blocked authenticity); it is a neutral fact.
         [item] = image_metadata_evidence({"header.text": "Generated with FLUX.1 by Black Forest Labs"}, None)
-        self.assertEqual((item.direction, item.strength), (EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE))
+        self.assertEqual((item.direction, item.strength), (EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK))
+        for key in ("exif.Model", "exif.LensModel", "png.Description"):
+            with self.subTest(key=key):
+                self.assertFalse([i for i in image_metadata_evidence({key: "Adobe Firefly"}, None) if i.direction == EvidenceDirection.SYNTHETIC])
+
+    def test_a_brand_in_a_generator_field_is_moderate_and_self_declared(self) -> None:
+        """P0R-11/P0R-12: Software=Midjourney is a moderate self-declaration; the A1111 structure stays strong."""
+        [item] = [i for i in image_metadata_evidence({"exif.Software": "Midjourney"}, None) if i.direction == EvidenceDirection.SYNTHETIC]
+        self.assertEqual((item.strength, item.self_declared), (EvidenceStrength.MODERATE, True))
+        self.assertIn("자기 선언 메타데이터 — 심거나 지울 수 있음", item.detail)
+        strong = image_metadata_evidence({"png.parameters": "x\nNegative prompt: y\nSteps: 20, Sampler: Euler, CFG scale: 7, Seed: 1"}, None)[0]
+        self.assertEqual((strong.strength, strong.self_declared), (EvidenceStrength.STRONG, True))
 
     def test_tool_word_in_free_text_field_is_not_strong(self) -> None:
         items = image_metadata_evidence({"png.Description": "fashion runway show backstage"}, (800, 600))

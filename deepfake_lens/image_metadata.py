@@ -552,7 +552,9 @@ def _read_tiff_dimensions(data: bytes) -> tuple[int, int] | None:
     return None
 
 
-def guess_image_source(metadata: dict[str, str]) -> SourceGuess:
+def guess_image_source(metadata: dict[str, str], *, brands: bool = True) -> SourceGuess:
+    """The source guess of image metadata. ``brands=False`` (P0R-11): structural generator records only (ComfyUI,
+    A1111, generation-parameter fields) — a brand word alone ("Firefly", "Runway") is not considered."""
     blob = "\n".join(f"{key}: {value}" for key, value in metadata.items())
     normalized = blob.lower()
     if not normalized.strip():
@@ -563,7 +565,7 @@ def guess_image_source(metadata: dict[str, str]) -> SourceGuess:
     if _looks_like_a1111(normalized):
         return SourceGuess("Stable Diffusion / A1111 추정", SourceConfidence.HIGH, ["프롬프트와 `Steps`, `Sampler`, `CFG scale`, `Seed` 같은 A1111 생성 파라미터가 발견되었습니다."])
 
-    direct = _direct_tool_guess(normalized)
+    direct = _direct_tool_guess(normalized) if brands else None
     if direct:
         return direct
 

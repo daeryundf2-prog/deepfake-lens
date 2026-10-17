@@ -382,6 +382,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 22,
+      "reason": "P0R-11: 생성기 이름(브랜드 단어)은 생성 도구 필드(Software·parameters·prompt·workflow·CreatorTool)에서만 보통 근거, exif.Model·LensModel·Credit·dc:creator·헤더 문자열은 중립 사실, 이미지 생성 도구 항목에 self_declared와 자기 선언 문구",
+      "sha256": "7e5c184f734d085dc97a75b4568c74234ba365fc299fef0298fd9f50bcfda0e7",
+      "sets": {
+        "stdlib": "7e5c184f734d085dc97a75b4568c74234ba365fc299fef0298fd9f50bcfda0e7",
+        "full-extras": "472948ac07e7395f4ad58059ba49f2e2432cd99722d95837a3f167c96245828a"
+      },
+      "constants_sha256": "eb43be685aa21565adbe6e836d313be230b222deed5ab25b2ab393d8a81abcea",
+      "constants_count": 59,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

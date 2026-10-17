@@ -879,7 +879,11 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    is not checked; an ITL-only signer's declaration is a moderate "C2PA 서명(동결된 임시 신뢰 목록 ITL): …" item.
 # 21: P0R-10 — rule 2 does not fire when strong deterministic authentic evidence is present too: such a row (a trusted
 #    C2PA camera signature + a planted generator field) is undetermined, and the conflict item says so.
-OUTPUT_FORMAT_GENERATION = 21
+# 22: P0R-11 — a generator brand word is moderate and counts only in generator-specific fields (Software, parameters,
+#    prompt/workflow, xmp:CreatorTool); exif.Model / LensModel / Credit / dc:creator / header strings give a neutral fact;
+#    the image metadata generator items carry self_declared and 「자기 선언 메타데이터 — 심거나 지울 수 있음」; a brand
+#    source guess is LOW (was HIGH).
+OUTPUT_FORMAT_GENERATION = 22
 
 
 def cache_extension(path: Path) -> str:

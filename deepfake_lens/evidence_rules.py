@@ -121,6 +121,13 @@ XMP_GENERATOR_FIELDS = (
     ("xmp.creator", "dc:creator"),
     ("xmp.Credit", "photoshop:Credit"),
 )
+# P0R-11 (review §1.3): a generator name is evidence only in a field that names the producing tool — never in an
+# author / credit / camera field (dc:creator, photoshop:Credit, exif.Model, exif.LensModel: a "Firefly Studio" credit,
+# a "Runway" camera name). XMP_GENERATOR_FIELDS still blocks the camera-EXIF consistency rule (camera_exif_evidence).
+XMP_TOOL_FIELDS = (("xmp.CreatorTool", "xmp:CreatorTool"),)
+# Non-XMP metadata keys (lower-case, matched on the part after the last ".") that name the producing tool or hold a
+# generator's own record: PNG/EXIF Software, A1111 parameters, ComfyUI prompt/workflow, a "generator" field.
+GENERATOR_SPECIFIC_KEYS = frozenset({"software", "parameters", "prompt", "workflow", "generator", "creatortool"})
 XMP_DIGITAL_SOURCE_TYPE_KEY = "xmp.DigitalSourceType"
 
 # Camera EXIF consistency (WP-A table: deterministic/authentic/moderate).
@@ -178,8 +185,8 @@ def xmp_evidence(metadata: Mapping[str, str]) -> list[EvidenceItem]:
         items.append(EvidenceItem(
             "XMP 디지털 출처 유형: 생성형 AI",
             f"Iptc4xmpExt:DigitalSourceType={', '.join(synthetic_types)} — 파일이 스스로 생성형/알고리즘 미디어임을 선언합니다(서명 없는 자기 신고). "
-            "XMP는 편집으로 지우거나 바꿀 수 있어 부재는 아무것도 증명하지 않습니다.",
-            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "metadata",
+            f"XMP는 편집으로 지우거나 바꿀 수 있어 부재는 아무것도 증명하지 않습니다 — {SELF_DECLARED_NOTE}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "metadata", self_declared=True,
         ))
     screen = sorted({d.display for d in declared if d.category == CATEGORY_SCREEN})
     if screen:
@@ -189,15 +196,16 @@ def xmp_evidence(metadata: Mapping[str, str]) -> list[EvidenceItem]:
             "카메라 실사 촬영 근거가 아니며, 생성 근거도 아닙니다.",
             EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.MODERATE, "metadata",
         ))
-    for key, label in XMP_GENERATOR_FIELDS:
+    for key, label in XMP_TOOL_FIELDS:
         value = metadata.get(key, "")
         name = generator_name_in(value)
         if name:
+            # P0R-11: a brand word in the tool field is moderate (it was strong — a conclusion by itself)
             items.append(EvidenceItem(
                 "XMP 생성 도구 필드",
-                f"{label}={value[:120]} — 생성 도구명 '{name}'이(가) 도구/작성자 필드에 기록되어 있습니다. "
-                "XMP는 편집으로 바꿀 수 있습니다.",
-                EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "metadata",
+                f"{label}={value[:120]} — 생성 도구명 '{name}'이(가) 도구 필드에 기록되어 있습니다. 이름 하나는 구조적 생성 기록이 아니어서 "
+                f"단독 결론 근거로 쓰지 않습니다 — {SELF_DECLARED_NOTE}.",
+                EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, "metadata", self_declared=True,
             ))
     return items
 
@@ -362,21 +370,44 @@ def image_metadata_evidence(
     # XMP fields have their own rules (xmp_evidence) — keep them out of the
     # generic guess so one field never yields two items.
     generic = {key: value for key, value in metadata.items() if not key.startswith("xmp.")}
-    tool_guess = guess_image_source(_tool_field_metadata(generic))
-    any_guess = guess_image_source(generic)
+    # P0R-11: only a structural generator record (ComfyUI graph, A1111 parameters) in a tool field is strong; a brand
+    # word counts only in a generator-specific field and is moderate; neither ever comes from exif.Model, LensModel,
+    # Credit or creator. Every such item is a self-declaration (P0R-12): unsigned metadata the file states about itself.
+    tool_guess = guess_image_source(_tool_field_metadata(generic), brands=False)
+    specific = {key: value for key, value in generic.items() if key.rsplit(".", 1)[-1].lower() in GENERATOR_SPECIFIC_KEYS}
+    brand_guess = guess_image_source(specific)
+    any_guess = guess_image_source(generic, brands=False)
     if tool_guess.confidence == SourceConfidence.HIGH:
         reason = tool_guess.reasons[0] if tool_guess.reasons else "생성 도구 단서가 발견되었습니다."
         items.append(EvidenceItem(
             "생성 도구 메타데이터",
-            f"{tool_guess.label}: {reason}",
-            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "metadata",
+            f"{tool_guess.label}: {reason} 생성 도구가 파일에 남긴 생성 기록입니다 — {SELF_DECLARED_NOTE}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "metadata", self_declared=True,
+        ))
+    elif brand_guess.confidence == SourceConfidence.LOW:  # only the brand rule answers LOW
+        reason = brand_guess.reasons[0] if brand_guess.reasons else "생성 도구 이름이 발견되었습니다."
+        items.append(EvidenceItem(
+            "생성 도구 이름 메타데이터",
+            f"{brand_guess.label}: {reason} 생성 도구 필드(소프트웨어·생성 파라미터 등)의 이름 하나는 구조적 생성 기록이 아니어서 "
+            f"단독 결론 근거로 쓰지 않습니다 — {SELF_DECLARED_NOTE}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, "metadata", self_declared=True,
         ))
     elif any_guess.confidence in {SourceConfidence.HIGH, SourceConfidence.MEDIUM}:
         reason = any_guess.reasons[0] if any_guess.reasons else "생성 도구 단서가 발견되었습니다."
         items.append(EvidenceItem(
             "생성 도구 메타데이터 단서",
-            f"{any_guess.label}: {reason} 도구 식별 필드가 아닌 위치(헤더 문자열·일반 필드)에서 발견되어 단독 결론 근거로 쓰지 않습니다.",
-            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, "metadata",
+            f"{any_guess.label}: {reason} 도구 식별 필드가 아닌 위치(헤더 문자열·일반 필드)에서 발견되어 단독 결론 근거로 쓰지 않습니다 — "
+            f"{SELF_DECLARED_NOTE}.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, "metadata", self_declared=True,
+        ))
+    elif (free := guess_image_source(generic)).confidence == SourceConfidence.LOW:
+        # P0R-11: a brand word outside the generator-specific fields (camera model, credit, a header byte string) is a
+        # fact only — never a synthetic direction ("Firefly Studio" credit, "Runway" in a description).
+        items.append(EvidenceItem(
+            "일반 필드의 생성 도구 이름(근거 아님)",
+            f"{free.label.replace(' 추정', '')} 이름이 생성 도구 필드가 아닌 곳(카메라 기종·크레딧·설명·헤더 문자열 등)에 있습니다. "
+            "같은 단어를 쓰는 사람·업체·장비가 있어 생성 근거로 쓰지 않습니다.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "metadata",
         ))
     items.extend(xmp_evidence(metadata))
     items.extend(camera_exif_evidence(metadata, image_format=image_format, jpeg_quality=jpeg_quality, decode_problem=decode_problem))

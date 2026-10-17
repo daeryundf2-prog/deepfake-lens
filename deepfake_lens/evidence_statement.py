@@ -287,7 +287,13 @@ def _clip(text: str, limit: int) -> str:
     """``text`` cut to ``limit`` chars without leaving a quoted metadata value open."""
     if len(text) <= limit:
         return text
-    clipped = text[:limit] + "…"
+    end = limit
+    # P0R-11: never cut a Latin word (a product name — "Adobe Firefly" — read as "Adobe Firefl…")
+    while end < len(text) and end < limit + 20 and text[end].isascii() and text[end].isalnum() and text[end - 1].isascii() and text[end - 1].isalnum():
+        end += 1
+    if end >= len(text):
+        return text
+    clipped = text[:end] + "…"
     if clipped.count(_QUOTE_OPEN) > clipped.count(_QUOTE_CLOSE):
         clipped += _QUOTE_CLOSE
     return clipped
