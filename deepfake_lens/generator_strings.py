@@ -71,7 +71,7 @@ def c2pa_signer_evidence(validation: Mapping[str, object] | None) -> list[Eviden
             if signature.get(key):
                 fields.append((label, str(signature[key])[:200]))
     if validation.get("claim_generator"):
-        fields.append(("생성기(claim generator)", str(validation["claim_generator"])[:200]))
+        fields.append(("생성기(claim_generator)", str(validation["claim_generator"])[:200]))
     if not fields:
         return []
     matches: list[tuple[str, str, dict[str, Any]]] = []

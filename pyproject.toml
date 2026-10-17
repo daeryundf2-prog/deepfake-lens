@@ -310,6 +310,7 @@ files = [
     "deepfake_lens/generator_strings.py",
     "deepfake_lens/tests/test_generator_strings.py",
     "deepfake_lens/tests/test_imwatermark_registry.py",
+    "deepfake_lens/tests/test_tb_tables_korean.py",
 ]
 follow_imports = "skip"
 ignore_missing_imports = true

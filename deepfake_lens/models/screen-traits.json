@@ -1,6 +1,6 @@
 {
   "schema": "screen-traits-v1",
-  "version": "2026-10-17.1",
+  "version": "2026-10-17.2",
   "note": "techniques-2026b TB-5: native screen resolutions (portrait width x height; either orientation matches) from the makers' official spec pages, retrieved 2026-10-17. Many models share a size, so a match narrows to a set of models and never identifies a device. Samsung's default FHD+ screenshot size is not stated officially and is not listed.",
   "screen_resolutions": [
     {

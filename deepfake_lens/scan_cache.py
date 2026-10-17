@@ -899,7 +899,10 @@ CACHE_KEY_VERSION = "content-v5"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    check label name the registered set (registry 2026-10-17.2).
 # 26: TB-2 fix — watermark_perth skips tone-dominated signals (3 strongest peaks >= 90% of the energy: a 440 Hz sine
 #    scored 0.99) "측정 범위 밖: … 순음 위주 신호 …", and its wording avoids English runs (registry 2026-10-17.3).
-OUTPUT_FORMAT_GENERATION = 26
+# 27: TB-3/4/5/7 wording — table texts shown in rows (platform meanings, device-label meanings, generator rule labels
+#    and reasons, C2PA service names, screen-size model lists — the latter now quoted) carry no English runs
+#    (tables 2026-10-17.2).
+OUTPUT_FORMAT_GENERATION = 27
 
 
 def cache_extension(path: Path) -> str:

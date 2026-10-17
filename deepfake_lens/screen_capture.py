@@ -172,7 +172,7 @@ def _evaluate(path: Path, metadata: Mapping[str, str], dimensions: tuple[int, in
             parts.append(f"기기 화면 크기 일치 {width}x{height}")
             items.append(EvidenceItem(
                 "기기 화면 해상도와 같은 크기",
-                f"이미지 크기 {width}x{height}가 기기의 기본 화면 해상도와 같습니다({devices} — 제조사 사양 페이지). 스크린샷 크기와 맞는다는 사실일 뿐이며, "
+                f"이미지 크기 {width}x{height}가 기기의 기본 화면 해상도와 같습니다(표의 기종: 「{devices}」 — 제조사 사양 페이지). 스크린샷 크기와 맞는다는 사실일 뿐이며, "
                 "같은 크기를 쓰는 기기가 많고 다른 이미지도 이 크기일 수 있어 기기를 특정하지 않습니다.",
                 EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, SCREEN_LAYER,
             ))
