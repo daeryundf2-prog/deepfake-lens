@@ -515,8 +515,8 @@ says about a file is read. The signed body's `items` are the job's rows
 exactly as the scan produced them (verdict, evidence, coverage, `sha256`), in
 scan order; `thresholds`, `coverage`, `model_pins` and `analysis_options`
 (`{pixel, heatmaps, deep_signals, default_engine, model_path,
-fusion_profile}`, file names only — printed as `재분석 옵션(…)`; the label is
-kept from R19-3) are the values captured when the job's scan ran; the
+fusion_profile}`, file names only — printed as `검사 옵션(…)` — R27-2 renamed the
+R19-3 label, which claimed a re-analysis that no longer happens) are the values captured when the job's scan ran; the
 summary's verdict counts are counted from the job's rows and its `capped`,
 `files_over_cap`, `subfolders_skipped`, `subfolder_files_skipped`,
 `subfolders_skipped_detail`, `cancelled` and `files_cancelled` are the job's

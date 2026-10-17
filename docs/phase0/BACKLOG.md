@@ -33,3 +33,10 @@
 - BL-16 — 검사 작업 보관 위치가 검사 대상 폴더와 겹치면(`cd ~; deepfake-lens web`) 작업은 메모리에만 남고(응답에 `scan_job_note`), 끝난 작업 64개를 넘으면 오래된 것부터 잊힌다 — 다시 검사하면 된다. 운영자가 `DEEPFAKE_LENS_SCAN_JOBS`로 증거 밖 폴더를 지정하는 안내를 `web` 시작 문구에 넣을지 결정. (P0R-6, Low, 서명)
 - BL-17 — `test_axis_product`는 한 번에 약 70초(호스트)가 걸린다. 게이트 시간이 문제가 되면 축 조합을 짝(pairwise)으로 줄이되 R23-1·R24-3·R25-4·R26-2·R26-3의 조합은 남긴다. (P0R-3, Cosmetic)
 - BL-18 — 호스트(macOS, Python 3.12) 단위 테스트에서만 실패하는 것: `test_error_text.JsonErrorTranslationTest`(Python 3.12의 JSON 오류 문구가 10종), `test_native_path`의 `os.getxattr`(mypy), QA-SYS-7 서버 테스트 일부 — 기준 환경은 게이트 이미지(Linux, Python 3.13)다. (환경, Cosmetic)
+
+## 27차 검증에서 넘긴 항목
+
+- BL-19 — `scan` 표 행에 자기 선언 표시(「심거나 지울 수 있음」)와 「이 결론이 틀릴 수 있는 이유」가 없다. `classify --format table`은 표시만 있고 이유 목록이 없다. JSON·HTML·PDF·증거설명서·GUI에는 둘 다 있다(`cli_render.py:161`, `cli_standalone.py:214`). (R27-1, Low, 판정)
+- BL-20 — JSON 계약 문서(`:55`, `:168-171`)와 `result_types.py:563-592`에 P0R-6 이전 설명(게시 행 재분석, `walk` 목록)이 남아 있다. (R27-3, Low, 문서)
+- BL-21 — 보고서 키 없이 운영하면 검사 작업 기록 파일을 고친 내용이 서명 없는 보고서에 그대로 나온다(문서화된 동작 — 키를 설정하면 409). (R27-4, Low, 서명)
+- BL-22 — SDXL 고정 워터마크 48비트 정확 일치를 강한 합성 근거로 쓴다. 상세 문구는 흉내 낼 수 있다고 밝히지만, 1단계에서 보통(moderate) 강도로 내릴지 재검토. (27차 참고 사항, 판정)
