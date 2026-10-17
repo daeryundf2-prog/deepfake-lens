@@ -674,9 +674,9 @@
         function decidingEvidence(r, v) {
             const ev = (r && r.evidence) || [];
             if (v === 'manipulation_evidence') {
-                return ev.filter(e => e.direction === 'synthetic' && ((e.kind === 'deterministic' && e.strength === 'strong') || (e.kind === 'statistical' && e.calibration_id)));
+                return ev.filter(e => DIRECTION_LABELS[e.direction] === '조작·생성 방향' && ((e.kind === 'deterministic' && e.strength === 'strong') || (e.kind === 'statistical' && e.calibration_id)));
             }
-            if (v === 'authenticity_evidence') return ev.filter(e => e.direction === 'authentic' && e.kind === 'deterministic' && e.strength === 'strong');
+            if (v === 'authenticity_evidence') return ev.filter(e => DIRECTION_LABELS[e.direction] === '원본성 방향' && e.kind === 'deterministic' && e.strength === 'strong');
             return [];
         }
         // A conclusion that rests only on records the file wrote about itself (P0R-12 self_declared) — anyone can
@@ -708,7 +708,7 @@
             if (v === 'manipulation_evidence' || v === 'authenticity_evidence') {
                 const top = decisiveEvidence(r, v)[0];
                 // M-1: the self-declared mark follows the title — the detail after it is cut short in the row.
-                const title = top && top.self_declared ? `${top.title} (${SELF_DECLARED_MARK})` : (top && top.title);
+                const title = top && top.self_declared ? top.title + ' (' + SELF_DECLARED_MARK + ')' : (top && top.title);
                 if (top) return top.detail ? title + ' — ' + top.detail : title;
                 return VERDICT_SHORT[v];
             }
