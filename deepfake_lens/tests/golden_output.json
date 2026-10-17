@@ -508,6 +508,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 28,
+      "reason": "TB-4 perf: soundfile decode for the bandwidth measurement",
+      "sha256": "281807a0b385142f1af40269a6c398bb2d74ae7b33853a76f34c226bb07a9657",
+      "sets": {
+        "stdlib": "281807a0b385142f1af40269a6c398bb2d74ae7b33853a76f34c226bb07a9657",
+        "full-extras": "dff81a0030b4dee47e996d18951058a00a588095c17a9d8e63a63d170b9f6e45"
+      },
+      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

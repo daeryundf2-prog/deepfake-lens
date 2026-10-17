@@ -367,12 +367,43 @@ def effective_bandwidth(samples: Any, rate: int) -> float | None:
     return float(above[-1] * rate / n_fft) if len(above) else None
 
 
+SOUNDFILE_EXTENSIONS = frozenset({".wav", ".flac", ".ogg"})
+
+
+def _soundfile_mono(path: Path) -> tuple[Any, int] | None:
+    """The first BANDWIDTH_SECONDS read in-process with soundfile (libsndfile formats) — None to fall back to ffmpeg.
+
+    Spawning ffmpeg for every WAV made an audio scan 30% slower (TB-4 perf probe); libsndfile reads these formats.
+    """
+    if path.suffix.lower() not in SOUNDFILE_EXTENSIONS:
+        return None
+    try:
+        import soundfile
+    except ImportError:
+        return None
+    from .native_path import native_safe_path
+
+    try:
+        with native_safe_path(path) as native:
+            with soundfile.SoundFile(native) as handle:
+                rate = int(handle.samplerate)
+                data = handle.read(frames=rate * BANDWIDTH_SECONDS, dtype="float64", always_2d=True)
+    except Exception:  # noqa: BLE001 - any libsndfile refusal falls back to the ffmpeg decode (which reports its own failure)
+        return None
+    return data, rate
+
+
 def _decode_mono(path: Path) -> tuple[Any, int, float]:
     import numpy as np
 
     from .audio import AudioDecoderMissing, NoAudioStream, ffmpeg_audio_wav
     from .float_wav import read_float_wav
 
+    direct = _soundfile_mono(path)
+    if direct is not None and len(direct[0]):
+        frames, rate = direct
+        mono = np.asarray(frames.mean(axis=1), dtype=np.float64)
+        return mono, rate, len(mono) / rate if rate else 0.0
     try:
         with ffmpeg_audio_wav(path, seconds=BANDWIDTH_SECONDS) as wav:
             frames, rate = read_float_wav(wav)

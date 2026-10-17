@@ -902,7 +902,9 @@ CACHE_KEY_VERSION = "content-v5"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 27: TB-3/4/5/7 wording — table texts shown in rows (platform meanings, device-label meanings, generator rule labels
 #    and reasons, C2PA service names, screen-size model lists — the latter now quoted) carry no English runs
 #    (tables 2026-10-17.2).
-OUTPUT_FORMAT_GENERATION = 27
+# 28: TB-4 perf — audio_channel_trace reads WAV/FLAC/OGG in-process with soundfile (ffmpeg only for other formats);
+#    the measured bandwidth may differ in its last bin from the ffmpeg float32 decode.
+OUTPUT_FORMAT_GENERATION = 28
 
 
 def cache_extension(path: Path) -> str:
