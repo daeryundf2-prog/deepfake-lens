@@ -161,6 +161,10 @@ IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "�
   - 미만 → `ran` 「… 검출 안 됨(신뢰도 …) — 무정보(워터마크 부재를 뜻하지 않음)」. 재녹음·음성 향상·다른 TTS는 표식을 남기지 않는다.
 - coverage: torch 없음 → `skipped` 「의존성 부재: torch」(librosa 없음 → 「의존성 부재: librosa」, ffmpeg 없음 → 「의존성 부재: ffmpeg」); 가중치 없음 →
   `skipped` 「가중치 없음: … fetch_watermark_models.py --only perth …」; 핀과 다른 바이트 → `failed` 「AssetPinError: 미고정 모델: …」; 1초 미만 → `skipped`.
+- **측정 범위(TB-2 수정)**: 디코더는 음성에서만 측정했다. ffmpeg의 440 Hz 사인파는 무손실·mp3·aac·opus 모두 신뢰도 0.99로 표식을 "주장"했다(220 Hz는 0.01 미만,
+  vorbis 220 Hz 10초는 0.92). 그래서 처음 30초의 평균 전력 스펙트럼에서 가장 강한 봉우리 3개(±2 빈)가 에너지의 90% 이상인 순음 위주 신호는 `skipped`
+  「측정 범위 밖: … 순음 위주 신호 — PerTh 디코더는 음성에서만 측정되었고 순음에서 오탐이 관찰됨 …」. 측정: LibriSpeech 240개의 비율 중앙값 0.23·최대 0.622,
+  합성 유성음 픽스처 0.55·0.67, 사인파 1.0. 같은 LibriSpeech 40개를 mp3 64k·aac 64k·opus 24k로 재압축해도 0.5 이상은 0건(최대 0.118).
   오디오 행과 영상의 음성 트랙에서 실행되고 표식 문맥(`marking_context.checked`)에 `watermark_perth`가 들어간다. 추론은 torch 스레드 1개(잠금).
 - 측정(2026-10-17, `docs/WATERMARK-MEASUREMENTS.md`): LibriSpeech dev-clean 240개에서 0.5 이상 3건(1.25%, 95% 상한 3.6%, 최대 0.780), 0.9 이상 0건;
   같은 240개에 패키지로 표식을 넣고 16비트로 저장하면 최소 0.922(240/240).

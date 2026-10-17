@@ -1,6 +1,6 @@
 {
   "schema": "watermark-registry-v1",
-  "version": "2026-10-17.2",
+  "version": "2026-10-17.3",
   "note": "techniques-2026: known generator watermark messages. A decoded mark is linked to a generator ONLY on an exact match with an entry here (bit-for-bit for imwatermark; the bit-accuracy rule of the entry for neural decoders). The table is versioned: a change bumps 'version' and the output generation. An empty algorithm list means no public, verified generator message is known — a decoded message is then recorded as a fact only.",
   "entries": [
     {
@@ -18,12 +18,13 @@
       "id": "perth-implicit-chatterbox",
       "algorithm": "perth-implicit",
       "expected_payload": "1",
-      "generator": "Resemble AI PerTh 암묵 워터마커(Chatterbox가 모든 출력에 기본 삽입)",
+      "generator": "Resemble의 PerTh 암묵 워터마커(Chatterbox가 모든 출력에 기본 삽입)",
       "source": "https://github.com/resemble-ai/chatterbox/blob/5de7a54aa4e5e2baadb0182dde554908b48b85c2/src/chatterbox/tts.py (L126 self.watermarker = perth.PerthImplicitWatermarker(); L271 apply_watermark) and src/chatterbox/vc.py (L29, L103); README 'Built-in PerTh Watermarking for Responsible AI'; decoder weights: resemble-perth 1.0.1 wheel (MIT)",
       "checked": "2026-10-17",
       "limitations": "The implicit PerTh mark has no message: a detection is one bit. Resemble AI's own services and anyone using the MIT library embed the same mark, so a match is a moderate synthetic-direction item that only blocks an authenticity conclusion; it never names Chatterbox as the generator by itself.",
       "min_confidence": 0.9,
-      "min_confidence_basis": "Measured 2026-10-17 on 240 LibriSpeech dev-clean utterances: unmarked max 0.780 (3 of 240 >= 0.5), marked (apply_watermark, 16-bit) min 0.922; 0 unmarked >= 0.9."
+      "min_confidence_basis": "Measured 2026-10-17 on 240 LibriSpeech dev-clean utterances: unmarked max 0.780 (3 of 240 >= 0.5), marked (apply_watermark, 16-bit) min 0.922; 0 unmarked >= 0.9.",
+      "tonal_guard": "wm_perth.MAX_TONAL_RATIO 0.9: a signal whose 3 strongest spectral peaks hold >= 90% of the energy is skipped (ffmpeg 440 Hz sine scored 0.99; LibriSpeech max share 0.622)"
     },
     {
       "id": "flux1-reference-imwatermark-dwtdct-46",

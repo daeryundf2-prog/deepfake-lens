@@ -436,12 +436,12 @@ def _audioseal_layer(path: Path, layers: MarkLayers) -> None:
 
 # --- Resemble AI PerTh implicit watermark (techniques-2026b TB-2) -------------------
 
-PERTH_ALGORITHM_LABEL = "PerTh 암묵 워터마크(Resemble AI, 1비트 존재 표식)"
+PERTH_ALGORITHM_LABEL = "PerTh 암묵 워터마크(Resemble 제작, 1비트 존재 표식)"
 PERTH_FOUND_TITLE = "PerTh 워터마크 검출"
 PERTH_REGISTERED_TITLE = "등록된 생성기 워터마크 일치(PerTh 1비트 존재 표식 — 결론 근거 아님)"
 # Measured with wm_perth on real speech (scripts/measure_watermark_fpr.py --audio --only perth; docs/WATERMARK-MEASUREMENTS.md).
 PERTH_FPR_NOTE = (
-    "워터마크가 없는 실제 음성 240개(LibriSpeech dev-clean 화자 40명×6발화)에서 신뢰도 0.5 이상 3건(1.25%, 95% 상한 3.6%, 최대 0.78), "
+    "워터마크가 없는 실제 음성 240개(LibriSpeech의 dev-clean 세트, 화자 40명×6발화)에서 신뢰도 0.5 이상 3건(1.25%, 95% 상한 3.6%, 최대 0.78), "
     "등록표 일치 기준 0.9 이상 0건(95% 상한 1.5%)(측정 2026-10-17, docs/WATERMARK-MEASUREMENTS.md)"
 )
 
@@ -461,12 +461,13 @@ def _perth_layer(path: Path, layers: MarkLayers) -> None:
         layers.coverage.append(entry)
         return
     reading, registry = outcome
-    span = f"처음 {reading.seconds:.1f}초 분석(원 표본화 {reading.source_rate} Hz → 32 kHz)"
+    span = f"처음 {reading.seconds:.1f}초 분석(원 표본화 {reading.source_rate}Hz를 32kHz로 변환)"
     if reading.present:
         layers.evidence.append(EvidenceItem(
             PERTH_FOUND_TITLE,
-            f"PerTh 암묵 디코더의 신뢰도 {reading.confidence:.3f}(기준 {wm_perth.PRESENCE_THRESHOLD:.1f} 이상, {span}) — Resemble AI PerTh 워터마크가 "
+            f"PerTh 암묵 디코더의 신뢰도 {reading.confidence:.3f}(기준 {wm_perth.PRESENCE_THRESHOLD:.1f} 이상, {span}) — Resemble의 PerTh 워터마크가 "
             "들어 있다는 사실입니다. 이 표식은 메시지 없이 존재만 나타내며, 공개 라이브러리(MIT)로 누구나 어떤 오디오에도 넣을 수 있습니다. "
+            "음성에서만 측정되었으며 순음 위주 신호는 검사하지 않습니다. "
             f"{PERTH_FPR_NOTE}.",
             EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, WATERMARK_LAYER,
         ))
@@ -476,7 +477,7 @@ def _perth_layer(path: Path, layers: MarkLayers) -> None:
                     PERTH_REGISTERED_TITLE,
                     f"검출된 PerTh 표식(신뢰도 {reading.confidence:.3f} ≥ 등록 기준 {float(registered.get('min_confidence', 0.9)):.1f})이 등록표 항목"
                     f"({registered.get('id')}: {registered.get('generator')})의 기대값(존재 = 1)과 일치합니다. "
-                    "1비트 표식이라 특정 생성기를 확정하지 않으며(Resemble AI 서비스·라이브러리 사용자도 같은 표식을 넣음), 원본성 결론만 막습니다. "
+                    "1비트 표식이라 특정 생성기를 확정하지 않으며(Resemble의 서비스와 라이브러리 사용자도 같은 표식을 넣음), 원본성 결론만 막습니다. "
                     f"기준: {registry.label}.",
                     EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, WATERMARK_LAYER,
                 ))

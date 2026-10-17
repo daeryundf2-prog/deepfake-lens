@@ -181,6 +181,40 @@ def confidence(decoder: Any, samples_32k: Any) -> float:
     return float(value)
 
 
+# TB-2 measurement domain: the decoder was measured on speech; ffmpeg's 440 Hz sine scored 0.99 (lossless and after
+# mp3/aac/opus) while LibriSpeech never exceeded 0.78. A signal whose three strongest spectral peaks (+-2 bins) hold
+# this share of the energy is outside that domain and is skipped. Measured 2026-10-17: LibriSpeech dev-clean (240)
+# median 0.23, max 0.622; the synthetic voiced fixtures 0.55 / 0.67; pure sines (220/440/1000 Hz, also after mp3) 1.0.
+MAX_TONAL_RATIO = 0.9
+TONAL_SECONDS = 30
+
+
+def tonal_ratio(samples: Any, rate: int) -> float:
+    """Share of the averaged power spectrum (first TONAL_SECONDS, 4096-point Hann frames) in the 3 strongest peaks (+-2 bins)."""
+    import numpy as np
+
+    x = np.asarray(samples[: int(rate * TONAL_SECONDS)], dtype=np.float64)
+    n = 4096
+    if len(x) < n:
+        x = np.pad(x, (0, n - len(x)))
+    window = np.hanning(n)
+    power = np.zeros(n // 2 + 1)
+    frames = (len(x) - n) // (n // 2) + 1
+    for index in range(frames):
+        power += np.abs(np.fft.rfft(x[index * (n // 2): index * (n // 2) + n] * window)) ** 2
+    total = float(power.sum())
+    if total <= 0:
+        return 0.0
+    remaining = power.copy()
+    peak_energy = 0.0
+    for _ in range(3):
+        k = int(np.argmax(remaining))
+        lo, hi = max(0, k - 2), min(len(remaining), k + 3)
+        peak_energy += float(remaining[lo:hi].sum())
+        remaining[lo:hi] = 0
+    return peak_energy / total
+
+
 def perth_read(path: Path) -> PerthReading:
     import librosa  # noqa: F401 — dependency probe: the package's resampler
     import numpy as np
@@ -200,6 +234,12 @@ def perth_read(path: Path) -> PerthReading:
     if seconds < MIN_SECONDS:
         raise CheckSkipped(f"측정 범위 밖: 길이 {seconds:.2f}초(1초 미만)")
     mono = np.ascontiguousarray(frames.mean(axis=1), dtype=np.float32)
+    tonal = tonal_ratio(mono, rate)
+    if tonal >= MAX_TONAL_RATIO:
+        raise CheckSkipped(
+            f"측정 범위 밖: 가장 강한 주파수 3개가 에너지의 {tonal:.0%}인 순음 위주 신호 — PerTh 디코더는 음성에서만 측정되었고 "
+            "순음에서 오탐이 관찰됨(440 Hz 사인파 신뢰도 0.99)"
+        )
     if rate != SAMPLE_RATE:
         import librosa
 

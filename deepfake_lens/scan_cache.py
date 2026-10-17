@@ -897,7 +897,9 @@ CACHE_KEY_VERSION = "content-v5"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 25: TB-8 — watermark_sdxl also matches the registered fixed messages of the FLUX.1 reference code (46 bits) and the
 #    SD 1 / SD 2 official scripts (136 / 32 bits); each match is titled by its pipeline; the no-match reason and the
 #    check label name the registered set (registry 2026-10-17.2).
-OUTPUT_FORMAT_GENERATION = 25
+# 26: TB-2 fix — watermark_perth skips tone-dominated signals (3 strongest peaks >= 90% of the energy: a 440 Hz sine
+#    scored 0.99) "측정 범위 밖: … 순음 위주 신호 …", and its wording avoids English runs (registry 2026-10-17.3).
+OUTPUT_FORMAT_GENERATION = 26
 
 
 def cache_extension(path: Path) -> str:

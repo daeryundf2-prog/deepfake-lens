@@ -466,6 +466,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 26,
+      "reason": "TB-2 fix: PerTh skips tone-dominated signals; wording without English runs",
+      "sha256": "cd55084ce585258d14ff50cd14eb2ff34126e6593d523fba34c5cb737aebeebb",
+      "sets": {
+        "stdlib": "cd55084ce585258d14ff50cd14eb2ff34126e6593d523fba34c5cb737aebeebb",
+        "full-extras": "4bfb03c62174d345348e67ae4982b2df26a5d06d1bde0e989f9a475ce8a967ee"
+      },
+      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

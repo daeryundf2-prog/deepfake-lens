@@ -123,6 +123,33 @@ class EnvironmentTest(unittest.TestCase):
         self.assertIn("fetch_watermark_models.py", layers.coverage[0].reason)
 
 
+class TonalGuardTest(unittest.TestCase):
+    """Out of the measured (speech) domain: a pure tone is skipped instead of decoded (a 440 Hz sine scored 0.99)."""
+
+    @unittest.skipUnless(importlib.util.find_spec("numpy") is not None, "numpy required")
+    def test_tonal_ratio_separates_tones_from_voiced_signals(self) -> None:
+        import numpy as np
+
+        from deepfake_lens.wm_perth import MAX_TONAL_RATIO, tonal_ratio
+
+        t = np.arange(48000 * 3) / 48000
+        self.assertGreaterEqual(tonal_ratio(0.3 * np.sin(2 * np.pi * 440 * t), 48000), MAX_TONAL_RATIO)
+        with wave.open(str(FIXTURES / "synthetic-perth.wav"), "rb") as handle:
+            voiced = np.frombuffer(handle.readframes(handle.getnframes()), dtype="<i2") / 32768.0
+        self.assertLess(tonal_ratio(voiced, 24000), MAX_TONAL_RATIO)
+
+    @unittest.skipUnless(HAVE_STACK, "torch, librosa and ffmpeg required (tech2 image)")
+    def test_a_sine_is_skipped(self) -> None:
+        if not _weight_present():
+            self.skipTest("perth-implicit-250000.pth.tar not in the models folder (tech2 image)")
+        layers = MarkLayers()
+        with tempfile.TemporaryDirectory() as tmp:
+            _perth_layer(_tone(Path(tmp) / "sine.wav", seconds=3.0, rate=48000), layers)
+        self.assertEqual(layers.coverage[0].status, CoverageStatus.SKIPPED)
+        self.assertIn("순음", layers.coverage[0].reason)
+        self.assertEqual(layers.evidence, [])
+
+
 @unittest.skipUnless(HAVE_STACK, "torch, librosa and ffmpeg required (tech2 image)")
 class DecoderTest(unittest.TestCase):
     """Against the confidences resemble-perth 1.0.1 itself computed for the fixtures (fixtures/perth/README.md)."""
