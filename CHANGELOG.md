@@ -18,6 +18,9 @@ grouped by work pass rather than release.
 - TB-3: `device_ai_label` — the Samsung SEFT trailer's entry names (ExifTool Samsung.pm layout; AI-related
   candidates marked unverified) and Google AI credit labels ("Edited with Google AI", "Made with Google AI",
   "Made by Google AI") as self-declared, at most moderate items (`models/device-labels.json`).
+- TB-5: `screen_capture` — the iOS/macOS "Screenshot" user comment (XMP `exif:UserComment`, EXIF UserComment) and
+  native phone/tablet screen sizes from the makers' spec pages (`models/screen-traits.json`) as neutral facts; a
+  trusted camera C2PA manifest adds "a camera manifest proves the device photographed this scene, not that it was real".
 - TB-6: `document_structure` — PDF revisions / incremental saves, bytes after a signature's `/ByteRange`, producer and
   creator history, `application/c2pa` embedding; DOCX/XLSX/PPTX revision, application, editing time, `w:rsid` count,
   tracked changes (self-declared facts). See `docs/FACT-LAYERS.md`.

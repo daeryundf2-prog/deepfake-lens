@@ -342,6 +342,7 @@ CHECK_LABELS = {
     "file_name_pattern": "파일 이름 형식(메신저·스크린샷·녹음)",
     "audio_channel_trace": "통화·메신저 코덱·대역폭 흔적",
     "device_ai_label": "기기 AI 편집 라벨(삼성·Google)",
+    "screen_capture": "스크린샷 사실(캡처 주석·화면 해상도)",
 }
 
 

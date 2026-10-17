@@ -69,3 +69,19 @@
   9to5google 보도), 「Made with Google AI」(Gemini — IPTC 공지 2024-10-28), 「Made by Google AI」(보도) → 생성·**중** 자기 신고(규칙 5만 막고 결론 없음).
   같은 파일의 IPTC 디지털 출처 유형(`compositeWithTrainedAlgorithmicMedia` 등)은 기존 XMP 규칙이 따로 읽는다(그 세기는 이 작업에서 바꾸지 않음 — 재구성 브랜치 결정).
 - coverage `ran` 사유: 「삼성 SEFT 트레일러 항목 N개 / 없음; Google AI 라벨 없음 / XMP 라벨 「…」(기기 라벨 표 …)」. 테스트 `test_device_labels.py`.
+
+## 4. 스크린샷·재촬영 사실 (`screen_capture`, TB-5 — M-IMG-07)
+
+표: `deepfake_lens/models/screen-traits.json`(`screen-traits-v1`, 판 `2026-10-17.1`). 모든 이미지에서 실행. 재촬영(모아레·서브픽셀) 탐지는 분류 B라 범위 밖.
+
+- **캡처 주석**: XMP `exif:UserComment`(`http://ns.adobe.com/exif/1.0/`) 또는 EXIF `UserComment`(0x9286)가 「Screenshot」 — iOS PNG 스크린샷 원본(위키미디어 공용,
+  iPhone 16 Pro Max 2025·iPhone XR 2020)과 macOS 대화형 스크린샷에서 확인. macOS `screencapture` 명령줄 도구는 쓰지 않는다(macOS 15.7.4에서 직접 확인).
+  → 중립·약 「화면 캡처 표시(운영체제가 쓴 주석)」. 다시 저장하면 사라지므로 없다고 스크린샷이 아닌 것은 아니다.
+- **화면 해상도**: 이미지 크기(가로·세로 어느 방향이든)가 표의 기기 기본 화면 해상도와 같으면 중립·약 「기기 화면 해상도와 같은 크기」(기기 목록 포함).
+  iPhone 11–17·Air·SE, iPad 일부(support.apple.com 기술 사양), 갤럭시 S22–S26·A35/36/55/56·Z 폴드5–7·플립6–7(samsung.com 사양), Pixel 8–11
+  (support.google.com/pixelphone/answer/7158570). 같은 크기를 여러 기종이 쓰므로(예: 1170×2532는 7개 기종) 기기를 특정하지 않는다. 삼성의 기본 FHD+ 화면 설정
+  크기는 공식 자료가 없어 넣지 않았다.
+- IPTC `screenCapture`는 기존 XMP·C2PA 규칙이 읽는다(중립·중).
+- **재촬영 문구**: 신뢰 서명자의 유효 C2PA 매니페스트가 `digitalCapture`·`computationalCapture`를 선언하면 한계 문구
+  「카메라 C2PA 서명은 이 기기가 이 장면을 찍었다는 것만 증명하며, 장면이 실제였다는 것(화면·인쇄물을 다시 찍은 것이 아님)은 증명하지 않습니다.」가 붙는다.
+- 테스트 `test_screen_capture.py`.

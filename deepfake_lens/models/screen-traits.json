@@ -1,0 +1,198 @@
+{
+  "schema": "screen-traits-v1",
+  "version": "2026-10-17.1",
+  "note": "techniques-2026b TB-5: native screen resolutions (portrait width x height; either orientation matches) from the makers' official spec pages, retrieved 2026-10-17. Many models share a size, so a match narrows to a set of models and never identifies a device. Samsung's default FHD+ screenshot size is not stated officially and is not listed.",
+  "screen_resolutions": [
+    {
+      "width": 828,
+      "height": 1792,
+      "devices": "iPhone 11·XR",
+      "source": "https://support.apple.com/en-us/111865"
+    },
+    {
+      "width": 1125,
+      "height": 2436,
+      "devices": "iPhone X·XS·11 Pro",
+      "source": "https://support.apple.com/en-us/111879"
+    },
+    {
+      "width": 1242,
+      "height": 2688,
+      "devices": "iPhone XS Max·11 Pro Max",
+      "source": "https://support.apple.com/en-us/111878"
+    },
+    {
+      "width": 750,
+      "height": 1334,
+      "devices": "iPhone SE(2·3세대)",
+      "source": "https://support.apple.com/en-us/111882"
+    },
+    {
+      "width": 1080,
+      "height": 2340,
+      "devices": "iPhone 12 mini·13 mini / 갤럭시 S22·S23·S24·S25·S26 기본형·A35·A36·A55·A56",
+      "source": "https://support.apple.com/en-us/111877 ; https://www.samsung.com/uk/smartphones/galaxy-s25/specs/"
+    },
+    {
+      "width": 1170,
+      "height": 2532,
+      "devices": "iPhone 12·12 Pro·13·13 Pro·14·16e·17e",
+      "source": "https://support.apple.com/en-us/111876"
+    },
+    {
+      "width": 1284,
+      "height": 2778,
+      "devices": "iPhone 12 Pro Max·13 Pro Max·14 Plus",
+      "source": "https://support.apple.com/en-us/111874"
+    },
+    {
+      "width": 1179,
+      "height": 2556,
+      "devices": "iPhone 14 Pro·15·15 Pro·16",
+      "source": "https://support.apple.com/en-us/111849"
+    },
+    {
+      "width": 1290,
+      "height": 2796,
+      "devices": "iPhone 14 Pro Max·15 Plus·15 Pro Max·16 Plus",
+      "source": "https://support.apple.com/en-us/111846"
+    },
+    {
+      "width": 1206,
+      "height": 2622,
+      "devices": "iPhone 16 Pro·17·17 Pro",
+      "source": "https://support.apple.com/en-us/121031"
+    },
+    {
+      "width": 1320,
+      "height": 2868,
+      "devices": "iPhone 16 Pro Max·17 Pro Max",
+      "source": "https://support.apple.com/en-us/121032"
+    },
+    {
+      "width": 1260,
+      "height": 2736,
+      "devices": "iPhone Air",
+      "source": "https://support.apple.com/en-us/125092"
+    },
+    {
+      "width": 1640,
+      "height": 2360,
+      "devices": "iPad(10세대·A16)·iPad Air 11형",
+      "source": "https://support.apple.com/en-us/111840"
+    },
+    {
+      "width": 2048,
+      "height": 2732,
+      "devices": "iPad Air 13형",
+      "source": "https://support.apple.com/en-us/119893"
+    },
+    {
+      "width": 1668,
+      "height": 2420,
+      "devices": "iPad Pro 11형(M4·M5)",
+      "source": "https://support.apple.com/en-us/119892"
+    },
+    {
+      "width": 2064,
+      "height": 2752,
+      "devices": "iPad Pro 13형(M4·M5)",
+      "source": "https://support.apple.com/en-us/119891"
+    },
+    {
+      "width": 1488,
+      "height": 2266,
+      "devices": "iPad mini(A17 Pro)",
+      "source": "https://support.apple.com/en-us/121456"
+    },
+    {
+      "width": 1440,
+      "height": 3120,
+      "devices": "갤럭시 S24+·S24 Ultra·S25+·S25 Ultra·S25 Edge·S26+·S26 Ultra(QHD+ 설정)",
+      "source": "https://www.samsung.com/uk/smartphones/galaxy-s25-ultra/specs/"
+    },
+    {
+      "width": 1440,
+      "height": 3088,
+      "devices": "갤럭시 S23 Ultra(QHD+ 설정)",
+      "source": "https://web.archive.org/web/20240115044725/https://www.samsung.com/uk/smartphones/galaxy-s23-ultra/specs/"
+    },
+    {
+      "width": 1968,
+      "height": 2184,
+      "devices": "갤럭시 Z 폴드7 안쪽 화면",
+      "source": "https://www.samsung.com/uk/smartphones/galaxy-z-fold7/specs/"
+    },
+    {
+      "width": 1080,
+      "height": 2520,
+      "devices": "갤럭시 Z 폴드7 바깥 화면·Z 플립7",
+      "source": "https://www.samsung.com/uk/smartphones/galaxy-z-flip7/specs/"
+    },
+    {
+      "width": 1856,
+      "height": 2160,
+      "devices": "갤럭시 Z 폴드6 안쪽 화면",
+      "source": "https://www.samsung.com/sec/smartphones/galaxy-z-fold6/specs/"
+    },
+    {
+      "width": 968,
+      "height": 2376,
+      "devices": "갤럭시 Z 폴드6 바깥 화면",
+      "source": "https://www.samsung.com/sec/smartphones/galaxy-z-fold6/specs/"
+    },
+    {
+      "width": 1812,
+      "height": 2176,
+      "devices": "갤럭시 Z 폴드5 안쪽 화면",
+      "source": "https://web.archive.org/web/20250314174641/https://www.samsung.com/uk/smartphones/galaxy-z-fold5/specs/"
+    },
+    {
+      "width": 904,
+      "height": 2316,
+      "devices": "갤럭시 Z 폴드5 바깥 화면",
+      "source": "https://web.archive.org/web/20250314174641/https://www.samsung.com/uk/smartphones/galaxy-z-fold5/specs/"
+    },
+    {
+      "width": 1080,
+      "height": 2640,
+      "devices": "갤럭시 Z 플립6",
+      "source": "https://www.samsung.com/sec/smartphones/galaxy-z-flip6/specs/"
+    },
+    {
+      "width": 1080,
+      "height": 2400,
+      "devices": "Pixel 8·8a",
+      "source": "https://support.google.com/pixelphone/answer/7158570"
+    },
+    {
+      "width": 1344,
+      "height": 2992,
+      "devices": "Pixel 8 Pro·9 Pro XL·10 Pro XL·11 Pro XL",
+      "source": "https://support.google.com/pixelphone/answer/7158570"
+    },
+    {
+      "width": 1080,
+      "height": 2424,
+      "devices": "Pixel 9·9a·10·10a·11(9 Pro Fold 바깥 화면)",
+      "source": "https://support.google.com/pixelphone/answer/7158570"
+    },
+    {
+      "width": 1280,
+      "height": 2856,
+      "devices": "Pixel 9 Pro·10 Pro·11 Pro",
+      "source": "https://support.google.com/pixelphone/answer/7158570"
+    },
+    {
+      "width": 2076,
+      "height": 2152,
+      "devices": "Pixel 9·10·11 Pro Fold 안쪽 화면",
+      "source": "https://support.google.com/pixelphone/answer/7158570"
+    }
+  ],
+  "user_comment": {
+    "value": "Screenshot",
+    "source": "iOS PNG screenshots (Wikimedia Commons originals from iPhone 16 Pro Max, 2025, and iPhone XR, 2020: XMP exif:UserComment and EXIF UserComment 'Screenshot'); macOS interactive screenshots (public sample, same fields). The macOS screencapture command-line tool writes neither (checked on macOS 15.7.4, 2026-10-17).",
+    "confidence": "원본 파일 확인(공개 표본)"
+  }
+}

@@ -1737,6 +1737,12 @@ def _analyze_image_file(
     device = device_label_layers(file_path, metadata)
     coverage.extend(device.coverage)
     marks = replace(marks, evidence=[*marks.evidence, *device.evidence])
+    # TB-5: screenshot facts (OS "Screenshot" user comment, native screen sizes) and the camera-C2PA recapture note.
+    from .screen_capture import screen_capture_layers
+
+    screen = screen_capture_layers(file_path, metadata, dimensions, c2pa_validation)
+    coverage.extend(screen.coverage)
+    marks = replace(marks, evidence=[*marks.evidence, *screen.evidence], limitations=[*marks.limitations, *screen.limitations])
 
     image_format = metadata_read.image_format if metadata_read is not None else None
     jpeg_quality = None

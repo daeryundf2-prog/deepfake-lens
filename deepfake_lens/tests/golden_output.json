@@ -403,6 +403,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 23,
+      "reason": "TB-5: screen_capture on image rows",
+      "sha256": "895a0f00070f1877a662fe84d5d734efb8a3056bc8511a5983a952275a0a80f6",
+      "sets": {
+        "stdlib": "895a0f00070f1877a662fe84d5d734efb8a3056bc8511a5983a952275a0a80f6",
+        "full-extras": "388323af9e48617880ea5b601639ede3175ec4a04672e27b7b75822db9ea5c3a"
+      },
+      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

@@ -889,7 +889,9 @@ CACHE_KEY_VERSION = "content-v5"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    optional: skipped "의존성 부재: torch" without it); the registry gains perth-implicit-chatterbox (2026-10-17.1).
 # 22: TB-3 — images gain device_ai_label: the Samsung SEFT trailer's entry names (neutral fact; AI-related
 #    candidates "의미 미확인") and Google AI credit labels in XMP photoshop:Credit (synthetic / moderate, self-declared).
-OUTPUT_FORMAT_GENERATION = 22
+# 23: TB-5 — images gain screen_capture (iOS/macOS "Screenshot" user comment in XMP/EXIF, native screen size of a
+#    phone/tablet) as neutral facts, and a trusted camera C2PA manifest adds the recapture limitation.
+OUTPUT_FORMAT_GENERATION = 23
 
 
 def cache_extension(path: Path) -> str:
@@ -941,6 +943,10 @@ def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | No
     from .device_labels import table_cache_tokens
 
     tokens += table_cache_tokens()
+    # TB-5: the screen-traits table (native screen sizes, the "Screenshot" comment).
+    from .screen_capture import traits_cache_tokens
+
+    tokens += traits_cache_tokens()
     return f"tool:{TOOL_VERSION}|pins:{_short_digest(chr(10).join(tokens))}"
 
 
