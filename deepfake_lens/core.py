@@ -2406,7 +2406,7 @@ def analyze_image_metadata(
             coverage.append(CoverageEntry("pixel", CoverageStatus.RAN) if pixel_analysis.available else skipped("pixel", "픽셀 분석 불가"))
         coverage.extend(_default_model_coverage(model_analysis))
 
-    limitations = ["결론은 메타데이터·출처 기록 같은 결정적 근거로만 내립니다. 통계·휴리스틱 신호는 보정 전까지 결론에 참여하지 않습니다."]
+    limitations = ["결론은 메타데이터·출처 기록 같은 재현 가능한 기록 근거로만 내립니다. 통계·휴리스틱 신호는 보정 전까지 결론에 참여하지 않습니다."]
     subject = "이미지"
     if image_class is not None and not image_class.is_photo:
         notice = NON_PHOTO_NOTICE if image_class.kind != "too_small" else OUT_OF_RANGE_NOTICE
@@ -2505,7 +2505,7 @@ def _verdict_text(
     if failed_entries:
         names = ", ".join(check_label(entry.check) for entry in failed_entries)
         return f"{subject}: 판단 불가 — 검사 실패({names})로 결론을 내리지 않습니다."
-    return f"{subject}: 판단 불가 — 결론을 뒷받침할 결정적 근거나 보정된 모델 근거가 없습니다. 원본이라는 뜻이 아닙니다."
+    return f"{subject}: 판단 불가 — 결론을 뒷받침할 재현 가능한 기록 근거나 보정된 모델 근거가 없습니다. 원본이라는 뜻이 아닙니다."
 
 
 def build_classification_result(

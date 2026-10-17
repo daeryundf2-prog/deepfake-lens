@@ -202,7 +202,7 @@ class EvidenceKind(str, Enum):
 
 
 EVIDENCE_KIND_LABELS = {
-    EvidenceKind.DETERMINISTIC: "결정적 근거",
+    EvidenceKind.DETERMINISTIC: "재현 가능한 기록 근거",
     EvidenceKind.STATISTICAL: "통계적 근거",
     EvidenceKind.LEXICAL: "어휘적 근거",
 }

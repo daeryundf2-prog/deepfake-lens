@@ -424,6 +424,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 24,
+      "reason": "P0R-13: 결정적 근거 표시를 「재현 가능한 기록 근거」로, 판단 불가 행의 등급 라벨 표시 안 함",
+      "sha256": "f675dfb6a4bae3ef03a56eea1cddb49974f7893575d9ab775bbd9701d9e99189",
+      "sets": {
+        "stdlib": "f675dfb6a4bae3ef03a56eea1cddb49974f7893575d9ab775bbd9701d9e99189",
+        "full-extras": "818b003103b052ece69dc22d4218f2f1e3172f1ffae6394a1e30a37d277d0c7e"
+      },
+      "constants_sha256": "04149d08d78eb64c812ba095e748397a1151899430f48fbdd1ead27ab8f0417d",
+      "constants_count": 60,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

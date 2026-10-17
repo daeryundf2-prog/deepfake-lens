@@ -304,7 +304,7 @@ class RendererTest(unittest.TestCase):
         text = out.getvalue()
         self.assertIn("조작·생성 근거 있음", text)
         self.assertIn("판단 불가", text)
-        self.assertIn("[결정적 근거]", text)
+        self.assertIn("[재현 가능한 기록 근거]", text)
         self.assertIn("결정 0·통계 0·어휘", text)
         self.assertIn(TEXT_LEGAL_LIMITATION, text)
         self.assertNotIn("medium=", text)
@@ -338,7 +338,7 @@ class RendererTest(unittest.TestCase):
         self.assertEqual((a1111["status"], a1111["status_label"]), ("analyzed", "분석됨"))
         self.assertEqual((a1111["grade"], a1111["grade_label"]), ("evidence", "감정 근거로 사용 가능"))
         self.assertTrue(a1111["top_evidence"].startswith("deterministic:"))
-        self.assertTrue(a1111["top_evidence_label"].startswith("[결정적 근거] "))
+        self.assertTrue(a1111["top_evidence_label"].startswith("[재현 가능한 기록 근거] "))
         note = by_path["note.txt"]
         self.assertEqual((note["grade"], note["grade_label"]), ("reference", "참고"))
         self.assertEqual(note["source_confidence_label"], "알 수 없음")
@@ -426,7 +426,7 @@ class RendererTest(unittest.TestCase):
         path = self.root / "r.html"
         write_html_report(path, self.summary, self.items)
         html = path.read_text(encoding="utf-8")
-        for needle in ("조작·생성 근거 있음", "판단 불가", "결정적 근거", "어휘적 근거", "미실행", TEXT_LEGAL_LIMITATION):
+        for needle in ("조작·생성 근거 있음", "판단 불가", "재현 가능한 기록 근거", "어휘적 근거", "미실행", TEXT_LEGAL_LIMITATION):
             self.assertIn(needle, html)
 
     def test_minimal_pdf_states_verdict_codes(self) -> None:
@@ -457,7 +457,7 @@ class RendererTest(unittest.TestCase):
         md = statement.to_markdown()
         self.assertIn(TEXT_LEGAL_LIMITATION, md)
         by_name = {Path(entry.file_path).name: entry for entry in statement.entries}
-        self.assertIn("결정적 근거", by_name["a1111.png"].purpose_of_proof)
+        self.assertIn("재현 가능한 기록 근거", by_name["a1111.png"].purpose_of_proof)
         self.assertEqual(by_name["note.txt"].statutes, [])
         self.assertIn("참고", by_name["note.txt"].purpose_of_proof)
 

@@ -885,7 +885,10 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    source guess is LOW (was HIGH).
 # 23: P0R-12 — result.conclusion_caveats (why a manipulation / authenticity conclusion could be wrong); a manipulation
 #    verdict resting on a self-declared item says 「(자기 선언 메타데이터 — 심거나 지울 수 있음)」.
-OUTPUT_FORMAT_GENERATION = 23
+# 24: P0R-13 — the deterministic kind label is 「재현 가능한 기록 근거」 in every rendering (the [기록/…] qualifiers, the CSV
+#    top_evidence_label, the evidence statement), and an evidence-grade 판단 불가 row shows no grade label (CSV
+#    grade_label blank). The JSON fields are unchanged.
+OUTPUT_FORMAT_GENERATION = 24
 
 
 def cache_extension(path: Path) -> str:

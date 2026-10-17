@@ -97,5 +97,35 @@ class CaveatRulesTest(unittest.TestCase):
                 self.assertTrue(conclusion_caveats(verdict, []))
 
 
+class RecordEvidenceWordingTest(unittest.TestCase):
+    """P0R-13: 「결정적 근거」 reads as "unforgeable" — it is 「재현 가능한 기록 근거」 everywhere a person reads it, and an
+    evidence-grade 판단 불가 row shows no 「감정 근거로 사용 가능」 label."""
+
+    def test_the_kind_label_and_the_csv_header(self) -> None:
+        from deepfake_lens.result_types import EVIDENCE_KIND_LABELS
+
+        self.assertEqual(EVIDENCE_KIND_LABELS[EvidenceKind.DETERMINISTIC], "재현 가능한 기록 근거")
+        gui = (Path(__file__).resolve().parents[1] / "gui.js").read_text(encoding="utf-8")
+        self.assertIn("결론,등급,재현 가능한 기록 근거,통계적 근거,어휘적 근거", gui)
+        package = Path(__file__).resolve().parents[1]
+        offenders = [p.name for p in [*package.glob("*.py"), package / "gui.js", package / "gui.html"] if "결정적 근거" in p.read_text(encoding="utf-8")]
+        self.assertEqual(offenders, [])
+
+    def test_no_evidence_grade_label_next_to_undetermined(self) -> None:
+        from deepfake_lens.result_text import shown_grade_label, verdict_heading
+
+        undetermined = build_classification_result(
+            subject="이미지", evidence=[], coverage=[], source_guess=SourceGuess.unknown(), limitations=[], next_checks=[],
+        )
+        self.assertEqual(verdict_heading(undetermined), "판단 불가")
+        self.assertEqual(shown_grade_label(undetermined), "")
+        self.assertEqual(undetermined.to_json()["grade_label"], "감정 근거로 사용 가능")  # the JSON field is unchanged
+        concluded = build_classification_result(
+            subject="이미지", evidence=[EvidenceItem("x", "d", EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "metadata")],
+            coverage=[], source_guess=SourceGuess.unknown(), limitations=[], next_checks=[],
+        )
+        self.assertEqual(verdict_heading(concluded), "조작·생성 근거 있음 [감정 근거로 사용 가능]")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -11,6 +11,10 @@ from typing import Any, Callable
 from .core import TOOL_VERSION, BatchScanSummary, ScanItem
 from .evaluation_metrics import format_ci
 from .evidence_rules import CAVEATS_TITLE  # P0R-12
+from .result_types import EvidenceKind
+
+# P0R-13: the forensic PDF table's short kind tag (it printed the first two characters of the kind label).
+EVIDENCE_KIND_SHORT_LABELS = {EvidenceKind.DETERMINISTIC: "기록", EvidenceKind.STATISTICAL: "통계", EvidenceKind.LEXICAL: "어휘"}
 from .office_config import OfficeIdentity, office_identity
 from .result_text import (
     HASH_UNAVAILABLE_ACCESS,
@@ -33,7 +37,7 @@ from .result_text import (
     UNRECORDED_SECTION_TITLE,
     verdict_heading,
 )
-from .result_types import EVIDENCE_KIND_LABELS, VERDICT_LABELS, CoverageStatus, Grade, Verdict, check_label, is_verdict_row, status_label
+from .result_types import VERDICT_LABELS, CoverageStatus, Grade, Verdict, check_label, is_verdict_row, status_label
 from .signing import REPORT_KEY_ENV, resolve_report_key, sign_report, signed_body_sha256
 from .json_text import script_safe_json
 from .native_path import temp_location  # R15-6: temp_folder in the report body
@@ -308,7 +312,7 @@ def write_html_report(
   <h1>{escape(HTML_REPORT_TITLE)}</h1>
   <p>{escape(summary_line(summary))}</p>
   {_scan_root_html(signed_report)}
-  <p class="note">결론은 세 가지뿐입니다 — 조작·생성 근거 있음 / 원본성 근거 있음 / 판단 불가. 결정적 근거(메타데이터·C2PA)만 결론을 내리고, 통계적(모델)·어휘적(키워드) 근거는 보정 전까지 참고로만 표시합니다. 검사가 실패한 파일은 판단 불가로 남습니다.</p>
+  <p class="note">결론은 세 가지뿐입니다 — 조작·생성 근거 있음 / 원본성 근거 있음 / 판단 불가. 재현 가능한 기록 근거(메타데이터·C2PA)만 결론을 내리고, 통계적(모델)·어휘적(키워드) 근거는 보정 전까지 참고로만 표시합니다. 검사가 실패한 파일은 판단 불가로 남습니다.</p>
   {legal_note}
   <p class="note">{"<br>".join(escape(line) for line in threshold_provenance_lines(thresholds))}</p>
   {_unrecorded_html(summary, items)}
@@ -526,7 +530,7 @@ FORENSIC_TABLE_HEADERS = ("번호", "증거 파일명 및 SHA-256 무결성 해�
 # Relative column widths of the evidence table (번호 … 주요 근거).
 FORENSIC_TABLE_WEIGHTS = (5.0, 35.0, 12.0, 7.0, 14.0, 27.0)
 FORENSIC_DECISION_NOTE = (
-    "결론은 결정적 근거(메타데이터·C2PA)로만 내리며, 통계적·어휘적 근거와 검사 실패 내역은 "
+    "결론은 재현 가능한 기록 근거(메타데이터·C2PA)로만 내리며, 통계적·어휘적 근거와 검사 실패 내역은 "
     "JSON 산출물의 evidence/coverage에 전부 기록됩니다."
 )
 
@@ -652,7 +656,7 @@ def _render_forensic_pdf(
         if failed_checks:
             sig_str = "실패: " + ", ".join(check_label(entry.check) for entry in failed_checks)
         elif top_item is not None:
-            sig_str = f"[{EVIDENCE_KIND_LABELS[top_item.kind][:2]}] {display_name(top_item.title)}"
+            sig_str = f"[{EVIDENCE_KIND_SHORT_LABELS[top_item.kind]}] {display_name(top_item.title)}"
             if top_item.self_declared:
                 sig_str += " (자기 선언)"  # P0R-12
         else:

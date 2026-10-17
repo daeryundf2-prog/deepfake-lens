@@ -13,6 +13,10 @@ It is intentionally CLI-first:
 
 Phase-0 gate verification covers these commands only: `scan`, `classify`, `verify-report`, `evidence-statement`, `doctor`, `web`, `api-serve`, `corpus build|split|verify` and `vendor-weights pin` / `pin-asset` (`deepfake_lens.cli_parser.GATE_COMMANDS`). Every other command is **experimental and outside the gate** — its help line ends with `[실험·비게이트]` and its `--help` description starts with 「실험·비게이트 명령 — 0단계 게이트 검증 범위 밖입니다 …」; `vendor-weights --help` says that only its `pin`/`pin-asset` actions are in scope. The experimental commands keep working and their tests still run in every gate; findings about their paths, wording or help are classified Low and go to `docs/phase0/BACKLOG.md` (a factually false user-visible statement is still fixed). See docs/phase0/HANDOFF.md §6.
 
+## Wording of record evidence and grade labels (P0R-13, output-format generation 24)
+
+User decision 2026-10-17 (review §1.3, UX audit U-1/U-2): the evidence kind `deterministic` is shown as **「재현 가능한 기록 근거」** (it was 「결정적 근거」, which reads as "unforgeable" — it means the record can be re-read and re-checked, not that it cannot be planted) in every rendering: the CLI table, `classify`/`explain` text (`[기록/합성/강]` qualifiers, was `[결정적/…]`), the HTML report, the forensic PDF (`[기록]` tag), the evidence statement, the GUI and its CSV export, whose header is now `결론,등급,재현 가능한 기록 근거,통계적 근거,어휘적 근거,검사 실패,출처 추정,모델,파일명,검토,메모,판정 문장` (the third column was `결정적 근거`). An evidence-grade **판단 불가** row shows no grade label — no 「감정 근거로 사용 가능」 next to 판단 불가 — in those renderings: `scan --csv-out`'s `grade_label` column is blank for it and the GUI CSV's `등급` column too; the JSON `grade` / `grade_label` fields are unchanged.
+
 ## Command Reference
 
 Every subcommand, briefly. Detail for the core workflow lives in the sections below.

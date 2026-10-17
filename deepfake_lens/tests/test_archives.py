@@ -1343,8 +1343,8 @@ class ArchiveContainerRollupEvidenceTests(unittest.TestCase):
         statement = build_evidence_statement(items, scan_root=self.root)
         entry = next(e for e in statement.entries if e.file_path == "case.zip")
         self.assertNotIn("근거 항목 없음", entry.purpose_of_proof)
-        self.assertNotIn("결정적 근거(결정적 근거)", entry.purpose_of_proof)
-        self.assertIn("압축 파일 구성원 중 결정적 근거에 의해 조작·생성 근거가 확인된 파일이 있는 증거물임을 소명함", entry.purpose_of_proof)
+        self.assertNotIn("재현 가능한 기록 근거(재현 가능한 기록 근거)", entry.purpose_of_proof)
+        self.assertIn("압축 파일 구성원 중 재현 가능한 기록 근거에 의해 조작·생성 근거가 확인된 파일이 있는 증거물임을 소명함", entry.purpose_of_proof)
         self.assertIn("조작·생성 근거 있음 1건 / 판단 불가 1건", entry.purpose_of_proof)
 
     def test_rollup_detail_lists_authenticity_only_when_present(self) -> None:

@@ -227,7 +227,7 @@ class LegalReportTextTest(unittest.TestCase):
         }
         text = legal_report_text(report)
         for expected in (
-            "[결정적/합성/강]", "[통계적/원본/중]", "[어휘적/중립/약]",
+            "[기록/합성/강]", "[통계적/원본/중]", "[어휘적/중립/약]",
             "- 메타데이터: 실행", "- 압축 구성 파일: 미실행 — 심볼릭 링크 멤버", "- 외부 모델(한국어 모델 이름): 실패 — RuntimeError: boom",
             "1234 바이트",
         ):
@@ -285,7 +285,7 @@ class AnalysisResultTextTest(unittest.TestCase):
             text = format_analysis_result(payload)
         for expected in (
             "[결론] 조작·생성 근거 있음 · 등급: 참고",
-            "[결정적/합성/강] 생성 도구 메타데이터: d",
+            "[기록/합성/강] 생성 도구 메타데이터: d",
             "- 메타데이터: 실행",
             "- 외부 모델(Swin-large 생성 이미지 탐지기(umm-maybe)): 미실행 — 모델 실행 불가",
         ):

@@ -54,6 +54,7 @@ from .result_text import (
     unrecorded_files,
 )
 from .evidence_rules import CAVEATS_TITLE, SELF_DECLARED_NOTE  # P0R-12
+from .result_text import shown_grade_label  # P0R-13
 from .result_types import VERDICT_LABELS, CoverageStatus, EvidenceDirection, EvidenceKind, EvidenceStrength, Grade, Verdict, is_verdict_row, status_label
 from .signing import resolve_report_key, sign_report
 from .json_text import json_dumps
@@ -306,7 +307,7 @@ def _clip(text: str, limit: int) -> str:
 # 형법 제347조 for any video or a title with "얼굴") — the same unfounded entry R18-16 removed from
 # the case name. The examiner writes the statutes.
 STATUTE_PLACEHOLDER = "• 관련 법조: (검토자 기재 — 도구는 죄명·법조를 정하지 않습니다)"
-STATUTE_NONE = "• 관련 법조: 해당 없음 (결정적 근거에 의한 조작·생성 결론이 없음)"
+STATUTE_NONE = "• 관련 법조: 해당 없음 (재현 가능한 기록 근거에 의한 조작·생성 결론이 없음)"
 
 
 def _member_references(item: ScanItem, exhibits: dict[str, str], items: list[ScanItem]) -> str:
@@ -337,7 +338,7 @@ def _purpose_head(item: ScanItem, member_refs: str = "") -> str:
         # N5: a container row concludes from its members, not from its own bytes.
         rollup = display_name(next((e.detail for e in res.evidence if e.layer == "archive"), ""))
         return (
-            f"압축 파일 구성원 중 결정적 근거에 의해 조작·생성 근거가 확인된 파일이 있는 증거물임을 소명함"
+            f"압축 파일 구성원 중 재현 가능한 기록 근거에 의해 조작·생성 근거가 확인된 파일이 있는 증거물임을 소명함"
             f"(구성원 결론 집계: {rollup}; {member_refs or '구성원 행 참조'})."
         )
     if res.verdict_code == Verdict.MANIPULATION_EVIDENCE:
@@ -345,20 +346,20 @@ def _purpose_head(item: ScanItem, member_refs: str = "") -> str:
             (e for e in res.evidence if e.kind == EvidenceKind.DETERMINISTIC and e.direction == EvidenceDirection.SYNTHETIC and e.strength == EvidenceStrength.STRONG),
             None,
         )
-        basis = deciding.title if deciding is not None else "결정적 근거"
+        basis = deciding.title if deciding is not None else "재현 가능한 기록 근거"
         # P0R-12: a conclusion resting on self-declared metadata says so in the purpose itself
         declared = f" — {SELF_DECLARED_NOTE}" if deciding is not None and deciding.self_declared else ""
-        return f"결정적 근거({display_name(basis)}{declared})에 의해 조작·생성 근거가 확인된 증거물임을 소명함."
+        return f"재현 가능한 기록 근거({display_name(basis)}{declared})에 의해 조작·생성 근거가 확인된 증거물임을 소명함."
     if res.verdict_code == Verdict.AUTHENTICITY_EVIDENCE:
         basis = next(
             (e.title for e in res.evidence if e.direction == EvidenceDirection.AUTHENTIC and e.strength == EvidenceStrength.STRONG),
-            "결정적 근거",
+            "재현 가능한 기록 근거",
         )
-        return f"결정적 근거({display_name(basis)})에 의해 원본성 근거가 확인된 증거물임을 소명함."
+        return f"재현 가능한 기록 근거({display_name(basis)})에 의해 원본성 근거가 확인된 증거물임을 소명함."
     failed = [entry for entry in res.coverage if entry.status == CoverageStatus.FAILED]
     if failed:
         return f"검사 실패({', '.join(display_name(entry.describe()) for entry in failed)})로 판단 불가 상태이며, 별도 검증이 필요함을 소명함."
-    return "결론을 뒷받침할 결정적 근거가 없어 판단 불가 상태이며(원본이라는 뜻이 아님), 별도 검증이 필요함을 소명함."
+    return "결론을 뒷받침할 재현 가능한 기록 근거가 없어 판단 불가 상태이며(원본이라는 뜻이 아님), 별도 검증이 필요함을 소명함."
 
 
 def build_evidence_statement(
@@ -456,7 +457,8 @@ def build_evidence_statement(
         hash_text = f"• 원본 SHA-256: {file_sha256}" if file_sha256 else f"• 원본 SHA-256: {hash_unavailable or HASH_UNAVAILABLE_ACCESS}"
 
         if verdict_row and res is not None:
-            head_line = f"[자동 분석 결론: {band} / 등급: {res.grade_label} — 유죄·불법성의 직접 증거가 아님]"
+            grade_text = shown_grade_label(res)  # P0R-13: no "감정 근거로 사용 가능" next to 판단 불가
+            head_line = f"[자동 분석 결론: {band}{f' / 등급: {grade_text}' if grade_text else ''} — 유죄·불법성의 직접 증거가 아님]"
         else:
             reason = display_name((item.error or "").strip()) or "사유 기록 없음"
             head_line = f"상태: {band} — {reason}"
@@ -488,7 +490,7 @@ def build_evidence_statement(
         wa = _wa_raw if isinstance(_wa_raw, int) else 0
         wc = _wc_raw if isinstance(_wc_raw, int) else 0
         prov_lines.append(
-            f"모델 가중치: {wa}/{wc} 탑재" + (" — 신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영" if wa == 0 else "")
+            f"모델 가중치: {wa}/{wc} 탑재" + (" — 신경망 미탑재(측정 게이트 미충족) — 재현 가능한 기록 근거만 반영" if wa == 0 else "")
         )
     if thresholds is not None:
         # S6: the same line as the CLI header / HTML / forensic PDF,

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .calibration import IN_SAMPLE_LABEL
 from .result_text import (
+    shown_grade_label,
     IN_SAMPLE_CAVEAT,
     TEXT_LEGAL_LIMITATION,
     coverage_counts_text,
@@ -29,7 +30,6 @@ from .result_text import (
 )
 from .result_types import (
     EVIDENCE_KIND_LABELS,
-    GRADE_LABELS,
     SOURCE_CONFIDENCE_LABELS,
     VERDICT_LABELS,
     CoverageStatus,
@@ -105,7 +105,7 @@ def _print_table(summary, items: list[ScanItem], *, include_low: bool, coverage:
         wa = wa_raw if isinstance(wa_raw, int) else 0
         wc = wc_raw if isinstance(wc_raw, int) else 0
         if wa == 0:
-            print("!! 신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영 !!")
+            print("!! 신경망 미탑재(측정 게이트 미충족) — 재현 가능한 기록 근거만 반영 !!")
         elif wa < wc:
             print(f"!! 신경망 가중치 부분 탑재 ({wa}/{wc}) — 일부 뉴럴 엔진이 실행되지 않았습니다 !!")
     if thresholds is not None and getattr(thresholds, "provisional", False):
@@ -321,7 +321,7 @@ def _csv_label_columns(item: ScanItem) -> list[object]:
     return [
         item_kind_label(item.kind),
         status_label(item.status) if not (result and is_verdict_row(item.status, True)) else "분석됨",
-        GRADE_LABELS[result.grade] if result else "",
+        shown_grade_label(result) if result else "",  # P0R-13: blank for an evidence-grade 판단 불가 row
         SOURCE_CONFIDENCE_LABELS[result.source_guess.confidence] if result else "",
         f"[{EVIDENCE_KIND_LABELS[top.kind]}] {top.title}" if top else "",
     ]

@@ -80,7 +80,7 @@ def explain_classification(
         f"참고 원점수 {score}/100 — 신호 가중치의 합이며 측정·보정되지 않았습니다",
         f"신호 {len(feature_importances)}개 집계"
         + (f" (상위: {', '.join(f.feature_name for f in top)})" if top else ""),
-        "결론은 scan의 결정 규칙(결정적 근거·보정된 확률)에서만 나옵니다",
+        "결론은 scan의 결정 규칙(재현 가능한 기록 근거·보정된 확률)에서만 나옵니다",
     ]
     summary = f"참고 원점수 {score}/100, 신호 {len(feature_importances)}개."
     if top:

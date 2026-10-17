@@ -38,8 +38,22 @@ KIND_ORDER = (EvidenceKind.DETERMINISTIC, EvidenceKind.STATISTICAL, EvidenceKind
 
 
 def verdict_heading(result: ClassificationResult) -> str:
-    """e.g. "조작·생성 근거 있음 [감정 근거로 사용 가능]"."""
-    return f"{VERDICT_LABELS[result.verdict_code]} [{result.grade_label}]"
+    """e.g. "조작·생성 근거 있음 [감정 근거로 사용 가능]"; "판단 불가" alone (P0R-13), "판단 불가 [참고]" for text."""
+    label = shown_grade_label(result)
+    return f"{VERDICT_LABELS[result.verdict_code]} [{label}]" if label else VERDICT_LABELS[result.verdict_code]
+
+
+def shown_grade_label(result: ClassificationResult) -> str:
+    """P0R-13 (review §1.3, U-2): the grade label a rendering shows — none for an evidence-grade 판단 불가 row.
+
+    "감정 근거로 사용 가능" next to "판단 불가" read as "an undetermined row is usable as evidence"; the JSON keeps
+    ``grade`` / ``grade_label`` unchanged.
+    """
+    from .result_types import Grade, Verdict
+
+    if result.grade == Grade.EVIDENCE and result.verdict_code == Verdict.UNDETERMINED:
+        return ""
+    return result.grade_label
 
 
 def evidence_line(item: EvidenceItem) -> str:
@@ -139,7 +153,7 @@ def summary_line(summary: BatchScanSummary) -> str:
 # report): "[결정적/합성/강]". Keyed by the JSON values so rows read back
 # from a report body render the same as live results.
 EVIDENCE_KIND_SHORT = {
-    EvidenceKind.DETERMINISTIC.value: "결정적",
+    EvidenceKind.DETERMINISTIC.value: "기록",  # P0R-13: was "결정적" (reproducible record, not "unforgeable")
     EvidenceKind.STATISTICAL.value: "통계적",
     EvidenceKind.LEXICAL.value: "어휘적",
 }
