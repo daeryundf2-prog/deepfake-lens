@@ -288,6 +288,9 @@ def create_app(
     # bypassed the documented surface. They are disabled; the REST table in
     # docs/deepfake-lens-service.md is the API's description.
     JSONResponse = surrogate_safe_json_response()  # R11-1: every JSON body is surrogate-safe
+    from .scan_jobs import owner_for
+
+    job_owner = owner_for(token)  # P0R-6: this server's scan jobs belong to its token
     app = FastAPI(
         title="Deepfake Lens API",
         version="0.1.0",
@@ -975,11 +978,18 @@ def create_app(
             # R26-5 (round 26): the finished scan is this server's job record (scan_job = the stream's job_id), so a
             # report of a cancelled stream's partial result with its cancelled archive containers is accepted — it
             # was always 400 (only /api/scan?async=1 jobs were held).
+            # P0R-6: the job record holds the payload plus the server-only report context; scan_job names it.
             import copy
 
-            from .webapp_api import record_stream_scan_job
+            from .webapp_api import _effective_roots, record_stream_scan_job, report_context
 
-            record_stream_scan_job(job_id, "cancelled" if summary.cancelled else "done", copy.deepcopy(payload))
+            payload["scan_job"] = job_id
+            note = record_stream_scan_job(
+                job_id, "cancelled" if summary.cancelled else "done", copy.deepcopy(payload), owner=job_owner,
+                context=report_context(Path(root_text), options, thresholds), evidence=_effective_roots(default_folder),
+            )
+            if note:
+                payload["scan_job_note"] = note
             if cancel.is_set():
                 # N8: total = rows the scan planned, done = rows processed
                 # before the cancel (processed kept as the old name of done).
@@ -1080,13 +1090,13 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc))
         if run_async:
             try:
-                return _scan_job_start(qs, default_folder=default_folder)
+                return _scan_job_start(qs, default_folder=default_folder, owner=job_owner)
             except ReadRootDenied:
                 return JSONResponse(read_root_denied_body(), status_code=403)
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc))
         try:
-            return _api_json(_scan_payload(qs, default_folder=default_folder))
+            return _api_json(_scan_payload(qs, default_folder=default_folder, owner=job_owner))
         except ReadRootDenied:
             return JSONResponse(read_root_denied_body(), status_code=403)
         except ValueError as exc:
@@ -1095,12 +1105,12 @@ def create_app(
     @app.get("/api/scan-status")
     def api_scan_status(request: Request):
         from .webapp_api import _scan_status_payload
-        return _api_json(_scan_status_payload(str(request.url.query)))
+        return _api_json(_scan_status_payload(str(request.url.query), owner=job_owner, default_folder=default_folder))
 
     @app.get("/api/scan-cancel")
     def api_scan_cancel(request: Request):
         from .webapp_api import _scan_cancel_payload
-        return _api_json(_scan_cancel_payload(str(request.url.query)))
+        return _api_json(_scan_cancel_payload(str(request.url.query), owner=job_owner))
 
     @app.get("/api/heatmap")
     def api_heatmap(request: Request):
@@ -1160,7 +1170,7 @@ def create_app(
         # N9/N11: one response builder for both servers — format from
         # ?format= or the JSON body, malformed requests 400 in Korean.
         status, content_type, content, headers = await run_in_threadpool(
-            lambda: report_http_response(body, request.query_params.get("format"), default_folder=default_folder)
+            lambda: report_http_response(body, request.query_params.get("format"), default_folder=default_folder, owner=job_owner)
         )
         return Response(content=content, status_code=status, media_type=content_type, headers=headers)
 

@@ -81,6 +81,7 @@ def build_report_body(
     scan_root: str | None = None,
     analysis_options: dict[str, object] | None = None,
     files_cancelled_source: str | None = None,
+    exhibit_paths: list[str] | None = None,
 ) -> dict[str, object]:
     """The JSON body an HTML/PDF report renders — what its signature covers.
 
@@ -137,6 +138,8 @@ def build_report_body(
         body["analysis_options"] = dict(analysis_options)
     if files_cancelled_source is not None:
         body["files_cancelled_source"] = files_cancelled_source
+    if exhibit_paths is not None:
+        body["exhibit_paths"] = list(exhibit_paths)  # P0R-6: the examiner's ordered exhibit selection (job row paths)
     return body
 
 
@@ -154,6 +157,7 @@ def signed_report_body(
     scan_root: str | None = None,
     analysis_options: dict[str, object] | None = None,
     files_cancelled_source: str | None = None,
+    exhibit_paths: list[str] | None = None,
 ) -> dict[str, object]:
     """``build_report_body`` signed with ``key`` or DEEPFAKE_LENS_REPORT_KEY (G30).
 
@@ -164,6 +168,7 @@ def signed_report_body(
         summary, items, thresholds=thresholds, coverage=coverage, report_format=report_format,
         redact_paths=redact_paths, excluded_items=excluded_items, scan_root=scan_root,
         analysis_options=analysis_options, files_cancelled_source=files_cancelled_source,
+        exhibit_paths=exhibit_paths,
     )
     return sign_report(body, key if key is not None else resolve_report_key(), model_pins=model_pins)
 

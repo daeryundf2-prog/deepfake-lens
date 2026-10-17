@@ -660,7 +660,7 @@
                 lastScanRoot = data.scan_root || folderPath;
                 lastScanRootB64 = data.scan_root_b64 || '';
                 lastScanOptions = scanOptions;  // R19-3: with the rows they produced
-                lastScanJob = job.job_id;
+                lastScanJob = data.scan_job || job.job_id;  // P0R-6: the server-held job the report is built from
                 processResults(data);
                 // R18-3: "분석 완료" was shown for a cancelled scan too.
                 if (partialResultNote(data.summary)) toast(`검사 취소 — 부분 결과 ${(data.items || []).length}개 행, 분석하지 않은 파일 ${data.summary.files_cancelled || 0}개`, true);
@@ -746,17 +746,12 @@
         }
 
         function reportPayload(extra) {
-            const out = {
-                items: results.map(r => r.item),
-                summary: lastProvenance.summary || {},
-                coverage: lastProvenance.coverage || {},
-                thresholds: lastProvenance.thresholds || {},
-                options: lastScanOptions,
-            };
-            // P1: rows are relative to the scanned folder; uploads carry
-            // source: "upload" and are never re-analyzed (P6).
-            if (lastScanRoot) out.scan_root = lastScanRoot;
-            if (lastScanJob) out.scan_job = lastScanJob;  // R19-3: the server checks a cancel count against its job
+            // P0R-6: a report is built from the server's own scan job (its rows, options and accounting) —
+            // the client sends the job id and the case fields, never rows. Upload rows (P6) go as `uploads`
+            // and are listed unsigned.
+            const out = {};
+            if (lastScanJob) out.scan_job = lastScanJob;
+            else out.uploads = results.map(r => r.item);
             const map = { 'case-no': 'case_no', 'case-name': 'case_name',
                           'case-plaintiff': 'plaintiff', 'case-defendant': 'defendant',
                           'case-court': 'court', 'case-firm': 'law_firm',

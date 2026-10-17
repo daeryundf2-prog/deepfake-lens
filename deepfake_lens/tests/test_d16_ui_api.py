@@ -33,7 +33,7 @@ class WebScanJobFailureTest(unittest.TestCase):
             raise RuntimeError("disk vanished")
 
         with tempfile.TemporaryDirectory() as tmp, patch.object(webapp_api, "_READ_ROOTS", OrderedDict()), \
-                patch.object(webapp_api, "_scan_payload", boom), \
+                patch.object(webapp_api, "_scan_run", boom), \
                 self.assertLogs("deepfake_lens.webapp_api", level=logging.ERROR) as logs:
             webapp_api.configure_read_roots(Path(tmp))
             job = webapp_api._scan_job_start(f"folder={tmp}", default_folder=Path(tmp))

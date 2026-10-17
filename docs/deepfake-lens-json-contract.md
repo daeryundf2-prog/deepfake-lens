@@ -493,78 +493,53 @@ top-level fields. The HMAC-SHA256 covers the canonical JSON
 
 Rendered reports (`POST /api/report`, `--html-out`) additionally carry
 `report_format`, `thresholds`/`coverage` provenance and `unrecorded_files`
-(X1) in the signed body. R22-1 (round 22): in a web report the
-`unrecorded_files` counts and the summary's `capped`, `files_over_cap`,
-`subfolders_skipped`, `subfolder_files_skipped` and
-`subfolders_skipped_detail` are the server's own (`unrecorded_files.listing`,
-above) — never inferred from the posted rows; when the server cannot list
-the scan folder the section says `확인 불가`, never `없음`.
+(X1) in the signed body.
 
-`POST /api/report` signs **server-derived results only** (X2). The posted
-rows are a request, not evidence: every row's file is located inside the
-folder the request names as `scan_root` (P1 — required whenever a row is to
-be re-analyzed: the `scan_root` of the `/api/scan` / `/api/scan/stream`
-response, sent back unchanged; absolute, existing, inside the read roots —
-400 when missing, not a string, relative or not a folder, 403 outside the
-roots; row paths are resolved against it only, never against the read root,
-and a path that leaves it is excluded with `스캔 폴더 밖의 경로라 서버가
-재분석하지 않았습니다`), never through a symbolic link, and re-analyzed on the server
-with `analysis_api.scan_file_run` — the scan's own body, so an archive
-yields the same member/container rows and a link the same skipped row —
-using the request's optional `options` object (the `/api/scan` query keys:
-`pixel`, `heatmaps`, `deep_signals`, `no_default_engine`, `model_path` /
-`fusion_profile` as bare names inside the server's models dir; validated
-like a scan request, 400 otherwise), the server's models dir and its
-threshold profile. Each signed row (verdict, evidence, coverage,
-`sha256`) is the server's row of the same path; `thresholds`/`coverage`
-are the server's provenance (posted values are only type-checked).
-A row the server cannot re-analyze is **not** in `items` and not counted in
-`summary`; the signed body lists it under `excluded_items` — `[{"path",
-"marker": "서명 제외(클라이언트 제공 결과)", "reason"}]` with reason
-`읽기 루트 안에서 파일을 찾을 수 없어 서버가 재분석하지 못했습니다`,
-`경로 중간의 폴더가 심볼릭 링크라 따라가지 않았습니다 — …`,
-`서버 재분석 결과에 이 항목이 없습니다(압축 파일 구성이 다름)` or
-`서버 재분석 실패: <사유>` — and never the client's result. R19-13 (round 19): a row of the first, third or fourth kind — its file gone from the scan folder since the scan, its archive member no longer produced, its re-analysis failed — or any row whose server `sha256`, `status` or `verdict_code` differs from the posted row gives no report at all: every format is refused with HTTP 409 and `changed_rows` (docs/deepfake-lens-service.md, E47); a posted dedupe duplicate stays a duplicate row when its bytes still equal those of `duplicate_of` — R20-4 (round 20): the server re-derivation of `duplicate_of`, which must be another posted row that is not a duplicate (else HTTP 400). Only rows behind a linked folder (and uploads, below) are still excluded (a row path outside the scan folder is HTTP 400 since R21-5, below) — R20-5 (round 20): except a row behind a linked folder that carries a `sha256` (the scan read it, so the folder became a link after the scan): 409 with reason `경로 중간의 폴더가 심볼릭 링크라 …`. R20-1 (round 20): the server classifies a posted row's entry the way the scan's walk does — a FIFO, socket, device node or pseudo-file-system file is the scan's skipped row, a folder it cannot list the scan's failed row `폴더를 읽을 수 없습니다: …` — so such rows of an unchanged folder are signed as the scan listed them (they were "not found" and every report of the folder was 409); "not found" means only that nothing is at the path, and a file replaced by a FIFO after the scan still differs (`analyzed` → `skipped`, 409). A posted folder row whose folder can be listed now is changed (`검사 때와 항목 종류가 다릅니다(지금은 읽을 수 있는 폴더) — …`, 409), except — R21-1 (round 21) — a walk-limit row (`건너뜀: 탐색 상한 도달(…)`), which is excluded (`폴더 탐색 상한 행 — …`: the server does not repeat the walk, so it cannot produce that row), and a loop row (`건너뜀: 순환 링크 — …`) of a folder the server finds to be the scan folder or one between it and the folder (signed with that constant). R21-1: no text of a posted row is signed — the server row's every field, reason and label is the server's; a posted row only names the entry (`path`, `container`/`member`), is compared (`sha256`, `status`, `verdict_code`) and, for a duplicate, names its original (`duplicate_of`, checked by digest; the duplicate row carries the scan's own `중복 내용(동일 해시)`). R21-5 (round 21): a row path is the scan's own form — relative to `scan_root`, no empty, `.` or `..` component, escaped as the scan escapes it — and each row is posted once, else HTTP 400 before any re-analysis. The HTML report
-(`<section id="unsigned-client-rows">`), the forensic PDF and the evidence
-statement PDF render those rows in a separate box titled
-`서명 제외(클라이언트 제공 결과)`: one line per row with the path, the
-conclusion the client sent and the reason, outside the table and outside
-the signature. `excluded_items` is `[]` when every row was re-derived (the
-CLI's reports have no such field). Upload results (`/api/analyze-upload`,
-`/api/check`) are not kept on the server: their rows carry `"source":
-"upload"` (P6) and a report lists every such row under `excluded_items` with
-`업로드 파일 — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다` —
-never re-analyzed from a same-named file of the read root. R22-8 (round 22):
-an upload row's `path` is client text inside the signed body, so it is
-limited — relative, at most 255 characters, no empty, `.` or `..`
-component, no NUL (else HTTP 400 `업로드 항목 N번의 이름이 업로드 파일 이름
-형식이 아닙니다(…)`) — and marked: `name_source: "server_upload"` when this
-server process produced an upload row of that path and `sha256`
-(`/api/analyze-upload`, `/api/check`), otherwise `name_source: "client"`
-with the reason `업로드 파일(클라이언트 제공 이름 — 이 서버가 받은 업로드
-기록에 없음) — …`, which every rendering prints. This is the one exception to
-"no posted text is signed" (R21-1). Make signed
-reports from folder scans. R19-3 (round 19): the signed body carries
-`analysis_options` — `{pixel, heatmaps, deep_signals, default_engine,
-model_path, fusion_profile}`, the options the server re-analyzed every row
-with (file names only) — printed in the HTML header, the forensic PDF and the
-evidence statement as `재분석 옵션(서버가 이 옵션으로 모든 행을 다시 분석): …`;
-and, when the scan was cancelled,
-`files_cancelled_source`: `server` when `summary.files_cancelled` is the
-count of the server's own scan job named by the request's `scan_job` (a
-finished `cancelled` job of the same scan folder, kept 15 minutes) — R23-3
-(round 23): such a job marks the report cancelled with its count whatever the
-posted `summary` says (omitted, or `cancelled: false`, used to sign the job's
-rows as the whole folder, "없음"); `unverified` when the posted `summary` says
-`cancelled: true` without such a job — then `files_cancelled` is 0 and the
-summary line says `분석하지 않은 파일 수는 서버가 확인하지 못했습니다(…)`
-(the posted number is never signed). R9-9 (round 9): the signed body carries
-`scan_root` — the posted `scan_root` folder relative to the read root that
-holds it (`caseA`, `caseA/deeper`, `.` for the root itself; never the
-absolute path) — inside the signature, and the HTML report
-(`<p id="scan-root">`), the forensic PDF and the evidence-statement PDF
-print it in their header as `검사 폴더(읽기 루트 기준, 행 경로의 기준 폴더): …`;
-a report of upload rows only has no `scan_root`.
+`POST /api/report` signs **a scan job the server ran and holds** (P0R-6, user
+decision 2026-10-17 — it used to take the rows the client posted and
+reconcile them with a server re-analysis, X2 … R26-1). The request names
+`scan_job` (docs/deepfake-lens-service.md, "POST /api/report"); nothing it
+says about a file is read. The signed body's `items` are the job's rows
+exactly as the scan produced them (verdict, evidence, coverage, `sha256`), in
+scan order; `thresholds`, `coverage`, `model_pins` and `analysis_options`
+(`{pixel, heatmaps, deep_signals, default_engine, model_path,
+fusion_profile}`, file names only — printed as `재분석 옵션(…)`; the label is
+kept from R19-3) are the values captured when the job's scan ran; the
+summary's verdict counts are counted from the job's rows and its `capped`,
+`files_over_cap`, `subfolders_skipped`, `subfolder_files_skipped`,
+`subfolders_skipped_detail`, `cancelled` and `files_cancelled` are the job's
+own (`unrecorded_files.listing` `{"source": "scan_job", "not_in_report": 0}` —
+every row of the job is signed, so none is "보고서에 행 없음";
+`files_cancelled_source: "server"` when the job was cancelled). The optional
+`exhibit_paths` (ordered job row paths) is signed as `exhibit_paths` and only
+chooses which rows the evidence statement numbers as exhibits, in that order —
+the others follow unnumbered (`서증 외(검사 행)`), so no row is left out of any
+artifact. Before signing, every file the scan hashed is re-hashed on disk under
+the job's folder (no link followed; archive members through the container's
+digest) and any change refuses every format with 409 and `changed_rows`
+`[{"path", "reason"}]` (E47). Upload rows (`/api/analyze-upload`, `/api/check`)
+are not kept on the server: a request may list them as `uploads` and the
+signed body lists each under `excluded_items` — `[{"path", "marker":
+"서명 제외(클라이언트 제공 결과)", "reason", "name_source"}]` with
+`업로드 파일 — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다`; the HTML
+report (`<section id="unsigned-client-rows">`), the forensic PDF and the
+evidence statement PDF render those rows in a separate box titled
+`서명 제외(클라이언트 제공 결과)`, outside the table and the signature. R22-8
+(round 22): an upload row's `path` is client text inside the signed body, so
+it is limited — relative, at most 255 characters, no empty, `.` or `..`
+component, no NUL (else HTTP 400 `업로드 항목 N번의 이름이 업로드 파일 이름 형식이
+아닙니다(…)`) — and marked `name_source: "server_upload"` when this server
+process produced an upload row of that path and `sha256`, otherwise
+`name_source: "client"` with the reason `업로드 파일(클라이언트 제공 이름 — 이
+서버가 받은 업로드 기록에 없음) — …`. With the case fields this is the only
+client text in a signed web report. `excluded_items` is `[]` without uploads
+(the CLI's reports have no such field). A report of uploads only has no
+`scan_root` and its `unrecorded_files.listing` is `{"source": "unknown",
+"reason": "검사 폴더가 없는 보고서 — 업로드 결과만 있음"}`. R9-9 (round 9): the
+signed body carries `scan_root` — the job's scan folder relative to the read
+root that holds it (`caseA`, `.` for the root itself; never the absolute
+path) — printed in every header as `검사 폴더(읽기 루트 기준, 행 경로의 기준
+폴더): …`.
 
 ### Signed evidence statement (증거설명서)
 

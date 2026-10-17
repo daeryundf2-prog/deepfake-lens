@@ -88,10 +88,8 @@ def unscannable_file_reason(path: Path) -> str | None:
 
     X3: a FIFO, socket or device node (:data:`NOT_REGULAR_FILE_REASON`);
     R18-10: a file on a kernel pseudo file system
-    (:data:`SPECIAL_FILESYSTEM_REASON`). R20-1 (round 20): the report's
-    re-analysis of a posted row (``webapp_api._rederive_report_items``)
-    classifies the entry with this same function, so a FIFO the scan
-    skipped is the same skipped row there — not "file not found".
+    (:data:`SPECIAL_FILESYSTEM_REASON`). (P0R-6: a web report no longer
+    re-analyzes rows — it signs the server-held scan job's rows as they were.)
     ``path.is_file()`` follows a link (an allowed one). Raises OSError
     only when the entry cannot be examined at all.
     """

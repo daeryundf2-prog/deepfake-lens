@@ -17,6 +17,7 @@ the partial payload.
 from __future__ import annotations
 
 import importlib.util
+import dataclasses
 import json
 import tempfile
 import threading
@@ -198,33 +199,36 @@ class WebJobIsCancelledTest(unittest.TestCase):
                     if state["status"] != "running" or time.monotonic() > deadline:
                         break
                     time.sleep(0.05)
-        self.assertEqual(state["status"], "cancelled")  # was "done"
-        result = state["result"]
-        assert isinstance(result, dict)
-        self.assertTrue(result["summary"]["cancelled"])
-        self.assertEqual(result["summary"]["total"] + result["summary"]["files_cancelled"], 6)
-        # R19-3 (round 19): a report naming this job gets the job's count, whatever the client posts.
-        empty = core.summarize([], capped=False)
-        marked, source = webapp_api._with_posted_cancel(empty, {"cancelled": True, "files_cancelled": 10**18}, job_id, folder)
-        self.assertEqual((source, marked.files_cancelled), ("server", result["summary"]["files_cancelled"]))
-        self.assertFalse(marked.files_cancelled_unverified)
-        # Another folder, or an unknown job: unverified.
-        other, source = webapp_api._with_posted_cancel(empty, {"cancelled": True, "files_cancelled": 10**18}, job_id, folder.parent)
-        self.assertEqual((source, other.files_cancelled, other.files_cancelled_unverified), ("unverified", 0, True))
+            self.assertEqual(state["status"], "cancelled")  # was "done"
+            result = state["result"]
+            assert isinstance(result, dict)
+            self.assertTrue(result["summary"]["cancelled"])
+            self.assertEqual(result["summary"]["total"] + result["summary"]["files_cancelled"], 6)
+            # R19-3 (round 19) / P0R-6: a report of this job signs the job's count; a posted count is no request field.
+            signed = webapp_api._report_payload(json.dumps({"scan_job": job_id, "format": "json"}).encode(), default_folder=folder)
+            assert isinstance(signed, dict)
+            self.assertEqual((signed["files_cancelled_source"], signed["summary"]["files_cancelled"]), ("server", result["summary"]["files_cancelled"]))
+            refused = webapp_api._report_payload(json.dumps({"scan_job": job_id, "summary": {"cancelled": True, "files_cancelled": 10**18}}).encode(), "json", default_folder=folder)
+            self.assertIn("알 수 없는 필드가 있습니다: summary", str(refused["error"]))  # type: ignore[index]
 
     def test_a_report_of_a_cancelled_scan_says_partial(self) -> None:
-        """R19-3 (round 19): the posted files_cancelled (7 here) used to be signed as given — 10**18 was. Without a
-        server job to check it against the count is 0 and the summary line says it is unverified."""
-        summary = core.summarize([], capped=False)
-        marked, source = webapp_api._with_posted_cancel(summary, {"cancelled": True, "files_cancelled": 7})
-        self.assertTrue(marked.cancelled)
-        self.assertEqual((source, marked.files_cancelled, marked.files_cancelled_unverified), ("unverified", 0, True))
-        self.assertIn("분석하지 않은 파일 수는 서버가 확인하지 못했습니다", summary_line(marked))
-        self.assertNotIn("7", summary_line(marked).split("]")[0])
-        self.assertNotIn("files_cancelled_unverified", marked.to_json())  # the summary JSON is unchanged
-        # A posted summary can only add the caveat.
-        self.assertEqual(webapp_api._with_posted_cancel(summary, {"cancelled": False, "files_cancelled": 7}), (summary, None))
-        self.assertEqual(webapp_api._with_posted_cancel(summary, {"cancelled": True, "files_cancelled": -3})[0].files_cancelled, 0)
+        """R19-3 (round 19): a posted files_cancelled (10**18) used to be signed as given. P0R-6: the count is the
+        server-held job's (a cancelled synchronous scan here); the rendering of an unverified count is kept for
+        reports made before P0R-6."""
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(webapp_api, "_READ_ROOTS", OrderedDict()):
+            folder = _folder(Path(tmp).resolve(), count=5)
+            webapp_api.configure_read_roots(folder)
+            payload = webapp_api._scan_payload(f"folder={folder}&no_default_engine=true", default_folder=folder, should_stop=_stop_after(2))
+            self.assertTrue(payload["summary"]["cancelled"])  # type: ignore[index]
+            signed = webapp_api._report_payload(json.dumps({"scan_job": payload["scan_job"]}).encode(), "json", default_folder=folder)
+            assert isinstance(signed, dict)
+            self.assertEqual(signed["summary"]["files_cancelled"], payload["summary"]["files_cancelled"])  # type: ignore[index]
+            html = webapp_api._report_payload(json.dumps({"scan_job": payload["scan_job"]}).encode(), "html", default_folder=folder)
+            assert isinstance(html, bytes)
+            self.assertIn(CANCELLED_PARTIAL_RESULT, html.decode("utf-8"))
+        summary = dataclasses.replace(core.summarize([], capped=False), cancelled=True, files_cancelled_unverified=True)
+        self.assertIn("분석하지 않은 파일 수는 서버가 확인하지 못했습니다", summary_line(summary))
+        self.assertNotIn("files_cancelled_unverified", summary.to_json())  # the summary JSON is unchanged
 
     def test_html_report_and_evidence_statement_say_partial(self) -> None:
         from deepfake_lens.evidence_statement import build_evidence_statement
@@ -344,8 +348,10 @@ class StreamCancelledPartialIsAReportableJobTest(unittest.TestCase):
 
         from deepfake_lens.api_server import create_app
 
+        from deepfake_lens.scan_jobs import JobStore
+
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(webapp_api, "_READ_ROOTS", OrderedDict()), \
-                mock.patch.object(webapp_api, "_SCAN_JOBS", {}):
+                mock.patch.object(webapp_api, "STORE", JobStore()):
             folder = Path(tmp).resolve() / "case"
             folder.mkdir()
             with zipfile.ZipFile(folder / "a0.zip", "w") as archive:
@@ -363,7 +369,7 @@ class StreamCancelledPartialIsAReportableJobTest(unittest.TestCase):
             client = TestClient(app)
 
             def report(**extra: Any) -> Any:
-                body = {"items": partial["items"], "scan_root": partial["scan_root"], "format": "json", **extra}
+                body = {"format": "json", **extra}  # P0R-6: the job, never its rows
                 return client.post("/api/report", content=json.dumps(body).encode("utf-8"),
                                    headers={**self.HEADERS, "Content-Type": "application/json"})
 
@@ -373,21 +379,22 @@ class StreamCancelledPartialIsAReportableJobTest(unittest.TestCase):
             self.assertTrue(body["summary"]["cancelled"])
             self.assertEqual((body["summary"]["files_cancelled"], body["files_cancelled_source"]), (final["files_cancelled"], "server"))
             self.assertEqual(body["unrecorded_files"]["listing"], {"source": "scan_job", "not_in_report": 0})
-            self.assertIn("a0.zip", [row["path"] for row in body["excluded_items"]])
+            # R24-1: the cancelled container is the job's own "cancelled" row, signed as such (never a 409)
+            self.assertEqual({row["path"]: row["status"] for row in body["items"]}["a0.zip"], "cancelled")
+            self.assertEqual(partial["scan_job"], job_id)
             refused = report()
             self.assertEqual(refused.status_code, 400, refused.text[:400])
-            self.assertIn("/api/scan/stream의 작업 id", refused.json()["error"])
+            self.assertEqual(refused.json()["error"], webapp_api.REPORT_SCAN_JOB_REQUIRED)
             # a stream that finished is held too: its rows are the report's listing
             done_id, done = self._stream(app, folder, cancel_after=None, number=2)
             self.assertEqual(done["event"], "result")
-            response = client.post("/api/report", content=json.dumps({
-                "items": [{key: value for key, value in row.items() if key not in ("verdict_code", "grade", "probability")} for row in done["items"]],
-                "scan_root": done["scan_root"], "format": "json", "scan_job": done_id,
-            }).encode("utf-8"), headers={**self.HEADERS, "Content-Type": "application/json"})
+            response = report(scan_job=done_id)
             self.assertEqual(response.status_code, 200, response.text[:400])
             self.assertEqual(response.json()["unrecorded_files"]["listing"], {"source": "scan_job", "not_in_report": 0})
-            # held stream records never block an async scan (they do not count against _SCAN_JOB_MAX)
-            with mock.patch.object(webapp_api, "_SCAN_JOB_MAX", 1):
+            # held stream records never block an async scan (only running async jobs count against MAX_RUNNING)
+            from deepfake_lens import scan_jobs
+
+            with mock.patch.object(scan_jobs, "MAX_RUNNING", 1):
                 self.assertIn("job_id", webapp_api._scan_job_start(f"folder={folder}&no_default_engine=true", default_folder=folder))
 
 if __name__ == "__main__":

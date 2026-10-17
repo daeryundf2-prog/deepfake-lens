@@ -172,6 +172,9 @@ def build_server(
         import sys
 
         print("참고: 루프백 바인드에 --token이 지정되었습니다. /api/*는 토큰을 계속 요구합니다.", file=sys.stderr)
+    from .scan_jobs import owner_for
+
+    job_owner = owner_for(token)  # P0R-6: this server's scan jobs belong to its token
     # The only place read roots are registered (G31): operator setup.
     configure_read_roots(default_folder, allow_roots)
 
@@ -258,24 +261,24 @@ def build_server(
                     return
                 if run_async:
                     try:
-                        self._send_json(_scan_job_start(parsed.query, default_folder=default_folder))
+                        self._send_json(_scan_job_start(parsed.query, default_folder=default_folder, owner=job_owner))
                     except UnicodeError:
                         raise  # R11-1: a codec error is a Korean 500 (below), never its English text as a 400
                     except ValueError as exc:
                         self._send_json({"error": str(exc)}, status=400)
                     return
                 try:
-                    self._send_json(_scan_payload(parsed.query, default_folder=default_folder))
+                    self._send_json(_scan_payload(parsed.query, default_folder=default_folder, owner=job_owner))
                 except UnicodeError:
                     raise  # R11-1: as above
                 except ValueError as exc:
                     self._send_json({"error": str(exc)}, status=400)
                 return
             if parsed.path == "/api/scan-status":
-                self._send_json(_scan_status_payload(parsed.query))
+                self._send_json(_scan_status_payload(parsed.query, owner=job_owner, default_folder=default_folder))
                 return
             if parsed.path == "/api/scan-cancel":
-                self._send_json(_scan_cancel_payload(parsed.query))
+                self._send_json(_scan_cancel_payload(parsed.query, owner=job_owner))
                 return
             if parsed.path == "/api/heatmap":
                 self._send_png(_heatmap_payload(parsed.query))
@@ -346,7 +349,7 @@ def build_server(
                 # the same response the FastAPI server gives.
                 req_fmt = parse_qs(parsed.query).get("format", [""])[0] or None
                 status, content_type, body, headers = report_http_response(
-                    self.rfile.read(length), req_fmt, default_folder=default_folder,
+                    self.rfile.read(length), req_fmt, default_folder=default_folder, owner=job_owner,
                 )
                 self.send_response(status)
                 self.send_header("Content-Type", content_type)

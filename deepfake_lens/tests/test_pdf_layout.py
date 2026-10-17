@@ -26,6 +26,7 @@ The ``layout`` unit tests check :class:`pdf_layout.PdfLayout` itself.
 
 from __future__ import annotations
 
+from deepfake_lens.tests.report_jobs import scan_job_for
 import importlib.util
 import io
 import re
@@ -401,10 +402,11 @@ class PdfGlyphlessCharactersTest(unittest.TestCase):
             rows = json.loads(out.getvalue())["items"]
             with mock.patch.object(webapp_api, "_READ_ROOTS", type(webapp_api._READ_ROOTS)()):
                 webapp_api.configure_read_roots(folder)
+                job = scan_job_for(folder)  # P0R-6: the report is built from a server-held scan job
                 for value in pairs:
                     for fmt, fields in (("evidence", ("plaintiff", "defendant", "case_no", "case_name", "court", "law_firm", "contact", "center")),
                                         ("pdf", ("exhibit_no", "law_firm", "contact"))):
-                        body = json.dumps({"items": rows, "scan_root": str(folder), "format": fmt, **{field: value for field in fields}}).encode("utf-8")
+                        body = json.dumps({"scan_job": job, "format": fmt, **{field: value for field in fields}}).encode("utf-8")
                         raw = webapp_api._report_payload(body, default_folder=folder)
                         assert isinstance(raw, bytes), raw
                         texts.setdefault(f"web {fmt}", []).append(self._pdf_text(raw))
@@ -499,8 +501,9 @@ class PdfGlyphlessCharactersTest(unittest.TestCase):
             rows = json.loads((out / "scan.json").read_text(encoding="utf-8"))["items"]
             with mock.patch.object(webapp_api, "_READ_ROOTS", type(webapp_api._READ_ROOTS)()):
                 webapp_api.configure_read_roots(base)  # the scan folder line names case_x|y relative to this root
+                job = scan_job_for(folder, base)  # P0R-6
                 for fmt in ("pdf", "evidence"):
-                    body = json.dumps({"items": rows, "scan_root": str(folder), "format": fmt, "law_firm": "x|y"}).encode("utf-8")
+                    body = json.dumps({"scan_job": job, "format": fmt, "law_firm": "x|y"}).encode("utf-8")
                     raw = webapp_api._report_payload(body, default_folder=base)
                     assert isinstance(raw, bytes), raw
                     texts[f"web {fmt}"] = self._pdf_text(raw)
@@ -550,8 +553,9 @@ class PdfGlyphlessCharactersTest(unittest.TestCase):
             roots = mock.patch.object(webapp_api, "_READ_ROOTS", type(webapp_api._READ_ROOTS)())
             with roots:
                 webapp_api.configure_read_roots(folder)
+                job = scan_job_for(folder)  # P0R-6
                 for fmt in ("pdf", "evidence"):
-                    body = json.dumps({"items": rows, "scan_root": str(folder), "format": fmt}).encode("utf-8")
+                    body = json.dumps({"scan_job": job, "format": fmt}).encode("utf-8")
                     raw = webapp_api._report_payload(body, default_folder=folder)
                     self.assertIsInstance(raw, bytes, raw)
                     assert isinstance(raw, bytes)

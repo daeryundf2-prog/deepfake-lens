@@ -273,7 +273,7 @@ class ScanRowsTest(unittest.TestCase):
 
 
 class ReportRederivationTest(unittest.TestCase):
-    """POST /api/report re-derives each duplicate member's own digest (no shared sha256)."""
+    """POST /api/report signs each duplicate member's own digest (no shared sha256) — P0R-6: the job's rows."""
 
     def setUp(self) -> None:
         roots: Any = patch.object(webapp_api, "_READ_ROOTS", OrderedDict())
@@ -311,7 +311,7 @@ class ReportRederivationTest(unittest.TestCase):
         members = {item["member"]: item for item in scan["items"] if "member" in item}
         self.assertEqual(sorted(members), ["same.png", "same.png#2"])
         self.assertEqual({item["sha256"] for item in members.values()}, {_sha(A1111), _sha(TEXTURE)})
-        request = json.dumps({"items": scan["items"], "scan_root": scan["scan_root"], "format": "json"}).encode("utf-8")
+        request = json.dumps({"scan_job": scan["scan_job"], "format": "json"}).encode("utf-8")  # P0R-6: the scan's server-held job
         status, body = call("/api/report?format=json", request)
         self.assertEqual(status, 200, body[:300])
         report = {item["path"]: item for item in json.loads(body)["items"]}

@@ -72,12 +72,17 @@ class ScanOptionsFollowTheRowsTest(unittest.TestCase):
         self.assertNotIn("lastScanOptions =", handler[:submitted])  # not when the scan is submitted
         applied = handler.index("processResults(data)")
         self.assertIn("lastScanOptions = scanOptions;", handler[submitted:applied])
-        self.assertIn("lastScanJob = job.job_id;", handler[submitted:applied])
+        self.assertIn("lastScanJob = data.scan_job || job.job_id;", handler[submitted:applied])  # P0R-6: the server-held job
         self.assertLess(handler.index("lastScanRoot = data.scan_root"), handler.index("lastScanOptions = scanOptions;"))
         upload = source[source.index("$('upload-btn').addEventListener"):source.index("function processResults(")]
         self.assertIn("lastScanOptions = {};", upload)
         self.assertIn("lastScanJob = '';", upload)
-        self.assertIn("if (lastScanJob) out.scan_job = lastScanJob;", _function("reportPayload"))
+        payload = _function("reportPayload")
+        self.assertIn("if (lastScanJob) out.scan_job = lastScanJob;", payload)
+        # P0R-6: a report request carries the job (or upload rows), never the rows, options or summary of a scan
+        self.assertIn("else out.uploads = results.map(r => r.item);", payload)
+        for field in ("items:", "options:", "summary:", "scan_root", "thresholds:"):
+            self.assertNotIn(field, payload)
 
     def test_exports_are_disabled_and_refused_while_scanning(self) -> None:
         source = GUI_JS.read_text(encoding="utf-8")

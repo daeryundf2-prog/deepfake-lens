@@ -296,7 +296,7 @@ class NonUtf8NameServersTest(_EnvMixin):
         for item in rows.values():
             self.assertEqual(item["result"]["verdict_code"], Verdict.MANIPULATION_EVIDENCE.value, (name, item["path"]))
         for fmt in ("json", "html"):
-            request = json.dumps({"items": scan["items"], "scan_root": scan["scan_root"], "format": fmt}).encode("utf-8")
+            request = json.dumps({"scan_job": scan["scan_job"], "format": fmt}).encode("utf-8")  # P0R-6: the server-held job
             status, body = call("POST", "/api/report?format=" + fmt, request)
             self.assertEqual(status, 200, (name, fmt, body[:300]))
             text = body.decode("utf-8")
@@ -306,7 +306,7 @@ class NonUtf8NameServersTest(_EnvMixin):
             else:
                 self.assertIn(SHOWN, text, name)
         if HAVE_PYMUPDF:
-            request = json.dumps({"items": scan["items"], "scan_root": scan["scan_root"]}).encode("utf-8")
+            request = json.dumps({"scan_job": scan["scan_job"]}).encode("utf-8")  # P0R-6
             status, body = call("POST", "/api/report?format=pdf", request)
             self.assertEqual(status, 200, (name, body[:300]))
             self.assertTrue(body.startswith(b"%PDF"), name)

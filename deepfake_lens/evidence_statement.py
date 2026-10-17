@@ -63,6 +63,10 @@ EVIDENCE_STATEMENT_REPORT_TYPE = "evidence-statement"
 SIGNATURE_SECTION_TITLE = "### [보고서 서명]"
 
 
+# P0R-6: a row of the scan the examiner did not choose as an exhibit (still in the statement and its signature).
+NOT_AN_EXHIBIT = "서증 외(검사 행)"
+
+
 @dataclass(frozen=True)
 class EvidenceStatementEntry:
     exhibit_no: str
@@ -364,8 +368,13 @@ def build_evidence_statement(
     scan_root: Path | str | None = None,
     summary: object | None = None,
     excluded_items: list[dict[str, object]] | None = None,
+    exhibit_paths: list[str] | None = None,
 ) -> EvidenceStatement:
     """Build an EvidenceStatement from analyzed scan items.
+
+    ``exhibit_paths`` (P0R-6, web reports): the examiner's ordered selection of row paths — those rows are the
+    numbered exhibits, in that order; every other row follows unnumbered (:data:`NOT_AN_EXHIBIT`), so no row of the
+    scan is left out of the signed statement. None: every row is an exhibit, in scan order.
 
     ``summary`` (a BatchScanSummary or the scan JSON's summary dict) adds
     the enumeration-level "기록되지 않은 파일" reasons — files over the
@@ -381,8 +390,16 @@ def build_evidence_statement(
     law_firm, contact, center = office.law_firm, office.contact, office.center
     entries: list[EvidenceStatementEntry] = []
     now_date = datetime.now().strftime("%Y. %m. %d.")
+    if exhibit_paths is not None:
+        by_path = {item.path: item for item in items}
+        chosen = [by_path[path] for path in exhibit_paths if path in by_path]
+        chosen_ids = {id(item) for item in chosen}
+        items = [*chosen, *(item for item in items if id(item) not in chosen_ids)]
+        numbered = len(chosen)
+    else:
+        numbered = len(items)
     # S1: exhibit number of every row, so a container can cite its members.
-    exhibits = {item.path: f"{exhibit_prefix}{idx}호증" for idx, item in enumerate(items, start=1)}
+    exhibits = {item.path: (f"{exhibit_prefix}{idx}호증" if idx <= numbered else NOT_AN_EXHIBIT) for idx, item in enumerate(items, start=1)}
 
     for idx, item in enumerate(items, start=1):
         res = item.result
@@ -401,7 +418,7 @@ def build_evidence_statement(
         signals = res.signals if res else []
         file_sha256, hash_unavailable = _item_hash(item, scan_root)
 
-        exhibit_no = f"{exhibit_prefix}{idx}호증"
+        exhibit_no = exhibits[item.path]
         # S1: an archive member is named "<container>::<member>", never its bare file name.
         doc_name = f"디지털 증거 파일 ({row_label(item.path)}) 및 AI 스크리닝 데이터"
         author_date = f"{law_firm}\n{now_date}" if law_firm else now_date

@@ -57,6 +57,7 @@ The QA traceability table is consistent with the tests (WP-J).
 
 from __future__ import annotations
 
+from deepfake_lens.tests.report_jobs import scan_job_for
 import ast
 import base64
 import contextlib
@@ -1035,8 +1036,9 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
     def test_web_report_signed_with_env_key_and_tamper_detected(self) -> None:
         """QA-SYS-6: 보고서 JSON의 임의 필드(결론, 근거, note, 모델 해시) 한 글자 변경 후 검증 → 모든 경우 "변조됨".
         /api/report HTML and JSON are signed with DEEPFAKE_LENS_REPORT_KEY."""
-        body = json.dumps({"items": self.report["items"], "scan_root": str(self.root)}).encode("utf-8")  # P1: rows are relative to the scanned folder
         with patch.object(webapp_api, "_READ_ROOTS", OrderedDict()), patch.dict(os.environ, {REPORT_KEY_ENV: KEY.decode()}):
+            # P0R-6: the report is built from a server-held scan job of the folder (its rows, options and accounting)
+            body = json.dumps({"scan_job": scan_job_for(self.root)}).encode("utf-8")
             html = webapp_api._report_payload(body, "html", default_folder=self.root)
             signed_json = webapp_api._report_payload(body, "json", default_folder=self.root)
         assert isinstance(html, bytes) and isinstance(signed_json, dict)
@@ -1054,7 +1056,8 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
     def test_web_report_without_key_says_unsigned(self) -> None:
         """QA-SYS-6: 보고서 JSON의 임의 필드(결론, 근거, note, 모델 해시) 한 글자 변경 후 검증 → 모든 경우 "변조됨".
         without a key the web report states 서명 없음 explicitly."""
-        body = json.dumps({"items": self.report["items"], "scan_root": str(self.root)}).encode("utf-8")  # P1: rows are relative to the scanned folder
+        with patch.object(webapp_api, "_READ_ROOTS", OrderedDict()):  # P0R-6: a server-held scan job of the folder
+            body = json.dumps({"scan_job": scan_job_for(self.root)}).encode("utf-8")
         env = {k: v for k, v in os.environ.items() if k != REPORT_KEY_ENV}
         with patch.object(webapp_api, "_READ_ROOTS", OrderedDict()), patch.dict(os.environ, env, clear=True):
             html = webapp_api._report_payload(body, "html", default_folder=self.root)
@@ -1086,7 +1089,8 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
         from deepfake_lens import reports
         from deepfake_lens.signing import signed_body_sha256
 
-        body = json.dumps({"items": self.report["items"], "scan_root": str(self.root)}).encode("utf-8")  # P1: rows are relative to the scanned folder
+        with patch.object(webapp_api, "_READ_ROOTS", OrderedDict()):  # P0R-6: a server-held scan job of the folder
+            body = json.dumps({"scan_job": scan_job_for(self.root)}).encode("utf-8")
         captured: list[dict[str, Any]] = []
         real_sign = reports.signed_report_body
 
@@ -1125,7 +1129,7 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
             raise ImportError("pymupdf")
 
         with patch.object(webapp_api, "_READ_ROOTS", OrderedDict()), patch("deepfake_lens.pdf_backend.import_pymupdf", _missing):
-            self.assertEqual(webapp_api._report_payload(json.dumps({"items": self.report["items"]}).encode("utf-8"), "pdf"),
+            self.assertEqual(webapp_api._report_payload(json.dumps({"scan_job": "0" * 32}).encode("utf-8"), "pdf"),  # P0R-6: 501 before the job
                              {"error": webapp_api.PDF_REPORT_UNAVAILABLE_ERROR})
             with tempfile.TemporaryDirectory() as tmp:
                 server = webapp.build_server("127.0.0.1", 0, default_folder=Path(tmp))
@@ -1134,7 +1138,7 @@ class QaSys6SignatureCoversWholeReportTest(unittest.TestCase):
                 try:
                     req = urllib.request.Request(
                         f"http://127.0.0.1:{server.server_address[1]}/api/report?format=pdf",
-                        data=json.dumps({"items": self.report["items"]}).encode("utf-8"),
+                        data=json.dumps({"scan_job": "0" * 32}).encode("utf-8"),  # P0R-6: 501 before the job is looked up
                         headers={CLIENT_HEADER: "qa", "Content-Type": "application/json"},
                         method="POST",
                     )
@@ -1240,7 +1244,7 @@ class QaSys7ReadRootConfinementTest(_ServerFixture):
                 pixel["heatmap_path"] = str(self.outside / "secret.png")
         for fmt in ("html", "pdf", "json"):
             with self.subTest(report=fmt):
-                self.assertDenied(*self.request(f"/api/report?format={fmt}", {"items": rows}))
+                self.assertDenied(*self.request(f"/api/report?format={fmt}", {"uploads": [dict(row, source="upload") for row in rows]}))  # P0R-6
 
     def test_scan_of_filesystem_root_is_403(self) -> None:
         """QA-SYS-7: /api/scan?folder=/ 등 등록되지 않은 경로로 요청. heatmap_path를 외부 파일로 지정한 report 요청 → 모두 403, 응답에 파일 내용 0바이트.
@@ -1290,7 +1294,7 @@ class QaSys7ReadRootConfinementTest(_ServerFixture):
                 pixel["heatmap_path"] = str(self.outside / "secret.png")
         for fmt in ("html", "pdf", "json"):
             with self.subTest(format=fmt):
-                self.assertDenied(*self.request(f"/api/report?format={fmt}", {"items": rows}))
+                self.assertDenied(*self.request(f"/api/report?format={fmt}", {"uploads": [dict(row, source="upload") for row in rows]}))  # P0R-6
 
     def test_report_with_inside_heatmap_renders_it(self) -> None:
         """QA-SYS-7: /api/scan?folder=/ 등 등록되지 않은 경로로 요청. heatmap_path를 외부 파일로 지정한 report 요청 → 모두 403, 응답에 파일 내용 0바이트.
@@ -1299,7 +1303,9 @@ class QaSys7ReadRootConfinementTest(_ServerFixture):
         # X2: the server re-analyzes the rows with the scan's options (the
         # posted heatmap paths are only checked, never trusted).
         # P1: rows are relative to the scanned folder named by scan_root.
-        status, body = self.request("/api/report?format=html", {"items": rows, "options": {"pixel": "deep", "heatmaps": True}, "scan_root": str(self.root)})
+        # P0R-6: the report signs the server-held job of a scan run with those options
+        job = scan_job_for(self.root, query="&pixel=deep&heatmaps=true")
+        status, body = self.request("/api/report?format=html", {"scan_job": job})
         self.assertEqual(status, 200)
         self.assertIn(b"data:image/png;base64", body)
         self.assertNoSecret(body)
@@ -1329,12 +1335,11 @@ class QaSys7ReadRootConfinementTest(_ServerFixture):
         # N11: the row carries the contract's required "result" (null for a
         # failed row) — /api/report refuses rows outside the item contract.
         rows = [{"path": str(self.outside / "secret.txt"), "name": "secret.txt", "kind": "text", "status": "failed", "size_bytes": 0, "result": None, "sha256": "f" * 64}]
-        status, body = self.request("/api/report?format=json", {"items": rows, "scan_root": str(self.root)})  # P1
-        # R21-5 (round 21): a row path that is not the scan's relative form (here absolute, outside the roots) is a
-        # malformed request — 400 before anything is read (it was 200 with the row under excluded_items; an absolute
-        # or "./" alias of a file inside the scan folder was signed as another row). Nothing is read or echoed.
+        status, body = self.request("/api/report?format=json", {"uploads": [dict(row, source="upload") for row in rows]})
+        # P0R-6: a request carries no folder rows; the only posted rows are uploads, whose absolute name is refused
+        # (R22-8) — 400 before anything is read. Nothing is read or echoed.
         self.assertEqual(status, 400)
-        self.assertIn("의 경로가 폴더 검사 결과의 경로 형식이 아닙니다", json.loads(body)["error"])
+        self.assertIn("업로드 파일 이름 형식이 아닙니다", json.loads(body)["error"])
         self.assertNotIn("f" * 64, body.decode("utf-8"))
         self.assertNoSecret(body)
 

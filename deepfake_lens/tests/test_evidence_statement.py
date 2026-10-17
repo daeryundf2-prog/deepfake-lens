@@ -284,11 +284,11 @@ class EvidenceStatementTest(_StatementFixture):
         payload = {
             # R22-8 (round 22): an upload row's name is relative (an upload endpoint names it after the client's
             # file name); these rows' absolute paths are now a malformed upload name (400) — posted by file name.
-            "items": [dict(self.item1.to_json(), source="upload", path=Path(self.item1.path).name),
-                      dict(item2.to_json(), source="upload", path=Path(item2.path).name)],
+            # P0R-6: upload rows travel as ``uploads`` (rows are no request field; folder rows come from a scan job)
+            "uploads": [dict(self.item1.to_json(), source="upload", path=Path(self.item1.path).name),
+                        dict(item2.to_json(), source="upload", path=Path(item2.path).name)],
             "format": "evidence",
             "case_no": "2026가합55555",
-            "scan_root": str(Path(tmp.name).resolve()),
         }
         resp = client.post(
             "/api/report?format=evidence",
