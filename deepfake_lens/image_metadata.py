@@ -574,10 +574,18 @@ def guess_image_source(metadata: dict[str, str], *, brands: bool = True) -> Sour
     return SourceGuess.unknown()
 
 
+HEADER_TEXT_MARKERS = ("prompt", "seed", "sampler", "stable", "comfy", "midjourney", "openai", "firefly", "runway", "novelai", "leonardo")
+_PRINTABLE_RUN = re.compile(r"[ -~]{4,}")
+# R27-5: one ASCII case-insensitive search instead of ``marker in item.lower()`` for each of 11 markers on every
+# printable run (a Python-level loop over ~1600 runs per file). The runs are printable ASCII ([ -~]), and with
+# re.ASCII, IGNORECASE folds exactly A-Z/a-z — the same as str.lower() on ASCII — so the selection is identical.
+_HEADER_MARKER = re.compile("|".join(re.escape(marker) for marker in HEADER_TEXT_MARKERS), re.IGNORECASE | re.ASCII)
+
+
 def _extract_header_text(data: bytes) -> str:
     text = data.decode("latin-1", errors="ignore")
-    strings = re.findall(r"[ -~]{4,}", text)
-    useful = [item for item in strings if any(marker in item.lower() for marker in ["prompt", "seed", "sampler", "stable", "comfy", "midjourney", "openai", "firefly", "runway", "novelai", "leonardo"])]
+    strings = _PRINTABLE_RUN.findall(text)
+    useful = [item for item in strings if _HEADER_MARKER.search(item)]
     return "\n".join(useful[:80])
 
 

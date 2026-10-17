@@ -190,8 +190,9 @@ def decode_image(path: Path) -> tuple[list[TrustMarkReading], list[str], list[st
     Pillow and CheckSkipped when no decoder file is present or the image is
     below MIN_SIDE.
     """
-    import numpy  # noqa: F401 — dependency probes
-    import onnxruntime  # noqa: F401
+    from .import_probe import require
+
+    require("numpy", "onnxruntime")  # dependency probes (R27-5: absence remembered)
     from PIL import Image
 
     present, missing = available_variants()

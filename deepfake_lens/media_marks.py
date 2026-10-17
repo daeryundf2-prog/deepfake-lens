@@ -132,9 +132,13 @@ class SdxlOutcome:
 
 def sdxl_check(path: Path) -> SdxlOutcome:
     """Decode the dwtDct message and compare it with the registry's SDXL entries (exact match only)."""
-    import numpy  # noqa: F401 — dependency probe: absent numpy/cv2/PIL is "skipped"
-    import cv2  # noqa: F401
-    import PIL  # noqa: F401
+    from .import_probe import require, require_available
+
+    # dependency probes: absent numpy/cv2/PIL is "skipped". R27-5: cv2 is located, not imported — it is imported by
+    # decode_array, i.e. only for an image inside the measured range (importing it starts OpenCV's BLAS threads).
+    require("numpy")
+    require_available("cv2")
+    require("PIL")
 
     from .wm_imwatermark import ALGORITHM, MAX_PIXELS, MIN_SIDE, decode_array, load_rgb
 
@@ -360,7 +364,9 @@ def _videoseal_layer(path: Path, layers: MarkLayers, *, video: bool) -> None:
     from . import wm_meta
 
     def check() -> Any:
-        import torch  # noqa: F401 — dependency probe: without torch the check is "의존성 부재: torch"
+        from .import_probe import require
+
+        require("torch")  # dependency probe: without torch the check is "의존성 부재: torch" (R27-5: absence remembered)
 
         registry = load_registry()
         reading = wm_meta.videoseal_read_video(path) if video else wm_meta.videoseal_read_image(path)
@@ -397,8 +403,9 @@ def _audioseal_layer(path: Path, layers: MarkLayers) -> None:
     from . import wm_meta
 
     def check() -> Any:
-        import torch  # noqa: F401 — dependency probes
-        import audioseal  # noqa: F401
+        from .import_probe import require
+
+        require("torch", "audioseal")  # dependency probes (R27-5: absence remembered)
 
         return wm_meta.audioseal_read(path), load_registry()
 

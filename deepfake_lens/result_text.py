@@ -536,6 +536,34 @@ def display_name(text: object, *, escape_pipe: bool = True) -> str:
     doubled, so "|" is an ordinary character there.
     """
     raw = str(text)
+    # R27-5: most texts (Korean report prose, ASCII names) contain no character this function changes; the
+    # per-character walk below cost the HTML report of a 300-row scan more than the scan itself.
+    if all(_unchanged_alone(char, escape_pipe) for char in set(raw)):
+        return raw
+    return _display_name_walk(raw, escape_pipe)
+
+
+# R27-5: char -> "display_name(char) == char" (per escape_pipe), filled as characters are met. A text made only
+# of such characters is returned as it is, exactly as the walk would: none of them is "\\", "|" (when escaped),
+# a control, an invisible or lookalike character, a character that NFC changes, or a mark / Hangul medial-final
+# jamo — so every run is a single character and the walk keeps each one. Bounded; past the bound a character is
+# decided again on every call.
+_UNCHANGED_ALONE: dict[tuple[str, bool], bool] = {}
+_UNCHANGED_ALONE_MAX = 65536
+
+
+def _unchanged_alone(char: str, escape_pipe: bool) -> bool:
+    key = (char, escape_pipe)
+    known = _UNCHANGED_ALONE.get(key)
+    if known is None:
+        known = _display_name_walk(char, escape_pipe) == char
+        if len(_UNCHANGED_ALONE) < _UNCHANGED_ALONE_MAX:
+            _UNCHANGED_ALONE[key] = known
+    return known
+
+
+def _display_name_walk(raw: str, escape_pipe: bool) -> str:
+    """:func:`display_name` character by character (the definition; the fast path above only skips it)."""
     non_nfc = _lookalike_positions(raw, escape_pipe)
     out: list[str] = []
     for index, char in enumerate(raw):

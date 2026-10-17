@@ -11,8 +11,10 @@ fail closed, 모든 검사의 coverage 기록, 재현 가능한 기록 근거(�
   그래서 인증서 폐기(revocation)는 확인하지 않는다.
 - **신뢰 목록**: 이전에는 신뢰 앵커를 넣지 않아 어떤 서명자도 `signingCredential.trusted`가 될 수 없었다(강한 C2PA 규칙 두 개가 도달 불가).
   이제 C2PA 공식 신뢰 목록 스냅샷(`deepfake_lens/models/c2pa-trust-list.pem`, 2026-08-05판, 앵커 30개,
-  `models/c2pa-trust.json`에 출처 URL·업스트림 커밋·조회일·sha256)을 쓰며, 매 사용 전에 sha256을 확인한다(다르면 `c2pa` 검사 failed
-  「C2PA 검증 불가: C2PA 신뢰 목록 무결성 불일치…」). 운영자는 `DEEPFAKE_LENS_C2PA_TRUST_ANCHORS=<PEM>`으로 앵커를 더한다(읽을 수 없으면 failed).
+  `models/c2pa-trust.json`에 출처 URL·업스트림 커밋·조회일·sha256)을 쓰며, 사용 전에 sha256을 확인한다(다르면 `c2pa` 검사 failed
+  「C2PA 검증 불가: C2PA 신뢰 목록 무결성 불일치…」). R27-5: 확인은 프로세스 안에서 파일 버전마다 한 번이다 — 목록·ITL·운영자 앵커 파일을
+  읽을 때 잰 stat(장치·inode·크기·mtime_ns·ctime_ns)이 그대로인 동안만 확인된 내용을 다시 쓰고, 하나라도 바뀌면 다시 읽고 다시 확인한다
+  (바뀐 파일은 여전히 failed). 판독기 Context(앵커 PEM을 파싱한 SDK 설정)도 작업 스레드마다, 확인된 sha256 조합마다 한 번 만든다. 운영자는 `DEEPFAKE_LENS_C2PA_TRUST_ANCHORS=<PEM>`으로 앵커를 더한다(읽을 수 없으면 failed).
   신뢰 기준(목록 id·발행일·sha256, 운영자 앵커 sha256)과 검증기 spec 버전은 C2PA 근거의 `detail`, `c2pa` coverage의 `reason`
   (「매니페스트 있음 · 검증기 C2PA 2.4.0 · 신뢰 목록 C2PA-TRUST-LIST 2026-08-05판(sha256 …)」)에 적혀 서명되는 보고서 본문에 들어가고,
   스캔 캐시 키에도 들어간다.
@@ -92,6 +94,9 @@ IPTC·C2PA 이름공간이 아닌 IRI는 마지막 경로 조각이 같아도 "�
 - **근거**: 48/48 정확 일치일 때만 결정적·생성·강 「SDXL 공식 파이프라인 워터마크 존재」. 메시지가 공개라 흉내 낼 수 있으므로 생성 도구
   메타데이터와 같은 급이다. 불일치는 무정보(coverage `ran` 「48비트 정확 일치 없음 — 무정보(워터마크 부재를 뜻하지 않음)」).
 - 범위 밖: 짧은 변 256px 미만(SDXL 워터마커가 표식을 넣지 않음) → `skipped`; 8천만 화소 초과 → `skipped`.
+- 의존성 확인(R27-5): numpy·Pillow는 import하고, OpenCV는 설치 위치만 찾는다(없으면 이전과 같이 `skipped` 「의존성 부재: cv2」).
+  OpenCV는 범위 안 이미지를 디코드할 때 import한다 — import가 OpenCV의 BLAS 스레드를 띄워 작은 이미지 검사에서 검사 자체보다 비쌌다.
+  그래서 설치는 되었으나 import가 실패하는 OpenCV에서는 256px 미만 이미지가 「의존성 부재」 대신 「측정 범위 밖」으로 건너뛰어진다(둘 다 `skipped`).
 - 측정: 실사 240장 우연 일치 0건(95% 상한 1.5%), 무손실 재검출률 29.6% — `docs/WATERMARK-MEASUREMENTS.md`.
 
 ## 4. Adobe TrustMark (`watermark_trustmark`)

@@ -11,6 +11,7 @@ part of the byte-marker scan for its legal-report output; see
 from __future__ import annotations
 
 import struct
+import threading
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -298,7 +299,7 @@ def _error_analysis(message: str) -> MetadataForensicAnalysis:
 # unreachable. The bundle is the C2PA conformance trust list snapshot
 # described by models/c2pa-trust.json (source URL, upstream commit, list
 # issue date, retrieval date, sha256); its bytes are checked against that
-# sha256 before every use — a changed file fails the check (fail closed).
+# sha256 before use — once per file version, see _BUNDLE_CACHE — and a changed file fails the check (fail closed).
 TRUST_BUNDLE_MANIFEST = Path(__file__).resolve().parent / "models" / "c2pa-trust.json"
 # P0R-21: the frozen Interim Trust List (ITL) — a second, separate bundle. A signer is checked against the official
 # list (+ operator anchors) first; only an untrusted signer is checked again against the ITL alone, and an ITL-only
@@ -317,21 +318,54 @@ class C2paTrustError(RuntimeError):
     """The trust bundle or the operator's anchors cannot be used (Korean message) — the check fails."""
 
 
+# R27-5: the bundles and the operator's anchors are read and their sha256 checked once per process and file
+# version, not three times per scanned file. A cached entry is reused only while ``os.stat`` of every file it was
+# read from is unchanged (device, inode, size, mtime_ns, ctime_ns — taken *before* the read, so a change during the
+# read is seen on the next call); any change re-reads and re-checks the file, so a changed file still fails closed.
+# Failures are never cached.
+_BUNDLE_CACHE: dict[str, tuple[tuple[int, ...], Path, tuple[int, ...], dict[str, object], str]] = {}
+_OPERATOR_CACHE: dict[str, tuple[tuple[int, ...], tuple[str, str]]] = {}
+# Counts real reads (cache misses) — the tests assert a scan does not re-read the bundles per file.
+TRUST_READS = {"bundle": 0, "operator": 0, "context": 0}
+
+
+def _file_version(path: Path) -> tuple[int, ...] | None:
+    import os
+
+    try:
+        info = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
 def _trust_bundle(manifest: Path | None = None) -> tuple[dict[str, object], str]:
     import hashlib
     import json
 
     manifest = manifest or TRUST_BUNDLE_MANIFEST  # looked up at call time (tests patch the module attribute)
 
+    cache_key = str(manifest)
+    cached = _BUNDLE_CACHE.get(cache_key)
+    manifest_version = _file_version(manifest)
+    if (cached is not None and manifest_version is not None and cached[0] == manifest_version
+            and _file_version(cached[1]) == cached[2]):
+        return dict(cached[3]), cached[4]
+    _BUNDLE_CACHE.pop(cache_key, None)
+    TRUST_READS["bundle"] += 1
     try:
         meta = json.loads(manifest.read_text(encoding="utf-8"))
         pem_path = manifest.parent / str(meta["file"])
+        pem_version = _file_version(pem_path)
         data = pem_path.read_bytes()
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise C2paTrustError(f"C2PA 신뢰 목록을 읽을 수 없습니다: {exception_text(exc)}") from exc
     if hashlib.sha256(data).hexdigest() != str(meta.get("sha256", "")):
         raise C2paTrustError(f"C2PA 신뢰 목록 무결성 불일치(models/{manifest.name}의 sha256과 다름)")
-    return meta, data.decode("ascii", errors="strict")
+    text = data.decode("ascii", errors="strict")
+    if manifest_version is not None and pem_version is not None:
+        _BUNDLE_CACHE[cache_key] = (manifest_version, pem_path, pem_version, dict(meta), text)
+    return meta, text
 
 
 def _operator_anchors() -> tuple[str, str] | None:
@@ -342,14 +376,24 @@ def _operator_anchors() -> tuple[str, str] | None:
     value = os.environ.get(TRUST_ANCHORS_ENV, "").strip()
     if not value:
         return None
+    path = Path(value).expanduser()
+    cached = _OPERATOR_CACHE.get(value)
+    version = _file_version(path)
+    if cached is not None and version is not None and cached[0] == version:
+        return cached[1]
+    _OPERATOR_CACHE.pop(value, None)
+    TRUST_READS["operator"] += 1
     try:
-        data = Path(value).expanduser().read_bytes()
+        data = path.read_bytes()
         text = data.decode("ascii")
     except (OSError, UnicodeError) as exc:
         raise C2paTrustError(f"{TRUST_ANCHORS_ENV}의 인증서 파일을 읽을 수 없습니다: {exception_text(exc)}") from exc
     if "-----BEGIN CERTIFICATE-----" not in text:
         raise C2paTrustError(f"{TRUST_ANCHORS_ENV}의 파일에 PEM 인증서가 없습니다")
-    return text, hashlib.sha256(data).hexdigest()
+    result = (text, hashlib.sha256(data).hexdigest())
+    if version is not None:
+        _OPERATOR_CACHE[value] = (version, result)
+    return result
 
 
 def trust_basis() -> dict[str, object]:
@@ -397,15 +441,47 @@ def reader_settings(*, itl: bool = False) -> dict[str, object]:
 
     ``itl`` (P0R-21): the frozen Interim Trust List's anchors alone, for the second check of an untrusted signer.
     """
+    return _reader_settings_keyed(itl=itl)[0]
+
+
+def _reader_settings_keyed(*, itl: bool = False) -> tuple[dict[str, object], tuple[object, ...]]:
+    """:func:`reader_settings` and a key naming its exact content (the checked sha256 of every PEM it carries)."""
     if itl:
-        _, itl_pem = _trust_bundle(ITL_BUNDLE_MANIFEST)
-        return {"verify": dict(OFFLINE_VERIFY_SETTINGS), "trust": {"trust_anchors": itl_pem}}
-    _, pem = _trust_bundle()
+        itl_meta, itl_pem = _trust_bundle(ITL_BUNDLE_MANIFEST)
+        return ({"verify": dict(OFFLINE_VERIFY_SETTINGS), "trust": {"trust_anchors": itl_pem}},
+                ("itl", str(itl_meta.get("sha256", ""))))
+    meta, pem = _trust_bundle()
     trust: dict[str, object] = {"trust_anchors": pem}
     operator = _operator_anchors()
     if operator is not None:
         trust["user_anchors"] = operator[0]
-    return {"verify": dict(OFFLINE_VERIFY_SETTINGS), "trust": trust}
+    return ({"verify": dict(OFFLINE_VERIFY_SETTINGS), "trust": trust},
+            ("official", str(meta.get("sha256", "")), operator[1] if operator else None))
+
+
+_CONTEXTS = threading.local()
+
+
+def _reader_context(sdk: object, settings: dict[str, object], key: tuple[object, ...]) -> object:
+    """A c2pa ``Context`` for ``settings`` — built once per thread and settings content (R27-5).
+
+    Building it parses every trust anchor (~100 KB of PEM) in the SDK, which cost more than reading a file with no
+    manifest. A Context carries only settings (the SDK documents it as shareable between readers); one is kept per
+    worker thread, per SDK module and per ``key`` (:func:`_reader_settings_keyed` — the checked sha256 of each PEM
+    and OFFLINE_VERIFY_SETTINGS), and rebuilt when the SDK reports it no longer valid.
+    """
+    cache: dict[tuple[object, ...], object] | None = getattr(_CONTEXTS, "cache", None)
+    if cache is None:
+        cache = _CONTEXTS.cache = {}
+    full_key = (id(sdk), getattr(sdk, "Context", None), tuple(sorted(OFFLINE_VERIFY_SETTINGS.items())), *key)
+    context = cache.get(full_key)
+    if context is not None and getattr(context, "is_valid", False):
+        return context
+    cache.pop(full_key, None)
+    TRUST_READS["context"] += 1
+    context = sdk.Context(sdk.Settings.from_dict(settings))  # type: ignore[attr-defined]
+    cache[full_key] = context
+    return context
 
 
 def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
@@ -446,14 +522,14 @@ def validate_c2pa_manifest(path: Path | str) -> dict[str, object] | None:
         return {"present": False, "status": "unavailable", "error_kind": "sdk_too_old",
                 "error": "c2pa-python 0.38 미만 — 오프라인 검증 설정과 신뢰 목록을 적용할 수 없음"}
     try:
-        settings = reader_settings()
+        settings, settings_key = _reader_settings_keyed()
         basis = trust_basis()
     except C2paTrustError as exc:
         return {"present": False, "status": "unavailable", "error_kind": "trust", "error": str(exc)}
     # R12-1: the SDK is native — it only ever sees an ASCII staged name.
     with native_safe_path(path) as native_media:
         try:
-            context = c2pa.Context(c2pa.Settings.from_dict(settings))
+            context = _reader_context(c2pa, settings, settings_key)
             reader = c2pa.Reader(native_media, context=context)
         except Exception as exc:  # noqa: BLE001 - SDK error classes vary by release; classified below
             if _is_c2pa_error(c2pa, exc, "ManifestNotFound"):
@@ -674,7 +750,7 @@ def _untrusted(results: object) -> bool:
 def _itl_trusted(sdk: object, native_media: object) -> bool:
     """P0R-21: the signer chains to the frozen Interim Trust List (checked against its anchors alone)."""
     try:
-        context = sdk.Context(sdk.Settings.from_dict(reader_settings(itl=True)))  # type: ignore[attr-defined]
+        context = _reader_context(sdk, *_reader_settings_keyed(itl=True))
         reader = sdk.Reader(native_media, context=context)  # type: ignore[attr-defined]
     except Exception:  # noqa: BLE001 - the first validation already recorded the manifest; this only labels its trust
         return False
