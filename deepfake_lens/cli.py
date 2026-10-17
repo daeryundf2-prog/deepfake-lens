@@ -37,9 +37,10 @@ from .perf import run_performance_check, write_performance_check
 from .release import write_release_checklist
 from .reports import write_eval_html_report, write_forensic_pdf_report, write_html_report, write_pdf_report
 from .security import write_security_check
-from .signing import ReportKeyError, load_key_file, resolve_report_key
+from .signing import ReportKeyError, check_signing_key, load_key_file, resolve_report_key
 from .cli_logging import configure_cli_logging
 from .error_text import LIBRARY_ERROR_FALLBACK, read_error_ko
+from .result_text import RowIdentityError
 from .training import write_neural_training_plan
 from .audio import analyze_audio
 from .face import analyze_faces
@@ -602,6 +603,10 @@ def _main(argv: list[str] | None = None) -> int:
         words = argv[1:]
         while len(words) > 1 and words[-1] in ("-h", "--help"):
             words = words[:-1]
+        # R26-7 (round 26): `help help <topic>` is the help of <topic> — "help" about help names the same topic. It was
+        # the top-level parser's 「허용되지 않은 값 'help'」 (exit 2) although its choice list does not hold "help".
+        while len(words) > 1 and words[0] == "help":
+            words = words[1:]
         topic = words[0] if words else None
         if topic is None or (topic in ("-h", "--help", "help") and len(words) == 1):
             argv = ["--help"]  # R23-11 (round 23): `help help` is the top-level help (was "허용되지 않은 값 'help'")
@@ -645,10 +650,18 @@ def _main(argv: list[str] | None = None) -> int:
     key_file = getattr(args, "key_file", None)
     if key_file is not None:
         try:
-            load_key_file(key_file)
+            key = load_key_file(key_file)
+            if args.command != "verify-report":
+                check_signing_key(key)  # P0R-15: a signing key below the minimum is refused before any work
         except ReportKeyError as exc:
             print(f"오류: {escape_echo(exc)}", file=sys.stderr)
             return 4 if args.command == "verify-report" else 2
+    if args.command in ("web", "api-serve"):
+        try:
+            check_signing_key(resolve_report_key())  # P0R-15: a server that signs reports starts only with a usable key
+        except ReportKeyError as exc:
+            print(f"오류: {escape_echo(exc)} (환경 변수 DEEPFAKE_LENS_REPORT_KEY)", file=sys.stderr)
+            return 2
     # N4/N7: every input path of every subcommand is checked before any
     # work — missing, a folder for a file (or the reverse), an unsupported
     # format: "오류: …" on stderr, exit 2 (verify-report: its usage code 4).
@@ -687,6 +700,10 @@ def _main(argv: list[str] | None = None) -> int:
         logging.getLogger(__name__).info("command %s: output not written: %s", args.command, exc)
         print(f"오류: {escape_echo(exc)}", file=sys.stderr)
         return UNEXPECTED_ERROR_EXIT
+    except ReportKeyError as exc:
+        # P0R-15: a signing key below the minimum length — the report is not written, exit 2
+        print(f"오류: {escape_echo(exc)}", file=sys.stderr)
+        return USAGE_EXIT
     except (RecursionError, ValueError) as exc:
         # R10-5 (round 10): an input the command could not take — a JSON
         # nested past the recursion limit, a value it cannot use — is an
@@ -696,6 +713,12 @@ def _main(argv: list[str] | None = None) -> int:
         logging.getLogger(__name__).exception("command %s: input error", args.command)
         print(f"오류: {INPUT_ERROR_MESSAGE.format(reason=escape_echo(input_error_reason(exc)), log=logs.log_hint())}", file=sys.stderr)
         return VERIFY_EXIT_OTHER if args.command == "verify-report" else USAGE_EXIT
+    except RowIdentityError as exc:
+        # R26-8 (round 26): a scan whose row identities are not injective gives no result — said as such
+        logs.command_errors += 1
+        logging.getLogger(__name__).exception("command %s: row identity invariant", args.command)
+        print(f"오류: {exc} — 상세는 {logs.log_hint()}", file=sys.stderr)
+        return UNEXPECTED_ERROR_EXIT
     except Exception as exc:  # noqa: BLE001 - N4: never an English traceback on the console
         logs.command_errors += 1
         logging.getLogger(__name__).exception("command %s failed", args.command)

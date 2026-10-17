@@ -9,6 +9,7 @@
         let lastScanOptions = {};
         // R19-3: the server job whose result is on screen (its cancel count is verified by the server).
         let lastScanJob = '';
+        let lastScanJobNote = '';
         let selectedFiles = [];
         let lastScanRoot = '';
         // R12-4: the scan folder as URL-safe base64 file-system bytes (scan_root_b64);
@@ -143,7 +144,7 @@
                 (next ? next.querySelector('button') : $('main')).focus();
             });
             // GUI-REV5 L-2: export failures and warnings are said next to the export buttons
-            // (#export-alert / #export-warn), not here.
+            // (#export-alert), not here.
             box.append(text, close);
             // GUI-REV2 H-10: only a scan's own errors carry its generation; a quick
             // check or export error is never later marked "이전 검사".
@@ -296,7 +297,7 @@
             if (cancelledNote) parts.push(`<b>${shown(cancelledNote)}</b>`);
             const wa = cov.weights_available, wt = cov.weights_total;
             if (wt !== undefined) {
-                if ((wa || 0) === 0) parts.push('<b>신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영</b> — 탑재된 신경망 가중치가 없어 통계적 근거는 결론에 참여하지 않습니다.');
+                if ((wa || 0) === 0) parts.push('<b>신경망 미탑재(측정 게이트 미충족) — 재현 가능한 기록 근거만 반영</b> — 탑재된 신경망 가중치가 없어 통계적 근거는 결론에 참여하지 않습니다.');
                 else if (wa < wt) parts.push(`신경망 가중치 일부 탑재 (${wa}/${wt}) — 미탑재 엔진의 판단이 빠져 있습니다.`);
             }
             const env = envFacts();
@@ -430,7 +431,7 @@
             authenticity_evidence: '원본성 근거 있음',
             undetermined: '판단 불가',
         };
-        const KIND_LABELS = { deterministic: '결정적 근거', statistical: '통계적 근거', lexical: '어휘적 근거' };
+        const KIND_LABELS = { deterministic: '재현 가능한 기록 근거', statistical: '통계적 근거', lexical: '어휘적 근거' };
         const KIND_NOTES = {
             deterministic: '메타데이터·C2PA 등 파일이 스스로 기록한 사실 — 결론을 낼 수 있습니다.',
             statistical: '모델 출력 — 보정(측정 코퍼스·신뢰구간)이 없으면 결론에 참여하지 않습니다.',
@@ -483,9 +484,9 @@
         }
         function verdictAdvice(verdict, grade) {
             if (grade === 'reference') return '텍스트 결과는 참고 등급입니다 — 어휘·문체 신호는 사람이 쓴 글에도 나타나므로 결론으로 쓰지 마세요.';
-            if (verdict === 'manipulation_evidence') return '결정적 근거(메타데이터·C2PA 등)가 조작·생성을 가리킵니다 — 근거 항목과 원본 파일을 대조해 감정서에 인용하세요.';
-            if (verdict === 'authenticity_evidence') return '결정적 근거가 원본성을 가리킵니다 — 서명자·해시 검증 내역을 감정서에 함께 기재하세요.';
-            return '결론을 낼 결정적 근거가 없거나 검사가 실패했습니다 — "원본"이라는 뜻이 아닙니다. 아래 검사 범위의 미실행·실패 사유를 확인하세요.';
+            if (verdict === 'manipulation_evidence') return '재현 가능한 기록 근거(메타데이터·C2PA 등)가 조작·생성을 가리킵니다 — 근거 항목과 원본 파일을 대조해 감정서에 인용하세요.';
+            if (verdict === 'authenticity_evidence') return '재현 가능한 기록 근거가 원본성을 가리킵니다 — 서명자·해시 검증 내역을 감정서에 함께 기재하세요.';
+            return '결론을 낼 재현 가능한 기록 근거가 없거나 검사가 실패했습니다 — "원본"이라는 뜻이 아닙니다. 아래 검사 범위의 미실행·실패 사유를 확인하세요.';
         }
         function evidenceHtml(r) {
             const ev = r.evidence || [];
@@ -1261,7 +1262,11 @@
                 lastScanRoot = data.scan_root || folderPath;
                 lastScanRootB64 = data.scan_root_b64 || '';
                 lastScanOptions = options || {};  // R19-3: with the rows they produced
-                lastScanJob = jobId;
+                lastScanJob = data.scan_job || jobId;  // P0R-6: the server-held job every report is built from
+                // P0R-6: a job the server could not persist (its store would be inside the evidence) is held in
+                // memory only — said, since a server restart then loses it (the report needs a new scan).
+                lastScanJobNote = data.scan_job_note ? String(data.scan_job_note) : '';
+                if (lastScanJobNote) toast(lastScanJobNote, true, '주의', 'scan');
                 processResults(data);
                 // R18-3: "분석 완료" was shown for a cancelled scan too.
                 if (partialResultNote(data.summary)) toast(`검사 취소 — 부분 결과 ${(data.items || []).length}개 행, 분석하지 않은 파일 ${data.summary.files_cancelled || 0}개`, true, '주의', 'scan');
@@ -1397,6 +1402,7 @@
                 lastScanRootB64 = '';
                 lastScanOptions = {};  // R19-3: upload rows are never re-analyzed (P6)
                 lastScanJob = '';
+                lastScanJobNote = '';
                 lastUploadScope = 'upload:' + Date.now().toString(36) + ':' + (selectedFiles[0] ? (selectedFiles[0].webkitRelativePath || selectedFiles[0].name) : '');
                 processResults({ items: allItems, coverage: stagedCoverage, thresholds: stagedThresholds });
                 toast(`분석 완료 — ${allItems.length}개 파일`);
@@ -1435,19 +1441,14 @@
             updateCaseLine();
         }
 
-        function reportPayload(extra, items) {
-            const out = {
-                items: items || results.map(r => r.item),
-                summary: lastProvenance.summary || {},
-                coverage: lastProvenance.coverage || {},
-                thresholds: lastProvenance.thresholds || {},
-                options: lastScanOptions,
-            };
-            // P1: rows are relative to the scanned folder; uploads carry
-            // source: "upload" and are never re-analyzed (P6).
-            if (lastScanRoot) out.scan_root = lastScanRoot;
-            if (lastScanJob) out.scan_job = lastScanJob;  // R19-3: the server checks a cancel count against its job
-            if (submitterSide()) out.submitter_side = submitterSide();
+        // Merge of phase0 P0R-6: a report is built from the server's own scan job — its rows, options and
+        // accounting; the GUI sends the job id, the ordered exhibit choice, the side and the case fields, never
+        // rows. Results without a job (uploads, P6) go as `uploads` and are listed unsigned.
+        function reportPayload(extra) {
+            const out = {};
+            if (lastScanJob) out.scan_job = lastScanJob;
+            else out.uploads = results.map(r => r.item);
+            if (submitterSide()) out.side = submitterSide();  // plaintiff only until BL-15
             for (const [id, key] of Object.entries(CASE_FIELDS)) {
                 const el = $(id);
                 if (el && el.value.trim()) out[key] = el.value.trim();
@@ -1720,7 +1721,10 @@
             const prob = (e.probability != null && e.calibration_id)
                 ? ` · p=${Number(e.probability).toFixed(2)}${e.probability_ci ? ` (95% CI ${Number(e.probability_ci[0]).toFixed(2)}–${Number(e.probability_ci[1]).toFixed(2)})` : ''} · 보정 ${shown(e.calibration_id)}`
                 : '';
-            return `<li><span class="str${neutral ? ' str-neutral' : ''}">${escapeHtml(tag)}</span><span>${shown(e.title)}` +
+            // Merge of phase0 P0R-12: a record the file declares about itself (metadata a tool wrote) is marked —
+            // anyone can plant or strip it.
+            const declared = e.self_declared ? '<span class="self-declared">자기 선언 — 심거나 지울 수 있음</span>' : '';
+            return `<li><span class="str${neutral ? ' str-neutral' : ''}">${escapeHtml(tag)}</span><span>${shown(e.title)}${declared}` +
                 `${e.detail ? `<span class="ev-src">${shown(e.detail || '')}</span>` : ''}` +
                 `<span class="ev-src">${escapeHtml(KIND_LABELS[e.kind] || e.kind)} · ${escapeHtml(DIRECTION_LABELS[e.direction] || e.direction)}${prob}</span></span></li>`;
         }
@@ -1812,6 +1816,9 @@
             if (neutral.length) ev += `<p class="hint">확인한 기록 (결론과 무관한 중립 기록)</p><ol class="ev-list">${neutral.map(evItemHtml).join('')}</ol>`;
             if (item.error && v !== 'other') ev += `<p class="c-red">분석 실패: ${shown(item.error)}</p>`;
             body.push(`<section class="d-sec"><h3>근거</h3>${ev}</section>`);
+            // Merge of phase0 P0R-12: why this conclusion could be wrong — never behind a disclosure.
+            const caveats = (r && r.conclusion_caveats) || [];
+            if (caveats.length) body.push(`<section class="d-sec d-caveat"><h3>이 결론이 틀릴 수 있는 이유</h3><ul>${caveats.map(c => `<li>${shown(c)}</li>`).join('')}</ul></section>`);
             // A failed check is never behind a disclosure.
             const failed = failedChecks(item);
             if (failed.length) body.push(`<section class="d-sec d-fail"><h3>실패한 검사 ${failed.length}</h3><ul>${failed.map(c => `<li>${shown(coverageText(c))}</li>`).join('')}</ul></section>`);
@@ -1851,7 +1858,7 @@
             if (r) {
                 discs.push(`<details class="disc"><summary>기술 세부</summary><div class="disc-body">${verdictHeadHtml(r)}${evidenceHtml(r)}${coverageHtml(r)}` +
                     `<div class="band-advice">${escapeHtml(verdictAdvice(r.verdict_code || 'undetermined', r.grade))}</div>` +
-                    `<div class="caveat">결론은 결정적 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>` +
+                    `<div class="caveat">결론은 재현 가능한 기록 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>` +
                     `<pre class="tech">${escapeHtml(techText(item))}</pre></div></details>`);
             } else {
                 discs.push(`<details class="disc"><summary>기술 세부</summary><div class="disc-body"><pre class="tech">${escapeHtml(techText(item))}</pre></div></details>`);
@@ -2239,14 +2246,14 @@
             const f = csvCell;
             // BOM prefix keeps Korean intact when the CSV is opened in Excel.
             const partial = partialResultNote(lastProvenance.summary);  // R18-3: a cancelled scan's CSV starts with the note
-            let csv = '﻿' + (partial ? `# ${partial}\n` : '') + '결론,등급,결정적 근거,통계적 근거,어휘적 근거,검사 실패,출처 추정,모델,파일명,검토,메모,판정 문장\n';
+            let csv = '﻿' + (partial ? `# ${partial}\n` : '') + '결론,등급,재현 가능한 기록 근거,통계적 근거,어휘적 근거,검사 실패,출처 추정,모델,파일명,검토,메모,판정 문장\n';
             results.forEach(e => {
                 const item = e.item, r = item.result || {};
                 const rev = reviewStore[itemKey(item)] || {};
                 const ev = r.evidence || [];
                 const titles = kind => ev.filter(x => x.kind === kind).map(x => x.title).join(' / ');
                 const failedCov = (r.coverage || []).filter(c => c.status === 'failed').map(coverageText).join(' / ');
-                csv += [f(riskLabel(verdictOf(item))), f(r.grade === 'reference' ? '참고' : (r.grade ? '근거' : '')), f(titles('deterministic')), f(titles('statistical')), f(titles('lexical')), f(failedCov), f((r.source_guess && r.source_guess.label) || ''), f((r.model_analysis && (r.model_analysis.display_name || r.model_analysis.model)) || ''), f(item.name || item.path), f(rev.star ? '검토됨' : ''), f(rev.note || ''), f(r.verdict || '')].join(',') + '\n';
+                csv += [f(riskLabel(verdictOf(item))), f(r.grade === 'reference' ? '참고' : (r.grade && verdictOf(item) !== 'undetermined' ? '근거' : '')), f(titles('deterministic')), f(titles('statistical')), f(titles('lexical')), f(failedCov), f((r.source_guess && r.source_guess.label) || ''), f((r.model_analysis && (r.model_analysis.display_name || r.model_analysis.model)) || ''), f(item.name || item.path), f(rev.star ? '검토됨' : ''), f(rev.note || ''), f(r.verdict || '')].join(',') + '\n';
             });
             download(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'deepfake-lens-results.csv');
         });
@@ -2310,6 +2317,7 @@
                 out.push(partial ? { tag: 'warn', text: partial } : { tag: 'ok', text: '전체 검사 결과입니다(중단 없음).' });
                 // The scan's own limits (G-9c); the statement prints them in its 무결성/해석 고지.
                 out.push({ tag: 'info', text: '검사의 한계: ' + reportLimitLines().join(' · ') });
+                if (lastScanJobNote) out.push({ tag: 'warn', text: '검사 작업 기록: ' + lastScanJobNote });
                 const listed = listingCheck(a4Listing);
                 if (listed) out.push(listed);
                 // GUI-REV3 J-8: uploaded files are never exhibits — said plainly, and left
@@ -2319,16 +2327,16 @@
                 if (uploads) out.push({ tag: 'info', text: `올린 파일 ${uploads}개는 증거설명서의 서증이 될 수 없습니다 — 다시 분석할 수 없어 서명 제외(클라이언트 제공 결과)로 실립니다.` });
                 if (!scanned) out.push({ tag: 'req', text: '올린 파일만 있어 증거설명서를 만들 수 없습니다 — 폴더를 검사하십시오. 감정 보고서·HTML·서명된 JSON은 만들 수 있습니다.', act: ['검사 화면으로', () => navigate('scan')] });
                 else if (!sel.length) out.push({ tag: 'req', text: '증거설명서의 서증으로 넣을 파일을 고르십시오. 근거 있는 파일이 없으면 판단 불가 칸을 고를 수 있습니다.', act: ['고르기', () => $('inc-manip').focus()] });
-                else if (sel.length < scanned) out.push({ tag: 'info', text: `서증 ${sel.length}개 · 나머지 ${scanned - sel.length}개는 증거설명서 부록에 결론·해시와 함께 남습니다. 다른 형식에는 ${results.length}개가 모두 실립니다.` });
+                else if (sel.length < scanned) out.push({ tag: 'info', text: `서증 ${sel.length}개(고른 순서로 번호) · 나머지 ${scanned - sel.length}개는 증거설명서 표에 번호 없이 "서증 외(검사 행)"로 남습니다. 다른 형식에는 ${results.length}개가 모두 실립니다.` });
                 // GUI-REV2 H-4: say which appendix rows carry more than a verdict.
                 const appendix = results.filter(e => !sel.includes(e) && e.item.source !== 'upload' && itemBand(e) === 'undetermined');
                 const cueRows = appendix.filter(e => cueEvidence(e.item.result).length).length;
                 // J-2: duplicates of a manipulated file that go to the appendix.
                 const dupManip = results.filter(e => !sel.includes(e) && e.item.source !== 'upload' && e.item.status === 'duplicate' &&
                     originOf(e.item) && verdictOf(originOf(e.item)) === 'manipulation_evidence').length;
-                if (dupManip) out.push({ tag: 'warn', text: `부록으로 가는 중복 행 중 조작·생성 근거 있음 ${dupManip}개 — 원본과 내용이 같은 사본입니다. 서증으로 넣으려면 분석 못 함 칸을 고르십시오.` });
+                if (dupManip) out.push({ tag: 'warn', text: `번호 없이 남는 중복 행 중 조작·생성 근거 있음 ${dupManip}개 — 원본과 내용이 같은 사본입니다. 서증으로 넣으려면 분석 못 함 칸을 고르십시오.` });
                 const failedRows = appendix.filter(e => failedChecks(e.item).length).length;
-                if (cueRows || failedRows) out.push({ tag: 'warn', text: `부록으로 가는 판단 불가 행 중 단서 ${cueRows}개 · 검사 실패 ${failedRows}개 — 부록에는 판단 불가의 종류와 한 줄 요약만 실립니다. 서증으로 넣으려면 판단 불가 칸을 고르십시오.`, act: ['판단 불가 넣기', () => { $('inc-undet').checked = true; groupsTouched = true; renderReport(); $('inc-undet').focus(); }] });
+                if (cueRows || failedRows) out.push({ tag: 'warn', text: `번호 없이 남는 판단 불가 행 중 단서 ${cueRows}개 · 검사 실패 ${failedRows}개 — 서증 번호를 붙이려면 판단 불가 칸을 고르십시오.`, act: ['판단 불가 넣기', () => { $('inc-undet').checked = true; groupsTouched = true; renderReport(); $('inc-undet').focus(); }] });
             }
             if (pdfAvailable === false) out.push({ tag: 'warn', text: 'PDF 엔진(pymupdf)이 설치되어 있지 않아 PDF는 만들 수 없습니다 — HTML 보고서와 서명된 JSON은 만들 수 있습니다.' });
             return out;
@@ -2507,61 +2515,35 @@
             // GUI-REV2 H-3: the forensic PDF's exhibit box follows the chosen side (갑/을).
             // J-6: no side, no 갑/을 (the export waits for the side anyway).
             if (kind === 'pdf') extra.exhibit_no = (submitterSide() ? (submitterSide() === 'defendant' ? '을 ' : '갑 ') : '') + '제        호증';
-            if (kind === 'evidence') extra.exhibit_paths = selectedEntries().map(e => e.item.path);
+            // P0R-6: exhibit_paths are rows of the job, numbered in this order; only with a job.
+            if (kind === 'evidence' && lastScanJob) extra.exhibit_paths = selectedEntries().map(e => e.item.path);
             return reportPayload(extra);
         }
-        // GUI-REV3 J-7: a refused export names the rows behind it — the chosen rows the
-        // server could not re-analyze (with its reason) and the paths it did not know.
+        // A refused export names the rows behind it (up to five).
         const EXPORT_ERROR_PATHS = 5;
-        // GUI-REV4 K-4: what changed, said as the 409 row shows it — the verdict, or only
-        // the content (same verdict, other SHA-256), or the original of an unchanged
-        // duplicate, or a file the server could not re-analyze. ``item`` is the ledger
-        // row (for duplicate_of), when there is one.
-        function changeText(row, item) {
-            const verdictText = (code, status) => code ? (VERDICT_LABELS[code] || String(code)) : (STATUS_LABELS[status] || (status ? String(status) : '다시 분석 못 함'));
-            const posted = verdictText(row.posted_verdict, row.posted_status);
-            if (!row.server_verdict && !row.server_status) return posted + ' → 다시 분석 못 함' + (row.reason ? ': ' + String(row.reason) : '');
-            const ownBytesSame = row.posted_sha256 && row.server_sha256 && row.posted_sha256 === row.server_sha256;
-            if (row.posted_status === 'duplicate' && ownBytesSame) {
-                return '원본(' + String((item && item.duplicate_of) || '원본 파일') + ') 바뀜';
-            }
-            const server = verdictText(row.server_verdict, row.server_status);
-            // GUI-REV5 Info (a): the same verdict with another status (e.g. 분석됨 → 부분 분석) is
-            // named as a status change — never "판단 불가 → 판단 불가".
-            if (posted === server && row.posted_status !== row.server_status) {
-                const rowStatus = { analyzed: '분석됨', expanded: '압축 파일(구성 파일 검사)', unknown: '압축 파일(검사한 구성 파일 없음)', ...STATUS_LABELS };
-                const statusText = status => rowStatus[status] || (status ? String(status) : '상태 기록 없음');
-                return '상태 바뀜: ' + statusText(row.posted_status) + ' → ' + statusText(row.server_status) + ' · 결론은 그대로 ' + posted +
-                    (row.posted_sha256 !== row.server_sha256 ? ' · 내용(SHA-256)도 바뀜' : '');
-            }
-            if (posted === server && row.posted_sha256 !== row.server_sha256) return '내용(SHA-256) 바뀜 · 결론은 그대로 ' + posted;
-            return posted + ' → ' + server;
+        // Merge of phase0 P0R-6: a 409 row is {path, reason} only — the server compares the job's files on disk
+        // with their scan-time digests and says why each changed (no verdict or status of its own any more).
+        function changeText(row) {
+            return String((row && row.reason) || '검사 뒤 바뀜');
         }
-        function exportErrorText(body, status, lookup) {
+        function exportErrorText(body, status) {
             const parts = [String((body && (body.error || body.detail)) || ('서버 오류 (HTTP ' + status + ')'))];
             const listed = (rows, render) => {
                 const shownRows = rows.slice(0, EXPORT_ERROR_PATHS).map(render).join(', ');
                 return shownRows + (rows.length > EXPORT_ERROR_PATHS ? ` 외 ${rows.length - EXPORT_ERROR_PATHS}개` : '');
             };
-            const lost = Array.isArray(body && body.not_rederived_exhibit_paths) ? body.not_rederived_exhibit_paths : [];
-            if (lost.length) parts.push('다시 분석할 수 없는 서증: ' + listed(lost, row => String(row.path) + '(' + String(row.reason || '사유 기록 없음') + ')'));
-            const lostPaths = new Set(lost.map(row => String(row.path)));
-            const unknown = (Array.isArray(body && body.unknown_exhibit_paths) ? body.unknown_exhibit_paths : []).filter(path => !lostPaths.has(String(path)));
-            if (unknown.length) parts.push('이 보고서의 행이 아닌 경로: ' + listed(unknown, String));
-            // R19-13 (409): files changed after the scan — each with what the ledger shows and
-            // what the server's re-analysis found.
+            // R19-13 (409): files changed after the scan, each with the server's reason.
             const changed = Array.isArray(body && body.changed_rows) ? body.changed_rows : [];
-            if (changed.length) parts.push('검사 뒤 바뀐 파일: ' + listed(changed, row => String(row.path) + '(' + changeText(row, lookup ? lookup(String(row.path)) : null) + ')'));
+            if (changed.length) parts.push('검사 뒤 바뀐 파일: ' + listed(changed, row => String(row.path) + '(' + changeText(row) + ')'));
             return parts.join(' — ');
         }
         // R19-13: the rows the server found changed after the scan — marked in the ledger
         // until the folder is scanned again.
         let changedPaths = new Set();
         let changedInfo = new Map();  // K-4: path -> what changed, for the evidence panel
-        function itemByPath(path) { return (results.find(e => String(e.item.path) === path) || {}).item || null; }
         function markChangedRows(rows) {
             changedPaths = new Set(rows.map(row => String(row.path)));
-            changedInfo = new Map(rows.map(row => [String(row.path), changeText(row, itemByPath(String(row.path)))]));
+            changedInfo = new Map(rows.map(row => [String(row.path), changeText(row)]));
             if (results.length) renderList();
             if (currentView === 'report') renderReport();  // the checklist above the box first
             renderExportAlert();
@@ -2597,41 +2579,6 @@
             list.hidden = paths.length === 0;
             // Brought into view where the export button was pressed (no focus move).
             if (currentView === 'report' && box.getClientRects().length) box.scrollIntoView({ block: 'nearest' });
-        }
-        // GUI-REV5 L-2: a warning has its own marker (주의, not the refusal box) and stays for
-        // these results — a later successful export does not clear it. It names the rows of
-        // this scan that a successful export (any format) listed as 서명 제외.
-        let exportWarnings = new Map();  // path -> reason
-        let exportWarnFormats = new Set();
-        function renderExportWarning() {
-            const box = $('export-warn');
-            box.hidden = exportWarnings.size === 0;
-            if (box.hidden) return;
-            $('export-warn-text').textContent = `이 검사의 행 ${exportWarnings.size}개가 서명 제외로 옮겨졌습니다(${[...exportWarnFormats].join(', ')}). ` +
-                '서버가 다시 분석·서명하지 않는 행입니다(사유는 행마다). 링크로 바뀐 폴더 뒤의 행이면 다시 검사하십시오. 폴더 탐색 상한 행은 다시 검사해도 같은 상한에 걸릴 수 있습니다. 검사 취소된 압축 파일의 컨테이너 행은 서명하지 않고, 분석된 구성 파일은 각 행으로 서명됩니다.';
-            const list = $('export-warn-list');
-            list.innerHTML = '';
-            const rows = [...exportWarnings];
-            rows.slice(0, 5).forEach(([path, reason]) => {
-                const li = document.createElement('li');
-                li.textContent = displayName(path) + ' — ' + displayName(reason);
-                list.appendChild(li);
-            });
-            if (rows.length > 5) {
-                const li = document.createElement('li');
-                li.textContent = `외 ${rows.length - 5}개`;
-                list.appendChild(li);
-            }
-        }
-        $('export-warn-rescan').addEventListener('click', () => rescanFolder());
-        // L-2: the server names the rows a report lists as 서명 제외 in a response header
-        // (URL-safe base64 of an ASCII JSON list) — PDF and HTML bodies cannot be read for it.
-        function decodeExcludedHeader(value) {
-            if (!value) return [];
-            try {
-                const rows = JSON.parse(atob(String(value).replace(/-/g, '+').replace(/_/g, '/')));
-                return Array.isArray(rows) ? rows : [];
-            } catch (e) { return []; }
         }
         // GUI-REV5 L-3: what a successful download does to the export feedback. Exports run
         // concurrently; one requested before a refusal can land after it. It never clears the
@@ -2669,17 +2616,8 @@
             changedInfo = new Map();
             resultsGeneration += 1;  // K-1: earlier export responses no longer apply
             exportFailure = null;
-            exportWarnings = new Map();
-            exportWarnFormats = new Set();
             renderExportAlert();
-            renderExportWarning();
             if (currentView === 'report') renderReport();
-        }
-        // K-5: the rows a report listed as excluded that were rows of this scan (not uploads)
-        // — L-2: from the response header, for every format.
-        function scanRowsExcluded(rows) {
-            const scanned = new Set(results.filter(e => e.item.source !== 'upload').map(e => String(e.item.path)));
-            return rows.filter(row => row && scanned.has(String(row.path))).map(row => ({ path: String(row.path), reason: String(row.reason || row.marker || '사유 기록 없음') }));
         }
         // GUI-REV5 Info (b): a note that stays in the export note until the next export action.
         let exportStickyNote = '';
@@ -2723,17 +2661,16 @@
                     if (type.includes('application/json')) {
                         try {
                             const errorBody = await res.json();
-                            message = exportErrorText(errorBody, res.status, itemByPath);
+                            message = exportErrorText(errorBody, res.status);
                             if (res.status === 409 && Array.isArray(errorBody.changed_rows)) changedRows = errorBody.changed_rows;
-                            // L-2: a chosen row that was never re-analyzed — scanning again helps
-                            // when it is a row of the scan (one the scan did not hash, behind a folder
-                            // that became a link — a hashed one is the R20-5 409), not an upload.
-                            const lost = Array.isArray(errorBody.not_rederived_exhibit_paths) ? errorBody.not_rederived_exhibit_paths : [];
-                            rescan = lost.some(row => { const item = itemByPath(String(row && row.path)); return Boolean(item && item.source !== 'upload'); });
                         } catch (e) { message = '서버 오류 (HTTP ' + res.status + ')'; }
                     } else {
                         message = await apiError(res);
                     }
+                    // P0R-6: the server-held job is unknown or expired (404 — e.g. after a server restart with
+                    // the job held in memory only) or unusable (a 409 that names no changed file): scanning again
+                    // makes a new job.
+                    rescan = Boolean(lastScanJob) && (res.status === 404 || (res.status === 409 && !changedRows.length));
                     const action = exportResponseAction(startGen, resultsGeneration, res.status, changedRows.length, false);
                     if (action === '무시') { ignored(); return; }
                     if (action === '바뀜') {
@@ -2751,16 +2688,6 @@
                 const outcome = exportSuccessOutcome(spec[3], seq, changedPaths.size, exportFailure);
                 if (outcome.clearFailure) exportFailure = null;
                 renderExportAlert();
-                // GUI-REV4 K-5 / GUI-REV5 L-2: rows of this scan the server listed as excluded (merge of
-                // R20-5: a hashed row behind a folder that became a link is a 409 now; a row the scan did
-                // not hash, e.g. a link row or a skipped row, is still excluded) are
-                // named after every format, and the warning stays for these results.
-                const excluded = scanRowsExcluded(decodeExcludedHeader(res.headers.get('X-Deepfake-Lens-Excluded-Rows')));
-                if (excluded.length) {
-                    excluded.forEach(row => exportWarnings.set(row.path, row.reason));
-                    exportWarnFormats.add(spec[3]);
-                    renderExportWarning();
-                }
                 $('export-note').textContent = outcome.note;
             } catch (e) {
                 failed(e.message, false);
@@ -2837,6 +2764,7 @@
                     lastUploadScope = 'check:' + Date.now().toString(36);
                     lastScanOptions = {};
                     lastScanJob = '';
+                lastScanJobNote = '';
                     retireErrors();
                     processResults(data);
                     toast(`압축 해제 — ${(data.items || []).length}개 파일 분석됨`);
@@ -2862,7 +2790,7 @@
             const thr = data.thresholds || {};
             const parts = [];
             const wa = cov.weights_available, wt = cov.weights_total;
-            if (wt !== undefined && (wa || 0) === 0) parts.push('신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영');
+            if (wt !== undefined && (wa || 0) === 0) parts.push('신경망 미탑재(측정 게이트 미충족) — 재현 가능한 기록 근거만 반영');
             else if (wt !== undefined && wa < wt) parts.push(`신경망 가중치 일부 탑재(${wa}/${wt})`);
             if (thr.provisional || thr.source === 'builtin_defaults') parts.push('잠정 임계값(미측정)');
             if (thr.in_sample) parts.push('임계값 in-sample(참고)');
@@ -2892,6 +2820,8 @@
             }
             const decisive = decisiveEvidence(r, verdict);
             if (decisive.length) top.push(`<ol class="ev-list">${decisive.map(evItemHtml).join('')}</ol>`);
+            // P0R-12: why the conclusion could be wrong, outside the disclosure.
+            if ((r.conclusion_caveats || []).length) top.push(`<section class="d-caveat"><h3>이 결론이 틀릴 수 있는 이유</h3><ul>${r.conclusion_caveats.map(c => `<li>${shown(c)}</li>`).join('')}</ul></section>`);
             const failed = failedChecks(item);
             if (failed.length) top.push(`<section class="d-fail"><h3>실패한 검사 ${failed.length}</h3><ul>${failed.map(c => `<li>${shown(coverageText(c))}</li>`).join('')}</ul></section>`);
             top.push(`<p class="band-advice">${escapeHtml(limitAdvice(item))}</p>`);
@@ -2939,7 +2869,7 @@
             parts.push(listItems('참고 신호(미측정 휴리스틱 — 결론 불참여)', (r.reference_signals || []).map(s => ({ title: `${s.title} (${s.weight})`, detail: s.detail }))));
             parts.push(listItems('다음 확인', r.next_checks));
             parts.push(`<div class="band-advice">${escapeHtml(verdictAdvice(r.verdict_code || 'undetermined', r.grade))}</div>`);
-            parts.push(`<div class="caveat">결론은 결정적 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>`);
+            parts.push(`<div class="caveat">결론은 재현 가능한 기록 근거로만 내립니다. 통계적·어휘적 근거와 검사 실패 내역은 근거·검사 범위 목록에 전부 남습니다.</div>`);
             box.innerHTML = top.join('') + `<details class="disc"><summary>세부 — 근거 종류별·검사 범위·참고 신호·계층 진단</summary><div class="disc-body">${parts.join('')}</div></details>`;
             // A11Y-6: only the one-line result is announced, not the whole block.
             $('qc-live').textContent = '빠른 검사 결과: ' + riskLabel(verdict);

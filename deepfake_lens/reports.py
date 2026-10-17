@@ -10,6 +10,11 @@ from typing import Any, Callable
 
 from .core import TOOL_VERSION, BatchScanSummary, ScanItem
 from .evaluation_metrics import format_ci
+from .evidence_rules import CAVEATS_TITLE  # P0R-12
+from .result_types import EvidenceKind
+
+# P0R-13: the forensic PDF table's short kind tag (it printed the first two characters of the kind label).
+EVIDENCE_KIND_SHORT_LABELS = {EvidenceKind.DETERMINISTIC: "기록", EvidenceKind.STATISTICAL: "통계", EvidenceKind.LEXICAL: "어휘"}
 from .office_config import OfficeIdentity, office_identity
 from .result_text import (
     HASH_UNAVAILABLE_ACCESS,
@@ -32,7 +37,7 @@ from .result_text import (
     UNRECORDED_SECTION_TITLE,
     verdict_heading,
 )
-from .result_types import EVIDENCE_KIND_LABELS, VERDICT_LABELS, CoverageStatus, Grade, Verdict, check_label, is_verdict_row, status_label
+from .result_types import VERDICT_LABELS, CoverageStatus, Grade, Verdict, check_label, is_verdict_row, status_label
 from .signing import REPORT_KEY_ENV, resolve_report_key, sign_report, signed_body_sha256
 from .json_text import script_safe_json
 from .native_path import temp_location  # R15-6: temp_folder in the report body
@@ -81,6 +86,7 @@ def build_report_body(
     scan_root: str | None = None,
     analysis_options: dict[str, object] | None = None,
     files_cancelled_source: str | None = None,
+    exhibit_paths: list[str] | None = None,
 ) -> dict[str, object]:
     """The JSON body an HTML/PDF report renders — what its signature covers.
 
@@ -125,8 +131,6 @@ def build_report_body(
         "coverage": coverage,
         # X1: inside the signed body, like the scan JSON.
         "unrecorded_files": unrecorded_files(list(items), summary).to_json(),
-        # R15-6: where the run's temp files went (a fallback folder is reported).
-        "temp_folder": temp_location(),
         "items": rows,
     }
     if excluded_items is not None:
@@ -137,6 +141,8 @@ def build_report_body(
         body["analysis_options"] = dict(analysis_options)
     if files_cancelled_source is not None:
         body["files_cancelled_source"] = files_cancelled_source
+    if exhibit_paths is not None:
+        body["exhibit_paths"] = list(exhibit_paths)  # P0R-6: the examiner's ordered exhibit selection (job row paths)
     return body
 
 
@@ -154,6 +160,7 @@ def signed_report_body(
     scan_root: str | None = None,
     analysis_options: dict[str, object] | None = None,
     files_cancelled_source: str | None = None,
+    exhibit_paths: list[str] | None = None,
 ) -> dict[str, object]:
     """``build_report_body`` signed with ``key`` or DEEPFAKE_LENS_REPORT_KEY (G30).
 
@@ -164,6 +171,7 @@ def signed_report_body(
         summary, items, thresholds=thresholds, coverage=coverage, report_format=report_format,
         redact_paths=redact_paths, excluded_items=excluded_items, scan_root=scan_root,
         analysis_options=analysis_options, files_cancelled_source=files_cancelled_source,
+        exhibit_paths=exhibit_paths,
     )
     return sign_report(body, key if key is not None else resolve_report_key(), model_pins=model_pins)
 
@@ -302,7 +310,7 @@ def write_html_report(
   <h1>{escape(HTML_REPORT_TITLE)}</h1>
   <p>{escape(summary_line(summary))}</p>
   {_scan_root_html(signed_report)}
-  <p class="note">결론은 세 가지뿐입니다 — 조작·생성 근거 있음 / 원본성 근거 있음 / 판단 불가. 결정적 근거(메타데이터·C2PA)만 결론을 내리고, 통계적(모델)·어휘적(키워드) 근거는 보정 전까지 참고로만 표시합니다. 검사가 실패한 파일은 판단 불가로 남습니다.</p>
+  <p class="note">결론은 세 가지뿐입니다 — 조작·생성 근거 있음 / 원본성 근거 있음 / 판단 불가. 재현 가능한 기록 근거(메타데이터·C2PA)만 결론을 내리고, 통계적(모델)·어휘적(키워드) 근거는 보정 전까지 참고로만 표시합니다. 검사가 실패한 파일은 판단 불가로 남습니다.</p>
   {legal_note}
   <p class="note">{"<br>".join(escape(line) for line in threshold_provenance_lines(thresholds))}</p>
   {_unrecorded_html(summary, items)}
@@ -364,14 +372,16 @@ def temp_folder_line(location: object) -> str:
     override_env = location.get("override_env", "DEEPFAKE_LENS_TMPDIR")
     requested_by = str(location.get("requested_by") or "system")
     named = f"환경 변수 {requested_by}에 지정된 폴더" if requested_by != "system" else "시스템 임시 폴더"
+    # P0R-14: no host path in a report line (it ends up in signed bodies); the CLI notice on stderr names the folder.
     return (
-        f"임시 폴더: {named}를 쓸 수 없어({location.get('reason', '')}) 대체 폴더 {location.get('base', '')}에 "
+        f"임시 폴더: {named}를 쓸 수 없어({location.get('reason', '')}) 대체 폴더에 "
         f"임시 파일을 만들었습니다(지정: 환경 변수 {override_env})."
     )
 
 
 def _temp_folder_html(signed_report: dict[str, object]) -> str:
-    line = temp_folder_line(signed_report.get("temp_folder"))
+    # P0R-14: the signed body no longer carries temp_folder (a host path); the notice comes from this run.
+    line = temp_folder_line(signed_report.get("temp_folder") or temp_location())
     return f'<p class="note" id="temp-folder">{escape(line)}</p>' if line else ""
 
 
@@ -520,7 +530,7 @@ FORENSIC_TABLE_HEADERS = ("번호", "증거 파일명 및 SHA-256 무결성 해�
 # Relative column widths of the evidence table (번호 … 주요 근거).
 FORENSIC_TABLE_WEIGHTS = (5.0, 35.0, 12.0, 7.0, 14.0, 27.0)
 FORENSIC_DECISION_NOTE = (
-    "결론은 결정적 근거(메타데이터·C2PA)로만 내리며, 통계적·어휘적 근거와 검사 실패 내역은 "
+    "결론은 재현 가능한 기록 근거(메타데이터·C2PA)로만 내리며, 통계적·어휘적 근거와 검사 실패 내역은 "
     "JSON 산출물의 evidence/coverage에 전부 기록됩니다."
 )
 
@@ -646,7 +656,9 @@ def _render_forensic_pdf(
         if failed_checks:
             sig_str = "실패: " + ", ".join(check_label(entry.check) for entry in failed_checks)
         elif top_item is not None:
-            sig_str = f"[{EVIDENCE_KIND_LABELS[top_item.kind][:2]}] {display_name(top_item.title)}"
+            sig_str = f"[{EVIDENCE_KIND_SHORT_LABELS[top_item.kind]}] {display_name(top_item.title)}"
+            if top_item.self_declared:
+                sig_str += " (자기 선언)"  # P0R-12
         else:
             sig_str = display_name(item.error or "") or "근거 항목 없음"
         if res and res.verdict_code == Verdict.MANIPULATION_EVIDENCE:
@@ -675,6 +687,13 @@ def _render_forensic_pdf(
             on_new_page=table_header,
         )
     layout.y += 6.0
+    caveat_rows = [(index, item) for index, item in enumerate(items, start=1) if item.result is not None and item.result.conclusion_caveats]
+    if caveat_rows:
+        # P0R-12: every conclusion says why it could be wrong.
+        layout.boxed_text(CAVEATS_TITLE, [
+            (f"{index}. {display_path(item.path, redact_paths=redact_paths)}: {display_name(text)}", 7.0, (0.3, 0.3, 0.3))
+            for index, item in caveat_rows for text in (item.result.conclusion_caveats if item.result else [])
+        ])
     if unsigned_rows:
         # X2: rows the server could not re-analyze — outside the table and the signature.
         layout.boxed_text(UNSIGNED_ROWS_TITLE, [
@@ -796,6 +815,11 @@ def _html_row(item: ScanItem, *, redact_paths: bool, allow_path: Callable[[str],
         evidence_parts.append(f'<div class="kind">{escape(kind_label)}</div><ul>' + "".join(f"<li>{escape(display_name(line))}</li>" for line in lines) + "</ul>")
     if not evidence_parts:
         evidence_parts.append("근거 항목 없음")
+    if result.conclusion_caveats:  # P0R-12
+        evidence_parts.append(
+            f'<div class="caveats"><div class="kind">{escape(CAVEATS_TITLE)}</div><ul>'
+            + "".join(f"<li>{escape(display_name(text))}</li>" for text in result.conclusion_caveats) + "</ul></div>"
+        )
     gaps = coverage_gaps(result)
     gap_cell = "<ul>" + "".join(
         f'<li class="{"gap-failed" if entry.status == CoverageStatus.FAILED else ""}">{escape(display_name(entry.describe()))}</li>' for entry in gaps

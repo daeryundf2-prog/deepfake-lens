@@ -42,3 +42,59 @@ the pin.
   (OpenCV, BSD 3-Clause). Vendored because OpenCV 5.x no longer ships the
   cascade XML with `cv2.data`; used by `face._detect_faces` before the
   MediaPipe fallback.
+
+## C2PA trust list (techniques-2026)
+
+- `c2pa-trust-list.pem` — the C2PA conformance trust list (30 trust anchors,
+  list issue date 2026-08-05, next update 2027-08-05), copied byte for byte
+  from https://raw.githubusercontent.com/c2pa-org/conformance-public/main/trust-list/C2PA-TRUST-LIST.pem
+  (upstream commit `70ec46e16962b81e70795fcb50a05e0128329a20`, retrieved
+  2026-10-15), sha256
+  `75cacc98b79ecac33713c7ecfb58d4a0ef383f3c1f886e7409f9e37e8664aea5`.
+  License: **CC BY 4.0** — © Coalition for Content Provenance and
+  Authenticity (c2pa-org/conformance-public `LICENSE`); unmodified.
+  `c2pa-trust.json` records the same facts; `deepfake_lens/c2pa.py` checks
+  the file's sha256 against it before every use and fails the `c2pa` check
+  when they differ. An operator adds their own anchors with
+  `DEEPFAKE_LENS_C2PA_TRUST_ANCHORS=<PEM 파일>` (recorded in every C2PA
+  item and coverage reason). To update: replace both files in one commit,
+  raise `scan_cache.OUTPUT_FORMAT_GENERATION` and record the golden output.
+
+## Digital source type vocabulary and SDXL watermark message (techniques-2026)
+
+- `deepfake_lens/digital_source_type.py` restates the IPTC NewsCodes
+  "Digital Source Type" vocabulary (release 2024-10-23, 20 concepts,
+  https://cv.iptc.org/newscodes/digitalsourcetype/) — © IPTC, **CC BY 4.0**;
+  codes and English labels are IPTC's, the Korean labels are ours.
+- `deepfake_lens/wm_imwatermark.py` reimplements the `dwtDct` *decoder* of
+  ShieldMnt/invisible-watermark 0.2.0 (`imwatermark/maxDct.py`, **MIT**) with
+  numpy + OpenCV; no code is copied. `watermark-registry.json` records the
+  SDXL 48-bit message published in huggingface/diffusers
+  (`pipelines/stable_diffusion_xl/watermark.py`, Apache-2.0) and
+  Stability-AI/generative-models (`sgm/inference/helpers.py`, MIT).
+
+## TrustMark watermark decoders (techniques-2026)
+
+- `trustmark-decoder_Q.onnx`, `trustmark-decoder_P.onnx`,
+  `trustmark-decoder_C.onnx` — Adobe TrustMark ONNX decoders from
+  https://cai-watermark.adobe.net/watermarking/trustmark-models/decoder_{Q,P,C}.onnx
+  (retrieved 2026-10-15), **MIT** (adobe/trustmark: "The MIT license covers
+  both the code in this repo and the model files"). Not committed; fetched
+  by `scripts/fetch_watermark_models.py` and pinned by sha256 in
+  `assets.json`.
+- `deepfake_lens/vendor_trustmark_bch.py` is `trustmark/bchecc.py` from the
+  trustmark 0.9.2 sdist, unchanged — Copyright 2023 Adobe, **MIT**.
+
+## Meta VideoSeal / AudioSeal weights (techniques-2026)
+
+- `videoseal-y_256b_img.jit` — VideoSeal 1.0 (256-bit) TorchScript export,
+  https://dl.fbaipublicfiles.com/videoseal/y_256b_img.jit (retrieved
+  2026-10-15), **MIT** (facebookresearch/videoseal LICENSE, which covers the
+  released models).
+- `audioseal-detector_base.pth` — AudioSeal 16-bit detector,
+  https://huggingface.co/facebook/audioseal (revision
+  `3c19eba53390776cf2cc9ed5f6c9ac67ce72ecba`, `detector_base.pth`), **MIT**
+  (model card). Loaded with the `audioseal` 0.2.0 package's model code (MIT).
+- Neither is committed; `scripts/fetch_watermark_models.py` fetches them and
+  `assets.json` pins their sha256. The optional `watermark_meta` extra
+  (torch) is needed to run them.

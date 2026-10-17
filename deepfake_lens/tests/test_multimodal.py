@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import Any
 
 from deepfake_lens.multimodal import (
     MultimodalAnalysis,
@@ -309,3 +310,76 @@ class AvSyncAudioTrackTest(unittest.TestCase):
                 result = analyze_av_sync(video)
         self.assertEqual(self._coverage(result)["av_sync_audio"], ("skipped", "의존성 부재: ffmpeg"))
         self.assertIn("의존성 부재: ffmpeg", result.reference_note)
+
+
+@unittest.skipUnless(_have("cv2", "librosa", "numpy"), "opencv + librosa required")
+class AvSyncBoundedMultiTrackTest(unittest.TestCase):
+    """R26-9 (round 26): --av-sync decoded the whole audio track at 22 050 Hz (a two-hour video: ~317 MB temporary WAV,
+    ~635 MB of samples) and read the first track only (a silent first track ended 「엔벨로프가 너무 짧거나 분산이 없어」
+    while the speech was on track 2, and nothing said so). The decode is now 8 kHz mono of the first AV_SYNC_MAX_SECONDS
+    only (the span said in the limitations when the video is longer), and every track up to AV_SYNC_MAX_AUDIO_TRACKS is
+    measured — the best-correlated one reported, each named in the limitations."""
+
+    def _make(self, folder: Any, name: str, tracks: int, seconds: int = 4) -> Any:
+        import shutil
+        import subprocess
+
+        if not shutil.which("ffmpeg"):
+            self.skipTest("ffmpeg 없음")
+        target = folder / name
+        inputs = ["-f", "lavfi", "-i", f"testsrc=size=96x96:rate=15:duration={seconds}"]
+        maps = ["-map", "0:v"]
+        sources = [f"anullsrc=r=16000:cl=mono:d={seconds}", f"sine=frequency=440:duration={seconds}", f"sine=frequency=880:duration={seconds}"]
+        for index in range(tracks):
+            inputs += ["-f", "lavfi", "-i", sources[index % len(sources)]]
+            maps += ["-map", f"{index + 1}:a"]
+        proc = subprocess.run(["ffmpeg", "-loglevel", "error", *inputs, *maps, "-shortest", "-c:v", "mpeg4", "-c:a", "aac", "-y", str(target)],
+                              capture_output=True, timeout=120)
+        self.assertEqual(proc.returncode, 0, proc.stderr[-500:])
+        return target
+
+    def test_every_track_is_measured_and_the_decode_is_bounded(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+
+        from deepfake_lens import audio, multimodal
+
+        calls: list[list[str]] = []
+        real = audio.run_child
+
+        def spy(args: Any, **kwargs: Any) -> Any:
+            calls.append([str(arg) for arg in args])
+            return real(args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            two = self._make(Path(tmp), "two tracks.mkv", tracks=2)
+            one = self._make(Path(tmp), "one track.mkv", tracks=1)
+            with mock.patch.object(audio, "run_child", side_effect=spy):
+                result = analyze_av_sync(two)
+            single = analyze_av_sync(one)
+            with mock.patch.object(multimodal, "AV_SYNC_MAX_SECONDS", 2):
+                capped = analyze_av_sync(one)
+            with mock.patch.object(multimodal, "AV_SYNC_MAX_AUDIO_TRACKS", 1):
+                limited = analyze_av_sync(two)
+            self.assertEqual(sorted(p.name for p in Path(tmp).iterdir()), ["one track.mkv", "two tracks.mkv"])  # no WAV left
+        decodes = [call for call in calls if "-ar" in call]
+        self.assertTrue(decodes)
+        for call in decodes:
+            self.assertEqual(call[call.index("-ar") + 1], "8000")
+            self.assertEqual(call[call.index("-ac") + 1], "1")
+            self.assertIn("-t", call)  # never the whole track
+        self.assertEqual(sorted({call[call.index("-map") + 1] for call in decodes}), ["0:a:0", "0:a:1", "0:a:2"])  # 2 tracks + the probe for a third
+        coverage = {entry["check"]: entry for entry in result.coverage}
+        self.assertEqual(coverage["av_sync_audio"]["status"], "ran")
+        self.assertIn("음성 트랙 2개를 각각 측정해", coverage["av_sync_audio"]["reason"])
+        text = " ".join(result.limitations)
+        self.assertIn("음성 트랙 1:", text)
+        self.assertIn("음성 트랙 2:", text)
+        self.assertEqual({entry["check"]: (entry["status"], entry["reason"]) for entry in single.coverage}["av_sync_audio"], ("ran", ""))
+        self.assertFalse(any("음성 트랙 1:" in line for line in single.limitations))
+        self.assertIn(multimodal.AV_SYNC_SPAN_NOTE.format(seconds=2, rate=8000), capped.limitations)
+        self.assertLessEqual(capped.audio_seconds, 2.1)
+        self.assertNotIn(multimodal.AV_SYNC_SPAN_NOTE.format(seconds=multimodal.AV_SYNC_MAX_SECONDS, rate=8000), single.limitations)
+        self.assertIn(multimodal.AV_SYNC_MORE_TRACKS.format(n=1), limited.limitations)
+

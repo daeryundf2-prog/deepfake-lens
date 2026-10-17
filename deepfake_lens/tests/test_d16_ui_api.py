@@ -33,7 +33,7 @@ class WebScanJobFailureTest(unittest.TestCase):
             raise RuntimeError("disk vanished")
 
         with tempfile.TemporaryDirectory() as tmp, patch.object(webapp_api, "_READ_ROOTS", OrderedDict()), \
-                patch.object(webapp_api, "_scan_payload", boom), \
+                patch.object(webapp_api, "_scan_run", boom), \
                 self.assertLogs("deepfake_lens.webapp_api", level=logging.ERROR) as logs:
             webapp_api.configure_read_roots(Path(tmp))
             job = webapp_api._scan_job_start(f"folder={tmp}", default_folder=Path(tmp))
@@ -72,7 +72,7 @@ class SummaryAndGuiTest(unittest.TestCase):
         self.assertNotIn('value="score"', html)
         self.assertIn('<option value="verdict">결론순</option>', html)
         self.assertNotIn("휴리스틱 전용", js)
-        self.assertIn("신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영", js)
+        self.assertIn("신경망 미탑재(측정 게이트 미충족) — 재현 가능한 기록 근거만 반영", js)
         self.assertIn("let sortMode = 'verdict';", js)
 
     def test_api_serve_help_has_no_folder_option(self) -> None:

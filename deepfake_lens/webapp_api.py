@@ -12,7 +12,6 @@ import json
 import logging
 import os
 import re
-import secrets
 import shutil
 import stat
 import tempfile
@@ -29,8 +28,18 @@ from urllib.parse import parse_qs
 from .audio_worker import in_worker_scope
 from .checks import failure_reason
 from .native_path import expand_user, scratch_dir
-from .error_text import exception_text
 from .result_text import display_name
+from .scan_jobs import (
+    CONTEXT_KEY,
+    LOCAL_OWNER,
+    SOURCE_ASYNC,
+    SOURCE_STREAM,
+    SOURCE_SYNC,
+    STORE,
+    JobIntegrityError,
+    client_payload,
+    new_job_id,
+)
 from .vendor_weights import default_models_dir
 
 logger = logging.getLogger(__name__)
@@ -44,7 +53,6 @@ from .analysis_api import (
     WEB_MAX_FILE_BYTES_CEILING,
     WEB_MAX_SCAN_FILES,
     AnalysisOptions,
-    InvalidOption,
     analyze_path,
     analyze_rows,
     load_thresholds,
@@ -227,16 +235,14 @@ def _set_row_name(record: dict[str, object], name: str) -> None:
     record["display_name"] = display_name(name)
 
 
-def _scan_payload(
+def _scan_run(
     query: str, *, default_folder: Path | None, should_stop: Callable[[], bool] | None = None,
     progress: Callable[[Any, int, int], None] | None = None, on_plan: Callable[[int], None] | None = None,
-) -> dict[str, object]:
-    """Handle scan request.
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Run a folder scan: ``(client payload, server-only report context)``.
 
     Raises ReadRootDenied (-> HTTP 403) when the folder is outside the
     operator-registered roots; the caller's folder is never registered (G31).
-    ``progress``/``on_plan`` are the scanner's per-row callbacks
-    (``analysis_api.scan_folder_run``) — the async job reports n/N from them.
     """
     folder = _requested_folder(query, default_folder)
     _require_read_root(folder, default_folder)
@@ -244,15 +250,46 @@ def _scan_payload(
     # option (non-integer limit, model_path outside the models dir) raises
     # InvalidOption (a ValueError) -> HTTP 400 before any file is read.
     options = _web_options(parse_qs(query))
+    # GUI redesign (U-7): ``progress``/``on_plan`` are the scanner's per-row callbacks — the async job reports n/N.
+    run = scan_folder_run(folder, options, should_stop=should_stop, progress=progress, on_plan=on_plan)
+    payload = scan_payload(run.summary, run.items, run.thresholds, options)
+    # P1: the folder the row paths are relative to.
+    root_text = scan_root_text(folder)
+    payload["scan_root"] = root_text
+    payload["scan_root_b64"] = fs_b64encode(root_text)  # R12-4
+    return payload, report_context(Path(root_text), options, run.thresholds)
+
+
+def report_context(folder: Path, options: AnalysisOptions, thresholds: Any) -> dict[str, object]:
+    """P0R-6: what a report of this scan needs from the server, captured when the scan ran (server-only).
+
+    The absolute scan folder (rows are relative to it, change detection re-hashes under it), the analysis options
+    as names (signed as ``analysis_options``), the threshold provenance and the model coverage of the run, and the
+    pins of the models folder. A report never re-reads these from the request or recomputes them later.
+    """
+    from .reports import _thresholds_payload
+    from .vendor_weights import weights_coverage
+
+    return {
+        "scan_root": str(folder),
+        "analysis_options": report_analysis_options(options),
+        "thresholds": _thresholds_payload(thresholds),
+        "coverage": dict(weights_coverage(options.resolved_models_dir())),
+    }
+
+
+def _scan_payload(
+    query: str, *, default_folder: Path | None, should_stop: Callable[[], bool] | None = None, owner: str = LOCAL_OWNER,
+) -> dict[str, object]:
+    """Handle a synchronous folder scan: the payload, held as this server's finished job ``scan_job`` (P0R-6).
+
+    ReadRootDenied (403) and an invalid option (InvalidOption, a ValueError -> 400) are raised before any file is
+    read, as before; a scan error is the Korean 400 body.
+    """
+    _require_read_root(_requested_folder(query, default_folder), default_folder)
+    _web_options(parse_qs(query))
     try:
-        run = scan_folder_run(folder, options, should_stop=should_stop, progress=progress, on_plan=on_plan)
-        payload = scan_payload(run.summary, run.items, run.thresholds, options)
-        # P1: the folder the row paths are relative to — the GUI sends it
-        # back with POST /api/report, which resolves rows against it only.
-        root_text = scan_root_text(folder)
-        payload["scan_root"] = root_text
-        payload["scan_root_b64"] = fs_b64encode(root_text)  # R12-4
-        return payload
+        payload, context = _scan_run(query, default_folder=default_folder, should_stop=should_stop)
     except UnicodeError:
         # R11-1: a codec error (a non-UTF-8 name reaching a strict encoder)
         # is a server fault — the Korean 500 — never its English text as a 400.
@@ -260,159 +297,122 @@ def _scan_payload(
     except (OSError, ValueError) as exc:
         # X4: missing folder, a file, unreadable — the Korean reason, 400.
         return ApiError(str(exc), 400)
+    summary = payload.get("summary")
+    status = "cancelled" if isinstance(summary, dict) and summary.get("cancelled") is True else "done"
+    job_id = new_job_id()
+    payload["scan_job"] = job_id
+    note = STORE.record_finished(job_id, owner, SOURCE_SYNC, status, {**payload, CONTEXT_KEY: context}, evidence=_effective_roots(default_folder))
+    if note:
+        payload["scan_job_note"] = note
+    return payload
 
 
-# In-memory scan-job registry for /api/scan?async=1. ThreadingHTTPServer
-# already runs each request on its own thread, so the job model exists for
-# progress polling and to keep long scans from holding a client connection —
-# not for concurrency. Entries expire; nothing is persisted.
-_SCAN_JOBS: dict[str, dict[str, Any]] = {}
-_SCAN_JOBS_LOCK = threading.Lock()
-_SCAN_JOB_TTL_SECONDS = 15 * 60
-_SCAN_JOB_MAX = 32
-
-
+# P0R-6 (user decision 2026-10-17): every folder scan is a job of scan_jobs.STORE — bound to the server's token,
+# persisted outside the evidence, a running job never evicted. /api/report signs a job's rows and nothing else.
+JOB_INTEGRITY_STATUS = 409
 # GUI redesign: the most recent finished rows a running job reports.
 _SCAN_JOB_RECENT = 5
 
 
-def _scan_job_evict(now: float) -> None:
-    """Drop finished jobs past the TTL (called with the lock held).
+def record_stream_scan_job(
+    job_id: str, status: str, result: dict[str, Any], *, owner: str = LOCAL_OWNER,
+    context: dict[str, object] | None = None, evidence: list[Path] | tuple[Path, ...] = (),
+) -> str | None:
+    """R26-5/P0R-6: a finished ``/api/scan/stream`` scan (``done`` or ``cancelled``) as this server's job ``job_id``.
 
-    A running job is never dropped: it was dropped 15 minutes after it
-    started (``finished`` defaulted to ``created``), so a long scan's status
-    became 404 and its result unreachable while the scan was still running.
+    Returns :data:`scan_jobs.JOB_NOT_PERSISTED_NOTE` text when the job is held in memory only.
     """
-    for key in [key for key, entry in _SCAN_JOBS.items() if "finished" in entry and now - entry["finished"] > _SCAN_JOB_TTL_SECONDS]:
-        _SCAN_JOBS.pop(key, None)
+    if status not in ("done", "cancelled") or not isinstance(result, dict):
+        return None
+    record = dict(result)
+    record["scan_job"] = job_id
+    if context is not None:
+        record[CONTEXT_KEY] = context
+    return STORE.record_finished(job_id, owner, SOURCE_STREAM, status, record, evidence=evidence)
 
 
-def _scan_job_start(query: str, *, default_folder: Path | None) -> dict[str, object]:
+def _scan_job_start(query: str, *, default_folder: Path | None, owner: str = LOCAL_OWNER) -> dict[str, object]:
     """Start a background scan job; poll /api/scan-status?job=<id>."""
     # Refuse out-of-root folders (403) and invalid options (400) up front,
     # not inside the job.
     _require_read_root(_requested_folder(query, default_folder), default_folder)
     _web_options(parse_qs(query))
-    with _SCAN_JOBS_LOCK:
-        _scan_job_evict(time.time())
-        if len(_SCAN_JOBS) >= _SCAN_JOB_MAX:
-            raise ValueError("실행 중인 검사 작업이 너무 많습니다 — 진행 중인 작업이 끝난 뒤 다시 시도하십시오")
-        job_id = secrets.token_hex(8)
-        cancel = threading.Event()
-        _SCAN_JOBS[job_id] = {
-            "status": "running", "created": time.time(), "cancel": cancel,
-            "done": 0, "total": None, "current": None, "recent": [],
-        }
+    job_id, cancel = STORE.start(owner, SOURCE_ASYNC)  # ValueError past MAX_RUNNING (400)
+    evidence = _effective_roots(default_folder)
+    STORE.set_progress(job_id, {"done": 0, "total": None, "current": None, "recent": []})
 
     def on_plan(planned: int) -> None:
-        with _SCAN_JOBS_LOCK:
-            entry = _SCAN_JOBS.get(job_id)
-            if entry is not None:
-                entry["total"] = planned
+        STORE.set_progress(job_id, {"total": planned})
 
     def on_row(item: Any, done: int, planned: int) -> None:
-        # The row as the scanner finished it (pre-fusion): its escaped name
-        # and verdict code, for the GUI's "방금 끝난 파일" list only — the
-        # final rows are the job's result.
+        # GUI redesign (U-7): the row as the scanner finished it (pre-fusion) — its escaped name and verdict
+        # code, for the GUI's "방금 끝난 파일" list only; the final rows are the job's result.
         name = display_name(str(getattr(item, "name", "") or getattr(item, "path", "") or ""))
         result = getattr(item, "result", None)
         verdict = getattr(getattr(result, "verdict_code", None), "value", None) if result is not None else None
-        status = str(getattr(item, "status", "") or "")
-        with _SCAN_JOBS_LOCK:
-            entry = _SCAN_JOBS.get(job_id)
-            if entry is not None:
-                entry["done"] = done
-                entry["total"] = max(planned, entry.get("total") or 0)
-                entry["current"] = name
-                entry["recent"] = ([{"name": name, "status": status, "verdict_code": verdict}] + entry["recent"])[:_SCAN_JOB_RECENT]
+        STORE.add_progress_row(job_id, done, planned, {"name": name, "status": str(getattr(item, "status", "") or ""), "verdict_code": verdict}, keep=_SCAN_JOB_RECENT)
 
     def work() -> None:
         try:
-            result = _scan_payload(query, default_folder=default_folder, should_stop=cancel.is_set, progress=on_row, on_plan=on_plan)
+            payload, context = _scan_run(query, default_folder=default_folder, should_stop=cancel.is_set, progress=on_row, on_plan=on_plan)
+            payload["scan_job"] = job_id
             # R18-3 (round 18): a scan the cancel cut short is "cancelled" (its
             # partial result kept, summary.cancelled) — it was "done", like a
             # complete scan.
-            summary = result.get("summary") if isinstance(result, dict) else None
+            summary = payload.get("summary")
             status = "cancelled" if isinstance(summary, dict) and summary.get("cancelled") is True else "done"
+            result: dict[str, Any] = {**payload, CONTEXT_KEY: context}
         except Exception as exc:  # noqa: BLE001 - a worker crash is recorded, not raised into the thread
             # D16: log the traceback and record the failure as coverage +
             # limitation — never just a bare message (fail-closed: the scan
             # did not complete, so nothing in it may read as a conclusion).
-            logger.exception("scan job %s failed", job_id)
-            reason = failure_reason(exc)
+            known = isinstance(exc, (OSError, ValueError)) and not isinstance(exc, UnicodeError)
+            if not known:
+                logger.exception("scan job %s failed", job_id)
+            # X4: a missing / unreadable folder keeps its Korean reason as the error (as the synchronous 400 does)
+            reason = str(exc) if known else failure_reason(exc)
             result = {
-                "error": "폴더 검사 작업이 실패했습니다",
+                "error": reason if known else "폴더 검사 작업이 실패했습니다",
                 "detail": reason,
                 "coverage": [{"check": "scan_job", "status": "failed", "reason": reason}],
                 "limitations": [f"검사 작업 실패 — {reason}. 이 작업의 결과는 결론으로 사용할 수 없습니다."],
             }
             status = "error"
-        with _SCAN_JOBS_LOCK:
-            entry = _SCAN_JOBS.get(job_id)
-            if entry is not None:
-                entry.update(status=status, result=result, finished=time.time())
+        note = STORE.finish(job_id, status, result, evidence=evidence)
+        if note:
+            STORE.annotate(job_id, "scan_job_note", note)
 
     threading.Thread(target=work, daemon=True, name=f"scan-job-{job_id}").start()
     return {"job_id": job_id, "status": "running"}
 
 
-def _scan_status_payload(query: str) -> dict[str, object]:
+def _scan_status_payload(query: str, *, owner: str = LOCAL_OWNER, default_folder: Path | None = None) -> dict[str, object]:
     params = parse_qs(query)
     job_id = params.get("job", [""])[0].strip()
     if not job_id:
         return ApiError(JOB_PARAM_REQUIRED, 400)  # X4
-    with _SCAN_JOBS_LOCK:
-        _scan_job_evict(time.time())
-        entry = _SCAN_JOBS.get(job_id)
-        if entry is None:
-            return ApiError(JOB_UNKNOWN, 404)  # X4
-        payload: dict[str, object] = {"job_id": job_id, "status": entry["status"]}
-        # GUI redesign (U-7): progress of the job — rows finished (``done``),
-        # rows the scan will report (``total``; null until the folder is
-        # enumerated), the escaped name of the row finished last
-        # (``current``), the last few finished rows (``recent``) and the
-        # seconds since the job started (``elapsed_seconds``).
-        payload["done"] = entry.get("done", 0)
-        payload["total"] = entry.get("total")
-        payload["current"] = entry.get("current")
-        payload["recent"] = list(entry.get("recent") or [])
-        payload["elapsed_seconds"] = round(entry.get("finished", time.time()) - entry["created"], 1)
-        if entry["status"] != "running":
-            payload["result"] = entry.get("result")
-        return payload
-
-
-def _with_posted_cancel(summary: Any, posted: object, job_id: object = None, scan_root: Path | None = None) -> tuple[Any, str | None]:
-    """R18-3: ``summary`` marked cancelled when the posted summary says so; R19-3: with a count the server checked.
-
-    The caveat ("부분 결과") is taken from the client — it can only add a
-    warning. R19-3 (round 19): the posted ``files_cancelled`` went into the
-    signed body unchecked (10**18 was signed). The count is now the
-    server's: from its own scan job named by ``scan_job`` (finished
-    "cancelled", same scan folder) — source ``"server"``; otherwise the count
-    is 0 and the summary is marked unverified (the renderings say the
-    number could not be checked) — source ``"unverified"``. Returns
-    ``(summary, source)``; source None when the post did not say cancelled.
-
-    R23-3 (round 23): the server's own job decides first. A ``scan_job`` that the server finished
-    "cancelled" (same scan folder) marks the report cancelled with that job's count whatever the post's
-    ``summary`` says — posted without ``summary.cancelled`` (or with ``false``), the job's rows were signed
-    as the complete listing (R22-1 ``scan_job``) and every rendering said "없음 — 분석 대상의 모든 파일에
-    분석 결과가 있습니다" although the server knew ``files_cancelled`` files were never analyzed. The post
-    can still only add the caveat (``summary.cancelled`` without such a job: "unverified").
-    """
-    from dataclasses import replace
-
-    job = _finished_scan_job(job_id, scan_root)
-    job_summary = job.get("summary") if job is not None and job.get("status") == "cancelled" else None
-    if isinstance(job_summary, dict):
-        count = job_summary.get("files_cancelled")
-        if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
-            return replace(summary, cancelled=True, files_cancelled=count), "server"
-        return replace(summary, cancelled=True, files_cancelled=0, files_cancelled_unverified=True), "unverified"
-    if not isinstance(posted, dict) or posted.get("cancelled") is not True:
-        return summary, None
-    return replace(summary, cancelled=True, files_cancelled=0, files_cancelled_unverified=True), "unverified"
+    try:
+        entry = STORE.get(job_id, owner, evidence=_effective_roots(default_folder))
+    except JobIntegrityError as exc:
+        return ApiError(str(exc), JOB_INTEGRITY_STATUS)
+    if entry is None:
+        return ApiError(JOB_UNKNOWN, 404)  # X4 (another owner's job is "unknown" too)
+    payload: dict[str, object] = {"job_id": job_id, "status": entry["status"]}
+    # GUI redesign (U-7): progress of the job — rows finished (``done``), rows the scan will report (``total``;
+    # null until the folder is enumerated), the escaped name of the row finished last (``current``), the last
+    # few finished rows (``recent``) and the seconds since the job started (``elapsed_seconds``).
+    progress = entry.get("progress") if isinstance(entry.get("progress"), dict) else {}
+    payload["done"] = progress.get("done", 0)
+    payload["total"] = progress.get("total")
+    payload["current"] = progress.get("current")
+    payload["recent"] = list(progress.get("recent") or [])
+    created, finished = entry.get("created"), entry.get("finished")
+    if isinstance(created, (int, float)):
+        payload["elapsed_seconds"] = round((finished if isinstance(finished, (int, float)) else time.time()) - created, 1)
+    if entry["status"] != "running":
+        result = entry.get("result")
+        payload["result"] = client_payload(result) if isinstance(result, dict) else result
+    return payload
 
 
 def report_analysis_options(options: AnalysisOptions) -> dict[str, object]:
@@ -435,21 +435,15 @@ def report_analysis_options(options: AnalysisOptions) -> dict[str, object]:
     }
 
 
-def _scan_cancel_payload(query: str) -> dict[str, object]:
+def _scan_cancel_payload(query: str, *, owner: str = LOCAL_OWNER) -> dict[str, object]:
     params = parse_qs(query)
     job_id = params.get("job", [""])[0].strip()
     if not job_id:
         return ApiError(JOB_PARAM_REQUIRED, 400)  # X4
-    with _SCAN_JOBS_LOCK:
-        entry = _SCAN_JOBS.get(job_id)
-        if entry is None:
-            return ApiError(JOB_UNKNOWN, 404)  # X4
-        if entry["status"] != "running":
-            return {"job_id": job_id, "status": entry["status"], "cancelled": False}
-        cancel = entry.get("cancel")
-        if isinstance(cancel, threading.Event):
-            cancel.set()
-        return {"job_id": job_id, "status": "cancelling", "cancelled": True}
+    outcome = STORE.cancel(job_id, owner)
+    if outcome is None:
+        return ApiError(JOB_UNKNOWN, 404)  # X4
+    return {"job_id": job_id, **outcome}
 
 
 def _analyze_file_payload(query: str) -> dict[str, object]:
@@ -1403,21 +1397,12 @@ REPORT_RENDER_FAILED_STATUS = 500
 EVIDENCE_PDF_FAILED_PREFIX = "증거설명서 PDF 생성 실패: "
 # N9: the report format comes from ?format= or, failing that, the JSON body's
 # "format" — both servers decide the content type from the same value.
-REPORT_FORMATS = ("html", "pdf", "evidence", "evidence-statement", "json", "evidence-json", "evidence-preview")
+# GUI redesign: ``evidence-preview`` — the evidence statement's PDF texts as JSON for the GUI preview, built from
+# the same job and the same statement as ``evidence`` (unsigned; no change detection — the export does that).
+REPORT_FORMATS = ("html", "pdf", "evidence", "evidence-statement", "json", "evidence-preview")
 PDF_REPORT_FORMATS = ("pdf", "evidence", "evidence-statement")
-# GUI-REV3 J-10: the list is REPORT_FORMATS itself (it missed evidence-json / evidence-preview).
 REPORT_FORMAT_UNSUPPORTED = "지원되지 않는 보고서 형식입니다: 「{value}」 (" + ", ".join(f"`{name}`" for name in REPORT_FORMATS) + " 중 하나)"
 REPORT_FORMAT_NOT_STRING = "`format` 값은 문자열이어야 합니다"
-
-
-# GUI-REV G-1/G-9: malformed exhibit choice / submitting side (HTTP 400).
-REPORT_EXHIBIT_PATHS_INVALID = "exhibit_paths는 행 경로(문자열)의 배열이어야 합니다"
-REPORT_EXHIBIT_PATHS_EMPTY = "증거설명서에 넣을 서증(exhibit_paths)이 비어 있습니다 — 한 개 이상 고르십시오"
-REPORT_EXHIBIT_PATHS_UNKNOWN = "exhibit_paths 중 {count}개는 이 보고서의 서명된 행이 아닙니다(unknown_exhibit_paths 참조)"
-REPORT_EXHIBIT_PATHS_NOT_REDERIVED = "서증으로 고른 파일 {count}개를 서버가 다시 분석할 수 없습니다(검사 뒤 지워졌거나 옮겨졌을 수 있음) — 다시 검사하십시오"
-REPORT_EXHIBIT_PATHS_DUPLICATE = "exhibit_paths에 같은 행이 두 번 있습니다"
-EVIDENCE_REPORT_FORMATS = ("evidence", "evidence-statement", "evidence-json")
-REPORT_SUBMITTER_SIDE_INVALID = "submitter_side는 plaintiff(원고·고소인 측) 또는 defendant(피고·피의자 측)여야 합니다"
 
 
 def report_error_status(body: dict[str, object]) -> int:
@@ -1439,37 +1424,38 @@ def report_error_status(body: dict[str, object]) -> int:
     return REPORT_BAD_REQUEST_STATUS
 
 
-# G7 (round 5): /api/report request errors in Korean (were "items array is
-# required", "thresholds must be an object", "malformed item: …").
+# G7 (round 5): /api/report request errors in Korean.
 REPORT_BODY_NOT_OBJECT = "보고서 요청 본문은 JSON 객체여야 합니다"
-REPORT_ITEMS_REQUIRED = "보고서에 넣을 검사 결과 항목(items 배열)이 필요합니다"
 REPORT_FIELD_NOT_OBJECT = "{field} 값은 JSON 객체여야 합니다"
-REPORT_ITEM_MALFORMED = "검사 결과 항목 {index}번을 해석할 수 없습니다: {reason}"
+REPORT_ITEM_MALFORMED = "업로드 항목 {index}번을 해석할 수 없습니다: {reason}"
 REPORT_JSON_INVALID = JSON_BODY_INVALID
-# X2 (round 7): the report never signs what the client says about a file.
-# Every posted row is re-analyzed on the server (analysis_api, the read
-# roots, the server's models dir and thresholds); its verdict, evidence,
-# coverage and SHA-256 are the server's. A row that cannot be re-analyzed
-# is left out of the signed body and rendered under this marker.
+# P0R-6 (user decision 2026-10-17): the request names a scan job the server ran and holds — never rows. The signed
+# row set, the options, the threshold/model provenance and the "기록되지 않은 파일"/cancel accounting are the job's.
+REPORT_FIELDS = (
+    "scan_job", "exhibit_paths", "uploads", "format", "side",
+    "case_no", "case_name", "plaintiff", "defendant", "court", "law_firm", "contact", "center", "exhibit_no",
+)
+REPORT_CASE_FIELDS = ("case_no", "case_name", "plaintiff", "defendant", "court", "law_firm", "contact", "center", "exhibit_no")
+REPORT_UNKNOWN_FIELD = (
+    "보고서 요청에 알 수 없는 필드가 있습니다: {fields} — 보고서는 서버가 보관한 검사 작업(scan_job)으로만 만듭니다"
+    "(받는 값: 검사 작업 id, 서증 선택, 업로드 결과, 형식, 제출 측과 사건 필드). 검사 행·옵션·요약은 보내지 마십시오"
+)
+REPORT_SCAN_JOB_REQUIRED = "보고서에 넣을 검사 작업(scan_job)이 필요합니다 — 폴더를 먼저 검사하고 그 응답의 scan_job 값을 보내십시오(업로드 결과만 넣으려면 uploads)"
+REPORT_SCAN_JOB_NOT_STRING = "scan_job 값은 문자열이어야 합니다"
+REPORT_SCAN_JOB_UNKNOWN = "알 수 없거나 만료된 검사 작업입니다 — 폴더를 다시 검사하십시오"
+REPORT_SCAN_JOB_NOT_FINISHED = "검사 작업이 아직 끝나지 않았습니다 — 끝난 뒤 다시 요청하십시오"
+REPORT_SCAN_JOB_FAILED = "검사 작업이 실패해 보고서를 만들 수 없습니다 — 폴더를 다시 검사하십시오"
+REPORT_CASE_FIELD_NOT_STRING = "사건 필드 {field} 값은 문자열이어야 합니다"
+REPORT_EXHIBIT_PATHS_INVALID = "exhibit_paths는 검사 작업의 행 경로(문자열)의 배열이어야 합니다"
+REPORT_EXHIBIT_PATHS_EMPTY = "exhibit_paths가 비어 있습니다 — 서증으로 넣을 행을 한 개 이상 고르거나 필드를 빼십시오(빼면 모든 행)"
+REPORT_EXHIBIT_PATHS_DUPLICATE = "exhibit_paths에 같은 행이 두 번 있습니다: 「{path}」"
+REPORT_EXHIBIT_PATHS_UNKNOWN = "exhibit_paths 중 {count}개는 이 검사 작업의 행이 아닙니다(첫 항목: 「{path}」)"
+REPORT_EXHIBIT_PATHS_WITHOUT_JOB = "exhibit_paths는 검사 작업(scan_job)의 행만 고를 수 있습니다 — scan_job이 없습니다"
+REPORT_SIDE_UNSUPPORTED = "제출 측(side) 「{value}」은(는) 이 서버가 지원하지 않습니다(지원: plaintiff)"
+REPORT_UPLOADS_INVALID = "uploads는 업로드 검사 결과 행(객체)의 배열이어야 합니다"
+# X2 / P6 (kept from the posted-row design): an upload's file is a temp file, never a file of the read roots — its
+# row is listed unsigned under this marker with the reason below (R22-8 name rules).
 UNSIGNED_CLIENT_ROW_MARKER = "서명 제외(클라이언트 제공 결과)"
-REPORT_ROW_NOT_FOUND = "읽기 루트 안에서 파일을 찾을 수 없어 서버가 재분석하지 못했습니다"
-REPORT_ROW_LINK_ON_PATH = "경로 중간의 폴더가 심볼릭 링크라 따라가지 않았습니다 — 서버가 재분석하지 못했습니다"
-REPORT_ROW_NOT_DERIVED = "서버 재분석 결과에 이 항목이 없습니다(압축 파일 구성이 다름)"
-# R20-1 (round 20): the posted row's entry is now a folder the scan would not have listed this way.
-REPORT_ROW_KIND_CHANGED = "검사 때와 항목 종류가 다릅니다(지금은 읽을 수 있는 폴더) — 서버가 재분석하지 못했습니다"
-REPORT_ROW_FAILED = "서버 재분석 실패: {reason}"
-# P1 (round 8): rows are relative to the folder that was scanned, not to the
-# read root — a report of <root>/caseA signed <root>/target.png (a same-named
-# file of the root). The request names the scan folder (the scan response's
-# scan_root) and every row is resolved against it only.
-REPORT_SCAN_ROOT_REQUIRED = "스캔 폴더(scan_root)가 필요합니다 — 폴더 검사 응답의 scan_root 값을 그대로 보내십시오(행 경로는 그 폴더 기준입니다)"
-REPORT_SCAN_ROOT_NOT_STRING = "scan_root 값은 문자열이어야 합니다"
-REPORT_SCAN_ROOT_NOT_ABSOLUTE = "scan_root는 절대 경로여야 합니다: 「{value}」"
-REPORT_SCAN_ROOT_MISSING = "스캔 폴더를 찾을 수 없습니다: 「{value}」"
-REPORT_ROW_OUTSIDE_SCAN_ROOT = "스캔 폴더 밖의 경로라 서버가 재분석하지 않았습니다"
-# P7 (round 8): a member row's container/member fields must spell its path.
-REPORT_ROW_IDENTITY_MISMATCH = "path가 container::member와 일치하지 않습니다"
-# P6 (round 8): an upload row is never re-analyzed from the read root.
 REPORT_ROW_UPLOAD = "업로드 파일 — 서버 읽기 폴더의 파일이 아니므로 재분석·서명하지 않습니다"
 # R22-8 (round 22): an upload row's path went into the signed body's excluded_items unchecked — any sentence,
 # "../", NUL. The name is still the client's (an upload has no file of the read roots), but it is now limited
@@ -1516,99 +1502,19 @@ def _upload_name_valid(path: str) -> bool:
         0 < len(path) <= UPLOAD_ROW_NAME_MAX and not os.path.isabs(path) and not path.startswith(("/", "\\"))
         and not any(part in ("", ".", "..") for part in parts) and "\x00" not in path
     )
-# R19-13 (round 19): the server's re-analysis of a posted row differs from the
-# row (sha256, status or verdict) or the row's file can no longer be
-# re-analyzed (deleted, an archive member gone, the analysis failed) — the
-# file changed after the scan. No report is signed: 409 with ``changed_rows``.
+
+
+# R19-13 (round 19) / P0R-6: a file of the job changed after the scan (its bytes, or it is gone, or it is now a link
+# or a folder) — the report is refused in every format: 409 with ``changed_rows`` (path and reason only — the
+# server's digests, statuses and verdicts are not echoed: review §2.4).
 REPORT_ROWS_CHANGED = "검사 뒤 바뀐 파일이 있습니다 — 다시 검사하십시오(보고서를 만들지 않았습니다)"
 REPORT_ROWS_CHANGED_STATUS = 409
-# R20-4 (round 20): a posted dedupe duplicate names, as ``duplicate_of``, a row it is not a copy of in this
-# report — itself, a row not posted, or another duplicate. Signed as a duplicate it carried no analysis at all
-# (a manipulated file posted as "a duplicate of itself" was signed with manipulation_evidence 0). HTTP 400.
-REPORT_DUPLICATE_OF_INVALID = (
-    "검사 결과 항목 「{path}」의 duplicate_of 「{target}」가 이 보고서에 게시된 원본 행이 아닙니다"
-    "(자기 자신·게시되지 않은 행·다른 중복 행은 원본이 될 수 없습니다) — 폴더 검사 결과를 그대로 보내십시오"
-)
-# R21-1 (round 21): a posted folder row of the walk's limit ("건너뜀: 탐색 상한 도달(…)"). The server does not
-# repeat the scan's walk (20 000 folders, 300 s, --max-files + 100 000 files — a limit of the whole walk, the
-# clock included), so it cannot produce that row itself: the row is excluded (never signed), with this reason.
-# The posted reason text was signed as the server's row ("… 이 폴더에는 조작 파일이 없음을 서버가 확인했습니다").
-REPORT_ROW_WALK_LIMIT = (
-    "폴더 탐색 상한 행 — 서버는 검사 때의 폴더 탐색(폴더 수·시간·파일 수 상한)을 다시 하지 않으므로 재분석·서명하지 않습니다"
-)
-# R21-5 (round 21): a posted row path that is not the scan's own form of it — relative to the scan folder, no
-# empty, "." or ".." component, escaped exactly as the scan escapes it. "./gen.png", "sub/../gen.png",
-# "../RM/gen.png" and "/tmp/RM/gen.png" named the same file and were signed as five rows. HTTP 400.
-REPORT_ROW_PATH_NOT_CANONICAL = (
-    "검사 결과 항목 「{path}」의 경로가 폴더 검사 결과의 경로 형식이 아닙니다(스캔 폴더 기준 상대 경로 — 절대 경로·빈 구성 요소·"
-    "`.`·`..` 불가) — 폴더 검사 결과를 그대로 보내십시오"
-)
-# R22-4 (round 22): a posted row path that names an existing entry under another spelling than the scan's own
-# listing — a different letter case or Unicode form on a case-insensitive / normalizing file system
-# ("GEN.png" for "gen.png") — or a path through a folder the walk never enters because it is the scan folder or
-# a folder between it and the entry again (a bind-mount loop: "sub/loop/gen.png"). The scan lists neither, and
-# each was signed as one more row of the same file (R21-5's string check passed them). HTTP 400.
-REPORT_ROW_NOT_LISTED_NAME = (
-    "검사 결과 항목 「{path}」의 경로가 폴더 목록의 이름과 다릅니다(대소문자·유니코드 형태가 다른 같은 파일) — "
-    "폴더 검사 결과를 그대로 보내십시오"
-)
-REPORT_ROW_UNDER_LOOP = (
-    "검사 결과 항목 「{path}」는 순환 폴더(검사 폴더나 그 상위 폴더와 같은 폴더) 아래의 경로라 폴더 검사가 만들지 않는 행입니다 — "
-    "폴더 검사 결과를 그대로 보내십시오"
-)
-# R21-5: the same row (path, or container and member) posted twice. HTTP 400.
-REPORT_ROW_POSTED_TWICE = "검사 결과 항목 「{path}」가 두 번 게시되었습니다 — 행마다 한 번만 보내십시오"
-# R22-1 (round 22): why the server could not list the scan folder for the "기록되지 않은 파일" section — the
-# section then says "확인 불가" (result_types.UNRECORDED_LISTING_UNKNOWN), never "없음".
+REPORT_ROW_CHANGED_CONTENT = "검사 뒤 내용이 바뀌었습니다"
+REPORT_ROW_CHANGED_GONE = "검사 뒤 파일이 없어졌거나 읽을 수 없습니다"
+REPORT_ROW_CHANGED_LINK = "검사 뒤 파일이나 그 경로의 폴더가 심볼릭 링크로 바뀌었습니다"
+REPORT_ROW_CHANGED_MEMBER = "검사 뒤 압축 파일에서 이 구성 파일이 바뀌었거나 없어졌습니다"
+# R22-1 / P0R-6: the "기록되지 않은 파일" section of a report without a scan job (uploads only).
 REPORT_LISTING_NO_SCAN_ROOT = "검사 폴더가 없는 보고서 — 업로드 결과만 있음"
-# R25-1 (round 25): with the server's scan job as the listing, a signed row (top-level or archive member) that
-# the job did not analyze. The walk's reason (REPORT_LISTING_ROWS_OUTSIDE, about the scan's options) is not the
-# cause there.
-REPORT_LISTING_ROWS_OUTSIDE_JOB = (
-    "서명된 행 {n}개가 서버의 검사 작업(scan_job) 기록에 분석된 행으로 없음 — 그 검사 작업의 결과를 그대로 보내야 확인됩니다"
-)
-REPORT_LISTING_WALK_LIMIT = "폴더 탐색 상한에 도달"
-REPORT_LISTING_WALK_FAILED = "폴더를 다시 읽지 못함"
-REPORT_LISTING_ROWS_OUTSIDE = (
-    "서명된 행 {n}개가 서버의 폴더 목록(하위 폴더 포함: {recursive}, 최대 파일 수: {max_files})에 없음 — "
-    "검사 때의 옵션(하위 폴더 포함 여부·최대 파일 수)을 함께 보내야 확인됩니다"
-)
-# R24-1 (round 24): a posted archive container row of status "cancelled" — a cancel left some or all of its
-# members unanalyzed. The server's re-analysis runs every member, so the row was compared with a complete
-# roll-up ("expanded") and the report refused as "검사 뒤 바뀐 파일" (409) although nothing had changed. Such a
-# row is now excluded (its partial roll-up is never signed) with this reason; the members the cancel left
-# unanalyzed are the scan job's files_cancelled, and each member row that was analyzed is re-derived and signed
-# as usual. The container's own sha256 is still compared (a really changed archive is 409).
-# R25-1 (round 25): only for a container the server's own cancelled scan job (``scan_job``) holds as
-# "cancelled" — confirmed by that job, by the server's re-analysis (an archive) and by the archive's digest.
-REPORT_ROW_CANCELLED = (
-    "사용자 취소 — 서버의 검사 작업(scan_job)이 취소되어 이 압축 파일의 구성 파일을 모두 분석하지 않았으므로 컨테이너 행(구성 파일 결론 집계)은 "
-    "서명하지 않습니다(분석된 구성 파일은 각 행으로 서명)"
-)
-REPORT_ROW_CANCELLED_NO_DIGEST = "서버가 압축 파일의 SHA-256을 다시 계산하지 못했습니다 — 검사 뒤 바뀌었거나 읽을 수 없습니다"
-# R25-1 (round 25): the server's re-analysis of a container its cancelled scan job holds as "cancelled" is not
-# an archive any more (the file at that path changed kind since the scan). A changed row (409).
-REPORT_ROW_CANCELLED_NOT_ARCHIVE = "서버 재분석에서 이 경로의 파일이 압축 파일이 아닙니다 — 검사 뒤 바뀌었습니다"
-# R24-1: when a posted "cancelled" row cannot be a cancelled container row of this report. HTTP 400.
-# R25-1 (round 25): decided from the server's own scan job only — never from the posted ``kind``, ``summary`` or
-# member rows. A posted ``summary.cancelled`` without that job made any row (a PNG posted as kind "archive")
-# an unsigned "사용자 취소" row and the report signed "기록되지 않은 파일: 없음".
-REPORT_ROW_CANCELLED_NOT_CONTAINER = (
-    "검사 결과 항목 「{path}」는 압축 파일의 구성 파일 행이라 상태가 cancelled일 수 없습니다(검사 취소로 미분석인 구성 파일은 행이 없습니다) — "
-    "폴더 검사 결과를 그대로 보내십시오"
-)
-REPORT_ROW_CANCELLED_NOT_CANCELLED_SCAN = (
-    "검사 결과 항목 「{path}」의 상태가 cancelled인데 scan_job이 이 서버가 이 폴더의 검사를 취소로 끝낸 검사 작업이 아닙니다"
-    "(없음·만료·다른 폴더·완료된 작업) — 검사 취소로 미분석인 압축 파일은 서버의 검사 작업 기록으로만 확인합니다. "
-    "폴더를 다시 검사하거나 그 검사 작업의 결과를 scan_job과 함께 그대로 보내십시오"
-)
-REPORT_ROW_CANCELLED_NOT_IN_JOB = (
-    "검사 결과 항목 「{path}」의 상태가 서버의 검사 작업(scan_job)의 같은 행과 다릅니다"
-    "(cancelled는 그 작업이 검사 취소로 구성 파일을 다 분석하지 않은 압축 파일로 기록한 행에만, 그 행에는 cancelled만 씁니다) — "
-    "폴더 검사 결과를 그대로 보내십시오"
-)
-# R19-13: the excluded reasons that mean "the file changed after the scan" (not "never re-analyzable").
-_CHANGED_AFTER_SCAN_REASONS = (REPORT_ROW_NOT_FOUND, REPORT_ROW_NOT_DERIVED, REPORT_ROW_KIND_CHANGED)
 
 
 def report_format(body: bytes, query_format: str | None) -> str | dict[str, object]:
@@ -1635,7 +1541,7 @@ def report_format(body: bytes, query_format: str | None) -> str | dict[str, obje
 
 
 def report_http_response(
-    body: bytes, query_format: str | None, *, default_folder: Path | None = None,
+    body: bytes, query_format: str | None, *, default_folder: Path | None = None, owner: str = LOCAL_OWNER,
 ) -> tuple[int, str, bytes, dict[str, str]]:
     """``(status, content type, body, extra headers)`` for POST /api/report.
 
@@ -1644,158 +1550,82 @@ def report_http_response(
     (N11) and the content type of a PDF can no longer differ between them.
     """
     fmt = report_format(body, query_format)
-    meta: dict[str, object] = {}
     if isinstance(fmt, dict):
         rendered: bytes | dict[str, object] = fmt
     else:
         try:
-            rendered = _report_payload(body, fmt, default_folder=default_folder, report_meta=meta)
+            rendered = _report_payload(body, fmt, default_folder=default_folder, owner=owner)
         except ReadRootDenied:
             rendered = read_root_denied_body()
             return 403, "application/json; charset=utf-8", _json_bytes(rendered), {}
     if isinstance(rendered, dict):
-        status = report_error_status(rendered)
-        return status, "application/json; charset=utf-8", _json_bytes(rendered), excluded_rows_headers(meta) if status == 200 else {}
+        return report_error_status(rendered), "application/json; charset=utf-8", _json_bytes(rendered), {}
     assert isinstance(fmt, str)
-    headers = excluded_rows_headers(meta)
     if fmt in ("evidence", "evidence-statement"):
-        return 200, "application/pdf", rendered, {"Content-Disposition": 'attachment; filename="deepfake-lens-evidence-statement.pdf"', **headers}
+        return 200, "application/pdf", rendered, {"Content-Disposition": 'attachment; filename="deepfake-lens-evidence-statement.pdf"'}
     if fmt == "pdf":
-        return 200, "application/pdf", rendered, {"Content-Disposition": 'attachment; filename="deepfake-lens-forensic-report.pdf"', **headers}
-    return 200, "text/html; charset=utf-8", rendered, {"Content-Disposition": 'attachment; filename="deepfake-lens-report.html"', **headers}
-
-
-# GUI-REV5 L-2: a successful /api/report says which posted rows it lists as 서명 제외
-# (not re-analyzed: uploads, rows behind a folder that became a link …) in headers, so
-# the GUI can name them after a PDF or HTML export too (the JSON body has excluded_items).
-# X-Deepfake-Lens-Excluded-Count: n; X-Deepfake-Lens-Excluded-Rows: URL-safe base64 of
-# the ASCII JSON list [{"path", "reason"}], at most EXCLUDED_ROWS_HEADER_MAX rows.
-EXCLUDED_COUNT_HEADER = "X-Deepfake-Lens-Excluded-Count"
-EXCLUDED_ROWS_HEADER = "X-Deepfake-Lens-Excluded-Rows"
-EXCLUDED_ROWS_HEADER_MAX = 50
-
-
-def excluded_rows_headers(meta: dict[str, object]) -> dict[str, str]:
-    import base64
-
-    rows = meta.get("excluded_rows")
-    if not isinstance(rows, list):
-        return {}
-    listed = [{"path": str(row.get("path", "")), "reason": str(row.get("reason", ""))} for row in rows[:EXCLUDED_ROWS_HEADER_MAX] if isinstance(row, dict)]
-    encoded = base64.urlsafe_b64encode(json.dumps(listed, ensure_ascii=True).encode("ascii")).decode("ascii")
-    return {EXCLUDED_COUNT_HEADER: str(len(rows)), EXCLUDED_ROWS_HEADER: encoded}
+        return 200, "application/pdf", rendered, {"Content-Disposition": 'attachment; filename="deepfake-lens-forensic-report.pdf"'}
+    return 200, "text/html; charset=utf-8", rendered, {"Content-Disposition": 'attachment; filename="deepfake-lens-report.html"'}
 
 
 def _json_bytes(payload: dict[str, object]) -> bytes:
     return json_dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
 
 
-class _ReportHasher:
-    """SHA-256 of each posted row's evidence, read only under the read roots (G31, N2, N10).
+class _JobFiles:
+    """P0R-6: re-hash a job's files under its scan folder (change detection) — never following a link (N2).
 
-    ``resolve`` maps a row path to the regular file it names inside a root
-    without following any symbolic link (the file itself or a folder
-    between the root and it) — so a link row can never be hashed as its
-    target. ``sha256`` hashes that file with ``O_NOFOLLOW``; an archive
-    member row ("a.zip::x") is hashed from the container re-extracted with
-    the scanner's own ``extract_archive`` (one extraction per container per
-    report), which yields the same bytes — and digest — the scan recorded.
+    A top-level row path is resolved against the job's scan folder only (P1) — the row path unescaped (P7) — with no
+    symbolic link on the way (the file itself or a folder between); an archive member is hashed from the container
+    re-extracted with the scanner's own ``extract_archive`` (once per container), which yields the bytes and digest
+    the scan recorded; two members of one name give no digest (R26-8: fail closed).
     """
 
-    def __init__(self, roots: list[Path], scan_root: Path | None = None) -> None:
-        self.roots = roots
-        # P1: the scanned folder (inside a read root) the row paths are
-        # relative to; every row is resolved against it only.
+    def __init__(self, scan_root: Path) -> None:
         self.scan_root = scan_root
         self._members: dict[str, dict[str, str]] = {}
         self._temp_dirs: list[Path] = []
 
-    def _candidates(self, path_text: str) -> list[tuple[Path, Path]]:
-        """(file, folder no link may sit under) pairs for a top-level row path (P1: the scan root only).
-
-        P7: the row path is unescaped ("a\\:\\:b" names the real file "a::b").
-        """
-        from .result_text import unescape_row_path
-
-        if self.scan_root is not None:
-            # R21-5 (round 21): a row path is relative to the scan folder, taken literally (a "~" is a name
-            # there); only the scan's own form reaches here (:func:`_posted_path_error`).
-            p = Path(os.path.normpath(unescape_row_path(path_text)))
-            cand = p if p.is_absolute() else Path(os.path.normpath(self.scan_root / p))
-            return [(cand, self.scan_root)] if _is_within(cand, self.scan_root) else []
-        p = Path(os.path.normpath(expand_user(unescape_row_path(path_text))))
-        return [(p, root) for root in self.roots] if p.is_absolute() else [(root / p, root) for root in self.roots]
-
     def resolve(self, path_text: str) -> Path | None:
         from .evidence_statement import _no_symlink_on_path, _SymlinkRefused
+        from .result_text import unescape_row_path
 
-        for cand, root in self._candidates(path_text):
-            if not _is_within(cand, root):
-                continue
-            try:
-                _no_symlink_on_path(cand, root)
-                mode = os.lstat(cand).st_mode
-            except _SymlinkRefused:
-                return None  # N2: a link is never followed
-            except OSError:
-                continue
-            if stat.S_ISREG(mode):
-                return cand
-        return None
-
-    def locate(self, path_text: str) -> Path | str:
-        """The entry a posted top-level row names, for server re-analysis (X2).
-
-        Returns the path inside a read root of any entry that exists — a
-        regular file, a symbolic link itself (never followed — its
-        re-analysis is the scan's skipped link row) and, R20-1 (round 20),
-        a FIFO, socket, device node or folder (the scan's skipped or
-        failed row, :func:`_unanalyzed_entry_row`) — or the Korean reason
-        it cannot be re-analyzed. :data:`REPORT_ROW_NOT_FOUND` only when
-        nothing is there (``lstat`` fails): a FIFO the scan listed as
-        skipped was "not found", and every report of its folder was 409.
-        A folder between the root and the entry that is a link refuses the
-        row (N2).
-        """
-        from .evidence_statement import _no_symlink_on_path, _SymlinkRefused
-
-        pairs = self._candidates(path_text)
-        if self.scan_root is not None and not pairs:
-            return REPORT_ROW_OUTSIDE_SCAN_ROOT
-        for cand, root in pairs:
-            if not _is_within(cand, root) or cand == root:
-                continue
-            try:
-                _no_symlink_on_path(cand.parent, root)
-                os.lstat(cand)  # R20-1: any entry that exists is located; its kind decides its row
-            except _SymlinkRefused:
-                return REPORT_ROW_LINK_ON_PATH
-            except OSError:
-                continue
-            return cand
-        return REPORT_ROW_NOT_FOUND
-
-    def sha256(self, item: Any) -> str | None:
-        from .evidence_statement import _compute_sha256, _SymlinkRefused
-        from .result_text import is_symlink_row, row_identity
-
-        if is_symlink_row(item.status, item.error):
-            return None  # N2: the scan never followed the link; nor does the report
-        top, member = row_identity(item)  # P7: the fields, not a "::" in a real path
-        if member is not None:
-            return self._member_digests(top).get(member)
-        path = self.resolve(top)
-        if path is None:
+        candidate = Path(os.path.normpath(self.scan_root / unescape_row_path(path_text)))
+        if not _is_within(candidate, self.scan_root) or candidate == self.scan_root:
             return None
-        root = next((r for r in self.roots if _is_within(path, r)), None)
-        if self.scan_root is not None and _is_within(path, self.scan_root):
-            root = self.scan_root
         try:
-            return _compute_sha256(path, root)
-        except _SymlinkRefused:
+            _no_symlink_on_path(candidate, self.scan_root)
+            mode = os.lstat(candidate).st_mode
+        except (_SymlinkRefused, OSError):
             return None
+        return candidate if stat.S_ISREG(mode) else None
 
-    def _member_digests(self, container_text: str) -> dict[str, str]:
+    def change(self, path_text: str, expected: str) -> str | None:
+        """The Korean reason the top-level file ``path_text`` no longer has digest ``expected``, or None."""
+        from .evidence_statement import _compute_sha256, _no_symlink_on_path, _SymlinkRefused
+        from .result_text import unescape_row_path
+
+        candidate = Path(os.path.normpath(self.scan_root / unescape_row_path(path_text)))
+        try:
+            _no_symlink_on_path(candidate, self.scan_root)
+            mode = os.lstat(candidate).st_mode
+        except _SymlinkRefused:
+            return REPORT_ROW_CHANGED_LINK
+        except OSError:
+            return REPORT_ROW_CHANGED_GONE
+        if stat.S_ISLNK(mode):
+            return REPORT_ROW_CHANGED_LINK
+        if not stat.S_ISREG(mode):
+            return REPORT_ROW_CHANGED_GONE
+        try:
+            digest = _compute_sha256(candidate, self.scan_root)
+        except _SymlinkRefused:
+            return REPORT_ROW_CHANGED_LINK
+        except OSError:
+            return REPORT_ROW_CHANGED_GONE
+        return None if digest == expected else REPORT_ROW_CHANGED_CONTENT
+
+    def member_digests(self, container_text: str) -> dict[str, str]:
         if container_text in self._members:
             return self._members[container_text]
         digests: dict[str, str] = {}
@@ -1815,13 +1645,20 @@ class _ReportHasher:
         except (OSError, ValueError, RuntimeError):
             logger.info("report: archive %s could not be re-extracted", container, exc_info=True)
             return digests
+        names: set[str] = set()
         for member in extraction.members:
+            name = extraction.member_name(member, dest)
             try:
                 digest = _compute_sha256(member, dest)
             except _SymlinkRefused:
-                continue
+                digest = None
+            if name in names:
+                logger.warning("report: archive %s yields two members named %r", container, name)  # R26-8
+                digests.clear()
+                return digests
+            names.add(name)
             if digest:
-                digests[extraction.member_name(member, dest)] = digest  # Y9: the scan's member name
+                digests[name] = digest
         return digests
 
     def close(self) -> None:
@@ -1830,253 +1667,151 @@ class _ReportHasher:
         self._temp_dirs.clear()
 
 
-@in_worker_scope  # R20-2: one audio worker for all files (was one per file)
-def _rederive_report_items(
-    posted: list[Any], hasher: "_ReportHasher", options: Any, thresholds: Any,
-    job_cancelled: dict[str, dict[str, Any]] | None = None,
-) -> tuple[list[Any], list[tuple[Any, str]], list[dict[str, object]], set[tuple[str, str]]]:
-    """Re-analyze every posted row on the server (X2).
+def _changed_job_rows(items: list[Any], files: _JobFiles) -> list[dict[str, object]]:
+    """P0R-6 (R19-13's rule on the job): every row the scan hashed, re-hashed on disk now; ``[{path, reason}]``.
 
-    Rows are grouped by their top-level file ("a.zip::x" -> "a.zip"); each
-    file is located inside the read roots (:meth:`_ReportHasher.locate`)
-    and analyzed once with ``analysis_api.scan_file_run`` — the scan's own
-    body, so an archive yields the same member and container rows and a
-    symbolic link the same skipped row. Each posted row is replaced by the
-    server row of the same path (path naming kept: the posted folder-relative
-    path). Returns ``(server rows in posted order, [(posted row, reason)]
-    for rows that could not be re-derived, changed rows)``.
-
-    R19-13 (round 19): each server row is compared with the posted row —
-    sha256 (an archive member's own digest), status and verdict_code. A
-    difference, or a row whose file is gone / whose member the server's
-    extraction no longer yields / whose re-analysis failed, is a *changed*
-    row (:func:`_changed_row`); the caller refuses the report. A posted
-    dedupe duplicate (status "duplicate", ``duplicate_of``) stays a
-    duplicate row when the server finds the file's bytes equal to those of
-    ``duplicate_of`` (it is not signed as a full analysis of the copy).
-
-    R23-5 (round 23): the fourth value is the ``(container, member)`` identities of the archive member rows
-    the server's own re-analysis of a posted container yields that the post left out — the report counts
-    them as files without a signed row (``not_in_report``); they used to be invisible (the listing compared
-    top-level paths only).
-
-    R25-1 (round 25): ``job_cancelled`` — the top-level rows the server's own cancelled scan job (``scan_job``)
-    holds as ``cancelled`` containers (:func:`_job_cancelled_containers`). Only a posted ``cancelled`` row of
-    such a path is excluded as cancelled (:data:`REPORT_ROW_CANCELLED`), and only when the server's own
-    re-analysis of the file is still an archive with the job's and the post's digest; anything else is a
-    changed row. Every posted top-level file is re-analyzed — a container posted without its member rows
-    too (R24-1 skipped it, so its members were never counted and a post could drop them unseen) — and every
-    member the re-analysis yields without a signed row is in the fourth value.
+    A top-level row with a digest is re-hashed. An archive member is covered by its container's digest when the
+    job holds one; otherwise (a container the scan could not hash) the member itself is re-hashed from a fresh
+    extraction. Rows the scan did not hash (links, special files, unreadable files, folders) are signed as the scan
+    recorded them — the scan's own row says why it has no digest.
     """
-    from .analysis_api import scan_file_run
-    from .result_text import escape_row_path, member_row_path, row_identity
+    from .result_text import row_identity
 
-    # R24-1 (round 24): a container row a cancel left (partly) unanalyzed is never compared with the server's
-    # complete roll-up — only its own sha256 is (:data:`REPORT_ROW_CANCELLED`). R25-1 (round 25): which rows
-    # those are is the server's cancelled scan job's knowledge (``job_cancelled``), never the post's; and the
-    # container is re-analyzed like any posted file (its members are counted).
-    job_cancelled = job_cancelled or {}
-    cancelled_tops = {row_identity(item)[0] for item in posted if _is_cancelled_container_row(item) and row_identity(item)[0] in job_cancelled}
-    derived_by_top: dict[str, dict[str | None, Any] | str] = {}
-    for item in posted:
-        top = row_identity(item)[0]
-        if top in derived_by_top:
-            continue
-        located = hasher.locate(top)
-        if isinstance(located, str):
-            derived_by_top[top] = located
-            continue
-        unanalyzed = _unanalyzed_entry_row(located, top, item, hasher.scan_root)
-        if unanalyzed is not None:
-            derived_by_top[top] = unanalyzed
-            continue
-        try:
-            run = scan_file_run(located, options, thresholds=thresholds)
-        except Exception as exc:  # noqa: BLE001 - one unreadable row must not fail the report
-            logger.info("report: %s could not be re-analyzed", top, exc_info=True)
-            derived_by_top[top] = REPORT_ROW_FAILED.format(reason=failure_reason(exc))
-            continue
-        name = escape_row_path(located.name)
-        # P7: server rows keyed by member path (None = the file's own row);
-        # the scan of the single file names its rows from the file name.
-        rows: dict[str | None, Any] = {}
-        for row in run.items:
-            row_top, row_member = row_identity(row)
-            if row_top != name:
-                continue
-            path = top if row_member is None else member_row_path(top, row_member)
-            rows[row_member] = replace(row, path=path, container=None if row_member is None else top, member=row_member)
-        derived_by_top[top] = rows
-    derived: list[Any] = []
-    excluded: list[tuple[Any, str]] = []
+    container_digest = {row_identity(item)[0]: item.sha256 for item in items if row_identity(item)[1] is None and item.sha256}
     changed: list[dict[str, object]] = []
-    seen: set[tuple[str, str | None]] = set()
-    for item in posted:
+    for item in items:
+        if not item.sha256:
+            continue
         top, member = row_identity(item)
-        found = derived_by_top[top]
-        if isinstance(found, str):
-            # R20-5 (round 20): a row the scan hashed (sha256 set — it read the file) that now sits behind
-            # a linked folder was moved to excluded_items and the rest signed (200): the web scan never
-            # follows a linked folder, so the folder was replaced by a link after the scan.
-            linked_since = found == REPORT_ROW_LINK_ON_PATH and bool(item.sha256)
-            if linked_since or found in _CHANGED_AFTER_SCAN_REASONS or found.startswith(REPORT_ROW_FAILED.split("{", 1)[0]):
-                changed.append(_changed_row(item, None, found))
-            excluded.append((item, found))
-        elif member is None and top in cancelled_tops:
-            # R24-1: excluded as cancelled unless the archive itself changed since the scan. R25-1: the server's
-            # re-analysis must still be an archive and its digest that of the job's row and of the post.
-            server_row = found.get(None)
-            server_sha = server_row.sha256 if server_row is not None else None
-            job_sha = job_cancelled[top].get("sha256")
-            if server_row is None or server_row.kind != "archive":
-                changed.append(_changed_row(item, server_row, REPORT_ROW_CANCELLED_NOT_ARCHIVE))
-            elif not server_sha or server_sha != item.sha256 or server_sha != job_sha:
-                entry = _changed_row(item, None, None if server_sha else REPORT_ROW_CANCELLED_NO_DIGEST)
-                entry["server_sha256"] = server_sha
-                changed.append(entry)
-            excluded.append((item, REPORT_ROW_CANCELLED))
-            seen.add((top, member))
-        elif member not in found:
-            changed.append(_changed_row(item, None, REPORT_ROW_NOT_DERIVED))
-            excluded.append((item, REPORT_ROW_NOT_DERIVED))
-        elif (top, member) not in seen:
-            seen.add((top, member))
-            server = found[member]
-            if item.status == "duplicate" and item.duplicate_of:
-                server = _as_duplicate(item, server, _derived_row(derived_by_top, str(item.duplicate_of)))
-            if _row_signature(item) != _row_signature(server):
-                changed.append(_changed_row(item, server, None))
-            derived.append(server)
-    unsigned_members = {
-        (top, member) for top, rows in derived_by_top.items() if isinstance(rows, dict)
-        for member in rows if member is not None and (top, member) not in seen
-    }
-    return derived, excluded, changed, unsigned_members
+        if member is None:
+            reason = files.change(top, item.sha256)
+        elif top in container_digest:
+            continue  # the container's own digest is compared (its row is in the job)
+        else:
+            reason = None if files.member_digests(top).get(member) == item.sha256 else REPORT_ROW_CHANGED_MEMBER
+        if reason is not None:
+            changed.append({"path": item.path, "reason": reason})
+    return changed
 
 
-def _is_cancelled_container_row(item: Any) -> bool:
-    """R24-1: a posted top-level row of status ``cancelled`` (checked by :func:`_posted_cancelled_row_error`)."""
-    from .core import CANCELLED_CONTAINER_STATUS
-    from .result_text import row_identity
+def _job_summary(items: list[Any], job_summary: dict[str, Any], cancelled: bool) -> Any:
+    """P0R-6: the report summary — counted from the job's rows, enumeration and cancel accounting from the job's summary."""
+    def count(name: str) -> int:
+        value = job_summary.get(name)
+        return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
 
-    return item.status == CANCELLED_CONTAINER_STATUS and row_identity(item)[1] is None
-
-
-def _job_cancelled_containers(job_id: object, scan_root: Path | None) -> dict[str, dict[str, Any]]:
-    """R25-1 (round 25): the top-level rows of status ``cancelled`` in the server's own cancelled scan job, by path.
-
-    Empty unless ``job_id`` names a scan job this server finished ``cancelled`` for the folder ``scan_root``
-    (:func:`_finished_scan_job`). Those rows are the scan's own containers whose members the cancel left
-    (partly) unanalyzed (core sets that status on archive container rows only) — the only rows a report may
-    exclude as cancelled.
-    """
-    job = _finished_scan_job(job_id, scan_root)
-    if job is None or job.get("status") != "cancelled" or not isinstance(job.get("items"), list):
-        return {}
-    from .core import CANCELLED_CONTAINER_STATUS
-
-    return {
-        row["path"]: row for row in job["items"]
-        if isinstance(row, dict) and row.get("member") is None and isinstance(row.get("path"), str)
-        and row.get("status") == CANCELLED_CONTAINER_STATUS
-    }
+    detail = job_summary.get("subfolders_skipped_detail")
+    return replace(
+        summarize(items, capped=job_summary.get("capped") is True),
+        files_over_cap=count("files_over_cap"), subfolders_skipped=count("subfolders_skipped"),
+        subfolder_files_skipped=count("subfolder_files_skipped"),
+        subfolders_skipped_detail=[dict(entry) for entry in detail if isinstance(entry, dict)] if isinstance(detail, list) else [],
+        cancelled=cancelled, files_cancelled=count("files_cancelled") if cancelled else 0,
+        unrecorded_listing={"source": "scan_job", "not_in_report": 0},
+    )
 
 
-def _posted_cancelled_row_error(posted: list[Any], job_id: object, scan_root: Path | None) -> str | None:
-    """R24-1 (round 24): why a posted ``cancelled`` row is not a cancelled container row of this report, or None.
+def _uploads_from_request(raw: object, roots: list[Path]) -> list[tuple[Any, str]] | dict[str, object]:
+    """P6/R22-8: the request's ``uploads`` rows as unsigned rows ``[(ScanItem, reason)]``, or a 400 body."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or not all(isinstance(row, dict) for row in raw):
+        return {"error": REPORT_UPLOADS_INVALID}
+    uploads: list[tuple[Any, str]] = []
+    for index, row in enumerate(raw):
+        nul_field = _row_nul_field(row)
+        if nul_field is not None:
+            # R22-6 (round 22): a NUL in a row's path-like value was a 500.
+            return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason=PATH_TEXT_NUL.format(field=nul_field))}
+        if not _posted_heatmaps_allowed(row, roots):
+            raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE)  # QA-SYS-7/P8: a heatmap path outside the roots is a probe
+        upload = _upload_row_item(row)
+        if upload is None:
+            return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason="path 값이 없습니다")}
+        if not _upload_name_valid(str(upload.path)):
+            return {"error": REPORT_UPLOAD_NAME_INVALID.format(index=index + 1, limit=UPLOAD_ROW_NAME_MAX)}  # R22-8
+        source = _upload_name_source({"path": upload.path, "sha256": row.get("sha256")})
+        uploads.append((upload, REPORT_ROW_UPLOAD if source == "server_upload" else REPORT_ROW_UPLOAD_CLIENT_NAME))
+    return uploads
 
-    R25-1 (round 25): decided from the server's own scan job only. A ``cancelled`` row must be a top-level row
-    that the server's cancelled scan job of this folder (``scan_job``) holds as a ``cancelled`` container
-    (:func:`_job_cancelled_containers`); the posted ``kind``, ``summary.cancelled`` and member rows decide
-    nothing (R24-1 took a posted ``kind: "archive"`` and ``summary.cancelled: true`` as enough, so any file —
-    or an archive with its member rows left out — could be listed unsigned as "사용자 취소" while the report
-    signed "기록되지 않은 파일: 없음"). Otherwise HTTP 400 — and so is a container that job holds as ``cancelled``
-    posted with another status (its partial roll-up is the job's; the report never signs it).
-    """
-    from .core import CANCELLED_CONTAINER_STATUS
-    from .result_text import row_identity
 
-    job = _finished_scan_job(job_id, scan_root)
-    job_cancelled = _job_cancelled_containers(job_id, scan_root)
-    for item in posted:
-        # a container the job holds as cancelled, posted with another status (e.g. "expanded")
-        top, member = row_identity(item)
-        if item.status != CANCELLED_CONTAINER_STATUS and member is None and top in job_cancelled:
-            return REPORT_ROW_CANCELLED_NOT_IN_JOB.format(path=str(item.path)[:200])
-    rows = [item for item in posted if item.status == CANCELLED_CONTAINER_STATUS]
-    for item in rows:
-        top, member = row_identity(item)
-        if member is not None:
-            return REPORT_ROW_CANCELLED_NOT_CONTAINER.format(path=str(item.path)[:200])
-        if job is None or job.get("status") != "cancelled":
-            return REPORT_ROW_CANCELLED_NOT_CANCELLED_SCAN.format(path=str(item.path)[:200])
-        if top not in job_cancelled:
-            return REPORT_ROW_CANCELLED_NOT_IN_JOB.format(path=str(item.path)[:200])
+def _row_nul_field(row: object) -> str | None:
+    """R22-6: the name of a posted row's path-like field holding a NUL character, or None."""
+    if not isinstance(row, dict):
+        return None
+    result = row.get("result")
+    pixel = result.get("pixel_analysis") if isinstance(result, dict) else None
+    fields = {name: row.get(name) for name in ("path", "name", "container", "member", "duplicate_of", "heatmap_path")}
+    fields["result.pixel_analysis.heatmap_path"] = pixel.get("heatmap_path") if isinstance(pixel, dict) else None
+    for name, value in fields.items():
+        if isinstance(value, str) and "\x00" in value:
+            return name
     return None
 
 
-def _unanalyzed_entry_row(
-    located: Path, top: str, posted: Any, scan_root: Path | None = None,
-) -> dict[str | None, Any] | str | None:
-    """R20-1 (round 20): the scan's own row of an entry it lists without analyzing, or None for a file it analyzes.
-
-    The walk (``scan_cache._iter_files``) never analyzes a FIFO, socket,
-    device node or pseudo-file-system file (a skipped row with
-    :func:`scan_cache.unscannable_file_reason`) and gives a folder it could
-    not list a failed row (:data:`scan_cache.UNREADABLE_FOLDER_ROW_REASON`).
-    The re-analysis classifies the entry the same way, so the server row
-    is compared like with like: an unchanged FIFO is the same skipped row
-    (signed as listed, as the scan listed it), a file replaced by a FIFO
-    after the scan differs (analyzed → skipped: 409).
-
-    R21-1 (round 21): every row returned here is made by the server from
-    what is on disk, with the walk's own reason constant — never the posted
-    ``error`` text (a posted readable folder "skipped: 탐색 상한 도달(서버
-    확인) — 이 폴더에는 조작 파일이 없음을 …" was signed word for word).
-    A folder that can be listed now is:
-
-    - the walk's bind-mount loop row (:data:`scan_cache.SYMLINK_LOOP_REASON`)
-      when the posted row says so and the server finds the folder is the
-      scan folder or a folder between it and the entry (same
-      ``(st_dev, st_ino)``, the walk's own test); a posted loop row of any
-      other folder is :data:`REPORT_ROW_KIND_CHANGED` (409);
-    - :data:`REPORT_ROW_WALK_LIMIT` (excluded, never signed) when the posted
-      row is a walk-limit row: that limit belongs to the whole walk and the
-      clock, which the server does not repeat;
-    - otherwise :data:`REPORT_ROW_KIND_CHANGED`.
-
-    Returns ``{None: row}``, a reason string, or None.
-    """
-    from .result_types import ScanItem
-    from .scan_cache import SYMLINK_LOOP_REASON, UNREADABLE_FOLDER_ROW_REASON, WALK_LIMIT_REASON, unscannable_file_reason
-
-    try:
-        mode = os.lstat(located).st_mode
-    except OSError:
-        return REPORT_ROW_NOT_FOUND
-    if stat.S_ISLNK(mode):
-        return None  # scan_file_run gives a link the scan's skipped link row (G6)
-    if stat.S_ISDIR(mode):
+def _posted_heatmaps_allowed(row: dict[str, Any], roots: list[Path]) -> bool:
+    """Every heatmap path an upload row names (top level or result.pixel_analysis) is under the roots."""
+    result = row.get("result")
+    pixel = result.get("pixel_analysis") if isinstance(result, dict) else None
+    candidates = [row.get("heatmap_path"), pixel.get("heatmap_path") if isinstance(pixel, dict) else None]
+    for value in candidates:
+        if value is None or value == "":
+            continue
+        if not isinstance(value, str):
+            return False
         try:
-            with os.scandir(located) as handle:
-                next(handle, None)
-        except OSError as exc:
-            return {None: ScanItem(top, located.name, "unknown", "failed", 0, error=UNREADABLE_FOLDER_ROW_REASON.format(reason=failure_reason(exc)))}
-        posted_error = posted.error if isinstance(posted.error, str) else ""
-        if posted.status == "skipped" and posted_error == SYMLINK_LOOP_REASON:
-            if scan_root is not None and _is_bind_mount_loop(located, scan_root):
-                return {None: ScanItem(top, located.name, "unknown", "skipped", 0, error=SYMLINK_LOOP_REASON)}
-            return REPORT_ROW_KIND_CHANGED
-        if posted.status == "skipped" and posted_error.startswith(WALK_LIMIT_REASON.split("(", 1)[0]):
-            return REPORT_ROW_WALK_LIMIT
-        return REPORT_ROW_KIND_CHANGED
-    try:
-        reason = unscannable_file_reason(located)
-    except OSError as exc:
-        return REPORT_ROW_FAILED.format(reason=failure_reason(exc))
-    if reason is None:
+            resolved = expand_user(value).resolve()
+        except (OSError, RuntimeError):
+            return False
+        if not (any(_is_within(resolved, root) for root in roots) or is_default_heatmap_output(resolved)):
+            return False
+    return True
+
+
+def _upload_row_item(row: dict[str, Any]) -> Any:
+    """A posted upload row as a ScanItem for the unsigned-rows section (P6), or None without a path."""
+    from .report_items import ItemContractError, check_report_item
+    from .result_types import ScanItem
+
+    path = row.get("path") or row.get("name")
+    if not isinstance(path, str) or not path:
         return None
-    return {None: ScanItem(top, located.name, "unknown", "skipped", 0, error=reason)}
+    try:
+        check_report_item(row)
+        return replace(_scan_item_from_json(row), path=path)
+    except (ItemContractError, TypeError, ValueError, KeyError, AttributeError):
+        # A failed upload row ({name, path, status, error}) is still listed (path only, never signed).
+        logger.info("upload row %s is listed without its result", path, exc_info=True)
+        raw_status = row.get("status")
+        status = raw_status if isinstance(raw_status, str) else "failed"
+        return ScanItem(path, Path(path).name or path, "unknown", status, 0)
+
+
+def _scan_root_label(scan_root: Path | None, roots: list[Path]) -> str | None:
+    """R9-9: the scanned folder relative to the (innermost) read root holding it ("." for the root itself)."""
+    if scan_root is None:
+        return None
+    holders = [root for root in roots if _is_within(scan_root, root)]
+    if not holders:
+        return None
+    root = max(holders, key=lambda path: len(path.parts))
+    relative = scan_root.relative_to(root).as_posix()
+    return relative or "."
+
+
+def _excluded_rows_json(excluded: list[tuple[Any, str]]) -> list[dict[str, object]]:
+    """The signed body's record of rows it does not vouch for (X2): path, marker, reason — no client verdict.
+
+    R22-8 (round 22): an upload row also carries ``name_source`` — "server_upload" (this server produced an
+    upload row of that name and sha256) or "client" (the name is only the client's text).
+    """
+    rows: list[dict[str, object]] = []
+    for item, reason in excluded:
+        row: dict[str, object] = {"path": item.path, "marker": UNSIGNED_CLIENT_ROW_MARKER, "reason": reason}
+        if reason in (REPORT_ROW_UPLOAD, REPORT_ROW_UPLOAD_CLIENT_NAME):
+            row["name_source"] = "server_upload" if reason == REPORT_ROW_UPLOAD else "client"
+        rows.append(row)
+    return rows
 
 
 def _preview_as_pdf_draws(preview: dict[str, Any]) -> dict[str, Any]:
@@ -2122,809 +1857,243 @@ def _preview_as_pdf_draws(preview: dict[str, Any]) -> dict[str, Any]:
     return drawn
 
 
-def _posted_walk_limit_row(posted: Any) -> bool:
-    """Merge of R21-1 (GUI preview): the posted row is the walk's limit row — the test _unanalyzed_entry_row uses."""
-    from .scan_cache import WALK_LIMIT_REASON
-
-    posted_error = posted.error if isinstance(posted.error, str) else ""
-    return bool(posted.status == "skipped" and posted_error.startswith(WALK_LIMIT_REASON.split("(", 1)[0]))
-
-
-def _is_bind_mount_loop(folder: Path, scan_root: Path) -> bool:
-    """R21-1: the walk's loop test — ``folder`` is the scan folder or a folder between it and ``folder`` (same device and inode)."""
-    from .scan_cache import _dir_identity
-
-    ident = _dir_identity(folder)
-    if ident is None or not _is_within(folder, scan_root) or folder == scan_root:
-        return False
-    current = folder.parent
-    while True:
-        if _dir_identity(current) == ident:
-            return True
-        if current == scan_root or not _is_within(current, scan_root):
-            return False
-        current = current.parent
-
-
-def _posted_path_error(posted: list[Any]) -> str | None:
-    """R21-5 (round 21): why the posted rows are not a list of distinct rows in the scan's own path form, or None.
-
-    A top-level row path (a member row's container) must be what the scan
-    writes for a file of the scan folder: relative, no empty, "." or ".."
-    component, and escaped as :func:`result_text.escape_row_path` escapes
-    it. A row (path, or container and member) may be posted once. Both are
-    a malformed request (400), before any re-analysis.
-    """
-    from .result_text import escape_row_path, row_identity, unescape_row_path
-
-    seen: set[tuple[str, str | None]] = set()
-    for item in posted:
-        top, member = row_identity(item)
-        real = unescape_row_path(top)
-        parts = real.replace(os.sep, "/").split("/")  # Windows rows use "\\" (str of a relative path)
-        if (
-            not real or os.path.isabs(real) or real.startswith("/")
-            or any(part in ("", ".", "..") for part in parts)
-            or escape_row_path(real) != top
-        ):
-            return REPORT_ROW_PATH_NOT_CANONICAL.format(path=str(item.path)[:200])
-        if (top, member) in seen:
-            return REPORT_ROW_POSTED_TWICE.format(path=str(item.path)[:200])
-        seen.add((top, member))
-    return None
-
-
-def _posted_alias_error(posted: list[Any], scan_root: Path | None) -> str | None:
-    """R22-4 (round 22): why a posted row path names a file the scan would list under another path, or None.
-
-    R21-5 compared the path *text* only. Two spellings still named one file and were signed as two rows:
-
-    - a path through a bind-mount loop folder ("sub/loop/gen.png" with sub/loop the scan folder or "sub"
-      again) — the walk never enters such a folder (same ``(st_dev, st_ino)`` as the scan folder or a folder
-      between it and the entry: :func:`scan_cache._iter_files`), so no scan writes that row;
-    - a path whose components are not the names the folder listing holds — another letter case or Unicode
-      form ("GEN.png", NFD "한") resolves to the same file on a case-insensitive or normalizing file system
-      (macOS, Windows), but the scan writes the listed name.
-
-    Each top-level row path (a member row's container) is checked component by component against the
-    listing of its folder (exact name) and the loop identities; both are 400. An entry that is not there at
-    all is left to the re-analysis (gone since the scan: 409). Distinct listed names of one inode (hard
-    links) are distinct rows, as the scan lists them.
-    """
-    from .result_text import row_identity, unescape_row_path
-    from .scan_cache import _dir_identity
-
-    if scan_root is None:
-        return None
-    listings: dict[Path, set[str] | None] = {}
-
-    def listed(folder: Path) -> set[str] | None:
-        if folder not in listings:
-            try:
-                with os.scandir(folder) as handle:
-                    listings[folder] = {entry.name for entry in handle}
-            except OSError:
-                listings[folder] = None
-        return listings[folder]
-
-    root_ident = _dir_identity(scan_root)
-    checked: set[str] = set()
-    for item in posted:
-        top = row_identity(item)[0]
-        if top in checked:
-            continue
-        checked.add(top)
-        parts = unescape_row_path(top).replace(os.sep, "/").split("/")
-        folder = scan_root
-        ancestors = {root_ident} if root_ident else set()
-        for index, part in enumerate(parts):
-            names = listed(folder)
-            if names is None:
-                break  # an unlistable folder: the re-analysis gives its row (R20-1)
-            if part not in names:
-                try:
-                    os.lstat(folder / part)
-                except OSError:
-                    break  # nothing there under any spelling: gone since the scan (409 later)
-                return REPORT_ROW_NOT_LISTED_NAME.format(path=str(item.path)[:200])
-            entry = folder / part
-            if index == len(parts) - 1 or os.path.islink(entry):
-                break  # a linked folder on the path is the hasher's (never followed: N2 / R20-5)
-            ident = _dir_identity(entry)
-            if ident is not None and ident in ancestors:
-                return REPORT_ROW_UNDER_LOOP.format(path=str(item.path)[:200])
-            if ident is not None:
-                ancestors.add(ident)
-            folder = entry
-    return None
-
-
-def _derived_row(derived_by_top: dict[str, dict[str | None, Any] | str], path: str) -> Any | None:
-    """R20-4: the server row re-derived for a posted row path ("a.png", or an archive member "a.zip::m"), or None."""
-    for top, rows in derived_by_top.items():
-        if isinstance(rows, str):
-            continue
-        for member, row in rows.items():
-            if row.path == path or (member is None and top == path):
-                return row
-    return None
-
-
-def _row_signature(item: Any) -> tuple[object, object, object]:
-    """R19-13: what must agree between a posted row and the server's — sha256, status, verdict_code."""
-    verdict = item.result.verdict_code.value if item.result is not None else None
-    return item.sha256, item.status, verdict
-
-
-def _changed_row(posted: Any, server: Any | None, reason: str | None) -> dict[str, object]:
-    """R19-13: one ``changed_rows`` entry of a 409 body."""
-    posted_sha, posted_status, posted_verdict = _row_signature(posted)
-    server_sha, server_status, server_verdict = _row_signature(server) if server is not None else (None, None, None)
-    entry: dict[str, object] = {
-        "path": posted.path,
-        "posted_sha256": posted_sha, "server_sha256": server_sha,
-        "posted_status": posted_status, "server_status": server_status,
-        "posted_verdict": posted_verdict, "server_verdict": server_verdict,
-    }
-    if reason is not None:
-        entry["reason"] = reason
-    return entry
-
-
-def _posted_duplicate_error(posted: list[Any]) -> str | None:
-    """R20-4 (round 20): why a posted dedupe duplicate row is not a duplicate of a row of this report, or None.
-
-    ``duplicate_of`` must name another posted row (its ``path``) that is not
-    itself a duplicate — the scan's original, whose analysis the report
-    signs. A self-duplicate, an original that is not posted or a chain of
-    duplicates is refused (400) before any re-analysis.
-    """
-    originals = {item.path for item in posted if item.status != "duplicate"}
-    for item in posted:
-        if item.status != "duplicate":
-            continue
-        target = item.duplicate_of
-        if not isinstance(target, str) or not target or target == item.path or target not in originals:
-            return REPORT_DUPLICATE_OF_INVALID.format(path=str(item.path)[:200], target=str(target)[:200])
-    return None
-
-
-def _as_duplicate(posted: Any, server: Any, original: Any | None) -> Any:
-    """R19-13 (J-2): the server row of a posted dedupe duplicate — a duplicate row when the bytes still match ``duplicate_of``.
-
-    The scan wrote no analysis for a duplicate (status "duplicate",
-    "중복 내용(동일 해시)"); re-analyzing the copy signed a full analysis in
-    its place. R20-4 (round 20): ``original`` is the server's re-derived row
-    of ``duplicate_of`` — a posted, non-duplicate row of this report
-    (:func:`_posted_duplicate_error`), signed with its own analysis; the
-    file named by ``duplicate_of`` used to be hashed from disk even when it
-    was not posted (its analysis then appeared nowhere in the report).
-    Its server sha256 equal to the copy's → the scan's duplicate row with
-    the server's sha256; otherwise the full server row (which then differs
-    from the posted row: 409).
-    """
-    from .result_types import ScanItem
-    from .scan_cache import DUPLICATE_ROW_REASON
-
-    target = str(posted.duplicate_of)
-    if original is None or original.status == "duplicate" or not server.sha256 or original.sha256 != server.sha256:
-        return server
-    # R21-1 (round 21): the scan's own duplicate reason — the posted ``error`` text was signed as it was.
-    return ScanItem(
-        server.path, server.name, "duplicate", "duplicate", server.size_bytes, error=DUPLICATE_ROW_REASON,
-        duplicate_of=target, sha256=server.sha256, container=server.container, member=server.member,
-        member_index=server.member_index,
-    )
-
-
-def _row_nul_field(row: object) -> str | None:
-    """R22-6: the name of a posted row's path-like field holding a NUL character, or None."""
-    if not isinstance(row, dict):
-        return None
-    result = row.get("result")
-    pixel = result.get("pixel_analysis") if isinstance(result, dict) else None
-    fields = {name: row.get(name) for name in ("path", "name", "container", "member", "duplicate_of", "heatmap_path")}
-    fields["result.pixel_analysis.heatmap_path"] = pixel.get("heatmap_path") if isinstance(pixel, dict) else None
-    for name, value in fields.items():
-        if isinstance(value, str) and "\x00" in value:
-            return name
-    return None
-
-
-def _posted_heatmaps_allowed(row: dict[str, Any], roots: list[Path]) -> bool:
-    """Every heatmap path a posted row names (top level or result.pixel_analysis) is under the roots."""
-    result = row.get("result")
-    pixel = result.get("pixel_analysis") if isinstance(result, dict) else None
-    candidates = [row.get("heatmap_path"), pixel.get("heatmap_path") if isinstance(pixel, dict) else None]
-    for value in candidates:
-        if value is None or value == "":
-            continue
-        if not isinstance(value, str):
-            return False
-        try:
-            resolved = expand_user(value).resolve()
-        except (OSError, RuntimeError):
-            return False
-        if not (any(_is_within(resolved, root) for root in roots) or is_default_heatmap_output(resolved)):
-            return False
-    return True
-
-
-def _upload_row_item(row: dict[str, Any]) -> Any:
-    """A posted upload row as a ScanItem for the unsigned-rows section (P6), or None without a path."""
-    from .report_items import ItemContractError, check_report_item
-    from .result_types import ScanItem
-
-    path = row.get("path") or row.get("name")
-    if not isinstance(path, str) or not path:
-        return None
-    try:
-        check_report_item(row)
-        return replace(_scan_item_from_json(row), path=path)
-    except (ItemContractError, TypeError, ValueError, KeyError, AttributeError):
-        # A failed upload row ({name, path, status, error}) is still listed (path only, never signed).
-        logger.info("upload row %s is listed without its result", path, exc_info=True)
-        raw_status = row.get("status")
-        status = raw_status if isinstance(raw_status, str) else "failed"
-        return ScanItem(path, Path(path).name or path, "unknown", status, 0)
-
-
-def _report_scan_root(value: object, roots: list[Path], *, required: bool) -> Path | None | dict[str, object]:
-    """P1: the scanned folder named by the request — absolute, existing, inside a read root.
-
-    Raises ReadRootDenied (403) for a folder outside the roots; returns an
-    error dict (400) when it is missing (with rows to re-analyze), not a
-    string, relative or not a folder.
-    """
-    if value is None or value == "":
-        return {"error": REPORT_SCAN_ROOT_REQUIRED} if required else None
-    if not isinstance(value, str):
-        return {"error": REPORT_SCAN_ROOT_NOT_STRING}
-    if "\x00" in value:
-        return {"error": PATH_TEXT_NUL.format(field="scan_root")}  # R22-6: was a 500
-    candidate = expand_user(value)
-    if not candidate.is_absolute():
-        return {"error": REPORT_SCAN_ROOT_NOT_ABSOLUTE.format(value=value[:200])}
-    try:
-        resolved = candidate.resolve(strict=True)
-        is_dir = resolved.is_dir()
-    except (OSError, RuntimeError):
-        is_dir = False
-    if not is_dir:
-        return {"error": REPORT_SCAN_ROOT_MISSING.format(value=value[:200])}
-    if not any(_is_within(resolved, root) for root in roots):
-        raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE)
-    return resolved
-
-
-def _finished_scan_job(job_id: object, scan_root: Path | None) -> dict[str, Any] | None:
-    """R19-3/R22-1: the result of the server's own finished scan job ``job_id`` of the folder ``scan_root``, or None."""
-    if not isinstance(job_id, str) or not job_id or scan_root is None:
-        return None
-    with _SCAN_JOBS_LOCK:
-        entry = _SCAN_JOBS.get(job_id)
-        status = entry.get("status") if entry is not None else None
-        result = entry.get("result") if entry is not None else None
-    if status not in ("done", "cancelled") or not isinstance(result, dict) or result.get("scan_root") != scan_root_text(scan_root):
-        return None
-    return {"status": status, **result}
-
-
-def _report_listing(
-    summary: Any, signed_items: list[Any], scan_root: Path | None, options: AnalysisOptions, job_id: object,
-    unsigned_members: set[tuple[str, str]] | None = None, cancelled_tops: set[str] | None = None,
-) -> Any:
-    """R22-1 (round 22): ``summary`` with the server's own "기록되지 않은 파일" counts of the scan folder.
-
-    The report counted the section from the posted rows only (``summarize(items, capped=False)``): a scan
-    capped at --max-files, a flat scan with files in subfolders, or a post that left rows out signed
-    ``total_files 0`` / "없음 — 분석 대상의 모든 파일에 분석 결과가 있습니다" in every format. Nothing here is
-    read from the posted rows except their identity. The listing is, in this order:
-
-    - ``scan_job`` — the server's own finished scan job named by ``scan_job`` for the same folder: its
-      summary's cap / flat-scan counts, and its rows (top-level paths) as the files of the folder;
-    - ``walk`` — the server walks the scan folder itself with the scan walk
-      (:func:`core.enumerate_scan_folder`) and the report's ``options`` ``recursive`` / ``max_files``;
-    - ``unknown`` — no scan folder (upload rows only), the walk stopped at a walk limit or could not
-      list the folder, or a signed row is not in that listing (other options than the scan's): the
-      section says "확인 불가" with the reason, and no enumeration count is signed.
-
-    A file of the listing without a signed row is counted (``not_in_report``).
-
-    R23-5 (round 23): so is an archive member the server's own re-analysis of a signed container yields
-    without a signed row (``unsigned_members``, from :func:`_rederive_report_items`). The listings hold
-    top-level paths only, so a post that left out ``bundle.zip::gen.png`` (the member with the generator
-    metadata) signed "없음". With a scan job as the listing only the members that job analyzed count: a
-    member a cancel left unanalyzed is already in the job's ``files_cancelled``.
-
-    R24-1 (round 24): ``cancelled_tops`` — container rows excluded as cancelled (:data:`REPORT_ROW_CANCELLED`)
-    — are not counted as files without a signed row: they are listed unsigned with that reason. R25-1 (round
-    25): such rows exist only with the server's cancelled scan job (:func:`_job_cancelled_containers`), so they
-    are always subtracted from that job's listing; the members of such a container that the job analyzed and
-    the post left out are counted (``unsigned_members`` — the container is always re-analyzed), the members
-    it never started are the job's ``files_cancelled``. A signed row the job did not analyze makes the
-    listing ``unknown`` with :data:`REPORT_LISTING_ROWS_OUTSIDE_JOB` (the walk's reason names the scan's
-    options, which are not the cause there). Callers pass ``scan_root`` whenever folder-scan rows were posted
-    — also when none of them is signed (R25-1: a post of only an excluded container said "업로드 결과만 있음").
-    """
-    from .core import enumerate_scan_folder
-    from .result_text import row_identity
-    from .scan_cache import WALK_LIMIT_REASON, _display_path
-
-    def unknown(reason: str) -> Any:
-        return replace(
-            summary, capped=False, files_over_cap=0, subfolders_skipped=0, subfolder_files_skipped=0,
-            subfolders_skipped_detail=[], unrecorded_listing={"source": "unknown", "not_in_report": 0, "reason": reason},
-        )
-
-    if scan_root is None:
-        return unknown(REPORT_LISTING_NO_SCAN_ROOT)
-    signed_tops = {row_identity(item)[0] for item in signed_items}
-    job = _finished_scan_job(job_id, scan_root)
-    job_summary = job.get("summary") if job is not None else None
-    job_items = job.get("items") if job is not None else None
-    if isinstance(job_summary, dict) and isinstance(job_items, list):
-        source = "scan_job"
-        listed = {row_identity(row)[0] for row in job_items if isinstance(row, dict)}
-
-        def count(name: str) -> int:
-            value = job_summary.get(name)
-            return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
-
-        detail = job_summary.get("subfolders_skipped_detail")
-        enumeration: dict[str, Any] = {
-            "capped": job_summary.get("capped") is True, "files_over_cap": count("files_over_cap"),
-            "subfolders_skipped": count("subfolders_skipped"), "subfolder_files_skipped": count("subfolder_files_skipped"),
-            "subfolders_skipped_detail": [dict(entry) for entry in detail if isinstance(entry, dict)] if isinstance(detail, list) else [],
-        }
-        job_members = {identity for identity in (row_identity(row) for row in job_items if isinstance(row, dict)) if identity[1] is not None}
-        missing_members = len((unsigned_members or set()) & job_members)
-        # R25-1 (round 25): a signed member row the job never analyzed (a member a cancel left unanalyzed is
-        # in the job's files_cancelled — signing it as well would count it twice) is outside the job's listing.
-        signed_members = {identity for identity in (row_identity(item) for item in signed_items) if identity[1] is not None}
-        outside = (signed_tops - listed) | {f"{top}::{member}" for top, member in signed_members - job_members}
-        if outside:
-            return unknown(REPORT_LISTING_ROWS_OUTSIDE_JOB.format(n=len(outside)))
-    else:
-        source = "walk"
-        try:
-            walk = enumerate_scan_folder(scan_root, recursive=options.recursive, max_files=options.max_files)
-        except OSError:
-            logger.info("report: the scan folder could not be listed", exc_info=True)
-            return unknown(REPORT_LISTING_WALK_FAILED)
-        limit_prefix = WALK_LIMIT_REASON.split("(", 1)[0]
-        if any(isinstance(entry, tuple) and entry[1].startswith(limit_prefix) for entry in walk.symlinks):
-            return unknown(REPORT_LISTING_WALK_LIMIT)
-        if any(path == scan_root for path, _ in walk.iter_errors):
-            return unknown(REPORT_LISTING_WALK_FAILED)
-        entries = [*walk.paths, *(path for path, _ in walk.iter_errors),
-                   *(entry[0] if isinstance(entry, tuple) else entry for entry in walk.symlinks)]
-        listed = {_display_path(path, root=scan_root) for path in entries}
-        enumeration = {
-            "capped": walk.capped, "files_over_cap": walk.files_over_cap,
-            "subfolders_skipped": len(walk.subfolder_detail),
-            "subfolder_files_skipped": sum(entry["files"] for entry in walk.subfolder_detail if isinstance(entry.get("files"), int)),
-            "subfolders_skipped_detail": list(walk.subfolder_detail),
-        }
-        missing_members = len(unsigned_members or ())
-        outside = signed_tops - listed
-        if outside:
-            return unknown(REPORT_LISTING_ROWS_OUTSIDE.format(
-                n=len(outside), recursive="예" if options.recursive else "아니오", max_files=options.max_files,
-            ))
-    return replace(
-        summary, **enumeration,
-        unrecorded_listing={"source": source, "not_in_report": len(listed - signed_tops - (cancelled_tops or set())) + missing_members},
-    )
-
-
-def _scan_root_label(scan_root: Path | None, roots: list[Path]) -> str | None:
-    """R9-9: the scanned folder relative to the (innermost) read root holding it ("." for the root itself)."""
-    if scan_root is None:
-        return None
-    holders = [root for root in roots if _is_within(scan_root, root)]
-    if not holders:
-        return None
-    root = max(holders, key=lambda path: len(path.parts))
-    relative = scan_root.relative_to(root).as_posix()
-    return relative or "."
-
-
-def _excluded_rows_json(excluded: list[tuple[Any, str]]) -> list[dict[str, object]]:
-    """The signed body's record of rows it does not vouch for (X2): path, marker, reason — no client verdict.
-
-    R22-8 (round 22): an upload row also carries ``name_source`` — "server_upload" (this server produced an
-    upload row of that name and sha256) or "client" (the name is only the client's text).
-    """
-    rows: list[dict[str, object]] = []
-    for item, reason in excluded:
-        row: dict[str, object] = {"path": item.path, "marker": UNSIGNED_CLIENT_ROW_MARKER, "reason": reason}
-        if reason in (REPORT_ROW_UPLOAD, REPORT_ROW_UPLOAD_CLIENT_NAME):
-            row["name_source"] = "server_upload" if reason == REPORT_ROW_UPLOAD else "client"
-        rows.append(row)
-    return rows
-
-
 def _report_payload(
-    body: bytes, format_override: str | None = None, *, default_folder: Path | None = None,
-    report_meta: dict[str, object] | None = None,
+    body: bytes, format_override: str | None = None, *, default_folder: Path | None = None, owner: str = LOCAL_OWNER,
 ) -> bytes | dict[str, object]:
-    """Render the HTML or court-admissible forensic PDF report for web-scan results.
+    """Render the HTML / forensic PDF / evidence statement / signed JSON of a server-held scan job (P0R-6).
 
-    ``format=json`` returns the signed report body itself. Raises
-    ReadRootDenied (-> 403) when a posted heatmap_path is outside the roots.
-
-    Accepts the items array the GUI holds (scan/upload payload rows) and
-    checks every row against the scan-result item contract (N11). X2: the
-    posted results are never signed — every row's file is re-analyzed on
-    the server inside the read roots (:func:`_rederive_report_items`) with
-    the server's options, models dir and threshold profile, and the report
-    (verdict, evidence, coverage, SHA-256, ``thresholds`` and ``coverage``
-    provenance) is built from those server rows only. A row that cannot be
-    re-analyzed (file not under a root, a linked folder on its path, an
-    archive member the server's extraction does not produce) is left out of
-    the signed body — the body lists its path under ``excluded_items`` — and
-    the HTML/PDF renderings show it in a separate "서명 제외(클라이언트
-    제공 결과)" section. Case metadata is taken from the request.
-
-    R19-13 (round 19): a server row that differs from its posted row
-    (sha256, status, verdict_code), or a row whose file is gone / whose
-    archive member is no longer produced / whose re-analysis failed, refuses
-    the report in every format: :class:`ApiError` 409 with ``changed_rows``.
+    The request names ``scan_job`` (a folder scan this server ran for this owner — ``/api/scan``, ``async=1`` or
+    ``/api/scan/stream``), the case fields, the format, ``side`` and optionally ``exhibit_paths`` (an ordered
+    selection of the job's row paths: the evidence statement numbers those rows as exhibits in that order; every
+    other row of the job is still in the statement, unnumbered, and in every other format). Nothing the client says
+    about a file is read: the signed rows are the job's rows, the options / threshold and model provenance and the
+    "기록되지 않은" / cancel accounting are the job's; every file the scan hashed is re-hashed on disk and a change
+    refuses the report (409, path and reason only). ``uploads`` (rows of ``/api/analyze-upload``) are listed
+    unsigned under :data:`UNSIGNED_CLIENT_ROW_MARKER` (P6, R22-8). Raises ReadRootDenied (403) when the job's
+    folder is no longer inside the read roots or an upload row names a heatmap outside them.
     """
-    from .report_items import ItemContractError, check_report_item
-
     try:
         data = load_json_body(body)
     except JsonBodyError as exc:
         return {"error": str(exc)}  # R11-3: a too-deep body was a 500
     if not isinstance(data, dict):
         return {"error": REPORT_BODY_NOT_OBJECT}
-    raw_items = data.get("items")
-    if not isinstance(raw_items, list) or not raw_items:
-        return {"error": REPORT_ITEMS_REQUIRED}
-
-    thresholds = data.get("thresholds")
-    if thresholds is not None and not isinstance(thresholds, dict):
-        return {"error": REPORT_FIELD_NOT_OBJECT.format(field="thresholds")}
-    coverage = data.get("coverage")
-    if coverage is not None and not isinstance(coverage, dict):
-        return {"error": REPORT_FIELD_NOT_OBJECT.format(field="coverage")}
+    unknown = sorted(str(key) for key in data if key not in REPORT_FIELDS)
+    if unknown:
+        return {"error": REPORT_UNKNOWN_FIELD.format(fields=", ".join(name[:40] for name in unknown[:8]))}
+    for field in REPORT_CASE_FIELDS:
+        value = data.get(field)
+        if value is not None and not isinstance(value, str):
+            return {"error": REPORT_CASE_FIELD_NOT_STRING.format(field=field)}
+    side = data.get("side")
+    if side is not None and side != "plaintiff":
+        return {"error": REPORT_SIDE_UNSUPPORTED.format(value=str(side)[:40])}
     if format_override is None:
         fmt_or_error = report_format(body, None)
         if isinstance(fmt_or_error, dict):
             return fmt_or_error
         format_override = fmt_or_error
-
-    # QA-SYS-7/P8: a heatmap_path outside the roots is a probe for host files
-    # — 403 whatever else is wrong with the row (a top-level heatmap_path
-    # included, which the GUI also reads).
-    roots_for_probe = _effective_roots(default_folder)
-    for index, row in enumerate(raw_items):
-        nul_field = _row_nul_field(row)
-        if nul_field is not None:
-            # R22-6 (round 22): a NUL in a row's path-like value was a 500 (resolve / lstat ValueError).
-            return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason=PATH_TEXT_NUL.format(field=nul_field))}
-    for row in raw_items:
-        if isinstance(row, dict) and not _posted_heatmaps_allowed(row, roots_for_probe):
-            raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE)
-
-    items = []
-    uploads: list[tuple[Any, str]] = []
-    for index, row in enumerate(raw_items):
-        if isinstance(row, dict) and row.get("source") == UPLOAD_SOURCE:
-            # P6: an upload row is listed as unsigned, never re-analyzed from
-            # a same-named file of the read root.
-            upload = _upload_row_item(row)
-            if upload is None:
-                return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason="path 값이 없습니다")}
-            if not _upload_name_valid(str(upload.path)):
-                return {"error": REPORT_UPLOAD_NAME_INVALID.format(index=index + 1, limit=UPLOAD_ROW_NAME_MAX)}  # R22-8
-            # R22-8: the name's source decides the reason every rendering prints
-            source = _upload_name_source({"path": upload.path, "sha256": row.get("sha256")})
-            uploads.append((upload, REPORT_ROW_UPLOAD if source == "server_upload" else REPORT_ROW_UPLOAD_CLIENT_NAME))
-            continue
-        try:
-            # N11: a row that is not a scan-result item is refused (was
-            # skipped, or rendered as a report about e.g. path 3).
-            check_report_item(row)
-            parsed = _scan_item_from_json(row)
-            if parsed.member is not None and (
-                parsed.container is None or parsed.path != f"{parsed.container}::{parsed.member}"
-            ):
-                # P7: the identity fields and the display path must agree.
-                return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason=REPORT_ROW_IDENTITY_MISMATCH)}
-            items.append(parsed)
-        except ItemContractError as exc:
-            return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason=str(exc))}
-        except (TypeError, ValueError, KeyError, AttributeError) as exc:
-            logger.info("report item %d could not be read", index, exc_info=True)
-            return {"error": REPORT_ITEM_MALFORMED.format(index=index + 1, reason=exception_text(exc))}
-
-    # G31: every disk read this report makes — evidence hashing and heatmap
-    # embedding — is confined to the operator read roots (or, with none
-    # registered, the server's default folder). Scan rows carry relative
-    # paths, so they are resolved against the roots; an unresolved or
-    # escaping path stays unread. N2: a symbolic link — the file itself or
-    # a folder between the root and it — is never followed.
+    req_format = format_override.lower()
     roots = _effective_roots(default_folder)
 
-    def _heatmap_allowed(path_text: str) -> bool:
-        try:
-            resolved = expand_user(path_text).resolve()
-        except OSError:
-            return False
-        return any(_is_within(resolved, r) for r in roots) or is_default_heatmap_output(resolved)
+    uploads = _uploads_from_request(data.get("uploads"), roots)
+    if isinstance(uploads, dict):
+        return uploads
+    job_id = data.get("scan_job")
+    if job_id is None or job_id == "":
+        if not uploads:
+            return {"error": REPORT_SCAN_JOB_REQUIRED}
+        if data.get("exhibit_paths") is not None:
+            return {"error": REPORT_EXHIBIT_PATHS_WITHOUT_JOB}
+        job_id = None
+    elif not isinstance(job_id, str):
+        return {"error": REPORT_SCAN_JOB_NOT_STRING}
 
-    # A posted heatmap_path outside the roots is a probe for host files:
-    # refuse the whole report (403) instead of rendering around it.
-    for item in items:
-        pixel = item.result.pixel_analysis if item.result is not None else None
-        heatmap_path = getattr(pixel, "heatmap_path", None)
-        if heatmap_path and not _heatmap_allowed(str(heatmap_path)):
-            raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE)
+    raw_exhibits = data.get("exhibit_paths")
+    exhibit_paths: list[str] | None = None
+    if raw_exhibits is not None:
+        if not isinstance(raw_exhibits, list) or not all(isinstance(path, str) for path in raw_exhibits):
+            return {"error": REPORT_EXHIBIT_PATHS_INVALID}
+        if not raw_exhibits:
+            return {"error": REPORT_EXHIBIT_PATHS_EMPTY}
+        seen_paths: set[str] = set()
+        for path in raw_exhibits:
+            if path in seen_paths:
+                return {"error": REPORT_EXHIBIT_PATHS_DUPLICATE.format(path=path[:200])}
+            seen_paths.add(path)
+        exhibit_paths = list(raw_exhibits)
 
-    if format_override.lower() in PDF_REPORT_FORMATS:
+    if req_format in PDF_REPORT_FORMATS:
         from .pdf_backend import pymupdf_available
 
         if not pymupdf_available():
-            # B8: the Korean 501 before any re-analysis work (nothing to render with). R22-7 (round 22): the
-            # evidence statement too — it re-analyzed every row and then failed with 500 (증거설명서 PDF 생성
-            # 실패), not the documented 501 (service.md E31).
+            # B8 / R22-7: the Korean 501 before any work (nothing to render with).
             return dict(PDF_REPORT_UNAVAILABLE_BODY)
 
-    # P1: rows are resolved against the scanned folder only (inside a read
-    # root; 403 outside) — required whenever a row is to be re-analyzed.
-    scan_root = _report_scan_root(data.get("scan_root"), roots, required=bool(items))
-    if isinstance(scan_root, dict):
-        return scan_root
-    hasher = _ReportHasher(roots, scan_root)
-    _resolve_item_path = hasher.resolve
-
-    def _path_allowed(path_text: str) -> bool:
-        return _resolve_item_path(path_text) is not None
-
-    # X2: nothing the client says about a file is signed. Each row is
-    # re-analyzed on the server (scan_file_run inside the roots — an archive
-    # re-extracted exactly as the scan extracted it, N10; a symbolic link
-    # never followed, N2) and replaced by the server's row: verdict,
-    # evidence, coverage and SHA-256. Client sha256 values were already
-    # never trusted (G11). The threshold/weights provenance is the server's
-    # too — posted ``thresholds``/``coverage`` are ignored.
     from .reports import signed_report_body
-    from .vendor_weights import weights_coverage
 
-    # The request may name the analysis options the scan used (``options``:
-    # the /api/scan query keys — pixel, heatmaps, deep_signals,
-    # no_default_engine, model_path/fusion_profile as bare names inside the
-    # models dir); they are validated like a scan request and only choose
-    # what the server runs.
-    # GUI-REV G-1/G-9: the evidence statement's exhibit choice and submitting
-    # side. ``exhibit_paths`` only picks which rows get exhibit numbers — every
-    # posted row is still re-analyzed, counted and signed (the rest go to the
-    # statement's appendix); other formats always carry every row.
-    raw_exhibits = data.get("exhibit_paths")
-    if raw_exhibits is not None and not (isinstance(raw_exhibits, list) and all(isinstance(path, str) for path in raw_exhibits)):
-        return {"error": REPORT_EXHIBIT_PATHS_INVALID}
-    # GUI-REV2 H-1: an ordered list — the statement numbers exhibits in this order.
-    exhibit_paths = list(raw_exhibits) if raw_exhibits is not None else None
-    submitter_side = data.get("submitter_side", "plaintiff")
-    if submitter_side not in ("plaintiff", "defendant"):
-        return {"error": REPORT_SUBMITTER_SIDE_INVALID}
-    raw_options = data.get("options")
-    if raw_options is not None and not isinstance(raw_options, dict):
-        return {"error": REPORT_FIELD_NOT_OBJECT.format(field="options")}
-    try:
-        options = _web_options(
-            # R23-13: a JSON null is an unset option (its default), never the text "None" (now a 400 for a flag)
-            {str(key): [str(value).lower() if isinstance(value, bool) else str(value)] for key, value in (raw_options or {}).items() if value is not None},
-        )
-    except InvalidOption as exc:
-        return {"error": str(exc)}
-    server_thresholds = load_thresholds(options)
-    # R20-4 / R21-5 / R22-4 / R24-1 (merge): a malformed duplicate_of, a non-canonical, repeated or
-    # aliased row path, a "cancelled" container row outside a cancelled scan is a malformed request
-    # (400) for every format, the preview included.
-    duplicate_error = (
-        _posted_path_error(items) or _posted_alias_error(items, scan_root) or _posted_duplicate_error(items)
-        # R24-1: a "cancelled" container row only in a report of a cancelled scan — R25-1: the server's own job's
-        or _posted_cancelled_row_error(items, data.get("scan_job"), scan_root)
-    )
-    if duplicate_error is not None:
-        hasher.close()
-        return {"error": duplicate_error}  # R21-5 / R20-4: 400
-    folder_rows_posted = bool(items)  # R25-1: the listing needs the scan folder even when no row ends up signed
-    # R25-1: which posted rows a cancel left unanalyzed is the server's own cancelled scan job's knowledge only —
-    # one decision for the export and (merge) the preview.
-    job_cancelled = _job_cancelled_containers(data.get("scan_job"), scan_root)
-    req_format = format_override.lower()
-    unsigned_members: set[tuple[str, str]] = set()
-    if req_format == "evidence-preview":
-        # GUI-REV2 H-2: the preview is built from the posted rows as they are —
-        # no re-analysis, nothing signed; the export re-analyzes, compares (R19-13) and signs.
-        # Merge of R23-5: without the re-analysis the preview knows no archive member the post
-        # left out (unsigned_members stays empty) — the GUI posts every member row of its scan.
-        hasher.close()
-        # Merge of R21-1: the export never signs a walk-limit folder row (excluded with
-        # REPORT_ROW_WALK_LIMIT), so the preview lists it the same way — preview equals output.
-        excluded: list[tuple[Any, str]] = [(item, REPORT_ROW_WALK_LIMIT) for item in items if _posted_walk_limit_row(item)]
-        items = [item for item in items if not _posted_walk_limit_row(item)]
-        # Merge of R24-1 / R25-1: the export excludes a container its server-held cancelled job lists as
-        # "cancelled" with REPORT_ROW_CANCELLED (unchanged; changed is the 409); the preview takes the same
-        # decision (job_cancelled — never the posted status alone).
-        def held_cancelled(item: Any) -> bool:
-            from .result_text import row_identity
-
-            return _is_cancelled_container_row(item) and row_identity(item)[0] in job_cancelled
-
-        excluded += [(item, REPORT_ROW_CANCELLED) for item in items if held_cancelled(item)]
-        items = [item for item in items if not held_cancelled(item)]
-    else:
+    items: list[Any] = []
+    scan_root: Path | None = None
+    context: dict[str, Any] = {}
+    job_summary: dict[str, Any] = {}
+    cancelled = False
+    files: _JobFiles | None = None
+    if job_id is not None:
         try:
-            items, excluded, changed, unsigned_members = _rederive_report_items(items, hasher, options, server_thresholds, job_cancelled)
-        finally:
-            hasher.close()
+            job = STORE.get(job_id, owner, evidence=roots)
+        except JobIntegrityError as exc:
+            return ApiError(str(exc), JOB_INTEGRITY_STATUS)
+        if job is None:
+            return ApiError(REPORT_SCAN_JOB_UNKNOWN, 404)
+        if job.get("status") == "running":
+            return ApiError(REPORT_SCAN_JOB_NOT_FINISHED, 409)
+        result = job.get("result")
+        if job.get("status") not in ("done", "cancelled") or not isinstance(result, dict) or not isinstance(result.get("items"), list):
+            return ApiError(REPORT_SCAN_JOB_FAILED, 409)
+        raw_context = result.get(CONTEXT_KEY)
+        context = raw_context if isinstance(raw_context, dict) else {}
+        root_text = context.get("scan_root") or result.get("scan_root")
+        if not isinstance(root_text, str) or not root_text:
+            return ApiError(REPORT_SCAN_JOB_FAILED, 409)
+        scan_root = Path(root_text)
+        if not any(_is_within(scan_root, root) for root in roots):
+            raise ReadRootDenied(READ_ROOT_DENIED_MESSAGE)  # G31: a root removed since the scan
+        try:
+            items = [_scan_item_from_json(row) for row in result["items"] if isinstance(row, dict)]
+        except (TypeError, ValueError, KeyError, AttributeError):
+            logger.warning("report: the rows of scan job %s could not be read", job_id, exc_info=True)
+            return ApiError(REPORT_SCAN_JOB_FAILED, 409)
+        summary_json = result.get("summary")
+        job_summary = summary_json if isinstance(summary_json, dict) else {}
+        cancelled = job.get("status") == "cancelled" or job_summary.get("cancelled") is True
+        if exhibit_paths is not None:
+            known = {item.path for item in items}
+            unknown_paths = [path for path in exhibit_paths if path not in known]
+            if unknown_paths:
+                return {"error": REPORT_EXHIBIT_PATHS_UNKNOWN.format(count=len(unknown_paths), path=unknown_paths[0][:200])}
+        files = _JobFiles(scan_root)
+        try:
+            # GUI preview: no re-hash (it runs on every selection change); the export refuses a changed file.
+            changed = _changed_job_rows(items, files) if req_format != "evidence-preview" else []
+        except Exception:
+            files.close()
+            raise
         if changed:
-            # R19-13 (round 19): never sign a re-analysis that differs from what the examiner saw.
-            # Comes before the evidence statement's exhibit checks (GUI-REV2 H-7, GUI-REV3 J-7).
-            return ApiError(REPORT_ROWS_CHANGED, REPORT_ROWS_CHANGED_STATUS, changed_rows=changed)
-    excluded = uploads + excluded  # P6: upload rows first, in posted order
-    thresholds = server_thresholds
-    coverage = dict(weights_coverage(options.resolved_models_dir()))
-    excluded_rows = _excluded_rows_json(excluded)
-    if report_meta is not None:
-        # GUI-REV5 L-2: the rows this report lists as 서명 제외, for the response headers.
-        report_meta["excluded_rows"] = excluded_rows
+            files.close()
+            # R19-13 (round 19): never sign rows whose files changed after the scan the examiner saw.
+            return ApiError(REPORT_ROWS_CHANGED, REPORT_ROWS_CHANGED_STATUS, changed_rows=changed[:200])
 
-    # Same counting rule as the CLI (core.summarize) so web and CLI report
-    # headers agree on every verdict count.
-    summary = summarize(items, capped=False)
-    # R18-3 (round 18): a cancelled scan's report says it is a partial result.
-    # The client's claim is taken as given — it can only add the caveat and
-    # the "사용자 취소" count, never remove a row or change a verdict.
-    # R23-3 (round 23): the server's own cancelled scan_job sets it whatever the post says.
-    summary, cancel_source = _with_posted_cancel(summary, data.get("summary"), data.get("scan_job"), scan_root)
-    # R22-1 (round 22): the cap / flat-scan / missing-row counts are the server's own, or "확인 불가".
-    # R23-5: and the archive members the server's re-analysis yields that the post left out.
-    # R24-1: a container excluded as cancelled is accounted for (its row is listed unsigned with the reason
-    # "사용자 취소", its unanalyzed members are files_cancelled) — not also a file "without a signed row".
-    # Merge: the preview takes the same listing (its job, else its own walk of scan_root) — the
-    # preview's 기록되지 않은 파일 box equals the export's.
-    from .result_text import row_identity
-
-    cancelled_tops = {row_identity(item)[0] for item, reason in excluded if reason == REPORT_ROW_CANCELLED}
-    summary = _report_listing(
-        summary, items, scan_root if folder_rows_posted else None, options, data.get("scan_job"), unsigned_members, cancelled_tops,
-    )
-    # G30: web reports are signed when DEEPFAKE_LENS_REPORT_KEY is set and
-    # say "서명 없음" otherwise; the pins are those of the server's models dir.
-    from .profile_pins import profile_pins
-
-    # R9-9: the scanned folder (relative to its read root) is signed and shown.
-    root_label = _scan_root_label(scan_root, roots)
-    # R19-3 (round 19): the options the server re-analyzed with are signed and printed.
-    analysis_options = report_analysis_options(options)
-    # GUI-REV2 H-7: an evidence statement with no exhibit, or naming a row that is
-    # not one of the signed (re-analyzed) rows, is refused — never signed with the
-    # unknown rows silently moved to the appendix.
-    if exhibit_paths is not None and req_format in (*EVIDENCE_REPORT_FORMATS, "evidence-preview"):
-        if not exhibit_paths:
-            return {"error": REPORT_EXHIBIT_PATHS_EMPTY}
-        known = {item.path for item in items}
-        unknown = [path for path in dict.fromkeys(exhibit_paths) if path not in known]
-        if unknown:
-            # GUI-REV3 J-7: a chosen row the server could not re-analyze (file gone,
-            # outside the roots, …) is said so, with its reason — not "not a signed row".
-            not_derived = {str(getattr(item, "path", "")): reason for item, reason in excluded}
-            lost = [path for path in unknown if path in not_derived]
-            if lost:
-                return {
-                    "error": REPORT_EXHIBIT_PATHS_NOT_REDERIVED.format(count=len(lost)), "code": "exhibit_not_rederived",
-                    "not_rederived_exhibit_paths": [{"path": path, "reason": not_derived[path]} for path in lost[:100]],
-                    "unknown_exhibit_paths": unknown[:100],
-                }
-            return {"error": REPORT_EXHIBIT_PATHS_UNKNOWN.format(count=len(unknown)), "code": "exhibit_unknown", "unknown_exhibit_paths": unknown[:100]}
-        if len(set(exhibit_paths)) != len(exhibit_paths):
-            return {"error": REPORT_EXHIBIT_PATHS_DUPLICATE}
-
-    def _statement() -> Any:
-        from .evidence_statement import build_evidence_statement, side_placeholders
-        from .office_config import DEFAULT_CASE_NAME
-
-        return build_evidence_statement(
-            items,
-            case_no=str(data.get("case_no") or "(사건번호 입력)"),
-            case_name=str(data.get("case_name") or DEFAULT_CASE_NAME),  # R18-16
-            # GUI-REV2 H-3: the client placeholder sits in the submitting side's box.
-            plaintiff=str(data.get("plaintiff") or side_placeholders(str(submitter_side))[0]),
-            defendant=str(data.get("defendant") or side_placeholders(str(submitter_side))[1]),
-            court=str(data.get("court") or "○○지방법원 귀중"),
-            # N17: the request's value, else the operator config, else blank.
-            law_firm=str(data.get("law_firm") or "") or None,
-            contact=str(data.get("contact") or "") or None,
-            center=str(data.get("center") or "디지털포렌식 감정센터"),
-            thresholds=thresholds,
-            coverage=coverage,
-            excluded_items=excluded_rows,
-            summary=summary,  # R18-3: the "사용자 취소" count of a cancelled scan
-            exhibit_paths=exhibit_paths,  # GUI-REV G-1
-            submitter_side=str(submitter_side),  # GUI-REV G-9
-        )
-
-    if req_format == "evidence-preview":
-        from .evidence_statement import statement_preview
-        from .reports import analysis_options_line, scan_root_line
-
-        # Merge of R21-1: the PDF prints every excluded row (unsigned_rows=excluded — uploads first,
-        # then the walk-limit rows the preview excludes like the export), so the preview does too.
-        preview = statement_preview(_statement(), excluded)
-        preview["scan_root_line"] = (scan_root_line({"scan_root": root_label}) or "") if root_label else ""
-        # R19-3: the PDF's case box also prints the re-analysis options line.
-        preview["analysis_options_line"] = analysis_options_line({"analysis_options": analysis_options}) or ""
-        # Merge of R22-1: the listing behind the 기록되지 않은 파일 box (source scan_job / walk /
-        # unknown, not_in_report, reason) — the GUI's checklist says "확인 불가" from it.
-        preview["unrecorded_listing"] = dict(getattr(summary, "unrecorded_listing", None) or {})
-        return _preview_as_pdf_draws(preview)
-    signed = signed_report_body(
-        summary, items, thresholds=thresholds, coverage=coverage,
-        report_format=req_format, model_pins=profile_pins(_models_dir()),
-        excluded_items=excluded_rows, scan_root=root_label,
-        analysis_options=analysis_options, files_cancelled_source=cancel_source,
-    )
-    if req_format == "json":
-        return signed
-
-    if req_format == "evidence-json":
-        # GUI-REV2 H-1: the evidence statement's signed body — the same statement
-        # the PDF renders (exhibit numbers, appendix), without the PDF renderer.
-        from .evidence_statement import signed_statement_body
-
-        return signed_statement_body(_statement(), model_pins=profile_pins(_models_dir()), scan_root=root_label, analysis_options=analysis_options)
-    suffix = ".pdf" if req_format in ("pdf", "evidence", "evidence-statement") else ".html"
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=scratch_dir()) as tmp:
-        tmp_path = Path(tmp.name)
     try:
-        if req_format in ("evidence", "evidence-statement"):
-            from .evidence_statement import (
-                PdfDependencyMissing as StatementPdfMissing,
-                signed_statement_body,
-                write_evidence_statement_pdf,
-            )
-            try:
-                stmt = _statement()
-                # G30: signed like the other web reports (server key + pins).
-                write_evidence_statement_pdf(
-                    tmp_path, stmt, signed=signed_statement_body(
-                        stmt, model_pins=profile_pins(_models_dir()), scan_root=root_label, analysis_options=analysis_options,
-                    ),
-                    unsigned_rows=excluded,
-                )
-            except StatementPdfMissing:
-                return dict(PDF_REPORT_UNAVAILABLE_BODY)  # R22-7: 501 as documented (E31), never a 500
-            except RuntimeError as exc:
-                return {"error": f"{EVIDENCE_PDF_FAILED_PREFIX}{exc}", "hint": "`pip install 'deepfake-lens[forensic]'` 후 재시도하거나 Markdown 출력을 사용하세요."}
-        elif req_format == "pdf":
-            from .evidence_statement import PdfDependencyMissing
-            from .reports import write_forensic_pdf_report
-            exhibit_no = str(data.get("exhibit_no") or "갑 제        호증")
-            try:
-                write_forensic_pdf_report(
-                    tmp_path, summary, items,
-                    exhibit_no=exhibit_no,
-                    thresholds=thresholds,
-                    coverage=coverage,
-                    resolve_path=_resolve_item_path,
-                    allow_path=_path_allowed,
-                    signed_report=signed,
-                    law_firm=str(data.get("law_firm") or "") or None,  # N17
-                    contact=str(data.get("contact") or "") or None,
-                    unsigned_rows=excluded,
-                )
-            except PdfDependencyMissing:
-                # B8: no English Latin-1 fallback PDF — a Korean error (HTTP 501).
-                return dict(PDF_REPORT_UNAVAILABLE_BODY)
+        excluded_rows = _excluded_rows_json(uploads)
+        thresholds = context.get("thresholds")
+        coverage = context.get("coverage") if isinstance(context.get("coverage"), dict) else None
+        analysis_options = context.get("analysis_options") if isinstance(context.get("analysis_options"), dict) else None
+        if job_id is not None:
+            summary = _job_summary(items, job_summary, cancelled)
         else:
-            write_html_report(tmp_path, summary, items, thresholds=thresholds, allow_path=_heatmap_allowed, signed_report=signed, unsigned_rows=excluded)
-        return tmp_path.read_bytes()
+            summary = replace(
+                summarize([], capped=False),
+                unrecorded_listing={"source": "unknown", "not_in_report": 0, "reason": REPORT_LISTING_NO_SCAN_ROOT},
+            )
+        root_label = _scan_root_label(scan_root, roots)
+        case = {field: data.get(field) for field in REPORT_CASE_FIELDS}
+
+        def _statement() -> Any:
+            """The evidence statement of this job — one build for the PDF and the GUI preview."""
+            from .evidence_statement import build_evidence_statement
+            from .office_config import DEFAULT_CASE_NAME
+
+            return build_evidence_statement(
+                items,
+                case_no=str(case["case_no"] or "(사건번호 입력)"),
+                case_name=str(case["case_name"] or DEFAULT_CASE_NAME),  # R18-16
+                plaintiff=str(case["plaintiff"] or "(의뢰사 상호명 입력) 귀하"),
+                defendant=str(case["defendant"] or "(피고/피의자 성명 입력)"),
+                court=str(case["court"] or "○○지방법원 귀중"),
+                # N17: the request's value, else the operator config, else blank.
+                law_firm=str(case["law_firm"] or "") or None,
+                contact=str(case["contact"] or "") or None,
+                center=str(case["center"] or "디지털포렌식 감정센터"),
+                thresholds=thresholds,
+                coverage=coverage,
+                excluded_items=excluded_rows,
+                summary=summary,  # R18-3: the "사용자 취소" count of a cancelled scan
+                exhibit_paths=exhibit_paths,
+            )
+
+        if req_format == "evidence-preview":
+            from .evidence_statement import statement_preview
+            from .reports import analysis_options_line, scan_root_line
+
+            preview = statement_preview(_statement(), uploads)
+            preview["scan_root_line"] = (scan_root_line({"scan_root": root_label}) or "") if root_label else ""
+            preview["analysis_options_line"] = analysis_options_line({"analysis_options": analysis_options}) or ""  # R19-3
+            # R22-1: the listing behind the 기록되지 않은 파일 box, for the GUI checklist (not drawn).
+            preview["unrecorded_listing"] = dict(getattr(summary, "unrecorded_listing", None) or {})
+            return _preview_as_pdf_draws(preview)
+        signed = signed_report_body(
+            summary, items, thresholds=thresholds, coverage=coverage,
+            report_format=req_format,
+            excluded_items=excluded_rows, scan_root=root_label,
+            analysis_options=analysis_options, files_cancelled_source="server" if cancelled else None,
+            exhibit_paths=exhibit_paths,
+        )
+        if req_format == "json":
+            return signed
+        resolve = files.resolve if files is not None else (lambda _path: None)
+
+        def _heatmap_allowed(path_text: str) -> bool:
+            try:
+                resolved = expand_user(path_text).resolve()
+            except OSError:
+                return False
+            return any(_is_within(resolved, r) for r in roots) or is_default_heatmap_output(resolved)
+
+        suffix = ".pdf" if req_format in PDF_REPORT_FORMATS else ".html"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=scratch_dir()) as tmp:
+            tmp_path = Path(tmp.name)
+        try:
+            if req_format in ("evidence", "evidence-statement"):
+                from .evidence_statement import (
+                    PdfDependencyMissing as StatementPdfMissing,
+                    signed_statement_body,
+                    write_evidence_statement_pdf,
+                )
+                try:
+                    stmt = _statement()  # the same build as the GUI preview
+                    write_evidence_statement_pdf(
+                        tmp_path, stmt, signed=signed_statement_body(
+                            stmt, scan_root=root_label, analysis_options=analysis_options,
+                        ),
+                        unsigned_rows=uploads,
+                    )
+                except StatementPdfMissing:
+                    return dict(PDF_REPORT_UNAVAILABLE_BODY)  # R22-7: 501 as documented (E31), never a 500
+                except RuntimeError as exc:
+                    return {"error": f"{EVIDENCE_PDF_FAILED_PREFIX}{exc}", "hint": "`pip install 'deepfake-lens[forensic]'` 후 재시도하거나 Markdown 출력을 사용하세요."}
+            elif req_format == "pdf":
+                from .evidence_statement import PdfDependencyMissing
+                from .reports import write_forensic_pdf_report
+                try:
+                    write_forensic_pdf_report(
+                        tmp_path, summary, items,
+                        exhibit_no=str(case["exhibit_no"] or "갑 제        호증"),
+                        thresholds=thresholds,
+                        coverage=coverage,
+                        resolve_path=resolve,
+                        allow_path=lambda path_text: resolve(path_text) is not None,
+                        signed_report=signed,
+                        law_firm=str(case["law_firm"] or "") or None,  # N17
+                        contact=str(case["contact"] or "") or None,
+                        unsigned_rows=uploads,
+                    )
+                except PdfDependencyMissing:
+                    return dict(PDF_REPORT_UNAVAILABLE_BODY)  # B8: a Korean error (HTTP 501)
+            else:
+                write_html_report(tmp_path, summary, items, thresholds=thresholds, allow_path=_heatmap_allowed, signed_report=signed, unsigned_rows=uploads)
+            return tmp_path.read_bytes()
+        finally:
+            tmp_path.unlink(missing_ok=True)
     finally:
-        tmp_path.unlink(missing_ok=True)
+        if files is not None:
+            files.close()

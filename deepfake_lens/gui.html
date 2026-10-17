@@ -54,8 +54,9 @@
                                     <legend>의뢰 측 <span class="req">증거설명서에 필수 · 기본값 없음</span></legend>
                                     <div class="radios">
                                         <label class="check"><input type="radio" name="submitter-side" value="plaintiff">원고·고소인 측 (갑호증)</label>
-                                        <label class="check"><input type="radio" name="submitter-side" value="defendant">피고·피의자 측 (을호증)</label>
+                                        <label class="check"><input type="radio" name="submitter-side" value="defendant" disabled aria-describedby="side-note">피고·피의자 측 (을호증)</label>
                                     </div>
+                                    <p class="hint" id="side-note">피고·피의자 측(을호증) 증거설명서는 아직 서버가 만들지 않습니다(후속 작업 예정) — 지금은 원고·고소인 측만 고를 수 있습니다.</p>
                                 </fieldset>
                                 <details class="case-more">
                                     <summary>그 밖의 항목 (제출 법원·법무법인·감정센터·연락처)</summary>
@@ -126,7 +127,7 @@
                                 <li><span class="mk mk-u" aria-hidden="true"></span><span><b>판단 불가</b> — 결론을 낼 근거가 없거나 검사가 실패했습니다. 원본이라는 뜻이 아닙니다.</span></li>
                                 <li><span class="mk mk-x" aria-hidden="true"></span><span><b>분석 못 함</b> — 미지원 형식·처리 실패·중복·건너뜀.</span></li>
                             </ul>
-                            <p class="hint">근거는 결정적(메타데이터·C2PA) / 통계적(모델) / 어휘적(키워드)으로 나뉘며, 통계적·어휘적 근거는 보정 전까지 결론을 바꾸지 못합니다. 텍스트 결과는 항상 참고 등급입니다.</p>
+                            <p class="hint">근거는 재현 가능한 기록(메타데이터·C2PA) / 통계적(모델) / 어휘적(키워드)으로 나뉘며, 통계적·어휘적 근거는 보정 전까지 결론을 바꾸지 못합니다. 텍스트 결과는 항상 참고 등급입니다.</p>
                         </details>
                     </div>
 
@@ -260,7 +261,7 @@
                                 <label class="group-row"><input type="checkbox" id="inc-undet" data-band="undetermined"><span class="mk mk-u" aria-hidden="true"></span><span><span class="gl">판단 불가</span> <span class="hint">근거 없음으로 함께 기재</span></span><span class="mono" id="inc-undet-n">0개</span></label>
                                 <label class="group-row"><input type="checkbox" id="inc-other" data-band="other"><span class="mk mk-x" aria-hidden="true"></span><span><span class="gl">분석 못 함</span> <span class="hint">미지원·실패·중복</span></span><span class="mono" id="inc-other-n">0개</span></label>
                             </div>
-                            <p class="hint">고른 파일에 증거설명서의 호증 번호가 붙습니다. 넣지 않은 파일도 부록 목록에 결론·해시와 함께 남고, 감정 보고서·HTML·서명된 JSON에는 모든 파일이 실립니다.</p>
+                            <p class="hint">고른 파일에 고른 순서대로 증거설명서의 호증 번호가 붙습니다. 고르지 않은 검사 행도 번호 없이 "서증 외(검사 행)"로 표에 남고, 감정 보고서·HTML·서명된 JSON에는 모든 행이 실립니다. 보고서는 서버가 보관한 이 검사 작업의 행으로 만듭니다.</p>
                         </fieldset>
                         <section aria-labelledby="fmt-h">
                             <h2 class="sec-h" id="fmt-h">형식</h2>
@@ -276,11 +277,6 @@
                                 <ul id="export-alert-list"></ul>
                                 <p id="export-alert-fail" hidden></p>
                                 <button class="btn btn-primary" id="export-alert-rescan" type="button">다시 검사</button>
-                            </div>
-                            <div class="export-warn" id="export-warn" role="status" hidden>
-                                <p class="t"><span class="tag tag-warn">주의</span> <span id="export-warn-text"></span></p>
-                                <ul id="export-warn-list"></ul>
-                                <button class="btn" id="export-warn-rescan" type="button">다시 검사</button>
                             </div>
                         </section>
                     </div>

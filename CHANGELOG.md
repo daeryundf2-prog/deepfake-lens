@@ -16,14 +16,32 @@ grouped by work pass rather than release.
 - `/api/scan-status` reports `done`/`total`/`current`/`recent`/
   `elapsed_seconds`; a running scan job is no longer evicted after 15
   minutes; `/api/stats` adds `default_folder`(`_b64`) and `pdf_available`.
-- GUI-REV (adversarial review of 39e11d9): exports carry every row; the
-  evidence statement takes `exhibit_paths` (the rest in a signed appendix)
-  and `submitter_side` (갑/을호증, chosen in the GUI, no default).
-- GUI-REV5: a successful `/api/report` (any format) sends
-  `X-Deepfake-Lens-Excluded-Count` / `X-Deepfake-Lens-Excluded-Rows` (the
-  rows it lists as `서명 제외`); the GUI says every export failure next to
-  the export buttons, once, and keeps the 서명 제외 warning under its own
-  주의 marker for the same results.
+- Merged onto P0R-6 (reports from the server-held scan job): the GUI sends
+  `scan_job`, the ordered `exhibit_paths`, `side` (plaintiff only — the
+  defendant side waits for BL-15) and the case fields; `format=evidence-preview`
+  is the evidence statement's PDF texts from the same job and build. The
+  earlier posted-row report designs (exhibit appendix, submitter_side,
+  excluded-rows headers) are gone with P0R-6.
+
+## 2026-10 — techniques-2026 (machine-readable marks)
+
+### Added
+- C2PA 2.2–2.4 reading (c2pa-python >= 0.38): offline verification against the
+  bundled C2PA trust list (+ `DEEPFAKE_LENS_C2PA_TRUST_ANCHORS`), AI Disclosure,
+  soft binding, watermark actions, embedded data, ingredient source types; the
+  validator spec version and trust list in every C2PA item and coverage reason;
+  c2pa checks on audio, video and documents. Full IPTC digital source type
+  vocabulary (`digital_source_type.py`).
+- Invisible watermark checks: SDXL's fixed imwatermark message (`watermark_sdxl`),
+  Adobe TrustMark Q/P/C with the C2PA soft-binding cross-check
+  (`watermark_trustmark`, `[watermark]` extra), Meta VideoSeal / AudioSeal
+  (`watermark_videoseal`, `watermark_audioseal`, `[watermark_meta]` extra) —
+  weights pinned in `models/assets.json`, `scripts/fetch_watermark_models.py`;
+  measured false-positive rates in `docs/WATERMARK-MEASUREMENTS.md`.
+- `result.marking_context` and the closing evidence item 「기계판독 표식 확인
+  결과(EU 인공지능법 제50조·인공지능기본법 관련)」; `online_detection` coverage
+  for online-only detectors (never run). See `docs/MACHINE-READABLE-MARKS.md`.
+- Gate image `deepfake-lens-gate:tech` (`scripts/gate/Dockerfile.tech`).
 
 ## 2026-10 — phase 0, round 19
 

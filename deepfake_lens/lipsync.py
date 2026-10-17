@@ -21,6 +21,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,8 @@ _WEAK_CORRELATION = 0.12
 # Offsets beyond ~0.5 s are implausible for a genuine in-camera recording.
 _LARGE_OFFSET_SECONDS = 0.5
 _FFMPEG_TIMEOUT_SECONDS = 60
+# R26-10 (round 26): the step an ffmpeg timeout reason names.
+FFMPEG_STEP_LIPSYNC_AUDIO = "립싱크 음성 포락선 추출"
 # R17-4 (round 17): an empty envelope means only "no audio track" now — an
 # ffmpeg that cannot run or fails raises FfmpegError (a failed check).
 LIPSYNC_NO_AUDIO_NOTE = "오디오 트랙이 없습니다."
@@ -166,8 +169,10 @@ def _audio_envelope(video_path: Path, *, max_seconds: float) -> tuple[list[float
     rate = 8000
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False, dir=scratch_dir()) as tmp:
         tmp_path = Path(tmp.name)
+    started = time.monotonic()
     try:
         with native_safe_path(video_path, for_child=True) as native_video:  # R12-1; R23-1: absolute for the child
+            started = time.monotonic()
             proc = run_child(  # R15-1: a tracked child, stopped by the shutdown cleanup
                 [
                     "ffmpeg", *FFMPEG_QUIET_ARGS, "-y", "-i", native_video,
@@ -192,7 +197,10 @@ def _audio_envelope(video_path: Path, *, max_seconds: float) -> tuple[list[float
         envelope = [float(np.sqrt(np.mean(samples[i : i + hop] ** 2))) for i in range(0, len(samples) - hop, hop)]
         return envelope, window_seconds
     except subprocess.TimeoutExpired as exc:
-        raise FfmpegError(f"ffmpeg가 {_FFMPEG_TIMEOUT_SECONDS}초 안에 끝나지 않음") from exc
+        # R26-10 (round 26): the step and the file too (was 「ffmpeg가 N초 안에 끝나지 않음」)
+        from .native_stderr import ffmpeg_timeout
+
+        raise ffmpeg_timeout(FFMPEG_STEP_LIPSYNC_AUDIO, video_path, _FFMPEG_TIMEOUT_SECONDS, time.monotonic() - started) from exc
     except wave.Error as exc:
         # R17-4: ffmpeg ended 0 but its WAV cannot be read — a failure, not "no track".
         raise FfmpegError(f"ffmpeg 출력 WAV를 읽지 못함: {exc}") from exc

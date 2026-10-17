@@ -208,7 +208,12 @@ class OutputGenerationMetaTest(unittest.TestCase):
         if inside.returncode != 0 or inside.stdout.strip() != "true":
             self.skipTest("not a git work tree")
         relative = GOLDEN_PATH.relative_to(REPO).as_posix()
-        commits = subprocess.run([git, "log", "--format=%H", "HEAD", "--", relative], cwd=REPO, capture_output=True, text=True, check=False).stdout.split()
+        # P0R-0: the first-parent history only — a merged side branch (techniques-2026, which recorded its own
+        # generations 13–17 in parallel with phase0's) has a golden history of its own; the merge commit records
+        # the next generation above both, and that branch's entries are not this branch's.
+        commits = subprocess.run(
+            [git, "log", "--first-parent", "--format=%H", "HEAD", "--", relative], cwd=REPO, capture_output=True, text=True, check=False,
+        ).stdout.split()
         current = {entry["generation"]: entry for entry in load_record()["history"]}
         for commit in commits:
             shown = subprocess.run([git, "show", f"{commit}:{relative}"], cwd=REPO, capture_output=True, text=True, check=False)

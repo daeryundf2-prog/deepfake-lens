@@ -225,6 +225,20 @@ def main() -> int:
             page.wait_for_function("() => document.querySelector('#detail .rev-sync-status').textContent === '서버에 저장됨'", timeout=10_000)
             console_errors[:] = [e for e in console_errors if "status of 409" not in e]
 
+            # 4b''. Merge of phase0 P0R-12: a conclusion's caveats ("이 결론이 틀릴 수 있는 이유") are in the
+            #       evidence panel outside any disclosure, and a self-declared record is marked.
+            caveated = page.evaluate("results.findIndex(e => e.row && ((e.item.result || {}).conclusion_caveats || []).length)")
+            if caveated >= 0:
+                page.evaluate(f"results[{caveated}].row.click()")
+                section = page.locator("#detail .d-caveat")
+                section.wait_for(timeout=10_000)
+                assert "이 결론이 틀릴 수 있는 이유" in section.inner_text() and section.is_visible()
+                if page.evaluate(f"((results[{caveated}].item.result || {{}}).evidence || []).some(e => e.self_declared)"):
+                    assert page.locator("#detail .self-declared").count() >= 1, "a self-declared record is not marked"
+                print("gui_smoke: conclusion caveats shown in the evidence panel")
+            else:
+                print("gui_smoke: no row with conclusion caveats in this folder — caveat display not exercised")
+
             # 4c. A11Y-5: list keys only inside the ledger (roving tabindex), J/K switchable.
             assert page.locator("#res-list .row[tabindex='0']").count() == 1, "roving tabindex must leave one tab stop"
             if rows.count() > 2:
@@ -266,13 +280,19 @@ def main() -> int:
             assert "(의뢰 측 미선택)" in unsided, "the preview must mark the missing side"
             assert "갑 제1호증" not in unsided and "원고(고소인)의 소송대리인은" not in unsided, "the preview drew the plaintiff form without a side"
             assert "의뢰 측" in page.evaluate("exportBlockReason('pdf', selectedEntries())")
-            page.check("input[name='submitter-side'][value='defendant']")
-            assert "을 제1호증" in a4_ready()
-            assert page.evaluate("exportPayload('evidence').submitter_side") == "defendant"
+            # Merge of P0R-6: the server makes the plaintiff side only (BL-15) — the defendant choice is
+            # disabled with a note, the side is sent as `side`.
+            assert page.locator("input[name='submitter-side'][value='defendant']").is_disabled(), "the defendant side must wait for BL-15"
+            assert "후속 작업 예정" in page.locator("#side-note").inner_text()
+            page.check("input[name='submitter-side'][value='plaintiff']")
+            assert "갑 제1호증" in a4_ready()
+            assert page.evaluate("exportPayload('evidence').side") == "plaintiff"
+            payload_keys = set(page.evaluate("Object.keys(exportPayload('evidence'))"))
+            assert not payload_keys & {"items", "summary", "options", "scan_root", "thresholds", "coverage"}, payload_keys
             # GUI-REV3 J-10: the empty boxes are named apart.
             assert "원고·고소인 칸과 피고·피의자 칸이 비어 있습니다" in page.locator("#report-checks").inner_text()
             # GUI-REV2 H-3: the forensic PDF's exhibit box follows the side.
-            assert page.evaluate("exportPayload('pdf').exhibit_no").startswith("을 제"), "forensic PDF exhibit box must follow the side"
+            assert page.evaluate("exportPayload('pdf').exhibit_no").startswith("갑 제"), "forensic PDF exhibit box must follow the side"
             assert "의뢰 측" not in page.evaluate("exportBlockReason('evidence', selectedEntries())")
             note = page.locator("#export-note").inner_text()
             assert "지금 내보낼 수 있는 형식" in note and "HTML 보고서" in note, note
@@ -280,23 +300,19 @@ def main() -> int:
             #     carry a cue or a failed check (the hostile folder has both).
             appendix_cues = page.evaluate("results.filter(e => itemBand(e) === 'undetermined' && e.item.source !== 'upload' && cueEvidence(e.item.result).length).length")
             if appendix_cues:
-                assert "부록으로 가는 판단 불가 행 중 단서" in page.locator("#report-checks").inner_text()
-            # GUI-REV2 H-1: the preview's (호증, 파일) list is the signed statement's, in
-            #     the same order — with 판단 불가 chosen too (cue/failed/reference rows,
-            #     archive members). The statement comes from format=evidence-json, the
-            #     body the evidence PDF is rendered from.
+                assert "번호 없이 남는 판단 불가 행 중 단서" in page.locator("#report-checks").inner_text()
+            # GUI-REV2 H-1, rebuilt on P0R-6: the preview's (호증, 파일) list is the job's statement — the
+            #     chosen rows numbered in the chosen order, every other job row after them unnumbered
+            #     ("서증 외(검사 행)"); the PDF comparison below checks every cell.
             page.check("#inc-undet")
             a4_ready()
-            compared = page.evaluate("""async () => {
-                const preview = [...document.querySelectorAll('#a4 tr[data-exhibit]')].map(r => [r.dataset.exhibit, r.dataset.path]);
-                const res = await apiFetch('/api/report?format=evidence-json', {method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(exportPayload('evidence'))});
-                const body = await res.json();
-                return [preview, (body.entries || []).map(e => [e.exhibit_no, displayName(e.file_path)]), res.status];
-            }""")
-            assert compared[2] == 200, compared
-            assert compared[0] and compared[0] == compared[1], (compared[0][:6], compared[1][:6])
-            assert compared[0][0][0] == "을 제1호증"
+            preview_rows = page.evaluate("[...document.querySelectorAll('#a4 tr[data-exhibit]')].map(r => [r.dataset.exhibit, r.dataset.path])")
+            chosen_paths = page.evaluate("exportPayload('evidence').exhibit_paths.map(p => displayName(p))")
+            assert [path for _, path in preview_rows[:len(chosen_paths)]] == chosen_paths, (preview_rows[:4], chosen_paths[:4])
+            assert preview_rows[0][0] == "갑 제1호증"
+            job_rows = page.evaluate("results.filter(e => e.item.source !== 'upload').length")
+            assert len(preview_rows) == job_rows, (len(preview_rows), job_rows)
+            assert all(exhibit == "서증 외(검사 행)" for exhibit, _ in preview_rows[len(chosen_paths):])
             # GUI-REV2 H-2: the preview shows exactly the PDF's sections — every case-box,
             #     box and signoff line of the preview is in the downloaded PDF, the box
             #     titles in the same order, and no section the PDF lacks.
@@ -341,14 +357,16 @@ def main() -> int:
                 print("gui_smoke: no evidence-bearing rows — checked the empty-choice preview")
             else:
                 a4_ready()
-            # GUI-REV G-1: every row is posted for every format; the choice only names exhibits.
+            # GUI-REV G-1, rebuilt on P0R-6: every format names the server-held job (all its rows are signed);
+            # the choice only names exhibits.
             total_rows = page.evaluate("results.length")
             for kind in ("evidence", "pdf", "html", "json"):
-                assert page.evaluate(f"exportPayload('{kind}').items.length") == total_rows, f"{kind} export dropped rows"
+                assert page.evaluate(f"exportPayload('{kind}').scan_job") == page.evaluate("lastScanJob"), f"{kind} export lost the job"
             chosen = page.evaluate("exportPayload('evidence').exhibit_paths.length")
             assert chosen == page.evaluate("selectedEntries().length") and chosen <= total_rows
             if 0 < chosen < total_rows:
-                assert f"서증으로 넣지 않은 파일 {total_rows - chosen}개" in a4_ready()
+                # P0R-6: the other job rows are in the table unnumbered (the appendix is gone)
+                assert "서증 외(검사 행)" in a4_ready()
 
             # 5b. GUI-REV G-5: while a new scan runs the other screens say the rows are
             #     the previous scan's, exports wait, and the new options are not
@@ -517,7 +535,7 @@ def main() -> int:
                 page.fill("#case-firm", "법무법인 시험")
                 page.check("input[name='submitter-side'][value='plaintiff']")
                 assert "다른 검사" in page.locator("#report-checks").inner_text(), "editing 법무법인/의뢰 측 silently confirmed the folder"
-                page.check("input[name='submitter-side'][value='defendant']")
+                page.check("input[name='submitter-side'][value='plaintiff']")
                 page.get_by_role("button", name="이 폴더의 사건이 맞음").click()
                 assert "다른 검사" not in page.locator("#report-checks").inner_text()
 
@@ -554,7 +572,7 @@ def main() -> int:
             page.evaluate("location.hash = '#/report'")
             page.wait_for_function("() => currentView === 'report'")
             if dup_manip:
-                assert f"부록으로 가는 중복 행 중 조작·생성 근거 있음 {dup_manip}개" in page.locator("#report-checks").inner_text()
+                assert f"번호 없이 남는 중복 행 중 조작·생성 근거 있음 {dup_manip}개" in page.locator("#report-checks").inner_text()
             # Merge of R19-13: duplicate rows stay duplicates in the export when their bytes still
             # match, so the dedupe preview (incl. 기록되지 않은 파일 and the 분석 못 함 exhibits) now
             # equals the signed PDF.
@@ -687,88 +705,57 @@ def main() -> int:
             page.wait_for_function("() => currentView === 'report'")
             assert "이전 검사의 것이라 무시했습니다" in page.locator("#export-note").inner_text(), page.locator("#export-note").inner_text()
 
-            # 6e. GUI-REV4 K-5, adapted at the merge of phase0 R20-5: a folder on a hashed row's
-            #     path replaced by a link after the scan is now a changed row (409, it was only
-            #     excluded before). A row the scan did not hash (a file link, sub2/l.txt) behind a
-            #     folder that became a link is still only excluded — the GUI names it under 주의
-            #     after any format.
+            # 6e. Rebuilt on P0R-6: a folder on a hashed row's path replaced by a link after the scan is a
+            #     changed row (409 with the server's reason), said once next to the buttons; and a refusal
+            #     that is not a changed file — the server-held job unknown or expired (404, a stand-in here,
+            #     e.g. after a restart of a server that could not persist it) — is said there too, with
+            #     다시 검사 (a new scan makes a new job).
             linked = mutable / "lnk"
             (linked / "sub").mkdir(parents=True)
             (linked / "sub" / "k.txt").write_text("링크 시험 글", encoding="utf-8")
             (mutable / "target").mkdir()
             (mutable / "target" / "k.txt").write_text("링크 시험 글", encoding="utf-8")
-            (linked / "sub2").mkdir()
-            (linked / "sub2" / "l.txt").symlink_to(mutable / "target" / "k.txt")
-            (mutable / "target2").mkdir()
-            (mutable / "target2" / "l.txt").symlink_to(mutable / "target" / "k.txt")
             page.evaluate("location.hash = '#/scan'")
             page.fill("#folder-path", str(linked))
             page.evaluate("document.getElementById('opt-recursive').checked = true; document.getElementById('opt-dedupe').checked = false")
             page.click("#analyze-btn")
             page.wait_for_function("() => scanBusy === false && currentView === 'ledger' && results.length > 0", timeout=180_000)
-            _shutil.rmtree(linked / "sub")
-            (linked / "sub").symlink_to(mutable / "target", target_is_directory=True)
             page.evaluate("location.hash = '#/report'")
             page.wait_for_function("() => currentView === 'report'")
             if page.evaluate("caseUnconfirmed()"):
                 page.get_by_role("button", name="이 폴더의 사건이 맞음").click()
-            # GUI-REV5 L-2: a refusal other than 409 (here a 400 exhibit_not_rederived for the row
-            # behind the link, answered by a stand-in) is said next to the buttons with 다시 검사.
             page.evaluate("""() => {
                 window.__realFetch = window.fetch;
                 window.fetch = async (url, options) => {
                     if (String(url).includes('/api/report?format=html')) {
-                        return new Response(JSON.stringify({error: '서증으로 고른 파일 1개를 서버가 다시 분석할 수 없습니다', code: 'exhibit_not_rederived',
-                            not_rederived_exhibit_paths: [{path: 'sub/k.txt', reason: '경로 중간의 폴더가 링크입니다'}]}),
-                            {status: 400, headers: {'Content-Type': 'application/json'}});
+                        return new Response(JSON.stringify({error: '알 수 없거나 만료된 검사 작업입니다 — 폴더를 다시 검사하십시오'}),
+                            {status: 404, headers: {'Content-Type': 'application/json'}});
                     }
                     return window.__realFetch(url, options);
                 };
             }""")
             page.click("#exp-report")
             page.wait_for_selector("#export-alert:not([hidden])", timeout=60_000)
-            assert "sub/k.txt" in page.locator("#export-alert").inner_text()
+            assert "만료된 검사 작업" in page.locator("#export-alert").inner_text()
             assert page.locator("#export-alert-rescan").is_visible()
-            assert page.locator("#error-region .err-item", has_text="다시 분석할 수 없는").count() == 0, "the refusal went to the error region"
+            assert page.locator("#error-region .err-item", has_text="만료된 검사 작업").count() == 0, "the refusal went to the error region"
             page.evaluate("() => { window.fetch = window.__realFetch; }")
-            console_errors[:] = [e for e in console_errors if "status of 400" not in e]
-            # R20-5: the real export of the hashed row behind the new link is refused (409), said
-            # once next to the buttons with the server's reason.
+            # a real export clears that failure
+            with page.expect_download():
+                page.click("#exp-report")
+            page.wait_for_function("() => document.getElementById('export-alert').hidden", timeout=60_000)
+            _shutil.rmtree(linked / "sub")
+            (linked / "sub").symlink_to(mutable / "target", target_is_directory=True)
             page.click("#exp-report")
             page.wait_for_function("() => changedPaths.has('sub/k.txt')", timeout=120_000)
             assert "sub/k.txt" in page.locator("#export-alert").inner_text()
             assert "링크" in page.locator("#export-alert").inner_text(), page.locator("#export-alert").inner_text()
             console_errors[:] = [e for e in console_errors if "status of 409" not in e]
-            page.click("#export-alert-rescan")
-            page.wait_for_function("() => currentView === 'scan' && document.activeElement && document.activeElement.id === 'analyze-btn'", timeout=10_000)
-            page.click("#analyze-btn")
-            page.wait_for_function("() => scanBusy === false && currentView === 'ledger' && results.length > 0", timeout=180_000)
-            row = page.evaluate("(results.find(e => e.item.path === 'sub2/l.txt') || {}).item || null")
-            assert row is not None and not row.get("sha256"), page.evaluate("results.map(e => [e.item.path, e.item.status, Boolean(e.item.sha256)])")
-            _shutil.rmtree(linked / "sub2")
-            (linked / "sub2").symlink_to(mutable / "target2", target_is_directory=True)
-            page.evaluate("location.hash = '#/report'")
-            page.wait_for_function("() => currentView === 'report'")
-            if page.evaluate("caseUnconfirmed()"):
-                page.get_by_role("button", name="이 폴더의 사건이 맞음").click()
-            # L-2: the HTML report (no JSON body to read) names the excluded scan row too, under
-            # its own 주의 marker.
-            with page.expect_download():
-                page.click("#exp-report")
-            page.wait_for_selector("#export-warn:not([hidden])", timeout=60_000)
-            assert "sub2/l.txt" in page.locator("#export-warn").inner_text()
-            assert page.locator("#export-alert").is_hidden(), "the alert outlived the rescan"
-            with page.expect_download():
-                page.click("#exp-signed")
-            page.wait_for_function("() => document.getElementById('export-note').textContent.includes('서명된 JSON — 내려받았습니다')")
-            assert page.locator("#export-warn").is_visible(), "a later successful export cleared the warning"
-            assert "서명된 JSON" in page.locator("#export-warn").inner_text()
-            assert page.locator("#error-region .err-item", has_text="서명 제외로").count() == 0
 
             # 6f. Merge of phase0 R24-1: a real scan cancelled from the GUI while an archive's members are
             #     still queued — the archive row is "cancelled" with the roll-up of what was analyzed; the
-            #     ledger says 검사 취소 (부분 결과), and an export is not refused as changed: the server
-            #     excludes the container row as 사용자 취소, said under 주의 next to the buttons.
+            #     ledger says 검사 취소 (부분 결과), and an export is not refused as changed (P0R-6: the job's
+            #     rows, the container row included, are signed with the server's cancel count).
             import zipfile as _zipfile
 
             czip = mutable / "czip"
@@ -796,13 +783,13 @@ def main() -> int:
                 page.wait_for_function("() => currentView === 'report'")
                 if page.evaluate("caseUnconfirmed()"):
                     page.get_by_role("button", name="이 폴더의 사건이 맞음").click()
-                with page.expect_download():
-                    page.click("#exp-report")
-                page.wait_for_selector("#export-warn:not([hidden])", timeout=60_000)
-                warned = page.locator("#export-warn").inner_text()
-                assert "bundle.zip" in warned and "사용자 취소" in warned, warned
+                with page.expect_download() as cancelled_download:
+                    page.click("#exp-signed")
+                signed_cancelled = _json.loads(Path(cancelled_download.value.path()).read_text(encoding="utf-8"))
+                assert signed_cancelled["summary"].get("cancelled") is True, signed_cancelled["summary"]
+                assert "bundle.zip" in [row["path"] for row in signed_cancelled["items"]]
                 assert page.locator("#export-alert").is_hidden(), "a cancelled scan's export was refused"
-                print("gui_smoke: cancelled archive — ledger, banner and the 사용자 취소 exclusion checked")
+                print("gui_smoke: cancelled archive — ledger, banner and the signed cancelled job checked")
 
             # 7. CSP/console errors: none tolerated. No request leaves the local server
             #    (fonts are local stacks; nothing is fetched from the network).

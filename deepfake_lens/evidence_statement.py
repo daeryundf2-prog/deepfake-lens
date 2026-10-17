@@ -31,7 +31,7 @@ import stat
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from .core import ScanItem
 from .office_config import DEFAULT_CASE_NAME, DEFAULT_CENTER, office_identity
@@ -53,6 +53,9 @@ from .result_text import (
     UnrecordedFiles,
     unrecorded_files,
 )
+from .evidence_rules import CAVEATS_TITLE, SELF_DECLARED_NOTE  # P0R-12
+from .result_text import shown_grade_label  # P0R-13
+from .profile_pins import executed_profiles  # P0R-14
 from .result_types import VERDICT_LABELS, CoverageStatus, EvidenceDirection, EvidenceKind, EvidenceStrength, Grade, Verdict, is_verdict_row, status_label
 from .signing import resolve_report_key, sign_report
 from .json_text import json_dumps
@@ -60,29 +63,11 @@ from .json_text import json_dumps
 # Marks a signed body as a 증거설명서 so it can never be mistaken for (or
 # verified as) a scan report body.
 EVIDENCE_STATEMENT_REPORT_TYPE = "evidence-statement"
-# GUI-REV G-9: the submitting side and its exhibit prefix (갑호증 / 을호증).
-SUBMITTER_PARTIES = {"plaintiff": "원고(고소인)", "defendant": "피고(피의자)"}
-SUBMITTER_EXHIBIT_PREFIX = {"plaintiff": "갑 제", "defendant": "을 제"}
-# GUI-REV2 H-3: every side-dependent word of the form, in one place. The
-# plaintiff row is the long-standing form, word for word (its Markdown says
-# "대리인", its PDF "소송대리인"); the defendant side says "변호인" everywhere
-# and puts the client placeholder in the defendant box. Statutes are not a side
-# matter: since R19-11 the tool names none for either side.
-SIDE_WORDING: dict[str, dict[str, Any]] = {
-    "plaintiff": {"md_agent": "대리인", "pdf_agent": "소송대리인", "signoff_agent": "소송대리인",
-                  "placeholders": ("(의뢰사 상호명 입력) 귀하", "(피고/피의자 성명 입력)")},
-    "defendant": {"md_agent": "변호인", "pdf_agent": "변호인", "signoff_agent": "변호인",
-                  # J-10: a party box takes a name, not the "귀하" of the plaintiff form's client line.
-                  "placeholders": ("(원고/고소인 성명 입력)", "(의뢰인 성명 입력)")},
-}
-
-
-def side_placeholders(side: str) -> tuple[str, str]:
-    """(plaintiff, defendant) placeholders of an empty case box for ``side`` (H-3)."""
-    return SIDE_WORDING.get(side, SIDE_WORDING["plaintiff"])["placeholders"]
-# GUI-REV G-1: the appendix of rows not chosen as exhibits.
-SELECTION_APPENDIX_TITLE = "부록: 서증으로 넣지 않은 파일"
 SIGNATURE_SECTION_TITLE = "### [보고서 서명]"
+
+
+# P0R-6: a row of the scan the examiner did not choose as an exhibit (still in the statement and its signature).
+NOT_AN_EXHIBIT = "서증 외(검사 행)"
 
 
 @dataclass(frozen=True)
@@ -131,50 +116,11 @@ class EvidenceStatement:
     # (native_path.temp_location(), the scan result's ``temp_folder``); a
     # fallback is also a line of provenance_note ("임시 폴더: …").
     temp_folder: dict[str, Any] = field(default_factory=lambda: {"fallback": False})
-    # GUI-REV G-9: the side that submits the statement — "plaintiff" (원고·고소인
-    # 측, 갑호증, the long-standing form) or "defendant" (피고·피의자 측, 을호증).
-    submitter_side: str = "plaintiff"
-    # GUI-REV G-1: rows of the scan the examiner did not choose as exhibits —
-    # never dropped: listed with their verdict and SHA-256 in an appendix and
-    # signed with the rest of the statement. Empty when every row is an exhibit.
-    excluded_by_selection: list[dict[str, Any]] = field(default_factory=list)
+    # P0R-14: the model profiles that ran on the statement's rows (profile_pins.executed_profiles) — signed.
+    executed_models: list[dict[str, Any]] = field(default_factory=list)
 
     def to_json(self) -> dict[str, Any]:
-        data = asdict(self)
-        # The two GUI-REV fields appear only when used, so a statement made
-        # the long-standing way (every row an exhibit, 원고 측) is unchanged.
-        if not self.excluded_by_selection:
-            data.pop("excluded_by_selection")
-        if self.submitter_side == "plaintiff":
-            data.pop("submitter_side")
-        return data
-
-    @property
-    def party(self) -> str:
-        """The submitting party as the form names it (원고(고소인) / 피고(피의자))."""
-        return SUBMITTER_PARTIES.get(self.submitter_side, SUBMITTER_PARTIES["plaintiff"])
-
-    @property
-    def wording(self) -> dict[str, Any]:
-        return SIDE_WORDING.get(self.submitter_side, SIDE_WORDING["plaintiff"])
-
-    @property
-    def party_agent(self) -> str:
-        return str(self.wording["signoff_agent"])
-
-    def selection_lines(self) -> list[str]:
-        """The appendix of rows not chosen as exhibits (G-1): verdict and hash of each."""
-        if not self.excluded_by_selection:
-            return []
-        lines = [f"서증으로 넣지 않은 파일 {len(self.excluded_by_selection)}개 — 이 검사의 결과이며, 해시와 함께 기록합니다."]
-        for row in self.excluded_by_selection:
-            digest = row.get("sha256") or row.get("hash_unavailable") or HASH_UNAVAILABLE_ACCESS
-            verdict = str(row.get("verdict_label", ""))
-            if row.get("undetermined"):
-                verdict += "(" + " · ".join(str(aspect) for aspect in row["undetermined"]) + ")"  # H-4
-            note = f" — {row['note']}" if row.get("note") else ""
-            lines.append(f"{row.get('file_path', '')} — {verdict}{note} — SHA-256: {digest}")
-        return lines
+        return asdict(self)
 
     def unrecorded_lines(self) -> list[str]:
         """The "기록되지 않은 파일" section body (headline + reasons)."""
@@ -197,7 +143,7 @@ class EvidenceStatement:
             f"**원    고 (고소인)**: {one_line(self.plaintiff)}",
             f"**피    고 (피의자)**: {one_line(self.defendant)}",
             "",
-            f"위 사건에 관하여 {self.party}의 {self.wording['md_agent']}은 그 주장사실을 입증하기 위하여 다음과 같이 증거방법을 제출합니다.",
+            "위 사건에 관하여 원고(고소인)의 대리인은 그 주장사실을 입증하기 위하여 다음과 같이 증거방법을 제출합니다.",
             "",
             "## 다        음",
             "",
@@ -226,16 +172,13 @@ class EvidenceStatement:
         ])
         unrecorded = self.unrecorded_lines()
         lines.extend([f"### [{UNRECORDED_SECTION_TITLE}]", one_line(unrecorded[0]), *(f"- {one_line(line)}" for line in unrecorded[1:]), ""])
-        selection = self.selection_lines()
-        if selection:
-            lines.extend([f"### [{SELECTION_APPENDIX_TITLE}]", one_line(selection[0]), *(f"- {one_line(line)}" for line in selection[1:]), ""])
         if self.reference_note:
             lines.extend(["### [텍스트 분석 한계]", self.reference_note, ""])
         if self.provenance_note:
             lines.extend(["### [분석 프로비넌스]", *(one_line(line) for line in self.provenance_note.split("\n")), ""])
         lines.extend([
             f"**제출일자**: {one_line(self.created_at)}",
-            f"**{self.party} {self.party_agent}**: {one_line(f'{self.law_firm} {self.center}'.strip())}",
+            f"**원고(고소인) 소송대리인**: {one_line(f'{self.law_firm} {self.center}'.strip())}",
             f"**대표전화**: {one_line(self.contact)}",
             f"**제출처**: **{one_line(self.court)}**",
         ])
@@ -349,7 +292,13 @@ def _clip(text: str, limit: int) -> str:
     """``text`` cut to ``limit`` chars without leaving a quoted metadata value open."""
     if len(text) <= limit:
         return text
-    clipped = text[:limit] + "…"
+    end = limit
+    # P0R-11: never cut a Latin word (a product name — "Adobe Firefly" — read as "Adobe Firefl…")
+    while end < len(text) and end < limit + 20 and text[end].isascii() and text[end].isalnum() and text[end - 1].isascii() and text[end - 1].isalnum():
+        end += 1
+    if end >= len(text):
+        return text
+    clipped = text[:end] + "…"
     if clipped.count(_QUOTE_OPEN) > clipped.count(_QUOTE_CLOSE):
         clipped += _QUOTE_CLOSE
     return clipped
@@ -361,7 +310,7 @@ def _clip(text: str, limit: int) -> str:
 # 형법 제347조 for any video or a title with "얼굴") — the same unfounded entry R18-16 removed from
 # the case name. The examiner writes the statutes.
 STATUTE_PLACEHOLDER = "• 관련 법조: (검토자 기재 — 도구는 죄명·법조를 정하지 않습니다)"
-STATUTE_NONE = "• 관련 법조: 해당 없음 (결정적 근거에 의한 조작·생성 결론이 없음)"
+STATUTE_NONE = "• 관련 법조: 해당 없음 (재현 가능한 기록 근거에 의한 조작·생성 결론이 없음)"
 
 
 def _member_references(item: ScanItem, exhibits: dict[str, str], items: list[ScanItem]) -> str:
@@ -392,25 +341,28 @@ def _purpose_head(item: ScanItem, member_refs: str = "") -> str:
         # N5: a container row concludes from its members, not from its own bytes.
         rollup = display_name(next((e.detail for e in res.evidence if e.layer == "archive"), ""))
         return (
-            f"압축 파일 구성원 중 결정적 근거에 의해 조작·생성 근거가 확인된 파일이 있는 증거물임을 소명함"
+            f"압축 파일 구성원 중 재현 가능한 기록 근거에 의해 조작·생성 근거가 확인된 파일이 있는 증거물임을 소명함"
             f"(구성원 결론 집계: {rollup}; {member_refs or '구성원 행 참조'})."
         )
     if res.verdict_code == Verdict.MANIPULATION_EVIDENCE:
-        basis = next(
-            (e.title for e in res.evidence if e.kind == EvidenceKind.DETERMINISTIC and e.direction == EvidenceDirection.SYNTHETIC and e.strength == EvidenceStrength.STRONG),
-            "결정적 근거",
+        deciding = next(
+            (e for e in res.evidence if e.kind == EvidenceKind.DETERMINISTIC and e.direction == EvidenceDirection.SYNTHETIC and e.strength == EvidenceStrength.STRONG),
+            None,
         )
-        return f"결정적 근거({display_name(basis)})에 의해 조작·생성 근거가 확인된 증거물임을 소명함."
+        basis = deciding.title if deciding is not None else "재현 가능한 기록 근거"
+        # P0R-12: a conclusion resting on self-declared metadata says so in the purpose itself
+        declared = f" — {SELF_DECLARED_NOTE}" if deciding is not None and deciding.self_declared else ""
+        return f"재현 가능한 기록 근거({display_name(basis)}{declared})에 의해 조작·생성 근거가 확인된 증거물임을 소명함."
     if res.verdict_code == Verdict.AUTHENTICITY_EVIDENCE:
         basis = next(
             (e.title for e in res.evidence if e.direction == EvidenceDirection.AUTHENTIC and e.strength == EvidenceStrength.STRONG),
-            "결정적 근거",
+            "재현 가능한 기록 근거",
         )
-        return f"결정적 근거({display_name(basis)})에 의해 원본성 근거가 확인된 증거물임을 소명함."
+        return f"재현 가능한 기록 근거({display_name(basis)})에 의해 원본성 근거가 확인된 증거물임을 소명함."
     failed = [entry for entry in res.coverage if entry.status == CoverageStatus.FAILED]
     if failed:
         return f"검사 실패({', '.join(display_name(entry.describe()) for entry in failed)})로 판단 불가 상태이며, 별도 검증이 필요함을 소명함."
-    return "결론을 뒷받침할 결정적 근거가 없어 판단 불가 상태이며(원본이라는 뜻이 아님), 별도 검증이 필요함을 소명함."
+    return "결론을 뒷받침할 재현 가능한 기록 근거가 없어 판단 불가 상태이며(원본이라는 뜻이 아님), 별도 검증이 필요함을 소명함."
 
 
 def build_evidence_statement(
@@ -430,10 +382,13 @@ def build_evidence_statement(
     scan_root: Path | str | None = None,
     summary: object | None = None,
     excluded_items: list[dict[str, object]] | None = None,
-    exhibit_paths: Sequence[str] | set[str] | frozenset[str] | None = None,
-    submitter_side: str = "plaintiff",
+    exhibit_paths: list[str] | None = None,
 ) -> EvidenceStatement:
     """Build an EvidenceStatement from analyzed scan items.
+
+    ``exhibit_paths`` (P0R-6, web reports): the examiner's ordered selection of row paths — those rows are the
+    numbered exhibits, in that order; every other row follows unnumbered (:data:`NOT_AN_EXHIBIT`), so no row of the
+    scan is left out of the signed statement. None: every row is an exhibit, in scan order.
 
     ``summary`` (a BatchScanSummary or the scan JSON's summary dict) adds
     the enumeration-level "기록되지 않은 파일" reasons — files over the
@@ -444,35 +399,21 @@ def build_evidence_statement(
     used to locate a file whose row carries no ``sha256`` (see
     :func:`_item_sha256`). ``law_firm`` / ``contact`` left as None come from
     the operator config (``office_config``) and are blank without one (N17).
-
-    GUI-REV G-1: ``exhibit_paths`` (row paths) chooses which rows become
-    exhibits; every other row is kept in ``excluded_by_selection`` (verdict,
-    SHA-256) and the "기록되지 않은 파일" count is still taken over every
-    row. None means every row is an exhibit. G-9: ``submitter_side``
-    ("plaintiff"/"defendant") names the submitting party; with the default
-    exhibit prefix it also picks 갑호증 / 을호증. Neither changes a verdict.
     """
-    if submitter_side not in SUBMITTER_PARTIES:
-        raise ValueError(f"알 수 없는 제출 측입니다: {submitter_side}")
-    if exhibit_prefix == "갑 제":
-        exhibit_prefix = SUBMITTER_EXHIBIT_PREFIX[submitter_side]
-    all_items = list(items)
-    not_chosen = [item for item in all_items if exhibit_paths is not None and item.path not in exhibit_paths]
-    if exhibit_paths is None:
-        items = all_items
-    elif isinstance(exhibit_paths, (set, frozenset)):
-        items = [item for item in all_items if item.path in exhibit_paths]
-    else:
-        # GUI-REV2 H-1: an ordered list numbers the exhibits in its own order —
-        # the order the examiner saw in the preview, not the scan's row order.
-        by_path = {item.path: item for item in all_items}
-        items = [by_path[path] for path in dict.fromkeys(exhibit_paths) if path in by_path]
     office = office_identity(law_firm, contact, center=center)
     law_firm, contact, center = office.law_firm, office.contact, office.center
     entries: list[EvidenceStatementEntry] = []
     now_date = datetime.now().strftime("%Y. %m. %d.")
+    if exhibit_paths is not None:
+        by_path = {item.path: item for item in items}
+        chosen = [by_path[path] for path in exhibit_paths if path in by_path]
+        chosen_ids = {id(item) for item in chosen}
+        items = [*chosen, *(item for item in items if id(item) not in chosen_ids)]
+        numbered = len(chosen)
+    else:
+        numbered = len(items)
     # S1: exhibit number of every row, so a container can cite its members.
-    exhibits = {item.path: f"{exhibit_prefix}{idx}호증" for idx, item in enumerate(items, start=1)}
+    exhibits = {item.path: (f"{exhibit_prefix}{idx}호증" if idx <= numbered else NOT_AN_EXHIBIT) for idx, item in enumerate(items, start=1)}
 
     for idx, item in enumerate(items, start=1):
         res = item.result
@@ -491,7 +432,7 @@ def build_evidence_statement(
         signals = res.signals if res else []
         file_sha256, hash_unavailable = _item_hash(item, scan_root)
 
-        exhibit_no = f"{exhibit_prefix}{idx}호증"
+        exhibit_no = exhibits[item.path]
         # S1: an archive member is named "<container>::<member>", never its bare file name.
         doc_name = f"디지털 증거 파일 ({row_label(item.path)}) 및 AI 스크리닝 데이터"
         author_date = f"{law_firm}\n{now_date}" if law_firm else now_date
@@ -509,16 +450,18 @@ def build_evidence_statement(
             gaps = coverage_gaps(res)
             if gaps:
                 evidence_lines.append("• 검사 범위: " + "; ".join(display_name(entry.describe()) for entry in gaps[:3]) + (f" 외 {len(gaps) - 3}건" if len(gaps) > 3 else ""))
+        if res is not None and res.conclusion_caveats:
+            # P0R-12: every conclusion says why it could be wrong
+            evidence_lines.append(f"• {CAVEATS_TITLE}: " + " ".join(display_name(text) for text in res.conclusion_caveats))
         sig_text = "\n".join(evidence_lines) if evidence_lines else "• 근거 항목 없음"
 
-        # R19-11 (both sides, GUI-REV3 merge): the tool names no statute for anyone — a
-        # manipulation row leaves 관련 법조 to the examiner whichever side submits.
         statute_text = STATUTE_PLACEHOLDER if band_value == "high" else STATUTE_NONE
 
         hash_text = f"• 원본 SHA-256: {file_sha256}" if file_sha256 else f"• 원본 SHA-256: {hash_unavailable or HASH_UNAVAILABLE_ACCESS}"
 
         if verdict_row and res is not None:
-            head_line = f"[자동 분석 결론: {band} / 등급: {res.grade_label} — 유죄·불법성의 직접 증거가 아님]"
+            grade_text = shown_grade_label(res)  # P0R-13: no "감정 근거로 사용 가능" next to 판단 불가
+            head_line = f"[자동 분석 결론: {band}{f' / 등급: {grade_text}' if grade_text else ''} — 유죄·불법성의 직접 증거가 아님]"
         else:
             reason = display_name((item.error or "").strip()) or "사유 기록 없음"
             head_line = f"상태: {band} — {reason}"
@@ -550,7 +493,7 @@ def build_evidence_statement(
         wa = _wa_raw if isinstance(_wa_raw, int) else 0
         wc = _wc_raw if isinstance(_wc_raw, int) else 0
         prov_lines.append(
-            f"모델 가중치: {wa}/{wc} 탑재" + (" — 신경망 미탑재(측정 게이트 미충족) — 결정적 근거만 반영" if wa == 0 else "")
+            f"모델 가중치: {wa}/{wc} 탑재" + (" — 신경망 미탑재(측정 게이트 미충족) — 재현 가능한 기록 근거만 반영" if wa == 0 else "")
         )
     if thresholds is not None:
         # S6: the same line as the CLI header / HTML / forensic PDF,
@@ -579,59 +522,11 @@ def build_evidence_statement(
         center=center,
         provenance_note=provenance_note,
         reference_note=TEXT_LEGAL_LIMITATION if any(i.result is not None and i.result.grade == Grade.REFERENCE for i in items) else "",
-        unrecorded_files=unrecorded_files(all_items, summary).to_json(),
-        submitter_side=submitter_side,
-        excluded_by_selection=[_selection_row(item, scan_root) for item in not_chosen],
+        unrecorded_files=unrecorded_files(list(items), summary).to_json(),
         excluded_items=[dict(entry) for entry in excluded_items or []],
         temp_folder=temp_folder,
+        executed_models=executed_profiles([item.to_json() for item in items]),
     )
-
-
-def undetermined_aspects(item: ScanItem) -> tuple[list[str], str]:
-    """GUI-REV2 H-4/H-6: why a 판단 불가 row is undetermined, as the GUI ledger says it.
-
-    Returns the aspect labels ("단서 1건", "확인 안 된 기록", "검사 실패", "참고
-    전용", else "근거 없음") and a one-line note naming the cue, the unverified
-    record or the failed checks — so a row moved to the appendix keeps what the
-    statement used to say about it. Nothing here changes a verdict.
-    """
-    res = item.result
-    if res is None or not is_verdict_row(item.status, True) or res.verdict_code != Verdict.UNDETERMINED:
-        return [], ""
-    from .result_types import CHECK_LABELS
-
-    cues = [e for e in res.evidence if e.kind == EvidenceKind.DETERMINISTIC and e.direction != EvidenceDirection.NEUTRAL]
-    unverified = [e for e in res.evidence if e.kind == EvidenceKind.DETERMINISTIC and e.direction == EvidenceDirection.NEUTRAL and e.layer == "c2pa"]
-    failed = [entry for entry in res.coverage if entry.status == CoverageStatus.FAILED]
-    aspects: list[str] = []
-    notes: list[str] = []
-    if cues:
-        aspects.append(f"단서 {len(cues)}건")
-        notes.append("단서: " + "; ".join(display_name(e.title) for e in cues[:2]) + (" 외" if len(cues) > 2 else ""))
-    elif unverified:
-        aspects.append("확인 안 된 기록")
-        notes.append("확인 안 된 기록: " + display_name(unverified[0].title))
-    if failed:
-        aspects.append("검사 실패")
-        notes.append("검사 실패: " + ", ".join(CHECK_LABELS.get(entry.check, entry.check) for entry in failed))
-    if res.grade == Grade.REFERENCE:
-        aspects.append("참고 전용")
-    return aspects or ["근거 없음"], " / ".join(notes)
-
-
-def _selection_row(item: ScanItem, scan_root: Path | str | None) -> dict[str, Any]:
-    """One appendix row (G-1): the row label, its verdict (or status) and its hash;
-    H-4: a 판단 불가 row also carries its aspects and a one-line note."""
-    res = item.result
-    verdict_row = res is not None and is_verdict_row(item.status, True)
-    label = VERDICT_LABELS[res.verdict_code] if res is not None and verdict_row else status_label(item.status or "failed")
-    digest, unavailable = _item_hash(item, scan_root)
-    aspects, note = undetermined_aspects(item)
-    row: dict[str, Any] = {"file_path": row_label(item.path), "verdict_label": label, "sha256": digest or "", "hash_unavailable": "" if digest else (unavailable or HASH_UNAVAILABLE_ACCESS)}
-    if aspects:
-        row["undetermined"] = aspects
-        row["note"] = note
-    return row
 
 
 def signed_statement_body(
@@ -655,7 +550,9 @@ def signed_statement_body(
         body["scan_root"] = scan_root
     if analysis_options is not None:
         body["analysis_options"] = dict(analysis_options)  # R19-3: the options the server re-analyzed with
-    return sign_report(body, key if key is not None else resolve_report_key(), model_pins=model_pins)
+    return sign_report(
+        body, key if key is not None else resolve_report_key(), model_pins=model_pins, executed_models=list(statement.executed_models),
+    )
 
 
 def statement_signature_lines(signed: dict[str, object]) -> list[str]:
@@ -773,24 +670,32 @@ STATEMENT_TABLE_WEIGHTS = (12.5, 22.0, 18.5, 47.0)
 STATEMENT_ROW_MIN_HEIGHT = 30.0
 
 
+# GUI preview (merge of the GUI redesign onto P0R-6): the evidence-statement PDF's texts as data — the case box,
+# the table rows, the boxes after the table and the signoff. The PDF renderer draws exactly these (one source),
+# and format=evidence-preview returns them, so the GUI's preview cannot show a line the PDF lacks or miss one.
 def statement_case_lines(statement: EvidenceStatement) -> list[str]:
-    """GUI-REV2 H-2: the PDF's case box, line for line (the preview shows these).
-
-    Merge of phase0 R24-7 / R25-3: the examiner's fields go through pdf_field_text (a literal backslash
-    doubled, "|" as typed) — in the PDF and so in the preview, which draws these same lines.
-    """
+    """The PDF's case box, line for line (R24-7/R25-3: the examiner's fields through pdf_field_text)."""
     from .result_text import pdf_field_text
 
     return [
         f"사        건    {pdf_field_text(statement.case_no)}  {pdf_field_text(statement.case_name)}",
         f"원고(고소인)    {pdf_field_text(statement.plaintiff)}",
         f"피고(피의자)    {pdf_field_text(statement.defendant)}",
-        f"위 사건에 관하여 {statement.party}의 {statement.wording['pdf_agent']}은 주장사실을 입증하기 위해 아래와 같이 증거방법을 제출합니다.",
+        "위 사건에 관하여 원고(고소인)의 소송대리인은 주장사실을 입증하기 위해 아래와 같이 증거방법을 제출합니다.",
     ]
 
 
+def statement_author_cell(statement: EvidenceStatement, entry: EvidenceStatementEntry) -> str:
+    """R25-3: the "작성자 및 일자" cell — the shown law firm over the date (``author_date`` is "<law firm>\n<date>")."""
+    from .result_text import pdf_field_text
+
+    if not statement.law_firm:
+        return entry.author_date
+    return f"{pdf_field_text(statement.law_firm)}\n{entry.author_date.rsplit(chr(10), 1)[-1]}"
+
+
 def statement_boxes(statement: EvidenceStatement) -> list[tuple[str, list[str]]]:
-    """GUI-REV2 H-2: the boxes after the PDF's exhibit table, in order, line for line."""
+    """The boxes after the PDF's exhibit table, in order, line for line (the unsigned-rows box is the caller's)."""
     hashed = sum(1 for e in statement.entries if e.sha256)
     notice = [
         f"원본 해시 산출: {hashed}/{len(statement.entries)}건.",
@@ -799,48 +704,25 @@ def statement_boxes(statement: EvidenceStatement) -> list[tuple[str, list[str]]]
     if statement.reference_note:
         notice.append(statement.reference_note)
     notice.extend(line.strip() for line in statement.provenance_note.split("\n") if line.strip())
-    boxes = [(STATEMENT_NOTICE_TITLE, notice), (UNRECORDED_SECTION_TITLE, statement.unrecorded_lines())]
-    selection = statement.selection_lines()
-    if selection:
-        boxes.append((SELECTION_APPENDIX_TITLE, selection))
-    return boxes
+    return [(STATEMENT_NOTICE_TITLE, notice), (UNRECORDED_SECTION_TITLE, statement.unrecorded_lines())]
 
 
 def statement_signoff_lines(statement: EvidenceStatement) -> list[str]:
-    """GUI-REV2 H-2: the PDF's signoff block (the court line follows it); R24-7/R25-3: the law firm through pdf_field_text."""
+    """The PDF's signoff block (the court line follows it)."""
     from .result_text import pdf_field_text
 
     return [
         statement.created_at,
-        f"{statement.party} {statement.party_agent}  {pdf_field_text(statement.law_firm)}".rstrip(),
+        f"원고(고소인) 소송대리인  {pdf_field_text(statement.law_firm)}".rstrip(),
         "담당변호사 : ○ ○ ○,  ○ ○ ○",
         "디지털포렌식센터 수석감정관 : ○ ○ ○  (인)",
     ]
 
 
-def _display_court(court: str) -> str:
-    from .result_text import pdf_field_text
-
-    return pdf_field_text(court)
-
-
-def statement_author_cell(statement: EvidenceStatement, entry: EvidenceStatementEntry) -> str:
-    """R25-3: the "작성자 및 일자" cell as the PDF prints it — the law firm through pdf_field_text over the date
-    (``author_date`` is "<law firm>\n<date>"); merge: the GUI preview shows the same cell."""
-    from .result_text import pdf_field_text
-
-    if not statement.law_firm:
-        return entry.author_date
-    return f"{pdf_field_text(statement.law_firm)}\n{entry.author_date.rsplit(chr(10), 1)[-1]}"
-
-
 def statement_preview(statement: EvidenceStatement, unsigned_rows: list[tuple[ScanItem, str]] | None = None) -> dict[str, Any]:
-    """GUI-REV2 H-2: what the evidence-statement PDF prints, as data, for the GUI preview.
+    """What the evidence-statement PDF prints, as data, for the GUI preview (unsigned — the export signs)."""
+    from .result_text import pdf_field_text
 
-    Every text comes from the helpers the PDF renderer itself uses, so the
-    preview cannot show a section the PDF does not have (or miss one it has).
-    Unsigned — the export re-analyzes every row and signs.
-    """
     unsigned: list[str] = []
     if unsigned_rows:
         from .reports import UNSIGNED_ROWS_NOTE, UNSIGNED_ROWS_TITLE, unsigned_row_lines
@@ -859,7 +741,7 @@ def statement_preview(statement: EvidenceStatement, unsigned_rows: list[tuple[Sc
         "boxes": [[title, lines] for title, lines in statement_boxes(statement)],
         "unsigned": unsigned,
         "signoff": statement_signoff_lines(statement),
-        "court": _display_court(statement.court),  # R24-7: as the PDF draws it
+        "court": pdf_field_text(statement.court),
     }
 
 
@@ -883,14 +765,13 @@ def _render_statement_pdf(
     # the \uNNNN escape PdfLayout.drawable writes for a character the font lacks never equals a literal
     # "\uNNNN" typed into the field ("ע corp" and "\u05e2 corp" printed alike).
     # R25-3 (round 25): through pdf_field_text (display_name without the Markdown "|" escape — "x|y" prints as
-    # typed), and the law firm of the table's 「작성자 및 일자」 cell too (statement_author_cell).
-    # Merge: the case box and signoff lines come from statement_case_lines / statement_signoff_lines, which
-    # apply pdf_field_text — shared with the GUI preview, as is statement_author_cell.
+    # typed), and the law firm of the table's 「작성자 및 일자」 cell too: it was drawn as typed
+    # (entry.author_date), so that cell still printed both values above as "\u05e2 corp".
     law_firm, center, contact = pdf_field_text(statement.law_firm), pdf_field_text(statement.center), pdf_field_text(statement.contact)
     court_name = pdf_field_text(statement.court)
 
     def author_cell(entry: EvidenceStatementEntry) -> str:
-        return statement_author_cell(statement, entry)
+        return statement_author_cell(statement, entry)  # shared with the GUI preview
 
     def page_header(layout: PdfLayout) -> None:
         firm_header = f"{law_firm} {center}".strip()
@@ -903,7 +784,7 @@ def _render_statement_pdf(
     layout = PdfLayout(pymupdf, header=page_header)
     layout.new_page()
     layout.text(layout.left, layout.right, "증  거  설  명  서", 18.0, (0.08, 0.15, 0.32), align=1, gap=6.0)
-    case_lines = statement_case_lines(statement)  # H-2: shared with the GUI preview
+    case_lines = statement_case_lines(statement)  # shared with the GUI preview
     layout.boxed_text("", [
         *((line, 9.5, (0.1, 0.1, 0.1)) for line in case_lines[:3]),
         (case_lines[3], 8.2, (0.3, 0.3, 0.3)),
@@ -940,9 +821,8 @@ def _render_statement_pdf(
         )
     layout.y += 8.0
 
-    # Provenance + integrity disclosure (screening caveat goes on every copy),
-    # 기록되지 않은 파일 (X1, always present) and the selection appendix (G-1) —
-    # H-2: the same boxes, line for line, as the GUI preview.
+    # Provenance + integrity disclosure (screening caveat goes on every copy) and the X1 "기록되지 않은 파일"
+    # section (count and reasons, always present) — the same lines as the GUI preview (statement_boxes).
     for title, lines in statement_boxes(statement):
         if title == STATEMENT_NOTICE_TITLE:
             layout.boxed_text(title, [(line, 6.8, (0.4, 0.4, 0.4)) for line in lines])
@@ -960,7 +840,7 @@ def _render_statement_pdf(
         ])
 
     # Signoff block, kept together on one page.
-    signoff_lines = statement_signoff_lines(statement)  # H-2: shared with the GUI preview
+    signoff_lines = statement_signoff_lines(statement)  # shared with the GUI preview
     signoff = [
         (signoff_lines[0], 10.0, (0.1, 0.1, 0.1)),
         (signoff_lines[1], 10.5, (0.08, 0.15, 0.32)),

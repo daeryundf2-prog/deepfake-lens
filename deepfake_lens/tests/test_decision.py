@@ -79,8 +79,15 @@ class Rule2DeterministicSyntheticTest(unittest.TestCase):
     def test_weak_is_not_enough(self) -> None:
         self.assertEqual(decide([item(D, SYN, WEAK)], [RAN], EV), UNDET)
 
-    def test_beats_strong_authenticity(self) -> None:
-        self.assertEqual(decide([DET_AUTH_STRONG, DET_SYN_STRONG], [RAN], EV), MANIP)
+    def test_strong_authenticity_makes_it_a_conflict(self) -> None:
+        # P0R-10 (user decision 2026-10-17): this test pinned the removed design "rule 2 beats strong authenticity"
+        # (test_beats_strong_authenticity) — a planted generator field outvoted a trusted camera signature. Both strong
+        # sides present is now a conflict: undetermined, reported as decision.CONFLICT_RULE.
+        from deepfake_lens.decision import CONFLICT_RULE, decide_with_rule
+
+        self.assertEqual(decide([DET_AUTH_STRONG, DET_SYN_STRONG], [RAN], EV), UNDET)
+        self.assertEqual(decide_with_rule([DET_AUTH_STRONG, DET_SYN_STRONG], [RAN], EV), (UNDET, CONFLICT_RULE))
+        self.assertEqual(decide([DET_SYN_STRONG], [RAN], EV), MANIP)  # alone it still decides
 
     def test_strong_statistical_without_calibration_does_not_conclude(self) -> None:
         self.assertEqual(decide([item(S, SYN, STRONG)], [RAN], EV), UNDET)

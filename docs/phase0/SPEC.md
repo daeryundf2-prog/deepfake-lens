@@ -14,6 +14,8 @@
 - CLI/GUI/API가 같은 파일에 같은 결과.
 - 캐시는 내용 해시 기반. 서명은 본문 전체를 덮는다. read-root는 운영자만 등록.
 
+**종료 판정(사용자 결정 2026-10-17, P0R-1).** 게이트 0의 통과는 "독립 검증의 불일치 0건"이 아니라 **위험 기반 종료**로 판정한다: 판정·서명·증거 세 축의 불변식 테스트가 있고 통과하며, 직전 두 번의 독립 검증 라운드가 그 세 축에서 Med 이상 지적을 내지 않았을 때 선언한다. Low·Cosmetic 지적은 `docs/phase0/BACKLOG.md`로 옮기고 막지 않되, 사용자에게 보이는 사실과 다른 문구는 심각도와 무관하게 막는다. 범위는 게이트 범위 명령(`scan`, `classify`, `verify-report`, `evidence-statement`, `doctor`, `web`, `api-serve`, `corpus`, `vendor-weights pin`)으로 동결한다. 세부 기준·테스트 이름·검증 라운드 형식은 HANDOFF.md 6장·8장.
+
 ## 공통 규칙
 1. 브랜치 phase0, WP마다 커밋 1개 이상, 커밋 메시지에 닫는 갭 ID(G1–G34)를 적는다. 커밋 메시지 끝에 다음 두 줄을 붙인다:
    Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
@@ -72,6 +74,8 @@
 4. statistical 근거 중 calibration_id와 measured_on이 있고 probability >= 프로필 threshold인 것이 있으면 → manipulation_evidence. (0단계에는 보정된 모델이 없어 도달 불가. 합성 입력으로 테스트.)
 5. deterministic+authentic+strong 근거가 있고, synthetic 방향 근거가 lexical을 제외하고 하나도 없으면 → authenticity_evidence.
 6. 그 외 → undetermined.
+
+(사용자 결정 2026-10-17, P0R-10: 규칙 2는 deterministic+authentic+strong 근거가 함께 있으면 발동하지 않는다 — 근거 충돌로 undetermined. `explain`은 이것을 "규칙 2의 예외(근거 충돌)"로 보고한다.)
 
 기존 신호의 분류 (core.py에서 EvidenceItem으로 변환):
 | 기존 신호 | kind | direction | strength |

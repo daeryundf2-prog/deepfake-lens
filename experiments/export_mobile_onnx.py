@@ -9,7 +9,7 @@ single-logit sigmoid detectors (CNNDetection et al.) the wrapper emits
 "input" [1,3,224,224] -> "logits" [1,2] ONNX, optionally INT8-dynamic-
 quantized for the APK size budget.
 
-The resulting file belongs at deepfakeclassifier/src/main/assets/
+The resulting file belongs at extras/android/deepfakeclassifier/src/main/assets/
 deepfake-lens.onnx (gitignored — checkpoint licenses do not permit
 redistribution; see models/NOTICE.md).
 
@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Export a torchvision-runtime checkpoint to the Android ONNX contract.")
     parser.add_argument("--profile", type=Path, required=True, help="torchvision-runtime profile JSON (arch, num_classes, state_dict_prefix, input_size)")
     parser.add_argument("--checkpoint", type=Path, help="override the profile's checkpoint path")
-    parser.add_argument("--out", type=Path, required=True, help="output .onnx path (e.g. deepfakeclassifier/src/main/assets/deepfake-lens.onnx)")
+    parser.add_argument("--out", type=Path, required=True, help="output .onnx path (e.g. extras/android/deepfakeclassifier/src/main/assets/deepfake-lens.onnx)")
     parser.add_argument("--quantize-int8", action="store_true", help="apply onnxruntime dynamic INT8 quantization (~4x smaller)")
     args = parser.parse_args(argv)
 

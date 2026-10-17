@@ -1,0 +1,14 @@
+{
+  "schema": "c2pa-trust-bundle-v1",
+  "id": "C2PA-TRUST-LIST",
+  "name": "C2PA 공식 신뢰 목록(C2PA Trust List)",
+  "file": "c2pa-trust-list.pem",
+  "sha256": "75cacc98b79ecac33713c7ecfb58d4a0ef383f3c1f886e7409f9e37e8664aea5",
+  "anchors": 30,
+  "list_issue_date": "2026-08-05",
+  "next_update": "2027-08-05",
+  "source": "https://raw.githubusercontent.com/c2pa-org/conformance-public/main/trust-list/C2PA-TRUST-LIST.pem",
+  "upstream_commit": "70ec46e16962b81e70795fcb50a05e0128329a20",
+  "retrieved": "2026-10-15",
+  "license": "CC BY 4.0 (c2pa-org/conformance-public LICENSE) — Coalition for Content Provenance and Authenticity"
+}

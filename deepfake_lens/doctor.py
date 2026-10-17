@@ -438,7 +438,12 @@ def _run_diagnostics(models_dir: Path | None) -> DoctorReport:
     for import_name, package, purpose in OPTIONAL_DEPS:
         try:
             module = _import_dependency(import_name)
-            version = getattr(module, "__version__", "?")
+            version = str(getattr(module, "__version__", "?"))
+            # techniques-2026 (seen with torch 2.14.1+cpu in the tech gate image): a PEP 440 local label
+            # ("+cpu") was printed as an English word next to the purpose; it is written as 빌드 「cpu」.
+            if "+" in version:
+                base, local = version.split("+", 1)
+                version = f"{base}(빌드 「{local}」)"
             if import_name == "mediapipe":
                 report.dependencies.append(_mediapipe_check(package, version, purpose))
                 continue
@@ -508,7 +513,7 @@ def format_report(report: DoctorReport) -> str:
     )
     if not runnable:
         lines.append(
-            "!! 실행 가능한 모델 프로필 없음 — 검사 결과는 결정적 근거(메타데이터·C2PA)와 참고 신호뿐이며 "
+            "!! 실행 가능한 모델 프로필 없음 — 검사 결과는 재현 가능한 기록 근거(메타데이터·C2PA)와 참고 신호뿐이며 "
             "모델 검사는 검사 범위(coverage)에 미실행/실패로 기록됩니다 !!"
         )
     lines.append(f"\n== {SECTION_TITLES['model_profiles']} ==")

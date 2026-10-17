@@ -327,48 +327,21 @@ class CaseFolderTest(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
-class ExportErrorTextTest(unittest.TestCase):
-    def test_refused_export_names_its_rows(self) -> None:
-        """GUI-REV3 J-7: the unknown / not re-analyzable paths are shown (up to five), with reasons."""
-        source = GUI_JS.read_text(encoding="utf-8")
-        body = {"error": "서증으로 고른 파일 1개를 서버가 다시 분석할 수 없습니다", "code": "exhibit_not_rederived",
-                "not_rederived_exhibit_paths": [{"path": "dalle.jpg", "reason": "파일을 찾을 수 없습니다"}],
-                "unknown_exhibit_paths": ["dalle.jpg", *(f"x{i}.png" for i in range(7))]}
-        script = ("const EXPORT_ERROR_PATHS = 5;\nconst VERDICT_LABELS = {manipulation_evidence: '조작·생성 근거 있음', undetermined: '판단 불가'};\n"
-                  "const STATUS_LABELS = {duplicate: '중복'};\n") + _function(source, "changeText") + _function(source, "exportErrorText") + f"console.log(JSON.stringify(exportErrorText({json.dumps(body, ensure_ascii=False)}, 400)));"
-        node = shutil.which("node")
-        assert node is not None
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "err.js"
-            path.write_text(script, encoding="utf-8")
-            done = subprocess.run([node, str(path)], capture_output=True, text=True, timeout=60)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        text = json.loads(done.stdout)
-        self.assertIn("다시 분석할 수 없는 서증: dalle.jpg(파일을 찾을 수 없습니다)", text)
-        self.assertIn("이 보고서의 행이 아닌 경로: x0.png, x1.png, x2.png, x3.png, x4.png 외 2개", text)
-
-
-@unittest.skipUnless(shutil.which("node"), "node is not installed")
 class ChangedRowsTest(unittest.TestCase):
     def test_a_409_names_the_changed_files_and_marks_their_rows(self) -> None:
-        """Merge of R19-13: the refused export lists posted vs server verdicts; the rows say 검사 뒤 바뀜."""
+        """Merge of R19-13, adapted to P0R-6: a 409 row is {path, reason} — the refusal lists each changed file
+        with the server's reason (it showed the posted and the server verdict, which the server no longer sends);
+        the rows say 검사 뒤 바뀜."""
         source = GUI_JS.read_text(encoding="utf-8")
         body = {"error": "검사 뒤 바뀐 파일이 있습니다 — 다시 검사하십시오(보고서를 만들지 않았습니다)", "changed_rows": [
-            {"path": "dalle.jpg", "posted_verdict": "manipulation_evidence", "server_verdict": "undetermined", "posted_status": "analyzed", "server_status": "analyzed"},
-            {"path": "gone.png", "posted_verdict": "undetermined", "server_verdict": None, "posted_status": "analyzed", "server_status": None, "reason": "파일을 찾을 수 없음"},
-            *({"path": f"x{i}.png", "posted_verdict": "undetermined", "server_verdict": "undetermined"} for i in range(5)),
+            {"path": "dalle.jpg", "reason": "검사 뒤 내용이 바뀌었습니다"},
+            {"path": "gone.png", "reason": "검사 뒤 파일이 없어졌거나 읽을 수 없습니다"},
+            *({"path": f"x{i}.png", "reason": "검사 뒤 내용이 바뀌었습니다"} for i in range(5)),
         ]}
-        script = ("const EXPORT_ERROR_PATHS = 5;\nconst VERDICT_LABELS = {manipulation_evidence: '조작·생성 근거 있음', undetermined: '판단 불가'};\n"
-                  "const STATUS_LABELS = {};\n") + _function(source, "changeText") + _function(source, "exportErrorText") + f"console.log(JSON.stringify(exportErrorText({json.dumps(body, ensure_ascii=False)}, 409)));"
-        node = shutil.which("node")
-        assert node is not None
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "changed.js"
-            path.write_text(script, encoding="utf-8")
-            done = subprocess.run([node, str(path)], capture_output=True, text=True, timeout=60)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        text = json.loads(done.stdout)
-        self.assertIn("검사 뒤 바뀐 파일: dalle.jpg(조작·생성 근거 있음 → 판단 불가), gone.png(판단 불가 → 다시 분석 못 함: 파일을 찾을 수 없음)", text)
+        script = "const EXPORT_ERROR_PATHS = 5;\n" + _function(source, "changeText") + _function(source, "exportErrorText") + f"console.log(JSON.stringify(exportErrorText({json.dumps(body, ensure_ascii=False)}, 409)));"
+        text = _node(script)
+        assert isinstance(text, str)
+        self.assertIn("검사 뒤 바뀐 파일: dalle.jpg(검사 뒤 내용이 바뀌었습니다), gone.png(검사 뒤 파일이 없어졌거나 읽을 수 없습니다)", text)
         self.assertIn("외 2개", text)
         out = _run(
             f"results = [{{item: {json.dumps(_row(), ensure_ascii=False)}}}];\n"
@@ -376,45 +349,6 @@ class ChangedRowsTest(unittest.TestCase):
             "console.log(JSON.stringify(rowReason(results[0].item)));"
         )
         self.assertTrue(str(out).startswith("검사 뒤 바뀜 — 다시 검사 · "), out)
-
-
-@unittest.skipUnless(shutil.which("node"), "node is not installed")
-class ChangeTextTest(unittest.TestCase):
-    def test_what_changed_is_named(self) -> None:
-        """GUI-REV4 K-4: content-only changes and a duplicate whose original changed are told apart."""
-        source = GUI_JS.read_text(encoding="utf-8")
-        rows = [
-            {"path": "plain.png", "posted_verdict": "undetermined", "server_verdict": "undetermined", "posted_status": "analyzed",
-             "server_status": "analyzed", "posted_sha256": "a" * 64, "server_sha256": "b" * 64},
-            {"path": "copy.png", "posted_verdict": None, "server_verdict": "manipulation_evidence", "posted_status": "duplicate",
-             "server_status": "analyzed", "posted_sha256": "c" * 64, "server_sha256": "c" * 64},
-            {"path": "dalle.jpg", "posted_verdict": "manipulation_evidence", "server_verdict": "undetermined", "posted_status": "analyzed",
-             "server_status": "analyzed", "posted_sha256": "d" * 64, "server_sha256": "e" * 64},
-            {"path": "gone.png", "posted_verdict": "undetermined", "server_verdict": None, "posted_status": "analyzed", "server_status": None,
-             "posted_sha256": "f" * 64, "server_sha256": None, "reason": "파일을 찾을 수 없음"},
-            # GUI-REV5 Info (a): same SHA-256 and verdict, another status.
-            {"path": "a.zip", "posted_verdict": "undetermined", "server_verdict": "undetermined", "posted_status": "expanded",
-             "server_status": "unknown", "posted_sha256": "9" * 64, "server_sha256": "9" * 64},
-        ]
-        script = ("const VERDICT_LABELS = {manipulation_evidence: '조작·생성 근거 있음', undetermined: '판단 불가'};\n"
-                  "const STATUS_LABELS = {duplicate: '중복'};\n") + _function(source, "changeText") + (
-            f"const rows = {json.dumps(rows)};\n"
-            "const items = {'copy.png': {duplicate_of: 'a1111.png'}};\n"
-            "console.log(JSON.stringify(rows.map(r => changeText(r, items[r.path] || null))));")
-        node = shutil.which("node")
-        assert node is not None
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "change.js"
-            path.write_text(script, encoding="utf-8")
-            done = subprocess.run([node, str(path)], capture_output=True, text=True, timeout=60)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(json.loads(done.stdout), [
-            "내용(SHA-256) 바뀜 · 결론은 그대로 판단 불가",
-            "원본(a1111.png) 바뀜",
-            "조작·생성 근거 있음 → 판단 불가",
-            "판단 불가 → 다시 분석 못 함: 파일을 찾을 수 없음",
-            "상태 바뀜: 압축 파일(구성 파일 검사) → 압축 파일(검사한 구성 파일 없음) · 결론은 그대로 판단 불가",
-        ])
 
 
 @unittest.skipUnless(shutil.which("node"), "node is not installed")
@@ -478,21 +412,6 @@ class ConcurrentExportTest(unittest.TestCase):
         self.assertIn("exportSuccessOutcome(spec[3], seq, changedPaths.size, exportFailure)", success)
 
 
-@unittest.skipUnless(shutil.which("node"), "node is not installed")
-class ExcludedHeaderTest(unittest.TestCase):
-    def test_the_header_rows_are_decoded(self) -> None:
-        """GUI-REV5 L-2: X-Deepfake-Lens-Excluded-Rows (URL-safe base64 of ASCII JSON) is read back,
-        non-ASCII paths included; a missing or broken header is no rows."""
-        import base64
-
-        rows = [{"path": "sub/사진?.png", "reason": "링크 폴더 — 다시 분석 안 함"}]
-        value = base64.urlsafe_b64encode(json.dumps(rows, ensure_ascii=True).encode("ascii")).decode("ascii")
-        source = GUI_JS.read_text(encoding="utf-8")
-        out = _node(_function(source, "decodeExcludedHeader") + (
-            f"console.log(JSON.stringify([decodeExcludedHeader({json.dumps(value)}), decodeExcludedHeader(null), decodeExcludedHeader('%%')]));"))
-        self.assertEqual(out, [rows, [], []])
-
-
 class ExportFeedbackSourceTest(unittest.TestCase):
     def test_export_problems_are_said_next_to_the_buttons_once(self) -> None:
         """GUI-REV5 L-2 / Info (c): no export outcome goes to the error region (it is off screen
@@ -502,12 +421,9 @@ class ExportFeedbackSourceTest(unittest.TestCase):
         body = source[source.index("        async function exportReport(kind) {"):source.index("        Object.entries(EXPORT_BUTTONS).forEach(([kind, id]) => $(id).addEventListener('click', () => exportReport(kind)));")]
         self.assertNotIn("showError(", body)
         self.assertNotIn("toast(spec[3] + ' 생성", body)
-        self.assertNotIn("exportWarnings = new Map()", body)
         html = (PACKAGE / "gui.html").read_text(encoding="utf-8")
-        self.assertIn('id="export-warn" role="status"', html)
         self.assertIn('id="export-alert" role="alert"', html)
         reset = _function(source, "resetExportState")
-        self.assertIn("exportWarnings = new Map()", reset)
         self.assertIn("exportFailure = null", reset)
 
     def test_an_ignored_response_stays_in_the_note(self) -> None:

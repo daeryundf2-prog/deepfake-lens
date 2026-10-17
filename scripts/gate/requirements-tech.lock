@@ -1,0 +1,14 @@
+# techniques-2026: watermark decoder dependencies from PyPI, resolved on top of the reference /venv
+# (deepfake-lens-gate:latest) + requirements-tech-torch.lock on 2026-10-15 (`pip check`: no broken requirements).
+# Installed with --no-deps (Dockerfile.tech). Licenses: audioseal MIT, einops MIT, flatbuffers Apache-2.0,
+# invisible-watermark MIT (comparison tests only), omegaconf BSD-3-Clause, onnxruntime MIT, protobuf BSD-3-Clause,
+# PyWavelets MIT (comparison tests only), PyYAML MIT.
+audioseal==0.2.0
+einops==0.8.2
+flatbuffers==25.12.19
+invisible-watermark==0.2.0
+omegaconf==2.4.0
+onnxruntime==1.31.0
+protobuf==7.36.2
+PyWavelets==1.10.0
+PyYAML==6.0.3

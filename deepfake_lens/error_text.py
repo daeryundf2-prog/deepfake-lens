@@ -65,6 +65,11 @@ _WINDOWS_ABSOLUTE = re.compile(rf"(?<![\w])(?:[A-Za-z]:|\\\\[^\\/{_PATH_STOP}]+)
 _QUOTED_ABSOLUTE = re.compile(r"(['\"])((?:/|[A-Za-z]:[\\/]|\\\\)[^'\"\n]*)\1")
 
 
+def _repr_inner(text: str) -> str:
+    """R26-2 (round 26): ``text`` as ``repr()`` writes it between its quotes ("한글\\xa0x.wav" for a NBSP name)."""
+    return repr(text)[1:-1]
+
+
 def _root_variants(root: Path | str) -> set[str]:
     raw = str(root)
     variants = {raw}
@@ -72,6 +77,8 @@ def _root_variants(root: Path | str) -> set[str]:
         variants.add(os.path.abspath(raw))
     with contextlib.suppress(OSError, RuntimeError, ValueError):
         variants.add(str(Path(raw).resolve()))
+    # R26-2 (round 26): a decoder quotes the path with repr(), which escapes a NBSP, a TAB … in a folder name
+    variants |= {_repr_inner(variant) for variant in variants}
     return {variant.rstrip("/\\") for variant in variants if variant.rstrip("/\\") not in ("", ".")}
 
 
@@ -105,6 +112,9 @@ def path_scrub_file(path: Path | str) -> Iterator[None]:
         with contextlib.suppress(OSError, RuntimeError, ValueError):
             absolute = os.path.abspath(raw)
             pairs = [(form, absolute) for form in {raw, os.path.normpath(raw)} if form not in ("", ".")]
+            # R26-2 (round 26): and as repr() quotes it — "'한글\\xa0x.wav'" for a name with a NBSP (or a TAB, a
+            # control) was left as it was, so `cd case; scan .` wrote it without "<root>/"
+            pairs += [(_repr_inner(form), _repr_inner(absolute)) for form, absolute in pairs if _repr_inner(form) != form]
     token = _SCRUB_FILES.set(_SCRUB_FILES.get() + tuple(sorted(pairs, key=lambda pair: len(pair[0]), reverse=True)))
     try:
         yield
@@ -131,6 +141,20 @@ def unescape_surrogates(text: str) -> str:
 def _basename(match: re.Match[str]) -> str:
     text = match.group(0)
     return re.split(r"[\\/]", text)[-1] or text
+
+
+def _registered_absolute(name: str) -> str:
+    """R26-2 (round 26): ``name`` — a whole path value such as ``OSError.filename`` — as its absolute name when it is
+    the analyzed file's registered relative name (:func:`path_scrub_file`), else unchanged.
+
+    The errno message names the file without quotes ("[Errno 13] 접근 권한이 없습니다: lock.wav"), so the quoted-name
+    rule of :func:`scrub_paths` never saw it: `cd case; scan .` wrote "lock.wav" where `scan /abs/case` wrote
+    "<root>/lock.wav".
+    """
+    for given, absolute in _SCRUB_FILES.get():
+        if name == given:
+            return absolute
+    return name
 
 
 def scrub_paths(text: str) -> str:
@@ -222,6 +246,9 @@ _MESSAGE_KO: tuple[tuple[re.Pattern[str], str], ...] = tuple(
               ("Illegal trailing comma before end of array", "배열 끝 앞에 쉼표가 있습니다"),
               ("Unexpected UTF-8 BOM (decode using utf-8-sig)", "파일 앞에 UTF-8 BOM이 있습니다"),
           )),
+        # R26-10 (round 26): any external command stopped at its limit (the ffmpeg runs name their file and step
+        # themselves — native_stderr.ffmpeg_timeout); the command line is not quoted (it may hold paths).
+        (r"^Command .+ timed out after ([\d.]+) seconds$", r"외부 명령이 상한 \1초 안에 끝나지 않아 중단했습니다"),
         (r"^No data left in file$", "파일에 더 읽을 데이터가 없습니다"),
         (r"^Unexpected end of data$", "데이터가 예상보다 일찍 끝났습니다"),
         (r"^Input signal length=(\d+) is too small to resample.*$", r"오디오 신호가 너무 짧습니다(길이 \1)"),
@@ -298,6 +325,7 @@ KNOWN_ACRONYMS = frozenset("""
     MLM MOV MP3 MP4 MPS OK ONNX OCR PDF PNG PRNU RAM REST RGB ROC SBI SDK SDXL SHA SSIM TB TIFF TPR TSV UI URL USB USM
     UTC UTF UUID VIT WAV WARN WEBP XMP XLSR ZIP EOS EF IS RF SD TTS LR DFL NA
     TXT MD DOCX XLSX PPTX DOC XLS PPT MKV AVI WEBM FLAC OGG AAC WMA TAR GZ RAR
+    RIFF INFO SEI BMFF HEVC AIGC ITL OCSP CRL TSA COSE CBOR TXXX TSSE TENC COMM ISFT ICMT IART INAM
 """.split())
 # R11-5: the file-format names above (TXT … RAR) — "PNG·JPG·TXT·MD·MKV·TAR 등"
 # is read word by word now that "·" is a token boundary.
@@ -313,6 +341,12 @@ KNOWN_PROPER_NOUNS = (
 KNOWN_MODULE_NAMES = frozenset("""
     torch torchvision transformers onnxruntime numpy librosa soundfile speechbrain mediapipe timm cv2 PIL Pillow
     c2pa pymupdf fitz fastapi uvicorn syhwp ffmpeg ffprobe opencv scipy sklearn
+""".split())
+# P0R-22: ISO-BMFF box types, codec / muxer names and container formats the container_metadata layer names in its
+# facts (identifiers, never prose).
+CONTAINER_IDENTIFIERS = frozenset("""
+    moov udta meta keys ilst hdlr mvhd stsd uuid mdat ftyp trak mdia minf stbl mdta vide soun data
+    Lavf Lavc Vorbis Opus Ogg Matroska QuickTime
 """.split())
 _IDENTIFIER_TOKENS: tuple[re.Pattern[str], ...] = (
     re.compile("\u300c[^\u300d]*\u300d"),  # metadata values copied verbatim from the evidence file (corner brackets)
@@ -341,6 +375,7 @@ _IDENTIFIER_TOKENS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b(?:assertion|signingCredential|claimSignature|claim|manifest|timeStamp|general|algorithm|ingredient)(?:\.[A-Za-z]\w*)+"),
     re.compile(r"\b(?:pin|sha256)\b"),
     re.compile(r"\b(?:" + "|".join(sorted(KNOWN_MODULE_NAMES)) + r")\b"),
+    re.compile(r"\b(?:" + "|".join(sorted(CONTAINER_IDENTIFIERS)) + r")\b"),
 )
 _ACRONYM = re.compile(r"\b[A-Z]{2,}s?\b")
 
@@ -945,7 +980,7 @@ def korean_exception_message(exc: BaseException) -> str:
     (path-scrubbed) text is logged at INFO — the CLI log file — only.
     """
     if isinstance(exc, OSError) and exc.errno in _ERRNO_KO:
-        target = f": {scrub_paths(exc.filename)}" if isinstance(exc.filename, str) and exc.filename else ""
+        target = f": {scrub_paths(_registered_absolute(exc.filename))}" if isinstance(exc.filename, str) and exc.filename else ""
         return f"[Errno {exc.errno}] {_ERRNO_KO[exc.errno]}{target}"
     message = scrub_paths(str(exc)).strip()
     c2pa = _C2PA_CLASS.match(type(exc).__name__)

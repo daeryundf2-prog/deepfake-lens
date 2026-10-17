@@ -173,7 +173,7 @@ class EmptyKeyFileTest(unittest.TestCase):
 
     def test_a_real_key_still_signs(self) -> None:
         key = self.root / "real.key"
-        key.write_bytes(b"real-key\n")
+        key.write_bytes(b"real-key-0123456789abcdef0123456789\n")  # P0R-15: ≥ 32 bytes
         out = self.root / "signed.json"
         self.assertEqual(_run(["scan", str(self.case), "--json-out", str(out), "--sign", "--key-file", str(key)])[0], 0)
         self.assertTrue(json.loads(out.read_text(encoding="utf-8"))["signature"])

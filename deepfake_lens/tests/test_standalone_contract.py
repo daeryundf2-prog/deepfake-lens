@@ -306,11 +306,11 @@ class LegalReportTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             key = Path(tmp) / "key"
-            key.write_text("legal-key", encoding="utf-8")
+            key.write_text("legal-key-0123456789abcdef0123456789", encoding="utf-8")  # P0R-15
             out_json = Path(tmp) / "report.json"
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 main(["legal-report", str(A1111), "--json-out", str(out_json), "--key-file", str(key)])
-            self.assertTrue(verify_report(out_json, b"legal-key").verified)
+            self.assertTrue(verify_report(out_json, b"legal-key-0123456789abcdef0123456789").verified)
 
 
 class VerifyReportCommandTest(unittest.TestCase):
@@ -322,12 +322,12 @@ class VerifyReportCommandTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
         self.key = self.root / "key"
-        self.key.write_text("report-key-1", encoding="utf-8")
+        self.key.write_text("report-key-1-0123456789abcdef0123456789", encoding="utf-8")  # P0R-15
         self.other_key = self.root / "other"
-        self.other_key.write_text("report-key-2", encoding="utf-8")
+        self.other_key.write_text("report-key-2-0123456789abcdef0123456789", encoding="utf-8")
         body = {"schema_version": 2, "summary": {"total": 1}, "items": [{"path": "a.png", "sha256": "0" * 64}]}
         self.signed = self.root / "signed.json"
-        self.signed.write_text(json.dumps(sign_report(body, b"report-key-1"), ensure_ascii=False), encoding="utf-8")
+        self.signed.write_text(json.dumps(sign_report(body, b"report-key-1-0123456789abcdef0123456789"), ensure_ascii=False), encoding="utf-8")
         self.unsigned = self.root / "unsigned.json"
         self.unsigned.write_text(json.dumps(sign_report(body, None), ensure_ascii=False), encoding="utf-8")
 
@@ -348,7 +348,7 @@ class VerifyReportCommandTest(unittest.TestCase):
         self.assertEqual((code, text.split(":")[0]), (0, "검증됨"))
 
     def test_env_key(self) -> None:
-        code, text = self._run([str(self.signed)], env_key="report-key-1")
+        code, text = self._run([str(self.signed)], env_key="report-key-1-0123456789abcdef0123456789")
         self.assertEqual(code, 0)
         self.assertIn("검증됨", text)
 
@@ -556,6 +556,84 @@ class UnreadableMediaRowTest(unittest.TestCase):
         result = items[0].result
         assert result is not None
         self.assertIn(self.CHANGED, result.verdict)
+
+
+class ReasonPathFormIsTheSameEverywhereTest(unittest.TestCase):
+    """R26-2 (round 26): the reasons of R25-2's read-failure rows (and an archive's extraction failure, an unreadable
+    folder) were made outside the path-scrub registration, and a worker thread did not inherit the scan's: `scan
+    /abs/case` wrote 「…: <root>/lock.wav」, but `cd case; scan .` and `--workers 4` wrote 「…: lock.wav」 (workers 1 and 4
+    gave different bytes). A name repr() escapes (NBSP, TAB) was not found either: 「'한글\\xa0x.wav'」 from `.`. Every
+    reason must read the same, ``<root>/…``, from the absolute folder, the relative folder and ".", with 1 or 4 workers;
+    a name the audio worker staged must never reach a row."""
+
+    @unittest.skipUnless(os.name == "posix", "POSIX uid")
+    def test_every_invocation_writes_the_same_reasons(self) -> None:
+        import subprocess
+        import sys
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            os.chmod(tmp, 0o777)
+            case = Path(tmp) / "case"
+            case.mkdir()
+            case.chmod(0o777)
+            write_wav(case / "lock.wav")
+            (case / "lock.png").write_bytes(A1111.read_bytes())
+            (case / "lock.mp4").write_bytes(b"\x00\x00\x00\x18ftypmp42" + bytes(64))
+            with zipfile.ZipFile(case / "l.zip", "w") as archive:
+                archive.writestr("a.txt", "메모입니다.")
+            (case / "sub").mkdir()
+            for name in ("lock.wav", "lock.png", "lock.mp4", "l.zip", "sub"):
+                (case / name).chmod(0)
+            for name in ("한글\u00a0x.wav", "t\tab.wav", "c:x.wav"):
+                (case / name).write_bytes(b"RIFF\x04\x00\x00\x00WAVE")  # a broken WAV: a decoder reason naming the file
+            nbsp_folder = case / "f\u00a0d"
+            nbsp_folder.mkdir()
+            (nbsp_folder / "n.wav").write_bytes(b"RIFF\x04\x00\x00\x00WAVE")
+            home = Path(tmp) / "home"
+            home.mkdir()
+            home.chmod(0o777)
+            env = {**os.environ, "HOME": str(home), "PYTHONPATH": str(REPO_ROOT), "PYTHONDONTWRITEBYTECODE": "1"}
+            env.pop("XDG_CACHE_HOME", None)
+            as_nobody = os.geteuid() == 0
+
+            def drop() -> None:  # pragma: no cover - runs in the child
+                os.setgid(65534)
+                os.setuid(65534)
+
+            def reasons(cwd: Path, folder: str, *extra: str) -> list[str]:
+                done = subprocess.run([sys.executable, "-m", "deepfake_lens", "scan", folder, "--recursive", "--format", "json", *extra],
+                                      cwd=cwd, env=env, capture_output=True, text=True, timeout=900,
+                                      preexec_fn=drop if as_nobody else None)
+                self.assertEqual(done.returncode, 0, done.stderr[-1500:])
+                lines = []
+                for row in sorted(json.loads(done.stdout)["items"], key=lambda row: row["path"]):
+                    result = row.get("result") or {}
+                    texts = [row.get("error"), result.get("verdict"), *(entry.get("reason") for entry in result.get("coverage", []))]
+                    lines.append(f"{row['path']} | {row['status']} | " + " | ".join(text for text in texts if text))
+                return lines
+
+            runs = {
+                "abs": reasons(Path(tmp), str(case)),
+                "relative": reasons(Path(tmp), "case"),
+                "dot": reasons(case, "."),
+                "abs-workers4": reasons(Path(tmp), str(case), "--workers", "4"),
+                "dot-workers4": reasons(case, ".", "--workers", "4"),
+            }
+            # a folder whose own name repr() escapes, scanned by its absolute name and as "." (the audio worker gets a
+            # non-ASCII absolute name there and stages it itself)
+            nbsp = {"abs": reasons(Path(tmp), str(nbsp_folder)), "dot": reasons(nbsp_folder, ".")}
+        expected = runs["abs"]
+        text = "\n".join(expected)
+        for name in ("lock.wav", "lock.png", "lock.mp4", "l.zip", "sub"):
+            self.assertIn(f"<root>/{name}", text, name)
+        self.assertNotIn(str(Path(tmp)), text)
+        self.assertNotRegex(text, r"\d{6}-[0-9a-f]{12}")  # no staged name
+        for name, lines in runs.items():
+            with self.subTest(invocation=name):
+                self.assertEqual(lines, expected)
+        self.assertEqual(nbsp["dot"], nbsp["abs"])
+        self.assertNotRegex("\n".join(nbsp["dot"]), r"\d{6}-[0-9a-f]{12}")
 
 
 @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed")

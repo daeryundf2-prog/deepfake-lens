@@ -1456,6 +1456,11 @@ class ChildPathTest(unittest.TestCase):
                     index += 1
                 Path("한글:v.bin").write_bytes(b"evidence bytes")
                 with mock.patch.object(native_path, "_PATH_MAX", None):
+                    if native_path._proc_cwd_prefix() is None:
+                        # R26-3 (round 26): without /proc (macOS, BSD) this asserted a staged copy (an ASCII name); the
+                        # UTF-8 name is now handed over as it is — tested by
+                        # test_without_proc_a_utf8_name_in_a_deep_folder_is_handed_over_as_it_is.
+                        self.skipTest("Linux /proc needed")
                     with native_safe_path("한글:v.bin") as staged:
                         self.assertTrue(staged.isascii(), staged)
                         self.assertEqual(Path(staged).read_bytes(), b"evidence bytes")
@@ -1466,6 +1471,56 @@ class ChildPathTest(unittest.TestCase):
                         self.assertEqual(child.stdout, "evidence bytes", child.stderr[-500:])
                     self.assertFalse(os.path.lexists(staged))  # removed afterwards
                     self.assertEqual(Path("한글:v.bin").read_bytes(), b"evidence bytes")  # the evidence file untouched
+            finally:
+                os.chdir(previous)
+
+    @unittest.skipIf(os.name == "nt", "POSIX working folder deeper than PATH_MAX")
+    def test_without_proc_a_utf8_name_in_a_deep_folder_is_handed_over_as_it_is(self) -> None:
+        """R26-3 (round 26): on macOS (PATH_MAX 1024, no /proc) a non-ASCII name in a working folder deeper than PATH_MAX
+        had no staged link (its target would be relative to the staging folder), so it was copied — every call — and a
+        file over the 2 GiB copy cap was 「…사본 상한 초과 — 비ASCII 이름의 파일에 심볼릭 링크를 만들 수 없어…」: the video
+        check failed, with a false reason (no link was ever attempted). A UTF-8 name is now handed over as it is there,
+        like an ASCII name (R24-3's "./" route): no copy, no cap, the relative name opens the file here and in a child
+        that inherits the working folder. A non-UTF-8 name is still copied, with the real reason."""
+        import subprocess
+        import sys
+
+        with tempfile.TemporaryDirectory() as tmp:
+            previous = os.getcwd()
+            os.chdir(tmp)
+            try:
+                index = 0
+                while len(os.fsencode(os.getcwd())) <= native_path._path_max():
+                    part = f"{index:02d}" + "d" * 198
+                    os.mkdir(part)
+                    os.chdir(part)
+                    index += 1
+                name = "한글 큰:v.bin"
+                Path(name).write_bytes(b"evidence bytes " * 64)
+                before = set(os.listdir(native_path.session_dir()))
+                with mock.patch.object(native_path, "_proc_cwd_prefix", return_value=None), \
+                        mock.patch.object(native_path, "NATIVE_COPY_MAX_BYTES", 16):  # the file is "over the cap"
+                    with native_safe_path(name) as handed:
+                        self.assertEqual(handed, name)
+                        self.assertEqual(Path(handed).read_bytes(), b"evidence bytes " * 64)
+                    with native_safe_path(name, for_child=True) as handed:
+                        self.assertEqual(handed, f"./{name}")  # never an ffmpeg protocol (R24-2)
+                        child = subprocess.run([sys.executable, "-c", "import sys; sys.stdout.write(open(sys.argv[1], 'rb').read().decode())", handed],
+                                               capture_output=True, text=True, timeout=60)  # inherits the working folder
+                        self.assertEqual(child.stdout, "evidence bytes " * 64, child.stderr[-500:])
+                    self.assertEqual(set(os.listdir(native_path.session_dir())), before)  # nothing staged, nothing copied
+                    if sys.platform.startswith("linux"):  # a non-UTF-8 name (Linux allows the bytes; APFS refuses them)
+                        raw = os.fsdecode(b"\xff\xfe big.bin")
+                        Path(raw).write_bytes(b"evidence bytes " * 64)
+                        with self.assertRaises(native_path.NativePathError) as caught:
+                            with native_safe_path(raw):
+                                pass
+                        reason = str(caught.exception)
+                        self.assertIn(native_path.COPY_CAP_EXCEEDED, reason)
+                        self.assertIn("/proc 경로로도 닿을 수 없어", reason)
+                        self.assertNotIn("심볼릭 링크를 만들 수 없어", reason)
+                with mock.patch.object(native_path, "_proc_cwd_prefix", return_value=None):
+                    self.assertFalse(native_path._passes_as_is(os.path.abspath(name)))  # an absolute name is staged as before
             finally:
                 os.chdir(previous)
 

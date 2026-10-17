@@ -27,6 +27,33 @@ from .pixel import DEFAULT_PIXEL_MAX_SIDE, SUPPORTED_PIXEL_MODES
 # unmeasured reference values and never a conclusion.
 LAYER_DIAGNOSTIC = "계층 진단 — 측정되지 않은 참고 수치이며 결론이 아님(결론은 scan 사용)"
 OUTPUT_FORMAT_HELP = "출력 형식"
+
+# P0R-4 (user decision 2026-10-17, scope freeze): the commands gate 0 verifies (HANDOFF.md §6). Every other command
+# is marked 「실험·비게이트」 in its help line and its --help description; its tests stay, but it is outside the
+# gate-0 verification scope. vendor-weights is a gate command for its `pin` / `pin-asset` actions only.
+GATE_COMMANDS = frozenset({
+    "scan", "classify", "verify-report", "evidence-statement", "doctor", "web", "api-serve", "corpus", "vendor-weights",
+})
+NON_GATE_MARK = "[실험·비게이트]"
+NON_GATE_NOTE = (
+    "실험·비게이트 명령 — 0단계 게이트 검증 범위 밖입니다(검증 대상은 명령 목록에서 이 표시가 없는 명령과 "
+    "vendor-weights의 pin 동작). 결과를 감정 근거로 쓰기 전에 scan으로 확인하십시오."
+)
+VENDOR_WEIGHTS_GATE_NOTE = "게이트 범위는 'pin'·'pin-asset' 동작뿐이며, 나머지 동작(--verify, --fetch, --bundle-to, --install 등)은 실험·비게이트입니다."
+
+
+def _mark_non_gate(subparsers: argparse._SubParsersAction) -> None:
+    """P0R-4: append NON_GATE_MARK to the help line and NON_GATE_NOTE to the description of every non-gate command."""
+    helps = {action.dest: action for action in subparsers._choices_actions}
+    for name, sub in subparsers.choices.items():
+        if name in GATE_COMMANDS:
+            if name == "vendor-weights":
+                sub.description = f"{sub.description or ''} {VENDOR_WEIGHTS_GATE_NOTE}".strip()
+            continue
+        sub.description = f"{NON_GATE_NOTE} {sub.description or ''}".strip()
+        action = helps.get(name)
+        if action is not None and action.help and NON_GATE_MARK not in action.help:
+            action.help = f"{action.help} {NON_GATE_MARK}"
 JSON_OUT_HELP = "JSON 보고서를 이 파일에 저장"
 SIGN_HELP = "--json-out 보고서에 HMAC-SHA256 서명(키 보유자 대상 무결성 확인이며 법적 부인방지는 아님; 키는 --key-file 또는 DEEPFAKE_LENS_REPORT_KEY)"
 KEY_FILE_HELP = "보고서 서명 키 파일(기본: DEEPFAKE_LENS_REPORT_KEY 환경 변수)"
@@ -470,7 +497,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     multimodal_parser.add_argument("--text-source", type=str, help="텍스트 출처 추정")
     multimodal_parser.add_argument("--audio-source", type=str, help="오디오 출처 추정")
     multimodal_parser.add_argument("--video-source", type=str, help="영상 출처 추정")
-    multimodal_parser.add_argument("--av-sync", type=Path, help="음성/영상 동기 검사용 영상 파일(opencv+librosa+ffmpeg 필요)")
+    multimodal_parser.add_argument("--av-sync", type=Path, help="음성/영상 동기 검사용 영상 파일(opencv+librosa+ffmpeg 필요; 처음 600초, 음성 트랙 최대 4개)")
     multimodal_parser.add_argument("--format", choices=["table", "json"], default="json", help=OUTPUT_FORMAT_HELP)
     multimodal_parser.add_argument("--json-out", type=Path, help=JSON_OUT_HELP)
 
@@ -642,6 +669,7 @@ def build_parser() -> tuple[argparse.ArgumentParser, dict[str, argparse.Argument
     for sub in [*subparsers.choices.values(), *nested]:
         sub.add_argument("--verbose", action="store_true", help="처리 오류의 상세 로그(트레이스백)를 표준 오류에도 출력(기본: 로그 파일에만 기록)")
 
+    _mark_non_gate(subparsers)
     _refuse_empty_paths(parser)
     _korean_metavars(parser)
     return parser, {

@@ -157,7 +157,8 @@ class ForensicPdfApiEndpointTest(unittest.TestCase):
             next_checks=[],
         )
         row = ScanItem("test/photo.jpg", "photo.jpg", "image", "analyzed", 100, result).to_json()
-        return {"items": [row], "format": "pdf", "exhibit_no": "갑 제3호증", "scan_root": self.scan_root}
+        # P0R-6: a hand-made row can only be an (unsigned) upload row; folder rows come from a server-held scan job
+        return {"uploads": [dict(row, source="upload")], "format": "pdf", "exhibit_no": "갑 제3호증"}
 
     # B8: pymupdf is the only PDF backend (no Latin-1 fallback) — this case runs in the venv_api / extras job.
     @unittest.skipUnless(HAVE_PYMUPDF, "pymupdf not installed — the venv_api / extras run covers this")
@@ -171,7 +172,7 @@ class ForensicPdfApiEndpointTest(unittest.TestCase):
 
         (Path(self.scan_root) / "memo.txt").write_text("사람이 쓴 짧은 메모입니다.", encoding="utf-8")
         scanned = webapp_api._scan_payload(f"folder={quote(self.scan_root)}&no_default_engine=true", default_folder=Path(self.scan_root))
-        payload = dict(self._payload(), items=scanned["items"], options={"no_default_engine": "true"})
+        payload = {"scan_job": scanned["scan_job"], "format": "pdf", "exhibit_no": "갑 제3호증"}  # P0R-6
         res = self.client.post(
             "/api/report?format=pdf",
             headers={"host": "localhost", "X-Deepfake-Lens-Client": "gui"},

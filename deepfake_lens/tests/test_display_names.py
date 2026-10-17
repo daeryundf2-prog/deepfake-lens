@@ -848,7 +848,7 @@ class EmbeddedReportJsonTest(unittest.TestCase):
             for name in self.NAMES:
                 (folder / name).write_bytes(A1111.read_bytes())
             key = root / "k.key"
-            key.write_text("r11-6-key-0123456789abcdef", encoding="utf-8")
+            key.write_text("r11-6-key-0123456789abcdef0123456789", encoding="utf-8")  # P0R-15: ≥ 32 bytes
             html_out = root / "r.html"
             saved = os.environ.pop("DEEPFAKE_LENS_REPORT_KEY", None)
             try:

@@ -193,6 +193,258 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 13,
+      "reason": "R26-1: 압축 구성원 경로의 각 단계 경로에 ::·\\가 있거나 :로 시작·끝나면 이스케이프(inner.zip::b.png 구성원은 inner.zip\\:\\:b.png) — 같은 입력의 scan JSON이 바뀜(압축 행은 캐시되지 않음)",
+      "sha256": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+      "sets": {
+        "stdlib": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+        "full-extras": "ece030016587b55c035311a0502994d510f0fc02294553470a0fe35cdb844a59"
+      },
+      "constants_sha256": "379d6f9f707a3c0e87807041bd6fadfdd2d6999f41caa42a58eaf09a2907100e",
+      "constants_count": 56,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
+    },
+    {
+      "generation": 14,
+      "reason": "R26-8: 새 사용자 문구 상수(result_text.ROW_IDENTITY_INVARIANT_BROKEN) — 행 식별자가 중복되거나 되돌아가지 않는 검사는 결과를 내지 않음; 정상 검사의 행은 바뀌지 않음",
+      "sha256": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+      "sets": {
+        "stdlib": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+        "full-extras": "ece030016587b55c035311a0502994d510f0fc02294553470a0fe35cdb844a59"
+      },
+      "constants_sha256": "6f131e070869e61776f999e33ba630130f9d308458ac162ad7682114858676cc",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
+    },
+    {
+      "generation": 15,
+      "reason": "R26-2: repr()가 이스케이프하는 이름(NBSP·TAB)이나 오디오 작업자가 스테이징한 이름을 적은 사유가 cd case; scan .·--workers 4에서도 <root>/…로 씀 — 그 실행에서 캐시된 세대 14 행은 '한글\\xa0x.wav'·'000001-….wav'였음",
+      "sha256": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+      "sets": {
+        "stdlib": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+        "full-extras": "ece030016587b55c035311a0502994d510f0fc02294553470a0fe35cdb844a59"
+      },
+      "constants_sha256": "6f131e070869e61776f999e33ba630130f9d308458ac162ad7682114858676cc",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
+    },
+    {
+      "generation": 16,
+      "reason": "R26-4: ~$보고서.docx·~WRL0001.tmp·(POSIX의) con.png 같은 압축 구성원을 폴더의 같은 파일처럼 해제·분석함(거부되었음) — 같은 입력의 scan JSON이 바뀜(압축 행은 캐시되지 않음)",
+      "sha256": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+      "sets": {
+        "stdlib": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+        "full-extras": "ece030016587b55c035311a0502994d510f0fc02294553470a0fe35cdb844a59"
+      },
+      "constants_sha256": "6f131e070869e61776f999e33ba630130f9d308458ac162ad7682114858676cc",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
+    },
+    {
+      "generation": 17,
+      "reason": "R26-10: 시간 상한에 걸린 ffmpeg 단계가 단계·파일·상한을 적음(FfmpegTimeout: ffmpeg 시간 초과 — …); 세대 16 행은 TimeoutExpired: 라이브러리 오류(TimeoutExpired)였음",
+      "sha256": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+      "sets": {
+        "stdlib": "a0a502f68450cc495b4d35e0b4ae48baafb6aee5df07d7c512322c30553495b9",
+        "full-extras": "ece030016587b55c035311a0502994d510f0fc02294553470a0fe35cdb844a59"
+      },
+      "constants_sha256": "6f131e070869e61776f999e33ba630130f9d308458ac162ad7682114858676cc",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
+    },
+    {
+      "generation": 18,
+      "reason": "techniques-2026 병합(R26 세대 17 위): C2PA 오프라인 신뢰 목록 검증·C2PA 2.x 사실 항목·오디오·영상·문서 c2pa 검사, watermark_sdxl·watermark_trustmark·watermark_videoseal·watermark_audioseal 검사, marking_context·기계판독 표식 항목·online_detection — 두 갈래의 세대 13~17 행은 서로의 변경이 없어 캐시에서 쓰지 않음",
+      "sha256": "659837dc6f4a0393b00acd271724cec8bda9c8d349b6baef20d50c08066e7927",
+      "sets": {
+        "stdlib": "659837dc6f4a0393b00acd271724cec8bda9c8d349b6baef20d50c08066e7927",
+        "full-extras": "7cbcf118a39298d7424bc404d5c6d5abb63ca9ef6a0eb9e5421587da30392746"
+      },
+      "constants_sha256": "d97b9702326ff1347338dfc4c97494b8c090189499adb9c95c7fd940f8b682bd",
+      "constants_count": 58,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
+    },
+    {
+      "generation": 19,
+      "reason": "P0R-22/P0R-23: 영상·음성 행(이미지는 GB 45438 AIGC 라벨)에 container_metadata 검사(MP4·SEI·ID3·RIFF INFO·FLAC 사실, 등록된 생성기 선언만 자기 선언 생성 근거), 근거 항목의 self_declared, 영상 출처 추정 문구가 없던 검사를 주장하지 않음",
+      "sha256": "d1a8f678b2f57d7c8f4b3a7fff0c694fcb34cdc37b925c8e1945aedf5be47e46",
+      "sets": {
+        "stdlib": "d1a8f678b2f57d7c8f4b3a7fff0c694fcb34cdc37b925c8e1945aedf5be47e46",
+        "full-extras": "9e9660655a597aba8ebd726039ccb5bf854686626dbda1bd04267935237eb798"
+      },
+      "constants_sha256": "eb43be685aa21565adbe6e836d313be230b222deed5ab25b2ab393d8a81abcea",
+      "constants_count": 59,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
+    },
+    {
+      "generation": 20,
+      "reason": "P0R-20/P0R-21: C2PA 하드 바인딩 제외범위가 콘텐츠를 빼면 c2pa 검사 실패(C2PA 해시 제외범위 이상), C2PA 검증 기준 문구에 동결된 임시 신뢰 목록(ITL)과 폐기 미확인, ITL에만 연결된 서명은 보통 근거",
+      "sha256": "d1a8f678b2f57d7c8f4b3a7fff0c694fcb34cdc37b925c8e1945aedf5be47e46",
+      "sets": {
+        "stdlib": "d1a8f678b2f57d7c8f4b3a7fff0c694fcb34cdc37b925c8e1945aedf5be47e46",
+        "full-extras": "8f3901f19cce1b55774ac44605465356717443bd09c11e2578b0a9e3003db0a0"
+      },
+      "constants_sha256": "eb43be685aa21565adbe6e836d313be230b222deed5ab25b2ab393d8a81abcea",
+      "constants_count": 59,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
+    },
+    {
+      "generation": 21,
+      "reason": "P0R-10: 강한 원본성 근거와 강한 생성 근거가 함께 있으면 규칙 2가 발동하지 않음(근거 충돌 — 판단 불가)",
+      "sha256": "d1a8f678b2f57d7c8f4b3a7fff0c694fcb34cdc37b925c8e1945aedf5be47e46",
+      "sets": {
+        "stdlib": "d1a8f678b2f57d7c8f4b3a7fff0c694fcb34cdc37b925c8e1945aedf5be47e46",
+        "full-extras": "8f3901f19cce1b55774ac44605465356717443bd09c11e2578b0a9e3003db0a0"
+      },
+      "constants_sha256": "eb43be685aa21565adbe6e836d313be230b222deed5ab25b2ab393d8a81abcea",
+      "constants_count": 59,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
+    },
+    {
+      "generation": 22,
+      "reason": "P0R-11: 생성기 이름(브랜드 단어)은 생성 도구 필드(Software·parameters·prompt·workflow·CreatorTool)에서만 보통 근거, exif.Model·LensModel·Credit·dc:creator·헤더 문자열은 중립 사실, 이미지 생성 도구 항목에 self_declared와 자기 선언 문구",
+      "sha256": "7e5c184f734d085dc97a75b4568c74234ba365fc299fef0298fd9f50bcfda0e7",
+      "sets": {
+        "stdlib": "7e5c184f734d085dc97a75b4568c74234ba365fc299fef0298fd9f50bcfda0e7",
+        "full-extras": "472948ac07e7395f4ad58059ba49f2e2432cd99722d95837a3f167c96245828a"
+      },
+      "constants_sha256": "eb43be685aa21565adbe6e836d313be230b222deed5ab25b2ab393d8a81abcea",
+      "constants_count": 59,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
+    },
+    {
+      "generation": 23,
+      "reason": "P0R-12: result.conclusion_caveats(이 결론이 틀릴 수 있는 이유), 자기 선언 근거의 조작 결론 문장에 「(자기 선언 메타데이터 — 심거나 지울 수 있음)」",
+      "sha256": "5f350026c555dc7410d916223b0211fa55129e5cec5836787dd0e3f325a62eb3",
+      "sets": {
+        "stdlib": "5f350026c555dc7410d916223b0211fa55129e5cec5836787dd0e3f325a62eb3",
+        "full-extras": "cf44c69dd0cf1cdac066344ae197e3bea4f8782b441f93942af6db7e8326197b"
+      },
+      "constants_sha256": "0fe55dfdc7d8916124b9fec00cd87687e99e90373c1ecf1c43f2d5b3dc5ced41",
+      "constants_count": 60,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
+    },
+    {
+      "generation": 24,
+      "reason": "P0R-13: 결정적 근거 표시를 「재현 가능한 기록 근거」로, 판단 불가 행의 등급 라벨 표시 안 함",
+      "sha256": "f675dfb6a4bae3ef03a56eea1cddb49974f7893575d9ab775bbd9701d9e99189",
+      "sets": {
+        "stdlib": "f675dfb6a4bae3ef03a56eea1cddb49974f7893575d9ab775bbd9701d9e99189",
+        "full-extras": "818b003103b052ece69dc22d4218f2f1e3172f1ffae6394a1e30a37d277d0c7e"
+      },
+      "constants_sha256": "04149d08d78eb64c812ba095e748397a1151899430f48fbdd1ead27ab8f0417d",
+      "constants_count": 60,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

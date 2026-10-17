@@ -88,10 +88,8 @@ def unscannable_file_reason(path: Path) -> str | None:
 
     X3: a FIFO, socket or device node (:data:`NOT_REGULAR_FILE_REASON`);
     R18-10: a file on a kernel pseudo file system
-    (:data:`SPECIAL_FILESYSTEM_REASON`). R20-1 (round 20): the report's
-    re-analysis of a posted row (``webapp_api._rederive_report_items``)
-    classifies the entry with this same function, so a FIFO the scan
-    skipped is the same skipped row there — not "file not found".
+    (:data:`SPECIAL_FILESYSTEM_REASON`). (P0R-6: a web report no longer
+    re-analyzes rows — it signs the server-held scan job's rows as they were.)
     ``path.is_file()`` follows a link (an allowed one). Raises OSError
     only when the entry cannot be examined at all.
     """
@@ -846,7 +844,51 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 12: R25-7 — a reason naming the analyzed file by a relative name (a decoder's
 #    'a.wav' in `cd case; scan .`) is written "<root>/a.wav" like the absolute and
 #    root-relative invocations; a generation-11 row from such a scan said 'a.wav'.
-OUTPUT_FORMAT_GENERATION = 12
+# 13: R26-1 — an archive member's chain escapes each level's path that holds "::" or "\" or starts or ends
+#    with ":" (the literal member "inner.zip::b.png" is "inner.zip\:\:b.png", ":lead.png" is "\:lead.png"),
+#    so it is never the chain of a nested archive's member. Archive rows are not cached; raised because the
+#    scan JSON of the same input changed.
+# 14: R26-8 — a new user-facing constant (result_text.ROW_IDENTITY_INVARIANT_BROKEN): a scan whose row identities
+#    are not unique or do not round-trip gives no result. No row of a valid scan changes.
+# 15: R26-2 — a reason naming the file as repr() escapes it ('<root>/한글\xa0x.wav' — a NBSP, a TAB) or by a
+#    name the audio worker staged reads "<root>/…" from `cd case; scan .` and with --workers 4 too; a
+#    generation-14 row of such a scan said '한글\xa0x.wav' or '000001-….wav'.
+# 16: R26-4 — archive members named "~$보고서.docx", "~WRL0001.tmp" or (on POSIX) "con.png" are extracted and
+#    analyzed like the same files in a folder (they were refused). Archive rows are not cached; raised because
+#    the scan JSON of the same input changed.
+# 17: R26-10 — an ffmpeg step stopped at its time limit names the step, the file and the limit ("FfmpegTimeout:
+#    ffmpeg 시간 초과 — 영상 음성 트랙 추출: '<root>/v.mp4' — 상한 120초에 중단(경과 120초)"); a generation-16 row
+#    said "TimeoutExpired: 라이브러리 오류(TimeoutExpired) — 상세는 로그 참조".
+# 18: merge of techniques-2026 (developed in parallel as its generations 13–17 on top of generation 12) onto
+#    R26 generation 17 — a row now carries all of: the C2PA reader run offline against the bundled C2PA
+#    trust list (+ DEEPFAKE_LENS_C2PA_TRUST_ANCHORS), a ran c2pa entry naming the validator's spec version
+#    and the trust list, C2PA 2.x facts as items, a c2pa check on audio, video and document rows (.txt/.md
+#    skipped), XMP DigitalSourceType over the full IPTC vocabulary ("자기 신고"); the image checks
+#    watermark_sdxl (exact 48/48 SDXL message), watermark_trustmark (a decoded packet is a neutral fact,
+#    the C2PA soft-binding cross-check its only link to a conclusion), watermark_videoseal (images, video)
+#    and watermark_audioseal (audio, video) behind the optional torch extra; result.marking_context, the
+#    closing item "기계판독 표식 확인 결과(…)" and the skipped coverage entry online_detection. A row of either
+#    side's generation 13–17 lacks the other side's changes, so neither may be served from the cache.
+# 19: P0R-22/P0R-23 — video and audio rows (and image rows, for the GB 45438 AIGC label) gain the check
+#    container_metadata (MP4/MOV boxes, SEI user data, ID3v2, RIFF INFO, FLAC Vorbis comments: facts; a
+#    registered generator declaration is a self-declared synthetic item); evidence items may carry
+#    "self_declared": true; a video row's source guess no longer claims a container-metadata check that did not
+#    exist ("영상 출처는 추정하지 않습니다 — …").
+# 20: P0R-20/P0R-21 — a C2PA hard binding whose exclusions drop content fails the c2pa check ("C2PA 해시 제외범위
+#    이상 …") whatever the SDK's state; every C2PA basis text names the frozen Interim Trust List and says revocation
+#    is not checked; an ITL-only signer's declaration is a moderate "C2PA 서명(동결된 임시 신뢰 목록 ITL): …" item.
+# 21: P0R-10 — rule 2 does not fire when strong deterministic authentic evidence is present too: such a row (a trusted
+#    C2PA camera signature + a planted generator field) is undetermined, and the conflict item says so.
+# 22: P0R-11 — a generator brand word is moderate and counts only in generator-specific fields (Software, parameters,
+#    prompt/workflow, xmp:CreatorTool); exif.Model / LensModel / Credit / dc:creator / header strings give a neutral fact;
+#    the image metadata generator items carry self_declared and 「자기 선언 메타데이터 — 심거나 지울 수 있음」; a brand
+#    source guess is LOW (was HIGH).
+# 23: P0R-12 — result.conclusion_caveats (why a manipulation / authenticity conclusion could be wrong); a manipulation
+#    verdict resting on a self-declared item says 「(자기 선언 메타데이터 — 심거나 지울 수 있음)」.
+# 24: P0R-13 — the deterministic kind label is 「재현 가능한 기록 근거」 in every rendering (the [기록/…] qualifiers, the CSV
+#    top_evidence_label, the evidence statement), and an evidence-grade 판단 불가 row shows no grade label (CSV
+#    grade_label blank). The JSON fields are unchanged.
+OUTPUT_FORMAT_GENERATION = 24
 
 
 def cache_extension(path: Path) -> str:
@@ -881,6 +923,19 @@ def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | No
     # R19-1 (round 19): and the runtime the checks ran in — which optional
     # dependencies can be found, at which version, and ffmpeg.
     tokens += dependency_tokens()
+    # techniques-2026: the C2PA trust basis (bundled list + DEEPFAKE_LENS_C2PA_TRUST_ANCHORS) decides
+    # whether a signer is trusted — a row cached under another trust basis is not replayed.
+    from .c2pa import trust_cache_tokens
+
+    tokens += trust_cache_tokens()
+    # techniques-2026 items 3–5: the watermark registry (generator messages) decides what a decoded mark says.
+    from .media_marks import registry_cache_tokens
+
+    tokens += registry_cache_tokens()
+    # P0R-22: the container generator registry (AIGC producers, SEI vendor strings, tool-field brands).
+    from .container_metadata import registry_cache_tokens as container_registry_tokens
+
+    tokens += container_registry_tokens()
     return f"tool:{TOOL_VERSION}|pins:{_short_digest(chr(10).join(tokens))}"
 
 

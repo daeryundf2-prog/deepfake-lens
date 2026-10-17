@@ -69,6 +69,8 @@ test_every_profile_is_gated_and_carries_an_empty_pin."
 | `ScanPayloadValidationTest.test_max_files_floors_at_one` | Y8 (검증 라운드 7) | 결함을 고정하던 테스트: `/api/scan?max_files=0`이 1로 올려져 검사가 돈다고 기대했다. 1 미만은 이제 400(InvalidOption)이므로 거부를 확인하도록 고치고 이름을 바꿨다. 커밋 메시지에 옛 이름 기재 | `ScanPayloadValidationTest.test_zero_or_negative_limits_are_refused` |
 | `JsonOutParentCreationTest.test_scan_json_out_creates_missing_parents` | Z5 (검증 라운드 8) | 결함을 고정하던 테스트: `scan --json-out`이 없는 상위 폴더를 만들어 저장한다고 기대했다. 없는 출력 폴더는 이제 검사 전 사용 오류(exit 2, `오류: 출력 폴더가 없습니다: …`, 폴더를 만들지 않음)이므로 거부와 기존 폴더 저장을 확인하도록 고치고 이름을 바꿨다. 커밋 메시지에 옛 이름 기재 | `JsonOutParentCreationTest.test_scan_json_out_refuses_missing_parents` |
 | `VideoFramesRuntimeTest.test_committed_aide_frames_profile_matches_video_modality` | `fix(models): pinned, gated model zoo; rejected profiles removed (WP-C)` (해시 참고: `1cb8da8`) | aide-frames-runtime.json 삭제. 커밋 메시지: "frames-profile contract retargeted to the remaining video-frames profiles" | `VideoFramesRuntimeTest.test_committed_frames_profiles_match_video_modality` |
+| `Rule2DeterministicSyntheticTest.test_beats_strong_authenticity` | `fix(decision): P0R-10 rule 2 no longer outvotes strong authenticity — strong reproducible-record evidence in both directions is a conflict, undetermined (P0R-10; Gaps: 신규)` | 없어진 설계를 고정하던 테스트(사용자 결정 2026-10-17): 강한 생성 근거가 강한 원본성 근거를 이긴다고 기대했다. 둘이 함께 있으면 이제 근거 충돌로 판단 불가다 | `Rule2DeterministicSyntheticTest.test_strong_authenticity_makes_it_a_conflict` |
+| `MetadataEvidenceMappingTest.test_header_byte_string_is_only_moderate` | `fix(metadata): P0R-11 a generator brand word is moderate and counts only in generator-specific fields (Software, parameters, prompt/workflow, xmp:CreatorTool) — never exif.Model, LensModel, Credit or dc:creator (P0R-11; Gaps: 신규)` | 없어진 설계를 고정하던 테스트(사용자 결정 2026-10-17): 헤더 바이트 문자열의 생성기 이름을 보통 강도의 생성 근거로 기대했다. 생성 도구 필드가 아닌 곳의 이름은 이제 중립 사실이다 | `MetadataEvidenceMappingTest.test_header_byte_string_is_only_a_fact` |
 
 ## 파일 이동 (삭제 아님)
 
@@ -81,3 +83,105 @@ test_every_profile_is_gated_and_carries_an_empty_pin."
 | `deepfake_lens/tests/qa/test_qa_sys_gate.py` (`MeasurementGateTest`, 클래스·테스트·docstring 그대로) | W2 (검증 라운드 4) | `deepfake_lens/tests/qa/test_qa_sys.py` |
 | `deepfake_lens/tests/qa/test_qa_sys_integrity.py` (`QaSys6SignatureCoversWholeReportTest`, `QaSys7ReadRootConfinementTest`, `QaSys7ReadRootUnitTest`, 클래스·테스트·docstring 그대로) | W2 (검증 라운드 4) | `deepfake_lens/tests/qa/test_qa_sys.py` |
 | `deepfake_lens/tests/qa/test_qa_traceability.py` (`TraceabilityTest`, `HarnessLogicTest`, 클래스·테스트·docstring 그대로) | W2 (검증 라운드 4) | `deepfake_lens/tests/qa/test_qa_sys.py` |
+
+## P0R-6 재설계로 없어진 테스트 (기준선 밖 — 0단계 중에 생긴 테스트)
+
+사용자 결정 2026-10-17: `/api/report`는 클라이언트가 게시한 행을 서버 재분석과 맞추지 않고, 서버가 보관한 검사 작업(`scan_job`)의 행만 서명한다. 아래 테스트는 **없어진 설계(게시 행의 재분석·대조·검증)**를 고정하던 것이라 함께 지웠다(커밋 제목: `feat(report): P0R-6 /api/report signs a server-held scan job only — …`). 기준선(QA-SYS-10) 테스트는 없다 — 그래서 표가 아니라 목록으로 적는다(QA-SYS-10 검사는 표의 행만 기준선 이름으로 확인한다). 의도가 남는 것은 `deepfake_lens/tests/test_servers.py`의 새 클래스가 새 API로 이어받는다: 게시 행 대신 `scan_job` — 서명 행 = 작업 행(`ReportSignsTheJobsRowsTest`, `ReportSignedSetIsTheServersInvariantTest`), 검사 뒤 변경 409(`ReportRefusesChangedRowsTest`, `ReportRefusesAFolderLinkedAfterTheScanTest`), 특수 항목(`ReportSignsSpecialEntriesAsScannedTest`), 취소·미기록 계수(`ReportSignedSetIsTheServersInvariantTest.test_r24_1_…`, `ReportUnrecordedFilesAreTheServersTest`), 클라이언트 문구 불변식(`ReportSignsNoPostedTextInvariantTest`), 구성원 사슬 단사(`ReportArchiveMemberChainIsInjectiveTest`), 업로드 이름(`ReportUploadRowNamesTest`), 작업 보관·소유·만료(`ScanJobsAreServerHeldTest`). 게시 행·별칭·게시된 중복 관계·게시된 폴더 사유·게시된 취소 계수를 다루던 테스트는 그 입력이 요청 필드가 아니게 되어(400 「알 수 없는 필드」) 이어받을 대상이 없다.
+
+- `ReportEvidenceHashesBothServersTest.test_symlink_component_on_the_path_is_not_followed`
+- `ReportSignsOnlyServerResultsTest.test_forged_row_is_replaced_by_the_server_result`
+- `ReportSignsOnlyServerResultsTest.test_rows_the_server_cannot_reanalyze_are_excluded_and_marked`
+- `ReportSignsOnlyServerResultsTest.test_report_options_are_validated`
+- `ReportRefusesChangedRowsTest.test_an_archive_member_replaced_after_the_scan_is_409`
+- `ReportRefusesChangedRowsTest.test_a_dedupe_duplicate_stays_a_duplicate_and_its_change_is_409`
+- `ReportRefusesChangedRowsTest.test_junk_posted_digests_are_409`
+- `ReportRefusesChangedRowsTest.test_unchanged_rows_are_signed_as_before`
+- `ReportSignsSpecialEntriesAsScannedTest.test_a_fifo_and_a_socket_are_signed_as_the_scan_listed_them`
+- `ReportSignsSpecialEntriesAsScannedTest.test_a_file_replaced_by_a_fifo_after_the_scan_is_still_409`
+- `ReportSignsSpecialEntriesAsScannedTest.test_a_missing_file_is_still_not_found`
+- `ReportVerifiesPostedDuplicatesTest.test_a_row_posted_as_a_duplicate_of_itself_is_refused`
+- `ReportVerifiesPostedDuplicatesTest.test_a_duplicate_of_a_row_that_is_not_posted_is_refused`
+- `ReportVerifiesPostedDuplicatesTest.test_a_duplicate_of_another_duplicate_is_refused`
+- `ReportVerifiesPostedDuplicatesTest.test_a_duplicate_of_a_posted_row_with_other_bytes_is_409`
+- `ReportVerifiesPostedDuplicatesTest.test_the_scans_own_duplicate_is_still_signed_as_a_duplicate`
+- `ReportRefusesAFolderLinkedAfterTheScanTest.test_a_row_the_scan_did_not_hash_is_still_only_excluded`
+- `ReportSignsNoPostedFolderReasonTest.test_a_forged_walk_limit_row_is_excluded_and_its_text_is_in_no_artifact`
+- `ReportSignsNoPostedFolderReasonTest.test_a_forged_loop_row_of_a_folder_that_is_no_loop_is_409`
+- `ReportSignsNoPostedFolderReasonTest.test_a_loop_the_server_finds_is_its_own_row`
+- `ReportSignsNoPostedFolderReasonTest.test_an_unreadable_folder_row_still_signs_the_servers_failed_row`
+- `ReportSignsNoPostedFolderReasonTest.test_a_duplicate_row_carries_the_scans_reason`
+- `ReportSignsNoPostedTextInvariantTest.test_no_posted_row_text_reaches_a_signed_artifact`
+- `ReportRowPathsAreTheScansOwnTest.test_an_alias_of_a_scan_row_path_is_400`
+- `ReportRowPathsAreTheScansOwnTest.test_an_escaped_alias_is_400`
+- `ReportRowPathsAreTheScansOwnTest.test_a_row_posted_twice_is_400`
+- `ReportRowPathsAreTheScansOwnTest.test_a_tilde_in_a_row_path_is_a_name_in_the_scan_folder`
+- `ReportRowPathsAreTheScansOwnTest.test_the_scans_own_rows_are_still_signed`
+- `ReportRecordsAnalysisOptionsTest.test_the_options_are_signed_and_printed`
+- `ReportRecordsAnalysisOptionsTest.test_a_posted_cancel_count_is_not_signed_unchecked`
+- `ReportScanRootAndUploadsTest.test_subfolder_scan_report_signs_the_subfolder_file`
+- `ReportScanRootAndUploadsTest.test_r9_9_scan_root_is_signed_and_shown`
+- `ReportScanRootAndUploadsTest.test_scan_root_is_required_absolute_existing_and_inside_the_roots`
+- `ReportScanRootAndUploadsTest.test_upload_named_like_a_root_file_is_never_signed`
+- `ReportArchiveMemberIdentityTest.test_every_row_is_reported_as_its_own_file`
+- `ReportUnrecordedFilesAreTheServersTest.test_rows_left_out_of_the_post_are_counted`
+- `ReportUnrecordedFilesAreTheServersTest.test_the_servers_scan_job_is_the_listing`
+- `ReportUnrecordedFilesAreTheServersTest.test_archive_member_rows_left_out_of_the_post_are_counted`
+- `ReportUnrecordedFilesAreTheServersTest.test_a_cancelled_scan_with_an_archive_is_reported`
+- `ReportUnrecordedFilesAreTheServersTest.test_a_cancelled_recursive_scan_with_an_archive_in_a_subfolder_is_reported`
+- `ReportUnrecordedFilesAreTheServersTest.test_a_cancelled_container_that_really_changed_is_still_refused`
+- `ReportUnrecordedFilesAreTheServersTest.test_a_cancelled_container_row_needs_a_cancelled_report`
+- `ReportUnrecordedFilesAreTheServersTest.test_a_cancelled_scan_job_is_cancelled_without_the_posted_summary`
+- `ReportUnrecordedFilesAreTheServersTest.test_a_cancelled_job_of_another_folder_or_a_finished_job_changes_nothing`
+- `ReportUnrecordedFilesAreTheServersTest.test_signed_rows_outside_the_servers_listing_are_unknown`
+- `ReportUnrecordedFilesAreTheServersTest.test_a_walk_limit_is_unknown`
+- `ReportUnrecordedFilesAreTheServersTest.test_upload_rows_only_are_unknown`
+- `ReportUnrecordedFilesAreTheServersTest.test_regressions_of_the_report_rules_stay_closed`
+- `ReportSignedSetIsTheServersInvariantTest.test_fuzzed_structure_of_a_never_cancelled_scan`
+- `ReportSignedSetIsTheServersInvariantTest.test_fuzzed_structure_of_a_cancelled_job`
+- `ReportSignedSetIsTheServersInvariantTest.test_fuzzed_structure_of_a_finished_job`
+- `ReportSignedSetIsTheServersInvariantTest.test_r25_1_a_file_posted_as_a_cancelled_archive_is_refused`
+- `ReportSignedSetIsTheServersInvariantTest.test_r25_1_an_archive_posted_cancelled_without_its_members_is_refused_or_counted`
+- `ReportSignedSetIsTheServersInvariantTest.test_r25_1_a_real_cancelled_job_with_its_analyzed_members_left_out`
+- `ReportSignedSetIsTheServersInvariantTest.test_original_cases_stay_closed`
+- `ReportArchiveMemberChainIsInjectiveTest.test_every_member_is_its_own_row_and_its_chain_round_trips`
+- `ReportArchiveMemberChainIsInjectiveTest.test_the_honest_report_is_signed_and_a_left_out_member_is_counted`
+- `ReportArchiveMemberChainIsInjectiveTest.test_a_server_whose_identities_collide_refuses_the_report`
+- `ReportArchiveMemberChainIsInjectiveTest.test_a_member_chain_in_another_form_is_400`
+- `ReportRowAliasesByFileIdentityTest.test_a_path_under_a_bind_mount_loop_is_400`
+- `ReportRowAliasesByFileIdentityTest.test_a_path_spelled_unlike_the_listing_is_400`
+- `ReportRowAliasesByFileIdentityTest.test_a_gone_file_is_still_409_and_hard_links_are_rows`
+
+## GUI 재설계 브랜치 — P0R-6 병합으로 없어진 GUI 테스트 (기준선 밖)
+
+`merge: phase0 8178e77 (R26, techniques-2026, P0R restructure) into gui-redesign` — P0R-6 뒤 `/api/report`는 서버가 보관한 검사 작업(`scan_job`)으로만 보고서를 만든다. 아래 GUI 브랜치 테스트는 **없어진 설계**(게시 행 기반 보고서, 증거설명서의 서명 부록 `excluded_by_selection`, `submitter_side`(을호증 — BACKLOG BL-15까지 원고 측만), `format=evidence-json`, 게시 행 검증의 `exhibit_not_rederived`/`exhibit_unknown` 코드, 409 행의 게시·서버 결론 비교, 서명 제외 행 응답 헤더 `X-Deepfake-Lens-Excluded-*`)를 고정하던 것이라 지웠다. 기준선(QA-SYS-10) 테스트는 없다.
+
+이어받는 테스트: 작업 기반 미리보기 = 내보낸 PDF(`EvidencePreviewOnTheJobTest.test_the_preview_is_the_exported_pdf` — R23-4 이스케이프, R24-7/R25-3 사건 필드 포함), 고른 순서의 호증 번호와 나머지 행의 "서증 외(검사 행)"(`test_the_preview_numbers_the_chosen_rows_in_order_and_keeps_every_other_row`), 요청 규칙(`test_the_preview_takes_the_requests_rules`), 변경 파일 409(`test_the_preview_does_not_rehash_but_the_export_refuses_a_changed_file`), 업로드만(`test_an_upload_only_preview_lists_the_uploads_unsigned`), 409 행의 사유 표시(`ChangedRowsTest`, test_gui_ledger.py). 서명된 작업 행·순서·검증은 phase0의 `test_servers.py`(P0R-6 클래스)가 맡는다.
+
+- `StatementSelectionTest.test_unchosen_rows_go_to_a_signed_appendix`
+- `StatementSelectionTest.test_an_ordered_choice_numbers_exhibits_in_its_order`
+- `StatementSelectionTest.test_the_long_standing_statement_is_unchanged`
+- `StatementSelectionTest.test_defendant_side_numbers_eul_exhibits`
+- `AppendixAspectsTest.test_appendix_rows_keep_why_they_are_undetermined`
+- `WebReportSelectionTest.test_evidence_statement_keeps_every_row`
+- `WebReportSelectionTest.test_rendered_pdf_lists_the_appendix`
+- `WebReportSelectionTest.test_web_statement_follows_the_posted_order`
+- `WebReportSelectionTest.test_evidence_json_is_the_signed_statement_in_the_posted_order`
+- `WebReportSelectionTest.test_other_formats_carry_every_row_whatever_the_choice`
+- `WebReportSelectionTest.test_defendant_side_placeholders_and_statutes_on_the_web`
+- `WebReportSelectionTest.test_rendered_defendant_pdf_says_byeonhoin`
+- `WebReportSelectionTest.test_preview_is_the_pdf_template`
+- `WebReportSelectionTest.test_an_empty_unknown_or_repeated_choice_is_refused`
+- `WebReportSelectionTest.test_a_chosen_file_gone_since_the_scan_is_said_so`
+- `WebReportSelectionTest.test_preview_refuses_a_malformed_duplicate_too`
+- `WebReportSelectionTest.test_preview_lists_a_walk_limit_row_as_the_export_does`
+- `WebReportSelectionTest.test_rows_posted_as_the_scan_returned_them_are_never_a_path_400`
+- `WebReportSelectionTest.test_preview_takes_the_servers_listing_like_the_export`
+- `WebReportSelectionTest.test_preview_draws_glyphless_names_as_the_pdf_does`
+- `WebReportSelectionTest.test_preview_excludes_a_cancelled_archive_like_the_export`
+- `WebReportSelectionTest.test_preview_case_fields_are_drawn_as_the_pdf_draws_them`
+- `WebReportSelectionTest.test_excluded_rows_are_named_in_response_headers`
+- `WebReportSelectionTest.test_unsupported_format_lists_every_format` (같은 이름의 새 테스트가 `EvidencePreviewOnTheJobTest`에 있다)
+- `WebReportSelectionTest.test_malformed_choice_is_refused`
+- `ExportErrorTextTest.test_refused_export_names_its_rows` (test_gui_ledger.py)
+- `ChangeTextTest.test_what_changed_is_named` (test_gui_ledger.py)
+- `ExcludedHeaderTest.test_the_header_rows_are_decoded` (test_gui_ledger.py)

@@ -29,8 +29,13 @@ HAVE_FASTAPI = importlib.util.find_spec("fastapi") is not None and importlib.uti
 
 
 class ScanStatusProgressTest(unittest.TestCase):
+    # Merge of phase0 P0R-6: the job registry is scan_jobs.STORE (was webapp_api._SCAN_JOBS); the progress is held
+    # with the running job in the store (set_progress / add_progress_row) — the tests set it there.
     def setUp(self) -> None:
-        for target in (patch.object(webapp_api, "_SCAN_JOBS", {}), patch.object(webapp_api, "_READ_ROOTS", OrderedDict())):
+        from deepfake_lens.scan_jobs import JobStore
+
+        self.store = JobStore()
+        for target in (patch.object(webapp_api, "STORE", self.store), patch.object(webapp_api, "_READ_ROOTS", OrderedDict())):
             target.start()
             self.addCleanup(target.stop)
 
@@ -41,6 +46,16 @@ class ScanStatusProgressTest(unittest.TestCase):
                 return state
             time.sleep(0.05)
         self.fail("job did not finish")
+
+    def _running(self, progress: dict[str, object] | None = None, *, age: float = 0.0) -> str:
+        from deepfake_lens.scan_jobs import LOCAL_OWNER, SOURCE_ASYNC
+
+        job_id, _cancel = self.store.start(LOCAL_OWNER, SOURCE_ASYNC)
+        with self.store._lock:
+            self.store._jobs[job_id]["created"] = time.time() - age
+        if progress is not None:
+            self.store.set_progress(job_id, progress)
+        return job_id
 
     def test_status_reports_done_total_current_recent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -67,31 +82,22 @@ class ScanStatusProgressTest(unittest.TestCase):
         self.assertGreaterEqual(float(state["elapsed_seconds"]), 0.0)
 
     def test_running_job_reports_its_progress(self) -> None:
-        with webapp_api._SCAN_JOBS_LOCK:
-            webapp_api._SCAN_JOBS["j1"] = {
-                "status": "running", "created": time.time() - 3, "cancel": threading.Event(),
-                "done": 2, "total": 9, "current": "b.png", "recent": [{"name": "b.png", "status": "analyzed", "verdict_code": "undetermined"}],
-            }
-        state = webapp_api._scan_status_payload("job=j1")
+        job = self._running({"done": 2, "total": 9, "current": "b.png", "recent": [{"name": "b.png", "status": "analyzed", "verdict_code": "undetermined"}]}, age=3)
+        state = webapp_api._scan_status_payload(f"job={job}")
         self.assertEqual((state["status"], state["done"], state["total"], state["current"]), ("running", 2, 9, "b.png"))
         self.assertNotIn("result", state)
         self.assertGreaterEqual(float(state["elapsed_seconds"]), 3.0)  # type: ignore[arg-type]
 
     def test_a_job_before_enumeration_has_no_total(self) -> None:
-        with webapp_api._SCAN_JOBS_LOCK:
-            webapp_api._SCAN_JOBS["j0"] = {"status": "running", "created": time.time(), "cancel": threading.Event()}
-        state = webapp_api._scan_status_payload("job=j0")
+        job = self._running()
+        state = webapp_api._scan_status_payload(f"job={job}")
         self.assertEqual((state["done"], state["total"], state["current"], state["recent"]), (0, None, None, []))
 
     def test_a_running_job_is_never_evicted(self) -> None:
-        old = time.time() - webapp_api._SCAN_JOB_TTL_SECONDS - 60
-        with webapp_api._SCAN_JOBS_LOCK:
-            webapp_api._SCAN_JOBS["long"] = {"status": "running", "created": old, "cancel": threading.Event()}
-            webapp_api._SCAN_JOBS["stale"] = {"status": "done", "created": old, "finished": old, "cancel": threading.Event()}
-            webapp_api._SCAN_JOBS["fresh"] = {"status": "done", "created": old, "finished": time.time(), "cancel": threading.Event()}
-        self.assertEqual(webapp_api._scan_status_payload("job=long")["status"], "running")
-        self.assertEqual(webapp_api.api_status(webapp_api._scan_status_payload("job=stale")), 404)
-        self.assertEqual(webapp_api._scan_status_payload("job=fresh")["status"], "done")
+        from deepfake_lens.scan_jobs import ttl_seconds
+
+        job = self._running(age=ttl_seconds() + 60)
+        self.assertEqual(webapp_api._scan_status_payload(f"job={job}")["status"], "running")
 
     @unittest.skipUnless(HAVE_FASTAPI, "fastapi + httpx not installed")
     def test_api_serve_status_has_the_same_fields(self) -> None:
@@ -99,13 +105,9 @@ class ScanStatusProgressTest(unittest.TestCase):
 
         from deepfake_lens.api_server import create_app
 
-        with webapp_api._SCAN_JOBS_LOCK:
-            webapp_api._SCAN_JOBS["j2"] = {
-                "status": "running", "created": time.time(), "cancel": threading.Event(),
-                "done": 1, "total": 4, "current": "a.txt", "recent": [],
-            }
+        job = self._running({"done": 1, "total": 4, "current": "a.txt", "recent": []})
         client = TestClient(create_app())
-        body = client.get("/api/scan-status?job=j2", headers={"host": "localhost", "X-Deepfake-Lens-Client": "gui"}).json()
+        body = client.get(f"/api/scan-status?job={job}", headers={"host": "localhost", "X-Deepfake-Lens-Client": "gui"}).json()
         self.assertEqual({key: body[key] for key in ("status", "done", "total", "current", "recent")},
                          {"status": "running", "done": 1, "total": 4, "current": "a.txt", "recent": []})
 

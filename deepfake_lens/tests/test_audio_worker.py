@@ -738,7 +738,8 @@ class MultiFileCommandsRunInOneScopeTest(unittest.TestCase):
                     self.assertTrue(seen, "the analysis was not reached")
                     self.assertIsInstance(seen[0], audio_worker.WorkerScope)
             self.assertIsNone(getattr(audio_worker._LOCAL, "scope", None))  # every scope ended
-        self.assertTrue(getattr(webapp_api._rederive_report_items, "__wrapped__", None))  # in_worker_scope
+        # P0R-6: /api/report no longer re-analyzes rows (it signs a server-held scan job), so it has no worker scope —
+        # test_servers.ReportSignsTheJobsRowsTest.test_a_report_runs_no_analysis checks that it analyzes nothing.
 
     def test_batch_binds_its_thread_pool_to_one_scope(self) -> None:
         import contextlib

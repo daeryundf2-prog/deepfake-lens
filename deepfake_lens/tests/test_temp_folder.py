@@ -157,8 +157,10 @@ class TempFolderFallbackTest(unittest.TestCase):
         )
         self.assertEqual(done.returncode, 0, done.stderr[-800:])
         body = json.loads(out.read_text(encoding="utf-8"))
-        self.assertEqual(body["temp_folder"]["requested_by"], "DEEPFAKE_LENS_TMPDIR")
-        self.assertEqual(body["temp_folder"]["base"], str(self.ascii_tmp))
+        # P0R-14 (review §4-5): the signed body never carries the temp folder record (a host path) — the provenance
+        # line says what happened without the path.
+        self.assertNotIn("temp_folder", body)
+        self.assertNotIn(str(self.ascii_tmp), out.read_text(encoding="utf-8"))
         line = "임시 폴더: 환경 변수 DEEPFAKE_LENS_TMPDIR에 지정된 폴더를 쓸 수 없어(경로에 ASCII가 아닌 문자가 있음)"
         self.assertIn(line, body["provenance_note"])  # inside the signed body
         from deepfake_lens.result_text import markdown_text
