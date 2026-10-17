@@ -4,8 +4,8 @@
            technical fields) stays reachable behind disclosures. */
         let results = [];
         let lastProvenance = { coverage: null, thresholds: null, summary: null };
-        // X2: the options of the last folder scan — /api/report re-analyzes
-        // every row on the server with them (the report signs only server results).
+        // X2: the options of the last folder scan, kept with its rows (shown state only — since P0R-6 a
+        // report takes the options, like the rows, from the server-held scan job; nothing is re-analyzed).
         let lastScanOptions = {};
         // R19-3: the server job whose result is on screen (its cancel count is verified by the server).
         let lastScanJob = '';
@@ -659,7 +659,7 @@
             if (v === 'other') return '분석 못 함 — ' + (STATUS_LABELS[item.status] || '기타');
             const cancelled = item.status === 'cancelled' ? ' · 검사 취소(부분 결과)' : '';
             if (v === 'undetermined') return '판단 불가 — ' + undeterminedAspects(item).join(' · ') + cancelled;
-            return VERDICT_SHORT[v] + cancelled;
+            return VERDICT_SHORT[v] + (restsOnSelfDeclared(item) ? ' · 자기 선언 기록' : '') + cancelled;
         }
         function decisiveEvidence(r, v) {
             // The direction that carries this verdict, by its label (조작·생성 방향 / 원본성 방향).
@@ -669,6 +669,24 @@
                 .filter(e => e.kind === 'deterministic' && (dir ? DIRECTION_LABELS[e.direction] === dir : e.direction !== 'neutral'))
                 .sort((a, b) => (order[a.strength] ?? 3) - (order[b.strength] ?? 3));
         }
+        // GUI-REV6 M-1: the evidence that carries a conclusion, by the server's own rule
+        // (evidence_rules.conclusion_caveats): a strong record, or a calibrated model for manipulation.
+        function decidingEvidence(r, v) {
+            const ev = (r && r.evidence) || [];
+            if (v === 'manipulation_evidence') {
+                return ev.filter(e => e.direction === 'synthetic' && ((e.kind === 'deterministic' && e.strength === 'strong') || (e.kind === 'statistical' && e.calibration_id)));
+            }
+            if (v === 'authenticity_evidence') return ev.filter(e => e.direction === 'authentic' && e.kind === 'deterministic' && e.strength === 'strong');
+            return [];
+        }
+        // A conclusion that rests only on records the file wrote about itself (P0R-12 self_declared) — anyone can
+        // plant or strip them; said wherever the conclusion is said, not only next to the evidence item.
+        function restsOnSelfDeclared(item) {
+            const v = verdictOf(item);
+            const deciding = decidingEvidence(item && item.result, v);
+            return deciding.length > 0 && deciding.every(e => e.self_declared);
+        }
+        const SELF_DECLARED_MARK = '자기 선언 — 심거나 지울 수 있음';
         // One line per row: why this row has its conclusion.
         function rowReason(item) {
             // R19-13: a row the server found changed since the scan says so first.
@@ -689,7 +707,9 @@
             }
             if (v === 'manipulation_evidence' || v === 'authenticity_evidence') {
                 const top = decisiveEvidence(r, v)[0];
-                if (top) return top.detail ? top.title + ' — ' + top.detail : top.title;
+                // M-1: the self-declared mark follows the title — the detail after it is cut short in the row.
+                const title = top && top.self_declared ? `${top.title} (${SELF_DECLARED_MARK})` : (top && top.title);
+                if (top) return top.detail ? title + ' — ' + top.detail : title;
                 return VERDICT_SHORT[v];
             }
             // H-6: every aspect that applies, failure first, then the cue, then the rest.
@@ -717,8 +737,10 @@
         function verdictLineOf(item) {
             const v = verdictOf(item);
             const r = item.result || {};
-            if (v === 'manipulation_evidence') return '이 파일의 기록에 조작·생성을 가리키는 근거가 있습니다.';
-            if (v === 'authenticity_evidence') return '이 파일의 기록에 원본성을 가리키는 근거가 있습니다.';
+            // M-1: a conclusion resting on self-declared metadata says so in its own sentence (as the server's verdict does).
+            const declared = restsOnSelfDeclared(item) ? ' 다만 그 기록은 파일이 스스로 적은 메타데이터라 누구나 심거나 지울 수 있습니다.' : '';
+            if (v === 'manipulation_evidence') return '이 파일의 기록에 조작·생성을 가리키는 근거가 있습니다.' + declared;
+            if (v === 'authenticity_evidence') return '이 파일의 기록에 원본성을 가리키는 근거가 있습니다.' + declared;
             if (v === 'other') {
                 return { unsupported: '지원하지 않는 형식이라 분석하지 않았습니다.', failed: '파일을 처리하지 못했습니다.',
                          duplicate: '같은 내용의 파일을 이미 검사했습니다.', skipped: '검사를 건너뛰었습니다.' }[item.status] || '분석하지 못했습니다.';
@@ -1492,6 +1514,9 @@
             const sub = [];
             // G-3: 판단 불가 is split by why — never all called "근거가 없어".
             const split = undeterminedSplitText();
+            // M-1: how many conclusions rest only on records the file wrote about itself.
+            const declared = results.filter(e => restsOnSelfDeclared(e.item)).length;
+            if (declared) sub.push(`그중 ${declared}개는 파일이 스스로 적은 메타데이터(자기 선언 — 심거나 지울 수 있음)에만 근거합니다.`);
             if (b.undetermined) sub.push(`${found ? '나머지 ' : ''}${b.undetermined}개는 판단 불가(${split})입니다 — <strong>원본이라는 뜻이 아닙니다.</strong>`);
             if (b.other) sub.push(`${b.other}개는 분석하지 못했습니다.`);
             $('sum-sub').innerHTML = sub.join(' ');
@@ -1729,7 +1754,7 @@
                 : '';
             // Merge of phase0 P0R-12: a record the file declares about itself (metadata a tool wrote) is marked —
             // anyone can plant or strip it.
-            const declared = e.self_declared ? '<span class="self-declared">자기 선언 — 심거나 지울 수 있음</span>' : '';
+            const declared = e.self_declared ? `<span class="self-declared">${SELF_DECLARED_MARK}</span>` : '';
             return `<li><span class="str${neutral ? ' str-neutral' : ''}">${escapeHtml(tag)}</span><span>${shown(e.title)}${declared}` +
                 `${e.detail ? `<span class="ev-src">${shown(e.detail || '')}</span>` : ''}` +
                 `<span class="ev-src">${escapeHtml(KIND_LABELS[e.kind] || e.kind)} · ${escapeHtml(DIRECTION_LABELS[e.direction] || e.direction)}${prob}</span></span></li>`;
@@ -1814,7 +1839,7 @@
                 `<button type="button" class="linkbtn d-back">목록으로 돌아가기</button></div>`);
             const body = [];
             // R19-13: the server found this file changed since the scan.
-            if (changedPaths.has(String(item.path))) body.push(`<section class="d-sec d-fail"><h3>검사 뒤 바뀜</h3><p>서버가 다시 분석해 보니 검사 때와 다릅니다: ${shown(changedInfo.get(String(item.path)) || '바뀜')}. 이 결과로는 내보낼 수 없습니다 — 폴더를 다시 검사하십시오.</p></section>`);
+            if (changedPaths.has(String(item.path))) body.push(`<section class="d-sec d-fail"><h3>검사 뒤 바뀜</h3><p>내보낼 때 서버가 파일의 SHA-256을 다시 계산해 보니 검사 때와 다릅니다: ${shown(changedInfo.get(String(item.path)) || '바뀜')}. 이 결과로는 내보낼 수 없습니다 — 폴더를 다시 검사하십시오.</p></section>`);
             // 근거: the records that carry the conclusion, then neutral records.
             const decisive = decisiveEvidence(r, v);
             const neutral = ((r && r.evidence) || []).filter(e => e.kind === 'deterministic' && e.direction === 'neutral');
@@ -2330,7 +2355,7 @@
                 // out of the appendix count (they go to the 서명 제외 box).
                 const uploads = results.filter(e => e.item.source === 'upload').length;
                 const scanned = results.length - uploads;
-                if (uploads) out.push({ tag: 'info', text: `올린 파일 ${uploads}개는 증거설명서의 서증이 될 수 없습니다 — 다시 분석할 수 없어 서명 제외(클라이언트 제공 결과)로 실립니다.` });
+                if (uploads) out.push({ tag: 'info', text: `올린 파일 ${uploads}개는 증거설명서의 서증이 될 수 없습니다 — 서버가 보관한 검사 작업의 행이 아니어서 서명 제외(클라이언트 제공 결과)로 실립니다.` });
                 if (!scanned) out.push({ tag: 'req', text: '올린 파일만 있어 증거설명서를 만들 수 없습니다 — 폴더를 검사하십시오. 감정 보고서·HTML·서명된 JSON은 만들 수 있습니다.', act: ['검사 화면으로', () => navigate('scan')] });
                 else if (!sel.length) out.push({ tag: 'req', text: '증거설명서의 서증으로 넣을 파일을 고르십시오. 근거 있는 파일이 없으면 판단 불가 칸을 고를 수 있습니다.', act: ['고르기', () => $('inc-manip').focus()] });
                 else if (sel.length < scanned) out.push({ tag: 'info', text: `서증 ${sel.length}개(고른 순서로 번호) · 나머지 ${scanned - sel.length}개는 증거설명서 표에 번호 없이 "서증 외(검사 행)"로 남습니다. 다른 형식에는 ${results.length}개가 모두 실립니다.` });
@@ -2367,6 +2392,8 @@
             if (!results.length) return '검사 결과가 없습니다.';
             if (changedPaths.size) return `검사 뒤 바뀐 파일 ${changedPaths.size}개 — 다시 검사하기 전에는 서명 형식을 내보낼 수 없습니다.`;
             if ((kind === 'evidence' || kind === 'pdf') && caseUnconfirmed()) return '사건 정보가 이 폴더의 것인지 먼저 확인하십시오(확인 목록).';
+            // GUI-REV6 F-2: with upload rows only there is nothing to choose — the reason was "고르십시오".
+            if (kind === 'evidence' && !results.some(e => e.item.source !== 'upload')) return '올린 파일만 있어 증거설명서를 만들 수 없습니다 — 폴더를 검사하십시오.';
             if (kind === 'evidence' && !sel.length) return '증거설명서의 서증으로 넣을 파일을 고르십시오.';
             if ((kind === 'evidence' || kind === 'pdf') && pdfAvailable === false) return 'PDF(증거설명서·감정 보고서)는 PDF 엔진(pymupdf)이 설치되어 있지 않아 만들 수 없습니다.';
             if (kind === 'evidence' && !(caseValue('case-no') && caseValue('case-name'))) return '사건번호와 사건명을 채우면 증거설명서를 내보낼 수 있습니다.';
@@ -2421,8 +2448,8 @@
         // GUI-REV2 H-2: the preview is drawn from the server's own statement template
         // (format=evidence-preview: the same build and the same case box, boxes and
         // signoff helpers the PDF renderer uses) — it cannot show a section the PDF
-        // lacks or miss one it has. Built from the rows on screen without
-        // re-analysis and unsigned; the export re-analyzes and signs.
+        // lacks or miss one it has. Built from the same server-held scan job as the export, unsigned and
+        // without the change check; the export re-hashes the job's files (409 on a change) and signs.
         let a4Timer = null;
         let a4Seq = 0;
         let a4Listing = null;  // R22-1 merge: {source, not_in_report, reason} of the last preview
@@ -2504,7 +2531,7 @@
                 boxes +
                 ((body.unsigned || []).length ? `<section class="a4-box">${lines(body.unsigned)}</section>` : '') +
                 `<div class="a4-signoff">${lines(body.signoff || [])}<p class="a4-court">${docHtml(body.court)}</p></div>` +
-                '<p class="a4-sign">서명은 내보낼 때 서버가 서명 키로 붙입니다(키가 없으면 "서명 없음"). 내보낼 때 서버가 파일을 다시 분석해, 검사 뒤 바뀌었거나 지워진 파일이 있으면 내보내기를 거부합니다(경로 중간의 폴더가 링크로 바뀐 파일도). 서버가 다시 분석할 수 없는 행(올린 파일, 검사 때 해시가 없던 행, 폴더 탐색 상한 행 등)은 서명 제외로 실립니다.</p>';
+                '<p class="a4-sign">서명은 내보낼 때 서버가 서명 키로 붙입니다(키가 없으면 "서명 없음"). 문서는 서버가 보관한 이 검사 작업의 행으로 만들며 파일을 다시 분석하지 않습니다. 내보낼 때 검사 때 해시한 파일의 SHA-256을 다시 계산해, 검사 뒤 바뀌었거나 지워진 파일(경로 중간의 폴더가 링크로 바뀐 파일도)이 있으면 내보내기를 거부합니다. 올린 파일만 서명 제외(클라이언트 제공 결과)로 실립니다.</p>';
         }
 
         const EXPORT_SPECS = {
@@ -2641,7 +2668,7 @@
             const startGen = resultsGeneration;
             const seq = ++exportSeq;
             // GUI-REV4 K-7: the format name is followed by " — …" (no particle after it: "JSON를").
-            $('export-note').textContent = spec[3] + ' — 만드는 중입니다. 서버가 파일을 다시 분석합니다.';
+            $('export-note').textContent = spec[3] + ' — 만드는 중입니다. 서버가 이 검사 작업의 파일이 검사 뒤 바뀌지 않았는지 확인합니다.';
             const ignored = () => {
                 exportStickyNote = spec[3] + ' 요청은 이전 검사의 것이라 무시했습니다. 지금 결과로 다시 내보내십시오.';
                 toast(spec[3] + ': 이전 검사에 대한 응답이라 무시했습니다.');

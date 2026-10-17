@@ -552,6 +552,74 @@ class CancelledContainerRowTest(unittest.TestCase):
         self.assertTrue(line.startswith("검사 취소 — 구성 파일 3개 미분석(부분 결과)."), line)
 
 
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class SelfDeclaredConclusionTest(unittest.TestCase):
+    def test_a_conclusion_resting_on_self_declared_metadata_says_so_where_it_is_said(self) -> None:
+        """GUI-REV6 M-1: a manipulation conclusion whose deciding record is self-declared metadata (P0R-12) was
+        labelled only next to the evidence item; the ledger row cut the server's note off at its end, and the
+        panel heading and the headline said nothing. The short verdict, the row reason (right after the title),
+        the verdict line and the headline's sub line say it; a conclusion with a signed (not self-declared)
+        deciding record does not."""
+        declared = _row("manipulation_evidence", evidence=[
+            {"kind": "deterministic", "direction": "synthetic", "strength": "strong", "title": "XMP 디지털 출처 유형: 생성형 AI",
+             "detail": "Iptc4xmpExt:DigitalSourceType=trainedAlgorithmicMedia — " + "긴 설명 " * 30, "self_declared": True},
+        ])
+        signed = _row("manipulation_evidence", evidence=[
+            {"kind": "deterministic", "direction": "synthetic", "strength": "strong", "title": "C2PA 생성형 AI 출처(신뢰 서명)", "detail": "x"},
+            {"kind": "deterministic", "direction": "synthetic", "strength": "moderate", "title": "XMP 생성 도구 필드", "detail": "y", "self_declared": True},
+        ])
+        out = _run(
+            f"const a = {json.dumps(declared, ensure_ascii=False)}; const b = {json.dumps(signed, ensure_ascii=False)};\n"
+            "results = [{item: a}, {item: b}];\n"
+            "console.log(JSON.stringify([shortVerdict(a), rowReason(a), verdictLine(a), restsOnSelfDeclared(a),"
+            " shortVerdict(b), rowReason(b), verdictLine(b), restsOnSelfDeclared(b)]));"
+        )
+        assert isinstance(out, list)
+        short_a, reason_a, line_a, sd_a, short_b, reason_b, line_b, sd_b = out
+        self.assertTrue(sd_a)
+        self.assertEqual(short_a, "조작·생성 근거 있음 · 자기 선언 기록")
+        self.assertTrue(reason_a.startswith("XMP 디지털 출처 유형: 생성형 AI (자기 선언 — 심거나 지울 수 있음) — "), reason_a)
+        self.assertIn("파일이 스스로 적은 메타데이터라 누구나 심거나 지울 수 있습니다", line_a)
+        self.assertFalse(sd_b)
+        self.assertEqual(short_b, "조작·생성 근거 있음")
+        self.assertNotIn("자기 선언", reason_b + line_b)
+        source = GUI_JS.read_text(encoding="utf-8")
+        self.assertIn("파일이 스스로 적은 메타데이터(자기 선언 — 심거나 지울 수 있음)에만 근거합니다", _function(source, "renderSummary"))
+
+
+@unittest.skipUnless(shutil.which("node"), "node is not installed")
+class UploadOnlyEvidenceReasonTest(unittest.TestCase):
+    def test_upload_rows_only_give_the_real_reason(self) -> None:
+        """GUI-REV6 F-2 (a reason other than the real one): with upload rows only the evidence statement cannot be
+        made at all (uploads are never exhibits), but the export note said "서증으로 넣을 파일을 고르십시오"."""
+        source = GUI_JS.read_text(encoding="utf-8")
+        out = _run(
+            "var scanBusy = false, pdfAvailable = true; var caseUnconfirmed = () => false; var caseValue = () => 'x'; var submitterSide = () => 'plaintiff';\n"
+            + _function(source, "exportBlockReason")
+            + "results = [{item: {path: 'a.png', source: 'upload', result: {}}}];\n"
+            "const uploadsOnly = exportBlockReason('evidence', []);\n"
+            "results = [{item: {path: 'a.png', result: {}}}];\n"
+            "console.log(JSON.stringify([uploadsOnly, exportBlockReason('evidence', [])]));"
+        )
+        assert isinstance(out, list)
+        self.assertEqual(out[0], "올린 파일만 있어 증거설명서를 만들 수 없습니다 — 폴더를 검사하십시오.")
+        self.assertEqual(out[1], "증거설명서의 서증으로 넣을 파일을 고르십시오.")
+
+
+class ExportWordingAfterP0R6Test(unittest.TestCase):
+    def test_no_text_says_the_server_re_analyzes_the_files(self) -> None:
+        """GUI-REV6 F-1 (false statement): since P0R-6 a report is built from the server-held scan job without
+        re-analysis — the server re-hashes the job's files and refuses a change (409); only uploads are signed
+        as excluded. The preview notes, the export progress note, the changed-file panel and the upload checklist
+        line still said the server re-analyzes the files and that rows without a scan-time hash or past the
+        walk cap go to 서명 제외."""
+        for path in (GUI_JS, PACKAGE / "gui.html"):
+            text = path.read_text(encoding="utf-8")
+            for stale in ("다시 분석해", "다시 분석합니다", "다시 분석할 수 없", "폴더 탐색 상한 행", "re-analyzes"):
+                self.assertNotIn(stale, text, (path.name, stale))
+        self.assertIn("SHA-256을 다시 계산해", GUI_JS.read_text(encoding="utf-8"))
+
+
 class ExportNoteParticleTest(unittest.TestCase):
     def test_no_particle_is_glued_to_a_format_name(self) -> None:
         """GUI-REV4 K-7: "서명된 JSON를" — the export note never glues 을/를 to the format name."""
