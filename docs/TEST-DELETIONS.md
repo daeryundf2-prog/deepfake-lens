@@ -150,3 +150,38 @@ test_every_profile_is_gated_and_carries_an_empty_pin."
 - `ReportRowAliasesByFileIdentityTest.test_a_path_under_a_bind_mount_loop_is_400`
 - `ReportRowAliasesByFileIdentityTest.test_a_path_spelled_unlike_the_listing_is_400`
 - `ReportRowAliasesByFileIdentityTest.test_a_gone_file_is_still_409_and_hard_links_are_rows`
+
+## GUI 재설계 브랜치 — P0R-6 병합으로 없어진 GUI 테스트 (기준선 밖)
+
+`merge: phase0 8178e77 (R26, techniques-2026, P0R restructure) into gui-redesign` — P0R-6 뒤 `/api/report`는 서버가 보관한 검사 작업(`scan_job`)으로만 보고서를 만든다. 아래 GUI 브랜치 테스트는 **없어진 설계**(게시 행 기반 보고서, 증거설명서의 서명 부록 `excluded_by_selection`, `submitter_side`(을호증 — BACKLOG BL-15까지 원고 측만), `format=evidence-json`, 게시 행 검증의 `exhibit_not_rederived`/`exhibit_unknown` 코드, 409 행의 게시·서버 결론 비교, 서명 제외 행 응답 헤더 `X-Deepfake-Lens-Excluded-*`)를 고정하던 것이라 지웠다. 기준선(QA-SYS-10) 테스트는 없다.
+
+이어받는 테스트: 작업 기반 미리보기 = 내보낸 PDF(`EvidencePreviewOnTheJobTest.test_the_preview_is_the_exported_pdf` — R23-4 이스케이프, R24-7/R25-3 사건 필드 포함), 고른 순서의 호증 번호와 나머지 행의 "서증 외(검사 행)"(`test_the_preview_numbers_the_chosen_rows_in_order_and_keeps_every_other_row`), 요청 규칙(`test_the_preview_takes_the_requests_rules`), 변경 파일 409(`test_the_preview_does_not_rehash_but_the_export_refuses_a_changed_file`), 업로드만(`test_an_upload_only_preview_lists_the_uploads_unsigned`), 409 행의 사유 표시(`ChangedRowsTest`, test_gui_ledger.py). 서명된 작업 행·순서·검증은 phase0의 `test_servers.py`(P0R-6 클래스)가 맡는다.
+
+- `StatementSelectionTest.test_unchosen_rows_go_to_a_signed_appendix`
+- `StatementSelectionTest.test_an_ordered_choice_numbers_exhibits_in_its_order`
+- `StatementSelectionTest.test_the_long_standing_statement_is_unchanged`
+- `StatementSelectionTest.test_defendant_side_numbers_eul_exhibits`
+- `AppendixAspectsTest.test_appendix_rows_keep_why_they_are_undetermined`
+- `WebReportSelectionTest.test_evidence_statement_keeps_every_row`
+- `WebReportSelectionTest.test_rendered_pdf_lists_the_appendix`
+- `WebReportSelectionTest.test_web_statement_follows_the_posted_order`
+- `WebReportSelectionTest.test_evidence_json_is_the_signed_statement_in_the_posted_order`
+- `WebReportSelectionTest.test_other_formats_carry_every_row_whatever_the_choice`
+- `WebReportSelectionTest.test_defendant_side_placeholders_and_statutes_on_the_web`
+- `WebReportSelectionTest.test_rendered_defendant_pdf_says_byeonhoin`
+- `WebReportSelectionTest.test_preview_is_the_pdf_template`
+- `WebReportSelectionTest.test_an_empty_unknown_or_repeated_choice_is_refused`
+- `WebReportSelectionTest.test_a_chosen_file_gone_since_the_scan_is_said_so`
+- `WebReportSelectionTest.test_preview_refuses_a_malformed_duplicate_too`
+- `WebReportSelectionTest.test_preview_lists_a_walk_limit_row_as_the_export_does`
+- `WebReportSelectionTest.test_rows_posted_as_the_scan_returned_them_are_never_a_path_400`
+- `WebReportSelectionTest.test_preview_takes_the_servers_listing_like_the_export`
+- `WebReportSelectionTest.test_preview_draws_glyphless_names_as_the_pdf_does`
+- `WebReportSelectionTest.test_preview_excludes_a_cancelled_archive_like_the_export`
+- `WebReportSelectionTest.test_preview_case_fields_are_drawn_as_the_pdf_draws_them`
+- `WebReportSelectionTest.test_excluded_rows_are_named_in_response_headers`
+- `WebReportSelectionTest.test_unsupported_format_lists_every_format` (같은 이름의 새 테스트가 `EvidencePreviewOnTheJobTest`에 있다)
+- `WebReportSelectionTest.test_malformed_choice_is_refused`
+- `ExportErrorTextTest.test_refused_export_names_its_rows` (test_gui_ledger.py)
+- `ChangeTextTest.test_what_changed_is_named` (test_gui_ledger.py)
+- `ExcludedHeaderTest.test_the_header_rows_are_decoded` (test_gui_ledger.py)

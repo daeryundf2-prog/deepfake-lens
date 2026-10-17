@@ -4,6 +4,25 @@ All notable changes to Deepfake Lens. Format: Keep a Changelog; this repo
 has not tagged a release yet (version is `0.1.0.dev0`), so entries are
 grouped by work pass rather than release.
 
+## 2026-10 — GUI redesign (court-docket ledger)
+
+### Changed
+- The web GUI leads with the conclusion: a headline ("N개 중 K개에서 결론
+  근거를 찾았습니다"), a verdict strip (colour + shape), a one-line
+  environment notice, a ruled file ledger and an evidence panel; detail
+  (skipped-check reasons grouped, reference signals, technical fields)
+  moved behind disclosures. New scan/progress and evidence-statement
+  screens; WCAG 2.2 AA fixes from the UX audit (A11Y-1–8, U-7, U-8, U-9).
+- `/api/scan-status` reports `done`/`total`/`current`/`recent`/
+  `elapsed_seconds`; a running scan job is no longer evicted after 15
+  minutes; `/api/stats` adds `default_folder`(`_b64`) and `pdf_available`.
+- Merged onto P0R-6 (reports from the server-held scan job): the GUI sends
+  `scan_job`, the ordered `exhibit_paths`, `side` (plaintiff only — the
+  defendant side waits for BL-15) and the case fields; `format=evidence-preview`
+  is the evidence statement's PDF texts from the same job and build. The
+  earlier posted-row report designs (exhibit appendix, submitter_side,
+  excluded-rows headers) are gone with P0R-6.
+
 ## 2026-10 — techniques-2026b (deterministic fact layers, TB)
 
 ### Added

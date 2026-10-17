@@ -16,6 +16,7 @@ import shutil
 import stat
 import tempfile
 import threading
+import time
 from collections import OrderedDict
 from dataclasses import replace
 from email.parser import BytesParser
@@ -234,7 +235,10 @@ def _set_row_name(record: dict[str, object], name: str) -> None:
     record["display_name"] = display_name(name)
 
 
-def _scan_run(query: str, *, default_folder: Path | None, should_stop: Callable[[], bool] | None = None) -> tuple[dict[str, object], dict[str, object]]:
+def _scan_run(
+    query: str, *, default_folder: Path | None, should_stop: Callable[[], bool] | None = None,
+    progress: Callable[[Any, int, int], None] | None = None, on_plan: Callable[[int], None] | None = None,
+) -> tuple[dict[str, object], dict[str, object]]:
     """Run a folder scan: ``(client payload, server-only report context)``.
 
     Raises ReadRootDenied (-> HTTP 403) when the folder is outside the
@@ -246,7 +250,8 @@ def _scan_run(query: str, *, default_folder: Path | None, should_stop: Callable[
     # option (non-integer limit, model_path outside the models dir) raises
     # InvalidOption (a ValueError) -> HTTP 400 before any file is read.
     options = _web_options(parse_qs(query))
-    run = scan_folder_run(folder, options, should_stop=should_stop)
+    # GUI redesign (U-7): ``progress``/``on_plan`` are the scanner's per-row callbacks — the async job reports n/N.
+    run = scan_folder_run(folder, options, should_stop=should_stop, progress=progress, on_plan=on_plan)
     payload = scan_payload(run.summary, run.items, run.thresholds, options)
     # P1: the folder the row paths are relative to.
     root_text = scan_root_text(folder)
@@ -305,6 +310,8 @@ def _scan_payload(
 # P0R-6 (user decision 2026-10-17): every folder scan is a job of scan_jobs.STORE — bound to the server's token,
 # persisted outside the evidence, a running job never evicted. /api/report signs a job's rows and nothing else.
 JOB_INTEGRITY_STATUS = 409
+# GUI redesign: the most recent finished rows a running job reports.
+_SCAN_JOB_RECENT = 5
 
 
 def record_stream_scan_job(
@@ -332,10 +339,22 @@ def _scan_job_start(query: str, *, default_folder: Path | None, owner: str = LOC
     _web_options(parse_qs(query))
     job_id, cancel = STORE.start(owner, SOURCE_ASYNC)  # ValueError past MAX_RUNNING (400)
     evidence = _effective_roots(default_folder)
+    STORE.set_progress(job_id, {"done": 0, "total": None, "current": None, "recent": []})
+
+    def on_plan(planned: int) -> None:
+        STORE.set_progress(job_id, {"total": planned})
+
+    def on_row(item: Any, done: int, planned: int) -> None:
+        # GUI redesign (U-7): the row as the scanner finished it (pre-fusion) — its escaped name and verdict
+        # code, for the GUI's "방금 끝난 파일" list only; the final rows are the job's result.
+        name = display_name(str(getattr(item, "name", "") or getattr(item, "path", "") or ""))
+        result = getattr(item, "result", None)
+        verdict = getattr(getattr(result, "verdict_code", None), "value", None) if result is not None else None
+        STORE.add_progress_row(job_id, done, planned, {"name": name, "status": str(getattr(item, "status", "") or ""), "verdict_code": verdict}, keep=_SCAN_JOB_RECENT)
 
     def work() -> None:
         try:
-            payload, context = _scan_run(query, default_folder=default_folder, should_stop=cancel.is_set)
+            payload, context = _scan_run(query, default_folder=default_folder, should_stop=cancel.is_set, progress=on_row, on_plan=on_plan)
             payload["scan_job"] = job_id
             # R18-3 (round 18): a scan the cancel cut short is "cancelled" (its
             # partial result kept, summary.cancelled) — it was "done", like a
@@ -379,6 +398,18 @@ def _scan_status_payload(query: str, *, owner: str = LOCAL_OWNER, default_folder
     if entry is None:
         return ApiError(JOB_UNKNOWN, 404)  # X4 (another owner's job is "unknown" too)
     payload: dict[str, object] = {"job_id": job_id, "status": entry["status"]}
+    # GUI redesign (U-7): progress of the job — rows finished (``done``), rows the scan will report (``total``;
+    # null until the folder is enumerated), the escaped name of the row finished last (``current``), the last
+    # few finished rows (``recent``) and the seconds since the job started (``elapsed_seconds``).
+    raw_progress = entry.get("progress")
+    progress: dict[str, Any] = raw_progress if isinstance(raw_progress, dict) else {}
+    payload["done"] = progress.get("done", 0)
+    payload["total"] = progress.get("total")
+    payload["current"] = progress.get("current")
+    payload["recent"] = list(progress.get("recent") or [])
+    created, finished = entry.get("created"), entry.get("finished")
+    if isinstance(created, (int, float)):
+        payload["elapsed_seconds"] = round((finished if isinstance(finished, (int, float)) else time.time()) - created, 1)
     if entry["status"] != "running":
         result = entry.get("result")
         payload["result"] = client_payload(result) if isinstance(result, dict) else result
@@ -500,8 +531,17 @@ def _analyze_file_payload(query: str) -> dict[str, object]:
     return response
 
 
-def _stats_payload() -> dict[str, object]:
-    """Handle stats request with real package facts."""
+def _stats_payload(default_folder: Path | None = None) -> dict[str, object]:
+    """Handle stats request with real package facts.
+
+    GUI redesign (U-8): ``default_folder`` — the server's ``--folder`` as an
+    absolute path (``default_folder_b64``: its file-system bytes, R12-4), or
+    null — so the GUI can prefill the scan folder; ``pdf_available`` — whether
+    the PDF renderer (pymupdf) is installed, so PDF exports can be offered
+    only when they can be produced.
+    """
+    from .pdf_backend import pymupdf_available
+
     import importlib.metadata
 
     try:
@@ -510,10 +550,14 @@ def _stats_payload() -> dict[str, object]:
         version = "dev"
     package_dir = Path(__file__).parent
     module_count = sum(1 for entry in package_dir.glob("*.py") if not entry.name.startswith("_"))
+    folder = scan_root_text(default_folder) if default_folder is not None else None
     return {
         "status": "ok",
         "version": version,
         "modules": module_count,
+        "default_folder": folder,
+        "default_folder_b64": fs_b64encode(folder) if folder is not None else None,
+        "pdf_available": bool(pymupdf_available()),
     }
 
 
@@ -1354,9 +1398,11 @@ REPORT_RENDER_FAILED_STATUS = 500
 EVIDENCE_PDF_FAILED_PREFIX = "증거설명서 PDF 생성 실패: "
 # N9: the report format comes from ?format= or, failing that, the JSON body's
 # "format" — both servers decide the content type from the same value.
-REPORT_FORMATS = ("html", "pdf", "evidence", "evidence-statement", "json")
+# GUI redesign: ``evidence-preview`` — the evidence statement's PDF texts as JSON for the GUI preview, built from
+# the same job and the same statement as ``evidence`` (unsigned; no change detection — the export does that).
+REPORT_FORMATS = ("html", "pdf", "evidence", "evidence-statement", "json", "evidence-preview")
 PDF_REPORT_FORMATS = ("pdf", "evidence", "evidence-statement")
-REPORT_FORMAT_UNSUPPORTED = "지원되지 않는 보고서 형식입니다: 「{value}」 (`html`, `pdf`, `evidence`, `json` 중 하나)"
+REPORT_FORMAT_UNSUPPORTED = "지원되지 않는 보고서 형식입니다: 「{value}」 (" + ", ".join(f"`{name}`" for name in REPORT_FORMATS) + " 중 하나)"
 REPORT_FORMAT_NOT_STRING = "`format` 값은 문자열이어야 합니다"
 
 
@@ -1769,6 +1815,49 @@ def _excluded_rows_json(excluded: list[tuple[Any, str]]) -> list[dict[str, objec
     return rows
 
 
+def _preview_as_pdf_draws(preview: dict[str, Any]) -> dict[str, Any]:
+    """Merge of phase0 R23-4 (GUI preview equals the PDF): every text the evidence PDF would draw is given
+    as the PDF draws it — a character its font has no glyph for (Hebrew, Arabic, emoji …) as its
+    ``\\uNNNN`` escape (:meth:`pdf_layout.PdfLayout.drawable`, the renderer's own rule).
+    ``pdf_glyph_escapes`` says whether any text was escaped, so the GUI can say why. Without pymupdf no
+    PDF can be made (501) and the texts are left as they are (``pdf_glyph_escapes`` false).
+    """
+    from .pdf_backend import import_pymupdf, pymupdf_available
+
+    preview["pdf_glyph_escapes"] = False
+    if not pymupdf_available():
+        return preview
+    from .pdf_layout import PdfLayout
+
+    layout = PdfLayout(import_pymupdf())
+    escaped = False
+
+    def draw(value: Any) -> Any:
+        nonlocal escaped
+        if isinstance(value, str):
+            out = layout.drawable(value)
+            escaped = escaped or out != value
+            return out
+        if isinstance(value, list):
+            return [draw(entry) for entry in value]
+        if isinstance(value, tuple):
+            return tuple(draw(entry) for entry in value)
+        if isinstance(value, dict):
+            # an entry's file_path is the row's identity (the GUI matches changed rows by it), not drawn text
+            return {key: entry if key == "file_path" else draw(entry) for key, entry in value.items()}
+        return value
+
+    try:
+        listing = preview.pop("unrecorded_listing", None)  # GUI data, never drawn
+        drawn = {key: draw(value) for key, value in preview.items()}
+    finally:
+        layout.doc.close()
+    if listing is not None:
+        drawn["unrecorded_listing"] = listing
+    drawn["pdf_glyph_escapes"] = escaped
+    return drawn
+
+
 def _report_payload(
     body: bytes, format_override: str | None = None, *, default_folder: Path | None = None, owner: str = LOCAL_OWNER,
 ) -> bytes | dict[str, object]:
@@ -1885,7 +1974,8 @@ def _report_payload(
                 return {"error": REPORT_EXHIBIT_PATHS_UNKNOWN.format(count=len(unknown_paths), path=unknown_paths[0][:200])}
         files = _JobFiles(scan_root)
         try:
-            changed = _changed_job_rows(items, files)
+            # GUI preview: no re-hash (it runs on every selection change); the export refuses a changed file.
+            changed = _changed_job_rows(items, files) if req_format != "evidence-preview" else []
         except Exception:
             files.close()
             raise
@@ -1907,6 +1997,41 @@ def _report_payload(
                 unrecorded_listing={"source": "unknown", "not_in_report": 0, "reason": REPORT_LISTING_NO_SCAN_ROOT},
             )
         root_label = _scan_root_label(scan_root, roots)
+        case = {field: data.get(field) for field in REPORT_CASE_FIELDS}
+
+        def _statement() -> Any:
+            """The evidence statement of this job — one build for the PDF and the GUI preview."""
+            from .evidence_statement import build_evidence_statement
+            from .office_config import DEFAULT_CASE_NAME
+
+            return build_evidence_statement(
+                items,
+                case_no=str(case["case_no"] or "(사건번호 입력)"),
+                case_name=str(case["case_name"] or DEFAULT_CASE_NAME),  # R18-16
+                plaintiff=str(case["plaintiff"] or "(의뢰사 상호명 입력) 귀하"),
+                defendant=str(case["defendant"] or "(피고/피의자 성명 입력)"),
+                court=str(case["court"] or "○○지방법원 귀중"),
+                # N17: the request's value, else the operator config, else blank.
+                law_firm=str(case["law_firm"] or "") or None,
+                contact=str(case["contact"] or "") or None,
+                center=str(case["center"] or "디지털포렌식 감정센터"),
+                thresholds=thresholds,
+                coverage=coverage,
+                excluded_items=excluded_rows,
+                summary=summary,  # R18-3: the "사용자 취소" count of a cancelled scan
+                exhibit_paths=exhibit_paths,
+            )
+
+        if req_format == "evidence-preview":
+            from .evidence_statement import statement_preview
+            from .reports import analysis_options_line, scan_root_line
+
+            preview = statement_preview(_statement(), uploads)
+            preview["scan_root_line"] = (scan_root_line({"scan_root": root_label}) or "") if root_label else ""
+            preview["analysis_options_line"] = analysis_options_line({"analysis_options": analysis_options}) or ""  # R19-3
+            # R22-1: the listing behind the 기록되지 않은 파일 box, for the GUI checklist (not drawn).
+            preview["unrecorded_listing"] = dict(getattr(summary, "unrecorded_listing", None) or {})
+            return _preview_as_pdf_draws(preview)
         signed = signed_report_body(
             summary, items, thresholds=thresholds, coverage=coverage,
             report_format=req_format,
@@ -1925,7 +2050,6 @@ def _report_payload(
                 return False
             return any(_is_within(resolved, r) for r in roots) or is_default_heatmap_output(resolved)
 
-        case = {field: data.get(field) for field in REPORT_CASE_FIELDS}
         suffix = ".pdf" if req_format in PDF_REPORT_FORMATS else ".html"
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=scratch_dir()) as tmp:
             tmp_path = Path(tmp.name)
@@ -1933,29 +2057,11 @@ def _report_payload(
             if req_format in ("evidence", "evidence-statement"):
                 from .evidence_statement import (
                     PdfDependencyMissing as StatementPdfMissing,
-                    build_evidence_statement,
                     signed_statement_body,
                     write_evidence_statement_pdf,
                 )
-                from .office_config import DEFAULT_CASE_NAME
                 try:
-                    stmt = build_evidence_statement(
-                        items,
-                        case_no=str(case["case_no"] or "(사건번호 입력)"),
-                        case_name=str(case["case_name"] or DEFAULT_CASE_NAME),  # R18-16
-                        plaintiff=str(case["plaintiff"] or "(의뢰사 상호명 입력) 귀하"),
-                        defendant=str(case["defendant"] or "(피고/피의자 성명 입력)"),
-                        court=str(case["court"] or "○○지방법원 귀중"),
-                        # N17: the request's value, else the operator config, else blank.
-                        law_firm=str(case["law_firm"] or "") or None,
-                        contact=str(case["contact"] or "") or None,
-                        center=str(case["center"] or "디지털포렌식 감정센터"),
-                        thresholds=thresholds,
-                        coverage=coverage,
-                        excluded_items=excluded_rows,
-                        summary=summary,  # R18-3: the "사용자 취소" count of a cancelled scan
-                        exhibit_paths=exhibit_paths,
-                    )
+                    stmt = _statement()  # the same build as the GUI preview
                     write_evidence_statement_pdf(
                         tmp_path, stmt, signed=signed_statement_body(
                             stmt, scan_root=root_label, analysis_options=analysis_options,

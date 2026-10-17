@@ -66,20 +66,24 @@ EXPORT_BUTTONS = ("exp-json", "exp-csv", "exp-report", "exp-pdf", "exp-evidence"
 
 class ScanOptionsFollowTheRowsTest(unittest.TestCase):
     def test_options_are_set_with_the_results_not_on_submit(self) -> None:
+        # GUI redesign (merge of R19-3): the scan is submitted by the folder form and polled by
+        # runScanJob(jobId, folderPath, options) — this test pinned the old analyze-btn handler.
+        # The rule is the same: no lastScanOptions on submit; options and job id with the results.
         source = GUI_JS.read_text(encoding="utf-8")
-        handler = source[source.index("$('analyze-btn').addEventListener"):source.index("$('scan-cancel').addEventListener")]
-        submitted = handler.index("setBusy(true")
-        self.assertNotIn("lastScanOptions =", handler[:submitted])  # not when the scan is submitted
-        applied = handler.index("processResults(data)")
-        self.assertIn("lastScanOptions = scanOptions;", handler[submitted:applied])
-        self.assertIn("lastScanJob = data.scan_job || job.job_id;", handler[submitted:applied])  # P0R-6: the server-held job
-        self.assertLess(handler.index("lastScanRoot = data.scan_root"), handler.index("lastScanOptions = scanOptions;"))
+        handler = source[source.index("$('scan-form').addEventListener('submit'"):source.index("$('scan-cancel').addEventListener")]
+        self.assertNotIn("lastScanOptions =", handler)  # not when the scan is submitted
+        self.assertIn("await runScanJob(job.job_id, folderPath, scanOptions);", handler)
+        poll = _function("runScanJob")
+        applied = poll.index("processResults(data)")
+        self.assertIn("lastScanOptions = options || {};", poll[:applied])
+        self.assertIn("lastScanJob = data.scan_job || jobId;", poll[:applied])  # P0R-6: the server-held job
+        self.assertLess(poll.index("lastScanRoot = data.scan_root"), poll.index("lastScanOptions = options || {};"))
         upload = source[source.index("$('upload-btn').addEventListener"):source.index("function processResults(")]
         self.assertIn("lastScanOptions = {};", upload)
         self.assertIn("lastScanJob = '';", upload)
         payload = _function("reportPayload")
         self.assertIn("if (lastScanJob) out.scan_job = lastScanJob;", payload)
-        # P0R-6: a report request carries the job (or upload rows), never the rows, options or summary of a scan
+        # P0R-6 (merge): a report request carries the job (or upload rows), never the rows, options or summary of a scan
         self.assertIn("else out.uploads = results.map(r => r.item);", payload)
         for field in ("items:", "options:", "summary:", "scan_root", "thresholds:"):
             self.assertNotIn(field, payload)
@@ -88,9 +92,19 @@ class ScanOptionsFollowTheRowsTest(unittest.TestCase):
         source = GUI_JS.read_text(encoding="utf-8")
         inputs = source[source.index("const SCAN_INPUTS = ["):]
         inputs = inputs[:inputs.index("];")]
+        # GUI redesign (merge of R19-3): the report screen's buttons (exp-report, exp-pdf,
+        # exp-evidence and the new exp-signed) share one handler, exportReport(kind), bound in a
+        # loop — this test pinned one handler per button. Each still refuses first.
+        shared = {"exp-report", "exp-pdf", "exp-evidence"}
+        self.assertIn("'exp-signed'", inputs)
+        self.assertTrue(_function("exportReport").split("{", 1)[1].lstrip().startswith("if (exportBlocked()) return;"))
+        self.assertIn("$(id).addEventListener('click', () => exportReport(kind))", source)
         for button in EXPORT_BUTTONS:
             with self.subTest(button=button):
                 self.assertIn(f"'{button}'", inputs)
+                if button in shared:
+                    self.assertIn(f"'{button}'", source[source.index("const EXPORT_BUTTONS = {"):])
+                    continue
                 start = source.index(f"$('{button}').addEventListener('click'")
                 first = source[start:source.index("\n", source.index("\n", start) + 1)]
                 self.assertIn("if (exportBlocked()) return;", first)

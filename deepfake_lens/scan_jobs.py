@@ -256,6 +256,25 @@ class JobStore:
             if entry is not None and isinstance(entry.get("result"), dict):
                 entry["result"][key] = value
 
+    # GUI redesign (U-7): a running job's progress (``done``, ``total``, ``current``, ``recent``) for
+    # /api/scan-status — held in memory with the job, never persisted or signed.
+    def set_progress(self, job_id: str, fields: dict[str, Any]) -> None:
+        with self._lock:
+            entry = self._jobs.get(job_id)
+            if entry is not None:
+                entry.setdefault("progress", {}).update(fields)
+
+    def add_progress_row(self, job_id: str, done: int, planned: int, row: dict[str, Any], *, keep: int) -> None:
+        with self._lock:
+            entry = self._jobs.get(job_id)
+            if entry is None:
+                return
+            progress = entry.setdefault("progress", {})
+            progress["done"] = done
+            progress["total"] = max(planned, progress.get("total") or 0)
+            progress["current"] = row.get("name")
+            progress["recent"] = ([row] + list(progress.get("recent") or []))[:keep]
+
     def cancel(self, job_id: str, owner: str) -> dict[str, Any] | None:
         """Ask a running job to stop: ``{"status", "cancelled"}``, or None for an unknown job / another owner's."""
         with self._lock:
@@ -284,7 +303,7 @@ class JobStore:
             if entry is not None:
                 if entry.get("owner") != owner:
                     return None
-                return {key: entry.get(key) for key in ("status", "created", "finished", "source", "result")}
+                return {key: entry.get(key) for key in ("status", "created", "finished", "source", "result", "progress")}
         record = self._load(job_id, evidence)
         if record is None or record.get("owner") != owner:
             return None

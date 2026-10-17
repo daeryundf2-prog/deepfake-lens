@@ -66,7 +66,7 @@ per-file coverage record:
 | `authenticity_evidence` | Verdict rows whose verdict is `authenticity_evidence`. |
 | `undetermined` | Verdict rows whose verdict is `undetermined`. |
 | `checks_failed` | Verdict rows with at least one `failed` coverage entry. |
-| `container_rows` | Verdict rows that are archive container rows (`kind: "archive"`) — already included in the three verdict counts (R5); the CLI/HTML/PDF header prints `총 N건(압축 파일 M건 포함)` and the GUI total pill `압축 파일 M건 포함` (N5). A container row carries one evidence item of its own: `압축 파일 구성원 결론 집계` — `조작·생성 근거 있음 N건 / 판단 불가 M건` (` / 원본성 근거 있음 K건` when K > 0), deterministic, neutral, moderate, layer `archive` — so the table and the evidence statement name the basis of its verdict. |
+| `container_rows` | Verdict rows that are archive container rows (`kind: "archive"`) — already included in the three verdict counts (R5); the CLI/HTML/PDF header prints `총 N건(압축 파일 M건 포함)` and the GUI ledger count `압축 파일 M건 포함` (N5). A container row carries one evidence item of its own: `압축 파일 구성원 결론 집계` — `조작·생성 근거 있음 N건 / 판단 불가 M건` (` / 원본성 근거 있음 K건` when K > 0), deterministic, neutral, moderate, layer `archive` — so the table and the evidence statement name the basis of its verdict. |
 | `subfolders_skipped` | Subfolders directly under the scanned folder that a non-recursive scan did not enter (a symlinked folder is a skipped row instead; with `--allow-symlinks` a followable linked folder is counted here — X3); 0 for `--recursive`. The CLI table prints `참고: 하위 폴더 N개는 검사하지 않았습니다 … --recursive`, the GUI banner says the same (N8). |
 | `files_over_cap` | X1: files the folder walk found beyond the `--max-files` cap (`capped: true`) — never analyzed, no row; 0 when not capped. Reported in every rendering's `기록되지 않은 파일` section and in the GUI banner. |
 | `cancelled` | R18-3: `true` when the scan was cancelled (GUI/web job cancel, `/api/scan/stream` cancel) before every file was analyzed; absent-or-`false` otherwise. Every rendering's summary line starts with `[검사 취소 — 폴더 전체가 아닌 부분 결과입니다: 분석하지 않은 파일 N개]`, the GUI shows the same banner, and the async job's status is `cancelled` instead of `done`. |
@@ -81,7 +81,7 @@ analyzed files, archive members **and archive container rows**
 `cancelled` when a cancel left members unanalyzed). R5: container
 rows are counted by their verdict like every other row (they used to land
 in `unsupported_or_failed`), so the header counts equal the CLI table and
-the GUI pills. `analyzed` is the number of verdict rows;
+the GUI verdict strip. `analyzed` is the number of verdict rows;
 `unsupported_or_failed` counts the remaining rows that are neither
 `duplicate` nor `skipped`. `total` = the three verdict counts +
 `unsupported_or_failed` + `duplicates` + `skipped`.

@@ -3,210 +3,346 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
     <title>Deepfake Lens</title>
     <link rel="stylesheet" href="/gui.css">
 </head>
 <body>
-    <div class="nav">
-        <div class="nav-inner">
-            <div class="brand">
-                <span class="mark">◉</span>
-                <h1>Deepfake Lens</h1>
-            </div>
-            <span class="sub">AI 생성 콘텐츠 스크리닝</span>
-            <button class="btn btn-sm ml-auto" id="guide-btn">사용법</button>
-            <span class="chip" id="ver-chip"></span>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand-name">Deepfake Lens</span>
+            <span class="mono muted small" id="ver-chip"></span>
         </div>
-    </div>
+        <div class="case-line">
+            <span class="muted small">사건</span>
+            <span class="case-title" id="case-line-title">사건 정보 없음</span>
+            <span class="mono muted small" id="case-line-meta"></span>
+        </div>
+        <nav class="viewnav" aria-label="화면">
+            <a href="#/scan" data-view-link="scan">검사</a>
+            <a href="#/ledger" data-view-link="ledger">사건 대장</a>
+            <a href="#/report" data-view-link="report" class="nav-primary">감정서 만들기</a>
+            <a href="#/tools" data-view-link="tools">빠른 검사·비교</a>
+        </nav>
+    </header>
 
-    <div class="wrap">
+    <main id="main" tabindex="-1">
+        <div class="page">
+            <div id="error-region" class="error-region" aria-live="assertive"></div>
+            <p class="busy-band" id="busy-band" role="status" hidden><span id="busy-band-text"></span> <a href="#/scan" id="busy-band-link">진행 상황 보기</a></p>
 
-        <!-- Onboarding guide -->
-        <section class="card" id="guide-card">
-            <div class="card-head">
-                <h2><span class="gh">🧭</span>사용법</h2>
-                <button class="btn btn-sm ml-auto" id="guide-close">닫기</button>
-            </div>
-            <div class="card-body">
-                <div class="guide-tiles">
-                    <div class="tile" data-target="card-check" role="button" tabindex="0">
-                        <div class="t-icon">⚡</div>
-                        <div class="t-title">의심 가는 콘텐츠 하나</div>
-                        <div class="t-desc">카톡·Threads에서 받은 글, 사진, 영상 하나가 AI 생성인지 — 텍스트 붙여넣기 또는 파일 1개 선택. 압축파일(zip)도 통째로 검사됩니다.</div>
-                        <div class="t-go">빠른 검사로 이동 →</div>
-                    </div>
-                    <div class="tile" data-target="card-compare" role="button" tabindex="0">
-                        <div class="t-icon">⚖️</div>
-                        <div class="t-title">두 파일이 같은 사람?</div>
-                        <div class="t-desc">의심 음성과 아는 사람의 음성을 비교(화자), 의심 문서와 다른 문서를 비교(필자). "같은 사람이 만든 것 같은가"를 측정합니다.</div>
-                        <div class="t-go">비교로 이동 →</div>
-                    </div>
-                    <div class="tile" data-target="card-scan" role="button" tabindex="0">
-                        <div class="t-icon">📁</div>
-                        <div class="t-title">폴더 통째로 조사</div>
-                        <div class="t-desc">다운로드 폴더, 증거 디렉터리 등 파일 묶음을 한 번에. 결론 순으로 정렬되어 조작·생성 근거가 있는 파일부터 검토할 수 있습니다.</div>
-                        <div class="t-go">스캔으로 이동 →</div>
-                    </div>
-                </div>
-                <div class="legend">
-                    <span class="lg"><span class="band-pill band-high">조작·생성 근거 있음</span> 재현 가능한 기록 근거(메타데이터·C2PA)가 조작·생성을 가리킴 — <b>근거 항목을 감정서에 인용</b></span>
-                    <span class="lg"><span class="band-pill band-medium">판단 불가</span> 재현 가능한 기록 근거 없음 또는 검사 실패 — <b>원본이라는 뜻이 아님, 검사 범위 확인</b></span>
-                    <span class="lg"><span class="band-pill band-low">원본성 근거 있음</span> 서명·해시 검증된 촬영 출처 — <b>검증 내역을 함께 기재</b></span>
-                </div>
-                <p class="note warn mt-10">결론은 위 세 가지뿐입니다. 근거는 <b>재현 가능한 기록</b>(메타데이터·C2PA) / <b>통계적</b>(모델) / <b>어휘적</b>(키워드)으로 나뉘며, 통계적·어휘적 근거는 보정 전까지 결론을 바꾸지 못합니다. 텍스트 결과는 항상 <b>참고</b> 등급입니다. 카드를 누르면 결론 → 근거(종류별) → 검사 범위(미실행·실패 사유) 순으로 나옵니다.</p>
-            </div>
-        </section>
-
-        <!-- Quick check -->
-        <section class="card" id="card-check">
-            <div class="card-head"><h2><span class="gh">⚡</span>빠른 검사</h2><span class="hint">의심 콘텐츠 1개 — 모든 탐지 레이어 한 번에</span></div>
-            <div class="card-body">
-                <textarea class="field" id="qc-text" placeholder="검사할 텍스트를 붙여넣으세요 (한국어/영어)…" aria-label="검사할 텍스트"></textarea>
-                <div class="row mt-10">
-                    <button class="btn btn-primary" id="qc-text-btn">텍스트 검사</button>
-                    <button class="btn" id="qc-file-btn">파일 선택</button>
-                    <input type="file" id="qc-file" hidden>
-                    <input class="field" id="qc-wm" placeholder="워터마크 키 (선택)" aria-label="워터마크 키">
-                </div>
-                <div class="qc-preview" id="qc-preview"></div>
-                <div class="elapsed" id="qc-status" aria-live="polite"></div>
-                <div class="qc-out" id="qc-out" aria-live="polite"></div>
-            </div>
-        </section>
-
-        <!-- Compare -->
-        <section class="card" id="card-compare">
-            <div class="card-head"><h2><span class="gh">⚖️</span>두 파일 비교</h2><span class="hint">같은 사람이 만들었는지 — 음성은 화자, 문서는 필자</span></div>
-            <div class="card-body">
-                <div class="cmp-slots">
-                    <div class="slot" id="slot-a" role="button" tabindex="0"><span class="sn">파일 A 선택</span></div>
-                    <div class="slot" id="slot-b" role="button" tabindex="0"><span class="sn">파일 B 선택</span></div>
-                </div>
-                <input type="file" id="cmp-a" hidden>
-                <input type="file" id="cmp-b" hidden>
-                <div class="row mt-10">
-                    <button class="btn btn-primary" id="cmp-btn" disabled>비교 실행</button>
-                    <span class="note">같은 모달리티끼리만 비교됩니다 (오디오 쌍 / 텍스트·문서 쌍)</span>
-                </div>
-                <div class="elapsed" id="cmp-status" aria-live="polite"></div>
-                <div class="cmp-result" id="cmp-result" aria-live="polite"></div>
-            </div>
-        </section>
-
-        <!-- Scan -->
-        <section class="card" id="card-scan">
-            <div class="card-head"><h2><span class="gh">📁</span>폴더 / 파일 스캔</h2><span class="hint">여러 파일을 결론순으로 일괄 조사</span></div>
-            <div class="card-body">
-                <div class="row">
-                    <input class="field" id="folder-path" placeholder="폴더 경로 (예: C:\Users\test\images)" aria-label="분석할 폴더 경로">
-                    <button class="btn btn-primary" id="analyze-btn">폴더 스캔</button>
-                </div>
-                <div class="row mt-12">
-                    <span class="note">픽셀 분석</span>
-                    <div class="seg" id="pixel-seg" role="radiogroup" aria-label="픽셀 분석 모드">
-                        <button data-v="off" class="on" role="radio" aria-checked="true">꺼짐</button>
-                        <button data-v="fast" role="radio" aria-checked="false">빠름</button>
-                        <button data-v="deep" role="radio" aria-checked="false">정밀</button>
-                    </div>
-                    <span class="note">최대 파일</span>
-                    <input type="number" class="field" id="max-files" value="1000" min="1" max="10000" aria-label="최대 파일 수">
-                </div>
-                <div class="opt-grid mt-12">
-                    <label class="switch"><input type="checkbox" id="opt-model" checked><span class="track"></span>뉴럴 모델</label>
-                    <label class="switch"><input type="checkbox" id="opt-recursive"><span class="track"></span>하위 폴더</label>
-                    <label class="switch"><input type="checkbox" id="opt-dedupe"><span class="track"></span>중복 제거</label>
-                    <label class="switch"><input type="checkbox" id="opt-heatmaps"><span class="track"></span>히트맵 (정밀)</label>
-                    <label class="switch"><input type="checkbox" id="opt-deep"><span class="track"></span>심층 신호 (느림)</label>
-                </div>
-                <div class="progress" id="progress" role="progressbar" aria-label="분석 진행"><div class="fill"></div></div>
-                <div class="row">
-                    <div class="elapsed" id="progress-text" aria-live="polite"></div>
-                    <button class="btn btn-sm" id="scan-cancel" type="button" hidden>취소</button>
-                </div>
-                <div class="drop mt-8" id="drop-zone" role="button" tabindex="0">
-                    <div class="icon">📁</div>
-                    <p><b>파일이나 폴더를 드롭</b>하거나 클릭해서 선택</p>
-                    <p>PNG·JPG·WebP·GIF·TXT·MD·PDF·DOCX·HWP·WAV·MP3·M4A·MP4·MOV·MKV·ZIP·TAR 등</p>
-                </div>
-                <div class="row mt-8">
-                    <button class="btn" id="dir-picker-btn" type="button">폴더 선택</button>
-                    <input type="file" id="dir-picker" webkitdirectory multiple hidden>
-                </div>
-                <div class="chips" id="file-list" aria-live="polite"></div>
-                <div class="row mt-10" id="upload-row" hidden>
-                    <button class="btn btn-primary" id="upload-btn">선택 파일 분석 (<span id="upload-n">0</span>)</button>
-                    <button class="btn btn-red" id="upload-clear">목록 비우기</button>
-                    <span class="note">업로드된 파일은 분석 후 서버에서 삭제됩니다</span>
-                </div>
-            </div>
-        </section>
-
-        <!-- Results -->
-        <section id="results-section" hidden>
-            <div id="prov-banner" hidden></div>
-            <div class="summary" aria-live="polite" id="stat-pills">
-                <div class="pill-stat pa-red" data-band="manipulation_evidence" role="button" tabindex="0" title="클릭하면 이 결론만 표시"><div class="n c-red" id="stat-manip">0</div><div class="t"><span class="dot bg-red"></span>조작·생성 근거 있음</div></div>
-                <div class="pill-stat pa-orange" data-band="undetermined" role="button" tabindex="0" title="클릭하면 이 결론만 표시"><div class="n c-orange" id="stat-undet">0</div><div class="t"><span class="dot bg-orange"></span>판단 불가</div></div>
-                <div class="pill-stat pa-green" data-band="authenticity_evidence" role="button" tabindex="0" title="클릭하면 이 결론만 표시"><div class="n c-green" id="stat-auth">0</div><div class="t"><span class="dot bg-green"></span>원본성 근거 있음</div></div>
-                <div class="pill-stat pa-muted" data-band="other" role="button" tabindex="0" title="미지원·분석 실패·중복·건너뜀 등"><div class="n c-muted" id="stat-other">0</div><div class="t"><span class="dot bg-muted"></span>미지원·실패·기타</div></div>
-                <div class="pill-stat pa-accent" data-band="" role="button" tabindex="0" title="필터 해제"><div class="n" id="stat-total">0</div><div class="t">전체 · <span id="stat-model-label">뉴럴 0</span></div></div>
-            </div>
-            <div class="distbar" id="distbar"></div>
-
-            <div class="card mt-12">
-                <div class="card-head">
-                    <h2><span class="gh">📋</span>분석 결과</h2>
-                    <input type="search" id="res-filter" class="field" placeholder="파일명·경로 필터" aria-label="결과 필터">
-                    <select id="res-sort" class="sort-sel" aria-label="정렬">
-                        <option value="verdict">결론순</option>
-                        <option value="name">이름순</option>
-                    </select>
-                    <button class="btn btn-sm" id="rev-filter" aria-pressed="false" title="검토 표시한 항목만 보기">★ 검토됨</button>
-                    <div class="toolbar">
-                        <button class="btn btn-sm" id="exp-json">JSON</button>
-                        <button class="btn btn-sm" id="exp-csv">CSV</button>
-                        <button class="btn btn-sm" id="exp-report">HTML</button>
-                        <button class="btn btn-sm" id="exp-pdf">감정 PDF</button>
-                        <button class="btn btn-sm" id="exp-evidence" title="대법원 전자소송(ECFS) 표준 증거설명서 내보내기">증거설명서</button>
-                        <button class="btn btn-sm btn-red" id="exp-clear">삭제</button>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <details class="case-meta" id="case-meta">
-                        <summary>사건 정보 (감정서·증거설명서에 반영)</summary>
-                        <div class="case-grid">
-                            <label>사건번호<input class="field" id="case-no" placeholder="2024가단0000"></label>
-                            <label>사건명<input class="field" id="case-name" placeholder="(사건명 입력)"></label>
-                            <label>의뢰인<input class="field" id="case-plaintiff" placeholder="(의뢰사 상호명 입력) 귀하"></label>
-                            <label>피고/피의자<input class="field" id="case-defendant" placeholder="(피고/피의자 성명 입력)"></label>
-                            <label>수권법원<input class="field" id="case-court" placeholder="○○지방법원 귀중"></label>
-                            <label>법무법인<input class="field" id="case-firm" placeholder="법무법인(유한) ○○"></label>
-                            <label>감정센터<input class="field" id="case-center" placeholder="디지털포렌식 감정센터"></label>
-                            <label>연락처<input class="field" id="case-contact" placeholder="02-0000-0000"></label>
+            <!-- ── 검사: 사건 정보 + 폴더 + 진행 ── -->
+            <section id="view-scan" class="view" aria-labelledby="scan-h" hidden>
+                <div class="scan-grid">
+                    <div class="scan-left">
+                        <div>
+                            <h1 id="scan-h" class="view-h" tabindex="-1"><span class="step mono">1 / 2</span>사건 정보</h1>
+                            <p class="hint" id="case-hint">감정서·증거설명서 머리말에만 쓰입니다. 기본값은 없습니다 — 비워 두면 감정서를 내보내기 전에 다시 묻습니다.</p>
                         </div>
-                    </details>
-                    <div class="res-list" id="res-list"></div>
-                    <div class="more-row" id="more-row" hidden><button class="btn" id="more-btn">더 보기</button></div>
-                    <p class="note mt-10">결론과 근거를 확인하십시오. 숫자 점수는 보정된 경우에만 표시됩니다. 카드를 누르면 판정 근거와 한계를 볼 수 있습니다.</p>
-                    <p class="kb-hint mt-6"><kbd>↑</kbd><kbd>↓</kbd> 또는 <kbd>J</kbd><kbd>K</kbd> 이동 · <kbd>Enter</kbd> 열기 · <kbd>Esc</kbd> 닫기/필터 해제 · <kbd>★</kbd> 검토 표시</p>
-                </div>
-            </div>
-        </section>
-    </div>
+                        <div id="case-slot-scan">
+                            <fieldset id="case-fields" class="case-fields" aria-describedby="case-hint">
+                                <legend class="sr-only">사건 정보</legend>
+                                <div class="case-grid">
+                                    <label class="lbl">사건번호 <span class="req">증거설명서에 필수</span><input class="field" id="case-no" autocomplete="off"></label>
+                                    <label class="lbl">사건명 <span class="req">증거설명서에 필수</span><input class="field" id="case-name" autocomplete="off"></label>
+                                    <label class="lbl">원고·고소인<input class="field" id="case-plaintiff" autocomplete="off"></label>
+                                    <label class="lbl">피고·피의자<input class="field" id="case-defendant" autocomplete="off"></label>
+                                </div>
+                                <fieldset class="side-choice">
+                                    <legend>의뢰 측 <span class="req">증거설명서에 필수 · 기본값 없음</span></legend>
+                                    <div class="radios">
+                                        <label class="check"><input type="radio" name="submitter-side" value="plaintiff">원고·고소인 측 (갑호증)</label>
+                                        <label class="check"><input type="radio" name="submitter-side" value="defendant" disabled aria-describedby="side-note">피고·피의자 측 (을호증)</label>
+                                    </div>
+                                    <p class="hint" id="side-note">피고·피의자 측(을호증) 증거설명서는 아직 서버가 만들지 않습니다(후속 작업 예정) — 지금은 원고·고소인 측만 고를 수 있습니다.</p>
+                                </fieldset>
+                                <details class="case-more">
+                                    <summary>그 밖의 항목 (제출 법원·법무법인·감정센터·연락처)</summary>
+                                    <div class="case-grid">
+                                        <label class="lbl">제출 법원<input class="field" id="case-court" autocomplete="off"></label>
+                                        <label class="lbl">법무법인<input class="field" id="case-firm" autocomplete="off"></label>
+                                        <label class="lbl">감정센터<input class="field" id="case-center" autocomplete="off"></label>
+                                        <label class="lbl">연락처<input class="field" id="case-contact" autocomplete="off"></label>
+                                    </div>
+                                </details>
+                            </fieldset>
+                        </div>
 
-    <div id="toasts" aria-live="polite"></div>
+                        <form id="scan-form" class="block" novalidate>
+                            <h2 class="block-h"><span class="step mono">2 / 2</span>검사할 폴더</h2>
+                            <label class="lbl" for="folder-path">폴더 경로</label>
+                            <div class="field-row">
+                                <input class="field mono" id="folder-path" type="text" autocomplete="off" spellcheck="false" aria-describedby="folder-hint folder-roots">
+                                <button class="btn btn-primary" id="analyze-btn" type="submit">검사 시작</button>
+                            </div>
+                            <p class="hint" id="folder-hint">원본 폴더에는 아무것도 쓰지 않습니다. 압축 파일은 안까지 검사합니다. Enter로 시작합니다.</p>
+                            <p class="hint" id="folder-roots">서버를 시작할 때 등록한 폴더(--folder, --allow-root) 안만 검사할 수 있습니다.</p>
+                            <details class="disclosure" id="scan-options">
+                                <summary>검사 옵션</summary>
+                                <div class="opt-body">
+                                    <fieldset>
+                                        <legend>픽셀 분석 (참고 신호 — 결론에 쓰지 않음)</legend>
+                                        <div class="radios">
+                                            <label class="check"><input type="radio" name="pixel-mode" value="off" checked>꺼짐</label>
+                                            <label class="check"><input type="radio" name="pixel-mode" value="fast">빠름</label>
+                                            <label class="check"><input type="radio" name="pixel-mode" value="deep">정밀</label>
+                                        </div>
+                                    </fieldset>
+                                    <div class="opt-row">
+                                        <label class="lbl" for="max-files">최대 파일 수</label>
+                                        <input type="number" class="field" id="max-files" value="1000" min="1" max="10000">
+                                    </div>
+                                    <label class="check"><input type="checkbox" id="opt-recursive">하위 폴더 포함</label>
+                                    <label class="check"><input type="checkbox" id="opt-dedupe">같은 내용의 파일은 한 번만 검사</label>
+                                    <label class="check"><input type="checkbox" id="opt-heatmaps">히트맵 만들기 (정밀 픽셀 분석에서만)</label>
+                                    <label class="check"><input type="checkbox" id="opt-deep">심층 신호 (느림)</label>
+                                    <label class="check"><input type="checkbox" id="opt-model" checked>측정을 통과한 신경망 탐지기 사용 (있을 때만 실행)</label>
+                                </div>
+                            </details>
+                        </form>
+
+                        <section class="block" aria-labelledby="upload-h">
+                            <h2 class="block-h" id="upload-h">폴더 대신 파일 올리기</h2>
+                            <div class="drop" id="drop-zone">
+                                <p>파일이나 폴더를 여기로 끌어 놓거나 고르십시오.</p>
+                                <button class="btn" id="file-picker-btn" type="button">파일 고르기</button>
+                                <button class="btn" id="dir-picker-btn" type="button">폴더 고르기</button>
+                                <input type="file" id="dir-picker" webkitdirectory multiple hidden aria-label="올릴 폴더">
+                            </div>
+                            <p class="hint">PNG·JPG·WebP·GIF·TXT·MD·PDF·DOCX·HWP·WAV·MP3·M4A·MP4·MOV·MKV·ZIP·TAR 등. 올린 파일은 분석 후 서버에서 삭제되고, 감정서에는 서명 제외로 실립니다.</p>
+                            <ul class="file-chips" id="file-list" aria-label="올릴 파일"></ul>
+                            <div class="prog-actions" id="upload-row" hidden>
+                                <button class="btn btn-primary" id="upload-btn" type="button">고른 파일 검사 (<span id="upload-n">0</span>)</button>
+                                <button class="btn" id="upload-clear" type="button">목록 비우기</button>
+                            </div>
+                        </section>
+
+                        <details class="disclosure block">
+                            <summary>결론 읽는 법</summary>
+                            <ul class="legend-list">
+                                <li><span class="mk mk-m" aria-hidden="true"></span><span><b>조작·생성 근거</b> — 파일에 남은 기록(메타데이터·C2PA)이 AI 생성·편집을 가리킵니다. 서명 없는 메타데이터는 파일이 스스로 적은 것(자기 선언)이라 심거나 지울 수 있습니다 — 그런 기록에만 근거한 결론은 "자기 선언 기록"으로 표시됩니다.</span></li>
+                                <li><span class="mk mk-a" aria-hidden="true"></span><span><b>원본성 근거</b> — 서명·해시로 검증된 촬영 출처가 있습니다.</span></li>
+                                <li><span class="mk mk-u" aria-hidden="true"></span><span><b>판단 불가</b> — 결론을 낼 근거가 없거나 검사가 실패했습니다. 원본이라는 뜻이 아닙니다.</span></li>
+                                <li><span class="mk mk-x" aria-hidden="true"></span><span><b>분석 못 함</b> — 미지원 형식·처리 실패·중복·건너뜀.</span></li>
+                            </ul>
+                            <p class="hint">근거는 재현 가능한 기록(메타데이터·C2PA) / 통계적(모델) / 어휘적(키워드)으로 나뉘며, 통계적·어휘적 근거는 보정 전까지 결론을 바꾸지 못합니다. 텍스트 결과는 항상 참고 등급입니다.</p>
+                        </details>
+                    </div>
+
+                    <section class="progress-panel" id="progress-panel" aria-labelledby="prog-h">
+                        <div class="prog-head">
+                            <h2 id="prog-h" tabindex="-1">검사 대기</h2>
+                            <span class="mono small" id="prog-time"></span>
+                        </div>
+                        <div class="prog-count">
+                            <span class="mono big" id="prog-done">0</span>
+                            <span class="mono muted of">/ <span id="prog-total">–</span> 파일</span>
+                        </div>
+                        <div class="progressbar" id="progress" role="progressbar" aria-label="검사한 파일" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><div class="fill" id="progress-fill"></div></div>
+                        <p class="prog-status" id="progress-text">폴더를 고르고 검사를 시작하십시오. 진행 상황이 여기에 쌓입니다.</p>
+                        <p class="sr-only" id="scan-live" aria-live="polite"></p>
+                        <div class="cancel-banner" id="cancel-banner" hidden>
+                            <span class="t">부분 결과 — 검사를 중단했습니다</span>
+                            <span class="small" id="cancel-banner-text"></span>
+                        </div>
+                        <div class="prog-actions">
+                            <button class="btn" id="scan-cancel" type="button" hidden>검사 중단</button>
+                            <span class="hint" id="cancel-note" hidden>중단해도 이미 끝난 결과는 남고, 남은 파일 수는 "사용자 취소"로 기록됩니다.</span>
+                            <button class="btn btn-primary" id="view-results-btn" type="button" hidden>결과 보기</button>
+                        </div>
+                        <div class="recent">
+                            <h3>방금 끝난 파일</h3>
+                            <ol id="recent-list"></ol>
+                        </div>
+                    </section>
+                </div>
+            </section>
+
+            <!-- ── 사건 대장: 결론 + 파일 대장 + 근거 ── -->
+            <section id="view-ledger" class="view" aria-labelledby="sum-h" hidden>
+                <div class="empty" id="ledger-empty">
+                    <h1 class="view-h" id="ledger-empty-h" tabindex="-1">아직 검사 결과가 없습니다</h1>
+                    <p>검사 화면에서 폴더를 검사하거나 파일을 올리십시오.</p>
+                    <a class="btn btn-primary" href="#/scan">검사 화면으로</a>
+                </div>
+                <div id="results-section" hidden>
+                    <div class="partial-banner" id="partial-banner" hidden></div>
+                    <div class="summary">
+                        <h1 class="headline" id="sum-h" tabindex="-1"></h1>
+                        <p class="sum-sub" id="sum-sub"></p>
+                        <div class="strip" id="stat-pills" role="group" aria-label="결론별로 걸러 보기">
+                            <button type="button" class="seg" data-band="manipulation_evidence" aria-pressed="false">
+                                <span class="seg-top"><span class="mk mk-m" aria-hidden="true"></span>조작·생성 근거</span>
+                                <span class="seg-n mono" id="stat-manip">0</span>
+                                <span class="seg-sub" id="sub-manip">AI 생성·편집 기록이 있음</span>
+                            </button>
+                            <button type="button" class="seg" data-band="authenticity_evidence" aria-pressed="false">
+                                <span class="seg-top"><span class="mk mk-a" aria-hidden="true"></span>원본성 근거</span>
+                                <span class="seg-n mono" id="stat-auth">0</span>
+                                <span class="seg-sub" id="sub-auth">촬영 서명 등 원본 기록이 있음</span>
+                            </button>
+                            <button type="button" class="seg" data-band="undetermined" aria-pressed="false">
+                                <span class="seg-top"><span class="mk mk-u" aria-hidden="true"></span>판단 불가</span>
+                                <span class="seg-n mono" id="stat-undet">0</span>
+                                <span class="seg-sub" id="sub-undet">근거 없음 — 원본이라는 뜻 아님</span>
+                            </button>
+                            <button type="button" class="seg" data-band="other" aria-pressed="false">
+                                <span class="seg-top"><span class="mk mk-x" aria-hidden="true"></span>분석 못 함</span>
+                                <span class="seg-n mono" id="stat-other">0</span>
+                                <span class="seg-sub" id="sub-other">미지원·실패·중복·건너뜀</span>
+                            </button>
+                        </div>
+                        <p class="env-note" id="env-note" hidden>
+                            <span class="env-tag">검사 환경 주의</span>
+                            <span id="env-text"></span>
+                            <button type="button" class="linkbtn" id="env-more" aria-expanded="false" aria-controls="prov-banner">자세히</button>
+                        </p>
+                        <div class="prov-details" id="prov-banner" hidden></div>
+                    </div>
+
+                    <div class="ledger-grid">
+                        <section class="ledger" aria-labelledby="ledger-h">
+                            <div class="ledger-head">
+                                <h2 id="ledger-h">파일 대장 <span class="muted" id="ledger-count"></span></h2>
+                                <span class="hint">근거 있는 파일 먼저 · 검사 범위 = 실행한 검사 / 해당 검사</span>
+                            </div>
+                            <div class="ledger-tools">
+                                <label class="sr-only" for="res-filter">파일명·경로로 거르기</label>
+                                <input type="search" id="res-filter" class="field search" placeholder="파일명·경로로 거르기">
+                                <label class="sr-only" for="res-sort">정렬</label>
+                                <select id="res-sort" class="field">
+                                    <option value="verdict">결론순</option>
+                                    <option value="name">이름순</option>
+                                </select>
+                                <button class="btn btn-sm" id="rev-filter" type="button" aria-pressed="false">검토한 것만</button>
+                                <details class="menu" id="export-menu">
+                                    <summary>내보내기</summary>
+                                    <div class="menu-body">
+                                        <button class="btn btn-sm" id="exp-json" type="button">결과 JSON (검토 기록 포함)</button>
+                                        <button class="btn btn-sm" id="exp-csv" type="button">결과 CSV</button>
+                                        <a class="btn btn-sm" href="#/report">감정서·보고서 (PDF·HTML·서명 JSON)</a>
+                                        <label class="check small"><input type="checkbox" id="kb-toggle" checked>목록에서 J 키와 K 키로도 이동</label>
+                                        <button class="btn btn-sm btn-red" id="exp-clear" type="button">화면의 결과 지우기</button>
+                                    </div>
+                                </details>
+                            </div>
+                            <ul class="rows" id="res-list" aria-labelledby="ledger-h"></ul>
+                            <div class="more-row" id="more-row" hidden><button class="btn" id="more-btn" type="button">더 보기</button></div>
+                            <div class="ledger-foot">
+                                <p class="note">결론과 근거를 확인하십시오. 숫자 점수는 보정된 경우에만 표시됩니다.</p>
+                                <p class="note">목록 안에서 ↑↓ 키(또는 J 키와 K 키)로 이동하고 Enter로 근거를 엽니다.</p>
+                            </div>
+                        </section>
+                        <aside class="detail" id="detail" aria-labelledby="detail-h"></aside>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ── 감정서 만들기 ── -->
+            <section id="view-report" class="view" aria-labelledby="rep-h" hidden>
+                <div class="report-grid">
+                    <div class="report-left">
+                        <h1 class="view-h" id="rep-h" tabindex="-1">감정서 만들기</h1>
+                        <section aria-labelledby="chk-h">
+                            <h2 class="sec-h" id="chk-h">내보내기 전에 확인</h2>
+                            <ul class="checks" id="report-checks"></ul>
+                        </section>
+                        <section aria-labelledby="rcase-h">
+                            <h2 class="sec-h" id="rcase-h">사건 정보</h2>
+                            <div id="case-slot-report"></div>
+                        </section>
+                        <fieldset class="groups" id="exhibit-groups">
+                            <legend>서증으로 넣을 파일 <span id="inc-label"></span></legend>
+                            <div class="group-list">
+                                <label class="group-row"><input type="checkbox" id="inc-manip" data-band="manipulation_evidence" checked><span class="mk mk-m" aria-hidden="true"></span><span><span class="gl">조작·생성 근거 있음</span></span><span class="mono" id="inc-manip-n">0개</span></label>
+                                <label class="group-row"><input type="checkbox" id="inc-auth" data-band="authenticity_evidence" checked><span class="mk mk-a" aria-hidden="true"></span><span><span class="gl">원본성 근거 있음</span></span><span class="mono" id="inc-auth-n">0개</span></label>
+                                <label class="group-row"><input type="checkbox" id="inc-undet" data-band="undetermined"><span class="mk mk-u" aria-hidden="true"></span><span><span class="gl">판단 불가</span> <span class="hint">근거 없음으로 함께 기재</span></span><span class="mono" id="inc-undet-n">0개</span></label>
+                                <label class="group-row"><input type="checkbox" id="inc-other" data-band="other"><span class="mk mk-x" aria-hidden="true"></span><span><span class="gl">분석 못 함</span> <span class="hint">미지원·실패·중복</span></span><span class="mono" id="inc-other-n">0개</span></label>
+                            </div>
+                            <p class="hint">고른 파일에 고른 순서대로 증거설명서의 호증 번호가 붙습니다. 고르지 않은 검사 행도 번호 없이 "서증 외(검사 행)"로 표에 남고, 감정 보고서·HTML·서명된 JSON에는 모든 행이 실립니다. 보고서는 서버가 보관한 이 검사 작업의 행으로 만듭니다.</p>
+                        </fieldset>
+                        <section aria-labelledby="fmt-h">
+                            <h2 class="sec-h" id="fmt-h">형식</h2>
+                            <div class="exports">
+                                <button class="btn btn-primary" id="exp-evidence" type="button">증거설명서 PDF</button>
+                                <button class="btn" id="exp-pdf" type="button">감정 보고서 PDF</button>
+                                <button class="btn" id="exp-report" type="button">HTML 보고서</button>
+                                <button class="btn" id="exp-signed" type="button">서명된 JSON</button>
+                            </div>
+                            <p class="hint" id="export-note" aria-live="polite"></p>
+                            <div class="export-alert" id="export-alert" role="alert" hidden>
+                                <p class="t" id="export-alert-text"></p>
+                                <ul id="export-alert-list"></ul>
+                                <p id="export-alert-fail" hidden></p>
+                                <button class="btn btn-primary" id="export-alert-rescan" type="button">다시 검사</button>
+                            </div>
+                        </section>
+                    </div>
+                    <section class="report-preview" aria-labelledby="pv-h">
+                        <h2 class="sr-only" id="pv-h">증거설명서 미리보기</h2>
+                        <div class="a4" id="a4"></div>
+                        <p class="hint">미리보기입니다. 실제 문서도 서버가 보관한 이 검사 작업의 행으로 만들고(파일을 다시 분석하지 않음), 서명 키가 있으면 서명합니다. 내보낼 때 서버는 검사 때 해시한 파일의 SHA-256을 다시 계산해, 검사 뒤 바뀌었거나 지워진 파일(경로 중간의 폴더가 링크로 바뀐 파일도)이 있으면 내보내기를 거부합니다(다시 검사 필요). 검사 때 해시가 없던 행(링크·특수 파일 등)은 검사 때 기록대로 서명되며, 그 행에 해시가 없는 이유가 적혀 있습니다. 올린 파일만 서명 제외(클라이언트 제공 결과)로 실립니다.</p>
+                    </section>
+                </div>
+            </section>
+
+            <!-- ── 빠른 검사·비교 ── -->
+            <section id="view-tools" class="view" aria-labelledby="tools-h" hidden>
+                <h1 class="view-h" id="tools-h" tabindex="-1">빠른 검사·비교</h1>
+                <div class="tools-grid">
+                    <section class="tool" id="card-check" aria-labelledby="qc-h">
+                        <h2 id="qc-h">빠른 검사 — 파일 하나 또는 텍스트</h2>
+                        <label class="lbl" for="qc-text">검사할 텍스트 (한국어·영어)</label>
+                        <textarea class="field" id="qc-text"></textarea>
+                        <div class="tool-row">
+                            <button class="btn btn-primary" id="qc-text-btn" type="button">텍스트 검사</button>
+                            <button class="btn" id="qc-file-btn" type="button">파일 하나 고르기</button>
+                            <input type="file" id="qc-file" hidden aria-label="빠른 검사할 파일">
+                            <label class="lbl">워터마크 키 (선택)<input class="field" id="qc-wm" autocomplete="off"></label>
+                        </div>
+                        <p class="hint">압축 파일을 고르면 안의 파일이 사건 대장에 행으로 실립니다.</p>
+                        <div class="qc-preview" id="qc-preview"></div>
+                        <p class="elapsed" id="qc-status"></p>
+                        <p class="sr-only" id="qc-live" aria-live="polite"></p>
+                        <div class="qc-out" id="qc-out"></div>
+                    </section>
+                    <section class="tool" id="card-compare" aria-labelledby="cmp-h">
+                        <h2 id="cmp-h">두 파일 비교 — 같은 사람이 만들었는가</h2>
+                        <p class="hint">음성은 화자, 문서는 필자를 비교합니다. 같은 종류끼리만 비교됩니다(오디오 쌍 / 텍스트·문서 쌍).</p>
+                        <div class="cmp-slots">
+                            <button class="slot" id="slot-a" type="button"><span class="sn">파일 A 고르기</span></button>
+                            <button class="slot" id="slot-b" type="button"><span class="sn">파일 B 고르기</span></button>
+                        </div>
+                        <input type="file" id="cmp-a" hidden aria-label="비교할 파일 A">
+                        <input type="file" id="cmp-b" hidden aria-label="비교할 파일 B">
+                        <div class="tool-row">
+                            <button class="btn btn-primary" id="cmp-btn" type="button" aria-disabled="true">비교 실행</button>
+                        </div>
+                        <p class="elapsed" id="cmp-status"></p>
+                        <div class="cmp-result" id="cmp-result"></div>
+                    </section>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <div id="toasts" role="status" aria-live="polite"></div>
+
+    <dialog id="token-modal" class="token-dialog" aria-labelledby="token-modal-title">
+        <form method="dialog" id="token-form">
+            <h2 id="token-modal-title">API 토큰 입력</h2>
+            <p class="note">서버가 --token으로 시작됐습니다. API 토큰을 입력하십시오.</p>
+            <label class="lbl" for="token-modal-input">API 토큰</label>
+            <input id="token-modal-input" class="field" type="password" autocomplete="off">
+            <div class="tm-actions">
+                <button id="token-modal-cancel" class="btn" type="button">취소</button>
+                <button id="token-modal-ok" class="btn btn-primary" type="submit">확인</button>
+            </div>
+        </form>
+    </dialog>
 
     <script src="/gui.js"></script>
-    <div id="token-modal" role="dialog" aria-modal="true" aria-labelledby="token-modal-title" hidden>
-        <div class="tm-card">
-            <h3 id="token-modal-title">API 토큰 입력</h3>
-            <p class="note">서버가 --token으로 시작됐습니다. API 토큰을 입력하세요.</p>
-            <input id="token-modal-input" class="field" type="password" autocomplete="off" placeholder="API 토큰" />
-            <div class="tm-actions">
-                <button id="token-modal-ok" class="btn primary">확인</button>
-                <button id="token-modal-cancel" class="btn">취소</button>
-            </div>
-        </div>
-    </div>
 </body>
 </html>

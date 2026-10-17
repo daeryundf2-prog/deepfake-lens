@@ -670,6 +670,81 @@ STATEMENT_TABLE_WEIGHTS = (12.5, 22.0, 18.5, 47.0)
 STATEMENT_ROW_MIN_HEIGHT = 30.0
 
 
+# GUI preview (merge of the GUI redesign onto P0R-6): the evidence-statement PDF's texts as data — the case box,
+# the table rows, the boxes after the table and the signoff. The PDF renderer draws exactly these (one source),
+# and format=evidence-preview returns them, so the GUI's preview cannot show a line the PDF lacks or miss one.
+def statement_case_lines(statement: EvidenceStatement) -> list[str]:
+    """The PDF's case box, line for line (R24-7/R25-3: the examiner's fields through pdf_field_text)."""
+    from .result_text import pdf_field_text
+
+    return [
+        f"사        건    {pdf_field_text(statement.case_no)}  {pdf_field_text(statement.case_name)}",
+        f"원고(고소인)    {pdf_field_text(statement.plaintiff)}",
+        f"피고(피의자)    {pdf_field_text(statement.defendant)}",
+        "위 사건에 관하여 원고(고소인)의 소송대리인은 주장사실을 입증하기 위해 아래와 같이 증거방법을 제출합니다.",
+    ]
+
+
+def statement_author_cell(statement: EvidenceStatement, entry: EvidenceStatementEntry) -> str:
+    """R25-3: the "작성자 및 일자" cell — the shown law firm over the date (``author_date`` is "<law firm>\n<date>")."""
+    from .result_text import pdf_field_text
+
+    if not statement.law_firm:
+        return entry.author_date
+    return f"{pdf_field_text(statement.law_firm)}\n{entry.author_date.rsplit(chr(10), 1)[-1]}"
+
+
+def statement_boxes(statement: EvidenceStatement) -> list[tuple[str, list[str]]]:
+    """The boxes after the PDF's exhibit table, in order, line for line (the unsigned-rows box is the caller's)."""
+    hashed = sum(1 for e in statement.entries if e.sha256)
+    notice = [
+        f"원본 해시 산출: {hashed}/{len(statement.entries)}건.",
+        "본 문서의 결론은 자동 분석 결과로 유죄·불법성의 직접 증거가 아니며, 정밀 감정은 별도로 수행되어야 합니다.",
+    ]
+    if statement.reference_note:
+        notice.append(statement.reference_note)
+    notice.extend(line.strip() for line in statement.provenance_note.split("\n") if line.strip())
+    return [(STATEMENT_NOTICE_TITLE, notice), (UNRECORDED_SECTION_TITLE, statement.unrecorded_lines())]
+
+
+def statement_signoff_lines(statement: EvidenceStatement) -> list[str]:
+    """The PDF's signoff block (the court line follows it)."""
+    from .result_text import pdf_field_text
+
+    return [
+        statement.created_at,
+        f"원고(고소인) 소송대리인  {pdf_field_text(statement.law_firm)}".rstrip(),
+        "담당변호사 : ○ ○ ○,  ○ ○ ○",
+        "디지털포렌식센터 수석감정관 : ○ ○ ○  (인)",
+    ]
+
+
+def statement_preview(statement: EvidenceStatement, unsigned_rows: list[tuple[ScanItem, str]] | None = None) -> dict[str, Any]:
+    """What the evidence-statement PDF prints, as data, for the GUI preview (unsigned — the export signs)."""
+    from .result_text import pdf_field_text
+
+    unsigned: list[str] = []
+    if unsigned_rows:
+        from .reports import UNSIGNED_ROWS_NOTE, UNSIGNED_ROWS_TITLE, unsigned_row_lines
+
+        unsigned = [UNSIGNED_ROWS_TITLE, UNSIGNED_ROWS_NOTE, *unsigned_row_lines(unsigned_rows)]
+    return {
+        "preview": True,
+        "title": "증  거  설  명  서",
+        "case_lines": statement_case_lines(statement),
+        "table_headers": list(STATEMENT_TABLE_HEADERS),
+        "entries": [
+            {"exhibit_no": e.exhibit_no, "document_name": e.document_name, "author_date": statement_author_cell(statement, e),
+             "purpose_of_proof": e.purpose_of_proof, "verdict_label": e.verdict_label, "file_path": e.file_path}
+            for e in statement.entries
+        ],
+        "boxes": [[title, lines] for title, lines in statement_boxes(statement)],
+        "unsigned": unsigned,
+        "signoff": statement_signoff_lines(statement),
+        "court": pdf_field_text(statement.court),
+    }
+
+
 def _render_statement_pdf(
     pymupdf: Any, statement: EvidenceStatement, body: dict[str, object],
     *, unsigned_rows: list[tuple[ScanItem, str]] | None = None,
@@ -692,16 +767,11 @@ def _render_statement_pdf(
     # R25-3 (round 25): through pdf_field_text (display_name without the Markdown "|" escape — "x|y" prints as
     # typed), and the law firm of the table's 「작성자 및 일자」 cell too: it was drawn as typed
     # (entry.author_date), so that cell still printed both values above as "\u05e2 corp".
-    case_no, case_name = pdf_field_text(statement.case_no), pdf_field_text(statement.case_name)
-    plaintiff, defendant = pdf_field_text(statement.plaintiff), pdf_field_text(statement.defendant)
     law_firm, center, contact = pdf_field_text(statement.law_firm), pdf_field_text(statement.center), pdf_field_text(statement.contact)
     court_name = pdf_field_text(statement.court)
 
     def author_cell(entry: EvidenceStatementEntry) -> str:
-        """The "작성자 및 일자" cell: the shown law firm over the date (``author_date`` is "<law firm>\n<date>")."""
-        if not statement.law_firm:
-            return entry.author_date
-        return f"{law_firm}\n{entry.author_date.rsplit(chr(10), 1)[-1]}"
+        return statement_author_cell(statement, entry)  # shared with the GUI preview
 
     def page_header(layout: PdfLayout) -> None:
         firm_header = f"{law_firm} {center}".strip()
@@ -714,11 +784,10 @@ def _render_statement_pdf(
     layout = PdfLayout(pymupdf, header=page_header)
     layout.new_page()
     layout.text(layout.left, layout.right, "증  거  설  명  서", 18.0, (0.08, 0.15, 0.32), align=1, gap=6.0)
+    case_lines = statement_case_lines(statement)  # shared with the GUI preview
     layout.boxed_text("", [
-        (f"사        건    {case_no}  {case_name}", 9.5, (0.1, 0.1, 0.1)),
-        (f"원고(고소인)    {plaintiff}", 9.5, (0.1, 0.1, 0.1)),
-        (f"피고(피의자)    {defendant}", 9.5, (0.1, 0.1, 0.1)),
-        ("위 사건에 관하여 원고(고소인)의 소송대리인은 주장사실을 입증하기 위해 아래와 같이 증거방법을 제출합니다.", 8.2, (0.3, 0.3, 0.3)),
+        *((line, 9.5, (0.1, 0.1, 0.1)) for line in case_lines[:3]),
+        (case_lines[3], 8.2, (0.3, 0.3, 0.3)),
         *([(root_line, 8.2, (0.3, 0.3, 0.3))] if (root_line := scan_root_line(body)) else []),  # R9-9
         *([(options_line, 8.2, (0.3, 0.3, 0.3))] if (options_line := analysis_options_line(body)) else []),  # R19-3
     ], border=(0.82, 0.86, 0.92), fill=(0.97, 0.98, 0.99))
@@ -752,23 +821,16 @@ def _render_statement_pdf(
         )
     layout.y += 8.0
 
-    # Provenance + integrity disclosure (screening caveat goes on every copy).
-    hashed = sum(1 for e in statement.entries if e.sha256)
-    notice = [
-        (f"원본 해시 산출: {hashed}/{len(statement.entries)}건.", 6.8, (0.4, 0.4, 0.4)),
-        ("본 문서의 결론은 자동 분석 결과로 유죄·불법성의 직접 증거가 아니며, 정밀 감정은 별도로 수행되어야 합니다.", 6.8, (0.4, 0.4, 0.4)),
-    ]
-    if statement.reference_note:
-        notice.append((statement.reference_note, 6.8, (0.4, 0.4, 0.4)))
-    for line in statement.provenance_note.split("\n"):
-        if line.strip():
-            notice.append((line.strip(), 6.8, (0.4, 0.4, 0.4)))
-    layout.boxed_text(STATEMENT_NOTICE_TITLE, notice)
-    # X1: the "기록되지 않은 파일" section — count and reasons, always present.
-    layout.boxed_text(UNRECORDED_SECTION_TITLE, [
-        (line, 7.5 if index == 0 else 6.8, (0.1, 0.2, 0.4) if index == 0 else (0.35, 0.35, 0.35))
-        for index, line in enumerate(statement.unrecorded_lines())
-    ])
+    # Provenance + integrity disclosure (screening caveat goes on every copy) and the X1 "기록되지 않은 파일"
+    # section (count and reasons, always present) — the same lines as the GUI preview (statement_boxes).
+    for title, lines in statement_boxes(statement):
+        if title == STATEMENT_NOTICE_TITLE:
+            layout.boxed_text(title, [(line, 6.8, (0.4, 0.4, 0.4)) for line in lines])
+        else:
+            layout.boxed_text(title, [
+                (line, 7.5 if index == 0 else 6.8, (0.1, 0.2, 0.4) if index == 0 else (0.35, 0.35, 0.35))
+                for index, line in enumerate(lines)
+            ])
     if unsigned_rows:
         from .reports import UNSIGNED_ROWS_NOTE, UNSIGNED_ROWS_TITLE, unsigned_row_lines
 
@@ -778,11 +840,12 @@ def _render_statement_pdf(
         ])
 
     # Signoff block, kept together on one page.
+    signoff_lines = statement_signoff_lines(statement)  # shared with the GUI preview
     signoff = [
-        (statement.created_at, 10.0, (0.1, 0.1, 0.1)),
-        (f"원고(고소인) 소송대리인  {law_firm}".rstrip(), 10.5, (0.08, 0.15, 0.32)),
-        ("담당변호사 : ○ ○ ○,  ○ ○ ○", 9.5, (0.2, 0.2, 0.2)),
-        ("디지털포렌식센터 수석감정관 : ○ ○ ○  (인)", 9.5, (0.2, 0.2, 0.2)),
+        (signoff_lines[0], 10.0, (0.1, 0.1, 0.1)),
+        (signoff_lines[1], 10.5, (0.08, 0.15, 0.32)),
+        (signoff_lines[2], 9.5, (0.2, 0.2, 0.2)),
+        (signoff_lines[3], 9.5, (0.2, 0.2, 0.2)),
     ]
     # The signoff, the court line and the G30 signature lines (or the
     # explicit "서명 없음" lines) stay together on one page.
