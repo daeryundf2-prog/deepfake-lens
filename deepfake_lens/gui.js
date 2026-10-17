@@ -405,6 +405,7 @@
             watermark_sdxl: 'SDXL 워터마크(imwatermark) 검사', watermark_trustmark: 'TrustMark 워터마크 검사',
             watermark_videoseal: 'VideoSeal 워터마크 검사', watermark_audioseal: 'AudioSeal 워터마크 검사', online_detection: '온라인 전용 검출(미실행)',
             text_invisible_marks: '비가시 유니코드 표식 검사', document_structure: '문서 구조 사실(증분 저장·편집 메타데이터)',
+            platform_recompression: '플랫폼 재압축 양자화표 대조', file_name_pattern: '파일 이름 형식(메신저·스크린샷·녹음)', audio_channel_trace: '통화·메신저 코덱·대역폭 흔적',
         };
         const COVERAGE_STATUS_LABELS = { ran: '실행', skipped: '미실행', failed: '실패' };
         // B5: same table as result_types.SOURCE_CONFIDENCE_LABELS; a text or

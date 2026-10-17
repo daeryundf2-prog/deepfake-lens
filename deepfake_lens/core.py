@@ -1408,6 +1408,18 @@ def _mark_layers(file_path: Path, modality: str, extra: "MarkLayers | None" = No
     )
 
 
+def _with_traces(layers: DeepLayers, file_path: Path, modality: str) -> DeepLayers:
+    """TB-4: the platform / messenger trace facts of an audio or video row join its mark layers."""
+    from .platform_traces import audio_trace_layers, video_trace_layers
+
+    traces = audio_trace_layers(file_path) if modality == "audio" else video_trace_layers(file_path)
+    return DeepLayers(
+        evidence=[*layers.evidence, *traces.evidence], coverage=[*layers.coverage, *traces.coverage],
+        limitations=[*layers.limitations, *traces.limitations], reference=list(layers.reference),
+        marking_context=layers.marking_context,
+    )
+
+
 # Words in a legacy analyzer's "unavailable" verdict that mean the input
 # could not be processed (a failure) rather than that the check does not
 # apply (a skip, e.g. no face or clip too short).
@@ -1713,6 +1725,12 @@ def _analyze_image_file(
 
     marks = _marking("image", c2pa_validation, c2pa_entry, image_mark_layers(file_path, c2pa_validation))
     coverage.extend(marks.coverage)
+    # TB-4: platform / messenger traces (JPEG recompression tables, file-name formats) — facts only.
+    from .platform_traces import image_trace_layers
+
+    traces = image_trace_layers(file_path)
+    coverage.extend(traces.coverage)
+    marks = replace(marks, evidence=[*marks.evidence, *traces.evidence], limitations=[*marks.limitations, *traces.limitations])
 
     image_format = metadata_read.image_format if metadata_read is not None else None
     jpeg_quality = None
@@ -1747,7 +1765,7 @@ def _analyze_audio_file(
     model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
 ) -> ClassificationResult:
     analysis, entry = run_check("audio_analysis", lambda: analyze_audio(file_path, model_path=model_path))
-    marks = _mark_layers(file_path, "audio")
+    marks = _with_traces(_mark_layers(file_path, "audio"), file_path, "audio")
     if analysis is None:
         return build_classification_result(
             subject="오디오",
@@ -1851,7 +1869,7 @@ def _analyze_video_file(
 
     analysis, entry = run_check("video_analysis", video_check)
     deep = _deep_video_layers(file_path, thresholds) if deep_signals else _deep_disabled(DEEP_VIDEO_CHECKS)
-    marks = _mark_layers(file_path, "video")
+    marks = _with_traces(_mark_layers(file_path, "video"), file_path, "video")
     # techniques-2026: the mark checks join the deep layers' lists (evidence, coverage, limitations).
     deep = DeepLayers(
         evidence=[*deep.evidence, *marks.evidence], coverage=[*deep.coverage, *marks.coverage],

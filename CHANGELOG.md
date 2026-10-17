@@ -13,6 +13,10 @@ grouped by work pass rather than release.
 - TB-6: `document_structure` — PDF revisions / incremental saves, bytes after a signature's `/ByteRange`, producer and
   creator history, `application/c2pa` embedding; DOCX/XLSX/PPTX revision, application, editing time, `w:rsid` count,
   tracked changes (self-declared facts). See `docs/FACT-LAYERS.md`.
+- TB-4: platform / messenger traces — JPEG recompression tables (`platform_recompression`, sourced library
+  `models/platform-traces.json`), messenger / screenshot / recording file-name formats (`file_name_pattern`; the file
+  name joins the scan-cache key, `content-v5`), AMR / Ogg Opus headers and effective bandwidth (`audio_channel_trace`),
+  with the limitation that such paths strip metadata, C2PA and watermarks.
 
 ## 2026-10 — techniques-2026 (machine-readable marks)
 

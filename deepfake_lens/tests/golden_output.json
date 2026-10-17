@@ -340,6 +340,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 20,
+      "reason": "TB-4: platform_recompression, file_name_pattern, audio_channel_trace; cache key content-v5 (+ file name)",
+      "sha256": "83bc325c3e0896001ca7ace2cf3674161c763718105d596223d6a30d4936dc63",
+      "sets": {
+        "stdlib": "83bc325c3e0896001ca7ace2cf3674161c763718105d596223d6a30d4936dc63",
+        "full-extras": "199076421f526ad15ab0644ded40f4e325214a8dc6b34dc1fb9b6074def26d92"
+      },
+      "constants_sha256": "5fb690ad63f8b46d2d3bb06d2ae22337e8bf0c35777333c7685c6097cf3db322",
+      "constants_count": 57,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

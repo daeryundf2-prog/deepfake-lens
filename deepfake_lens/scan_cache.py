@@ -8,6 +8,7 @@ compatibility with existing call sites and tests.
 from __future__ import annotations
 
 import hashlib
+import unicodedata
 import re
 import json
 from dataclasses import replace
@@ -736,7 +737,8 @@ def _cache_key(
     the analysis — the kind (image/audio/…) and the reader (the C2PA SDK
     decides the format from it: an empty ``.png`` is an I/O failure, an
     empty ``.jpg`` an unsupported format) — so ``zero.png`` no longer
-    replays ``empty.jpg``'s row. ``root`` is accepted for call-site
+    replays ``empty.jpg``'s row. TB-4 (content-v5): the base name (NFC) too —
+    the file-name format check reads it; a renamed folder still hits. ``root`` is accepted for call-site
     compatibility and ignored. Returns "" (never cacheable) when the file
     cannot be read.
     """
@@ -763,6 +765,8 @@ def _cache_key(
             f"fmt:{OUTPUT_FORMAT_GENERATION}",
             f"sha256:{digest}",
             f"ext:{cache_extension(path)}",
+            # TB-4: the file's own name is an analysis input (file_name_pattern) — a renamed file re-analyzes.
+            f"name:{_short_digest(unicodedata.normalize('NFC', path.name))}",
             f"opts:{_short_digest(options)}",
             context,
             # Threshold/weights provenance — a cached verdict computed under
@@ -795,7 +799,7 @@ def _content_sha256(path: Path, fingerprints: dict[Path, str] | None = None) -> 
 
 # Bumped whenever the key layout changes so entries written under an older
 # layout (the path+size+mtime keys before G11) can never match.
-CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output format generation
+CACHE_KEY_VERSION = "content-v5"  # v3 (N6): + extension; v4 (R14-3): + output format generation; v5 (TB-4): + file name
 # R14-3 (round 14): the generation of the rules that turn an analysis into a
 # row's text — reasons, limitations, verdict wording, path scrubbing, name
 # restoring. A cached row is the text an older commit wrote; the tool
@@ -867,7 +871,10 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    c2pa skip reason of .txt/.md says the signature is not validated (the wrapper's presence is the new check's).
 # 19: TB-6 — document rows (pdf/docx/xlsx/pptx; hwp/doc/xls/ppt skipped) gain document_structure: PDF revisions,
 #    bytes after a signature's /ByteRange, tool history, application/c2pa embedding; OOXML edit metadata — facts.
-OUTPUT_FORMAT_GENERATION = 19
+# 20: TB-4 — images gain platform_recompression and file_name_pattern, videos file_name_pattern, audio
+#    file_name_pattern and audio_channel_trace (facts + the path limitation); the cache key gains the file name
+#    (content-v5) and the platform-trace library.
+OUTPUT_FORMAT_GENERATION = 20
 
 
 def cache_extension(path: Path) -> str:
@@ -911,6 +918,10 @@ def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | No
     from .media_marks import registry_cache_tokens
 
     tokens += registry_cache_tokens()
+    # TB-4: the platform-trace library (JPEG tables, file-name formats, codec strings).
+    from .platform_traces import library_cache_tokens
+
+    tokens += library_cache_tokens()
     return f"tool:{TOOL_VERSION}|pins:{_short_digest(chr(10).join(tokens))}"
 
 

@@ -337,6 +337,9 @@ CHECK_LABELS = {
     # techniques-2026b (TB): further deterministic fact layers.
     "text_invisible_marks": "비가시 유니코드 표식 검사",
     "document_structure": "문서 구조 사실(증분 저장·편집 메타데이터)",
+    "platform_recompression": "플랫폼 재압축 양자화표 대조",
+    "file_name_pattern": "파일 이름 형식(메신저·스크린샷·녹음)",
+    "audio_channel_trace": "통화·메신저 코덱·대역폭 흔적",
 }
 
 

@@ -294,6 +294,9 @@ files = [
     "deepfake_lens/tests/test_text_marks.py",
     "deepfake_lens/document_structure.py",
     "deepfake_lens/tests/test_document_structure.py",
+    "deepfake_lens/float_wav.py",
+    "deepfake_lens/platform_traces.py",
+    "deepfake_lens/tests/test_platform_traces.py",
 ]
 follow_imports = "skip"
 ignore_missing_imports = true
