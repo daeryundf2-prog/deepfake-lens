@@ -143,7 +143,9 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      # P0R-5: the Android module lives in extras/android (outside the Python package and the phase-0 gate).
       - name: Android unit tests
+        working-directory: extras/android
         run: ./gradlew :deepfakeclassifier:testDebugUnitTest --no-daemon
 
   contract-drift:

@@ -43,10 +43,10 @@ is present:
 
 ```sh
 python experiments/export_onnx.py --checkpoint experiments/run-001/convnext_tiny.torchscript \
-  --out deepfakeclassifier/src/main/assets/deepfake-lens.onnx
+  --out extras/android/deepfakeclassifier/src/main/assets/deepfake-lens.onnx
 ```
 
-Contract (see `deepfakeclassifier/src/main/assets/README.md` and
+Contract (see `extras/android/deepfakeclassifier/src/main/assets/README.md` and
 `OnnxClassifier.kt`): input `input` [1,3,224,224] NCHW float32,
 ImageNet-normalized RGB; output `logits` [1,2], softmax over
 `real=0, synthetic-fake=1`. Without the asset the app degrades to

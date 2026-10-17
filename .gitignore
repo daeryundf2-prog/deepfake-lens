@@ -46,7 +46,7 @@ deepfake_lens/models/*.task
 deepfake_lens/models/*.jit
 deepfake_lens/models/checkpoints/
 # Bundled-app model asset — generated/exported locally, never committed
-deepfakeclassifier/src/main/assets/*.onnx
+extras/android/deepfakeclassifier/src/main/assets/*.onnx
 
 # IDE
 .vscode/

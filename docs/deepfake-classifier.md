@@ -1,6 +1,6 @@
 # Deepfake Lens MVP
 
-`deepfakeclassifier` is a standalone Android module for checking AI-generated text, suspicious image signals, and supported files inside a user-selected folder.
+`deepfakeclassifier` (in `extras/android/` since P0R-5 — outside the Python package and the phase-0 gate; run Gradle from that folder) is a standalone Android module for checking AI-generated text, suspicious image signals, and supported files inside a user-selected folder.
 
 ## Current Approach
 
@@ -52,7 +52,7 @@ The ONNX classifier is split across two test surfaces:
 
 No model file is committed. To run the real end-to-end check, export a
 checkpoint (`experiments/export_onnx.py`, see `src/main/assets/README.md`),
-drop `deepfake-lens.onnx` into `deepfakeclassifier/src/main/assets/`, and
+drop `deepfake-lens.onnx` into `extras/android/deepfakeclassifier/src/main/assets/`, and
 run `connectedDebugAndroidTest` — the `assumeTrue`-gated test then asserts
 `classify` returns a probability in `[0, 1]`.
 
