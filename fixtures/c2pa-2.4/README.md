@@ -22,3 +22,18 @@
 - c2pa-rs 0.91의 빌더는 구성요소(ingredient)의 `digitalSourceType`(2.4)을 기록하지 않으므로, 구성요소 수준 출처 유형은
   기록된 판독 결과(dict)로만 시험한다(`test_c2pa24.py`).
 - 폐기(revocation) 확인은 OCSP 조회가 필요해 분석 중에는 하지 않는다(오프라인 설정 `ocsp_fetch: false`).
+
+## 하드 바인딩 제외범위 공격 픽스처 (P0R-20)
+
+`scripts/build_c2pa_exclusion_fixtures.py --force`로 만든다. 일회용 CA(`exclusion-attack-ca-cert.pem`)로 서명한 뒤 활성 매니페스트의
+`c2pa.hash.data` assertion을 바꾸고(제외 구간·해시·pad), claim의 해시 URI를 고치고, COSE 서명을 다시 해 저장소 길이를 늘린 파일이다.
+
+| 파일 | 제외 구간 | SDK(c2pa-python 0.38) |
+| --- | --- | --- |
+| `exclusion-twozone.png` | 매니페스트 위치 그대로 + 그 뒤 콘텐츠 2000바이트 | Trusted(실패 코드 없음) — 공격 재현 |
+| `exclusion-allcontent.png` | 매니페스트 위치 그대로 + 나머지 모든 바이트 | Trusted — 서명이 아무 콘텐츠도 덮지 않음 |
+| `exclusion-twozone.jpg` | JPEG 두 구간 | Invalid(`assertion.dataHash.mismatch`) — 회귀용 |
+| `exclusion-wholefile.png` | 파일 전체 하나 | Invalid — 회귀용 |
+| `exclusion-paststore.png` | 매니페스트 + 뒤 콘텐츠를 한 구간으로 | Invalid — 회귀용 |
+
+다섯 파일 모두 `c2pa` 검사가 「C2PA 해시 제외범위 이상 …」으로 실패해야 한다(`test_c2pa_exclusions.py`).

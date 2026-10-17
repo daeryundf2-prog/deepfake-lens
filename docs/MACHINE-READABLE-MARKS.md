@@ -45,6 +45,27 @@ fail closed, 모든 검사의 coverage 기록, 결정적 근거만 결론에 참
   못한다(`claim_cbor: unexpected trailing data`). 그런 파일은 `c2pa` failed로 기록된다(fail closed). 빌더가 구성요소의 `digitalSourceType`을
   기록하지 않아 구성요소 수준 값은 기록된 판독 결과로만 시험했다.
 - 픽스처: `fixtures/c2pa-2.4/`(재현 스크립트 `scripts/build_c2pa24_fixtures.py`, 설명 `fixtures/c2pa-2.4/README.md`), 테스트 `test_c2pa24.py`.
+- **하드 바인딩 제외범위 검사(P0R-20, 위협 G3 — 2026-10-02 공개)**: `c2pa.hash.data` assertion의 제외 구간(exclusions)은 서명된 콘텐츠 해시에서 빠지는
+  바이트 범위다. c2pa-rs(0.91.3까지, 게이트의 c2pa-python 0.38)는 제외 구간 하나가 매니페스트 위치와 같은지만 보고 나머지 구간은 보지 않아,
+  매니페스트 구간 + 콘텐츠를 덮는 두 번째 구간(또는 나머지 전부)을 넣은 파일을 **Trusted**로 보고한다. `deepfake_lens/c2pa_binding.py`가
+  판독기의 `detailed_json()` assertion 저장소에서 활성 매니페스트의 하드 바인딩을 읽어(파일은 청크·세그먼트 헤더만 읽음 — 전체를 읽지 않음)
+  다음이면 신뢰 불가로 본다: 제외 구간이 파일 전체를 덮거나 해시되는 콘텐츠가 64바이트 미만, 매니페스트 저장소(PNG `caBX` 청크, JPEG APP11
+  세그먼트) 밖을 64바이트(세그먼트 틀 여유)보다 많이 덮음, 겹치거나 파일 밖·음수·형식이 잘못된 구간, BMFF 제외 경로가 `/uuid`·`/ftyp`·`/mfra`
+  밖, PNG·JPEG·BMFF인데 하드 바인딩이 없음. 그러면 판독 기록은 `status: "invalid"`, `error_kind: "hash_exclusion"`, `trusted: false`,
+  실패 코드에 `c2pa.hash.exclusion.invalid`가 더해지고 `hard_binding`(ok·kind·reason·file_size·excluded_bytes·excluded_outside_store·
+  hashed_bytes·store_located)이 남으며, `c2pa` 검사는 `failed` 「AnalyzerError: C2PA 해시 제외범위 이상 — 서명 대상에서 파일 내용 N바이트 중
+  M바이트가 제외됨(매니페스트 저장소 밖 제외 K바이트) — 서명 유효 여부와 무관하게 출처 근거로 쓰지 않습니다」이다(규칙 3: 판단 불가). 픽스처
+  `exclusion-twozone.png`·`exclusion-allcontent.png`(SDK가 Trusted로 보고), `exclusion-twozone.jpg`·`exclusion-wholefile.png`·
+  `exclusion-paststore.png`(SDK가 이미 Invalid — 회귀용), 재현 스크립트 `scripts/build_c2pa_exclusion_fixtures.py`, 테스트 `test_c2pa_exclusions.py`.
+- **신뢰 목록 분리(P0R-21)**: 2026-01-01에 동결된 임시 신뢰 목록(ITL)의 루트 앵커(`deepfake_lens/models/c2pa-itl-anchors.pem`, 27개,
+  `models/c2pa-itl.json` — contentauth/verify-site `static/trust/anchors.pem`, 커밋 c2bf16d, Apache-2.0, sha256 확인)를 공식 목록과 따로 둔다.
+  서명자는 먼저 공식 목록(+ 운영자 앵커)으로 확인하고, 신뢰되지 않을 때만 ITL 앵커만으로 다시 확인한다. 판독 기록의 `trust_list`는
+  `c2pa`(공식 목록) / `c2pa_or_operator`(운영자 앵커가 지정된 경우) / `itl`(동결된 ITL에만 연결) / 없음이다. ITL에만 연결된 유효 서명의 생성형·촬영
+  선언은 **보통**(「C2PA 서명(동결된 임시 신뢰 목록 ITL): …」 — ITL 제품은 C2PA 적합성 프로그램의 평가를 받지 않음)이며 결론 근거가 아니다.
+  ITL의 최종 개체 허용 목록(`allowed.pem`)은 넣지 않았다.
+- **폐기 확인(P0R-21)**: 공식 C2PA 오프라인 폐기 목록(CRL 스냅숏)은 2026-10-17 현재 공개된 것이 없어 동봉하지 않았다. 모든 C2PA 근거의 검증 기준
+  문구와 `c2pa` 사유에 「인증서 폐기 여부는 확인하지 않음(오프라인 폐기 목록 미적용·OCSP 조회 안 함 — 폐기된 서명 인증서도 신뢰로 보일 수 있음)」이
+  붙고 `trust_basis.revocation`은 `not_checked`다.
 
 ## 2. 디지털 출처 유형 어휘 (`digital_source_type.py`)
 

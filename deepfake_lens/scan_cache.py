@@ -874,7 +874,10 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    registered generator declaration is a self-declared synthetic item); evidence items may carry
 #    "self_declared": true; a video row's source guess no longer claims a container-metadata check that did not
 #    exist ("영상 출처는 추정하지 않습니다 — …").
-OUTPUT_FORMAT_GENERATION = 19
+# 20: P0R-20/P0R-21 — a C2PA hard binding whose exclusions drop content fails the c2pa check ("C2PA 해시 제외범위
+#    이상 …") whatever the SDK's state; every C2PA basis text names the frozen Interim Trust List and says revocation
+#    is not checked; an ITL-only signer's declaration is a moderate "C2PA 서명(동결된 임시 신뢰 목록 ITL): …" item.
+OUTPUT_FORMAT_GENERATION = 20
 
 
 def cache_extension(path: Path) -> str:

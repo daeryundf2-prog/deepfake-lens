@@ -1359,6 +1359,13 @@ def _validate_c2pa(path: Path) -> dict[str, object]:
             raise AnalyzerError(f"C2PA 검증 불가: {validation.get('error', '')}")
         stage = "검증" if validation.get("present") else "판독"
         raise AnalyzerError(f"C2PA {stage} 실패: {validation.get('error', '')}")
+    if validation.get("error_kind") == "hash_exclusion":
+        # P0R-20: the signature's hard-binding exclusions empty the asset (or
+        # reach outside the manifest store). The check fails closed whatever
+        # the signature's validity — the manifest is not usable provenance.
+        binding = validation.get("hard_binding")
+        reason = binding.get("reason") if isinstance(binding, dict) else ""
+        raise AnalyzerError(reason or "C2PA 해시 제외범위 이상")
     return validation
 
 

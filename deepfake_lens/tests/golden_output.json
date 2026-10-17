@@ -340,6 +340,27 @@
         "sklearn": "scikit-learn==1.9.1",
         "soundfile": "soundfile==0.14.0"
       }
+    },
+    {
+      "generation": 20,
+      "reason": "P0R-20/P0R-21: C2PA 하드 바인딩 제외범위가 콘텐츠를 빼면 c2pa 검사 실패(C2PA 해시 제외범위 이상), C2PA 검증 기준 문구에 동결된 임시 신뢰 목록(ITL)과 폐기 미확인, ITL에만 연결된 서명은 보통 근거",
+      "sha256": "d1a8f678b2f57d7c8f4b3a7fff0c694fcb34cdc37b925c8e1945aedf5be47e46",
+      "sets": {
+        "stdlib": "d1a8f678b2f57d7c8f4b3a7fff0c694fcb34cdc37b925c8e1945aedf5be47e46",
+        "full-extras": "8f3901f19cce1b55774ac44605465356717443bd09c11e2578b0a9e3003db0a0"
+      },
+      "constants_sha256": "eb43be685aa21565adbe6e836d313be230b222deed5ab25b2ab393d8a81abcea",
+      "constants_count": 59,
+      "full_extras_environment": {
+        "PIL": "pillow==12.3.0",
+        "c2pa": "c2pa-python==0.38.0",
+        "cv2": "opencv-python==5.0.0.93",
+        "librosa": "librosa==1.0.0",
+        "numpy": "numpy==2.5.4",
+        "scipy": "scipy==1.18.1",
+        "sklearn": "scikit-learn==1.9.1",
+        "soundfile": "soundfile==0.14.0"
+      }
     }
   ]
 }

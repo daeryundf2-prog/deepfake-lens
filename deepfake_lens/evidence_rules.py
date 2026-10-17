@@ -545,6 +545,18 @@ def c2pa_evidence(validation: Mapping[str, object] | None) -> list[EvidenceItem]
     if not validation or not validation.get("present"):
         return []
     basis = c2pa_basis_text(validation)
+    binding = validation.get("hard_binding")
+    if isinstance(binding, Mapping) and binding.get("ok") is False:
+        # P0R-20: the hard-binding exclusions empty the asset (or reach outside
+        # the manifest store). The manifest's provenance claims are not usable —
+        # emit only a neutral weak fact naming the anomaly (never a strong/
+        # moderate authentic or synthetic item), then the other neutral facts.
+        anomaly = EvidenceItem(
+            "C2PA 하드 바인딩(콘텐츠 해시) 제외범위 이상",
+            f"{binding.get('reason') or 'C2PA 해시 제외범위 이상'}" + basis,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "c2pa",
+        )
+        return [anomaly, *_c2pa_fact_items(validation, usable=False)]
     disclosure = _disclosure_text(validation)
     generative = [d for d in _c2pa_declarations(validation, "action") if d.category == CATEGORY_GENERATIVE]
     parts = [f"digitalSourceType={', '.join(d.code for d in generative)}"] if generative else []
@@ -571,6 +583,7 @@ def c2pa_evidence(validation: Mapping[str, object] | None) -> list[EvidenceItem]
     failure = _codes(validation.get("failure_codes"))
     hash_ok = any(code in success for code in C2PA_HARD_BINDING_MATCH) and not any(code.endswith("Hash.mismatch") for code in failure)
     verified = validation.get("status") == "valid" and bool(validation.get("trusted")) and hash_ok
+    itl_verified = validation.get("status") == "valid" and validation.get("trust_list") == "itl" and hash_ok
     signature = validation.get("signature")
     signer = str(signature.get("common_name", "알 수 없음")) if isinstance(signature, dict) else "알 수 없음"
     from .c2pa import c2pa_failure_codes_text, c2pa_state_label
@@ -601,6 +614,17 @@ def c2pa_evidence(validation: Mapping[str, object] | None) -> list[EvidenceItem]
             "C2PA 매니페스트 검증됨(출처 유형 미선언)",
             f"신뢰 서명자 {signer}의 유효한 매니페스트이나 촬영/생성 출처 유형을 선언하지 않았습니다." + basis,
             EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.MODERATE, "c2pa",
+        )
+    elif itl_verified and (declared_text or capture):
+        # P0R-21: a valid manifest whose signer chains only to the frozen Interim Trust List — "legacy trust": the
+        # product was never evaluated by the C2PA conformance program, so the declaration is moderate, never strong.
+        direction = EvidenceDirection.SYNTHETIC if declared_text else EvidenceDirection.AUTHENTIC
+        what = f"{declared_text}를 선언합니다" if declared_text else "digitalCapture(카메라 촬영)를 선언합니다"
+        main = EvidenceItem(
+            "C2PA 서명(동결된 임시 신뢰 목록 ITL): " + ("생성형 AI 출처 선언" if declared_text else "카메라 촬영 출처"),
+            f"서명자 {signer}의 유효한 매니페스트가 {what}(해시 일치). 서명 인증서는 현재 C2PA 공식 신뢰 목록이 아니라 2026-01-01에 동결된 "
+            "임시 신뢰 목록(ITL)에만 연결됩니다 — ITL 제품은 C2PA 적합성 프로그램의 평가를 받지 않았으므로 단독 결론 근거로 쓰지 않습니다." + basis,
+            EvidenceKind.DETERMINISTIC, direction, EvidenceStrength.MODERATE, "c2pa",
         )
     elif declared_text:
         main = EvidenceItem(

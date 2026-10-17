@@ -59,6 +59,7 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `backslash is a path separator on Windows` | Windows가 아닌 OS(POSIX) | test_qa_in.py |
 | `c2pa-python and fixture required` | `provenance`/`dev` extra(c2pa-python) + `scripts/build_c2pa_fixture.py` 픽스처 | test_result_contract.py |
 | `c2pa-python not installed` | `provenance`/`dev` extra(c2pa-python) | test_c2pa.py |
+| `c2pa-python 없음` | `provenance`/`dev` extra(c2pa-python>=0.38) — C2PA 하드 바인딩 제외범위 공격 픽스처와 ITL 판독(P0R-20/21) | test_c2pa_exclusions.py |
 | `c2pa-python required for the SDK path` | `provenance`/`dev` extra(c2pa-python) | test_fail_closed.py |
 | `cannot create symlinks: {exc}` | 심볼릭 링크를 만들 수 있는 OS·권한(POSIX, Windows 개발자 모드) | test_cli_inputs.py, test_evidence_statement.py |
 | `checkpoint is present; auto-discovery would run real inference` | 체크포인트가 없는 환경에서만 실행(가중치를 받은 환경에서는 해당 없음) | test_aide_engine.py |
