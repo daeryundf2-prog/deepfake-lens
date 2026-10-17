@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from deepfake_lens.tests.png_fixture import write_png
+
 from deepfake_lens.core import SourceGuess, analyze_file, build_classification_result
 from deepfake_lens.evidence_rules import (
     CAVEAT_C2PA_AUTHENTIC,
@@ -29,13 +31,8 @@ A1111 = "a cat\nNegative prompt: x\nSteps: 20, Sampler: Euler a, CFG scale: 7, S
 
 
 def _png(path: Path, text: dict[str, str]) -> Path:
-    from PIL import Image, PngImagePlugin
-
-    info = PngImagePlugin.PngInfo()
-    for key, value in text.items():
-        info.add_text(key, value)
-    Image.new("RGB", (64, 48), (10, 120, 200)).save(path, pnginfo=info)
-    return path
+    # Pillow-free (the API venv may lack Pillow): PNG with tEXt chunks
+    return write_png(path, text)
 
 
 class SelfDeclaredConclusionTest(unittest.TestCase):

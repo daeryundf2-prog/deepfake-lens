@@ -22,6 +22,8 @@ import tempfile
 import unittest
 import wave
 from pathlib import Path
+
+from deepfake_lens.tests.png_fixture import write_png
 from unittest import mock
 
 from hypothesis import HealthCheck, given, settings
@@ -152,13 +154,9 @@ class DecisionRuleInvariantTest(unittest.TestCase):
 EXCEPTIONS = (ValueError, RuntimeError, KeyError, ZeroDivisionError, TypeError, IndexError, AttributeError, OverflowError, MemoryError)
 
 
-def _png(path: Path, text: dict[str, str]) -> None:
-    from PIL import Image, PngImagePlugin
-
-    info = PngImagePlugin.PngInfo()
-    for key, value in text.items():
-        info.add_text(key, value)
-    Image.new("RGB", (64, 48), (120, 90, 60)).save(path, pnginfo=info)
+def _png(path: Path, text: dict[str, str]) -> Path:
+    # Pillow-free (the API venv may lack Pillow): PNG with tEXt chunks
+    return write_png(path, text)
 
 
 def _wav(path: Path) -> None:

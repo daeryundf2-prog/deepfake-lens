@@ -32,18 +32,16 @@ import wave
 import zipfile
 from pathlib import Path
 
+from deepfake_lens.tests.png_fixture import write_png
+
 from deepfake_lens.cli import main
 
 DEEP_LEVELS = 22  # 22 folders of 200 characters: > 4096 bytes (Linux PATH_MAX) and > 1024 (macOS)
 
 
-def _png(path: Path, text: dict[str, str]) -> None:
-    from PIL import Image, PngImagePlugin
-
-    info = PngImagePlugin.PngInfo()
-    for key, value in text.items():
-        info.add_text(key, value)
-    Image.new("RGB", (64, 48), (40, 90, 160)).save(path, pnginfo=info)
+def _png(path: Path, text: dict[str, str]) -> Path:
+    # Pillow-free (the API venv may lack Pillow): PNG with tEXt chunks
+    return write_png(path, text)
 
 
 def _wav(path: Path) -> None:
