@@ -4,7 +4,7 @@
   "generated_by": "scripts/build_traceability_commits.py",
   "range": {
     "base": "dad97306212ac2fa07d3c0398c1f17682cec91b5",
-    "head": "b83ddd87433a0844fd6c5df975d1782a31c42045",
+    "head": "c4e00c4aa3493b9b68f15170edecdab159ae960e",
     "note": "range.base..range.head(병합 커밋 제외). range.head는 이 표를 재생성한 커밋의 부모 — 그 커밋 자신의 해시는 표에 없다."
   },
   "notes": [
@@ -4563,6 +4563,35 @@
       "new": "갭 목록 밖 항목 포함",
       "commits": [
         "ffb347f"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R27-2",
+      "round": 27,
+      "source": "verify_round27.md",
+      "summary": "R27-2 the report labels the options as the scan job's own — 「검사 옵션(서버가 이 검사 작업을 실행한 옵션)」 —",
+      "gaps": [
+        "G30"
+      ],
+      "new": null,
+      "commits": [
+        "0fc5c71"
+      ],
+      "used_in_commit_subjects": true
+    },
+    {
+      "id": "R27-5",
+      "round": 27,
+      "source": "verify_round27.md",
+      "summary": "R27-5 image scans and HTML reports back within 25% of 2130892 — the C2PA trust bundles are",
+      "gaps": [],
+      "new": "갭 목록 밖 항목 포함",
+      "commits": [
+        "3622dc6",
+        "4420e63",
+        "96b24f4",
+        "c4e00c4"
       ],
       "used_in_commit_subjects": true
     }
@@ -12290,6 +12319,48 @@
       "gaps_source": "subject"
     },
     {
+      "sha": "b589e4d6d2cb3ee50459c28e38f5dc7fe0ea442b",
+      "short": "b589e4d",
+      "round": "26",
+      "subject": "feat(text): TB-1 invisible Unicode marks in text and documents — tag strings, variation-selector data, zero-width characters and C2PA 2.3/2.4 text manifests are recorded as facts, never a verdict (TB-1; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "5a50808263bceb645ac9ce15ae4e8c8fd757fd7d",
+      "short": "5a50808",
+      "round": "26",
+      "subject": "feat(documents): TB-6 document structure facts — PDF revisions, saves after a signature's /ByteRange, tool history and C2PA embedding; OOXML revision, editing time, rsid count and tracked changes, all self-declared facts (TB-6; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "82cb31c4c63cab23b759d38269b487164152bcd0",
+      "short": "82cb31c",
+      "round": "26",
+      "subject": "fix(text): TB-1 corner brackets in the package source wrap only interpolated values — the C2PA text magic is a constant, and a docstring no longer quotes 「…」 (TB-1; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
       "sha": "66389ae4623ecf424286f986ac517ac737543f27",
       "short": "66389ae",
       "round": "26",
@@ -12307,6 +12378,62 @@
       "new": false,
       "new_reasons": [],
       "gaps_line": "Gaps: G30, G31",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "1ab27cfb7bc452b051be47f0bac6a979987bf35f",
+      "short": "1ab27cf",
+      "round": "26",
+      "subject": "feat(platform): TB-4 platform and messenger traces — sourced JPEG recompression tables, messenger / screenshot / recording file-name formats, AMR and Opus headers and the effective audio bandwidth are facts that only add the \"metadata may have been stripped\" limitation (TB-4; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "267b463f5968040103eec352d2f5e14b9384c038",
+      "short": "267b463",
+      "round": "26",
+      "subject": "fix(platform): TB-4 the scan-cache key carries the file-name formats a name matches, not the name — a renamed copy still replays its row (QA-IN-4), and the new tests' skip reasons are documented (TB-4; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "66389ae46e7ab235e7319bd704c7a7f0178cc5f1",
+      "short": "66389ae",
+      "round": "26",
+      "subject": "feat(watermark): TB-2 Resemble AI PerTh implicit watermark (Chatterbox's default) on audio and video audio tracks — presence is a fact, the registered Chatterbox entry is a moderate 1-bit item that never concludes (TB-2; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "53c5aa792cbb6154d41e043e1a92886f3f0a3630",
+      "short": "53c5aa7",
+      "round": "26",
+      "subject": "feat(device): TB-3 device AI-edit labels — the Samsung SEFT trailer's entry names are facts (AI-related candidates marked unverified) and Google AI credit labels are moderate self-declarations (TB-3; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
       "gaps_source": "subject"
     },
     {
@@ -12396,6 +12523,34 @@
       "gaps_source": "subject"
     },
     {
+      "sha": "25c7680e0da5b99f06a8e212255604c0c13fe15e",
+      "short": "25c7680",
+      "round": "26",
+      "subject": "feat(screen): TB-5 screenshot facts — the iOS/macOS \"Screenshot\" user comment and native phone/tablet screen sizes are neutral facts, and a trusted camera C2PA manifest adds the recapture limitation (TB-5; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "8b48c5b78b912ff00cb355fe2005f99de06d3288",
+      "short": "8b48c5b",
+      "round": "26",
+      "subject": "feat(generators): TB-7 a versioned, sourced generator / service string table — the phase-0 markers move unchanged into models/generator-strings.json with sourced additions, and a C2PA signer is named as a neutral fact; no strength rule changes (TB-7; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
       "sha": "63151880ad18739bc152f868d5ef7f12d8c68795",
       "short": "6315188",
       "round": "26",
@@ -12470,6 +12625,20 @@
       "gaps_source": "subject"
     },
     {
+      "sha": "6a2eec5277639c9e8035d27726947958813ab2a5",
+      "short": "6a2eec5",
+      "round": "26",
+      "subject": "feat(watermark): TB-8 the open pipelines' default fixed watermarks verified in source — FLUX.1 reference (46 bits) and the SD 1 / SD 2 official scripts join SDXL in the registry; FLUX.2, FLUX.3 and the other pipelines: 확인: 기본 워터마크 없음 (TB-8; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
       "sha": "b83ddd87433a0844fd6c5df975d1782a31c42045",
       "short": "b83ddd8",
       "round": "26",
@@ -12482,6 +12651,180 @@
       "gaps": [],
       "new": true,
       "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "7d7c78a3742792de726b7c3c0f429017ace74652",
+      "short": "7d7c78a",
+      "round": "26",
+      "subject": "fix(watermark): TB-2 PerTh skips tone-dominated signals outside its measured (speech) domain — a 440 Hz sine scored 0.99 — and its texts avoid English runs (TB-2; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "9f51400da4abe9904f11254efadadefce1035309",
+      "short": "9f51400",
+      "round": "26",
+      "subject": "fix(platform): TB-4 table texts shown in rows carry no English runs — platform meanings, device-label meanings, generator rule labels and C2PA service names reworded, screen-size model lists quoted; a test keeps the TB tables Korean (TB-3, TB-4, TB-5, TB-7; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "4d505cff451b6cc5f82a4213c3d81d298f8bba17",
+      "short": "4d505cf",
+      "round": "26",
+      "subject": "perf(platform): TB-4 the bandwidth measurement reads WAV/FLAC/OGG in-process with soundfile instead of spawning ffmpeg — an audio scan was 30% slower than at 0298c97, now 7% (TB-4; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "8178e77413c405880a69a409171f0280bc92fc11",
+      "short": "8178e77",
+      "round": "26",
+      "subject": "docs(qa): CONFORMANCE.md and commit traceability regenerated on b83ddd8, round-26 IDs mapped; techniques-2026 merge and phase-0 restructure (P0R) included (WP-J; Gaps: G26, G27, G28)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "gaps": [
+        "G26",
+        "G27",
+        "G28"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G26, G27, G28",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "f7dbe43fe0599e6ee817d268e5e81d7483f8f14f",
+      "short": "f7dbe43",
+      "round": "26",
+      "subject": "docs(phase0): round-27 verification findings — first round in the risk-based format: no Med+ on the verdict/signature/evidence axes, one false statement (R27-2) and one performance Med (R27-5) to fix (WP-J; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "WP-J"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "0fc5c71d844f850bfc9a17d6d0ca7d3de3ffd461",
+      "short": "0fc5c71",
+      "round": "27",
+      "subject": "fix(report): R27-2 the report labels the options as the scan job's own — 「검사 옵션(서버가 이 검사 작업을 실행한 옵션)」 — not 「재분석 옵션(서버가 이 옵션으로 모든 행을 다시 분석)」, which stopped being true when P0R-6 made reports sign the job's rows without re-analysis; R27-1/3/4 go to BACKLOG (R27-2; Gaps: G30)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R27-2"
+      ],
+      "gaps_named_in_subject": [
+        "G30"
+      ],
+      "gaps": [
+        "G30"
+      ],
+      "new": false,
+      "new_reasons": [],
+      "gaps_line": "Gaps: G30",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "3622dc6c5963ce0b8e278a037609b3e13b2a6494",
+      "short": "3622dc6",
+      "round": "27",
+      "subject": "perf(scan): R27-5 image scans and HTML reports back within 25% of 2130892 — the C2PA trust bundles are read and sha256-checked once per file version (not three times per file), the SDK Context is built once per thread, absent watermark dependencies are remembered, cv2 is located rather than imported below the SDXL size floor, and three hot pure-Python loops (header-text markers, error translation, display_name) take an exact fast path; scan JSON byte-identical (R27-5; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R27-5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R27-5: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "4420e6300062e78e1dfa52d0e1040c3550f2b1f6",
+      "short": "4420e63",
+      "round": "27",
+      "subject": "perf(scan): R27-5 the techniques-2026b layers keep image scans within 25% of 2130892 — device-label and screen-trait tables loaded once per file version, the metadata layer's prefix, EXIF UserComment and decoded PNG pixels handed to the layers that re-read them, absent torch/soundfile remembered, and a row's to_json no longer converts the fields it replaces; output byte-identical (R27-5; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R27-5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R27-5: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "96b24f4b207366cd4cbc84209e5c73d5b7c24902",
+      "short": "96b24f4",
+      "round": "27",
+      "subject": "perf(text): R27-5 text_marks.scan_text jumps to the characters it acts on (tag characters, variation selectors, the zero-width set) instead of walking every character in Python; result identical (R27-5; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R27-5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R27-5: 갭 목록 밖 항목 포함"
+      ],
+      "gaps_line": "Gaps: 신규(스펙 외)",
+      "gaps_source": "subject"
+    },
+    {
+      "sha": "c4e00c4aa3493b9b68f15170edecdab159ae960e",
+      "short": "c4e00c4",
+      "round": "27",
+      "subject": "docs(phase0): R27-5 the performance budget excludes the measured cost of a newly added check (user decision 2026-10-17); documents at +33%/+53% from the C2PA SDK reading PDFs go to BACKLOG as BL-23 (R27-5; Gaps: 신규)",
+      "pre_rewrite_subject": null,
+      "ids": [
+        "R27-5"
+      ],
+      "gaps_named_in_subject": [],
+      "gaps": [],
+      "new": true,
+      "new_reasons": [
+        "R27-5: 갭 목록 밖 항목 포함"
+      ],
       "gaps_line": "Gaps: 신규(스펙 외)",
       "gaps_source": "subject"
     }
