@@ -23,3 +23,13 @@
 
 - BL-10 — 히트맵 루트 예외(`core.is_default_heatmap_output`): 읽기 루트 밖이라도 도구 히트맵 폴더의 `*.heatmap.png`는 읽힌다. (fable_review §4-7, Low, 증거)
 - BL-11 — 재분석·해시·탐색 사이의 TOCTOU는 최선 노력이다(문서화). (fable_review §4-8, Low, 서명)
+
+## P0R(0단계 재구성)에서 남긴 항목
+
+- BL-12 — C2PA 해시 제외범위 공격 픽스처는 PNG 두 형태(두 구간·나머지 전부)만 SDK가 Trusted로 보고하게 재현했다. JPEG 두 구간 픽스처는 SDK가 이미 Invalid로 보고하고(매니페스트 위치 계산 차이로 보임), BMFF(MP4) 변형 픽스처는 없다 — 검사 규칙은 형식과 무관하게 적용되지만 실제 공격 파일로 시험하지 않았다. (P0R-20, Low, 판정)
+- BL-13 — 동결된 ITL의 최종 개체 허용 목록(`contentauth/verify-site` `static/trust/allowed.pem`, 약 240 KB)은 동봉하지 않았다 — 루트 앵커에 연결되지 않고 허용 목록에만 있는 서명자는 `trust_list` 없음(신뢰되지 않음)으로 남는다. (P0R-21, Low, 판정)
+- BL-14 — C2PA 공식 오프라인 폐기 목록(CRL 스냅숏)이 공개되면 동봉해 적용한다. 지금은 모든 C2PA 근거에 「인증서 폐기 여부는 확인하지 않음 …」이 붙는다. (P0R-21, Med로 승격 후보 — 1단계 진입 전 재확인, 판정)
+- BL-15 — `/api/report`의 `side`(제출 측 — 원고/피고)는 이 브랜치에서 `plaintiff`만 받는다(다른 값 400). GUI 브랜치의 제출 측 기능을 병합할 때 증거설명서 문구와 함께 들인다. (P0R-6, Low, 서명)
+- BL-16 — 검사 작업 보관 위치가 검사 대상 폴더와 겹치면(`cd ~; deepfake-lens web`) 작업은 메모리에만 남고(응답에 `scan_job_note`), 끝난 작업 64개를 넘으면 오래된 것부터 잊힌다 — 다시 검사하면 된다. 운영자가 `DEEPFAKE_LENS_SCAN_JOBS`로 증거 밖 폴더를 지정하는 안내를 `web` 시작 문구에 넣을지 결정. (P0R-6, Low, 서명)
+- BL-17 — `test_axis_product`는 한 번에 약 70초(호스트)가 걸린다. 게이트 시간이 문제가 되면 축 조합을 짝(pairwise)으로 줄이되 R23-1·R24-3·R25-4·R26-2·R26-3의 조합은 남긴다. (P0R-3, Cosmetic)
+- BL-18 — 호스트(macOS, Python 3.12) 단위 테스트에서만 실패하는 것: `test_error_text.JsonErrorTranslationTest`(Python 3.12의 JSON 오류 문구가 10종), `test_native_path`의 `os.getxattr`(mypy), QA-SYS-7 서버 테스트 일부 — 기준 환경은 게이트 이미지(Linux, Python 3.13)다. (환경, Cosmetic)
