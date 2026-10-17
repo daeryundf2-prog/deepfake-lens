@@ -401,7 +401,8 @@ def _scan_status_payload(query: str, *, owner: str = LOCAL_OWNER, default_folder
     # GUI redesign (U-7): progress of the job — rows finished (``done``), rows the scan will report (``total``;
     # null until the folder is enumerated), the escaped name of the row finished last (``current``), the last
     # few finished rows (``recent``) and the seconds since the job started (``elapsed_seconds``).
-    progress = entry.get("progress") if isinstance(entry.get("progress"), dict) else {}
+    raw_progress = entry.get("progress")
+    progress: dict[str, Any] = raw_progress if isinstance(raw_progress, dict) else {}
     payload["done"] = progress.get("done", 0)
     payload["total"] = progress.get("total")
     payload["current"] = progress.get("current")
