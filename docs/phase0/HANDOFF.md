@@ -58,7 +58,9 @@ torch/transformers/mediapipe는 설치하지 않은 상태가 기준이다(신�
 
 - `scripts/gate/Dockerfile` — 기준 이미지: `docker build -t deepfake-lens-gate -f scripts/gate/Dockerfile scripts/gate`
 - `scripts/gate/Dockerfile.gui` — GUI 스모크 이미지(기준 이미지 + `/venv-gui`의 pymupdf·Playwright Chromium): `docker build -t deepfake-lens-gate:gui -f scripts/gate/Dockerfile.gui scripts/gate`
-- `scripts/gate/Dockerfile.tech` — 기법 이미지(techniques-2026 병합, P0R-0): `:latest` 위에 워터마크 디코더 스택(torch CPU·onnxruntime·audioseal·invisible-watermark, `requirements-tech*.lock`)과 핀된 디코더 가중치(`/opt/deepfake-lens-weights`): `docker build -t deepfake-lens-gate:tech -f scripts/gate/Dockerfile.tech scripts/gate`. 8.1장의 (a)는 `:latest`와 `:tech` 두 이미지의 `gate.sh full` 통과다. `:latest`를 바꾸면 `:tech`도 다시 빌드한다(`FROM deepfake-lens-gate:latest`).
+- `scripts/gate/Dockerfile.tech` — 기법 이미지(techniques-2026 병합, P0R-0): `:latest` 위에 워터마크 디코더 스택(torch CPU·onnxruntime·audioseal·invisible-watermark, `requirements-tech*.lock`)과 핀된 디코더 가중치(`/opt/deepfake-lens-weights`): `docker build -t deepfake-lens-gate:tech -f scripts/gate/Dockerfile.tech scripts/gate`. `:latest`를 바꾸면 `:tech`도 다시 빌드한다(`FROM deepfake-lens-gate:latest`).
+- `scripts/gate/Dockerfile.tech2` — PerTh 가중치 이미지(techniques-2026b TB-2, 28차 R28-3): `:tech` 위에 Resemble AI PerTh 암묵 디코더 가중치(`perth-implicit-250000.pth.tar`, MIT 휠 resemble-perth 1.0.1에서 꺼내 휠·파일 sha256 확인, `models/assets.json`에 핀)만 더한다 — 파이썬 패키지는 더하지 않는다: `docker build -t deepfake-lens-gate:tech2 -f scripts/gate/Dockerfile.tech2 scripts/gate`. **PerTh 가중치가 있는 이미지는 `:tech2`뿐이다** — `:tech`에서는 PerTh 디코더 경로(`wm_perth`, `synthetic-perth.wav` 검출)가 가중치 없음으로 건너뛰어진다. `:tech`를 바꾸면 `:tech2`도 다시 빌드한다(`FROM deepfake-lens-gate:tech`).
+- 필수 게이트 이미지는 `:latest`, `:tech`, `:tech2`(각각 `gate.sh full`)와 `:gui`(`gate.sh gui`) 넷이다(8.1장의 (a)).
 - `scripts/gate/gate.sh` — 실행기(bash, 단계마다 `pipefail`). Python 파일이 아니므로 ruff·mypy·`scripts/*.py` 도움말 테스트의 대상이 아니다.
 - `scripts/gate/requirements-main.lock`, `requirements-api.lock`, `requirements-gui.lock` — 각 venv의 `pip freeze`(의존성 포함 전부, 정확한 버전). Dockerfile이 `pip install --no-deps -r`로 설치하므로 빌드 시점에 아무것도 새로 해석하지 않는다.
 
@@ -84,7 +86,7 @@ docker run --rm --init --name <고유이름> --cpus 3 --shm-size=1g \
 
 ## 5. 게이트 (커밋마다 전부 통과해야 함)
 
-기준 환경에서는 `scripts/gate/gate.sh full`(4장의 `docker run`)이 아래 단계를 그대로 실행한다. 단계별 출력(`Ran …`, `OK`, `!!! FAILED`)을 읽고, 마지막 `GATE rc=`만 보지 않는다.
+기준 환경에서는 `scripts/gate/gate.sh full`(4장의 `docker run`)이 아래 단계를 그대로 실행한다. 게이트 이미지는 `:latest`, `:tech`, `:tech2`(PerTh 가중치가 있는 유일한 이미지, R28-3)에서 각각 `gate.sh full`, `:gui`에서 `gate.sh gui`다(4장). 단계별 출력(`Ran …`, `OK`, `!!! FAILED`)을 읽고, 마지막 `GATE rc=`만 보지 않는다.
 
 ```bash
 python -m unittest discover deepfake_lens/tests          # 두 환경 모두
@@ -139,7 +141,7 @@ python scripts/build_traceability_commits.py --check
 
 이전 기준("독립 검증의 불일치 0건")은 탐침 영역을 매 라운드 새로 여는 한 도달할 수 없고, 도달해도 결함이 없다는 뜻이 아니었다(전체 리뷰 `fable_review.md` 3.2). 게이트 0은 다음 두 조건이 **모두** 참일 때 선언한다.
 
-(a) 세 축의 불변식 테스트가 있고 게이트(`gate.sh full`, `:latest`와 `:tech`)에서 통과한다.
+(a) 세 축의 불변식 테스트가 있고 게이트(`gate.sh full`, `:latest`·`:tech`·`:tech2` — `:tech2`는 PerTh 가중치가 있는 유일한 이미지라 TB-2 디코더 경로가 여기서만 돈다(28차 R28-3); `gate.sh gui`, `:gui`)에서 통과한다.
 
 | 축 | 불변식 | 테스트 |
 | --- | --- | --- |
@@ -166,15 +168,15 @@ python scripts/build_traceability_commits.py --check
 
 이전 형식의 "이전에 다루지 않은 영역 40건 이상"은 폐지한다 — 탐침 영역을 열 때마다 Low가 무한히 나오고, 그것이 라운드마다 지적 수가 7~13 사이에서 진동한 원인이었다. 새 지시의 골격:
 
-- **게이트**: `gate.sh full`을 `:latest`와 `:tech`에서(플레이크 확인을 위해 2회), `gate.sh gui`. 측정 조건(이미지 태그·git 이력 유무·`--cpus`·동시 실행 여부)을 결과와 함께 적는다.
+- **게이트**: `gate.sh full`을 `:latest`와 `:tech`에서(플레이크 확인을 위해 2회)와 `:tech2`(PerTh 가중치, R28-3)에서, `gate.sh gui`(`:gui`). 측정 조건(이미지 태그·git 이력 유무·`--cpus`·동시 실행 여부)을 결과와 함께 적는다.
 - **세 축의 적대적 탐침**(범위는 6장의 게이트 범위 명령만):
   - 판정: 예외를 일으키는 입력(손상·잘림·권한·거대 크기·0바이트·위장 확장자)이 결론으로 새는지, 어휘·참고·미보정 통계 신호만으로 결론이 나는지, 자기 선언 메타데이터의 심기·지우기·모순(원본성 서명 + 생성 선언)이 어떻게 판정되는지, 세 진입점의 결과가 바이트 동일한지.
   - 서명: 보고서 요청에 클라이언트 문자열을 심어 서명 본문에 들어가는지, 서명 행 집합이 서버 작업과 다르게 만들어지는지(작업 id 위조·만료·다른 토큰·검사 뒤 파일 변경·취소된 작업), 서명 본문 변조가 `verify-report`에서 잡히는지.
   - 증거: 모든 게이트 범위 명령과 서버 경로가 증거 폴더에 쓰지 않는지(sha256·mtime·파일 수).
 - **회귀 탐침**: 직전 라운드의 수정마다 그 수정이 닿는 다른 호출 경로를 새 탐침으로 확인한다(수정 커밋 본문의 "다른 호출자" 목록이 출발점).
-- **축 곱**: `test_axis_product`가 고정한 축(상대/절대/`.` 경로 × 깊은 작업 폴더 × 비ASCII 이름 × workers 1/4 × 폴더/압축) 밖의 조합이 의심되면 그 조합을 표에 추가하는 것을 지적으로 낸다.
+- **축 곱**: `test_axis_product`가 고정한 축(상대/절대/`.` 경로 × 깊은 작업 폴더 × 비ASCII 이름 × workers 1/4 × 폴더/압축, 그리고 28차 R28-1의 업로드 경로(폴더 검사·압축 업로드·단일 업로드·`/api/check` 업로드) × 이름에 의존하는 검사) 밖의 조합이 의심되면 그 조합을 표에 추가하는 것을 지적으로 낸다.
 - **성능**: 직전 검증 커밋과 2130892 대비 scan(이미지 2000개, 오디오·영상 300개, workers 1/4)과 보고서 경로; 25% 이상 저하는 Med.
-  - 예외(사용자 결정 2026-10-17): 새로 추가한 검사(새 근거 층·새 판독기) 자체의 비용은 25% 예산에서 뺀다. 단 그 비용을 형식별로 측정해 커밋 본문과 `BACKLOG.md`에 적어야 한다. 기존 경로가 느려진 회귀는 여전히 25% 예산으로 막는다. 첫 적용: techniques-2026b 병합 뒤 문서 600개 +33%/+53%(작업자 1/4) — PDF마다 C2PA SDK 판독 약 0.15~0.19ms(BL-23).
+  - 예외(사용자 결정 2026-10-17): 새로 추가한 검사(새 근거 층·새 판독기) 자체의 비용은 25% 예산에서 뺀다. 단 그 비용을 형식별로 측정해 커밋 본문과 `BACKLOG.md`에 적어야 한다. 기존 경로가 느려진 회귀는 여전히 25% 예산으로 막는다. 첫 적용: techniques-2026b 병합 뒤 문서 600개 +46%/+53%(작업자 1/4, 28차 측정 — 27차 기록의 +33%는 작업자 1에서 작았다, R28-2) — PDF마다 C2PA SDK 판독(3622dc6에서 이미 +28%/+35%)과 TB 문서 층(3622dc6 대비 약 +14%)(BL-23).
 - **분류**: 지적마다 심각도와 축, 그리고 사용자에게 보이는 거짓 문구인지 여부. Low·Cosmetic은 "백로그 후보"로 따로 적는다.
 - **최종 판정**: 세 축에서 Med 이상 0건(거짓 문구 0건 포함)이면 "예", 아니면 "아니오" + Med 이상 수정 목록. 백로그 후보 목록은 판정과 별도.
 
