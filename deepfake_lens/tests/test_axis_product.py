@@ -16,11 +16,18 @@ and requires every combination's rows — path, status, verdict, reason, coverag
 titles — to be identical to the first combination of its folder/archive group. Scans run in-process through the CLI
 (``cli.main``) with ``--pixel off`` to keep the table fast; the audio row runs where librosa is installed and is the
 same skipped row everywhere it is not.
+
+R28-1 (round 28) added the upload path as an axis for the checks that read a file's name (the platform-trace file-name
+format check): a folder scan (workers 1/4), a zip upload, a single upload on ``/api/analyze-upload`` (web and
+api-serve share ``_analyze_upload_payload``) and the single-file ``/api/check`` upload must give the same
+``file_name_pattern`` coverage, file-name fact item and path limitation — single uploads used to run that check on
+the server's temp file name and report 「일치 없음」.
 """
 
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import io
 import itertools
 import json
@@ -156,6 +163,129 @@ class AxisProductTableTest(unittest.TestCase):
                 for key, rows in scans[1:]:
                     with self.subTest(layout=layout, combination=key, against=first_key):
                         self.assertEqual(rows, first_rows)
+
+
+# R28-1: names that match a registered format, each with bytes of its kind (the name check does not decode them).
+NAME_CASES = {
+    "KakaoTalk_20240101_123456789.png": None,  # PNG written by _png
+    "Screenshot_20240101-123456.png": None,
+    "PTT-20240101-WA0001.opus": b"OggS\x00\x02" + b"\x00" * 60,
+}
+
+
+def _multipart(*files: tuple[str, bytes]) -> tuple[str, bytes]:
+    boundary = "r28axis"
+    body = b"".join(
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; filename=\"{name}\"\r\n\r\n".encode("utf-8") + data + b"\r\n"
+        for name, data in files
+    ) + f"--{boundary}--\r\n".encode("ascii")
+    return f"multipart/form-data; boundary={boundary}", body
+
+
+def _name_facts(item: dict) -> tuple:
+    """The parts of a row that depend on the file's name (R28-1)."""
+    from deepfake_lens.platform_traces import FILE_NAME_CHECK, PATH_LIMITATION
+
+    result = item.get("result") or {}
+    return (
+        [(c.get("check"), c.get("status"), c.get("reason")) for c in result.get("coverage") or [] if c.get("check") == FILE_NAME_CHECK],
+        [e.get("title") for e in result.get("evidence") or [] if str(e.get("title") or "").startswith("파일 이름 형식")],
+        PATH_LIMITATION in (result.get("limitations") or []),
+    )
+
+
+class UploadPathNameDependentCheckTest(unittest.TestCase):
+    """R28-1: upload path × name-dependent check — every path checks the client's name, never a temp name."""
+
+    maxDiff = None
+
+    def _files(self, folder: Path) -> dict[str, bytes]:
+        folder.mkdir()
+        out: dict[str, bytes] = {}
+        for name, data in NAME_CASES.items():
+            if data is None:
+                _png(folder / name, {})
+            else:
+                (folder / name).write_bytes(data)
+            out[name] = (folder / name).read_bytes()
+        return out
+
+    def test_every_upload_path_checks_the_client_name_like_the_folder_scan(self) -> None:
+        from deepfake_lens import webapp_api
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            files = self._files(base / "case")
+            paths: dict[str, dict[str, tuple]] = {}
+            for workers in (1, 4):
+                out = base / f"scan{workers}.json"
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
+                    code = main(["scan", str(base / "case"), "--pixel", "off", "--workers", str(workers), "--format", "json", "--json-out", str(out)])
+                self.assertEqual(code, 0, err.getvalue()[:300])
+                paths[f"folder scan w{workers}"] = {item["path"]: _name_facts(item) for item in json.loads(out.read_text(encoding="utf-8"))["items"]}
+            with zipfile.ZipFile(base / "case.zip", "w") as archive:
+                for name, data in files.items():
+                    archive.writestr(name, data)
+            ctype, body = _multipart(("case.zip", (base / "case.zip").read_bytes()))
+            zipped = webapp_api._analyze_upload_payload(ctype, body)["items"]
+            paths["zip upload"] = {item["member"]: _name_facts(item) for item in zipped if item.get("member")}
+            singles: dict[str, tuple] = {}
+            checked: dict[str, tuple] = {}
+            for name, data in files.items():
+                ctype, body = _multipart((name, data))
+                upload = webapp_api._analyze_upload_payload(ctype, body)
+                singles[name] = _name_facts(upload["items"][0])
+                check = webapp_api._check_file_payload(ctype, body)
+                checked[name] = _name_facts(check["item"])
+                for payload in (upload, check):
+                    text = json.dumps(payload, ensure_ascii=False)
+                    self.assertNotIn("dflens-up-", text)  # the temp folder never reaches a row
+                    self.assertNotIn(str(base), text)
+            paths["single upload (/api/analyze-upload)"] = singles
+            paths["single upload (/api/check)"] = checked
+            if importlib.util.find_spec("fastapi") is not None and importlib.util.find_spec("httpx") is not None:
+                from fastapi.testclient import TestClient
+
+                from deepfake_lens import api_server
+
+                client = TestClient(api_server.create_app(default_folder=base / "case"), raise_server_exceptions=False)
+                served: dict[str, tuple] = {}
+                for name, data in files.items():
+                    ctype, body = _multipart((name, data))
+                    response = client.post("/api/analyze-upload", content=body, headers={"host": "localhost", "content-type": ctype, "X-Deepfake-Lens-Client": "gui"})
+                    self.assertEqual(response.status_code, 200, response.text[:300])
+                    served[name] = _name_facts(response.json()["items"][0])
+                paths["single upload (api-serve)"] = served
+            reference = paths.pop("folder scan w1")
+            self.assertEqual(sorted(reference), sorted(NAME_CASES))
+            for name, facts in reference.items():
+                coverage, items, limited = facts
+                self.assertEqual([status for _check, status, _reason in coverage], ["ran"], name)
+                self.assertIn("이름 형식 일치", coverage[0][2], name)
+                self.assertEqual(len(items), 1, name)
+                self.assertTrue(limited, name)
+            for label, rows in paths.items():
+                with self.subTest(path=label):
+                    self.assertEqual(rows, reference)
+
+    def test_a_name_that_cannot_be_a_file_name_is_not_reported_as_checked(self) -> None:
+        # R28-1: a client name this system cannot create (here: longer than NAME_MAX) is analyzed under a stand-in
+        # name — the name check is then "skipped" with the reason, never 「일치 없음」 for a name it did not check.
+        from deepfake_lens import webapp_api
+        from deepfake_lens.platform_traces import FILE_NAME_CHECK
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data = _png(Path(tmp) / "x.png", {}).read_bytes()
+        name = "KakaoTalk_20240101_123456789" + "가" * 300 + ".png"  # > 255 characters and > 255 bytes
+        ctype, body = _multipart((name, data))
+        for label, payload in (("analyze-upload", webapp_api._analyze_upload_payload(ctype, body)), ("check", webapp_api._check_file_payload(ctype, body))):
+            item = payload["items"][0] if "items" in payload else payload["item"]
+            with self.subTest(path=label):
+                self.assertEqual(item["status"], "analyzed")
+                self.assertEqual(item["name"], name)
+                coverage = [c for c in item["result"]["coverage"] if c["check"] == FILE_NAME_CHECK]
+                self.assertEqual([(c["status"], c["reason"]) for c in coverage], [("skipped", webapp_api.UPLOAD_NAME_NOT_CHECKED)])
+                self.assertNotIn("dflens-up-", json.dumps(payload, ensure_ascii=False))
 
 
 if __name__ == "__main__":

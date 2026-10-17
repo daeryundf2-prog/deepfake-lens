@@ -22,7 +22,7 @@ from dataclasses import replace
 from email.parser import BytesParser
 from email.policy import default as email_policy
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 from urllib.parse import parse_qs
 
 from .audio_worker import in_worker_scope
@@ -1041,6 +1041,61 @@ def _archive_upload_items(
         shutil.rmtree(folder, ignore_errors=True)
 
 
+# R28-1 (round 28): the reason a single upload's file-name check names when the client's
+# name cannot be a file name here (it is not checked under another name).
+UPLOAD_NAME_NOT_CHECKED = "업로드 파일의 원래 이름을 이 시스템에서 파일 이름으로 쓸 수 없어 원래 이름으로 검사하지 않음"
+
+
+@contextlib.contextmanager
+def _upload_copy(filename: str, payload: bytes, suffix: str) -> Iterator[tuple[Path, bool]]:
+    """Write one uploaded file under the client's own base name; yield ``(path, named)``.
+
+    R28-1 (round 28): a single upload was analyzed as a ``NamedTemporaryFile``
+    (``tmpXXXX.png``), so every check that reads the file's name — the
+    platform-trace file-name format check above all — ran on the temp name
+    and reported "일치 없음" for ``KakaoTalk_…png`` while a folder scan or a
+    zip upload of the same bytes matched. The bytes are now written, like
+    :func:`_archive_upload_items` writes an archive, into a fresh temp folder
+    under the base name the client sent (the last ``/``- or ``\\``-separated
+    component), so the row is the folder scan's row for that one file and no
+    temp name reaches it. When that name cannot be a file name here (empty,
+    ``.``/``..``, NUL, too long, not encodable) the bytes go under
+    ``upload<suffix>`` and ``named`` is False — the caller then marks the
+    name-dependent check skipped instead of reporting a check it did not run.
+    The folder is deleted on exit.
+    """
+    folder = Path(tempfile.mkdtemp(prefix="dflens-up-", dir=scratch_dir())).resolve()
+    try:
+        base = Path(filename.replace("\\", "/")).name
+        # (path, named): the client's base name first, the stand-in name last.
+        candidates = ([(folder / base, True)] if base not in ("", ".", "..") else []) + [(folder / f"upload{suffix}", False)]
+        for index, (target, named) in enumerate(candidates):
+            try:
+                target.write_bytes(payload)  # a fresh folder: nothing to overwrite
+            except (OSError, ValueError, UnicodeError):
+                if index == len(candidates) - 1:
+                    raise
+                with contextlib.suppress(OSError, ValueError, UnicodeError):
+                    target.unlink(missing_ok=True)
+                continue
+            break
+        yield target, named
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def _mark_name_not_checked(record: dict[str, object]) -> None:
+    """R28-1: an upload analyzed under a stand-in name did not check its name — say so (skipped)."""
+    from .platform_traces import FILE_NAME_CHECK
+
+    result = record.get("result")
+    coverage = result.get("coverage") if isinstance(result, dict) else None
+    for entry in coverage if isinstance(coverage, list) else []:
+        if isinstance(entry, dict) and entry.get("check") == FILE_NAME_CHECK:
+            entry["status"] = "skipped"
+            entry["reason"] = UPLOAD_NAME_NOT_CHECKED
+
+
 @in_worker_scope  # R20-2: one audio worker for all files (was one per file)
 def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]:
     """Analyze files uploaded via multipart/form-data.
@@ -1075,17 +1130,12 @@ def _analyze_upload_payload(content_type: str, body: bytes) -> dict[str, object]
             if is_archive(filename):
                 items.extend(_archive_upload_items(filename, suffix, payload, options=options, thresholds=thresholds))
                 continue
-            # delete=False: Windows cannot reopen a delete=True temp file.
-            tmp_name = ""
-            try:
-                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=scratch_dir()) as tmp:
-                    tmp.write(payload)
-                    tmp_name = tmp.name
-                item = analyze_path(tmp_name, options, thresholds=thresholds)
-            finally:
-                if tmp_name:
-                    Path(tmp_name).unlink(missing_ok=True)
+            # R28-1: under the client's base name (name-dependent checks see it), never a temp name.
+            with _upload_copy(filename, payload, suffix) as (upload_path, named):
+                item = analyze_path(upload_path, options, thresholds=thresholds)
             record = item.to_json()
+            if not named:
+                _mark_name_not_checked(record)
             # R10-6: the row path of an uploaded file is escaped like any
             # real file's (R9-1) — "t:::c.png" is the row "t\:\:\:c.png" and
             # never holds "::"; ``name`` keeps the name the client sent.
@@ -1224,14 +1274,12 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
             "items": items,
             **_provenance(options, thresholds),
         }
-    tmp_name = ""
-    try:
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=scratch_dir()) as tmp:
-            tmp.write(payload)
-            tmp_name = tmp.name
-        tmp_path = Path(tmp_name)
+    # R28-1: as /api/analyze-upload — under the client's base name, never a temp name.
+    with _upload_copy(filename, payload, suffix) as (tmp_path, named):
         item = analyze_path(tmp_path, options, thresholds=thresholds)
         record = item.to_json()
+        if not named:
+            _mark_name_not_checked(record)
         forensic = None
         layer_errors: dict[str, Any] = {}
         try:
@@ -1248,9 +1296,6 @@ def _check_file_payload(content_type: str, body: bytes) -> dict[str, object]:
             except Exception as exc:
                 logger.exception("text-advanced layer failed")
                 _layer_error(layer_errors, "advanced", exc)
-    finally:
-        if tmp_name:
-            Path(tmp_name).unlink(missing_ok=True)
     _set_row_name(record, filename)
     record["path"] = escape_row_path(filename)  # R10-6: as /api/analyze-upload
     record["source"] = UPLOAD_SOURCE  # P6
