@@ -303,6 +303,8 @@ files = [
     "deepfake_lens/tests/test_platform_traces.py",
     "deepfake_lens/wm_perth.py",
     "deepfake_lens/tests/test_wm_perth.py",
+    "deepfake_lens/device_labels.py",
+    "deepfake_lens/tests/test_device_labels.py",
 ]
 follow_imports = "skip"
 ignore_missing_imports = true

@@ -1731,6 +1731,12 @@ def _analyze_image_file(
     traces = image_trace_layers(file_path)
     coverage.extend(traces.coverage)
     marks = replace(marks, evidence=[*marks.evidence, *traces.evidence], limitations=[*marks.limitations, *traces.limitations])
+    # TB-3: device AI-edit labels (Samsung SEFT trailer names, Google AI credit labels) — self-declared facts.
+    from .device_labels import device_label_layers
+
+    device = device_label_layers(file_path, metadata)
+    coverage.extend(device.coverage)
+    marks = replace(marks, evidence=[*marks.evidence, *device.evidence])
 
     image_format = metadata_read.image_format if metadata_read is not None else None
     jpeg_quality = None

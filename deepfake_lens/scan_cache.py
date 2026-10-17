@@ -887,7 +887,9 @@ CACHE_KEY_VERSION = "content-v5"  # v3 (N6): + extension; v4 (R14-3): + output f
 #    (content-v5) and the platform-trace library.
 # 21: TB-2 — audio rows and a video's audio track gain watermark_perth (Resemble AI PerTh implicit mark, torch
 #    optional: skipped "의존성 부재: torch" without it); the registry gains perth-implicit-chatterbox (2026-10-17.1).
-OUTPUT_FORMAT_GENERATION = 21
+# 22: TB-3 — images gain device_ai_label: the Samsung SEFT trailer's entry names (neutral fact; AI-related
+#    candidates "의미 미확인") and Google AI credit labels in XMP photoshop:Credit (synthetic / moderate, self-declared).
+OUTPUT_FORMAT_GENERATION = 22
 
 
 def cache_extension(path: Path) -> str:
@@ -935,6 +937,10 @@ def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | No
     from .platform_traces import library_cache_tokens
 
     tokens += library_cache_tokens()
+    # TB-3: the device-label table (Samsung SEFT names, Google AI credit labels).
+    from .device_labels import table_cache_tokens
+
+    tokens += table_cache_tokens()
     return f"tool:{TOOL_VERSION}|pins:{_short_digest(chr(10).join(tokens))}"
 
 

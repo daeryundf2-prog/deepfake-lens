@@ -1,0 +1,33 @@
+{
+  "schema": "device-labels-v1",
+  "version": "2026-10-17.1",
+  "note": "techniques-2026b TB-3: device / app AI-edit labels with their sources. Unsigned labels are self-declarations: a Google AI credit label is synthetic / moderate at most; Samsung SEFT entry names are neutral facts. Field names without a public source are never added.",
+  "self_declared_note": "기기·앱이 서명 없이 기록한 값이며 누구나 고칠 수 있습니다.",
+  "samsung_seft": {
+    "source": "ExifTool lib/Image/ExifTool/Samsung.pm $VERSION 1.62 (last change e9609a9, 'Update to 13.50', 2026-02-07): ProcessSamsung (trailer layout) and the Samsung::Trailer table (entry names seen in real files, ExifTool forum 16086/16242); https://raw.githubusercontent.com/exiftool/exiftool/master/lib/Image/ExifTool/Samsung.pm",
+    "known_entries": [
+      {"entry": "Image_UTC_Data", "meaning": "촬영 시각(UTC 밀리초)"},
+      {"entry": "PhotoEditor_Re_Edit_Data", "meaning": "갤러리 편집기의 재편집 정보"},
+      {"entry": "Original_Path_Hash_Key", "meaning": "원본 경로 해시"},
+      {"entry": "Intelligent_PhotoEditor_Data", "meaning": "지능형 사진 편집기 데이터(내용 미해석)"},
+      {"entry": "Copy_Available_Edit_Info", "meaning": "편집 복사 정보(내용 미해석)"},
+      {"entry": "Remaster_Info", "meaning": "리마스터 정보"},
+      {"entry": "Samsung_Capture_Info", "meaning": "삼성 캡처 정보"},
+      {"entry": "Captured_App_Info", "meaning": "캡처한 앱 정보"},
+      {"entry": "Watermark_Info", "meaning": "워터마크 정보(내용 미해석)"},
+      {"entry": "Document_Scan_Info", "meaning": "문서 스캔 정보"},
+      {"entry": "Auto_Enhance_Info", "meaning": "자동 보정 정보"},
+      {"entry": "Portrait_Effect_Info", "meaning": "인물 효과 정보"}
+    ],
+    "ai_candidates": [
+      {"entry": "PhotoEditor_Re_Edit_Data", "keys": ["isScaleAI", "isAIFilterReEditOnly"], "require_keys": true, "source": "ExifTool Samsung::ReEditData table (JSON keys)"},
+      {"entry": "PEg_Info", "keys": ["genImageVersion", "connectorType"], "require_keys": false, "source": "ExifTool Samsung::PEgInfo table (type 0x0d91, JSON keys genImageVersion, connectorType); meaning not documented"}
+    ]
+  },
+  "credit_labels": [
+    {"value": "Edited with Google AI", "title": "Google AI 편집 라벨(자기 신고)", "meaning": "Google 포토의 AI 편집(매직 에디터·매직 지우개·줌 향상) 표시 라벨", "confidence": "Google 공지(2024-10-24, 필드 이름 미기재) + 9to5google 보도 2024-10-24", "source": "https://blog.google/products-and-platforms/products/photos/ai-editing-transparency/ ; https://9to5google.com/2024/10/24/google-photos-ai-edit-info/"},
+    {"value": "Made with Google AI", "title": "Google AI 생성 라벨(자기 신고)", "meaning": "Gemini가 만든 이미지의 표시 라벨", "confidence": "IPTC 공지(2024-10-28)", "source": "https://iptc.org/?p=7667"},
+    {"value": "Made by Google AI", "title": "Google AI 생성 라벨(자기 신고)", "meaning": "Pixel Studio·Gemini 이미지의 표시 라벨로 보도된 값", "confidence": "9to5google 보도 2024-10-24", "source": "https://9to5google.com/2024/10/24/google-photos-ai-edit-info/"}
+  ],
+  "not_registered": "Samsung Galaxy AI Generative Edit / Sketch to Image / Portrait Studio: no public source names a trailer entry or XMP field for them (ExifTool 13.50 has none); their C2PA manifests (S25+, reported) are read by the c2pa check. Google Photos XMP location of the labels is reported, not dumped: photoshop:Credit is matched because IPTC documents it for Gemini."
+}

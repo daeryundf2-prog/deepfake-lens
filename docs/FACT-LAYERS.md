@@ -54,3 +54,18 @@
 - MP4/3GP의 코덱 상자(samr·sawb·mp4a)와 인코더 태그는 컨테이너 메타데이터 계층(재구성 브랜치)의 일이라 여기서 읽지 않는다.
 - 흔적이 하나라도 있으면 한계 문구 「메신저·SNS·화면 캡처·통화 경로의 흔적이 관찰되었습니다 — … 그 부재는 무정보이며, 원본 파일(메신저의 '파일로 보내기' 전송본 등)을 …」가 붙는다.
 - 모든 항목은 중립·약(층 `platform`). 테스트 `test_platform_traces.py`.
+
+## 3. 기기 AI 편집 라벨 (`device_ai_label`, TB-3 — S-GALAXY-AI, S-GOOGLE-PHOTOS)
+
+표: `deepfake_lens/models/device-labels.json`(`device-labels-v1`, 판 `2026-10-17.1`, 판·sha256이 근거·사유와 캐시 키에 들어감). 모든 이미지에서 실행.
+
+- **삼성 SEFT 트레일러**: JPEG EOI·PNG IEND 뒤 `SEFT`로 끝나는 블록. 배치는 ExifTool `Samsung.pm` 1.62(`ProcessSamsung`, 2026-02-07 커밋 e9609a9)와 같다:
+  리틀엔디언 `SEFH` 디렉터리(형식·음의 오프셋·크기 12바이트 항목), 각 블록 `[형식][이름 길이][이름][데이터]`. 항목 이름 목록이 중립·약 사실
+  「삼성 기기 편집·촬영 기록(SEFT 트레일러)」(ExifTool이 뜻을 기록한 이름은 한국어 뜻을 덧붙임).
+  AI 관련 **후보**: `PhotoEditor_Re_Edit_Data` JSON의 `isScaleAI`·`isAIFilterReEditOnly`, `PEg_Info`(`genImageVersion`·`connectorType`) — 의미를 확인한
+  공개 자료가 없어 중립·약 「삼성 편집 기록의 AI 관련 후보 필드(의미 미확인)」로만 적는다. **갤럭시 AI 생성형 편집 전용 항목 이름은 공개 자료에 없어
+  등록하지 않았다**(ExifTool에도 없음; 조사에서 언급된 `Generative_Edit`는 근거 없음). S25 이후 AI 편집본의 C2PA(보도)는 `c2pa` 검사·기존 C2PA 규칙이 읽는다.
+- **Google AI 라벨**: XMP `photoshop:Credit`이 정확히 「Edited with Google AI」(Google 포토 AI 편집 — Google 공지 2024-10-24는 필드 이름을 적지 않음,
+  9to5google 보도), 「Made with Google AI」(Gemini — IPTC 공지 2024-10-28), 「Made by Google AI」(보도) → 생성·**중** 자기 신고(규칙 5만 막고 결론 없음).
+  같은 파일의 IPTC 디지털 출처 유형(`compositeWithTrainedAlgorithmicMedia` 등)은 기존 XMP 규칙이 따로 읽는다(그 세기는 이 작업에서 바꾸지 않음 — 재구성 브랜치 결정).
+- coverage `ran` 사유: 「삼성 SEFT 트레일러 항목 N개 / 없음; Google AI 라벨 없음 / XMP 라벨 「…」(기기 라벨 표 …)」. 테스트 `test_device_labels.py`.
