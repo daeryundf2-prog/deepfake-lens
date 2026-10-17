@@ -63,6 +63,7 @@ ZERO_WIDTH_RUN_MIN = 4
 # C2PA 2.3 §A.7 "Embedding manifests into unstructured text": the wrapper bytes
 # start with this magic (see docs/MACHINE-READABLE-MARKS.md §7 for the source).
 C2PA_TEXT_MAGIC = b"C2PATXT\x00"
+C2PA_TEXT_MAGIC_SHOWN = "C2PATXT\\0"
 C2PA_STRUCTURED_BEGIN = "-----BEGIN C2PA MANIFEST-----"
 C2PA_STRUCTURED_END = "-----END C2PA MANIFEST-----"
 IVS_LAST = 0xE011F  # last selector used by registered ideographic variation sequences
@@ -232,7 +233,7 @@ def text_mark_evidence(scan: TextMarkScan, *, source: str) -> list[EvidenceItem]
     for offset, data in wrappers[:4]:
         items.append(EvidenceItem(
             "C2PA 텍스트 매니페스트 래퍼 발견(서명 미검증)",
-            f"{source}의 위치 {offset}에 변형 선택자로 부호화된 C2PA 비정형 텍스트 래퍼(C2PA 2.3 부록 A.7, 머리 「C2PATXT\\0」)가 있습니다: {_c2pa_wrapper_text(data)}. "
+            f"{source}의 위치 {offset}에 변형 선택자로 부호화된 C2PA 비정형 텍스트 래퍼(C2PA 2.3 부록 A.7, 머리 「{C2PA_TEXT_MAGIC_SHOWN}」)가 있습니다: {_c2pa_wrapper_text(data)}. "
             "번들 SDK(c2pa-python 0.38 / c2pa-rs 0.91)는 텍스트 임베딩을 판독하지 않아 서명·해시를 검증하지 않았습니다 — "
             "검증 전의 매니페스트는 출처 근거가 아닌 존재 사실입니다.",
             EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, TEXT_MARKS_LAYER,

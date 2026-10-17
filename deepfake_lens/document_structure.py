@@ -24,7 +24,7 @@ verdict, never a statement about the content:
 
 All of it is written by the producing software and can be edited by anyone:
 each finding is a deterministic, neutral, weak **fact** ("자기 신고"), shown
-in 「…」 verbatim. A document with a long history is not forged; a document
+in corner brackets verbatim. A document with a long history is not forged; a document
 without one is not original.
 """
 
