@@ -861,7 +861,17 @@ CACHE_KEY_VERSION = "content-v4"  # v3 (N6): + extension; v4 (R14-3): + output f
 # 17: R26-10 — an ffmpeg step stopped at its time limit names the step, the file and the limit ("FfmpegTimeout:
 #    ffmpeg 시간 초과 — 영상 음성 트랙 추출: '<root>/v.mp4' — 상한 120초에 중단(경과 120초)"); a generation-16 row
 #    said "TimeoutExpired: 라이브러리 오류(TimeoutExpired) — 상세는 로그 참조".
-OUTPUT_FORMAT_GENERATION = 17
+# 18: merge of techniques-2026 (developed in parallel as its generations 13–17 on top of generation 12) onto
+#    R26 generation 17 — a row now carries all of: the C2PA reader run offline against the bundled C2PA
+#    trust list (+ DEEPFAKE_LENS_C2PA_TRUST_ANCHORS), a ran c2pa entry naming the validator's spec version
+#    and the trust list, C2PA 2.x facts as items, a c2pa check on audio, video and document rows (.txt/.md
+#    skipped), XMP DigitalSourceType over the full IPTC vocabulary ("자기 신고"); the image checks
+#    watermark_sdxl (exact 48/48 SDXL message), watermark_trustmark (a decoded packet is a neutral fact,
+#    the C2PA soft-binding cross-check its only link to a conclusion), watermark_videoseal (images, video)
+#    and watermark_audioseal (audio, video) behind the optional torch extra; result.marking_context, the
+#    closing item "기계판독 표식 확인 결과(…)" and the skipped coverage entry online_detection. A row of either
+#    side's generation 13–17 lacks the other side's changes, so neither may be served from the cache.
+OUTPUT_FORMAT_GENERATION = 18
 
 
 def cache_extension(path: Path) -> str:
@@ -896,6 +906,15 @@ def _cache_scan_context(model_path: ModelPathArg, *, models_dir: Path | str | No
     # R19-1 (round 19): and the runtime the checks ran in — which optional
     # dependencies can be found, at which version, and ffmpeg.
     tokens += dependency_tokens()
+    # techniques-2026: the C2PA trust basis (bundled list + DEEPFAKE_LENS_C2PA_TRUST_ANCHORS) decides
+    # whether a signer is trusted — a row cached under another trust basis is not replayed.
+    from .c2pa import trust_cache_tokens
+
+    tokens += trust_cache_tokens()
+    # techniques-2026 items 3–5: the watermark registry (generator messages) decides what a decoded mark says.
+    from .media_marks import registry_cache_tokens
+
+    tokens += registry_cache_tokens()
     return f"tool:{TOOL_VERSION}|pins:{_short_digest(chr(10).join(tokens))}"
 
 

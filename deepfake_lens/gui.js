@@ -402,6 +402,8 @@
             audio_analysis: '오디오 분석', audio_features: '오디오 특징 추출', video_analysis: '영상 분석', av_audio: '영상 음성 트랙 분석',
             document_text: '문서 텍스트 추출', text_lexical: '어휘·문체 신호', archive: '압축 해제',
             archive_member: '압축 구성 파일', archive_member_name: '압축 구성 파일 이름 구분', file_integrity: '분석 전후 파일 동일성',
+            watermark_sdxl: 'SDXL 워터마크(imwatermark) 검사', watermark_trustmark: 'TrustMark 워터마크 검사',
+            watermark_videoseal: 'VideoSeal 워터마크 검사', watermark_audioseal: 'AudioSeal 워터마크 검사', online_detection: '온라인 전용 검출(미실행)',
         };
         const COVERAGE_STATUS_LABELS = { ran: '실행', skipped: '미실행', failed: '실패' };
         // B5: same table as result_types.SOURCE_CONFIDENCE_LABELS; a text or

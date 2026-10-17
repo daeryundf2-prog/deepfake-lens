@@ -141,6 +141,14 @@ R11-2 (round 11). 선택 패키지·도구·OS 기능·픽스처가 없으면 �
 | `대조군: 이 onnxruntime은 텔레메트리 파일을 만들지 않음` | onnxruntime이 가져올 때 텔레메트리 장치 ID를 쓰는 환경(1.2x Linux 휠, R15-2) — 그렇지 않은 버전에서는 대조군이 성립하지 않아 건너뜀 | test_telemetry.py |
 | `대조군: 이 환경의 mediapipe 가져오기는 자식 프로세스도 파일도 만들지 않음` | 그냥 `import mediapipe`가 자식 프로세스(sounddevice→ctypes.util.find_library의 ldconfig/gcc/ld, matplotlib 글꼴 캐시의 fc-list)나 파일(`~/.cache/matplotlib` 등)을 만드는 환경(Linux, R15-8/R16-4) — 그렇지 않은 환경에서는 대조군이 성립하지 않아 건너뜀 | test_mediapipe_import.py |
 | `파일 시스템이 UTF-8이 아닌 파일 이름을 허용하지 않음(Windows·macOS)` | UTF-8이 아닌 바이트 파일 이름을 허용하는 파일 시스템(리눅스 ext4·tmpfs 등) | test_corpus_manifest.py, test_native_path.py, test_non_utf8_names.py, test_path_b64.py |
+| `c2pa-python and fixtures/c2pa-2.4 required` | `provenance`/`dev` extra(c2pa-python>=0.38) + `scripts/build_c2pa24_fixtures.py` 픽스처(techniques-2026) | test_c2pa24.py, test_marking_context.py |
+| `numpy, opencv and Pillow required` | `pixel`+`dev` extra(numpy, opencv-python, Pillow) — SDXL dwtDct 워터마크 검사(techniques-2026) | test_wm_sdxl.py |
+| `invisible-watermark + PyWavelets required (tech image)` | invisible-watermark·PyWavelets(`deepfake-lens-gate:tech` 이미지, `requirements-tech.lock`) — 디코더가 라이브러리와 비트 단위로 같은지 확인 | test_wm_sdxl.py |
+| `onnxruntime, numpy and Pillow required` | `watermark` extra(onnxruntime) + numpy, Pillow — TrustMark 가중치 없음·핀 불일치 처리 | test_wm_trustmark.py |
+| `onnxruntime + pinned TrustMark decoders + fixtures/trustmark required (tech image)` | `watermark` extra + `scripts/fetch_watermark_models.py`로 받은 고정 TrustMark 디코더(`deepfake-lens-gate:tech`는 이미지에 포함) + `fixtures/trustmark` | test_wm_trustmark.py |
+| `torch required (tech image)` | `watermark_meta` extra(torch) — VideoSeal 가중치 없음·핀 불일치 처리 | test_wm_meta.py |
+| `torch + pinned VideoSeal weights required (tech image)` | `watermark_meta` extra + 고정 VideoSeal 가중치(`deepfake-lens-gate:tech`) | test_wm_meta.py |
+| `torch + audioseal + pinned detector + ffmpeg required (tech image)` | `watermark_meta` extra(torch, audioseal) + 고정 AudioSeal 검출기 + `ffmpeg` 실행 파일(`deepfake-lens-gate:tech`) | test_wm_meta.py |
 
 ## 환경 의존 기준선 테스트
 

@@ -4,6 +4,26 @@ All notable changes to Deepfake Lens. Format: Keep a Changelog; this repo
 has not tagged a release yet (version is `0.1.0.dev0`), so entries are
 grouped by work pass rather than release.
 
+## 2026-10 — techniques-2026 (machine-readable marks)
+
+### Added
+- C2PA 2.2–2.4 reading (c2pa-python >= 0.38): offline verification against the
+  bundled C2PA trust list (+ `DEEPFAKE_LENS_C2PA_TRUST_ANCHORS`), AI Disclosure,
+  soft binding, watermark actions, embedded data, ingredient source types; the
+  validator spec version and trust list in every C2PA item and coverage reason;
+  c2pa checks on audio, video and documents. Full IPTC digital source type
+  vocabulary (`digital_source_type.py`).
+- Invisible watermark checks: SDXL's fixed imwatermark message (`watermark_sdxl`),
+  Adobe TrustMark Q/P/C with the C2PA soft-binding cross-check
+  (`watermark_trustmark`, `[watermark]` extra), Meta VideoSeal / AudioSeal
+  (`watermark_videoseal`, `watermark_audioseal`, `[watermark_meta]` extra) —
+  weights pinned in `models/assets.json`, `scripts/fetch_watermark_models.py`;
+  measured false-positive rates in `docs/WATERMARK-MEASUREMENTS.md`.
+- `result.marking_context` and the closing evidence item 「기계판독 표식 확인
+  결과(EU 인공지능법 제50조·인공지능기본법 관련)」; `online_detection` coverage
+  for online-only detectors (never run). See `docs/MACHINE-READABLE-MARKS.md`.
+- Gate image `deepfake-lens-gate:tech` (`scripts/gate/Dockerfile.tech`).
+
 ## 2026-10 — phase 0, round 19
 
 ### Changed

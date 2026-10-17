@@ -11,7 +11,7 @@ import tempfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable, NamedTuple
+from typing import TYPE_CHECKING, Callable, NamedTuple
 
 from .archives import archive_format, extract_archive, is_archive
 from .native_path import expand_user, scratch_dir, temp_location
@@ -46,6 +46,7 @@ from .layer_diagnostic import UNAVAILABLE_BAND
 from .result_text import TEXT_LEGAL_LIMITATION, check_row_identities, member_row_path, unrecorded_files
 from .evidence_rules import (
     c2pa_evidence,
+    evidence_conflicts,
     deep_layer_reference,
     document_metadata_evidence,
     image_class_evidence,
@@ -149,6 +150,10 @@ from .scan_cache import (  # noqa: F401
     _write_scan_cache,
 )
 from .json_text import json_dumps
+from .marking_context import MARKING_LAYER
+
+if TYPE_CHECKING:
+    from .media_marks import MarkLayers
 
 
 AI_IDENTITY_PHRASES = [
@@ -1347,9 +1352,81 @@ def _validate_c2pa(path: Path) -> dict[str, object]:
         # manifest exists is unknown, so it is never reported as absent.
         if validation.get("error_kind") == "not_supported":
             raise CheckSkipped(f"C2PA SDK가 지원하지 않는 형식: {validation.get('error', '')}")
+        if validation.get("error_kind") == "sdk_too_old":
+            raise CheckSkipped(f"의존성 부재: c2pa-python>=0.38 ({validation.get('error', '')})")
+        if validation.get("error_kind") == "trust":
+            # techniques-2026: the trust list / operator anchors cannot be used — no validation without them.
+            raise AnalyzerError(f"C2PA 검증 불가: {validation.get('error', '')}")
         stage = "검증" if validation.get("present") else "판독"
         raise AnalyzerError(f"C2PA {stage} 실패: {validation.get('error', '')}")
     return validation
+
+
+# techniques-2026 item 1: text/HTML embedding (C2PA 2.3 unstructured text, 2.4
+# HTML/structured text) is not read by c2pa-rs 0.91 (c2pa-python 0.38) — the
+# check says so instead of an opaque "type is unsupported".
+C2PA_TEXT_EMBEDDING_UNSUPPORTED = (
+    "C2PA 텍스트·HTML 임베딩(C2PA 2.3/2.4)은 현재 SDK(c2pa_python 0.38 / c2pa_rs 0.91)가 판독하지 않음 — "
+    "텍스트 파일의 매니페스트 존재 여부를 확인하지 못했습니다"
+)
+
+
+def c2pa_coverage_note(validation: dict[str, object] | None) -> str:
+    """techniques-2026: the ran c2pa entry names the validator's spec version and the trust list."""
+    if not validation:
+        return ""
+    from .c2pa import trust_basis_text
+
+    basis = trust_basis_text(validation.get("trust_basis"))
+    if not validation.get("present"):
+        return f"매니페스트 없음 · 신뢰 목록 {basis}"
+    spec = str(validation.get("spec_version") or "") or "미기재"
+    return f"매니페스트 있음 · 검증기 C2PA {spec} · 신뢰 목록 {basis}"
+
+
+def _c2pa_check(file_path: Path) -> tuple[dict[str, object] | None, CoverageEntry]:
+    """The ``c2pa`` check of every modality (images since phase 0; audio, video, documents since techniques-2026)."""
+    if file_path.suffix.lower() in SUPPORTED_TEXT_EXTENSIONS:
+        return None, skipped("c2pa", C2PA_TEXT_EMBEDDING_UNSUPPORTED)
+    validation, entry = run_check("c2pa", lambda: _validate_c2pa(file_path))
+    if entry.status == CoverageStatus.RAN and validation:
+        entry = CoverageEntry("c2pa", CoverageStatus.RAN, c2pa_coverage_note(validation))
+    return validation, entry
+
+
+def _marking(modality: str, validation: dict[str, object] | None, c2pa_entry: CoverageEntry, marks: "MarkLayers") -> DeepLayers:
+    """techniques-2026: the mark checks' evidence, coverage and limitations + the marking-context item and object."""
+    from .marking_context import build as build_marking, c2pa_finding, online_entry
+
+    findings = [c2pa_finding(validation, c2pa_entry)] + [
+        {"check": f.check, "algorithm": f.algorithm, "outcome": f.outcome, "detail": f.detail} for f in marks.findings
+    ]
+    context, item = build_marking(modality, findings)
+    return DeepLayers(
+        evidence=[*marks.evidence, item],
+        coverage=[*marks.coverage, online_entry(modality)],
+        limitations=list(marks.limitations),
+        marking_context=context,
+    )
+
+
+def _mark_layers(file_path: Path, modality: str) -> DeepLayers:
+    """techniques-2026: the machine-readable-mark checks of a non-image file — C2PA, then the watermark decoders.
+
+    Returned in the :class:`DeepLayers` shape (evidence, coverage, limitations,
+    marking_context) so each modality's builder merges it like the deep
+    layers. Images run their C2PA check inline (its result also feeds the
+    metadata rules) and call :func:`_marking` themselves.
+    """
+    from .media_marks import MarkLayers, audio_mark_layers, video_mark_layers
+
+    validation, entry = _c2pa_check(file_path)
+    marks = audio_mark_layers(file_path) if modality == "audio" else video_mark_layers(file_path) if modality == "video" else MarkLayers()
+    layers = _marking(modality, validation, entry, marks)
+    return DeepLayers(
+        evidence=[*c2pa_evidence(validation), *layers.evidence], coverage=[entry, *layers.coverage],
+        limitations=layers.limitations, marking_context=layers.marking_context,
+    )
 
 
 # Words in a legacy analyzer's "unavailable" verdict that mean the input
@@ -1396,6 +1473,8 @@ class DeepLayers:
     coverage: list[CoverageEntry] = field(default_factory=list)
     limitations: list[str] = field(default_factory=list)
     reference: list[EvidenceSignal] = field(default_factory=list)
+    # techniques-2026 item 6: the mark checks' marking_context object (set by _mark_layers only).
+    marking_context: dict | None = None
 
 
 def _deep_image_layers(path: Path, thresholds=None) -> DeepLayers:
@@ -1603,9 +1682,9 @@ def _analyze_image_file(
         # R18-4 (round 18): a read that covered only part of the file says so (it said "ran" with no reason).
         else CoverageEntry("metadata", CoverageStatus.RAN, (metadata_read.partial or "") if metadata_read is not None else "")
     ]
-    c2pa_validation, entry = run_check("c2pa", lambda: _validate_c2pa(file_path))
-    coverage.append(entry)
-    c2pa_unknown = entry.status == CoverageStatus.FAILED
+    c2pa_validation, c2pa_entry = _c2pa_check(file_path)
+    coverage.append(c2pa_entry)
+    c2pa_unknown = c2pa_entry.status == CoverageStatus.FAILED
 
     # Photo/non-photo gate (WP-D, G13): detectors are only applied to
     # photographs. A non-photo (or too small) image keeps metadata + C2PA;
@@ -1649,6 +1728,12 @@ def _analyze_image_file(
     else:
         deep = _deep_image_layers(file_path, thresholds) if deep_signals else _deep_disabled(DEEP_IMAGE_CHECKS)
     coverage.extend(deep.coverage)
+    # techniques-2026 items 3–6: watermark decoders (run on every image — a mark is a fact whatever the
+    # image class) and the marking context.
+    from .media_marks import image_mark_layers
+
+    marks = _marking("image", c2pa_validation, c2pa_entry, image_mark_layers(file_path, c2pa_validation))
+    coverage.extend(marks.coverage)
 
     image_format = metadata_read.image_format if metadata_read is not None else None
     jpeg_quality = None
@@ -1663,8 +1748,8 @@ def _analyze_image_file(
         model_analysis=model_analysis,
         c2pa_validation=c2pa_validation,
         coverage=coverage,
-        extra_evidence=deep.evidence,
-        extra_limitations=[*(metadata_read.notes if metadata_read is not None else []), *deep.limitations],
+        extra_evidence=[*deep.evidence, *marks.evidence],
+        extra_limitations=[*(metadata_read.notes if metadata_read is not None else []), *deep.limitations, *marks.limitations],
         image_class=image_class,
         metadata_read_error=read_error,
         c2pa_unknown=c2pa_unknown,
@@ -1673,6 +1758,7 @@ def _analyze_image_file(
         extra_reference=deep.reference,
         # G8: rule 4's thresholds are the loaded profiles' (calibration id -> threshold/100).
         probability_thresholds=profile_probability_thresholds(model_path),
+        marking_context=marks.marking_context,
     )
 
 
@@ -1682,11 +1768,13 @@ def _analyze_audio_file(
     model_path: Path | str | list[Path | str] | tuple[Path | str, ...] | None,
 ) -> ClassificationResult:
     analysis, entry = run_check("audio_analysis", lambda: analyze_audio(file_path, model_path=model_path))
+    marks = _mark_layers(file_path, "audio")
     if analysis is None:
         return build_classification_result(
             subject="오디오",
-            evidence=[],
-            coverage=[entry],
+            evidence=list(marks.evidence),
+            coverage=[entry, *marks.coverage],
+            marking_context=marks.marking_context,
             source_guess=SourceGuess.unknown("오디오를 분석하지 못했습니다."),
             limitations=[],
             next_checks=AUDIO_NEXT_CHECKS,
@@ -1707,7 +1795,8 @@ def _analyze_audio_file(
         coverage.append(_no_model_entry(model_path, "audio"))
     else:
         coverage.extend(model_coverage(analysis.model_analysis))
-    return _audio_result(analysis, coverage=coverage, probability_thresholds=profile_probability_thresholds(model_path))  # G8
+    coverage.extend(marks.coverage)
+    return _audio_result(analysis, coverage=coverage, probability_thresholds=profile_probability_thresholds(model_path), marks=marks)  # G8
 
 
 def _audio_result(
@@ -1715,6 +1804,7 @@ def _audio_result(
     *,
     coverage: list[CoverageEntry] | None = None,
     probability_thresholds: dict[str, float] | None = None,
+    marks: "DeepLayers | None" = None,
 ) -> ClassificationResult:
     """Adapt an AudioAnalysis into the result contract.
 
@@ -1725,7 +1815,7 @@ def _audio_result(
         coverage = [CoverageEntry("audio_analysis", CoverageStatus.RAN)]
         if analysis.model_analysis is not None:
             coverage.extend(model_coverage(analysis.model_analysis))
-    evidence: list[EvidenceItem] = []
+    evidence: list[EvidenceItem] = list(marks.evidence) if marks is not None else []
     model_item = model_evidence(analysis.model_analysis, probability_thresholds)  # N1
     if model_item is not None:
         evidence.append(model_item)
@@ -1746,6 +1836,7 @@ def _audio_result(
         "오디오 음향 휴리스틱은 측정 전 참고 신호이며 결론에 참여하지 않습니다.",
         *analysis.limitations,
         *(analysis.model_analysis.limitations if analysis.model_analysis else []),
+        *(marks.limitations if marks is not None else []),
     ]))
     return build_classification_result(
         subject="오디오",
@@ -1757,6 +1848,7 @@ def _audio_result(
         reference_signals=reference,
         model_analysis=analysis.model_analysis,
         probability_thresholds=probability_thresholds,  # G8
+        marking_context=marks.marking_context if marks is not None else None,
     )
 
 
@@ -1780,6 +1872,13 @@ def _analyze_video_file(
 
     analysis, entry = run_check("video_analysis", video_check)
     deep = _deep_video_layers(file_path, thresholds) if deep_signals else _deep_disabled(DEEP_VIDEO_CHECKS)
+    marks = _mark_layers(file_path, "video")
+    # techniques-2026: the mark checks join the deep layers' lists (evidence, coverage, limitations).
+    deep = DeepLayers(
+        evidence=[*deep.evidence, *marks.evidence], coverage=[*deep.coverage, *marks.coverage],
+        limitations=[*deep.limitations, *marks.limitations], reference=list(deep.reference),
+        marking_context=marks.marking_context,
+    )
     coverage: list[CoverageEntry] = [entry]
     if analysis is not None:
         av_audio, av_entry = audio_track_check(file_path, model_path)
@@ -1802,6 +1901,7 @@ def _analyze_video_file(
             limitations=deep.limitations,
             next_checks=VIDEO_NEXT_CHECKS,
             reference_signals=deep.reference,
+            marking_context=deep.marking_context,
         )
     if analysis.model_analysis is None:
         coverage.append(_no_model_entry(model_path, "video"))
@@ -1861,6 +1961,7 @@ def _video_result(
         model_analysis=analysis.model_analysis,
         av_audio=analysis.av_audio,
         probability_thresholds=probability_thresholds,  # G8
+        marking_context=deep.marking_context,
     )
 
 
@@ -1912,8 +2013,13 @@ def _analyze_text_file(
         if tmp_text_path is not None:
             tmp_text_path.unlink(missing_ok=True)
     coverage.extend(model_entries)
+    marks = _mark_layers(file_path, "text")
+    coverage.extend(marks.coverage)
     thresholds = profile_probability_thresholds(model_path)  # N1
-    result = analyze_text(text, model_analysis=model_analysis, coverage=coverage, probability_thresholds=thresholds)
+    result = analyze_text(
+        text, model_analysis=model_analysis, coverage=coverage, probability_thresholds=thresholds,
+        extra_evidence=marks.evidence, extra_limitations=marks.limitations, marking_context=marks.marking_context,
+    )
     return _apply_document_metadata(result, doc_metadata, probability_thresholds=thresholds)
 
 
@@ -2045,6 +2151,7 @@ def _apply_document_metadata(
         reference_signals=result.reference_signals,
         model_analysis=result.model_analysis,
         probability_thresholds=probability_thresholds,  # N1
+        marking_context=result.marking_context,
     )
     return replace(rebuilt, document_metadata=preserved or result.document_metadata)
 
@@ -2070,21 +2177,30 @@ def analyze_text(
     model_analysis: ExternalModelAnalysis | None = None,
     coverage: list[CoverageEntry] | None = None,
     probability_thresholds: dict[str, float] | None = None,
+    extra_evidence: list[EvidenceItem] | None = None,
+    extra_limitations: list[str] | None = None,
+    marking_context: dict | None = None,
 ) -> ClassificationResult:
     """Text screening — always reference grade with the legal limitation
-    first (G24). Phrase/style signals are lexical evidence only (G4)."""
+    first (G24). Phrase/style signals are lexical evidence only (G4).
+
+    ``extra_evidence`` / ``extra_limitations`` (techniques-2026): the file's
+    machine-readable-mark items (a document's C2PA manifest) — listed, but
+    the grade stays reference (text rule), so they never decide the verdict.
+    """
     coverage = list(coverage) if coverage is not None else _default_model_coverage(model_analysis)
     trimmed = text.strip()
     if not trimmed:
         return build_classification_result(
             subject="글",
-            evidence=[],
+            evidence=list(extra_evidence or []),
             coverage=[*coverage, skipped("text_lexical", "분석할 원문이 비어 있음")],
             grade=Grade.REFERENCE,
             source_guess=SourceGuess.unknown(),
-            limitations=[TEXT_LEGAL_LIMITATION, "분석할 원문이 비어 있습니다."],
+            limitations=[TEXT_LEGAL_LIMITATION, "분석할 원문이 비어 있습니다.", *(extra_limitations or [])],
             next_checks=["분석할 원문을 더 길게 확보하세요."],
             model_analysis=model_analysis,
+            marking_context=marking_context,
         )
 
     normalized = re.sub(r"\s+", " ", trimmed.lower())
@@ -2126,7 +2242,7 @@ def analyze_text(
             signals.append(optional)
     signals.extend(_frontier_llm_fingerprints(trimmed, normalized, sentences, words))
 
-    evidence = lexical_evidence(signals)
+    evidence = [*lexical_evidence(signals), *(extra_evidence or [])]
     model_item = model_evidence(model_analysis, probability_thresholds)  # N1
     if model_item is not None:
         evidence.append(model_item)
@@ -2144,6 +2260,7 @@ def analyze_text(
         limitations.append("문장 수가 적어 반복도와 문장 길이 신호가 제한적입니다.")
     if model_analysis:
         limitations.extend(model_analysis.limitations)
+    limitations.extend(extra_limitations or [])
 
     return build_classification_result(
         subject="글",
@@ -2155,6 +2272,7 @@ def analyze_text(
         next_checks=TEXT_NEXT_CHECKS,
         model_analysis=model_analysis,
         probability_thresholds=probability_thresholds,  # N1
+        marking_context=marking_context,
     )
 
 
@@ -2203,6 +2321,7 @@ def analyze_image_metadata(
     jpeg_quality: float | None = None,
     extra_reference: list[EvidenceSignal] | None = None,
     probability_thresholds: dict[str, float] | None = None,
+    marking_context: dict | None = None,
 ) -> ClassificationResult:
     """Image result from already-collected analyzer outputs.
 
@@ -2275,6 +2394,7 @@ def analyze_image_metadata(
         pixel_analysis=pixel_analysis,
         model_analysis=model_analysis,
         probability_thresholds=probability_thresholds,
+        marking_context=marking_context,
     )
 
 
@@ -2288,7 +2408,8 @@ _DIRECTION_ORDER = {EvidenceDirection.SYNTHETIC: 0, EvidenceDirection.AUTHENTIC:
 
 
 def _ordered_evidence(items: list[EvidenceItem]) -> list[EvidenceItem]:
-    return sorted(items, key=lambda i: (_KIND_ORDER[i.kind], _STRENGTH_ORDER[i.strength], _DIRECTION_ORDER[i.direction]))
+    # techniques-2026 item 6: the marking-context statement closes the list (it is a summary, never a "top" item).
+    return sorted(items, key=lambda i: (i.layer == MARKING_LAYER, _KIND_ORDER[i.kind], _STRENGTH_ORDER[i.strength], _DIRECTION_ORDER[i.direction]))
 
 
 def _integrity_failures(failed_entries: list[CoverageEntry]) -> list[CoverageEntry]:
@@ -2360,6 +2481,7 @@ def build_classification_result(
     av_audio: dict | None = None,
     document_metadata: dict | None = None,
     probability_thresholds: dict[str, float] | None = None,
+    marking_context: dict | None = None,
 ) -> ClassificationResult:
     """The only constructor new code uses for a ClassificationResult.
 
@@ -2369,7 +2491,9 @@ def build_classification_result(
     """
     # N1: a calibrated statistical item points toward synthesis iff its
     # probability reaches the profile threshold for its calibration id.
-    ordered = _ordered_evidence(with_calibrated_directions(evidence, probability_thresholds))
+    calibrated_items = with_calibrated_directions(evidence, probability_thresholds)
+    # techniques-2026 (coordinator addition): a strong authentic + strong synthetic pair is named, not hidden.
+    ordered = _ordered_evidence([*calibrated_items, *evidence_conflicts(calibrated_items)])
     entries = list(coverage)
     verdict_code = decide(ordered, entries, grade, probability_thresholds)
     calibrated = [item for item in ordered if item.kind == EvidenceKind.STATISTICAL and item.is_calibrated]
@@ -2407,6 +2531,7 @@ def build_classification_result(
         probability_ci=top.probability_ci if top else None,
         score_is_calibrated=probability is not None,
         reference_signals=list(reference_signals or []),
+        marking_context=marking_context,
     )
 
 

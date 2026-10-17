@@ -1,0 +1,26 @@
+{
+  "schema": "watermark-registry-v1",
+  "version": "2026-10-15.1",
+  "note": "techniques-2026: known generator watermark messages. A decoded mark is linked to a generator ONLY on an exact match with an entry here (bit-for-bit for imwatermark; the bit-accuracy rule of the entry for neural decoders). The table is versioned: a change bumps 'version' and the output generation. An empty algorithm list means no public, verified generator message is known — a decoded message is then recorded as a fact only.",
+  "entries": [
+    {
+      "id": "sdxl-imwatermark-dwtdct-48",
+      "algorithm": "imwatermark-dwtDct",
+      "message_bits": "101100111110110010010000011110111011000110011110",
+      "generator": "Stable Diffusion XL 공식 파이프라인",
+      "source": "https://github.com/huggingface/diffusers/blob/main/src/diffusers/pipelines/stable_diffusion_xl/watermark.py (WATERMARK_MESSAGE = 0b101100111110110010010000011110111011000110011110); https://github.com/Stability-AI/generative-models/blob/main/sgm/inference/helpers.py (same 48-bit message)",
+      "checked": "2026-10-15",
+      "limitations": "The message is public and the invisible-watermark library (MIT) can embed it into any image, so a match shows that the SDXL watermarker (or someone imitating it) marked the pixels — like a generator metadata field. Pipelines run with add_watermarker=False, images under 256 px wide and SD3/FLUX diffusers pipelines carry no such mark."
+    }
+  ],
+  "algorithms": {
+    "imwatermark-dwtDct": "invisible-watermark dwtDct; match = all bits equal (exact)",
+    "videoseal-1.0": "Meta Video Seal 1.0, 256 bits; match = at least min_agreement_bits (default 243) equal bits — no entry registered",
+    "audioseal-16": "Meta AudioSeal, 16 bits; match = all 16 bits equal after a detection — no entry registered"
+  },
+  "unregistered_algorithms": {
+    "trustmark": "TrustMark payloads are IDs (e.g. a soft-binding key), not generator names; a payload is linked to a manifest only by matching a valid manifest's c2pa.soft-binding value — never to a generator by this table.",
+    "videoseal": "No public, verified generator message for VideoSeal/PixelSeal (2026-10). Meta does not document which messages its products embed.",
+    "audioseal": "No public, verified generator message for AudioSeal 16-bit messages (2026-10)."
+  }
+}

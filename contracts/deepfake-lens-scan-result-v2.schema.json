@@ -190,7 +190,19 @@
         "reference_signals": { "type": "array", "items": { "$ref": "#/$defs/signal" } },
         "score": { "type": "integer", "description": "round(probability*100) when calibrated, else 0." },
         "band": { "enum": ["high", "low", "unknown"], "description": "Derived: manipulation->high, authenticity->low, undetermined->unknown." },
-        "signals": { "type": "array", "items": { "$ref": "#/$defs/signal" } }
+        "signals": { "type": "array", "items": { "$ref": "#/$defs/signal" } },
+        "marking_context": {
+          "type": ["object", "null"],
+          "description": "techniques-2026 item 6: the machine-readable marks checked for this file (EU AI Act Art. 50 / 인공지능기본법 context) — facts only, never a conclusion; the absence of a mark is not evidence of originality. Null for rows not analyzed as media/documents.",
+          "required": ["legal_basis", "checked", "online_only", "marks_found", "absence_statement"],
+          "properties": {
+            "legal_basis": { "type": "string" },
+            "checked": { "type": "array", "items": { "type": "object", "required": ["check", "algorithm", "outcome", "detail"], "properties": { "check": { "type": "string" }, "algorithm": { "type": "string" }, "outcome": { "enum": ["found", "not_found", "skipped", "failed"] }, "detail": { "type": "string" } } } },
+            "online_only": { "type": "array", "items": { "type": "object", "required": ["name", "status", "reason"], "properties": { "name": { "type": "string" }, "status": { "const": "skipped" }, "reason": { "type": "string" } } } },
+            "marks_found": { "type": "integer", "minimum": 0 },
+            "absence_statement": { "type": "string" }
+          }
+        }
       }
     },
     "evidence_item": {

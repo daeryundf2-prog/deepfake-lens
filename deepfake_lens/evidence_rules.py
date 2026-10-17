@@ -29,6 +29,19 @@ from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from datetime import datetime, timedelta
 
+from .digital_source_type import (
+    CATEGORY_CAPTURE,
+    CATEGORY_GENERATIVE,
+    CATEGORY_NEUTRAL,
+    CATEGORY_SCREEN,
+    CATEGORY_UNKNOWN,
+    C2PA_SOURCE_TYPES,
+    IPTC_SOURCE_TYPES,
+    IPTC_VOCABULARY_RELEASE,
+    DeclaredSourceType,
+    classify_source_type,
+    split_declared,
+)
 from .image_class import DIRECTION_NEUTRAL_NOTE, ImageClass
 from .image_metadata import guess_image_source
 from .result_types import (
@@ -49,14 +62,10 @@ TOOL_FIELD_MARKERS = (
     "prompt", "workflow", "model", "credit", "source", "comment",
 )
 
-# IPTC digital source type vocabulary (cv.iptc.org/newscodes/digitalsourcetype).
-C2PA_SYNTHETIC_SOURCE_TYPES = frozenset({
-    "trainedAlgorithmicMedia",
-    "compositeWithTrainedAlgorithmicMedia",
-    "algorithmicMedia",
-    "compositeSynthetic",
-})
-C2PA_CAPTURE_SOURCE_TYPES = frozenset({"digitalCapture"})
+# IPTC digital source type vocabulary (cv.iptc.org/newscodes/digitalsourcetype)
+# — derived from the full table in digital_source_type.py (techniques-2026).
+C2PA_SYNTHETIC_SOURCE_TYPES = frozenset(entry.code for entry in (*IPTC_SOURCE_TYPES, *C2PA_SOURCE_TYPES) if entry.category == CATEGORY_GENERATIVE)
+C2PA_CAPTURE_SOURCE_TYPES = frozenset(entry.code for entry in IPTC_SOURCE_TYPES if entry.category == CATEGORY_CAPTURE)
 
 # An uncalibrated model score at or above the midpoint of the runtimes'
 # 0-100 scale (probability 0.5 x 100, see model_runtimes._normalize_score)
@@ -150,15 +159,25 @@ def xmp_evidence(metadata: Mapping[str, str]) -> list[EvidenceItem]:
     which the detail says; it can never support authenticity.
     """
     items: list[EvidenceItem] = []
-    source_type = metadata.get(XMP_DIGITAL_SOURCE_TYPE_KEY, "")
-    declared = {part.strip().rsplit("/", 1)[-1] for part in source_type.split(";") if part.strip()}
-    synthetic_types = sorted(declared & C2PA_SYNTHETIC_SOURCE_TYPES)
+    # techniques-2026 item 2: values are mapped with the full IPTC vocabulary
+    # (digital_source_type.py, retired values included); an unsigned XMP value
+    # is a self-declaration (자기 신고) — the ToolMetadata grade of the WP-A table.
+    declared = [classify_source_type(value) for value in split_declared(metadata.get(XMP_DIGITAL_SOURCE_TYPE_KEY, ""))]
+    synthetic_types = sorted({d.display for d in declared if d.category == CATEGORY_GENERATIVE})
     if synthetic_types:
         items.append(EvidenceItem(
             "XMP 디지털 출처 유형: 생성형 AI",
-            f"Iptc4xmpExt:DigitalSourceType={', '.join(synthetic_types)} — 파일이 스스로 생성형/알고리즘 미디어임을 선언합니다. "
+            f"Iptc4xmpExt:DigitalSourceType={', '.join(synthetic_types)} — 파일이 스스로 생성형/알고리즘 미디어임을 선언합니다(서명 없는 자기 신고). "
             "XMP는 편집으로 지우거나 바꿀 수 있어 부재는 아무것도 증명하지 않습니다.",
             EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "metadata",
+        ))
+    screen = sorted({d.display for d in declared if d.category == CATEGORY_SCREEN})
+    if screen:
+        items.append(EvidenceItem(
+            "XMP 디지털 출처 유형: 화면 캡처(자기 신고)",
+            f"Iptc4xmpExt:DigitalSourceType={', '.join(screen)} — 화면에 표시된 콘텐츠를 캡처·재촬영한 파일이라는 서명 없는 자기 신고입니다. "
+            "카메라 실사 촬영 근거가 아니며, 생성 근거도 아닙니다.",
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.MODERATE, "metadata",
         ))
     for key, label in XMP_GENERATOR_FIELDS:
         value = metadata.get(key, "")
@@ -373,6 +392,30 @@ def _c2pa_source_types(validation: Mapping[str, object]) -> set[str]:
     return {str(item).rsplit("/", 1)[-1] for item in raw} if isinstance(raw, (list, tuple, set)) else set()
 
 
+def _c2pa_declarations(validation: Mapping[str, object], where: str) -> list[DeclaredSourceType]:
+    """The active manifest's declared source types (``action``) or its ingredients' (``ingredient``).
+
+    techniques-2026 item 2: values are mapped with the IPTC/C2PA vocabulary
+    table (digital_source_type.py) — a value of another namespace is unknown,
+    never mapped by its last path segment. A validation record without
+    ``source_type_declarations`` (older callers, test records) falls back to
+    ``digital_source_types`` for ``action``.
+    """
+    raw = validation.get("source_type_declarations")
+    if isinstance(raw, (list, tuple)):
+        values = [str(item.get("value", "")) for item in raw if isinstance(item, Mapping) and item.get("where") == where]
+    elif where == "action":
+        legacy = validation.get("digital_source_types")
+        values = [str(item) for item in legacy if isinstance(item, str)] if isinstance(legacy, (list, tuple, set)) else []
+    else:
+        values = []
+    seen: dict[str, DeclaredSourceType] = {}
+    for value in values:
+        declared = classify_source_type(value)
+        seen.setdefault(declared.code, declared)
+    return [seen[key] for key in sorted(seen)]
+
+
 def _codes(raw: object) -> set[str]:
     return {str(code) for code in raw} if isinstance(raw, (list, tuple, set)) else set()
 
@@ -384,11 +427,93 @@ def _codes(raw: object) -> set[str]:
 # "Validation" status codes.
 C2PA_INTEGRITY_TITLE = "C2PA 무결성 불일치"
 C2PA_INTEGRITY_DETAIL = "매니페스트 해시 불일치 — 서명 이후 내용이 변경됨"
+# techniques-2026: the content hard bindings a validator reports a match for
+# (data hash for JPEG/PNG/PDF…, BMFF hash for MP4/MOV/HEIF, box hash, collection hash).
+C2PA_HARD_BINDING_MATCH = ("assertion.dataHash.match", "assertion.bmffHash.match", "assertion.boxesHash.match", "assertion.collectionHash.match")
 
 
 def c2pa_integrity_mismatch_codes(failure_codes: object) -> list[str]:
     """The failure codes that say signed content was altered (N6)."""
     return sorted(code for code in _codes(failure_codes) if code.lower().endswith(".mismatch"))
+
+
+def _disclosure_text(validation: Mapping[str, object]) -> str:
+    raw = validation.get("ai_disclosures")
+    parts = []
+    for item in raw if isinstance(raw, (list, tuple)) else []:
+        if isinstance(item, Mapping):
+            fields = [f"{key}=「{item[key]}」" for key in ("modelType", "modelName", "modelIdentifier", "humanOversightLevel") if item.get(key)]
+            parts.append(", ".join(fields) or "필드 없음")
+    return "; ".join(parts)
+
+
+def c2pa_basis_text(validation: Mapping[str, object]) -> str:
+    """techniques-2026: "검증 기준: C2PA <ver> 검증기(<sdk>), 신뢰 목록 <id/date/sha>" — "" for a record without it."""
+    if not validation.get("trust_basis") and not validation.get("spec_version"):
+        return ""
+    from .c2pa import trust_basis_text
+
+    spec = str(validation.get("spec_version") or "") or "미기재"
+    sdk = str(validation.get("sdk_version") or "")
+    return f" 검증 기준: C2PA {spec} 검증기" + (f"({sdk})" if sdk else "") + f", 신뢰 목록 {trust_basis_text(validation.get('trust_basis'))}."
+
+
+def _c2pa_fact_items(validation: Mapping[str, object], *, usable: bool) -> list[EvidenceItem]:
+    """techniques-2026 item 1: the C2PA 2.x facts as neutral items (never a conclusion by themselves).
+
+    ``usable``: the manifest's content binding held (no hash mismatch) — a
+    declaration of a tampered manifest is said to be one.
+    """
+    items: list[EvidenceItem] = []
+    caveat = "" if usable else " 단, 서명 이후 내용이 변경된 매니페스트의 선언입니다."
+    screen = [d for d in _c2pa_declarations(validation, "action") if d.category == CATEGORY_SCREEN]
+    if screen:
+        items.append(EvidenceItem(
+            "C2PA: 화면 캡처 출처 선언",
+            f"매니페스트가 digitalSourceType={', '.join(d.display for d in screen)}를 선언합니다 — 화면에 표시된 다른 콘텐츠를 재촬영한 자산이라는 뜻이며 "
+            "카메라 실사 촬영 근거가 아닙니다." + caveat,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.MODERATE, "c2pa",
+        ))
+    other = [d for d in _c2pa_declarations(validation, "action") if d.category in (CATEGORY_NEUTRAL, CATEGORY_UNKNOWN)]
+    if other:
+        items.append(EvidenceItem(
+            "C2PA: 그 밖의 디지털 출처 유형 선언",
+            f"digitalSourceType={', '.join(d.display for d in other)} — 촬영·생성 어느 쪽 결론에도 쓰지 않는 출처 유형입니다(IPTC {IPTC_VOCABULARY_RELEASE} 어휘)." + caveat,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "c2pa",
+        ))
+    ingredient_ai = [d for d in _c2pa_declarations(validation, "ingredient") if d.category == CATEGORY_GENERATIVE]
+    if ingredient_ai:
+        items.append(EvidenceItem(
+            "C2PA 구성요소(ingredient)의 생성형 AI 출처 선언",
+            f"매니페스트의 구성요소(ingredient)가 digitalSourceType={', '.join(d.display for d in ingredient_ai)}로 선언되어 있습니다(C2PA 2.4). "
+            "입력 자료의 출처이며 이 파일 자체의 출처 선언이 아니므로 단독 결론 근거로 쓰지 않습니다." + caveat,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, "c2pa",
+        ))
+    bindings = validation.get("soft_bindings")
+    actions = validation.get("watermark_actions")
+    binding_parts = [
+        f"alg=「{b.get('alg')}」 값=" + ", ".join(f"「{v}」" for v in (b.get("values") or [])[:4])
+        for b in (bindings if isinstance(bindings, (list, tuple)) else []) if isinstance(b, Mapping)
+    ]
+    action_list = [str(a) for a in actions] if isinstance(actions, (list, tuple)) else []
+    if binding_parts or action_list:
+        items.append(EvidenceItem(
+            "C2PA 소프트 바인딩·워터마크 선언",
+            ("소프트 바인딩 assertion: " + "; ".join(binding_parts) + ". " if binding_parts else "소프트 바인딩 assertion 없음. ")
+            + ("워터마크 액션: " + ", ".join(action_list) + ". " if action_list else "")
+            + "매니페스트가 기록한 사실이며, 워터마크가 실제로 들어 있는지는 해당 알고리즘의 디코더 검사(있을 때)가 확인합니다."
+            " 소프트 바인딩 ID로 매니페스트를 찾는 온라인 조회는 하지 않습니다(분석 중 네트워크 금지)." + caveat,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "c2pa",
+        ))
+    embedded = validation.get("embedded_data")
+    if isinstance(embedded, (list, tuple)) and embedded:
+        listed = ", ".join(f"{e.get('label')}" + (f"({e.get('format')})" if e.get("format") else "") for e in embedded if isinstance(e, Mapping))
+        items.append(EvidenceItem(
+            "C2PA 내장 데이터(embedded data) assertion",
+            f"매니페스트에 내장 데이터 assertion이 있습니다: {listed}. 내용은 해석하지 않고 존재만 기록합니다." + caveat,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "c2pa",
+        ))
+    return items
 
 
 def c2pa_evidence(validation: Mapping[str, object] | None) -> list[EvidenceItem]:
@@ -397,31 +522,44 @@ def c2pa_evidence(validation: Mapping[str, object] | None) -> list[EvidenceItem]
     N6: a hash mismatch (content changed after signing) is reported as
     "C2PA 무결성 불일치" — deterministic, neutral, strong — never with the
     untrusted-signer wording, whatever the signer's trust status.
+
+    techniques-2026 item 1: a generative declaration is a generative
+    ``digitalSourceType`` of the active manifest's actions (IPTC/C2PA
+    vocabulary) **or** a ``c2pa.ai-disclosure`` assertion (C2PA 2.4). Under a
+    valid signature by a trusted signer with a content-hash match it is
+    deterministic/synthetic/strong; otherwise moderate. The other 2.x facts
+    (screen capture, other source types, ingredient-level types, soft
+    bindings and watermark actions, embedded data) follow as neutral items;
+    the main item's detail names the validator's spec version and trust list.
     """
     if not validation or not validation.get("present"):
         return []
+    basis = c2pa_basis_text(validation)
+    disclosure = _disclosure_text(validation)
+    generative = [d for d in _c2pa_declarations(validation, "action") if d.category == CATEGORY_GENERATIVE]
+    parts = [f"digitalSourceType={', '.join(d.code for d in generative)}"] if generative else []
+    if disclosure:
+        parts.append(f"AI 공개(c2pa.ai-disclosure) assertion({disclosure})")
+    declared_text = " 및 ".join(parts)
     mismatches = c2pa_integrity_mismatch_codes(validation.get("failure_codes"))
     if mismatches:
         items = [EvidenceItem(
             C2PA_INTEGRITY_TITLE,
             f"{C2PA_INTEGRITY_DETAIL} ({', '.join(mismatches)}). 매니페스트가 서명한 내용과 현재 파일이 다르므로 "
-            "매니페스트의 출처 선언을 이 파일의 근거로 쓸 수 없습니다.",
+            "매니페스트의 출처 선언을 이 파일의 근거로 쓸 수 없습니다." + basis,
             EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.STRONG, "c2pa",
         )]
-        declared = sorted(_c2pa_source_types(validation) & C2PA_SYNTHETIC_SOURCE_TYPES)
-        if declared:
+        if declared_text:
             items.append(EvidenceItem(
                 "C2PA 매니페스트의 생성형 AI 출처 선언(무결성 불일치)",
-                f"매니페스트가 digitalSourceType={', '.join(declared)}를 선언했으나 서명 이후 내용이 변경되어(해시 불일치) 결론 근거로 쓰지 않습니다.",
+                f"매니페스트가 {declared_text}를 선언했으나 서명 이후 내용이 변경되어(해시 불일치) 결론 근거로 쓰지 않습니다.",
                 EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, "c2pa",
             ))
-        return items
-    source_types = _c2pa_source_types(validation)
-    synthetic_types = sorted(source_types & C2PA_SYNTHETIC_SOURCE_TYPES)
-    capture = bool(source_types & C2PA_CAPTURE_SOURCE_TYPES)
+        return items + _c2pa_fact_items(validation, usable=False)
+    capture = any(d.category == CATEGORY_CAPTURE for d in _c2pa_declarations(validation, "action"))
     success = _codes(validation.get("success_codes"))
     failure = _codes(validation.get("failure_codes"))
-    hash_ok = "assertion.dataHash.match" in success and not any("dataHash.mismatch" in code for code in failure)
+    hash_ok = any(code in success for code in C2PA_HARD_BINDING_MATCH) and not any(code.endswith("Hash.mismatch") for code in failure)
     verified = validation.get("status") == "valid" and bool(validation.get("trusted")) and hash_ok
     signature = validation.get("signature")
     signer = str(signature.get("common_name", "알 수 없음")) if isinstance(signature, dict) else "알 수 없음"
@@ -429,34 +567,72 @@ def c2pa_evidence(validation: Mapping[str, object] | None) -> list[EvidenceItem]
 
     state = c2pa_state_label(validation.get("state"))  # G4: 무효/유효/신뢰됨, never the SDK's English word
     codes = c2pa_failure_codes_text(sorted(failure))
-    if verified and synthetic_types:
-        return [EvidenceItem(
+    facts = _c2pa_fact_items(validation, usable=True)
+    if verified and declared_text:
+        main = EvidenceItem(
             "C2PA 서명: 생성형 AI 출처 선언",
-            f"신뢰 서명자 {signer}의 유효한 매니페스트가 digitalSourceType={', '.join(synthetic_types)}를 선언합니다(해시 일치).",
+            f"신뢰 서명자 {signer}의 유효한 매니페스트가 {declared_text}를 선언합니다(해시 일치)." + basis,
             EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.STRONG, "c2pa",
-        )]
-    if verified and capture:
-        return [EvidenceItem(
+        )
+    elif verified and capture:
+        main = EvidenceItem(
             "C2PA 서명: 카메라 촬영 출처",
-            f"신뢰 서명자 {signer}의 유효한 매니페스트가 digitalCapture를 선언하며 콘텐츠 해시가 일치합니다.",
+            f"신뢰 서명자 {signer}의 유효한 매니페스트가 digitalCapture를 선언하며 콘텐츠 해시가 일치합니다." + basis,
             EvidenceKind.DETERMINISTIC, EvidenceDirection.AUTHENTIC, EvidenceStrength.STRONG, "c2pa",
-        )]
-    if verified:
-        return [EvidenceItem(
-            "C2PA 매니페스트 검증됨(출처 유형 미선언)",
-            f"신뢰 서명자 {signer}의 유효한 매니페스트이나 촬영/생성 출처 유형을 선언하지 않았습니다.",
+        )
+    elif verified and _c2pa_declarations(validation, "action"):
+        main = EvidenceItem(
+            "C2PA 매니페스트 검증됨(촬영·생성 외 출처 유형 선언)",
+            f"신뢰 서명자 {signer}의 유효한 매니페스트이며(해시 일치) 선언한 출처 유형은 아래 항목과 같습니다 — 촬영(digitalCapture)도 생성형 AI도 아닙니다." + basis,
             EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.MODERATE, "c2pa",
-        )]
-    if synthetic_types:
-        return [EvidenceItem(
+        )
+    elif verified:
+        main = EvidenceItem(
+            "C2PA 매니페스트 검증됨(출처 유형 미선언)",
+            f"신뢰 서명자 {signer}의 유효한 매니페스트이나 촬영/생성 출처 유형을 선언하지 않았습니다." + basis,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.MODERATE, "c2pa",
+        )
+    elif declared_text:
+        main = EvidenceItem(
             "C2PA 매니페스트의 생성형 AI 출처 선언(검증 미완료)",
-            f"매니페스트가 digitalSourceType={', '.join(synthetic_types)}를 선언하나 검증 상태: {state} ({codes}) — 서명 신뢰 또는 해시 검증이 완료되지 않았습니다.",
+            f"매니페스트가 {declared_text}를 선언하나 검증 상태: {state} ({codes}) — 서명 신뢰 또는 해시 검증이 완료되지 않았습니다." + basis,
             EvidenceKind.DETERMINISTIC, EvidenceDirection.SYNTHETIC, EvidenceStrength.MODERATE, "c2pa",
-        )]
+        )
+    else:
+        main = EvidenceItem(
+            "C2PA 매니페스트 존재(검증 미완료)",
+            f"서명자 {signer}, 검증 상태: {state} ({codes}). 신뢰 저장소에 없는 서명자이거나 무결성 검증이 끝나지 않아 결론 근거로 쓰지 않습니다." + basis,
+            EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "c2pa",
+        )
+    return [main, *facts]
+
+
+EVIDENCE_CONFLICT_TITLE = "근거 충돌: 서명된 원본성 근거와 생성 근거가 함께 있음"
+
+
+def evidence_conflicts(items: Iterable[EvidenceItem]) -> list[EvidenceItem]:
+    """techniques-2026 (coordinator addition): surface, never hide, a strong authentic/synthetic conflict.
+
+    When a strong deterministic authenticity item (a trusted C2PA camera
+    signature) and a strong deterministic synthetic item (e.g. a
+    self-declared XMP generator field) are both present, decision rule 2
+    lets the synthetic one decide. This adds a neutral item that names both
+    so the examiner sees the contradiction; it does not change the rule.
+    """
+    listed = list(items)
+    if any(item.title == EVIDENCE_CONFLICT_TITLE for item in listed):
+        return []  # already named (a result rebuilt from its own evidence)
+    strong = [i for i in listed if i.kind == EvidenceKind.DETERMINISTIC and i.strength == EvidenceStrength.STRONG]
+    authentic = [i.title for i in strong if i.direction == EvidenceDirection.AUTHENTIC]
+    synthetic = [i.title for i in strong if i.direction == EvidenceDirection.SYNTHETIC]
+    if not authentic or not synthetic:
+        return []
     return [EvidenceItem(
-        "C2PA 매니페스트 존재(검증 미완료)",
-        f"서명자 {signer}, 검증 상태: {state} ({codes}). 신뢰 저장소에 없는 서명자이거나 무결성 검증이 끝나지 않아 결론 근거로 쓰지 않습니다.",
-        EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "c2pa",
+        EVIDENCE_CONFLICT_TITLE,
+        f"원본성 근거({', '.join(authentic)})와 생성·조작 근거({', '.join(synthetic)})가 같은 파일에 함께 있습니다. "
+        "현재 결정 규칙은 생성·조작 근거를 우선하므로 결론은 그쪽으로 정해지지만, 두 근거가 모순되므로 "
+        "어느 쪽이 위조·편집되었는지(서명 이후 메타데이터 추가 등) 별도로 확인해야 합니다.",
+        EvidenceKind.DETERMINISTIC, EvidenceDirection.NEUTRAL, EvidenceStrength.WEAK, "metadata",
     )]
 
 

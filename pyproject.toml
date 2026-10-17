@@ -37,8 +37,20 @@ face_mediapipe = ["mediapipe>=0.10,<0.10.30", "opencv-python>=4.8,<5", "numpy>=1
 face_tasks = ["mediapipe>=0.10.30", "opencv-python>=4.8", "numpy>=1.24"]
 video = ["opencv-python>=4.8", "numpy>=1.24"]
 ml = ["opencv-python>=4.8", "numpy>=1.24", "scikit-learn>=1.3"]
-provenance = ["c2pa-python>=0.6"]
+# techniques-2026: c2pa-python 0.38 (c2pa-rs 0.91, C2PA 2.4 validator — records
+# specVersion 2.4.0) is the first release with the Context/Settings API used to
+# load the bundled trust list and to turn off remote-manifest / OCSP fetching.
+provenance = ["c2pa-python>=0.38"]
 text_lm = ["torch>=2.0", "transformers>=4.40"]
+# techniques-2026 item 3: the SDXL imwatermark check needs only the pixel extra
+# (numpy + opencv) and Pillow. Item 4: Adobe TrustMark ONNX decoders (weights:
+# scripts/fetch_watermark_models.py, pinned in models/assets.json).
+watermark = ["onnxruntime>=1.20", "numpy>=1.24", "Pillow>=10.0", "opencv-python>=4.8"]
+# Item 5: Meta VideoSeal (TorchScript) + AudioSeal — heavy (torch); optional.
+# Without it the checks are skipped "의존성 부재: torch". AudioSeal's model code
+# is the audioseal package (pinned: its private loader helpers are used);
+# audio is decoded by ffmpeg. Gate versions: scripts/gate/requirements-tech*.lock.
+watermark_meta = ["torch>=2.3", "audioseal==0.2.0", "omegaconf>=2.3", "einops>=0.7", "numpy>=1.24", "Pillow>=10.0", "opencv-python>=4.8"]
 # Pure-Python HWP/HWPX reader (MIT; sole dep olefile) for .hwp extraction.
 # Without it .hwp files degrade to extractor=unavailable:syhwp.
 hwp = ["syhwp>=0.0.7", "olefile>=0.46"]
@@ -61,7 +73,7 @@ full = ["librosa>=0.10", "opencv-python>=4.8", "numpy>=1.24", "scipy>=1.10", "sc
 dev = [
   "numpy>=1.24",
   "Pillow>=10.0",
-  "c2pa-python>=0.6",
+  "c2pa-python>=0.38",
   "coverage>=7.4",
   # N3: test_json_contract validates real scan/stream payloads against
   # contracts/deepfake-lens-scan-result-v2.schema.json (draft 2020-12).
@@ -79,7 +91,7 @@ exclude = ["deepfake_lens.tests*"]
 # GUI shell + extracted static assets must ship together — webapp.py serves
 # gui.css/gui.js from the package directory.
 [tool.setuptools.package-data]
-deepfake_lens = ["gui.html", "gui.css", "gui.js", "models/*.json", "models/*.md", "models/*.xml"]
+deepfake_lens = ["gui.html", "gui.css", "gui.js", "models/*.json", "models/*.md", "models/*.xml", "models/*.pem"]
 
 # Coverage gate: fail_under is set just below the measured floor (63.59%
 # branch coverage with the dev extra installed, 2026-10 — down from 67% in
@@ -265,6 +277,18 @@ files = [
     "deepfake_lens/watermark.py",
     "deepfake_lens/webapp.py",
     "deepfake_lens/xai.py",
+    # techniques-2026
+    "deepfake_lens/digital_source_type.py",
+    "deepfake_lens/media_marks.py",
+    "deepfake_lens/marking_context.py",
+    "deepfake_lens/wm_imwatermark.py",
+    "deepfake_lens/wm_trustmark.py",
+    "deepfake_lens/wm_meta.py",
+    "deepfake_lens/tests/test_c2pa24.py",
+    "deepfake_lens/tests/test_wm_sdxl.py",
+    "deepfake_lens/tests/test_wm_trustmark.py",
+    "deepfake_lens/tests/test_wm_meta.py",
+    "deepfake_lens/tests/test_marking_context.py",
 ]
 follow_imports = "skip"
 ignore_missing_imports = true
